@@ -5,54 +5,50 @@ import {
   CircleNotch,
   PaperPlaneRight,
   Paperclip,
-  StopCircle,
   TerminalWindow,
+  WarningCircle,
 } from '@phosphor-icons/react'
 import { useMemo, useRef, useState } from 'react'
 import type { WorkMessage, WorkSession } from '@dsh-cyber/contracts'
 
-import type { CyberEmployee, ToolStep } from '../types.js'
+import type { CyberEmployee, LiveAgentTurn, ToolStep } from '../types.js'
 import { Avatar } from './Avatar.js'
 
 interface ChatWorkbenchProps {
+  demoMode: boolean
   session?: WorkSession
   messages: WorkMessage[]
   employees: CyberEmployee[]
+  liveTurns: LiveAgentTurn[]
   sending: boolean
   draft: string
   onDraftChange(value: string): void
   onSend(prompt: string): Promise<void>
-  onStop(): void
   onOpenDossier(employeeId: string): void
+  onOpenArtifact(): void
+  onRecruit(): void
 }
 
-const demoTools: ToolStep[] = [
-  { id: 'read', label: '读取文档', target: 'read_file', status: 'complete', duration: '0.4s' },
-  { id: 'search', label: '搜索代码', target: 'search_code', status: 'complete', duration: '0.8s' },
-  { id: 'write', label: '写入文件', target: 'write_file', status: 'complete', duration: '0.2s' },
-  { id: 'test', label: '运行测试', target: 'run_tests', status: 'complete', duration: '2.1s' },
-  { id: 'scan', label: '安全扫描', target: 'sec_scan', status: 'running' },
-]
-
 export function ChatWorkbench({
+  demoMode,
   session,
   messages,
   employees,
+  liveTurns,
   sending,
   draft,
   onDraftChange,
   onSend,
-  onStop,
   onOpenDossier,
+  onOpenArtifact,
+  onRecruit,
 }: ChatWorkbenchProps) {
-  const [traceOpen, setTraceOpen] = useState(true)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const mention = useMemo(() => currentMention(draft), [draft])
   const suggestions = useMemo(() => {
     if (mention === undefined) return []
     return employees.filter((employee) => employee.displayName.includes(mention)).slice(0, 6)
   }, [employees, mention])
-  const lastAssistantIndex = messages.findLastIndex((message) => message.kind === 'assistant')
 
   const submit = async () => {
     const prompt = draft.trim()
@@ -83,14 +79,20 @@ export function ChatWorkbench({
         {messages.length === 0 ? (
           <div className="conversation-empty">
             <TerminalWindow size={34} />
-            <h2>向当前世界的员工下达任务</h2>
-            <p>输入 @员工名 可直接和独立 Agent 对话；同时点名多人会创建真实群组会话。</p>
+            <h2>{employees.length === 0 ? '当前世界还没有员工' : '向当前世界的员工下达任务'}</h2>
+            <p>{employees.length === 0
+              ? '从员工市场明确招聘第一位角色。招聘后会创建当前世界专属、可持续的独立 Agent。'
+              : '输入 @员工名 可直接和独立 Agent 对话；同时点名多人会创建真实群组会话。'}</p>
+            {employees.length === 0 ? <button className="primary-button" type="button" onClick={onRecruit}>招聘第一位员工</button> : null}
           </div>
         ) : messages.map((message, index) => {
           const employee = employees.find((item) => item.id === message.senderId)
           const owner = message.senderKind === 'owner'
           if (message.kind === 'reasoning') {
             return <ReasoningMessage key={message.id} message={message} employee={employee} />
+          }
+          if (message.kind === 'tool-call' || message.kind === 'tool-result') {
+            return <ToolEventMessage key={message.id} message={message} employee={employee} />
           }
           return (
             <article key={message.id} className={`message${owner ? ' message--owner' : ''}`}>
@@ -111,27 +113,13 @@ export function ChatWorkbench({
                   <time>{displayTime(message)}</time>
                 </header>
                 <div className="message__content"><RichText value={message.content} /></div>
-                {index === 1 ? <ArtifactAttachment /> : null}
-                {index === lastAssistantIndex ? (
-                  <div className="trace-stack">
-                    <button className="trace-disclosure" type="button" onClick={() => setTraceOpen((value) => !value)}>
-                      <span><TerminalWindow size={15} />工具调用时间线（{demoTools.length}）</span>
-                      <CaretDown size={14} className={traceOpen ? 'is-open' : ''} />
-                    </button>
-                    {traceOpen ? <ToolTimeline tools={demoTools} /> : null}
-                  </div>
-                ) : null}
+                {demoMode && index === 1 ? <ArtifactAttachment onOpen={onOpenArtifact} /> : null}
               </div>
             </article>
           )
         })}
-        {sending ? (
-          <div className="stream-state">
-            <CircleNotch size={16} className="spin" />
-            <span>员工正在思考并执行任务</span>
-            <span className="stream-caret" />
-          </div>
-        ) : null}
+        {liveTurns.map((turn) => <LiveTurn key={`${turn.sessionId}:${turn.agentId}`} turn={turn} employee={employees.find((item) => item.id === turn.agentId)} />)}
+        {sending && liveTurns.length === 0 ? <div className="stream-state"><CircleNotch size={16} className="spin" /><span>正在连接员工的独立 Agent…</span><span className="stream-caret" /></div> : null}
       </div>
 
       <div className="composer-zone">
@@ -150,13 +138,14 @@ export function ChatWorkbench({
             ref={inputRef}
             value={draft}
             onChange={(event) => onDraftChange(event.target.value)}
+            disabled={employees.length === 0}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault()
                 void submit()
               }
             }}
-            placeholder="@员工 下达任务，或同时点名多人召开协作会…"
+            placeholder={employees.length === 0 ? '请先招聘一名员工…' : '@员工 下达任务，或同时点名多人召开协作会…'}
             rows={2}
             aria-label="给当前世界的员工发送消息"
           />
@@ -166,19 +155,35 @@ export function ChatWorkbench({
               <button className="icon-button" type="button" aria-label="插入代码或命令"><BracketsCurly size={18} /></button>
               <span className="composer__hint">Enter 发送 · Shift+Enter 换行 · @ 仅显示当前世界角色</span>
             </div>
-            {sending ? (
-              <button className="send-button send-button--stop" type="button" aria-label="停止生成" onClick={onStop}>
-                <StopCircle size={19} weight="fill" />
-              </button>
-            ) : (
-              <button className="send-button" type="button" aria-label="发送" disabled={!draft.trim()} onClick={() => void submit()}>
-                <PaperPlaneRight size={19} weight="fill" />
-              </button>
-            )}
+            <button className="send-button" type="button" aria-label={sending ? '员工处理中' : '发送'} disabled={sending || employees.length === 0 || !draft.trim()} onClick={() => void submit()}>
+              {sending ? <CircleNotch size={19} className="spin" /> : <PaperPlaneRight size={19} weight="fill" />}
+            </button>
           </div>
         </div>
       </div>
     </section>
+  )
+}
+
+function LiveTurn({ turn, employee }: { turn: LiveAgentTurn; employee: CyberEmployee | undefined }) {
+  const [reasoningOpen, setReasoningOpen] = useState(true)
+  return (
+    <article className={`live-turn live-turn--${turn.status}`}>
+      <header>
+        <span>{turn.status === 'failed' ? <WarningCircle size={16} /> : <CircleNotch size={16} className={turn.status === 'completed' ? '' : 'spin'} />}</span>
+        <div><strong>{employee?.displayName ?? '员工'}</strong><small>{liveStatusLabel(turn.status)}</small></div>
+      </header>
+      {turn.reasoning ? (
+        <div className="trace-stack">
+          <button className="trace-disclosure" type="button" onClick={() => setReasoningOpen((value) => !value)}>
+            <span><TerminalWindow size={15} />实时思考过程</span><CaretDown size={14} className={reasoningOpen ? 'is-open' : ''} />
+          </button>
+          {reasoningOpen ? <p className="live-turn__reasoning">{turn.reasoning}</p> : null}
+        </div>
+      ) : null}
+      {turn.tools.length > 0 ? <ToolTimeline tools={turn.tools} /> : null}
+      {turn.text ? <p className="live-turn__text">{turn.text}<span className="stream-caret" /></p> : null}
+    </article>
   )
 }
 
@@ -194,6 +199,20 @@ function ReasoningMessage({ message, employee }: { message: WorkMessage; employe
   )
 }
 
+function ToolEventMessage({ message, employee }: { message: WorkMessage; employee: CyberEmployee | undefined }) {
+  const failed = message.metadata.failed === true
+  const started = message.kind === 'tool-call'
+  const toolName = typeof message.metadata.toolName === 'string' ? message.metadata.toolName : 'tool'
+  const callId = typeof message.metadata.callId === 'string' ? message.metadata.callId : message.id
+  return (
+    <div className={`tool-event-message${failed ? ' is-failed' : ''}`}>
+      {failed ? <WarningCircle size={15} /> : started ? <CircleNotch size={15} className="spin" /> : <CheckCircle size={15} weight="fill" />}
+      <span><strong>{employee?.displayName ?? '员工'} · {started ? '调用工具' : '工具结果'}</strong><code>{toolName}</code></span>
+      <small>{callId}</small>
+    </div>
+  )
+}
+
 function RichText({ value }: { value: string }) {
   return value.split('\n').map((line, lineIndex) => (
     <p key={`${lineIndex}-${line}`}>
@@ -206,9 +225,9 @@ function RichText({ value }: { value: string }) {
   ))
 }
 
-function ArtifactAttachment() {
+function ArtifactAttachment({ onOpen }: { onOpen(): void }) {
   return (
-    <button className="artifact-attachment" type="button">
+    <button className="artifact-attachment" type="button" onClick={onOpen}>
       <span className="artifact-attachment__icon"><BracketsCurly size={18} /></span>
       <span><strong>v0.3.0-架构设计.md</strong><small>1.2 MB · 已保存到世界产物</small></span>
       <span>预览</span>
@@ -231,6 +250,10 @@ function ToolTimeline({ tools }: { tools: ToolStep[] }) {
       ))}
     </ol>
   )
+}
+
+function liveStatusLabel(status: LiveAgentTurn['status']): string {
+  return ({ thinking: '正在思考', working: '正在调用工具', completed: '本轮完成', failed: '执行失败' })[status]
 }
 
 function displayTime(message: WorkMessage): string {

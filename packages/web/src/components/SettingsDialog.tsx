@@ -10,19 +10,38 @@ import {
   Sun,
   X,
 } from '@phosphor-icons/react'
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import type { ModelProfile, WorkspacePreferences } from '@dsh-cyber/contracts'
 
-type SettingsSection = 'appearance' | 'models' | 'runtime' | 'data' | 'updates'
+export type SettingsSection = 'appearance' | 'models' | 'runtime' | 'data' | 'updates'
+export type SystemAction = 'status' | 'doctor' | 'backup' | 'export' | 'verify-update'
+
+export interface SystemActionResult {
+  ok: boolean
+  checkedAt?: string
+  createdAt?: string
+  kind?: string
+  output?: string
+  stateRoot?: string
+  version?: string
+  supported?: boolean
+  contractId?: string
+  database?: { schemaVersion?: number; integrity?: string[]; errors?: string[]; counts?: Record<string, number> }
+  compatibility?: { expectedVersion?: string; errors?: string[] }
+  checks?: Record<string, boolean>
+  errors?: string[]
+}
 
 interface SettingsDialogProps {
   preferences: WorkspacePreferences
   models: ModelProfile[]
+  initialSection?: SettingsSection
   saving: boolean
   onClose(): void
   onSavePreferences(preferences: WorkspacePreferences): Promise<void>
   onUploadBackground(file: File): Promise<string>
   onSaveModel(profile: Omit<ModelProfile, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt'>): Promise<void>
+  onSystemAction(action: SystemAction, input?: { candidateRoot?: string }): Promise<SystemActionResult>
 }
 
 const sections = [
@@ -36,15 +55,20 @@ const sections = [
 export function SettingsDialog({
   preferences,
   models,
+  initialSection = 'appearance',
   saving,
   onClose,
   onSavePreferences,
   onUploadBackground,
   onSaveModel,
+  onSystemAction,
 }: SettingsDialogProps) {
-  const [section, setSection] = useState<SettingsSection>('appearance')
+  const [section, setSection] = useState<SettingsSection>(initialSection)
   const [draft, setDraft] = useState(preferences)
   const [uploading, setUploading] = useState(false)
+  const [pendingAction, setPendingAction] = useState<SystemAction>()
+  const [actionResult, setActionResult] = useState<SystemActionResult>()
+  const [actionError, setActionError] = useState<string>()
   const [modelDraft, setModelDraft] = useState({
     displayName: '本地模型',
     providerKind: 'openai-compatible-local' as const,
@@ -54,6 +78,18 @@ export function SettingsDialog({
     credentialEnvName: '',
   })
   const changed = useMemo(() => JSON.stringify(draft) !== JSON.stringify(preferences), [draft, preferences])
+  const runSystemAction = async (action: SystemAction, input?: { candidateRoot?: string }) => {
+    setPendingAction(action)
+    setActionResult(undefined)
+    setActionError(undefined)
+    try {
+      setActionResult(await onSystemAction(action, input))
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : '本地操作失败')
+    } finally {
+      setPendingAction(undefined)
+    }
+  }
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
@@ -104,9 +140,9 @@ export function SettingsDialog({
                 })}
               />
             ) : null}
-            {section === 'runtime' ? <RuntimeSettings /> : null}
-            {section === 'data' ? <DataSettings /> : null}
-            {section === 'updates' ? <UpdateSettings /> : null}
+            {section === 'runtime' ? <RuntimeSettings pending={pendingAction} result={actionResult} error={actionError} onRun={runSystemAction} /> : null}
+            {section === 'data' ? <DataSettings pending={pendingAction} result={actionResult} error={actionError} onRun={runSystemAction} /> : null}
+            {section === 'updates' ? <UpdateSettings pending={pendingAction} result={actionResult} error={actionError} onRun={runSystemAction} /> : null}
           </div>
         </div>
         <footer className="settings-dialog__footer">
@@ -160,7 +196,7 @@ function AppearanceSettings({
         <legend>自定义背景</legend>
         <label className="background-upload">
           <ImageSquare size={24} />
-          <span><strong>{uploading ? '正在保存到本地…' : '上传 PNG、JPEG 或 WebP'}</strong><small>最大 5 MiB。文件保存在本机，数据库仅记录校验值和引用。</small></span>
+          <span><strong>{uploading ? '正在保存到本地…' : '上传 PNG、JPEG 或 WebP'}</strong><small>最大 5 MiB。文件保存在本机，并同步作为当前世界场景底图；人物、灯光与状态层仍可交互。</small></span>
           <input type="file" accept="image/png,image/jpeg,image/webp" disabled={uploading} onChange={(event) => { const file = event.target.files?.[0]; if (file) void onUpload(file) }} />
         </label>
         <div className="setting-grid setting-grid--three">
@@ -196,10 +232,61 @@ function ModelSettings({ models, draft, onChange, onSave }: { models: ModelProfi
   )
 }
 
-function RuntimeSettings() { return <InfoSettings title="运行时" copy="独立 DSH profile 仅绑定环回地址。每名员工拥有稳定且独立的 Harness 会话。" rows={['DeepSeek Harness 兼容性检查', '最小权限与工具能力', '员工模型策略覆盖']} /> }
-function DataSettings() { return <InfoSettings title="本地数据" copy="SQLite 是本地权威数据源。可执行备份、导出、诊断与损坏只读恢复。" rows={['数据库健康检查', '创建本地备份', '导出可移植 JSON']} /> }
-function UpdateSettings() { return <InfoSettings title="更新" copy="底层 DSH 先进入候选 profile，通过协议与回归测试后再原子切换。" rows={['检查 DSH 兼容版本', '运行候选环境验证', '查看更新与回滚记录']} /> }
+interface ActionSettingsProps {
+  pending: SystemAction | undefined
+  result: SystemActionResult | undefined
+  error: string | undefined
+  onRun(action: SystemAction, input?: { candidateRoot?: string }): Promise<void>
+}
 
-function InfoSettings({ title, copy, rows }: { title: string; copy: string; rows: string[] }) {
-  return <div className="settings-section"><div className="settings-section__heading"><h3>{title}</h3><p>{copy}</p></div><div className="settings-action-list">{rows.map((row) => <button key={row} type="button"><span>{row}</span><span>查看</span></button>)}</div></div>
+function RuntimeSettings({ pending, result, error, onRun }: ActionSettingsProps) {
+  return (
+    <ActionSettings title="运行时" copy="独立 DSH profile 仅绑定环回地址。检查会同时验证 Harness 版本、bundle 声明和本地 SQLite。" result={result} error={error}>
+      <ActionButton label="检查运行时与数据库" action="status" pending={pending} onRun={onRun} />
+    </ActionSettings>
+  )
+}
+
+function DataSettings({ pending, result, error, onRun }: ActionSettingsProps) {
+  return (
+    <ActionSettings title="本地数据" copy="SQLite 是本地权威数据源。备份和导出写入当前 DSH Cyber 数据目录，不会覆盖已有文件。" result={result} error={error}>
+      <ActionButton label="运行数据库健康检查" action="doctor" pending={pending} onRun={onRun} />
+      <ActionButton label="创建时间戳 SQLite 备份" action="backup" pending={pending} onRun={onRun} />
+      <ActionButton label="导出可移植 JSON" action="export" pending={pending} onRun={onRun} />
+    </ActionSettings>
+  )
+}
+
+function UpdateSettings({ pending, result, error, onRun }: ActionSettingsProps) {
+  const [candidateRoot, setCandidateRoot] = useState('')
+  return (
+    <ActionSettings title="更新" copy="底层 DSH 必须先进入隔离候选 profile，通过精确版本矩阵检查后才允许进入后续切换流程。当前按钮只验证，不会替换运行版本。" result={result} error={error}>
+      <label className="dialog-field update-candidate-field"><span>候选 DSH 安装目录</span><input value={candidateRoot} placeholder="例如 F:\\runtime\\dsh-candidate" onChange={(event) => setCandidateRoot(event.target.value)} /></label>
+      <button className="settings-action-button" type="button" disabled={!candidateRoot.trim() || pending !== undefined} onClick={() => void onRun('verify-update', { candidateRoot: candidateRoot.trim() })}><span>验证候选版本与隔离 profile</span><span>{pending === 'verify-update' ? '验证中…' : '开始验证'}</span></button>
+    </ActionSettings>
+  )
+}
+
+function ActionSettings({ title, copy, result, error, children }: { title: string; copy: string; result: SystemActionResult | undefined; error: string | undefined; children: ReactNode }) {
+  return <div className="settings-section"><div className="settings-section__heading"><h3>{title}</h3><p>{copy}</p></div><div className="settings-action-list">{children}</div>{error === undefined && result === undefined ? null : <SystemResultCard {...(result === undefined ? {} : { result })} {...(error === undefined ? {} : { error })} />}</div>
+}
+
+function ActionButton({ label, action, pending, onRun }: { label: string; action: SystemAction; pending: SystemAction | undefined; onRun(action: SystemAction): Promise<void> }) {
+  return <button className="settings-action-button" type="button" disabled={pending !== undefined} onClick={() => void onRun(action)}><span>{label}</span><span>{pending === action ? '执行中…' : '执行'}</span></button>
+}
+
+function SystemResultCard({ result, error }: { result?: SystemActionResult; error?: string }) {
+  if (error !== undefined) return <div className="system-result system-result--error"><strong>操作失败</strong><p>{error}</p></div>
+  if (result === undefined) return null
+  const version = result.version ?? result.compatibility?.expectedVersion
+  const database = result.database
+  return (
+    <div className={`system-result ${result.ok ? 'system-result--ok' : 'system-result--error'}`}>
+      <strong>{result.ok ? '检查通过' : '需要处理'}</strong>
+      {version === undefined ? null : <p>Harness 版本：{version}{result.contractId ? ` · ${result.contractId}` : ''}</p>}
+      {database === undefined ? null : <p>SQLite schema v{database.schemaVersion ?? '?'} · 完整性 {(database.integrity ?? []).join(', ') || '未知'}</p>}
+      {result.output === undefined ? null : <p className="system-result__path">已生成：{result.output}</p>}
+      {(result.errors ?? result.compatibility?.errors ?? database?.errors ?? []).map((item) => <p key={item}>{item}</p>)}
+    </div>
+  )
 }

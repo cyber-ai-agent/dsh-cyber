@@ -97,6 +97,7 @@ export interface ReviseEmployeeInput {
 
 export interface ReviseEmployeeProfileInput {
   employeeId: string
+  displayName?: string
   birthday?: string | null
   background?: string
   personalityTraits?: string[]
@@ -1010,7 +1011,10 @@ export class SqliteStore {
     const employee = this.#requireEmployee(input.employeeId)
     const previous = this.getEmployeeProfile(employee.id)
     const birthday = input.birthday === undefined ? previous?.birthday : input.birthday ?? undefined
+    const displayName = (input.displayName ?? employee.displayName).trim()
     if (birthday !== undefined) assertBirthday(birthday)
+    if (!displayName) throw new PersistenceError('Employee display name cannot be empty')
+    if (displayName.length > 48) throw new PersistenceError('Employee display name is too long')
     const profile: EmployeeProfile = {
       employeeId: employee.id,
       revision: (previous?.revision ?? 0) + 1,
@@ -1026,6 +1030,11 @@ export class SqliteStore {
     assertSecretFree(profile.appearance)
 
     return this.#transaction(() => {
+      if (displayName !== employee.displayName) {
+        this.database
+          .prepare('UPDATE employee_instances SET display_name = ?, updated_at = ? WHERE id = ?')
+          .run(displayName, profile.createdAt, employee.id)
+      }
       this.database
         .prepare(
           `INSERT INTO employee_profile_revisions
@@ -1049,7 +1058,13 @@ export class SqliteStore {
         type: 'employee.profile.revised',
         actorId: input.actorId ?? 'owner',
         actorKind: 'owner',
-        payload: { employeeId: employee.id, revision: profile.revision, reason: profile.reason },
+        payload: {
+          employeeId: employee.id,
+          revision: profile.revision,
+          reason: profile.reason,
+          displayName,
+          identityChanged: displayName !== employee.displayName,
+        },
       })
       return profile
     })
@@ -1428,6 +1443,7 @@ export class SqliteStore {
     const employee = this.#requireEmployee(employeeId)
     const dossier: EmployeeDossier = {
       employee,
+      revisions: this.listEmployeeRevisions(employee.id),
       skills: this.listEmployeeSkills(employee.id),
       evidence: this.listSkillEvidence(employee.id),
       milestones: this.listEmployeeMilestones(employee.id),

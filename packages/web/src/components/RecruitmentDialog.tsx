@@ -1,0 +1,113 @@
+import { Briefcase, Check, ShieldCheck, Sparkle, X } from '@phosphor-icons/react'
+import { useEffect, useMemo, useState } from 'react'
+import type { EmployeeBlueprint } from '@dsh-cyber/contracts'
+
+interface RecruitmentDialogProps {
+  blueprints: EmployeeBlueprint[]
+  loading: boolean
+  recruiting: boolean
+  onClose(): void
+  onRecruit(blueprint: EmployeeBlueprint, displayName?: string): Promise<void>
+}
+
+export function RecruitmentDialog({
+  blueprints,
+  loading,
+  recruiting,
+  onClose,
+  onRecruit,
+}: RecruitmentDialogProps) {
+  const [selectedId, setSelectedId] = useState<string>()
+  const [displayName, setDisplayName] = useState('')
+  const selected = useMemo(
+    () => blueprints.find((blueprint) => blueprint.id === selectedId) ?? blueprints[0],
+    [blueprints, selectedId],
+  )
+
+  useEffect(() => {
+    if (selected !== undefined && selectedId === undefined) setSelectedId(selected.id)
+  }, [selected, selectedId])
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section className="recruitment-dialog" role="dialog" aria-modal="true" aria-labelledby="recruitment-title">
+        <header className="dialog-header">
+          <div>
+            <h2 id="recruitment-title">员工市场</h2>
+            <p>招聘会创建当前世界专属的 Employee Instance 与版本 1，不会静默生成员工。</p>
+          </div>
+          <button className="icon-button" type="button" aria-label="关闭员工市场" onClick={onClose}><X size={18} /></button>
+        </header>
+
+        <div className="recruitment-layout">
+          <div className="blueprint-list" aria-label="可招聘员工">
+            {loading ? <div className="dialog-empty">正在读取当前世界的角色蓝图…</div> : null}
+            {!loading && blueprints.length === 0 ? <div className="dialog-empty">当前世界还没有兼容的员工蓝图。</div> : null}
+            {blueprints.map((blueprint) => (
+              <button
+                key={`${blueprint.id}@${blueprint.version}`}
+                className={`blueprint-card${selected?.id === blueprint.id ? ' is-active' : ''}`}
+                type="button"
+                onClick={() => { setSelectedId(blueprint.id); setDisplayName('') }}
+              >
+                <span className="blueprint-card__icon"><Briefcase size={20} /></span>
+                <span className="blueprint-card__copy">
+                  <span><strong>{blueprint.displayName}</strong><small>v{blueprint.version}</small></span>
+                  <span>{blueprint.role}</span>
+                  <small>{blueprint.summary}</small>
+                </span>
+                {selected?.id === blueprint.id ? <Check size={17} weight="bold" /> : null}
+              </button>
+            ))}
+          </div>
+
+          <div className="blueprint-detail">
+            {selected === undefined ? null : (
+              <>
+                <div className="blueprint-detail__heading">
+                  <span><Sparkle size={18} /></span>
+                  <div><h3>{selected.displayName}</h3><p>{selected.role} · 蓝图版本 {selected.version}</p></div>
+                </div>
+                <p className="blueprint-detail__summary">{selected.summary}</p>
+                <label className="dialog-field">
+                  <span>员工称呼（可选）</span>
+                  <input value={displayName} placeholder={selected.displayName} onChange={(event) => setDisplayName(event.target.value)} />
+                </label>
+                <CapabilityGroup title="建议技能" items={selected.requestedSkills} />
+                <CapabilityGroup title="请求权限" items={selected.requestedCapabilities} />
+                <div className="permission-notice">
+                  <ShieldCheck size={18} />
+                  <p>招聘只创建角色身份。技能与工具仍按最小权限单独授权，角色不能自动扩大自己的能力。</p>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        <footer className="dialog-footer">
+          <span>{selected === undefined ? '请选择一份角色蓝图' : `将在当前世界创建独立 Agent：${displayName.trim() || selected.displayName}`}</span>
+          <div>
+            <button className="text-button" type="button" onClick={onClose}>取消</button>
+            <button
+              className="primary-button"
+              type="button"
+              disabled={selected === undefined || recruiting}
+              onClick={() => selected && void onRecruit(selected, displayName.trim() || undefined)}
+            >
+              {recruiting ? '正在创建独立 Agent…' : '确认招聘'}
+            </button>
+          </div>
+        </footer>
+      </section>
+    </div>
+  )
+}
+
+function CapabilityGroup({ title, items }: { title: string; items: string[] }) {
+  return (
+    <section className="capability-group">
+      <h4>{title}</h4>
+      <div>{items.length === 0 ? <span>无额外请求</span> : items.map((item) => <span key={item}>{item}</span>)}</div>
+    </section>
+  )
+}

@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises'
-import { extname, join, resolve, sep } from 'node:path'
+import { mkdir, open, readFile, readdir, realpath, rename, stat, unlink } from 'node:fs/promises'
+import { extname, join, relative, resolve, sep } from 'node:path'
 import type { AddressInfo } from 'node:net'
 import { fileURLToPath } from 'node:url'
 
@@ -11,10 +11,13 @@ import type {
   CyberPackageKind,
   CyberPackageManifest,
   JsonObject,
+  ModelProfile,
 } from '@dsh-cyber/contracts'
 import {
-  HarnessCompatibilityAdapter,
+  HarnessModelRouter,
+  inspectHarnessCandidate,
   inspectHarnessCompatibility,
+  type HarnessModelRoute,
 } from '@dsh-cyber/harness-adapter'
 import {
   ConversationOrchestrationError,
@@ -32,6 +35,7 @@ import { SqliteStore } from '@dsh-cyber/persistence'
 
 const MAX_BODY_BYTES = 8 * 1024 * 1024
 const MAX_BACKGROUND_BYTES = 5 * 1024 * 1024
+const MAX_WORKSPACE_PREVIEW_BYTES = 2 * 1024 * 1024
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_PORT = 43123
 
@@ -75,6 +79,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     throw new Error(`Invalid port: ${port}`)
   }
   const stateRoot = resolve(options.stateRoot)
+  const workspaceRoot = await realpath(resolve(options.workspacePath))
   const webRoot = resolve(options.webRoot ?? fileURLToPath(new URL('../../web/dist', import.meta.url)))
   await mkdir(join(stateRoot, 'data'), { recursive: true })
   const compatibility = await inspectHarnessCompatibility(join(stateRoot, 'runtime', 'harness-home'))
@@ -86,11 +91,23 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
 
   const runtime =
     options.runtime ??
-    new HarnessCompatibilityAdapter({ stateRoot: join(stateRoot, 'runtime') })
+    new HarnessModelRouter({
+      stateRoot: join(stateRoot, 'runtime'),
+      resolveRoute(request) {
+        const selectedProfileId = request.revision.modelPolicy.modelProfileId
+        const selectedProfile = typeof selectedProfileId === 'string'
+          ? store.getModelProfile(selectedProfileId)
+          : undefined
+        const profile = selectedProfile?.workspaceId === request.agent.workspaceId
+          ? selectedProfile
+          : store.listModelProfiles(request.agent.workspaceId).find((candidate) => candidate.isDefault)
+        return profile === undefined ? undefined : harnessModelRoute(profile)
+      },
+    })
   const orchestrator = new ConversationOrchestrator({
     store,
     runtime,
-    workspacePath: resolve(options.workspacePath),
+    workspacePath: workspaceRoot,
   })
   const packageManager = new PackageManager({
     store,
@@ -108,6 +125,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       orchestrator,
       packageManager,
       stateRoot,
+      workspaceRoot,
       webRoot,
       liveClients,
     }).catch((error: unknown) => writeError(response, error))
@@ -171,10 +189,11 @@ async function handleRequest(context: {
   orchestrator: ConversationOrchestrator
   packageManager: PackageManager
   stateRoot: string
+  workspaceRoot: string
   webRoot: string
   liveClients: Set<LiveClient>
 }): Promise<void> {
-  const { request, response, store, orchestrator, packageManager, stateRoot, webRoot, liveClients } = context
+  const { request, response, store, orchestrator, packageManager, stateRoot, workspaceRoot, webRoot, liveClients } = context
   assertLocalRequest(request)
   const url = new URL(request.url ?? '/', 'http://127.0.0.1')
   const method = request.method ?? 'GET'
@@ -189,6 +208,90 @@ async function handleRequest(context: {
   if (method === 'GET' && url.pathname === '/api/system/compatibility') {
     const compatibility = await inspectHarnessCompatibility(join(stateRoot, 'runtime', 'harness-home'))
     writeJson(response, compatibility.ok ? 200 : 503, compatibility)
+    return
+  }
+  if (method === 'GET' && url.pathname === '/api/system/status') {
+    const compatibility = await inspectHarnessCompatibility(join(stateRoot, 'runtime', 'harness-home'))
+    const database = store.doctor()
+    writeJson(response, 200, {
+      ok: compatibility.ok && database.ok,
+      checkedAt: new Date().toISOString(),
+      stateRoot,
+      database,
+      compatibility,
+    })
+    return
+  }
+  if (method === 'POST' && url.pathname === '/api/system/doctor') {
+    const database = store.doctor()
+    writeJson(response, 200, { ok: database.ok, checkedAt: new Date().toISOString(), database })
+    return
+  }
+  if (method === 'POST' && url.pathname === '/api/system/backup') {
+    const destination = join(stateRoot, 'backups', `dsh-cyber-${artifactTimestamp()}.sqlite`)
+    const output = await store.backup(destination)
+    writeJson(response, 201, { ok: true, kind: 'backup', output, createdAt: new Date().toISOString() })
+    return
+  }
+  if (method === 'POST' && url.pathname === '/api/system/export') {
+    const destination = join(stateRoot, 'backups', `dsh-cyber-${artifactTimestamp()}.json`)
+    const output = await store.exportJson(destination)
+    writeJson(response, 201, { ok: true, kind: 'export', output, createdAt: new Date().toISOString() })
+    return
+  }
+  if (method === 'POST' && url.pathname === '/api/system/update/verify') {
+    const body = await readJson(request)
+    const report = await inspectHarnessCandidate({
+      candidateRoot: requiredString(body, 'candidateRoot'),
+      stateRoot: join(stateRoot, 'runtime'),
+    })
+    writeJson(response, 200, report)
+    return
+  }
+  if (method === 'GET' && url.pathname === '/api/workspace/files') {
+    const directory = await resolveWorkspaceEntry(workspaceRoot, url.searchParams.get('path') ?? '')
+    const directoryInfo = await stat(directory.absolutePath)
+    if (!directoryInfo.isDirectory()) {
+      throw new HttpError(422, 'workspace_directory_required', 'Workspace path is not a directory')
+    }
+    const items = await Promise.all((await readdir(directory.absolutePath, { withFileTypes: true }))
+      .filter((entry) => !entry.isSymbolicLink())
+      .map(async (entry) => {
+        const entryPath = directory.relativePath ? `${directory.relativePath}/${entry.name}` : entry.name
+        if (workspaceEntryIsHidden(entryPath)) return undefined
+        const entryInfo = await stat(join(directory.absolutePath, entry.name))
+        return {
+          name: entry.name,
+          path: entryPath,
+          kind: entryInfo.isDirectory() ? 'directory' : 'file',
+          size: entryInfo.isFile() ? entryInfo.size : 0,
+          updatedAt: entryInfo.mtime.toISOString(),
+          previewKind: entryInfo.isFile() ? workspacePreviewKind(entry.name)?.kind : undefined,
+        }
+      }))
+    writeJson(response, 200, {
+      path: directory.relativePath,
+      parentPath: directory.relativePath.includes('/')
+        ? directory.relativePath.slice(0, directory.relativePath.lastIndexOf('/'))
+        : directory.relativePath ? '' : undefined,
+      items: items
+        .filter((entry) => entry !== undefined)
+        .sort((left, right) => left.kind === right.kind
+          ? left.name.localeCompare(right.name)
+          : left.kind === 'directory' ? -1 : 1),
+    })
+    return
+  }
+  if (method === 'GET' && url.pathname === '/api/workspace/file') {
+    const file = await resolveWorkspaceEntry(workspaceRoot, url.searchParams.get('path') ?? '')
+    const fileInfo = await stat(file.absolutePath)
+    if (!fileInfo.isFile()) throw new HttpError(422, 'workspace_file_required', 'Workspace path is not a file')
+    if (fileInfo.size > MAX_WORKSPACE_PREVIEW_BYTES) {
+      throw new HttpError(413, 'workspace_file_too_large', 'Workspace preview is limited to 2 MiB')
+    }
+    const preview = workspacePreviewKind(file.relativePath)
+    if (preview === undefined) throw new HttpError(415, 'workspace_file_unsupported', 'File type cannot be previewed')
+    writeWorkspaceFile(response, await readFile(file.absolutePath), preview.contentType)
     return
   }
   if (method === 'GET' && url.pathname === '/api/catalog/world-templates') {
@@ -554,6 +657,7 @@ async function handleRequest(context: {
     const body = await readJson(request)
     const profile = store.reviseEmployeeProfile({
       employeeId: employeeProfile[0],
+      ...(body.displayName === undefined ? {} : { displayName: requiredString(body, 'displayName') }),
       ...(body.birthday === undefined ? {} : { birthday: nullableString(body.birthday) }),
       ...(body.background === undefined ? {} : { background: requiredString(body, 'background') }),
       ...(body.personalityTraits === undefined
@@ -715,6 +819,19 @@ function writeBinary(
     'Content-Type': contentType,
     'Content-Length': body.byteLength,
     'Cache-Control': 'private, max-age=31536000, immutable',
+    'Content-Security-Policy': "default-src 'none'; sandbox",
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'no-referrer',
+  })
+  response.end(body)
+}
+
+function writeWorkspaceFile(response: ServerResponse, body: Buffer, contentType: string): void {
+  response.writeHead(200, {
+    'Content-Type': contentType,
+    'Content-Length': body.byteLength,
+    'Content-Disposition': 'inline',
+    'Cache-Control': 'no-store',
     'Content-Security-Policy': "default-src 'none'; sandbox",
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
@@ -959,14 +1076,107 @@ function packageManifest(value: unknown): CyberPackageManifest {
   }
 }
 
+function harnessModelRoute(profile: ModelProfile): HarnessModelRoute {
+  const contextWindow = optionalPositiveInteger(profile.settings.contextWindow)
+  const maxTokens = optionalPositiveInteger(profile.settings.maxTokens)
+  return {
+    id: profile.id,
+    displayName: profile.displayName,
+    api: profile.api,
+    baseURL: profile.baseUrl,
+    modelId: profile.modelId,
+    ...(profile.credentialEnvName === undefined
+      ? {}
+      : { apiKeyEnv: profile.credentialEnvName }),
+    ...(contextWindow === undefined ? {} : { contextWindow }),
+    ...(maxTokens === undefined ? {} : { maxTokens }),
+  }
+}
+
 function optionalPositiveInteger(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined
+}
+
+async function resolveWorkspaceEntry(
+  workspaceRoot: string,
+  requestedPath: string,
+): Promise<{ absolutePath: string; relativePath: string }> {
+  const normalized = requestedPath.replaceAll('\\', '/').replace(/^\.\//, '')
+  if (
+    normalized.includes('\0') ||
+    normalized.startsWith('/') ||
+    /^[A-Za-z]:/.test(normalized) ||
+    normalized.split('/').some((part) => part === '..') ||
+    workspaceEntryIsHidden(normalized)
+  ) {
+    throw new HttpError(403, 'workspace_path_rejected', 'Workspace path is not accessible')
+  }
+  const candidate = resolve(workspaceRoot, ...normalized.split('/').filter(Boolean))
+  let absolutePath: string
+  try {
+    absolutePath = await realpath(candidate)
+  } catch (error) {
+    if (isMissingFile(error)) throw new HttpError(404, 'workspace_entry_not_found', 'Workspace entry not found')
+    throw error
+  }
+  if (!pathIsInside(workspaceRoot, absolutePath)) {
+    throw new HttpError(403, 'workspace_path_rejected', 'Workspace path escapes the configured root')
+  }
+  const relativePath = relative(workspaceRoot, absolutePath).split(sep).join('/')
+  if (workspaceEntryIsHidden(relativePath)) {
+    throw new HttpError(403, 'workspace_path_rejected', 'Workspace path is not accessible')
+  }
+  return { absolutePath, relativePath }
+}
+
+function pathIsInside(root: string, target: string): boolean {
+  const normalizeCase = (value: string) => process.platform === 'win32' ? value.toLowerCase() : value
+  const normalizedRoot = normalizeCase(resolve(root))
+  const normalizedTarget = normalizeCase(resolve(target))
+  return normalizedTarget === normalizedRoot || normalizedTarget.startsWith(`${normalizedRoot}${sep}`)
+}
+
+function workspaceEntryIsHidden(relativePath: string): boolean {
+  if (!relativePath) return false
+  const segments = relativePath.replaceAll('\\', '/').split('/').filter(Boolean)
+  const hiddenDirectories = new Set(['node_modules', 'dist', 'coverage', '.git', '.ssh'])
+  const sensitiveFiles = new Set(['credentials.json', 'secrets.json', 'id_rsa', 'id_ed25519'])
+  return segments.some((segment) => {
+    const lower = segment.toLowerCase()
+    return segment.startsWith('.') || hiddenDirectories.has(lower) || sensitiveFiles.has(lower)
+  })
+}
+
+function workspacePreviewKind(fileName: string): { kind: 'text' | 'image'; contentType: string } | undefined {
+  const extension = extname(fileName).toLowerCase()
+  const images: Record<string, string> = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.webp': 'image/webp',
+    '.gif': 'image/gif',
+  }
+  const imageType = images[extension]
+  if (imageType !== undefined) return { kind: 'image', contentType: imageType }
+  const textExtensions = new Set([
+    '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json', '.md', '.txt',
+    '.css', '.scss', '.html', '.yaml', '.yml', '.toml', '.sql', '.py', '.rs',
+    '.go', '.java', '.kt', '.swift', '.sh', '.ps1', '.bat', '.cmd', '.xml',
+    '.svg', '.csv',
+  ])
+  return textExtensions.has(extension)
+    ? { kind: 'text', contentType: 'text/plain; charset=utf-8' }
+    : undefined
 }
 
 function nonNegativeInteger(value: string | null): number {
   if (value === null) return 0
   const number = Number(value)
   return Number.isInteger(number) && number >= 0 ? number : 0
+}
+
+function artifactTimestamp(): string {
+  return new Date().toISOString().replaceAll(/[:.]/g, '-').replace('T', '_').replace('Z', '')
 }
 
 function mentionedEmployeeIds(

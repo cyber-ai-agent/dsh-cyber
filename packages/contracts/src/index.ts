@@ -245,6 +245,7 @@ export interface EmployeeRelationship {
 export interface EmployeeDossier {
   employee: EmployeeInstance
   profile?: EmployeeProfile
+  revisions: EmployeeRevision[]
   skills: EmployeeSkill[]
   evidence: SkillEvidence[]
   milestones: EmployeeMilestone[]

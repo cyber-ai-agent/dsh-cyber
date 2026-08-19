@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { request as httpRequest } from 'node:http'
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -41,10 +41,28 @@ class FakeRuntime implements AgentRuntimePort {
       metadata: {},
     })
     request.onEvent?.({
-      kind: 'assistant.message',
+      kind: 'tool.started',
       source: 'test-runtime',
       sourceSessionId: agentSessionId,
       sourceSequence: 3,
+      toolName: 'search_workspace',
+      callId: `call-${request.agent.id}`,
+      metadata: {},
+    })
+    request.onEvent?.({
+      kind: 'tool.completed',
+      source: 'test-runtime',
+      sourceSessionId: agentSessionId,
+      sourceSequence: 4,
+      callId: `call-${request.agent.id}`,
+      failed: false,
+      metadata: {},
+    })
+    request.onEvent?.({
+      kind: 'assistant.message',
+      source: 'test-runtime',
+      sourceSessionId: agentSessionId,
+      sourceSequence: 5,
       content,
       metadata: {},
     })
@@ -52,10 +70,10 @@ class FakeRuntime implements AgentRuntimePort {
       kind: 'turn.completed',
       source: 'test-runtime',
       sourceSessionId: agentSessionId,
-      sourceSequence: 4,
+      sourceSequence: 6,
       metadata: {},
     })
-    return { agentSessionId, finalResponse: content, eventCount: 4 }
+    return { agentSessionId, finalResponse: content, eventCount: 6 }
   }
 
   async close(): Promise<void> {}
@@ -233,6 +251,8 @@ describe('Cyber local server', () => {
       'cyber-company.software-engineer',
     )
     const archivist = await recruit(first.origin, world.id, 'cyber-company.archivist')
+    const stream = openRuntimeStream(first.origin, world.id)
+    await stream.ready
 
     const chat = await json(first.origin, `/api/worlds/${world.id}/chat`, {
       method: 'POST',
@@ -248,6 +268,12 @@ describe('Cyber local server', () => {
     expect(firstRuntime.calls[1]?.agent.id).toBe(archivist.id)
     expect(firstRuntime.calls[1]?.prompt).toContain('开发工程师：我先建立性能基线。')
     const sessionId = chat.body.session.id as string
+    const runtimeEvents = await stream.waitForCount(12)
+    stream.close()
+    expect(runtimeEvents.map((item) => item.event.kind)).toEqual([
+      'turn.started', 'assistant.reasoning', 'tool.started', 'tool.completed', 'assistant.message', 'turn.completed',
+      'turn.started', 'assistant.reasoning', 'tool.started', 'tool.completed', 'assistant.message', 'turn.completed',
+    ])
 
     await first.server.close()
     servers.splice(servers.indexOf(first.server), 1)
@@ -259,6 +285,9 @@ describe('Cyber local server', () => {
     expect(workspaceSnapshot.body.worlds).toHaveLength(1)
     expect(worldSnapshot.body.employees).toHaveLength(2)
     expect(messages.body.items.filter((item: { kind: string }) => item.kind === 'assistant')).toHaveLength(2)
+    expect(messages.body.items.filter((item: { kind: string }) => item.kind === 'reasoning')).toHaveLength(2)
+    expect(messages.body.items.filter((item: { kind: string }) => item.kind === 'tool-call')).toHaveLength(2)
+    expect(messages.body.items.filter((item: { kind: string }) => item.kind === 'tool-result')).toHaveLength(2)
     expect(worldSnapshot.body.employees.every((item: { agentSessionId?: string }) => item.agentSessionId)).toBe(true)
   })
 
@@ -341,10 +370,11 @@ describe('Cyber local server', () => {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        displayName: '阿帆',
         birthday: '05-24',
         background: '负责可验证的软件交付。',
         personalityTraits: ['严谨', '主动'],
-        appearance: { avatarIndex: 2 },
+        appearance: { avatarIndex: 6 },
         reason: '完善员工数字档案',
       }),
     })
@@ -400,9 +430,49 @@ describe('Cyber local server', () => {
     expect(downloaded.status).toBe(200)
     expect(downloaded.headers.get('content-type')).toBe('image/png')
 
+    const status = await json(origin, '/api/system/status')
+    expect(status.response.status).toBe(200)
+    expect(status.body).toMatchObject({ ok: true, database: { ok: true }, compatibility: { ok: true } })
+    const doctor = await json(origin, '/api/system/doctor', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    expect(doctor.body).toMatchObject({ ok: true, database: { integrity: ['ok'] } })
+    const backup = await json(origin, '/api/system/backup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    const exported = await json(origin, '/api/system/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    expect((await stat(backup.body.output)).isFile()).toBe(true)
+    expect((await stat(exported.body.output)).isFile()).toBe(true)
+
     const dossier = await json(origin, `/api/employees/${employee.id}/dossier`)
     expect(dossier.body.profile).toMatchObject({ birthday: '05-24', personalityTraits: ['严谨', '主动'] })
+    expect(dossier.body.profile.appearance).toMatchObject({ avatarIndex: 6 })
+    expect(dossier.body.employee.displayName).toBe('阿帆')
     expect(dossier.body.milestones[0]).toMatchObject({ category: 'joined' })
+  })
+
+  it('browses and previews safe workspace files without exposing hidden files or traversal', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-server-files-'))
+    await mkdir(join(stateRoot, 'src'), { recursive: true })
+    await writeFile(join(stateRoot, 'src', 'hello.ts'), 'export const hello = "cyber"\n', 'utf8')
+    await writeFile(join(stateRoot, '.env'), 'SECRET_MUST_NOT_LEAK=value\n', 'utf8')
+    const { origin } = await start(stateRoot)
+
+    const root = await json(origin, '/api/workspace/files')
+    expect(root.response.status).toBe(200)
+    expect(root.body.items.map((item: { name: string }) => item.name)).toContain('src')
+    expect(root.body.items.map((item: { name: string }) => item.name)).not.toContain('.env')
+
+    const nested = await json(origin, '/api/workspace/files?path=src')
+    expect(nested.body).toMatchObject({ path: 'src', parentPath: '' })
+    expect(nested.body.items).toEqual([
+      expect.objectContaining({ name: 'hello.ts', kind: 'file', previewKind: 'text' }),
+    ])
+    const preview = await fetch(`${origin}/api/workspace/file?path=src%2Fhello.ts`)
+    expect(preview.status).toBe(200)
+    expect(preview.headers.get('content-type')).toContain('text/plain')
+    expect(await preview.text()).toContain('export const hello')
+
+    const hidden = await fetch(`${origin}/api/workspace/file?path=.env`)
+    expect(hidden.status).toBe(403)
+    const traversal = await fetch(`${origin}/api/workspace/files?path=..%2F`)
+    expect(traversal.status).toBe(403)
   })
 
   it('rejects DNS rebinding and cross-origin mutation requests', async () => {
@@ -452,4 +522,77 @@ function rawStatus(
     request.once('error', reject)
     request.end(options.body)
   })
+}
+
+function openRuntimeStream(origin: string, worldId: string): {
+  ready: Promise<void>
+  waitForCount(count: number): Promise<any[]>
+  close(): void
+} {
+  const target = new URL(origin)
+  const runtimeEvents: any[] = []
+  const waiters: Array<{ count: number; resolve(items: any[]): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }> = []
+  let buffer = ''
+  let request: ReturnType<typeof httpRequest>
+  let resolveReady!: () => void
+  let rejectReady!: (error: Error) => void
+  const ready = new Promise<void>((resolvePromise, reject) => {
+    resolveReady = resolvePromise
+    rejectReady = reject
+  })
+  request = httpRequest({
+    hostname: '127.0.0.1',
+    port: Number(target.port),
+    method: 'GET',
+    path: `/api/worlds/${encodeURIComponent(worldId)}/live`,
+    headers: { Host: target.host },
+  }, (response) => {
+    response.setEncoding('utf8')
+    response.on('data', (chunk: string) => {
+      buffer += chunk
+      let boundary = buffer.indexOf('\n\n')
+      while (boundary >= 0) {
+        const block = buffer.slice(0, boundary)
+        buffer = buffer.slice(boundary + 2)
+        const eventName = /^event:\s*(.+)$/m.exec(block)?.[1]
+        const data = /^data:\s*(.+)$/m.exec(block)?.[1]
+        if (eventName === 'ready') resolveReady()
+        if (eventName === 'runtime' && data !== undefined) runtimeEvents.push(JSON.parse(data))
+        for (const waiter of [...waiters]) {
+          if (runtimeEvents.length < waiter.count) continue
+          clearTimeout(waiter.timer)
+          waiters.splice(waiters.indexOf(waiter), 1)
+          waiter.resolve([...runtimeEvents])
+        }
+        boundary = buffer.indexOf('\n\n')
+      }
+    })
+  })
+  request.once('error', (error) => {
+    rejectReady(error)
+    for (const waiter of waiters.splice(0)) {
+      clearTimeout(waiter.timer)
+      waiter.reject(error)
+    }
+  })
+  request.end()
+  return {
+    ready,
+    waitForCount(count) {
+      if (runtimeEvents.length >= count) return Promise.resolve([...runtimeEvents])
+      return new Promise((resolvePromise, reject) => {
+        const waiter = {
+          count,
+          resolve: resolvePromise,
+          reject,
+          timer: setTimeout(() => {
+            waiters.splice(waiters.indexOf(waiter), 1)
+            reject(new Error(`Timed out waiting for ${count} runtime events; received ${runtimeEvents.length}`))
+          }, 2_000),
+        }
+        waiters.push(waiter)
+      })
+    },
+    close() { request.destroy() },
+  }
 }

@@ -4,10 +4,15 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import type { EmployeeInstance, EmployeeRevision } from '@dsh-cyber/contracts'
+import type {
+  AgentRuntimePort,
+  EmployeeInstance,
+  EmployeeRevision,
+} from '@dsh-cyber/contracts'
 
 import {
   HarnessCompatibilityAdapter,
+  HarnessModelRouter,
   ensureHarnessProfile,
   inspectHarnessCandidate,
   normalizeHarnessNotification,
@@ -15,6 +20,8 @@ import {
   workerEnvironment,
   type HarnessRuntime,
   type HarnessRuntimeSpec,
+  type HarnessAdapterOptions,
+  type HarnessModelRoute,
 } from '../src/index.js'
 
 function employee(): EmployeeInstance {
@@ -33,14 +40,14 @@ function employee(): EmployeeInstance {
   }
 }
 
-function revision(): EmployeeRevision {
+function revision(modelPolicy: EmployeeRevision['modelPolicy'] = {}): EmployeeRevision {
   return {
     employeeId: 'employee-1',
     revision: 1,
     persona: '先建立基线，再实施变更。',
     skillGrants: [],
     capabilityGrants: [],
-    modelPolicy: {},
+    modelPolicy,
     reason: 'recruited',
     createdAt: '2026-08-19T00:00:00.000Z',
   }
@@ -137,6 +144,109 @@ describe('Harness profile and adapter', () => {
     expect(observed).toEqual(['session.event', 'session.event'])
     await adapter.close()
     expect(closes).toBe(1)
+  })
+
+  it('routes independent employees through their selected model profiles and refreshes changed routes', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-model-router-'))
+    const routes = new Map<string, HarnessModelRoute>([
+      ['model-a', {
+        id: 'model-a',
+        displayName: 'Local A',
+        api: 'openai-completions',
+        baseURL: 'http://127.0.0.1:11434/v1',
+        modelId: 'qwen-a',
+      }],
+      ['model-b', {
+        id: 'model-b',
+        displayName: 'Remote B',
+        api: 'openai-responses',
+        baseURL: 'https://models.example.test/v1',
+        modelId: 'model-b',
+        apiKeyEnv: 'MODEL_B_API_KEY',
+      }],
+    ])
+    const created: HarnessAdapterOptions[] = []
+    const calls: Array<{ employeeId: string; model?: string }> = []
+    let closes = 0
+    const closedAgents: string[] = []
+    const adapterFactory = (options: HarnessAdapterOptions): AgentRuntimePort => {
+      created.push(options)
+      return {
+        async runTurn(request) {
+          calls.push({ employeeId: request.agent.id, ...(options.model === undefined ? {} : { model: options.model }) })
+          return {
+            agentSessionId: `session-${request.agent.id}`,
+            finalResponse: `reply:${options.model ?? 'default'}`,
+            eventCount: 0,
+          }
+        },
+        async closeAgent(agentId) {
+          closedAgents.push(agentId)
+        },
+        async close() {
+          closes += 1
+        },
+      }
+    }
+    const router = new HarnessModelRouter({
+      stateRoot,
+      resolveRoute(request) {
+        const selected = request.revision.modelPolicy.modelProfileId
+        return typeof selected === 'string' ? routes.get(selected) : undefined
+      },
+      adapterFactory,
+    })
+    const employeeA = employee()
+    const employeeB = { ...employee(), id: 'employee-2', displayName: '阿帆' }
+
+    await router.runTurn({
+      agent: employeeA,
+      revision: revision({ modelProfileId: 'model-a' }),
+      prompt: 'A',
+      workspacePath: stateRoot,
+    })
+    await router.runTurn({
+      agent: employeeB,
+      revision: { ...revision({ modelProfileId: 'model-b' }), employeeId: employeeB.id },
+      prompt: 'B',
+      workspacePath: stateRoot,
+    })
+
+    expect(calls).toEqual([
+      { employeeId: 'employee-1', model: 'qwen-a' },
+      { employeeId: 'employee-2', model: 'model-b' },
+    ])
+    expect(created[0]?.providerProfile).toMatchObject({
+      displayName: 'Local A',
+      baseURL: 'http://127.0.0.1:11434/v1',
+      model: { id: 'qwen-a' },
+    })
+    expect(created[1]?.providerProfile).toMatchObject({
+      apiKeyEnv: 'MODEL_B_API_KEY',
+      model: { id: 'model-b' },
+    })
+    expect(JSON.stringify(created)).not.toContain('apiKeyValue')
+
+    routes.set('model-a', {
+      ...routes.get('model-a')!,
+      modelId: 'qwen-a-v2',
+      contextWindow: 65_536,
+    })
+    await router.runTurn({
+      agent: employeeA,
+      revision: revision({ modelProfileId: 'model-a' }),
+      prompt: 'A2',
+      workspacePath: stateRoot,
+    })
+    expect(created).toHaveLength(3)
+    expect(created[2]?.model).toBe('qwen-a-v2')
+    expect(created[2]?.providerProfile?.model.contextWindow).toBe(65_536)
+    expect(closes).toBe(1)
+
+    await router.closeAgent(employeeA.id)
+    expect(closedAgents).toEqual([employeeA.id, employeeA.id])
+    await router.close()
+    expect(closes).toBe(3)
   })
 
   it('passes only an allowlisted host environment plus worker-owned values', async () => {

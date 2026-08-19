@@ -23,6 +23,7 @@ interface NavigationPaneProps {
   onSelectSession(sessionId: string): void
   onSelectEmployee(employeeId: string): void
   onDirectEmployee(employee: CyberEmployee): void
+  onRecruit(): void
   onCreateWorld(): void
 }
 
@@ -36,6 +37,7 @@ export function NavigationPane({
   onSelectSession,
   onSelectEmployee,
   onDirectEmployee,
+  onRecruit,
   onCreateWorld,
 }: NavigationPaneProps) {
   const [query, setQuery] = useState('')
@@ -118,6 +120,12 @@ export function NavigationPane({
           />
         </label>
         <div className="employee-list">
+          {employees.length === 0 ? (
+            <div className="employee-list-empty">
+              <p>当前世界从 0 开始，还没有角色。</p>
+              <button className="secondary-button" type="button" onClick={onRecruit}><Plus size={14} />招聘员工</button>
+            </div>
+          ) : null}
           {filteredEmployees.map((employee) => (
             <button
               key={employee.id}
@@ -152,4 +160,3 @@ function formatSessionTime(value: string): string {
   }
   return `${date.getMonth() + 1}-${String(date.getDate()).padStart(2, '0')}`
 }
-

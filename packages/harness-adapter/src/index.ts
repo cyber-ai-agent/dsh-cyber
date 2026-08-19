@@ -1,3 +1,4 @@
 export * from './adapter.js'
 export * from './compatibility.js'
+export * from './model-router.js'
 export * from './profile.js'

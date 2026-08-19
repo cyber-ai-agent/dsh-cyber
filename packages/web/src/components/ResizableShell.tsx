@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 
 interface ResizableShellProps {
   left: ReactNode
@@ -21,18 +21,26 @@ export function ResizableShell({
 }: ResizableShellProps) {
   const shellRef = useRef<HTMLDivElement>(null)
   const widthsRef = useRef({ leftWidth, rightWidth })
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
+  const paneScale = viewportWidth >= 3_200 ? 1.35 : viewportWidth >= 2_200 ? 1.18 : 1
 
   useEffect(() => {
     widthsRef.current = { leftWidth, rightWidth }
   }, [leftWidth, rightWidth])
 
+  useEffect(() => {
+    const updateViewport = () => setViewportWidth(window.innerWidth)
+    window.addEventListener('resize', updateViewport)
+    return () => window.removeEventListener('resize', updateViewport)
+  }, [])
+
   const beginResize = useCallback((side: 'left' | 'right', startEvent: ReactPointerEvent) => {
     startEvent.currentTarget.setPointerCapture(startEvent.pointerId)
     const originX = startEvent.clientX
     const initial = widthsRef.current
-    const shellWidth = shellRef.current?.clientWidth ?? window.innerWidth
+    const shellWidth = (shellRef.current?.clientWidth ?? window.innerWidth) / paneScale
     const onMove = (event: PointerEvent) => {
-      const delta = event.clientX - originX
+      const delta = (event.clientX - originX) / paneScale
       const nextLeft = side === 'left'
         ? clamp(initial.leftWidth + delta, 220, Math.min(520, shellWidth - 700))
         : initial.leftWidth
@@ -47,13 +55,20 @@ export function ResizableShell({
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onEnd, { once: true })
-  }, [onResize])
+  }, [onResize, paneScale])
+
+  const handleWidth = Math.round(5 * paneScale)
+  const minimumCenterWidth = Math.round(460 * paneScale)
+  const displayedLeftWidth = Math.round(leftWidth * paneScale)
+  const displayedRightWidth = Math.round(rightWidth * paneScale)
 
   return (
     <div
       ref={shellRef}
       className={`workbench-shell${rightCollapsed ? ' workbench-shell--dock-collapsed' : ''}`}
-      style={{ gridTemplateColumns: `${leftWidth}px 5px minmax(460px, 1fr) ${rightCollapsed ? '0 0' : `5px ${rightWidth}px`}` }}
+      style={{
+        gridTemplateColumns: `${displayedLeftWidth}px ${handleWidth}px minmax(${minimumCenterWidth}px, 1fr) ${rightCollapsed ? '0 0' : `${handleWidth}px ${displayedRightWidth}px`}`,
+      }}
     >
       <aside className="left-pane">{left}</aside>
       <button

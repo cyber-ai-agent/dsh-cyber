@@ -95,6 +95,16 @@ function dossier(employee: CyberEmployee, index: number): EmployeeDossier {
   const categories: EmployeeMilestoneCategory[] = ['joined', 'delivery', 'skill', 'review']
   return {
     employee,
+    revisions: [{
+      employeeId: employee.id,
+      revision: employee.currentRevision,
+      persona: `${employee.role}，以可验证结果和清晰协作为工作原则。`,
+      skillGrants: [],
+      capabilityGrants: [],
+      modelPolicy: { modelProfileId: 'deepseek-default' },
+      reason: '从员工市场加入当前世界',
+      createdAt: now,
+    }],
     profile: {
       employeeId: employee.id,
       revision: 2,

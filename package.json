@@ -13,12 +13,14 @@
     "build": "tsc -b && pnpm --filter @dsh-cyber/web build",
     "clean": "tsc -b --clean",
     "test": "pnpm run build && vitest run",
+    "test:e2e": "pnpm run build && playwright test",
     "test:watch": "vitest",
     "typecheck": "tsc -b --pretty false && pnpm --filter @dsh-cyber/web typecheck",
     "verify": "pnpm run typecheck && pnpm run test",
     "dsh-cyber": "node packages/cli/lib/bin.js"
   },
   "devDependencies": {
+    "@playwright/test": "1.55.0",
     "@types/node": "22.20.0",
     "tsx": "4.22.4",
     "typescript": "6.0.3",

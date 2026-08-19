@@ -1,4 +1,5 @@
 import {
+  ArrowLeft,
   ArrowSquareOut,
   BookOpenText,
   CalendarDots,
@@ -21,6 +22,8 @@ interface EmployeeDossierProps {
   employees: CyberEmployee[]
   avatarIndex: number
   onDirect(): void
+  onManage(): void
+  onBack(): void
 }
 
 const sections: Array<{ id: DossierSection; label: string; icon: typeof IdentificationCard }> = [
@@ -31,21 +34,31 @@ const sections: Array<{ id: DossierSection; label: string; icon: typeof Identifi
   { id: 'relations', label: '关系', icon: UsersThree },
 ]
 
-export function EmployeeDossier({ dossier, employees, avatarIndex, onDirect }: EmployeeDossierProps) {
+export function EmployeeDossier({ dossier, employees, avatarIndex, onDirect, onManage, onBack }: EmployeeDossierProps) {
   const [section, setSection] = useState<DossierSection>('profile')
   const verified = dossier.skills.filter((skill) => skill.status === 'verified').length
   const profile = dossier.profile
 
   return (
     <div className="dossier">
+      <div className="dossier-breadcrumb">
+        <button type="button" onClick={onBack}><ArrowLeft size={14} />全员档案</button>
+        <span>{dossier.employee.displayName} / 数字员工档案</span>
+      </div>
       <header className="dossier-hero">
-        <Avatar index={avatarIndex} size="lg" label={dossier.employee.displayName} status={dossier.employee.status} />
+        <button className="avatar-edit-button" type="button" aria-label={`修改${dossier.employee.displayName}的名字和头像`} onClick={onManage}>
+          <Avatar index={avatarIndex} size="lg" label={dossier.employee.displayName} status={dossier.employee.status} />
+        </button>
         <div className="dossier-hero__identity">
           <h2>{dossier.employee.displayName}</h2>
           <p>{dossier.employee.role} · 独立 Agent</p>
           <StatusDot status={dossier.employee.status} label={statusLabel(dossier.employee.status)} />
         </div>
-        <button className="primary-button" type="button" onClick={onDirect}>直接对话</button>
+        <div className="dossier-hero__actions">
+          <span>角色版本 r{dossier.employee.currentRevision}</span>
+          <button className="text-button" type="button" onClick={onManage}>管理</button>
+          <button className="primary-button" type="button" onClick={onDirect}>直接对话</button>
+        </div>
       </header>
 
       <div className="dossier-facts" aria-label="员工事实摘要">
@@ -173,4 +186,3 @@ function formatDate(value: string): string {
     ? value
     : date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
 }
-
