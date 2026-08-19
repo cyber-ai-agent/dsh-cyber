@@ -1,0 +1,27 @@
+{
+  "name": "@dsh-cyber/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "bin": {
+    "dsh-cyber": "./lib/bin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    }
+  },
+  "files": ["lib"],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@dsh-cyber/harness-adapter": "workspace:*",
+    "@dsh-cyber/persistence": "workspace:*",
+    "@dsh-cyber/server": "workspace:*"
+  }
+}

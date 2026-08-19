@@ -1,9 +1,12 @@
 node_modules/
 dist/
 build/
+lib/
 .turbo/
 .next/
 coverage/
+.coverage/
+*.tsbuildinfo
 *.log
 .DS_Store
 
@@ -13,9 +16,13 @@ data/
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 
 # Local product planning (never commit)
 .private/
+.ui-craft/
 
 # Credentials and private keys
 .env

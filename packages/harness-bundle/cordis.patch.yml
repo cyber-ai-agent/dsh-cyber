@@ -1,0 +1,63 @@
+# DSH Cyber employee runtime. This is a real dsh bundle patch applied after
+# @deepseek-ai/dsh-base. It exposes the Harness SDK event stream over stdio
+# and deliberately mounts no terminal or browser UI.
+
+- id: hmr
+  disabled: true
+
+- id: session-telemetry-otel
+  disabled: true
+
+- id: session-title-llm
+  disabled: true
+
+- id: system-prompt
+  config:
+    persona: !!js process.env.DSH_SYSTEM_PROMPT ?? 'You are a professional AI employee. Stay in role, report evidence, and never impersonate another employee.'
+
+# SDK workers have no approval UI. Phase 1 therefore defaults to a read-only
+# workspace and disables side-effecting command tools. Capability grants can
+# add tools in a later, explicit employee revision.
+- id: sandbox-policy
+  config:
+    mode: read-only
+    workspaceRoot: !!js process.env.DSH_CWD ?? process.cwd()
+
+- id: approval
+  config:
+    policy: never
+
+- id: permission
+  config:
+    defaultPreset: employee-read-only
+    presets:
+      employee-read-only:
+        sandbox: read-only
+        approval: never
+
+- id: tool-bash
+  disabled: true
+
+- id: tool-pwsh
+  disabled: true
+
+- id: tool-str-replace-editor
+  disabled: true
+
+- id: tool-fs
+  disabled: true
+
+- id: tool-fs-search
+  disabled: true
+
+- id: tool-workflow
+  disabled: true
+
+- id: tool-ralph
+  disabled: true
+
+- insert:
+    - id: dsh-cyber-sdk-jsonrpc
+      name: '@dsh-cyber/harness-bundle'
+      config:
+        maxTokensAsSuccess: false

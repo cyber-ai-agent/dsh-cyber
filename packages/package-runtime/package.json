@@ -1,0 +1,25 @@
+{
+  "name": "@dsh-cyber/package-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    }
+  },
+  "files": ["lib"],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@dsh-cyber/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@dsh-cyber/persistence": "workspace:*"
+  }
+}

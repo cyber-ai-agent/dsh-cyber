@@ -1,0 +1,14 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/contracts" },
+    { "path": "./packages/catalog" },
+    { "path": "./packages/persistence" },
+    { "path": "./packages/harness-bundle" },
+    { "path": "./packages/harness-adapter" },
+    { "path": "./packages/orchestration" },
+    { "path": "./packages/package-runtime" },
+    { "path": "./packages/server" },
+    { "path": "./packages/cli" }
+  ]
+}

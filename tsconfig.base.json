@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "composite": true,
+    "baseUrl": ".",
+    "ignoreDeprecations": "6.0",
+    "paths": {
+      "@dsh-cyber/contracts": ["packages/contracts/src/index.ts"],
+      "@dsh-cyber/catalog": ["packages/catalog/src/index.ts"],
+      "@dsh-cyber/persistence": ["packages/persistence/src/index.ts"],
+      "@dsh-cyber/harness-adapter": ["packages/harness-adapter/src/index.ts"],
+      "@dsh-cyber/orchestration": ["packages/orchestration/src/index.ts"],
+      "@dsh-cyber/package-runtime": ["packages/package-runtime/src/index.ts"],
+      "@dsh-cyber/server": ["packages/server/src/index.ts"],
+      "@dsh-cyber/cli": ["packages/cli/src/index.ts"]
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "dsh-cyber",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first standalone multi-agent workspace powered by DeepSeek Harness.",
+  "type": "module",
+  "license": "SEE LICENSE IN LICENSE",
+  "packageManager": "pnpm@11.7.0",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "scripts": {
+    "build": "tsc -b && pnpm --filter @dsh-cyber/web build",
+    "clean": "tsc -b --clean",
+    "test": "pnpm run build && vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -b --pretty false && pnpm --filter @dsh-cyber/web typecheck",
+    "verify": "pnpm run typecheck && pnpm run test",
+    "dsh-cyber": "node packages/cli/lib/bin.js"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.0",
+    "tsx": "4.22.4",
+    "typescript": "6.0.3",
+    "vitest": "4.1.8"
+  }
+}
