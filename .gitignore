@@ -1,0 +1,30 @@
+node_modules/
+dist/
+build/
+.turbo/
+.next/
+coverage/
+*.log
+.DS_Store
+
+# Local runtime state
+.dsh-cyber/
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Local product planning (never commit)
+.private/
+
+# Credentials and private keys
+.env
+.env.*
+!.env.example
+.ssh/
+*.pem
+*.key
+id_ed25519
+id_ed25519.pub
+id_rsa
+id_rsa.pub
