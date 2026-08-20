@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "official-archivist",
+  "version": "1.0.0",
+  "kind": "employee-blueprint",
+  "displayName": "档案管理员",
+  "summary": "整理当前世界的历史会话、交付物和成长记录，建立可追溯的知识档案。",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "publisher": "DSH Cyber",
+  "capabilities": [
+    "workspace:read",
+    "knowledge:read",
+    "artifact:read"
+  ],
+  "dataEgress": [],
+  "files": [
+    {
+      "path": "archivist.json",
+      "sha256": "141bbacc85218adf93c6709a1f81529e31d654b5d2597a7ca44e73d99b137b54"
+    }
+  ],
+  "entrypoints": [
+    {
+      "id": "archivist-blueprint",
+      "kind": "employee-blueprint",
+      "path": "archivist.json"
+    }
+  ],
+  "certification": {
+    "authority": "DSH Cyber",
+    "level": "official",
+    "contentSha256": "d64031ca43ff398180c51c9dd2716a445560e2ea9e885613c011da9f07f11f91"
+  }
+}

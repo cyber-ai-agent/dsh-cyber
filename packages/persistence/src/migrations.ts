@@ -427,6 +427,81 @@ const MIGRATIONS: readonly Migration[] = [
         ON local_assets(workspace_id, kind, created_at DESC);
     `,
   },
+  {
+    version: 8,
+    name: 'world-runtime-v2-projections',
+    sql: `
+      CREATE TABLE world_runtime_snapshots (
+        world_id TEXT PRIMARY KEY REFERENCES worlds(id) ON DELETE CASCADE,
+        theme_id TEXT NOT NULL,
+        scene_id TEXT NOT NULL,
+        sequence INTEGER NOT NULL CHECK (sequence >= 0),
+        snapshot_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      ) STRICT;
+
+      CREATE TABLE world_entity_states (
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        entity_id TEXT NOT NULL,
+        scene_id TEXT NOT NULL,
+        anchor_id TEXT,
+        target_anchor_id TEXT,
+        facing TEXT NOT NULL CHECK (facing IN ('north', 'east', 'south', 'west')),
+        activity TEXT NOT NULL CHECK (
+          activity IN (
+            'idle', 'walking', 'thinking', 'working', 'talking',
+            'meeting', 'blocked', 'celebrating'
+          )
+        ),
+        activity_ref TEXT,
+        target_entity_id TEXT,
+        state_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (world_id, entity_id)
+      ) STRICT;
+
+      CREATE INDEX world_entity_states_scene_idx
+        ON world_entity_states(world_id, scene_id, activity, updated_at DESC);
+
+      CREATE TABLE world_object_states (
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        entity_id TEXT NOT NULL,
+        scene_id TEXT NOT NULL,
+        state_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (world_id, entity_id)
+      ) STRICT;
+
+      CREATE TABLE world_theme_bindings (
+        world_id TEXT PRIMARY KEY REFERENCES worlds(id) ON DELETE CASCADE,
+        theme_id TEXT NOT NULL,
+        theme_version TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('active', 'disabled')),
+        manifest_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      ) STRICT;
+
+      CREATE INDEX world_theme_bindings_theme_idx
+        ON world_theme_bindings(theme_id, theme_version, status);
+    `,
+  },
+  {
+    version: 9,
+    name: 'hierarchical-model-assignments',
+    sql: `
+      CREATE TABLE model_assignments (
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        scope TEXT NOT NULL CHECK (scope IN ('workspace', 'world', 'employee')),
+        scope_id TEXT NOT NULL,
+        model_profile_id TEXT NOT NULL REFERENCES model_profiles(id) ON DELETE CASCADE,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (workspace_id, scope, scope_id)
+      ) STRICT;
+
+      CREATE INDEX model_assignments_profile_idx
+        ON model_assignments(workspace_id, model_profile_id, scope, scope_id);
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {

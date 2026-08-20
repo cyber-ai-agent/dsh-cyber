@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "official-cyber-nocturne",
+  "version": "1.0.0",
+  "kind": "world-theme",
+  "displayName": "赛博公司 · 夜班总部",
+  "summary": "适用于 cyber-company 世界的深色像素办公室主题，提供工作区、会议区、运行台和休息区。",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "publisher": "DSH Cyber",
+  "capabilities": [
+    "world:render"
+  ],
+  "dataEgress": [],
+  "files": [
+    {
+      "path": "theme.json",
+      "sha256": "5138785fd064a0b417b782ef26480df96c22b3f403c4c4f26dbe54d4ff8d6a52"
+    }
+  ],
+  "entrypoints": [
+    {
+      "id": "cyber-nocturne-theme",
+      "kind": "world-theme",
+      "path": "theme.json"
+    }
+  ],
+  "certification": {
+    "authority": "DSH Cyber",
+    "level": "official",
+    "contentSha256": "31d6bb523578dc1926288decccafd03973f80e86a5a938ec7d0162fde4addace"
+  }
+}

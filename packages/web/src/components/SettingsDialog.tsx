@@ -11,7 +11,17 @@ import {
   X,
 } from '@phosphor-icons/react'
 import { useMemo, useState, type ReactNode } from 'react'
-import type { ModelProfile, RuntimeUpdateTransaction, WorkspacePreferences } from '@dsh-cyber/contracts'
+import type {
+  EmployeeInstance,
+  ModelApiKind,
+  ModelAssignment,
+  ModelProfile,
+  ModelProviderKind,
+  RuntimeUpdateTransaction,
+  Workspace,
+  WorkspacePreferences,
+  World,
+} from '@dsh-cyber/contracts'
 
 export type SettingsSection = 'appearance' | 'models' | 'runtime' | 'data' | 'updates'
 export type SystemAction = 'status' | 'doctor' | 'backup' | 'export' | 'list-updates' | 'verify-update' | 'contract-update' | 'canary-update' | 'activate-update' | 'rollback-update'
@@ -46,12 +56,17 @@ export interface SystemActionResult {
 interface SettingsDialogProps {
   preferences: WorkspacePreferences
   models: ModelProfile[]
+  assignments: ModelAssignment[]
+  workspace: Workspace
+  worlds: World[]
+  employees: EmployeeInstance[]
   initialSection?: SettingsSection
   saving: boolean
   onClose(): void
   onSavePreferences(preferences: WorkspacePreferences): Promise<void>
   onUploadBackground(file: File): Promise<string>
   onSaveModel(profile: Omit<ModelProfile, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt'>): Promise<void>
+  onAssignModel(input: { scope: ModelAssignment['scope']; scopeId: string; modelProfileId?: string }): Promise<void>
   onSystemAction(action: SystemAction, input?: SystemActionInput): Promise<SystemActionResult>
 }
 
@@ -63,15 +78,71 @@ const sections = [
   ['updates', '更新', ArrowsClockwise],
 ] as const
 
+interface ModelProviderPreset {
+  id: string
+  label: string
+  providerKind: ModelProviderKind
+  api: ModelApiKind
+  baseUrl: string
+  credentialEnvName: string
+  modelPlaceholder: string
+}
+
+interface ModelDraft {
+  providerId: string
+  displayName: string
+  providerKind: ModelProviderKind
+  baseUrl: string
+  modelId: string
+  api: ModelApiKind
+  credentialEnvName: string
+  contextWindow: number
+  maxTokens: number
+  temperature: number
+}
+
+const MODEL_PRESETS: readonly ModelProviderPreset[] = [
+  { id: 'deepseek', label: 'DeepSeek', providerKind: 'deepseek', api: 'openai-completions', baseUrl: 'https://api.deepseek.com/v1', credentialEnvName: 'DEEPSEEK_API_KEY', modelPlaceholder: 'deepseek-chat' },
+  { id: 'openai', label: 'OpenAI', providerKind: 'openai-compatible-remote', api: 'openai-responses', baseUrl: 'https://api.openai.com/v1', credentialEnvName: 'OPENAI_API_KEY', modelPlaceholder: 'gpt-5' },
+  { id: 'anthropic', label: 'Anthropic', providerKind: 'openai-compatible-remote', api: 'anthropic-messages', baseUrl: 'https://api.anthropic.com/v1', credentialEnvName: 'ANTHROPIC_API_KEY', modelPlaceholder: 'claude-sonnet-4-5' },
+  { id: 'gemini', label: 'Google Gemini', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', credentialEnvName: 'GEMINI_API_KEY', modelPlaceholder: 'gemini-2.5-pro' },
+  { id: 'openrouter', label: 'OpenRouter', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://openrouter.ai/api/v1', credentialEnvName: 'OPENROUTER_API_KEY', modelPlaceholder: 'deepseek/deepseek-chat' },
+  { id: 'groq', label: 'Groq', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://api.groq.com/openai/v1', credentialEnvName: 'GROQ_API_KEY', modelPlaceholder: 'llama-3.3-70b-versatile' },
+  { id: 'mistral', label: 'Mistral', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://api.mistral.ai/v1', credentialEnvName: 'MISTRAL_API_KEY', modelPlaceholder: 'mistral-large-latest' },
+  { id: 'xai', label: 'xAI', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://api.x.ai/v1', credentialEnvName: 'XAI_API_KEY', modelPlaceholder: 'grok-4' },
+  { id: 'ollama', label: 'Ollama（本地）', providerKind: 'openai-compatible-local', api: 'openai-completions', baseUrl: 'http://127.0.0.1:11434/v1', credentialEnvName: '', modelPlaceholder: 'qwen3:14b' },
+  { id: 'lm-studio', label: 'LM Studio（本地）', providerKind: 'openai-compatible-local', api: 'openai-completions', baseUrl: 'http://127.0.0.1:1234/v1', credentialEnvName: '', modelPlaceholder: 'local-model' },
+] as const
+
+function modelDraftForPreset(preset: ModelProviderPreset): ModelDraft {
+  return {
+    providerId: preset.id,
+    displayName: preset.label,
+    providerKind: preset.providerKind,
+    baseUrl: preset.baseUrl,
+    modelId: '',
+    api: preset.api,
+    credentialEnvName: preset.credentialEnvName,
+    contextWindow: 64_000,
+    maxTokens: 8_192,
+    temperature: 0.3,
+  }
+}
+
 export function SettingsDialog({
   preferences,
   models,
+  assignments,
+  workspace,
+  worlds,
+  employees,
   initialSection = 'appearance',
   saving,
   onClose,
   onSavePreferences,
   onUploadBackground,
   onSaveModel,
+  onAssignModel,
   onSystemAction,
 }: SettingsDialogProps) {
   const [section, setSection] = useState<SettingsSection>(initialSection)
@@ -80,14 +151,7 @@ export function SettingsDialog({
   const [pendingAction, setPendingAction] = useState<SystemAction>()
   const [actionResult, setActionResult] = useState<SystemActionResult>()
   const [actionError, setActionError] = useState<string>()
-  const [modelDraft, setModelDraft] = useState({
-    displayName: '本地模型',
-    providerKind: 'openai-compatible-local' as const,
-    baseUrl: 'http://127.0.0.1:11434/v1',
-    modelId: '',
-    api: 'openai-completions' as const,
-    credentialEnvName: '',
-  })
+  const [modelDraft, setModelDraft] = useState<ModelDraft>(() => modelDraftForPreset(MODEL_PRESETS[0]!))
   const changed = useMemo(() => JSON.stringify(draft) !== JSON.stringify(preferences), [draft, preferences])
   const runSystemAction = async (action: SystemAction, input?: SystemActionInput) => {
     setPendingAction(action)
@@ -137,8 +201,13 @@ export function SettingsDialog({
             {section === 'models' ? (
               <ModelSettings
                 models={models}
+                assignments={assignments}
+                workspace={workspace}
+                worlds={worlds}
+                employees={employees}
                 draft={modelDraft}
                 onChange={setModelDraft}
+                onAssign={onAssignModel}
                 onSave={() => onSaveModel({
                   displayName: modelDraft.displayName,
                   providerKind: modelDraft.providerKind,
@@ -147,7 +216,12 @@ export function SettingsDialog({
                   api: modelDraft.api,
                   ...(modelDraft.credentialEnvName ? { credentialEnvName: modelDraft.credentialEnvName } : {}),
                   isDefault: models.length === 0,
-                  settings: {},
+                  settings: {
+                    providerId: modelDraft.providerId,
+                    contextWindow: modelDraft.contextWindow,
+                    maxTokens: modelDraft.maxTokens,
+                    temperature: modelDraft.temperature,
+                  },
                 })}
               />
             ) : null}
@@ -228,19 +302,64 @@ function AppearanceSettings({
   )
 }
 
-function ModelSettings({ models, draft, onChange, onSave }: { models: ModelProfile[]; draft: { displayName: string; providerKind: 'openai-compatible-local'; baseUrl: string; modelId: string; api: 'openai-completions'; credentialEnvName: string }; onChange(value: typeof draft): void; onSave(): Promise<void> }) {
+function ModelSettings({
+  models,
+  assignments,
+  workspace,
+  worlds,
+  employees,
+  draft,
+  onChange,
+  onSave,
+  onAssign,
+}: {
+  models: ModelProfile[]
+  assignments: ModelAssignment[]
+  workspace: Workspace
+  worlds: World[]
+  employees: EmployeeInstance[]
+  draft: ModelDraft
+  onChange(value: ModelDraft): void
+  onSave(): Promise<void>
+  onAssign(input: { scope: ModelAssignment['scope']; scopeId: string; modelProfileId?: string }): Promise<void>
+}) {
+  const assignmentValue = (scope: ModelAssignment['scope'], scopeId: string) =>
+    assignments.find((item) => item.scope === scope && item.scopeId === scopeId)?.modelProfileId ?? ''
+  const assign = (scope: ModelAssignment['scope'], scopeId: string, modelProfileId: string) =>
+    onAssign({ scope, scopeId, ...(modelProfileId ? { modelProfileId } : {}) })
   return (
     <div className="settings-section">
-      <div className="settings-section__heading"><h3>模型</h3><p>配置默认模型与本地兼容接口。密钥只读取环境变量。</p></div>
-      <div className="model-list">{models.map((model) => <article key={model.id}><Cpu size={20} /><div><strong>{model.displayName}</strong><span>{model.modelId} · {model.providerKind}</span></div><span>{model.isDefault ? '默认' : '可用'}</span></article>)}</div>
-      <fieldset className="setting-group"><legend>添加 OpenAI 兼容的本地模型</legend><div className="setting-grid">
+      <div className="settings-section__heading"><h3>模型与路由</h3><p>模型配置保存在本地；密钥只引用环境变量。路由按员工 → 世界 → 工作区逐级继承。</p></div>
+      <div className="model-list">{models.map((model) => <article key={model.id}><Cpu size={20} /><div><strong>{model.displayName}</strong><span>{model.modelId} · {providerLabel(model)}</span></div><span>{model.isDefault ? '默认' : model.credentialEnvName ? model.credentialEnvName : '本地可用'}</span></article>)}</div>
+      <fieldset className="setting-group"><legend>添加模型提供商</legend><div className="setting-grid">
+        <label><span>提供商</span><select value={draft.providerId} onChange={(event) => { const preset = MODEL_PRESETS.find((item) => item.id === event.target.value); if (preset) onChange(modelDraftForPreset(preset)) }}>{MODEL_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}</select></label>
         <label><span>名称</span><input value={draft.displayName} onChange={(event) => onChange({ ...draft, displayName: event.target.value })} /></label>
-        <label><span>模型 ID</span><input value={draft.modelId} placeholder="qwen3:14b" onChange={(event) => onChange({ ...draft, modelId: event.target.value })} /></label>
+        <label><span>模型 ID</span><input value={draft.modelId} placeholder={MODEL_PRESETS.find((item) => item.id === draft.providerId)?.modelPlaceholder} onChange={(event) => onChange({ ...draft, modelId: event.target.value })} /></label>
+        <label><span>接口协议</span><select value={draft.api} onChange={(event) => onChange({ ...draft, api: event.target.value as ModelApiKind })}><option value="openai-completions">OpenAI Chat Completions</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic-messages">Anthropic Messages</option></select></label>
         <label className="setting-grid__wide"><span>Base URL</span><input value={draft.baseUrl} onChange={(event) => onChange({ ...draft, baseUrl: event.target.value })} /></label>
-        <label className="setting-grid__wide"><span>凭据环境变量名（可选）</span><input value={draft.credentialEnvName} placeholder="LOCAL_MODEL_API_KEY" onChange={(event) => onChange({ ...draft, credentialEnvName: event.target.value })} /></label>
+        <label className="setting-grid__wide"><span>凭据环境变量名（不保存密钥）</span><input value={draft.credentialEnvName} placeholder="PROVIDER_API_KEY" onChange={(event) => onChange({ ...draft, credentialEnvName: event.target.value })} /></label>
+        <label><span>上下文窗口</span><input type="number" min="1024" step="1024" value={draft.contextWindow} onChange={(event) => onChange({ ...draft, contextWindow: Number(event.target.value) })} /></label>
+        <label><span>最大输出 Token</span><input type="number" min="256" step="256" value={draft.maxTokens} onChange={(event) => onChange({ ...draft, maxTokens: Number(event.target.value) })} /></label>
+        <label><span>温度 {draft.temperature.toFixed(1)}</span><input type="range" min="0" max="2" step="0.1" value={draft.temperature} onChange={(event) => onChange({ ...draft, temperature: Number(event.target.value) })} /></label>
       </div><button className="secondary-button" type="button" disabled={!draft.modelId.trim()} onClick={() => void onSave()}>保存模型配置</button></fieldset>
+      <fieldset className="setting-group"><legend>模型分配</legend>
+        <div className="model-routing-list">
+          <ModelRouteRow label="工作区默认" detail={workspace.name} value={assignmentValue('workspace', workspace.id)} models={models} onChange={(value) => void assign('workspace', workspace.id, value)} />
+          {worlds.map((world) => <ModelRouteRow key={world.id} label="世界" detail={world.name} value={assignmentValue('world', world.id)} models={models} onChange={(value) => void assign('world', world.id, value)} />)}
+          {employees.map((employee) => <ModelRouteRow key={employee.id} label="员工" detail={`${employee.displayName} · ${employee.role}`} value={assignmentValue('employee', employee.id)} models={models} onChange={(value) => void assign('employee', employee.id, value)} />)}
+        </div>
+      </fieldset>
     </div>
   )
+}
+
+function ModelRouteRow({ label, detail, value, models, onChange }: { label: string; detail: string; value: string; models: ModelProfile[]; onChange(value: string): void }) {
+  return <label className="model-route-row"><span><strong>{label}</strong><small>{detail}</small></span><select value={value} disabled={models.length === 0} onChange={(event) => onChange(event.target.value)}><option value="">继承上级 / 默认模型</option>{models.map((model) => <option key={model.id} value={model.id}>{model.displayName} · {model.modelId}</option>)}</select></label>
+}
+
+function providerLabel(model: ModelProfile): string {
+  const providerId = typeof model.settings.providerId === 'string' ? model.settings.providerId : model.providerKind
+  return MODEL_PRESETS.find((preset) => preset.id === providerId)?.label ?? providerId
 }
 
 interface ActionSettingsProps {

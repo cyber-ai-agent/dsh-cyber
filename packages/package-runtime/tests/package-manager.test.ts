@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -10,9 +10,11 @@ import { SqliteStore } from '@dsh-cyber/persistence'
 
 import {
   LocalPackageRuntime,
+  LocalPackageCatalog,
   PackageApprovalRequiredError,
   PackageInstallError,
   PackageManager,
+  packageContentDigest,
   type PackageStorePort,
 } from '../src/index.js'
 
@@ -44,6 +46,43 @@ function manifest(version: string, content: string, capabilities = ['workspace:r
 }
 
 describe('PackageManager', () => {
+  it('searches independent market folders and verifies official package content', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-cyber-market-'))
+    const source = join(directory, 'plugins', 'meeting-notes')
+    await mkdir(source, { recursive: true })
+    const content = `${JSON.stringify({ schemaVersion: 1, commands: [{ trigger: '/meeting-summary', instruction: '输出会议纪要。' }] }, null, 2)}\n`
+    await writeFile(join(source, 'commands.json'), content, 'utf8')
+    const packageManifest: CyberPackageManifest = {
+      schemaVersion: 1,
+      id: '@dsh-cyber/meeting-notes',
+      version: '1.0.0',
+      kind: 'plugin',
+      displayName: '会议纪要插件',
+      summary: '把斜杠命令转换为可执行的会议纪要提示。',
+      license: 'BUSL-1.1',
+      publisher: 'DSH Cyber',
+      capabilities: ['conversation:transform'],
+      dataEgress: [],
+      files: [{ path: 'commands.json', sha256: createHash('sha256').update(content).digest('hex') }],
+      entrypoints: [{ id: 'commands', kind: 'prompt-transform', path: 'commands.json' }],
+    }
+    packageManifest.certification = {
+      authority: 'DSH Cyber',
+      level: 'official',
+      contentSha256: packageContentDigest(packageManifest),
+    }
+    await writeFile(join(source, 'dsh-cyber.package.json'), `${JSON.stringify(packageManifest, null, 2)}\n`, 'utf8')
+
+    const catalog = new LocalPackageCatalog(directory)
+    const results = await catalog.list({ market: 'plugin', query: '会议' })
+    expect(results).toHaveLength(1)
+    expect(results[0]).toMatchObject({ market: 'plugin', verified: true })
+    expect(results[0]?.manifest.entrypoints?.[0]?.kind).toBe('prompt-transform')
+
+    await writeFile(join(source, 'commands.json'), '{"tampered":true}\n', 'utf8')
+    expect(await catalog.list({ market: 'plugin' })).toEqual([])
+  })
+
   it('requires an exact permission approval and atomically activates a verified package', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-cyber-package-'))
     const source = join(directory, 'source-v1')

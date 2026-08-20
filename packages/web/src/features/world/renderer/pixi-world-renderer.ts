@@ -1,0 +1,561 @@
+import {
+  Application,
+  Container,
+  Graphics,
+  Rectangle,
+  Sprite,
+  Text,
+  Texture,
+  type FederatedPointerEvent,
+} from 'pixi.js'
+import 'pixi.js/unsafe-eval'
+import type {
+  WorldCue,
+  WorldPoint,
+  WorldRuntimeEntityState,
+  WorldRuntimeSnapshot,
+  WorldThemeManifestV1,
+  WorldThemeSceneManifest,
+} from '@dsh-cyber/contracts'
+
+interface RendererCallbacks {
+  onEntitySelect(entityId: string): void
+  onObjectSelect(objectId: string): void
+  onReady?(metrics: { initializationMs: number; assetBytesEstimate: number }): void
+}
+
+interface ActorView {
+  root: Container
+  sprite: Sprite
+  selection: Graphics
+  status: Graphics
+  name: Text
+  activity: Text
+  state: WorldRuntimeEntityState
+  motion: ActorMotion | undefined
+}
+
+interface ActorMotion {
+  route: WorldPoint[]
+  segment: number
+  elapsed: number
+  segmentDuration: number
+}
+
+const WORLD_MIN_ZOOM = 0.55
+const WORLD_MAX_ZOOM = 2.2
+
+export class PixiWorldRenderer {
+  readonly #callbacks: RendererCallbacks
+  readonly #app = new Application()
+  readonly #camera = new Container()
+  readonly #sceneRoot = new Container()
+  readonly #actorLayer = new Container()
+  readonly #interactionLayer = new Container()
+  readonly #effectsLayer = new Container()
+  readonly #actors = new Map<string, ActorView>()
+  readonly #objectHints = new Map<string, Graphics>()
+  readonly #assetTextures = new Map<string, Texture>()
+  #manifest?: WorldThemeManifestV1
+  #scene?: WorldThemeSceneManifest
+  #snapshot?: WorldRuntimeSnapshot
+  #host?: HTMLElement
+  #selectedEntityId: string | undefined
+  #selectedObjectId: string | undefined
+  #fitScale = 1
+  #zoom = 1
+  #cameraOffset = { x: 0, y: 0 }
+  #drag: { x: number; y: number; offsetX: number; offsetY: number } | undefined
+  #darkness?: Graphics
+  #resizeObserver: ResizeObserver | undefined
+  #initialized = false
+  #destroyed = false
+
+  constructor(callbacks: RendererCallbacks) {
+    this.#callbacks = callbacks
+  }
+
+  async mount(host: HTMLElement, manifest: WorldThemeManifestV1, snapshot: WorldRuntimeSnapshot): Promise<void> {
+    const startedAt = performance.now()
+    this.#destroyed = false
+    this.#host = host
+    this.#manifest = manifest
+    const scene = manifest.scenes.find((candidate) => candidate.id === snapshot.sceneId) ?? manifest.scenes[0]
+    if (scene === undefined) throw new Error(`主题 ${manifest.id} 没有可用场景`)
+    this.#scene = scene
+    await this.#app.init({
+      resizeTo: host,
+      backgroundColor: 0x05080b,
+      backgroundAlpha: 1,
+      antialias: true,
+      autoDensity: true,
+      resolution: Math.min(window.devicePixelRatio || 1, 2),
+      preference: 'webgl',
+    })
+    if (this.#destroyed) {
+      this.#app.destroy(true, { children: true, texture: false, textureSource: false })
+      return
+    }
+    this.#initialized = true
+    this.#app.canvas.className = 'world-runtime-canvas'
+    this.#app.canvas.setAttribute('aria-hidden', 'true')
+    host.appendChild(this.#app.canvas)
+    this.#camera.sortableChildren = true
+    this.#sceneRoot.sortableChildren = true
+    this.#actorLayer.sortableChildren = true
+    this.#sceneRoot.addChild(this.#actorLayer, this.#interactionLayer, this.#effectsLayer)
+    this.#camera.addChild(this.#sceneRoot)
+    this.#app.stage.addChild(this.#camera)
+    await this.#loadAssets(manifest)
+    this.#buildScene()
+    this.updateSnapshot(snapshot)
+    this.fillScene()
+    this.#wireCamera()
+    this.#app.ticker.add((ticker) => this.#tick(ticker.deltaMS))
+    this.#resizeObserver = new ResizeObserver(() => this.fillScene())
+    this.#resizeObserver.observe(host)
+    this.#callbacks.onReady?.({
+      initializationMs: Math.round(performance.now() - startedAt),
+      assetBytesEstimate: manifest.assets.length * 1_500_000,
+    })
+  }
+
+  updateSnapshot(snapshot: WorldRuntimeSnapshot): void {
+    this.#snapshot = snapshot
+    if (!this.#scene || !this.#manifest) return
+    const actorAssetId = this.#manifest.actorSets[0]?.assetId
+    if (actorAssetId === undefined || !this.#assetTextures.has(actorAssetId)) return
+    const activeIds = new Set(snapshot.entities.filter((entity) => entity.kind === 'agent').map((entity) => entity.id))
+    for (const [entityId, actor] of this.#actors) {
+      if (activeIds.has(entityId)) continue
+      actor.root.destroy({ children: true })
+      this.#actors.delete(entityId)
+    }
+    for (const entity of snapshot.entities) {
+      if (entity.kind !== 'agent') continue
+      const actor = this.#actors.get(entity.id) ?? this.#createActor(entity)
+      actor.state = entity
+      actor.root.position.set(entity.position.x, entity.position.y)
+      actor.root.zIndex = 600 + entity.position.y
+      actor.name.text = entity.displayName
+      actor.activity.text = entity.activityLabel
+      actor.selection.visible = entity.id === this.#selectedEntityId
+      actor.activity.visible = entity.id === this.#selectedEntityId
+      actor.status.clear().circle(-43, -112, 4).fill({ color: statusColor(entity), alpha: 1 })
+      this.#applyFacing(actor)
+    }
+    for (const object of snapshot.objects) {
+      const hint = this.#objectHints.get(object.id)
+      if (hint !== undefined) hint.alpha = object.state === 'active' ? 0.34 : 0.001
+    }
+    this.#setLights(snapshot.clock.lightsOn)
+  }
+
+  applyCues(cues: WorldCue[]): void {
+    for (const cue of cues) {
+      const actor = cue.entityId === undefined ? undefined : this.#actors.get(cue.entityId)
+      if (cue.kind === 'entity.route' && actor !== undefined) {
+        const route = cuePoints(cue)
+        if (route.length > 1) {
+          actor.root.position.set(route[0]!.x, route[0]!.y)
+          actor.motion = { route, segment: 0, elapsed: 0, segmentDuration: segmentDuration(route[0]!, route[1]!) }
+          actor.state = { ...actor.state, activity: 'walking', facing: facingBetween(route[0]!, route[1]!) }
+          this.#applyFacing(actor)
+        }
+      }
+      if (cue.kind === 'entity.focus' && actor !== undefined) this.focusEntity(actor.state.id)
+      if (cue.kind === 'entity.speech' && actor !== undefined) this.#showBubble(actor, cueText(cue) || actor.state.activityLabel)
+      if (cue.kind === 'growth.unlocked' && actor !== undefined) this.#showBubble(actor, '解锁了一项成长记录')
+    }
+  }
+
+  selectEntity(entityId?: string): void {
+    this.#selectedEntityId = entityId
+    this.#selectedObjectId = undefined
+    for (const [id, actor] of this.#actors) {
+      actor.selection.visible = id === entityId
+      actor.activity.visible = id === entityId
+    }
+    if (entityId !== undefined) this.focusEntity(entityId)
+  }
+
+  selectObject(objectId?: string): void {
+    this.#selectedObjectId = objectId
+    this.#selectedEntityId = undefined
+    for (const actor of this.#actors.values()) {
+      actor.selection.visible = false
+      actor.activity.visible = false
+    }
+    for (const [id, hint] of this.#objectHints) hint.alpha = id === objectId ? 0.58 : 0.001
+  }
+
+  focusEntity(entityId: string): void {
+    const actor = this.#actors.get(entityId)
+    if (actor === undefined || !this.#host) return
+    const scale = this.#fitScale * Math.max(this.#zoom, 1.25)
+    this.#zoom = Math.max(this.#zoom, 1.25)
+    this.#cameraOffset = {
+      x: this.#host.clientWidth / 2 - actor.root.x * scale,
+      y: this.#host.clientHeight / 2 - actor.root.y * scale,
+    }
+    this.#applyCamera()
+  }
+
+  fitScene(): void {
+    if (!this.#scene || !this.#host || !this.#initialized) return
+    const availableWidth = Math.max(this.#host.clientWidth, 1)
+    const availableHeight = Math.max(this.#host.clientHeight, 1)
+    this.#fitScale = Math.min(availableWidth / this.#scene.size.width, availableHeight / this.#scene.size.height)
+    this.#zoom = 1
+    this.#cameraOffset = {
+      x: (availableWidth - this.#scene.size.width * this.#fitScale) / 2,
+      y: (availableHeight - this.#scene.size.height * this.#fitScale) / 2,
+    }
+    this.#applyCamera()
+  }
+
+  fillScene(): void {
+    if (!this.#scene || !this.#host || !this.#initialized) return
+    const availableWidth = Math.max(this.#host.clientWidth, 1)
+    const availableHeight = Math.max(this.#host.clientHeight, 1)
+    const containScale = Math.min(availableWidth / this.#scene.size.width, availableHeight / this.#scene.size.height)
+    const coverScale = Math.max(availableWidth / this.#scene.size.width, availableHeight / this.#scene.size.height)
+    const presentationScale = Math.min(coverScale, containScale * 1.35)
+    this.#fitScale = containScale
+    this.#zoom = presentationScale / containScale
+    this.#cameraOffset = {
+      x: (availableWidth - this.#scene.size.width * presentationScale) / 2,
+      y: (availableHeight - this.#scene.size.height * presentationScale) / 2,
+    }
+    this.#applyCamera()
+  }
+
+  zoomBy(delta: number): void {
+    this.#zoom = clamp(this.#zoom + delta, WORLD_MIN_ZOOM, WORLD_MAX_ZOOM)
+    this.#applyCamera()
+  }
+
+  getZoom(): number {
+    return this.#zoom
+  }
+
+  destroy(): void {
+    this.#destroyed = true
+    this.#resizeObserver?.disconnect()
+    this.#resizeObserver = undefined
+    this.#actors.clear()
+    this.#objectHints.clear()
+    this.#assetTextures.clear()
+    if (this.#initialized) this.#app.destroy(true, { children: true, texture: false, textureSource: false })
+    this.#initialized = false
+  }
+
+  async #loadAssets(manifest: WorldThemeManifestV1): Promise<void> {
+    await Promise.all(manifest.assets.map(async (asset) => {
+      const image = await loadImage(asset.src)
+      const texture = manifest.actorSets.some((actorSet) => actorSet.assetId === asset.id)
+        ? createRosterTexture(image)
+        : Texture.from(image)
+      texture.source.scaleMode = asset.pixelArt ? 'nearest' : 'linear'
+      this.#assetTextures.set(asset.id, texture)
+    }))
+  }
+
+  #buildScene(): void {
+    if (!this.#scene) return
+    const actorZ = 600
+    for (const layer of this.#scene.layers) {
+      const sourceTexture = this.#assetTextures.get(layer.assetId)
+      if (sourceTexture === undefined) continue
+      const texture = layer.source === undefined
+        ? sourceTexture
+        : new Texture({
+          source: sourceTexture.source,
+          frame: new Rectangle(layer.source.x, layer.source.y, layer.source.width, layer.source.height),
+        })
+      const sprite = new Sprite(texture)
+      sprite.position.set(layer.destination.x, layer.destination.y)
+      sprite.width = layer.destination.width
+      sprite.height = layer.destination.height
+      sprite.alpha = layer.alpha ?? 1
+      sprite.zIndex = layer.occludesActors ? Math.max(layer.zIndex, actorZ + layer.destination.y) : layer.zIndex
+      this.#sceneRoot.addChild(sprite)
+    }
+    this.#actorLayer.zIndex = actorZ
+    this.#interactionLayer.zIndex = 8_000
+    this.#effectsLayer.zIndex = 9_000
+    for (const interactable of this.#scene.interactables) {
+      const hint = new Graphics()
+        .roundRect(interactable.bounds.x, interactable.bounds.y, interactable.bounds.width, interactable.bounds.height, 10)
+        .stroke({ color: 0x51d4e8, width: 2, alpha: 0.8 })
+      hint.eventMode = 'static'
+      hint.cursor = 'pointer'
+      hint.alpha = 0.001
+      hint.on('pointerover', () => { hint.alpha = 0.72 })
+      hint.on('pointerout', () => { hint.alpha = this.#selectedObjectId === interactable.id ? 0.58 : 0.001 })
+      hint.on('pointertap', (event: FederatedPointerEvent) => {
+        event.stopPropagation()
+        this.#callbacks.onObjectSelect(interactable.id)
+      })
+      this.#interactionLayer.addChild(hint)
+      this.#objectHints.set(interactable.id, hint)
+    }
+    this.#darkness = new Graphics()
+    this.#darkness.zIndex = 7_500
+    this.#sceneRoot.addChild(this.#darkness)
+  }
+
+  #createActor(entity: WorldRuntimeEntityState): ActorView {
+    const actorSet = this.#manifest?.actorSets[0]
+    const source = actorSet === undefined ? undefined : this.#assetTextures.get(actorSet.assetId)
+    if (actorSet === undefined || source === undefined) throw new Error('角色图集尚未加载')
+    const rosterIndex = rosterIndexFor(entity)
+    const columns = Math.max(1, Math.floor(source.width / actorSet.frameWidth))
+    const frame = new Rectangle(
+      (rosterIndex % columns) * actorSet.frameWidth,
+      Math.floor(rosterIndex / columns) * actorSet.frameHeight,
+      actorSet.frameWidth,
+      actorSet.frameHeight,
+    )
+    const sprite = new Sprite(new Texture({ source: source.source, frame }))
+    sprite.anchor.set(0.5, 1)
+    sprite.scale.set(actorSet.scale)
+    const root = new Container()
+    root.eventMode = 'static'
+    root.cursor = 'pointer'
+    root.hitArea = new Rectangle(-58, -136, 116, 152)
+    const shadow = new Graphics().ellipse(0, -2, 34, 10).fill({ color: 0x000000, alpha: 0.42 })
+    const selection = new Graphics().ellipse(0, -2, 45, 15).stroke({ color: 0x58e2ff, width: 3, alpha: 0.95 })
+    selection.visible = false
+    const status = new Graphics()
+    const name = new Text({
+      text: entity.displayName,
+      style: { fontFamily: 'Microsoft YaHei, sans-serif', fontSize: 15, fontWeight: '700', fill: 0xf4f7fb, stroke: { color: 0x05080b, width: 4 } },
+    })
+    name.anchor.set(0.5, 0)
+    name.position.set(0, -151)
+    const activity = new Text({
+      text: entity.activityLabel,
+      style: { fontFamily: 'Microsoft YaHei, sans-serif', fontSize: 12, fill: 0x8fd9e6, stroke: { color: 0x05080b, width: 3 } },
+    })
+    activity.anchor.set(0.5, 0)
+    activity.position.set(0, -130)
+    activity.visible = false
+    root.addChild(shadow, selection, sprite, status, name, activity)
+    root.on('pointertap', (event: FederatedPointerEvent) => {
+      event.stopPropagation()
+      this.#callbacks.onEntitySelect(entity.id)
+    })
+    root.on('pointerover', () => { activity.visible = true })
+    root.on('pointerout', () => { activity.visible = this.#selectedEntityId === entity.id })
+    const actor: ActorView = { root, sprite, selection, status, name, activity, state: entity, motion: undefined }
+    this.#actorLayer.addChild(root)
+    this.#actors.set(entity.id, actor)
+    return actor
+  }
+
+  #tick(deltaMs: number): void {
+    const time = performance.now()
+    for (const actor of this.#actors.values()) {
+      if (actor.motion !== undefined) this.#advanceMotion(actor, deltaMs)
+      const amplitude = actor.state.activity === 'walking' ? 3 : actor.state.activity === 'talking' ? 1.5 : actor.state.activity === 'working' ? 1 : 0.5
+      actor.sprite.y = -Math.abs(Math.sin(time / (actor.state.activity === 'walking' ? 115 : 460))) * amplitude
+      actor.root.zIndex = 600 + actor.root.y
+    }
+  }
+
+  #advanceMotion(actor: ActorView, deltaMs: number): void {
+    const motion = actor.motion
+    if (motion === undefined) return
+    const from = motion.route[motion.segment]
+    const to = motion.route[motion.segment + 1]
+    if (from === undefined || to === undefined) {
+      actor.motion = undefined
+      actor.state = { ...actor.state, activity: this.#snapshot?.entities.find((entity) => entity.id === actor.state.id)?.activity ?? 'idle' }
+      this.#applyFacing(actor)
+      return
+    }
+    motion.elapsed += deltaMs
+    const progress = clamp(motion.elapsed / motion.segmentDuration, 0, 1)
+    actor.root.position.set(lerp(from.x, to.x, progress), lerp(from.y, to.y, progress))
+    actor.state = { ...actor.state, facing: facingBetween(from, to), activity: 'walking' }
+    this.#applyFacing(actor)
+    if (progress < 1) return
+    motion.segment += 1
+    motion.elapsed = 0
+    const next = motion.route[motion.segment + 1]
+    if (next === undefined) {
+      actor.motion = undefined
+      const recovered = this.#snapshot?.entities.find((entity) => entity.id === actor.state.id)
+      if (recovered !== undefined) actor.state = recovered
+      this.#applyFacing(actor)
+      return
+    }
+    motion.segmentDuration = segmentDuration(to, next)
+  }
+
+  #applyFacing(actor: ActorView): void {
+    const baseScale = this.#manifest?.actorSets[0]?.scale ?? 0.25
+    const horizontal = actor.state.facing === 'west' ? -1 : 1
+    actor.sprite.scale.set(baseScale * horizontal, baseScale)
+    actor.sprite.rotation = actor.state.facing === 'north' ? -0.015 : actor.state.facing === 'south' ? 0.015 : 0
+  }
+
+  #showBubble(actor: ActorView, text: string): void {
+    const compact = text.replace(/\s+/g, ' ').trim().slice(0, 38)
+    if (!compact) return
+    const bubble = new Container()
+    const label = new Text({
+      text: compact,
+      style: { fontFamily: 'Microsoft YaHei, sans-serif', fontSize: 14, fill: 0xf6f7f8, wordWrap: true, wordWrapWidth: 220, lineHeight: 20 },
+    })
+    const width = Math.min(240, Math.max(110, label.width + 24))
+    const height = label.height + 18
+    const plate = new Graphics().roundRect(-width / 2, -height, width, height, 9).fill({ color: 0x10171d, alpha: 0.96 }).stroke({ color: 0x4fd8ed, width: 1, alpha: 0.72 })
+    label.anchor.set(0.5, 1)
+    label.position.set(0, -8)
+    bubble.position.set(actor.root.x, actor.root.y - 150)
+    bubble.zIndex = 9_500
+    bubble.addChild(plate, label)
+    this.#effectsLayer.addChild(bubble)
+    window.setTimeout(() => bubble.destroy({ children: true }), 4_000)
+  }
+
+  #setLights(lightsOn: boolean): void {
+    if (!this.#darkness || !this.#scene) return
+    this.#darkness.clear().rect(0, 0, this.#scene.size.width, this.#scene.size.height).fill({ color: 0x02050a, alpha: lightsOn ? 0.04 : 0.58 })
+  }
+
+  #wireCamera(): void {
+    if (!this.#host) return
+    this.#host.addEventListener('wheel', (event) => {
+      event.preventDefault()
+      this.zoomBy(event.deltaY > 0 ? -0.1 : 0.1)
+    }, { passive: false })
+    this.#app.stage.eventMode = 'static'
+    this.#app.stage.hitArea = this.#app.screen
+    this.#app.stage.on('pointerdown', (event: FederatedPointerEvent) => {
+      this.#drag = { x: event.global.x, y: event.global.y, offsetX: this.#cameraOffset.x, offsetY: this.#cameraOffset.y }
+    })
+    this.#app.stage.on('pointermove', (event: FederatedPointerEvent) => {
+      if (this.#drag === undefined) return
+      this.#cameraOffset = {
+        x: this.#drag.offsetX + event.global.x - this.#drag.x,
+        y: this.#drag.offsetY + event.global.y - this.#drag.y,
+      }
+      this.#applyCamera()
+    })
+    const release = () => { this.#drag = undefined }
+    this.#app.stage.on('pointerup', release)
+    this.#app.stage.on('pointerupoutside', release)
+  }
+
+  #applyCamera(): void {
+    const scale = this.#fitScale * this.#zoom
+    this.#camera.scale.set(scale)
+    this.#camera.position.set(this.#cameraOffset.x, this.#cameraOffset.y)
+  }
+}
+
+function loadImage(source: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+    image.decoding = 'async'
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error(`世界资源加载失败：${source}`))
+    image.src = source
+  })
+}
+
+function createRosterTexture(image: HTMLImageElement): Texture {
+  const canvas = document.createElement('canvas')
+  canvas.width = image.naturalWidth
+  canvas.height = image.naturalHeight
+  const context = canvas.getContext('2d', { willReadFrequently: true })
+  if (context === null) return Texture.from(image)
+  context.drawImage(image, 0, 0)
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height)
+  const visited = new Uint8Array(canvas.width * canvas.height)
+  const queue = new Int32Array(canvas.width * canvas.height)
+  let head = 0
+  let tail = 0
+  const enqueue = (index: number) => {
+    if (index < 0 || index >= visited.length || visited[index] === 1) return
+    visited[index] = 1
+    queue[tail++] = index
+  }
+  for (let x = 0; x < canvas.width; x += 1) {
+    enqueue(x)
+    enqueue((canvas.height - 1) * canvas.width + x)
+  }
+  for (let y = 0; y < canvas.height; y += 1) {
+    enqueue(y * canvas.width)
+    enqueue(y * canvas.width + canvas.width - 1)
+  }
+  while (head < tail) {
+    const index = queue[head++]!
+    const offset = index * 4
+    const red = pixels.data[offset]!
+    const green = pixels.data[offset + 1]!
+    const blue = pixels.data[offset + 2]!
+    const maximum = Math.max(red, green, blue)
+    const minimum = Math.min(red, green, blue)
+    if (minimum < 226 || maximum - minimum > 7) continue
+    pixels.data[offset + 3] = 0
+    const x = index % canvas.width
+    if (x > 0) enqueue(index - 1)
+    if (x + 1 < canvas.width) enqueue(index + 1)
+    if (index >= canvas.width) enqueue(index - canvas.width)
+    if (index + canvas.width < visited.length) enqueue(index + canvas.width)
+  }
+  context.putImageData(pixels, 0, 0)
+  return Texture.from(canvas)
+}
+
+function rosterIndexFor(entity: WorldRuntimeEntityState): number {
+  const configured = entity.visualState['rosterIndex']
+  if (typeof configured === 'number' && Number.isInteger(configured)) return clamp(configured, 0, 7)
+  let hash = 0
+  for (const character of entity.id) hash = (hash * 31 + character.charCodeAt(0)) % 8
+  return hash
+}
+
+function statusColor(entity: WorldRuntimeEntityState): number {
+  if (entity.status === 'blocked') return 0xf26464
+  if (entity.status === 'working') return 0x4fd8ed
+  if (entity.status === 'waiting') return 0xf3b83f
+  return 0x55d691
+}
+
+function cuePoints(cue: WorldCue): WorldPoint[] {
+  const route = cue.payload['route']
+  if (!Array.isArray(route)) return []
+  return route.flatMap((value) => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return []
+    const point = value as Record<string, unknown>
+    return typeof point.x === 'number' && typeof point.y === 'number' ? [{ x: point.x, y: point.y }] : []
+  })
+}
+
+function cueText(cue: WorldCue): string {
+  const value = cue.payload['text'] ?? cue.payload['label']
+  return typeof value === 'string' ? value : ''
+}
+
+function segmentDuration(from: WorldPoint, to: WorldPoint): number {
+  return Math.max(90, Math.hypot(to.x - from.x, to.y - from.y) / 230 * 1_000)
+}
+
+function facingBetween(from: WorldPoint, to: WorldPoint): WorldRuntimeEntityState['facing'] {
+  const dx = to.x - from.x
+  const dy = to.y - from.y
+  return Math.abs(dx) > Math.abs(dy) ? (dx >= 0 ? 'east' : 'west') : (dy >= 0 ? 'south' : 'north')
+}
+
+function lerp(from: number, to: number, progress: number): number {
+  return from + (to - from) * progress
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.min(Math.max(value, minimum), maximum)
+}

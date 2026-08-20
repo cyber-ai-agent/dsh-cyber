@@ -9,11 +9,15 @@ import { BUILTIN_BLUEPRINTS, BUILTIN_WORLD_TEMPLATES, worldTemplate } from '@dsh
 import type {
   AgentRuntimePort,
   ChatAttachment,
+  CyberMarketKind,
   CyberPackageKind,
   CyberPackageManifest,
   JsonObject,
   LocalAssetMimeType,
   ModelProfile,
+  WorldInteractionAction,
+  WorldInteractionRequest,
+  WorldRuntimeStreamEnvelope,
 } from '@dsh-cyber/contracts'
 import {
   clearActiveHarnessRuntime,
@@ -33,6 +37,7 @@ import {
   type DirectConversationInput,
 } from '@dsh-cyber/orchestration'
 import {
+  LocalPackageCatalog,
   LocalPackageRuntime,
   PackageApprovalRequiredError,
   PackageInstallError,
@@ -40,6 +45,8 @@ import {
   type PackageRuntimePort,
 } from '@dsh-cyber/package-runtime'
 import { SqliteStore } from '@dsh-cyber/persistence'
+import { applyInstalledPromptTransforms, loadInstalledBlueprints } from './installed-package-runtime.js'
+import { UnsupportedWorldRuntimeError, WorldRuntimeService } from './world-runtime-service.js'
 
 const MAX_BODY_BYTES = 8 * 1024 * 1024
 const MAX_BACKGROUND_BYTES = 5 * 1024 * 1024
@@ -56,6 +63,7 @@ export interface CyberServerOptions {
   port?: number
   runtime?: AgentRuntimePort
   packageRuntime?: PackageRuntimePort
+  marketplaceRoot?: string
 }
 
 export interface CyberServerAddress {
@@ -76,6 +84,10 @@ export interface CyberServer {
 interface LiveClient {
   worldId: string
   response: ServerResponse
+}
+
+interface WorldRuntimeClient extends LiveClient {
+  lastSequence: number
 }
 
 export async function createCyberServer(options: CyberServerOptions): Promise<CyberServer> {
@@ -127,7 +139,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
           : undefined
         const profile = selectedProfile?.workspaceId === request.agent.workspaceId
           ? selectedProfile
-          : store.listModelProfiles(request.agent.workspaceId).find((candidate) => candidate.isDefault)
+          : store.resolveModelProfile(request.agent.workspaceId, request.agent.worldId, request.agent.id)
         return profile === undefined ? undefined : harnessModelRoute(profile)
       },
     })
@@ -140,7 +152,21 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     store,
     runtime: options.packageRuntime ?? new LocalPackageRuntime(join(stateRoot, 'packages')),
   })
+  const packageCatalog = new LocalPackageCatalog(
+    options.marketplaceRoot ?? fileURLToPath(new URL('../../../marketplace', import.meta.url)),
+  )
   const liveClients = new Set<LiveClient>()
+  const worldRuntimeClients = new Set<WorldRuntimeClient>()
+  const worldRuntime = new WorldRuntimeService({
+    store,
+    publish(event) {
+      for (const client of worldRuntimeClients) {
+        if (client.worldId !== event.worldId) continue
+        writeSse(client.response, event.kind, event, event.id)
+        client.lastSequence = Math.max(client.lastSequence, event.sequence)
+      }
+    },
+  })
   let startedAddress: CyberServerAddress | undefined
   let closed = false
 
@@ -151,10 +177,13 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       store,
       orchestrator,
       packageManager,
+      packageCatalog,
       stateRoot,
       workspaceRoot,
       webRoot,
       liveClients,
+      worldRuntimeClients,
+      worldRuntime,
     }).catch((error: unknown) => writeError(response, error))
   })
   httpServer.requestTimeout = 0
@@ -167,9 +196,22 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       if (client.worldId !== event.worldId) continue
       client.response.write(`event: runtime\ndata: ${data}\n\n`)
     }
+    worldRuntime.publishRuntime(event.worldId, event.event, event.agentId)
   })
   const heartbeat = setInterval(() => {
     for (const client of liveClients) client.response.write(': heartbeat\n\n')
+    for (const client of worldRuntimeClients) {
+      const heartbeatEvent: WorldRuntimeStreamEnvelope = {
+        contractVersion: 1,
+        id: `heartbeat:${Date.now()}`,
+        worldId: client.worldId,
+        sequence: client.lastSequence,
+        kind: 'heartbeat',
+        payload: {},
+        createdAt: new Date().toISOString(),
+      }
+      writeSse(client.response, 'heartbeat', heartbeatEvent, heartbeatEvent.id)
+    }
   }, 15_000)
   heartbeat.unref()
 
@@ -202,6 +244,8 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       clearInterval(heartbeat)
       for (const client of liveClients) client.response.end()
       liveClients.clear()
+      for (const client of worldRuntimeClients) client.response.end()
+      worldRuntimeClients.clear()
       if (httpServer.listening) await closeServer(httpServer)
       await orchestrator.close()
       store.close()
@@ -215,12 +259,28 @@ async function handleRequest(context: {
   store: SqliteStore
   orchestrator: ConversationOrchestrator
   packageManager: PackageManager
+  packageCatalog: LocalPackageCatalog
   stateRoot: string
   workspaceRoot: string
   webRoot: string
   liveClients: Set<LiveClient>
+  worldRuntimeClients: Set<WorldRuntimeClient>
+  worldRuntime: WorldRuntimeService
 }): Promise<void> {
-  const { request, response, store, orchestrator, packageManager, stateRoot, workspaceRoot, webRoot, liveClients } = context
+  const {
+    request,
+    response,
+    store,
+    orchestrator,
+    packageManager,
+    packageCatalog,
+    stateRoot,
+    workspaceRoot,
+    webRoot,
+    liveClients,
+    worldRuntimeClients,
+    worldRuntime,
+  } = context
   assertLocalRequest(request)
   const url = new URL(request.url ?? '/', 'http://127.0.0.1')
   const method = request.method ?? 'GET'
@@ -477,9 +537,29 @@ async function handleRequest(context: {
   }
   if (method === 'GET' && url.pathname === '/api/catalog/blueprints') {
     const templateId = url.searchParams.get('templateId')
+    const workspaceId = url.searchParams.get('workspaceId')
+    const installed = workspaceId === null ? [] : store.listInstalledPackages(workspaceId)
+    const packageBlueprints = await loadInstalledBlueprints(installed)
+    for (const blueprint of packageBlueprints) store.saveBlueprint(blueprint)
+    const available = [...BUILTIN_BLUEPRINTS, ...packageBlueprints]
     const items = templateId
-      ? BUILTIN_BLUEPRINTS.filter((item) => item.worldTemplateId === templateId)
-      : BUILTIN_BLUEPRINTS
+      ? available.filter((item) => item.worldTemplateId === templateId)
+      : available
+    writeJson(response, 200, { items })
+    return
+  }
+  if (method === 'GET' && url.pathname === '/api/marketplace') {
+    const market = url.searchParams.get('market')
+    if (market !== null && !['theme', 'plugin', 'talent'].includes(market)) {
+      throw new HttpError(422, 'invalid_market', 'Unknown marketplace')
+    }
+    const workspaceId = url.searchParams.get('workspaceId')
+    const installed = workspaceId === null ? [] : store.listInstalledPackages(workspaceId)
+    const items = await packageCatalog.list({
+      ...(market === null ? {} : { market: market as CyberMarketKind }),
+      ...(url.searchParams.get('q') === null ? {} : { query: url.searchParams.get('q')! }),
+      installed,
+    })
     writeJson(response, 200, { items })
     return
   }
@@ -539,7 +619,15 @@ async function handleRequest(context: {
   }
   const workspaceModels = match(url.pathname, /^\/api\/workspaces\/([^/]+)\/model-profiles$/)
   if (workspaceModels !== undefined && method === 'GET') {
-    writeJson(response, 200, { items: store.listModelProfiles(workspaceModels[0]) })
+    writeJson(response, 200, {
+      items: store.listModelProfiles(workspaceModels[0]).map((profile) => ({
+        ...profile,
+        credentialConfigured: profile.credentialEnvName === undefined
+          ? profile.providerKind === 'openai-compatible-local'
+          : Boolean(process.env[profile.credentialEnvName]),
+      })),
+      assignments: store.listModelAssignments(workspaceModels[0]),
+    })
     return
   }
   const workspaceAssets = match(url.pathname, /^\/api\/workspaces\/([^/]+)\/assets$/)
@@ -686,6 +774,30 @@ async function handleRequest(context: {
     writeJson(response, 201, { profile })
     return
   }
+  const modelAssignment = match(
+    url.pathname,
+    /^\/api\/workspaces\/([^/]+)\/model-assignments\/(workspace|world|employee)\/([^/]+)$/,
+  )
+  if (modelAssignment !== undefined && method === 'PUT') {
+    const body = await readJson(request)
+    const assignment = store.saveModelAssignment({
+      workspaceId: modelAssignment[0],
+      scope: modelAssignment[1] as 'workspace' | 'world' | 'employee',
+      scopeId: modelAssignment[2]!,
+      modelProfileId: requiredString(body, 'modelProfileId'),
+    })
+    writeJson(response, 200, { assignment })
+    return
+  }
+  if (modelAssignment !== undefined && method === 'DELETE') {
+    const removed = store.clearModelAssignment(
+      modelAssignment[0],
+      modelAssignment[1] as 'workspace' | 'world' | 'employee',
+      modelAssignment[2]!,
+    )
+    writeJson(response, 200, { removed })
+    return
+  }
   const workspaceWorlds = match(url.pathname, /^\/api\/workspaces\/([^/]+)\/worlds$/)
   if (workspaceWorlds !== undefined && method === 'GET') {
     writeJson(response, 200, { items: store.listWorlds(workspaceWorlds[0]) })
@@ -749,10 +861,135 @@ async function handleRequest(context: {
     writeJson(response, 201, { installed })
     return
   }
+  const marketplacePreview = match(
+    url.pathname,
+    /^\/api\/workspaces\/([^/]+)\/marketplace\/preview$/,
+  )
+  if (marketplacePreview !== undefined && method === 'POST') {
+    const body = await readJson(request)
+    const item = await packageCatalog.find(requiredString(body, 'packageId'), optionalString(body.version))
+    if (item === undefined) throw new HttpError(404, 'market_package_not_found', 'Marketplace package not found')
+    writeJson(response, 200, {
+      item,
+      preview: packageManager.preview(marketplacePreview[0], item.manifest),
+    })
+    return
+  }
+  const marketplaceInstall = match(
+    url.pathname,
+    /^\/api\/workspaces\/([^/]+)\/marketplace\/install$/,
+  )
+  if (marketplaceInstall !== undefined && method === 'POST') {
+    const body = await readJson(request)
+    const item = await packageCatalog.find(requiredString(body, 'packageId'), optionalString(body.version))
+    if (item === undefined) throw new HttpError(404, 'market_package_not_found', 'Marketplace package not found')
+    const installed = await packageManager.install({
+      workspaceId: marketplaceInstall[0],
+      manifest: item.manifest,
+      sourceDirectory: item.sourceDirectory,
+      approvalToken: requiredString(body, 'approvalToken'),
+      actorId: 'owner',
+    })
+    if (installed.kind === 'employee-blueprint') {
+      for (const blueprint of await loadInstalledBlueprints([installed])) store.saveBlueprint(blueprint)
+    }
+    writeJson(response, 201, { installed })
+    return
+  }
 
   const worldSnapshot = match(url.pathname, /^\/api\/worlds\/([^/]+)\/snapshot$/)
   if (method === 'GET' && worldSnapshot !== undefined) {
     writeJson(response, 200, store.getWorldSnapshot(worldSnapshot[0]))
+    return
+  }
+  const worldRuntimeSnapshot = match(url.pathname, /^\/api\/worlds\/([^/]+)\/runtime-snapshot$/)
+  if (method === 'GET' && worldRuntimeSnapshot !== undefined) {
+    writeJson(response, 200, worldRuntime.getSnapshot(worldRuntimeSnapshot[0]))
+    return
+  }
+  const worldThemeManifest = match(url.pathname, /^\/api\/worlds\/([^/]+)\/theme-manifest$/)
+  if (method === 'GET' && worldThemeManifest !== undefined) {
+    writeJson(response, 200, worldRuntime.getThemeManifest(worldThemeManifest[0]))
+    return
+  }
+  const worldInteractions = match(url.pathname, /^\/api\/worlds\/([^/]+)\/interactions$/)
+  if (method === 'POST' && worldInteractions !== undefined) {
+    const body = await readJson(request)
+    const action = requiredEnum<WorldInteractionAction>(body, 'action', [
+      'focus',
+      'talk',
+      'assign-task',
+      'inspect',
+      'use-object',
+      'start-meeting',
+      'toggle-lights',
+      'fit-camera',
+    ])
+    const interaction: WorldInteractionRequest = {
+      action,
+      actorId: optionalString(body.actorId) ?? 'owner',
+      ...(optionalString(body.entityId) === undefined ? {} : { entityId: optionalString(body.entityId)! }),
+      ...(optionalString(body.objectId) === undefined ? {} : { objectId: optionalString(body.objectId)! }),
+      ...(body.participantIds === undefined ? {} : { participantIds: optionalStringArray(body.participantIds) }),
+      ...(optionalString(body.prompt) === undefined ? {} : { prompt: optionalString(body.prompt)! }),
+      ...(record(body.metadata) === undefined ? {} : { metadata: record(body.metadata) as JsonObject }),
+    }
+    writeJson(response, 202, worldRuntime.interact(worldInteractions[0], interaction))
+    return
+  }
+  const worldStream = match(url.pathname, /^\/api\/worlds\/([^/]+)\/stream$/)
+  if (method === 'GET' && worldStream !== undefined) {
+    const worldId = worldStream[0]
+    const world = store.getWorld(worldId)
+    if (world === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
+    const snapshot = worldRuntime.getSnapshot(worldId)
+    const after = Math.max(
+      nonNegativeInteger(url.searchParams.get('after')),
+      nonNegativeInteger(headerValue(request.headers['last-event-id'])),
+    )
+    response.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    })
+    if (after < snapshot.sequence) {
+      const recovery: WorldRuntimeStreamEnvelope = {
+        contractVersion: 1,
+        id: `state:${worldId}:${snapshot.sequence}`,
+        worldId,
+        sequence: snapshot.sequence,
+        kind: 'world-state',
+        payload: snapshot as unknown as JsonObject,
+        createdAt: new Date().toISOString(),
+      }
+      writeSse(response, 'world-state', recovery, recovery.id)
+      for (const event of store.listWorldDomainEvents(worldId, after)) {
+        const envelope: WorldRuntimeStreamEnvelope = {
+          contractVersion: 1,
+          id: `domain:${event.id}`,
+          worldId,
+          sequence: event.sequence,
+          kind: 'domain',
+          payload: event as unknown as JsonObject,
+          createdAt: event.createdAt,
+        }
+        writeSse(response, 'domain', envelope, envelope.id)
+      }
+    } else {
+      writeSse(response, 'ready', {
+        contractVersion: 1,
+        id: `ready:${worldId}:${snapshot.sequence}`,
+        worldId,
+        sequence: snapshot.sequence,
+        kind: 'heartbeat',
+        payload: {},
+        createdAt: new Date().toISOString(),
+      })
+    }
+    const client: WorldRuntimeClient = { worldId, response, lastSequence: snapshot.sequence }
+    worldRuntimeClients.add(client)
+    request.once('close', () => worldRuntimeClients.delete(client))
     return
   }
   const worldEvents = match(url.pathname, /^\/api\/worlds\/([^/]+)\/events$/)
@@ -797,7 +1034,14 @@ async function handleRequest(context: {
     const metadata: JsonObject | undefined = attachments.length === 0
       ? undefined
       : { attachments: attachments.map(chatAttachmentJson) }
-    const runtimePrompt = attachments.length === 0 ? undefined : attachmentAwarePrompt(prompt, attachments)
+    const attachmentPrompt = attachments.length === 0 ? prompt : attachmentAwarePrompt(prompt, attachments)
+    const transformedPrompt = await applyInstalledPromptTransforms(
+      store.listInstalledPackages(world.workspaceId),
+      attachmentPrompt,
+    )
+    const runtimePrompt = transformedPrompt === prompt && attachments.length === 0
+      ? undefined
+      : transformedPrompt
     const explicitIds = optionalStringArray(body.employeeIds)
     const employeeIds = explicitIds.length > 0
       ? explicitIds
@@ -1054,6 +1298,18 @@ function writeJson(response: ServerResponse, status: number, value: unknown): vo
   response.end(body)
 }
 
+function writeSse(
+  response: ServerResponse,
+  event: string,
+  value: unknown,
+  id?: string,
+): void {
+  if (response.writableEnded || response.destroyed) return
+  if (id !== undefined) response.write(`id: ${id}\n`)
+  response.write(`event: ${event}\n`)
+  response.write(`data: ${JSON.stringify(value)}\n\n`)
+}
+
 function writeBinary(
   response: ServerResponse,
   status: number,
@@ -1284,6 +1540,15 @@ function writeError(response: ServerResponse, error: unknown): void {
     })
     return
   }
+  if (error instanceof UnsupportedWorldRuntimeError) {
+    writeJson(response, 409, {
+      error: {
+        code: 'world_runtime_unavailable',
+        message: 'This world uses the legacy renderer. Switch to a Runtime V2 theme to enable the live world.',
+      },
+    })
+    return
+  }
   const notFound = error instanceof Error && error.name === 'EntityNotFoundError'
   writeJson(response, notFound ? 404 : 500, {
     error: {
@@ -1388,6 +1653,27 @@ function packageManifest(value: unknown): CyberPackageManifest {
       sha256: requiredString(file, 'sha256'),
     }
   })
+  const entrypoints = input.entrypoints === undefined
+    ? undefined
+    : Array.isArray(input.entrypoints)
+      ? input.entrypoints.map((item) => {
+          const entrypoint = record(item)
+          if (entrypoint === undefined) throw new HttpError(422, 'invalid_package_entrypoint', 'Invalid package entrypoint')
+          return {
+            id: requiredString(entrypoint, 'id'),
+            kind: requiredEnum(entrypoint, 'kind', ['prompt-transform', 'employee-blueprint', 'world-theme', 'skill']),
+            path: requiredString(entrypoint, 'path'),
+          }
+        })
+      : (() => { throw new HttpError(422, 'invalid_package_entrypoints', 'Package entrypoints must be an array') })()
+  const certificationInput = record(input.certification)
+  const certification = certificationInput === undefined
+    ? undefined
+    : {
+        authority: requiredString(certificationInput, 'authority'),
+        level: requiredEnum(certificationInput, 'level', ['official', 'community']),
+        contentSha256: requiredString(certificationInput, 'contentSha256'),
+      }
   return {
     schemaVersion: 1,
     id: requiredString(input, 'id'),
@@ -1400,6 +1686,8 @@ function packageManifest(value: unknown): CyberPackageManifest {
     capabilities: optionalStringArray(input.capabilities),
     dataEgress: optionalStringArray(input.dataEgress),
     files,
+    ...(entrypoints === undefined ? {} : { entrypoints }),
+    ...(certification === undefined ? {} : { certification }),
   }
 }
 
@@ -1500,6 +1788,11 @@ function nonNegativeInteger(value: string | null): number {
   if (value === null) return 0
   const number = Number(value)
   return Number.isInteger(number) && number >= 0 ? number : 0
+}
+
+function headerValue(value: string | string[] | undefined): string | null {
+  if (Array.isArray(value)) return value[0] ?? null
+  return value ?? null
 }
 
 function artifactTimestamp(): string {

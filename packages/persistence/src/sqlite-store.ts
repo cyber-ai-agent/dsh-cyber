@@ -25,6 +25,8 @@ import {
   type JsonValue,
   type LocalAsset,
   type LocalAssetKind,
+  type ModelAssignment,
+  type ModelAssignmentScope,
   type ModelApiKind,
   type ModelProfile,
   type ModelProviderKind,
@@ -42,6 +44,11 @@ import {
   type WorkSessionKind,
   type WorkSessionParticipant,
   type World,
+  type WorldRuntimeEntityState,
+  type WorldRuntimeObjectState,
+  type WorldRuntimeSnapshot,
+  type WorldThemeBinding,
+  type WorldThemeManifestV1,
   type WorldSnapshot,
   type Workspace,
   type WorkspacePreferences,
@@ -187,6 +194,14 @@ export interface SaveModelProfileInput {
   actorId?: string
 }
 
+export interface SaveModelAssignmentInput {
+  workspaceId: string
+  scope: ModelAssignmentScope
+  scopeId: string
+  modelProfileId: string
+  actorId?: string
+}
+
 export interface SaveLocalAssetInput {
   id?: string
   workspaceId: string
@@ -289,6 +304,7 @@ const KNOWN_TABLES = [
   'employee_relationships',
   'workspace_preferences',
   'model_profiles',
+  'model_assignments',
   'local_assets',
   'work_sessions',
   'work_session_participants',
@@ -296,6 +312,10 @@ const KNOWN_TABLES = [
   'installed_packages',
   'package_install_transactions',
   'runtime_update_transactions',
+  'world_runtime_snapshots',
+  'world_entity_states',
+  'world_object_states',
+  'world_theme_bindings',
   'domain_events',
   'sync_outbox',
 ] as const
@@ -614,6 +634,106 @@ export class SqliteStore {
       )
       .all(workspaceId)
       .map(mapModelProfile)
+  }
+
+  saveModelAssignment(input: SaveModelAssignmentInput): ModelAssignment {
+    this.#assertWritable()
+    this.#requireWorkspace(input.workspaceId)
+    const profile = this.getModelProfile(input.modelProfileId)
+    if (profile === undefined || profile.workspaceId !== input.workspaceId) {
+      throw new PersistenceError('Model profile must belong to the assignment workspace')
+    }
+    let worldId: string | undefined
+    if (input.scope === 'workspace') {
+      if (input.scopeId !== input.workspaceId) throw new PersistenceError('Workspace assignment scope id must match workspace id')
+    } else if (input.scope === 'world') {
+      const world = this.getWorld(input.scopeId)
+      if (world === undefined || world.workspaceId !== input.workspaceId) throw new PersistenceError('World assignment target is invalid')
+      worldId = world.id
+    } else {
+      const employee = this.getEmployee(input.scopeId)
+      if (employee === undefined || employee.workspaceId !== input.workspaceId) throw new PersistenceError('Employee assignment target is invalid')
+      worldId = employee.worldId
+    }
+    const assignment: ModelAssignment = {
+      workspaceId: input.workspaceId,
+      scope: input.scope,
+      scopeId: input.scopeId,
+      modelProfileId: input.modelProfileId,
+      updatedAt: this.#clock(),
+    }
+    return this.#transaction(() => {
+      this.database
+        .prepare(
+          `INSERT INTO model_assignments
+           (workspace_id, scope, scope_id, model_profile_id, updated_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT (workspace_id, scope, scope_id) DO UPDATE SET
+             model_profile_id = excluded.model_profile_id,
+             updated_at = excluded.updated_at`,
+        )
+        .run(assignment.workspaceId, assignment.scope, assignment.scopeId, assignment.modelProfileId, assignment.updatedAt)
+      this.#appendEvent({
+        workspaceId: assignment.workspaceId,
+        ...(worldId === undefined ? {} : { worldId }),
+        type: 'model.assignment.updated',
+        actorId: input.actorId ?? 'owner',
+        actorKind: 'owner',
+        payload: {
+          scope: assignment.scope,
+          scopeId: assignment.scopeId,
+          modelProfileId: assignment.modelProfileId,
+        },
+      })
+      return assignment
+    })
+  }
+
+  getModelAssignment(workspaceId: string, scope: ModelAssignmentScope, scopeId: string): ModelAssignment | undefined {
+    const row = this.database
+      .prepare('SELECT * FROM model_assignments WHERE workspace_id = ? AND scope = ? AND scope_id = ?')
+      .get(workspaceId, scope, scopeId)
+    return row ? mapModelAssignment(row) : undefined
+  }
+
+  listModelAssignments(workspaceId: string): ModelAssignment[] {
+    return this.database
+      .prepare(
+        `SELECT * FROM model_assignments WHERE workspace_id = ?
+         ORDER BY CASE scope WHEN 'workspace' THEN 0 WHEN 'world' THEN 1 ELSE 2 END, scope_id`,
+      )
+      .all(workspaceId)
+      .map(mapModelAssignment)
+  }
+
+  clearModelAssignment(workspaceId: string, scope: ModelAssignmentScope, scopeId: string, actorId = 'owner'): boolean {
+    this.#assertWritable()
+    this.#requireWorkspace(workspaceId)
+    return this.#transaction(() => {
+      const removed = this.database
+        .prepare('DELETE FROM model_assignments WHERE workspace_id = ? AND scope = ? AND scope_id = ?')
+        .run(workspaceId, scope, scopeId).changes > 0
+      if (removed) {
+        this.#appendEvent({
+          workspaceId,
+          type: 'model.assignment.updated',
+          actorId,
+          actorKind: 'owner',
+          payload: { scope, scopeId, cleared: true },
+        })
+      }
+      return removed
+    })
+  }
+
+  resolveModelProfile(workspaceId: string, worldId: string, employeeId: string): ModelProfile | undefined {
+    const employee = this.getModelAssignment(workspaceId, 'employee', employeeId)
+    const world = this.getModelAssignment(workspaceId, 'world', worldId)
+    const workspace = this.getModelAssignment(workspaceId, 'workspace', workspaceId)
+    const profileId = employee?.modelProfileId ?? world?.modelProfileId ?? workspace?.modelProfileId
+    if (profileId !== undefined) return this.getModelProfile(profileId)
+    return this.listModelProfiles(workspaceId).find((profile) => profile.isDefault)
+      ?? this.listModelProfiles(workspaceId)[0]
   }
 
   saveLocalAsset(input: SaveLocalAssetInput): LocalAsset {
@@ -2037,6 +2157,144 @@ export class SqliteStore {
     }
   }
 
+  getWorldRuntimeSnapshot(worldId: string): WorldRuntimeSnapshot | undefined {
+    const row = this.database
+      .prepare('SELECT snapshot_json FROM world_runtime_snapshots WHERE world_id = ?')
+      .get(worldId) as { snapshot_json?: string } | undefined
+    return row?.snapshot_json === undefined
+      ? undefined
+      : parseJson<WorldRuntimeSnapshot>(row.snapshot_json)
+  }
+
+  saveWorldRuntimeSnapshot(
+    snapshot: WorldRuntimeSnapshot,
+    manifest?: WorldThemeManifestV1,
+  ): WorldRuntimeSnapshot {
+    this.#assertWritable()
+    const world = this.#requireWorld(snapshot.worldId)
+    if (world.workspaceId !== snapshot.workspaceId) {
+      throw new PersistenceError('World runtime snapshot workspace does not match its world')
+    }
+    if (manifest !== undefined && manifest.id !== snapshot.themeId) {
+      throw new PersistenceError('World runtime snapshot theme does not match the manifest')
+    }
+    const updatedAt = this.#clock()
+    return this.#transaction(() => {
+      this.database
+        .prepare(
+          `INSERT INTO world_runtime_snapshots
+           (world_id, theme_id, scene_id, sequence, snapshot_json, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT (world_id) DO UPDATE SET
+             theme_id = excluded.theme_id,
+             scene_id = excluded.scene_id,
+             sequence = excluded.sequence,
+             snapshot_json = excluded.snapshot_json,
+             updated_at = excluded.updated_at`,
+        )
+        .run(
+          snapshot.worldId,
+          snapshot.themeId,
+          snapshot.sceneId,
+          snapshot.sequence,
+          stringifyJson(snapshot as unknown as JsonValue),
+          updatedAt,
+        )
+
+      this.database.prepare('DELETE FROM world_entity_states WHERE world_id = ?').run(snapshot.worldId)
+      const insertEntity = this.database.prepare(
+        `INSERT INTO world_entity_states
+         (world_id, entity_id, scene_id, anchor_id, target_anchor_id, facing, activity,
+          activity_ref, target_entity_id, state_json, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      for (const entity of snapshot.entities) {
+        insertEntity.run(
+          snapshot.worldId,
+          entity.id,
+          entity.sceneId,
+          entity.anchorId ?? null,
+          entity.targetAnchorId ?? null,
+          entity.facing,
+          entity.activity,
+          entity.activityRef ?? null,
+          entity.targetEntityId ?? null,
+          stringifyJson(entity as unknown as JsonValue),
+          entity.updatedAt,
+        )
+      }
+
+      this.database.prepare('DELETE FROM world_object_states WHERE world_id = ?').run(snapshot.worldId)
+      const insertObject = this.database.prepare(
+        `INSERT INTO world_object_states
+         (world_id, entity_id, scene_id, state_json, updated_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      for (const object of snapshot.objects) {
+        insertObject.run(
+          snapshot.worldId,
+          object.id,
+          object.sceneId,
+          stringifyJson(object as unknown as JsonValue),
+          object.updatedAt,
+        )
+      }
+
+      if (manifest !== undefined) {
+        this.database
+          .prepare(
+            `INSERT INTO world_theme_bindings
+             (world_id, theme_id, theme_version, status, manifest_json, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT (world_id) DO UPDATE SET
+               theme_id = excluded.theme_id,
+               theme_version = excluded.theme_version,
+               status = excluded.status,
+               manifest_json = excluded.manifest_json,
+               updated_at = excluded.updated_at`,
+          )
+          .run(
+            snapshot.worldId,
+            manifest.id,
+            manifest.version,
+            'active',
+            stringifyJson(manifest as unknown as JsonValue),
+            updatedAt,
+          )
+      }
+      return snapshot
+    })
+  }
+
+  listWorldEntityStates(worldId: string): WorldRuntimeEntityState[] {
+    return this.database
+      .prepare('SELECT state_json FROM world_entity_states WHERE world_id = ? ORDER BY entity_id')
+      .all(worldId)
+      .map((row) => parseJson<WorldRuntimeEntityState>((row as { state_json: string }).state_json))
+  }
+
+  listWorldObjectStates(worldId: string): WorldRuntimeObjectState[] {
+    return this.database
+      .prepare('SELECT state_json FROM world_object_states WHERE world_id = ? ORDER BY entity_id')
+      .all(worldId)
+      .map((row) => parseJson<WorldRuntimeObjectState>((row as { state_json: string }).state_json))
+  }
+
+  getWorldThemeBinding(worldId: string): WorldThemeBinding | undefined {
+    const row = this.database
+      .prepare('SELECT * FROM world_theme_bindings WHERE world_id = ?')
+      .get(worldId) as Record<string, unknown> | undefined
+    if (row === undefined) return undefined
+    return {
+      worldId: String(row.world_id),
+      themeId: String(row.theme_id),
+      themeVersion: String(row.theme_version),
+      status: row.status as WorldThemeBinding['status'],
+      manifest: parseJson<WorldThemeManifestV1>(row.manifest_json),
+      updatedAt: String(row.updated_at),
+    }
+  }
+
   async backup(destinationPath: string): Promise<string> {
     const destination = resolve(destinationPath)
     if (destination === this.databasePath) {
@@ -2060,6 +2318,7 @@ export class SqliteStore {
          workspace,
          preferences: this.getWorkspacePreferences(workspace.id),
          modelProfiles: this.listModelProfiles(workspace.id),
+         modelAssignments: this.listModelAssignments(workspace.id),
          localAssets: this.listLocalAssets(workspace.id),
          packages: this.listInstalledPackages(workspace.id),
         packageTransactions: this.listPackageInstallTransactions(workspace.id),
@@ -2075,6 +2334,8 @@ export class SqliteStore {
             participants: this.listParticipants(session.id),
             messages: this.listMessages(session.id),
           })),
+          runtime: this.getWorldRuntimeSnapshot(world.id),
+          themeBinding: this.getWorldThemeBinding(world.id),
           events: this.listWorldDomainEvents(world.id),
         })),
         events: this.listDomainEvents(workspace.id).filter((event) => event.worldId === undefined),
@@ -2118,12 +2379,17 @@ export class SqliteStore {
         employeeRelationships: countRows(this.database, 'employee_relationships'),
         workspacePreferences: countRows(this.database, 'workspace_preferences'),
         modelProfiles: countRows(this.database, 'model_profiles'),
+        modelAssignments: countRows(this.database, 'model_assignments'),
         localAssets: countRows(this.database, 'local_assets'),
         sessions: countRows(this.database, 'work_sessions'),
         messages: countRows(this.database, 'messages'),
         installedPackages: countRows(this.database, 'installed_packages'),
         packageTransactions: countRows(this.database, 'package_install_transactions'),
         runtimeUpdates: countRows(this.database, 'runtime_update_transactions'),
+        worldRuntimeSnapshots: countRows(this.database, 'world_runtime_snapshots'),
+        worldEntityStates: countRows(this.database, 'world_entity_states'),
+        worldObjectStates: countRows(this.database, 'world_object_states'),
+        worldThemeBindings: countRows(this.database, 'world_theme_bindings'),
         events: countRows(this.database, 'domain_events'),
         outbox: countRows(this.database, 'sync_outbox'),
       },
@@ -2845,6 +3111,17 @@ function mapModelProfile(row: object): ModelProfile {
     profile.credentialEnvName = value.credential_env_name
   }
   return profile
+}
+
+function mapModelAssignment(row: object): ModelAssignment {
+  const value = row as Record<string, unknown>
+  return {
+    workspaceId: String(value.workspace_id),
+    scope: value.scope as ModelAssignmentScope,
+    scopeId: String(value.scope_id),
+    modelProfileId: String(value.model_profile_id),
+    updatedAt: String(value.updated_at),
+  }
 }
 
 function mapLocalAsset(row: object): LocalAsset {

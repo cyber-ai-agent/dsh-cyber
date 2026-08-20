@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "official-meeting-notes",
+  "version": "1.0.0",
+  "kind": "plugin",
+  "displayName": "会议纪要助手",
+  "summary": "将当前世界中的会话、任务、工具轨迹和交付物整理为可追溯的会议纪要。",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "publisher": "DSH Cyber",
+  "capabilities": [
+    "prompt:transform"
+  ],
+  "dataEgress": [],
+  "files": [
+    {
+      "path": "meeting-notes.json",
+      "sha256": "e64503041cb106218ae7792f5be20866adbbfdebe3b3fa7e0e06e379e456dde5"
+    }
+  ],
+  "entrypoints": [
+    {
+      "id": "meeting-summary",
+      "kind": "prompt-transform",
+      "path": "meeting-notes.json"
+    }
+  ],
+  "certification": {
+    "authority": "DSH Cyber",
+    "level": "official",
+    "contentSha256": "eb25fc713d493f96db6d6a2b3e05c2c594d79c3c10c2a633d941eac8ed746318"
+  }
+}

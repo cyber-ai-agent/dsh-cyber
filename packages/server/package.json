@@ -22,6 +22,7 @@
     "@dsh-cyber/harness-adapter": "workspace:*",
     "@dsh-cyber/orchestration": "workspace:*",
     "@dsh-cyber/package-runtime": "workspace:*",
-    "@dsh-cyber/persistence": "workspace:*"
+    "@dsh-cyber/persistence": "workspace:*",
+    "@dsh-cyber/world-runtime": "workspace:*"
   }
 }

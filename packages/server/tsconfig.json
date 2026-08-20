@@ -12,6 +12,7 @@
     { "path": "../persistence" },
     { "path": "../harness-adapter" },
     { "path": "../orchestration" },
+    { "path": "../world-runtime" },
     { "path": "../package-runtime" }
   ]
 }

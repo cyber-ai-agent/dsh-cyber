@@ -1,4 +1,6 @@
 import {
+  Buildings,
+  ChatCircleDots,
   Cube,
   GearSix,
   Pulse,
@@ -9,6 +11,8 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'r
 import type {
   AgentRuntimeEvent,
   ChatAttachment,
+  CyberMarketKind,
+  CyberMarketPackage,
   CyberPackageManifest,
   EmployeeBlueprint,
   EmployeeDossier,
@@ -17,6 +21,7 @@ import type {
   InstalledPackage,
   JsonObject,
   LocalAssetMimeType,
+  ModelAssignment,
   ModelProfile,
   PackageInstallTransaction,
   PackagePermissionPreview,
@@ -42,8 +47,11 @@ import { SettingsDialog, type SettingsSection, type SystemAction, type SystemAct
 import { demoData, demoTavernDossiers, demoTavernEmployees, demoTavernMessages, demoTavernSessions } from './demo-data.js'
 import type { CyberEmployee, DockTab, LiveAgentTurn } from './types.js'
 import { worldExperience } from './world-experience.js'
+import { WorldMode } from './features/world/WorldMode.js'
 
 const demoMode = new URLSearchParams(window.location.search).get('demo') === '1'
+const worldRuntimeV2Enabled = new URLSearchParams(window.location.search).get('legacyWorld') !== '1'
+type AppMode = 'world' | 'workbench'
 
 interface ChatResult {
   session: WorkSession
@@ -68,6 +76,7 @@ export default function App() {
   const [liveTurns, setLiveTurns] = useState<LiveAgentTurn[]>([])
   const [preferences, setPreferences] = useState<WorkspacePreferences | undefined>(demoMode ? demoData.preferences : undefined)
   const [models, setModels] = useState<ModelProfile[]>(demoMode ? demoData.modelProfiles : [])
+  const [modelAssignments, setModelAssignments] = useState<ModelAssignment[]>([])
   const [dossiers, setDossiers] = useState<Record<string, EmployeeDossier>>(demoMode ? demoData.dossiers : {})
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | undefined>()
   const [dockTab, setDockTab] = useState<DockTab>('world')
@@ -79,6 +88,8 @@ export default function App() {
   const [savingSettings, setSavingSettings] = useState(false)
   const [recruitmentOpen, setRecruitmentOpen] = useState(false)
   const [packageMarketOpen, setPackageMarketOpen] = useState(false)
+  const [packageMarketKind, setPackageMarketKind] = useState<CyberMarketKind>('plugin')
+  const [marketplaceItems, setMarketplaceItems] = useState<CyberMarketPackage[]>([])
   const [installedPackages, setInstalledPackages] = useState<InstalledPackage[]>([])
   const [packageTransactions, setPackageTransactions] = useState<PackageInstallTransaction[]>([])
   const [packageLoading, setPackageLoading] = useState(false)
@@ -90,6 +101,7 @@ export default function App() {
   const [savingEmployee, setSavingEmployee] = useState(false)
   const [loading, setLoading] = useState(!demoMode)
   const [error, setError] = useState<string | undefined>()
+  const [appMode, setAppMode] = useState<AppMode>(worldRuntimeV2Enabled ? 'world' : 'workbench')
 
   const activeSession = sessions.find((session) => session.id === activeSessionId)
   const experience = activeWorld === undefined ? undefined : worldExperience(activeWorld)
@@ -97,6 +109,7 @@ export default function App() {
   const managingEmployee = employees.find((employee) => employee.id === managingEmployeeId)
   const managingDossier = managingEmployeeId === undefined ? undefined : dossiers[managingEmployeeId]
   const managingRevision = managingDossier?.revisions.find((revision) => revision.revision === managingEmployee?.currentRevision)
+  const supportsWorldRuntime = worldRuntimeV2Enabled && activeWorld?.templateId.includes('company') === true
 
   const loadWorld = useCallback(async (world: World) => {
     setError(undefined)
@@ -107,6 +120,7 @@ export default function App() {
     setDraft('')
     setSelectedEmployeeId(undefined)
     setDockTab('world')
+    setAppMode(worldRuntimeV2Enabled && world.templateId.includes('company') ? 'world' : 'workbench')
     if (demoMode) {
       const isCompany = world.id === demoData.activeWorld.id
       const nextEmployees = isCompany ? demoData.employees : demoTavernEmployees
@@ -147,13 +161,14 @@ export default function App() {
         const [snapshot, preferenceResult, modelResult] = await Promise.all([
           api<WorkspaceSnapshot>(`/api/workspaces/${first.id}/snapshot`),
           api<{ preferences: WorkspacePreferences }>(`/api/workspaces/${first.id}/preferences`),
-          api<{ items: ModelProfile[] }>(`/api/workspaces/${first.id}/model-profiles`),
+          api<{ items: ModelProfile[]; assignments: ModelAssignment[] }>(`/api/workspaces/${first.id}/model-profiles`),
         ])
         if (cancelled) return
         setWorkspace(first)
         setWorlds(snapshot.worlds)
         setPreferences(preferenceResult.preferences)
         setModels(modelResult.items)
+        setModelAssignments(modelResult.assignments)
         if (snapshot.worlds[0] !== undefined) await loadWorld(snapshot.worlds[0])
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : '无法连接本地 DSH Cyber 服务')
@@ -210,6 +225,7 @@ export default function App() {
 
   const openDossier = useCallback(async (employeeId: string) => {
     setSelectedEmployeeId(employeeId)
+    setAppMode('workbench')
     setDockCollapsed(false)
     setDockTab('dossier')
     if (dossiers[employeeId] !== undefined || demoMode) return
@@ -222,8 +238,12 @@ export default function App() {
   }, [dossiers])
 
   const directEmployee = useCallback((employee: CyberEmployee) => {
-    setDraft((current) => `${current.replace(/\s*$/, '')}${current.trim() ? ' ' : ''}@${employee.displayName} `)
-  }, [])
+    const existing = sessions.find((session) => session.kind === 'direct' && session.title.includes(employee.displayName))
+    setActiveSessionId(existing?.id)
+    if (existing === undefined) setMessages([])
+    setDraft(`@${employee.displayName} `)
+    setSelectedEmployeeId(employee.id)
+  }, [sessions])
 
   const openRecruitment = useCallback(async () => {
     if (activeWorld === undefined) return
@@ -231,7 +251,7 @@ export default function App() {
     setCatalogLoading(true)
     setError(undefined)
     try {
-      const result = await api<{ items: EmployeeBlueprint[] }>(`/api/catalog/blueprints?templateId=${encodeURIComponent(activeWorld.templateId)}`)
+      const result = await api<{ items: EmployeeBlueprint[] }>(`/api/catalog/blueprints?templateId=${encodeURIComponent(activeWorld.templateId)}&workspaceId=${encodeURIComponent(activeWorld.workspaceId)}`)
       setBlueprints(result.items)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '员工市场加载失败')
@@ -247,18 +267,25 @@ export default function App() {
     setPackageTransactions(result.transactions)
   }, [workspace])
 
-  const openPackageMarket = useCallback(async () => {
+  const searchMarketplace = useCallback(async (market: CyberMarketKind, query = '') => {
+    if (workspace === undefined) return
+    const result = await api<{ items: CyberMarketPackage[] }>(`/api/marketplace?market=${market}&workspaceId=${encodeURIComponent(workspace.id)}&q=${encodeURIComponent(query)}`)
+    setMarketplaceItems(result.items)
+  }, [workspace])
+
+  const openPackageMarket = useCallback(async (market: CyberMarketKind = 'plugin') => {
+    setPackageMarketKind(market)
     setPackageMarketOpen(true)
     setPackageLoading(true)
     setError(undefined)
     try {
-      await loadPackages()
+      await Promise.all([loadPackages(), searchMarketplace(market)])
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '软件包清单加载失败')
     } finally {
       setPackageLoading(false)
     }
-  }, [loadPackages])
+  }, [loadPackages, searchMarketplace])
 
   const previewPackage = useCallback(async (manifest: CyberPackageManifest): Promise<PackagePermissionPreview> => {
     if (workspace === undefined) throw new Error('工作区尚未就绪')
@@ -312,6 +339,48 @@ export default function App() {
       setPackageInstalling(false)
     }
   }, [loadPackages, workspace])
+
+  const previewMarketplacePackage = useCallback(async (item: CyberMarketPackage): Promise<PackagePermissionPreview> => {
+    if (workspace === undefined) throw new Error('工作区尚未就绪')
+    if (demoMode) return previewPackage(item.manifest)
+    const result = await api<{ preview: PackagePermissionPreview }>(`/api/workspaces/${workspace.id}/marketplace/preview`, {
+      method: 'POST',
+      body: JSON.stringify({ packageId: item.manifest.id, version: item.manifest.version }),
+    })
+    return result.preview
+  }, [previewPackage, workspace])
+
+  const installMarketplacePackage = useCallback(async (item: CyberMarketPackage, approvalToken: string) => {
+    if (workspace === undefined) throw new Error('工作区尚未就绪')
+    setPackageInstalling(true)
+    try {
+      if (demoMode) {
+        await installPackage({ manifest: item.manifest, sourceDirectory: item.sourceDirectory, approvalToken })
+        const timestamp = new Date().toISOString()
+        setMarketplaceItems((current) => current.map((candidate) => candidate.manifest.id === item.manifest.id
+          ? { ...candidate, installedVersion: item.manifest.version }
+          : candidate))
+        setPackageTransactions((current) => [{
+          id: `demo-market-${item.manifest.id}-${Date.now()}`,
+          workspaceId: workspace.id,
+          packageId: item.manifest.id,
+          version: item.manifest.version,
+          status: 'activated',
+          approvedCapabilities: item.manifest.capabilities,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        }, ...current])
+      } else {
+        await api(`/api/workspaces/${workspace.id}/marketplace/install`, {
+          method: 'POST',
+          body: JSON.stringify({ packageId: item.manifest.id, version: item.manifest.version, approvalToken }),
+        })
+        await Promise.all([loadPackages(), searchMarketplace(item.market)])
+      }
+    } finally {
+      setPackageInstalling(false)
+    }
+  }, [installPackage, loadPackages, searchMarketplace, workspace])
 
   const recruitEmployee = useCallback(async (blueprint: EmployeeBlueprint, displayName?: string) => {
     if (activeWorld === undefined) return
@@ -607,6 +676,25 @@ export default function App() {
     setModels((current) => [...current.filter((item) => item.id !== result.profile.id), result.profile])
   }, [workspace])
 
+  const assignModel = useCallback(async (input: { scope: ModelAssignment['scope']; scopeId: string; modelProfileId?: string }) => {
+    if (workspace === undefined) return
+    if (demoMode) {
+      setModelAssignments((current) => {
+        const remaining = current.filter((item) => item.scope !== input.scope || item.scopeId !== input.scopeId)
+        return input.modelProfileId === undefined ? remaining : [...remaining, { ...input, modelProfileId: input.modelProfileId, workspaceId: workspace.id, updatedAt: new Date().toISOString() }]
+      })
+      return
+    }
+    const endpoint = `/api/workspaces/${workspace.id}/model-assignments/${input.scope}/${encodeURIComponent(input.scopeId)}`
+    if (input.modelProfileId === undefined) {
+      await api(endpoint, { method: 'DELETE' })
+      setModelAssignments((current) => current.filter((item) => item.scope !== input.scope || item.scopeId !== input.scopeId))
+    } else {
+      const result = await api<{ assignment: ModelAssignment }>(endpoint, { method: 'PUT', body: JSON.stringify({ modelProfileId: input.modelProfileId }) })
+      setModelAssignments((current) => [...current.filter((item) => item.scope !== result.assignment.scope || item.scopeId !== result.assignment.scopeId), result.assignment])
+    }
+  }, [workspace])
+
   const runSystemAction = useCallback(async (action: SystemAction, input?: SystemActionInput): Promise<SystemActionResult> => {
     if (demoMode) {
       await delay(350)
@@ -660,21 +748,27 @@ export default function App() {
       <header className="topbar">
         <div className="brand-lockup"><Cube size={20} weight="fill" /><strong>DSH Cyber</strong></div>
         <div className="topbar__workspace"><span>当前工作区：</span><strong>{workspace.name}</strong><span className="topbar__chevron">⌄</span></div>
+        <div className="topbar__mode-switch" aria-label="主视图">
+          <button
+            className={appMode === 'world' ? 'is-active' : ''}
+            type="button"
+            disabled={!supportsWorldRuntime}
+            title={supportsWorldRuntime ? '进入互动世界' : '当前主题尚未安装世界渲染器'}
+            onClick={() => setAppMode('world')}
+          ><Buildings size={16} />世界</button>
+          <button className={appMode === 'workbench' ? 'is-active' : ''} type="button" onClick={() => setAppMode('workbench')}><ChatCircleDots size={16} />工作台</button>
+        </div>
         <nav aria-label="全局功能">
-          <button type="button" onClick={() => void openPackageMarket()}><Cube size={16} />软件包市场</button>
-          <button type="button" onClick={() => void openRecruitment()}><Storefront size={16} />{experience?.marketLabel ?? '角色市场'}</button>
+          <button type="button" onClick={() => void openPackageMarket('theme')}><Buildings size={16} />主题市场</button>
+          <button type="button" onClick={() => void openPackageMarket('plugin')}><Cube size={16} />插件市场</button>
+          <button type="button" onClick={() => void openPackageMarket('talent')}><Storefront size={16} />人才市场</button>
           <button type="button" onClick={() => { setSettingsSection('runtime'); setSettingsOpen(true) }}><Pulse size={16} /><span>运行时健康</span><i className="health-indicator" />良好</button>
           <button type="button" onClick={() => { setSettingsSection('appearance'); setSettingsOpen(true) }}><GearSix size={17} />设置</button>
         </nav>
       </header>
       {error === undefined ? null : <div className="error-banner" role="alert">{error}<button type="button" onClick={() => setError(undefined)}>关闭</button></div>}
-      <ResizableShell
-        leftWidth={preferences.leftPaneWidth}
-        rightWidth={preferences.rightPaneWidth}
-        rightCollapsed={dockCollapsed}
-        rightPrimary={dockTab === 'world'}
-        onResize={resize}
-        left={(
+      {appMode === 'world' && supportsWorldRuntime ? (
+        <div className="world-shell">
           <NavigationPane
             worlds={worlds}
             activeWorldId={activeWorld.id}
@@ -682,15 +776,13 @@ export default function App() {
             {...(activeSessionId === undefined ? {} : { activeSessionId })}
             employees={employees}
             onSelectWorld={(worldId) => { const world = worlds.find((item) => item.id === worldId); if (world) void loadWorld(world) }}
-            onSelectSession={selectSession}
-            onSelectEmployee={(employeeId) => void openDossier(employeeId)}
+            onSelectSession={(sessionId) => { selectSession(sessionId); setAppMode('workbench') }}
+            onSelectEmployee={setSelectedEmployeeId}
             onDirectEmployee={directEmployee}
             onRecruit={() => void openRecruitment()}
             onCreateWorld={() => setError('世界创建向导将在主题市场阶段开放。')}
           />
-        )}
-        center={(
-          <ChatWorkbench
+          <WorldMode
             demoMode={demoMode}
             world={activeWorld}
             {...(activeSession === undefined ? {} : { session: activeSession })}
@@ -699,44 +791,93 @@ export default function App() {
             liveTurns={liveTurns}
             sending={sending}
             draft={draft}
+            {...(selectedEmployeeId === undefined ? {} : { selectedEmployeeId })}
             onDraftChange={setDraft}
             onSend={send}
             onUploadAttachment={uploadChatAttachment}
+            onDirectEmployee={directEmployee}
+            onSelectEmployee={setSelectedEmployeeId}
             onOpenDossier={(employeeId) => void openDossier(employeeId)}
-            onOpenArtifact={() => { setDockCollapsed(false); setDockTab('preview') }}
+            onOpenArtifact={() => { setAppMode('workbench'); setDockCollapsed(false); setDockTab('preview') }}
             onRecruit={() => void openRecruitment()}
           />
-        )}
-        right={(
-          <ArtifactDock
-            demoMode={demoMode}
-            activeTab={dockTab}
-            {...(selectedEmployee === undefined ? {} : { selectedEmployee })}
-            dossiers={dossiers}
-            employees={employees}
-            world={activeWorld}
-            {...(backgroundImage === undefined ? {} : { sceneImage: backgroundImage })}
-            onTabChange={setDockTab}
-            onCollapse={() => setDockCollapsed(true)}
-            onSelectEmployee={(employeeId) => void openDossier(employeeId)}
-            onDirectEmployee={directEmployee}
-            onManageEmployee={(employee) => setManagingEmployeeId(employee.id)}
-            onShowAllDossiers={() => setSelectedEmployeeId(undefined)}
-            onInvite={() => void openRecruitment()}
-          />
-        )}
-      />
-      {dockCollapsed ? <button className="dock-reopen" type="button" onClick={() => setDockCollapsed(false)} aria-label="展开侧边栏"><SidebarSimple size={18} /></button> : null}
+        </div>
+      ) : (
+        <ResizableShell
+          leftWidth={preferences.leftPaneWidth}
+          rightWidth={preferences.rightPaneWidth}
+          rightCollapsed={dockCollapsed}
+          rightPrimary={dockTab === 'world'}
+          onResize={resize}
+          left={(
+            <NavigationPane
+              worlds={worlds}
+              activeWorldId={activeWorld.id}
+              sessions={sessions}
+              {...(activeSessionId === undefined ? {} : { activeSessionId })}
+              employees={employees}
+              onSelectWorld={(worldId) => { const world = worlds.find((item) => item.id === worldId); if (world) void loadWorld(world) }}
+              onSelectSession={selectSession}
+              onSelectEmployee={(employeeId) => void openDossier(employeeId)}
+              onDirectEmployee={directEmployee}
+              onRecruit={() => void openRecruitment()}
+              onCreateWorld={() => setError('世界创建向导将在主题市场阶段开放。')}
+            />
+          )}
+          center={(
+            <ChatWorkbench
+              demoMode={demoMode}
+              world={activeWorld}
+              {...(activeSession === undefined ? {} : { session: activeSession })}
+              messages={messages}
+              employees={employees}
+              liveTurns={liveTurns}
+              sending={sending}
+              draft={draft}
+              onDraftChange={setDraft}
+              onSend={send}
+              onUploadAttachment={uploadChatAttachment}
+              onOpenDossier={(employeeId) => void openDossier(employeeId)}
+              onOpenArtifact={() => { setDockCollapsed(false); setDockTab('preview') }}
+              onRecruit={() => void openRecruitment()}
+            />
+          )}
+          right={(
+            <ArtifactDock
+              demoMode={demoMode}
+              activeTab={dockTab}
+              {...(selectedEmployee === undefined ? {} : { selectedEmployee })}
+              dossiers={dossiers}
+              employees={employees}
+              world={activeWorld}
+              {...(backgroundImage === undefined ? {} : { sceneImage: backgroundImage })}
+              onTabChange={setDockTab}
+              onCollapse={() => setDockCollapsed(true)}
+              onSelectEmployee={(employeeId) => void openDossier(employeeId)}
+              onDirectEmployee={directEmployee}
+              onManageEmployee={(employee) => setManagingEmployeeId(employee.id)}
+              onShowAllDossiers={() => setSelectedEmployeeId(undefined)}
+              onInvite={() => void openRecruitment()}
+            />
+          )}
+        />
+      )}
+      {appMode === 'workbench' && dockCollapsed ? <button className="dock-reopen" type="button" onClick={() => setDockCollapsed(false)} aria-label="展开侧边栏"><SidebarSimple size={18} /></button> : null}
       {settingsOpen ? (
         <SettingsDialog
           preferences={preferences}
           models={models}
+          assignments={modelAssignments}
+          workspace={workspace}
+          worlds={worlds}
+          employees={employees}
           initialSection={settingsSection}
           saving={savingSettings}
           onClose={() => setSettingsOpen(false)}
           onSavePreferences={savePreferences}
           onUploadBackground={uploadBackground}
           onSaveModel={saveModel}
+          onAssignModel={assignModel}
           onSystemAction={runSystemAction}
         />
       ) : null}
@@ -752,6 +893,8 @@ export default function App() {
       ) : null}
       {packageMarketOpen ? (
         <PackageMarketDialog
+          initialMarket={packageMarketKind}
+          items={marketplaceItems}
           installed={installedPackages}
           transactions={packageTransactions}
           loading={packageLoading}
@@ -759,6 +902,9 @@ export default function App() {
           onClose={() => setPackageMarketOpen(false)}
           onPreview={previewPackage}
           onInstall={installPackage}
+          onSearch={searchMarketplace}
+          onPreviewMarketplace={previewMarketplacePackage}
+          onInstallMarketplace={installMarketplacePackage}
         />
       ) : null}
       {managingEmployee !== undefined ? (

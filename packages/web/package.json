@@ -10,7 +10,9 @@
   },
   "dependencies": {
     "@dsh-cyber/contracts": "workspace:*",
+    "@dsh-cyber/world-runtime": "workspace:*",
     "@phosphor-icons/react": "^2.1.10",
+    "pixi.js": "8.19.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

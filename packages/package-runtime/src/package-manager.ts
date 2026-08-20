@@ -162,6 +162,34 @@ export function validatePackageManifest(manifest: CyberPackageManifest): void {
     if (!safeRelativePath(file.path)) throw new Error(`Unsafe package file path: ${file.path}`)
     if (!/^[a-f0-9]{64}$/.test(file.sha256)) throw new Error(`Invalid SHA-256: ${file.path}`)
   }
+  const entrypoints = manifest.entrypoints ?? []
+  assertUnique(entrypoints.map((entrypoint) => entrypoint.id), 'entrypoint id')
+  const packageFiles = new Set(manifest.files.map((file) => file.path))
+  for (const entrypoint of entrypoints) {
+    if (!/^[a-z0-9][a-z0-9._-]*$/.test(entrypoint.id)) {
+      throw new Error(`Invalid package entrypoint id: ${entrypoint.id}`)
+    }
+    if (!safeRelativePath(entrypoint.path) || !packageFiles.has(entrypoint.path)) {
+      throw new Error(`Package entrypoint is not a declared file: ${entrypoint.path}`)
+    }
+  }
+  if (manifest.certification !== undefined) {
+    if (!manifest.certification.authority.trim()) throw new Error('Package certification authority cannot be empty')
+    if (!/^[a-f0-9]{64}$/.test(manifest.certification.contentSha256)) {
+      throw new Error('Invalid package certification content SHA-256')
+    }
+    if (manifest.certification.contentSha256 !== packageContentDigest(manifest)) {
+      throw new Error('Package certification digest does not match declared files')
+    }
+  }
+}
+
+export function packageContentDigest(manifest: Pick<CyberPackageManifest, 'files'>): string {
+  const inventory = [...manifest.files]
+    .sort((left, right) => left.path.localeCompare(right.path))
+    .map((file) => `${file.path}:${file.sha256}`)
+    .join('\n')
+  return createHash('sha256').update(inventory).digest('hex')
 }
 
 function approvalToken(value: Omit<PackagePermissionPreview, 'approvalToken'>): string {

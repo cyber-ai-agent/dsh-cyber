@@ -1,0 +1,250 @@
+{
+  "schemaVersion": 1,
+  "id": "official-cyber-nocturne",
+  "version": "1.0.0",
+  "templateId": "cyber-company",
+  "displayName": "赛博公司 · 夜班总部",
+  "renderer": "pixi-v8",
+  "terminology": {
+    "world": "公司",
+    "participant": "员工",
+    "session": "协作频道",
+    "milestone": "成长事迹"
+  },
+  "assets": [
+    {
+      "id": "cyber-office-background",
+      "src": "/assets/cyber-office-world.png",
+      "kind": "image",
+      "preload": true,
+      "pixelArt": true
+    },
+    {
+      "id": "cyber-employee-roster",
+      "src": "/assets/employee-roster-transparent.png",
+      "kind": "spritesheet",
+      "preload": true,
+      "pixelArt": false
+    }
+  ],
+  "actorSets": [
+    {
+      "id": "cyber-employee-roster-v1",
+      "assetId": "cyber-employee-roster",
+      "frameWidth": 384,
+      "frameHeight": 512,
+      "scale": 0.25,
+      "footOffset": {
+        "x": 0,
+        "y": 112
+      },
+      "clips": {
+        "idle": {
+          "south": [0],
+          "north": [0],
+          "east": [0],
+          "west": [0]
+        },
+        "walking": {
+          "south": [0],
+          "north": [0],
+          "east": [0],
+          "west": [0]
+        },
+        "thinking": {
+          "south": [0],
+          "north": [0],
+          "east": [0],
+          "west": [0]
+        },
+        "working": {
+          "south": [0],
+          "north": [0],
+          "east": [0],
+          "west": [0]
+        },
+        "talking": {
+          "south": [0],
+          "north": [0],
+          "east": [0],
+          "west": [0]
+        },
+        "meeting": {
+          "south": [0],
+          "north": [0],
+          "east": [0],
+          "west": [0]
+        },
+        "blocked": {
+          "south": [0],
+          "north": [0],
+          "east": [0],
+          "west": [0]
+        },
+        "celebrating": {
+          "south": [0],
+          "north": [0],
+          "east": [0],
+          "west": [0]
+        }
+      }
+    }
+  ],
+  "scenes": [
+    {
+      "id": "headquarters",
+      "displayName": "总部运行层",
+      "size": {
+        "width": 1440,
+        "height": 1080
+      },
+      "cameraBounds": {
+        "x": 24,
+        "y": 24,
+        "width": 1392,
+        "height": 1032
+      },
+      "safeArea": {
+        "x": 52,
+        "y": 52,
+        "width": 1336,
+        "height": 976
+      },
+      "layers": [
+        {
+          "id": "office-background",
+          "assetId": "cyber-office-background",
+          "destination": {
+            "x": 0,
+            "y": 0,
+            "width": 1440,
+            "height": 1080
+          },
+          "zIndex": 0
+        }
+      ],
+      "anchors": [
+        {
+          "id": "workstation",
+          "position": {
+            "x": 720,
+            "y": 390
+          },
+          "facing": "north",
+          "capacity": 4,
+          "tags": ["work"]
+        },
+        {
+          "id": "operations",
+          "position": {
+            "x": 280,
+            "y": 820
+          },
+          "facing": "north",
+          "capacity": 2,
+          "tags": ["work", "operations"]
+        },
+        {
+          "id": "meeting",
+          "position": {
+            "x": 1220,
+            "y": 900
+          },
+          "facing": "south",
+          "capacity": 4,
+          "tags": ["meeting"]
+        },
+        {
+          "id": "lounge",
+          "position": {
+            "x": 1110,
+            "y": 735
+          },
+          "facing": "south",
+          "capacity": 3,
+          "tags": ["idle", "talk"]
+        }
+      ],
+      "navigation": {
+        "origin": {
+          "x": 0,
+          "y": 0
+        },
+        "cellSize": 48,
+        "columns": 30,
+        "rows": 23,
+        "blocked": []
+      },
+      "interactables": [
+        {
+          "id": "meeting-table",
+          "kind": "meeting-table",
+          "displayName": "协作会议桌",
+          "bounds": {
+            "x": 1080,
+            "y": 810,
+            "width": 300,
+            "height": 220
+          },
+          "approachAnchorIds": ["meeting"],
+          "actions": [
+            {
+              "id": "start-meeting",
+              "label": "召集会议"
+            }
+          ],
+          "zIndex": 170
+        },
+        {
+          "id": "operations-console",
+          "kind": "ops-console",
+          "displayName": "运行控制台",
+          "bounds": {
+            "x": 130,
+            "y": 650,
+            "width": 300,
+            "height": 240
+          },
+          "approachAnchorIds": ["operations"],
+          "actions": [
+            {
+              "id": "use-object",
+              "label": "查看运行轨迹"
+            }
+          ],
+          "zIndex": 160
+        }
+      ],
+      "growthSlots": [
+        {
+          "id": "growth-skill",
+          "category": "skill",
+          "position": {
+            "x": 680,
+            "y": 560
+          },
+          "zIndex": 120
+        },
+        {
+          "id": "growth-delivery",
+          "category": "delivery",
+          "position": {
+            "x": 730,
+            "y": 560
+          },
+          "zIndex": 120
+        }
+      ]
+    }
+  ],
+  "activityMapping": {
+    "task.started": "working",
+    "turn.started": "thinking",
+    "tool.started": "working",
+    "message.appended": "talking",
+    "task.blocked": "blocked",
+    "task.completed": "idle",
+    "meeting.started": "meeting",
+    "meeting.finished": "idle"
+  }
+}

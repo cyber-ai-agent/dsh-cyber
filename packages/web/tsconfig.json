@@ -9,6 +9,6 @@
     "noEmit": true,
     "types": ["vite/client"]
   },
-  "references": [{ "path": "../contracts" }],
+  "references": [{ "path": "../contracts" }, { "path": "../world-runtime" }],
   "include": ["src", "vite.config.ts"]
 }

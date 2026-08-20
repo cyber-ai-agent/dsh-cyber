@@ -1,4 +1,4 @@
-export const CYBER_SCHEMA_VERSION = 7 as const
+export const CYBER_SCHEMA_VERSION = 9 as const
 
 export type IsoTimestamp = string
 export type JsonPrimitive = boolean | number | string | null
@@ -49,6 +49,14 @@ export interface CyberPackageFile {
   sha256: string
 }
 
+export type CyberPackageEntrypointKind = 'prompt-transform' | 'employee-blueprint' | 'world-theme' | 'skill'
+
+export interface CyberPackageEntrypoint {
+  id: string
+  kind: CyberPackageEntrypointKind
+  path: string
+}
+
 export interface CyberPackageManifest {
   schemaVersion: 1
   id: string
@@ -61,6 +69,22 @@ export interface CyberPackageManifest {
   capabilities: string[]
   dataEgress: string[]
   files: CyberPackageFile[]
+  entrypoints?: CyberPackageEntrypoint[]
+  certification?: {
+    authority: string
+    level: 'official' | 'community'
+    contentSha256: string
+  }
+}
+
+export type CyberMarketKind = 'theme' | 'plugin' | 'talent'
+
+export interface CyberMarketPackage {
+  market: CyberMarketKind
+  manifest: CyberPackageManifest
+  sourceDirectory: string
+  verified: boolean
+  installedVersion?: string
 }
 
 export type InstalledPackageStatus = 'active' | 'superseded' | 'disabled'
@@ -311,6 +335,16 @@ export interface ModelProfile {
   updatedAt: IsoTimestamp
 }
 
+export type ModelAssignmentScope = 'workspace' | 'world' | 'employee'
+
+export interface ModelAssignment {
+  workspaceId: string
+  scope: ModelAssignmentScope
+  scopeId: string
+  modelProfileId: string
+  updatedAt: IsoTimestamp
+}
+
 export type LocalAssetKind = 'background' | 'attachment'
 export type LocalAssetMimeType =
   | 'image/png'
@@ -400,6 +434,7 @@ export const DOMAIN_EVENT_TYPES = [
   'celebration.finished',
   'workspace.preferences.updated',
   'model.profile.updated',
+  'model.assignment.updated',
   'local.asset.saved',
   'session.created',
   'session.participant.joined',
@@ -415,6 +450,11 @@ export const DOMAIN_EVENT_TYPES = [
   'task.waiting',
   'task.blocked',
   'task.completed',
+  'world.interaction.requested',
+  'world.interaction.completed',
+  'world.object.activated',
+  'world.lights.changed',
+  'world.runtime.snapshot.saved',
   'package.install.approved',
   'package.install.staged',
   'package.install.activated',
@@ -516,12 +556,17 @@ export interface DatabaseDoctorReport {
     employeeRelationships: number
     workspacePreferences: number
     modelProfiles: number
+    modelAssignments: number
     localAssets: number
     sessions: number
     messages: number
     installedPackages: number
     packageTransactions: number
     runtimeUpdates: number
+    worldRuntimeSnapshots: number
+    worldEntityStates: number
+    worldObjectStates: number
+    worldThemeBindings: number
     events: number
     outbox: number
   }
@@ -531,3 +576,5 @@ export interface DatabaseDoctorReport {
 export function isDomainEventType(value: string): value is DomainEventType {
   return (DOMAIN_EVENT_TYPES as readonly string[]).includes(value)
 }
+
+export * from './world-runtime.js'

@@ -79,13 +79,19 @@ class FakeRuntime implements AgentRuntimePort {
   async close(): Promise<void> {}
 }
 
-async function start(stateRoot: string, runtime = new FakeRuntime(), webRoot?: string) {
+async function start(
+  stateRoot: string,
+  runtime = new FakeRuntime(),
+  webRoot?: string,
+  marketplaceRoot?: string,
+) {
   const server = await createCyberServer({
     stateRoot,
     workspacePath: stateRoot,
     port: 0,
     runtime,
     ...(webRoot === undefined ? {} : { webRoot }),
+    ...(marketplaceRoot === undefined ? {} : { marketplaceRoot }),
   })
   servers.push(server)
   const address = await server.start()
@@ -291,6 +297,64 @@ describe('Cyber local server', () => {
     expect(worldSnapshot.body.employees.every((item: { agentSessionId?: string }) => item.agentSessionId)).toBe(true)
   })
 
+  it('projects, persists, interacts with, and recovers the World Runtime V2 state', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-world-runtime-'))
+    const first = await start(stateRoot, new FakeRuntime())
+    const { world } = await createWorld(first.origin)
+    const engineer = await recruit(first.origin, world.id, 'cyber-company.software-engineer')
+    const archivist = await recruit(first.origin, world.id, 'cyber-company.archivist')
+
+    const projected = await json(first.origin, `/api/worlds/${world.id}/runtime-snapshot`)
+    expect(projected.response.status).toBe(200)
+    expect(projected.body).toMatchObject({
+      contractVersion: 1,
+      worldId: world.id,
+      themeId: 'dsh-cyber.company.nocturne',
+      sceneId: 'headquarters',
+      clock: { lightsOn: true },
+    })
+    expect(projected.body.entities.map((item: { id: string }) => item.id).sort()).toEqual(
+      [engineer.id, archivist.id].sort(),
+    )
+    expect(projected.body.objects).toHaveLength(4)
+
+    const objectInteraction = await json(first.origin, `/api/worlds/${world.id}/interactions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'use-object',
+        actorId: 'owner',
+        entityId: engineer.id,
+        objectId: 'ops-console',
+      }),
+    })
+    expect(objectInteraction.response.status).toBe(202)
+    expect(objectInteraction.body.snapshot.objects).toContainEqual(
+      expect.objectContaining({ id: 'ops-console', state: 'active' }),
+    )
+
+    const lights = await json(first.origin, `/api/worlds/${world.id}/interactions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'toggle-lights', actorId: 'owner' }),
+    })
+    expect(lights.body.snapshot.clock.lightsOn).toBe(false)
+    expect(first.server.store.doctor().counts).toMatchObject({
+      worldRuntimeSnapshots: 1,
+      worldEntityStates: 2,
+      worldObjectStates: 4,
+      worldThemeBindings: 1,
+    })
+
+    await first.server.close()
+    servers.splice(servers.indexOf(first.server), 1)
+    const second = await start(stateRoot, new FakeRuntime())
+    const recovered = await json(second.origin, `/api/worlds/${world.id}/runtime-snapshot`)
+    expect(recovered.body.clock.lightsOn).toBe(false)
+    expect(recovered.body.entities).toHaveLength(2)
+    expect(recovered.body.sequence).toBeGreaterThan(projected.body.sequence)
+  })
+
   it('starts a world-scoped conversation after a theme switch and never leaks old @ roles', async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-server-'))
     const runtime = new FakeRuntime()
@@ -419,6 +483,32 @@ describe('Cyber local server', () => {
     expect(model.body.profile).not.toHaveProperty('credential')
     expect(model.body.profile.credentialEnvName).toBe('LOCAL_MODEL_API_KEY')
 
+    const worldAssignment = await json(
+      origin,
+      `/api/workspaces/${workspace.id}/model-assignments/world/${world.id}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modelProfileId: model.body.profile.id }),
+      },
+    )
+    const employeeAssignment = await json(
+      origin,
+      `/api/workspaces/${workspace.id}/model-assignments/employee/${employee.id}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modelProfileId: model.body.profile.id }),
+      },
+    )
+    expect(worldAssignment.response.status).toBe(200)
+    expect(employeeAssignment.response.status).toBe(200)
+    const modelSettings = await json(origin, `/api/workspaces/${workspace.id}/model-profiles`)
+    expect(modelSettings.body.assignments).toEqual(expect.arrayContaining([
+      expect.objectContaining({ scope: 'world', scopeId: world.id, modelProfileId: model.body.profile.id }),
+      expect.objectContaining({ scope: 'employee', scopeId: employee.id, modelProfileId: model.body.profile.id }),
+    ]))
+
     const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
     const asset = await json(origin, `/api/workspaces/${workspace.id}/assets/background`, {
       method: 'POST',
@@ -494,6 +584,81 @@ describe('Cyber local server', () => {
     expect(hidden.status).toBe(403)
     const traversal = await fetch(`${origin}/api/workspace/files?path=..%2F`)
     expect(traversal.status).toBe(403)
+  })
+
+  it('searches verified market packages and activates installed plugin and talent entrypoints', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-marketplace-'))
+    const runtime = new FakeRuntime()
+    const { origin } = await start(stateRoot, runtime, undefined, resolve('marketplace'))
+    const { workspace, world } = await createWorld(origin)
+    const engineer = await recruit(origin, world.id, 'cyber-company.software-engineer')
+
+    const plugins = await json(
+      origin,
+      `/api/marketplace?market=plugin&workspaceId=${workspace.id}&q=${encodeURIComponent('会议')}`,
+    )
+    expect(plugins.response.status).toBe(200)
+    expect(plugins.body.items).toHaveLength(1)
+    expect(plugins.body.items[0]).toMatchObject({
+      market: 'plugin',
+      verified: true,
+      manifest: { id: 'official-meeting-notes', version: '1.0.0' },
+    })
+
+    const pluginPreview = await json(origin, `/api/workspaces/${workspace.id}/marketplace/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ packageId: 'official-meeting-notes', version: '1.0.0' }),
+    })
+    expect(pluginPreview.response.status).toBe(200)
+    const pluginInstall = await json(origin, `/api/workspaces/${workspace.id}/marketplace/install`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        packageId: 'official-meeting-notes',
+        version: '1.0.0',
+        approvalToken: pluginPreview.body.preview.approvalToken,
+      }),
+    })
+    expect(pluginInstall.response.status).toBe(201)
+
+    const chat = await json(origin, `/api/worlds/${world.id}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        employeeIds: [engineer.id],
+        prompt: `/meeting-summary @${engineer.displayName} 整理本次发布评审`,
+      }),
+    })
+    expect(chat.response.status).toBe(200)
+    expect(runtime.calls[0]?.prompt).toContain('你是当前世界的会议纪要助手')
+    expect(runtime.calls[0]?.prompt).toContain('整理本次发布评审')
+
+    const talentPreview = await json(origin, `/api/workspaces/${workspace.id}/marketplace/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ packageId: 'official-archivist', version: '1.0.0' }),
+    })
+    const talentInstall = await json(origin, `/api/workspaces/${workspace.id}/marketplace/install`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        packageId: 'official-archivist',
+        version: '1.0.0',
+        approvalToken: talentPreview.body.preview.approvalToken,
+      }),
+    })
+    expect(talentInstall.response.status).toBe(201)
+
+    const blueprints = await json(
+      origin,
+      `/api/catalog/blueprints?templateId=cyber-company&workspaceId=${workspace.id}`,
+    )
+    expect(blueprints.body.items).toContainEqual(
+      expect.objectContaining({ id: 'official-archivist', displayName: '档案管理员' }),
+    )
+    const archivist = await recruit(origin, world.id, 'official-archivist')
+    expect(archivist.displayName).toBe('档案管理员')
   })
 
   it('rejects DNS rebinding and cross-origin mutation requests', async () => {

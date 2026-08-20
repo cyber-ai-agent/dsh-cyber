@@ -126,7 +126,7 @@ describe('SqliteStore', () => {
       '收到，我先建立基线。',
     ])
     expect(reopened.getEmployee(employee.id)?.agentSessionId).toBe('harness-session-1')
-    expect(reopened.doctor()).toMatchObject({ ok: true, schemaVersion: 7 })
+    expect(reopened.doctor()).toMatchObject({ ok: true, schemaVersion: 9 })
   })
 
   it('writes every domain event and cloud-sync outbox entry atomically', async () => {
@@ -211,7 +211,7 @@ describe('SqliteStore', () => {
     expect(backupStore.getWorkspace(workspace.id)?.name).toBe('赛博公司')
     const exported = JSON.parse(await readFile(exportPath, 'utf8')) as any
     expect(exported.format).toBe('dsh-cyber-export')
-    expect(exported.schemaVersion).toBe(7)
+    expect(exported.schemaVersion).toBe(9)
     expect(exported.workspaces[0].worlds[0].world.id).toBe(world.id)
     expect(exported.workspaces[0].worlds[0].employees[0].employee.id).toBe(employee.id)
     expect(exported.workspaces[0].worlds[0].sessions[0].messages[0].content).toBe('世界内记录')
@@ -398,6 +398,58 @@ describe('SqliteStore', () => {
     ])
   })
 
+  it('resolves model assignments from employee to world to workspace defaults', async () => {
+    const { store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: '模型路由工作区' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '研发世界', templateId: 'cyber-company' })
+    store.saveBlueprint(blueprint())
+    const employee = store.recruitEmployee({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      blueprintId: 'software-engineer',
+      blueprintVersion: 1,
+    })
+    const defaultModel = store.saveModelProfile({
+      workspaceId: workspace.id,
+      displayName: '默认模型',
+      providerKind: 'deepseek',
+      baseUrl: 'https://api.deepseek.com',
+      modelId: 'deepseek-chat',
+      api: 'openai-completions',
+      isDefault: true,
+      settings: {},
+    })
+    const worldModel = store.saveModelProfile({
+      workspaceId: workspace.id,
+      displayName: '世界模型',
+      providerKind: 'openai-compatible-remote',
+      baseUrl: 'https://api.openai.com/v1',
+      modelId: 'gpt-5.6-luna',
+      api: 'openai-responses',
+      isDefault: false,
+      settings: {},
+    })
+    const employeeModel = store.saveModelProfile({
+      workspaceId: workspace.id,
+      displayName: '员工模型',
+      providerKind: 'openai-compatible-local',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      modelId: 'qwen3:14b',
+      api: 'openai-completions',
+      isDefault: false,
+      settings: {},
+    })
+
+    expect(store.resolveModelProfile(workspace.id, world.id, employee.id)?.id).toBe(defaultModel.id)
+    store.saveModelAssignment({ workspaceId: workspace.id, scope: 'world', scopeId: world.id, modelProfileId: worldModel.id })
+    expect(store.resolveModelProfile(workspace.id, world.id, employee.id)?.id).toBe(worldModel.id)
+    store.saveModelAssignment({ workspaceId: workspace.id, scope: 'employee', scopeId: employee.id, modelProfileId: employeeModel.id })
+    expect(store.resolveModelProfile(workspace.id, world.id, employee.id)?.id).toBe(employeeModel.id)
+    expect(store.listModelAssignments(workspace.id)).toHaveLength(2)
+    expect(store.clearModelAssignment(workspace.id, 'employee', employee.id)).toBe(true)
+    expect(store.resolveModelProfile(workspace.id, world.id, employee.id)?.id).toBe(worldModel.id)
+  })
+
   it('migrates an existing v2 database forward without losing workspace data', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-cyber-migration-'))
     const databasePath = join(directory, 'cyber.sqlite')
@@ -406,6 +458,7 @@ describe('SqliteStore', () => {
     seeded.close()
     const legacy = new DatabaseSync(databasePath)
     legacy.exec(`
+      DROP TABLE model_assignments;
       DROP TABLE model_profiles;
       DROP TABLE workspace_preferences;
       DROP TABLE local_assets;
@@ -416,6 +469,10 @@ describe('SqliteStore', () => {
       DROP TABLE employee_skill_revisions;
       DROP TABLE skill_evidence;
       DROP TABLE employee_profile_revisions;
+      DROP TABLE world_theme_bindings;
+      DROP TABLE world_object_states;
+      DROP TABLE world_entity_states;
+      DROP TABLE world_runtime_snapshots;
       DELETE FROM schema_migrations WHERE version > 2;
       PRAGMA user_version = 2;
     `)
@@ -426,14 +483,19 @@ describe('SqliteStore', () => {
     expect(migrated.listWorkspaces()[0]?.name).toBe('迁移前工作区')
     expect(migrated.doctor()).toMatchObject({
       ok: true,
-      schemaVersion: 7,
+      schemaVersion: 9,
       counts: {
         installedPackages: 0,
         packageTransactions: 0,
         runtimeUpdates: 0,
         employeeProfiles: 0,
         modelProfiles: 0,
+        modelAssignments: 0,
         localAssets: 0,
+        worldRuntimeSnapshots: 0,
+        worldEntityStates: 0,
+        worldObjectStates: 0,
+        worldThemeBindings: 0,
       },
     })
   })

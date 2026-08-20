@@ -12,6 +12,7 @@ coverage/
 
 # Local runtime state
 .dsh-cyber/
+.local-data/
 data/
 *.db
 *.db-shm
