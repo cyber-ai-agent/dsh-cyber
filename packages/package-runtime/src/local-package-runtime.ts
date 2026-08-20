@@ -5,6 +5,7 @@ import {
   mkdir,
   open,
   readFile,
+  readdir,
   rename,
   rm,
 } from 'node:fs/promises'
@@ -16,8 +17,13 @@ import {
   type PackageActivationReceipt,
   type PackageRuntimePort,
   type StagedPackage,
+  packageManifestDigest,
   validatePackageManifest,
 } from './package-manager.js'
+
+const MAX_PACKAGE_FILE_BYTES = 64 * 1024 * 1024
+const MAX_PACKAGE_TOTAL_BYTES = 256 * 1024 * 1024
+const MAX_PACKAGE_MANIFEST_BYTES = 1024 * 1024
 
 export class LocalPackageRuntime implements PackageRuntimePort {
   readonly #root: string
@@ -37,6 +43,7 @@ export class LocalPackageRuntime implements PackageRuntimePort {
       if (!sourceRootMetadata.isDirectory() || sourceRootMetadata.isSymbolicLink()) {
         throw new Error('Package source must be a regular directory, not a symbolic link')
       }
+      await verifyPackageSourceInventory(sourceRoot, manifest)
       for (const file of manifest.files) {
         let sourcePath = sourceRoot
         for (const segment of file.path.split('/')) {
@@ -53,6 +60,7 @@ export class LocalPackageRuntime implements PackageRuntimePort {
         if (!metadata.isFile() || metadata.isSymbolicLink()) {
           throw new Error(`Package file must be a regular file: ${file.path}`)
         }
+        if (metadata.size > MAX_PACKAGE_FILE_BYTES) throw new Error(`Package file is too large: ${file.path}`)
         const digest = createHash('sha256').update(await readFile(sourcePath)).digest('hex')
         if (digest !== file.sha256) throw new Error(`Package file integrity mismatch: ${file.path}`)
         const targetPath = join(stagedPath, ...file.path.split('/'))
@@ -120,8 +128,52 @@ async function verifyInstalledFiles(installedPath: string, manifest: CyberPackag
     if (!path.startsWith(`${root}${sep}`)) throw new Error(`Activated package file escaped its root: ${file.path}`)
     const metadata = await lstat(path)
     if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error(`Activated package file is invalid: ${file.path}`)
+    if (metadata.size > MAX_PACKAGE_FILE_BYTES) throw new Error(`Activated package file is too large: ${file.path}`)
     const digest = createHash('sha256').update(await readFile(path)).digest('hex')
     if (digest !== file.sha256) throw new Error(`Activated package hash mismatch: ${file.path}`)
+  }
+}
+
+export async function verifyPackageSourceInventory(sourceRoot: string, manifest: CyberPackageManifest): Promise<void> {
+  const declared = new Set(manifest.files.map((file) => file.path))
+  const discovered = new Set<string>()
+  let totalBytes = 0
+
+  const visit = async (directory: string, prefix: string): Promise<void> => {
+    const entries = await readdir(directory, { withFileTypes: true })
+    for (const entry of entries) {
+      if (entry.name.startsWith('.')) throw new Error(`Hidden package entries are not allowed: ${entry.name}`)
+      const relativePath = prefix === '' ? entry.name : `${prefix}/${entry.name}`
+      const absolutePath = resolve(directory, entry.name)
+      const metadata = await lstat(absolutePath)
+      if (metadata.isSymbolicLink() || entry.isSymbolicLink()) {
+        throw new Error(`Package paths cannot contain symbolic links: ${relativePath}`)
+      }
+      if (metadata.isDirectory()) {
+        await visit(absolutePath, relativePath)
+        continue
+      }
+      if (!metadata.isFile()) throw new Error(`Package entry must be a regular file: ${relativePath}`)
+      if (relativePath === 'dsh-cyber.package.json') {
+        if (metadata.size > MAX_PACKAGE_MANIFEST_BYTES) throw new Error('Package source manifest is too large')
+        const sourceManifest = JSON.parse(await readFile(absolutePath, 'utf8')) as CyberPackageManifest
+        validatePackageManifest(sourceManifest)
+        if (packageManifestDigest(sourceManifest) !== packageManifestDigest(manifest)) {
+          throw new Error('Package source manifest does not match the approved manifest')
+        }
+        continue
+      }
+      if (!declared.has(relativePath)) throw new Error(`Package source contains an undeclared file: ${relativePath}`)
+      if (metadata.size > MAX_PACKAGE_FILE_BYTES) throw new Error(`Package file is too large: ${relativePath}`)
+      totalBytes += metadata.size
+      if (totalBytes > MAX_PACKAGE_TOTAL_BYTES) throw new Error('Package contents exceed the total size limit')
+      discovered.add(relativePath)
+    }
+  }
+
+  await visit(sourceRoot, '')
+  for (const path of declared) {
+    if (!discovered.has(path)) throw new Error(`Declared package file is missing: ${path}`)
   }
 }
 

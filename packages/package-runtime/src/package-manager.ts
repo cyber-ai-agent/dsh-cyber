@@ -83,12 +83,34 @@ interface PackageApprovalGrant {
 
 const DEFAULT_APPROVAL_TTL_MS = 5 * 60 * 1_000
 const MAX_APPROVAL_GRANTS = 2_048
+const PACKAGE_KINDS = new Set(['plugin', 'skill', 'employee-blueprint', 'world-theme', 'asset', 'model-provider'])
+const ENTRYPOINT_KINDS = new Set(['prompt-transform', 'employee-blueprint', 'world-theme', 'skill'])
+const PACKAGE_KEYS = new Set([
+  'schemaVersion',
+  'id',
+  'version',
+  'kind',
+  'displayName',
+  'summary',
+  'license',
+  'publisher',
+  'capabilities',
+  'dataEgress',
+  'files',
+  'entrypoints',
+  'certification',
+])
+const MAX_PACKAGE_FILES = 2_048
+const MAX_PACKAGE_ENTRYPOINTS = 128
+const MAX_PACKAGE_CAPABILITIES = 256
+const MAX_PACKAGE_EGRESS = 128
 
 export class PackageManager {
   readonly #store: PackageStorePort
   readonly #runtime: PackageRuntimePort
   readonly #clock: () => Date
   readonly #approvalTtlMs: number
+  readonly #validateStaged: ((staged: StagedPackage) => Promise<void>) | undefined
   readonly #approvalGrants = new Map<string, PackageApprovalGrant>()
 
   constructor(options: {
@@ -96,11 +118,13 @@ export class PackageManager {
     runtime: PackageRuntimePort
     clock?: () => Date
     approvalTtlMs?: number
+    validateStaged?: (staged: StagedPackage) => Promise<void>
   }) {
     this.#store = options.store
     this.#runtime = options.runtime
     this.#clock = options.clock ?? (() => new Date())
     this.#approvalTtlMs = options.approvalTtlMs ?? DEFAULT_APPROVAL_TTL_MS
+    this.#validateStaged = options.validateStaged
     if (!Number.isSafeInteger(this.#approvalTtlMs) || this.#approvalTtlMs <= 0) {
       throw new Error('Package approval TTL must be a positive integer')
     }
@@ -168,6 +192,7 @@ export class PackageManager {
     let receipt: PackageActivationReceipt | undefined
     try {
       staged = await this.#runtime.stage(input.manifest, input.sourceDirectory)
+      await this.#validateStaged?.(staged)
       this.#store.markPackageInstallStaged(transaction.id)
       receipt = await this.#runtime.activate(staged)
       const completeInput: Parameters<PackageStorePort['completePackageInstall']>[0] = {
@@ -207,6 +232,8 @@ export class PackageManager {
 }
 
 export function validatePackageManifest(manifest: CyberPackageManifest): void {
+  if (!isRecord(manifest)) throw new Error('Package manifest must be an object')
+  assertAllowedKeys(manifest, PACKAGE_KEYS, 'package manifest')
   if (manifest.schemaVersion !== 1) throw new Error('Unsupported package manifest schema')
   if (!/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/.test(manifest.id)) {
     throw new Error('Invalid package id')
@@ -214,44 +241,90 @@ export function validatePackageManifest(manifest: CyberPackageManifest): void {
   if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(manifest.version)) {
     throw new Error('Invalid package version')
   }
-  for (const field of [manifest.displayName, manifest.summary, manifest.license, manifest.publisher]) {
-    if (!field.trim()) throw new Error('Package metadata cannot be empty')
+  if (!PACKAGE_KINDS.has(manifest.kind)) throw new Error('Invalid package kind')
+  assertText(manifest.displayName, 'displayName', 100)
+  assertText(manifest.summary, 'summary', 500)
+  assertText(manifest.license, 'license', 128)
+  if (!/^[A-Za-z0-9.+-]+(?:\s+(?:AND|OR|WITH)\s+[A-Za-z0-9.+-]+)*$/.test(manifest.license)) {
+    throw new Error('Package license must be an SPDX identifier or expression')
   }
+  assertText(manifest.publisher, 'publisher', 200)
+  if (!Array.isArray(manifest.capabilities) || manifest.capabilities.length > MAX_PACKAGE_CAPABILITIES) {
+    throw new Error(`Package capabilities must contain at most ${MAX_PACKAGE_CAPABILITIES} items`)
+  }
+  if (!Array.isArray(manifest.dataEgress) || manifest.dataEgress.length > MAX_PACKAGE_EGRESS) {
+    throw new Error(`Package data egress must contain at most ${MAX_PACKAGE_EGRESS} items`)
+  }
+  if (!Array.isArray(manifest.files) || manifest.files.length === 0 || manifest.files.length > MAX_PACKAGE_FILES) {
+    throw new Error(`Package files must contain between 1 and ${MAX_PACKAGE_FILES} items`)
+  }
+  manifest.capabilities.forEach((capability) => {
+    if (typeof capability !== 'string' || !/^[a-z][a-z0-9._-]*:[a-z][a-z0-9._-]*$/.test(capability)) {
+      throw new Error(`Invalid package capability: ${String(capability)}`)
+    }
+  })
+  manifest.dataEgress.forEach(assertDataEgress)
   assertUnique(manifest.capabilities, 'capability')
   assertUnique(manifest.dataEgress, 'data egress declaration')
-  assertUnique(manifest.files.map((file) => file.path), 'file path')
+  const filePaths: string[] = []
   for (const file of manifest.files) {
+    if (!isRecord(file)) throw new Error('Package file entry must be an object')
+    assertAllowedKeys(file, new Set(['path', 'sha256']), 'package file')
+    if (typeof file.path !== 'string' || file.path.length > 512) throw new Error('Invalid package file path')
     if (!safeRelativePath(file.path)) throw new Error(`Unsafe package file path: ${file.path}`)
-    if (!/^[a-f0-9]{64}$/.test(file.sha256)) throw new Error(`Invalid SHA-256: ${file.path}`)
+    if (typeof file.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(file.sha256)) throw new Error(`Invalid SHA-256: ${file.path}`)
+    filePaths.push(file.path)
   }
+  assertUnique(filePaths, 'file path')
   const entrypoints = manifest.entrypoints ?? []
-  assertUnique(entrypoints.map((entrypoint) => entrypoint.id), 'entrypoint id')
-  const packageFiles = new Set(manifest.files.map((file) => file.path))
+  if (!Array.isArray(entrypoints) || entrypoints.length > MAX_PACKAGE_ENTRYPOINTS) {
+    throw new Error(`Package entrypoints must contain at most ${MAX_PACKAGE_ENTRYPOINTS} items`)
+  }
+  const entrypointIds: string[] = []
+  const packageFiles = new Set(filePaths)
   for (const entrypoint of entrypoints) {
-    if (!/^[a-z0-9][a-z0-9._-]*$/.test(entrypoint.id)) {
-      throw new Error(`Invalid package entrypoint id: ${entrypoint.id}`)
+    if (!isRecord(entrypoint)) throw new Error('Package entrypoint must be an object')
+    assertAllowedKeys(entrypoint, new Set(['id', 'kind', 'path']), 'package entrypoint')
+    if (typeof entrypoint.id !== 'string' || !/^[a-z0-9][a-z0-9._-]*$/.test(entrypoint.id)) {
+      throw new Error(`Invalid package entrypoint id: ${String(entrypoint.id)}`)
     }
-    if (!safeRelativePath(entrypoint.path) || !packageFiles.has(entrypoint.path)) {
-      throw new Error(`Package entrypoint is not a declared file: ${entrypoint.path}`)
+    if (typeof entrypoint.kind !== 'string' || !ENTRYPOINT_KINDS.has(entrypoint.kind)) throw new Error(`Invalid package entrypoint kind: ${String(entrypoint.kind)}`)
+    if (typeof entrypoint.path !== 'string' || !safeRelativePath(entrypoint.path) || !packageFiles.has(entrypoint.path)) {
+      throw new Error(`Package entrypoint is not a declared file: ${String(entrypoint.path)}`)
     }
+    entrypointIds.push(entrypoint.id)
+    assertEntrypointContract(manifest, entrypoint.kind)
+  }
+  assertUnique(entrypointIds, 'entrypoint id')
+  if (['plugin', 'employee-blueprint', 'world-theme'].includes(manifest.kind) && entrypoints.length === 0) {
+    throw new Error(`Package kind ${manifest.kind} requires an entrypoint`)
+  }
+  if (['employee-blueprint', 'world-theme'].includes(manifest.kind) && entrypoints.length !== 1) {
+    throw new Error(`Package kind ${manifest.kind} requires exactly one entrypoint`)
   }
   if (manifest.certification !== undefined) {
-    if (!manifest.certification.authority.trim()) throw new Error('Package certification authority cannot be empty')
+    if (!isRecord(manifest.certification)) throw new Error('Package certification must be an object')
+    assertAllowedKeys(manifest.certification, new Set(['authority', 'level', 'contentSha256']), 'package certification')
+    assertText(manifest.certification.authority, 'certification authority', 200)
+    if (!['official', 'community'].includes(manifest.certification.level)) throw new Error('Invalid package certification level')
     if (!/^[a-f0-9]{64}$/.test(manifest.certification.contentSha256)) {
       throw new Error('Invalid package certification content SHA-256')
     }
     if (manifest.certification.contentSha256 !== packageContentDigest(manifest)) {
-      throw new Error('Package certification digest does not match declared files')
+      throw new Error('Package certification digest does not match the declared manifest contents')
     }
   }
 }
 
-export function packageContentDigest(manifest: Pick<CyberPackageManifest, 'files'>): string {
-  const inventory = [...manifest.files]
-    .sort((left, right) => left.path.localeCompare(right.path))
-    .map((file) => `${file.path}:${file.sha256}`)
-    .join('\n')
-  return createHash('sha256').update(inventory).digest('hex')
+export function packageContentDigest(manifest: CyberPackageManifest): string {
+  const certification = manifest.certification === undefined
+    ? undefined
+    : { authority: manifest.certification.authority, level: manifest.certification.level }
+  const unsignedManifest = {
+    ...manifest,
+    ...(certification === undefined ? {} : { certification }),
+  }
+  return createHash('sha256').update(stableSerialize(unsignedManifest)).digest('hex')
 }
 
 export function packageManifestDigest(manifest: CyberPackageManifest): string {
@@ -284,7 +357,54 @@ function assertUnique(values: readonly string[], label: string): void {
 function safeRelativePath(value: string): boolean {
   if (!value || value.includes('\\') || value.startsWith('/') || /^[A-Za-z]:/.test(value)) return false
   const parts = value.split('/')
-  return parts.every((part) => part !== '' && part !== '.' && part !== '..')
+  return parts.every((part) => part !== '' && part !== '.' && part !== '..' && !part.startsWith('.'))
+}
+
+function assertEntrypointContract(manifest: CyberPackageManifest, kind: string): void {
+  const expectation = ({
+    'prompt-transform': { packageKind: 'plugin', capability: 'prompt:transform', noEgress: true },
+    'employee-blueprint': { packageKind: 'employee-blueprint', capability: 'employee:blueprint', noEgress: true },
+    'world-theme': { packageKind: 'world-theme', capability: 'world:render', noEgress: true },
+    skill: { packageKind: 'skill', capability: undefined, noEgress: false },
+  } as const)[kind as 'prompt-transform' | 'employee-blueprint' | 'world-theme' | 'skill']
+  if (expectation === undefined || manifest.kind !== expectation.packageKind) {
+    throw new Error(`Entrypoint ${kind} is incompatible with package kind ${manifest.kind}`)
+  }
+  if (expectation.capability !== undefined && !manifest.capabilities.includes(expectation.capability)) {
+    throw new Error(`Entrypoint ${kind} requires capability ${expectation.capability}`)
+  }
+  if (expectation.noEgress && manifest.dataEgress.length > 0) {
+    throw new Error(`Entrypoint ${kind} does not support data egress`)
+  }
+}
+
+function assertDataEgress(value: string): void {
+  if (typeof value !== 'string' || value.length > 512) throw new Error('Invalid package data egress declaration')
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    throw new Error(`Invalid package data egress URL: ${value}`)
+  }
+  if (url.protocol !== 'https:' || !url.hostname || url.username || url.password || url.hash) {
+    throw new Error(`Invalid package data egress URL: ${value}`)
+  }
+}
+
+function assertText(value: unknown, field: string, maximum: number): asserts value is string {
+  if (typeof value !== 'string' || !value.trim() || value.length > maximum || /[\u0000-\u001f\u007f]/.test(value)) {
+    throw new Error(`Package ${field} must be non-empty text of at most ${maximum} characters`)
+  }
+}
+
+function assertAllowedKeys(value: Record<string, unknown>, allowed: Set<string>, label: string): void {
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) throw new Error(`Unknown ${label} field: ${key}`)
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function packageErrorCode(error: unknown): string {

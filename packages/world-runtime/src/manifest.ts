@@ -6,6 +6,16 @@ const RENDERERS = ['pixi-2d', 'pixi-2.5d', 'three-2.5d', 'three-3d'] as const
 const FACINGS = ['north', 'east', 'south', 'west'] as const
 const ACTIVITIES = ['idle', 'walking', 'thinking', 'working', 'talking', 'meeting', 'blocked', 'celebrating'] as const
 const ACTIONS = ['focus', 'talk', 'assign-task', 'inspect', 'use-object', 'start-meeting', 'toggle-lights', 'fit-camera'] as const
+const REQUIRED_ACTIVITY_EVENTS = [
+  'task.started',
+  'turn.started',
+  'tool.started',
+  'message.appended',
+  'task.blocked',
+  'task.completed',
+  'meeting.started',
+  'meeting.finished',
+] as const
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/
 const MAX_ERRORS = 200
@@ -23,19 +33,20 @@ export function validateWorldThemeManifest(value: unknown): ManifestValidationRe
   string(root.templateId, 'templateId', errors, ID)
   string(root.displayName, 'displayName', errors, undefined, 160)
   enumeration(root.renderer, 'renderer', RENDERERS, errors)
-  if (!record(root.terminology)) error(errors, 'terminology must be an object')
-  else if (Object.keys(root.terminology).length > 128) error(errors, 'terminology exceeds 128 entries')
+  jsonObject(root.terminology, 'terminology', errors)
 
   const assets = array(root.assets, 'assets', 1, 128, errors)
   const assetIds = new Set<string>()
+  const assetKinds = new Map<string, string>()
   assets.forEach((raw, index) => {
     const path = `assets[${index}]`
     const asset = object(raw, path, ['id', 'src', 'kind', 'preload', 'pixelArt'], errors)
     if (asset === undefined) return
-    uniqueString(asset.id, `${path}.id`, assetIds, errors)
+    const id = uniqueString(asset.id, `${path}.id`, assetIds, errors)
     const src = string(asset.src, `${path}.src`, errors, undefined, 512)
     if (src !== undefined && !safeAssetPath(src)) error(errors, `${path}.src is unsafe`)
-    enumeration(asset.kind, `${path}.kind`, ['image', 'spritesheet'], errors)
+    const kind = enumeration(asset.kind, `${path}.kind`, ['image', 'spritesheet'], errors)
+    if (id !== undefined && kind !== undefined) assetKinds.set(id, kind)
     boolean(asset.preload, `${path}.preload`, errors)
     if (asset.pixelArt !== undefined) boolean(asset.pixelArt, `${path}.pixelArt`, errors)
   })
@@ -48,6 +59,9 @@ export function validateWorldThemeManifest(value: unknown): ManifestValidationRe
     if (actor === undefined) return
     uniqueString(actor.id, `${path}.id`, actorSetIds, errors)
     reference(actor.assetId, `${path}.assetId`, assetIds, errors)
+    if (typeof actor.assetId === 'string' && assetKinds.get(actor.assetId) !== 'spritesheet') {
+      error(errors, `${path}.assetId must reference a spritesheet asset`)
+    }
     if (actor.fallbackAssetId !== undefined) reference(actor.fallbackAssetId, `${path}.fallbackAssetId`, assetIds, errors)
     integer(actor.frameWidth, `${path}.frameWidth`, 1, 8192, errors)
     integer(actor.frameHeight, `${path}.frameHeight`, 1, 8192, errors)
@@ -189,12 +203,15 @@ function clips(raw: unknown, path: string, errors: string[]): void {
     if (!(activity in value)) return error(errors, `${path}.${activity} is required`)
     const clip = object(value[activity], `${path}.${activity}`, FACINGS, errors)
     if (clip === undefined) return
+    let activityFrameCount = 0
     FACINGS.forEach((facing) => {
       if (clip[facing] === undefined) return
       const frames = array(clip[facing], `${path}.${activity}.${facing}`, 1, 256, errors)
       frameCount += frames.length
+      activityFrameCount += frames.length
       frames.forEach((frame, index) => integer(frame, `${path}.${activity}.${facing}[${index}]`, 0, 65535, errors))
     })
+    if (activityFrameCount === 0) error(errors, `${path}.${activity} must define at least one directional frame`)
   })
   if (frameCount > 4096) error(errors, `${path} exceeds 4096 frames`)
 }
@@ -206,6 +223,9 @@ function activityMapping(raw: unknown, errors: string[]): void {
   entries.slice(0, 256).forEach(([key, value]) => {
     string(key, `activityMapping.${key}`, errors, undefined, 160)
     enumeration(value, `activityMapping.${key}`, ACTIVITIES, errors)
+  })
+  REQUIRED_ACTIVITY_EVENTS.forEach((event) => {
+    if (!(event in raw)) error(errors, `activityMapping.${event} is required`)
   })
 }
 
@@ -226,6 +246,66 @@ function validateBudget(raw: unknown, errors: string[]): void {
   visit(raw, 0)
   if (nodes > 100_000) error(errors, 'manifest exceeds 100000 JSON nodes')
   if (bytes > 1_000_000) error(errors, 'manifest exceeds 1000000 UTF-8 string bytes')
+}
+
+function jsonObject(raw: unknown, path: string, errors: string[]): void {
+  if (!record(raw)) return error(errors, `${path} must be an object`)
+  jsonRecord(raw, path, 0, new WeakSet<object>(), errors)
+}
+
+function jsonRecord(
+  value: Record<string, unknown>,
+  path: string,
+  depth: number,
+  visiting: WeakSet<object>,
+  errors: string[],
+): void {
+  if (visiting.has(value)) return error(errors, `${path} must not contain circular references`)
+  visiting.add(value)
+  const entries = Object.entries(value)
+  if (entries.length > 128) error(errors, `${path} exceeds 128 entries`)
+  entries.slice(0, 128).forEach(([key, item]) => {
+    if (key.trim() === '' || key.length > 160 || /[\u0000-\u001f\u007f]/.test(key)) {
+      error(errors, `${path} contains an invalid key`)
+      return
+    }
+    jsonValue(item, `${path}.${key}`, depth + 1, visiting, errors)
+  })
+  visiting.delete(value)
+}
+
+function jsonValue(
+  value: unknown,
+  path: string,
+  depth: number,
+  visiting: WeakSet<object>,
+  errors: string[],
+): void {
+  if (depth > 16) return error(errors, `${path} exceeds maximum terminology depth 16`)
+  if (value === null || typeof value === 'boolean') return
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) error(errors, `${path} must be a finite JSON number`)
+    return
+  }
+  if (typeof value === 'string') {
+    if (value.length > 16_384 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value)) {
+      error(errors, `${path} must be valid JSON text of at most 16384 characters`)
+    }
+    return
+  }
+  if (Array.isArray(value)) {
+    if (visiting.has(value)) return error(errors, `${path} must not contain circular references`)
+    visiting.add(value)
+    if (value.length > 512) error(errors, `${path} exceeds 512 items`)
+    value.slice(0, 512).forEach((item, index) => jsonValue(item, `${path}[${index}]`, depth + 1, visiting, errors))
+    visiting.delete(value)
+    return
+  }
+  if (record(value)) {
+    jsonRecord(value, path, depth, visiting, errors)
+    return
+  }
+  error(errors, `${path} must be a JSON value`)
 }
 
 function object(raw: unknown, path: string, keys: readonly string[], errors: string[]): Record<string, unknown> | undefined {

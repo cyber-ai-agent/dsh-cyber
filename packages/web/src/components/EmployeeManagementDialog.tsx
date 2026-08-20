@@ -22,8 +22,8 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
   const [selectedAvatar, setSelectedAvatar] = useState(avatarIndex)
   const [reason, setReason] = useState('更新岗位配置')
   const [persona, setPersona] = useState('')
-  const [skills, setSkills] = useState('')
-  const [capabilities, setCapabilities] = useState('')
+  const [skills, setSkills] = useState(currentRevision?.skillGrants.join(', ') ?? '')
+  const [capabilities, setCapabilities] = useState(currentRevision?.capabilityGrants.join(', ') ?? '')
   const configuredModelId = currentRevision?.modelPolicy.modelProfileId
   const [modelProfileId, setModelProfileId] = useState(typeof configuredModelId === 'string' ? configuredModelId : '')
   const [confirmArchive, setConfirmArchive] = useState(false)
@@ -77,8 +77,8 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
               onClick={() => void onRevise({
                 reason: reason.trim(),
                 ...(persona.trim() ? { persona: persona.trim() } : {}),
-                ...(skills.trim() ? { skillGrants: splitList(skills) } : {}),
-                ...(capabilities.trim() ? { capabilityGrants: splitList(capabilities) } : {}),
+                skillGrants: splitList(skills),
+                capabilityGrants: splitList(capabilities),
                 modelPolicy: modelProfileId ? { modelProfileId } : {},
               })}
             >

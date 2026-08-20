@@ -101,6 +101,21 @@ export function headerValue(value: string | string[] | undefined): string | null
 export function packageManifest(value: unknown): CyberPackageManifest {
   const input = record(value)
   if (input === undefined) throw new HttpError(422, 'manifest_required', 'Package manifest required')
+  assertExactObjectKeys(input, [
+    'schemaVersion',
+    'id',
+    'version',
+    'kind',
+    'displayName',
+    'summary',
+    'license',
+    'publisher',
+    'capabilities',
+    'dataEgress',
+    'files',
+    'entrypoints',
+    'certification',
+  ], 'package manifest')
   if (input.schemaVersion !== 1) {
     throw new HttpError(422, 'invalid_manifest_schema', 'Unsupported package manifest schema')
   }
@@ -122,6 +137,7 @@ export function packageManifest(value: unknown): CyberPackageManifest {
   const files = input.files.map((item) => {
     const file = record(item)
     if (file === undefined) throw new HttpError(422, 'invalid_package_file', 'Invalid package file')
+    assertExactObjectKeys(file, ['path', 'sha256'], 'package file')
     return {
       path: requiredString(file, 'path'),
       sha256: requiredString(file, 'sha256'),
@@ -133,6 +149,7 @@ export function packageManifest(value: unknown): CyberPackageManifest {
       ? input.entrypoints.map((item) => {
           const entrypoint = record(item)
           if (entrypoint === undefined) throw new HttpError(422, 'invalid_package_entrypoint', 'Invalid package entrypoint')
+          assertExactObjectKeys(entrypoint, ['id', 'kind', 'path'], 'package entrypoint')
           return {
             id: requiredString(entrypoint, 'id'),
             kind: requiredEnum(entrypoint, 'kind', ['prompt-transform', 'employee-blueprint', 'world-theme', 'skill']),
@@ -141,13 +158,15 @@ export function packageManifest(value: unknown): CyberPackageManifest {
         })
       : (() => { throw new HttpError(422, 'invalid_package_entrypoints', 'Package entrypoints must be an array') })()
   const certificationInput = record(input.certification)
-  const certification = certificationInput === undefined
-    ? undefined
-    : {
-        authority: requiredString(certificationInput, 'authority'),
-        level: requiredEnum(certificationInput, 'level', ['official', 'community']),
-        contentSha256: requiredString(certificationInput, 'contentSha256'),
-      }
+  let certification: CyberPackageManifest['certification']
+  if (certificationInput !== undefined) {
+    assertExactObjectKeys(certificationInput, ['authority', 'level', 'contentSha256'], 'package certification')
+    certification = {
+      authority: requiredString(certificationInput, 'authority'),
+      level: requiredEnum(certificationInput, 'level', ['official', 'community']),
+      contentSha256: requiredString(certificationInput, 'contentSha256'),
+    }
+  }
   return {
     schemaVersion: 1,
     id: requiredString(input, 'id'),
@@ -157,10 +176,26 @@ export function packageManifest(value: unknown): CyberPackageManifest {
     summary: requiredString(input, 'summary'),
     license: requiredString(input, 'license'),
     publisher: requiredString(input, 'publisher'),
-    capabilities: optionalStringArray(input.capabilities),
-    dataEgress: optionalStringArray(input.dataEgress),
+    capabilities: strictStringArray(input.capabilities, 'capabilities'),
+    dataEgress: strictStringArray(input.dataEgress, 'dataEgress'),
     files,
     ...(entrypoints === undefined ? {} : { entrypoints }),
     ...(certification === undefined ? {} : { certification }),
+  }
+}
+
+function strictStringArray(value: unknown, field: string): string[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || item.trim().length === 0)) {
+    throw new HttpError(422, 'invalid_manifest_array', `${field} must be an array of non-empty strings`)
+  }
+  return value.map((item) => (item as string).trim())
+}
+
+function assertExactObjectKeys(value: Record<string, unknown>, allowedKeys: readonly string[], label: string): void {
+  const allowed = new Set(allowedKeys)
+  const unknown = Object.keys(value).find((key) => !allowed.has(key))
+  if (unknown !== undefined) {
+    throw new HttpError(422, 'invalid_manifest_field', `Unknown ${label} field: ${unknown}`)
   }
 }

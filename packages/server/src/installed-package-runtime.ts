@@ -3,14 +3,19 @@ import { lstat, readFile } from 'node:fs/promises'
 import { extname, resolve, sep } from 'node:path'
 
 import type { EmployeeBlueprint, InstalledPackage, WorldThemeManifestV1 } from '@dsh-cyber/contracts'
+import type { StagedPackage } from '@dsh-cyber/package-runtime'
 import { validateWorldThemeManifest } from '@dsh-cyber/world-runtime'
 
-const MAX_ENTRYPOINT_BYTES = 512 * 1024
+import { parseEmployeeBlueprintManifest } from './employee-blueprint-manifest.js'
+import {
+  parsePromptTransformDefinition,
+  type PromptTransform,
+} from './prompt-transform-parser.js'
+import { validateWorldThemePackageAssets } from './world-theme-package.js'
 
-interface PromptTransformDefinition {
-  schemaVersion: 1
-  commands: Array<{ trigger: string; instruction: string }>
-}
+export { parsePromptTransformDefinition } from './prompt-transform-parser.js'
+
+const MAX_ENTRYPOINT_BYTES = 512 * 1024
 
 export interface InstalledWorldTheme {
   packageId: string
@@ -47,32 +52,54 @@ export async function applyInstalledPromptTransforms(
   packages: InstalledPackage[],
   prompt: string,
 ): Promise<string> {
-  let transformed = prompt
-  for (const installed of packages.filter((item) => item.status === 'active')) {
+  const originalPrompt = prompt
+  const matched: AppliedPromptTransform[] = []
+  const activePackages = packages
+    .filter((item) => item.status === 'active')
+    .sort(compareInstalledPackages)
+  for (const installed of activePackages) {
     for (const entrypoint of installed.manifest.entrypoints ?? []) {
       if (entrypoint.kind !== 'prompt-transform') continue
-      const definition = await readEntrypoint<PromptTransformDefinition>(installed, entrypoint.path)
-      if (definition.schemaVersion !== 1 || !Array.isArray(definition.commands)) continue
-      for (const command of definition.commands) {
-        if (!validCommand(command) || !commandMatches(transformed, command.trigger)) continue
-        transformed = `${command.instruction.trim()}\n\n用户原始请求：\n${transformed}`
+      assertPromptTransformPackage(installed)
+      const definition = parsePromptTransformDefinition(await readEntrypoint<unknown>(installed, entrypoint.path))
+      for (const [index, transform] of definition.transforms.entries()) {
+        if (!transformMatches(originalPrompt, transform.trigger)) continue
+        matched.push({
+          packageId: installed.packageId,
+          packageVersion: installed.version,
+          entrypointId: entrypoint.id,
+          entrypointPath: entrypoint.path,
+          index,
+          transform,
+        })
       }
     }
   }
-  return transformed
+  matched.sort(compareAppliedTransforms)
+
+  const replacement = matched.find((item) => item.transform.mode === 'replace')?.transform.instruction
+  const base = replacement ?? originalPrompt
+  const prepends = matched
+    .filter((item) => item.transform.mode === 'prepend')
+    .map((item) => item.transform.instruction)
+  const appends = matched
+    .filter((item) => item.transform.mode === 'append')
+    .map((item) => item.transform.instruction)
+  return [...prepends, base, ...appends].join('\n\n')
 }
 
 export async function loadInstalledBlueprints(packages: InstalledPackage[]): Promise<EmployeeBlueprint[]> {
   const blueprints: EmployeeBlueprint[] = []
   for (const installed of packages.filter((item) => item.status === 'active')) {
-    for (const entrypoint of installed.manifest.entrypoints ?? []) {
-      if (entrypoint.kind !== 'employee-blueprint') continue
+    const entrypoints = (installed.manifest.entrypoints ?? []).filter((entrypoint) => entrypoint.kind === 'employee-blueprint')
+    if (entrypoints.length === 0) continue
+    assertEmployeeBlueprintPackage(installed, entrypoints.length)
+    for (const entrypoint of entrypoints) {
       const value = await readEntrypoint<unknown>(installed, entrypoint.path)
-      const candidates = Array.isArray(value) ? value : [value]
-      for (const candidate of candidates) {
-        const blueprint = parseBlueprint(candidate)
-        if (blueprint !== undefined) blueprints.push(blueprint)
-      }
+      blueprints.push(parseEmployeeBlueprintManifest(value, {
+        packageId: installed.packageId,
+        packageCapabilities: installed.manifest.capabilities,
+      }))
     }
   }
   return blueprints
@@ -84,24 +111,53 @@ export async function loadInstalledWorldThemes(
 ): Promise<InstalledWorldTheme[]> {
   const themes: InstalledWorldTheme[] = []
   for (const installed of packages.filter((item) => item.status === 'active' && item.kind === 'world-theme')) {
+    const entrypoints = (installed.manifest.entrypoints ?? []).filter((entrypoint) => entrypoint.kind === 'world-theme')
+    assertWorldThemePackage(installed, entrypoints.length)
     await verificationCache.verifyPackage(installed)
-    for (const entrypoint of installed.manifest.entrypoints ?? []) {
-      if (entrypoint.kind !== 'world-theme') continue
+    for (const entrypoint of entrypoints) {
       const value = await readEntrypoint<unknown>(installed, entrypoint.path, verificationCache)
       const validation = validateWorldThemeManifest(value)
       if (!validation.valid) throw new Error(`Invalid installed world theme ${installed.packageId}: ${validation.errors.join('; ')}`)
       const manifest = value as WorldThemeManifestV1
       const declaredFiles = new Set(installed.manifest.files.map((file) => file.path))
-      for (const asset of manifest.assets) {
-        if (!safeRelativePackagePath(asset.src) || !declaredFiles.has(asset.src)) {
-          throw new Error(`World theme asset is not a declared package file: ${asset.src}`)
-        }
-      }
+      await validateWorldThemePackageAssets(
+        manifest,
+        declaredFiles,
+        (relativePath) => verificationCache.readFile(installed, relativePath),
+      )
       const entrypointFile = installed.manifest.files.find((file) => file.path === entrypoint.path)!
       themes.push({ packageId: installed.packageId, packageVersion: installed.version, contentDigest: entrypointFile.sha256, manifest })
     }
   }
   return themes
+}
+
+export async function validateStagedPackageEntrypoints(staged: StagedPackage): Promise<void> {
+  const installed: InstalledPackage = {
+    workspaceId: '__staged__',
+    packageId: staged.manifest.id,
+    version: staged.manifest.version,
+    kind: staged.manifest.kind,
+    status: 'active',
+    installedPath: staged.path,
+    capabilities: [...staged.manifest.capabilities],
+    manifest: staged.manifest,
+    installedAt: '1970-01-01T00:00:00.000Z',
+    updatedAt: '1970-01-01T00:00:00.000Z',
+  }
+  const verificationCache = new InstalledPackageVerificationCache()
+  await verificationCache.verifyPackage(installed)
+  if (installed.kind === 'plugin') {
+    await applyInstalledPromptTransforms([installed], '')
+    return
+  }
+  if (installed.kind === 'employee-blueprint') {
+    await loadInstalledBlueprints([installed])
+    return
+  }
+  if (installed.kind === 'world-theme') {
+    await loadInstalledWorldThemes([installed], verificationCache)
+  }
 }
 
 export async function readInstalledWorldThemeAsset(
@@ -183,39 +239,81 @@ function assetContentType(path: string): string {
   return ({ '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.json': 'application/json' } as Record<string, string>)[extname(path).toLowerCase()] ?? 'application/octet-stream'
 }
 
-function validCommand(value: unknown): value is { trigger: string; instruction: string } {
-  if (typeof value !== 'object' || value === null) return false
-  const command = value as Record<string, unknown>
-  return typeof command.trigger === 'string' && command.trigger.trim().startsWith('/') &&
-    typeof command.instruction === 'string' && command.instruction.trim().length > 0
+interface AppliedPromptTransform {
+  packageId: string
+  packageVersion: string
+  entrypointId: string
+  entrypointPath: string
+  index: number
+  transform: PromptTransform
 }
 
-function commandMatches(prompt: string, trigger: string): boolean {
+function assertPromptTransformPackage(installed: InstalledPackage): void {
+  if (installed.kind !== 'plugin' || installed.manifest.kind !== 'plugin') {
+    throw new Error(`Prompt-transform entrypoint requires plugin package: ${installed.packageId}`)
+  }
+  if (!installed.manifest.capabilities.includes('prompt:transform')) {
+    throw new Error(`Prompt-transform package is missing prompt:transform capability: ${installed.packageId}`)
+  }
+  if (installed.manifest.dataEgress.length !== 0) {
+    throw new Error(`Prompt-transform package must not declare data egress: ${installed.packageId}`)
+  }
+}
+
+function assertEmployeeBlueprintPackage(installed: InstalledPackage, entrypointCount: number): void {
+  if (installed.kind !== 'employee-blueprint' || installed.manifest.kind !== 'employee-blueprint') {
+    throw new Error(`Employee-blueprint entrypoint requires employee-blueprint package: ${installed.packageId}`)
+  }
+  if (entrypointCount !== 1) {
+    throw new Error(`Employee-blueprint package requires exactly one entrypoint: ${installed.packageId}`)
+  }
+  if (!installed.manifest.capabilities.includes('employee:blueprint')) {
+    throw new Error(`Employee-blueprint package is missing employee:blueprint capability: ${installed.packageId}`)
+  }
+  if (installed.manifest.dataEgress.length !== 0) {
+    throw new Error(`Employee-blueprint package must not declare data egress: ${installed.packageId}`)
+  }
+}
+
+function assertWorldThemePackage(installed: InstalledPackage, entrypointCount: number): void {
+  if (installed.kind !== 'world-theme' || installed.manifest.kind !== 'world-theme') {
+    throw new Error(`World-theme entrypoint requires world-theme package: ${installed.packageId}`)
+  }
+  if (entrypointCount !== 1) {
+    throw new Error(`World-theme package requires exactly one entrypoint: ${installed.packageId}`)
+  }
+  if (!installed.manifest.capabilities.includes('world:render')) {
+    throw new Error(`World-theme package is missing world:render capability: ${installed.packageId}`)
+  }
+  if (installed.manifest.dataEgress.length !== 0) {
+    throw new Error(`World-theme package must not declare data egress: ${installed.packageId}`)
+  }
+}
+
+function transformMatches(prompt: string, trigger: string): boolean {
+  if (trigger === 'always') return true
   const normalized = trigger.trim()
   return prompt === normalized || prompt.startsWith(`${normalized} `) || prompt.startsWith(`${normalized}\n`)
 }
 
-function parseBlueprint(value: unknown): EmployeeBlueprint | undefined {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
-  const input = value as Record<string, unknown>
-  const strings = ['id', 'worldTemplateId', 'displayName', 'role', 'summary', 'persona', 'createdAt'] as const
-  if (strings.some((field) => typeof input[field] !== 'string' || !(input[field] as string).trim())) return undefined
-  if (typeof input.version !== 'number' || !Number.isInteger(input.version) || input.version < 1) return undefined
-  if (!stringArray(input.requestedSkills) || !stringArray(input.requestedCapabilities)) return undefined
-  return {
-    id: input.id as string,
-    version: input.version,
-    worldTemplateId: input.worldTemplateId as string,
-    displayName: input.displayName as string,
-    role: input.role as string,
-    summary: input.summary as string,
-    persona: input.persona as string,
-    requestedSkills: input.requestedSkills,
-    requestedCapabilities: input.requestedCapabilities,
-    createdAt: input.createdAt as string,
-  }
+function compareInstalledPackages(left: InstalledPackage, right: InstalledPackage): number {
+  return compareStrings(left.packageId, right.packageId) ||
+    compareStrings(left.version, right.version) ||
+    compareStrings(left.installedPath, right.installedPath)
 }
 
-function stringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === 'string' && item.trim().length > 0)
+function compareAppliedTransforms(left: AppliedPromptTransform, right: AppliedPromptTransform): number {
+  return left.transform.priority === right.transform.priority
+    ? compareStrings(left.packageId, right.packageId) ||
+      compareStrings(left.packageVersion, right.packageVersion) ||
+      compareStrings(left.entrypointId, right.entrypointId) ||
+      compareStrings(left.entrypointPath, right.entrypointPath) ||
+      compareStrings(left.transform.id, right.transform.id) ||
+      left.index - right.index
+    : left.transform.priority > right.transform.priority ? -1 : 1
+}
+
+function compareStrings(left: string, right: string): number {
+  if (left === right) return 0
+  return left < right ? -1 : 1
 }

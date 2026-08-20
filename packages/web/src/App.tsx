@@ -408,7 +408,11 @@ export default function App() {
     }
   }, [installPackage, loadPackages, searchMarketplace, workspace])
 
-  const recruitEmployee = useCallback(async (blueprint: EmployeeBlueprint, displayName?: string) => {
+  const recruitEmployee = useCallback(async (
+    blueprint: EmployeeBlueprint,
+    displayName: string | undefined,
+    capabilityGrants: string[],
+  ) => {
     if (activeWorld === undefined) return
     setRecruiting(true)
     setError(undefined)
@@ -432,7 +436,12 @@ export default function App() {
       } else {
         const result = await api<{ employee: EmployeeInstance }>(`/api/worlds/${activeWorld.id}/recruit`, {
           method: 'POST',
-          body: JSON.stringify({ blueprintId: blueprint.id, blueprintVersion: blueprint.version, ...(displayName === undefined ? {} : { displayName }) }),
+          body: JSON.stringify({
+            blueprintId: blueprint.id,
+            blueprintVersion: blueprint.version,
+            capabilityGrants,
+            ...(displayName === undefined ? {} : { displayName }),
+          }),
         })
         employee = result.employee
       }

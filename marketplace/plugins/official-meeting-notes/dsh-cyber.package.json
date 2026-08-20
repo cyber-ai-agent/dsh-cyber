@@ -14,7 +14,7 @@
   "files": [
     {
       "path": "meeting-notes.json",
-      "sha256": "e64503041cb106218ae7792f5be20866adbbfdebe3b3fa7e0e06e379e456dde5"
+      "sha256": "e5092a95db9b8f499559a5ef43de35673e4fb143fc7da5d6e20f632296bd037d"
     }
   ],
   "entrypoints": [
@@ -27,6 +27,6 @@
   "certification": {
     "authority": "DSH Cyber",
     "level": "official",
-    "contentSha256": "eb25fc713d493f96db6d6a2b3e05c2c594d79c3c10c2a633d941eac8ed746318"
+    "contentSha256": "eb49a2a625287d5f4dc8c14d6ea3c768b58cea7c47085d83cc97601a94b0bbae"
   }
 }

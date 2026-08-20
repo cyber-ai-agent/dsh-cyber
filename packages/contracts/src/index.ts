@@ -157,6 +157,7 @@ export interface RuntimeUpdateTransaction {
 }
 
 export interface EmployeeBlueprint {
+  schemaVersion: 1
   id: string
   version: number
   worldTemplateId: string
