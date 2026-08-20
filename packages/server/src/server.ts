@@ -10,14 +10,11 @@ import type {
   AgentRuntimePort,
   ChatAttachment,
   CyberMarketKind,
-  CyberPackageKind,
-  CyberPackageManifest,
   JsonObject,
   LocalAssetMimeType,
   ModelProfile,
   WorldInteractionAction,
   WorldInteractionRequest,
-  WorldRuntimeStreamEnvelope,
 } from '@dsh-cyber/contracts'
 import {
   clearActiveHarnessRuntime,
@@ -32,23 +29,40 @@ import {
   type HarnessModelRoute,
 } from '@dsh-cyber/harness-adapter'
 import {
-  ConversationOrchestrationError,
   ConversationOrchestrator,
   type DirectConversationInput,
 } from '@dsh-cyber/orchestration'
 import {
   LocalPackageCatalog,
   LocalPackageRuntime,
-  PackageApprovalRequiredError,
-  PackageInstallError,
   PackageManager,
   type PackageRuntimePort,
 } from '@dsh-cyber/package-runtime'
 import { SqliteStore } from '@dsh-cyber/persistence'
+import { HttpError, writeError } from './http/errors.js'
+import { match } from './http/router.js'
+import {
+  nonNegativeInteger,
+  nullableString,
+  optionalPositiveInteger,
+  optionalString,
+  optionalStringArray,
+  packageManifest,
+  readJson,
+  record,
+  requiredBoolean,
+  requiredEnum,
+  requiredNumber,
+  requiredString,
+} from './http/request.js'
+import { writeBinary, writeHtml, writeJson, writeWorkspaceFile } from './http/response.js'
+import { assertLocalRequest, isLoopbackHost } from './http/security.js'
+import { serveWebAsset, isMissingFile } from './http/static-files.js'
 import { applyInstalledPromptTransforms, loadInstalledBlueprints } from './installed-package-runtime.js'
-import { UnsupportedWorldRuntimeError, WorldRuntimeService } from './world-runtime-service.js'
+import { RuntimeStreamHub } from './streams/runtime-stream-hub.js'
+import { WorldStreamHub } from './streams/world-stream-hub.js'
+import { WorldRuntimeService } from './world-runtime-service.js'
 
-const MAX_BODY_BYTES = 8 * 1024 * 1024
 const MAX_BACKGROUND_BYTES = 5 * 1024 * 1024
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
 const MAX_WORKSPACE_PREVIEW_BYTES = 2 * 1024 * 1024
@@ -79,15 +93,6 @@ export interface CyberServer {
   start(): Promise<CyberServerAddress>
   address(): CyberServerAddress | undefined
   close(): Promise<void>
-}
-
-interface LiveClient {
-  worldId: string
-  response: ServerResponse
-}
-
-interface WorldRuntimeClient extends LiveClient {
-  lastSequence: number
 }
 
 export async function createCyberServer(options: CyberServerOptions): Promise<CyberServer> {
@@ -155,16 +160,12 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const packageCatalog = new LocalPackageCatalog(
     options.marketplaceRoot ?? fileURLToPath(new URL('../../../marketplace', import.meta.url)),
   )
-  const liveClients = new Set<LiveClient>()
-  const worldRuntimeClients = new Set<WorldRuntimeClient>()
+  const runtimeStreamHub = new RuntimeStreamHub()
+  const worldStreamHub = new WorldStreamHub()
   const worldRuntime = new WorldRuntimeService({
     store,
     publish(event) {
-      for (const client of worldRuntimeClients) {
-        if (client.worldId !== event.worldId) continue
-        writeSse(client.response, event.kind, event, event.id)
-        client.lastSequence = Math.max(client.lastSequence, event.sequence)
-      }
+      worldStreamHub.publish(event)
     },
   })
   let startedAddress: CyberServerAddress | undefined
@@ -181,8 +182,8 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       stateRoot,
       workspaceRoot,
       webRoot,
-      liveClients,
-      worldRuntimeClients,
+      runtimeStreamHub,
+      worldStreamHub,
       worldRuntime,
     }).catch((error: unknown) => writeError(response, error))
   })
@@ -191,29 +192,9 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   httpServer.keepAliveTimeout = 5_000
 
   const unsubscribe = orchestrator.subscribe((event) => {
-    const data = JSON.stringify(event)
-    for (const client of liveClients) {
-      if (client.worldId !== event.worldId) continue
-      client.response.write(`event: runtime\ndata: ${data}\n\n`)
-    }
+    runtimeStreamHub.publish(event)
     worldRuntime.publishRuntime(event.worldId, event.event, event.agentId)
   })
-  const heartbeat = setInterval(() => {
-    for (const client of liveClients) client.response.write(': heartbeat\n\n')
-    for (const client of worldRuntimeClients) {
-      const heartbeatEvent: WorldRuntimeStreamEnvelope = {
-        contractVersion: 1,
-        id: String(client.lastSequence),
-        worldId: client.worldId,
-        sequence: client.lastSequence,
-        kind: 'heartbeat',
-        payload: {},
-        createdAt: new Date().toISOString(),
-      }
-      writeSse(client.response, 'heartbeat', heartbeatEvent, heartbeatEvent.id)
-    }
-  }, 15_000)
-  heartbeat.unref()
 
   return {
     store,
@@ -241,11 +222,8 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       if (closed) return
       closed = true
       unsubscribe()
-      clearInterval(heartbeat)
-      for (const client of liveClients) client.response.end()
-      liveClients.clear()
-      for (const client of worldRuntimeClients) client.response.end()
-      worldRuntimeClients.clear()
+      runtimeStreamHub.close()
+      worldStreamHub.close()
       if (httpServer.listening) await closeServer(httpServer)
       await orchestrator.close()
       store.close()
@@ -263,8 +241,8 @@ async function handleRequest(context: {
   stateRoot: string
   workspaceRoot: string
   webRoot: string
-  liveClients: Set<LiveClient>
-  worldRuntimeClients: Set<WorldRuntimeClient>
+  runtimeStreamHub: RuntimeStreamHub
+  worldStreamHub: WorldStreamHub
   worldRuntime: WorldRuntimeService
 }): Promise<void> {
   const {
@@ -277,8 +255,8 @@ async function handleRequest(context: {
     stateRoot,
     workspaceRoot,
     webRoot,
-    liveClients,
-    worldRuntimeClients,
+    runtimeStreamHub,
+    worldStreamHub,
     worldRuntime,
   } = context
   assertLocalRequest(request)
@@ -974,59 +952,7 @@ async function handleRequest(context: {
     const world = store.getWorld(worldId)
     if (world === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
     const snapshot = worldRuntime.getSnapshot(worldId)
-    const afterParameter = url.searchParams.get('after')
-    const lastEventId = headerValue(request.headers['last-event-id'])
-    const invalidCursor = (afterParameter !== null && !isSseSequence(afterParameter)) ||
-      (lastEventId !== null && !isSseSequence(lastEventId))
-    const after = Math.max(
-      sseSequence(afterParameter),
-      sseSequence(lastEventId),
-    )
-    response.writeHead(200, {
-      'Content-Type': 'text/event-stream; charset=utf-8',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    })
-    if (invalidCursor || after !== snapshot.sequence) {
-      const recoveryRequired: WorldRuntimeStreamEnvelope = {
-        contractVersion: 1,
-        id: String(snapshot.sequence),
-        worldId,
-        sequence: snapshot.sequence,
-        kind: 'recovery-required',
-        payload: {
-          requestedSequence: after,
-          latestSequence: snapshot.sequence,
-          reason: invalidCursor ? 'invalid-cursor' : after > snapshot.sequence ? 'cursor-ahead' : 'cursor-gap',
-        },
-        createdAt: new Date().toISOString(),
-      }
-      writeSse(response, 'recovery-required', recoveryRequired, recoveryRequired.id)
-      const recoveryState: WorldRuntimeStreamEnvelope = {
-        contractVersion: 1,
-        id: String(snapshot.sequence),
-        worldId,
-        sequence: snapshot.sequence,
-        kind: 'world-state',
-        payload: snapshot as unknown as JsonObject,
-        createdAt: new Date().toISOString(),
-      }
-      writeSse(response, 'world-state', recoveryState, recoveryState.id)
-    } else {
-      writeSse(response, 'ready', {
-        contractVersion: 1,
-        id: String(snapshot.sequence),
-        worldId,
-        sequence: snapshot.sequence,
-        kind: 'heartbeat',
-        payload: {},
-        createdAt: new Date().toISOString(),
-      }, String(snapshot.sequence))
-    }
-    const client: WorldRuntimeClient = { worldId, response, lastSequence: snapshot.sequence }
-    worldRuntimeClients.add(client)
-    request.once('close', () => worldRuntimeClients.delete(client))
+    worldStreamHub.connect(worldId, request, response, snapshot, url.searchParams.get('after'))
     return
   }
   const worldEvents = match(url.pathname, /^\/api\/worlds\/([^/]+)\/events$/)
@@ -1121,16 +1047,7 @@ async function handleRequest(context: {
     if (store.getWorld(worldLive[0]) === undefined) {
       throw new HttpError(404, 'world_not_found', 'World not found')
     }
-    response.writeHead(200, {
-      'Content-Type': 'text/event-stream; charset=utf-8',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    })
-    response.write('event: ready\ndata: {}\n\n')
-    const client = { worldId: worldLive[0], response }
-    liveClients.add(client)
-    request.once('close', () => liveClients.delete(client))
+    runtimeStreamHub.connect(worldLive[0], request, response)
     return
   }
 
@@ -1267,125 +1184,6 @@ async function handleRequest(context: {
   throw new HttpError(404, 'not_found', 'Route not found')
 }
 
-class HttpError extends Error {
-  readonly status: number
-  readonly code: string
-
-  constructor(status: number, code: string, message: string) {
-    super(message)
-    this.status = status
-    this.code = code
-  }
-}
-
-function assertLocalRequest(request: IncomingMessage): void {
-  const hostHeader = request.headers.host
-  if (hostHeader === undefined) throw new HttpError(400, 'host_required', 'Host header required')
-  let host: string
-  try {
-    host = new URL(`http://${hostHeader}`).hostname
-  } catch {
-    throw new HttpError(400, 'invalid_host', 'Invalid Host header')
-  }
-  if (!isLoopbackHost(host)) throw new HttpError(403, 'non_loopback_host', 'Non-loopback host rejected')
-  const origin = request.headers.origin
-  if (origin !== undefined && origin !== `http://${hostHeader}`) {
-    throw new HttpError(403, 'origin_rejected', 'Cross-origin request rejected')
-  }
-  if (request.method !== 'GET' && request.method !== 'HEAD') {
-    const contentType = request.headers['content-type'] ?? ''
-    if (!String(contentType).toLowerCase().startsWith('application/json')) {
-      throw new HttpError(415, 'json_required', 'Application JSON content type required')
-    }
-  }
-}
-
-function isLoopbackHost(host: string): boolean {
-  return host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]'
-}
-
-async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
-  const chunks: Buffer[] = []
-  let bytes = 0
-  for await (const value of request) {
-    const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value)
-    bytes += chunk.length
-    if (bytes > MAX_BODY_BYTES) throw new HttpError(413, 'body_too_large', 'Request body too large')
-    chunks.push(chunk)
-  }
-  try {
-    const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown
-    const body = record(parsed)
-    if (body === undefined) throw new Error('JSON body must be an object')
-    return body
-  } catch {
-    throw new HttpError(400, 'invalid_json', 'Invalid JSON body')
-  }
-}
-
-function writeJson(response: ServerResponse, status: number, value: unknown): void {
-  if (response.headersSent) return
-  const body = `${JSON.stringify(value)}\n`
-  response.writeHead(status, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Content-Length': Buffer.byteLength(body),
-    'Cache-Control': 'no-store',
-    'X-Content-Type-Options': 'nosniff',
-    'Referrer-Policy': 'no-referrer',
-  })
-  response.end(body)
-}
-
-function writeSse(
-  response: ServerResponse,
-  event: string,
-  value: unknown,
-  id?: string,
-): void {
-  if (response.writableEnded || response.destroyed) return
-  if (id !== undefined) response.write(`id: ${id}\n`)
-  response.write(`event: ${event}\n`)
-  response.write(`data: ${JSON.stringify(value)}\n\n`)
-}
-
-function isSseSequence(value: string | null | undefined): value is string {
-  return typeof value === 'string' && /^(?:0|[1-9]\d*)$/.test(value) && Number.isSafeInteger(Number(value))
-}
-
-function sseSequence(value: string | null | undefined): number {
-  return value !== null && value !== undefined && isSseSequence(value) ? Number(value) : 0
-}
-
-function writeBinary(
-  response: ServerResponse,
-  status: number,
-  body: Buffer,
-  contentType: string,
-): void {
-  response.writeHead(status, {
-    'Content-Type': contentType,
-    'Content-Length': body.byteLength,
-    'Cache-Control': 'private, max-age=31536000, immutable',
-    'Content-Security-Policy': "default-src 'none'; sandbox",
-    'X-Content-Type-Options': 'nosniff',
-    'Referrer-Policy': 'no-referrer',
-  })
-  response.end(body)
-}
-
-function writeWorkspaceFile(response: ServerResponse, body: Buffer, contentType: string): void {
-  response.writeHead(200, {
-    'Content-Type': contentType,
-    'Content-Length': body.byteLength,
-    'Content-Disposition': 'inline',
-    'Cache-Control': 'no-store',
-    'Content-Security-Policy': "default-src 'none'; sandbox",
-    'X-Content-Type-Options': 'nosniff',
-    'Referrer-Policy': 'no-referrer',
-  })
-  response.end(body)
-}
-
 function matchesImageSignature(
   bytes: Buffer,
   mimeType: 'image/png' | 'image/jpeg' | 'image/webp',
@@ -1474,269 +1272,6 @@ function chatAttachmentJson(attachment: ChatAttachment): JsonObject {
   }
 }
 
-function writeHtml(response: ServerResponse, status: number, body: string): void {
-  response.writeHead(status, {
-    'Content-Type': 'text/html; charset=utf-8',
-    'Content-Length': Buffer.byteLength(body),
-    'Cache-Control': 'no-store',
-    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
-    'X-Content-Type-Options': 'nosniff',
-    'Referrer-Policy': 'no-referrer',
-  })
-  response.end(body)
-}
-
-async function serveWebAsset(
-  response: ServerResponse,
-  webRoot: string,
-  pathname: string,
-): Promise<boolean> {
-  let relativePath: string
-  try {
-    relativePath = decodeURIComponent(pathname).replace(/^\/+/, '') || 'index.html'
-  } catch {
-    throw new HttpError(400, 'invalid_path', 'Invalid URL path')
-  }
-  if (relativePath.includes('\0') || relativePath.split(/[\\/]/).includes('..')) {
-    throw new HttpError(400, 'invalid_path', 'Invalid URL path')
-  }
-  const root = resolve(webRoot)
-  let target = resolve(root, relativePath)
-  if (target !== root && !target.startsWith(`${root}${sep}`)) {
-    throw new HttpError(400, 'invalid_path', 'Invalid URL path')
-  }
-  let bytes: Buffer
-  try {
-    bytes = await readFile(target)
-  } catch (error) {
-    if (!isMissingFile(error) || extname(relativePath) !== '') return false
-    target = join(root, 'index.html')
-    try {
-      bytes = await readFile(target)
-    } catch (fallbackError) {
-      if (isMissingFile(fallbackError)) return false
-      throw fallbackError
-    }
-  }
-  const extension = extname(target).toLowerCase()
-  const contentType = ({
-    '.html': 'text/html; charset=utf-8',
-    '.js': 'text/javascript; charset=utf-8',
-    '.css': 'text/css; charset=utf-8',
-    '.json': 'application/json; charset=utf-8',
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.webp': 'image/webp',
-    '.svg': 'image/svg+xml',
-    '.woff2': 'font/woff2',
-  } as Record<string, string>)[extension] ?? 'application/octet-stream'
-  const immutable = relativePath.startsWith('assets/') && /-[A-Za-z0-9_-]{8,}\./.test(relativePath)
-  response.writeHead(200, {
-    'Content-Type': contentType,
-    'Content-Length': bytes.byteLength,
-    'Cache-Control': immutable ? 'public, max-age=31536000, immutable' : 'no-store',
-    'Content-Security-Policy': [
-      "default-src 'self'",
-      "script-src 'self'",
-      "style-src 'self'",
-      "img-src 'self' data: blob:",
-      "connect-src 'self'",
-      "frame-src https: http://127.0.0.1:* http://localhost:*",
-      "object-src 'none'",
-      "base-uri 'none'",
-      "form-action 'self'",
-      "frame-ancestors 'none'",
-    ].join('; '),
-    'X-Content-Type-Options': 'nosniff',
-    'Referrer-Policy': 'no-referrer',
-  })
-  response.end(bytes)
-  return true
-}
-
-function isMissingFile(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT'
-}
-
-function writeError(response: ServerResponse, error: unknown): void {
-  if (response.headersSent) {
-    response.end()
-    return
-  }
-  if (error instanceof HttpError) {
-    writeJson(response, error.status, { error: { code: error.code, message: error.message } })
-    return
-  }
-  if (error instanceof ConversationOrchestrationError) {
-    writeJson(response, 422, {
-      error: { code: 'conversation_rejected', message: error.message },
-    })
-    return
-  }
-  if (error instanceof PackageApprovalRequiredError) {
-    writeJson(response, 409, {
-      error: { code: 'package_approval_required', message: error.message },
-    })
-    return
-  }
-  if (error instanceof PackageInstallError) {
-    writeJson(response, 422, {
-      error: { code: 'package_install_failed', message: error.message },
-    })
-    return
-  }
-  if (error instanceof UnsupportedWorldRuntimeError) {
-    writeJson(response, 409, {
-      error: {
-        code: 'world_runtime_unavailable',
-        message: 'This world uses the legacy renderer. Switch to a Runtime V2 theme to enable the live world.',
-      },
-    })
-    return
-  }
-  const notFound = error instanceof Error && error.name === 'EntityNotFoundError'
-  writeJson(response, notFound ? 404 : 500, {
-    error: {
-      code: notFound ? 'entity_not_found' : 'internal_error',
-      message: notFound ? error.message : 'Internal server error',
-    },
-  })
-}
-
-function match(pathname: string, expression: RegExp): [string, ...string[]] | undefined {
-  const result = expression.exec(pathname)
-  if (result === null) return undefined
-  const values = result.slice(1).map((value) => decodeURIComponent(value))
-  const first = values[0]
-  return first === undefined ? undefined : [first, ...values.slice(1)]
-}
-
-function record(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined
-}
-
-function requiredString(body: Record<string, unknown>, key: string): string {
-  const value = optionalString(body[key])
-  if (value === undefined) throw new HttpError(422, 'field_required', `${key} is required`)
-  return value
-}
-
-function optionalString(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const normalized = value.trim()
-  return normalized || undefined
-}
-
-function nullableString(value: unknown): string | null {
-  if (value === null) return null
-  const normalized = optionalString(value)
-  if (normalized === undefined) throw new HttpError(422, 'invalid_string', 'Expected a string or null')
-  return normalized
-}
-
-function requiredNumber(body: Record<string, unknown>, key: string): number {
-  const value = body[key]
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new HttpError(422, 'invalid_number', `${key} must be a finite number`)
-  }
-  return value
-}
-
-function requiredBoolean(body: Record<string, unknown>, key: string): boolean {
-  const value = body[key]
-  if (typeof value !== 'boolean') {
-    throw new HttpError(422, 'invalid_boolean', `${key} must be a boolean`)
-  }
-  return value
-}
-
-function requiredEnum<T extends string>(
-  body: Record<string, unknown>,
-  key: string,
-  values: readonly T[],
-): T {
-  const value = requiredString(body, key)
-  if (!values.includes(value as T)) {
-    throw new HttpError(422, 'invalid_enum', `${key} has an unsupported value`)
-  }
-  return value as T
-}
-
-function optionalStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  return [...new Set(value.map(optionalString).filter((item): item is string => item !== undefined))]
-}
-
-function packageManifest(value: unknown): CyberPackageManifest {
-  const input = record(value)
-  if (input === undefined) throw new HttpError(422, 'manifest_required', 'Package manifest required')
-  if (input.schemaVersion !== 1) {
-    throw new HttpError(422, 'invalid_manifest_schema', 'Unsupported package manifest schema')
-  }
-  const kind = optionalString(input.kind)
-  const validKinds: CyberPackageKind[] = [
-    'plugin',
-    'skill',
-    'employee-blueprint',
-    'world-theme',
-    'asset',
-    'model-provider',
-  ]
-  if (kind === undefined || !validKinds.includes(kind as CyberPackageKind)) {
-    throw new HttpError(422, 'invalid_package_kind', 'Invalid package kind')
-  }
-  if (!Array.isArray(input.files)) {
-    throw new HttpError(422, 'invalid_package_files', 'Package files must be an array')
-  }
-  const files = input.files.map((item) => {
-    const file = record(item)
-    if (file === undefined) throw new HttpError(422, 'invalid_package_file', 'Invalid package file')
-    return {
-      path: requiredString(file, 'path'),
-      sha256: requiredString(file, 'sha256'),
-    }
-  })
-  const entrypoints = input.entrypoints === undefined
-    ? undefined
-    : Array.isArray(input.entrypoints)
-      ? input.entrypoints.map((item) => {
-          const entrypoint = record(item)
-          if (entrypoint === undefined) throw new HttpError(422, 'invalid_package_entrypoint', 'Invalid package entrypoint')
-          return {
-            id: requiredString(entrypoint, 'id'),
-            kind: requiredEnum(entrypoint, 'kind', ['prompt-transform', 'employee-blueprint', 'world-theme', 'skill']),
-            path: requiredString(entrypoint, 'path'),
-          }
-        })
-      : (() => { throw new HttpError(422, 'invalid_package_entrypoints', 'Package entrypoints must be an array') })()
-  const certificationInput = record(input.certification)
-  const certification = certificationInput === undefined
-    ? undefined
-    : {
-        authority: requiredString(certificationInput, 'authority'),
-        level: requiredEnum(certificationInput, 'level', ['official', 'community']),
-        contentSha256: requiredString(certificationInput, 'contentSha256'),
-      }
-  return {
-    schemaVersion: 1,
-    id: requiredString(input, 'id'),
-    version: requiredString(input, 'version'),
-    kind: kind as CyberPackageKind,
-    displayName: requiredString(input, 'displayName'),
-    summary: requiredString(input, 'summary'),
-    license: requiredString(input, 'license'),
-    publisher: requiredString(input, 'publisher'),
-    capabilities: optionalStringArray(input.capabilities),
-    dataEgress: optionalStringArray(input.dataEgress),
-    files,
-    ...(entrypoints === undefined ? {} : { entrypoints }),
-    ...(certification === undefined ? {} : { certification }),
-  }
-}
-
 function harnessModelRoute(profile: ModelProfile): HarnessModelRoute {
   const contextWindow = optionalPositiveInteger(profile.settings.contextWindow)
   const maxTokens = optionalPositiveInteger(profile.settings.maxTokens)
@@ -1752,10 +1287,6 @@ function harnessModelRoute(profile: ModelProfile): HarnessModelRoute {
     ...(contextWindow === undefined ? {} : { contextWindow }),
     ...(maxTokens === undefined ? {} : { maxTokens }),
   }
-}
-
-function optionalPositiveInteger(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined
 }
 
 async function resolveWorkspaceEntry(
@@ -1828,17 +1359,6 @@ function workspacePreviewKind(fileName: string): { kind: 'text' | 'image'; conte
   return textExtensions.has(extension)
     ? { kind: 'text', contentType: 'text/plain; charset=utf-8' }
     : undefined
-}
-
-function nonNegativeInteger(value: string | null): number {
-  if (value === null) return 0
-  const number = Number(value)
-  return Number.isInteger(number) && number >= 0 ? number : 0
-}
-
-function headerValue(value: string | string[] | undefined): string | null {
-  if (Array.isArray(value)) return value[0] ?? null
-  return value ?? null
 }
 
 function artifactTimestamp(): string {
