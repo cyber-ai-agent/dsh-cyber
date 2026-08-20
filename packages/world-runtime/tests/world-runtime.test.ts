@@ -81,6 +81,10 @@ describe('world theme manifest', () => {
     ['unknown root field', () => ({ ...structuredClone(cyberCompanyTheme), injected: true })],
     ['invalid renderer', () => ({ ...structuredClone(cyberCompanyTheme), renderer: 'canvas-2d' })],
     ['invalid terminology', () => ({ ...structuredClone(cyberCompanyTheme), terminology: [] })],
+    ['non-JSON terminology number', () => ({
+      ...structuredClone(cyberCompanyTheme),
+      terminology: { nested: [Number.POSITIVE_INFINITY] },
+    })],
     ['duplicate asset', () => {
       const value = structuredClone(cyberCompanyTheme)
       value.assets.push({ ...value.assets[0]! })
@@ -91,12 +95,27 @@ describe('world theme manifest', () => {
       value.actorSets[0]!.clips.walking.south = [-1]
       return value
     }],
+    ['actor set references a non-spritesheet asset', () => {
+      const value = structuredClone(cyberCompanyTheme)
+      value.actorSets[0]!.assetId = value.assets.find((asset) => asset.kind === 'image')!.id
+      return value
+    }],
+    ['activity has no directional fallback frame', () => {
+      const value = structuredClone(cyberCompanyTheme)
+      value.actorSets[0]!.clips.walking = {}
+      return value
+    }],
     ['duplicate blocked cell', () => {
       const value = structuredClone(cyberCompanyTheme)
       value.scenes[0]!.navigation.blocked.push(value.scenes[0]!.navigation.blocked[0]!)
       return value
     }],
     ['invalid activity mapping', () => ({ ...structuredClone(cyberCompanyTheme), activityMapping: { event: 'flying' } })],
+    ['missing required activity mapping', () => {
+      const value = structuredClone(cyberCompanyTheme)
+      Reflect.deleteProperty(value.activityMapping, 'task.started')
+      return value
+    }],
   ])('rejects malformed theme: %s', (_name, createValue) => {
     expect(validateWorldThemeManifest(createValue()).valid).toBe(false)
   })

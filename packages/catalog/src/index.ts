@@ -120,13 +120,14 @@ export function blueprintsForWorld(templateId: string): EmployeeBlueprint[] {
 }
 
 function blueprint(
-  input: Omit<EmployeeBlueprint, 'version' | 'createdAt' | 'requestedSkills' | 'requestedCapabilities'> & {
+  input: Omit<EmployeeBlueprint, 'schemaVersion' | 'version' | 'createdAt' | 'requestedSkills' | 'requestedCapabilities'> & {
     requestedSkills?: string[]
     requestedCapabilities?: string[]
   },
 ): EmployeeBlueprint {
   return {
     ...input,
+    schemaVersion: 1,
     version: 1,
     requestedSkills: input.requestedSkills ?? [],
     requestedCapabilities: input.requestedCapabilities ?? [],

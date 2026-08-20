@@ -16,6 +16,7 @@ import {
   PackageManager,
   packageContentDigest,
   type PackageStorePort,
+  validatePackageManifest,
 } from '../src/index.js'
 
 const stores: SqliteStore[] = []
@@ -50,8 +51,8 @@ describe('PackageManager', () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-cyber-market-'))
     const source = join(directory, 'plugins', 'meeting-notes')
     await mkdir(source, { recursive: true })
-    const content = `${JSON.stringify({ schemaVersion: 1, commands: [{ trigger: '/meeting-summary', instruction: '输出会议纪要。' }] }, null, 2)}\n`
-    await writeFile(join(source, 'commands.json'), content, 'utf8')
+    const content = `${JSON.stringify({ schemaVersion: 1, transforms: [{ id: 'meeting-summary', trigger: '/meeting-summary', description: '整理会议事实。', instruction: '输出会议纪要。', mode: 'prepend', priority: 0 }] }, null, 2)}\n`
+    await writeFile(join(source, 'transforms.json'), content, 'utf8')
     const packageManifest: CyberPackageManifest = {
       schemaVersion: 1,
       id: '@dsh-cyber/meeting-notes',
@@ -61,16 +62,17 @@ describe('PackageManager', () => {
       summary: '把斜杠命令转换为可执行的会议纪要提示。',
       license: 'BUSL-1.1',
       publisher: 'DSH Cyber',
-      capabilities: ['conversation:transform'],
+      capabilities: ['prompt:transform'],
       dataEgress: [],
-      files: [{ path: 'commands.json', sha256: createHash('sha256').update(content).digest('hex') }],
-      entrypoints: [{ id: 'commands', kind: 'prompt-transform', path: 'commands.json' }],
+      files: [{ path: 'transforms.json', sha256: createHash('sha256').update(content).digest('hex') }],
+      entrypoints: [{ id: 'transforms', kind: 'prompt-transform', path: 'transforms.json' }],
     }
     packageManifest.certification = {
       authority: 'DSH Cyber',
       level: 'official',
-      contentSha256: packageContentDigest(packageManifest),
+      contentSha256: '0'.repeat(64),
     }
+    packageManifest.certification.contentSha256 = packageContentDigest(packageManifest)
     await writeFile(join(source, 'dsh-cyber.package.json'), `${JSON.stringify(packageManifest, null, 2)}\n`, 'utf8')
 
     const catalog = new LocalPackageCatalog(directory)
@@ -79,7 +81,7 @@ describe('PackageManager', () => {
     expect(results[0]).toMatchObject({ market: 'plugin', verified: true })
     expect(results[0]?.manifest.entrypoints?.[0]?.kind).toBe('prompt-transform')
 
-    await writeFile(join(source, 'commands.json'), '{"tampered":true}\n', 'utf8')
+    await writeFile(join(source, 'transforms.json'), '{"tampered":true}\n', 'utf8')
     expect(await catalog.list({ market: 'plugin' })).toEqual([])
   })
 
@@ -188,6 +190,57 @@ describe('PackageManager', () => {
     await expect(manager.install({ workspaceId: workspace.id, manifest: future, sourceDirectory: source, approvalToken: stale.approvalToken })).rejects.toBeInstanceOf(PackageApprovalRequiredError)
   })
 
+  it('rejects manifest fields, entrypoint capabilities, hidden paths, and unsupported declarative egress', () => {
+    const plugin: CyberPackageManifest = {
+      ...manifest('1.0.0', '# Example\n'),
+      id: 'strict-plugin',
+      kind: 'plugin',
+      capabilities: ['prompt:transform'],
+      files: [{ path: 'plugin.json', sha256: 'a'.repeat(64) }],
+      entrypoints: [{ id: 'main', kind: 'prompt-transform', path: 'plugin.json' }],
+    }
+    expect(() => validatePackageManifest({
+      ...plugin,
+      capabilities: [],
+    })).toThrow('requires capability prompt:transform')
+    expect(() => validatePackageManifest({
+      ...plugin,
+      dataEgress: ['https://example.com/upload'],
+    })).toThrow('does not support data egress')
+    expect(() => validatePackageManifest({
+      ...plugin,
+      files: [{ path: '.hidden.json', sha256: 'a'.repeat(64) }],
+      entrypoints: [{ id: 'main', kind: 'prompt-transform', path: '.hidden.json' }],
+    })).toThrow('Unsafe package file path')
+    expect(() => validatePackageManifest({
+      ...plugin,
+      futureField: true,
+    } as CyberPackageManifest)).toThrow('Unknown package manifest field')
+    expect(() => validatePackageManifest({
+      ...plugin,
+      id: 'strict-blueprint',
+      kind: 'employee-blueprint',
+      capabilities: ['employee:blueprint'],
+      entrypoints: [
+        { id: 'first', kind: 'employee-blueprint', path: 'plugin.json' },
+        { id: 'second', kind: 'employee-blueprint', path: 'plugin.json' },
+      ],
+    })).toThrow('requires exactly one entrypoint')
+
+    const certified = structuredClone(plugin)
+    certified.certification = {
+      authority: 'DSH Cyber',
+      level: 'official',
+      contentSha256: packageContentDigest({
+        ...certified,
+        certification: { authority: 'DSH Cyber', level: 'official', contentSha256: '0'.repeat(64) },
+      }),
+    }
+    expect(() => validatePackageManifest(certified)).not.toThrow()
+    expect(() => validatePackageManifest({ ...certified, publisher: 'Changed publisher' }))
+      .toThrow('certification digest does not match')
+  })
+
   it('restores the previous active pointer and database state when activation commit fails', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-cyber-package-'))
     const sourceV1 = join(directory, 'source-v1')
@@ -240,5 +293,16 @@ describe('PackageManager', () => {
       await readFile(join(packageRoot, 'active', `${encodeURIComponent(v1.id)}.json`), 'utf8'),
     ) as { version: string }
     expect(pointer.version).toBe('1.0.0')
+  })
+
+  it('rejects undeclared source inventory before staging a package', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-cyber-package-inventory-'))
+    const source = join(directory, 'source')
+    await mkdir(source, { recursive: true })
+    await writeFile(join(source, 'SKILL.md'), '# Example\n', 'utf8')
+    await writeFile(join(source, 'undeclared.txt'), 'not approved\n', 'utf8')
+    const runtime = new LocalPackageRuntime(join(directory, 'packages'))
+    await expect(runtime.stage(manifest('1.0.0', '# Example\n'), source))
+      .rejects.toThrow('undeclared file')
   })
 })

@@ -154,6 +154,30 @@ describe('Cyber local server', () => {
     const tavernCatalog = await json(origin, '/api/catalog/blueprints?templateId=tavern')
     expect(companyCatalog.body.items.every((item: { worldTemplateId: string }) => item.worldTemplateId === 'cyber-company')).toBe(true)
     expect(tavernCatalog.body.items.every((item: { worldTemplateId: string }) => item.worldTemplateId === 'tavern')).toBe(true)
+
+    const approvedRecruit = await json(origin, `/api/worlds/${world.id}/recruit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        blueprintId: 'cyber-company.software-engineer',
+        blueprintVersion: 1,
+        capabilityGrants: ['workspace:read'],
+      }),
+    })
+    expect(approvedRecruit.response.status).toBe(201)
+    const dossier = await json(origin, `/api/employees/${approvedRecruit.body.employee.id}/dossier`)
+    expect(dossier.body.revisions[0].capabilityGrants).toEqual(['workspace:read'])
+
+    const rejectedRecruit = await json(origin, `/api/worlds/${world.id}/recruit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        blueprintId: 'cyber-company.software-engineer',
+        blueprintVersion: 1,
+        capabilityGrants: ['workspace:write'],
+      }),
+    })
+    expect(rejectedRecruit.response.status).toBe(422)
   })
 
   it('previews package permissions, requires exact approval, and preserves the active version on failure', async () => {
@@ -214,6 +238,46 @@ describe('Cyber local server', () => {
     })
     expect(installed.response.status).toBe(201)
     expect(installed.body.installed).toMatchObject({ version: '1.0.0', status: 'active' })
+
+    const invalidPluginSource = join(stateRoot, 'invalid-plugin-source')
+    await mkdir(invalidPluginSource, { recursive: true })
+    const invalidPluginEntrypoint = `${JSON.stringify({
+      schemaVersion: 1,
+      transforms: [{
+        id: 'unsafe-mode',
+        trigger: 'always',
+        description: 'Invalid staged entrypoint.',
+        instruction: 'This package must never activate.',
+        mode: 'execute',
+      }],
+    })}\n`
+    await writeFile(join(invalidPluginSource, 'transforms.json'), invalidPluginEntrypoint, 'utf8')
+    const invalidPluginManifest = {
+      ...packageManifest,
+      id: '@cyber/invalid-plugin',
+      kind: 'plugin',
+      capabilities: ['prompt:transform'],
+      files: [{
+        path: 'transforms.json',
+        sha256: createHash('sha256').update(invalidPluginEntrypoint).digest('hex'),
+      }],
+      entrypoints: [{ id: 'transforms', kind: 'prompt-transform', path: 'transforms.json' }],
+    }
+    const invalidPluginPreview = await json(origin, `/api/workspaces/${workspace.id}/packages/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ manifest: invalidPluginManifest }),
+    })
+    const invalidPluginInstall = await json(origin, `/api/workspaces/${workspace.id}/packages/install`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        manifest: invalidPluginManifest,
+        sourceDirectory: invalidPluginSource,
+        approvalToken: invalidPluginPreview.body.approvalToken,
+      }),
+    })
+    expect(invalidPluginInstall.response.status).toBe(422)
 
     const brokenV2 = {
       ...packageManifest,
@@ -701,17 +765,21 @@ describe('Cyber local server', () => {
     })
     expect(pluginInstall.response.status).toBe(201)
 
+    const originalPluginPrompt = `/meeting-summary @${engineer.displayName} 整理本次发布评审`
     const chat = await json(origin, `/api/worlds/${world.id}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         employeeIds: [engineer.id],
-        prompt: `/meeting-summary @${engineer.displayName} 整理本次发布评审`,
+        prompt: originalPluginPrompt,
       }),
     })
     expect(chat.response.status).toBe(200)
     expect(runtime.calls[0]?.prompt).toContain('你是当前世界的会议纪要助手')
     expect(runtime.calls[0]?.prompt).toContain('整理本次发布评审')
+    const pluginMessages = await json(origin, `/api/sessions/${chat.body.session.id}/messages`)
+    expect(pluginMessages.body.items.find((message: { kind: string }) => message.kind === 'user')?.content)
+      .toBe(originalPluginPrompt)
 
     const talentPreview = await json(origin, `/api/workspaces/${workspace.id}/marketplace/preview`, {
       method: 'POST',

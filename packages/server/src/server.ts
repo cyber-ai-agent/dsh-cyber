@@ -43,6 +43,7 @@ import { RuntimeUpdateService } from './services/runtime-update-service.js'
 import { WorkspaceFileService } from './services/workspace-file-service.js'
 import { RuntimeStreamHub } from './streams/runtime-stream-hub.js'
 import { WorldStreamHub } from './streams/world-stream-hub.js'
+import { validateStagedPackageEntrypoints } from './installed-package-runtime.js'
 import { WorldRuntimeService } from './world-runtime-service.js'
 
 const DEFAULT_HOST = '127.0.0.1'
@@ -113,6 +114,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const packageManager = new PackageManager({
     store,
     runtime: options.packageRuntime ?? new LocalPackageRuntime(join(stateRoot, 'packages')),
+    validateStaged: validateStagedPackageEntrypoints,
   })
   const packageCatalog = new LocalPackageCatalog(
     options.marketplaceRoot ?? fileURLToPath(new URL('../../../marketplace', import.meta.url)),

@@ -10,6 +10,7 @@ import type {
 } from '@dsh-cyber/contracts'
 
 import { packageContentDigest, validatePackageManifest } from './package-manager.js'
+import { verifyPackageSourceInventory } from './local-package-runtime.js'
 
 const MARKET_DIRECTORIES: Record<CyberMarketKind, string> = {
   theme: 'themes',
@@ -82,6 +83,7 @@ export class LocalPackageCatalog {
       const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as CyberPackageManifest
       validatePackageManifest(manifest)
       if (!kindMatchesMarket(manifest, market)) return undefined
+      await verifyPackageSourceInventory(sourceDirectory, manifest)
       for (const file of manifest.files) {
         const absolutePath = join(sourceDirectory, ...file.path.split('/'))
         const fileMetadata = await lstat(absolutePath)

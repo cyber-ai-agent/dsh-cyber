@@ -30,6 +30,7 @@ async function testDatabase(): Promise<{ directory: string; path: string; store:
 
 function blueprint(overrides: Partial<EmployeeBlueprint> = {}): EmployeeBlueprint {
   return {
+    schemaVersion: 1,
     id: 'software-engineer',
     version: 1,
     worldTemplateId: 'cyber-company',
@@ -37,7 +38,7 @@ function blueprint(overrides: Partial<EmployeeBlueprint> = {}): EmployeeBlueprin
     role: '软件工程师',
     summary: '交付可靠的软件。',
     persona: '先澄清验收标准，再实现和验证。',
-    requestedSkills: ['coding'],
+    requestedSkills: ['coding', 'testing'],
     requestedCapabilities: ['workspace:read'],
     createdAt: '2026-08-19T00:00:00.000Z',
     ...overrides,
@@ -74,6 +75,54 @@ describe('SqliteStore', () => {
     expect(store.listEmployeeRevisions(employee.id)).toHaveLength(2)
     expect(store.getWorkspaceSnapshot(workspace.id).worlds).toHaveLength(1)
     expect(store.getWorldSnapshot(world.id).employees).toHaveLength(1)
+  })
+
+  it('limits initial and revised employee capability grants to the approved blueprint request', async () => {
+    const { path, store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: 'Grant boundary' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: 'Company', templateId: 'cyber-company' })
+    store.saveBlueprint(blueprint())
+    expect(() => store.recruitEmployee({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      blueprintId: 'software-engineer',
+      blueprintVersion: 1,
+      capabilityGrants: ['workspace:write'],
+    })).toThrow('not requested by the blueprint')
+
+    const employee = store.recruitEmployee({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      blueprintId: 'software-engineer',
+      blueprintVersion: 1,
+      capabilityGrants: ['workspace:read'],
+    })
+    expect(() => store.reviseEmployee({
+      employeeId: employee.id,
+      reason: 'attempt escalation',
+      capabilityGrants: ['workspace:read', 'workspace:write'],
+    })).toThrow('not requested by the blueprint')
+    expect(() => store.reviseEmployee({
+      employeeId: employee.id,
+      reason: 'attempt skill escalation',
+      skillGrants: ['shell-access'],
+    })).toThrow('not requested by the blueprint')
+    expect(store.reviseEmployee({
+      employeeId: employee.id,
+      reason: 'revoke all grants',
+      skillGrants: [],
+      capabilityGrants: [],
+    })).toMatchObject({ skillGrants: [], capabilityGrants: [] })
+    store.close()
+    stores.splice(stores.indexOf(store), 1)
+    const reopened = await SqliteStore.open(path)
+    stores.push(reopened)
+    expect(reopened.getEmployeeRevision(employee.id, 2)).toMatchObject({
+      skillGrants: [],
+      capabilityGrants: [],
+    })
+    expect(() => reopened.saveBlueprint(blueprint({ summary: 'changed without a version bump' })))
+      .toThrow('identity is immutable')
   })
 
   it('persists direct and group session history across restart', async () => {

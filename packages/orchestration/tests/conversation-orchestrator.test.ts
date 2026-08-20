@@ -127,6 +127,7 @@ function blueprint(
   worldTemplateId = 'cyber-company',
 ): EmployeeBlueprint {
   return {
+    schemaVersion: 1,
     id,
     version: 1,
     worldTemplateId,

@@ -9,7 +9,7 @@ interface RecruitmentDialogProps {
   loading: boolean
   recruiting: boolean
   onClose(): void
-  onRecruit(blueprint: EmployeeBlueprint, displayName?: string): Promise<void>
+  onRecruit(blueprint: EmployeeBlueprint, displayName: string | undefined, capabilityGrants: string[]): Promise<void>
 }
 
 export function RecruitmentDialog({
@@ -20,19 +20,23 @@ export function RecruitmentDialog({
   onClose,
   onRecruit,
 }: RecruitmentDialogProps) {
-  const [selectedId, setSelectedId] = useState<string>()
+  const [selectedKey, setSelectedKey] = useState<string>()
   const experience = worldExperience(world)
   const roleplay = experience.kind === 'tavern'
   const BlueprintIcon = roleplay ? IdentificationCard : Briefcase
   const [displayName, setDisplayName] = useState('')
+  const [capabilityGrants, setCapabilityGrants] = useState<string[]>([])
   const selected = useMemo(
-    () => blueprints.find((blueprint) => blueprint.id === selectedId) ?? blueprints[0],
-    [blueprints, selectedId],
+    () => blueprints.find((blueprint) => blueprintKey(blueprint) === selectedKey) ?? blueprints[0],
+    [blueprints, selectedKey],
   )
 
   useEffect(() => {
-    if (selected !== undefined && selectedId === undefined) setSelectedId(selected.id)
-  }, [selected, selectedId])
+    if (selected !== undefined && blueprintKey(selected) !== selectedKey) {
+      setSelectedKey(blueprintKey(selected))
+      setCapabilityGrants([])
+    }
+  }, [selected, selectedKey])
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
@@ -54,7 +58,7 @@ export function RecruitmentDialog({
                 key={`${blueprint.id}@${blueprint.version}`}
                 className={`blueprint-card${selected?.id === blueprint.id ? ' is-active' : ''}`}
                 type="button"
-                onClick={() => { setSelectedId(blueprint.id); setDisplayName('') }}
+                onClick={() => { setSelectedKey(blueprintKey(blueprint)); setDisplayName(''); setCapabilityGrants([]) }}
               >
                 <span className="blueprint-card__icon"><BlueprintIcon size={20} /></span>
                 <span className="blueprint-card__copy">
@@ -80,7 +84,11 @@ export function RecruitmentDialog({
                   <input value={displayName} placeholder={selected.displayName} onChange={(event) => setDisplayName(event.target.value)} />
                 </label>
                 <CapabilityGroup title="建议技能" items={selected.requestedSkills} />
-                <CapabilityGroup title="请求权限" items={selected.requestedCapabilities} />
+                <CapabilityApprovalGroup
+                  items={selected.requestedCapabilities}
+                  selected={capabilityGrants}
+                  onChange={setCapabilityGrants}
+                />
                 <div className="permission-notice">
                   <ShieldCheck size={18} />
                   <p>{roleplay ? '角色卡只在当前故事世界生效。技能、知识库和工具权限仍按最小权限独立授权。' : '招聘只创建角色身份。技能与工具仍按最小权限单独授权，角色不能自动扩大自己的能力。'}</p>
@@ -98,7 +106,7 @@ export function RecruitmentDialog({
               className="primary-button"
               type="button"
               disabled={selected === undefined || recruiting}
-              onClick={() => selected && void onRecruit(selected, displayName.trim() || undefined)}
+              onClick={() => selected && void onRecruit(selected, displayName.trim() || undefined, capabilityGrants)}
             >
               {recruiting ? '正在创建独立 Agent…' : roleplay ? '邀请角色入场' : '确认招聘'}
             </button>
@@ -109,11 +117,43 @@ export function RecruitmentDialog({
   )
 }
 
+function blueprintKey(blueprint: EmployeeBlueprint): string {
+  return `${blueprint.id}@${blueprint.version}`
+}
+
 function CapabilityGroup({ title, items }: { title: string; items: string[] }) {
   return (
     <section className="capability-group">
       <h4>{title}</h4>
       <div>{items.length === 0 ? <span>无额外请求</span> : items.map((item) => <span key={item}>{item}</span>)}</div>
     </section>
+  )
+}
+
+function CapabilityApprovalGroup({
+  items,
+  selected,
+  onChange,
+}: {
+  items: string[]
+  selected: string[]
+  onChange(next: string[]): void
+}) {
+  return (
+    <fieldset className="capability-approval-group">
+      <legend>逐项批准员工权限</legend>
+      {items.length === 0 ? <span>该蓝图未请求额外权限</span> : items.map((item) => (
+        <label key={item}>
+          <input
+            type="checkbox"
+            checked={selected.includes(item)}
+            onChange={(event) => onChange(event.target.checked
+              ? [...selected, item]
+              : selected.filter((value) => value !== item))}
+          />
+          <code>{item}</code>
+        </label>
+      ))}
+    </fieldset>
   )
 }

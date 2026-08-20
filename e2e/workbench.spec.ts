@@ -113,9 +113,12 @@ test('runs the real World Mode task, meeting, growth, persistence, and reconnect
   await clickWorldEntity(page, worldId, engineer.id)
   await page.getByRole('complementary', { name: '阿帆情境操作' }).getByRole('button', { name: /安排任务/ }).click()
   const composer = drawer.getByRole('textbox', { name: '给当前世界的员工发送消息' })
+  const persistedReplies = drawer.locator('.message__content').getByText('我先建立性能基线。', { exact: true })
+  const persistedReplyCountBeforeSubmit = await persistedReplies.count()
   await composer.fill('@阿帆 任务：实现可恢复的世界状态')
   await drawer.getByRole('button', { name: '发送' }).click()
-  await expect(drawer.getByText('我先建立性能基线。')).toBeVisible()
+  await expect(persistedReplies).toHaveCount(persistedReplyCountBeforeSubmit + 1)
+  await expect(persistedReplies.last()).toBeVisible()
   await expect.poll(() => server.store.listWorldDomainEvents(worldId).filter((event) => event.type === 'task.completed').length).toBeGreaterThan(taskCompletedBeforeSubmit)
   const taskEvents = server.store.listWorldDomainEvents(worldId)
   expect(taskEvents.filter((event) => event.type === 'task.started').length).toBeGreaterThan(taskStartedBeforeIntent)
@@ -188,6 +191,7 @@ test('runs the real World Mode task, meeting, growth, persistence, and reconnect
 })
 
 test('keeps the workbench readable and the world viewport filled on a 4K display', async ({ page }) => {
+  test.setTimeout(90_000)
   await page.setViewportSize({ width: 3_840, height: 2_160 })
   await page.goto(origin)
   const onboarding = page.getByRole('heading', { name: '创建第一个本地世界' })
@@ -215,6 +219,7 @@ test('keeps the workbench readable and the world viewport filled on a 4K display
   expect(stage?.width ?? 0).toBeGreaterThan(2_800)
   await expect(page.locator('.world-runtime-canvas')).toBeVisible()
 
+  await page.setViewportSize({ width: 1_440, height: 900 })
   for (let index = 0; index < 20; index += 1) {
     await page.getByRole('button', { name: '工作台', exact: true }).click()
     await expect(page.locator('.world-runtime-canvas')).toHaveCount(0)

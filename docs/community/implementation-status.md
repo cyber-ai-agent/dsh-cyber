@@ -1,0 +1,41 @@
+# 创作规范实现状态
+
+本表只描述仓库当前可执行能力。`packages/server/tests/marketplace-conformance.test.ts` 把仓库内市场包的目录可发现性、类型/入口/能力一致性和三类 entrypoint schema 纳入持续测试。
+
+## 结论
+
+世界主题、本地包、员工蓝图和 prompt-transform 已收敛到严格声明式边界；现有领域模型更安全的部分继续保留。远程市场、发布 CLI、密码学签名、依赖解析、任意插件代码和外发监控仍未实现，不能通过文档字段假装存在。
+
+| 领域 | 已实现 | 部分实现/约定补强 | 未实现（ROADMAP） |
+| --- | --- | --- | --- |
+| 包审批 | 完整 manifest 内容绑定、加密随机 token、TTL、单次消费、活动版本绑定、失败回滚 | grant 存于进程内，重启后需重新 preview | 跨设备/远程审批 |
+| 包完整性 | 严格 manifest、未知字段/长度/唯一性、入口-类型-能力关系、完整源目录库存、逐文件 SHA-256、路径/symlink 防护、staged 入口校验、激活后目标文件复验 | license 当前做 SPDX 表达式语法校验，不内置完整注册表 | 密码学签名、透明日志 |
+| 本地市场 | themes/plugins/talent 独立目录、搜索、官方 authority + digest、本地安装 | `certification` 不是签名；`verified` 级别不存在 | 远程 index、publish、付费、依赖、更新、卸载 |
+| 世界主题 | 严格 nested/JSON parser、资源限制、引用/唯一性、八项核心 activity mapping、极端导航拒绝、安装/绑定/切换/禁用/内置回退 | 当前正式官方 roster 多数状态使用受控单帧 fallback | 音频、多场景切换、Three renderer |
+| 主题身份 | package + packageVersion + theme + themeVersion + digest，renderer key 不冲突 | 内置主题使用专用 builtin identity | 签名内容寻址分发 |
+| 主题资产 | staged 时整包与逐资产验证、`assets/` 包内路径、PNG/JPEG/WebP 签名、4/8 MiB 上限、不可变身份缓存、请求目标文件复验、越界/symlink 拒绝 | 缓存为进程内可信缓存 | 远程内容存储/CDN（当前明确禁止） |
+| Pixi 表现 | RendererRegistry、Pixi 实现、8 状态、四向 fallback、脚底锚点、Y-sort、遮挡、growth badge | 官方 roster 多数 clip 目前是单帧受控 fallback | Three.js、正式多帧全方向资产 |
+| 员工蓝图 | schemaVersion、严格字段/长度/唯一性、package id 与能力绑定、不可变 id+version、模板过滤、默认拒绝与逐项能力授权、独立实例/会话、SQLite 恢复 | requested skills 当前展示但不自动授权；模型继续走 ModelProfile/assignment | avatar、memory/skill 文件、蓝图 modelPolicy、compatibility/评测 schema |
+| 插件 | canonical `prompt-transform` 进入真实 conversation runtime prompt；legacy `commands` 明确转换；staged 校验；原始用户消息持久化不被改写 | 仅声明式 JSON；支持 `/command`、`always`、prepend/append/replace、priority 与资源上限；强制无外发 | 可执行代码、skill/tool/event/widget、网络代理与外发审计 |
+| CI | Node 22.19、pnpm 11.7、frozen lockfile、typecheck、test、Chromium、E2E | 仓库工作流名为 `required`；GitHub 分支保护需在仓库设置中另行确认 | 自动发布与包签名流水线 |
+
+## 关键证据
+
+- 包审批与事务：`packages/package-runtime/src/package-manager.ts`、`packages/package-runtime/tests/package-manager.test.ts`
+- 本地市场与完整性：`packages/package-runtime/src/local-package-catalog.ts`、`packages/package-runtime/src/local-package-runtime.ts`
+- 主题 parser：`packages/world-runtime/src/manifest.ts`、`packages/world-runtime/tests/world-runtime.test.ts`
+- 安装入口与资产缓存：`packages/server/src/installed-package-runtime.ts`、`packages/server/src/world-theme-package.ts`、对应 tests
+- 社区包门禁：`packages/server/tests/marketplace-conformance.test.ts`
+- 主题绑定与资产服务：`packages/server/src/world-runtime-service.ts`
+- renderer 与动画：`packages/web/src/features/world/renderer`、`packages/web/tests`
+- 员工蓝图解析与实例化：`packages/server/src/employee-blueprint-manifest.ts`、`packages/persistence/src/sqlite-store.ts`
+- prompt transform：`packages/server/src/prompt-transform-parser.ts`、`packages/server/src/routes/conversation-routes.ts`
+- CI：`.github/workflows/ci.yml`
+
+## 采用规则
+
+讨论稿条款只有满足以下任一条件才能从 ROADMAP 升级为当前约定：
+
+1. 已进入 versioned contract，并有严格解析和兼容策略；
+2. 已进入运行时/持久化真实路径，并有正反测试；
+3. 作为社区审核政策明确标注“代码未强制”，且不会暗示产品能力。

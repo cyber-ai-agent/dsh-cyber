@@ -7,6 +7,7 @@ import {
   nonNegativeInteger,
   optionalPositiveInteger,
   optionalString,
+  optionalStringArray,
   readJson,
   requiredString,
 } from '../http/request.js'
@@ -67,6 +68,22 @@ export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDep
     }
     const displayName = optionalString(body.displayName)
     if (displayName !== undefined) recruitInput.displayName = displayName
+    if (body.capabilityGrants !== undefined) {
+      if (!Array.isArray(body.capabilityGrants) || body.capabilityGrants.some((item) => typeof item !== 'string' || item.trim() === '')) {
+        throw new HttpError(422, 'invalid_capability_grants', 'capabilityGrants must be an array of non-empty strings')
+      }
+      const capabilityGrants = optionalStringArray(body.capabilityGrants)
+      if (capabilityGrants.length !== body.capabilityGrants.length) {
+        throw new HttpError(422, 'duplicate_capability_grant', 'capabilityGrants must not contain duplicates')
+      }
+      const blueprint = store.getBlueprint(recruitInput.blueprintId, recruitInput.blueprintVersion)
+      const requestedCapabilities = new Set(blueprint?.requestedCapabilities ?? [])
+      const denied = capabilityGrants.find((capability) => !requestedCapabilities.has(capability))
+      if (blueprint !== undefined && denied !== undefined) {
+        throw new HttpError(422, 'capability_not_requested', `Capability was not requested by the blueprint: ${denied}`)
+      }
+      recruitInput.capabilityGrants = capabilityGrants
+    }
     writeJson(response, 201, { employee: store.recruitEmployee(recruitInput) })
   })
 }

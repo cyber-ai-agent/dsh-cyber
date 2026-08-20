@@ -867,21 +867,27 @@ export class SqliteStore {
 
   saveBlueprint(blueprint: EmployeeBlueprint): EmployeeBlueprint {
     this.#assertWritable()
+    if (blueprint.schemaVersion !== 1) throw new PersistenceError('Unsupported employee blueprint schema')
     if (blueprint.version < 1) throw new PersistenceError('Blueprint version must be positive')
+    if (new Set(blueprint.requestedSkills).size !== blueprint.requestedSkills.length) {
+      throw new PersistenceError('Employee blueprint requested skills must be unique')
+    }
+    if (new Set(blueprint.requestedCapabilities).size !== blueprint.requestedCapabilities.length) {
+      throw new PersistenceError('Employee blueprint requested capabilities must be unique')
+    }
+    const existing = this.getBlueprint(blueprint.id, blueprint.version)
+    if (existing !== undefined) {
+      if (!employeeBlueprintEquals(existing, blueprint)) {
+        throw new PersistenceError(`Employee blueprint identity is immutable: ${blueprint.id}@${blueprint.version}`)
+      }
+      return existing
+    }
     this.database
       .prepare(
         `INSERT INTO employee_blueprints (
            id, version, world_template_id, display_name, role, summary, persona,
            requested_skills_json, requested_capabilities_json, created_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (id, version) DO UPDATE SET
-           world_template_id = excluded.world_template_id,
-           display_name = excluded.display_name,
-           role = excluded.role,
-           summary = excluded.summary,
-           persona = excluded.persona,
-           requested_skills_json = excluded.requested_skills_json,
-           requested_capabilities_json = excluded.requested_capabilities_json`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         blueprint.id,
@@ -930,6 +936,10 @@ export class SqliteStore {
         `Blueprint ${blueprint.id}@${blueprint.version} belongs to ${blueprint.worldTemplateId}, not ${world.templateId}`,
       )
     }
+    const initialSkillGrants = input.skillGrants ?? []
+    const initialCapabilityGrants = input.capabilityGrants ?? []
+    assertSubset(initialSkillGrants, blueprint.requestedSkills, 'skill grant')
+    assertSubset(initialCapabilityGrants, blueprint.requestedCapabilities, 'capability grant')
     const now = this.#clock()
     const employee: EmployeeInstance = {
       id: this.#idFactory(),
@@ -948,8 +958,8 @@ export class SqliteStore {
       employeeId: employee.id,
       revision: 1,
       persona: input.persona ?? blueprint.persona,
-      skillGrants: input.skillGrants ?? [],
-      capabilityGrants: input.capabilityGrants ?? [],
+      skillGrants: initialSkillGrants,
+      capabilityGrants: initialCapabilityGrants,
       modelPolicy: input.modelPolicy ?? {},
       reason: input.reason ?? 'recruited',
       createdAt: now,
@@ -1023,6 +1033,14 @@ export class SqliteStore {
     const employee = this.#requireEmployee(input.employeeId)
     const previous = this.getEmployeeRevision(employee.id, employee.currentRevision)
     if (!previous) throw new EntityNotFoundError(`Current employee revision not found: ${employee.id}`)
+    const blueprint = this.getBlueprint(employee.blueprintId, employee.blueprintVersion)
+    if (blueprint === undefined) throw new EntityNotFoundError(`Employee blueprint not found: ${employee.blueprintId}@${employee.blueprintVersion}`)
+    if (input.skillGrants !== undefined) {
+      assertSubset(input.skillGrants, blueprint.requestedSkills, 'skill grant')
+    }
+    if (input.capabilityGrants !== undefined) {
+      assertSubset(input.capabilityGrants, blueprint.requestedCapabilities, 'capability grant')
+    }
     const now = this.#clock()
     const revision: EmployeeRevision = {
       employeeId: employee.id,
@@ -2893,6 +2911,27 @@ function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))]
 }
 
+function assertSubset(values: string[], allowedValues: string[], label: string): void {
+  if (new Set(values).size !== values.length) throw new PersistenceError(`Employee ${label}s must be unique`)
+  const allowed = new Set(allowedValues)
+  const denied = values.find((value) => !allowed.has(value))
+  if (denied !== undefined) throw new PersistenceError(`Employee ${label} is not requested by the blueprint: ${denied}`)
+}
+
+function employeeBlueprintEquals(left: EmployeeBlueprint, right: EmployeeBlueprint): boolean {
+  return left.schemaVersion === right.schemaVersion &&
+    left.id === right.id &&
+    left.version === right.version &&
+    left.worldTemplateId === right.worldTemplateId &&
+    left.displayName === right.displayName &&
+    left.role === right.role &&
+    left.summary === right.summary &&
+    left.persona === right.persona &&
+    left.createdAt === right.createdAt &&
+    [...left.requestedSkills].sort().join('\u0000') === [...right.requestedSkills].sort().join('\u0000') &&
+    [...left.requestedCapabilities].sort().join('\u0000') === [...right.requestedCapabilities].sort().join('\u0000')
+}
+
 function assertBirthday(value: string): void {
   if (!/^(?:\d{4}-)?\d{2}-\d{2}$/.test(value)) {
     throw new PersistenceError('Birthday must use MM-DD or YYYY-MM-DD')
@@ -2969,6 +3008,7 @@ function mapWorld(row: object): World {
 function mapBlueprint(row: object): EmployeeBlueprint {
   const value = row as Record<string, unknown>
   return {
+    schemaVersion: 1,
     id: String(value.id),
     version: Number(value.version),
     worldTemplateId: String(value.world_template_id),
