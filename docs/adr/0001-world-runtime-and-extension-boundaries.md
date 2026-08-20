@@ -31,10 +31,14 @@ PixiJS 只负责渲染、命中测试、相机和动画；角色身份、任务�
 
 当前支持的真实入口包括：
 
-- `prompt-transform`：在 Agent 回合开始前转换提示；
+- `prompt-transform`：在 Agent 回合开始前转换提示；当前严格限定为声明式 JSON，只改变 runtime prompt，持久化的原始用户消息不被改写；
 - `employee-blueprint`：向指定世界提供可招聘员工蓝图；
 - `world-theme`：提供版本化世界主题清单；
-- `skill`：为后续 Harness Skill 授权与装载保留入口。
+- `skill`：为后续 Harness Skill 授权与装载保留入口，当前尚未自动注入或授权。
+
+当前不加载或执行第三方 JavaScript、TypeScript、原生模块或任意本机命令，也不提供网络代理、通用存储或可执行代码 sandbox。`talent` 是市场分类，不是包类型；员工蓝图包的 `kind` 必须是 `employee-blueprint`。官方认证同时要求受信机构与内容摘要一致，但 `certification` 不是密码学签名。
+
+远程市场/索引、密码学签名、依赖解析、自动更新、卸载和 `package pack|verify|publish` 发布 CLI 均保留为路线图；当前只支持本地市场、安装前预览与可回滚安装。
 
 ### 5. Harness 只位于适配边界
 
