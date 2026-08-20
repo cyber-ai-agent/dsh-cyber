@@ -1,9 +1,4 @@
-import {
-  createServer,
-  type IncomingMessage,
-  type Server,
-  type ServerResponse,
-} from 'node:http'
+import { createServer, type Server } from 'node:http'
 import { mkdir, realpath } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -27,11 +22,11 @@ import {
 } from '@dsh-cyber/package-runtime'
 import { SqliteStore } from '@dsh-cyber/persistence'
 
-import { HttpError, writeError } from './http/errors.js'
+import { dispatchHttpRequest } from './http/context.js'
+import { writeError } from './http/errors.js'
 import { optionalPositiveInteger } from './http/request.js'
 import { Router } from './http/router.js'
-import { assertLocalRequest, isLoopbackHost } from './http/security.js'
-import { serveWebAsset } from './http/static-files.js'
+import { isLoopbackHost } from './http/security.js'
 import { registerAssetRoutes } from './routes/asset-routes.js'
 import { registerCatalogRoutes } from './routes/catalog-routes.js'
 import { registerConversationRoutes } from './routes/conversation-routes.js'
@@ -43,6 +38,9 @@ import { registerWorkspaceFileRoutes } from './routes/workspace-file-routes.js'
 import { registerWorkspaceRoutes } from './routes/workspace-routes.js'
 import { registerWorldRuntimeRoutes } from './routes/world-runtime-routes.js'
 import { registerWorldRoutes } from './routes/world-routes.js'
+import { AssetService } from './services/asset-service.js'
+import { RuntimeUpdateService } from './services/runtime-update-service.js'
+import { WorkspaceFileService } from './services/workspace-file-service.js'
 import { RuntimeStreamHub } from './streams/runtime-stream-hub.js'
 import { WorldStreamHub } from './streams/world-stream-hub.js'
 import { WorldRuntimeService } from './world-runtime-service.js'
@@ -122,14 +120,17 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const runtimeStreamHub = new RuntimeStreamHub()
   const worldStreamHub = new WorldStreamHub()
   const worldRuntime = new WorldRuntimeService({ store, publish: (event) => worldStreamHub.publish(event) })
+  const runtimeUpdates = new RuntimeUpdateService(store, stateRoot, workspaceRoot)
+  const assets = new AssetService(store, stateRoot)
+  const workspaceFiles = new WorkspaceFileService(workspaceRoot)
 
   const router = new Router()
-  registerSystemRoutes(router, { store, stateRoot, workspaceRoot })
-  registerWorkspaceFileRoutes(router, { workspaceRoot })
+  registerSystemRoutes(router, { store, stateRoot, runtimeUpdates })
+  registerWorkspaceFileRoutes(router, { workspaceFiles })
   registerCatalogRoutes(router, { store, packageCatalog })
   registerWorkspaceRoutes(router, { store })
   registerModelRoutes(router, { store })
-  registerAssetRoutes(router, { store, stateRoot })
+  registerAssetRoutes(router, { store, assets })
   registerWorldRoutes(router, { store })
   registerPackageRoutes(router, { store, packageManager, packageCatalog })
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub })
@@ -180,21 +181,6 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       store.close()
     },
   }
-}
-
-async function dispatchHttpRequest(
-  router: Router,
-  webRoot: string,
-  request: IncomingMessage,
-  response: ServerResponse,
-): Promise<void> {
-  assertLocalRequest(request)
-  const url = new URL(request.url ?? '/', 'http://127.0.0.1')
-  if ((request.method ?? 'GET') === 'GET' && !url.pathname.startsWith('/api/')) {
-    if (await serveWebAsset(response, webRoot, url.pathname)) return
-  }
-  if (await router.dispatch(request, response)) return
-  throw new HttpError(404, 'not_found', 'Route not found')
 }
 
 async function resolveActiveRuntime(

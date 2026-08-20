@@ -7,6 +7,7 @@ import {
 } from '@dsh-cyber/package-runtime'
 
 import { UnsupportedWorldRuntimeError } from '../world-runtime-service.js'
+import { ServiceError } from '../services/service-error.js'
 import { writeJson } from './response.js'
 
 export class HttpError extends Error {
@@ -27,6 +28,18 @@ export function writeError(response: ServerResponse, error: unknown): void {
   }
   if (error instanceof HttpError) {
     writeJson(response, error.status, { error: { code: error.code, message: error.message } })
+    return
+  }
+  if (error instanceof ServiceError) {
+    const status = {
+      conflict: 409,
+      forbidden: 403,
+      invalid: 422,
+      'not-found': 404,
+      'too-large': 413,
+      unsupported: 415,
+    }[error.kind]
+    writeJson(response, status, { error: { code: error.code, message: error.message } })
     return
   }
   if (error instanceof ConversationOrchestrationError) {

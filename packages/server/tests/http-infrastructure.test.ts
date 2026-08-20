@@ -10,6 +10,7 @@ import { HttpError, writeError } from '../src/http/errors.js'
 import { Router, matchRoute } from '../src/http/router.js'
 import { RuntimeStreamHub } from '../src/streams/runtime-stream-hub.js'
 import { WorldStreamHub } from '../src/streams/world-stream-hub.js'
+import { ServiceError } from '../src/services/service-error.js'
 
 class FakeResponse {
   readonly chunks: string[] = []
@@ -125,6 +126,16 @@ describe('HTTP error mapping', () => {
     expect(fake.statusCode).toBe(500)
     expect(JSON.parse(fake.text())).toEqual({
       error: { code: 'internal_error', message: 'Internal server error' },
+    })
+  })
+
+  it('maps application errors without coupling services to HTTP responses', () => {
+    const { fake, node } = response()
+    writeError(node, new ServiceError('too-large', 'preview_too_large', 'Preview is too large'))
+
+    expect(fake.statusCode).toBe(413)
+    expect(JSON.parse(fake.text())).toEqual({
+      error: { code: 'preview_too_large', message: 'Preview is too large' },
     })
   })
 })
