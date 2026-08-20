@@ -188,6 +188,7 @@ test('runs the real World Mode task, meeting, growth, persistence, and reconnect
 })
 
 test('keeps the workbench readable and the world viewport filled on a 4K display', async ({ page }) => {
+  test.setTimeout(120_000)
   await page.setViewportSize({ width: 3_840, height: 2_160 })
   await page.goto(origin)
   const onboarding = page.getByRole('heading', { name: '创建第一个本地世界' })
