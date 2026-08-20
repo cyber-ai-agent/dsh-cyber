@@ -97,6 +97,8 @@ describe('PackageManager', () => {
     const preview = manager.preview(workspace.id, packageManifest)
 
     expect(preview.addedCapabilities).toEqual(['workspace:read'])
+    expect(preview.approvalToken).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    expect(Date.parse(preview.approvalExpiresAt)).toBeGreaterThan(Date.now())
     await expect(
       manager.install({
         workspaceId: workspace.id,
@@ -123,6 +125,67 @@ describe('PackageManager', () => {
       'package.install.staged',
       'package.install.activated',
     ]))
+    await expect(manager.install({
+      workspaceId: workspace.id,
+      manifest: packageManifest,
+      sourceDirectory: source,
+      approvalToken: preview.approvalToken,
+    })).rejects.toBeInstanceOf(PackageApprovalRequiredError)
+  })
+
+  it('binds a one-time random grant to all manifest content', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-cyber-approval-'))
+    const source = join(directory, 'source')
+    await mkdir(source, { recursive: true })
+    await writeFile(join(source, 'SKILL.md'), '# Example\n', 'utf8')
+    const store = await SqliteStore.open(join(directory, 'cyber.sqlite'))
+    stores.push(store)
+    const workspace = store.createWorkspace({ name: 'Approval binding' })
+    const manager = new PackageManager({ store, runtime: new LocalPackageRuntime(join(directory, 'packages')) })
+    const original = manifest('1.0.0', '# Example\n')
+    original.entrypoints = [{ id: 'skill', kind: 'skill', path: 'SKILL.md' }]
+    const mutations: Array<(value: CyberPackageManifest) => void> = [
+      (value) => { value.files[0]!.sha256 = 'a'.repeat(64) },
+      (value) => { value.entrypoints![0]!.id = 'changed' },
+      (value) => { value.publisher = 'Different publisher' },
+      (value) => { value.license = 'MIT' },
+    ]
+    for (const mutate of mutations) {
+      const preview = manager.preview(workspace.id, original)
+      const changed = structuredClone(original)
+      mutate(changed)
+      await expect(manager.install({ workspaceId: workspace.id, manifest: changed, sourceDirectory: source, approvalToken: preview.approvalToken })).rejects.toBeInstanceOf(PackageApprovalRequiredError)
+      await expect(manager.install({ workspaceId: workspace.id, manifest: original, sourceDirectory: source, approvalToken: preview.approvalToken })).rejects.toBeInstanceOf(PackageApprovalRequiredError)
+    }
+    expect(new Set(Array.from({ length: 32 }, () => manager.preview(workspace.id, original).approvalToken)).size).toBe(32)
+  })
+
+  it('expires grants and invalidates them when the active package changes', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-cyber-approval-expiry-'))
+    const source = join(directory, 'source')
+    await mkdir(source, { recursive: true })
+    await writeFile(join(source, 'SKILL.md'), '# Example\n', 'utf8')
+    const store = await SqliteStore.open(join(directory, 'cyber.sqlite'))
+    stores.push(store)
+    const workspace = store.createWorkspace({ name: 'Approval expiry' })
+    let now = new Date('2026-08-20T00:00:00.000Z')
+    const manager = new PackageManager({
+      store,
+      runtime: new LocalPackageRuntime(join(directory, 'packages')),
+      clock: () => now,
+      approvalTtlMs: 1_000,
+    })
+    const first = manifest('1.0.0', '# Example\n')
+    const expired = manager.preview(workspace.id, first)
+    now = new Date('2026-08-20T00:00:01.000Z')
+    await expect(manager.install({ workspaceId: workspace.id, manifest: first, sourceDirectory: source, approvalToken: expired.approvalToken })).rejects.toBeInstanceOf(PackageApprovalRequiredError)
+    now = new Date('2026-08-20T00:00:02.000Z')
+    await manager.install({ workspaceId: workspace.id, manifest: first, sourceDirectory: source, approvalToken: manager.preview(workspace.id, first).approvalToken })
+    const future = manifest('3.0.0', '# Example\n')
+    const stale = manager.preview(workspace.id, future)
+    const replacement = manifest('2.0.0', '# Example\n')
+    await manager.install({ workspaceId: workspace.id, manifest: replacement, sourceDirectory: source, approvalToken: manager.preview(workspace.id, replacement).approvalToken })
+    await expect(manager.install({ workspaceId: workspace.id, manifest: future, sourceDirectory: source, approvalToken: stale.approvalToken })).rejects.toBeInstanceOf(PackageApprovalRequiredError)
   })
 
   it('restores the previous active pointer and database state when activation commit fails', async () => {

@@ -381,7 +381,7 @@ describe('Cyber local server', () => {
     const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-world-sse-'))
     const { origin } = await start(stateRoot, new FakeRuntime())
     const { world } = await createWorld(origin)
-    await recruit(origin, world.id, 'cyber-company.software-engineer')
+    const employee = await recruit(origin, world.id, 'cyber-company.software-engineer')
     const initial = await json(origin, `/api/worlds/${world.id}/runtime-snapshot`)
 
     const live = openWorldStream(origin, world.id, initial.body.sequence)
@@ -412,6 +412,26 @@ describe('Cyber local server', () => {
     expect(recoveredState.id).toBe(String(lastSequence))
     expect(stale.events.filter((event) => event.event === 'world-state')).toHaveLength(1)
     stale.close()
+
+    const boundarySnapshot = await json(origin, `/api/worlds/${world.id}/runtime-snapshot`)
+    const boundary = openWorldStream(origin, world.id, boundarySnapshot.body.sequence)
+    await boundary.connected
+    await boundary.waitFor((event) => event.event === 'ready')
+    await json(origin, `/api/worlds/${world.id}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employeeIds: [employee.id], prompt: '验证 cue/state 断点恢复' }),
+    })
+    const cue = await boundary.waitFor((event) => event.event === 'world-cue')
+    boundary.close()
+
+    const afterCueDisconnect = openWorldStream(origin, world.id, boundarySnapshot.body.sequence, cue.id)
+    await afterCueDisconnect.connected
+    const recoveryAfterCue = await afterCueDisconnect.waitFor((event) => event.event === 'recovery-required')
+    const stateAfterCue = await afterCueDisconnect.waitFor((event) => event.event === 'world-state')
+    expect(stateAfterCue.data.sequence).toBe(recoveryAfterCue.data.sequence)
+    expect(afterCueDisconnect.events.filter((event) => event.event === 'world-cue')).toHaveLength(0)
+    afterCueDisconnect.close()
   })
 
   it('starts a world-scoped conversation after a theme switch and never leaks old @ roles', async () => {
@@ -754,6 +774,19 @@ describe('Cyber local server', () => {
     expect(packageAsset.status).toBe(200)
     expect(packageAsset.headers.get('content-type')).toBe('image/png')
     expect(server.store.getWorldThemeBinding(world.id)).toMatchObject({ status: 'active', themeId: 'official-cyber-nocturne' })
+
+    for (let index = 0; index < 100; index += 1) {
+      const action = index % 2 === 0 ? 'bind' : 'fallback'
+      const switched = await json(origin, `/api/worlds/${world.id}/theme-binding`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(action === 'bind'
+          ? { action, packageId: 'official-cyber-nocturne' }
+          : { action }),
+      })
+      expect(switched.response.status).toBe(200)
+    }
+    expect((await json(origin, `/api/worlds/${world.id}/themes`)).body.items.filter((item: { active: boolean }) => item.active)).toHaveLength(1)
 
     const fallback = await json(origin, `/api/worlds/${world.id}/theme-binding`, {
       method: 'PUT',

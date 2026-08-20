@@ -8,7 +8,13 @@ import { describe, expect, it } from 'vitest'
 import type { CyberPackageManifest, InstalledPackage } from '@dsh-cyber/contracts'
 import { cyberCompanyTheme } from '@dsh-cyber/world-runtime'
 
-import { applyInstalledPromptTransforms, loadInstalledBlueprints, loadInstalledWorldThemes } from '../src/installed-package-runtime.js'
+import {
+  applyInstalledPromptTransforms,
+  InstalledPackageVerificationCache,
+  loadInstalledBlueprints,
+  loadInstalledWorldThemes,
+  readInstalledWorldThemeAsset,
+} from '../src/installed-package-runtime.js'
 
 describe('installed package entrypoints', () => {
   it('applies an installed command plugin to the runtime prompt', async () => {
@@ -60,10 +66,42 @@ describe('installed package entrypoints', () => {
       files: [{ path: 'theme.json', sha256: createHash('sha256').update(content).digest('hex') }],
       entrypoints: [{ id: 'theme', kind: 'world-theme', path: 'theme.json' }],
     })
-    await expect(loadInstalledWorldThemes([installed])).rejects.toThrow('not a declared package file')
+    await expect(loadInstalledWorldThemes([installed])).rejects.toThrow(/Invalid installed world theme|not a declared package file/)
 
     await writeFile(join(root, 'theme.json'), `${content}tampered`, 'utf8')
     await expect(loadInstalledWorldThemes([installed])).rejects.toThrow('hash mismatch')
+  })
+
+  it('verifies a package once and rehashes only the requested asset afterwards', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-cyber-theme-cache-'))
+    const theme = structuredClone(cyberCompanyTheme)
+    theme.assets[0]!.src = 'scene.png'
+    theme.assets[1]!.src = 'roster.png'
+    const themeContent = `${JSON.stringify(theme)}\n`
+    const scene = Buffer.from('scene-image')
+    const roster = Buffer.from('roster-image')
+    await writeFile(join(root, 'theme.json'), themeContent, 'utf8')
+    await writeFile(join(root, 'scene.png'), scene)
+    await writeFile(join(root, 'roster.png'), roster)
+    const installed = packageRecord(root, {
+      id: 'cached-theme',
+      kind: 'world-theme',
+      files: [
+        { path: 'theme.json', sha256: createHash('sha256').update(themeContent).digest('hex') },
+        { path: 'scene.png', sha256: createHash('sha256').update(scene).digest('hex') },
+        { path: 'roster.png', sha256: createHash('sha256').update(roster).digest('hex') },
+      ],
+      entrypoints: [{ id: 'theme', kind: 'world-theme', path: 'theme.json' }],
+    })
+    const cache = new InstalledPackageVerificationCache()
+    await expect(loadInstalledWorldThemes([installed], cache)).resolves.toHaveLength(1)
+    expect(cache.fullVerificationPasses).toBe(1)
+
+    await writeFile(join(root, 'roster.png'), 'tampered-unrequested', 'utf8')
+    await expect(readInstalledWorldThemeAsset(installed, 'scene.png', cache)).resolves.toMatchObject({ contentType: 'image/png' })
+    expect(cache.fullVerificationPasses).toBe(1)
+    await writeFile(join(root, 'scene.png'), 'tampered-requested', 'utf8')
+    await expect(readInstalledWorldThemeAsset(installed, 'scene.png', cache)).rejects.toThrow('hash mismatch')
   })
 })
 

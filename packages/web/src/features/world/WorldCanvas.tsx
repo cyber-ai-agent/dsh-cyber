@@ -11,6 +11,7 @@ import { createWorldRendererRegistry } from './renderer/renderer-registry.js'
 
 interface WorldCanvasProps {
   manifest: WorldThemeManifestV1
+  rendererIdentity: string
   snapshot: WorldRuntimeSnapshot
   cues: WorldCue[]
   selectedEntityId?: string
@@ -24,6 +25,7 @@ interface WorldCanvasProps {
 
 export function WorldCanvas({
   manifest,
+  rendererIdentity,
   snapshot,
   cues,
   selectedEntityId,
@@ -37,7 +39,7 @@ export function WorldCanvas({
   const hostRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<WorldRenderer<HTMLElement> | undefined>(undefined)
   const appliedCueIds = useRef(new Set<string>())
-  const mountedKey = `${manifest.id}:${manifest.version}:${snapshot.sceneId}`
+  const mountedKey = `${rendererIdentity}:${snapshot.sceneId}`
 
   useEffect(() => {
     const host = hostRef.current

@@ -15,8 +15,33 @@ interface PromptTransformDefinition {
 export interface InstalledWorldTheme {
   packageId: string
   packageVersion: string
+  contentDigest: string
   manifest: WorldThemeManifestV1
 }
+
+export class InstalledPackageVerificationCache {
+  readonly #verifiedPackages = new Set<string>()
+  #fullVerificationPasses = 0
+
+  get fullVerificationPasses(): number {
+    return this.#fullVerificationPasses
+  }
+
+  async verifyPackage(installed: InstalledPackage): Promise<void> {
+    const identity = installedIdentity(installed)
+    if (this.#verifiedPackages.has(identity)) return
+    for (const file of installed.manifest.files) await readVerifiedPackageFile(installed, file.path)
+    this.#verifiedPackages.add(identity)
+    this.#fullVerificationPasses += 1
+  }
+
+  async readFile(installed: InstalledPackage, relativePath: string): Promise<Buffer> {
+    await this.verifyPackage(installed)
+    return readVerifiedPackageFile(installed, relativePath)
+  }
+}
+
+const defaultVerificationCache = new InstalledPackageVerificationCache()
 
 export async function applyInstalledPromptTransforms(
   packages: InstalledPackage[],
@@ -53,13 +78,16 @@ export async function loadInstalledBlueprints(packages: InstalledPackage[]): Pro
   return blueprints
 }
 
-export async function loadInstalledWorldThemes(packages: InstalledPackage[]): Promise<InstalledWorldTheme[]> {
+export async function loadInstalledWorldThemes(
+  packages: InstalledPackage[],
+  verificationCache = defaultVerificationCache,
+): Promise<InstalledWorldTheme[]> {
   const themes: InstalledWorldTheme[] = []
   for (const installed of packages.filter((item) => item.status === 'active' && item.kind === 'world-theme')) {
-    await verifyInstalledPackage(installed)
+    await verificationCache.verifyPackage(installed)
     for (const entrypoint of installed.manifest.entrypoints ?? []) {
       if (entrypoint.kind !== 'world-theme') continue
-      const value = await readEntrypoint<unknown>(installed, entrypoint.path)
+      const value = await readEntrypoint<unknown>(installed, entrypoint.path, verificationCache)
       const validation = validateWorldThemeManifest(value)
       if (!validation.valid) throw new Error(`Invalid installed world theme ${installed.packageId}: ${validation.errors.join('; ')}`)
       const manifest = value as WorldThemeManifestV1
@@ -69,7 +97,8 @@ export async function loadInstalledWorldThemes(packages: InstalledPackage[]): Pr
           throw new Error(`World theme asset is not a declared package file: ${asset.src}`)
         }
       }
-      themes.push({ packageId: installed.packageId, packageVersion: installed.version, manifest })
+      const entrypointFile = installed.manifest.files.find((file) => file.path === entrypoint.path)!
+      themes.push({ packageId: installed.packageId, packageVersion: installed.version, contentDigest: entrypointFile.sha256, manifest })
     }
   }
   return themes
@@ -78,32 +107,48 @@ export async function loadInstalledWorldThemes(packages: InstalledPackage[]): Pr
 export async function readInstalledWorldThemeAsset(
   installed: InstalledPackage,
   relativePath: string,
+  verificationCache = defaultVerificationCache,
 ): Promise<{ body: Buffer; contentType: string }> {
-  await verifyInstalledPackage(installed)
   const declared = installed.manifest.files.find((file) => file.path === relativePath)
   if (declared === undefined || !safeRelativePackagePath(relativePath)) {
     throw new Error(`World theme asset is not declared: ${relativePath}`)
   }
-  const path = await securePackageFile(installed, relativePath)
-  return { body: await readFile(path), contentType: assetContentType(relativePath) }
+  return { body: await verificationCache.readFile(installed, relativePath), contentType: assetContentType(relativePath) }
 }
 
-async function readEntrypoint<T>(installed: InstalledPackage, relativePath: string): Promise<T> {
+async function readEntrypoint<T>(
+  installed: InstalledPackage,
+  relativePath: string,
+  verificationCache?: InstalledPackageVerificationCache,
+): Promise<T> {
   const path = await securePackageFile(installed, relativePath)
   const metadata = await lstat(path)
   if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > MAX_ENTRYPOINT_BYTES) {
     throw new Error(`Invalid installed package entrypoint: ${installed.packageId}/${relativePath}`)
   }
-  return JSON.parse(await readFile(path, 'utf8')) as T
+  const body = verificationCache === undefined
+    ? await readFile(path)
+    : await verificationCache.readFile(installed, relativePath)
+  return JSON.parse(body.toString('utf8')) as T
 }
 
-async function verifyInstalledPackage(installed: InstalledPackage): Promise<void> {
-  for (const file of installed.manifest.files) {
-    const path = await securePackageFile(installed, file.path)
-    const body = await readFile(path)
-    const digest = createHash('sha256').update(body).digest('hex')
-    if (digest !== file.sha256) throw new Error(`Installed package hash mismatch: ${installed.packageId}/${file.path}`)
-  }
+async function readVerifiedPackageFile(installed: InstalledPackage, relativePath: string): Promise<Buffer> {
+  const declared = installed.manifest.files.find((file) => file.path === relativePath)
+  if (declared === undefined) throw new Error(`Installed package file is not declared: ${installed.packageId}/${relativePath}`)
+  const path = await securePackageFile(installed, relativePath)
+  const body = await readFile(path)
+  const digest = createHash('sha256').update(body).digest('hex')
+  if (digest !== declared.sha256) throw new Error(`Installed package hash mismatch: ${installed.packageId}/${relativePath}`)
+  return body
+}
+
+function installedIdentity(installed: InstalledPackage): string {
+  const inventory = [...installed.manifest.files]
+    .sort((left, right) => left.path.localeCompare(right.path))
+    .map((file) => `${file.path}:${file.sha256}`)
+    .join('\n')
+  const digest = createHash('sha256').update(inventory).digest('hex')
+  return `${installed.workspaceId}:${installed.packageId}@${installed.version}:${resolve(installed.installedPath)}:${digest}`
 }
 
 async function securePackageFile(installed: InstalledPackage, relativePath: string): Promise<string> {

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 
 import type {
   CyberPackageManifest,
@@ -73,13 +73,37 @@ export class PackageInstallError extends Error {
   }
 }
 
+interface PackageApprovalGrant {
+  workspaceId: string
+  manifestDigest: string
+  activePackageDigest?: string
+  capabilities: string[]
+  expiresAtMs: number
+}
+
+const DEFAULT_APPROVAL_TTL_MS = 5 * 60 * 1_000
+const MAX_APPROVAL_GRANTS = 2_048
+
 export class PackageManager {
   readonly #store: PackageStorePort
   readonly #runtime: PackageRuntimePort
+  readonly #clock: () => Date
+  readonly #approvalTtlMs: number
+  readonly #approvalGrants = new Map<string, PackageApprovalGrant>()
 
-  constructor(options: { store: PackageStorePort; runtime: PackageRuntimePort }) {
+  constructor(options: {
+    store: PackageStorePort
+    runtime: PackageRuntimePort
+    clock?: () => Date
+    approvalTtlMs?: number
+  }) {
     this.#store = options.store
     this.#runtime = options.runtime
+    this.#clock = options.clock ?? (() => new Date())
+    this.#approvalTtlMs = options.approvalTtlMs ?? DEFAULT_APPROVAL_TTL_MS
+    if (!Number.isSafeInteger(this.#approvalTtlMs) || this.#approvalTtlMs <= 0) {
+      throw new Error('Package approval TTL must be a positive integer')
+    }
   }
 
   preview(workspaceId: string, manifest: CyberPackageManifest): PackagePermissionPreview {
@@ -88,6 +112,9 @@ export class PackageManager {
     const capabilities = sortedUnique(manifest.capabilities)
     const previousCapabilities = new Set(active?.capabilities ?? [])
     const currentCapabilities = new Set(capabilities)
+    const now = this.#clock()
+    const expiresAt = new Date(now.getTime() + this.#approvalTtlMs)
+    const approvalToken = randomBytes(32).toString('base64url')
     const previewBase = {
       workspaceId,
       packageId: manifest.id,
@@ -98,21 +125,42 @@ export class PackageManager {
       dataEgress: sortedUnique(manifest.dataEgress),
       ...(active === undefined ? {} : { previousVersion: active.version }),
     }
+    this.#purgeApprovalGrants(now.getTime())
+    this.#approvalGrants.set(tokenDigest(approvalToken), {
+      workspaceId,
+      manifestDigest: packageManifestDigest(manifest),
+      ...(active === undefined ? {} : { activePackageDigest: installedPackageDigest(active) }),
+      capabilities,
+      expiresAtMs: expiresAt.getTime(),
+    })
+    this.#trimApprovalGrants()
     return {
       ...previewBase,
-      approvalToken: approvalToken(previewBase),
+      approvalToken,
+      approvalExpiresAt: expiresAt.toISOString(),
     }
   }
 
   async install(input: InstallPackageInput): Promise<InstalledPackage> {
-    const preview = this.preview(input.workspaceId, input.manifest)
-    if (!timingSafeTextEqual(preview.approvalToken, input.approvalToken)) {
+    validatePackageManifest(input.manifest)
+    const digest = tokenDigest(input.approvalToken)
+    const grant = this.#approvalGrants.get(digest)
+    if (grant === undefined) {
       throw new PackageApprovalRequiredError()
     }
+    this.#approvalGrants.delete(digest)
+    const active = this.#store.getActivePackage(input.workspaceId, input.manifest.id)
+    const activePackageDigest = active === undefined ? undefined : installedPackageDigest(active)
+    if (
+      grant.expiresAtMs <= this.#clock().getTime()
+      || grant.workspaceId !== input.workspaceId
+      || grant.manifestDigest !== packageManifestDigest(input.manifest)
+      || grant.activePackageDigest !== activePackageDigest
+    ) throw new PackageApprovalRequiredError()
     const beginInput: Parameters<PackageStorePort['beginPackageInstall']>[0] = {
       workspaceId: input.workspaceId,
       manifest: input.manifest,
-      approvedCapabilities: preview.capabilities,
+      approvedCapabilities: grant.capabilities,
     }
     if (input.actorId !== undefined) beginInput.actorId = input.actorId
     const transaction = this.#store.beginPackageInstall(beginInput)
@@ -140,6 +188,20 @@ export class PackageManager {
       if (input.actorId !== undefined) rollbackInput.actorId = input.actorId
       this.#store.rollbackPackageInstall(rollbackInput)
       throw new PackageInstallError(errorCode, error)
+    }
+  }
+
+  #purgeApprovalGrants(nowMs: number): void {
+    for (const [key, grant] of this.#approvalGrants) {
+      if (grant.expiresAtMs <= nowMs) this.#approvalGrants.delete(key)
+    }
+  }
+
+  #trimApprovalGrants(): void {
+    while (this.#approvalGrants.size > MAX_APPROVAL_GRANTS) {
+      const oldest = this.#approvalGrants.keys().next().value as string | undefined
+      if (oldest === undefined) return
+      this.#approvalGrants.delete(oldest)
     }
   }
 }
@@ -192,14 +254,23 @@ export function packageContentDigest(manifest: Pick<CyberPackageManifest, 'files
   return createHash('sha256').update(inventory).digest('hex')
 }
 
-function approvalToken(value: Omit<PackagePermissionPreview, 'approvalToken'>): string {
-  return createHash('sha256').update(JSON.stringify(value)).digest('hex')
+export function packageManifestDigest(manifest: CyberPackageManifest): string {
+  return createHash('sha256').update(stableSerialize(manifest)).digest('hex')
 }
 
-function timingSafeTextEqual(left: string, right: string): boolean {
-  const leftHash = createHash('sha256').update(left).digest()
-  const rightHash = createHash('sha256').update(right).digest()
-  return leftHash.equals(rightHash)
+function installedPackageDigest(installed: InstalledPackage): string {
+  return `${installed.packageId}@${installed.version}:${packageManifestDigest(installed.manifest)}`
+}
+
+function tokenDigest(token: string): string {
+  return createHash('sha256').update(token).digest('hex')
+}
+
+function stableSerialize(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(stableSerialize).join(',')}]`
+  const record = value as Record<string, unknown>
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableSerialize(record[key])}`).join(',')}}`
 }
 
 function sortedUnique(values: readonly string[]): string[] {

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import type {
   AgentRuntimeEvent,
   JsonObject,
@@ -16,7 +18,11 @@ import {
   validateWorldThemeManifest,
 } from '@dsh-cyber/world-runtime'
 
-import { loadInstalledWorldThemes, readInstalledWorldThemeAsset } from './installed-package-runtime.js'
+import {
+  InstalledPackageVerificationCache,
+  loadInstalledWorldThemes,
+  readInstalledWorldThemeAsset,
+} from './installed-package-runtime.js'
 
 const ACTIVE_RENDERERS = new Set(['pixi-2d'])
 
@@ -40,6 +46,7 @@ export class WorldRuntimeService {
   readonly #store: SqliteStore
   readonly #publish: (event: WorldRuntimeStreamEnvelope) => void
   readonly #clock: () => string
+  readonly #verificationCache = new InstalledPackageVerificationCache()
 
   constructor(options: WorldRuntimeServiceOptions) {
     this.#store = options.store
@@ -121,7 +128,7 @@ export class WorldRuntimeService {
     if (world === undefined) throw new Error(`World not found: ${worldId}`)
     const binding = this.#store.getWorldThemeBinding(worldId)
     const builtIn = this.#manifestForTemplate(world.templateId)
-    const installed = await loadInstalledWorldThemes(this.#store.listInstalledPackages(world.workspaceId))
+    const installed = await loadInstalledWorldThemes(this.#store.listInstalledPackages(world.workspaceId), this.#verificationCache)
     const compatible = installed.filter((item) =>
       themeTemplateMatches(world.templateId, item.manifest.templateId) && ACTIVE_RENDERERS.has(item.manifest.renderer))
     const activeThemeId = binding?.status === 'active' ? binding.themeId : builtIn?.id ?? ''
@@ -132,7 +139,10 @@ export class WorldRuntimeService {
         displayName: builtIn.displayName,
         templateId: builtIn.templateId,
         source: 'built-in' as const,
-        active: activeThemeId === builtIn.id,
+        active: binding?.status !== 'active',
+        packageId: '@dsh-cyber/builtin-world-themes',
+        packageVersion: builtIn.version,
+        contentDigest: themeContentDigest(builtIn),
       }]),
       ...compatible.map((item) => ({
         themeId: item.manifest.id,
@@ -140,8 +150,15 @@ export class WorldRuntimeService {
         displayName: item.manifest.displayName,
         templateId: item.manifest.templateId,
         source: 'installed' as const,
-        active: activeThemeId === item.manifest.id,
+        active: binding?.status === 'active'
+          && binding.packageId === item.packageId
+          && binding.packageVersion === item.packageVersion
+          && binding.themeId === item.manifest.id
+          && binding.themeVersion === item.manifest.version
+          && binding.contentDigest === item.contentDigest,
         packageId: item.packageId,
+        packageVersion: item.packageVersion,
+        contentDigest: item.contentDigest,
       })),
     ]
     return { activeThemeId, items }
@@ -150,7 +167,7 @@ export class WorldRuntimeService {
   async bindInstalledTheme(worldId: string, packageId: string): Promise<WorldRuntimeSnapshot> {
     const world = this.#store.getWorld(worldId)
     if (world === undefined) throw new Error(`World not found: ${worldId}`)
-    const themes = await loadInstalledWorldThemes(this.#store.listInstalledPackages(world.workspaceId))
+    const themes = await loadInstalledWorldThemes(this.#store.listInstalledPackages(world.workspaceId), this.#verificationCache)
     const selected = themes.find((item) => item.packageId === packageId)
     if (selected === undefined) throw new Error(`Installed world theme not found: ${packageId}`)
     if (!themeTemplateMatches(world.templateId, selected.manifest.templateId)) {
@@ -159,7 +176,13 @@ export class WorldRuntimeService {
     if (!ACTIVE_RENDERERS.has(selected.manifest.renderer)) {
       throw new Error(`World renderer is not installed: ${selected.manifest.renderer}`)
     }
-    this.#store.bindWorldTheme(worldId, selected.manifest)
+    this.#store.bindWorldTheme(worldId, {
+      packageId: selected.packageId,
+      packageVersion: selected.packageVersion,
+      themeId: selected.manifest.id,
+      themeVersion: selected.manifest.version,
+      contentDigest: selected.contentDigest,
+    }, selected.manifest)
     const snapshot = this.getSnapshot(worldId)
     this.publishState(snapshot)
     return snapshot
@@ -183,12 +206,17 @@ export class WorldRuntimeService {
     const asset = binding.manifest.assets.find((item) => item.id === assetId)
     if (asset === undefined) throw new Error(`World theme asset not found: ${assetId}`)
     const packages = this.#store.listInstalledPackages(world.workspaceId)
-    const themes = await loadInstalledWorldThemes(packages)
-    const selected = themes.find((item) => item.manifest.id === binding.themeId && item.manifest.version === binding.themeVersion)
+    const themes = await loadInstalledWorldThemes(packages, this.#verificationCache)
+    const selected = themes.find((item) =>
+      item.packageId === binding.packageId
+      && item.packageVersion === binding.packageVersion
+      && item.manifest.id === binding.themeId
+      && item.manifest.version === binding.themeVersion
+      && item.contentDigest === binding.contentDigest)
     if (selected === undefined) throw new Error('The bound world theme package is no longer active')
     const installed = packages.find((item) => item.packageId === selected.packageId && item.version === selected.packageVersion)
     if (installed === undefined) throw new Error('The bound world theme package is missing')
-    return readInstalledWorldThemeAsset(installed, asset.src)
+    return readInstalledWorldThemeAsset(installed, asset.src, this.#verificationCache)
   }
 
   interact(worldId: string, request: WorldInteractionRequest): WorldInteractionResult {
@@ -345,11 +373,23 @@ export class WorldRuntimeService {
 
   #manifestForWorld(worldId: string, templateId: string): WorldThemeManifestV1 | undefined {
     const binding = this.#store.getWorldThemeBinding(worldId)
-    if (binding?.status === 'active' && themeTemplateMatches(templateId, binding.manifest.templateId) && ACTIVE_RENDERERS.has(binding.manifest.renderer)) {
+    const world = this.#store.getWorld(worldId)
+    const installed = world === undefined || binding?.status !== 'active'
+      ? undefined
+      : this.#store.listInstalledPackages(world.workspaceId).find((item) =>
+        item.status === 'active'
+        && item.packageId === binding.packageId
+        && item.version === binding.packageVersion
+        && item.manifest.files.some((file) => file.sha256 === binding.contentDigest))
+    if (installed !== undefined && binding?.status === 'active' && themeTemplateMatches(templateId, binding.manifest.templateId) && ACTIVE_RENDERERS.has(binding.manifest.renderer)) {
       return binding.manifest
     }
     return this.#manifestForTemplate(templateId)
   }
+}
+
+function themeContentDigest(manifest: WorldThemeManifestV1): string {
+  return createHash('sha256').update(JSON.stringify(manifest)).digest('hex')
 }
 
 function interactionPayload(request: WorldInteractionRequest): JsonObject {

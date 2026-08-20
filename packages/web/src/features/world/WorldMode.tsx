@@ -153,6 +153,7 @@ export function WorldMode({
     <main className="world-runtime" aria-label={`${world.name}互动世界`}>
       <WorldCanvas
         manifest={runtime.manifest}
+        rendererIdentity={runtime.rendererIdentity}
         snapshot={runtime.snapshot}
         cues={runtime.cues}
         {...(selectedEmployeeId === undefined ? {} : { selectedEntityId: selectedEmployeeId })}

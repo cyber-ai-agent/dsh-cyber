@@ -2259,15 +2259,22 @@ export class SqliteStore {
     if (row === undefined) return undefined
     return {
       worldId: String(row.world_id),
+      packageId: String(row.package_id),
+      packageVersion: String(row.package_version),
       themeId: String(row.theme_id),
       themeVersion: String(row.theme_version),
+      contentDigest: String(row.content_digest),
       status: row.status as WorldThemeBinding['status'],
       manifest: parseJson<WorldThemeManifestV1>(row.manifest_json),
       updatedAt: String(row.updated_at),
     }
   }
 
-  bindWorldTheme(worldId: string, manifest: WorldThemeManifestV1): WorldThemeBinding {
+  bindWorldTheme(
+    worldId: string,
+    identity: Pick<WorldThemeBinding, 'packageId' | 'packageVersion' | 'themeId' | 'themeVersion' | 'contentDigest'>,
+    manifest: WorldThemeManifestV1,
+  ): WorldThemeBinding {
     this.#assertWritable()
     const world = this.#requireWorld(worldId)
     if (!themeTemplateMatches(world.templateId, manifest.templateId)) {
@@ -2278,16 +2285,19 @@ export class SqliteStore {
       this.database
         .prepare(
           `INSERT INTO world_theme_bindings
-           (world_id, theme_id, theme_version, status, manifest_json, updated_at)
-           VALUES (?, ?, ?, 'active', ?, ?)
+           (world_id, package_id, package_version, theme_id, theme_version, content_digest, status, manifest_json, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)
            ON CONFLICT (world_id) DO UPDATE SET
+             package_id = excluded.package_id,
+             package_version = excluded.package_version,
              theme_id = excluded.theme_id,
              theme_version = excluded.theme_version,
+             content_digest = excluded.content_digest,
              status = 'active',
              manifest_json = excluded.manifest_json,
              updated_at = excluded.updated_at`,
         )
-        .run(worldId, manifest.id, manifest.version, stringifyJson(manifest as unknown as JsonValue), updatedAt)
+        .run(worldId, identity.packageId, identity.packageVersion, identity.themeId, identity.themeVersion, identity.contentDigest, stringifyJson(manifest as unknown as JsonValue), updatedAt)
       this.clearWorldRuntimeProjection(worldId)
     })
     return this.getWorldThemeBinding(worldId)!

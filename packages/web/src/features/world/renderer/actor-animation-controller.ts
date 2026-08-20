@@ -21,6 +21,7 @@ export class ActorAnimationController {
   readonly #actorSet: WorldThemeActorSetManifest
   readonly #source: Texture
   readonly #rosterIndex: number
+  readonly #textures = new Map<number, Texture>()
   #activity: WorldActivityKind = 'idle'
   #facing: WorldFacing = 'south'
   #elapsed = 0
@@ -78,6 +79,12 @@ export class ActorAnimationController {
 
   destroy(): void {
     this.sprite.stop()
+    for (const texture of this.#textures.values()) texture.destroy(false)
+    this.#textures.clear()
+  }
+
+  get textureCount(): number {
+    return this.#textures.size
   }
 
   #texture(relativeFrame: number): Texture {
@@ -86,7 +93,9 @@ export class ActorAnimationController {
     const totalFrames = columns * rows
     const framesPerActor = Math.max(1, this.#actorSet.framesPerActor ?? 1)
     const frameIndex = Math.min(totalFrames - 1, Math.max(0, this.#rosterIndex * framesPerActor + relativeFrame))
-    return new Texture({
+    const cached = this.#textures.get(frameIndex)
+    if (cached !== undefined) return cached
+    const texture = new Texture({
       source: this.#source.source,
       frame: new Rectangle(
         (frameIndex % columns) * this.#actorSet.frameWidth,
@@ -95,6 +104,8 @@ export class ActorAnimationController {
         this.#actorSet.frameHeight,
       ),
     })
+    this.#textures.set(frameIndex, texture)
+    return texture
   }
 
   #applyFacingScale(): void {

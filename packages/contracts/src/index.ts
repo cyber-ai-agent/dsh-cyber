@@ -1,4 +1,4 @@
-export const CYBER_SCHEMA_VERSION = 9 as const
+export const CYBER_SCHEMA_VERSION = 10 as const
 
 export type IsoTimestamp = string
 export type JsonPrimitive = boolean | number | string | null
@@ -132,6 +132,7 @@ export interface PackagePermissionPreview {
   dataEgress: string[]
   previousVersion?: string
   approvalToken: string
+  approvalExpiresAt: IsoTimestamp
 }
 
 export type RuntimeUpdateStatus =

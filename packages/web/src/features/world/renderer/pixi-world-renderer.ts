@@ -60,6 +60,7 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
   readonly #objectHints = new Map<string, Graphics>()
   readonly #growthMarkers = new Map<string, GrowthMarkerView>()
   readonly #assetTextures = new Map<string, Texture>()
+  readonly #layerTextures = new Set<Texture>()
   readonly #appliedCueIds = new Set<string>()
   readonly #lastCueSequence = new Map<string, number>()
   #manifest?: WorldThemeManifestV1
@@ -76,6 +77,7 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
   #resizeObserver: ResizeObserver | undefined
   #initialized = false
   #destroyed = false
+  #wheelListener: ((event: WheelEvent) => void) | undefined
 
   constructor(callbacks: WorldRendererCallbacks) {
     this.#callbacks = callbacks
@@ -259,15 +261,22 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
     this.#destroyed = true
     this.#resizeObserver?.disconnect()
     this.#resizeObserver = undefined
+    if (this.#host !== undefined && this.#wheelListener !== undefined) {
+      this.#host.removeEventListener('wheel', this.#wheelListener)
+    }
+    this.#wheelListener = undefined
     for (const actor of this.#actors.values()) actor.animation.destroy()
     this.#actors.clear()
     this.#objectHints.clear()
     for (const marker of this.#growthMarkers.values()) marker.root.destroy({ children: true })
     this.#growthMarkers.clear()
-    this.#assetTextures.clear()
     this.#appliedCueIds.clear()
     this.#lastCueSequence.clear()
     if (this.#initialized) this.#app.destroy(true, { children: true, texture: false, textureSource: false })
+    for (const texture of this.#layerTextures) texture.destroy(false)
+    this.#layerTextures.clear()
+    for (const texture of this.#assetTextures.values()) texture.destroy(true)
+    this.#assetTextures.clear()
     this.#initialized = false
   }
 
@@ -294,6 +303,7 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
           source: sourceTexture.source,
           frame: new Rectangle(layer.source.x, layer.source.y, layer.source.width, layer.source.height),
         })
+      if (texture !== sourceTexture) this.#layerTextures.add(texture)
       const sprite = new Sprite(texture)
       sprite.position.set(layer.destination.x, layer.destination.y)
       sprite.width = layer.destination.width
@@ -460,10 +470,11 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
 
   #wireCamera(): void {
     if (!this.#host) return
-    this.#host.addEventListener('wheel', (event) => {
+    this.#wheelListener = (event) => {
       event.preventDefault()
       this.zoomBy(event.deltaY > 0 ? -0.1 : 0.1)
-    }, { passive: false })
+    }
+    this.#host.addEventListener('wheel', this.#wheelListener, { passive: false })
     this.#app.stage.eventMode = 'static'
     this.#app.stage.hitArea = this.#app.screen
     this.#app.stage.on('pointerdown', (event: FederatedPointerEvent) => {

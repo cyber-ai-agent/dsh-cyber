@@ -502,6 +502,19 @@ const MIGRATIONS: readonly Migration[] = [
         ON model_assignments(workspace_id, model_profile_id, scope, scope_id);
     `,
   },
+  {
+    version: 10,
+    name: 'immutable-world-theme-identities',
+    sql: `
+      ALTER TABLE world_theme_bindings ADD COLUMN package_id TEXT NOT NULL DEFAULT 'legacy-unbound';
+      ALTER TABLE world_theme_bindings ADD COLUMN package_version TEXT NOT NULL DEFAULT '0.0.0';
+      ALTER TABLE world_theme_bindings ADD COLUMN content_digest TEXT NOT NULL DEFAULT 'legacy-unverified';
+      UPDATE world_theme_bindings SET status = 'disabled';
+      DROP INDEX world_theme_bindings_theme_idx;
+      CREATE INDEX world_theme_bindings_identity_idx
+        ON world_theme_bindings(package_id, package_version, theme_id, theme_version, content_digest, status);
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {

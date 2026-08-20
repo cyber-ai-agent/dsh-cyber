@@ -284,10 +284,16 @@ export interface WorldThemeManifestV1 {
   activityMapping: Partial<Record<string, WorldActivityKind>>
 }
 
-export interface WorldThemeBinding {
-  worldId: string
+export interface WorldThemeIdentity {
+  packageId: string
+  packageVersion: string
   themeId: string
   themeVersion: string
+  contentDigest: string
+}
+
+export interface WorldThemeBinding extends WorldThemeIdentity {
+  worldId: string
   status: 'active' | 'disabled'
   manifest: WorldThemeManifestV1
   updatedAt: IsoTimestamp
@@ -301,4 +307,6 @@ export interface WorldThemeOption {
   source: 'built-in' | 'installed'
   active: boolean
   packageId?: string
+  packageVersion?: string
+  contentDigest: string
 }

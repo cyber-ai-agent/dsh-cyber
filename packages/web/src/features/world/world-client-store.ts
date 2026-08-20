@@ -8,6 +8,7 @@ import type {
   WorldRuntimeSnapshot,
   WorldRuntimeStreamEnvelope,
   WorldThemeManifestV1,
+  WorldThemeOption,
   WorldThemeSceneManifest,
 } from '@dsh-cyber/contracts'
 import { cyberCompanyTheme, findPath, getAnchor, getScene } from '@dsh-cyber/world-runtime'
@@ -18,6 +19,7 @@ import type { CyberEmployee } from '../../types.js'
 export interface WorldClientState {
   snapshot?: WorldRuntimeSnapshot
   manifest: WorldThemeManifestV1
+  rendererIdentity: string
   cues: WorldCue[]
   loading: boolean
   connected: boolean
@@ -34,6 +36,7 @@ export function useWorldClient({ demoMode, world, employees }: UseWorldClientInp
   const manifest = cyberCompanyTheme
   const [state, setState] = useState<WorldClientState>(() => ({
     manifest,
+    rendererIdentity: builtInRendererIdentity(manifest),
     cues: [],
     loading: !demoMode,
     connected: demoMode,
@@ -45,6 +48,7 @@ export function useWorldClient({ demoMode, world, employees }: UseWorldClientInp
     setState((current) => ({
       ...current,
       manifest,
+      rendererIdentity: builtInRendererIdentity(manifest),
       snapshot: mergeDemoEmployees(current.snapshot, world, employees, manifest),
       loading: false,
       connected: true,
@@ -58,9 +62,18 @@ export function useWorldClient({ demoMode, world, employees }: UseWorldClientInp
     void Promise.all([
       api<WorldRuntimeSnapshot>(`/api/worlds/${encodeURIComponent(world.id)}/runtime-snapshot`),
       api<WorldThemeManifestV1>(`/api/worlds/${encodeURIComponent(world.id)}/theme-manifest`),
-    ]).then(([snapshot, nextManifest]) => {
+      api<{ items: WorldThemeOption[] }>(`/api/worlds/${encodeURIComponent(world.id)}/themes`),
+    ]).then(([snapshot, nextManifest, themes]) => {
       if (cancelled) return
-      setState((current) => ({ ...current, snapshot, manifest: nextManifest, loading: false, connected: true }))
+      const activeTheme = themes.items.find((item) => item.active)
+      setState((current) => ({
+        ...current,
+        snapshot,
+        manifest: nextManifest,
+        rendererIdentity: activeTheme === undefined ? builtInRendererIdentity(nextManifest) : rendererIdentity(activeTheme),
+        loading: false,
+        connected: true,
+      }))
       stream = new EventSource(`/api/worlds/${encodeURIComponent(world.id)}/stream?after=${snapshot.sequence}`)
       let currentSequence = snapshot.sequence
       const onState = (event: Event) => {
@@ -131,6 +144,14 @@ export function useWorldClient({ demoMode, world, employees }: UseWorldClientInp
   }, [demoMode, world.id])
 
   return useMemo(() => ({ ...state, interact }), [interact, state])
+}
+
+function rendererIdentity(theme: WorldThemeOption): string {
+  return [theme.packageId ?? '@dsh-cyber/builtin-world-themes', theme.packageVersion ?? theme.version, theme.themeId, theme.version, theme.contentDigest].join(':')
+}
+
+function builtInRendererIdentity(manifest: WorldThemeManifestV1): string {
+  return `@dsh-cyber/builtin-world-themes:${manifest.version}:${manifest.id}:${manifest.version}:bundled`
 }
 
 function parseEnvelope(event: Event): WorldRuntimeStreamEnvelope | undefined {

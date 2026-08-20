@@ -327,6 +327,7 @@ export default function App() {
         dataEgress: [...new Set(manifest.dataEgress)].sort(),
         ...(active === undefined ? {} : { previousVersion: active.version }),
         approvalToken: `demo-${manifest.id}-${manifest.version}`,
+        approvalExpiresAt: new Date(Date.now() + 5 * 60 * 1_000).toISOString(),
       }
     }
     return api<PackagePermissionPreview>(`/api/workspaces/${workspace.id}/packages/preview`, {

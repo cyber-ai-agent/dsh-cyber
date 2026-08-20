@@ -76,6 +76,39 @@ describe('world theme manifest', () => {
     expect(result.errors.join(' ')).toContain('missing asset')
     expect(result.errors.join(' ')).toContain('missing anchor')
   })
+
+  it.each([
+    ['unknown root field', () => ({ ...structuredClone(cyberCompanyTheme), injected: true })],
+    ['invalid renderer', () => ({ ...structuredClone(cyberCompanyTheme), renderer: 'canvas-2d' })],
+    ['invalid terminology', () => ({ ...structuredClone(cyberCompanyTheme), terminology: [] })],
+    ['duplicate asset', () => {
+      const value = structuredClone(cyberCompanyTheme)
+      value.assets.push({ ...value.assets[0]! })
+      return value
+    }],
+    ['invalid frame', () => {
+      const value = structuredClone(cyberCompanyTheme)
+      value.actorSets[0]!.clips.walking.south = [-1]
+      return value
+    }],
+    ['duplicate blocked cell', () => {
+      const value = structuredClone(cyberCompanyTheme)
+      value.scenes[0]!.navigation.blocked.push(value.scenes[0]!.navigation.blocked[0]!)
+      return value
+    }],
+    ['invalid activity mapping', () => ({ ...structuredClone(cyberCompanyTheme), activityMapping: { event: 'flying' } })],
+  ])('rejects malformed theme: %s', (_name, createValue) => {
+    expect(validateWorldThemeManifest(createValue()).valid).toBe(false)
+  })
+
+  it('rejects extreme navigation dimensions', () => {
+    const value = structuredClone(cyberCompanyTheme)
+    value.scenes[0]!.navigation.columns = 4_096
+    value.scenes[0]!.navigation.rows = 4_096
+    const result = validateWorldThemeManifest(value)
+    expect(result.valid).toBe(false)
+    expect(result.errors.join(' ')).toContain('navigation cells')
+  })
 })
 
 describe('world navigation', () => {

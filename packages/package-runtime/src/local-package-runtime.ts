@@ -75,6 +75,7 @@ export class LocalPackageRuntime implements PackageRuntimePort {
     await mkdir(packageRoot, { recursive: true })
     try {
       await rename(staged.path, installedPath)
+      await verifyInstalledFiles(installedPath, staged.manifest)
       await writeAtomic(pointerPath, {
         packageId: staged.manifest.id,
         version: staged.manifest.version,
@@ -109,6 +110,18 @@ export class LocalPackageRuntime implements PackageRuntimePort {
       throw new Error('Refusing to discard a path outside package staging')
     }
     await rm(stagedPath, { recursive: true, force: true })
+  }
+}
+
+async function verifyInstalledFiles(installedPath: string, manifest: CyberPackageManifest): Promise<void> {
+  const root = resolve(installedPath)
+  for (const file of manifest.files) {
+    const path = resolve(root, ...file.path.split('/'))
+    if (!path.startsWith(`${root}${sep}`)) throw new Error(`Activated package file escaped its root: ${file.path}`)
+    const metadata = await lstat(path)
+    if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error(`Activated package file is invalid: ${file.path}`)
+    const digest = createHash('sha256').update(await readFile(path)).digest('hex')
+    if (digest !== file.sha256) throw new Error(`Activated package hash mismatch: ${file.path}`)
   }
 }
 

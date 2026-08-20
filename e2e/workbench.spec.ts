@@ -214,6 +214,13 @@ test('keeps the workbench readable and the world viewport filled on a 4K display
   expect(stage?.height ?? 0).toBeGreaterThan((right?.height ?? 0) * 0.8)
   expect(stage?.width ?? 0).toBeGreaterThan(2_800)
   await expect(page.locator('.world-runtime-canvas')).toBeVisible()
+
+  for (let index = 0; index < 20; index += 1) {
+    await page.getByRole('button', { name: '工作台', exact: true }).click()
+    await expect(page.locator('.world-runtime-canvas')).toHaveCount(0)
+    await page.getByLabel('主视图').getByRole('button', { name: '世界', exact: true }).click()
+    await expect(page.locator('.world-runtime-canvas')).toHaveCount(1)
+  }
 })
 
 test('opens the dossier as an all-employee information directory', async ({ page }) => {
