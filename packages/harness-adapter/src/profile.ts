@@ -69,19 +69,18 @@ export async function ensureHarnessProfile(
   )
   await writeTextAtomic(
     profilePatchPath,
-    '# Machine-local DSH Cyber worker overrides. Bundle policy remains authoritative.\n[]\n',
+    providerProfile === undefined
+      ? '# Machine-local DSH Cyber worker overrides. Bundle policy remains authoritative.\n[]\n'
+      : `${JSON.stringify([
+          {
+            id: 'llm-pi-ai',
+            config: { providers: { [providerProfile.route]: providerRoute(providerProfile) } },
+          },
+        ], null, 2)}\n`,
   )
   if (providerProfile !== undefined) {
     validateProviderProfile(providerProfile)
-    const route = {
-      displayName: providerProfile.displayName,
-      api: providerProfile.api,
-      baseURL: providerProfile.baseURL,
-      models: [providerProfile.model],
-      ...(providerProfile.apiKeyEnv === undefined
-        ? {}
-        : { apiKeyEnv: providerProfile.apiKeyEnv }),
-    }
+    const route = providerRoute(providerProfile)
     await writeTextAtomic(
       settingsPath,
       `${JSON.stringify({ 'llm-pi-ai': { providers: { [providerProfile.route]: route } } }, null, 2)}\n`,
@@ -99,6 +98,19 @@ export async function ensureHarnessProfile(
     profileManifestPath,
     profilePatchPath,
     settingsPath,
+  }
+}
+
+function providerRoute(providerProfile: HarnessProviderProfile): Record<string, unknown> {
+  validateProviderProfile(providerProfile)
+  return {
+    displayName: providerProfile.displayName,
+    api: providerProfile.api,
+    baseURL: providerProfile.baseURL,
+    models: [providerProfile.model],
+    ...(providerProfile.apiKeyEnv === undefined
+      ? {}
+      : { apiKeyEnv: providerProfile.apiKeyEnv }),
   }
 }
 

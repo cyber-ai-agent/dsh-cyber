@@ -34,12 +34,12 @@ test('onboards, recruits, talks, browses dossiers and previews a real workspace 
   await expect(page.getByRole('textbox')).toHaveCount(0)
   await page.getByRole('button', { name: '创建本地工作区' }).click()
 
-  await expect(page.getByRole('heading', { name: '当前世界还没有员工' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '公司还没有员工' })).toBeVisible()
   const composer = page.getByRole('textbox', { name: '给当前世界的员工发送消息' })
   await expect(composer).toBeDisabled()
   await expect(composer).toHaveCount(1)
 
-  await page.getByRole('button', { name: '招聘第一位员工' }).click()
+  await page.getByRole('button', { name: '添加第一名员工' }).click()
   const market = page.getByRole('dialog', { name: '员工市场' })
   await expect(market).toBeVisible()
   await market.getByRole('button', { name: /开发工程师 v1/ }).click()
@@ -51,7 +51,7 @@ test('onboards, recruits, talks, browses dossiers and previews a real workspace 
   await expect(page.getByRole('button', { name: /阿帆.*软件工程师/ })).toBeVisible()
 
   const dock = page.getByRole('region', { name: '产物与世界侧边栏' })
-  await expect(dock.getByText('阿帆 / 数字员工档案')).toBeVisible()
+  await expect(dock.getByText('阿帆 / 独立员工档案')).toBeVisible()
   await dock.getByRole('button', { name: '全员档案' }).click()
   await expect(dock.getByText('全员数字档案')).toBeVisible()
   await expect(dock.getByRole('article').filter({ hasText: '阿帆' })).toBeVisible()
@@ -94,8 +94,9 @@ test('keeps the workbench readable and the world viewport filled on a 4K display
   expect(center?.width ?? 0).toBeGreaterThan(1_200)
   expect(right?.width ?? 0).toBeGreaterThan(700)
   expect(Math.abs((stage?.height ?? 0) - (canvas?.height ?? 0))).toBeLessThan(3)
-  expect(Math.abs(((stage?.width ?? 1) / (stage?.height ?? 1)) - (46 / 34))).toBeLessThan(.03)
-  await expect(dock.getByLabel('世界实时活动')).toBeVisible()
+  expect(stage?.height ?? 0).toBeGreaterThan((right?.height ?? 0) * 0.8)
+  expect(stage?.width ?? 0).toBeGreaterThan(700)
+  await expect(dock.locator('.world-activity-rail')).toHaveCount(0)
   await expect(page.getByRole('textbox', { name: '给当前世界的员工发送消息' })).toHaveCount(1)
 })
 
@@ -105,7 +106,7 @@ test('opens the dossier as an all-employee information directory', async ({ page
   await dock.getByRole('button', { name: '档案', exact: true }).click()
 
   await expect(dock.getByText('全员数字档案')).toBeVisible()
-  await expect(dock.getByText('8 名角色')).toBeVisible()
+  await expect(dock.getByText('8 名员工')).toBeVisible()
   await expect(dock.getByRole('article')).toHaveCount(8)
   for (const employee of ['小羽', '老周', '阿帆', '小Q', '安澜', '墨游', '小E', '秘书']) {
     await expect(dock.getByRole('article').filter({ hasText: employee })).toBeVisible()

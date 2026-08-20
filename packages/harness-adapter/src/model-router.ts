@@ -29,6 +29,7 @@ export interface HarnessModelRouterOptions {
   adapterFactory?: (options: HarnessAdapterOptions) => AgentRuntimePort
   inheritedEnvironment?: NodeJS.ProcessEnv
   nodeExecutable?: string
+  dshBinPath?: string
 }
 
 interface AdapterEntry {
@@ -107,6 +108,9 @@ export class HarnessModelRouter implements AgentRuntimePort, AsyncDisposable {
       ...(this.#options.nodeExecutable === undefined
         ? {}
         : { nodeExecutable: this.#options.nodeExecutable }),
+      ...(this.#options.dshBinPath === undefined
+        ? {}
+        : { dshBinPath: this.#options.dshBinPath }),
     }
     if (route !== undefined) {
       const providerRoute = `cyber-${fingerprint.slice(0, 16)}`

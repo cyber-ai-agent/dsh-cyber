@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { request as httpRequest } from 'node:http'
 import { mkdir, mkdtemp, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -519,6 +519,77 @@ describe('Cyber local server', () => {
       body: JSON.stringify({ name: 'blocked' }),
     })
     expect(originStatus).toBe(403)
+  })
+
+  it('persists the staged DSH update state machine, explicit activation, and rollback', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-server-update-'))
+    const { origin, server } = await start(stateRoot)
+    const verified = await json(origin, '/api/system/update/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ candidateRoot: resolve('.') }),
+    })
+    expect(verified.response.status).toBe(201)
+    expect(verified.body).toMatchObject({
+      ok: true,
+      version: '0.1.0-rc.7',
+      transaction: { status: 'verified' },
+    })
+    const transactionId = verified.body.transaction.id as string
+
+    const unapproved = await json(origin, `/api/system/update/${transactionId}/activate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved: false }),
+    })
+    expect(unapproved.response.status).toBe(409)
+    expect(unapproved.body.error.code).toBe('runtime_activation_approval_required')
+
+    const contract = await json(origin, `/api/system/update/${transactionId}/contract-test`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    })
+    expect(contract.response.status).toBe(200)
+    expect(contract.body.transaction.status).toBe('contract-tested')
+
+    const missingModel = await json(origin, `/api/system/update/${transactionId}/canary`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    })
+    expect(missingModel.response.status).toBe(422)
+
+    server.store.transitionRuntimeUpdate({
+      transactionId,
+      status: 'canary-passed',
+      report: { ok: true, evidence: 'real Harness canary is covered by harness-adapter integration' },
+    })
+    const activated = await json(origin, `/api/system/update/${transactionId}/activate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved: true }),
+    })
+    expect(activated.response.status).toBe(200)
+    expect(activated.body).toMatchObject({
+      ok: true,
+      restartRequired: true,
+      transaction: { status: 'activated' },
+    })
+
+    const updates = await json(origin, '/api/system/updates')
+    expect(updates.body.activeRuntime).toMatchObject({ transactionId, version: '0.1.0-rc.7' })
+    expect(updates.body.items[0]).toMatchObject({ id: transactionId, status: 'activated' })
+
+    const rolledBack = await json(origin, `/api/system/update/${transactionId}/rollback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved: true }),
+    })
+    expect(rolledBack.response.status).toBe(200)
+    expect(rolledBack.body.transaction.status).toBe('rolled-back')
+    const afterRollback = await json(origin, '/api/system/updates')
+    expect(afterRollback.body.activeRuntime).toBeUndefined()
   })
 })
 

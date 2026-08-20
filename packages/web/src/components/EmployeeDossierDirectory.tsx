@@ -18,6 +18,7 @@ interface EmployeeDossierDirectoryProps {
 export function EmployeeDossierDirectory({ employees, dossiers, world, onOpen, onDirect, onManage }: EmployeeDossierDirectoryProps) {
   const experience = worldExperience(world)
   const roleplay = experience.kind === 'tavern'
+  const directoryTitle = experience.kind === 'company' ? '全员数字档案' : `全${experience.peopleLabel}数字档案`
   const verifiedSkills = Object.values(dossiers).reduce(
     (total, dossier) => total + dossier.skills.filter((skill) => skill.status === 'verified').length,
     0,
@@ -29,13 +30,13 @@ export function EmployeeDossierDirectory({ employees, dossiers, world, onOpen, o
       <header className="dossier-directory__header">
         <div>
           <IdentificationBadge size={22} />
-          <span><strong>全角色数字档案</strong><small>{roleplay ? '人物设定、关系、成长与剧情履历' : '身份、能力、成长与真实履历'}</small></span>
+          <span><strong>{directoryTitle}</strong><small>{roleplay ? '人物设定、关系、成长与剧情履历' : '身份、能力、成长与真实履历'}</small></span>
         </div>
-        <span>{employees.length} 名角色</span>
+        <span>{employees.length} 名{experience.personLabel}</span>
       </header>
 
       <div className="dossier-directory__summary" aria-label="全员档案概览">
-        <div><UsersThree size={16} /><strong>{employees.length}</strong><span>在册角色</span></div>
+        <div><UsersThree size={16} /><strong>{employees.length}</strong><span>在册{experience.personLabel}</span></div>
         <div><Certificate size={16} /><strong>{verifiedSkills}</strong><span>已验证技能</span></div>
         <div><CalendarDots size={16} /><strong>{milestones}</strong><span>真实事迹</span></div>
       </div>

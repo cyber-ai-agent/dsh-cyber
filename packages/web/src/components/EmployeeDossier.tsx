@@ -46,8 +46,8 @@ export function EmployeeDossier({ dossier, employees, avatarIndex, world, onDire
   return (
     <div className="dossier">
       <div className="dossier-breadcrumb">
-        <button type="button" onClick={onBack}><ArrowLeft size={14} />全角色档案</button>
-        <span>{dossier.employee.displayName} / 独立角色档案</span>
+        <button type="button" onClick={onBack}><ArrowLeft size={14} />{experience.kind === 'company' ? '全员档案' : `全${experience.peopleLabel}档案`}</button>
+        <span>{dossier.employee.displayName} / 独立{experience.personLabel}档案</span>
       </div>
       <header className="dossier-hero">
         <button className="avatar-edit-button" type="button" aria-label={`修改${dossier.employee.displayName}的名字和头像`} onClick={onManage}>
@@ -59,19 +59,19 @@ export function EmployeeDossier({ dossier, employees, avatarIndex, world, onDire
           <StatusDot status={dossier.employee.status} label={statusLabel(dossier.employee.status, roleplay)} />
         </div>
         <div className="dossier-hero__actions">
-          <span>角色版本 r{dossier.employee.currentRevision}</span>
+          <span>{experience.personLabel}版本 r{dossier.employee.currentRevision}</span>
           <button className="text-button" type="button" onClick={onManage}>管理</button>
           <button className="primary-button" type="button" onClick={onDirect}>直接对话</button>
         </div>
       </header>
 
-      <div className="dossier-facts" aria-label="角色事实摘要">
+      <div className="dossier-facts" aria-label={`${experience.personLabel}事实摘要`}>
         <div><strong>{verified}</strong><span>已验证技能</span></div>
         <div><strong>{dossier.milestones.length}</strong><span>真实事迹</span></div>
         <div><strong>{dossier.journals.length}</strong><span>{roleplay ? '角色日志' : '工作日志'}</span></div>
       </div>
 
-      <nav className="dossier-tabs" aria-label="角色档案栏目">
+      <nav className="dossier-tabs" aria-label={`${experience.personLabel}档案栏目`}>
         {sections.map((item) => {
           const Icon = item.icon
           return (

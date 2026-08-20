@@ -4,6 +4,9 @@ import { join } from 'node:path'
 
 import { describe, expect, it, vi } from 'vitest'
 
+import { readActiveHarnessRuntime, writeActiveHarnessRuntime } from '@dsh-cyber/harness-adapter'
+import { SqliteStore } from '@dsh-cyber/persistence'
+
 import { runCli, type CliIo } from '../src/index.js'
 
 function captureIo(): { io: CliIo; stdout: string[]; stderr: string[] } {
@@ -91,5 +94,41 @@ describe('dsh-cyber CLI', () => {
     const unknown = captureIo()
     expect(await runCli(['unknown'], { io: unknown.io })).toBe(1)
     expect(unknown.stderr[0]).toContain('Unknown command')
+  })
+
+  it('recovers an activated candidate pointer to the bundled runtime without the web server', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-cli-recovery-'))
+    const web = captureIo()
+    expect(await runCli(['web', '--port', '0', '--data-dir', stateRoot, '--no-open'], {
+      cwd: stateRoot,
+      io: web.io,
+      waitForShutdown: async (server) => server.close(),
+    })).toBe(0)
+    const store = await SqliteStore.open(join(stateRoot, 'data', 'dsh-cyber.sqlite'))
+    const verified = store.beginRuntimeUpdate({
+      candidateRoot: stateRoot,
+      version: '0.1.0-rc.7',
+      contractId: 'dsh-session-events-v1',
+      report: { ok: true },
+    })
+    store.transitionRuntimeUpdate({ transactionId: verified.id, status: 'contract-tested', report: { ok: true } })
+    store.transitionRuntimeUpdate({ transactionId: verified.id, status: 'canary-passed', report: { ok: true } })
+    store.transitionRuntimeUpdate({ transactionId: verified.id, status: 'activated', report: { ok: true } })
+    store.close()
+    await writeActiveHarnessRuntime(join(stateRoot, 'runtime'), {
+      schemaVersion: 1,
+      transactionId: verified.id,
+      candidateRoot: stateRoot,
+      version: '0.1.0-rc.7',
+      activatedAt: new Date().toISOString(),
+    })
+
+    const rollback = captureIo()
+    expect(await runCli(['runtime-rollback', '--data-dir', stateRoot], { io: rollback.io })).toBe(0)
+    expect(await readActiveHarnessRuntime(join(stateRoot, 'runtime'))).toBeUndefined()
+    const reopened = await SqliteStore.open(join(stateRoot, 'data', 'dsh-cyber.sqlite'), { readOnly: true })
+    expect(reopened.getRuntimeUpdateTransaction(verified.id)?.status).toBe('rolled-back')
+    reopened.close()
+    expect(rollback.stdout[0]).toContain('恢复内置 DSH')
   })
 })

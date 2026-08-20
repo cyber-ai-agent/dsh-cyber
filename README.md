@@ -10,7 +10,7 @@ DSH Cyber 是一个基于 [DeepSeek Harness](https://www.deepseek.com/harness/) 
 - **真实多角色协作**：每个角色拥有独立身份、会话、模型策略、权限和成长档案；主 Agent 不冒充其他角色。
 - **世界隔离**：公司、酒馆、创作工作室等世界拥有各自的角色、会话、关系和 `@` 候选列表，切换世界会进入独立上下文。
 - **会话与轨迹同屏**：对话、思考、工具调用、交付物和状态事件集中在主工作区。
-- **可调整工作台**：左侧世界与会话、中间对话、右侧世界/档案/文件/预览均可适配窗口宽度，桌面分栏支持拖动，超宽屏会同步扩大侧栏和阅读密度。
+- **可调整工作台**：左侧承载世界、会话与角色，中间专注对话，右侧以完整高度呈现主世界，并可切换档案、文件和预览；桌面分栏支持拖动，超宽屏会同步扩大世界和阅读区域。
 - **员工成长档案**：全员档案库集中展示身份、生日、性格、技能证据、里程碑、工作日志与关系；技能必须由真实任务或评审证据支撑。
 - **世界可视化**：侧栏聚焦视口与全屏地图共享同一事实投影，角色位置、会议、交接和工作状态由真实事件驱动，不使用无状态随机表演。
 - **安全文件预览**：只读浏览当前工作区的允许目录，文本、代码和图片可以在侧栏预览或新标签打开；隐藏文件、凭据、符号链接和越界路径默认拒绝。
@@ -28,6 +28,8 @@ DSH Cyber 是一个基于 [DeepSeek Harness](https://www.deepseek.com/harness/) 
 - 紧凑/舒适密度，以及左右栏宽度；
 - 默认模型与 OpenAI 兼容本地模型；
 - DSH 运行时、本地数据和更新状态入口。
+
+“设置 → 更新”提供受控的底层 DSH 升级流程：候选版本先进入隔离 profile，依次通过精确版本验证、协议合同测试和两轮真实模型金丝雀，得到人工批准后才会备份本地数据库并写入活动运行时指针。更新在下次启动时生效，失败记录保留在 SQLite 中。
 
 界面偏好和模型资料保存在本地 SQLite。背景文件保存在本机资产目录，数据库只记录引用和完整性校验值。模型凭据只通过环境变量名引用，不写入浏览器状态或数据库明文。
 
@@ -56,7 +58,11 @@ pnpm dsh-cyber -- web --port 43123 --workspace . --data-dir ./data --no-open
 pnpm dsh-cyber -- doctor --data-dir ./data
 pnpm dsh-cyber -- backup --data-dir ./data --output ./backup.sqlite
 pnpm dsh-cyber -- export --data-dir ./data --output ./workspace.json
+pnpm dsh-cyber -- runtime-check --candidate-root /path/to/dsh-candidate --data-dir ./data
+pnpm dsh-cyber -- runtime-rollback --data-dir ./data
 ```
+
+如果候选 DSH 导致 Web 服务无法启动，`runtime-rollback` 不依赖 Web UI，会先创建 SQLite 备份，再清除候选运行时指针并恢复项目内置版本。
 
 默认数据目录：
 

@@ -20,6 +20,7 @@ import type {
   ModelProfile,
   PackageInstallTransaction,
   PackagePermissionPreview,
+  RuntimeUpdateTransaction,
   WorkMessage,
   WorkSession,
   Workspace,
@@ -37,7 +38,7 @@ import { NavigationPane } from './components/NavigationPane.js'
 import { PackageMarketDialog } from './components/PackageMarketDialog.js'
 import { RecruitmentDialog } from './components/RecruitmentDialog.js'
 import { ResizableShell } from './components/ResizableShell.js'
-import { SettingsDialog, type SettingsSection, type SystemAction, type SystemActionResult } from './components/SettingsDialog.js'
+import { SettingsDialog, type SettingsSection, type SystemAction, type SystemActionInput, type SystemActionResult } from './components/SettingsDialog.js'
 import { demoData, demoTavernDossiers, demoTavernEmployees, demoTavernMessages, demoTavernSessions } from './demo-data.js'
 import type { CyberEmployee, DockTab, LiveAgentTurn } from './types.js'
 import { worldExperience } from './world-experience.js'
@@ -606,22 +607,34 @@ export default function App() {
     setModels((current) => [...current.filter((item) => item.id !== result.profile.id), result.profile])
   }, [workspace])
 
-  const runSystemAction = useCallback(async (action: SystemAction, input?: { candidateRoot?: string }): Promise<SystemActionResult> => {
+  const runSystemAction = useCallback(async (action: SystemAction, input?: SystemActionInput): Promise<SystemActionResult> => {
     if (demoMode) {
       await delay(350)
       if (action === 'backup' || action === 'export') {
         return { ok: true, kind: action, output: `演示模式/${action === 'backup' ? 'dsh-cyber-demo.sqlite' : 'dsh-cyber-demo.json'}`, createdAt: new Date().toISOString() }
       }
       if (action === 'verify-update') {
-        return { ok: true, version: '0.1.0-rc.7', supported: true, contractId: 'dsh-session-events-v1', checks: { packageVersions: true, isolatedProfile: true } }
+        return { ok: true, version: '0.1.0-rc.7', supported: true, contractId: 'dsh-session-events-v1', checks: { packageVersions: true, isolatedProfile: true }, transaction: demoRuntimeTransaction('verified') }
       }
+      if (action === 'contract-update') return { ok: true, transaction: demoRuntimeTransaction('contract-tested') }
+      if (action === 'canary-update') return { ok: true, transaction: demoRuntimeTransaction('canary-passed') }
+      if (action === 'activate-update') return { ok: true, transaction: demoRuntimeTransaction('activated'), restartRequired: true }
+      if (action === 'rollback-update') return { ok: true, transaction: demoRuntimeTransaction('rolled-back'), restartRequired: true }
+      if (action === 'list-updates') return { ok: true, items: [] }
       return { ok: true, checkedAt: new Date().toISOString(), compatibility: { expectedVersion: '0.1.0-rc.7', errors: [] }, database: { schemaVersion: 5, integrity: ['ok'], errors: [] } }
     }
     if (action === 'status') return api<SystemActionResult>('/api/system/status')
     if (action === 'doctor') return api<SystemActionResult>('/api/system/doctor', { method: 'POST', body: '{}' })
     if (action === 'backup') return api<SystemActionResult>('/api/system/backup', { method: 'POST', body: '{}' })
     if (action === 'export') return api<SystemActionResult>('/api/system/export', { method: 'POST', body: '{}' })
-    return api<SystemActionResult>('/api/system/update/verify', { method: 'POST', body: JSON.stringify({ candidateRoot: input?.candidateRoot }) })
+    if (action === 'list-updates') return api<SystemActionResult>('/api/system/updates')
+    if (action === 'verify-update') return api<SystemActionResult>('/api/system/update/verify', { method: 'POST', body: JSON.stringify({ candidateRoot: input?.candidateRoot }) })
+    const transactionId = input?.transactionId
+    if (!transactionId) throw new Error('缺少更新事务，请重新验证候选版本。')
+    if (action === 'contract-update') return api<SystemActionResult>(`/api/system/update/${transactionId}/contract-test`, { method: 'POST', body: '{}' })
+    if (action === 'canary-update') return api<SystemActionResult>(`/api/system/update/${transactionId}/canary`, { method: 'POST', body: JSON.stringify({ modelProfileId: input?.modelProfileId }) })
+    if (action === 'activate-update') return api<SystemActionResult>(`/api/system/update/${transactionId}/activate`, { method: 'POST', body: JSON.stringify({ approved: input?.approved === true }) })
+    return api<SystemActionResult>(`/api/system/update/${transactionId}/rollback`, { method: 'POST', body: JSON.stringify({ approved: input?.approved === true }) })
   }, [])
 
   const resize = useCallback((leftPaneWidth: number, rightPaneWidth: number) => {
@@ -889,6 +902,20 @@ function serializableAttachments(attachments: ChatAttachment[]): JsonObject[] {
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
+}
+
+function demoRuntimeTransaction(status: RuntimeUpdateTransaction['status']): RuntimeUpdateTransaction {
+  const timestamp = new Date().toISOString()
+  return {
+    id: 'demo-runtime-update',
+    candidateRoot: '演示候选运行时',
+    version: '0.1.0-rc.7',
+    contractId: 'dsh-session-events-v1',
+    status,
+    report: { ok: true, demo: true },
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  }
 }
 
 function reduceLiveTurn(current: LiveAgentTurn[], envelope: RuntimeEnvelope): LiveAgentTurn[] {

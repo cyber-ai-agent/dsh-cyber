@@ -11,10 +11,17 @@ import {
   X,
 } from '@phosphor-icons/react'
 import { useMemo, useState, type ReactNode } from 'react'
-import type { ModelProfile, WorkspacePreferences } from '@dsh-cyber/contracts'
+import type { ModelProfile, RuntimeUpdateTransaction, WorkspacePreferences } from '@dsh-cyber/contracts'
 
 export type SettingsSection = 'appearance' | 'models' | 'runtime' | 'data' | 'updates'
-export type SystemAction = 'status' | 'doctor' | 'backup' | 'export' | 'verify-update'
+export type SystemAction = 'status' | 'doctor' | 'backup' | 'export' | 'list-updates' | 'verify-update' | 'contract-update' | 'canary-update' | 'activate-update' | 'rollback-update'
+
+export interface SystemActionInput {
+  candidateRoot?: string
+  transactionId?: string
+  modelProfileId?: string
+  approved?: boolean
+}
 
 export interface SystemActionResult {
   ok: boolean
@@ -30,6 +37,10 @@ export interface SystemActionResult {
   compatibility?: { expectedVersion?: string; errors?: string[] }
   checks?: Record<string, boolean>
   errors?: string[]
+  transaction?: RuntimeUpdateTransaction
+  items?: RuntimeUpdateTransaction[]
+  activeRuntime?: { transactionId: string; candidateRoot: string; version: string }
+  restartRequired?: boolean
 }
 
 interface SettingsDialogProps {
@@ -41,7 +52,7 @@ interface SettingsDialogProps {
   onSavePreferences(preferences: WorkspacePreferences): Promise<void>
   onUploadBackground(file: File): Promise<string>
   onSaveModel(profile: Omit<ModelProfile, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt'>): Promise<void>
-  onSystemAction(action: SystemAction, input?: { candidateRoot?: string }): Promise<SystemActionResult>
+  onSystemAction(action: SystemAction, input?: SystemActionInput): Promise<SystemActionResult>
 }
 
 const sections = [
@@ -78,7 +89,7 @@ export function SettingsDialog({
     credentialEnvName: '',
   })
   const changed = useMemo(() => JSON.stringify(draft) !== JSON.stringify(preferences), [draft, preferences])
-  const runSystemAction = async (action: SystemAction, input?: { candidateRoot?: string }) => {
+  const runSystemAction = async (action: SystemAction, input?: SystemActionInput) => {
     setPendingAction(action)
     setActionResult(undefined)
     setActionError(undefined)
@@ -142,7 +153,7 @@ export function SettingsDialog({
             ) : null}
             {section === 'runtime' ? <RuntimeSettings pending={pendingAction} result={actionResult} error={actionError} onRun={runSystemAction} /> : null}
             {section === 'data' ? <DataSettings pending={pendingAction} result={actionResult} error={actionError} onRun={runSystemAction} /> : null}
-            {section === 'updates' ? <UpdateSettings pending={pendingAction} result={actionResult} error={actionError} onRun={runSystemAction} /> : null}
+            {section === 'updates' ? <UpdateSettings models={models} pending={pendingAction} result={actionResult} error={actionError} onRun={runSystemAction} /> : null}
           </div>
         </div>
         <footer className="settings-dialog__footer">
@@ -236,7 +247,7 @@ interface ActionSettingsProps {
   pending: SystemAction | undefined
   result: SystemActionResult | undefined
   error: string | undefined
-  onRun(action: SystemAction, input?: { candidateRoot?: string }): Promise<void>
+  onRun(action: SystemAction, input?: SystemActionInput): Promise<void>
 }
 
 function RuntimeSettings({ pending, result, error, onRun }: ActionSettingsProps) {
@@ -257,12 +268,26 @@ function DataSettings({ pending, result, error, onRun }: ActionSettingsProps) {
   )
 }
 
-function UpdateSettings({ pending, result, error, onRun }: ActionSettingsProps) {
+function UpdateSettings({ models, pending, result, error, onRun }: ActionSettingsProps & { models: ModelProfile[] }) {
   const [candidateRoot, setCandidateRoot] = useState('')
+  const [modelProfileId, setModelProfileId] = useState(models.find((item) => item.isDefault)?.id ?? models[0]?.id ?? '')
+  const [approved, setApproved] = useState(false)
+  const transaction = result?.transaction ?? result?.items?.[0]
   return (
-    <ActionSettings title="更新" copy="底层 DSH 必须先进入隔离候选 profile，通过精确版本矩阵检查后才允许进入后续切换流程。当前按钮只验证，不会替换运行版本。" result={result} error={error}>
+    <ActionSettings title="安全更新" copy="候选 DSH 依次经过版本验证、协议测试、真实模型金丝雀和人工批准。启用前自动备份；即使新版本无法启动，也能用命令行恢复内置运行时。" result={result} error={error}>
+      <button className="settings-action-button" type="button" disabled={pending !== undefined} onClick={() => void onRun('list-updates')}><span>读取更新记录与当前运行时</span><span>{pending === 'list-updates' ? '读取中…' : '刷新'}</span></button>
       <label className="dialog-field update-candidate-field"><span>候选 DSH 安装目录</span><input value={candidateRoot} placeholder="例如 F:\\runtime\\dsh-candidate" onChange={(event) => setCandidateRoot(event.target.value)} /></label>
       <button className="settings-action-button" type="button" disabled={!candidateRoot.trim() || pending !== undefined} onClick={() => void onRun('verify-update', { candidateRoot: candidateRoot.trim() })}><span>验证候选版本与隔离 profile</span><span>{pending === 'verify-update' ? '验证中…' : '开始验证'}</span></button>
+      {transaction?.status === 'verified' ? <button className="settings-action-button" type="button" disabled={pending !== undefined} onClick={() => void onRun('contract-update', { transactionId: transaction.id })}><span>执行协议合同测试</span><span>{pending === 'contract-update' ? '测试中…' : '继续'}</span></button> : null}
+      {transaction?.status === 'contract-tested' ? (
+        <>
+          <label className="dialog-field"><span>金丝雀使用的模型</span><select value={modelProfileId} onChange={(event) => setModelProfileId(event.target.value)}><option value="">请选择模型</option>{models.map((model) => <option key={model.id} value={model.id}>{model.displayName} · {model.modelId}</option>)}</select></label>
+          <button className="settings-action-button" type="button" disabled={!modelProfileId || pending !== undefined} onClick={() => void onRun('canary-update', { transactionId: transaction.id, modelProfileId })}><span>运行两轮真实 Harness 金丝雀</span><span>{pending === 'canary-update' ? '运行中…' : '继续'}</span></button>
+        </>
+      ) : null}
+      {transaction?.status === 'canary-passed' || transaction?.status === 'activated' ? <label className="approval-check"><input type="checkbox" checked={approved} onChange={(event) => setApproved(event.target.checked)} /><span>我已审阅验证结果，并批准{transaction.status === 'activated' ? '回滚' : '启用'}该运行时。</span></label> : null}
+      {transaction?.status === 'canary-passed' ? <button className="settings-action-button" type="button" disabled={!approved || pending !== undefined} onClick={() => void onRun('activate-update', { transactionId: transaction.id, approved: true })}><span>备份并启用候选运行时</span><span>{pending === 'activate-update' ? '启用中…' : '启用'}</span></button> : null}
+      {transaction?.status === 'activated' ? <button className="settings-action-button" type="button" disabled={!approved || pending !== undefined} onClick={() => void onRun('rollback-update', { transactionId: transaction.id, approved: true })}><span>备份并回滚运行时</span><span>{pending === 'rollback-update' ? '回滚中…' : '回滚'}</span></button> : null}
     </ActionSettings>
   )
 }
@@ -286,6 +311,9 @@ function SystemResultCard({ result, error }: { result?: SystemActionResult; erro
       {version === undefined ? null : <p>Harness 版本：{version}{result.contractId ? ` · ${result.contractId}` : ''}</p>}
       {database === undefined ? null : <p>SQLite schema v{database.schemaVersion ?? '?'} · 完整性 {(database.integrity ?? []).join(', ') || '未知'}</p>}
       {result.output === undefined ? null : <p className="system-result__path">已生成：{result.output}</p>}
+      {result.transaction === undefined ? null : <p>更新状态：{result.transaction.status}{result.restartRequired ? ' · 重启后生效' : ''}</p>}
+      {result.activeRuntime === undefined ? null : <p>当前候选运行时：{result.activeRuntime.version}</p>}
+      {result.items === undefined ? null : <p>更新记录：{result.items.length} 条</p>}
       {(result.errors ?? result.compatibility?.errors ?? database?.errors ?? []).map((item) => <p key={item}>{item}</p>)}
     </div>
   )

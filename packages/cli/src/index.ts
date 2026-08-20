@@ -4,8 +4,10 @@ import { homedir, platform } from 'node:os'
 import { join, resolve } from 'node:path'
 
 import {
+  clearActiveHarnessRuntime,
   inspectHarnessCandidate,
   inspectHarnessCompatibility,
+  readActiveHarnessRuntime,
 } from '@dsh-cyber/harness-adapter'
 import { SqliteStore } from '@dsh-cyber/persistence'
 import { createCyberServer, type CyberServer } from '@dsh-cyber/server'
@@ -85,6 +87,36 @@ export async function runCli(args: string[], context: CliContext = {}): Promise<
       })
       io.stdout(JSON.stringify(report, null, 2))
       return report.ok ? 0 : 1
+    }
+
+    if (command === 'runtime-rollback') {
+      const runtimeStateRoot = join(stateRoot, 'runtime')
+      const active = await readActiveHarnessRuntime(runtimeStateRoot)
+      const databasePath = join(stateRoot, 'data', 'dsh-cyber.sqlite')
+      if (existsSync(databasePath)) {
+        const store = await SqliteStore.open(databasePath)
+        try {
+          const transaction = active === undefined
+            ? store.listRuntimeUpdateTransactions().find((item) => item.status === 'activated')
+            : store.getRuntimeUpdateTransaction(active.transactionId)
+          if (transaction?.status === 'activated') {
+            const backup = await store.backup(defaultArtifactPath(stateRoot, 'backup'))
+            await clearActiveHarnessRuntime(runtimeStateRoot)
+            store.transitionRuntimeUpdate({
+              transactionId: transaction.id,
+              status: 'rolled-back',
+              report: { ok: true, recovery: 'cli', backup, returnedToBundledRuntime: true },
+            })
+            io.stdout(`已恢复内置 DSH 运行时；数据库备份：${backup}`)
+            return 0
+          }
+        } finally {
+          store.close()
+        }
+      }
+      await clearActiveHarnessRuntime(runtimeStateRoot)
+      io.stdout(active === undefined ? '当前已使用内置 DSH 运行时。' : '已清除候选运行时指针，恢复内置 DSH。')
+      return 0
     }
 
     if (command === 'backup' || command === 'export') {
@@ -197,6 +229,7 @@ function helpText(): string {
     '  dsh-cyber web [--port 43123] [--data-dir PATH] [--workspace PATH] [--no-open]',
     '  dsh-cyber doctor [--data-dir PATH]',
     '  dsh-cyber runtime-check --candidate-root PATH [--data-dir PATH]',
+    '  dsh-cyber runtime-rollback [--data-dir PATH]',
     '  dsh-cyber backup [--data-dir PATH] [--output FILE]',
     '  dsh-cyber export [--data-dir PATH] [--output FILE]',
     '',

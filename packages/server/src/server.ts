@@ -16,9 +16,15 @@ import type {
   ModelProfile,
 } from '@dsh-cyber/contracts'
 import {
+  clearActiveHarnessRuntime,
   HarnessModelRouter,
   inspectHarnessCandidate,
+  inspectHarnessCandidateContract,
   inspectHarnessCompatibility,
+  readActiveHarnessRuntime,
+  resolveCandidateDshBin,
+  runHarnessCandidateCanary,
+  writeActiveHarnessRuntime,
   type HarnessModelRoute,
 } from '@dsh-cyber/harness-adapter'
 import {
@@ -92,10 +98,28 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const store = await SqliteStore.open(join(stateRoot, 'data', 'dsh-cyber.sqlite'))
   for (const blueprint of BUILTIN_BLUEPRINTS) store.saveBlueprint(blueprint)
 
+  const runtimeStateRoot = join(stateRoot, 'runtime')
+  const activeRuntime = await readActiveHarnessRuntime(runtimeStateRoot)
+  let activeDshBinPath: string | undefined
+  if (activeRuntime !== undefined) {
+    const activeReport = await inspectHarnessCandidate({
+      candidateRoot: activeRuntime.candidateRoot,
+      stateRoot: runtimeStateRoot,
+    })
+    if (!activeReport.ok || activeReport.version !== activeRuntime.version) {
+      store.close()
+      throw new Error(
+        `Activated Harness runtime is unavailable or incompatible. Run "dsh-cyber runtime-rollback --data-dir ${stateRoot}" to recover.`,
+      )
+    }
+    activeDshBinPath = await resolveCandidateDshBin(activeRuntime.candidateRoot)
+  }
+
   const runtime =
     options.runtime ??
     new HarnessModelRouter({
-      stateRoot: join(stateRoot, 'runtime'),
+      stateRoot: runtimeStateRoot,
+      ...(activeDshBinPath === undefined ? {} : { dshBinPath: activeDshBinPath }),
       resolveRoute(request) {
         const selectedProfileId = request.revision.modelPolicy.modelProfileId
         const selectedProfile = typeof selectedProfileId === 'string'
@@ -222,6 +246,8 @@ async function handleRequest(context: {
       stateRoot,
       database,
       compatibility,
+      activeRuntime: await readActiveHarnessRuntime(join(stateRoot, 'runtime')),
+      runtimeUpdates: store.listRuntimeUpdateTransactions().slice(0, 10),
     })
     return
   }
@@ -248,7 +274,155 @@ async function handleRequest(context: {
       candidateRoot: requiredString(body, 'candidateRoot'),
       stateRoot: join(stateRoot, 'runtime'),
     })
-    writeJson(response, 200, report)
+    if (!report.ok || report.version === undefined || report.contractId === undefined) {
+      writeJson(response, 200, report)
+      return
+    }
+    const activeRuntime = await readActiveHarnessRuntime(join(stateRoot, 'runtime'))
+    const transaction = store.beginRuntimeUpdate({
+      candidateRoot: report.candidateRoot,
+      version: report.version,
+      contractId: report.contractId,
+      ...(activeRuntime === undefined ? {} : { previousRuntimeRoot: activeRuntime.candidateRoot }),
+      report: report as unknown as JsonObject,
+    })
+    writeJson(response, 201, { ...report, transaction })
+    return
+  }
+  if (method === 'GET' && url.pathname === '/api/system/updates') {
+    writeJson(response, 200, {
+      items: store.listRuntimeUpdateTransactions(),
+      activeRuntime: await readActiveHarnessRuntime(join(stateRoot, 'runtime')),
+    })
+    return
+  }
+  const contractTestUpdate = match(url.pathname, /^\/api\/system\/update\/([^/]+)\/contract-test$/)
+  if (method === 'POST' && contractTestUpdate !== undefined) {
+    const transaction = store.getRuntimeUpdateTransaction(contractTestUpdate[0])
+    if (transaction === undefined) throw new HttpError(404, 'runtime_update_not_found', 'Runtime update transaction not found')
+    try {
+      const report = await inspectHarnessCandidateContract({
+        candidateRoot: transaction.candidateRoot,
+        stateRoot: join(stateRoot, 'runtime'),
+      })
+      const updated = store.transitionRuntimeUpdate({
+        transactionId: transaction.id,
+        status: 'contract-tested',
+        report,
+      })
+      writeJson(response, 200, { ok: true, transaction: updated })
+    } catch (error) {
+      const updated = store.transitionRuntimeUpdate({
+        transactionId: transaction.id,
+        status: 'rejected',
+        errorCode: 'runtime_contract_failed',
+        report: { ok: false, message: errorMessage(error) },
+      })
+      writeJson(response, 422, { ok: false, transaction: updated, errors: [errorMessage(error)] })
+    }
+    return
+  }
+  const canaryUpdate = match(url.pathname, /^\/api\/system\/update\/([^/]+)\/canary$/)
+  if (method === 'POST' && canaryUpdate !== undefined) {
+    const transaction = store.getRuntimeUpdateTransaction(canaryUpdate[0])
+    if (transaction === undefined) throw new HttpError(404, 'runtime_update_not_found', 'Runtime update transaction not found')
+    const body = await readJson(request)
+    const modelProfile = store.getModelProfile(requiredString(body, 'modelProfileId'))
+    if (modelProfile === undefined) throw new HttpError(404, 'model_profile_not_found', 'Model profile not found')
+    try {
+      const report = await runHarnessCandidateCanary({
+        candidateRoot: transaction.candidateRoot,
+        stateRoot: join(stateRoot, 'runtime', 'updates', transaction.id),
+        workspacePath: workspaceRoot,
+        route: harnessModelRoute(modelProfile),
+        inheritedEnvironment: process.env,
+      })
+      const updated = store.transitionRuntimeUpdate({
+        transactionId: transaction.id,
+        status: 'canary-passed',
+        report,
+      })
+      writeJson(response, 200, { ok: true, transaction: updated })
+    } catch (error) {
+      const updated = store.transitionRuntimeUpdate({
+        transactionId: transaction.id,
+        status: 'rejected',
+        errorCode: 'runtime_canary_failed',
+        report: { ok: false, message: errorMessage(error) },
+      })
+      writeJson(response, 422, { ok: false, transaction: updated, errors: [errorMessage(error)] })
+    }
+    return
+  }
+  const activateUpdate = match(url.pathname, /^\/api\/system\/update\/([^/]+)\/activate$/)
+  if (method === 'POST' && activateUpdate !== undefined) {
+    const body = await readJson(request)
+    if (!requiredBoolean(body, 'approved')) throw new HttpError(409, 'runtime_activation_approval_required', 'Explicit activation approval is required')
+    const transaction = store.getRuntimeUpdateTransaction(activateUpdate[0])
+    if (transaction === undefined) throw new HttpError(404, 'runtime_update_not_found', 'Runtime update transaction not found')
+    if (transaction.status !== 'canary-passed') throw new HttpError(409, 'runtime_update_not_ready', 'Runtime must pass the canary before activation')
+    const verification = await inspectHarnessCandidate({
+      candidateRoot: transaction.candidateRoot,
+      stateRoot: join(stateRoot, 'runtime'),
+    })
+    if (!verification.ok || verification.version !== transaction.version) {
+      throw new HttpError(409, 'runtime_candidate_changed', 'Candidate changed after canary verification')
+    }
+    const backup = await store.backup(join(stateRoot, 'backups', `pre-runtime-${artifactTimestamp()}.sqlite`))
+    const previousPointer = await readActiveHarnessRuntime(join(stateRoot, 'runtime'))
+    try {
+      await writeActiveHarnessRuntime(join(stateRoot, 'runtime'), {
+        schemaVersion: 1,
+        transactionId: transaction.id,
+        candidateRoot: transaction.candidateRoot,
+        version: transaction.version,
+        activatedAt: new Date().toISOString(),
+      })
+      const updated = store.transitionRuntimeUpdate({
+        transactionId: transaction.id,
+        status: 'activated',
+        report: { ok: true, backup, restartRequired: true },
+      })
+      writeJson(response, 200, { ok: true, transaction: updated, backup, restartRequired: true })
+    } catch (error) {
+      if (previousPointer === undefined) await clearActiveHarnessRuntime(join(stateRoot, 'runtime'))
+      else await writeActiveHarnessRuntime(join(stateRoot, 'runtime'), previousPointer)
+      throw error
+    }
+    return
+  }
+  const rollbackUpdate = match(url.pathname, /^\/api\/system\/update\/([^/]+)\/rollback$/)
+  if (method === 'POST' && rollbackUpdate !== undefined) {
+    const body = await readJson(request)
+    if (!requiredBoolean(body, 'approved')) throw new HttpError(409, 'runtime_rollback_approval_required', 'Explicit rollback approval is required')
+    const transaction = store.getRuntimeUpdateTransaction(rollbackUpdate[0])
+    if (transaction === undefined) throw new HttpError(404, 'runtime_update_not_found', 'Runtime update transaction not found')
+    if (transaction.status !== 'activated') throw new HttpError(409, 'runtime_update_not_active', 'Only an activated runtime can be rolled back')
+    const backup = await store.backup(join(stateRoot, 'backups', `pre-rollback-${artifactTimestamp()}.sqlite`))
+    if (transaction.previousRuntimeRoot === undefined) {
+      await clearActiveHarnessRuntime(join(stateRoot, 'runtime'))
+    } else {
+      const previous = await inspectHarnessCandidate({
+        candidateRoot: transaction.previousRuntimeRoot,
+        stateRoot: join(stateRoot, 'runtime'),
+      })
+      if (!previous.ok || previous.version === undefined) {
+        throw new HttpError(409, 'previous_runtime_unavailable', 'Previous runtime is unavailable; use the CLI recovery command to return to bundled DSH')
+      }
+      await writeActiveHarnessRuntime(join(stateRoot, 'runtime'), {
+        schemaVersion: 1,
+        transactionId: `rollback-${transaction.id}`,
+        candidateRoot: previous.candidateRoot,
+        version: previous.version,
+        activatedAt: new Date().toISOString(),
+      })
+    }
+    const updated = store.transitionRuntimeUpdate({
+      transactionId: transaction.id,
+      status: 'rolled-back',
+      report: { ok: true, backup, restartRequired: true },
+    })
+    writeJson(response, 200, { ok: true, transaction: updated, backup, restartRequired: true })
     return
   }
   if (method === 'GET' && url.pathname === '/api/workspace/files') {
@@ -1160,6 +1334,14 @@ function requiredNumber(body: Record<string, unknown>, key: string): number {
   return value
 }
 
+function requiredBoolean(body: Record<string, unknown>, key: string): boolean {
+  const value = body[key]
+  if (typeof value !== 'boolean') {
+    throw new HttpError(422, 'invalid_boolean', `${key} must be a boolean`)
+  }
+  return value
+}
+
 function requiredEnum<T extends string>(
   body: Record<string, unknown>,
   key: string,
@@ -1322,6 +1504,10 @@ function nonNegativeInteger(value: string | null): number {
 
 function artifactTimestamp(): string {
   return new Date().toISOString().replaceAll(/[:.]/g, '-').replace('T', '_').replace('Z', '')
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 function mentionedEmployeeIds(

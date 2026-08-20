@@ -60,6 +60,7 @@ export interface HarnessAdapterOptions {
   provider?: string
   model?: string
   providerProfile?: HarnessProviderProfile
+  dshBinPath?: string
 }
 
 export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDisposable {
@@ -160,7 +161,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     const harness = new DeepSeekHarness({
       launch: {
         command: this.#options.nodeExecutable ?? process.execPath,
-        args: [resolveDshBin(), '--profile', WORKER_PROFILE_NAME],
+        args: [resolve(this.#options.dshBinPath ?? resolveDshBin()), '--profile', WORKER_PROFILE_NAME],
         cwd: spec.workspacePath,
         env: environment,
       },
