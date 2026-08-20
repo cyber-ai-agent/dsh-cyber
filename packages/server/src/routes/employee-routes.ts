@@ -1,0 +1,121 @@
+import type { JsonObject } from '@dsh-cyber/contracts'
+import type { SqliteStore } from '@dsh-cyber/persistence'
+
+import type { Router } from '../http/router.js'
+import {
+  nullableString,
+  optionalString,
+  optionalStringArray,
+  readJson,
+  record,
+  requiredEnum,
+  requiredString,
+} from '../http/request.js'
+import { writeJson } from '../http/response.js'
+
+export interface EmployeeRoutesDependencies {
+  store: SqliteStore
+}
+
+export function registerEmployeeRoutes(router: Router, dependencies: EmployeeRoutesDependencies): void {
+  const { store } = dependencies
+
+  router.post(/^\/api\/employees\/([^/]+)\/revisions$/, async ({ request, response, params }) => {
+    const body = await readJson(request)
+    const reviseInput: Parameters<SqliteStore['reviseEmployee']>[0] = {
+      employeeId: params[0]!,
+      reason: requiredString(body, 'reason'),
+    }
+    const persona = optionalString(body.persona)
+    if (persona !== undefined) reviseInput.persona = persona
+    if (body.skillGrants !== undefined) reviseInput.skillGrants = optionalStringArray(body.skillGrants)
+    if (body.capabilityGrants !== undefined) {
+      reviseInput.capabilityGrants = optionalStringArray(body.capabilityGrants)
+    }
+    const modelPolicy = record(body.modelPolicy)
+    if (modelPolicy !== undefined) reviseInput.modelPolicy = modelPolicy as JsonObject
+    writeJson(response, 201, { revision: store.reviseEmployee(reviseInput) })
+  })
+
+  router.get(/^\/api\/employees\/([^/]+)\/dossier$/, ({ response, params }) => {
+    writeJson(response, 200, store.getEmployeeDossier(params[0]!))
+  })
+
+  router.put(/^\/api\/employees\/([^/]+)\/profile$/, async ({ request, response, params }) => {
+    const body = await readJson(request)
+    const profile = store.reviseEmployeeProfile({
+      employeeId: params[0]!,
+      ...(body.displayName === undefined ? {} : { displayName: requiredString(body, 'displayName') }),
+      ...(body.birthday === undefined ? {} : { birthday: nullableString(body.birthday) }),
+      ...(body.background === undefined ? {} : { background: requiredString(body, 'background') }),
+      ...(body.personalityTraits === undefined
+        ? {}
+        : { personalityTraits: optionalStringArray(body.personalityTraits) }),
+      ...(record(body.appearance) === undefined ? {} : { appearance: record(body.appearance) as JsonObject }),
+      reason: requiredString(body, 'reason'),
+    })
+    writeJson(response, 201, { profile })
+  })
+
+  router.post(/^\/api\/employees\/([^/]+)\/skill-evidence$/, async ({ request, response, params }) => {
+    const body = await readJson(request)
+    const evidence = store.recordSkillEvidence({
+      employeeId: params[0]!,
+      skillId: requiredString(body, 'skillId'),
+      kind: requiredEnum(body, 'kind', ['task', 'test', 'review', 'artifact', 'training']),
+      outcome: requiredEnum(body, 'outcome', ['observed', 'passed', 'failed']),
+      summary: requiredString(body, 'summary'),
+      sourceEventIds: optionalStringArray(body.sourceEventIds),
+      sourceMessageIds: optionalStringArray(body.sourceMessageIds),
+      artifactRefs: optionalStringArray(body.artifactRefs),
+    })
+    writeJson(response, 201, { evidence })
+  })
+
+  router.post(/^\/api\/employees\/([^/]+)\/skills$/, async ({ request, response, params }) => {
+    const body = await readJson(request)
+    const skill = store.reviseEmployeeSkill({
+      employeeId: params[0]!,
+      skillId: requiredString(body, 'skillId'),
+      status: requiredEnum(body, 'status', ['learning', 'verified', 'suspended']),
+      evidenceIds: optionalStringArray(body.evidenceIds),
+      reason: requiredString(body, 'reason'),
+    })
+    writeJson(response, 201, { skill })
+  })
+
+  router.post(/^\/api\/employees\/([^/]+)\/milestones$/, async ({ request, response, params }) => {
+    const body = await readJson(request)
+    const milestone = store.appendEmployeeMilestone({
+      employeeId: params[0]!,
+      category: requiredEnum(body, 'category', [
+        'joined', 'task', 'delivery', 'skill', 'review', 'promotion',
+        'failure', 'recovery', 'celebration', 'birthday', 'reflection',
+      ]),
+      title: requiredString(body, 'title'),
+      summary: requiredString(body, 'summary'),
+      sourceEventIds: optionalStringArray(body.sourceEventIds),
+      sourceMessageIds: optionalStringArray(body.sourceMessageIds),
+      artifactRefs: optionalStringArray(body.artifactRefs),
+      ...(body.occurredAt === undefined ? {} : { occurredAt: requiredString(body, 'occurredAt') }),
+    })
+    writeJson(response, 201, { milestone })
+  })
+
+  router.post(/^\/api\/employees\/([^/]+)\/journals$/, async ({ request, response, params }) => {
+    const body = await readJson(request)
+    const journal = store.writeEmployeeJournal({
+      employeeId: params[0]!,
+      localDate: requiredString(body, 'localDate'),
+      summary: requiredString(body, 'summary'),
+      highlights: optionalStringArray(body.highlights),
+      sourceEventIds: optionalStringArray(body.sourceEventIds),
+      sourceMessageIds: optionalStringArray(body.sourceMessageIds),
+    })
+    writeJson(response, 201, { journal })
+  })
+
+  router.post(/^\/api\/employees\/([^/]+)\/archive$/, ({ response, params }) => {
+    writeJson(response, 200, { employee: store.archiveEmployee(params[0]!) })
+  })
+}
