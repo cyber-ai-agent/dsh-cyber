@@ -154,7 +154,22 @@ describe('ConversationOrchestrator', () => {
     const orchestrator = new ConversationOrchestrator({ store, runtime, workspacePath: directory })
     orchestrators.push(orchestrator)
     const realtime: AgentRuntimeEvent[] = []
-    orchestrator.subscribe((event) => realtime.push(event.event))
+    const durableAtEmit: Array<{ kind: AgentRuntimeEvent['kind']; persisted: boolean }> = []
+    orchestrator.subscribe((event) => {
+      realtime.push(event.event)
+      const eventTypes = store.listWorldDomainEvents(company.id).map((item) => item.type)
+      const messages = store.listMessages(event.sessionId)
+      const persisted = event.event.kind === 'turn.started'
+        ? eventTypes.includes('turn.started')
+        : event.event.kind === 'tool.started'
+          ? eventTypes.includes('tool.started') && messages.some((message) => message.kind === 'tool-call')
+          : event.event.kind === 'assistant.message'
+            ? messages.some((message) => message.kind === 'assistant' && message.content === event.event.content)
+            : event.event.kind === 'turn.completed'
+              ? eventTypes.includes('turn.completed')
+              : true
+      durableAtEmit.push({ kind: event.event.kind, persisted })
+    })
 
     const first = await orchestrator.direct({
       workspaceId: workspace.id,
@@ -173,12 +188,17 @@ describe('ConversationOrchestrator', () => {
     expect(runtime.calls).toHaveLength(2)
     expect(store.getEmployee(employee.id)?.agentSessionId).toBe(`agent-${employee.id}`)
     expect(realtime.some((event) => event.kind === 'reasoning.delta')).toBe(true)
+    expect(durableAtEmit
+      .filter((item) => ['turn.started', 'tool.started', 'assistant.message', 'turn.completed'].includes(item.kind))
+      .every((item) => item.persisted)).toBe(true)
     expect(store.listMessages(first.session.id).some((message) => message.content === 'stream-only')).toBe(
       false,
     )
     expect(
       store.listMessages(first.session.id).filter((message) => message.kind === 'assistant'),
     ).toHaveLength(2)
+    expect(store.listWorldDomainEvents(company.id).at(-1)?.type).toBe('task.completed')
+    expect(store.getEmployee(employee.id)?.status).toBe('available')
   })
 
   it('runs two independent agents in sequence and gives the second the first real statement', async () => {

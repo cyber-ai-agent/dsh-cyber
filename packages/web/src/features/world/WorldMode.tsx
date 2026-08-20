@@ -16,6 +16,7 @@ import type {
   WorkSession,
   World,
   WorldInteractionAction,
+  WorldZoomCommand,
 } from '@dsh-cyber/contracts'
 
 import { ChatWorkbench } from '../../components/ChatWorkbench.js'
@@ -23,6 +24,7 @@ import type { CyberEmployee, LiveAgentTurn } from '../../types.js'
 import { WorldCanvas } from './WorldCanvas.js'
 import { EmployeeInteractionMenu, ObjectInteractionMenu } from './WorldInteractionMenu.js'
 import { useWorldClient } from './world-client-store.js'
+import { createZoomCommand } from './zoom-command.js'
 
 interface WorldModeProps {
   demoMode: boolean
@@ -67,7 +69,7 @@ export function WorldMode({
   const [selectedObjectId, setSelectedObjectId] = useState<string>()
   const [chatOpen, setChatOpen] = useState(false)
   const [fitRequest, setFitRequest] = useState(1)
-  const [zoomRequest, setZoomRequest] = useState(0)
+  const [zoomCommand, setZoomCommand] = useState<WorldZoomCommand>()
   const [rendererMetrics, setRendererMetrics] = useState<{ initializationMs: number; assetBytesEstimate: number }>()
 
   const selectedEmployee = employees.find((employee) => employee.id === selectedEmployeeId)
@@ -156,7 +158,7 @@ export function WorldMode({
         {...(selectedEmployeeId === undefined ? {} : { selectedEntityId: selectedEmployeeId })}
         {...(selectedObjectId === undefined ? {} : { selectedObjectId })}
         fitRequest={fitRequest}
-        zoomRequest={zoomRequest}
+        {...(zoomCommand === undefined ? {} : { zoomCommand })}
         onEntitySelect={selectEmployee}
         onObjectSelect={(objectId) => setSelectedObjectId(objectId)}
         onReady={setRendererMetrics}
@@ -180,9 +182,9 @@ export function WorldMode({
       </section>
 
       <div className="world-hud world-hud--camera" aria-label="世界视图控制">
-        <button type="button" aria-label="缩小" onClick={() => setZoomRequest((value) => value - 1)}><Minus size={15} /></button>
+        <button type="button" aria-label="缩小" onClick={() => setZoomCommand(createZoomCommand(-0.1))}><Minus size={15} /></button>
         <button type="button" aria-label="适应窗口" onClick={() => setFitRequest((value) => value + 1)}><ArrowsOut size={15} /></button>
-        <button type="button" aria-label="放大" onClick={() => setZoomRequest((value) => value + 1)}><Plus size={15} /></button>
+        <button type="button" aria-label="放大" onClick={() => setZoomCommand(createZoomCommand(0.1))}><Plus size={15} /></button>
         <button
           type="button"
           className={runtime.snapshot.clock.lightsOn ? 'is-active' : ''}

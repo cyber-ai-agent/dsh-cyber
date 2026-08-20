@@ -30,6 +30,7 @@ interface PackageMarketDialogProps {
   onSearch(market: CyberMarketKind, query: string): Promise<void>
   onPreviewMarketplace(item: CyberMarketPackage): Promise<PackagePermissionPreview>
   onInstallMarketplace(item: CyberMarketPackage, approvalToken: string): Promise<void>
+  onBindTheme(packageId: string): Promise<void>
   onPreview(manifest: CyberPackageManifest): Promise<PackagePermissionPreview>
   onInstall(input: { manifest: CyberPackageManifest; sourceDirectory: string; approvalToken: string }): Promise<void>
 }
@@ -98,6 +99,15 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
     }
   }
 
+  const bindTheme = async (item: CyberMarketPackage) => {
+    setError(undefined)
+    try {
+      await props.onBindTheme(item.manifest.id)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '主题与当前世界不兼容')
+    }
+  }
+
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && props.onClose()}>
       <section className="package-market-dialog package-market-dialog--catalog" role="dialog" aria-modal="true" aria-labelledby="package-market-title">
@@ -128,7 +138,12 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
                     <header><MarketIcon market={item.market} /><div><strong>{item.manifest.displayName}</strong><span>{item.manifest.publisher} · v{item.manifest.version}</span></div>{item.verified ? <em><ShieldCheck size={14} />官方校验</em> : <em className="is-community">社区包</em>}</header>
                     <p>{item.manifest.summary}</p>
                     <div className="market-capabilities">{item.manifest.capabilities.slice(0, 4).map((capability) => <code key={capability}>{capability}</code>)}</div>
-                    <footer><span>{item.installedVersion === undefined ? '未安装' : `已安装 v${item.installedVersion}`}</span><button type="button" disabled={item.installedVersion === item.manifest.version} onClick={() => void inspect(item)}>{item.installedVersion === item.manifest.version ? '已安装' : '查看并安装'}</button></footer>
+                    <footer>
+                      <span>{item.installedVersion === undefined ? '未安装' : `已安装 v${item.installedVersion}`}</span>
+                      {item.market === 'theme' && item.installedVersion === item.manifest.version
+                        ? <button type="button" onClick={() => void bindTheme(item)}>绑定到当前世界</button>
+                        : <button type="button" onClick={() => void inspect(item)}>查看并安装</button>}
+                    </footer>
                   </article>
                 ))}
               </div>

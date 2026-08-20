@@ -1,13 +1,21 @@
+import { createHash } from 'node:crypto'
 import { lstat, readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { extname, resolve, sep } from 'node:path'
 
-import type { EmployeeBlueprint, InstalledPackage } from '@dsh-cyber/contracts'
+import type { EmployeeBlueprint, InstalledPackage, WorldThemeManifestV1 } from '@dsh-cyber/contracts'
+import { validateWorldThemeManifest } from '@dsh-cyber/world-runtime'
 
 const MAX_ENTRYPOINT_BYTES = 512 * 1024
 
 interface PromptTransformDefinition {
   schemaVersion: 1
   commands: Array<{ trigger: string; instruction: string }>
+}
+
+export interface InstalledWorldTheme {
+  packageId: string
+  packageVersion: string
+  manifest: WorldThemeManifestV1
 }
 
 export async function applyInstalledPromptTransforms(
@@ -45,13 +53,89 @@ export async function loadInstalledBlueprints(packages: InstalledPackage[]): Pro
   return blueprints
 }
 
+export async function loadInstalledWorldThemes(packages: InstalledPackage[]): Promise<InstalledWorldTheme[]> {
+  const themes: InstalledWorldTheme[] = []
+  for (const installed of packages.filter((item) => item.status === 'active' && item.kind === 'world-theme')) {
+    await verifyInstalledPackage(installed)
+    for (const entrypoint of installed.manifest.entrypoints ?? []) {
+      if (entrypoint.kind !== 'world-theme') continue
+      const value = await readEntrypoint<unknown>(installed, entrypoint.path)
+      const validation = validateWorldThemeManifest(value)
+      if (!validation.valid) throw new Error(`Invalid installed world theme ${installed.packageId}: ${validation.errors.join('; ')}`)
+      const manifest = value as WorldThemeManifestV1
+      const declaredFiles = new Set(installed.manifest.files.map((file) => file.path))
+      for (const asset of manifest.assets) {
+        if (!safeRelativePackagePath(asset.src) || !declaredFiles.has(asset.src)) {
+          throw new Error(`World theme asset is not a declared package file: ${asset.src}`)
+        }
+      }
+      themes.push({ packageId: installed.packageId, packageVersion: installed.version, manifest })
+    }
+  }
+  return themes
+}
+
+export async function readInstalledWorldThemeAsset(
+  installed: InstalledPackage,
+  relativePath: string,
+): Promise<{ body: Buffer; contentType: string }> {
+  await verifyInstalledPackage(installed)
+  const declared = installed.manifest.files.find((file) => file.path === relativePath)
+  if (declared === undefined || !safeRelativePackagePath(relativePath)) {
+    throw new Error(`World theme asset is not declared: ${relativePath}`)
+  }
+  const path = await securePackageFile(installed, relativePath)
+  return { body: await readFile(path), contentType: assetContentType(relativePath) }
+}
+
 async function readEntrypoint<T>(installed: InstalledPackage, relativePath: string): Promise<T> {
-  const path = join(installed.installedPath, ...relativePath.split('/'))
+  const path = await securePackageFile(installed, relativePath)
   const metadata = await lstat(path)
   if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > MAX_ENTRYPOINT_BYTES) {
     throw new Error(`Invalid installed package entrypoint: ${installed.packageId}/${relativePath}`)
   }
   return JSON.parse(await readFile(path, 'utf8')) as T
+}
+
+async function verifyInstalledPackage(installed: InstalledPackage): Promise<void> {
+  for (const file of installed.manifest.files) {
+    const path = await securePackageFile(installed, file.path)
+    const body = await readFile(path)
+    const digest = createHash('sha256').update(body).digest('hex')
+    if (digest !== file.sha256) throw new Error(`Installed package hash mismatch: ${installed.packageId}/${file.path}`)
+  }
+}
+
+async function securePackageFile(installed: InstalledPackage, relativePath: string): Promise<string> {
+  if (!safeRelativePackagePath(relativePath)) throw new Error(`Unsafe installed package path: ${relativePath}`)
+  const root = resolve(installed.installedPath)
+  const rootMetadata = await lstat(root)
+  if (!rootMetadata.isDirectory() || rootMetadata.isSymbolicLink()) {
+    throw new Error(`Invalid installed package root: ${installed.packageId}`)
+  }
+  let current = root
+  for (const segment of relativePath.split('/')) {
+    current = resolve(current, segment)
+    if (current !== root && !current.startsWith(`${root}${sep}`)) {
+      throw new Error(`Installed package path escaped its root: ${relativePath}`)
+    }
+    const metadata = await lstat(current)
+    if (metadata.isSymbolicLink()) throw new Error(`Symbolic links are not allowed in installed packages: ${relativePath}`)
+  }
+  const metadata = await lstat(current)
+  if (!metadata.isFile() || metadata.size > MAX_ENTRYPOINT_BYTES * 32) {
+    throw new Error(`Invalid installed package file: ${relativePath}`)
+  }
+  return current
+}
+
+function safeRelativePackagePath(value: string): boolean {
+  if (!value || value.includes('\\') || value.startsWith('/') || /^[A-Za-z]:/.test(value)) return false
+  return value.split('/').every((part) => part !== '' && part !== '.' && part !== '..')
+}
+
+function assetContentType(path: string): string {
+  return ({ '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.json': 'application/json' } as Record<string, string>)[extname(path).toLowerCase()] ?? 'application/octet-stream'
 }
 
 function validCommand(value: unknown): value is { trigger: string; instruction: string } {

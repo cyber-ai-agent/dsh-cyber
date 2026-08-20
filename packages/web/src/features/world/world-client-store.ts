@@ -62,24 +62,42 @@ export function useWorldClient({ demoMode, world, employees }: UseWorldClientInp
       if (cancelled) return
       setState((current) => ({ ...current, snapshot, manifest: nextManifest, loading: false, connected: true }))
       stream = new EventSource(`/api/worlds/${encodeURIComponent(world.id)}/stream?after=${snapshot.sequence}`)
+      let currentSequence = snapshot.sequence
       const onState = (event: Event) => {
         const envelope = parseEnvelope(event)
         if (envelope?.kind !== 'world-state') return
-        setState((current) => ({ ...current, snapshot: envelope.payload as unknown as WorldRuntimeSnapshot, connected: true }))
+        currentSequence = Math.max(currentSequence, envelope.sequence)
+        setState((current) => reduceWorldStreamState(current, envelope))
       }
       const onCue = (event: Event) => {
         const envelope = parseEnvelope(event)
         if (envelope?.kind !== 'world-cue') return
-        const cue = envelope.payload as unknown as WorldCue
-        setState((current) => ({ ...current, cues: appendCue(current.cues, cue), connected: true }))
+        setState((current) => reduceWorldStreamState(current, envelope))
       }
       const onRecovery = () => {
+        setState((current) => ({ ...current, cues: [], connected: false }))
         void api<WorldRuntimeSnapshot>(`/api/worlds/${encodeURIComponent(world.id)}/runtime-snapshot`)
-          .then((recovered) => { if (!cancelled) setState((current) => ({ ...current, snapshot: recovered, connected: true })) })
+          .then((recovered) => {
+            currentSequence = Math.max(currentSequence, recovered.sequence)
+            if (!cancelled) setState((current) => ({ ...current, snapshot: recovered, cues: [], connected: true }))
+          })
+      }
+      const onReady = (event: Event) => {
+        const envelope = parseEnvelope(event)
+        if (envelope === undefined || currentSequence >= envelope.sequence) {
+          setState((current) => ({ ...current, connected: true }))
+          return
+        }
+        void api<WorldRuntimeSnapshot>(`/api/worlds/${encodeURIComponent(world.id)}/runtime-snapshot`)
+          .then((recovered) => {
+            currentSequence = Math.max(currentSequence, recovered.sequence)
+            if (!cancelled) setState((latest) => ({ ...latest, snapshot: recovered, cues: [], connected: true }))
+          })
       }
       stream.addEventListener('world-state', onState)
       stream.addEventListener('world-cue', onCue)
       stream.addEventListener('recovery-required', onRecovery)
+      stream.addEventListener('ready', onReady)
       stream.onerror = () => { if (!cancelled) setState((current) => ({ ...current, connected: false })) }
     }).catch((cause: unknown) => {
       if (!cancelled) setState((current) => ({
@@ -125,6 +143,24 @@ function parseEnvelope(event: Event): WorldRuntimeStreamEnvelope | undefined {
 
 function appendCue(current: WorldCue[], cue: WorldCue): WorldCue[] {
   return [...current.filter((item) => item.id !== cue.id), cue].slice(-48)
+}
+
+export function reduceWorldStreamState(
+  current: WorldClientState,
+  envelope: WorldRuntimeStreamEnvelope,
+): WorldClientState {
+  if (envelope.kind === 'world-state') {
+    const snapshot = envelope.payload as unknown as WorldRuntimeSnapshot
+    if (current.snapshot !== undefined && snapshot.sequence < current.snapshot.sequence) return current
+    return { ...current, snapshot, connected: true }
+  }
+  if (envelope.kind === 'world-cue') {
+    const cue = envelope.payload as unknown as WorldCue
+    if (current.snapshot !== undefined && cue.sequence < current.snapshot.sequence) return current
+    if (current.cues.some((item) => item.id === cue.id)) return { ...current, connected: true }
+    return { ...current, cues: appendCue(current.cues, cue), connected: true }
+  }
+  return current
 }
 
 function demoSnapshot(world: World, employees: CyberEmployee[], manifest: WorldThemeManifestV1): WorldRuntimeSnapshot {
@@ -237,20 +273,7 @@ function demoInteraction(current: WorldClientState, request: WorldInteractionReq
       snapshot: { ...snapshot, clock: { ...snapshot.clock, lightsOn: !snapshot.clock.lightsOn } },
     }
   }
-  if (request.action === 'start-meeting') {
-    const meetingAnchors = scene.anchors.filter((anchor) => anchor.tags.includes('meeting'))
-    let nextCues = current.cues
-    const participantIds = request.participantIds ?? []
-    const entities = snapshot.entities.map((entity) => {
-      const index = participantIds.indexOf(entity.id)
-      const anchor = index < 0 ? undefined : meetingAnchors[index % meetingAnchors.length]
-      if (anchor === undefined) return entity
-      const path = findPath(scene.navigation, entity.position, anchor.position)
-      nextCues = appendCue(nextCues, routeCue(snapshot, entity.id, anchor.id, path))
-      return { ...entity, position: { ...anchor.position }, anchorId: anchor.id, route: [], facing: anchor.facing, activity: 'meeting' as const, activityLabel: '正在协作会议' }
-    })
-    return { ...current, snapshot: { ...snapshot, entities, sequence: snapshot.sequence + 1 }, cues: nextCues }
-  }
+  if (request.action === 'start-meeting' || request.action === 'assign-task') return current
   const entity = request.entityId === undefined ? undefined : snapshot.entities.find((item) => item.id === request.entityId)
   const object = request.objectId === undefined ? undefined : scene.interactables.find((item) => item.id === request.objectId)
   const anchor = object?.approachAnchorIds[0] === undefined ? undefined : getAnchor(scene, object.approachAnchorIds[0])

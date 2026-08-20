@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto'
-
 import type {
   AgentRuntimeEvent,
   JsonObject,
@@ -9,6 +7,7 @@ import type {
   WorldRuntimeSnapshot,
   WorldRuntimeStreamEnvelope,
   WorldThemeManifestV1,
+  WorldThemeOption,
 } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 import {
@@ -16,6 +15,10 @@ import {
   projectWorldRuntime,
   validateWorldThemeManifest,
 } from '@dsh-cyber/world-runtime'
+
+import { loadInstalledWorldThemes, readInstalledWorldThemeAsset } from './installed-package-runtime.js'
+
+const ACTIVE_RENDERERS = new Set(['pixi-2d'])
 
 export class UnsupportedWorldRuntimeError extends Error {
   readonly worldId: string
@@ -46,13 +49,13 @@ export class WorldRuntimeService {
 
   supports(worldId: string): boolean {
     const world = this.#store.getWorld(worldId)
-    return world !== undefined && this.#manifestForTemplate(world.templateId) !== undefined
+    return world !== undefined && this.#manifestForWorld(world.id, world.templateId) !== undefined
   }
 
   getSnapshot(worldId: string): WorldRuntimeSnapshot {
     const world = this.#store.getWorld(worldId)
     if (world === undefined) throw new Error(`World not found: ${worldId}`)
-    const manifest = this.#manifestForTemplate(world.templateId)
+    const manifest = this.#manifestForWorld(world.id, world.templateId)
     if (manifest === undefined) throw new UnsupportedWorldRuntimeError(worldId)
     const validation = validateWorldThemeManifest(manifest)
     if (!validation.valid) throw new Error(`Built-in world theme is invalid: ${validation.errors.join('; ')}`)
@@ -70,24 +73,32 @@ export class WorldRuntimeService {
       ...(previous === undefined ? {} : { previous }),
       now: this.#clock(),
     })
-    this.#store.saveWorldRuntimeSnapshot(result.snapshot, manifest)
+    this.#store.saveWorldRuntimeSnapshot(result.snapshot)
     return result.snapshot
   }
 
   getThemeManifest(worldId: string): WorldThemeManifestV1 {
     const world = this.#store.getWorld(worldId)
     if (world === undefined) throw new Error(`World not found: ${worldId}`)
-    const manifest = this.#manifestForTemplate(world.templateId)
+    const manifest = this.#manifestForWorld(world.id, world.templateId)
     if (manifest === undefined) throw new UnsupportedWorldRuntimeError(worldId)
     const validation = validateWorldThemeManifest(manifest)
     if (!validation.valid) throw new Error(`Built-in world theme is invalid: ${validation.errors.join('; ')}`)
-    return manifest
+    const binding = this.#store.getWorldThemeBinding(worldId)
+    if (binding?.status !== 'active') return manifest
+    return {
+      ...manifest,
+      assets: manifest.assets.map((asset) => ({
+        ...asset,
+        src: `/api/worlds/${encodeURIComponent(worldId)}/theme-assets/${encodeURIComponent(asset.id)}`,
+      })),
+    }
   }
 
   refresh(worldId: string): { snapshot: WorldRuntimeSnapshot; cues: WorldCue[] } {
     const world = this.#store.getWorld(worldId)
     if (world === undefined) throw new Error(`World not found: ${worldId}`)
-    const manifest = this.#manifestForTemplate(world.templateId)
+    const manifest = this.#manifestForWorld(world.id, world.templateId)
     if (manifest === undefined) throw new UnsupportedWorldRuntimeError(worldId)
     const previous = this.#store.getWorldRuntimeSnapshot(worldId)
     const employees = this.#store.listEmployees(worldId)
@@ -101,8 +112,83 @@ export class WorldRuntimeService {
       ...(previous === undefined ? {} : { previous }),
       now: this.#clock(),
     })
-    this.#store.saveWorldRuntimeSnapshot(result.snapshot, manifest)
+    this.#store.saveWorldRuntimeSnapshot(result.snapshot)
     return result
+  }
+
+  async listThemes(worldId: string): Promise<{ activeThemeId: string; items: WorldThemeOption[] }> {
+    const world = this.#store.getWorld(worldId)
+    if (world === undefined) throw new Error(`World not found: ${worldId}`)
+    const binding = this.#store.getWorldThemeBinding(worldId)
+    const builtIn = this.#manifestForTemplate(world.templateId)
+    const installed = await loadInstalledWorldThemes(this.#store.listInstalledPackages(world.workspaceId))
+    const compatible = installed.filter((item) =>
+      themeTemplateMatches(world.templateId, item.manifest.templateId) && ACTIVE_RENDERERS.has(item.manifest.renderer))
+    const activeThemeId = binding?.status === 'active' ? binding.themeId : builtIn?.id ?? ''
+    const items: WorldThemeOption[] = [
+      ...(builtIn === undefined ? [] : [{
+        themeId: builtIn.id,
+        version: builtIn.version,
+        displayName: builtIn.displayName,
+        templateId: builtIn.templateId,
+        source: 'built-in' as const,
+        active: activeThemeId === builtIn.id,
+      }]),
+      ...compatible.map((item) => ({
+        themeId: item.manifest.id,
+        version: item.manifest.version,
+        displayName: item.manifest.displayName,
+        templateId: item.manifest.templateId,
+        source: 'installed' as const,
+        active: activeThemeId === item.manifest.id,
+        packageId: item.packageId,
+      })),
+    ]
+    return { activeThemeId, items }
+  }
+
+  async bindInstalledTheme(worldId: string, packageId: string): Promise<WorldRuntimeSnapshot> {
+    const world = this.#store.getWorld(worldId)
+    if (world === undefined) throw new Error(`World not found: ${worldId}`)
+    const themes = await loadInstalledWorldThemes(this.#store.listInstalledPackages(world.workspaceId))
+    const selected = themes.find((item) => item.packageId === packageId)
+    if (selected === undefined) throw new Error(`Installed world theme not found: ${packageId}`)
+    if (!themeTemplateMatches(world.templateId, selected.manifest.templateId)) {
+      throw new Error(`World theme ${selected.manifest.id} is not compatible with ${world.templateId}`)
+    }
+    if (!ACTIVE_RENDERERS.has(selected.manifest.renderer)) {
+      throw new Error(`World renderer is not installed: ${selected.manifest.renderer}`)
+    }
+    this.#store.bindWorldTheme(worldId, selected.manifest)
+    const snapshot = this.getSnapshot(worldId)
+    this.publishState(snapshot)
+    return snapshot
+  }
+
+  useBuiltInTheme(worldId: string): WorldRuntimeSnapshot {
+    const world = this.#store.getWorld(worldId)
+    if (world === undefined) throw new Error(`World not found: ${worldId}`)
+    if (this.#manifestForTemplate(world.templateId) === undefined) throw new UnsupportedWorldRuntimeError(worldId)
+    this.#store.disableWorldTheme(worldId)
+    const snapshot = this.getSnapshot(worldId)
+    this.publishState(snapshot)
+    return snapshot
+  }
+
+  async getThemeAsset(worldId: string, assetId: string): Promise<{ body: Buffer; contentType: string }> {
+    const world = this.#store.getWorld(worldId)
+    if (world === undefined) throw new Error(`World not found: ${worldId}`)
+    const binding = this.#store.getWorldThemeBinding(worldId)
+    if (binding?.status !== 'active') throw new Error('The active world theme does not use package assets')
+    const asset = binding.manifest.assets.find((item) => item.id === assetId)
+    if (asset === undefined) throw new Error(`World theme asset not found: ${assetId}`)
+    const packages = this.#store.listInstalledPackages(world.workspaceId)
+    const themes = await loadInstalledWorldThemes(packages)
+    const selected = themes.find((item) => item.manifest.id === binding.themeId && item.manifest.version === binding.themeVersion)
+    if (selected === undefined) throw new Error('The bound world theme package is no longer active')
+    const installed = packages.find((item) => item.packageId === selected.packageId && item.version === selected.packageVersion)
+    if (installed === undefined) throw new Error('The bound world theme package is missing')
+    return readInstalledWorldThemeAsset(installed, asset.src)
   }
 
   interact(worldId: string, request: WorldInteractionRequest): WorldInteractionResult {
@@ -144,22 +230,19 @@ export class WorldRuntimeService {
         },
       })
     }
-    if (request.action === 'start-meeting') {
-      this.#store.appendDomainEvent({
-        workspaceId: world.workspaceId,
-        worldId,
-        type: 'meeting.started',
-        actorId: request.actorId,
-        actorKind: request.actorId === 'owner' ? 'owner' : 'employee',
-        causationId: requested.id,
-        correlationId: requested.id,
-        payload: {
-          participantIds: request.participantIds ?? [],
-          sourceInteractionId: requested.id,
-        },
-      })
-    }
+    const pending = request.action === 'assign-task' || request.action === 'start-meeting'
     const projected = this.refresh(worldId)
+    if (pending) {
+      for (const cue of projected.cues) this.publishCue(cue)
+      this.publishState(projected.snapshot)
+      return {
+        accepted: true,
+        eventId: requested.id,
+        status: 'pending',
+        snapshot: projected.snapshot,
+        cues: projected.cues,
+      }
+    }
     const completed = this.#store.appendDomainEvent({
       workspaceId: world.workspaceId,
       worldId,
@@ -176,11 +259,12 @@ export class WorldRuntimeService {
       },
     })
     const final = this.refresh(worldId)
-    this.publishState(final.snapshot)
     for (const cue of [...projected.cues, ...final.cues]) this.publishCue(cue)
+    this.publishState(final.snapshot)
     return {
       accepted: true,
       eventId: completed.id,
+      status: 'completed',
       snapshot: final.snapshot,
       cues: [...projected.cues, ...final.cues],
     }
@@ -188,12 +272,12 @@ export class WorldRuntimeService {
 
   publishRuntime(worldId: string, runtime: AgentRuntimeEvent, agentId: string): void {
     if (!this.supports(worldId)) return
-    const snapshot = this.getSnapshot(worldId)
+    const projected = this.refresh(worldId)
     this.#publish({
       contractVersion: 1,
-      id: `runtime:${randomUUID()}`,
+      id: String(projected.snapshot.sequence),
       worldId,
-      sequence: snapshot.sequence,
+      sequence: projected.snapshot.sequence,
       kind: 'runtime',
       payload: {
         agentId,
@@ -204,15 +288,21 @@ export class WorldRuntimeService {
       },
       createdAt: this.#clock(),
     })
-    const projected = this.refresh(worldId)
-    this.publishState(projected.snapshot)
     for (const cue of projected.cues) this.publishCue(cue)
+    this.publishState(projected.snapshot)
+  }
+
+  publishCurrent(worldId: string): void {
+    if (!this.supports(worldId)) return
+    const projected = this.refresh(worldId)
+    for (const cue of projected.cues) this.publishCue(cue)
+    this.publishState(projected.snapshot)
   }
 
   publishState(snapshot: WorldRuntimeSnapshot): void {
     this.#publish({
       contractVersion: 1,
-      id: `state:${snapshot.worldId}:${snapshot.sequence}`,
+      id: String(snapshot.sequence),
       worldId: snapshot.worldId,
       sequence: snapshot.sequence,
       kind: 'world-state',
@@ -224,7 +314,7 @@ export class WorldRuntimeService {
   publishCue(cue: WorldCue): void {
     this.#publish({
       contractVersion: 1,
-      id: cue.id,
+      id: String(cue.sequence),
       worldId: cue.worldId,
       sequence: cue.sequence,
       kind: 'world-cue',
@@ -252,6 +342,14 @@ export class WorldRuntimeService {
       ? cyberCompanyTheme
       : undefined
   }
+
+  #manifestForWorld(worldId: string, templateId: string): WorldThemeManifestV1 | undefined {
+    const binding = this.#store.getWorldThemeBinding(worldId)
+    if (binding?.status === 'active' && themeTemplateMatches(templateId, binding.manifest.templateId) && ACTIVE_RENDERERS.has(binding.manifest.renderer)) {
+      return binding.manifest
+    }
+    return this.#manifestForTemplate(templateId)
+  }
 }
 
 function interactionPayload(request: WorldInteractionRequest): JsonObject {
@@ -264,4 +362,9 @@ function interactionPayload(request: WorldInteractionRequest): JsonObject {
     prompt: request.prompt ?? '',
     metadata: request.metadata ?? {},
   }
+}
+
+function themeTemplateMatches(worldTemplateId: string, themeTemplateId: string): boolean {
+  if (worldTemplateId === themeTemplateId) return true
+  return [worldTemplateId, themeTemplateId].every((value) => value === 'company' || value === 'cyber-company')
 }

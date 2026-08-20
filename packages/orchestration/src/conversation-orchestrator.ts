@@ -280,6 +280,11 @@ export class ConversationOrchestrator implements AsyncDisposable {
         prompt,
         workspacePath: this.#workspacePath,
         onEvent: (event) => {
+          if (event.kind === 'turn.failed') failedTurn = true
+          if (event.kind === 'assistant.message' && event.content?.trim()) {
+            responsePersisted = true
+          }
+          this.#persistRuntimeEvent(session, employee, event)
           this.#emit({
             workspaceId: session.workspaceId,
             worldId: session.worldId,
@@ -287,11 +292,6 @@ export class ConversationOrchestrator implements AsyncDisposable {
             agentId: employee.id,
             event,
           })
-          if (event.kind === 'turn.failed') failedTurn = true
-          if (event.kind === 'assistant.message' && event.content?.trim()) {
-            responsePersisted = true
-          }
-          this.#persistRuntimeEvent(session, employee, event)
         },
       })
       this.#store.bindEmployeeAgentSession(employee.id, result.agentSessionId)
@@ -314,6 +314,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
           correlationId: session.id,
         })
       }
+      this.#store.setEmployeeStatus(employee.id, 'available', 'system')
       this.#store.appendDomainEvent({
         workspaceId: session.workspaceId,
         worldId: session.worldId,
@@ -324,7 +325,6 @@ export class ConversationOrchestrator implements AsyncDisposable {
         correlationId: session.id,
         payload: { employeeId: employee.id, agentSessionId: result.agentSessionId },
       })
-      this.#store.setEmployeeStatus(employee.id, 'available', 'system')
       return {
         employeeId: employee.id,
         displayName: employee.displayName,

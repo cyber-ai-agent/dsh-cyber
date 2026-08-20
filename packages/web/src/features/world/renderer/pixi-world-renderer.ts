@@ -12,27 +12,30 @@ import 'pixi.js/unsafe-eval'
 import type {
   WorldCue,
   WorldPoint,
+  WorldRenderer,
+  WorldRendererCallbacks,
   WorldRuntimeEntityState,
   WorldRuntimeSnapshot,
   WorldThemeManifestV1,
   WorldThemeSceneManifest,
 } from '@dsh-cyber/contracts'
 
-interface RendererCallbacks {
-  onEntitySelect(entityId: string): void
-  onObjectSelect(objectId: string): void
-  onReady?(metrics: { initializationMs: number; assetBytesEstimate: number }): void
-}
+import { ActorAnimationController } from './actor-animation-controller.js'
 
 interface ActorView {
   root: Container
-  sprite: Sprite
+  animation: ActorAnimationController
   selection: Graphics
   status: Graphics
   name: Text
   activity: Text
   state: WorldRuntimeEntityState
   motion: ActorMotion | undefined
+}
+
+interface GrowthMarkerView {
+  root: Container
+  count: Text
 }
 
 interface ActorMotion {
@@ -45,17 +48,20 @@ interface ActorMotion {
 const WORLD_MIN_ZOOM = 0.55
 const WORLD_MAX_ZOOM = 2.2
 
-export class PixiWorldRenderer {
-  readonly #callbacks: RendererCallbacks
+export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
+  readonly kind = 'pixi-2d' as const
+  readonly #callbacks: WorldRendererCallbacks
   readonly #app = new Application()
   readonly #camera = new Container()
   readonly #sceneRoot = new Container()
-  readonly #actorLayer = new Container()
   readonly #interactionLayer = new Container()
   readonly #effectsLayer = new Container()
   readonly #actors = new Map<string, ActorView>()
   readonly #objectHints = new Map<string, Graphics>()
+  readonly #growthMarkers = new Map<string, GrowthMarkerView>()
   readonly #assetTextures = new Map<string, Texture>()
+  readonly #appliedCueIds = new Set<string>()
+  readonly #lastCueSequence = new Map<string, number>()
   #manifest?: WorldThemeManifestV1
   #scene?: WorldThemeSceneManifest
   #snapshot?: WorldRuntimeSnapshot
@@ -71,7 +77,7 @@ export class PixiWorldRenderer {
   #initialized = false
   #destroyed = false
 
-  constructor(callbacks: RendererCallbacks) {
+  constructor(callbacks: WorldRendererCallbacks) {
     this.#callbacks = callbacks
   }
 
@@ -102,8 +108,7 @@ export class PixiWorldRenderer {
     host.appendChild(this.#app.canvas)
     this.#camera.sortableChildren = true
     this.#sceneRoot.sortableChildren = true
-    this.#actorLayer.sortableChildren = true
-    this.#sceneRoot.addChild(this.#actorLayer, this.#interactionLayer, this.#effectsLayer)
+    this.#sceneRoot.addChild(this.#interactionLayer, this.#effectsLayer)
     this.#camera.addChild(this.#sceneRoot)
     this.#app.stage.addChild(this.#camera)
     await this.#loadAssets(manifest)
@@ -121,6 +126,7 @@ export class PixiWorldRenderer {
   }
 
   updateSnapshot(snapshot: WorldRuntimeSnapshot): void {
+    if (this.#snapshot !== undefined && snapshot.sequence < this.#snapshot.sequence) return
     this.#snapshot = snapshot
     if (!this.#scene || !this.#manifest) return
     const actorAssetId = this.#manifest.actorSets[0]?.assetId
@@ -128,6 +134,7 @@ export class PixiWorldRenderer {
     const activeIds = new Set(snapshot.entities.filter((entity) => entity.kind === 'agent').map((entity) => entity.id))
     for (const [entityId, actor] of this.#actors) {
       if (activeIds.has(entityId)) continue
+      actor.animation.destroy()
       actor.root.destroy({ children: true })
       this.#actors.delete(entityId)
     }
@@ -135,32 +142,41 @@ export class PixiWorldRenderer {
       if (entity.kind !== 'agent') continue
       const actor = this.#actors.get(entity.id) ?? this.#createActor(entity)
       actor.state = entity
-      actor.root.position.set(entity.position.x, entity.position.y)
-      actor.root.zIndex = 600 + entity.position.y
+      if (actor.motion === undefined) actor.root.position.set(entity.position.x, entity.position.y)
+      actor.root.zIndex = 600 + actor.root.y
       actor.name.text = entity.displayName
       actor.activity.text = entity.activityLabel
       actor.selection.visible = entity.id === this.#selectedEntityId
       actor.activity.visible = entity.id === this.#selectedEntityId
       actor.status.clear().circle(-43, -112, 4).fill({ color: statusColor(entity), alpha: 1 })
-      this.#applyFacing(actor)
+      this.#applyAnimation(actor)
     }
     for (const object of snapshot.objects) {
       const hint = this.#objectHints.get(object.id)
       if (hint !== undefined) hint.alpha = object.state === 'active' ? 0.34 : 0.001
     }
+    this.#updateGrowth(snapshot)
     this.#setLights(snapshot.clock.lightsOn)
   }
 
   applyCues(cues: WorldCue[]): void {
     for (const cue of cues) {
+      if (this.#appliedCueIds.has(cue.id) || cue.sequence < (this.#snapshot?.sequence ?? 0)) continue
+      const channel = `${cue.kind}:${cue.entityId ?? cue.objectId ?? 'world'}`
+      const previousSequence = this.#lastCueSequence.get(channel) ?? -1
+      if (cue.sequence < previousSequence) continue
+      this.#appliedCueIds.add(cue.id)
+      this.#lastCueSequence.set(channel, cue.sequence)
       const actor = cue.entityId === undefined ? undefined : this.#actors.get(cue.entityId)
       if (cue.kind === 'entity.route' && actor !== undefined) {
-        const route = cuePoints(cue)
+        const semanticRoute = cuePoints(cue)
+        const route = semanticRoute.length < 2
+          ? semanticRoute
+          : [{ x: actor.root.x, y: actor.root.y }, ...semanticRoute.slice(1)]
         if (route.length > 1) {
-          actor.root.position.set(route[0]!.x, route[0]!.y)
           actor.motion = { route, segment: 0, elapsed: 0, segmentDuration: segmentDuration(route[0]!, route[1]!) }
           actor.state = { ...actor.state, activity: 'walking', facing: facingBetween(route[0]!, route[1]!) }
-          this.#applyFacing(actor)
+          this.#applyAnimation(actor)
         }
       }
       if (cue.kind === 'entity.focus' && actor !== undefined) this.focusEntity(actor.state.id)
@@ -243,9 +259,14 @@ export class PixiWorldRenderer {
     this.#destroyed = true
     this.#resizeObserver?.disconnect()
     this.#resizeObserver = undefined
+    for (const actor of this.#actors.values()) actor.animation.destroy()
     this.#actors.clear()
     this.#objectHints.clear()
+    for (const marker of this.#growthMarkers.values()) marker.root.destroy({ children: true })
+    this.#growthMarkers.clear()
     this.#assetTextures.clear()
+    this.#appliedCueIds.clear()
+    this.#lastCueSequence.clear()
     if (this.#initialized) this.#app.destroy(true, { children: true, texture: false, textureSource: false })
     this.#initialized = false
   }
@@ -281,7 +302,6 @@ export class PixiWorldRenderer {
       sprite.zIndex = layer.occludesActors ? Math.max(layer.zIndex, actorZ + layer.destination.y) : layer.zIndex
       this.#sceneRoot.addChild(sprite)
     }
-    this.#actorLayer.zIndex = actorZ
     this.#interactionLayer.zIndex = 8_000
     this.#effectsLayer.zIndex = 9_000
     for (const interactable of this.#scene.interactables) {
@@ -309,17 +329,7 @@ export class PixiWorldRenderer {
     const actorSet = this.#manifest?.actorSets[0]
     const source = actorSet === undefined ? undefined : this.#assetTextures.get(actorSet.assetId)
     if (actorSet === undefined || source === undefined) throw new Error('角色图集尚未加载')
-    const rosterIndex = rosterIndexFor(entity)
-    const columns = Math.max(1, Math.floor(source.width / actorSet.frameWidth))
-    const frame = new Rectangle(
-      (rosterIndex % columns) * actorSet.frameWidth,
-      Math.floor(rosterIndex / columns) * actorSet.frameHeight,
-      actorSet.frameWidth,
-      actorSet.frameHeight,
-    )
-    const sprite = new Sprite(new Texture({ source: source.source, frame }))
-    sprite.anchor.set(0.5, 1)
-    sprite.scale.set(actorSet.scale)
+    const animation = new ActorAnimationController(source, actorSet, rosterIndexFor(entity))
     const root = new Container()
     root.eventMode = 'static'
     root.cursor = 'pointer'
@@ -341,25 +351,23 @@ export class PixiWorldRenderer {
     activity.anchor.set(0.5, 0)
     activity.position.set(0, -130)
     activity.visible = false
-    root.addChild(shadow, selection, sprite, status, name, activity)
+    root.addChild(shadow, selection, animation.sprite, status, name, activity)
     root.on('pointertap', (event: FederatedPointerEvent) => {
       event.stopPropagation()
       this.#callbacks.onEntitySelect(entity.id)
     })
     root.on('pointerover', () => { activity.visible = true })
     root.on('pointerout', () => { activity.visible = this.#selectedEntityId === entity.id })
-    const actor: ActorView = { root, sprite, selection, status, name, activity, state: entity, motion: undefined }
-    this.#actorLayer.addChild(root)
+    const actor: ActorView = { root, animation, selection, status, name, activity, state: entity, motion: undefined }
+    this.#sceneRoot.addChild(root)
     this.#actors.set(entity.id, actor)
     return actor
   }
 
   #tick(deltaMs: number): void {
-    const time = performance.now()
     for (const actor of this.#actors.values()) {
       if (actor.motion !== undefined) this.#advanceMotion(actor, deltaMs)
-      const amplitude = actor.state.activity === 'walking' ? 3 : actor.state.activity === 'talking' ? 1.5 : actor.state.activity === 'working' ? 1 : 0.5
-      actor.sprite.y = -Math.abs(Math.sin(time / (actor.state.activity === 'walking' ? 115 : 460))) * amplitude
+      actor.animation.tick(deltaMs)
       actor.root.zIndex = 600 + actor.root.y
     }
   }
@@ -372,14 +380,14 @@ export class PixiWorldRenderer {
     if (from === undefined || to === undefined) {
       actor.motion = undefined
       actor.state = { ...actor.state, activity: this.#snapshot?.entities.find((entity) => entity.id === actor.state.id)?.activity ?? 'idle' }
-      this.#applyFacing(actor)
+      this.#applyAnimation(actor)
       return
     }
     motion.elapsed += deltaMs
     const progress = clamp(motion.elapsed / motion.segmentDuration, 0, 1)
     actor.root.position.set(lerp(from.x, to.x, progress), lerp(from.y, to.y, progress))
     actor.state = { ...actor.state, facing: facingBetween(from, to), activity: 'walking' }
-    this.#applyFacing(actor)
+    this.#applyAnimation(actor)
     if (progress < 1) return
     motion.segment += 1
     motion.elapsed = 0
@@ -388,17 +396,41 @@ export class PixiWorldRenderer {
       actor.motion = undefined
       const recovered = this.#snapshot?.entities.find((entity) => entity.id === actor.state.id)
       if (recovered !== undefined) actor.state = recovered
-      this.#applyFacing(actor)
+      this.#applyAnimation(actor)
       return
     }
     motion.segmentDuration = segmentDuration(to, next)
   }
 
-  #applyFacing(actor: ActorView): void {
-    const baseScale = this.#manifest?.actorSets[0]?.scale ?? 0.25
-    const horizontal = actor.state.facing === 'west' ? -1 : 1
-    actor.sprite.scale.set(baseScale * horizontal, baseScale)
-    actor.sprite.rotation = actor.state.facing === 'north' ? -0.015 : actor.state.facing === 'south' ? 0.015 : 0
+  #applyAnimation(actor: ActorView): void {
+    actor.animation.setState(actor.motion === undefined ? actor.state.activity : 'walking', actor.state.facing)
+  }
+
+  #updateGrowth(snapshot: WorldRuntimeSnapshot): void {
+    if (this.#scene === undefined) return
+    for (const slot of this.#scene.growthSlots) {
+      const milestoneIds = snapshot.growthSlots[slot.category] ?? []
+      let marker = this.#growthMarkers.get(slot.id)
+      if (marker === undefined) {
+        const root = new Container()
+        root.position.set(slot.position.x, slot.position.y)
+        root.zIndex = slot.zIndex
+        const color = slot.category === 'promotion' ? 0xf3b83f : slot.category === 'delivery' ? 0x55d691 : 0x58e2ff
+        const badge = new Graphics().circle(0, 0, 18).fill({ color: 0x10171d, alpha: 0.94 }).stroke({ color, width: 3, alpha: 0.95 })
+        const glyph = new Text({ text: growthGlyph(slot.category), style: { fontFamily: 'Microsoft YaHei, sans-serif', fontSize: 16, fill: color, fontWeight: '800' } })
+        glyph.anchor.set(0.5)
+        const count = new Text({ text: '', style: { fontFamily: 'Microsoft YaHei, sans-serif', fontSize: 11, fill: 0xffffff, fontWeight: '700' } })
+        count.anchor.set(0.5)
+        count.position.set(18, -16)
+        root.addChild(badge, glyph, count)
+        this.#sceneRoot.addChild(root)
+        marker = { root, count }
+        this.#growthMarkers.set(slot.id, marker)
+      }
+      marker.root.visible = milestoneIds.length > 0
+      marker.count.text = String(milestoneIds.length)
+      marker.root.label = `${slot.category}:${milestoneIds.join(',')}`
+    }
   }
 
   #showBubble(actor: ActorView, text: string): void {
@@ -525,6 +557,12 @@ function statusColor(entity: WorldRuntimeEntityState): number {
   if (entity.status === 'working') return 0x4fd8ed
   if (entity.status === 'waiting') return 0xf3b83f
   return 0x55d691
+}
+
+function growthGlyph(category: string): string {
+  if (category === 'promotion') return '▲'
+  if (category === 'delivery') return '✓'
+  return '✦'
 }
 
 function cuePoints(cue: WorldCue): WorldPoint[] {

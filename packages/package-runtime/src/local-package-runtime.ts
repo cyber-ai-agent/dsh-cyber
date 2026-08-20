@@ -8,7 +8,7 @@ import {
   rename,
   rm,
 } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 
 import type { CyberPackageManifest } from '@dsh-cyber/contracts'
 
@@ -33,8 +33,22 @@ export class LocalPackageRuntime implements PackageRuntimePort {
     const stagedPath = join(stagingRoot, randomUUID())
     await mkdir(stagedPath, { recursive: true })
     try {
+      const sourceRootMetadata = await lstat(sourceRoot)
+      if (!sourceRootMetadata.isDirectory() || sourceRootMetadata.isSymbolicLink()) {
+        throw new Error('Package source must be a regular directory, not a symbolic link')
+      }
       for (const file of manifest.files) {
-        const sourcePath = join(sourceRoot, ...file.path.split('/'))
+        let sourcePath = sourceRoot
+        for (const segment of file.path.split('/')) {
+          sourcePath = resolve(sourcePath, segment)
+          if (!sourcePath.startsWith(`${sourceRoot}${sep}`)) {
+            throw new Error(`Package file escaped its source directory: ${file.path}`)
+          }
+          const segmentMetadata = await lstat(sourcePath)
+          if (segmentMetadata.isSymbolicLink()) {
+            throw new Error(`Package paths cannot contain symbolic links: ${file.path}`)
+          }
+        }
         const metadata = await lstat(sourcePath)
         if (!metadata.isFile() || metadata.isSymbolicLink()) {
           throw new Error(`Package file must be a regular file: ${file.path}`)

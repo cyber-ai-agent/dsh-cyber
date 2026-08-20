@@ -203,7 +203,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     for (const client of worldRuntimeClients) {
       const heartbeatEvent: WorldRuntimeStreamEnvelope = {
         contractVersion: 1,
-        id: `heartbeat:${Date.now()}`,
+        id: String(client.lastSequence),
         worldId: client.worldId,
         sequence: client.lastSequence,
         kind: 'heartbeat',
@@ -907,9 +907,40 @@ async function handleRequest(context: {
     writeJson(response, 200, worldRuntime.getSnapshot(worldRuntimeSnapshot[0]))
     return
   }
+  const worldRuntimeCapability = match(url.pathname, /^\/api\/worlds\/([^/]+)\/runtime-capability$/)
+  if (method === 'GET' && worldRuntimeCapability !== undefined) {
+    const worldId = worldRuntimeCapability[0]
+    const supported = worldRuntime.supports(worldId)
+    writeJson(response, 200, {
+      supported,
+      ...(supported ? { renderer: worldRuntime.getThemeManifest(worldId).renderer } : {}),
+    })
+    return
+  }
   const worldThemeManifest = match(url.pathname, /^\/api\/worlds\/([^/]+)\/theme-manifest$/)
   if (method === 'GET' && worldThemeManifest !== undefined) {
     writeJson(response, 200, worldRuntime.getThemeManifest(worldThemeManifest[0]))
+    return
+  }
+  const worldThemes = match(url.pathname, /^\/api\/worlds\/([^/]+)\/themes$/)
+  if (method === 'GET' && worldThemes !== undefined) {
+    writeJson(response, 200, await worldRuntime.listThemes(worldThemes[0]))
+    return
+  }
+  const worldThemeBinding = match(url.pathname, /^\/api\/worlds\/([^/]+)\/theme-binding$/)
+  if (method === 'PUT' && worldThemeBinding !== undefined) {
+    const body = await readJson(request)
+    const action = requiredEnum(body, 'action', ['bind', 'disable', 'fallback'])
+    const snapshot = action === 'bind'
+      ? await worldRuntime.bindInstalledTheme(worldThemeBinding[0], requiredString(body, 'packageId'))
+      : worldRuntime.useBuiltInTheme(worldThemeBinding[0])
+    writeJson(response, 200, { action, snapshot, binding: store.getWorldThemeBinding(worldThemeBinding[0]) })
+    return
+  }
+  const worldThemeAsset = match(url.pathname, /^\/api\/worlds\/([^/]+)\/theme-assets\/([^/]+)$/)
+  if (method === 'GET' && worldThemeAsset !== undefined) {
+    const asset = await worldRuntime.getThemeAsset(worldThemeAsset[0], worldThemeAsset[1]!)
+    writeBinary(response, 200, asset.body, asset.contentType)
     return
   }
   const worldInteractions = match(url.pathname, /^\/api\/worlds\/([^/]+)\/interactions$/)
@@ -943,9 +974,13 @@ async function handleRequest(context: {
     const world = store.getWorld(worldId)
     if (world === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
     const snapshot = worldRuntime.getSnapshot(worldId)
+    const afterParameter = url.searchParams.get('after')
+    const lastEventId = headerValue(request.headers['last-event-id'])
+    const invalidCursor = (afterParameter !== null && !isSseSequence(afterParameter)) ||
+      (lastEventId !== null && !isSseSequence(lastEventId))
     const after = Math.max(
-      nonNegativeInteger(url.searchParams.get('after')),
-      nonNegativeInteger(headerValue(request.headers['last-event-id'])),
+      sseSequence(afterParameter),
+      sseSequence(lastEventId),
     )
     response.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
@@ -953,39 +988,41 @@ async function handleRequest(context: {
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
     })
-    if (after < snapshot.sequence) {
-      const recovery: WorldRuntimeStreamEnvelope = {
+    if (invalidCursor || after !== snapshot.sequence) {
+      const recoveryRequired: WorldRuntimeStreamEnvelope = {
         contractVersion: 1,
-        id: `state:${worldId}:${snapshot.sequence}`,
+        id: String(snapshot.sequence),
+        worldId,
+        sequence: snapshot.sequence,
+        kind: 'recovery-required',
+        payload: {
+          requestedSequence: after,
+          latestSequence: snapshot.sequence,
+          reason: invalidCursor ? 'invalid-cursor' : after > snapshot.sequence ? 'cursor-ahead' : 'cursor-gap',
+        },
+        createdAt: new Date().toISOString(),
+      }
+      writeSse(response, 'recovery-required', recoveryRequired, recoveryRequired.id)
+      const recoveryState: WorldRuntimeStreamEnvelope = {
+        contractVersion: 1,
+        id: String(snapshot.sequence),
         worldId,
         sequence: snapshot.sequence,
         kind: 'world-state',
         payload: snapshot as unknown as JsonObject,
         createdAt: new Date().toISOString(),
       }
-      writeSse(response, 'world-state', recovery, recovery.id)
-      for (const event of store.listWorldDomainEvents(worldId, after)) {
-        const envelope: WorldRuntimeStreamEnvelope = {
-          contractVersion: 1,
-          id: `domain:${event.id}`,
-          worldId,
-          sequence: event.sequence,
-          kind: 'domain',
-          payload: event as unknown as JsonObject,
-          createdAt: event.createdAt,
-        }
-        writeSse(response, 'domain', envelope, envelope.id)
-      }
+      writeSse(response, 'world-state', recoveryState, recoveryState.id)
     } else {
       writeSse(response, 'ready', {
         contractVersion: 1,
-        id: `ready:${worldId}:${snapshot.sequence}`,
+        id: String(snapshot.sequence),
         worldId,
         sequence: snapshot.sequence,
         kind: 'heartbeat',
         payload: {},
         createdAt: new Date().toISOString(),
-      })
+      }, String(snapshot.sequence))
     }
     const client: WorldRuntimeClient = { worldId, response, lastSequence: snapshot.sequence }
     worldRuntimeClients.add(client)
@@ -1075,6 +1112,7 @@ async function handleRequest(context: {
           ...(title === undefined ? {} : { title }),
         })
     }
+    worldRuntime.publishCurrent(world.id)
     writeJson(response, 200, result)
     return
   }
@@ -1308,6 +1346,14 @@ function writeSse(
   if (id !== undefined) response.write(`id: ${id}\n`)
   response.write(`event: ${event}\n`)
   response.write(`data: ${JSON.stringify(value)}\n\n`)
+}
+
+function isSseSequence(value: string | null | undefined): value is string {
+  return typeof value === 'string' && /^(?:0|[1-9]\d*)$/.test(value) && Number.isSafeInteger(Number(value))
+}
+
+function sseSequence(value: string | null | undefined): number {
+  return value !== null && value !== undefined && isSseSequence(value) ? Number(value) : 0
 }
 
 function writeBinary(

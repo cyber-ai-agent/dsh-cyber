@@ -40,7 +40,8 @@ export function projectWorldRuntime(input: ProjectWorldRuntimeInput): ProjectWor
   const entities = new Map<string, WorldRuntimeEntityState>()
   for (const entity of input.previous?.entities ?? []) entities.set(entity.id, cloneEntity(entity))
 
-  const workAnchors = scene.anchors.filter((anchor) => anchor.tags.includes('work'))
+  const arrivalAnchors = scene.anchors.filter((anchor) => anchor.tags.includes('idle'))
+  const fallbackAnchors = scene.anchors.filter((anchor) => anchor.tags.includes('work'))
   for (const [index, employee] of input.employees.entries()) {
     if (employee.status === 'archived') continue
     const existing = entities.get(employee.id)
@@ -51,8 +52,10 @@ export function projectWorldRuntime(input: ProjectWorldRuntimeInput): ProjectWor
       existing.updatedAt = employee.updatedAt
       continue
     }
-    const anchor = workAnchors[index % workAnchors.length] ?? getAnchor(scene, 'spawn')
-    entities.set(employee.id, createEmployeeEntity(employee, scene.id, anchor))
+    const anchor = arrivalAnchors[index % arrivalAnchors.length]
+      ?? fallbackAnchors[index % fallbackAnchors.length]
+      ?? getAnchor(scene, 'spawn')
+    entities.set(employee.id, createEmployeeEntity(employee, scene.id, anchor, index))
   }
 
   const activeEmployeeIds = new Set(input.employees.filter((employee) => employee.status !== 'archived').map((employee) => employee.id))
@@ -141,6 +144,21 @@ function applyEvent(
     ?? (event.actorKind === 'employee' ? event.actorId : undefined)
   const activity = manifest.activityMapping[event.type]
 
+  if (event.type === 'task.started' && employeeId !== undefined) {
+    const entity = entities.get(employeeId)
+    if (entity !== undefined && typeof entity.visualState['activeMeetingId'] !== 'string') {
+      moveEntity(
+        entity,
+        chooseWorkAnchor(scene.anchors, entity.id),
+        'working',
+        '前往工位执行任务',
+        scene.navigation,
+        event,
+        cues,
+      )
+    }
+  }
+
   if (event.type === 'meeting.started') {
     const participants = stringArrayValue(event.payload, 'participantIds')
     const anchors = scene.anchors.filter((anchor) => anchor.tags.includes('meeting'))
@@ -148,6 +166,11 @@ function applyEvent(
       const entity = entities.get(participantId)
       const anchor = anchors[index % anchors.length]
       if (entity !== undefined && anchor !== undefined) {
+        settleAtTarget(entity)
+        entity.visualState = {
+          ...entity.visualState,
+          activeMeetingId: event.correlationId ?? event.id,
+        }
         moveEntity(entity, anchor, 'meeting', '前往协作会议', scene.navigation, event, cues)
       }
     }
@@ -156,8 +179,13 @@ function applyEvent(
   }
 
   if (event.type === 'meeting.finished') {
+    const participants = new Set(stringArrayValue(event.payload, 'participantIds'))
+    const meetingId = event.correlationId
     for (const entity of entities.values()) {
-      if (entity.activity !== 'meeting') continue
+      const activeMeetingId = entity.visualState['activeMeetingId']
+      if (!participants.has(entity.id) && (typeof activeMeetingId !== 'string' || activeMeetingId !== meetingId)) continue
+      settleAtTarget(entity)
+      delete entity.visualState['activeMeetingId']
       const anchor = chooseWorkAnchor(scene.anchors, entity.id)
       moveEntity(entity, anchor, 'idle', '会议结束，返回工位', scene.navigation, event, cues)
     }
@@ -165,65 +193,10 @@ function applyEvent(
     return
   }
 
-  if (event.type === 'world.interaction.requested') {
-    const targetId = textValue(event.payload, 'entityId')
-    const objectId = textValue(event.payload, 'objectId')
-    const entity = targetId === undefined ? undefined : entities.get(targetId)
-    const interactable = objectId === undefined
-      ? undefined
-      : scene.interactables.find((candidate) => candidate.id === objectId)
-    const anchorId = interactable?.approachAnchorIds[0]
-    if (entity !== undefined && interactable !== undefined && anchorId !== undefined) {
-      moveEntity(
-        entity,
-        getAnchor(scene, anchorId),
-        'walking',
-        `前往${interactable.displayName}`,
-        scene.navigation,
-        event,
-        cues,
-      )
-    }
-  }
-
-  if (event.type === 'world.interaction.completed') {
-    const targetIds = [
-      textValue(event.payload, 'entityId'),
-      ...stringArrayValue(event.payload, 'participantIds'),
-    ].filter((value): value is string => value !== undefined && value !== '')
-    const action = textValue(event.payload, 'action')
-    for (const targetId of targetIds) {
-      const target = entities.get(targetId)
-      if (target?.targetPosition === undefined) continue
-      target.position = { ...target.targetPosition }
-      if (target.targetAnchorId === undefined) delete target.anchorId
-      else target.anchorId = target.targetAnchorId
-      delete target.targetPosition
-      delete target.targetAnchorId
-      target.route = []
-      target.activity = action === 'start-meeting'
-        ? 'meeting'
-        : action === 'assign-task' || action === 'use-object'
-          ? 'working'
-          : action === 'talk'
-            ? 'talking'
-            : 'idle'
-      target.activityLabel = action === 'start-meeting'
-        ? '正在协作会议'
-        : action === 'assign-task'
-          ? '正在执行新任务'
-          : action === 'use-object'
-            ? '正在使用场景设施'
-            : action === 'talk'
-              ? '正在与你对话'
-              : '已到达目标位置'
-      target.updatedAt = event.createdAt
-    }
-  }
-
   if (employeeId === undefined) return
   const entity = entities.get(employeeId)
   if (entity === undefined) return
+  if (event.type === 'task.completed' || event.type === 'task.blocked') settleAtTarget(entity)
   if (activity !== undefined) {
     entity.activity = activity
     entity.activityLabel = activityLabel(event.type)
@@ -248,6 +221,16 @@ function applyEvent(
     }, entity.id))
   }
   entity.visualState = { ...entity.visualState, lastEventType: event.type, projectedAt: now }
+}
+
+function settleAtTarget(entity: WorldRuntimeEntityState): void {
+  if (entity.targetPosition === undefined) return
+  entity.position = { ...entity.targetPosition }
+  if (entity.targetAnchorId === undefined) delete entity.anchorId
+  else entity.anchorId = entity.targetAnchorId
+  delete entity.targetPosition
+  delete entity.targetAnchorId
+  entity.route = []
 }
 
 function moveEntity(
@@ -279,6 +262,7 @@ function createEmployeeEntity(
   employee: EmployeeInstance,
   sceneId: string,
   anchor: WorldThemeAnchorManifest,
+  placementIndex: number,
 ): WorldRuntimeEntityState {
   return {
     id: employee.id,
@@ -288,7 +272,7 @@ function createEmployeeEntity(
     displayName: employee.displayName,
     role: employee.role,
     anchorId: anchor.id,
-    position: { ...anchor.position },
+    position: placementAtAnchor(anchor, placementIndex),
     footOffset: { x: 0, y: 112 },
     facing: anchor.facing,
     activity: employee.status === 'blocked' ? 'blocked' : employee.status === 'working' ? 'working' : 'idle',
@@ -297,6 +281,18 @@ function createEmployeeEntity(
     route: [],
     visualState: { rosterIndex: 0 },
     updatedAt: employee.updatedAt,
+  }
+}
+
+function placementAtAnchor(anchor: WorldThemeAnchorManifest, index: number): WorldPoint {
+  const capacity = Math.max(1, anchor.capacity)
+  const slot = index % capacity
+  const columns = Math.min(capacity, 3)
+  const column = slot % columns
+  const row = Math.floor(slot / columns)
+  return {
+    x: anchor.position.x + (column - (columns - 1) / 2) * 72,
+    y: anchor.position.y + row * 38,
   }
 }
 

@@ -2166,17 +2166,11 @@ export class SqliteStore {
       : parseJson<WorldRuntimeSnapshot>(row.snapshot_json)
   }
 
-  saveWorldRuntimeSnapshot(
-    snapshot: WorldRuntimeSnapshot,
-    manifest?: WorldThemeManifestV1,
-  ): WorldRuntimeSnapshot {
+  saveWorldRuntimeSnapshot(snapshot: WorldRuntimeSnapshot): WorldRuntimeSnapshot {
     this.#assertWritable()
     const world = this.#requireWorld(snapshot.worldId)
     if (world.workspaceId !== snapshot.workspaceId) {
       throw new PersistenceError('World runtime snapshot workspace does not match its world')
-    }
-    if (manifest !== undefined && manifest.id !== snapshot.themeId) {
-      throw new PersistenceError('World runtime snapshot theme does not match the manifest')
     }
     const updatedAt = this.#clock()
     return this.#transaction(() => {
@@ -2240,28 +2234,6 @@ export class SqliteStore {
         )
       }
 
-      if (manifest !== undefined) {
-        this.database
-          .prepare(
-            `INSERT INTO world_theme_bindings
-             (world_id, theme_id, theme_version, status, manifest_json, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?)
-             ON CONFLICT (world_id) DO UPDATE SET
-               theme_id = excluded.theme_id,
-               theme_version = excluded.theme_version,
-               status = excluded.status,
-               manifest_json = excluded.manifest_json,
-               updated_at = excluded.updated_at`,
-          )
-          .run(
-            snapshot.worldId,
-            manifest.id,
-            manifest.version,
-            'active',
-            stringifyJson(manifest as unknown as JsonValue),
-            updatedAt,
-          )
-      }
       return snapshot
     })
   }
@@ -2293,6 +2265,53 @@ export class SqliteStore {
       manifest: parseJson<WorldThemeManifestV1>(row.manifest_json),
       updatedAt: String(row.updated_at),
     }
+  }
+
+  bindWorldTheme(worldId: string, manifest: WorldThemeManifestV1): WorldThemeBinding {
+    this.#assertWritable()
+    const world = this.#requireWorld(worldId)
+    if (!themeTemplateMatches(world.templateId, manifest.templateId)) {
+      throw new PersistenceError('World theme is not compatible with this world')
+    }
+    const updatedAt = this.#clock()
+    this.#transaction(() => {
+      this.database
+        .prepare(
+          `INSERT INTO world_theme_bindings
+           (world_id, theme_id, theme_version, status, manifest_json, updated_at)
+           VALUES (?, ?, ?, 'active', ?, ?)
+           ON CONFLICT (world_id) DO UPDATE SET
+             theme_id = excluded.theme_id,
+             theme_version = excluded.theme_version,
+             status = 'active',
+             manifest_json = excluded.manifest_json,
+             updated_at = excluded.updated_at`,
+        )
+        .run(worldId, manifest.id, manifest.version, stringifyJson(manifest as unknown as JsonValue), updatedAt)
+      this.clearWorldRuntimeProjection(worldId)
+    })
+    return this.getWorldThemeBinding(worldId)!
+  }
+
+  disableWorldTheme(worldId: string): WorldThemeBinding | undefined {
+    this.#assertWritable()
+    this.#requireWorld(worldId)
+    const updatedAt = this.#clock()
+    this.#transaction(() => {
+      this.database
+        .prepare("UPDATE world_theme_bindings SET status = 'disabled', updated_at = ? WHERE world_id = ?")
+        .run(updatedAt, worldId)
+      this.clearWorldRuntimeProjection(worldId)
+    })
+    return this.getWorldThemeBinding(worldId)
+  }
+
+  clearWorldRuntimeProjection(worldId: string): void {
+    this.#assertWritable()
+    this.#requireWorld(worldId)
+    this.database.prepare('DELETE FROM world_runtime_snapshots WHERE world_id = ?').run(worldId)
+    this.database.prepare('DELETE FROM world_entity_states WHERE world_id = ?').run(worldId)
+    this.database.prepare('DELETE FROM world_object_states WHERE world_id = ?').run(worldId)
   }
 
   async backup(destinationPath: string): Promise<string> {
@@ -2835,6 +2854,12 @@ function countRows(database: DatabaseSync, table: string): number {
   } catch {
     return 0
   }
+}
+
+function themeTemplateMatches(worldTemplateId: string, themeTemplateId: string): boolean {
+  if (worldTemplateId === themeTemplateId) return true
+  return new Set([worldTemplateId, themeTemplateId]).size === 2 &&
+    [worldTemplateId, themeTemplateId].every((value) => value === 'company' || value === 'cyber-company')
 }
 
 async function fileExists(filePath: string): Promise<boolean> {

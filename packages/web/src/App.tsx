@@ -102,6 +102,8 @@ export default function App() {
   const [loading, setLoading] = useState(!demoMode)
   const [error, setError] = useState<string | undefined>()
   const [appMode, setAppMode] = useState<AppMode>(worldRuntimeV2Enabled ? 'world' : 'workbench')
+  const [worldRuntimeAvailable, setWorldRuntimeAvailable] = useState(demoMode)
+  const [worldRuntimeRevision, setWorldRuntimeRevision] = useState(0)
 
   const activeSession = sessions.find((session) => session.id === activeSessionId)
   const experience = activeWorld === undefined ? undefined : worldExperience(activeWorld)
@@ -109,7 +111,7 @@ export default function App() {
   const managingEmployee = employees.find((employee) => employee.id === managingEmployeeId)
   const managingDossier = managingEmployeeId === undefined ? undefined : dossiers[managingEmployeeId]
   const managingRevision = managingDossier?.revisions.find((revision) => revision.revision === managingEmployee?.currentRevision)
-  const supportsWorldRuntime = worldRuntimeV2Enabled && activeWorld?.templateId.includes('company') === true
+  const supportsWorldRuntime = worldRuntimeV2Enabled && worldRuntimeAvailable
 
   const loadWorld = useCallback(async (world: World) => {
     setError(undefined)
@@ -120,9 +122,10 @@ export default function App() {
     setDraft('')
     setSelectedEmployeeId(undefined)
     setDockTab('world')
-    setAppMode(worldRuntimeV2Enabled && world.templateId.includes('company') ? 'world' : 'workbench')
     if (demoMode) {
       const isCompany = world.id === demoData.activeWorld.id
+      setWorldRuntimeAvailable(isCompany)
+      setAppMode(worldRuntimeV2Enabled && isCompany ? 'world' : 'workbench')
       const nextEmployees = isCompany ? demoData.employees : demoTavernEmployees
       const nextSessions = isCompany ? demoData.sessions : demoTavernSessions
       const nextMessages = isCompany ? demoData.messages : demoTavernMessages
@@ -133,7 +136,12 @@ export default function App() {
       setActiveSessionId(nextSessions[0]?.id)
       return
     }
-    const snapshot = await api<WorldSnapshot>(`/api/worlds/${world.id}/snapshot`)
+    const [snapshot, capability] = await Promise.all([
+      api<WorldSnapshot>(`/api/worlds/${world.id}/snapshot`),
+      api<{ supported: boolean }>(`/api/worlds/${world.id}/runtime-capability`),
+    ])
+    setWorldRuntimeAvailable(capability.supported)
+    setAppMode(worldRuntimeV2Enabled && capability.supported ? 'world' : 'workbench')
     const dossierResults = await Promise.all(snapshot.employees.map(async (employee) => {
       try {
         return await api<EmployeeDossier>(`/api/employees/${employee.id}/dossier`)
@@ -149,6 +157,23 @@ export default function App() {
     setEmployees(snapshot.employees.map((employee, index) => toCyberEmployee(employee, index, nextDossiers[employee.id])))
     setSessions(snapshot.openSessions)
   }, [])
+
+  const bindWorldTheme = useCallback(async (packageId: string) => {
+    if (activeWorld === undefined) throw new Error('世界尚未就绪')
+    if (demoMode) {
+      setWorldRuntimeAvailable(true)
+      setAppMode('world')
+      setWorldRuntimeRevision((value) => value + 1)
+      return
+    }
+    await api(`/api/worlds/${encodeURIComponent(activeWorld.id)}/theme-binding`, {
+      method: 'PUT',
+      body: JSON.stringify({ action: 'bind', packageId }),
+    })
+    setWorldRuntimeAvailable(true)
+    setAppMode('world')
+    setWorldRuntimeRevision((value) => value + 1)
+  }, [activeWorld])
 
   useEffect(() => {
     if (demoMode) return
@@ -783,6 +808,7 @@ export default function App() {
             onCreateWorld={() => setError('世界创建向导将在主题市场阶段开放。')}
           />
           <WorldMode
+            key={`${activeWorld.id}:${worldRuntimeRevision}`}
             demoMode={demoMode}
             world={activeWorld}
             {...(activeSession === undefined ? {} : { session: activeSession })}
@@ -905,6 +931,7 @@ export default function App() {
           onSearch={searchMarketplace}
           onPreviewMarketplace={previewMarketplacePackage}
           onInstallMarketplace={installMarketplacePackage}
+          onBindTheme={bindWorldTheme}
         />
       ) : null}
       {managingEmployee !== undefined ? (

@@ -6,8 +6,9 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import type { CyberPackageManifest, InstalledPackage } from '@dsh-cyber/contracts'
+import { cyberCompanyTheme } from '@dsh-cyber/world-runtime'
 
-import { applyInstalledPromptTransforms, loadInstalledBlueprints } from '../src/installed-package-runtime.js'
+import { applyInstalledPromptTransforms, loadInstalledBlueprints, loadInstalledWorldThemes } from '../src/installed-package-runtime.js'
 
 describe('installed package entrypoints', () => {
   it('applies an installed command plugin to the runtime prompt', async () => {
@@ -45,6 +46,24 @@ describe('installed package entrypoints', () => {
       entrypoints: [{ id: 'archivist', kind: 'employee-blueprint', path: 'blueprint.json' }],
     })
     await expect(loadInstalledBlueprints([installed])).resolves.toEqual([blueprint])
+  })
+
+  it('rejects undeclared traversal assets and tampered installed theme files', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-cyber-theme-'))
+    const unsafeTheme = structuredClone(cyberCompanyTheme)
+    unsafeTheme.assets[0]!.src = '../outside.png'
+    const content = `${JSON.stringify(unsafeTheme)}\n`
+    await writeFile(join(root, 'theme.json'), content, 'utf8')
+    const installed = packageRecord(root, {
+      id: 'test-theme',
+      kind: 'world-theme',
+      files: [{ path: 'theme.json', sha256: createHash('sha256').update(content).digest('hex') }],
+      entrypoints: [{ id: 'theme', kind: 'world-theme', path: 'theme.json' }],
+    })
+    await expect(loadInstalledWorldThemes([installed])).rejects.toThrow('not a declared package file')
+
+    await writeFile(join(root, 'theme.json'), `${content}tampered`, 'utf8')
+    await expect(loadInstalledWorldThemes([installed])).rejects.toThrow('hash mismatch')
   })
 })
 

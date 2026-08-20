@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "templateId": "cyber-company",
   "displayName": "赛博公司 · 夜班总部",
-  "renderer": "pixi-v8",
+  "renderer": "pixi-2d",
   "terminology": {
     "world": "公司",
     "participant": "员工",
@@ -14,14 +14,14 @@
   "assets": [
     {
       "id": "cyber-office-background",
-      "src": "/assets/cyber-office-world.png",
+      "src": "assets/cyber-office-world.png",
       "kind": "image",
       "preload": true,
       "pixelArt": true
     },
     {
       "id": "cyber-employee-roster",
-      "src": "/assets/employee-roster-transparent.png",
+      "src": "assets/employee-roster-transparent.png",
       "kind": "spritesheet",
       "preload": true,
       "pixelArt": false
@@ -230,6 +230,15 @@
           "category": "delivery",
           "position": {
             "x": 730,
+            "y": 560
+          },
+          "zIndex": 120
+        },
+        {
+          "id": "growth-promotion",
+          "category": "promotion",
+          "position": {
+            "x": 780,
             "y": 560
           },
           "zIndex": 120

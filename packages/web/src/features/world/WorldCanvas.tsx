@@ -1,7 +1,13 @@
 import { useEffect, useRef } from 'react'
-import type { WorldCue, WorldRuntimeSnapshot, WorldThemeManifestV1 } from '@dsh-cyber/contracts'
+import type {
+  WorldCue,
+  WorldRenderer,
+  WorldRuntimeSnapshot,
+  WorldThemeManifestV1,
+  WorldZoomCommand,
+} from '@dsh-cyber/contracts'
 
-import { PixiWorldRenderer } from './renderer/pixi-world-renderer.js'
+import { createWorldRendererRegistry } from './renderer/renderer-registry.js'
 
 interface WorldCanvasProps {
   manifest: WorldThemeManifestV1
@@ -10,7 +16,7 @@ interface WorldCanvasProps {
   selectedEntityId?: string
   selectedObjectId?: string
   fitRequest: number
-  zoomRequest: number
+  zoomCommand?: WorldZoomCommand
   onEntitySelect(entityId: string): void
   onObjectSelect(objectId: string): void
   onReady(metrics: { initializationMs: number; assetBytesEstimate: number }): void
@@ -23,20 +29,21 @@ export function WorldCanvas({
   selectedEntityId,
   selectedObjectId,
   fitRequest,
-  zoomRequest,
+  zoomCommand,
   onEntitySelect,
   onObjectSelect,
   onReady,
 }: WorldCanvasProps) {
   const hostRef = useRef<HTMLDivElement>(null)
-  const rendererRef = useRef<PixiWorldRenderer | undefined>(undefined)
+  const rendererRef = useRef<WorldRenderer<HTMLElement> | undefined>(undefined)
   const appliedCueIds = useRef(new Set<string>())
   const mountedKey = `${manifest.id}:${manifest.version}:${snapshot.sceneId}`
 
   useEffect(() => {
     const host = hostRef.current
     if (host === null) return
-    const renderer = new PixiWorldRenderer({ onEntitySelect, onObjectSelect, onReady })
+    const registry = createWorldRendererRegistry()
+    const renderer = registry.create(manifest.renderer, { onEntitySelect, onObjectSelect, onReady })
     rendererRef.current = renderer
     let cancelled = false
     void renderer.mount(host, manifest, snapshot).catch((cause: unknown) => {
@@ -63,7 +70,9 @@ export function WorldCanvas({
   useEffect(() => rendererRef.current?.selectEntity(selectedEntityId), [selectedEntityId])
   useEffect(() => rendererRef.current?.selectObject(selectedObjectId), [selectedObjectId])
   useEffect(() => { if (fitRequest > 0) rendererRef.current?.fitScene() }, [fitRequest])
-  useEffect(() => { if (zoomRequest !== 0) rendererRef.current?.zoomBy(zoomRequest) }, [zoomRequest])
+  useEffect(() => {
+    if (zoomCommand !== undefined) rendererRef.current?.zoomBy(zoomCommand.delta)
+  }, [zoomCommand?.id])
 
   return <div ref={hostRef} className="world-canvas-host" aria-label="互动世界画布" />
 }

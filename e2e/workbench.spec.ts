@@ -34,6 +34,9 @@ test('onboards, recruits, talks, browses dossiers and previews a real workspace 
   await expect(page.getByRole('textbox')).toHaveCount(0)
   await page.getByRole('button', { name: '创建本地工作区' }).click()
 
+  await expect(page.getByRole('main', { name: /赛博公司互动世界/ })).toBeVisible()
+  await expect(page.locator('.world-runtime-canvas')).toBeVisible()
+  await page.getByRole('button', { name: '工作台', exact: true }).click()
   await expect(page.getByRole('heading', { name: '公司还没有员工' })).toBeVisible()
   const composer = page.getByRole('textbox', { name: '给当前世界的员工发送消息' })
   await expect(composer).toBeDisabled()
@@ -74,6 +77,116 @@ test('onboards, recruits, talks, browses dossiers and previews a real workspace 
   await expect(page.locator('.workbench-shell')).toBeVisible()
 })
 
+test('runs the real World Mode task, meeting, growth, persistence, and reconnect lifecycle', async ({ page }) => {
+  await page.goto(origin)
+  await expect(page.getByRole('main', { name: /互动世界/ })).toBeVisible()
+  await expect(page.locator('.world-runtime-canvas')).toBeVisible()
+
+  await page.getByRole('button', { name: /临时雇佣/ }).click()
+  const market = page.getByRole('dialog', { name: '员工市场' })
+  await market.getByRole('button', { name: /秘书 v1/ }).click()
+  await market.getByRole('textbox', { name: '员工称呼（可选）' }).fill('小周')
+  await market.getByRole('button', { name: '确认招聘' }).click()
+  await expect(market).toBeHidden()
+
+  const snapshotResponse = await fetch(`${origin}/api/workspaces`)
+  const workspaces = await snapshotResponse.json() as { items: Array<{ id: string }> }
+  const workspaceSnapshot = await (await fetch(`${origin}/api/workspaces/${workspaces.items[0]!.id}/snapshot`)).json() as { worlds: Array<{ id: string }> }
+  const worldId = workspaceSnapshot.worlds[0]!.id
+  const worldSnapshot = await (await fetch(`${origin}/api/worlds/${worldId}/snapshot`)).json() as { employees: Array<{ id: string; displayName: string }> }
+  const engineer = worldSnapshot.employees.find((employee) => employee.displayName === '阿帆')!
+  const product = worldSnapshot.employees.find((employee) => employee.displayName === '小周')!
+
+  const taskStartedBeforeIntent = server.store.listWorldDomainEvents(worldId).filter((event) => event.type === 'task.started').length
+  await clickWorldEntity(page, worldId, engineer.id)
+  const employeeMenu = page.getByRole('complementary', { name: '阿帆情境操作' })
+  await expect(employeeMenu).toBeVisible()
+  await employeeMenu.getByRole('button', { name: /安排任务/ }).click()
+  const drawer = page.locator('.world-chat-drawer')
+  await expect(drawer).toHaveClass(/is-open/)
+  expect(server.store.getEmployee(engineer.id)?.status).toBe('available')
+  expect(server.store.listWorldDomainEvents(worldId).filter((event) => event.type === 'task.started')).toHaveLength(taskStartedBeforeIntent)
+  await drawer.getByRole('button', { name: '关闭任务频道' }).click()
+  expect(server.store.getEmployee(engineer.id)?.status).toBe('available')
+
+  const taskCompletedBeforeSubmit = server.store.listWorldDomainEvents(worldId).filter((event) => event.type === 'task.completed').length
+  await clickWorldEntity(page, worldId, engineer.id)
+  await page.getByRole('complementary', { name: '阿帆情境操作' }).getByRole('button', { name: /安排任务/ }).click()
+  const composer = drawer.getByRole('textbox', { name: '给当前世界的员工发送消息' })
+  await composer.fill('@阿帆 任务：实现可恢复的世界状态')
+  await drawer.getByRole('button', { name: '发送' }).click()
+  await expect(drawer.getByText('我先建立性能基线。')).toBeVisible()
+  await expect.poll(() => server.store.listWorldDomainEvents(worldId).filter((event) => event.type === 'task.completed').length).toBeGreaterThan(taskCompletedBeforeSubmit)
+  const taskEvents = server.store.listWorldDomainEvents(worldId)
+  expect(taskEvents.filter((event) => event.type === 'task.started').length).toBeGreaterThan(taskStartedBeforeIntent)
+  expect(server.store.getEmployee(engineer.id)?.status).toBe('available')
+  await drawer.getByRole('button', { name: '关闭任务频道' }).click()
+
+  const meetingStartedBefore = server.store.listWorldDomainEvents(worldId).filter((event) => event.type === 'meeting.started').length
+  await clickWorldEntity(page, worldId, engineer.id)
+  await page.getByRole('complementary', { name: '阿帆情境操作' }).getByRole('button', { name: /邀请协助/ }).click()
+  expect(server.store.listWorldDomainEvents(worldId).filter((event) => event.type === 'meeting.started')).toHaveLength(meetingStartedBefore)
+  await drawer.getByRole('button', { name: '发送' }).click()
+  await expect.poll(() => server.store.listWorldDomainEvents(worldId).filter((event) => event.type === 'meeting.finished').length).toBeGreaterThan(0)
+  const meetingEvents = server.store.listWorldDomainEvents(worldId).filter((event) => event.type === 'meeting.started')
+  expect(meetingEvents).toHaveLength(meetingStartedBefore + 1)
+  const latestMeeting = meetingEvents.at(-1)!
+  expect(latestMeeting.payload.participantIds).toEqual([engineer.id, product.id])
+  const groupSession = server.store.listSessions(worldId).find((session) => session.kind === 'group')!
+  expect(server.store.listMessages(groupSession.id).filter((message) => message.kind === 'assistant').map((message) => message.senderId)).toEqual([engineer.id, product.id])
+
+  const evidenceEvent = server.store.listWorldDomainEvents(worldId).find((event) => event.type === 'task.completed')!
+  for (const category of ['skill', 'delivery', 'promotion'] as const) {
+    server.store.appendEmployeeMilestone({
+      employeeId: engineer.id,
+      category,
+      title: `${category} 里程碑`,
+      summary: '由真实任务交付与事件证据生成。',
+      sourceEventIds: [evidenceEvent.id],
+    })
+  }
+
+  await drawer.getByRole('button', { name: '关闭任务频道' }).click()
+  const lightButton = page.getByRole('button', { name: '关闭场景照明' })
+  await lightButton.click()
+  await expect(page.getByRole('button', { name: '打开场景照明' })).toBeVisible()
+  const beforeRestart = await (await fetch(`${origin}/api/worlds/${worldId}/runtime-snapshot`)).json() as { entities: unknown[]; growthSlots: Record<string, string[]>; clock: { lightsOn: boolean } }
+  expect(beforeRestart.clock.lightsOn).toBe(false)
+  expect(beforeRestart.growthSlots.skill).toHaveLength(1)
+  expect(beforeRestart.growthSlots.delivery).toHaveLength(1)
+  expect(beforeRestart.growthSlots.promotion).toHaveLength(1)
+  const eventCountBeforeReload = server.store.listWorldDomainEvents(worldId).length
+  await page.reload()
+  await expect(page.locator('.world-runtime-canvas')).toBeVisible()
+  expect(server.store.listWorldDomainEvents(worldId)).toHaveLength(eventCountBeforeReload)
+
+  await server.close()
+  server = await createCyberServer({
+    stateRoot,
+    workspacePath: process.cwd(),
+    webRoot: join(process.cwd(), 'packages', 'web', 'dist'),
+    port: 0,
+    runtime: new BrowserRuntime(),
+  })
+  origin = (await server.start()).origin
+  await page.goto(origin)
+  await expect(page.locator('.world-runtime-canvas')).toBeVisible()
+  await expect(page.getByRole('button', { name: '打开场景照明' })).toBeVisible()
+  const afterRestart = await (await fetch(`${origin}/api/worlds/${worldId}/runtime-snapshot`)).json() as typeof beforeRestart
+  expect(afterRestart.entities).toEqual(beforeRestart.entities)
+  expect(afterRestart.growthSlots).toEqual(beforeRestart.growthSlots)
+
+  await page.getByRole('button', { name: '工作台', exact: true }).click()
+  await expect(page.locator('.workbench-shell')).toBeVisible()
+  await page.getByRole('region', { name: '当前世界的会话' }).getByRole('button').first().click()
+  await expect(page.getByText('我先建立性能基线。').first()).toBeVisible()
+  const dock = page.getByRole('region', { name: '产物与世界侧边栏' })
+  await dock.getByRole('button', { name: '档案', exact: true }).click()
+  await expect(dock.getByText('全员数字档案')).toBeVisible()
+  await dock.getByRole('button', { name: '文件', exact: true }).click()
+  await expect(dock.getByText('工作区根目录')).toBeVisible()
+})
+
 test('keeps the workbench readable and the world viewport filled on a 4K display', async ({ page }) => {
   await page.setViewportSize({ width: 3_840, height: 2_160 })
   await page.goto(origin)
@@ -81,27 +194,31 @@ test('keeps the workbench readable and the world viewport filled on a 4K display
   if (await onboarding.isVisible()) {
     await page.getByRole('button', { name: '创建本地工作区' }).click()
   }
+  await page.getByRole('button', { name: '工作台', exact: true }).click()
   const dock = page.getByRole('region', { name: '产物与世界侧边栏' })
-  await dock.getByRole('button', { name: '世界', exact: true }).click()
 
   const left = await page.locator('.left-pane').boundingBox()
   const center = await page.locator('.center-pane').boundingBox()
   const right = await page.locator('.right-pane').boundingBox()
-  const stage = await page.locator('.world-stage').boundingBox()
-  const canvas = await page.locator('.world-canvas').boundingBox()
 
   expect(left?.width ?? 0).toBeGreaterThan(330)
   expect(center?.width ?? 0).toBeGreaterThan(1_200)
   expect(right?.width ?? 0).toBeGreaterThan(700)
-  expect(Math.abs((stage?.height ?? 0) - (canvas?.height ?? 0))).toBeLessThan(3)
-  expect(stage?.height ?? 0).toBeGreaterThan((right?.height ?? 0) * 0.8)
-  expect(stage?.width ?? 0).toBeGreaterThan(700)
   await expect(dock.locator('.world-activity-rail')).toHaveCount(0)
   await expect(page.getByRole('textbox', { name: '给当前世界的员工发送消息' })).toHaveCount(1)
+
+  await page.getByLabel('主视图').getByRole('button', { name: '世界', exact: true }).click()
+  const stage = await page.locator('.world-runtime').boundingBox()
+  const canvas = await page.locator('.world-canvas-host').boundingBox()
+  expect(Math.abs((stage?.height ?? 0) - (canvas?.height ?? 0))).toBeLessThan(3)
+  expect(stage?.height ?? 0).toBeGreaterThan((right?.height ?? 0) * 0.8)
+  expect(stage?.width ?? 0).toBeGreaterThan(2_800)
+  await expect(page.locator('.world-runtime-canvas')).toBeVisible()
 })
 
 test('opens the dossier as an all-employee information directory', async ({ page }) => {
   await page.goto(`${origin}?demo=1`)
+  await page.getByRole('button', { name: '工作台', exact: true }).click()
   const dock = page.getByRole('region', { name: '产物与世界侧边栏' })
   await dock.getByRole('button', { name: '档案', exact: true }).click()
 
@@ -115,6 +232,19 @@ test('opens the dossier as an all-employee information directory', async ({ page
   await expect(dock.getByText('32', { exact: true })).toBeVisible()
 })
 
+async function clickWorldEntity(page: import('@playwright/test').Page, worldId: string, entityId: string): Promise<void> {
+  const snapshot = await fetch(`${origin}/api/worlds/${worldId}/snapshot`).then((response) => response.json()) as {
+    employees: Array<{ id: string; displayName: string }>
+  }
+  const employee = snapshot.employees.find((item) => item.id === entityId)
+  if (employee === undefined) throw new Error('World employee is not available for interaction')
+  await page.getByRole('region', { name: /员工（当前世界）/ })
+    .getByRole('button')
+    .filter({ hasText: employee.displayName })
+    .first()
+    .click()
+}
+
 class BrowserRuntime implements AgentRuntimePort {
   async runTurn(request: AgentTurnRequest) {
     const agentSessionId = request.agent.agentSessionId ?? `agent-${request.agent.id}`
@@ -126,7 +256,10 @@ class BrowserRuntime implements AgentRuntimePort {
       { kind: 'assistant.message', sourceSequence: 5, content: '我先建立性能基线。' },
       { kind: 'turn.completed', sourceSequence: 6 },
     ] as const
-    for (const event of events) request.onEvent?.({ ...event, source: 'browser-e2e', sourceSessionId: agentSessionId, metadata: {} })
+    for (const event of events) {
+      request.onEvent?.({ ...event, source: 'browser-e2e', sourceSessionId: agentSessionId, metadata: {} })
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 20))
+    }
     return { agentSessionId, finalResponse: '我先建立性能基线。', eventCount: events.length }
   }
 

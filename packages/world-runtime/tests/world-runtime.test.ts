@@ -160,4 +160,60 @@ describe('world projector', () => {
     expect(replay.cues).toEqual([])
     expect(replay.snapshot.sequence).toBe(1)
   })
+
+  it('keeps semantic and visual movement state separate until a real task completes', () => {
+    const started = projectWorldRuntime({
+      workspaceId: 'workspace-1',
+      world,
+      employees: [{ ...employees[0]!, status: 'working' }],
+      manifest: cyberCompanyTheme,
+      events: [event(1, 'task.started', { employeeId: 'employee-architect' })],
+    })
+    const moving = started.snapshot.entities.find((entity) => entity.id === 'employee-architect')!
+    expect(moving.targetPosition).toBeDefined()
+    expect(moving.position).not.toEqual(moving.targetPosition)
+    expect(started.cues).toContainEqual(expect.objectContaining({ kind: 'entity.route', entityId: moving.id }))
+
+    const completed = projectWorldRuntime({
+      workspaceId: 'workspace-1',
+      world,
+      employees: [{ ...employees[0]!, status: 'available' }],
+      manifest: cyberCompanyTheme,
+      previous: started.snapshot,
+      events: [event(2, 'task.completed', { employeeId: 'employee-architect' })],
+    })
+    const settled = completed.snapshot.entities.find((entity) => entity.id === 'employee-architect')!
+    expect(settled.targetPosition).toBeUndefined()
+    expect(settled.anchorId).toBeDefined()
+    expect(settled.activity).toBe('idle')
+  })
+
+  it('keeps participant turns at the meeting table until the meeting finishes', () => {
+    const meeting = projectWorldRuntime({
+      workspaceId: 'workspace-1',
+      world,
+      employees,
+      manifest: cyberCompanyTheme,
+      events: [
+        event(1, 'meeting.started', { participantIds: employees.map((employee) => employee.id) }),
+        event(2, 'task.started', { employeeId: 'employee-architect' }),
+        event(3, 'turn.started', { employeeId: 'employee-architect' }),
+      ],
+    })
+    const participant = meeting.snapshot.entities.find((entity) => entity.id === 'employee-architect')!
+    expect(participant.targetAnchorId).toMatch(/^meeting-/)
+    expect(participant.visualState['activeMeetingId']).toBe('event-1')
+
+    const finished = projectWorldRuntime({
+      workspaceId: 'workspace-1',
+      world,
+      employees,
+      manifest: cyberCompanyTheme,
+      previous: meeting.snapshot,
+      events: [event(4, 'meeting.finished', { participantIds: employees.map((employee) => employee.id) })],
+    })
+    const returning = finished.snapshot.entities.find((entity) => entity.id === 'employee-architect')!
+    expect(returning.targetAnchorId).toMatch(/^work-/)
+    expect(returning.visualState['activeMeetingId']).toBeUndefined()
+  })
 })

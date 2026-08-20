@@ -2,6 +2,8 @@ import type { EmployeeStatus, IsoTimestamp, JsonObject } from './index.js'
 
 export const WORLD_RUNTIME_CONTRACT_VERSION = 1 as const
 
+export type RendererKind = 'pixi-2d' | 'pixi-2.5d' | 'three-2.5d' | 'three-3d'
+
 export type WorldFacing = 'north' | 'east' | 'south' | 'west'
 
 export type WorldActivityKind =
@@ -146,8 +148,44 @@ export interface WorldInteractionRequest {
 export interface WorldInteractionResult {
   accepted: boolean
   eventId: string
+  status: 'pending' | 'completed'
   snapshot: WorldRuntimeSnapshot
   cues: WorldCue[]
+}
+
+export interface WorldRendererCallbacks {
+  onEntitySelect(entityId: string): void
+  onObjectSelect(objectId: string): void
+  onReady?(metrics: { initializationMs: number; assetBytesEstimate: number }): void
+}
+
+export interface WorldRenderer<Host = unknown> {
+  readonly kind: RendererKind
+  mount(host: Host, manifest: WorldThemeManifestV1, snapshot: WorldRuntimeSnapshot): Promise<void>
+  updateSnapshot(snapshot: WorldRuntimeSnapshot): void
+  applyCues(cues: WorldCue[]): void
+  selectEntity(entityId?: string): void
+  selectObject(objectId?: string): void
+  focusEntity(entityId: string): void
+  fitScene(): void
+  zoomBy(delta: number): void
+  getZoom(): number
+  destroy(): void
+}
+
+export type WorldRendererFactory<Host = unknown> = (
+  callbacks: WorldRendererCallbacks,
+) => WorldRenderer<Host>
+
+export interface RendererRegistry<Host = unknown> {
+  register(kind: RendererKind, factory: WorldRendererFactory<Host>): void
+  supports(kind: RendererKind): boolean
+  create(kind: RendererKind, callbacks: WorldRendererCallbacks): WorldRenderer<Host>
+}
+
+export interface WorldZoomCommand {
+  id: string
+  delta: 0.1 | -0.1
 }
 
 export interface WorldThemeAssetManifest {
@@ -206,6 +244,7 @@ export interface WorldThemeActorSetManifest {
   fallbackAssetId?: string
   frameWidth: number
   frameHeight: number
+  framesPerActor?: number
   scale: number
   footOffset: WorldPoint
   clips: Record<WorldActivityKind, Partial<Record<WorldFacing, number[]>>>
@@ -237,7 +276,7 @@ export interface WorldThemeManifestV1 {
   version: string
   templateId: string
   displayName: string
-  renderer: 'pixi-v8'
+  renderer: RendererKind
   terminology: JsonObject
   assets: WorldThemeAssetManifest[]
   actorSets: WorldThemeActorSetManifest[]
@@ -252,4 +291,14 @@ export interface WorldThemeBinding {
   status: 'active' | 'disabled'
   manifest: WorldThemeManifestV1
   updatedAt: IsoTimestamp
+}
+
+export interface WorldThemeOption {
+  themeId: string
+  version: string
+  displayName: string
+  templateId: string
+  source: 'built-in' | 'installed'
+  active: boolean
+  packageId?: string
 }

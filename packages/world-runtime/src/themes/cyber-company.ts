@@ -14,7 +14,7 @@ export const cyberCompanyTheme: WorldThemeManifestV1 = {
   version: '2.0.0',
   templateId: 'company',
   displayName: '赛博公司 · 夜班总部',
-  renderer: 'pixi-v8',
+  renderer: 'pixi-2d',
   terminology: {
     world: '公司',
     participant: '员工',

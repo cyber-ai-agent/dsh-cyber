@@ -318,6 +318,28 @@ describe('Cyber local server', () => {
     )
     expect(projected.body.objects).toHaveLength(4)
 
+    const taskIntent = await json(first.origin, `/api/worlds/${world.id}/interactions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'assign-task',
+        actorId: 'owner',
+        entityId: engineer.id,
+        objectId: 'workstation',
+      }),
+    })
+    expect(taskIntent.body.status).toBe('pending')
+    expect(taskIntent.body.snapshot.entities.find((item: { id: string }) => item.id === engineer.id).activity).toBe('idle')
+    const meetingIntent = await json(first.origin, `/api/worlds/${world.id}/interactions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'start-meeting', actorId: 'owner', participantIds: [engineer.id, archivist.id] }),
+    })
+    expect(meetingIntent.body.status).toBe('pending')
+    const intentEvents = first.server.store.listWorldDomainEvents(world.id).map((event) => event.type)
+    expect(intentEvents).not.toContain('task.started')
+    expect(intentEvents).not.toContain('meeting.started')
+
     const objectInteraction = await json(first.origin, `/api/worlds/${world.id}/interactions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -343,7 +365,7 @@ describe('Cyber local server', () => {
       worldRuntimeSnapshots: 1,
       worldEntityStates: 2,
       worldObjectStates: 4,
-      worldThemeBindings: 1,
+      worldThemeBindings: 0,
     })
 
     await first.server.close()
@@ -353,6 +375,43 @@ describe('Cyber local server', () => {
     expect(recovered.body.clock.lightsOn).toBe(false)
     expect(recovered.body.entities).toHaveLength(2)
     expect(recovered.body.sequence).toBeGreaterThan(projected.body.sequence)
+  })
+
+  it('resumes the world SSE stream with numeric sequence ids and no duplicate replay', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-world-sse-'))
+    const { origin } = await start(stateRoot, new FakeRuntime())
+    const { world } = await createWorld(origin)
+    await recruit(origin, world.id, 'cyber-company.software-engineer')
+    const initial = await json(origin, `/api/worlds/${world.id}/runtime-snapshot`)
+
+    const live = openWorldStream(origin, world.id, initial.body.sequence)
+    await live.connected
+    await live.waitFor((event) => event.event === 'ready')
+    await json(origin, `/api/worlds/${world.id}/interactions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'toggle-lights', actorId: 'owner' }),
+    })
+    const changed = await live.waitFor((event) => event.event === 'world-state' && event.data.sequence > initial.body.sequence)
+    expect(changed.id).toMatch(/^\d+$/)
+    const lastSequence = Number(changed.id)
+    live.close()
+
+    const resumed = openWorldStream(origin, world.id, 0, String(lastSequence))
+    await resumed.connected
+    await resumed.waitFor((event) => event.event === 'ready')
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 80))
+    expect(resumed.events.filter((event) => event.event === 'world-state')).toHaveLength(0)
+    resumed.close()
+
+    const stale = openWorldStream(origin, world.id, initial.body.sequence)
+    await stale.connected
+    const recovery = await stale.waitFor((event) => event.event === 'recovery-required')
+    const recoveredState = await stale.waitFor((event) => event.event === 'world-state')
+    expect(recovery.id).toBe(String(lastSequence))
+    expect(recoveredState.id).toBe(String(lastSequence))
+    expect(stale.events.filter((event) => event.event === 'world-state')).toHaveLength(1)
+    stale.close()
   })
 
   it('starts a world-scoped conversation after a theme switch and never leaks old @ roles', async () => {
@@ -589,7 +648,7 @@ describe('Cyber local server', () => {
   it('searches verified market packages and activates installed plugin and talent entrypoints', async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-marketplace-'))
     const runtime = new FakeRuntime()
-    const { origin } = await start(stateRoot, runtime, undefined, resolve('marketplace'))
+    const { origin, server } = await start(stateRoot, runtime, undefined, resolve('marketplace'))
     const { workspace, world } = await createWorld(origin)
     const engineer = await recruit(origin, world.id, 'cyber-company.software-engineer')
 
@@ -659,6 +718,50 @@ describe('Cyber local server', () => {
     )
     const archivist = await recruit(origin, world.id, 'official-archivist')
     expect(archivist.displayName).toBe('档案管理员')
+
+    const themePreview = await json(origin, `/api/workspaces/${workspace.id}/marketplace/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ packageId: 'official-cyber-nocturne', version: '1.0.0' }),
+    })
+    expect(themePreview.response.status).toBe(200)
+    const themeInstall = await json(origin, `/api/workspaces/${workspace.id}/marketplace/install`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        packageId: 'official-cyber-nocturne',
+        version: '1.0.0',
+        approvalToken: themePreview.body.preview.approvalToken,
+      }),
+    })
+    expect(themeInstall.response.status).toBe(201)
+    const themes = await json(origin, `/api/worlds/${world.id}/themes`)
+    expect(themes.body.items).toContainEqual(expect.objectContaining({
+      packageId: 'official-cyber-nocturne',
+      source: 'installed',
+      active: false,
+    }))
+    const bound = await json(origin, `/api/worlds/${world.id}/theme-binding`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'bind', packageId: 'official-cyber-nocturne' }),
+    })
+    expect(bound.response.status).toBe(200)
+    expect(bound.body.snapshot.themeId).toBe('official-cyber-nocturne')
+    const boundManifest = await json(origin, `/api/worlds/${world.id}/theme-manifest`)
+    expect(boundManifest.body.assets.every((asset: { src: string }) => asset.src.startsWith(`/api/worlds/${world.id}/theme-assets/`))).toBe(true)
+    const packageAsset = await fetch(`${origin}${boundManifest.body.assets[0].src}`)
+    expect(packageAsset.status).toBe(200)
+    expect(packageAsset.headers.get('content-type')).toBe('image/png')
+    expect(server.store.getWorldThemeBinding(world.id)).toMatchObject({ status: 'active', themeId: 'official-cyber-nocturne' })
+
+    const fallback = await json(origin, `/api/worlds/${world.id}/theme-binding`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'fallback' }),
+    })
+    expect(fallback.body.snapshot.themeId).toBe('dsh-cyber.company.nocturne')
+    expect(server.store.getWorldThemeBinding(world.id)?.status).toBe('disabled')
   })
 
   it('rejects DNS rebinding and cross-origin mutation requests', async () => {
@@ -692,7 +795,7 @@ describe('Cyber local server', () => {
     const verified = await json(origin, '/api/system/update/verify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ candidateRoot: resolve('.') }),
+      body: JSON.stringify({ candidateRoot: resolve('packages/harness-adapter') }),
     })
     expect(verified.response.status).toBe(201)
     expect(verified.body).toMatchObject({
@@ -845,6 +948,102 @@ function openRuntimeStream(origin: string, worldId: string): {
           timer: setTimeout(() => {
             waiters.splice(waiters.indexOf(waiter), 1)
             reject(new Error(`Timed out waiting for ${count} runtime events; received ${runtimeEvents.length}`))
+          }, 2_000),
+        }
+        waiters.push(waiter)
+      })
+    },
+    close() { request.destroy() },
+  }
+}
+
+interface TestSseEvent {
+  id?: string
+  event: string
+  data: any
+}
+
+function openWorldStream(origin: string, worldId: string, after: number, lastEventId?: string): {
+  connected: Promise<void>
+  events: TestSseEvent[]
+  waitFor(predicate: (event: TestSseEvent) => boolean): Promise<TestSseEvent>
+  close(): void
+} {
+  const target = new URL(origin)
+  const events: TestSseEvent[] = []
+  const waiters: Array<{
+    predicate: (event: TestSseEvent) => boolean
+    resolve(event: TestSseEvent): void
+    reject(error: Error): void
+    timer: ReturnType<typeof setTimeout>
+  }> = []
+  let buffer = ''
+  let resolveConnected!: () => void
+  let rejectConnected!: (error: Error) => void
+  const connected = new Promise<void>((resolvePromise, rejectPromise) => {
+    resolveConnected = resolvePromise
+    rejectConnected = rejectPromise
+  })
+  const headers: Record<string, string> = { Host: target.host }
+  if (lastEventId !== undefined) headers['Last-Event-ID'] = lastEventId
+  const request = httpRequest({
+    hostname: '127.0.0.1',
+    port: Number(target.port),
+    method: 'GET',
+    path: `/api/worlds/${encodeURIComponent(worldId)}/stream?after=${after}`,
+    headers,
+  }, (response) => {
+    resolveConnected()
+    response.setEncoding('utf8')
+    response.on('data', (chunk: string) => {
+      buffer += chunk.replaceAll('\r\n', '\n')
+      let boundary = buffer.indexOf('\n\n')
+      while (boundary >= 0) {
+        const block = buffer.slice(0, boundary)
+        buffer = buffer.slice(boundary + 2)
+        const eventName = /^event:\s*(.+)$/m.exec(block)?.[1]
+        const data = /^data:\s*(.+)$/m.exec(block)?.[1]
+        const id = /^id:\s*(.+)$/m.exec(block)?.[1]
+        if (eventName !== undefined && data !== undefined) {
+          const parsed: TestSseEvent = {
+            event: eventName,
+            data: JSON.parse(data),
+            ...(id === undefined ? {} : { id }),
+          }
+          events.push(parsed)
+          for (const waiter of [...waiters]) {
+            if (!waiter.predicate(parsed)) continue
+            clearTimeout(waiter.timer)
+            waiters.splice(waiters.indexOf(waiter), 1)
+            waiter.resolve(parsed)
+          }
+        }
+        boundary = buffer.indexOf('\n\n')
+      }
+    })
+  })
+  request.once('error', (error) => {
+    rejectConnected(error)
+    for (const waiter of waiters.splice(0)) {
+      clearTimeout(waiter.timer)
+      waiter.reject(error)
+    }
+  })
+  request.end()
+  return {
+    connected,
+    events,
+    waitFor(predicate) {
+      const current = events.find(predicate)
+      if (current !== undefined) return Promise.resolve(current)
+      return new Promise((resolvePromise, rejectPromise) => {
+        const waiter = {
+          predicate,
+          resolve: resolvePromise,
+          reject: rejectPromise,
+          timer: setTimeout(() => {
+            waiters.splice(waiters.indexOf(waiter), 1)
+            rejectPromise(new Error(`Timed out waiting for world SSE event; received ${events.map((event) => event.event).join(', ')}`))
           }, 2_000),
         }
         waiters.push(waiter)

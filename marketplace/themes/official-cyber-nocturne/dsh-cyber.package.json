@@ -14,7 +14,15 @@
   "files": [
     {
       "path": "theme.json",
-      "sha256": "5138785fd064a0b417b782ef26480df96c22b3f403c4c4f26dbe54d4ff8d6a52"
+      "sha256": "b8072276e65f2894995c82219c38d5d688658b5dcdaa13dbfdd9487d7982394a"
+    },
+    {
+      "path": "assets/cyber-office-world.png",
+      "sha256": "ec61b9717e48ae3936f44e927132aa55c0f08bb955f0a5b5580b873e1e6ed1cd"
+    },
+    {
+      "path": "assets/employee-roster-transparent.png",
+      "sha256": "daa0fb666ed00b763535c577d757db25df2a10d6afab8ef68ac41e90ded4e3c5"
     }
   ],
   "entrypoints": [
@@ -27,6 +35,6 @@
   "certification": {
     "authority": "DSH Cyber",
     "level": "official",
-    "contentSha256": "31d6bb523578dc1926288decccafd03973f80e86a5a938ec7d0162fde4addace"
+    "contentSha256": "314a9eacbc2dc194455f05ce5dbed2232385742f3ccb45e785c68141aa96007b"
   }
 }

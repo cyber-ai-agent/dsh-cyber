@@ -13,7 +13,9 @@ export function validateWorldThemeManifest(value: unknown): ManifestValidationRe
   const errors: string[] = []
   if (!isRecord(value)) return { valid: false, errors: ['manifest must be an object'] }
   if (value.schemaVersion !== 1) errors.push('schemaVersion must be 1')
-  if (value.renderer !== 'pixi-v8') errors.push('renderer must be pixi-v8')
+  if (!['pixi-2d', 'pixi-2.5d', 'three-2.5d', 'three-3d'].includes(String(value.renderer))) {
+    errors.push('renderer must be a supported RendererKind')
+  }
   requireText(value, 'id', errors)
   requireText(value, 'version', errors)
   requireText(value, 'templateId', errors)
