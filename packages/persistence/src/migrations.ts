@@ -367,6 +367,66 @@ const MIGRATIONS: readonly Migration[] = [
         ON local_assets(workspace_id, kind, created_at DESC);
     `,
   },
+  {
+    version: 6,
+    name: 'audited-runtime-updates',
+    sql: `
+      CREATE TABLE runtime_update_transactions (
+        id TEXT PRIMARY KEY,
+        candidate_root TEXT NOT NULL,
+        version TEXT NOT NULL,
+        contract_id TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (
+          status IN (
+            'verified', 'contract-tested', 'canary-passed',
+            'activated', 'rejected', 'rolled-back'
+          )
+        ),
+        previous_runtime_root TEXT,
+        report_json TEXT NOT NULL,
+        error_code TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      ) STRICT;
+
+      CREATE INDEX runtime_update_transactions_status_idx
+        ON runtime_update_transactions(status, updated_at DESC, id);
+    `,
+  },
+  {
+    version: 7,
+    name: 'conversation-attachments',
+    sql: `
+      DROP INDEX local_assets_workspace_idx;
+      ALTER TABLE local_assets RENAME TO local_assets_v5;
+
+      CREATE TABLE local_assets (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK (kind IN ('background', 'attachment')),
+        mime_type TEXT NOT NULL CHECK (
+          mime_type IN (
+            'image/png', 'image/jpeg', 'image/webp',
+            'text/plain', 'text/markdown', 'application/json', 'application/pdf'
+          )
+        ),
+        sha256 TEXT NOT NULL,
+        relative_path TEXT NOT NULL UNIQUE,
+        byte_length INTEGER NOT NULL CHECK (byte_length > 0),
+        created_at TEXT NOT NULL
+      ) STRICT;
+
+      INSERT INTO local_assets (
+        id, workspace_id, kind, mime_type, sha256, relative_path, byte_length, created_at
+      )
+      SELECT id, workspace_id, kind, mime_type, sha256, relative_path, byte_length, created_at
+      FROM local_assets_v5;
+
+      DROP TABLE local_assets_v5;
+      CREATE INDEX local_assets_workspace_idx
+        ON local_assets(workspace_id, kind, created_at DESC);
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {

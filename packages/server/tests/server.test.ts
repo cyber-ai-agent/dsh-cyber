@@ -430,6 +430,27 @@ describe('Cyber local server', () => {
     expect(downloaded.status).toBe(200)
     expect(downloaded.headers.get('content-type')).toBe('image/png')
 
+    const attachmentText = '# 北境徽章\n背面刻有月桂与断剑。'
+    const attachment = await json(origin, `/api/workspaces/${workspace.id}/assets/attachment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: '北境徽章.md',
+        mimeType: 'text/markdown',
+        dataBase64: Buffer.from(attachmentText).toString('base64'),
+      }),
+    })
+    expect(attachment.response.status).toBe(201)
+    expect(attachment.body.attachment).toMatchObject({
+      name: '北境徽章.md',
+      mimeType: 'text/markdown',
+      byteLength: Buffer.byteLength(attachmentText),
+    })
+    const attachmentDownload = await fetch(`${origin}${attachment.body.attachment.url}`)
+    expect(attachmentDownload.status).toBe(200)
+    expect(attachmentDownload.headers.get('content-type')).toBe('text/markdown')
+    expect(await attachmentDownload.text()).toBe(attachmentText)
+
     const status = await json(origin, '/api/system/status')
     expect(status.response.status).toBe(200)
     expect(status.body).toMatchObject({ ok: true, database: { ok: true }, compatibility: { ok: true } })

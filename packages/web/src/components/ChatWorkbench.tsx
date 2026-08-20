@@ -3,19 +3,23 @@ import {
   CaretDown,
   CheckCircle,
   CircleNotch,
+  File as FileIcon,
   PaperPlaneRight,
   Paperclip,
   TerminalWindow,
   WarningCircle,
+  X,
 } from '@phosphor-icons/react'
 import { useMemo, useRef, useState } from 'react'
-import type { WorkMessage, WorkSession } from '@dsh-cyber/contracts'
+import type { ChatAttachment, JsonObject, WorkMessage, WorkSession, World } from '@dsh-cyber/contracts'
 
 import type { CyberEmployee, LiveAgentTurn, ToolStep } from '../types.js'
+import { worldExperience } from '../world-experience.js'
 import { Avatar } from './Avatar.js'
 
 interface ChatWorkbenchProps {
   demoMode: boolean
+  world: World
   session?: WorkSession
   messages: WorkMessage[]
   employees: CyberEmployee[]
@@ -23,7 +27,8 @@ interface ChatWorkbenchProps {
   sending: boolean
   draft: string
   onDraftChange(value: string): void
-  onSend(prompt: string): Promise<void>
+  onSend(prompt: string, attachments: ChatAttachment[]): Promise<void>
+  onUploadAttachment(file: File): Promise<ChatAttachment>
   onOpenDossier(employeeId: string): void
   onOpenArtifact(): void
   onRecruit(): void
@@ -31,6 +36,7 @@ interface ChatWorkbenchProps {
 
 export function ChatWorkbench({
   demoMode,
+  world,
   session,
   messages,
   employees,
@@ -39,11 +45,17 @@ export function ChatWorkbench({
   draft,
   onDraftChange,
   onSend,
+  onUploadAttachment,
   onOpenDossier,
   onOpenArtifact,
   onRecruit,
 }: ChatWorkbenchProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([])
+  const [uploading, setUploading] = useState(false)
+  const [attachmentError, setAttachmentError] = useState<string>()
+  const experience = worldExperience(world)
   const mention = useMemo(() => currentMention(draft), [draft])
   const suggestions = useMemo(() => {
     if (mention === undefined) return []
@@ -52,8 +64,37 @@ export function ChatWorkbench({
 
   const submit = async () => {
     const prompt = draft.trim()
-    if (!prompt || sending) return
-    await onSend(prompt)
+    if ((!prompt && attachments.length === 0) || sending || uploading) return
+    await onSend(prompt || '请查看随消息发送的附件。', attachments)
+    setAttachments([])
+  }
+
+  const uploadAttachment = async (file: File) => {
+    setAttachmentError(undefined)
+    if (file.size < 1 || file.size > 5 * 1024 * 1024) {
+      setAttachmentError('附件大小需在 1 byte 到 5 MiB 之间。')
+      return
+    }
+    if (attachments.length >= 8) {
+      setAttachmentError('每条消息最多附加 8 个文件。')
+      return
+    }
+    setUploading(true)
+    try {
+      const attachment = await onUploadAttachment(file)
+      setAttachments((current) => [...current, attachment])
+    } catch (cause) {
+      setAttachmentError(cause instanceof Error ? cause.message : '附件上传失败')
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  const insertCodeBlock = () => {
+    const next = `${draft}${draft && !draft.endsWith('\n') ? '\n' : ''}\`\`\`\n\n\`\`\``
+    onDraftChange(next)
+    requestAnimationFrame(() => inputRef.current?.focus())
   }
 
   const insertMention = (employee: CyberEmployee) => {
@@ -66,11 +107,11 @@ export function ChatWorkbench({
   }
 
   return (
-    <section className="chat-workbench" aria-label="多角色协作会话">
+    <section className="chat-workbench" aria-label="当前世界多角色会话">
       <header className="chat-header">
         <div>
           <h1>{session?.title ?? '新会话'}</h1>
-          <p>{session === undefined ? '点名一名或多名员工开始真实协作' : `${messages.length} 条消息 · 当前世界独立上下文`}</p>
+          <p>{session === undefined ? `点名一名或多名${experience.personLabel}开始互动` : `${messages.length} 条消息 · 当前世界独立上下文`}</p>
         </div>
         <button className="text-button" type="button">会话成员 <span>{participantCount(messages)}</span></button>
       </header>
@@ -79,11 +120,13 @@ export function ChatWorkbench({
         {messages.length === 0 ? (
           <div className="conversation-empty">
             <TerminalWindow size={34} />
-            <h2>{employees.length === 0 ? '当前世界还没有员工' : '向当前世界的员工下达任务'}</h2>
+            <h2>{employees.length === 0 ? experience.emptyTitle : experience.kind === 'tavern' ? '从一句话开始今晚的故事' : `向当前世界的${experience.peopleLabel}发起${experience.actionLabel}`}</h2>
             <p>{employees.length === 0
-              ? '从员工市场明确招聘第一位角色。招聘后会创建当前世界专属、可持续的独立 Agent。'
-              : '输入 @员工名 可直接和独立 Agent 对话；同时点名多人会创建真实群组会话。'}</p>
-            {employees.length === 0 ? <button className="primary-button" type="button" onClick={onRecruit}>招聘第一位员工</button> : null}
+              ? experience.emptyCopy
+              : experience.kind === 'tavern'
+                ? '输入 @角色名 可指定下一位发言者；不点名时，角色将按人物关系和场景自然决定谁回应。'
+                : '输入 @角色名 可直接和独立 Agent 对话；同时点名多人会创建真实群组会话。'}</p>
+            {employees.length === 0 ? <button className="primary-button" type="button" onClick={onRecruit}>{experience.kind === 'tavern' ? '邀请第一张角色卡' : `添加第一名${experience.personLabel}`}</button> : null}
           </div>
         ) : messages.map((message, index) => {
           const employee = employees.find((item) => item.id === message.senderId)
@@ -101,25 +144,26 @@ export function ChatWorkbench({
                   className="avatar-button"
                   type="button"
                   onClick={() => employee && onOpenDossier(employee.id)}
-                  aria-label={`查看${employee?.displayName ?? '员工'}档案`}
+                  aria-label={`查看${employee?.displayName ?? experience.personLabel}档案`}
                 >
                   <Avatar index={employee?.avatarIndex ?? 7} label={employee?.displayName ?? '员工'} />
                 </button>
               )}
               <div className="message__body">
                 <header className="message__meta">
-                  <strong>{owner ? '老板' : employee?.displayName ?? '员工'}</strong>
-                  {owner ? null : <span>{employee?.role} · 独立 Agent</span>}
+                  <strong>{owner ? (experience.kind === 'tavern' ? '你' : '老板') : employee?.displayName ?? experience.personLabel}</strong>
+                  {owner ? null : <span>{employee?.role} · 独立角色</span>}
                   <time>{displayTime(message)}</time>
                 </header>
                 <div className="message__content"><RichText value={message.content} /></div>
-                {demoMode && index === 1 ? <ArtifactAttachment onOpen={onOpenArtifact} /> : null}
+                <MessageAttachments attachments={messageAttachments(message.metadata)} />
+                {demoMode && experience.kind === 'company' && index === 1 ? <ArtifactAttachment onOpen={onOpenArtifact} /> : null}
               </div>
             </article>
           )
         })}
         {liveTurns.map((turn) => <LiveTurn key={`${turn.sessionId}:${turn.agentId}`} turn={turn} employee={employees.find((item) => item.id === turn.agentId)} />)}
-        {sending && liveTurns.length === 0 ? <div className="stream-state"><CircleNotch size={16} className="spin" /><span>正在连接员工的独立 Agent…</span><span className="stream-caret" /></div> : null}
+        {sending && liveTurns.length === 0 ? <div className="stream-state"><CircleNotch size={16} className="spin" /><span>正在连接{experience.personLabel}的独立 Agent…</span><span className="stream-caret" /></div> : null}
       </div>
 
       <div className="composer-zone">
@@ -129,11 +173,23 @@ export function ChatWorkbench({
               {suggestions.map((employee) => (
                 <button key={employee.id} type="button" onClick={() => insertMention(employee)}>
                   <Avatar index={employee.avatarIndex} size="sm" label={employee.displayName} />
-                  <span><strong>{employee.displayName}</strong><small>{employee.role} · 独立 Agent</small></span>
+                  <span><strong>{employee.displayName}</strong><small>{employee.role} · 独立角色</small></span>
                 </button>
               ))}
             </div>
           )}
+          {attachments.length > 0 ? (
+            <div className="composer-attachments" aria-label="待发送附件">
+              {attachments.map((attachment) => (
+                <span key={attachment.assetId}>
+                  <FileIcon size={15} />
+                  <span><strong>{attachment.name}</strong><small>{formatBytes(attachment.byteLength)}</small></span>
+                  <button type="button" aria-label={`移除附件 ${attachment.name}`} onClick={() => setAttachments((current) => current.filter((item) => item.assetId !== attachment.assetId))}><X size={13} /></button>
+                </span>
+              ))}
+            </div>
+          ) : null}
+          {attachmentError === undefined ? null : <p className="composer-error" role="alert">{attachmentError}</p>}
           <textarea
             ref={inputRef}
             value={draft}
@@ -145,17 +201,24 @@ export function ChatWorkbench({
                 void submit()
               }
             }}
-            placeholder={employees.length === 0 ? '请先招聘一名员工…' : '@员工 下达任务，或同时点名多人召开协作会…'}
+            placeholder={employees.length === 0 ? experience.emptyTitle : experience.composerPlaceholder}
             rows={2}
-            aria-label="给当前世界的员工发送消息"
+            aria-label={`给当前世界的${experience.peopleLabel}发送消息`}
           />
           <div className="composer__toolbar">
             <div>
-              <button className="icon-button" type="button" aria-label="添加附件"><Paperclip size={18} /></button>
-              <button className="icon-button" type="button" aria-label="插入代码或命令"><BracketsCurly size={18} /></button>
+              <input
+                ref={fileInputRef}
+                className="composer-file-input"
+                type="file"
+                accept=".png,.jpg,.jpeg,.webp,.txt,.md,.json,.pdf"
+                onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAttachment(file) }}
+              />
+              <button className="icon-button" type="button" aria-label={uploading ? '正在上传附件' : '添加附件'} disabled={uploading} onClick={() => fileInputRef.current?.click()}>{uploading ? <CircleNotch size={18} className="spin" /> : <Paperclip size={18} />}</button>
+              <button className="icon-button" type="button" aria-label="插入代码或命令" onClick={insertCodeBlock}><BracketsCurly size={18} /></button>
               <span className="composer__hint">Enter 发送 · Shift+Enter 换行 · @ 仅显示当前世界角色</span>
             </div>
-            <button className="send-button" type="button" aria-label={sending ? '员工处理中' : '发送'} disabled={sending || employees.length === 0 || !draft.trim()} onClick={() => void submit()}>
+            <button className="send-button" type="button" aria-label={sending ? '员工处理中' : '发送'} disabled={sending || uploading || employees.length === 0 || (!draft.trim() && attachments.length === 0)} onClick={() => void submit()}>
               {sending ? <CircleNotch size={19} className="spin" /> : <PaperPlaneRight size={19} weight="fill" />}
             </button>
           </div>
@@ -163,6 +226,48 @@ export function ChatWorkbench({
       </div>
     </section>
   )
+}
+
+function MessageAttachments({ attachments }: { attachments: ChatAttachment[] }) {
+  if (attachments.length === 0) return null
+  return (
+    <div className="message-attachments">
+      {attachments.map((attachment) => attachment.mimeType.startsWith('image/') ? (
+        <a key={attachment.assetId} className="message-attachment message-attachment--image" href={attachment.url} target="_blank" rel="noreferrer">
+          <img src={attachment.url} alt={attachment.name} />
+          <span><strong>{attachment.name}</strong><small>{formatBytes(attachment.byteLength)}</small></span>
+        </a>
+      ) : (
+        <a key={attachment.assetId} className="message-attachment" href={attachment.url} target="_blank" rel="noreferrer">
+          <FileIcon size={19} />
+          <span><strong>{attachment.name}</strong><small>{attachment.mimeType} · {formatBytes(attachment.byteLength)}</small></span>
+          <span>打开</span>
+        </a>
+      ))}
+    </div>
+  )
+}
+
+function messageAttachments(metadata: JsonObject): ChatAttachment[] {
+  const value = metadata.attachments
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) => {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) return []
+    const attachment = item as Record<string, unknown>
+    return typeof attachment.assetId === 'string' &&
+      typeof attachment.name === 'string' &&
+      typeof attachment.mimeType === 'string' &&
+      typeof attachment.byteLength === 'number' &&
+      typeof attachment.url === 'string'
+      ? [attachment as unknown as ChatAttachment]
+      : []
+  })
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`
+  return `${(value / 1024 / 1024).toFixed(1)} MB`
 }
 
 function LiveTurn({ turn, employee }: { turn: LiveAgentTurn; employee: CyberEmployee | undefined }) {

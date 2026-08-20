@@ -32,6 +32,8 @@ import {
   type InstalledPackage,
   type PackageInstallTransaction,
   type ParticipantKind,
+  type RuntimeUpdateStatus,
+  type RuntimeUpdateTransaction,
   type SkillEvidence,
   type SkillEvidenceKind,
   type SkillEvidenceOutcome,
@@ -248,6 +250,21 @@ export interface RollbackPackageInstallInput {
   actorId?: string
 }
 
+export interface BeginRuntimeUpdateInput {
+  candidateRoot: string
+  version: string
+  contractId: string
+  previousRuntimeRoot?: string
+  report: JsonObject
+}
+
+export interface TransitionRuntimeUpdateInput {
+  transactionId: string
+  status: Exclude<RuntimeUpdateStatus, 'verified'>
+  report: JsonObject
+  errorCode?: string
+}
+
 export interface RecoveryExportReport {
   sourcePath: string
   destinationPath: string
@@ -278,6 +295,7 @@ const KNOWN_TABLES = [
   'messages',
   'installed_packages',
   'package_install_transactions',
+  'runtime_update_transactions',
   'domain_events',
   'sync_outbox',
 ] as const
@@ -1886,6 +1904,112 @@ export class SqliteStore {
     })
   }
 
+  getRuntimeUpdateTransaction(transactionId: string): RuntimeUpdateTransaction | undefined {
+    const row = this.database
+      .prepare('SELECT * FROM runtime_update_transactions WHERE id = ?')
+      .get(transactionId)
+    return row ? mapRuntimeUpdateTransaction(row) : undefined
+  }
+
+  listRuntimeUpdateTransactions(): RuntimeUpdateTransaction[] {
+    return this.database
+      .prepare('SELECT * FROM runtime_update_transactions ORDER BY created_at DESC, id DESC')
+      .all()
+      .map(mapRuntimeUpdateTransaction)
+  }
+
+  beginRuntimeUpdate(input: BeginRuntimeUpdateInput): RuntimeUpdateTransaction {
+    this.#assertWritable()
+    const candidateRoot = resolve(input.candidateRoot.trim())
+    const version = input.version.trim()
+    const contractId = input.contractId.trim()
+    if (!input.candidateRoot.trim()) throw new PersistenceError('Candidate runtime root cannot be empty')
+    if (!version) throw new PersistenceError('Candidate runtime version cannot be empty')
+    if (!contractId) throw new PersistenceError('Runtime compatibility contract cannot be empty')
+    assertSecretFree(input.report)
+    const now = this.#clock()
+    const transaction: RuntimeUpdateTransaction = {
+      id: this.#idFactory(),
+      candidateRoot,
+      version,
+      contractId,
+      status: 'verified',
+      report: input.report,
+      createdAt: now,
+      updatedAt: now,
+      ...(input.previousRuntimeRoot === undefined
+        ? {}
+        : { previousRuntimeRoot: resolve(input.previousRuntimeRoot) }),
+    }
+    this.database
+      .prepare(
+        `INSERT INTO runtime_update_transactions (
+           id, candidate_root, version, contract_id, status, previous_runtime_root,
+           report_json, error_code, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, 'verified', ?, ?, NULL, ?, ?)`,
+      )
+      .run(
+        transaction.id,
+        transaction.candidateRoot,
+        transaction.version,
+        transaction.contractId,
+        transaction.previousRuntimeRoot ?? null,
+        stringifyJson(transaction.report),
+        transaction.createdAt,
+        transaction.updatedAt,
+      )
+    return transaction
+  }
+
+  transitionRuntimeUpdate(input: TransitionRuntimeUpdateInput): RuntimeUpdateTransaction {
+    this.#assertWritable()
+    const transaction = this.getRuntimeUpdateTransaction(input.transactionId)
+    if (transaction === undefined) throw new EntityNotFoundError('Runtime update transaction not found')
+    const allowedTransitions: Record<RuntimeUpdateStatus, RuntimeUpdateStatus[]> = {
+      verified: ['contract-tested', 'rejected'],
+      'contract-tested': ['canary-passed', 'rejected'],
+      'canary-passed': ['activated', 'rejected'],
+      activated: ['rolled-back'],
+      rejected: [],
+      'rolled-back': [],
+    }
+    if (!allowedTransitions[transaction.status].includes(input.status)) {
+      throw new PersistenceError(
+        `Runtime update cannot transition from ${transaction.status} to ${input.status}`,
+      )
+    }
+    if (input.status === 'rejected' && !input.errorCode?.trim()) {
+      throw new PersistenceError('Rejected runtime update requires an error code')
+    }
+    assertSecretFree(input.report)
+    const now = this.#clock()
+    const updated: RuntimeUpdateTransaction = {
+      ...transaction,
+      status: input.status,
+      report: input.report,
+      updatedAt: now,
+      ...(input.errorCode?.trim() ? { errorCode: input.errorCode.trim() } : {}),
+    }
+    const result = this.database
+      .prepare(
+        `UPDATE runtime_update_transactions
+         SET status = ?, report_json = ?, error_code = ?, updated_at = ?
+         WHERE id = ? AND status = ?`,
+      )
+      .run(
+        updated.status,
+        stringifyJson(updated.report),
+        updated.errorCode ?? null,
+        updated.updatedAt,
+        updated.id,
+        transaction.status,
+      )
+    if (Number(result.changes) !== 1) {
+      throw new PersistenceError('Runtime update changed concurrently; reload before retrying')
+    }
+    return updated
+  }
+
   getWorkspaceSnapshot(workspaceId: string): WorkspaceSnapshot {
     const workspace = this.#requireWorkspace(workspaceId)
     const row = this.database
@@ -1931,6 +2055,7 @@ export class SqliteStore {
       format: 'dsh-cyber-export',
       schemaVersion: readUserVersion(this.database),
       exportedAt: this.#clock(),
+      runtimeUpdates: this.listRuntimeUpdateTransactions(),
        workspaces: this.listWorkspaces().map((workspace) => ({
          workspace,
          preferences: this.getWorkspacePreferences(workspace.id),
@@ -1998,6 +2123,7 @@ export class SqliteStore {
         messages: countRows(this.database, 'messages'),
         installedPackages: countRows(this.database, 'installed_packages'),
         packageTransactions: countRows(this.database, 'package_install_transactions'),
+        runtimeUpdates: countRows(this.database, 'runtime_update_transactions'),
         events: countRows(this.database, 'domain_events'),
         outbox: countRows(this.database, 'sync_outbox'),
       },
@@ -2804,6 +2930,25 @@ function mapPackageInstallTransaction(row: object): PackageInstallTransaction {
   }
   if (typeof value.previous_version === 'string') {
     transaction.previousVersion = value.previous_version
+  }
+  if (typeof value.error_code === 'string') transaction.errorCode = value.error_code
+  return transaction
+}
+
+function mapRuntimeUpdateTransaction(row: object): RuntimeUpdateTransaction {
+  const value = row as Record<string, unknown>
+  const transaction: RuntimeUpdateTransaction = {
+    id: String(value.id),
+    candidateRoot: String(value.candidate_root),
+    version: String(value.version),
+    contractId: String(value.contract_id),
+    status: value.status as RuntimeUpdateStatus,
+    report: parseJson<JsonObject>(value.report_json),
+    createdAt: String(value.created_at),
+    updatedAt: String(value.updated_at),
+  }
+  if (typeof value.previous_runtime_root === 'string') {
+    transaction.previousRuntimeRoot = value.previous_runtime_root
   }
   if (typeof value.error_code === 'string') transaction.errorCode = value.error_code
   return transaction

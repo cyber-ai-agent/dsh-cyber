@@ -13,7 +13,7 @@ import {
   SpinnerGap,
 } from '@phosphor-icons/react'
 import { useEffect, useMemo, useState } from 'react'
-import type { EmployeeDossier as EmployeeDossierData } from '@dsh-cyber/contracts'
+import type { EmployeeDossier as EmployeeDossierData, World } from '@dsh-cyber/contracts'
 
 import type { CyberEmployee, DockTab } from '../types.js'
 import { EmployeeDossier } from './EmployeeDossier.js'
@@ -26,7 +26,7 @@ interface ArtifactDockProps {
   selectedEmployee?: CyberEmployee
   dossiers: Record<string, EmployeeDossierData>
   employees: CyberEmployee[]
-  worldName: string
+  world: World
   sceneImage?: string
   onTabChange(tab: DockTab): void
   onCollapse(): void
@@ -34,6 +34,7 @@ interface ArtifactDockProps {
   onDirectEmployee(employee: CyberEmployee): void
   onManageEmployee(employee: CyberEmployee): void
   onShowAllDossiers(): void
+  onInvite(): void
 }
 
 interface DemoArtifact {
@@ -106,7 +107,7 @@ export function ArtifactDock({
   selectedEmployee,
   dossiers,
   employees,
-  worldName,
+  world,
   sceneImage,
   onTabChange,
   onCollapse,
@@ -114,6 +115,7 @@ export function ArtifactDock({
   onDirectEmployee,
   onManageEmployee,
   onShowAllDossiers,
+  onInvite,
 }: ArtifactDockProps) {
   const [selectedArtifactId, setSelectedArtifactId] = useState(demoArtifacts[0]?.id)
   const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFileList>({ path: '', items: [] })
@@ -202,13 +204,14 @@ export function ArtifactDock({
 
       <div className="dock-content">
         {activeTab === 'world' ? (
-          <WorldView worldName={worldName} employees={employees} {...(sceneImage === undefined ? {} : { sceneImage })} onSelectEmployee={onSelectEmployee} />
+          <WorldView world={world} employees={employees} {...(sceneImage === undefined ? {} : { sceneImage })} onSelectEmployee={onSelectEmployee} onInvite={onInvite} />
         ) : null}
         {activeTab === 'dossier' ? (
           selectedEmployee !== undefined && dossiers[selectedEmployee.id] !== undefined
             ? <EmployeeDossier
                 dossier={dossiers[selectedEmployee.id]!}
                 employees={employees}
+                world={world}
                 avatarIndex={selectedEmployee.avatarIndex}
                 onDirect={() => onDirectEmployee(selectedEmployee)}
                 onManage={() => onManageEmployee(selectedEmployee)}
@@ -217,6 +220,7 @@ export function ArtifactDock({
             : <EmployeeDossierDirectory
                 employees={employees}
                 dossiers={dossiers}
+                world={world}
                 onOpen={onSelectEmployee}
                 onDirect={onDirectEmployee}
                 onManage={onManageEmployee}

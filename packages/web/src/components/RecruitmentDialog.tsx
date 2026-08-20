@@ -1,9 +1,11 @@
-import { Briefcase, Check, ShieldCheck, Sparkle, X } from '@phosphor-icons/react'
+import { Briefcase, Check, IdentificationCard, ShieldCheck, Sparkle, X } from '@phosphor-icons/react'
 import { useEffect, useMemo, useState } from 'react'
-import type { EmployeeBlueprint } from '@dsh-cyber/contracts'
+import type { EmployeeBlueprint, World } from '@dsh-cyber/contracts'
+import { worldExperience } from '../world-experience.js'
 
 interface RecruitmentDialogProps {
   blueprints: EmployeeBlueprint[]
+  world: World
   loading: boolean
   recruiting: boolean
   onClose(): void
@@ -12,12 +14,16 @@ interface RecruitmentDialogProps {
 
 export function RecruitmentDialog({
   blueprints,
+  world,
   loading,
   recruiting,
   onClose,
   onRecruit,
 }: RecruitmentDialogProps) {
   const [selectedId, setSelectedId] = useState<string>()
+  const experience = worldExperience(world)
+  const roleplay = experience.kind === 'tavern'
+  const BlueprintIcon = roleplay ? IdentificationCard : Briefcase
   const [displayName, setDisplayName] = useState('')
   const selected = useMemo(
     () => blueprints.find((blueprint) => blueprint.id === selectedId) ?? blueprints[0],
@@ -33,16 +39,16 @@ export function RecruitmentDialog({
       <section className="recruitment-dialog" role="dialog" aria-modal="true" aria-labelledby="recruitment-title">
         <header className="dialog-header">
           <div>
-            <h2 id="recruitment-title">员工市场</h2>
-            <p>招聘会创建当前世界专属的 Employee Instance 与版本 1，不会静默生成员工。</p>
+            <h2 id="recruitment-title">{experience.marketLabel}</h2>
+            <p>{roleplay ? '邀请角色卡会建立当前故事专属的人设、记忆与会话，不会混入其他世界。' : '招聘会创建当前世界专属的 Employee Instance 与版本 1，不会静默生成员工。'}</p>
           </div>
-          <button className="icon-button" type="button" aria-label="关闭员工市场" onClick={onClose}><X size={18} /></button>
+          <button className="icon-button" type="button" aria-label={`关闭${experience.marketLabel}`} onClick={onClose}><X size={18} /></button>
         </header>
 
         <div className="recruitment-layout">
-          <div className="blueprint-list" aria-label="可招聘员工">
+          <div className="blueprint-list" aria-label={`可添加${experience.peopleLabel}`}>
             {loading ? <div className="dialog-empty">正在读取当前世界的角色蓝图…</div> : null}
-            {!loading && blueprints.length === 0 ? <div className="dialog-empty">当前世界还没有兼容的员工蓝图。</div> : null}
+            {!loading && blueprints.length === 0 ? <div className="dialog-empty">当前世界还没有兼容的角色蓝图。</div> : null}
             {blueprints.map((blueprint) => (
               <button
                 key={`${blueprint.id}@${blueprint.version}`}
@@ -50,7 +56,7 @@ export function RecruitmentDialog({
                 type="button"
                 onClick={() => { setSelectedId(blueprint.id); setDisplayName('') }}
               >
-                <span className="blueprint-card__icon"><Briefcase size={20} /></span>
+                <span className="blueprint-card__icon"><BlueprintIcon size={20} /></span>
                 <span className="blueprint-card__copy">
                   <span><strong>{blueprint.displayName}</strong><small>v{blueprint.version}</small></span>
                   <span>{blueprint.role}</span>
@@ -70,14 +76,14 @@ export function RecruitmentDialog({
                 </div>
                 <p className="blueprint-detail__summary">{selected.summary}</p>
                 <label className="dialog-field">
-                  <span>员工称呼（可选）</span>
+                  <span>{roleplay ? '角色称呼（可选）' : '员工称呼（可选）'}</span>
                   <input value={displayName} placeholder={selected.displayName} onChange={(event) => setDisplayName(event.target.value)} />
                 </label>
                 <CapabilityGroup title="建议技能" items={selected.requestedSkills} />
                 <CapabilityGroup title="请求权限" items={selected.requestedCapabilities} />
                 <div className="permission-notice">
                   <ShieldCheck size={18} />
-                  <p>招聘只创建角色身份。技能与工具仍按最小权限单独授权，角色不能自动扩大自己的能力。</p>
+                  <p>{roleplay ? '角色卡只在当前故事世界生效。技能、知识库和工具权限仍按最小权限独立授权。' : '招聘只创建角色身份。技能与工具仍按最小权限单独授权，角色不能自动扩大自己的能力。'}</p>
                 </div>
               </>
             )}
@@ -94,7 +100,7 @@ export function RecruitmentDialog({
               disabled={selected === undefined || recruiting}
               onClick={() => selected && void onRecruit(selected, displayName.trim() || undefined)}
             >
-              {recruiting ? '正在创建独立 Agent…' : '确认招聘'}
+              {recruiting ? '正在创建独立 Agent…' : roleplay ? '邀请角色入场' : '确认招聘'}
             </button>
           </div>
         </footer>

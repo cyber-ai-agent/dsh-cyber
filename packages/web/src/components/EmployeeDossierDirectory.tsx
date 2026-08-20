@@ -1,19 +1,23 @@
 import { ArrowRight, CalendarDots, Certificate, GearSix, IdentificationBadge, UsersThree } from '@phosphor-icons/react'
-import type { EmployeeDossier } from '@dsh-cyber/contracts'
+import type { EmployeeDossier, World } from '@dsh-cyber/contracts'
 
 import type { CyberEmployee } from '../types.js'
+import { worldExperience } from '../world-experience.js'
 import { Avatar } from './Avatar.js'
 import { StatusDot } from './StatusDot.js'
 
 interface EmployeeDossierDirectoryProps {
   employees: CyberEmployee[]
   dossiers: Record<string, EmployeeDossier>
+  world: World
   onOpen(employeeId: string): void
   onDirect(employee: CyberEmployee): void
   onManage(employee: CyberEmployee): void
 }
 
-export function EmployeeDossierDirectory({ employees, dossiers, onOpen, onDirect, onManage }: EmployeeDossierDirectoryProps) {
+export function EmployeeDossierDirectory({ employees, dossiers, world, onOpen, onDirect, onManage }: EmployeeDossierDirectoryProps) {
+  const experience = worldExperience(world)
+  const roleplay = experience.kind === 'tavern'
   const verifiedSkills = Object.values(dossiers).reduce(
     (total, dossier) => total + dossier.skills.filter((skill) => skill.status === 'verified').length,
     0,
@@ -25,7 +29,7 @@ export function EmployeeDossierDirectory({ employees, dossiers, onOpen, onDirect
       <header className="dossier-directory__header">
         <div>
           <IdentificationBadge size={22} />
-          <span><strong>全员数字档案</strong><small>身份、能力、成长与真实履历</small></span>
+          <span><strong>全角色数字档案</strong><small>{roleplay ? '人物设定、关系、成长与剧情履历' : '身份、能力、成长与真实履历'}</small></span>
         </div>
         <span>{employees.length} 名角色</span>
       </header>
@@ -38,7 +42,7 @@ export function EmployeeDossierDirectory({ employees, dossiers, onOpen, onDirect
 
       <div className="dossier-directory__list">
         {employees.length === 0 ? (
-          <div className="dossier-directory__empty"><IdentificationBadge size={30} /><strong>档案库还是空的</strong><p>从员工市场招聘角色后，将在这里持续沉淀技能、日志和事迹。</p></div>
+          <div className="dossier-directory__empty"><IdentificationBadge size={30} /><strong>档案库还是空的</strong><p>从{experience.marketLabel}添加角色后，将在这里持续沉淀技能、日志和事迹。</p></div>
         ) : employees.map((employee) => {
           const dossier = dossiers[employee.id]
           const profile = dossier?.profile
@@ -52,7 +56,7 @@ export function EmployeeDossierDirectory({ employees, dossiers, onOpen, onDirect
                   <Avatar index={employee.avatarIndex} size="md" label={employee.displayName} status={employee.status} />
                 </button>
                 <div><strong>{employee.displayName}</strong><span>{employee.role} · r{employee.currentRevision}</span></div>
-                <StatusDot status={employee.status} label={statusLabel(employee.status)} />
+                <StatusDot status={employee.status} label={statusLabel(employee.status, roleplay)} />
               </header>
 
               <p className="dossier-card__activity">{employee.currentActivity}</p>
@@ -87,6 +91,7 @@ export function EmployeeDossierDirectory({ employees, dossiers, onOpen, onDirect
   )
 }
 
-function statusLabel(status: CyberEmployee['status']): string {
+function statusLabel(status: CyberEmployee['status'], roleplay: boolean): string {
+  if (roleplay) return ({ available: '可登场', working: '演绎中', waiting: '等待发言', blocked: '剧情暂停', archived: '已退场' })[status]
   return ({ available: '可接任务', working: '工作中', waiting: '等待中', blocked: '被阻塞', archived: '已归档' })[status]
 }

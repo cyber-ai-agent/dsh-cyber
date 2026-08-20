@@ -7,6 +7,7 @@ interface ResizableShellProps {
   leftWidth: number
   rightWidth: number
   rightCollapsed: boolean
+  rightPrimary?: boolean
   onResize(leftWidth: number, rightWidth: number): void
 }
 
@@ -17,6 +18,7 @@ export function ResizableShell({
   leftWidth,
   rightWidth,
   rightCollapsed,
+  rightPrimary = false,
   onResize,
 }: ResizableShellProps) {
   const shellRef = useRef<HTMLDivElement>(null)
@@ -60,12 +62,14 @@ export function ResizableShell({
   const handleWidth = Math.round(5 * paneScale)
   const minimumCenterWidth = Math.round(460 * paneScale)
   const displayedLeftWidth = Math.round(leftWidth * paneScale)
-  const displayedRightWidth = Math.round(rightWidth * paneScale)
+  const displayedRightWidth = rightPrimary
+    ? clamp(Math.max(Math.round(rightWidth * paneScale), Math.round(viewportWidth * .56)), Math.round(720 * paneScale), Math.max(Math.round(720 * paneScale), viewportWidth - displayedLeftWidth - Math.round(430 * paneScale)))
+    : Math.round(rightWidth * paneScale)
 
   return (
     <div
       ref={shellRef}
-      className={`workbench-shell${rightCollapsed ? ' workbench-shell--dock-collapsed' : ''}`}
+      className={`workbench-shell${rightCollapsed ? ' workbench-shell--dock-collapsed' : ''}${rightPrimary ? ' workbench-shell--right-primary' : ''}`}
       style={{
         gridTemplateColumns: `${displayedLeftWidth}px ${handleWidth}px minmax(${minimumCenterWidth}px, 1fr) ${rightCollapsed ? '0 0' : `${handleWidth}px ${displayedRightWidth}px`}`,
       }}

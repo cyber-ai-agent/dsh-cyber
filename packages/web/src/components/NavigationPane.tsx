@@ -11,6 +11,7 @@ import { useDeferredValue, useMemo, useState } from 'react'
 import type { WorkSession, World } from '@dsh-cyber/contracts'
 
 import type { CyberEmployee } from '../types.js'
+import { worldExperience } from '../world-experience.js'
 import { Avatar } from './Avatar.js'
 
 interface NavigationPaneProps {
@@ -41,6 +42,8 @@ export function NavigationPane({
   onCreateWorld,
 }: NavigationPaneProps) {
   const [query, setQuery] = useState('')
+  const activeWorld = worlds.find((world) => world.id === activeWorldId) ?? worlds[0]
+  const experience = activeWorld === undefined ? undefined : worldExperience(activeWorld)
   const deferredQuery = useDeferredValue(query.trim().toLocaleLowerCase())
   const filteredEmployees = useMemo(() => {
     if (!deferredQuery) return employees
@@ -89,7 +92,7 @@ export function NavigationPane({
         </div>
         <div className="session-list">
           {sessions.length === 0 ? (
-            <div className="compact-empty">还没有会话，直接 @ 一名员工开始。</div>
+            <div className="compact-empty">还没有会话，直接 @ 一名{experience?.personLabel ?? '角色'}开始。</div>
           ) : sessions.map((session) => (
             <button
               key={session.id}
@@ -107,7 +110,7 @@ export function NavigationPane({
 
       <section className="nav-section nav-section--roles" aria-labelledby="roles-title">
         <div className="nav-section__title nav-section__title--inline" id="roles-title">
-          <span>角色（当前世界）</span>
+          <span>{experience?.peopleLabel ?? '角色'}（当前世界）</span>
           <span>{employees.length}</span>
         </div>
         <label className="nav-search">
@@ -115,15 +118,15 @@ export function NavigationPane({
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索角色或任务"
-            aria-label="搜索角色或任务"
+            placeholder={`搜索${experience?.personLabel ?? '角色'}或${experience?.actionLabel ?? '活动'}`}
+            aria-label={`搜索${experience?.personLabel ?? '角色'}或${experience?.actionLabel ?? '活动'}`}
           />
         </label>
         <div className="employee-list">
           {employees.length === 0 ? (
             <div className="employee-list-empty">
-              <p>当前世界从 0 开始，还没有角色。</p>
-              <button className="secondary-button" type="button" onClick={onRecruit}><Plus size={14} />招聘员工</button>
+              <p>{experience?.emptyCopy ?? '当前世界从 0 开始，还没有角色。'}</p>
+              <button className="secondary-button" type="button" onClick={onRecruit}><Plus size={14} />{experience?.marketLabel ?? '角色市场'}</button>
             </div>
           ) : null}
           {filteredEmployees.map((employee) => (

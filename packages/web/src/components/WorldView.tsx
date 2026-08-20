@@ -1,7 +1,6 @@
 import {
   ArrowsInSimple,
   ArrowsOutSimple,
-  Buildings,
   Lightbulb,
   Minus,
   Moon,
@@ -11,96 +10,89 @@ import {
   X,
 } from '@phosphor-icons/react'
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import type { World } from '@dsh-cyber/contracts'
 
 import type { CyberEmployee } from '../types.js'
+import { worldExperience } from '../world-experience.js'
 import { Avatar } from './Avatar.js'
 import { StatusDot } from './StatusDot.js'
 
 interface WorldViewProps {
-  worldName: string
+  world: World
   employees: CyberEmployee[]
   sceneImage?: string
   onSelectEmployee(employeeId: string): void
+  onInvite(): void
 }
 
-const stationPositions = [
-  [22, 25], [48, 24], [77, 27], [22, 65], [49, 66], [77, 66], [67, 46], [36, 46],
+const companyPositions = [
+  [22, 27], [49, 25], [77, 28], [22, 66], [50, 66], [78, 65], [66, 47], [36, 47],
 ] as const
 
-export function WorldView({ worldName, employees, sceneImage, onSelectEmployee }: WorldViewProps) {
+const tavernPositions = [
+  [23, 56], [43, 45], [64, 49], [79, 62], [57, 71], [35, 72], [17, 76], [84, 36],
+] as const
+
+export function WorldView({ world, employees, sceneImage, onSelectEmployee, onInvite }: WorldViewProps) {
   const [now, setNow] = useState(() => new Date())
   const [lightsOn, setLightsOn] = useState(true)
   const [zoom, setZoom] = useState(1)
   const [expanded, setExpanded] = useState(false)
+  const experience = worldExperience(world)
+  const working = employees.filter((employee) => employee.status === 'working').length
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 1_000)
     return () => window.clearInterval(timer)
   }, [])
 
-  const working = employees.filter((employee) => employee.status === 'working').length
-  const blocked = employees.filter((employee) => employee.status === 'blocked').length
-  const metrics = useMemo(() => ({
-    queue: employees.filter((employee) => employee.status === 'waiting').length,
-    healthy: Math.max(0, employees.length - blocked),
-  }), [blocked, employees])
-
-  const scene = (
+  const scene = useMemo(() => (
     <WorldScene
+      kind={experience.kind}
       employees={employees}
       {...(sceneImage === undefined ? {} : { sceneImage })}
       lightsOn={lightsOn}
       now={now}
       zoom={zoom}
-      working={working}
-      metrics={metrics}
       onSelectEmployee={onSelectEmployee}
+      onInvite={onInvite}
     />
-  )
+  ), [employees, experience.kind, lightsOn, now, onInvite, onSelectEmployee, sceneImage, zoom])
 
   return (
-    <div className="world-view">
+    <div className={`world-view world-view--${experience.kind}`}>
       <header className="world-view__header">
         <div>
-          <strong>{worldName} · 总部办公区</strong>
-          <StatusDot status="healthy" label="实时运行" />
+          <strong>{world.name} · {experience.sceneTitle}</strong>
+          <span>{experience.sceneSubtitle}</span>
         </div>
         <div className="world-view__stats">
-          <span><UsersThree size={14} />{employees.length} 人</span>
-          <span><Buildings size={14} />{working} 人工作中</span>
+          <StatusDot status="healthy" label="实时运行" />
+          <span><UsersThree size={14} />{employees.length} 名{experience.personLabel}</span>
+          <span>{working} 名行动中</span>
         </div>
       </header>
+
       <div className="world-view__viewport">
         {scene}
-        <div className="world-activity-rail" aria-label="世界实时活动">
-          <header><strong>实时活动</strong><span>{working > 0 ? `${working} 人正在执行` : '全员可接任务'}</span></header>
-          <div>
-            {employees.length === 0 ? <p>招聘员工后，这里会显示真实会话和工具状态。</p> : employees.map((employee) => (
-              <button key={employee.id} type="button" onClick={() => onSelectEmployee(employee.id)}>
-                <StatusDot status={employee.status} />
-                <span><strong>{employee.displayName}</strong><small>{activityLabel(employee)}</small></span>
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="world-controls" aria-label="世界显示控制">
-          <button type="button" aria-label="缩小世界" disabled={zoom <= .8} onClick={() => setZoom((value) => Math.max(.8, value - .1))}><Minus size={14} /></button>
-          <button type="button" onClick={() => setZoom(1)}>{Math.round(zoom * 100)}%</button>
-          <button type="button" aria-label="放大世界" disabled={zoom >= 1.6} onClick={() => setZoom((value) => Math.min(1.6, value + .1))}><Plus size={14} /></button>
-          <button type="button" className={lightsOn ? 'is-active' : ''} onClick={() => setLightsOn((value) => !value)}>{lightsOn ? <Sun size={14} /> : <Moon size={14} />}{lightsOn ? '关灯' : '开灯'}</button>
-        </div>
+        <WorldControls lightsOn={lightsOn} zoom={zoom} setLightsOn={setLightsOn} setZoom={setZoom} />
       </div>
+
       <footer className="world-view__footer">
-        <span>点击员工查看档案；状态由真实会话驱动</span>
-        <button type="button" onClick={() => setExpanded(true)}><ArrowsOutSimple size={14} />展开世界</button>
+        <span>点击角色查看档案 · 状态与位置由当前世界事件驱动</span>
+        <button type="button" onClick={() => setExpanded(true)}><ArrowsOutSimple size={14} />沉浸模式</button>
       </footer>
+
       {expanded ? (
-        <div className="world-expanded" role="dialog" aria-modal="true" aria-label={`${worldName}全景世界`}>
-          <header><div><strong>{worldName} · 实时世界</strong><span>{now.toLocaleString('zh-CN', { hour12: false })}</span></div><button type="button" onClick={() => setExpanded(false)}><X size={20} />关闭</button></header>
+        <div className="world-expanded" role="dialog" aria-modal="true" aria-label={`${world.name}沉浸世界`}>
+          <header>
+            <div><strong>{world.name} · {experience.sceneTitle}</strong><span>{now.toLocaleString('zh-CN', { hour12: false })}</span></div>
+            <button type="button" onClick={() => setExpanded(false)}><X size={20} />关闭</button>
+          </header>
           <div className="world-expanded__scene">{scene}</div>
           <div className="world-expanded__tools">
             <button type="button" onClick={() => setZoom(1)}><ArrowsInSimple size={15} />适应画面</button>
-            <button type="button" onClick={() => setLightsOn((value) => !value)}><Lightbulb size={15} />{lightsOn ? '关闭区域灯' : '打开区域灯'}</button>
+            <button type="button" onClick={() => setLightsOn((value) => !value)}><Lightbulb size={15} />{lightsOn ? '关闭场景灯' : '打开场景灯'}</button>
           </div>
         </div>
       ) : null}
@@ -108,68 +100,89 @@ export function WorldView({ worldName, employees, sceneImage, onSelectEmployee }
   )
 }
 
-function WorldScene({
-  employees,
-  sceneImage,
-  lightsOn,
-  now,
-  zoom,
-  working,
-  metrics,
-  onSelectEmployee,
-}: {
+function WorldControls({ lightsOn, zoom, setLightsOn, setZoom }: {
+  lightsOn: boolean
+  zoom: number
+  setLightsOn(value: (current: boolean) => boolean): void
+  setZoom(value: (current: number) => number): void
+}) {
+  return (
+    <div className="world-controls" aria-label="世界显示控制">
+      <button type="button" aria-label="缩小世界" disabled={zoom <= .8} onClick={() => setZoom((value) => Math.max(.8, value - .1))}><Minus size={14} /></button>
+      <button type="button" aria-label="恢复世界缩放" onClick={() => setZoom(() => 1)}>{Math.round(zoom * 100)}%</button>
+      <button type="button" aria-label="放大世界" disabled={zoom >= 1.6} onClick={() => setZoom((value) => Math.min(1.6, value + .1))}><Plus size={14} /></button>
+      <button type="button" className={lightsOn ? 'is-active' : ''} onClick={() => setLightsOn((value) => !value)}>{lightsOn ? <Sun size={14} /> : <Moon size={14} />}{lightsOn ? '关灯' : '开灯'}</button>
+    </div>
+  )
+}
+
+function WorldScene({ kind, employees, sceneImage, lightsOn, now, zoom, onSelectEmployee, onInvite }: {
+  kind: 'company' | 'tavern' | 'studio'
   employees: CyberEmployee[]
   sceneImage?: string
   lightsOn: boolean
   now: Date
   zoom: number
-  working: number
-  metrics: { queue: number; healthy: number }
   onSelectEmployee(employeeId: string): void
+  onInvite(): void
 }) {
+  const isTavern = kind === 'tavern'
+  const positions = isTavern ? tavernPositions : companyPositions
+  const image = sceneImage ?? (isTavern ? '/assets/moonlit-tavern-world.png' : '/assets/cyber-office-world.png')
+  const activeSpeaker = employees.find((employee) => employee.status === 'working')
+
   return (
-    <div className="world-stage">
-      <div className={`world-canvas ${lightsOn ? 'lights-on' : 'lights-off'}`} style={{ '--world-zoom': zoom } as CSSProperties}>
-        <img src={sceneImage ?? '/assets/cyber-office-world.png'} alt={sceneImage === undefined ? '赛博公司像素办公室俯视图' : '用户自定义的世界场景'} />
-        <div className="world-light world-light--product" />
-        <div className="world-light world-light--meeting" />
-        <div className="world-light world-light--ops" />
-        <div className="world-light world-light--lounge" />
-        <div className="world-clock"><span>LOCAL TIME</span><strong>{now.toLocaleTimeString('zh-CN', { hour12: false })}</strong></div>
-        <div className="world-slogan"><strong>把复杂留给系统</strong><span>把结果交给老板</span></div>
-        <div className="world-screen-feed world-screen-feed--left"><i /><span>运行任务</span><strong>{working}/{employees.length}</strong></div>
-        <div className="world-screen-feed world-screen-feed--right"><i /><span>健康角色</span><strong>{metrics.healthy}</strong></div>
-        <div className="world-screen-feed world-screen-feed--bottom"><i /><span>等待队列</span><strong>{metrics.queue}</strong></div>
-        {employees.map((employee, index) => {
-          const position = stationPositions[index] ?? [50 + ((index % 3) - 1) * 16, 78 + (index % 2) * 5]
-          const waitingOffset = employee.status === 'waiting' ? 5 : 0
-          const blockedOffset = employee.status === 'blocked' ? -4 : 0
+    <div className={`world-stage world-stage--${kind}`}>
+      <div className={`world-canvas world-canvas--${kind} ${lightsOn ? 'lights-on' : 'lights-off'}`} style={{ '--world-zoom': zoom } as CSSProperties}>
+        <img src={image} alt={isTavern ? '月光下的奇幻酒馆场景' : '赛博公司的实时世界场景'} />
+        {isTavern ? (
+          <>
+            <div className="tavern-scene-card">
+              <span>当前场景</span>
+              <strong>雨夜 · 壁炉旁的陌生委托</strong>
+              <small>{activeSpeaker === undefined ? '等待角色入场' : `${activeSpeaker.displayName} 正在发言`}</small>
+            </div>
+            <div className="tavern-turn-order"><span>发言策略</span><strong>自然顺序</strong><small>@ 点名可强制下一位角色</small></div>
+          </>
+        ) : (
+          <>
+            <div className="world-clock"><span>LOCAL TIME</span><strong>{now.toLocaleTimeString('zh-CN', { hour12: false })}</strong></div>
+            <div className="world-slogan"><strong>把复杂留给系统</strong><span>把结果交给老板</span></div>
+            <div className="world-screen-feed world-screen-feed--left"><i /><span>运行任务</span><strong>{employees.filter((employee) => employee.status === 'working').length}/{employees.length}</strong></div>
+            <div className="world-screen-feed world-screen-feed--right"><i /><span>在线角色</span><strong>{employees.filter((employee) => employee.status !== 'archived').length}</strong></div>
+          </>
+        )}
+
+        {employees.length === 0 ? (
+          <div className="world-empty-cast">
+            <strong>{isTavern ? '今夜尚无人登场' : '这个世界还没有角色'}</strong>
+            <span>{isTavern ? '邀请角色卡后，人物会带着独立设定和记忆进入场景。' : '加入角色后，真实任务状态会在这里发生。'}</span>
+            <button type="button" onClick={onInvite}>{isTavern ? '邀请角色卡' : '添加第一名角色'}</button>
+          </div>
+        ) : employees.map((employee, index) => {
+          const position = positions[index] ?? [50 + ((index % 3) - 1) * 15, 76 + (index % 2) * 6]
           return (
             <button
               key={employee.id}
-              className={`world-agent world-agent--${employee.status}`}
+              className={`world-agent world-agent--${employee.status}${activeSpeaker?.id === employee.id ? ' is-speaking' : ''}`}
               type="button"
-              style={{ left: `${position[0] + waitingOffset}%`, top: `${position[1] + blockedOffset}%` }}
+              style={{ left: `${position[0]}%`, top: `${position[1]}%`, zIndex: Math.round(position[1]) }}
               onClick={() => onSelectEmployee(employee.id)}
-              aria-label={`查看${employee.displayName}的工作状态和档案`}
+              aria-label={`查看${employee.displayName}的状态和档案`}
             >
               <span className="world-agent__sprite"><Avatar index={employee.avatarIndex} size="world" label={employee.displayName} /></span>
-              <span className="world-agent__label"><strong>{employee.displayName}</strong><small>{activityLabel(employee)}</small></span>
+              <span className="world-agent__label"><strong>{employee.displayName}</strong><small>{activityLabel(employee, isTavern)}</small></span>
             </button>
           )
         })}
-        <div className="world-zone world-zone--product">研发区</div>
-        <div className="world-zone world-zone--meeting">会议区</div>
-        <div className="world-zone world-zone--ops">运维区</div>
-        <div className="world-zone world-zone--lounge">休息区</div>
       </div>
     </div>
   )
 }
 
-function activityLabel(employee: CyberEmployee): string {
-  if (employee.status === 'blocked') return '等待推进'
-  if (employee.status === 'waiting') return '等待任务'
-  if (employee.status === 'available') return '可接任务'
+function activityLabel(employee: CyberEmployee, roleplay: boolean): string {
+  if (employee.status === 'blocked') return roleplay ? '剧情等待中' : '等待推进'
+  if (employee.status === 'waiting') return roleplay ? '等待发言' : '等待任务'
+  if (employee.status === 'available') return roleplay ? '可被点名' : '可接任务'
   return employee.currentActivity
 }

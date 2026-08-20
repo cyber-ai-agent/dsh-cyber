@@ -9,9 +9,10 @@ import {
   UsersThree,
 } from '@phosphor-icons/react'
 import { useState } from 'react'
-import type { EmployeeDossier as EmployeeDossierData } from '@dsh-cyber/contracts'
+import type { EmployeeDossier as EmployeeDossierData, World } from '@dsh-cyber/contracts'
 
 import type { CyberEmployee } from '../types.js'
+import { worldExperience } from '../world-experience.js'
 import { Avatar } from './Avatar.js'
 import { StatusDot } from './StatusDot.js'
 
@@ -21,6 +22,7 @@ interface EmployeeDossierProps {
   dossier: EmployeeDossierData
   employees: CyberEmployee[]
   avatarIndex: number
+  world: World
   onDirect(): void
   onManage(): void
   onBack(): void
@@ -34,16 +36,18 @@ const sections: Array<{ id: DossierSection; label: string; icon: typeof Identifi
   { id: 'relations', label: '关系', icon: UsersThree },
 ]
 
-export function EmployeeDossier({ dossier, employees, avatarIndex, onDirect, onManage, onBack }: EmployeeDossierProps) {
+export function EmployeeDossier({ dossier, employees, avatarIndex, world, onDirect, onManage, onBack }: EmployeeDossierProps) {
   const [section, setSection] = useState<DossierSection>('profile')
+  const experience = worldExperience(world)
+  const roleplay = experience.kind === 'tavern'
   const verified = dossier.skills.filter((skill) => skill.status === 'verified').length
   const profile = dossier.profile
 
   return (
     <div className="dossier">
       <div className="dossier-breadcrumb">
-        <button type="button" onClick={onBack}><ArrowLeft size={14} />全员档案</button>
-        <span>{dossier.employee.displayName} / 数字员工档案</span>
+        <button type="button" onClick={onBack}><ArrowLeft size={14} />全角色档案</button>
+        <span>{dossier.employee.displayName} / 独立角色档案</span>
       </div>
       <header className="dossier-hero">
         <button className="avatar-edit-button" type="button" aria-label={`修改${dossier.employee.displayName}的名字和头像`} onClick={onManage}>
@@ -52,7 +56,7 @@ export function EmployeeDossier({ dossier, employees, avatarIndex, onDirect, onM
         <div className="dossier-hero__identity">
           <h2>{dossier.employee.displayName}</h2>
           <p>{dossier.employee.role} · 独立 Agent</p>
-          <StatusDot status={dossier.employee.status} label={statusLabel(dossier.employee.status)} />
+          <StatusDot status={dossier.employee.status} label={statusLabel(dossier.employee.status, roleplay)} />
         </div>
         <div className="dossier-hero__actions">
           <span>角色版本 r{dossier.employee.currentRevision}</span>
@@ -61,13 +65,13 @@ export function EmployeeDossier({ dossier, employees, avatarIndex, onDirect, onM
         </div>
       </header>
 
-      <div className="dossier-facts" aria-label="员工事实摘要">
+      <div className="dossier-facts" aria-label="角色事实摘要">
         <div><strong>{verified}</strong><span>已验证技能</span></div>
         <div><strong>{dossier.milestones.length}</strong><span>真实事迹</span></div>
-        <div><strong>{dossier.journals.length}</strong><span>工作日志</span></div>
+        <div><strong>{dossier.journals.length}</strong><span>{roleplay ? '角色日志' : '工作日志'}</span></div>
       </div>
 
-      <nav className="dossier-tabs" aria-label="员工档案栏目">
+      <nav className="dossier-tabs" aria-label="角色档案栏目">
         {sections.map((item) => {
           const Icon = item.icon
           return (
@@ -87,16 +91,16 @@ export function EmployeeDossier({ dossier, employees, avatarIndex, onDirect, onM
       <div className="dossier-content">
         {section === 'profile' ? (
           <div className="profile-section">
-            <div className="profile-row"><span>入职时间</span><strong>{formatDate(dossier.employee.createdAt)}</strong></div>
+            <div className="profile-row"><span>{roleplay ? '入场时间' : '入职时间'}</span><strong>{formatDate(dossier.employee.createdAt)}</strong></div>
             <div className="profile-row"><span>生日</span><strong>{profile?.birthday ?? '未设置'}</strong></div>
-            <div className="profile-block"><span>身份背景</span><p>{profile?.background ?? '等待建立员工档案。'}</p></div>
+            <div className="profile-block"><span>身份背景</span><p>{profile?.background ?? '等待建立角色档案。'}</p></div>
             <div className="profile-block">
               <span>性格标签</span>
               <div className="trait-list">{profile?.personalityTraits.map((trait) => <span key={trait}>{trait}</span>)}</div>
             </div>
             <div className="evidence-principle">
               <LinkSimple size={16} />
-              <p>属性来自交付、评审、技能验证和故障恢复，不使用虚构忠诚度或智力数值。</p>
+              <p>{roleplay ? '角色成长来自真实对话、剧情事件、关系变化和技能证据，并保留来源。' : '属性来自交付、评审、技能验证和故障恢复，不使用虚构忠诚度或智力数值。'}</p>
             </div>
           </div>
         ) : null}
@@ -159,12 +163,12 @@ export function EmployeeDossier({ dossier, employees, avatarIndex, onDirect, onM
               const colleague = employees.find((employee) => employee.id === relationship.colleagueId)
               return (
                 <article key={relationship.colleagueId}>
-                  <Avatar index={colleague?.avatarIndex ?? 7} label={colleague?.displayName ?? '同事'} size="sm" />
-                  <div><strong>{colleague?.displayName ?? relationship.colleagueId}</strong><span>{colleague?.role ?? '同事'}</span></div>
+                  <Avatar index={colleague?.avatarIndex ?? 7} label={colleague?.displayName ?? '关联角色'} size="sm" />
+                  <div><strong>{colleague?.displayName ?? relationship.colleagueId}</strong><span>{colleague?.role ?? '关联角色'}</span></div>
                   <dl>
-                    <div><dt>协作</dt><dd>{relationship.collaborationCount}</dd></div>
-                    <div><dt>评审</dt><dd>{relationship.reviewCount}</dd></div>
-                    <div><dt>交接</dt><dd>{relationship.handoffCount}</dd></div>
+                    <div><dt>{roleplay ? '互动' : '协作'}</dt><dd>{relationship.collaborationCount}</dd></div>
+                    <div><dt>{roleplay ? '同场' : '评审'}</dt><dd>{relationship.reviewCount}</dd></div>
+                    <div><dt>{roleplay ? '线索' : '交接'}</dt><dd>{relationship.handoffCount}</dd></div>
                   </dl>
                 </article>
               )
@@ -176,7 +180,8 @@ export function EmployeeDossier({ dossier, employees, avatarIndex, onDirect, onM
   )
 }
 
-function statusLabel(status: EmployeeDossierData['employee']['status']): string {
+function statusLabel(status: EmployeeDossierData['employee']['status'], roleplay: boolean): string {
+  if (roleplay) return ({ available: '可登场', working: '演绎中', waiting: '等待发言', blocked: '剧情暂停', archived: '已退场' })[status]
   return ({ available: '可用', working: '工作中', waiting: '等待中', blocked: '被阻塞', archived: '已归档' })[status]
 }
 

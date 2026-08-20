@@ -126,7 +126,7 @@ describe('SqliteStore', () => {
       '收到，我先建立基线。',
     ])
     expect(reopened.getEmployee(employee.id)?.agentSessionId).toBe('harness-session-1')
-    expect(reopened.doctor()).toMatchObject({ ok: true, schemaVersion: 5 })
+    expect(reopened.doctor()).toMatchObject({ ok: true, schemaVersion: 7 })
   })
 
   it('writes every domain event and cloud-sync outbox entry atomically', async () => {
@@ -211,7 +211,7 @@ describe('SqliteStore', () => {
     expect(backupStore.getWorkspace(workspace.id)?.name).toBe('赛博公司')
     const exported = JSON.parse(await readFile(exportPath, 'utf8')) as any
     expect(exported.format).toBe('dsh-cyber-export')
-    expect(exported.schemaVersion).toBe(5)
+    expect(exported.schemaVersion).toBe(7)
     expect(exported.workspaces[0].worlds[0].world.id).toBe(world.id)
     expect(exported.workspaces[0].worlds[0].employees[0].employee.id).toBe(employee.id)
     expect(exported.workspaces[0].worlds[0].sessions[0].messages[0].content).toBe('世界内记录')
@@ -409,6 +409,7 @@ describe('SqliteStore', () => {
       DROP TABLE model_profiles;
       DROP TABLE workspace_preferences;
       DROP TABLE local_assets;
+      DROP TABLE runtime_update_transactions;
       DROP TABLE employee_relationships;
       DROP TABLE employee_daily_journals;
       DROP TABLE employee_milestones;
@@ -425,14 +426,57 @@ describe('SqliteStore', () => {
     expect(migrated.listWorkspaces()[0]?.name).toBe('迁移前工作区')
     expect(migrated.doctor()).toMatchObject({
       ok: true,
-      schemaVersion: 5,
+      schemaVersion: 7,
       counts: {
         installedPackages: 0,
         packageTransactions: 0,
+        runtimeUpdates: 0,
         employeeProfiles: 0,
         modelProfiles: 0,
         localAssets: 0,
       },
     })
+  })
+
+  it('persists audited runtime update transitions and rejects skipped stages', async () => {
+    const { path, store } = await testDatabase()
+    const verified = store.beginRuntimeUpdate({
+      candidateRoot: join(path, '..', 'candidate-runtime'),
+      version: '0.1.0-rc.7',
+      contractId: 'dsh-cyber-runtime-v1',
+      report: { packageVersions: true, isolatedProfile: true },
+    })
+
+    expect(() =>
+      store.transitionRuntimeUpdate({
+        transactionId: verified.id,
+        status: 'activated',
+        report: { activated: true },
+      }),
+    ).toThrow('cannot transition from verified to activated')
+
+    const contractTested = store.transitionRuntimeUpdate({
+      transactionId: verified.id,
+      status: 'contract-tested',
+      report: { turns: 2, stableSession: true },
+    })
+    const canary = store.transitionRuntimeUpdate({
+      transactionId: verified.id,
+      status: 'canary-passed',
+      report: { events: ['message_start', 'message_end'], healthy: true },
+    })
+    expect(contractTested.status).toBe('contract-tested')
+    expect(canary.status).toBe('canary-passed')
+
+    store.close()
+    stores.splice(stores.indexOf(store), 1)
+    const reopened = await SqliteStore.open(path)
+    stores.push(reopened)
+    expect(reopened.getRuntimeUpdateTransaction(verified.id)).toMatchObject({
+      status: 'canary-passed',
+      version: '0.1.0-rc.7',
+      report: { events: ['message_start', 'message_end'], healthy: true },
+    })
+    expect(reopened.doctor().counts.runtimeUpdates).toBe(1)
   })
 })

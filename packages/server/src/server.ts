@@ -8,9 +8,11 @@ import { fileURLToPath } from 'node:url'
 import { BUILTIN_BLUEPRINTS, BUILTIN_WORLD_TEMPLATES, worldTemplate } from '@dsh-cyber/catalog'
 import type {
   AgentRuntimePort,
+  ChatAttachment,
   CyberPackageKind,
   CyberPackageManifest,
   JsonObject,
+  LocalAssetMimeType,
   ModelProfile,
 } from '@dsh-cyber/contracts'
 import {
@@ -35,6 +37,7 @@ import { SqliteStore } from '@dsh-cyber/persistence'
 
 const MAX_BODY_BYTES = 8 * 1024 * 1024
 const MAX_BACKGROUND_BYTES = 5 * 1024 * 1024
+const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
 const MAX_WORKSPACE_PREVIEW_BYTES = 2 * 1024 * 1024
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_PORT = 43123
@@ -423,6 +426,65 @@ async function handleRequest(context: {
     }
     return
   }
+  const workspaceAttachment = match(
+    url.pathname,
+    /^\/api\/workspaces\/([^/]+)\/assets\/attachment$/,
+  )
+  if (workspaceAttachment !== undefined && method === 'POST') {
+    if (store.getWorkspace(workspaceAttachment[0]) === undefined) {
+      throw new HttpError(404, 'workspace_not_found', 'Workspace not found')
+    }
+    const body = await readJson(request)
+    const name = requiredString(body, 'name').slice(0, 180)
+    const mimeType = requiredEnum(body, 'mimeType', [
+      'image/png', 'image/jpeg', 'image/webp',
+      'text/plain', 'text/markdown', 'application/json', 'application/pdf',
+    ])
+    const encoded = requiredString(body, 'dataBase64')
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) {
+      throw new HttpError(422, 'invalid_base64', 'Attachment data must be base64')
+    }
+    const bytes = Buffer.from(encoded, 'base64')
+    if (bytes.length < 1 || bytes.length > MAX_ATTACHMENT_BYTES) {
+      throw new HttpError(422, 'asset_size_rejected', 'Attachment must be between 1 byte and 5 MiB')
+    }
+    if (!matchesAttachmentSignature(bytes, mimeType)) {
+      throw new HttpError(422, 'asset_signature_rejected', 'Attachment content does not match its MIME type')
+    }
+    const id = randomUUID()
+    const relativePath = `${workspaceAttachment[0]}/attachments/${id}.${attachmentExtension(mimeType)}`
+    const assetRoot = join(stateRoot, 'assets')
+    const destination = join(assetRoot, relativePath)
+    const temporary = `${destination}.tmp-${randomUUID()}`
+    await mkdir(join(assetRoot, workspaceAttachment[0], 'attachments'), { recursive: true })
+    const handle = await open(temporary, 'wx', 0o600)
+    try {
+      await handle.writeFile(bytes)
+      await handle.sync()
+    } finally {
+      await handle.close()
+    }
+    await rename(temporary, destination)
+    try {
+      const asset = store.saveLocalAsset({
+        id,
+        workspaceId: workspaceAttachment[0],
+        kind: 'attachment',
+        mimeType,
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+        relativePath,
+        byteLength: bytes.length,
+      })
+      writeJson(response, 201, {
+        asset,
+        attachment: { assetId: asset.id, name, mimeType, byteLength: bytes.length, url: `/api/assets/${asset.id}` },
+      })
+    } catch (error) {
+      await unlink(destination).catch(() => undefined)
+      throw error
+    }
+    return
+  }
   if (workspaceModels !== undefined && method === 'POST') {
     const body = await readJson(request)
     const profile = store.saveModelProfile({
@@ -557,6 +619,11 @@ async function handleRequest(context: {
     if (world === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
     const body = await readJson(request)
     const prompt = requiredString(body, 'prompt')
+    const attachments = validatedChatAttachments(body.attachments, store, world.workspaceId)
+    const metadata: JsonObject | undefined = attachments.length === 0
+      ? undefined
+      : { attachments: attachments.map(chatAttachmentJson) }
+    const runtimePrompt = attachments.length === 0 ? undefined : attachmentAwarePrompt(prompt, attachments)
     const explicitIds = optionalStringArray(body.employeeIds)
     const employeeIds = explicitIds.length > 0
       ? explicitIds
@@ -572,6 +639,8 @@ async function handleRequest(context: {
           worldId: world.id,
           employeeId: employeeIds[0]!,
           prompt,
+          ...(metadata === undefined ? {} : { metadata }),
+          ...(runtimePrompt === undefined ? {} : { runtimePrompt }),
       }
       const sessionId = optionalString(body.sessionId)
       if (sessionId !== undefined) directInput.sessionId = sessionId
@@ -583,6 +652,8 @@ async function handleRequest(context: {
           worldId: world.id,
           employeeIds,
           prompt,
+          ...(metadata === undefined ? {} : { metadata }),
+          ...(runtimePrompt === undefined ? {} : { runtimePrompt }),
           ...(title === undefined ? {} : { title }),
         })
     }
@@ -851,6 +922,80 @@ function matchesImageSignature(
   }
   return bytes.subarray(0, 4).toString('ascii') === 'RIFF' &&
     bytes.subarray(8, 12).toString('ascii') === 'WEBP'
+}
+
+function matchesAttachmentSignature(bytes: Buffer, mimeType: LocalAssetMimeType): boolean {
+  if (mimeType === 'image/png' || mimeType === 'image/jpeg' || mimeType === 'image/webp') {
+    return matchesImageSignature(bytes, mimeType)
+  }
+  if (mimeType === 'application/pdf') return bytes.subarray(0, 5).toString('ascii') === '%PDF-'
+  const text = bytes.toString('utf8')
+  if (text.includes('\0') || text.includes('\uFFFD')) return false
+  if (mimeType === 'application/json') {
+    try {
+      JSON.parse(text)
+      return true
+    } catch {
+      return false
+    }
+  }
+  return true
+}
+
+function attachmentExtension(mimeType: LocalAssetMimeType): string {
+  return ({
+    'image/png': 'png',
+    'image/jpeg': 'jpg',
+    'image/webp': 'webp',
+    'text/plain': 'txt',
+    'text/markdown': 'md',
+    'application/json': 'json',
+    'application/pdf': 'pdf',
+  } as Record<LocalAssetMimeType, string>)[mimeType]
+}
+
+function validatedChatAttachments(
+  value: unknown,
+  store: SqliteStore,
+  workspaceId: string,
+): ChatAttachment[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value) || value.length > 8) {
+    throw new HttpError(422, 'invalid_attachments', 'Attachments must be an array with at most 8 items')
+  }
+  return value.map((item) => {
+    const input = record(item)
+    if (input === undefined) throw new HttpError(422, 'invalid_attachment', 'Invalid attachment')
+    const assetId = requiredString(input, 'assetId')
+    const asset = store.getLocalAsset(assetId)
+    if (asset === undefined || asset.workspaceId !== workspaceId || asset.kind !== 'attachment') {
+      throw new HttpError(422, 'attachment_unavailable', 'Attachment does not belong to this workspace')
+    }
+    return {
+      assetId: asset.id,
+      name: requiredString(input, 'name').slice(0, 180),
+      mimeType: asset.mimeType,
+      byteLength: asset.byteLength,
+      url: `/api/assets/${asset.id}`,
+    }
+  })
+}
+
+function attachmentAwarePrompt(prompt: string, attachments: ChatAttachment[]): string {
+  const inventory = attachments
+    .map((attachment) => `- ${attachment.name} (${attachment.mimeType}, asset ${attachment.assetId})`)
+    .join('\n')
+  return `${prompt}\n\n用户随消息附加了以下本地文件：\n${inventory}\n请在回复中明确说明你如何使用这些附件；无法读取内容时不要臆测。`
+}
+
+function chatAttachmentJson(attachment: ChatAttachment): JsonObject {
+  return {
+    assetId: attachment.assetId,
+    name: attachment.name,
+    mimeType: attachment.mimeType,
+    byteLength: attachment.byteLength,
+    url: attachment.url,
+  }
 }
 
 function writeHtml(response: ServerResponse, status: number, body: string): void {

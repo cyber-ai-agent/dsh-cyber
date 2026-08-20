@@ -82,6 +82,8 @@ export interface DirectConversationInput {
   worldId: string
   employeeId: string
   prompt: string
+  metadata?: JsonObject
+  runtimePrompt?: string
   sessionId?: string
   title?: string
 }
@@ -91,6 +93,8 @@ export interface GroupConversationInput {
   worldId: string
   employeeIds: string[]
   prompt: string
+  metadata?: JsonObject
+  runtimePrompt?: string
   title?: string
 }
 
@@ -157,9 +161,10 @@ export class ConversationOrchestrator implements AsyncDisposable {
       senderKind: 'owner',
       kind: 'user',
       content: prompt,
+      ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
       correlationId: session.id,
     })
-    const reply = await this.#runAgent(session, employee, prompt)
+    const reply = await this.#runAgent(session, employee, input.runtimePrompt?.trim() || prompt)
     return { session, replies: [reply] }
   }
 
@@ -191,6 +196,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
       senderKind: 'owner',
       kind: 'user',
       content: prompt,
+      ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
       correlationId: session.id,
     })
     this.#store.appendDomainEvent({
@@ -207,7 +213,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
     const replies: AgentReply[] = []
     try {
       for (const employee of employees) {
-        const collaborationPrompt = groupPrompt(prompt, replies)
+        const collaborationPrompt = groupPrompt(input.runtimePrompt?.trim() || prompt, replies)
         replies.push(await this.#runAgent(session, employee, collaborationPrompt))
       }
       this.#store.appendDomainEvent({

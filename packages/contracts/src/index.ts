@@ -1,4 +1,4 @@
-export const CYBER_SCHEMA_VERSION = 5 as const
+export const CYBER_SCHEMA_VERSION = 7 as const
 
 export type IsoTimestamp = string
 export type JsonPrimitive = boolean | number | string | null
@@ -108,6 +108,27 @@ export interface PackagePermissionPreview {
   dataEgress: string[]
   previousVersion?: string
   approvalToken: string
+}
+
+export type RuntimeUpdateStatus =
+  | 'verified'
+  | 'contract-tested'
+  | 'canary-passed'
+  | 'activated'
+  | 'rejected'
+  | 'rolled-back'
+
+export interface RuntimeUpdateTransaction {
+  id: string
+  candidateRoot: string
+  version: string
+  contractId: string
+  status: RuntimeUpdateStatus
+  previousRuntimeRoot?: string
+  report: JsonObject
+  errorCode?: string
+  createdAt: IsoTimestamp
+  updatedAt: IsoTimestamp
 }
 
 export interface EmployeeBlueprint {
@@ -290,17 +311,33 @@ export interface ModelProfile {
   updatedAt: IsoTimestamp
 }
 
-export type LocalAssetKind = 'background'
+export type LocalAssetKind = 'background' | 'attachment'
+export type LocalAssetMimeType =
+  | 'image/png'
+  | 'image/jpeg'
+  | 'image/webp'
+  | 'text/plain'
+  | 'text/markdown'
+  | 'application/json'
+  | 'application/pdf'
 
 export interface LocalAsset {
   id: string
   workspaceId: string
   kind: LocalAssetKind
-  mimeType: 'image/png' | 'image/jpeg' | 'image/webp'
+  mimeType: LocalAssetMimeType
   sha256: string
   relativePath: string
   byteLength: number
   createdAt: IsoTimestamp
+}
+
+export interface ChatAttachment {
+  assetId: string
+  name: string
+  mimeType: LocalAssetMimeType
+  byteLength: number
+  url: string
 }
 
 export type WorkSessionKind = 'direct' | 'group' | 'meeting' | 'task'
@@ -484,6 +521,7 @@ export interface DatabaseDoctorReport {
     messages: number
     installedPackages: number
     packageTransactions: number
+    runtimeUpdates: number
     events: number
     outbox: number
   }

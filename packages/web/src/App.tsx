@@ -8,12 +8,15 @@ import {
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
 import type {
   AgentRuntimeEvent,
+  ChatAttachment,
   CyberPackageManifest,
   EmployeeBlueprint,
   EmployeeDossier,
   EmployeeInstance,
   EmployeeRevision,
   InstalledPackage,
+  JsonObject,
+  LocalAssetMimeType,
   ModelProfile,
   PackageInstallTransaction,
   PackagePermissionPreview,
@@ -35,8 +38,9 @@ import { PackageMarketDialog } from './components/PackageMarketDialog.js'
 import { RecruitmentDialog } from './components/RecruitmentDialog.js'
 import { ResizableShell } from './components/ResizableShell.js'
 import { SettingsDialog, type SettingsSection, type SystemAction, type SystemActionResult } from './components/SettingsDialog.js'
-import { demoData } from './demo-data.js'
+import { demoData, demoTavernDossiers, demoTavernEmployees, demoTavernMessages, demoTavernSessions } from './demo-data.js'
 import type { CyberEmployee, DockTab, LiveAgentTurn } from './types.js'
+import { worldExperience } from './world-experience.js'
 
 const demoMode = new URLSearchParams(window.location.search).get('demo') === '1'
 
@@ -87,6 +91,7 @@ export default function App() {
   const [error, setError] = useState<string | undefined>()
 
   const activeSession = sessions.find((session) => session.id === activeSessionId)
+  const experience = activeWorld === undefined ? undefined : worldExperience(activeWorld)
   const selectedEmployee = employees.find((employee) => employee.id === selectedEmployeeId)
   const managingEmployee = employees.find((employee) => employee.id === managingEmployeeId)
   const managingDossier = managingEmployeeId === undefined ? undefined : dossiers[managingEmployeeId]
@@ -103,10 +108,14 @@ export default function App() {
     setDockTab('world')
     if (demoMode) {
       const isCompany = world.id === demoData.activeWorld.id
-      setEmployees(isCompany ? demoData.employees : [])
-      setSessions(isCompany ? demoData.sessions : [])
-      setMessages(isCompany ? demoData.messages : [])
-      setActiveSessionId(isCompany ? demoData.sessions[0]?.id : undefined)
+      const nextEmployees = isCompany ? demoData.employees : demoTavernEmployees
+      const nextSessions = isCompany ? demoData.sessions : demoTavernSessions
+      const nextMessages = isCompany ? demoData.messages : demoTavernMessages
+      setEmployees(nextEmployees)
+      setSessions(nextSessions)
+      setMessages(nextMessages)
+      setDossiers(isCompany ? demoData.dossiers : demoTavernDossiers)
+      setActiveSessionId(nextSessions[0]?.id)
       return
     }
     const snapshot = await api<WorldSnapshot>(`/api/worlds/${world.id}/snapshot`)
@@ -468,10 +477,14 @@ export default function App() {
 
   const selectSession = useCallback((sessionId: string) => {
     setActiveSessionId(sessionId)
-    if (demoMode) setMessages(sessionId === demoData.sessions[0]?.id ? demoData.messages : [])
+    if (demoMode) {
+      setMessages(sessionId === demoData.sessions[0]?.id
+        ? demoData.messages
+        : sessionId === demoTavernSessions[0]?.id ? demoTavernMessages : [])
+    }
   }, [])
 
-  const send = useCallback(async (prompt: string) => {
+  const send = useCallback(async (prompt: string, attachments: ChatAttachment[]) => {
     if (activeWorld === undefined) return
     setSending(true)
     setLiveTurns([])
@@ -481,7 +494,15 @@ export default function App() {
         const session = activeSession ?? makeDemoSession(activeWorld, prompt)
         const mentioned = employees.filter((employee) => prompt.includes(`@${employee.displayName}`))
         const targets = mentioned.length > 0 ? mentioned : employees.slice(0, 1)
-        const ownerMessage = makeDemoMessage(session.id, messages.length + 1, 'owner', 'owner', 'user', prompt)
+        const ownerMessage = makeDemoMessage(
+          session.id,
+          messages.length + 1,
+          'owner',
+          'owner',
+          'user',
+          prompt,
+          attachments.length === 0 ? undefined : { attachments: serializableAttachments(attachments) },
+        )
         setSessions((current) => current.some((item) => item.id === session.id) ? current : [session, ...current])
         setActiveSessionId(session.id)
         setMessages((current) => [...current, ownerMessage])
@@ -493,14 +514,20 @@ export default function App() {
           employee.id,
           'employee',
           'assistant',
-          `${employee.displayName}收到。我会以${employee.role}的职责独立处理“${compactPrompt(prompt)}”，完成后给出证据、产物和下一步。`,
+          activeWorld.templateId.includes('tavern')
+            ? tavernDemoReply(employee, prompt)
+            : `${employee.displayName}收到。我会以${employee.role}的职责独立处理“${compactPrompt(prompt)}”，完成后给出证据、产物和下一步。`,
         ))
         setMessages((current) => [...current, ...replies])
         return
       }
       const result = await api<ChatResult>(`/api/worlds/${activeWorld.id}/chat`, {
         method: 'POST',
-        body: JSON.stringify({ prompt, ...(activeSessionId === undefined ? {} : { sessionId: activeSessionId }) }),
+        body: JSON.stringify({
+          prompt,
+          ...(attachments.length === 0 ? {} : { attachments }),
+          ...(activeSessionId === undefined ? {} : { sessionId: activeSessionId }),
+        }),
       })
       setDraft('')
       setActiveSessionId(result.session.id)
@@ -514,6 +541,26 @@ export default function App() {
       setLiveTurns([])
     }
   }, [activeSession, activeSessionId, activeWorld, employees, messages.length])
+
+  const uploadChatAttachment = useCallback(async (file: File): Promise<ChatAttachment> => {
+    if (workspace === undefined) throw new Error('请先创建工作区')
+    const mimeType = attachmentMimeType(file)
+    if (demoMode) {
+      return {
+        assetId: `demo-attachment-${Date.now()}`,
+        name: file.name,
+        mimeType,
+        byteLength: file.size,
+        url: URL.createObjectURL(file),
+      }
+    }
+    const dataBase64 = await fileToBase64(file)
+    const result = await api<{ attachment: ChatAttachment }>(`/api/workspaces/${workspace.id}/assets/attachment`, {
+      method: 'POST',
+      body: JSON.stringify({ name: file.name, mimeType, dataBase64 }),
+    })
+    return result.attachment
+  }, [workspace])
 
   const savePreferences = useCallback(async (next: WorkspacePreferences) => {
     if (workspace === undefined) return
@@ -602,7 +649,7 @@ export default function App() {
         <div className="topbar__workspace"><span>当前工作区：</span><strong>{workspace.name}</strong><span className="topbar__chevron">⌄</span></div>
         <nav aria-label="全局功能">
           <button type="button" onClick={() => void openPackageMarket()}><Cube size={16} />软件包市场</button>
-          <button type="button" onClick={() => void openRecruitment()}><Storefront size={16} />员工市场</button>
+          <button type="button" onClick={() => void openRecruitment()}><Storefront size={16} />{experience?.marketLabel ?? '角色市场'}</button>
           <button type="button" onClick={() => { setSettingsSection('runtime'); setSettingsOpen(true) }}><Pulse size={16} /><span>运行时健康</span><i className="health-indicator" />良好</button>
           <button type="button" onClick={() => { setSettingsSection('appearance'); setSettingsOpen(true) }}><GearSix size={17} />设置</button>
         </nav>
@@ -612,6 +659,7 @@ export default function App() {
         leftWidth={preferences.leftPaneWidth}
         rightWidth={preferences.rightPaneWidth}
         rightCollapsed={dockCollapsed}
+        rightPrimary={dockTab === 'world'}
         onResize={resize}
         left={(
           <NavigationPane
@@ -631,6 +679,7 @@ export default function App() {
         center={(
           <ChatWorkbench
             demoMode={demoMode}
+            world={activeWorld}
             {...(activeSession === undefined ? {} : { session: activeSession })}
             messages={messages}
             employees={employees}
@@ -639,6 +688,7 @@ export default function App() {
             draft={draft}
             onDraftChange={setDraft}
             onSend={send}
+            onUploadAttachment={uploadChatAttachment}
             onOpenDossier={(employeeId) => void openDossier(employeeId)}
             onOpenArtifact={() => { setDockCollapsed(false); setDockTab('preview') }}
             onRecruit={() => void openRecruitment()}
@@ -651,7 +701,7 @@ export default function App() {
             {...(selectedEmployee === undefined ? {} : { selectedEmployee })}
             dossiers={dossiers}
             employees={employees}
-            worldName={activeWorld.name}
+            world={activeWorld}
             {...(backgroundImage === undefined ? {} : { sceneImage: backgroundImage })}
             onTabChange={setDockTab}
             onCollapse={() => setDockCollapsed(true)}
@@ -659,6 +709,7 @@ export default function App() {
             onDirectEmployee={directEmployee}
             onManageEmployee={(employee) => setManagingEmployeeId(employee.id)}
             onShowAllDossiers={() => setSelectedEmployeeId(undefined)}
+            onInvite={() => void openRecruitment()}
           />
         )}
       />
@@ -679,6 +730,7 @@ export default function App() {
       {recruitmentOpen ? (
         <RecruitmentDialog
           blueprints={blueprints}
+          world={activeWorld}
           loading={catalogLoading}
           recruiting={recruiting}
           onClose={() => setRecruitmentOpen(false)}
@@ -774,14 +826,22 @@ function makeDemoSession(world: World, prompt: string): WorkSession {
   return { id: `session-${Date.now()}`, workspaceId: world.workspaceId, worldId: world.id, kind: 'direct', title: compactPrompt(prompt), status: 'open', createdAt: timestamp, updatedAt: timestamp }
 }
 
-function makeDemoMessage(sessionId: string, sequence: number, senderId: string, senderKind: WorkMessage['senderKind'], kind: WorkMessage['kind'], content: string): WorkMessage {
+function makeDemoMessage(sessionId: string, sequence: number, senderId: string, senderKind: WorkMessage['senderKind'], kind: WorkMessage['kind'], content: string, metadata?: JsonObject): WorkMessage {
   const createdAt = new Date().toISOString()
-  return { id: `message-${Date.now()}-${sequence}`, sessionId, sequence, senderId, senderKind, kind, content, metadata: { displayTime: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }, createdAt }
+  return { id: `message-${Date.now()}-${sequence}`, sessionId, sequence, senderId, senderKind, kind, content, metadata: { displayTime: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }), ...metadata }, createdAt }
 }
 
 function compactPrompt(value: string): string {
   const compact = value.replace(/\s+/g, ' ').trim()
   return compact.length > 36 ? `${compact.slice(0, 35)}…` : compact
+}
+
+function tavernDemoReply(employee: CyberEmployee, prompt: string): string {
+  const cue = compactPrompt(prompt.replace(new RegExp(`@${employee.displayName}`, 'g'), '').trim())
+  if (employee.id.includes('innkeeper')) return `伊瑟拉把杯子轻轻放下，目光越过摇晃的烛火：“${cue || '你终于来了'}……这句话，我十二年前也听过一次。”`
+  if (employee.id.includes('bard')) return `洛安按住仍在震颤的琴弦，笑意并未抵达眼底：“关于‘${cue || '这个故事'}’，歌里有三个版本。你想先听活人的，还是亡者的？”`
+  if (employee.id.includes('knight')) return `凯恩抬起被雨水打湿的脸，声音很低：“${cue || '继续说'}。但如果你提到北境，我会先问清你的立场。”`
+  return `弥娅翻开皮革封面的旧册，在你的话旁写下时间与见证者：“${cue || '这段对话'}已经归档。现在，我们可以追查它和旧传闻的联系。”`
 }
 
 function resolveBackground(reference?: string): string | undefined {
@@ -798,6 +858,33 @@ function fileToBase64(file: File): Promise<string> {
     reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '')
     reader.readAsDataURL(file)
   })
+}
+
+function attachmentMimeType(file: File): LocalAssetMimeType {
+  const byType = file.type.toLowerCase()
+  const supported: LocalAssetMimeType[] = [
+    'image/png', 'image/jpeg', 'image/webp',
+    'text/plain', 'text/markdown', 'application/json', 'application/pdf',
+  ]
+  if (supported.includes(byType as LocalAssetMimeType)) return byType as LocalAssetMimeType
+  const extension = file.name.toLowerCase().split('.').pop()
+  const byExtension: Record<string, LocalAssetMimeType> = {
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp',
+    txt: 'text/plain', md: 'text/markdown', json: 'application/json', pdf: 'application/pdf',
+  }
+  const inferred = extension === undefined ? undefined : byExtension[extension]
+  if (inferred === undefined) throw new Error('仅支持 PNG、JPEG、WebP、TXT、Markdown、JSON 和 PDF 附件。')
+  return inferred
+}
+
+function serializableAttachments(attachments: ChatAttachment[]): JsonObject[] {
+  return attachments.map((attachment) => ({
+    assetId: attachment.assetId,
+    name: attachment.name,
+    mimeType: attachment.mimeType,
+    byteLength: attachment.byteLength,
+    url: attachment.url,
+  }))
 }
 
 function delay(milliseconds: number): Promise<void> {
