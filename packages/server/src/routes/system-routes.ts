@@ -1,4 +1,5 @@
-import { join } from 'node:path'
+import { cp, mkdir, readdir, stat, writeFile } from 'node:fs/promises'
+import { basename, join } from 'node:path'
 
 import {
   inspectHarnessCompatibility,
@@ -51,9 +52,14 @@ export function registerSystemRoutes(router: Router, dependencies: SystemRoutesD
   })
 
   router.post('/api/system/backup', async ({ response }) => {
-    const destination = join(stateRoot, 'backups', `dsh-cyber-${artifactTimestamp()}.sqlite`)
-    const output = await store.backup(destination)
-    writeJson(response, 201, { ok: true, kind: 'backup', output, createdAt: new Date().toISOString() })
+    const output = await createLocalBackupBundle(stateRoot, store)
+    writeJson(response, 201, {
+      ok: true,
+      kind: 'backup-bundle',
+      output,
+      createdAt: new Date().toISOString(),
+      excluded: ['credentials', 'runtime', 'world-cache'],
+    })
   })
 
   router.post('/api/system/export', async ({ response }) => {
@@ -95,19 +101,62 @@ export function registerSystemRoutes(router: Router, dependencies: SystemRoutesD
 
   router.post(/^\/api\/system\/update\/([^/]+)\/activate$/, async ({ request, response, params }) => {
     const body = await readJson(request)
-    writeJson(response, 200, await runtimeUpdates.activate(
-      params[0]!,
-      requiredBoolean(body, 'approved'),
-    ))
+    writeJson(response, 200, await runtimeUpdates.activate(params[0]!, requiredBoolean(body, 'approved')))
   })
 
   router.post(/^\/api\/system\/update\/([^/]+)\/rollback$/, async ({ request, response, params }) => {
     const body = await readJson(request)
-    writeJson(response, 200, await runtimeUpdates.rollback(
-      params[0]!,
-      requiredBoolean(body, 'approved'),
-    ))
+    writeJson(response, 200, await runtimeUpdates.rollback(params[0]!, requiredBoolean(body, 'approved')))
   })
+}
+
+async function createLocalBackupBundle(stateRoot: string, store: SqliteStore): Promise<string> {
+  const backupRoot = join(stateRoot, 'backups')
+  const destination = join(backupRoot, `dsh-cyber-${artifactTimestamp()}`)
+  await mkdir(destination, { recursive: true })
+  await store.backup(join(destination, 'database.sqlite'))
+
+  const included: string[] = ['database.sqlite']
+  for (const directory of ['worlds', 'assets', 'packages']) {
+    const source = join(stateRoot, directory)
+    if (!await exists(source)) continue
+    const target = join(destination, directory)
+    await copyBackupTree(source, target, directory === 'worlds')
+    included.push(directory)
+  }
+
+  const manifest = {
+    schemaVersion: 1,
+    createdAt: new Date().toISOString(),
+    format: 'dsh-cyber-local-backup',
+    included,
+    excluded: ['credentials', 'runtime', 'worlds/*/cache'],
+    notes: '模型密钥不会进入普通备份；世界访问锁、世界设置、文件与世界资产包含在 worlds 中。',
+  }
+  await writeFile(join(destination, 'backup-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
+  return destination
+}
+
+async function copyBackupTree(source: string, destination: string, excludeWorldCache: boolean): Promise<void> {
+  await mkdir(destination, { recursive: true })
+  for (const entry of await readdir(source, { withFileTypes: true })) {
+    if (entry.isSymbolicLink()) continue
+    if (excludeWorldCache && entry.name === 'cache') continue
+    const from = join(source, entry.name)
+    const to = join(destination, entry.name)
+    if (entry.isDirectory()) {
+      await copyBackupTree(from, to, excludeWorldCache)
+      continue
+    }
+    if (!entry.isFile()) continue
+    await cp(from, to, { force: false, errorOnExist: true, preserveTimestamps: true })
+    const info = await stat(to)
+    if (info.size < 0) throw new Error(`Backup copy failed: ${basename(to)}`)
+  }
+}
+
+async function exists(path: string): Promise<boolean> {
+  try { await stat(path); return true } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error }
 }
 
 function artifactTimestamp(): string {
