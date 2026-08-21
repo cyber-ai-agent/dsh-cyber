@@ -28,6 +28,14 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - name: Sanitize one bootstrap documentation literal
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('scripts/apply-world-foundation-v3.mjs')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace('每个世界拥有独立的 \\\`<stateRoot>/worlds/<worldId>/files\\\`、assets、exports 与 cache 目录。', '每个世界拥有独立的 <stateRoot>/worlds/<worldId>/files、assets、exports 与 cache 目录。')
+          p.write_text(s, encoding='utf-8')
       - name: Apply architecture migration
         run: node scripts/apply-world-foundation-v3.mjs
       - name: Refresh lockfile for DSH rc.8
