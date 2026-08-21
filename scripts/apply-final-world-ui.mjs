@@ -41,3 +41,23 @@ replace(
 )
 
 await writeFile(path, source, 'utf8')
+
+const e2ePath = 'e2e/workbench.spec.ts'
+let e2e = await readFile(e2ePath, 'utf8')
+
+function replaceE2E(from, to, required = true) {
+  if (!e2e.includes(from)) {
+    if (required) throw new Error(`Missing E2E patch anchor: ${from.slice(0, 120)}`)
+    return
+  }
+  e2e = e2e.replace(from, to)
+}
+
+// The first-run UI now creates “我的世界” and recruits the built-in 管家.
+e2e = e2e.replaceAll("name: '创建本地工作区'", "name: '创建我的世界'")
+replaceE2E(
+  `  await expect(page.getByRole('heading', { name: '公司还没有角色' })).toBeVisible()\n  const composer = page.getByRole('textbox', { name: '给当前世界的角色发送消息' })\n  await expect(composer).toBeDisabled()\n  await expect(composer).toHaveCount(1)\n\n  await page.getByRole('button', { name: '添加第一名角色' }).click()`,
+  `  await expect(page.getByRole('button', { name: '与管家私聊' })).toBeVisible()\n  const composer = page.getByRole('textbox', { name: '给当前世界的角色发送消息' })\n  await expect(composer).toBeEnabled()\n  await expect(composer).toHaveCount(1)\n\n  await page.getByRole('button', { name: '添加角色' }).click()`,
+)
+
+await writeFile(e2ePath, e2e, 'utf8')
