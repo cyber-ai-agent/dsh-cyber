@@ -52,7 +52,8 @@ jobs:
             echo '== semantic resolution =='
             git checkout --ours pnpm-lock.yaml || exit $?
             node scripts/resolve-pr8-merge.mjs || exit $?
-            git add packages/server/src/server.ts packages/web/src/App.tsx packages/web/src/components/ChatWorkbench.tsx pnpm-lock.yaml || exit $?
+            sed -i "s/getByRole('button', { name: '设置' })/getByRole('button', { name: '设置', exact: true })/g" e2e/workbench.spec.ts
+            git add packages/server/src/server.ts packages/web/src/App.tsx packages/web/src/components/ChatWorkbench.tsx e2e/workbench.spec.ts pnpm-lock.yaml || exit $?
             if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
               echo "Unresolved conflicts remain" >&2
               git diff --name-only --diff-filter=U
