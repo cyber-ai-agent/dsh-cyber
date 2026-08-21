@@ -19,33 +19,54 @@ jobs:
           ref: merge/pr-8-integration
       - name: Fetch PR 8 head
         run: git fetch origin refs/pull/8/head:refs/remotes/origin/pr8
-      - name: Attempt real merge and report conflicts
+      - name: Attempt merge
+        id: merge
         shell: bash
         run: |
           set +e
           git merge --no-ff --no-edit refs/remotes/origin/pr8
           status=$?
           if [ "$status" -ne 0 ]; then
-            echo '=== CONFLICTS ==='
-            git diff --name-only --diff-filter=U
-            echo '=== CONFLICT MARKERS ==='
-            git diff --cc --stat
-            exit "$status"
+            git diff --name-only --diff-filter=U > /tmp/pr8-conflicts.txt
+            git merge --abort || true
+            cp /tmp/pr8-conflicts.txt PR8_CONFLICTS.txt
+            echo "conflicted=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "conflicted=false" >> "$GITHUB_OUTPUT"
           fi
+      - name: Persist conflict inventory
+        if: steps.merge.outputs.conflicted == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add PR8_CONFLICTS.txt
+          git commit -m "ci: capture PR 8 conflict inventory"
+          git push origin HEAD:merge/pr-8-integration
+      - name: Stop on conflicts
+        if: steps.merge.outputs.conflicted == 'true'
+        run: exit 1
       - uses: pnpm/action-setup@v4
+        if: steps.merge.outputs.conflicted == 'false'
         with:
           version: 11.7.0
           run_install: false
       - uses: actions/setup-node@v4
+        if: steps.merge.outputs.conflicted == 'false'
         with:
           node-version: 22.19.0
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck
-      - run: pnpm test
-      - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm test:e2e
+      - if: steps.merge.outputs.conflicted == 'false'
+        run: pnpm install --frozen-lockfile
+      - if: steps.merge.outputs.conflicted == 'false'
+        run: pnpm typecheck
+      - if: steps.merge.outputs.conflicted == 'false'
+        run: pnpm test
+      - if: steps.merge.outputs.conflicted == 'false'
+        run: pnpm exec playwright install --with-deps chromium
+      - if: steps.merge.outputs.conflicted == 'false'
+        run: pnpm test:e2e
       - name: Push verified merge commit
+        if: steps.merge.outputs.conflicted == 'false'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
