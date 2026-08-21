@@ -621,7 +621,7 @@ export default function App() {
           revision: (previous?.revision ?? 0) + 1,
           background: previous?.background ?? managingEmployee.role,
           personalityTraits: previous?.personalityTraits ?? [],
-          appearance: { ...(previous?.appearance ?? {}), avatarIndex: input.avatarIndex },
+          appearance: { ...(previous?.appearance ?? {}), avatarIndex: input.avatarIndex, worldSkinIndex: input.avatarIndex },
           reason: '更新角色名片与形象',
           createdAt: new Date().toISOString(),
           ...(previous?.birthday === undefined ? {} : { birthday: previous.birthday }),
@@ -631,7 +631,7 @@ export default function App() {
           method: 'PUT',
           body: JSON.stringify({
             displayName: input.displayName,
-            appearance: { ...(previous?.appearance ?? {}), avatarIndex: input.avatarIndex },
+            appearance: { ...(previous?.appearance ?? {}), avatarIndex: input.avatarIndex, worldSkinIndex: input.avatarIndex },
             reason: '更新角色名片与形象',
           }),
         })
@@ -647,6 +647,7 @@ export default function App() {
           ? current
           : { ...current, [managingEmployee.id]: { ...dossier, employee: { ...dossier.employee, displayName: input.displayName, updatedAt }, ...(profile === undefined ? {} : { profile }) } }
       })
+      setWorldRuntimeRevision((value) => value + 1)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '角色名片保存失败')
     } finally {
@@ -1145,6 +1146,11 @@ export default function App() {
                     const employee = employees.find((item) => item.id === employeeId)
                     if (employee !== undefined) directEmployee(employee)
                   }}
+                  onStartGroup={(employeeIds) => {
+                    const selected = employees.filter((employee) => employeeIds.includes(employee.id))
+                    if (selected.length < 2) return
+                    createGroupIntent({ employeeIds: selected.map((employee) => employee.id), title: selected.map((employee) => employee.displayName).join('、') })
+                  }}
                   onRecruit={() => void openRecruitment()}
                 />
               ),
@@ -1192,6 +1198,7 @@ export default function App() {
       {recruitmentOpen ? (
         <RecruitmentDialog
           blueprints={blueprints}
+          employees={employees}
           world={activeWorld}
           loading={catalogLoading}
           recruiting={recruiting}
@@ -1363,7 +1370,7 @@ function stableAvatar(id: string, fallback: number): number {
 
 function statusActivity(employee: EmployeeInstance): string {
   if (employee.status === 'working') return `正在执行${employee.role}任务`
-  if (employee.status === 'blocked') return '等待依赖或老板推进'
+  if (employee.status === 'blocked') return '等待依赖或进一步处理'
   if (employee.status === 'waiting') return '等待下一步处理'
   return '可接新任务'
 }
