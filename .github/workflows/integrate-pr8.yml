@@ -7,6 +7,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: integrate-pr8
+  cancel-in-progress: true
+
 jobs:
   merge-and-verify:
     if: github.actor != 'github-actions[bot]'
@@ -17,30 +21,6 @@ jobs:
         with:
           fetch-depth: 0
           ref: merge/pr-8-integration
-      - name: Configure git identity
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-      - name: Fetch PR 8 head
-        run: git fetch origin refs/pull/8/head:refs/remotes/origin/pr8
-      - name: Merge PR 8 and resolve semantic conflicts
-        run: |
-          git merge --no-ff --no-edit refs/remotes/origin/pr8 || true
-          conflicts="$(git diff --name-only --diff-filter=U)"
-          printf '%s\n' "$conflicts"
-          expected=$'packages/server/src/server.ts\npackages/web/src/App.tsx\npackages/web/src/components/ChatWorkbench.tsx\npnpm-lock.yaml'
-          if [ "$conflicts" != "$expected" ]; then
-            echo "Unexpected conflict set" >&2
-            exit 1
-          fi
-          git checkout --ours pnpm-lock.yaml
-          node scripts/resolve-pr8-merge.mjs
-          git add packages/server/src/server.ts packages/web/src/App.tsx packages/web/src/components/ChatWorkbench.tsx pnpm-lock.yaml
-          if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
-            echo "Unresolved conflicts remain" >&2
-            git diff --name-only --diff-filter=U
-            exit 1
-          fi
       - uses: pnpm/action-setup@v4
         with:
           version: 11.7.0
@@ -49,31 +29,71 @@ jobs:
         with:
           node-version: 22.19.0
           cache: pnpm
-      - name: Regenerate lockfile from merged package manifests
+      - name: Integrate and verify PR 8
+        shell: bash
         run: |
-          pnpm install --no-frozen-lockfile
-          git add pnpm-lock.yaml
-      - name: Validate merge tree
-        run: |
-          git add -A
-          git diff --cached --check
-          if git grep -nE '^(<<<<<<<|=======|>>>>>>>)' -- ':!PR8_*' ':!scripts/resolve-pr8-merge.mjs'; then
-            echo "Conflict markers remain" >&2
-            exit 1
+          set +e
+          set -o pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f PR8_INTEGRATION_FAILURE.log
+          {
+            echo '== fetch =='
+            git fetch origin refs/pull/8/head:refs/remotes/origin/pr8 || exit $?
+            echo '== merge =='
+            git merge --no-ff --no-edit refs/remotes/origin/pr8 || true
+            conflicts="$(git diff --name-only --diff-filter=U)"
+            printf '%s\n' "$conflicts"
+            expected=$'packages/server/src/server.ts\npackages/web/src/App.tsx\npackages/web/src/components/ChatWorkbench.tsx\npnpm-lock.yaml'
+            if [ "$conflicts" != "$expected" ]; then
+              echo "Unexpected conflict set" >&2
+              exit 31
+            fi
+            echo '== semantic resolution =='
+            git checkout --ours pnpm-lock.yaml || exit $?
+            node scripts/resolve-pr8-merge.mjs || exit $?
+            git add packages/server/src/server.ts packages/web/src/App.tsx packages/web/src/components/ChatWorkbench.tsx pnpm-lock.yaml || exit $?
+            if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+              echo "Unresolved conflicts remain" >&2
+              git diff --name-only --diff-filter=U
+              exit 32
+            fi
+            echo '== lockfile =='
+            pnpm install --no-frozen-lockfile || exit $?
+            git add -A || exit $?
+            git diff --cached --check || exit $?
+            if git grep -nE '^(<<<<<<<|=======|>>>>>>>)' -- ':!PR8_*' ':!scripts/resolve-pr8-merge.mjs'; then
+              echo "Conflict markers remain" >&2
+              exit 33
+            fi
+            echo '== typecheck =='
+            pnpm typecheck || exit $?
+            echo '== tests =='
+            pnpm test || exit $?
+            echo '== chromium =='
+            pnpm exec playwright install --with-deps chromium || exit $?
+            echo '== e2e =='
+            pnpm test:e2e || exit $?
+            echo '== verify =='
+            pnpm verify || exit $?
+            echo '== commit merge =='
+            git commit --no-edit || exit $?
+            echo '== cleanup =='
+            rm -f PR8_CONFLICTS.txt PR8_CONFLICT_PATCH.diff PR8_SERVER_CONFLICT.txt PR8_APP_CONFLICT.txt PR8_CHAT_CONFLICT.txt PR8_INTEGRATION_FAILURE.log
+            rm -f scripts/resolve-pr8-merge.mjs .github/workflows/integrate-pr8.yml
+            git add -A || exit $?
+            git commit -m "chore: remove PR 8 integration diagnostics" || exit $?
+            echo '== push =='
+            git push origin HEAD:merge/pr-8-integration || exit $?
+          } 2>&1 | tee /tmp/pr8-integration.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            cp /tmp/pr8-integration.log /tmp/pr8-integration-failure.log
+            if git rev-parse -q --verify MERGE_HEAD >/dev/null; then git merge --abort || true; fi
+            git reset --hard HEAD
+            cp /tmp/pr8-integration-failure.log PR8_INTEGRATION_FAILURE.log
+            git add -f PR8_INTEGRATION_FAILURE.log
+            git commit -m "ci: capture PR 8 integration failure" || true
+            git push origin HEAD:merge/pr-8-integration || true
+            exit "$status"
           fi
-      - run: pnpm typecheck
-      - run: pnpm test
-      - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm test:e2e
-      - run: pnpm verify
-      - name: Commit validated merge
-        run: |
-          git commit --no-edit
-      - name: Remove integration-only diagnostics
-        run: |
-          rm -f PR8_CONFLICTS.txt PR8_CONFLICT_PATCH.diff PR8_SERVER_CONFLICT.txt PR8_APP_CONFLICT.txt PR8_CHAT_CONFLICT.txt
-          rm -f scripts/resolve-pr8-merge.mjs .github/workflows/integrate-pr8.yml
-          git add -A
-          git commit -m "chore: remove PR 8 integration diagnostics"
-      - name: Push validated integration
-        run: git push origin HEAD:merge/pr-8-integration
