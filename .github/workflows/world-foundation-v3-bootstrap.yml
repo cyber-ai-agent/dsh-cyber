@@ -1,0 +1,50 @@
+name: world-foundation-v3-bootstrap
+
+on:
+  push:
+    branches:
+      - feat/world-foundation-v3
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: feat/world-foundation-v3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Enable pnpm
+        run: corepack enable
+      - name: Apply architecture migration
+        run: node scripts/apply-world-foundation-v3.mjs
+      - name: Refresh lockfile for DSH rc.8
+        run: pnpm install --no-frozen-lockfile
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Unit and integration tests
+        run: pnpm test
+      - name: Chromium E2E
+        run: |
+          pnpm exec playwright install --with-deps chromium
+          pnpm test:e2e
+      - name: Verify
+        run: pnpm verify
+      - name: Ensure clean patches
+        run: git diff --check
+      - name: Commit verified implementation
+        shell: bash
+        run: |
+          rm -f scripts/apply-world-foundation-v3.mjs .github/workflows/world-foundation-v3-bootstrap.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: establish isolated configurable character worlds and DSH rc.8"
+          git push origin HEAD:feat/world-foundation-v3
