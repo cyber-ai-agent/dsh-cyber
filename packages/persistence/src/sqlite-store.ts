@@ -970,7 +970,7 @@ export class SqliteStore {
         `Employee blueprint not found: ${input.blueprintId}@${input.blueprintVersion}`,
       )
     }
-    if (blueprint.worldTemplateId !== world.templateId) {
+    if (blueprint.worldTemplateId !== world.templateId && world.templateId !== 'personal-world') {
       throw new PersistenceError(
         `Blueprint ${blueprint.id}@${blueprint.version} belongs to ${blueprint.worldTemplateId}, not ${world.templateId}`,
       )

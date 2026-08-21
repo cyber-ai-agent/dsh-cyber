@@ -33,16 +33,16 @@ test('onboards, recruits, talks, browses dossiers and previews a real workspace 
 
   await expect(page.getByRole('heading', { name: '创建第一个本地世界' })).toBeVisible()
   await expect(page.getByRole('textbox')).toHaveCount(0)
-  await page.getByRole('button', { name: '创建本地工作区' }).click()
+  await page.getByRole('button', { name: '创建我的世界' }).click()
 
   await expect(page.locator('.workbench-shell')).toBeVisible()
   await expect(page.locator('.world-runtime-canvas')).toBeVisible()
-  await expect(page.getByRole('heading', { name: '公司还没有角色' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '与管家私聊' })).toBeVisible()
   const composer = page.getByRole('textbox', { name: '给当前世界的角色发送消息' })
-  await expect(composer).toBeDisabled()
+  await expect(composer).toBeEnabled()
   await expect(composer).toHaveCount(1)
 
-  await page.getByRole('button', { name: '添加第一名角色' }).click()
+  await page.locator('.left-pane').getByRole('button', { name: '添加角色' }).click()
   const market = page.getByRole('dialog', { name: '角色市场' })
   await expect(market).toBeVisible()
   await market.getByRole('button', { name: /开发工程师 v1/ }).click()
@@ -207,7 +207,7 @@ test('keeps the workbench readable and the world viewport filled on a 4K display
   await page.goto(origin)
   const onboarding = page.getByRole('heading', { name: '创建第一个本地世界' })
   if (await onboarding.isVisible()) {
-    await page.getByRole('button', { name: '创建本地工作区' }).click()
+    await page.getByRole('button', { name: '创建我的世界' }).click()
   }
   const dock = page.getByRole('region', { name: '产物与世界侧边栏' })
 

@@ -171,6 +171,7 @@ export default function App() {
     const capability = await api<{ supported: boolean }>(`/api/worlds/${world.id}/runtime-capability`)
     const settingsResult = await api<{ settings: WorldSettings; access: WorldAccessSummary }>(`/api/worlds/${world.id}/settings`)
     setWorldSettings(settingsResult.settings)
+    applyWorldAppearance(settingsResult.settings)
     setWorldAccess(settingsResult.access)
     setReasoningEffort(settingsResult.settings.model.reasoningEffort)
     setWorldRuntimeAvailable(capability.supported)
@@ -1098,7 +1099,7 @@ export default function App() {
           onBindTheme={bindWorldTheme}
         />
       ) : null}
-      {worldSettingsOpen && activeWorld !== undefined && worldSettings !== undefined && worldAccess !== undefined ? <WorldSettingsDialog world={activeWorld} value={worldSettings} access={worldAccess} models={models} saving={savingSettings} onClose={()=>setWorldSettingsOpen(false)} onSave={async (value)=>{ setSavingSettings(true); try { const result = await api<{settings:WorldSettings}>(`/api/worlds/${activeWorld.id}/settings`, { method:'PUT', body:JSON.stringify(value) }); setWorldSettings(result.settings); setReasoningEffort(result.settings.model.reasoningEffort); document.documentElement.style.setProperty('--world-accent', result.settings.appearance.accentColor); document.documentElement.style.setProperty('--world-background', result.settings.appearance.pageBackground); document.documentElement.style.setProperty('--world-character-bubble', result.settings.appearance.characterBubbleColor); document.documentElement.style.setProperty('--world-bubble-radius', `${result.settings.appearance.bubbleRadius}px`) } finally { setSavingSettings(false) } }} onSetPassword={async(password)=>{ const result=await api<{access:WorldAccessSummary}>(`/api/worlds/${activeWorld.id}/access/password`,{method:'POST',body:JSON.stringify({password})});setWorldAccess(result.access)}} onClearPassword={async()=>{const result=await api<{access:WorldAccessSummary}>(`/api/worlds/${activeWorld.id}/access/password`,{method:'DELETE'});setWorldAccess(result.access)}} onLock={async()=>{await api(`/api/worlds/${activeWorld.id}/access/lock`,{method:'POST',body:'{}'});setWorldSettingsOpen(false);setLockedWorld(activeWorld)}} /> : null}
+      {worldSettingsOpen && activeWorld !== undefined && worldSettings !== undefined && worldAccess !== undefined ? <WorldSettingsDialog world={activeWorld} value={worldSettings} access={worldAccess} models={models} saving={savingSettings} onClose={()=>setWorldSettingsOpen(false)} onSave={async (value)=>{ setSavingSettings(true); try { const result = await api<{settings:WorldSettings}>(`/api/worlds/${activeWorld.id}/settings`, { method:'PUT', body:JSON.stringify(value) }); setWorldSettings(result.settings); setReasoningEffort(result.settings.model.reasoningEffort); applyWorldAppearance(result.settings) } finally { setSavingSettings(false) } }} onSetPassword={async(password)=>{ const result=await api<{access:WorldAccessSummary}>(`/api/worlds/${activeWorld.id}/access/password`,{method:'POST',body:JSON.stringify({password})});setWorldAccess(result.access)}} onClearPassword={async()=>{const result=await api<{access:WorldAccessSummary}>(`/api/worlds/${activeWorld.id}/access/password`,{method:'DELETE'});setWorldAccess(result.access)}} onLock={async()=>{await api(`/api/worlds/${activeWorld.id}/access/lock`,{method:'POST',body:'{}'});setWorldSettingsOpen(false);setLockedWorld(activeWorld)}} /> : null}
       {lockedWorld !== undefined ? <WorldUnlockDialog worldName={lockedWorld.name} onUnlock={async(password)=>{ await api(`/api/worlds/${lockedWorld.id}/access/unlock`,{method:'POST',body:JSON.stringify({password})}); const world=lockedWorld; setLockedWorld(undefined); await loadWorld(world) }} /> : null}
       {managingEmployee !== undefined ? (
         <EmployeeManagementDialog
@@ -1116,6 +1117,22 @@ export default function App() {
       ) : null}
     </div>
   )
+}
+
+function applyWorldAppearance(settings: WorldSettings): void {
+  const root = document.documentElement
+  const appearance = settings.appearance
+  root.style.setProperty('--world-accent', appearance.accentColor)
+  root.style.setProperty('--world-background', appearance.pageBackground)
+  root.style.setProperty('--world-panel', appearance.panelBackground)
+  root.style.setProperty('--world-owner-bubble', appearance.ownerBubbleColor)
+  root.style.setProperty('--world-character-bubble', appearance.characterBubbleColor)
+  root.style.setProperty('--world-text', appearance.textColor)
+  root.style.setProperty('--world-muted', appearance.mutedTextColor)
+  root.style.setProperty('--world-panel-radius', `${appearance.panelRadius}px`)
+  root.style.setProperty('--world-bubble-radius', `${appearance.bubbleRadius}px`)
+  root.style.setProperty('--world-button-radius', `${appearance.buttonRadius}px`)
+  root.style.setProperty('--world-font-scale', String(appearance.fontScale))
 }
 
 function WorldSwitcher({
@@ -1186,8 +1203,9 @@ function Onboarding({ error, onCreated }: { error?: string; onCreated(): Promise
   const create = async () => {
     setCreating(true)
     try {
-      const workspaceResult = await api<{ workspace: Workspace }>('/api/workspaces', { method: 'POST', body: JSON.stringify({ name: '我的本地空间' }) })
-      await api(`/api/workspaces/${workspaceResult.workspace.id}/worlds`, { method: 'POST', body: JSON.stringify({ name: '赛博公司', templateId: 'cyber-company' }) })
+      const workspaceResult = await api<{ workspace: Workspace }>('/api/workspaces', { method: 'POST', body: JSON.stringify({ name: '本地实例' }) })
+      const worldResult = await api<{ world: World }>(`/api/workspaces/${workspaceResult.workspace.id}/worlds`, { method: 'POST', body: JSON.stringify({ name: '我的世界', templateId: 'personal-world' }) })
+      await api(`/api/worlds/${worldResult.world.id}/recruit`, { method: 'POST', body: JSON.stringify({ blueprintId: 'core.butler', blueprintVersion: 1, displayName: '管家' }) })
       await onCreated()
     } finally {
       setCreating(false)
@@ -1197,9 +1215,9 @@ function Onboarding({ error, onCreated }: { error?: string; onCreated(): Promise
     <main className="onboarding">
       <div className="brand-lockup brand-lockup--large"><Cube size={28} weight="fill" /><strong>DSH Cyber</strong></div>
       <h1>创建第一个本地世界</h1>
-      <p>世界拥有独立角色、会话、记忆和成长档案。不会自动招聘角色。</p>
+      <p>每个世界拥有独立角色、会话、文件、设定和访问锁。首次会添加一名“管家”帮助你开始。</p>
       {error === undefined ? null : <div className="onboarding__error">{error}</div>}
-      <button className="primary-button" type="button" disabled={creating} onClick={() => void create()}>{creating ? '正在创建…' : '创建本地工作区'}</button>
+      <button className="primary-button" type="button" disabled={creating} onClick={() => void create()}>{creating ? '正在创建…' : '创建我的世界'}</button>
       <a href="?demo=1">先体验交互演示</a>
     </main>
   )

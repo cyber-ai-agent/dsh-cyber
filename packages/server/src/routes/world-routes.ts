@@ -32,13 +32,12 @@ export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDep
     if (worldTemplate(requestedTemplateId) === undefined) {
       throw new HttpError(422, 'unknown_world_template', 'Unknown world template')
     }
-    const templateId = requestedTemplateId === 'personal-world' ? 'cyber-company' : requestedTemplateId
     const world = store.createWorld({
       workspaceId: params[0]!,
       name: requiredString(body, 'name'),
-      templateId,
+      templateId: requestedTemplateId,
     })
-    writeJson(response, 201, { world, requestedTemplateId })
+    writeJson(response, 201, { world })
   })
 
   router.get(/^\/api\/worlds\/([^/]+)\/snapshot$/, async ({ request, response, params }) => {
