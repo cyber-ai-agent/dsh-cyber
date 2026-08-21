@@ -5,6 +5,19 @@ const CREATED_AT = '2026-08-19T00:00:00.000Z'
 export const BUILTIN_WORLD_TEMPLATES: readonly WorldTemplateManifest[] = [
   {
     schemaVersion: 1,
+    id: 'personal-world',
+    version: 1,
+    displayName: '我的世界',
+    summary: '可自由定义世界观、关系、角色、视觉与模型的私人本地世界。底层复用成熟的互动场景运行时。',
+    terminology: {
+      agent: '角色',
+      recruit: '添加角色',
+      groupSession: '群组会话',
+      assignment: '任务',
+    },
+  },
+  {
+    schemaVersion: 1,
     id: 'cyber-company',
     version: 1,
     displayName: '赛博公司',
@@ -125,7 +138,8 @@ export function worldTemplate(templateId: string): WorldTemplateManifest | undef
 }
 
 export function blueprintsForWorld(templateId: string): EmployeeBlueprint[] {
-  return BUILTIN_BLUEPRINTS.filter((item) => item.worldTemplateId === templateId)
+  const runtimeTemplateId = templateId === 'personal-world' ? 'cyber-company' : templateId
+  return BUILTIN_BLUEPRINTS.filter((item) => item.worldTemplateId === runtimeTemplateId)
 }
 
 function blueprint(
