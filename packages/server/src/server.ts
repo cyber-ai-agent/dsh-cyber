@@ -35,6 +35,7 @@ import { registerWorldRuntimeRoutes } from './routes/world-runtime-routes.js'
 import { registerWorldRoutes } from './routes/world-routes.js'
 import { registerWorldSettingsRoutes } from './routes/world-settings-routes.js'
 import { AssetService } from './services/asset-service.js'
+import { CharacterProfileRuntime } from './services/character-profile-runtime.js'
 import { harnessModelRoute } from './services/harness-model-route.js'
 import { ModelCatalogService } from './services/model-catalog-service.js'
 import { ModelCredentialService } from './services/model-credential-service.js'
@@ -111,8 +112,9 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     ...(activeDshBinPath === undefined ? {} : { dshBinPath: activeDshBinPath }),
     resolveRoute(request) { return resolveHarnessRoute(store, request) },
   })
+  const profileRuntime = new CharacterProfileRuntime(baseRuntime, store)
   const runtime = new TurnInteractionLoggingRuntime({
-    inner: baseRuntime,
+    inner: profileRuntime,
     service: interactions,
     resolveRoute(request) { return resolveHarnessRoute(store, request) },
   })
