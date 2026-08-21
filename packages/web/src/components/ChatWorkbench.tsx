@@ -10,7 +10,7 @@ import {
   WarningCircle,
   X,
 } from '@phosphor-icons/react'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { ChatAttachment, JsonObject, WorkMessage, WorkSession, World } from '@dsh-cyber/contracts'
@@ -60,6 +60,7 @@ export function ChatWorkbench({
 }: ChatWorkbenchProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
   const [uploading, setUploading] = useState(false)
   const [attachmentError, setAttachmentError] = useState<string>()
@@ -74,6 +75,17 @@ export function ChatWorkbench({
     .filter((employee): employee is CyberEmployee => employee !== undefined)
   const conversationTitle = session?.title ?? intent?.title ?? '选择员工开始对话'
   const conversationKind = session?.kind ?? intent?.kind
+
+  // 自动滚动到底部：新消息、实时输出或发送状态变化时跟随。若用户主动上翻
+  // 查看历史（距底部超过阈值）则不打扰，直到再次接近底部。
+  useEffect(() => {
+    const container = scrollRef.current
+    if (container === null) return
+    const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 160
+    if (nearBottom || sending) {
+      container.scrollTop = container.scrollHeight
+    }
+  }, [messages, liveTurns, sending])
 
   const submit = async () => {
     const prompt = draft.trim()
@@ -136,7 +148,7 @@ export function ChatWorkbench({
         <div className="chat-header__count">{messages.length}<span>条消息</span></div>
       </header>
 
-      <div className="message-scroll" aria-live="polite" aria-busy={sending}>
+      <div className="message-scroll" ref={scrollRef} aria-live="polite" aria-busy={sending}>
         {messages.length === 0 ? (
           <div className="conversation-empty">
             <TerminalWindow size={34} />
@@ -184,7 +196,12 @@ export function ChatWorkbench({
             </article>
           )
         })}
-        {liveTurns.map((turn) => <LiveTurn key={`${turn.sessionId}:${turn.agentId}`} turn={turn} employee={employees.find((item) => item.id === turn.agentId)} />)}
+        {liveTurns.length > 0 ? (
+          <div className="live-turns-block" aria-label="实时执行过程">
+            <header className="live-turns-block__header"><TerminalWindow size={14} /><span>实时执行过程</span></header>
+            {liveTurns.map((turn) => <LiveTurn key={`${turn.sessionId}:${turn.agentId}`} turn={turn} employee={employees.find((item) => item.id === turn.agentId)} />)}
+          </div>
+        ) : null}
         {sending && liveTurns.length === 0 ? <div className="stream-state"><CircleNotch size={16} className="spin" /><span>正在连接{experience.personLabel}的独立 Agent…</span><span className="stream-caret" /></div> : null}
       </div>
 
@@ -300,11 +317,13 @@ function formatBytes(value: number): string {
 
 function LiveTurn({ turn, employee }: { turn: LiveAgentTurn; employee: CyberEmployee | undefined }) {
   const [reasoningOpen, setReasoningOpen] = useState(true)
+  const live = turn.status === 'thinking' || turn.status === 'working'
   return (
-    <article className={`live-turn live-turn--${turn.status}`}>
+    <article className={`live-turn live-turn--${turn.status}${live ? ' live-turn--live' : ''}`}>
       <header>
-        <span>{turn.status === 'failed' ? <WarningCircle size={16} /> : <CircleNotch size={16} className={turn.status === 'completed' ? '' : 'spin'} />}</span>
+        <span>{turn.status === 'failed' ? <WarningCircle size={16} /> : <CircleNotch size={16} className={live ? 'spin' : ''} />}</span>
         <div><strong>{employee?.displayName ?? '员工'}</strong><small>{liveStatusLabel(turn.status)}</small></div>
+        {live ? <em className="live-turn__badge">实时</em> : null}
       </header>
       {turn.reasoning ? (
         <div className="trace-stack">

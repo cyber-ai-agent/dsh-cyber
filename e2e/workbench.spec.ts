@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -62,9 +62,9 @@ test('onboards, recruits, talks, browses dossiers and previews a real workspace 
 
   await composer.fill('@阿帆 请确认真实回合')
   await page.getByRole('button', { name: '发送' }).click()
-  await expect(page.getByText('我先建立性能基线。')).toBeVisible()
-  await page.getByText('阿帆的思考过程').click()
-  await expect(page.getByText('核对事实与权限。')).toBeVisible()
+  await expect(page.getByText('我先建立性能基线。').first()).toBeVisible()
+  await page.getByText('阿帆的思考过程').first().click()
+  await expect(page.getByText('核对事实与权限。').first()).toBeVisible()
   await expect(page.getByText('search_workspace').first()).toBeVisible()
 
   await dock.getByRole('button', { name: '文件', exact: true }).click()
@@ -323,7 +323,94 @@ test('opens the dossier as an all-employee information directory', async ({ page
   await expect(dock.getByText('32', { exact: true })).toBeVisible()
 })
 
+test('clears the composer instantly, shows the owner message on screen, and keeps the thinking trace visible during and after a turn', async ({ page }) => {
+  // 用慢速回合重建 server，留出窗口断言“进行中”状态
+  await server.close()
+  server = await createCyberServer({
+    stateRoot,
+    workspacePath: process.cwd(),
+    webRoot: join(process.cwd(), 'packages', 'web', 'dist'),
+    port: 0,
+    runtime: new BrowserRuntime({ eventIntervalMs: 500 }),
+  })
+  origin = (await server.start()).origin
+  const consoleEntries: string[] = []
+  const pageErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error' || message.type() === 'warning') {
+      consoleEntries.push(`[${message.type()}] ${message.text()}`)
+    }
+  })
+  page.on('pageerror', (error) => pageErrors.push(String(error)))
+  await page.goto(origin)
+  // 独立于测试 1/2：无工作区则自行 onboarding，已有则直接进入
+  const shell = page.locator('.workbench-shell')
+  const onboarding = page.getByRole('heading', { name: '创建第一个本地世界' })
+  await expect(shell.or(onboarding)).toBeVisible()
+  if (await onboarding.isVisible()) {
+    await page.getByRole('button', { name: '创建本地工作区' }).click()
+    await expect(shell).toBeVisible()
+  }
+
+  // 无“与阿帆私聊”则自行招募，已有则复用现有会话
+  const directButton = page.getByRole('button', { name: '与阿帆私聊' })
+  if (await directButton.count() === 0) {
+    await page.getByRole('button', { name: '添加第一名员工' }).click()
+    const market = page.getByRole('dialog', { name: '员工市场' })
+    await market.getByRole('button', { name: /开发工程师 v1/ }).click()
+    await market.getByRole('textbox', { name: '员工称呼（可选）' }).fill('阿帆')
+    await market.getByRole('button', { name: '确认招聘' }).click()
+    await expect(market).toBeHidden()
+    await expect(page.getByRole('button', { name: '与阿帆私聊' })).toBeVisible()
+  }
+  await directButton.first().click()
+  const composer = page.getByRole('textbox', { name: '给当前世界的员工发送消息' })
+  await expect(composer).toBeEnabled()
+  const ownerText = '任务：验证乐观发送与实时思考展示'
+  await composer.fill(ownerText)
+  await page.getByRole('button', { name: '发送' }).click()
+
+  // 1) 发送后输入框立即清空（乐观更新，不等模型回合结束）
+  await expect(composer).toHaveValue('')
+  // 2) 用户消息立即上屏，不依赖 chat 响应返回
+  await expect(page.locator('.message--owner').filter({ hasText: ownerText })).toBeVisible()
+
+  // 3) 思考过程在回合进行中明显可见（turn.started → reasoning → tool 逐条到达）
+  await expect(page.locator('.live-turns-block')).toBeVisible()
+  await expect(page.locator('.live-turn--live')).toBeVisible()
+  await expect(page.locator('.live-turn__badge')).toHaveText('实时')
+  await expect(page.locator('.live-turn__reasoning').filter({ hasText: '核对事实与权限。' })).toBeVisible()
+  await expect(page.locator('.tool-step').filter({ hasText: 'search_workspace' })).toBeVisible()
+
+  // 视觉证据：思考过程进行中的三个视口截图（供视觉审批使用）
+  await page.setViewportSize({ width: 1_920, height: 1_080 })
+  await page.screenshot({ path: join(process.cwd(), 'artifacts', 'ui-world-conversations', 'live-turns-1920x1080.png') })
+  await page.setViewportSize({ width: 1_440, height: 900 })
+  await page.screenshot({ path: join(process.cwd(), 'artifacts', 'ui-world-conversations', 'live-turns-1440x900.png') })
+  await page.setViewportSize({ width: 3_840, height: 2_160 })
+  await page.screenshot({ path: join(process.cwd(), 'artifacts', 'ui-world-conversations', 'live-turns-3840x2160.png') })
+  await page.setViewportSize({ width: 1_584, height: 992 })
+
+  // 4) 回合结束后 liveTurns 保留一段时间，不立即清空
+  await expect(page.locator('.live-turn--completed')).toBeVisible()
+  await expect(page.locator('.live-turn--completed').filter({ hasText: '核对事实与权限。' })).toBeVisible()
+
+  // 视觉审批证据：记录控制台 error/warn，并断言无未捕获页面错误
+  await writeFile(
+    join(process.cwd(), 'artifacts', 'ui-world-conversations', 'live-turns-console.log'),
+    `[pageerror]\n${pageErrors.join('\n')}\n\n[console]\n${consoleEntries.join('\n')}\n`,
+    'utf8',
+  )
+  expect(pageErrors, `页面存在未捕获错误：${pageErrors.join('; ')}`).toEqual([])
+})
+
 class BrowserRuntime implements AgentRuntimePort {
+  readonly eventIntervalMs: number
+
+  constructor(options: { eventIntervalMs?: number } = {}) {
+    this.eventIntervalMs = options.eventIntervalMs ?? 20
+  }
+
   async runTurn(request: AgentTurnRequest) {
     const agentSessionId = request.agent.agentSessionId ?? `agent-${request.agent.id}`
     const events = [
@@ -336,7 +423,7 @@ class BrowserRuntime implements AgentRuntimePort {
     ] as const
     for (const event of events) {
       request.onEvent?.({ ...event, source: 'browser-e2e', sourceSessionId: agentSessionId, metadata: {} })
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, 20))
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, this.eventIntervalMs))
     }
     return { agentSessionId, finalResponse: '我先建立性能基线。', eventCount: events.length }
   }

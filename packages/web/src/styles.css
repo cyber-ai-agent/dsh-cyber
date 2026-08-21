@@ -298,14 +298,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .tool-step strong { font-size: 9px; font-weight: 500; }
 .tool-step code, .tool-step time { overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); font: 8px var(--font-mono); }
 .stream-state { display: flex; align-items: center; gap: 7px; margin: 10px 0; color: var(--text-muted); font-size: 11px; }
+.live-turns-block { display: grid; gap: 7px; margin: 12px 0 10px; }
+.live-turns-block__header { display: flex; align-items: center; gap: 6px; color: var(--accent); font-size: 10px; font-weight: 600; letter-spacing: .08em; }
 .live-turn { display: grid; gap: 7px; margin: 10px 0; padding: 10px; border: 1px solid var(--border); border-left: 2px solid var(--accent); background: var(--surface-1); }
 .live-turn--completed { border-left-color: var(--success); }
 .live-turn--failed { border-left-color: var(--danger); }
+.live-turn--live { border-left-width: 3px; background: var(--surface-2); box-shadow: 0 0 0 1px var(--accent-soft), 0 0 18px var(--accent-soft); }
 .live-turn > header { display: flex; align-items: center; gap: 8px; }
 .live-turn > header > span { color: var(--accent); }
 .live-turn > header > div { display: flex; align-items: baseline; gap: 7px; }
 .live-turn > header strong { font-size: 11px; }
 .live-turn > header small { color: var(--text-muted); font-size: 9px; }
+.live-turn__badge { flex: 0 0 auto; margin-left: auto; font-style: normal; font-size: 9px; line-height: 1; padding: 4px 7px; border-radius: 999px; color: var(--surface-0); background: var(--accent); }
 .live-turn .trace-stack { margin-top: 0; }
 .live-turn__reasoning, .live-turn__text { margin: 0; padding: 9px; color: var(--text-soft); font-size: 10px; line-height: 1.7; white-space: pre-wrap; }
 .live-turn__reasoning { border-top: 1px solid var(--border); color: var(--text-muted); }
