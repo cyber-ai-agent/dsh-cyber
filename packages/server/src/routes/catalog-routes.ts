@@ -27,9 +27,11 @@ export function registerCatalogRoutes(router: Router, dependencies: CatalogRoute
     const packageBlueprints = await loadInstalledBlueprints(installed)
     for (const blueprint of packageBlueprints) store.saveBlueprint(blueprint)
     const available = [...BUILTIN_BLUEPRINTS, ...packageBlueprints]
-    const items = templateId
-      ? available.filter((item) => item.worldTemplateId === templateId)
-      : available
+    const items = templateId === 'personal-world'
+      ? available
+      : templateId
+        ? available.filter((item) => item.worldTemplateId === templateId)
+        : available
     writeJson(response, 200, { items })
   })
 

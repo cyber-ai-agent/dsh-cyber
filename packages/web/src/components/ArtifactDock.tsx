@@ -138,12 +138,12 @@ export function ArtifactDock({
     setFilesLoading(true)
     setFileError(undefined)
     try {
-      const response = await fetch(`/api/workspace/files?path=${encodeURIComponent(path)}`)
+      const response = await fetch(`/api/worlds/${encodeURIComponent(world.id)}/files?path=${encodeURIComponent(path)}`)
       const payload = await response.json() as WorkspaceFileList & { error?: { message?: string } }
-      if (!response.ok) throw new Error(payload.error?.message ?? '工作区目录读取失败')
+      if (!response.ok) throw new Error(payload.error?.message ?? '世界目录读取失败')
       setWorkspaceFiles(payload)
     } catch (cause) {
-      setFileError(cause instanceof Error ? cause.message : '工作区目录读取失败')
+      setFileError(cause instanceof Error ? cause.message : '世界目录读取失败')
     } finally {
       setFilesLoading(false)
     }
@@ -158,7 +158,7 @@ export function ArtifactDock({
       setFileError('此文件类型暂不支持安全预览。')
       return
     }
-    const url = `/api/workspace/file?path=${encodeURIComponent(entry.path)}`
+    const url = `/api/worlds/${encodeURIComponent(world.id)}/file?path=${encodeURIComponent(entry.path)}`
     setFileError(undefined)
     setWorkspacePreview({ entry, url })
     onTabChange('preview')
@@ -256,7 +256,7 @@ function WorkspaceFileBrowser({ value, loading, error, onOpen, onBack }: { value
     <div className="file-browser workspace-file-browser">
       <header>
         <button type="button" disabled={value.parentPath === undefined} aria-label="返回上级目录" onClick={() => value.parentPath !== undefined && onBack(value.parentPath)}><ArrowLeft size={15} /></button>
-        <strong>{value.path || '工作区根目录'}</strong>
+        <strong>{value.path || '世界根目录'}</strong>
         <span>{value.items.length} 项</span>
       </header>
       {error === undefined ? null : <div className="file-browser__error">{error}</div>}
@@ -284,7 +284,7 @@ function WorkspaceFilePreview({ value, error }: { value: WorkspacePreview; error
     <article className="artifact-preview workspace-file-preview">
       <header>
         {isImage ? <Image size={20} /> : <FileCode size={20} />}
-        <div><strong>{value.entry.name}</strong><span>{formatBytes(value.entry.size)} · 本地工作区只读预览</span></div>
+        <div><strong>{value.entry.name}</strong><span>{formatBytes(value.entry.size)} · 当前世界只读预览</span></div>
         <button type="button" onClick={() => window.open(value.url, '_blank', 'noopener,noreferrer')}><ArrowSquareOut size={15} />新标签打开</button>
       </header>
       {error === undefined ? null : <div className="file-browser__error">{error}</div>}

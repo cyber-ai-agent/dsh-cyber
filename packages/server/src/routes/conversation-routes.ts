@@ -1,4 +1,4 @@
-import type { ChatAttachment, JsonObject } from '@dsh-cyber/contracts'
+import type { ChatAttachment, JsonObject, ReasoningEffort } from '@dsh-cyber/contracts'
 import type {
   ConversationOrchestrator,
   DirectConversationInput,
@@ -13,47 +13,44 @@ import {
   optionalStringArray,
   readJson,
   record,
+  requiredEnum,
   requiredString,
 } from '../http/request.js'
 import { writeJson } from '../http/response.js'
 import { applyInstalledPromptTransforms } from '../installed-package-runtime.js'
 import type { RuntimeStreamHub } from '../streams/runtime-stream-hub.js'
 import type { WorldRuntimeService } from '../world-runtime-service.js'
+import type { WorldAccessService } from '../services/world-access-service.js'
+import type { WorldSettingsService } from '../services/world-settings-service.js'
 
 export interface ConversationRoutesDependencies {
   store: SqliteStore
   orchestrator: ConversationOrchestrator
   runtimeStreamHub: RuntimeStreamHub
   worldRuntime: WorldRuntimeService
+  worldAccess: WorldAccessService
+  worldSettings: WorldSettingsService
 }
 
-export function registerConversationRoutes(
-  router: Router,
-  dependencies: ConversationRoutesDependencies,
-): void {
-  const { store, orchestrator, runtimeStreamHub, worldRuntime } = dependencies
+export function registerConversationRoutes(router: Router, dependencies: ConversationRoutesDependencies): void {
+  const { store, orchestrator, runtimeStreamHub, worldRuntime, worldAccess, worldSettings } = dependencies
 
   router.post(/^\/api\/worlds\/([^/]+)\/chat$/, async ({ request, response, params }) => {
     const world = store.getWorld(params[0]!)
     if (world === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
+    await worldAccess.assertUnlocked(world.id, request)
     const body = await readJson(request)
     const prompt = requiredString(body, 'prompt')
     const attachments = validatedChatAttachments(body.attachments, store, world.workspaceId)
     const attachmentPrompt = attachments.length === 0 ? prompt : attachmentAwarePrompt(prompt, attachments)
-    const transformedPrompt = await applyInstalledPromptTransforms(
-      store.listInstalledPackages(world.workspaceId),
-      attachmentPrompt,
-    )
-    const runtimePrompt = transformedPrompt === prompt && attachments.length === 0
-      ? undefined
-      : transformedPrompt
+    const transformedPrompt = await applyInstalledPromptTransforms(store.listInstalledPackages(world.workspaceId), attachmentPrompt)
+    const worldSettingsValue = await worldSettings.get(world.id)
+    const requestedReasoning = body.reasoningEffort === undefined
+      ? worldSettingsValue.model.reasoningEffort
+      : requiredEnum<ReasoningEffort>(body, 'reasoningEffort', ['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
     const explicitIds = optionalStringArray(body.employeeIds)
-    const employeeIds = explicitIds.length > 0
-      ? explicitIds
-      : mentionedEmployeeIds(prompt, store.listEmployees(world.id))
-    if (employeeIds.length === 0) {
-      throw new HttpError(422, 'agent_required', 'Mention or select at least one agent')
-    }
+    const employeeIds = explicitIds.length > 0 ? explicitIds : mentionedEmployeeIds(prompt, store.listEmployees(world.id))
+    if (employeeIds.length === 0) throw new HttpError(422, 'agent_required', '请选择或 @ 至少一个角色')
     const metadata: JsonObject = {
       participantIds: employeeIds,
       ...(attachments.length === 0 ? {} : { attachments: attachments.map(chatAttachmentJson) }),
@@ -62,13 +59,18 @@ export function registerConversationRoutes(
     const sessionId = optionalString(body.sessionId)
     let result
     if (employeeIds.length === 1) {
+      const character = store.getEmployee(employeeIds[0]!)
+      if (character === undefined || character.worldId !== world.id) {
+        throw new HttpError(422, 'character_unavailable', '所选角色不属于当前世界')
+      }
       const directInput: DirectConversationInput = {
         workspaceId: world.workspaceId,
         worldId: world.id,
-        employeeId: employeeIds[0]!,
+        employeeId: character.id,
         prompt,
         metadata,
-        ...(runtimePrompt === undefined ? {} : { runtimePrompt }),
+        runtimePrompt: await worldSettings.composeRuntimePrompt(world.id, character, transformedPrompt),
+        ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
       }
       if (sessionId !== undefined) directInput.sessionId = sessionId
       if (title !== undefined) directInput.title = title
@@ -80,7 +82,8 @@ export function registerConversationRoutes(
         employeeIds,
         prompt,
         metadata,
-        ...(runtimePrompt === undefined ? {} : { runtimePrompt }),
+        runtimePrompt: await worldSettings.composeGroupRuntimePrompt(world.id, transformedPrompt),
+        ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
         ...(sessionId === undefined ? {} : { sessionId }),
         ...(title === undefined ? {} : { title }),
       })
@@ -89,32 +92,29 @@ export function registerConversationRoutes(
     writeJson(response, 200, result)
   })
 
-  router.get(/^\/api\/worlds\/([^/]+)\/live$/, ({ request, response, params }) => {
+  router.get(/^\/api\/worlds\/([^/]+)\/live$/, async ({ request, response, params }) => {
     const worldId = params[0]!
-    if (store.getWorld(worldId) === undefined) {
-      throw new HttpError(404, 'world_not_found', 'World not found')
-    }
+    if (store.getWorld(worldId) === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
+    await worldAccess.assertUnlocked(worldId, request)
     runtimeStreamHub.connect(worldId, request, response)
   })
 
-  router.get(/^\/api\/sessions\/([^/]+)\/messages$/, ({ response, params, url }) => {
-    writeJson(response, 200, {
-      items: store.listMessages(params[0]!, nonNegativeInteger(url.searchParams.get('after'))),
-    })
-  })
-
-  router.get(/^\/api\/sessions\/([^/]+)\/participants$/, ({ response, params }) => {
+  router.get(/^\/api\/sessions\/([^/]+)\/messages$/, async ({ request, response, params, url }) => {
     const session = store.getSession(params[0]!)
     if (session === undefined) throw new HttpError(404, 'session_not_found', 'Session not found')
+    await worldAccess.assertUnlocked(session.worldId, request)
+    writeJson(response, 200, { items: store.listMessages(session.id, nonNegativeInteger(url.searchParams.get('after'))) })
+  })
+
+  router.get(/^\/api\/sessions\/([^/]+)\/participants$/, async ({ request, response, params }) => {
+    const session = store.getSession(params[0]!)
+    if (session === undefined) throw new HttpError(404, 'session_not_found', 'Session not found')
+    await worldAccess.assertUnlocked(session.worldId, request)
     writeJson(response, 200, { items: store.listParticipants(session.id) })
   })
 }
 
-function validatedChatAttachments(
-  value: unknown,
-  store: SqliteStore,
-  workspaceId: string,
-): ChatAttachment[] {
+function validatedChatAttachments(value: unknown, store: SqliteStore, workspaceId: string): ChatAttachment[] {
   if (value === undefined) return []
   if (!Array.isArray(value) || value.length > 8) {
     throw new HttpError(422, 'invalid_attachments', 'Attachments must be an array with at most 8 items')
@@ -138,26 +138,15 @@ function validatedChatAttachments(
 }
 
 function attachmentAwarePrompt(prompt: string, attachments: ChatAttachment[]): string {
-  const inventory = attachments
-    .map((attachment) => `- ${attachment.name} (${attachment.mimeType}, asset ${attachment.assetId})`)
-    .join('\n')
+  const inventory = attachments.map((attachment) => `- ${attachment.name} (${attachment.mimeType}, asset ${attachment.assetId})`).join('\n')
   return `${prompt}\n\n用户随消息附加了以下本地文件：\n${inventory}\n请在回复中明确说明你如何使用这些附件；无法读取内容时不要臆测。`
 }
 
 function chatAttachmentJson(attachment: ChatAttachment): JsonObject {
-  return {
-    assetId: attachment.assetId,
-    name: attachment.name,
-    mimeType: attachment.mimeType,
-    byteLength: attachment.byteLength,
-    url: attachment.url,
-  }
+  return { assetId: attachment.assetId, name: attachment.name, mimeType: attachment.mimeType, byteLength: attachment.byteLength, url: attachment.url }
 }
 
-function mentionedEmployeeIds(
-  prompt: string,
-  employees: Array<{ id: string; displayName: string }>,
-): string[] {
+function mentionedEmployeeIds(prompt: string, employees: Array<{ id: string; displayName: string }>): string[] {
   return employees
     .filter((employee) => prompt.includes(`@${employee.displayName}`))
     .sort((left, right) => prompt.indexOf(`@${left.displayName}`) - prompt.indexOf(`@${right.displayName}`))

@@ -141,6 +141,7 @@ describe('Cyber local server', () => {
     expect(workspaces.body.items).toEqual([])
     const templates = await json(origin, '/api/catalog/world-templates')
     expect(templates.body.items.map((item: { id: string }) => item.id)).toEqual([
+      'personal-world',
       'cyber-company',
       'tavern',
       'creator-studio',
@@ -822,35 +823,38 @@ describe('Cyber local server', () => {
     }
   })
 
-  it('browses and previews safe workspace files without exposing hidden files or traversal', async () => {
-    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-server-files-'))
-    await mkdir(join(stateRoot, 'src'), { recursive: true })
-    await writeFile(join(stateRoot, 'src', 'hello.ts'), 'export const hello = "cyber"\n', 'utf8')
-    await writeFile(join(stateRoot, '.env'), 'SECRET_MUST_NOT_LEAK=value\n', 'utf8')
-    const { origin } = await start(stateRoot)
 
-    const root = await json(origin, '/api/workspace/files')
-    expect(root.response.status).toBe(200)
-    expect(root.body.items.map((item: { name: string }) => item.name)).toContain('src')
-    expect(root.body.items.map((item: { name: string }) => item.name)).not.toContain('.env')
+it('browses and previews safe world files without exposing hidden files or traversal', async () => {
+  const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-server-files-'))
+  const { origin } = await start(stateRoot)
+  const { world } = await createWorld(origin)
+  const filesRoot = join(stateRoot, 'worlds', encodeURIComponent(world.id), 'files')
+  await mkdir(join(filesRoot, 'src'), { recursive: true })
+  await writeFile(join(filesRoot, 'src', 'hello.ts'), 'export const hello = "cyber"\n', 'utf8')
+  await writeFile(join(filesRoot, '.env'), 'SECRET_MUST_NOT_LEAK=value\n', 'utf8')
 
-    const nested = await json(origin, '/api/workspace/files?path=src')
-    expect(nested.body).toMatchObject({ path: 'src', parentPath: '' })
-    expect(nested.body.items).toEqual([
-      expect.objectContaining({ name: 'hello.ts', kind: 'file', previewKind: 'text' }),
-    ])
-    const preview = await fetch(`${origin}/api/workspace/file?path=src%2Fhello.ts`)
-    expect(preview.status).toBe(200)
-    expect(preview.headers.get('content-type')).toContain('text/plain')
-    expect(await preview.text()).toContain('export const hello')
+  const root = await json(origin, `/api/worlds/${world.id}/files`)
+  expect(root.response.status).toBe(200)
+  expect(root.body.items.map((item: { name: string }) => item.name)).toContain('src')
+  expect(root.body.items.map((item: { name: string }) => item.name)).not.toContain('.env')
 
-    const hidden = await fetch(`${origin}/api/workspace/file?path=.env`)
-    expect(hidden.status).toBe(403)
-    const traversal = await fetch(`${origin}/api/workspace/files?path=..%2F`)
-    expect(traversal.status).toBe(403)
-  })
+  const nested = await json(origin, `/api/worlds/${world.id}/files?path=src`)
+  expect(nested.body).toMatchObject({ path: 'src', parentPath: '' })
+  expect(nested.body.items).toEqual([
+    expect.objectContaining({ name: 'hello.ts', kind: 'file', previewKind: 'text' }),
+  ])
+  const preview = await fetch(`${origin}/api/worlds/${world.id}/file?path=src%2Fhello.ts`)
+  expect(preview.status).toBe(200)
+  expect(preview.headers.get('content-type')).toContain('text/plain')
+  expect(await preview.text()).toContain('export const hello')
 
-  it('searches verified market packages and activates installed plugin and talent entrypoints', async () => {
+  const hidden = await fetch(`${origin}/api/worlds/${world.id}/file?path=.env`)
+  expect(hidden.status).toBe(403)
+  const traversal = await fetch(`${origin}/api/worlds/${world.id}/files?path=..%2F`)
+  expect(traversal.status).toBe(403)
+})
+
+it('searches verified market packages and activates installed plugin and talent entrypoints', async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-marketplace-'))
     const runtime = new FakeRuntime()
     const { origin, server } = await start(stateRoot, runtime, undefined, resolve('marketplace'))
@@ -1022,7 +1026,7 @@ describe('Cyber local server', () => {
     expect(verified.response.status).toBe(201)
     expect(verified.body).toMatchObject({
       ok: true,
-      version: '0.1.0-rc.7',
+      version: '0.1.0-rc.8',
       transaction: { status: 'verified' },
     })
     const transactionId = verified.body.transaction.id as string
@@ -1068,7 +1072,7 @@ describe('Cyber local server', () => {
     })
 
     const updates = await json(origin, '/api/system/updates')
-    expect(updates.body.activeRuntime).toMatchObject({ transactionId, version: '0.1.0-rc.7' })
+    expect(updates.body.activeRuntime).toMatchObject({ transactionId, version: '0.1.0-rc.8' })
     expect(updates.body.items[0]).toMatchObject({ id: transactionId, status: 'activated' })
 
     const rolledBack = await json(origin, `/api/system/update/${transactionId}/rollback`, {

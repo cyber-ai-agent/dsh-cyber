@@ -11,7 +11,7 @@ import {
   X,
 } from '@phosphor-icons/react'
 import { useMemo, useRef, useState } from 'react'
-import type { ChatAttachment, JsonObject, WorkMessage, WorkSession, World } from '@dsh-cyber/contracts'
+import type { ChatAttachment, JsonObject, ReasoningEffort, WorkMessage, WorkSession, World } from '@dsh-cyber/contracts'
 
 import type { ConversationIntent, CyberEmployee, LiveAgentTurn, ToolStep } from '../types.js'
 import { worldExperience } from '../world-experience.js'
@@ -28,6 +28,8 @@ interface ChatWorkbenchProps {
   liveTurns: LiveAgentTurn[]
   sending: boolean
   draft: string
+  reasoningEffort?: ReasoningEffort
+  onReasoningEffortChange?(value: ReasoningEffort): void
   onDraftChange(value: string): void
   onSend(prompt: string, attachments: ChatAttachment[]): Promise<void>
   onUploadAttachment(file: File): Promise<ChatAttachment>
@@ -47,6 +49,8 @@ export function ChatWorkbench({
   liveTurns,
   sending,
   draft,
+  reasoningEffort = 'auto',
+  onReasoningEffortChange = () => undefined,
   onDraftChange,
   onSend,
   onUploadAttachment,
@@ -68,7 +72,7 @@ export function ChatWorkbench({
   const participantEmployees = participantIds
     .map((employeeId) => employees.find((employee) => employee.id === employeeId))
     .filter((employee): employee is CyberEmployee => employee !== undefined)
-  const conversationTitle = session?.title ?? intent?.title ?? '选择员工开始对话'
+  const conversationTitle = session?.title ?? intent?.title ?? '选择角色开始对话'
   const conversationKind = session?.kind ?? intent?.kind
 
   const submit = async () => {
@@ -140,10 +144,10 @@ export function ChatWorkbench({
             <p>{employees.length === 0
               ? experience.emptyCopy
               : conversationKind === 'group'
-                ? '发送第一条消息后，群聊和多人协作任务才会正式创建。关闭或切换不会让员工提前进入会议状态。'
+                ? '发送第一条消息后，群聊和多人协作任务才会正式创建。关闭或切换不会让角色提前进入会议状态。'
                 : conversationKind === 'direct'
-                  ? '历史记录会保留在当前世界；发送消息后员工才会进入真实任务生命周期。'
-                  : '员工像通讯录联系人一样工作：单击私聊，也可以从左上角创建多人群聊。'}</p>
+                  ? '历史记录会保留在当前世界；发送消息后角色才会进入真实任务生命周期。'
+                  : '角色像通讯录联系人一样工作：单击私聊，也可以从左上角创建多人群聊。'}</p>
             {employees.length === 0 ? <button className="primary-button" type="button" onClick={onRecruit}>{experience.kind === 'tavern' ? '邀请第一张角色卡' : `添加第一名${experience.personLabel}`}</button> : null}
           </div>
         ) : messages.map((message, index) => {
@@ -164,7 +168,7 @@ export function ChatWorkbench({
                   onClick={() => employee && onOpenDossier(employee.id)}
                   aria-label={`查看${employee?.displayName ?? experience.personLabel}档案`}
                 >
-                  <Avatar index={employee?.avatarIndex ?? 7} label={employee?.displayName ?? '员工'} />
+                  <Avatar index={employee?.avatarIndex ?? 7} label={employee?.displayName ?? '角色'} />
                 </button>
               )}
               <div className="message__body">
@@ -225,7 +229,7 @@ export function ChatWorkbench({
                 ? `发送消息给 ${participantEmployees.map((employee) => employee.displayName).join('、')}`
                 : conversationKind === 'direct'
                   ? `发送消息给 ${participantEmployees[0]?.displayName ?? experience.personLabel}`
-                  : '先从左侧选择联系人，或输入 @员工名'}
+                  : '先从左侧选择联系人，或输入 @角色名'}
             rows={2}
             aria-label={`给当前世界的${experience.peopleLabel}发送消息`}
           />
@@ -240,9 +244,9 @@ export function ChatWorkbench({
               />
               <button className="icon-button" type="button" aria-label={uploading ? '正在上传附件' : '添加附件'} disabled={uploading} onClick={() => fileInputRef.current?.click()}>{uploading ? <CircleNotch size={18} className="spin" /> : <Paperclip size={18} />}</button>
               <button className="icon-button" type="button" aria-label="插入代码或命令" onClick={insertCodeBlock}><BracketsCurly size={18} /></button>
-              <span className="composer__hint">Enter 发送 · Shift+Enter 换行 · @ 仅显示当前世界角色</span>
+              <label className="composer-reasoning">推理<select value={reasoningEffort} onChange={(event)=>onReasoningEffortChange(event.target.value as ReasoningEffort)}><option value="auto">自动</option><option value="off">关闭</option><option value="minimal">极低</option><option value="low">低</option><option value="medium">中</option><option value="high">高</option><option value="xhigh">极高</option><option value="max">最大</option></select></label><span className="composer__hint">Enter 发送 · Shift+Enter 换行 · @ 仅显示当前世界角色</span>
             </div>
-            <button className="send-button" type="button" aria-label={sending ? '员工处理中' : '发送'} disabled={sending || uploading || employees.length === 0 || (!draft.trim() && attachments.length === 0)} onClick={() => void submit()}>
+            <button className="send-button" type="button" aria-label={sending ? '角色处理中' : '发送'} disabled={sending || uploading || employees.length === 0 || (!draft.trim() && attachments.length === 0)} onClick={() => void submit()}>
               {sending ? <CircleNotch size={19} className="spin" /> : <PaperPlaneRight size={19} weight="fill" />}
             </button>
           </div>
@@ -300,7 +304,7 @@ function LiveTurn({ turn, employee }: { turn: LiveAgentTurn; employee: CyberEmpl
     <article className={`live-turn live-turn--${turn.status}`}>
       <header>
         <span>{turn.status === 'failed' ? <WarningCircle size={16} /> : <CircleNotch size={16} className={turn.status === 'completed' ? '' : 'spin'} />}</span>
-        <div><strong>{employee?.displayName ?? '员工'}</strong><small>{liveStatusLabel(turn.status)}</small></div>
+        <div><strong>{employee?.displayName ?? '角色'}</strong><small>{liveStatusLabel(turn.status)}</small></div>
       </header>
       {turn.reasoning ? (
         <div className="trace-stack">
@@ -320,7 +324,7 @@ function ReasoningMessage({ message, employee }: { message: WorkMessage; employe
   return (
     <details className="reasoning-message">
       <summary>
-        <span><CircleNotch size={14} />{employee?.displayName ?? '员工'}的思考过程</span>
+        <span><CircleNotch size={14} />{employee?.displayName ?? '角色'}的思考过程</span>
         <span>{displayTime(message)}</span>
       </summary>
       <div>{message.content}</div>
@@ -336,7 +340,7 @@ function ToolEventMessage({ message, employee }: { message: WorkMessage; employe
   return (
     <div className={`tool-event-message${failed ? ' is-failed' : ''}`}>
       {failed ? <WarningCircle size={15} /> : started ? <CircleNotch size={15} className="spin" /> : <CheckCircle size={15} weight="fill" />}
-      <span><strong>{employee?.displayName ?? '员工'} · {started ? '调用工具' : '工具结果'}</strong><code>{toolName}</code></span>
+      <span><strong>{employee?.displayName ?? '角色'} · {started ? '调用工具' : '工具结果'}</strong><code>{toolName}</code></span>
       <small>{callId}</small>
     </div>
   )

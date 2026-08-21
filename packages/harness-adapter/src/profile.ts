@@ -3,7 +3,7 @@ import { lstat, mkdir, open, readFile, readlink, rename, symlink, unlink } from 
 import { dirname, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
-export const SUPPORTED_HARNESS_VERSION = '0.1.0-rc.7' as const
+export const SUPPORTED_HARNESS_VERSION = '0.1.0-rc.8' as const
 export const WORKER_PROFILE_NAME = 'dsh-cyber-worker' as const
 
 export interface HarnessProfilePaths {
@@ -24,7 +24,10 @@ export interface HarnessProviderProfile {
     name?: string
     contextWindow?: number
     maxTokens?: number
+    reasoningEfforts?: false | Partial<Record<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max', string | null>>
+    compat?: { thinkingFormat?: string; supportsReasoningEffort?: boolean }
   }
+  reasoning?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   apiKeyEnv?: string
 }
 
@@ -108,6 +111,7 @@ function providerRoute(providerProfile: HarnessProviderProfile): Record<string, 
     api: providerProfile.api,
     baseURL: providerProfile.baseURL,
     models: [providerProfile.model],
+    ...(providerProfile.reasoning === undefined ? {} : { reasoning: providerProfile.reasoning }),
     ...(providerProfile.apiKeyEnv === undefined
       ? {}
       : { apiKeyEnv: providerProfile.apiKeyEnv }),

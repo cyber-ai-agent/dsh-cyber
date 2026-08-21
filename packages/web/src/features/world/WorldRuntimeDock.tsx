@@ -103,8 +103,8 @@ export function WorldRuntimeDock({
         {employees.length === 0 ? (
           <div className="world-runtime-dock__empty">
             <Storefront size={25} />
-            <strong>这个世界还没有员工</strong>
-            <span>从人才市场添加第一名员工后，他会出现在这里。</span>
+            <strong>这个世界还没有角色</strong>
+            <span>从人才市场添加第一名角色后，他会出现在这里。</span>
             <button className="primary-button" type="button" onClick={onRecruit}>打开人才市场</button>
           </div>
         ) : null}

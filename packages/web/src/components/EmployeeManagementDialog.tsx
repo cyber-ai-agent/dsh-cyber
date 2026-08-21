@@ -33,14 +33,14 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
       <section className="employee-management-dialog" role="dialog" aria-modal="true" aria-labelledby="employee-management-title">
         <header className="dialog-header">
           <div><h2 id="employee-management-title">管理 {employee.displayName}</h2><p>{employee.role} · 当前版本 r{employee.currentRevision}</p></div>
-          <button className="icon-button" type="button" aria-label="关闭员工管理" onClick={onClose}><X size={18} /></button>
+          <button className="icon-button" type="button" aria-label="关闭角色管理" onClick={onClose}><X size={18} /></button>
         </header>
         <div className="employee-management-content">
           <section className="employee-identity-editor">
-            <div className="settings-section__heading"><h3><IdentificationCard size={17} />员工名片与形象</h3><p>姓名和头像会同步到通讯录、@ 列表、档案和世界；保存后写入本地员工档案。</p></div>
+            <div className="settings-section__heading"><h3><IdentificationCard size={17} />角色名片与形象</h3><p>姓名和头像会同步到通讯录、@ 列表、档案和世界；保存后写入本地角色档案。</p></div>
             <div className="identity-editor-layout">
               <label className="dialog-field"><span>显示名称</span><input maxLength={48} value={displayName} onChange={(event) => setDisplayName(event.target.value)} /></label>
-              <div className="avatar-picker" role="radiogroup" aria-label="选择员工头像">
+              <div className="avatar-picker" role="radiogroup" aria-label="选择角色头像">
                 {Array.from({ length: 8 }, (_, index) => (
                   <button key={index} type="button" role="radio" aria-checked={selectedAvatar === index} className={selectedAvatar === index ? 'is-active' : ''} onClick={() => setSelectedAvatar(index)}>
                     <Avatar index={index} size="md" label={`头像 ${index + 1}`} />
@@ -66,7 +66,7 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
               </select>
               <small>
                 {modelProfileId
-                  ? '此员工的新版本将固定使用所选模型配置；密钥仍只从本机环境变量读取。'
+                  ? '此角色的新版本将固定使用所选模型配置；密钥仍只从本机环境变量读取。'
                   : `当前跟随默认模型：${models.find((model) => model.isDefault)?.displayName ?? 'DSH 默认路由'}`}
               </small>
             </label>
@@ -86,10 +86,10 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
             </button>
           </section>
           <section className="archive-section">
-            <div><Archive size={18} /><div><strong>归档员工</strong><p>员工将从当前世界和 @ 列表移除，但会话、交付物和审计记录不会删除。</p></div></div>
+            <div><Archive size={18} /><div><strong>归档角色</strong><p>角色将从当前世界和 @ 列表移除，但会话、交付物和审计记录不会删除。</p></div></div>
             {confirmArchive ? (
               <div className="archive-confirm"><ShieldWarning size={17} /><span>确认归档 {employee.displayName}？</span><button type="button" disabled={saving} onClick={() => void onArchive()}>确认归档</button><button type="button" onClick={() => setConfirmArchive(false)}>取消</button></div>
-            ) : <button className="danger-button" type="button" onClick={() => setConfirmArchive(true)}>归档员工</button>}
+            ) : <button className="danger-button" type="button" onClick={() => setConfirmArchive(true)}>归档角色</button>}
           </section>
         </div>
       </section>

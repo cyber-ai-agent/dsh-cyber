@@ -3,6 +3,7 @@ import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { HttpError } from '../http/errors.js'
 import type { Router } from '../http/router.js'
+import type { WorldAccessService } from '../services/world-access-service.js'
 import {
   nonNegativeInteger,
   optionalPositiveInteger,
@@ -15,10 +16,11 @@ import { writeJson } from '../http/response.js'
 
 export interface WorldRoutesDependencies {
   store: SqliteStore
+  worldAccess?: WorldAccessService
 }
 
 export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDependencies): void {
-  const { store } = dependencies
+  const { store, worldAccess } = dependencies
 
   router.get(/^\/api\/workspaces\/([^/]+)\/worlds$/, ({ response, params }) => {
     writeJson(response, 200, { items: store.listWorlds(params[0]!) })
@@ -26,39 +28,45 @@ export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDep
 
   router.post(/^\/api\/workspaces\/([^/]+)\/worlds$/, async ({ request, response, params }) => {
     const body = await readJson(request)
-    const templateId = requiredString(body, 'templateId')
-    if (worldTemplate(templateId) === undefined) {
+    const requestedTemplateId = requiredString(body, 'templateId')
+    if (worldTemplate(requestedTemplateId) === undefined) {
       throw new HttpError(422, 'unknown_world_template', 'Unknown world template')
     }
     const world = store.createWorld({
       workspaceId: params[0]!,
       name: requiredString(body, 'name'),
-      templateId,
+      templateId: requestedTemplateId,
     })
     writeJson(response, 201, { world })
   })
 
-  router.get(/^\/api\/worlds\/([^/]+)\/snapshot$/, ({ response, params }) => {
+  router.get(/^\/api\/worlds\/([^/]+)\/snapshot$/, async ({ request, response, params }) => {
+    await worldAccess?.assertUnlocked(params[0]!, request)
     writeJson(response, 200, store.getWorldSnapshot(params[0]!))
   })
 
-  router.get(/^\/api\/worlds\/([^/]+)\/events$/, ({ response, params, url }) => {
+  router.get(/^\/api\/worlds\/([^/]+)\/events$/, async ({ request, response, params, url }) => {
+    const worldId = params[0]!
+    if (store.getWorld(worldId) === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
+    await worldAccess?.assertUnlocked(worldId, request)
     writeJson(response, 200, {
-      items: store.listWorldDomainEvents(params[0]!, nonNegativeInteger(url.searchParams.get('after'))),
+      items: store.listWorldDomainEvents(worldId, nonNegativeInteger(url.searchParams.get('after'))),
     })
   })
 
-  router.get(/^\/api\/worlds\/([^/]+)\/sessions$/, ({ response, params }) => {
+  router.get(/^\/api\/worlds\/([^/]+)\/sessions$/, async ({ request, response, params }) => {
     const worldId = params[0]!
     if (store.getWorld(worldId) === undefined) {
       throw new HttpError(404, 'world_not_found', 'World not found')
     }
+    await worldAccess?.assertUnlocked(worldId, request)
     writeJson(response, 200, { items: store.listSessions(worldId) })
   })
 
   router.post(/^\/api\/worlds\/([^/]+)\/recruit$/, async ({ request, response, params }) => {
     const world = store.getWorld(params[0]!)
     if (world === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
+    await worldAccess?.assertUnlocked(world.id, request)
     const body = await readJson(request)
     const recruitInput: Parameters<SqliteStore['recruitEmployee']>[0] = {
       workspaceId: world.workspaceId,

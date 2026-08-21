@@ -374,6 +374,22 @@ export class WorldRuntimeService {
   }
 
   #manifestForTemplate(templateId: string): WorldThemeManifestV1 | undefined {
+    if (templateId === 'personal-world') {
+      return {
+        ...cyberCompanyTheme,
+        id: 'dsh-cyber.personal.default',
+        version: '1.0.0',
+        templateId: 'personal-world',
+        displayName: '我的世界 · 默认空间',
+        terminology: {
+          ...cyberCompanyTheme.terminology,
+          world: '世界',
+          participant: '角色',
+          session: '会话',
+          milestone: '成长记录',
+        },
+      }
+    }
     if (templateId === 'company' || templateId === 'cyber-company') return cyberCompanyTheme
     if (templateId === 'tavern' || templateId === 'moonlit-tavern') return moonlitTavernTheme
     return undefined
@@ -413,6 +429,7 @@ function interactionPayload(request: WorldInteractionRequest): JsonObject {
 }
 
 function themeTemplateMatches(worldTemplateId: string, themeTemplateId: string): boolean {
+  if (worldTemplateId === 'personal-world') return true
   if (worldTemplateId === themeTemplateId) return true
   if ([worldTemplateId, themeTemplateId].every((value) => value === 'company' || value === 'cyber-company')) return true
   return [worldTemplateId, themeTemplateId].every((value) => value === 'tavern' || value === 'moonlit-tavern')

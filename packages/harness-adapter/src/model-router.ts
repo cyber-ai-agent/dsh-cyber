@@ -21,6 +21,9 @@ export interface HarnessModelRoute {
   apiKeyEnv?: string
   contextWindow?: number
   maxTokens?: number
+  reasoningEfforts?: false | Partial<Record<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max', string | null>>
+  reasoning?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+  compat?: { thinkingFormat?: string; supportsReasoningEffort?: boolean }
 }
 
 export interface HarnessModelRouterOptions {
@@ -125,7 +128,10 @@ export class HarnessModelRouter implements AgentRuntimePort, AsyncDisposable {
           id: route.modelId,
           ...(route.contextWindow === undefined ? {} : { contextWindow: route.contextWindow }),
           ...(route.maxTokens === undefined ? {} : { maxTokens: route.maxTokens }),
+          ...(route.reasoningEfforts === undefined ? {} : { reasoningEfforts: route.reasoningEfforts }),
+          ...(route.compat === undefined ? {} : { compat: route.compat }),
         },
+        ...(route.reasoning === undefined ? {} : { reasoning: route.reasoning }),
         ...(route.apiKeyEnv === undefined ? {} : { apiKeyEnv: route.apiKeyEnv }),
       }
     }

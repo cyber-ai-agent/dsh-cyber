@@ -170,7 +170,7 @@ function dossier(employee: CyberEmployee, index: number, roster: CyberEmployee[]
       skillGrants: [],
       capabilityGrants: [],
       modelPolicy: { modelProfileId: 'deepseek-default' },
-      reason: isTavern ? '从角色卡市场进入当前故事世界' : '从员工市场加入当前世界',
+      reason: isTavern ? '从角色卡市场进入当前故事世界' : '从角色市场加入当前世界',
       createdAt: now,
     }],
     profile: {
@@ -180,7 +180,7 @@ function dossier(employee: CyberEmployee, index: number, roster: CyberEmployee[]
       background: isTavern ? `${employee.role}，在月影酒馆拥有自己的来历、秘密、关系与长期记忆。` : `${employee.role}，关注可验证交付、清晰沟通与持续改进。`,
       personalityTraits: index % 2 === 0 ? ['严谨', '主动', '务实'] : ['沉稳', '好奇', '可靠'],
       appearance: { avatarIndex: index },
-      reason: '完成员工数字档案建档',
+      reason: '完成角色数字档案建档',
       createdAt: now,
     },
     skills: [

@@ -5,6 +5,7 @@ import {
   Plus,
   UsersThree,
   UserFocus,
+  GearSix,
 } from '@phosphor-icons/react'
 import { useDeferredValue, useMemo, useState } from 'react'
 import type { WorkSession, World } from '@dsh-cyber/contracts'
@@ -25,6 +26,7 @@ interface NavigationPaneProps {
   onDirectEmployee(employee: CyberEmployee): void
   onRecruit(): void
   onCreateGroup(): void
+  onWorldSettings(): void
 }
 
 export function NavigationPane({
@@ -39,6 +41,7 @@ export function NavigationPane({
   onDirectEmployee,
   onRecruit,
   onCreateGroup,
+  onWorldSettings,
 }: NavigationPaneProps) {
   const [query, setQuery] = useState('')
   const experience = worldExperience(world)
@@ -122,6 +125,7 @@ export function NavigationPane({
           ))}
         </div>
       </section>
+      <footer className="world-settings-entry"><button type="button" onClick={onWorldSettings}><GearSix size={17} /><span>世界设置</span></button></footer>
     </div>
   )
 }

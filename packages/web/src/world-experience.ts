@@ -1,6 +1,6 @@
 import type { World } from '@dsh-cyber/contracts'
 
-export type WorldKind = 'company' | 'tavern' | 'studio'
+export type WorldKind = 'personal' | 'company' | 'tavern' | 'studio'
 
 export interface WorldExperience {
   kind: WorldKind
@@ -16,15 +16,16 @@ export interface WorldExperience {
 }
 
 const experiences: Record<WorldKind, WorldExperience> = {
+  personal: { kind: 'personal', peopleLabel: '角色', personLabel: '角色', marketLabel: '角色市场', actionLabel: '互动', emptyTitle: '这个世界还没有角色', emptyCopy: '添加一个独立角色，定义关系、人格和模型后开始互动。', composerPlaceholder: '@角色 开始对话或任务…', sceneTitle: '我的世界', sceneSubtitle: '世界观、角色、文件、模型与记忆在这里独立存在' },
   company: {
     kind: 'company',
-    peopleLabel: '员工',
-    personLabel: '员工',
-    marketLabel: '员工市场',
+    peopleLabel: '角色',
+    personLabel: '角色',
+    marketLabel: '角色市场',
     actionLabel: '任务',
-    emptyTitle: '公司还没有员工',
-    emptyCopy: '从员工市场招聘第一位独立 Agent，建立属于这个世界的组织与会话。',
-    composerPlaceholder: '@员工 下达任务，或同时点名多人召开协作会…',
+    emptyTitle: '公司还没有角色',
+    emptyCopy: '从角色市场招聘第一位独立 Agent，建立属于这个世界的组织与会话。',
+    composerPlaceholder: '@角色 下达任务，或同时点名多人召开协作会…',
     sceneTitle: '总部指挥中心',
     sceneSubtitle: '真实任务状态会改变角色所在区域与行动',
   },
@@ -56,6 +57,7 @@ const experiences: Record<WorldKind, WorldExperience> = {
 
 export function worldExperience(world: Pick<World, 'templateId'>): WorldExperience {
   const template = world.templateId.toLowerCase()
+  if (template.includes('personal')) return experiences.personal
   if (template.includes('tavern')) return experiences.tavern
   if (template.includes('studio') || template.includes('creator')) return experiences.studio
   return experiences.company

@@ -144,7 +144,7 @@ export function WorldMode({
       <main className="world-runtime world-runtime--loading">
         <Buildings size={32} />
         <strong>正在恢复世界运行状态</strong>
-        <span>加载场景、员工位置和持久化事件…</span>
+        <span>加载场景、角色位置和持久化事件…</span>
       </main>
     )
   }
@@ -234,8 +234,8 @@ export function WorldMode({
         <section className="world-empty-roster">
           <Storefront size={30} />
           <strong>这个世界还没有机器人</strong>
-          <p>按任务临时雇佣一名员工。每名员工拥有独立会话、记忆和成长档案。</p>
-          <button className="primary-button" type="button" onClick={onRecruit}>打开员工市场</button>
+          <p>按任务临时雇佣一名角色。每名角色拥有独立会话、记忆和成长档案。</p>
+          <button className="primary-button" type="button" onClick={onRecruit}>打开角色市场</button>
         </section>
       ) : null}
 

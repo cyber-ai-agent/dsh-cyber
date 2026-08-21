@@ -8,12 +8,12 @@ export const HARNESS_PROTOCOL_CONTRACT = 'dsh-session-events-v1' as const
 
 export const HARNESS_COMPATIBILITY_MATRIX = [
   {
-    dshVersion: '0.1.0-rc.7',
+    dshVersion: '0.1.0-rc.8',
     contractId: HARNESS_PROTOCOL_CONTRACT,
     packages: {
-      '@deepseek-ai/dsh': '0.1.0-rc.7',
-      '@deepseek-ai/dsh-sdk-client': '0.1.0-rc.7',
-      '@deepseek-ai/dsh-sdk-jsonrpc-server': '0.1.0-rc.7',
+      '@deepseek-ai/dsh': '0.1.0-rc.8',
+      '@deepseek-ai/dsh-sdk-client': '0.1.0-rc.8',
+      '@deepseek-ai/dsh-sdk-jsonrpc-server': '0.1.0-rc.8',
     },
     requiredEvents: [
       'turn/start',
@@ -24,6 +24,23 @@ export const HARNESS_COMPATIBILITY_MATRIX = [
       'turn/end',
     ],
   },
+{
+  dshVersion: '0.1.0-rc.7',
+  contractId: HARNESS_PROTOCOL_CONTRACT,
+  packages: {
+    '@deepseek-ai/dsh': '0.1.0-rc.7',
+    '@deepseek-ai/dsh-sdk-client': '0.1.0-rc.7',
+    '@deepseek-ai/dsh-sdk-jsonrpc-server': '0.1.0-rc.7',
+  },
+  requiredEvents: [
+    'turn/start',
+    'assistant/chunk',
+    'assistant/message',
+    'tool/call',
+    'tool/result',
+    'turn/end',
+  ],
+},
 ] as const
 
 export type HarnessCompatibilityEntry = (typeof HARNESS_COMPATIBILITY_MATRIX)[number]

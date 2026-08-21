@@ -4,14 +4,13 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { BUILTIN_BLUEPRINTS } from '@dsh-cyber/catalog'
-import type { AgentRuntimePort, ModelProfile } from '@dsh-cyber/contracts'
+import type { AgentRuntimePort } from '@dsh-cyber/contracts'
 import {
   HarnessModelRouter,
   inspectHarnessCandidate,
   inspectHarnessCompatibility,
   readActiveHarnessRuntime,
   resolveCandidateDshBin,
-  type HarnessModelRoute,
 } from '@dsh-cyber/harness-adapter'
 import { ConversationOrchestrator } from '@dsh-cyber/orchestration'
 import {
@@ -24,7 +23,6 @@ import { SqliteStore } from '@dsh-cyber/persistence'
 
 import { dispatchHttpRequest } from './http/context.js'
 import { writeError } from './http/errors.js'
-import { optionalPositiveInteger } from './http/request.js'
 import { Router } from './http/router.js'
 import { isLoopbackHost } from './http/security.js'
 import { registerAssetRoutes } from './routes/asset-routes.js'
@@ -38,11 +36,16 @@ import { registerWorkspaceFileRoutes } from './routes/workspace-file-routes.js'
 import { registerWorkspaceRoutes } from './routes/workspace-routes.js'
 import { registerWorldRuntimeRoutes } from './routes/world-runtime-routes.js'
 import { registerWorldRoutes } from './routes/world-routes.js'
+import { registerWorldSettingsRoutes } from './routes/world-settings-routes.js'
 import { AssetService } from './services/asset-service.js'
-import { ModelCredentialService } from './services/model-credential-service.js'
+import { harnessModelRoute } from './services/harness-model-route.js'
 import { ModelCatalogService } from './services/model-catalog-service.js'
+import { ModelCredentialService } from './services/model-credential-service.js'
 import { RuntimeUpdateService } from './services/runtime-update-service.js'
-import { WorkspaceFileService } from './services/workspace-file-service.js'
+import { WorldAccessService } from './services/world-access-service.js'
+import { WorldFileService } from './services/world-file-service.js'
+import { WorldRootService } from './services/world-root-service.js'
+import { WorldSettingsService } from './services/world-settings-service.js'
 import { RuntimeStreamHub } from './streams/runtime-stream-hub.js'
 import { WorldStreamHub } from './streams/world-stream-hub.js'
 import { validateStagedPackageEntrypoints } from './installed-package-runtime.js'
@@ -60,6 +63,7 @@ export interface CyberServerOptions {
   runtime?: AgentRuntimePort
   packageRuntime?: PackageRuntimePort
   marketplaceRoot?: string
+  bootstrapDefaultWorld?: boolean
 }
 
 export interface CyberServerAddress {
@@ -96,6 +100,25 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
 
   const store = await SqliteStore.open(join(stateRoot, 'data', 'dsh-cyber.sqlite'))
   for (const blueprint of BUILTIN_BLUEPRINTS) store.saveBlueprint(blueprint)
+  if (options.bootstrapDefaultWorld === true && store.listWorkspaces().length === 0) {
+    const local = store.createWorkspace({ name: '本地实例' })
+    const world = store.createWorld({ workspaceId: local.id, name: '我的世界', templateId: 'cyber-company' })
+    store.recruitEmployee({
+      workspaceId: local.id,
+      worldId: world.id,
+      blueprintId: 'core.butler',
+      blueprintVersion: 1,
+      displayName: '管家',
+    })
+  }
+  const worldRoots = new WorldRootService(stateRoot)
+  await Promise.all(
+    store.listWorkspaces().flatMap((workspace) =>
+      store.listWorlds(workspace.id, true).map((world) => worldRoots.ensure(world.id)),
+    ),
+  )
+  const worldSettings = new WorldSettingsService(worldRoots)
+  const worldAccess = new WorldAccessService(worldRoots)
   const credentials = await ModelCredentialService.open(stateRoot)
   const modelCatalog = new ModelCatalogService(credentials)
 
@@ -111,10 +134,15 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       const profile = selectedProfile?.workspaceId === request.agent.workspaceId
         ? selectedProfile
         : store.resolveModelProfile(request.agent.workspaceId, request.agent.worldId, request.agent.id)
-      return profile === undefined ? undefined : harnessModelRoute(profile)
+      return profile === undefined ? undefined : harnessModelRoute(profile, request.reasoningEffort)
     },
   })
-  const orchestrator = new ConversationOrchestrator({ store, runtime, workspacePath: workspaceRoot })
+  const orchestrator = new ConversationOrchestrator({
+    store,
+    runtime,
+    workspacePath: workspaceRoot,
+    resolveWorldRoot: async (worldId) => (await worldRoots.ensure(worldId)).filesPath,
+  })
   const packageManager = new PackageManager({
     store,
     runtime: options.packageRuntime ?? new LocalPackageRuntime(join(stateRoot, 'packages')),
@@ -125,23 +153,34 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   )
   const runtimeStreamHub = new RuntimeStreamHub()
   const worldStreamHub = new WorldStreamHub()
-  const worldRuntime = new WorldRuntimeService({ store, publish: (event) => worldStreamHub.publish(event) })
+  const worldRuntime = new WorldRuntimeService({
+    store,
+    publish: (event) => worldStreamHub.publish(event),
+  })
   const runtimeUpdates = new RuntimeUpdateService(store, stateRoot, workspaceRoot)
   const assets = new AssetService(store, stateRoot)
-  const workspaceFiles = new WorkspaceFileService(workspaceRoot)
+  const worldFiles = new WorldFileService(worldRoots)
 
   const router = new Router()
   registerSystemRoutes(router, { store, stateRoot, runtimeUpdates })
-  registerWorkspaceFileRoutes(router, { workspaceFiles })
+  registerWorkspaceFileRoutes(router, { worldFiles, access: worldAccess })
   registerCatalogRoutes(router, { store, packageCatalog })
   registerWorkspaceRoutes(router, { store })
   registerModelRoutes(router, { store, credentials, modelCatalog })
   registerAssetRoutes(router, { store, assets })
-  registerWorldRoutes(router, { store })
+  registerWorldRoutes(router, { store, worldAccess })
+  registerWorldSettingsRoutes(router, { store, settings: worldSettings, access: worldAccess })
   registerPackageRoutes(router, { store, packageManager, packageCatalog })
-  registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub })
-  registerConversationRoutes(router, { store, orchestrator, runtimeStreamHub, worldRuntime })
-  registerEmployeeRoutes(router, { store })
+  registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
+  registerConversationRoutes(router, {
+    store,
+    orchestrator,
+    runtimeStreamHub,
+    worldRuntime,
+    worldAccess,
+    worldSettings,
+  })
+  registerEmployeeRoutes(router, { store, worldAccess })
 
   const httpServer = createServer((request, response) => {
     void dispatchHttpRequest(router, webRoot, request, response)
@@ -208,21 +247,6 @@ async function resolveActiveRuntime(
     )
   }
   return resolveCandidateDshBin(activeRuntime.candidateRoot)
-}
-
-function harnessModelRoute(profile: ModelProfile): HarnessModelRoute {
-  const contextWindow = optionalPositiveInteger(profile.settings.contextWindow)
-  const maxTokens = optionalPositiveInteger(profile.settings.maxTokens)
-  return {
-    id: profile.id,
-    displayName: profile.displayName,
-    api: profile.api,
-    baseURL: profile.baseUrl,
-    modelId: profile.modelId,
-    ...(profile.credentialEnvName === undefined ? {} : { apiKeyEnv: profile.credentialEnvName }),
-    ...(contextWindow === undefined ? {} : { contextWindow }),
-    ...(maxTokens === undefined ? {} : { maxTokens }),
-  }
 }
 
 function listen(server: Server, port: number, host: string): Promise<void> {
