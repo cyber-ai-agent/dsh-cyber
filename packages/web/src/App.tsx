@@ -759,7 +759,7 @@ export default function App() {
           employee.id,
           'employee',
           'assistant',
-          activeWorld.templateId.includes('tavern')
+          worldExperience(activeWorld).kind === 'tavern'
             ? tavernDemoReply(employee, prompt)
             : `${employee.displayName}收到。我会以${employee.role}的职责独立处理“${compactPrompt(prompt)}”，完成后给出证据、产物和下一步。`,
         ))
@@ -962,7 +962,13 @@ export default function App() {
     if (demoMode) {
       await delay(350)
       if (action === 'backup' || action === 'export') {
-        return { ok: true, kind: action, output: `演示模式/${action === 'backup' ? 'dsh-cyber-demo.sqlite' : 'dsh-cyber-demo.json'}`, createdAt: new Date().toISOString() }
+        return {
+          ok: true,
+          kind: action,
+          output: `演示模式/${action === 'backup' ? 'dsh-cyber-demo.dshbackup' : 'dsh-cyber-demo.json'}`,
+          ...(action === 'backup' ? { format: 'dsh-cyber-local-backup', bundle: true } : {}),
+          createdAt: new Date().toISOString(),
+        }
       }
       if (action === 'verify-update') {
         return { ok: true, version: '0.1.0-rc.8', supported: true, contractId: 'dsh-session-events-v1', checks: { packageVersions: true, isolatedProfile: true }, transaction: demoRuntimeTransaction('verified') }
@@ -1323,7 +1329,7 @@ function WorldSwitcher({
               onClick={() => { onSelect(world); close() }}
             >
               <Buildings size={17} />
-              <span><strong>{world.name}</strong><small>{world.templateId.includes('tavern') ? '叙事角色世界' : '团队协作世界'}</small></span>
+              <span><strong>{world.name}</strong><small>{worldExperience(world).kind === 'tavern' ? '叙事角色世界' : '团队协作世界'}</small></span>
               {world.id === activeWorld.id ? <Check size={16} weight="bold" /> : null}
             </button>
           ))}

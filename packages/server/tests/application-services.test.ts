@@ -60,12 +60,25 @@ describe('WorldFileService', () => {
     const restored = await files.readAttachment('world-a', attachment.assetId)
     expect(restored.contentType).toBe('text/plain')
     expect(restored.body.equals(source)).toBe(true)
+    await expect(files.getAttachment('world-a', attachment.assetId)).resolves.toMatchObject({
+      assetId: attachment.assetId,
+      name: 'note.txt',
+      mimeType: 'text/plain',
+      byteLength: source.byteLength,
+      url: `/api/worlds/world-a/assets/${attachment.assetId}`,
+    })
     await expect(files.readAttachment('world-b', attachment.assetId)).rejects.toMatchObject<ServiceError>({
       kind: 'not-found',
       code: 'asset_not_found',
     })
-    const metadata = JSON.parse(await readFile(join(worldRoot.assetsPath, 'attachments', `${attachment.assetId}.json`), 'utf8')) as { name: string }
+    const metadataPath = join(worldRoot.assetsPath, 'attachments', `${attachment.assetId}.json`)
+    const metadata = JSON.parse(await readFile(metadataPath, 'utf8')) as { name: string; fileName: string }
     expect(metadata.name).toBe('note.txt')
+    await writeFile(metadataPath, JSON.stringify({ ...metadata, fileName: '../outside.txt' }))
+    await expect(files.readAttachment('world-a', attachment.assetId)).rejects.toMatchObject<ServiceError>({
+      kind: 'conflict',
+      code: 'asset_metadata_invalid',
+    })
   })
 })
 

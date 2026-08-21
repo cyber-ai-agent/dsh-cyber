@@ -787,9 +787,9 @@ function RuntimeSettings({ pending, result, error, onRun }: ActionSettingsProps)
 
 function DataSettings({ pending, result, error, onRun }: ActionSettingsProps) {
   return (
-    <ActionSettings title="本地数据" copy="SQLite 是本地权威数据源。备份和导出写入当前 DSH Cyber 数据目录，不会覆盖已有文件。" result={result} error={error}>
+    <ActionSettings title="本地数据" copy="SQLite 是本地权威数据源。备份会生成包含世界数据的本地 Bundle，导出写入当前 DSH Cyber 数据目录，不会覆盖已有文件。" result={result} error={error}>
       <ActionButton label="运行数据库健康检查" action="doctor" pending={pending} onRun={onRun} />
-      <ActionButton label="创建时间戳 SQLite 备份" action="backup" pending={pending} onRun={onRun} />
+      <ActionButton label="创建本地数据备份 Bundle" action="backup" pending={pending} onRun={onRun} />
       <ActionButton label="导出可移植 JSON" action="export" pending={pending} onRun={onRun} />
     </ActionSettings>
   )

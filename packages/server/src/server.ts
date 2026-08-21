@@ -149,7 +149,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerPackageRoutes(router, { store, packageManager, packageCatalog })
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
   registerModelInteractionRoutes(router, { store, interactions })
-  registerConversationRoutes(router, { store, orchestrator, runtimeStreamHub, worldRuntime, worldAccess, worldSettings })
+  registerConversationRoutes(router, { store, orchestrator, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings })
   registerEmployeeRoutes(router, { store, worldAccess })
 
   const httpServer = createServer((request, response) => {

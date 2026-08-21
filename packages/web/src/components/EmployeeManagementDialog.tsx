@@ -13,7 +13,15 @@ interface EmployeeManagementDialogProps {
   saving: boolean
   onClose(): void
   onRevise(input: { reason: string; persona?: string; skillGrants?: string[]; capabilityGrants?: string[]; modelPolicy: { modelProfileId?: string } }): Promise<void>
-  onUpdateProfile(input: { displayName: string; avatarIndex: number }): Promise<void>
+  onUpdateProfile(input: {
+    displayName: string
+    avatarIndex: number
+    background: string
+    personalityTraits: string[]
+    relationshipToUser: string
+    addressUserAs: string
+    selfReference: string
+  }): Promise<void>
   onArchive(): Promise<void>
 }
 
@@ -55,7 +63,16 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
 
   const saveIdentityAndRelationship = async () => {
     if (!displayName.trim() || !background.trim() || saving) return
-    await onUpdateProfile({ displayName: displayName.trim(), avatarIndex: selectedAvatar })
+    const profile = runtimeProfile()
+    await onUpdateProfile({
+      displayName: displayName.trim(),
+      avatarIndex: selectedAvatar,
+      background: profile.background,
+      personalityTraits: profile.personalityTraits,
+      relationshipToUser: profile.relationshipToUser,
+      addressUserAs: profile.addressUserAs,
+      selfReference: profile.selfReference,
+    })
     await onRevise({
       reason: '更新角色身份、关系与背景',
       persona: composeCharacterPersona(runtimeProfile()),

@@ -149,7 +149,7 @@ describe('world experience stabilization', () => {
       body: '{}',
     })
     expect(backup.response.status).toBe(201)
-    expect(backup.body.kind).toBe('backup-bundle')
+    expect(backup.body).toMatchObject({ kind: 'backup', format: 'dsh-cyber-local-backup', bundle: true })
     const destination = backup.body.output as string
     expect((await stat(destination)).isFile()).toBe(true)
     expect(destination.endsWith('.dshbackup')).toBe(true)

@@ -77,7 +77,10 @@ export function registerSystemRoutes(router: Router, dependencies: SystemRoutesD
     const output = await createLocalBackupBundle(stateRoot, store)
     writeJson(response, 201, {
       ok: true,
-      kind: 'backup-bundle',
+      // 保留原有 kind，Bundle 细节通过附加字段表达，避免旧客户端无法识别备份响应。
+      kind: 'backup',
+      format: 'dsh-cyber-local-backup',
+      bundle: true,
       output,
       createdAt: new Date().toISOString(),
       excluded: ['credentials', 'runtime', 'world-cache'],
