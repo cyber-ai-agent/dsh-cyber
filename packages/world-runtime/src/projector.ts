@@ -291,8 +291,8 @@ function placementAtAnchor(anchor: WorldThemeAnchorManifest, index: number): Wor
   const column = slot % columns
   const row = Math.floor(slot / columns)
   return {
-    x: anchor.position.x + (column - (columns - 1) / 2) * 72,
-    y: anchor.position.y + row * 38,
+    x: anchor.position.x + (column - (columns - 1) / 2) * 112,
+    y: anchor.position.y + row * 112,
   }
 }
 

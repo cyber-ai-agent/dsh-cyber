@@ -46,8 +46,8 @@ test('onboards, recruits, talks, browses dossiers and previews a real workspace 
   const market = page.getByRole('dialog', { name: '角色市场' })
   await expect(market).toBeVisible()
   await market.getByRole('button', { name: /开发工程师 v1/ }).click()
-  await market.getByRole('textbox', { name: '角色称呼（可选）' }).fill('阿帆')
-  await market.getByRole('button', { name: '确认招聘' }).click()
+  await market.getByRole('textbox', { name: '角色名字（可选）' }).fill('阿帆')
+  await market.getByRole('button', { name: '确认添加' }).click()
 
   await expect(market).toBeHidden()
   await expect(composer).toBeEnabled()
@@ -90,8 +90,8 @@ test('runs direct and group conversations with real world lifecycle, persistence
   await page.locator('.left-pane').getByRole('button', { name: '添加角色' }).click()
   const market = page.getByRole('dialog', { name: '角色市场' })
   await market.getByRole('button', { name: /秘书 v1/ }).click()
-  await market.getByRole('textbox', { name: '角色称呼（可选）' }).fill('小周')
-  await market.getByRole('button', { name: '确认招聘' }).click()
+  await market.getByRole('textbox', { name: '角色名字（可选）' }).fill('小周')
+  await market.getByRole('button', { name: '确认添加' }).click()
   await expect(market).toBeHidden()
 
   const snapshotResponse = await fetch(`${origin}/api/workspaces`)
@@ -362,8 +362,8 @@ test('clears the composer instantly, shows the owner message on screen, and keep
     await page.locator('.left-pane').getByRole('button', { name: '添加角色' }).click()
     const market = page.getByRole('dialog', { name: '角色市场' })
     await market.getByRole('button', { name: /开发工程师 v1/ }).click()
-    await market.getByRole('textbox', { name: '角色称呼（可选）' }).fill('阿帆')
-    await market.getByRole('button', { name: '确认招聘' }).click()
+    await market.getByRole('textbox', { name: '角色名字（可选）' }).fill('阿帆')
+    await market.getByRole('button', { name: '确认添加' }).click()
     await expect(market).toBeHidden()
     await expect(page.getByRole('button', { name: '与阿帆私聊' })).toBeVisible()
   }
@@ -425,8 +425,8 @@ test('shows real model interaction logs in the settings panel with filtering, de
     await page.locator('.left-pane').getByRole('button', { name: '添加角色' }).click()
     const market = page.getByRole('dialog', { name: '角色市场' })
     await market.getByRole('button', { name: /开发工程师 v1/ }).click()
-    await market.getByRole('textbox', { name: '角色称呼（可选）' }).fill('阿帆')
-    await market.getByRole('button', { name: '确认招聘' }).click()
+    await market.getByRole('textbox', { name: '角色名字（可选）' }).fill('阿帆')
+    await market.getByRole('button', { name: '确认添加' }).click()
     await expect(market).toBeHidden()
     await expect(page.getByRole('button', { name: '与阿帆私聊' })).toBeVisible()
   }
