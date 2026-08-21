@@ -4,6 +4,8 @@ import {
   Cpu,
   Database,
   Desktop,
+  Eye,
+  EyeSlash,
   ImageSquare,
   Moon,
   Palette,
@@ -70,12 +72,30 @@ interface SettingsDialogProps {
   onSavePreferences(preferences: WorkspacePreferences): Promise<void>
   onUploadBackground(file: File): Promise<string>
   onSaveModel(profile: ModelProfileSaveDraft): Promise<ModelProfile>
+  onDiscoverModels(input: ModelDiscoveryDraft): Promise<DiscoveredModel[]>
   onDeleteModel(modelProfileId: string): Promise<void>
   onAssignModel(input: { scope: ModelAssignment['scope']; scopeId: string; modelProfileId?: string }): Promise<void>
   onSystemAction(action: SystemAction, input?: SystemActionInput): Promise<SystemActionResult>
 }
 
-export type ModelProfileSaveDraft = Omit<ModelProfile, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt'> & { id?: string }
+export type ModelProfileSaveDraft = Omit<ModelProfile, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt'> & {
+  id?: string
+  apiKey?: string
+  clearCredential?: boolean
+}
+
+export interface ModelDiscoveryDraft {
+  baseUrl: string
+  api: ModelApiKind
+  profileId?: string
+  apiKey?: string
+  credentialEnvName?: string
+}
+
+export interface DiscoveredModel {
+  id: string
+  displayName?: string
+}
 
 const sections = [
   ['appearance', '外观与个性化', Palette],
@@ -92,8 +112,11 @@ interface ModelProviderPreset {
   api: ModelApiKind
   baseUrl: string
   credentialEnvName: string
+  credentialMode: ModelCredentialMode
   modelPlaceholder: string
 }
+
+type ModelCredentialMode = 'api-key' | 'environment' | 'none'
 
 interface ModelDraft {
   id?: string
@@ -103,7 +126,10 @@ interface ModelDraft {
   baseUrl: string
   modelId: string
   api: ModelApiKind
+  apiKey: string
+  credentialMode: ModelCredentialMode
   credentialEnvName: string
+  hasStoredApiKey: boolean
   contextWindow: number
   maxTokens: number
   isDefault: boolean
@@ -111,18 +137,18 @@ interface ModelDraft {
 }
 
 const MODEL_PRESETS: readonly ModelProviderPreset[] = [
-  { id: 'deepseek', label: 'DeepSeek', providerKind: 'deepseek', api: 'openai-completions', baseUrl: 'https://api.deepseek.com/v1', credentialEnvName: 'DEEPSEEK_API_KEY', modelPlaceholder: 'deepseek-chat' },
-  { id: 'openai', label: 'OpenAI', providerKind: 'openai-compatible-remote', api: 'openai-responses', baseUrl: 'https://api.openai.com/v1', credentialEnvName: 'OPENAI_API_KEY', modelPlaceholder: 'gpt-5' },
-  { id: 'anthropic', label: 'Anthropic', providerKind: 'openai-compatible-remote', api: 'anthropic-messages', baseUrl: 'https://api.anthropic.com/v1', credentialEnvName: 'ANTHROPIC_API_KEY', modelPlaceholder: 'claude-sonnet-4-5' },
-  { id: 'gemini', label: 'Google Gemini', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', credentialEnvName: 'GEMINI_API_KEY', modelPlaceholder: 'gemini-2.5-pro' },
-  { id: 'openrouter', label: 'OpenRouter', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://openrouter.ai/api/v1', credentialEnvName: 'OPENROUTER_API_KEY', modelPlaceholder: 'deepseek/deepseek-chat' },
-  { id: 'groq', label: 'Groq', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://api.groq.com/openai/v1', credentialEnvName: 'GROQ_API_KEY', modelPlaceholder: 'llama-3.3-70b-versatile' },
-  { id: 'mistral', label: 'Mistral', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://api.mistral.ai/v1', credentialEnvName: 'MISTRAL_API_KEY', modelPlaceholder: 'mistral-large-latest' },
-  { id: 'xai', label: 'xAI', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://api.x.ai/v1', credentialEnvName: 'XAI_API_KEY', modelPlaceholder: 'grok-4' },
-  { id: 'ollama', label: 'Ollama（本地）', providerKind: 'openai-compatible-local', api: 'openai-completions', baseUrl: 'http://127.0.0.1:11434/v1', credentialEnvName: '', modelPlaceholder: 'qwen3:14b' },
-  { id: 'lm-studio', label: 'LM Studio（本地）', providerKind: 'openai-compatible-local', api: 'openai-completions', baseUrl: 'http://127.0.0.1:1234/v1', credentialEnvName: '', modelPlaceholder: 'local-model' },
-  { id: 'custom-local', label: '自定义（本机或局域网）', providerKind: 'openai-compatible-local', api: 'openai-completions', baseUrl: '', credentialEnvName: '', modelPlaceholder: 'qwen3.5' },
-  { id: 'custom-remote', label: '自定义（HTTPS）', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: '', credentialEnvName: 'CUSTOM_API_KEY', modelPlaceholder: 'model-id' },
+  { id: 'deepseek', label: 'DeepSeek', providerKind: 'deepseek', api: 'openai-completions', baseUrl: 'https://api.deepseek.com/v1', credentialEnvName: 'DEEPSEEK_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'deepseek-chat' },
+  { id: 'openai', label: 'OpenAI', providerKind: 'openai-compatible-remote', api: 'openai-responses', baseUrl: 'https://api.openai.com/v1', credentialEnvName: 'OPENAI_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'gpt-5' },
+  { id: 'anthropic', label: 'Anthropic', providerKind: 'openai-compatible-remote', api: 'anthropic-messages', baseUrl: 'https://api.anthropic.com/v1', credentialEnvName: 'ANTHROPIC_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'claude-sonnet-4-5' },
+  { id: 'gemini', label: 'Google Gemini', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', credentialEnvName: 'GEMINI_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'gemini-2.5-pro' },
+  { id: 'openrouter', label: 'OpenRouter', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://openrouter.ai/api/v1', credentialEnvName: 'OPENROUTER_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'deepseek/deepseek-chat' },
+  { id: 'groq', label: 'Groq', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://api.groq.com/openai/v1', credentialEnvName: 'GROQ_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'llama-3.3-70b-versatile' },
+  { id: 'mistral', label: 'Mistral', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://api.mistral.ai/v1', credentialEnvName: 'MISTRAL_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'mistral-large-latest' },
+  { id: 'xai', label: 'xAI', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://api.x.ai/v1', credentialEnvName: 'XAI_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'grok-4' },
+  { id: 'ollama', label: 'Ollama（本地）', providerKind: 'openai-compatible-local', api: 'openai-completions', baseUrl: 'http://127.0.0.1:11434/v1', credentialEnvName: '', credentialMode: 'none', modelPlaceholder: 'qwen3:14b' },
+  { id: 'lm-studio', label: 'LM Studio（本地）', providerKind: 'openai-compatible-local', api: 'openai-completions', baseUrl: 'http://127.0.0.1:1234/v1', credentialEnvName: '', credentialMode: 'none', modelPlaceholder: 'local-model' },
+  { id: 'custom-local', label: '自定义（本机或局域网）', providerKind: 'openai-compatible-local', api: 'openai-completions', baseUrl: '', credentialEnvName: 'SUB2API_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'qwen3.5' },
+  { id: 'custom-remote', label: '自定义（HTTPS）', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: '', credentialEnvName: 'CUSTOM_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'model-id' },
 ] as const
 
 function modelDraftForPreset(preset: ModelProviderPreset, isDefault = false): ModelDraft {
@@ -133,7 +159,10 @@ function modelDraftForPreset(preset: ModelProviderPreset, isDefault = false): Mo
     baseUrl: preset.baseUrl,
     modelId: '',
     api: preset.api,
+    apiKey: '',
+    credentialMode: preset.credentialMode,
     credentialEnvName: preset.credentialEnvName,
+    hasStoredApiKey: false,
     contextWindow: 64_000,
     maxTokens: 8_192,
     isDefault,
@@ -147,6 +176,7 @@ function modelDraftForProfile(profile: ModelProfile): ModelDraft {
   const providerId = MODEL_PRESETS.some((preset) => preset.id === configuredProviderId)
     ? configuredProviderId!
     : fallbackProviderId
+  const hasStoredApiKey = isManagedCredentialName(profile.credentialEnvName)
   return {
     id: profile.id,
     providerId,
@@ -155,7 +185,10 @@ function modelDraftForProfile(profile: ModelProfile): ModelDraft {
     baseUrl: profile.baseUrl,
     modelId: profile.modelId,
     api: profile.api,
-    credentialEnvName: profile.credentialEnvName ?? '',
+    apiKey: '',
+    credentialMode: hasStoredApiKey ? 'api-key' : profile.credentialEnvName ? 'environment' : 'none',
+    credentialEnvName: hasStoredApiKey ? '' : profile.credentialEnvName ?? '',
+    hasStoredApiKey,
     contextWindow: modelSettingNumber(profile, 'contextWindow', 64_000),
     maxTokens: modelSettingNumber(profile, 'maxTokens', 8_192),
     isDefault: profile.isDefault,
@@ -181,6 +214,7 @@ export function SettingsDialog({
   onSavePreferences,
   onUploadBackground,
   onSaveModel,
+  onDiscoverModels,
   onDeleteModel,
   onAssignModel,
   onSystemAction,
@@ -246,6 +280,7 @@ export function SettingsDialog({
                 employees={employees}
                 onAssign={onAssignModel}
                 onSave={onSaveModel}
+                onDiscover={onDiscoverModels}
                 onDelete={onDeleteModel}
               />
             ) : null}
@@ -336,6 +371,7 @@ function ModelSettings({
   worlds,
   employees,
   onSave,
+  onDiscover,
   onDelete,
   onAssign,
 }: {
@@ -345,6 +381,7 @@ function ModelSettings({
   worlds: World[]
   employees: EmployeeInstance[]
   onSave(profile: ModelProfileSaveDraft): Promise<ModelProfile>
+  onDiscover(input: ModelDiscoveryDraft): Promise<DiscoveredModel[]>
   onDelete(modelProfileId: string): Promise<void>
   onAssign(input: { scope: ModelAssignment['scope']; scopeId: string; modelProfileId?: string }): Promise<void>
 }) {
@@ -353,20 +390,54 @@ function ModelSettings({
   const [deletingModelId, setDeletingModelId] = useState<string>()
   const [modelError, setModelError] = useState<string>()
   const [modelNotice, setModelNotice] = useState<string>()
+  const [showApiKey, setShowApiKey] = useState(false)
+  const [discoveringModels, setDiscoveringModels] = useState(false)
+  const [discoveredModels, setDiscoveredModels] = useState<DiscoveredModel[]>([])
   const assignmentValue = (scope: ModelAssignment['scope'], scopeId: string) =>
     assignments.find((item) => item.scope === scope && item.scopeId === scopeId)?.modelProfileId ?? ''
   const assign = (scope: ModelAssignment['scope'], scopeId: string, modelProfileId: string) =>
     onAssign({ scope, scopeId, ...(modelProfileId ? { modelProfileId } : {}) })
   const editModel = (profile: ModelProfile) => {
     setDraft(modelDraftForProfile(profile))
+    setShowApiKey(false)
+    setDiscoveredModels([])
     setModelError(undefined)
     setModelNotice(undefined)
   }
   const startNewModel = () => {
     const custom = MODEL_PRESETS.find((preset) => preset.id === 'custom-local')!
     setDraft(modelDraftForPreset(custom, models.length === 0))
+    setShowApiKey(false)
+    setDiscoveredModels([])
     setModelError(undefined)
     setModelNotice(undefined)
+  }
+  const discoverModels = async () => {
+    const validationError = validateModelConnection(draft)
+    if (validationError !== undefined) {
+      setModelError(validationError)
+      setModelNotice(undefined)
+      return
+    }
+    setDiscoveringModels(true)
+    setModelError(undefined)
+    setModelNotice(undefined)
+    try {
+      const items = await onDiscover({
+        baseUrl: draft.baseUrl.trim(),
+        api: draft.api,
+        ...(draft.id && draft.hasStoredApiKey && !draft.apiKey.trim() ? { profileId: draft.id } : {}),
+        ...(draft.credentialMode === 'api-key' && draft.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : {}),
+        ...(draft.credentialMode === 'environment' ? { credentialEnvName: draft.credentialEnvName.trim() } : {}),
+      })
+      setDiscoveredModels(items)
+      if (!draft.modelId.trim() && items[0]) setDraft((current) => ({ ...current, modelId: items[0]!.id }))
+      setModelNotice(`已获取 ${items.length} 个可用模型。`)
+    } catch (cause) {
+      setModelError(cause instanceof Error ? cause.message : '模型列表获取失败，请检查接口配置。')
+    } finally {
+      setDiscoveringModels(false)
+    }
   }
   const saveDraft = async () => {
     const validationError = validateModelDraft(draft)
@@ -381,6 +452,11 @@ function ModelSettings({
     try {
       const settings = { ...draft.settings }
       delete settings.temperature
+      const credential = draft.credentialMode === 'api-key'
+        ? (draft.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : {})
+        : draft.credentialMode === 'environment'
+          ? { credentialEnvName: draft.credentialEnvName.trim() }
+          : { clearCredential: true }
       const saved = await onSave({
         ...(draft.id ? { id: draft.id } : {}),
         displayName: draft.displayName.trim(),
@@ -388,7 +464,7 @@ function ModelSettings({
         baseUrl: draft.baseUrl.trim(),
         modelId: draft.modelId.trim(),
         api: draft.api,
-        ...(draft.credentialEnvName.trim() ? { credentialEnvName: draft.credentialEnvName.trim() } : {}),
+        ...credential,
         isDefault: draft.isDefault || models.length === 0,
         settings: {
           ...settings,
@@ -398,6 +474,7 @@ function ModelSettings({
         },
       })
       setDraft(modelDraftForProfile(saved))
+      setShowApiKey(false)
       setModelNotice(draft.id ? '模型配置已更新并保存。' : '模型配置已添加并保存。')
     } catch (cause) {
       setModelError(cause instanceof Error ? cause.message : '模型配置保存失败')
@@ -422,7 +499,7 @@ function ModelSettings({
   }
   return (
     <div className="settings-section settings-section--models">
-      <div className="settings-section__heading"><h3>模型与路由</h3><p>模型配置保存在本地；密钥只引用环境变量。路由按员工 → 世界 → 工作区逐级继承。</p></div>
+      <div className="settings-section__heading"><h3>模型与路由</h3><p>API 密钥保存在本机加密凭据库，不写入模型数据库或接口响应。路由按员工 → 世界 → 工作区逐级继承。</p></div>
       <div className="model-config-layout">
         <section className="model-profile-panel" aria-label="已保存的模型配置">
           <header><div><h4>模型配置</h4><span>{models.length} 个已保存配置</span></div><button className="secondary-button" type="button" onClick={startNewModel}><Plus size={16} />添加配置</button></header>
@@ -431,7 +508,7 @@ function ModelSettings({
             {models.map((model) => (
               <article key={model.id} className={draft.id === model.id ? 'is-active' : ''}>
                 <Cpu size={22} />
-                <div><strong>{model.displayName}</strong><span>{model.modelId}</span><small>{providerLabel(model)} · {model.credentialEnvName ? `凭据：${model.credentialEnvName}` : '无需凭据'}</small></div>
+                <div><strong>{model.displayName}</strong><span>{model.modelId}</span><small>{providerLabel(model)} · {credentialSummary(model)}</small></div>
                 <div className="model-profile-actions">
                   {model.isDefault ? <span className="model-default-badge"><CheckCircle size={14} />默认</span> : null}
                   <button type="button" aria-label={`编辑${model.displayName}`} onClick={() => editModel(model)}><PencilSimple size={15} />编辑</button>
@@ -449,9 +526,15 @@ function ModelSettings({
             <label><span>提供商类型</span><select value={draft.providerId} onChange={(event) => { const preset = MODEL_PRESETS.find((item) => item.id === event.target.value); if (preset) setDraft({ ...modelDraftForPreset(preset, draft.isDefault), ...(draft.id ? { id: draft.id } : {}) }) }}>{MODEL_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}</select></label>
             <label><span>显示名称</span><input value={draft.displayName} placeholder="例如：公司内网 sub2api" onChange={(event) => setDraft({ ...draft, displayName: event.target.value })} /></label>
             <label className="setting-grid__wide"><span>接口地址</span><input inputMode="url" value={draft.baseUrl} placeholder={draft.providerKind === 'openai-compatible-local' ? 'http://192.168.1.10:11434/v1' : 'https://api.example.com/v1'} onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })} /><small>本机或局域网可使用 HTTP；公网服务必须使用 HTTPS。</small></label>
-            <label><span>接口协议</span><select value={draft.api} onChange={(event) => setDraft({ ...draft, api: event.target.value as ModelApiKind })}><option value="openai-completions">OpenAI 对话补全</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic-messages">Anthropic 消息</option></select></label>
-            <label><span>模型 ID</span><input value={draft.modelId} placeholder={MODEL_PRESETS.find((item) => item.id === draft.providerId)?.modelPlaceholder} onChange={(event) => setDraft({ ...draft, modelId: event.target.value })} /></label>
-            <label className="setting-grid__wide"><span>凭据环境变量名</span><input value={draft.credentialEnvName} placeholder="SUB2API_API_KEY（无凭据可留空）" onChange={(event) => setDraft({ ...draft, credentialEnvName: event.target.value })} /><small>这里只保存环境变量名称，不会把 API 密钥写入本地数据库。</small></label>
+            <label><span>接口协议</span><select value={draft.api} onChange={(event) => { setDraft({ ...draft, api: event.target.value as ModelApiKind }); setDiscoveredModels([]) }}><option value="openai-completions">OpenAI 对话补全</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic-messages">Anthropic 消息</option></select></label>
+            <label className="setting-grid__wide"><span>模型 ID</span><div className="model-catalog-input"><input list="available-model-options" value={draft.modelId} placeholder={MODEL_PRESETS.find((item) => item.id === draft.providerId)?.modelPlaceholder} onChange={(event) => setDraft({ ...draft, modelId: event.target.value })} /><button type="button" disabled={discoveringModels} onClick={() => void discoverModels()}>{discoveringModels ? '正在获取…' : '获取可用模型'}</button></div><datalist id="available-model-options">{discoveredModels.map((model) => <option key={model.id} value={model.id}>{model.displayName ?? model.id}</option>)}</datalist><small>{discoveredModels.length > 0 ? `已加载 ${discoveredModels.length} 个模型，可选择或继续手动填写。` : '可以从服务拉取模型列表，也可以直接手动填写模型 ID。'}</small></label>
+            <label className="setting-grid__wide"><span>凭据方式</span><select value={draft.credentialMode} onChange={(event) => setDraft({ ...draft, credentialMode: event.target.value as ModelCredentialMode, apiKey: '' })}><option value="api-key">API 密钥</option><option value="environment">环境变量（高级）</option><option value="none">无需凭据</option></select></label>
+            {draft.credentialMode === 'api-key' ? (
+              <label className="setting-grid__wide"><span>API 密钥</span><div className="model-secret-input"><input type={showApiKey ? 'text' : 'password'} autoComplete="new-password" spellCheck={false} value={draft.apiKey} placeholder={draft.hasStoredApiKey ? '已保存；留空保持原密钥' : '输入 sk-... 或服务商提供的密钥'} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} /><button type="button" aria-label={showApiKey ? '隐藏 API 密钥' : '显示 API 密钥'} onClick={() => setShowApiKey((current) => !current)}>{showApiKey ? <EyeSlash size={18} /> : <Eye size={18} />}</button></div><small>{draft.hasStoredApiKey && !draft.apiKey ? '密钥已加密保存。输入新密钥可替换，留空不会改变。' : '密钥仅发送到本机服务，并加密保存；保存后不再回显明文。'}</small></label>
+            ) : null}
+            {draft.credentialMode === 'environment' ? (
+              <label className="setting-grid__wide"><span>凭据环境变量名</span><input value={draft.credentialEnvName} placeholder="SUB2API_API_KEY" onChange={(event) => setDraft({ ...draft, credentialEnvName: event.target.value })} /><small>高级用法：只保存变量名，运行服务前需要自行设置对应环境变量。</small></label>
+            ) : null}
             <label><span>上下文窗口</span><input type="number" min="1024" step="1" value={draft.contextWindow} onChange={(event) => setDraft({ ...draft, contextWindow: Number(event.target.value) })} /></label>
             <label><span>最大输出 Token</span><input type="number" min="256" step="256" value={draft.maxTokens} onChange={(event) => setDraft({ ...draft, maxTokens: Number(event.target.value) })} /></label>
           </div>
@@ -472,16 +555,23 @@ function ModelSettings({
 
 function validateModelDraft(draft: ModelDraft): string | undefined {
   if (!draft.displayName.trim()) return '请输入模型配置名称。'
+  const connectionError = validateModelConnection(draft)
+  if (connectionError !== undefined) return connectionError
+  if (!draft.modelId.trim()) return '请输入模型 ID。'
+  if (!Number.isInteger(draft.contextWindow) || draft.contextWindow < 1_024) return '上下文窗口必须是不小于 1024 的整数。'
+  if (!Number.isInteger(draft.maxTokens) || draft.maxTokens < 256) return '最大输出 Token 必须是不小于 256 的整数。'
+  return undefined
+}
+
+function validateModelConnection(draft: ModelDraft): string | undefined {
   if (!draft.baseUrl.trim()) return '请输入模型接口地址。'
   try {
     new URL(draft.baseUrl.trim())
   } catch {
     return '模型接口地址格式不正确。'
   }
-  if (!draft.modelId.trim()) return '请输入模型 ID。'
-  if (draft.credentialEnvName.trim() && !/^[A-Z_][A-Z0-9_]*$/.test(draft.credentialEnvName.trim())) return '凭据环境变量名只能使用大写字母、数字和下划线，且不能以数字开头。'
-  if (!Number.isInteger(draft.contextWindow) || draft.contextWindow < 1_024) return '上下文窗口必须是不小于 1024 的整数。'
-  if (!Number.isInteger(draft.maxTokens) || draft.maxTokens < 256) return '最大输出 Token 必须是不小于 256 的整数。'
+  if (draft.credentialMode === 'api-key' && !draft.apiKey.trim() && !draft.hasStoredApiKey) return '请输入 API 密钥，或将凭据方式改为“无需凭据”。'
+  if (draft.credentialMode === 'environment' && !/^[A-Z_][A-Z0-9_]*$/.test(draft.credentialEnvName.trim())) return '凭据环境变量名只能使用大写字母、数字和下划线，且不能以数字开头。'
   return undefined
 }
 
@@ -492,6 +582,16 @@ function ModelRouteRow({ label, detail, value, models, onChange }: { label: stri
 function providerLabel(model: ModelProfile): string {
   const providerId = typeof model.settings.providerId === 'string' ? model.settings.providerId : model.providerKind
   return MODEL_PRESETS.find((preset) => preset.id === providerId)?.label ?? providerId
+}
+
+function credentialSummary(model: ModelProfile): string {
+  if (isManagedCredentialName(model.credentialEnvName)) return 'API 密钥已保存'
+  if (model.credentialEnvName) return `环境变量：${model.credentialEnvName}`
+  return '无需凭据'
+}
+
+function isManagedCredentialName(value: string | undefined): boolean {
+  return value?.startsWith('DSH_CYBER_MODEL_KEY_') ?? false
 }
 
 interface ActionSettingsProps {

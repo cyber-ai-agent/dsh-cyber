@@ -47,7 +47,16 @@ import { NavigationPane } from './components/NavigationPane.js'
 import { PackageMarketDialog } from './components/PackageMarketDialog.js'
 import { RecruitmentDialog } from './components/RecruitmentDialog.js'
 import { ResizableShell } from './components/ResizableShell.js'
-import { SettingsDialog, type ModelProfileSaveDraft, type SettingsSection, type SystemAction, type SystemActionInput, type SystemActionResult } from './components/SettingsDialog.js'
+import {
+  SettingsDialog,
+  type DiscoveredModel,
+  type ModelDiscoveryDraft,
+  type ModelProfileSaveDraft,
+  type SettingsSection,
+  type SystemAction,
+  type SystemActionInput,
+  type SystemActionResult,
+} from './components/SettingsDialog.js'
 import { demoData, demoTavernDossiers, demoTavernEmployees, demoTavernMessages, demoTavernSessions } from './demo-data.js'
 import type { ConversationIntent, CyberEmployee, DockTab, LiveAgentTurn, SessionParticipantMap } from './types.js'
 import { worldExperience } from './world-experience.js'
@@ -344,7 +353,7 @@ export default function App() {
     const result = await api<{ items: InstalledPackage[]; transactions: PackageInstallTransaction[] }>(`/api/workspaces/${workspace.id}/packages`)
     setInstalledPackages(result.items)
     setPackageTransactions(result.transactions)
-  }, [workspace])
+  }, [demoMode, workspace])
 
   const searchMarketplace = useCallback(async (market: CyberMarketKind, query = '') => {
     if (workspace === undefined) return
@@ -785,8 +794,11 @@ export default function App() {
     if (demoMode) {
       const timestamp = new Date().toISOString()
       const currentProfile = profile.id ? models.find((item) => item.id === profile.id) : undefined
+      const profileData = { ...profile }
+      delete profileData.apiKey
+      delete profileData.clearCredential
       const saved: ModelProfile = {
-        ...profile,
+        ...profileData,
         id: profile.id ?? `demo-model-${crypto.randomUUID()}`,
         workspaceId: workspace.id,
         createdAt: currentProfile?.createdAt ?? timestamp,
@@ -812,6 +824,23 @@ export default function App() {
     ])
     return result.profile
   }, [models, workspace])
+
+  const discoverModels = useCallback(async (input: ModelDiscoveryDraft): Promise<DiscoveredModel[]> => {
+    if (workspace === undefined) throw new Error('请先创建工作区')
+    if (demoMode) {
+      await delay(250)
+      return [
+        { id: 'qwen3.5' },
+        { id: 'qwen3.5:9b' },
+        { id: 'deepseek-chat' },
+      ]
+    }
+    const result = await api<{ items: DiscoveredModel[] }>(`/api/workspaces/${workspace.id}/model-profiles/discover`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+    return result.items
+  }, [demoMode, workspace])
 
   const deleteModel = useCallback(async (modelProfileId: string): Promise<void> => {
     if (workspace === undefined) throw new Error('请先创建工作区')
@@ -1019,6 +1048,7 @@ export default function App() {
           onSavePreferences={savePreferences}
           onUploadBackground={uploadBackground}
           onSaveModel={saveModel}
+          onDiscoverModels={discoverModels}
           onDeleteModel={deleteModel}
           onAssignModel={assignModel}
           onSystemAction={runSystemAction}

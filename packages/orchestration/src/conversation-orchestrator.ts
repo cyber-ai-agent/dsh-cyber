@@ -113,13 +113,23 @@ export interface ConversationResult {
 
 export class ConversationOrchestrationError extends Error {}
 
+export type AgentTurnFailureKind =
+  | 'authentication'
+  | 'model-not-found'
+  | 'rate-limited'
+  | 'timeout'
+  | 'unreachable'
+  | 'unknown'
+
 export class AgentTurnFailedError extends ConversationOrchestrationError {
   readonly employeeId: string
+  readonly failureKind: AgentTurnFailureKind
 
-  constructor(employeeId: string) {
-    super(`Agent turn failed: ${employeeId}`)
+  constructor(employeeId: string, failureKind: AgentTurnFailureKind = 'unknown') {
+    super('Agent model turn failed')
     this.name = 'AgentTurnFailedError'
     this.employeeId = employeeId
+    this.failureKind = failureKind
   }
 }
 
@@ -276,6 +286,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
 
     let responsePersisted = false
     let failedTurn = false
+    let failedTurnKind: AgentTurnFailureKind = 'unknown'
     try {
       const result = await this.#runtime.runTurn({
         agent: employee,
@@ -283,7 +294,10 @@ export class ConversationOrchestrator implements AsyncDisposable {
         prompt,
         workspacePath: this.#workspacePath,
         onEvent: (event) => {
-          if (event.kind === 'turn.failed') failedTurn = true
+          if (event.kind === 'turn.failed') {
+            failedTurn = true
+            failedTurnKind = classifyRuntimeFailure(event.metadata)
+          }
           if (event.kind === 'assistant.message' && event.content?.trim()) {
             responsePersisted = true
           }
@@ -300,7 +314,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
       this.#store.bindEmployeeAgentSession(employee.id, result.agentSessionId)
       if (failedTurn) {
         this.#blockAgent(session, employee, 'runtime-turn-failed')
-        throw new AgentTurnFailedError(employee.id)
+        throw new AgentTurnFailedError(employee.id, failedTurnKind)
       }
       const content = result.finalResponse.trim()
       if (!responsePersisted && content) {
@@ -348,7 +362,9 @@ export class ConversationOrchestrator implements AsyncDisposable {
         })
         this.#blockAgent(session, employee, 'runtime-error')
       }
-      throw error
+      throw error instanceof AgentTurnFailedError
+        ? error
+        : new AgentTurnFailedError(employee.id, classifyRuntimeFailure(error))
     }
   }
 
@@ -545,6 +561,21 @@ export class ConversationOrchestrator implements AsyncDisposable {
       }
     }
   }
+}
+
+function classifyRuntimeFailure(value: unknown): AgentTurnFailureKind {
+  const signal = value instanceof Error
+    ? `${value.name} ${value.message}`
+    : value !== null && typeof value === 'object'
+      ? Object.values(value).filter((item) => typeof item === 'string' || typeof item === 'number').join(' ')
+      : String(value ?? '')
+  const normalized = signal.toLowerCase()
+  if (/401|403|unauthori[sz]ed|forbidden|authentication|invalid[_ -]?api[_ -]?key|credential/.test(normalized)) return 'authentication'
+  if (/404|model[_ -]?not[_ -]?found|unknown[_ -]?model|invalid[_ -]?model/.test(normalized)) return 'model-not-found'
+  if (/429|rate[_ -]?limit|too many requests|quota/.test(normalized)) return 'rate-limited'
+  if (/timeout|timed out|abort/.test(normalized)) return 'timeout'
+  if (/econn|enotfound|network|fetch failed|connection|socket|dns/.test(normalized)) return 'unreachable'
+  return 'unknown'
 }
 
 function groupPrompt(original: string, replies: readonly AgentReply[]): string {
