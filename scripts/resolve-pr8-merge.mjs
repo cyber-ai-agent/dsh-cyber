@@ -197,4 +197,21 @@ import type { ChatAttachment, JsonObject, ReasoningEffort, WorkMessage, WorkSess
   ],
 ])
 
-console.log('PR 8 semantic conflicts resolved.')
+// PR #8 was authored before World Foundation V3 renamed the product-facing
+// employee/workspace terminology. Keep its new E2E coverage, but align the
+// locators with the current first-run world + role experience.
+{
+  const path = 'e2e/workbench.spec.ts'
+  let source = await readFile(path, 'utf8')
+  const replacements = [
+    ["name: '创建本地工作区'", "name: '创建我的世界'"],
+    ["name: '给当前世界的员工发送消息'", "name: '给当前世界的角色发送消息'"],
+    ["await page.getByRole('button', { name: '添加第一名员工' }).click()", "await page.locator('.left-pane').getByRole('button', { name: '添加角色' }).click()"],
+    ["name: '员工市场'", "name: '角色市场'"],
+    ["name: '员工称呼（可选）'", "name: '角色称呼（可选）'"],
+  ]
+  for (const [from, to] of replacements) source = source.replaceAll(from, to)
+  await writeFile(path, source, 'utf8')
+}
+
+console.log('PR 8 semantic conflicts resolved and E2E terminology aligned.')
