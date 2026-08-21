@@ -4,16 +4,13 @@ on:
   push:
     branches:
       - feat/world-foundation-v3
-  pull_request:
-    branches:
-      - main
 
 permissions:
   contents: write
 
 jobs:
   apply-and-verify:
-    if: github.actor != 'github-actions[bot]' && (github.ref_name == 'feat/world-foundation-v3' || github.head_ref == 'feat/world-foundation-v3')
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,65 +36,18 @@ jobs:
           s = s.replace("if (!source.includes(from)) throw new Error(`Missing replacement anchor in ${path}: ${from}`)", "if (!source.includes(from)) { console.warn(`Optional replacement anchor missing in ${path}: ${from}`); return }")
           p.write_text(s, encoding='utf-8')
           p = Path('scripts/post-world-foundation-v3.py')
-          s = p.read_text(encoding='utf-8')
-          s = s.replace("r'''\\\n", "r'''\n")
+          s = p.read_text(encoding='utf-8').replace("r'''\\\n", "r'''\n")
           p.write_text(s, encoding='utf-8')
-      - name: Apply architecture migration
-        run: node scripts/apply-world-foundation-v3.mjs
-      - name: Apply deterministic post patches
-        run: python scripts/post-world-foundation-v3.py
-      - name: Align role terminology and world file browser
-        shell: python
+      - name: Generate implementation
         run: |
-          from pathlib import Path
-          for path in Path('packages/web/src').rglob('*.tsx'):
-            text = path.read_text(encoding='utf-8')
-            text = text.replace('员工', '角色')
-            path.write_text(text, encoding='utf-8')
-
-          p = Path('packages/web/src/components/ArtifactDock.tsx')
-          s = p.read_text(encoding='utf-8')
-          s = s.replace('`/api/workspace/files?path=${encodeURIComponent(path)}`', '`/api/worlds/${encodeURIComponent(world.id)}/files?path=${encodeURIComponent(path)}`')
-          s = s.replace('`/api/workspace/file?path=${encodeURIComponent(entry.path)}`', '`/api/worlds/${encodeURIComponent(world.id)}/file?path=${encodeURIComponent(entry.path)}`')
-          s = s.replace('工作区目录读取失败', '世界目录读取失败')
-          s = s.replace("value.path || '工作区根目录'", "value.path || '世界根目录'")
-          s = s.replace('本地工作区只读预览', '当前世界只读预览')
-          p.write_text(s, encoding='utf-8')
-
-          p = Path('e2e/workbench.spec.ts')
-          s = p.read_text(encoding='utf-8')
-          s = s.replace("import { mkdir, mkdtemp, rm } from 'node:fs/promises'", "import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'")
-          s = s.replace('员工', '角色')
-          old = """  await dock.getByRole('button', { name: '文件', exact: true }).click()
-  await dock.getByRole('button', { name: /packages.*目录/ }).click()
-  await dock.getByRole('button', { name: /web.*目录/ }).click()
-  await dock.getByRole('button', { name: /package\\.json.*可预览/ }).click()
-  await expect(dock.getByText('本地工作区只读预览')).toBeVisible()
-  await expect(dock.getByRole('button', { name: '新标签打开' })).toBeVisible()
-"""
-          new = """  const localWorkspace = server.store.listWorkspaces()[0]!
-  const localWorld = server.store.listWorlds(localWorkspace.id)[0]!
-  const worldFilesRoot = join(stateRoot, 'worlds', encodeURIComponent(localWorld.id), 'files')
-  await mkdir(join(worldFilesRoot, 'docs'), { recursive: true })
-  await writeFile(join(worldFilesRoot, 'docs', 'hello.md'), '# 当前世界文件\\n', 'utf8')
-  await dock.getByRole('button', { name: '文件', exact: true }).click()
-  await dock.getByRole('button', { name: /docs.*目录/ }).click()
-  await dock.getByRole('button', { name: /hello\\.md.*可预览/ }).click()
-  await expect(dock.getByText('当前世界只读预览')).toBeVisible()
-  await expect(dock.getByRole('button', { name: '新标签打开' })).toBeVisible()
-"""
-          if old not in s:
-            raise SystemExit('missing E2E workspace file browser block')
-          s = s.replace(old, new)
-          s = s.replace("dock.getByText('工作区根目录')", "dock.getByText('世界根目录')")
-          p.write_text(s, encoding='utf-8')
-      - name: Align rc8 runtime update expectations
-        shell: python
-        run: |
+          node scripts/apply-world-foundation-v3.mjs
+          python scripts/post-world-foundation-v3.py
+          python scripts/finalize-world-foundation-v3.py
+          python - <<'PY'
           from pathlib import Path
           p = Path('packages/server/tests/server.test.ts')
-          s = p.read_text(encoding='utf-8').replace("version: '0.1.0-rc.7'", "version: '0.1.0-rc.8'")
-          p.write_text(s, encoding='utf-8')
+          p.write_text(p.read_text(encoding='utf-8').replace("version: '0.1.0-rc.7'", "version: '0.1.0-rc.8'"), encoding='utf-8')
+          PY
       - name: Refresh lockfile for DSH rc.8
         run: pnpm install --no-frozen-lockfile
       - name: Typecheck
@@ -113,10 +63,9 @@ jobs:
       - name: Ensure clean patches
         run: git diff --check
       - name: Commit verified implementation
-        if: github.event_name == 'push'
         shell: bash
         run: |
-          rm -f scripts/apply-world-foundation-v3.mjs scripts/post-world-foundation-v3.py .github/workflows/world-foundation-v3-bootstrap.yml
+          rm -f scripts/apply-world-foundation-v3.mjs scripts/post-world-foundation-v3.py scripts/finalize-world-foundation-v3.py .github/workflows/world-foundation-v3-bootstrap.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
