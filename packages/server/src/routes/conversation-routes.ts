@@ -53,13 +53,15 @@ export function registerConversationRoutes(
     const worldSettingsValue = await worldSettings.get(world.id)
     const requestedReasoning = body.reasoningEffort === undefined
       ? worldSettingsValue.model.reasoningEffort
-      : requiredEnum<ReasoningEffort>(body, 'reasoningEffort', ['auto','off','minimal','low','medium','high','xhigh','max'])
+      : requiredEnum<ReasoningEffort>(body, 'reasoningEffort', [
+          'auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max',
+        ])
     const explicitIds = optionalStringArray(body.employeeIds)
     const employeeIds = explicitIds.length > 0
       ? explicitIds
       : mentionedEmployeeIds(prompt, store.listEmployees(world.id))
     if (employeeIds.length === 0) {
-      throw new HttpError(422, 'agent_required', 'Mention or select at least one agent')
+      throw new HttpError(422, 'agent_required', '请选择或 @ 至少一个角色')
     }
     const metadata: JsonObject = {
       participantIds: employeeIds,
@@ -69,13 +71,17 @@ export function registerConversationRoutes(
     const sessionId = optionalString(body.sessionId)
     let result
     if (employeeIds.length === 1) {
+      const character = store.getEmployee(employeeIds[0]!)
+      if (character === undefined || character.worldId !== world.id) {
+        throw new HttpError(422, 'character_unavailable', '所选角色不属于当前世界')
+      }
       const directInput: DirectConversationInput = {
         workspaceId: world.workspaceId,
         worldId: world.id,
-        employeeId: employeeIds[0]!,
+        employeeId: character.id,
         prompt,
         metadata,
-        runtimePrompt: await worldSettings.composeRuntimePrompt(world.id, store.getEmployee(employeeIds[0]!)!, transformedPrompt),
+        runtimePrompt: await worldSettings.composeRuntimePrompt(world.id, character, transformedPrompt),
         ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
       }
       if (sessionId !== undefined) directInput.sessionId = sessionId
@@ -107,15 +113,19 @@ export function registerConversationRoutes(
     runtimeStreamHub.connect(worldId, request, response)
   })
 
-  router.get(/^\/api\/sessions\/([^/]+)\/messages$/, ({ response, params, url }) => {
+  router.get(/^\/api\/sessions\/([^/]+)\/messages$/, async ({ request, response, params, url }) => {
+    const session = store.getSession(params[0]!)
+    if (session === undefined) throw new HttpError(404, 'session_not_found', 'Session not found')
+    await worldAccess.assertUnlocked(session.worldId, request)
     writeJson(response, 200, {
-      items: store.listMessages(params[0]!, nonNegativeInteger(url.searchParams.get('after'))),
+      items: store.listMessages(session.id, nonNegativeInteger(url.searchParams.get('after'))),
     })
   })
 
-  router.get(/^\/api\/sessions\/([^/]+)\/participants$/, ({ response, params }) => {
+  router.get(/^\/api\/sessions\/([^/]+)\/participants$/, async ({ request, response, params }) => {
     const session = store.getSession(params[0]!)
     if (session === undefined) throw new HttpError(404, 'session_not_found', 'Session not found')
+    await worldAccess.assertUnlocked(session.worldId, request)
     writeJson(response, 200, { items: store.listParticipants(session.id) })
   })
 }
