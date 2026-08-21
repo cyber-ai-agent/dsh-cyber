@@ -18,15 +18,18 @@ import {
   type ModelCredentialService,
 } from '../services/model-credential-service.js'
 import type { ModelCatalogService } from '../services/model-catalog-service.js'
+import type { ModelInteractionService } from '../services/model-interaction-service.js'
+import { ServiceError } from '../services/service-error.js'
 
 export interface ModelRoutesDependencies {
   store: SqliteStore
   credentials: ModelCredentialService
   modelCatalog: ModelCatalogService
+  interactions: ModelInteractionService
 }
 
 export function registerModelRoutes(router: Router, dependencies: ModelRoutesDependencies): void {
-  const { store, credentials, modelCatalog } = dependencies
+  const { store, credentials, modelCatalog, interactions } = dependencies
 
   router.get(/^\/api\/workspaces\/([^/]+)\/model-profiles$/, ({ response, params }) => {
     const workspaceId = params[0]!
@@ -123,17 +126,45 @@ export function registerModelRoutes(router: Router, dependencies: ModelRoutesDep
       && !/^[A-Z_][A-Z0-9_]*_API_KEY$/.test(credentialEnvName)) {
       throw new HttpError(422, 'credential_env_name_invalid', 'Credential environment variable must end with _API_KEY')
     }
-    const items = await modelCatalog.discover({
-      baseUrl: requiredString(body, 'baseUrl'),
-      api: requiredEnum(body, 'api', [
-        'openai-completions',
-        'openai-responses',
-        'anthropic-messages',
-      ]),
-      ...(profileId === undefined ? {} : { profileId }),
-      ...(apiKey === undefined ? {} : { apiKey }),
-      ...(credentialEnvName === undefined ? {} : { credentialEnvName }),
-    })
+    const workspaceId = params[0]!
+    const startedAt = Date.now()
+    const modelId = profile?.modelId ?? '-'
+    const provider = profile?.displayName ?? requiredString(body, 'baseUrl')
+    let items
+    try {
+      items = await modelCatalog.discover({
+        baseUrl: requiredString(body, 'baseUrl'),
+        api: requiredEnum(body, 'api', [
+          'openai-completions',
+          'openai-responses',
+          'anthropic-messages',
+        ]),
+        ...(profileId === undefined ? {} : { profileId }),
+        ...(apiKey === undefined ? {} : { apiKey }),
+        ...(credentialEnvName === undefined ? {} : { credentialEnvName }),
+      })
+      interactions.recordDiscovery({
+        workspaceId,
+        modelId,
+        provider,
+        status: 'success',
+        httpStatus: 200,
+        durationMs: Date.now() - startedAt,
+      })
+    } catch (error) {
+      const httpStatus = serviceErrorHttpStatus(error)
+      interactions.recordDiscovery({
+        workspaceId,
+        modelId,
+        provider,
+        status: 'failed',
+        errorCode: error instanceof ServiceError ? error.code : 'model_catalog_failed',
+        errorMessage: error instanceof Error ? error.message : '模型列表获取失败',
+        ...(httpStatus === undefined ? {} : { httpStatus }),
+        durationMs: Date.now() - startedAt,
+      })
+      throw error
+    }
     writeJson(response, 200, { items })
   })
 
@@ -208,4 +239,20 @@ function isPrivateModelHostname(value: string): boolean {
       || (first === 100 && second !== undefined && second >= 64 && second <= 127)
   }
   return hostname.includes(':') && (hostname.startsWith('fc') || hostname.startsWith('fd') || hostname.startsWith('fe80:'))
+}
+
+const SERVICE_ERROR_HTTP_STATUS: Record<ServiceError['kind'], number> = {
+  conflict: 409,
+  forbidden: 403,
+  invalid: 422,
+  'not-found': 404,
+  'rate-limited': 429,
+  'too-large': 413,
+  unavailable: 502,
+  unsupported: 415,
+}
+
+function serviceErrorHttpStatus(error: unknown): number | undefined {
+  if (!(error instanceof ServiceError)) return undefined
+  return error.httpStatus ?? SERVICE_ERROR_HTTP_STATUS[error.kind]
 }

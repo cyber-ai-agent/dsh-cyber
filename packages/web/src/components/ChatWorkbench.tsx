@@ -10,8 +10,12 @@ import {
   WarningCircle,
   X,
 } from '@phosphor-icons/react'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { ChatAttachment, JsonObject, ReasoningEffort, WorkMessage, WorkSession, World } from '@dsh-cyber/contracts'
+
+import { mentionPlugin } from './mention-plugin.js'
 
 import type { ConversationIntent, CyberEmployee, LiveAgentTurn, ToolStep } from '../types.js'
 import { worldExperience } from '../world-experience.js'
@@ -60,6 +64,7 @@ export function ChatWorkbench({
 }: ChatWorkbenchProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
   const [uploading, setUploading] = useState(false)
   const [attachmentError, setAttachmentError] = useState<string>()
@@ -74,6 +79,38 @@ export function ChatWorkbench({
     .filter((employee): employee is CyberEmployee => employee !== undefined)
   const conversationTitle = session?.title ?? intent?.title ?? '选择角色开始对话'
   const conversationKind = session?.kind ?? intent?.kind
+
+  // 自动滚动到底部：新消息、实时输出或发送状态变化时跟随。若用户主动上翻
+  // 查看历史（距底部超过阈值）则不打扰，直到再次接近底部。
+  useEffect(() => {
+    const container = scrollRef.current
+    if (container === null) return
+    const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 160
+    if (nearBottom || sending) {
+      container.scrollTop = container.scrollHeight
+    }
+  }, [messages, liveTurns, sending])
+
+  // 切换会话时强制滚动到底部：进入新会话是明确意图，无论会话长短都直接
+  // 看最新消息。会话消息异步加载、分批到达，用定时重试持续滚动直到稳定
+  // 在底部或超时；组件复用不重挂载，用 ref 记录上次会话避免重复触发。
+  const lastSessionIdRef = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (session?.id === undefined || lastSessionIdRef.current === session.id) return
+    lastSessionIdRef.current = session.id
+    const container = scrollRef.current
+    if (container === null) return
+    let attempts = 0
+    const timer = window.setInterval(() => {
+      container.scrollTop = container.scrollHeight
+      attempts += 1
+      const settled = container.scrollHeight - container.scrollTop - container.clientHeight <= 2
+      if (settled || attempts >= 20) {
+        window.clearInterval(timer)
+      }
+    }, 100)
+    return () => window.clearInterval(timer)
+  }, [session?.id])
 
   const submit = async () => {
     const prompt = draft.trim()
@@ -136,7 +173,7 @@ export function ChatWorkbench({
         <div className="chat-header__count">{messages.length}<span>条消息</span></div>
       </header>
 
-      <div className="message-scroll" aria-live="polite" aria-busy={sending}>
+      <div className="message-scroll" ref={scrollRef} aria-live="polite" aria-busy={sending}>
         {messages.length === 0 ? (
           <div className="conversation-empty">
             <TerminalWindow size={34} />
@@ -184,7 +221,12 @@ export function ChatWorkbench({
             </article>
           )
         })}
-        {liveTurns.map((turn) => <LiveTurn key={`${turn.sessionId}:${turn.agentId}`} turn={turn} employee={employees.find((item) => item.id === turn.agentId)} />)}
+        {liveTurns.length > 0 ? (
+          <div className="live-turns-block" aria-label="实时执行过程">
+            <header className="live-turns-block__header"><TerminalWindow size={14} /><span>实时执行过程</span></header>
+            {liveTurns.map((turn) => <LiveTurn key={`${turn.sessionId}:${turn.agentId}`} turn={turn} employee={employees.find((item) => item.id === turn.agentId)} />)}
+          </div>
+        ) : null}
         {sending && liveTurns.length === 0 ? <div className="stream-state"><CircleNotch size={16} className="spin" /><span>正在连接{experience.personLabel}的独立 Agent…</span><span className="stream-caret" /></div> : null}
       </div>
 
@@ -300,11 +342,13 @@ function formatBytes(value: number): string {
 
 function LiveTurn({ turn, employee }: { turn: LiveAgentTurn; employee: CyberEmployee | undefined }) {
   const [reasoningOpen, setReasoningOpen] = useState(true)
+  const live = turn.status === 'thinking' || turn.status === 'working'
   return (
-    <article className={`live-turn live-turn--${turn.status}`}>
+    <article className={`live-turn live-turn--${turn.status}${live ? ' live-turn--live' : ''}`}>
       <header>
-        <span>{turn.status === 'failed' ? <WarningCircle size={16} /> : <CircleNotch size={16} className={turn.status === 'completed' ? '' : 'spin'} />}</span>
+        <span>{turn.status === 'failed' ? <WarningCircle size={16} /> : <CircleNotch size={16} className={live ? 'spin' : ''} />}</span>
         <div><strong>{employee?.displayName ?? '角色'}</strong><small>{liveStatusLabel(turn.status)}</small></div>
+        {live ? <em className="live-turn__badge">实时</em> : null}
       </header>
       {turn.reasoning ? (
         <div className="trace-stack">
@@ -347,15 +391,11 @@ function ToolEventMessage({ message, employee }: { message: WorkMessage; employe
 }
 
 function RichText({ value }: { value: string }) {
-  return value.split('\n').map((line, lineIndex) => (
-    <p key={`${lineIndex}-${line}`}>
-      {line.split(/(@[^\s，。；：]+)/g).map((part, partIndex) =>
-        part.startsWith('@')
-          ? <mark key={`${partIndex}-${part}`}>{part}</mark>
-          : <span key={`${partIndex}-${part}`}>{part}</span>,
-      )}
-    </p>
-  ))
+  return (
+    <div className="markdown-body">
+      <ReactMarkdown remarkPlugins={[remarkGfm, mentionPlugin]}>{value}</ReactMarkdown>
+    </div>
+  )
 }
 
 function ArtifactAttachment({ onOpen }: { onOpen(): void }) {

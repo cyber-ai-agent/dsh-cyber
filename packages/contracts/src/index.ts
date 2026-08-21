@@ -1,4 +1,4 @@
-export const CYBER_SCHEMA_VERSION = 10 as const
+export const CYBER_SCHEMA_VERSION = 12 as const
 
 export type IsoTimestamp = string
 export type JsonPrimitive = boolean | number | string | null
@@ -374,6 +374,82 @@ export interface WorkspacePreferences {
 export type ModelProviderKind = 'deepseek' | 'openai-compatible-local' | 'openai-compatible-remote'
 export type ModelApiKind = 'openai-completions' | 'openai-responses' | 'anthropic-messages'
 
+export type ModelInteractionLogStatus = 'success' | 'failed'
+export type ModelInteractionLogSource = 'turn' | 'discovery'
+
+/**
+ * 一条模型交互日志。隐私红线：绝不保存 API 密钥、prompt 明文或响应明文，
+ * 只保存请求摘要统计（消息数 / 字符数）与可读的错误信息（不含密钥）。
+ */
+export interface ModelInteractionLog {
+  id: string
+  workspaceId: string
+  worldId?: string
+  sessionId?: string
+  employeeId?: string
+  /** 采集来源：turn=对话回合（服务端发起的整轮交互），discovery=/models 模型发现 */
+  source: ModelInteractionLogSource
+  modelId: string
+  /** provider 展示名（模型配置显示名，或默认 DSH 模型） */
+  provider: string
+  status: ModelInteractionLogStatus
+  errorCode?: string
+  errorMessage?: string
+  /** 模型接口返回的 HTTP 状态码（如 200/401/429/502）；worker 未透出时为空 */
+  httpStatus?: number
+  /** 请求摘要：发送给模型的消息条数（turn 级为 1 条用户消息 + 工具回填条数，近似） */
+  promptMessageCount: number
+  /** 请求摘要：prompt 字符数 */
+  promptCharCount: number
+  responseCharCount?: number
+  toolCallCount?: number
+  durationMs: number
+  /** 仅当接口真实返回 token 用量时填写 */
+  tokensPrompt?: number
+  tokensCompletion?: number
+  tokensTotal?: number
+  createdAt: IsoTimestamp
+}
+
+export interface RecordModelInteractionInput {
+  workspaceId: string
+  worldId?: string
+  sessionId?: string
+  employeeId?: string
+  source: ModelInteractionLogSource
+  modelId: string
+  provider: string
+  status: ModelInteractionLogStatus
+  errorCode?: string
+  errorMessage?: string
+  httpStatus?: number
+  promptMessageCount: number
+  promptCharCount: number
+  responseCharCount?: number
+  toolCallCount?: number
+  durationMs: number
+  tokensPrompt?: number
+  tokensCompletion?: number
+  tokensTotal?: number
+}
+
+export interface ModelInteractionLogFilter {
+  status?: ModelInteractionLogStatus
+  modelId?: string
+  page: number
+  pageSize: number
+}
+
+export interface ModelInteractionLogPage {
+  items: ModelInteractionLog[]
+  total: number
+  page: number
+  pageSize: number
+  /** 该工作区出现过（去重）的模型 ID，用于前端筛选下拉 */
+  modelIds: string[]
+}
+
+
 export interface ModelProfile {
   id: string
   workspaceId: string
@@ -622,6 +698,7 @@ export interface DatabaseDoctorReport {
     worldEntityStates: number
     worldObjectStates: number
     worldThemeBindings: number
+    modelInteractionLogs: number
     events: number
     outbox: number
   }
