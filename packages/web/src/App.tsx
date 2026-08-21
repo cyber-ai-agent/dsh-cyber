@@ -608,31 +608,49 @@ export default function App() {
     }
   }, [dossiers, managingEmployee])
 
-  const updateEmployeeProfile = useCallback(async (input: { displayName: string; avatarIndex: number }) => {
+  const updateEmployeeProfile = useCallback(async (input: {
+    displayName: string
+    avatarIndex: number
+    background: string
+    personalityTraits: string[]
+    relationshipToUser: string
+    addressUserAs: string
+    selfReference: string
+  }) => {
     if (managingEmployee === undefined) return
     setSavingEmployee(true)
     setError(undefined)
     try {
       const previous = dossiers[managingEmployee.id]?.profile
+      const appearance = {
+        ...(previous?.appearance ?? {}),
+        avatarIndex: input.avatarIndex,
+        worldSkinIndex: input.avatarIndex,
+        relationshipToUser: input.relationshipToUser,
+        addressUserAs: input.addressUserAs,
+        selfReference: input.selfReference,
+      }
       let profile = previous
       if (demoMode) {
         profile = {
           employeeId: managingEmployee.id,
           revision: (previous?.revision ?? 0) + 1,
-          background: previous?.background ?? managingEmployee.role,
-          personalityTraits: previous?.personalityTraits ?? [],
-          appearance: { ...(previous?.appearance ?? {}), avatarIndex: input.avatarIndex, worldSkinIndex: input.avatarIndex },
-          reason: '更新角色名片与形象',
+          background: input.background,
+          personalityTraits: input.personalityTraits,
+          appearance,
+          reason: '更新角色资料与关系设定',
           createdAt: new Date().toISOString(),
           ...(previous?.birthday === undefined ? {} : { birthday: previous.birthday }),
         }
       } else {
-        const result = await api<{ profile: EmployeeDossier['profile'] }>(`/api/employees/${managingEmployee.id}/profile`, {
+        const result = await api<{ profile: EmployeeDossier['profile'] }>('/api/employees/' + managingEmployee.id + '/profile', {
           method: 'PUT',
           body: JSON.stringify({
             displayName: input.displayName,
-            appearance: { ...(previous?.appearance ?? {}), avatarIndex: input.avatarIndex, worldSkinIndex: input.avatarIndex },
-            reason: '更新角色名片与形象',
+            background: input.background,
+            personalityTraits: input.personalityTraits,
+            appearance,
+            reason: '更新角色资料与关系设定',
           }),
         })
         profile = result.profile
@@ -649,7 +667,7 @@ export default function App() {
       })
       setWorldRuntimeRevision((value) => value + 1)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '角色名片保存失败')
+      setError(cause instanceof Error ? cause.message : '角色资料保存失败')
     } finally {
       setSavingEmployee(false)
     }
