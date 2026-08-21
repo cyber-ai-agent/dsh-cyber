@@ -7,6 +7,7 @@ import type {
   EmployeeRevision,
   JsonObject,
   ParticipantKind,
+  ReasoningEffort,
   WorkMessage,
   WorkSession,
   WorkSessionParticipant,
@@ -74,7 +75,8 @@ export type ConversationRealtimeListener = (event: ConversationRealtimeEnvelope)
 export interface ConversationOrchestratorOptions {
   store: ConversationStorePort
   runtime: AgentRuntimePort
-  workspacePath: string
+  workspacePath?: string
+  resolveWorldRoot?: (worldId: string) => Promise<string>
 }
 
 export interface DirectConversationInput {
@@ -84,6 +86,7 @@ export interface DirectConversationInput {
   prompt: string
   metadata?: JsonObject
   runtimePrompt?: string
+  reasoningEffort?: Exclude<ReasoningEffort, 'auto'>
   sessionId?: string
   title?: string
 }
@@ -95,6 +98,7 @@ export interface GroupConversationInput {
   prompt: string
   metadata?: JsonObject
   runtimePrompt?: string
+  reasoningEffort?: Exclude<ReasoningEffort, 'auto'>
   sessionId?: string
   title?: string
 }
@@ -136,13 +140,16 @@ export class AgentTurnFailedError extends ConversationOrchestrationError {
 export class ConversationOrchestrator implements AsyncDisposable {
   readonly #store: ConversationStorePort
   readonly #runtime: AgentRuntimePort
-  readonly #workspacePath: string
+  readonly #workspacePath: string | undefined
+  readonly #resolveWorldRoot: ((worldId: string) => Promise<string>) | undefined
   readonly #listeners = new Set<ConversationRealtimeListener>()
 
   constructor(options: ConversationOrchestratorOptions) {
     this.#store = options.store
     this.#runtime = options.runtime
     this.#workspacePath = options.workspacePath
+    this.#resolveWorldRoot = options.resolveWorldRoot
+    if (this.#workspacePath === undefined && this.#resolveWorldRoot === undefined) throw new Error('ConversationOrchestrator requires workspacePath or resolveWorldRoot')
   }
 
   subscribe(listener: ConversationRealtimeListener): () => void {
@@ -175,7 +182,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
       ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
       correlationId: session.id,
     })
-    const reply = await this.#runAgent(session, employee, input.runtimePrompt?.trim() || prompt)
+    const reply = await this.#runAgent(session, employee, input.runtimePrompt?.trim() || prompt, input.reasoningEffort)
     return { session, replies: [reply] }
   }
 
@@ -227,7 +234,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
     try {
       for (const employee of employees) {
         const collaborationPrompt = groupPrompt(input.runtimePrompt?.trim() || prompt, replies)
-        replies.push(await this.#runAgent(session, employee, collaborationPrompt))
+        replies.push(await this.#runAgent(session, employee, collaborationPrompt, input.reasoningEffort))
       }
       this.#store.appendDomainEvent({
         workspaceId: input.workspaceId,
@@ -267,6 +274,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
     session: WorkSession,
     employee: EmployeeInstance,
     prompt: string,
+    reasoningEffort?: Exclude<ReasoningEffort, 'auto'>,
   ): Promise<AgentReply> {
     const revision = this.#store.getEmployeeRevision(employee.id, employee.currentRevision)
     if (revision === undefined) {
@@ -288,11 +296,13 @@ export class ConversationOrchestrator implements AsyncDisposable {
     let failedTurn = false
     let failedTurnKind: AgentTurnFailureKind = 'unknown'
     try {
+      const workspacePath = this.#resolveWorldRoot === undefined ? this.#workspacePath! : await this.#resolveWorldRoot(session.worldId)
       const result = await this.#runtime.runTurn({
         agent: employee,
         revision,
         prompt,
-        workspacePath: this.#workspacePath,
+        workspacePath,
+        ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
         onEvent: (event) => {
           if (event.kind === 'turn.failed') {
             failedTurn = true

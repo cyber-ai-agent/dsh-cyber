@@ -44,7 +44,7 @@ export async function runCli(args: string[], context: CliContext = {}): Promise<
     if (command === 'web') {
       const port = optionInteger(options, 'port') ?? 43123
       const workspacePath = resolve(optionString(options, 'workspace') ?? cwd)
-      const server = await createCyberServer({ stateRoot, workspacePath, port })
+      const server = await createCyberServer({ stateRoot, workspacePath, port, bootstrapDefaultWorld: true })
       const address = await server.start()
       try {
         io.stdout(`DSH Cyber 已启动：${address.origin}`)

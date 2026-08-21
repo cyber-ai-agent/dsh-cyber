@@ -35,10 +35,13 @@ import type {
   WorkspacePreferences,
   WorkspaceSnapshot,
   World,
+  WorldAccessSummary,
+  WorldSettings,
+  ReasoningEffort,
   WorldSnapshot,
 } from '@dsh-cyber/contracts'
 
-import { api } from './api.js'
+import { ApiError, api } from './api.js'
 import { ArtifactDock } from './components/ArtifactDock.js'
 import { ChatWorkbench } from './components/ChatWorkbench.js'
 import { EmployeeManagementDialog } from './components/EmployeeManagementDialog.js'
@@ -61,6 +64,7 @@ import { demoData, demoTavernDossiers, demoTavernEmployees, demoTavernMessages, 
 import type { ConversationIntent, CyberEmployee, DockTab, LiveAgentTurn, SessionParticipantMap } from './types.js'
 import { worldExperience } from './world-experience.js'
 import { WorldRuntimeDock } from './features/world/WorldRuntimeDock.js'
+import { WorldSettingsDialog, WorldUnlockDialog } from './components/WorldSettingsDialog.js'
 
 const demoMode = new URLSearchParams(window.location.search).get('demo') === '1'
 const worldRuntimeV2Enabled = new URLSearchParams(window.location.search).get('legacyWorld') !== '1'
@@ -120,6 +124,11 @@ export default function App() {
   const [appMode, setAppMode] = useState<AppMode>(worldRuntimeV2Enabled ? 'world' : 'workbench')
   const [worldRuntimeAvailable, setWorldRuntimeAvailable] = useState(demoMode)
   const [worldRuntimeRevision, setWorldRuntimeRevision] = useState(0)
+  const [worldSettingsOpen, setWorldSettingsOpen] = useState(false)
+  const [worldSettings, setWorldSettings] = useState<WorldSettings>()
+  const [worldAccess, setWorldAccess] = useState<WorldAccessSummary>()
+  const [lockedWorld, setLockedWorld] = useState<World>()
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('auto')
 
   const activeSession = sessions.find((session) => session.id === activeSessionId)
   const activeParticipantIds = conversationIntent?.employeeIds
@@ -157,10 +166,13 @@ export default function App() {
       setActiveSessionId(nextSessions[0]?.id)
       return
     }
-    const [snapshot, capability] = await Promise.all([
-      api<WorldSnapshot>(`/api/worlds/${world.id}/snapshot`),
-      api<{ supported: boolean }>(`/api/worlds/${world.id}/runtime-capability`),
-    ])
+    let snapshot: WorldSnapshot
+    try { snapshot = await api<WorldSnapshot>(`/api/worlds/${world.id}/snapshot`) } catch (cause) { if (cause instanceof ApiError && cause.status === 423) { setLockedWorld(world); return } throw cause }
+    const capability = await api<{ supported: boolean }>(`/api/worlds/${world.id}/runtime-capability`)
+    const settingsResult = await api<{ settings: WorldSettings; access: WorldAccessSummary }>(`/api/worlds/${world.id}/settings`)
+    setWorldSettings(settingsResult.settings)
+    setWorldAccess(settingsResult.access)
+    setReasoningEffort(settingsResult.settings.model.reasoningEffort)
     setWorldRuntimeAvailable(capability.supported)
     setAppMode(worldRuntimeV2Enabled && capability.supported ? 'world' : 'workbench')
     const [dossierResults, participantResults] = await Promise.all([
@@ -297,7 +309,7 @@ export default function App() {
       const dossier = await api<EmployeeDossier>(`/api/employees/${employeeId}/dossier`)
       setDossiers((current) => ({ ...current, [employeeId]: dossier }))
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '员工档案加载失败')
+      setError(cause instanceof Error ? cause.message : '角色档案加载失败')
     }
   }, [dossiers])
 
@@ -342,7 +354,7 @@ export default function App() {
       const result = await api<{ items: EmployeeBlueprint[] }>(`/api/catalog/blueprints?templateId=${encodeURIComponent(activeWorld.templateId)}&workspaceId=${encodeURIComponent(activeWorld.workspaceId)}`)
       setBlueprints(result.items)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '员工市场加载失败')
+      setError(cause instanceof Error ? cause.message : '角色市场加载失败')
     } finally {
       setCatalogLoading(false)
     }
@@ -592,7 +604,7 @@ export default function App() {
           background: previous?.background ?? managingEmployee.role,
           personalityTraits: previous?.personalityTraits ?? [],
           appearance: { ...(previous?.appearance ?? {}), avatarIndex: input.avatarIndex },
-          reason: '更新员工名片与形象',
+          reason: '更新角色名片与形象',
           createdAt: new Date().toISOString(),
           ...(previous?.birthday === undefined ? {} : { birthday: previous.birthday }),
         }
@@ -602,7 +614,7 @@ export default function App() {
           body: JSON.stringify({
             displayName: input.displayName,
             appearance: { ...(previous?.appearance ?? {}), avatarIndex: input.avatarIndex },
-            reason: '更新员工名片与形象',
+            reason: '更新角色名片与形象',
           }),
         })
         profile = result.profile
@@ -618,7 +630,7 @@ export default function App() {
           : { ...current, [managingEmployee.id]: { ...dossier, employee: { ...dossier.employee, displayName: input.displayName, updatedAt }, ...(profile === undefined ? {} : { profile }) } }
       })
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '员工名片保存失败')
+      setError(cause instanceof Error ? cause.message : '角色名片保存失败')
     } finally {
       setSavingEmployee(false)
     }
@@ -644,7 +656,7 @@ export default function App() {
       }
       setManagingEmployeeId(undefined)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '员工归档失败')
+      setError(cause instanceof Error ? cause.message : '角色归档失败')
     } finally {
       setSavingEmployee(false)
     }
@@ -718,6 +730,7 @@ export default function App() {
         method: 'POST',
         body: JSON.stringify({
           prompt,
+          reasoningEffort,
           ...(attachments.length === 0 ? {} : { attachments }),
           ...(targetIds.length === 0 ? {} : { employeeIds: targetIds }),
           ...(conversationIntent === undefined ? {} : { title: conversationIntent.title }),
@@ -737,7 +750,7 @@ export default function App() {
       setSending(false)
       setLiveTurns([])
     }
-  }, [activeSession, activeSessionId, activeWorld, conversationIntent, employees, messages.length, sessionParticipants])
+  }, [activeSession, activeSessionId, activeWorld, conversationIntent, employees, messages.length, sessionParticipants, reasoningEffort])
 
   const uploadChatAttachment = useCallback(async (file: File): Promise<ChatAttachment> => {
     if (workspace === undefined) throw new Error('请先创建工作区')
@@ -888,14 +901,14 @@ export default function App() {
         return { ok: true, kind: action, output: `演示模式/${action === 'backup' ? 'dsh-cyber-demo.sqlite' : 'dsh-cyber-demo.json'}`, createdAt: new Date().toISOString() }
       }
       if (action === 'verify-update') {
-        return { ok: true, version: '0.1.0-rc.7', supported: true, contractId: 'dsh-session-events-v1', checks: { packageVersions: true, isolatedProfile: true }, transaction: demoRuntimeTransaction('verified') }
+        return { ok: true, version: '0.1.0-rc.8', supported: true, contractId: 'dsh-session-events-v1', checks: { packageVersions: true, isolatedProfile: true }, transaction: demoRuntimeTransaction('verified') }
       }
       if (action === 'contract-update') return { ok: true, transaction: demoRuntimeTransaction('contract-tested') }
       if (action === 'canary-update') return { ok: true, transaction: demoRuntimeTransaction('canary-passed') }
       if (action === 'activate-update') return { ok: true, transaction: demoRuntimeTransaction('activated'), restartRequired: true }
       if (action === 'rollback-update') return { ok: true, transaction: demoRuntimeTransaction('rolled-back'), restartRequired: true }
       if (action === 'list-updates') return { ok: true, items: [] }
-      return { ok: true, checkedAt: new Date().toISOString(), compatibility: { expectedVersion: '0.1.0-rc.7', errors: [] }, database: { schemaVersion: 5, integrity: ['ok'], errors: [] } }
+      return { ok: true, checkedAt: new Date().toISOString(), compatibility: { expectedVersion: '0.1.0-rc.8', errors: [] }, database: { schemaVersion: 5, integrity: ['ok'], errors: [] } }
     }
     if (action === 'status') return api<SystemActionResult>('/api/system/status')
     if (action === 'doctor') return api<SystemActionResult>('/api/system/doctor', { method: 'POST', body: '{}' })
@@ -933,7 +946,7 @@ export default function App() {
       <div className="workspace-backdrop" aria-hidden="true" />
       <header className="topbar">
         <div className="brand-lockup"><Cube size={20} weight="fill" /><strong>DSH Cyber</strong></div>
-        <div className="topbar__workspace"><span>当前工作区：</span><strong>{workspace.name}</strong><span className="topbar__chevron">⌄</span></div>
+
         <WorldSwitcher
           worlds={worlds}
           activeWorld={activeWorld}
@@ -968,6 +981,7 @@ export default function App() {
             onDirectEmployee={directEmployee}
             onRecruit={() => void openRecruitment()}
             onCreateGroup={() => setGroupDialogOpen(true)}
+          onWorldSettings={() => setWorldSettingsOpen(true)}
           />
         )}
         center={(
@@ -982,6 +996,8 @@ export default function App() {
             liveTurns={liveTurns}
             sending={sending}
             draft={draft}
+            reasoningEffort={reasoningEffort}
+            onReasoningEffortChange={setReasoningEffort}
             onDraftChange={setDraft}
             onSend={send}
             onUploadAttachment={uploadChatAttachment}
@@ -1082,6 +1098,8 @@ export default function App() {
           onBindTheme={bindWorldTheme}
         />
       ) : null}
+      {worldSettingsOpen && activeWorld !== undefined && worldSettings !== undefined && worldAccess !== undefined ? <WorldSettingsDialog world={activeWorld} value={worldSettings} access={worldAccess} models={models} saving={savingSettings} onClose={()=>setWorldSettingsOpen(false)} onSave={async (value)=>{ setSavingSettings(true); try { const result = await api<{settings:WorldSettings}>(`/api/worlds/${activeWorld.id}/settings`, { method:'PUT', body:JSON.stringify(value) }); setWorldSettings(result.settings); setReasoningEffort(result.settings.model.reasoningEffort); document.documentElement.style.setProperty('--world-accent', result.settings.appearance.accentColor); document.documentElement.style.setProperty('--world-background', result.settings.appearance.pageBackground); document.documentElement.style.setProperty('--world-character-bubble', result.settings.appearance.characterBubbleColor); document.documentElement.style.setProperty('--world-bubble-radius', `${result.settings.appearance.bubbleRadius}px`) } finally { setSavingSettings(false) } }} onSetPassword={async(password)=>{ const result=await api<{access:WorldAccessSummary}>(`/api/worlds/${activeWorld.id}/access/password`,{method:'POST',body:JSON.stringify({password})});setWorldAccess(result.access)}} onClearPassword={async()=>{const result=await api<{access:WorldAccessSummary}>(`/api/worlds/${activeWorld.id}/access/password`,{method:'DELETE'});setWorldAccess(result.access)}} onLock={async()=>{await api(`/api/worlds/${activeWorld.id}/access/lock`,{method:'POST',body:'{}'});setWorldSettingsOpen(false);setLockedWorld(activeWorld)}} /> : null}
+      {lockedWorld !== undefined ? <WorldUnlockDialog worldName={lockedWorld.name} onUnlock={async(password)=>{ await api(`/api/worlds/${lockedWorld.id}/access/unlock`,{method:'POST',body:JSON.stringify({password})}); const world=lockedWorld; setLockedWorld(undefined); await loadWorld(world) }} /> : null}
       {managingEmployee !== undefined ? (
         <EmployeeManagementDialog
           employee={managingEmployee}
@@ -1179,7 +1197,7 @@ function Onboarding({ error, onCreated }: { error?: string; onCreated(): Promise
     <main className="onboarding">
       <div className="brand-lockup brand-lockup--large"><Cube size={28} weight="fill" /><strong>DSH Cyber</strong></div>
       <h1>创建第一个本地世界</h1>
-      <p>世界拥有独立角色、会话、记忆和成长档案。不会自动招聘员工。</p>
+      <p>世界拥有独立角色、会话、记忆和成长档案。不会自动招聘角色。</p>
       {error === undefined ? null : <div className="onboarding__error">{error}</div>}
       <button className="primary-button" type="button" disabled={creating} onClick={() => void create()}>{creating ? '正在创建…' : '创建本地工作区'}</button>
       <a href="?demo=1">先体验交互演示</a>
@@ -1328,7 +1346,7 @@ function demoRuntimeTransaction(status: RuntimeUpdateTransaction['status']): Run
   return {
     id: 'demo-runtime-update',
     candidateRoot: '演示候选运行时',
-    version: '0.1.0-rc.7',
+    version: '0.1.0-rc.8',
     contractId: 'dsh-session-events-v1',
     status,
     report: { ok: true, demo: true },

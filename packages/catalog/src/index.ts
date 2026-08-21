@@ -5,13 +5,26 @@ const CREATED_AT = '2026-08-19T00:00:00.000Z'
 export const BUILTIN_WORLD_TEMPLATES: readonly WorldTemplateManifest[] = [
   {
     schemaVersion: 1,
+    id: 'personal-world',
+    version: 1,
+    displayName: '我的世界',
+    summary: '可自由定义世界观、关系、角色、视觉与模型的私人本地世界。',
+    terminology: {
+      agent: '角色',
+      recruit: '添加角色',
+      groupSession: '群组会话',
+      assignment: '任务',
+    },
+  },
+  {
+    schemaVersion: 1,
     id: 'cyber-company',
     version: 1,
     displayName: '赛博公司',
     summary: '围绕项目、岗位、协作和交付运转的独立数字公司。',
     terminology: {
-      agent: '员工',
-      recruit: '招聘',
+      agent: '角色',
+      recruit: '添加角色',
       groupSession: '项目群',
       assignment: '任务单',
     },
@@ -45,6 +58,15 @@ export const BUILTIN_WORLD_TEMPLATES: readonly WorldTemplateManifest[] = [
 ] as const
 
 export const BUILTIN_BLUEPRINTS: readonly EmployeeBlueprint[] = [
+  blueprint({
+    id: 'core.butler',
+    worldTemplateId: 'personal-world',
+    displayName: '管家',
+    role: '世界管家',
+    summary: '协助配置当前世界、整理会话、管理角色，并严格遵守当前世界的权限边界。',
+    persona: '你是当前世界的独立管家。你帮助用户理解和配置这个世界，只以自己的身份发言，不读取其他世界的内容，也不会未经确认修改关键设置。',
+    requestedSkills: ['world-setup', 'conversation-organization'],
+  }),
   blueprint({
     id: 'cyber-company.secretary',
     worldTemplateId: 'cyber-company',

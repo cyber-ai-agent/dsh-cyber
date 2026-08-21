@@ -30,10 +30,10 @@ export function EmployeeInteractionMenu({ employee, onClose, onTalk, onAssignTas
         <button type="button" aria-label="关闭操作菜单" onClick={onClose}><X size={16} /></button>
       </header>
       <div className="world-context-menu__actions">
-        <button type="button" onClick={onTalk}><ChatsCircle size={18} /><span><strong>直接对话</strong><small>进入这名员工的独立会话</small></span></button>
+        <button type="button" onClick={onTalk}><ChatsCircle size={18} /><span><strong>直接对话</strong><small>进入这名角色的独立会话</small></span></button>
         <button type="button" onClick={onAssignTask}><ClipboardText size={18} /><span><strong>安排任务</strong><small>让机器人前往工位执行</small></span></button>
         <button type="button" onClick={onMeeting}><UsersThree size={18} /><span><strong>邀请协助</strong><small>选择同事发起一次协作</small></span></button>
-        <button type="button" onClick={onDossier}><AddressBook size={18} /><span><strong>员工档案</strong><small>成长、技能、日志与事迹</small></span></button>
+        <button type="button" onClick={onDossier}><AddressBook size={18} /><span><strong>角色档案</strong><small>成长、技能、日志与事迹</small></span></button>
       </div>
     </aside>
   )
@@ -52,7 +52,7 @@ export function ObjectInteractionMenu({ object, manifest, selectedEmployee, onCl
     <aside className="world-context-menu world-context-menu--object" aria-label={`${object.displayName}情境操作`}>
       <header>
         <span className="world-context-menu__object-icon">{manifest.kind === 'meeting-table' ? <UsersThree size={23} /> : manifest.kind === 'workstation' ? <Robot size={23} /> : <Wrench size={23} />}</span>
-        <div><span>场景设施 · {object.state === 'active' ? '使用中' : '可用'}</span><strong>{object.displayName}</strong><small>{selectedEmployee === undefined ? '先选择一名员工，或直接查看设施' : `${selectedEmployee.displayName} 已准备执行`}</small></div>
+        <div><span>场景设施 · {object.state === 'active' ? '使用中' : '可用'}</span><strong>{object.displayName}</strong><small>{selectedEmployee === undefined ? '先选择一名角色，或直接查看设施' : `${selectedEmployee.displayName} 已准备执行`}</small></div>
         <button type="button" aria-label="关闭操作菜单" onClick={onClose}><X size={16} /></button>
       </header>
       <div className="world-context-menu__actions">

@@ -5,6 +5,51 @@ export type JsonPrimitive = boolean | number | string | null
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue }
 export type JsonObject = { [key: string]: JsonValue }
 
+export type ReasoningEffort = 'auto' | 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+export interface WorldSettings {
+  schemaVersion: 1
+  worldId: string
+  lore: string
+  scenario: string
+  userIdentity: {
+    displayName: string
+    worldRole: string
+    addressAs: string
+  }
+  terminology: {
+    characterSingular: string
+    characterPlural: string
+    addCharacterVerb: string
+    groupConversation: string
+    assignment: string
+  }
+  appearance: {
+    accentColor: string
+    pageBackground: string
+    panelBackground: string
+    ownerBubbleColor: string
+    characterBubbleColor: string
+    textColor: string
+    mutedTextColor: string
+    panelRadius: number
+    bubbleRadius: number
+    buttonRadius: number
+    fontScale: number
+  }
+  model: {
+    defaultModelProfileId?: string
+    reasoningEffort: ReasoningEffort
+  }
+  updatedAt: IsoTimestamp
+}
+
+export interface WorldAccessSummary {
+  worldId: string
+  passwordEnabled: boolean
+  unlocked: boolean
+}
+
 export type WorkspaceStatus = 'active' | 'archived'
 
 export interface Workspace {
@@ -188,6 +233,9 @@ export interface EmployeeInstance {
   archivedAt?: IsoTimestamp
 }
 
+export type CharacterBlueprint = EmployeeBlueprint
+export type CharacterInstance = EmployeeInstance
+
 export interface EmployeeRevision {
   employeeId: string
   revision: number
@@ -199,6 +247,8 @@ export interface EmployeeRevision {
   createdAt: IsoTimestamp
 }
 
+export type CharacterRevision = EmployeeRevision
+
 export interface EmployeeProfile {
   employeeId: string
   revision: number
@@ -209,6 +259,8 @@ export interface EmployeeProfile {
   reason: string
   createdAt: IsoTimestamp
 }
+
+export type CharacterProfile = EmployeeProfile
 
 export type SkillEvidenceKind = 'task' | 'test' | 'review' | 'artifact' | 'training'
 export type SkillEvidenceOutcome = 'observed' | 'passed' | 'failed'
@@ -523,6 +575,7 @@ export interface AgentTurnRequest {
   revision: EmployeeRevision
   prompt: string
   workspacePath: string
+  reasoningEffort?: Exclude<ReasoningEffort, 'auto'>
   onEvent?: (event: AgentRuntimeEvent) => void
 }
 

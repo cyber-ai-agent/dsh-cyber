@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -37,16 +37,16 @@ test('onboards, recruits, talks, browses dossiers and previews a real workspace 
 
   await expect(page.locator('.workbench-shell')).toBeVisible()
   await expect(page.locator('.world-runtime-canvas')).toBeVisible()
-  await expect(page.getByRole('heading', { name: '公司还没有员工' })).toBeVisible()
-  const composer = page.getByRole('textbox', { name: '给当前世界的员工发送消息' })
+  await expect(page.getByRole('heading', { name: '公司还没有角色' })).toBeVisible()
+  const composer = page.getByRole('textbox', { name: '给当前世界的角色发送消息' })
   await expect(composer).toBeDisabled()
   await expect(composer).toHaveCount(1)
 
-  await page.getByRole('button', { name: '添加第一名员工' }).click()
-  const market = page.getByRole('dialog', { name: '员工市场' })
+  await page.getByRole('button', { name: '添加第一名角色' }).click()
+  const market = page.getByRole('dialog', { name: '角色市场' })
   await expect(market).toBeVisible()
   await market.getByRole('button', { name: /开发工程师 v1/ }).click()
-  await market.getByRole('textbox', { name: '员工称呼（可选）' }).fill('阿帆')
+  await market.getByRole('textbox', { name: '角色称呼（可选）' }).fill('阿帆')
   await market.getByRole('button', { name: '确认招聘' }).click()
 
   await expect(market).toBeHidden()
@@ -55,7 +55,7 @@ test('onboards, recruits, talks, browses dossiers and previews a real workspace 
 
   const dock = page.getByRole('region', { name: '产物与世界侧边栏' })
   await page.getByRole('button', { name: '查看阿帆档案' }).click()
-  await expect(dock.getByText('阿帆 / 独立员工档案')).toBeVisible()
+  await expect(dock.getByText('阿帆 / 独立角色档案')).toBeVisible()
   await dock.getByRole('button', { name: '全员档案' }).click()
   await expect(dock.getByText('全员数字档案', { exact: true })).toBeVisible()
   await expect(dock.getByRole('article').filter({ hasText: '阿帆' })).toBeVisible()
@@ -67,11 +67,15 @@ test('onboards, recruits, talks, browses dossiers and previews a real workspace 
   await expect(page.getByText('核对事实与权限。')).toBeVisible()
   await expect(page.getByText('search_workspace').first()).toBeVisible()
 
+  const localWorkspace = server.store.listWorkspaces()[0]!
+  const localWorld = server.store.listWorlds(localWorkspace.id)[0]!
+  const worldFilesRoot = join(stateRoot, 'worlds', encodeURIComponent(localWorld.id), 'files')
+  await mkdir(join(worldFilesRoot, 'docs'), { recursive: true })
+  await writeFile(join(worldFilesRoot, 'docs', 'hello.md'), '# 当前世界文件\n', 'utf8')
   await dock.getByRole('button', { name: '文件', exact: true }).click()
-  await dock.getByRole('button', { name: /packages.*目录/ }).click()
-  await dock.getByRole('button', { name: /web.*目录/ }).click()
-  await dock.getByRole('button', { name: /package\.json.*可预览/ }).click()
-  await expect(dock.getByText('本地工作区只读预览')).toBeVisible()
+  await dock.getByRole('button', { name: /docs.*目录/ }).click()
+  await dock.getByRole('button', { name: /hello\.md.*可预览/ }).click()
+  await expect(dock.getByText('当前世界只读预览')).toBeVisible()
   await expect(dock.getByRole('button', { name: '新标签打开' })).toBeVisible()
 
   await expect(page.locator('.composer')).toHaveCount(1)
@@ -83,10 +87,10 @@ test('runs direct and group conversations with real world lifecycle, persistence
   await expect(page.locator('.workbench-shell')).toBeVisible()
   await expect(page.locator('.world-runtime-canvas')).toBeVisible()
 
-  await page.getByRole('button', { name: '添加员工' }).click()
-  const market = page.getByRole('dialog', { name: '员工市场' })
+  await page.getByRole('button', { name: '添加角色' }).click()
+  const market = page.getByRole('dialog', { name: '角色市场' })
   await market.getByRole('button', { name: /秘书 v1/ }).click()
-  await market.getByRole('textbox', { name: '员工称呼（可选）' }).fill('小周')
+  await market.getByRole('textbox', { name: '角色称呼（可选）' }).fill('小周')
   await market.getByRole('button', { name: '确认招聘' }).click()
   await expect(market).toBeHidden()
 
@@ -112,7 +116,7 @@ test('runs direct and group conversations with real world lifecycle, persistence
   const taskCompletedBeforeSubmit = server.store.listWorldDomainEvents(worldId).filter((event) => event.type === 'task.completed').length
   await dock.getByRole('button', { name: '世界', exact: true }).click()
   await page.getByRole('button', { name: '与阿帆私聊' }).click()
-  const composer = page.getByRole('textbox', { name: '给当前世界的员工发送消息' })
+  const composer = page.getByRole('textbox', { name: '给当前世界的角色发送消息' })
   const persistedReplies = page.locator('.message__content').getByText('我先建立性能基线。', { exact: true })
   const persistedReplyCountBeforeSubmit = await persistedReplies.count()
   await composer.fill('任务：实现可恢复的世界状态')
@@ -194,7 +198,7 @@ test('runs direct and group conversations with real world lifecycle, persistence
   await dock.getByRole('button', { name: '全员档案', exact: true }).click()
   await expect(dock.getByText('全员数字档案', { exact: true })).toBeVisible()
   await dock.getByRole('button', { name: '文件', exact: true }).click()
-  await expect(dock.getByText('工作区根目录')).toBeVisible()
+  await expect(dock.getByText('世界根目录')).toBeVisible()
 })
 
 test('keeps the workbench readable and the world viewport filled on a 4K display', async ({ page }) => {
@@ -215,7 +219,7 @@ test('keeps the workbench readable and the world viewport filled on a 4K display
   expect(center?.width ?? 0).toBeGreaterThan(1_200)
   expect(right?.width ?? 0).toBeGreaterThan(700)
   await expect(dock.locator('.world-activity-rail')).toHaveCount(0)
-  await expect(page.getByRole('textbox', { name: '给当前世界的员工发送消息' })).toHaveCount(1)
+  await expect(page.getByRole('textbox', { name: '给当前世界的角色发送消息' })).toHaveCount(1)
 
   const stage = await page.locator('.world-runtime-dock__canvas').boundingBox()
   const canvas = await page.locator('.world-canvas-host').boundingBox()
@@ -314,7 +318,7 @@ test('opens the dossier as an all-employee information directory', async ({ page
   await dock.getByRole('button', { name: '档案', exact: true }).click()
 
   await expect(dock.getByText('全员数字档案')).toBeVisible()
-  await expect(dock.getByText('8 名员工')).toBeVisible()
+  await expect(dock.getByText('8 名角色')).toBeVisible()
   await expect(dock.getByRole('article')).toHaveCount(8)
   for (const employee of ['小羽', '老周', '阿帆', '小Q', '安澜', '墨游', '小E', '秘书']) {
     await expect(dock.getByRole('article').filter({ hasText: employee })).toBeVisible()

@@ -3,6 +3,7 @@ import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { HttpError } from '../http/errors.js'
 import type { Router } from '../http/router.js'
+import type { WorldAccessService } from '../services/world-access-service.js'
 import {
   nonNegativeInteger,
   optionalPositiveInteger,
@@ -15,10 +16,11 @@ import { writeJson } from '../http/response.js'
 
 export interface WorldRoutesDependencies {
   store: SqliteStore
+  worldAccess?: WorldAccessService
 }
 
 export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDependencies): void {
-  const { store } = dependencies
+  const { store, worldAccess } = dependencies
 
   router.get(/^\/api\/workspaces\/([^/]+)\/worlds$/, ({ response, params }) => {
     writeJson(response, 200, { items: store.listWorlds(params[0]!) })
@@ -38,7 +40,8 @@ export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDep
     writeJson(response, 201, { world })
   })
 
-  router.get(/^\/api\/worlds\/([^/]+)\/snapshot$/, ({ response, params }) => {
+  router.get(/^\/api\/worlds\/([^/]+)\/snapshot$/, async ({ request, response, params }) => {
+    await worldAccess?.assertUnlocked(params[0]!, request)
     writeJson(response, 200, store.getWorldSnapshot(params[0]!))
   })
 
@@ -48,11 +51,12 @@ export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDep
     })
   })
 
-  router.get(/^\/api\/worlds\/([^/]+)\/sessions$/, ({ response, params }) => {
+  router.get(/^\/api\/worlds\/([^/]+)\/sessions$/, async ({ request, response, params }) => {
     const worldId = params[0]!
     if (store.getWorld(worldId) === undefined) {
       throw new HttpError(404, 'world_not_found', 'World not found')
     }
+    await worldAccess?.assertUnlocked(worldId, request)
     writeJson(response, 200, { items: store.listSessions(worldId) })
   })
 

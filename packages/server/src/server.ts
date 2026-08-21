@@ -38,11 +38,15 @@ import { registerWorkspaceFileRoutes } from './routes/workspace-file-routes.js'
 import { registerWorkspaceRoutes } from './routes/workspace-routes.js'
 import { registerWorldRuntimeRoutes } from './routes/world-runtime-routes.js'
 import { registerWorldRoutes } from './routes/world-routes.js'
+import { registerWorldSettingsRoutes } from './routes/world-settings-routes.js'
 import { AssetService } from './services/asset-service.js'
 import { ModelCredentialService } from './services/model-credential-service.js'
 import { ModelCatalogService } from './services/model-catalog-service.js'
 import { RuntimeUpdateService } from './services/runtime-update-service.js'
-import { WorkspaceFileService } from './services/workspace-file-service.js'
+import { WorldFileService } from './services/world-file-service.js'
+import { WorldRootService } from './services/world-root-service.js'
+import { WorldSettingsService } from './services/world-settings-service.js'
+import { WorldAccessService } from './services/world-access-service.js'
 import { RuntimeStreamHub } from './streams/runtime-stream-hub.js'
 import { WorldStreamHub } from './streams/world-stream-hub.js'
 import { validateStagedPackageEntrypoints } from './installed-package-runtime.js'
@@ -60,6 +64,7 @@ export interface CyberServerOptions {
   runtime?: AgentRuntimePort
   packageRuntime?: PackageRuntimePort
   marketplaceRoot?: string
+  bootstrapDefaultWorld?: boolean
 }
 
 export interface CyberServerAddress {
@@ -96,6 +101,15 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
 
   const store = await SqliteStore.open(join(stateRoot, 'data', 'dsh-cyber.sqlite'))
   for (const blueprint of BUILTIN_BLUEPRINTS) store.saveBlueprint(blueprint)
+  if (options.bootstrapDefaultWorld === true && store.listWorkspaces().length === 0) {
+    const local = store.createWorkspace({ name: '本地实例' })
+    const world = store.createWorld({ workspaceId: local.id, name: '我的世界', templateId: 'personal-world' })
+    store.recruitEmployee({ workspaceId: local.id, worldId: world.id, blueprintId: 'core.butler', blueprintVersion: 1, displayName: '管家' })
+  }
+  const worldRoots = new WorldRootService(stateRoot)
+  await Promise.all(store.listWorkspaces().flatMap((workspace) => store.listWorlds(workspace.id, true).map((world) => worldRoots.ensure(world.id))))
+  const worldSettings = new WorldSettingsService(worldRoots)
+  const worldAccess = new WorldAccessService(worldRoots)
   const credentials = await ModelCredentialService.open(stateRoot)
   const modelCatalog = new ModelCatalogService(credentials)
 
@@ -111,10 +125,10 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       const profile = selectedProfile?.workspaceId === request.agent.workspaceId
         ? selectedProfile
         : store.resolveModelProfile(request.agent.workspaceId, request.agent.worldId, request.agent.id)
-      return profile === undefined ? undefined : harnessModelRoute(profile)
+      return profile === undefined ? undefined : harnessModelRoute(profile, request.reasoningEffort)
     },
   })
-  const orchestrator = new ConversationOrchestrator({ store, runtime, workspacePath: workspaceRoot })
+  const orchestrator = new ConversationOrchestrator({ store, runtime, workspacePath: workspaceRoot, resolveWorldRoot: async (worldId) => (await worldRoots.ensure(worldId)).filesPath })
   const packageManager = new PackageManager({
     store,
     runtime: options.packageRuntime ?? new LocalPackageRuntime(join(stateRoot, 'packages')),
@@ -128,19 +142,20 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const worldRuntime = new WorldRuntimeService({ store, publish: (event) => worldStreamHub.publish(event) })
   const runtimeUpdates = new RuntimeUpdateService(store, stateRoot, workspaceRoot)
   const assets = new AssetService(store, stateRoot)
-  const workspaceFiles = new WorkspaceFileService(workspaceRoot)
+  const worldFiles = new WorldFileService(worldRoots)
 
   const router = new Router()
   registerSystemRoutes(router, { store, stateRoot, runtimeUpdates })
-  registerWorkspaceFileRoutes(router, { workspaceFiles })
+  registerWorkspaceFileRoutes(router, { worldFiles, access: worldAccess })
   registerCatalogRoutes(router, { store, packageCatalog })
   registerWorkspaceRoutes(router, { store })
   registerModelRoutes(router, { store, credentials, modelCatalog })
   registerAssetRoutes(router, { store, assets })
-  registerWorldRoutes(router, { store })
+  registerWorldRoutes(router, { store, worldAccess })
+  registerWorldSettingsRoutes(router, { store, settings: worldSettings, access: worldAccess })
   registerPackageRoutes(router, { store, packageManager, packageCatalog })
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub })
-  registerConversationRoutes(router, { store, orchestrator, runtimeStreamHub, worldRuntime })
+  registerConversationRoutes(router, { store, orchestrator, runtimeStreamHub, worldRuntime, worldAccess, worldSettings })
   registerEmployeeRoutes(router, { store })
 
   const httpServer = createServer((request, response) => {
@@ -210,7 +225,7 @@ async function resolveActiveRuntime(
   return resolveCandidateDshBin(activeRuntime.candidateRoot)
 }
 
-function harnessModelRoute(profile: ModelProfile): HarnessModelRoute {
+function harnessModelRoute(profile: ModelProfile, reasoningEffort?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'): HarnessModelRoute {
   const contextWindow = optionalPositiveInteger(profile.settings.contextWindow)
   const maxTokens = optionalPositiveInteger(profile.settings.maxTokens)
   return {
@@ -222,6 +237,9 @@ function harnessModelRoute(profile: ModelProfile): HarnessModelRoute {
     ...(profile.credentialEnvName === undefined ? {} : { apiKeyEnv: profile.credentialEnvName }),
     ...(contextWindow === undefined ? {} : { contextWindow }),
     ...(maxTokens === undefined ? {} : { maxTokens }),
+    ...(reasoningEffort === undefined ? {} : { reasoning: reasoningEffort }),
+    ...(profile.settings.reasoningEfforts === false ? { reasoningEfforts: false } : typeof profile.settings.reasoningEfforts === 'object' && profile.settings.reasoningEfforts !== null ? { reasoningEfforts: profile.settings.reasoningEfforts as Exclude<HarnessModelRoute['reasoningEfforts'], undefined> } : {}),
+    ...(typeof profile.settings.thinkingFormat === 'string' ? { compat: { thinkingFormat: profile.settings.thinkingFormat, supportsReasoningEffort: true } } : {}),
   }
 }
 

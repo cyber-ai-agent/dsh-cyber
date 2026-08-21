@@ -243,7 +243,7 @@ export function SettingsDialog({
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <header className="settings-dialog__header">
-          <div><h2 id="settings-title">设置</h2><p>管理界面、模型、数据和 DSH 运行时。</p></div>
+          <div><h2 id="settings-title">设置</h2><p>全局模型、数据和 DSH 运行时。当前世界的个性化请使用左下角“世界设置”。</p></div>
           <button className="icon-button" type="button" aria-label="关闭设置" onClick={onClose}><X size={18} /></button>
         </header>
         <div className="settings-layout">
@@ -499,7 +499,7 @@ function ModelSettings({
   }
   return (
     <div className="settings-section settings-section--models">
-      <div className="settings-section__heading"><h3>模型与路由</h3><p>API 密钥保存在本机加密凭据库，不写入模型数据库或接口响应。路由按员工 → 世界 → 工作区逐级继承。</p></div>
+      <div className="settings-section__heading"><h3>模型与路由</h3><p>API 密钥保存在本机加密凭据库，不写入模型数据库或接口响应。路由按角色 → 世界 → 工作区逐级继承。</p></div>
       <div className="model-config-layout">
         <section className="model-profile-panel" aria-label="已保存的模型配置">
           <header><div><h4>模型配置</h4><span>{models.length} 个已保存配置</span></div><button className="secondary-button" type="button" onClick={startNewModel}><Plus size={16} />添加配置</button></header>
@@ -538,7 +538,7 @@ function ModelSettings({
             <label><span>上下文窗口</span><input type="number" min="1024" step="1" value={draft.contextWindow} onChange={(event) => setDraft({ ...draft, contextWindow: Number(event.target.value) })} /></label>
             <label><span>最大输出 Token</span><input type="number" min="256" step="256" value={draft.maxTokens} onChange={(event) => setDraft({ ...draft, maxTokens: Number(event.target.value) })} /></label>
           </div>
-          <label className="model-default-control"><input type="checkbox" checked={draft.isDefault || models.length === 0} disabled={models.length === 0} onChange={(event) => setDraft({ ...draft, isDefault: event.target.checked })} /><span><strong>设为工作区默认模型</strong><small>未单独分配模型的世界和员工会使用此配置。</small></span></label>
+          <label className="model-default-control"><input type="checkbox" checked={draft.isDefault || models.length === 0} disabled={models.length === 0} onChange={(event) => setDraft({ ...draft, isDefault: event.target.checked })} /><span><strong>设为工作区默认模型</strong><small>未单独分配模型的世界和角色会使用此配置。</small></span></label>
           <footer><span>{draft.id ? '正在编辑已保存配置' : '新配置保存后立即可用于路由'}</span><button className="primary-button" type="submit" disabled={savingModel}>{savingModel ? '正在保存…' : draft.id ? '保存修改' : '添加并保存'}</button></footer>
         </form>
       </div>
@@ -546,7 +546,7 @@ function ModelSettings({
         <div className="model-routing-list">
           <ModelRouteRow label="工作区默认" detail={workspace.name} value={assignmentValue('workspace', workspace.id)} models={models} onChange={(value) => void assign('workspace', workspace.id, value)} />
           {worlds.map((world) => <ModelRouteRow key={world.id} label="世界" detail={world.name} value={assignmentValue('world', world.id)} models={models} onChange={(value) => void assign('world', world.id, value)} />)}
-          {employees.map((employee) => <ModelRouteRow key={employee.id} label="员工" detail={`${employee.displayName} · ${employee.role}`} value={assignmentValue('employee', employee.id)} models={models} onChange={(value) => void assign('employee', employee.id, value)} />)}
+          {employees.map((employee) => <ModelRouteRow key={employee.id} label="角色" detail={`${employee.displayName} · ${employee.role}`} value={assignmentValue('employee', employee.id)} models={models} onChange={(value) => void assign('employee', employee.id, value)} />)}
         </div>
       </fieldset>
     </div>

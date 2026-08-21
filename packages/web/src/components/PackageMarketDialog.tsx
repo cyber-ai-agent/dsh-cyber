@@ -40,7 +40,7 @@ interface PackageMarketDialogProps {
 const MARKET_META: Record<CyberMarketKind, { label: string; description: string }> = {
   theme: { label: '主题市场', description: '安装独立世界、场景规则与交互主题。切换主题会创建新的会话上下文。' },
   plugin: { label: '插件市场', description: '为 Agent 增加可审阅、可回滚的真实执行能力。' },
-  talent: { label: '人才市场', description: '安装员工蓝图与技能包，再从招聘入口招募为独立员工智能体。' },
+  talent: { label: '人才市场', description: '安装角色蓝图与技能包，再从招聘入口招募为独立角色智能体。' },
 }
 
 export function PackageMarketDialog(props: PackageMarketDialogProps) {
@@ -196,14 +196,14 @@ function packageKindLabel(kind: CyberPackageManifest['kind']): string {
     skill: '技能包',
     'model-provider': '模型服务',
     asset: '资产包',
-    'employee-blueprint': '员工蓝图',
+    'employee-blueprint': '角色蓝图',
     'world-theme': '世界主题',
   })[kind]
 }
 
 function capabilityLabel(capability: string): string {
   return ({
-    'employee:blueprint': '提供员工蓝图',
+    'employee:blueprint': '提供角色蓝图',
     'workspace:read': '读取工作区',
     'knowledge:read': '读取知识库',
     'artifact:read': '读取产物',

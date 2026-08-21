@@ -44,7 +44,7 @@ export function RecruitmentDialog({
         <header className="dialog-header">
           <div>
             <h2 id="recruitment-title">{experience.marketLabel}</h2>
-            <p>{roleplay ? '邀请角色卡会建立当前故事专属的人设、记忆与会话，不会混入其他世界。' : '招聘会创建当前世界专属的 Employee Instance 与版本 1，不会静默生成员工。'}</p>
+            <p>{roleplay ? '邀请角色卡会建立当前故事专属的人设、记忆与会话，不会混入其他世界。' : '招聘会创建当前世界专属的 Employee Instance 与版本 1，不会静默生成角色。'}</p>
           </div>
           <button className="icon-button" type="button" aria-label={`关闭${experience.marketLabel}`} onClick={onClose}><X size={18} /></button>
         </header>
@@ -80,7 +80,7 @@ export function RecruitmentDialog({
                 </div>
                 <p className="blueprint-detail__summary">{selected.summary}</p>
                 <label className="dialog-field">
-                  <span>{roleplay ? '角色称呼（可选）' : '员工称呼（可选）'}</span>
+                  <span>{roleplay ? '角色称呼（可选）' : '角色称呼（可选）'}</span>
                   <input value={displayName} placeholder={selected.displayName} onChange={(event) => setDisplayName(event.target.value)} />
                 </label>
                 <CapabilityGroup title="建议技能" items={selected.requestedSkills} />
@@ -141,7 +141,7 @@ function CapabilityApprovalGroup({
 }) {
   return (
     <fieldset className="capability-approval-group">
-      <legend>逐项批准员工权限</legend>
+      <legend>逐项批准角色权限</legend>
       {items.length === 0 ? <span>该蓝图未请求额外权限</span> : items.map((item) => (
         <label key={item}>
           <input

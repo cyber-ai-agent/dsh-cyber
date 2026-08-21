@@ -1,4 +1,4 @@
-import type { ChatAttachment, JsonObject } from '@dsh-cyber/contracts'
+import type { ChatAttachment, JsonObject, ReasoningEffort } from '@dsh-cyber/contracts'
 import type {
   ConversationOrchestrator,
   DirectConversationInput,
@@ -13,29 +13,35 @@ import {
   optionalStringArray,
   readJson,
   record,
+  requiredEnum,
   requiredString,
 } from '../http/request.js'
 import { writeJson } from '../http/response.js'
 import { applyInstalledPromptTransforms } from '../installed-package-runtime.js'
 import type { RuntimeStreamHub } from '../streams/runtime-stream-hub.js'
 import type { WorldRuntimeService } from '../world-runtime-service.js'
+import type { WorldAccessService } from '../services/world-access-service.js'
+import type { WorldSettingsService } from '../services/world-settings-service.js'
 
 export interface ConversationRoutesDependencies {
   store: SqliteStore
   orchestrator: ConversationOrchestrator
   runtimeStreamHub: RuntimeStreamHub
   worldRuntime: WorldRuntimeService
+  worldAccess: WorldAccessService
+  worldSettings: WorldSettingsService
 }
 
 export function registerConversationRoutes(
   router: Router,
   dependencies: ConversationRoutesDependencies,
 ): void {
-  const { store, orchestrator, runtimeStreamHub, worldRuntime } = dependencies
+  const { store, orchestrator, runtimeStreamHub, worldRuntime, worldAccess, worldSettings } = dependencies
 
   router.post(/^\/api\/worlds\/([^/]+)\/chat$/, async ({ request, response, params }) => {
     const world = store.getWorld(params[0]!)
     if (world === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
+    await worldAccess.assertUnlocked(world.id, request)
     const body = await readJson(request)
     const prompt = requiredString(body, 'prompt')
     const attachments = validatedChatAttachments(body.attachments, store, world.workspaceId)
@@ -44,9 +50,10 @@ export function registerConversationRoutes(
       store.listInstalledPackages(world.workspaceId),
       attachmentPrompt,
     )
-    const runtimePrompt = transformedPrompt === prompt && attachments.length === 0
-      ? undefined
-      : transformedPrompt
+    const worldSettingsValue = await worldSettings.get(world.id)
+    const requestedReasoning = body.reasoningEffort === undefined
+      ? worldSettingsValue.model.reasoningEffort
+      : requiredEnum<ReasoningEffort>(body, 'reasoningEffort', ['auto','off','minimal','low','medium','high','xhigh','max'])
     const explicitIds = optionalStringArray(body.employeeIds)
     const employeeIds = explicitIds.length > 0
       ? explicitIds
@@ -68,7 +75,8 @@ export function registerConversationRoutes(
         employeeId: employeeIds[0]!,
         prompt,
         metadata,
-        ...(runtimePrompt === undefined ? {} : { runtimePrompt }),
+        runtimePrompt: await worldSettings.composeRuntimePrompt(world.id, store.getEmployee(employeeIds[0]!)!, transformedPrompt),
+        ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
       }
       if (sessionId !== undefined) directInput.sessionId = sessionId
       if (title !== undefined) directInput.title = title
@@ -80,7 +88,8 @@ export function registerConversationRoutes(
         employeeIds,
         prompt,
         metadata,
-        ...(runtimePrompt === undefined ? {} : { runtimePrompt }),
+        runtimePrompt: transformedPrompt,
+        ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
         ...(sessionId === undefined ? {} : { sessionId }),
         ...(title === undefined ? {} : { title }),
       })
@@ -89,11 +98,12 @@ export function registerConversationRoutes(
     writeJson(response, 200, result)
   })
 
-  router.get(/^\/api\/worlds\/([^/]+)\/live$/, ({ request, response, params }) => {
+  router.get(/^\/api\/worlds\/([^/]+)\/live$/, async ({ request, response, params }) => {
     const worldId = params[0]!
     if (store.getWorld(worldId) === undefined) {
       throw new HttpError(404, 'world_not_found', 'World not found')
     }
+    await worldAccess.assertUnlocked(worldId, request)
     runtimeStreamHub.connect(worldId, request, response)
   })
 

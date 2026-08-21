@@ -58,7 +58,7 @@ export function GroupConversationDialog({ employees, onClose, onCreate }: GroupC
           <div>
             <span><UsersThree size={16} weight="fill" /> 当前世界</span>
             <h2 id="group-dialog-title">创建群聊</h2>
-            <p>选择至少两名员工。群聊会在你发送第一条消息时正式创建。</p>
+            <p>选择至少两名角色。群聊会在你发送第一条消息时正式创建。</p>
           </div>
           <button className="icon-button" type="button" aria-label="关闭创建群聊" onClick={onClose}><X size={18} /></button>
         </header>
@@ -66,7 +66,7 @@ export function GroupConversationDialog({ employees, onClose, onCreate }: GroupC
         <div className="group-dialog__body">
           <label className="group-dialog__search">
             <MagnifyingGlass size={17} />
-            <input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索员工或角色" aria-label="搜索群聊成员" />
+            <input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索角色或角色" aria-label="搜索群聊成员" />
           </label>
           <label className="group-dialog__name">
             <span>群聊名称</span>
