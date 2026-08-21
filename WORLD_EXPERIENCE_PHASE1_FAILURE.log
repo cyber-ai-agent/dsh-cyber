@@ -4,9 +4,10 @@ file:///home/runner/work/dsh-cyber/dsh-cyber/scripts/apply-world-experience-phas
     if (!source.includes(from)) throw new Error(`Missing anchor in ${path}: ${from.slice(0, 120)}`)
                                       ^
 
-Error: Missing anchor in packages/web/src/features/world/WorldRuntimeDock.tsx: import { useState } from 'react'
-import type { World, WorldZoomCommand } from '@dsh-cyber/contracts'
+Error: Missing anchor in packages/web/src/features/world/renderer/pixi-world-renderer.ts:   fitScene(): void {
+    if (!this.#scene || !this.#host || !this.#initialized) return
+    const availableWidth = Math.m
     at patch (file:///home/runner/work/dsh-cyber/dsh-cyber/scripts/apply-world-experience-phase1.mjs:6:39)
-    at async file:///home/runner/work/dsh-cyber/dsh-cyber/scripts/apply-world-experience-phase1.mjs:217:1
+    at async file:///home/runner/work/dsh-cyber/dsh-cyber/scripts/apply-world-experience-phase1.mjs:136:1
 
 Node.js v22.19.0
