@@ -10,9 +10,11 @@ def write(path: str, content: str) -> None:
 
 
 # Public product wording: “角色” is the UI term; Employee* remains only an internal v1 compatibility name.
-for path in Path('packages/web/src').rglob('*.tsx'):
-    text = path.read_text(encoding='utf-8').replace('员工', '角色')
-    path.write_text(text, encoding='utf-8')
+# Include .ts configuration modules such as world-experience.ts, not just rendered TSX components.
+for pattern in ('*.tsx', '*.ts'):
+    for path in Path('packages/web/src').rglob(pattern):
+        text = path.read_text(encoding='utf-8').replace('员工', '角色')
+        path.write_text(text, encoding='utf-8')
 
 # The file dock must use the active world's isolated filesystem, never the old global workspace root.
 p = 'packages/web/src/components/ArtifactDock.tsx'
