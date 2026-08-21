@@ -78,11 +78,11 @@ function modelCatalogEndpoint(baseUrl: string): URL {
 }
 
 function upstreamCatalogError(status: number): ServiceError {
-  if (status === 401 || status === 403) return new ServiceError('forbidden', 'model_credential_rejected', 'API 密钥无效或没有访问权限，请检查后重试。')
-  if (status === 404) return new ServiceError('not-found', 'model_catalog_not_found', '该接口没有提供模型列表，请确认接口地址以 /v1 结尾，或手动填写模型 ID。')
-  if (status === 429) return new ServiceError('rate-limited', 'model_catalog_rate_limited', '模型服务请求过于频繁，请稍后重试。')
-  if (status >= 500) return new ServiceError('unavailable', 'model_catalog_upstream_error', '模型服务暂时不可用，请稍后重试。')
-  return new ServiceError('invalid', 'model_catalog_rejected', `模型服务拒绝了模型列表请求（状态码 ${status}）。`)
+  if (status === 401 || status === 403) return new ServiceError('forbidden', 'model_credential_rejected', 'API 密钥无效或没有访问权限，请检查后重试。', status)
+  if (status === 404) return new ServiceError('not-found', 'model_catalog_not_found', '该接口没有提供模型列表，请确认接口地址以 /v1 结尾，或手动填写模型 ID。', status)
+  if (status === 429) return new ServiceError('rate-limited', 'model_catalog_rate_limited', '模型服务请求过于频繁，请稍后重试。', status)
+  if (status >= 500) return new ServiceError('unavailable', 'model_catalog_upstream_error', '模型服务暂时不可用，请稍后重试。', status)
+  return new ServiceError('invalid', 'model_catalog_rejected', `模型服务拒绝了模型列表请求（状态码 ${status}）。`, status)
 }
 
 async function readCatalogJson(response: Response): Promise<unknown> {

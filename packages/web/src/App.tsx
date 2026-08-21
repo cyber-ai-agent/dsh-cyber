@@ -24,6 +24,9 @@ import type {
   JsonObject,
   LocalAssetMimeType,
   ModelAssignment,
+  ModelInteractionLog,
+  ModelInteractionLogFilter,
+  ModelInteractionLogPage,
   ModelProfile,
   PackageInstallTransaction,
   PackagePermissionPreview,
@@ -102,6 +105,7 @@ export default function App() {
   const [dockCollapsed, setDockCollapsed] = useState(false)
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
+  const liveTurnClearTimerRef = useRef<number | undefined>(undefined)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('appearance')
   const [savingSettings, setSavingSettings] = useState(false)
@@ -140,6 +144,18 @@ export default function App() {
   const managingRevision = managingDossier?.revisions.find((revision) => revision.revision === managingEmployee?.currentRevision)
   const supportsWorldRuntime = worldRuntimeV2Enabled && worldRuntimeAvailable
 
+  const clearLiveTurns = useCallback(() => {
+    if (liveTurnClearTimerRef.current !== undefined) {
+      window.clearTimeout(liveTurnClearTimerRef.current)
+      liveTurnClearTimerRef.current = undefined
+    }
+    setLiveTurns([])
+  }, [])
+
+  useEffect(() => () => {
+    if (liveTurnClearTimerRef.current !== undefined) window.clearTimeout(liveTurnClearTimerRef.current)
+  }, [])
+
   const loadWorld = useCallback(async (world: World) => {
     setError(undefined)
     setActiveWorld(world)
@@ -147,7 +163,7 @@ export default function App() {
     setSessionParticipants({})
     setConversationIntent(undefined)
     setMessages([])
-    setLiveTurns([])
+    clearLiveTurns()
     setDraft('')
     setSelectedEmployeeId(undefined)
     setDockTab('world')
@@ -201,7 +217,7 @@ export default function App() {
     setEmployees(snapshot.employees.map((employee, index) => toCyberEmployee(employee, index, nextDossiers[employee.id])))
     setSessions(snapshot.openSessions)
     setSessionParticipants(Object.fromEntries(participantResults))
-  }, [])
+  }, [clearLiveTurns])
 
   const bindWorldTheme = useCallback(async (packageId: string) => {
     if (activeWorld === undefined) throw new Error('世界尚未就绪')
@@ -326,9 +342,10 @@ export default function App() {
       title: `与 ${employee.displayName} 对话`,
     } : undefined)
     if (existing === undefined) setMessages([])
+    clearLiveTurns()
     setDraft('')
     setSelectedEmployeeId(employee.id)
-  }, [sessionParticipants, sessions])
+  }, [clearLiveTurns, sessionParticipants, sessions])
 
   const createGroupIntent = useCallback((input: { title: string; employeeIds: string[] }) => {
     const selected = employees.filter((employee) => input.employeeIds.includes(employee.id))
@@ -336,7 +353,7 @@ export default function App() {
     setGroupDialogOpen(false)
     setActiveSessionId(undefined)
     setMessages([])
-    setLiveTurns([])
+    clearLiveTurns()
     setDraft('')
     setConversationIntent({
       kind: 'group',
@@ -344,7 +361,7 @@ export default function App() {
       title: input.title.trim() || selected.map((employee) => employee.displayName).join('、'),
     })
     setSelectedEmployeeId(selected[0]?.id)
-  }, [employees])
+  }, [clearLiveTurns, employees])
 
   const openRecruitment = useCallback(async () => {
     if (activeWorld === undefined) return
@@ -666,6 +683,7 @@ export default function App() {
   const selectSession = useCallback((sessionId: string) => {
     setConversationIntent(undefined)
     setActiveSessionId(sessionId)
+    clearLiveTurns()
     setDraft('')
     setSelectedEmployeeId(sessionParticipants[sessionId]?.[0])
     if (demoMode) {
@@ -673,13 +691,16 @@ export default function App() {
         ? demoData.messages
         : sessionId === demoTavernSessions[0]?.id ? demoTavernMessages : [])
     }
-  }, [sessionParticipants])
+  }, [clearLiveTurns, sessionParticipants])
 
   const send = useCallback(async (prompt: string, attachments: ChatAttachment[]) => {
     if (activeWorld === undefined) return
     setSending(true)
-    setLiveTurns([])
+    clearLiveTurns()
+    // 乐观更新：点击发送瞬间立即清空输入框，不等模型回合结束
+    setDraft('')
     setError(undefined)
+    let optimisticOwnerMessage: WorkMessage | undefined
     try {
       const explicitEmployeeIds = conversationIntent?.employeeIds
         ?? (activeSessionId === undefined ? [] : sessionParticipants[activeSessionId] ?? [])
@@ -712,7 +733,6 @@ export default function App() {
         setSessionParticipants((current) => ({ ...current, [session.id]: targets.map((employee) => employee.id) }))
         setConversationIntent(undefined)
         setMessages((current) => [...current, ownerMessage])
-        setDraft('')
         await delay(650)
         const replies = targets.map((employee, index) => makeDemoMessage(
           session.id,
@@ -727,6 +747,24 @@ export default function App() {
         setMessages((current) => [...current, ...replies])
         return
       }
+      // 乐观更新：用户消息立即上屏，不依赖 chat 响应返回
+      const ownerMessage: WorkMessage = {
+        id: `local-owner-${Date.now()}`,
+        sessionId: activeSessionId ?? `pending-${Date.now()}`,
+        sequence: messages.length + 1,
+        senderId: 'owner',
+        senderKind: 'owner',
+        kind: 'user',
+        content: prompt,
+        metadata: {
+          displayTime: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+          participantIds: targetIds,
+          ...(attachments.length === 0 ? {} : { attachments: serializableAttachments(attachments) }),
+        },
+        createdAt: new Date().toISOString(),
+      }
+      optimisticOwnerMessage = ownerMessage
+      setMessages((current) => [...current, ownerMessage])
       const result = await api<ChatResult>(`/api/worlds/${activeWorld.id}/chat`, {
         method: 'POST',
         body: JSON.stringify({
@@ -738,7 +776,6 @@ export default function App() {
           ...(activeSessionId === undefined ? {} : { sessionId: activeSessionId }),
         }),
       })
-      setDraft('')
       setActiveSessionId(result.session.id)
       setSessionParticipants((current) => ({ ...current, [result.session.id]: targetIds }))
       setConversationIntent(undefined)
@@ -746,12 +783,19 @@ export default function App() {
       const transcript = await api<{ items: WorkMessage[] }>(`/api/sessions/${result.session.id}/messages`)
       setMessages(transcript.items)
     } catch (cause) {
+      // 回合失败时收回乐观消息，避免 UI 上残留未持久化的用户消息
+      const failedOwnerId = optimisticOwnerMessage?.id
+      if (failedOwnerId !== undefined) {
+        setMessages((current) => current.filter((message) => message.id !== failedOwnerId))
+      }
       setError(cause instanceof Error ? cause.message : '消息发送失败')
     } finally {
       setSending(false)
-      setLiveTurns([])
+      // 回合结束后保留 liveTurns 一段时间，让思考/运行过程不会一闪而过
+      if (liveTurnClearTimerRef.current !== undefined) window.clearTimeout(liveTurnClearTimerRef.current)
+      liveTurnClearTimerRef.current = window.setTimeout(() => setLiveTurns([]), 8_000)
     }
-  }, [activeSession, activeSessionId, activeWorld, conversationIntent, employees, messages.length, sessionParticipants, reasoningEffort])
+  }, [activeSession, activeSessionId, activeWorld, clearLiveTurns, conversationIntent, employees, messages.length, sessionParticipants, reasoningEffort])
 
   const uploadChatAttachment = useCallback(async (file: File): Promise<ChatAttachment> => {
     if (workspace === undefined) throw new Error('请先创建工作区')
@@ -925,6 +969,78 @@ export default function App() {
     return api<SystemActionResult>(`/api/system/update/${transactionId}/rollback`, { method: 'POST', body: JSON.stringify({ approved: input?.approved === true }) })
   }, [])
 
+  const loadModelLogs = useCallback(async (filter: ModelInteractionLogFilter): Promise<ModelInteractionLogPage> => {
+    if (workspace === undefined) throw new Error('请先创建工作区')
+    if (demoMode) {
+      await delay(200)
+      const status = filter.status
+      const modelId = filter.modelId
+      const items: ModelInteractionLog[] = (demoData.modelProfiles[0] ? [
+        {
+          id: 'demo-log-1',
+          workspaceId: workspace.id,
+          source: 'turn' as const,
+          modelId: demoData.modelProfiles[0].modelId,
+          provider: demoData.modelProfiles[0].displayName,
+          status: 'success' as const,
+          promptMessageCount: 3,
+          promptCharCount: 842,
+          responseCharCount: 156,
+          toolCallCount: 2,
+          durationMs: 3_420,
+          tokensPrompt: 1_204,
+          tokensCompletion: 312,
+          tokensTotal: 1_516,
+          createdAt: new Date(Date.now() - 4 * 60_000).toISOString(),
+        },
+        {
+          id: 'demo-log-2',
+          workspaceId: workspace.id,
+          source: 'discovery' as const,
+          modelId: '-',
+          provider: demoData.modelProfiles[0].displayName,
+          status: 'failed' as const,
+          errorCode: 'model_catalog_timeout',
+          errorMessage: '模型服务响应超时，请检查地址或稍后重试。',
+          promptMessageCount: 0,
+          promptCharCount: 0,
+          durationMs: 12_000,
+          createdAt: new Date(Date.now() - 32 * 60_000).toISOString(),
+        },
+      ] : [])
+        .filter((log) =>
+          (status === undefined || log.status === status) &&
+          (modelId === undefined || modelId === '' || log.modelId === modelId),
+        )
+      const pageSize = filter.pageSize
+      const page = Math.max(1, filter.page)
+      const total = items.length
+      return {
+        items: items.slice((page - 1) * pageSize, page * pageSize),
+        total,
+        page,
+        pageSize,
+        modelIds: [...new Set(items.map((log) => log.modelId))],
+      }
+    }
+    const query = new URLSearchParams()
+    query.set('page', String(filter.page))
+    query.set('pageSize', String(filter.pageSize))
+    if (filter.status !== undefined) query.set('status', filter.status)
+    if (filter.modelId !== undefined && filter.modelId) query.set('modelId', filter.modelId)
+    return api<ModelInteractionLogPage>(`/api/workspaces/${workspace.id}/model-interactions?${query.toString()}`)
+  }, [demoMode, workspace])
+
+  const clearModelLogs = useCallback(async (): Promise<number> => {
+    if (workspace === undefined) throw new Error('请先创建工作区')
+    if (demoMode) {
+      await delay(200)
+      return 0
+    }
+    const result = await api<{ removed: number }>(`/api/workspaces/${workspace.id}/model-interactions`, { method: 'DELETE' })
+    return result.removed
+  }, [demoMode, workspace])
+
   const resize = useCallback((leftPaneWidth: number, rightPaneWidth: number) => {
     setPreferences((current) => current === undefined ? current : { ...current, leftPaneWidth, rightPaneWidth })
   }, [])
@@ -1069,6 +1185,8 @@ export default function App() {
           onDeleteModel={deleteModel}
           onAssignModel={assignModel}
           onSystemAction={runSystemAction}
+          onLoadModelLogs={loadModelLogs}
+          onClearModelLogs={clearModelLogs}
         />
       ) : null}
       {recruitmentOpen ? (
