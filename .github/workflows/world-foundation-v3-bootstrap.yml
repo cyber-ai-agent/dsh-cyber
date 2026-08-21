@@ -46,6 +46,14 @@ jobs:
         run: node scripts/apply-world-foundation-v3.mjs
       - name: Apply deterministic post patches
         run: python scripts/post-world-foundation-v3.py
+      - name: Align rc8 runtime update expectation
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('packages/server/tests/server.test.ts')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace("version: '0.1.0-rc.7',\n      transaction: { status: 'verified' }", "version: '0.1.0-rc.8',\n      transaction: { status: 'verified' }")
+          p.write_text(s, encoding='utf-8')
       - name: Refresh lockfile for DSH rc.8
         run: pnpm install --no-frozen-lockfile
       - name: Typecheck
