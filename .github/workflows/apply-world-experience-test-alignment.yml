@@ -1,0 +1,40 @@
+name: apply-world-experience-test-alignment
+
+on:
+  push:
+    branches: [fix/world-experience-stabilization]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/world-experience-stabilization
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: pnpm
+      - name: Apply and verify test alignment
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          node scripts/apply-world-experience-test-alignment.mjs
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+          git diff --check
+          git add e2e/workbench.spec.ts packages/world-runtime/src/projector.ts packages/world-runtime/src/themes/cyber-company.ts
+          git commit -m "fix: space world characters and align role terminology"
+          rm scripts/apply-world-experience-test-alignment.mjs .github/workflows/apply-world-experience-test-alignment.yml
+          git add -A
+          git commit -m "chore: remove test alignment bootstrap"
+          git push origin HEAD:fix/world-experience-stabilization
