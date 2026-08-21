@@ -61,3 +61,5 @@ if old not in s:
 s = s.replace(old, new)
 s = s.replace("dock.getByText('工作区根目录')", "dock.getByText('世界根目录')")
 write(p, s)
+
+# Trigger marker; the successful bootstrap removes this script.
