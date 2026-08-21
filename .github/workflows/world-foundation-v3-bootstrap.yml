@@ -40,7 +40,7 @@ jobs:
           p.write_text(s, encoding='utf-8')
       - name: Apply architecture migration
         run: node scripts/apply-world-foundation-v3.mjs
-      - name: Complete concrete App integration
+      - name: Complete concrete integration patches
         shell: python
         run: |
           from pathlib import Path
@@ -51,6 +51,20 @@ jobs:
           if '          reasoningEffort,\n          ...(attachments.length' not in s:
               s = s.replace('          prompt,\n          ...(attachments.length === 0 ? {} : { attachments }),', '          prompt,\n          reasoningEffort,\n          ...(attachments.length === 0 ? {} : { attachments }),')
           s = s.replace('sessionParticipants])\n\n  const uploadChatAttachment', 'sessionParticipants, reasoningEffort])\n\n  const uploadChatAttachment')
+          p.write_text(s, encoding='utf-8')
+
+          p = Path('packages/server/src/routes/conversation-routes.ts')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace("router.get(/^\\/api\\/worlds\\/([^/]+)\\/live$/, ({ request, response, params }) => {", "router.get(/^\\/api\\/worlds\\/([^/]+)\\/live$/, async ({ request, response, params }) => {")
+          p.write_text(s, encoding='utf-8')
+
+          p = Path('packages/server/src/server.ts')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace("profile.settings.reasoningEfforts as HarnessModelRoute['reasoningEfforts']", "profile.settings.reasoningEfforts as Exclude<HarnessModelRoute['reasoningEfforts'], undefined>")
+          p.write_text(s, encoding='utf-8')
+
+          p = Path('packages/server/src/routes/world-settings-routes.ts')
+          s = p.read_text(encoding='utf-8').replace("import type { ModelProfile, WorldSettings }", "import type { WorldSettings }")
           p.write_text(s, encoding='utf-8')
       - name: Refresh lockfile for DSH rc.8
         run: pnpm install --no-frozen-lockfile
