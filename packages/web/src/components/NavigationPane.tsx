@@ -1,49 +1,47 @@
 import {
-  Buildings,
   ChatCircleDots,
   ClockCounterClockwise,
   MagnifyingGlass,
   Plus,
+  UsersThree,
   UserFocus,
-  Wine,
 } from '@phosphor-icons/react'
 import { useDeferredValue, useMemo, useState } from 'react'
 import type { WorkSession, World } from '@dsh-cyber/contracts'
 
-import type { CyberEmployee } from '../types.js'
+import type { CyberEmployee, SessionParticipantMap } from '../types.js'
 import { worldExperience } from '../world-experience.js'
 import { Avatar } from './Avatar.js'
 
 interface NavigationPaneProps {
-  worlds: World[]
-  activeWorldId: string
+  world: World
   sessions: WorkSession[]
   activeSessionId?: string
+  activeEmployeeIds: string[]
+  sessionParticipants: SessionParticipantMap
   employees: CyberEmployee[]
-  onSelectWorld(worldId: string): void
   onSelectSession(sessionId: string): void
   onSelectEmployee(employeeId: string): void
   onDirectEmployee(employee: CyberEmployee): void
   onRecruit(): void
-  onCreateWorld(): void
+  onCreateGroup(): void
 }
 
 export function NavigationPane({
-  worlds,
-  activeWorldId,
+  world,
   sessions,
   activeSessionId,
+  activeEmployeeIds,
+  sessionParticipants,
   employees,
-  onSelectWorld,
   onSelectSession,
   onSelectEmployee,
   onDirectEmployee,
   onRecruit,
-  onCreateWorld,
+  onCreateGroup,
 }: NavigationPaneProps) {
   const [query, setQuery] = useState('')
-  const activeWorld = worlds.find((world) => world.id === activeWorldId) ?? worlds[0]
-  const experience = activeWorld === undefined ? undefined : worldExperience(activeWorld)
+  const experience = worldExperience(world)
   const deferredQuery = useDeferredValue(query.trim().toLocaleLowerCase())
   const filteredEmployees = useMemo(() => {
     if (!deferredQuery) return employees
@@ -57,33 +55,11 @@ export function NavigationPane({
   return (
     <div className="navigation-pane">
       <header className="pane-heading">
-        <span>会话</span>
-        <button className="icon-button" type="button" aria-label="新建世界" onClick={onCreateWorld}>
-          <Plus size={17} weight="bold" />
+        <span>会话与通讯录</span>
+        <button className="icon-button" type="button" aria-label="创建群聊" title="创建群聊" onClick={onCreateGroup}>
+          <UsersThree size={18} weight="bold" />
         </button>
       </header>
-
-      <section className="nav-section" aria-labelledby="worlds-title">
-        <div className="nav-section__title" id="worlds-title">世界</div>
-        <div className="world-list">
-          {worlds.map((world) => {
-            const WorldIcon = world.templateId.includes('tavern') ? Wine : Buildings
-            return (
-              <button
-                key={world.id}
-                className={`world-row${world.id === activeWorldId ? ' is-active' : ''}`}
-                type="button"
-                aria-current={world.id === activeWorldId ? 'page' : undefined}
-                onClick={() => onSelectWorld(world.id)}
-              >
-                <WorldIcon size={19} />
-                <span>{world.name}</span>
-              </button>
-            )
-          })}
-        </div>
-        <p className="isolation-note">切换世界将开启新的会话上下文</p>
-      </section>
 
       <section className="nav-section nav-section--sessions" aria-labelledby="sessions-title">
         <div className="nav-section__title nav-section__title--inline" id="sessions-title">
@@ -94,16 +70,14 @@ export function NavigationPane({
           {sessions.length === 0 ? (
             <div className="compact-empty">还没有会话，直接 @ 一名{experience?.personLabel ?? '角色'}开始。</div>
           ) : sessions.map((session) => (
-            <button
+            <SessionRow
               key={session.id}
-              className={`session-row${session.id === activeSessionId ? ' is-active' : ''}`}
-              type="button"
+              session={session}
+              employees={employees}
+              participantIds={sessionParticipants[session.id] ?? []}
+              active={session.id === activeSessionId}
               onClick={() => onSelectSession(session.id)}
-            >
-              <ChatCircleDots size={14} />
-              <span className="session-row__title">{session.title}</span>
-              <time>{formatSessionTime(session.updatedAt)}</time>
-            </button>
+            />
           ))}
         </div>
       </section>
@@ -111,7 +85,7 @@ export function NavigationPane({
       <section className="nav-section nav-section--roles" aria-labelledby="roles-title">
         <div className="nav-section__title nav-section__title--inline" id="roles-title">
           <span>{experience?.peopleLabel ?? '角色'}（当前世界）</span>
-          <span>{employees.length}</span>
+          <span className="nav-section__summary"><span>{employees.length}</span><button type="button" aria-label={`添加${experience?.personLabel ?? '角色'}`} title={`添加${experience?.personLabel ?? '角色'}`} onClick={onRecruit}><Plus size={14} /></button></span>
         </div>
         <label className="nav-search">
           <MagnifyingGlass size={15} />
@@ -130,28 +104,57 @@ export function NavigationPane({
             </div>
           ) : null}
           {filteredEmployees.map((employee) => (
-            <button
-              key={employee.id}
-              className="employee-row"
-              type="button"
-              onClick={() => onSelectEmployee(employee.id)}
-              onDoubleClick={() => onDirectEmployee(employee)}
-              title="单击查看数字档案，双击直接 @ 本人"
-            >
-              <Avatar index={employee.avatarIndex} label={employee.displayName} status={employee.status} />
-              <span className="employee-row__copy">
-                <span className="employee-row__identity">
-                  <strong>{employee.displayName}</strong>
-                  <span>{employee.role}</span>
+            <div key={employee.id} className={`employee-row${activeEmployeeIds.includes(employee.id) ? ' is-active' : ''}`}>
+              <button className="employee-row__main" type="button" onClick={() => onDirectEmployee(employee)} aria-label={`与${employee.displayName}私聊`}>
+                <Avatar index={employee.avatarIndex} label={employee.displayName} status={employee.status} />
+                <span className="employee-row__copy">
+                  <span className="employee-row__identity">
+                    <strong>{employee.displayName}</strong>
+                    <span>{employee.role}</span>
+                  </span>
+                  <span className="employee-row__activity">{employee.currentActivity}</span>
                 </span>
-                <span className="employee-row__activity">{employee.currentActivity}</span>
-              </span>
-              <UserFocus className="employee-row__action" size={16} />
-            </button>
+              </button>
+              <button className="employee-row__dossier" type="button" aria-label={`查看${employee.displayName}档案`} title="查看档案" onClick={() => onSelectEmployee(employee.id)}>
+                <UserFocus size={16} />
+              </button>
+            </div>
           ))}
         </div>
       </section>
     </div>
+  )
+}
+
+function SessionRow({
+  session,
+  employees,
+  participantIds,
+  active,
+  onClick,
+}: {
+  session: WorkSession
+  employees: CyberEmployee[]
+  participantIds: string[]
+  active: boolean
+  onClick(): void
+}) {
+  const participants = participantIds
+    .map((id) => employees.find((employee) => employee.id === id))
+    .filter((employee): employee is CyberEmployee => employee !== undefined)
+  const subtitle = session.kind === 'group'
+    ? `群聊 · ${participants.length || participantIds.length} 名成员`
+    : participants[0]?.role ?? '私聊'
+  return (
+    <button className={`session-row${active ? ' is-active' : ''}`} type="button" onClick={onClick}>
+      <span className="session-row__avatar" aria-hidden="true">
+        {participants.length === 0
+          ? session.kind === 'group' ? <UsersThree size={16} /> : <ChatCircleDots size={16} />
+          : participants.slice(0, 2).map((employee) => <Avatar key={employee.id} index={employee.avatarIndex} size="sm" label={employee.displayName} />)}
+      </span>
+      <span className="session-row__copy"><strong>{session.title}</strong><small>{subtitle}</small></span>
+      <time>{formatSessionTime(session.updatedAt)}</time>
+    </button>
   )
 }
 

@@ -24,6 +24,7 @@ data/
 # Local product planning (never commit)
 .private/
 .ui-craft/
+artifacts/
 
 # Credentials and private keys
 .env

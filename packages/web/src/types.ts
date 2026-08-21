@@ -11,6 +11,14 @@ import type {
 
 export type DockTab = 'world' | 'dossier' | 'files' | 'preview'
 
+export interface ConversationIntent {
+  kind: 'direct' | 'group'
+  employeeIds: string[]
+  title: string
+}
+
+export type SessionParticipantMap = Record<string, string[]>
+
 export interface CyberEmployee extends EmployeeInstance {
   avatarIndex: number
   summary: string

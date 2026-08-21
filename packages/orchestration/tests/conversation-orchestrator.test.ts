@@ -247,6 +247,47 @@ describe('ConversationOrchestrator', () => {
     expect(eventTypes).toContain('meeting.finished')
   })
 
+  it('continues an existing group history without creating a duplicate session', async () => {
+    const { directory, store, workspace, company } = await setup()
+    store.saveBlueprint(blueprint('tech-lead', '老王', '技术经理'))
+    store.saveBlueprint(blueprint('engineer', '小刘', '软件工程师'))
+    const lead = store.recruitEmployee({
+      workspaceId: workspace.id,
+      worldId: company.id,
+      blueprintId: 'tech-lead',
+      blueprintVersion: 1,
+    })
+    const engineer = store.recruitEmployee({
+      workspaceId: workspace.id,
+      worldId: company.id,
+      blueprintId: 'engineer',
+      blueprintVersion: 1,
+    })
+    const runtime = new FakeRuntime({})
+    const orchestrator = new ConversationOrchestrator({ store, runtime, workspacePath: directory })
+    orchestrators.push(orchestrator)
+
+    const first = await orchestrator.group({
+      workspaceId: workspace.id,
+      worldId: company.id,
+      employeeIds: [lead.id, engineer.id],
+      prompt: '第一次讨论',
+      title: '发布协作群',
+    })
+    const second = await orchestrator.group({
+      workspaceId: workspace.id,
+      worldId: company.id,
+      employeeIds: [lead.id, engineer.id],
+      sessionId: first.session.id,
+      prompt: '继续讨论验收',
+    })
+
+    expect(second.session.id).toBe(first.session.id)
+    expect(store.listSessions(company.id).filter((session) => session.kind === 'group')).toHaveLength(1)
+    expect(store.listMessages(first.session.id).filter((message) => message.kind === 'user')).toHaveLength(2)
+    expect(store.listWorldDomainEvents(company.id).filter((event) => event.type === 'meeting.started')).toHaveLength(2)
+  })
+
   it('rejects cross-world role mixing before a runtime starts', async () => {
     const { directory, store, workspace, company, tavern } = await setup()
     store.saveBlueprint(blueprint('engineer', '小刘', '软件工程师'))

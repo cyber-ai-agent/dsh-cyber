@@ -14,6 +14,7 @@ import type {
 import type { SqliteStore } from '@dsh-cyber/persistence'
 import {
   cyberCompanyTheme,
+  moonlitTavernTheme,
   projectWorldRuntime,
   validateWorldThemeManifest,
 } from '@dsh-cyber/world-runtime'
@@ -92,7 +93,11 @@ export class WorldRuntimeService {
     const validation = validateWorldThemeManifest(manifest)
     if (!validation.valid) throw new Error(`Built-in world theme is invalid: ${validation.errors.join('; ')}`)
     const binding = this.#store.getWorldThemeBinding(worldId)
-    if (binding?.status !== 'active') return manifest
+    if (
+      binding?.status !== 'active' ||
+      manifest.id !== binding.themeId ||
+      manifest.version !== binding.themeVersion
+    ) return manifest
     return {
       ...manifest,
       assets: manifest.assets.map((asset) => ({
@@ -131,7 +136,15 @@ export class WorldRuntimeService {
     const installed = await loadInstalledWorldThemes(this.#store.listInstalledPackages(world.workspaceId), this.#verificationCache)
     const compatible = installed.filter((item) =>
       themeTemplateMatches(world.templateId, item.manifest.templateId) && ACTIVE_RENDERERS.has(item.manifest.renderer))
-    const activeThemeId = binding?.status === 'active' ? binding.themeId : builtIn?.id ?? ''
+    const activeInstalled = binding?.status === 'active'
+      ? compatible.find((item) =>
+          item.packageId === binding.packageId
+          && item.packageVersion === binding.packageVersion
+          && item.manifest.id === binding.themeId
+          && item.manifest.version === binding.themeVersion
+          && item.contentDigest === binding.contentDigest)
+      : undefined
+    const activeThemeId = activeInstalled?.manifest.id ?? builtIn?.id ?? ''
     const items: WorldThemeOption[] = [
       ...(builtIn === undefined ? [] : [{
         themeId: builtIn.id,
@@ -139,7 +152,7 @@ export class WorldRuntimeService {
         displayName: builtIn.displayName,
         templateId: builtIn.templateId,
         source: 'built-in' as const,
-        active: binding?.status !== 'active',
+        active: activeInstalled === undefined,
         packageId: '@dsh-cyber/builtin-world-themes',
         packageVersion: builtIn.version,
         contentDigest: themeContentDigest(builtIn),
@@ -150,12 +163,7 @@ export class WorldRuntimeService {
         displayName: item.manifest.displayName,
         templateId: item.manifest.templateId,
         source: 'installed' as const,
-        active: binding?.status === 'active'
-          && binding.packageId === item.packageId
-          && binding.packageVersion === item.packageVersion
-          && binding.themeId === item.manifest.id
-          && binding.themeVersion === item.manifest.version
-          && binding.contentDigest === item.contentDigest,
+        active: activeInstalled === item,
         packageId: item.packageId,
         packageVersion: item.packageVersion,
         contentDigest: item.contentDigest,
@@ -366,9 +374,9 @@ export class WorldRuntimeService {
   }
 
   #manifestForTemplate(templateId: string): WorldThemeManifestV1 | undefined {
-    return templateId === 'company' || templateId === 'cyber-company'
-      ? cyberCompanyTheme
-      : undefined
+    if (templateId === 'company' || templateId === 'cyber-company') return cyberCompanyTheme
+    if (templateId === 'tavern' || templateId === 'moonlit-tavern') return moonlitTavernTheme
+    return undefined
   }
 
   #manifestForWorld(worldId: string, templateId: string): WorldThemeManifestV1 | undefined {
@@ -406,5 +414,6 @@ function interactionPayload(request: WorldInteractionRequest): JsonObject {
 
 function themeTemplateMatches(worldTemplateId: string, themeTemplateId: string): boolean {
   if (worldTemplateId === themeTemplateId) return true
-  return [worldTemplateId, themeTemplateId].every((value) => value === 'company' || value === 'cyber-company')
+  if ([worldTemplateId, themeTemplateId].every((value) => value === 'company' || value === 'cyber-company')) return true
+  return [worldTemplateId, themeTemplateId].every((value) => value === 'tavern' || value === 'moonlit-tavern')
 }

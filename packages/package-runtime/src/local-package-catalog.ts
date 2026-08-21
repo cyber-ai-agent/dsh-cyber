@@ -42,7 +42,10 @@ export class LocalPackageCatalog {
       ? ['theme', 'plugin', 'talent']
       : [input.market]
     const packages = (await Promise.all(markets.map((market) => this.#scanMarket(market)))).flat()
-    const installed = new Map((input.installed ?? []).map((item) => [item.packageId, item.version]))
+    const installed = new Map<string, string>()
+    for (const item of input.installed ?? []) {
+      if (item.status === 'active' && !installed.has(item.packageId)) installed.set(item.packageId, item.version)
+    }
     const query = input.query?.trim().toLocaleLowerCase() ?? ''
     return packages
       .filter((item) => query === '' || searchableText(item.manifest).includes(query))

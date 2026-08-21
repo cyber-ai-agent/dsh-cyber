@@ -435,14 +435,14 @@ export class SqliteStore {
     if (row !== undefined) return mapWorkspacePreferences(row)
     return {
       workspaceId: workspace.id,
-      colorScheme: 'system',
+      colorScheme: 'dark',
       skinId: 'cyber-graphite',
       backgroundFit: 'cover',
       backgroundOpacity: 0.18,
       interfaceDensity: 'compact',
       motion: 'system',
       leftPaneWidth: 288,
-      rightPaneWidth: 520,
+      rightPaneWidth: 660,
       updatedAt: workspace.updatedAt,
     }
   }
@@ -474,7 +474,7 @@ export class SqliteStore {
     if (!Number.isInteger(preferences.leftPaneWidth) || preferences.leftPaneWidth < 220 || preferences.leftPaneWidth > 520) {
       throw new PersistenceError('Left pane width must be between 220 and 520 pixels')
     }
-    if (!Number.isInteger(preferences.rightPaneWidth) || preferences.rightPaneWidth < 300 || preferences.rightPaneWidth > 760) {
+    if (!Number.isInteger(preferences.rightPaneWidth) || preferences.rightPaneWidth < 300 || preferences.rightPaneWidth > 1_440) {
       throw new PersistenceError('Right pane width must be between 300 and 760 pixels')
     }
 

@@ -39,9 +39,6 @@ export function registerConversationRoutes(
     const body = await readJson(request)
     const prompt = requiredString(body, 'prompt')
     const attachments = validatedChatAttachments(body.attachments, store, world.workspaceId)
-    const metadata: JsonObject | undefined = attachments.length === 0
-      ? undefined
-      : { attachments: attachments.map(chatAttachmentJson) }
     const attachmentPrompt = attachments.length === 0 ? prompt : attachmentAwarePrompt(prompt, attachments)
     const transformedPrompt = await applyInstalledPromptTransforms(
       store.listInstalledPackages(world.workspaceId),
@@ -57,7 +54,12 @@ export function registerConversationRoutes(
     if (employeeIds.length === 0) {
       throw new HttpError(422, 'agent_required', 'Mention or select at least one agent')
     }
+    const metadata: JsonObject = {
+      participantIds: employeeIds,
+      ...(attachments.length === 0 ? {} : { attachments: attachments.map(chatAttachmentJson) }),
+    }
     const title = optionalString(body.title)
+    const sessionId = optionalString(body.sessionId)
     let result
     if (employeeIds.length === 1) {
       const directInput: DirectConversationInput = {
@@ -65,10 +67,9 @@ export function registerConversationRoutes(
         worldId: world.id,
         employeeId: employeeIds[0]!,
         prompt,
-        ...(metadata === undefined ? {} : { metadata }),
+        metadata,
         ...(runtimePrompt === undefined ? {} : { runtimePrompt }),
       }
-      const sessionId = optionalString(body.sessionId)
       if (sessionId !== undefined) directInput.sessionId = sessionId
       if (title !== undefined) directInput.title = title
       result = await orchestrator.direct(directInput)
@@ -78,8 +79,9 @@ export function registerConversationRoutes(
         worldId: world.id,
         employeeIds,
         prompt,
-        ...(metadata === undefined ? {} : { metadata }),
+        metadata,
         ...(runtimePrompt === undefined ? {} : { runtimePrompt }),
+        ...(sessionId === undefined ? {} : { sessionId }),
         ...(title === undefined ? {} : { title }),
       })
     }
@@ -99,6 +101,12 @@ export function registerConversationRoutes(
     writeJson(response, 200, {
       items: store.listMessages(params[0]!, nonNegativeInteger(url.searchParams.get('after'))),
     })
+  })
+
+  router.get(/^\/api\/sessions\/([^/]+)\/participants$/, ({ response, params }) => {
+    const session = store.getSession(params[0]!)
+    if (session === undefined) throw new HttpError(404, 'session_not_found', 'Session not found')
+    writeJson(response, 200, { items: store.listParticipants(session.id) })
   })
 }
 

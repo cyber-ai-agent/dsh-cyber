@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "official-cyber-nocturne",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "templateId": "cyber-company",
   "displayName": "赛博公司 · 夜班总部",
   "renderer": "pixi-2d",
@@ -14,7 +14,7 @@
   "assets": [
     {
       "id": "cyber-office-background",
-      "src": "assets/cyber-office-world.png",
+      "src": "assets/cyber-office-world-clean.png",
       "kind": "image",
       "preload": true,
       "pixelArt": true

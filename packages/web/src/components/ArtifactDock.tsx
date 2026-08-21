@@ -12,7 +12,7 @@ import {
   Folder,
   SpinnerGap,
 } from '@phosphor-icons/react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { EmployeeDossier as EmployeeDossierData, World } from '@dsh-cyber/contracts'
 
 import type { CyberEmployee, DockTab } from '../types.js'
@@ -28,6 +28,7 @@ interface ArtifactDockProps {
   employees: CyberEmployee[]
   world: World
   sceneImage?: string
+  worldContent?: ReactNode
   onTabChange(tab: DockTab): void
   onCollapse(): void
   onSelectEmployee(employeeId: string): void
@@ -109,6 +110,7 @@ export function ArtifactDock({
   employees,
   world,
   sceneImage,
+  worldContent,
   onTabChange,
   onCollapse,
   onSelectEmployee,
@@ -204,7 +206,7 @@ export function ArtifactDock({
 
       <div className="dock-content">
         {activeTab === 'world' ? (
-          <WorldView world={world} employees={employees} {...(sceneImage === undefined ? {} : { sceneImage })} onSelectEmployee={onSelectEmployee} onInvite={onInvite} />
+          worldContent ?? <WorldView world={world} employees={employees} {...(sceneImage === undefined ? {} : { sceneImage })} onSelectEmployee={onSelectEmployee} onInvite={onInvite} />
         ) : null}
         {activeTab === 'dossier' ? (
           selectedEmployee !== undefined && dossiers[selectedEmployee.id] !== undefined

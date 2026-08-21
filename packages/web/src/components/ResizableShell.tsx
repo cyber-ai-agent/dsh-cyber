@@ -47,7 +47,7 @@ export function ResizableShell({
         ? clamp(initial.leftWidth + delta, 220, Math.min(520, shellWidth - 700))
         : initial.leftWidth
       const nextRight = side === 'right'
-        ? clamp(initial.rightWidth - delta, 300, Math.min(760, shellWidth - 700))
+        ? clamp(initial.rightWidth - delta, 300, Math.min(1_440, shellWidth - 700))
         : initial.rightWidth
       onResize(nextLeft, nextRight)
     }
@@ -60,11 +60,9 @@ export function ResizableShell({
   }, [onResize, paneScale])
 
   const handleWidth = Math.round(5 * paneScale)
-  const minimumCenterWidth = Math.round(460 * paneScale)
+  const minimumCenterWidth = Math.round(440 * paneScale)
   const displayedLeftWidth = Math.round(leftWidth * paneScale)
-  const displayedRightWidth = rightPrimary
-    ? clamp(Math.max(Math.round(rightWidth * paneScale), Math.round(viewportWidth * .56)), Math.round(720 * paneScale), Math.max(Math.round(720 * paneScale), viewportWidth - displayedLeftWidth - Math.round(430 * paneScale)))
-    : Math.round(rightWidth * paneScale)
+  const displayedRightWidth = Math.round(rightWidth * paneScale)
 
   return (
     <div

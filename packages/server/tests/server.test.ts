@@ -810,7 +810,7 @@ describe('Cyber local server', () => {
     const themePreview = await json(origin, `/api/workspaces/${workspace.id}/marketplace/preview`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ packageId: 'official-cyber-nocturne', version: '1.0.0' }),
+      body: JSON.stringify({ packageId: 'official-cyber-nocturne', version: '1.0.1' }),
     })
     expect(themePreview.response.status).toBe(200)
     const themeInstall = await json(origin, `/api/workspaces/${workspace.id}/marketplace/install`, {
@@ -818,7 +818,7 @@ describe('Cyber local server', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         packageId: 'official-cyber-nocturne',
-        version: '1.0.0',
+        version: '1.0.1',
         approvalToken: themePreview.body.preview.approvalToken,
       }),
     })
