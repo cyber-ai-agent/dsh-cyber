@@ -4,13 +4,16 @@ on:
   push:
     branches:
       - feat/world-foundation-v3
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
 
 jobs:
   apply-and-verify:
-    if: github.actor != 'github-actions[bot]'
+    if: github.actor != 'github-actions[bot]' && (github.ref_name == 'feat/world-foundation-v3' || github.head_ref == 'feat/world-foundation-v3')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -40,6 +43,7 @@ jobs:
       - name: Ensure clean patches
         run: git diff --check
       - name: Commit verified implementation
+        if: github.event_name == 'push'
         shell: bash
         run: |
           rm -f scripts/apply-world-foundation-v3.mjs .github/workflows/world-foundation-v3-bootstrap.yml
