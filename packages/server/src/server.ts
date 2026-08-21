@@ -102,7 +102,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   for (const blueprint of BUILTIN_BLUEPRINTS) store.saveBlueprint(blueprint)
   if (options.bootstrapDefaultWorld === true && store.listWorkspaces().length === 0) {
     const local = store.createWorkspace({ name: '本地实例' })
-    const world = store.createWorld({ workspaceId: local.id, name: '我的世界', templateId: 'personal-world' })
+    const world = store.createWorld({ workspaceId: local.id, name: '我的世界', templateId: 'cyber-company' })
     store.recruitEmployee({
       workspaceId: local.id,
       worldId: world.id,
