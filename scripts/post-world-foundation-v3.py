@@ -192,3 +192,5 @@ new_test = dedent(
 )
 s = s[: match.start()] + new_test + s[match.end() :]
 write(p, s)
+
+# This file is intentionally deleted by the successful bootstrap commit.
