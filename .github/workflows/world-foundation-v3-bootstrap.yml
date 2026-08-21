@@ -28,7 +28,7 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - name: Prepare migration script
+      - name: Prepare migration scripts
         shell: python
         run: |
           from pathlib import Path
@@ -37,6 +37,10 @@ jobs:
           s = s.replace('每个世界拥有独立的 \\\`<stateRoot>/worlds/<worldId>/files\\\`、assets、exports 与 cache 目录。', '每个世界拥有独立的 <stateRoot>/worlds/<worldId>/files、assets、exports 与 cache 目录。')
           s = s.replace("if (!source.includes(from)) throw new Error(`Missing replacement anchor in ${path}: ${from.slice(0, 80)}`)", "if (!source.includes(from)) { console.warn(`Optional replacement anchor missing in ${path}: ${from.slice(0, 80)}`); return }")
           s = s.replace("if (!source.includes(from)) throw new Error(`Missing replacement anchor in ${path}: ${from}`)", "if (!source.includes(from)) { console.warn(`Optional replacement anchor missing in ${path}: ${from}`); return }")
+          p.write_text(s, encoding='utf-8')
+          p = Path('scripts/post-world-foundation-v3.py')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace("r'''\\\n", "r'''\n")
           p.write_text(s, encoding='utf-8')
       - name: Apply architecture migration
         run: node scripts/apply-world-foundation-v3.mjs
