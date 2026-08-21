@@ -22,13 +22,14 @@ export function registerCatalogRoutes(router: Router, dependencies: CatalogRoute
 
   router.get('/api/catalog/blueprints', async ({ response, url }) => {
     const templateId = url.searchParams.get('templateId')
+    const runtimeTemplateId = templateId === 'personal-world' ? 'cyber-company' : templateId
     const workspaceId = url.searchParams.get('workspaceId')
     const installed = workspaceId === null ? [] : store.listInstalledPackages(workspaceId)
     const packageBlueprints = await loadInstalledBlueprints(installed)
     for (const blueprint of packageBlueprints) store.saveBlueprint(blueprint)
     const available = [...BUILTIN_BLUEPRINTS, ...packageBlueprints]
-    const items = templateId
-      ? available.filter((item) => item.worldTemplateId === templateId)
+    const items = runtimeTemplateId
+      ? available.filter((item) => item.worldTemplateId === runtimeTemplateId)
       : available
     writeJson(response, 200, { items })
   })
