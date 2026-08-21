@@ -195,6 +195,7 @@ test('runs direct and group conversations with real world lifecycle, persistence
   await page.getByRole('region', { name: '当前世界的会话' }).getByRole('button').first().click()
   await expect(page.getByText('我先建立性能基线。').first()).toBeVisible()
   await dock.getByRole('button', { name: '档案', exact: true }).click()
+  await dock.getByRole('button', { name: '全角色档案', exact: true }).click()
   await expect(dock.getByText('全角色数字档案', { exact: true })).toBeVisible()
   await dock.getByRole('button', { name: '文件', exact: true }).click()
   await expect(dock.getByText('世界根目录')).toBeVisible()
