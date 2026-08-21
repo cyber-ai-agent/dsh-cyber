@@ -1,12 +1,15 @@
 import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { promisify } from 'node:util'
+import { gunzip } from 'node:zlib'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
 import type { AgentRuntimePort, AgentTurnRequest, World } from '@dsh-cyber/contracts'
 import { createCyberServer, type CyberServer } from '../src/index.js'
 
+const gunzipAsync = promisify(gunzip)
 const servers: CyberServer[] = []
 
 afterEach(async () => {
@@ -140,19 +143,30 @@ describe('world experience stabilization', () => {
     await mkdir(join(stateRoot, 'credentials'), { recursive: true })
     await writeFile(join(stateRoot, 'credentials', 'secret.txt'), 'must-not-copy')
 
-    const backup = await json(origin, '/api/system/backup', { method: 'POST', body: '{}' })
+    const backup = await json(origin, '/api/system/backup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    })
     expect(backup.response.status).toBe(201)
     expect(backup.body.kind).toBe('backup-bundle')
     const destination = backup.body.output as string
+    expect((await stat(destination)).isFile()).toBe(true)
+    expect(destination.endsWith('.dshbackup')).toBe(true)
 
-    await expect(stat(join(destination, 'database.sqlite'))).resolves.toBeDefined()
-    await expect(readFile(join(destination, 'worlds', encodeURIComponent(world.id), 'settings.json'), 'utf8')).resolves.toContain('备份测试世界')
-    await expect(readFile(join(destination, 'worlds', encodeURIComponent(world.id), 'files', 'note.md'), 'utf8')).resolves.toContain('# kept')
-    await expect(stat(join(destination, 'worlds', encodeURIComponent(world.id), 'assets', 'attachments'))).resolves.toBeDefined()
-    await expect(readFile(join(destination, 'packages', 'sample', 'manifest.txt'), 'utf8')).resolves.toBe('package')
-    await expect(stat(join(destination, 'worlds', encodeURIComponent(world.id), 'cache', 'throw-away.tmp'))).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(stat(join(destination, 'credentials', 'secret.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
-    const manifest = JSON.parse(await readFile(join(destination, 'backup-manifest.json'), 'utf8')) as { excluded: string[] }
-    expect(manifest.excluded).toContain('credentials')
+    const bundle = JSON.parse((await gunzipAsync(await readFile(destination))).toString('utf8')) as {
+      excluded: string[]
+      entries: Array<{ path: string; sha256: string; dataBase64: string }>
+    }
+    const entries = new Map(bundle.entries.map((entry) => [entry.path, entry]))
+    expect(entries.has('database.sqlite')).toBe(true)
+    expect(Buffer.from(entries.get(`worlds/${encodeURIComponent(world.id)}/settings.json`)!.dataBase64, 'base64').toString('utf8')).toContain('备份测试世界')
+    expect(Buffer.from(entries.get(`worlds/${encodeURIComponent(world.id)}/files/note.md`)!.dataBase64, 'base64').toString('utf8')).toContain('# kept')
+    expect([...entries.keys()].some((path) => path.startsWith(`worlds/${encodeURIComponent(world.id)}/assets/attachments/`))).toBe(true)
+    expect(Buffer.from(entries.get('packages/sample/manifest.txt')!.dataBase64, 'base64').toString('utf8')).toBe('package')
+    expect([...entries.keys()].some((path) => path.includes('/cache/'))).toBe(false)
+    expect([...entries.keys()].some((path) => path.startsWith('credentials/'))).toBe(false)
+    expect(bundle.excluded).toContain('credentials')
+    for (const entry of bundle.entries) expect(entry.sha256).toMatch(/^[a-f0-9]{64}$/)
   })
 })
