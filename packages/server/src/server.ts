@@ -4,14 +4,13 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { BUILTIN_BLUEPRINTS } from '@dsh-cyber/catalog'
-import type { AgentRuntimePort, ModelProfile } from '@dsh-cyber/contracts'
+import type { AgentRuntimePort } from '@dsh-cyber/contracts'
 import {
   HarnessModelRouter,
   inspectHarnessCandidate,
   inspectHarnessCompatibility,
   readActiveHarnessRuntime,
   resolveCandidateDshBin,
-  type HarnessModelRoute,
 } from '@dsh-cyber/harness-adapter'
 import { ConversationOrchestrator } from '@dsh-cyber/orchestration'
 import {
@@ -24,7 +23,6 @@ import { SqliteStore } from '@dsh-cyber/persistence'
 
 import { dispatchHttpRequest } from './http/context.js'
 import { writeError } from './http/errors.js'
-import { optionalPositiveInteger } from './http/request.js'
 import { Router } from './http/router.js'
 import { isLoopbackHost } from './http/security.js'
 import { registerAssetRoutes } from './routes/asset-routes.js'
@@ -40,13 +38,14 @@ import { registerWorldRuntimeRoutes } from './routes/world-runtime-routes.js'
 import { registerWorldRoutes } from './routes/world-routes.js'
 import { registerWorldSettingsRoutes } from './routes/world-settings-routes.js'
 import { AssetService } from './services/asset-service.js'
-import { ModelCredentialService } from './services/model-credential-service.js'
+import { harnessModelRoute } from './services/harness-model-route.js'
 import { ModelCatalogService } from './services/model-catalog-service.js'
+import { ModelCredentialService } from './services/model-credential-service.js'
 import { RuntimeUpdateService } from './services/runtime-update-service.js'
+import { WorldAccessService } from './services/world-access-service.js'
 import { WorldFileService } from './services/world-file-service.js'
 import { WorldRootService } from './services/world-root-service.js'
 import { WorldSettingsService } from './services/world-settings-service.js'
-import { WorldAccessService } from './services/world-access-service.js'
 import { RuntimeStreamHub } from './streams/runtime-stream-hub.js'
 import { WorldStreamHub } from './streams/world-stream-hub.js'
 import { validateStagedPackageEntrypoints } from './installed-package-runtime.js'
@@ -248,43 +247,6 @@ async function resolveActiveRuntime(
     )
   }
   return resolveCandidateDshBin(activeRuntime.candidateRoot)
-}
-
-function harnessModelRoute(
-  profile: ModelProfile,
-  reasoningEffort?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max',
-): HarnessModelRoute {
-  const contextWindow = optionalPositiveInteger(profile.settings.contextWindow)
-  const maxTokens = optionalPositiveInteger(profile.settings.maxTokens)
-  return {
-    id: profile.id,
-    displayName: profile.displayName,
-    api: profile.api,
-    baseURL: profile.baseUrl,
-    modelId: profile.modelId,
-    ...(profile.credentialEnvName === undefined ? {} : { apiKeyEnv: profile.credentialEnvName }),
-    ...(contextWindow === undefined ? {} : { contextWindow }),
-    ...(maxTokens === undefined ? {} : { maxTokens }),
-    ...(reasoningEffort === undefined ? {} : { reasoning: reasoningEffort }),
-    ...(profile.settings.reasoningEfforts === false
-      ? { reasoningEfforts: false }
-      : typeof profile.settings.reasoningEfforts === 'object' && profile.settings.reasoningEfforts !== null
-        ? {
-            reasoningEfforts: profile.settings.reasoningEfforts as Exclude<
-              HarnessModelRoute['reasoningEfforts'],
-              undefined
-            >,
-          }
-        : {}),
-    ...(typeof profile.settings.thinkingFormat === 'string'
-      ? {
-          compat: {
-            thinkingFormat: profile.settings.thinkingFormat,
-            supportsReasoningEffort: true,
-          },
-        }
-      : {}),
-  }
 }
 
 function listen(server: Server, port: number, host: string): Promise<void> {
