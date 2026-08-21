@@ -28,16 +28,17 @@ export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDep
 
   router.post(/^\/api\/workspaces\/([^/]+)\/worlds$/, async ({ request, response, params }) => {
     const body = await readJson(request)
-    const templateId = requiredString(body, 'templateId')
-    if (worldTemplate(templateId) === undefined) {
+    const requestedTemplateId = requiredString(body, 'templateId')
+    if (worldTemplate(requestedTemplateId) === undefined) {
       throw new HttpError(422, 'unknown_world_template', 'Unknown world template')
     }
+    const templateId = requestedTemplateId === 'personal-world' ? 'cyber-company' : requestedTemplateId
     const world = store.createWorld({
       workspaceId: params[0]!,
       name: requiredString(body, 'name'),
       templateId,
     })
-    writeJson(response, 201, { world })
+    writeJson(response, 201, { world, requestedTemplateId })
   })
 
   router.get(/^\/api\/worlds\/([^/]+)\/snapshot$/, async ({ request, response, params }) => {
