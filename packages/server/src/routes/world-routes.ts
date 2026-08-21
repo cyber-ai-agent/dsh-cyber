@@ -45,9 +45,12 @@ export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDep
     writeJson(response, 200, store.getWorldSnapshot(params[0]!))
   })
 
-  router.get(/^\/api\/worlds\/([^/]+)\/events$/, ({ response, params, url }) => {
+  router.get(/^\/api\/worlds\/([^/]+)\/events$/, async ({ request, response, params, url }) => {
+    const worldId = params[0]!
+    if (store.getWorld(worldId) === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
+    await worldAccess?.assertUnlocked(worldId, request)
     writeJson(response, 200, {
-      items: store.listWorldDomainEvents(params[0]!, nonNegativeInteger(url.searchParams.get('after'))),
+      items: store.listWorldDomainEvents(worldId, nonNegativeInteger(url.searchParams.get('after'))),
     })
   })
 
@@ -63,6 +66,7 @@ export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDep
   router.post(/^\/api\/worlds\/([^/]+)\/recruit$/, async ({ request, response, params }) => {
     const world = store.getWorld(params[0]!)
     if (world === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
+    await worldAccess?.assertUnlocked(world.id, request)
     const body = await readJson(request)
     const recruitInput: Parameters<SqliteStore['recruitEmployee']>[0] = {
       workspaceId: world.workspaceId,
