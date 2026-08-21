@@ -18,7 +18,7 @@ interface EmployeeMenuProps {
   onTalk(): void
   onAssignTask(): void
   onMeeting(): void
-  onDossier(): void
+  onDossier?(): void
 }
 
 export function EmployeeInteractionMenu({ employee, onClose, onTalk, onAssignTask, onMeeting, onDossier }: EmployeeMenuProps) {
@@ -26,14 +26,14 @@ export function EmployeeInteractionMenu({ employee, onClose, onTalk, onAssignTas
     <aside className="world-context-menu" aria-label={`${employee.displayName}情境操作`}>
       <header>
         <Avatar index={employee.avatarIndex} size="lg" label={employee.displayName} />
-        <div><span><i className={`status-pip status-pip--${employee.status}`} />独立机器人</span><strong>{employee.displayName}</strong><small>{employee.role} · {employee.currentActivity}</small></div>
+        <div><span><i className={`status-pip status-pip--${employee.status}`} />独立角色</span><strong>{employee.displayName}</strong><small>{employee.role} · {employee.currentActivity}</small></div>
         <button type="button" aria-label="关闭操作菜单" onClick={onClose}><X size={16} /></button>
       </header>
       <div className="world-context-menu__actions">
         <button type="button" onClick={onTalk}><ChatsCircle size={18} /><span><strong>直接对话</strong><small>进入这名角色的独立会话</small></span></button>
-        <button type="button" onClick={onAssignTask}><ClipboardText size={18} /><span><strong>安排任务</strong><small>让机器人前往工位执行</small></span></button>
-        <button type="button" onClick={onMeeting}><UsersThree size={18} /><span><strong>邀请协助</strong><small>选择同事发起一次协作</small></span></button>
-        <button type="button" onClick={onDossier}><AddressBook size={18} /><span><strong>角色档案</strong><small>成长、技能、日志与事迹</small></span></button>
+        <button type="button" onClick={onAssignTask}><ClipboardText size={18} /><span><strong>安排任务</strong><small>让角色前往可用工作区域执行</small></span></button>
+        <button type="button" onClick={onMeeting}><UsersThree size={18} /><span><strong>邀请协作</strong><small>与其他角色发起一次协作</small></span></button>
+        {onDossier === undefined ? null : <button type="button" onClick={onDossier}><AddressBook size={18} /><span><strong>角色档案</strong><small>成长、技能、日志与事迹</small></span></button>}
       </div>
     </aside>
   )

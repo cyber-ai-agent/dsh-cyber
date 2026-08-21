@@ -57,8 +57,8 @@ const experiences: Record<WorldKind, WorldExperience> = {
 
 export function worldExperience(world: Pick<World, 'templateId'>): WorldExperience {
   const template = world.templateId.toLowerCase()
-  if (template.includes('personal')) return experiences.personal
-  if (template.includes('tavern')) return experiences.tavern
-  if (template.includes('studio') || template.includes('creator')) return experiences.studio
+  if (template === 'personal' || template === 'personal-world') return experiences.personal
+  if (template === 'tavern' || template === 'moonlit-tavern') return experiences.tavern
+  if (template === 'studio' || template === 'creator-studio') return experiences.studio
   return experiences.company
 }

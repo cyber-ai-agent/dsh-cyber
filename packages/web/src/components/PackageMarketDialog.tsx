@@ -38,9 +38,9 @@ interface PackageMarketDialogProps {
 }
 
 const MARKET_META: Record<CyberMarketKind, { label: string; description: string }> = {
-  theme: { label: '主题市场', description: '安装独立世界、场景规则与交互主题。切换主题会创建新的会话上下文。' },
-  plugin: { label: '插件市场', description: '为 Agent 增加可审阅、可回滚的真实执行能力。' },
-  talent: { label: '人才市场', description: '安装角色蓝图与技能包，再从招聘入口招募为独立角色智能体。' },
+  theme: { label: '主题市场', description: '安装世界场景、视觉资源与交互主题，再绑定到兼容世界。' },
+  plugin: { label: '插件市场', description: '为角色增加经过审阅、可回滚的扩展能力。当前可执行边界仍以声明式插件为主。' },
+  talent: { label: '角色市场', description: '安装角色模板与技能扩展；安装后可在当前世界创建一个或多个独立角色。' },
 }
 
 export function PackageMarketDialog(props: PackageMarketDialogProps) {
@@ -114,7 +114,7 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && props.onClose()}>
       <section className="package-market-dialog package-market-dialog--catalog" role="dialog" aria-modal="true" aria-labelledby="package-market-title">
         <header className="dialog-header package-market-header">
-          <div><h2 id="package-market-title">扩展市场</h2><p>目录包经过哈希校验、能力审阅和事务安装后才会进入运行链路。</p></div>
+          <div><h2 id="package-market-title">扩展市场</h2><p>扩展经过完整性校验、能力审阅和事务安装后才会进入运行链路。</p></div>
           <button className="icon-button" type="button" aria-label="关闭扩展市场" onClick={props.onClose}><X size={18} /></button>
         </header>
         <nav className="market-tabs" aria-label="市场分类">
@@ -142,7 +142,7 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
                     <div className="market-capabilities">{item.manifest.capabilities.slice(0, 4).map((capability) => <code key={capability}>{capabilityLabel(capability)}</code>)}</div>
                     <footer>
                       <span>{item.installedVersion === undefined ? '未安装' : `已安装 v${item.installedVersion}`}</span>
-                      {marketAction(item, props.employees, () => void bindTheme(item), () => void inspect(item))}
+                      {marketAction(item, () => void bindTheme(item), () => void inspect(item))}
                     </footer>
                   </article>
                 ))}
@@ -152,11 +152,9 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
             {manualOpen ? <ManualInstaller installing={props.installing} onPreview={props.onPreview} onInstall={props.onInstall} /> : null}
           </main>
           <aside className="market-review-panel">
-            {selected === undefined || preview === undefined ? (
-              <InstalledOverview installed={props.installed} transactions={props.transactions} />
-            ) : (
-              <PermissionReview manifest={selected.manifest} preview={preview} approved={approved} installing={props.installing} onApproved={setApproved} onInstall={() => void install()} />
-            )}
+            {selected === undefined || preview === undefined
+              ? <InstalledOverview installed={props.installed} transactions={props.transactions} />
+              : <PermissionReview manifest={selected.manifest} preview={preview} approved={approved} installing={props.installing} onApproved={setApproved} onInstall={() => void install()} />}
           </aside>
         </div>
       </section>
@@ -181,33 +179,24 @@ function PermissionReview({ manifest, preview, approved, installing, onApproved,
   return <section className="permission-review permission-review--market"><header><div><span>{packageKindLabel(manifest.kind)}</span><h4>{manifest.displayName} <small>v{manifest.version}</small></h4><p>{manifest.publisher} · {manifest.license}</p></div><CheckCircle size={24} /></header><p>{manifest.summary}</p><PermissionGroup title="新增能力" values={preview.addedCapabilities.map(capabilityLabel)} empty="没有新增能力" tone="warning" /><PermissionGroup title="数据外发" values={preview.dataEgress} empty="不外发数据" tone={preview.dataEgress.length > 0 ? 'danger' : 'safe'} /><div className="package-file-summary">激活前将再次校验 {manifest.files.length} 个文件与入口定义；失败不会覆盖当前版本。</div><label className="approval-check"><input type="checkbox" checked={approved} onChange={(event) => onApproved(event.target.checked)} /><span>我已审阅发布者、许可证、文件与运行能力。</span></label><button className="primary-button" type="button" disabled={!approved || installing} onClick={onInstall}>{installing ? '正在安装并激活…' : preview.previousVersion ? `批准升级至 v${preview.version}` : `批准安装 v${preview.version}`}</button></section>
 }
 
-function marketAction(item: CyberMarketPackage, employees: CyberEmployee[], onBind: () => void, onInspect: () => void) {
+function marketAction(item: CyberMarketPackage, onBind: () => void, onInspect: () => void) {
   const installed = item.installedVersion === item.manifest.version
-  const recruited = item.market === 'talent' && employees.some((employee) => employee.blueprintId === item.manifest.id)
-  if (recruited) return <button type="button" disabled>已招募</button>
   if (item.market === 'theme' && installed) return <button type="button" onClick={onBind}>绑定到当前世界</button>
   if (installed) return <button type="button" disabled>已安装</button>
   return <button type="button" onClick={onInspect}>{item.installedVersion === undefined ? '查看并安装' : '查看升级'}</button>
 }
 
 function packageKindLabel(kind: CyberPackageManifest['kind']): string {
-  return ({
-    plugin: '插件',
-    skill: '技能包',
-    'model-provider': '模型服务',
-    asset: '资产包',
-    'employee-blueprint': '角色蓝图',
-    'world-theme': '世界主题',
-  })[kind]
+  return ({ plugin: '插件', skill: '技能包', 'model-provider': '模型服务', asset: '资产包', 'employee-blueprint': '角色模板', 'world-theme': '世界主题' })[kind]
 }
 
 function capabilityLabel(capability: string): string {
   return ({
-    'employee:blueprint': '提供角色蓝图',
-    'workspace:read': '读取工作区',
+    'employee:blueprint': '提供角色模板',
+    'workspace:read': '读取本地工作目录',
     'knowledge:read': '读取知识库',
     'artifact:read': '读取产物',
-    'prompt:transform': '调整提示词',
+    'prompt:transform': '调整运行提示',
     'world:render': '渲染世界',
   } as Record<string, string>)[capability] ?? capability
 }

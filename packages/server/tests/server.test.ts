@@ -703,6 +703,35 @@ describe('Cyber local server', () => {
     expect(attachmentDownload.headers.get('content-type')).toBe('text/markdown')
     expect(await attachmentDownload.text()).toBe(attachmentText)
 
+    const worldAttachmentText = '世界专属资料：只应在当前世界的会话中可用。'
+    const worldAttachment = await json(origin, `/api/worlds/${world.id}/assets/attachment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: '世界资料.txt',
+        mimeType: 'text/plain',
+        dataBase64: Buffer.from(worldAttachmentText).toString('base64'),
+      }),
+    })
+    expect(worldAttachment.response.status).toBe(201)
+    const worldAttachmentDownload = await fetch(`${origin}${worldAttachment.body.attachment.url}`)
+    expect(worldAttachmentDownload.status).toBe(200)
+    expect(await worldAttachmentDownload.text()).toBe(worldAttachmentText)
+    const chatWithWorldAttachment = await json(origin, `/api/worlds/${world.id}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        employeeIds: [employee.id],
+        prompt: '请阅读世界资料并确认收到',
+        attachments: [{ ...worldAttachment.body.attachment, name: '客户端不可信的文件名.txt' }],
+      }),
+    })
+    expect(chatWithWorldAttachment.response.status).toBe(200)
+    const attachmentMessages = await json(origin, `/api/sessions/${chatWithWorldAttachment.body.session.id}/messages`)
+    expect(attachmentMessages.body.items.find((item: { kind: string }) => item.kind === 'user')?.metadata.attachments).toContainEqual(
+      expect.objectContaining({ name: '世界资料.txt', mimeType: 'text/plain' }),
+    )
+
     const status = await json(origin, '/api/system/status')
     expect(status.response.status).toBe(200)
     expect(status.body).toMatchObject({ ok: true, database: { ok: true }, compatibility: { ok: true } })
@@ -710,6 +739,7 @@ describe('Cyber local server', () => {
     expect(doctor.body).toMatchObject({ ok: true, database: { integrity: ['ok'] } })
     const backup = await json(origin, '/api/system/backup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
     const exported = await json(origin, '/api/system/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    expect(backup.body).toMatchObject({ kind: 'backup', format: 'dsh-cyber-local-backup', bundle: true })
     expect((await stat(backup.body.output)).isFile()).toBe(true)
     expect((await stat(exported.body.output)).isFile()).toBe(true)
 

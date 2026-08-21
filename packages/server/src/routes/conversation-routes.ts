@@ -21,7 +21,9 @@ import { applyInstalledPromptTransforms } from '../installed-package-runtime.js'
 import type { RuntimeStreamHub } from '../streams/runtime-stream-hub.js'
 import type { WorldRuntimeService } from '../world-runtime-service.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
+import type { WorldFileService } from '../services/world-file-service.js'
 import type { WorldSettingsService } from '../services/world-settings-service.js'
+import { ServiceError } from '../services/service-error.js'
 
 export interface ConversationRoutesDependencies {
   store: SqliteStore
@@ -29,11 +31,12 @@ export interface ConversationRoutesDependencies {
   runtimeStreamHub: RuntimeStreamHub
   worldRuntime: WorldRuntimeService
   worldAccess: WorldAccessService
+  worldFiles: WorldFileService
   worldSettings: WorldSettingsService
 }
 
 export function registerConversationRoutes(router: Router, dependencies: ConversationRoutesDependencies): void {
-  const { store, orchestrator, runtimeStreamHub, worldRuntime, worldAccess, worldSettings } = dependencies
+  const { store, orchestrator, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings } = dependencies
 
   router.post(/^\/api\/worlds\/([^/]+)\/chat$/, async ({ request, response, params }) => {
     const world = store.getWorld(params[0]!)
@@ -41,7 +44,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     await worldAccess.assertUnlocked(world.id, request)
     const body = await readJson(request)
     const prompt = requiredString(body, 'prompt')
-    const attachments = validatedChatAttachments(body.attachments, store, world.workspaceId)
+    const attachments = await validatedChatAttachments(body.attachments, store, world.workspaceId, world.id, worldFiles)
     const attachmentPrompt = attachments.length === 0 ? prompt : attachmentAwarePrompt(prompt, attachments)
     const transformedPrompt = await applyInstalledPromptTransforms(store.listInstalledPackages(world.workspaceId), attachmentPrompt)
     const worldSettingsValue = await worldSettings.get(world.id)
@@ -114,27 +117,40 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
   })
 }
 
-function validatedChatAttachments(value: unknown, store: SqliteStore, workspaceId: string): ChatAttachment[] {
+async function validatedChatAttachments(value: unknown, store: SqliteStore, workspaceId: string, worldId: string, worldFiles: WorldFileService): Promise<ChatAttachment[]> {
   if (value === undefined) return []
   if (!Array.isArray(value) || value.length > 8) {
     throw new HttpError(422, 'invalid_attachments', 'Attachments must be an array with at most 8 items')
   }
-  return value.map((item) => {
+  return Promise.all(value.map(async (item) => {
     const input = record(item)
     if (input === undefined) throw new HttpError(422, 'invalid_attachment', 'Invalid attachment')
     const assetId = requiredString(input, 'assetId')
     const asset = store.getLocalAsset(assetId)
-    if (asset === undefined || asset.workspaceId !== workspaceId || asset.kind !== 'attachment') {
-      throw new HttpError(422, 'attachment_unavailable', 'Attachment does not belong to this workspace')
+    if (asset !== undefined) {
+      if (asset.workspaceId !== workspaceId || asset.kind !== 'attachment') {
+        throw new HttpError(422, 'attachment_unavailable', 'Attachment does not belong to this workspace')
+      }
+      return {
+        assetId: asset.id,
+        name: requiredString(input, 'name').slice(0, 180),
+        mimeType: asset.mimeType,
+        byteLength: asset.byteLength,
+        url: `/api/assets/${asset.id}`,
+      }
     }
-    return {
-      assetId: asset.id,
-      name: requiredString(input, 'name').slice(0, 180),
-      mimeType: asset.mimeType,
-      byteLength: asset.byteLength,
-      url: `/api/assets/${asset.id}`,
+    try {
+      return await worldFiles.getAttachment(worldId, assetId)
+    } catch (error) {
+      if (error instanceof ServiceError && error.code === 'asset_not_found') {
+        throw new HttpError(422, 'attachment_unavailable', 'Attachment does not belong to this workspace')
+      }
+      if (error instanceof ServiceError) {
+        throw new HttpError(422, 'invalid_attachment', '附件已损坏或无法读取，请重新上传')
+      }
+      throw error
     }
-  })
+  }))
 }
 
 function attachmentAwarePrompt(prompt: string, attachments: ChatAttachment[]): string {

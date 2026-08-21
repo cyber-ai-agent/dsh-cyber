@@ -14,12 +14,7 @@ import {
   type HarnessModelRoute,
 } from '@dsh-cyber/harness-adapter'
 import { ConversationOrchestrator } from '@dsh-cyber/orchestration'
-import {
-  LocalPackageCatalog,
-  LocalPackageRuntime,
-  PackageManager,
-  type PackageRuntimePort,
-} from '@dsh-cyber/package-runtime'
+import { LocalPackageCatalog, LocalPackageRuntime, PackageManager, type PackageRuntimePort } from '@dsh-cyber/package-runtime'
 import { SqliteStore } from '@dsh-cyber/persistence'
 
 import { dispatchHttpRequest } from './http/context.js'
@@ -40,13 +35,11 @@ import { registerWorldRuntimeRoutes } from './routes/world-runtime-routes.js'
 import { registerWorldRoutes } from './routes/world-routes.js'
 import { registerWorldSettingsRoutes } from './routes/world-settings-routes.js'
 import { AssetService } from './services/asset-service.js'
+import { CharacterProfileRuntime } from './services/character-profile-runtime.js'
 import { harnessModelRoute } from './services/harness-model-route.js'
 import { ModelCatalogService } from './services/model-catalog-service.js'
 import { ModelCredentialService } from './services/model-credential-service.js'
-import {
-  ModelInteractionService,
-  TurnInteractionLoggingRuntime,
-} from './services/model-interaction-service.js'
+import { ModelInteractionService, TurnInteractionLoggingRuntime } from './services/model-interaction-service.js'
 import { RuntimeUpdateService } from './services/runtime-update-service.js'
 import { WorldAccessService } from './services/world-access-service.js'
 import { WorldFileService } from './services/world-file-service.js'
@@ -72,12 +65,7 @@ export interface CyberServerOptions {
   bootstrapDefaultWorld?: boolean
 }
 
-export interface CyberServerAddress {
-  host: string
-  port: number
-  origin: string
-}
-
+export interface CyberServerAddress { host: string; port: number; origin: string }
 export interface CyberServer {
   readonly store: SqliteStore
   readonly orchestrator: ConversationOrchestrator
@@ -100,29 +88,18 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
 
   const runtimeStateRoot = join(stateRoot, 'runtime')
   const compatibility = await inspectHarnessCompatibility(join(runtimeStateRoot, 'harness-home'))
-  if (!compatibility.ok) {
-    throw new Error(`Harness compatibility check failed: ${compatibility.errors.join('; ')}`)
-  }
+  if (!compatibility.ok) throw new Error(`Harness compatibility check failed: ${compatibility.errors.join('; ')}`)
 
   const store = await SqliteStore.open(join(stateRoot, 'data', 'dsh-cyber.sqlite'))
   for (const blueprint of BUILTIN_BLUEPRINTS) store.saveBlueprint(blueprint)
   if (options.bootstrapDefaultWorld === true && store.listWorkspaces().length === 0) {
     const local = store.createWorkspace({ name: '本地实例' })
-    const world = store.createWorld({ workspaceId: local.id, name: '我的世界', templateId: 'cyber-company' })
-    store.recruitEmployee({
-      workspaceId: local.id,
-      worldId: world.id,
-      blueprintId: 'core.butler',
-      blueprintVersion: 1,
-      displayName: '管家',
-    })
+    const world = store.createWorld({ workspaceId: local.id, name: '我的世界', templateId: 'personal-world' })
+    store.recruitEmployee({ workspaceId: local.id, worldId: world.id, blueprintId: 'core.butler', blueprintVersion: 1, displayName: '管家' })
   }
+
   const worldRoots = new WorldRootService(stateRoot)
-  await Promise.all(
-    store.listWorkspaces().flatMap((workspace) =>
-      store.listWorlds(workspace.id, true).map((world) => worldRoots.ensure(world.id)),
-    ),
-  )
+  await Promise.all(store.listWorkspaces().flatMap((workspace) => store.listWorlds(workspace.id, true).map((world) => worldRoots.ensure(world.id))))
   const worldSettings = new WorldSettingsService(worldRoots)
   const worldAccess = new WorldAccessService(worldRoots)
   const credentials = await ModelCredentialService.open(stateRoot)
@@ -133,18 +110,13 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const baseRuntime = options.runtime ?? new HarnessModelRouter({
     stateRoot: runtimeStateRoot,
     ...(activeDshBinPath === undefined ? {} : { dshBinPath: activeDshBinPath }),
-    resolveRoute(request) {
-      return resolveHarnessRoute(store, request)
-    },
+    resolveRoute(request) { return resolveHarnessRoute(store, request) },
   })
-  // 无论内置路由还是外部注入的 runtime，统一包一层回合级日志采集；
-  // 观测边界：模型 API 请求在 DSH worker 内部，服务端记录整轮交互的成功/失败与耗时。
+  const profileRuntime = new CharacterProfileRuntime(baseRuntime, store)
   const runtime = new TurnInteractionLoggingRuntime({
-    inner: baseRuntime,
+    inner: profileRuntime,
     service: interactions,
-    resolveRoute(request) {
-      return resolveHarnessRoute(store, request)
-    },
+    resolveRoute(request) { return resolveHarnessRoute(store, request) },
   })
   const orchestrator = new ConversationOrchestrator({
     store,
@@ -157,15 +129,10 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     runtime: options.packageRuntime ?? new LocalPackageRuntime(join(stateRoot, 'packages')),
     validateStaged: validateStagedPackageEntrypoints,
   })
-  const packageCatalog = new LocalPackageCatalog(
-    options.marketplaceRoot ?? fileURLToPath(new URL('../../../marketplace', import.meta.url)),
-  )
+  const packageCatalog = new LocalPackageCatalog(options.marketplaceRoot ?? fileURLToPath(new URL('../../../marketplace', import.meta.url)))
   const runtimeStreamHub = new RuntimeStreamHub()
   const worldStreamHub = new WorldStreamHub()
-  const worldRuntime = new WorldRuntimeService({
-    store,
-    publish: (event) => worldStreamHub.publish(event),
-  })
+  const worldRuntime = new WorldRuntimeService({ store, publish: (event) => worldStreamHub.publish(event) })
   const runtimeUpdates = new RuntimeUpdateService(store, stateRoot, workspaceRoot)
   const assets = new AssetService(store, stateRoot)
   const worldFiles = new WorldFileService(worldRoots)
@@ -176,25 +143,17 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerCatalogRoutes(router, { store, packageCatalog })
   registerWorkspaceRoutes(router, { store })
   registerModelRoutes(router, { store, credentials, modelCatalog, interactions })
-  registerAssetRoutes(router, { store, assets })
+  registerAssetRoutes(router, { store, assets, access: worldAccess })
   registerWorldRoutes(router, { store, worldAccess })
   registerWorldSettingsRoutes(router, { store, settings: worldSettings, access: worldAccess })
   registerPackageRoutes(router, { store, packageManager, packageCatalog })
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
   registerModelInteractionRoutes(router, { store, interactions })
-  registerConversationRoutes(router, {
-    store,
-    orchestrator,
-    runtimeStreamHub,
-    worldRuntime,
-    worldAccess,
-    worldSettings,
-  })
+  registerConversationRoutes(router, { store, orchestrator, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings })
   registerEmployeeRoutes(router, { store, worldAccess })
 
   const httpServer = createServer((request, response) => {
-    void dispatchHttpRequest(router, webRoot, request, response)
-      .catch((error: unknown) => writeError(response, error))
+    void dispatchHttpRequest(router, webRoot, request, response).catch((error: unknown) => writeError(response, error))
   })
   httpServer.requestTimeout = 0
   httpServer.headersTimeout = 10_000
@@ -216,15 +175,11 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       if (startedAddress !== undefined) return startedAddress
       await listen(httpServer, port, host)
       const address = httpServer.address()
-      if (address === null || typeof address === 'string') {
-        throw new Error('Server did not expose a TCP address')
-      }
+      if (address === null || typeof address === 'string') throw new Error('Server did not expose a TCP address')
       startedAddress = { host, port: address.port, origin: `http://${host}:${address.port}` }
       return startedAddress
     },
-    address() {
-      return startedAddress
-    },
+    address() { return startedAddress },
     async close() {
       if (closed) return
       closed = true
@@ -239,48 +194,28 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   }
 }
 
-async function resolveActiveRuntime(
-  store: SqliteStore,
-  runtimeStateRoot: string,
-  stateRoot: string,
-): Promise<string | undefined> {
+async function resolveActiveRuntime(store: SqliteStore, runtimeStateRoot: string, stateRoot: string): Promise<string | undefined> {
   const activeRuntime = await readActiveHarnessRuntime(runtimeStateRoot)
   if (activeRuntime === undefined) return undefined
-  const activeReport = await inspectHarnessCandidate({
-    candidateRoot: activeRuntime.candidateRoot,
-    stateRoot: runtimeStateRoot,
-  })
+  const activeReport = await inspectHarnessCandidate({ candidateRoot: activeRuntime.candidateRoot, stateRoot: runtimeStateRoot })
   if (!activeReport.ok || activeReport.version !== activeRuntime.version) {
     store.close()
-    throw new Error(
-      `Activated Harness runtime is unavailable or incompatible. Run "dsh-cyber runtime-rollback --data-dir ${stateRoot}" to recover.`,
-    )
+    throw new Error(`Activated Harness runtime is unavailable or incompatible. Run "dsh-cyber runtime-rollback --data-dir ${stateRoot}" to recover.`)
   }
   return resolveCandidateDshBin(activeRuntime.candidateRoot)
 }
 
 function resolveHarnessRoute(store: SqliteStore, request: AgentTurnRequest): HarnessModelRoute | undefined {
-  const selectedProfileId = request.revision.modelPolicy.modelProfileId
-  const selectedProfile = typeof selectedProfileId === 'string'
-    ? store.getModelProfile(selectedProfileId)
-    : undefined
-  const profile = selectedProfile?.workspaceId === request.agent.workspaceId
-    ? selectedProfile
-    : store.resolveModelProfile(request.agent.workspaceId, request.agent.worldId, request.agent.id)
+  // 活动路由只有一个事实来源：角色 → 世界 → 全局 assignment。
+  // Revision 中旧的 modelPolicy 继续作为历史数据保留，但不再静默抢占当前 UI 路由。
+  const profile = store.resolveModelProfile(request.agent.workspaceId, request.agent.worldId, request.agent.id)
   return profile === undefined ? undefined : harnessModelRoute(profile, request.reasoningEffort)
 }
 
-
 function listen(server: Server, port: number, host: string): Promise<void> {
   return new Promise((resolvePromise, reject) => {
-    const onError = (error: Error) => {
-      server.off('listening', onListening)
-      reject(error)
-    }
-    const onListening = () => {
-      server.off('error', onError)
-      resolvePromise()
-    }
+    const onError = (error: Error) => { server.off('listening', onListening); reject(error) }
+    const onListening = () => { server.off('error', onError); resolvePromise() }
     server.once('error', onError)
     server.once('listening', onListening)
     server.listen(port, host)
@@ -288,7 +223,5 @@ function listen(server: Server, port: number, host: string): Promise<void> {
 }
 
 function closeServer(server: Server): Promise<void> {
-  return new Promise((resolvePromise, reject) => {
-    server.close((error) => (error === undefined ? resolvePromise() : reject(error)))
-  })
+  return new Promise((resolvePromise, reject) => { server.close((error) => (error === undefined ? resolvePromise() : reject(error))) })
 }

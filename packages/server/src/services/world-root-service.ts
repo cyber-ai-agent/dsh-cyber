@@ -1,4 +1,4 @@
-import { mkdir, realpath } from 'node:fs/promises'
+import { lstat, mkdir, realpath } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 
 export interface WorldRoot {
@@ -18,14 +18,47 @@ export class WorldRootService {
   }
 
   async ensure(worldId: string): Promise<WorldRoot> {
+    await mkdir(this.#root, { recursive: true })
+    const managedRoot = await realpath(this.#root)
+    const managedInfo = await lstat(this.#root)
+    if (managedInfo.isSymbolicLink() || !managedInfo.isDirectory()) throw new Error('Managed world directory is not a real directory')
     const safeId = encodeURIComponent(worldId)
     const rootPath = resolve(this.#root, safeId)
     if (rootPath !== this.#root && !rootPath.startsWith(`${this.#root}${sep}`)) throw new Error('World root escaped managed data directory')
+    await rejectSymlink(rootPath)
     const filesPath = join(rootPath, 'files')
     const assetsPath = join(rootPath, 'assets')
     const exportsPath = join(rootPath, 'exports')
     const cachePath = join(rootPath, 'cache')
     await Promise.all([filesPath, assetsPath, exportsPath, cachePath].map((path) => mkdir(path, { recursive: true })))
-    return { worldId, rootPath: await realpath(rootPath), filesPath: await realpath(filesPath), assetsPath: await realpath(assetsPath), exportsPath: await realpath(exportsPath), cachePath: await realpath(cachePath) }
+    const resolved = {
+      rootPath: await realpath(rootPath),
+      filesPath: await realpath(filesPath),
+      assetsPath: await realpath(assetsPath),
+      exportsPath: await realpath(exportsPath),
+      cachePath: await realpath(cachePath),
+    }
+    for (const path of Object.values(resolved)) {
+      if (!isPathWithin(managedRoot, path)) throw new Error('World path escaped managed data directory')
+      const info = await lstat(path)
+      if (info.isSymbolicLink() || !info.isDirectory()) throw new Error('World path is not a real directory')
+    }
+    return { worldId, ...resolved }
   }
+}
+
+async function rejectSymlink(path: string): Promise<void> {
+  try {
+    const info = await lstat(path)
+    if (info.isSymbolicLink()) throw new Error('World root cannot be a symbolic link')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+}
+
+function isPathWithin(parent: string, candidate: string): boolean {
+  const normalize = (value: string) => value.endsWith(sep) ? value.slice(0, -1) : value
+  const base = normalize(parent).toLowerCase()
+  const target = normalize(candidate).toLowerCase()
+  return target === base || target.startsWith(`${base}${sep}`)
 }

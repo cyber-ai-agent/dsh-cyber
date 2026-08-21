@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -8,6 +8,8 @@ import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { AssetService } from '../src/services/asset-service.js'
 import { ServiceError } from '../src/services/service-error.js'
+import { WorldFileService } from '../src/services/world-file-service.js'
+import { WorldRootService } from '../src/services/world-root-service.js'
 import { WorkspaceFileService } from '../src/services/workspace-file-service.js'
 
 const temporaryRoots: string[] = []
@@ -36,6 +38,50 @@ describe('AssetService', () => {
   })
 })
 
+describe('WorldFileService', () => {
+  it('stores attachments under the owning world and verifies them on read', async () => {
+    const stateRoot = await temporaryRoot()
+    const roots = new WorldRootService(stateRoot)
+    const files = new WorldFileService(roots)
+    const source = Buffer.from('private world note\n', 'utf8')
+
+    const attachment = await files.uploadAttachment('world-a', {
+      name: 'note.txt',
+      mimeType: 'text/plain',
+      dataBase64: source.toString('base64'),
+    })
+    expect(attachment.url).toContain('/api/worlds/world-a/assets/')
+
+    const worldRoot = await roots.ensure('world-a')
+    const entries = await readdir(join(worldRoot.assetsPath, 'attachments'))
+    expect(entries.some((entry) => entry === `${attachment.assetId}.txt`)).toBe(true)
+    expect(entries.some((entry) => entry === `${attachment.assetId}.json`)).toBe(true)
+
+    const restored = await files.readAttachment('world-a', attachment.assetId)
+    expect(restored.contentType).toBe('text/plain')
+    expect(restored.body.equals(source)).toBe(true)
+    await expect(files.getAttachment('world-a', attachment.assetId)).resolves.toMatchObject({
+      assetId: attachment.assetId,
+      name: 'note.txt',
+      mimeType: 'text/plain',
+      byteLength: source.byteLength,
+      url: `/api/worlds/world-a/assets/${attachment.assetId}`,
+    })
+    await expect(files.readAttachment('world-b', attachment.assetId)).rejects.toMatchObject<ServiceError>({
+      kind: 'not-found',
+      code: 'asset_not_found',
+    })
+    const metadataPath = join(worldRoot.assetsPath, 'attachments', `${attachment.assetId}.json`)
+    const metadata = JSON.parse(await readFile(metadataPath, 'utf8')) as { name: string; fileName: string }
+    expect(metadata.name).toBe('note.txt')
+    await writeFile(metadataPath, JSON.stringify({ ...metadata, fileName: '../outside.txt' }))
+    await expect(files.readAttachment('world-a', attachment.assetId)).rejects.toMatchObject<ServiceError>({
+      kind: 'conflict',
+      code: 'asset_metadata_invalid',
+    })
+  })
+})
+
 describe('WorkspaceFileService', () => {
   it('lists safe files while rejecting hidden and traversal paths', async () => {
     const root = await temporaryRoot()
@@ -53,12 +99,9 @@ describe('WorkspaceFileService', () => {
   })
 
   it('accepts a workspace root expressed as a Windows 8.3 short name', async () => {
-    // 在启用了 8.3 短名的 Windows 上，mkdtemp 返回的临时目录本身就是短名形式
-    // （如 C:\Users\ADMINI~1\...）；realpath 会把它展开为完整路径。根目录与
-    // 目标必须基于同一展开结果比较，否则路径逃逸校验会误报（Windows 专属回归）。
     const root = await temporaryRoot()
     const expandedRoot = await realpath(root)
-    if (expandedRoot === root) return // 平台未启用短名时无需断言
+    if (expandedRoot === root) return
     await mkdir(join(root, 'src'))
     await writeFile(join(root, 'src', 'main.ts'), 'export {}\n')
     const files = new WorkspaceFileService(root)

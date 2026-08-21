@@ -81,8 +81,9 @@ export class WorldRuntimeService {
       ...(previous === undefined ? {} : { previous }),
       now: this.#clock(),
     })
-    this.#store.saveWorldRuntimeSnapshot(result.snapshot)
-    return result.snapshot
+    const snapshot = this.#applyCharacterVisuals(result.snapshot)
+    this.#store.saveWorldRuntimeSnapshot(snapshot)
+    return snapshot
   }
 
   getThemeManifest(worldId: string): WorldThemeManifestV1 {
@@ -124,8 +125,23 @@ export class WorldRuntimeService {
       ...(previous === undefined ? {} : { previous }),
       now: this.#clock(),
     })
-    this.#store.saveWorldRuntimeSnapshot(result.snapshot)
-    return result
+    const snapshot = this.#applyCharacterVisuals(result.snapshot)
+    this.#store.saveWorldRuntimeSnapshot(snapshot)
+    return { ...result, snapshot }
+  }
+
+  #applyCharacterVisuals(snapshot: WorldRuntimeSnapshot): WorldRuntimeSnapshot {
+    return {
+      ...snapshot,
+      entities: snapshot.entities.map((entity) => {
+        if (entity.kind !== 'agent') return entity
+        const profile = this.#store.getEmployeeProfile(entity.id)
+        const configured = profile?.appearance['worldSkinIndex'] ?? profile?.appearance['avatarIndex']
+        if (typeof configured !== 'number' || !Number.isInteger(configured)) return entity
+        const rosterIndex = Math.min(7, Math.max(0, configured))
+        return { ...entity, visualState: { ...entity.visualState, rosterIndex } }
+      }),
+    }
   }
 
   async listThemes(worldId: string): Promise<{ activeThemeId: string; items: WorldThemeOption[] }> {

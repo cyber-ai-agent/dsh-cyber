@@ -15,6 +15,7 @@ import { cyberCompanyTheme, findPath, getAnchor, getScene, moonlitTavernTheme } 
 
 import { api } from '../../api.js'
 import type { CyberEmployee } from '../../types.js'
+import { worldExperience } from '../../world-experience.js'
 
 export interface WorldClientState {
   snapshot?: WorldRuntimeSnapshot
@@ -33,7 +34,7 @@ interface UseWorldClientInput {
 }
 
 export function useWorldClient({ demoMode, world, employees }: UseWorldClientInput) {
-  const manifest = world.templateId.includes('tavern') ? moonlitTavernTheme : cyberCompanyTheme
+  const manifest = worldExperience(world).kind === 'tavern' ? moonlitTavernTheme : cyberCompanyTheme
   const [state, setState] = useState<WorldClientState>(() => ({
     manifest,
     rendererIdentity: builtInRendererIdentity(manifest),

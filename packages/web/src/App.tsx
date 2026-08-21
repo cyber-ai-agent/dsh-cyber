@@ -608,31 +608,49 @@ export default function App() {
     }
   }, [dossiers, managingEmployee])
 
-  const updateEmployeeProfile = useCallback(async (input: { displayName: string; avatarIndex: number }) => {
+  const updateEmployeeProfile = useCallback(async (input: {
+    displayName: string
+    avatarIndex: number
+    background: string
+    personalityTraits: string[]
+    relationshipToUser: string
+    addressUserAs: string
+    selfReference: string
+  }) => {
     if (managingEmployee === undefined) return
     setSavingEmployee(true)
     setError(undefined)
     try {
       const previous = dossiers[managingEmployee.id]?.profile
+      const appearance = {
+        ...(previous?.appearance ?? {}),
+        avatarIndex: input.avatarIndex,
+        worldSkinIndex: input.avatarIndex,
+        relationshipToUser: input.relationshipToUser,
+        addressUserAs: input.addressUserAs,
+        selfReference: input.selfReference,
+      }
       let profile = previous
       if (demoMode) {
         profile = {
           employeeId: managingEmployee.id,
           revision: (previous?.revision ?? 0) + 1,
-          background: previous?.background ?? managingEmployee.role,
-          personalityTraits: previous?.personalityTraits ?? [],
-          appearance: { ...(previous?.appearance ?? {}), avatarIndex: input.avatarIndex },
-          reason: '更新角色名片与形象',
+          background: input.background,
+          personalityTraits: input.personalityTraits,
+          appearance,
+          reason: '更新角色资料与关系设定',
           createdAt: new Date().toISOString(),
           ...(previous?.birthday === undefined ? {} : { birthday: previous.birthday }),
         }
       } else {
-        const result = await api<{ profile: EmployeeDossier['profile'] }>(`/api/employees/${managingEmployee.id}/profile`, {
+        const result = await api<{ profile: EmployeeDossier['profile'] }>('/api/employees/' + managingEmployee.id + '/profile', {
           method: 'PUT',
           body: JSON.stringify({
             displayName: input.displayName,
-            appearance: { ...(previous?.appearance ?? {}), avatarIndex: input.avatarIndex },
-            reason: '更新角色名片与形象',
+            background: input.background,
+            personalityTraits: input.personalityTraits,
+            appearance,
+            reason: '更新角色资料与关系设定',
           }),
         })
         profile = result.profile
@@ -647,8 +665,9 @@ export default function App() {
           ? current
           : { ...current, [managingEmployee.id]: { ...dossier, employee: { ...dossier.employee, displayName: input.displayName, updatedAt }, ...(profile === undefined ? {} : { profile }) } }
       })
+      setWorldRuntimeRevision((value) => value + 1)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '角色名片保存失败')
+      setError(cause instanceof Error ? cause.message : '角色资料保存失败')
     } finally {
       setSavingEmployee(false)
     }
@@ -740,7 +759,7 @@ export default function App() {
           employee.id,
           'employee',
           'assistant',
-          activeWorld.templateId.includes('tavern')
+          worldExperience(activeWorld).kind === 'tavern'
             ? tavernDemoReply(employee, prompt)
             : `${employee.displayName}收到。我会以${employee.role}的职责独立处理“${compactPrompt(prompt)}”，完成后给出证据、产物和下一步。`,
         ))
@@ -943,7 +962,13 @@ export default function App() {
     if (demoMode) {
       await delay(350)
       if (action === 'backup' || action === 'export') {
-        return { ok: true, kind: action, output: `演示模式/${action === 'backup' ? 'dsh-cyber-demo.sqlite' : 'dsh-cyber-demo.json'}`, createdAt: new Date().toISOString() }
+        return {
+          ok: true,
+          kind: action,
+          output: `演示模式/${action === 'backup' ? 'dsh-cyber-demo.dshbackup' : 'dsh-cyber-demo.json'}`,
+          ...(action === 'backup' ? { format: 'dsh-cyber-local-backup', bundle: true } : {}),
+          createdAt: new Date().toISOString(),
+        }
       }
       if (action === 'verify-update') {
         return { ok: true, version: '0.1.0-rc.8', supported: true, contractId: 'dsh-session-events-v1', checks: { packageVersions: true, isolatedProfile: true }, transaction: demoRuntimeTransaction('verified') }
@@ -1073,7 +1098,7 @@ export default function App() {
         <nav aria-label="全局功能">
           <button type="button" onClick={() => void openPackageMarket('theme')}><Buildings size={16} />主题市场</button>
           <button type="button" onClick={() => void openPackageMarket('plugin')}><Cube size={16} />插件市场</button>
-          <button type="button" onClick={() => void openPackageMarket('talent')}><Storefront size={16} />人才市场</button>
+          <button type="button" onClick={() => void openPackageMarket('talent')}><Storefront size={16} />角色市场</button>
           <button type="button" onClick={() => { setSettingsSection('runtime'); setSettingsOpen(true) }}><Pulse size={16} /><span>运行时健康</span><i className="health-indicator" />良好</button>
           <button type="button" onClick={() => { setSettingsSection('appearance'); setSettingsOpen(true) }}><GearSix size={17} />设置</button>
         </nav>
@@ -1145,6 +1170,11 @@ export default function App() {
                     const employee = employees.find((item) => item.id === employeeId)
                     if (employee !== undefined) directEmployee(employee)
                   }}
+                  onStartGroup={(employeeIds) => {
+                    const selected = employees.filter((employee) => employeeIds.includes(employee.id))
+                    if (selected.length < 2) return
+                    createGroupIntent({ employeeIds: selected.map((employee) => employee.id), title: selected.map((employee) => employee.displayName).join('、') })
+                  }}
                   onRecruit={() => void openRecruitment()}
                 />
               ),
@@ -1192,6 +1222,7 @@ export default function App() {
       {recruitmentOpen ? (
         <RecruitmentDialog
           blueprints={blueprints}
+          employees={employees}
           world={activeWorld}
           loading={catalogLoading}
           recruiting={recruiting}
@@ -1298,7 +1329,7 @@ function WorldSwitcher({
               onClick={() => { onSelect(world); close() }}
             >
               <Buildings size={17} />
-              <span><strong>{world.name}</strong><small>{world.templateId.includes('tavern') ? '叙事角色世界' : '团队协作世界'}</small></span>
+              <span><strong>{world.name}</strong><small>{worldExperience(world).kind === 'tavern' ? '叙事角色世界' : '团队协作世界'}</small></span>
               {world.id === activeWorld.id ? <Check size={16} weight="bold" /> : null}
             </button>
           ))}
@@ -1363,7 +1394,7 @@ function stableAvatar(id: string, fallback: number): number {
 
 function statusActivity(employee: EmployeeInstance): string {
   if (employee.status === 'working') return `正在执行${employee.role}任务`
-  if (employee.status === 'blocked') return '等待依赖或老板推进'
+  if (employee.status === 'blocked') return '等待依赖或进一步处理'
   if (employee.status === 'waiting') return '等待下一步处理'
   return '可接新任务'
 }

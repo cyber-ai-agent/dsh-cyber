@@ -17,7 +17,7 @@ export const cyberCompanyTheme: WorldThemeManifestV1 = {
   renderer: 'pixi-2d',
   terminology: {
     world: '公司',
-    participant: '员工',
+    participant: '角色',
     session: '协作频道',
     milestone: '成长事迹',
   },
@@ -123,7 +123,7 @@ export const cyberCompanyTheme: WorldThemeManifestV1 = {
           bounds: { x: 505, y: 180, width: 380, height: 230 },
           approachAnchorIds: ['work-architecture'],
           actions: [
-            { id: 'assign-task', label: '下达任务' },
+            { id: 'assign-task', label: '安排任务' },
             { id: 'inspect', label: '查看当前执行' },
           ],
           zIndex: 150,
@@ -155,7 +155,7 @@ export const cyberCompanyTheme: WorldThemeManifestV1 = {
           displayName: '成长里程碑墙',
           bounds: { x: 620, y: 500, width: 200, height: 170 },
           approachAnchorIds: ['milestone-wall'],
-          actions: [{ id: 'inspect', label: '查看团队成长' }],
+          actions: [{ id: 'inspect', label: '查看角色成长' }],
           zIndex: 140,
         },
       ],
