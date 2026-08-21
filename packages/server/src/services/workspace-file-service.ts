@@ -27,9 +27,17 @@ export interface WorkspaceFilePreview {
 
 export class WorkspaceFileService {
   readonly #workspaceRoot: string
+  #resolvedWorkspaceRoot: Promise<string> | undefined
 
   constructor(workspaceRoot: string) {
     this.#workspaceRoot = workspaceRoot
+  }
+
+  #resolveWorkspaceRoot(): Promise<string> {
+    // realpath 会把 Windows 8.3 短名（如 C:\Users\ADMINI~1\...）展开为完整路径；
+    // target 侧同样经过 realpath，两侧必须基于同一展开结果比较，否则前缀比对会误判"逃逸"。
+    this.#resolvedWorkspaceRoot ??= realpath(this.#workspaceRoot).catch(() => resolve(this.#workspaceRoot))
+    return this.#resolvedWorkspaceRoot
   }
 
   async list(requestedPath: string): Promise<WorkspaceFileList> {
@@ -97,10 +105,11 @@ export class WorkspaceFileService {
       if (isMissingFile(error)) throw new ServiceError('not-found', 'workspace_entry_not_found', 'Workspace entry not found')
       throw error
     }
-    if (!pathIsInside(this.#workspaceRoot, absolutePath)) {
+    const workspaceRoot = await this.#resolveWorkspaceRoot()
+    if (!pathIsInside(workspaceRoot, absolutePath)) {
       throw new ServiceError('forbidden', 'workspace_path_rejected', 'Workspace path escapes the configured root')
     }
-    const relativePath = relative(this.#workspaceRoot, absolutePath).split(sep).join('/')
+    const relativePath = relative(workspaceRoot, absolutePath).split(sep).join('/')
     if (workspaceEntryIsHidden(relativePath)) {
       throw new ServiceError('forbidden', 'workspace_path_rejected', 'Workspace path is not accessible')
     }
