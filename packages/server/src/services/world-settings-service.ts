@@ -3,27 +3,20 @@ import { open, readFile, rename } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import type { EmployeeInstance, ReasoningEffort, WorldSettings } from '@dsh-cyber/contracts'
-
 import type { WorldRootService } from './world-root-service.js'
 
-const reasoning = new Set<ReasoningEffort>([
-  'auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max',
-])
+const reasoning = new Set<ReasoningEffort>(['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+const COLOR = /^#[0-9a-f]{6}$/i
 
 export class WorldSettingsService {
   readonly #roots: WorldRootService
 
-  constructor(roots: WorldRootService) {
-    this.#roots = roots
-  }
+  constructor(roots: WorldRootService) { this.#roots = roots }
 
   async get(worldId: string): Promise<WorldSettings> {
     const root = await this.#roots.ensure(worldId)
     try {
-      return normalize(
-        worldId,
-        JSON.parse(await readFile(join(root.rootPath, 'settings.json'), 'utf8')) as Partial<WorldSettings>,
-      )
+      return normalize(worldId, JSON.parse(await readFile(join(root.rootPath, 'settings.json'), 'utf8')) as Partial<WorldSettings>)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       return defaults(worldId)
@@ -46,11 +39,7 @@ export class WorldSettingsService {
     return next
   }
 
-  async composeRuntimePrompt(
-    worldId: string,
-    character: EmployeeInstance,
-    prompt: string,
-  ): Promise<string> {
+  async composeRuntimePrompt(worldId: string, character: EmployeeInstance, prompt: string): Promise<string> {
     const settings = await this.get(worldId)
     return `${worldHeader(settings)}\n${characterIdentity(character)}\n\n[用户请求]\n${prompt}`
   }
@@ -62,14 +51,13 @@ export class WorldSettingsService {
 }
 
 function worldHeader(settings: WorldSettings): string {
-  const worldContext = [
+  return [
     '[当前世界设定]',
     settings.lore ? `世界观：${settings.lore}` : '',
     settings.scenario ? `当前场景：${settings.scenario}` : '',
     `用户在这个世界中的身份：${settings.userIdentity.displayName}（${settings.userIdentity.worldRole}），请称呼用户为“${settings.userIdentity.addressAs}”。`,
     '当前世界与其他世界的数据、文件、记忆相互隔离。',
-  ].filter(Boolean)
-  return worldContext.join('\n')
+  ].filter(Boolean).join('\n')
 }
 
 function characterIdentity(character: EmployeeInstance): string {
@@ -82,30 +70,12 @@ function defaults(worldId: string): WorldSettings {
     worldId,
     lore: '',
     scenario: '',
-    userIdentity: {
-      displayName: '你',
-      worldRole: '世界创建者',
-      addressAs: '你',
-    },
-    terminology: {
-      characterSingular: '角色',
-      characterPlural: '角色',
-      addCharacterVerb: '添加角色',
-      groupConversation: '群组会话',
-      assignment: '任务',
-    },
+    userIdentity: { displayName: '你', worldRole: '世界创建者', addressAs: '你' },
+    terminology: { characterSingular: '角色', characterPlural: '角色', addCharacterVerb: '添加角色', groupConversation: '群组会话', assignment: '任务' },
     appearance: {
-      accentColor: '#d7a52a',
-      pageBackground: '#080d10',
-      panelBackground: '#0d1419',
-      ownerBubbleColor: '#263629',
-      characterBubbleColor: '#141c22',
-      textColor: '#edf2f4',
-      mutedTextColor: '#84919a',
-      panelRadius: 10,
-      bubbleRadius: 8,
-      buttonRadius: 7,
-      fontScale: 1,
+      accentColor: '#d7a52a', pageBackground: '#080d10', panelBackground: '#0d1419',
+      ownerBubbleColor: '#263629', characterBubbleColor: '#141c22', textColor: '#edf2f4', mutedTextColor: '#84919a',
+      panelRadius: 10, bubbleRadius: 8, buttonRadius: 7, fontScale: 1,
     },
     model: { reasoningEffort: 'auto' },
     updatedAt: new Date().toISOString(),
@@ -114,22 +84,66 @@ function defaults(worldId: string): WorldSettings {
 
 function normalize(worldId: string, value: Partial<WorldSettings>): WorldSettings {
   const base = defaults(worldId)
-  const next = {
+  const raw = {
     ...base,
     ...value,
-    schemaVersion: 1 as const,
-    worldId,
     userIdentity: { ...base.userIdentity, ...(value.userIdentity ?? {}) },
     terminology: { ...base.terminology, ...(value.terminology ?? {}) },
     appearance: { ...base.appearance, ...(value.appearance ?? {}) },
     model: { ...base.model, ...(value.model ?? {}) },
+  }
+  const next: WorldSettings = {
+    ...raw,
+    schemaVersion: 1,
+    worldId,
+    lore: cleanText(raw.lore, 20_000),
+    scenario: cleanText(raw.scenario, 8_000),
+    userIdentity: {
+      displayName: cleanText(raw.userIdentity.displayName, 80) || base.userIdentity.displayName,
+      worldRole: cleanText(raw.userIdentity.worldRole, 120) || base.userIdentity.worldRole,
+      addressAs: cleanText(raw.userIdentity.addressAs, 80) || base.userIdentity.addressAs,
+    },
+    terminology: {
+      characterSingular: cleanText(raw.terminology.characterSingular, 32) || base.terminology.characterSingular,
+      characterPlural: cleanText(raw.terminology.characterPlural, 32) || base.terminology.characterPlural,
+      addCharacterVerb: cleanText(raw.terminology.addCharacterVerb, 32) || base.terminology.addCharacterVerb,
+      groupConversation: cleanText(raw.terminology.groupConversation, 32) || base.terminology.groupConversation,
+      assignment: cleanText(raw.terminology.assignment, 32) || base.terminology.assignment,
+    },
+    appearance: {
+      accentColor: color(raw.appearance.accentColor, base.appearance.accentColor),
+      pageBackground: color(raw.appearance.pageBackground, base.appearance.pageBackground),
+      panelBackground: color(raw.appearance.panelBackground, base.appearance.panelBackground),
+      ownerBubbleColor: color(raw.appearance.ownerBubbleColor, base.appearance.ownerBubbleColor),
+      characterBubbleColor: color(raw.appearance.characterBubbleColor, base.appearance.characterBubbleColor),
+      textColor: color(raw.appearance.textColor, base.appearance.textColor),
+      mutedTextColor: color(raw.appearance.mutedTextColor, base.appearance.mutedTextColor),
+      panelRadius: clampNumber(raw.appearance.panelRadius, 0, 40, base.appearance.panelRadius),
+      bubbleRadius: clampNumber(raw.appearance.bubbleRadius, 0, 40, base.appearance.bubbleRadius),
+      buttonRadius: clampNumber(raw.appearance.buttonRadius, 0, 30, base.appearance.buttonRadius),
+      fontScale: clampNumber(raw.appearance.fontScale, 0.8, 1.4, base.appearance.fontScale),
+    },
+    model: {
+      ...(typeof raw.model.defaultModelProfileId === 'string' && raw.model.defaultModelProfileId.trim()
+        ? { defaultModelProfileId: raw.model.defaultModelProfileId.trim().slice(0, 160) }
+        : {}),
+      reasoningEffort: reasoning.has(raw.model.reasoningEffort) ? raw.model.reasoningEffort : 'auto',
+    },
     updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : new Date().toISOString(),
   }
-  if (!reasoning.has(next.model.reasoningEffort)) next.model.reasoningEffort = 'auto'
-  for (const key of ['panelRadius', 'bubbleRadius', 'buttonRadius', 'fontScale'] as const) {
-    if (!Number.isFinite(next.appearance[key])) next.appearance[key] = base.appearance[key]
-  }
   return next
+}
+
+function cleanText(value: unknown, max: number): string {
+  return typeof value === 'string' ? value.replaceAll('\0', '').trim().slice(0, max) : ''
+}
+
+function color(value: unknown, fallback: string): string {
+  return typeof value === 'string' && COLOR.test(value) ? value.toLowerCase() : fallback
+}
+
+function clampNumber(value: unknown, minimum: number, maximum: number, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.min(maximum, Math.max(minimum, value)) : fallback
 }
 
 async function atomic(path: string, content: string): Promise<void> {
