@@ -104,10 +104,20 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   if (options.bootstrapDefaultWorld === true && store.listWorkspaces().length === 0) {
     const local = store.createWorkspace({ name: '本地实例' })
     const world = store.createWorld({ workspaceId: local.id, name: '我的世界', templateId: 'personal-world' })
-    store.recruitEmployee({ workspaceId: local.id, worldId: world.id, blueprintId: 'core.butler', blueprintVersion: 1, displayName: '管家' })
+    store.recruitEmployee({
+      workspaceId: local.id,
+      worldId: world.id,
+      blueprintId: 'core.butler',
+      blueprintVersion: 1,
+      displayName: '管家',
+    })
   }
   const worldRoots = new WorldRootService(stateRoot)
-  await Promise.all(store.listWorkspaces().flatMap((workspace) => store.listWorlds(workspace.id, true).map((world) => worldRoots.ensure(world.id))))
+  await Promise.all(
+    store.listWorkspaces().flatMap((workspace) =>
+      store.listWorlds(workspace.id, true).map((world) => worldRoots.ensure(world.id)),
+    ),
+  )
   const worldSettings = new WorldSettingsService(worldRoots)
   const worldAccess = new WorldAccessService(worldRoots)
   const credentials = await ModelCredentialService.open(stateRoot)
@@ -128,7 +138,12 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       return profile === undefined ? undefined : harnessModelRoute(profile, request.reasoningEffort)
     },
   })
-  const orchestrator = new ConversationOrchestrator({ store, runtime, workspacePath: workspaceRoot, resolveWorldRoot: async (worldId) => (await worldRoots.ensure(worldId)).filesPath })
+  const orchestrator = new ConversationOrchestrator({
+    store,
+    runtime,
+    workspacePath: workspaceRoot,
+    resolveWorldRoot: async (worldId) => (await worldRoots.ensure(worldId)).filesPath,
+  })
   const packageManager = new PackageManager({
     store,
     runtime: options.packageRuntime ?? new LocalPackageRuntime(join(stateRoot, 'packages')),
@@ -139,7 +154,10 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   )
   const runtimeStreamHub = new RuntimeStreamHub()
   const worldStreamHub = new WorldStreamHub()
-  const worldRuntime = new WorldRuntimeService({ store, publish: (event) => worldStreamHub.publish(event) })
+  const worldRuntime = new WorldRuntimeService({
+    store,
+    publish: (event) => worldStreamHub.publish(event),
+  })
   const runtimeUpdates = new RuntimeUpdateService(store, stateRoot, workspaceRoot)
   const assets = new AssetService(store, stateRoot)
   const worldFiles = new WorldFileService(worldRoots)
@@ -154,9 +172,16 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerWorldRoutes(router, { store, worldAccess })
   registerWorldSettingsRoutes(router, { store, settings: worldSettings, access: worldAccess })
   registerPackageRoutes(router, { store, packageManager, packageCatalog })
-  registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub })
-  registerConversationRoutes(router, { store, orchestrator, runtimeStreamHub, worldRuntime, worldAccess, worldSettings })
-  registerEmployeeRoutes(router, { store })
+  registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
+  registerConversationRoutes(router, {
+    store,
+    orchestrator,
+    runtimeStreamHub,
+    worldRuntime,
+    worldAccess,
+    worldSettings,
+  })
+  registerEmployeeRoutes(router, { store, worldAccess })
 
   const httpServer = createServer((request, response) => {
     void dispatchHttpRequest(router, webRoot, request, response)
@@ -225,7 +250,10 @@ async function resolveActiveRuntime(
   return resolveCandidateDshBin(activeRuntime.candidateRoot)
 }
 
-function harnessModelRoute(profile: ModelProfile, reasoningEffort?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'): HarnessModelRoute {
+function harnessModelRoute(
+  profile: ModelProfile,
+  reasoningEffort?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max',
+): HarnessModelRoute {
   const contextWindow = optionalPositiveInteger(profile.settings.contextWindow)
   const maxTokens = optionalPositiveInteger(profile.settings.maxTokens)
   return {
@@ -238,8 +266,24 @@ function harnessModelRoute(profile: ModelProfile, reasoningEffort?: 'off' | 'min
     ...(contextWindow === undefined ? {} : { contextWindow }),
     ...(maxTokens === undefined ? {} : { maxTokens }),
     ...(reasoningEffort === undefined ? {} : { reasoning: reasoningEffort }),
-    ...(profile.settings.reasoningEfforts === false ? { reasoningEfforts: false } : typeof profile.settings.reasoningEfforts === 'object' && profile.settings.reasoningEfforts !== null ? { reasoningEfforts: profile.settings.reasoningEfforts as Exclude<HarnessModelRoute['reasoningEfforts'], undefined> } : {}),
-    ...(typeof profile.settings.thinkingFormat === 'string' ? { compat: { thinkingFormat: profile.settings.thinkingFormat, supportsReasoningEffort: true } } : {}),
+    ...(profile.settings.reasoningEfforts === false
+      ? { reasoningEfforts: false }
+      : typeof profile.settings.reasoningEfforts === 'object' && profile.settings.reasoningEfforts !== null
+        ? {
+            reasoningEfforts: profile.settings.reasoningEfforts as Exclude<
+              HarnessModelRoute['reasoningEfforts'],
+              undefined
+            >,
+          }
+        : {}),
+    ...(typeof profile.settings.thinkingFormat === 'string'
+      ? {
+          compat: {
+            thinkingFormat: profile.settings.thinkingFormat,
+            supportsReasoningEffort: true,
+          },
+        }
+      : {}),
   }
 }
 
