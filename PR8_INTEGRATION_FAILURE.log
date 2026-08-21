@@ -1,0 +1,468 @@
+== fetch ==
+From https://github.com/cyber-ai-agent/dsh-cyber
+ * [new ref]         refs/pull/8/head -> origin/pr8
+== merge ==
+Auto-merging e2e/workbench.spec.ts
+Auto-merging packages/contracts/src/index.ts
+Auto-merging packages/persistence/src/sqlite-store.ts
+Auto-merging packages/server/src/server.ts
+CONFLICT (content): Merge conflict in packages/server/src/server.ts
+Auto-merging packages/web/src/App.tsx
+CONFLICT (content): Merge conflict in packages/web/src/App.tsx
+Auto-merging packages/web/src/components/ChatWorkbench.tsx
+CONFLICT (content): Merge conflict in packages/web/src/components/ChatWorkbench.tsx
+Auto-merging packages/web/src/components/SettingsDialog.tsx
+Auto-merging pnpm-lock.yaml
+CONFLICT (content): Merge conflict in pnpm-lock.yaml
+Automatic merge failed; fix conflicts and then commit the result.
+packages/server/src/server.ts
+packages/web/src/App.tsx
+packages/web/src/components/ChatWorkbench.tsx
+pnpm-lock.yaml
+== semantic resolution ==
+Updated 1 path from the index
+PR 8 semantic conflicts resolved.
+== lockfile ==
+Scope: all 12 workspace projects
+? Verifying lockfile against supply-chain policies (620 entries)...
+Progress: resolved 1, reused 0, downloaded 0, added 0
+Progress: resolved 23, reused 17, downloaded 6, added 0
+Progress: resolved 26, reused 20, downloaded 6, added 0
+Progress: resolved 30, reused 23, downloaded 6, added 0
+✓ Lockfile passes supply-chain policies (620 entries in 4.2s)
+Progress: resolved 163, reused 130, downloaded 28, added 0
+Progress: resolved 386, reused 261, downloaded 69, added 0
+Progress: resolved 679, reused 468, downloaded 104, added 0
+[WARN] 1 deprecated subdependencies found: node-domexception@1.0.0
+Progress: resolved 724, reused 513, downloaded 106, added 0
+Packages: +617
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Progress: resolved 724, reused 513, downloaded 106, added 617, done
+.../.pnpm/koffi@3.1.5/node_modules/koffi install$ node ./cnoke.cjs -P . -D src/koffi --prebuild --release
+.../node_modules/protobufjs postinstall$ node scripts/postinstall
+.../node_modules/node-pty install$ node scripts/prebuild.js || node-gyp rebuild
+.../esbuild@0.28.2/node_modules/esbuild postinstall$ node install.js
+.../node_modules/protobufjs postinstall: Done
+.../node_modules/node-pty install: [32m> Checking prebuilds...[0m
+.../node_modules/node-pty install: Done
+.../node_modules/node-pty postinstall$ node scripts/post-install.js
+.../.pnpm/koffi@3.1.5/node_modules/koffi install: Done
+.../esbuild@0.28.2/node_modules/esbuild postinstall: Done
+.../node_modules/node-pty postinstall: [32m> Cleaning release folder...[0m
+.../node_modules/node-pty postinstall: [32m> Moving conpty.dll...[0m
+.../node_modules/node-pty postinstall:   SKIPPED (not Windows)
+.../node_modules/node-pty postinstall: Done
+.../node_modules/@google/genai preinstall$ echo 'preinstall: no-op'
+.../node_modules/@google/genai preinstall: preinstall: no-op
+.../node_modules/@google/genai preinstall: Done
+.../@deepseek-ai/dsh-subprocess-local postinstall$ node scripts/ensure-spawn-helper.mjs
+.../@deepseek-ai/dsh-subprocess-local postinstall: Done
+[WARN] Issues with peer dependencies found. Run "pnpm peers check" to list them.
+
+devDependencies:
++ @playwright/test 1.55.0 (1.62.1 is available)
++ @types/node 22.20.0 (26.2.0 is available)
++ tsx 4.22.4 (4.23.12 is available)
++ typescript 6.0.3 (7.0.2 is available)
++ vitest 4.1.8 (4.1.11 is available)
+
+Done in 22.7s using pnpm v11.7.0
+== typecheck ==
+$ tsc -b --pretty false && pnpm --filter @dsh-cyber/web typecheck
+$ tsc -b --pretty false
+== tests ==
+$ pnpm run build && vitest run
+$ tsc -b && pnpm --filter @dsh-cyber/web build
+$ tsc -b && vite build
+[36mvite v8.2.1 [32mbuilding client environment for production...[36m[39m
+[2Ktransforming...✓ 5551 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                     1.19 kB │ gzip:   0.47 kB
+dist/assets/index-_99BJF5n.css                     99.59 kB │ gzip:  17.72 kB
+dist/assets/webworkerAll-Bf5jG4XK.js                0.07 kB │ gzip:   0.08 kB
+dist/assets/getTextureBatchBindGroup-DKcXtAqj.js    0.40 kB │ gzip:   0.31 kB │ map:     1.82 kB
+dist/assets/CanvasPool-nl3h59PE.js                  0.80 kB │ gzip:   0.46 kB │ map:     3.55 kB
+dist/assets/canvasUtils-DhssYTZL.js                 6.07 kB │ gzip:   2.07 kB │ map:    22.03 kB
+dist/assets/BufferResource-BNgndzD8.js             10.57 kB │ gzip:   2.82 kB │ map:    25.97 kB
+dist/assets/init-Bb36MuzL.js                       15.30 kB │ gzip:   4.81 kB │ map:    53.69 kB
+dist/assets/getPo2TextureFromSource-8n9yLb25.js    25.11 kB │ gzip:   8.69 kB │ map:   108.25 kB
+dist/assets/browserAll-CGgrHz7g.js                 42.65 kB │ gzip:  11.14 kB │ map:   157.28 kB
+dist/assets/RenderTargetSystem-LFwj_NTp.js         71.12 kB │ gzip:  20.23 kB │ map:   265.05 kB
+dist/assets/CanvasRenderer-BYSdj_46.js             87.44 kB │ gzip:  27.48 kB │ map:   465.54 kB
+dist/assets/Geometry-BEzu8CbX.js                  101.68 kB │ gzip:  31.17 kB │ map:   503.63 kB
+dist/assets/index-D-0lUBD9.js                     906.81 kB │ gzip: 256.60 kB │ map: 3,280.64 kB
+
+[32m✓ built in 1.23s[39m
+[33m[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.[39m
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.8 [39m[90m/home/runner/work/dsh-cyber/dsh-cyber[39m
+
+(node:2588) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:2594) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:2587) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m packages/package-runtime/tests/package-manager.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 148[2mms[22m[39m
+ [32m✓[39m packages/persistence/tests/sqlite-store.test.ts [2m([22m[2m15 tests[22m[2m)[22m[33m 369[2mms[22m[39m
+ [32m✓[39m packages/server/tests/installed-package-runtime.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 61[2mms[22m[39m
+(node:2623) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:2638) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m packages/orchestration/tests/conversation-orchestrator.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 169[2mms[22m[39m
+ [32m✓[39m packages/server/tests/model-interaction-routes.test.ts [2m([22m[2m7 tests[22m[2m)[22m[33m 334[2mms[22m[39m
+ [32m✓[39m packages/harness-adapter/tests/adapter.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 34[2mms[22m[39m
+ [32m✓[39m packages/world-runtime/tests/world-runtime.test.ts [2m([22m[2m20 tests[22m[2m)[22m[32m 82[2mms[22m[39m
+ [32m✓[39m packages/server/tests/http-infrastructure.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m packages/server/tests/marketplace-conformance.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 87[2mms[22m[39m
+(node:2711) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m packages/cli/tests/cli.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 219[2mms[22m[39m
+ [32m✓[39m packages/server/tests/model-services.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 94[2mms[22m[39m
+ [32m✓[39m packages/server/tests/server.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 2939[2mms[22m[39m
+     [33m[2m✓[22m[39m searches verified market packages and activates installed plugin and talent entrypoints [33m 1747[2mms[22m[39m
+ [32m✓[39m packages/server/tests/application-services.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 21[2mms[22m[39m
+ [32m✓[39m packages/server/tests/server-architecture.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 27[2mms[22m[39m
+ [32m✓[39m packages/server/tests/world-theme-package.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m packages/web/tests/world-runtime-client.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m packages/web/tests/mention-plugin.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m packages/server/tests/employee-blueprint-manifest.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m packages/server/tests/world-foundation-v3.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 19[2mms[22m[39m
+ [32m✓[39m packages/harness-adapter/tests/rc8-reasoning.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m packages/harness-adapter/tests/local-harness.integration.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 3326[2mms[22m[39m
+     [33m[2m✓[22m[39m runs and resumes one persistent employee session without cloud access [33m 3324[2mms[22m[39m
+ [32m✓[39m packages/web/tests/actor-animation-controller.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 32[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m22 passed[39m[22m[90m (22)[39m
+[2m      Tests [22m [1m[32m125 passed[39m[22m[90m (125)[39m
+[2m   Start at [22m 09:42:32
+[2m   Duration [22m 5.39s[2m (transform 2.01s, setup 0ms, import 3.97s, tests 8.01s, environment 4ms)[22m
+
+== chromium ==
+Installing dependencies...
+Switching to root user to install dependencies...
+Get:1 file:/etc/apt/apt-mirrors.txt Mirrorlist [144 B]
+Hit:2 http://azure.archive.ubuntu.com/ubuntu noble InRelease
+Hit:6 https://packages.microsoft.com/repos/azure-cli noble InRelease
+Get:7 https://packages.microsoft.com/ubuntu/24.04/prod noble InRelease [3600 B]
+Get:3 http://azure.archive.ubuntu.com/ubuntu noble-updates InRelease [126 kB]
+Get:4 http://azure.archive.ubuntu.com/ubuntu noble-backports InRelease [126 kB]
+Get:5 http://azure.archive.ubuntu.com/ubuntu noble-security InRelease [126 kB]
+Get:8 https://dl.google.com/linux/chrome-stable/deb stable InRelease [2548 B]
+Get:9 https://packages.microsoft.com/ubuntu/24.04/prod noble/main arm64 Packages [350 kB]
+Get:10 https://packages.microsoft.com/ubuntu/24.04/prod noble/main amd64 Packages [396 kB]
+Get:11 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 Packages [1227 kB]
+Get:12 http://azure.archive.ubuntu.com/ubuntu noble-updates/main Translation-en [286 kB]
+Get:13 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 Components [181 kB]
+Get:14 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 Packages [1687 kB]
+Get:15 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe Translation-en [337 kB]
+Get:16 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 Components [388 kB]
+Get:17 http://azure.archive.ubuntu.com/ubuntu noble-updates/restricted amd64 Packages [1483 kB]
+Get:18 http://azure.archive.ubuntu.com/ubuntu noble-updates/restricted Translation-en [339 kB]
+Get:19 http://azure.archive.ubuntu.com/ubuntu noble-updates/multiverse Translation-en [12.8 kB]
+Get:20 http://azure.archive.ubuntu.com/ubuntu noble-updates/multiverse amd64 Components [940 B]
+Get:21 http://azure.archive.ubuntu.com/ubuntu noble-backports/main amd64 Components [5776 B]
+Get:22 http://azure.archive.ubuntu.com/ubuntu noble-backports/universe amd64 Components [12.6 kB]
+Get:23 http://azure.archive.ubuntu.com/ubuntu noble-security/main amd64 Packages [967 kB]
+Get:24 http://azure.archive.ubuntu.com/ubuntu noble-security/main Translation-en [205 kB]
+Get:25 http://azure.archive.ubuntu.com/ubuntu noble-security/main amd64 Components [46.4 kB]
+Get:26 http://azure.archive.ubuntu.com/ubuntu noble-security/universe amd64 Packages [1201 kB]
+Get:27 http://azure.archive.ubuntu.com/ubuntu noble-security/universe Translation-en [240 kB]
+Get:28 http://azure.archive.ubuntu.com/ubuntu noble-security/universe amd64 Components [76.2 kB]
+Get:29 http://azure.archive.ubuntu.com/ubuntu noble-security/restricted amd64 Packages [1385 kB]
+Get:30 http://azure.archive.ubuntu.com/ubuntu noble-security/restricted Translation-en [320 kB]
+Get:31 https://dl.google.com/linux/chrome-stable/deb stable/main amd64 Packages [1409 B]
+Fetched 11.5 MB in 1s (8787 kB/s)
+Reading package lists...
+Reading package lists...
+Building dependency tree...
+Reading state information...
+libasound2t64 is already the newest version (1.2.11-1ubuntu0.3).
+libasound2t64 set to manually installed.
+libatk-bridge2.0-0t64 is already the newest version (2.52.0-1build1).
+libatk-bridge2.0-0t64 set to manually installed.
+libatk1.0-0t64 is already the newest version (2.52.0-1build1).
+libatk1.0-0t64 set to manually installed.
+libatspi2.0-0t64 is already the newest version (2.52.0-1build1).
+libatspi2.0-0t64 set to manually installed.
+libcairo2 is already the newest version (1.18.0-3build1).
+libcairo2 set to manually installed.
+libcups2t64 is already the newest version (2.4.7-1.2ubuntu7.14).
+libcups2t64 set to manually installed.
+libdbus-1-3 is already the newest version (1.14.10-4ubuntu4.1).
+libdbus-1-3 set to manually installed.
+libdrm2 is already the newest version (2.4.125-1ubuntu0.1~24.04.2).
+libdrm2 set to manually installed.
+libgbm1 is already the newest version (25.2.8-0ubuntu0.24.04.2).
+libgbm1 set to manually installed.
+libglib2.0-0t64 is already the newest version (2.80.0-6ubuntu3.8).
+libglib2.0-0t64 set to manually installed.
+libnspr4 is already the newest version (2:4.35-1.1build1).
+libnspr4 set to manually installed.
+libnss3 is already the newest version (2:3.98-1ubuntu0.2).
+libnss3 set to manually installed.
+libpango-1.0-0 is already the newest version (1.52.1+ds-1build1).
+libpango-1.0-0 set to manually installed.
+libx11-6 is already the newest version (2:1.8.7-1build1).
+libx11-6 set to manually installed.
+libxcb1 is already the newest version (1.15-1ubuntu2).
+libxcb1 set to manually installed.
+libxcomposite1 is already the newest version (1:0.4.5-1build3).
+libxcomposite1 set to manually installed.
+libxdamage1 is already the newest version (1:1.1.6-1build1).
+libxdamage1 set to manually installed.
+libxext6 is already the newest version (2:1.3.4-1build2).
+libxext6 set to manually installed.
+libxfixes3 is already the newest version (1:6.0.0-2build1).
+libxfixes3 set to manually installed.
+libxkbcommon0 is already the newest version (1.6.0-1build1).
+libxkbcommon0 set to manually installed.
+libxrandr2 is already the newest version (2:1.5.2-2build1).
+libxrandr2 set to manually installed.
+xvfb is already the newest version (2:21.1.12-1ubuntu1.6).
+fonts-noto-color-emoji is already the newest version (2.047-0ubuntu0.24.04.1).
+libfontconfig1 is already the newest version (2.15.0-1.1ubuntu2).
+libfontconfig1 set to manually installed.
+libfreetype6 is already the newest version (2.13.2+dfsg-1ubuntu0.1).
+libfreetype6 set to manually installed.
+fonts-liberation is already the newest version (1:2.1.5-3).
+fonts-liberation set to manually installed.
+The following additional packages will be installed:
+  xfonts-encodings xfonts-utils
+Recommended packages:
+  fonts-ipafont-mincho fonts-tlwg-loma
+The following NEW packages will be installed:
+  fonts-freefont-ttf fonts-ipafont-gothic fonts-tlwg-loma-otf fonts-unifont
+  fonts-wqy-zenhei xfonts-cyrillic xfonts-encodings xfonts-scalable
+  xfonts-utils
+0 upgraded, 9 newly installed, 0 to remove and 28 not upgraded.
+Need to get 21.1 MB of archives.
+After this operation, 79.5 MB of additional disk space will be used.
+Get:1 file:/etc/apt/apt-mirrors.txt Mirrorlist [144 B]
+Get:2 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 fonts-ipafont-gothic all 00303-21ubuntu1 [3513 kB]
+Get:3 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 fonts-freefont-ttf all 20211204+svn4273-2 [5641 kB]
+Get:4 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 fonts-tlwg-loma-otf all 1:0.7.3-1 [107 kB]
+Get:5 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 fonts-unifont all 1:15.1.01-1build1 [2993 kB]
+Get:6 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 fonts-wqy-zenhei all 0.9.45-8 [7472 kB]
+Get:7 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 xfonts-encodings all 1:1.0.5-0ubuntu2 [578 kB]
+Get:8 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 xfonts-utils amd64 1:7.7+6build3 [94.4 kB]
+Get:9 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 xfonts-cyrillic all 1:1.0.5+nmu1 [384 kB]
+Get:10 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 xfonts-scalable all 1:1.0.3-1.3 [304 kB]
+Fetched 21.1 MB in 0s (76.4 MB/s)
+Selecting previously unselected package fonts-ipafont-gothic.
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 203124 files and directories currently installed.)
+Preparing to unpack .../0-fonts-ipafont-gothic_00303-21ubuntu1_all.deb ...
+Unpacking fonts-ipafont-gothic (00303-21ubuntu1) ...
+Selecting previously unselected package fonts-freefont-ttf.
+Preparing to unpack .../1-fonts-freefont-ttf_20211204+svn4273-2_all.deb ...
+Unpacking fonts-freefont-ttf (20211204+svn4273-2) ...
+Selecting previously unselected package fonts-tlwg-loma-otf.
+Preparing to unpack .../2-fonts-tlwg-loma-otf_1%3a0.7.3-1_all.deb ...
+Unpacking fonts-tlwg-loma-otf (1:0.7.3-1) ...
+Selecting previously unselected package fonts-unifont.
+Preparing to unpack .../3-fonts-unifont_1%3a15.1.01-1build1_all.deb ...
+Unpacking fonts-unifont (1:15.1.01-1build1) ...
+Selecting previously unselected package fonts-wqy-zenhei.
+Preparing to unpack .../4-fonts-wqy-zenhei_0.9.45-8_all.deb ...
+Unpacking fonts-wqy-zenhei (0.9.45-8) ...
+Selecting previously unselected package xfonts-encodings.
+Preparing to unpack .../5-xfonts-encodings_1%3a1.0.5-0ubuntu2_all.deb ...
+Unpacking xfonts-encodings (1:1.0.5-0ubuntu2) ...
+Selecting previously unselected package xfonts-utils.
+Preparing to unpack .../6-xfonts-utils_1%3a7.7+6build3_amd64.deb ...
+Unpacking xfonts-utils (1:7.7+6build3) ...
+Selecting previously unselected package xfonts-cyrillic.
+Preparing to unpack .../7-xfonts-cyrillic_1%3a1.0.5+nmu1_all.deb ...
+Unpacking xfonts-cyrillic (1:1.0.5+nmu1) ...
+Selecting previously unselected package xfonts-scalable.
+Preparing to unpack .../8-xfonts-scalable_1%3a1.0.3-1.3_all.deb ...
+Unpacking xfonts-scalable (1:1.0.3-1.3) ...
+Setting up fonts-wqy-zenhei (0.9.45-8) ...
+Setting up fonts-freefont-ttf (20211204+svn4273-2) ...
+Setting up fonts-tlwg-loma-otf (1:0.7.3-1) ...
+Setting up xfonts-encodings (1:1.0.5-0ubuntu2) ...
+Setting up fonts-ipafont-gothic (00303-21ubuntu1) ...
+update-alternatives: using /usr/share/fonts/opentype/ipafont-gothic/ipag.ttf to provide /usr/share/fonts/truetype/fonts-japanese-gothic.ttf (fonts-japanese-gothic.ttf) in auto mode
+Setting up fonts-unifont (1:15.1.01-1build1) ...
+Setting up xfonts-utils (1:7.7+6build3) ...
+Setting up xfonts-cyrillic (1:1.0.5+nmu1) ...
+Setting up xfonts-scalable (1:1.0.3-1.3) ...
+Processing triggers for man-db (2.12.0-4build2) ...
+Not building database; man-db/auto-update is not 'true'.
+Processing triggers for fontconfig (2.15.0-1.1ubuntu2) ...
+
+Running kernel seems to be up-to-date.
+
+No services need to be restarted.
+
+No containers need to be restarted.
+
+No user sessions are running outdated binaries.
+
+No VM guests are running outdated hypervisor (qemu) binaries on this host.
+Downloading Chromium 140.0.7339.16 (playwright build v1187) from https://cdn.playwright.dev/dbazure/download/playwright/builds/chromium/1187/chromium-linux.zip
+|                                                                                |   0% of 173.7 MiB
+|■■■■■■■■                                                                        |  10% of 173.7 MiB
+|■■■■■■■■■■■■■■■■                                                                |  20% of 173.7 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■                                                        |  30% of 173.7 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                                |  40% of 173.7 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                        |  50% of 173.7 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                |  60% of 173.7 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                        |  70% of 173.7 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                |  80% of 173.7 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■        |  90% of 173.7 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■| 100% of 173.7 MiB
+Chromium 140.0.7339.16 (playwright build v1187) downloaded to /home/runner/.cache/ms-playwright/chromium-1187
+Downloading FFMPEG playwright build v1011 from https://cdn.playwright.dev/dbazure/download/playwright/builds/ffmpeg/1011/ffmpeg-linux.zip
+|                                                                                |   0% of 2.3 MiB
+|■■■■■■■■                                                                        |  10% of 2.3 MiB
+|■■■■■■■■■■■■■■■■                                                                |  20% of 2.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■                                                        |  30% of 2.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                                |  40% of 2.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                        |  50% of 2.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                |  60% of 2.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                        |  70% of 2.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                |  80% of 2.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■        |  90% of 2.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■| 100% of 2.3 MiB
+FFMPEG playwright build v1011 downloaded to /home/runner/.cache/ms-playwright/ffmpeg-1011
+Downloading Chromium Headless Shell 140.0.7339.16 (playwright build v1187) from https://cdn.playwright.dev/dbazure/download/playwright/builds/chromium/1187/chromium-headless-shell-linux.zip
+|                                                                                |   0% of 104.3 MiB
+|■■■■■■■■                                                                        |  10% of 104.3 MiB
+|■■■■■■■■■■■■■■■■                                                                |  20% of 104.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■                                                        |  30% of 104.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                                |  40% of 104.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                        |  50% of 104.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                                |  60% of 104.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                        |  70% of 104.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■                |  80% of 104.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■        |  90% of 104.3 MiB
+|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■| 100% of 104.3 MiB
+Chromium Headless Shell 140.0.7339.16 (playwright build v1187) downloaded to /home/runner/.cache/ms-playwright/chromium_headless_shell-1187
+== e2e ==
+$ pnpm run build && playwright test
+$ tsc -b && pnpm --filter @dsh-cyber/web build
+$ tsc -b && vite build
+[36mvite v8.2.1 [32mbuilding client environment for production...[36m[39m
+[2Ktransforming...✓ 5551 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                     1.19 kB │ gzip:   0.47 kB
+dist/assets/index-_99BJF5n.css                     99.59 kB │ gzip:  17.72 kB
+dist/assets/webworkerAll-Bf5jG4XK.js                0.07 kB │ gzip:   0.08 kB
+dist/assets/getTextureBatchBindGroup-DKcXtAqj.js    0.40 kB │ gzip:   0.31 kB │ map:     1.82 kB
+dist/assets/CanvasPool-nl3h59PE.js                  0.80 kB │ gzip:   0.46 kB │ map:     3.55 kB
+dist/assets/canvasUtils-DhssYTZL.js                 6.07 kB │ gzip:   2.07 kB │ map:    22.03 kB
+dist/assets/BufferResource-BNgndzD8.js             10.57 kB │ gzip:   2.82 kB │ map:    25.97 kB
+dist/assets/init-Bb36MuzL.js                       15.30 kB │ gzip:   4.81 kB │ map:    53.69 kB
+dist/assets/getPo2TextureFromSource-8n9yLb25.js    25.11 kB │ gzip:   8.69 kB │ map:   108.25 kB
+dist/assets/browserAll-CGgrHz7g.js                 42.65 kB │ gzip:  11.14 kB │ map:   157.28 kB
+dist/assets/RenderTargetSystem-LFwj_NTp.js         71.12 kB │ gzip:  20.23 kB │ map:   265.05 kB
+dist/assets/CanvasRenderer-BYSdj_46.js             87.44 kB │ gzip:  27.48 kB │ map:   465.54 kB
+dist/assets/Geometry-BEzu8CbX.js                  101.68 kB │ gzip:  31.17 kB │ map:   503.63 kB
+dist/assets/index-D-0lUBD9.js                     906.81 kB │ gzip: 256.60 kB │ map: 3,280.64 kB
+
+[32m✓ built in 1.24s[39m
+[33m[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.[39m
+(node:3760) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 7 tests using 1 worker
+
+(node:3780) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  1 e2e/workbench.spec.ts:31:1 › onboards, recruits, talks, browses dossiers and previews a real workspace file (11.0s)
+  ✓  2 e2e/workbench.spec.ts:85:1 › runs direct and group conversations with real world lifecycle, persistence, and reconnect recovery (30.7s)
+  ✓  3 e2e/workbench.spec.ts:204:1 › keeps the workbench readable and the world viewport filled on a 4K display (54.7s)
+  ✓  4 e2e/workbench.spec.ts:253:1 › creates, edits, restores, and deletes a private-network sub2api model profile (23.7s)
+  ✓  5 e2e/workbench.spec.ts:304:1 › opens the dossier as an all-employee information directory (10.7s)
+  ✘  6 e2e/workbench.spec.ts:330:1 › clears the composer instantly, shows the owner message on screen, and keeps the thinking trace visible during and after a turn (12.1s)
+(node:4166) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✘  7 e2e/workbench.spec.ts:411:1 › shows real model interaction logs in the settings panel with filtering, detail, clear and visual evidence (45.1s)
+
+
+  1) e2e/workbench.spec.ts:330:1 › clears the composer instantly, shows the owner message on screen, and keeps the thinking trace visible during and after a turn 
+
+    Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeEnabled[2m()[22m failed
+
+    Locator:  getByRole('textbox', { name: '给当前世界的员工发送消息' })
+    Expected: enabled
+    Received: <element(s) not found>
+    Timeout:  8000ms
+
+    Call log:
+    [2m  - Expect "toBeEnabled" with timeout 8000ms[22m
+    [2m  - waiting for getByRole('textbox', { name: '给当前世界的员工发送消息' })[22m
+
+
+      370 |   await directButton.first().click()
+      371 |   const composer = page.getByRole('textbox', { name: '给当前世界的员工发送消息' })
+    > 372 |   await expect(composer).toBeEnabled()
+          |                          ^
+      373 |   const ownerText = '任务：验证乐观发送与实时思考展示'
+      374 |   await composer.fill(ownerText)
+      375 |   await page.getByRole('button', { name: '发送' }).click()
+        at /home/runner/work/dsh-cyber/dsh-cyber/e2e/workbench.spec.ts:372:26
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    .private/playwright-results/workbench-clears-the-compo-e4cdf-ble-during-and-after-a-turn/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: .private/playwright-results/workbench-clears-the-compo-e4cdf-ble-during-and-after-a-turn/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    .private/playwright-results/workbench-clears-the-compo-e4cdf-ble-during-and-after-a-turn/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace .private/playwright-results/workbench-clears-the-compo-e4cdf-ble-during-and-after-a-turn/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  2) e2e/workbench.spec.ts:411:1 › shows real model interaction logs in the settings panel with filtering, detail, clear and visual evidence 
+
+    [31mTest timeout of 45000ms exceeded.[39m
+
+    Error: locator.click: Test timeout of 45000ms exceeded.
+    Call log:
+    [2m  - waiting for getByRole('button', { name: '创建本地工作区' })[22m
+
+
+      416 |   await expect(shell.or(onboarding)).toBeVisible()
+      417 |   if (await onboarding.isVisible()) {
+    > 418 |     await page.getByRole('button', { name: '创建本地工作区' }).click()
+          |                                                         ^
+      419 |     await expect(shell).toBeVisible()
+      420 |   }
+      421 |
+        at /home/runner/work/dsh-cyber/dsh-cyber/e2e/workbench.spec.ts:418:57
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    .private/playwright-results/workbench-shows-real-model-eb8a2-l-clear-and-visual-evidence/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: .private/playwright-results/workbench-shows-real-model-eb8a2-l-clear-and-visual-evidence/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    .private/playwright-results/workbench-shows-real-model-eb8a2-l-clear-and-visual-evidence/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace .private/playwright-results/workbench-shows-real-model-eb8a2-l-clear-and-visual-evidence/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  2 failed
+    e2e/workbench.spec.ts:330:1 › clears the composer instantly, shows the owner message on screen, and keeps the thinking trace visible during and after a turn 
+    e2e/workbench.spec.ts:411:1 › shows real model interaction logs in the settings panel with filtering, detail, clear and visual evidence 
+  5 passed (3.2m)
+[ELIFECYCLE] Command failed with exit code 1.
