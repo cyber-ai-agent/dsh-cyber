@@ -1,0 +1,73 @@
+name: world-experience-phase1
+
+on:
+  push:
+    branches: [fix/world-experience-stabilization]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: world-experience-phase1
+  cancel-in-progress: true
+
+jobs:
+  apply-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/world-experience-stabilization
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: pnpm
+      - name: Apply phase 1 and verify
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f WORLD_EXPERIENCE_PHASE1_FAILURE.log
+          {
+            echo '== apply =='
+            node scripts/apply-world-experience-phase1.mjs || exit $?
+            echo '== install =='
+            pnpm install --frozen-lockfile || exit $?
+            echo '== typecheck =='
+            pnpm typecheck || exit $?
+            echo '== tests =='
+            pnpm test || exit $?
+            echo '== chromium =='
+            pnpm exec playwright install --with-deps chromium || exit $?
+            echo '== e2e =='
+            pnpm test:e2e || exit $?
+            echo '== verify =='
+            pnpm verify || exit $?
+            echo '== diff check =='
+            git diff --check || exit $?
+            echo '== commit =='
+            git add packages/world-runtime/src/projector.ts packages/server/src/world-runtime-service.ts packages/web/src/features/world/renderer/pixi-world-renderer.ts packages/web/src/features/world/WorldRuntimeDock.tsx packages/web/src/App.tsx packages/web/src/components/RecruitmentDialog.tsx packages/world-runtime/tests/world-runtime.test.ts
+            git commit -m "fix: stabilize character visuals camera and world interactions" || exit $?
+            rm -f scripts/apply-world-experience-phase1.mjs .github/workflows/world-experience-phase1.yml WORLD_EXPERIENCE_PHASE1_FAILURE.log
+            git add -A
+            git commit -m "chore: remove phase 1 bootstrap" || exit $?
+            git push origin HEAD:fix/world-experience-stabilization || exit $?
+          } 2>&1 | tee /tmp/world-experience-phase1.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            git reset --hard HEAD
+            cp /tmp/world-experience-phase1.log WORLD_EXPERIENCE_PHASE1_FAILURE.log
+            git add -f WORLD_EXPERIENCE_PHASE1_FAILURE.log
+            git commit -m "ci: capture world experience phase 1 failure" || true
+            git push origin HEAD:fix/world-experience-stabilization || true
+            exit "$status"
+          fi
