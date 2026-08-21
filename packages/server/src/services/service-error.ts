@@ -3,7 +3,9 @@ export type ServiceErrorKind =
   | 'forbidden'
   | 'invalid'
   | 'not-found'
+  | 'rate-limited'
   | 'too-large'
+  | 'unavailable'
   | 'unsupported'
 
 export class ServiceError extends Error {

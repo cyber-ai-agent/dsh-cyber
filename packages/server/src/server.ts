@@ -39,6 +39,8 @@ import { registerWorkspaceRoutes } from './routes/workspace-routes.js'
 import { registerWorldRuntimeRoutes } from './routes/world-runtime-routes.js'
 import { registerWorldRoutes } from './routes/world-routes.js'
 import { AssetService } from './services/asset-service.js'
+import { ModelCredentialService } from './services/model-credential-service.js'
+import { ModelCatalogService } from './services/model-catalog-service.js'
 import { RuntimeUpdateService } from './services/runtime-update-service.js'
 import { WorkspaceFileService } from './services/workspace-file-service.js'
 import { RuntimeStreamHub } from './streams/runtime-stream-hub.js'
@@ -94,6 +96,8 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
 
   const store = await SqliteStore.open(join(stateRoot, 'data', 'dsh-cyber.sqlite'))
   for (const blueprint of BUILTIN_BLUEPRINTS) store.saveBlueprint(blueprint)
+  const credentials = await ModelCredentialService.open(stateRoot)
+  const modelCatalog = new ModelCatalogService(credentials)
 
   const activeDshBinPath = await resolveActiveRuntime(store, runtimeStateRoot, stateRoot)
   const runtime = options.runtime ?? new HarnessModelRouter({
@@ -131,7 +135,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerWorkspaceFileRoutes(router, { workspaceFiles })
   registerCatalogRoutes(router, { store, packageCatalog })
   registerWorkspaceRoutes(router, { store })
-  registerModelRoutes(router, { store })
+  registerModelRoutes(router, { store, credentials, modelCatalog })
   registerAssetRoutes(router, { store, assets })
   registerWorldRoutes(router, { store })
   registerPackageRoutes(router, { store, packageManager, packageCatalog })
@@ -180,6 +184,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       worldStreamHub.close()
       if (httpServer.listening) await closeServer(httpServer)
       await orchestrator.close()
+      credentials.close()
       store.close()
     },
   }

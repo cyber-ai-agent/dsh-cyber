@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 
 import { describe, expect, it } from 'vitest'
 
-import type { ConversationRealtimeEnvelope } from '@dsh-cyber/orchestration'
+import { AgentTurnFailedError, type ConversationRealtimeEnvelope } from '@dsh-cyber/orchestration'
 import type { WorldRuntimeSnapshot, WorldRuntimeStreamEnvelope } from '@dsh-cyber/contracts'
 
 import { HttpError, writeError } from '../src/http/errors.js'
@@ -137,6 +137,20 @@ describe('HTTP error mapping', () => {
     expect(JSON.parse(fake.text())).toEqual({
       error: { code: 'preview_too_large', message: 'Preview is too large' },
     })
+  })
+
+  it('turns model authentication failures into an actionable Chinese error', () => {
+    const { fake, node } = response()
+    writeError(node, new AgentTurnFailedError('employee-private-id', 'authentication'))
+
+    expect(fake.statusCode).toBe(502)
+    expect(JSON.parse(fake.text())).toEqual({
+      error: {
+        code: 'model_turn_authentication',
+        message: '模型服务拒绝了 API 密钥，请在设置中重新填写后重试。',
+      },
+    })
+    expect(fake.text()).not.toContain('employee-private-id')
   })
 })
 

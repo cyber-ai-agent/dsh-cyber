@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
-import { request as httpRequest } from 'node:http'
-import { mkdir, mkdtemp, stat, writeFile } from 'node:fs/promises'
+import { createServer as createHttpServer, request as httpRequest } from 'node:http'
+import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -717,6 +717,109 @@ describe('Cyber local server', () => {
     expect(dossier.body.profile.appearance).toMatchObject({ avatarIndex: 6 })
     expect(dossier.body.employee.displayName).toBe('阿帆')
     expect(dossier.body.milestones[0]).toMatchObject({ category: 'joined' })
+  })
+
+  it('stores direct model API keys outside SQLite and restores them after restart', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-model-credentials-'))
+    const secret = 'sk-server-integration-test-only'
+    let started = await start(stateRoot)
+    const workspaceResult = await json(started.origin, '/api/workspaces', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Model credential workspace' }),
+    })
+    const workspaceId = workspaceResult.body.workspace.id as string
+    const rejectedSecret = 'sk-rejected-profile-test-only'
+    const rejected = await json(started.origin, `/api/workspaces/${workspaceId}/model-profiles`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        displayName: 'Invalid remote model',
+        providerKind: 'openai-compatible-remote',
+        baseUrl: 'http://public.example.test/v1',
+        modelId: 'invalid-test',
+        api: 'openai-completions',
+        apiKey: rejectedSecret,
+      }),
+    })
+    expect(rejected.response.status).toBe(422)
+    expect(rejected.body.error.message).toBe('公网模型服务必须使用 HTTPS 地址。')
+    const rejectedVault = await readFile(join(stateRoot, 'credentials', 'model-credentials.json'), 'utf8').catch(() => '')
+    expect(rejectedVault).not.toContain(rejectedSecret)
+
+    const saved = await json(started.origin, `/api/workspaces/${workspaceId}/model-profiles`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        displayName: 'Private sub2api',
+        providerKind: 'openai-compatible-remote',
+        baseUrl: 'https://models.example.test/v1',
+        modelId: 'qwen-test',
+        api: 'openai-completions',
+        apiKey: secret,
+        isDefault: true,
+      }),
+    })
+    expect(saved.response.status).toBe(201)
+    expect(saved.body.profile).not.toHaveProperty('apiKey')
+    expect(saved.body.profile.credentialEnvName).toMatch(/^DSH_CYBER_MODEL_KEY_[A-F0-9]{24}$/)
+    const envName = saved.body.profile.credentialEnvName as string
+
+    const listed = await json(started.origin, `/api/workspaces/${workspaceId}/model-profiles`)
+    expect(listed.body.items[0]).toMatchObject({ credentialConfigured: true })
+    expect(JSON.stringify(listed.body)).not.toContain(secret)
+    expect(await readFile(join(stateRoot, 'credentials', 'model-credentials.json'), 'utf8')).not.toContain(secret)
+    expect((await readFile(join(stateRoot, 'data', 'dsh-cyber.sqlite'))).includes(Buffer.from(secret))).toBe(false)
+
+    await started.server.close()
+    expect(process.env[envName]).toBeUndefined()
+    started = await start(stateRoot)
+    const restored = await json(started.origin, `/api/workspaces/${workspaceId}/model-profiles`)
+    expect(restored.body.items[0]).toMatchObject({ id: saved.body.profile.id, credentialConfigured: true })
+
+    const removed = await json(started.origin, `/api/workspaces/${workspaceId}/model-profiles/${saved.body.profile.id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+    })
+    expect(removed.body).toMatchObject({ removed: true, items: [] })
+    expect(process.env[envName]).toBeUndefined()
+  })
+
+  it('discovers provider models with the submitted API key without returning the key', async () => {
+    const secret = 'sk-discovery-route-test-only'
+    let authorized = false
+    const upstream = createHttpServer((request, response) => {
+      authorized = request.headers.authorization === `Bearer ${secret}`
+      response.writeHead(authorized ? 200 : 401, { 'Content-Type': 'application/json' })
+      response.end(authorized ? JSON.stringify({ data: [{ id: 'qwen-test' }, { id: 'deepseek-test' }] }) : '{}')
+    })
+    await new Promise<void>((resolvePromise) => upstream.listen(0, '127.0.0.1', resolvePromise))
+    try {
+      const address = upstream.address()
+      if (address === null || typeof address === 'string') throw new Error('Model catalog test server did not start')
+      const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-model-discovery-'))
+      const { origin } = await start(stateRoot)
+      const workspaceResult = await json(origin, '/api/workspaces', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Model discovery workspace' }),
+      })
+      const discovered = await json(origin, `/api/workspaces/${workspaceResult.body.workspace.id}/model-profiles/discover`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          baseUrl: `http://127.0.0.1:${address.port}/v1`,
+          api: 'openai-completions',
+          apiKey: secret,
+        }),
+      })
+      expect(discovered.response.status).toBe(200)
+      expect(authorized).toBe(true)
+      expect(discovered.body.items).toEqual([{ id: 'deepseek-test' }, { id: 'qwen-test' }])
+      expect(JSON.stringify(discovered.body)).not.toContain(secret)
+    } finally {
+      await new Promise<void>((resolvePromise, rejectPromise) => upstream.close((error) => error ? rejectPromise(error) : resolvePromise()))
+    }
   })
 
   it('browses and previews safe workspace files without exposing hidden files or traversal', async () => {

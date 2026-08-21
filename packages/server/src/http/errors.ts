@@ -1,6 +1,10 @@
 import type { ServerResponse } from 'node:http'
 
-import { ConversationOrchestrationError } from '@dsh-cyber/orchestration'
+import {
+  AgentTurnFailedError,
+  ConversationOrchestrationError,
+  type AgentTurnFailureKind,
+} from '@dsh-cyber/orchestration'
 import {
   PackageApprovalRequiredError,
   PackageInstallError,
@@ -36,15 +40,26 @@ export function writeError(response: ServerResponse, error: unknown): void {
       forbidden: 403,
       invalid: 422,
       'not-found': 404,
+      'rate-limited': 429,
       'too-large': 413,
+      unavailable: 502,
       unsupported: 415,
     }[error.kind]
     writeJson(response, status, { error: { code: error.code, message: error.message } })
     return
   }
+  if (error instanceof AgentTurnFailedError) {
+    writeJson(response, 502, {
+      error: {
+        code: `model_turn_${error.failureKind.replaceAll('-', '_')}`,
+        message: agentTurnFailureMessage(error.failureKind),
+      },
+    })
+    return
+  }
   if (error instanceof ConversationOrchestrationError) {
     writeJson(response, 422, {
-      error: { code: 'conversation_rejected', message: error.message },
+      error: { code: 'conversation_rejected', message: '当前会话暂时无法执行，请检查参与员工和模型配置后重试。' },
     })
     return
   }
@@ -76,4 +91,15 @@ export function writeError(response: ServerResponse, error: unknown): void {
       message: notFound ? error.message : 'Internal server error',
     },
   })
+}
+
+function agentTurnFailureMessage(kind: AgentTurnFailureKind): string {
+  switch (kind) {
+    case 'authentication': return '模型服务拒绝了 API 密钥，请在设置中重新填写后重试。'
+    case 'model-not-found': return '当前模型 ID 不存在或无权访问，请重新获取模型列表。'
+    case 'rate-limited': return '模型服务请求过于频繁或额度不足，请稍后重试。'
+    case 'timeout': return '模型服务响应超时，请检查网络或稍后重试。'
+    case 'unreachable': return '无法连接模型服务，请检查接口地址、网络和服务状态。'
+    case 'unknown': return '模型暂时无法完成请求，请检查 API 密钥、接口地址和模型 ID 后重试。'
+  }
 }

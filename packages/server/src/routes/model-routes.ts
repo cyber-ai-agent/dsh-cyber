@@ -1,7 +1,10 @@
+import { randomUUID } from 'node:crypto'
+
 import type { JsonObject } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import type { Router } from '../http/router.js'
+import { HttpError } from '../http/errors.js'
 import {
   nullableString,
   readJson,
@@ -10,20 +13,29 @@ import {
   requiredString,
 } from '../http/request.js'
 import { writeJson } from '../http/response.js'
+import {
+  isManagedModelCredentialName,
+  type ModelCredentialService,
+} from '../services/model-credential-service.js'
+import type { ModelCatalogService } from '../services/model-catalog-service.js'
 
 export interface ModelRoutesDependencies {
   store: SqliteStore
+  credentials: ModelCredentialService
+  modelCatalog: ModelCatalogService
 }
 
 export function registerModelRoutes(router: Router, dependencies: ModelRoutesDependencies): void {
-  const { store } = dependencies
+  const { store, credentials, modelCatalog } = dependencies
 
   router.get(/^\/api\/workspaces\/([^/]+)\/model-profiles$/, ({ response, params }) => {
     const workspaceId = params[0]!
     writeJson(response, 200, {
       items: store.listModelProfiles(workspaceId).map((profile) => ({
         ...profile,
-        credentialConfigured: profile.credentialEnvName === undefined
+        credentialConfigured: isManagedModelCredentialName(profile.credentialEnvName)
+          ? credentials.has(profile.id)
+          : profile.credentialEnvName === undefined
           ? profile.providerKind === 'openai-compatible-local'
           : Boolean(process.env[profile.credentialEnvName]),
       })),
@@ -33,33 +45,102 @@ export function registerModelRoutes(router: Router, dependencies: ModelRoutesDep
 
   router.post(/^\/api\/workspaces\/([^/]+)\/model-profiles$/, async ({ request, response, params }) => {
     const body = await readJson(request)
-    const profile = store.saveModelProfile({
-      ...(body.id === undefined ? {} : { id: requiredString(body, 'id') }),
-      workspaceId: params[0]!,
-      displayName: requiredString(body, 'displayName'),
-      providerKind: requiredEnum(body, 'providerKind', [
-        'deepseek',
-        'openai-compatible-local',
-        'openai-compatible-remote',
-      ]),
+    const profileId = body.id === undefined ? randomUUID() : requiredString(body, 'id')
+    const existing = store.getModelProfile(profileId)
+    const apiKey = body.apiKey === undefined ? undefined : requiredString(body, 'apiKey')
+    const clearCredential = body.clearCredential === true
+    if (existing !== undefined && existing.workspaceId !== params[0]) {
+      throw new HttpError(409, 'model_profile_workspace_mismatch', 'Model profile cannot move between workspaces')
+    }
+    if (apiKey !== undefined && body.credentialEnvName !== undefined) {
+      throw new HttpError(422, 'credential_source_conflict', 'Choose either an API key or an environment variable')
+    }
+    const displayName = requiredString(body, 'displayName')
+    const providerKind = requiredEnum(body, 'providerKind', [
+      'deepseek',
+      'openai-compatible-local',
+      'openai-compatible-remote',
+    ])
+    const baseUrl = requiredString(body, 'baseUrl')
+    validateModelBaseUrl(baseUrl, providerKind)
+    const modelId = requiredString(body, 'modelId')
+    const api = requiredEnum(body, 'api', [
+      'openai-completions',
+      'openai-responses',
+      'anthropic-messages',
+    ])
+    const settings = record(body.settings)
+    const previousManagedSecret = isManagedModelCredentialName(existing?.credentialEnvName)
+      ? credentials.resolve(profileId)
+      : undefined
+    let credentialEnvName = existing?.credentialEnvName
+    if (apiKey !== undefined) {
+      credentialEnvName = await credentials.set(profileId, apiKey)
+    } else if (body.credentialEnvName !== undefined) {
+      credentialEnvName = nullableString(body.credentialEnvName) ?? undefined
+    } else if (clearCredential) {
+      credentialEnvName = undefined
+    }
+    let profile
+    try {
+      profile = store.saveModelProfile({
+        id: profileId,
+        workspaceId: params[0]!,
+        displayName,
+        providerKind,
+        baseUrl,
+        modelId,
+        api,
+        ...(credentialEnvName === undefined ? {} : { credentialEnvName }),
+        ...(typeof body.isDefault === 'boolean' ? { isDefault: body.isDefault } : {}),
+        ...(settings === undefined ? {} : { settings: settings as JsonObject }),
+      })
+    } catch (error) {
+      if (apiKey !== undefined) {
+        if (previousManagedSecret === undefined) await credentials.delete(profileId)
+        else await credentials.set(profileId, previousManagedSecret)
+      }
+      throw error
+    }
+    if (apiKey === undefined && (body.credentialEnvName !== undefined || clearCredential)) {
+      await credentials.delete(profileId)
+    }
+    writeJson(response, 201, { profile })
+  })
+
+  router.post(/^\/api\/workspaces\/([^/]+)\/model-profiles\/discover$/, async ({ request, response, params }) => {
+    const body = await readJson(request)
+    const profileId = body.profileId === undefined ? undefined : requiredString(body, 'profileId')
+    const profile = profileId === undefined ? undefined : store.getModelProfile(profileId)
+    if (profile !== undefined && profile.workspaceId !== params[0]) {
+      throw new HttpError(404, 'model_profile_not_found', 'Model profile not found')
+    }
+    const apiKey = body.apiKey === undefined ? undefined : requiredString(body, 'apiKey')
+    const credentialEnvName = profile?.credentialEnvName
+      ?? (body.credentialEnvName === undefined ? undefined : requiredString(body, 'credentialEnvName'))
+    if (credentialEnvName !== undefined
+      && !isManagedModelCredentialName(credentialEnvName)
+      && !/^[A-Z_][A-Z0-9_]*_API_KEY$/.test(credentialEnvName)) {
+      throw new HttpError(422, 'credential_env_name_invalid', 'Credential environment variable must end with _API_KEY')
+    }
+    const items = await modelCatalog.discover({
       baseUrl: requiredString(body, 'baseUrl'),
-      modelId: requiredString(body, 'modelId'),
       api: requiredEnum(body, 'api', [
         'openai-completions',
         'openai-responses',
         'anthropic-messages',
       ]),
-      ...(body.credentialEnvName === undefined
-        ? {}
-        : { credentialEnvName: nullableString(body.credentialEnvName) }),
-      ...(typeof body.isDefault === 'boolean' ? { isDefault: body.isDefault } : {}),
-      ...(record(body.settings) === undefined ? {} : { settings: record(body.settings) as JsonObject }),
+      ...(profileId === undefined ? {} : { profileId }),
+      ...(apiKey === undefined ? {} : { apiKey }),
+      ...(credentialEnvName === undefined ? {} : { credentialEnvName }),
     })
-    writeJson(response, 201, { profile })
+    writeJson(response, 200, { items })
   })
 
-  router.delete(/^\/api\/workspaces\/([^/]+)\/model-profiles\/([^/]+)$/, ({ response, params }) => {
+  router.delete(/^\/api\/workspaces\/([^/]+)\/model-profiles\/([^/]+)$/, async ({ response, params }) => {
     const workspaceId = params[0]!
+    const profile = store.getModelProfile(params[1]!)
+    if (profile?.workspaceId === workspaceId) await credentials.delete(profile.id)
     const removed = store.deleteModelProfile(workspaceId, params[1]!)
     writeJson(response, 200, {
       removed,
@@ -88,4 +169,43 @@ export function registerModelRoutes(router: Router, dependencies: ModelRoutesDep
     )
     writeJson(response, 200, { removed })
   })
+}
+
+function validateModelBaseUrl(
+  value: string,
+  providerKind: 'deepseek' | 'openai-compatible-local' | 'openai-compatible-remote',
+): void {
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    throw new HttpError(422, 'model_base_url_invalid', '模型接口地址格式不正确。')
+  }
+  if (providerKind === 'openai-compatible-local') {
+    if (!['http:', 'https:'].includes(url.protocol) || !isPrivateModelHostname(url.hostname)) {
+      throw new HttpError(422, 'model_base_url_invalid', '本机或局域网模型必须使用回环地址或私有网络 HTTP(S) 地址。')
+    }
+    return
+  }
+  if (url.protocol !== 'https:') {
+    throw new HttpError(422, 'model_base_url_insecure', '公网模型服务必须使用 HTTPS 地址。')
+  }
+}
+
+function isPrivateModelHostname(value: string): boolean {
+  const hostname = value.toLowerCase().replace(/^\[|\]$/g, '')
+  if (hostname === 'localhost' || hostname === '::1' || hostname === 'host.docker.internal'
+    || hostname === 'host.containers.internal' || hostname.endsWith('.local')) return true
+  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(hostname)
+  if (ipv4 !== null) {
+    const octets = ipv4.slice(1).map(Number)
+    if (octets.some((octet) => octet > 255)) return false
+    const [first, second] = octets
+    return first === 10 || first === 127
+      || (first === 172 && second !== undefined && second >= 16 && second <= 31)
+      || (first === 192 && second === 168)
+      || (first === 169 && second === 254)
+      || (first === 100 && second !== undefined && second >= 64 && second <= 127)
+  }
+  return hostname.includes(':') && (hostname.startsWith('fc') || hostname.startsWith('fd') || hostname.startsWith('fe80:'))
 }
