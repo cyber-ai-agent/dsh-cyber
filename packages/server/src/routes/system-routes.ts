@@ -1,5 +1,8 @@
-import { cp, mkdir, readdir, stat, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
+import { promisify } from 'node:util'
+import { gzip } from 'node:zlib'
 
 import {
   inspectHarnessCompatibility,
@@ -13,10 +16,29 @@ import { readJson, requiredBoolean, requiredString } from '../http/request.js'
 import { writeJson } from '../http/response.js'
 import type { RuntimeUpdateService } from '../services/runtime-update-service.js'
 
+const gzipAsync = promisify(gzip)
+
 export interface SystemRoutesDependencies {
   store: SqliteStore
   stateRoot: string
   runtimeUpdates: RuntimeUpdateService
+}
+
+interface BackupBundleEntry {
+  path: string
+  byteLength: number
+  sha256: string
+  dataBase64: string
+}
+
+interface LocalBackupBundleV1 {
+  schemaVersion: 1
+  format: 'dsh-cyber-local-backup'
+  createdAt: string
+  included: string[]
+  excluded: string[]
+  entries: BackupBundleEntry[]
+  notes: string
 }
 
 export function registerSystemRoutes(router: Router, dependencies: SystemRoutesDependencies): void {
@@ -112,46 +134,66 @@ export function registerSystemRoutes(router: Router, dependencies: SystemRoutesD
 
 async function createLocalBackupBundle(stateRoot: string, store: SqliteStore): Promise<string> {
   const backupRoot = join(stateRoot, 'backups')
-  const destination = join(backupRoot, `dsh-cyber-${artifactTimestamp()}`)
-  await mkdir(destination, { recursive: true })
-  await store.backup(join(destination, 'database.sqlite'))
+  await mkdir(backupRoot, { recursive: true })
+  const timestamp = artifactTimestamp()
+  const temporaryDatabase = join(backupRoot, `.dsh-cyber-${timestamp}.sqlite`)
+  const destination = join(backupRoot, `dsh-cyber-${timestamp}.dshbackup`)
 
-  const included: string[] = ['database.sqlite']
-  for (const directory of ['worlds', 'assets', 'packages']) {
-    const source = join(stateRoot, directory)
-    if (!await exists(source)) continue
-    const target = join(destination, directory)
-    await copyBackupTree(source, target, directory === 'worlds')
-    included.push(directory)
-  }
+  await store.backup(temporaryDatabase)
+  try {
+    const entries: BackupBundleEntry[] = [await backupEntry(temporaryDatabase, 'database.sqlite')]
+    const included = ['database.sqlite']
+    for (const directory of ['worlds', 'assets', 'packages']) {
+      const source = join(stateRoot, directory)
+      if (!await exists(source)) continue
+      entries.push(...await collectBackupEntries(source, directory, directory === 'worlds'))
+      included.push(directory)
+    }
 
-  const manifest = {
-    schemaVersion: 1,
-    createdAt: new Date().toISOString(),
-    format: 'dsh-cyber-local-backup',
-    included,
-    excluded: ['credentials', 'runtime', 'worlds/*/cache'],
-    notes: '模型密钥不会进入普通备份；世界访问锁、世界设置、文件与世界资产包含在 worlds 中。',
+    entries.sort((left, right) => left.path.localeCompare(right.path))
+    const bundle: LocalBackupBundleV1 = {
+      schemaVersion: 1,
+      format: 'dsh-cyber-local-backup',
+      createdAt: new Date().toISOString(),
+      included,
+      excluded: ['credentials', 'runtime', 'worlds/*/cache', 'backups'],
+      entries,
+      notes: '模型密钥不会进入普通备份；世界访问锁、世界设置、文件与世界资产均包含在 Bundle 中。',
+    }
+    const compressed = await gzipAsync(Buffer.from(`${JSON.stringify(bundle)}\n`, 'utf8'), { level: 6 })
+    await writeFile(destination, compressed, { mode: 0o600 })
+    return destination
+  } finally {
+    await rm(temporaryDatabase, { force: true })
   }
-  await writeFile(join(destination, 'backup-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
-  return destination
 }
 
-async function copyBackupTree(source: string, destination: string, excludeWorldCache: boolean): Promise<void> {
-  await mkdir(destination, { recursive: true })
+async function collectBackupEntries(source: string, archivePrefix: string, excludeWorldCache: boolean): Promise<BackupBundleEntry[]> {
+  const result: BackupBundleEntry[] = []
   for (const entry of await readdir(source, { withFileTypes: true })) {
     if (entry.isSymbolicLink()) continue
     if (excludeWorldCache && entry.name === 'cache') continue
     const from = join(source, entry.name)
-    const to = join(destination, entry.name)
+    const archivePath = `${archivePrefix}/${entry.name}`.replaceAll('\\', '/')
     if (entry.isDirectory()) {
-      await copyBackupTree(from, to, excludeWorldCache)
+      result.push(...await collectBackupEntries(from, archivePath, excludeWorldCache))
       continue
     }
     if (!entry.isFile()) continue
-    await cp(from, to, { force: false, errorOnExist: true, preserveTimestamps: true })
-    const info = await stat(to)
-    if (info.size < 0) throw new Error(`Backup copy failed: ${basename(to)}`)
+    result.push(await backupEntry(from, archivePath))
+  }
+  return result
+}
+
+async function backupEntry(source: string, archivePath: string): Promise<BackupBundleEntry> {
+  const body = await readFile(source)
+  const info = await stat(source)
+  if (info.size !== body.byteLength) throw new Error(`Backup read changed during capture: ${basename(source)}`)
+  return {
+    path: archivePath,
+    byteLength: body.byteLength,
+    sha256: createHash('sha256').update(body).digest('hex'),
+    dataBase64: body.toString('base64'),
   }
 }
 
