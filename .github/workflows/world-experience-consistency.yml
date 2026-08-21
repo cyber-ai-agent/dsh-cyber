@@ -1,0 +1,42 @@
+name: world-experience-consistency
+
+on:
+  push:
+    branches: [fix/world-experience-stabilization]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/world-experience-stabilization
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: pnpm
+      - name: Apply consistency fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          node scripts/apply-world-experience-consistency.mjs
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+          pnpm test
+          git diff --check
+          git add packages/web/src/App.tsx packages/web/src/components/ChatWorkbench.tsx packages/server/src/server.ts packages/catalog/src/index.ts
+          git commit -m "fix: unify world role and model semantics"
+          rm -f scripts/apply-world-experience-consistency.mjs .github/workflows/world-experience-consistency.yml
+          git add -A
+          git commit -m "chore: remove consistency bootstrap"
+          git push origin HEAD:fix/world-experience-stabilization
