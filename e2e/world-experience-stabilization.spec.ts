@@ -27,10 +27,15 @@ test.afterAll(async () => {
   await rm(stateRoot, { recursive: true, force: true })
 })
 
-test('previews, cancels and persists world appearance settings', async ({ page }) => {
+async function ensureWorld(page: import('@playwright/test').Page) {
   await page.goto(origin)
-  await page.getByRole('button', { name: '创建我的世界' }).click()
+  const onboarding = page.getByRole('heading', { name: '创建第一个本地世界' })
+  if (await onboarding.isVisible()) await page.getByRole('button', { name: '创建我的世界' }).click()
   await expect(page.locator('.workbench-shell')).toBeVisible()
+}
+
+test('previews, cancels and persists world appearance settings', async ({ page }) => {
+  await ensureWorld(page)
 
   const app = page.locator('.app-frame')
   const before = await app.evaluate((element) => getComputedStyle(element).getPropertyValue('--accent').trim())
@@ -51,7 +56,7 @@ test('previews, cancels and persists world appearance settings', async ({ page }
   dialog = page.getByRole('dialog', { name: /世界设置 · 我的世界/ })
   await dialog.getByLabel('强调色').fill('#3366ff')
   await dialog.getByRole('button', { name: '保存世界设置' }).click()
-  await expect(dialog.getByText('世界设置已保存')).toBeVisible()
+  await expect(dialog.getByRole('status')).toContainText('世界设置已保存')
   await expect(dialog).toBeHidden({ timeout: 3_000 })
 
   await page.getByRole('button', { name: '世界设置' }).click()
@@ -61,8 +66,7 @@ test('previews, cancels and persists world appearance settings', async ({ page }
 })
 
 test('shows existing role instances and warns before creating a duplicate name', async ({ page }) => {
-  await page.goto(origin)
-  await expect(page.locator('.workbench-shell')).toBeVisible()
+  await ensureWorld(page)
   await expect(page.getByRole('button', { name: '与管家私聊' })).toBeVisible()
 
   await page.locator('.left-pane').getByRole('button', { name: '添加角色' }).click()
