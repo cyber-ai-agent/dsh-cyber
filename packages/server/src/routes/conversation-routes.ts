@@ -32,10 +32,7 @@ export interface ConversationRoutesDependencies {
   worldSettings: WorldSettingsService
 }
 
-export function registerConversationRoutes(
-  router: Router,
-  dependencies: ConversationRoutesDependencies,
-): void {
+export function registerConversationRoutes(router: Router, dependencies: ConversationRoutesDependencies): void {
   const { store, orchestrator, runtimeStreamHub, worldRuntime, worldAccess, worldSettings } = dependencies
 
   router.post(/^\/api\/worlds\/([^/]+)\/chat$/, async ({ request, response, params }) => {
@@ -46,23 +43,14 @@ export function registerConversationRoutes(
     const prompt = requiredString(body, 'prompt')
     const attachments = validatedChatAttachments(body.attachments, store, world.workspaceId)
     const attachmentPrompt = attachments.length === 0 ? prompt : attachmentAwarePrompt(prompt, attachments)
-    const transformedPrompt = await applyInstalledPromptTransforms(
-      store.listInstalledPackages(world.workspaceId),
-      attachmentPrompt,
-    )
+    const transformedPrompt = await applyInstalledPromptTransforms(store.listInstalledPackages(world.workspaceId), attachmentPrompt)
     const worldSettingsValue = await worldSettings.get(world.id)
     const requestedReasoning = body.reasoningEffort === undefined
       ? worldSettingsValue.model.reasoningEffort
-      : requiredEnum<ReasoningEffort>(body, 'reasoningEffort', [
-          'auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max',
-        ])
+      : requiredEnum<ReasoningEffort>(body, 'reasoningEffort', ['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
     const explicitIds = optionalStringArray(body.employeeIds)
-    const employeeIds = explicitIds.length > 0
-      ? explicitIds
-      : mentionedEmployeeIds(prompt, store.listEmployees(world.id))
-    if (employeeIds.length === 0) {
-      throw new HttpError(422, 'agent_required', '请选择或 @ 至少一个角色')
-    }
+    const employeeIds = explicitIds.length > 0 ? explicitIds : mentionedEmployeeIds(prompt, store.listEmployees(world.id))
+    if (employeeIds.length === 0) throw new HttpError(422, 'agent_required', '请选择或 @ 至少一个角色')
     const metadata: JsonObject = {
       participantIds: employeeIds,
       ...(attachments.length === 0 ? {} : { attachments: attachments.map(chatAttachmentJson) }),
@@ -94,7 +82,7 @@ export function registerConversationRoutes(
         employeeIds,
         prompt,
         metadata,
-        runtimePrompt: transformedPrompt,
+        runtimePrompt: await worldSettings.composeGroupRuntimePrompt(world.id, transformedPrompt),
         ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
         ...(sessionId === undefined ? {} : { sessionId }),
         ...(title === undefined ? {} : { title }),
@@ -106,9 +94,7 @@ export function registerConversationRoutes(
 
   router.get(/^\/api\/worlds\/([^/]+)\/live$/, async ({ request, response, params }) => {
     const worldId = params[0]!
-    if (store.getWorld(worldId) === undefined) {
-      throw new HttpError(404, 'world_not_found', 'World not found')
-    }
+    if (store.getWorld(worldId) === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
     await worldAccess.assertUnlocked(worldId, request)
     runtimeStreamHub.connect(worldId, request, response)
   })
@@ -117,9 +103,7 @@ export function registerConversationRoutes(
     const session = store.getSession(params[0]!)
     if (session === undefined) throw new HttpError(404, 'session_not_found', 'Session not found')
     await worldAccess.assertUnlocked(session.worldId, request)
-    writeJson(response, 200, {
-      items: store.listMessages(session.id, nonNegativeInteger(url.searchParams.get('after'))),
-    })
+    writeJson(response, 200, { items: store.listMessages(session.id, nonNegativeInteger(url.searchParams.get('after'))) })
   })
 
   router.get(/^\/api\/sessions\/([^/]+)\/participants$/, async ({ request, response, params }) => {
@@ -130,11 +114,7 @@ export function registerConversationRoutes(
   })
 }
 
-function validatedChatAttachments(
-  value: unknown,
-  store: SqliteStore,
-  workspaceId: string,
-): ChatAttachment[] {
+function validatedChatAttachments(value: unknown, store: SqliteStore, workspaceId: string): ChatAttachment[] {
   if (value === undefined) return []
   if (!Array.isArray(value) || value.length > 8) {
     throw new HttpError(422, 'invalid_attachments', 'Attachments must be an array with at most 8 items')
@@ -158,26 +138,15 @@ function validatedChatAttachments(
 }
 
 function attachmentAwarePrompt(prompt: string, attachments: ChatAttachment[]): string {
-  const inventory = attachments
-    .map((attachment) => `- ${attachment.name} (${attachment.mimeType}, asset ${attachment.assetId})`)
-    .join('\n')
+  const inventory = attachments.map((attachment) => `- ${attachment.name} (${attachment.mimeType}, asset ${attachment.assetId})`).join('\n')
   return `${prompt}\n\n用户随消息附加了以下本地文件：\n${inventory}\n请在回复中明确说明你如何使用这些附件；无法读取内容时不要臆测。`
 }
 
 function chatAttachmentJson(attachment: ChatAttachment): JsonObject {
-  return {
-    assetId: attachment.assetId,
-    name: attachment.name,
-    mimeType: attachment.mimeType,
-    byteLength: attachment.byteLength,
-    url: attachment.url,
-  }
+  return { assetId: attachment.assetId, name: attachment.name, mimeType: attachment.mimeType, byteLength: attachment.byteLength, url: attachment.url }
 }
 
-function mentionedEmployeeIds(
-  prompt: string,
-  employees: Array<{ id: string; displayName: string }>,
-): string[] {
+function mentionedEmployeeIds(prompt: string, employees: Array<{ id: string; displayName: string }>): string[] {
   return employees
     .filter((employee) => prompt.includes(`@${employee.displayName}`))
     .sort((left, right) => prompt.indexOf(`@${left.displayName}`) - prompt.indexOf(`@${right.displayName}`))
