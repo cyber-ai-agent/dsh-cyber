@@ -4,16 +4,6 @@ import type { EmployeeInstance, EmployeeProfile, EmployeeRevision, ModelProfile 
 
 import { Avatar } from './Avatar.js'
 
-interface CharacterProfileUpdate {
-  displayName: string
-  avatarIndex: number
-  background: string
-  personalityTraits: string[]
-  relationshipToUser: string
-  addressUserAs: string
-  selfReference: string
-}
-
 interface EmployeeManagementDialogProps {
   employee: EmployeeInstance
   profile?: EmployeeProfile
@@ -23,23 +13,68 @@ interface EmployeeManagementDialogProps {
   saving: boolean
   onClose(): void
   onRevise(input: { reason: string; persona?: string; skillGrants?: string[]; capabilityGrants?: string[]; modelPolicy: { modelProfileId?: string } }): Promise<void>
-  onUpdateProfile(input: CharacterProfileUpdate): Promise<void>
+  onUpdateProfile(input: { displayName: string; avatarIndex: number }): Promise<void>
   onArchive(): Promise<void>
 }
 
+interface CharacterRuntimeProfile {
+  relationshipToUser: string
+  addressUserAs: string
+  selfReference: string
+  personalityTraits: string[]
+  background: string
+  persona: string
+}
+
+const PROFILE_START = '[角色关系与背景]'
+const PROFILE_END = '[/角色关系与背景]'
+
 export function EmployeeManagementDialog({ employee, profile, currentRevision, models, avatarIndex, saving, onClose, onRevise, onUpdateProfile, onArchive }: EmployeeManagementDialogProps) {
+  const parsed = parseCharacterRuntimeProfile(currentRevision?.persona ?? '', profile, employee.role)
   const [displayName, setDisplayName] = useState(employee.displayName)
   const [selectedAvatar, setSelectedAvatar] = useState(avatarIndex)
-  const [background, setBackground] = useState(profile?.background ?? employee.role)
-  const [personality, setPersonality] = useState((profile?.personalityTraits ?? []).join('、'))
-  const [relationshipToUser, setRelationshipToUser] = useState(textAppearance(profile, 'relationshipToUser'))
-  const [addressUserAs, setAddressUserAs] = useState(textAppearance(profile, 'addressUserAs'))
-  const [selfReference, setSelfReference] = useState(textAppearance(profile, 'selfReference'))
+  const [background, setBackground] = useState(parsed.background)
+  const [personality, setPersonality] = useState(parsed.personalityTraits.join('、'))
+  const [relationshipToUser, setRelationshipToUser] = useState(parsed.relationshipToUser)
+  const [addressUserAs, setAddressUserAs] = useState(parsed.addressUserAs)
+  const [selfReference, setSelfReference] = useState(parsed.selfReference)
   const [reason, setReason] = useState('调整角色设定')
-  const [persona, setPersona] = useState(currentRevision?.persona ?? '')
+  const [persona, setPersona] = useState(parsed.persona)
   const [skills, setSkills] = useState(currentRevision?.skillGrants.join(', ') ?? '')
   const [capabilities, setCapabilities] = useState(currentRevision?.capabilityGrants.join(', ') ?? '')
   const [confirmArchive, setConfirmArchive] = useState(false)
+
+  const runtimeProfile = (): CharacterRuntimeProfile => ({
+    relationshipToUser: relationshipToUser.trim(),
+    addressUserAs: addressUserAs.trim(),
+    selfReference: selfReference.trim(),
+    personalityTraits: splitList(personality),
+    background: background.trim(),
+    persona: persona.trim(),
+  })
+
+  const saveIdentityAndRelationship = async () => {
+    if (!displayName.trim() || !background.trim() || saving) return
+    await onUpdateProfile({ displayName: displayName.trim(), avatarIndex: selectedAvatar })
+    await onRevise({
+      reason: '更新角色身份、关系与背景',
+      persona: composeCharacterPersona(runtimeProfile()),
+      skillGrants: splitList(skills),
+      capabilityGrants: splitList(capabilities),
+      modelPolicy: {},
+    })
+  }
+
+  const saveBehavior = async () => {
+    if (!reason.trim() || !persona.trim() || saving) return
+    await onRevise({
+      reason: reason.trim(),
+      persona: composeCharacterPersona(runtimeProfile()),
+      skillGrants: splitList(skills),
+      capabilityGrants: splitList(capabilities),
+      modelPolicy: {},
+    })
+  }
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
@@ -51,7 +86,7 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
 
         <div className="employee-management-content">
           <section className="employee-identity-editor">
-            <div className="settings-section__heading"><h3><IdentificationCard size={17} />身份与形象</h3><p>这里的名字与形象会同步到通讯录、聊天、档案和互动世界。</p></div>
+            <div className="settings-section__heading"><h3><IdentificationCard size={17} />身份、关系与形象</h3><p>名字与形象会同步到通讯录、聊天、档案和互动世界；关系、称呼和背景会进入角色真实运行设定。</p></div>
             <div className="identity-editor-layout">
               <label className="dialog-field"><span>角色名字</span><input maxLength={48} value={displayName} onChange={(event) => setDisplayName(event.target.value)} /></label>
               <div className="avatar-picker" role="radiogroup" aria-label="选择角色形象">
@@ -71,7 +106,7 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
               <label className="dialog-field character-profile-grid__wide"><span>背景故事</span><textarea rows={4} value={background} onChange={(event)=>setBackground(event.target.value)} placeholder="这个角色在当前世界里的经历、身份和重要背景。"/></label>
             </div>
 
-            <div className="identity-editor-footer"><span>角色档案版本 p{(profile?.revision ?? 0) + 1}</span><button className="secondary-button" type="button" disabled={!displayName.trim() || !background.trim() || saving} onClick={() => void onUpdateProfile({ displayName: displayName.trim(), avatarIndex: selectedAvatar, background: background.trim(), personalityTraits: splitList(personality), relationshipToUser: relationshipToUser.trim(), addressUserAs: addressUserAs.trim(), selfReference: selfReference.trim() })}>{saving ? '正在保存…' : '保存角色资料'}</button></div>
+            <div className="identity-editor-footer"><span>保存后会同时生成新的角色设定版本</span><button className="secondary-button" type="button" disabled={!displayName.trim() || !background.trim() || saving} onClick={() => void saveIdentityAndRelationship()}>{saving ? '正在保存…' : '保存角色资料'}</button></div>
           </section>
 
           <section>
@@ -90,7 +125,7 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
 
             <div className="character-model-note"><strong>运行模型</strong><span>当前角色模型请在“设置 → 模型 → 模型分配”中选择。活动路由统一按角色 → 世界 → 全局继承，避免出现两个互相冲突的模型设置。</span><small>可用模型：{models.length === 0 ? '尚未配置' : models.map((model)=>model.displayName).join('、')}</small></div>
 
-            <button className="primary-button" type="button" disabled={!reason.trim() || !persona.trim() || saving} onClick={() => void onRevise({ reason: reason.trim(), persona: persona.trim(), skillGrants: splitList(skills), capabilityGrants: splitList(capabilities), modelPolicy: {} })}>{saving ? '正在保存…' : `保存为 r${employee.currentRevision + 1}`}</button>
+            <button className="primary-button" type="button" disabled={!reason.trim() || !persona.trim() || saving} onClick={() => void saveBehavior()}>{saving ? '正在保存…' : `保存为 r${employee.currentRevision + 1}`}</button>
           </section>
 
           <section className="archive-section">
@@ -103,9 +138,43 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
   )
 }
 
-function textAppearance(profile: EmployeeProfile | undefined, key: string): string {
-  const value = profile?.appearance[key]
-  return typeof value === 'string' ? value : ''
+function composeCharacterPersona(value: CharacterRuntimeProfile): string {
+  const metadata = [
+    PROFILE_START,
+    `与用户的关系：${value.relationshipToUser || '未单独设定'}`,
+    `称呼用户：${value.addressUserAs || '跟随当前世界默认称呼'}`,
+    `自称：${value.selfReference || '我'}`,
+    `性格关键词：${value.personalityTraits.join('、') || '未单独设定'}`,
+    `背景故事：${value.background}`,
+    PROFILE_END,
+  ].join('\n')
+  return `${metadata}\n\n${value.persona}`.trim()
+}
+
+function parseCharacterRuntimeProfile(persona: string, profile: EmployeeProfile | undefined, role: string): CharacterRuntimeProfile {
+  const start = persona.indexOf(PROFILE_START)
+  const end = persona.indexOf(PROFILE_END)
+  const block = start >= 0 && end > start ? persona.slice(start + PROFILE_START.length, end) : ''
+  const corePersona = start >= 0 && end > start ? `${persona.slice(0, start)}${persona.slice(end + PROFILE_END.length)}`.trim() : persona.trim()
+  const values = new Map<string, string>()
+  for (const line of block.split('\n')) {
+    const separator = line.indexOf('：')
+    if (separator > 0) values.set(line.slice(0, separator).trim(), line.slice(separator + 1).trim())
+  }
+  const traits = values.get('性格关键词')
+  return {
+    relationshipToUser: cleanUnset(values.get('与用户的关系')),
+    addressUserAs: cleanUnset(values.get('称呼用户')),
+    selfReference: cleanUnset(values.get('自称')),
+    personalityTraits: traits && !traits.startsWith('未单独') ? splitList(traits) : (profile?.personalityTraits ?? []),
+    background: cleanUnset(values.get('背景故事')) || profile?.background || role,
+    persona: corePersona || '保持自己的角色身份、知识边界和职责，不冒充其他角色。',
+  }
+}
+
+function cleanUnset(value: string | undefined): string {
+  if (value === undefined || value.startsWith('未单独') || value.startsWith('跟随当前世界')) return ''
+  return value
 }
 
 function splitList(value: string): string[] {
