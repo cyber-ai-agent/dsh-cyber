@@ -1,0 +1,39 @@
+name: apply-character-profile-persistence
+
+on:
+  push:
+    branches: [fix/world-experience-stabilization]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/world-experience-stabilization
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Apply targeted App migration
+        run: node scripts/apply-character-profile-persistence.mjs
+      - run: pnpm typecheck
+      - name: Commit real source and remove bootstrap
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/web/src/App.tsx
+          git commit -m "fix: persist complete character profile settings"
+          git rm scripts/apply-character-profile-persistence.mjs .github/workflows/apply-character-profile-persistence.yml
+          git commit -m "chore: remove character profile migration bootstrap"
+          git push origin HEAD:fix/world-experience-stabilization
