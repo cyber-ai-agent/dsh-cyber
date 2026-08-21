@@ -27,23 +27,25 @@ jobs:
         id: merge
         shell: bash
         run: |
-          rm -f PR8_CONFLICTS.txt
+          rm -f PR8_CONFLICTS.txt PR8_CONFLICT_PATCH.diff
           set +e
           git merge --no-ff --no-edit refs/remotes/origin/pr8
           status=$?
           if [ "$status" -ne 0 ]; then
             git diff --name-only --diff-filter=U > /tmp/pr8-conflicts.txt
+            git diff --cc > /tmp/pr8-conflict.patch
             git merge --abort || true
             cp /tmp/pr8-conflicts.txt PR8_CONFLICTS.txt
+            cp /tmp/pr8-conflict.patch PR8_CONFLICT_PATCH.diff
             echo "conflicted=true" >> "$GITHUB_OUTPUT"
           else
             echo "conflicted=false" >> "$GITHUB_OUTPUT"
           fi
-      - name: Persist conflict inventory
+      - name: Persist conflict diagnostics
         if: steps.merge.outputs.conflicted == 'true'
         run: |
-          git add -f PR8_CONFLICTS.txt
-          git commit -m "ci: capture PR 8 conflict inventory"
+          git add -f PR8_CONFLICTS.txt PR8_CONFLICT_PATCH.diff
+          git commit -m "ci: capture PR 8 conflict diagnostics"
           git push origin HEAD:merge/pr-8-integration
       - name: Stop on conflicts
         if: steps.merge.outputs.conflicted == 'true'
@@ -70,5 +72,4 @@ jobs:
         run: pnpm test:e2e
       - name: Push verified merge commit
         if: steps.merge.outputs.conflicted == 'false'
-        run: |
-          git push origin HEAD:merge/pr-8-integration
+        run: git push origin HEAD:merge/pr-8-integration
