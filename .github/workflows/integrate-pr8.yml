@@ -1,0 +1,52 @@
+name: integrate-pr8
+
+on:
+  push:
+    branches: [merge/pr-8-integration]
+
+permissions:
+  contents: write
+
+jobs:
+  merge-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: merge/pr-8-integration
+      - name: Fetch PR 8 head
+        run: git fetch origin refs/pull/8/head:refs/remotes/origin/pr8
+      - name: Attempt real merge and report conflicts
+        shell: bash
+        run: |
+          set +e
+          git merge --no-ff --no-edit refs/remotes/origin/pr8
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            echo '=== CONFLICTS ==='
+            git diff --name-only --diff-filter=U
+            echo '=== CONFLICT MARKERS ==='
+            git diff --cc --stat
+            exit "$status"
+          fi
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e
+      - name: Push verified merge commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git push origin HEAD:merge/pr-8-integration
