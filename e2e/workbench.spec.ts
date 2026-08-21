@@ -100,7 +100,7 @@ test('runs direct and group conversations with real world lifecycle, persistence
 
   const taskStartedBeforeIntent = server.store.listWorldDomainEvents(worldId).filter((event) => event.type === 'task.started').length
   await page.getByRole('button', { name: '与阿帆私聊' }).click()
-  await expect(page.getByRole('heading', { name: /阿帆/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '与 阿帆 对话', exact: true })).toBeVisible()
   await expect(page.getByLabel('当前会话成员')).toContainText('阿帆')
   const dock = page.getByRole('region', { name: '产物与世界侧边栏' })
   expect(server.store.getEmployee(engineer.id)?.status).toBe('available')
@@ -244,6 +244,57 @@ test('keeps the workbench readable and the world viewport filled on a 4K display
     await dock.getByRole('button', { name: '世界', exact: true }).click()
     await expect(page.locator('.world-runtime-canvas')).toHaveCount(1)
   }
+})
+
+test('creates, edits, restores, and deletes a private-network sub2api model profile', async ({ page }) => {
+  await page.setViewportSize({ width: 1_920, height: 1_080 })
+  await page.goto(origin)
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  let settings = page.getByRole('dialog', { name: '设置' })
+  await settings.getByRole('button', { name: '模型', exact: true }).click()
+  await expect(settings.getByRole('heading', { name: '模型与路由' })).toBeVisible()
+  await expect(settings.getByText('模型配置与路由在当前页面单独保存')).toBeVisible()
+  await expect(settings.getByText('温度', { exact: false })).toHaveCount(0)
+
+  await settings.getByRole('button', { name: '添加配置' }).click()
+  const editor = settings.getByRole('form', { name: '模型配置编辑器' })
+  await editor.getByRole('combobox', { name: '提供商类型' }).selectOption('custom-local')
+  await editor.getByRole('textbox', { name: '显示名称' }).fill('公司 sub2api')
+  await editor.getByRole('textbox', { name: '接口地址' }).fill('http://172.16.1.125:11434/v1/')
+  await editor.getByRole('textbox', { name: '模型 ID' }).fill('qwen3.5:9b')
+  await editor.getByRole('textbox', { name: '凭据环境变量名' }).fill('SUB2API_API_KEY')
+  await editor.getByRole('button', { name: '添加并保存' }).click()
+  await expect(editor.getByRole('status')).toContainText('模型配置已添加并保存')
+  await expect(settings.getByRole('article').filter({ hasText: '公司 sub2api' })).toContainText('qwen3.5:9b')
+
+  await settings.getByRole('button', { name: '编辑公司 sub2api' }).click()
+  await editor.getByRole('textbox', { name: '模型 ID' }).fill('qwen3.5')
+  await editor.getByRole('button', { name: '保存修改' }).click()
+  await expect(editor.getByRole('status')).toContainText('模型配置已更新并保存')
+  await expect(settings.getByRole('article').filter({ hasText: '公司 sub2api' })).toContainText('qwen3.5')
+
+  await server.close()
+  server = await createCyberServer({
+    stateRoot,
+    workspacePath: process.cwd(),
+    webRoot: join(process.cwd(), 'packages', 'web', 'dist'),
+    port: 0,
+    runtime: new BrowserRuntime(),
+  })
+  origin = (await server.start()).origin
+  await page.goto(origin)
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  settings = page.getByRole('dialog', { name: '设置' })
+  await settings.getByRole('button', { name: '模型', exact: true }).click()
+  const restored = settings.getByRole('article').filter({ hasText: '公司 sub2api' })
+  await expect(restored).toContainText('qwen3.5')
+  await expect(restored).toContainText('SUB2API_API_KEY')
+  await page.screenshot({ path: join(process.cwd(), 'artifacts', 'ui-world-conversations', 'model-settings-1920x1080.png') })
+
+  page.once('dialog', (dialog) => dialog.accept())
+  await settings.getByRole('button', { name: '删除公司 sub2api' }).click()
+  await expect(settings.getByText('还没有模型配置')).toBeVisible()
+  await expect(settings.getByText('模型配置已删除')).toBeVisible()
 })
 
 test('opens the dossier as an all-employee information directory', async ({ page }) => {

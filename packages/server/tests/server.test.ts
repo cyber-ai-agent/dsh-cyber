@@ -612,19 +612,33 @@ describe('Cyber local server', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        displayName: '本地 Qwen',
+        displayName: '公司 sub2api',
         providerKind: 'openai-compatible-local',
-        baseUrl: 'http://127.0.0.1:11434/v1',
-        modelId: 'qwen3:14b',
+        baseUrl: 'http://172.16.1.125:11434/v1/',
+        modelId: 'qwen3.5:9b',
         api: 'openai-completions',
-        credentialEnvName: 'LOCAL_MODEL_API_KEY',
+        credentialEnvName: 'SUB2API_API_KEY',
         isDefault: true,
-        settings: {},
+        settings: { providerId: 'custom-local' },
       }),
     })
     expect(model.response.status).toBe(201)
     expect(model.body.profile).not.toHaveProperty('credential')
-    expect(model.body.profile.credentialEnvName).toBe('LOCAL_MODEL_API_KEY')
+    expect(model.body.profile.credentialEnvName).toBe('SUB2API_API_KEY')
+    expect(model.body.profile.baseUrl).toBe('http://172.16.1.125:11434/v1')
+
+    const updatedModel = await json(origin, `/api/workspaces/${workspace.id}/model-profiles`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...model.body.profile,
+        displayName: '公司 sub2api（主线路）',
+        modelId: 'qwen3.5',
+        settings: { providerId: 'custom-local', contextWindow: 128_000 },
+      }),
+    })
+    expect(updatedModel.response.status).toBe(201)
+    expect(updatedModel.body.profile).toMatchObject({ id: model.body.profile.id, displayName: '公司 sub2api（主线路）', modelId: 'qwen3.5' })
 
     const worldAssignment = await json(
       origin,
@@ -651,6 +665,10 @@ describe('Cyber local server', () => {
       expect.objectContaining({ scope: 'world', scopeId: world.id, modelProfileId: model.body.profile.id }),
       expect.objectContaining({ scope: 'employee', scopeId: employee.id, modelProfileId: model.body.profile.id }),
     ]))
+
+    const deletedModel = await json(origin, `/api/workspaces/${workspace.id}/model-profiles/${model.body.profile.id}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' } })
+    expect(deletedModel.response.status).toBe(200)
+    expect(deletedModel.body).toMatchObject({ removed: true, items: [], assignments: [] })
 
     const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
     const asset = await json(origin, `/api/workspaces/${workspace.id}/assets/background`, {

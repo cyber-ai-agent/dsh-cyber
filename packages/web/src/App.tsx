@@ -47,7 +47,7 @@ import { NavigationPane } from './components/NavigationPane.js'
 import { PackageMarketDialog } from './components/PackageMarketDialog.js'
 import { RecruitmentDialog } from './components/RecruitmentDialog.js'
 import { ResizableShell } from './components/ResizableShell.js'
-import { SettingsDialog, type SettingsSection, type SystemAction, type SystemActionInput, type SystemActionResult } from './components/SettingsDialog.js'
+import { SettingsDialog, type ModelProfileSaveDraft, type SettingsSection, type SystemAction, type SystemActionInput, type SystemActionResult } from './components/SettingsDialog.js'
 import { demoData, demoTavernDossiers, demoTavernEmployees, demoTavernMessages, demoTavernSessions } from './demo-data.js'
 import type { ConversationIntent, CyberEmployee, DockTab, LiveAgentTurn, SessionParticipantMap } from './types.js'
 import { worldExperience } from './world-experience.js'
@@ -780,18 +780,57 @@ export default function App() {
     return `assets/${result.asset.id}`
   }, [workspace])
 
-  const saveModel = useCallback(async (profile: Omit<ModelProfile, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt'>) => {
-    if (workspace === undefined) return
+  const saveModel = useCallback(async (profile: ModelProfileSaveDraft): Promise<ModelProfile> => {
+    if (workspace === undefined) throw new Error('请先创建工作区')
     if (demoMode) {
       const timestamp = new Date().toISOString()
-      setModels((current) => [...current, { ...profile, id: `demo-model-${current.length}`, workspaceId: workspace.id, createdAt: timestamp, updatedAt: timestamp }])
-      return
+      const currentProfile = profile.id ? models.find((item) => item.id === profile.id) : undefined
+      const saved: ModelProfile = {
+        ...profile,
+        id: profile.id ?? `demo-model-${crypto.randomUUID()}`,
+        workspaceId: workspace.id,
+        createdAt: currentProfile?.createdAt ?? timestamp,
+        updatedAt: timestamp,
+      }
+      setModels((current) => [
+        ...current
+          .filter((item) => item.id !== saved.id)
+          .map((item) => saved.isDefault ? { ...item, isDefault: false } : item),
+        saved,
+      ])
+      return saved
     }
     const result = await api<{ profile: ModelProfile }>(`/api/workspaces/${workspace.id}/model-profiles`, {
       method: 'POST',
       body: JSON.stringify(profile),
     })
-    setModels((current) => [...current.filter((item) => item.id !== result.profile.id), result.profile])
+    setModels((current) => [
+      ...current
+        .filter((item) => item.id !== result.profile.id)
+        .map((item) => result.profile.isDefault ? { ...item, isDefault: false } : item),
+      result.profile,
+    ])
+    return result.profile
+  }, [models, workspace])
+
+  const deleteModel = useCallback(async (modelProfileId: string): Promise<void> => {
+    if (workspace === undefined) throw new Error('请先创建工作区')
+    if (demoMode) {
+      setModels((current) => {
+        const removed = current.find((item) => item.id === modelProfileId)
+        const remaining = current.filter((item) => item.id !== modelProfileId)
+        if (removed?.isDefault && remaining[0]) remaining[0] = { ...remaining[0], isDefault: true }
+        return remaining
+      })
+      setModelAssignments((current) => current.filter((item) => item.modelProfileId !== modelProfileId))
+      return
+    }
+    const result = await api<{ removed: boolean; items: ModelProfile[]; assignments: ModelAssignment[] }>(`/api/workspaces/${workspace.id}/model-profiles/${encodeURIComponent(modelProfileId)}`, {
+      method: 'DELETE',
+    })
+    if (!result.removed) throw new Error('模型配置不存在或已被删除')
+    setModels(result.items)
+    setModelAssignments(result.assignments)
   }, [workspace])
 
   const assignModel = useCallback(async (input: { scope: ModelAssignment['scope']; scopeId: string; modelProfileId?: string }) => {
@@ -980,6 +1019,7 @@ export default function App() {
           onSavePreferences={savePreferences}
           onUploadBackground={uploadBackground}
           onSaveModel={saveModel}
+          onDeleteModel={deleteModel}
           onAssignModel={assignModel}
           onSystemAction={runSystemAction}
         />

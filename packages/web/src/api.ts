@@ -8,10 +8,12 @@ export class ApiError extends Error {
 }
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = init?.method?.toUpperCase() ?? 'GET'
+  const requiresJsonHeader = !['GET', 'HEAD'].includes(method)
   const response = await fetch(path, {
     ...init,
     headers: {
-      ...(init?.body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      ...(!requiresJsonHeader && init?.body === undefined ? {} : { 'Content-Type': 'application/json' }),
       ...init?.headers,
     },
   })
@@ -27,4 +29,3 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 export function jsonBody(value: unknown): Pick<RequestInit, 'body' | 'method'> {
   return { method: 'POST', body: JSON.stringify(value) }
 }
-

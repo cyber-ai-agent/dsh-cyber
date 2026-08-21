@@ -58,6 +58,16 @@ export function registerModelRoutes(router: Router, dependencies: ModelRoutesDep
     writeJson(response, 201, { profile })
   })
 
+  router.delete(/^\/api\/workspaces\/([^/]+)\/model-profiles\/([^/]+)$/, ({ response, params }) => {
+    const workspaceId = params[0]!
+    const removed = store.deleteModelProfile(workspaceId, params[1]!)
+    writeJson(response, 200, {
+      removed,
+      items: store.listModelProfiles(workspaceId),
+      assignments: store.listModelAssignments(workspaceId),
+    })
+  })
+
   const assignmentPattern = /^\/api\/workspaces\/([^/]+)\/model-assignments\/(workspace|world|employee)\/([^/]+)$/
   router.put(assignmentPattern, async ({ request, response, params }) => {
     const body = await readJson(request)
