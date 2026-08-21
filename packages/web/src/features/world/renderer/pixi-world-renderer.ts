@@ -143,6 +143,17 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
     for (const entity of snapshot.entities) {
       if (entity.kind !== 'agent') continue
       const actor = this.#actors.get(entity.id) ?? this.#createActor(entity)
+      const previousRosterIndex = actor.state.visualState['rosterIndex']
+      const nextRosterIndex = entity.visualState['rosterIndex']
+      if (previousRosterIndex !== nextRosterIndex && actor.motion === undefined) {
+        actor.animation.destroy()
+        actor.root.destroy({ children: true })
+        this.#actors.delete(entity.id)
+        const replacement = this.#createActor(entity)
+        replacement.root.position.set(entity.position.x, entity.position.y)
+        replacement.root.zIndex = 600 + replacement.root.y
+        continue
+      }
       actor.state = entity
       if (actor.motion === undefined) actor.root.position.set(entity.position.x, entity.position.y)
       actor.root.zIndex = 600 + actor.root.y
@@ -172,9 +183,7 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
       const actor = cue.entityId === undefined ? undefined : this.#actors.get(cue.entityId)
       if (cue.kind === 'entity.route' && actor !== undefined) {
         const semanticRoute = cuePoints(cue)
-        const route = semanticRoute.length < 2
-          ? semanticRoute
-          : [{ x: actor.root.x, y: actor.root.y }, ...semanticRoute.slice(1)]
+        const route = semanticRoute.length < 2 ? semanticRoute : [{ x: actor.root.x, y: actor.root.y }, ...semanticRoute.slice(1)]
         if (route.length > 1) {
           actor.motion = { route, segment: 0, elapsed: 0, segmentDuration: segmentDuration(route[0]!, route[1]!) }
           actor.state = { ...actor.state, activity: 'walking', facing: facingBetween(route[0]!, route[1]!) }
@@ -199,19 +208,15 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
 
   selectObject(objectId?: string): void {
     this.#selectedObjectId = objectId
-    this.#selectedEntityId = undefined
-    for (const actor of this.#actors.values()) {
-      actor.selection.visible = false
-      actor.activity.visible = false
-    }
     for (const [id, hint] of this.#objectHints) hint.alpha = id === objectId ? 0.58 : 0.001
   }
 
   focusEntity(entityId: string): void {
     const actor = this.#actors.get(entityId)
     if (actor === undefined || !this.#host) return
-    const scale = this.#fitScale * Math.max(this.#zoom, 1.25)
-    this.#zoom = Math.max(this.#zoom, 1.25)
+    const nextZoom = Math.max(this.#zoom, 1.25, this.#minimumZoomForCoverage())
+    const scale = this.#fitScale * nextZoom
+    this.#zoom = nextZoom
     this.#cameraOffset = {
       x: this.#host.clientWidth / 2 - actor.root.x * scale,
       y: this.#host.clientHeight / 2 - actor.root.y * scale,
@@ -220,16 +225,7 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
   }
 
   fitScene(): void {
-    if (!this.#scene || !this.#host || !this.#initialized) return
-    const availableWidth = Math.max(this.#host.clientWidth, 1)
-    const availableHeight = Math.max(this.#host.clientHeight, 1)
-    this.#fitScale = Math.min(availableWidth / this.#scene.size.width, availableHeight / this.#scene.size.height)
-    this.#zoom = 1
-    this.#cameraOffset = {
-      x: (availableWidth - this.#scene.size.width * this.#fitScale) / 2,
-      y: (availableHeight - this.#scene.size.height * this.#fitScale) / 2,
-    }
-    this.#applyCamera()
+    this.fillScene()
   }
 
   fillScene(): void {
@@ -237,18 +233,18 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
     const availableWidth = Math.max(this.#host.clientWidth, 1)
     const availableHeight = Math.max(this.#host.clientHeight, 1)
     const containScale = Math.min(availableWidth / this.#scene.size.width, availableHeight / this.#scene.size.height)
-    const coverScale = Math.max(availableWidth / this.#scene.size.width, availableHeight / this.#scene.size.height)
     this.#fitScale = containScale
-    this.#zoom = coverScale / containScale
+    this.#zoom = this.#minimumZoomForCoverage()
+    const scale = this.#fitScale * this.#zoom
     this.#cameraOffset = {
-      x: (availableWidth - this.#scene.size.width * coverScale) / 2,
-      y: (availableHeight - this.#scene.size.height * coverScale) / 2,
+      x: (availableWidth - this.#scene.size.width * scale) / 2,
+      y: (availableHeight - this.#scene.size.height * scale) / 2,
     }
     this.#applyCamera()
   }
 
   zoomBy(delta: number): void {
-    this.#zoom = clamp(this.#zoom + delta, WORLD_MIN_ZOOM, WORLD_MAX_ZOOM)
+    this.#zoom = clamp(this.#zoom + delta, this.#minimumZoomForCoverage(), WORLD_MAX_ZOOM)
     this.#applyCamera()
   }
 
@@ -260,9 +256,7 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
     this.#destroyed = true
     this.#resizeObserver?.disconnect()
     this.#resizeObserver = undefined
-    if (this.#host !== undefined && this.#wheelListener !== undefined) {
-      this.#host.removeEventListener('wheel', this.#wheelListener)
-    }
+    if (this.#host !== undefined && this.#wheelListener !== undefined) this.#host.removeEventListener('wheel', this.#wheelListener)
     this.#wheelListener = undefined
     for (const actor of this.#actors.values()) actor.animation.destroy()
     this.#actors.clear()
@@ -282,9 +276,7 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
   async #loadAssets(manifest: WorldThemeManifestV1): Promise<void> {
     await Promise.all(manifest.assets.map(async (asset) => {
       const image = await loadImage(asset.src)
-      const texture = manifest.actorSets.some((actorSet) => actorSet.assetId === asset.id)
-        ? createRosterTexture(image)
-        : Texture.from(image)
+      const texture = manifest.actorSets.some((actorSet) => actorSet.assetId === asset.id) ? createRosterTexture(image) : Texture.from(image)
       texture.source.scaleMode = asset.pixelArt ? 'nearest' : 'linear'
       this.#assetTextures.set(asset.id, texture)
     }))
@@ -298,10 +290,7 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
       if (sourceTexture === undefined) continue
       const texture = layer.source === undefined
         ? sourceTexture
-        : new Texture({
-          source: sourceTexture.source,
-          frame: new Rectangle(layer.source.x, layer.source.y, layer.source.width, layer.source.height),
-        })
+        : new Texture({ source: sourceTexture.source, frame: new Rectangle(layer.source.x, layer.source.y, layer.source.width, layer.source.height) })
       if (texture !== sourceTexture) this.#layerTextures.add(texture)
       const sprite = new Sprite(texture)
       sprite.position.set(layer.destination.x, layer.destination.y)
@@ -347,24 +336,15 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
     const selection = new Graphics().ellipse(0, -2, 45, 15).stroke({ color: 0x58e2ff, width: 3, alpha: 0.95 })
     selection.visible = false
     const status = new Graphics()
-    const name = new Text({
-      text: entity.displayName,
-      style: { fontFamily: 'Microsoft YaHei, sans-serif', fontSize: 15, fontWeight: '700', fill: 0xf4f7fb, stroke: { color: 0x05080b, width: 4 } },
-    })
+    const name = new Text({ text: entity.displayName, style: { fontFamily: 'Microsoft YaHei, sans-serif', fontSize: 15, fontWeight: '700', fill: 0xf4f7fb, stroke: { color: 0x05080b, width: 4 } } })
     name.anchor.set(0.5, 0)
     name.position.set(0, -151)
-    const activity = new Text({
-      text: entity.activityLabel,
-      style: { fontFamily: 'Microsoft YaHei, sans-serif', fontSize: 12, fill: 0x8fd9e6, stroke: { color: 0x05080b, width: 3 } },
-    })
+    const activity = new Text({ text: entity.activityLabel, style: { fontFamily: 'Microsoft YaHei, sans-serif', fontSize: 12, fill: 0x8fd9e6, stroke: { color: 0x05080b, width: 3 } } })
     activity.anchor.set(0.5, 0)
     activity.position.set(0, -130)
     activity.visible = false
     root.addChild(shadow, selection, animation.sprite, status, name, activity)
-    root.on('pointertap', (event: FederatedPointerEvent) => {
-      event.stopPropagation()
-      this.#callbacks.onEntitySelect(entity.id)
-    })
+    root.on('pointertap', (event: FederatedPointerEvent) => { event.stopPropagation(); this.#callbacks.onEntitySelect(entity.id) })
     root.on('pointerover', () => { activity.visible = true })
     root.on('pointerout', () => { activity.visible = this.#selectedEntityId === entity.id })
     const actor: ActorView = { root, animation, selection, status, name, activity, state: entity, motion: undefined }
@@ -446,10 +426,7 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
     const compact = text.replace(/\s+/g, ' ').trim().slice(0, 38)
     if (!compact) return
     const bubble = new Container()
-    const label = new Text({
-      text: compact,
-      style: { fontFamily: 'Microsoft YaHei, sans-serif', fontSize: 14, fill: 0xf6f7f8, wordWrap: true, wordWrapWidth: 220, lineHeight: 20 },
-    })
+    const label = new Text({ text: compact, style: { fontFamily: 'Microsoft YaHei, sans-serif', fontSize: 14, fill: 0xf6f7f8, wordWrap: true, wordWrapWidth: 220, lineHeight: 20 } })
     const width = Math.min(240, Math.max(110, label.width + 24))
     const height = label.height + 18
     const plate = new Graphics().roundRect(-width / 2, -height, width, height, 9).fill({ color: 0x10171d, alpha: 0.96 }).stroke({ color: 0x4fd8ed, width: 1, alpha: 0.72 })
@@ -469,10 +446,7 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
 
   #wireCamera(): void {
     if (!this.#host) return
-    this.#wheelListener = (event) => {
-      event.preventDefault()
-      this.zoomBy(event.deltaY > 0 ? -0.1 : 0.1)
-    }
+    this.#wheelListener = (event) => { event.preventDefault(); this.zoomBy(event.deltaY > 0 ? -0.1 : 0.1) }
     this.#host.addEventListener('wheel', this.#wheelListener, { passive: false })
     this.#app.stage.eventMode = 'static'
     this.#app.stage.hitArea = this.#app.screen
@@ -481,10 +455,7 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
     })
     this.#app.stage.on('pointermove', (event: FederatedPointerEvent) => {
       if (this.#drag === undefined) return
-      this.#cameraOffset = {
-        x: this.#drag.offsetX + event.global.x - this.#drag.x,
-        y: this.#drag.offsetY + event.global.y - this.#drag.y,
-      }
+      this.#cameraOffset = { x: this.#drag.offsetX + event.global.x - this.#drag.x, y: this.#drag.offsetY + event.global.y - this.#drag.y }
       this.#applyCamera()
     })
     const release = () => { this.#drag = undefined }
@@ -492,8 +463,33 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
     this.#app.stage.on('pointerupoutside', release)
   }
 
+  #minimumZoomForCoverage(): number {
+    if (!this.#scene || !this.#host || this.#fitScale <= 0) return WORLD_MIN_ZOOM
+    const bounds = this.#scene.cameraBounds ?? { x: 0, y: 0, width: this.#scene.size.width, height: this.#scene.size.height }
+    const widthZoom = this.#host.clientWidth / Math.max(1, bounds.width * this.#fitScale)
+    const heightZoom = this.#host.clientHeight / Math.max(1, bounds.height * this.#fitScale)
+    return clamp(Math.max(WORLD_MIN_ZOOM, widthZoom, heightZoom), WORLD_MIN_ZOOM, WORLD_MAX_ZOOM)
+  }
+
+  #clampCameraOffset(scale: number): void {
+    if (!this.#scene || !this.#host) return
+    const bounds = this.#scene.cameraBounds ?? { x: 0, y: 0, width: this.#scene.size.width, height: this.#scene.size.height }
+    const viewportWidth = Math.max(1, this.#host.clientWidth)
+    const viewportHeight = Math.max(1, this.#host.clientHeight)
+    const minX = viewportWidth - (bounds.x + bounds.width) * scale
+    const maxX = -bounds.x * scale
+    const minY = viewportHeight - (bounds.y + bounds.height) * scale
+    const maxY = -bounds.y * scale
+    this.#cameraOffset = {
+      x: minX <= maxX ? clamp(this.#cameraOffset.x, minX, maxX) : (viewportWidth - bounds.width * scale) / 2 - bounds.x * scale,
+      y: minY <= maxY ? clamp(this.#cameraOffset.y, minY, maxY) : (viewportHeight - bounds.height * scale) / 2 - bounds.y * scale,
+    }
+  }
+
   #applyCamera(): void {
+    this.#zoom = Math.max(this.#zoom, this.#minimumZoomForCoverage())
     const scale = this.#fitScale * this.#zoom
+    this.#clampCameraOffset(scale)
     this.#camera.scale.set(scale)
     this.#camera.position.set(this.#cameraOffset.x, this.#cameraOffset.y)
   }
