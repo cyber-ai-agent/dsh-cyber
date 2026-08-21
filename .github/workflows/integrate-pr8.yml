@@ -17,12 +17,17 @@ jobs:
         with:
           fetch-depth: 0
           ref: merge/pr-8-integration
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
       - name: Fetch PR 8 head
         run: git fetch origin refs/pull/8/head:refs/remotes/origin/pr8
       - name: Attempt merge
         id: merge
         shell: bash
         run: |
+          rm -f PR8_CONFLICTS.txt
           set +e
           git merge --no-ff --no-edit refs/remotes/origin/pr8
           status=$?
@@ -37,9 +42,7 @@ jobs:
       - name: Persist conflict inventory
         if: steps.merge.outputs.conflicted == 'true'
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add PR8_CONFLICTS.txt
+          git add -f PR8_CONFLICTS.txt
           git commit -m "ci: capture PR 8 conflict inventory"
           git push origin HEAD:merge/pr-8-integration
       - name: Stop on conflicts
@@ -68,6 +71,4 @@ jobs:
       - name: Push verified merge commit
         if: steps.merge.outputs.conflicted == 'false'
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git push origin HEAD:merge/pr-8-integration
