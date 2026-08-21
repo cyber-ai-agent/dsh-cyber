@@ -11,7 +11,7 @@ import type {
   WorldThemeOption,
   WorldThemeSceneManifest,
 } from '@dsh-cyber/contracts'
-import { cyberCompanyTheme, findPath, getAnchor, getScene } from '@dsh-cyber/world-runtime'
+import { cyberCompanyTheme, findPath, getAnchor, getScene, moonlitTavernTheme } from '@dsh-cyber/world-runtime'
 
 import { api } from '../../api.js'
 import type { CyberEmployee } from '../../types.js'
@@ -33,7 +33,7 @@ interface UseWorldClientInput {
 }
 
 export function useWorldClient({ demoMode, world, employees }: UseWorldClientInput) {
-  const manifest = cyberCompanyTheme
+  const manifest = world.templateId.includes('tavern') ? moonlitTavernTheme : cyberCompanyTheme
   const [state, setState] = useState<WorldClientState>(() => ({
     manifest,
     rendererIdentity: builtInRendererIdentity(manifest),

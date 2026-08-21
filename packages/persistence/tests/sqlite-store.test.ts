@@ -410,15 +410,23 @@ describe('SqliteStore', () => {
     })
     const model = store.saveModelProfile({
       workspaceId: workspace.id,
-      displayName: '本地 Qwen',
+      displayName: '公司 sub2api',
       providerKind: 'openai-compatible-local',
-      baseUrl: 'http://127.0.0.1:11434/v1',
-      modelId: 'qwen3:14b',
+      baseUrl: 'http://172.16.1.125:11434/v1/',
+      modelId: 'qwen3.5:9b',
       api: 'openai-completions',
-      credentialEnvName: 'LOCAL_MODEL_API_KEY',
+      credentialEnvName: 'SUB2API_API_KEY',
       isDefault: true,
-      settings: { temperature: 0.3 },
+      settings: { providerId: 'custom-local', temperature: 0.3 },
     })
+    const updatedModel = store.saveModelProfile({
+      ...model,
+      displayName: '公司 sub2api（主线路）',
+      modelId: 'qwen3.5',
+      settings: { ...model.settings, contextWindow: 128_000 },
+    })
+    expect(updatedModel.id).toBe(model.id)
+    expect(store.listModelProfiles(workspace.id)).toHaveLength(1)
     expect(() =>
       store.saveModelProfile({
         ...model,
@@ -440,11 +448,53 @@ describe('SqliteStore', () => {
     expect(reopened.listModelProfiles(workspace.id)).toEqual([
       expect.objectContaining({
         id: model.id,
-        baseUrl: 'http://127.0.0.1:11434/v1',
-        credentialEnvName: 'LOCAL_MODEL_API_KEY',
+        displayName: '公司 sub2api（主线路）',
+        baseUrl: 'http://172.16.1.125:11434/v1',
+        modelId: 'qwen3.5',
+        credentialEnvName: 'SUB2API_API_KEY',
         isDefault: true,
       }),
     ])
+  })
+
+  it('deletes model profiles, clears routes, and promotes a fallback default', async () => {
+    const { store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: '模型删除工作区' })
+    const primary = store.saveModelProfile({
+      workspaceId: workspace.id,
+      displayName: 'A 主模型',
+      providerKind: 'openai-compatible-local',
+      baseUrl: 'http://192.168.10.8:8080/v1',
+      modelId: 'primary',
+      api: 'openai-completions',
+      isDefault: true,
+      settings: {},
+    })
+    const fallback = store.saveModelProfile({
+      workspaceId: workspace.id,
+      displayName: 'B 备用模型',
+      providerKind: 'openai-compatible-remote',
+      baseUrl: 'https://models.example.com/v1',
+      modelId: 'fallback',
+      api: 'openai-completions',
+      isDefault: false,
+      settings: {},
+    })
+    store.saveModelAssignment({ workspaceId: workspace.id, scope: 'workspace', scopeId: workspace.id, modelProfileId: primary.id })
+
+    expect(store.deleteModelProfile(workspace.id, primary.id)).toBe(true)
+    expect(store.listModelAssignments(workspace.id)).toEqual([])
+    expect(store.listModelProfiles(workspace.id)).toEqual([expect.objectContaining({ id: fallback.id, isDefault: true })])
+    expect(store.deleteModelProfile(workspace.id, primary.id)).toBe(false)
+    expect(() => store.saveModelProfile({
+      workspaceId: workspace.id,
+      displayName: '公网明文接口',
+      providerKind: 'openai-compatible-local',
+      baseUrl: 'http://203.0.113.10/v1',
+      modelId: 'unsafe',
+      api: 'openai-completions',
+      settings: {},
+    })).toThrow(/private-network/)
   })
 
   it('resolves model assignments from employee to world to workspace defaults', async () => {

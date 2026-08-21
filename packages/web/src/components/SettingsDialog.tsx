@@ -1,13 +1,17 @@
 import {
   ArrowsClockwise,
+  CheckCircle,
   Cpu,
   Database,
   Desktop,
   ImageSquare,
   Moon,
   Palette,
+  PencilSimple,
+  Plus,
   ShieldCheck,
   Sun,
+  Trash,
   X,
 } from '@phosphor-icons/react'
 import { useMemo, useState, type ReactNode } from 'react'
@@ -65,10 +69,13 @@ interface SettingsDialogProps {
   onClose(): void
   onSavePreferences(preferences: WorkspacePreferences): Promise<void>
   onUploadBackground(file: File): Promise<string>
-  onSaveModel(profile: Omit<ModelProfile, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt'>): Promise<void>
+  onSaveModel(profile: ModelProfileSaveDraft): Promise<ModelProfile>
+  onDeleteModel(modelProfileId: string): Promise<void>
   onAssignModel(input: { scope: ModelAssignment['scope']; scopeId: string; modelProfileId?: string }): Promise<void>
   onSystemAction(action: SystemAction, input?: SystemActionInput): Promise<SystemActionResult>
 }
+
+export type ModelProfileSaveDraft = Omit<ModelProfile, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt'> & { id?: string }
 
 const sections = [
   ['appearance', '外观与个性化', Palette],
@@ -89,6 +96,7 @@ interface ModelProviderPreset {
 }
 
 interface ModelDraft {
+  id?: string
   providerId: string
   displayName: string
   providerKind: ModelProviderKind
@@ -98,7 +106,8 @@ interface ModelDraft {
   credentialEnvName: string
   contextWindow: number
   maxTokens: number
-  temperature: number
+  isDefault: boolean
+  settings: ModelProfile['settings']
 }
 
 const MODEL_PRESETS: readonly ModelProviderPreset[] = [
@@ -112,9 +121,11 @@ const MODEL_PRESETS: readonly ModelProviderPreset[] = [
   { id: 'xai', label: 'xAI', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://api.x.ai/v1', credentialEnvName: 'XAI_API_KEY', modelPlaceholder: 'grok-4' },
   { id: 'ollama', label: 'Ollama（本地）', providerKind: 'openai-compatible-local', api: 'openai-completions', baseUrl: 'http://127.0.0.1:11434/v1', credentialEnvName: '', modelPlaceholder: 'qwen3:14b' },
   { id: 'lm-studio', label: 'LM Studio（本地）', providerKind: 'openai-compatible-local', api: 'openai-completions', baseUrl: 'http://127.0.0.1:1234/v1', credentialEnvName: '', modelPlaceholder: 'local-model' },
+  { id: 'custom-local', label: '自定义（本机或局域网）', providerKind: 'openai-compatible-local', api: 'openai-completions', baseUrl: '', credentialEnvName: '', modelPlaceholder: 'qwen3.5' },
+  { id: 'custom-remote', label: '自定义（HTTPS）', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: '', credentialEnvName: 'CUSTOM_API_KEY', modelPlaceholder: 'model-id' },
 ] as const
 
-function modelDraftForPreset(preset: ModelProviderPreset): ModelDraft {
+function modelDraftForPreset(preset: ModelProviderPreset, isDefault = false): ModelDraft {
   return {
     providerId: preset.id,
     displayName: preset.label,
@@ -125,8 +136,36 @@ function modelDraftForPreset(preset: ModelProviderPreset): ModelDraft {
     credentialEnvName: preset.credentialEnvName,
     contextWindow: 64_000,
     maxTokens: 8_192,
-    temperature: 0.3,
+    isDefault,
+    settings: {},
   }
+}
+
+function modelDraftForProfile(profile: ModelProfile): ModelDraft {
+  const configuredProviderId = typeof profile.settings.providerId === 'string' ? profile.settings.providerId : undefined
+  const fallbackProviderId = profile.providerKind === 'openai-compatible-local' ? 'custom-local' : 'custom-remote'
+  const providerId = MODEL_PRESETS.some((preset) => preset.id === configuredProviderId)
+    ? configuredProviderId!
+    : fallbackProviderId
+  return {
+    id: profile.id,
+    providerId,
+    displayName: profile.displayName,
+    providerKind: profile.providerKind,
+    baseUrl: profile.baseUrl,
+    modelId: profile.modelId,
+    api: profile.api,
+    credentialEnvName: profile.credentialEnvName ?? '',
+    contextWindow: modelSettingNumber(profile, 'contextWindow', 64_000),
+    maxTokens: modelSettingNumber(profile, 'maxTokens', 8_192),
+    isDefault: profile.isDefault,
+    settings: profile.settings,
+  }
+}
+
+function modelSettingNumber(profile: ModelProfile, key: string, fallback: number): number {
+  const value = profile.settings[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
 
 export function SettingsDialog({
@@ -142,6 +181,7 @@ export function SettingsDialog({
   onSavePreferences,
   onUploadBackground,
   onSaveModel,
+  onDeleteModel,
   onAssignModel,
   onSystemAction,
 }: SettingsDialogProps) {
@@ -151,7 +191,6 @@ export function SettingsDialog({
   const [pendingAction, setPendingAction] = useState<SystemAction>()
   const [actionResult, setActionResult] = useState<SystemActionResult>()
   const [actionError, setActionError] = useState<string>()
-  const [modelDraft, setModelDraft] = useState<ModelDraft>(() => modelDraftForPreset(MODEL_PRESETS[0]!))
   const changed = useMemo(() => JSON.stringify(draft) !== JSON.stringify(preferences), [draft, preferences])
   const runSystemAction = async (action: SystemAction, input?: SystemActionInput) => {
     setPendingAction(action)
@@ -205,24 +244,9 @@ export function SettingsDialog({
                 workspace={workspace}
                 worlds={worlds}
                 employees={employees}
-                draft={modelDraft}
-                onChange={setModelDraft}
                 onAssign={onAssignModel}
-                onSave={() => onSaveModel({
-                  displayName: modelDraft.displayName,
-                  providerKind: modelDraft.providerKind,
-                  baseUrl: modelDraft.baseUrl,
-                  modelId: modelDraft.modelId,
-                  api: modelDraft.api,
-                  ...(modelDraft.credentialEnvName ? { credentialEnvName: modelDraft.credentialEnvName } : {}),
-                  isDefault: models.length === 0,
-                  settings: {
-                    providerId: modelDraft.providerId,
-                    contextWindow: modelDraft.contextWindow,
-                    maxTokens: modelDraft.maxTokens,
-                    temperature: modelDraft.temperature,
-                  },
-                })}
+                onSave={onSaveModel}
+                onDelete={onDeleteModel}
               />
             ) : null}
             {section === 'runtime' ? <RuntimeSettings pending={pendingAction} result={actionResult} error={actionError} onRun={runSystemAction} /> : null}
@@ -231,8 +255,11 @@ export function SettingsDialog({
           </div>
         </div>
         <footer className="settings-dialog__footer">
-          <span>{saving ? '正在保存…' : changed ? '有未保存的外观更改' : '设置已同步到本地数据库'}</span>
-          <div><button className="text-button" type="button" onClick={onClose}>取消</button><button className="primary-button" type="button" disabled={!changed || saving} onClick={() => void onSavePreferences(draft)}>保存设置</button></div>
+          <span>{section === 'appearance' ? (saving ? '正在保存…' : changed ? '有未保存的外观更改' : '外观设置已同步到本地数据库') : section === 'models' ? '模型配置与路由在当前页面单独保存' : '本地设置与运行状态已同步'}</span>
+          <div>
+            <button className="text-button" type="button" onClick={onClose}>{section === 'appearance' ? '取消' : '关闭'}</button>
+            {section === 'appearance' ? <button className="primary-button" type="button" disabled={!changed || saving} onClick={() => void onSavePreferences(draft)}>保存外观设置</button> : null}
+          </div>
         </footer>
       </section>
     </div>
@@ -308,9 +335,8 @@ function ModelSettings({
   workspace,
   worlds,
   employees,
-  draft,
-  onChange,
   onSave,
+  onDelete,
   onAssign,
 }: {
   models: ModelProfile[]
@@ -318,30 +344,121 @@ function ModelSettings({
   workspace: Workspace
   worlds: World[]
   employees: EmployeeInstance[]
-  draft: ModelDraft
-  onChange(value: ModelDraft): void
-  onSave(): Promise<void>
+  onSave(profile: ModelProfileSaveDraft): Promise<ModelProfile>
+  onDelete(modelProfileId: string): Promise<void>
   onAssign(input: { scope: ModelAssignment['scope']; scopeId: string; modelProfileId?: string }): Promise<void>
 }) {
+  const [draft, setDraft] = useState<ModelDraft>(() => models[0] ? modelDraftForProfile(models[0]) : modelDraftForPreset(MODEL_PRESETS.find((preset) => preset.id === 'custom-local')!, true))
+  const [savingModel, setSavingModel] = useState(false)
+  const [deletingModelId, setDeletingModelId] = useState<string>()
+  const [modelError, setModelError] = useState<string>()
+  const [modelNotice, setModelNotice] = useState<string>()
   const assignmentValue = (scope: ModelAssignment['scope'], scopeId: string) =>
     assignments.find((item) => item.scope === scope && item.scopeId === scopeId)?.modelProfileId ?? ''
   const assign = (scope: ModelAssignment['scope'], scopeId: string, modelProfileId: string) =>
     onAssign({ scope, scopeId, ...(modelProfileId ? { modelProfileId } : {}) })
+  const editModel = (profile: ModelProfile) => {
+    setDraft(modelDraftForProfile(profile))
+    setModelError(undefined)
+    setModelNotice(undefined)
+  }
+  const startNewModel = () => {
+    const custom = MODEL_PRESETS.find((preset) => preset.id === 'custom-local')!
+    setDraft(modelDraftForPreset(custom, models.length === 0))
+    setModelError(undefined)
+    setModelNotice(undefined)
+  }
+  const saveDraft = async () => {
+    const validationError = validateModelDraft(draft)
+    if (validationError !== undefined) {
+      setModelError(validationError)
+      setModelNotice(undefined)
+      return
+    }
+    setSavingModel(true)
+    setModelError(undefined)
+    setModelNotice(undefined)
+    try {
+      const settings = { ...draft.settings }
+      delete settings.temperature
+      const saved = await onSave({
+        ...(draft.id ? { id: draft.id } : {}),
+        displayName: draft.displayName.trim(),
+        providerKind: draft.providerKind,
+        baseUrl: draft.baseUrl.trim(),
+        modelId: draft.modelId.trim(),
+        api: draft.api,
+        ...(draft.credentialEnvName.trim() ? { credentialEnvName: draft.credentialEnvName.trim() } : {}),
+        isDefault: draft.isDefault || models.length === 0,
+        settings: {
+          ...settings,
+          providerId: draft.providerId,
+          contextWindow: draft.contextWindow,
+          maxTokens: draft.maxTokens,
+        },
+      })
+      setDraft(modelDraftForProfile(saved))
+      setModelNotice(draft.id ? '模型配置已更新并保存。' : '模型配置已添加并保存。')
+    } catch (cause) {
+      setModelError(cause instanceof Error ? cause.message : '模型配置保存失败')
+    } finally {
+      setSavingModel(false)
+    }
+  }
+  const deleteProfile = async (profile: ModelProfile) => {
+    if (!window.confirm(`确定删除“${profile.displayName}”吗？相关模型路由会自动恢复为继承上级。`)) return
+    setDeletingModelId(profile.id)
+    setModelError(undefined)
+    setModelNotice(undefined)
+    try {
+      await onDelete(profile.id)
+      if (draft.id === profile.id) startNewModel()
+      setModelNotice('模型配置已删除。')
+    } catch (cause) {
+      setModelError(cause instanceof Error ? cause.message : '模型配置删除失败')
+    } finally {
+      setDeletingModelId(undefined)
+    }
+  }
   return (
-    <div className="settings-section">
+    <div className="settings-section settings-section--models">
       <div className="settings-section__heading"><h3>模型与路由</h3><p>模型配置保存在本地；密钥只引用环境变量。路由按员工 → 世界 → 工作区逐级继承。</p></div>
-      <div className="model-list">{models.map((model) => <article key={model.id}><Cpu size={20} /><div><strong>{model.displayName}</strong><span>{model.modelId} · {providerLabel(model)}</span></div><span>{model.isDefault ? '默认' : model.credentialEnvName ? model.credentialEnvName : '本地可用'}</span></article>)}</div>
-      <fieldset className="setting-group"><legend>添加模型提供商</legend><div className="setting-grid">
-        <label><span>提供商</span><select value={draft.providerId} onChange={(event) => { const preset = MODEL_PRESETS.find((item) => item.id === event.target.value); if (preset) onChange(modelDraftForPreset(preset)) }}>{MODEL_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}</select></label>
-        <label><span>名称</span><input value={draft.displayName} onChange={(event) => onChange({ ...draft, displayName: event.target.value })} /></label>
-        <label><span>模型 ID</span><input value={draft.modelId} placeholder={MODEL_PRESETS.find((item) => item.id === draft.providerId)?.modelPlaceholder} onChange={(event) => onChange({ ...draft, modelId: event.target.value })} /></label>
-        <label><span>接口协议</span><select value={draft.api} onChange={(event) => onChange({ ...draft, api: event.target.value as ModelApiKind })}><option value="openai-completions">OpenAI Chat Completions</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic-messages">Anthropic Messages</option></select></label>
-        <label className="setting-grid__wide"><span>Base URL</span><input value={draft.baseUrl} onChange={(event) => onChange({ ...draft, baseUrl: event.target.value })} /></label>
-        <label className="setting-grid__wide"><span>凭据环境变量名（不保存密钥）</span><input value={draft.credentialEnvName} placeholder="PROVIDER_API_KEY" onChange={(event) => onChange({ ...draft, credentialEnvName: event.target.value })} /></label>
-        <label><span>上下文窗口</span><input type="number" min="1024" step="1024" value={draft.contextWindow} onChange={(event) => onChange({ ...draft, contextWindow: Number(event.target.value) })} /></label>
-        <label><span>最大输出 Token</span><input type="number" min="256" step="256" value={draft.maxTokens} onChange={(event) => onChange({ ...draft, maxTokens: Number(event.target.value) })} /></label>
-        <label><span>温度 {draft.temperature.toFixed(1)}</span><input type="range" min="0" max="2" step="0.1" value={draft.temperature} onChange={(event) => onChange({ ...draft, temperature: Number(event.target.value) })} /></label>
-      </div><button className="secondary-button" type="button" disabled={!draft.modelId.trim()} onClick={() => void onSave()}>保存模型配置</button></fieldset>
+      <div className="model-config-layout">
+        <section className="model-profile-panel" aria-label="已保存的模型配置">
+          <header><div><h4>模型配置</h4><span>{models.length} 个已保存配置</span></div><button className="secondary-button" type="button" onClick={startNewModel}><Plus size={16} />添加配置</button></header>
+          <div className="model-list">
+            {models.length === 0 ? <div className="model-list__empty"><Cpu size={22} /><strong>还没有模型配置</strong><span>添加本地、局域网或 HTTPS 模型接口。</span></div> : null}
+            {models.map((model) => (
+              <article key={model.id} className={draft.id === model.id ? 'is-active' : ''}>
+                <Cpu size={22} />
+                <div><strong>{model.displayName}</strong><span>{model.modelId}</span><small>{providerLabel(model)} · {model.credentialEnvName ? `凭据：${model.credentialEnvName}` : '无需凭据'}</small></div>
+                <div className="model-profile-actions">
+                  {model.isDefault ? <span className="model-default-badge"><CheckCircle size={14} />默认</span> : null}
+                  <button type="button" aria-label={`编辑${model.displayName}`} onClick={() => editModel(model)}><PencilSimple size={15} />编辑</button>
+                  <button className="is-danger" type="button" aria-label={`删除${model.displayName}`} disabled={deletingModelId === model.id} onClick={() => void deleteProfile(model)}><Trash size={15} />{deletingModelId === model.id ? '删除中' : '删除'}</button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+        <form className="model-editor-panel" aria-label="模型配置编辑器" onSubmit={(event) => { event.preventDefault(); void saveDraft() }}>
+          <header><div><h4>{draft.id ? '编辑模型配置' : '添加模型配置'}</h4><p>{draft.id ? '修改后会覆盖当前配置，不会产生重复条目。' : '支持本机、局域网 sub2api 与 HTTPS 服务。'}</p></div>{draft.id ? <button className="text-button" type="button" onClick={startNewModel}>取消编辑</button> : null}</header>
+          {modelError ? <p className="model-form-message model-form-message--error" role="alert">{modelError}</p> : null}
+          {modelNotice ? <p className="model-form-message model-form-message--success" role="status"><CheckCircle size={16} />{modelNotice}</p> : null}
+          <div className="setting-grid model-setting-grid">
+            <label><span>提供商类型</span><select value={draft.providerId} onChange={(event) => { const preset = MODEL_PRESETS.find((item) => item.id === event.target.value); if (preset) setDraft({ ...modelDraftForPreset(preset, draft.isDefault), ...(draft.id ? { id: draft.id } : {}) }) }}>{MODEL_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}</select></label>
+            <label><span>显示名称</span><input value={draft.displayName} placeholder="例如：公司内网 sub2api" onChange={(event) => setDraft({ ...draft, displayName: event.target.value })} /></label>
+            <label className="setting-grid__wide"><span>接口地址</span><input inputMode="url" value={draft.baseUrl} placeholder={draft.providerKind === 'openai-compatible-local' ? 'http://192.168.1.10:11434/v1' : 'https://api.example.com/v1'} onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })} /><small>本机或局域网可使用 HTTP；公网服务必须使用 HTTPS。</small></label>
+            <label><span>接口协议</span><select value={draft.api} onChange={(event) => setDraft({ ...draft, api: event.target.value as ModelApiKind })}><option value="openai-completions">OpenAI 对话补全</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic-messages">Anthropic 消息</option></select></label>
+            <label><span>模型 ID</span><input value={draft.modelId} placeholder={MODEL_PRESETS.find((item) => item.id === draft.providerId)?.modelPlaceholder} onChange={(event) => setDraft({ ...draft, modelId: event.target.value })} /></label>
+            <label className="setting-grid__wide"><span>凭据环境变量名</span><input value={draft.credentialEnvName} placeholder="SUB2API_API_KEY（无凭据可留空）" onChange={(event) => setDraft({ ...draft, credentialEnvName: event.target.value })} /><small>这里只保存环境变量名称，不会把 API 密钥写入本地数据库。</small></label>
+            <label><span>上下文窗口</span><input type="number" min="1024" step="1" value={draft.contextWindow} onChange={(event) => setDraft({ ...draft, contextWindow: Number(event.target.value) })} /></label>
+            <label><span>最大输出 Token</span><input type="number" min="256" step="256" value={draft.maxTokens} onChange={(event) => setDraft({ ...draft, maxTokens: Number(event.target.value) })} /></label>
+          </div>
+          <label className="model-default-control"><input type="checkbox" checked={draft.isDefault || models.length === 0} disabled={models.length === 0} onChange={(event) => setDraft({ ...draft, isDefault: event.target.checked })} /><span><strong>设为工作区默认模型</strong><small>未单独分配模型的世界和员工会使用此配置。</small></span></label>
+          <footer><span>{draft.id ? '正在编辑已保存配置' : '新配置保存后立即可用于路由'}</span><button className="primary-button" type="submit" disabled={savingModel}>{savingModel ? '正在保存…' : draft.id ? '保存修改' : '添加并保存'}</button></footer>
+        </form>
+      </div>
       <fieldset className="setting-group"><legend>模型分配</legend>
         <div className="model-routing-list">
           <ModelRouteRow label="工作区默认" detail={workspace.name} value={assignmentValue('workspace', workspace.id)} models={models} onChange={(value) => void assign('workspace', workspace.id, value)} />
@@ -351,6 +468,21 @@ function ModelSettings({
       </fieldset>
     </div>
   )
+}
+
+function validateModelDraft(draft: ModelDraft): string | undefined {
+  if (!draft.displayName.trim()) return '请输入模型配置名称。'
+  if (!draft.baseUrl.trim()) return '请输入模型接口地址。'
+  try {
+    new URL(draft.baseUrl.trim())
+  } catch {
+    return '模型接口地址格式不正确。'
+  }
+  if (!draft.modelId.trim()) return '请输入模型 ID。'
+  if (draft.credentialEnvName.trim() && !/^[A-Z_][A-Z0-9_]*$/.test(draft.credentialEnvName.trim())) return '凭据环境变量名只能使用大写字母、数字和下划线，且不能以数字开头。'
+  if (!Number.isInteger(draft.contextWindow) || draft.contextWindow < 1_024) return '上下文窗口必须是不小于 1024 的整数。'
+  if (!Number.isInteger(draft.maxTokens) || draft.maxTokens < 256) return '最大输出 Token 必须是不小于 256 的整数。'
+  return undefined
 }
 
 function ModelRouteRow({ label, detail, value, models, onChange }: { label: string; detail: string; value: string; models: ModelProfile[]; onChange(value: string): void }) {

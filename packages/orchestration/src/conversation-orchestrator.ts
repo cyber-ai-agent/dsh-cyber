@@ -95,6 +95,7 @@ export interface GroupConversationInput {
   prompt: string
   metadata?: JsonObject
   runtimePrompt?: string
+  sessionId?: string
   title?: string
 }
 
@@ -177,19 +178,21 @@ export class ConversationOrchestrator implements AsyncDisposable {
     const employees = employeeIds.map((employeeId) =>
       this.#requireEmployeeInWorld(employeeId, input.workspaceId, input.worldId),
     )
-    const session = this.#store.createSession({
-      workspaceId: input.workspaceId,
-      worldId: input.worldId,
-      kind: 'group',
-      title: input.title?.trim() || conciseTitle(prompt),
-      participants: [
-        { participantId: 'owner', kind: 'owner' },
-        ...employees.map((employee) => ({
-          participantId: employee.id,
-          kind: 'employee' as const,
-        })),
-      ],
-    })
+    const session = input.sessionId
+      ? this.#requireGroupSession(input.sessionId, input.workspaceId, input.worldId, employeeIds)
+      : this.#store.createSession({
+          workspaceId: input.workspaceId,
+          worldId: input.worldId,
+          kind: 'group',
+          title: input.title?.trim() || conciseTitle(prompt),
+          participants: [
+            { participantId: 'owner', kind: 'owner' },
+            ...employees.map((employee) => ({
+              participantId: employee.id,
+              kind: 'employee' as const,
+            })),
+          ],
+        })
     this.#store.appendMessage({
       sessionId: session.id,
       senderId: 'owner',
@@ -499,6 +502,36 @@ export class ConversationOrchestrator implements AsyncDisposable {
     const participants = this.#store.listParticipants(session.id)
     if (!participants.some((participant) => participant.participantId === employeeId)) {
       this.#store.addParticipant(session.id, employeeId, 'employee')
+    }
+    return session
+  }
+
+  #requireGroupSession(
+    sessionId: string,
+    workspaceId: string,
+    worldId: string,
+    employeeIds: string[],
+  ): WorkSession {
+    const session = this.#store.getSession(sessionId)
+    if (
+      session === undefined ||
+      session.kind !== 'group' ||
+      session.workspaceId !== workspaceId ||
+      session.worldId !== worldId ||
+      session.status !== 'open'
+    ) {
+      throw new ConversationOrchestrationError('Group session is unavailable')
+    }
+    const existingIds = this.#store.listParticipants(session.id)
+      .filter((participant) => participant.kind === 'employee')
+      .map((participant) => participant.participantId)
+      .sort()
+    const requestedIds = [...employeeIds].sort()
+    if (
+      existingIds.length !== requestedIds.length ||
+      existingIds.some((participantId, index) => participantId !== requestedIds[index])
+    ) {
+      throw new ConversationOrchestrationError('Group session participants do not match')
     }
     return session
   }

@@ -9,7 +9,7 @@ import {
   UsersThree,
   X,
 } from '@phosphor-icons/react'
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useMemo, useState, type CSSProperties } from 'react'
 import type { World } from '@dsh-cyber/contracts'
 
 import type { CyberEmployee } from '../types.js'
@@ -34,17 +34,11 @@ const tavernPositions = [
 ] as const
 
 export function WorldView({ world, employees, sceneImage, onSelectEmployee, onInvite }: WorldViewProps) {
-  const [now, setNow] = useState(() => new Date())
   const [lightsOn, setLightsOn] = useState(true)
   const [zoom, setZoom] = useState(1)
   const [expanded, setExpanded] = useState(false)
   const experience = worldExperience(world)
   const working = employees.filter((employee) => employee.status === 'working').length
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(new Date()), 1_000)
-    return () => window.clearInterval(timer)
-  }, [])
 
   const scene = useMemo(() => (
     <WorldScene
@@ -52,12 +46,11 @@ export function WorldView({ world, employees, sceneImage, onSelectEmployee, onIn
       employees={employees}
       {...(sceneImage === undefined ? {} : { sceneImage })}
       lightsOn={lightsOn}
-      now={now}
       zoom={zoom}
       onSelectEmployee={onSelectEmployee}
       onInvite={onInvite}
     />
-  ), [employees, experience.kind, lightsOn, now, onInvite, onSelectEmployee, sceneImage, zoom])
+  ), [employees, experience.kind, lightsOn, onInvite, onSelectEmployee, sceneImage, zoom])
 
   return (
     <div className={`world-view world-view--${experience.kind}`}>
@@ -86,7 +79,7 @@ export function WorldView({ world, employees, sceneImage, onSelectEmployee, onIn
       {expanded ? (
         <div className="world-expanded" role="dialog" aria-modal="true" aria-label={`${world.name}沉浸世界`}>
           <header>
-            <div><strong>{world.name} · {experience.sceneTitle}</strong><span>{now.toLocaleString('zh-CN', { hour12: false })}</span></div>
+            <div><strong>{world.name} · {experience.sceneTitle}</strong><span>{experience.sceneSubtitle}</span></div>
             <button type="button" onClick={() => setExpanded(false)}><X size={20} />关闭</button>
           </header>
           <div className="world-expanded__scene">{scene}</div>
@@ -116,19 +109,18 @@ function WorldControls({ lightsOn, zoom, setLightsOn, setZoom }: {
   )
 }
 
-function WorldScene({ kind, employees, sceneImage, lightsOn, now, zoom, onSelectEmployee, onInvite }: {
+function WorldScene({ kind, employees, sceneImage, lightsOn, zoom, onSelectEmployee, onInvite }: {
   kind: 'company' | 'tavern' | 'studio'
   employees: CyberEmployee[]
   sceneImage?: string
   lightsOn: boolean
-  now: Date
   zoom: number
   onSelectEmployee(employeeId: string): void
   onInvite(): void
 }) {
   const isTavern = kind === 'tavern'
   const positions = isTavern ? tavernPositions : companyPositions
-  const image = sceneImage ?? (isTavern ? '/assets/moonlit-tavern-world.png' : '/assets/cyber-office-world.png')
+  const image = sceneImage ?? (isTavern ? '/assets/moonlit-tavern-world.png' : '/assets/cyber-office-world-clean.png')
   const activeSpeaker = employees.find((employee) => employee.status === 'working')
 
   return (
@@ -144,14 +136,7 @@ function WorldScene({ kind, employees, sceneImage, lightsOn, now, zoom, onSelect
             </div>
             <div className="tavern-turn-order"><span>发言策略</span><strong>自然顺序</strong><small>@ 点名可强制下一位角色</small></div>
           </>
-        ) : (
-          <>
-            <div className="world-clock"><span>LOCAL TIME</span><strong>{now.toLocaleTimeString('zh-CN', { hour12: false })}</strong></div>
-            <div className="world-slogan"><strong>把复杂留给系统</strong><span>把结果交给老板</span></div>
-            <div className="world-screen-feed world-screen-feed--left"><i /><span>运行任务</span><strong>{employees.filter((employee) => employee.status === 'working').length}/{employees.length}</strong></div>
-            <div className="world-screen-feed world-screen-feed--right"><i /><span>在线角色</span><strong>{employees.filter((employee) => employee.status !== 'archived').length}</strong></div>
-          </>
-        )}
+        ) : null}
 
         {employees.length === 0 ? (
           <div className="world-empty-cast">

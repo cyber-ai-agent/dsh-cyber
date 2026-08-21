@@ -13,7 +13,7 @@ import {
 import { useMemo, useRef, useState } from 'react'
 import type { ChatAttachment, JsonObject, WorkMessage, WorkSession, World } from '@dsh-cyber/contracts'
 
-import type { CyberEmployee, LiveAgentTurn, ToolStep } from '../types.js'
+import type { ConversationIntent, CyberEmployee, LiveAgentTurn, ToolStep } from '../types.js'
 import { worldExperience } from '../world-experience.js'
 import { Avatar } from './Avatar.js'
 
@@ -21,6 +21,8 @@ interface ChatWorkbenchProps {
   demoMode: boolean
   world: World
   session?: WorkSession
+  intent?: ConversationIntent
+  participantIds?: string[]
   messages: WorkMessage[]
   employees: CyberEmployee[]
   liveTurns: LiveAgentTurn[]
@@ -38,6 +40,8 @@ export function ChatWorkbench({
   demoMode,
   world,
   session,
+  intent,
+  participantIds = [],
   messages,
   employees,
   liveTurns,
@@ -61,6 +65,11 @@ export function ChatWorkbench({
     if (mention === undefined) return []
     return employees.filter((employee) => employee.displayName.includes(mention)).slice(0, 6)
   }, [employees, mention])
+  const participantEmployees = participantIds
+    .map((employeeId) => employees.find((employee) => employee.id === employeeId))
+    .filter((employee): employee is CyberEmployee => employee !== undefined)
+  const conversationTitle = session?.title ?? intent?.title ?? '选择员工开始对话'
+  const conversationKind = session?.kind ?? intent?.kind
 
   const submit = async () => {
     const prompt = draft.trim()
@@ -109,23 +118,32 @@ export function ChatWorkbench({
   return (
     <section className="chat-workbench" aria-label="当前世界多角色会话">
       <header className="chat-header">
-        <div>
-          <h1>{session?.title ?? '新会话'}</h1>
-          <p>{session === undefined ? `点名一名或多名${experience.personLabel}开始互动` : `${messages.length} 条消息 · 当前世界独立上下文`}</p>
+        <div className="chat-header__identity">
+          <span className="chat-header__avatars" aria-hidden="true">
+            {participantEmployees.slice(0, 3).map((employee) => <Avatar key={employee.id} index={employee.avatarIndex} size="sm" label={employee.displayName} />)}
+          </span>
+          <span>
+            <h1>{conversationTitle}</h1>
+            <p>{conversationKind === undefined
+              ? `从左侧通讯录选择一名${experience.personLabel}，或创建群聊`
+              : `${conversationKind === 'group' ? '群聊' : '私聊'} · ${participantEmployees.length} 名成员 · ${world.name}`}</p>
+          </span>
         </div>
-        <button className="text-button" type="button">会话成员 <span>{participantCount(messages)}</span></button>
+        <div className="chat-header__count">{messages.length}<span>条消息</span></div>
       </header>
 
       <div className="message-scroll" aria-live="polite" aria-busy={sending}>
         {messages.length === 0 ? (
           <div className="conversation-empty">
             <TerminalWindow size={34} />
-            <h2>{employees.length === 0 ? experience.emptyTitle : experience.kind === 'tavern' ? '从一句话开始今晚的故事' : `向当前世界的${experience.peopleLabel}发起${experience.actionLabel}`}</h2>
+            <h2>{employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? '群聊已准备好' : conversationKind === 'direct' ? `开始与${participantEmployees[0]?.displayName ?? experience.personLabel}对话` : '选择联系人开始工作'}</h2>
             <p>{employees.length === 0
               ? experience.emptyCopy
-              : experience.kind === 'tavern'
-                ? '输入 @角色名 可指定下一位发言者；不点名时，角色将按人物关系和场景自然决定谁回应。'
-                : '输入 @角色名 可直接和独立 Agent 对话；同时点名多人会创建真实群组会话。'}</p>
+              : conversationKind === 'group'
+                ? '发送第一条消息后，群聊和多人协作任务才会正式创建。关闭或切换不会让员工提前进入会议状态。'
+                : conversationKind === 'direct'
+                  ? '历史记录会保留在当前世界；发送消息后员工才会进入真实任务生命周期。'
+                  : '员工像通讯录联系人一样工作：单击私聊，也可以从左上角创建多人群聊。'}</p>
             {employees.length === 0 ? <button className="primary-button" type="button" onClick={onRecruit}>{experience.kind === 'tavern' ? '邀请第一张角色卡' : `添加第一名${experience.personLabel}`}</button> : null}
           </div>
         ) : messages.map((message, index) => {
@@ -201,7 +219,13 @@ export function ChatWorkbench({
                 void submit()
               }
             }}
-            placeholder={employees.length === 0 ? experience.emptyTitle : experience.composerPlaceholder}
+            placeholder={employees.length === 0
+              ? experience.emptyTitle
+              : conversationKind === 'group'
+                ? `发送消息给 ${participantEmployees.map((employee) => employee.displayName).join('、')}`
+                : conversationKind === 'direct'
+                  ? `发送消息给 ${participantEmployees[0]?.displayName ?? experience.personLabel}`
+                  : '先从左侧选择联系人，或输入 @员工名'}
             rows={2}
             aria-label={`给当前世界的${experience.peopleLabel}发送消息`}
           />
@@ -366,10 +390,6 @@ function displayTime(message: WorkMessage): string {
   return typeof metadataTime === 'string'
     ? metadataTime
     : new Date(message.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-}
-
-function participantCount(messages: WorkMessage[]): number {
-  return new Set(messages.map((message) => message.senderId)).size
 }
 
 function currentMention(value: string): string | undefined {

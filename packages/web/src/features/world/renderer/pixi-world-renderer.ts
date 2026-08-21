@@ -238,12 +238,11 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
     const availableHeight = Math.max(this.#host.clientHeight, 1)
     const containScale = Math.min(availableWidth / this.#scene.size.width, availableHeight / this.#scene.size.height)
     const coverScale = Math.max(availableWidth / this.#scene.size.width, availableHeight / this.#scene.size.height)
-    const presentationScale = Math.min(coverScale, containScale * 1.35)
     this.#fitScale = containScale
-    this.#zoom = presentationScale / containScale
+    this.#zoom = coverScale / containScale
     this.#cameraOffset = {
-      x: (availableWidth - this.#scene.size.width * presentationScale) / 2,
-      y: (availableHeight - this.#scene.size.height * presentationScale) / 2,
+      x: (availableWidth - this.#scene.size.width * coverScale) / 2,
+      y: (availableHeight - this.#scene.size.height * coverScale) / 2,
     }
     this.#applyCamera()
   }

@@ -1,13 +1,15 @@
 import {
   Buildings,
-  ChatCircleDots,
+  CaretDown,
+  Check,
+  Compass,
   Cube,
   GearSix,
   Pulse,
   SidebarSimple,
   Storefront,
 } from '@phosphor-icons/react'
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type {
   AgentRuntimeEvent,
   ChatAttachment,
@@ -28,6 +30,7 @@ import type {
   RuntimeUpdateTransaction,
   WorkMessage,
   WorkSession,
+  WorkSessionParticipant,
   Workspace,
   WorkspacePreferences,
   WorkspaceSnapshot,
@@ -39,15 +42,16 @@ import { api } from './api.js'
 import { ArtifactDock } from './components/ArtifactDock.js'
 import { ChatWorkbench } from './components/ChatWorkbench.js'
 import { EmployeeManagementDialog } from './components/EmployeeManagementDialog.js'
+import { GroupConversationDialog } from './components/GroupConversationDialog.js'
 import { NavigationPane } from './components/NavigationPane.js'
 import { PackageMarketDialog } from './components/PackageMarketDialog.js'
 import { RecruitmentDialog } from './components/RecruitmentDialog.js'
 import { ResizableShell } from './components/ResizableShell.js'
-import { SettingsDialog, type SettingsSection, type SystemAction, type SystemActionInput, type SystemActionResult } from './components/SettingsDialog.js'
+import { SettingsDialog, type ModelProfileSaveDraft, type SettingsSection, type SystemAction, type SystemActionInput, type SystemActionResult } from './components/SettingsDialog.js'
 import { demoData, demoTavernDossiers, demoTavernEmployees, demoTavernMessages, demoTavernSessions } from './demo-data.js'
-import type { CyberEmployee, DockTab, LiveAgentTurn } from './types.js'
+import type { ConversationIntent, CyberEmployee, DockTab, LiveAgentTurn, SessionParticipantMap } from './types.js'
 import { worldExperience } from './world-experience.js'
-import { WorldMode } from './features/world/WorldMode.js'
+import { WorldRuntimeDock } from './features/world/WorldRuntimeDock.js'
 
 const demoMode = new URLSearchParams(window.location.search).get('demo') === '1'
 const worldRuntimeV2Enabled = new URLSearchParams(window.location.search).get('legacyWorld') !== '1'
@@ -72,6 +76,8 @@ export default function App() {
   const [employees, setEmployees] = useState<CyberEmployee[]>(demoMode ? demoData.employees : [])
   const [sessions, setSessions] = useState<WorkSession[]>(demoMode ? demoData.sessions : [])
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(demoMode ? demoData.sessions[0]?.id : undefined)
+  const [sessionParticipants, setSessionParticipants] = useState<SessionParticipantMap>(() => demoMode ? inferDemoSessionParticipants(demoData.sessions, demoData.messages, demoData.employees) : {})
+  const [conversationIntent, setConversationIntent] = useState<ConversationIntent>()
   const [messages, setMessages] = useState<WorkMessage[]>(demoMode ? demoData.messages : [])
   const [liveTurns, setLiveTurns] = useState<LiveAgentTurn[]>([])
   const [preferences, setPreferences] = useState<WorkspacePreferences | undefined>(demoMode ? demoData.preferences : undefined)
@@ -87,6 +93,7 @@ export default function App() {
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('appearance')
   const [savingSettings, setSavingSettings] = useState(false)
   const [recruitmentOpen, setRecruitmentOpen] = useState(false)
+  const [groupDialogOpen, setGroupDialogOpen] = useState(false)
   const [packageMarketOpen, setPackageMarketOpen] = useState(false)
   const [packageMarketKind, setPackageMarketKind] = useState<CyberMarketKind>('plugin')
   const [marketplaceItems, setMarketplaceItems] = useState<CyberMarketPackage[]>([])
@@ -106,6 +113,8 @@ export default function App() {
   const [worldRuntimeRevision, setWorldRuntimeRevision] = useState(0)
 
   const activeSession = sessions.find((session) => session.id === activeSessionId)
+  const activeParticipantIds = conversationIntent?.employeeIds
+    ?? (activeSessionId === undefined ? [] : sessionParticipants[activeSessionId] ?? [])
   const experience = activeWorld === undefined ? undefined : worldExperience(activeWorld)
   const selectedEmployee = employees.find((employee) => employee.id === selectedEmployeeId)
   const managingEmployee = employees.find((employee) => employee.id === managingEmployeeId)
@@ -117,6 +126,8 @@ export default function App() {
     setError(undefined)
     setActiveWorld(world)
     setActiveSessionId(undefined)
+    setSessionParticipants({})
+    setConversationIntent(undefined)
     setMessages([])
     setLiveTurns([])
     setDraft('')
@@ -124,14 +135,15 @@ export default function App() {
     setDockTab('world')
     if (demoMode) {
       const isCompany = world.id === demoData.activeWorld.id
-      setWorldRuntimeAvailable(isCompany)
-      setAppMode(worldRuntimeV2Enabled && isCompany ? 'world' : 'workbench')
+      setWorldRuntimeAvailable(true)
+      setAppMode(worldRuntimeV2Enabled ? 'world' : 'workbench')
       const nextEmployees = isCompany ? demoData.employees : demoTavernEmployees
       const nextSessions = isCompany ? demoData.sessions : demoTavernSessions
       const nextMessages = isCompany ? demoData.messages : demoTavernMessages
       setEmployees(nextEmployees)
       setSessions(nextSessions)
       setMessages(nextMessages)
+      setSessionParticipants(inferDemoSessionParticipants(nextSessions, nextMessages, nextEmployees))
       setDossiers(isCompany ? demoData.dossiers : demoTavernDossiers)
       setActiveSessionId(nextSessions[0]?.id)
       return
@@ -142,13 +154,23 @@ export default function App() {
     ])
     setWorldRuntimeAvailable(capability.supported)
     setAppMode(worldRuntimeV2Enabled && capability.supported ? 'world' : 'workbench')
-    const dossierResults = await Promise.all(snapshot.employees.map(async (employee) => {
+    const [dossierResults, participantResults] = await Promise.all([
+      Promise.all(snapshot.employees.map(async (employee) => {
       try {
         return await api<EmployeeDossier>(`/api/employees/${employee.id}/dossier`)
       } catch {
         return undefined
       }
-    }))
+      })),
+      Promise.all(snapshot.openSessions.map(async (session) => {
+        try {
+          const result = await api<{ items: WorkSessionParticipant[] }>(`/api/sessions/${session.id}/participants`)
+          return [session.id, result.items.filter((participant) => participant.kind === 'employee').map((participant) => participant.participantId)] as const
+        } catch {
+          return [session.id, []] as const
+        }
+      })),
+    ])
     const nextDossiers: Record<string, EmployeeDossier> = {}
     for (const dossier of dossierResults) {
       if (dossier !== undefined) nextDossiers[dossier.employee.id] = dossier
@@ -156,6 +178,7 @@ export default function App() {
     setDossiers(nextDossiers)
     setEmployees(snapshot.employees.map((employee, index) => toCyberEmployee(employee, index, nextDossiers[employee.id])))
     setSessions(snapshot.openSessions)
+    setSessionParticipants(Object.fromEntries(participantResults))
   }, [])
 
   const bindWorldTheme = useCallback(async (packageId: string) => {
@@ -208,7 +231,14 @@ export default function App() {
     if (demoMode || activeSessionId === undefined) return
     let cancelled = false
     void api<{ items: WorkMessage[] }>(`/api/sessions/${activeSessionId}/messages`)
-      .then((result) => { if (!cancelled) setMessages(result.items) })
+      .then((result) => {
+        if (cancelled) return
+        setMessages(result.items)
+        const participantIds = participantIdsFromMessages(result.items)
+        if (participantIds.length > 0) {
+          setSessionParticipants((current) => ({ ...current, [activeSessionId]: participantIds }))
+        }
+      })
       .catch((cause: unknown) => { if (!cancelled) setError(cause instanceof Error ? cause.message : '会话加载失败') })
     return () => { cancelled = true }
   }, [activeSessionId])
@@ -263,12 +293,36 @@ export default function App() {
   }, [dossiers])
 
   const directEmployee = useCallback((employee: CyberEmployee) => {
-    const existing = sessions.find((session) => session.kind === 'direct' && session.title.includes(employee.displayName))
+    const existing = sessions.find((session) => session.kind === 'direct' && (
+      sessionParticipants[session.id]?.includes(employee.id) === true ||
+      (sessionParticipants[session.id]?.length ?? 0) === 0 && session.title.includes(employee.displayName)
+    ))
     setActiveSessionId(existing?.id)
+    setConversationIntent(existing === undefined ? {
+      kind: 'direct',
+      employeeIds: [employee.id],
+      title: `与 ${employee.displayName} 对话`,
+    } : undefined)
     if (existing === undefined) setMessages([])
-    setDraft(`@${employee.displayName} `)
+    setDraft('')
     setSelectedEmployeeId(employee.id)
-  }, [sessions])
+  }, [sessionParticipants, sessions])
+
+  const createGroupIntent = useCallback((input: { title: string; employeeIds: string[] }) => {
+    const selected = employees.filter((employee) => input.employeeIds.includes(employee.id))
+    if (selected.length < 2) return
+    setGroupDialogOpen(false)
+    setActiveSessionId(undefined)
+    setMessages([])
+    setLiveTurns([])
+    setDraft('')
+    setConversationIntent({
+      kind: 'group',
+      employeeIds: selected.map((employee) => employee.id),
+      title: input.title.trim() || selected.map((employee) => employee.displayName).join('、'),
+    })
+    setSelectedEmployeeId(selected[0]?.id)
+  }, [employees])
 
   const openRecruitment = useCallback(async () => {
     if (activeWorld === undefined) return
@@ -448,13 +502,20 @@ export default function App() {
       const mapped = toCyberEmployee(employee, employees.length)
       setEmployees((current) => [...current, mapped])
       setRecruitmentOpen(false)
-      setDraft(`@${employee.displayName} `)
+      setActiveSessionId(undefined)
+      setConversationIntent({
+        kind: 'direct',
+        employeeIds: [employee.id],
+        title: `与 ${employee.displayName} 对话`,
+      })
+      setDraft('')
+      setSelectedEmployeeId(employee.id)
+      setAppMode('world')
+      setDockTab('world')
+      setDockCollapsed(false)
       if (!demoMode) {
         const dossier = await api<EmployeeDossier>(`/api/employees/${employee.id}/dossier`)
         setDossiers((current) => ({ ...current, [employee.id]: dossier }))
-        setSelectedEmployeeId(employee.id)
-        setDockTab('dossier')
-        setDockCollapsed(false)
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '招聘失败')
@@ -581,13 +642,16 @@ export default function App() {
   }, [managingEmployee, selectedEmployeeId])
 
   const selectSession = useCallback((sessionId: string) => {
+    setConversationIntent(undefined)
     setActiveSessionId(sessionId)
+    setDraft('')
+    setSelectedEmployeeId(sessionParticipants[sessionId]?.[0])
     if (demoMode) {
       setMessages(sessionId === demoData.sessions[0]?.id
         ? demoData.messages
         : sessionId === demoTavernSessions[0]?.id ? demoTavernMessages : [])
     }
-  }, [])
+  }, [sessionParticipants])
 
   const send = useCallback(async (prompt: string, attachments: ChatAttachment[]) => {
     if (activeWorld === undefined) return
@@ -595,10 +659,20 @@ export default function App() {
     setLiveTurns([])
     setError(undefined)
     try {
+      const explicitEmployeeIds = conversationIntent?.employeeIds
+        ?? (activeSessionId === undefined ? [] : sessionParticipants[activeSessionId] ?? [])
+      const mentioned = employees.filter((employee) => prompt.includes(`@${employee.displayName}`))
+      const targetIds = explicitEmployeeIds.length > 0 ? explicitEmployeeIds : mentioned.map((employee) => employee.id)
       if (demoMode) {
-        const session = activeSession ?? makeDemoSession(activeWorld, prompt)
-        const mentioned = employees.filter((employee) => prompt.includes(`@${employee.displayName}`))
-        const targets = mentioned.length > 0 ? mentioned : employees.slice(0, 1)
+        const targets = targetIds.length > 0
+          ? targetIds.map((id) => employees.find((employee) => employee.id === id)).filter((employee): employee is CyberEmployee => employee !== undefined)
+          : employees.slice(0, 1)
+        const session = activeSession ?? makeDemoSession(
+          activeWorld,
+          prompt,
+          targets.length > 1 ? 'group' : 'direct',
+          conversationIntent?.title,
+        )
         const ownerMessage = makeDemoMessage(
           session.id,
           messages.length + 1,
@@ -606,10 +680,15 @@ export default function App() {
           'owner',
           'user',
           prompt,
-          attachments.length === 0 ? undefined : { attachments: serializableAttachments(attachments) },
+          {
+            participantIds: targets.map((employee) => employee.id),
+            ...(attachments.length === 0 ? {} : { attachments: serializableAttachments(attachments) }),
+          },
         )
         setSessions((current) => current.some((item) => item.id === session.id) ? current : [session, ...current])
         setActiveSessionId(session.id)
+        setSessionParticipants((current) => ({ ...current, [session.id]: targets.map((employee) => employee.id) }))
+        setConversationIntent(undefined)
         setMessages((current) => [...current, ownerMessage])
         setDraft('')
         await delay(650)
@@ -631,11 +710,15 @@ export default function App() {
         body: JSON.stringify({
           prompt,
           ...(attachments.length === 0 ? {} : { attachments }),
+          ...(targetIds.length === 0 ? {} : { employeeIds: targetIds }),
+          ...(conversationIntent === undefined ? {} : { title: conversationIntent.title }),
           ...(activeSessionId === undefined ? {} : { sessionId: activeSessionId }),
         }),
       })
       setDraft('')
       setActiveSessionId(result.session.id)
+      setSessionParticipants((current) => ({ ...current, [result.session.id]: targetIds }))
+      setConversationIntent(undefined)
       setSessions((current) => [result.session, ...current.filter((item) => item.id !== result.session.id)])
       const transcript = await api<{ items: WorkMessage[] }>(`/api/sessions/${result.session.id}/messages`)
       setMessages(transcript.items)
@@ -645,7 +728,7 @@ export default function App() {
       setSending(false)
       setLiveTurns([])
     }
-  }, [activeSession, activeSessionId, activeWorld, employees, messages.length])
+  }, [activeSession, activeSessionId, activeWorld, conversationIntent, employees, messages.length, sessionParticipants])
 
   const uploadChatAttachment = useCallback(async (file: File): Promise<ChatAttachment> => {
     if (workspace === undefined) throw new Error('请先创建工作区')
@@ -697,18 +780,57 @@ export default function App() {
     return `assets/${result.asset.id}`
   }, [workspace])
 
-  const saveModel = useCallback(async (profile: Omit<ModelProfile, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt'>) => {
-    if (workspace === undefined) return
+  const saveModel = useCallback(async (profile: ModelProfileSaveDraft): Promise<ModelProfile> => {
+    if (workspace === undefined) throw new Error('请先创建工作区')
     if (demoMode) {
       const timestamp = new Date().toISOString()
-      setModels((current) => [...current, { ...profile, id: `demo-model-${current.length}`, workspaceId: workspace.id, createdAt: timestamp, updatedAt: timestamp }])
-      return
+      const currentProfile = profile.id ? models.find((item) => item.id === profile.id) : undefined
+      const saved: ModelProfile = {
+        ...profile,
+        id: profile.id ?? `demo-model-${crypto.randomUUID()}`,
+        workspaceId: workspace.id,
+        createdAt: currentProfile?.createdAt ?? timestamp,
+        updatedAt: timestamp,
+      }
+      setModels((current) => [
+        ...current
+          .filter((item) => item.id !== saved.id)
+          .map((item) => saved.isDefault ? { ...item, isDefault: false } : item),
+        saved,
+      ])
+      return saved
     }
     const result = await api<{ profile: ModelProfile }>(`/api/workspaces/${workspace.id}/model-profiles`, {
       method: 'POST',
       body: JSON.stringify(profile),
     })
-    setModels((current) => [...current.filter((item) => item.id !== result.profile.id), result.profile])
+    setModels((current) => [
+      ...current
+        .filter((item) => item.id !== result.profile.id)
+        .map((item) => result.profile.isDefault ? { ...item, isDefault: false } : item),
+      result.profile,
+    ])
+    return result.profile
+  }, [models, workspace])
+
+  const deleteModel = useCallback(async (modelProfileId: string): Promise<void> => {
+    if (workspace === undefined) throw new Error('请先创建工作区')
+    if (demoMode) {
+      setModels((current) => {
+        const removed = current.find((item) => item.id === modelProfileId)
+        const remaining = current.filter((item) => item.id !== modelProfileId)
+        if (removed?.isDefault && remaining[0]) remaining[0] = { ...remaining[0], isDefault: true }
+        return remaining
+      })
+      setModelAssignments((current) => current.filter((item) => item.modelProfileId !== modelProfileId))
+      return
+    }
+    const result = await api<{ removed: boolean; items: ModelProfile[]; assignments: ModelAssignment[] }>(`/api/workspaces/${workspace.id}/model-profiles/${encodeURIComponent(modelProfileId)}`, {
+      method: 'DELETE',
+    })
+    if (!result.removed) throw new Error('模型配置不存在或已被删除')
+    setModels(result.items)
+    setModelAssignments(result.assignments)
   }, [workspace])
 
   const assignModel = useCallback(async (input: { scope: ModelAssignment['scope']; scopeId: string; modelProfileId?: string }) => {
@@ -783,16 +905,12 @@ export default function App() {
       <header className="topbar">
         <div className="brand-lockup"><Cube size={20} weight="fill" /><strong>DSH Cyber</strong></div>
         <div className="topbar__workspace"><span>当前工作区：</span><strong>{workspace.name}</strong><span className="topbar__chevron">⌄</span></div>
-        <div className="topbar__mode-switch" aria-label="主视图">
-          <button
-            className={appMode === 'world' ? 'is-active' : ''}
-            type="button"
-            disabled={!supportsWorldRuntime}
-            title={supportsWorldRuntime ? '进入互动世界' : '当前主题尚未安装世界渲染器'}
-            onClick={() => setAppMode('world')}
-          ><Buildings size={16} />世界</button>
-          <button className={appMode === 'workbench' ? 'is-active' : ''} type="button" onClick={() => setAppMode('workbench')}><ChatCircleDots size={16} />工作台</button>
-        </div>
+        <WorldSwitcher
+          worlds={worlds}
+          activeWorld={activeWorld}
+          onSelect={(world) => void loadWorld(world)}
+          onExplore={() => void openPackageMarket('theme')}
+        />
         <nav aria-label="全局功能">
           <button type="button" onClick={() => void openPackageMarket('theme')}><Buildings size={16} />主题市场</button>
           <button type="button" onClick={() => void openPackageMarket('plugin')}><Cube size={16} />插件市场</button>
@@ -802,103 +920,91 @@ export default function App() {
         </nav>
       </header>
       {error === undefined ? null : <div className="error-banner" role="alert">{error}<button type="button" onClick={() => setError(undefined)}>关闭</button></div>}
-      {appMode === 'world' && supportsWorldRuntime ? (
-        <div className="world-shell">
+      <ResizableShell
+        leftWidth={preferences.leftPaneWidth}
+        rightWidth={preferences.rightPaneWidth}
+        rightCollapsed={dockCollapsed}
+        rightPrimary={appMode === 'world' && dockTab === 'world'}
+        onResize={resize}
+        left={(
           <NavigationPane
-            worlds={worlds}
-            activeWorldId={activeWorld.id}
+            world={activeWorld}
             sessions={sessions}
             {...(activeSessionId === undefined ? {} : { activeSessionId })}
+            activeEmployeeIds={activeParticipantIds}
+            sessionParticipants={sessionParticipants}
             employees={employees}
-            onSelectWorld={(worldId) => { const world = worlds.find((item) => item.id === worldId); if (world) void loadWorld(world) }}
-            onSelectSession={(sessionId) => { selectSession(sessionId); setAppMode('workbench') }}
-            onSelectEmployee={setSelectedEmployeeId}
+            onSelectSession={selectSession}
+            onSelectEmployee={(employeeId) => void openDossier(employeeId)}
             onDirectEmployee={directEmployee}
             onRecruit={() => void openRecruitment()}
-            onCreateWorld={() => setError('世界创建向导将在主题市场阶段开放。')}
+            onCreateGroup={() => setGroupDialogOpen(true)}
           />
-          <WorldMode
-            key={`${activeWorld.id}:${worldRuntimeRevision}`}
+        )}
+        center={(
+          <ChatWorkbench
             demoMode={demoMode}
             world={activeWorld}
             {...(activeSession === undefined ? {} : { session: activeSession })}
+            {...(conversationIntent === undefined ? {} : { intent: conversationIntent })}
+            participantIds={activeParticipantIds}
             messages={messages}
             employees={employees}
             liveTurns={liveTurns}
             sending={sending}
             draft={draft}
-            {...(selectedEmployeeId === undefined ? {} : { selectedEmployeeId })}
             onDraftChange={setDraft}
             onSend={send}
             onUploadAttachment={uploadChatAttachment}
-            onDirectEmployee={directEmployee}
-            onSelectEmployee={setSelectedEmployeeId}
             onOpenDossier={(employeeId) => void openDossier(employeeId)}
             onOpenArtifact={() => { setAppMode('workbench'); setDockCollapsed(false); setDockTab('preview') }}
             onRecruit={() => void openRecruitment()}
           />
-        </div>
-      ) : (
-        <ResizableShell
-          leftWidth={preferences.leftPaneWidth}
-          rightWidth={preferences.rightPaneWidth}
-          rightCollapsed={dockCollapsed}
-          rightPrimary={dockTab === 'world'}
-          onResize={resize}
-          left={(
-            <NavigationPane
-              worlds={worlds}
-              activeWorldId={activeWorld.id}
-              sessions={sessions}
-              {...(activeSessionId === undefined ? {} : { activeSessionId })}
-              employees={employees}
-              onSelectWorld={(worldId) => { const world = worlds.find((item) => item.id === worldId); if (world) void loadWorld(world) }}
-              onSelectSession={selectSession}
-              onSelectEmployee={(employeeId) => void openDossier(employeeId)}
-              onDirectEmployee={directEmployee}
-              onRecruit={() => void openRecruitment()}
-              onCreateWorld={() => setError('世界创建向导将在主题市场阶段开放。')}
-            />
-          )}
-          center={(
-            <ChatWorkbench
-              demoMode={demoMode}
-              world={activeWorld}
-              {...(activeSession === undefined ? {} : { session: activeSession })}
-              messages={messages}
-              employees={employees}
-              liveTurns={liveTurns}
-              sending={sending}
-              draft={draft}
-              onDraftChange={setDraft}
-              onSend={send}
-              onUploadAttachment={uploadChatAttachment}
-              onOpenDossier={(employeeId) => void openDossier(employeeId)}
-              onOpenArtifact={() => { setDockCollapsed(false); setDockTab('preview') }}
-              onRecruit={() => void openRecruitment()}
-            />
-          )}
-          right={(
-            <ArtifactDock
-              demoMode={demoMode}
-              activeTab={dockTab}
-              {...(selectedEmployee === undefined ? {} : { selectedEmployee })}
-              dossiers={dossiers}
-              employees={employees}
-              world={activeWorld}
-              {...(backgroundImage === undefined ? {} : { sceneImage: backgroundImage })}
-              onTabChange={setDockTab}
-              onCollapse={() => setDockCollapsed(true)}
-              onSelectEmployee={(employeeId) => void openDossier(employeeId)}
-              onDirectEmployee={directEmployee}
-              onManageEmployee={(employee) => setManagingEmployeeId(employee.id)}
-              onShowAllDossiers={() => setSelectedEmployeeId(undefined)}
-              onInvite={() => void openRecruitment()}
-            />
-          )}
+        )}
+        right={(
+          <ArtifactDock
+            demoMode={demoMode}
+            activeTab={dockTab}
+            {...(selectedEmployee === undefined ? {} : { selectedEmployee })}
+            dossiers={dossiers}
+            employees={employees}
+            world={activeWorld}
+            {...(backgroundImage === undefined ? {} : { sceneImage: backgroundImage })}
+            {...(supportsWorldRuntime ? {
+              worldContent: (
+                <WorldRuntimeDock
+                  key={`${activeWorld.id}:${worldRuntimeRevision}`}
+                  demoMode={demoMode}
+                  world={activeWorld}
+                  employees={employees}
+                  conversationEmployeeIds={activeParticipantIds}
+                  {...(selectedEmployeeId === undefined ? {} : { selectedEmployeeId })}
+                  onSelectEmployee={(employeeId) => {
+                    const employee = employees.find((item) => item.id === employeeId)
+                    if (employee !== undefined) directEmployee(employee)
+                  }}
+                  onRecruit={() => void openRecruitment()}
+                />
+              ),
+            } : {})}
+            onTabChange={(tab) => { setDockTab(tab); setAppMode(tab === 'world' ? 'world' : 'workbench') }}
+            onCollapse={() => setDockCollapsed(true)}
+            onSelectEmployee={(employeeId) => void openDossier(employeeId)}
+            onDirectEmployee={directEmployee}
+            onManageEmployee={(employee) => setManagingEmployeeId(employee.id)}
+            onShowAllDossiers={() => setSelectedEmployeeId(undefined)}
+            onInvite={() => void openRecruitment()}
+          />
+        )}
+      />
+      {dockCollapsed ? <button className="dock-reopen" type="button" onClick={() => setDockCollapsed(false)} aria-label="展开侧边栏"><SidebarSimple size={18} /></button> : null}
+      {groupDialogOpen ? (
+        <GroupConversationDialog
+          employees={employees}
+          onClose={() => setGroupDialogOpen(false)}
+          onCreate={createGroupIntent}
         />
-      )}
-      {appMode === 'workbench' && dockCollapsed ? <button className="dock-reopen" type="button" onClick={() => setDockCollapsed(false)} aria-label="展开侧边栏"><SidebarSimple size={18} /></button> : null}
+      ) : null}
       {settingsOpen ? (
         <SettingsDialog
           preferences={preferences}
@@ -913,6 +1019,7 @@ export default function App() {
           onSavePreferences={savePreferences}
           onUploadBackground={uploadBackground}
           onSaveModel={saveModel}
+          onDeleteModel={deleteModel}
           onAssignModel={assignModel}
           onSystemAction={runSystemAction}
         />
@@ -933,6 +1040,7 @@ export default function App() {
           items={marketplaceItems}
           installed={installedPackages}
           transactions={packageTransactions}
+          employees={employees}
           loading={packageLoading}
           installing={packageInstalling}
           onClose={() => setPackageMarketOpen(false)}
@@ -959,6 +1067,65 @@ export default function App() {
         />
       ) : null}
     </div>
+  )
+}
+
+function WorldSwitcher({
+  worlds,
+  activeWorld,
+  onSelect,
+  onExplore,
+}: {
+  worlds: World[]
+  activeWorld: World
+  onSelect(world: World): void
+  onExplore(): void
+}) {
+  const detailsRef = useRef<HTMLDetailsElement>(null)
+  const close = () => { if (detailsRef.current) detailsRef.current.open = false }
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (detailsRef.current?.open && !detailsRef.current.contains(event.target as Node)) close()
+    }
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') close() }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [])
+  return (
+    <details ref={detailsRef} className="topbar-world-switcher">
+      <summary aria-label={`切换世界，当前为${activeWorld.name}`}>
+        <Buildings size={17} />
+        <span>当前世界：</span>
+        <strong>{activeWorld.name}</strong>
+        <CaretDown size={14} />
+      </summary>
+      <div className="topbar-world-switcher__menu">
+        <header><strong>切换世界主体</strong><span>角色、会话和地图彼此独立</span></header>
+        <div role="menu">
+          {worlds.map((world) => (
+            <button
+              key={world.id}
+              type="button"
+              role="menuitemradio"
+              aria-checked={world.id === activeWorld.id}
+              onClick={() => { onSelect(world); close() }}
+            >
+              <Buildings size={17} />
+              <span><strong>{world.name}</strong><small>{world.templateId.includes('tavern') ? '叙事角色世界' : '团队协作世界'}</small></span>
+              {world.id === activeWorld.id ? <Check size={16} weight="bold" /> : null}
+            </button>
+          ))}
+        </div>
+        <button className="topbar-world-switcher__explore" type="button" onClick={() => { onExplore(); close() }}>
+          <Compass size={18} />
+          <span><strong>探索更多世界</strong><small>前往主题市场搜索并安装</small></span>
+        </button>
+      </div>
+    </details>
   )
 }
 
@@ -1017,9 +1184,48 @@ function statusActivity(employee: EmployeeInstance): string {
   return '可接新任务'
 }
 
-function makeDemoSession(world: World, prompt: string): WorkSession {
+function makeDemoSession(
+  world: World,
+  prompt: string,
+  kind: WorkSession['kind'] = 'direct',
+  title?: string,
+): WorkSession {
   const timestamp = new Date().toISOString()
-  return { id: `session-${Date.now()}`, workspaceId: world.workspaceId, worldId: world.id, kind: 'direct', title: compactPrompt(prompt), status: 'open', createdAt: timestamp, updatedAt: timestamp }
+  return { id: `session-${Date.now()}`, workspaceId: world.workspaceId, worldId: world.id, kind, title: title?.trim() || compactPrompt(prompt), status: 'open', createdAt: timestamp, updatedAt: timestamp }
+}
+
+function participantIdsFromMessages(messages: WorkMessage[]): string[] {
+  const ids: string[] = []
+  for (const message of messages) {
+    const metadataIds = message.metadata.participantIds
+    if (Array.isArray(metadataIds)) {
+      for (const value of metadataIds) {
+        if (typeof value === 'string' && value !== 'owner' && !ids.includes(value)) ids.push(value)
+      }
+    }
+    if (message.senderKind === 'employee' && !ids.includes(message.senderId)) ids.push(message.senderId)
+  }
+  return ids
+}
+
+function inferDemoSessionParticipants(
+  sessions: WorkSession[],
+  messages: WorkMessage[],
+  employees: CyberEmployee[],
+): SessionParticipantMap {
+  const result: SessionParticipantMap = {}
+  for (const session of sessions) {
+    const messageParticipants = participantIdsFromMessages(messages.filter((message) => message.sessionId === session.id))
+    if (messageParticipants.length > 0) {
+      result[session.id] = messageParticipants
+      continue
+    }
+    const titleParticipants = employees
+      .filter((employee) => session.title.includes(employee.displayName))
+      .map((employee) => employee.id)
+    result[session.id] = session.kind === 'direct' ? titleParticipants.slice(0, 1) : titleParticipants
+  }
+  return result
 }
 
 function makeDemoMessage(sessionId: string, sequence: number, senderId: string, senderKind: WorkMessage['senderKind'], kind: WorkMessage['kind'], content: string, metadata?: JsonObject): WorkMessage {

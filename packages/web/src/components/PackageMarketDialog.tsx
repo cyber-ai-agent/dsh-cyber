@@ -18,12 +18,14 @@ import type {
   PackageInstallTransaction,
   PackagePermissionPreview,
 } from '@dsh-cyber/contracts'
+import type { CyberEmployee } from '../types.js'
 
 interface PackageMarketDialogProps {
   initialMarket: CyberMarketKind
   items: CyberMarketPackage[]
   installed: InstalledPackage[]
   transactions: PackageInstallTransaction[]
+  employees: CyberEmployee[]
   loading: boolean
   installing: boolean
   onClose(): void
@@ -38,7 +40,7 @@ interface PackageMarketDialogProps {
 const MARKET_META: Record<CyberMarketKind, { label: string; description: string }> = {
   theme: { label: '主题市场', description: '安装独立世界、场景规则与交互主题。切换主题会创建新的会话上下文。' },
   plugin: { label: '插件市场', description: '为 Agent 增加可审阅、可回滚的真实执行能力。' },
-  talent: { label: '人才市场', description: '安装员工蓝图与技能包，再从招聘入口雇佣为独立 Agent。' },
+  talent: { label: '人才市场', description: '安装员工蓝图与技能包，再从招聘入口招募为独立员工智能体。' },
 }
 
 export function PackageMarketDialog(props: PackageMarketDialogProps) {
@@ -137,12 +139,10 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
                   <article key={`${item.manifest.id}-${item.manifest.version}`} className={selected?.manifest.id === item.manifest.id ? 'is-selected' : ''}>
                     <header><MarketIcon market={item.market} /><div><strong>{item.manifest.displayName}</strong><span>{item.manifest.publisher} · v{item.manifest.version}</span></div>{item.verified ? <em><ShieldCheck size={14} />官方校验</em> : <em className="is-community">社区包</em>}</header>
                     <p>{item.manifest.summary}</p>
-                    <div className="market-capabilities">{item.manifest.capabilities.slice(0, 4).map((capability) => <code key={capability}>{capability}</code>)}</div>
+                    <div className="market-capabilities">{item.manifest.capabilities.slice(0, 4).map((capability) => <code key={capability}>{capabilityLabel(capability)}</code>)}</div>
                     <footer>
                       <span>{item.installedVersion === undefined ? '未安装' : `已安装 v${item.installedVersion}`}</span>
-                      {item.market === 'theme' && item.installedVersion === item.manifest.version
-                        ? <button type="button" onClick={() => void bindTheme(item)}>绑定到当前世界</button>
-                        : <button type="button" onClick={() => void inspect(item)}>查看并安装</button>}
+                      {marketAction(item, props.employees, () => void bindTheme(item), () => void inspect(item))}
                     </footer>
                   </article>
                 ))}
@@ -173,11 +173,43 @@ function MarketIcon({ market }: { market: CyberMarketKind }) {
 }
 
 function InstalledOverview({ installed, transactions }: { installed: InstalledPackage[]; transactions: PackageInstallTransaction[] }) {
-  return <div className="installed-overview"><h3>运行中的扩展</h3><p>{installed.length} 个活动版本。所有变更均保留安装事务，失败自动回滚。</p><div className="installed-package-list">{installed.length === 0 ? <span className="dialog-empty">尚未安装扩展</span> : installed.slice(0, 8).map((item) => <article key={`${item.packageId}-${item.version}`}><span className="package-kind">{item.kind}</span><strong>{item.manifest.displayName}</strong><small>v{item.version}</small></article>)}</div><div className="package-history"><strong>最近安装</strong>{transactions.length === 0 ? <span>暂无记录</span> : transactions.slice(0, 6).map((item) => <span key={item.id} className={`transaction-status transaction-status--${item.status}`}>{item.packageId} · {transactionLabel(item.status)}</span>)}</div></div>
+  const active = installed.filter((item) => item.status === 'active')
+  return <div className="installed-overview"><h3>运行中的扩展</h3><p>{active.length} 个活动版本。所有变更均保留安装事务，失败自动回滚。</p><div className="installed-package-list">{active.length === 0 ? <span className="dialog-empty">尚未安装扩展</span> : active.slice(0, 8).map((item) => <article key={`${item.packageId}-${item.version}`}><span className="package-kind">{packageKindLabel(item.kind)}</span><strong>{item.manifest.displayName}</strong><small>v{item.version}</small></article>)}</div><div className="package-history"><strong>最近安装</strong>{transactions.length === 0 ? <span>暂无记录</span> : transactions.slice(0, 6).map((item) => <span key={item.id} className={`transaction-status transaction-status--${item.status}`}>{installed.find((installedItem) => installedItem.packageId === item.packageId)?.manifest.displayName ?? item.packageId} · {transactionLabel(item.status)}</span>)}</div></div>
 }
 
 function PermissionReview({ manifest, preview, approved, installing, onApproved, onInstall }: { manifest: CyberPackageManifest; preview: PackagePermissionPreview; approved: boolean; installing: boolean; onApproved(value: boolean): void; onInstall(): void }) {
-  return <section className="permission-review permission-review--market"><header><div><span>{manifest.kind}</span><h4>{manifest.displayName} <small>v{manifest.version}</small></h4><p>{manifest.publisher} · {manifest.license}</p></div><CheckCircle size={24} /></header><p>{manifest.summary}</p><PermissionGroup title="新增能力" values={preview.addedCapabilities} empty="没有新增能力" tone="warning" /><PermissionGroup title="数据外发" values={preview.dataEgress} empty="不外发数据" tone={preview.dataEgress.length > 0 ? 'danger' : 'safe'} /><div className="package-file-summary">激活前将再次校验 {manifest.files.length} 个文件与入口定义；失败不会覆盖当前版本。</div><label className="approval-check"><input type="checkbox" checked={approved} onChange={(event) => onApproved(event.target.checked)} /><span>我已审阅发布者、许可证、文件与运行能力。</span></label><button className="primary-button" type="button" disabled={!approved || installing} onClick={onInstall}>{installing ? '正在安装并激活…' : preview.previousVersion ? `批准升级至 v${preview.version}` : `批准安装 v${preview.version}`}</button></section>
+  return <section className="permission-review permission-review--market"><header><div><span>{packageKindLabel(manifest.kind)}</span><h4>{manifest.displayName} <small>v{manifest.version}</small></h4><p>{manifest.publisher} · {manifest.license}</p></div><CheckCircle size={24} /></header><p>{manifest.summary}</p><PermissionGroup title="新增能力" values={preview.addedCapabilities.map(capabilityLabel)} empty="没有新增能力" tone="warning" /><PermissionGroup title="数据外发" values={preview.dataEgress} empty="不外发数据" tone={preview.dataEgress.length > 0 ? 'danger' : 'safe'} /><div className="package-file-summary">激活前将再次校验 {manifest.files.length} 个文件与入口定义；失败不会覆盖当前版本。</div><label className="approval-check"><input type="checkbox" checked={approved} onChange={(event) => onApproved(event.target.checked)} /><span>我已审阅发布者、许可证、文件与运行能力。</span></label><button className="primary-button" type="button" disabled={!approved || installing} onClick={onInstall}>{installing ? '正在安装并激活…' : preview.previousVersion ? `批准升级至 v${preview.version}` : `批准安装 v${preview.version}`}</button></section>
+}
+
+function marketAction(item: CyberMarketPackage, employees: CyberEmployee[], onBind: () => void, onInspect: () => void) {
+  const installed = item.installedVersion === item.manifest.version
+  const recruited = item.market === 'talent' && employees.some((employee) => employee.blueprintId === item.manifest.id)
+  if (recruited) return <button type="button" disabled>已招募</button>
+  if (item.market === 'theme' && installed) return <button type="button" onClick={onBind}>绑定到当前世界</button>
+  if (installed) return <button type="button" disabled>已安装</button>
+  return <button type="button" onClick={onInspect}>{item.installedVersion === undefined ? '查看并安装' : '查看升级'}</button>
+}
+
+function packageKindLabel(kind: CyberPackageManifest['kind']): string {
+  return ({
+    plugin: '插件',
+    skill: '技能包',
+    'model-provider': '模型服务',
+    asset: '资产包',
+    'employee-blueprint': '员工蓝图',
+    'world-theme': '世界主题',
+  })[kind]
+}
+
+function capabilityLabel(capability: string): string {
+  return ({
+    'employee:blueprint': '提供员工蓝图',
+    'workspace:read': '读取工作区',
+    'knowledge:read': '读取知识库',
+    'artifact:read': '读取产物',
+    'prompt:transform': '调整提示词',
+    'world:render': '渲染世界',
+  } as Record<string, string>)[capability] ?? capability
 }
 
 function ManualInstaller({ installing, onPreview, onInstall }: { installing: boolean; onPreview(manifest: CyberPackageManifest): Promise<PackagePermissionPreview>; onInstall(input: { manifest: CyberPackageManifest; sourceDirectory: string; approvalToken: string }): Promise<void> }) {
