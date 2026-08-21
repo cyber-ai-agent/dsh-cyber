@@ -515,6 +515,49 @@ const MIGRATIONS: readonly Migration[] = [
         ON world_theme_bindings(package_id, package_version, theme_id, theme_version, content_digest, status);
     `,
   },
+  {
+    version: 11,
+    name: 'model-interaction-logs',
+    sql: `
+      CREATE TABLE model_interaction_logs (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT REFERENCES worlds(id) ON DELETE CASCADE,
+        session_id TEXT REFERENCES work_sessions(id) ON DELETE CASCADE,
+        employee_id TEXT REFERENCES employee_instances(id) ON DELETE CASCADE,
+        source TEXT NOT NULL CHECK (source IN ('turn', 'discovery')),
+        model_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('success', 'failed')),
+        error_code TEXT,
+        error_message TEXT,
+        prompt_message_count INTEGER NOT NULL CHECK (prompt_message_count >= 0),
+        prompt_char_count INTEGER NOT NULL CHECK (prompt_char_count >= 0),
+        response_char_count INTEGER CHECK (response_char_count >= 0),
+        tool_call_count INTEGER CHECK (tool_call_count >= 0),
+        duration_ms INTEGER NOT NULL CHECK (duration_ms >= 0),
+        tokens_prompt INTEGER CHECK (tokens_prompt >= 0),
+        tokens_completion INTEGER CHECK (tokens_completion >= 0),
+        tokens_total INTEGER CHECK (tokens_total >= 0),
+        created_at TEXT NOT NULL
+      ) STRICT;
+
+      CREATE INDEX model_interaction_logs_workspace_idx
+        ON model_interaction_logs(workspace_id, created_at DESC, id);
+      CREATE INDEX model_interaction_logs_status_idx
+        ON model_interaction_logs(workspace_id, status, created_at DESC, id);
+      CREATE INDEX model_interaction_logs_model_idx
+        ON model_interaction_logs(workspace_id, model_id, created_at DESC, id);
+    `,
+  },
+  {
+    version: 12,
+    name: 'model-interaction-http-status',
+    sql: `
+      ALTER TABLE model_interaction_logs
+        ADD COLUMN http_status INTEGER CHECK (http_status BETWEEN 100 AND 599);
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {

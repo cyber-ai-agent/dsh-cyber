@@ -28,12 +28,18 @@ import {
   type ModelAssignment,
   type ModelAssignmentScope,
   type ModelApiKind,
+  type ModelInteractionLog,
+  type ModelInteractionLogFilter,
+  type ModelInteractionLogPage,
+  type ModelInteractionLogSource,
+  type ModelInteractionLogStatus,
   type ModelProfile,
   type ModelProviderKind,
   type CyberPackageManifest,
   type InstalledPackage,
   type PackageInstallTransaction,
   type ParticipantKind,
+  type RecordModelInteractionInput,
   type RuntimeUpdateStatus,
   type RuntimeUpdateTransaction,
   type SkillEvidence,
@@ -202,6 +208,13 @@ export interface SaveModelAssignmentInput {
   actorId?: string
 }
 
+export type {
+  ModelInteractionLog,
+  ModelInteractionLogFilter,
+  ModelInteractionLogPage,
+  RecordModelInteractionInput,
+} from '@dsh-cyber/contracts'
+
 export interface SaveLocalAssetInput {
   id?: string
   workspaceId: string
@@ -316,6 +329,7 @@ const KNOWN_TABLES = [
   'world_entity_states',
   'world_object_states',
   'world_theme_bindings',
+  'model_interaction_logs',
   'domain_events',
   'sync_outbox',
 ] as const
@@ -773,6 +787,172 @@ export class SqliteStore {
     if (profileId !== undefined) return this.getModelProfile(profileId)
     return this.listModelProfiles(workspaceId).find((profile) => profile.isDefault)
       ?? this.listModelProfiles(workspaceId)[0]
+  }
+
+  recordModelInteraction(input: RecordModelInteractionInput): ModelInteractionLog {
+    this.#assertWritable()
+    const workspace = this.#requireWorkspace(input.workspaceId)
+    if (input.worldId !== undefined) {
+      const world = this.#requireWorld(input.worldId)
+      if (world.workspaceId !== workspace.id) {
+        throw new PersistenceError('Model interaction world does not belong to workspace')
+      }
+    }
+    if (input.sessionId !== undefined) {
+      const session = this.#requireSession(input.sessionId)
+      if (session.workspaceId !== workspace.id) {
+        throw new PersistenceError('Model interaction session does not belong to workspace')
+      }
+    }
+    if (input.employeeId !== undefined) {
+      const employee = this.#requireEmployee(input.employeeId)
+      if (employee.workspaceId !== workspace.id) {
+        throw new PersistenceError('Model interaction employee does not belong to workspace')
+      }
+    }
+    if (input.source !== 'turn' && input.source !== 'discovery') {
+      throw new PersistenceError('Model interaction source is invalid')
+    }
+    if (input.status !== 'success' && input.status !== 'failed') {
+      throw new PersistenceError('Model interaction status is invalid')
+    }
+    if (!input.modelId.trim()) throw new PersistenceError('Model interaction model id cannot be empty')
+    if (!input.provider.trim()) throw new PersistenceError('Model interaction provider cannot be empty')
+    if (!Number.isInteger(input.promptMessageCount) || input.promptMessageCount < 0) {
+      throw new PersistenceError('Model interaction prompt message count must be a non-negative integer')
+    }
+    if (!Number.isInteger(input.promptCharCount) || input.promptCharCount < 0) {
+      throw new PersistenceError('Model interaction prompt char count must be a non-negative integer')
+    }
+    if (!Number.isInteger(input.durationMs) || input.durationMs < 0) {
+      throw new PersistenceError('Model interaction duration must be a non-negative integer')
+    }
+    assertOptionalCount('response char count', input.responseCharCount)
+    assertOptionalCount('tool call count', input.toolCallCount)
+    assertOptionalCount('tokens prompt', input.tokensPrompt)
+    assertOptionalCount('tokens completion', input.tokensCompletion)
+    assertOptionalCount('tokens total', input.tokensTotal)
+
+    const log: ModelInteractionLog = {
+      id: this.#idFactory(),
+      workspaceId: workspace.id,
+      source: input.source,
+      modelId: input.modelId.trim().slice(0, 200),
+      provider: input.provider.trim().slice(0, 120),
+      status: input.status,
+      promptMessageCount: input.promptMessageCount,
+      promptCharCount: input.promptCharCount,
+      durationMs: input.durationMs,
+      createdAt: this.#clock(),
+    }
+    if (input.worldId !== undefined) log.worldId = input.worldId
+    if (input.sessionId !== undefined) log.sessionId = input.sessionId
+    if (input.employeeId !== undefined) log.employeeId = input.employeeId
+    if (input.errorCode?.trim()) log.errorCode = input.errorCode.trim().slice(0, 120)
+    if (input.errorMessage?.trim()) log.errorMessage = input.errorMessage.trim().slice(0, 1_000)
+    if (input.httpStatus !== undefined) {
+      if (!Number.isInteger(input.httpStatus) || input.httpStatus < 100 || input.httpStatus > 599) {
+        throw new PersistenceError('Model interaction HTTP status must be between 100 and 599')
+      }
+      log.httpStatus = input.httpStatus
+    }
+    if (input.responseCharCount !== undefined) log.responseCharCount = input.responseCharCount
+    if (input.toolCallCount !== undefined) log.toolCallCount = input.toolCallCount
+    if (input.tokensPrompt !== undefined) log.tokensPrompt = input.tokensPrompt
+    if (input.tokensCompletion !== undefined) log.tokensCompletion = input.tokensCompletion
+    if (input.tokensTotal !== undefined) log.tokensTotal = input.tokensTotal
+
+    this.database
+      .prepare(
+        `INSERT INTO model_interaction_logs (
+           id, workspace_id, world_id, session_id, employee_id, source, model_id, provider,
+           status, error_code, error_message, http_status, prompt_message_count, prompt_char_count,
+           response_char_count, tool_call_count, duration_ms, tokens_prompt,
+           tokens_completion, tokens_total, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        log.id,
+        log.workspaceId,
+        log.worldId ?? null,
+        log.sessionId ?? null,
+        log.employeeId ?? null,
+        log.source,
+        log.modelId,
+        log.provider,
+        log.status,
+        log.errorCode ?? null,
+        log.errorMessage ?? null,
+        log.httpStatus ?? null,
+        log.promptMessageCount,
+        log.promptCharCount,
+        log.responseCharCount ?? null,
+        log.toolCallCount ?? null,
+        log.durationMs,
+        log.tokensPrompt ?? null,
+        log.tokensCompletion ?? null,
+        log.tokensTotal ?? null,
+        log.createdAt,
+      )
+    return log
+  }
+
+  listModelInteractions(workspaceId: string, filter: ModelInteractionLogFilter): ModelInteractionLogPage {
+    this.#requireWorkspace(workspaceId)
+    const page = Math.max(1, Math.trunc(filter.page))
+    const pageSize = Math.min(100, Math.max(1, Math.trunc(filter.pageSize)))
+    const conditions = ['workspace_id = ?']
+    const parameters: Array<string | number> = [workspaceId]
+    if (filter.status !== undefined) {
+      if (filter.status !== 'success' && filter.status !== 'failed') {
+        throw new PersistenceError('Model interaction status filter is invalid')
+      }
+      conditions.push('status = ?')
+      parameters.push(filter.status)
+    }
+    if (filter.modelId !== undefined && filter.modelId.trim()) {
+      conditions.push('model_id = ?')
+      parameters.push(filter.modelId.trim().slice(0, 200))
+    }
+    const where = conditions.join(' AND ')
+    const totalRow = this.database
+      .prepare(`SELECT COUNT(*) AS count FROM model_interaction_logs WHERE ${where}`)
+      .get(...parameters) as { count?: number } | undefined
+    const total = Number(totalRow?.count ?? 0)
+    const rows = this.database
+      .prepare(
+        `SELECT * FROM model_interaction_logs WHERE ${where}
+         ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
+      )
+      .all(...parameters, pageSize, (page - 1) * pageSize)
+    const modelRows = this.database
+      .prepare(
+        `SELECT DISTINCT model_id FROM model_interaction_logs
+         WHERE workspace_id = ? ORDER BY model_id`,
+      )
+      .all(workspaceId) as Array<{ model_id?: unknown }>
+    return {
+      items: rows.map(mapModelInteractionLog),
+      total,
+      page,
+      pageSize,
+      modelIds: modelRows.map((row) => String(row.model_id)),
+    }
+  }
+
+  getModelInteraction(interactionId: string): ModelInteractionLog | undefined {
+    const row = this.database
+      .prepare('SELECT * FROM model_interaction_logs WHERE id = ?')
+      .get(interactionId)
+    return row ? mapModelInteractionLog(row) : undefined
+  }
+
+  clearModelInteractions(workspaceId: string): number {
+    this.#assertWritable()
+    this.#requireWorkspace(workspaceId)
+    return Number(this.database
+      .prepare('DELETE FROM model_interaction_logs WHERE workspace_id = ?')
+      .run(workspaceId).changes)
   }
 
   saveLocalAsset(input: SaveLocalAssetInput): LocalAsset {
@@ -2476,6 +2656,7 @@ export class SqliteStore {
         worldEntityStates: countRows(this.database, 'world_entity_states'),
         worldObjectStates: countRows(this.database, 'world_object_states'),
         worldThemeBindings: countRows(this.database, 'world_theme_bindings'),
+        modelInteractionLogs: countRows(this.database, 'model_interaction_logs'),
         events: countRows(this.database, 'domain_events'),
         outbox: countRows(this.database, 'sync_outbox'),
       },
@@ -2996,6 +3177,12 @@ function assertLocalAssetRef(value: string): void {
   }
 }
 
+function assertOptionalCount(label: string, value: number | undefined): void {
+  if (value !== undefined && (!Number.isInteger(value) || value < 0)) {
+    throw new PersistenceError(`Model interaction ${label} must be a non-negative integer`)
+  }
+}
+
 function normalizeModelBaseUrl(value: string, providerKind: ModelProviderKind): string {
   let url: URL
   try {
@@ -3267,6 +3454,46 @@ function mapLocalAsset(row: object): LocalAsset {
     byteLength: Number(value.byte_length),
     createdAt: String(value.created_at),
   }
+}
+
+function mapModelInteractionLog(row: object): ModelInteractionLog {
+  const value = row as Record<string, unknown>
+  const log: ModelInteractionLog = {
+    id: String(value.id),
+    workspaceId: String(value.workspace_id),
+    source: value.source as ModelInteractionLogSource,
+    modelId: String(value.model_id),
+    provider: String(value.provider),
+    status: value.status as ModelInteractionLogStatus,
+    promptMessageCount: Number(value.prompt_message_count),
+    promptCharCount: Number(value.prompt_char_count),
+    durationMs: Number(value.duration_ms),
+    createdAt: String(value.created_at),
+  }
+  if (typeof value.world_id === 'string') log.worldId = value.world_id
+  if (typeof value.session_id === 'string') log.sessionId = value.session_id
+  if (typeof value.employee_id === 'string') log.employeeId = value.employee_id
+  if (typeof value.error_code === 'string') log.errorCode = value.error_code
+  if (typeof value.error_message === 'string') log.errorMessage = value.error_message
+  if (value.http_status !== null && value.http_status !== undefined) {
+    log.httpStatus = Number(value.http_status)
+  }
+  if (value.response_char_count !== null && value.response_char_count !== undefined) {
+    log.responseCharCount = Number(value.response_char_count)
+  }
+  if (value.tool_call_count !== null && value.tool_call_count !== undefined) {
+    log.toolCallCount = Number(value.tool_call_count)
+  }
+  if (value.tokens_prompt !== null && value.tokens_prompt !== undefined) {
+    log.tokensPrompt = Number(value.tokens_prompt)
+  }
+  if (value.tokens_completion !== null && value.tokens_completion !== undefined) {
+    log.tokensCompletion = Number(value.tokens_completion)
+  }
+  if (value.tokens_total !== null && value.tokens_total !== undefined) {
+    log.tokensTotal = Number(value.tokens_total)
+  }
+  return log
 }
 
 function mapSession(row: object): WorkSession {

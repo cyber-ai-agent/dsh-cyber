@@ -24,6 +24,9 @@ import type {
   JsonObject,
   LocalAssetMimeType,
   ModelAssignment,
+  ModelInteractionLog,
+  ModelInteractionLogFilter,
+  ModelInteractionLogPage,
   ModelProfile,
   PackageInstallTransaction,
   PackagePermissionPreview,
@@ -952,6 +955,78 @@ export default function App() {
     return api<SystemActionResult>(`/api/system/update/${transactionId}/rollback`, { method: 'POST', body: JSON.stringify({ approved: input?.approved === true }) })
   }, [])
 
+  const loadModelLogs = useCallback(async (filter: ModelInteractionLogFilter): Promise<ModelInteractionLogPage> => {
+    if (workspace === undefined) throw new Error('请先创建工作区')
+    if (demoMode) {
+      await delay(200)
+      const status = filter.status
+      const modelId = filter.modelId
+      const items: ModelInteractionLog[] = (demoData.modelProfiles[0] ? [
+        {
+          id: 'demo-log-1',
+          workspaceId: workspace.id,
+          source: 'turn' as const,
+          modelId: demoData.modelProfiles[0].modelId,
+          provider: demoData.modelProfiles[0].displayName,
+          status: 'success' as const,
+          promptMessageCount: 3,
+          promptCharCount: 842,
+          responseCharCount: 156,
+          toolCallCount: 2,
+          durationMs: 3_420,
+          tokensPrompt: 1_204,
+          tokensCompletion: 312,
+          tokensTotal: 1_516,
+          createdAt: new Date(Date.now() - 4 * 60_000).toISOString(),
+        },
+        {
+          id: 'demo-log-2',
+          workspaceId: workspace.id,
+          source: 'discovery' as const,
+          modelId: '-',
+          provider: demoData.modelProfiles[0].displayName,
+          status: 'failed' as const,
+          errorCode: 'model_catalog_timeout',
+          errorMessage: '模型服务响应超时，请检查地址或稍后重试。',
+          promptMessageCount: 0,
+          promptCharCount: 0,
+          durationMs: 12_000,
+          createdAt: new Date(Date.now() - 32 * 60_000).toISOString(),
+        },
+      ] : [])
+        .filter((log) =>
+          (status === undefined || log.status === status) &&
+          (modelId === undefined || modelId === '' || log.modelId === modelId),
+        )
+      const pageSize = filter.pageSize
+      const page = Math.max(1, filter.page)
+      const total = items.length
+      return {
+        items: items.slice((page - 1) * pageSize, page * pageSize),
+        total,
+        page,
+        pageSize,
+        modelIds: [...new Set(items.map((log) => log.modelId))],
+      }
+    }
+    const query = new URLSearchParams()
+    query.set('page', String(filter.page))
+    query.set('pageSize', String(filter.pageSize))
+    if (filter.status !== undefined) query.set('status', filter.status)
+    if (filter.modelId !== undefined && filter.modelId) query.set('modelId', filter.modelId)
+    return api<ModelInteractionLogPage>(`/api/workspaces/${workspace.id}/model-interactions?${query.toString()}`)
+  }, [demoMode, workspace])
+
+  const clearModelLogs = useCallback(async (): Promise<number> => {
+    if (workspace === undefined) throw new Error('请先创建工作区')
+    if (demoMode) {
+      await delay(200)
+      return 0
+    }
+    const result = await api<{ removed: number }>(`/api/workspaces/${workspace.id}/model-interactions`, { method: 'DELETE' })
+    return result.removed
+  }, [demoMode, workspace])
+
   const resize = useCallback((leftPaneWidth: number, rightPaneWidth: number) => {
     setPreferences((current) => current === undefined ? current : { ...current, leftPaneWidth, rightPaneWidth })
   }, [])
@@ -1093,6 +1168,8 @@ export default function App() {
           onDeleteModel={deleteModel}
           onAssignModel={assignModel}
           onSystemAction={runSystemAction}
+          onLoadModelLogs={loadModelLogs}
+          onClearModelLogs={clearModelLogs}
         />
       ) : null}
       {recruitmentOpen ? (

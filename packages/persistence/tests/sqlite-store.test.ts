@@ -175,7 +175,7 @@ describe('SqliteStore', () => {
       '收到，我先建立基线。',
     ])
     expect(reopened.getEmployee(employee.id)?.agentSessionId).toBe('harness-session-1')
-    expect(reopened.doctor()).toMatchObject({ ok: true, schemaVersion: 10 })
+    expect(reopened.doctor()).toMatchObject({ ok: true, schemaVersion: 12 })
   })
 
   it('writes every domain event and cloud-sync outbox entry atomically', async () => {
@@ -260,7 +260,7 @@ describe('SqliteStore', () => {
     expect(backupStore.getWorkspace(workspace.id)?.name).toBe('赛博公司')
     const exported = JSON.parse(await readFile(exportPath, 'utf8')) as any
     expect(exported.format).toBe('dsh-cyber-export')
-    expect(exported.schemaVersion).toBe(10)
+    expect(exported.schemaVersion).toBe(12)
     expect(exported.workspaces[0].worlds[0].world.id).toBe(world.id)
     expect(exported.workspaces[0].worlds[0].employees[0].employee.id).toBe(employee.id)
     expect(exported.workspaces[0].worlds[0].sessions[0].messages[0].content).toBe('世界内记录')
@@ -572,6 +572,7 @@ describe('SqliteStore', () => {
       DROP TABLE world_object_states;
       DROP TABLE world_entity_states;
       DROP TABLE world_runtime_snapshots;
+      DROP TABLE model_interaction_logs;
       DELETE FROM schema_migrations WHERE version > 2;
       PRAGMA user_version = 2;
     `)
@@ -582,7 +583,7 @@ describe('SqliteStore', () => {
     expect(migrated.listWorkspaces()[0]?.name).toBe('迁移前工作区')
     expect(migrated.doctor()).toMatchObject({
       ok: true,
-      schemaVersion: 10,
+      schemaVersion: 12,
       counts: {
         installedPackages: 0,
         packageTransactions: 0,
@@ -595,6 +596,7 @@ describe('SqliteStore', () => {
         worldEntityStates: 0,
         worldObjectStates: 0,
         worldThemeBindings: 0,
+        modelInteractionLogs: 0,
       },
     })
   })
@@ -639,5 +641,173 @@ describe('SqliteStore', () => {
       report: { events: ['message_start', 'message_end'], healthy: true },
     })
     expect(reopened.doctor().counts.runtimeUpdates).toBe(1)
+  })
+
+  it('records, lists, filters, pages and clears model interaction logs without leaking prompt text', async () => {
+    const { path, store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: '日志工作区' })
+    const world = store.createWorld({
+      workspaceId: workspace.id,
+      name: '赛博公司',
+      templateId: 'cyber-company',
+    })
+    store.saveBlueprint(blueprint())
+    const employee = store.recruitEmployee({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      blueprintId: 'software-engineer',
+      blueprintVersion: 1,
+      skillGrants: ['coding'],
+    })
+    const session = store.createSession({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      kind: 'direct',
+      title: '与 小刘 对话',
+      participants: [
+        { participantId: 'owner', kind: 'owner' },
+        { participantId: employee.id, kind: 'employee' },
+      ],
+    })
+
+    const success = store.recordModelInteraction({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      sessionId: session.id,
+      employeeId: employee.id,
+      source: 'turn',
+      modelId: 'deepseek-chat',
+      provider: 'DeepSeek',
+      status: 'success',
+      promptMessageCount: 3,
+      promptCharCount: 842,
+      responseCharCount: 156,
+      toolCallCount: 2,
+      durationMs: 3_420,
+      tokensPrompt: 1_204,
+      tokensCompletion: 312,
+      tokensTotal: 1_516,
+    })
+    expect(success.id).toMatch(/^[0-9a-f-]{36}$/)
+    expect(success.workspaceId).toBe(workspace.id)
+    expect(success.worldId).toBe(world.id)
+    expect(success.sessionId).toBe(session.id)
+    expect(success.employeeId).toBe(employee.id)
+    expect(success.createdAt).toBeTruthy()
+
+    // 真实场景两次交互时间不同；这里稍作延迟保证 created_at 排序稳定
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 5))
+
+    const failed = store.recordModelInteraction({
+      workspaceId: workspace.id,
+      source: 'discovery',
+      modelId: '-',
+      provider: 'https://models.example.test/v1',
+      status: 'failed',
+      errorCode: 'model_catalog_timeout',
+      errorMessage: '模型服务响应超时，请检查地址或稍后重试。',
+      promptMessageCount: 0,
+      promptCharCount: 0,
+      durationMs: 12_000,
+    })
+    expect(failed.errorCode).toBe('model_catalog_timeout')
+    expect(failed.tokensTotal).toBeUndefined()
+
+    // 列表：默认按时间倒序
+    const all = store.listModelInteractions(workspace.id, { page: 1, pageSize: 20 })
+    expect(all.total).toBe(2)
+    expect(all.items.map((item) => item.id)).toEqual([failed.id, success.id])
+    expect(all.modelIds).toEqual(['-', 'deepseek-chat'])
+
+    // 状态筛选
+    const failures = store.listModelInteractions(workspace.id, { page: 1, pageSize: 20, status: 'failed' })
+    expect(failures.total).toBe(1)
+    expect(failures.items[0]?.id).toBe(failed.id)
+
+    // 模型筛选
+    const modelFiltered = store.listModelInteractions(workspace.id, { page: 1, pageSize: 20, modelId: 'deepseek-chat' })
+    expect(modelFiltered.total).toBe(1)
+    expect(modelFiltered.items[0]?.id).toBe(success.id)
+
+    // 分页
+    const paged = store.listModelInteractions(workspace.id, { page: 2, pageSize: 1 })
+    expect(paged.total).toBe(2)
+    expect(paged.items.map((item) => item.id)).toEqual([success.id])
+
+    // 详情
+    expect(store.getModelInteraction(success.id)).toMatchObject({
+      id: success.id,
+      modelId: 'deepseek-chat',
+      status: 'success',
+      durationMs: 3_420,
+    })
+    expect(store.getModelInteraction('missing-id')).toBeUndefined()
+
+    // 日志内容不含 prompt 明文（字段只存摘要统计）
+    const stored = store.getModelInteraction(success.id)!
+    expect(JSON.stringify(stored)).not.toContain('秘密提示词')
+    expect(stored.promptCharCount).toBe(842)
+
+    // 重启后日志仍在
+    store.close()
+    stores.splice(stores.indexOf(store), 1)
+    const reopened = await SqliteStore.open(path)
+    stores.push(reopened)
+    expect(reopened.listModelInteractions(workspace.id, { page: 1, pageSize: 20 }).total).toBe(2)
+    expect(reopened.doctor().counts.modelInteractionLogs).toBe(2)
+
+    // 清空
+    expect(reopened.clearModelInteractions(workspace.id)).toBe(2)
+    expect(reopened.listModelInteractions(workspace.id, { page: 1, pageSize: 20 }).total).toBe(0)
+  })
+
+  it('rejects invalid model interaction log input', async () => {
+    const { store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: '校验工作区' })
+
+    expect(() => store.recordModelInteraction({
+      workspaceId: workspace.id,
+      source: 'turn',
+      modelId: 'deepseek-chat',
+      provider: 'DeepSeek',
+      status: 'success',
+      promptMessageCount: -1,
+      promptCharCount: 10,
+      durationMs: 5,
+    })).toThrow('prompt message count must be a non-negative integer')
+
+    expect(() => store.recordModelInteraction({
+      workspaceId: workspace.id,
+      source: 'turn',
+      modelId: '  ',
+      provider: 'DeepSeek',
+      status: 'success',
+      promptMessageCount: 1,
+      promptCharCount: 10,
+      durationMs: 5,
+    })).toThrow('model id cannot be empty')
+
+    expect(() => store.recordModelInteraction({
+      workspaceId: workspace.id,
+      source: 'turn',
+      modelId: 'deepseek-chat',
+      provider: 'DeepSeek',
+      status: 'success',
+      promptMessageCount: 1,
+      promptCharCount: 10,
+      durationMs: -1,
+    })).toThrow('duration must be a non-negative integer')
+
+    expect(() => store.recordModelInteraction({
+      workspaceId: workspace.id,
+      source: 'turn',
+      modelId: 'deepseek-chat',
+      provider: 'DeepSeek',
+      status: 'success',
+      promptMessageCount: 1,
+      promptCharCount: 10,
+      durationMs: 5,
+      tokensTotal: -2,
+    })).toThrow('tokens total must be a non-negative integer')
   })
 })

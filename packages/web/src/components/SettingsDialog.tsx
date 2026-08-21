@@ -1,5 +1,7 @@
 import {
   ArrowsClockwise,
+  CaretDown,
+  CaretUp,
   CheckCircle,
   Cpu,
   Database,
@@ -7,6 +9,7 @@ import {
   Eye,
   EyeSlash,
   ImageSquare,
+  ListMagnifyingGlass,
   Moon,
   Palette,
   PencilSimple,
@@ -16,11 +19,14 @@ import {
   Trash,
   X,
 } from '@phosphor-icons/react'
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import type {
   EmployeeInstance,
   ModelApiKind,
   ModelAssignment,
+  ModelInteractionLog,
+  ModelInteractionLogFilter,
+  ModelInteractionLogPage,
   ModelProfile,
   ModelProviderKind,
   RuntimeUpdateTransaction,
@@ -29,7 +35,7 @@ import type {
   World,
 } from '@dsh-cyber/contracts'
 
-export type SettingsSection = 'appearance' | 'models' | 'runtime' | 'data' | 'updates'
+export type SettingsSection = 'appearance' | 'models' | 'runtime' | 'data' | 'updates' | 'logs'
 export type SystemAction = 'status' | 'doctor' | 'backup' | 'export' | 'list-updates' | 'verify-update' | 'contract-update' | 'canary-update' | 'activate-update' | 'rollback-update'
 
 export interface SystemActionInput {
@@ -76,6 +82,8 @@ interface SettingsDialogProps {
   onDeleteModel(modelProfileId: string): Promise<void>
   onAssignModel(input: { scope: ModelAssignment['scope']; scopeId: string; modelProfileId?: string }): Promise<void>
   onSystemAction(action: SystemAction, input?: SystemActionInput): Promise<SystemActionResult>
+  onLoadModelLogs(filter: ModelInteractionLogFilter): Promise<ModelInteractionLogPage>
+  onClearModelLogs(): Promise<number>
 }
 
 export type ModelProfileSaveDraft = Omit<ModelProfile, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt'> & {
@@ -100,6 +108,7 @@ export interface DiscoveredModel {
 const sections = [
   ['appearance', '外观与个性化', Palette],
   ['models', '模型', Cpu],
+  ['logs', '日志记录', ListMagnifyingGlass],
   ['runtime', '运行时', ShieldCheck],
   ['data', '本地数据', Database],
   ['updates', '更新', ArrowsClockwise],
@@ -218,6 +227,8 @@ export function SettingsDialog({
   onDeleteModel,
   onAssignModel,
   onSystemAction,
+  onLoadModelLogs,
+  onClearModelLogs,
 }: SettingsDialogProps) {
   const [section, setSection] = useState<SettingsSection>(initialSection)
   const [draft, setDraft] = useState(preferences)
@@ -282,6 +293,12 @@ export function SettingsDialog({
                 onSave={onSaveModel}
                 onDiscover={onDiscoverModels}
                 onDelete={onDeleteModel}
+              />
+            ) : null}
+            {section === 'logs' ? (
+              <ModelInteractionLogSettings
+                onLoad={onLoadModelLogs}
+                onClear={onClearModelLogs}
               />
             ) : null}
             {section === 'runtime' ? <RuntimeSettings pending={pendingAction} result={actionResult} error={actionError} onRun={runSystemAction} /> : null}
@@ -551,6 +568,165 @@ function ModelSettings({
       </fieldset>
     </div>
   )
+}
+
+function ModelInteractionLogSettings({
+  onLoad,
+  onClear,
+}: {
+  onLoad(filter: ModelInteractionLogFilter): Promise<ModelInteractionLogPage>
+  onClear(): Promise<number>
+}) {
+  const [status, setStatus] = useState<'' | ModelInteractionLog['status']>('')
+  const [modelId, setModelId] = useState('')
+  const [page, setPage] = useState(1)
+  const pageSize = 20
+  const [result, setResult] = useState<ModelInteractionLogPage>()
+  const [loading, setLoading] = useState(false)
+  const [clearing, setClearing] = useState(false)
+  const [error, setError] = useState<string>()
+  const [expandedId, setExpandedId] = useState<string>()
+  const totalPages = result === undefined ? 0 : Math.max(1, Math.ceil(result.total / result.pageSize))
+
+  const load = async (overrides?: { page?: number; status?: '' | ModelInteractionLog['status']; modelId?: string }) => {
+    setLoading(true)
+    setError(undefined)
+    try {
+      const nextStatus = overrides?.status === undefined ? status : overrides.status
+      const nextModelId = overrides?.modelId === undefined ? modelId : overrides.modelId
+      const nextPage = overrides?.page ?? page
+      const data = await onLoad({
+        page: nextPage,
+        pageSize,
+        ...(nextStatus === '' ? {} : { status: nextStatus }),
+        ...(nextModelId === '' ? {} : { modelId: nextModelId }),
+      })
+      setResult(data)
+      setPage(data.page)
+      setStatus(nextStatus)
+      setModelId(nextModelId)
+      setExpandedId(undefined)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '日志加载失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void load()
+    // 仅在挂载时加载一次；后续筛选/翻页通过显式调用 load 触发
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const clearLogs = async () => {
+    if (!window.confirm('确定清空全部模型交互日志吗？此操作不可恢复。')) return
+    setClearing(true)
+    setError(undefined)
+    try {
+      const removed = await onClear()
+      setResult(undefined)
+      setExpandedId(undefined)
+      if (removed > 0) await load({ page: 1 })
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '清空日志失败')
+    } finally {
+      setClearing(false)
+    }
+  }
+
+  return (
+    <div className="settings-section">
+      <div className="settings-section__heading">
+        <h3>模型交互日志</h3>
+        <p>记录每次模型 API 交互的摘要统计：时间、模型、provider、请求摘要（消息数 / 字符数）、响应状态、耗时与 token 用量。为保护隐私，日志不保存 API 密钥、prompt 明文或响应明文。</p>
+      </div>
+      <div className="log-toolbar">
+        <label className="log-filter"><span>状态</span><select value={status} onChange={(event) => void load({ status: event.target.value as '' | ModelInteractionLog['status'], page: 1 })}><option value="">全部</option><option value="success">成功</option><option value="failed">失败</option></select></label>
+        <label className="log-filter"><span>模型</span><select value={modelId} disabled={(result?.modelIds ?? []).length === 0} onChange={(event) => void load({ modelId: event.target.value, page: 1 })}><option value="">全部模型</option>{(result?.modelIds ?? []).map((id) => <option key={id} value={id}>{id}</option>)}</select></label>
+        <div className="log-toolbar__actions">
+          <button className="secondary-button" type="button" disabled={loading} onClick={() => void load()}><ArrowsClockwise size={16} />{loading ? '刷新中…' : '刷新'}</button>
+          <button className="secondary-button is-danger" type="button" disabled={loading || clearing || (result?.total ?? 0) === 0} onClick={() => void clearLogs()}><Trash size={16} />{clearing ? '清空中…' : '清空日志'}</button>
+        </div>
+      </div>
+      {error !== undefined ? <p className="model-form-message model-form-message--error" role="alert">{error}</p> : null}
+      {result === undefined ? (
+        loading ? <div className="log-empty">正在加载日志…</div> : (
+          <div className="log-empty"><ListMagnifyingGlass size={24} /><strong>还没有模型交互日志</strong><span>发起一次对话，或在模型设置中获取可用模型列表后，这里会显示真实交互记录。</span></div>
+        )
+      ) : result.items.length === 0 ? (
+        <div className="log-empty"><ListMagnifyingGlass size={24} /><strong>{result.total === 0 ? '还没有模型交互日志' : '没有符合条件的日志'}</strong><span>{result.total === 0 ? '发起一次对话，或在模型设置中获取可用模型列表后，这里会显示真实交互记录。' : '请调整状态或模型筛选条件。'}</span></div>
+      ) : (
+        <>
+          <div className="log-list" aria-label="模型交互日志列表">
+            {result.items.map((log) => {
+              const expanded = expandedId === log.id
+              return (
+                <article key={log.id} className={`log-entry${expanded ? ' is-expanded' : ''}`}>
+                  <button className="log-entry__row" type="button" aria-expanded={expanded} onClick={() => setExpandedId(expanded ? undefined : log.id)}>
+                    <span className="log-entry__time">{formatLogTime(log.createdAt)}</span>
+                    <span className="log-entry__model"><strong>{log.modelId}</strong><small>{log.provider}</small></span>
+                    <span className="log-entry__source">{log.source === 'turn' ? '对话回合' : '模型发现'}</span>
+                    <span className={log.status === 'success' ? 'log-status log-status--success' : 'log-status log-status--failed'}>{log.status === 'success' ? '成功' : '失败'}</span>
+                    <span className="log-entry__http">{log.httpStatus === undefined ? '' : `HTTP ${log.httpStatus}`}</span>
+                    <span className="log-entry__duration">{formatDuration(log.durationMs)}</span>
+                    <span className="log-entry__tokens">{tokensSummary(log)}</span>
+                    <i className="log-entry__toggle">{expanded ? <CaretUp size={14} /> : <CaretDown size={14} />}</i>
+                  </button>
+                  {expanded ? <LogDetail log={log} /> : null}
+                </article>
+              )
+            })}
+          </div>
+          <footer className="log-pagination">
+            <span>共 {result.total} 条 · 第 {result.page} / {totalPages} 页</span>
+            <div>
+              <button className="text-button" type="button" disabled={loading || result.page <= 1} onClick={() => void load({ page: result.page - 1 })}>上一页</button>
+              <button className="text-button" type="button" disabled={loading || result.page >= totalPages} onClick={() => void load({ page: result.page + 1 })}>下一页</button>
+            </div>
+          </footer>
+        </>
+      )}
+    </div>
+  )
+}
+
+function LogDetail({ log }: { log: ModelInteractionLog }) {
+  return (
+    <div className="log-detail">
+      <dl>
+        <div><dt>模型</dt><dd>{log.modelId}</dd></div>
+        <div><dt>提供商</dt><dd>{log.provider}</dd></div>
+        <div><dt>交互类型</dt><dd>{log.source === 'turn' ? '对话回合（服务端整轮交互）' : '/models 模型发现'}</dd></div>
+        <div><dt>状态</dt><dd>{log.status === 'success' ? '成功' : '失败'}{log.errorCode === undefined ? '' : ` · ${log.errorCode}`}</dd></div>
+        <div><dt>HTTP 状态码</dt><dd>{log.httpStatus === undefined ? '—' : log.httpStatus}</dd></div>
+        <div><dt>耗时</dt><dd>{log.durationMs} ms</dd></div>
+        <div><dt>请求摘要</dt><dd>{log.promptMessageCount} 条消息 · {log.promptCharCount} 字符（不含原文）</dd></div>
+        <div><dt>工具调用</dt><dd>{log.toolCallCount ?? 0} 次</dd></div>
+        <div><dt>响应摘要</dt><dd>{log.responseCharCount === undefined ? '—' : `${log.responseCharCount} 字符（不含原文）`}</dd></div>
+        <div><dt>Token 用量</dt><dd>{log.tokensPrompt === undefined ? '接口未返回' : `输入 ${log.tokensPrompt} · 输出 ${log.tokensCompletion ?? 0} · 合计 ${log.tokensTotal ?? 0}`}</dd></div>
+        <div><dt>记录时间</dt><dd>{formatLogTime(log.createdAt, true)}</dd></div>
+      </dl>
+      {log.errorMessage !== undefined && log.errorMessage !== '' ? <p className="log-detail__error"><strong>错误信息</strong>{log.errorMessage}</p> : null}
+    </div>
+  )
+}
+
+function formatLogTime(value: string, full = false): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  if (full) return date.toLocaleString('zh-CN', { hour12: false })
+  return date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+}
+
+function formatDuration(value: number): string {
+  if (value < 1_000) return `${value} ms`
+  return `${(value / 1_000).toFixed(1)} s`
+}
+
+function tokensSummary(log: ModelInteractionLog): string {
+  if (log.tokensTotal === undefined) return '—'
+  return `Token ${log.tokensTotal.toLocaleString('zh-CN')}`
 }
 
 function validateModelDraft(draft: ModelDraft): string | undefined {

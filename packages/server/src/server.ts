@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { BUILTIN_BLUEPRINTS } from '@dsh-cyber/catalog'
-import type { AgentRuntimePort, ModelProfile } from '@dsh-cyber/contracts'
+import type { AgentRuntimePort, AgentTurnRequest, ModelProfile } from '@dsh-cyber/contracts'
 import {
   HarnessModelRouter,
   inspectHarnessCandidate,
@@ -31,6 +31,7 @@ import { registerAssetRoutes } from './routes/asset-routes.js'
 import { registerCatalogRoutes } from './routes/catalog-routes.js'
 import { registerConversationRoutes } from './routes/conversation-routes.js'
 import { registerEmployeeRoutes } from './routes/employee-routes.js'
+import { registerModelInteractionRoutes } from './routes/model-interaction-routes.js'
 import { registerModelRoutes } from './routes/model-routes.js'
 import { registerPackageRoutes } from './routes/package-routes.js'
 import { registerSystemRoutes } from './routes/system-routes.js'
@@ -41,6 +42,10 @@ import { registerWorldRoutes } from './routes/world-routes.js'
 import { AssetService } from './services/asset-service.js'
 import { ModelCredentialService } from './services/model-credential-service.js'
 import { ModelCatalogService } from './services/model-catalog-service.js'
+import {
+  ModelInteractionService,
+  TurnInteractionLoggingRuntime,
+} from './services/model-interaction-service.js'
 import { RuntimeUpdateService } from './services/runtime-update-service.js'
 import { WorkspaceFileService } from './services/workspace-file-service.js'
 import { RuntimeStreamHub } from './streams/runtime-stream-hub.js'
@@ -100,18 +105,21 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const modelCatalog = new ModelCatalogService(credentials)
 
   const activeDshBinPath = await resolveActiveRuntime(store, runtimeStateRoot, stateRoot)
-  const runtime = options.runtime ?? new HarnessModelRouter({
+  const interactions = new ModelInteractionService(store)
+  const baseRuntime = options.runtime ?? new HarnessModelRouter({
     stateRoot: runtimeStateRoot,
     ...(activeDshBinPath === undefined ? {} : { dshBinPath: activeDshBinPath }),
     resolveRoute(request) {
-      const selectedProfileId = request.revision.modelPolicy.modelProfileId
-      const selectedProfile = typeof selectedProfileId === 'string'
-        ? store.getModelProfile(selectedProfileId)
-        : undefined
-      const profile = selectedProfile?.workspaceId === request.agent.workspaceId
-        ? selectedProfile
-        : store.resolveModelProfile(request.agent.workspaceId, request.agent.worldId, request.agent.id)
-      return profile === undefined ? undefined : harnessModelRoute(profile)
+      return resolveHarnessRoute(store, request)
+    },
+  })
+  // 无论内置路由还是外部注入的 runtime，统一包一层回合级日志采集；
+  // 观测边界：模型 API 请求在 DSH worker 内部，服务端记录整轮交互的成功/失败与耗时。
+  const runtime = new TurnInteractionLoggingRuntime({
+    inner: baseRuntime,
+    service: interactions,
+    resolveRoute(request) {
+      return resolveHarnessRoute(store, request)
     },
   })
   const orchestrator = new ConversationOrchestrator({ store, runtime, workspacePath: workspaceRoot })
@@ -135,11 +143,12 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerWorkspaceFileRoutes(router, { workspaceFiles })
   registerCatalogRoutes(router, { store, packageCatalog })
   registerWorkspaceRoutes(router, { store })
-  registerModelRoutes(router, { store, credentials, modelCatalog })
+  registerModelRoutes(router, { store, credentials, modelCatalog, interactions })
   registerAssetRoutes(router, { store, assets })
   registerWorldRoutes(router, { store })
   registerPackageRoutes(router, { store, packageManager, packageCatalog })
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub })
+  registerModelInteractionRoutes(router, { store, interactions })
   registerConversationRoutes(router, { store, orchestrator, runtimeStreamHub, worldRuntime })
   registerEmployeeRoutes(router, { store })
 
@@ -208,6 +217,17 @@ async function resolveActiveRuntime(
     )
   }
   return resolveCandidateDshBin(activeRuntime.candidateRoot)
+}
+
+function resolveHarnessRoute(store: SqliteStore, request: AgentTurnRequest): HarnessModelRoute | undefined {
+  const selectedProfileId = request.revision.modelPolicy.modelProfileId
+  const selectedProfile = typeof selectedProfileId === 'string'
+    ? store.getModelProfile(selectedProfileId)
+    : undefined
+  const profile = selectedProfile?.workspaceId === request.agent.workspaceId
+    ? selectedProfile
+    : store.resolveModelProfile(request.agent.workspaceId, request.agent.worldId, request.agent.id)
+  return profile === undefined ? undefined : harnessModelRoute(profile)
 }
 
 function harnessModelRoute(profile: ModelProfile): HarnessModelRoute {

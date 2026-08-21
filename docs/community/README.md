@@ -6,6 +6,7 @@
 - [世界主题创作约定](world-theme-authoring.md)
 - [员工蓝图创作约定](employee-blueprint-authoring.md)
 - [声明式插件创作约定](plugin-authoring.md)
+- [模型交互日志（运行时能力说明）](model-interaction-logs.md)
 - [规范实现状态](implementation-status.md)
 
 规范关键词含义：

@@ -404,6 +404,97 @@ test('clears the composer instantly, shows the owner message on screen, and keep
   expect(pageErrors, `页面存在未捕获错误：${pageErrors.join('; ')}`).toEqual([])
 })
 
+test('shows real model interaction logs in the settings panel with filtering, detail, clear and visual evidence', async ({ page }) => {
+  // 独立于前序测试：无工作区则自行 onboarding，已有则直接复用
+  await page.goto(origin)
+  const shell = page.locator('.workbench-shell')
+  const onboarding = page.getByRole('heading', { name: '创建第一个本地世界' })
+  await expect(shell.or(onboarding)).toBeVisible()
+  if (await onboarding.isVisible()) {
+    await page.getByRole('button', { name: '创建本地工作区' }).click()
+    await expect(shell).toBeVisible()
+  }
+
+  // 无“与阿帆私聊”则自行招募，已有则复用现有会话
+  const directButton = page.getByRole('button', { name: '与阿帆私聊' })
+  if (await directButton.count() === 0) {
+    await page.getByRole('button', { name: '添加第一名员工' }).click()
+    const market = page.getByRole('dialog', { name: '员工市场' })
+    await market.getByRole('button', { name: /开发工程师 v1/ }).click()
+    await market.getByRole('textbox', { name: '员工称呼（可选）' }).fill('阿帆')
+    await market.getByRole('button', { name: '确认招聘' }).click()
+    await expect(market).toBeHidden()
+    await expect(page.getByRole('button', { name: '与阿帆私聊' })).toBeVisible()
+  }
+
+  const workspaces = await (await fetch(`${origin}/api/workspaces`)).json() as { items: Array<{ id: string }> }
+  const workspaceId = workspaces.items[0]!.id
+  const beforeTotal = (await (await fetch(`${origin}/api/workspaces/${workspaceId}/model-interactions`)).json() as { total: number }).total
+
+  // 发一条真实回合，触发 turn 级模型交互日志（用 @提及确保命中员工并创建会话）
+  const composer = page.getByRole('textbox', { name: '给当前世界的员工发送消息' })
+  await expect(composer).toBeEnabled()
+  await composer.fill('@阿帆 任务：请确认模型交互日志的采集')
+  await page.getByRole('button', { name: '发送' }).click()
+  await expect(page.getByText('我先建立性能基线。').first()).toBeVisible()
+  await expect.poll(async () =>
+    (await (await fetch(`${origin}/api/workspaces/${workspaceId}/model-interactions`)).json() as { total: number }).total,
+  ).toBeGreaterThan(beforeTotal)
+
+  // 打开设置 → 日志记录
+  await page.getByRole('button', { name: '设置' }).click()
+  const settings = page.getByRole('dialog', { name: '设置' })
+  await expect(settings).toBeVisible()
+  await settings.getByRole('button', { name: '日志记录' }).click()
+  await expect(settings.getByRole('heading', { name: '模型交互日志' })).toBeVisible()
+  await expect(settings.locator('.log-entry').first()).toBeVisible()
+  await expect(settings.locator('.log-entry__model').filter({ hasText: 'dsh-default' }).first()).toBeVisible()
+  await expect(settings.locator('.log-status--success').first()).toBeVisible()
+  await expect(settings.getByText('对话回合').first()).toBeVisible()
+
+  // 展开详情：显示请求摘要（不含 prompt 明文）
+  await settings.locator('.log-entry__row').first().click()
+  await expect(settings.locator('.log-detail')).toBeVisible()
+  await expect(settings.locator('.log-detail').getByText('请求摘要')).toBeVisible()
+  await expect(settings.locator('.log-detail')).not.toContainText('请确认模型交互日志的采集')
+
+  // 状态筛选
+  await settings.locator('.log-filter select').first().selectOption('success')
+  await expect(settings.locator('.log-entry').first()).toBeVisible()
+  await expect(settings.locator('.log-status--success').first()).toBeVisible()
+
+  // 视觉证据：日志面板三个视口截图 + 控制台 error/warn 记录（供视觉审批）
+  const consoleEntries: string[] = []
+  const pageErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error' || message.type() === 'warning') {
+      consoleEntries.push(`[${message.type()}] ${message.text()}`)
+    }
+  })
+  page.on('pageerror', (error) => pageErrors.push(String(error)))
+  await page.setViewportSize({ width: 1_920, height: 1_080 })
+  await page.screenshot({ path: join(process.cwd(), 'artifacts', 'ui-world-conversations', 'model-logs-1920x1080.png') })
+  await page.setViewportSize({ width: 1_440, height: 900 })
+  await page.screenshot({ path: join(process.cwd(), 'artifacts', 'ui-world-conversations', 'model-logs-1440x900.png') })
+  await page.setViewportSize({ width: 3_840, height: 2_160 })
+  await page.screenshot({ path: join(process.cwd(), 'artifacts', 'ui-world-conversations', 'model-logs-3840x2160.png') })
+  await page.setViewportSize({ width: 1_584, height: 992 })
+  await writeFile(
+    join(process.cwd(), 'artifacts', 'ui-world-conversations', 'model-logs-console.log'),
+    `[pageerror]\n${pageErrors.join('\n')}\n\n[console]\n${consoleEntries.join('\n')}\n`,
+    'utf8',
+  )
+  expect(pageErrors, `页面存在未捕获错误：${pageErrors.join('; ')}`).toEqual([])
+
+  // 清空日志 → 空态提示
+  page.once('dialog', (dialog) => void dialog.accept())
+  await settings.getByRole('button', { name: '清空日志' }).click()
+  await expect(settings.getByText('还没有模型交互日志')).toBeVisible()
+  await expect.poll(async () =>
+    (await (await fetch(`${origin}/api/workspaces/${workspaceId}/model-interactions`)).json() as { total: number }).total,
+  ).toBe(0)
+})
+
 class BrowserRuntime implements AgentRuntimePort {
   readonly eventIntervalMs: number
 

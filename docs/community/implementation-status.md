@@ -17,6 +17,7 @@
 | Pixi 表现 | RendererRegistry、Pixi 实现、8 状态、四向 fallback、脚底锚点、Y-sort、遮挡、growth badge | 官方 roster 多数 clip 目前是单帧受控 fallback | Three.js、正式多帧全方向资产 |
 | 员工蓝图 | schemaVersion、严格字段/长度/唯一性、package id 与能力绑定、不可变 id+version、模板过滤、默认拒绝与逐项能力授权、独立实例/会话、SQLite 恢复 | requested skills 当前展示但不自动授权；模型继续走 ModelProfile/assignment | avatar、memory/skill 文件、蓝图 modelPolicy、compatibility/评测 schema |
 | 插件 | canonical `prompt-transform` 进入真实 conversation runtime prompt；legacy `commands` 明确转换；staged 校验；原始用户消息持久化不被改写 | 仅声明式 JSON；支持 `/command`、`always`、prepend/append/replace、priority 与资源上限；强制无外发 | 可执行代码、skill/tool/event/widget、网络代理与外发审计 |
+| 模型交互日志 | turn/discovery 双源采集、SQLite 持久化（v11 STRICT 表 + 三索引）、分页/筛选/详情/清空 API、设置面板「日志记录」界面、错误信息密钥清洗（`sk-…`/`Bearer …`/键值对 → `[已隐藏]`） | token 用量字段预留但当前恒为空（DSH worker 未透出单次请求用量）；消息数为近似统计；无自动保留策略 | worker 进程内逐请求采集与 token 透出、日志自动清理/条数上限 |
 | CI | Node 22.19、pnpm 11.7、frozen lockfile、typecheck、test、Chromium、E2E | 仓库工作流名为 `required`；GitHub 分支保护需在仓库设置中另行确认 | 自动发布与包签名流水线 |
 
 ## 关键证据
@@ -30,6 +31,7 @@
 - renderer 与动画：`packages/web/src/features/world/renderer`、`packages/web/tests`
 - 员工蓝图解析与实例化：`packages/server/src/employee-blueprint-manifest.ts`、`packages/persistence/src/sqlite-store.ts`
 - prompt transform：`packages/server/src/prompt-transform-parser.ts`、`packages/server/src/routes/conversation-routes.ts`
+- 模型交互日志：`packages/server/src/services/model-interaction-service.ts`、`packages/server/src/routes/model-interaction-routes.ts`、`packages/persistence/src/migrations.ts`（v11）、[模块说明与观测边界](model-interaction-logs.md)
 - CI：`.github/workflows/ci.yml`
 
 ## 采用规则
