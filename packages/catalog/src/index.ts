@@ -5,28 +5,15 @@ const CREATED_AT = '2026-08-19T00:00:00.000Z'
 export const BUILTIN_WORLD_TEMPLATES: readonly WorldTemplateManifest[] = [
   {
     schemaVersion: 1,
-    id: 'personal-world',
+    id: 'cyber-company',
     version: 1,
-    displayName: '我的世界',
-    summary: '可自由定义世界观、关系、角色、视觉与模型的私人本地世界。',
+    displayName: '赛博公司',
+    summary: '围绕项目、角色协作和交付运转的独立数字世界，也可通过世界设置改造成私人世界。',
     terminology: {
       agent: '角色',
       recruit: '添加角色',
       groupSession: '群组会话',
       assignment: '任务',
-    },
-  },
-  {
-    schemaVersion: 1,
-    id: 'cyber-company',
-    version: 1,
-    displayName: '赛博公司',
-    summary: '围绕项目、岗位、协作和交付运转的独立数字公司。',
-    terminology: {
-      agent: '角色',
-      recruit: '添加角色',
-      groupSession: '项目群',
-      assignment: '任务单',
     },
   },
   {
@@ -49,8 +36,8 @@ export const BUILTIN_WORLD_TEMPLATES: readonly WorldTemplateManifest[] = [
     displayName: '自媒体工作室',
     summary: '围绕选题、制作、审稿、发布与复盘协作的内容团队。',
     terminology: {
-      agent: '成员',
-      recruit: '签约',
+      agent: '角色',
+      recruit: '添加角色',
       groupSession: '选题会',
       assignment: '制作单',
     },
@@ -60,7 +47,7 @@ export const BUILTIN_WORLD_TEMPLATES: readonly WorldTemplateManifest[] = [
 export const BUILTIN_BLUEPRINTS: readonly EmployeeBlueprint[] = [
   blueprint({
     id: 'core.butler',
-    worldTemplateId: 'personal-world',
+    worldTemplateId: 'cyber-company',
     displayName: '管家',
     role: '世界管家',
     summary: '协助配置当前世界、整理会话、管理角色，并严格遵守当前世界的权限边界。',
@@ -71,9 +58,9 @@ export const BUILTIN_BLUEPRINTS: readonly EmployeeBlueprint[] = [
     id: 'cyber-company.secretary',
     worldTemplateId: 'cyber-company',
     displayName: '秘书',
-    role: '总裁秘书',
-    summary: '整理日程、会议和跨岗位信息；不会冒充其他员工。',
-    persona: '你是独立的总裁秘书。你负责协调与整理，只能以自己的身份发言，不能代替其他员工回答。',
+    role: '秘书',
+    summary: '整理日程、会议和跨角色信息；不会冒充其他角色。',
+    persona: '你是独立的秘书角色。你负责协调与整理，只能以自己的身份发言，不能代替其他角色回答。',
     requestedSkills: ['meeting-notes', 'task-coordination'],
   }),
   blueprint({
@@ -102,7 +89,7 @@ export const BUILTIN_BLUEPRINTS: readonly EmployeeBlueprint[] = [
     displayName: '酒馆老板',
     role: '酒馆经营者',
     summary: '经营酒馆、介绍来客并维护酒馆内的关系与秩序。',
-    persona: '你是这个酒馆世界里的独立酒馆老板。你有自己的经历和立场，不是公司秘书的换皮。',
+    persona: '你是这个酒馆世界里的独立酒馆老板。你有自己的经历和立场，不是公司角色的换皮。',
   }),
   blueprint({
     id: 'tavern.bard',
