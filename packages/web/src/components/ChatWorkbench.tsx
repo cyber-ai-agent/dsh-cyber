@@ -87,6 +87,27 @@ export function ChatWorkbench({
     }
   }, [messages, liveTurns, sending])
 
+  // 切换会话时强制滚动到底部：进入新会话是明确意图，无论会话长短都直接
+  // 看最新消息。会话消息异步加载、分批到达，用定时重试持续滚动直到稳定
+  // 在底部或超时；组件复用不重挂载，用 ref 记录上次会话避免重复触发。
+  const lastSessionIdRef = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (session?.id === undefined || lastSessionIdRef.current === session.id) return
+    lastSessionIdRef.current = session.id
+    const container = scrollRef.current
+    if (container === null) return
+    let attempts = 0
+    const timer = window.setInterval(() => {
+      container.scrollTop = container.scrollHeight
+      attempts += 1
+      const settled = container.scrollHeight - container.scrollTop - container.clientHeight <= 2
+      if (settled || attempts >= 20) {
+        window.clearInterval(timer)
+      }
+    }, 100)
+    return () => window.clearInterval(timer)
+  }, [session?.id])
+
   const submit = async () => {
     const prompt = draft.trim()
     if ((!prompt && attachments.length === 0) || sending || uploading) return
