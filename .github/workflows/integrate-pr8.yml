@@ -23,59 +23,57 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
       - name: Fetch PR 8 head
         run: git fetch origin refs/pull/8/head:refs/remotes/origin/pr8
-      - name: Attempt merge
-        id: merge
-        shell: bash
+      - name: Merge PR 8 and resolve semantic conflicts
         run: |
-          rm -f PR8_CONFLICTS.txt PR8_CONFLICT_PATCH.diff PR8_SERVER_CONFLICT.txt PR8_APP_CONFLICT.txt PR8_CHAT_CONFLICT.txt
-          set +e
-          git merge --no-ff --no-edit refs/remotes/origin/pr8
-          status=$?
-          if [ "$status" -ne 0 ]; then
-            git diff --name-only --diff-filter=U > /tmp/pr8-conflicts.txt
-            git diff --cc > /tmp/pr8-conflict.patch
-            cp packages/server/src/server.ts /tmp/pr8-server.txt
-            cp packages/web/src/App.tsx /tmp/pr8-app.txt
-            cp packages/web/src/components/ChatWorkbench.tsx /tmp/pr8-chat.txt
-            git merge --abort || true
-            cp /tmp/pr8-conflicts.txt PR8_CONFLICTS.txt
-            cp /tmp/pr8-conflict.patch PR8_CONFLICT_PATCH.diff
-            cp /tmp/pr8-server.txt PR8_SERVER_CONFLICT.txt
-            cp /tmp/pr8-app.txt PR8_APP_CONFLICT.txt
-            cp /tmp/pr8-chat.txt PR8_CHAT_CONFLICT.txt
-            echo "conflicted=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "conflicted=false" >> "$GITHUB_OUTPUT"
+          git merge --no-ff --no-edit refs/remotes/origin/pr8 || true
+          conflicts="$(git diff --name-only --diff-filter=U)"
+          printf '%s\n' "$conflicts"
+          expected=$'packages/server/src/server.ts\npackages/web/src/App.tsx\npackages/web/src/components/ChatWorkbench.tsx\npnpm-lock.yaml'
+          if [ "$conflicts" != "$expected" ]; then
+            echo "Unexpected conflict set" >&2
+            exit 1
           fi
-      - name: Persist conflict diagnostics
-        if: steps.merge.outputs.conflicted == 'true'
-        run: |
-          git add -f PR8_CONFLICTS.txt PR8_CONFLICT_PATCH.diff PR8_SERVER_CONFLICT.txt PR8_APP_CONFLICT.txt PR8_CHAT_CONFLICT.txt
-          git commit -m "ci: capture exact PR 8 conflict state"
-          git push origin HEAD:merge/pr-8-integration
-      - name: Stop on conflicts
-        if: steps.merge.outputs.conflicted == 'true'
-        run: exit 1
+          git checkout --ours pnpm-lock.yaml
+          node scripts/resolve-pr8-merge.mjs
+          git add packages/server/src/server.ts packages/web/src/App.tsx packages/web/src/components/ChatWorkbench.tsx pnpm-lock.yaml
+          if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+            echo "Unresolved conflicts remain" >&2
+            git diff --name-only --diff-filter=U
+            exit 1
+          fi
       - uses: pnpm/action-setup@v4
-        if: steps.merge.outputs.conflicted == 'false'
         with:
           version: 11.7.0
           run_install: false
       - uses: actions/setup-node@v4
-        if: steps.merge.outputs.conflicted == 'false'
         with:
           node-version: 22.19.0
           cache: pnpm
-      - if: steps.merge.outputs.conflicted == 'false'
-        run: pnpm install --frozen-lockfile
-      - if: steps.merge.outputs.conflicted == 'false'
-        run: pnpm typecheck
-      - if: steps.merge.outputs.conflicted == 'false'
-        run: pnpm test
-      - if: steps.merge.outputs.conflicted == 'false'
-        run: pnpm exec playwright install --with-deps chromium
-      - if: steps.merge.outputs.conflicted == 'false'
-        run: pnpm test:e2e
-      - name: Push verified merge commit
-        if: steps.merge.outputs.conflicted == 'false'
+      - name: Regenerate lockfile from merged package manifests
+        run: |
+          pnpm install --no-frozen-lockfile
+          git add pnpm-lock.yaml
+      - name: Validate merge tree
+        run: |
+          git add -A
+          git diff --cached --check
+          if git grep -nE '^(<<<<<<<|=======|>>>>>>>)' -- ':!PR8_*' ':!scripts/resolve-pr8-merge.mjs'; then
+            echo "Conflict markers remain" >&2
+            exit 1
+          fi
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e
+      - run: pnpm verify
+      - name: Commit validated merge
+        run: |
+          git commit --no-edit
+      - name: Remove integration-only diagnostics
+        run: |
+          rm -f PR8_CONFLICTS.txt PR8_CONFLICT_PATCH.diff PR8_SERVER_CONFLICT.txt PR8_APP_CONFLICT.txt PR8_CHAT_CONFLICT.txt
+          rm -f scripts/resolve-pr8-merge.mjs .github/workflows/integrate-pr8.yml
+          git add -A
+          git commit -m "chore: remove PR 8 integration diagnostics"
+      - name: Push validated integration
         run: git push origin HEAD:merge/pr-8-integration
