@@ -11,7 +11,11 @@ import {
   X,
 } from '@phosphor-icons/react'
 import { useMemo, useRef, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { ChatAttachment, JsonObject, WorkMessage, WorkSession, World } from '@dsh-cyber/contracts'
+
+import { mentionPlugin } from './mention-plugin.js'
 
 import type { ConversationIntent, CyberEmployee, LiveAgentTurn, ToolStep } from '../types.js'
 import { worldExperience } from '../world-experience.js'
@@ -343,15 +347,11 @@ function ToolEventMessage({ message, employee }: { message: WorkMessage; employe
 }
 
 function RichText({ value }: { value: string }) {
-  return value.split('\n').map((line, lineIndex) => (
-    <p key={`${lineIndex}-${line}`}>
-      {line.split(/(@[^\s，。；：]+)/g).map((part, partIndex) =>
-        part.startsWith('@')
-          ? <mark key={`${partIndex}-${part}`}>{part}</mark>
-          : <span key={`${partIndex}-${part}`}>{part}</span>,
-      )}
-    </p>
-  ))
+  return (
+    <div className="markdown-body">
+      <ReactMarkdown remarkPlugins={[remarkGfm, mentionPlugin]}>{value}</ReactMarkdown>
+    </div>
+  )
 }
 
 function ArtifactAttachment({ onOpen }: { onOpen(): void }) {
