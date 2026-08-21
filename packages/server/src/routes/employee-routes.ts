@@ -1,7 +1,9 @@
 import type { JsonObject } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
+import { HttpError } from '../http/errors.js'
 import type { Router } from '../http/router.js'
+import type { WorldAccessService } from '../services/world-access-service.js'
 import {
   nullableString,
   optionalString,
@@ -15,12 +17,21 @@ import { writeJson } from '../http/response.js'
 
 export interface EmployeeRoutesDependencies {
   store: SqliteStore
+  worldAccess?: WorldAccessService
 }
 
 export function registerEmployeeRoutes(router: Router, dependencies: EmployeeRoutesDependencies): void {
-  const { store } = dependencies
+  const { store, worldAccess } = dependencies
+
+  const assertCharacterUnlocked = async (employeeId: string, request: Parameters<WorldAccessService['assertUnlocked']>[1]) => {
+    const employee = store.getEmployee(employeeId)
+    if (employee === undefined) throw new HttpError(404, 'character_not_found', 'Character not found')
+    await worldAccess?.assertUnlocked(employee.worldId, request)
+    return employee
+  }
 
   router.post(/^\/api\/employees\/([^/]+)\/revisions$/, async ({ request, response, params }) => {
+    await assertCharacterUnlocked(params[0]!, request)
     const body = await readJson(request)
     const reviseInput: Parameters<SqliteStore['reviseEmployee']>[0] = {
       employeeId: params[0]!,
@@ -37,11 +48,13 @@ export function registerEmployeeRoutes(router: Router, dependencies: EmployeeRou
     writeJson(response, 201, { revision: store.reviseEmployee(reviseInput) })
   })
 
-  router.get(/^\/api\/employees\/([^/]+)\/dossier$/, ({ response, params }) => {
+  router.get(/^\/api\/employees\/([^/]+)\/dossier$/, async ({ request, response, params }) => {
+    await assertCharacterUnlocked(params[0]!, request)
     writeJson(response, 200, store.getEmployeeDossier(params[0]!))
   })
 
   router.put(/^\/api\/employees\/([^/]+)\/profile$/, async ({ request, response, params }) => {
+    await assertCharacterUnlocked(params[0]!, request)
     const body = await readJson(request)
     const profile = store.reviseEmployeeProfile({
       employeeId: params[0]!,
@@ -58,6 +71,7 @@ export function registerEmployeeRoutes(router: Router, dependencies: EmployeeRou
   })
 
   router.post(/^\/api\/employees\/([^/]+)\/skill-evidence$/, async ({ request, response, params }) => {
+    await assertCharacterUnlocked(params[0]!, request)
     const body = await readJson(request)
     const evidence = store.recordSkillEvidence({
       employeeId: params[0]!,
@@ -73,6 +87,7 @@ export function registerEmployeeRoutes(router: Router, dependencies: EmployeeRou
   })
 
   router.post(/^\/api\/employees\/([^/]+)\/skills$/, async ({ request, response, params }) => {
+    await assertCharacterUnlocked(params[0]!, request)
     const body = await readJson(request)
     const skill = store.reviseEmployeeSkill({
       employeeId: params[0]!,
@@ -85,6 +100,7 @@ export function registerEmployeeRoutes(router: Router, dependencies: EmployeeRou
   })
 
   router.post(/^\/api\/employees\/([^/]+)\/milestones$/, async ({ request, response, params }) => {
+    await assertCharacterUnlocked(params[0]!, request)
     const body = await readJson(request)
     const milestone = store.appendEmployeeMilestone({
       employeeId: params[0]!,
@@ -103,6 +119,7 @@ export function registerEmployeeRoutes(router: Router, dependencies: EmployeeRou
   })
 
   router.post(/^\/api\/employees\/([^/]+)\/journals$/, async ({ request, response, params }) => {
+    await assertCharacterUnlocked(params[0]!, request)
     const body = await readJson(request)
     const journal = store.writeEmployeeJournal({
       employeeId: params[0]!,
@@ -115,7 +132,8 @@ export function registerEmployeeRoutes(router: Router, dependencies: EmployeeRou
     writeJson(response, 201, { journal })
   })
 
-  router.post(/^\/api\/employees\/([^/]+)\/archive$/, ({ response, params }) => {
+  router.post(/^\/api\/employees\/([^/]+)\/archive$/, async ({ request, response, params }) => {
+    await assertCharacterUnlocked(params[0]!, request)
     writeJson(response, 200, { employee: store.archiveEmployee(params[0]!) })
   })
 }
