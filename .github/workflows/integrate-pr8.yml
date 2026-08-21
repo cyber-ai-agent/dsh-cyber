@@ -27,16 +27,22 @@ jobs:
         id: merge
         shell: bash
         run: |
-          rm -f PR8_CONFLICTS.txt PR8_CONFLICT_PATCH.diff
+          rm -f PR8_CONFLICTS.txt PR8_CONFLICT_PATCH.diff PR8_SERVER_CONFLICT.txt PR8_APP_CONFLICT.txt PR8_CHAT_CONFLICT.txt
           set +e
           git merge --no-ff --no-edit refs/remotes/origin/pr8
           status=$?
           if [ "$status" -ne 0 ]; then
             git diff --name-only --diff-filter=U > /tmp/pr8-conflicts.txt
             git diff --cc > /tmp/pr8-conflict.patch
+            cp packages/server/src/server.ts /tmp/pr8-server.txt
+            cp packages/web/src/App.tsx /tmp/pr8-app.txt
+            cp packages/web/src/components/ChatWorkbench.tsx /tmp/pr8-chat.txt
             git merge --abort || true
             cp /tmp/pr8-conflicts.txt PR8_CONFLICTS.txt
             cp /tmp/pr8-conflict.patch PR8_CONFLICT_PATCH.diff
+            cp /tmp/pr8-server.txt PR8_SERVER_CONFLICT.txt
+            cp /tmp/pr8-app.txt PR8_APP_CONFLICT.txt
+            cp /tmp/pr8-chat.txt PR8_CHAT_CONFLICT.txt
             echo "conflicted=true" >> "$GITHUB_OUTPUT"
           else
             echo "conflicted=false" >> "$GITHUB_OUTPUT"
@@ -44,8 +50,8 @@ jobs:
       - name: Persist conflict diagnostics
         if: steps.merge.outputs.conflicted == 'true'
         run: |
-          git add -f PR8_CONFLICTS.txt PR8_CONFLICT_PATCH.diff
-          git commit -m "ci: capture PR 8 conflict diagnostics"
+          git add -f PR8_CONFLICTS.txt PR8_CONFLICT_PATCH.diff PR8_SERVER_CONFLICT.txt PR8_APP_CONFLICT.txt PR8_CHAT_CONFLICT.txt
+          git commit -m "ci: capture exact PR 8 conflict state"
           git push origin HEAD:merge/pr-8-integration
       - name: Stop on conflicts
         if: steps.merge.outputs.conflicted == 'true'
