@@ -1,0 +1,52 @@
+name: final-world-foundation-gate
+
+on:
+  push:
+    branches:
+      - feat/world-foundation-v3
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-commit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: feat/world-foundation-v3
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Apply final world UI migration
+        run: node scripts/apply-final-world-ui.mjs
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Unit and integration tests
+        run: pnpm test
+      - name: Chromium E2E
+        run: |
+          pnpm exec playwright install --with-deps chromium
+          pnpm test:e2e
+      - name: Verify
+        run: pnpm verify
+      - name: Diff check
+        run: git diff --check
+      - name: Commit verified UI integration
+        shell: bash
+        run: |
+          rm -f scripts/apply-final-world-ui.mjs .github/workflows/final-world-foundation-gate.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: persist world appearance and align first-run world setup"
+          git push origin HEAD:feat/world-foundation-v3
