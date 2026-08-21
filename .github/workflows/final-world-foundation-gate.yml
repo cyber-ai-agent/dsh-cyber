@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: final-world-foundation-v3
+  cancel-in-progress: true
+
 jobs:
   verify-and-commit:
     if: github.actor != 'github-actions[bot]'
@@ -25,26 +29,42 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - name: Apply final world UI migration
+      - name: Apply final world migration
         run: node scripts/apply-final-world-ui.mjs
       - name: Install
         run: pnpm install --frozen-lockfile
-      - name: Typecheck
-        run: pnpm typecheck
-      - name: Unit and integration tests
-        run: pnpm test
-      - name: Chromium E2E
-        run: |
-          pnpm exec playwright install --with-deps chromium
-          pnpm test:e2e
-      - name: Verify
-        run: pnpm verify
-      - name: Diff check
-        run: git diff --check
-      - name: Commit verified UI integration
+      - name: Verify generated implementation
         shell: bash
         run: |
-          rm -f scripts/apply-final-world-ui.mjs .github/workflows/final-world-foundation-gate.yml
+          set +e
+          set -o pipefail
+          {
+            echo '== typecheck =='
+            pnpm typecheck &&
+            echo '== unit/integration =='
+            pnpm test &&
+            echo '== chromium =='
+            pnpm exec playwright install --with-deps chromium &&
+            echo '== e2e =='
+            pnpm test:e2e &&
+            echo '== verify =='
+            pnpm verify &&
+            echo '== diff check =='
+            git diff --check
+          } 2>&1 | tee final-world-foundation-gate.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -f final-world-foundation-gate.log
+            git commit -m "ci: capture final world foundation gate failure" || true
+            git push origin HEAD:feat/world-foundation-v3 || true
+            exit "$status"
+          fi
+      - name: Commit verified implementation
+        shell: bash
+        run: |
+          rm -f final-world-foundation-gate.log scripts/apply-final-world-ui.mjs .github/workflows/final-world-foundation-gate.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
