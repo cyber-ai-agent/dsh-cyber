@@ -38,7 +38,7 @@ test('previews, cancels and persists world appearance settings', async ({ page }
   await page.getByRole('button', { name: '世界设置' }).click()
   let dialog = page.getByRole('dialog', { name: /世界设置 · 我的世界/ })
   await expect(dialog).toBeVisible()
-  const accent = dialog.getByLabel('强调色').locator('input[type="color"]')
+  const accent = dialog.getByLabel('强调色')
   await accent.fill('#3366ff')
   await expect.poll(() => app.evaluate((element) => getComputedStyle(element).getPropertyValue('--accent').trim())).not.toBe(before)
   await expect(dialog.getByText('这里的样式会跟着设置实时变化。')).toBeVisible()
@@ -49,14 +49,14 @@ test('previews, cancels and persists world appearance settings', async ({ page }
 
   await page.getByRole('button', { name: '世界设置' }).click()
   dialog = page.getByRole('dialog', { name: /世界设置 · 我的世界/ })
-  await dialog.getByLabel('强调色').locator('input[type="color"]').fill('#3366ff')
+  await dialog.getByLabel('强调色').fill('#3366ff')
   await dialog.getByRole('button', { name: '保存世界设置' }).click()
   await expect(dialog.getByText('世界设置已保存')).toBeVisible()
   await expect(dialog).toBeHidden({ timeout: 3_000 })
 
   await page.getByRole('button', { name: '世界设置' }).click()
   dialog = page.getByRole('dialog', { name: /世界设置 · 我的世界/ })
-  await expect(dialog.getByLabel('强调色').locator('input[type="color"]')).toHaveValue('#3366ff')
+  await expect(dialog.getByLabel('强调色')).toHaveValue('#3366ff')
   await dialog.getByRole('button', { name: '取消' }).click()
 })
 
