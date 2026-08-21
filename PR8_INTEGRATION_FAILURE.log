@@ -21,22 +21,23 @@ packages/web/src/components/ChatWorkbench.tsx
 pnpm-lock.yaml
 == semantic resolution ==
 Updated 1 path from the index
-PR 8 semantic conflicts resolved.
+PR 8 semantic conflicts resolved and E2E terminology aligned.
 == lockfile ==
 Scope: all 12 workspace projects
 ? Verifying lockfile against supply-chain policies (620 entries)...
 Progress: resolved 1, reused 0, downloaded 0, added 0
-Progress: resolved 23, reused 17, downloaded 6, added 0
+Progress: resolved 22, reused 16, downloaded 6, added 0
 Progress: resolved 26, reused 20, downloaded 6, added 0
-Progress: resolved 30, reused 23, downloaded 6, added 0
-✓ Lockfile passes supply-chain policies (620 entries in 4.2s)
-Progress: resolved 163, reused 130, downloaded 28, added 0
-Progress: resolved 386, reused 261, downloaded 69, added 0
-Progress: resolved 679, reused 468, downloaded 104, added 0
-[WARN] 1 deprecated subdependencies found: node-domexception@1.0.0
+Progress: resolved 31, reused 25, downloaded 6, added 0
+✓ Lockfile passes supply-chain policies (620 entries in 3.9s)
+Progress: resolved 163, reused 133, downloaded 28, added 0
+Progress: resolved 387, reused 262, downloaded 69, added 0
+Progress: resolved 595, reused 388, downloaded 103, added 0
 Progress: resolved 724, reused 513, downloaded 106, added 0
+[WARN] 1 deprecated subdependencies found: node-domexception@1.0.0
 Packages: +617
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Progress: resolved 724, reused 513, downloaded 106, added 1
 Progress: resolved 724, reused 513, downloaded 106, added 617, done
 .../.pnpm/koffi@3.1.5/node_modules/koffi install$ node ./cnoke.cjs -P . -D src/koffi --prebuild --release
 .../node_modules/protobufjs postinstall$ node scripts/postinstall
@@ -66,7 +67,7 @@ devDependencies:
 + typescript 6.0.3 (7.0.2 is available)
 + vitest 4.1.8 (4.1.11 is available)
 
-Done in 22.7s using pnpm v11.7.0
+Done in 22.9s using pnpm v11.7.0
 == typecheck ==
 $ tsc -b --pretty false && pnpm --filter @dsh-cyber/web typecheck
 $ tsc -b --pretty false
@@ -102,47 +103,47 @@ dist/assets/index-D-0lUBD9.js                     906.81 kB │ gzip: 256.60 kB 
 
 [1m[30m[46m RUN [49m[39m[22m [36mv4.1.8 [39m[90m/home/runner/work/dsh-cyber/dsh-cyber[39m
 
+(node:2589) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:2595) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
 (node:2588) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:2594) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+ [32m✓[39m packages/package-runtime/tests/package-manager.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 165[2mms[22m[39m
+ [32m✓[39m packages/persistence/tests/sqlite-store.test.ts [2m([22m[2m15 tests[22m[2m)[22m[33m 402[2mms[22m[39m
+ [32m✓[39m packages/server/tests/installed-package-runtime.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 76[2mms[22m[39m
+(node:2624) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:2587) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:2639) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
- [32m✓[39m packages/package-runtime/tests/package-manager.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 148[2mms[22m[39m
- [32m✓[39m packages/persistence/tests/sqlite-store.test.ts [2m([22m[2m15 tests[22m[2m)[22m[33m 369[2mms[22m[39m
- [32m✓[39m packages/server/tests/installed-package-runtime.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 61[2mms[22m[39m
-(node:2623) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+ [32m✓[39m packages/orchestration/tests/conversation-orchestrator.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 182[2mms[22m[39m
+ [32m✓[39m packages/server/tests/model-interaction-routes.test.ts [2m([22m[2m7 tests[22m[2m)[22m[33m 315[2mms[22m[39m
+ [32m✓[39m packages/harness-adapter/tests/adapter.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 57[2mms[22m[39m
+ [32m✓[39m packages/world-runtime/tests/world-runtime.test.ts [2m([22m[2m20 tests[22m[2m)[22m[32m 69[2mms[22m[39m
+ [32m✓[39m packages/server/tests/http-infrastructure.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m packages/server/tests/marketplace-conformance.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 93[2mms[22m[39m
+(node:2712) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-(node:2638) ExperimentalWarning: SQLite is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
- [32m✓[39m packages/orchestration/tests/conversation-orchestrator.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 169[2mms[22m[39m
- [32m✓[39m packages/server/tests/model-interaction-routes.test.ts [2m([22m[2m7 tests[22m[2m)[22m[33m 334[2mms[22m[39m
- [32m✓[39m packages/harness-adapter/tests/adapter.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 34[2mms[22m[39m
- [32m✓[39m packages/world-runtime/tests/world-runtime.test.ts [2m([22m[2m20 tests[22m[2m)[22m[32m 82[2mms[22m[39m
- [32m✓[39m packages/server/tests/http-infrastructure.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 10[2mms[22m[39m
- [32m✓[39m packages/server/tests/marketplace-conformance.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 87[2mms[22m[39m
-(node:2711) ExperimentalWarning: SQLite is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
- [32m✓[39m packages/cli/tests/cli.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 219[2mms[22m[39m
- [32m✓[39m packages/server/tests/model-services.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 94[2mms[22m[39m
- [32m✓[39m packages/server/tests/server.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 2939[2mms[22m[39m
-     [33m[2m✓[22m[39m searches verified market packages and activates installed plugin and talent entrypoints [33m 1747[2mms[22m[39m
- [32m✓[39m packages/server/tests/application-services.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 21[2mms[22m[39m
- [32m✓[39m packages/server/tests/server-architecture.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 27[2mms[22m[39m
+ [32m✓[39m packages/cli/tests/cli.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 228[2mms[22m[39m
+ [32m✓[39m packages/server/tests/server.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 2580[2mms[22m[39m
+     [33m[2m✓[22m[39m searches verified market packages and activates installed plugin and talent entrypoints [33m 1445[2mms[22m[39m
+ [32m✓[39m packages/server/tests/model-services.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 80[2mms[22m[39m
+ [32m✓[39m packages/server/tests/application-services.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 17[2mms[22m[39m
+ [32m✓[39m packages/server/tests/server-architecture.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 32[2mms[22m[39m
  [32m✓[39m packages/server/tests/world-theme-package.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 11[2mms[22m[39m
- [32m✓[39m packages/web/tests/world-runtime-client.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 9[2mms[22m[39m
- [32m✓[39m packages/web/tests/mention-plugin.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m packages/web/tests/world-runtime-client.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m packages/web/tests/mention-plugin.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 12[2mms[22m[39m
  [32m✓[39m packages/server/tests/employee-blueprint-manifest.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 10[2mms[22m[39m
- [32m✓[39m packages/server/tests/world-foundation-v3.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 19[2mms[22m[39m
- [32m✓[39m packages/harness-adapter/tests/rc8-reasoning.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 4[2mms[22m[39m
- [32m✓[39m packages/harness-adapter/tests/local-harness.integration.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 3326[2mms[22m[39m
-     [33m[2m✓[22m[39m runs and resumes one persistent employee session without cloud access [33m 3324[2mms[22m[39m
- [32m✓[39m packages/web/tests/actor-animation-controller.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 32[2mms[22m[39m
+ [32m✓[39m packages/server/tests/world-foundation-v3.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 15[2mms[22m[39m
+ [32m✓[39m packages/harness-adapter/tests/rc8-reasoning.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m packages/harness-adapter/tests/local-harness.integration.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 3148[2mms[22m[39m
+     [33m[2m✓[22m[39m runs and resumes one persistent employee session without cloud access [33m 3145[2mms[22m[39m
+ [32m✓[39m packages/web/tests/actor-animation-controller.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 43[2mms[22m[39m
 
 [2m Test Files [22m [1m[32m22 passed[39m[22m[90m (22)[39m
 [2m      Tests [22m [1m[32m125 passed[39m[22m[90m (125)[39m
-[2m   Start at [22m 09:42:32
-[2m   Duration [22m 5.39s[2m (transform 2.01s, setup 0ms, import 3.97s, tests 8.01s, environment 4ms)[22m
+[2m   Start at [22m 09:49:59
+[2m   Duration [22m 5.31s[2m (transform 2.08s, setup 0ms, import 4.35s, tests 7.56s, environment 5ms)[22m
 
 == chromium ==
 Installing dependencies...
@@ -150,35 +151,35 @@ Switching to root user to install dependencies...
 Get:1 file:/etc/apt/apt-mirrors.txt Mirrorlist [144 B]
 Hit:2 http://azure.archive.ubuntu.com/ubuntu noble InRelease
 Hit:6 https://packages.microsoft.com/repos/azure-cli noble InRelease
-Get:7 https://packages.microsoft.com/ubuntu/24.04/prod noble InRelease [3600 B]
 Get:3 http://azure.archive.ubuntu.com/ubuntu noble-updates InRelease [126 kB]
 Get:4 http://azure.archive.ubuntu.com/ubuntu noble-backports InRelease [126 kB]
 Get:5 http://azure.archive.ubuntu.com/ubuntu noble-security InRelease [126 kB]
-Get:8 https://dl.google.com/linux/chrome-stable/deb stable InRelease [2548 B]
-Get:9 https://packages.microsoft.com/ubuntu/24.04/prod noble/main arm64 Packages [350 kB]
-Get:10 https://packages.microsoft.com/ubuntu/24.04/prod noble/main amd64 Packages [396 kB]
-Get:11 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 Packages [1227 kB]
-Get:12 http://azure.archive.ubuntu.com/ubuntu noble-updates/main Translation-en [286 kB]
-Get:13 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 Components [181 kB]
-Get:14 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 Packages [1687 kB]
-Get:15 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe Translation-en [337 kB]
-Get:16 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 Components [388 kB]
-Get:17 http://azure.archive.ubuntu.com/ubuntu noble-updates/restricted amd64 Packages [1483 kB]
-Get:18 http://azure.archive.ubuntu.com/ubuntu noble-updates/restricted Translation-en [339 kB]
-Get:19 http://azure.archive.ubuntu.com/ubuntu noble-updates/multiverse Translation-en [12.8 kB]
-Get:20 http://azure.archive.ubuntu.com/ubuntu noble-updates/multiverse amd64 Components [940 B]
-Get:21 http://azure.archive.ubuntu.com/ubuntu noble-backports/main amd64 Components [5776 B]
-Get:22 http://azure.archive.ubuntu.com/ubuntu noble-backports/universe amd64 Components [12.6 kB]
-Get:23 http://azure.archive.ubuntu.com/ubuntu noble-security/main amd64 Packages [967 kB]
-Get:24 http://azure.archive.ubuntu.com/ubuntu noble-security/main Translation-en [205 kB]
-Get:25 http://azure.archive.ubuntu.com/ubuntu noble-security/main amd64 Components [46.4 kB]
-Get:26 http://azure.archive.ubuntu.com/ubuntu noble-security/universe amd64 Packages [1201 kB]
-Get:27 http://azure.archive.ubuntu.com/ubuntu noble-security/universe Translation-en [240 kB]
-Get:28 http://azure.archive.ubuntu.com/ubuntu noble-security/universe amd64 Components [76.2 kB]
-Get:29 http://azure.archive.ubuntu.com/ubuntu noble-security/restricted amd64 Packages [1385 kB]
-Get:30 http://azure.archive.ubuntu.com/ubuntu noble-security/restricted Translation-en [320 kB]
-Get:31 https://dl.google.com/linux/chrome-stable/deb stable/main amd64 Packages [1409 B]
-Fetched 11.5 MB in 1s (8787 kB/s)
+Get:7 https://dl.google.com/linux/chrome-stable/deb stable InRelease [2548 B]
+Get:8 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 Packages [1227 kB]
+Get:9 http://azure.archive.ubuntu.com/ubuntu noble-updates/main Translation-en [286 kB]
+Get:10 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 Components [181 kB]
+Get:11 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 Packages [1687 kB]
+Get:18 https://packages.microsoft.com/ubuntu/24.04/prod noble InRelease [3600 B]
+Get:12 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe Translation-en [337 kB]
+Get:13 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 Components [388 kB]
+Get:14 http://azure.archive.ubuntu.com/ubuntu noble-updates/restricted amd64 Packages [1483 kB]
+Get:15 http://azure.archive.ubuntu.com/ubuntu noble-updates/restricted Translation-en [339 kB]
+Get:16 http://azure.archive.ubuntu.com/ubuntu noble-updates/multiverse Translation-en [12.8 kB]
+Get:17 http://azure.archive.ubuntu.com/ubuntu noble-updates/multiverse amd64 Components [940 B]
+Get:19 http://azure.archive.ubuntu.com/ubuntu noble-backports/main amd64 Components [5776 B]
+Get:20 http://azure.archive.ubuntu.com/ubuntu noble-backports/universe amd64 Components [12.6 kB]
+Get:21 http://azure.archive.ubuntu.com/ubuntu noble-security/main amd64 Packages [967 kB]
+Get:22 http://azure.archive.ubuntu.com/ubuntu noble-security/main Translation-en [205 kB]
+Get:23 http://azure.archive.ubuntu.com/ubuntu noble-security/main amd64 Components [46.4 kB]
+Get:24 http://azure.archive.ubuntu.com/ubuntu noble-security/universe amd64 Packages [1201 kB]
+Get:25 http://azure.archive.ubuntu.com/ubuntu noble-security/universe Translation-en [240 kB]
+Get:26 http://azure.archive.ubuntu.com/ubuntu noble-security/universe amd64 Components [76.2 kB]
+Get:27 http://azure.archive.ubuntu.com/ubuntu noble-security/restricted amd64 Packages [1385 kB]
+Get:28 http://azure.archive.ubuntu.com/ubuntu noble-security/restricted Translation-en [320 kB]
+Get:29 https://dl.google.com/linux/chrome-stable/deb stable/main amd64 Packages [1409 B]
+Get:30 https://packages.microsoft.com/ubuntu/24.04/prod noble/main amd64 Packages [396 kB]
+Get:31 https://packages.microsoft.com/ubuntu/24.04/prod noble/main arm64 Packages [350 kB]
+Fetched 11.5 MB in 1s (8650 kB/s)
 Reading package lists...
 Reading package lists...
 Building dependency tree...
@@ -254,7 +255,7 @@ Get:7 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 xfonts-encodings a
 Get:8 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 xfonts-utils amd64 1:7.7+6build3 [94.4 kB]
 Get:9 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 xfonts-cyrillic all 1:1.0.5+nmu1 [384 kB]
 Get:10 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 xfonts-scalable all 1:1.0.3-1.3 [304 kB]
-Fetched 21.1 MB in 0s (76.4 MB/s)
+Fetched 21.1 MB in 0s (54.0 MB/s)
 Selecting previously unselected package fonts-ipafont-gothic.
 (Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 203124 files and directories currently installed.)
 Preparing to unpack .../0-fonts-ipafont-gothic_00303-21ubuntu1_all.deb ...
@@ -374,78 +375,40 @@ dist/assets/index-D-0lUBD9.js                     906.81 kB │ gzip: 256.60 kB 
 - Using dynamic import() to code-split the application
 - Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
 - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.[39m
-(node:3760) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:3764) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
 
 Running 7 tests using 1 worker
 
-(node:3780) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(node:3785) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
-  ✓  1 e2e/workbench.spec.ts:31:1 › onboards, recruits, talks, browses dossiers and previews a real workspace file (11.0s)
-  ✓  2 e2e/workbench.spec.ts:85:1 › runs direct and group conversations with real world lifecycle, persistence, and reconnect recovery (30.7s)
-  ✓  3 e2e/workbench.spec.ts:204:1 › keeps the workbench readable and the world viewport filled on a 4K display (54.7s)
-  ✓  4 e2e/workbench.spec.ts:253:1 › creates, edits, restores, and deletes a private-network sub2api model profile (23.7s)
-  ✓  5 e2e/workbench.spec.ts:304:1 › opens the dossier as an all-employee information directory (10.7s)
-  ✘  6 e2e/workbench.spec.ts:330:1 › clears the composer instantly, shows the owner message on screen, and keeps the thinking trace visible during and after a turn (12.1s)
-(node:4166) ExperimentalWarning: SQLite is an experimental feature and might change at any time
-(Use `node --trace-warnings ...` to show where the warning was created)
-  ✘  7 e2e/workbench.spec.ts:411:1 › shows real model interaction logs in the settings panel with filtering, detail, clear and visual evidence (45.1s)
+  ✓  1 e2e/workbench.spec.ts:31:1 › onboards, recruits, talks, browses dossiers and previews a real workspace file (13.5s)
+  ✓  2 e2e/workbench.spec.ts:85:1 › runs direct and group conversations with real world lifecycle, persistence, and reconnect recovery (28.4s)
+  ✓  3 e2e/workbench.spec.ts:204:1 › keeps the workbench readable and the world viewport filled on a 4K display (53.4s)
+  ✓  4 e2e/workbench.spec.ts:253:1 › creates, edits, restores, and deletes a private-network sub2api model profile (23.1s)
+  ✓  5 e2e/workbench.spec.ts:304:1 › opens the dossier as an all-employee information directory (10.8s)
+  ✓  6 e2e/workbench.spec.ts:330:1 › clears the composer instantly, shows the owner message on screen, and keeps the thinking trace visible during and after a turn (11.7s)
+  ✘  7 e2e/workbench.spec.ts:411:1 › shows real model interaction logs in the settings panel with filtering, detail, clear and visual evidence (9.3s)
 
 
-  1) e2e/workbench.spec.ts:330:1 › clears the composer instantly, shows the owner message on screen, and keeps the thinking trace visible during and after a turn 
+  1) e2e/workbench.spec.ts:411:1 › shows real model interaction logs in the settings panel with filtering, detail, clear and visual evidence 
 
-    Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeEnabled[2m()[22m failed
-
-    Locator:  getByRole('textbox', { name: '给当前世界的员工发送消息' })
-    Expected: enabled
-    Received: <element(s) not found>
-    Timeout:  8000ms
+    Error: locator.click: Error: strict mode violation: getByRole('button', { name: '设置' }) resolved to 2 elements:
+        1) <button type="button">…</button> aka getByRole('button', { name: '设置', exact: true })
+        2) <button type="button">…</button> aka getByRole('button', { name: '世界设置' })
 
     Call log:
-    [2m  - Expect "toBeEnabled" with timeout 8000ms[22m
-    [2m  - waiting for getByRole('textbox', { name: '给当前世界的员工发送消息' })[22m
+    [2m  - waiting for getByRole('button', { name: '设置' })[22m
 
 
-      370 |   await directButton.first().click()
-      371 |   const composer = page.getByRole('textbox', { name: '给当前世界的员工发送消息' })
-    > 372 |   await expect(composer).toBeEnabled()
-          |                          ^
-      373 |   const ownerText = '任务：验证乐观发送与实时思考展示'
-      374 |   await composer.fill(ownerText)
-      375 |   await page.getByRole('button', { name: '发送' }).click()
-        at /home/runner/work/dsh-cyber/dsh-cyber/e2e/workbench.spec.ts:372:26
-
-    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
-    .private/playwright-results/workbench-clears-the-compo-e4cdf-ble-during-and-after-a-turn/test-failed-1.png
-    ────────────────────────────────────────────────────────────────────────────────────────────────
-
-    Error Context: .private/playwright-results/workbench-clears-the-compo-e4cdf-ble-during-and-after-a-turn/error-context.md
-
-    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
-    .private/playwright-results/workbench-clears-the-compo-e4cdf-ble-during-and-after-a-turn/trace.zip
-    Usage:
-
-        pnpm exec playwright show-trace .private/playwright-results/workbench-clears-the-compo-e4cdf-ble-during-and-after-a-turn/trace.zip
-
-    ────────────────────────────────────────────────────────────────────────────────────────────────
-
-  2) e2e/workbench.spec.ts:411:1 › shows real model interaction logs in the settings panel with filtering, detail, clear and visual evidence 
-
-    [31mTest timeout of 45000ms exceeded.[39m
-
-    Error: locator.click: Test timeout of 45000ms exceeded.
-    Call log:
-    [2m  - waiting for getByRole('button', { name: '创建本地工作区' })[22m
-
-
-      416 |   await expect(shell.or(onboarding)).toBeVisible()
-      417 |   if (await onboarding.isVisible()) {
-    > 418 |     await page.getByRole('button', { name: '创建本地工作区' }).click()
-          |                                                         ^
-      419 |     await expect(shell).toBeVisible()
-      420 |   }
-      421 |
-        at /home/runner/work/dsh-cyber/dsh-cyber/e2e/workbench.spec.ts:418:57
+      447 |
+      448 |   // 打开设置 → 日志记录
+    > 449 |   await page.getByRole('button', { name: '设置' }).click()
+          |                                                  ^
+      450 |   const settings = page.getByRole('dialog', { name: '设置' })
+      451 |   await expect(settings).toBeVisible()
+      452 |   await settings.getByRole('button', { name: '日志记录' }).click()
+        at /home/runner/work/dsh-cyber/dsh-cyber/e2e/workbench.spec.ts:449:50
 
     attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
     .private/playwright-results/workbench-shows-real-model-eb8a2-l-clear-and-visual-evidence/test-failed-1.png
@@ -461,8 +424,7 @@ Running 7 tests using 1 worker
 
     ────────────────────────────────────────────────────────────────────────────────────────────────
 
-  2 failed
-    e2e/workbench.spec.ts:330:1 › clears the composer instantly, shows the owner message on screen, and keeps the thinking trace visible during and after a turn 
+  1 failed
     e2e/workbench.spec.ts:411:1 › shows real model interaction logs in the settings panel with filtering, detail, clear and visual evidence 
-  5 passed (3.2m)
+  6 passed (2.6m)
 [ELIFECYCLE] Command failed with exit code 1.
