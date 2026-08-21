@@ -6,11 +6,12 @@ import {
   Plus,
   Storefront,
 } from '@phosphor-icons/react'
-import { useState } from 'react'
-import type { World, WorldZoomCommand } from '@dsh-cyber/contracts'
+import { useEffect, useMemo, useState } from 'react'
+import type { World, WorldInteractionAction, WorldRuntimeSnapshot, WorldZoomCommand } from '@dsh-cyber/contracts'
 
 import type { CyberEmployee } from '../../types.js'
 import { WorldCanvas } from './WorldCanvas.js'
+import { EmployeeInteractionMenu, ObjectInteractionMenu } from './WorldInteractionMenu.js'
 import { useWorldClient } from './world-client-store.js'
 import { createZoomCommand } from './zoom-command.js'
 
@@ -37,6 +38,9 @@ export function WorldRuntimeDock({
   const [fitRequest, setFitRequest] = useState(0)
   const [zoomCommand, setZoomCommand] = useState<WorldZoomCommand>()
   const [selectedObjectId, setSelectedObjectId] = useState<string>()
+  const [activeEmployeeId, setActiveEmployeeId] = useState<string | undefined>(selectedEmployeeId)
+
+  useEffect(() => setActiveEmployeeId(selectedEmployeeId), [selectedEmployeeId])
 
   if (runtime.loading || runtime.snapshot === undefined) {
     return (
@@ -48,9 +52,54 @@ export function WorldRuntimeDock({
     )
   }
 
+  const renderedSnapshot = withCharacterVisuals(runtime.snapshot, employees)
+  const selectedEmployee = employees.find((employee) => employee.id === activeEmployeeId)
+  const selectedObject = renderedSnapshot.objects.find((object) => object.id === selectedObjectId)
+  const selectedObjectManifest = runtime.manifest.scenes
+    .find((scene) => scene.id === renderedSnapshot.sceneId)
+    ?.interactables.find((object) => object.id === selectedObjectId)
+
   const focusedNames = conversationEmployeeIds
     .map((employeeId) => employees.find((employee) => employee.id === employeeId)?.displayName)
     .filter((name): name is string => name !== undefined)
+
+  const interactWithEmployee = async (action: 'talk' | 'assign-task' | 'start-meeting') => {
+    if (selectedEmployee === undefined) return
+    if (action === 'talk') {
+      await runtime.interact({ action, actorId: 'owner', entityId: selectedEmployee.id })
+      onSelectEmployee(selectedEmployee.id)
+      return
+    }
+    if (action === 'assign-task') {
+      await runtime.interact({ action, actorId: 'owner', entityId: selectedEmployee.id, objectId: 'workstation' })
+      onSelectEmployee(selectedEmployee.id)
+      return
+    }
+    const colleague = employees.find((employee) => employee.id !== selectedEmployee.id)
+    await runtime.interact({
+      action,
+      actorId: 'owner',
+      participantIds: colleague === undefined ? [selectedEmployee.id] : [selectedEmployee.id, colleague.id],
+    })
+  }
+
+  const actOnObject = async (action: WorldInteractionAction) => {
+    if (selectedObject === undefined) return
+    const participantIds = action === 'start-meeting'
+      ? (selectedEmployee === undefined
+          ? employees.slice(0, 3)
+          : [selectedEmployee, ...employees.filter((employee) => employee.id !== selectedEmployee.id).slice(0, 2)])
+        .map((employee) => employee.id)
+      : undefined
+    await runtime.interact({
+      action,
+      actorId: 'owner',
+      objectId: selectedObject.id,
+      ...(selectedEmployee === undefined ? {} : { entityId: selectedEmployee.id }),
+      ...(participantIds === undefined ? {} : { participantIds }),
+    })
+    if (action === 'assign-task' && selectedEmployee !== undefined) onSelectEmployee(selectedEmployee.id)
+  }
 
   return (
     <section className="world-runtime-dock" aria-label={`${world.name}实时世界`}>
@@ -70,13 +119,16 @@ export function WorldRuntimeDock({
         <WorldCanvas
           manifest={runtime.manifest}
           rendererIdentity={runtime.rendererIdentity}
-          snapshot={runtime.snapshot}
+          snapshot={renderedSnapshot}
           cues={runtime.cues}
-          {...(selectedEmployeeId === undefined ? {} : { selectedEntityId: selectedEmployeeId })}
+          {...(activeEmployeeId === undefined ? {} : { selectedEntityId: activeEmployeeId })}
           {...(selectedObjectId === undefined ? {} : { selectedObjectId })}
           fitRequest={fitRequest}
           {...(zoomCommand === undefined ? {} : { zoomCommand })}
-          onEntitySelect={onSelectEmployee}
+          onEntitySelect={(employeeId) => {
+            setActiveEmployeeId(employeeId)
+            setSelectedObjectId(undefined)
+          }}
           onObjectSelect={setSelectedObjectId}
           onReady={() => undefined}
         />
@@ -88,9 +140,29 @@ export function WorldRuntimeDock({
           </div>
         )}
 
+        {selectedEmployee === undefined ? null : (
+          <EmployeeInteractionMenu
+            employee={selectedEmployee}
+            onClose={() => setActiveEmployeeId(undefined)}
+            onTalk={() => void interactWithEmployee('talk')}
+            onAssignTask={() => void interactWithEmployee('assign-task')}
+            onMeeting={() => void interactWithEmployee('start-meeting')}
+          />
+        )}
+
+        {selectedObject === undefined || selectedObjectManifest === undefined ? null : (
+          <ObjectInteractionMenu
+            object={selectedObject}
+            manifest={selectedObjectManifest}
+            {...(selectedEmployee === undefined ? {} : { selectedEmployee })}
+            onClose={() => setSelectedObjectId(undefined)}
+            onAction={(action) => void actOnObject(action)}
+          />
+        )}
+
         <div className="world-runtime-dock__controls" aria-label="世界视图控制">
           <button type="button" aria-label="缩小" onClick={() => setZoomCommand(createZoomCommand(-0.1))}><Minus size={15} /></button>
-          <button type="button" aria-label="显示全景" title="显示完整场景" onClick={() => setFitRequest((value) => value + 1)}><ArrowsOut size={15} /></button>
+          <button type="button" aria-label="显示全景" title="适应窗口且不露出场景边界" onClick={() => setFitRequest((value) => value + 1)}><ArrowsOut size={15} /></button>
           <button type="button" aria-label="放大" onClick={() => setZoomCommand(createZoomCommand(0.1))}><Plus size={15} /></button>
           <button
             type="button"
@@ -104,11 +176,24 @@ export function WorldRuntimeDock({
           <div className="world-runtime-dock__empty">
             <Storefront size={25} />
             <strong>这个世界还没有角色</strong>
-            <span>从人才市场添加第一名角色后，他会出现在这里。</span>
-            <button className="primary-button" type="button" onClick={onRecruit}>打开人才市场</button>
+            <span>从角色市场添加第一名角色后，他会出现在这里。</span>
+            <button className="primary-button" type="button" onClick={onRecruit}>打开角色市场</button>
           </div>
         ) : null}
       </div>
     </section>
   )
+}
+
+function withCharacterVisuals(snapshot: WorldRuntimeSnapshot, employees: CyberEmployee[]): WorldRuntimeSnapshot {
+  const visualIndex = new Map(employees.map((employee) => [employee.id, employee.avatarIndex]))
+  return {
+    ...snapshot,
+    entities: snapshot.entities.map((entity) => {
+      const rosterIndex = visualIndex.get(entity.id)
+      return rosterIndex === undefined
+        ? entity
+        : { ...entity, visualState: { ...entity.visualState, rosterIndex } }
+    }),
+  }
 }
