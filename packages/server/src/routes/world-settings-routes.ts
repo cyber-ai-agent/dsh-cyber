@@ -64,6 +64,8 @@ export function registerWorldSettingsRoutes(
   router.post(/^\/api\/worlds\/([^/]+)\/access\/password$/, async ({ request, response, params }) => {
     const worldId = params[0]!
     if (store.getWorld(worldId) === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
+    const current = await access.summary(worldId, request)
+    if (current.passwordEnabled) await access.assertUnlocked(worldId, request)
     const body = await readJson(request)
     writeJson(response, 200, {
       access: await access.setPassword(worldId, requiredString(body, 'password'), response),
