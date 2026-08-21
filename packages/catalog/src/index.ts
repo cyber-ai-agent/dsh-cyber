@@ -9,12 +9,7 @@ export const BUILTIN_WORLD_TEMPLATES: readonly WorldTemplateManifest[] = [
     version: 1,
     displayName: '我的世界',
     summary: '可自由定义世界观、关系、角色、视觉与模型的私人本地世界。底层复用成熟的互动场景运行时。',
-    terminology: {
-      agent: '角色',
-      recruit: '添加角色',
-      groupSession: '群组会话',
-      assignment: '任务',
-    },
+    terminology: { agent: '角色', recruit: '添加角色', groupSession: '群组会话', assignment: '任务' },
   },
   {
     schemaVersion: 1,
@@ -22,12 +17,7 @@ export const BUILTIN_WORLD_TEMPLATES: readonly WorldTemplateManifest[] = [
     version: 1,
     displayName: '赛博公司',
     summary: '围绕项目、角色协作和交付运转的独立数字世界，也可通过世界设置改造成私人世界。',
-    terminology: {
-      agent: '角色',
-      recruit: '添加角色',
-      groupSession: '群组会话',
-      assignment: '任务',
-    },
+    terminology: { agent: '角色', recruit: '添加角色', groupSession: '群组会话', assignment: '任务' },
   },
   {
     schemaVersion: 1,
@@ -35,12 +25,7 @@ export const BUILTIN_WORLD_TEMPLATES: readonly WorldTemplateManifest[] = [
     version: 1,
     displayName: '角色酒馆',
     summary: '拥有独立人物、关系和剧情记忆的多角色互动世界。',
-    terminology: {
-      agent: '角色',
-      recruit: '邀请入席',
-      groupSession: '同桌会话',
-      assignment: '委托',
-    },
+    terminology: { agent: '角色', recruit: '邀请入席', groupSession: '同桌会话', assignment: '委托' },
   },
   {
     schemaVersion: 1,
@@ -48,12 +33,7 @@ export const BUILTIN_WORLD_TEMPLATES: readonly WorldTemplateManifest[] = [
     version: 1,
     displayName: '自媒体工作室',
     summary: '围绕选题、制作、审稿、发布与复盘协作的内容团队。',
-    terminology: {
-      agent: '角色',
-      recruit: '添加角色',
-      groupSession: '选题会',
-      assignment: '制作单',
-    },
+    terminology: { agent: '角色', recruit: '添加角色', groupSession: '选题会', assignment: '制作单' },
   },
 ] as const
 
@@ -138,8 +118,9 @@ export function worldTemplate(templateId: string): WorldTemplateManifest | undef
 }
 
 export function blueprintsForWorld(templateId: string): EmployeeBlueprint[] {
-  const runtimeTemplateId = templateId === 'personal-world' ? 'cyber-company' : templateId
-  return BUILTIN_BLUEPRINTS.filter((item) => item.worldTemplateId === runtimeTemplateId)
+  return templateId === 'personal-world'
+    ? [...BUILTIN_BLUEPRINTS]
+    : BUILTIN_BLUEPRINTS.filter((item) => item.worldTemplateId === templateId)
 }
 
 function blueprint(
