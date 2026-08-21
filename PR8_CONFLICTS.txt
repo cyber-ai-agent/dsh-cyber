@@ -1,0 +1,4 @@
+packages/server/src/server.ts
+packages/web/src/App.tsx
+packages/web/src/components/ChatWorkbench.tsx
+pnpm-lock.yaml
