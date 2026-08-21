@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -50,6 +50,21 @@ describe('WorkspaceFileService', () => {
       kind: 'forbidden',
       code: 'workspace_path_rejected',
     })
+  })
+
+  it('accepts a workspace root expressed as a Windows 8.3 short name', async () => {
+    // 在启用了 8.3 短名的 Windows 上，mkdtemp 返回的临时目录本身就是短名形式
+    // （如 C:\Users\ADMINI~1\...）；realpath 会把它展开为完整路径。根目录与
+    // 目标必须基于同一展开结果比较，否则路径逃逸校验会误报（Windows 专属回归）。
+    const root = await temporaryRoot()
+    const expandedRoot = await realpath(root)
+    if (expandedRoot === root) return // 平台未启用短名时无需断言
+    await mkdir(join(root, 'src'))
+    await writeFile(join(root, 'src', 'main.ts'), 'export {}\n')
+    const files = new WorkspaceFileService(root)
+
+    const listing = await files.list('')
+    expect(listing.items.map((item) => item.name)).toEqual(['src'])
   })
 })
 
