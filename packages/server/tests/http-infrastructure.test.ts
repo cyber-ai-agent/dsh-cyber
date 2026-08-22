@@ -147,7 +147,7 @@ describe('HTTP error mapping', () => {
     expect(JSON.parse(fake.text())).toEqual({
       error: {
         code: 'model_turn_authentication',
-        message: '模型服务拒绝了 API 密钥，请在设置中重新填写后重试。',
+        message: 'API 密钥被模型服务拒绝。请打开“设置 → 模型”重新填写密钥，并先获取模型列表确认连接成功。',
       },
     })
     expect(fake.text()).not.toContain('employee-private-id')
