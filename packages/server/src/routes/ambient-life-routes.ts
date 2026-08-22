@@ -1,13 +1,14 @@
-import type { Router } from '../http/router.js'
+import type { SqliteStore } from '@dsh-cyber/persistence'
+
 import { HttpError } from '../http/errors.js'
 import { readJson } from '../http/request.js'
 import { writeJson } from '../http/response.js'
+import type { Router } from '../http/router.js'
 import type {
   AmbientLifeSettingsService,
   UpdateWorldAmbientLifeSettings,
 } from '../services/ambient-life-settings-service.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
-import type { SqliteStore } from '@dsh-cyber/persistence'
 
 export interface AmbientLifeRoutesDependencies {
   store: SqliteStore
@@ -41,7 +42,6 @@ export function registerAmbientLifeRoutes(
       'enabled',
       'minimumIdleMs',
       'minimumAmbientIntervalMs',
-      'socialCooldownMs',
       'breakAfterMs',
       'timeBucketMs',
       'maximumPlansPerTick',
@@ -50,7 +50,6 @@ export function registerAmbientLifeRoutes(
     if (body.enabled !== undefined) input.enabled = booleanValue(body.enabled, 'enabled')
     copyInteger(body, input, 'minimumIdleMs')
     copyInteger(body, input, 'minimumAmbientIntervalMs')
-    copyInteger(body, input, 'socialCooldownMs')
     copyInteger(body, input, 'breakAfterMs')
     copyInteger(body, input, 'timeBucketMs')
     copyInteger(body, input, 'maximumPlansPerTick')
