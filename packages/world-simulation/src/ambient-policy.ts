@@ -21,7 +21,6 @@ export interface AmbientCharacterState {
   activeSessionId?: string
   idleSince: string
   lastAmbientAt?: string
-  lastSocialAt?: string
 }
 
 export interface AmbientSlot {
@@ -41,7 +40,6 @@ export interface AmbientPolicyInput {
   enabled: boolean
   minimumIdleMs?: number
   minimumAmbientIntervalMs?: number
-  socialCooldownMs?: number
   breakAfterMs?: number
   timeBucketMs?: number
 }
