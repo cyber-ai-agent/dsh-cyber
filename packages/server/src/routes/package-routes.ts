@@ -1,3 +1,4 @@
+import type { WorkshopCreateInput } from '@dsh-cyber/contracts/creative-platform'
 import type { LocalPackageCatalog, PackageManager } from '@dsh-cyber/package-runtime'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
@@ -6,6 +7,7 @@ import type { Router } from '../http/router.js'
 import { optionalString, packageManifest, readJson, requiredString } from '../http/request.js'
 import { writeJson } from '../http/response.js'
 import { loadInstalledBlueprints } from '../installed-package-runtime.js'
+import { CreativeWorkshopService } from '../services/creative-workshop-service.js'
 
 export interface PackageRoutesDependencies {
   store: SqliteStore
@@ -15,12 +17,11 @@ export interface PackageRoutesDependencies {
 
 export function registerPackageRoutes(router: Router, dependencies: PackageRoutesDependencies): void {
   const { store, packageManager, packageCatalog } = dependencies
+  const workshop = new CreativeWorkshopService(store, packageManager)
 
   router.get(/^\/api\/workspaces\/([^/]+)\/packages$/, ({ response, params }) => {
     const workspaceId = params[0]!
-    if (store.getWorkspace(workspaceId) === undefined) {
-      throw new HttpError(404, 'workspace_not_found', 'Workspace not found')
-    }
+    if (store.getWorkspace(workspaceId) === undefined) throw new HttpError(404, 'workspace_not_found', 'Workspace not found')
     writeJson(response, 200, {
       items: store.listInstalledPackages(workspaceId),
       transactions: store.listPackageInstallTransactions(workspaceId),
@@ -29,18 +30,14 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
 
   router.post(/^\/api\/workspaces\/([^/]+)\/packages\/preview$/, async ({ request, response, params }) => {
     const workspaceId = params[0]!
-    if (store.getWorkspace(workspaceId) === undefined) {
-      throw new HttpError(404, 'workspace_not_found', 'Workspace not found')
-    }
+    if (store.getWorkspace(workspaceId) === undefined) throw new HttpError(404, 'workspace_not_found', 'Workspace not found')
     const body = await readJson(request)
     writeJson(response, 200, packageManager.preview(workspaceId, packageManifest(body.manifest)))
   })
 
   router.post(/^\/api\/workspaces\/([^/]+)\/packages\/install$/, async ({ request, response, params }) => {
     const workspaceId = params[0]!
-    if (store.getWorkspace(workspaceId) === undefined) {
-      throw new HttpError(404, 'workspace_not_found', 'Workspace not found')
-    }
+    if (store.getWorkspace(workspaceId) === undefined) throw new HttpError(404, 'workspace_not_found', 'Workspace not found')
     const body = await readJson(request)
     const installed = await packageManager.install({
       workspaceId,
@@ -49,6 +46,9 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
       approvalToken: requiredString(body, 'approvalToken'),
       actorId: 'owner',
     })
+    if (installed.kind === 'employee-blueprint') {
+      for (const blueprint of await loadInstalledBlueprints([installed])) store.saveBlueprint(blueprint)
+    }
     writeJson(response, 201, { installed })
   })
 
@@ -77,5 +77,19 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
       for (const blueprint of await loadInstalledBlueprints([installed])) store.saveBlueprint(blueprint)
     }
     writeJson(response, 201, { installed })
+  })
+
+  router.get(/^\/api\/workspaces\/([^/]+)\/workshop\/projects$/, async ({ response, params }) => {
+    writeJson(response, 200, { items: await workshop.list(params[0]!) })
+  })
+
+  router.post(/^\/api\/workspaces\/([^/]+)\/workshop\/projects$/, async ({ request, response, params }) => {
+    const body = await readJson(request)
+    const project = await workshop.create(params[0]!, body as unknown as WorkshopCreateInput)
+    writeJson(response, 201, { project })
+  })
+
+  router.get(/^\/api\/workspaces\/([^/]+)\/workshop\/projects\/([^/]+)$/, async ({ response, params }) => {
+    writeJson(response, 200, { project: await workshop.readProject(params[0]!, params[1]!) })
   })
 }
