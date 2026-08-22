@@ -108,7 +108,7 @@ export class AmbientLifeSettingsService {
     const normalized = worldId.trim()
     const world = normalized ? this.#store.getWorld(normalized) : undefined
     if (world === undefined || world.status === 'archived') {
-      throw new ServiceError('world_not_found', '世界不存在或已归档', 404)
+      throw new ServiceError('not-found', 'world_not_found', '世界不存在或已归档', 404)
     }
     return world
   }
@@ -141,7 +141,7 @@ function validateSettings(value: WorldAmbientLifeSettings): void {
 
 function boundedInteger(label: string, value: number | undefined, minimum: number, maximum: number): void {
   if (value === undefined || !Number.isInteger(value) || value < minimum || value > maximum) {
-    throw new ServiceError('invalid_ambient_setting', `${label}必须在 ${minimum} 到 ${maximum} 之间`, 422)
+    throw new ServiceError('invalid', 'invalid_ambient_setting', `${label}必须在 ${minimum} 到 ${maximum} 之间`, 422)
   }
 }
 
