@@ -104,10 +104,13 @@ export class AmbientLifeExecutor {
       this.#simulationStore.releasePlanReservations(plan.id)
       const presence = this.#simulationStore.getPresence(character.id)
       if (presence !== undefined) {
+        const {
+          reservedSlotId: _reservedSlotId,
+          activePlanId: _activePlanId,
+          ...stablePresence
+        } = presence
         const next: CharacterPresence = {
-          ...presence,
-          reservedSlotId: undefined,
-          activePlanId: undefined,
+          ...stablePresence,
           physicalState: 'navigating',
           updatedAt: nowIso,
         }
