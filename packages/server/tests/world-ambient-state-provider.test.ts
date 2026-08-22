@@ -12,6 +12,8 @@ import { WorldAmbientStateProvider } from '../src/services/world-ambient-state-p
 
 const stores: SqliteStore[] = []
 
+const ENGINEERING_HOME_SLOT_ID = 'work-engineering:slot-1'
+
 afterEach(() => {
   for (const store of stores.splice(0)) store.close()
 })
@@ -53,10 +55,10 @@ async function setup() {
   simulationStore.savePresence({
     worldId: world.id,
     characterId: engineer.id,
-    sceneId: 'company-main',
-    zoneId: 'engineering',
-    homeSlotId: 'work-engineering-slot-1',
-    currentSlotId: 'work-engineering-slot-1',
+    sceneId: 'headquarters',
+    zoneId: 'zone-engineering',
+    homeSlotId: ENGINEERING_HOME_SLOT_ID,
+    currentSlotId: ENGINEERING_HOME_SLOT_ID,
     facing: 'south',
     physicalState: 'at-home',
     status: 'available',
@@ -78,8 +80,8 @@ describe('world ambient state provider', () => {
     expect(characters).toEqual([
       expect.objectContaining({
         characterId: engineer.id,
-        currentSlotId: 'work-engineering-slot-1',
-        homeSlotId: 'work-engineering-slot-1',
+        currentSlotId: ENGINEERING_HOME_SLOT_ID,
+        homeSlotId: ENGINEERING_HOME_SLOT_ID,
         roleTags: expect.arrayContaining(['engineering', 'coding', 'testing']),
         preferredZoneTags: ['engineering'],
       }),
@@ -91,7 +93,8 @@ describe('world ambient state provider', () => {
     const slotResolver = new WorldAmbientSlotResolver({ store })
     const slots = slotResolver.resolve(world.id)
     expect(slots.length).toBeGreaterThan(0)
-    const home = slots.find((slot) => slot.id === 'work-engineering-slot-1') ?? slots[0]!
+    const home = slots.find((slot) => slot.id === ENGINEERING_HOME_SLOT_ID)
+    expect(home).toBeDefined()
     simulationStore.saveActionPlan({
       id: 'ambient-plan-1',
       worldId: world.id,
@@ -107,7 +110,7 @@ describe('world ambient state provider', () => {
     simulationStore.saveReservations([{
       id: 'reservation-1',
       worldId: world.id,
-      slotId: home.id,
+      slotId: home!.id,
       characterId: engineer.id,
       planId: 'ambient-plan-1',
       status: 'reserved',
@@ -123,7 +126,7 @@ describe('world ambient state provider', () => {
       resolveSlots: (worldId) => slotResolver.resolve(worldId),
     })
     const resolved = await provider.loadSlots(world.id)
-    const selected = resolved.find((slot) => slot.id === home.id)
+    const selected = resolved.find((slot) => slot.id === home!.id)
     expect(selected).toMatchObject({
       occupiedBy: engineer.id,
       reservedBy: engineer.id,
