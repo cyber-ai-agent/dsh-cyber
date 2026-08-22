@@ -13,6 +13,10 @@
     "./world-simulation": {
       "types": "./lib/world-simulation.d.ts",
       "default": "./lib/world-simulation.js"
+    },
+    "./peer-collaboration": {
+      "types": "./lib/peer-collaboration.d.ts",
+      "default": "./lib/peer-collaboration.js"
     }
   },
   "files": ["lib"],
