@@ -1,0 +1,29 @@
+name: Generate embodied runtime lockfile
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  lockfile:
+    if: ${{ github.head_ref == 'feat/embodied-world-runtime-v1' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+      - run: pnpm install --lockfile-only
+      - uses: actions/upload-artifact@v4
+        with:
+          name: embodied-pnpm-lock
+          path: pnpm-lock.yaml
+          if-no-files-found: error
+          retention-days: 1
