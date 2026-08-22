@@ -1,0 +1,42 @@
+name: Final ambient source cleanup
+
+on:
+  push:
+    branches:
+      - feat/role-aware-ambient-life
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/role-aware-ambient-life
+          fetch-depth: 0
+      - name: Normalize the projector and remove this one-shot workflow
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('packages/world-runtime/src/projector.ts')
+          text = path.read_text()
+          line = "      delete entity.visualState['peerConversation']\n"
+          text = re.sub(r'(?:' + re.escape(line) + r'){2,}', line, text)
+          text = text.replace(
+              "  if (employeeId !== undefined && applyActiveMeetingParticipantEvent(event, entities, employeeId, cues, now)) {\n  return\n}\n",
+              "  if (employeeId !== undefined && applyActiveMeetingParticipantEvent(event, entities, employeeId, cues, now)) {\n    return\n  }\n",
+          )
+          path.write_text(text)
+          PY
+          git rm .github/workflows/ambient-final-source-cleanup.yml
+      - name: Commit normalized source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/world-runtime/src/projector.ts
+          git commit -m "chore: finalize ambient projector source"
+          git push origin HEAD:feat/role-aware-ambient-life
