@@ -12,6 +12,8 @@ function character(id: string, role: string, homeSlotId: string, roleTags: strin
     displayName: id,
     role,
     status: 'available',
+    sceneId: 'headquarters',
+    facing: 'south',
     roleTags,
     preferredZoneTags: roleTags,
     currentZoneId: homeSlotId.split(':')[0]!,
