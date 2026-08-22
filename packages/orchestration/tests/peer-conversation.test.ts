@@ -139,7 +139,7 @@ describe('peer conversations', () => {
     })
 
     expect(runtime.calls.map((call) => call.agent.id)).toEqual([engineer.id, researcher.id, secretary.id])
-    expect(new Set(runtime.calls.map((call) => call.agentSessionId ?? call.agent.id)).size).toBe(3)
+    expect(new Set(runtime.calls.map((call) => call.agent.agentSessionId ?? call.agent.id)).size).toBe(3)
     expect(runtime.calls[0]?.prompt).toContain('你是被 林秘书 邀请参与协作的角色')
     expect(runtime.calls.at(-1)?.prompt).toContain('你是本次协作的发起者')
   })
