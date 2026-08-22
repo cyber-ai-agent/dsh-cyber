@@ -56,6 +56,8 @@ export class WorldAmbientStateProvider implements AmbientLifeStateProvider {
           displayName: character.displayName,
           role: character.role,
           status: character.status,
+          sceneId: presence.sceneId,
+          facing: presence.facing,
           roleTags: roleTags(character),
           preferredZoneTags: preferredZoneTags(character),
           currentZoneId: presence.zoneId,
