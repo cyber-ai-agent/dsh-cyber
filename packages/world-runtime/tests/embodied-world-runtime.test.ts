@@ -7,7 +7,12 @@ import type {
   WorldRuntimeSnapshot,
 } from '@dsh-cyber/contracts'
 
-import { cyberCompanyTheme, projectWorldRuntime } from '../src/index.js'
+import {
+  characterMotionPhaseOffset,
+  cyberCompanyTheme,
+  projectWorldRuntime,
+  sampleCharacterMotion,
+} from '../src/index.js'
 
 const world: World = {
   id: 'world-embodied',
@@ -84,6 +89,96 @@ describe('embodied world runtime projection', () => {
       payload: expect.objectContaining({ excerpt: '我去向开发工程师确认进度。' }),
     }))
     expect(result.cues.some((cue) => cue.entityId === engineer.id && cue.kind === 'entity.speech')).toBe(false)
+  })
+
+  it('runs an arbitrary user-defined role through a complete embodied turn', () => {
+    const custom = character(
+      'custom-quantum-gardener',
+      'user.custom.quantum-gardener',
+      '星芽',
+      '量子园丁',
+    )
+    const initial = projectWorldRuntime({
+      workspaceId: world.workspaceId,
+      world,
+      employees: [custom],
+      events: [],
+      manifest: cyberCompanyTheme,
+      now: '2026-08-22T00:00:00.000Z',
+    })
+    const initialEntity = initial.snapshot.entities.find((entity) => entity.id === custom.id)!
+    expect(initialEntity.activity).toBe('idle')
+    expect(initialEntity.displayName).toBe('星芽')
+    expect(initialEntity.role).toBe('量子园丁')
+    expect(initialEntity.visualState['homeSlotId']).toEqual(expect.any(String))
+
+    const thinking = projectWorldRuntime({
+      workspaceId: world.workspaceId,
+      world,
+      employees: [custom],
+      events: [event(1, 'turn.started', custom.id, { employeeId: custom.id })],
+      manifest: cyberCompanyTheme,
+      previous: initial.snapshot,
+      now: '2026-08-22T00:00:01.000Z',
+    })
+    expect(thinking.snapshot.entities[0]?.activity).toBe('thinking')
+
+    const working = projectWorldRuntime({
+      workspaceId: world.workspaceId,
+      world,
+      employees: [custom],
+      events: [event(2, 'tool.started', custom.id, {
+        employeeId: custom.id,
+        toolName: 'knowledge.search',
+      })],
+      manifest: cyberCompanyTheme,
+      previous: thinking.snapshot,
+      now: '2026-08-22T00:00:02.000Z',
+    })
+    expect(working.snapshot.entities[0]?.activity).toBe('working')
+
+    const talking = projectWorldRuntime({
+      workspaceId: world.workspaceId,
+      world,
+      employees: [custom],
+      events: [event(3, 'message.appended', custom.id, {
+        employeeId: custom.id,
+        senderId: custom.id,
+        messageKind: 'assistant',
+        messageId: 'message-custom-role',
+        excerpt: '我已经整理好这片实验田的状态。',
+      })],
+      manifest: cyberCompanyTheme,
+      previous: working.snapshot,
+      now: '2026-08-22T00:00:03.000Z',
+    })
+    const talkingEntity = talking.snapshot.entities[0]!
+    expect(talkingEntity.activity).toBe('talking')
+    expect(talking.cues).toContainEqual(expect.objectContaining({
+      kind: 'entity.speech',
+      entityId: custom.id,
+    }))
+    const talkingMotion = sampleCharacterMotion(talkingEntity.activity, 180, {
+      phaseOffset: characterMotionPhaseOffset(custom.id),
+    })
+    expect(talkingMotion).not.toMatchObject({
+      offsetX: 0,
+      offsetY: 0,
+      rotation: 0,
+      scaleX: 1,
+      scaleY: 1,
+    })
+
+    const completed = projectWorldRuntime({
+      workspaceId: world.workspaceId,
+      world,
+      employees: [custom],
+      events: [event(4, 'turn.completed', custom.id, { employeeId: custom.id })],
+      manifest: cyberCompanyTheme,
+      previous: talking.snapshot,
+      now: '2026-08-22T00:00:04.000Z',
+    })
+    expect(completed.snapshot.entities[0]?.activity).toBe('idle')
   })
 
   it('routes an engineer from a shared area back to an engineering work slot for a real task', () => {
