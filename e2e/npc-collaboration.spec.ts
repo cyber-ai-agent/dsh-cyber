@@ -45,7 +45,7 @@ test('lets one embodied character consult another, shows the real exchange, and 
   await expect(characterMenu).toBeVisible()
   await characterMenu.getByRole('button', { name: /让他去沟通/ }).click()
 
-  const dialog = page.getByRole('dialog', { name: '角色自主协作' })
+  const dialog = page.getByRole('dialog', { name: /让 管家 去沟通/ })
   await expect(dialog).toBeVisible()
   await expect(dialog.getByText('阿帆')).toBeVisible()
   await dialog.getByRole('textbox', { name: '角色协作目标' }).fill('向开发工程师确认当前项目进度，并整理成可执行的汇报。')
@@ -63,8 +63,9 @@ test('lets one embodied character consult another, shows the real exchange, and 
       entities: Array<{ id: string; visualState: Record<string, unknown> }>
     }
     const states = Object.fromEntries(snapshot.entities.map((entity) => [entity.id, entity.visualState.physicalState]))
-    return [states[butler.id], states[engineer.id]]
-  }, { timeout: 8_000 }).toSatisfy((states: unknown[]) => states.includes('speaking') || states.includes('thinking') || states.includes('listening'))
+    return [states[butler.id], states[engineer.id]].some((state) =>
+      state === 'speaking' || state === 'thinking' || state === 'listening')
+  }, { timeout: 8_000 }).toBe(true)
 
   await expect(dialog).toBeHidden({ timeout: 15_000 })
   await expect(page.getByRole('heading', { name: /向开发工程师确认当前项目进度/ })).toBeVisible()
