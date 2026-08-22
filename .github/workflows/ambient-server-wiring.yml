@@ -1,0 +1,67 @@
+name: Wire ambient settings into server
+
+on:
+  push:
+    branches:
+      - feat/role-aware-ambient-life
+
+permissions:
+  contents: write
+
+jobs:
+  wire:
+    if: ${{ !contains(github.event.head_commit.message, '[ambient-server-wired]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/role-aware-ambient-life
+          fetch-depth: 0
+      - name: Patch server composition root
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('packages/server/src/server.ts')
+          text = path.read_text()
+          if "./routes/ambient-life-routes.js" not in text:
+              text = text.replace(
+                  "import { registerAssetRoutes } from './routes/asset-routes.js'\n",
+                  "import { registerAmbientLifeRoutes } from './routes/ambient-life-routes.js'\n"
+                  "import { registerAssetRoutes } from './routes/asset-routes.js'\n",
+                  1,
+              )
+          if "./services/ambient-life-settings-service.js" not in text:
+              text = text.replace(
+                  "import { AssetService } from './services/asset-service.js'\n",
+                  "import { AmbientLifeSettingsService } from './services/ambient-life-settings-service.js'\n"
+                  "import { AssetService } from './services/asset-service.js'\n",
+                  1,
+              )
+          if 'const ambientLifeSettings = new AmbientLifeSettingsService(store)' not in text:
+              text = text.replace(
+                  "  const worldSettings = new WorldSettingsService(worldRoots)\n",
+                  "  const worldSettings = new WorldSettingsService(worldRoots)\n"
+                  "  const ambientLifeSettings = new AmbientLifeSettingsService(store)\n",
+                  1,
+              )
+          if 'registerAmbientLifeRoutes(router' not in text:
+              text = text.replace(
+                  "  registerAssetRoutes(router, { store, assets, access: worldAccess })\n",
+                  "  registerAmbientLifeRoutes(router, { store, settings: ambientLifeSettings, access: worldAccess })\n"
+                  "  registerAssetRoutes(router, { store, assets, access: worldAccess })\n",
+                  1,
+              )
+          path.write_text(text)
+          PY
+      - name: Commit server wiring
+        run: |
+          if git diff --quiet; then
+            echo "Ambient server composition already wired"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/server/src/server.ts
+          git commit -m "feat: register per-world ambient life settings [ambient-server-wired]"
+          git push origin HEAD:feat/role-aware-ambient-life
