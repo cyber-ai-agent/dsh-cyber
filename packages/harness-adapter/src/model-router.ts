@@ -6,7 +6,6 @@ import type {
   AgentRuntimePort,
   AgentTurnRequest,
   AgentTurnResult,
-  JsonObject,
 } from '@dsh-cyber/contracts'
 
 import {
@@ -107,15 +106,17 @@ export class HarnessModelRouter implements AgentRuntimePort, AsyncDisposable {
       if (failure !== undefined) request.onEvent?.(failure)
       return result
     } catch (error) {
+      const failureSignal = observation.terminalFailure?.metadata ?? error
       if (
         !observation.unsafeToRetry
-        && isTransientRuntimeFailure(error)
+        && isTransientRuntimeFailure(failureSignal)
         && entry.adapter.closeAgent !== undefined
       ) {
         await entry.adapter.closeAgent(request.agent.id)
         entry = await this.#entry(routeId, route, fingerprint)
         return entry.adapter.runTurn(request)
       }
+      if (observation.terminalFailure !== undefined) request.onEvent?.(observation.terminalFailure)
       throw error
     }
   }
