@@ -68,7 +68,7 @@ export interface CompiledWorldSemantics {
   contractVersion: typeof WORLD_SIMULATION_CONTRACT_VERSION
   themeId: string
   sceneId: string
-  navigation: WorldThemeNavigationManifest
+  navigation?: WorldThemeNavigationManifest
   zones: WorldZoneDefinition[]
   facilities: WorldFacilityDefinition[]
   slots: WorldSlotDefinition[]
