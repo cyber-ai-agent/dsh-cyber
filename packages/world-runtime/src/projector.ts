@@ -418,13 +418,11 @@ function applyAmbientInteractionEvent(
   if (action === 'ambient-complete') {
     delete entity.visualState['ambientPlanId']
     delete entity.visualState['ambientBehaviorKind']
-    delete entity.visualState['ambientTargetCharacterId']
     const home = slotFromVisualState(semantics, entity, 'homeSlotId')
     if (home !== undefined) {
       moveEntityToSlot(entity, home, 'idle', '日常活动结束，返回岗位', semantics, event, cues, {
         physicalState: 'navigating',
         source: 'ambient',
-        planId: textValue(event.payload, 'planId'),
       })
     }
     return true
@@ -441,7 +439,6 @@ function applyAmbientInteractionEvent(
     ...entity.visualState,
     ambientPlanId: textValue(event.payload, 'planId'),
     ambientBehaviorKind: behaviorKind,
-    ambientTargetCharacterId: textValue(event.payload, 'targetCharacterId'),
   })
   moveEntityToSlot(
     entity,
@@ -464,8 +461,6 @@ function ambientPresentation(kind: string): { activity: WorldActivityKind; label
   switch (kind) {
     case 'inspect-work-area':
       return { activity: 'working', label: '正在进行岗位巡检' }
-    case 'consult-colleague':
-      return { activity: 'meeting', label: '前往进行一次岗位沟通' }
     case 'take-short-break':
       return { activity: 'idle', label: '前往休息区短暂休息' }
     case 'return-home':
