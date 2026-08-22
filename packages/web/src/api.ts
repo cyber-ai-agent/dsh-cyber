@@ -1,9 +1,12 @@
 export class ApiError extends Error {
   readonly status: number
+  readonly code?: string
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code?: string) {
     super(message)
+    this.name = 'ApiError'
     this.status = status
+    if (code !== undefined) this.code = code
   }
 }
 
@@ -19,9 +22,13 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   })
   if (!response.ok) {
     const body = await response.json().catch(() => undefined) as
-      | { error?: { message?: string } }
+      | { error?: { code?: string; message?: string } }
       | undefined
-    throw new ApiError(response.status, body?.error?.message ?? `Request failed: ${response.status}`)
+    throw new ApiError(
+      response.status,
+      body?.error?.message ?? `Request failed: ${response.status}`,
+      body?.error?.code,
+    )
   }
   return response.json() as Promise<T>
 }
