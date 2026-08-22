@@ -199,16 +199,6 @@ function applyEvent(
         ...entity.visualState,
         activeMeetingId: event.correlationId ?? event.id,
         peerConversation: event.payload['peerConversation'] === true,
-        peerConversation: event.payload['peerConversation'] === true,
-        peerConversation: event.payload['peerConversation'] === true,
-        peerConversation: event.payload['peerConversation'] === true,
-        peerConversation: event.payload['peerConversation'] === true,
-        peerConversation: event.payload['peerConversation'] === true,
-        peerConversation: event.payload['peerConversation'] === true,
-        peerConversation: event.payload['peerConversation'] === true,
-        peerConversation: event.payload['peerConversation'] === true,
-        peerConversation: event.payload['peerConversation'] === true,
-        peerConversation: event.payload['peerConversation'] === true,
       }
       moveEntityToSlot(entity, slot, 'meeting', '前往协作会议', semantics, event, cues, {
         physicalState: 'meeting',
