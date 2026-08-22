@@ -1,5 +1,10 @@
 import type { EmployeeStatus, IsoTimestamp, JsonObject } from './index.js'
-import type { WorldFacing, WorldPoint, WorldRect } from './world-runtime.js'
+import type {
+  WorldFacing,
+  WorldPoint,
+  WorldRect,
+  WorldThemeNavigationManifest,
+} from './world-runtime.js'
 
 export const WORLD_SIMULATION_CONTRACT_VERSION = 1 as const
 
@@ -63,6 +68,7 @@ export interface CompiledWorldSemantics {
   contractVersion: typeof WORLD_SIMULATION_CONTRACT_VERSION
   themeId: string
   sceneId: string
+  navigation: WorldThemeNavigationManifest
   zones: WorldZoneDefinition[]
   facilities: WorldFacilityDefinition[]
   slots: WorldSlotDefinition[]
