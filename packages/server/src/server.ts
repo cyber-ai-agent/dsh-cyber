@@ -41,6 +41,7 @@ import { AmbientLifeScheduler } from './services/ambient-life-scheduler.js'
 import { AmbientLifeSettingsService } from './services/ambient-life-settings-service.js'
 import { AssetService } from './services/asset-service.js'
 import { CharacterProfileRuntime } from './services/character-profile-runtime.js'
+import { CharacterSkillRuntime } from './services/character-skill-runtime.js'
 import { harnessModelRoute } from './services/harness-model-route.js'
 import { ModelCatalogService } from './services/model-catalog-service.js'
 import { ModelCredentialService } from './services/model-credential-service.js'
@@ -172,6 +173,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     settings: ambientLifeSettings,
     service: ambientLifeRuntime,
   })
+  const skillRuntime = new CharacterSkillRuntime(store)
   const runtimeUpdates = new RuntimeUpdateService(store, stateRoot, workspaceRoot)
   const assets = new AssetService(store, stateRoot)
   const worldFiles = new WorldFileService(worldRoots)
@@ -189,7 +191,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerPackageRoutes(router, { store, packageManager, packageCatalog })
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
   registerModelInteractionRoutes(router, { store, interactions })
-  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings })
+  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings })
   registerEmployeeRoutes(router, { store, worldAccess })
 
   const httpServer = createServer((request, response) => {
@@ -218,12 +220,14 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       if (address === null || typeof address === 'string') throw new Error('Server did not expose a TCP address')
       startedAddress = { host, port: address.port, origin: `http://${host}:${address.port}` }
       ambientLifeScheduler.start()
+      skillRuntime.start()
       return startedAddress
     },
     address() { return startedAddress },
     async close() {
       if (closed) return
       closed = true
+      skillRuntime.close()
       await ambientLifeScheduler.close()
       unsubscribe()
       runtimeStreamHub.close()
