@@ -35,7 +35,6 @@ export interface AmbientSlot {
 export interface AmbientPolicyInput {
   now: string
   character: AmbientCharacterState
-  colleagues: AmbientCharacterState[]
   slots: AmbientSlot[]
   enabled: boolean
   minimumIdleMs?: number
@@ -52,7 +51,6 @@ export interface AmbientDecision {
   priority: number
   interruptible: true
   targetSlotId: string
-  targetCharacterId?: string
   decisionKey: string
 }
 
@@ -175,7 +173,6 @@ function decision(
     input.character.characterId,
     value.kind,
     value.targetSlotId,
-    value.targetCharacterId ?? '',
     input.now,
   ].join(':')
   return {
