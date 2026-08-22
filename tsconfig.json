@@ -7,6 +7,7 @@
     { "path": "./packages/harness-bundle" },
     { "path": "./packages/harness-adapter" },
     { "path": "./packages/orchestration" },
+    { "path": "./packages/world-simulation" },
     { "path": "./packages/world-runtime" },
     { "path": "./packages/package-runtime" },
     { "path": "./packages/server" },
