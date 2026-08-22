@@ -12,7 +12,6 @@ export interface AmbientWorldPolicy {
   enabled: boolean
   minimumIdleMs?: number
   minimumAmbientIntervalMs?: number
-  socialCooldownMs?: number
   breakAfterMs?: number
   timeBucketMs?: number
   maximumPlansPerTick?: number
@@ -68,7 +67,6 @@ export function coordinateAmbientLife(input: AmbientCoordinationInput): AmbientC
       ...(input.policy.minimumAmbientIntervalMs === undefined
         ? {}
         : { minimumAmbientIntervalMs: input.policy.minimumAmbientIntervalMs }),
-      ...(input.policy.socialCooldownMs === undefined ? {} : { socialCooldownMs: input.policy.socialCooldownMs }),
       ...(input.policy.breakAfterMs === undefined ? {} : { breakAfterMs: input.policy.breakAfterMs }),
       ...(input.policy.timeBucketMs === undefined ? {} : { timeBucketMs: input.policy.timeBucketMs }),
     })
