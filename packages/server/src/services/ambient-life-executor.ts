@@ -71,9 +71,6 @@ export class AmbientLifeExecutor {
           behaviorKind: decision.kind,
           targetSlotId: decision.targetSlotId,
           reason: decision.reason,
-          ...(decision.targetCharacterId === undefined
-            ? {}
-            : { targetCharacterId: decision.targetCharacterId }),
         },
       })
       eventIds.push(event.id)
