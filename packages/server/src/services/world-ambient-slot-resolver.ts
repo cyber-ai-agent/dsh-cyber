@@ -28,7 +28,7 @@ export class WorldAmbientSlotResolver {
   resolve(worldId: string): AmbientSlot[] {
     const world = this.#store.getWorld(worldId)
     if (world === undefined || world.status === 'archived') {
-      throw new ServiceError('world_not_found', '世界不存在或已归档', 404)
+      throw new ServiceError('not-found', 'world_not_found', '世界不存在或已归档', 404)
     }
     if (world.templateId !== 'personal-world' && world.templateId !== 'cyber-company') {
       return []
