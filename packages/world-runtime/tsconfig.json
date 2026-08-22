@@ -6,5 +6,8 @@
     "tsBuildInfoFile": "lib/.tsbuildinfo"
   },
   "include": ["src/**/*.ts"],
-  "references": [{ "path": "../contracts" }]
+  "references": [
+    { "path": "../contracts" },
+    { "path": "../world-simulation" }
+  ]
 }
