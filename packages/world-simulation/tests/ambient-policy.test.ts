@@ -71,7 +71,6 @@ function policy(overrides: Partial<AmbientPolicyInput> = {}): AmbientPolicyInput
     enabled: true,
     minimumIdleMs: 1,
     minimumAmbientIntervalMs: 1,
-    socialCooldownMs: 1,
     breakAfterMs: 99_999_999,
     timeBucketMs: 300_000,
     ...overrides,
@@ -146,8 +145,8 @@ describe('role-aware ambient policy', () => {
     for (let offset = 0; offset < 30; offset += 1) {
       const candidate = new Date(Date.parse(now) + offset * 300_000).toISOString()
       const result = decideAmbientBehavior(policy({ now: candidate, colleagues: [colleague] }))
-      expect(result?.kind).not.toBe('consult-colleague')
       expect(result?.targetCharacterId).toBeUndefined()
+      expect(['stay-at-post', 'inspect-work-area', 'take-short-break', 'return-home']).toContain(result?.kind)
     }
   })
 
