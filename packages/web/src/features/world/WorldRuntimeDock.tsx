@@ -7,13 +7,20 @@ import {
   Storefront,
 } from '@phosphor-icons/react'
 import { useEffect, useState } from 'react'
-import type { World, WorldInteractionAction, WorldRuntimeSnapshot, WorldZoomCommand } from '@dsh-cyber/contracts'
+import type { WorkSession, World, WorldInteractionAction, WorldRuntimeSnapshot, WorldZoomCommand } from '@dsh-cyber/contracts'
 
+import { api } from '../../api.js'
+import { PeerCollaborationDialog, type PeerCollaborationDraft } from '../../components/PeerCollaborationDialog.js'
 import type { CyberEmployee } from '../../types.js'
 import { WorldCanvas } from './WorldCanvas.js'
 import { EmployeeInteractionMenu, ObjectInteractionMenu } from './WorldInteractionMenu.js'
 import { useWorldClient } from './world-client-store.js'
 import { createZoomCommand } from './zoom-command.js'
+
+interface PeerCollaborationResponse {
+  session: WorkSession
+  participantIds: string[]
+}
 
 interface WorldRuntimeDockProps {
   demoMode: boolean
@@ -22,7 +29,7 @@ interface WorldRuntimeDockProps {
   selectedEmployeeId?: string
   conversationEmployeeIds: string[]
   onSelectEmployee(employeeId: string): void
-  onStartGroup(employeeIds: string[]): void
+  onStartGroup(employeeIds: string[], session?: WorkSession): void
   onRecruit(): void
 }
 
@@ -32,6 +39,9 @@ export function WorldRuntimeDock({ demoMode, world, employees, selectedEmployeeI
   const [zoomCommand, setZoomCommand] = useState<WorldZoomCommand>()
   const [selectedObjectId, setSelectedObjectId] = useState<string>()
   const [activeEmployeeId, setActiveEmployeeId] = useState<string | undefined>(selectedEmployeeId)
+  const [peerInitiatorId, setPeerInitiatorId] = useState<string>()
+  const [peerBusy, setPeerBusy] = useState(false)
+  const [peerError, setPeerError] = useState<string>()
 
   useEffect(() => setActiveEmployeeId(selectedEmployeeId), [selectedEmployeeId])
 
@@ -41,6 +51,7 @@ export function WorldRuntimeDock({ demoMode, world, employees, selectedEmployeeI
 
   const renderedSnapshot = withCharacterVisuals(runtime.snapshot, employees)
   const selectedEmployee = employees.find((employee) => employee.id === activeEmployeeId)
+  const peerInitiator = employees.find((employee) => employee.id === peerInitiatorId)
   const selectedObject = renderedSnapshot.objects.find((object) => object.id === selectedObjectId)
   const selectedObjectManifest = runtime.manifest.scenes.find((scene) => scene.id === renderedSnapshot.sceneId)?.interactables.find((object) => object.id === selectedObjectId)
   const focusedNames = conversationEmployeeIds.map((employeeId) => employees.find((employee) => employee.id === employeeId)?.displayName).filter((name): name is string => name !== undefined)
@@ -64,6 +75,46 @@ export function WorldRuntimeDock({ demoMode, world, employees, selectedEmployeeI
     onStartGroup(participantIds)
   }
 
+  const startPeerCollaboration = async (draft: PeerCollaborationDraft) => {
+    if (peerInitiator === undefined || peerBusy) return
+    const participantIds = [peerInitiator.id, ...draft.participantIds]
+    setPeerBusy(true)
+    setPeerError(undefined)
+    try {
+      if (demoMode) {
+        const now = new Date().toISOString()
+        const session: WorkSession = {
+          id: `demo-peer-${Date.now()}`,
+          workspaceId: world.workspaceId,
+          worldId: world.id,
+          kind: 'meeting',
+          title: draft.purpose.slice(0, 36),
+          status: 'open',
+          createdAt: now,
+          updatedAt: now,
+        }
+        setPeerInitiatorId(undefined)
+        onStartGroup(participantIds, session)
+        return
+      }
+      const result = await api<PeerCollaborationResponse>(`/api/worlds/${encodeURIComponent(world.id)}/peer-conversations`, {
+        method: 'POST',
+        body: JSON.stringify({
+          initiatorId: peerInitiator.id,
+          participantIds: draft.participantIds,
+          purpose: draft.purpose,
+          maxRounds: draft.maxRounds,
+        }),
+      })
+      setPeerInitiatorId(undefined)
+      onStartGroup(result.participantIds, result.session)
+    } catch (cause) {
+      setPeerError(cause instanceof Error ? cause.message : '角色协作启动失败')
+    } finally {
+      setPeerBusy(false)
+    }
+  }
+
   const actOnObject = async (action: WorldInteractionAction) => {
     if (selectedObject === undefined) return
     const participantIds = action === 'start-meeting'
@@ -85,42 +136,54 @@ export function WorldRuntimeDock({ demoMode, world, employees, selectedEmployeeI
   }
 
   return (
-    <section className="world-runtime-dock" aria-label={`${world.name}实时世界`}>
-      <header className="world-runtime-dock__header">
-        <div className="world-runtime-dock__identity"><span className="world-runtime-dock__mark"><Buildings size={17} weight="fill" /></span><span><strong>{world.name}</strong><small>{runtime.manifest.displayName}</small></span></div>
-        <div className="world-runtime-dock__status"><i className={runtime.connected ? 'is-online' : 'is-offline'} /><span>{runtime.connected ? '实时同步' : '正在重连'}</span><b>{employees.length} 人</b></div>
-      </header>
+    <>
+      <section className="world-runtime-dock" aria-label={`${world.name}实时世界`}>
+        <header className="world-runtime-dock__header">
+          <div className="world-runtime-dock__identity"><span className="world-runtime-dock__mark"><Buildings size={17} weight="fill" /></span><span><strong>{world.name}</strong><small>{runtime.manifest.displayName}</small></span></div>
+          <div className="world-runtime-dock__status"><i className={runtime.connected ? 'is-online' : 'is-offline'} /><span>{runtime.connected ? '实时同步' : '正在重连'}</span><b>{employees.length} 人</b></div>
+        </header>
 
-      <div className="world-runtime-dock__canvas">
-        <WorldCanvas
-          manifest={runtime.manifest}
-          rendererIdentity={runtime.rendererIdentity}
-          snapshot={renderedSnapshot}
-          cues={runtime.cues}
-          {...(activeEmployeeId === undefined ? {} : { selectedEntityId: activeEmployeeId })}
-          {...(selectedObjectId === undefined ? {} : { selectedObjectId })}
-          fitRequest={fitRequest}
-          {...(zoomCommand === undefined ? {} : { zoomCommand })}
-          onEntitySelect={(employeeId) => { setActiveEmployeeId(employeeId); setSelectedObjectId(undefined) }}
-          onObjectSelect={setSelectedObjectId}
-          onReady={() => undefined}
-        />
+        <div className="world-runtime-dock__canvas">
+          <WorldCanvas
+            manifest={runtime.manifest}
+            rendererIdentity={runtime.rendererIdentity}
+            snapshot={renderedSnapshot}
+            cues={runtime.cues}
+            {...(activeEmployeeId === undefined ? {} : { selectedEntityId: activeEmployeeId })}
+            {...(selectedObjectId === undefined ? {} : { selectedObjectId })}
+            fitRequest={fitRequest}
+            {...(zoomCommand === undefined ? {} : { zoomCommand })}
+            onEntitySelect={(employeeId) => { setActiveEmployeeId(employeeId); setSelectedObjectId(undefined) }}
+            onObjectSelect={setSelectedObjectId}
+            onReady={() => undefined}
+          />
 
-        {focusedNames.length === 0 ? null : <div className="world-runtime-dock__focus" aria-label="当前会话成员"><span>当前会话</span><strong>{focusedNames.join('、')}</strong></div>}
+          {focusedNames.length === 0 ? null : <div className="world-runtime-dock__focus" aria-label="当前会话成员"><span>当前会话</span><strong>{focusedNames.join('、')}</strong></div>}
 
-        {selectedEmployee === undefined ? null : <EmployeeInteractionMenu employee={selectedEmployee} onClose={() => setActiveEmployeeId(undefined)} onTalk={() => void interactWithEmployee('talk')} onAssignTask={() => void interactWithEmployee('assign-task')} onMeeting={() => void interactWithEmployee('start-meeting')} />}
-        {selectedObject === undefined || selectedObjectManifest === undefined ? null : <ObjectInteractionMenu object={selectedObject} manifest={selectedObjectManifest} {...(selectedEmployee === undefined ? {} : { selectedEmployee })} onClose={() => setSelectedObjectId(undefined)} onAction={(action) => void actOnObject(action)} />}
+          {selectedEmployee === undefined ? null : <EmployeeInteractionMenu employee={selectedEmployee} onClose={() => setActiveEmployeeId(undefined)} onTalk={() => void interactWithEmployee('talk')} onAssignTask={() => void interactWithEmployee('assign-task')} onMeeting={() => void interactWithEmployee('start-meeting')} onPeerCollaboration={() => { setPeerError(undefined); setPeerInitiatorId(selectedEmployee.id) }} />}
+          {selectedObject === undefined || selectedObjectManifest === undefined ? null : <ObjectInteractionMenu object={selectedObject} manifest={selectedObjectManifest} {...(selectedEmployee === undefined ? {} : { selectedEmployee })} onClose={() => setSelectedObjectId(undefined)} onAction={(action) => void actOnObject(action)} />}
 
-        <div className="world-runtime-dock__controls" aria-label="世界视图控制">
-          <button type="button" aria-label="缩小" onClick={() => setZoomCommand(createZoomCommand(-0.1))}><Minus size={15} /></button>
-          <button type="button" aria-label="显示全景" title="适应窗口且不露出场景边界" onClick={() => setFitRequest((value) => value + 1)}><ArrowsOut size={15} /></button>
-          <button type="button" aria-label="放大" onClick={() => setZoomCommand(createZoomCommand(0.1))}><Plus size={15} /></button>
-          <button type="button" className={runtime.snapshot.clock.lightsOn ? 'is-active' : ''} aria-label={runtime.snapshot.clock.lightsOn ? '关闭场景照明' : '打开场景照明'} onClick={() => void runtime.interact({ action: 'toggle-lights', actorId: 'owner' })}><LightbulbFilament size={16} /></button>
+          <div className="world-runtime-dock__controls" aria-label="世界视图控制">
+            <button type="button" aria-label="缩小" onClick={() => setZoomCommand(createZoomCommand(-0.1))}><Minus size={15} /></button>
+            <button type="button" aria-label="显示全景" title="适应窗口且不露出场景边界" onClick={() => setFitRequest((value) => value + 1)}><ArrowsOut size={15} /></button>
+            <button type="button" aria-label="放大" onClick={() => setZoomCommand(createZoomCommand(0.1))}><Plus size={15} /></button>
+            <button type="button" className={runtime.snapshot.clock.lightsOn ? 'is-active' : ''} aria-label={runtime.snapshot.clock.lightsOn ? '关闭场景照明' : '打开场景照明'} onClick={() => void runtime.interact({ action: 'toggle-lights', actorId: 'owner' })}><LightbulbFilament size={16} /></button>
+          </div>
+
+          {employees.length === 0 ? <div className="world-runtime-dock__empty"><Storefront size={25} /><strong>这个世界还没有角色</strong><span>从角色市场添加第一名角色后，他会出现在这里。</span><button className="primary-button" type="button" onClick={onRecruit}>打开角色市场</button></div> : null}
         </div>
-
-        {employees.length === 0 ? <div className="world-runtime-dock__empty"><Storefront size={25} /><strong>这个世界还没有角色</strong><span>从角色市场添加第一名角色后，他会出现在这里。</span><button className="primary-button" type="button" onClick={onRecruit}>打开角色市场</button></div> : null}
-      </div>
-    </section>
+      </section>
+      {peerInitiator === undefined ? null : (
+        <PeerCollaborationDialog
+          initiator={peerInitiator}
+          employees={employees}
+          busy={peerBusy}
+          {...(peerError === undefined ? {} : { error: peerError })}
+          onClose={() => { if (!peerBusy) { setPeerInitiatorId(undefined); setPeerError(undefined) } }}
+          onCreate={(draft) => void startPeerCollaboration(draft)}
+        />
+      )}
+    </>
   )
 }
 
