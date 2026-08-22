@@ -5,6 +5,8 @@ export type CharacterAnimationRigKind =
   | 'layered-spritesheet'
   | 'procedural'
 
+export type CharacterMotionProfileId = 'subtle' | 'standard' | 'energetic'
+
 export interface CharacterMotionSample {
   offsetX: number
   offsetY: number
@@ -28,6 +30,7 @@ export interface CharacterMotionProfile {
 export interface SampleCharacterMotionOptions {
   reducedMotion?: boolean
   phaseOffset?: number
+  motionProfileId?: CharacterMotionProfileId
 }
 
 const NEUTRAL_SAMPLE: CharacterMotionSample = {
@@ -115,8 +118,41 @@ const MOTION_PROFILES: Record<WorldActivityKind, CharacterMotionProfile> = {
   },
 }
 
-export function characterMotionProfile(activity: WorldActivityKind): CharacterMotionProfile {
-  return { ...MOTION_PROFILES[activity] }
+const MOTION_VARIANTS: Record<CharacterMotionProfileId, { amplitude: number; speed: number }> = {
+  subtle: { amplitude: 0.55, speed: 0.82 },
+  standard: { amplitude: 1, speed: 1 },
+  energetic: { amplitude: 1.35, speed: 1.18 },
+}
+
+export function characterMotionProfile(
+  activity: WorldActivityKind,
+  profileId: CharacterMotionProfileId = 'standard',
+): CharacterMotionProfile {
+  const profile = MOTION_PROFILES[activity]
+  const variant = MOTION_VARIANTS[profileId]
+  return {
+    durationMs: Math.max(120, Math.round(profile.durationMs / variant.speed)),
+    offsetX: round(profile.offsetX * variant.amplitude),
+    offsetY: round(profile.offsetY * variant.amplitude),
+    rotation: round(profile.rotation * variant.amplitude),
+    scaleX: round(profile.scaleX * variant.amplitude),
+    scaleY: round(profile.scaleY * variant.amplitude),
+    alphaPulse: round(profile.alphaPulse * variant.amplitude),
+  }
+}
+
+/**
+ * Gives each character a stable phase without coupling animation to role names,
+ * blueprint ids or renderer coordinates. Custom roles therefore share the same
+ * reusable rig while avoiding perfectly synchronized movement.
+ */
+export function characterMotionPhaseOffset(characterId: string): number {
+  let hash = 2_166_136_261
+  for (let index = 0; index < characterId.length; index += 1) {
+    hash ^= characterId.charCodeAt(index)
+    hash = Math.imul(hash, 16_777_619)
+  }
+  return (hash >>> 0) % 10_000
 }
 
 export function sampleCharacterMotion(
@@ -126,7 +162,7 @@ export function sampleCharacterMotion(
 ): CharacterMotionSample {
   if (options.reducedMotion === true) return { ...NEUTRAL_SAMPLE }
 
-  const profile = MOTION_PROFILES[activity]
+  const profile = characterMotionProfile(activity, options.motionProfileId ?? 'standard')
   const safeElapsed = Number.isFinite(elapsedMs) ? Math.max(0, elapsedMs) : 0
   const phaseOffset = Number.isFinite(options.phaseOffset) ? options.phaseOffset ?? 0 : 0
   const phase = ((safeElapsed + phaseOffset) % profile.durationMs) / profile.durationMs
