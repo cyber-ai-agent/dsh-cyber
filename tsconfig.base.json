@@ -20,10 +20,12 @@
     "ignoreDeprecations": "6.0",
     "paths": {
       "@dsh-cyber/contracts": ["packages/contracts/src/index.ts"],
+      "@dsh-cyber/contracts/world-simulation": ["packages/contracts/src/world-simulation.ts"],
       "@dsh-cyber/catalog": ["packages/catalog/src/index.ts"],
       "@dsh-cyber/persistence": ["packages/persistence/src/index.ts"],
       "@dsh-cyber/harness-adapter": ["packages/harness-adapter/src/index.ts"],
       "@dsh-cyber/orchestration": ["packages/orchestration/src/index.ts"],
+      "@dsh-cyber/world-simulation": ["packages/world-simulation/src/index.ts"],
       "@dsh-cyber/world-runtime": ["packages/world-runtime/src/index.ts"],
       "@dsh-cyber/package-runtime": ["packages/package-runtime/src/index.ts"],
       "@dsh-cyber/server": ["packages/server/src/index.ts"],
