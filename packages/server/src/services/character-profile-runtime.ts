@@ -1,24 +1,43 @@
-import type { AgentRuntimePort, AgentTurnRequest, EmployeeProfile } from '@dsh-cyber/contracts'
+import type {
+  AgentRuntimePort,
+  AgentTurnRequest,
+  EmployeeProfile,
+} from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
+
+type CharacterRuntimeStore = Pick<
+  SqliteStore,
+  'getEmployee' | 'getEmployeeRevision' | 'getEmployeeProfile'
+>
 
 export class CharacterProfileRuntime implements AgentRuntimePort {
   readonly #inner: AgentRuntimePort
-  readonly #store: Pick<SqliteStore, 'getEmployeeProfile'>
+  readonly #store: CharacterRuntimeStore
 
-  constructor(inner: AgentRuntimePort, store: Pick<SqliteStore, 'getEmployeeProfile'>) {
+  constructor(inner: AgentRuntimePort, store: CharacterRuntimeStore) {
     this.#inner = inner
     this.#store = store
   }
 
   runTurn(request: AgentTurnRequest) {
-    const profile = this.#store.getEmployeeProfile(request.agent.id)
-    if (profile === undefined) return this.#inner.runTurn(request)
+    // A multi-round collaboration can bind a persistent Agent session during an
+    // earlier turn. Always reload the current character and revision so the next
+    // turn resumes that session instead of using the stale object captured when
+    // the conversation was planned.
+    const agent = this.#store.getEmployee(request.agent.id) ?? request.agent
+    const revision = this.#store.getEmployeeRevision(agent.id, agent.currentRevision)
+      ?? request.revision
+    const profile = this.#store.getEmployeeProfile(agent.id)
+
     return this.#inner.runTurn({
       ...request,
-      revision: {
-        ...request.revision,
-        persona: composeCharacterPersona(request.revision.persona, profile),
-      },
+      agent,
+      revision: profile === undefined
+        ? revision
+        : {
+            ...revision,
+            persona: composeCharacterPersona(revision.persona, profile),
+          },
     })
   }
 
