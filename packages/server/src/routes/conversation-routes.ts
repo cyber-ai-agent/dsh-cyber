@@ -19,6 +19,10 @@ import {
 } from '../http/request.js'
 import { writeJson } from '../http/response.js'
 import { applyInstalledPromptTransforms } from '../installed-package-runtime.js'
+import {
+  DelegatedCollaborationService,
+  detectDelegatedCollaboration,
+} from '../services/delegated-collaboration-service.js'
 import type { PeerCollaborationService } from '../services/peer-collaboration-service.js'
 import type { RuntimeStreamHub } from '../streams/runtime-stream-hub.js'
 import type { WorldRuntimeService } from '../world-runtime-service.js'
@@ -49,6 +53,12 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     worldFiles,
     worldSettings,
   } = dependencies
+  const delegatedCollaboration = new DelegatedCollaborationService({
+    store,
+    orchestrator,
+    peerCollaboration,
+    worldSettings,
+  })
 
   router.post(/^\/api\/worlds\/([^/]+)\/chat$/, async ({ request, response, params }) => {
     const world = store.getWorld(params[0]!)
@@ -78,18 +88,36 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
       if (character === undefined || character.worldId !== world.id) {
         throw new HttpError(422, 'character_unavailable', '所选角色不属于当前世界')
       }
-      const directInput: DirectConversationInput = {
-        workspaceId: world.workspaceId,
-        worldId: world.id,
-        employeeId: character.id,
+      const delegation = detectDelegatedCollaboration({
         prompt,
-        metadata,
-        runtimePrompt: await worldSettings.composeRuntimePrompt(world.id, character, transformedPrompt),
-        ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
+        initiator: character,
+        characters: store.listEmployees(world.id),
+      })
+      if (delegation !== undefined) {
+        result = await delegatedCollaboration.run({
+          ...delegation,
+          workspaceId: world.workspaceId,
+          worldId: world.id,
+          transformedPrompt,
+          metadata,
+          ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
+          ...(sessionId === undefined ? {} : { sessionId }),
+          ...(title === undefined ? {} : { title }),
+        })
+      } else {
+        const directInput: DirectConversationInput = {
+          workspaceId: world.workspaceId,
+          worldId: world.id,
+          employeeId: character.id,
+          prompt,
+          metadata,
+          runtimePrompt: await worldSettings.composeRuntimePrompt(world.id, character, transformedPrompt),
+          ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
+        }
+        if (sessionId !== undefined) directInput.sessionId = sessionId
+        if (title !== undefined) directInput.title = title
+        result = await orchestrator.direct(directInput)
       }
-      if (sessionId !== undefined) directInput.sessionId = sessionId
-      if (title !== undefined) directInput.title = title
-      result = await orchestrator.direct(directInput)
     } else {
       result = await orchestrator.group({
         workspaceId: world.workspaceId,
