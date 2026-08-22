@@ -21,6 +21,7 @@ import { dispatchHttpRequest } from './http/context.js'
 import { writeError } from './http/errors.js'
 import { Router } from './http/router.js'
 import { isLoopbackHost } from './http/security.js'
+import { registerAmbientLifeRoutes } from './routes/ambient-life-routes.js'
 import { registerAssetRoutes } from './routes/asset-routes.js'
 import { registerCatalogRoutes } from './routes/catalog-routes.js'
 import { registerConversationRoutes } from './routes/conversation-routes.js'
@@ -34,6 +35,7 @@ import { registerWorkspaceRoutes } from './routes/workspace-routes.js'
 import { registerWorldRuntimeRoutes } from './routes/world-runtime-routes.js'
 import { registerWorldRoutes } from './routes/world-routes.js'
 import { registerWorldSettingsRoutes } from './routes/world-settings-routes.js'
+import { AmbientLifeSettingsService } from './services/ambient-life-settings-service.js'
 import { AssetService } from './services/asset-service.js'
 import { CharacterProfileRuntime } from './services/character-profile-runtime.js'
 import { harnessModelRoute } from './services/harness-model-route.js'
@@ -103,6 +105,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const worldRoots = new WorldRootService(stateRoot)
   await Promise.all(store.listWorkspaces().flatMap((workspace) => store.listWorlds(workspace.id, true).map((world) => worldRoots.ensure(world.id))))
   const worldSettings = new WorldSettingsService(worldRoots)
+  const ambientLifeSettings = new AmbientLifeSettingsService(store)
   const worldAccess = new WorldAccessService(worldRoots)
   const credentials = await ModelCredentialService.open(stateRoot)
   const modelCatalog = new ModelCatalogService(credentials)
@@ -154,6 +157,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerCatalogRoutes(router, { store, packageCatalog })
   registerWorkspaceRoutes(router, { store })
   registerModelRoutes(router, { store, credentials, modelCatalog, interactions })
+  registerAmbientLifeRoutes(router, { store, settings: ambientLifeSettings, access: worldAccess })
   registerAssetRoutes(router, { store, assets, access: worldAccess })
   registerWorldRoutes(router, { store, worldAccess })
   registerWorldSettingsRoutes(router, { store, settings: worldSettings, access: worldAccess })
