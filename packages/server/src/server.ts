@@ -35,6 +35,7 @@ import { registerWorkspaceRoutes } from './routes/workspace-routes.js'
 import { registerWorldRuntimeRoutes } from './routes/world-runtime-routes.js'
 import { registerWorldRoutes } from './routes/world-routes.js'
 import { registerWorldSettingsRoutes } from './routes/world-settings-routes.js'
+import { AmbientLifeScheduler } from './services/ambient-life-scheduler.js'
 import { AmbientLifeSettingsService } from './services/ambient-life-settings-service.js'
 import { AssetService } from './services/asset-service.js'
 import { CharacterProfileRuntime } from './services/character-profile-runtime.js'
@@ -44,7 +45,10 @@ import { ModelCredentialService } from './services/model-credential-service.js'
 import { ModelInteractionService, TurnInteractionLoggingRuntime } from './services/model-interaction-service.js'
 import { PeerCollaborationService } from './services/peer-collaboration-service.js'
 import { RuntimeUpdateService } from './services/runtime-update-service.js'
+import { RoleAwareAmbientLifeService } from './services/role-aware-ambient-life-service.js'
 import { WorldAccessService } from './services/world-access-service.js'
+import { WorldAmbientSlotResolver } from './services/world-ambient-slot-resolver.js'
+import { WorldAmbientStateProvider } from './services/world-ambient-state-provider.js'
 import { WorldFileService } from './services/world-file-service.js'
 import { WorldRootService } from './services/world-root-service.js'
 import { WorldSettingsService } from './services/world-settings-service.js'
@@ -147,6 +151,23 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     simulationStore: worldSimulation,
     publish: (event) => worldStreamHub.publish(event),
   })
+  const ambientSlotResolver = new WorldAmbientSlotResolver({ store })
+const ambientStateProvider = new WorldAmbientStateProvider({
+  store,
+  simulationStore: worldSimulation,
+  resolveSlots: (worldId) => ambientSlotResolver.resolve(worldId),
+})
+const ambientLife = new RoleAwareAmbientLifeService({
+  stateProvider: ambientStateProvider,
+  persistence: worldSimulation,
+})
+const ambientLifeScheduler = new AmbientLifeScheduler({
+  settings: ambientLifeSettings,
+  service: ambientLife,
+  onResult: (result) => {
+    if (result.plans.length > 0) worldRuntime.publishCurrent(result.worldId)
+  },
+})
   const runtimeUpdates = new RuntimeUpdateService(store, stateRoot, workspaceRoot)
   const assets = new AssetService(store, stateRoot)
   const worldFiles = new WorldFileService(worldRoots)
@@ -187,6 +208,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     packageManager,
     async start() {
       if (closed) throw new Error('Server is closed')
+      ambientLifeScheduler.start()
       if (startedAddress !== undefined) return startedAddress
       await listen(httpServer, port, host)
       const address = httpServer.address()
@@ -196,6 +218,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     },
     address() { return startedAddress },
     async close() {
+      await ambientLifeScheduler.close()
       if (closed) return
       closed = true
       unsubscribe()
