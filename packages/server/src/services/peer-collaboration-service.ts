@@ -7,6 +7,8 @@ import type {
 import type { SqliteStore, WorldSimulationStore } from '@dsh-cyber/persistence'
 import type { SharedWorldEpisode } from '@dsh-cyber/contracts/world-simulation'
 
+import { ServiceError } from './service-error.js'
+
 export interface PeerCollaborationServiceOptions {
   store: SqliteStore
   simulationStore: WorldSimulationStore
@@ -24,6 +26,7 @@ export class PeerCollaborationService {
   readonly #simulationStore: WorldSimulationStore
   readonly #orchestrator: ConversationOrchestrator
   readonly #clock: () => string
+  readonly #activeCharacterIds = new Set<string>()
 
   constructor(options: PeerCollaborationServiceOptions) {
     this.#store = options.store
@@ -33,46 +36,66 @@ export class PeerCollaborationService {
   }
 
   async run(input: PeerConversationInput): Promise<PeerCollaborationResult> {
-    const result = await this.#orchestrator.peer(input)
-    const messages = this.#store.listMessages(result.session.id)
-    const events = this.#store
-      .listWorldDomainEvents(result.session.worldId, 0)
-      .filter((event) => event.sessionId === result.session.id)
-    const now = this.#clock()
-    const episode: SharedWorldEpisode = {
-      id: `peer-episode-${result.session.id}`,
-      worldId: result.session.worldId,
-      participantIds: result.participantIds,
-      sessionId: result.session.id,
-      kind: 'collaboration',
-      title: concise(result.purpose, 80),
-      summary: groundedSummary(result.replies),
-      outcome: groundedOutcome(result.replies),
-      sourceEventIds: events.map((event) => event.id),
-      sourceMessageIds: peerConversationMessageIds(messages),
-      importance: peerImportance(result.rounds, result.participantIds.length),
-      occurredAt: now,
-      createdAt: now,
+    const characterIds = uniqueCharacterIds(input)
+    const busyCharacterId = characterIds.find((characterId) => this.#activeCharacterIds.has(characterId))
+    if (busyCharacterId !== undefined) {
+      const character = this.#store.getEmployee(busyCharacterId)
+      throw new ServiceError(
+        'conflict',
+        'peer_collaboration_busy',
+        `${character?.displayName ?? '所选角色'} 正在参与另一场协作，请等待结束后重试`,
+      )
     }
-    this.#simulationStore.recordSharedEpisode(episode)
+    for (const characterId of characterIds) this.#activeCharacterIds.add(characterId)
 
-    const relationships: EmployeeRelationship[] = []
-    for (let leftIndex = 0; leftIndex < result.participantIds.length; leftIndex += 1) {
-      for (let rightIndex = leftIndex + 1; rightIndex < result.participantIds.length; rightIndex += 1) {
-        const left = result.participantIds[leftIndex]
-        const right = result.participantIds[rightIndex]
-        if (left === undefined || right === undefined) continue
-        relationships.push(...this.#store.recordEmployeeInteraction({
-          employeeId: left,
-          colleagueId: right,
-          sessionId: result.session.id,
-          kind: 'collaboration',
-        }))
+    try {
+      const result = await this.#orchestrator.peer(input)
+      const messages = this.#store.listMessages(result.session.id)
+      const events = this.#store
+        .listWorldDomainEvents(result.session.worldId, 0)
+        .filter((event) => event.sessionId === result.session.id)
+      const now = this.#clock()
+      const episode: SharedWorldEpisode = {
+        id: `peer-episode-${result.session.id}`,
+        worldId: result.session.worldId,
+        participantIds: result.participantIds,
+        sessionId: result.session.id,
+        kind: 'collaboration',
+        title: concise(result.purpose, 80),
+        summary: groundedSummary(result.replies),
+        outcome: groundedOutcome(result.replies),
+        sourceEventIds: events.map((event) => event.id),
+        sourceMessageIds: peerConversationMessageIds(messages),
+        importance: peerImportance(result.rounds, result.participantIds.length),
+        occurredAt: now,
+        createdAt: now,
       }
-    }
+      this.#simulationStore.recordSharedEpisode(episode)
 
-    return { ...result, episode, relationships }
+      const relationships: EmployeeRelationship[] = []
+      for (let leftIndex = 0; leftIndex < result.participantIds.length; leftIndex += 1) {
+        for (let rightIndex = leftIndex + 1; rightIndex < result.participantIds.length; rightIndex += 1) {
+          const left = result.participantIds[leftIndex]
+          const right = result.participantIds[rightIndex]
+          if (left === undefined || right === undefined) continue
+          relationships.push(...this.#store.recordEmployeeInteraction({
+            employeeId: left,
+            colleagueId: right,
+            sessionId: result.session.id,
+            kind: 'collaboration',
+          }))
+        }
+      }
+
+      return { ...result, episode, relationships }
+    } finally {
+      for (const characterId of characterIds) this.#activeCharacterIds.delete(characterId)
+    }
   }
+}
+
+function uniqueCharacterIds(input: PeerConversationInput): string[] {
+  return [...new Set([input.initiatorId, ...input.participantIds].map((value) => value.trim()).filter(Boolean))]
 }
 
 function groundedSummary(replies: PeerConversationResult['replies']): string {
