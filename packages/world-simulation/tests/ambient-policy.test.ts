@@ -130,7 +130,7 @@ describe('role-aware ambient policy', () => {
     expect(result?.targetSlotId).not.toBe('board-engineering')
   })
 
-  it('requires a compatible idle colleague and an available conversation slot for social behavior', () => {
+  it('never simulates a role conversation without the real peer-collaboration runtime', () => {
     const colleague = character({
       characterId: 'character-secretary',
       displayName: '秘书',
@@ -141,20 +141,12 @@ describe('role-aware ambient policy', () => {
       currentSlotId: 'admin-schedule',
       homeSlotId: 'admin-schedule',
     })
-    let selected
     for (let offset = 0; offset < 30; offset += 1) {
       const candidate = new Date(Date.parse(now) + offset * 300_000).toISOString()
       const result = decideAmbientBehavior(policy({ now: candidate, colleagues: [colleague] }))
-      if (result?.kind === 'consult-colleague') {
-        selected = result
-        break
-      }
+      expect(result?.kind).not.toBe('consult-colleague')
+      expect(result?.targetCharacterId).toBeUndefined()
     }
-    expect(selected).toMatchObject({
-      kind: 'consult-colleague',
-      targetCharacterId: colleague.characterId,
-      targetSlotId: 'conversation-public-1',
-    })
   })
 
   it('compiles decisions into durable interruptible action plans', () => {
