@@ -51,7 +51,6 @@ export function coordinateAmbientLife(input: AmbientCoordinationInput): AmbientC
   const decisions: AmbientDecision[] = []
   const plans: CharacterActionPlan[] = []
   const skippedCharacterIds: string[] = []
-  const socialTargets = new Set<string>()
 
   for (const character of characters) {
     if (plans.length >= maximum) {
@@ -62,7 +61,7 @@ export function coordinateAmbientLife(input: AmbientCoordinationInput): AmbientC
     const decision = decideAmbientBehavior({
       now: input.now,
       character,
-      colleagues: characters.filter((candidate) => !socialTargets.has(candidate.characterId)),
+      colleagues: [],
       slots: workingSlots,
       enabled: input.policy.enabled,
       ...(input.policy.minimumIdleMs === undefined ? {} : { minimumIdleMs: input.policy.minimumIdleMs }),
@@ -85,8 +84,6 @@ export function coordinateAmbientLife(input: AmbientCoordinationInput): AmbientC
     }
 
     selectedSlot.reservedBy = character.characterId
-    if (decision.targetCharacterId !== undefined) socialTargets.add(decision.targetCharacterId)
-    socialTargets.add(character.characterId)
     decisions.push(decision)
     plans.push(createAmbientActionPlan(decision, {
       worldId: input.worldId,
