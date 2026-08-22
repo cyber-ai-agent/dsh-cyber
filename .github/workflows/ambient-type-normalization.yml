@@ -1,0 +1,91 @@
+name: Normalize ambient settings types
+
+on:
+  push:
+    branches:
+      - feat/role-aware-ambient-life
+
+permissions:
+  contents: write
+
+jobs:
+  normalize:
+    if: ${{ !contains(github.event.head_commit.message, '[ambient-types-normalized]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/role-aware-ambient-life
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+      - name: Normalize required settings and exports
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+
+          path = Path('packages/server/src/services/ambient-life-settings-service.ts')
+          text = path.read_text()
+          old = """export interface WorldAmbientLifeSettings extends AmbientWorldPolicy {
+            worldId: string
+            updatedAt: string
+          }
+          """
+          new = """export interface WorldAmbientLifeSettings {
+            worldId: string
+            enabled: boolean
+            minimumIdleMs: number
+            minimumAmbientIntervalMs: number
+            socialCooldownMs: number
+            breakAfterMs: number
+            timeBucketMs: number
+            maximumPlansPerTick: number
+            updatedAt: string
+          }
+          """
+          if old in text:
+              text = text.replace(old, new, 1)
+          path.write_text(text)
+
+          Path('packages/world-simulation/src/index.ts').write_text(
+              "export * from './action-plan.js'\n"
+              "export * from './ambient-action-plan.js'\n"
+              "export * from './ambient-coordinator.js'\n"
+              "export * from './ambient-policy.js'\n"
+              "export * from './director.js'\n"
+              "export * from './reservation-ledger.js'\n"
+              "export * from './semantics.js'\n"
+          )
+
+          for relative in [
+              'packages/world-simulation/src/index.generated.ts',
+              'packages/world-simulation/src/ambient-action-plan-safe.ts',
+              'packages/world-simulation/src/ambient-public.ts',
+              'packages/world-simulation/src/ambient-index.ts',
+          ]:
+              file = Path(relative)
+              if file.exists(): file.unlink()
+
+          package_path = Path('packages/server/package.json')
+          package = json.loads(package_path.read_text())
+          package.setdefault('dependencies', {})['@dsh-cyber/world-simulation'] = 'workspace:*'
+          package['dependencies'] = dict(sorted(package['dependencies'].items()))
+          package_path.write_text(json.dumps(package, ensure_ascii=False, indent=2) + '\n')
+          PY
+          pnpm install --lockfile-only --config.minimum-release-age=0
+      - name: Commit normalization
+        run: |
+          if git diff --quiet; then
+            echo "Ambient types already normalized"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: normalize ambient settings and exports [ambient-types-normalized]"
+          git push origin HEAD:feat/role-aware-ambient-life
