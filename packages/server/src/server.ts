@@ -40,6 +40,7 @@ import { harnessModelRoute } from './services/harness-model-route.js'
 import { ModelCatalogService } from './services/model-catalog-service.js'
 import { ModelCredentialService } from './services/model-credential-service.js'
 import { ModelInteractionService, TurnInteractionLoggingRuntime } from './services/model-interaction-service.js'
+import { PeerCollaborationService } from './services/peer-collaboration-service.js'
 import { RuntimeUpdateService } from './services/runtime-update-service.js'
 import { WorldAccessService } from './services/world-access-service.js'
 import { WorldFileService } from './services/world-file-service.js'
@@ -125,6 +126,11 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     workspacePath: workspaceRoot,
     resolveWorldRoot: async (worldId) => (await worldRoots.ensure(worldId)).filesPath,
   })
+  const peerCollaboration = new PeerCollaborationService({
+  store,
+  simulationStore: worldSimulation,
+  orchestrator,
+})
   const packageManager = new PackageManager({
     store,
     runtime: options.packageRuntime ?? new LocalPackageRuntime(join(stateRoot, 'packages')),
@@ -154,7 +160,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerPackageRoutes(router, { store, packageManager, packageCatalog })
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
   registerModelInteractionRoutes(router, { store, interactions })
-  registerConversationRoutes(router, { store, orchestrator, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings })
+  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings })
   registerEmployeeRoutes(router, { store, worldAccess })
 
   const httpServer = createServer((request, response) => {

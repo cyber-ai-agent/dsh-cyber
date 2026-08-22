@@ -103,6 +103,25 @@ export interface GroupConversationInput {
   title?: string
 }
 
+export interface PeerConversationInput {
+  workspaceId: string
+  worldId: string
+  initiatorId: string
+  participantIds: string[]
+  purpose: string
+  maxRounds?: number
+  runtimePrompt?: string
+  reasoningEffort?: Exclude<ReasoningEffort, 'auto'>
+  title?: string
+}
+
+export interface PeerConversationResult extends ConversationResult {
+  initiatorId: string
+  participantIds: string[]
+  purpose: string
+  rounds: number
+}
+
 export interface AgentReply {
   employeeId: string
   displayName: string
@@ -261,6 +280,143 @@ export class ConversationOrchestrator implements AsyncDisposable {
       throw error
     }
   }
+
+  async peer(input: PeerConversationInput): Promise<PeerConversationResult> {
+  const purpose = requiredText(input.purpose, 'Peer conversation purpose')
+  const initiatorId = requiredText(input.initiatorId, 'Initiator id')
+  const participantIds = [...new Set(
+    [initiatorId, ...input.participantIds]
+      .map((value) => value.trim())
+      .filter(Boolean),
+  )]
+  if (participantIds.length < 2 || participantIds.length > 4) {
+    throw new ConversationOrchestrationError('A peer conversation requires 2 to 4 characters')
+  }
+  const maxRounds = input.maxRounds ?? 1
+  if (!Number.isInteger(maxRounds) || maxRounds < 1 || maxRounds > 3) {
+    throw new ConversationOrchestrationError('Peer conversation rounds must be between 1 and 3')
+  }
+  const employees = participantIds.map((employeeId) =>
+    this.#requireEmployeeInWorld(employeeId, input.workspaceId, input.worldId),
+  )
+  const initiator = employees.find((employee) => employee.id === initiatorId)
+  if (initiator === undefined) throw new ConversationOrchestrationError('Peer conversation initiator is unavailable')
+  const orderedEmployees = [
+    ...employees.filter((employee) => employee.id !== initiator.id),
+    initiator,
+  ]
+  const session = this.#store.createSession({
+    workspaceId: input.workspaceId,
+    worldId: input.worldId,
+    kind: 'meeting',
+    title: input.title?.trim() || conciseTitle(purpose),
+    participants: employees.map((employee) => ({
+      participantId: employee.id,
+      kind: 'employee' as const,
+    })),
+    actorId: initiator.id,
+  })
+  this.#store.appendMessage({
+    sessionId: session.id,
+    senderId: 'system',
+    senderKind: 'system',
+    kind: 'system',
+    content: `角色协作目标：${purpose}`,
+    metadata: {
+      source: 'peer-collaboration',
+      peerConversation: true,
+      initiatorId: initiator.id,
+      participantIds,
+      purpose,
+      maxRounds,
+    },
+    correlationId: session.id,
+  })
+  this.#store.appendDomainEvent({
+    workspaceId: input.workspaceId,
+    worldId: input.worldId,
+    sessionId: session.id,
+    type: 'meeting.started',
+    actorId: initiator.id,
+    actorKind: 'employee',
+    correlationId: session.id,
+    payload: {
+      participantIds,
+      speakerOrder: orderedEmployees.map((employee) => employee.id),
+      initiatorId: initiator.id,
+      peerConversation: true,
+      purpose,
+      maxRounds,
+    },
+  })
+
+  const replies: AgentReply[] = []
+  try {
+    for (let round = 1; round <= maxRounds; round += 1) {
+      for (const employee of orderedEmployees) {
+        replies.push(await this.#runAgent(
+          session,
+          employee,
+          peerPrompt({
+            basePrompt: input.runtimePrompt?.trim() || purpose,
+            purpose,
+            employee,
+            initiator,
+            participants: employees,
+            replies,
+            round,
+            maxRounds,
+          }),
+          input.reasoningEffort,
+        ))
+      }
+    }
+    this.#store.appendDomainEvent({
+      workspaceId: input.workspaceId,
+      worldId: input.worldId,
+      sessionId: session.id,
+      type: 'meeting.finished',
+      actorId: 'system',
+      actorKind: 'system',
+      correlationId: session.id,
+      payload: {
+        participantIds,
+        initiatorId: initiator.id,
+        peerConversation: true,
+        status: 'completed',
+        replyCount: replies.length,
+        rounds: maxRounds,
+      },
+    })
+    return {
+      session,
+      replies,
+      initiatorId: initiator.id,
+      participantIds,
+      purpose,
+      rounds: maxRounds,
+    }
+  } catch (error) {
+    this.#store.appendDomainEvent({
+      workspaceId: input.workspaceId,
+      worldId: input.worldId,
+      sessionId: session.id,
+      type: 'meeting.finished',
+      actorId: 'system',
+      actorKind: 'system',
+      correlationId: session.id,
+      payload: {
+        participantIds,
+        initiatorId: initiator.id,
+        peerConversation: true,
+        status: 'blocked',
+        replyCount: replies.length,
+        rounds: maxRounds,
+      },
+    })
+    throw error
+  }
+}
 
   close(): Promise<void> {
     return this.#runtime.close()
@@ -586,6 +742,43 @@ function classifyRuntimeFailure(value: unknown): AgentTurnFailureKind {
   if (/timeout|timed out|abort/.test(normalized)) return 'timeout'
   if (/econn|enotfound|network|fetch failed|connection|socket|dns/.test(normalized)) return 'unreachable'
   return 'unknown'
+}
+
+function peerPrompt(input: {
+  basePrompt: string
+  purpose: string
+  employee: EmployeeInstance
+  initiator: EmployeeInstance
+  participants: EmployeeInstance[]
+  replies: readonly AgentReply[]
+  round: number
+  maxRounds: number
+}): string {
+  const transcript = input.replies.length === 0
+    ? '尚无角色发言。'
+    : input.replies
+        .slice(-12)
+        .map((reply) => `${reply.displayName}：${compactPeerStatement(reply.content)}`)
+        .join('\n\n')
+  const participantNames = input.participants.map((participant) => `${participant.displayName}（${participant.role}）`).join('、')
+  const roleInstruction = input.employee.id === input.initiator.id
+    ? '你是本次协作的发起者，本轮最后发言。请核对其他角色的真实意见，给出阶段结论、下一步或需要继续追问的点。'
+    : `你是被 ${input.initiator.displayName} 邀请参与协作的角色。请从自己的职责、记忆和权限范围内提供具体信息，不要替发起者或其他角色发言。`
+  return [
+    input.basePrompt,
+    '你正在参加同一世界内的一次真实角色协作。这个会话没有用户直接代替你们发言。',
+    `协作目标：${input.purpose}`,
+    `参与角色：${participantNames}`,
+    `当前轮次：${input.round}/${input.maxRounds}`,
+    `此前角色的真实发言：\n${transcript}`,
+    roleInstruction,
+    '只引用会话中已经出现的事实和你自己能够访问的信息。不得虚构共同经历、权限、文件内容或其他角色观点。回答应简洁、可执行；没有补充时明确说明。',
+  ].join('\n\n')
+}
+
+function compactPeerStatement(value: string): string {
+  const compact = value.replaceAll(/\s+/g, ' ').trim()
+  return compact.length <= 1_200 ? compact : `${compact.slice(0, 1_199)}…`
 }
 
 function groupPrompt(original: string, replies: readonly AgentReply[]): string {

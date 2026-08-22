@@ -1170,11 +1170,24 @@ export default function App() {
                     const employee = employees.find((item) => item.id === employeeId)
                     if (employee !== undefined) directEmployee(employee)
                   }}
-                  onStartGroup={(employeeIds) => {
-                    const selected = employees.filter((employee) => employeeIds.includes(employee.id))
-                    if (selected.length < 2) return
-                    createGroupIntent({ employeeIds: selected.map((employee) => employee.id), title: selected.map((employee) => employee.displayName).join('、') })
-                  }}
+                  onStartGroup={(employeeIds, session) => {
+          const selected = employees.filter((employee) => employeeIds.includes(employee.id))
+          if (selected.length < 2) return
+          if (session !== undefined) {
+            setSessions((current) => [session, ...current.filter((item) => item.id !== session.id)])
+            setSessionParticipants((current) => ({ ...current, [session.id]: employeeIds }))
+            setActiveSessionId(session.id)
+            setConversationIntent(undefined)
+            setSelectedEmployeeId(employeeIds[0])
+            setMessages([])
+            clearLiveTurns()
+            setAppMode('workbench')
+            setDockCollapsed(false)
+            setDockTab('world')
+            return
+          }
+          createGroupIntent({ employeeIds: selected.map((employee) => employee.id), title: selected.map((employee) => employee.displayName).join('、') })
+        }}
                   onRecruit={() => void openRecruitment()}
                 />
               ),

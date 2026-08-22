@@ -198,6 +198,7 @@ function applyEvent(
       entity.visualState = {
         ...entity.visualState,
         activeMeetingId: event.correlationId ?? event.id,
+        peerConversation: event.payload['peerConversation'] === true,
       }
       moveEntityToSlot(entity, slot, 'meeting', '前往协作会议', semantics, event, cues, {
         physicalState: 'meeting',
@@ -219,6 +220,17 @@ function applyEvent(
       if (!participants.has(entity.id) && (typeof activeMeetingId !== 'string' || activeMeetingId !== meetingId)) continue
       settleAtTarget(entity)
       delete entity.visualState['activeMeetingId']
+      delete entity.visualState['peerConversation']
+      delete entity.visualState['peerConversation']
+      delete entity.visualState['peerConversation']
+      delete entity.visualState['peerConversation']
+      delete entity.visualState['peerConversation']
+      delete entity.visualState['peerConversation']
+      delete entity.visualState['peerConversation']
+      delete entity.visualState['peerConversation']
+      delete entity.visualState['peerConversation']
+      delete entity.visualState['peerConversation']
+      delete entity.visualState['peerConversation']
       const home = slotFromVisualState(semantics, entity, 'homeSlotId')
       if (home === undefined) continue
       moveEntityToSlot(entity, home, 'idle', '会议结束，返回岗位', semantics, event, cues, {
@@ -231,6 +243,10 @@ function applyEvent(
     cues.push(cue(event, 'meeting.disperse', {}))
     return
   }
+
+  if (employeeId !== undefined && applyActiveMeetingParticipantEvent(event, entities, employeeId, cues, now)) {
+  return
+}
 
   if (employeeId !== undefined) {
     const entity = entities.get(employeeId)
@@ -318,6 +334,79 @@ function applyEvent(
       }, entity.id))
     }
   }
+}
+
+function applyActiveMeetingParticipantEvent(
+  event: DomainEvent,
+  entities: ReadonlyMap<string, WorldRuntimeEntityState>,
+  speakerId: string,
+  cues: WorldCue[],
+  now: string,
+): boolean {
+  const speaker = entities.get(speakerId)
+  const meetingId = speaker === undefined ? undefined : stringVisual(speaker.visualState, 'activeMeetingId')
+  if (speaker === undefined || meetingId === undefined) return false
+  const messageKind = textValue(event.payload, 'messageKind')
+  const relevant = event.type === 'task.started'
+    || event.type === 'turn.started'
+    || event.type === 'tool.started'
+    || event.type === 'tool.completed'
+    || event.type === 'turn.completed'
+    || event.type === 'task.completed'
+    || event.type === 'turn.failed'
+    || event.type === 'task.blocked'
+    || (event.type === 'message.appended' && messageKind === 'assistant')
+  if (!relevant) return false
+
+  for (const entity of entities.values()) {
+    if (stringVisual(entity.visualState, 'activeMeetingId') !== meetingId) continue
+    const isSpeaker = entity.id === speakerId
+    const next = peerMeetingActivity(event.type, isSpeaker, messageKind)
+    entity.activity = next.activity
+    entity.activityLabel = isSpeaker ? next.label : `正在倾听${speaker.displayName}`
+    entity.updatedAt = event.createdAt
+    entity.visualState = compactVisualState({
+      ...entity.visualState,
+      physicalState: isSpeaker ? next.physicalState : 'listening',
+      activeSessionId: event.sessionId,
+      lastEventType: event.type,
+      projectedAt: now,
+    })
+    cues.push(cue(event, 'entity.activity', {
+      entityId: entity.id,
+      activity: entity.activity,
+      label: entity.activityLabel,
+    }, entity.id))
+  }
+
+  if (event.type === 'message.appended' && messageKind === 'assistant') {
+    cues.push(cue(event, 'entity.speech', {
+      entityId: speaker.id,
+      messageId: textValue(event.payload, 'messageId') ?? '',
+      excerpt: textValue(event.payload, 'excerpt') ?? '',
+      sessionId: event.sessionId ?? '',
+    }, speaker.id))
+  }
+  return true
+}
+
+function peerMeetingActivity(
+  eventType: DomainEvent['type'],
+  isSpeaker: boolean,
+  messageKind?: string,
+): { activity: WorldActivityKind; physicalState: string; label: string } {
+  if (!isSpeaker) return { activity: 'meeting', physicalState: 'listening', label: '正在倾听' }
+  if (eventType === 'turn.started') return { activity: 'thinking', physicalState: 'thinking', label: '正在思考如何回应' }
+  if (eventType === 'tool.started' || eventType === 'tool.completed' || eventType === 'task.started') {
+    return { activity: 'working', physicalState: 'using-object', label: '正在核对资料与工具结果' }
+  }
+  if (eventType === 'message.appended' && messageKind === 'assistant') {
+    return { activity: 'talking', physicalState: 'speaking', label: '正在发言' }
+  }
+  if (eventType === 'turn.failed' || eventType === 'task.blocked') {
+    return { activity: 'blocked', physicalState: 'blocked', label: '发言受阻，等待处理' }
+  }
+  return { activity: 'meeting', physicalState: 'listening', label: '本轮发言结束，继续倾听' }
 }
 
 function moveEntityToSlot(
