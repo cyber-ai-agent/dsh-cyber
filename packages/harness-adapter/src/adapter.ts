@@ -264,8 +264,7 @@ export function normalizeHarnessNotification(
       const failure = record(data.error)
       const failed = failure !== undefined
       const metadata: JsonObject = { failed }
-      const errorCode = stringValue(failure?.code)
-      if (errorCode !== undefined) metadata.errorCode = errorCode
+      appendFailureDiagnostics(metadata, failure, data)
       return [make('tool.completed', { callId, failed, metadata })]
     }
     case 'turn/end': {
@@ -273,8 +272,7 @@ export function normalizeHarnessNotification(
       const reasonKind = stringValue(reason?.kind) ?? 'unknown'
       const metadata: JsonObject = { reason: reasonKind }
       const failure = record(reason?.error)
-      const code = stringValue(failure?.code)
-      if (code !== undefined) metadata.errorCode = code
+      appendFailureDiagnostics(metadata, failure, reason, data)
       return [
         make(reasonKind === 'completed' ? 'turn.completed' : 'turn.failed', {
           failed: reasonKind !== 'completed',
@@ -315,6 +313,96 @@ function numericMetadata(
     if (item !== undefined) metadata[key] = item
   }
   return metadata
+}
+
+const DIAGNOSTIC_SECRET_PATTERNS: readonly RegExp[] = [
+  /\bsk-[A-Za-z0-9_-]{8,}\b/g,
+  /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi,
+  /\b(?:api[_-]?key|access[_-]?token|secret|password)\b\s*[=:]\s*["']?[A-Za-z0-9._~+/=-]{8,}/gi,
+  /([?&](?:api[_-]?key|key|token|access[_-]?token)=)[^&\s]+/gi,
+]
+
+function appendFailureDiagnostics(
+  metadata: JsonObject,
+  ...sources: Array<Record<string, unknown> | undefined>
+): void {
+  const records = diagnosticRecords(sources)
+  const code = firstDiagnosticString(records, ['code', 'errorCode', 'error_code'])
+  const type = firstDiagnosticString(records, ['type', 'errorType', 'error_type'])
+  const message = firstDiagnosticString(records, ['message', 'detail', 'error_description', 'error'])
+  const status = firstHttpStatus(records)
+
+  if (code !== undefined) metadata.errorCode = sanitizeDiagnosticText(code, 120)
+  else if (status !== undefined) metadata.errorCode = statusFallbackCode(status)
+  if (type !== undefined) metadata.errorType = sanitizeDiagnosticText(type, 120)
+  if (message !== undefined) metadata.error = sanitizeDiagnosticText(message, 400)
+  if (status !== undefined) metadata.httpStatus = status
+}
+
+function diagnosticRecords(
+  roots: Array<Record<string, unknown> | undefined>,
+): Array<Record<string, unknown>> {
+  const result: Array<Record<string, unknown>> = []
+  const seen = new Set<Record<string, unknown>>()
+  let current = roots.filter((value): value is Record<string, unknown> => value !== undefined)
+  for (let depth = 0; depth < 3 && current.length > 0; depth += 1) {
+    const next: Array<Record<string, unknown>> = []
+    for (const item of current) {
+      if (seen.has(item)) continue
+      seen.add(item)
+      result.push(item)
+      for (const key of ['error', 'cause', 'response', 'data']) {
+        const nested = record(item[key])
+        if (nested !== undefined && !seen.has(nested)) next.push(nested)
+      }
+    }
+    current = next
+  }
+  return result
+}
+
+function firstDiagnosticString(
+  records: readonly Record<string, unknown>[],
+  keys: readonly string[],
+): string | undefined {
+  for (const item of records) {
+    for (const key of keys) {
+      const value = stringValue(item[key])?.trim()
+      if (value) return value
+    }
+  }
+  return undefined
+}
+
+function firstHttpStatus(records: readonly Record<string, unknown>[]): number | undefined {
+  for (const item of records) {
+    for (const key of ['status', 'statusCode', 'httpStatus', 'http_status']) {
+      const value = item[key]
+      if (typeof value === 'number' && Number.isInteger(value) && value >= 100 && value <= 599) return value
+      if (typeof value === 'string') {
+        const parsed = Number.parseInt(value, 10)
+        if (Number.isInteger(parsed) && parsed >= 100 && parsed <= 599) return parsed
+      }
+    }
+  }
+  return undefined
+}
+
+function statusFallbackCode(status: number): string {
+  if (status === 401 || status === 403) return 'authentication'
+  if (status === 402) return 'quota_exhausted'
+  if (status === 408 || status === 504) return 'timeout'
+  if (status === 429) return 'rate_limit'
+  if (status >= 500) return 'upstream_unreachable'
+  return `http_${status}`
+}
+
+function sanitizeDiagnosticText(value: string, limit: number): string {
+  let text = value.replaceAll(/[\r\n\t]+/g, ' ').trim()
+  for (const pattern of DIAGNOSTIC_SECRET_PATTERNS) {
+    text = text.replace(pattern, (match, prefix: string | undefined) => prefix ? `${prefix}[已隐藏]` : '[已隐藏]')
+  }
+  return text.slice(0, limit)
 }
 
 export function workerEnvironment(
