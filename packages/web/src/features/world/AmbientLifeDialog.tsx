@@ -83,7 +83,7 @@ export function AmbientLifeDialog({ worldId, worldName, onClose }: AmbientLifeDi
             </label>
 
             <div className="ambient-life-grid">
-              <SettingSelect label="空闲多久后开始日常行为" value={value.minimumIdleMs} options={[[30_000, '30 秒'], [60_000, '1 分钟'], [180_000, '3 分钟'], [300_000, '5 分钟']]} onChange={(minimumIdleMs) => setValue({ ...value, minimumIdleMs })} />
+              <SettingSelect label="空闲多久后开始日常行为" value={value.minimumIdleMs} options={[[30_000, '30 秒'], [45_000, '45 秒（默认）'], [60_000, '1 分钟'], [180_000, '3 分钟'], [300_000, '5 分钟']]} onChange={(minimumIdleMs) => setValue({ ...value, minimumIdleMs })} />
               <SettingSelect label="两次日常行为的最短间隔" value={value.minimumAmbientIntervalMs} options={[[180_000, '3 分钟'], [300_000, '5 分钟'], [600_000, '10 分钟'], [900_000, '15 分钟']]} onChange={(minimumAmbientIntervalMs) => setValue({ ...value, minimumAmbientIntervalMs })} />
               <SettingSelect label="连续待命多久可短暂休息" value={value.breakAfterMs} options={[[900_000, '15 分钟'], [1_800_000, '30 分钟'], [3_600_000, '1 小时'], [7_200_000, '2 小时']]} onChange={(breakAfterMs) => setValue({ ...value, breakAfterMs })} />
               <SettingSelect label="单次最多安排几个角色" value={value.maximumPlansPerTick} options={[[1, '1 名'], [2, '2 名'], [3, '3 名'], [5, '5 名']]} onChange={(maximumPlansPerTick) => setValue({ ...value, maximumPlansPerTick })} />
