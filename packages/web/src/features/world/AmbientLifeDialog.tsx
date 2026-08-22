@@ -87,14 +87,13 @@ export function AmbientLifeDialog({ worldId, worldName, onClose }: AmbientLifeDi
             <div className="ambient-life-grid">
               <SettingSelect label="空闲多久后开始日常行为" value={value.minimumIdleMs} options={[[30_000, '30 秒'], [60_000, '1 分钟'], [180_000, '3 分钟'], [300_000, '5 分钟']]} onChange={(minimumIdleMs) => setValue({ ...value, minimumIdleMs })} />
               <SettingSelect label="两次日常行为的最短间隔" value={value.minimumAmbientIntervalMs} options={[[180_000, '3 分钟'], [300_000, '5 分钟'], [600_000, '10 分钟'], [900_000, '15 分钟']]} onChange={(minimumAmbientIntervalMs) => setValue({ ...value, minimumAmbientIntervalMs })} />
-              <SettingSelect label="角色间岗位沟通冷却" value={value.socialCooldownMs} options={[[900_000, '15 分钟'], [1_800_000, '30 分钟'], [3_600_000, '1 小时'], [7_200_000, '2 小时']]} onChange={(socialCooldownMs) => setValue({ ...value, socialCooldownMs })} />
               <SettingSelect label="连续待命多久可短暂休息" value={value.breakAfterMs} options={[[900_000, '15 分钟'], [1_800_000, '30 分钟'], [3_600_000, '1 小时'], [7_200_000, '2 小时']]} onChange={(breakAfterMs) => setValue({ ...value, breakAfterMs })} />
               <SettingSelect label="单次最多安排几个角色" value={value.maximumPlansPerTick} options={[[1, '1 名'], [2, '2 名'], [3, '3 名'], [5, '5 名']]} onChange={(maximumPlansPerTick) => setValue({ ...value, maximumPlansPerTick })} />
             </div>
 
             <aside className="ambient-life-dialog__notice">
               <strong>行为边界</strong>
-              <span>不会随机全图游走；不会进入职责无关部门；不会占用其他角色的位置；不会把视觉日常活动伪装成真实 Agent 任务。</span>
+              <span>不会随机全图游走；不会进入职责无关部门；不会占用其他角色的位置；不会把视觉日常活动伪装成真实 Agent 任务。角色之间的对话仍通过真实协作会话执行并沉淀记录。</span>
             </aside>
             {error === undefined ? null : <div className="ambient-life-dialog__error" role="alert">{error}</div>}
           </div>
