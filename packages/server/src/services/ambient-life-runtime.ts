@@ -1,14 +1,19 @@
 import type { AmbientWorldPolicy } from '@dsh-cyber/world-simulation'
 
-import type { AmbientLifeExecutor } from './ambient-life-executor.js'
-import type {
-  AmbientLifeTickResult,
-  RoleAwareAmbientLifeService,
-} from './role-aware-ambient-life-service.js'
+import type { AmbientLifeTickResult } from './role-aware-ambient-life-service.js'
+
+export interface AmbientLifePlanningPort {
+  tick(worldId: string, policy?: Partial<AmbientWorldPolicy>): Promise<AmbientLifeTickResult>
+}
+
+export interface AmbientLifeExecutionPort {
+  completeDue(worldId: string, now?: string): string[]
+  start(result: AmbientLifeTickResult): string[]
+}
 
 export interface AmbientLifeRuntimeOptions {
-  service: RoleAwareAmbientLifeService
-  executor: AmbientLifeExecutor
+  service: AmbientLifePlanningPort
+  executor: AmbientLifeExecutionPort
   publish?: (worldId: string) => void
   clock?: () => string
 }
@@ -19,8 +24,8 @@ export interface AmbientLifeRuntimeOptions {
  * events, and only then publish the refreshed world snapshot.
  */
 export class AmbientLifeRuntime {
-  readonly #service: RoleAwareAmbientLifeService
-  readonly #executor: AmbientLifeExecutor
+  readonly #service: AmbientLifePlanningPort
+  readonly #executor: AmbientLifeExecutionPort
   readonly #publish: ((worldId: string) => void) | undefined
   readonly #clock: () => string
 
