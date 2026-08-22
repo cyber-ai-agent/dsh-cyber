@@ -1,0 +1,83 @@
+name: Fix peer web wiring
+
+on:
+  push:
+    branches:
+      - feat/npc-collaboration-v1
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[peer-web-fixed]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/npc-collaboration-v1
+          fetch-depth: 0
+      - name: Patch exact App callback and peer title
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          app = Path('packages/web/src/App.tsx')
+          text = app.read_text()
+          old = """                  onStartGroup={(employeeIds) => {
+                    const selected = employees.filter((employee) => employeeIds.includes(employee.id))
+                    if (selected.length < 2) return
+                    createGroupIntent({ employeeIds: selected.map((employee) => employee.id), title: selected.map((employee) => employee.displayName).join('、') })
+                  }}
+          """
+          new = """                  onStartGroup={(employeeIds, session) => {
+                    const selected = employees.filter((employee) => employeeIds.includes(employee.id))
+                    if (selected.length < 2) return
+                    if (session !== undefined) {
+                      setSessions((current) => [session, ...current.filter((item) => item.id !== session.id)])
+                      setSessionParticipants((current) => ({ ...current, [session.id]: employeeIds }))
+                      setActiveSessionId(session.id)
+                      setConversationIntent(undefined)
+                      setSelectedEmployeeId(employeeIds[0])
+                      setMessages([])
+                      clearLiveTurns()
+                      setAppMode('workbench')
+                      setDockCollapsed(false)
+                      setDockTab('world')
+                      return
+                    }
+                    createGroupIntent({ employeeIds: selected.map((employee) => employee.id), title: selected.map((employee) => employee.displayName).join('、') })
+                  }}
+          """
+          if old not in text:
+              raise SystemExit('App callback anchor not found')
+          app.write_text(text.replace(old, new, 1))
+
+          route = Path('packages/server/src/routes/conversation-routes.ts')
+          text = route.read_text()
+          anchor = """    const transformedPurpose = await applyInstalledPromptTransforms(
+              store.listInstalledPackages(world.workspaceId),
+              purpose,
+            )
+            const result = await peerCollaboration.run({
+          """
+          replacement = """    const transformedPurpose = await applyInstalledPromptTransforms(
+              store.listInstalledPackages(world.workspaceId),
+              purpose,
+            )
+            const peerTitle = optionalString(body.title)
+            const result = await peerCollaboration.run({
+          """
+          if anchor in text:
+              text = text.replace(anchor, replacement, 1)
+          elif 'const peerTitle = optionalString(body.title)' not in text:
+              raise SystemExit('Peer title anchor not found')
+          route.write_text(text)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/web/src/App.tsx packages/server/src/routes/conversation-routes.ts
+          git commit -m "fix: wire peer sessions into the active workbench [peer-web-fixed]"
+          git push origin HEAD:feat/npc-collaboration-v1
