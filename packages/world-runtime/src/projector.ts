@@ -223,16 +223,6 @@ function applyEvent(
       settleAtTarget(entity)
       delete entity.visualState['activeMeetingId']
       delete entity.visualState['peerConversation']
-      delete entity.visualState['peerConversation']
-      delete entity.visualState['peerConversation']
-      delete entity.visualState['peerConversation']
-      delete entity.visualState['peerConversation']
-      delete entity.visualState['peerConversation']
-      delete entity.visualState['peerConversation']
-      delete entity.visualState['peerConversation']
-      delete entity.visualState['peerConversation']
-      delete entity.visualState['peerConversation']
-      delete entity.visualState['peerConversation']
       const home = slotFromVisualState(semantics, entity, 'homeSlotId')
       if (home === undefined) continue
       moveEntityToSlot(entity, home, 'idle', '会议结束，返回岗位', semantics, event, cues, {
@@ -247,8 +237,8 @@ function applyEvent(
   }
 
   if (employeeId !== undefined && applyActiveMeetingParticipantEvent(event, entities, employeeId, cues, now)) {
-  return
-}
+    return
+  }
 
   if (employeeId !== undefined) {
     const entity = entities.get(employeeId)
