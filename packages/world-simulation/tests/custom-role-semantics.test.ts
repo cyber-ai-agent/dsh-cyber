@@ -33,7 +33,7 @@ const configured: CharacterBehaviorProfile = {
   preferredZoneTags: ['research'],
   preferredFacilityCapabilities: ['research', 'inspect'],
   allowedZoneTags: ['research', 'meeting', 'rest', 'public'],
-  homeSlotTags: ['research', 'work'],
+  homeSlotTags: ['research', 'home'],
   ambientBehaviors: ['inspect-cultivation-bed'],
   socialPolicy: {
     canInitiateConversation: false,
@@ -43,9 +43,9 @@ const configured: CharacterBehaviorProfile = {
 }
 
 const slots: WorldSlotDefinition[] = [
-  slot('admin-home', 'zone-administration', 'work', ['administration', 'work']),
-  slot('engineering-home', 'zone-engineering', 'work', ['engineering', 'coding', 'work']),
-  slot('research-home', 'zone-research', 'work', ['research', 'archive', 'work']),
+  slot('admin-home', 'zone-administration', 'home', ['administration', 'home']),
+  slot('engineering-home', 'zone-engineering', 'home', ['engineering', 'home']),
+  slot('research-home', 'zone-research', 'home', ['research', 'home']),
   slot('research-bench', 'zone-research', 'work', ['research', 'inspect', 'work']),
   slot('public-wait', 'zone-public', 'waiting', ['public', 'waiting']),
 ]
