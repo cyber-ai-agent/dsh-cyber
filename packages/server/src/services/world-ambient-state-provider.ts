@@ -35,7 +35,6 @@ export class WorldAmbientStateProvider implements AmbientLifeStateProvider {
     const presences = new Map(
       this.#simulationStore.listPresences(worldId).map((presence) => [presence.characterId, presence]),
     )
-    const episodes = this.#simulationStore.listSharedEpisodes(worldId)
     return this.#store
       .listEmployees(worldId)
       .filter((character) => character.status !== 'archived')
@@ -46,10 +45,6 @@ export class WorldAmbientStateProvider implements AmbientLifeStateProvider {
         const latestAmbient = [...plans]
           .filter((plan) => plan.source === 'ambient' || plan.source === 'role-routine')
           .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0]
-        const latestSocial = episodes
-          .filter((episode) => episode.participantIds.includes(character.id))
-          .filter((episode) => episode.kind === 'conversation' || episode.kind === 'collaboration')
-          .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt))[0]
         const state: AmbientCharacterState = {
           worldId,
           characterId: character.id,
@@ -68,7 +63,6 @@ export class WorldAmbientStateProvider implements AmbientLifeStateProvider {
         if (presence.activePlanId !== undefined) state.activePlanId = presence.activePlanId
         if (presence.activeSessionId !== undefined) state.activeSessionId = presence.activeSessionId
         if (latestAmbient !== undefined) state.lastAmbientAt = latestAmbient.createdAt
-        if (latestSocial !== undefined) state.lastSocialAt = latestSocial.occurredAt
         return state
       })
       .filter((value): value is AmbientCharacterState => value !== undefined)
