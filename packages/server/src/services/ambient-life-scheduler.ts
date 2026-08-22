@@ -1,13 +1,19 @@
+import type { AmbientWorldPolicy } from '@dsh-cyber/world-simulation'
+
 import type { WorldAmbientLifeSettings } from './ambient-life-settings-service.js'
-import type { AmbientLifeTickResult, RoleAwareAmbientLifeService } from './role-aware-ambient-life-service.js'
+import type { AmbientLifeTickResult } from './role-aware-ambient-life-service.js'
 
 export interface AmbientLifeSettingsReader {
   listEnabled(): WorldAmbientLifeSettings[]
 }
 
+export interface AmbientLifeTickPort {
+  tick(worldId: string, policy?: Partial<AmbientWorldPolicy>): Promise<AmbientLifeTickResult>
+}
+
 export interface AmbientLifeSchedulerOptions {
   settings: AmbientLifeSettingsReader
-  service: RoleAwareAmbientLifeService
+  service: AmbientLifeTickPort
   intervalMs?: number
   onResult?: (result: AmbientLifeTickResult) => void
   onError?: (worldId: string, error: unknown) => void
@@ -17,7 +23,7 @@ const DEFAULT_INTERVAL_MS = 30_000
 
 export class AmbientLifeScheduler implements AsyncDisposable {
   readonly #settings: AmbientLifeSettingsReader
-  readonly #service: RoleAwareAmbientLifeService
+  readonly #service: AmbientLifeTickPort
   readonly #intervalMs: number
   readonly #onResult: ((result: AmbientLifeTickResult) => void) | undefined
   readonly #onError: ((worldId: string, error: unknown) => void) | undefined
