@@ -24,13 +24,10 @@ jobs:
 
           app = Path('packages/web/src/App.tsx')
           text = app.read_text()
-          old = """                  onStartGroup={(employeeIds) => {
-                    const selected = employees.filter((employee) => employeeIds.includes(employee.id))
-                    if (selected.length < 2) return
-                    createGroupIntent({ employeeIds: selected.map((employee) => employee.id), title: selected.map((employee) => employee.displayName).join('、') })
-                  }}
-          """
-          new = """                  onStartGroup={(employeeIds, session) => {
+          if 'onStartGroup={(employeeIds, session) =>' not in text:
+              start = text.index('                  onStartGroup={(employeeIds) => {')
+              end = text.index('                  onRecruit={() => void openRecruitment()}', start)
+              replacement = """                  onStartGroup={(employeeIds, session) => {
                     const selected = employees.filter((employee) => employeeIds.includes(employee.id))
                     if (selected.length < 2) return
                     if (session !== undefined) {
@@ -49,31 +46,15 @@ jobs:
                     createGroupIntent({ employeeIds: selected.map((employee) => employee.id), title: selected.map((employee) => employee.displayName).join('、') })
                   }}
           """
-          if old in text:
-              text = text.replace(old, new, 1)
-          elif 'onStartGroup={(employeeIds, session) =>' not in text:
-              raise SystemExit('App callback anchor not found')
+              text = text[:start] + replacement + text[end:]
           app.write_text(text)
 
           route = Path('packages/server/src/routes/conversation-routes.ts')
           text = route.read_text()
-          anchor = """    const transformedPurpose = await applyInstalledPromptTransforms(
-              store.listInstalledPackages(world.workspaceId),
-              purpose,
-            )
-            const result = await peerCollaboration.run({
-          """
-          replacement = """    const transformedPurpose = await applyInstalledPromptTransforms(
-              store.listInstalledPackages(world.workspaceId),
-              purpose,
-            )
-            const peerTitle = optionalString(body.title)
-            const result = await peerCollaboration.run({
-          """
-          if anchor in text:
-              text = text.replace(anchor, replacement, 1)
-          elif 'const peerTitle = optionalString(body.title)' not in text:
-              raise SystemExit('Peer title anchor not found')
+          if 'const peerTitle = optionalString(body.title)' not in text:
+              marker = '    const result = await peerCollaboration.run({'
+              index = text.index(marker)
+              text = text[:index] + '    const peerTitle = optionalString(body.title)\n' + text[index:]
           route.write_text(text)
           PY
       - name: Commit patch
