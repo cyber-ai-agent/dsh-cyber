@@ -1,16 +1,16 @@
 name: Fix peer session continuity
 
 on:
-  push:
+  pull_request:
     branches:
-      - feat/npc-collaboration-v1
+      - main
 
 permissions:
   contents: write
 
 jobs:
   fix:
-    if: ${{ !contains(github.event.head_commit.message, '[peer-session-continuity]') }}
+    if: ${{ github.head_ref == 'feat/npc-collaboration-v1' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -24,25 +24,10 @@ jobs:
 
           path = Path('packages/orchestration/src/conversation-orchestrator.ts')
           text = path.read_text()
-          old = """      for (const employee of orderedEmployees) {
-        replies.push(await this.#runAgent(
-          session,
-          employee,
-          peerPrompt({
-            basePrompt: input.runtimePrompt?.trim() || purpose,
-            purpose,
-            employee,
-            initiator,
-            participants: employees,
-            replies,
-            round,
-            maxRounds,
-          }),
-          input.reasoningEffort,
-        ))
-      }
-          """
-          new = """      for (const scheduledEmployee of orderedEmployees) {
+          if 'for (const scheduledEmployee of orderedEmployees)' not in text:
+              start = text.index('      for (const employee of orderedEmployees) {', text.index('async peer('))
+              end = text.index('      }\n    }\n    this.#store.appendDomainEvent({', start) + len('      }\n')
+              replacement = """      for (const scheduledEmployee of orderedEmployees) {
         const employee = this.#requireEmployeeInWorld(
           scheduledEmployee.id,
           input.workspaceId,
@@ -65,10 +50,7 @@ jobs:
         ))
       }
           """
-          if old in text:
-              text = text.replace(old, new, 1)
-          elif 'for (const scheduledEmployee of orderedEmployees)' not in text:
-              raise SystemExit('Peer turn loop anchor not found')
+              text = text[:start] + replacement + text[end:]
           path.write_text(text)
           PY
       - name: Commit fix
