@@ -51,9 +51,9 @@ export class ActorAnimationController {
     this.#source = source
     this.#actorSet = actorSet
     this.#rosterIndex = rosterIndex
-    this.#phaseOffset = options.characterId === undefined
-      ? 0
-      : characterMotionPhaseOffset(options.characterId)
+    this.#phaseOffset = characterMotionPhaseOffset(
+      options.characterId ?? `${actorSet.id}:${rosterIndex}`,
+    )
     this.#reducedMotion = options.reducedMotion ?? false
     this.#motionProfileId = options.motionProfileId ?? 'standard'
     this.sprite = new AnimatedSprite([this.#texture(0)])
@@ -92,8 +92,11 @@ export class ActorAnimationController {
   tick(deltaMs: number): void {
     const safeDelta = Number.isFinite(deltaMs) ? Math.max(0, deltaMs) : 0
     this.#elapsed += safeDelta
+    const reducedMotion = this.#reducedMotion || prefersReducedMotion()
+    if (reducedMotion) this.sprite.gotoAndStop(0)
+    else if (!this.#usesFallback && !this.sprite.playing) this.sprite.play()
     const sample = sampleCharacterMotion(this.#activity, this.#elapsed, {
-      reducedMotion: this.#reducedMotion,
+      reducedMotion,
       phaseOffset: this.#phaseOffset,
       motionProfileId: this.#motionProfileId,
     })
@@ -172,6 +175,17 @@ export function resolveClipFrames(
     if (frames !== undefined && frames.length > 0) return frames
   }
   return [0]
+}
+
+function prefersReducedMotion(): boolean {
+  if (typeof document !== 'undefined') {
+    const preference = document.documentElement.dataset.motion
+    if (preference === 'reduced') return true
+    if (preference === 'full') return false
+  }
+  return typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
 function mix(from: number, to: number, strength: number): number {
