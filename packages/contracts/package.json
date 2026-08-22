@@ -13,6 +13,10 @@
     "./world-simulation": {
       "types": "./lib/world-simulation.d.ts",
       "default": "./lib/world-simulation.js"
+    },
+    "./creative-platform": {
+      "types": "./lib/creative-platform.d.ts",
+      "default": "./lib/creative-platform.js"
     }
   },
   "files": ["lib"],
