@@ -47,11 +47,12 @@ export function compileWorldSemantics(
   const slots = scene.anchors.flatMap((anchor) => {
     const zone = anchorZones.get(anchor.id) ?? 'public'
     const facility = facilityByAnchor.get(anchor.id)
-    return createSlots(anchor, zone, facility)
+    return createSlots(scene.id, anchor, zone, facility)
   })
 
   const zones = createZones(scene, anchorZones)
-  const facilities = scene.interactables.map((interactable) => createFacility(interactable, anchorZones, slots))
+  const facilities = scene.interactables.map((interactable) =>
+    createFacility(scene.id, interactable, anchorZones, slots))
 
   return {
     contractVersion: 1,
@@ -176,6 +177,7 @@ export function rankSlots(
 }
 
 function createSlots(
+  sceneId: string,
   anchor: WorldThemeAnchorManifest,
   zone: WorldZoneKind,
   facility?: WorldThemeInteractableManifest,
@@ -184,7 +186,7 @@ function createSlots(
   const kind = inferSlotKind(anchor, facility)
   return Array.from({ length: count }, (_, index) => ({
     id: `${anchor.id}:slot-${index + 1}`,
-    sceneId: '',
+    sceneId,
     zoneId: `zone-${zone}`,
     ...(facility === undefined ? {} : { facilityId: facility.id }),
     anchorId: anchor.id,
@@ -222,6 +224,7 @@ function createZones(
 }
 
 function createFacility(
+  sceneId: string,
   interactable: WorldThemeInteractableManifest,
   anchorZones: ReadonlyMap<string, WorldZoneKind>,
   slots: readonly WorldSlotDefinition[],
@@ -231,7 +234,7 @@ function createFacility(
     .find((value): value is WorldZoneKind => value !== undefined) ?? 'public'
   return {
     id: interactable.id,
-    sceneId: slots.find((slot) => slot.facilityId === interactable.id)?.sceneId ?? '',
+    sceneId,
     zoneId: `zone-${zone}`,
     kind: interactable.kind,
     displayName: interactable.displayName,
