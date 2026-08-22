@@ -18,6 +18,7 @@ import {
   projectWorldRuntime,
   validateWorldThemeManifest,
 } from '@dsh-cyber/world-runtime'
+import { readCharacterBehaviorProfile } from '@dsh-cyber/world-simulation'
 
 import {
   InstalledPackageVerificationCache,
@@ -337,7 +338,12 @@ export class WorldRuntimeService {
     if (!validation.valid) throw new Error(`Built-in world theme is invalid: ${validation.errors.join('; ')}`)
 
     const previous = this.#store.getWorldRuntimeSnapshot(worldId)
-    const employees = this.#store.listEmployees(worldId)
+    const employees = this.#store.listEmployees(worldId).map((employee) => {
+      const behaviorProfile = readCharacterBehaviorProfile(
+        this.#store.getEmployeeProfile(employee.id)?.appearance,
+      )
+      return behaviorProfile === undefined ? employee : { ...employee, behaviorProfile }
+    })
     this.#simulationStore.cleanupExpiredReservations(this.#clock())
     const result = projectWorldRuntime({
       workspaceId: world.workspaceId,

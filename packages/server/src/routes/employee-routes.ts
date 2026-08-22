@@ -1,5 +1,6 @@
 import type { JsonObject } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
+import { assertCharacterBehaviorProfileAppearance } from '@dsh-cyber/world-simulation'
 
 import { HttpError } from '../http/errors.js'
 import type { Router } from '../http/router.js'
@@ -56,6 +57,18 @@ export function registerEmployeeRoutes(router: Router, dependencies: EmployeeRou
   router.put(/^\/api\/employees\/([^/]+)\/profile$/, async ({ request, response, params }) => {
     await assertCharacterUnlocked(params[0]!, request)
     const body = await readJson(request)
+    const appearance = record(body.appearance) as JsonObject | undefined
+    if (appearance !== undefined) {
+      try {
+        assertCharacterBehaviorProfileAppearance(appearance)
+      } catch (error) {
+        throw new HttpError(
+          422,
+          'invalid_character_behavior_profile',
+          error instanceof Error ? error.message : 'Invalid character behavior profile',
+        )
+      }
+    }
     const profile = store.reviseEmployeeProfile({
       employeeId: params[0]!,
       ...(body.displayName === undefined ? {} : { displayName: requiredString(body, 'displayName') }),
@@ -64,7 +77,7 @@ export function registerEmployeeRoutes(router: Router, dependencies: EmployeeRou
       ...(body.personalityTraits === undefined
         ? {}
         : { personalityTraits: optionalStringArray(body.personalityTraits) }),
-      ...(record(body.appearance) === undefined ? {} : { appearance: record(body.appearance) as JsonObject }),
+      ...(appearance === undefined ? {} : { appearance }),
       reason: requiredString(body, 'reason'),
     })
     writeJson(response, 201, { profile })

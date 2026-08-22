@@ -1,8 +1,9 @@
-import type { EmployeeInstance } from '@dsh-cyber/contracts'
 import type { SqliteStore, WorldSimulationStore } from '@dsh-cyber/persistence'
-import type {
-  AmbientCharacterState,
-  AmbientSlot,
+import {
+  readCharacterBehaviorProfile,
+  resolveCharacterBehavior,
+  type AmbientCharacterState,
+  type AmbientSlot,
 } from '@dsh-cyber/world-simulation'
 
 import type { AmbientLifeStateProvider } from './role-aware-ambient-life-service.js'
@@ -45,6 +46,10 @@ export class WorldAmbientStateProvider implements AmbientLifeStateProvider {
         const latestAmbient = [...plans]
           .filter((plan) => plan.source === 'ambient' || plan.source === 'role-routine')
           .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0]
+        const configured = readCharacterBehaviorProfile(
+          this.#store.getEmployeeProfile(character.id)?.appearance,
+        )
+        const behavior = resolveCharacterBehavior(character, configured)
         const state: AmbientCharacterState = {
           worldId,
           characterId: character.id,
@@ -53,8 +58,8 @@ export class WorldAmbientStateProvider implements AmbientLifeStateProvider {
           status: character.status,
           sceneId: presence.sceneId,
           facing: presence.facing,
-          roleTags: roleTags(character),
-          preferredZoneTags: preferredZoneTags(character),
+          roleTags: [...behavior.roleTags],
+          preferredZoneTags: [...behavior.preferredZoneTags],
           currentZoneId: presence.zoneId,
           currentSlotId: presence.currentSlotId,
           homeSlotId: presence.homeSlotId,
@@ -86,41 +91,4 @@ export class WorldAmbientStateProvider implements AmbientLifeStateProvider {
       }
     })
   }
-}
-
-function roleTags(character: EmployeeInstance): string[] {
-  const values = new Set<string>([character.role.trim().toLocaleLowerCase()])
-  const signal = `${character.role} ${character.blueprintId}`.toLocaleLowerCase()
-  if (/开发|工程|架构|测试|code|engineer|developer|qa/.test(signal)) {
-    values.add('engineering')
-    values.add('coding')
-    values.add('testing')
-  }
-  if (/秘书|管家|行政|协调|助理|secretary|butler|assistant|admin/.test(signal)) {
-    values.add('administration')
-    values.add('coordination')
-    values.add('schedule')
-  }
-  if (/研究|档案|知识|分析|research|archive|knowledge|analyst/.test(signal)) {
-    values.add('research')
-    values.add('knowledge')
-    values.add('archive')
-  }
-  if (/运维|运营|监控|安全|operations|ops|monitor|security/.test(signal)) {
-    values.add('operations')
-    values.add('monitoring')
-    values.add('control')
-  }
-  return [...values]
-}
-
-function preferredZoneTags(character: EmployeeInstance): string[] {
-  const tags = roleTags(character)
-  const preferred = tags.filter((tag) => [
-    'engineering',
-    'administration',
-    'research',
-    'operations',
-  ].includes(tag))
-  return preferred.length > 0 ? preferred : ['public']
 }

@@ -1,6 +1,7 @@
 import type { DomainEvent, EmployeeInstance } from '@dsh-cyber/contracts'
 import type {
   CharacterActionPlan,
+  CharacterBehaviorProfile,
   CharacterPhysicalState,
   CompiledWorldSemantics,
   WorldSlotDefinition,
@@ -27,14 +28,21 @@ export interface DirectWorldEventInput {
   semantics: CompiledWorldSemantics
   occupiedSlotIds: ReadonlySet<string>
   homeSlot?: WorldSlotDefinition
+  behaviorProfile?: CharacterBehaviorProfile
 }
 
 export function directWorldEvent(input: DirectWorldEventInput): WorldCharacterDirective | undefined {
-  const { event, character, semantics, occupiedSlotIds, homeSlot } = input
+  const { event, character, semantics, occupiedSlotIds, homeSlot, behaviorProfile } = input
   if (!eventTargetsCharacter(event, character.id)) return undefined
 
   if (event.type === 'task.started') {
-    const targetSlot = selectCharacterSlot(character, semantics, occupiedSlotIds, 'task') ?? homeSlot
+    const targetSlot = selectCharacterSlot(
+      character,
+      semantics,
+      occupiedSlotIds,
+      'task',
+      behaviorProfile,
+    ) ?? homeSlot
     return directiveWithPlan({
       event,
       character,
@@ -61,7 +69,13 @@ export function directWorldEvent(input: DirectWorldEventInput): WorldCharacterDi
   }
 
   if (event.type === 'tool.started') {
-    const targetSlot = selectCharacterSlot(character, semantics, occupiedSlotIds, 'task') ?? homeSlot
+    const targetSlot = selectCharacterSlot(
+      character,
+      semantics,
+      occupiedSlotIds,
+      'task',
+      behaviorProfile,
+    ) ?? homeSlot
     const toolName = textValue(event, 'toolName')
     return directiveWithPlan({
       event,
