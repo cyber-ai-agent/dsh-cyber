@@ -69,7 +69,11 @@ export function resolveCharacterBehavior(
   character: Pick<EmployeeInstance, 'blueprintId' | 'displayName' | 'role'>,
   configured?: CharacterBehaviorProfile,
 ): CharacterBehaviorProfile {
-  if (configured !== undefined) return cloneBehaviorProfile(configured)
+  const embedded = (character as typeof character & {
+    behaviorProfile?: CharacterBehaviorProfile
+  }).behaviorProfile
+  const explicit = configured ?? embedded
+  if (explicit !== undefined) return cloneBehaviorProfile(explicit)
   const identity = `${character.blueprintId} ${character.role} ${character.displayName}`.toLowerCase()
 
   if (containsAny(identity, ['secretary', '秘书', 'butler', '管家', 'assistant', '助理'])) {
@@ -136,19 +140,25 @@ export function assignCharacterHomeSlots(
   const occupied = new Set<string>()
 
   for (const character of [...characters].sort((left, right) => left.id.localeCompare(right.id))) {
+    const profile = resolveCharacterBehavior(character, profiles.get(character.id))
     const retainedSlotId = retained.get(character.id)
     const retainedSlot = retainedSlotId === undefined
       ? undefined
       : semantics.slots.find((slot) => slot.id === retainedSlotId)
-    if (retainedSlot !== undefined && (!retainedSlot.exclusive || !occupied.has(retainedSlot.id))) {
+    if (
+      retainedSlot !== undefined
+      && slotAllowedByProfile(retainedSlot, profile)
+      && (!retainedSlot.exclusive || !occupied.has(retainedSlot.id))
+    ) {
       result.set(character.id, retainedSlot)
       if (retainedSlot.exclusive) occupied.add(retainedSlot.id)
       continue
     }
 
-    const profile = resolveCharacterBehavior(character, profiles.get(character.id))
     const candidate = rankSlots(semantics.slots, profile, occupied, 'home')[0]
-      ?? semantics.slots.find((slot) => !slot.exclusive || !occupied.has(slot.id))
+      ?? semantics.slots.find((slot) =>
+        slotAllowedByProfile(slot, profile)
+        && (!slot.exclusive || !occupied.has(slot.id)))
     if (candidate === undefined) continue
     result.set(character.id, candidate)
     if (candidate.exclusive) occupied.add(candidate.id)
