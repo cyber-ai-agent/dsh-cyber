@@ -58,6 +58,7 @@ export function compileWorldSemantics(
     contractVersion: 1,
     themeId: manifest.id,
     sceneId: scene.id,
+    navigation: structuredClone(scene.navigation),
     zones,
     facilities,
     slots,

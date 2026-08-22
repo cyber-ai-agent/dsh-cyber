@@ -3,6 +3,7 @@ import type {
   EmployeeInstance,
   EmployeeMilestone,
   JsonObject,
+  JsonValue,
   World,
   WorldActivityKind,
   WorldCue,
@@ -330,11 +331,11 @@ function moveEntityToSlot(
   context: {
     physicalState: string
     source: string
-    planId?: string
-    sessionId?: string
+    planId?: string | undefined
+    sessionId?: string | undefined
   },
 ): void {
-  const sceneNavigation = semanticsNavigation(semantics)
+  const sceneNavigation = semantics.navigation ?? semanticsNavigation(semantics)
   const route = findPath(sceneNavigation, entity.position, slot.position)
   entity.facing = facingToward(entity.position, slot.position, slot.facing)
   entity.activity = activity
@@ -561,12 +562,17 @@ function samePoint(left: WorldPoint, right: WorldPoint): boolean {
 function compactVisualState(value: Record<string, unknown>): JsonObject {
   const result: JsonObject = {}
   for (const [key, field] of Object.entries(value)) {
-    if (field === undefined) continue
-    if (typeof field === 'string' || typeof field === 'number' || typeof field === 'boolean' || field === null) {
-      result[key] = field
-    }
+    if (field !== undefined && isJsonValue(field)) result[key] = field
   }
   return result
+}
+
+function isJsonValue(value: unknown): value is JsonValue {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true
+  if (typeof value === 'number') return Number.isFinite(value)
+  if (Array.isArray(value)) return value.every(isJsonValue)
+  if (typeof value !== 'object') return false
+  return Object.values(value as Record<string, unknown>).every(isJsonValue)
 }
 
 function activityLabel(type: string): string {
