@@ -8,7 +8,6 @@ export interface WorldAmbientLifeSettings {
   enabled: boolean
   minimumIdleMs: number
   minimumAmbientIntervalMs: number
-  socialCooldownMs: number
   breakAfterMs: number
   timeBucketMs: number
   maximumPlansPerTick: number
@@ -49,7 +48,6 @@ export function AmbientLifeDialog({ worldId, worldName, onClose }: AmbientLifeDi
           enabled: value.enabled,
           minimumIdleMs: value.minimumIdleMs,
           minimumAmbientIntervalMs: value.minimumAmbientIntervalMs,
-          socialCooldownMs: value.socialCooldownMs,
           breakAfterMs: value.breakAfterMs,
           timeBucketMs: value.timeBucketMs,
           maximumPlansPerTick: value.maximumPlansPerTick,
