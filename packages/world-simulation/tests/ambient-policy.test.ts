@@ -66,7 +66,6 @@ function policy(overrides: Partial<AmbientPolicyInput> = {}): AmbientPolicyInput
   return {
     now,
     character: character(),
-    colleagues: [],
     slots,
     enabled: true,
     minimumIdleMs: 1,
@@ -131,21 +130,10 @@ describe('role-aware ambient policy', () => {
     expect(result?.targetSlotId).not.toBe('board-engineering')
   })
 
-  it('never simulates a role conversation without the real peer-collaboration runtime', () => {
-    const colleague = character({
-      characterId: 'character-secretary',
-      displayName: '秘书',
-      role: '行政秘书',
-      roleTags: ['administration', '秘书'],
-      preferredZoneTags: ['administration'],
-      currentZoneId: 'zone-administration',
-      currentSlotId: 'admin-schedule',
-      homeSlotId: 'admin-schedule',
-    })
+  it('only produces spatial routines and never fabricates a role conversation', () => {
     for (let offset = 0; offset < 30; offset += 1) {
       const candidate = new Date(Date.parse(now) + offset * 300_000).toISOString()
-      const result = decideAmbientBehavior(policy({ now: candidate, colleagues: [colleague] }))
-      expect(result?.targetCharacterId).toBeUndefined()
+      const result = decideAmbientBehavior(policy({ now: candidate }))
       expect(['stay-at-post', 'inspect-work-area', 'take-short-break', 'return-home']).toContain(result?.kind)
     }
   })
