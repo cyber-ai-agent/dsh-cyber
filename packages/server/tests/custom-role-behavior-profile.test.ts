@@ -82,6 +82,7 @@ describe('custom role behavior profile vertical flow', () => {
 
   it('rejects malformed semantic profiles without changing persisted appearance', async () => {
     const { server, origin, employeeId } = await setup()
+    const before = structuredClone(server.store.getEmployeeProfile(employeeId))
     const rejected = await request(origin, `/api/employees/${employeeId}/profile`, {
       method: 'PUT',
       body: JSON.stringify({
@@ -100,7 +101,7 @@ describe('custom role behavior profile vertical flow', () => {
 
     expect(rejected.response.status).toBe(422)
     expect(JSON.stringify(rejected.body)).toContain('invalid_character_behavior_profile')
-    expect(server.store.getEmployeeProfile(employeeId)).toBeUndefined()
+    expect(server.store.getEmployeeProfile(employeeId)).toEqual(before)
   })
 })
 
