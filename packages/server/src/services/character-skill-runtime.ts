@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
-import { open, readFile, rename } from 'node:fs/promises'
+import { mkdir, open, readFile, rename } from 'node:fs/promises'
 
 import type { CharacterSkillAction, CharacterSkillResult } from '@dsh-cyber/contracts/creative-platform'
 import type { SqliteStore } from '@dsh-cyber/persistence'
@@ -27,8 +27,14 @@ export class CharacterSkillRuntime {
 
   start(): void {
     if (this.#timer !== undefined) return
-    this.#timer = setInterval(() => void this.tick(), TICK_MS)
+    this.#timer = setInterval(() => void this.tick().catch(() => undefined), TICK_MS)
     this.#timer.unref()
+  }
+
+  close(): void {
+    if (this.#timer === undefined) return
+    clearInterval(this.#timer)
+    this.#timer = undefined
   }
 
   async prepare(worldId: string, characterId: string, prompt: string, now = new Date()): Promise<CharacterSkillResult> {
@@ -173,7 +179,6 @@ export class CharacterSkillRuntime {
 
   async #write(value: SkillActionFile): Promise<void> {
     const directory = dirname(this.#path)
-    const { mkdir } = await import('node:fs/promises')
     await mkdir(directory, { recursive: true, mode: 0o700 })
     const temporary = `${this.#path}.tmp-${randomUUID()}`
     const handle = await open(temporary, 'wx', 0o600)
