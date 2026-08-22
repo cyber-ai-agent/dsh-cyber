@@ -20,7 +20,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22.19.0
-      - run: pnpm install --lockfile-only
+      - run: pnpm install --lockfile-only --config.minimum-release-age=0
       - uses: actions/upload-artifact@v4
         with:
           name: embodied-pnpm-lock
