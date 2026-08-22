@@ -41,7 +41,8 @@ test('enables and persists bounded role-aware ambient life for one world', async
   await page.getByRole('button', { name: '世界活力设置' }).click()
   let dialog = page.getByRole('dialog', { name: '世界活力 · 我的世界' })
   await expect(dialog).toBeVisible()
-  await expect(dialog.getByText('不会随机全图游走；不会进入职责无关部门；不会占用其他角色的位置；不会把视觉日常活动伪装成真实 Agent 任务。')).toBeVisible()
+  await expect(dialog.getByText(/不会随机全图游走；不会进入职责无关部门；不会占用其他角色的位置/)).toBeVisible()
+  await expect(dialog.getByText(/角色之间的对话仍通过真实协作会话执行并沉淀记录/)).toBeVisible()
 
   const enabled = dialog.getByRole('checkbox', { name: /启用有岗位逻辑的日常行为/ })
   await expect(enabled).not.toBeChecked()
