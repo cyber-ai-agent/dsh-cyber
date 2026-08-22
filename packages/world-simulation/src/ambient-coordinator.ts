@@ -60,7 +60,6 @@ export function coordinateAmbientLife(input: AmbientCoordinationInput): AmbientC
     const decision = decideAmbientBehavior({
       now: input.now,
       character,
-      colleagues: [],
       slots: workingSlots,
       enabled: input.policy.enabled,
       ...(input.policy.minimumIdleMs === undefined ? {} : { minimumIdleMs: input.policy.minimumIdleMs }),
