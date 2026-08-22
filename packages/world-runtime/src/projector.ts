@@ -360,7 +360,7 @@ function moveEntityToSlot(
     entity.visualState = compactVisualState({
       ...entity.visualState,
       currentSlotId: slot.id,
-      physicalState: activity === 'idle' ? 'at-home' : context.physicalState,
+      physicalState: settledPhysicalState(activity, context.physicalState),
     })
     delete entity.visualState['reservedSlotId']
   } else {
@@ -553,6 +553,17 @@ function facingToward(from: WorldPoint, to: WorldPoint, fallback: WorldFacing): 
   if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return fallback
   if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? 'east' : 'west'
   return dy > 0 ? 'south' : 'north'
+}
+
+function settledPhysicalState(activity: WorldActivityKind, fallback: string): string {
+  if (activity === 'idle') return 'at-home'
+  if (activity === 'working') return 'working'
+  if (activity === 'thinking') return 'thinking'
+  if (activity === 'talking') return 'speaking'
+  if (activity === 'meeting') return 'meeting'
+  if (activity === 'blocked') return 'blocked'
+  if (activity === 'celebrating') return 'celebrating'
+  return fallback
 }
 
 function samePoint(left: WorldPoint, right: WorldPoint): boolean {
