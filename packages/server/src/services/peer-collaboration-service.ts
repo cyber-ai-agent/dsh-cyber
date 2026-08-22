@@ -49,7 +49,7 @@ export class PeerCollaborationService {
       summary: groundedSummary(result.replies),
       outcome: groundedOutcome(result.replies),
       sourceEventIds: events.map((event) => event.id),
-      sourceMessageIds: messages.map((message) => message.id),
+      sourceMessageIds: peerConversationMessageIds(messages),
       importance: peerImportance(result.rounds, result.participantIds.length),
       occurredAt: now,
       createdAt: now,
@@ -101,5 +101,7 @@ function concise(value: string, limit: number): string {
 }
 
 export function peerConversationMessageIds(messages: readonly WorkMessage[]): string[] {
-  return messages.map((message) => message.id)
+  return messages
+    .filter((message) => message.kind === 'assistant' || message.kind === 'system')
+    .map((message) => message.id)
 }
