@@ -14,7 +14,7 @@ Ambient life makes a world feel inhabited while preserving the truth of the unde
 6. A slot is selected only when it is available to that character. A world tick reserves a selected slot before evaluating the next character.
 7. Ambient life never fabricates a conversation. Role-to-role dialogue continues through the real bounded collaboration runtime, with its own model turns, permissions, transcript and shared episode.
 8. Ambient plans are persisted through the same `CharacterActionPlan` contract as other world behavior.
-9. Ambient activity must be visibly distinguishable from real tasks and agent conversations.
+9. Ambient activity must be visibly distinguishishable from real tasks and agent conversations.
 10. World-level settings can disable ambient life completely.
 
 ## Priority order
@@ -85,3 +85,9 @@ The server persists action plans and slot leases. After restart:
 - incomplete ambient plans may be cancelled safely;
 - characters without a valid destination return to a compatible home slot;
 - no new random destination is generated during recovery.
+
+## Rollout and verification
+
+Ambient life is disabled by default for every world. A user must enable it explicitly from the world view. Each world keeps an independent policy, and disabling the policy immediately stops new ambient plans while existing short-lived plans remain interruptible and expire safely.
+
+The merge gate covers deterministic policy selection, slot contention, persisted plans and leases, semantic start/completion events, scheduler recovery, world-level settings, and a Chromium flow that saves and reloads the policy. A release must not include temporary branch workflows or renderer-side behavior decisions.
