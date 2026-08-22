@@ -1,0 +1,159 @@
+name: Apply peer server and runtime wiring
+
+on:
+  push:
+    branches:
+      - feat/npc-collaboration-v1
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[peer-runtime-applied]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/npc-collaboration-v1
+          fetch-depth: 0
+      - name: Patch server and projector
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          server = Path('packages/server/src/server.ts')
+          text = server.read_text()
+          if "./services/peer-collaboration-service.js" not in text:
+              text = text.replace(
+                  "import { ModelInteractionService, TurnInteractionLoggingRuntime } from './services/model-interaction-service.js'\n",
+                  "import { ModelInteractionService, TurnInteractionLoggingRuntime } from './services/model-interaction-service.js'\nimport { PeerCollaborationService } from './services/peer-collaboration-service.js'\n",
+                  1,
+              )
+          if 'const peerCollaboration = new PeerCollaborationService' not in text:
+              marker = "  const packageManager = new PackageManager({"
+              block = """  const peerCollaboration = new PeerCollaborationService({
+            store,
+            simulationStore: worldSimulation,
+            orchestrator,
+          })
+          """
+              text = text.replace(marker, block + marker, 1)
+          text = text.replace(
+              "registerConversationRoutes(router, { store, orchestrator, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings })",
+              "registerConversationRoutes(router, { store, orchestrator, peerCollaboration, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings })",
+              1,
+          )
+          server.write_text(text)
+
+          projector = Path('packages/world-runtime/src/projector.ts')
+          text = projector.read_text()
+          text = text.replace(
+              "        activeMeetingId: event.correlationId ?? event.id,\n",
+              "        activeMeetingId: event.correlationId ?? event.id,\n        peerConversation: event.payload['peerConversation'] === true,\n",
+              1,
+          )
+          text = text.replace(
+              "      delete entity.visualState['activeMeetingId']\n",
+              "      delete entity.visualState['activeMeetingId']\n      delete entity.visualState['peerConversation']\n",
+              1,
+          )
+          marker = "  if (employeeId !== undefined) {\n    const entity = entities.get(employeeId)\n    const employee = employeeById.get(employeeId)"
+          if 'applyActiveMeetingParticipantEvent(' not in text:
+              insertion = """  if (employeeId !== undefined && applyActiveMeetingParticipantEvent(event, entities, employeeId, cues, now)) {
+            return
+          }
+
+          """
+              text = text.replace(marker, insertion + marker, 1)
+
+          helper_marker = "function moveEntityToSlot("
+          if 'function applyActiveMeetingParticipantEvent(' not in text:
+              helper = r'''function applyActiveMeetingParticipantEvent(
+            event: DomainEvent,
+            entities: ReadonlyMap<string, WorldRuntimeEntityState>,
+            speakerId: string,
+            cues: WorldCue[],
+            now: string,
+          ): boolean {
+            const speaker = entities.get(speakerId)
+            const meetingId = speaker === undefined ? undefined : stringVisual(speaker.visualState, 'activeMeetingId')
+            if (speaker === undefined || meetingId === undefined) return false
+            const messageKind = textValue(event.payload, 'messageKind')
+            const relevant = event.type === 'task.started'
+              || event.type === 'turn.started'
+              || event.type === 'tool.started'
+              || event.type === 'tool.completed'
+              || event.type === 'turn.completed'
+              || event.type === 'task.completed'
+              || event.type === 'turn.failed'
+              || event.type === 'task.blocked'
+              || (event.type === 'message.appended' && messageKind === 'assistant')
+            if (!relevant) return false
+
+            for (const entity of entities.values()) {
+              if (stringVisual(entity.visualState, 'activeMeetingId') !== meetingId) continue
+              const isSpeaker = entity.id === speakerId
+              const next = peerMeetingActivity(event.type, isSpeaker, messageKind)
+              entity.activity = next.activity
+              entity.activityLabel = isSpeaker ? next.label : `正在倾听${speaker.displayName}`
+              entity.updatedAt = event.createdAt
+              entity.visualState = compactVisualState({
+                ...entity.visualState,
+                physicalState: isSpeaker ? next.physicalState : 'listening',
+                activeSessionId: event.sessionId,
+                lastEventType: event.type,
+                projectedAt: now,
+              })
+              cues.push(cue(event, 'entity.activity', {
+                entityId: entity.id,
+                activity: entity.activity,
+                label: entity.activityLabel,
+              }, entity.id))
+            }
+
+            if (event.type === 'message.appended' && messageKind === 'assistant') {
+              cues.push(cue(event, 'entity.speech', {
+                entityId: speaker.id,
+                messageId: textValue(event.payload, 'messageId') ?? '',
+                excerpt: textValue(event.payload, 'excerpt') ?? '',
+                sessionId: event.sessionId ?? '',
+              }, speaker.id))
+            }
+            return true
+          }
+
+          function peerMeetingActivity(
+            eventType: DomainEvent['type'],
+            isSpeaker: boolean,
+            messageKind?: string,
+          ): { activity: WorldActivityKind; physicalState: string; label: string } {
+            if (!isSpeaker) return { activity: 'meeting', physicalState: 'listening', label: '正在倾听' }
+            if (eventType === 'turn.started') return { activity: 'thinking', physicalState: 'thinking', label: '正在思考如何回应' }
+            if (eventType === 'tool.started' || eventType === 'tool.completed' || eventType === 'task.started') {
+              return { activity: 'working', physicalState: 'using-object', label: '正在核对资料与工具结果' }
+            }
+            if (eventType === 'message.appended' && messageKind === 'assistant') {
+              return { activity: 'talking', physicalState: 'speaking', label: '正在发言' }
+            }
+            if (eventType === 'turn.failed' || eventType === 'task.blocked') {
+              return { activity: 'blocked', physicalState: 'blocked', label: '发言受阻，等待处理' }
+            }
+            return { activity: 'meeting', physicalState: 'listening', label: '本轮发言结束，继续倾听' }
+          }
+
+          '''
+              text = text.replace(helper_marker, helper + helper_marker, 1)
+          projector.write_text(text)
+          PY
+      - name: Commit patch
+        run: |
+          if git diff --quiet; then
+            echo "Peer server/runtime already patched"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/server/src/server.ts packages/world-runtime/src/projector.ts
+          git commit -m "feat: wire bounded NPC collaboration into the embodied runtime [peer-runtime-applied]"
+          git push origin HEAD:feat/npc-collaboration-v1
