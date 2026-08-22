@@ -213,7 +213,7 @@ describe('world projector', () => {
     expect(replay.snapshot.sequence).toBe(1)
   })
 
-  it('keeps semantic and visual movement state separate until a real task completes', () => {
+  it('keeps task intent separate from visual travel and works in place when already at the correct slot', () => {
     const started = projectWorldRuntime({
       workspaceId: 'workspace-1',
       world,
@@ -221,10 +221,18 @@ describe('world projector', () => {
       manifest: cyberCompanyTheme,
       events: [event(1, 'task.started', { employeeId: 'employee-architect' })],
     })
-    const moving = started.snapshot.entities.find((entity) => entity.id === 'employee-architect')!
-    expect(moving.targetPosition).toBeDefined()
-    expect(moving.position).not.toEqual(moving.targetPosition)
-    expect(started.cues).toContainEqual(expect.objectContaining({ kind: 'entity.route', entityId: moving.id }))
+    const active = started.snapshot.entities.find((entity) => entity.id === 'employee-architect')!
+    expect(active.activity).toBe('working')
+    expect(active.visualState['activePlanId']).toBeDefined()
+
+    if (active.targetPosition !== undefined) {
+      expect(active.position).not.toEqual(active.targetPosition)
+      expect(started.cues).toContainEqual(expect.objectContaining({ kind: 'entity.route', entityId: active.id }))
+      expect(active.visualState['reservedSlotId']).toBeDefined()
+    } else {
+      expect(active.visualState['currentSlotId']).toBeDefined()
+      expect(active.visualState['physicalState']).toBe('working')
+    }
 
     const completed = projectWorldRuntime({
       workspaceId: 'workspace-1',
@@ -235,9 +243,14 @@ describe('world projector', () => {
       events: [event(2, 'task.completed', { employeeId: 'employee-architect' })],
     })
     const settled = completed.snapshot.entities.find((entity) => entity.id === 'employee-architect')!
-    expect(settled.targetPosition).toBeUndefined()
-    expect(settled.anchorId).toBeDefined()
+    const homeSlotId = settled.visualState['homeSlotId']
+    expect(typeof homeSlotId).toBe('string')
     expect(settled.activity).toBe('idle')
+    if (settled.targetPosition === undefined) {
+      expect(settled.visualState['currentSlotId']).toBe(homeSlotId)
+    } else {
+      expect(settled.visualState['reservedSlotId']).toBe(homeSlotId)
+    }
   })
 
   it('keeps participant turns at the meeting table until the meeting finishes', () => {
