@@ -1,0 +1,51 @@
+name: Require persisted ambient settings
+
+on:
+  push:
+    branches:
+      - feat/role-aware-ambient-life
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: ${{ !contains(github.event.head_commit.message, '[ambient-settings-required]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/role-aware-ambient-life
+          fetch-depth: 0
+      - name: Normalize settings interface
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          path = Path('packages/server/src/services/ambient-life-settings-service.ts')
+          text = path.read_text()
+          pattern = re.compile(
+              r"export interface WorldAmbientLifeSettings(?: extends AmbientWorldPolicy)? \{.*?\n\}\n",
+              re.S,
+          )
+          replacement = """export interface WorldAmbientLifeSettings extends Required<AmbientWorldPolicy> {
+            worldId: string
+            updatedAt: string
+          }
+          """
+          text, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit('Unable to normalize WorldAmbientLifeSettings')
+          path.write_text(text)
+          PY
+      - name: Commit settings type
+        run: |
+          if git diff --quiet; then
+            echo "Ambient settings already required"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/server/src/services/ambient-life-settings-service.ts
+          git commit -m "fix: require persisted ambient policy fields [ambient-settings-required]"
+          git push origin HEAD:feat/role-aware-ambient-life
