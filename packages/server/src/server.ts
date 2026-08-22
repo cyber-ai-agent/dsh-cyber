@@ -21,6 +21,7 @@ import { dispatchHttpRequest } from './http/context.js'
 import { writeError } from './http/errors.js'
 import { Router } from './http/router.js'
 import { isLoopbackHost } from './http/security.js'
+import { registerAmbientLifeRoutes } from './routes/ambient-life-routes.js'
 import { registerAssetRoutes } from './routes/asset-routes.js'
 import { registerCatalogRoutes } from './routes/catalog-routes.js'
 import { registerConversationRoutes } from './routes/conversation-routes.js'
@@ -34,6 +35,10 @@ import { registerWorkspaceRoutes } from './routes/workspace-routes.js'
 import { registerWorldRuntimeRoutes } from './routes/world-runtime-routes.js'
 import { registerWorldRoutes } from './routes/world-routes.js'
 import { registerWorldSettingsRoutes } from './routes/world-settings-routes.js'
+import { AmbientLifeExecutor } from './services/ambient-life-executor.js'
+import { AmbientLifeRuntime } from './services/ambient-life-runtime.js'
+import { AmbientLifeScheduler } from './services/ambient-life-scheduler.js'
+import { AmbientLifeSettingsService } from './services/ambient-life-settings-service.js'
 import { AssetService } from './services/asset-service.js'
 import { CharacterProfileRuntime } from './services/character-profile-runtime.js'
 import { harnessModelRoute } from './services/harness-model-route.js'
@@ -41,8 +46,11 @@ import { ModelCatalogService } from './services/model-catalog-service.js'
 import { ModelCredentialService } from './services/model-credential-service.js'
 import { ModelInteractionService, TurnInteractionLoggingRuntime } from './services/model-interaction-service.js'
 import { PeerCollaborationService } from './services/peer-collaboration-service.js'
+import { RoleAwareAmbientLifeService } from './services/role-aware-ambient-life-service.js'
 import { RuntimeUpdateService } from './services/runtime-update-service.js'
 import { WorldAccessService } from './services/world-access-service.js'
+import { WorldAmbientSlotResolver } from './services/world-ambient-slot-resolver.js'
+import { WorldAmbientStateProvider } from './services/world-ambient-state-provider.js'
 import { WorldFileService } from './services/world-file-service.js'
 import { WorldRootService } from './services/world-root-service.js'
 import { WorldSettingsService } from './services/world-settings-service.js'
@@ -103,6 +111,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const worldRoots = new WorldRootService(stateRoot)
   await Promise.all(store.listWorkspaces().flatMap((workspace) => store.listWorlds(workspace.id, true).map((world) => worldRoots.ensure(world.id))))
   const worldSettings = new WorldSettingsService(worldRoots)
+  const ambientLifeSettings = new AmbientLifeSettingsService(store)
   const worldAccess = new WorldAccessService(worldRoots)
   const credentials = await ModelCredentialService.open(stateRoot)
   const modelCatalog = new ModelCatalogService(credentials)
@@ -127,10 +136,10 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     resolveWorldRoot: async (worldId) => (await worldRoots.ensure(worldId)).filesPath,
   })
   const peerCollaboration = new PeerCollaborationService({
-  store,
-  simulationStore: worldSimulation,
-  orchestrator,
-})
+    store,
+    simulationStore: worldSimulation,
+    orchestrator,
+  })
   const packageManager = new PackageManager({
     store,
     runtime: options.packageRuntime ?? new LocalPackageRuntime(join(stateRoot, 'packages')),
@@ -144,6 +153,25 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     simulationStore: worldSimulation,
     publish: (event) => worldStreamHub.publish(event),
   })
+  const ambientSlotResolver = new WorldAmbientSlotResolver({ store })
+  const ambientStateProvider = new WorldAmbientStateProvider({
+    store,
+    simulationStore: worldSimulation,
+    resolveSlots: (worldId) => ambientSlotResolver.resolve(worldId),
+  })
+  const ambientLifeService = new RoleAwareAmbientLifeService({
+    stateProvider: ambientStateProvider,
+    persistence: worldSimulation,
+  })
+  const ambientLifeRuntime = new AmbientLifeRuntime({
+    service: ambientLifeService,
+    executor: new AmbientLifeExecutor({ store, simulationStore: worldSimulation }),
+    publish: (worldId) => worldRuntime.publishCurrent(worldId),
+  })
+  const ambientLifeScheduler = new AmbientLifeScheduler({
+    settings: ambientLifeSettings,
+    service: ambientLifeRuntime,
+  })
   const runtimeUpdates = new RuntimeUpdateService(store, stateRoot, workspaceRoot)
   const assets = new AssetService(store, stateRoot)
   const worldFiles = new WorldFileService(worldRoots)
@@ -154,6 +182,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerCatalogRoutes(router, { store, packageCatalog })
   registerWorkspaceRoutes(router, { store })
   registerModelRoutes(router, { store, credentials, modelCatalog, interactions })
+  registerAmbientLifeRoutes(router, { store, settings: ambientLifeSettings, access: worldAccess })
   registerAssetRoutes(router, { store, assets, access: worldAccess })
   registerWorldRoutes(router, { store, worldAccess })
   registerWorldSettingsRoutes(router, { store, settings: worldSettings, access: worldAccess })
@@ -188,12 +217,14 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       const address = httpServer.address()
       if (address === null || typeof address === 'string') throw new Error('Server did not expose a TCP address')
       startedAddress = { host, port: address.port, origin: `http://${host}:${address.port}` }
+      ambientLifeScheduler.start()
       return startedAddress
     },
     address() { return startedAddress },
     async close() {
       if (closed) return
       closed = true
+      await ambientLifeScheduler.close()
       unsubscribe()
       runtimeStreamHub.close()
       worldStreamHub.close()

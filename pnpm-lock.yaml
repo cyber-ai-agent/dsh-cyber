@@ -159,6 +159,9 @@ importers:
       '@dsh-cyber/world-runtime':
         specifier: workspace:*
         version: link:../world-runtime
+      '@dsh-cyber/world-simulation':
+        specifier: workspace:*
+        version: link:../world-simulation
 
   packages/web:
     dependencies:
