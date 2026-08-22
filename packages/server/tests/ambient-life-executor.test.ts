@@ -50,11 +50,11 @@ async function setup() {
   simulationStore.savePresence({
     worldId: world.id,
     characterId: character.id,
-    sceneId: 'company-main',
-    zoneId: 'engineering',
-    homeSlotId: 'work-engineering-slot-1',
-    currentSlotId: 'work-engineering-slot-1',
-    reservedSlotId: 'work-engineering-slot-2',
+    sceneId: 'headquarters',
+    zoneId: 'zone-engineering',
+    homeSlotId: 'work-engineering:slot-1',
+    currentSlotId: 'work-engineering:slot-1',
+    reservedSlotId: 'work-engineering:slot-2',
     facing: 'south',
     physicalState: 'navigating',
     status: 'available',
@@ -74,7 +74,7 @@ describe('AmbientLifeExecutor', () => {
       reason: '岗位巡检',
       priority: 16,
       interruptible: true,
-      targetSlotId: 'work-engineering-slot-2',
+      targetSlotId: 'work-engineering:slot-2',
       decisionKey: 'decision-1',
     }
     const plan = createAmbientActionPlan(decision, {
@@ -121,7 +121,7 @@ describe('AmbientLifeExecutor', () => {
       reason: '岗位巡检',
       priority: 16,
       interruptible: true,
-      targetSlotId: 'work-engineering-slot-2',
+      targetSlotId: 'work-engineering:slot-2',
       decisionKey: 'decision-2',
     }
     const queued = createAmbientActionPlan(decision, {
@@ -159,5 +159,47 @@ describe('AmbientLifeExecutor', () => {
     expect(presence?.reservedSlotId).toBeUndefined()
     const event = store.listWorldDomainEvents(world.id).find((item) => item.id === eventIds[0])
     expect(event?.payload).toMatchObject({ action: 'ambient-complete', planId: running.id })
+  })
+
+  it('cleans an expired slot lease even when its plan is not yet due', async () => {
+    const { store, world, character, simulationStore } = await setup()
+    const decision: AmbientDecision = {
+      characterId: character.id,
+      kind: 'stay-at-post',
+      source: 'role-routine',
+      reason: '保持待命',
+      priority: 8,
+      interruptible: true,
+      targetSlotId: 'work-engineering:slot-1',
+      decisionKey: 'decision-stale-lease',
+    }
+    const plan = createAmbientActionPlan(decision, {
+      worldId: world.id,
+      now: '2026-08-22T10:00:00.000Z',
+      idFactory: (scope) => scope.replaceAll(':', '-'),
+    })
+    simulationStore.saveActionPlan(plan)
+    simulationStore.saveReservations([{
+      id: 'stale-reservation',
+      worldId: world.id,
+      slotId: decision.targetSlotId,
+      characterId: character.id,
+      planId: plan.id,
+      status: 'reserved',
+      priority: 8,
+      reservedAt: '2026-08-22T10:00:00.000Z',
+      expiresAt: '2026-08-22T10:00:10.000Z',
+      updatedAt: '2026-08-22T10:00:00.000Z',
+    }])
+    const executor = new AmbientLifeExecutor({
+      store,
+      simulationStore,
+      maximumDurationMs: 300_000,
+      clock: () => '2026-08-22T10:00:20.000Z',
+    })
+
+    expect(executor.completeDue(world.id)).toEqual([])
+    expect(simulationStore.listReservations(world.id)).toEqual([])
+    expect(simulationStore.getActionPlan(plan.id)).toMatchObject({ status: 'queued' })
   })
 })
