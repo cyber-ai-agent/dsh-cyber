@@ -14,7 +14,6 @@ export interface UpdateWorldAmbientLifeSettings {
   enabled?: boolean
   minimumIdleMs?: number
   minimumAmbientIntervalMs?: number
-  socialCooldownMs?: number
   breakAfterMs?: number
   timeBucketMs?: number
   maximumPlansPerTick?: number
@@ -24,7 +23,6 @@ const DEFAULT_SETTINGS: Omit<WorldAmbientLifeSettings, 'worldId' | 'updatedAt'> 
   enabled: false,
   minimumIdleMs: 45_000,
   minimumAmbientIntervalMs: 180_000,
-  socialCooldownMs: 900_000,
   breakAfterMs: 1_800_000,
   timeBucketMs: 300_000,
   maximumPlansPerTick: 3,
@@ -60,7 +58,6 @@ export class AmbientLifeSettingsService {
       enabled: input.enabled ?? previous.enabled,
       minimumIdleMs: input.minimumIdleMs ?? previous.minimumIdleMs,
       minimumAmbientIntervalMs: input.minimumAmbientIntervalMs ?? previous.minimumAmbientIntervalMs,
-      socialCooldownMs: input.socialCooldownMs ?? previous.socialCooldownMs,
       breakAfterMs: input.breakAfterMs ?? previous.breakAfterMs,
       timeBucketMs: input.timeBucketMs ?? previous.timeBucketMs,
       maximumPlansPerTick: input.maximumPlansPerTick ?? previous.maximumPlansPerTick,
@@ -71,14 +68,12 @@ export class AmbientLifeSettingsService {
       .prepare(
         `INSERT INTO world_ambient_life_settings (
            world_id, enabled, minimum_idle_ms, minimum_ambient_interval_ms,
-           social_cooldown_ms, break_after_ms, time_bucket_ms,
-           maximum_plans_per_tick, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           break_after_ms, time_bucket_ms, maximum_plans_per_tick, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(world_id) DO UPDATE SET
            enabled = excluded.enabled,
            minimum_idle_ms = excluded.minimum_idle_ms,
            minimum_ambient_interval_ms = excluded.minimum_ambient_interval_ms,
-           social_cooldown_ms = excluded.social_cooldown_ms,
            break_after_ms = excluded.break_after_ms,
            time_bucket_ms = excluded.time_bucket_ms,
            maximum_plans_per_tick = excluded.maximum_plans_per_tick,
@@ -89,7 +84,6 @@ export class AmbientLifeSettingsService {
         next.enabled ? 1 : 0,
         next.minimumIdleMs,
         next.minimumAmbientIntervalMs,
-        next.socialCooldownMs,
         next.breakAfterMs,
         next.timeBucketMs,
         next.maximumPlansPerTick,
@@ -120,7 +114,6 @@ export class AmbientLifeSettingsService {
         enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
         minimum_idle_ms INTEGER NOT NULL,
         minimum_ambient_interval_ms INTEGER NOT NULL,
-        social_cooldown_ms INTEGER NOT NULL,
         break_after_ms INTEGER NOT NULL,
         time_bucket_ms INTEGER NOT NULL,
         maximum_plans_per_tick INTEGER NOT NULL,
@@ -133,7 +126,6 @@ export class AmbientLifeSettingsService {
 function validateSettings(value: WorldAmbientLifeSettings): void {
   boundedInteger('最短空闲时间', value.minimumIdleMs, 5_000, 3_600_000)
   boundedInteger('日常行为间隔', value.minimumAmbientIntervalMs, 30_000, 86_400_000)
-  boundedInteger('角色社交冷却', value.socialCooldownMs, 60_000, 604_800_000)
   boundedInteger('休息触发时间', value.breakAfterMs, 300_000, 86_400_000)
   boundedInteger('确定性时间桶', value.timeBucketMs, 60_000, 3_600_000)
   boundedInteger('单次最大行为数', value.maximumPlansPerTick, 1, 16)
@@ -151,7 +143,6 @@ function mapSettings(row: Record<string, unknown>): WorldAmbientLifeSettings {
     enabled: numberColumn(row, 'enabled') === 1,
     minimumIdleMs: numberColumn(row, 'minimum_idle_ms'),
     minimumAmbientIntervalMs: numberColumn(row, 'minimum_ambient_interval_ms'),
-    socialCooldownMs: numberColumn(row, 'social_cooldown_ms'),
     breakAfterMs: numberColumn(row, 'break_after_ms'),
     timeBucketMs: numberColumn(row, 'time_bucket_ms'),
     maximumPlansPerTick: numberColumn(row, 'maximum_plans_per_tick'),
