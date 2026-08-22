@@ -1,4 +1,7 @@
 import type { EmployeeBlueprint } from '@dsh-cyber/contracts'
+import type { EmbodiedEmployeeBlueprint } from '@dsh-cyber/contracts/creative-platform'
+
+import { parseEmbodimentProfile } from './embodiment-profile.js'
 
 const BLUEPRINT_KEYS = new Set([
   'schemaVersion',
@@ -11,6 +14,7 @@ const BLUEPRINT_KEYS = new Set([
   'persona',
   'requestedSkills',
   'requestedCapabilities',
+  'embodiment',
   'createdAt',
 ])
 const ID = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/
@@ -24,7 +28,7 @@ export interface EmployeeBlueprintParseContext {
 export function parseEmployeeBlueprintManifest(
   value: unknown,
   context: EmployeeBlueprintParseContext,
-): EmployeeBlueprint {
+): EmbodiedEmployeeBlueprint {
   const input = object(value, 'employee blueprint')
   for (const key of Object.keys(input)) {
     if (!BLUEPRINT_KEYS.has(key)) throw new Error(`Unknown employee blueprint field: ${key}`)
@@ -53,7 +57,7 @@ export function parseEmployeeBlueprintManifest(
   if (!Number.isFinite(timestamp) || new Date(timestamp).toISOString() !== createdAt) {
     throw new Error('Employee blueprint createdAt must be a canonical ISO 8601 timestamp')
   }
-  return {
+  const blueprint: EmbodiedEmployeeBlueprint = {
     schemaVersion: 1,
     id,
     version: input.version as number,
@@ -66,6 +70,12 @@ export function parseEmployeeBlueprintManifest(
     requestedCapabilities,
     createdAt,
   }
+  if (input.embodiment !== undefined) blueprint.embodiment = parseEmbodimentProfile(input.embodiment)
+  return blueprint
+}
+
+export function asEmployeeBlueprint(value: EmbodiedEmployeeBlueprint): EmployeeBlueprint {
+  return value
 }
 
 function object(value: unknown, label: string): Record<string, unknown> {
