@@ -139,7 +139,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
       maxRounds,
       runtimePrompt: await worldSettings.composeGroupRuntimePrompt(world.id, transformedPurpose),
       ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
-      ...(optionalString(body.title) === undefined ? {} : { title: optionalString(body.title) }),
+      ...(peerTitle === undefined ? {} : { title: peerTitle }),
     })
     worldRuntime.publishCurrent(world.id)
     writeJson(response, 201, result)
