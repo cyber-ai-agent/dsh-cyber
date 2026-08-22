@@ -27,16 +27,18 @@ jobs:
           old = "    sceneId: scene.id,\n    zones,"
           new = "    sceneId: scene.id,\n    navigation: structuredClone(scene.navigation),\n    zones,"
           if old in text:
-              text = text.replace(old, new, 1)
-              semantics.write_text(text)
+              semantics.write_text(text.replace(old, new, 1))
 
           projector = Path('packages/world-runtime/src/projector.ts')
           text = projector.read_text()
-          text = text.replace(
-              "  JsonObject,\n",
-              "  JsonObject,\n  JsonValue,\n",
-              1,
-          )
+
+          # Keep exactly one JsonValue type import.
+          while "  JsonValue,\n  JsonValue,\n" in text:
+              text = text.replace("  JsonValue,\n  JsonValue,\n", "  JsonValue,\n", 1)
+          import_block = text.split("} from '@dsh-cyber/contracts'", 1)[0]
+          if "  JsonValue,\n" not in import_block:
+              text = text.replace("  JsonObject,\n", "  JsonObject,\n  JsonValue,\n", 1)
+
           text = text.replace(
               "const sceneNavigation = semanticsNavigation(semantics)",
               "const sceneNavigation = semantics.navigation ?? semanticsNavigation(semantics)",
@@ -47,6 +49,14 @@ jobs:
               "    planId?: string | undefined\n    sessionId?: string | undefined\n",
               1,
           )
+
+          # A transient thinking/speaking directive must not erase the active task plan.
+          text = text.replace(
+              "            activeSessionId: directive.sessionId,\n            activePlanId: directive.plan?.id,\n",
+              "            ...(directive.sessionId === undefined ? {} : { activeSessionId: directive.sessionId }),\n            ...(directive.plan === undefined ? {} : { activePlanId: directive.plan.id }),\n",
+              1,
+          )
+
           old_compact = """function compactVisualState(value: Record<string, unknown>): JsonObject {
             const result: JsonObject = {}
             for (const [key, field] of Object.entries(value)) {
