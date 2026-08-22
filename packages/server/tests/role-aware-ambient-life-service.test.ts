@@ -44,6 +44,8 @@ function character(overrides: Partial<AmbientCharacterState> = {}): AmbientChara
     displayName: '开发工程师',
     role: '开发工程师',
     status: 'available',
+    sceneId: 'headquarters',
+    facing: 'east',
     roleTags: ['engineering', 'coding'],
     preferredZoneTags: ['engineering'],
     currentZoneId: 'engineering',
@@ -93,6 +95,8 @@ describe('RoleAwareAmbientLifeService', () => {
     expect(persistence.presences[0]).toMatchObject({
       worldId: 'world-1',
       characterId: 'engineer',
+      sceneId: 'headquarters',
+      facing: 'east',
       activePlanId: persistence.plans[0]?.id,
     })
   })
