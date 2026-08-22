@@ -17,6 +17,8 @@ function character(overrides: Partial<AmbientCharacterState> = {}): AmbientChara
     displayName: '开发工程师',
     role: '开发工程师',
     status: 'available',
+    sceneId: 'headquarters',
+    facing: 'south',
     roleTags: ['engineering', 'coding'],
     preferredZoneTags: ['engineering'],
     currentZoneId: 'zone-engineering',
