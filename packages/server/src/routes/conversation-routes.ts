@@ -9,6 +9,7 @@ import { HttpError } from '../http/errors.js'
 import type { Router } from '../http/router.js'
 import {
   nonNegativeInteger,
+  optionalPositiveInteger,
   optionalString,
   optionalStringArray,
   readJson,
@@ -18,6 +19,7 @@ import {
 } from '../http/request.js'
 import { writeJson } from '../http/response.js'
 import { applyInstalledPromptTransforms } from '../installed-package-runtime.js'
+import type { PeerCollaborationService } from '../services/peer-collaboration-service.js'
 import type { RuntimeStreamHub } from '../streams/runtime-stream-hub.js'
 import type { WorldRuntimeService } from '../world-runtime-service.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
@@ -28,6 +30,7 @@ import { ServiceError } from '../services/service-error.js'
 export interface ConversationRoutesDependencies {
   store: SqliteStore
   orchestrator: ConversationOrchestrator
+  peerCollaboration: PeerCollaborationService
   runtimeStreamHub: RuntimeStreamHub
   worldRuntime: WorldRuntimeService
   worldAccess: WorldAccessService
@@ -36,7 +39,16 @@ export interface ConversationRoutesDependencies {
 }
 
 export function registerConversationRoutes(router: Router, dependencies: ConversationRoutesDependencies): void {
-  const { store, orchestrator, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings } = dependencies
+  const {
+    store,
+    orchestrator,
+    peerCollaboration,
+    runtimeStreamHub,
+    worldRuntime,
+    worldAccess,
+    worldFiles,
+    worldSettings,
+  } = dependencies
 
   router.post(/^\/api\/worlds\/([^/]+)\/chat$/, async ({ request, response, params }) => {
     const world = store.getWorld(params[0]!)
@@ -93,6 +105,44 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     }
     worldRuntime.publishCurrent(world.id)
     writeJson(response, 200, result)
+  })
+
+  router.post(/^\/api\/worlds\/([^/]+)\/peer-conversations$/, async ({ request, response, params }) => {
+    const world = store.getWorld(params[0]!)
+    if (world === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
+    await worldAccess.assertUnlocked(world.id, request)
+    const body = await readJson(request)
+    const initiatorId = requiredString(body, 'initiatorId')
+    const participantIds = optionalStringArray(body.participantIds)
+    const purpose = requiredString(body, 'purpose')
+    if (purpose.length > 2_000) {
+      throw new HttpError(422, 'purpose_too_long', '角色协作目标不能超过 2000 个字符')
+    }
+    const maxRounds = optionalPositiveInteger(body.maxRounds) ?? 1
+    if (maxRounds > 3) {
+      throw new HttpError(422, 'invalid_rounds', '角色协作最多进行 3 轮')
+    }
+    const settings = await worldSettings.get(world.id)
+    const requestedReasoning = body.reasoningEffort === undefined
+      ? settings.model.reasoningEffort
+      : requiredEnum<ReasoningEffort>(body, 'reasoningEffort', ['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+    const transformedPurpose = await applyInstalledPromptTransforms(
+      store.listInstalledPackages(world.workspaceId),
+      purpose,
+    )
+    const result = await peerCollaboration.run({
+      workspaceId: world.workspaceId,
+      worldId: world.id,
+      initiatorId,
+      participantIds,
+      purpose,
+      maxRounds,
+      runtimePrompt: await worldSettings.composeGroupRuntimePrompt(world.id, transformedPurpose),
+      ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
+      ...(optionalString(body.title) === undefined ? {} : { title: optionalString(body.title) }),
+    })
+    worldRuntime.publishCurrent(world.id)
+    writeJson(response, 201, result)
   })
 
   router.get(/^\/api\/worlds\/([^/]+)\/live$/, async ({ request, response, params }) => {
