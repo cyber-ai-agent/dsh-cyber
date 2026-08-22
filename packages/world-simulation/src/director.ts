@@ -44,7 +44,7 @@ export function directWorldEvent(input: DirectWorldEventInput): WorldCharacterDi
       source: 'task',
       priority: CHARACTER_ACTION_PRIORITIES.task,
       interruptible: false,
-      targetSlot,
+      ...(targetSlot === undefined ? {} : { targetSlot }),
       activityStep: 'working',
     })
   }
@@ -72,7 +72,7 @@ export function directWorldEvent(input: DirectWorldEventInput): WorldCharacterDi
       source: 'task',
       priority: CHARACTER_ACTION_PRIORITIES.task,
       interruptible: false,
-      targetSlot,
+      ...(targetSlot === undefined ? {} : { targetSlot }),
       activityStep: 'working',
     })
   }
@@ -100,7 +100,7 @@ export function directWorldEvent(input: DirectWorldEventInput): WorldCharacterDi
       source: 'system',
       priority: CHARACTER_ACTION_PRIORITIES.roleRoutine,
       interruptible: true,
-      targetSlot: homeSlot,
+      ...(homeSlot === undefined ? {} : { targetSlot: homeSlot }),
       activityStep: 'idle',
     })
   }
