@@ -17,6 +17,7 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
-    "@dsh-cyber/contracts": "workspace:*"
+    "@dsh-cyber/contracts": "workspace:*",
+    "@dsh-cyber/world-simulation": "workspace:*"
   }
 }
