@@ -56,14 +56,7 @@ export function createAmbientActionPlan(
     source: decision.source,
   })
 
-  if (decision.kind === 'consult-colleague' && decision.targetCharacterId !== undefined) {
-    append('face-entity', { characterId: decision.targetCharacterId })
-    append('wait', {
-      purpose: 'peer-consultation-ready',
-      targetCharacterId: decision.targetCharacterId,
-      maximumMs: 30_000,
-    })
-  } else if (decision.kind === 'inspect-work-area') {
+  if (decision.kind === 'inspect-work-area') {
     append('play-activity', { activity: 'working', label: '岗位巡检' })
     append('wait', { purpose: 'role-routine', maximumMs: 20_000 })
   } else if (decision.kind === 'take-short-break') {
