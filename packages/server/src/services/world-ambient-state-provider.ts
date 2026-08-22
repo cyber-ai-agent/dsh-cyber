@@ -80,11 +80,15 @@ export class WorldAmbientStateProvider implements AmbientLifeStateProvider {
     ])
     const reservedBy = new Map(reservations.map((reservation) => [reservation.slotId, reservation.characterId]))
     const occupiedBy = new Map(presences.map((presence) => [presence.currentSlotId, presence.characterId]))
-    return slots.map((slot) => ({
-      ...slot,
-      ...(occupiedBy.get(slot.id) === undefined ? {} : { occupiedBy: occupiedBy.get(slot.id) }),
-      ...(reservedBy.get(slot.id) === undefined ? {} : { reservedBy: reservedBy.get(slot.id) }),
-    }))
+    return slots.map((slot) => {
+      const occupiedCharacterId = occupiedBy.get(slot.id)
+      const reservedCharacterId = reservedBy.get(slot.id)
+      return {
+        ...slot,
+        ...(occupiedCharacterId === undefined ? {} : { occupiedBy: occupiedCharacterId }),
+        ...(reservedCharacterId === undefined ? {} : { reservedBy: reservedCharacterId }),
+      }
+    })
   }
 }
 
