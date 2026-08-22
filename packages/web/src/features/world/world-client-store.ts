@@ -88,6 +88,11 @@ export function useWorldClient({ demoMode, world, employees }: UseWorldClientInp
         if (envelope?.kind !== 'world-cue') return
         setState((current) => reduceWorldStreamState(current, envelope))
       }
+      const onRuntime = (event: Event) => {
+        const envelope = parseEnvelope(event)
+        if (envelope?.kind !== 'runtime') return
+        setState((current) => reduceWorldStreamState(current, envelope))
+      }
       const onRecovery = () => {
         setState((current) => ({ ...current, cues: [], connected: false }))
         void api<WorldRuntimeSnapshot>(`/api/worlds/${encodeURIComponent(world.id)}/runtime-snapshot`)
@@ -110,6 +115,7 @@ export function useWorldClient({ demoMode, world, employees }: UseWorldClientInp
       }
       stream.addEventListener('world-state', onState)
       stream.addEventListener('world-cue', onCue)
+      stream.addEventListener('runtime', onRuntime)
       stream.addEventListener('recovery-required', onRecovery)
       stream.addEventListener('ready', onReady)
       stream.onerror = () => { if (!cancelled) setState((current) => ({ ...current, connected: false })) }
@@ -182,7 +188,48 @@ export function reduceWorldStreamState(
     if (current.cues.some((item) => item.id === cue.id)) return { ...current, connected: true }
     return { ...current, cues: appendCue(current.cues, cue), connected: true }
   }
+  if (envelope.kind === 'runtime') {
+    const cue = runtimeCue(envelope)
+    return cue === undefined
+      ? { ...current, connected: true }
+      : { ...current, cues: appendCue(current.cues, cue), connected: true }
+  }
   return current
+}
+
+function runtimeCue(envelope: WorldRuntimeStreamEnvelope): WorldCue | undefined {
+  const agentId = jsonString(envelope.payload, 'agentId')
+  const runtimeKind = jsonString(envelope.payload, 'runtimeKind')
+  if (agentId === undefined || runtimeKind === undefined) return undefined
+
+  let text: string | undefined
+  if (runtimeKind === 'turn.started') text = '正在思考…'
+  if (runtimeKind === 'tool.started') {
+    const toolName = jsonString(envelope.payload, 'toolName')
+    text = toolName === undefined ? '正在使用工具…' : `正在使用 ${toolName}…`
+  }
+  if (runtimeKind === 'assistant.message') text = jsonString(envelope.payload, 'content')
+  if (runtimeKind === 'turn.failed') text = '遇到问题，正在等待处理。'
+  if (text === undefined || !text.trim()) return undefined
+
+  return {
+    id: `${envelope.id}:speech`,
+    worldId: envelope.worldId,
+    sequence: envelope.sequence,
+    kind: 'entity.speech',
+    entityId: agentId,
+    payload: {
+      text: text.trim().replace(/\s+/g, ' ').slice(0, 120),
+      sessionId: jsonString(envelope.payload, 'sessionId') ?? '',
+      runtimeKind,
+    },
+    createdAt: envelope.createdAt,
+  }
+}
+
+function jsonString(value: WorldRuntimeStreamEnvelope['payload'], key: string): string | undefined {
+  const field = value[key]
+  return typeof field === 'string' && field.trim() ? field.trim() : undefined
 }
 
 function demoSnapshot(world: World, employees: CyberEmployee[], manifest: WorldThemeManifestV1): WorldRuntimeSnapshot {
