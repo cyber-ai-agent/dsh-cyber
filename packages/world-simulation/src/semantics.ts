@@ -67,7 +67,9 @@ export function compileWorldSemantics(
 
 export function resolveCharacterBehavior(
   character: Pick<EmployeeInstance, 'blueprintId' | 'displayName' | 'role'>,
+  configured?: CharacterBehaviorProfile,
 ): CharacterBehaviorProfile {
+  if (configured !== undefined) return cloneBehaviorProfile(configured)
   const identity = `${character.blueprintId} ${character.role} ${character.displayName}`.toLowerCase()
 
   if (containsAny(identity, ['secretary', '秘书', 'butler', '管家', 'assistant', '助理'])) {
@@ -128,6 +130,7 @@ export function assignCharacterHomeSlots(
   characters: readonly Pick<EmployeeInstance, 'id' | 'blueprintId' | 'displayName' | 'role'>[],
   semantics: CompiledWorldSemantics,
   retained: ReadonlyMap<string, string> = new Map(),
+  profiles: ReadonlyMap<string, CharacterBehaviorProfile> = new Map(),
 ): Map<string, WorldSlotDefinition> {
   const result = new Map<string, WorldSlotDefinition>()
   const occupied = new Set<string>()
@@ -143,7 +146,7 @@ export function assignCharacterHomeSlots(
       continue
     }
 
-    const profile = resolveCharacterBehavior(character)
+    const profile = resolveCharacterBehavior(character, profiles.get(character.id))
     const candidate = rankSlots(semantics.slots, profile, occupied, 'home')[0]
       ?? semantics.slots.find((slot) => !slot.exclusive || !occupied.has(slot.id))
     if (candidate === undefined) continue
@@ -159,8 +162,14 @@ export function selectCharacterSlot(
   semantics: CompiledWorldSemantics,
   occupiedSlotIds: ReadonlySet<string>,
   purpose: 'home' | 'task' | 'meeting' | 'conversation' | 'rest',
+  configured?: CharacterBehaviorProfile,
 ): WorldSlotDefinition | undefined {
-  return rankSlots(semantics.slots, resolveCharacterBehavior(character), occupiedSlotIds, purpose)[0]
+  return rankSlots(
+    semantics.slots,
+    resolveCharacterBehavior(character, configured),
+    occupiedSlotIds,
+    purpose,
+  )[0]
 }
 
 export function rankSlots(
@@ -171,6 +180,7 @@ export function rankSlots(
 ): WorldSlotDefinition[] {
   return slots
     .filter((slot) => !slot.exclusive || !occupiedSlotIds.has(slot.id))
+    .filter((slot) => slotAllowedByProfile(slot, profile))
     .filter((slot) => slotAllowedForPurpose(slot, purpose))
     .map((slot) => ({ slot, score: scoreSlot(slot, profile, purpose) }))
     .sort((left, right) => right.score - left.score || left.slot.id.localeCompare(right.slot.id))
@@ -302,6 +312,15 @@ function scoreSlot(
   return score
 }
 
+function slotAllowedByProfile(
+  slot: WorldSlotDefinition,
+  profile: CharacterBehaviorProfile,
+): boolean {
+  if (profile.allowedZoneTags.length === 0) return true
+  return profile.allowedZoneTags.some((tag) =>
+    slot.tags.includes(tag) || slot.zoneId === `zone-${tag}`)
+}
+
 function slotAllowedForPurpose(
   slot: WorldSlotDefinition,
   purpose: 'home' | 'task' | 'meeting' | 'conversation' | 'rest',
@@ -322,6 +341,19 @@ function behaviorProfile(input: Omit<CharacterBehaviorProfile, 'allowedZoneTags'
       cooldownSeconds: 300,
       maxDailyConversations: 8,
     },
+  }
+}
+
+function cloneBehaviorProfile(profile: CharacterBehaviorProfile): CharacterBehaviorProfile {
+  return {
+    id: profile.id,
+    roleTags: [...profile.roleTags],
+    preferredZoneTags: [...profile.preferredZoneTags],
+    preferredFacilityCapabilities: [...profile.preferredFacilityCapabilities],
+    allowedZoneTags: [...profile.allowedZoneTags],
+    homeSlotTags: [...profile.homeSlotTags],
+    ambientBehaviors: [...profile.ambientBehaviors],
+    socialPolicy: { ...profile.socialPolicy },
   }
 }
 
