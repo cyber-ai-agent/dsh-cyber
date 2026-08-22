@@ -12,7 +12,7 @@ Ambient life makes a world feel inhabited while preserving the truth of the unde
 4. Every movement has a source, reason, target slot, priority and interruptibility flag.
 5. Characters prefer role-compatible zones and return to their stable home slot after temporary activity.
 6. A slot is selected only when it is available to that character. A world tick reserves a selected slot before evaluating the next character.
-7. Social behavior requires a useful colleague, an available conversation slot, a cooldown and a bounded collaboration policy.
+7. Ambient life never fabricates a conversation. Role-to-role dialogue continues through the real bounded collaboration runtime, with its own model turns, permissions, transcript and shared episode.
 8. Ambient plans are persisted through the same `CharacterActionPlan` contract as other world behavior.
 9. Ambient activity must be visibly distinguishable from real tasks and agent conversations.
 10. World-level settings can disable ambient life completely.
@@ -26,7 +26,6 @@ Ambient life makes a world feel inhabited while preserving the truth of the unde
 | 80 | real task execution |
 | 70 | accepted meeting or peer collaboration |
 | 50 | scheduled role duty |
-| 30 | bounded useful social behavior |
 | 10–24 | ambient role routine, break and return home |
 
 A higher-priority plan may cancel or suspend an interruptible lower-priority plan. Ambient plans are always interruptible.
@@ -39,11 +38,11 @@ world tick
   -> exclude real work and active sessions
   -> enforce idle and cooldown windows
   -> return displaced characters to home first
-  -> evaluate bounded social opportunity
-  -> evaluate role-compatible routine
+  -> evaluate role-compatible routine or bounded break
   -> reserve destination in stable character order
   -> compile durable action plan
   -> persist plan and lease
+  -> emit semantic ambient-start/ambient-complete events
   -> publish world state
 ```
 
@@ -61,19 +60,17 @@ Examples:
 
 A theme maps these semantic tags to its own zones and facilities. A magic-school theme may map `research` to a library and `engineering` to an alchemy workshop without changing the character policy.
 
-## Social behavior
+## Conversation boundary
 
-Ambient social behavior is not open-ended autonomous chat. It only produces a collaboration intent when:
+A character may visually inspect a role-compatible area, return to its post or take a bounded break. It may not display a fake conversation bubble or claim that another Agent participated.
 
-- both characters are idle and available;
-- both belong to the same world;
-- neither owns an active task/session/plan;
-- their roles overlap or complement one another;
-- the pair is outside its cooldown;
-- a conversation slot is available;
-- the world and daily budgets allow it.
+Real role conversation is initiated through one of the existing collaboration paths:
 
-The existing bounded NPC collaboration runtime remains responsible for model turns, permissions, transcripts and shared episodes.
+- the user explicitly selects “让他去沟通”;
+- the user delegates a consultation in direct chat and explicitly mentions a target role;
+- a future autonomous collaboration policy creates a bounded, auditable intent.
+
+Only the bounded NPC collaboration runtime may execute model turns and write a transcript, relationship evidence or `SharedWorldEpisode`. Autonomous role consultation remains disabled until that policy is implemented end to end.
 
 ## Renderer boundary
 
