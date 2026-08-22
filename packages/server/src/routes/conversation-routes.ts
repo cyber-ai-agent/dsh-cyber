@@ -130,6 +130,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
       store.listInstalledPackages(world.workspaceId),
       purpose,
     )
+    const peerTitle = optionalString(body.title)
     const result = await peerCollaboration.run({
       workspaceId: world.workspaceId,
       worldId: world.id,
