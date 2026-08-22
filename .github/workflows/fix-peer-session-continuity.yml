@@ -1,0 +1,84 @@
+name: Fix peer session continuity
+
+on:
+  push:
+    branches:
+      - feat/npc-collaboration-v1
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: ${{ !contains(github.event.head_commit.message, '[peer-session-continuity]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/npc-collaboration-v1
+          fetch-depth: 0
+      - name: Refresh character state before each peer turn
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('packages/orchestration/src/conversation-orchestrator.ts')
+          text = path.read_text()
+          old = """      for (const employee of orderedEmployees) {
+        replies.push(await this.#runAgent(
+          session,
+          employee,
+          peerPrompt({
+            basePrompt: input.runtimePrompt?.trim() || purpose,
+            purpose,
+            employee,
+            initiator,
+            participants: employees,
+            replies,
+            round,
+            maxRounds,
+          }),
+          input.reasoningEffort,
+        ))
+      }
+          """
+          new = """      for (const scheduledEmployee of orderedEmployees) {
+        const employee = this.#requireEmployeeInWorld(
+          scheduledEmployee.id,
+          input.workspaceId,
+          input.worldId,
+        )
+        replies.push(await this.#runAgent(
+          session,
+          employee,
+          peerPrompt({
+            basePrompt: input.runtimePrompt?.trim() || purpose,
+            purpose,
+            employee,
+            initiator,
+            participants: employees,
+            replies,
+            round,
+            maxRounds,
+          }),
+          input.reasoningEffort,
+        ))
+      }
+          """
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif 'for (const scheduledEmployee of orderedEmployees)' not in text:
+              raise SystemExit('Peer turn loop anchor not found')
+          path.write_text(text)
+          PY
+      - name: Commit fix
+        run: |
+          if git diff --quiet; then
+            echo "Peer session continuity already fixed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/orchestration/src/conversation-orchestrator.ts
+          git commit -m "fix: reuse each character persistent Agent session across peer rounds [peer-session-continuity]"
+          git push origin HEAD:feat/npc-collaboration-v1
