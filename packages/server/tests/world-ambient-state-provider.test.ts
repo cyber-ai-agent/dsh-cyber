@@ -88,6 +88,46 @@ describe('world ambient state provider', () => {
     ])
   })
 
+  it('lets a persisted custom profile override role-name inference for ambient routines', async () => {
+    const { store, world, engineer, simulationStore } = await setup()
+    store.reviseEmployeeProfile({
+      employeeId: engineer.id,
+      background: '负责实验植物与异常生长数据。',
+      personalityTraits: ['细致'],
+      appearance: {
+        worldBehaviorProfile: {
+          id: 'user.quantum-gardener',
+          roleTags: ['botany', 'experiments'],
+          preferredZoneTags: ['research'],
+          preferredFacilityCapabilities: ['research', 'inspect'],
+          allowedZoneTags: ['research', 'meeting', 'rest', 'public'],
+          homeSlotTags: ['research', 'work'],
+          ambientBehaviors: ['inspect-cultivation-bed'],
+          socialPolicy: {
+            canInitiateConversation: false,
+            cooldownSeconds: 1_800,
+            maxDailyConversations: 0,
+          },
+        },
+      },
+      reason: '切换为自定义岗位语义',
+    })
+    const slotResolver = new WorldAmbientSlotResolver({ store })
+    const provider = new WorldAmbientStateProvider({
+      store,
+      simulationStore,
+      resolveSlots: (worldId) => slotResolver.resolve(worldId),
+    })
+
+    expect(provider.loadCharacters(world.id)).toEqual([
+      expect.objectContaining({
+        characterId: engineer.id,
+        roleTags: ['botany', 'experiments'],
+        preferredZoneTags: ['research'],
+      }),
+    ])
+  })
+
   it('projects durable occupancy and reservations onto semantic slots', async () => {
     const { store, world, engineer, simulationStore } = await setup()
     const slotResolver = new WorldAmbientSlotResolver({ store })
