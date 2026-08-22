@@ -84,6 +84,7 @@ export class AmbientLifeExecutor {
   completeDue(worldId: string, now = this.#clock()): string[] {
     const nowIso = new Date(now).toISOString()
     const nowMs = Date.parse(nowIso)
+    this.#simulationStore.cleanupExpiredReservations(nowIso)
     const candidates = this.#simulationStore
       .listActionPlans(worldId)
       .filter((plan) => plan.source === 'ambient' || plan.source === 'role-routine')
