@@ -4,6 +4,13 @@ DSH Cyber 是一个基于 [DeepSeek Harness](https://www.deepseek.com/harness/) 
 
 > 当前版本处于早期开发阶段，适合本地体验、架构验证与共同开发，尚未发布到 npm。
 
+| 组件 | 当前版本 |
+| --- | --- |
+| DSH Cyber | `0.1.0` |
+| DeepSeek Harness | `0.1.1-rc.1` |
+
+本次分支升级已将内置 Harness、专用 bundle 与兼容性检查统一到 DSH `0.1.1-rc.1`。安装包与 GitHub Release 分发会在项目进入稳定发布阶段后单独规划。
+
 ## 核心能力
 
 - **独立工作台**：不依赖 DSH 原生 Web 界面，一条命令启动本地 Web UI。
@@ -164,7 +171,7 @@ DSH Cyber 遵循 Harness 的插件、服务、事件、技能、子代理和会�
 - [Session projections](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/subsystems/session-projection.md)
 - [Cordis paper](https://github.com/cordiverse/paper)
 
-Harness 仍处于开发者预览阶段。DSH Cyber 的发布版本将维护明确的兼容矩阵，不假定上游内部 API 稳定。
+Harness `0.1.1-rc.1` 仍处于开发者预览阶段。DSH Cyber 当前内置运行时与兼容性检查以 `0.1.1-rc.1` 为主版本，同时保留旧 rc.8/rc.7 候选记录用于受控回退与历史诊断；不假定上游内部 API 稳定。
 
 ## 贡献
 

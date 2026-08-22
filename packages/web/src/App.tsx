@@ -971,14 +971,14 @@ export default function App() {
         }
       }
       if (action === 'verify-update') {
-        return { ok: true, version: '0.1.0-rc.8', supported: true, contractId: 'dsh-session-events-v1', checks: { packageVersions: true, isolatedProfile: true }, transaction: demoRuntimeTransaction('verified') }
+        return { ok: true, version: '0.1.1-rc.1', supported: true, contractId: 'dsh-session-events-v1', checks: { packageVersions: true, isolatedProfile: true }, transaction: demoRuntimeTransaction('verified') }
       }
       if (action === 'contract-update') return { ok: true, transaction: demoRuntimeTransaction('contract-tested') }
       if (action === 'canary-update') return { ok: true, transaction: demoRuntimeTransaction('canary-passed') }
       if (action === 'activate-update') return { ok: true, transaction: demoRuntimeTransaction('activated'), restartRequired: true }
       if (action === 'rollback-update') return { ok: true, transaction: demoRuntimeTransaction('rolled-back'), restartRequired: true }
       if (action === 'list-updates') return { ok: true, items: [] }
-      return { ok: true, checkedAt: new Date().toISOString(), compatibility: { expectedVersion: '0.1.0-rc.8', errors: [] }, database: { schemaVersion: 5, integrity: ['ok'], errors: [] } }
+      return { ok: true, checkedAt: new Date().toISOString(), compatibility: { expectedVersion: '0.1.1-rc.1', errors: [] }, database: { schemaVersion: 5, integrity: ['ok'], errors: [] } }
     }
     if (action === 'status') return api<SystemActionResult>('/api/system/status')
     if (action === 'doctor') return api<SystemActionResult>('/api/system/doctor', { method: 'POST', body: '{}' })
@@ -1513,7 +1513,7 @@ function demoRuntimeTransaction(status: RuntimeUpdateTransaction['status']): Run
   return {
     id: 'demo-runtime-update',
     candidateRoot: '演示候选运行时',
-    version: '0.1.0-rc.8',
+    version: '0.1.1-rc.1',
     contractId: 'dsh-session-events-v1',
     status,
     report: { ok: true, demo: true },

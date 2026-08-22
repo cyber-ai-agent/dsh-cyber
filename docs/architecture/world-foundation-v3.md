@@ -10,6 +10,6 @@ DSH Cyber 的产品主实体从“公司工作区”提升为“本地世界”�
 
 世界设置会真正参与运行时：世界观和用户身份进入角色上下文，世界默认模型写入 ModelAssignment，推理档位传递给 Harness，视觉 token 在切换世界和重启后恢复。访问锁覆盖世界快照、会话、消息、角色档案、文件、World Runtime、主题资源和实时流等世界级接口。
 
-DSH runtime 升级到 0.1.0-rc.8，并把 rc.8 的按模型 reasoningEfforts / compat.thinkingFormat 边界接入模型路由。会话可传入推理档位；auto 表示不向上游强制推理档位。
+DSH runtime 升级到 0.1.1-rc.1，并把当前版本的按模型 reasoningEfforts / compat.thinkingFormat 边界接入模型路由。会话可传入推理档位；auto 表示不向上游强制推理档位。
 
 最终迁移门禁已执行 typecheck、单元/集成测试、Chromium E2E、verify 与 git diff --check；临时迁移脚本和临时 workflow 在验证成功后自动删除。

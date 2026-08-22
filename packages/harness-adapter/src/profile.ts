@@ -3,7 +3,7 @@ import { lstat, mkdir, open, readFile, readlink, rename, symlink, unlink } from 
 import { dirname, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
-export const SUPPORTED_HARNESS_VERSION = '0.1.0-rc.8' as const
+export const SUPPORTED_HARNESS_VERSION = '0.1.1-rc.1' as const
 export const WORKER_PROFILE_NAME = 'dsh-cyber-worker' as const
 
 export interface HarnessProfilePaths {
