@@ -15,7 +15,7 @@ import {
 } from '@dsh-cyber/harness-adapter'
 import { ConversationOrchestrator } from '@dsh-cyber/orchestration'
 import { LocalPackageCatalog, LocalPackageRuntime, PackageManager, type PackageRuntimePort } from '@dsh-cyber/package-runtime'
-import { SqliteStore } from '@dsh-cyber/persistence'
+import { SqliteStore, WorldSimulationStore } from '@dsh-cyber/persistence'
 
 import { dispatchHttpRequest } from './http/context.js'
 import { writeError } from './http/errors.js'
@@ -97,6 +97,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     const world = store.createWorld({ workspaceId: local.id, name: '我的世界', templateId: 'personal-world' })
     store.recruitEmployee({ workspaceId: local.id, worldId: world.id, blueprintId: 'core.butler', blueprintVersion: 1, displayName: '管家' })
   }
+  const worldSimulation = new WorldSimulationStore(store)
 
   const worldRoots = new WorldRootService(stateRoot)
   await Promise.all(store.listWorkspaces().flatMap((workspace) => store.listWorlds(workspace.id, true).map((world) => worldRoots.ensure(world.id))))
@@ -132,7 +133,11 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const packageCatalog = new LocalPackageCatalog(options.marketplaceRoot ?? fileURLToPath(new URL('../../../marketplace', import.meta.url)))
   const runtimeStreamHub = new RuntimeStreamHub()
   const worldStreamHub = new WorldStreamHub()
-  const worldRuntime = new WorldRuntimeService({ store, publish: (event) => worldStreamHub.publish(event) })
+  const worldRuntime = new WorldRuntimeService({
+    store,
+    simulationStore: worldSimulation,
+    publish: (event) => worldStreamHub.publish(event),
+  })
   const runtimeUpdates = new RuntimeUpdateService(store, stateRoot, workspaceRoot)
   const assets = new AssetService(store, stateRoot)
   const worldFiles = new WorldFileService(worldRoots)
@@ -161,7 +166,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
 
   const unsubscribe = orchestrator.subscribe((event) => {
     runtimeStreamHub.publish(event)
-    worldRuntime.publishRuntime(event.worldId, event.event, event.agentId)
+    worldRuntime.publishRuntime(event.worldId, event.event, event.agentId, event.sessionId)
   })
   let startedAddress: CyberServerAddress | undefined
   let closed = false
@@ -206,8 +211,6 @@ async function resolveActiveRuntime(store: SqliteStore, runtimeStateRoot: string
 }
 
 function resolveHarnessRoute(store: SqliteStore, request: AgentTurnRequest): HarnessModelRoute | undefined {
-  // 活动路由只有一个事实来源：角色 → 世界 → 全局 assignment。
-  // Revision 中旧的 modelPolicy 继续作为历史数据保留，但不再静默抢占当前 UI 路由。
   const profile = store.resolveModelProfile(request.agent.workspaceId, request.agent.worldId, request.agent.id)
   return profile === undefined ? undefined : harnessModelRoute(profile, request.reasoningEffort)
 }

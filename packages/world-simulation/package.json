@@ -1,5 +1,5 @@
 {
-  "name": "@dsh-cyber/contracts",
+  "name": "@dsh-cyber/world-simulation",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,15 +9,14 @@
     ".": {
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
-    },
-    "./world-simulation": {
-      "types": "./lib/world-simulation.d.ts",
-      "default": "./lib/world-simulation.js"
     }
   },
   "files": ["lib"],
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@dsh-cyber/contracts": "workspace:*"
   }
 }

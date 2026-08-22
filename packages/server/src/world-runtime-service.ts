@@ -11,7 +11,7 @@ import type {
   WorldThemeManifestV1,
   WorldThemeOption,
 } from '@dsh-cyber/contracts'
-import type { SqliteStore } from '@dsh-cyber/persistence'
+import type { SqliteStore, WorldSimulationStore } from '@dsh-cyber/persistence'
 import {
   cyberCompanyTheme,
   moonlitTavernTheme,
@@ -39,18 +39,21 @@ export class UnsupportedWorldRuntimeError extends Error {
 
 export interface WorldRuntimeServiceOptions {
   store: SqliteStore
+  simulationStore: WorldSimulationStore
   publish: (event: WorldRuntimeStreamEnvelope) => void
   clock?: () => string
 }
 
 export class WorldRuntimeService {
   readonly #store: SqliteStore
+  readonly #simulationStore: WorldSimulationStore
   readonly #publish: (event: WorldRuntimeStreamEnvelope) => void
   readonly #clock: () => string
   readonly #verificationCache = new InstalledPackageVerificationCache()
 
   constructor(options: WorldRuntimeServiceOptions) {
     this.#store = options.store
+    this.#simulationStore = options.simulationStore
     this.#publish = options.publish
     this.#clock = options.clock ?? (() => new Date().toISOString())
   }
@@ -61,29 +64,7 @@ export class WorldRuntimeService {
   }
 
   getSnapshot(worldId: string): WorldRuntimeSnapshot {
-    const world = this.#store.getWorld(worldId)
-    if (world === undefined) throw new Error(`World not found: ${worldId}`)
-    const manifest = this.#manifestForWorld(world.id, world.templateId)
-    if (manifest === undefined) throw new UnsupportedWorldRuntimeError(worldId)
-    const validation = validateWorldThemeManifest(manifest)
-    if (!validation.valid) throw new Error(`Built-in world theme is invalid: ${validation.errors.join('; ')}`)
-    const previous = this.#store.getWorldRuntimeSnapshot(worldId)
-    const events = this.#store.listWorldDomainEvents(worldId, previous?.sequence ?? 0)
-    const employees = this.#store.listEmployees(worldId)
-    const milestones = employees.flatMap((employee) => this.#store.listEmployeeMilestones(employee.id))
-    const result = projectWorldRuntime({
-      workspaceId: world.workspaceId,
-      world,
-      employees,
-      events,
-      milestones,
-      manifest,
-      ...(previous === undefined ? {} : { previous }),
-      now: this.#clock(),
-    })
-    const snapshot = this.#applyCharacterVisuals(result.snapshot)
-    this.#store.saveWorldRuntimeSnapshot(snapshot)
-    return snapshot
+    return this.#project(worldId).snapshot
   }
 
   getThemeManifest(worldId: string): WorldThemeManifestV1 {
@@ -109,39 +90,7 @@ export class WorldRuntimeService {
   }
 
   refresh(worldId: string): { snapshot: WorldRuntimeSnapshot; cues: WorldCue[] } {
-    const world = this.#store.getWorld(worldId)
-    if (world === undefined) throw new Error(`World not found: ${worldId}`)
-    const manifest = this.#manifestForWorld(world.id, world.templateId)
-    if (manifest === undefined) throw new UnsupportedWorldRuntimeError(worldId)
-    const previous = this.#store.getWorldRuntimeSnapshot(worldId)
-    const employees = this.#store.listEmployees(worldId)
-    const result = projectWorldRuntime({
-      workspaceId: world.workspaceId,
-      world,
-      employees,
-      events: this.#store.listWorldDomainEvents(worldId, previous?.sequence ?? 0),
-      milestones: employees.flatMap((employee) => this.#store.listEmployeeMilestones(employee.id)),
-      manifest,
-      ...(previous === undefined ? {} : { previous }),
-      now: this.#clock(),
-    })
-    const snapshot = this.#applyCharacterVisuals(result.snapshot)
-    this.#store.saveWorldRuntimeSnapshot(snapshot)
-    return { ...result, snapshot }
-  }
-
-  #applyCharacterVisuals(snapshot: WorldRuntimeSnapshot): WorldRuntimeSnapshot {
-    return {
-      ...snapshot,
-      entities: snapshot.entities.map((entity) => {
-        if (entity.kind !== 'agent') return entity
-        const profile = this.#store.getEmployeeProfile(entity.id)
-        const configured = profile?.appearance['worldSkinIndex'] ?? profile?.appearance['avatarIndex']
-        if (typeof configured !== 'number' || !Number.isInteger(configured)) return entity
-        const rosterIndex = Math.min(7, Math.max(0, configured))
-        return { ...entity, visualState: { ...entity.visualState, rosterIndex } }
-      }),
-    }
+    return this.#project(worldId)
   }
 
   async listThemes(worldId: string): Promise<{ activeThemeId: string; items: WorldThemeOption[] }> {
@@ -322,20 +271,24 @@ export class WorldRuntimeService {
     }
   }
 
-  publishRuntime(worldId: string, runtime: AgentRuntimeEvent, agentId: string): void {
+  publishRuntime(worldId: string, runtime: AgentRuntimeEvent, agentId: string, sessionId?: string): void {
     if (!this.supports(worldId)) return
     const projected = this.refresh(worldId)
     this.#publish({
       contractVersion: 1,
-      id: String(projected.snapshot.sequence),
+      id: `${projected.snapshot.sequence}:runtime:${agentId}:${runtime.sourceSequence ?? runtime.kind}`,
       worldId,
       sequence: projected.snapshot.sequence,
       kind: 'runtime',
       payload: {
         agentId,
+        sessionId: sessionId ?? '',
         runtimeKind: runtime.kind,
-        content: runtime.content ?? '',
+        content: runtime.content?.slice(0, 500) ?? '',
         toolName: runtime.toolName ?? '',
+        callId: runtime.callId ?? '',
+        sourceSessionId: runtime.sourceSessionId,
+        sourceSequence: runtime.sourceSequence ?? 0,
         failed: runtime.failed ?? false,
       },
       createdAt: this.#clock(),
@@ -373,6 +326,84 @@ export class WorldRuntimeService {
       payload: cue as unknown as JsonObject,
       createdAt: cue.createdAt,
     })
+  }
+
+  #project(worldId: string): { snapshot: WorldRuntimeSnapshot; cues: WorldCue[] } {
+    const world = this.#store.getWorld(worldId)
+    if (world === undefined) throw new Error(`World not found: ${worldId}`)
+    const manifest = this.#manifestForWorld(world.id, world.templateId)
+    if (manifest === undefined) throw new UnsupportedWorldRuntimeError(worldId)
+    const validation = validateWorldThemeManifest(manifest)
+    if (!validation.valid) throw new Error(`Built-in world theme is invalid: ${validation.errors.join('; ')}`)
+
+    const previous = this.#store.getWorldRuntimeSnapshot(worldId)
+    const employees = this.#store.listEmployees(worldId)
+    this.#simulationStore.cleanupExpiredReservations(this.#clock())
+    const result = projectWorldRuntime({
+      workspaceId: world.workspaceId,
+      world,
+      employees,
+      events: this.#store.listWorldDomainEvents(worldId, previous?.sequence ?? 0),
+      milestones: employees.flatMap((employee) => this.#store.listEmployeeMilestones(employee.id)),
+      manifest,
+      presences: this.#simulationStore.listPresences(worldId),
+      ...(previous === undefined ? {} : { previous }),
+      now: this.#clock(),
+    })
+    const snapshot = this.#applyCharacterVisuals(result.snapshot)
+    this.#store.saveWorldRuntimeSnapshot(snapshot)
+    this.#syncPresences(snapshot)
+    return { ...result, snapshot }
+  }
+
+  #syncPresences(snapshot: WorldRuntimeSnapshot): void {
+    const activeIds = new Set<string>()
+    for (const entity of snapshot.entities) {
+      if (entity.kind !== 'agent') continue
+      const homeSlotId = jsonString(entity.visualState, 'homeSlotId')
+      const currentSlotId = jsonString(entity.visualState, 'currentSlotId') ?? homeSlotId
+      const zoneId = jsonString(entity.visualState, 'zoneId')
+      if (homeSlotId === undefined || currentSlotId === undefined || zoneId === undefined) continue
+      activeIds.add(entity.id)
+      this.#simulationStore.savePresence({
+        worldId: snapshot.worldId,
+        characterId: entity.id,
+        sceneId: entity.sceneId,
+        zoneId,
+        homeSlotId,
+        currentSlotId,
+        ...(jsonString(entity.visualState, 'reservedSlotId') === undefined
+          ? {}
+          : { reservedSlotId: jsonString(entity.visualState, 'reservedSlotId')! }),
+        facing: entity.facing,
+        physicalState: physicalState(entity.visualState, entity.activity),
+        ...(entity.status === undefined ? {} : { status: entity.status }),
+        ...(jsonString(entity.visualState, 'activePlanId') === undefined
+          ? {}
+          : { activePlanId: jsonString(entity.visualState, 'activePlanId')! }),
+        ...(jsonString(entity.visualState, 'activeSessionId') === undefined
+          ? {}
+          : { activeSessionId: jsonString(entity.visualState, 'activeSessionId')! }),
+        updatedAt: entity.updatedAt,
+      })
+    }
+    for (const presence of this.#simulationStore.listPresences(snapshot.worldId)) {
+      if (!activeIds.has(presence.characterId)) this.#simulationStore.removePresence(presence.characterId)
+    }
+  }
+
+  #applyCharacterVisuals(snapshot: WorldRuntimeSnapshot): WorldRuntimeSnapshot {
+    return {
+      ...snapshot,
+      entities: snapshot.entities.map((entity) => {
+        if (entity.kind !== 'agent') return entity
+        const profile = this.#store.getEmployeeProfile(entity.id)
+        const configured = profile?.appearance['worldSkinIndex'] ?? profile?.appearance['avatarIndex']
+        if (typeof configured !== 'number' || !Number.isInteger(configured)) return entity
+        const rosterIndex = Math.min(7, Math.max(0, configured))
+        return { ...entity, visualState: { ...entity.visualState, rosterIndex } }
+      }),
+    }
   }
 
   #assertInteractionTarget(request: WorldInteractionRequest, snapshot: WorldRuntimeSnapshot): void {
@@ -449,4 +480,27 @@ function themeTemplateMatches(worldTemplateId: string, themeTemplateId: string):
   if (worldTemplateId === themeTemplateId) return true
   if ([worldTemplateId, themeTemplateId].every((value) => value === 'company' || value === 'cyber-company')) return true
   return [worldTemplateId, themeTemplateId].every((value) => value === 'tavern' || value === 'moonlit-tavern')
+}
+
+function jsonString(value: JsonObject, key: string): string | undefined {
+  const field = value[key]
+  return typeof field === 'string' && field.trim() ? field : undefined
+}
+
+function physicalState(
+  visualState: JsonObject,
+  activity: WorldRuntimeSnapshot['entities'][number]['activity'],
+): 'at-home' | 'navigating' | 'positioning' | 'thinking' | 'speaking' | 'listening' | 'working' | 'using-object' | 'meeting' | 'waiting' | 'blocked' {
+  const configured = jsonString(visualState, 'physicalState')
+  if (configured === 'at-home' || configured === 'navigating' || configured === 'positioning'
+    || configured === 'thinking' || configured === 'speaking' || configured === 'listening'
+    || configured === 'working' || configured === 'using-object' || configured === 'meeting'
+    || configured === 'waiting' || configured === 'blocked') return configured
+  if (activity === 'walking') return 'navigating'
+  if (activity === 'thinking') return 'thinking'
+  if (activity === 'talking') return 'speaking'
+  if (activity === 'working') return 'working'
+  if (activity === 'meeting') return 'meeting'
+  if (activity === 'blocked') return 'blocked'
+  return 'at-home'
 }

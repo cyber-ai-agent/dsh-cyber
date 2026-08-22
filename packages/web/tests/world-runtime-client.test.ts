@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type {
+  JsonObject,
   WorldCue,
   WorldRuntimeSnapshot,
   WorldRuntimeStreamEnvelope,
@@ -38,6 +39,39 @@ describe('world renderer client contracts', () => {
     expect(reduceWorldStreamState(withCue, envelope('world-cue', 9, makeCue(9, 'cue-9')))).toBe(withCue)
     expect(reduceWorldStreamState(withCue, envelope('world-state', 8, makeSnapshot(8)))).toBe(withCue)
   })
+
+  it('turns live runtime events into speech cues for only the addressed character', () => {
+    const initial: WorldClientState = {
+      manifest: cyberCompanyTheme,
+      snapshot: makeSnapshot(20),
+      cues: [],
+      loading: false,
+      connected: true,
+    }
+    const assistant = reduceWorldStreamState(initial, runtimeEnvelope(20, {
+      agentId: 'secretary',
+      sessionId: 'session-secretary',
+      runtimeKind: 'assistant.message',
+      content: '开发工程师已经完成接口联调。',
+    }))
+    expect(assistant.cues).toHaveLength(1)
+    expect(assistant.cues[0]).toMatchObject({
+      kind: 'entity.speech',
+      entityId: 'secretary',
+      payload: {
+        text: '开发工程师已经完成接口联调。',
+        sessionId: 'session-secretary',
+      },
+    })
+    expect(assistant.cues.some((cue) => cue.entityId === 'engineer')).toBe(false)
+
+    const hiddenReasoning = reduceWorldStreamState(assistant, runtimeEnvelope(20, {
+      agentId: 'secretary',
+      runtimeKind: 'reasoning.delta',
+      content: '不应展示的内部推理',
+    }))
+    expect(hiddenReasoning.cues).toHaveLength(1)
+  })
 })
 
 function makeSnapshot(sequence: number): WorldRuntimeSnapshot {
@@ -62,6 +96,30 @@ function makeCue(sequence: number, id: string): WorldCue {
   return { id, worldId: 'world', sequence, kind: 'entity.activity', payload: {}, createdAt: '2026-08-20T00:00:00.000Z' }
 }
 
-function envelope(kind: 'world-cue' | 'world-state', sequence: number, payload: WorldCue | WorldRuntimeSnapshot): WorldRuntimeStreamEnvelope {
-  return { contractVersion: 1, id: String(sequence), worldId: 'world', sequence, kind, payload: payload as never, createdAt: '2026-08-20T00:00:00.000Z' }
+function envelope(
+  kind: 'world-cue' | 'world-state',
+  sequence: number,
+  payload: WorldCue | WorldRuntimeSnapshot,
+): WorldRuntimeStreamEnvelope {
+  return {
+    contractVersion: 1,
+    id: String(sequence),
+    worldId: 'world',
+    sequence,
+    kind,
+    payload: payload as never,
+    createdAt: '2026-08-20T00:00:00.000Z',
+  }
+}
+
+function runtimeEnvelope(sequence: number, payload: JsonObject): WorldRuntimeStreamEnvelope {
+  return {
+    contractVersion: 1,
+    id: `${sequence}:runtime`,
+    worldId: 'world',
+    sequence,
+    kind: 'runtime',
+    payload,
+    createdAt: '2026-08-20T00:00:00.000Z',
+  }
 }
