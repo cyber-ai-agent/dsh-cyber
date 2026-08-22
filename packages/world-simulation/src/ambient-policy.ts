@@ -10,6 +10,8 @@ export interface AmbientCharacterState {
   displayName: string
   role: string
   status: 'available' | 'working' | 'waiting' | 'blocked' | 'archived'
+  sceneId: string
+  facing: 'north' | 'east' | 'south' | 'west'
   roleTags: string[]
   preferredZoneTags: string[]
   currentZoneId: string
