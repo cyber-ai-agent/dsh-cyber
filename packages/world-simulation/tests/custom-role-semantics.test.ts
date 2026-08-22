@@ -72,7 +72,8 @@ describe('custom role semantic placement', () => {
       new Map(),
       new Map([[customRole.id, configured]]),
     )
-    expect(homes.get(customRole.id)?.id).toBe('research-home')
+    expect(homes.get(customRole.id)?.zoneId).toBe('zone-research')
+    expect(homes.get(customRole.id)?.zoneId).not.toBe('zone-administration')
   })
 
   it('selects task facilities from declared capabilities and allowed zones', () => {
