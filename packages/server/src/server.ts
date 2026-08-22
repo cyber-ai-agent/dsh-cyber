@@ -35,6 +35,8 @@ import { registerWorkspaceRoutes } from './routes/workspace-routes.js'
 import { registerWorldRuntimeRoutes } from './routes/world-runtime-routes.js'
 import { registerWorldRoutes } from './routes/world-routes.js'
 import { registerWorldSettingsRoutes } from './routes/world-settings-routes.js'
+import { AmbientLifeExecutor } from './services/ambient-life-executor.js'
+import { AmbientLifeRuntime } from './services/ambient-life-runtime.js'
 import { AmbientLifeScheduler } from './services/ambient-life-scheduler.js'
 import { AmbientLifeSettingsService } from './services/ambient-life-settings-service.js'
 import { AssetService } from './services/asset-service.js'
@@ -44,8 +46,8 @@ import { ModelCatalogService } from './services/model-catalog-service.js'
 import { ModelCredentialService } from './services/model-credential-service.js'
 import { ModelInteractionService, TurnInteractionLoggingRuntime } from './services/model-interaction-service.js'
 import { PeerCollaborationService } from './services/peer-collaboration-service.js'
-import { RuntimeUpdateService } from './services/runtime-update-service.js'
 import { RoleAwareAmbientLifeService } from './services/role-aware-ambient-life-service.js'
+import { RuntimeUpdateService } from './services/runtime-update-service.js'
 import { WorldAccessService } from './services/world-access-service.js'
 import { WorldAmbientSlotResolver } from './services/world-ambient-slot-resolver.js'
 import { WorldAmbientStateProvider } from './services/world-ambient-state-provider.js'
@@ -134,10 +136,10 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     resolveWorldRoot: async (worldId) => (await worldRoots.ensure(worldId)).filesPath,
   })
   const peerCollaboration = new PeerCollaborationService({
-  store,
-  simulationStore: worldSimulation,
-  orchestrator,
-})
+    store,
+    simulationStore: worldSimulation,
+    orchestrator,
+  })
   const packageManager = new PackageManager({
     store,
     runtime: options.packageRuntime ?? new LocalPackageRuntime(join(stateRoot, 'packages')),
@@ -152,22 +154,24 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     publish: (event) => worldStreamHub.publish(event),
   })
   const ambientSlotResolver = new WorldAmbientSlotResolver({ store })
-const ambientStateProvider = new WorldAmbientStateProvider({
-  store,
-  simulationStore: worldSimulation,
-  resolveSlots: (worldId) => ambientSlotResolver.resolve(worldId),
-})
-const ambientLife = new RoleAwareAmbientLifeService({
-  stateProvider: ambientStateProvider,
-  persistence: worldSimulation,
-})
-const ambientLifeScheduler = new AmbientLifeScheduler({
-  settings: ambientLifeSettings,
-  service: ambientLife,
-  onResult: (result) => {
-    if (result.plans.length > 0) worldRuntime.publishCurrent(result.worldId)
-  },
-})
+  const ambientStateProvider = new WorldAmbientStateProvider({
+    store,
+    simulationStore: worldSimulation,
+    resolveSlots: (worldId) => ambientSlotResolver.resolve(worldId),
+  })
+  const ambientLifeService = new RoleAwareAmbientLifeService({
+    stateProvider: ambientStateProvider,
+    persistence: worldSimulation,
+  })
+  const ambientLifeRuntime = new AmbientLifeRuntime({
+    service: ambientLifeService,
+    executor: new AmbientLifeExecutor({ store, simulationStore: worldSimulation }),
+    publish: (worldId) => worldRuntime.publishCurrent(worldId),
+  })
+  const ambientLifeScheduler = new AmbientLifeScheduler({
+    settings: ambientLifeSettings,
+    service: ambientLifeRuntime,
+  })
   const runtimeUpdates = new RuntimeUpdateService(store, stateRoot, workspaceRoot)
   const assets = new AssetService(store, stateRoot)
   const worldFiles = new WorldFileService(worldRoots)
@@ -208,19 +212,19 @@ const ambientLifeScheduler = new AmbientLifeScheduler({
     packageManager,
     async start() {
       if (closed) throw new Error('Server is closed')
-      ambientLifeScheduler.start()
       if (startedAddress !== undefined) return startedAddress
       await listen(httpServer, port, host)
       const address = httpServer.address()
       if (address === null || typeof address === 'string') throw new Error('Server did not expose a TCP address')
       startedAddress = { host, port: address.port, origin: `http://${host}:${address.port}` }
+      ambientLifeScheduler.start()
       return startedAddress
     },
     address() { return startedAddress },
     async close() {
-      await ambientLifeScheduler.close()
       if (closed) return
       closed = true
+      await ambientLifeScheduler.close()
       unsubscribe()
       runtimeStreamHub.close()
       worldStreamHub.close()
