@@ -39,7 +39,6 @@ describe('ambient settings and scheduler', () => {
       enabled: true,
       minimumIdleMs: 60_000,
       minimumAmbientIntervalMs: 240_000,
-      socialCooldownMs: 1_200_000,
       breakAfterMs: 2_400_000,
       timeBucketMs: 300_000,
       maximumPlansPerTick: 2,
@@ -53,7 +52,7 @@ describe('ambient settings and scheduler', () => {
     const settings = new AmbientLifeSettingsService(store)
     expect(() => settings.update(first.id, { maximumPlansPerTick: 100 })).toThrow('单次最大行为数')
     expect(() => settings.update(first.id, { minimumAmbientIntervalMs: 1 })).toThrow('日常行为间隔')
-    expect(() => settings.update(first.id, { socialCooldownMs: 1 })).toThrow('角色社交冷却')
+    expect(() => settings.update(first.id, { breakAfterMs: 1 })).toThrow('休息触发时间')
   })
 
   it('ticks only enabled worlds and does not overlap the same world', async () => {
