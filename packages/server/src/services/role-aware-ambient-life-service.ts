@@ -41,7 +41,6 @@ const DEFAULT_POLICY: AmbientWorldPolicy = {
   enabled: false,
   minimumIdleMs: 45_000,
   minimumAmbientIntervalMs: 180_000,
-  socialCooldownMs: 900_000,
   breakAfterMs: 1_800_000,
   timeBucketMs: 300_000,
   maximumPlansPerTick: 3,
