@@ -203,6 +203,7 @@ function applyEvent(
         peerConversation: event.payload['peerConversation'] === true,
         peerConversation: event.payload['peerConversation'] === true,
         peerConversation: event.payload['peerConversation'] === true,
+        peerConversation: event.payload['peerConversation'] === true,
       }
       moveEntityToSlot(entity, slot, 'meeting', '前往协作会议', semantics, event, cues, {
         physicalState: 'meeting',
@@ -224,6 +225,7 @@ function applyEvent(
       if (!participants.has(entity.id) && (typeof activeMeetingId !== 'string' || activeMeetingId !== meetingId)) continue
       settleAtTarget(entity)
       delete entity.visualState['activeMeetingId']
+      delete entity.visualState['peerConversation']
       delete entity.visualState['peerConversation']
       delete entity.visualState['peerConversation']
       delete entity.visualState['peerConversation']
