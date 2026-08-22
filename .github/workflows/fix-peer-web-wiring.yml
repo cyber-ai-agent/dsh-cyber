@@ -1,16 +1,16 @@
 name: Fix peer web wiring
 
 on:
-  push:
+  pull_request:
     branches:
-      - feat/npc-collaboration-v1
+      - main
 
 permissions:
   contents: write
 
 jobs:
   patch:
-    if: ${{ !contains(github.event.head_commit.message, '[peer-web-fixed]') }}
+    if: ${{ github.head_ref == 'feat/npc-collaboration-v1' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -49,9 +49,11 @@ jobs:
                     createGroupIntent({ employeeIds: selected.map((employee) => employee.id), title: selected.map((employee) => employee.displayName).join('、') })
                   }}
           """
-          if old not in text:
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif 'onStartGroup={(employeeIds, session) =>' not in text:
               raise SystemExit('App callback anchor not found')
-          app.write_text(text.replace(old, new, 1))
+          app.write_text(text)
 
           route = Path('packages/server/src/routes/conversation-routes.ts')
           text = route.read_text()
@@ -76,6 +78,10 @@ jobs:
           PY
       - name: Commit patch
         run: |
+          if git diff --quiet; then
+            echo "Peer web wiring already fixed"
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add packages/web/src/App.tsx packages/server/src/routes/conversation-routes.ts
