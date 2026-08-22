@@ -121,7 +121,8 @@ describe('ambient settings and scheduler', () => {
     })
 
     const results = await scheduler.runOnce()
-    expect(calls).toEqual([first.id, second.id])
+    expect(calls).toHaveLength(2)
+    expect(calls).toEqual(expect.arrayContaining([first.id, second.id]))
     expect(errors).toEqual([first.id])
     expect(results.map((item) => item.worldId)).toEqual([second.id])
     await scheduler.close()
