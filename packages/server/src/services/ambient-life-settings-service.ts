@@ -5,15 +5,8 @@ import type { AmbientWorldPolicy } from '@dsh-cyber/world-simulation'
 
 import { ServiceError } from './service-error.js'
 
-export interface WorldAmbientLifeSettings {
+export interface WorldAmbientLifeSettings extends Required<AmbientWorldPolicy> {
   worldId: string
-  enabled: boolean
-  minimumIdleMs: number
-  minimumAmbientIntervalMs: number
-  socialCooldownMs: number
-  breakAfterMs: number
-  timeBucketMs: number
-  maximumPlansPerTick: number
   updatedAt: string
 }
 
