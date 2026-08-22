@@ -18,7 +18,7 @@ interface EmployeeMenuProps {
   onTalk(): void
   onAssignTask(): void
   onMeeting(): void
-  onPeerCollaboration(): void
+  onPeerCollaboration?(): void
   onDossier?(): void
 }
 
@@ -33,7 +33,7 @@ export function EmployeeInteractionMenu({ employee, onClose, onTalk, onAssignTas
       <div className="world-context-menu__actions">
         <button type="button" onClick={onTalk}><ChatsCircle size={18} /><span><strong>直接对话</strong><small>进入这名角色的独立会话</small></span></button>
         <button type="button" onClick={onAssignTask}><ClipboardText size={18} /><span><strong>安排任务</strong><small>让角色前往可用工作区域执行</small></span></button>
-        <button type="button" onClick={onPeerCollaboration}><UsersThree size={18} /><span><strong>让他去沟通</strong><small>选择其他角色，发起有目标的真实讨论</small></span></button>
+        {onPeerCollaboration === undefined ? null : <button type="button" onClick={onPeerCollaboration}><UsersThree size={18} /><span><strong>让他去沟通</strong><small>选择其他角色，发起有目标的真实讨论</small></span></button>}
         <button type="button" onClick={onMeeting}><UsersThree size={18} /><span><strong>和我一起协作</strong><small>创建包含你的多人会话</small></span></button>
         {onDossier === undefined ? null : <button type="button" onClick={onDossier}><AddressBook size={18} /><span><strong>角色档案</strong><small>成长、技能、日志与事迹</small></span></button>}
       </div>
