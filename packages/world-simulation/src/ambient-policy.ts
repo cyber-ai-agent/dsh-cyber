@@ -2,7 +2,6 @@ export type AmbientBehaviorKind =
   | 'stay-at-post'
   | 'inspect-work-area'
   | 'take-short-break'
-  | 'consult-colleague'
   | 'return-home'
 
 export interface AmbientCharacterState {
@@ -59,7 +58,6 @@ export interface AmbientDecision {
 
 const DEFAULT_MINIMUM_IDLE_MS = 45_000
 const DEFAULT_AMBIENT_INTERVAL_MS = 180_000
-const DEFAULT_SOCIAL_COOLDOWN_MS = 900_000
 const DEFAULT_BREAK_AFTER_MS = 1_800_000
 const DEFAULT_TIME_BUCKET_MS = 300_000
 
@@ -68,7 +66,8 @@ const DEFAULT_TIME_BUCKET_MS = 300_000
  *
  * This policy is intentionally deterministic. It never uses Math.random(), never lets
  * the model control coordinates, and never moves a character outside role-compatible
- * zones. The same world state and time bucket always produce the same decision.
+ * zones. Ambient life only represents visual routines; all character conversations
+ * continue through the real peer-collaboration runtime and are never simulated here.
  */
 export function decideAmbientBehavior(input: AmbientPolicyInput): AmbientDecision | undefined {
   if (!input.enabled) return undefined
@@ -102,9 +101,6 @@ export function decideAmbientBehavior(input: AmbientPolicyInput): AmbientDecisio
   const bucket = Math.floor(nowMs / timeBucketMs)
   const selector = stableNumber(`${character.worldId}:${character.characterId}:${bucket}`)
 
-  const social = selectSocialDecision(input, availableSlots, selector, nowMs)
-  if (social !== undefined) return social
-
   const breakAfterMs = input.breakAfterMs ?? DEFAULT_BREAK_AFTER_MS
   if (nowMs - idleSinceMs >= breakAfterMs && selector % 5 === 0) {
     const rest = rankSlots(availableSlots, ['rest', 'lounge', 'public'], ['rest', 'seat'])[0]
@@ -132,41 +128,6 @@ export function decideAmbientBehavior(input: AmbientPolicyInput): AmbientDecisio
     })
   }
   return undefined
-}
-
-function selectSocialDecision(
-  input: AmbientPolicyInput,
-  slots: AmbientSlot[],
-  selector: number,
-  nowMs: number,
-): AmbientDecision | undefined {
-  if (selector % 7 !== 0) return undefined
-  const character = input.character
-  const cooldown = input.socialCooldownMs ?? DEFAULT_SOCIAL_COOLDOWN_MS
-  if (character.lastSocialAt !== undefined && nowMs - parseTime(character.lastSocialAt) < cooldown) return undefined
-
-  const candidates = input.colleagues
-    .filter((candidate) => candidate.worldId === character.worldId)
-    .filter((candidate) => candidate.characterId !== character.characterId)
-    .filter((candidate) => candidate.status === 'available')
-    .filter((candidate) => candidate.activePlanId === undefined && candidate.activeSessionId === undefined)
-    .filter((candidate) => isUsefulColleague(character, candidate))
-    .sort((left, right) => left.characterId.localeCompare(right.characterId))
-  if (candidates.length === 0) return undefined
-
-  const target = candidates[selector % candidates.length]
-  if (target === undefined) return undefined
-  const conversation = rankSlots(slots, ['conversation', 'public'], ['conversation', 'waiting'])[0]
-  if (conversation === undefined) return undefined
-
-  return decision(input, {
-    kind: 'consult-colleague',
-    source: 'role-routine',
-    reason: `基于岗位职责与 ${target.displayName} 进行一次有目标、受冷却限制的短协作`,
-    priority: 30,
-    targetSlotId: conversation.id,
-    targetCharacterId: target.characterId,
-  })
 }
 
 function selectRoleRoutine(
@@ -241,21 +202,6 @@ function rankSlots(slots: AmbientSlot[], semanticTags: string[], kinds: AmbientS
 function isAvailableFor(slot: AmbientSlot, characterId: string): boolean {
   return (slot.occupiedBy === undefined || slot.occupiedBy === characterId)
     && (slot.reservedBy === undefined || slot.reservedBy === characterId)
-}
-
-function isUsefulColleague(left: AmbientCharacterState, right: AmbientCharacterState): boolean {
-  const leftTags = normalizedTags([...left.roleTags, ...left.preferredZoneTags, left.role])
-  const rightTags = normalizedTags([...right.roleTags, ...right.preferredZoneTags, right.role])
-  if ([...leftTags].some((tag) => rightTags.has(tag))) return true
-  const complements = [
-    ['administration', 'engineering'],
-    ['秘书', '工程师'],
-    ['research', 'engineering'],
-    ['研究', '工程师'],
-    ['operations', 'engineering'],
-    ['运维', '工程师'],
-  ] as const
-  return complements.some(([a, b]) => (leftTags.has(a) && rightTags.has(b)) || (leftTags.has(b) && rightTags.has(a)))
 }
 
 function normalizedTags(values: string[]): Set<string> {
