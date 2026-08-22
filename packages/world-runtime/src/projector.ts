@@ -181,6 +181,8 @@ function applyEvent(
 ): void {
   const employeeId = eventEmployeeId(event)
 
+  if (event.type === 'world.interaction.requested' && applyAmbientInteractionEvent(event, entities, semantics, cues)) return
+
   if (event.type === 'meeting.started') {
     const participants = stringArrayValue(event.payload, 'participantIds')
     const occupied = occupiedSlotIds(entities, new Set(participants))
@@ -407,6 +409,80 @@ function peerMeetingActivity(
     return { activity: 'blocked', physicalState: 'blocked', label: '发言受阻，等待处理' }
   }
   return { activity: 'meeting', physicalState: 'listening', label: '本轮发言结束，继续倾听' }
+}
+
+function applyAmbientInteractionEvent(
+  event: DomainEvent,
+  entities: Map<string, WorldRuntimeEntityState>,
+  semantics: CompiledWorldSemantics,
+  cues: WorldCue[],
+): boolean {
+  const action = textValue(event.payload, 'action')
+  if (action !== 'ambient-start' && action !== 'ambient-complete') return false
+  const characterId = textValue(event.payload, 'characterId') ?? textValue(event.payload, 'employeeId')
+  if (characterId === undefined) return true
+  const entity = entities.get(characterId)
+  if (entity === undefined) return true
+  settleAtTarget(entity)
+
+  if (action === 'ambient-complete') {
+    delete entity.visualState['ambientPlanId']
+    delete entity.visualState['ambientBehaviorKind']
+    delete entity.visualState['ambientTargetCharacterId']
+    const home = slotFromVisualState(semantics, entity, 'homeSlotId')
+    if (home !== undefined) {
+      moveEntityToSlot(entity, home, 'idle', '日常活动结束，返回岗位', semantics, event, cues, {
+        physicalState: 'navigating',
+        source: 'ambient',
+        planId: textValue(event.payload, 'planId'),
+      })
+    }
+    return true
+  }
+
+  const targetSlotId = textValue(event.payload, 'targetSlotId')
+  const target = targetSlotId === undefined
+    ? undefined
+    : semantics.slots.find((slot) => slot.id === targetSlotId)
+  if (target === undefined) return true
+  const behaviorKind = textValue(event.payload, 'behaviorKind') ?? 'stay-at-post'
+  const presentation = ambientPresentation(behaviorKind)
+  entity.visualState = compactVisualState({
+    ...entity.visualState,
+    ambientPlanId: textValue(event.payload, 'planId'),
+    ambientBehaviorKind: behaviorKind,
+    ambientTargetCharacterId: textValue(event.payload, 'targetCharacterId'),
+  })
+  moveEntityToSlot(
+    entity,
+    target,
+    presentation.activity,
+    presentation.label,
+    semantics,
+    event,
+    cues,
+    {
+      physicalState: 'navigating',
+      source: textValue(event.payload, 'source') ?? 'ambient',
+      planId: textValue(event.payload, 'planId'),
+    },
+  )
+  return true
+}
+
+function ambientPresentation(kind: string): { activity: WorldActivityKind; label: string } {
+  switch (kind) {
+    case 'inspect-work-area':
+      return { activity: 'working', label: '正在进行岗位巡检' }
+    case 'consult-colleague':
+      return { activity: 'meeting', label: '前往进行一次岗位沟通' }
+    case 'take-short-break':
+      return { activity: 'idle', label: '前往休息区短暂休息' }
+    case 'return-home':
+      return { activity: 'idle', label: '返回自己的固定岗位' }
+    default:
+      return { activity: 'idle', label: '在岗位待命' }
+  }
 }
 
 function moveEntityToSlot(
