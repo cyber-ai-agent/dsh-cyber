@@ -982,3 +982,28 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition: none !important; }
 }
+
+
+/* role-aware ambient life */
+.ambient-life-backdrop { z-index: 180; }
+.ambient-life-dialog { width: min(760px, calc(100vw - 40px)); max-height: min(820px, calc(100vh - 40px)); overflow: auto; border: 1px solid var(--border-strong); border-radius: 18px; background: var(--surface-0); box-shadow: 0 28px 90px rgba(0,0,0,.5); }
+.ambient-life-dialog > header { display: grid; grid-template-columns: auto 1fr auto; align-items: start; gap: 14px; padding: 20px 22px; border-bottom: 1px solid var(--border-subtle); }
+.ambient-life-dialog > header h2 { margin: 0 0 5px; font-size: 20px; }
+.ambient-life-dialog > header p { margin: 0; color: var(--text-muted); line-height: 1.55; }
+.ambient-life-dialog__icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 13px; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.ambient-life-dialog__body { display: grid; gap: 18px; padding: 22px; }
+.ambient-life-dialog__loading, .ambient-life-dialog__error { margin: 22px; padding: 14px 16px; border-radius: 10px; background: var(--surface-2); color: var(--text-muted); }
+.ambient-life-dialog__error { color: var(--danger); }
+.ambient-life-switch { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 16px; border: 1px solid var(--border-subtle); border-radius: 14px; background: var(--surface-1); }
+.ambient-life-switch span { display: grid; gap: 4px; }
+.ambient-life-switch small { color: var(--text-muted); line-height: 1.45; }
+.ambient-life-switch input { width: 42px; height: 24px; accent-color: var(--accent); }
+.ambient-life-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.ambient-life-field { display: grid; gap: 7px; }
+.ambient-life-field > span { color: var(--text-muted); font-size: 13px; }
+.ambient-life-field select { width: 100%; min-height: 42px; border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--surface-1); color: var(--text); padding: 0 12px; }
+.ambient-life-dialog__notice { display: grid; gap: 6px; padding: 14px 16px; border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--surface-1)); color: var(--text-muted); line-height: 1.55; }
+.ambient-life-dialog__notice strong { color: var(--text); }
+.ambient-life-dialog > footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 22px; border-top: 1px solid var(--border-subtle); color: var(--text-muted); }
+.ambient-life-dialog > footer > div { display: flex; gap: 9px; }
+@media (max-width: 760px) { .ambient-life-grid { grid-template-columns: 1fr; } .ambient-life-dialog > footer { align-items: stretch; flex-direction: column; } }
