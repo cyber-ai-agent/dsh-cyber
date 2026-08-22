@@ -1,0 +1,50 @@
+name: Fix Agent session refresh
+
+on:
+  push:
+    branches:
+      - feat/npc-collaboration-v1
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: ${{ !contains(github.event.head_commit.message, '[agent-session-refreshed]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/npc-collaboration-v1
+          fetch-depth: 0
+      - name: Refresh persisted character state before every turn
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('packages/orchestration/src/conversation-orchestrator.ts')
+          text = path.read_text()
+          marker = """  ): Promise<AgentReply> {
+    const revision = this.#store.getEmployeeRevision(employee.id, employee.currentRevision)
+          """
+          replacement = """  ): Promise<AgentReply> {
+    employee = this.#requireEmployeeInWorld(employee.id, session.workspaceId, session.worldId)
+    const revision = this.#store.getEmployeeRevision(employee.id, employee.currentRevision)
+          """
+          if marker in text:
+              text = text.replace(marker, replacement, 1)
+          elif 'employee = this.#requireEmployeeInWorld(employee.id, session.workspaceId, session.worldId)' not in text:
+              raise SystemExit('Agent turn refresh anchor not found')
+          path.write_text(text)
+          PY
+      - name: Commit fix
+        run: |
+          if git diff --quiet; then
+            echo "Agent session refresh already applied"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/orchestration/src/conversation-orchestrator.ts
+          git commit -m "fix: refresh persisted character Agent sessions before each turn [agent-session-refreshed]"
+          git push origin HEAD:feat/npc-collaboration-v1
