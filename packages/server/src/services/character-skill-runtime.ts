@@ -9,7 +9,6 @@ import type {
 } from '@dsh-cyber/contracts/skill-runtime'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
-import { createBuiltinSkillRegistry } from '../skills/builtin-skill-registry.js'
 import type { CharacterSkillAdapterRegistry } from '../skills/skill-adapter.js'
 
 const TICK_MS = 30_000
@@ -34,16 +33,17 @@ interface LegacySkillAction {
 }
 
 export interface CharacterSkillRuntimeOptions {
-  registry?: CharacterSkillAdapterRegistry
+  registry: CharacterSkillAdapterRegistry
 }
 
 /**
  * Provider-neutral skill orchestration.
  *
  * Responsibilities stay deliberately narrow: authorize by character revision,
- * ask registered trusted adapters for structured proposals, persist durable
- * actions, schedule them, and feed factual execution results back to the Agent.
- * It never knows how Home Assistant, GitHub, Feishu or any future provider works.
+ * ask a host-injected registry for structured proposals, persist durable actions,
+ * schedule them, and feed factual execution results back to the Agent.
+ * It never owns provider registration and never knows how Home Assistant,
+ * GitHub, Feishu or any future provider works.
  */
 export class CharacterSkillRuntime {
   readonly #store: SqliteStore
@@ -52,10 +52,10 @@ export class CharacterSkillRuntime {
   #timer: NodeJS.Timeout | undefined
   #ticking = false
 
-  constructor(store: SqliteStore, options: CharacterSkillRuntimeOptions = {}) {
+  constructor(store: SqliteStore, options: CharacterSkillRuntimeOptions) {
     this.#store = store
     this.#path = join(dirname(dirname(store.databasePath)), 'skills', 'actions.json')
-    this.#registry = options.registry ?? createBuiltinSkillRegistry()
+    this.#registry = options.registry
   }
 
   start(): void {
