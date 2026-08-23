@@ -40,9 +40,10 @@ test('lets one embodied character consult another, shows the real exchange, and 
   await expect(page.getByRole('button', { name: '与阿帆私聊' })).toBeVisible()
 
   await page.getByRole('button', { name: '与管家私聊' }).click()
+  await page.getByRole('button', { name: '管家世界角色' }).press('Shift+F10')
   const characterMenu = page.getByLabel('管家情境操作')
   await expect(characterMenu).toBeVisible()
-  await characterMenu.getByRole('button', { name: /让他去沟通/ }).click()
+  await characterMenu.getByRole('menuitem', { name: /让他去沟通/ }).click()
 
   const dialog = page.getByRole('dialog', { name: /让 管家 去沟通/ })
   await expect(dialog).toBeVisible()

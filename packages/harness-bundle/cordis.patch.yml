@@ -15,12 +15,12 @@
   config:
     persona: !!js process.env.DSH_SYSTEM_PROMPT ?? 'You are a professional AI employee. Stay in role, report evidence, and never impersonate another employee.'
 
-# SDK workers have no approval UI. Phase 1 therefore defaults to a read-only
-# workspace and disables side-effecting command tools. Capability grants can
-# add tools in a later, explicit employee revision.
+# SDK workers have no approval UI. The product exposes two explicit modes:
+# read-only for inspection, and workspace-write for commands and file changes
+# confined to the current world's workspace root.
 - id: sandbox-policy
   config:
-    mode: read-only
+    mode: !!js process.env.DSH_PERMISSION_MODE ?? 'read-only'
     workspaceRoot: !!js process.env.DSH_CWD ?? process.cwd()
 
 - id: approval
@@ -29,32 +29,35 @@
 
 - id: permission
   config:
-    defaultPreset: employee-read-only
+    defaultPreset: !!js process.env.DSH_PERMISSION_MODE ?? 'read-only'
     presets:
-      employee-read-only:
+      read-only:
         sandbox: read-only
+        approval: never
+      workspace-write:
+        sandbox: workspace-write
         approval: never
 
 - id: tool-bash
-  disabled: true
+  disabled: !!js process.env.DSH_PERMISSION_MODE !== 'workspace-write'
 
 - id: tool-pwsh
-  disabled: true
+  disabled: !!js process.env.DSH_PERMISSION_MODE !== 'workspace-write'
 
 - id: tool-str-replace-editor
-  disabled: true
+  disabled: !!js process.env.DSH_PERMISSION_MODE !== 'workspace-write'
 
 - id: tool-fs
-  disabled: true
+  disabled: false
 
 - id: tool-fs-search
-  disabled: true
+  disabled: false
 
 - id: tool-workflow
-  disabled: true
+  disabled: !!js process.env.DSH_PERMISSION_MODE !== 'workspace-write'
 
 - id: tool-ralph
-  disabled: true
+  disabled: !!js process.env.DSH_PERMISSION_MODE !== 'workspace-write'
 
 - insert:
     - id: dsh-cyber-sdk-jsonrpc

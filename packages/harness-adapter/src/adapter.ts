@@ -1,8 +1,10 @@
+import { randomUUID } from 'node:crypto'
 import { join, resolve } from 'node:path'
 
 import { DeepSeekHarness, type HarnessNotification } from '@deepseek-ai/dsh-sdk-client'
 import type {
   AgentRuntimeEvent,
+  AgentPermissionMode,
   AgentRuntimePort,
   AgentTurnRequest,
   AgentTurnResult,
@@ -24,6 +26,7 @@ export interface EmployeeTurnRequest {
   revision: EmployeeRevision
   prompt: string
   workspacePath: string
+  permissionMode?: AgentPermissionMode
   onNotification?: (notification: HarnessNotification) => void
 }
 
@@ -48,6 +51,7 @@ export interface HarnessRuntimeSpec {
   profile: HarnessProfilePaths
   workspacePath: string
   sessionsRoot: string
+  permissionMode: AgentPermissionMode
 }
 
 export type HarnessRuntimeFactory = (spec: HarnessRuntimeSpec) => HarnessRuntime
@@ -65,7 +69,7 @@ export interface HarnessAdapterOptions {
 
 export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDisposable {
   readonly #options: HarnessAdapterOptions
-  readonly #runtimes = new Map<string, HarnessRuntime>()
+  readonly #runtimes = new Map<string, { permissionMode: AgentPermissionMode; runtime: HarnessRuntime }>()
   #profile: Promise<HarnessProfilePaths> | undefined
 
   constructor(options: HarnessAdapterOptions) {
@@ -78,6 +82,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       revision: request.revision,
       prompt: request.prompt,
       workspacePath: request.workspacePath,
+      ...(request.permissionMode === undefined ? {} : { permissionMode: request.permissionMode }),
     }
     if (request.onEvent !== undefined) {
       employeeRequest.onNotification = (notification) => {
@@ -96,28 +101,64 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
 
   async runEmployeeTurn(request: EmployeeTurnRequest): Promise<EmployeeTurnResult> {
     const profile = await this.#getProfile()
-    const agentSessionId = request.employee.agentSessionId ?? stableAgentSessionId(request.employee.id)
-    let runtime = this.#runtimes.get(request.employee.id)
-    if (runtime === undefined) {
+    let agentSessionId = request.employee.agentSessionId ?? stableAgentSessionId(request.employee.id)
+    const permissionMode = request.permissionMode ?? 'read-only'
+    let cached = this.#runtimes.get(request.employee.id)
+    let createdRuntime = false
+    if (cached !== undefined && cached.permissionMode !== permissionMode) {
+      this.#runtimes.delete(request.employee.id)
+      await cached.runtime.close()
+      cached = undefined
+    }
+    if (cached === undefined) {
       const spec: HarnessRuntimeSpec = {
         employee: request.employee,
         revision: request.revision,
         profile,
         workspacePath: resolve(request.workspacePath),
         sessionsRoot: join(resolve(this.#options.stateRoot), 'harness-sessions', request.employee.id),
+        permissionMode,
       }
-      runtime = this.#options.runtimeFactory?.(spec) ?? this.#createRuntime(spec)
-      this.#runtimes.set(request.employee.id, runtime)
+      const runtime = this.#options.runtimeFactory?.(spec) ?? this.#createRuntime(spec)
+      cached = { permissionMode, runtime }
+      this.#runtimes.set(request.employee.id, cached)
+      createdRuntime = true
     }
-    const result = await runtime.run(agentSessionId, request.prompt, request.onNotification)
-    return { agentSessionId, ...result }
+    // DSH 0.1.1-rc.1 cannot resume a named session whose JSONL log was
+    // created by an earlier worker process. A newly created runtime therefore
+    // receives a fresh id up front, before it can emit turn/tool events. The
+    // recovered id is returned and persisted by the orchestrator; subsequent
+    // turns in this runtime keep using that same id.
+    if (createdRuntime && request.employee.agentSessionId !== undefined) {
+      agentSessionId = freshAgentSessionId(request.employee.id)
+    }
+    let observedNotification = false
+    const onNotification = request.onNotification === undefined
+      ? undefined
+      : (notification: HarnessNotification) => {
+          observedNotification = true
+          request.onNotification?.(notification)
+        }
+    try {
+      const result = await cached.runtime.run(agentSessionId, request.prompt, onNotification)
+      return { agentSessionId, ...result }
+    } catch (error) {
+      // DSH 0.1.1-rc.1's JSON-RPC server creates a named session on every
+      // process start instead of resuming its persisted log. Reusing the
+      // employee's durable id can therefore fail before the prompt is queued.
+      // Only that exact, side-effect-free failure is safe to retry.
+      if (observedNotification || !isPersistedSessionCollision(error)) throw error
+      const recoveredSessionId = freshAgentSessionId(request.employee.id)
+      const result = await cached.runtime.run(recoveredSessionId, request.prompt, request.onNotification)
+      return { agentSessionId: recoveredSessionId, ...result }
+    }
   }
 
   async closeEmployee(employeeId: string): Promise<void> {
     const runtime = this.#runtimes.get(employeeId)
     if (runtime === undefined) return
     this.#runtimes.delete(employeeId)
-    await runtime.close()
+    await runtime.runtime.close()
   }
 
   closeAgent(agentId: string): Promise<void> {
@@ -125,7 +166,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
   }
 
   async close(): Promise<void> {
-    const runtimes = [...this.#runtimes.values()]
+    const runtimes = [...this.#runtimes.values()].map((entry) => entry.runtime)
     this.#runtimes.clear()
     const results = await Promise.allSettled(runtimes.map((runtime) => runtime.close()))
     const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
@@ -289,6 +330,35 @@ export function stableAgentSessionId(employeeId: string): string {
   return `employee-${employeeId.replaceAll(/[^a-zA-Z0-9_-]/g, '-')}`
 }
 
+export function freshAgentSessionId(employeeId: string): string {
+  return `${stableAgentSessionId(employeeId)}-${randomUUID().replaceAll('-', '')}`
+}
+
+export function isPersistedSessionCollision(value: unknown): boolean {
+  const seen = new Set<unknown>()
+  const messages: string[] = []
+  let current: unknown = value
+  for (let depth = 0; depth < 5 && current !== null && current !== undefined && !seen.has(current); depth += 1) {
+    seen.add(current)
+    if (current instanceof Error) {
+      messages.push(current.message)
+      current = (current as Error & { cause?: unknown }).cause
+      continue
+    }
+    if (typeof current === 'object') {
+      const record = current as Record<string, unknown>
+      if (typeof record.message === 'string') messages.push(record.message)
+      current = record.cause ?? record.error ?? record.data
+      continue
+    }
+    messages.push(String(current))
+    break
+  }
+  const signal = messages.join(' ').toLowerCase()
+  return signal.includes('id collision')
+    && (signal.includes('persisted log') || signal.includes('already persisted'))
+}
+
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -440,7 +510,7 @@ export function workerEnvironment(
   environment.DSH_SESSION_ROOT = spec.sessionsRoot
   environment.DSH_SYSTEM_PROMPT = employeeSystemPrompt(spec.employee, spec.revision)
   environment.DSH_TELEMETRY_DISABLED = '1'
-  environment.DSH_PERMISSION_MODE = 'read-only'
+  environment.DSH_PERMISSION_MODE = spec.permissionMode
   return environment
 }
 

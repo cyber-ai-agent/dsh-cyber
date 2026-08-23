@@ -244,6 +244,13 @@ test('keeps the workbench readable and the world viewport filled on a 4K display
 
 test('creates, edits, restores, and deletes a private-network sub2api model profile', async ({ page }) => {
   await page.setViewportSize({ width: 1_920, height: 1_080 })
+  await page.route('**/api/workspaces/*/model-profiles/discover', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ items: [{ id: 'deepseek-v4-flash' }, { id: 'qwen3.5:9b' }, { id: 'qwen3.5' }] }),
+    })
+  })
   await page.goto(origin)
   await page.getByRole('button', { name: '设置', exact: true }).click()
   let settings = page.getByRole('dialog', { name: '设置' })
@@ -259,6 +266,14 @@ test('creates, edits, restores, and deletes a private-network sub2api model prof
   await editor.getByRole('textbox', { name: '接口地址' }).fill('http://172.16.1.125:11434/v1/')
   await editor.getByLabel('模型 ID').fill('qwen3.5:9b')
   await editor.getByRole('textbox', { name: /API 密钥/ }).fill('sk-e2e-test-only-not-real')
+  await editor.getByRole('button', { name: '获取可用模型' }).click()
+  const modelSelect = editor.getByRole('combobox', { name: '选择可用模型' })
+  await expect(modelSelect).toBeVisible()
+  await expect(modelSelect).toHaveValue('qwen3.5:9b')
+  await editor.getByRole('button', { name: '手动填写其他模型 ID' }).click()
+  await expect(editor.getByLabel('模型 ID')).toBeVisible()
+  await editor.getByRole('button', { name: '从已获取列表选择' }).click()
+  await modelSelect.selectOption('qwen3.5:9b')
   await editor.getByRole('button', { name: '添加并保存' }).click()
   await expect(editor.getByRole('status')).toContainText('模型配置已添加并保存')
   await expect(settings.getByRole('article').filter({ hasText: '公司 sub2api' })).toContainText('qwen3.5:9b')
@@ -375,6 +390,12 @@ test('keeps chat conversational while World Trace explains execution during and 
   await expect(page.locator('.world-trace-panel')).toBeVisible()
   await expect(page.locator('.world-trace-item').filter({ hasText: '角色开始处理请求' })).toBeVisible()
   await expect(page.locator('.world-trace-item').filter({ hasText: 'search_workspace' }).first()).toBeVisible()
+  const reasoningTrace = page.locator('.world-trace-item').filter({ hasText: '角色生成了推理摘要' }).first()
+  await reasoningTrace.locator('summary').click()
+  await expect(reasoningTrace.locator('.world-trace-item__detail')).toContainText('核对事实与权限')
+  const toolTrace = page.locator('.world-trace-item').filter({ hasText: 'search_workspace' }).first()
+  await toolTrace.locator('summary').click()
+  await expect(toolTrace.locator('.world-trace-item__detail')).toContainText('search_workspace')
   await expect(page.locator('.live-turns-block')).toHaveCount(0)
   await expect(page.locator('.reasoning-message')).toHaveCount(0)
   await expect(page.locator('.tool-event-message')).toHaveCount(0)

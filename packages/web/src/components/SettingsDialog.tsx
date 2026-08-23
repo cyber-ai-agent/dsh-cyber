@@ -410,6 +410,7 @@ function ModelSettings({
   const [showApiKey, setShowApiKey] = useState(false)
   const [discoveringModels, setDiscoveringModels] = useState(false)
   const [discoveredModels, setDiscoveredModels] = useState<DiscoveredModel[]>([])
+  const [manualModelId, setManualModelId] = useState(true)
   const assignmentValue = (scope: ModelAssignment['scope'], scopeId: string) =>
     assignments.find((item) => item.scope === scope && item.scopeId === scopeId)?.modelProfileId ?? ''
   const assign = (scope: ModelAssignment['scope'], scopeId: string, modelProfileId: string) =>
@@ -418,6 +419,7 @@ function ModelSettings({
     setDraft(modelDraftForProfile(profile))
     setShowApiKey(false)
     setDiscoveredModels([])
+    setManualModelId(true)
     setModelError(undefined)
     setModelNotice(undefined)
   }
@@ -426,6 +428,7 @@ function ModelSettings({
     setDraft(modelDraftForPreset(custom, models.length === 0))
     setShowApiKey(false)
     setDiscoveredModels([])
+    setManualModelId(true)
     setModelError(undefined)
     setModelNotice(undefined)
   }
@@ -448,7 +451,13 @@ function ModelSettings({
         ...(draft.credentialMode === 'environment' ? { credentialEnvName: draft.credentialEnvName.trim() } : {}),
       })
       setDiscoveredModels(items)
-      if (!draft.modelId.trim() && items[0]) setDraft((current) => ({ ...current, modelId: items[0]!.id }))
+      if (items[0]) {
+        const selected = items.some((item) => item.id === draft.modelId.trim())
+          ? draft.modelId.trim()
+          : items[0].id
+        setDraft((current) => ({ ...current, modelId: selected }))
+        setManualModelId(false)
+      }
       setModelNotice(`已获取 ${items.length} 个可用模型。`)
     } catch (cause) {
       setModelError(cause instanceof Error ? cause.message : '模型列表获取失败，请检查接口配置。')
@@ -540,11 +549,11 @@ function ModelSettings({
           {modelError ? <p className="model-form-message model-form-message--error" role="alert">{modelError}</p> : null}
           {modelNotice ? <p className="model-form-message model-form-message--success" role="status"><CheckCircle size={16} />{modelNotice}</p> : null}
           <div className="setting-grid model-setting-grid">
-            <label><span>提供商类型</span><select value={draft.providerId} onChange={(event) => { const preset = MODEL_PRESETS.find((item) => item.id === event.target.value); if (preset) setDraft({ ...modelDraftForPreset(preset, draft.isDefault), ...(draft.id ? { id: draft.id } : {}) }) }}>{MODEL_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}</select></label>
+            <label><span>提供商类型</span><select value={draft.providerId} onChange={(event) => { const preset = MODEL_PRESETS.find((item) => item.id === event.target.value); if (preset) { setDraft({ ...modelDraftForPreset(preset, draft.isDefault), ...(draft.id ? { id: draft.id } : {}) }); setDiscoveredModels([]); setManualModelId(true) } }}>{MODEL_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}</select></label>
             <label><span>显示名称</span><input value={draft.displayName} placeholder="例如：公司内网 sub2api" onChange={(event) => setDraft({ ...draft, displayName: event.target.value })} /></label>
-            <label className="setting-grid__wide"><span>接口地址</span><input inputMode="url" value={draft.baseUrl} placeholder={draft.providerKind === 'openai-compatible-local' ? 'http://192.168.1.10:11434/v1' : 'https://api.example.com/v1'} onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })} /><small>本机或局域网可使用 HTTP；公网服务必须使用 HTTPS。</small></label>
-            <label><span>接口协议</span><select value={draft.api} onChange={(event) => { setDraft({ ...draft, api: event.target.value as ModelApiKind }); setDiscoveredModels([]) }}><option value="openai-completions">OpenAI 对话补全</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic-messages">Anthropic 消息</option></select></label>
-            <label className="setting-grid__wide"><span>模型 ID</span><div className="model-catalog-input"><input list="available-model-options" value={draft.modelId} placeholder={MODEL_PRESETS.find((item) => item.id === draft.providerId)?.modelPlaceholder} onChange={(event) => setDraft({ ...draft, modelId: event.target.value })} /><button type="button" disabled={discoveringModels} onClick={() => void discoverModels()}>{discoveringModels ? '正在获取…' : '获取可用模型'}</button></div><datalist id="available-model-options">{discoveredModels.map((model) => <option key={model.id} value={model.id}>{model.displayName ?? model.id}</option>)}</datalist><small>{discoveredModels.length > 0 ? `已加载 ${discoveredModels.length} 个模型，可选择或继续手动填写。` : '可以从服务拉取模型列表，也可以直接手动填写模型 ID。'}</small></label>
+            <label className="setting-grid__wide"><span>接口地址</span><input inputMode="url" value={draft.baseUrl} placeholder={draft.providerKind === 'openai-compatible-local' ? 'http://192.168.1.10:11434/v1' : 'https://api.example.com/v1'} onChange={(event) => { setDraft({ ...draft, baseUrl: event.target.value }); setDiscoveredModels([]); setManualModelId(true) }} /><small>本机或局域网可使用 HTTP；公网服务必须使用 HTTPS。</small></label>
+            <label><span>接口协议</span><select value={draft.api} onChange={(event) => { setDraft({ ...draft, api: event.target.value as ModelApiKind }); setDiscoveredModels([]); setManualModelId(true) }}><option value="openai-completions">OpenAI 对话补全</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic-messages">Anthropic 消息</option></select></label>
+            <label className="setting-grid__wide"><span>模型 ID</span><div className="model-catalog-input">{discoveredModels.length > 0 && !manualModelId ? <select aria-label="选择可用模型" value={draft.modelId} onChange={(event) => setDraft({ ...draft, modelId: event.target.value })}>{discoveredModels.map((model) => <option key={model.id} value={model.id}>{model.displayName && model.displayName !== model.id ? `${model.displayName}（${model.id}）` : model.id}</option>)}</select> : <input value={draft.modelId} placeholder={MODEL_PRESETS.find((item) => item.id === draft.providerId)?.modelPlaceholder} onChange={(event) => setDraft({ ...draft, modelId: event.target.value })} />}<button type="button" disabled={discoveringModels} onClick={() => void discoverModels()}>{discoveringModels ? '正在获取…' : '获取可用模型'}</button></div>{discoveredModels.length > 0 ? <button className="model-catalog-mode" type="button" onClick={() => { if (manualModelId && discoveredModels[0]) setDraft((current) => ({ ...current, modelId: discoveredModels.some((item) => item.id === current.modelId) ? current.modelId : discoveredModels[0]!.id })); setManualModelId((current) => !current) }}>{manualModelId ? '从已获取列表选择' : '手动填写其他模型 ID'}</button> : null}<small>{discoveredModels.length > 0 ? `已获取 ${discoveredModels.length} 个模型，当前可直接点选。` : '先获取服务提供的模型列表，也可以直接手动填写模型 ID。'}</small></label>
             <label className="setting-grid__wide"><span>凭据方式</span><select value={draft.credentialMode} onChange={(event) => setDraft({ ...draft, credentialMode: event.target.value as ModelCredentialMode, apiKey: '' })}><option value="api-key">API 密钥</option><option value="environment">环境变量（高级）</option><option value="none">无需凭据</option></select></label>
             {draft.credentialMode === 'api-key' ? (
               <label className="setting-grid__wide"><span>API 密钥</span><div className="model-secret-input"><input type={showApiKey ? 'text' : 'password'} autoComplete="new-password" spellCheck={false} value={draft.apiKey} placeholder={draft.hasStoredApiKey ? '已保存；留空保持原密钥' : '输入 sk-... 或服务商提供的密钥'} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} /><button type="button" aria-label={showApiKey ? '隐藏 API 密钥' : '显示 API 密钥'} onClick={() => setShowApiKey((current) => !current)}>{showApiKey ? <EyeSlash size={18} /> : <Eye size={18} />}</button></div><small>{draft.hasStoredApiKey && !draft.apiKey ? '密钥已加密保存。输入新密钥可替换，留空不会改变。' : '密钥仅发送到本机服务，并加密保存；保存后不再回显明文。'}</small></label>

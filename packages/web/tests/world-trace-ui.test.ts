@@ -6,6 +6,7 @@ import type { WorkMessage, World, WorldTraceEntry } from '@dsh-cyber/contracts'
 
 import { ArtifactDock } from '../src/components/ArtifactDock.js'
 import { ChatWorkbench, isChatMessage } from '../src/components/ChatWorkbench.js'
+import { WorldTraceItem } from '../src/components/world-trace/WorldTraceItem.js'
 import { mergeTraceEntries } from '../src/components/world-trace/useWorldTrace.js'
 
 const world: World = {
@@ -102,7 +103,21 @@ describe('Trace dock and live merge', () => {
   it('does not erase a newer live fact when an older history request completes', () => {
     const live = trace('live-during-refresh', 'running', '2026-08-23T00:02:00.000Z')
     const history = trace('history', 'success', '2026-08-23T00:01:00.000Z')
-    expect(mergeTraceEntries([live], [history]).map((entry) => entry.id)).toEqual(['history', 'live-during-refresh'])
+    expect(mergeTraceEntries([live], [history]).map((entry) => entry.id)).toEqual(['live-during-refresh', 'history'])
+  })
+
+  it('renders reasoning and tool facts as keyboard-expandable cards', () => {
+    const reasoning = { ...trace('reasoning', 'info', '2026-08-23T00:02:00.000Z'), category: 'agent' as const, summary: '角色生成了推理摘要', detail: '先核对事实，再执行工具。' }
+    const tool = { ...trace('tool', 'success', '2026-08-23T00:01:00.000Z'), category: 'tool' as const, summary: '工具执行完成', detail: 'read_file' }
+    const html = renderToStaticMarkup(createElement('ol', {},
+      createElement(WorldTraceItem, { entry: reasoning, employees: [] }),
+      createElement(WorldTraceItem, { entry: tool, employees: [] }),
+    ))
+    expect(html).toContain('<details>')
+    expect(html).toContain('展开推理')
+    expect(html).toContain('展开工具详情')
+    expect(html).toContain('先核对事实，再执行工具。')
+    expect(html).toContain('read_file')
   })
 })
 

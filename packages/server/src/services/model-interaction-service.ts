@@ -235,9 +235,21 @@ const SECRET_PATTERNS: readonly RegExp[] = [
 ]
 
 function sanitizeErrorMessage(value: unknown): string {
-  let text = errorMessageText(value)
+  let text = friendlyRuntimeErrorMessage(value)
   for (const pattern of SECRET_PATTERNS) text = text.replace(pattern, '[已隐藏]')
   return text.slice(0, 500)
+}
+
+export function friendlyRuntimeErrorMessage(value: unknown): string {
+  const text = errorMessageText(value)
+  const normalized = text.toLowerCase()
+  if (
+    normalized.includes('id collision')
+    && (normalized.includes('persisted log') || normalized.includes('already persisted'))
+  ) {
+    return '本地模型会话恢复时发现历史记录冲突。系统会自动建立新的安全会话；请重新发送当前消息。如果仍然失败，请重启本地服务后再试。'
+  }
+  return text
 }
 
 function errorMessageText(value: unknown): string {
@@ -256,6 +268,7 @@ export function classifyTurnFailure(value: unknown): string {
       ? Object.values(value).filter((item) => typeof item === 'string' || typeof item === 'number').join(' ')
       : String(value ?? '')
   const normalized = signal.toLowerCase()
+  if (/id collision/.test(normalized) && /persisted log|already persisted/.test(normalized)) return 'session-recovery'
   if (/401|403|unauthori[sz]ed|forbidden|authentication|invalid[_ -]?api[_ -]?key|credential/.test(normalized)) return 'authentication'
   if (/404|model[_ -]?not[_ -]?found|unknown[_ -]?model|invalid[_ -]?model/.test(normalized)) return 'model-not-found'
   if (/429|rate[_ -]?limit|too many requests|quota/.test(normalized)) return 'rate-limited'

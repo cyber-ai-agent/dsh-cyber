@@ -146,6 +146,96 @@ describe('Harness profile and adapter', () => {
     expect(closes).toBe(1)
   })
 
+  it('recovers a persisted-session id collision before the prompt produces side effects', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-session-recovery-'))
+    const calls: string[] = []
+    const adapter = new HarnessCompatibilityAdapter({
+      stateRoot,
+      runtimeFactory() {
+        return {
+          async run(sessionId) {
+            calls.push(sessionId)
+            if (calls.length === 1) {
+              throw new Error(`session "${sessionId}" already has a persisted log on disk that does not match this live session (id collision)`)
+            }
+            return { finalResponse: '已恢复', notifications: [] }
+          },
+          async close() {},
+        }
+      },
+    })
+
+    const result = await adapter.runEmployeeTurn({
+      employee: employee(),
+      revision: revision(),
+      prompt: '继续处理',
+      workspacePath: stateRoot,
+    })
+
+    expect(calls[0]).toBe(stableAgentSessionId('employee-1'))
+    expect(calls[1]).toMatch(/^employee-employee-1-[a-f0-9]{32}$/)
+    expect(result).toMatchObject({ agentSessionId: calls[1], finalResponse: '已恢复' })
+    await adapter.close()
+  })
+
+  it('rotates a persisted employee session before a newly created worker can collide', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-session-preflight-'))
+    const calls: string[] = []
+    const adapter = new HarnessCompatibilityAdapter({
+      stateRoot,
+      runtimeFactory() {
+        return {
+          async run(sessionId) {
+            calls.push(sessionId)
+            return { finalResponse: '新进程已恢复', notifications: [] }
+          },
+          async close() {},
+        }
+      },
+    })
+
+    const result = await adapter.runEmployeeTurn({
+      employee: { ...employee(), agentSessionId: 'employee-persisted-session' },
+      revision: revision(),
+      prompt: '继续处理',
+      workspacePath: stateRoot,
+    })
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatch(/^employee-employee-1-[a-f0-9]{32}$/)
+    expect(calls[0]).not.toBe('employee-persisted-session')
+    expect(result).toMatchObject({ agentSessionId: calls[0], finalResponse: '新进程已恢复' })
+    await adapter.close()
+  })
+
+  it('never retries a collision after the runtime has emitted an observable event', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-session-no-retry-'))
+    let calls = 0
+    const adapter = new HarnessCompatibilityAdapter({
+      stateRoot,
+      runtimeFactory() {
+        return {
+          async run(sessionId, _prompt, onNotification) {
+            calls += 1
+            onNotification?.({ method: 'session.event', params: { sessionId, event: { type: 'turn/start' } } })
+            throw new Error('persisted log mismatch (id collision)')
+          },
+          async close() {},
+        }
+      },
+    })
+
+    await expect(adapter.runEmployeeTurn({
+      employee: employee(),
+      revision: revision(),
+      prompt: '不要重复执行',
+      workspacePath: stateRoot,
+      onNotification: () => undefined,
+    })).rejects.toThrow('id collision')
+    expect(calls).toBe(1)
+    await adapter.close()
+  })
+
   it('routes independent employees through their selected model profiles and refreshes changed routes', async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-model-router-'))
     const routes = new Map<string, HarnessModelRoute>([
@@ -264,6 +354,7 @@ describe('Harness profile and adapter', () => {
         profile,
         workspacePath: directory,
         sessionsRoot: join(directory, 'sessions'),
+        permissionMode: 'read-only',
       },
     )
     expect(environment.PATH).toBe('bin')
@@ -271,6 +362,25 @@ describe('Harness profile and adapter', () => {
     expect(environment.RANDOM_SECRET).toBeUndefined()
     expect(environment.DSH_PERMISSION_MODE).toBe('read-only')
     expect(environment.DSH_SYSTEM_PROMPT).toContain('小刘')
+  })
+
+  it('restarts an employee runtime when its workspace permission mode changes', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-permission-'))
+    const modes: string[] = []
+    let closes = 0
+    const adapter = new HarnessCompatibilityAdapter({
+      stateRoot,
+      runtimeFactory(spec) {
+        modes.push(spec.permissionMode)
+        return { run: async () => ({ finalResponse: 'ok', notifications: [] }), close: async () => { closes += 1 } }
+      },
+    })
+    await adapter.runEmployeeTurn({ employee: employee(), revision: revision(), prompt: '查看文件', workspacePath: stateRoot, permissionMode: 'read-only' })
+    await adapter.runEmployeeTurn({ employee: employee(), revision: revision(), prompt: '修改文件', workspacePath: stateRoot, permissionMode: 'workspace-write' })
+    expect(modes).toEqual(['read-only', 'workspace-write'])
+    expect(closes).toBe(1)
+    await adapter.close()
+    expect(closes).toBe(2)
   })
 
   it('checks candidate Harness packages in an isolated profile without switching the active runtime', async () => {

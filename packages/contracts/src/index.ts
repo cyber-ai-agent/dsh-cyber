@@ -12,6 +12,7 @@ export type {
 } from './embodiment.js'
 
 export type ReasoningEffort = 'auto' | 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+export type AgentPermissionMode = 'read-only' | 'workspace-write'
 
 export interface WorldSettings {
   schemaVersion: 1
@@ -46,6 +47,9 @@ export interface WorldSettings {
   model: {
     defaultModelProfileId?: string
     reasoningEffort: ReasoningEffort
+  }
+  runtime: {
+    permissionMode: AgentPermissionMode
   }
   updatedAt: IsoTimestamp
 }
@@ -660,6 +664,7 @@ export interface AgentTurnRequest {
   prompt: string
   workspacePath: string
   reasoningEffort?: Exclude<ReasoningEffort, 'auto'>
+  permissionMode?: AgentPermissionMode
   onEvent?: (event: AgentRuntimeEvent) => void
 }
 
