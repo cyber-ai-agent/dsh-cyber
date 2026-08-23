@@ -76,13 +76,13 @@ export class CreativeWorkshopService {
     const projectDirectory = safeChild(this.#projectRoot, projectId)
     await mkdir(join(projectDirectory, 'generated', 'roles'), { recursive: true, mode: 0o700 })
     const reversibleInstalls: ReversiblePackageInstallation[] = []
+    let compiled: CompiledRolePackage[] = []
     let createdWorldId: string | undefined
 
     try {
       // Compile every declarative role package first. World mutation does not begin
       // until all role definitions, manifests and PackageManager previews are valid.
-      const compiled = await this.#compileRoles(projectId, projectDirectory, normalized.roles, normalized.baseTemplateId, now)
-      rememberCompiled(projectDirectory, compiled)
+      compiled = await this.#compileRoles(projectId, projectDirectory, normalized.roles, normalized.baseTemplateId, now)
       for (const item of compiled) item.preview = this.#packageManager.preview(workspaceId, item.manifest)
 
       // PackageManager owns source staging, content verification and per-package rollback.
@@ -162,7 +162,6 @@ export class CreativeWorkshopService {
         updatedAt: now,
       }
       await atomicWrite(join(projectDirectory, 'project.json'), `${JSON.stringify(project, null, 2)}\n`)
-      compiledOrEmpty(projectDirectory)
       return project
     } catch (error) {
       const compensationFailures: unknown[] = []
@@ -173,7 +172,7 @@ export class CreativeWorkshopService {
           compensationFailures.push(cause)
         }
       }
-      for (const item of [...compiledOrEmpty(projectDirectory)].reverse()) {
+      for (const item of [...compiled].reverse()) {
         try {
           this.#store.discardBlueprintIfUnused(item.blueprint.id, item.blueprint.version)
         } catch (cause) {
@@ -235,17 +234,6 @@ export class CreativeWorkshopService {
   }
 }
 
-const compiledBuilds = new Map<string, CompiledRolePackage[]>()
-
-function rememberCompiled(projectDirectory: string, compiled: CompiledRolePackage[]): void {
-  compiledBuilds.set(projectDirectory, compiled)
-}
-
-function compiledOrEmpty(projectDirectory: string): CompiledRolePackage[] {
-  const compiled = compiledBuilds.get(projectDirectory) ?? []
-  compiledBuilds.delete(projectDirectory)
-  return compiled
-}
 
 async function materializeRolePackage(
   directory: string,
