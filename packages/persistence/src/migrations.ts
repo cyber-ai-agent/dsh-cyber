@@ -101,7 +101,7 @@ const MIGRATIONS: readonly Migration[] = [
       ) STRICT;
 
       CREATE INDEX work_sessions_workspace_idx
-        ON work_sessions(workspace_id, status, updated_at DESC);
+        ON work_sessions(workspace_id, world_id, status, updated_at DESC);
 
       CREATE TABLE work_session_participants (
         session_id TEXT NOT NULL REFERENCES work_sessions(id) ON DELETE CASCADE,
@@ -271,8 +271,6 @@ const MIGRATIONS: readonly Migration[] = [
         created_at TEXT NOT NULL
       ) STRICT;
 
-      CREATE INDEX skill_evidence_employee_idx2
-        ON skill_evidence(employee_id, skill_id, created_at DESC);
       CREATE INDEX employee_milestones_employee_idx
         ON employee_milestones(employee_id, occurred_at DESC, id);
 

@@ -1123,8 +1123,8 @@ export class SqliteStore {
       .prepare(
         `INSERT INTO employee_blueprints (
            id, version, world_template_id, display_name, role, summary, persona,
-           requested_skills_json, requested_capabilities_json, created_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           requested_skills_json, requested_capabilities_json, embodiment_json, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         blueprint.id,
@@ -1136,6 +1136,7 @@ export class SqliteStore {
         blueprint.persona,
         stringifyJson(blueprint.requestedSkills),
         stringifyJson(blueprint.requestedCapabilities),
+        blueprint.embodiment === undefined ? null : stringifyJson(blueprint.embodiment as unknown as JsonValue),
         blueprint.createdAt,
       )
     return blueprint
@@ -1179,7 +1180,13 @@ export class SqliteStore {
         `Employee blueprint not found: ${input.blueprintId}@${input.blueprintVersion}`,
       )
     }
-    if (blueprint.worldTemplateId !== world.templateId && world.templateId !== 'personal-world') {
+    // A Blueprint with explicit semantic Embodiment is portable. Legacy
+    // Blueprints without Embodiment keep their original template restriction.
+    if (
+      blueprint.embodiment === undefined
+      && blueprint.worldTemplateId !== world.templateId
+      && world.templateId !== 'personal-world'
+    ) {
       throw new PersistenceError(
         `Blueprint ${blueprint.id}@${blueprint.version} belongs to ${blueprint.worldTemplateId}, not ${world.templateId}`,
       )
@@ -3241,7 +3248,8 @@ function employeeBlueprintEquals(left: EmployeeBlueprint, right: EmployeeBluepri
     left.persona === right.persona &&
     left.createdAt === right.createdAt &&
     [...left.requestedSkills].sort().join('\u0000') === [...right.requestedSkills].sort().join('\u0000') &&
-    [...left.requestedCapabilities].sort().join('\u0000') === [...right.requestedCapabilities].sort().join('\u0000')
+    [...left.requestedCapabilities].sort().join('\u0000') === [...right.requestedCapabilities].sort().join('\u0000') &&
+    JSON.stringify(left.embodiment ?? null) === JSON.stringify(right.embodiment ?? null)
 }
 
 function assertBirthday(value: string): void {
@@ -3342,7 +3350,7 @@ function mapWorld(row: object): World {
 
 function mapBlueprint(row: object): EmployeeBlueprint {
   const value = row as Record<string, unknown>
-  return {
+  const blueprint: EmployeeBlueprint = {
     schemaVersion: 1,
     id: String(value.id),
     version: Number(value.version),
@@ -3355,6 +3363,10 @@ function mapBlueprint(row: object): EmployeeBlueprint {
     requestedCapabilities: parseJson<string[]>(value.requested_capabilities_json),
     createdAt: String(value.created_at),
   }
+  if (typeof value.embodiment_json === 'string') {
+    blueprint.embodiment = parseJson<NonNullable<EmployeeBlueprint['embodiment']>>(value.embodiment_json)
+  }
+  return blueprint
 }
 
 function mapEmployee(row: object): EmployeeInstance {
