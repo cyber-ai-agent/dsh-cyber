@@ -36,7 +36,13 @@ interface LegacySkillAction {
 
 const RISKS = new Set<SkillActionRisk>(['read', 'write-local', 'external-side-effect'])
 const AUTHORIZATIONS = new Set<SkillActionAuthorization>(['explicit-user-request', 'preapproved-policy'])
-const STATUSES = new Set<SkillActionStatus>(['scheduled', 'executed', 'waiting-for-integration', 'failed'])
+const STATUSES = new Set<SkillActionStatus>([
+  'scheduled',
+  'executed',
+  'waiting-for-integration',
+  'failed',
+  'outcome-unknown',
+])
 
 /**
  * Local-first Skill Action repository.
