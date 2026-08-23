@@ -69,6 +69,8 @@ The current branch already includes:
 - pinned/hidden conversation preferences;
 - full local `.dshbackup` including Workshop and Skill state;
 - controlled Harness update / rollback flow.
+- World Trace Center with adapter-based projections over durable domain, conversation and Skill facts;
+- chat/result and execution/trace separation with reconnect recovery and centralized sanitization.
 
 ### Intentionally incomplete
 
@@ -456,10 +458,13 @@ Center
 
 Right
 ├─ World
+├─ Trace
 └─ Dossier
 ```
 
 Market owns template/extension installation. Dossier owns concrete character creation, configuration and authorization. This prevents the same concept from being represented by multiple conflicting entry points.
+
+Chat presents final conversational results only. Provider reasoning summaries, tool lifecycle, task lifecycle, Skill actions, collaboration and semantic world events belong to Trace. Trace is rebuilt from canonical `DomainEvent`, `WorkMessage` and `CharacterSkillAction` facts instead of maintaining a second event database. Its live view reuses the existing world live transport and recovers through an independent cursor-based history API.
 
 ---
 
@@ -539,3 +544,4 @@ The guiding engineering rule is simple:
 - Architecture guidelines: [`development/architecture-guidelines.md`](./development/architecture-guidelines.md)
 - CI strategy: [`development/ci-strategy.md`](./development/ci-strategy.md)
 - Local upgrade safety: [`operations/local-first-upgrades.md`](./operations/local-first-upgrades.md)
+- World Trace Center V1: [`architecture/world-trace-center-v1.md`](./architecture/world-trace-center-v1.md)
