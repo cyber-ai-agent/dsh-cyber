@@ -183,7 +183,7 @@ test('runs direct and group conversations with real world lifecycle, persistence
   expect(afterRestart.growthSlots).toEqual(beforeRestart.growthSlots)
 
   await expect(page.locator('.workbench-shell')).toBeVisible()
-  await page.getByRole('region', { name: '当前世界的会话' }).getByRole('button').first().click()
+  await page.getByRole('button', { name: '与阿帆私聊' }).click()
   await expect(page.getByText('我先建立性能基线。').first()).toBeVisible()
   await dock.getByRole('button', { name: '档案', exact: true }).click()
   await dock.getByRole('button', { name: '全角色档案', exact: true }).click()
