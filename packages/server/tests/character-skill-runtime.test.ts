@@ -9,6 +9,7 @@ import type { CharacterSkillAction, CharacterSkillDescriptor } from '@dsh-cyber/
 import { SqliteStore } from '@dsh-cyber/persistence'
 
 import { CharacterSkillRuntime } from '../src/services/character-skill-runtime.js'
+import { LocalSkillActionRepository } from '../src/skills/local-skill-action-repository.js'
 import {
   CharacterSkillAdapterRegistry,
   type CharacterSkillAdapter,
@@ -34,19 +35,19 @@ describe('CharacterSkillAdapterRegistry', () => {
 
 describe('CharacterSkillRuntime', () => {
   it('does not install provider adapters on its own', async () => {
-    const { store } = await setup([])
+    const { store, root } = await setup([])
     const registry = new CharacterSkillAdapterRegistry()
-    const runtime = new CharacterSkillRuntime(store, { registry })
+    const runtime = makeRuntime(store, root, registry)
 
     expect(runtime.listDescriptors()).toEqual([])
   })
 
   it('executes an authorized skill through a registered adapter and persists only structured facts', async () => {
-    const { store, worldId, employeeId } = await setup(['test.echo'])
+    const { store, root, worldId, employeeId } = await setup(['test.echo'])
     const adapter = new TestAdapter()
     const registry = new CharacterSkillAdapterRegistry()
     registry.register(adapter)
-    const runtime = new CharacterSkillRuntime(store, { registry })
+    const runtime = makeRuntime(store, root, registry)
 
     const result = await runtime.prepare(worldId, employeeId, '请执行 echo', new Date('2026-08-23T08:00:00.000Z'))
 
@@ -66,11 +67,11 @@ describe('CharacterSkillRuntime', () => {
   })
 
   it('never executes a skill that the character did not receive as a grant', async () => {
-    const { store, worldId, employeeId } = await setup([])
+    const { store, root, worldId, employeeId } = await setup([])
     const adapter = new TestAdapter()
     const registry = new CharacterSkillAdapterRegistry()
     registry.register(adapter)
-    const runtime = new CharacterSkillRuntime(store, { registry })
+    const runtime = makeRuntime(store, root, registry)
 
     const result = await runtime.prepare(worldId, employeeId, '请执行 echo')
 
@@ -79,11 +80,11 @@ describe('CharacterSkillRuntime', () => {
   })
 
   it('rechecks grants before a scheduled side effect executes', async () => {
-    const { store, worldId, employeeId } = await setup(['test.echo'])
+    const { store, root, worldId, employeeId } = await setup(['test.echo'])
     const adapter = new TestAdapter('test-adapter', '2026-08-23T09:00:00.000Z')
     const registry = new CharacterSkillAdapterRegistry()
     registry.register(adapter)
-    const runtime = new CharacterSkillRuntime(store, { registry })
+    const runtime = makeRuntime(store, root, registry)
 
     const prepared = await runtime.prepare(worldId, employeeId, '请执行 echo', new Date('2026-08-23T08:00:00.000Z'))
     expect(prepared.actions[0]?.status).toBe('scheduled')
@@ -101,6 +102,26 @@ describe('CharacterSkillRuntime', () => {
       detail: '计划执行前角色已不可用或技能授权已撤销',
     })
     expect(adapter.executed).toBe(0)
+  })
+
+  it('reserves an immediate side effect before adapter execution and deduplicates concurrent requests', async () => {
+    const { store, root, worldId, employeeId } = await setup(['test.echo'])
+    const adapter = new TestAdapter()
+    const registry = new CharacterSkillAdapterRegistry()
+    registry.register(adapter)
+    const runtime = makeRuntime(store, root, registry)
+    const now = new Date('2026-08-23T08:00:00.000Z')
+
+    const [left, right] = await Promise.all([
+      runtime.prepare(worldId, employeeId, '请执行 echo', now),
+      runtime.prepare(worldId, employeeId, '请执行 echo', now),
+    ])
+
+    expect(left.handled).toBe(true)
+    expect(right.handled).toBe(true)
+    expect(left.actions[0]?.id).toBe(right.actions[0]?.id)
+    expect(adapter.executed).toBe(1)
+    expect(await runtime.list(worldId)).toHaveLength(1)
   })
 })
 
@@ -141,6 +162,17 @@ class TestAdapter implements CharacterSkillAdapter {
   }
 }
 
+function makeRuntime(
+  store: SqliteStore,
+  root: string,
+  registry: CharacterSkillAdapterRegistry,
+): CharacterSkillRuntime {
+  return new CharacterSkillRuntime(store, {
+    registry,
+    actions: new LocalSkillActionRepository(join(root, 'skills', 'actions.json')),
+  })
+}
+
 async function setup(skillGrants: string[]) {
   const root = await mkdtemp(join(tmpdir(), 'dsh-skill-runtime-'))
   roots.push(root)
@@ -169,5 +201,5 @@ async function setup(skillGrants: string[]) {
     blueprintVersion: blueprint.version,
     skillGrants,
   })
-  return { store, worldId: world.id, employeeId: employee.id }
+  return { root, store, worldId: world.id, employeeId: employee.id }
 }
