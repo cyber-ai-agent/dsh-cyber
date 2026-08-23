@@ -46,6 +46,11 @@ export interface PackageStorePort {
     errorCode: string
     actorId?: string
   }): PackageInstallTransaction
+  compensateActivatedPackageInstall(input: {
+    transactionId: string
+    errorCode: string
+    actorId?: string
+  }): PackageInstallTransaction
 }
 
 export interface InstallPackageInput {
@@ -54,6 +59,12 @@ export interface InstallPackageInput {
   sourceDirectory: string
   approvalToken: string
   actorId?: string
+}
+
+export interface ReversiblePackageInstallation {
+  installed: InstalledPackage
+  transactionId: string
+  receipt: PackageActivationReceipt
 }
 
 export class PackageApprovalRequiredError extends Error {
@@ -166,6 +177,10 @@ export class PackageManager {
   }
 
   async install(input: InstallPackageInput): Promise<InstalledPackage> {
+    return (await this.installReversible(input)).installed
+  }
+
+  async installReversible(input: InstallPackageInput): Promise<ReversiblePackageInstallation> {
     validatePackageManifest(input.manifest)
     const digest = tokenDigest(input.approvalToken)
     const grant = this.#approvalGrants.get(digest)
@@ -201,7 +216,8 @@ export class PackageManager {
         installedPath: receipt.installedPath,
       }
       if (input.actorId !== undefined) completeInput.actorId = input.actorId
-      return this.#store.completePackageInstall(completeInput)
+      const installed = this.#store.completePackageInstall(completeInput)
+      return { installed, transactionId: transaction.id, receipt }
     } catch (error) {
       if (receipt !== undefined) await this.#runtime.rollback(receipt).catch(() => undefined)
       if (staged !== undefined) await this.#runtime.discard(staged).catch(() => undefined)
@@ -214,6 +230,19 @@ export class PackageManager {
       this.#store.rollbackPackageInstall(rollbackInput)
       throw new PackageInstallError(errorCode, error)
     }
+  }
+
+  async compensate(
+    installation: ReversiblePackageInstallation,
+    errorCode: string,
+    actorId = 'system',
+  ): Promise<void> {
+    await this.#runtime.rollback(installation.receipt)
+    this.#store.compensateActivatedPackageInstall({
+      transactionId: installation.transactionId,
+      errorCode,
+      actorId,
+    })
   }
 
   #purgeApprovalGrants(nowMs: number): void {

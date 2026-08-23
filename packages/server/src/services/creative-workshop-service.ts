@@ -10,7 +10,7 @@ import type {
   WorkshopProject,
   WorkshopRoleDefinition,
 } from '@dsh-cyber/contracts/creative-platform'
-import type { PackageManager } from '@dsh-cyber/package-runtime'
+import type { PackageManager, ReversiblePackageInstallation } from '@dsh-cyber/package-runtime'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { embodimentToBehaviorJson, parseEmbodimentProfile } from '../embodiment-profile.js'
@@ -75,11 +75,14 @@ export class CreativeWorkshopService {
     const projectId = `workshop.${slug(normalized.displayName) || 'world'}.${randomUUID().slice(0, 8)}`
     const projectDirectory = safeChild(this.#projectRoot, projectId)
     await mkdir(join(projectDirectory, 'generated', 'roles'), { recursive: true, mode: 0o700 })
+    const reversibleInstalls: ReversiblePackageInstallation[] = []
+    let createdWorldId: string | undefined
 
     try {
       // Compile every declarative role package first. World mutation does not begin
       // until all role definitions, manifests and PackageManager previews are valid.
       const compiled = await this.#compileRoles(projectId, projectDirectory, normalized.roles, normalized.baseTemplateId, now)
+      rememberCompiled(projectDirectory, compiled)
       for (const item of compiled) item.preview = this.#packageManager.preview(workspaceId, item.manifest)
 
       // PackageManager owns source staging, content verification and per-package rollback.
@@ -87,13 +90,14 @@ export class CreativeWorkshopService {
       for (const item of compiled) {
         const preview = item.preview
         if (preview === undefined) throw new Error(`Workshop package was not previewed: ${item.manifest.id}`)
-        await this.#packageManager.install({
+        const installation = await this.#packageManager.installReversible({
           workspaceId,
           manifest: item.manifest,
           sourceDirectory: item.directory,
           approvalToken: preview.approvalToken,
           actorId: 'owner',
         })
+        reversibleInstalls.push(installation)
         this.#store.saveBlueprint(item.blueprint as EmployeeBlueprint)
       }
 
@@ -103,6 +107,7 @@ export class CreativeWorkshopService {
         templateId: normalized.baseTemplateId,
         actorId: 'owner',
       })
+      createdWorldId = world.id
       await this.#worldRoots.ensure(world.id)
       await this.#worldSettings.save(world.id, {
         lore: normalized.lore,
@@ -157,11 +162,35 @@ export class CreativeWorkshopService {
         updatedAt: now,
       }
       await atomicWrite(join(projectDirectory, 'project.json'), `${JSON.stringify(project, null, 2)}\n`)
+      compiledOrEmpty(projectDirectory)
       return project
     } catch (error) {
-      // Generated workshop output is rebuildable. Do not leave a half-generated
-      // source project behind when preflight or activation fails.
-      await rm(projectDirectory, { recursive: true, force: true }).catch(() => undefined)
+      const compensationFailures: unknown[] = []
+      if (createdWorldId !== undefined) {
+        try {
+          this.#store.rollbackWorldCreation(createdWorldId, 'creative-workshop-build-failed')
+        } catch (cause) {
+          compensationFailures.push(cause)
+        }
+      }
+      for (const item of [...compiledOrEmpty(projectDirectory)].reverse()) {
+        try {
+          this.#store.discardBlueprintIfUnused(item.blueprint.id, item.blueprint.version)
+        } catch (cause) {
+          compensationFailures.push(cause)
+        }
+      }
+      for (const installation of [...reversibleInstalls].reverse()) {
+        try {
+          await this.#packageManager.compensate(installation, 'creative-workshop-build-failed')
+        } catch (cause) {
+          compensationFailures.push(cause)
+        }
+      }
+      await rm(projectDirectory, { recursive: true, force: true }).catch((cause) => compensationFailures.push(cause))
+      if (compensationFailures.length > 0) {
+        throw new AggregateError([error, ...compensationFailures], 'Creative Workshop build failed and compensation was incomplete')
+      }
       throw error
     }
   }
@@ -204,6 +233,18 @@ export class CreativeWorkshopService {
     }
     return compiled
   }
+}
+
+const compiledBuilds = new Map<string, CompiledRolePackage[]>()
+
+function rememberCompiled(projectDirectory: string, compiled: CompiledRolePackage[]): void {
+  compiledBuilds.set(projectDirectory, compiled)
+}
+
+function compiledOrEmpty(projectDirectory: string): CompiledRolePackage[] {
+  const compiled = compiledBuilds.get(projectDirectory) ?? []
+  compiledBuilds.delete(projectDirectory)
+  return compiled
 }
 
 async function materializeRolePackage(

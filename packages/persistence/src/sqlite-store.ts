@@ -1085,6 +1085,23 @@ export class SqliteStore {
     return this.database.prepare(sql).all(workspaceId).map(mapWorld)
   }
 
+  rollbackWorldCreation(worldId: string, reason: string, actorId = 'system'): void {
+    this.#assertWritable()
+    const world = this.#requireWorld(worldId)
+    const workspaceId = world.workspaceId
+    const normalizedReason = reason.trim() || 'construction-failed'
+    this.#transaction(() => {
+      this.database.prepare('DELETE FROM worlds WHERE id = ?').run(world.id)
+      this.#appendEvent({
+        workspaceId,
+        type: 'world.creation.rolled-back',
+        actorId,
+        actorKind: actorId === 'system' ? 'system' : 'owner',
+        payload: { discardedWorldId: world.id, name: world.name, reason: normalizedReason },
+      })
+    })
+  }
+
   saveBlueprint(blueprint: EmployeeBlueprint): EmployeeBlueprint {
     this.#assertWritable()
     if (blueprint.schemaVersion !== 1) throw new PersistenceError('Unsupported employee blueprint schema')
@@ -1136,6 +1153,17 @@ export class SqliteStore {
       .prepare('SELECT * FROM employee_blueprints ORDER BY display_name, version DESC')
       .all()
       .map(mapBlueprint)
+  }
+
+  discardBlueprintIfUnused(id: string, version: number): boolean {
+    this.#assertWritable()
+    const used = this.database
+      .prepare('SELECT 1 AS used FROM employee_instances WHERE blueprint_id = ? AND blueprint_version = ? LIMIT 1')
+      .get(id, version)
+    if (used !== undefined) return false
+    return this.database
+      .prepare('DELETE FROM employee_blueprints WHERE id = ? AND version = ?')
+      .run(id, version).changes > 0
   }
 
   recruitEmployee(input: RecruitEmployeeInput): EmployeeInstance {
@@ -2260,6 +2288,65 @@ export class SqliteStore {
           packageId: transaction.packageId,
           version: transaction.version,
           errorCode: rolledBack.errorCode ?? 'install-failed',
+        },
+      })
+      return rolledBack
+    })
+  }
+
+  compensateActivatedPackageInstall(input: RollbackPackageInstallInput): PackageInstallTransaction {
+    this.#assertWritable()
+    const transaction = this.getPackageInstallTransaction(input.transactionId)
+    if (transaction === undefined || transaction.status !== 'activated') {
+      throw new PersistenceError('Only an activated package install can be compensated')
+    }
+    const active = this.getActivePackage(transaction.workspaceId, transaction.packageId)
+    if (active === undefined || active.version !== transaction.version) {
+      throw new PersistenceError('Activated package no longer matches the compensation target')
+    }
+    const now = this.#clock()
+    const rolledBack: PackageInstallTransaction = {
+      ...transaction,
+      status: 'rolled-back',
+      errorCode: input.errorCode,
+      updatedAt: now,
+    }
+    return this.#transaction(() => {
+      this.database
+        .prepare(
+          `UPDATE installed_packages SET status = 'disabled', updated_at = ?
+           WHERE workspace_id = ? AND package_id = ? AND version = ? AND status = 'active'`,
+        )
+        .run(now, transaction.workspaceId, transaction.packageId, transaction.version)
+      if (transaction.previousVersion !== undefined) {
+        const restored = this.database
+          .prepare(
+            `UPDATE installed_packages SET status = 'active', updated_at = ?
+             WHERE workspace_id = ? AND package_id = ? AND version = ?`,
+          )
+          .run(now, transaction.workspaceId, transaction.packageId, transaction.previousVersion)
+        if (restored.changes !== 1) throw new PersistenceError('Previous package version cannot be restored')
+      }
+      this.database
+        .prepare(
+          `UPDATE package_install_transactions
+           SET status = 'rolled-back', error_code = ?, updated_at = ?
+           WHERE id = ? AND status = 'activated'`,
+        )
+        .run(input.errorCode, now, transaction.id)
+      this.#appendEvent({
+        workspaceId: transaction.workspaceId,
+        type: 'package.install.rolled-back',
+        actorId: input.actorId ?? 'system',
+        actorKind: input.actorId === undefined || input.actorId === 'system' ? 'system' : 'owner',
+        correlationId: transaction.id,
+        payload: {
+          transactionId: transaction.id,
+          packageId: transaction.packageId,
+          version: transaction.version,
+          previousVersion: transaction.previousVersion ?? null,
+          errorCode: input.errorCode,
+          compensatedAfterActivation: true,
         },
       })
       return rolledBack
