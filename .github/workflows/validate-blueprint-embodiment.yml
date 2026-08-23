@@ -77,6 +77,16 @@ jobs:
           equals_replacement = """function employeeBlueprintEquals(left: EmployeeBlueprint, right: EmployeeBlueprint): boolean {\n  return left.schemaVersion === right.schemaVersion &&\n    left.id === right.id &&\n    left.version === right.version &&\n    left.worldTemplateId === right.worldTemplateId &&\n    left.displayName === right.displayName &&\n    left.role === right.role &&\n    left.summary === right.summary &&\n    left.persona === right.persona &&\n    left.createdAt === right.createdAt &&\n    [...left.requestedSkills].sort().join('\\u0000') === [...right.requestedSkills].sort().join('\\u0000') &&\n    [...left.requestedCapabilities].sort().join('\\u0000') === [...right.requestedCapabilities].sort().join('\\u0000') &&\n    JSON.stringify(left.embodiment ?? null) === JSON.stringify(right.embodiment ?? null)\n}"""
           text = text[:equals_match.start()] + equals_replacement + text[equals_match.end():]
           store.write_text(text, encoding='utf-8')
+
+          tests = Path('packages/persistence/tests/sqlite-store.test.ts')
+          text = tests.read_text(encoding='utf-8')
+          text = text.replace('schemaVersion: 12', 'schemaVersion: 13')
+          text = text.replace('expect(exported.schemaVersion).toBe(12)', 'expect(exported.schemaVersion).toBe(13)')
+          legacy_marker = """      DROP TABLE model_interaction_logs;\n      DELETE FROM schema_migrations WHERE version > 2;"""
+          legacy_replacement = """      DROP TABLE model_interaction_logs;\n      ALTER TABLE employee_blueprints DROP COLUMN embodiment_json;\n      DELETE FROM schema_migrations WHERE version > 2;"""
+          if legacy_marker not in text:
+            raise SystemExit('legacy v2 fixture marker not found')
+          tests.write_text(text.replace(legacy_marker, legacy_replacement, 1), encoding='utf-8')
           PY
 
       - run: pnpm install --frozen-lockfile
