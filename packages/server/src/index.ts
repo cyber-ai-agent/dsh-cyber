@@ -1,3 +1,7 @@
 export * from './server.js'
 export * from './world-runtime-service.js'
 export * from './services/local-backup-service.js'
+export * from './skills/skill-adapter.js'
+export * from './skills/skill-action-repository.js'
+export * from './skills/builtin-skill-registry.js'
+export * from './skills/local-skill-action-repository.js'
