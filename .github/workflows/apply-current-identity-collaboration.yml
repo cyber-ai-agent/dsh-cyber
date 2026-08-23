@@ -1,0 +1,42 @@
+name: Apply current identity collaboration cleanup
+
+on:
+  push:
+    branches: [feat/creative-world-platform-v1]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/creative-world-platform-v1
+      - name: Remove template role leakage from collaboration prompts
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('packages/orchestration/src/conversation-orchestrator.ts')
+          text = path.read_text(encoding='utf-8')
+          old_names = "const participantNames = input.participants.map((participant) => `${participant.displayName}（${participant.role}）`).join('、')"
+          new_names = "const participantNames = input.participants.map((participant) => participant.displayName).join('、')"
+          old_instruction = "请从自己的职责、记忆和权限范围内提供具体信息，不要替发起者或其他角色发言。"
+          new_instruction = "请从自己的当前 Persona、记忆和权限范围内提供具体信息，不要从创建时模板岗位推断已经被用户修改掉的身份，也不要替发起者或其他角色发言。"
+          if old_names not in text:
+              raise SystemExit('participant role label target not found')
+          if old_instruction not in text:
+              raise SystemExit('peer role instruction target not found')
+          text = text.replace(old_names, new_names, 1).replace(old_instruction, new_instruction, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+      - name: Commit cleanup and remove one-shot workflow
+        run: |
+          rm .github/workflows/apply-current-identity-collaboration.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add packages/orchestration/src/conversation-orchestrator.ts .github/workflows/apply-current-identity-collaboration.yml
+          git commit -m "fix: keep collaboration prompts on current character identity"
+          git push origin HEAD:feat/creative-world-platform-v1
