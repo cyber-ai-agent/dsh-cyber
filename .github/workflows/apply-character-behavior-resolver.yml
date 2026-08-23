@@ -1,0 +1,63 @@
+name: Apply Character Behavior Resolver
+
+on:
+  push:
+    branches: [feat/creative-world-platform-v1]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/creative-world-platform-v1
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: pnpm
+      - name: Patch World Runtime consumer
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('packages/server/src/world-runtime-service.ts')
+          text = path.read_text(encoding='utf-8')
+          old_import = "import { readCharacterBehaviorProfile } from '@dsh-cyber/world-simulation'\n\nimport {\n  InstalledPackageVerificationCache,"
+          new_import = "import {\n  InstalledPackageVerificationCache,"
+          if old_import not in text:
+            raise SystemExit('World Runtime behavior import target missing')
+          text = text.replace(old_import, new_import, 1)
+          marker = "} from './installed-package-runtime.js'\n"
+          if marker not in text:
+            raise SystemExit('World Runtime local import marker missing')
+          text = text.replace(
+            marker,
+            marker + "import { resolveConfiguredCharacterBehavior } from './services/character-behavior-resolver.js'\n",
+            1,
+          )
+          old = """    const employees = this.#store.listEmployees(worldId).map((employee) => {\n      const behaviorProfile = readCharacterBehaviorProfile(\n        this.#store.getEmployeeProfile(employee.id)?.appearance,\n      )\n      return behaviorProfile === undefined ? employee : { ...employee, behaviorProfile }\n    })"""
+          new = """    const employees = this.#store.listEmployees(worldId).map((employee) => {\n      const behaviorProfile = resolveConfiguredCharacterBehavior(this.#store, employee)\n      return behaviorProfile === undefined ? employee : { ...employee, behaviorProfile }\n    })"""
+          if old not in text:
+            raise SystemExit('World Runtime employee behavior block missing')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - name: Commit validated change
+        shell: bash
+        run: |
+          rm .github/workflows/apply-character-behavior-resolver.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add packages/server/src/world-runtime-service.ts .github/workflows/apply-character-behavior-resolver.yml
+          git commit -m "refactor: use unified character behavior resolution"
+          git push origin HEAD:feat/creative-world-platform-v1
