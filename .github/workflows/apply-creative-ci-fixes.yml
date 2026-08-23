@@ -1,0 +1,54 @@
+name: Apply creative CI fixes
+
+on:
+  push:
+    branches:
+      - feat/creative-world-platform-v1
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/creative-world-platform-v1
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Fix market status map and workshop compatibility
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          market = Path('packages/web/src/components/PackageMarketDialog.tsx')
+          text = market.read_text(encoding='utf-8')
+          old = "return ({ pending: '待处理', staged: '已暂存', activated: '已激活', 'rolled-back': '已回滚' })[status]"
+          new = "return ({ pending: '待处理', approved: '已批准', staged: '已暂存', activated: '已激活', failed: '失败', 'rolled-back': '已回滚' })[status]"
+          if old not in text:
+              raise SystemExit('transaction status anchor not found')
+          market.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          service = Path('packages/server/src/services/creative-workshop-service.ts')
+          text = service.read_text(encoding='utf-8')
+          old = '''function parseStoredProject(value: unknown): WorkshopProject {\n  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid workshop project')\n  const project = value as WorkshopProject\n  if (project.schemaVersion !== 1 || !project.id || !project.workspaceId || !project.worldId || !Array.isArray(project.roles)) {\n    throw new Error('Invalid workshop project')\n  }\n  return project\n}'''
+          new = '''type LegacyWorkshopRoleDefinition = Omit<WorkshopRoleDefinition, 'requestedSkillIds'> & {\n  requestedSkillIds?: string[]\n  skillIds?: string[]\n}\n\nfunction parseStoredProject(value: unknown): WorkshopProject {\n  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid workshop project')\n  const project = value as Omit<WorkshopProject, 'roles'> & { roles?: LegacyWorkshopRoleDefinition[] }\n  if (project.schemaVersion !== 1 || !project.id || !project.workspaceId || !project.worldId || !Array.isArray(project.roles)) {\n    throw new Error('Invalid workshop project')\n  }\n  const roles = project.roles.map((role) => {\n    const { skillIds: legacySkillIds, requestedSkillIds, ...rest } = role\n    return {\n      ...rest,\n      requestedSkillIds: Array.isArray(requestedSkillIds)\n        ? [...requestedSkillIds]\n        : Array.isArray(legacySkillIds) ? [...legacySkillIds] : [],\n    } satisfies WorkshopRoleDefinition\n  })\n  return { ...project, roles } as WorkshopProject\n}'''
+          if old not in text:
+              raise SystemExit('workshop parser anchor not found')
+          service.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+      - name: Remove temporary verification files and commit
+        run: |
+          git rm -f .github/workflows/apply-creative-ci-fixes.yml
+          git rm -f .github/workflows/verify-creative-world-platform.yml || true
+          git rm -f docs/operations/.ci-note || true
+          git rm -f docs/operations/.draft-ci-purpose || true
+          git add packages/web/src/components/PackageMarketDialog.tsx packages/server/src/services/creative-workshop-service.ts
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix: preserve workshop compatibility and market status coverage"
+          git push origin HEAD:feat/creative-world-platform-v1
