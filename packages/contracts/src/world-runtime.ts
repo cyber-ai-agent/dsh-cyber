@@ -156,6 +156,8 @@ export interface WorldInteractionResult {
 export interface WorldRendererCallbacks {
   onEntitySelect(entityId: string): void
   onObjectSelect(objectId: string): void
+  onEntityContext?(entityId: string, position: WorldPoint): void
+  onObjectContext?(objectId: string, position: WorldPoint): void
   onReady?(metrics: { initializationMs: number; assetBytesEstimate: number }): void
 }
 

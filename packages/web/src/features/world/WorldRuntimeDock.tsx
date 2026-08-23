@@ -18,6 +18,8 @@ import { EmployeeInteractionMenu, ObjectInteractionMenu } from './WorldInteracti
 import { useWorldClient } from './world-client-store.js'
 import { createZoomCommand } from './zoom-command.js'
 
+type WorldContextTarget = { kind: 'employee' | 'object'; id: string; position: { x: number; y: number } }
+
 interface PeerCollaborationResponse {
   session: WorkSession
   participantIds: string[]
@@ -39,6 +41,7 @@ export function WorldRuntimeDock({ demoMode, world, employees, selectedEmployeeI
   const [zoomCommand, setZoomCommand] = useState<WorldZoomCommand>()
   const [selectedObjectId, setSelectedObjectId] = useState<string>()
   const [activeEmployeeId, setActiveEmployeeId] = useState<string | undefined>(selectedEmployeeId)
+  const [contextTarget, setContextTarget] = useState<WorldContextTarget>()
   const [ambientSettingsOpen, setAmbientSettingsOpen] = useState(false)
   const [peerInitiatorId, setPeerInitiatorId] = useState<string>()
   const [peerBusy, setPeerBusy] = useState(false)
@@ -154,15 +157,17 @@ export function WorldRuntimeDock({ demoMode, world, employees, selectedEmployeeI
             {...(selectedObjectId === undefined ? {} : { selectedObjectId })}
             fitRequest={fitRequest}
             {...(zoomCommand === undefined ? {} : { zoomCommand })}
-            onEntitySelect={(employeeId) => { setActiveEmployeeId(employeeId); setSelectedObjectId(undefined) }}
-            onObjectSelect={setSelectedObjectId}
+            onEntitySelect={(employeeId) => { setActiveEmployeeId(employeeId); setSelectedObjectId(undefined); setContextTarget(undefined) }}
+            onObjectSelect={(objectId) => { setSelectedObjectId(objectId); setContextTarget(undefined) }}
+            onEntityContext={(employeeId, position) => { setActiveEmployeeId(employeeId); setSelectedObjectId(undefined); setContextTarget({ kind: 'employee', id: employeeId, position }) }}
+            onObjectContext={(objectId, position) => { setSelectedObjectId(objectId); setContextTarget({ kind: 'object', id: objectId, position }) }}
             onReady={() => undefined}
           />
 
           {focusedNames.length === 0 ? null : <div className="world-runtime-dock__focus" aria-label="当前会话成员"><span>当前会话</span><strong>{focusedNames.join('、')}</strong></div>}
 
-          {selectedEmployee === undefined ? null : <EmployeeInteractionMenu employee={selectedEmployee} onClose={() => setActiveEmployeeId(undefined)} onTalk={() => void interactWithEmployee('talk')} onAssignTask={() => void interactWithEmployee('assign-task')} onMeeting={() => void interactWithEmployee('start-meeting')} onPeerCollaboration={() => { setPeerError(undefined); setPeerInitiatorId(selectedEmployee.id) }} />}
-          {selectedObject === undefined || selectedObjectManifest === undefined ? null : <ObjectInteractionMenu object={selectedObject} manifest={selectedObjectManifest} {...(selectedEmployee === undefined ? {} : { selectedEmployee })} onClose={() => setSelectedObjectId(undefined)} onAction={(action) => void actOnObject(action)} />}
+          {selectedEmployee === undefined || contextTarget?.kind !== 'employee' || contextTarget.id !== selectedEmployee.id ? null : <EmployeeInteractionMenu employee={selectedEmployee} position={contextTarget.position} onClose={() => setContextTarget(undefined)} onTalk={() => void interactWithEmployee('talk')} onAssignTask={() => void interactWithEmployee('assign-task')} onMeeting={() => void interactWithEmployee('start-meeting')} onPeerCollaboration={() => { setPeerError(undefined); setPeerInitiatorId(selectedEmployee.id) }} />}
+          {selectedObject === undefined || selectedObjectManifest === undefined || contextTarget?.kind !== 'object' || contextTarget.id !== selectedObject.id ? null : <ObjectInteractionMenu object={selectedObject} manifest={selectedObjectManifest} position={contextTarget.position} {...(selectedEmployee === undefined ? {} : { selectedEmployee })} onClose={() => setContextTarget(undefined)} onAction={(action) => void actOnObject(action)} />}
 
           <div className="world-runtime-dock__controls" aria-label="世界视图控制">
             <button type="button" aria-label="缩小" onClick={() => setZoomCommand(createZoomCommand(-0.1))}><Minus size={15} /></button>

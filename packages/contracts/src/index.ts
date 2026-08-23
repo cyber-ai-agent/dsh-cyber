@@ -654,12 +654,15 @@ export interface AgentRuntimeEvent {
   metadata: JsonObject
 }
 
+export type AgentPermissionMode = 'read-only' | 'workspace-write'
+
 export interface AgentTurnRequest {
   agent: EmployeeInstance
   revision: EmployeeRevision
   prompt: string
   workspacePath: string
   reasoningEffort?: Exclude<ReasoningEffort, 'auto'>
+  permissionMode?: AgentPermissionMode
   onEvent?: (event: AgentRuntimeEvent) => void
 }
 

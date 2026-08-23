@@ -264,6 +264,7 @@ describe('Harness profile and adapter', () => {
         profile,
         workspacePath: directory,
         sessionsRoot: join(directory, 'sessions'),
+        permissionMode: 'read-only',
       },
     )
     expect(environment.PATH).toBe('bin')
@@ -271,6 +272,25 @@ describe('Harness profile and adapter', () => {
     expect(environment.RANDOM_SECRET).toBeUndefined()
     expect(environment.DSH_PERMISSION_MODE).toBe('read-only')
     expect(environment.DSH_SYSTEM_PROMPT).toContain('小刘')
+  })
+
+  it('restarts an employee runtime when its workspace permission mode changes', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-permission-'))
+    const modes: string[] = []
+    let closes = 0
+    const adapter = new HarnessCompatibilityAdapter({
+      stateRoot,
+      runtimeFactory(spec) {
+        modes.push(spec.permissionMode)
+        return { run: async () => ({ finalResponse: 'ok', notifications: [] }), close: async () => { closes += 1 } }
+      },
+    })
+    await adapter.runEmployeeTurn({ employee: employee(), revision: revision(), prompt: '查看文件', workspacePath: stateRoot, permissionMode: 'read-only' })
+    await adapter.runEmployeeTurn({ employee: employee(), revision: revision(), prompt: '修改文件', workspacePath: stateRoot, permissionMode: 'workspace-write' })
+    expect(modes).toEqual(['read-only', 'workspace-write'])
+    expect(closes).toBe(1)
+    await adapter.close()
+    expect(closes).toBe(2)
   })
 
   it('checks candidate Harness packages in an isolated profile without switching the active runtime', async () => {

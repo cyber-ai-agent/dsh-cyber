@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path'
 import { DeepSeekHarness, type HarnessNotification } from '@deepseek-ai/dsh-sdk-client'
 import type {
   AgentRuntimeEvent,
+  AgentPermissionMode,
   AgentRuntimePort,
   AgentTurnRequest,
   AgentTurnResult,
@@ -24,6 +25,7 @@ export interface EmployeeTurnRequest {
   revision: EmployeeRevision
   prompt: string
   workspacePath: string
+  permissionMode?: AgentPermissionMode
   onNotification?: (notification: HarnessNotification) => void
 }
 
@@ -48,6 +50,7 @@ export interface HarnessRuntimeSpec {
   profile: HarnessProfilePaths
   workspacePath: string
   sessionsRoot: string
+  permissionMode: AgentPermissionMode
 }
 
 export type HarnessRuntimeFactory = (spec: HarnessRuntimeSpec) => HarnessRuntime
@@ -65,7 +68,7 @@ export interface HarnessAdapterOptions {
 
 export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDisposable {
   readonly #options: HarnessAdapterOptions
-  readonly #runtimes = new Map<string, HarnessRuntime>()
+  readonly #runtimes = new Map<string, { permissionMode: AgentPermissionMode; runtime: HarnessRuntime }>()
   #profile: Promise<HarnessProfilePaths> | undefined
 
   constructor(options: HarnessAdapterOptions) {
@@ -78,6 +81,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       revision: request.revision,
       prompt: request.prompt,
       workspacePath: request.workspacePath,
+      ...(request.permissionMode === undefined ? {} : { permissionMode: request.permissionMode }),
     }
     if (request.onEvent !== undefined) {
       employeeRequest.onNotification = (notification) => {
@@ -97,19 +101,27 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
   async runEmployeeTurn(request: EmployeeTurnRequest): Promise<EmployeeTurnResult> {
     const profile = await this.#getProfile()
     const agentSessionId = request.employee.agentSessionId ?? stableAgentSessionId(request.employee.id)
-    let runtime = this.#runtimes.get(request.employee.id)
-    if (runtime === undefined) {
+    const permissionMode = request.permissionMode ?? 'read-only'
+    let cached = this.#runtimes.get(request.employee.id)
+    if (cached !== undefined && cached.permissionMode !== permissionMode) {
+      this.#runtimes.delete(request.employee.id)
+      await cached.runtime.close()
+      cached = undefined
+    }
+    if (cached === undefined) {
       const spec: HarnessRuntimeSpec = {
         employee: request.employee,
         revision: request.revision,
         profile,
         workspacePath: resolve(request.workspacePath),
         sessionsRoot: join(resolve(this.#options.stateRoot), 'harness-sessions', request.employee.id),
+        permissionMode,
       }
-      runtime = this.#options.runtimeFactory?.(spec) ?? this.#createRuntime(spec)
-      this.#runtimes.set(request.employee.id, runtime)
+      const runtime = this.#options.runtimeFactory?.(spec) ?? this.#createRuntime(spec)
+      cached = { permissionMode, runtime }
+      this.#runtimes.set(request.employee.id, cached)
     }
-    const result = await runtime.run(agentSessionId, request.prompt, request.onNotification)
+    const result = await cached.runtime.run(agentSessionId, request.prompt, request.onNotification)
     return { agentSessionId, ...result }
   }
 
@@ -117,7 +129,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     const runtime = this.#runtimes.get(employeeId)
     if (runtime === undefined) return
     this.#runtimes.delete(employeeId)
-    await runtime.close()
+    await runtime.runtime.close()
   }
 
   closeAgent(agentId: string): Promise<void> {
@@ -125,7 +137,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
   }
 
   async close(): Promise<void> {
-    const runtimes = [...this.#runtimes.values()]
+    const runtimes = [...this.#runtimes.values()].map((entry) => entry.runtime)
     this.#runtimes.clear()
     const results = await Promise.allSettled(runtimes.map((runtime) => runtime.close()))
     const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
@@ -440,7 +452,7 @@ export function workerEnvironment(
   environment.DSH_SESSION_ROOT = spec.sessionsRoot
   environment.DSH_SYSTEM_PROMPT = employeeSystemPrompt(spec.employee, spec.revision)
   environment.DSH_TELEMETRY_DISABLED = '1'
-  environment.DSH_PERMISSION_MODE = 'read-only'
+  environment.DSH_PERMISSION_MODE = spec.permissionMode
   return environment
 }
 

@@ -315,6 +315,10 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
         event.stopPropagation()
         this.#callbacks.onObjectSelect(interactable.id)
       })
+      hint.on('rightclick', (event: FederatedPointerEvent) => {
+        event.stopPropagation()
+        this.#callbacks.onObjectContext?.(interactable.id, { x: event.global.x, y: event.global.y })
+      })
       this.#interactionLayer.addChild(hint)
       this.#objectHints.set(interactable.id, hint)
     }
@@ -345,6 +349,7 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
     activity.visible = false
     root.addChild(shadow, selection, animation.sprite, status, name, activity)
     root.on('pointertap', (event: FederatedPointerEvent) => { event.stopPropagation(); this.#callbacks.onEntitySelect(entity.id) })
+    root.on('rightclick', (event: FederatedPointerEvent) => { event.stopPropagation(); this.#callbacks.onEntityContext?.(entity.id, { x: event.global.x, y: event.global.y }) })
     root.on('pointerover', () => { activity.visible = true })
     root.on('pointerout', () => { activity.visible = this.#selectedEntityId === entity.id })
     const actor: ActorView = { root, animation, selection, status, name, activity, state: entity, motion: undefined }

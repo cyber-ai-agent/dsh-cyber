@@ -12,6 +12,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type {
   AgentRuntimeEvent,
+  AgentPermissionMode,
   ChatAttachment,
   CyberMarketKind,
   CyberMarketPackage,
@@ -133,6 +134,7 @@ export default function App() {
   const [worldAccess, setWorldAccess] = useState<WorldAccessSummary>()
   const [lockedWorld, setLockedWorld] = useState<World>()
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('auto')
+  const [permissionMode, setPermissionMode] = useState<AgentPermissionMode>('read-only')
 
   const activeSession = sessions.find((session) => session.id === activeSessionId)
   const activeParticipantIds = conversationIntent?.employeeIds
@@ -154,6 +156,7 @@ export default function App() {
     setDraft('')
     setSelectedEmployeeId(undefined)
     setDockTab('world')
+    setPermissionMode(savedPermissionMode(world.id))
     if (demoMode) {
       const isCompany = world.id === demoData.activeWorld.id
       setWorldRuntimeAvailable(true)
@@ -780,6 +783,7 @@ export default function App() {
         body: JSON.stringify({
           prompt,
           reasoningEffort,
+          permissionMode,
           ...(attachments.length === 0 ? {} : { attachments }),
           ...(targetIds.length === 0 ? {} : { employeeIds: targetIds }),
           ...(conversationIntent === undefined ? {} : { title: conversationIntent.title }),
@@ -800,7 +804,7 @@ export default function App() {
     } finally {
       setSending(false)
     }
-  }, [activeSession, activeSessionId, activeWorld, conversationIntent, employees, messages.length, sessionParticipants, reasoningEffort])
+  }, [activeSession, activeSessionId, activeWorld, conversationIntent, employees, messages.length, sessionParticipants, reasoningEffort, permissionMode])
 
   const uploadChatAttachment = useCallback(async (file: File): Promise<ChatAttachment> => {
     if (workspace === undefined) throw new Error('请先创建工作区')
@@ -1122,8 +1126,8 @@ export default function App() {
             employees={employees}
             sending={sending}
             draft={draft}
-            reasoningEffort={reasoningEffort}
-            onReasoningEffortChange={setReasoningEffort}
+            permissionMode={permissionMode}
+            onPermissionModeChange={(value) => { setPermissionMode(value); window.localStorage.setItem(`dsh-cyber:permission-mode:${activeWorld.id}`, value) }}
             onDraftChange={setDraft}
             onSend={send}
             onUploadAttachment={uploadChatAttachment}
@@ -1502,6 +1506,10 @@ function serializableAttachments(attachments: ChatAttachment[]): JsonObject[] {
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
+}
+
+function savedPermissionMode(worldId: string): AgentPermissionMode {
+  return window.localStorage.getItem(`dsh-cyber:permission-mode:${worldId}`) === 'workspace-write' ? 'workspace-write' : 'read-only'
 }
 
 function demoRuntimeTransaction(status: RuntimeUpdateTransaction['status']): RuntimeUpdateTransaction {

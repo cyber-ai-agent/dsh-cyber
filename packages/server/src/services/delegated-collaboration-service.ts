@@ -1,4 +1,5 @@
 import type {
+  AgentPermissionMode,
   EmployeeInstance,
   JsonObject,
   ReasoningEffort,
@@ -36,6 +37,7 @@ export interface DelegatedCollaborationInput extends DelegatedCollaborationInten
   transformedPrompt: string
   metadata: JsonObject
   reasoningEffort?: Exclude<ReasoningEffort, 'auto'>
+  permissionMode?: AgentPermissionMode
   sessionId?: string
   title?: string
 }
@@ -140,6 +142,7 @@ export class DelegatedCollaborationService {
         reportPrompt,
       ),
       ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
+      ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
     }
     if (input.sessionId !== undefined) directInput.sessionId = input.sessionId
     if (input.title !== undefined) directInput.title = input.title

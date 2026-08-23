@@ -1,4 +1,4 @@
-import type { ChatAttachment, JsonObject, ReasoningEffort } from '@dsh-cyber/contracts'
+import type { AgentPermissionMode, ChatAttachment, JsonObject, ReasoningEffort } from '@dsh-cyber/contracts'
 import type {
   ConversationOrchestrator,
   DirectConversationInput,
@@ -81,11 +81,13 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     const requestedReasoning = body.reasoningEffort === undefined
       ? worldSettingsValue.model.reasoningEffort
       : requiredEnum<ReasoningEffort>(body, 'reasoningEffort', ['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+    const permissionMode = body.permissionMode === undefined ? 'read-only' : requiredEnum<AgentPermissionMode>(body, 'permissionMode', ['read-only', 'workspace-write'])
     const explicitIds = optionalStringArray(body.employeeIds)
     const employeeIds = explicitIds.length > 0 ? explicitIds : mentionedEmployeeIds(prompt, store.listEmployees(world.id))
     if (employeeIds.length === 0) throw new HttpError(422, 'agent_required', '请选择或 @ 至少一个角色')
     const metadata: JsonObject = {
       participantIds: employeeIds,
+      permissionMode,
       ...(attachments.length === 0 ? {} : { attachments: attachments.map(chatAttachmentJson) }),
     }
     const title = optionalString(body.title)
@@ -116,6 +118,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
           transformedPrompt,
           metadata,
           ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
+          permissionMode,
           ...(sessionId === undefined ? {} : { sessionId }),
           ...(title === undefined ? {} : { title }),
         })
@@ -137,6 +140,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
           metadata,
           runtimePrompt: await worldSettings.composeRuntimePrompt(world.id, character, runtimeSource),
           ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
+          permissionMode,
         }
         if (sessionId !== undefined) directInput.sessionId = sessionId
         if (title !== undefined) directInput.title = title
@@ -151,6 +155,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
         metadata,
         runtimePrompt: await worldSettings.composeGroupRuntimePrompt(world.id, transformedPrompt),
         ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
+        permissionMode,
         ...(requestedSessionId === undefined ? {} : { sessionId: requestedSessionId }),
         ...(title === undefined ? {} : { title }),
       })

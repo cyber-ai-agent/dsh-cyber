@@ -13,6 +13,7 @@ import type { ConversationHubItem } from '@dsh-cyber/contracts/creative-platform
 import { api } from '../api.js'
 import type { CyberEmployee, SessionParticipantMap } from '../types.js'
 import { Avatar } from './Avatar.js'
+import { ContextMenu, type ContextMenuPosition } from './ContextMenu.js'
 
 interface NavigationPaneProps {
   world: World
@@ -185,6 +186,7 @@ function SessionRow({
   onPin?: () => void
   onDelete?: () => void
 }) {
+  const [menuPosition, setMenuPosition] = useState<ContextMenuPosition>()
   const { session, participantIds } = item
   const participants = participantIds
     .map((id) => employees.find((employee) => employee.id === id))
@@ -192,9 +194,10 @@ function SessionRow({
   const subtitle = session.kind === 'group' || session.kind === 'meeting'
     ? `群聊 · ${participants.length || participantIds.length} 名成员`
     : participants[0]?.role ?? '私聊'
+  const openMenu = (position: ContextMenuPosition) => { if (onPin !== undefined && onDelete !== undefined) setMenuPosition(position) }
   return (
     <div className={`session-row-wrap${active ? ' is-active' : ''}${item.pinned ? ' is-pinned' : ''}`}>
-      <button className="session-row session-row--hub" type="button" onClick={onClick} aria-label={session.kind === 'direct' && participants[0] !== undefined ? `与${participants[0].displayName}私聊` : directTitle(session, participants)}>
+      <button className="session-row session-row--hub" type="button" onClick={onClick} onContextMenu={(event) => { event.preventDefault(); openMenu({ x: event.clientX, y: event.clientY }) }} onKeyDown={(event) => { if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return; event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); openMenu({ x: rect.left + 28, y: rect.top + 28 }) }} aria-label={session.kind === 'direct' && participants[0] !== undefined ? `与${participants[0].displayName}私聊` : directTitle(session, participants)}>
         <span className="session-row__avatar" aria-hidden="true">
           {participants.length === 0
             ? session.kind === 'group' || session.kind === 'meeting' ? <UsersThree size={16} /> : <ChatCircleDots size={16} />
@@ -203,14 +206,10 @@ function SessionRow({
         <span className="session-row__copy"><strong>{directTitle(session, participants)}</strong><small>{subtitle}</small></span>
         <time>{formatSessionTime(session.updatedAt)}</time>
       </button>
-      {onPin === undefined || onDelete === undefined ? null : (
-        <span className="session-row-actions">
-          <button type="button" aria-label={item.pinned ? '取消置顶' : '置顶会话'} title={item.pinned ? '取消置顶' : '置顶会话'} onClick={onPin}>
-            {item.pinned ? <PushPinSlash size={14} /> : <PushPin size={14} />}
-          </button>
-          <button type="button" aria-label="删除会话" title="从列表删除" onClick={onDelete}><Trash size={14} /></button>
-        </span>
-      )}
+      {menuPosition === undefined || onPin === undefined || onDelete === undefined ? null : <ContextMenu label={`${directTitle(session, participants)}会话操作`} position={menuPosition} onClose={() => setMenuPosition(undefined)} items={[
+        { id: 'pin', label: item.pinned ? '取消置顶' : '置顶会话', description: item.pinned ? '恢复按最近消息排序' : '固定在会话列表顶部', icon: item.pinned ? <PushPinSlash size={17} /> : <PushPin size={17} />, onSelect: onPin },
+        { id: 'delete', label: '从列表移除', description: '历史消息仍会保留', icon: <Trash size={17} />, danger: true, onSelect: onDelete },
+      ]} />}
     </div>
   )
 }

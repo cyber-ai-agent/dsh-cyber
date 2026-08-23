@@ -5,12 +5,14 @@ import {
   PaperPlaneRight,
   Paperclip,
   TerminalWindow,
+  UserCircle,
+  Wrench,
   X,
 } from '@phosphor-icons/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { ChatAttachment, JsonObject, LocalAssetMimeType, ReasoningEffort, WorkMessage, WorkSession, World } from '@dsh-cyber/contracts'
+import type { AgentPermissionMode, ChatAttachment, JsonObject, LocalAssetMimeType, WorkMessage, WorkSession, World } from '@dsh-cyber/contracts'
 
 import { mentionPlugin } from './mention-plugin.js'
 import type { ConversationIntent, CyberEmployee } from '../types.js'
@@ -27,8 +29,8 @@ interface ChatWorkbenchProps {
   employees: CyberEmployee[]
   sending: boolean
   draft: string
-  reasoningEffort?: ReasoningEffort
-  onReasoningEffortChange?(value: ReasoningEffort): void
+  permissionMode: AgentPermissionMode
+  onPermissionModeChange(value: AgentPermissionMode): void
   onDraftChange(value: string): void
   onSend(prompt: string, attachments: ChatAttachment[]): Promise<void>
   onUploadAttachment(file: File): Promise<ChatAttachment>
@@ -37,7 +39,7 @@ interface ChatWorkbenchProps {
   onRecruit(): void
 }
 
-export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, sending, draft, reasoningEffort = 'auto', onReasoningEffortChange = () => undefined, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRecruit }: ChatWorkbenchProps) {
+export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, sending, draft, permissionMode, onPermissionModeChange, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRecruit }: ChatWorkbenchProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -116,7 +118,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
           <span className="chat-header__avatars" aria-hidden="true">{participantEmployees.slice(0, 3).map((employee) => <Avatar key={employee.id} index={employee.avatarIndex} size="sm" label={employee.displayName} />)}</span>
           <span><h1>{conversationTitle}</h1><p>{conversationKind === undefined ? `从左侧会话列表进入私聊，或创建群聊` : `${conversationKind === 'group' ? '群聊' : '私聊'} · ${participantEmployees.length} 名成员 · ${world.name}`}</p></span>
         </div>
-        <div className="chat-header__count">{visibleMessages.length}<span>条消息</span></div>
+        <div className="chat-header__count"><span>{visibleMessages.length} 条消息</span></div>
       </header>
 
       <div className="message-scroll" ref={scrollRef} aria-live="polite" aria-busy={sending}>
@@ -134,11 +136,12 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
             <article key={message.id} className={`message${owner ? ' message--owner' : ''}`}>
               {owner ? null : <button className="avatar-button" type="button" onClick={() => employee && onOpenDossier(employee.id)} aria-label={`查看${employee?.displayName ?? experience.personLabel}档案`}><Avatar index={employee?.avatarIndex ?? 7} label={employee?.displayName ?? '角色'} /></button>}
               <div className="message__body">
-                <header className="message__meta"><strong>{owner ? '你' : employee?.displayName ?? experience.personLabel}</strong>{owner ? null : <span>{employee?.role} · 独立角色</span>}<time>{displayTime(message)}</time></header>
+                <header className="message__meta">{owner ? <span className="sr-only">我的消息</span> : <><strong>{employee?.displayName ?? experience.personLabel}</strong><span>{employee?.role}</span></>}<time>{displayTime(message)}</time></header>
                 <div className="message__content"><RichText value={message.content} /></div>
                 <MessageAttachments attachments={messageAttachments(message.metadata)} />
                 {demoMode && experience.kind === 'company' && index === 1 ? <ArtifactAttachment onOpen={onOpenArtifact} /> : null}
               </div>
+              {owner ? <span className="owner-avatar" role="img" aria-label="我的头像"><UserCircle size={28} weight="fill" /></span> : null}
             </article>
           )
         })}
@@ -154,7 +157,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
           <input ref={fileInputRef} className="composer-file-input" type="file" accept=".png,.jpg,.jpeg,.webp,.txt,.md,.json,.pdf" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAttachment(file) }} />
           <button className="icon-button" type="button" aria-label={uploading ? '正在上传附件' : '添加附件'} disabled={uploading} onClick={() => fileInputRef.current?.click()}>{uploading ? <CircleNotch size={18} className="spin" /> : <Paperclip size={18} />}</button>
           <button className="icon-button" type="button" aria-label="插入代码或命令" onClick={insertCodeBlock}><BracketsCurly size={18} /></button>
-          <label className="composer-reasoning">推理<select value={reasoningEffort} onChange={(event)=>onReasoningEffortChange(event.target.value as ReasoningEffort)}><option value="auto">自动</option><option value="off">关闭</option><option value="minimal">极低</option><option value="low">低</option><option value="medium">中</option><option value="high">高</option><option value="xhigh">极高</option><option value="max">最大</option></select></label><span className="composer__hint">Enter 发送 · Shift+Enter 换行 · @ 仅显示当前世界角色</span>
+          <div className="composer-mode" role="group" aria-label="角色运行权限"><button type="button" className={permissionMode === 'read-only' ? 'is-active' : ''} aria-pressed={permissionMode === 'read-only'} title="可读取和搜索当前世界文件，不会修改内容" onClick={() => onPermissionModeChange('read-only')}><TerminalWindow size={15} />只读</button><button type="button" className={permissionMode === 'workspace-write' ? 'is-active' : ''} aria-pressed={permissionMode === 'workspace-write'} title="可调用工具、运行任务并读写当前世界文件" onClick={() => onPermissionModeChange('workspace-write')}><Wrench size={15} />执行</button></div><span className="composer__hint">{permissionMode === 'workspace-write' ? '可运行任务并读写当前世界文件' : '只读取当前世界文件'} · Enter 发送</span>
         </div><button className="send-button" type="button" aria-label={sending ? '角色处理中' : '发送'} disabled={sending || uploading || employees.length === 0 || (!draft.trim() && attachments.length === 0)} onClick={() => void submit()}>{sending ? <CircleNotch size={19} className="spin" /> : <PaperPlaneRight size={19} weight="fill" />}</button></div>
       </div></div>
     </section>

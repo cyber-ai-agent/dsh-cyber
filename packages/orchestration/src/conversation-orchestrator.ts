@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import type {
   AgentRuntimeEvent,
   AgentRuntimePort,
+  AgentPermissionMode,
   DomainEvent,
   DomainEventType,
   EmployeeInstance,
@@ -89,6 +90,7 @@ export interface DirectConversationInput {
   metadata?: JsonObject
   runtimePrompt?: string
   reasoningEffort?: Exclude<ReasoningEffort, 'auto'>
+  permissionMode?: AgentPermissionMode
   sessionId?: string
   title?: string
 }
@@ -101,6 +103,7 @@ export interface GroupConversationInput {
   metadata?: JsonObject
   runtimePrompt?: string
   reasoningEffort?: Exclude<ReasoningEffort, 'auto'>
+  permissionMode?: AgentPermissionMode
   sessionId?: string
   title?: string
 }
@@ -203,7 +206,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
       ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
       correlationId: session.id,
     })
-    const reply = await this.#runAgent(session, employee, input.runtimePrompt?.trim() || prompt, input.reasoningEffort)
+    const reply = await this.#runAgent(session, employee, input.runtimePrompt?.trim() || prompt, input.reasoningEffort, input.permissionMode)
     return { session, replies: [reply] }
   }
 
@@ -256,7 +259,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
     try {
       for (const employee of employees) {
         const collaborationPrompt = groupPrompt(input.runtimePrompt?.trim() || prompt, replies)
-        replies.push(await this.#runAgent(session, employee, collaborationPrompt, input.reasoningEffort))
+        replies.push(await this.#runAgent(session, employee, collaborationPrompt, input.reasoningEffort, input.permissionMode))
       }
       this.#store.appendDomainEvent({
         workspaceId: input.workspaceId,
@@ -438,6 +441,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
     employee: EmployeeInstance,
     prompt: string,
     reasoningEffort?: Exclude<ReasoningEffort, 'auto'>,
+    permissionMode?: AgentPermissionMode,
   ): Promise<AgentReply> {
     const revision = this.#store.getEmployeeRevision(employee.id, employee.currentRevision)
     if (revision === undefined) {
@@ -467,6 +471,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
         prompt,
         workspacePath,
         ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+        ...(permissionMode === undefined ? {} : { permissionMode }),
         onEvent: (event) => {
           const tracedEvent: AgentRuntimeEvent = {
             ...event,
