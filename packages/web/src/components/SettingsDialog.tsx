@@ -35,7 +35,7 @@ import type {
   World,
 } from '@dsh-cyber/contracts'
 
-export type SettingsSection = 'appearance' | 'models' | 'runtime' | 'data' | 'updates' | 'logs'
+export type SettingsSection = 'appearance' | 'models' | 'data' | 'logs' | 'maintenance'
 export type SystemAction = 'status' | 'doctor' | 'backup' | 'export' | 'list-updates' | 'verify-update' | 'contract-update' | 'canary-update' | 'activate-update' | 'rollback-update'
 
 export interface SystemActionInput {
@@ -105,13 +105,27 @@ export interface DiscoveredModel {
   displayName?: string
 }
 
-const sections = [
-  ['appearance', '外观与个性化', Palette],
-  ['models', '模型', Cpu],
-  ['logs', '日志记录', ListMagnifyingGlass],
-  ['runtime', '运行时', ShieldCheck],
-  ['data', '本地数据', Database],
-  ['updates', '更新', ArrowsClockwise],
+const sectionGroups = [
+  {
+    label: '常用设置',
+    items: [
+      ['appearance', '外观与布局', Palette, '主题、背景和面板宽度'],
+      ['models', 'AI 模型', Cpu, '连接模型并设置使用范围'],
+    ],
+  },
+  {
+    label: '数据与记录',
+    items: [
+      ['data', '数据与备份', Database, '备份或导出本机数据'],
+      ['logs', '使用记录', ListMagnifyingGlass, '查看模型调用与错误'],
+    ],
+  },
+  {
+    label: '高级',
+    items: [
+      ['maintenance', '维护与更新', ShieldCheck, '检查状态和更新 DSH'],
+    ],
+  },
 ] as const
 
 interface ModelProviderPreset {
@@ -263,15 +277,21 @@ export function SettingsDialog({
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <header className="settings-dialog__header">
-          <div><h2 id="settings-title">设置</h2><p>全局模型、数据和 DSH 运行时。当前世界的个性化请使用左下角“世界设置”。</p></div>
+          <div><h2 id="settings-title">设置</h2><p>管理界面、AI 模型、数据备份与应用维护。角色、权限和世界规则请到“世界设置”调整。</p></div>
           <button className="icon-button" type="button" aria-label="关闭设置" onClick={onClose}><X size={18} /></button>
         </header>
         <div className="settings-layout">
           <nav className="settings-nav" aria-label="设置栏目">
-            {sections.map(([id, label, Icon]) => (
-              <button key={id} type="button" className={section === id ? 'is-active' : ''} onClick={() => setSection(id)}>
-                <Icon size={17} /><span>{label}</span>
-              </button>
+            {sectionGroups.map((group) => (
+              <div className="settings-nav__group" key={group.label}>
+                <span className="settings-nav__label">{group.label}</span>
+                {group.items.map(([id, label, Icon, description]) => (
+                  <button key={id} type="button" className={section === id ? 'is-active' : ''} onClick={() => setSection(id)}>
+                    <Icon size={18} />
+                    <span><strong>{label}</strong><small>{description}</small></span>
+                  </button>
+                ))}
+              </div>
             ))}
           </nav>
           <div className="settings-content">
@@ -310,13 +330,12 @@ export function SettingsDialog({
                 onClear={onClearModelLogs}
               />
             ) : null}
-            {section === 'runtime' ? <RuntimeSettings pending={pendingAction} result={actionResult} error={actionError} onRun={runSystemAction} /> : null}
             {section === 'data' ? <DataSettings pending={pendingAction} result={actionResult} error={actionError} onRun={runSystemAction} /> : null}
-            {section === 'updates' ? <UpdateSettings models={models} pending={pendingAction} result={actionResult} error={actionError} onRun={runSystemAction} /> : null}
+            {section === 'maintenance' ? <MaintenanceSettings models={models} pending={pendingAction} result={actionResult} error={actionError} onRun={runSystemAction} /> : null}
           </div>
         </div>
         <footer className="settings-dialog__footer">
-          <span>{section === 'appearance' ? (saving ? '正在保存…' : changed ? '有未保存的外观更改' : '外观设置已同步到本地数据库') : section === 'models' ? '模型配置与路由在当前页面单独保存' : '本地设置与运行状态已同步'}</span>
+          <span>{section === 'appearance' ? (saving ? '正在保存…' : changed ? '有未保存的外观更改' : '外观设置已保存') : section === 'models' ? '每个模型连接单独保存，密钥不会显示在页面中' : section === 'data' ? '数据保存在当前设备' : section === 'logs' ? '记录不包含对话正文和密钥' : '高级操作只在你主动执行时运行'}</span>
           <div>
             <button className="text-button" type="button" onClick={onClose}>{section === 'appearance' ? '取消' : '关闭'}</button>
             {section === 'appearance' ? <button className="primary-button" type="button" disabled={!changed || saving} onClick={() => void onSavePreferences(draft)}>保存外观设置</button> : null}
@@ -340,7 +359,7 @@ function AppearanceSettings({
 }) {
   return (
     <div className="settings-section">
-      <div className="settings-section__heading"><h3>外观与个性化</h3><p>设置全局明暗、皮肤、背景和工作台密度。</p></div>
+      <div className="settings-section__heading"><h3>外观与布局</h3><p>调整颜色、背景和面板宽度。这里的设置会应用到整个工作台。</p></div>
       <fieldset className="setting-group">
         <legend>颜色模式</legend>
         <div className="segmented-control">
@@ -512,7 +531,7 @@ function ModelSettings({
       })
       setDraft(modelDraftForProfile(saved))
       setShowApiKey(false)
-      setModelNotice(draft.id ? '模型配置已更新并保存。' : '模型配置已添加并保存。')
+      setModelNotice(draft.id ? '模型连接已更新。' : '模型已连接并保存。')
     } catch (cause) {
       setModelError(cause instanceof Error ? cause.message : '模型配置保存失败')
     } finally {
@@ -527,7 +546,7 @@ function ModelSettings({
     try {
       await onDelete(profile.id)
       if (draft.id === profile.id) startNewModel()
-      setModelNotice('模型配置已删除。')
+      setModelNotice('模型连接已删除。')
     } catch (cause) {
       setModelError(cause instanceof Error ? cause.message : '模型配置删除失败')
     } finally {
@@ -536,12 +555,12 @@ function ModelSettings({
   }
   return (
     <div className="settings-section settings-section--models">
-      <div className="settings-section__heading"><h3>模型与路由</h3><p>API 密钥保存在本机加密凭据库，不写入模型数据库或接口响应。路由按角色 → 世界 → 全局逐级继承。</p></div>
+      <div className="settings-section__heading"><h3>AI 模型</h3><p>连接你使用的模型服务。保存后可设为默认，也可单独分配给某个世界或角色；API 密钥只加密保存在当前设备。</p></div>
       <div className="model-config-layout">
         <section className="model-profile-panel" aria-label="已保存的模型配置">
-          <header><div><h4>模型配置</h4><span>{models.length} 个已保存配置</span></div><button className="secondary-button" type="button" onClick={startNewModel}><Plus size={16} />添加配置</button></header>
+          <header><div><h4>已连接的模型</h4><span>{models.length === 0 ? '还没有可用模型' : `共 ${models.length} 个`}</span></div><button className="secondary-button" type="button" onClick={startNewModel}><Plus size={16} />连接模型</button></header>
           <div className="model-list">
-            {models.length === 0 ? <div className="model-list__empty"><Cpu size={22} /><strong>还没有模型配置</strong><span>添加本地、局域网或 HTTPS 模型接口。</span></div> : null}
+            {models.length === 0 ? <div className="model-list__empty"><Cpu size={22} /><strong>还没有连接模型</strong><span>连接云端服务、本机模型或局域网模型服务。</span><button className="secondary-button" type="button" onClick={startNewModel}>连接第一个模型</button></div> : null}
             {models.map((model) => (
               <article key={model.id} className={draft.id === model.id ? 'is-active' : ''}>
                 <Cpu size={22} />
@@ -555,25 +574,30 @@ function ModelSettings({
             ))}
           </div>
         </section>
-        <form className="model-editor-panel" aria-label="模型配置编辑器" onSubmit={(event) => { event.preventDefault(); void saveDraft() }}>
-          <header><div><h4>{draft.id ? '编辑模型配置' : '添加模型配置'}</h4><p>{draft.id ? '修改后会覆盖当前配置，不会产生重复条目。' : '支持本机、局域网 sub2api 与 HTTPS 服务。'}</p></div>{draft.id ? <button className="text-button" type="button" onClick={startNewModel}>取消编辑</button> : null}</header>
+        <form className="model-editor-panel" aria-label="模型连接编辑器" onSubmit={(event) => { event.preventDefault(); void saveDraft() }}>
+          <header><div><h4>{draft.id ? '编辑模型连接' : '连接模型服务'}</h4><p>{draft.id ? '保存后直接更新这条连接，不会产生重复项。' : '选择服务商，填写地址和密钥，再选择要使用的模型。'}</p></div>{draft.id ? <button className="text-button" type="button" onClick={startNewModel}>退出编辑</button> : null}</header>
           {modelError ? <p className="model-form-message model-form-message--error" role="alert">{modelError}</p> : null}
           {modelNotice ? <p className="model-form-message model-form-message--success" role="status"><CheckCircle size={16} />{modelNotice}</p> : null}
           <div className="setting-grid model-setting-grid">
-            <label><span>提供商类型</span><select value={draft.providerId} onChange={(event) => { const preset = MODEL_PRESETS.find((item) => item.id === event.target.value); if (preset) { setDraft({ ...modelDraftForPreset(preset, draft.isDefault), ...(draft.id ? { id: draft.id } : {}) }); setDiscoveredModels([]); setManualModelId(true) } }}>{MODEL_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}</select></label>
-            <label><span>显示名称</span><input value={draft.displayName} placeholder="例如：公司内网 sub2api" onChange={(event) => setDraft({ ...draft, displayName: event.target.value })} /></label>
-            <label className="setting-grid__wide"><span>接口地址</span><input inputMode="url" value={draft.baseUrl} placeholder={draft.providerKind === 'openai-compatible-local' ? 'http://192.168.1.10:11434/v1' : 'https://api.example.com/v1'} onChange={(event) => { setDraft({ ...draft, baseUrl: event.target.value }); setDiscoveredModels([]); setManualModelId(true) }} /><small>本机或局域网可使用 HTTP；公网服务必须使用 HTTPS。</small></label>
-            <label><span>接口协议</span><select value={draft.api} onChange={(event) => { setDraft({ ...draft, api: event.target.value as ModelApiKind }); setDiscoveredModels([]); setManualModelId(true) }}><option value="openai-completions">OpenAI 对话补全</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic-messages">Anthropic 消息</option></select></label>
+            <label><span>模型服务</span><select value={draft.providerId} onChange={(event) => { const preset = MODEL_PRESETS.find((item) => item.id === event.target.value); if (preset) { setDraft({ ...modelDraftForPreset(preset, draft.isDefault), ...(draft.id ? { id: draft.id } : {}) }); setDiscoveredModels([]); setManualModelId(true) } }}>{MODEL_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}</select></label>
+            <label><span>连接名称</span><input value={draft.displayName} placeholder="例如：公司的 AI 服务" onChange={(event) => setDraft({ ...draft, displayName: event.target.value })} /></label>
+            <label className="setting-grid__wide"><span>服务地址</span><input inputMode="url" value={draft.baseUrl} placeholder={draft.providerKind === 'openai-compatible-local' ? 'http://192.168.1.10:11434/v1' : 'https://api.example.com/v1'} onChange={(event) => { setDraft({ ...draft, baseUrl: event.target.value }); setDiscoveredModels([]); setManualModelId(true) }} /><small>本机或局域网服务可以使用 HTTP，公网服务必须使用 HTTPS。</small></label>
             <label className="setting-grid__wide"><span>模型 ID</span><div className="model-catalog-input">{discoveredModels.length > 0 && !manualModelId ? <select aria-label="选择可用模型" value={draft.modelId} onChange={(event) => setDraft({ ...draft, modelId: event.target.value })}>{discoveredModels.map((model) => <option key={model.id} value={model.id}>{model.displayName && model.displayName !== model.id ? `${model.displayName}（${model.id}）` : model.id}</option>)}</select> : <input value={draft.modelId} placeholder={MODEL_PRESETS.find((item) => item.id === draft.providerId)?.modelPlaceholder} onChange={(event) => setDraft({ ...draft, modelId: event.target.value })} />}<button type="button" disabled={discoveringModels} onClick={() => void discoverModels()}>{discoveringModels ? '正在获取…' : '获取可用模型'}</button></div>{discoveredModels.length > 0 ? <button className="model-catalog-mode" type="button" onClick={() => { if (manualModelId && discoveredModels[0]) setDraft((current) => ({ ...current, modelId: discoveredModels.some((item) => item.id === current.modelId) ? current.modelId : discoveredModels[0]!.id })); setManualModelId((current) => !current) }}>{manualModelId ? '从已获取列表选择' : '手动填写其他模型 ID'}</button> : null}<small>{discoveredModels.length > 0 ? `已获取 ${discoveredModels.length} 个模型，当前可直接点选。` : '先获取服务提供的模型列表，也可以直接手动填写模型 ID。'}</small></label>
-            <label className="setting-grid__wide"><span>凭据方式</span><select value={draft.credentialMode} onChange={(event) => setDraft({ ...draft, credentialMode: event.target.value as ModelCredentialMode, apiKey: '' })}><option value="api-key">API 密钥</option><option value="environment">环境变量（高级）</option><option value="none">无需凭据</option></select></label>
             {draft.credentialMode === 'api-key' ? (
               <label className="setting-grid__wide"><span>API 密钥</span><div className="model-secret-input"><input type={showApiKey ? 'text' : 'password'} autoComplete="new-password" spellCheck={false} value={draft.apiKey} placeholder={draft.hasStoredApiKey ? '已保存；留空保持原密钥' : '输入 sk-... 或服务商提供的密钥'} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} /><button type="button" aria-label={showApiKey ? '隐藏 API 密钥' : '显示 API 密钥'} onClick={() => setShowApiKey((current) => !current)}>{showApiKey ? <EyeSlash size={18} /> : <Eye size={18} />}</button></div><small>{draft.hasStoredApiKey && !draft.apiKey ? '密钥已加密保存。输入新密钥可替换，留空不会改变。' : '密钥仅发送到本机服务，并加密保存；保存后不再回显明文。'}</small></label>
             ) : null}
-            {draft.credentialMode === 'environment' ? (
-              <label className="setting-grid__wide"><span>凭据环境变量名</span><input value={draft.credentialEnvName} placeholder="SUB2API_API_KEY" onChange={(event) => setDraft({ ...draft, credentialEnvName: event.target.value })} /><small>高级用法：只保存变量名，运行服务前需要自行设置对应环境变量。</small></label>
-            ) : null}
-            <label><span>上下文窗口</span><input type="number" min="1024" step="1" value={draft.contextWindow} onChange={(event) => setDraft({ ...draft, contextWindow: Number(event.target.value) })} /></label>
-            <label><span>最大输出 Token</span><input type="number" min="256" step="256" value={draft.maxTokens} onChange={(event) => setDraft({ ...draft, maxTokens: Number(event.target.value) })} /></label>
+            <details className="settings-disclosure setting-grid__wide">
+              <summary><span><strong>高级连接设置</strong><small>接口兼容方式、环境变量和模型容量</small></span><CaretDown size={16} /></summary>
+              <div className="setting-grid settings-disclosure__content">
+                <label><span>接口兼容方式</span><select value={draft.api} onChange={(event) => { setDraft({ ...draft, api: event.target.value as ModelApiKind }); setDiscoveredModels([]); setManualModelId(true) }}><option value="openai-completions">OpenAI 对话补全</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic-messages">Anthropic 消息</option></select></label>
+                <label><span>密钥来源</span><select value={draft.credentialMode} onChange={(event) => setDraft({ ...draft, credentialMode: event.target.value as ModelCredentialMode, apiKey: '' })}><option value="api-key">直接填写 API 密钥</option><option value="environment">从环境变量读取</option><option value="none">此服务无需密钥</option></select></label>
+                {draft.credentialMode === 'environment' ? (
+                  <label className="setting-grid__wide"><span>环境变量名称</span><input value={draft.credentialEnvName} placeholder="SUB2API_API_KEY" onChange={(event) => setDraft({ ...draft, credentialEnvName: event.target.value })} /><small>只保存变量名称；启动服务前需要自行设置对应环境变量。</small></label>
+                ) : null}
+                <label><span>上下文容量</span><input type="number" min="1024" step="1" value={draft.contextWindow} onChange={(event) => setDraft({ ...draft, contextWindow: Number(event.target.value) })} /><small>不确定时保持默认值。</small></label>
+                <label><span>单次最大输出</span><input type="number" min="256" step="256" value={draft.maxTokens} onChange={(event) => setDraft({ ...draft, maxTokens: Number(event.target.value) })} /><small>不确定时保持默认值。</small></label>
+              </div>
+            </details>
           </div>
           <label className="model-default-control">
             <input type="checkbox" checked={draft.webSearchEnabled} onChange={(event) => setDraft({
@@ -594,13 +618,14 @@ function ModelSettings({
           <footer><span>{draft.id ? '正在编辑已保存配置' : '新配置保存后立即可用于路由'}</span><button className="primary-button" type="submit" disabled={savingModel}>{savingModel ? '正在保存…' : draft.id ? '保存修改' : '添加并保存'}</button></footer>
         </form>
       </div>
-      <fieldset className="setting-group"><legend>模型分配</legend>
-        <div className="model-routing-list">
+      <details className="settings-disclosure settings-disclosure--routing">
+        <summary><span><strong>按世界或角色指定模型</strong><small>可选。默认情况下，所有世界和角色都会使用全局默认模型。</small></span><CaretDown size={16} /></summary>
+        <div className="model-routing-list settings-disclosure__content">
           <ModelRouteRow label="全局默认" detail={workspace.name} value={assignmentValue('workspace', workspace.id)} models={models} onChange={(value) => void assign('workspace', workspace.id, value)} />
           {worlds.map((world) => <ModelRouteRow key={world.id} label="世界" detail={world.name} value={assignmentValue('world', world.id)} models={models} onChange={(value) => void assign('world', world.id, value)} />)}
           {employees.map((employee) => <ModelRouteRow key={employee.id} label="角色" detail={`${employee.displayName} · ${employee.role}`} value={assignmentValue('employee', employee.id)} models={models} onChange={(value) => void assign('employee', employee.id, value)} />)}
         </div>
-      </fieldset>
+      </details>
     </div>
   )
 }
@@ -673,8 +698,8 @@ function ModelInteractionLogSettings({
   return (
     <div className="settings-section">
       <div className="settings-section__heading">
-        <h3>模型交互日志</h3>
-        <p>记录每次模型 API 交互的摘要统计：时间、模型、provider、请求摘要（消息数 / 字符数）、响应状态、耗时与 token 用量。为保护隐私，日志不保存 API 密钥、prompt 明文或响应明文。</p>
+        <h3>使用记录</h3>
+        <p>用于排查模型连接是否正常，包括调用时间、所用模型、耗时和错误原因。这里不会保存对话正文、模型回复或 API 密钥。</p>
       </div>
       <div className="log-toolbar">
         <label className="log-filter"><span>状态</span><select value={status} onChange={(event) => void load({ status: event.target.value as '' | ModelInteractionLog['status'], page: 1 })}><option value="">全部</option><option value="success">成功</option><option value="failed">失败</option></select></label>
@@ -687,10 +712,10 @@ function ModelInteractionLogSettings({
       {error !== undefined ? <p className="model-form-message model-form-message--error" role="alert">{error}</p> : null}
       {result === undefined ? (
         loading ? <div className="log-empty">正在加载日志…</div> : (
-          <div className="log-empty"><ListMagnifyingGlass size={24} /><strong>还没有模型交互日志</strong><span>发起一次对话，或在模型设置中获取可用模型列表后，这里会显示真实交互记录。</span></div>
+          <div className="log-empty"><ListMagnifyingGlass size={24} /><strong>还没有使用记录</strong><span>完成一次模型连接测试或发起对话后，这里会显示调用状态。</span></div>
         )
       ) : result.items.length === 0 ? (
-        <div className="log-empty"><ListMagnifyingGlass size={24} /><strong>{result.total === 0 ? '还没有模型交互日志' : '没有符合条件的日志'}</strong><span>{result.total === 0 ? '发起一次对话，或在模型设置中获取可用模型列表后，这里会显示真实交互记录。' : '请调整状态或模型筛选条件。'}</span></div>
+        <div className="log-empty"><ListMagnifyingGlass size={24} /><strong>{result.total === 0 ? '还没有使用记录' : '没有符合条件的记录'}</strong><span>{result.total === 0 ? '完成一次模型连接测试或发起对话后，这里会显示调用状态。' : '请调整状态或模型筛选条件。'}</span></div>
       ) : (
         <>
           <div className="log-list" aria-label="模型交互日志列表">
@@ -822,31 +847,40 @@ interface ActionSettingsProps {
   onRun(action: SystemAction, input?: SystemActionInput): Promise<void>
 }
 
-function RuntimeSettings({ pending, result, error, onRun }: ActionSettingsProps) {
+function MaintenanceSettings({ models, pending, result, error, onRun }: ActionSettingsProps & { models: ModelProfile[] }) {
   return (
-    <ActionSettings title="运行时" copy="独立 DSH profile 仅绑定环回地址。检查会同时验证 Harness 版本、bundle 声明和本地 SQLite。" result={result} error={error}>
-      <ActionButton label="检查运行时与数据库" action="status" pending={pending} onRun={onRun} />
-    </ActionSettings>
+    <div className="settings-section settings-section--maintenance">
+      <div className="settings-section__heading"><h3>维护与更新</h3><p>应用出现异常时可先运行状态检查。版本验证和回滚属于开发者工具，日常使用无需操作。</p></div>
+      <section className="maintenance-card">
+        <div><ShieldCheck size={22} /><span><strong>应用状态检查</strong><small>检查 AI 执行引擎和本机数据是否可以正常工作。</small></span></div>
+        <ActionButton label="立即检查" action="status" pending={pending} onRun={onRun} />
+      </section>
+      {error === undefined && result === undefined ? null : <SystemResultCard {...(result === undefined ? {} : { result })} {...(error === undefined ? {} : { error })} />}
+      <details className="settings-disclosure settings-disclosure--maintenance">
+        <summary><span><strong>开发者更新工具</strong><small>验证其他 DSH 版本、执行兼容测试或回滚</small></span><CaretDown size={16} /></summary>
+        <UpdateSettings models={models} pending={pending} result={result} error={error} onRun={onRun} embedded />
+      </details>
+    </div>
   )
 }
 
 function DataSettings({ pending, result, error, onRun }: ActionSettingsProps) {
   return (
-    <ActionSettings title="本地数据" copy="SQLite 是本地权威数据源。备份会生成包含世界数据的本地 Bundle，导出写入当前 DSH Cyber 数据目录，不会覆盖已有文件。" result={result} error={error}>
-      <ActionButton label="运行数据库健康检查" action="doctor" pending={pending} onRun={onRun} />
-      <ActionButton label="创建本地数据备份 Bundle" action="backup" pending={pending} onRun={onRun} />
-      <ActionButton label="导出可移植 JSON" action="export" pending={pending} onRun={onRun} />
+    <ActionSettings title="数据与备份" copy="你的世界、会话、角色和设置都保存在当前设备。建议在重要改动前创建备份；导出文件可用于迁移或留档。" result={result} error={error}>
+      <ActionButton label="检查数据是否完整" action="doctor" pending={pending} onRun={onRun} />
+      <ActionButton label="创建完整备份" action="backup" pending={pending} onRun={onRun} />
+      <ActionButton label="导出通用 JSON 文件" action="export" pending={pending} onRun={onRun} />
     </ActionSettings>
   )
 }
 
-function UpdateSettings({ models, pending, result, error, onRun }: ActionSettingsProps & { models: ModelProfile[] }) {
+function UpdateSettings({ models, pending, result, error, onRun, embedded = false }: ActionSettingsProps & { models: ModelProfile[]; embedded?: boolean }) {
   const [candidateRoot, setCandidateRoot] = useState('')
   const [modelProfileId, setModelProfileId] = useState(models.find((item) => item.isDefault)?.id ?? models[0]?.id ?? '')
   const [approved, setApproved] = useState(false)
   const transaction = result?.transaction ?? result?.items?.[0]
   return (
-    <ActionSettings title="安全更新" copy="候选 DSH 依次经过版本验证、协议测试、真实模型金丝雀和人工批准。启用前自动备份；即使新版本无法启动，也能用命令行恢复内置运行时。" result={result} error={error}>
+    <ActionSettings title="DSH 版本验证" copy="仅用于开发和升级测试。选择候选版本后，系统会依次验证兼容性、进行真实模型测试，并在启用前自动备份。" result={embedded ? undefined : result} error={embedded ? undefined : error}>
       <button className="settings-action-button" type="button" disabled={pending !== undefined} onClick={() => void onRun('list-updates')}><span>读取更新记录与当前运行时</span><span>{pending === 'list-updates' ? '读取中…' : '刷新'}</span></button>
       <label className="dialog-field update-candidate-field"><span>候选 DSH 安装目录</span><input value={candidateRoot} placeholder="例如 F:\\runtime\\dsh-candidate" onChange={(event) => setCandidateRoot(event.target.value)} /></label>
       <button className="settings-action-button" type="button" disabled={!candidateRoot.trim() || pending !== undefined} onClick={() => void onRun('verify-update', { candidateRoot: candidateRoot.trim() })}><span>验证候选版本与隔离 profile</span><span>{pending === 'verify-update' ? '验证中…' : '开始验证'}</span></button>
@@ -880,13 +914,25 @@ function SystemResultCard({ result, error }: { result?: SystemActionResult; erro
   return (
     <div className={`system-result ${result.ok ? 'system-result--ok' : 'system-result--error'}`}>
       <strong>{result.ok ? '检查通过' : '需要处理'}</strong>
-      {version === undefined ? null : <p>Harness 版本：{version}{result.contractId ? ` · ${result.contractId}` : ''}</p>}
-      {database === undefined ? null : <p>SQLite schema v{database.schemaVersion ?? '?'} · 完整性 {(database.integrity ?? []).join(', ') || '未知'}</p>}
+      {version === undefined ? null : <p>AI 执行引擎版本：{version}</p>}
+      {database === undefined ? null : <p>本机数据：{(database.integrity ?? []).includes('ok') && (database.errors ?? []).length === 0 ? '正常' : '需要检查'}</p>}
       {result.output === undefined ? null : <p className="system-result__path">已生成：{result.output}</p>}
-      {result.transaction === undefined ? null : <p>更新状态：{result.transaction.status}{result.restartRequired ? ' · 重启后生效' : ''}</p>}
-      {result.activeRuntime === undefined ? null : <p>当前候选运行时：{result.activeRuntime.version}</p>}
+      {result.transaction === undefined ? null : <p>版本验证状态：{updateStatusLabel(result.transaction.status)}{result.restartRequired ? ' · 重启后生效' : ''}</p>}
+      {result.activeRuntime === undefined ? null : <p>当前测试版本：{result.activeRuntime.version}</p>}
       {result.items === undefined ? null : <p>更新记录：{result.items.length} 条</p>}
       {(result.errors ?? result.compatibility?.errors ?? database?.errors ?? []).map((item) => <p key={item}>{item}</p>)}
     </div>
   )
+}
+
+function updateStatusLabel(status: RuntimeUpdateTransaction['status']): string {
+  return ({
+    discovered: '已发现',
+    verified: '基础检查通过',
+    'contract-tested': '兼容测试通过',
+    'canary-passed': '真实模型测试通过',
+    activated: '已启用',
+    'rolled-back': '已回滚',
+    failed: '失败',
+  } as Partial<Record<RuntimeUpdateTransaction['status'], string>>)[status] ?? status
 }

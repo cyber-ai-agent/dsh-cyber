@@ -1146,7 +1146,7 @@ export default function App() {
         <nav aria-label="全局功能">
           <CreativeWorkshopLauncher workspaceId={workspace.id} onCreated={(project) => void openWorkshopWorld(project.worldId)} onOpenWorld={(worldId) => void openWorkshopWorld(worldId)} />
           <button type="button" onClick={() => void openPackageMarket(packageMarketKind)}><Storefront size={16} />市场</button>
-          <button type="button" onClick={() => { setSettingsSection('runtime'); setSettingsOpen(true) }}><Pulse size={16} /><span>运行时健康</span><i className="health-indicator" />良好</button>
+          <button type="button" onClick={() => { setSettingsSection('maintenance'); setSettingsOpen(true) }}><Pulse size={16} /><span>系统状态</span><i className="health-indicator" />良好</button>
           <button type="button" onClick={() => { setSettingsSection('appearance'); setSettingsOpen(true) }}><GearSix size={17} />设置</button>
         </nav>
       </header>
