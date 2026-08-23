@@ -34,7 +34,7 @@ export function CreativeWorkshopEditor({
   const [selectedRoleId, setSelectedRoleId] = useState(draft.roles[0]?.clientId)
   const presetMap = useMemo(() => new Map(presets.map((preset) => [preset.id, preset])), [presets])
   const selected = draft.roles.find((role) => role.clientId === selectedRoleId) ?? draft.roles[0]
-  const fallbackPresetId = presets[0]?.id ?? 'general'
+  const fallbackPreset = presets[0]
 
   useEffect(() => {
     if (selected !== undefined) return
@@ -50,9 +50,16 @@ export function CreativeWorkshopEditor({
     })
   }
 
+  const applyPreset = (preset: EmbodimentPresetDescriptor) => {
+    updateSelected({
+      embodimentPresetId: preset.id,
+      embodiment: structuredClone(preset.profile),
+    })
+  }
+
   const addRole = () => {
-    if (draft.roles.length >= 16) return
-    const role = createRoleDraft(draft.roles.length + 1, fallbackPresetId)
+    if (draft.roles.length >= 16 || fallbackPreset === undefined) return
+    const role = createRoleDraft(draft.roles.length + 1, fallbackPreset)
     onChange({ ...draft, roles: [...draft.roles, role] })
     setSelectedRoleId(role.clientId)
   }
@@ -81,11 +88,11 @@ export function CreativeWorkshopEditor({
             <label className="dialog-field"><span>当前场景 / 经营目标</span><textarea rows={2} value={draft.scenario} placeholder="当前阶段的业务、故事或经营目标。" onChange={(event) => patchDraft({ scenario: event.target.value })} /></label>
           </section>
 
-          <div className="creative-workshop-role-heading"><strong>初始角色</strong><button type="button" onClick={addRole} disabled={draft.roles.length >= 16}><Plus size={15} />添加</button></div>
+          <div className="creative-workshop-role-heading"><strong>初始角色</strong><button type="button" onClick={addRole} disabled={draft.roles.length >= 16 || fallbackPreset === undefined}><Plus size={15} />添加</button></div>
           <div className="creative-workshop-role-list">
             {draft.roles.map((role, index) => (
               <button key={role.clientId} type="button" className={role.clientId === selected?.clientId ? 'is-active' : ''} onClick={() => setSelectedRoleId(role.clientId)}>
-                <span>{index + 1}</span><div><strong>{role.displayName || `角色 ${index + 1}`}</strong><small>{role.role || presetMap.get(role.embodimentPresetId)?.displayName || '自定义角色'}</small></div>
+                <span>{index + 1}</span><div><strong>{role.displayName || `角色 ${index + 1}`}</strong><small>{role.role || (role.embodimentPresetId === undefined ? '自定义语义' : presetMap.get(role.embodimentPresetId)?.displayName) || '自定义角色'}</small></div>
               </button>
             ))}
           </div>
@@ -108,7 +115,10 @@ export function CreativeWorkshopEditor({
             <fieldset className="creative-workshop-presets">
               <legend>空间与行为语义</legend>
               <p>预设来自宿主 Catalog，只提供可移植语义；主题再把语义映射为 Zone / Facility / Slot。</p>
-              <div>{presets.map((preset) => <label key={preset.id} className={selected.embodimentPresetId === preset.id ? 'is-active' : ''}><input type="radio" name={`preset-${selected.clientId}`} checked={selected.embodimentPresetId === preset.id} onChange={() => updateSelected({ embodimentPresetId: preset.id })} /><strong>{preset.displayName}</strong><small>{preset.description}</small></label>)}</div>
+              <div>
+                {selected.embodimentPresetId === undefined ? <div className="creative-workshop-custom-semantic"><strong>保留项目自定义语义</strong><small>{selected.embodiment.roleTags.join(' · ') || 'custom'}</small></div> : null}
+                {presets.map((preset) => <label key={preset.id} className={selected.embodimentPresetId === preset.id ? 'is-active' : ''}><input type="radio" name={`preset-${selected.clientId}`} checked={selected.embodimentPresetId === preset.id} onChange={() => applyPreset(preset)} /><strong>{preset.displayName}</strong><small>{preset.description}</small></label>)}
+              </div>
             </fieldset>
 
             <fieldset className="creative-workshop-skills">
