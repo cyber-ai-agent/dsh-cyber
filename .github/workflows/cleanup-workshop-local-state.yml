@@ -1,0 +1,60 @@
+name: Cleanup Workshop request-local build state
+
+on:
+  push:
+    branches: [feat/creative-world-platform-v1]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/creative-world-platform-v1
+      - name: Keep compiled build state request-local
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('packages/server/src/services/creative-workshop-service.ts')
+          text = path.read_text(encoding='utf-8')
+          replacements = [
+            (
+              "    const reversibleInstalls: ReversiblePackageInstallation[] = []\n    let createdWorldId: string | undefined",
+              "    const reversibleInstalls: ReversiblePackageInstallation[] = []\n    let compiled: CompiledRolePackage[] = []\n    let createdWorldId: string | undefined",
+            ),
+            (
+              "      const compiled = await this.#compileRoles(projectId, projectDirectory, normalized.roles, normalized.baseTemplateId, now)\n      rememberCompiled(projectDirectory, compiled)",
+              "      compiled = await this.#compileRoles(projectId, projectDirectory, normalized.roles, normalized.baseTemplateId, now)",
+            ),
+            (
+              "      await atomicWrite(join(projectDirectory, 'project.json'), `${JSON.stringify(project, null, 2)}\\n`)\n      compiledOrEmpty(projectDirectory)\n      return project",
+              "      await atomicWrite(join(projectDirectory, 'project.json'), `${JSON.stringify(project, null, 2)}\\n`)\n      return project",
+            ),
+            (
+              "      for (const item of [...compiledOrEmpty(projectDirectory)].reverse()) {",
+              "      for (const item of [...compiled].reverse()) {",
+            ),
+          ]
+          for old, new in replacements:
+            if old not in text:
+              raise SystemExit(f'Workshop local state target missing: {old[:100]}')
+            text = text.replace(old, new, 1)
+
+          helper = """\nconst compiledBuilds = new Map<string, CompiledRolePackage[]>()\n\nfunction rememberCompiled(projectDirectory: string, compiled: CompiledRolePackage[]): void {\n  compiledBuilds.set(projectDirectory, compiled)\n}\n\nfunction compiledOrEmpty(projectDirectory: string): CompiledRolePackage[] {\n  const compiled = compiledBuilds.get(projectDirectory) ?? []\n  compiledBuilds.delete(projectDirectory)\n  return compiled\n}\n"""
+          if helper not in text:
+            raise SystemExit('Workshop global build map missing')
+          text = text.replace(helper, '\n', 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+      - name: Commit cleanup and remove one-shot workflow
+        run: |
+          rm .github/workflows/cleanup-workshop-local-state.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add packages/server/src/services/creative-workshop-service.ts .github/workflows/cleanup-workshop-local-state.yml
+          git commit -m "refactor: keep Workshop build compensation state request-local"
+          git push origin HEAD:feat/creative-world-platform-v1
