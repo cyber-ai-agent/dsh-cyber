@@ -57,6 +57,13 @@ export function ArtifactDock({
 }: ArtifactDockProps) {
   const visibleTab: DockTab = activeTab === 'dossier' ? 'dossier' : 'world'
 
+  const selectTab = (tab: DockTab) => {
+    // “档案”是角色管理的顶层入口；点击顶层 Tab 应回到目录。
+    // 具体角色详情仍通过世界角色、消息头像或档案卡片进入。
+    if (tab === 'dossier') onShowAllDossiers()
+    onTabChange(tab)
+  }
+
   return (
     <section className="artifact-dock" aria-label="世界与角色档案侧边栏">
       <header className="dock-tabs">
@@ -68,7 +75,7 @@ export function ArtifactDock({
                 key={tab.id}
                 type="button"
                 className={visibleTab === tab.id ? 'is-active' : ''}
-                onClick={() => onTabChange(tab.id)}
+                onClick={() => selectTab(tab.id)}
               >
                 <Icon size={15} />
                 <span>{tab.label}</span>
