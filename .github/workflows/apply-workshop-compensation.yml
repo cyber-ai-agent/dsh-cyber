@@ -1,0 +1,125 @@
+name: Apply Workshop compensation primitives
+
+on:
+  push:
+    branches: [feat/creative-world-platform-v1]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/creative-world-platform-v1
+      - name: Add reversible package install and Workshop compensation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          manager = Path('packages/package-runtime/src/package-manager.ts')
+          text = manager.read_text(encoding='utf-8')
+          old_port = """  rollbackPackageInstall(input: {\n    transactionId: string\n    errorCode: string\n    actorId?: string\n  }): PackageInstallTransaction\n}"""
+          new_port = """  rollbackPackageInstall(input: {\n    transactionId: string\n    errorCode: string\n    actorId?: string\n  }): PackageInstallTransaction\n  compensateActivatedPackageInstall(input: {\n    transactionId: string\n    errorCode: string\n    actorId?: string\n  }): PackageInstallTransaction\n}"""
+          if old_port not in text:
+            raise SystemExit('PackageStorePort target missing')
+          text = text.replace(old_port, new_port, 1)
+
+          marker = """export interface InstallPackageInput {\n  workspaceId: string\n  manifest: CyberPackageManifest\n  sourceDirectory: string\n  approvalToken: string\n  actorId?: string\n}\n"""
+          addition = marker + """\nexport interface ReversiblePackageInstallation {\n  installed: InstalledPackage\n  transactionId: string\n  receipt: PackageActivationReceipt\n}\n"""
+          if marker not in text:
+            raise SystemExit('InstallPackageInput target missing')
+          text = text.replace(marker, addition, 1)
+
+          pattern = re.compile(r"  async install\(input: InstallPackageInput\): Promise<InstalledPackage> \{.*?\n  #purgeApprovalGrants", re.S)
+          replacement = """  async install(input: InstallPackageInput): Promise<InstalledPackage> {\n    return (await this.installReversible(input)).installed\n  }\n\n  async installReversible(input: InstallPackageInput): Promise<ReversiblePackageInstallation> {\n    validatePackageManifest(input.manifest)\n    const digest = tokenDigest(input.approvalToken)\n    const grant = this.#approvalGrants.get(digest)\n    if (grant === undefined) {\n      throw new PackageApprovalRequiredError()\n    }\n    this.#approvalGrants.delete(digest)\n    const active = this.#store.getActivePackage(input.workspaceId, input.manifest.id)\n    const activePackageDigest = active === undefined ? undefined : installedPackageDigest(active)\n    if (\n      grant.expiresAtMs <= this.#clock().getTime()\n      || grant.workspaceId !== input.workspaceId\n      || grant.manifestDigest !== packageManifestDigest(input.manifest)\n      || grant.activePackageDigest !== activePackageDigest\n    ) throw new PackageApprovalRequiredError()\n    const beginInput: Parameters<PackageStorePort['beginPackageInstall']>[0] = {\n      workspaceId: input.workspaceId,\n      manifest: input.manifest,\n      approvedCapabilities: grant.capabilities,\n    }\n    if (input.actorId !== undefined) beginInput.actorId = input.actorId\n    const transaction = this.#store.beginPackageInstall(beginInput)\n    let staged: StagedPackage | undefined\n    let receipt: PackageActivationReceipt | undefined\n    try {\n      staged = await this.#runtime.stage(input.manifest, input.sourceDirectory)\n      await this.#validateStaged?.(staged)\n      this.#store.markPackageInstallStaged(transaction.id)\n      receipt = await this.#runtime.activate(staged)\n      const completeInput: Parameters<PackageStorePort['completePackageInstall']>[0] = {\n        transactionId: transaction.id,\n        manifest: input.manifest,\n        installedPath: receipt.installedPath,\n      }\n      if (input.actorId !== undefined) completeInput.actorId = input.actorId\n      const installed = this.#store.completePackageInstall(completeInput)\n      return { installed, transactionId: transaction.id, receipt }\n    } catch (error) {\n      if (receipt !== undefined) await this.#runtime.rollback(receipt).catch(() => undefined)\n      if (staged !== undefined) await this.#runtime.discard(staged).catch(() => undefined)\n      const errorCode = packageErrorCode(error)\n      const rollbackInput: Parameters<PackageStorePort['rollbackPackageInstall']>[0] = {\n        transactionId: transaction.id,\n        errorCode,\n      }\n      if (input.actorId !== undefined) rollbackInput.actorId = input.actorId\n      this.#store.rollbackPackageInstall(rollbackInput)\n      throw new PackageInstallError(errorCode, error)\n    }\n  }\n\n  async compensate(\n    installation: ReversiblePackageInstallation,\n    errorCode: string,\n    actorId = 'system',\n  ): Promise<void> {\n    await this.#runtime.rollback(installation.receipt)\n    this.#store.compensateActivatedPackageInstall({\n      transactionId: installation.transactionId,\n      errorCode,\n      actorId,\n    })\n  }\n\n  #purgeApprovalGrants"""
+          text, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+            raise SystemExit('PackageManager install method target missing')
+          manager.write_text(text, encoding='utf-8')
+
+          store = Path('packages/persistence/src/sqlite-store.ts')
+          text = store.read_text(encoding='utf-8')
+
+          world_marker = """  saveBlueprint(blueprint: EmployeeBlueprint): EmployeeBlueprint {"""
+          world_methods = """  rollbackWorldCreation(worldId: string, reason: string, actorId = 'system'): void {\n    this.#assertWritable()\n    const world = this.#requireWorld(worldId)\n    const workspaceId = world.workspaceId\n    const normalizedReason = reason.trim() || 'construction-failed'\n    this.#transaction(() => {\n      this.database.prepare('DELETE FROM worlds WHERE id = ?').run(world.id)\n      this.#appendEvent({\n        workspaceId,\n        type: 'world.creation.rolled-back',\n        actorId,\n        actorKind: actorId === 'system' ? 'system' : 'owner',\n        payload: { discardedWorldId: world.id, name: world.name, reason: normalizedReason },\n      })\n    })\n  }\n\n""" + world_marker
+          if world_marker not in text:
+            raise SystemExit('saveBlueprint marker missing')
+          text = text.replace(world_marker, world_methods, 1)
+
+          blueprint_marker = """  recruitEmployee(input: RecruitEmployeeInput): EmployeeInstance {"""
+          blueprint_method = """  discardBlueprintIfUnused(id: string, version: number): boolean {\n    this.#assertWritable()\n    const used = this.database\n      .prepare('SELECT 1 AS used FROM employee_instances WHERE blueprint_id = ? AND blueprint_version = ? LIMIT 1')\n      .get(id, version)\n    if (used !== undefined) return false\n    return this.database\n      .prepare('DELETE FROM employee_blueprints WHERE id = ? AND version = ?')\n      .run(id, version).changes > 0\n  }\n\n""" + blueprint_marker
+          if blueprint_marker not in text:
+            raise SystemExit('recruitEmployee marker missing')
+          text = text.replace(blueprint_marker, blueprint_method, 1)
+
+          package_marker = """  getRuntimeUpdateTransaction(transactionId: string): RuntimeUpdateTransaction | undefined {"""
+          package_method = """  compensateActivatedPackageInstall(input: RollbackPackageInstallInput): PackageInstallTransaction {\n    this.#assertWritable()\n    const transaction = this.getPackageInstallTransaction(input.transactionId)\n    if (transaction === undefined || transaction.status !== 'activated') {\n      throw new PersistenceError('Only an activated package install can be compensated')\n    }\n    const active = this.getActivePackage(transaction.workspaceId, transaction.packageId)\n    if (active === undefined || active.version !== transaction.version) {\n      throw new PersistenceError('Activated package no longer matches the compensation target')\n    }\n    const now = this.#clock()\n    const rolledBack: PackageInstallTransaction = {\n      ...transaction,\n      status: 'rolled-back',\n      errorCode: input.errorCode,\n      updatedAt: now,\n    }\n    return this.#transaction(() => {\n      this.database\n        .prepare(\n          `UPDATE installed_packages SET status = 'disabled', updated_at = ?\n           WHERE workspace_id = ? AND package_id = ? AND version = ? AND status = 'active'`,\n        )\n        .run(now, transaction.workspaceId, transaction.packageId, transaction.version)\n      if (transaction.previousVersion !== undefined) {\n        const restored = this.database\n          .prepare(\n            `UPDATE installed_packages SET status = 'active', updated_at = ?\n             WHERE workspace_id = ? AND package_id = ? AND version = ?`,\n          )\n          .run(now, transaction.workspaceId, transaction.packageId, transaction.previousVersion)\n        if (restored.changes !== 1) throw new PersistenceError('Previous package version cannot be restored')\n      }\n      this.database\n        .prepare(\n          `UPDATE package_install_transactions\n           SET status = 'rolled-back', error_code = ?, updated_at = ?\n           WHERE id = ? AND status = 'activated'`,\n        )\n        .run(input.errorCode, now, transaction.id)\n      this.#appendEvent({\n        workspaceId: transaction.workspaceId,\n        type: 'package.install.rolled-back',\n        actorId: input.actorId ?? 'system',\n        actorKind: input.actorId === undefined || input.actorId === 'system' ? 'system' : 'owner',\n        correlationId: transaction.id,\n        payload: {\n          transactionId: transaction.id,\n          packageId: transaction.packageId,\n          version: transaction.version,\n          previousVersion: transaction.previousVersion ?? null,\n          errorCode: input.errorCode,\n          compensatedAfterActivation: true,\n        },\n      })\n      return rolledBack\n    })\n  }\n\n""" + package_marker
+          if package_marker not in text:
+            raise SystemExit('runtime transaction marker missing')
+          text = text.replace(package_marker, package_method, 1)
+          store.write_text(text, encoding='utf-8')
+
+          workshop = Path('packages/server/src/services/creative-workshop-service.ts')
+          text = workshop.read_text(encoding='utf-8')
+          old_import = "import type { PackageManager } from '@dsh-cyber/package-runtime'"
+          new_import = "import type { PackageManager, ReversiblePackageInstallation } from '@dsh-cyber/package-runtime'"
+          if old_import not in text:
+            raise SystemExit('Workshop PackageManager import missing')
+          text = text.replace(old_import, new_import, 1)
+
+          old_setup = """    const projectDirectory = safeChild(this.#projectRoot, projectId)\n    await mkdir(join(projectDirectory, 'generated', 'roles'), { recursive: true, mode: 0o700 })\n\n    try {"""
+          new_setup = """    const projectDirectory = safeChild(this.#projectRoot, projectId)\n    await mkdir(join(projectDirectory, 'generated', 'roles'), { recursive: true, mode: 0o700 })\n    const reversibleInstalls: ReversiblePackageInstallation[] = []\n    let createdWorldId: string | undefined\n\n    try {"""
+          if old_setup not in text:
+            raise SystemExit('Workshop setup target missing')
+          text = text.replace(old_setup, new_setup, 1)
+
+          old_install = """        await this.#packageManager.install({\n          workspaceId,\n          manifest: item.manifest,\n          sourceDirectory: item.directory,\n          approvalToken: preview.approvalToken,\n          actorId: 'owner',\n        })\n        this.#store.saveBlueprint(item.blueprint as EmployeeBlueprint)"""
+          new_install = """        const installation = await this.#packageManager.installReversible({\n          workspaceId,\n          manifest: item.manifest,\n          sourceDirectory: item.directory,\n          approvalToken: preview.approvalToken,\n          actorId: 'owner',\n        })\n        reversibleInstalls.push(installation)\n        this.#store.saveBlueprint(item.blueprint as EmployeeBlueprint)"""
+          if old_install not in text:
+            raise SystemExit('Workshop install target missing')
+          text = text.replace(old_install, new_install, 1)
+
+          old_world = """      const world = this.#store.createWorld({\n        workspaceId,\n        name: normalized.displayName,\n        templateId: normalized.baseTemplateId,\n        actorId: 'owner',\n      })\n      await this.#worldRoots.ensure(world.id)"""
+          new_world = """      const world = this.#store.createWorld({\n        workspaceId,\n        name: normalized.displayName,\n        templateId: normalized.baseTemplateId,\n        actorId: 'owner',\n      })\n      createdWorldId = world.id\n      await this.#worldRoots.ensure(world.id)"""
+          if old_world not in text:
+            raise SystemExit('Workshop world target missing')
+          text = text.replace(old_world, new_world, 1)
+
+          old_catch = """    } catch (error) {\n      // Generated workshop output is rebuildable. Do not leave a half-generated\n      // source project behind when preflight or activation fails.\n      await rm(projectDirectory, { recursive: true, force: true }).catch(() => undefined)\n      throw error\n    }"""
+          new_catch = """    } catch (error) {\n      const compensationFailures: unknown[] = []\n      if (createdWorldId !== undefined) {\n        try {\n          this.#store.rollbackWorldCreation(createdWorldId, 'creative-workshop-build-failed')\n        } catch (cause) {\n          compensationFailures.push(cause)\n        }\n      }\n      for (const item of [...compiledOrEmpty(projectDirectory)].reverse()) {\n        try {\n          this.#store.discardBlueprintIfUnused(item.blueprint.id, item.blueprint.version)\n        } catch (cause) {\n          compensationFailures.push(cause)\n        }\n      }\n      for (const installation of [...reversibleInstalls].reverse()) {\n        try {\n          await this.#packageManager.compensate(installation, 'creative-workshop-build-failed')\n        } catch (cause) {\n          compensationFailures.push(cause)\n        }\n      }\n      await rm(projectDirectory, { recursive: true, force: true }).catch((cause) => compensationFailures.push(cause))\n      if (compensationFailures.length > 0) {\n        throw new AggregateError([error, ...compensationFailures], 'Creative Workshop build failed and compensation was incomplete')\n      }\n      throw error\n    }"""
+          if old_catch not in text:
+            raise SystemExit('Workshop catch target missing')
+          text = text.replace(old_catch, new_catch, 1)
+
+          # Keep the compiled role list available to compensation without widening mutable scope.
+          old_compile = """      const compiled = await this.#compileRoles(projectId, projectDirectory, normalized.roles, normalized.baseTemplateId, now)"""
+          new_compile = """      const compiled = await this.#compileRoles(projectId, projectDirectory, normalized.roles, normalized.baseTemplateId, now)\n      rememberCompiled(projectDirectory, compiled)"""
+          if old_compile not in text:
+            raise SystemExit('Workshop compiled target missing')
+          text = text.replace(old_compile, new_compile, 1)
+
+          helper = """\nconst compiledBuilds = new Map<string, CompiledRolePackage[]>()\n\nfunction rememberCompiled(projectDirectory: string, compiled: CompiledRolePackage[]): void {\n  compiledBuilds.set(projectDirectory, compiled)\n}\n\nfunction compiledOrEmpty(projectDirectory: string): CompiledRolePackage[] {\n  const compiled = compiledBuilds.get(projectDirectory) ?? []\n  compiledBuilds.delete(projectDirectory)\n  return compiled\n}\n"""
+          insert_before = "\nasync function materializeRolePackage("
+          if insert_before not in text:
+            raise SystemExit('Workshop helper insertion target missing')
+          text = text.replace(insert_before, helper + insert_before, 1)
+          # Clean successful build bookkeeping before returning.
+          success_marker = """      await atomicWrite(join(projectDirectory, 'project.json'), `${JSON.stringify(project, null, 2)}\\n`)\n      return project"""
+          success_replacement = """      await atomicWrite(join(projectDirectory, 'project.json'), `${JSON.stringify(project, null, 2)}\\n`)\n      compiledOrEmpty(projectDirectory)\n      return project"""
+          if success_marker not in text:
+            raise SystemExit('Workshop success marker missing')
+          text = text.replace(success_marker, success_replacement, 1)
+          workshop.write_text(text, encoding='utf-8')
+          PY
+      - name: Commit compensation refactor and remove one-shot workflow
+        run: |
+          rm .github/workflows/apply-workshop-compensation.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add packages/package-runtime/src/package-manager.ts packages/persistence/src/sqlite-store.ts packages/server/src/services/creative-workshop-service.ts .github/workflows/apply-workshop-compensation.yml
+          git commit -m "refactor: add compensating Workshop package transactions"
+          git push origin HEAD:feat/creative-world-platform-v1
