@@ -171,6 +171,11 @@ export class CreativeWorkshopService {
         } catch (cause) {
           compensationFailures.push(cause)
         }
+        try {
+          await this.#worldRoots.remove(createdWorldId)
+        } catch (cause) {
+          compensationFailures.push(cause)
+        }
       }
       for (const item of [...compiled].reverse()) {
         try {
