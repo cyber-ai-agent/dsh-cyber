@@ -1,59 +1,156 @@
 # 参与 DSH Cyber 共创
 
-感谢你参与 DSH Cyber。仓库当前处于早期开发阶段；贡献应保持本地优先、可审计、最小权限和真实运行证据，不把路线图写成已经存在的能力。
+感谢你参与 DSH Cyber。仓库当前处于 **Pre-Alpha / Creative Platform V1** 快速演进阶段。贡献应优先保持：本地优先、明确领域边界、可审计、最小权限、真实执行证据和可复用组件。
 
-本仓库采用 PolyForm Noncommercial License 1.0.0，可在 GitHub 公开共创，但不属于 OSI 认证的开源许可证。对外请使用“社区共创”或“source-available contribution”，不要误称为 OSI open source。
+> 本仓库采用 PolyForm Noncommercial License 1.0.0。代码公开可读、可参与社区共创，但该许可证不是 OSI 认证的 Open Source License。对外请准确描述为 source-available / 社区共创项目。
+
+## 开始之前
+
+请先阅读：
+
+- [`README.md`](./README.md)
+- [`docs/technical-report.md`](./docs/technical-report.md)
+- [`docs/development/architecture-guidelines.md`](./docs/development/architecture-guidelines.md)
+- [`docs/development/ci-strategy.md`](./docs/development/ci-strategy.md)
+- [`AGENTS.md`](./AGENTS.md)
+
+大型领域变更建议先讨论 contract / boundary，再进入实现。
 
 ## 事实来源
 
-当文档、示例和实现不一致时，不允许只选择其中一份作为结论。PR 必须同时核对：
+当文档、示例和实现不一致时，应同时核对：
 
-1. `packages/contracts/src` 中的公开类型与版本，确定可表达的合同边界；
-2. 对应解析器、服务和持久化实现，确定真实接受条件和领域行为；
-3. 自动化测试与 `.github/workflows/ci.yml`，确认正反场景有持续证据；
-4. `docs/community` 中的创作约定，确认贡献者能准确复现当前规则；
-5. issue、讨论稿和路线图，区分已实现要求与未来提案。
+1. `packages/contracts/src` 的公开类型与 schema；
+2. 对应 parser / service / persistence；
+3. 单元与集成测试；
+4. 浏览器 E2E（当该场景已经进入稳定验收层）；
+5. ADR / architecture docs / roadmap。
 
-如果实现具有更完整且经过测试的安全边界，文档和示例 MUST 随 PR 更新；如果规范提出的边界更完整，PR MUST 把它落实到真实解析、运行、持久化或交互链路并补测试，不能只改文档。无法在当前架构安全落地的提案必须明确保留为 ROADMAP，并解释由哪个现有边界替代。
+路线图不是已实现能力。讨论稿也不能单独改变 HTTP API、SQLite schema、包 schema 或 World Runtime contract。
 
-讨论稿不能单独改变 HTTP API、SQLite schema、包 schema 或 World Runtime contract。任何合同变更必须同时修改类型、解析器、迁移策略、兼容性说明和测试。
+## 架构贡献规则
+
+### World / Character / Skill / Harness 分离
+
+```text
+World != Character != Skill != Harness
+```
+
+禁止：
+
+- 根据角色显示名称写运行时业务分支；
+- 在核心 Skill Runtime 中增加供应商专属 `if/else`；
+- 把 `requestedSkills` 当成 `skillGrants`；
+- 让 UI 动画或模型自然语言代替真实执行结果；
+- 绕过 PackageManager / Harness Adapter 创建第二条隐藏运行路径。
+
+新增供应商能力应实现稳定 Adapter；新增复杂 UI 应拆 feature/component/model 边界，不继续扩大 `App.tsx`。
+
+## Character 自定义规则
+
+用户当前保存的 Character Identity / Persona / Relationship / Embodiment / Memory 是运行时事实。
+
+如果某个角色从“秘书模板”创建，用户后来把它改成猫、伙伴、酒馆老板或其他身份，运行时不能继续根据旧模板名字偷偷恢复“秘书”设定。
+
+模板是 construction material，不是永久隐藏人格。
+
+## 本地数据规则
+
+程序目录与 `stateRoot` 必须分离。
+
+新增持久化目录时同时考虑：
+
+- schemaVersion；
+- migration；
+- `.dshbackup`；
+- restore；
+- failure behavior。
+
+### 当前 Pre-Alpha
+
+Creative Platform V1 兼容基线正式宣布前，如果开发期旧格式严重妨碍正确架构，可以进行明确的 clean refactor，不要求为了尚未发布给真实外部用户的数据快照永久保留大量兼容补丁。
+
+### 兼容基线之后
+
+持久化格式变化必须使用 versioned migration；普通升级不得要求用户删除 `stateRoot`。
 
 ## 开发流程
 
-1. 从最新 `main` 创建范围明确的分支，例如 `fix/...`、`feat/...`、`refactor/...` 或 `docs/...`。
-2. 提交前先说明问题、验收条件和不在范围内的内容；大型合同变更先提交 issue 或 ADR。
-3. 保持提交可审查，不混入本地数据、生成截图、日志、数据库或无关格式化。
-4. Pull Request 使用仓库模板，列出真实测试结果和仍未验证的内容。
-5. CI 必须通过后才合并；不得删除断言、跳过失败场景或把路线图描述为完成来绕过门禁。
+1. 从最新 `main` 或当前约定的集成分支创建范围明确的分支：`feat/...`、`fix/...`、`refactor/...`、`docs/...`。
+2. 大型 contract / persistence / permission 变化优先补 ADR 或 architecture note。
+3. 保持 commit 可审查，不混入本地数据库、密钥、私有日志、临时构建产物。
+4. Pull Request 说明：目标、边界、实际验证、仍未验证的内容。
+5. Required CI 通过后可以继续集成；准备把大型 Draft PR 标记为 Ready 或合并 `main` 时，再运行当前阶段要求的完整浏览器验收。
 
-本地基础门禁：
+## CI 与测试
+
+当前 Pre-Alpha Required CI：
 
 ```bash
 pnpm typecheck
 pnpm test
+```
+
+完整 Chromium E2E 当前用于：
+
+- `main` push；
+- nightly；
+- manual dispatch；
+- 大型重构准备进入 Ready / merge 前的阶段验收。
+
+本地完整验证仍可运行：
+
+```bash
 pnpm test:e2e
 pnpm verify
 ```
 
-Node.js 与 pnpm 版本以根目录 `package.json` 和 CI 工作流为准。影响浏览器交互、世界渲染或恢复流程的变更，还应附实际浏览器尺寸、控制台检查和截图路径。
+测试应尽量验证业务合同：角色是否创建、会话是否持久化、Skill 是否越权、重启是否恢复。避免把所有测试绑定到“左侧第几个按钮”或固定 DOM 排列。
 
-## 市场包贡献
+详见 [`docs/development/ci-strategy.md`](./docs/development/ci-strategy.md)。
 
-市场包必须先阅读 [包生态与信任边界](docs/community/package-ecosystem.md)，再按类型阅读：
+## UI / Visual QA
 
-- [世界主题创作约定](docs/community/world-theme-authoring.md)
-- [员工蓝图创作约定](docs/community/employee-blueprint-authoring.md)
-- [声明式插件创作约定](docs/community/plugin-authoring.md)
+影响核心界面的改动至少检查：
 
-贡献者必须声明完整文件清单、逐文件 SHA-256、许可证、发布者、能力和数据外发。社区贡献不得自行标记为 `official`；认证字段由维护者在独立审核后决定。安装授权令牌是运行时临时凭据，绝不能写入包、测试夹具或 Git 历史。
+- 1440×900；
+- 1920×1080；
+- 3840×2160；
+- 控制台 error/warn；
+- 文字可读性；
+- 世界画面填充；
+- 弹窗遮挡/重叠；
+- 关键入口是否符合当前信息架构。
+
+当前信息架构：
+
+```text
+Topbar: Creative Workshop / Market / Runtime / Settings
+Left: Conversations only
+Right: World / Dossier
+```
+
+旧 E2E 如果仍要求“左侧添加角色”“文件 Tab”等废弃入口，应更新测试，不要恢复旧产品结构。
+
+## 市场 / MOD 贡献
+
+市场包请先阅读：
+
+- [`docs/community/package-ecosystem.md`](./docs/community/package-ecosystem.md)
+- [`docs/community/world-theme-authoring.md`](./docs/community/world-theme-authoring.md)
+- [`docs/community/employee-blueprint-authoring.md`](./docs/community/employee-blueprint-authoring.md)
+- [`docs/community/plugin-authoring.md`](./docs/community/plugin-authoring.md)
+
+包必须声明文件、哈希、许可证、发布者、capabilities 和 data egress。发现一个包不等于信任它；安装一个包也不等于批准它执行所有外部动作。
 
 ## 安全与隐私
 
-- 不提交 `.env`、密钥、Cookie、私有会话、数据库、`.local-data`、`.private`、运行日志或用户工作区内容。
-- 不用符号链接、绝对路径、`..`、外部 CDN 或隐藏文件绕过包边界。
-- 不扩大 `capabilities` 或 `dataEgress` 以“备用”；只声明真实需要的最小集合。
-- 发现漏洞时不要在公开 issue 中附利用细节、凭据或真实用户数据，应先联系维护者进行私下披露。
+- 不提交 `.env`、API key、Cookie、私有会话、数据库、`.local-data`、`.private`、用户工作区或真实凭据。
+- 不使用符号链接、绝对路径、`..`、隐藏文件绕过包边界。
+- Capability 只申请真实需要的最小集合。
+- 外部副作用必须可追踪到具体 Action 和授权来源。
+- 漏洞披露不要在公开 issue 中附真实凭据或可直接利用的用户数据。
 
 ## 许可证与署名
 
-提交贡献即表示你有权提交相关代码、文档和资产，并同意贡献按仓库 [LICENSE](LICENSE) 分发。第三方资产必须提供可核验来源和兼容许可证；不得提交来源不明、不可再分发或仅允许个人使用的内容。
+提交贡献即表示你有权提交相关代码、文档和资产，并同意贡献按仓库 [`LICENSE`](./LICENSE) 分发。第三方资产必须提供可核验来源和兼容许可证。
