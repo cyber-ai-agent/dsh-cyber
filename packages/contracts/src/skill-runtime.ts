@@ -5,6 +5,7 @@ export type SkillActionStatus =
   | 'executed'
   | 'waiting-for-integration'
   | 'failed'
+  | 'outcome-unknown'
 
 export type SkillActionRisk = 'read' | 'write-local' | 'external-side-effect'
 
@@ -17,6 +18,10 @@ export type SkillActionAuthorization =
  *
  * It contains no provider credentials and no executable callback. Provider
  * details stay behind a trusted host-side Skill Adapter.
+ *
+ * `outcome-unknown` is intentionally distinct from `failed`: once an external
+ * request may have left the process, a lost response cannot prove that no side
+ * effect happened. Unknown outcomes must never be auto-retried blindly.
  */
 export interface CharacterSkillAction {
   id: string
