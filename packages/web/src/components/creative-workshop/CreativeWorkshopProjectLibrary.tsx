@@ -1,6 +1,8 @@
 import { ArrowRight, Copy, Cube, Plus, UsersThree } from '@phosphor-icons/react'
 import type { CharacterSkillDescriptor, WorkshopProject } from '@dsh-cyber/contracts/creative-platform'
 
+import './CreativeWorkshopProjectLibrary.css'
+
 interface CreativeWorkshopProjectLibraryProps {
   projects: WorkshopProject[]
   selectedProject?: WorkshopProject
