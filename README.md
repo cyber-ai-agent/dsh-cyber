@@ -24,6 +24,8 @@ DSH Cyber 是一个基于 [DeepSeek Harness](https://www.deepseek.com/harness/) 
 - **三类扩展市场**：主题市场、插件市场和人才市场统一使用独立目录包。目录支持搜索、官方认证与内容哈希校验；安装前展示来源、许可证、能力和数据外发声明，失败保留可审计回滚记录。
 - **声明式插件与人才包**：当前 `prompt-transform` 插件入口会进入真实 Agent 提示链；人才包安装后会进入当前世界的招聘目录，并创建独立员工会话，而不是只展示一张市场卡片。
 - **本地优先存储**：SQLite 保存工作区、世界、角色、会话索引、偏好、档案与授权；核心功能不依赖云端账户。
+- **本地创意工坊**：用户创建的世界、角色 Blueprint、具身语义和生成包保存在 `stateRoot/workshop`，应用更新不会覆盖；未来云端只作为可选同步副本。
+- **受信任 Skill Adapter**：角色模板只声明 Skill 请求，角色 revision 单独授权；外部动作通过宿主 Adapter 结构化执行并记录真实状态。
 - **可扩展生态**：为运行时插件、技能包、角色蓝图、世界主题和资产包预留统一的安装、授权与审计边界。
 
 ## 设置与个性化
@@ -38,7 +40,7 @@ DSH Cyber 是一个基于 [DeepSeek Harness](https://www.deepseek.com/harness/) 
 - 工作区、世界与员工三级模型分配，员工设置优先于世界设置，世界设置优先于工作区默认值；
 - DSH 运行时、本地数据和更新状态入口。
 
-“设置 → 更新”提供受控的底层 DSH 升级流程：候选版本先进入隔离 profile，依次通过精确版本验证、协议合同测试和两轮真实模型金丝雀，得到人工批准后才会备份本地数据库并写入活动运行时指针。更新在下次启动时生效，失败记录保留在 SQLite 中。
+“设置 → 更新”提供受控的底层 DSH 升级流程：候选版本先进入隔离 profile，依次通过精确版本验证、协议合同测试和两轮真实模型金丝雀，得到人工批准后先生成完整 `.dshbackup` 本地数据 Bundle，再写入活动运行时指针。更新在下次启动时生效，失败记录保留在 SQLite 中。
 
 界面偏好和模型资料保存在本地 SQLite。背景文件保存在本机资产目录，数据库只记录引用和完整性校验值。模型凭据只通过环境变量名引用，不写入浏览器状态或数据库明文。
 
@@ -65,18 +67,37 @@ pnpm dsh-cyber -- web
 ```bash
 pnpm dsh-cyber -- web --port 43123 --workspace . --data-dir ./data --no-open
 pnpm dsh-cyber -- doctor --data-dir ./data
-pnpm dsh-cyber -- backup --data-dir ./data --output ./backup.sqlite
+pnpm dsh-cyber -- backup --data-dir ./data --output ./backup.dshbackup
 pnpm dsh-cyber -- export --data-dir ./data --output ./workspace.json
 pnpm dsh-cyber -- runtime-check --candidate-root /path/to/dsh-candidate --data-dir ./data
 pnpm dsh-cyber -- runtime-rollback --data-dir ./data
 ```
 
-如果候选 DSH 导致 Web 服务无法启动，`runtime-rollback` 不依赖 Web UI，会先创建 SQLite 备份，再清除候选运行时指针并恢复项目内置版本。
+如果候选 DSH 导致 Web 服务无法启动，`runtime-rollback` 不依赖 Web UI，会先创建包含 SQLite、世界、资产、已安装包、创意工坊和 Skill 动作的完整本地 Bundle，再清除候选运行时指针并恢复项目内置版本。
 
 默认数据目录：
 
 - Windows：`%LOCALAPPDATA%\DSH Cyber`
 - macOS / Linux：`~/.dsh-cyber`
+
+### 更新到最新版本（保留本地世界与创作数据）
+
+DSH Cyber 的程序目录与 `stateRoot` 分离。正常更新只替换源码、依赖和构建产物，不删除本地世界、角色、会话、Workshop 项目、Skill 动作或资产。推荐更新前先生成一次完整 Bundle：
+
+```bash
+pnpm dsh-cyber -- backup
+
+git fetch origin
+git switch main
+git pull --ff-only origin main
+
+pnpm install --frozen-lockfile
+pnpm build
+pnpm dsh-cyber -- doctor
+pnpm dsh-cyber -- web
+```
+
+开发分支用户把 `main` 替换为目标分支即可；如果使用自定义 `--data-dir`，更新后继续传入**同一个数据目录**。完整说明见 [`docs/operations/local-first-upgrades.md`](./docs/operations/local-first-upgrades.md)。不要通过删除 `~/.dsh-cyber`、`%LOCALAPPDATA%\DSH Cyber`、`workshop/` 或 `worlds/` 来处理普通代码升级。
 
 ### 开发验证
 
@@ -102,7 +123,7 @@ pnpm verify
 
 ## 数据与隐私
 
-- SQLite 是本地权威数据源；云同步是未来可选的加密副本，不替代本地所有权。
+- 本地 `stateRoot` 是当前权威数据源：SQLite、世界、Workshop、Skill 动作和资产共同组成用户本地状态；云同步是未来可选的加密副本，不替代本地所有权。
 - 大型文件和背景图片单独存储，并以内容校验值关联。
 - 服务默认只监听 loopback，不提供公网监听开关。
 - 插件与角色使用显式、最小权限授权。
