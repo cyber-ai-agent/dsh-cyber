@@ -32,7 +32,7 @@ export interface CharacterSkillExecutionContext {
 }
 
 export interface CharacterSkillExecutionResult {
-  status: Extract<SkillActionStatus, 'executed' | 'waiting-for-integration' | 'failed'>
+  status: Extract<SkillActionStatus, 'executed' | 'waiting-for-integration' | 'failed' | 'outcome-unknown'>
   detail: string
 }
 
