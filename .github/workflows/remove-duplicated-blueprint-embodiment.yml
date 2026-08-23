@@ -1,0 +1,78 @@
+name: Remove Duplicated Blueprint Embodiment
+
+on:
+  push:
+    branches: [feat/creative-world-platform-v1]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/creative-world-platform-v1
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: pnpm
+      - name: Remove duplicated Blueprint projections
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          routes = Path('packages/server/src/routes/world-routes.ts')
+          text = routes.read_text(encoding='utf-8')
+          text = text.replace("import type { JsonObject } from '@dsh-cyber/contracts'\n", '')
+          text = text.replace("import { embodimentToBehaviorJson } from '../embodiment-profile.js'\n", '')
+          old = """    const employee = store.recruitEmployee(recruitInput)\n    if (liveBlueprint?.embodiment !== undefined) {\n      const current = store.getEmployeeProfile(employee.id)\n      store.reviseEmployeeProfile({\n        employeeId: employee.id,\n        background: current?.background ?? liveBlueprint.summary,\n        personalityTraits: current?.personalityTraits ?? [],\n        appearance: {\n          ...(current?.appearance ?? {}),\n          worldBehaviorProfile: embodimentToBehaviorJson(\n            `${liveBlueprint.id}@${liveBlueprint.version}`,\n            liveBlueprint.embodiment,\n          ) as unknown as JsonObject,\n          ...(liveBlueprint.embodiment.actorRigId === undefined ? {} : { actorRigId: liveBlueprint.embodiment.actorRigId }),\n        },\n        reason: 'blueprint-embodiment',\n        actorId: 'system',\n      })\n    }\n    await conversationHub.ensureDirectSessions(world.id)"""
+          new = """    const employee = store.recruitEmployee(recruitInput)\n    await conversationHub.ensureDirectSessions(world.id)"""
+          if old not in text:
+            raise SystemExit('world-routes duplicated Embodiment block missing')
+          routes.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          workshop = Path('packages/server/src/services/creative-workshop-service.ts')
+          text = workshop.read_text(encoding='utf-8')
+          text = text.replace(
+            "import type { CyberPackageManifest, EmployeeBlueprint, JsonObject, PackagePermissionPreview } from '@dsh-cyber/contracts'",
+            "import type { CyberPackageManifest, EmployeeBlueprint, PackagePermissionPreview } from '@dsh-cyber/contracts'",
+            1,
+          )
+          text = text.replace(
+            "import { embodimentToBehaviorJson, parseEmbodimentProfile } from '../embodiment-profile.js'",
+            "import { parseEmbodimentProfile } from '../embodiment-profile.js'",
+            1,
+          )
+          old = """        const character = this.#store.recruitEmployee({\n          workspaceId,\n          worldId: world.id,\n          blueprintId: blueprint.id,\n          blueprintVersion: blueprint.version,\n          displayName: role.displayName,\n          actorId: 'owner',\n          reason: 'creative-workshop',\n        })\n        const currentProfile = this.#store.getEmployeeProfile(character.id)\n        this.#store.reviseEmployeeProfile({\n          employeeId: character.id,\n          background: currentProfile?.background ?? role.summary,\n          personalityTraits: currentProfile?.personalityTraits ?? [],\n          appearance: {\n            ...(currentProfile?.appearance ?? {}),\n            worldBehaviorProfile: embodimentToBehaviorJson(\n              `${blueprint.id}@${blueprint.version}`,\n              blueprint.embodiment!,\n            ) as unknown as JsonObject,\n            ...(blueprint.embodiment?.actorRigId === undefined ? {} : { actorRigId: blueprint.embodiment.actorRigId }),\n          },\n          reason: 'creative-workshop-embodiment',\n          actorId: 'owner',\n        })"""
+          new = """        this.#store.recruitEmployee({\n          workspaceId,\n          worldId: world.id,\n          blueprintId: blueprint.id,\n          blueprintVersion: blueprint.version,\n          displayName: role.displayName,\n          actorId: 'owner',\n          reason: 'creative-workshop',\n        })"""
+          if old not in text:
+            raise SystemExit('Workshop duplicated Embodiment block missing')
+          workshop.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          test = Path('packages/server/tests/creative-workshop-service.test.ts')
+          text = test.read_text(encoding='utf-8')
+          old = """    expect(store.getEmployeeProfile(employee.id)?.appearance).toMatchObject({\n      worldBehaviorProfile: {\n        preferredZoneTags: ['operations'],\n      },\n    })"""
+          new = """    expect(blueprint.embodiment).toMatchObject({\n      preferredZoneTags: ['operations'],\n    })\n    expect(store.getEmployeeProfile(employee.id)?.appearance['worldBehaviorProfile']).toBeUndefined()"""
+          if old not in text:
+            raise SystemExit('Workshop duplicated-profile test target missing')
+          test.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - name: Commit validated cleanup
+        shell: bash
+        run: |
+          rm .github/workflows/remove-duplicated-blueprint-embodiment.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add packages/server/src/routes/world-routes.ts packages/server/src/services/creative-workshop-service.ts packages/server/tests/creative-workshop-service.test.ts .github/workflows/remove-duplicated-blueprint-embodiment.yml
+          git commit -m "refactor: keep Blueprint Embodiment as single default source"
+          git push origin HEAD:feat/creative-world-platform-v1
