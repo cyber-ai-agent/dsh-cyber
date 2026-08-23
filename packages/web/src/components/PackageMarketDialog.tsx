@@ -219,5 +219,5 @@ function PermissionGroup({ title, values, empty, tone }: { title: string; values
 }
 
 function transactionLabel(status: PackageInstallTransaction['status']): string {
-  return ({ pending: '待处理', staged: '已暂存', activated: '已激活', 'rolled-back': '已回滚' })[status]
+  return ({ pending: '待处理', approved: '已批准', staged: '已暂存', activated: '已激活', failed: '失败', 'rolled-back': '已回滚' })[status]
 }

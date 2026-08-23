@@ -267,13 +267,27 @@ function normalizeCreateInput(input: WorkshopCreateInput): Required<Omit<Worksho
   }
 }
 
+type LegacyWorkshopRoleDefinition = Omit<WorkshopRoleDefinition, 'requestedSkillIds'> & {
+  requestedSkillIds?: string[]
+  skillIds?: string[]
+}
+
 function parseStoredProject(value: unknown): WorkshopProject {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid workshop project')
-  const project = value as WorkshopProject
+  const project = value as Omit<WorkshopProject, 'roles'> & { roles?: LegacyWorkshopRoleDefinition[] }
   if (project.schemaVersion !== 1 || !project.id || !project.workspaceId || !project.worldId || !Array.isArray(project.roles)) {
     throw new Error('Invalid workshop project')
   }
-  return project
+  const roles = project.roles.map((role) => {
+    const { skillIds: legacySkillIds, requestedSkillIds, ...rest } = role
+    return {
+      ...rest,
+      requestedSkillIds: Array.isArray(requestedSkillIds)
+        ? [...requestedSkillIds]
+        : Array.isArray(legacySkillIds) ? [...legacySkillIds] : [],
+    } satisfies WorkshopRoleDefinition
+  })
+  return { ...project, roles } as WorkshopProject
 }
 
 function text(value: unknown, label: string, max: number): string {
