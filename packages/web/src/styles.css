@@ -72,9 +72,6 @@
   grid-column: 2; grid-row: 1; width: 40px; height: 40px; display: grid; place-items: center;
   color: #12181d; background: #e4aa2f; border: 1px solid #f3c45d; border-radius: 8px;
 }
-.composer-mode { display: inline-grid; grid-template-columns: 1fr 1fr; padding: 2px; border: 1px solid #33414b; border-radius: 7px; background: #0c1217; }
-.composer-mode button { min-height: 32px; display: inline-flex; align-items: center; gap: 5px; padding: 0 10px; border: 0; border-radius: 5px; background: transparent; color: #aab6be; font-size: 12px; cursor: pointer; }
-.composer-mode button.is-active { color: #11171b; background: #e5aa30; font-weight: 700; }
 .composer__hint { font-size: 12px !important; color: #98a7b0 !important; }
 .session-row-wrap { position: relative; }
 .session-row-actions { display: none !important; }

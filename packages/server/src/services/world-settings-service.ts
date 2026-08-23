@@ -2,10 +2,11 @@ import { randomUUID } from 'node:crypto'
 import { open, readFile, rename } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import type { EmployeeInstance, ReasoningEffort, WorldSettings } from '@dsh-cyber/contracts'
+import type { AgentPermissionMode, EmployeeInstance, ReasoningEffort, WorldSettings } from '@dsh-cyber/contracts'
 import type { WorldRootService } from './world-root-service.js'
 
 const reasoning = new Set<ReasoningEffort>(['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+const permissionModes = new Set<AgentPermissionMode>(['read-only', 'workspace-write'])
 const COLOR = /^#[0-9a-f]{6}$/i
 
 export class WorldSettingsService {
@@ -32,6 +33,7 @@ export class WorldSettingsService {
       terminology: { ...current.terminology, ...value.terminology },
       appearance: { ...current.appearance, ...value.appearance },
       model: { ...current.model, ...value.model },
+      runtime: { ...current.runtime, ...value.runtime },
       updatedAt: new Date().toISOString(),
     })
     const root = await this.#roots.ensure(worldId)
@@ -82,6 +84,7 @@ function defaults(worldId: string): WorldSettings {
       panelRadius: 10, bubbleRadius: 8, buttonRadius: 7, fontScale: 1,
     },
     model: { reasoningEffort: 'auto' },
+    runtime: { permissionMode: 'read-only' },
     updatedAt: new Date().toISOString(),
   }
 }
@@ -95,6 +98,7 @@ function normalize(worldId: string, value: Partial<WorldSettings>): WorldSetting
     terminology: { ...base.terminology, ...(value.terminology ?? {}) },
     appearance: { ...base.appearance, ...(value.appearance ?? {}) },
     model: { ...base.model, ...(value.model ?? {}) },
+    runtime: { ...base.runtime, ...(value.runtime ?? {}) },
   }
   const next: WorldSettings = {
     ...raw,
@@ -132,6 +136,9 @@ function normalize(worldId: string, value: Partial<WorldSettings>): WorldSetting
         ? { defaultModelProfileId: raw.model.defaultModelProfileId.trim().slice(0, 160) }
         : {}),
       reasoningEffort: reasoning.has(raw.model.reasoningEffort) ? raw.model.reasoningEffort : 'auto',
+    },
+    runtime: {
+      permissionMode: permissionModes.has(raw.runtime.permissionMode) ? raw.runtime.permissionMode : 'read-only',
     },
     updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : new Date().toISOString(),
   }

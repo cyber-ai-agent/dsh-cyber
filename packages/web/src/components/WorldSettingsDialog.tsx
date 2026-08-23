@@ -1,6 +1,6 @@
 import { CheckCircle, LockKey, Palette, SlidersHorizontal, UserCircle, WarningCircle, X } from '@phosphor-icons/react'
 import { useEffect, useRef, useState } from 'react'
-import type { ModelProfile, ReasoningEffort, World, WorldAccessSummary, WorldSettings } from '@dsh-cyber/contracts'
+import type { AgentPermissionMode, ModelProfile, ReasoningEffort, World, WorldAccessSummary, WorldSettings } from '@dsh-cyber/contracts'
 
 interface WorldSettingsDialogProps {
   world: World
@@ -106,9 +106,11 @@ export function WorldSettingsDialog({ world, value, access, models, saving, onCl
           </fieldset>
 
           <fieldset>
-            <legend><SlidersHorizontal size={16}/> 模型与推理</legend>
+            <legend><SlidersHorizontal size={16}/> 模型与运行</legend>
             <label>世界默认模型<select value={draft.model.defaultModelProfileId ?? ''} onChange={(event)=>setDraft({...draft,model:event.target.value ? {...draft.model,defaultModelProfileId:event.target.value} : {reasoningEffort:draft.model.reasoningEffort}})}><option value="">继承全局或角色设置</option>{models.map((model)=><option key={model.id} value={model.id}>{model.displayName} · {model.modelId}</option>)}</select></label>
             <label>默认推理<select value={draft.model.reasoningEffort} onChange={(event)=>setDraft({...draft,model:{...draft.model,reasoningEffort:event.target.value as ReasoningEffort}})}>{reasoningOptions.map(([id,label])=><option key={id} value={id}>{label}</option>)}</select></label>
+            <label>任务权限<select value={draft.runtime.permissionMode} onChange={(event)=>setDraft({...draft,runtime:{permissionMode:event.target.value as AgentPermissionMode}})}><option value="read-only">只读：允许查看和搜索文件</option><option value="workspace-write">执行：允许调用工具并修改当前世界文件</option></select></label>
+            <p className="setting-help">权限只应用于当前世界。切换后，下次对话会使用新的运行环境。</p>
           </fieldset>
 
           <fieldset>

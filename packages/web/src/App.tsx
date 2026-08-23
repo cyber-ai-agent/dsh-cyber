@@ -156,7 +156,7 @@ export default function App() {
     setDraft('')
     setSelectedEmployeeId(undefined)
     setDockTab('world')
-    setPermissionMode(savedPermissionMode(world.id))
+    setPermissionMode('read-only')
     if (demoMode) {
       const isCompany = world.id === demoData.activeWorld.id
       setWorldRuntimeAvailable(true)
@@ -180,6 +180,7 @@ export default function App() {
     applyWorldAppearance(settingsResult.settings)
     setWorldAccess(settingsResult.access)
     setReasoningEffort(settingsResult.settings.model.reasoningEffort)
+    setPermissionMode(settingsResult.settings.runtime.permissionMode)
     setWorldRuntimeAvailable(capability.supported)
     setAppMode(worldRuntimeV2Enabled && capability.supported ? 'world' : 'workbench')
     const [dossierResults, participantResults] = await Promise.all([
@@ -1126,8 +1127,6 @@ export default function App() {
             employees={employees}
             sending={sending}
             draft={draft}
-            permissionMode={permissionMode}
-            onPermissionModeChange={(value) => { setPermissionMode(value); window.localStorage.setItem(`dsh-cyber:permission-mode:${activeWorld.id}`, value) }}
             onDraftChange={setDraft}
             onSend={send}
             onUploadAttachment={uploadChatAttachment}
@@ -1248,7 +1247,7 @@ export default function App() {
           onBindTheme={bindWorldTheme}
         />
       ) : null}
-      {worldSettingsOpen && activeWorld !== undefined && worldSettings !== undefined && worldAccess !== undefined ? <WorldSettingsDialog world={activeWorld} value={worldSettings} access={worldAccess} models={models} saving={savingSettings} onClose={()=>setWorldSettingsOpen(false)} onSave={async (value)=>{ setSavingSettings(true); try { const result = await api<{settings:WorldSettings}>(`/api/worlds/${activeWorld.id}/settings`, { method:'PUT', body:JSON.stringify(value) }); setWorldSettings(result.settings); setReasoningEffort(result.settings.model.reasoningEffort); applyWorldAppearance(result.settings) } finally { setSavingSettings(false) } }} onSetPassword={async(password)=>{ const result=await api<{access:WorldAccessSummary}>(`/api/worlds/${activeWorld.id}/access/password`,{method:'POST',body:JSON.stringify({password})});setWorldAccess(result.access)}} onClearPassword={async()=>{const result=await api<{access:WorldAccessSummary}>(`/api/worlds/${activeWorld.id}/access/password`,{method:'DELETE'});setWorldAccess(result.access)}} onLock={async()=>{await api(`/api/worlds/${activeWorld.id}/access/lock`,{method:'POST',body:'{}'});setWorldSettingsOpen(false);setLockedWorld(activeWorld)}} /> : null}
+      {worldSettingsOpen && activeWorld !== undefined && worldSettings !== undefined && worldAccess !== undefined ? <WorldSettingsDialog world={activeWorld} value={worldSettings} access={worldAccess} models={models} saving={savingSettings} onClose={()=>setWorldSettingsOpen(false)} onSave={async (value)=>{ setSavingSettings(true); try { const result = await api<{settings:WorldSettings}>(`/api/worlds/${activeWorld.id}/settings`, { method:'PUT', body:JSON.stringify(value) }); setWorldSettings(result.settings); setReasoningEffort(result.settings.model.reasoningEffort); setPermissionMode(result.settings.runtime.permissionMode); applyWorldAppearance(result.settings) } finally { setSavingSettings(false) } }} onSetPassword={async(password)=>{ const result=await api<{access:WorldAccessSummary}>(`/api/worlds/${activeWorld.id}/access/password`,{method:'POST',body:JSON.stringify({password})});setWorldAccess(result.access)}} onClearPassword={async()=>{const result=await api<{access:WorldAccessSummary}>(`/api/worlds/${activeWorld.id}/access/password`,{method:'DELETE'});setWorldAccess(result.access)}} onLock={async()=>{await api(`/api/worlds/${activeWorld.id}/access/lock`,{method:'POST',body:'{}'});setWorldSettingsOpen(false);setLockedWorld(activeWorld)}} /> : null}
       {lockedWorld !== undefined ? <WorldUnlockDialog worldName={lockedWorld.name} onUnlock={async(password)=>{ await api(`/api/worlds/${lockedWorld.id}/access/unlock`,{method:'POST',body:JSON.stringify({password})}); const world=lockedWorld; setLockedWorld(undefined); await loadWorld(world) }} /> : null}
       {managingEmployee !== undefined ? (
         <EmployeeManagementDialog
@@ -1506,10 +1505,6 @@ function serializableAttachments(attachments: ChatAttachment[]): JsonObject[] {
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
-}
-
-function savedPermissionMode(worldId: string): AgentPermissionMode {
-  return window.localStorage.getItem(`dsh-cyber:permission-mode:${worldId}`) === 'workspace-write' ? 'workspace-write' : 'read-only'
 }
 
 function demoRuntimeTransaction(status: RuntimeUpdateTransaction['status']): RuntimeUpdateTransaction {

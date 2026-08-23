@@ -6,13 +6,12 @@ import {
   Paperclip,
   TerminalWindow,
   UserCircle,
-  Wrench,
   X,
 } from '@phosphor-icons/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { AgentPermissionMode, ChatAttachment, JsonObject, LocalAssetMimeType, WorkMessage, WorkSession, World } from '@dsh-cyber/contracts'
+import type { ChatAttachment, JsonObject, LocalAssetMimeType, WorkMessage, WorkSession, World } from '@dsh-cyber/contracts'
 
 import { mentionPlugin } from './mention-plugin.js'
 import type { ConversationIntent, CyberEmployee } from '../types.js'
@@ -29,8 +28,6 @@ interface ChatWorkbenchProps {
   employees: CyberEmployee[]
   sending: boolean
   draft: string
-  permissionMode: AgentPermissionMode
-  onPermissionModeChange(value: AgentPermissionMode): void
   onDraftChange(value: string): void
   onSend(prompt: string, attachments: ChatAttachment[]): Promise<void>
   onUploadAttachment(file: File): Promise<ChatAttachment>
@@ -39,7 +36,7 @@ interface ChatWorkbenchProps {
   onRecruit(): void
 }
 
-export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, sending, draft, permissionMode, onPermissionModeChange, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRecruit }: ChatWorkbenchProps) {
+export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, sending, draft, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRecruit }: ChatWorkbenchProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -99,12 +96,6 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
     }
   }
 
-  const insertCodeBlock = () => {
-    const next = `${draft}${draft && !draft.endsWith('\n') ? '\n' : ''}\`\`\`\n\n\`\`\``
-    onDraftChange(next)
-    requestAnimationFrame(() => inputRef.current?.focus())
-  }
-
   const insertMention = (employee: CyberEmployee) => {
     const marker = draft.lastIndexOf('@')
     onDraftChange(marker < 0 ? `${draft}@${employee.displayName} ` : `${draft.slice(0, marker)}@${employee.displayName} `)
@@ -156,8 +147,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
         <div className="composer__toolbar"><div>
           <input ref={fileInputRef} className="composer-file-input" type="file" accept=".png,.jpg,.jpeg,.webp,.txt,.md,.json,.pdf" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAttachment(file) }} />
           <button className="icon-button" type="button" aria-label={uploading ? '正在上传附件' : '添加附件'} disabled={uploading} onClick={() => fileInputRef.current?.click()}>{uploading ? <CircleNotch size={18} className="spin" /> : <Paperclip size={18} />}</button>
-          <button className="icon-button" type="button" aria-label="插入代码或命令" onClick={insertCodeBlock}><BracketsCurly size={18} /></button>
-          <div className="composer-mode" role="group" aria-label="角色运行权限"><button type="button" className={permissionMode === 'read-only' ? 'is-active' : ''} aria-pressed={permissionMode === 'read-only'} title="可读取和搜索当前世界文件，不会修改内容" onClick={() => onPermissionModeChange('read-only')}><TerminalWindow size={15} />只读</button><button type="button" className={permissionMode === 'workspace-write' ? 'is-active' : ''} aria-pressed={permissionMode === 'workspace-write'} title="可调用工具、运行任务并读写当前世界文件" onClick={() => onPermissionModeChange('workspace-write')}><Wrench size={15} />执行</button></div><span className="composer__hint">{permissionMode === 'workspace-write' ? '可运行任务并读写当前世界文件' : '只读取当前世界文件'} · Enter 发送</span>
+          <span className="composer__hint">Enter 发送 · Shift+Enter 换行</span>
         </div><button className="send-button" type="button" aria-label={sending ? '角色处理中' : '发送'} disabled={sending || uploading || employees.length === 0 || (!draft.trim() && attachments.length === 0)} onClick={() => void submit()}>{sending ? <CircleNotch size={19} className="spin" /> : <PaperPlaneRight size={19} weight="fill" />}</button></div>
       </div></div>
     </section>

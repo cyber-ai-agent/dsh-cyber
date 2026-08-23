@@ -250,8 +250,6 @@ export function WorldMode({
           employees={employees}
           sending={sending}
           draft={draft}
-          permissionMode="read-only"
-          onPermissionModeChange={() => undefined}
           onDraftChange={onDraftChange}
           onSend={onSend}
           onUploadAttachment={onUploadAttachment}
