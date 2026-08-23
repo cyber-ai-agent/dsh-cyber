@@ -25,6 +25,10 @@
     "./creative-platform": {
       "types": "./lib/creative-platform.d.ts",
       "default": "./lib/creative-platform.js"
+    },
+    "./world-trace": {
+      "types": "./lib/world-trace.d.ts",
+      "default": "./lib/world-trace.js"
     }
   },
   "files": ["lib"],

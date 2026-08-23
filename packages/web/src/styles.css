@@ -357,10 +357,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .artifact-dock { height: 100%; display: grid; grid-template-rows: 56px minmax(0, 1fr); }
 .dock-tabs { justify-content: space-between; padding: 0 8px 0 10px; }
 .dock-tabs nav { min-width: 0; height: 100%; display: flex; overflow-x: auto; }
-.dock-tabs nav button { min-width: 54px; height: 100%; display: flex; align-items: center; justify-content: center; gap: 5px; padding: 0 9px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-muted); font-size: 10px; }
+.dock-tabs nav button { min-width: 62px; height: 100%; display: flex; align-items: center; justify-content: center; gap: 5px; padding: 0 10px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-muted); font-size: 12px; }
 .dock-tabs nav button:hover, .dock-tabs nav button.is-active { color: var(--text); background: var(--surface-2); }
 .dock-tabs nav button.is-active { border-bottom-color: var(--accent); color: var(--accent-strong); }
 .dock-content { min-height: 0; overflow: auto; }
+.chat-system-notice { align-self: center; max-width: min(520px, 90%); margin: 8px auto; padding: 9px 14px; color: var(--text-soft); border: 1px solid var(--border); background: var(--surface-1); font-size: 13px; line-height: 1.5; text-align: center; }
 .dock-empty { height: 100%; display: grid; place-content: center; justify-items: center; text-align: center; color: var(--text-muted); }
 .dock-empty strong { margin-top: 10px; color: var(--text); }
 .dock-empty p { max-width: 260px; margin: 5px 0; font-size: 11px; }

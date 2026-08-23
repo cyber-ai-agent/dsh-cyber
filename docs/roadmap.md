@@ -13,7 +13,9 @@
 - [x] Deterministic ambient life and world simulation
 - [x] Explicit semantic embodiment for custom roles
 - [x] Conversation-only left navigation
-- [x] World + Dossier right dock
+- [x] World + Trace + Dossier right dock
+- [x] Provider-neutral World Trace read model and durable recovery
+- [x] Chat limited to final conversational results
 - [x] Unified Market entry
 - [x] Local Creative Workshop project library
 - [x] Workshop-generated character packages through PackageManager
@@ -101,3 +103,4 @@
 6. MOD extensibility should increase reuse, not introduce hard-coded branches.
 7. Growth is evidence-driven.
 8. Visual world state must reflect real domain state instead of fabricating work.
+9. Chat surfaces final conversational results; execution details belong to Trace.

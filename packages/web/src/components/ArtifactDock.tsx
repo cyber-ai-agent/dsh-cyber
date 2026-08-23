@@ -2,6 +2,7 @@ import {
   CaretDoubleRight,
   GlobeHemisphereWest,
   IdentificationBadge,
+  Path,
 } from '@phosphor-icons/react'
 import type { ReactNode } from 'react'
 import type { EmployeeDossier as EmployeeDossierData, World } from '@dsh-cyber/contracts'
@@ -20,6 +21,7 @@ interface ArtifactDockProps {
   world: World
   sceneImage?: string
   worldContent?: ReactNode
+  traceContent?: ReactNode
   onTabChange(tab: DockTab): void
   onCollapse(): void
   onSelectEmployee(employeeId: string): void
@@ -31,14 +33,11 @@ interface ArtifactDockProps {
 
 const tabs: Array<{ id: DockTab; label: string; icon: typeof GlobeHemisphereWest }> = [
   { id: 'world', label: '世界', icon: GlobeHemisphereWest },
+  { id: 'trace', label: '轨迹', icon: Path },
   { id: 'dossier', label: '档案', icon: IdentificationBadge },
 ]
 
-/**
- * Right-side product dock intentionally exposes only World and Dossier.
- * Files and previews remain backend capabilities but are hidden until their
- * information architecture is ready; role management belongs to Dossier.
- */
+/** Right-side product dock keeps embodiment, execution trace, and role records separate. */
 export function ArtifactDock({
   activeTab,
   selectedEmployee,
@@ -47,6 +46,7 @@ export function ArtifactDock({
   world,
   sceneImage,
   worldContent,
+  traceContent,
   onTabChange,
   onCollapse,
   onSelectEmployee,
@@ -55,7 +55,7 @@ export function ArtifactDock({
   onShowAllDossiers,
   onInvite,
 }: ArtifactDockProps) {
-  const visibleTab: DockTab = activeTab === 'dossier' ? 'dossier' : 'world'
+  const visibleTab = activeTab
 
   const selectTab = (tab: DockTab) => {
     // “档案”是角色管理的顶层入口；点击顶层 Tab 应回到目录。
@@ -92,6 +92,7 @@ export function ArtifactDock({
         {visibleTab === 'world' ? (
           worldContent ?? <WorldView world={world} employees={employees} {...(sceneImage === undefined ? {} : { sceneImage })} onSelectEmployee={onSelectEmployee} />
         ) : null}
+        {visibleTab === 'trace' ? traceContent : null}
         {visibleTab === 'dossier' ? (
           selectedEmployee !== undefined && dossiers[selectedEmployee.id] !== undefined
             ? <EmployeeDossier
