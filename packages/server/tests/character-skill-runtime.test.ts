@@ -123,6 +123,21 @@ describe('CharacterSkillRuntime', () => {
     expect(adapter.executed).toBe(1)
     expect(await runtime.list(worldId)).toHaveLength(1)
   })
+
+  it('persists adapter exceptions as outcome-unknown instead of a retryable failure', async () => {
+    const { store, root, worldId, employeeId } = await setup(['test.echo'])
+    const registry = new CharacterSkillAdapterRegistry()
+    registry.register(new ThrowingAdapter())
+    const runtime = makeRuntime(store, root, registry)
+
+    const result = await runtime.prepare(worldId, employeeId, '请执行 echo', new Date('2026-08-23T08:00:00.000Z'))
+
+    expect(result.actions[0]).toMatchObject({
+      status: 'outcome-unknown',
+      detail: '技能适配器执行过程异常，外部动作结果未知；不得自动重试',
+    })
+    expect((await runtime.list(worldId))[0]).toMatchObject({ status: 'outcome-unknown' })
+  })
 })
 
 class TestAdapter implements CharacterSkillAdapter {
@@ -130,29 +145,12 @@ class TestAdapter implements CharacterSkillAdapter {
   executed = 0
 
   constructor(readonly id = 'test-adapter', readonly scheduledFor?: string) {
-    this.descriptors = [{
-      id: 'test.echo',
-      displayName: '测试技能',
-      summary: '测试注册表与授权边界。',
-      adapterId: id,
-      risks: ['write-local'],
-      supportsScheduling: true,
-    }]
+    this.descriptors = descriptor(id)
   }
 
   propose(context: CharacterSkillMatchContext) {
     if (!context.prompt.includes('echo')) return []
-    return [{
-      skillId: 'test.echo',
-      adapterId: this.id,
-      action: 'echo.run',
-      target: 'local-test',
-      label: '执行测试动作',
-      risk: 'write-local' as const,
-      authorization: 'explicit-user-request' as const,
-      parameters: { text: 'echo' },
-      ...(this.scheduledFor === undefined ? {} : { scheduledFor: this.scheduledFor }),
-    }]
+    return proposal(this.id, this.scheduledFor)
   }
 
   async execute(action: CharacterSkillAction) {
@@ -160,6 +158,44 @@ class TestAdapter implements CharacterSkillAdapter {
     expect(action.parameters).toEqual({ text: 'echo' })
     return { status: 'executed' as const, detail: '测试动作已执行' }
   }
+}
+
+class ThrowingAdapter implements CharacterSkillAdapter {
+  readonly id = 'test-adapter'
+  readonly descriptors = descriptor(this.id)
+
+  propose(context: CharacterSkillMatchContext) {
+    return context.prompt.includes('echo') ? proposal(this.id) : []
+  }
+
+  async execute(): Promise<never> {
+    throw new Error('transport disappeared after dispatch')
+  }
+}
+
+function descriptor(adapterId: string): readonly CharacterSkillDescriptor[] {
+  return [{
+    id: 'test.echo',
+    displayName: '测试技能',
+    summary: '测试注册表与授权边界。',
+    adapterId,
+    risks: ['write-local'],
+    supportsScheduling: true,
+  }]
+}
+
+function proposal(adapterId: string, scheduledFor?: string) {
+  return [{
+    skillId: 'test.echo',
+    adapterId,
+    action: 'echo.run',
+    target: 'local-test',
+    label: '执行测试动作',
+    risk: 'write-local' as const,
+    authorization: 'explicit-user-request' as const,
+    parameters: { text: 'echo' },
+    ...(scheduledFor === undefined ? {} : { scheduledFor }),
+  }]
 }
 
 function makeRuntime(
