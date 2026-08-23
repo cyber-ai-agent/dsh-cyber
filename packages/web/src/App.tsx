@@ -829,7 +829,7 @@ export default function App() {
     try {
       const result = await api<{ item: TaskSchedule }>(`/api/worlds/${activeWorld.id}/schedules`, { method: 'POST', body: JSON.stringify(input) })
       setTaskSchedules((current) => [result.item, ...current])
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '计划创建失败'); throw cause }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '日程创建失败'); throw cause }
     finally { setScheduleBusy(false) }
   }, [activeWorld])
 
@@ -839,7 +839,7 @@ export default function App() {
     try {
       const result = await api<{ item: TaskSchedule }>(`/api/worlds/${activeWorld.id}/schedules/${item.id}`, { method: 'PATCH', body: JSON.stringify({ status }) })
       setTaskSchedules((current) => current.map((value) => value.id === item.id ? result.item : value))
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '计划更新失败') }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '日程更新失败') }
     finally { setScheduleBusy(false) }
   }, [activeWorld])
 
@@ -848,9 +848,9 @@ export default function App() {
     setScheduleBusy(true); setError(undefined)
     try {
       const result = await api<{ run: { status: string; errorCode?: string } }>(`/api/worlds/${activeWorld.id}/schedules/${item.id}/run`, { method: 'POST', body: '{}' })
-      if (result.run.status === 'failed') setError(`计划执行失败：${scheduleErrorLabel(result.run.errorCode)}`)
+      if (result.run.status === 'failed') setError(`日程执行失败：${scheduleErrorLabel(result.run.errorCode)}`)
       await refreshTaskSchedules()
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '计划执行失败') }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '日程执行失败') }
     finally { setScheduleBusy(false) }
   }, [activeWorld, refreshTaskSchedules])
 
@@ -860,7 +860,7 @@ export default function App() {
     try {
       await api(`/api/worlds/${activeWorld.id}/schedules/${item.id}`, { method: 'DELETE' })
       setTaskSchedules((current) => current.filter((value) => value.id !== item.id))
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '计划删除失败') }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '日程删除失败') }
     finally { setScheduleBusy(false) }
   }, [activeWorld])
 

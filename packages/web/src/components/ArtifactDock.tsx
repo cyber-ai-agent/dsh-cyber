@@ -35,9 +35,9 @@ interface ArtifactDockProps {
 
 const tabs: Array<{ id: DockTab; label: string; icon: typeof GlobeHemisphereWest }> = [
   { id: 'world', label: '世界', icon: GlobeHemisphereWest },
-  { id: 'trace', label: '轨迹', icon: Path },
-  { id: 'schedule', label: '计划', icon: CalendarBlank },
   { id: 'dossier', label: '档案', icon: IdentificationBadge },
+  { id: 'trace', label: '轨迹', icon: Path },
+  { id: 'schedule', label: '日程', icon: CalendarBlank },
 ]
 
 /** Right-side product dock keeps embodiment, execution trace, and role records separate. */

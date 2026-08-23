@@ -68,7 +68,7 @@ describe('Chat final-result projection', () => {
 })
 
 describe('Trace dock and live merge', () => {
-  it('exposes exactly 世界、轨迹、档案 in the right dock', () => {
+  it('keeps 世界、档案、轨迹、日程 in the requested dock order', () => {
     const html = renderToStaticMarkup(createElement(ArtifactDock, {
       demoMode: false,
       activeTab: 'trace',
@@ -85,8 +85,12 @@ describe('Trace dock and live merge', () => {
       onInvite: () => undefined,
     }))
     expect(html).toContain('世界')
-    expect(html).toContain('轨迹')
     expect(html).toContain('档案')
+    expect(html).toContain('轨迹')
+    expect(html).toContain('日程')
+    expect(html.indexOf('世界')).toBeLessThan(html.indexOf('档案'))
+    expect(html.indexOf('档案')).toBeLessThan(html.indexOf('轨迹'))
+    expect(html.indexOf('轨迹')).toBeLessThan(html.indexOf('日程'))
     expect(html).toContain('轨迹内容')
     expect(html).not.toContain('文件')
     expect(html).not.toContain('预览')
