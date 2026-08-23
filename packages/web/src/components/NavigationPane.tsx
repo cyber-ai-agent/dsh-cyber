@@ -48,7 +48,7 @@ export function NavigationPane({
       .then((result) => { if (!cancelled) { setHubItems(result.items); setError(undefined) } })
       .catch((cause: unknown) => { if (!cancelled) setError(cause instanceof Error ? cause.message : '会话列表加载失败') })
     return () => { cancelled = true }
-  }, [world.id, sessions.length])
+  }, [world.id, sessions.length, employees.length])
 
   useEffect(() => {
     if (activeSessionId === undefined || hubItems === undefined) return
@@ -76,7 +76,7 @@ export function NavigationPane({
   }
 
   return (
-    <div className="navigation-pane navigation-pane--conversations">
+    <div className="navigation-pane navigation-pane--conversations" role="region" aria-label="当前世界的会话">
       <header className="pane-heading">
         <span>会话</span>
         <button className="icon-button" type="button" aria-label="创建群聊" title="创建群聊" onClick={onCreateGroup}>
@@ -144,7 +144,7 @@ function SessionRow({
     : participants[0]?.role ?? '私聊'
   return (
     <div className={`session-row-wrap${active ? ' is-active' : ''}${item.pinned ? ' is-pinned' : ''}`}>
-      <button className="session-row session-row--hub" type="button" onClick={onClick}>
+      <button className="session-row session-row--hub" type="button" onClick={onClick} aria-label={session.kind === 'direct' && participants[0] !== undefined ? `与${participants[0].displayName}私聊` : directTitle(session, participants)}>
         <span className="session-row__avatar" aria-hidden="true">
           {participants.length === 0
             ? session.kind === 'group' || session.kind === 'meeting' ? <UsersThree size={16} /> : <ChatCircleDots size={16} />
