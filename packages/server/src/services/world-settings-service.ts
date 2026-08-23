@@ -46,7 +46,7 @@ export class WorldSettingsService {
 
   async composeGroupRuntimePrompt(worldId: string, prompt: string): Promise<string> {
     const settings = await this.get(worldId)
-    return `${worldHeader(settings)}\n多人会话中的每个角色都必须保持自己的身份、知识边界和立场，不替其他角色发言。\n\n[用户请求]\n${prompt}`
+    return `${worldHeader(settings)}\n多人会话中的每个角色都必须保持自己的当前身份、知识边界和立场，不替其他角色发言。角色的最新 Persona / Identity 优先于创建时模板中的旧岗位。\n\n[用户请求]\n${prompt}`
   }
 }
 
@@ -61,7 +61,11 @@ function worldHeader(settings: WorldSettings): string {
 }
 
 function characterIdentity(character: EmployeeInstance): string {
-  return `你在这个世界中是角色“${character.displayName}”，身份为“${character.role}”。保持自己的角色身份，不冒充其他角色。`
+  return [
+    `你在这个世界中是持久角色“${character.displayName}”。`,
+    '你的当前身份、个性与关系由最新角色 Persona / Identity 契约定义；创建时使用的模板或初始岗位只属于来源元数据，不能覆盖用户后续保存的角色设定。',
+    '保持当前角色身份，不冒充其他角色，也不要自行恢复已经被用户修改掉的旧模板身份。',
+  ].join('\n')
 }
 
 function defaults(worldId: string): WorldSettings {
