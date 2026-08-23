@@ -4,9 +4,9 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { SqliteStore } from '@dsh-cyber/persistence'
 import type { EmployeeBlueprint } from '@dsh-cyber/contracts'
-import type { CharacterSkillAction, CharacterSkillDescriptor } from '@dsh-cyber/contracts/creative-platform'
+import type { CharacterSkillAction, CharacterSkillDescriptor } from '@dsh-cyber/contracts/skill-runtime'
+import { SqliteStore } from '@dsh-cyber/persistence'
 
 import { CharacterSkillRuntime } from '../src/services/character-skill-runtime.js'
 import {
@@ -33,6 +33,14 @@ describe('CharacterSkillAdapterRegistry', () => {
 })
 
 describe('CharacterSkillRuntime', () => {
+  it('does not install provider adapters on its own', async () => {
+    const { store } = await setup([])
+    const registry = new CharacterSkillAdapterRegistry()
+    const runtime = new CharacterSkillRuntime(store, { registry })
+
+    expect(runtime.listDescriptors()).toEqual([])
+  })
+
   it('executes an authorized skill through a registered adapter and persists only structured facts', async () => {
     const { store, worldId, employeeId } = await setup(['test.echo'])
     const adapter = new TestAdapter()
