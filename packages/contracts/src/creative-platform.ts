@@ -21,6 +21,18 @@ export interface EmbodimentProfile {
   socialPolicy?: EmbodimentSocialPolicy
 }
 
+/**
+ * Human-facing reusable starting point for an EmbodimentProfile.
+ * Presets are catalog data, not UI conditionals; users may still author an
+ * explicit profile that does not correspond to any preset.
+ */
+export interface EmbodimentPresetDescriptor {
+  id: string
+  displayName: string
+  description: string
+  profile: EmbodimentProfile
+}
+
 export type EmbodiedEmployeeBlueprint = EmployeeBlueprint & {
   embodiment?: EmbodimentProfile
 }
