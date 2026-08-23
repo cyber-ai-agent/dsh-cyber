@@ -71,9 +71,13 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
 
   const startNew = (source?: WorkshopProject) => {
     const templateId = source?.baseTemplateId ?? templates[0]?.id ?? 'personal-world'
-    const presetId = presets[0]?.id ?? 'general'
+    const preset = presets[0]
+    if (source === undefined && preset === undefined) {
+      setError('当前宿主没有可用的具身语义预设，无法创建新角色')
+      return
+    }
     setDraft(source === undefined
-      ? createEmptyWorkshopDraft(templateId, presetId)
+      ? createEmptyWorkshopDraft(templateId, preset!)
       : projectToDraft(source, presets))
     setError(undefined)
     setView('editor')
@@ -89,7 +93,7 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
     setSaving(true)
     setError(undefined)
     try {
-      const input = draftToCreateInput(draft, presets)
+      const input = draftToCreateInput(draft)
       const result = await api<{ project: WorkshopProject }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/workshop/projects`, {
         method: 'POST',
         body: JSON.stringify(input),
