@@ -121,6 +121,15 @@ test('runs direct and group conversations with real world lifecycle, persistence
   expect(taskEvents.filter((event) => event.type === 'task.started').length).toBeGreaterThan(taskStartedBeforeIntent)
   expect(server.store.getEmployee(engineer.id)?.status).toBe('available')
 
+  await dock.getByRole('button', { name: '档案', exact: true }).click()
+  await dock.getByRole('article').filter({ hasText: '阿帆' }).getByRole('button', { name: /完整档案/ }).click()
+  await dock.getByRole('button', { name: '事迹', exact: true }).click()
+  await expect(dock.getByText('完成一次有工具证据的任务').first()).toBeVisible()
+  await expect(dock.getByText(/search_workspace/).first()).toBeVisible()
+  await dock.getByRole('button', { name: '日志', exact: true }).click()
+  await expect(dock.getByText(/当日已完成 \d+ 次有真实记录的会话或任务/)).toBeVisible()
+  await dock.getByRole('button', { name: '世界', exact: true }).click()
+
   const meetingStartedBefore = server.store.listWorldDomainEvents(worldId).filter((event) => event.type === 'meeting.started').length
   await page.getByRole('button', { name: '创建群聊' }).click()
   const groupDialog = page.getByRole('dialog', { name: '创建群聊' })
@@ -266,6 +275,8 @@ test('creates, edits, restores, and deletes a private-network sub2api model prof
   await editor.getByRole('textbox', { name: '接口地址' }).fill('http://172.16.1.125:11434/v1/')
   await editor.getByLabel('模型 ID').fill('qwen3.5:9b')
   await editor.getByRole('textbox', { name: /API 密钥/ }).fill('sk-e2e-test-only-not-real')
+  await editor.getByRole('checkbox', { name: /启用联网搜索/ }).check()
+  await editor.getByRole('textbox', { name: /搜索服务地址/ }).fill('https://search.example.test/anthropic/v1')
   await editor.getByRole('button', { name: '获取可用模型' }).click()
   const modelSelect = editor.getByRole('combobox', { name: '选择可用模型' })
   await expect(modelSelect).toBeVisible()
@@ -276,7 +287,7 @@ test('creates, edits, restores, and deletes a private-network sub2api model prof
   await modelSelect.selectOption('qwen3.5:9b')
   await editor.getByRole('button', { name: '添加并保存' }).click()
   await expect(editor.getByRole('status')).toContainText('模型配置已添加并保存')
-  await expect(settings.getByRole('article').filter({ hasText: '公司 sub2api' })).toContainText('qwen3.5:9b')
+  await expect(settings.getByRole('article').filter({ hasText: '公司 sub2api' })).toContainText('联网搜索已启用')
 
   await settings.getByRole('button', { name: '编辑公司 sub2api' }).click()
   await editor.getByLabel('模型 ID').fill('qwen3.5')
@@ -300,6 +311,7 @@ test('creates, edits, restores, and deletes a private-network sub2api model prof
   const restored = settings.getByRole('article').filter({ hasText: '公司 sub2api' })
   await expect(restored).toContainText('qwen3.5')
   await expect(restored).toContainText('API 密钥已保存')
+  await expect(restored).toContainText('联网搜索已启用')
   await page.screenshot({ path: join(process.cwd(), 'artifacts', 'ui-world-conversations', 'model-settings-1920x1080.png') })
 
   page.once('dialog', (dialog) => dialog.accept())

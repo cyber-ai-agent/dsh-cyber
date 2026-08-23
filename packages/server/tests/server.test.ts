@@ -747,7 +747,9 @@ describe('Cyber local server', () => {
     expect(dossier.body.profile).toMatchObject({ birthday: '05-24', personalityTraits: ['严谨', '主动'] })
     expect(dossier.body.profile.appearance).toMatchObject({ avatarIndex: 6 })
     expect(dossier.body.employee.displayName).toBe('阿帆')
-    expect(dossier.body.milestones[0]).toMatchObject({ category: 'joined' })
+    expect(dossier.body.milestones).toEqual(expect.arrayContaining([
+      expect.objectContaining({ category: 'joined' }),
+    ]))
   })
 
   it('stores direct model API keys outside SQLite and restores them after restart', async () => {
@@ -789,11 +791,19 @@ describe('Cyber local server', () => {
         api: 'openai-completions',
         apiKey: secret,
         isDefault: true,
+        settings: {
+          webSearchEnabled: true,
+          webSearchBaseUrl: 'https://search.example.test/anthropic/v1',
+        },
       }),
     })
     expect(saved.response.status).toBe(201)
     expect(saved.body.profile).not.toHaveProperty('apiKey')
     expect(saved.body.profile.credentialEnvName).toMatch(/^DSH_CYBER_MODEL_KEY_[A-F0-9]{24}$/)
+    expect(saved.body.profile.settings).toMatchObject({
+      webSearchEnabled: true,
+      webSearchBaseUrl: 'https://search.example.test/anthropic/v1',
+    })
     const envName = saved.body.profile.credentialEnvName as string
 
     const listed = await json(started.origin, `/api/workspaces/${workspaceId}/model-profiles`)

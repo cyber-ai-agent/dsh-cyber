@@ -320,14 +320,14 @@ export default function App() {
     setAppMode('workbench')
     setDockCollapsed(false)
     setDockTab('dossier')
-    if (dossiers[employeeId] !== undefined || demoMode) return
+    if (demoMode) return
     try {
       const dossier = await api<EmployeeDossier>(`/api/employees/${employeeId}/dossier`)
       setDossiers((current) => ({ ...current, [employeeId]: dossier }))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '角色档案加载失败')
     }
-  }, [dossiers])
+  }, [demoMode])
 
   const directEmployee = useCallback((employee: CyberEmployee) => {
     const existing = sessions.find((session) => session.kind === 'direct' && (

@@ -195,9 +195,10 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     const environment = workerEnvironment(
       this.#options.inheritedEnvironment ?? process.env,
       spec,
-      this.#options.providerProfile?.apiKeyEnv === undefined
-        ? []
-        : [this.#options.providerProfile.apiKeyEnv],
+      [...new Set([
+        this.#options.providerProfile?.apiKeyEnv,
+        this.#options.providerProfile?.webSearch?.apiKeyEnv,
+      ].filter((value): value is string => value !== undefined))],
     )
     const harness = new DeepSeekHarness({
       launch: {
@@ -522,6 +523,7 @@ function employeeSystemPrompt(employee: EmployeeInstance, revision: EmployeeRevi
     'The blueprint or job title used when this character was first created is provenance metadata only. Do not restore or infer an older template identity unless the current Persona explicitly keeps it.',
     'Stay consistent with your current identity, maintain your own persistent conversation, and never impersonate another character.',
     'When another character\'s statement is included in a collaboration prompt, respond to its substance and identify agreements or disagreements.',
+    'If web search is unavailable, explain the cause in plain Chinese and direct the user to 设置 → 模型 → 编辑当前模型 → 启用联网搜索. Never invent results or tell the user to configure a hidden "Web Models" page.',
     'Give concise, evidence-based answers from your current identity, memory and granted capabilities.',
   ].join('\n\n')
 }

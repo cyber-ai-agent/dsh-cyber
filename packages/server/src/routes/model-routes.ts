@@ -86,6 +86,7 @@ export function registerModelRoutes(router: Router, dependencies: ModelRoutesDep
     }
     let profile
     try {
+      validateWebSearchSettings(settings, credentialEnvName)
       profile = store.saveModelProfile({
         id: profileId,
         workspaceId: params[0]!,
@@ -200,6 +201,29 @@ export function registerModelRoutes(router: Router, dependencies: ModelRoutesDep
     )
     writeJson(response, 200, { removed })
   })
+}
+
+function validateWebSearchSettings(
+  settings: Record<string, unknown> | undefined,
+  credentialEnvName: string | undefined,
+): void {
+  if (settings?.webSearchEnabled !== true) return
+  if (credentialEnvName === undefined) {
+    throw new HttpError(422, 'web_search_credential_missing', '启用联网搜索前，请先配置 API 密钥或凭据环境变量。')
+  }
+  const value = settings.webSearchBaseUrl
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new HttpError(422, 'web_search_base_url_missing', '启用联网搜索后，需要填写搜索服务地址。')
+  }
+  let url: URL
+  try {
+    url = new URL(value.trim())
+  } catch {
+    throw new HttpError(422, 'web_search_base_url_invalid', '联网搜索服务地址格式不正确。')
+  }
+  if (url.protocol !== 'https:') {
+    throw new HttpError(422, 'web_search_base_url_insecure', '联网搜索服务必须使用 HTTPS 地址。')
+  }
 }
 
 function validateModelBaseUrl(

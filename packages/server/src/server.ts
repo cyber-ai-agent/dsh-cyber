@@ -43,6 +43,7 @@ import { AmbientLifeSettingsService } from './services/ambient-life-settings-ser
 import { AssetService } from './services/asset-service.js'
 import { CharacterProfileRuntime } from './services/character-profile-runtime.js'
 import { CharacterSkillRuntime } from './services/character-skill-runtime.js'
+import { EmployeeActivityProjectionService } from './services/employee-activity-projection-service.js'
 import { harnessModelRoute } from './services/harness-model-route.js'
 import { ModelCatalogService } from './services/model-catalog-service.js'
 import { ModelCredentialService } from './services/model-credential-service.js'
@@ -189,6 +190,8 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     actions: skillActions,
   })
   const worldTrace = new WorldTraceService({ store, actions: skillActions })
+  const employeeActivity = new EmployeeActivityProjectionService(store)
+  employeeActivity.projectAll()
   const runtimeUpdates = new RuntimeUpdateService(store, stateRoot, workspaceRoot)
   const assets = new AssetService(store, stateRoot)
   const worldFiles = new WorldFileService(worldRoots)
@@ -207,7 +210,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
   registerWorldTraceRoutes(router, { store, trace: worldTrace, access: worldAccess })
   registerModelInteractionRoutes(router, { store, interactions })
-  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, worldTrace })
+  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, worldTrace, employeeActivity })
   registerEmployeeRoutes(router, { store, worldAccess })
 
   const httpServer = createServer((request, response) => {

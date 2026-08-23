@@ -99,6 +99,39 @@ describe('Harness profile and adapter', () => {
     expect(await readFile(profile.profilePatchPath, 'utf8')).toContain('[]')
   })
 
+  it('binds an explicitly enabled web search provider to the model credential reference', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-cyber-web-search-profile-'))
+    const profile = await ensureHarnessProfile(directory, 'dsh-cyber-worker', {
+      route: 'cyber-search-test',
+      displayName: 'DeepSeek 测试',
+      api: 'openai-completions',
+      baseURL: 'https://api.deepseek.com/v1',
+      model: { id: 'deepseek-chat' },
+      apiKeyEnv: 'DSH_CYBER_MODEL_KEY_TEST',
+      webSearch: {
+        baseURL: 'https://api.deepseek.com/anthropic/v1',
+        apiKeyEnv: 'DSH_CYBER_MODEL_KEY_TEST',
+      },
+    })
+    const patch = JSON.parse(await readFile(profile.profilePatchPath, 'utf8')) as Array<{ id: string; config: Record<string, unknown> }>
+    const settings = JSON.parse(await readFile(profile.settingsPath, 'utf8')) as Record<string, unknown>
+
+    expect(patch).toContainEqual(expect.objectContaining({
+      id: 'web-search-deepseek',
+      config: {
+        apiKeyEnv: 'DSH_CYBER_MODEL_KEY_TEST',
+        baseURL: 'https://api.deepseek.com/anthropic/v1',
+      },
+    }))
+    expect(settings).toMatchObject({
+      'web-search-deepseek': {
+        apiKeyEnv: 'DSH_CYBER_MODEL_KEY_TEST',
+        baseURL: 'https://api.deepseek.com/anthropic/v1',
+      },
+    })
+    expect(JSON.stringify({ patch, settings })).not.toContain('sk-')
+  })
+
   it('keeps one independent runtime and stable Harness session per employee', async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-adapter-'))
     const specs: HarnessRuntimeSpec[] = []
@@ -253,6 +286,10 @@ describe('Harness profile and adapter', () => {
         baseURL: 'https://models.example.test/v1',
         modelId: 'model-b',
         apiKeyEnv: 'MODEL_B_API_KEY',
+        webSearch: {
+          baseURL: 'https://search.example.test/anthropic/v1',
+          apiKeyEnv: 'MODEL_B_API_KEY',
+        },
       }],
     ])
     const created: HarnessAdapterOptions[] = []
@@ -313,6 +350,10 @@ describe('Harness profile and adapter', () => {
     })
     expect(created[1]?.providerProfile).toMatchObject({
       apiKeyEnv: 'MODEL_B_API_KEY',
+      webSearch: {
+        baseURL: 'https://search.example.test/anthropic/v1',
+        apiKeyEnv: 'MODEL_B_API_KEY',
+      },
       model: { id: 'model-b' },
     })
     expect(JSON.stringify(created)).not.toContain('apiKeyValue')
