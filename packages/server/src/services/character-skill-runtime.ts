@@ -6,7 +6,7 @@ import type {
   CharacterSkillAction,
   CharacterSkillDescriptor,
   CharacterSkillResult,
-} from '@dsh-cyber/contracts/creative-platform'
+} from '@dsh-cyber/contracts/skill-runtime'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { createBuiltinSkillRegistry } from '../skills/builtin-skill-registry.js'
