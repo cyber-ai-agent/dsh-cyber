@@ -3,6 +3,7 @@ import { useState } from 'react'
 import type { EmployeeInstance, EmployeeProfile, EmployeeRevision, ModelProfile } from '@dsh-cyber/contracts'
 
 import { Avatar } from './Avatar.js'
+import { SkillGrantEditor } from './SkillGrantEditor.js'
 
 interface EmployeeManagementDialogProps {
   employee: EmployeeInstance
@@ -48,7 +49,7 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
   const [selfReference, setSelfReference] = useState(parsed.selfReference)
   const [reason, setReason] = useState('调整角色设定')
   const [persona, setPersona] = useState(parsed.persona)
-  const [skills, setSkills] = useState(currentRevision?.skillGrants.join(', ') ?? '')
+  const [skills, setSkills] = useState<string[]>(currentRevision?.skillGrants ?? [])
   const [capabilities, setCapabilities] = useState(currentRevision?.capabilityGrants.join(', ') ?? '')
   const [confirmArchive, setConfirmArchive] = useState(false)
 
@@ -76,7 +77,7 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
     await onRevise({
       reason: '更新角色身份、关系与背景',
       persona: composeCharacterPersona(runtimeProfile()),
-      skillGrants: splitList(skills),
+      skillGrants: skills,
       capabilityGrants: splitList(capabilities),
       modelPolicy: {},
     })
@@ -87,7 +88,7 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
     await onRevise({
       reason: reason.trim(),
       persona: composeCharacterPersona(runtimeProfile()),
-      skillGrants: splitList(skills),
+      skillGrants: skills,
       capabilityGrants: splitList(capabilities),
       modelPolicy: {},
     })
@@ -133,10 +134,11 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
 
             <details className="character-advanced-settings">
               <summary><GitBranch size={15}/>高级能力与权限</summary>
-              <p>普通用户通常不需要修改这里。技能和权限仍受角色模板允许范围约束。</p>
+              <p>Skill 只能从 Blueprint 已请求的范围内显式授权；安装包或创建角色不会自动扩大权限。</p>
+              <div className="settings-section__heading"><h3>Skill 授权</h3><p>每次保存都会生成新的角色 revision。计划任务执行前也会重新检查这里的当前授权。</p></div>
+              <SkillGrantEditor employee={employee} value={skills} onChange={setSkills} />
               <div className="dialog-field-grid">
-                <label className="dialog-field"><span>技能授权</span><input value={skills} onChange={(event) => setSkills(event.target.value)} /></label>
-                <label className="dialog-field"><span>能力权限</span><input value={capabilities} onChange={(event) => setCapabilities(event.target.value)} /></label>
+                <label className="dialog-field"><span>底层 Capability 权限</span><input value={capabilities} onChange={(event) => setCapabilities(event.target.value)} /><small>仅用于现有低层能力兼容；后续将同样迁移为结构化审批控件。</small></label>
               </div>
             </details>
 
