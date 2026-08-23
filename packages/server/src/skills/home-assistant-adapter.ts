@@ -1,4 +1,4 @@
-import type { CharacterSkillAction, CharacterSkillDescriptor } from '@dsh-cyber/contracts/creative-platform'
+import type { CharacterSkillAction, CharacterSkillDescriptor } from '@dsh-cyber/contracts/skill-runtime'
 
 import type {
   CharacterSkillActionProposal,
