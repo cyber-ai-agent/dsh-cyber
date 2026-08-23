@@ -1,6 +1,7 @@
 import { Sparkle } from '@phosphor-icons/react'
 import { lazy, Suspense, useState } from 'react'
 import { createPortal } from 'react-dom'
+import type { WorkshopProject } from '@dsh-cyber/contracts/creative-platform'
 
 const CreativeWorkshopDialog = lazy(async () => {
   const module = await import('./CreativeWorkshopDialog.js')
@@ -9,7 +10,8 @@ const CreativeWorkshopDialog = lazy(async () => {
 
 interface CreativeWorkshopLauncherProps {
   workspaceId: string
-  onCreated?(): void
+  onCreated?(project: WorkshopProject): void
+  onOpenWorld?(worldId: string): void
 }
 
 /**
@@ -17,7 +19,7 @@ interface CreativeWorkshopLauncherProps {
  * stays out of the initial bundle and its dialog is portalled outside the topbar
  * so topbar navigation CSS can never leak into workshop controls.
  */
-export function CreativeWorkshopLauncher({ workspaceId, onCreated }: CreativeWorkshopLauncherProps) {
+export function CreativeWorkshopLauncher({ workspaceId, onCreated, onOpenWorld }: CreativeWorkshopLauncherProps) {
   const [open, setOpen] = useState(false)
 
   const dialog = open ? createPortal(
@@ -25,9 +27,13 @@ export function CreativeWorkshopLauncher({ workspaceId, onCreated }: CreativeWor
       <CreativeWorkshopDialog
         workspaceId={workspaceId}
         onClose={() => setOpen(false)}
-        onCreated={() => {
+        onCreated={(project) => {
           setOpen(false)
-          onCreated?.()
+          onCreated?.(project)
+        }}
+        onOpenWorld={(worldId) => {
+          setOpen(false)
+          onOpenWorld?.(worldId)
         }}
       />
     </Suspense>,
