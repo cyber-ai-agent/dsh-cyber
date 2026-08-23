@@ -169,8 +169,11 @@ export class CharacterSkillRuntime {
       action.status = result.status
       action.detail = result.detail
     } catch {
-      action.status = 'failed'
-      action.detail = '技能适配器执行失败，未确认任何外部副作用'
+      // Adapter exceptions are deliberately ambiguous: the provider may have
+      // accepted an external side effect before the local process lost the
+      // response. Do not turn this into a definitive failure or retry signal.
+      action.status = 'outcome-unknown'
+      action.detail = '技能适配器执行过程异常，外部动作结果未知；不得自动重试'
     }
     action.updatedAt = now.toISOString()
   }
