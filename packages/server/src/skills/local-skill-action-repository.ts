@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { dirname } from 'node:path'
 import { mkdir, open, readFile, rename } from 'node:fs/promises'
 
+import type { JsonObject, JsonValue } from '@dsh-cyber/contracts'
 import type {
   CharacterSkillAction,
   SkillActionAuthorization,
@@ -161,7 +162,7 @@ function parseAction(value: unknown, path: string): CharacterSkillAction {
   if (!STATUSES.has(status)) throw new Error(`Invalid ${path}.status`)
   if (!RISKS.has(risk)) throw new Error(`Invalid ${path}.risk`)
   if (!AUTHORIZATIONS.has(authorization)) throw new Error(`Invalid ${path}.authorization`)
-  const parameters = record(input.parameters, `${path}.parameters`)
+  const parameters = jsonObject(input.parameters, `${path}.parameters`)
   const scheduledFor = optionalString(input.scheduledFor, `${path}.scheduledFor`)
   const action: CharacterSkillAction = {
     id: string(input.id, `${path}.id`),
@@ -232,6 +233,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function record(value: unknown, path: string): Record<string, unknown> {
   if (!isRecord(value)) throw new Error(`${path} must be an object`)
   return value
+}
+
+function jsonObject(value: unknown, path: string): JsonObject {
+  const input = record(value, path)
+  const result: JsonObject = {}
+  for (const [key, item] of Object.entries(input)) result[key] = jsonValue(item, `${path}.${key}`)
+  return result
+}
+
+function jsonValue(value: unknown, path: string): JsonValue {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new Error(`${path} must contain a finite JSON number`)
+    return value
+  }
+  if (Array.isArray(value)) return value.map((item, index) => jsonValue(item, `${path}[${index}]`))
+  if (isRecord(value)) return jsonObject(value, path)
+  throw new Error(`${path} contains a non-JSON value`)
 }
 
 function string(value: unknown, path: string): string {
