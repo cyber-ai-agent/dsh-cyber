@@ -56,6 +56,8 @@ import { WorldFileService } from './services/world-file-service.js'
 import { WorldRootService } from './services/world-root-service.js'
 import { WorldSettingsService } from './services/world-settings-service.js'
 import { createBuiltinSkillRegistry } from './skills/builtin-skill-registry.js'
+import { LocalSkillActionRepository } from './skills/local-skill-action-repository.js'
+import type { CharacterSkillActionRepository } from './skills/skill-action-repository.js'
 import type { CharacterSkillAdapterRegistry } from './skills/skill-adapter.js'
 import { RuntimeStreamHub } from './streams/runtime-stream-hub.js'
 import { WorldStreamHub } from './streams/world-stream-hub.js'
@@ -74,6 +76,7 @@ export interface CyberServerOptions {
   runtime?: AgentRuntimePort
   packageRuntime?: PackageRuntimePort
   skillRegistry?: CharacterSkillAdapterRegistry
+  skillActionRepository?: CharacterSkillActionRepository
   marketplaceRoot?: string
   bootstrapDefaultWorld?: boolean
 }
@@ -177,7 +180,12 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     service: ambientLifeRuntime,
   })
   const skillRegistry = options.skillRegistry ?? createBuiltinSkillRegistry()
-  const skillRuntime = new CharacterSkillRuntime(store, { registry: skillRegistry })
+  const skillActions = options.skillActionRepository
+    ?? new LocalSkillActionRepository(join(stateRoot, 'skills', 'actions.json'))
+  const skillRuntime = new CharacterSkillRuntime(store, {
+    registry: skillRegistry,
+    actions: skillActions,
+  })
   const runtimeUpdates = new RuntimeUpdateService(store, stateRoot, workspaceRoot)
   const assets = new AssetService(store, stateRoot)
   const worldFiles = new WorldFileService(worldRoots)
