@@ -145,6 +145,7 @@ describe('Cyber local server', () => {
       'cyber-company',
       'tavern',
       'creator-studio',
+      'orbital-observatory',
     ])
     const { workspace, world } = await createWorld(origin)
     const snapshot = await json(origin, `/api/worlds/${world.id}/snapshot`)
@@ -1028,6 +1029,45 @@ it('searches verified market packages and activates installed plugin and talent 
     })
     expect(fallback.body.snapshot.themeId).toBe('dsh-cyber.company.nocturne')
     expect(server.store.getWorldThemeBinding(world.id)?.status).toBe('disabled')
+
+    const themeCatalog = await json(origin, `/api/marketplace?market=theme&workspaceId=${workspace.id}`)
+    expect(themeCatalog.body.items).toHaveLength(4)
+    const visualPreview = await fetch(`${origin}/api/marketplace/packages/official-moonlit-tavern/1.0.0/preview`)
+    expect(visualPreview.status).toBe(200)
+    expect(visualPreview.headers.get('content-type')).toBe('image/png')
+    expect((await visualPreview.arrayBuffer()).byteLength).toBeGreaterThan(100_000)
+
+    const tavernPreview = await json(origin, `/api/workspaces/${workspace.id}/marketplace/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ packageId: 'official-moonlit-tavern', version: '1.0.0' }),
+    })
+    const tavernInstall = await json(origin, `/api/workspaces/${workspace.id}/marketplace/install`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        packageId: 'official-moonlit-tavern',
+        version: '1.0.0',
+        approvalToken: tavernPreview.body.preview.approvalToken,
+      }),
+    })
+    expect(tavernInstall.response.status).toBe(201)
+    const createdTavern = await json(origin, `/api/workspaces/${workspace.id}/marketplace/worlds`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ packageId: 'official-moonlit-tavern', name: '月影酒馆' }),
+    })
+    expect(createdTavern.response.status).toBe(201)
+    expect(createdTavern.body.world).toMatchObject({ name: '月影酒馆', templateId: 'tavern' })
+    expect(createdTavern.body.employees.map((item: { displayName: string }) => item.displayName)).toEqual([
+      '酒馆老板', '吟游诗人', '远行制图师',
+    ])
+    const tavernSnapshot = await json(origin, `/api/worlds/${createdTavern.body.world.id}/runtime-snapshot`)
+    expect(tavernSnapshot.body.themeId).toBe('official-moonlit-tavern')
+    expect(server.store.getWorldThemeBinding(createdTavern.body.world.id)).toMatchObject({
+      packageId: 'official-moonlit-tavern',
+      status: 'active',
+    })
   })
 
   it('rejects DNS rebinding and cross-origin mutation requests', async () => {

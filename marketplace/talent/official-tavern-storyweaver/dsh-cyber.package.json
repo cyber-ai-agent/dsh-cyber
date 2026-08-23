@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "official-tavern-storyweaver",
+  "version": "1.0.0",
+  "kind": "employee-blueprint",
+  "displayName": "织梦说书人",
+  "summary": "适合月影酒馆的剧情角色：梳理传闻、保留证据边界，并把线索编织成可选择的故事路径。",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "publisher": "DSH Cyber",
+  "capabilities": [
+    "employee:blueprint",
+    "knowledge:read"
+  ],
+  "dataEgress": [],
+  "files": [
+    {
+      "path": "storyweaver.json",
+      "sha256": "4be4377f121494650f3f5424e03cbc6c982430d8259b6bdde717b4bfe83cc687"
+    },
+    {
+      "path": "preview.png",
+      "sha256": "f699f5b486a00657682a33305490ac3f392fef8ce637e5ceeacad605cd23414d"
+    }
+  ],
+  "entrypoints": [
+    {
+      "id": "tavern-storyweaver-blueprint",
+      "kind": "employee-blueprint",
+      "path": "storyweaver.json"
+    }
+  ],
+  "certification": {
+    "authority": "DSH Cyber",
+    "level": "official",
+    "contentSha256": "69b644360e7f98c76507aad62d9b67425a10690a9abf52544f7131be834b1e27"
+  }
+}

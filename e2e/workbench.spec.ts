@@ -14,6 +14,7 @@ test.beforeAll(async () => {
   stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-e2e-'))
   await mkdir(join(process.cwd(), 'artifacts', 'ui-world-conversations'), { recursive: true })
   await mkdir(join(process.cwd(), 'artifacts', 'settings-experience'), { recursive: true })
+  await mkdir(join(process.cwd(), 'artifacts', 'world-market-starter-content'), { recursive: true })
   server = await createCyberServer({
     stateRoot,
     workspacePath: process.cwd(),
@@ -374,6 +375,100 @@ test('creates, edits, restores, and deletes a private-network sub2api model prof
   await expect(settings.getByText('模型连接已删除')).toBeVisible()
 })
 
+test('discovers, installs, and creates a visually distinct world from the world-first market', async ({ page }) => {
+  test.setTimeout(90_000)
+  const consoleEntries: string[] = []
+  const pageErrors: string[] = []
+  const failedResponses: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error' || message.type() === 'warning') consoleEntries.push(`[${message.type()}] ${message.text()} ${message.location().url}`)
+  })
+  page.on('pageerror', (error) => pageErrors.push(String(error)))
+  page.on('response', (response) => {
+    if (response.status() >= 400) failedResponses.push(`${response.status()} ${response.url()}`)
+  })
+  await page.setViewportSize({ width: 1_920, height: 1_080 })
+  await page.goto(origin)
+  const onboarding = page.getByRole('heading', { name: '创建第一个本地世界' })
+  if (await onboarding.isVisible()) await page.getByRole('button', { name: '创建我的世界' }).click()
+
+  await page.getByRole('button', { name: '市场', exact: true }).click()
+  const market = page.getByRole('dialog', { name: '扩展市场' })
+  await expect(market).toBeVisible()
+  await expect(market.locator('.market-tabs button')).toHaveText(['世界', '角色', '插件'])
+  for (const worldName of ['赛博公司', '月影酒馆', '云端创作工坊', '远星观测站']) {
+    await expect(market.getByRole('article').filter({ hasText: worldName })).toBeVisible()
+  }
+  const covers = market.locator('.market-world-cover')
+  await expect(covers).toHaveCount(4)
+  expect(await covers.evaluateAll((images) => images.every((image) => (image as HTMLImageElement).naturalWidth > 1_000))).toBe(true)
+  const cardParagraphSize = await market.locator('.market-card-grid article > p').first().evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))
+  expect(cardParagraphSize).toBeGreaterThanOrEqual(14)
+  await page.screenshot({ path: join(process.cwd(), 'artifacts', 'world-market-starter-content', 'market-1920x1080.png') })
+  await page.setViewportSize({ width: 1_440, height: 900 })
+  await page.screenshot({ path: join(process.cwd(), 'artifacts', 'world-market-starter-content', 'market-1440x900.png') })
+  await page.setViewportSize({ width: 3_840, height: 2_160 })
+  await page.screenshot({ path: join(process.cwd(), 'artifacts', 'world-market-starter-content', 'market-3840x2160.png') })
+  await page.setViewportSize({ width: 1_920, height: 1_080 })
+
+  const tavernCard = market.getByRole('article').filter({ hasText: '月影酒馆' })
+  await tavernCard.getByRole('button', { name: '查看并安装' }).click()
+  await market.getByRole('checkbox', { name: /我已审阅发布者/ }).check()
+  await market.getByRole('button', { name: /批准安装/ }).click()
+  await expect(tavernCard.getByRole('button', { name: '创建这个世界' })).toBeVisible()
+  await tavernCard.getByRole('button', { name: '创建这个世界' }).click()
+  await expect(market.getByRole('heading', { name: /月影酒馆/ })).toBeVisible()
+  await market.getByRole('textbox', { name: '新世界名称' }).fill('月影酒馆 E2E')
+  await market.getByRole('button', { name: '创建并进入这个世界' }).click()
+  await expect(market).toBeHidden()
+  await expect(page.getByLabel('月影酒馆 E2E实时世界')).toBeVisible()
+  for (const viewport of [
+    { width: 1_440, height: 900, label: '1440x900' },
+    { width: 1_920, height: 1_080, label: '1920x1080' },
+    { width: 3_840, height: 2_160, label: '3840x2160' },
+  ]) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height })
+    await expect(page.locator('.world-runtime-canvas')).toBeVisible()
+    const panel = await page.locator('.right-pane').boundingBox()
+    const canvas = await page.locator('.world-canvas-host').boundingBox()
+    expect(canvas?.width ?? 0).toBeGreaterThan((panel?.width ?? 0) * 0.9)
+    expect(canvas?.height ?? 0).toBeGreaterThan((panel?.height ?? 0) * 0.78)
+    await page.screenshot({ path: join(process.cwd(), 'artifacts', 'world-market-starter-content', `tavern-world-${viewport.label}.png`) })
+  }
+  await page.setViewportSize({ width: 1_920, height: 1_080 })
+
+  const workspace = server.store.listWorkspaces()[0]!
+  const created = server.store.listWorlds(workspace.id).find((world) => world.name === '月影酒馆 E2E')!
+  expect(created.templateId).toBe('tavern')
+  expect(server.store.listEmployees(created.id).map((employee) => employee.displayName).sort()).toEqual(['吟游诗人', '酒馆老板', '远行制图师'].sort())
+  expect(server.store.getWorldThemeBinding(created.id)).toMatchObject({ packageId: 'official-moonlit-tavern', status: 'active' })
+
+  await page.getByRole('button', { name: '市场', exact: true }).click()
+  await market.getByRole('button', { name: '角色', exact: true }).click()
+  for (const roleName of ['档案管理员', '织梦说书人', '视觉导演', '异星生态学家']) {
+    await expect(market.getByRole('article').filter({ hasText: roleName })).toBeVisible()
+  }
+  await expect(market.locator('.market-role-cover')).toHaveCount(4)
+  expect(await market.locator('.market-role-cover').evaluateAll((images) => images.every((image) => (image as HTMLImageElement).naturalWidth > 1_000))).toBe(true)
+  await page.screenshot({ path: join(process.cwd(), 'artifacts', 'world-market-starter-content', 'roles-1920x1080.png') })
+  await market.getByRole('button', { name: '插件', exact: true }).click()
+  for (const pluginName of ['会议纪要助手', '研究简报', '决策记录', '发布检查']) {
+    await expect(market.getByRole('article').filter({ hasText: pluginName })).toBeVisible()
+  }
+  await expect(market.getByText('全局可用 · 所有世界共享').first()).toBeVisible()
+  await page.screenshot({ path: join(process.cwd(), 'artifacts', 'world-market-starter-content', 'plugins-1920x1080.png') })
+  await market.getByRole('button', { name: '关闭市场' }).click()
+
+  await writeFile(
+    join(process.cwd(), 'artifacts', 'world-market-starter-content', 'console.log'),
+    `[pageerror]\n${pageErrors.join('\n')}\n\n[console]\n${consoleEntries.join('\n')}\n\n[http]\n${failedResponses.join('\n')}\n`,
+    'utf8',
+  )
+  expect(pageErrors).toEqual([])
+  expect(failedResponses).toEqual([])
+  expect(consoleEntries).toEqual([])
+})
+
 test('opens the dossier as an all-employee information directory', async ({ page }) => {
   await page.goto(`${origin}?demo=1`)
   await page.getByLabel(/切换世界，当前为/).click()
@@ -384,8 +479,8 @@ test('opens the dossier as an all-employee information directory', async ({ page
   await page.getByRole('menuitemradio', { name: /赛博公司/ }).click()
   await page.getByLabel(/切换世界，当前为赛博公司/).click()
   await page.getByRole('button', { name: /探索更多世界/ }).click()
-  const themeMarket = page.getByRole('dialog', { name: '市场' })
-  await expect(themeMarket.getByRole('button', { name: '主题', exact: true })).toBeVisible()
+  const themeMarket = page.getByRole('dialog', { name: '扩展市场' })
+  await expect(themeMarket.getByRole('button', { name: '世界', exact: true })).toBeVisible()
   await themeMarket.getByRole('button', { name: '关闭市场' }).click()
   const dock = page.getByRole('region', { name: '世界与角色档案侧边栏' })
   await dock.getByRole('button', { name: '档案', exact: true }).click()

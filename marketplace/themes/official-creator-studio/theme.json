@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "id": "official-creator-studio",
+  "version": "1.0.0",
+  "templateId": "creator-studio",
+  "displayName": "云端创作工坊 · 日光片场",
+  "renderer": "pixi-2d",
+  "terminology": { "world": "工作室", "participant": "成员", "session": "选题会", "milestone": "作品履历" },
+  "assets": [
+    { "id": "creator-studio-background", "src": "assets/creator-studio-world.png", "kind": "image", "preload": true, "pixelArt": false },
+    { "id": "creator-studio-roster", "src": "assets/creator-studio-roster.png", "kind": "spritesheet", "preload": true, "pixelArt": false }
+  ],
+  "actorSets": [{
+    "id": "creator-studio-cast-v1", "assetId": "creator-studio-roster", "frameWidth": 256, "frameHeight": 768,
+    "framesPerActor": 1, "scale": 0.18, "footOffset": { "x": 0, "y": 132 },
+    "clips": {
+      "idle": { "south": [0] }, "walking": { "south": [0] }, "thinking": { "south": [0] },
+      "working": { "south": [0] }, "talking": { "south": [0] }, "meeting": { "south": [0] },
+      "blocked": { "south": [0] }, "celebrating": { "south": [0] }
+    }
+  }],
+  "scenes": [{
+    "id": "daylight-studio", "displayName": "云端创作工坊",
+    "size": { "width": 1536, "height": 1024 },
+    "cameraBounds": { "x": 0, "y": 0, "width": 1536, "height": 1024 },
+    "safeArea": { "x": 32, "y": 32, "width": 1472, "height": 960 },
+    "layers": [{ "id": "studio-interior", "assetId": "creator-studio-background", "destination": { "x": 0, "y": 0, "width": 1536, "height": 1024 }, "zIndex": 0 }],
+    "anchors": [
+      { "id": "spawn", "position": { "x": 760, "y": 930 }, "facing": "north", "capacity": 8, "tags": ["spawn"] },
+      { "id": "idea-table", "position": { "x": 760, "y": 650 }, "facing": "north", "capacity": 6, "tags": ["meeting", "talk"] },
+      { "id": "editing-bay", "position": { "x": 300, "y": 520 }, "facing": "north", "capacity": 3, "tags": ["work"] },
+      { "id": "podcast-booth", "position": { "x": 980, "y": 330 }, "facing": "north", "capacity": 3, "tags": ["work", "talk"] },
+      { "id": "film-stage", "position": { "x": 1250, "y": 520 }, "facing": "east", "capacity": 3, "tags": ["work"] },
+      { "id": "lounge", "position": { "x": 650, "y": 340 }, "facing": "south", "capacity": 3, "tags": ["idle", "talk"] }
+    ],
+    "navigation": { "origin": { "x": 0, "y": 0 }, "cellSize": 64, "columns": 24, "rows": 16, "blocked": [] },
+    "interactables": [
+      { "id": "idea-table", "kind": "meeting-table", "displayName": "选题桌", "bounds": { "x": 580, "y": 470, "width": 390, "height": 270 }, "approachAnchorIds": ["idea-table"], "actions": [{ "id": "start-meeting", "label": "发起选题会" }], "zIndex": 170 },
+      { "id": "editing-bay", "kind": "workstation", "displayName": "剪辑台", "bounds": { "x": 40, "y": 330, "width": 440, "height": 300 }, "approachAnchorIds": ["editing-bay"], "actions": [{ "id": "assign-task", "label": "安排制作" }], "zIndex": 160 },
+      { "id": "podcast-booth", "kind": "recording-booth", "displayName": "播客间", "bounds": { "x": 850, "y": 130, "width": 330, "height": 280 }, "approachAnchorIds": ["podcast-booth"], "actions": [{ "id": "talk", "label": "开始录制" }], "zIndex": 155 },
+      { "id": "film-stage", "kind": "film-stage", "displayName": "拍摄区", "bounds": { "x": 1130, "y": 230, "width": 350, "height": 410 }, "approachAnchorIds": ["film-stage"], "actions": [{ "id": "assign-task", "label": "安排拍摄" }], "zIndex": 158 }
+    ],
+    "growthSlots": [
+      { "id": "studio-skill", "category": "skill", "position": { "x": 1180, "y": 760 }, "zIndex": 130 },
+      { "id": "studio-delivery", "category": "delivery", "position": { "x": 1240, "y": 760 }, "zIndex": 130 },
+      { "id": "studio-promotion", "category": "promotion", "position": { "x": 1300, "y": 760 }, "zIndex": 130 }
+    ]
+  }],
+  "activityMapping": { "task.started": "working", "turn.started": "thinking", "tool.started": "working", "message.appended": "talking", "task.blocked": "blocked", "task.completed": "idle", "meeting.started": "meeting", "meeting.finished": "idle" }
+}

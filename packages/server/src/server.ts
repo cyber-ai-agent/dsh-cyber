@@ -61,6 +61,7 @@ import { WorldFileService } from './services/world-file-service.js'
 import { WorldRootService } from './services/world-root-service.js'
 import { WorldSettingsService } from './services/world-settings-service.js'
 import { WorldTraceService } from './services/world-trace-service.js'
+import { WorldMarketplaceService } from './services/world-marketplace-service.js'
 import { createBuiltinSkillRegistry } from './skills/builtin-skill-registry.js'
 import { LocalSkillActionRepository } from './skills/local-skill-action-repository.js'
 import type { CharacterSkillActionRepository } from './skills/skill-action-repository.js'
@@ -166,6 +167,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     simulationStore: worldSimulation,
     publish: (event) => worldStreamHub.publish(event),
   })
+  const worldMarketplace = new WorldMarketplaceService(store, worldRuntime)
   const ambientSlotResolver = new WorldAmbientSlotResolver({ store })
   const ambientStateProvider = new WorldAmbientStateProvider({
     store,
@@ -211,7 +213,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerWorldRoutes(router, { store, worldAccess })
   registerWorldSettingsRoutes(router, { store, settings: worldSettings, access: worldAccess })
   registerTaskScheduleRoutes(router, { store, schedules: taskSchedules, access: worldAccess })
-  registerPackageRoutes(router, { store, packageManager, packageCatalog, skillRuntime })
+  registerPackageRoutes(router, { store, packageManager, packageCatalog, skillRuntime, worldMarketplace })
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
   registerWorldTraceRoutes(router, { store, trace: worldTrace, access: worldAccess })
   registerModelInteractionRoutes(router, { store, interactions })

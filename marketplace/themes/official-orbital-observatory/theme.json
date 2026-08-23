@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "id": "official-orbital-observatory",
+  "version": "1.0.0",
+  "templateId": "orbital-observatory",
+  "displayName": "远星观测站 · 蓝环轨道",
+  "renderer": "pixi-2d",
+  "terminology": { "world": "观测站", "participant": "研究员", "session": "联合观测", "milestone": "探索记录" },
+  "assets": [
+    { "id": "orbital-observatory-background", "src": "assets/orbital-observatory-world.png", "kind": "image", "preload": true, "pixelArt": false },
+    { "id": "orbital-observatory-roster", "src": "assets/orbital-observatory-roster.png", "kind": "spritesheet", "preload": true, "pixelArt": false }
+  ],
+  "actorSets": [{
+    "id": "orbital-observatory-cast-v1", "assetId": "orbital-observatory-roster", "frameWidth": 256, "frameHeight": 768,
+    "framesPerActor": 1, "scale": 0.18, "footOffset": { "x": 0, "y": 132 },
+    "clips": {
+      "idle": { "south": [0] }, "walking": { "south": [0] }, "thinking": { "south": [0] },
+      "working": { "south": [0] }, "talking": { "south": [0] }, "meeting": { "south": [0] },
+      "blocked": { "south": [0] }, "celebrating": { "south": [0] }
+    }
+  }],
+  "scenes": [{
+    "id": "blue-ring-deck", "displayName": "蓝环轨道观测层",
+    "size": { "width": 1536, "height": 1024 },
+    "cameraBounds": { "x": 0, "y": 0, "width": 1536, "height": 1024 },
+    "safeArea": { "x": 32, "y": 32, "width": 1472, "height": 960 },
+    "layers": [{ "id": "observatory-interior", "assetId": "orbital-observatory-background", "destination": { "x": 0, "y": 0, "width": 1536, "height": 1024 }, "zIndex": 0 }],
+    "anchors": [
+      { "id": "spawn", "position": { "x": 760, "y": 930 }, "facing": "north", "capacity": 8, "tags": ["spawn"] },
+      { "id": "hologram-table", "position": { "x": 760, "y": 590 }, "facing": "north", "capacity": 6, "tags": ["meeting", "talk"] },
+      { "id": "telescope", "position": { "x": 300, "y": 420 }, "facing": "west", "capacity": 2, "tags": ["work", "inspect"] },
+      { "id": "specimen-lab", "position": { "x": 1220, "y": 430 }, "facing": "east", "capacity": 3, "tags": ["work"] },
+      { "id": "docking-console", "position": { "x": 330, "y": 800 }, "facing": "north", "capacity": 2, "tags": ["work", "operations"] },
+      { "id": "analysis-nook", "position": { "x": 1240, "y": 810 }, "facing": "north", "capacity": 2, "tags": ["idle", "work"] }
+    ],
+    "navigation": { "origin": { "x": 0, "y": 0 }, "cellSize": 64, "columns": 24, "rows": 16, "blocked": [] },
+    "interactables": [
+      { "id": "hologram-table", "kind": "meeting-table", "displayName": "星图沙盘", "bounds": { "x": 580, "y": 430, "width": 390, "height": 300 }, "approachAnchorIds": ["hologram-table"], "actions": [{ "id": "start-meeting", "label": "开始联合观测" }], "zIndex": 170 },
+      { "id": "telescope", "kind": "telescope", "displayName": "深空望远镜", "bounds": { "x": 120, "y": 170, "width": 430, "height": 330 }, "approachAnchorIds": ["telescope"], "actions": [{ "id": "inspect", "label": "查看天区" }], "zIndex": 160 },
+      { "id": "specimen-lab", "kind": "laboratory", "displayName": "异星样本舱", "bounds": { "x": 1030, "y": 180, "width": 450, "height": 340 }, "approachAnchorIds": ["specimen-lab"], "actions": [{ "id": "assign-task", "label": "安排分析" }], "zIndex": 158 },
+      { "id": "docking-console", "kind": "ops-console", "displayName": "对接控制台", "bounds": { "x": 50, "y": 650, "width": 460, "height": 300 }, "approachAnchorIds": ["docking-console"], "actions": [{ "id": "use-object", "label": "检查航线" }], "zIndex": 155 }
+    ],
+    "growthSlots": [
+      { "id": "observatory-skill", "category": "skill", "position": { "x": 1110, "y": 720 }, "zIndex": 130 },
+      { "id": "observatory-delivery", "category": "delivery", "position": { "x": 1170, "y": 720 }, "zIndex": 130 },
+      { "id": "observatory-promotion", "category": "promotion", "position": { "x": 1230, "y": 720 }, "zIndex": 130 }
+    ]
+  }],
+  "activityMapping": { "task.started": "working", "turn.started": "thinking", "tool.started": "working", "message.appended": "talking", "task.blocked": "blocked", "task.completed": "idle", "meeting.started": "meeting", "meeting.finished": "idle" }
+}

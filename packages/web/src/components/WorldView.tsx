@@ -108,7 +108,7 @@ function WorldControls({ lightsOn, zoom, setLightsOn, setZoom }: {
 }
 
 function WorldScene({ kind, employees, sceneImage, lightsOn, zoom, onSelectEmployee }: {
-  kind: 'personal' | 'company' | 'tavern' | 'studio'
+  kind: 'personal' | 'company' | 'tavern' | 'studio' | 'observatory'
   employees: CyberEmployee[]
   sceneImage?: string
   lightsOn: boolean

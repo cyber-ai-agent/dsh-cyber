@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "id": "official-moonlit-tavern",
+  "version": "1.0.0",
+  "templateId": "tavern",
+  "displayName": "月影酒馆 · 雨夜大厅",
+  "renderer": "pixi-2d",
+  "terminology": { "world": "酒馆", "participant": "角色", "session": "同桌会话", "milestone": "人物事迹" },
+  "assets": [
+    { "id": "moonlit-tavern-background", "src": "assets/moonlit-tavern-world.png", "kind": "image", "preload": true, "pixelArt": false },
+    { "id": "moonlit-tavern-roster", "src": "assets/moonlit-tavern-roster.png", "kind": "spritesheet", "preload": true, "pixelArt": false }
+  ],
+  "actorSets": [{
+    "id": "moonlit-tavern-cast-v1", "assetId": "moonlit-tavern-roster", "frameWidth": 256, "frameHeight": 768,
+    "framesPerActor": 1, "scale": 0.18, "footOffset": { "x": 0, "y": 132 },
+    "clips": {
+      "idle": { "south": [0] }, "walking": { "south": [0] }, "thinking": { "south": [0] },
+      "working": { "south": [0] }, "talking": { "south": [0] }, "meeting": { "south": [0] },
+      "blocked": { "south": [0] }, "celebrating": { "south": [0] }
+    }
+  }],
+  "scenes": [{
+    "id": "moonlit-hall", "displayName": "月影酒馆大厅",
+    "size": { "width": 1536, "height": 1024 },
+    "cameraBounds": { "x": 0, "y": 0, "width": 1536, "height": 1024 },
+    "safeArea": { "x": 32, "y": 32, "width": 1472, "height": 960 },
+    "layers": [{ "id": "tavern-interior", "assetId": "moonlit-tavern-background", "destination": { "x": 0, "y": 0, "width": 1536, "height": 1024 }, "zIndex": 0 }],
+    "anchors": [
+      { "id": "spawn", "position": { "x": 760, "y": 920 }, "facing": "north", "capacity": 8, "tags": ["spawn"] },
+      { "id": "bar", "position": { "x": 650, "y": 430 }, "facing": "north", "capacity": 3, "tags": ["work", "talk"] },
+      { "id": "fireplace", "position": { "x": 270, "y": 600 }, "facing": "west", "capacity": 2, "tags": ["idle", "talk"] },
+      { "id": "booth", "position": { "x": 1190, "y": 590 }, "facing": "north", "capacity": 3, "tags": ["idle", "talk"] },
+      { "id": "notice-board", "position": { "x": 1360, "y": 500 }, "facing": "east", "capacity": 2, "tags": ["work", "inspect"] },
+      { "id": "round-table", "position": { "x": 770, "y": 720 }, "facing": "north", "capacity": 6, "tags": ["meeting"] }
+    ],
+    "navigation": { "origin": { "x": 0, "y": 0 }, "cellSize": 64, "columns": 24, "rows": 16, "blocked": [] },
+    "interactables": [
+      { "id": "tavern-bar", "kind": "bar", "displayName": "月影吧台", "bounds": { "x": 420, "y": 220, "width": 510, "height": 250 }, "approachAnchorIds": ["bar"], "actions": [{ "id": "talk", "label": "与吧台角色交谈" }], "zIndex": 150 },
+      { "id": "round-table", "kind": "meeting-table", "displayName": "壁炉圆桌", "bounds": { "x": 530, "y": 515, "width": 500, "height": 340 }, "approachAnchorIds": ["round-table"], "actions": [{ "id": "start-meeting", "label": "召集同桌会话" }], "zIndex": 170 },
+      { "id": "notice-board", "kind": "notice-board", "displayName": "委托告示板", "bounds": { "x": 1260, "y": 250, "width": 220, "height": 310 }, "approachAnchorIds": ["notice-board"], "actions": [{ "id": "assign-task", "label": "发布委托" }, { "id": "inspect", "label": "查看线索" }], "zIndex": 160 },
+      { "id": "fireplace", "kind": "fireplace", "displayName": "旧石壁炉", "bounds": { "x": 70, "y": 230, "width": 360, "height": 410 }, "approachAnchorIds": ["fireplace"], "actions": [{ "id": "talk", "label": "围炉交谈" }], "zIndex": 145 }
+    ],
+    "growthSlots": [
+      { "id": "tavern-skill", "category": "skill", "position": { "x": 1290, "y": 310 }, "zIndex": 130 },
+      { "id": "tavern-delivery", "category": "delivery", "position": { "x": 1350, "y": 310 }, "zIndex": 130 },
+      { "id": "tavern-promotion", "category": "promotion", "position": { "x": 1410, "y": 310 }, "zIndex": 130 }
+    ]
+  }],
+  "activityMapping": { "task.started": "working", "turn.started": "thinking", "tool.started": "working", "message.appended": "talking", "task.blocked": "blocked", "task.completed": "idle", "meeting.started": "meeting", "meeting.finished": "idle" }
+}

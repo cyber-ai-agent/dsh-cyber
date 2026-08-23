@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "official-moonlit-tavern",
+  "version": "1.0.0",
+  "kind": "world-theme",
+  "displayName": "月影酒馆 · 雨夜大厅",
+  "summary": "雨夜幻想酒馆世界，拥有壁炉、吧台、同桌会话与委托告示板，并配套八种奇幻角色皮肤。",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "publisher": "DSH Cyber",
+  "capabilities": [
+    "world:render"
+  ],
+  "dataEgress": [],
+  "files": [
+    {
+      "path": "theme.json",
+      "sha256": "2506d33e1347e6ab574a41e893a8dfb9065a08be036e58b3ba7ab33ac0d12747"
+    },
+    {
+      "path": "assets/moonlit-tavern-world.png",
+      "sha256": "501a251ee2f29fb886d1d2a151bc7c0eed4742ba51af6e87ce8bc32453c21e06"
+    },
+    {
+      "path": "assets/moonlit-tavern-roster.png",
+      "sha256": "f699f5b486a00657682a33305490ac3f392fef8ce637e5ceeacad605cd23414d"
+    }
+  ],
+  "entrypoints": [
+    {
+      "id": "moonlit-tavern-theme",
+      "kind": "world-theme",
+      "path": "theme.json"
+    }
+  ],
+  "certification": {
+    "authority": "DSH Cyber",
+    "level": "official",
+    "contentSha256": "81dd77a43b9b5565e3aae904d1f877e5c53674a7503b5f9c756723c9675b9caa"
+  }
+}

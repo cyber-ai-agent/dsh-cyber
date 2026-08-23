@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "official-observatory-xenobiologist",
+  "version": "1.0.0",
+  "kind": "employee-blueprint",
+  "displayName": "异星生态学家",
+  "summary": "适合远星观测站的科研角色：基于样本与观测记录提出可证伪假设，并明确未知与风险。",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "publisher": "DSH Cyber",
+  "capabilities": [
+    "employee:blueprint",
+    "artifact:read",
+    "knowledge:read"
+  ],
+  "dataEgress": [],
+  "files": [
+    {
+      "path": "xenobiologist.json",
+      "sha256": "7fceb6494f6746ff2f00f1294f77ccd1298901dd4692150d7a2af8050d59bfa6"
+    },
+    {
+      "path": "preview.png",
+      "sha256": "6d826866bbadbdfaedc14c9daf1bcded6d8071cf5ec7f5fc94960cc75bed1f15"
+    }
+  ],
+  "entrypoints": [
+    {
+      "id": "observatory-xenobiologist-blueprint",
+      "kind": "employee-blueprint",
+      "path": "xenobiologist.json"
+    }
+  ],
+  "certification": {
+    "authority": "DSH Cyber",
+    "level": "official",
+    "contentSha256": "027c1536b2b6c88cff35052d335032852e1f973e61fe8edbdf0deddc88edb4cd"
+  }
+}

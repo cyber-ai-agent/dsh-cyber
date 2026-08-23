@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "official-creator-studio",
+  "version": "1.0.0",
+  "kind": "world-theme",
+  "displayName": "云端创作工坊 · 日光片场",
+  "summary": "明亮的内容创作世界，包含选题桌、播客间、剪辑台与拍摄区，并配套八种创作者角色皮肤。",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "publisher": "DSH Cyber",
+  "capabilities": [
+    "world:render"
+  ],
+  "dataEgress": [],
+  "files": [
+    {
+      "path": "theme.json",
+      "sha256": "47493d02531c97127e976988c7bce68011e359bdb1ed5358c1e6648203dec1cf"
+    },
+    {
+      "path": "assets/creator-studio-world.png",
+      "sha256": "69fdb6d1d799ac33cf73409d6c20f7e2937909c89a617c27e138cb11b5949aac"
+    },
+    {
+      "path": "assets/creator-studio-roster.png",
+      "sha256": "abc27813493bef78d92b0f049e3a6499beccdc9f5a46cdac4c12c8b07c8c5958"
+    }
+  ],
+  "entrypoints": [
+    {
+      "id": "creator-studio-theme",
+      "kind": "world-theme",
+      "path": "theme.json"
+    }
+  ],
+  "certification": {
+    "authority": "DSH Cyber",
+    "level": "official",
+    "contentSha256": "8f343872ed5edfedbe98d22b2131a7c31e23703a9a1b263d6c7b57b283456e9f"
+  }
+}

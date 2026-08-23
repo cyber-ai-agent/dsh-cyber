@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "official-studio-visual-director",
+  "version": "1.0.0",
+  "kind": "employee-blueprint",
+  "displayName": "视觉导演",
+  "summary": "适合云端创作工坊的创作角色：制定视觉方向、镜头节奏与素材清单，保持作品风格一致。",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "publisher": "DSH Cyber",
+  "capabilities": [
+    "employee:blueprint",
+    "artifact:read",
+    "workspace:read"
+  ],
+  "dataEgress": [],
+  "files": [
+    {
+      "path": "visual-director.json",
+      "sha256": "fb004a381c83290dbb16c1f938019c09c7bcfdffe1f02a5a88b5307de4b8cabe"
+    },
+    {
+      "path": "preview.png",
+      "sha256": "abc27813493bef78d92b0f049e3a6499beccdc9f5a46cdac4c12c8b07c8c5958"
+    }
+  ],
+  "entrypoints": [
+    {
+      "id": "studio-visual-director-blueprint",
+      "kind": "employee-blueprint",
+      "path": "visual-director.json"
+    }
+  ],
+  "certification": {
+    "authority": "DSH Cyber",
+    "level": "official",
+    "contentSha256": "2198cae49358d24e92e5ccfe467c4519bc58a1b694d71058d069bd6ad8458669"
+  }
+}

@@ -18,29 +18,26 @@ import type {
   PackageInstallTransaction,
   PackagePermissionPreview,
 } from '@dsh-cyber/contracts'
-import type { CyberEmployee } from '../types.js'
-
 interface PackageMarketDialogProps {
   initialMarket: CyberMarketKind
   items: CyberMarketPackage[]
   installed: InstalledPackage[]
   transactions: PackageInstallTransaction[]
-  employees: CyberEmployee[]
   loading: boolean
   installing: boolean
   onClose(): void
   onSearch(market: CyberMarketKind, query: string): Promise<void>
   onPreviewMarketplace(item: CyberMarketPackage): Promise<PackagePermissionPreview>
   onInstallMarketplace(item: CyberMarketPackage, approvalToken: string): Promise<void>
-  onBindTheme(packageId: string): Promise<void>
+  onCreateThemeWorld(item: CyberMarketPackage, name: string): Promise<void>
   onPreview(manifest: CyberPackageManifest): Promise<PackagePermissionPreview>
   onInstall(input: { manifest: CyberPackageManifest; sourceDirectory: string; approvalToken: string }): Promise<void>
 }
 
 const MARKET_META: Record<CyberMarketKind, { label: string; description: string }> = {
-  theme: { label: '主题', description: '安装世界场景、视觉资源与交互主题，再绑定到兼容世界。' },
-  plugin: { label: '插件', description: '为角色增加经过审阅、可回滚的扩展能力。当前可执行边界仍以声明式插件为主。' },
-  talent: { label: '角色', description: '安装角色模板与能力请求；安装后可从右侧档案创建独立角色实例。' },
+  theme: { label: '世界', description: '选择完整场景皮肤、空间设定和起始角色，创建彼此独立的新世界。' },
+  talent: { label: '角色', description: '安装不同世界观与专长的角色模板，再把角色招募到兼容世界。' },
+  plugin: { label: '插件', description: '全局扩展，安装一次即可在所有世界使用；每次安装都可审阅、回滚。' },
 }
 
 export function PackageMarketDialog(props: PackageMarketDialogProps) {
@@ -51,6 +48,9 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
   const [approved, setApproved] = useState(false)
   const [error, setError] = useState<string>()
   const [manualOpen, setManualOpen] = useState(false)
+  const [creatingWorldFor, setCreatingWorldFor] = useState<CyberMarketPackage>()
+  const [worldName, setWorldName] = useState('')
+  const [creatingWorld, setCreatingWorld] = useState(false)
 
   useEffect(() => {
     setMarket(props.initialMarket)
@@ -58,6 +58,7 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
     setSelected(undefined)
     setPreview(undefined)
     setApproved(false)
+    setCreatingWorldFor(undefined)
   }, [props.initialMarket])
 
   const switchMarket = (next: CyberMarketKind) => {
@@ -66,6 +67,7 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
     setPreview(undefined)
     setApproved(false)
     setError(undefined)
+    setCreatingWorldFor(undefined)
     void props.onSearch(next, '')
   }
 
@@ -101,12 +103,25 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
     }
   }
 
-  const bindTheme = async (item: CyberMarketPackage) => {
+  const prepareWorld = (item: CyberMarketPackage) => {
+    setSelected(item)
+    setPreview(undefined)
+    setApproved(false)
     setError(undefined)
+    setCreatingWorldFor(item)
+    setWorldName(item.manifest.displayName.split('·')[0]!.trim())
+  }
+
+  const createWorld = async () => {
+    if (creatingWorldFor === undefined || worldName.trim().length === 0) return
+    setError(undefined)
+    setCreatingWorld(true)
     try {
-      await props.onBindTheme(item.manifest.id)
+      await props.onCreateThemeWorld(creatingWorldFor, worldName.trim())
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '主题与当前世界不兼容')
+      setError(cause instanceof Error ? cause.message : '世界创建失败，请稍后重试')
+    } finally {
+      setCreatingWorld(false)
     }
   }
 
@@ -114,13 +129,13 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && props.onClose()}>
       <section className="package-market-dialog package-market-dialog--catalog" role="dialog" aria-modal="true" aria-labelledby="package-market-title">
         <header className="dialog-header package-market-header">
-          <div><h2 id="package-market-title">市场</h2><p>主题、插件和角色模板统一管理；扩展经过完整性校验、能力审阅和事务安装后才进入运行链路。</p></div>
+          <div><h2 id="package-market-title">扩展市场</h2><p>先选择世界，再发现角色与全局插件。所有内容经过完整性校验和事务安装。</p></div>
           <button className="icon-button" type="button" aria-label="关闭市场" onClick={props.onClose}><X size={18} /></button>
         </header>
         <nav className="market-tabs" aria-label="市场分类">
           <MarketTab market="theme" active={market === 'theme'} onSelect={switchMarket} />
-          <MarketTab market="plugin" active={market === 'plugin'} onSelect={switchMarket} />
           <MarketTab market="talent" active={market === 'talent'} onSelect={switchMarket} />
+          <MarketTab market="plugin" active={market === 'plugin'} onSelect={switchMarket} />
         </nav>
         <div className="package-market-layout package-market-layout--catalog">
           <main className="market-catalog">
@@ -137,12 +152,17 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
               <div className="market-card-grid">
                 {props.items.map((item) => (
                   <article key={`${item.manifest.id}-${item.manifest.version}`} className={selected?.manifest.id === item.manifest.id ? 'is-selected' : ''}>
+                    {item.market === 'theme' ? <img className="market-world-cover" src={marketplacePreviewUrl(item)} alt={`${item.manifest.displayName}世界预览`} /> : null}
+                    {item.market === 'talent' ? <img className="market-role-cover" src={marketplacePreviewUrl(item)} alt={`${item.manifest.displayName}角色风格预览`} /> : null}
                     <header><MarketIcon market={item.market} /><div><strong>{item.manifest.displayName}</strong><span>{item.manifest.publisher} · v{item.manifest.version}</span></div>{item.verified ? <em><ShieldCheck size={14} />官方校验</em> : <em className="is-community">社区包</em>}</header>
                     <p>{item.manifest.summary}</p>
+                    {item.market === 'theme' ? <div className="market-world-facts"><span>完整场景皮肤</span><span>专属角色外观</span><span>独立会话与档案</span></div> : null}
+                    {item.market === 'talent' ? <div className="market-role-world">适合：{roleWorldLabel(item.manifest.id)}</div> : null}
+                    {item.market === 'plugin' ? <div className="market-plugin-scope">全局可用 · 所有世界共享</div> : null}
                     <div className="market-capabilities">{item.manifest.capabilities.slice(0, 4).map((capability) => <code key={capability}>{capabilityLabel(capability)}</code>)}</div>
                     <footer>
                       <span>{item.installedVersion === undefined ? '未安装' : `已安装 v${item.installedVersion}`}</span>
-                      {marketAction(item, () => void bindTheme(item), () => void inspect(item))}
+                      {marketAction(item, () => prepareWorld(item), () => void inspect(item))}
                     </footer>
                   </article>
                 ))}
@@ -152,9 +172,11 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
             {manualOpen ? <ManualInstaller installing={props.installing} onPreview={props.onPreview} onInstall={props.onInstall} /> : null}
           </main>
           <aside className="market-review-panel">
-            {selected === undefined || preview === undefined
-              ? <InstalledOverview installed={props.installed} transactions={props.transactions} />
-              : <PermissionReview manifest={selected.manifest} preview={preview} approved={approved} installing={props.installing} onApproved={setApproved} onInstall={() => void install()} />}
+            {creatingWorldFor !== undefined
+              ? <WorldCreationReview item={creatingWorldFor} name={worldName} creating={creatingWorld} onName={setWorldName} onCreate={() => void createWorld()} />
+              : selected !== undefined && preview !== undefined
+                ? <PermissionReview manifest={selected.manifest} preview={preview} approved={approved} installing={props.installing} onApproved={setApproved} onInstall={() => void install()} />
+                : <InstalledOverview installed={props.installed} transactions={props.transactions} />}
           </aside>
         </div>
       </section>
@@ -179,11 +201,34 @@ function PermissionReview({ manifest, preview, approved, installing, onApproved,
   return <section className="permission-review permission-review--market"><header><div><span>{packageKindLabel(manifest.kind)}</span><h4>{manifest.displayName} <small>v{manifest.version}</small></h4><p>{manifest.publisher} · {manifest.license}</p></div><CheckCircle size={24} /></header><p>{manifest.summary}</p><PermissionGroup title="新增能力" values={preview.addedCapabilities.map(capabilityLabel)} empty="没有新增能力" tone="warning" /><PermissionGroup title="数据外发" values={preview.dataEgress} empty="不外发数据" tone={preview.dataEgress.length > 0 ? 'danger' : 'safe'} /><div className="package-file-summary">激活前将再次校验 {manifest.files.length} 个文件与入口定义；失败不会覆盖当前版本。</div><label className="approval-check"><input type="checkbox" checked={approved} onChange={(event) => onApproved(event.target.checked)} /><span>我已审阅发布者、许可证、文件与运行能力。</span></label><button className="primary-button" type="button" disabled={!approved || installing} onClick={onInstall}>{installing ? '正在安装并激活…' : preview.previousVersion ? `批准升级至 v${preview.version}` : `批准安装 v${preview.version}`}</button></section>
 }
 
+function WorldCreationReview({ item, name, creating, onName, onCreate }: { item: CyberMarketPackage; name: string; creating: boolean; onName(value: string): void; onCreate(): void }) {
+  return <section className="world-creation-review">
+    <img src={marketplacePreviewUrl(item)} alt={`${item.manifest.displayName}世界预览`} />
+    <div><span>已安装的世界皮肤</span><h3>{item.manifest.displayName}</h3><p>{item.manifest.summary}</p></div>
+    <ul><li>创建独立世界，不覆盖当前世界</li><li>自动加入三名对应设定的起始角色</li><li>会话、档案、任务和运行状态彼此隔离</li></ul>
+    <label className="dialog-field"><span>新世界名称</span><input value={name} maxLength={60} autoFocus onChange={(event) => onName(event.target.value)} placeholder="为这个世界命名" /></label>
+    <button className="primary-button" type="button" disabled={creating || name.trim().length === 0} onClick={onCreate}>{creating ? '正在布置世界…' : '创建并进入这个世界'}</button>
+  </section>
+}
+
 function marketAction(item: CyberMarketPackage, onBind: () => void, onInspect: () => void) {
   const installed = item.installedVersion === item.manifest.version
-  if (item.market === 'theme' && installed) return <button type="button" onClick={onBind}>绑定到当前世界</button>
-  if (installed) return <button type="button" disabled>已安装</button>
+  if (item.market === 'theme' && installed) return <button type="button" onClick={onBind}>创建这个世界</button>
+  if (installed) return <button type="button" disabled>{item.market === 'talent' ? '角色模板已安装' : '已安装'}</button>
   return <button type="button" onClick={onInspect}>{item.installedVersion === undefined ? '查看并安装' : '查看升级'}</button>
+}
+
+function marketplacePreviewUrl(item: CyberMarketPackage): string {
+  return `/api/marketplace/packages/${encodeURIComponent(item.manifest.id)}/${encodeURIComponent(item.manifest.version)}/preview`
+}
+
+function roleWorldLabel(packageId: string): string {
+  return ({
+    'official-tavern-storyweaver': '月影酒馆',
+    'official-studio-visual-director': '云端创作工坊',
+    'official-observatory-xenobiologist': '远星观测站',
+    'official-archivist': '赛博公司与通用工作区',
+  } as Record<string, string>)[packageId] ?? '兼容世界'
 }
 
 function packageKindLabel(kind: CyberPackageManifest['kind']): string {
