@@ -117,7 +117,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
       } else {
         const skillResult = await skillRuntime.prepare(world.id, character.id, prompt)
         const runtimeSource = skillResult.handled && skillResult.summary
-          ? `${transformedPrompt}\n\n[已授权角色技能的真实执行结果]\n${skillResult.summary}\n只能根据以上真实状态向用户说明“已执行、已计划、等待绑定或失败”，不得把未执行动作说成已完成。`
+          ? `${transformedPrompt}\n\n[已授权角色技能的真实执行结果]\n${skillResult.summary}\n只能根据以上真实状态向用户说明“已执行、已计划、等待绑定、失败或结果未知”。对“结果未知”不得声称已经成功或确定失败，也不得自动重试可能产生外部副作用的动作。`
           : transformedPrompt
         if (skillResult.handled) {
           metadata.skillId = skillResult.skillId ?? ''
