@@ -72,6 +72,7 @@ export function registerEmployeeRoutes(router: Router, dependencies: EmployeeRou
     const profile = store.reviseEmployeeProfile({
       employeeId: params[0]!,
       ...(body.displayName === undefined ? {} : { displayName: requiredString(body, 'displayName') }),
+      ...(body.role === undefined ? {} : { role: requiredString(body, 'role') }),
       ...(body.birthday === undefined ? {} : { birthday: nullableString(body.birthday) }),
       ...(body.background === undefined ? {} : { background: requiredString(body, 'background') }),
       ...(body.personalityTraits === undefined
@@ -80,7 +81,7 @@ export function registerEmployeeRoutes(router: Router, dependencies: EmployeeRou
       ...(appearance === undefined ? {} : { appearance }),
       reason: requiredString(body, 'reason'),
     })
-    writeJson(response, 201, { profile })
+    writeJson(response, 201, { profile, employee: store.getEmployee(params[0]!) })
   })
 
   router.post(/^\/api\/employees\/([^/]+)\/skill-evidence$/, async ({ request, response, params }) => {
