@@ -1,11 +1,11 @@
+import type { JsonObject } from '@dsh-cyber/contracts'
 import type {
   CharacterSkillAction,
   CharacterSkillDescriptor,
   SkillActionAuthorization,
   SkillActionRisk,
   SkillActionStatus,
-} from '@dsh-cyber/contracts/creative-platform'
-import type { JsonObject } from '@dsh-cyber/contracts'
+} from '@dsh-cyber/contracts/skill-runtime'
 
 export interface CharacterSkillMatchContext {
   worldId: string
