@@ -1,5 +1,6 @@
 import {
   CaretDoubleRight,
+  CalendarBlank,
   GlobeHemisphereWest,
   IdentificationBadge,
   Path,
@@ -22,6 +23,7 @@ interface ArtifactDockProps {
   sceneImage?: string
   worldContent?: ReactNode
   traceContent?: ReactNode
+  scheduleContent?: ReactNode
   onTabChange(tab: DockTab): void
   onCollapse(): void
   onSelectEmployee(employeeId: string): void
@@ -34,6 +36,7 @@ interface ArtifactDockProps {
 const tabs: Array<{ id: DockTab; label: string; icon: typeof GlobeHemisphereWest }> = [
   { id: 'world', label: '世界', icon: GlobeHemisphereWest },
   { id: 'trace', label: '轨迹', icon: Path },
+  { id: 'schedule', label: '计划', icon: CalendarBlank },
   { id: 'dossier', label: '档案', icon: IdentificationBadge },
 ]
 
@@ -47,6 +50,7 @@ export function ArtifactDock({
   sceneImage,
   worldContent,
   traceContent,
+  scheduleContent,
   onTabChange,
   onCollapse,
   onSelectEmployee,
@@ -93,6 +97,7 @@ export function ArtifactDock({
           worldContent ?? <WorldView world={world} employees={employees} {...(sceneImage === undefined ? {} : { sceneImage })} onSelectEmployee={onSelectEmployee} />
         ) : null}
         {visibleTab === 'trace' ? traceContent : null}
+        {visibleTab === 'schedule' ? scheduleContent : null}
         {visibleTab === 'dossier' ? (
           selectedEmployee !== undefined && dossiers[selectedEmployee.id] !== undefined
             ? <EmployeeDossier

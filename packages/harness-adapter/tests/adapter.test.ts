@@ -418,10 +418,11 @@ describe('Harness profile and adapter', () => {
     })
     await adapter.runEmployeeTurn({ employee: employee(), revision: revision(), prompt: '查看文件', workspacePath: stateRoot, permissionMode: 'read-only' })
     await adapter.runEmployeeTurn({ employee: employee(), revision: revision(), prompt: '修改文件', workspacePath: stateRoot, permissionMode: 'workspace-write' })
-    expect(modes).toEqual(['read-only', 'workspace-write'])
-    expect(closes).toBe(1)
-    await adapter.close()
+    await adapter.runEmployeeTurn({ employee: employee(), revision: revision(), prompt: '跨目录修改文件', workspacePath: stateRoot, permissionMode: 'danger-full-access' })
+    expect(modes).toEqual(['read-only', 'workspace-write', 'danger-full-access'])
     expect(closes).toBe(2)
+    await adapter.close()
+    expect(closes).toBe(3)
   })
 
   it('checks candidate Harness packages in an isolated profile without switching the active runtime', async () => {

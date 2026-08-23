@@ -9,7 +9,7 @@ import type {
   World,
 } from '@dsh-cyber/contracts'
 
-export type DockTab = 'world' | 'trace' | 'dossier'
+export type DockTab = 'world' | 'trace' | 'schedule' | 'dossier'
 
 export interface ConversationIntent {
   kind: 'direct' | 'group'

@@ -565,6 +565,53 @@ const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE employee_blueprints ADD COLUMN embodiment_json TEXT;
     `,
   },
+  {
+    version: 14,
+    name: 'durable-task-schedules',
+    sql: `
+      CREATE TABLE task_schedules (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        employee_id TEXT NOT NULL REFERENCES employee_instances(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        prompt TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('once', 'interval')),
+        scheduled_at TEXT NOT NULL,
+        every_seconds INTEGER CHECK (every_seconds IS NULL OR every_seconds >= 300),
+        time_zone TEXT NOT NULL,
+        permission_mode TEXT NOT NULL CHECK (permission_mode IN ('read-only', 'workspace-write')),
+        status TEXT NOT NULL CHECK (status IN ('active', 'paused', 'completed')),
+        next_run_at TEXT,
+        last_run_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        CHECK ((kind = 'once' AND every_seconds IS NULL) OR (kind = 'interval' AND every_seconds IS NOT NULL))
+      ) STRICT;
+
+      CREATE INDEX idx_task_schedules_due
+        ON task_schedules(status, next_run_at, world_id);
+
+      CREATE TABLE task_schedule_runs (
+        id TEXT PRIMARY KEY,
+        schedule_id TEXT NOT NULL REFERENCES task_schedules(id) ON DELETE CASCADE,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        employee_id TEXT NOT NULL REFERENCES employee_instances(id) ON DELETE CASCADE,
+        status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed', 'skipped')),
+        scheduled_for TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        completed_at TEXT,
+        session_id TEXT,
+        summary TEXT,
+        error_code TEXT,
+        UNIQUE(schedule_id, scheduled_for)
+      ) STRICT;
+
+      CREATE INDEX idx_task_schedule_runs_schedule
+        ON task_schedule_runs(schedule_id, started_at DESC);
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {

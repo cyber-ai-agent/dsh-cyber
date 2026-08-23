@@ -77,3 +77,6 @@
   .advanced-terminology-grid, .color-setting-row, .character-profile-grid { grid-template-columns: 1fr; }
   .character-profile-grid__wide { grid-column: auto; }
 }
+.permission-risk-confirm{display:flex!important;align-items:flex-start;gap:10px;padding:12px;border:1px solid #8d5b25;background:#24170d;color:#f2d5ae}
+.permission-risk-confirm input{width:18px!important;min-height:18px!important;margin-top:2px;accent-color:#e8ac31}
+.permission-risk-confirm span{display:grid;gap:4px}.permission-risk-confirm strong{font-size:14px}.permission-risk-confirm small{font-size:12px;line-height:1.5;color:#d2b792}

@@ -32,6 +32,7 @@ import type {
   PackageInstallTransaction,
   PackagePermissionPreview,
   RuntimeUpdateTransaction,
+  TaskSchedule,
   WorkMessage,
   WorkSession,
   WorkSessionParticipant,
@@ -71,6 +72,7 @@ import { worldExperience } from './world-experience.js'
 import { WorldRuntimeDock } from './features/world/WorldRuntimeDock.js'
 import { WorldTracePanel } from './components/world-trace/WorldTracePanel.js'
 import { WorldSettingsDialog, WorldUnlockDialog } from './components/WorldSettingsDialog.js'
+import { TaskSchedulePanel } from './components/TaskSchedulePanel.js'
 
 const demoMode = new URLSearchParams(window.location.search).get('demo') === '1'
 const worldRuntimeV2Enabled = new URLSearchParams(window.location.search).get('legacyWorld') !== '1'
@@ -135,6 +137,8 @@ export default function App() {
   const [lockedWorld, setLockedWorld] = useState<World>()
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('auto')
   const [permissionMode, setPermissionMode] = useState<AgentPermissionMode>('read-only')
+  const [taskSchedules, setTaskSchedules] = useState<TaskSchedule[]>([])
+  const [scheduleBusy, setScheduleBusy] = useState(false)
 
   const activeSession = sessions.find((session) => session.id === activeSessionId)
   const activeParticipantIds = conversationIntent?.employeeIds
@@ -157,6 +161,7 @@ export default function App() {
     setSelectedEmployeeId(undefined)
     setDockTab('world')
     setPermissionMode('read-only')
+    setTaskSchedules([])
     if (demoMode) {
       const isCompany = world.id === demoData.activeWorld.id
       setWorldRuntimeAvailable(true)
@@ -183,7 +188,7 @@ export default function App() {
     setPermissionMode(settingsResult.settings.runtime.permissionMode)
     setWorldRuntimeAvailable(capability.supported)
     setAppMode(worldRuntimeV2Enabled && capability.supported ? 'world' : 'workbench')
-    const [dossierResults, participantResults] = await Promise.all([
+    const [dossierResults, participantResults, scheduleResult] = await Promise.all([
       Promise.all(snapshot.employees.map(async (employee) => {
       try {
         return await api<EmployeeDossier>(`/api/employees/${employee.id}/dossier`)
@@ -199,6 +204,7 @@ export default function App() {
           return [session.id, []] as const
         }
       })),
+      api<{ items: TaskSchedule[] }>(`/api/worlds/${world.id}/schedules`),
     ])
     const nextDossiers: Record<string, EmployeeDossier> = {}
     for (const dossier of dossierResults) {
@@ -208,6 +214,7 @@ export default function App() {
     setEmployees(snapshot.employees.map((employee, index) => toCyberEmployee(employee, index, nextDossiers[employee.id])))
     setSessions(snapshot.openSessions)
     setSessionParticipants(Object.fromEntries(participantResults))
+    setTaskSchedules(scheduleResult.items)
   }, [])
 
   const openWorkshopWorld = useCallback(async (worldId: string) => {
@@ -785,6 +792,9 @@ export default function App() {
           prompt,
           reasoningEffort,
           permissionMode,
+          interactionKind: conversationIntent?.kind === 'group' || targetIds.length > 1
+            ? 'meeting'
+            : /(?:^|\s)任务[：:]/.test(prompt) ? 'task' : 'chat',
           ...(attachments.length === 0 ? {} : { attachments }),
           ...(targetIds.length === 0 ? {} : { employeeIds: targetIds }),
           ...(conversationIntent === undefined ? {} : { title: conversationIntent.title }),
@@ -806,6 +816,53 @@ export default function App() {
       setSending(false)
     }
   }, [activeSession, activeSessionId, activeWorld, conversationIntent, employees, messages.length, sessionParticipants, reasoningEffort, permissionMode])
+
+  const refreshTaskSchedules = useCallback(async () => {
+    if (activeWorld === undefined || demoMode) return
+    const result = await api<{ items: TaskSchedule[] }>(`/api/worlds/${activeWorld.id}/schedules`)
+    setTaskSchedules(result.items)
+  }, [activeWorld])
+
+  const createTaskSchedule = useCallback(async (input: { employeeId: string; title: string; prompt: string; kind: 'once' | 'interval'; scheduledAt: string; everySeconds?: number; permissionMode: 'read-only' | 'workspace-write' }) => {
+    if (activeWorld === undefined) return
+    setScheduleBusy(true); setError(undefined)
+    try {
+      const result = await api<{ item: TaskSchedule }>(`/api/worlds/${activeWorld.id}/schedules`, { method: 'POST', body: JSON.stringify(input) })
+      setTaskSchedules((current) => [result.item, ...current])
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '计划创建失败'); throw cause }
+    finally { setScheduleBusy(false) }
+  }, [activeWorld])
+
+  const updateTaskScheduleStatus = useCallback(async (item: TaskSchedule, status: 'active' | 'paused') => {
+    if (activeWorld === undefined) return
+    setScheduleBusy(true); setError(undefined)
+    try {
+      const result = await api<{ item: TaskSchedule }>(`/api/worlds/${activeWorld.id}/schedules/${item.id}`, { method: 'PATCH', body: JSON.stringify({ status }) })
+      setTaskSchedules((current) => current.map((value) => value.id === item.id ? result.item : value))
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '计划更新失败') }
+    finally { setScheduleBusy(false) }
+  }, [activeWorld])
+
+  const runTaskSchedule = useCallback(async (item: TaskSchedule) => {
+    if (activeWorld === undefined) return
+    setScheduleBusy(true); setError(undefined)
+    try {
+      const result = await api<{ run: { status: string; errorCode?: string } }>(`/api/worlds/${activeWorld.id}/schedules/${item.id}/run`, { method: 'POST', body: '{}' })
+      if (result.run.status === 'failed') setError(`计划执行失败：${scheduleErrorLabel(result.run.errorCode)}`)
+      await refreshTaskSchedules()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '计划执行失败') }
+    finally { setScheduleBusy(false) }
+  }, [activeWorld, refreshTaskSchedules])
+
+  const deleteTaskSchedule = useCallback(async (item: TaskSchedule) => {
+    if (activeWorld === undefined) return
+    setScheduleBusy(true); setError(undefined)
+    try {
+      await api(`/api/worlds/${activeWorld.id}/schedules/${item.id}`, { method: 'DELETE' })
+      setTaskSchedules((current) => current.filter((value) => value.id !== item.id))
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '计划删除失败') }
+    finally { setScheduleBusy(false) }
+  }, [activeWorld])
 
   const uploadChatAttachment = useCallback(async (file: File): Promise<ChatAttachment> => {
     if (workspace === undefined) throw new Error('请先创建工作区')
@@ -1178,6 +1235,7 @@ export default function App() {
               ),
             } : {})}
             traceContent={<WorldTracePanel key={activeWorld.id} world={activeWorld} employees={employees} demoMode={demoMode} />}
+            scheduleContent={<TaskSchedulePanel employees={employees} items={taskSchedules} busy={scheduleBusy} onCreate={createTaskSchedule} onStatus={updateTaskScheduleStatus} onRun={runTaskSchedule} onDelete={deleteTaskSchedule} />}
             onTabChange={(tab) => { setDockTab(tab); setAppMode(tab === 'world' ? 'world' : 'workbench') }}
             onCollapse={() => setDockCollapsed(true)}
             onSelectEmployee={(employeeId) => void openDossier(employeeId)}
@@ -1265,6 +1323,17 @@ export default function App() {
       ) : null}
     </div>
   )
+}
+
+function scheduleErrorLabel(code?: string): string {
+  const labels: Record<string, string> = {
+    'model-unavailable': '模型或凭据不可用',
+    'runtime-unavailable': '运行时不可用',
+    'employee-unavailable': '执行角色不可用',
+    'service-restarted': '服务重启时中断',
+    'execution-failed': '任务执行未成功',
+  }
+  return labels[code ?? ''] ?? '请在世界轨迹中查看失败详情'
 }
 
 function applyWorldAppearance(settings: WorldSettings): void {
