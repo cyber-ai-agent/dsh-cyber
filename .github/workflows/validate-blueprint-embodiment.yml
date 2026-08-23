@@ -27,9 +27,6 @@ jobs:
       - name: Apply candidate portable Blueprint patch
         shell: bash
         run: |
-          # Restore the two persistence files to the last known-good pre-migration
-          # baseline so this validation cannot accidentally bless the earlier
-          # partial schema edit.
           git show 4220deb599bdc7077b08a1e7829f47243d0bf7cb:packages/persistence/src/migrations.ts > packages/persistence/src/migrations.ts
           git show 4220deb599bdc7077b08a1e7829f47243d0bf7cb:packages/persistence/src/sqlite-store.ts > packages/persistence/src/sqlite-store.ts
 
@@ -49,7 +46,7 @@ jobs:
           text = store.read_text(encoding='utf-8')
 
           old_insert = """        `INSERT INTO employee_blueprints (\n           id, version, world_template_id, display_name, role, summary, persona,\n           requested_skills_json, requested_capabilities_json, created_at\n         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,\n      )\n      .run(\n        blueprint.id,\n        blueprint.version,\n        blueprint.worldTemplateId,\n        blueprint.displayName,\n        blueprint.role,\n        blueprint.summary,\n        blueprint.persona,\n        stringifyJson(blueprint.requestedSkills),\n        stringifyJson(blueprint.requestedCapabilities),\n        blueprint.createdAt,\n      )"""
-          new_insert = """        `INSERT INTO employee_blueprints (\n           id, version, world_template_id, display_name, role, summary, persona,\n           requested_skills_json, requested_capabilities_json, embodiment_json, created_at\n         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,\n      )\n      .run(\n        blueprint.id,\n        blueprint.version,\n        blueprint.worldTemplateId,\n        blueprint.displayName,\n        blueprint.role,\n        blueprint.summary,\n        blueprint.persona,\n        stringifyJson(blueprint.requestedSkills),\n        stringifyJson(blueprint.requestedCapabilities),\n        blueprint.embodiment === undefined ? null : stringifyJson(blueprint.embodiment),\n        blueprint.createdAt,\n      )"""
+          new_insert = """        `INSERT INTO employee_blueprints (\n           id, version, world_template_id, display_name, role, summary, persona,\n           requested_skills_json, requested_capabilities_json, embodiment_json, created_at\n         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,\n      )\n      .run(\n        blueprint.id,\n        blueprint.version,\n        blueprint.worldTemplateId,\n        blueprint.displayName,\n        blueprint.role,\n        blueprint.summary,\n        blueprint.persona,\n        stringifyJson(blueprint.requestedSkills),\n        stringifyJson(blueprint.requestedCapabilities),\n        blueprint.embodiment === undefined ? null : stringifyJson(blueprint.embodiment as unknown as JsonValue),\n        blueprint.createdAt,\n      )"""
           if old_insert not in text:
             raise SystemExit('saveBlueprint insert target not found')
           text = text.replace(old_insert, new_insert, 1)
