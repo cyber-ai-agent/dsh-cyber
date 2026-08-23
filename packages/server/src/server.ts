@@ -33,6 +33,7 @@ import { registerSystemRoutes } from './routes/system-routes.js'
 import { registerWorkspaceFileRoutes } from './routes/workspace-file-routes.js'
 import { registerWorkspaceRoutes } from './routes/workspace-routes.js'
 import { registerWorldRuntimeRoutes } from './routes/world-runtime-routes.js'
+import { registerWorldTraceRoutes } from './routes/world-trace-routes.js'
 import { registerWorldRoutes } from './routes/world-routes.js'
 import { registerWorldSettingsRoutes } from './routes/world-settings-routes.js'
 import { AmbientLifeExecutor } from './services/ambient-life-executor.js'
@@ -55,6 +56,7 @@ import { WorldAmbientStateProvider } from './services/world-ambient-state-provid
 import { WorldFileService } from './services/world-file-service.js'
 import { WorldRootService } from './services/world-root-service.js'
 import { WorldSettingsService } from './services/world-settings-service.js'
+import { WorldTraceService } from './services/world-trace-service.js'
 import { createBuiltinSkillRegistry } from './skills/builtin-skill-registry.js'
 import { LocalSkillActionRepository } from './skills/local-skill-action-repository.js'
 import type { CharacterSkillActionRepository } from './skills/skill-action-repository.js'
@@ -186,6 +188,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     registry: skillRegistry,
     actions: skillActions,
   })
+  const worldTrace = new WorldTraceService({ store, actions: skillActions })
   const runtimeUpdates = new RuntimeUpdateService(store, stateRoot, workspaceRoot)
   const assets = new AssetService(store, stateRoot)
   const worldFiles = new WorldFileService(worldRoots)
@@ -202,8 +205,9 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerWorldSettingsRoutes(router, { store, settings: worldSettings, access: worldAccess })
   registerPackageRoutes(router, { store, packageManager, packageCatalog, skillRuntime })
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
+  registerWorldTraceRoutes(router, { store, trace: worldTrace, access: worldAccess })
   registerModelInteractionRoutes(router, { store, interactions })
-  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings })
+  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, worldTrace })
   registerEmployeeRoutes(router, { store, worldAccess })
 
   const httpServer = createServer((request, response) => {
@@ -215,6 +219,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
 
   const unsubscribe = orchestrator.subscribe((event) => {
     runtimeStreamHub.publish(event)
+    runtimeStreamHub.publishTrace(event.worldId, worldTrace.adaptRuntime(event))
     worldRuntime.publishRuntime(event.worldId, event.event, event.agentId, event.sessionId)
   })
   let startedAddress: CyberServerAddress | undefined

@@ -718,3 +718,4 @@ export function isDomainEventType(value: string): value is DomainEventType {
 }
 
 export * from './world-runtime.js'
+export * from './world-trace.js'

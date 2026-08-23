@@ -31,6 +31,7 @@ import type { WorldRuntimeService } from '../world-runtime-service.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
 import type { WorldFileService } from '../services/world-file-service.js'
 import type { WorldSettingsService } from '../services/world-settings-service.js'
+import type { WorldTraceService } from '../services/world-trace-service.js'
 import { ServiceError } from '../services/service-error.js'
 
 export interface ConversationRoutesDependencies {
@@ -43,6 +44,7 @@ export interface ConversationRoutesDependencies {
   worldAccess: WorldAccessService
   worldFiles: WorldFileService
   worldSettings: WorldSettingsService
+  worldTrace: WorldTraceService
 }
 
 export function registerConversationRoutes(router: Router, dependencies: ConversationRoutesDependencies): void {
@@ -56,6 +58,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     worldAccess,
     worldFiles,
     worldSettings,
+    worldTrace,
   } = dependencies
   const delegatedCollaboration = new DelegatedCollaborationService({
     store,
@@ -87,6 +90,8 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     }
     const title = optionalString(body.title)
     const requestedSessionId = optionalString(body.sessionId)
+    const traceCheckpoint = await createTraceCheckpoint(world.id, worldTrace)
+    try {
     let result
     if (employeeIds.length === 1) {
       const character = store.getEmployee(employeeIds[0]!)
@@ -152,6 +157,9 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     }
     worldRuntime.publishCurrent(world.id)
     writeJson(response, 200, result)
+    } finally {
+      await publishTraceChanges(world.id, worldTrace, traceCheckpoint, runtimeStreamHub)
+    }
   })
 
   router.get(/^\/api\/worlds\/([^/]+)\/skill-actions$/, async ({ request, response, params }) => {
@@ -178,6 +186,8 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
       : requiredEnum<ReasoningEffort>(body, 'reasoningEffort', ['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
     const transformedPurpose = await applyInstalledPromptTransforms(store.listInstalledPackages(world.workspaceId), purpose)
     const peerTitle = optionalString(body.title)
+    const traceCheckpoint = await createTraceCheckpoint(world.id, worldTrace)
+    try {
     const result = await peerCollaboration.run({
       workspaceId: world.workspaceId,
       worldId: world.id,
@@ -191,6 +201,9 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     })
     worldRuntime.publishCurrent(world.id)
     writeJson(response, 201, result)
+    } finally {
+      await publishTraceChanges(world.id, worldTrace, traceCheckpoint, runtimeStreamHub)
+    }
   })
 
   router.get(/^\/api\/worlds\/([^/]+)\/live$/, async ({ request, response, params }) => {
@@ -213,6 +226,30 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     await worldAccess.assertUnlocked(session.worldId, request)
     writeJson(response, 200, { items: store.listParticipants(session.id) })
   })
+}
+
+async function publishTraceChanges(
+  worldId: string,
+  trace: WorldTraceService,
+  checkpoint: Awaited<ReturnType<WorldTraceService['checkpoint']>>,
+  stream: RuntimeStreamHub,
+): Promise<void> {
+  try {
+    stream.publishTrace(worldId, await trace.changesSince(worldId, checkpoint))
+  } catch {
+    // Trace is an auxiliary read model and must not replace the conversation result.
+  }
+}
+
+async function createTraceCheckpoint(
+  worldId: string,
+  trace: WorldTraceService,
+): Promise<Awaited<ReturnType<WorldTraceService['checkpoint']>>> {
+  try {
+    return await trace.checkpoint(worldId)
+  } catch {
+    return new Map()
+  }
 }
 
 async function validatedChatAttachments(value: unknown, store: SqliteStore, workspaceId: string, worldId: string, worldFiles: WorldFileService): Promise<ChatAttachment[]> {
