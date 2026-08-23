@@ -3,6 +3,7 @@ import type { EmployeeBlueprint, EmployeeInstance } from '@dsh-cyber/contracts'
 import type { CharacterSkillDescriptor } from '@dsh-cyber/contracts/creative-platform'
 
 import { api } from '../api.js'
+import './SkillGrantEditor.css'
 
 interface SkillGrantEditorProps {
   employee: EmployeeInstance
