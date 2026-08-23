@@ -1,0 +1,51 @@
+name: Apply workshop world navigation
+
+on:
+  push:
+    branches:
+      - feat/creative-world-platform-v1
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/creative-world-platform-v1
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Wire project library to live world selection
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('packages/web/src/App.tsx')
+          text = path.read_text(encoding='utf-8')
+
+          anchor = "  }, [clearLiveTurns])\n\n  const bindWorldTheme = useCallback(async (packageId: string) => {"
+          insert = """  }, [clearLiveTurns])\n\n  const openWorkshopWorld = useCallback(async (worldId: string) => {\n    if (workspace === undefined || demoMode) return\n    const snapshot = await api<WorkspaceSnapshot>(`/api/workspaces/${workspace.id}/snapshot`)\n    setWorlds(snapshot.worlds)\n    const target = snapshot.worlds.find((world) => world.id === worldId)\n    if (target === undefined) throw new Error('创意工坊对应的世界不存在或已归档')\n    await loadWorld(target)\n  }, [loadWorld, workspace])\n\n  const bindWorldTheme = useCallback(async (packageId: string) => {"""
+          if anchor not in text:
+              raise SystemExit('loadWorld insertion anchor not found')
+          text = text.replace(anchor, insert, 1)
+
+          old = '<CreativeWorkshopLauncher workspaceId={workspace.id} onCreated={() => window.location.reload()} />'
+          new = '<CreativeWorkshopLauncher workspaceId={workspace.id} onCreated={(project) => void openWorkshopWorld(project.worldId)} onOpenWorld={(worldId) => void openWorkshopWorld(worldId)} />'
+          if old not in text:
+              raise SystemExit('workshop launcher anchor not found')
+          text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+      - name: Remove one-shot workflow and commit
+        run: |
+          git rm .github/workflows/apply-workshop-world-navigation.yml
+          git add packages/web/src/App.tsx
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "feat: open persisted workshop worlds without reload"
+          git push origin HEAD:feat/creative-world-platform-v1
