@@ -188,7 +188,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerAssetRoutes(router, { store, assets, access: worldAccess })
   registerWorldRoutes(router, { store, worldAccess })
   registerWorldSettingsRoutes(router, { store, settings: worldSettings, access: worldAccess })
-  registerPackageRoutes(router, { store, packageManager, packageCatalog })
+  registerPackageRoutes(router, { store, packageManager, packageCatalog, skillRuntime })
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
   registerModelInteractionRoutes(router, { store, interactions })
   registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings })
