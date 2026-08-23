@@ -38,9 +38,9 @@ interface PackageMarketDialogProps {
 }
 
 const MARKET_META: Record<CyberMarketKind, { label: string; description: string }> = {
-  theme: { label: '主题市场', description: '安装世界场景、视觉资源与交互主题，再绑定到兼容世界。' },
-  plugin: { label: '插件市场', description: '为角色增加经过审阅、可回滚的扩展能力。当前可执行边界仍以声明式插件为主。' },
-  talent: { label: '角色市场', description: '安装角色模板与技能扩展；安装后可在当前世界创建一个或多个独立角色。' },
+  theme: { label: '主题', description: '安装世界场景、视觉资源与交互主题，再绑定到兼容世界。' },
+  plugin: { label: '插件', description: '为角色增加经过审阅、可回滚的扩展能力。当前可执行边界仍以声明式插件为主。' },
+  talent: { label: '角色', description: '安装角色模板与能力请求；安装后可从右侧档案创建独立角色实例。' },
 }
 
 export function PackageMarketDialog(props: PackageMarketDialogProps) {
@@ -114,8 +114,8 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && props.onClose()}>
       <section className="package-market-dialog package-market-dialog--catalog" role="dialog" aria-modal="true" aria-labelledby="package-market-title">
         <header className="dialog-header package-market-header">
-          <div><h2 id="package-market-title">扩展市场</h2><p>扩展经过完整性校验、能力审阅和事务安装后才会进入运行链路。</p></div>
-          <button className="icon-button" type="button" aria-label="关闭扩展市场" onClick={props.onClose}><X size={18} /></button>
+          <div><h2 id="package-market-title">市场</h2><p>主题、插件和角色模板统一管理；扩展经过完整性校验、能力审阅和事务安装后才进入运行链路。</p></div>
+          <button className="icon-button" type="button" aria-label="关闭市场" onClick={props.onClose}><X size={18} /></button>
         </header>
         <nav className="market-tabs" aria-label="市场分类">
           <MarketTab market="theme" active={market === 'theme'} onSelect={switchMarket} />
@@ -219,5 +219,5 @@ function PermissionGroup({ title, values, empty, tone }: { title: string; values
 }
 
 function transactionLabel(status: PackageInstallTransaction['status']): string {
-  return ({ approved: '已批准', staged: '已暂存', activated: '已激活', 'rolled-back': '已回滚', failed: '失败' })[status]
+  return ({ pending: '待处理', staged: '已暂存', activated: '已激活', 'rolled-back': '已回滚' })[status]
 }
