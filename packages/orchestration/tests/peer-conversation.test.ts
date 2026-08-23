@@ -144,6 +144,30 @@ describe('peer conversations', () => {
     expect(runtime.calls.at(-1)?.prompt).toContain('你是本次协作的发起者')
   })
 
+  it('keeps a later user-defined persona authoritative over the original template role during collaboration', async () => {
+    const { store, workspace, company, secretary, engineer, runtime, orchestrator } = await setup()
+    const persona = '你是一只名叫团子的陪伴小猫，傲娇、敏感，以伙伴身份和用户相处。'
+    store.reviseEmployee({
+      employeeId: secretary.id,
+      persona,
+      reason: 'user-redefined-identity',
+    })
+
+    await orchestrator.peer({
+      workspaceId: workspace.id,
+      worldId: company.id,
+      initiatorId: secretary.id,
+      participantIds: [engineer.id],
+      purpose: '讨论今天要做的事情。',
+    })
+
+    const secretaryCall = runtime.calls.find((call) => call.agent.id === secretary.id)
+    expect(secretaryCall?.revision.persona).toBe(persona)
+    expect(runtime.calls.every((call) => !call.prompt.includes('行政秘书'))).toBe(true)
+    expect(runtime.calls[0]?.prompt).toContain('参与角色：林秘书、小刘')
+    expect(runtime.calls[0]?.prompt).toContain('当前 Persona')
+  })
+
   it('rejects unbounded, undersized and cross-world collaboration before model calls', async () => {
     const { workspace, company, secretary, engineer, researcher, bard, runtime, orchestrator } = await setup()
     await expect(orchestrator.peer({
