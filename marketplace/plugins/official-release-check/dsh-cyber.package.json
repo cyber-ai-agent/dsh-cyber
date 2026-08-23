@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "official-release-check",
+  "version": "1.0.0",
+  "kind": "plugin",
+  "displayName": "发布检查",
+  "summary": "在任意世界输入 /发布检查，按阻断、建议和已通过检查目标、证据、风险与回滚。",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "publisher": "DSH Cyber",
+  "capabilities": [
+    "prompt:transform"
+  ],
+  "dataEgress": [],
+  "files": [
+    {
+      "path": "release-check.json",
+      "sha256": "fb65675ccb23d7ce43a09f980797adf26a7e52994f4bbeb60d54066243bbe56f"
+    }
+  ],
+  "entrypoints": [
+    {
+      "id": "release-check",
+      "kind": "prompt-transform",
+      "path": "release-check.json"
+    }
+  ],
+  "certification": {
+    "authority": "DSH Cyber",
+    "level": "official",
+    "contentSha256": "d361c5dfe16862d2ec771d2ac9b18ce6b658bcfa3ab5590e94f34f7ab0c58a30"
+  }
+}

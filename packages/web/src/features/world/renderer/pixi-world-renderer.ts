@@ -246,7 +246,8 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
   }
 
   zoomBy(delta: number): void {
-    this.#zoom = clamp(this.#zoom + delta, this.#minimumZoomForCoverage(), WORLD_MAX_ZOOM)
+    const coverageZoom = this.#minimumZoomForCoverage()
+    this.#zoom = clamp(this.#zoom + delta, coverageZoom, Math.max(WORLD_MAX_ZOOM, coverageZoom))
     this.#applyCamera()
   }
 
@@ -487,9 +488,7 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
   #minimumZoomForCoverage(): number {
     if (!this.#scene || !this.#host || this.#fitScale <= 0) return WORLD_MIN_ZOOM
     const bounds = this.#scene.cameraBounds ?? { x: 0, y: 0, width: this.#scene.size.width, height: this.#scene.size.height }
-    const widthZoom = this.#host.clientWidth / Math.max(1, bounds.width * this.#fitScale)
-    const heightZoom = this.#host.clientHeight / Math.max(1, bounds.height * this.#fitScale)
-    return clamp(Math.max(WORLD_MIN_ZOOM, widthZoom, heightZoom), WORLD_MIN_ZOOM, WORLD_MAX_ZOOM)
+    return minimumCoverageZoom(this.#host.clientWidth, this.#host.clientHeight, bounds.width, bounds.height, this.#fitScale)
   }
 
   #clampCameraOffset(scale: number): void {
@@ -514,6 +513,15 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
     this.#camera.scale.set(scale)
     this.#camera.position.set(this.#cameraOffset.x, this.#cameraOffset.y)
   }
+}
+
+export function minimumCoverageZoom(viewportWidth: number, viewportHeight: number, sceneWidth: number, sceneHeight: number, fitScale: number): number {
+  const widthZoom = viewportWidth / Math.max(1, sceneWidth * fitScale)
+  const heightZoom = viewportHeight / Math.max(1, sceneHeight * fitScale)
+  // Coverage is a layout invariant, not a user zoom preference. Very tall or
+  // very wide panes (notably the world pane on 4K displays) can require more
+  // than the normal interactive zoom ceiling to avoid letterboxing.
+  return Math.max(WORLD_MIN_ZOOM, widthZoom, heightZoom)
 }
 
 function loadImage(source: string): Promise<HTMLImageElement> {

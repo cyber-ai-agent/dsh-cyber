@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "transforms": [{
+    "id": "release-check", "trigger": "/release-check", "description": "在交付前执行风险与证据检查。",
+    "instruction": "你正在使用全局插件“发布检查”。对当前交付执行发布前审查：目标是否满足、关键证据、缺失验证、隐私与安全风险、可回滚性、面向用户的变更说明。按“阻断 / 建议 / 已通过”分组；不得把未执行的测试标记为已通过。",
+    "mode": "prepend", "priority": 92
+  }]
+}

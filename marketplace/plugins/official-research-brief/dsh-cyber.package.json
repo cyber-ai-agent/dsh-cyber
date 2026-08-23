@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "official-research-brief",
+  "version": "1.0.0",
+  "kind": "plugin",
+  "displayName": "研究简报",
+  "summary": "在任意世界输入 /研究简报，把问题整理为结论、证据、不确定性和下一步验证。",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "publisher": "DSH Cyber",
+  "capabilities": [
+    "prompt:transform"
+  ],
+  "dataEgress": [],
+  "files": [
+    {
+      "path": "research-brief.json",
+      "sha256": "b92fc2632612a873ef5579c85292a983ebec046a8146afca98e286e26ca9a2aa"
+    }
+  ],
+  "entrypoints": [
+    {
+      "id": "research-brief",
+      "kind": "prompt-transform",
+      "path": "research-brief.json"
+    }
+  ],
+  "certification": {
+    "authority": "DSH Cyber",
+    "level": "official",
+    "contentSha256": "2d73b457c877adb061f63a03a7bc21c3b01e09c8702e85a008f4c983c9ea86c9"
+  }
+}

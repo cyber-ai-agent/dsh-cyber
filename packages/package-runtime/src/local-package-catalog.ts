@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { lstat, readFile, readdir } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 
 import type {
   CyberMarketKind,
@@ -63,6 +63,25 @@ export class LocalPackageCatalog {
     return items.find((item) => item.manifest.id === packageId && (version === undefined || item.manifest.version === version))
   }
 
+  async readDeclaredFile(item: CyberMarketPackage, relativePath: string): Promise<Buffer> {
+    const declared = item.manifest.files.find((file) => file.path === relativePath)
+    if (declared === undefined || !safeRelativePath(relativePath)) {
+      throw new Error(`Marketplace file is not declared: ${relativePath}`)
+    }
+    const packageRoot = resolve(item.sourceDirectory)
+    if (packageRoot !== this.#root && !packageRoot.startsWith(`${this.#root}${sep}`)) {
+      throw new Error('Marketplace package escaped the catalog root')
+    }
+    const absolutePath = resolve(packageRoot, ...relativePath.split('/'))
+    if (!absolutePath.startsWith(`${packageRoot}${sep}`)) throw new Error('Marketplace file escaped its package root')
+    const metadata = await lstat(absolutePath)
+    if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error('Marketplace file is not a regular file')
+    const body = await readFile(absolutePath)
+    const digest = createHash('sha256').update(body).digest('hex')
+    if (digest !== declared.sha256) throw new Error('Marketplace file hash mismatch')
+    return body
+  }
+
   async #scanMarket(market: CyberMarketKind): Promise<CyberMarketPackage[]> {
     const marketRoot = join(this.#root, MARKET_DIRECTORIES[market])
     let directories
@@ -117,6 +136,11 @@ function kindMatchesMarket(manifest: CyberPackageManifest, market: CyberMarketKi
   if (market === 'theme') return manifest.kind === 'world-theme'
   if (market === 'talent') return manifest.kind === 'employee-blueprint' || manifest.kind === 'skill'
   return manifest.kind === 'plugin' || manifest.kind === 'asset' || manifest.kind === 'model-provider'
+}
+
+function safeRelativePath(value: string): boolean {
+  if (!value || value.includes('\\') || value.startsWith('/') || /^[A-Za-z]:/.test(value)) return false
+  return value.split('/').every((part) => part !== '' && part !== '.' && part !== '..' && !part.startsWith('.'))
 }
 
 function isMissingFile(error: unknown): boolean {

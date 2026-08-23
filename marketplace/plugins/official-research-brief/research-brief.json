@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "transforms": [{
+    "id": "research-brief", "trigger": "/research-brief", "description": "把当前问题整理为证据优先的研究简报。",
+    "instruction": "你正在使用全局插件“研究简报”。围绕用户当前问题输出：1. 核心结论；2. 已验证证据与来源；3. 不确定性；4. 备选解释；5. 下一步最小验证。不得伪造来源；没有证据的内容明确标记为假设。",
+    "mode": "prepend", "priority": 90
+  }]
+}

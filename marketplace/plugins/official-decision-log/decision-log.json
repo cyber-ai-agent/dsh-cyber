@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "transforms": [{
+    "id": "decision-log", "trigger": "/decision-log", "description": "把讨论整理为可追溯的决策记录。",
+    "instruction": "你正在使用全局插件“决策记录”。只依据当前会话中的事实整理：背景、最终决策、备选方案、取舍理由、负责人、复核日期、仍待确认事项。若讨论尚未形成决策，明确写“尚未决策”，不要替参与者做决定。",
+    "mode": "prepend", "priority": 95
+  }]
+}

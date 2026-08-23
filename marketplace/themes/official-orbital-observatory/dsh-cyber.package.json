@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "official-orbital-observatory",
+  "version": "1.0.0",
+  "kind": "world-theme",
+  "displayName": "远星观测站 · 蓝环轨道",
+  "summary": "面向探索与研究的轨道观测世界，包含星图沙盘、深空望远镜、样本舱和对接控制台，并配套八种科研角色皮肤。",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "publisher": "DSH Cyber",
+  "capabilities": [
+    "world:render"
+  ],
+  "dataEgress": [],
+  "files": [
+    {
+      "path": "theme.json",
+      "sha256": "3eb922490f40bc1b7043e1a4efa46ff1267d5075dba41b4c72a2df8d34e6a121"
+    },
+    {
+      "path": "assets/orbital-observatory-world.png",
+      "sha256": "de8b14c8c569b8ba86c06d7d0192855b2e82cf19d8508f2098b4711b23660dcc"
+    },
+    {
+      "path": "assets/orbital-observatory-roster.png",
+      "sha256": "6d826866bbadbdfaedc14c9daf1bcded6d8071cf5ec7f5fc94960cc75bed1f15"
+    }
+  ],
+  "entrypoints": [
+    {
+      "id": "orbital-observatory-theme",
+      "kind": "world-theme",
+      "path": "theme.json"
+    }
+  ],
+  "certification": {
+    "authority": "DSH Cyber",
+    "level": "official",
+    "contentSha256": "3c1b6a1cd76a0bb1a33656854938ad97cc2dd92529af6db1bbeef487d3a89d95"
+  }
+}

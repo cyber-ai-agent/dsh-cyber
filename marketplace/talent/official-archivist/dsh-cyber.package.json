@@ -18,6 +18,10 @@
     {
       "path": "archivist.json",
       "sha256": "9d4d93f1005a519cfae214a3e42ef9964923e76eced09fb6ec14e9edfe5c5ad7"
+    },
+    {
+      "path": "preview.png",
+      "sha256": "f3c427dcb9c6ddb30b0e69b0890567900f7b6caf9b0f527232bebf4fd63e32fd"
     }
   ],
   "entrypoints": [
@@ -30,6 +34,6 @@
   "certification": {
     "authority": "DSH Cyber",
     "level": "official",
-    "contentSha256": "379b89b3746af6581ffc3b81ca3d1a63f999c7d9f7b9551f081911da36561688"
+    "contentSha256": "fc720572a1013047b8954d4c275f90b50007428abe2a558996b93f73fc0a826e"
   }
 }

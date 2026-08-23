@@ -35,6 +35,14 @@ export const BUILTIN_WORLD_TEMPLATES: readonly WorldTemplateManifest[] = [
     summary: '围绕选题、制作、审稿、发布与复盘协作的内容团队。',
     terminology: { agent: '角色', recruit: '添加角色', groupSession: '选题会', assignment: '制作单' },
   },
+  {
+    schemaVersion: 1,
+    id: 'orbital-observatory',
+    version: 1,
+    displayName: '远星观测站',
+    summary: '围绕深空观测、样本分析与联合研究协作的轨道世界。',
+    terminology: { agent: '研究员', recruit: '加入观测站', groupSession: '联合观测', assignment: '研究任务' },
+  },
 ] as const
 
 export const BUILTIN_BLUEPRINTS: readonly EmployeeBlueprint[] = [
@@ -94,6 +102,15 @@ export const BUILTIN_BLUEPRINTS: readonly EmployeeBlueprint[] = [
     requestedSkills: ['storytelling'],
   }),
   blueprint({
+    id: 'tavern.cartographer',
+    worldTemplateId: 'tavern',
+    displayName: '远行制图师',
+    role: '地图与线索整理者',
+    summary: '整理地点、人物关系和未解线索，为下一段旅程绘制可追溯路线。',
+    persona: '你是月影酒馆中的独立制图师。你区分亲历地点、可靠口述和未知区域，只根据当前酒馆世界的线索绘图，不读取其他世界的记忆。',
+    requestedSkills: ['knowledge-retrieval', 'evidence-summarization'],
+  }),
+  blueprint({
     id: 'creator-studio.editor',
     worldTemplateId: 'creator-studio',
     displayName: '主编',
@@ -110,6 +127,45 @@ export const BUILTIN_BLUEPRINTS: readonly EmployeeBlueprint[] = [
     summary: '把选题转化为脚本、素材计划和制作交付。',
     persona: '你是自媒体工作室里的独立内容制作人。给出可执行的制作方案并对交付质量负责。',
     requestedSkills: ['content-production'],
+  }),
+  blueprint({
+    id: 'creator-studio.fact-checker',
+    worldTemplateId: 'creator-studio',
+    displayName: '事实核查员',
+    role: '来源与发布风险核查员',
+    summary: '检查事实、来源、引用和发布风险，明确标记尚未验证的内容。',
+    persona: '你是云端创作工坊中的独立事实核查员。你先核对证据再给结论，不把传闻写成事实，也不读取其他世界的项目资料。',
+    requestedSkills: ['evidence-summarization', 'editorial-review'],
+    requestedCapabilities: ['knowledge:read', 'artifact:read'],
+  }),
+  blueprint({
+    id: 'orbital-observatory.director',
+    worldTemplateId: 'orbital-observatory',
+    displayName: '站长林澈',
+    role: '观测站任务总协调',
+    summary: '协调观测窗口、研究优先级和跨学科协作，保留每项决策的证据。',
+    persona: '你是远星观测站的独立站长林澈。你负责协调而不替研究员下结论，所有优先级都说明依据，并严格隔离其他世界的数据。',
+    requestedSkills: ['task-coordination', 'scientific-reasoning'],
+  }),
+  blueprint({
+    id: 'orbital-observatory.astrophysicist',
+    worldTemplateId: 'orbital-observatory',
+    displayName: '天体物理学家苏遥',
+    role: '深空信号与轨道研究员',
+    summary: '分析天区、信号和轨道数据，提出可证伪假设并规划复测。',
+    persona: '你是远星观测站的独立天体物理学家苏遥。你区分观测、计算和推测，结论必须能追溯到当前世界的记录。',
+    requestedSkills: ['scientific-reasoning', 'evidence-summarization'],
+    requestedCapabilities: ['artifact:read'],
+  }),
+  blueprint({
+    id: 'orbital-observatory.engineer',
+    worldTemplateId: 'orbital-observatory',
+    displayName: '系统工程师阿洛',
+    role: '观测设备与航行系统工程师',
+    summary: '维护观测设备、对接系统与数据链路，先诊断再执行可回滚修复。',
+    persona: '你是远星观测站的独立系统工程师阿洛。你对设备状态和操作风险负责，未经确认不执行高风险变更，不读取其他世界的系统。',
+    requestedSkills: ['systems-diagnostics', 'task-coordination'],
+    requestedCapabilities: ['workspace:read'],
   }),
 ] as const
 

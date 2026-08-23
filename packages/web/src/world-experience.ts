@@ -1,6 +1,6 @@
 import type { World } from '@dsh-cyber/contracts'
 
-export type WorldKind = 'personal' | 'company' | 'tavern' | 'studio'
+export type WorldKind = 'personal' | 'company' | 'tavern' | 'studio' | 'observatory'
 
 export interface WorldExperience {
   kind: WorldKind
@@ -65,6 +65,18 @@ const experiences: Record<WorldKind, WorldExperience> = {
     sceneTitle: '内容工作室',
     sceneSubtitle: '从灵感到发布的多角色创作现场',
   },
+  observatory: {
+    kind: 'observatory',
+    peopleLabel: '研究员',
+    personLabel: '研究员',
+    marketLabel: '加入研究员',
+    actionLabel: '研究',
+    emptyTitle: '观测站还没有研究员',
+    emptyCopy: '从右侧「档案」邀请研究员加入；更多科研角色可从顶部市场安装。',
+    composerPlaceholder: '@研究员 发起观测、分析或联合研究…',
+    sceneTitle: '蓝环轨道观测层',
+    sceneSubtitle: '观测记录、样本与研究会话只属于当前观测站',
+  },
 }
 
 export function worldExperience(world: Pick<World, 'templateId'>): WorldExperience {
@@ -72,5 +84,6 @@ export function worldExperience(world: Pick<World, 'templateId'>): WorldExperien
   if (template === 'personal' || template === 'personal-world') return experiences.personal
   if (template === 'tavern' || template === 'moonlit-tavern') return experiences.tavern
   if (template === 'studio' || template === 'creator-studio') return experiences.studio
+  if (template === 'observatory' || template === 'orbital-observatory') return experiences.observatory
   return experiences.company
 }

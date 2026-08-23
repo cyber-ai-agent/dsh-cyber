@@ -9,16 +9,18 @@ import { writeJson } from '../http/response.js'
 import { loadInstalledBlueprints } from '../installed-package-runtime.js'
 import type { CharacterSkillRuntime } from '../services/character-skill-runtime.js'
 import { CreativeWorkshopService } from '../services/creative-workshop-service.js'
+import type { WorldMarketplaceService } from '../services/world-marketplace-service.js'
 
 export interface PackageRoutesDependencies {
   store: SqliteStore
   packageManager: PackageManager
   packageCatalog: LocalPackageCatalog
   skillRuntime: CharacterSkillRuntime
+  worldMarketplace: WorldMarketplaceService
 }
 
 export function registerPackageRoutes(router: Router, dependencies: PackageRoutesDependencies): void {
-  const { store, packageManager, packageCatalog, skillRuntime } = dependencies
+  const { store, packageManager, packageCatalog, skillRuntime, worldMarketplace } = dependencies
   const workshop = new CreativeWorkshopService(store, packageManager)
 
   router.get(/^\/api\/workspaces\/([^/]+)\/packages$/, ({ response, params }) => {
@@ -85,6 +87,16 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
       for (const blueprint of await loadInstalledBlueprints([installed])) store.saveBlueprint(blueprint)
     }
     writeJson(response, 201, { installed })
+  })
+
+  router.post(/^\/api\/workspaces\/([^/]+)\/marketplace\/worlds$/, async ({ request, response, params }) => {
+    const body = await readJson(request)
+    const result = await worldMarketplace.createFromInstalledTheme({
+      workspaceId: params[0]!,
+      packageId: requiredString(body, 'packageId'),
+      name: requiredString(body, 'name'),
+    })
+    writeJson(response, 201, result)
   })
 
   router.get(/^\/api\/workspaces\/([^/]+)\/workshop\/projects$/, async ({ response, params }) => {

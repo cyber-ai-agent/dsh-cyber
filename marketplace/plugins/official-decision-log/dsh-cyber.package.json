@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "official-decision-log",
+  "version": "1.0.0",
+  "kind": "plugin",
+  "displayName": "决策记录",
+  "summary": "在任意世界输入 /决策记录，把讨论沉淀为背景、方案、取舍、负责人和复核日期。",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "publisher": "DSH Cyber",
+  "capabilities": [
+    "prompt:transform"
+  ],
+  "dataEgress": [],
+  "files": [
+    {
+      "path": "decision-log.json",
+      "sha256": "0736b8986477e3545603f3b4a1046bcd3c47dde2b63c1029e3c7c3c240ab6a77"
+    }
+  ],
+  "entrypoints": [
+    {
+      "id": "decision-log",
+      "kind": "prompt-transform",
+      "path": "decision-log.json"
+    }
+  ],
+  "certification": {
+    "authority": "DSH Cyber",
+    "level": "official",
+    "contentSha256": "5da94dc73518e6142b371f0f6a402e11552a7de1d22a7109e73a2df9003d640c"
+  }
+}

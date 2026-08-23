@@ -115,7 +115,7 @@ export default function App() {
   const [recruitmentOpen, setRecruitmentOpen] = useState(false)
   const [groupDialogOpen, setGroupDialogOpen] = useState(false)
   const [packageMarketOpen, setPackageMarketOpen] = useState(false)
-  const [packageMarketKind, setPackageMarketKind] = useState<CyberMarketKind>('plugin')
+  const [packageMarketKind, setPackageMarketKind] = useState<CyberMarketKind>('theme')
   const [marketplaceItems, setMarketplaceItems] = useState<CyberMarketPackage[]>([])
   const [installedPackages, setInstalledPackages] = useState<InstalledPackage[]>([])
   const [packageTransactions, setPackageTransactions] = useState<PackageInstallTransaction[]>([])
@@ -226,22 +226,18 @@ export default function App() {
     await loadWorld(target)
   }, [loadWorld, workspace])
 
-  const bindWorldTheme = useCallback(async (packageId: string) => {
-    if (activeWorld === undefined) throw new Error('世界尚未就绪')
-    if (demoMode) {
-      setWorldRuntimeAvailable(true)
-      setAppMode('world')
-      setWorldRuntimeRevision((value) => value + 1)
-      return
-    }
-    await api(`/api/worlds/${encodeURIComponent(activeWorld.id)}/theme-binding`, {
-      method: 'PUT',
-      body: JSON.stringify({ action: 'bind', packageId }),
+  const createWorldFromTheme = useCallback(async (item: CyberMarketPackage, name: string) => {
+    if (workspace === undefined) throw new Error('工作区尚未就绪')
+    if (demoMode) throw new Error('演示模式不会写入新世界，请在本地工作区中创建')
+    const result = await api<{ world: World }>(`/api/workspaces/${workspace.id}/marketplace/worlds`, {
+      method: 'POST',
+      body: JSON.stringify({ packageId: item.manifest.id, name }),
     })
-    setWorldRuntimeAvailable(true)
-    setAppMode('world')
-    setWorldRuntimeRevision((value) => value + 1)
-  }, [activeWorld])
+    const snapshot = await api<WorkspaceSnapshot>(`/api/workspaces/${workspace.id}/snapshot`)
+    setWorlds(snapshot.worlds)
+    setPackageMarketOpen(false)
+    await loadWorld(result.world)
+  }, [loadWorld, workspace])
 
   useEffect(() => {
     if (demoMode) return
@@ -395,7 +391,7 @@ export default function App() {
     setMarketplaceItems(result.items)
   }, [workspace])
 
-  const openPackageMarket = useCallback(async (market: CyberMarketKind = 'plugin') => {
+  const openPackageMarket = useCallback(async (market: CyberMarketKind = 'theme') => {
     setPackageMarketKind(market)
     setPackageMarketOpen(true)
     setPackageLoading(true)
@@ -1145,7 +1141,7 @@ export default function App() {
         />
         <nav aria-label="全局功能">
           <CreativeWorkshopLauncher workspaceId={workspace.id} onCreated={(project) => void openWorkshopWorld(project.worldId)} onOpenWorld={(worldId) => void openWorkshopWorld(worldId)} />
-          <button type="button" onClick={() => void openPackageMarket(packageMarketKind)}><Storefront size={16} />市场</button>
+          <button type="button" onClick={() => void openPackageMarket('theme')}><Storefront size={16} />市场</button>
           <button type="button" onClick={() => { setSettingsSection('maintenance'); setSettingsOpen(true) }}><Pulse size={16} /><span>系统状态</span><i className="health-indicator" />良好</button>
           <button type="button" onClick={() => { setSettingsSection('appearance'); setSettingsOpen(true) }}><GearSix size={17} />设置</button>
         </nav>
@@ -1293,7 +1289,6 @@ export default function App() {
           items={marketplaceItems}
           installed={installedPackages}
           transactions={packageTransactions}
-          employees={employees}
           loading={packageLoading}
           installing={packageInstalling}
           onClose={() => setPackageMarketOpen(false)}
@@ -1302,7 +1297,7 @@ export default function App() {
           onSearch={searchMarketplace}
           onPreviewMarketplace={previewMarketplacePackage}
           onInstallMarketplace={installMarketplacePackage}
-          onBindTheme={bindWorldTheme}
+          onCreateThemeWorld={createWorldFromTheme}
         />
       ) : null}
       {worldSettingsOpen && activeWorld !== undefined && worldSettings !== undefined && worldAccess !== undefined ? <WorldSettingsDialog world={activeWorld} value={worldSettings} access={worldAccess} models={models} saving={savingSettings} onClose={()=>setWorldSettingsOpen(false)} onSave={async (value)=>{ setSavingSettings(true); try { const result = await api<{settings:WorldSettings}>(`/api/worlds/${activeWorld.id}/settings`, { method:'PUT', body:JSON.stringify(value) }); setWorldSettings(result.settings); setReasoningEffort(result.settings.model.reasoningEffort); setPermissionMode(result.settings.runtime.permissionMode); applyWorldAppearance(result.settings) } finally { setSavingSettings(false) } }} onSetPassword={async(password)=>{ const result=await api<{access:WorldAccessSummary}>(`/api/worlds/${activeWorld.id}/access/password`,{method:'POST',body:JSON.stringify({password})});setWorldAccess(result.access)}} onClearPassword={async()=>{const result=await api<{access:WorldAccessSummary}>(`/api/worlds/${activeWorld.id}/access/password`,{method:'DELETE'});setWorldAccess(result.access)}} onLock={async()=>{await api(`/api/worlds/${activeWorld.id}/access/lock`,{method:'POST',body:'{}'});setWorldSettingsOpen(false);setLockedWorld(activeWorld)}} /> : null}
