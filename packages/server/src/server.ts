@@ -55,6 +55,8 @@ import { WorldAmbientStateProvider } from './services/world-ambient-state-provid
 import { WorldFileService } from './services/world-file-service.js'
 import { WorldRootService } from './services/world-root-service.js'
 import { WorldSettingsService } from './services/world-settings-service.js'
+import { createBuiltinSkillRegistry } from './skills/builtin-skill-registry.js'
+import type { CharacterSkillAdapterRegistry } from './skills/skill-adapter.js'
 import { RuntimeStreamHub } from './streams/runtime-stream-hub.js'
 import { WorldStreamHub } from './streams/world-stream-hub.js'
 import { validateStagedPackageEntrypoints } from './installed-package-runtime.js'
@@ -71,6 +73,7 @@ export interface CyberServerOptions {
   port?: number
   runtime?: AgentRuntimePort
   packageRuntime?: PackageRuntimePort
+  skillRegistry?: CharacterSkillAdapterRegistry
   marketplaceRoot?: string
   bootstrapDefaultWorld?: boolean
 }
@@ -173,7 +176,8 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     settings: ambientLifeSettings,
     service: ambientLifeRuntime,
   })
-  const skillRuntime = new CharacterSkillRuntime(store)
+  const skillRegistry = options.skillRegistry ?? createBuiltinSkillRegistry()
+  const skillRuntime = new CharacterSkillRuntime(store, { registry: skillRegistry })
   const runtimeUpdates = new RuntimeUpdateService(store, stateRoot, workspaceRoot)
   const assets = new AssetService(store, stateRoot)
   const worldFiles = new WorldFileService(worldRoots)
