@@ -47,6 +47,7 @@ import type {
 import { ApiError, api } from './api.js'
 import { ArtifactDock } from './components/ArtifactDock.js'
 import { ChatWorkbench } from './components/ChatWorkbench.js'
+import { CreativeWorkshopLauncher } from './components/CreativeWorkshopLauncher.js'
 import { EmployeeManagementDialog } from './components/EmployeeManagementDialog.js'
 import { GroupConversationDialog } from './components/GroupConversationDialog.js'
 import { NavigationPane } from './components/NavigationPane.js'
@@ -1096,9 +1097,8 @@ export default function App() {
           onExplore={() => void openPackageMarket('theme')}
         />
         <nav aria-label="全局功能">
-          <button type="button" onClick={() => void openPackageMarket('theme')}><Buildings size={16} />主题市场</button>
-          <button type="button" onClick={() => void openPackageMarket('plugin')}><Cube size={16} />插件市场</button>
-          <button type="button" onClick={() => void openPackageMarket('talent')}><Storefront size={16} />角色市场</button>
+          <CreativeWorkshopLauncher workspaceId={workspace.id} onCreated={() => window.location.reload()} />
+          <button type="button" onClick={() => void openPackageMarket(packageMarketKind)}><Storefront size={16} />市场</button>
           <button type="button" onClick={() => { setSettingsSection('runtime'); setSettingsOpen(true) }}><Pulse size={16} /><span>运行时健康</span><i className="health-indicator" />良好</button>
           <button type="button" onClick={() => { setSettingsSection('appearance'); setSettingsOpen(true) }}><GearSix size={17} />设置</button>
         </nav>
@@ -1144,8 +1144,8 @@ export default function App() {
             onSend={send}
             onUploadAttachment={uploadChatAttachment}
             onOpenDossier={(employeeId) => void openDossier(employeeId)}
-            onOpenArtifact={() => { setAppMode('workbench'); setDockCollapsed(false); setDockTab('preview') }}
-            onRecruit={() => void openRecruitment()}
+            onOpenArtifact={() => { setAppMode('world'); setDockCollapsed(false); setDockTab('world') }}
+            onRecruit={() => { setSelectedEmployeeId(undefined); setDockCollapsed(false); setDockTab('dossier') }}
           />
         )}
         right={(
@@ -1188,7 +1188,6 @@ export default function App() {
           }
           createGroupIntent({ employeeIds: selected.map((employee) => employee.id), title: selected.map((employee) => employee.displayName).join('、') })
         }}
-                  onRecruit={() => void openRecruitment()}
                 />
               ),
             } : {})}
