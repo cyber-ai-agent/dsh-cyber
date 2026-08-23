@@ -1,5 +1,6 @@
 import type {
   EmbodimentPresetDescriptor,
+  EmbodimentProfile,
   WorkshopCreateInput,
   WorkshopProject,
 } from '@dsh-cyber/contracts/creative-platform'
@@ -10,7 +11,8 @@ export interface WorkshopRoleDraft {
   role: string
   summary: string
   persona: string
-  embodimentPresetId: string
+  embodimentPresetId?: string
+  embodiment: EmbodimentProfile
   requestedSkillIds: string[]
 }
 
@@ -24,25 +26,26 @@ export interface WorkshopDraft {
 
 export function createEmptyWorkshopDraft(
   baseTemplateId: string,
-  presetId: string,
+  preset: EmbodimentPresetDescriptor,
 ): WorkshopDraft {
   return {
     displayName: '',
     baseTemplateId,
     lore: '',
     scenario: '',
-    roles: [createRoleDraft(1, presetId)],
+    roles: [createRoleDraft(1, preset)],
   }
 }
 
-export function createRoleDraft(index: number, presetId: string): WorkshopRoleDraft {
+export function createRoleDraft(index: number, preset: EmbodimentPresetDescriptor): WorkshopRoleDraft {
   return {
-    clientId: `draft-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`,
+    clientId: `draft-${index}-${crypto.randomUUID()}`,
     displayName: '',
     role: '',
     summary: '',
     persona: '',
-    embodimentPresetId: presetId,
+    embodimentPresetId: preset.id,
+    embodiment: structuredClone(preset.profile),
     requestedSkillIds: [],
   }
 }
@@ -51,47 +54,41 @@ export function projectToDraft(
   project: WorkshopProject,
   presets: readonly EmbodimentPresetDescriptor[],
 ): WorkshopDraft {
-  const fallback = presets[0]?.id ?? 'general'
   return {
     displayName: `${project.displayName} 副本`,
     baseTemplateId: project.baseTemplateId,
     lore: project.lore,
     scenario: project.scenario,
     roles: project.roles.map((role, index) => ({
-      clientId: `clone-${Date.now()}-${index}`,
+      clientId: `clone-${index}-${crypto.randomUUID()}`,
       displayName: role.displayName,
       role: role.role,
       summary: role.summary,
       persona: role.persona,
-      embodimentPresetId: findPresetId(role.embodiment, presets) ?? fallback,
+      ...(findPresetId(role.embodiment, presets) === undefined
+        ? {}
+        : { embodimentPresetId: findPresetId(role.embodiment, presets)! }),
+      embodiment: structuredClone(role.embodiment),
       requestedSkillIds: [...role.requestedSkillIds],
     })),
   }
 }
 
-export function draftToCreateInput(
-  draft: WorkshopDraft,
-  presets: readonly EmbodimentPresetDescriptor[],
-): WorkshopCreateInput {
-  const presetMap = new Map(presets.map((preset) => [preset.id, preset]))
+export function draftToCreateInput(draft: WorkshopDraft): WorkshopCreateInput {
   return {
     displayName: draft.displayName.trim(),
     baseTemplateId: draft.baseTemplateId,
     lore: draft.lore.trim(),
     scenario: draft.scenario.trim(),
-    roles: draft.roles.map((role, index) => {
-      const preset = presetMap.get(role.embodimentPresetId)
-      if (preset === undefined) throw new Error(`角色 ${index + 1} 的具身语义预设已不可用，请重新选择`)
-      return {
-        id: `role-${index + 1}`,
-        displayName: role.displayName.trim(),
-        role: role.role.trim(),
-        summary: role.summary.trim(),
-        persona: role.persona.trim(),
-        embodiment: structuredClone(preset.profile),
-        requestedSkillIds: [...role.requestedSkillIds],
-      }
-    }),
+    roles: draft.roles.map((role, index) => ({
+      id: `role-${index + 1}`,
+      displayName: role.displayName.trim(),
+      role: role.role.trim(),
+      summary: role.summary.trim(),
+      persona: role.persona.trim(),
+      embodiment: structuredClone(role.embodiment),
+      requestedSkillIds: [...role.requestedSkillIds],
+    })),
   }
 }
 
@@ -114,7 +111,7 @@ function findPresetId(
   return presets.find((preset) => semanticProfileEquals(profile, preset.profile))?.id
 }
 
-function semanticProfileEquals(left: WorkshopProject['roles'][number]['embodiment'], right: WorkshopProject['roles'][number]['embodiment']): boolean {
+function semanticProfileEquals(left: EmbodimentProfile, right: EmbodimentProfile): boolean {
   return stable(left) === stable(right)
 }
 
