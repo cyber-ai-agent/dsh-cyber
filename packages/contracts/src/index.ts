@@ -1,9 +1,15 @@
-export const CYBER_SCHEMA_VERSION = 12 as const
+export const CYBER_SCHEMA_VERSION = 13 as const
 
 export type IsoTimestamp = string
 export type JsonPrimitive = boolean | number | string | null
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue }
 export type JsonObject = { [key: string]: JsonValue }
+
+export type {
+  EmbodimentPresetDescriptor,
+  EmbodimentProfile,
+  EmbodimentSocialPolicy,
+} from './embodiment.js'
 
 export type ReasoningEffort = 'auto' | 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
@@ -212,6 +218,7 @@ export interface EmployeeBlueprint {
   persona: string
   requestedSkills: string[]
   requestedCapabilities: string[]
+  embodiment?: import('./embodiment.js').EmbodimentProfile
   createdAt: IsoTimestamp
 }
 
