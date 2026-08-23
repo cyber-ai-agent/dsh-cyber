@@ -3,16 +3,22 @@ import {
   GearSix,
   PushPin,
   PushPinSlash,
+  Sparkle,
   Trash,
   UsersThree,
 } from '@phosphor-icons/react'
-import { useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import type { WorkSession, World } from '@dsh-cyber/contracts'
 import type { ConversationHubItem } from '@dsh-cyber/contracts/creative-platform'
 
 import { api } from '../api.js'
 import type { CyberEmployee, SessionParticipantMap } from '../types.js'
 import { Avatar } from './Avatar.js'
+
+const CreativeWorkshopDialog = lazy(async () => {
+  const module = await import('./CreativeWorkshopDialog.js')
+  return { default: module.CreativeWorkshopDialog }
+})
 
 interface NavigationPaneProps {
   world: World
@@ -41,6 +47,7 @@ export function NavigationPane({
 }: NavigationPaneProps) {
   const [hubItems, setHubItems] = useState<ConversationHubItem[]>()
   const [error, setError] = useState<string>()
+  const [workshopOpen, setWorkshopOpen] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -114,8 +121,22 @@ export function NavigationPane({
       </section>
 
       <footer className="world-settings-entry">
+        <button type="button" onClick={() => setWorkshopOpen(true)}><Sparkle size={17} /><span>创意工坊</span></button>
         <button type="button" onClick={onWorldSettings}><GearSix size={17} /><span>世界设置</span></button>
       </footer>
+
+      {workshopOpen ? (
+        <Suspense fallback={null}>
+          <CreativeWorkshopDialog
+            workspaceId={world.workspaceId}
+            onClose={() => setWorkshopOpen(false)}
+            onCreated={() => {
+              setWorkshopOpen(false)
+              window.location.reload()
+            }}
+          />
+        </Suspense>
+      ) : null}
     </div>
   )
 }
