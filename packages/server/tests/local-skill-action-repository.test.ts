@@ -48,6 +48,24 @@ describe('LocalSkillActionRepository', () => {
     expect((await repository.listByWorld(scheduled.worldId))[0]).toMatchObject({ status: 'executed', detail: 'done' })
   })
 
+  it('round-trips an outcome-unknown action without turning it into a retryable failure', async () => {
+    const { repository } = await setup()
+    const uncertain: CharacterSkillAction = {
+      ...sampleAction(),
+      status: 'outcome-unknown',
+      risk: 'external-side-effect',
+      detail: '外部动作结果未知；不得自动重试',
+    }
+
+    await repository.reserve(uncertain, 60_000)
+
+    expect((await repository.listByWorld(uncertain.worldId))[0]).toMatchObject({
+      status: 'outcome-unknown',
+      risk: 'external-side-effect',
+      detail: '外部动作结果未知；不得自动重试',
+    })
+  })
+
   it('reads the legacy v1 local action format without losing scheduled work', async () => {
     const { path, repository } = await setup()
     await mkdir(dirname(path), { recursive: true })
