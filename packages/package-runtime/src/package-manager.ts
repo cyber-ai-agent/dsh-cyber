@@ -28,6 +28,7 @@ export interface PackageRuntimePort {
 
 export interface PackageStorePort {
   getActivePackage(workspaceId: string, packageId: string): InstalledPackage | undefined
+  getPackageInstallTransaction(transactionId: string): PackageInstallTransaction | undefined
   beginPackageInstall(input: {
     workspaceId: string
     manifest: CyberPackageManifest
@@ -232,11 +233,29 @@ export class PackageManager {
     }
   }
 
+  /**
+   * Idempotently compensate one previously activated install.
+   *
+   * Crash recovery may replay compensation after the filesystem or DB half of a
+   * rollback already completed. The durable transaction is authoritative: a
+   * rolled-back transaction is already safe, while any other non-activated
+   * state is not a valid compensation target.
+   */
   async compensate(
     installation: ReversiblePackageInstallation,
     errorCode: string,
     actorId = 'system',
   ): Promise<void> {
+    const transaction = this.#store.getPackageInstallTransaction(installation.transactionId)
+    if (transaction?.status === 'rolled-back') return
+    if (transaction === undefined || transaction.status !== 'activated') {
+      throw new Error(`Package install transaction cannot be compensated from ${transaction?.status ?? 'missing'}`)
+    }
+
+    // LocalPackageRuntime.rollback is intentionally idempotent: restoring the
+    // previous pointer twice and force-removing an already removed install path
+    // are both safe. This closes the crash window between filesystem rollback
+    // and SQLite compensation.
     await this.#runtime.rollback(installation.receipt)
     this.#store.compensateActivatedPackageInstall({
       transactionId: installation.transactionId,
