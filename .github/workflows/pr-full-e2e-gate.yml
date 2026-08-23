@@ -1,5 +1,6 @@
 name: PR Full E2E Gate
 
+# Temporary merge gate for Creative Platform V1.
 on:
   pull_request:
     branches: [main]
