@@ -9,7 +9,7 @@ import type {
   World,
 } from '@dsh-cyber/contracts'
 
-export type DockTab = 'world' | 'dossier' | 'files' | 'preview'
+export type DockTab = 'world' | 'trace' | 'dossier'
 
 export interface ConversationIntent {
   kind: 'direct' | 'group'
@@ -35,21 +35,4 @@ export interface WorkbenchData {
   preferences: WorkspacePreferences
   modelProfiles: ModelProfile[]
   dossiers: Record<string, EmployeeDossier>
-}
-
-export interface ToolStep {
-  id: string
-  label: string
-  target: string
-  status: 'complete' | 'running' | 'failed'
-  duration?: string
-}
-
-export interface LiveAgentTurn {
-  agentId: string
-  sessionId: string
-  status: 'thinking' | 'working' | 'completed' | 'failed'
-  reasoning: string
-  text: string
-  tools: ToolStep[]
 }

@@ -20,7 +20,7 @@ import type {
 } from '@dsh-cyber/contracts'
 
 import { ChatWorkbench } from '../../components/ChatWorkbench.js'
-import type { CyberEmployee, LiveAgentTurn } from '../../types.js'
+import type { CyberEmployee } from '../../types.js'
 import { WorldCanvas } from './WorldCanvas.js'
 import { EmployeeInteractionMenu, ObjectInteractionMenu } from './WorldInteractionMenu.js'
 import { useWorldClient } from './world-client-store.js'
@@ -32,7 +32,6 @@ interface WorldModeProps {
   employees: CyberEmployee[]
   session?: WorkSession
   messages: WorkMessage[]
-  liveTurns: LiveAgentTurn[]
   sending: boolean
   draft: string
   selectedEmployeeId?: string
@@ -52,7 +51,6 @@ export function WorldMode({
   employees,
   session,
   messages,
-  liveTurns,
   sending,
   draft,
   selectedEmployeeId,
@@ -250,7 +248,6 @@ export function WorldMode({
           {...(session === undefined ? {} : { session })}
           messages={messages}
           employees={employees}
-          liveTurns={liveTurns}
           sending={sending}
           draft={draft}
           onDraftChange={onDraftChange}

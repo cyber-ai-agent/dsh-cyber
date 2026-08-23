@@ -59,9 +59,11 @@ test('onboards, recruits from dossier, talks, browses dossiers and keeps file su
   await composer.fill('@阿帆 请确认真实回合')
   await page.getByRole('button', { name: '发送' }).click()
   await expect(page.getByText('我先建立性能基线。').first()).toBeVisible()
-  await page.getByText('阿帆的思考过程').first().click()
-  await expect(page.getByText('核对事实与权限。').first()).toBeVisible()
-  await expect(page.getByText('search_workspace').first()).toBeVisible()
+  await dock.getByRole('button', { name: '轨迹', exact: true }).click()
+  await expect(dock.locator('.world-trace-item').filter({ hasText: '角色已完成本轮处理' })).toBeVisible()
+  await expect(dock.locator('.world-trace-item').filter({ hasText: '核对事实与权限。' })).toBeVisible()
+  await expect(dock.locator('.world-trace-item').filter({ hasText: 'search_workspace' }).first()).toBeVisible()
+  await expect(page.getByText('阿帆的思考过程')).toHaveCount(0)
 
   const localWorkspace = server.store.listWorkspaces()[0]!
   const localWorld = server.store.listWorlds(localWorkspace.id)[0]!
@@ -317,7 +319,7 @@ test('opens the dossier as an all-employee information directory', async ({ page
   await expect(dock.getByText('32', { exact: true })).toBeVisible()
 })
 
-test('clears the composer instantly, shows the owner message on screen, and keeps the thinking trace visible during and after a turn', async ({ page }) => {
+test('keeps chat conversational while World Trace explains execution during and after a turn', async ({ page }) => {
   // 用慢速回合重建 server，留出窗口断言“进行中”状态
   await server.close()
   server = await createCyberServer({
@@ -353,6 +355,10 @@ test('clears the composer instantly, shows the owner message on screen, and keep
     await expect(page.getByRole('button', { name: '与阿帆私聊' })).toBeVisible()
   }
   await directButton.first().click()
+  const traceWorld = server.store.listWorlds(server.store.listWorkspaces()[0]!.id)[0]!
+  const traceEmployee = server.store.listEmployees(traceWorld.id).find((employee) => employee.displayName === '阿帆')!
+  const taskTraceBefore = await (await fetch(`${origin}/api/worlds/${traceWorld.id}/trace?category=task&actorId=${traceEmployee.id}&limit=200`)).json() as { items: Array<{ id: string; status: string; summary: string }> }
+  const agentTraceBefore = await (await fetch(`${origin}/api/worlds/${traceWorld.id}/trace?category=agent&actorId=${traceEmployee.id}&limit=200`)).json() as typeof taskTraceBefore
   const composer = page.getByRole('textbox', { name: '给当前世界的角色发送消息' })
   await expect(composer).toBeEnabled()
   const ownerText = '任务：验证乐观发送与实时思考展示'
@@ -364,29 +370,58 @@ test('clears the composer instantly, shows the owner message on screen, and keep
   // 2) 用户消息立即上屏，不依赖 chat 响应返回
   await expect(page.locator('.message--owner').filter({ hasText: ownerText })).toBeVisible()
 
-  // 3) 思考过程在回合进行中明显可见（turn.started → reasoning → tool 逐条到达）
-  await expect(page.locator('.live-turns-block')).toBeVisible()
-  await expect(page.locator('.live-turn--live')).toBeVisible()
-  await expect(page.locator('.live-turn__badge')).toHaveText('实时')
-  await expect(page.locator('.live-turn__reasoning').filter({ hasText: '核对事实与权限。' })).toBeVisible()
-  await expect(page.locator('.tool-step').filter({ hasText: 'search_workspace' })).toBeVisible()
+  // 3) 执行过程只进入右侧轨迹中心，聊天不再混入推理和工具事件
+  await page.getByRole('button', { name: '轨迹' }).click()
+  await expect(page.locator('.world-trace-panel')).toBeVisible()
+  await expect(page.locator('.world-trace-item').filter({ hasText: '角色开始处理请求' })).toBeVisible()
+  await expect(page.locator('.world-trace-item').filter({ hasText: 'search_workspace' }).first()).toBeVisible()
+  await expect(page.locator('.live-turns-block')).toHaveCount(0)
+  await expect(page.locator('.reasoning-message')).toHaveCount(0)
+  await expect(page.locator('.tool-event-message')).toHaveCount(0)
 
   // 视觉证据：思考过程进行中的三个视口截图（供视觉审批使用）
   await page.setViewportSize({ width: 1_920, height: 1_080 })
-  await page.screenshot({ path: join(process.cwd(), 'artifacts', 'ui-world-conversations', 'live-turns-1920x1080.png') })
+  await page.screenshot({ path: join(process.cwd(), 'artifacts', 'ui-world-conversations', 'world-trace-1920x1080.png') })
   await page.setViewportSize({ width: 1_440, height: 900 })
-  await page.screenshot({ path: join(process.cwd(), 'artifacts', 'ui-world-conversations', 'live-turns-1440x900.png') })
+  await page.screenshot({ path: join(process.cwd(), 'artifacts', 'ui-world-conversations', 'world-trace-1440x900.png') })
   await page.setViewportSize({ width: 3_840, height: 2_160 })
-  await page.screenshot({ path: join(process.cwd(), 'artifacts', 'ui-world-conversations', 'live-turns-3840x2160.png') })
+  await page.screenshot({ path: join(process.cwd(), 'artifacts', 'ui-world-conversations', 'world-trace-3840x2160.png') })
   await page.setViewportSize({ width: 1_584, height: 992 })
 
-  // 4) 回合结束后 liveTurns 保留一段时间，不立即清空
-  await expect(page.locator('.live-turn--completed')).toBeVisible()
-  await expect(page.locator('.live-turn--completed').filter({ hasText: '核对事实与权限。' })).toBeVisible()
+  // 4) 回合结束后同一稳定轨迹更新为完成，不追加重复生命周期卡片
+  await expect.poll(async () => {
+    const current = await (await fetch(`${origin}/api/worlds/${traceWorld.id}/trace?category=agent&actorId=${traceEmployee.id}&limit=200`)).json() as typeof agentTraceBefore
+    return current.items.filter((entry) => entry.summary.includes('本轮处理')).length
+  }).toBe(agentTraceBefore.items.filter((entry) => entry.summary.includes('本轮处理')).length + 1)
+  const agentTraceAfter = await (await fetch(`${origin}/api/worlds/${traceWorld.id}/trace?category=agent&actorId=${traceEmployee.id}&limit=200`)).json() as typeof agentTraceBefore
+  expect(agentTraceAfter.items.filter((entry) => entry.summary.includes('本轮处理'))).toHaveLength(
+    agentTraceBefore.items.filter((entry) => entry.summary.includes('本轮处理')).length + 1,
+  )
+  await expect(page.locator('.world-trace-item').filter({ hasText: '角色已完成本轮处理' }).filter({ hasText: '阿帆' }).last()).toBeVisible()
+  await expect.poll(async () => {
+    const current = await (await fetch(`${origin}/api/worlds/${traceWorld.id}/trace?category=task&actorId=${traceEmployee.id}&limit=200`)).json() as typeof taskTraceBefore
+    return current.items.length
+  }).toBe(taskTraceBefore.items.length + 1)
+  await expect.poll(async () => {
+    const current = await (await fetch(`${origin}/api/worlds/${traceWorld.id}/trace?category=task&actorId=${traceEmployee.id}&limit=200`)).json() as typeof taskTraceBefore
+    return current.items.at(-1)?.status
+  }).toBe('success')
+  await expect(page.locator('.world-trace-item').filter({ hasText: '真实任务已完成' }).filter({ hasText: '阿帆' }).last()).toBeVisible()
+  const taskTraceAfter = await (await fetch(`${origin}/api/worlds/${traceWorld.id}/trace?category=task&actorId=${traceEmployee.id}&limit=200`)).json() as typeof taskTraceBefore
+  expect(taskTraceAfter.items).toHaveLength(taskTraceBefore.items.length + 1)
+  expect(taskTraceAfter.items.at(-1)?.status).toBe('success')
+
+  // 5) 模型执行失败不撤回已经持久化的用户消息；失败原因只进入提示与轨迹
+  const failedOwnerText = '模拟失败：这条用户消息必须保留在聊天中'
+  await composer.fill(failedOwnerText)
+  await page.getByRole('button', { name: '发送' }).click()
+  await expect(page.getByRole('alert')).toContainText('API 密钥被模型服务拒绝')
+  await expect(page.locator('.message--owner').filter({ hasText: failedOwnerText })).toBeVisible()
+  await expect(page.locator('.world-trace-item').filter({ hasText: '角色本轮处理失败' })).toBeVisible()
 
   // 视觉审批证据：记录控制台 error/warn，并断言无未捕获页面错误
   await writeFile(
-    join(process.cwd(), 'artifacts', 'ui-world-conversations', 'live-turns-console.log'),
+    join(process.cwd(), 'artifacts', 'ui-world-conversations', 'world-trace-console.log'),
     `[pageerror]\n${pageErrors.join('\n')}\n\n[console]\n${consoleEntries.join('\n')}\n`,
     'utf8',
   )
@@ -506,6 +541,12 @@ class BrowserRuntime implements AgentRuntimePort {
 
   async runTurn(request: AgentTurnRequest) {
     const agentSessionId = request.agent.agentSessionId ?? `agent-${request.agent.id}`
+    if (request.prompt.includes('模拟失败')) {
+      request.onEvent?.({ kind: 'turn.started', source: 'browser-e2e', sourceSessionId: agentSessionId, sourceSequence: 1, metadata: {} })
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, this.eventIntervalMs))
+      request.onEvent?.({ kind: 'turn.failed', source: 'browser-e2e', sourceSessionId: agentSessionId, sourceSequence: 2, metadata: { failure: 'provider-authentication' } })
+      return { agentSessionId, finalResponse: '', eventCount: 2 }
+    }
     const events = [
       { kind: 'turn.started', sourceSequence: 1 },
       { kind: 'assistant.reasoning', sourceSequence: 2, content: '核对事实与权限。' },

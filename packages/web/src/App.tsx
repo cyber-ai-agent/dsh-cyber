@@ -65,9 +65,10 @@ import {
   type SystemActionResult,
 } from './components/SettingsDialog.js'
 import { demoData, demoTavernDossiers, demoTavernEmployees, demoTavernMessages, demoTavernSessions } from './demo-data.js'
-import type { ConversationIntent, CyberEmployee, DockTab, LiveAgentTurn, SessionParticipantMap } from './types.js'
+import type { ConversationIntent, CyberEmployee, DockTab, SessionParticipantMap } from './types.js'
 import { worldExperience } from './world-experience.js'
 import { WorldRuntimeDock } from './features/world/WorldRuntimeDock.js'
+import { WorldTracePanel } from './components/world-trace/WorldTracePanel.js'
 import { WorldSettingsDialog, WorldUnlockDialog } from './components/WorldSettingsDialog.js'
 
 const demoMode = new URLSearchParams(window.location.search).get('demo') === '1'
@@ -96,7 +97,6 @@ export default function App() {
   const [sessionParticipants, setSessionParticipants] = useState<SessionParticipantMap>(() => demoMode ? inferDemoSessionParticipants(demoData.sessions, demoData.messages, demoData.employees) : {})
   const [conversationIntent, setConversationIntent] = useState<ConversationIntent>()
   const [messages, setMessages] = useState<WorkMessage[]>(demoMode ? demoData.messages : [])
-  const [liveTurns, setLiveTurns] = useState<LiveAgentTurn[]>([])
   const [preferences, setPreferences] = useState<WorkspacePreferences | undefined>(demoMode ? demoData.preferences : undefined)
   const [models, setModels] = useState<ModelProfile[]>(demoMode ? demoData.modelProfiles : [])
   const [modelAssignments, setModelAssignments] = useState<ModelAssignment[]>([])
@@ -106,7 +106,6 @@ export default function App() {
   const [dockCollapsed, setDockCollapsed] = useState(false)
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
-  const liveTurnClearTimerRef = useRef<number | undefined>(undefined)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('appearance')
   const [savingSettings, setSavingSettings] = useState(false)
@@ -145,18 +144,6 @@ export default function App() {
   const managingRevision = managingDossier?.revisions.find((revision) => revision.revision === managingEmployee?.currentRevision)
   const supportsWorldRuntime = worldRuntimeV2Enabled && worldRuntimeAvailable
 
-  const clearLiveTurns = useCallback(() => {
-    if (liveTurnClearTimerRef.current !== undefined) {
-      window.clearTimeout(liveTurnClearTimerRef.current)
-      liveTurnClearTimerRef.current = undefined
-    }
-    setLiveTurns([])
-  }, [])
-
-  useEffect(() => () => {
-    if (liveTurnClearTimerRef.current !== undefined) window.clearTimeout(liveTurnClearTimerRef.current)
-  }, [])
-
   const loadWorld = useCallback(async (world: World) => {
     setError(undefined)
     setActiveWorld(world)
@@ -164,7 +151,6 @@ export default function App() {
     setSessionParticipants({})
     setConversationIntent(undefined)
     setMessages([])
-    clearLiveTurns()
     setDraft('')
     setSelectedEmployeeId(undefined)
     setDockTab('world')
@@ -218,7 +204,7 @@ export default function App() {
     setEmployees(snapshot.employees.map((employee, index) => toCyberEmployee(employee, index, nextDossiers[employee.id])))
     setSessions(snapshot.openSessions)
     setSessionParticipants(Object.fromEntries(participantResults))
-  }, [clearLiveTurns])
+  }, [])
 
   const openWorkshopWorld = useCallback(async (worldId: string) => {
     if (workspace === undefined || demoMode) return
@@ -299,7 +285,6 @@ export default function App() {
       try {
         const envelope = JSON.parse(message.data) as RuntimeEnvelope
         if (envelope.worldId !== activeWorld.id) return
-        setLiveTurns((current) => reduceLiveTurn(current, envelope))
         const status = runtimeEmployeeStatus(envelope.event)
         if (status !== undefined) {
           setEmployees((current) => current.map((employee) => employee.id === envelope.agentId
@@ -352,10 +337,9 @@ export default function App() {
       title: `与 ${employee.displayName} 对话`,
     } : undefined)
     if (existing === undefined) setMessages([])
-    clearLiveTurns()
     setDraft('')
     setSelectedEmployeeId(employee.id)
-  }, [clearLiveTurns, sessionParticipants, sessions])
+  }, [sessionParticipants, sessions])
 
   const createGroupIntent = useCallback((input: { title: string; employeeIds: string[] }) => {
     const selected = employees.filter((employee) => input.employeeIds.includes(employee.id))
@@ -363,7 +347,6 @@ export default function App() {
     setGroupDialogOpen(false)
     setActiveSessionId(undefined)
     setMessages([])
-    clearLiveTurns()
     setDraft('')
     setConversationIntent({
       kind: 'group',
@@ -371,7 +354,7 @@ export default function App() {
       title: input.title.trim() || selected.map((employee) => employee.displayName).join('、'),
     })
     setSelectedEmployeeId(selected[0]?.id)
-  }, [clearLiveTurns, employees])
+  }, [employees])
 
   const openRecruitment = useCallback(async () => {
     if (activeWorld === undefined) return
@@ -714,7 +697,6 @@ export default function App() {
   const selectSession = useCallback((sessionId: string) => {
     setConversationIntent(undefined)
     setActiveSessionId(sessionId)
-    clearLiveTurns()
     setDraft('')
     setSelectedEmployeeId(sessionParticipants[sessionId]?.[0])
     if (demoMode) {
@@ -722,16 +704,14 @@ export default function App() {
         ? demoData.messages
         : sessionId === demoTavernSessions[0]?.id ? demoTavernMessages : [])
     }
-  }, [clearLiveTurns, sessionParticipants])
+  }, [sessionParticipants])
 
   const send = useCallback(async (prompt: string, attachments: ChatAttachment[]) => {
     if (activeWorld === undefined) return
     setSending(true)
-    clearLiveTurns()
     // 乐观更新：点击发送瞬间立即清空输入框，不等模型回合结束
     setDraft('')
     setError(undefined)
-    let optimisticOwnerMessage: WorkMessage | undefined
     try {
       const explicitEmployeeIds = conversationIntent?.employeeIds
         ?? (activeSessionId === undefined ? [] : sessionParticipants[activeSessionId] ?? [])
@@ -794,7 +774,6 @@ export default function App() {
         },
         createdAt: new Date().toISOString(),
       }
-      optimisticOwnerMessage = ownerMessage
       setMessages((current) => [...current, ownerMessage])
       const result = await api<ChatResult>(`/api/worlds/${activeWorld.id}/chat`, {
         method: 'POST',
@@ -814,19 +793,14 @@ export default function App() {
       const transcript = await api<{ items: WorkMessage[] }>(`/api/sessions/${result.session.id}/messages`)
       setMessages(transcript.items)
     } catch (cause) {
-      // 回合失败时收回乐观消息，避免 UI 上残留未持久化的用户消息
-      const failedOwnerId = optimisticOwnerMessage?.id
-      if (failedOwnerId !== undefined) {
-        setMessages((current) => current.filter((message) => message.id !== failedOwnerId))
-      }
+      // The orchestrator persists the owner's message before starting the model
+      // turn. Keep that conversational fact visible even when execution fails;
+      // the failure itself is explained by the toast and World Trace.
       setError(cause instanceof Error ? cause.message : '消息发送失败')
     } finally {
       setSending(false)
-      // 回合结束后保留 liveTurns 一段时间，让思考/运行过程不会一闪而过
-      if (liveTurnClearTimerRef.current !== undefined) window.clearTimeout(liveTurnClearTimerRef.current)
-      liveTurnClearTimerRef.current = window.setTimeout(() => setLiveTurns([]), 8_000)
     }
-  }, [activeSession, activeSessionId, activeWorld, clearLiveTurns, conversationIntent, employees, messages.length, sessionParticipants, reasoningEffort])
+  }, [activeSession, activeSessionId, activeWorld, conversationIntent, employees, messages.length, sessionParticipants, reasoningEffort])
 
   const uploadChatAttachment = useCallback(async (file: File): Promise<ChatAttachment> => {
     if (workspace === undefined) throw new Error('请先创建工作区')
@@ -1146,7 +1120,6 @@ export default function App() {
             participantIds={activeParticipantIds}
             messages={messages}
             employees={employees}
-            liveTurns={liveTurns}
             sending={sending}
             draft={draft}
             reasoningEffort={reasoningEffort}
@@ -1191,7 +1164,6 @@ export default function App() {
             setConversationIntent(undefined)
             setSelectedEmployeeId(employeeIds[0])
             setMessages([])
-            clearLiveTurns()
             setAppMode('workbench')
             setDockCollapsed(false)
             setDockTab('world')
@@ -1202,6 +1174,7 @@ export default function App() {
                 />
               ),
             } : {})}
+            traceContent={<WorldTracePanel key={activeWorld.id} world={activeWorld} employees={employees} demoMode={demoMode} />}
             onTabChange={(tab) => { setDockTab(tab); setAppMode(tab === 'world' ? 'world' : 'workbench') }}
             onCollapse={() => setDockCollapsed(true)}
             onSelectEmployee={(employeeId) => void openDossier(employeeId)}
@@ -1543,39 +1516,6 @@ function demoRuntimeTransaction(status: RuntimeUpdateTransaction['status']): Run
     createdAt: timestamp,
     updatedAt: timestamp,
   }
-}
-
-function reduceLiveTurn(current: LiveAgentTurn[], envelope: RuntimeEnvelope): LiveAgentTurn[] {
-  const key = (turn: LiveAgentTurn) => turn.agentId === envelope.agentId && turn.sessionId === envelope.sessionId
-  const existing = current.find(key) ?? {
-    agentId: envelope.agentId,
-    sessionId: envelope.sessionId,
-    status: 'thinking' as const,
-    reasoning: '',
-    text: '',
-    tools: [],
-  }
-  const event = envelope.event
-  let next = existing
-  if (event.kind === 'turn.started') next = { ...next, status: 'thinking' }
-  if (event.kind === 'reasoning.delta' && event.content) next = { ...next, reasoning: `${next.reasoning}${event.content}` }
-  if (event.kind === 'assistant.reasoning' && event.content && !next.reasoning) next = { ...next, reasoning: event.content }
-  if (event.kind === 'text.delta' && event.content) next = { ...next, text: `${next.text}${event.content}` }
-  if (event.kind === 'assistant.message' && event.content && !next.text) next = { ...next, text: event.content }
-  if (event.kind === 'tool.started') {
-    const callId = event.callId ?? `tool-${next.tools.length}`
-    const tool = { id: callId, label: event.toolName ?? '工具调用', target: event.toolName ?? 'unknown-tool', status: 'running' as const }
-    next = { ...next, status: 'working', tools: [...next.tools.filter((item) => item.id !== callId), tool] }
-  }
-  if (event.kind === 'tool.completed') {
-    const callId = event.callId ?? `tool-${next.tools.length}`
-    const found = next.tools.find((item) => item.id === callId)
-    const tool = { id: callId, label: found?.label ?? '工具调用', target: found?.target ?? 'unknown-tool', status: event.failed ? 'failed' as const : 'complete' as const }
-    next = { ...next, status: event.failed ? 'failed' : 'thinking', tools: [...next.tools.filter((item) => item.id !== callId), tool] }
-  }
-  if (event.kind === 'turn.completed') next = { ...next, status: 'completed' }
-  if (event.kind === 'turn.failed') next = { ...next, status: 'failed' }
-  return [...current.filter((turn) => !key(turn)), next]
 }
 
 function runtimeEmployeeStatus(event: AgentRuntimeEvent): EmployeeInstance['status'] | undefined {
