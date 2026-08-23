@@ -1,0 +1,81 @@
+name: Apply current character identity labels
+
+on:
+  push:
+    branches: [feat/creative-world-platform-v1]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/creative-world-platform-v1
+      - name: Make current role label editable without changing blueprint provenance
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          store = Path('packages/persistence/src/sqlite-store.ts')
+          text = store.read_text(encoding='utf-8')
+          replacements = [
+            (
+              "export interface ReviseEmployeeProfileInput {\n  employeeId: string\n  displayName?: string\n  birthday?: string | null",
+              "export interface ReviseEmployeeProfileInput {\n  employeeId: string\n  displayName?: string\n  role?: string\n  birthday?: string | null",
+            ),
+            (
+              "    const displayName = (input.displayName ?? employee.displayName).trim()\n    if (birthday !== undefined) assertBirthday(birthday)\n    if (!displayName) throw new PersistenceError('Employee display name cannot be empty')\n    if (displayName.length > 48) throw new PersistenceError('Employee display name is too long')",
+              "    const displayName = (input.displayName ?? employee.displayName).trim()\n    const role = (input.role ?? employee.role).trim()\n    if (birthday !== undefined) assertBirthday(birthday)\n    if (!displayName) throw new PersistenceError('Employee display name cannot be empty')\n    if (displayName.length > 48) throw new PersistenceError('Employee display name is too long')\n    if (!role) throw new PersistenceError('Character identity label cannot be empty')\n    if (role.length > 100) throw new PersistenceError('Character identity label is too long')",
+            ),
+            (
+              "      if (displayName !== employee.displayName) {\n        this.database\n          .prepare('UPDATE employee_instances SET display_name = ?, updated_at = ? WHERE id = ?')\n          .run(displayName, profile.createdAt, employee.id)\n      }",
+              "      if (displayName !== employee.displayName || role !== employee.role) {\n        this.database\n          .prepare('UPDATE employee_instances SET display_name = ?, role = ?, updated_at = ? WHERE id = ?')\n          .run(displayName, role, profile.createdAt, employee.id)\n      }",
+            ),
+            (
+              "          displayName,\n          identityChanged: displayName !== employee.displayName,",
+              "          displayName,\n          role,\n          identityChanged: displayName !== employee.displayName || role !== employee.role,",
+            ),
+          ]
+          for old, new in replacements:
+            if old not in text:
+              raise SystemExit(f'sqlite-store patch target missing: {old[:80]}')
+            text = text.replace(old, new, 1)
+          store.write_text(text, encoding='utf-8')
+
+          app = Path('packages/web/src/App.tsx')
+          text = app.read_text(encoding='utf-8')
+          replacements = [
+            (
+              "  const updateEmployeeProfile = useCallback(async (input: {\n    displayName: string\n    avatarIndex: number",
+              "  const updateEmployeeProfile = useCallback(async (input: {\n    displayName: string\n    role: string\n    avatarIndex: number",
+            ),
+            (
+              "            displayName: input.displayName,\n            background: input.background,",
+              "            displayName: input.displayName,\n            role: input.role,\n            background: input.background,",
+            ),
+            (
+              "        ? { ...employee, displayName: input.displayName, avatarIndex: input.avatarIndex, updatedAt }",
+              "        ? { ...employee, displayName: input.displayName, role: input.role, avatarIndex: input.avatarIndex, updatedAt }",
+            ),
+            (
+              "          : { ...current, [managingEmployee.id]: { ...dossier, employee: { ...dossier.employee, displayName: input.displayName, updatedAt }, ...(profile === undefined ? {} : { profile }) } }",
+              "          : { ...current, [managingEmployee.id]: { ...dossier, employee: { ...dossier.employee, displayName: input.displayName, role: input.role, updatedAt }, ...(profile === undefined ? {} : { profile }) } }",
+            ),
+          ]
+          for old, new in replacements:
+            if old not in text:
+              raise SystemExit(f'App patch target missing: {old[:80]}')
+            text = text.replace(old, new, 1)
+          app.write_text(text, encoding='utf-8')
+          PY
+      - name: Commit cleanup and remove one-shot workflow
+        run: |
+          rm .github/workflows/apply-current-character-labels.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add packages/persistence/src/sqlite-store.ts packages/web/src/App.tsx .github/workflows/apply-current-character-labels.yml
+          git commit -m "refactor: make character identity labels instance-owned"
+          git push origin HEAD:feat/creative-world-platform-v1
