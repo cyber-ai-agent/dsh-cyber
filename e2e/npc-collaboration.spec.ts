@@ -33,12 +33,11 @@ test('lets one embodied character consult another, shows the real exchange, and 
   await page.getByRole('button', { name: '创建我的世界' }).click()
   await expect(page.locator('.world-runtime-canvas')).toBeVisible()
 
-  await page.locator('.left-pane').getByRole('button', { name: '添加角色' }).click()
-  const market = page.getByRole('dialog', { name: '角色市场' })
-  await market.getByRole('button', { name: /开发工程师 v1/ }).click()
-  await market.getByRole('textbox', { name: '角色名字（可选）' }).fill('阿帆')
-  await market.getByRole('button', { name: '确认添加' }).click()
-  await expect(market).toBeHidden()
+  const workspace = server.store.listWorkspaces()[0]!
+  const world = server.store.listWorlds(workspace.id)[0]!
+  await recruitRole(world.id, 'cyber-company.software-engineer', '阿帆')
+  await page.reload()
+  await expect(page.getByRole('button', { name: '与阿帆私聊' })).toBeVisible()
 
   await page.getByRole('button', { name: '与管家私聊' }).click()
   const characterMenu = page.getByLabel('管家情境操作')
@@ -51,8 +50,6 @@ test('lets one embodied character consult another, shows the real exchange, and 
   await dialog.getByRole('textbox', { name: '角色协作目标' }).fill('向开发工程师确认当前项目进度，并整理成可执行的汇报。')
   await dialog.getByRole('button', { name: '开始真实协作' }).click()
 
-  const workspace = server.store.listWorkspaces()[0]!
-  const world = server.store.listWorlds(workspace.id)[0]!
   const employees = server.store.listEmployees(world.id)
   const butler = employees.find((employee) => employee.displayName === '管家')!
   const engineer = employees.find((employee) => employee.displayName === '阿帆')!
@@ -116,6 +113,15 @@ test('lets one embodied character consult another, shows the real exchange, and 
   expect(finalSnapshot.entities.every((entity) => entity.visualState.activeMeetingId === undefined)).toBe(true)
   expect(new Set(finalSnapshot.entities.map((entity) => entity.visualState.currentSlotId ?? entity.visualState.reservedSlotId)).size).toBe(finalSnapshot.entities.length)
 })
+
+async function recruitRole(worldId: string, blueprintId: string, displayName: string): Promise<void> {
+  const response = await fetch(`${origin}/api/worlds/${worldId}/recruit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ blueprintId, blueprintVersion: 1, displayName }),
+  })
+  expect(response.ok, await response.text()).toBe(true)
+}
 
 class SlowPeerRuntime implements AgentRuntimePort {
   readonly counts = new Map<string, number>()
