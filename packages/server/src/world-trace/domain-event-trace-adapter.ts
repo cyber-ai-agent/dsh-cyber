@@ -122,6 +122,11 @@ function presentDomainEvent(type: DomainEventType, payload: Record<string, unkno
     case 'task.waiting': return { category: 'task', status: 'waiting', summary: '任务正在等待', lifecycle: 'task' }
     case 'task.blocked': return { category: 'task', status: 'failed', summary: '任务已被阻塞', lifecycle: 'task' }
     case 'task.completed': return { category: 'task', status: 'success', summary: '真实任务已完成', lifecycle: 'task' }
+    case 'schedule.created': return { category: 'schedule', status: 'pending', summary: '计划任务已创建' }
+    case 'schedule.updated': return { category: 'schedule', status: 'info', summary: '计划任务已更新' }
+    case 'schedule.run.started': return { category: 'schedule', status: 'running', summary: '计划任务开始执行' }
+    case 'schedule.run.completed': return { category: 'schedule', status: 'success', summary: '计划任务执行完成' }
+    case 'schedule.run.failed': return { category: 'schedule', status: 'failed', summary: '计划任务执行失败' }
     case 'world.interaction.requested': return { category: 'world', status: 'pending', summary: interactionSummary(payload, false) }
     case 'world.interaction.completed': return { category: 'world', status: 'success', summary: interactionSummary(payload, true) }
     case 'world.object.activated': return { category: 'world', status: 'success', summary: '世界对象已激活' }

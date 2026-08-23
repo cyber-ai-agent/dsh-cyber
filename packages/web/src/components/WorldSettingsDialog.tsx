@@ -20,6 +20,7 @@ export function WorldSettingsDialog({ world, value, access, models, saving, onCl
   const [password, setPassword] = useState('')
   const [notice, setNotice] = useState<string>()
   const [error, setError] = useState<string>()
+  const [fullAccessConfirmed, setFullAccessConfirmed] = useState(false)
   const savedRef = useRef(false)
 
   useEffect(() => {
@@ -44,6 +45,10 @@ export function WorldSettingsDialog({ world, value, access, models, saving, onCl
     setError(undefined)
     setNotice(undefined)
     try {
+      if (draft.runtime.permissionMode === 'danger-full-access' && !fullAccessConfirmed) {
+        setError('完整访问可读写当前 Windows 账号能够访问的文件。请先勾选风险确认。')
+        return
+      }
       await onSave(draft)
       savedRef.current = true
       setNotice('世界设置已保存')
@@ -109,8 +114,9 @@ export function WorldSettingsDialog({ world, value, access, models, saving, onCl
             <legend><SlidersHorizontal size={16}/> 模型与运行</legend>
             <label>世界默认模型<select value={draft.model.defaultModelProfileId ?? ''} onChange={(event)=>setDraft({...draft,model:event.target.value ? {...draft.model,defaultModelProfileId:event.target.value} : {reasoningEffort:draft.model.reasoningEffort}})}><option value="">继承全局或角色设置</option>{models.map((model)=><option key={model.id} value={model.id}>{model.displayName} · {model.modelId}</option>)}</select></label>
             <label>默认推理<select value={draft.model.reasoningEffort} onChange={(event)=>setDraft({...draft,model:{...draft.model,reasoningEffort:event.target.value as ReasoningEffort}})}>{reasoningOptions.map(([id,label])=><option key={id} value={id}>{label}</option>)}</select></label>
-            <label>任务权限<select value={draft.runtime.permissionMode} onChange={(event)=>setDraft({...draft,runtime:{permissionMode:event.target.value as AgentPermissionMode}})}><option value="read-only">只读：允许查看和搜索文件</option><option value="workspace-write">执行：允许调用工具并修改当前世界文件</option></select></label>
-            <p className="setting-help">权限只应用于当前世界。切换后，下次对话会使用新的运行环境。</p>
+            <label>任务权限<select value={draft.runtime.permissionMode} onChange={(event)=>{ const permissionMode=event.target.value as AgentPermissionMode; setDraft({...draft,runtime:{permissionMode}}); if(permissionMode!=='danger-full-access') setFullAccessConfirmed(false) }}><option value="read-only">只读：查看和搜索当前世界文件</option><option value="workspace-write">世界读写：修改当前世界目录</option><option value="danger-full-access">完整访问：读写此电脑上可访问的文件</option></select></label>
+            {draft.runtime.permissionMode === 'danger-full-access' ? <label className="permission-risk-confirm"><input type="checkbox" checked={fullAccessConfirmed} onChange={(event)=>setFullAccessConfirmed(event.target.checked)}/><span><strong>我确认允许角色访问当前世界目录之外的文件</strong><small>这是 DSH 原生完整访问模式。只用于当前世界的手动任务；持久化计划不会使用此权限。</small></span></label> : null}
+            <p className="setting-help">权限只应用于当前世界，下次对话生效。需要跨目录工作时使用完整访问，并在任务中写明目标路径。</p>
           </fieldset>
 
           <fieldset>

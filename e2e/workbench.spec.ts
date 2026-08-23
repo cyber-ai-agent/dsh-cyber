@@ -124,10 +124,10 @@ test('runs direct and group conversations with real world lifecycle, persistence
   await dock.getByRole('button', { name: '档案', exact: true }).click()
   await dock.getByRole('article').filter({ hasText: '阿帆' }).getByRole('button', { name: /完整档案/ }).click()
   await dock.getByRole('button', { name: '事迹', exact: true }).click()
-  await expect(dock.getByText('完成一次有工具证据的任务').first()).toBeVisible()
+  await expect(dock.getByText(/完成任务：任务：实现可恢复的世界状态/).first()).toBeVisible()
   await expect(dock.getByText(/search_workspace/).first()).toBeVisible()
   await dock.getByRole('button', { name: '日志', exact: true }).click()
-  await expect(dock.getByText(/当日已完成 \d+ 次有真实记录的会话或任务/)).toBeVisible()
+  await expect(dock.getByText(/当日参与 \d+ 轮交流与任务/)).toBeVisible()
   await dock.getByRole('button', { name: '世界', exact: true }).click()
 
   const meetingStartedBefore = server.store.listWorldDomainEvents(worldId).filter((event) => event.type === 'meeting.started').length
@@ -200,6 +200,29 @@ test('runs direct and group conversations with real world lifecycle, persistence
   await expect(dock.getByText('全角色数字档案', { exact: true })).toBeVisible()
   await expect(dock.getByRole('button', { name: '文件', exact: true })).toHaveCount(0)
   await expect(dock.getByRole('button', { name: '预览', exact: true })).toHaveCount(0)
+})
+
+test('creates a durable safe schedule, runs it once, and restores it after reload', async ({ page }) => {
+  await page.goto(origin)
+  const schedulesTab = page.getByRole('button', { name: '计划', exact: true })
+  await schedulesTab.click()
+  const panel = page.getByRole('region', { name: '计划任务' })
+  await panel.getByRole('button', { name: '新建计划' }).click()
+  await panel.getByLabel('计划名称').fill('E2E 每日交付摘要')
+  await panel.getByLabel('任务内容').fill('任务：汇总今日交付并给出下一步。')
+  await panel.getByLabel('任务权限').selectOption('workspace-write')
+  await panel.getByRole('button', { name: '保存计划' }).click()
+  await expect(panel.getByText('E2E 每日交付摘要')).toBeVisible()
+  await expect(panel.getByText('当前世界读写', { exact: true })).toBeVisible()
+
+  await page.reload()
+  await page.getByRole('button', { name: '计划', exact: true }).click()
+  const restored = page.getByRole('region', { name: '计划任务' }).getByText('E2E 每日交付摘要')
+  await expect(restored).toBeVisible()
+  const scheduleRow = page.getByRole('region', { name: '计划任务' }).locator('li').filter({ hasText: 'E2E 每日交付摘要' })
+  await scheduleRow.getByRole('button', { name: '立即运行' }).click()
+  await expect(scheduleRow.getByText('已完成', { exact: true })).toBeVisible()
+  await expect.poll(() => server.store.database.prepare("SELECT COUNT(*) AS count FROM task_schedule_runs WHERE status = 'completed'").get() as { count: number }).toMatchObject({ count: 1 })
 })
 
 test('keeps the workbench readable and the world viewport filled on a 4K display', async ({ page }) => {

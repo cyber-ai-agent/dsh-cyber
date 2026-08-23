@@ -25,6 +25,7 @@ export class EmployeeActivityProjectionService {
   project(employeeId: string): void {
     const employee = this.#store.getEmployee(employeeId)
     if (employee === undefined) return
+    this.#store.removeLegacyConversationMilestones(employee.id)
 
     const completedTurns = this.#store.listWorldDomainEvents(employee.worldId)
       .filter((event) => event.type === 'turn.completed' && event.actorId === employee.id && event.sessionId !== undefined)
@@ -40,11 +41,11 @@ export class EmployeeActivityProjectionService {
       if (messages.length === 0) continue
       const presentation = turnPresentation(employee.displayName, messages)
 
-      if (!projectedMilestoneEvents.has(event.id)) {
+      if (presentation.milestone !== undefined && !projectedMilestoneEvents.has(event.id)) {
         this.#store.appendEmployeeMilestone({
           employeeId: employee.id,
           category: 'task',
-          title: presentation.title,
+          title: presentation.milestone.title,
           summary: presentation.summary,
           sourceEventIds: [event.id],
           sourceMessageIds: messages.map((message) => message.id),
@@ -60,11 +61,14 @@ export class EmployeeActivityProjectionService {
           .find((journal) => journal.localDate === localDate)
         const sourceEventIds = unique([...(previous?.sourceEventIds ?? []), event.id])
         const sourceMessageIds = unique([...(previous?.sourceMessageIds ?? []), ...messages.map((message) => message.id)])
-        const highlights = unique([...(previous?.highlights ?? []), presentation.highlight]).slice(-12)
+        const highlights = unique([...(previous?.highlights ?? []), presentation.highlight]).slice(-6)
+        const toolCount = sourceMessageIds
+          .map((messageId) => this.#store.listMessages(event.sessionId!).find((message) => message.id === messageId))
+          .filter((message) => message?.kind === 'tool-call').length
         this.#store.writeEmployeeJournal({
           employeeId: employee.id,
           localDate,
-          summary: `${employee.displayName} 当日已完成 ${sourceEventIds.length} 次有真实记录的会话或任务。`,
+          summary: `${employee.displayName} 当日参与 ${sourceEventIds.length} 轮交流与任务${toolCount > 0 ? `，留下 ${toolCount} 项工具调用证据` : ''}。重点已按主题聚合，不把每轮对话单列为事迹。`,
           highlights,
           sourceEventIds,
           sourceMessageIds,
@@ -89,7 +93,7 @@ function turnMessages(messages: WorkMessage[], event: DomainEvent): WorkMessage[
 }
 
 function turnPresentation(employeeName: string, messages: WorkMessage[]): {
-  title: string
+  milestone?: { title: string }
   summary: string
   highlight: string
 } {
@@ -106,8 +110,12 @@ function turnPresentation(employeeName: string, messages: WorkMessage[]): {
   const toolSummary = tools.length === 0
     ? '未调用外部工具'
     : `${failedTools.length === 0 ? '完成' : '尝试'} ${tools.join('、')} ${tools.length} 项工具调用`
+  const interactionKind = prompt?.metadata.interactionKind
+  const milestone = interactionKind === 'task'
+    ? { title: `完成任务：${request}` }
+    : interactionKind === 'meeting' ? { title: `完成协作：${request}` } : undefined
   return {
-    title: tools.length === 0 ? '完成一次真实对话' : '完成一次有工具证据的任务',
+    ...(milestone === undefined ? {} : { milestone }),
     summary: `回应“${request}”；${toolSummary}。结果：${outcome}`,
     highlight: `${employeeName} · ${request} · ${toolSummary}`,
   }

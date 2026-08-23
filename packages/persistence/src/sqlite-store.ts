@@ -331,6 +331,8 @@ const KNOWN_TABLES = [
   'world_object_states',
   'world_theme_bindings',
   'model_interaction_logs',
+  'task_schedules',
+  'task_schedule_runs',
   'domain_events',
   'sync_outbox',
 ] as const
@@ -1693,6 +1695,16 @@ export class SqliteStore {
       .map(mapEmployeeMilestone)
   }
 
+  removeLegacyConversationMilestones(employeeId: string): number {
+    this.#assertWritable()
+    this.#requireEmployee(employeeId)
+    return Number(this.database.prepare(
+      `DELETE FROM employee_milestones
+       WHERE employee_id = ?
+         AND title IN ('完成一次真实对话', '完成一次有工具证据的任务')`,
+    ).run(employeeId).changes)
+  }
+
   writeEmployeeJournal(input: WriteEmployeeJournalInput): EmployeeDailyJournal {
     this.#assertWritable()
     const employee = this.#requireEmployee(input.employeeId)
@@ -2756,6 +2768,8 @@ export class SqliteStore {
         worldObjectStates: countRows(this.database, 'world_object_states'),
         worldThemeBindings: countRows(this.database, 'world_theme_bindings'),
         modelInteractionLogs: countRows(this.database, 'model_interaction_logs'),
+        taskSchedules: countRows(this.database, 'task_schedules'),
+        taskScheduleRuns: countRows(this.database, 'task_schedule_runs'),
         events: countRows(this.database, 'domain_events'),
         outbox: countRows(this.database, 'sync_outbox'),
       },

@@ -1,4 +1,4 @@
-import { createServer, type Server } from 'node:http'
+import { createServer } from 'node:http'
 import { mkdir, realpath } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -21,6 +21,7 @@ import { dispatchHttpRequest } from './http/context.js'
 import { writeError } from './http/errors.js'
 import { Router } from './http/router.js'
 import { isLoopbackHost } from './http/security.js'
+import { closeServer, listenBrowserSafe } from './http/server-lifecycle.js'
 import { registerAmbientLifeRoutes } from './routes/ambient-life-routes.js'
 import { registerAssetRoutes } from './routes/asset-routes.js'
 import { registerCatalogRoutes } from './routes/catalog-routes.js'
@@ -30,6 +31,7 @@ import { registerModelInteractionRoutes } from './routes/model-interaction-route
 import { registerModelRoutes } from './routes/model-routes.js'
 import { registerPackageRoutes } from './routes/package-routes.js'
 import { registerSystemRoutes } from './routes/system-routes.js'
+import { registerTaskScheduleRoutes } from './routes/task-schedule-routes.js'
 import { registerWorkspaceFileRoutes } from './routes/workspace-file-routes.js'
 import { registerWorkspaceRoutes } from './routes/workspace-routes.js'
 import { registerWorldRuntimeRoutes } from './routes/world-runtime-routes.js'
@@ -51,6 +53,7 @@ import { ModelInteractionService, TurnInteractionLoggingRuntime } from './servic
 import { PeerCollaborationService } from './services/peer-collaboration-service.js'
 import { RoleAwareAmbientLifeService } from './services/role-aware-ambient-life-service.js'
 import { RuntimeUpdateService } from './services/runtime-update-service.js'
+import { TaskScheduleService } from './services/task-schedule-service.js'
 import { WorldAccessService } from './services/world-access-service.js'
 import { WorldAmbientSlotResolver } from './services/world-ambient-slot-resolver.js'
 import { WorldAmbientStateProvider } from './services/world-ambient-state-provider.js'
@@ -192,6 +195,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const worldTrace = new WorldTraceService({ store, actions: skillActions })
   const employeeActivity = new EmployeeActivityProjectionService(store)
   employeeActivity.projectAll()
+  const taskSchedules = new TaskScheduleService({ store, orchestrator, settings: worldSettings, employeeActivity })
   const runtimeUpdates = new RuntimeUpdateService(store, stateRoot, workspaceRoot)
   const assets = new AssetService(store, stateRoot)
   const worldFiles = new WorldFileService(worldRoots)
@@ -206,6 +210,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerAssetRoutes(router, { store, assets, access: worldAccess })
   registerWorldRoutes(router, { store, worldAccess })
   registerWorldSettingsRoutes(router, { store, settings: worldSettings, access: worldAccess })
+  registerTaskScheduleRoutes(router, { store, schedules: taskSchedules, access: worldAccess })
   registerPackageRoutes(router, { store, packageManager, packageCatalog, skillRuntime })
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
   registerWorldTraceRoutes(router, { store, trace: worldTrace, access: worldAccess })
@@ -235,11 +240,10 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     async start() {
       if (closed) throw new Error('Server is closed')
       if (startedAddress !== undefined) return startedAddress
-      await listen(httpServer, port, host)
-      const address = httpServer.address()
-      if (address === null || typeof address === 'string') throw new Error('Server did not expose a TCP address')
+      const address = await listenBrowserSafe(httpServer, port, host)
       startedAddress = { host, port: address.port, origin: `http://${host}:${address.port}` }
       ambientLifeScheduler.start()
+      taskSchedules.start()
       skillRuntime.start()
       return startedAddress
     },
@@ -248,6 +252,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       if (closed) return
       closed = true
       skillRuntime.close()
+      await taskSchedules.close()
       await ambientLifeScheduler.close()
       unsubscribe()
       runtimeStreamHub.close()
@@ -274,18 +279,4 @@ async function resolveActiveRuntime(store: SqliteStore, runtimeStateRoot: string
 function resolveHarnessRoute(store: SqliteStore, request: AgentTurnRequest): HarnessModelRoute | undefined {
   const profile = store.resolveModelProfile(request.agent.workspaceId, request.agent.worldId, request.agent.id)
   return profile === undefined ? undefined : harnessModelRoute(profile, request.reasoningEffort)
-}
-
-function listen(server: Server, port: number, host: string): Promise<void> {
-  return new Promise((resolvePromise, reject) => {
-    const onError = (error: Error) => { server.off('listening', onListening); reject(error) }
-    const onListening = () => { server.off('error', onError); resolvePromise() }
-    server.once('error', onError)
-    server.once('listening', onListening)
-    server.listen(port, host)
-  })
-}
-
-function closeServer(server: Server): Promise<void> {
-  return new Promise((resolvePromise, reject) => { server.close((error) => (error === undefined ? resolvePromise() : reject(error))) })
 }

@@ -175,7 +175,7 @@ describe('SqliteStore', () => {
       '收到，我先建立基线。',
     ])
     expect(reopened.getEmployee(employee.id)?.agentSessionId).toBe('harness-session-1')
-    expect(reopened.doctor()).toMatchObject({ ok: true, schemaVersion: 13 })
+    expect(reopened.doctor()).toMatchObject({ ok: true, schemaVersion: 14 })
   })
 
   it('writes every domain event and cloud-sync outbox entry atomically', async () => {
@@ -260,7 +260,7 @@ describe('SqliteStore', () => {
     expect(backupStore.getWorkspace(workspace.id)?.name).toBe('赛博公司')
     const exported = JSON.parse(await readFile(exportPath, 'utf8')) as any
     expect(exported.format).toBe('dsh-cyber-export')
-    expect(exported.schemaVersion).toBe(13)
+    expect(exported.schemaVersion).toBe(14)
     expect(exported.workspaces[0].worlds[0].world.id).toBe(world.id)
     expect(exported.workspaces[0].worlds[0].employees[0].employee.id).toBe(employee.id)
     expect(exported.workspaces[0].worlds[0].sessions[0].messages[0].content).toBe('世界内记录')
@@ -573,6 +573,8 @@ describe('SqliteStore', () => {
       DROP TABLE world_entity_states;
       DROP TABLE world_runtime_snapshots;
       DROP TABLE model_interaction_logs;
+      DROP TABLE task_schedule_runs;
+      DROP TABLE task_schedules;
       ALTER TABLE employee_blueprints DROP COLUMN embodiment_json;
       DELETE FROM schema_migrations WHERE version > 2;
       PRAGMA user_version = 2;
@@ -584,7 +586,7 @@ describe('SqliteStore', () => {
     expect(migrated.listWorkspaces()[0]?.name).toBe('迁移前工作区')
     expect(migrated.doctor()).toMatchObject({
       ok: true,
-      schemaVersion: 13,
+      schemaVersion: 14,
       counts: {
         installedPackages: 0,
         packageTransactions: 0,

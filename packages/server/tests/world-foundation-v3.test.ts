@@ -21,5 +21,7 @@ describe('world foundation v3', () => {
     expect((await settings.get('world-b')).runtime.permissionMode).toBe('read-only')
     expect(JSON.parse(await readFile(join(a.rootPath, 'settings.json'), 'utf8')).userIdentity.addressAs).toBe('院长')
     expect(JSON.parse(await readFile(join(a.rootPath, 'settings.json'), 'utf8')).runtime.permissionMode).toBe('workspace-write')
+    const fullAccess = await settings.save('world-a', { runtime: { permissionMode: 'danger-full-access' } })
+    expect(fullAccess.runtime.permissionMode).toBe('danger-full-access')
   })
 })

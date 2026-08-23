@@ -1,4 +1,4 @@
-export const CYBER_SCHEMA_VERSION = 13 as const
+export const CYBER_SCHEMA_VERSION = 14 as const
 
 export type IsoTimestamp = string
 export type JsonPrimitive = boolean | number | string | null
@@ -12,7 +12,45 @@ export type {
 } from './embodiment.js'
 
 export type ReasoningEffort = 'auto' | 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
-export type AgentPermissionMode = 'read-only' | 'workspace-write'
+export type AgentPermissionMode = 'read-only' | 'workspace-write' | 'danger-full-access'
+
+export type TaskScheduleKind = 'once' | 'interval'
+export type TaskScheduleStatus = 'active' | 'paused' | 'completed'
+export type TaskScheduleRunStatus = 'running' | 'completed' | 'failed' | 'skipped'
+
+export interface TaskSchedule {
+  id: string
+  workspaceId: string
+  worldId: string
+  employeeId: string
+  title: string
+  prompt: string
+  kind: TaskScheduleKind
+  scheduledAt: IsoTimestamp
+  everySeconds?: number
+  timeZone: string
+  permissionMode: Exclude<AgentPermissionMode, 'danger-full-access'>
+  status: TaskScheduleStatus
+  nextRunAt?: IsoTimestamp
+  lastRunAt?: IsoTimestamp
+  createdAt: IsoTimestamp
+  updatedAt: IsoTimestamp
+}
+
+export interface TaskScheduleRun {
+  id: string
+  scheduleId: string
+  workspaceId: string
+  worldId: string
+  employeeId: string
+  status: TaskScheduleRunStatus
+  scheduledFor: IsoTimestamp
+  startedAt: IsoTimestamp
+  completedAt?: IsoTimestamp
+  sessionId?: string
+  summary?: string
+  errorCode?: string
+}
 
 export interface WorldSettings {
   schemaVersion: 1
@@ -592,6 +630,11 @@ export const DOMAIN_EVENT_TYPES = [
   'task.waiting',
   'task.blocked',
   'task.completed',
+  'schedule.created',
+  'schedule.updated',
+  'schedule.run.started',
+  'schedule.run.completed',
+  'schedule.run.failed',
   'world.interaction.requested',
   'world.interaction.completed',
   'world.object.activated',
@@ -712,6 +755,8 @@ export interface DatabaseDoctorReport {
     worldObjectStates: number
     worldThemeBindings: number
     modelInteractionLogs: number
+    taskSchedules: number
+    taskScheduleRuns: number
     events: number
     outbox: number
   }

@@ -84,13 +84,14 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     const requestedReasoning = body.reasoningEffort === undefined
       ? worldSettingsValue.model.reasoningEffort
       : requiredEnum<ReasoningEffort>(body, 'reasoningEffort', ['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
-    const permissionMode = body.permissionMode === undefined ? 'read-only' : requiredEnum<AgentPermissionMode>(body, 'permissionMode', ['read-only', 'workspace-write'])
+    const permissionMode = body.permissionMode === undefined ? 'read-only' : requiredEnum<AgentPermissionMode>(body, 'permissionMode', ['read-only', 'workspace-write', 'danger-full-access'])
     const explicitIds = optionalStringArray(body.employeeIds)
     const employeeIds = explicitIds.length > 0 ? explicitIds : mentionedEmployeeIds(prompt, store.listEmployees(world.id))
     if (employeeIds.length === 0) throw new HttpError(422, 'agent_required', '请选择或 @ 至少一个角色')
     const metadata: JsonObject = {
       participantIds: employeeIds,
       permissionMode,
+      interactionKind: body.interactionKind === 'task' || body.interactionKind === 'meeting' ? body.interactionKind : 'chat',
       ...(attachments.length === 0 ? {} : { attachments: attachments.map(chatAttachmentJson) }),
     }
     const title = optionalString(body.title)

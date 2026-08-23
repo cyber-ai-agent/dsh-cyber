@@ -6,7 +6,7 @@ import type { AgentPermissionMode, EmployeeInstance, ReasoningEffort, WorldSetti
 import type { WorldRootService } from './world-root-service.js'
 
 const reasoning = new Set<ReasoningEffort>(['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
-const permissionModes = new Set<AgentPermissionMode>(['read-only', 'workspace-write'])
+const permissionModes = new Set<AgentPermissionMode>(['read-only', 'workspace-write', 'danger-full-access'])
 const COLOR = /^#[0-9a-f]{6}$/i
 
 export class WorldSettingsService {
