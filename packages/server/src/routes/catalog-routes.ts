@@ -1,4 +1,5 @@
 import { BUILTIN_BLUEPRINTS, BUILTIN_WORLD_TEMPLATES } from '@dsh-cyber/catalog'
+import { BUILTIN_EMBODIMENT_PRESETS } from '@dsh-cyber/catalog/creative'
 import type { CyberMarketKind } from '@dsh-cyber/contracts'
 import type { LocalPackageCatalog } from '@dsh-cyber/package-runtime'
 import type { SqliteStore } from '@dsh-cyber/persistence'
@@ -18,6 +19,10 @@ export function registerCatalogRoutes(router: Router, dependencies: CatalogRoute
 
   router.get('/api/catalog/world-templates', ({ response }) => {
     writeJson(response, 200, { items: BUILTIN_WORLD_TEMPLATES })
+  })
+
+  router.get('/api/catalog/embodiment-presets', ({ response }) => {
+    writeJson(response, 200, { items: BUILTIN_EMBODIMENT_PRESETS })
   })
 
   router.get('/api/catalog/blueprints', async ({ response, url }) => {
