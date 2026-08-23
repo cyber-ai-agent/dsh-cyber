@@ -88,10 +88,10 @@ export class HomeAssistantSkillAdapter implements CharacterSkillAdapter {
       return { status: 'executed', detail: `已通过 Home Assistant 执行 ${action.label}` }
     } catch (error) {
       return {
-        status: 'failed',
+        status: 'outcome-unknown',
         detail: error instanceof Error && error.name === 'AbortError'
-          ? 'Home Assistant 执行超时'
-          : '无法连接 Home Assistant，动作未执行',
+          ? 'Home Assistant 请求超时，外部动作结果未知；不得自动重试'
+          : 'Home Assistant 连接中断，外部动作结果未知；不得自动重试',
       }
     } finally {
       clearTimeout(timeout)
