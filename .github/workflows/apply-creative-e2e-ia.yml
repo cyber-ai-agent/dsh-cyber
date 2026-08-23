@@ -1,0 +1,114 @@
+name: Apply creative platform E2E information architecture
+
+on:
+  push:
+    branches:
+      - feat/creative-world-platform-v1
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/creative-world-platform-v1
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Rewrite stale E2E selectors around new product IA
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('e2e/workbench.spec.ts')
+          text = path.read_text(encoding='utf-8')
+
+          text = text.replace(
+            "test('onboards, recruits, talks, browses dossiers and previews a real workspace file', async ({ page }) => {",
+            "test('onboards, recruits from dossier, talks, browses dossiers and keeps file surfaces hidden', async ({ page }) => {",
+            1,
+          )
+
+          recruit_engineer = '''  await page.locator('.left-pane').getByRole('button', { name: '添加角色' }).click()\n  const market = page.getByRole('dialog', { name: '角色市场' })\n  await expect(market).toBeVisible()\n  await market.getByRole('button', { name: /开发工程师 v1/ }).click()\n  await market.getByRole('textbox', { name: '角色名字（可选）' }).fill('阿帆')\n  await market.getByRole('button', { name: '确认添加' }).click()\n\n  await expect(market).toBeHidden()'''
+          replacement_engineer = '''  await createRoleFromDossier(page, /开发工程师 v1/, '阿帆')'''
+          if recruit_engineer not in text:
+              raise SystemExit('first engineer recruit block not found')
+          text = text.replace(recruit_engineer, replacement_engineer, 1)
+
+          recruit_secretary = '''  await page.locator('.left-pane').getByRole('button', { name: '添加角色' }).click()\n  const market = page.getByRole('dialog', { name: '角色市场' })\n  await market.getByRole('button', { name: /秘书 v1/ }).click()\n  await market.getByRole('textbox', { name: '角色名字（可选）' }).fill('小周')\n  await market.getByRole('button', { name: '确认添加' }).click()\n  await expect(market).toBeHidden()'''
+          replacement_secretary = '''  await createRoleFromDossier(page, /秘书 v1/, '小周')'''
+          if recruit_secretary not in text:
+              raise SystemExit('secretary recruit block not found')
+          text = text.replace(recruit_secretary, replacement_secretary, 1)
+
+          old_dock = "page.getByRole('region', { name: '产物与世界侧边栏' })"
+          text = text.replace(old_dock, "page.getByRole('region', { name: '世界与角色档案侧边栏' })")
+
+          old_dossier_open = '''  await page.getByRole('button', { name: '查看阿帆档案' }).click()\n  await expect(dock.getByText('阿帆 / 独立角色档案')).toBeVisible()'''
+          new_dossier_open = '''  await dock.getByRole('button', { name: '档案', exact: true }).click()\n  const engineerCard = dock.getByRole('article').filter({ hasText: '阿帆' })\n  await expect(engineerCard).toBeVisible()\n  await engineerCard.getByRole('button', { name: /完整档案/ }).click()\n  await expect(dock.getByText('阿帆 / 独立角色档案')).toBeVisible()'''
+          if old_dossier_open not in text:
+              raise SystemExit('dossier open block not found')
+          text = text.replace(old_dossier_open, new_dossier_open, 1)
+
+          file_preview = '''  const localWorkspace = server.store.listWorkspaces()[0]!\n  const localWorld = server.store.listWorlds(localWorkspace.id)[0]!\n  const worldFilesRoot = join(stateRoot, 'worlds', encodeURIComponent(localWorld.id), 'files')\n  await mkdir(join(worldFilesRoot, 'docs'), { recursive: true })\n  await writeFile(join(worldFilesRoot, 'docs', 'hello.md'), '# 当前世界文件\\n', 'utf8')\n  await dock.getByRole('button', { name: '文件', exact: true }).click()\n  await dock.getByRole('button', { name: /docs.*目录/ }).click()\n  await dock.getByRole('button', { name: /hello\\.md.*可预览/ }).click()\n  await expect(dock.getByText('当前世界只读预览')).toBeVisible()\n  await expect(dock.getByRole('button', { name: '新标签打开' })).toBeVisible()'''
+          file_backend = '''  const localWorkspace = server.store.listWorkspaces()[0]!\n  const localWorld = server.store.listWorlds(localWorkspace.id)[0]!\n  const worldFilesRoot = join(stateRoot, 'worlds', encodeURIComponent(localWorld.id), 'files')\n  await mkdir(join(worldFilesRoot, 'docs'), { recursive: true })\n  await writeFile(join(worldFilesRoot, 'docs', 'hello.md'), '# 当前世界文件\\n', 'utf8')\n  const fileListing = await (await fetch(`${origin}/api/worlds/${localWorld.id}/files?path=docs`)).json() as { items: Array<{ name: string }> }\n  expect(fileListing.items.map((item) => item.name)).toContain('hello.md')\n  expect(await (await fetch(`${origin}/api/worlds/${localWorld.id}/file?path=docs%2Fhello.md`)).text()).toContain('当前世界文件')\n  await expect(dock.getByRole('button', { name: '文件', exact: true })).toHaveCount(0)\n  await expect(dock.getByRole('button', { name: '预览', exact: true })).toHaveCount(0)'''
+          if file_preview not in text:
+              raise SystemExit('file preview block not found')
+          text = text.replace(file_preview, file_backend, 1)
+
+          file_no_task = '''  await dock.getByRole('button', { name: '文件', exact: true }).click()\n  expect(server.store.getEmployee(engineer.id)?.status).toBe('available')\n  expect(server.store.listWorldDomainEvents(worldId).filter((event) => event.type === 'task.started')).toHaveLength(taskStartedBeforeIntent)\n\n  const taskCompletedBeforeSubmit = server.store.listWorldDomainEvents(worldId).filter((event) => event.type === 'task.completed').length\n  await dock.getByRole('button', { name: '世界', exact: true }).click()'''
+          dossier_no_task = '''  await dock.getByRole('button', { name: '档案', exact: true }).click()\n  expect(server.store.getEmployee(engineer.id)?.status).toBe('available')\n  expect(server.store.listWorldDomainEvents(worldId).filter((event) => event.type === 'task.started')).toHaveLength(taskStartedBeforeIntent)\n\n  const taskCompletedBeforeSubmit = server.store.listWorldDomainEvents(worldId).filter((event) => event.type === 'task.completed').length\n  await dock.getByRole('button', { name: '世界', exact: true }).click()'''
+          if file_no_task not in text:
+              raise SystemExit('file no-task block not found')
+          text = text.replace(file_no_task, dossier_no_task, 1)
+
+          restart_file = '''  await dock.getByRole('button', { name: '文件', exact: true }).click()\n  await expect(dock.getByText('世界根目录')).toBeVisible()'''
+          restart_replacement = '''  await expect(dock.getByRole('button', { name: '文件', exact: true })).toHaveCount(0)\n  await expect(dock.getByRole('button', { name: '预览', exact: true })).toHaveCount(0)'''
+          if restart_file not in text:
+              raise SystemExit('restart file block not found')
+          text = text.replace(restart_file, restart_replacement, 1)
+
+          shared_width = '''  const sharedWidth = (await page.locator('.right-pane').boundingBox())?.width ?? 0\n  await dock.getByRole('button', { name: '文件', exact: true }).click()\n  expect(Math.abs(((await page.locator('.right-pane').boundingBox())?.width ?? 0) - sharedWidth)).toBeLessThan(2)\n  await dock.getByRole('button', { name: '档案', exact: true }).click()\n  expect(Math.abs(((await page.locator('.right-pane').boundingBox())?.width ?? 0) - sharedWidth)).toBeLessThan(2)\n  await dock.getByRole('button', { name: '世界', exact: true }).click()'''
+          shared_replacement = '''  const sharedWidth = (await page.locator('.right-pane').boundingBox())?.width ?? 0\n  await dock.getByRole('button', { name: '档案', exact: true }).click()\n  expect(Math.abs(((await page.locator('.right-pane').boundingBox())?.width ?? 0) - sharedWidth)).toBeLessThan(2)\n  await expect(dock.getByRole('button', { name: '文件', exact: true })).toHaveCount(0)\n  await expect(dock.getByRole('button', { name: '预览', exact: true })).toHaveCount(0)\n  await dock.getByRole('button', { name: '世界', exact: true }).click()'''
+          if shared_width not in text:
+              raise SystemExit('4K shared-width block not found')
+          text = text.replace(shared_width, shared_replacement, 1)
+
+          stress = '''  for (let index = 0; index < 20; index += 1) {\n    await dock.getByRole('button', { name: '文件', exact: true }).click()\n    await expect(page.locator('.world-runtime-canvas')).toHaveCount(0)\n    await dock.getByRole('button', { name: '世界', exact: true }).click()\n    await expect(page.locator('.world-runtime-canvas')).toHaveCount(1)\n  }'''
+          stress_replacement = '''  for (let index = 0; index < 20; index += 1) {\n    await dock.getByRole('button', { name: '档案', exact: true }).click()\n    await expect(page.locator('.world-runtime-canvas')).toHaveCount(0)\n    await dock.getByRole('button', { name: '世界', exact: true }).click()\n    await expect(page.locator('.world-runtime-canvas')).toHaveCount(1)\n  }'''
+          if stress not in text:
+              raise SystemExit('dock stress block not found')
+          text = text.replace(stress, stress_replacement, 1)
+
+          text = text.replace("page.getByRole('dialog', { name: '扩展市场' })", "page.getByRole('dialog', { name: '市场' })")
+          text = text.replace("themeMarket.getByText('主题市场', { exact: true }).first()", "themeMarket.getByRole('button', { name: '主题', exact: true })")
+          text = text.replace("themeMarket.getByRole('button', { name: '关闭扩展市场' })", "themeMarket.getByRole('button', { name: '关闭市场' })")
+
+          conditional = '''    await page.locator('.left-pane').getByRole('button', { name: '添加角色' }).click()\n    const market = page.getByRole('dialog', { name: '角色市场' })\n    await market.getByRole('button', { name: /开发工程师 v1/ }).click()\n    await market.getByRole('textbox', { name: '角色名字（可选）' }).fill('阿帆')\n    await market.getByRole('button', { name: '确认添加' }).click()\n    await expect(market).toBeHidden()\n    await expect(page.getByRole('button', { name: '与阿帆私聊' })).toBeVisible()'''
+          conditional_replacement = '''    await createRoleFromDossier(page, /开发工程师 v1/, '阿帆')\n    await expect(page.getByRole('button', { name: '与阿帆私聊' })).toBeVisible()'''
+          count = text.count(conditional)
+          if count != 2:
+              raise SystemExit(f'expected 2 conditional recruit blocks, found {count}')
+          text = text.replace(conditional, conditional_replacement)
+
+          helper_anchor = '\nclass BrowserRuntime implements AgentRuntimePort {'
+          helper = '''\nasync function createRoleFromDossier(page: import('@playwright/test').Page, blueprint: RegExp, displayName: string) {\n  const dock = page.getByRole('region', { name: '世界与角色档案侧边栏' })\n  await dock.getByRole('button', { name: '档案', exact: true }).click()\n  let add = dock.getByRole('button', { name: '新增角色', exact: true })\n  if (await add.count() === 0) {\n    const back = dock.getByRole('button', { name: '全角色档案', exact: true })\n    if (await back.count() > 0) await back.click()\n    add = dock.getByRole('button', { name: '新增角色', exact: true })\n  }\n  await add.click()\n  const dialog = page.getByRole('dialog', { name: '新增角色' })\n  await expect(dialog).toBeVisible()\n  await dialog.getByRole('button', { name: blueprint }).click()\n  await dialog.getByRole('textbox', { name: '角色名字（可选）' }).fill(displayName)\n  await dialog.getByRole('button', { name: /确认新增|再创建一名/ }).click()\n  await expect(dialog).toBeHidden()\n}\n'''
+          if helper_anchor not in text:
+              raise SystemExit('BrowserRuntime anchor not found')
+          text = text.replace(helper_anchor, helper + helper_anchor, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+      - name: Remove one-shot workflow and commit
+        run: |
+          git rm .github/workflows/apply-creative-e2e-ia.yml
+          git add e2e/workbench.spec.ts
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "test: align browser coverage with creative platform IA"
+          git push origin HEAD:feat/creative-world-platform-v1
