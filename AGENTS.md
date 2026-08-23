@@ -23,6 +23,44 @@
    - 对每个视口逐项记录：图片适配、大段空白、文字对比度、语言一致性、最小字号、文案可读性。
    - 任一项未通过时不得标记视觉验收完成。
 
+## 本地优先与升级安全
+
+- 当前创意工坊、世界、角色、会话、成长档案、Skill 动作与本地资产以用户机器上的 `stateRoot` 为权威数据源。未来服务器能力只能作为可选同步/备份层，不能替代本地所有权。
+- 应用源码目录与 `stateRoot` 必须保持物理和逻辑解耦。默认数据目录继续使用 `%LOCALAPPDATA%\\DSH Cyber`（Windows）或 `~/.dsh-cyber`（macOS/Linux）；禁止默认把用户数据写进 Git 工作树。
+- `git pull`、重新安装依赖、重新构建 Web/CLI、替换内置 Harness bundle 都不得删除、覆盖或重新初始化已有 `stateRoot`。
+- 数据迁移只能做 versioned migration，并必须保持向前迁移、失败可诊断；不得用“重新创建世界/角色”代替迁移。
+- 新增任何持久化目录时，必须同步加入本地 Backup Bundle。当前 Bundle 至少包含：SQLite、`worlds/`、`assets/`、`packages/`、`workshop/`、`skills/`；凭据、运行时二进制、缓存和旧备份继续排除。
+- 升级说明必须先给备份命令，再给 `git pull --ff-only` / install / build / doctor / restart 流程，并明确指出这些命令只更新程序，不触碰 `stateRoot`。
+- 文档中不得建议用户通过删除 `~/.dsh-cyber`、`%LOCALAPPDATA%\\DSH Cyber`、`data/`、`worlds/`、`workshop/` 来解决普通升级问题。
+
+## 世界、角色与 Skill 解耦
+
+- `World` 只负责世界身份、主题/场景能力、文件根、设置与运行时投影；不得根据角色显示名称写业务分支。
+- `EmployeeBlueprint` 只声明角色身份、Persona、请求的 Skill/Capability 与可移植具身语义；角色名称不是权限来源，也不是空间行为来源。
+- `EmbodimentProfile` 只能保存 role/zone/facility/ambient/rig 等语义标签；禁止保存像素坐标、路径、动画帧逻辑或 `role.includes(...)` 之类的运行时判断。
+- `requestedSkills` 与 `skillGrants` 必须保持不同含义：模板和创意工坊只能请求能力，实际授权必须由角色 revision/审批链显式产生。
+- Skill Runtime 只负责授权、路由、调度、持久化与审计。任何 Home Assistant、GitHub、浏览器、飞书等供应商逻辑必须放进独立 `CharacterSkillAdapter`；禁止在核心 Runtime 中继续添加 `if (skillId === ...)`。
+- 一个 Skill ID 只能由一个活动 Adapter 提供；注册冲突必须失败，不能用注册顺序静默覆盖。
+- 第三方包不能拿到 Adapter 实例、系统命令、任意网络或任意文件权限。包只声明请求，宿主受信任 Adapter 执行结构化动作。
+- 外部副作用必须记录 `risk`、`authorization`、`adapterId`、结构化参数和最终执行状态；凭据不得进入动作记录、Prompt、SQLite 普通字段或前端响应。
+- 计划任务执行前必须重新检查角色是否存在、是否归档、世界归属和当前 Skill Grant；撤销授权后不得继续执行旧计划。
+
+## Harness 设计采用规则
+
+- 参考 DeepSeek Harness 的 provider/registry 思路：新增能力优先注册在稳定接口旁边，不修改 Agent loop；注册应可替换、可测试，并有清晰作用域。
+- 参考 Codex 的最小权限与逐动作审批思路：权限判断发生在具体动作边界，危险能力不得因为“安装了插件”或“角色请求过 Skill”就默认放行。
+- DSH Cyber 上层领域模型不绑定任一 Harness 内部 API。DeepSeek Harness、Codex 或未来其他 Harness 只能通过适配层提供模型、工具、子代理或执行能力。
+- Harness 返回的真实工具/执行结果才能注入 Agent 上下文；UI 动画、NPC Ambient Life、模型自然语言声明都不能替代执行事实。
+
+## 创意工坊构建规范
+
+- 创意工坊生成物采用 `project source -> generated package -> PackageManager -> runtime entity` 流程，禁止直接把表单数据写成活动角色绕过包验证。
+- 在创建世界前必须先验证全部角色输入、EmbodimentProfile、manifest 和 PackageManager preview；单个角色校验失败不得留下半个世界。
+- PackageManager 仍拥有包 staging、内容哈希、激活和单包回滚边界；Workshop 不复制一套安装逻辑。
+- Workshop 项目源与 generated 产物保存在 `stateRoot/workshop`，应用源码升级不得覆盖用户项目。
+- 创意工坊前端必须独立组件化并按需加载；不要继续扩大 `App.tsx`，世界编辑器、角色编辑器、Skill 选择器应保持可复用边界。
+- 新增世界模板、角色语义预设或 Skill Adapter 时必须补合同/服务测试；核心创建流程必须补 Chromium E2E。
+
 ## 世界与会话隔离
 
 - 赛博公司、月影酒馆以及已安装的兼容世界主题都是独立世界主体。
