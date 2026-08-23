@@ -76,7 +76,7 @@ test('shows existing role instances and warns before creating a duplicate name',
   await expect(dialog).toBeVisible()
   await dialog.getByRole('button', { name: /管家 v1/ }).click()
   await expect(dialog.getByText('当前世界已有 1 名', { exact: true })).toBeVisible()
-  await expect(dialog.getByText(/当前世界已经有 1 名角色来自这份模板：管家/)).toBeVisible()
+  await expect(dialog.getByText(/当前世界已有 1 名角色来自这份模板：管家/)).toBeVisible()
 
   const name = dialog.getByLabel('角色名字（可选）')
   await name.fill('管家')
