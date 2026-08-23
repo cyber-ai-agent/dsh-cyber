@@ -36,6 +36,7 @@ export function NavigationPane({
   sessionParticipants,
   employees,
   onSelectSession,
+  onDirectEmployee,
   onCreateGroup,
   onWorldSettings,
 }: NavigationPaneProps) {
@@ -44,6 +45,7 @@ export function NavigationPane({
 
   useEffect(() => {
     let cancelled = false
+    setHubItems(undefined)
     void api<{ items: ConversationHubItem[] }>(`/api/worlds/${encodeURIComponent(world.id)}/conversation-hub`)
       .then((result) => { if (!cancelled) { setHubItems(result.items); setError(undefined) } })
       .catch((cause: unknown) => { if (!cancelled) setError(cause instanceof Error ? cause.message : '会话列表加载失败') })
@@ -57,15 +59,46 @@ export function NavigationPane({
     void updatePreference(activeSessionId, { hidden: false }).then(setHubItems).catch(() => undefined)
   }, [activeSessionId, hubItems])
 
-  const items = useMemo(() => {
-    if (hubItems !== undefined) return hubItems.filter((item) => !item.hidden || item.session.id === activeSessionId)
-    return sessions.map((session) => ({
+  const fallbackItems = useMemo((): ConversationHubItem[] => {
+    const sessionItems: ConversationHubItem[] = sessions.map((session) => ({
       session,
       participantIds: sessionParticipants[session.id] ?? [],
       pinned: false,
       hidden: false,
     }))
-  }, [activeSessionId, hubItems, sessionParticipants, sessions])
+    const directOwners = new Set(
+      sessionItems
+        .filter((item) => item.session.kind === 'direct' && item.participantIds.length === 1)
+        .map((item) => item.participantIds[0]!),
+    )
+    const directContacts = employees
+      .filter((employee) => employee.status !== 'archived' && !directOwners.has(employee.id))
+      .map((employee): ConversationHubItem => ({
+        session: {
+          id: `contact:${world.id}:${employee.id}`,
+          workspaceId: world.workspaceId,
+          worldId: world.id,
+          kind: 'direct',
+          title: `与 ${employee.displayName} 对话`,
+          status: 'open',
+          createdAt: employee.createdAt,
+          updatedAt: employee.updatedAt,
+        },
+        participantIds: [employee.id],
+        pinned: employee.blueprintId === 'core.butler',
+        hidden: false,
+        canonicalCharacterId: employee.id,
+      }))
+    return [...sessionItems, ...directContacts].sort((left, right) => {
+      if (left.pinned !== right.pinned) return left.pinned ? -1 : 1
+      return right.session.updatedAt.localeCompare(left.session.updatedAt)
+    })
+  }, [employees, sessionParticipants, sessions, world.id, world.workspaceId])
+
+  const items = useMemo(() => {
+    const source = hubItems ?? fallbackItems
+    return source.filter((item) => !item.hidden || item.session.id === activeSessionId)
+  }, [activeSessionId, fallbackItems, hubItems])
 
   const updatePreference = async (sessionId: string, value: { pinned?: boolean; hidden?: boolean }) => {
     const result = await api<{ items: ConversationHubItem[] }>(
@@ -73,6 +106,18 @@ export function NavigationPane({
       { method: 'PUT', body: JSON.stringify(value) },
     )
     return result.items
+  }
+
+  const openItem = (item: ConversationHubItem) => {
+    if (item.session.kind === 'direct') {
+      const employeeId = item.canonicalCharacterId ?? item.participantIds[0]
+      const employee = employees.find((candidate) => candidate.id === employeeId)
+      if (employee !== undefined) {
+        onDirectEmployee(employee)
+        return
+      }
+    }
+    onSelectSession(item.session.id)
   }
 
   return (
@@ -89,27 +134,32 @@ export function NavigationPane({
           <span>当前世界</span>
           <small>{items.length} 个会话</small>
         </div>
-        {error === undefined ? null : <div className="compact-empty" role="status">{error}</div>}
+        {error === undefined || fallbackItems.length > 0 ? null : <div className="compact-empty" role="status">{error}</div>}
         <div className="session-list">
           {items.length === 0 ? (
             <div className="compact-empty">还没有会话。新增角色后会自动生成唯一私聊，也可以创建群聊。</div>
-          ) : items.map((item) => (
-            <SessionRow
-              key={item.session.id}
-              item={item}
-              employees={employees}
-              active={item.session.id === activeSessionId}
-              onClick={() => onSelectSession(item.session.id)}
-              onPin={() => void updatePreference(item.session.id, { pinned: !item.pinned }).then(setHubItems).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : '置顶失败'))}
-              onDelete={() => void updatePreference(item.session.id, { hidden: true }).then((next) => {
-                setHubItems(next)
-                if (item.session.id === activeSessionId) {
-                  const fallback = next.find((candidate) => !candidate.hidden)
-                  if (fallback !== undefined) onSelectSession(fallback.session.id)
-                }
-              }).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : '删除会话失败'))}
-            />
-          ))}
+          ) : items.map((item) => {
+            const synthetic = item.session.id.startsWith('contact:')
+            return (
+              <SessionRow
+                key={item.session.id}
+                item={item}
+                employees={employees}
+                active={item.session.id === activeSessionId || (item.session.kind === 'direct' && item.participantIds.some((id) => id === sessionParticipants[activeSessionId ?? '']?.[0]))}
+                onClick={() => openItem(item)}
+                {...(synthetic ? {} : {
+                  onPin: () => void updatePreference(item.session.id, { pinned: !item.pinned }).then(setHubItems).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : '置顶失败')),
+                  onDelete: () => void updatePreference(item.session.id, { hidden: true }).then((next) => {
+                    setHubItems(next)
+                    if (item.session.id === activeSessionId) {
+                      const fallback = next.find((candidate) => !candidate.hidden)
+                      if (fallback !== undefined) onSelectSession(fallback.session.id)
+                    }
+                  }).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : '删除会话失败')),
+                })}
+              />
+            )
+          })}
         </div>
       </section>
 
@@ -132,8 +182,8 @@ function SessionRow({
   employees: CyberEmployee[]
   active: boolean
   onClick(): void
-  onPin(): void
-  onDelete(): void
+  onPin?: () => void
+  onDelete?: () => void
 }) {
   const { session, participantIds } = item
   const participants = participantIds
@@ -153,12 +203,14 @@ function SessionRow({
         <span className="session-row__copy"><strong>{directTitle(session, participants)}</strong><small>{subtitle}</small></span>
         <time>{formatSessionTime(session.updatedAt)}</time>
       </button>
-      <span className="session-row-actions">
-        <button type="button" aria-label={item.pinned ? '取消置顶' : '置顶会话'} title={item.pinned ? '取消置顶' : '置顶会话'} onClick={onPin}>
-          {item.pinned ? <PushPinSlash size={14} /> : <PushPin size={14} />}
-        </button>
-        <button type="button" aria-label="删除会话" title="从列表删除" onClick={onDelete}><Trash size={14} /></button>
-      </span>
+      {onPin === undefined || onDelete === undefined ? null : (
+        <span className="session-row-actions">
+          <button type="button" aria-label={item.pinned ? '取消置顶' : '置顶会话'} title={item.pinned ? '取消置顶' : '置顶会话'} onClick={onPin}>
+            {item.pinned ? <PushPinSlash size={14} /> : <PushPin size={14} />}
+          </button>
+          <button type="button" aria-label="删除会话" title="从列表删除" onClick={onDelete}><Trash size={14} /></button>
+        </span>
+      )}
     </div>
   )
 }
