@@ -59,6 +59,7 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
   readonly #actors = new Map<string, ActorView>()
   readonly #objectHints = new Map<string, Graphics>()
   readonly #growthMarkers = new Map<string, GrowthMarkerView>()
+  readonly #actorBubbles = new Map<string, Container>()
   readonly #assetTextures = new Map<string, Texture>()
   readonly #layerTextures = new Set<Texture>()
   readonly #appliedCueIds = new Set<string>()
@@ -136,6 +137,7 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
     const activeIds = new Set(snapshot.entities.filter((entity) => entity.kind === 'agent').map((entity) => entity.id))
     for (const [entityId, actor] of this.#actors) {
       if (activeIds.has(entityId)) continue
+      this.#removeBubble(entityId)
       actor.animation.destroy()
       actor.root.destroy({ children: true })
       this.#actors.delete(entityId)
@@ -263,6 +265,8 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
     this.#objectHints.clear()
     for (const marker of this.#growthMarkers.values()) marker.root.destroy({ children: true })
     this.#growthMarkers.clear()
+    for (const bubble of this.#actorBubbles.values()) bubble.destroy({ children: true })
+    this.#actorBubbles.clear()
     this.#appliedCueIds.clear()
     this.#lastCueSequence.clear()
     if (this.#initialized) this.#app.destroy(true, { children: true, texture: false, textureSource: false })
@@ -430,6 +434,7 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
   #showBubble(actor: ActorView, text: string): void {
     const compact = text.replace(/\s+/g, ' ').trim().slice(0, 38)
     if (!compact) return
+    this.#removeBubble(actor.state.id)
     const bubble = new Container()
     const label = new Text({ text: compact, style: { fontFamily: 'Microsoft YaHei, sans-serif', fontSize: 14, fill: 0xf6f7f8, wordWrap: true, wordWrapWidth: 220, lineHeight: 20 } })
     const width = Math.min(240, Math.max(110, label.width + 24))
@@ -441,7 +446,18 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
     bubble.zIndex = 9_500
     bubble.addChild(plate, label)
     this.#effectsLayer.addChild(bubble)
-    window.setTimeout(() => bubble.destroy({ children: true }), 4_000)
+    this.#actorBubbles.set(actor.state.id, bubble)
+    window.setTimeout(() => {
+      if (this.#actorBubbles.get(actor.state.id) !== bubble) return
+      this.#removeBubble(actor.state.id)
+    }, 4_000)
+  }
+
+  #removeBubble(entityId: string): void {
+    const bubble = this.#actorBubbles.get(entityId)
+    if (bubble === undefined) return
+    this.#actorBubbles.delete(entityId)
+    bubble.destroy({ children: true })
   }
 
   #setLights(lightsOn: boolean): void {

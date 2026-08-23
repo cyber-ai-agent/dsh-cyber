@@ -9,6 +9,10 @@ export function harnessModelRoute(
 ): HarnessModelRoute {
   const contextWindow = optionalPositiveInteger(profile.settings.contextWindow)
   const maxTokens = optionalPositiveInteger(profile.settings.maxTokens)
+  const webSearchEnabled = profile.settings.webSearchEnabled === true
+  const webSearchBaseUrl = typeof profile.settings.webSearchBaseUrl === 'string'
+    ? profile.settings.webSearchBaseUrl.trim()
+    : ''
   return {
     id: profile.id,
     displayName: profile.displayName,
@@ -16,6 +20,14 @@ export function harnessModelRoute(
     baseURL: profile.baseUrl,
     modelId: profile.modelId,
     ...(profile.credentialEnvName === undefined ? {} : { apiKeyEnv: profile.credentialEnvName }),
+    ...(webSearchEnabled && webSearchBaseUrl && profile.credentialEnvName !== undefined
+      ? {
+          webSearch: {
+            baseURL: webSearchBaseUrl,
+            apiKeyEnv: profile.credentialEnvName,
+          },
+        }
+      : {}),
     ...(contextWindow === undefined ? {} : { contextWindow }),
     ...(maxTokens === undefined ? {} : { maxTokens }),
     ...(reasoningEffort === undefined ? {} : { reasoning: reasoningEffort }),

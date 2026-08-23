@@ -29,6 +29,10 @@ export interface HarnessProviderProfile {
   }
   reasoning?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   apiKeyEnv?: string
+  webSearch?: {
+    baseURL: string
+    apiKeyEnv: string
+  }
 }
 
 export interface HarnessCompatibilityReport {
@@ -74,19 +78,24 @@ export async function ensureHarnessProfile(
     profilePatchPath,
     providerProfile === undefined
       ? '# Machine-local DSH Cyber worker overrides. Bundle policy remains authoritative.\n[]\n'
-      : `${JSON.stringify([
-          {
-            id: 'llm-pi-ai',
-            config: { providers: { [providerProfile.route]: providerRoute(providerProfile) } },
-          },
-        ], null, 2)}\n`,
+      : `${JSON.stringify(providerPatch(providerProfile), null, 2)}\n`,
   )
   if (providerProfile !== undefined) {
     validateProviderProfile(providerProfile)
     const route = providerRoute(providerProfile)
     await writeTextAtomic(
       settingsPath,
-      `${JSON.stringify({ 'llm-pi-ai': { providers: { [providerProfile.route]: route } } }, null, 2)}\n`,
+      `${JSON.stringify({
+        'llm-pi-ai': { providers: { [providerProfile.route]: route } },
+        ...(providerProfile.webSearch === undefined
+          ? {}
+          : {
+              'web-search-deepseek': {
+                apiKeyEnv: providerProfile.webSearch.apiKeyEnv,
+                baseURL: providerProfile.webSearch.baseURL,
+              },
+            }),
+      }, null, 2)}\n`,
     )
   }
   const require = createRequire(import.meta.url)
@@ -102,6 +111,23 @@ export async function ensureHarnessProfile(
     profilePatchPath,
     settingsPath,
   }
+}
+
+function providerPatch(providerProfile: HarnessProviderProfile): Array<Record<string, unknown>> {
+  const patch: Array<Record<string, unknown>> = [{
+    id: 'llm-pi-ai',
+    config: { providers: { [providerProfile.route]: providerRoute(providerProfile) } },
+  }]
+  if (providerProfile.webSearch !== undefined) {
+    patch.push({
+      id: 'web-search-deepseek',
+      config: {
+        apiKeyEnv: providerProfile.webSearch.apiKeyEnv,
+        baseURL: providerProfile.webSearch.baseURL,
+      },
+    })
+  }
+  return patch
 }
 
 function providerRoute(providerProfile: HarnessProviderProfile): Record<string, unknown> {
@@ -221,5 +247,12 @@ function validateProviderProfile(profile: HarnessProviderProfile): void {
   }
   if (profile.apiKeyEnv !== undefined && !/^[A-Z_][A-Z0-9_]*$/.test(profile.apiKeyEnv)) {
     throw new Error('Invalid provider credential environment variable')
+  }
+  if (profile.webSearch !== undefined) {
+    const searchEndpoint = new URL(profile.webSearch.baseURL)
+    if (searchEndpoint.protocol !== 'https:') throw new Error('Web search URL must use HTTPS')
+    if (!/^[A-Z_][A-Z0-9_]*$/.test(profile.webSearch.apiKeyEnv)) {
+      throw new Error('Invalid web search credential environment variable')
+    }
   }
 }

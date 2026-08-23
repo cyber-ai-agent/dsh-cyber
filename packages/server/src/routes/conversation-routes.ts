@@ -24,6 +24,7 @@ import {
   detectDelegatedCollaboration,
 } from '../services/delegated-collaboration-service.js'
 import { ConversationHubService } from '../services/conversation-hub-service.js'
+import type { EmployeeActivityProjectionService } from '../services/employee-activity-projection-service.js'
 import type { CharacterSkillRuntime } from '../services/character-skill-runtime.js'
 import type { PeerCollaborationService } from '../services/peer-collaboration-service.js'
 import type { RuntimeStreamHub } from '../streams/runtime-stream-hub.js'
@@ -45,6 +46,7 @@ export interface ConversationRoutesDependencies {
   worldFiles: WorldFileService
   worldSettings: WorldSettingsService
   worldTrace: WorldTraceService
+  employeeActivity: EmployeeActivityProjectionService
 }
 
 export function registerConversationRoutes(router: Router, dependencies: ConversationRoutesDependencies): void {
@@ -59,6 +61,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     worldFiles,
     worldSettings,
     worldTrace,
+    employeeActivity,
   } = dependencies
   const delegatedCollaboration = new DelegatedCollaborationService({
     store,
@@ -160,6 +163,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
         ...(title === undefined ? {} : { title }),
       })
     }
+    for (const employeeId of employeeIds) employeeActivity.project(employeeId)
     worldRuntime.publishCurrent(world.id)
     writeJson(response, 200, result)
     } finally {

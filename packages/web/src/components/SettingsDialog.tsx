@@ -123,6 +123,7 @@ interface ModelProviderPreset {
   credentialEnvName: string
   credentialMode: ModelCredentialMode
   modelPlaceholder: string
+  webSearchBaseUrl?: string
 }
 
 type ModelCredentialMode = 'api-key' | 'environment' | 'none'
@@ -141,12 +142,14 @@ interface ModelDraft {
   hasStoredApiKey: boolean
   contextWindow: number
   maxTokens: number
+  webSearchEnabled: boolean
+  webSearchBaseUrl: string
   isDefault: boolean
   settings: ModelProfile['settings']
 }
 
 const MODEL_PRESETS: readonly ModelProviderPreset[] = [
-  { id: 'deepseek', label: 'DeepSeek', providerKind: 'deepseek', api: 'openai-completions', baseUrl: 'https://api.deepseek.com/v1', credentialEnvName: 'DEEPSEEK_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'deepseek-chat' },
+  { id: 'deepseek', label: 'DeepSeek', providerKind: 'deepseek', api: 'openai-completions', baseUrl: 'https://api.deepseek.com/v1', credentialEnvName: 'DEEPSEEK_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'deepseek-chat', webSearchBaseUrl: 'https://api.deepseek.com/anthropic/v1' },
   { id: 'openai', label: 'OpenAI', providerKind: 'openai-compatible-remote', api: 'openai-responses', baseUrl: 'https://api.openai.com/v1', credentialEnvName: 'OPENAI_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'gpt-5' },
   { id: 'anthropic', label: 'Anthropic', providerKind: 'openai-compatible-remote', api: 'anthropic-messages', baseUrl: 'https://api.anthropic.com/v1', credentialEnvName: 'ANTHROPIC_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'claude-sonnet-4-5' },
   { id: 'gemini', label: 'Google Gemini', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', credentialEnvName: 'GEMINI_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'gemini-2.5-pro' },
@@ -174,6 +177,8 @@ function modelDraftForPreset(preset: ModelProviderPreset, isDefault = false): Mo
     hasStoredApiKey: false,
     contextWindow: 64_000,
     maxTokens: 8_192,
+    webSearchEnabled: preset.webSearchBaseUrl !== undefined,
+    webSearchBaseUrl: preset.webSearchBaseUrl ?? '',
     isDefault,
     settings: {},
   }
@@ -200,6 +205,10 @@ function modelDraftForProfile(profile: ModelProfile): ModelDraft {
     hasStoredApiKey,
     contextWindow: modelSettingNumber(profile, 'contextWindow', 64_000),
     maxTokens: modelSettingNumber(profile, 'maxTokens', 8_192),
+    webSearchEnabled: profile.settings.webSearchEnabled === true,
+    webSearchBaseUrl: typeof profile.settings.webSearchBaseUrl === 'string'
+      ? profile.settings.webSearchBaseUrl
+      : '',
     isDefault: profile.isDefault,
     settings: profile.settings,
   }
@@ -497,6 +506,8 @@ function ModelSettings({
           providerId: draft.providerId,
           contextWindow: draft.contextWindow,
           maxTokens: draft.maxTokens,
+          webSearchEnabled: draft.webSearchEnabled,
+          ...(draft.webSearchEnabled ? { webSearchBaseUrl: draft.webSearchBaseUrl.trim() } : {}),
         },
       })
       setDraft(modelDraftForProfile(saved))
@@ -534,7 +545,7 @@ function ModelSettings({
             {models.map((model) => (
               <article key={model.id} className={draft.id === model.id ? 'is-active' : ''}>
                 <Cpu size={22} />
-                <div><strong>{model.displayName}</strong><span>{model.modelId}</span><small>{providerLabel(model)} · {credentialSummary(model)}</small></div>
+                <div><strong>{model.displayName}</strong><span>{model.modelId}</span><small>{providerLabel(model)} · {credentialSummary(model)} · {model.settings.webSearchEnabled === true ? '联网搜索已启用' : '未启用联网搜索'}</small></div>
                 <div className="model-profile-actions">
                   {model.isDefault ? <span className="model-default-badge"><CheckCircle size={14} />默认</span> : null}
                   <button type="button" aria-label={`编辑${model.displayName}`} onClick={() => editModel(model)}><PencilSimple size={15} />编辑</button>
@@ -564,6 +575,21 @@ function ModelSettings({
             <label><span>上下文窗口</span><input type="number" min="1024" step="1" value={draft.contextWindow} onChange={(event) => setDraft({ ...draft, contextWindow: Number(event.target.value) })} /></label>
             <label><span>最大输出 Token</span><input type="number" min="256" step="256" value={draft.maxTokens} onChange={(event) => setDraft({ ...draft, maxTokens: Number(event.target.value) })} /></label>
           </div>
+          <label className="model-default-control">
+            <input type="checkbox" checked={draft.webSearchEnabled} onChange={(event) => setDraft({
+              ...draft,
+              webSearchEnabled: event.target.checked,
+              webSearchBaseUrl: event.target.checked && !draft.webSearchBaseUrl
+                ? (MODEL_PRESETS.find((preset) => preset.id === draft.providerId)?.webSearchBaseUrl ?? '')
+                : draft.webSearchBaseUrl,
+            })} />
+            <span><strong>启用联网搜索</strong><small>通过 DSH 的网页搜索工具查询实时信息。只有兼容 DeepSeek Anthropic 搜索协议的服务才能启用。</small></span>
+          </label>
+          {draft.webSearchEnabled ? (
+            <div className="setting-grid model-setting-grid model-web-search-settings">
+              <label className="setting-grid__wide"><span>搜索服务地址</span><input inputMode="url" value={draft.webSearchBaseUrl} placeholder="https://api.deepseek.com/anthropic/v1" onChange={(event) => setDraft({ ...draft, webSearchBaseUrl: event.target.value })} /><small>搜索会复用上方已加密保存的 API 密钥；自定义网关请填写其 Anthropic 兼容搜索端点，不会自动把密钥发送给其他服务。</small></label>
+            </div>
+          ) : null}
           <label className="model-default-control"><input type="checkbox" checked={draft.isDefault || models.length === 0} disabled={models.length === 0} onChange={(event) => setDraft({ ...draft, isDefault: event.target.checked })} /><span><strong>设为全局默认模型</strong><small>未单独分配模型的世界和角色会使用此配置。</small></span></label>
           <footer><span>{draft.id ? '正在编辑已保存配置' : '新配置保存后立即可用于路由'}</span><button className="primary-button" type="submit" disabled={savingModel}>{savingModel ? '正在保存…' : draft.id ? '保存修改' : '添加并保存'}</button></footer>
         </form>
@@ -745,6 +771,16 @@ function validateModelDraft(draft: ModelDraft): string | undefined {
   if (!draft.modelId.trim()) return '请输入模型 ID。'
   if (!Number.isInteger(draft.contextWindow) || draft.contextWindow < 1_024) return '上下文窗口必须是不小于 1024 的整数。'
   if (!Number.isInteger(draft.maxTokens) || draft.maxTokens < 256) return '最大输出 Token 必须是不小于 256 的整数。'
+  if (draft.webSearchEnabled) {
+    if (!draft.webSearchBaseUrl.trim()) return '启用联网搜索后，请填写搜索服务地址。'
+    try {
+      const searchUrl = new URL(draft.webSearchBaseUrl.trim())
+      if (searchUrl.protocol !== 'https:') return '联网搜索服务必须使用 HTTPS 地址。'
+    } catch {
+      return '联网搜索服务地址格式不正确。'
+    }
+    if (draft.credentialMode === 'none') return '联网搜索需要 API 密钥或凭据环境变量。'
+  }
   return undefined
 }
 

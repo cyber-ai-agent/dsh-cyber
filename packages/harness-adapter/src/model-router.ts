@@ -20,6 +20,10 @@ export interface HarnessModelRoute {
   baseURL: string
   modelId: string
   apiKeyEnv?: string
+  webSearch?: {
+    baseURL: string
+    apiKeyEnv: string
+  }
   contextWindow?: number
   maxTokens?: number
   reasoningEfforts?: false | Partial<Record<'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max', string | null>>
@@ -202,6 +206,7 @@ export class HarnessModelRouter implements AgentRuntimePort, AsyncDisposable {
         },
         ...(route.reasoning === undefined ? {} : { reasoning: route.reasoning }),
         ...(route.apiKeyEnv === undefined ? {} : { apiKeyEnv: route.apiKeyEnv }),
+        ...(route.webSearch === undefined ? {} : { webSearch: route.webSearch }),
       }
     }
     return this.#options.adapterFactory?.(options) ?? new HarnessCompatibilityAdapter(options)
