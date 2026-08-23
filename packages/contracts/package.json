@@ -14,6 +14,10 @@
       "types": "./lib/embodiment.d.ts",
       "default": "./lib/embodiment.js"
     },
+    "./skill-runtime": {
+      "types": "./lib/skill-runtime.d.ts",
+      "default": "./lib/skill-runtime.js"
+    },
     "./world-simulation": {
       "types": "./lib/world-simulation.d.ts",
       "default": "./lib/world-simulation.js"
