@@ -887,10 +887,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .model-secret-input button:hover { border-color: var(--accent); color: var(--text); }
 .model-secret-input button:focus-visible { position: relative; z-index: 1; outline: 2px solid var(--accent); outline-offset: 1px; }
 .model-catalog-input { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
-.model-catalog-input input { min-width: 0; border-right: 0 !important; }
+.model-catalog-input input, .model-catalog-input select { min-width: 0; border-right: 0 !important; }
 .model-catalog-input button { min-width: 124px; height: 40px; padding: 0 14px; border: 1px solid var(--accent); color: var(--accent); background: var(--accent-soft); font-size: 13px; font-weight: 600; }
 .model-catalog-input button:hover:not(:disabled) { color: var(--bg); background: var(--accent); }
 .model-catalog-input button:disabled { color: var(--text-muted); border-color: var(--border); background: var(--surface-2); cursor: wait; }
+.model-catalog-mode { width: fit-content; min-height: 30px; padding: 0; border: 0; color: var(--accent); background: transparent; font-size: 13px; text-align: left; }
+.model-catalog-mode:hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
 .model-form-message { margin: 14px 16px 0; padding: 10px 12px; border: 1px solid var(--border); font-size: 13px; line-height: 1.55; }
 .model-form-message--error { border-color: color-mix(in srgb, var(--danger) 60%, var(--border)); color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, var(--surface-0)); }
 .model-form-message--success { display: flex; align-items: center; gap: 7px; border-color: color-mix(in srgb, var(--success) 55%, var(--border)); color: var(--success); background: color-mix(in srgb, var(--success) 7%, var(--surface-0)); }

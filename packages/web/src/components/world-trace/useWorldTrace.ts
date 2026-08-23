@@ -80,7 +80,7 @@ export function mergeTraceEntries(
       })
     }
   }
-  return [...merged.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
+  return [...merged.values()].sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id))
 }
 
 function demoTrace(worldId: string): WorldTraceEntry[] {
@@ -92,8 +92,9 @@ function demoTrace(worldId: string): WorldTraceEntry[] {
     { id: 'demo-skill', category: 'skill', status: 'success', summary: '灯光控制技能执行成功', actorId: 'employee-demo', skillId: 'world.lights', sourceId: 'demo-skill', offset: 70_000 },
     { id: 'demo-world', category: 'world', status: 'success', summary: '世界灯光已切换', actorId: 'owner', sourceId: 'demo-world', offset: 92_000 },
   ]
-  return entries.map(({ offset, ...entry }) => {
+  const projected: WorldTraceEntry[] = entries.map(({ offset, ...entry }) => {
     const timestamp = new Date(base + offset).toISOString()
     return { ...entry, worldId, sourceKind: entry.category === 'skill' ? 'skill-action' : 'domain-event', createdAt: timestamp, updatedAt: timestamp }
   })
+  return projected.sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id))
 }
