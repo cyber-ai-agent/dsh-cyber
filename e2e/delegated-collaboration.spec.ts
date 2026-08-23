@@ -36,20 +36,17 @@ test('lets the user delegate a real role consultation and receive a grounded rep
   await page.getByRole('button', { name: '创建我的世界' }).click()
   await expect(page.locator('.world-runtime-canvas')).toBeVisible()
 
-  await page.locator('.left-pane').getByRole('button', { name: '添加角色' }).click()
-  const market = page.getByRole('dialog', { name: '角色市场' })
-  await market.getByRole('button', { name: /开发工程师 v1/ }).click()
-  await market.getByRole('textbox', { name: '角色名字（可选）' }).fill('阿帆')
-  await market.getByRole('button', { name: '确认添加' }).click()
-  await expect(market).toBeHidden()
+  const workspace = server.store.listWorkspaces()[0]!
+  const world = server.store.listWorlds(workspace.id)[0]!
+  await recruitRole(world.id, 'cyber-company.software-engineer', '阿帆')
+  await page.reload()
+  await expect(page.getByRole('button', { name: '与阿帆私聊' })).toBeVisible()
 
   await page.getByRole('button', { name: '与管家私聊' }).click()
   const composer = page.getByRole('textbox', { name: '给当前世界的角色发送消息' })
   await composer.fill('请帮我向 @阿帆 确认当前项目进度，然后回来告诉我。')
   await page.getByRole('button', { name: '发送' }).click()
 
-  const workspace = server.store.listWorkspaces()[0]!
-  const world = server.store.listWorlds(workspace.id)[0]!
   const employees = server.store.listEmployees(world.id)
   const butler = employees.find((employee) => employee.displayName === '管家')!
   const engineer = employees.find((employee) => employee.displayName === '阿帆')!
@@ -70,7 +67,7 @@ test('lets the user delegate a real role consultation and receive a grounded rep
   )).toBeVisible({ timeout: 20_000 })
 
   const sessions = server.store.listSessions(world.id)
-  const direct = sessions.find((session) => session.kind === 'direct')!
+  const direct = sessions.find((session) => session.kind === 'direct' && server.store.listParticipants(session.id).some((participant) => participant.participantId === butler.id))!
   const meeting = sessions.find((session) => session.kind === 'meeting')!
   expect(direct).toBeDefined()
   expect(meeting).toBeDefined()
@@ -117,6 +114,15 @@ test('lets the user delegate a real role consultation and receive a grounded rep
   }
   expect(finalSnapshot.entities.every((entity) => entity.visualState.activeMeetingId === undefined)).toBe(true)
 })
+
+async function recruitRole(worldId: string, blueprintId: string, displayName: string): Promise<void> {
+  const response = await fetch(`${origin}/api/worlds/${worldId}/recruit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ blueprintId, blueprintVersion: 1, displayName }),
+  })
+  expect(response.ok, await response.text()).toBe(true)
+}
 
 class DelegatedWorkflowRuntime implements AgentRuntimePort {
   readonly turns = new Map<string, number>()
