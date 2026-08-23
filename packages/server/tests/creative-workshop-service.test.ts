@@ -43,11 +43,10 @@ describe('CreativeWorkshopService', () => {
     const blueprint = store.getBlueprint(employee.blueprintId, employee.blueprintVersion)!
     expect(blueprint.requestedSkills).toEqual(['smart-home.control'])
     expect(revision.skillGrants).toEqual([])
-    expect(store.getEmployeeProfile(employee.id)?.appearance).toMatchObject({
-      worldBehaviorProfile: {
-        preferredZoneTags: ['operations'],
-      },
+    expect(blueprint.embodiment).toMatchObject({
+      preferredZoneTags: ['operations'],
     })
+    expect(store.getEmployeeProfile(employee.id)?.appearance['worldBehaviorProfile']).toBeUndefined()
 
     const restored = await workshop.readProject(workspaceId, project.id)
     expect(restored).toEqual(project)

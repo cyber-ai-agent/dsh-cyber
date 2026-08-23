@@ -3,7 +3,7 @@ import { dirname, join, resolve, sep } from 'node:path'
 import { lstat, mkdir, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 
 import { worldTemplate } from '@dsh-cyber/catalog'
-import type { CyberPackageManifest, EmployeeBlueprint, JsonObject, PackagePermissionPreview } from '@dsh-cyber/contracts'
+import type { CyberPackageManifest, EmployeeBlueprint, PackagePermissionPreview } from '@dsh-cyber/contracts'
 import type {
   EmbodiedEmployeeBlueprint,
   WorkshopCreateInput,
@@ -13,7 +13,7 @@ import type {
 import type { PackageManager, ReversiblePackageInstallation } from '@dsh-cyber/package-runtime'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
-import { embodimentToBehaviorJson, parseEmbodimentProfile } from '../embodiment-profile.js'
+import { parseEmbodimentProfile } from '../embodiment-profile.js'
 import { ServiceError } from './service-error.js'
 import { WorldRootService } from './world-root-service.js'
 import { WorldSettingsService } from './world-settings-service.js'
@@ -120,7 +120,7 @@ export class CreativeWorkshopService {
         // Blueprint skill requests are deliberately not grants. This mirrors the
         // Harness/Codex capability boundary: construction declares intent; a later
         // owner approval revises the character's grants.
-        const character = this.#store.recruitEmployee({
+        this.#store.recruitEmployee({
           workspaceId,
           worldId: world.id,
           blueprintId: blueprint.id,
@@ -128,22 +128,6 @@ export class CreativeWorkshopService {
           displayName: role.displayName,
           actorId: 'owner',
           reason: 'creative-workshop',
-        })
-        const currentProfile = this.#store.getEmployeeProfile(character.id)
-        this.#store.reviseEmployeeProfile({
-          employeeId: character.id,
-          background: currentProfile?.background ?? role.summary,
-          personalityTraits: currentProfile?.personalityTraits ?? [],
-          appearance: {
-            ...(currentProfile?.appearance ?? {}),
-            worldBehaviorProfile: embodimentToBehaviorJson(
-              `${blueprint.id}@${blueprint.version}`,
-              blueprint.embodiment!,
-            ) as unknown as JsonObject,
-            ...(blueprint.embodiment?.actorRigId === undefined ? {} : { actorRigId: blueprint.embodiment.actorRigId }),
-          },
-          reason: 'creative-workshop-embodiment',
-          actorId: 'owner',
         })
       }
 

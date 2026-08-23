@@ -1,11 +1,9 @@
 import { BUILTIN_BLUEPRINTS, worldTemplate } from '@dsh-cyber/catalog'
-import type { JsonObject } from '@dsh-cyber/contracts'
 import type { EmbodiedEmployeeBlueprint } from '@dsh-cyber/contracts/creative-platform'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { HttpError } from '../http/errors.js'
 import type { Router } from '../http/router.js'
-import { embodimentToBehaviorJson } from '../embodiment-profile.js'
 import { loadInstalledBlueprints } from '../installed-package-runtime.js'
 import { ConversationHubService } from '../services/conversation-hub-service.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
@@ -127,24 +125,6 @@ export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDep
       recruitInput.capabilityGrants = capabilityGrants
     }
     const employee = store.recruitEmployee(recruitInput)
-    if (liveBlueprint?.embodiment !== undefined) {
-      const current = store.getEmployeeProfile(employee.id)
-      store.reviseEmployeeProfile({
-        employeeId: employee.id,
-        background: current?.background ?? liveBlueprint.summary,
-        personalityTraits: current?.personalityTraits ?? [],
-        appearance: {
-          ...(current?.appearance ?? {}),
-          worldBehaviorProfile: embodimentToBehaviorJson(
-            `${liveBlueprint.id}@${liveBlueprint.version}`,
-            liveBlueprint.embodiment,
-          ) as unknown as JsonObject,
-          ...(liveBlueprint.embodiment.actorRigId === undefined ? {} : { actorRigId: liveBlueprint.embodiment.actorRigId }),
-        },
-        reason: 'blueprint-embodiment',
-        actorId: 'system',
-      })
-    }
     await conversationHub.ensureDirectSessions(world.id)
     writeJson(response, 201, { employee })
   })
