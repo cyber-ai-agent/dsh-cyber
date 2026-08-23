@@ -1,41 +1,17 @@
 import type { EmployeeBlueprint, IsoTimestamp, JsonObject, WorkSession } from './index.js'
+import type { EmbodimentProfile } from './embodiment.js'
 
-export interface EmbodimentSocialPolicy {
-  canInitiateConversation: boolean
-  cooldownSeconds: number
-  maxDailyConversations: number
-}
-
-/**
- * Portable semantic description of a role's body in any compatible world.
- * It intentionally contains no coordinates, paths or animation frame numbers.
- */
-export interface EmbodimentProfile {
-  roleTags: string[]
-  preferredZoneTags: string[]
-  preferredFacilityCapabilities: string[]
-  allowedZoneTags: string[]
-  homeSlotTags: string[]
-  ambientBehaviors: string[]
-  actorRigId?: string
-  socialPolicy?: EmbodimentSocialPolicy
-}
+export type {
+  EmbodimentPresetDescriptor,
+  EmbodimentProfile,
+  EmbodimentSocialPolicy,
+} from './embodiment.js'
 
 /**
- * Human-facing reusable starting point for an EmbodimentProfile.
- * Presets are catalog data, not UI conditionals; users may still author an
- * explicit profile that does not correspond to any preset.
+ * Compatibility alias kept while callers migrate from the original Workshop
+ * contract. Embodiment is now part of the core EmployeeBlueprint itself.
  */
-export interface EmbodimentPresetDescriptor {
-  id: string
-  displayName: string
-  description: string
-  profile: EmbodimentProfile
-}
-
-export type EmbodiedEmployeeBlueprint = EmployeeBlueprint & {
-  embodiment?: EmbodimentProfile
-}
+export type EmbodiedEmployeeBlueprint = EmployeeBlueprint
 
 export interface WorkshopRoleDefinition {
   id: string
