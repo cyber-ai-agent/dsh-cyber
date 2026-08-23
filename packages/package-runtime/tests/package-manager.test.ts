@@ -272,6 +272,7 @@ describe('PackageManager', () => {
         throw new Error('simulated database commit failure')
       },
       rollbackPackageInstall: store.rollbackPackageInstall.bind(store),
+      compensateActivatedPackageInstall: store.compensateActivatedPackageInstall.bind(store),
     }
     const upgrade = new PackageManager({ store: failingStore, runtime })
     const v2 = manifest('2.0.0', '# V2\n', ['workspace:read', 'workspace:write'])
