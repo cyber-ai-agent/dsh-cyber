@@ -16,6 +16,7 @@ interface EmployeeManagementDialogProps {
   onRevise(input: { reason: string; persona?: string; skillGrants?: string[]; capabilityGrants?: string[]; modelPolicy: { modelProfileId?: string } }): Promise<void>
   onUpdateProfile(input: {
     displayName: string
+    role: string
     avatarIndex: number
     background: string
     personalityTraits: string[]
@@ -27,6 +28,7 @@ interface EmployeeManagementDialogProps {
 }
 
 interface CharacterRuntimeProfile {
+  identityLabel: string
   relationshipToUser: string
   addressUserAs: string
   selfReference: string
@@ -41,6 +43,7 @@ const PROFILE_END = '[/角色关系与背景]'
 export function EmployeeManagementDialog({ employee, profile, currentRevision, models, avatarIndex, saving, onClose, onRevise, onUpdateProfile, onArchive }: EmployeeManagementDialogProps) {
   const parsed = parseCharacterRuntimeProfile(currentRevision?.persona ?? '', profile, employee.role)
   const [displayName, setDisplayName] = useState(employee.displayName)
+  const [role, setRole] = useState(parsed.identityLabel)
   const [selectedAvatar, setSelectedAvatar] = useState(avatarIndex)
   const [background, setBackground] = useState(parsed.background)
   const [personality, setPersonality] = useState(parsed.personalityTraits.join('、'))
@@ -54,6 +57,7 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
   const [confirmArchive, setConfirmArchive] = useState(false)
 
   const runtimeProfile = (): CharacterRuntimeProfile => ({
+    identityLabel: role.trim(),
     relationshipToUser: relationshipToUser.trim(),
     addressUserAs: addressUserAs.trim(),
     selfReference: selfReference.trim(),
@@ -63,10 +67,11 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
   })
 
   const saveIdentityAndRelationship = async () => {
-    if (!displayName.trim() || !background.trim() || saving) return
+    if (!displayName.trim() || !role.trim() || !background.trim() || saving) return
     const profile = runtimeProfile()
     await onUpdateProfile({
       displayName: displayName.trim(),
+      role: profile.identityLabel,
       avatarIndex: selectedAvatar,
       background: profile.background,
       personalityTraits: profile.personalityTraits,
@@ -84,7 +89,7 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
   }
 
   const saveBehavior = async () => {
-    if (!reason.trim() || !persona.trim() || saving) return
+    if (!reason.trim() || !role.trim() || !persona.trim() || saving) return
     await onRevise({
       reason: reason.trim(),
       persona: composeCharacterPersona(runtimeProfile()),
@@ -104,9 +109,10 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
 
         <div className="employee-management-content">
           <section className="employee-identity-editor">
-            <div className="settings-section__heading"><h3><IdentificationCard size={17} />身份、关系与形象</h3><p>名字与形象会同步到通讯录、聊天、档案和互动世界；关系、称呼和背景会进入角色真实运行设定。</p></div>
+            <div className="settings-section__heading"><h3><IdentificationCard size={17} />身份、关系与形象</h3><p>当前身份由角色实例自己持有。初始 Blueprint 只提供创建默认值；名字、身份/形态、关系和背景保存后都会成为当前角色事实。</p></div>
             <div className="identity-editor-layout">
               <label className="dialog-field"><span>角色名字</span><input maxLength={48} value={displayName} onChange={(event) => setDisplayName(event.target.value)} /></label>
+              <label className="dialog-field"><span>当前身份 / 形态</span><input maxLength={100} value={role} onChange={(event) => setRole(event.target.value)} placeholder="陪伴小猫 / 开发工程师 / 酒馆老板 / 机器人" /><small>这是当前角色标签，可以完全脱离最初模板岗位。</small></label>
               <div className="avatar-picker" role="radiogroup" aria-label="选择角色形象">
                 {Array.from({ length: 8 }, (_, index) => (
                   <button key={index} type="button" role="radio" aria-checked={selectedAvatar === index} className={selectedAvatar === index ? 'is-active' : ''} onClick={() => setSelectedAvatar(index)}>
@@ -124,7 +130,7 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
               <label className="dialog-field character-profile-grid__wide"><span>背景故事</span><textarea rows={4} value={background} onChange={(event)=>setBackground(event.target.value)} placeholder="这个角色在当前世界里的经历、身份和重要背景。"/></label>
             </div>
 
-            <div className="identity-editor-footer"><span>保存后会同时生成新的角色设定版本</span><button className="secondary-button" type="button" disabled={!displayName.trim() || !background.trim() || saving} onClick={() => void saveIdentityAndRelationship()}>{saving ? '正在保存…' : '保存角色资料'}</button></div>
+            <div className="identity-editor-footer"><span>保存后会同步当前实例身份，并生成新的角色设定版本</span><button className="secondary-button" type="button" disabled={!displayName.trim() || !role.trim() || !background.trim() || saving} onClick={() => void saveIdentityAndRelationship()}>{saving ? '正在保存…' : '保存角色资料'}</button></div>
           </section>
 
           <section>
@@ -144,7 +150,7 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
 
             <div className="character-model-note"><strong>运行模型</strong><span>当前角色模型请在“设置 → 模型 → 模型分配”中选择。活动路由统一按角色 → 世界 → 全局继承，避免出现两个互相冲突的模型设置。</span><small>可用模型：{models.length === 0 ? '尚未配置' : models.map((model)=>model.displayName).join('、')}</small></div>
 
-            <button className="primary-button" type="button" disabled={!reason.trim() || !persona.trim() || saving} onClick={() => void saveBehavior()}>{saving ? '正在保存…' : `保存为 r${employee.currentRevision + 1}`}</button>
+            <button className="primary-button" type="button" disabled={!reason.trim() || !role.trim() || !persona.trim() || saving} onClick={() => void saveBehavior()}>{saving ? '正在保存…' : `保存为 r${employee.currentRevision + 1}`}</button>
           </section>
 
           <section className="archive-section">
@@ -160,6 +166,7 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
 function composeCharacterPersona(value: CharacterRuntimeProfile): string {
   const metadata = [
     PROFILE_START,
+    `当前身份/形态：${value.identityLabel}`,
     `与用户的关系：${value.relationshipToUser || '未单独设定'}`,
     `称呼用户：${value.addressUserAs || '跟随当前世界默认称呼'}`,
     `自称：${value.selfReference || '我'}`,
@@ -182,12 +189,13 @@ function parseCharacterRuntimeProfile(persona: string, profile: EmployeeProfile 
   }
   const traits = values.get('性格关键词')
   return {
+    identityLabel: cleanUnset(values.get('当前身份/形态')) || role,
     relationshipToUser: cleanUnset(values.get('与用户的关系')),
     addressUserAs: cleanUnset(values.get('称呼用户')),
     selfReference: cleanUnset(values.get('自称')),
     personalityTraits: traits && !traits.startsWith('未单独') ? splitList(traits) : (profile?.personalityTraits ?? []),
     background: cleanUnset(values.get('背景故事')) || profile?.background || role,
-    persona: corePersona || '保持自己的角色身份、知识边界和职责，不冒充其他角色。',
+    persona: corePersona || '保持自己的当前角色身份、知识边界和权限，不冒充其他角色。',
   }
 }
 
