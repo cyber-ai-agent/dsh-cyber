@@ -1,12 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { dirname, join, resolve, sep } from 'node:path'
-import { lstat, mkdir, open, readFile, readdir, rename, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 
 import { worldTemplate } from '@dsh-cyber/catalog'
-import type { CyberPackageManifest, EmployeeBlueprint, JsonObject } from '@dsh-cyber/contracts'
+import type { CyberPackageManifest, EmployeeBlueprint, JsonObject, PackagePermissionPreview } from '@dsh-cyber/contracts'
 import type {
   EmbodiedEmployeeBlueprint,
-  EmbodimentProfile,
   WorkshopCreateInput,
   WorkshopProject,
   WorkshopRoleDefinition,
@@ -21,6 +20,14 @@ import { WorldSettingsService } from './world-settings-service.js'
 
 const PROJECT_VERSION = 1 as const
 const MAX_ROLES = 16
+
+interface CompiledRolePackage {
+  role: WorkshopRoleDefinition
+  blueprint: EmbodiedEmployeeBlueprint
+  directory: string
+  manifest: CyberPackageManifest
+  preview?: PackagePermissionPreview
+}
 
 export class CreativeWorkshopService {
   readonly #store: SqliteStore
@@ -69,103 +76,94 @@ export class CreativeWorkshopService {
     const projectDirectory = safeChild(this.#projectRoot, projectId)
     await mkdir(join(projectDirectory, 'generated', 'roles'), { recursive: true, mode: 0o700 })
 
-    const world = this.#store.createWorld({
-      workspaceId,
-      name: normalized.displayName,
-      templateId: normalized.baseTemplateId,
-      actorId: 'owner',
-    })
-    await this.#worldRoots.ensure(world.id)
-    await this.#worldSettings.save(world.id, {
-      lore: normalized.lore,
-      scenario: normalized.scenario,
-    })
+    try {
+      // Compile every declarative role package first. World mutation does not begin
+      // until all role definitions, manifests and PackageManager previews are valid.
+      const compiled = await this.#compileRoles(projectId, projectDirectory, normalized.roles, normalized.baseTemplateId, now)
+      for (const item of compiled) item.preview = this.#packageManager.preview(workspaceId, item.manifest)
 
-    const generatedPackageIds: string[] = []
-    const storedRoles: WorkshopRoleDefinition[] = []
-    for (let index = 0; index < normalized.roles.length; index += 1) {
-      const role = normalized.roles[index]!
-      const roleId = role.id || `role-${index + 1}`
-      const packageId = `${projectId}.${slug(roleId) || `role${index + 1}`}`.slice(0, 150)
-      const blueprint: EmbodiedEmployeeBlueprint = {
-        schemaVersion: 1,
-        id: packageId,
-        version: 1,
-        worldTemplateId: normalized.baseTemplateId,
-        displayName: role.displayName,
-        role: role.role,
-        summary: role.summary,
-        persona: role.persona,
-        requestedSkills: role.skillIds,
-        requestedCapabilities: [],
-        embodiment: role.embodiment,
-        createdAt: now,
+      // PackageManager owns source staging, content verification and per-package rollback.
+      // Workshop never bypasses that transaction boundary.
+      for (const item of compiled) {
+        const preview = item.preview
+        if (preview === undefined) throw new Error(`Workshop package was not previewed: ${item.manifest.id}`)
+        await this.#packageManager.install({
+          workspaceId,
+          manifest: item.manifest,
+          sourceDirectory: item.directory,
+          approvalToken: preview.approvalToken,
+          actorId: 'owner',
+        })
+        this.#store.saveBlueprint(item.blueprint as EmployeeBlueprint)
       }
-      const roleDirectory = safeChild(join(projectDirectory, 'generated', 'roles'), packageId)
-      const manifest = await materializeRolePackage(roleDirectory, blueprint)
-      const preview = this.#packageManager.preview(workspaceId, manifest)
-      await this.#packageManager.install({
+
+      const world = this.#store.createWorld({
         workspaceId,
-        manifest,
-        sourceDirectory: roleDirectory,
-        approvalToken: preview.approvalToken,
+        name: normalized.displayName,
+        templateId: normalized.baseTemplateId,
         actorId: 'owner',
       })
-      this.#store.saveBlueprint(blueprint as EmployeeBlueprint)
-      const character = this.#store.recruitEmployee({
+      await this.#worldRoots.ensure(world.id)
+      await this.#worldSettings.save(world.id, {
+        lore: normalized.lore,
+        scenario: normalized.scenario,
+      })
+
+      for (const item of compiled) {
+        const role = item.role
+        const blueprint = item.blueprint
+        // Blueprint skill requests are deliberately not grants. This mirrors the
+        // Harness/Codex capability boundary: construction declares intent; a later
+        // owner approval revises the character's grants.
+        const character = this.#store.recruitEmployee({
+          workspaceId,
+          worldId: world.id,
+          blueprintId: blueprint.id,
+          blueprintVersion: blueprint.version,
+          displayName: role.displayName,
+          actorId: 'owner',
+          reason: 'creative-workshop',
+        })
+        const currentProfile = this.#store.getEmployeeProfile(character.id)
+        this.#store.reviseEmployeeProfile({
+          employeeId: character.id,
+          background: currentProfile?.background ?? role.summary,
+          personalityTraits: currentProfile?.personalityTraits ?? [],
+          appearance: {
+            ...(currentProfile?.appearance ?? {}),
+            worldBehaviorProfile: embodimentToBehaviorJson(
+              `${blueprint.id}@${blueprint.version}`,
+              blueprint.embodiment!,
+            ) as unknown as JsonObject,
+            ...(blueprint.embodiment?.actorRigId === undefined ? {} : { actorRigId: blueprint.embodiment.actorRigId }),
+          },
+          reason: 'creative-workshop-embodiment',
+          actorId: 'owner',
+        })
+      }
+
+      const project: WorkshopProject = {
+        schemaVersion: PROJECT_VERSION,
+        id: projectId,
         workspaceId,
         worldId: world.id,
-        blueprintId: blueprint.id,
-        blueprintVersion: blueprint.version,
-        displayName: role.displayName,
-        skillGrants: role.skillIds,
-        actorId: 'owner',
-        reason: 'creative-workshop',
-      })
-      const currentProfile = this.#store.getEmployeeProfile(character.id)
-      this.#store.reviseEmployeeProfile({
-        employeeId: character.id,
-        background: currentProfile?.background ?? role.summary,
-        personalityTraits: currentProfile?.personalityTraits ?? [],
-        appearance: {
-          ...(currentProfile?.appearance ?? {}),
-          worldBehaviorProfile: embodimentToBehaviorJson(
-            `${blueprint.id}@${blueprint.version}`,
-            blueprint.embodiment!,
-          ) as unknown as JsonObject,
-          ...(blueprint.embodiment?.actorRigId === undefined ? {} : { actorRigId: blueprint.embodiment.actorRigId }),
-        },
-        reason: 'creative-workshop-embodiment',
-        actorId: 'owner',
-      })
-      generatedPackageIds.push(packageId)
-      storedRoles.push({
-        id: roleId,
-        displayName: role.displayName,
-        role: role.role,
-        summary: role.summary,
-        persona: role.persona,
-        embodiment: role.embodiment,
-        skillIds: role.skillIds,
-      })
+        displayName: normalized.displayName,
+        baseTemplateId: normalized.baseTemplateId,
+        lore: normalized.lore,
+        scenario: normalized.scenario,
+        roles: compiled.map((item) => item.role),
+        generatedPackageIds: compiled.map((item) => item.manifest.id),
+        createdAt: now,
+        updatedAt: now,
+      }
+      await atomicWrite(join(projectDirectory, 'project.json'), `${JSON.stringify(project, null, 2)}\n`)
+      return project
+    } catch (error) {
+      // Generated workshop output is rebuildable. Do not leave a half-generated
+      // source project behind when preflight or activation fails.
+      await rm(projectDirectory, { recursive: true, force: true }).catch(() => undefined)
+      throw error
     }
-
-    const project: WorkshopProject = {
-      schemaVersion: PROJECT_VERSION,
-      id: projectId,
-      workspaceId,
-      worldId: world.id,
-      displayName: normalized.displayName,
-      baseTemplateId: normalized.baseTemplateId,
-      lore: normalized.lore,
-      scenario: normalized.scenario,
-      roles: storedRoles,
-      generatedPackageIds,
-      createdAt: now,
-      updatedAt: now,
-    }
-    await atomicWrite(join(projectDirectory, 'project.json'), `${JSON.stringify(project, null, 2)}\n`)
-    return project
   }
 
   async readProject(workspaceId: string, projectId: string): Promise<WorkshopProject> {
@@ -173,6 +171,38 @@ export class CreativeWorkshopService {
     const project = parseStoredProject(JSON.parse(await readFile(path, 'utf8')))
     if (project.workspaceId !== workspaceId) throw new ServiceError('forbidden', 'workshop_project_forbidden', '项目不属于当前本地实例')
     return project
+  }
+
+  async #compileRoles(
+    projectId: string,
+    projectDirectory: string,
+    roles: WorkshopRoleDefinition[],
+    baseTemplateId: string,
+    createdAt: string,
+  ): Promise<CompiledRolePackage[]> {
+    const compiled: CompiledRolePackage[] = []
+    for (let index = 0; index < roles.length; index += 1) {
+      const role = roles[index]!
+      const packageId = `${projectId}.${slug(role.id) || `role${index + 1}`}`.slice(0, 150)
+      const blueprint: EmbodiedEmployeeBlueprint = {
+        schemaVersion: 1,
+        id: packageId,
+        version: 1,
+        worldTemplateId: baseTemplateId,
+        displayName: role.displayName,
+        role: role.role,
+        summary: role.summary,
+        persona: role.persona,
+        requestedSkills: role.requestedSkillIds,
+        requestedCapabilities: [],
+        embodiment: role.embodiment,
+        createdAt,
+      }
+      const directory = safeChild(join(projectDirectory, 'generated', 'roles'), packageId)
+      const manifest = await materializeRolePackage(directory, blueprint)
+      compiled.push({ role, blueprint, directory, manifest })
+    }
+    return compiled
   }
 }
 
@@ -225,7 +255,7 @@ function normalizeCreateInput(input: WorkshopCreateInput): Required<Omit<Worksho
       summary: text(value.summary, `角色 ${index + 1} 简介`, 500),
       persona: text(value.persona, `角色 ${index + 1} 设定`, 2_000),
       embodiment,
-      skillIds: uniqueTokens(value.skillIds ?? [], `角色 ${index + 1} 技能`),
+      requestedSkillIds: uniqueTokens(value.requestedSkillIds ?? [], `角色 ${index + 1} 技能`),
     }
   })
   return {
