@@ -1,4 +1,4 @@
-import { ArrowRight, CalendarDots, Certificate, GearSix, IdentificationBadge, UsersThree } from '@phosphor-icons/react'
+import { ArrowRight, CalendarDots, Certificate, GearSix, IdentificationBadge, Plus, UsersThree } from '@phosphor-icons/react'
 import type { EmployeeDossier, World } from '@dsh-cyber/contracts'
 
 import type { CyberEmployee } from '../types.js'
@@ -13,9 +13,10 @@ interface EmployeeDossierDirectoryProps {
   onOpen(employeeId: string): void
   onDirect(employee: CyberEmployee): void
   onManage(employee: CyberEmployee): void
+  onInvite(): void
 }
 
-export function EmployeeDossierDirectory({ employees, dossiers, world, onOpen, onDirect, onManage }: EmployeeDossierDirectoryProps) {
+export function EmployeeDossierDirectory({ employees, dossiers, world, onOpen, onDirect, onManage, onInvite }: EmployeeDossierDirectoryProps) {
   const experience = worldExperience(world)
   const roleplay = experience.kind === 'tavern'
   const directoryTitle = experience.kind === 'company' ? '全员数字档案' : `全${experience.peopleLabel}数字档案`
@@ -32,7 +33,13 @@ export function EmployeeDossierDirectory({ employees, dossiers, world, onOpen, o
           <IdentificationBadge size={22} />
           <span><strong>{directoryTitle}</strong><small>{roleplay ? '人物设定、关系、成长与剧情履历' : '身份、能力、成长与真实履历'}</small></span>
         </div>
-        <span>{employees.length} 名{experience.personLabel}</span>
+        <div className="dossier-directory__header-actions">
+          <span>{employees.length} 名{experience.personLabel}</span>
+          <button className="primary-button dossier-directory__invite" type="button" onClick={onInvite}>
+            <Plus size={14} weight="bold" />
+            <span>{roleplay ? '邀请角色' : '新增角色'}</span>
+          </button>
+        </div>
       </header>
 
       <div className="dossier-directory__summary" aria-label="全员档案概览">
@@ -43,7 +50,7 @@ export function EmployeeDossierDirectory({ employees, dossiers, world, onOpen, o
 
       <div className="dossier-directory__list">
         {employees.length === 0 ? (
-          <div className="dossier-directory__empty"><IdentificationBadge size={30} /><strong>档案库还是空的</strong><p>从{experience.marketLabel}添加角色后，将在这里持续沉淀技能、日志和事迹。</p></div>
+          <div className="dossier-directory__empty"><IdentificationBadge size={30} /><strong>档案库还是空的</strong><p>新增角色后，会在这里集中管理身份、技能授权、成长记录和长期履历。</p><button className="primary-button" type="button" onClick={onInvite}><Plus size={14} />新增第一个角色</button></div>
         ) : employees.map((employee) => {
           const dossier = dossiers[employee.id]
           const profile = dossier?.profile
