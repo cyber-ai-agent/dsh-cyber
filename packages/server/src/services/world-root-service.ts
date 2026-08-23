@@ -1,4 +1,4 @@
-import { lstat, mkdir, realpath } from 'node:fs/promises'
+import { lstat, mkdir, realpath, rm } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 
 export interface WorldRoot {
@@ -22,9 +22,7 @@ export class WorldRootService {
     const managedRoot = await realpath(this.#root)
     const managedInfo = await lstat(this.#root)
     if (managedInfo.isSymbolicLink() || !managedInfo.isDirectory()) throw new Error('Managed world directory is not a real directory')
-    const safeId = encodeURIComponent(worldId)
-    const rootPath = resolve(this.#root, safeId)
-    if (rootPath !== this.#root && !rootPath.startsWith(`${this.#root}${sep}`)) throw new Error('World root escaped managed data directory')
+    const rootPath = this.#safeWorldRoot(worldId)
     await rejectSymlink(rootPath)
     const filesPath = join(rootPath, 'files')
     const assetsPath = join(rootPath, 'assets')
@@ -44,6 +42,28 @@ export class WorldRootService {
       if (info.isSymbolicLink() || !info.isDirectory()) throw new Error('World path is not a real directory')
     }
     return { worldId, ...resolved }
+  }
+
+  async remove(worldId: string): Promise<void> {
+    await mkdir(this.#root, { recursive: true })
+    const managedRoot = await realpath(this.#root)
+    const managedInfo = await lstat(this.#root)
+    if (managedInfo.isSymbolicLink() || !managedInfo.isDirectory()) throw new Error('Managed world directory is not a real directory')
+    const rootPath = this.#safeWorldRoot(worldId)
+    if (!isPathWithin(managedRoot, rootPath) || rootPath === managedRoot) {
+      throw new Error('Refusing to remove a path outside the managed world directory')
+    }
+    await rejectSymlink(rootPath)
+    await rm(rootPath, { recursive: true, force: true })
+  }
+
+  #safeWorldRoot(worldId: string): string {
+    const safeId = encodeURIComponent(worldId)
+    const rootPath = resolve(this.#root, safeId)
+    if (rootPath === this.#root || !rootPath.startsWith(`${this.#root}${sep}`)) {
+      throw new Error('World root escaped managed data directory')
+    }
+    return rootPath
   }
 }
 

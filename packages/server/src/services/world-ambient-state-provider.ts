@@ -1,11 +1,11 @@
 import type { SqliteStore, WorldSimulationStore } from '@dsh-cyber/persistence'
 import {
-  readCharacterBehaviorProfile,
   resolveCharacterBehavior,
   type AmbientCharacterState,
   type AmbientSlot,
 } from '@dsh-cyber/world-simulation'
 
+import { resolveConfiguredCharacterBehavior } from './character-behavior-resolver.js'
 import type { AmbientLifeStateProvider } from './role-aware-ambient-life-service.js'
 
 export type AmbientSlotResolver = (worldId: string) => Promise<AmbientSlot[]> | AmbientSlot[]
@@ -46,9 +46,7 @@ export class WorldAmbientStateProvider implements AmbientLifeStateProvider {
         const latestAmbient = [...plans]
           .filter((plan) => plan.source === 'ambient' || plan.source === 'role-routine')
           .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0]
-        const configured = readCharacterBehaviorProfile(
-          this.#store.getEmployeeProfile(character.id)?.appearance,
-        )
+        const configured = resolveConfiguredCharacterBehavior(this.#store, character)
         const behavior = resolveCharacterBehavior(character, configured)
         const state: AmbientCharacterState = {
           worldId,

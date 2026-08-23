@@ -41,6 +41,7 @@ import { AmbientLifeScheduler } from './services/ambient-life-scheduler.js'
 import { AmbientLifeSettingsService } from './services/ambient-life-settings-service.js'
 import { AssetService } from './services/asset-service.js'
 import { CharacterProfileRuntime } from './services/character-profile-runtime.js'
+import { CharacterSkillRuntime } from './services/character-skill-runtime.js'
 import { harnessModelRoute } from './services/harness-model-route.js'
 import { ModelCatalogService } from './services/model-catalog-service.js'
 import { ModelCredentialService } from './services/model-credential-service.js'
@@ -54,6 +55,10 @@ import { WorldAmbientStateProvider } from './services/world-ambient-state-provid
 import { WorldFileService } from './services/world-file-service.js'
 import { WorldRootService } from './services/world-root-service.js'
 import { WorldSettingsService } from './services/world-settings-service.js'
+import { createBuiltinSkillRegistry } from './skills/builtin-skill-registry.js'
+import { LocalSkillActionRepository } from './skills/local-skill-action-repository.js'
+import type { CharacterSkillActionRepository } from './skills/skill-action-repository.js'
+import type { CharacterSkillAdapterRegistry } from './skills/skill-adapter.js'
 import { RuntimeStreamHub } from './streams/runtime-stream-hub.js'
 import { WorldStreamHub } from './streams/world-stream-hub.js'
 import { validateStagedPackageEntrypoints } from './installed-package-runtime.js'
@@ -70,6 +75,8 @@ export interface CyberServerOptions {
   port?: number
   runtime?: AgentRuntimePort
   packageRuntime?: PackageRuntimePort
+  skillRegistry?: CharacterSkillAdapterRegistry
+  skillActionRepository?: CharacterSkillActionRepository
   marketplaceRoot?: string
   bootstrapDefaultWorld?: boolean
 }
@@ -172,6 +179,13 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     settings: ambientLifeSettings,
     service: ambientLifeRuntime,
   })
+  const skillRegistry = options.skillRegistry ?? createBuiltinSkillRegistry()
+  const skillActions = options.skillActionRepository
+    ?? new LocalSkillActionRepository(join(stateRoot, 'skills', 'actions.json'))
+  const skillRuntime = new CharacterSkillRuntime(store, {
+    registry: skillRegistry,
+    actions: skillActions,
+  })
   const runtimeUpdates = new RuntimeUpdateService(store, stateRoot, workspaceRoot)
   const assets = new AssetService(store, stateRoot)
   const worldFiles = new WorldFileService(worldRoots)
@@ -186,10 +200,10 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerAssetRoutes(router, { store, assets, access: worldAccess })
   registerWorldRoutes(router, { store, worldAccess })
   registerWorldSettingsRoutes(router, { store, settings: worldSettings, access: worldAccess })
-  registerPackageRoutes(router, { store, packageManager, packageCatalog })
+  registerPackageRoutes(router, { store, packageManager, packageCatalog, skillRuntime })
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
   registerModelInteractionRoutes(router, { store, interactions })
-  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings })
+  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings })
   registerEmployeeRoutes(router, { store, worldAccess })
 
   const httpServer = createServer((request, response) => {
@@ -218,12 +232,14 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       if (address === null || typeof address === 'string') throw new Error('Server did not expose a TCP address')
       startedAddress = { host, port: address.port, origin: `http://${host}:${address.port}` }
       ambientLifeScheduler.start()
+      skillRuntime.start()
       return startedAddress
     },
     address() { return startedAddress },
     async close() {
       if (closed) return
       closed = true
+      skillRuntime.close()
       await ambientLifeScheduler.close()
       unsubscribe()
       runtimeStreamHub.close()

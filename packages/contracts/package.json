@@ -10,9 +10,21 @@
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
     },
+    "./embodiment": {
+      "types": "./lib/embodiment.d.ts",
+      "default": "./lib/embodiment.js"
+    },
+    "./skill-runtime": {
+      "types": "./lib/skill-runtime.d.ts",
+      "default": "./lib/skill-runtime.js"
+    },
     "./world-simulation": {
       "types": "./lib/world-simulation.d.ts",
       "default": "./lib/world-simulation.js"
+    },
+    "./creative-platform": {
+      "types": "./lib/creative-platform.d.ts",
+      "default": "./lib/creative-platform.js"
     }
   },
   "files": ["lib"],

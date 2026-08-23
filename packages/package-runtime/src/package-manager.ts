@@ -28,6 +28,7 @@ export interface PackageRuntimePort {
 
 export interface PackageStorePort {
   getActivePackage(workspaceId: string, packageId: string): InstalledPackage | undefined
+  getPackageInstallTransaction(transactionId: string): PackageInstallTransaction | undefined
   beginPackageInstall(input: {
     workspaceId: string
     manifest: CyberPackageManifest
@@ -46,6 +47,11 @@ export interface PackageStorePort {
     errorCode: string
     actorId?: string
   }): PackageInstallTransaction
+  compensateActivatedPackageInstall(input: {
+    transactionId: string
+    errorCode: string
+    actorId?: string
+  }): PackageInstallTransaction
 }
 
 export interface InstallPackageInput {
@@ -54,6 +60,12 @@ export interface InstallPackageInput {
   sourceDirectory: string
   approvalToken: string
   actorId?: string
+}
+
+export interface ReversiblePackageInstallation {
+  installed: InstalledPackage
+  transactionId: string
+  receipt: PackageActivationReceipt
 }
 
 export class PackageApprovalRequiredError extends Error {
@@ -166,6 +178,10 @@ export class PackageManager {
   }
 
   async install(input: InstallPackageInput): Promise<InstalledPackage> {
+    return (await this.installReversible(input)).installed
+  }
+
+  async installReversible(input: InstallPackageInput): Promise<ReversiblePackageInstallation> {
     validatePackageManifest(input.manifest)
     const digest = tokenDigest(input.approvalToken)
     const grant = this.#approvalGrants.get(digest)
@@ -201,7 +217,8 @@ export class PackageManager {
         installedPath: receipt.installedPath,
       }
       if (input.actorId !== undefined) completeInput.actorId = input.actorId
-      return this.#store.completePackageInstall(completeInput)
+      const installed = this.#store.completePackageInstall(completeInput)
+      return { installed, transactionId: transaction.id, receipt }
     } catch (error) {
       if (receipt !== undefined) await this.#runtime.rollback(receipt).catch(() => undefined)
       if (staged !== undefined) await this.#runtime.discard(staged).catch(() => undefined)
@@ -214,6 +231,37 @@ export class PackageManager {
       this.#store.rollbackPackageInstall(rollbackInput)
       throw new PackageInstallError(errorCode, error)
     }
+  }
+
+  /**
+   * Idempotently compensate one previously activated install.
+   *
+   * Crash recovery may replay compensation after the filesystem or DB half of a
+   * rollback already completed. The durable transaction is authoritative: a
+   * rolled-back transaction is already safe, while any other non-activated
+   * state is not a valid compensation target.
+   */
+  async compensate(
+    installation: ReversiblePackageInstallation,
+    errorCode: string,
+    actorId = 'system',
+  ): Promise<void> {
+    const transaction = this.#store.getPackageInstallTransaction(installation.transactionId)
+    if (transaction?.status === 'rolled-back') return
+    if (transaction === undefined || transaction.status !== 'activated') {
+      throw new Error(`Package install transaction cannot be compensated from ${transaction?.status ?? 'missing'}`)
+    }
+
+    // LocalPackageRuntime.rollback is intentionally idempotent: restoring the
+    // previous pointer twice and force-removing an already removed install path
+    // are both safe. This closes the crash window between filesystem rollback
+    // and SQLite compensation.
+    await this.#runtime.rollback(installation.receipt)
+    this.#store.compensateActivatedPackageInstall({
+      transactionId: installation.transactionId,
+      errorCode,
+      actorId,
+    })
   }
 
   #purgeApprovalGrants(nowMs: number): void {

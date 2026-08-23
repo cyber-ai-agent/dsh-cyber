@@ -113,6 +113,7 @@ export interface ReviseEmployeeInput {
 export interface ReviseEmployeeProfileInput {
   employeeId: string
   displayName?: string
+  role?: string
   birthday?: string | null
   background?: string
   personalityTraits?: string[]
@@ -1084,6 +1085,23 @@ export class SqliteStore {
     return this.database.prepare(sql).all(workspaceId).map(mapWorld)
   }
 
+  rollbackWorldCreation(worldId: string, reason: string, actorId = 'system'): void {
+    this.#assertWritable()
+    const world = this.#requireWorld(worldId)
+    const workspaceId = world.workspaceId
+    const normalizedReason = reason.trim() || 'construction-failed'
+    this.#transaction(() => {
+      this.database.prepare('DELETE FROM worlds WHERE id = ?').run(world.id)
+      this.#appendEvent({
+        workspaceId,
+        type: 'world.creation.rolled-back',
+        actorId,
+        actorKind: actorId === 'system' ? 'system' : 'owner',
+        payload: { discardedWorldId: world.id, name: world.name, reason: normalizedReason },
+      })
+    })
+  }
+
   saveBlueprint(blueprint: EmployeeBlueprint): EmployeeBlueprint {
     this.#assertWritable()
     if (blueprint.schemaVersion !== 1) throw new PersistenceError('Unsupported employee blueprint schema')
@@ -1105,8 +1123,8 @@ export class SqliteStore {
       .prepare(
         `INSERT INTO employee_blueprints (
            id, version, world_template_id, display_name, role, summary, persona,
-           requested_skills_json, requested_capabilities_json, created_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           requested_skills_json, requested_capabilities_json, embodiment_json, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         blueprint.id,
@@ -1118,6 +1136,7 @@ export class SqliteStore {
         blueprint.persona,
         stringifyJson(blueprint.requestedSkills),
         stringifyJson(blueprint.requestedCapabilities),
+        blueprint.embodiment === undefined ? null : stringifyJson(blueprint.embodiment as unknown as JsonValue),
         blueprint.createdAt,
       )
     return blueprint
@@ -1137,6 +1156,17 @@ export class SqliteStore {
       .map(mapBlueprint)
   }
 
+  discardBlueprintIfUnused(id: string, version: number): boolean {
+    this.#assertWritable()
+    const used = this.database
+      .prepare('SELECT 1 AS used FROM employee_instances WHERE blueprint_id = ? AND blueprint_version = ? LIMIT 1')
+      .get(id, version)
+    if (used !== undefined) return false
+    return this.database
+      .prepare('DELETE FROM employee_blueprints WHERE id = ? AND version = ?')
+      .run(id, version).changes > 0
+  }
+
   recruitEmployee(input: RecruitEmployeeInput): EmployeeInstance {
     this.#assertWritable()
     const workspace = this.#requireWorkspace(input.workspaceId)
@@ -1150,7 +1180,13 @@ export class SqliteStore {
         `Employee blueprint not found: ${input.blueprintId}@${input.blueprintVersion}`,
       )
     }
-    if (blueprint.worldTemplateId !== world.templateId && world.templateId !== 'personal-world') {
+    // A Blueprint with explicit semantic Embodiment is portable. Legacy
+    // Blueprints without Embodiment keep their original template restriction.
+    if (
+      blueprint.embodiment === undefined
+      && blueprint.worldTemplateId !== world.templateId
+      && world.templateId !== 'personal-world'
+    ) {
       throw new PersistenceError(
         `Blueprint ${blueprint.id}@${blueprint.version} belongs to ${blueprint.worldTemplateId}, not ${world.templateId}`,
       )
@@ -1387,9 +1423,12 @@ export class SqliteStore {
     const previous = this.getEmployeeProfile(employee.id)
     const birthday = input.birthday === undefined ? previous?.birthday : input.birthday ?? undefined
     const displayName = (input.displayName ?? employee.displayName).trim()
+    const role = (input.role ?? employee.role).trim()
     if (birthday !== undefined) assertBirthday(birthday)
     if (!displayName) throw new PersistenceError('Employee display name cannot be empty')
     if (displayName.length > 48) throw new PersistenceError('Employee display name is too long')
+    if (!role) throw new PersistenceError('Character identity label cannot be empty')
+    if (role.length > 100) throw new PersistenceError('Character identity label is too long')
     const profile: EmployeeProfile = {
       employeeId: employee.id,
       revision: (previous?.revision ?? 0) + 1,
@@ -1405,10 +1444,10 @@ export class SqliteStore {
     assertSecretFree(profile.appearance)
 
     return this.#transaction(() => {
-      if (displayName !== employee.displayName) {
+      if (displayName !== employee.displayName || role !== employee.role) {
         this.database
-          .prepare('UPDATE employee_instances SET display_name = ?, updated_at = ? WHERE id = ?')
-          .run(displayName, profile.createdAt, employee.id)
+          .prepare('UPDATE employee_instances SET display_name = ?, role = ?, updated_at = ? WHERE id = ?')
+          .run(displayName, role, profile.createdAt, employee.id)
       }
       this.database
         .prepare(
@@ -1438,7 +1477,8 @@ export class SqliteStore {
           revision: profile.revision,
           reason: profile.reason,
           displayName,
-          identityChanged: displayName !== employee.displayName,
+          role,
+          identityChanged: displayName !== employee.displayName || role !== employee.role,
         },
       })
       return profile
@@ -2255,6 +2295,65 @@ export class SqliteStore {
           packageId: transaction.packageId,
           version: transaction.version,
           errorCode: rolledBack.errorCode ?? 'install-failed',
+        },
+      })
+      return rolledBack
+    })
+  }
+
+  compensateActivatedPackageInstall(input: RollbackPackageInstallInput): PackageInstallTransaction {
+    this.#assertWritable()
+    const transaction = this.getPackageInstallTransaction(input.transactionId)
+    if (transaction === undefined || transaction.status !== 'activated') {
+      throw new PersistenceError('Only an activated package install can be compensated')
+    }
+    const active = this.getActivePackage(transaction.workspaceId, transaction.packageId)
+    if (active === undefined || active.version !== transaction.version) {
+      throw new PersistenceError('Activated package no longer matches the compensation target')
+    }
+    const now = this.#clock()
+    const rolledBack: PackageInstallTransaction = {
+      ...transaction,
+      status: 'rolled-back',
+      errorCode: input.errorCode,
+      updatedAt: now,
+    }
+    return this.#transaction(() => {
+      this.database
+        .prepare(
+          `UPDATE installed_packages SET status = 'disabled', updated_at = ?
+           WHERE workspace_id = ? AND package_id = ? AND version = ? AND status = 'active'`,
+        )
+        .run(now, transaction.workspaceId, transaction.packageId, transaction.version)
+      if (transaction.previousVersion !== undefined) {
+        const restored = this.database
+          .prepare(
+            `UPDATE installed_packages SET status = 'active', updated_at = ?
+             WHERE workspace_id = ? AND package_id = ? AND version = ?`,
+          )
+          .run(now, transaction.workspaceId, transaction.packageId, transaction.previousVersion)
+        if (restored.changes !== 1) throw new PersistenceError('Previous package version cannot be restored')
+      }
+      this.database
+        .prepare(
+          `UPDATE package_install_transactions
+           SET status = 'rolled-back', error_code = ?, updated_at = ?
+           WHERE id = ? AND status = 'activated'`,
+        )
+        .run(input.errorCode, now, transaction.id)
+      this.#appendEvent({
+        workspaceId: transaction.workspaceId,
+        type: 'package.install.rolled-back',
+        actorId: input.actorId ?? 'system',
+        actorKind: input.actorId === undefined || input.actorId === 'system' ? 'system' : 'owner',
+        correlationId: transaction.id,
+        payload: {
+          transactionId: transaction.id,
+          packageId: transaction.packageId,
+          version: transaction.version,
+          previousVersion: transaction.previousVersion ?? null,
+          errorCode: input.errorCode,
+          compensatedAfterActivation: true,
         },
       })
       return rolledBack
@@ -3149,7 +3248,8 @@ function employeeBlueprintEquals(left: EmployeeBlueprint, right: EmployeeBluepri
     left.persona === right.persona &&
     left.createdAt === right.createdAt &&
     [...left.requestedSkills].sort().join('\u0000') === [...right.requestedSkills].sort().join('\u0000') &&
-    [...left.requestedCapabilities].sort().join('\u0000') === [...right.requestedCapabilities].sort().join('\u0000')
+    [...left.requestedCapabilities].sort().join('\u0000') === [...right.requestedCapabilities].sort().join('\u0000') &&
+    JSON.stringify(left.embodiment ?? null) === JSON.stringify(right.embodiment ?? null)
 }
 
 function assertBirthday(value: string): void {
@@ -3250,7 +3350,7 @@ function mapWorld(row: object): World {
 
 function mapBlueprint(row: object): EmployeeBlueprint {
   const value = row as Record<string, unknown>
-  return {
+  const blueprint: EmployeeBlueprint = {
     schemaVersion: 1,
     id: String(value.id),
     version: Number(value.version),
@@ -3263,6 +3363,10 @@ function mapBlueprint(row: object): EmployeeBlueprint {
     requestedCapabilities: parseJson<string[]>(value.requested_capabilities_json),
     createdAt: String(value.created_at),
   }
+  if (typeof value.embodiment_json === 'string') {
+    blueprint.embodiment = parseJson<NonNullable<EmployeeBlueprint['embodiment']>>(value.embodiment_json)
+  }
+  return blueprint
 }
 
 function mapEmployee(row: object): EmployeeInstance {

@@ -12,6 +12,7 @@ import {
 } from '@dsh-cyber/harness-adapter'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
+import { createLocalBackupBundle } from './local-backup-service.js'
 import { ServiceError } from './service-error.js'
 
 export class RuntimeUpdateService {
@@ -115,9 +116,9 @@ export class RuntimeUpdateService {
     if (!verification.ok || verification.version !== transaction.version) {
       throw new ServiceError('conflict', 'runtime_candidate_changed', 'Candidate changed after canary verification')
     }
-    const backup = await this.#store.backup(
-      join(this.#stateRoot, 'backups', `pre-runtime-${artifactTimestamp()}.sqlite`),
-    )
+    const backup = await createLocalBackupBundle(this.#stateRoot, this.#store, {
+      output: join(this.#stateRoot, 'backups', `pre-runtime-${artifactTimestamp()}.dshbackup`),
+    })
     const previousPointer = await readActiveHarnessRuntime(this.#runtimeRoot)
     try {
       await writeActiveHarnessRuntime(this.#runtimeRoot, {
@@ -130,7 +131,7 @@ export class RuntimeUpdateService {
       const updated = this.#store.transitionRuntimeUpdate({
         transactionId: transaction.id,
         status: 'activated',
-        report: { ok: true, backup, restartRequired: true },
+        report: { ok: true, backup, restartRequired: true, localStateBundle: true },
       })
       return { ok: true as const, transaction: updated, backup, restartRequired: true as const }
     } catch (error) {
@@ -148,9 +149,9 @@ export class RuntimeUpdateService {
     if (transaction.status !== 'activated') {
       throw new ServiceError('conflict', 'runtime_update_not_active', 'Only an activated runtime can be rolled back')
     }
-    const backup = await this.#store.backup(
-      join(this.#stateRoot, 'backups', `pre-rollback-${artifactTimestamp()}.sqlite`),
-    )
+    const backup = await createLocalBackupBundle(this.#stateRoot, this.#store, {
+      output: join(this.#stateRoot, 'backups', `pre-rollback-${artifactTimestamp()}.dshbackup`),
+    })
     if (transaction.previousRuntimeRoot === undefined) {
       await clearActiveHarnessRuntime(this.#runtimeRoot)
     } else {
@@ -176,7 +177,7 @@ export class RuntimeUpdateService {
     const updated = this.#store.transitionRuntimeUpdate({
       transactionId: transaction.id,
       status: 'rolled-back',
-      report: { ok: true, backup, restartRequired: true },
+      report: { ok: true, backup, restartRequired: true, localStateBundle: true },
     })
     return { ok: true as const, transaction: updated, backup, restartRequired: true as const }
   }

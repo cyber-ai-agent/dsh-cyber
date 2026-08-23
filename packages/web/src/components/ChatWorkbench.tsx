@@ -117,7 +117,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
       <header className="chat-header">
         <div className="chat-header__identity">
           <span className="chat-header__avatars" aria-hidden="true">{participantEmployees.slice(0, 3).map((employee) => <Avatar key={employee.id} index={employee.avatarIndex} size="sm" label={employee.displayName} />)}</span>
-          <span><h1>{conversationTitle}</h1><p>{conversationKind === undefined ? `从左侧通讯录选择一名${experience.personLabel}，或创建群聊` : `${conversationKind === 'group' ? '群聊' : '私聊'} · ${participantEmployees.length} 名成员 · ${world.name}`}</p></span>
+          <span><h1>{conversationTitle}</h1><p>{conversationKind === undefined ? `从左侧会话列表进入私聊，或创建群聊` : `${conversationKind === 'group' ? '群聊' : '私聊'} · ${participantEmployees.length} 名成员 · ${world.name}`}</p></span>
         </div>
         <div className="chat-header__count">{messages.length}<span>条消息</span></div>
       </header>
@@ -126,9 +126,8 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
         {messages.length === 0 ? (
           <div className="conversation-empty">
             <TerminalWindow size={34} />
-            <h2>{employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? '群聊已准备好' : conversationKind === 'direct' ? `开始与${participantEmployees[0]?.displayName ?? experience.personLabel}对话` : '选择联系人开始互动'}</h2>
-            <p>{employees.length === 0 ? experience.emptyCopy : conversationKind === 'group' ? '发送第一条消息后，群聊和多人协作才会正式创建。关闭或切换不会让角色提前进入会议状态。' : conversationKind === 'direct' ? '历史记录会保留在当前世界；发送消息后角色才会进入真实运行过程。' : '角色像通讯录联系人一样存在：单击私聊，也可以创建多人群聊。'}</p>
-            {employees.length === 0 ? <button className="primary-button" type="button" onClick={onRecruit}>{experience.kind === 'tavern' ? '邀请第一张角色卡' : `添加第一名${experience.personLabel}`}</button> : null}
+            <h2>{employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? '群聊已准备好' : conversationKind === 'direct' ? `开始与${participantEmployees[0]?.displayName ?? experience.personLabel}对话` : '选择会话开始互动'}</h2>
+            <p>{employees.length === 0 ? experience.emptyCopy : conversationKind === 'group' ? '发送第一条消息后，群聊和多人协作才会正式创建。关闭或切换不会让角色提前进入会议状态。' : conversationKind === 'direct' ? '历史记录会保留在当前世界；发送消息后角色才会进入真实运行过程。' : '左侧只保留会话：每个角色固定一个私聊，也可以创建多人群聊；角色新增与管理统一在右侧档案。'}</p>
           </div>
         ) : messages.map((message, index) => {
           const employee = employees.find((item) => item.id === message.senderId)
@@ -155,7 +154,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
         {suggestions.length === 0 ? null : <div className="mention-menu" role="listbox" aria-label="当前世界角色">{suggestions.map((employee) => <button key={employee.id} type="button" onClick={() => insertMention(employee)}><Avatar index={employee.avatarIndex} size="sm" label={employee.displayName} /><span><strong>{employee.displayName}</strong><small>{employee.role} · 独立角色</small></span></button>)}</div>}
         {attachments.length > 0 ? <div className="composer-attachments" aria-label="待发送附件">{attachments.map((attachment) => <span key={attachment.assetId}><FileIcon size={15} /><span><strong>{attachment.name}</strong><small>{formatBytes(attachment.byteLength)}</small></span><button type="button" aria-label={`移除附件 ${attachment.name}`} onClick={() => setAttachments((current) => current.filter((item) => item.assetId !== attachment.assetId))}><X size={13} /></button></span>)}</div> : null}
         {attachmentError === undefined ? null : <p className="composer-error" role="alert">{attachmentError}</p>}
-        <textarea ref={inputRef} value={draft} onChange={(event) => onDraftChange(event.target.value)} disabled={employees.length === 0} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit() } }} placeholder={employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? `发送消息给 ${participantEmployees.map((employee) => employee.displayName).join('、')}` : conversationKind === 'direct' ? `发送消息给 ${participantEmployees[0]?.displayName ?? experience.personLabel}` : '先从左侧选择联系人，或输入 @角色名'} rows={2} aria-label={`给当前世界的${experience.peopleLabel}发送消息`} />
+        <textarea ref={inputRef} value={draft} onChange={(event) => onDraftChange(event.target.value)} disabled={employees.length === 0} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit() } }} placeholder={employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? `发送消息给 ${participantEmployees.map((employee) => employee.displayName).join('、')}` : conversationKind === 'direct' ? `发送消息给 ${participantEmployees[0]?.displayName ?? experience.personLabel}` : '先从左侧选择会话，或输入 @角色名'} rows={2} aria-label={`给当前世界的${experience.peopleLabel}发送消息`} />
         <div className="composer__toolbar"><div>
           <input ref={fileInputRef} className="composer-file-input" type="file" accept=".png,.jpg,.jpeg,.webp,.txt,.md,.json,.pdf" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAttachment(file) }} />
           <button className="icon-button" type="button" aria-label={uploading ? '正在上传附件' : '添加附件'} disabled={uploading} onClick={() => fileInputRef.current?.click()}>{uploading ? <CircleNotch size={18} className="spin" /> : <Paperclip size={18} />}</button>

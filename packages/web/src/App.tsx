@@ -47,6 +47,7 @@ import type {
 import { ApiError, api } from './api.js'
 import { ArtifactDock } from './components/ArtifactDock.js'
 import { ChatWorkbench } from './components/ChatWorkbench.js'
+import { CreativeWorkshopLauncher } from './components/CreativeWorkshopLauncher.js'
 import { EmployeeManagementDialog } from './components/EmployeeManagementDialog.js'
 import { GroupConversationDialog } from './components/GroupConversationDialog.js'
 import { NavigationPane } from './components/NavigationPane.js'
@@ -218,6 +219,15 @@ export default function App() {
     setSessions(snapshot.openSessions)
     setSessionParticipants(Object.fromEntries(participantResults))
   }, [clearLiveTurns])
+
+  const openWorkshopWorld = useCallback(async (worldId: string) => {
+    if (workspace === undefined || demoMode) return
+    const snapshot = await api<WorkspaceSnapshot>(`/api/workspaces/${workspace.id}/snapshot`)
+    setWorlds(snapshot.worlds)
+    const target = snapshot.worlds.find((world) => world.id === worldId)
+    if (target === undefined) throw new Error('创意工坊对应的世界不存在或已归档')
+    await loadWorld(target)
+  }, [loadWorld, workspace])
 
   const bindWorldTheme = useCallback(async (packageId: string) => {
     if (activeWorld === undefined) throw new Error('世界尚未就绪')
@@ -610,6 +620,7 @@ export default function App() {
 
   const updateEmployeeProfile = useCallback(async (input: {
     displayName: string
+    role: string
     avatarIndex: number
     background: string
     personalityTraits: string[]
@@ -647,6 +658,7 @@ export default function App() {
           method: 'PUT',
           body: JSON.stringify({
             displayName: input.displayName,
+            role: input.role,
             background: input.background,
             personalityTraits: input.personalityTraits,
             appearance,
@@ -657,13 +669,13 @@ export default function App() {
       }
       const updatedAt = profile?.createdAt ?? new Date().toISOString()
       setEmployees((current) => current.map((employee) => employee.id === managingEmployee.id
-        ? { ...employee, displayName: input.displayName, avatarIndex: input.avatarIndex, updatedAt }
+        ? { ...employee, displayName: input.displayName, role: input.role, avatarIndex: input.avatarIndex, updatedAt }
         : employee))
       setDossiers((current) => {
         const dossier = current[managingEmployee.id]
         return dossier === undefined
           ? current
-          : { ...current, [managingEmployee.id]: { ...dossier, employee: { ...dossier.employee, displayName: input.displayName, updatedAt }, ...(profile === undefined ? {} : { profile }) } }
+          : { ...current, [managingEmployee.id]: { ...dossier, employee: { ...dossier.employee, displayName: input.displayName, role: input.role, updatedAt }, ...(profile === undefined ? {} : { profile }) } }
       })
       setWorldRuntimeRevision((value) => value + 1)
     } catch (cause) {
@@ -1096,9 +1108,8 @@ export default function App() {
           onExplore={() => void openPackageMarket('theme')}
         />
         <nav aria-label="全局功能">
-          <button type="button" onClick={() => void openPackageMarket('theme')}><Buildings size={16} />主题市场</button>
-          <button type="button" onClick={() => void openPackageMarket('plugin')}><Cube size={16} />插件市场</button>
-          <button type="button" onClick={() => void openPackageMarket('talent')}><Storefront size={16} />角色市场</button>
+          <CreativeWorkshopLauncher workspaceId={workspace.id} onCreated={(project) => void openWorkshopWorld(project.worldId)} onOpenWorld={(worldId) => void openWorkshopWorld(worldId)} />
+          <button type="button" onClick={() => void openPackageMarket(packageMarketKind)}><Storefront size={16} />市场</button>
           <button type="button" onClick={() => { setSettingsSection('runtime'); setSettingsOpen(true) }}><Pulse size={16} /><span>运行时健康</span><i className="health-indicator" />良好</button>
           <button type="button" onClick={() => { setSettingsSection('appearance'); setSettingsOpen(true) }}><GearSix size={17} />设置</button>
         </nav>
@@ -1144,8 +1155,8 @@ export default function App() {
             onSend={send}
             onUploadAttachment={uploadChatAttachment}
             onOpenDossier={(employeeId) => void openDossier(employeeId)}
-            onOpenArtifact={() => { setAppMode('workbench'); setDockCollapsed(false); setDockTab('preview') }}
-            onRecruit={() => void openRecruitment()}
+            onOpenArtifact={() => { setAppMode('world'); setDockCollapsed(false); setDockTab('world') }}
+            onRecruit={() => { setSelectedEmployeeId(undefined); setDockCollapsed(false); setDockTab('dossier') }}
           />
         )}
         right={(
@@ -1188,7 +1199,6 @@ export default function App() {
           }
           createGroupIntent({ employeeIds: selected.map((employee) => employee.id), title: selected.map((employee) => employee.displayName).join('、') })
         }}
-                  onRecruit={() => void openRecruitment()}
                 />
               ),
             } : {})}

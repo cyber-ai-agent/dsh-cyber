@@ -9,6 +9,10 @@
     ".": {
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
+    },
+    "./creative": {
+      "types": "./lib/creative-presets.d.ts",
+      "default": "./lib/creative-presets.js"
     }
   },
   "files": ["lib"],

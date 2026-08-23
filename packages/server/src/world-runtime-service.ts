@@ -18,13 +18,12 @@ import {
   projectWorldRuntime,
   validateWorldThemeManifest,
 } from '@dsh-cyber/world-runtime'
-import { readCharacterBehaviorProfile } from '@dsh-cyber/world-simulation'
-
 import {
   InstalledPackageVerificationCache,
   loadInstalledWorldThemes,
   readInstalledWorldThemeAsset,
 } from './installed-package-runtime.js'
+import { resolveConfiguredCharacterBehavior } from './services/character-behavior-resolver.js'
 
 const ACTIVE_RENDERERS = new Set(['pixi-2d'])
 
@@ -339,9 +338,7 @@ export class WorldRuntimeService {
 
     const previous = this.#store.getWorldRuntimeSnapshot(worldId)
     const employees = this.#store.listEmployees(worldId).map((employee) => {
-      const behaviorProfile = readCharacterBehaviorProfile(
-        this.#store.getEmployeeProfile(employee.id)?.appearance,
-      )
+      const behaviorProfile = resolveConfiguredCharacterBehavior(this.#store, employee)
       return behaviorProfile === undefined ? employee : { ...employee, behaviorProfile }
     })
     this.#simulationStore.cleanupExpiredReservations(this.#clock())

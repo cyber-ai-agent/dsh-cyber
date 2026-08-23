@@ -23,6 +23,8 @@ import {
   DelegatedCollaborationService,
   detectDelegatedCollaboration,
 } from '../services/delegated-collaboration-service.js'
+import { ConversationHubService } from '../services/conversation-hub-service.js'
+import type { CharacterSkillRuntime } from '../services/character-skill-runtime.js'
 import type { PeerCollaborationService } from '../services/peer-collaboration-service.js'
 import type { RuntimeStreamHub } from '../streams/runtime-stream-hub.js'
 import type { WorldRuntimeService } from '../world-runtime-service.js'
@@ -35,6 +37,7 @@ export interface ConversationRoutesDependencies {
   store: SqliteStore
   orchestrator: ConversationOrchestrator
   peerCollaboration: PeerCollaborationService
+  skillRuntime: CharacterSkillRuntime
   runtimeStreamHub: RuntimeStreamHub
   worldRuntime: WorldRuntimeService
   worldAccess: WorldAccessService
@@ -47,6 +50,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     store,
     orchestrator,
     peerCollaboration,
+    skillRuntime,
     runtimeStreamHub,
     worldRuntime,
     worldAccess,
@@ -59,6 +63,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     peerCollaboration,
     worldSettings,
   })
+  const conversationHub = new ConversationHubService(store)
 
   router.post(/^\/api\/worlds\/([^/]+)\/chat$/, async ({ request, response, params }) => {
     const world = store.getWorld(params[0]!)
@@ -81,13 +86,18 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
       ...(attachments.length === 0 ? {} : { attachments: attachments.map(chatAttachmentJson) }),
     }
     const title = optionalString(body.title)
-    const sessionId = optionalString(body.sessionId)
+    const requestedSessionId = optionalString(body.sessionId)
     let result
     if (employeeIds.length === 1) {
       const character = store.getEmployee(employeeIds[0]!)
       if (character === undefined || character.worldId !== world.id) {
         throw new HttpError(422, 'character_unavailable', '所选角色不属于当前世界')
       }
+      const canonical = (await conversationHub.list(world.id))
+        .find((item) => item.canonicalCharacterId === character.id)
+      const sessionId = requestedSessionId ?? canonical?.session.id
+      if (sessionId !== undefined) await conversationHub.restoreCanonicalDirect(sessionId)
+
       const delegation = detectDelegatedCollaboration({
         prompt,
         initiator: character,
@@ -105,13 +115,22 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
           ...(title === undefined ? {} : { title }),
         })
       } else {
+        const skillResult = await skillRuntime.prepare(world.id, character.id, prompt)
+        const runtimeSource = skillResult.handled && skillResult.summary
+          ? `${transformedPrompt}\n\n[已授权角色技能的真实执行结果]\n${skillResult.summary}\n只能根据以上真实状态向用户说明“已执行、已计划、等待绑定、失败或结果未知”。对“结果未知”不得声称已经成功或确定失败，也不得自动重试可能产生外部副作用的动作。`
+          : transformedPrompt
+        if (skillResult.handled) {
+          metadata.skillId = skillResult.skillId ?? ''
+          metadata.skillActionIds = skillResult.actions.map((item) => item.id)
+          metadata.skillActionStatuses = skillResult.actions.map((item) => item.status)
+        }
         const directInput: DirectConversationInput = {
           workspaceId: world.workspaceId,
           worldId: world.id,
           employeeId: character.id,
           prompt,
           metadata,
-          runtimePrompt: await worldSettings.composeRuntimePrompt(world.id, character, transformedPrompt),
+          runtimePrompt: await worldSettings.composeRuntimePrompt(world.id, character, runtimeSource),
           ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
         }
         if (sessionId !== undefined) directInput.sessionId = sessionId
@@ -127,12 +146,19 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
         metadata,
         runtimePrompt: await worldSettings.composeGroupRuntimePrompt(world.id, transformedPrompt),
         ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
-        ...(sessionId === undefined ? {} : { sessionId }),
+        ...(requestedSessionId === undefined ? {} : { sessionId: requestedSessionId }),
         ...(title === undefined ? {} : { title }),
       })
     }
     worldRuntime.publishCurrent(world.id)
     writeJson(response, 200, result)
+  })
+
+  router.get(/^\/api\/worlds\/([^/]+)\/skill-actions$/, async ({ request, response, params }) => {
+    const worldId = params[0]!
+    if (store.getWorld(worldId) === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
+    await worldAccess.assertUnlocked(worldId, request)
+    writeJson(response, 200, { items: await skillRuntime.list(worldId) })
   })
 
   router.post(/^\/api\/worlds\/([^/]+)\/peer-conversations$/, async ({ request, response, params }) => {
@@ -143,21 +169,14 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     const initiatorId = requiredString(body, 'initiatorId')
     const participantIds = optionalStringArray(body.participantIds)
     const purpose = requiredString(body, 'purpose')
-    if (purpose.length > 2_000) {
-      throw new HttpError(422, 'purpose_too_long', '角色协作目标不能超过 2000 个字符')
-    }
+    if (purpose.length > 2_000) throw new HttpError(422, 'purpose_too_long', '角色协作目标不能超过 2000 个字符')
     const maxRounds = optionalPositiveInteger(body.maxRounds) ?? 1
-    if (maxRounds > 3) {
-      throw new HttpError(422, 'invalid_rounds', '角色协作最多进行 3 轮')
-    }
+    if (maxRounds > 3) throw new HttpError(422, 'invalid_rounds', '角色协作最多进行 3 轮')
     const settings = await worldSettings.get(world.id)
     const requestedReasoning = body.reasoningEffort === undefined
       ? settings.model.reasoningEffort
       : requiredEnum<ReasoningEffort>(body, 'reasoningEffort', ['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
-    const transformedPurpose = await applyInstalledPromptTransforms(
-      store.listInstalledPackages(world.workspaceId),
-      purpose,
-    )
+    const transformedPurpose = await applyInstalledPromptTransforms(store.listInstalledPackages(world.workspaceId), purpose)
     const peerTitle = optionalString(body.title)
     const result = await peerCollaboration.run({
       workspaceId: world.workspaceId,
@@ -198,18 +217,14 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
 
 async function validatedChatAttachments(value: unknown, store: SqliteStore, workspaceId: string, worldId: string, worldFiles: WorldFileService): Promise<ChatAttachment[]> {
   if (value === undefined) return []
-  if (!Array.isArray(value) || value.length > 8) {
-    throw new HttpError(422, 'invalid_attachments', 'Attachments must be an array with at most 8 items')
-  }
+  if (!Array.isArray(value) || value.length > 8) throw new HttpError(422, 'invalid_attachments', 'Attachments must be an array with at most 8 items')
   return Promise.all(value.map(async (item) => {
     const input = record(item)
     if (input === undefined) throw new HttpError(422, 'invalid_attachment', 'Invalid attachment')
     const assetId = requiredString(input, 'assetId')
     const asset = store.getLocalAsset(assetId)
     if (asset !== undefined) {
-      if (asset.workspaceId !== workspaceId || asset.kind !== 'attachment') {
-        throw new HttpError(422, 'attachment_unavailable', 'Attachment does not belong to this workspace')
-      }
+      if (asset.workspaceId !== workspaceId || asset.kind !== 'attachment') throw new HttpError(422, 'attachment_unavailable', 'Attachment does not belong to this workspace')
       return {
         assetId: asset.id,
         name: requiredString(input, 'name').slice(0, 180),
@@ -221,12 +236,8 @@ async function validatedChatAttachments(value: unknown, store: SqliteStore, work
     try {
       return await worldFiles.getAttachment(worldId, assetId)
     } catch (error) {
-      if (error instanceof ServiceError && error.code === 'asset_not_found') {
-        throw new HttpError(422, 'attachment_unavailable', 'Attachment does not belong to this workspace')
-      }
-      if (error instanceof ServiceError) {
-        throw new HttpError(422, 'invalid_attachment', '附件已损坏或无法读取，请重新上传')
-      }
+      if (error instanceof ServiceError && error.code === 'asset_not_found') throw new HttpError(422, 'attachment_unavailable', 'Attachment does not belong to this workspace')
+      if (error instanceof ServiceError) throw new HttpError(422, 'invalid_attachment', '附件已损坏或无法读取，请重新上传')
       throw error
     }
   }))

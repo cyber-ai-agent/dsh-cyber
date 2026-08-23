@@ -1,0 +1,309 @@
+.creative-workshop-dialog {
+  width: min(1180px, calc(100vw - 48px));
+  max-height: min(860px, calc(100vh - 48px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle, rgba(255,255,255,.1));
+  border-radius: 20px;
+  background: var(--world-panel, #15181f);
+  color: var(--world-text, #f4f6fa);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, .42);
+}
+
+.creative-workshop-layout {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
+  flex: 1;
+  overflow: hidden;
+  border-top: 1px solid var(--border-subtle, rgba(255,255,255,.08));
+  border-bottom: 1px solid var(--border-subtle, rgba(255,255,255,.08));
+}
+
+.creative-workshop-sidebar,
+.creative-workshop-role-editor {
+  min-height: 0;
+  overflow: auto;
+}
+
+.creative-workshop-sidebar {
+  padding: 20px;
+  border-right: 1px solid var(--border-subtle, rgba(255,255,255,.08));
+  background: color-mix(in srgb, var(--world-panel, #15181f) 94%, black);
+}
+
+.creative-workshop-role-editor {
+  padding: 24px 28px 32px;
+}
+
+.creative-workshop-world-card,
+.creative-workshop-presets,
+.creative-workshop-skills {
+  padding: 16px;
+  border: 1px solid var(--border-subtle, rgba(255,255,255,.09));
+  border-radius: 14px;
+  background: rgba(255,255,255,.025);
+}
+
+.creative-workshop-section-title,
+.creative-workshop-role-heading,
+.creative-workshop-role-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.creative-workshop-section-title {
+  justify-content: flex-start;
+  margin-bottom: 14px;
+}
+
+.creative-workshop-role-heading {
+  margin: 22px 2px 10px;
+}
+
+.creative-workshop-role-heading button,
+.creative-workshop-role-toolbar > button {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.creative-workshop-role-list {
+  display: grid;
+  gap: 8px;
+}
+
+.creative-workshop-role-list > button {
+  width: 100%;
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+}
+
+.creative-workshop-role-list > button:hover,
+.creative-workshop-role-list > button.is-active {
+  border-color: color-mix(in srgb, var(--world-accent, #7d8cff) 42%, transparent);
+  background: color-mix(in srgb, var(--world-accent, #7d8cff) 10%, transparent);
+}
+
+.creative-workshop-role-list > button > span {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 9px;
+  background: rgba(255,255,255,.06);
+  font-size: 12px;
+}
+
+.creative-workshop-role-list div,
+.creative-workshop-skills label > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.creative-workshop-role-list strong,
+.creative-workshop-role-list small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.creative-workshop-role-list small,
+.creative-workshop-role-toolbar p,
+.creative-workshop-presets > p,
+.creative-workshop-skills > p {
+  color: var(--world-muted, #9ca3b2);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.creative-workshop-role-toolbar {
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+.creative-workshop-role-toolbar h3 {
+  margin: 0 0 5px;
+  font-size: 21px;
+}
+
+.creative-workshop-role-toolbar p {
+  margin: 0;
+}
+
+.creative-workshop-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.creative-workshop-dialog .dialog-field {
+  margin-bottom: 14px;
+}
+
+.creative-workshop-dialog .dialog-field input,
+.creative-workshop-dialog .dialog-field select,
+.creative-workshop-dialog .dialog-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+}
+
+.creative-workshop-dialog .dialog-field small {
+  line-height: 1.45;
+}
+
+.creative-workshop-presets,
+.creative-workshop-skills {
+  margin: 18px 0 0;
+}
+
+.creative-workshop-presets legend,
+.creative-workshop-skills legend {
+  padding: 0 7px;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.creative-workshop-presets > p,
+.creative-workshop-skills > p {
+  margin: 0 0 12px;
+}
+
+.creative-workshop-presets > div {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.creative-workshop-presets label {
+  min-height: 92px;
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle, rgba(255,255,255,.08));
+  border-radius: 12px;
+  cursor: pointer;
+  background: rgba(255,255,255,.02);
+}
+
+.creative-workshop-presets label.is-active {
+  border-color: color-mix(in srgb, var(--world-accent, #7d8cff) 55%, transparent);
+  background: color-mix(in srgb, var(--world-accent, #7d8cff) 11%, transparent);
+}
+
+.creative-workshop-presets label input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.creative-workshop-presets label strong {
+  font-size: 14px;
+}
+
+.creative-workshop-presets label small {
+  color: var(--world-muted, #9ca3b2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.creative-workshop-skills > div {
+  display: grid;
+  gap: 8px;
+}
+
+.creative-workshop-skills label {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 11px 12px;
+  border-radius: 10px;
+  background: rgba(255,255,255,.025);
+}
+
+.creative-workshop-skills input {
+  margin-top: 3px;
+}
+
+.creative-workshop-skills strong {
+  font-size: 14px;
+}
+
+.creative-workshop-skills small {
+  color: var(--world-muted, #9ca3b2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.creative-workshop-skills code {
+  width: fit-content;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(255,255,255,.06);
+  color: var(--world-muted, #aeb6c6);
+  font-size: 12px;
+}
+
+.creative-workshop-error {
+  margin: 12px 20px 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(220, 70, 70, .12);
+  color: #ffb4b4;
+  font-size: 13px;
+}
+
+@media (max-width: 980px) {
+  .creative-workshop-dialog {
+    width: min(760px, calc(100vw - 24px));
+    max-height: calc(100vh - 24px);
+  }
+
+  .creative-workshop-layout {
+    grid-template-columns: 1fr;
+    overflow: auto;
+  }
+
+  .creative-workshop-sidebar,
+  .creative-workshop-role-editor {
+    overflow: visible;
+  }
+
+  .creative-workshop-sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--border-subtle, rgba(255,255,255,.08));
+  }
+
+  .creative-workshop-presets > div {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .creative-workshop-grid,
+  .creative-workshop-presets > div {
+    grid-template-columns: 1fr;
+  }
+
+  .creative-workshop-role-editor,
+  .creative-workshop-sidebar {
+    padding: 16px;
+  }
+}

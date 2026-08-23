@@ -760,10 +760,10 @@ function peerPrompt(input: {
         .slice(-12)
         .map((reply) => `${reply.displayName}：${compactPeerStatement(reply.content)}`)
         .join('\n\n')
-  const participantNames = input.participants.map((participant) => `${participant.displayName}（${participant.role}）`).join('、')
+  const participantNames = input.participants.map((participant) => participant.displayName).join('、')
   const roleInstruction = input.employee.id === input.initiator.id
     ? '你是本次协作的发起者，本轮最后发言。请核对其他角色的真实意见，给出阶段结论、下一步或需要继续追问的点。'
-    : `你是被 ${input.initiator.displayName} 邀请参与协作的角色。请从自己的职责、记忆和权限范围内提供具体信息，不要替发起者或其他角色发言。`
+    : `你是被 ${input.initiator.displayName} 邀请参与协作的角色。请从自己的当前 Persona、记忆和权限范围内提供具体信息，不要从创建时模板岗位推断已经被用户修改掉的身份，也不要替发起者或其他角色发言。`
   return [
     input.basePrompt,
     '你正在参加同一世界内的一次真实角色协作。这个会话没有用户直接代替你们发言。',

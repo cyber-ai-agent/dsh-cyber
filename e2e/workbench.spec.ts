@@ -28,7 +28,7 @@ test.afterAll(async () => {
   await rm(stateRoot, { recursive: true, force: true })
 })
 
-test('onboards, recruits, talks, browses dossiers and previews a real workspace file', async ({ page }) => {
+test('onboards, recruits from dossier, talks, browses dossiers and keeps file surfaces hidden', async ({ page }) => {
   await page.goto(origin)
 
   await expect(page.getByRole('heading', { name: '创建第一个本地世界' })).toBeVisible()
@@ -42,19 +42,15 @@ test('onboards, recruits, talks, browses dossiers and previews a real workspace 
   await expect(composer).toBeEnabled()
   await expect(composer).toHaveCount(1)
 
-  await page.locator('.left-pane').getByRole('button', { name: '添加角色' }).click()
-  const market = page.getByRole('dialog', { name: '角色市场' })
-  await expect(market).toBeVisible()
-  await market.getByRole('button', { name: /开发工程师 v1/ }).click()
-  await market.getByRole('textbox', { name: '角色名字（可选）' }).fill('阿帆')
-  await market.getByRole('button', { name: '确认添加' }).click()
-
-  await expect(market).toBeHidden()
+  await createRoleFromDossier(page, /开发工程师 v1/, '阿帆')
   await expect(composer).toBeEnabled()
   await expect(page.getByRole('button', { name: '与阿帆私聊' })).toBeVisible()
 
-  const dock = page.getByRole('region', { name: '产物与世界侧边栏' })
-  await page.getByRole('button', { name: '查看阿帆档案' }).click()
+  const dock = page.getByRole('region', { name: '世界与角色档案侧边栏' })
+  await dock.getByRole('button', { name: '档案', exact: true }).click()
+  const engineerCard = dock.getByRole('article').filter({ hasText: '阿帆' })
+  await expect(engineerCard).toBeVisible()
+  await engineerCard.getByRole('button', { name: /完整档案/ }).click()
   await expect(dock.getByText('阿帆 / 独立角色档案')).toBeVisible()
   await dock.getByRole('button', { name: '全角色档案' }).click()
   await expect(dock.getByText('全角色数字档案', { exact: true })).toBeVisible()
@@ -72,11 +68,11 @@ test('onboards, recruits, talks, browses dossiers and previews a real workspace 
   const worldFilesRoot = join(stateRoot, 'worlds', encodeURIComponent(localWorld.id), 'files')
   await mkdir(join(worldFilesRoot, 'docs'), { recursive: true })
   await writeFile(join(worldFilesRoot, 'docs', 'hello.md'), '# 当前世界文件\n', 'utf8')
-  await dock.getByRole('button', { name: '文件', exact: true }).click()
-  await dock.getByRole('button', { name: /docs.*目录/ }).click()
-  await dock.getByRole('button', { name: /hello\.md.*可预览/ }).click()
-  await expect(dock.getByText('当前世界只读预览')).toBeVisible()
-  await expect(dock.getByRole('button', { name: '新标签打开' })).toBeVisible()
+  const fileListing = await (await fetch(`${origin}/api/worlds/${localWorld.id}/files?path=docs`)).json() as { items: Array<{ name: string }> }
+  expect(fileListing.items.map((item) => item.name)).toContain('hello.md')
+  expect(await (await fetch(`${origin}/api/worlds/${localWorld.id}/file?path=docs%2Fhello.md`)).text()).toContain('当前世界文件')
+  await expect(dock.getByRole('button', { name: '文件', exact: true })).toHaveCount(0)
+  await expect(dock.getByRole('button', { name: '预览', exact: true })).toHaveCount(0)
 
   await expect(page.locator('.composer')).toHaveCount(1)
   await expect(page.locator('.workbench-shell')).toBeVisible()
@@ -87,12 +83,7 @@ test('runs direct and group conversations with real world lifecycle, persistence
   await expect(page.locator('.workbench-shell')).toBeVisible()
   await expect(page.locator('.world-runtime-canvas')).toBeVisible()
 
-  await page.locator('.left-pane').getByRole('button', { name: '添加角色' }).click()
-  const market = page.getByRole('dialog', { name: '角色市场' })
-  await market.getByRole('button', { name: /秘书 v1/ }).click()
-  await market.getByRole('textbox', { name: '角色名字（可选）' }).fill('小周')
-  await market.getByRole('button', { name: '确认添加' }).click()
-  await expect(market).toBeHidden()
+  await createRoleFromDossier(page, /秘书 v1/, '小周')
 
   const snapshotResponse = await fetch(`${origin}/api/workspaces`)
   const workspaces = await snapshotResponse.json() as { items: Array<{ id: string }> }
@@ -106,10 +97,10 @@ test('runs direct and group conversations with real world lifecycle, persistence
   await page.getByRole('button', { name: '与阿帆私聊' }).click()
   await expect(page.getByRole('heading', { name: '与 阿帆 对话', exact: true })).toBeVisible()
   await expect(page.getByLabel('当前会话成员')).toContainText('阿帆')
-  const dock = page.getByRole('region', { name: '产物与世界侧边栏' })
+  const dock = page.getByRole('region', { name: '世界与角色档案侧边栏' })
   expect(server.store.getEmployee(engineer.id)?.status).toBe('available')
   expect(server.store.listWorldDomainEvents(worldId).filter((event) => event.type === 'task.started')).toHaveLength(taskStartedBeforeIntent)
-  await dock.getByRole('button', { name: '文件', exact: true }).click()
+  await dock.getByRole('button', { name: '档案', exact: true }).click()
   expect(server.store.getEmployee(engineer.id)?.status).toBe('available')
   expect(server.store.listWorldDomainEvents(worldId).filter((event) => event.type === 'task.started')).toHaveLength(taskStartedBeforeIntent)
 
@@ -192,13 +183,12 @@ test('runs direct and group conversations with real world lifecycle, persistence
   expect(afterRestart.growthSlots).toEqual(beforeRestart.growthSlots)
 
   await expect(page.locator('.workbench-shell')).toBeVisible()
-  await page.getByRole('region', { name: '当前世界的会话' }).getByRole('button').first().click()
+  await page.getByRole('button', { name: '与阿帆私聊' }).click()
   await expect(page.getByText('我先建立性能基线。').first()).toBeVisible()
   await dock.getByRole('button', { name: '档案', exact: true }).click()
-  await dock.getByRole('button', { name: '全角色档案', exact: true }).click()
   await expect(dock.getByText('全角色数字档案', { exact: true })).toBeVisible()
-  await dock.getByRole('button', { name: '文件', exact: true }).click()
-  await expect(dock.getByText('世界根目录')).toBeVisible()
+  await expect(dock.getByRole('button', { name: '文件', exact: true })).toHaveCount(0)
+  await expect(dock.getByRole('button', { name: '预览', exact: true })).toHaveCount(0)
 })
 
 test('keeps the workbench readable and the world viewport filled on a 4K display', async ({ page }) => {
@@ -209,7 +199,7 @@ test('keeps the workbench readable and the world viewport filled on a 4K display
   if (await onboarding.isVisible()) {
     await page.getByRole('button', { name: '创建我的世界' }).click()
   }
-  const dock = page.getByRole('region', { name: '产物与世界侧边栏' })
+  const dock = page.getByRole('region', { name: '世界与角色档案侧边栏' })
 
   const left = await page.locator('.left-pane').boundingBox()
   const center = await page.locator('.center-pane').boundingBox()
@@ -230,10 +220,10 @@ test('keeps the workbench readable and the world viewport filled on a 4K display
   await page.screenshot({ path: join(process.cwd(), 'artifacts', 'ui-world-conversations', 'world-3840x2160.png') })
 
   const sharedWidth = (await page.locator('.right-pane').boundingBox())?.width ?? 0
-  await dock.getByRole('button', { name: '文件', exact: true }).click()
-  expect(Math.abs(((await page.locator('.right-pane').boundingBox())?.width ?? 0) - sharedWidth)).toBeLessThan(2)
   await dock.getByRole('button', { name: '档案', exact: true }).click()
   expect(Math.abs(((await page.locator('.right-pane').boundingBox())?.width ?? 0) - sharedWidth)).toBeLessThan(2)
+  await expect(dock.getByRole('button', { name: '文件', exact: true })).toHaveCount(0)
+  await expect(dock.getByRole('button', { name: '预览', exact: true })).toHaveCount(0)
   await dock.getByRole('button', { name: '世界', exact: true }).click()
 
   await page.setViewportSize({ width: 1_920, height: 1_080 })
@@ -243,7 +233,7 @@ test('keeps the workbench readable and the world viewport filled on a 4K display
   await page.setViewportSize({ width: 1_440, height: 900 })
   await page.screenshot({ path: join(process.cwd(), 'artifacts', 'ui-world-conversations', 'world-1440x900.png') })
   for (let index = 0; index < 20; index += 1) {
-    await dock.getByRole('button', { name: '文件', exact: true }).click()
+    await dock.getByRole('button', { name: '档案', exact: true }).click()
     await expect(page.locator('.world-runtime-canvas')).toHaveCount(0)
     await dock.getByRole('button', { name: '世界', exact: true }).click()
     await expect(page.locator('.world-runtime-canvas')).toHaveCount(1)
@@ -311,10 +301,10 @@ test('opens the dossier as an all-employee information directory', async ({ page
   await page.getByRole('menuitemradio', { name: /赛博公司/ }).click()
   await page.getByLabel(/切换世界，当前为赛博公司/).click()
   await page.getByRole('button', { name: /探索更多世界/ }).click()
-  const themeMarket = page.getByRole('dialog', { name: '扩展市场' })
-  await expect(themeMarket.getByText('主题市场', { exact: true }).first()).toBeVisible()
-  await themeMarket.getByRole('button', { name: '关闭扩展市场' }).click()
-  const dock = page.getByRole('region', { name: '产物与世界侧边栏' })
+  const themeMarket = page.getByRole('dialog', { name: '市场' })
+  await expect(themeMarket.getByRole('button', { name: '主题', exact: true })).toBeVisible()
+  await themeMarket.getByRole('button', { name: '关闭市场' }).click()
+  const dock = page.getByRole('region', { name: '世界与角色档案侧边栏' })
   await dock.getByRole('button', { name: '档案', exact: true }).click()
 
   await expect(dock.getByText('全员数字档案')).toBeVisible()
@@ -359,12 +349,7 @@ test('clears the composer instantly, shows the owner message on screen, and keep
   // 无“与阿帆私聊”则自行招募，已有则复用现有会话
   const directButton = page.getByRole('button', { name: '与阿帆私聊' })
   if (await directButton.count() === 0) {
-    await page.locator('.left-pane').getByRole('button', { name: '添加角色' }).click()
-    const market = page.getByRole('dialog', { name: '角色市场' })
-    await market.getByRole('button', { name: /开发工程师 v1/ }).click()
-    await market.getByRole('textbox', { name: '角色名字（可选）' }).fill('阿帆')
-    await market.getByRole('button', { name: '确认添加' }).click()
-    await expect(market).toBeHidden()
+    await createRoleFromDossier(page, /开发工程师 v1/, '阿帆')
     await expect(page.getByRole('button', { name: '与阿帆私聊' })).toBeVisible()
   }
   await directButton.first().click()
@@ -422,12 +407,7 @@ test('shows real model interaction logs in the settings panel with filtering, de
   // 无“与阿帆私聊”则自行招募，已有则复用现有会话
   const directButton = page.getByRole('button', { name: '与阿帆私聊' })
   if (await directButton.count() === 0) {
-    await page.locator('.left-pane').getByRole('button', { name: '添加角色' }).click()
-    const market = page.getByRole('dialog', { name: '角色市场' })
-    await market.getByRole('button', { name: /开发工程师 v1/ }).click()
-    await market.getByRole('textbox', { name: '角色名字（可选）' }).fill('阿帆')
-    await market.getByRole('button', { name: '确认添加' }).click()
-    await expect(market).toBeHidden()
+    await createRoleFromDossier(page, /开发工程师 v1/, '阿帆')
     await expect(page.getByRole('button', { name: '与阿帆私聊' })).toBeVisible()
   }
 
@@ -498,6 +478,24 @@ test('shows real model interaction logs in the settings panel with filtering, de
     (await (await fetch(`${origin}/api/workspaces/${workspaceId}/model-interactions`)).json() as { total: number }).total,
   ).toBe(0)
 })
+
+async function createRoleFromDossier(page: import('@playwright/test').Page, blueprint: RegExp, displayName: string) {
+  const dock = page.getByRole('region', { name: '世界与角色档案侧边栏' })
+  await dock.getByRole('button', { name: '档案', exact: true }).click()
+  let add = dock.getByRole('button', { name: '新增角色', exact: true })
+  if (await add.count() === 0) {
+    const back = dock.getByRole('button', { name: '全角色档案', exact: true })
+    if (await back.count() > 0) await back.click()
+    add = dock.getByRole('button', { name: '新增角色', exact: true })
+  }
+  await add.click()
+  const dialog = page.getByRole('dialog', { name: '新增角色' })
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('button', { name: blueprint }).click()
+  await dialog.getByRole('textbox', { name: '角色名字（可选）' }).fill(displayName)
+  await dialog.getByRole('button', { name: /确认新增|再创建一名/ }).click()
+  await expect(dialog).toBeHidden()
+}
 
 class BrowserRuntime implements AgentRuntimePort {
   readonly eventIntervalMs: number

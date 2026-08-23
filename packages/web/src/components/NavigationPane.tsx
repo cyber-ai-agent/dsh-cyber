@@ -1,17 +1,17 @@
 import {
   ChatCircleDots,
-  ClockCounterClockwise,
-  MagnifyingGlass,
-  Plus,
-  UsersThree,
-  UserFocus,
   GearSix,
+  PushPin,
+  PushPinSlash,
+  Trash,
+  UsersThree,
 } from '@phosphor-icons/react'
-import { useDeferredValue, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { WorkSession, World } from '@dsh-cyber/contracts'
+import type { ConversationHubItem } from '@dsh-cyber/contracts/creative-platform'
 
+import { api } from '../api.js'
 import type { CyberEmployee, SessionParticipantMap } from '../types.js'
-import { worldExperience } from '../world-experience.js'
 import { Avatar } from './Avatar.js'
 
 interface NavigationPaneProps {
@@ -33,133 +33,190 @@ export function NavigationPane({
   world,
   sessions,
   activeSessionId,
-  activeEmployeeIds,
   sessionParticipants,
   employees,
   onSelectSession,
-  onSelectEmployee,
   onDirectEmployee,
-  onRecruit,
   onCreateGroup,
   onWorldSettings,
 }: NavigationPaneProps) {
-  const [query, setQuery] = useState('')
-  const experience = worldExperience(world)
-  const deferredQuery = useDeferredValue(query.trim().toLocaleLowerCase())
-  const filteredEmployees = useMemo(() => {
-    if (!deferredQuery) return employees
-    return employees.filter((employee) =>
-      `${employee.displayName} ${employee.role} ${employee.currentActivity}`
-        .toLocaleLowerCase()
-        .includes(deferredQuery),
+  const [hubItems, setHubItems] = useState<ConversationHubItem[]>()
+  const [error, setError] = useState<string>()
+
+  useEffect(() => {
+    let cancelled = false
+    setHubItems(undefined)
+    void api<{ items: ConversationHubItem[] }>(`/api/worlds/${encodeURIComponent(world.id)}/conversation-hub`)
+      .then((result) => { if (!cancelled) { setHubItems(result.items); setError(undefined) } })
+      .catch((cause: unknown) => { if (!cancelled) setError(cause instanceof Error ? cause.message : '会话列表加载失败') })
+    return () => { cancelled = true }
+  }, [world.id, sessions.length, employees.length])
+
+  useEffect(() => {
+    if (activeSessionId === undefined || hubItems === undefined) return
+    const selected = hubItems.find((item) => item.session.id === activeSessionId)
+    if (selected?.hidden !== true) return
+    void updatePreference(activeSessionId, { hidden: false }).then(setHubItems).catch(() => undefined)
+  }, [activeSessionId, hubItems])
+
+  const fallbackItems = useMemo((): ConversationHubItem[] => {
+    const sessionItems: ConversationHubItem[] = sessions.map((session) => ({
+      session,
+      participantIds: sessionParticipants[session.id] ?? [],
+      pinned: false,
+      hidden: false,
+    }))
+    const directOwners = new Set(
+      sessionItems
+        .filter((item) => item.session.kind === 'direct' && item.participantIds.length === 1)
+        .map((item) => item.participantIds[0]!),
     )
-  }, [deferredQuery, employees])
+    const directContacts = employees
+      .filter((employee) => employee.status !== 'archived' && !directOwners.has(employee.id))
+      .map((employee): ConversationHubItem => ({
+        session: {
+          id: `contact:${world.id}:${employee.id}`,
+          workspaceId: world.workspaceId,
+          worldId: world.id,
+          kind: 'direct',
+          title: `与 ${employee.displayName} 对话`,
+          status: 'open',
+          createdAt: employee.createdAt,
+          updatedAt: employee.updatedAt,
+        },
+        participantIds: [employee.id],
+        pinned: employee.blueprintId === 'core.butler',
+        hidden: false,
+        canonicalCharacterId: employee.id,
+      }))
+    return [...sessionItems, ...directContacts].sort((left, right) => {
+      if (left.pinned !== right.pinned) return left.pinned ? -1 : 1
+      return right.session.updatedAt.localeCompare(left.session.updatedAt)
+    })
+  }, [employees, sessionParticipants, sessions, world.id, world.workspaceId])
+
+  const items = useMemo(() => {
+    const source = hubItems ?? fallbackItems
+    return source.filter((item) => !item.hidden || item.session.id === activeSessionId)
+  }, [activeSessionId, fallbackItems, hubItems])
+
+  const updatePreference = async (sessionId: string, value: { pinned?: boolean; hidden?: boolean }) => {
+    const result = await api<{ items: ConversationHubItem[] }>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/conversation-preferences`,
+      { method: 'PUT', body: JSON.stringify(value) },
+    )
+    return result.items
+  }
+
+  const openItem = (item: ConversationHubItem) => {
+    if (item.session.kind === 'direct') {
+      const employeeId = item.canonicalCharacterId ?? item.participantIds[0]
+      const employee = employees.find((candidate) => candidate.id === employeeId)
+      if (employee !== undefined) {
+        onDirectEmployee(employee)
+        return
+      }
+    }
+    onSelectSession(item.session.id)
+  }
 
   return (
-    <div className="navigation-pane">
+    <div className="navigation-pane navigation-pane--conversations" role="region" aria-label="当前世界的会话">
       <header className="pane-heading">
-        <span>会话与通讯录</span>
+        <span>会话</span>
         <button className="icon-button" type="button" aria-label="创建群聊" title="创建群聊" onClick={onCreateGroup}>
           <UsersThree size={18} weight="bold" />
         </button>
       </header>
 
-      <section className="nav-section nav-section--sessions" aria-labelledby="sessions-title">
+      <section className="nav-section nav-section--sessions nav-section--conversation-only" aria-labelledby="sessions-title">
         <div className="nav-section__title nav-section__title--inline" id="sessions-title">
-          <span>当前世界的会话</span>
-          <ClockCounterClockwise size={15} />
+          <span>当前世界</span>
+          <small>{items.length} 个会话</small>
         </div>
+        {error === undefined || fallbackItems.length > 0 ? null : <div className="compact-empty" role="status">{error}</div>}
         <div className="session-list">
-          {sessions.length === 0 ? (
-            <div className="compact-empty">还没有会话，直接 @ 一名{experience?.personLabel ?? '角色'}开始。</div>
-          ) : sessions.map((session) => (
-            <SessionRow
-              key={session.id}
-              session={session}
-              employees={employees}
-              participantIds={sessionParticipants[session.id] ?? []}
-              active={session.id === activeSessionId}
-              onClick={() => onSelectSession(session.id)}
-            />
-          ))}
+          {items.length === 0 ? (
+            <div className="compact-empty">还没有会话。新增角色后会自动生成唯一私聊，也可以创建群聊。</div>
+          ) : items.map((item) => {
+            const synthetic = item.session.id.startsWith('contact:')
+            return (
+              <SessionRow
+                key={item.session.id}
+                item={item}
+                employees={employees}
+                active={item.session.id === activeSessionId || (item.session.kind === 'direct' && item.participantIds.some((id) => id === sessionParticipants[activeSessionId ?? '']?.[0]))}
+                onClick={() => openItem(item)}
+                {...(synthetic ? {} : {
+                  onPin: () => void updatePreference(item.session.id, { pinned: !item.pinned }).then(setHubItems).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : '置顶失败')),
+                  onDelete: () => void updatePreference(item.session.id, { hidden: true }).then((next) => {
+                    setHubItems(next)
+                    if (item.session.id === activeSessionId) {
+                      const fallback = next.find((candidate) => !candidate.hidden)
+                      if (fallback !== undefined) onSelectSession(fallback.session.id)
+                    }
+                  }).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : '删除会话失败')),
+                })}
+              />
+            )
+          })}
         </div>
       </section>
 
-      <section className="nav-section nav-section--roles" aria-labelledby="roles-title">
-        <div className="nav-section__title nav-section__title--inline" id="roles-title">
-          <span>{experience?.peopleLabel ?? '角色'}（当前世界）</span>
-          <span className="nav-section__summary"><span>{employees.length}</span><button type="button" aria-label={`添加${experience?.personLabel ?? '角色'}`} title={`添加${experience?.personLabel ?? '角色'}`} onClick={onRecruit}><Plus size={14} /></button></span>
-        </div>
-        <label className="nav-search">
-          <MagnifyingGlass size={15} />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={`搜索${experience?.personLabel ?? '角色'}或${experience?.actionLabel ?? '活动'}`}
-            aria-label={`搜索${experience?.personLabel ?? '角色'}或${experience?.actionLabel ?? '活动'}`}
-          />
-        </label>
-        <div className="employee-list">
-          {employees.length === 0 ? (
-            <div className="employee-list-empty">
-              <p>{experience?.emptyCopy ?? '当前世界从 0 开始，还没有角色。'}</p>
-              <button className="secondary-button" type="button" onClick={onRecruit}><Plus size={14} />{experience?.marketLabel ?? '角色市场'}</button>
-            </div>
-          ) : null}
-          {filteredEmployees.map((employee) => (
-            <div key={employee.id} className={`employee-row${activeEmployeeIds.includes(employee.id) ? ' is-active' : ''}`}>
-              <button className="employee-row__main" type="button" onClick={() => onDirectEmployee(employee)} aria-label={`与${employee.displayName}私聊`}>
-                <Avatar index={employee.avatarIndex} label={employee.displayName} status={employee.status} />
-                <span className="employee-row__copy">
-                  <span className="employee-row__identity">
-                    <strong>{employee.displayName}</strong>
-                    <span>{employee.role}</span>
-                  </span>
-                  <span className="employee-row__activity">{employee.currentActivity}</span>
-                </span>
-              </button>
-              <button className="employee-row__dossier" type="button" aria-label={`查看${employee.displayName}档案`} title="查看档案" onClick={() => onSelectEmployee(employee.id)}>
-                <UserFocus size={16} />
-              </button>
-            </div>
-          ))}
-        </div>
-      </section>
-      <footer className="world-settings-entry"><button type="button" onClick={onWorldSettings}><GearSix size={17} /><span>世界设置</span></button></footer>
+      <footer className="world-settings-entry">
+        <button type="button" onClick={onWorldSettings}><GearSix size={17} /><span>世界设置</span></button>
+      </footer>
     </div>
   )
 }
 
 function SessionRow({
-  session,
+  item,
   employees,
-  participantIds,
   active,
   onClick,
+  onPin,
+  onDelete,
 }: {
-  session: WorkSession
+  item: ConversationHubItem
   employees: CyberEmployee[]
-  participantIds: string[]
   active: boolean
   onClick(): void
+  onPin?: () => void
+  onDelete?: () => void
 }) {
+  const { session, participantIds } = item
   const participants = participantIds
     .map((id) => employees.find((employee) => employee.id === id))
     .filter((employee): employee is CyberEmployee => employee !== undefined)
-  const subtitle = session.kind === 'group'
+  const subtitle = session.kind === 'group' || session.kind === 'meeting'
     ? `群聊 · ${participants.length || participantIds.length} 名成员`
     : participants[0]?.role ?? '私聊'
   return (
-    <button className={`session-row${active ? ' is-active' : ''}`} type="button" onClick={onClick}>
-      <span className="session-row__avatar" aria-hidden="true">
-        {participants.length === 0
-          ? session.kind === 'group' ? <UsersThree size={16} /> : <ChatCircleDots size={16} />
-          : participants.slice(0, 2).map((employee) => <Avatar key={employee.id} index={employee.avatarIndex} size="sm" label={employee.displayName} />)}
-      </span>
-      <span className="session-row__copy"><strong>{session.title}</strong><small>{subtitle}</small></span>
-      <time>{formatSessionTime(session.updatedAt)}</time>
-    </button>
+    <div className={`session-row-wrap${active ? ' is-active' : ''}${item.pinned ? ' is-pinned' : ''}`}>
+      <button className="session-row session-row--hub" type="button" onClick={onClick} aria-label={session.kind === 'direct' && participants[0] !== undefined ? `与${participants[0].displayName}私聊` : directTitle(session, participants)}>
+        <span className="session-row__avatar" aria-hidden="true">
+          {participants.length === 0
+            ? session.kind === 'group' || session.kind === 'meeting' ? <UsersThree size={16} /> : <ChatCircleDots size={16} />
+            : participants.slice(0, 2).map((employee) => <Avatar key={employee.id} index={employee.avatarIndex} size="sm" label={employee.displayName} />)}
+        </span>
+        <span className="session-row__copy"><strong>{directTitle(session, participants)}</strong><small>{subtitle}</small></span>
+        <time>{formatSessionTime(session.updatedAt)}</time>
+      </button>
+      {onPin === undefined || onDelete === undefined ? null : (
+        <span className="session-row-actions">
+          <button type="button" aria-label={item.pinned ? '取消置顶' : '置顶会话'} title={item.pinned ? '取消置顶' : '置顶会话'} onClick={onPin}>
+            {item.pinned ? <PushPinSlash size={14} /> : <PushPin size={14} />}
+          </button>
+          <button type="button" aria-label="删除会话" title="从列表删除" onClick={onDelete}><Trash size={14} /></button>
+        </span>
+      )}
+    </div>
   )
+}
+
+function directTitle(session: WorkSession, participants: CyberEmployee[]): string {
+  return session.kind === 'direct' && participants[0] !== undefined ? participants[0].displayName : session.title
 }
 
 function formatSessionTime(value: string): string {

@@ -22,7 +22,6 @@ interface WorldViewProps {
   employees: CyberEmployee[]
   sceneImage?: string
   onSelectEmployee(employeeId: string): void
-  onInvite(): void
 }
 
 const companyPositions = [
@@ -33,7 +32,7 @@ const tavernPositions = [
   [23, 56], [43, 45], [64, 49], [79, 62], [57, 71], [35, 72], [17, 76], [84, 36],
 ] as const
 
-export function WorldView({ world, employees, sceneImage, onSelectEmployee, onInvite }: WorldViewProps) {
+export function WorldView({ world, employees, sceneImage, onSelectEmployee }: WorldViewProps) {
   const [lightsOn, setLightsOn] = useState(true)
   const [zoom, setZoom] = useState(1)
   const [expanded, setExpanded] = useState(false)
@@ -48,9 +47,8 @@ export function WorldView({ world, employees, sceneImage, onSelectEmployee, onIn
       lightsOn={lightsOn}
       zoom={zoom}
       onSelectEmployee={onSelectEmployee}
-      onInvite={onInvite}
     />
-  ), [employees, experience.kind, lightsOn, onInvite, onSelectEmployee, sceneImage, zoom])
+  ), [employees, experience.kind, lightsOn, onSelectEmployee, sceneImage, zoom])
 
   return (
     <div className={`world-view world-view--${experience.kind}`}>
@@ -72,7 +70,7 @@ export function WorldView({ world, employees, sceneImage, onSelectEmployee, onIn
       </div>
 
       <footer className="world-view__footer">
-        <span>点击角色查看档案 · 状态与位置由当前世界事件驱动</span>
+        <span>点击角色进入对应会话 · 角色新增与管理统一在「档案」中完成</span>
         <button type="button" onClick={() => setExpanded(true)}><ArrowsOutSimple size={14} />沉浸模式</button>
       </footer>
 
@@ -109,14 +107,13 @@ function WorldControls({ lightsOn, zoom, setLightsOn, setZoom }: {
   )
 }
 
-function WorldScene({ kind, employees, sceneImage, lightsOn, zoom, onSelectEmployee, onInvite }: {
+function WorldScene({ kind, employees, sceneImage, lightsOn, zoom, onSelectEmployee }: {
   kind: 'personal' | 'company' | 'tavern' | 'studio'
   employees: CyberEmployee[]
   sceneImage?: string
   lightsOn: boolean
   zoom: number
   onSelectEmployee(employeeId: string): void
-  onInvite(): void
 }) {
   const isTavern = kind === 'tavern'
   const positions = isTavern ? tavernPositions : companyPositions
@@ -141,8 +138,7 @@ function WorldScene({ kind, employees, sceneImage, lightsOn, zoom, onSelectEmplo
         {employees.length === 0 ? (
           <div className="world-empty-cast">
             <strong>{isTavern ? '今夜尚无人登场' : '这个世界还没有角色'}</strong>
-            <span>{isTavern ? '邀请角色卡后，人物会带着独立设定和记忆进入场景。' : '加入角色后，真实任务状态会在这里发生。'}</span>
-            <button type="button" onClick={onInvite}>{isTavern ? '邀请角色卡' : '添加第一名角色'}</button>
+            <span>{isTavern ? '前往右侧「档案」邀请角色进入场景。' : '前往右侧「档案」新增角色后，真实任务状态会在这里发生。'}</span>
           </div>
         ) : employees.map((employee, index) => {
           const position = positions[index] ?? [50 + ((index % 3) - 1) * 15, 76 + (index % 2) * 6]
@@ -153,7 +149,7 @@ function WorldScene({ kind, employees, sceneImage, lightsOn, zoom, onSelectEmplo
               type="button"
               style={{ left: `${position[0]}%`, top: `${position[1]}%`, zIndex: Math.round(position[1]) }}
               onClick={() => onSelectEmployee(employee.id)}
-              aria-label={`查看${employee.displayName}的状态和档案`}
+              aria-label={`进入${employee.displayName}的会话`}
             >
               <span className="world-agent__sprite"><Avatar index={employee.avatarIndex} size="world" label={employee.displayName} /></span>
               <span className="world-agent__label"><strong>{employee.displayName}</strong><small>{activityLabel(employee, isTavern)}</small></span>

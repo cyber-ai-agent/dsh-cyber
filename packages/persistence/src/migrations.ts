@@ -558,6 +558,13 @@ const MIGRATIONS: readonly Migration[] = [
         ADD COLUMN http_status INTEGER CHECK (http_status BETWEEN 100 AND 599);
     `,
   },
+  {
+    version: 13,
+    name: 'portable-blueprint-embodiment',
+    sql: `
+      ALTER TABLE employee_blueprints ADD COLUMN embodiment_json TEXT;
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {

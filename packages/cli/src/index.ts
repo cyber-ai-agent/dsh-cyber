@@ -10,7 +10,7 @@ import {
   readActiveHarnessRuntime,
 } from '@dsh-cyber/harness-adapter'
 import { SqliteStore } from '@dsh-cyber/persistence'
-import { createCyberServer, type CyberServer } from '@dsh-cyber/server'
+import { createCyberServer, createLocalBackupBundle, type CyberServer } from '@dsh-cyber/server'
 
 export interface CliIo {
   stdout: (line: string) => void
@@ -100,14 +100,14 @@ export async function runCli(args: string[], context: CliContext = {}): Promise<
             ? store.listRuntimeUpdateTransactions().find((item) => item.status === 'activated')
             : store.getRuntimeUpdateTransaction(active.transactionId)
           if (transaction?.status === 'activated') {
-            const backup = await store.backup(defaultArtifactPath(stateRoot, 'backup'))
+            const backup = await createLocalBackupBundle(stateRoot, store)
             await clearActiveHarnessRuntime(runtimeStateRoot)
             store.transitionRuntimeUpdate({
               transactionId: transaction.id,
               status: 'rolled-back',
               report: { ok: true, recovery: 'cli', backup, returnedToBundledRuntime: true },
             })
-            io.stdout(`已恢复内置 DSH 运行时；数据库备份：${backup}`)
+            io.stdout(`已恢复内置 DSH 运行时；本地数据 Bundle：${backup}`)
             return 0
           }
         } finally {
@@ -126,7 +126,7 @@ export async function runCli(args: string[], context: CliContext = {}): Promise<
       const store = await SqliteStore.open(databasePath)
       try {
         const destination = command === 'backup'
-          ? await store.backup(output)
+          ? await createLocalBackupBundle(stateRoot, store, { output })
           : await store.exportJson(output)
         io.stdout(destination)
       } finally {
@@ -189,7 +189,7 @@ function defaultStateRoot(environment: NodeJS.ProcessEnv): string {
 
 function defaultArtifactPath(stateRoot: string, kind: 'backup' | 'export'): string {
   const timestamp = new Date().toISOString().replaceAll(/[:.]/g, '-')
-  const extension = kind === 'backup' ? 'sqlite' : 'json'
+  const extension = kind === 'backup' ? 'dshbackup' : 'json'
   return join(stateRoot, 'backups', `dsh-cyber-${timestamp}.${extension}`)
 }
 
@@ -230,9 +230,10 @@ function helpText(): string {
     '  dsh-cyber doctor [--data-dir PATH]',
     '  dsh-cyber runtime-check --candidate-root PATH [--data-dir PATH]',
     '  dsh-cyber runtime-rollback [--data-dir PATH]',
-    '  dsh-cyber backup [--data-dir PATH] [--output FILE]',
-    '  dsh-cyber export [--data-dir PATH] [--output FILE]',
+    '  dsh-cyber backup [--data-dir PATH] [--output FILE.dshbackup]',
+    '  dsh-cyber export [--data-dir PATH] [--output FILE.json]',
     '',
+    'backup 会包含数据库、世界、资产、已安装包、创意工坊项目和 Skill 动作；不包含模型密钥与运行时缓存。',
     'Web 服务固定监听 loopback；Phase 1 不开放公网监听。',
   ].join('\n')
 }

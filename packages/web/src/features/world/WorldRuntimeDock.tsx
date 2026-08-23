@@ -5,7 +5,6 @@ import {
   Minus,
   Plus,
   PersonSimpleWalk,
-  Storefront,
 } from '@phosphor-icons/react'
 import { useEffect, useState } from 'react'
 import type { WorkSession, World, WorldInteractionAction, WorldRuntimeSnapshot, WorldZoomCommand } from '@dsh-cyber/contracts'
@@ -32,10 +31,9 @@ interface WorldRuntimeDockProps {
   conversationEmployeeIds: string[]
   onSelectEmployee(employeeId: string): void
   onStartGroup(employeeIds: string[], session?: WorkSession): void
-  onRecruit(): void
 }
 
-export function WorldRuntimeDock({ demoMode, world, employees, selectedEmployeeId, conversationEmployeeIds, onSelectEmployee, onStartGroup, onRecruit }: WorldRuntimeDockProps) {
+export function WorldRuntimeDock({ demoMode, world, employees, selectedEmployeeId, conversationEmployeeIds, onSelectEmployee, onStartGroup }: WorldRuntimeDockProps) {
   const runtime = useWorldClient({ demoMode, world, employees })
   const [fitRequest, setFitRequest] = useState(0)
   const [zoomCommand, setZoomCommand] = useState<WorldZoomCommand>()
@@ -171,12 +169,12 @@ export function WorldRuntimeDock({ demoMode, world, employees, selectedEmployeeI
             <button type="button" aria-label="显示全景" title="适应窗口且不露出场景边界" onClick={() => setFitRequest((value) => value + 1)}><ArrowsOut size={15} /></button>
             <button type="button" aria-label="放大" onClick={() => setZoomCommand(createZoomCommand(0.1))}><Plus size={15} /></button>
             <button type="button" aria-label="世界活力设置" title="配置角色有岗位逻辑的日常行为" onClick={() => setAmbientSettingsOpen(true)}><PersonSimpleWalk size={16} /></button>
-          <button type="button" className={runtime.snapshot.clock.lightsOn ? 'is-active' : ''} aria-label={runtime.snapshot.clock.lightsOn ? '关闭场景照明' : '打开场景照明'} onClick={() => void runtime.interact({ action: 'toggle-lights', actorId: 'owner' })}><LightbulbFilament size={16} /></button>
+            <button type="button" className={runtime.snapshot.clock.lightsOn ? 'is-active' : ''} aria-label={runtime.snapshot.clock.lightsOn ? '关闭场景照明' : '打开场景照明'} onClick={() => void runtime.interact({ action: 'toggle-lights', actorId: 'owner' })}><LightbulbFilament size={16} /></button>
           </div>
 
           {ambientSettingsOpen ? <AmbientLifeDialog worldId={world.id} worldName={world.name} onClose={() => setAmbientSettingsOpen(false)} /> : null}
 
-        {employees.length === 0 ? <div className="world-runtime-dock__empty"><Storefront size={25} /><strong>这个世界还没有角色</strong><span>从角色市场添加第一名角色后，他会出现在这里。</span><button className="primary-button" type="button" onClick={onRecruit}>打开角色市场</button></div> : null}
+          {employees.length === 0 ? <div className="world-runtime-dock__empty"><strong>这个世界还没有角色</strong><span>请到右侧「档案」新增角色。世界视图只负责展示和互动，不再承担角色管理。</span></div> : null}
         </div>
       </section>
       {peerInitiator === undefined ? null : (

@@ -245,7 +245,6 @@ describe('PackageManager', () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-cyber-package-'))
     const sourceV1 = join(directory, 'source-v1')
     const sourceV2 = join(directory, 'source-v2')
-    const { mkdir } = await import('node:fs/promises')
     await mkdir(sourceV1, { recursive: true })
     await mkdir(sourceV2, { recursive: true })
     await writeFile(join(sourceV1, 'SKILL.md'), '# V1\n', 'utf8')
@@ -266,12 +265,14 @@ describe('PackageManager', () => {
 
     const failingStore: PackageStorePort = {
       getActivePackage: store.getActivePackage.bind(store),
+      getPackageInstallTransaction: store.getPackageInstallTransaction.bind(store),
       beginPackageInstall: store.beginPackageInstall.bind(store),
       markPackageInstallStaged: store.markPackageInstallStaged.bind(store),
       completePackageInstall: () => {
         throw new Error('simulated database commit failure')
       },
       rollbackPackageInstall: store.rollbackPackageInstall.bind(store),
+      compensateActivatedPackageInstall: store.compensateActivatedPackageInstall.bind(store),
     }
     const upgrade = new PackageManager({ store: failingStore, runtime })
     const v2 = manifest('2.0.0', '# V2\n', ['workspace:read', 'workspace:write'])
@@ -293,6 +294,36 @@ describe('PackageManager', () => {
       await readFile(join(packageRoot, 'active', `${encodeURIComponent(v1.id)}.json`), 'utf8'),
     ) as { version: string }
     expect(pointer.version).toBe('1.0.0')
+  })
+
+  it('can replay compensation after a crash without re-breaking an already rolled-back package', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-cyber-package-compensate-'))
+    const source = join(directory, 'source')
+    await mkdir(source, { recursive: true })
+    await writeFile(join(source, 'SKILL.md'), '# Reversible\n', 'utf8')
+    const store = await SqliteStore.open(join(directory, 'cyber.sqlite'))
+    stores.push(store)
+    const workspace = store.createWorkspace({ name: 'Crash recovery' })
+    const manager = new PackageManager({
+      store,
+      runtime: new LocalPackageRuntime(join(directory, 'packages')),
+    })
+    const packageManifest = manifest('1.0.0', '# Reversible\n')
+    const installation = await manager.installReversible({
+      workspaceId: workspace.id,
+      manifest: packageManifest,
+      sourceDirectory: source,
+      approvalToken: manager.preview(workspace.id, packageManifest).approvalToken,
+    })
+
+    await manager.compensate(installation, 'workshop-crash-recovery')
+    await expect(manager.compensate(installation, 'workshop-crash-recovery')).resolves.toBeUndefined()
+
+    expect(store.getActivePackage(workspace.id, packageManifest.id)).toBeUndefined()
+    expect(store.getPackageInstallTransaction(installation.transactionId)).toMatchObject({
+      status: 'rolled-back',
+      errorCode: 'workshop-crash-recovery',
+    })
   })
 
   it('rejects undeclared source inventory before staging a package', async () => {
