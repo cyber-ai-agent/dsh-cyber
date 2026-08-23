@@ -1,0 +1,88 @@
+name: Apply Blueprint Embodiment persistence
+
+on:
+  push:
+    branches: [feat/creative-world-platform-v1]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/creative-world-platform-v1
+      - name: Persist portable Embodiment on core Blueprints
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          contracts = Path('packages/contracts/src/index.ts')
+          text = contracts.read_text(encoding='utf-8')
+          text = text.replace('export const CYBER_SCHEMA_VERSION = 12 as const', 'export const CYBER_SCHEMA_VERSION = 13 as const', 1)
+          marker = "export type JsonObject = { [key: string]: JsonValue }\n"
+          if marker not in text:
+            raise SystemExit('contracts JsonObject marker missing')
+          text = text.replace(
+            marker,
+            marker + "\nexport type { EmbodimentPresetDescriptor, EmbodimentProfile, EmbodimentSocialPolicy } from './embodiment.js'\n",
+            1,
+          )
+          marker = "  requestedSkills: string[]\n  requestedCapabilities: string[]\n  createdAt: IsoTimestamp"
+          if marker not in text:
+            raise SystemExit('EmployeeBlueprint marker missing')
+          text = text.replace(
+            marker,
+            "  requestedSkills: string[]\n  requestedCapabilities: string[]\n  embodiment?: import('./embodiment.js').EmbodimentProfile\n  createdAt: IsoTimestamp",
+            1,
+          )
+          contracts.write_text(text, encoding='utf-8')
+
+          migrations = Path('packages/persistence/src/migrations.ts')
+          text = migrations.read_text(encoding='utf-8')
+          tail = """  {\n    version: 12,\n    name: 'model-interaction-http-status',\n    sql: `\n      ALTER TABLE model_interaction_logs\n        ADD COLUMN http_status INTEGER CHECK (http_status BETWEEN 100 AND 599);\n    `,\n  },\n]"""
+          replacement = """  {\n    version: 12,\n    name: 'model-interaction-http-status',\n    sql: `\n      ALTER TABLE model_interaction_logs\n        ADD COLUMN http_status INTEGER CHECK (http_status BETWEEN 100 AND 599);\n    `,\n  },\n  {\n    version: 13,\n    name: 'portable-blueprint-embodiment',\n    sql: `\n      ALTER TABLE employee_blueprints ADD COLUMN embodiment_json TEXT;\n    `,\n  },\n]"""
+          if tail not in text:
+            raise SystemExit('migration tail missing')
+          migrations.write_text(text.replace(tail, replacement, 1), encoding='utf-8')
+
+          store = Path('packages/persistence/src/sqlite-store.ts')
+          text = store.read_text(encoding='utf-8')
+
+          old_insert = """        `INSERT INTO employee_blueprints (\n           id, version, world_template_id, display_name, role, summary, persona,\n           requested_skills_json, requested_capabilities_json, created_at\n         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,\n      )\n      .run(\n        blueprint.id,\n        blueprint.version,\n        blueprint.worldTemplateId,\n        blueprint.displayName,\n        blueprint.role,\n        blueprint.summary,\n        blueprint.persona,\n        stringifyJson(blueprint.requestedSkills),\n        stringifyJson(blueprint.requestedCapabilities),\n        blueprint.createdAt,\n      )"""
+          new_insert = """        `INSERT INTO employee_blueprints (\n           id, version, world_template_id, display_name, role, summary, persona,\n           requested_skills_json, requested_capabilities_json, embodiment_json, created_at\n         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,\n      )\n      .run(\n        blueprint.id,\n        blueprint.version,\n        blueprint.worldTemplateId,\n        blueprint.displayName,\n        blueprint.role,\n        blueprint.summary,\n        blueprint.persona,\n        stringifyJson(blueprint.requestedSkills),\n        stringifyJson(blueprint.requestedCapabilities),\n        blueprint.embodiment === undefined ? null : stringifyJson(blueprint.embodiment),\n        blueprint.createdAt,\n      )"""
+          if old_insert not in text:
+            raise SystemExit('saveBlueprint insert target missing')
+          text = text.replace(old_insert, new_insert, 1)
+
+          old_world_guard = """    if (blueprint.worldTemplateId !== world.templateId && world.templateId !== 'personal-world') {\n      throw new PersistenceError('Employee blueprint is not compatible with this world')\n    }"""
+          new_world_guard = """    // Explicit semantic Embodiment makes a Blueprint portable across compatible\n    // worlds. Legacy Blueprints without Embodiment keep their original template\n    // restriction until they are upgraded to the portable character contract.\n    if (\n      blueprint.embodiment === undefined\n      && blueprint.worldTemplateId !== world.templateId\n      && world.templateId !== 'personal-world'\n    ) {\n      throw new PersistenceError('Employee blueprint is not compatible with this world')\n    }"""
+          if old_world_guard not in text:
+            raise SystemExit('recruit world guard missing')
+          text = text.replace(old_world_guard, new_world_guard, 1)
+
+          old_map = """function mapBlueprint(row: object): EmployeeBlueprint {\n  const value = row as Record<string, unknown>\n  return {\n    schemaVersion: 1,\n    id: String(value.id),\n    version: Number(value.version),\n    worldTemplateId: String(value.world_template_id),\n    displayName: String(value.display_name),\n    role: String(value.role),\n    summary: String(value.summary),\n    persona: String(value.persona),\n    requestedSkills: parseJson<string[]>(value.requested_skills_json),\n    requestedCapabilities: parseJson<string[]>(value.requested_capabilities_json),\n    createdAt: String(value.created_at),\n  }\n}"""
+          new_map = """function mapBlueprint(row: object): EmployeeBlueprint {\n  const value = row as Record<string, unknown>\n  const blueprint: EmployeeBlueprint = {\n    schemaVersion: 1,\n    id: String(value.id),\n    version: Number(value.version),\n    worldTemplateId: String(value.world_template_id),\n    displayName: String(value.display_name),\n    role: String(value.role),\n    summary: String(value.summary),\n    persona: String(value.persona),\n    requestedSkills: parseJson<string[]>(value.requested_skills_json),\n    requestedCapabilities: parseJson<string[]>(value.requested_capabilities_json),\n    createdAt: String(value.created_at),\n  }\n  if (typeof value.embodiment_json === 'string') {\n    blueprint.embodiment = parseJson<NonNullable<EmployeeBlueprint['embodiment']>>(value.embodiment_json)\n  }\n  return blueprint\n}"""
+          if old_map not in text:
+            raise SystemExit('mapBlueprint target missing')
+          text = text.replace(old_map, new_map, 1)
+
+          pattern = re.compile(r"function employeeBlueprintEquals\(left: EmployeeBlueprint, right: EmployeeBlueprint\): boolean \{.*?\n\}", re.S)
+          match = pattern.search(text)
+          if match is None:
+            raise SystemExit('employeeBlueprintEquals target missing')
+          replacement = """function employeeBlueprintEquals(left: EmployeeBlueprint, right: EmployeeBlueprint): boolean {\n  return left.schemaVersion === right.schemaVersion &&\n    left.id === right.id &&\n    left.version === right.version &&\n    left.worldTemplateId === right.worldTemplateId &&\n    left.displayName === right.displayName &&\n    left.role === right.role &&\n    left.summary === right.summary &&\n    left.persona === right.persona &&\n    JSON.stringify(left.requestedSkills) === JSON.stringify(right.requestedSkills) &&\n    JSON.stringify(left.requestedCapabilities) === JSON.stringify(right.requestedCapabilities) &&\n    JSON.stringify(left.embodiment ?? null) === JSON.stringify(right.embodiment ?? null) &&\n    left.createdAt === right.createdAt\n}"""
+          text = text[:match.start()] + replacement + text[match.end():]
+          store.write_text(text, encoding='utf-8')
+          PY
+      - name: Commit and remove one-shot workflow
+        run: |
+          rm .github/workflows/apply-blueprint-embodiment-persistence.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add packages/contracts/src/index.ts packages/persistence/src/migrations.ts packages/persistence/src/sqlite-store.ts .github/workflows/apply-blueprint-embodiment-persistence.yml
+          git commit -m "refactor: persist portable Blueprint Embodiment"
+          git push origin HEAD:feat/creative-world-platform-v1
