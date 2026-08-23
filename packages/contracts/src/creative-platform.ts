@@ -1,4 +1,4 @@
-import type { EmployeeBlueprint, IsoTimestamp, WorkSession } from './index.js'
+import type { EmployeeBlueprint, IsoTimestamp, JsonObject, WorkSession } from './index.js'
 
 export interface EmbodimentSocialPolicy {
   canInitiateConversation: boolean
@@ -32,7 +32,8 @@ export interface WorkshopRoleDefinition {
   summary: string
   persona: string
   embodiment: EmbodimentProfile
-  skillIds: string[]
+  /** Capabilities the generated blueprint may request. Grants happen separately. */
+  requestedSkillIds: string[]
 }
 
 export interface WorkshopProject {
@@ -72,13 +73,28 @@ export type SkillActionStatus =
   | 'waiting-for-integration'
   | 'failed'
 
+export type SkillActionRisk = 'read' | 'write-local' | 'external-side-effect'
+
+export type SkillActionAuthorization =
+  | 'explicit-user-request'
+  | 'preapproved-policy'
+
+/**
+ * Durable, provider-neutral representation of one concrete skill side effect.
+ * Adapter-specific credentials never belong here; parameters must be secret-free.
+ */
 export interface CharacterSkillAction {
   id: string
   worldId: string
   characterId: string
   skillId: string
+  adapterId: string
   action: string
   target: string
+  label: string
+  risk: SkillActionRisk
+  authorization: SkillActionAuthorization
+  parameters: JsonObject
   scheduledFor?: IsoTimestamp
   status: SkillActionStatus
   detail: string
@@ -91,4 +107,13 @@ export interface CharacterSkillResult {
   skillId?: string
   summary?: string
   actions: CharacterSkillAction[]
+}
+
+export interface CharacterSkillDescriptor {
+  id: string
+  displayName: string
+  summary: string
+  adapterId: string
+  risks: SkillActionRisk[]
+  supportsScheduling: boolean
 }
