@@ -1,207 +1,443 @@
+<div align="center">
+
 # DSH Cyber
 
-DSH Cyber 是一个基于 [DeepSeek Harness](https://www.deepseek.com/harness/) 的本地优先、多角色智能体工作台。它提供独立 Web 界面，把真实 Agent 会话、思考过程、工具轨迹、文件与可视化世界整合为一个可持续使用的桌面式工作空间。
+### 一个本地优先、可具身、可成长、可连接真实世界的 AI 角色与世界平台
 
-> 当前版本处于早期开发阶段，适合本地体验、架构验证与共同开发，尚未发布到 npm。
+**Build a living AI world — characters with identity, memory, bodies, skills, relationships and real actions.**
 
-| 组件 | 当前版本 |
-| --- | --- |
-| DSH Cyber | `0.1.0` |
-| DeepSeek Harness | `0.1.1-rc.1` |
+[官网](https://www.sandaoliu.cn/) · [English](./README_EN.md) · [技术报告](./docs/technical-report.md) · [Roadmap](./docs/roadmap.md) · [贡献指南](./CONTRIBUTING.md)
 
-本次分支升级已将内置 Harness、专用 bundle 与兼容性检查统一到 DSH `0.1.1-rc.1`。安装包与 GitHub Release 分发会在项目进入稳定发布阶段后单独规划。
+[![CI](https://github.com/cyber-ai-agent/dsh-cyber/actions/workflows/ci.yml/badge.svg)](https://github.com/cyber-ai-agent/dsh-cyber/actions/workflows/ci.yml)
+[![Full E2E](https://github.com/cyber-ai-agent/dsh-cyber/actions/workflows/full-e2e.yml/badge.svg)](https://github.com/cyber-ai-agent/dsh-cyber/actions/workflows/full-e2e.yml)
+[![GitHub stars](https://img.shields.io/github/stars/cyber-ai-agent/dsh-cyber?style=flat)](https://github.com/cyber-ai-agent/dsh-cyber/stargazers)
+[![License](https://img.shields.io/badge/license-see%20LICENSE-blue)](./LICENSE)
 
-## 核心能力
+> **Pre-Alpha** — 项目仍在快速重构。当前重点是把 Creative Platform V1 的架构边界做对，再进入稳定兼容阶段。
 
-- **独立工作台**：不依赖 DSH 原生 Web 界面，一条命令启动本地 Web UI。
-- **真实多角色协作**：每名员工都是一个可持续使用的独立机器人 Agent，拥有自己的身份、直接会话、模型策略、权限和成长档案；协调 Agent 不冒充其他角色。
-- **世界隔离**：公司、酒馆、创作工作室等世界拥有各自的角色、会话、关系和 `@` 候选列表，切换世界会进入独立上下文。
-- **会话与轨迹同屏**：对话、思考、工具调用、交付物和状态事件集中在主工作区。
-- **世界与工作台双模式**：世界模式把可交互场景作为主画面完整呈现；工作台模式把会话与轨迹放在中心，并提供可调宽度的世界、档案、文件和预览侧栏。
-- **员工成长档案**：全员档案库集中展示身份、生日、性格、技能证据、里程碑、工作日志与关系；技能必须由真实任务或评审证据支撑。
-- **World Runtime V2**：PixiJS 场景由版本化主题清单、SQLite 快照、可重放事件和可恢复 SSE 共同驱动；角色位置、会议、物件、灯光与工作状态来自真实领域事件，不使用无状态随机表演。
-- **安全文件预览**：只读浏览当前工作区的允许目录，文本、代码和图片可以在侧栏预览或新标签打开；隐藏文件、凭据、符号链接和越界路径默认拒绝。
-- **三类扩展市场**：主题市场、插件市场和人才市场统一使用独立目录包。目录支持搜索、官方认证与内容哈希校验；安装前展示来源、许可证、能力和数据外发声明，失败保留可审计回滚记录。
-- **声明式插件与人才包**：当前 `prompt-transform` 插件入口会进入真实 Agent 提示链；人才包安装后会进入当前世界的招聘目录，并创建独立员工会话，而不是只展示一张市场卡片。
-- **本地优先存储**：SQLite 保存工作区、世界、角色、会话索引、偏好、档案与授权；核心功能不依赖云端账户。
-- **本地创意工坊**：用户创建的世界、角色 Blueprint、具身语义和生成包保存在 `stateRoot/workshop`，应用更新不会覆盖；未来云端只作为可选同步副本。
-- **受信任 Skill Adapter**：角色模板只声明 Skill 请求，角色 revision 单独授权；外部动作通过宿主 Adapter 结构化执行并记录真实状态。
-- **可扩展生态**：为运行时插件、技能包、角色蓝图、世界主题和资产包预留统一的安装、授权与审计边界。
+</div>
 
-## 设置与个性化
+---
 
-右上角的“设置”统一管理工作台配置：
+## 为什么做 DSH Cyber？
 
-- 跟随系统、白天和黑夜三种颜色模式；
-- 赛博石墨、午夜紫、纸张日光等界面皮肤；
-- 上传 PNG、JPEG 或 WebP 作为本地背景，并设置铺满、完整显示或平铺、透明度和动效；
-- 紧凑/舒适密度，以及左右栏宽度；
-- DeepSeek、OpenAI、Anthropic、Gemini、OpenRouter、Groq、Mistral、xAI、Ollama 和 LM Studio 模型预设；
-- 工作区、世界与员工三级模型分配，员工设置优先于世界设置，世界设置优先于工作区默认值；
-- DSH 运行时、本地数据和更新状态入口。
+我们希望 AI 角色不再只是一个 Prompt。
 
-“设置 → 更新”提供受控的底层 DSH 升级流程：候选版本先进入隔离 profile，依次通过精确版本验证、协议合同测试和两轮真实模型金丝雀，得到人工批准后先生成完整 `.dshbackup` 本地数据 Bundle，再写入活动运行时指针。更新在下次启动时生效，失败记录保留在 SQLite 中。
+```text
+Character
+├─ Identity
+├─ Persona
+├─ Agent Session
+├─ Model Policy
+├─ Embodiment
+├─ Memory
+├─ Relationships
+├─ Skill Grants
+├─ Work History
+├─ Evidence
+└─ Growth
+```
 
-界面偏好和模型资料保存在本地 SQLite。背景文件保存在本机资产目录，数据库只记录引用和完整性校验值。模型凭据只通过环境变量名引用，不写入浏览器状态或数据库明文。
+一个角色应该能长期存在，有自己的会话、档案、身体、关系、技能和成长轨迹；进入不同世界时保持身份一致；需要调用真实世界能力时，通过受控 Skill Adapter 完成真实动作，并把结果写回可审计状态。
+
+DSH Cyber 想把这件事做成一个**可视化、可玩、可扩展的本地 AI 世界平台**：你可以经营一家公司，也可以创建酒馆、创作工作室、家庭空间、虚拟伙伴世界，甚至通过 Skills 联动 GitHub、浏览器、Home Assistant、IM 机器人和其他真实系统。
+
+---
+
+## 当前已经实现
+
+### 🧠 Persistent AI Characters
+
+- 每个角色拥有独立 Agent session、模型策略、档案和长期身份。
+- 一个角色对应一个稳定 canonical 私聊，会话可以置顶/隐藏，管家默认置顶。
+- 角色可以参与真实多角色协作，不由一个“总控 Prompt”假装所有人发言。
+- 角色之间的共享经历和关系证据可以持久化。
+
+### 🌍 Embodied Worlds
+
+- World Runtime + World Simulation 分层。
+- PixiJS 可视化世界、状态投影、角色移动、会议、灯光与具身动作。
+- deterministic role-aware ambient life，避免无意义随机走动。
+- 自定义角色通过 `EmbodimentProfile` 使用语义标签绑定区域、设施、行为和动画 Rig。
+- 世界、角色、Skill 三者显式解耦。
+
+### ✨ Creative Workshop
+
+- 顶栏独立「创意工坊」入口。
+- 本地项目库：用户创建的世界项目保存在 `stateRoot/workshop`。
+- 世界观、场景、角色 Persona、Embodiment 与 Skill 请求分别建模。
+- Workshop 会把角色编译成标准扩展包，再经过 `PackageManager` preview / install。
+- 支持基于已有项目创建安全副本，避免直接覆盖运行中的不可变历史。
+
+### 🧩 Market / MOD Foundation
+
+统一市场包含：
+
+- World Themes
+- Plugins
+- Character Blueprints
+
+扩展包拥有 manifest、内容哈希、权限声明、来源和安装事务。当前第三方运行入口仍以声明式能力为主，不默认执行任意 JS / shell。
+
+### 🔌 Trusted Skill Runtime
+
+Skill 当前采用：
+
+```text
+Available
+≠ Requested
+≠ Granted
+≠ Approved Action
+≠ Executed Action
+```
+
+已完成：
+
+- `CharacterSkillRuntime`
+- `CharacterSkillAdapterRegistry`
+- 结构化 Skill Action
+- risk / authorization / adapterId / status
+- durable scheduling
+- Home Assistant Adapter V1
+
+外部动作只有 Adapter 返回真实执行结果后，Agent 才能告诉用户“已经完成”。
+
+### 💾 Local-first & Safe Upgrades
+
+本地 `stateRoot` 当前是权威数据源。
+
+完整 `.dshbackup` 已覆盖：
+
+```text
+SQLite
+worlds/
+assets/
+packages/
+workshop/
+skills/
+```
+
+凭据、运行时二进制和可重建缓存不进入普通备份。
+
+应用源码、Harness 与用户数据拥有不同生命周期；正常升级不会通过删除本地世界来“解决问题”。
+
+---
+
+## 界面与世界示例
+
+> Creative Platform V1 的 UI 仍在快速调整。下面先展示当前内置世界视觉资产；稳定后的工作台 / 创意工坊 / 角色档案截图会统一放入 `docs/assets/screenshots/`，避免 README 长期挂着已经失效的开发截图。
+
+<table>
+<tr>
+<td width="50%">
+<img src="./packages/web/public/assets/cyber-office-world.png" alt="Cyber Office World" />
+<br/><b>赛博公司世界</b><br/>角色工作、协作、会议与状态会投影到可视化世界。
+</td>
+<td width="50%">
+<img src="./packages/web/public/assets/moonlit-tavern-world.png" alt="Moonlit Tavern World" />
+<br/><b>月影酒馆世界</b><br/>同一套 Character / Conversation / World Runtime 可以承载完全不同的世界语义。
+</td>
+</tr>
+</table>
+
+当前信息架构已经收敛为：
+
+```text
+Topbar
+├─ 创意工坊
+├─ 市场
+├─ 运行时健康
+└─ 设置
+
+Left
+└─ 会话（类似微信会话列表）
+
+Center
+└─ 对话 / 工作台
+
+Right
+├─ 世界
+└─ 档案
+```
+
+市场负责安装模板和扩展；档案负责实例化、配置、授权和查看具体角色。
+
+---
+
+## 架构
+
+```mermaid
+flowchart TB
+    UI[Web UI / Creative Workshop / World]
+    API[Local API + Event Stream]
+    DOMAIN[Domain Services]
+    WORLD[World Runtime + Simulation]
+    CHAR[Character / Dossier / Growth]
+    CONV[Conversation / Collaboration]
+    SKILL[Skill Runtime + Adapter Registry]
+    PKG[Package / MOD Runtime]
+    STORE[SQLite + Local State Roots]
+    HARNESS[Harness Compatibility Adapter]
+    DSH[DeepSeek Harness]
+    REAL[GitHub / Browser / Home Assistant / IM / ...]
+
+    UI --> API --> DOMAIN
+    DOMAIN --> WORLD
+    DOMAIN --> CHAR
+    DOMAIN --> CONV
+    DOMAIN --> SKILL
+    DOMAIN --> PKG
+    DOMAIN --> STORE
+    CONV --> HARNESS --> DSH
+    SKILL --> REAL
+```
+
+核心不变量：
+
+```text
+World != Character != Skill != Harness
+```
+
+一个稳定 `characterId` 连接：
+
+```text
+Agent identity
+= canonical direct conversation contact
+= world body
+= dossier
+= memory owner
+= growth owner
+= skill grant owner
+```
+
+详细设计见：
+
+- [技术报告](./docs/technical-report.md)
+- [Creative World Platform V1](./docs/architecture/creative-world-platform-v1.md)
+- [Architecture & Development Guidelines](./docs/development/architecture-guidelines.md)
+- [CI Strategy](./docs/development/ci-strategy.md)
+
+---
+
+## 从 DeepSeek Harness 与 OpenAI Codex 吸收什么？
+
+DSH Cyber 不把两个项目的内部实现直接复制进领域层，而是吸收它们值得长期保留的工程思想。
+
+### DeepSeek Harness
+
+参考 [`deepseek-ai/deepseek-harness`](https://github.com/deepseek-ai/deepseek-harness)：
+
+- Registry / factory / scoped setup 分离；
+- 能力通过稳定 Context/Provider 边界组合；
+- setup 完成后再 publication；
+- 生命周期和 ownership 显式；
+- 不为了新增能力不断修改 Agent loop。
+
+### OpenAI Codex
+
+参考 [`openai/codex`](https://github.com/openai/codex)：
+
+- sandbox-first；
+- 最小权限；
+- 对命令、网络、文件、工具调用等具体 Action 做审批；
+- 一次授权、会话授权、策略修改拥有不同语义；
+- 将风险和用户授权程度绑定到实际动作，而不是绑定整个插件。
+
+DSH Cyber 再在上层加入：**世界、具身角色、长期记忆、关系、成长、本地所有权、MOD 和真实 Skill Action**。
+
+---
 
 ## 快速开始
 
-### 环境要求
+### 环境
 
 - Node.js `22.19+` 或 `24+`
 - pnpm `11.7+`
-- 可用的 DeepSeek Harness 开发环境（执行真实 Agent 时需要）
 
-### 安装与启动
+### 安装
 
 ```bash
-git clone git@github.com:cyber-ai-agent/dsh-cyber.git
+git clone https://github.com/cyber-ai-agent/dsh-cyber.git
 cd dsh-cyber
 pnpm install
 pnpm build
 pnpm dsh-cyber -- web
 ```
 
-服务默认监听 `127.0.0.1:43123` 并自动打开浏览器。常用参数：
+默认监听：
 
-```bash
-pnpm dsh-cyber -- web --port 43123 --workspace . --data-dir ./data --no-open
-pnpm dsh-cyber -- doctor --data-dir ./data
-pnpm dsh-cyber -- backup --data-dir ./data --output ./backup.dshbackup
-pnpm dsh-cyber -- export --data-dir ./data --output ./workspace.json
-pnpm dsh-cyber -- runtime-check --candidate-root /path/to/dsh-candidate --data-dir ./data
-pnpm dsh-cyber -- runtime-rollback --data-dir ./data
+```text
+127.0.0.1:43123
 ```
 
-如果候选 DSH 导致 Web 服务无法启动，`runtime-rollback` 不依赖 Web UI，会先创建包含 SQLite、世界、资产、已安装包、创意工坊和 Skill 动作的完整本地 Bundle，再清除候选运行时指针并恢复项目内置版本。
-
-默认数据目录：
-
-- Windows：`%LOCALAPPDATA%\DSH Cyber`
-- macOS / Linux：`~/.dsh-cyber`
-
-### 更新到最新版本（保留本地世界与创作数据）
-
-DSH Cyber 的程序目录与 `stateRoot` 分离。正常更新只替换源码、依赖和构建产物，不删除本地世界、角色、会话、Workshop 项目、Skill 动作或资产。推荐更新前先生成一次完整 Bundle：
+常用命令：
 
 ```bash
+pnpm dsh-cyber -- doctor
+pnpm dsh-cyber -- backup --output ./backup.dshbackup
+pnpm dsh-cyber -- web --no-open
+pnpm typecheck
+pnpm test
+pnpm test:e2e
+```
+
+---
+
+## 更新到最新版本，同时保留本地世界
+
+推荐流程：
+
+```bash
+# 1. 先备份本地状态
 pnpm dsh-cyber -- backup
 
+# 2. 更新程序代码
 git fetch origin
 git switch main
 git pull --ff-only origin main
 
+# 3. 更新依赖并构建
 pnpm install --frozen-lockfile
 pnpm build
+
+# 4. 检查本地状态
 pnpm dsh-cyber -- doctor
+
+# 5. 启动
 pnpm dsh-cyber -- web
 ```
 
-开发分支用户把 `main` 替换为目标分支即可；如果使用自定义 `--data-dir`，更新后继续传入**同一个数据目录**。完整说明见 [`docs/operations/local-first-upgrades.md`](./docs/operations/local-first-upgrades.md)。不要通过删除 `~/.dsh-cyber`、`%LOCALAPPDATA%\DSH Cyber`、`workshop/` 或 `worlds/` 来处理普通代码升级。
+如果你使用自定义 `--data-dir`，升级前后继续使用**同一个目录**。
 
-### 开发验证
+完整说明：[Local-first Upgrades](./docs/operations/local-first-upgrades.md)
 
-```bash
-pnpm typecheck
-pnpm test
-pnpm test:e2e
-pnpm verify
-```
+### 当前开发期的兼容边界
 
-## 使用模型
+目前仍处于 Pre-Alpha，尚未形成真实外部安装用户规模。Creative Platform V1 定型前，如果实验性旧结构严重阻碍正确架构，我们会优先做一次干净重构，而不是永久背负大量只服务于开发快照的兼容补丁。
 
-在“设置 → 模型”中选择供应商预设后，界面会同步填写协议、服务地址和推荐的密钥环境变量名，也可以登记其他 OpenAI 兼容服务。远程模型地址必须使用 HTTPS；本地模型地址仅允许环回地址。需要密钥时只填写环境变量名，例如 `DEEPSEEK_API_KEY` 或 `ANTHROPIC_API_KEY`，然后在启动 DSH Cyber 前设置对应环境变量。
+**从正式声明本地数据兼容基线的版本开始**，所有持久化变更都必须使用 versioned migration + backup / restore 验证，正常升级不得清空用户数据。
 
-模型路由按以下优先级解析：
+---
 
-1. 员工专属模型；
-2. 当前世界模型；
-3. 工作区默认模型；
-4. 默认模型资料。
+## 模型与 Harness
 
-因此同一世界中的产品、开发和测试员工可以使用不同模型，同时仍保留统一的工作区兜底配置。密钥值不会进入员工档案、SQLite 或浏览器状态。
-
-## 数据与隐私
-
-- 本地 `stateRoot` 是当前权威数据源：SQLite、世界、Workshop、Skill 动作和资产共同组成用户本地状态；云同步是未来可选的加密副本，不替代本地所有权。
-- 大型文件和背景图片单独存储，并以内容校验值关联。
-- 服务默认只监听 loopback，不提供公网监听开关。
-- 插件与角色使用显式、最小权限授权。
-- 不可逆操作（发布、付款、外部消息、删除）需要审批或可补偿控制。
-- 请勿把 `.env`、数据库、运行日志、私钥或本地工作区数据提交到仓库。
-
-## 架构
-
-```mermaid
-flowchart TB
-  UI["Standalone Web UI"] --> API["Cyber API / Event Stream"]
-  API --> Kernel["World, Conversation, Growth & Package Services"]
-  Kernel --> Store["SQLite + Local Asset Store"]
-  Kernel --> Adapter["Harness Compatibility Adapter"]
-  Adapter --> DSH["DeepSeek Harness"]
-  DSH --> Agents["Independent Agent Sessions"]
-  DSH --> Plugins["Skills, Tools & Plugins"]
-  Kernel -. optional .-> Sync["Encrypted Cloud Sync"]
-```
-
-上层产品只依赖 DSH Cyber 的领域契约和适配器端口。DeepSeek Harness 被限制在兼容适配层和专用 bundle/profile 中，从而允许底层 DSH 升级先经过候选环境、契约测试、回归测试和回滚检查，再切换活动版本。
-
-关键边界与取舍见 [ADR 0001：World Runtime 与扩展边界](./docs/adr/0001-world-runtime-and-extension-boundaries.md)。
-
-## 扩展市场与包类型
-
-仓库中的市场目录采用可复制、可审计的独立包结构：
+模型配置支持多种供应商与 OpenAI-compatible endpoints，并允许：
 
 ```text
-marketplace/
-├── themes/<package-id>/
-├── plugins/<package-id>/
-└── talent/<package-id>/
+Employee model
+  > World model
+    > Workspace default
+      > Default model profile
 ```
 
-每个目录至少包含 `dsh-cyber.package.json` 和清单声明的内容文件。清单声明包类型、版本、发布者、许可证、能力、数据外发、逐文件 SHA-256、运行入口和认证摘要。官方标记只有在发布机构受信任且内容摘要一致时才成立；发现目录不等于自动信任或自动启用。
+Harness 被限制在兼容适配层，不允许世界、角色、Skill 领域代码依赖 Harness 私有 API。
 
-当前内置的可验证示例包括赛博夜班总部主题、会议纪要插件和档案管理员人才包。插件通过 `/meeting-summary` 命令进入真实提示链；档案管理员包安装后进入招聘列表。
+底层 Harness 更新支持候选版本检查、contract test、canary、人工激活、完整本地备份和 rollback。
 
-| 类型 | 用途 |
-| --- | --- |
-| Plugin / Skill Pack | 当前仅支持声明式 `prompt-transform`；模型、工具、通道、存储、技能注入和工作流属于后续能力边界 |
-| Employee Blueprint | 可招聘的独立角色模板、能力要求与评测规则 |
-| World Theme | 世界布局、术语、场景、角色素材与事件动画映射 |
-| Asset Pack | 头像、服装、场景、声音等授权素材 |
+---
 
-安装包、启用包、授予世界权限和员工掌握技能是不同状态。市场条目需要经过来源、完整性、许可证、权限和运行行为检查，不能仅凭发现来源视为可信。
+## 开发状态 / TODO
 
-### 当前扩展边界与路线图
+完整列表见 [Roadmap](./docs/roadmap.md)。当前重点：
 
-当前插件入口严格限定为声明式 `prompt-transform` JSON。运行时不加载或执行第三方 JavaScript、TypeScript、原生模块或任意本机命令，也不提供网络代理、通用存储或可执行代码 sandbox；`skill` 入口仅保留合同边界，尚未自动注入或授权。`talent` 只是市场分类，员工包的 `kind` 必须是 `employee-blueprint`。
+- [ ] Creative Platform V1 稳定化
+- [ ] Workshop 项目版本与编辑生命周期
+- [ ] Character Identity / Persona / Embodiment 完全以用户当前设定为准
+- [ ] Persistent Memory V2
+- [ ] Task / Job / Deliverable / Review 工作系统
+- [ ] GitHub Skill Adapter
+- [ ] Browser Skill Adapter
+- [ ] 飞书 / QQ / 微信 Channel Adapter
+- [ ] Autonomous Collaboration Policy
+- [ ] MOD 远程索引、签名、依赖与更新
+- [ ] 自定义角色 Body / Rig / 动画资产
+- [ ] 未来 3D 世界能力
+- [ ] 可选加密云同步（本地仍为权威）
 
-官方认证同时要求受信机构与内容摘要一致；`certification` 不是发布者私钥产生的密码学签名。远程市场/索引、密码学签名、依赖解析、自动更新、卸载和 `package pack|verify|publish` 发布 CLI 都是 ROADMAP，当前只支持仓库内本地市场与真实安装流程。
+---
 
-## DeepSeek Harness 兼容性
+## 开发规范
 
-DSH Cyber 遵循 Harness 的插件、服务、事件、技能、子代理和会话投影模型：
+我们希望这个项目越做越大，但不要越做越难改。
 
-- [DeepSeek Harness](https://www.deepseek.com/harness/)
-- [官方仓库](https://github.com/deepseek-ai/deepseek-harness)
-- [Quick start](https://deepseek-harness.github.io/deepseek-harness/guide/quickstart)
-- [Architecture](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/architecture.md)
-- [Plugin development](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/develop/basic/index.md)
-- [Skills](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/subsystems/skills.md)
-- [Subagents](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/subsystems/subagent.md)
-- [Session projections](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/subsystems/session-projection.md)
-- [Cordis paper](https://github.com/cordiverse/paper)
+几个硬规则：
 
-Harness `0.1.1-rc.1` 仍处于开发者预览阶段。DSH Cyber 当前内置运行时与兼容性检查以 `0.1.1-rc.1` 为主版本，同时保留旧 rc.8/rc.7 候选记录用于受控回退与历史诊断；不假定上游内部 API 稳定。
+1. **不要通过角色名字写业务逻辑。**
+2. **不要在核心 Runtime 里堆供应商 `if/else`。**
+3. **requested capability 与 granted capability 必须分离。**
+4. **外部真实动作必须结构化、可审批、可审计。**
+5. **复杂 UI 继续拆组件，不把状态全部塞回 `App.tsx`。**
+6. **新增持久化目录必须同步进入备份策略。**
+7. **兼容基线之后，schema 变化必须有 migration。**
+8. **测试产品契约，减少对按钮位置和 DOM 排列的耦合。**
 
-## 贡献
+详细规范：
 
-完整流程见 [CONTRIBUTING.md](./CONTRIBUTING.md)。扩展包作者还应阅读 [社区共创规范](./docs/community/README.md)；其中明确区分当前合同、贡献审核要求与尚未实现的路线图。
+- [`AGENTS.md`](./AGENTS.md)
+- [`docs/development/architecture-guidelines.md`](./docs/development/architecture-guidelines.md)
+- [`docs/development/ci-strategy.md`](./docs/development/ci-strategy.md)
+- [`CONTRIBUTING.md`](./CONTRIBUTING.md)
 
-提交变更前请运行 `pnpm verify`，并确认没有包含凭据、私有会话、数据库或本地运行目录。兼容性问题请同时提供 DSH 版本、操作系统、复现步骤和经过脱敏的诊断输出。
+---
 
-## 许可证
+## CI 策略
 
-DSH Cyber 使用 [PolyForm Noncommercial License 1.0.0](./LICENSE)，不授权商业用途。商业使用需要获得版权所有者的单独书面许可。
+项目当前处于快速架构期，因此 CI 分层：
 
-本项目不是 DeepSeek 官方项目。第三方组件与参考项目仍受各自许可证约束，详见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。
+```text
+Required PR CI
+└─ typecheck + unit/integration
+
+Full Chromium E2E
+├─ main push
+├─ nightly
+└─ manual dispatch
+```
+
+当前已经有 200+ unit/integration tests。进入 Alpha 后会增加少量核心 Smoke E2E 为 Required；进入 Beta / Stable 后再逐步把完整 E2E、migration、backup/restore、OS matrix 和 Harness Canary 收紧为发布门禁。
+
+---
+
+## 项目方向
+
+我们希望最后得到的不只是一个“多 Agent 面板”。
+
+更接近：
+
+```text
+AI Character Platform
++ Visual World Simulation
++ Persistent Memory & Growth
++ MOD Ecosystem
++ Real-world Skill Runtime
++ Harness Runtime
+```
+
+你可以创建一家公司，也可以创建一只长期陪伴你的猫、一个酒馆老板、一个内容工作室、一支开发团队，或者完全不同的世界。
+
+角色会有自己的经历，会记住发生过的事情，会形成关系，会通过真实工作积累证据和成长；当被授权时，它们还能通过 Skills 跨出虚拟世界，真正操作现实系统。
+
+---
+
+## Contributing
+
+项目仍然非常早期，架构讨论、世界设计、Character / MOD 设计、Skill Adapter、测试、文档和 UI 都欢迎贡献。
+
+请先阅读 [CONTRIBUTING.md](./CONTRIBUTING.md) 和 [Architecture Guidelines](./docs/development/architecture-guidelines.md)。重大领域变化建议先讨论边界，再写实现。
+
+---
+
+## Links
+
+- Website: https://www.sandaoliu.cn/
+- Repository: https://github.com/cyber-ai-agent/dsh-cyber
+- DeepSeek Harness: https://github.com/deepseek-ai/deepseek-harness
+- OpenAI Codex: https://github.com/openai/codex
+
+---
+
+<div align="center">
+
+**DSH Cyber is still early. That is exactly why we are investing in the architecture now.**
+
+</div>
