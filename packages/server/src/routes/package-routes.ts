@@ -7,16 +7,18 @@ import type { Router } from '../http/router.js'
 import { optionalString, packageManifest, readJson, requiredString } from '../http/request.js'
 import { writeJson } from '../http/response.js'
 import { loadInstalledBlueprints } from '../installed-package-runtime.js'
+import type { CharacterSkillRuntime } from '../services/character-skill-runtime.js'
 import { CreativeWorkshopService } from '../services/creative-workshop-service.js'
 
 export interface PackageRoutesDependencies {
   store: SqliteStore
   packageManager: PackageManager
   packageCatalog: LocalPackageCatalog
+  skillRuntime: CharacterSkillRuntime
 }
 
 export function registerPackageRoutes(router: Router, dependencies: PackageRoutesDependencies): void {
-  const { store, packageManager, packageCatalog } = dependencies
+  const { store, packageManager, packageCatalog, skillRuntime } = dependencies
   const workshop = new CreativeWorkshopService(store, packageManager)
 
   router.get(/^\/api\/workspaces\/([^/]+)\/packages$/, ({ response, params }) => {
@@ -26,6 +28,12 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
       items: store.listInstalledPackages(workspaceId),
       transactions: store.listPackageInstallTransactions(workspaceId),
     })
+  })
+
+  router.get(/^\/api\/workspaces\/([^/]+)\/skill-catalog$/, ({ response, params }) => {
+    const workspaceId = params[0]!
+    if (store.getWorkspace(workspaceId) === undefined) throw new HttpError(404, 'workspace_not_found', 'Workspace not found')
+    writeJson(response, 200, { items: skillRuntime.listDescriptors() })
   })
 
   router.post(/^\/api\/workspaces\/([^/]+)\/packages\/preview$/, async ({ request, response, params }) => {
