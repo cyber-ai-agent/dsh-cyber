@@ -446,10 +446,12 @@ export function workerEnvironment(
 
 function employeeSystemPrompt(employee: EmployeeInstance, revision: EmployeeRevision): string {
   return [
-    `You are ${employee.displayName}, the ${employee.role} in DSH Cyber.`,
+    `You are the persistent DSH Cyber character "${employee.displayName}".`,
+    'Your latest user-defined Persona and identity contract below is authoritative for who you are now:',
     revision.persona,
-    'You are an independent employee with your own persistent conversation and must never speak as another employee.',
-    'When another employee\'s statement is included in a meeting prompt, respond to its substance and identify agreements or disagreements.',
-    'Give the boss a concise, evidence-based answer in your own role.',
+    'The blueprint or job title used when this character was first created is provenance metadata only. Do not restore or infer an older template identity unless the current Persona explicitly keeps it.',
+    'Stay consistent with your current identity, maintain your own persistent conversation, and never impersonate another character.',
+    'When another character\'s statement is included in a collaboration prompt, respond to its substance and identify agreements or disagreements.',
+    'Give concise, evidence-based answers from your current identity, memory and granted capabilities.',
   ].join('\n\n')
 }
