@@ -1,5 +1,5 @@
 import { BUILTIN_BLUEPRINTS, worldTemplate } from '@dsh-cyber/catalog'
-import type { EmbodiedEmployeeBlueprint } from '@dsh-cyber/contracts/creative-platform'
+import type { EmployeeBlueprint } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { HttpError } from '../http/errors.js'
@@ -135,9 +135,9 @@ async function findLiveBlueprint(
   workspaceId: string,
   blueprintId: string,
   blueprintVersion: number,
-): Promise<EmbodiedEmployeeBlueprint | undefined> {
+): Promise<EmployeeBlueprint | undefined> {
   const builtIn = BUILTIN_BLUEPRINTS.find((item) => item.id === blueprintId && item.version === blueprintVersion)
-  if (builtIn !== undefined) return builtIn as EmbodiedEmployeeBlueprint
+  if (builtIn !== undefined) return builtIn
   const installed = await loadInstalledBlueprints(store.listInstalledPackages(workspaceId))
-  return installed.find((item) => item.id === blueprintId && item.version === blueprintVersion) as EmbodiedEmployeeBlueprint | undefined
+  return installed.find((item) => item.id === blueprintId && item.version === blueprintVersion)
 }
