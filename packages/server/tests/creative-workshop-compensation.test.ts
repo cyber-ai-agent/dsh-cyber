@@ -29,31 +29,39 @@ describe('CreativeWorkshopService compensation', () => {
     })
     const workshop = new CreativeWorkshopService(store, manager)
 
-    const originalReviseProfile = store.reviseEmployeeProfile.bind(store)
+    // Inject failure at a stable construction boundary rather than an
+    // implementation detail such as profile materialization. By the second
+    // recruit all generated packages are active and the world already exists,
+    // so this still exercises full composite compensation while allowing the
+    // Blueprint/Profile architecture to evolve independently.
+    const originalRecruit = store.recruitEmployee.bind(store)
+    let recruitCalls = 0
     let injected = false
-    Object.defineProperty(store, 'reviseEmployeeProfile', {
+    Object.defineProperty(store, 'recruitEmployee', {
       configurable: true,
-      value: ((input: Parameters<SqliteStore['reviseEmployeeProfile']>[0]) => {
-        if (!injected) {
+      value: ((input: Parameters<SqliteStore['recruitEmployee']>[0]) => {
+        recruitCalls += 1
+        if (recruitCalls === 2) {
           injected = true
-          throw new Error('simulated late Workshop profile failure')
+          throw new Error('simulated late Workshop recruit failure')
         }
-        return originalReviseProfile(input)
-      }) satisfies SqliteStore['reviseEmployeeProfile'],
+        return originalRecruit(input)
+      }) satisfies SqliteStore['recruitEmployee'],
     })
 
     await expect(workshop.create(workspace.id, {
       displayName: '会失败的创意世界',
       baseTemplateId: 'personal-world',
       lore: '用于验证组合事务补偿。',
-      scenario: '所有角色包已安装后，在写第一个角色具身档案时失败。',
+      scenario: '所有角色包已安装且第一个角色已创建后，第二个角色创建失败。',
       roles: [
         role('planner', '阿策', '内容策划'),
         role('editor', '阿剪', '视频剪辑师'),
       ],
-    })).rejects.toThrow('simulated late Workshop profile failure')
+    })).rejects.toThrow('simulated late Workshop recruit failure')
 
     expect(injected).toBe(true)
+    expect(recruitCalls).toBe(2)
     expect(store.listWorlds(workspace.id)).toEqual([])
     expect(store.listBlueprints()).toEqual([])
     expect(store.listInstalledPackages(workspace.id).filter((item) => item.status === 'active')).toEqual([])
