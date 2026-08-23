@@ -5,7 +5,6 @@ import { lstat, mkdir, open, readFile, readdir, rename, rm, writeFile } from 'no
 import { worldTemplate } from '@dsh-cyber/catalog'
 import type { CyberPackageManifest, EmployeeBlueprint, PackagePermissionPreview } from '@dsh-cyber/contracts'
 import type {
-  EmbodiedEmployeeBlueprint,
   WorkshopCreateInput,
   WorkshopProject,
   WorkshopRoleDefinition,
@@ -23,7 +22,7 @@ const MAX_ROLES = 16
 
 interface CompiledRolePackage {
   role: WorkshopRoleDefinition
-  blueprint: EmbodiedEmployeeBlueprint
+  blueprint: EmployeeBlueprint
   directory: string
   manifest: CyberPackageManifest
   preview?: PackagePermissionPreview
@@ -98,7 +97,7 @@ export class CreativeWorkshopService {
           actorId: 'owner',
         })
         reversibleInstalls.push(installation)
-        this.#store.saveBlueprint(item.blueprint as EmployeeBlueprint)
+        this.#store.saveBlueprint(item.blueprint)
       }
 
       const world = this.#store.createWorld({
@@ -201,7 +200,7 @@ export class CreativeWorkshopService {
     for (let index = 0; index < roles.length; index += 1) {
       const role = roles[index]!
       const packageId = `${projectId}.${slug(role.id) || `role${index + 1}`}`.slice(0, 150)
-      const blueprint: EmbodiedEmployeeBlueprint = {
+      const blueprint: EmployeeBlueprint = {
         schemaVersion: 1,
         id: packageId,
         version: 1,
@@ -223,10 +222,9 @@ export class CreativeWorkshopService {
   }
 }
 
-
 async function materializeRolePackage(
   directory: string,
-  blueprint: EmbodiedEmployeeBlueprint,
+  blueprint: EmployeeBlueprint,
 ): Promise<CyberPackageManifest> {
   await mkdir(directory, { recursive: true, mode: 0o700 })
   const blueprintPath = 'blueprint.json'
