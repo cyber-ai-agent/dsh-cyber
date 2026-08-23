@@ -620,6 +620,7 @@ export default function App() {
 
   const updateEmployeeProfile = useCallback(async (input: {
     displayName: string
+    role: string
     avatarIndex: number
     background: string
     personalityTraits: string[]
@@ -657,6 +658,7 @@ export default function App() {
           method: 'PUT',
           body: JSON.stringify({
             displayName: input.displayName,
+            role: input.role,
             background: input.background,
             personalityTraits: input.personalityTraits,
             appearance,
@@ -667,13 +669,13 @@ export default function App() {
       }
       const updatedAt = profile?.createdAt ?? new Date().toISOString()
       setEmployees((current) => current.map((employee) => employee.id === managingEmployee.id
-        ? { ...employee, displayName: input.displayName, avatarIndex: input.avatarIndex, updatedAt }
+        ? { ...employee, displayName: input.displayName, role: input.role, avatarIndex: input.avatarIndex, updatedAt }
         : employee))
       setDossiers((current) => {
         const dossier = current[managingEmployee.id]
         return dossier === undefined
           ? current
-          : { ...current, [managingEmployee.id]: { ...dossier, employee: { ...dossier.employee, displayName: input.displayName, updatedAt }, ...(profile === undefined ? {} : { profile }) } }
+          : { ...current, [managingEmployee.id]: { ...dossier, employee: { ...dossier.employee, displayName: input.displayName, role: input.role, updatedAt }, ...(profile === undefined ? {} : { profile }) } }
       })
       setWorldRuntimeRevision((value) => value + 1)
     } catch (cause) {
