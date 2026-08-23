@@ -40,7 +40,6 @@ const tabs: Array<{ id: DockTab; label: string; icon: typeof GlobeHemisphereWest
  * information architecture is ready; role management belongs to Dossier.
  */
 export function ArtifactDock({
-  demoMode,
   activeTab,
   selectedEmployee,
   dossiers,
@@ -84,7 +83,7 @@ export function ArtifactDock({
 
       <div className="dock-content">
         {visibleTab === 'world' ? (
-          worldContent ?? <WorldView world={world} employees={employees} {...(sceneImage === undefined ? {} : { sceneImage })} onSelectEmployee={onSelectEmployee} onInvite={onInvite} />
+          worldContent ?? <WorldView world={world} employees={employees} {...(sceneImage === undefined ? {} : { sceneImage })} onSelectEmployee={onSelectEmployee} />
         ) : null}
         {visibleTab === 'dossier' ? (
           selectedEmployee !== undefined && dossiers[selectedEmployee.id] !== undefined
