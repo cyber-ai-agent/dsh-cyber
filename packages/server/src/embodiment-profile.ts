@@ -1,4 +1,6 @@
-import type { EmbodimentProfile } from '@dsh-cyber/contracts/creative-platform'
+import type { EmbodimentProfile, JsonObject } from '@dsh-cyber/contracts'
+import type { CharacterBehaviorProfile } from '@dsh-cyber/contracts/world-simulation'
+import { characterBehaviorProfileToJson } from '@dsh-cyber/world-simulation'
 
 const TAG = /^[a-z][a-z0-9._-]{0,63}$/
 const RIG = /^[a-z0-9][a-z0-9._/-]{0,127}$/
@@ -46,21 +48,35 @@ export function parseEmbodimentProfile(value: unknown, label = 'embodiment'): Em
   return result
 }
 
-export function embodimentToBehaviorJson(id: string, profile: EmbodimentProfile): Record<string, unknown> {
+/**
+ * Converts the portable Character Blueprint contract into the renderer-agnostic
+ * world-simulation behavior contract. This is the single conversion boundary:
+ * callers must not independently rebuild the same semantic profile.
+ */
+export function embodimentToCharacterBehaviorProfile(
+  id: string,
+  profile: EmbodimentProfile,
+): CharacterBehaviorProfile {
   return {
     id,
-    roleTags: profile.roleTags,
-    preferredZoneTags: profile.preferredZoneTags,
-    preferredFacilityCapabilities: profile.preferredFacilityCapabilities,
-    allowedZoneTags: profile.allowedZoneTags,
-    homeSlotTags: profile.homeSlotTags,
-    ambientBehaviors: profile.ambientBehaviors,
-    socialPolicy: profile.socialPolicy ?? {
-      canInitiateConversation: false,
-      cooldownSeconds: 1_800,
-      maxDailyConversations: 0,
-    },
+    roleTags: [...profile.roleTags],
+    preferredZoneTags: [...profile.preferredZoneTags],
+    preferredFacilityCapabilities: [...profile.preferredFacilityCapabilities],
+    allowedZoneTags: [...profile.allowedZoneTags],
+    homeSlotTags: [...profile.homeSlotTags],
+    ambientBehaviors: [...profile.ambientBehaviors],
+    socialPolicy: profile.socialPolicy === undefined
+      ? {
+          canInitiateConversation: false,
+          cooldownSeconds: 1_800,
+          maxDailyConversations: 0,
+        }
+      : { ...profile.socialPolicy },
   }
+}
+
+export function embodimentToBehaviorJson(id: string, profile: EmbodimentProfile): JsonObject {
+  return characterBehaviorProfileToJson(embodimentToCharacterBehaviorProfile(id, profile))
 }
 
 function object(value: unknown, label: string): Record<string, unknown> {
