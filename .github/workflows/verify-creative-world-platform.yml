@@ -1,0 +1,44 @@
+name: Verify creative world platform
+
+on:
+  push:
+    branches:
+      - feat/creative-world-platform-v1
+
+permissions:
+  contents: write
+
+concurrency:
+  group: verify-creative-world-platform-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/creative-world-platform-v1
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e
+      - name: Remove one-shot workflow after successful verification
+        run: |
+          git rm .github/workflows/verify-creative-world-platform.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "ci: complete creative platform verification"
+          git push origin HEAD:feat/creative-world-platform-v1
