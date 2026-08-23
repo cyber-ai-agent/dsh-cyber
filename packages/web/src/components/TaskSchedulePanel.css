@@ -1,15 +1,191 @@
-.task-schedule-panel{height:100%;overflow:auto;background:#090f13;color:var(--world-text,#e8edf0)}
-.task-schedule-panel>header{display:flex;align-items:center;gap:12px;min-height:76px;padding:16px 18px;border-bottom:1px solid #26323a}
-.task-schedule-panel>header>span:nth-child(2){display:grid;gap:3px;min-width:0;flex:1}.task-schedule-panel>header strong{font-size:18px}.task-schedule-panel>header small{font-size:13px;color:#a9b4bb}
-.task-schedule-panel__mark{display:grid;place-items:center;width:42px;height:42px;border:1px solid #866510;background:#2a240e;color:#f2b62f}
-.task-schedule-panel form{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:18px;border-bottom:1px solid #26323a;background:#0d151a}
-.task-schedule-panel form label{display:grid;gap:7px;font-size:14px;color:#cbd3d8}.task-schedule-panel form .is-wide{grid-column:1/-1}
-.task-schedule-panel input,.task-schedule-panel select,.task-schedule-panel textarea{width:100%;min-height:42px;padding:9px 11px;border:1px solid #34434d;background:#091116;color:#edf2f4;font:inherit;border-radius:0}
-.task-schedule-panel textarea{resize:vertical;line-height:1.55}.task-schedule-panel__guard{grid-column:1/-1;margin:0;padding:10px 12px;border-left:3px solid #d49d20;background:#211d10;color:#e6d29e;font-size:13px;line-height:1.5}
-.task-schedule-panel__form-actions{grid-column:1/-1;display:flex;justify-content:flex-end;gap:8px}
-.task-schedule-panel ol{list-style:none;margin:0;padding:0}.task-schedule-panel li{padding:18px;border-bottom:1px solid #26323a}.task-schedule-panel li>div:first-child{display:grid;grid-template-columns:auto 1fr;gap:5px 10px;align-items:center}.task-schedule-panel li strong{font-size:15px}.task-schedule-panel li small{grid-column:2;color:#a9b4bb;font-size:12px}
-.schedule-state{padding:3px 7px;border:1px solid #3a4a53;color:#b8c4ca;font-size:12px}.schedule-state.is-active{border-color:#8d6b16;color:#f0bd3b}.schedule-state.is-paused{color:#a9b4bb}.schedule-state.is-completed{border-color:#287355;color:#69d9a7}
-.task-schedule-panel li>p{margin:12px 0;color:#d5dde1;font-size:14px;line-height:1.55;white-space:pre-wrap}.task-schedule-panel dl{display:grid;grid-template-columns:repeat(3,1fr);margin:0;border:1px solid #26323a}.task-schedule-panel dl>div{padding:9px 10px;border-right:1px solid #26323a}.task-schedule-panel dl>div:last-child{border-right:0}.task-schedule-panel dt{color:#89979f;font-size:12px}.task-schedule-panel dd{margin:3px 0 0;font-size:13px}
-.task-schedule-panel li footer{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}.task-schedule-panel li footer button{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 11px;border:1px solid #34434d;background:#10191f;color:#dce3e6}.task-schedule-panel li footer .is-danger{color:#f18383}
-.task-schedule-panel__empty{display:grid;place-items:center;gap:8px;padding:60px 20px;text-align:center;color:#a9b4bb}.task-schedule-panel__empty strong{color:#edf2f4;font-size:16px}.task-schedule-panel__empty p{margin:0;font-size:14px}
-@media(max-width:900px){.task-schedule-panel form{grid-template-columns:1fr}.task-schedule-panel form .is-wide,.task-schedule-panel__guard,.task-schedule-panel__form-actions{grid-column:1}.task-schedule-panel dl{grid-template-columns:1fr}.task-schedule-panel dl>div{border-right:0;border-bottom:1px solid #26323a}}
+.task-schedule-panel {
+  height: 100%;
+  overflow: auto;
+  background: #090f13;
+  color: var(--world-text, #e8edf0);
+}
+
+.task-schedule-panel > header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 76px;
+  padding: 16px 18px;
+  border-bottom: 1px solid #26323a;
+}
+
+.task-schedule-panel > header > span:nth-child(2) {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 3px;
+}
+
+.task-schedule-panel > header strong { font-size: 18px; }
+.task-schedule-panel > header small { color: #a9b4bb; font-size: 13px; line-height: 1.4; }
+.task-schedule-panel > header button { display: inline-flex; align-items: center; flex: 0 0 auto; gap: 6px; min-height: 40px; }
+
+.task-schedule-panel__mark {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid #866510;
+  background: #2a240e;
+  color: #f2b62f;
+}
+
+.task-schedule-panel form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  padding: 18px;
+  border-bottom: 1px solid #26323a;
+  background: #0d151a;
+}
+
+.task-schedule-panel form > label {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  color: #cbd3d8;
+  font-size: 14px;
+}
+
+.task-schedule-panel form .is-wide { grid-column: 1 / -1; }
+
+.task-schedule-panel input,
+.task-schedule-panel select,
+.task-schedule-panel textarea {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid #34434d;
+  border-radius: 0;
+  background: #091116;
+  color: #edf2f4;
+  font: inherit;
+}
+
+.task-schedule-panel textarea { resize: vertical; line-height: 1.55; }
+.task-schedule-panel input:hover,
+.task-schedule-panel select:hover,
+.task-schedule-panel textarea:hover { border-color: #586a75; }
+.task-schedule-panel input:focus-visible,
+.task-schedule-panel select:focus-visible,
+.task-schedule-panel textarea:focus-visible { border-color: #f2b62f; outline: 2px solid rgb(242 182 47 / 28%); outline-offset: 1px; }
+.task-schedule-panel [aria-invalid='true'] { border-color: #d95f63; }
+.task-schedule-panel .field-error { color: #ff9699; font-size: 12px; line-height: 1.4; }
+.task-schedule-panel .field-help { color: #92a0a8; font-size: 12px; line-height: 1.4; }
+
+.schedule-choice-field {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.schedule-choice-field legend {
+  margin-bottom: 7px;
+  color: #cbd3d8;
+  font-size: 14px;
+}
+
+.schedule-choice {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.task-schedule-panel form .schedule-choice > label {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 58px;
+  padding: 9px 10px;
+  border: 1px solid #34434d;
+  background: #091116;
+  color: #cbd3d8;
+  cursor: pointer;
+}
+
+.task-schedule-panel form .schedule-choice > label:hover { border-color: #8d6b16; background: #11180f; }
+.task-schedule-panel form .schedule-choice > label.is-selected { border-color: #b9891e; background: #211d10; color: #f3e2b0; }
+.task-schedule-panel form .schedule-choice > label:focus-within { outline: 2px solid rgb(242 182 47 / 35%); outline-offset: 2px; }
+.task-schedule-panel form .schedule-choice input { position: absolute; width: 1px; height: 1px; min-height: 0; margin: 0; opacity: 0; }
+.task-schedule-panel form .schedule-choice span { display: grid; gap: 2px; }
+.task-schedule-panel form .schedule-choice strong { font-size: 14px; }
+.task-schedule-panel form .schedule-choice small { color: #9eabb2; font-size: 12px; line-height: 1.35; }
+
+.task-schedule-panel__guard {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 11px 12px;
+  border-left: 3px solid #d49d20;
+  background: #211d10;
+  color: #e6d29e;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.task-schedule-panel__form-error {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #8c3e43;
+  background: #241316;
+  color: #ffb2b4;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.task-schedule-panel__form-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.task-schedule-panel__form-actions button { min-height: 40px; }
+.task-schedule-panel button:disabled { cursor: not-allowed; opacity: .52; }
+.task-schedule-panel ol { margin: 0; padding: 0; list-style: none; }
+.task-schedule-panel li { padding: 18px; border-bottom: 1px solid #26323a; }
+.task-schedule-panel li > div:first-child { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 5px 10px; }
+.task-schedule-panel li strong { font-size: 15px; }
+.task-schedule-panel li small { grid-column: 2; color: #a9b4bb; font-size: 12px; }
+
+.schedule-state { padding: 3px 7px; border: 1px solid #3a4a53; color: #b8c4ca; font-size: 12px; }
+.schedule-state.is-active { border-color: #8d6b16; color: #f0bd3b; }
+.schedule-state.is-paused { color: #a9b4bb; }
+.schedule-state.is-completed { border-color: #287355; color: #69d9a7; }
+
+.task-schedule-panel li > p { margin: 12px 0; color: #d5dde1; font-size: 14px; line-height: 1.55; white-space: pre-wrap; }
+.task-schedule-panel dl { display: grid; grid-template-columns: repeat(3, 1fr); margin: 0; border: 1px solid #26323a; }
+.task-schedule-panel dl > div { padding: 9px 10px; border-right: 1px solid #26323a; }
+.task-schedule-panel dl > div:last-child { border-right: 0; }
+.task-schedule-panel dt { color: #89979f; font-size: 12px; }
+.task-schedule-panel dd { margin: 3px 0 0; font-size: 13px; }
+.task-schedule-panel li footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.task-schedule-panel li footer button { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 12px; border: 1px solid #34434d; background: #10191f; color: #dce3e6; }
+.task-schedule-panel li footer button:hover:not(:disabled) { border-color: #8d6b16; color: #f3e2b0; }
+.task-schedule-panel li footer .is-danger { color: #f18383; }
+.task-schedule-panel li footer .is-danger:hover:not(:disabled) { border-color: #a5474d; background: #241316; color: #ffb2b4; }
+
+.task-schedule-panel__empty { display: grid; place-items: center; gap: 10px; padding: 60px 20px; text-align: center; color: #a9b4bb; }
+.task-schedule-panel__empty strong { color: #edf2f4; font-size: 16px; }
+.task-schedule-panel__empty p { margin: 0 0 6px; font-size: 14px; }
+.task-schedule-panel__empty button { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; }
+
+@media (max-width: 900px) {
+  .task-schedule-panel form { grid-template-columns: 1fr; }
+  .task-schedule-panel form .is-wide,
+  .task-schedule-panel__guard,
+  .task-schedule-panel__form-actions { grid-column: 1; }
+  .task-schedule-panel dl { grid-template-columns: 1fr; }
+  .task-schedule-panel dl > div { border-right: 0; border-bottom: 1px solid #26323a; }
+}
+
+@media (max-width: 560px) {
+  .task-schedule-panel > header { align-items: flex-start; flex-wrap: wrap; }
+  .task-schedule-panel > header button { margin-left: 54px; }
+  .schedule-choice { grid-template-columns: 1fr; }
+}

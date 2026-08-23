@@ -17,7 +17,7 @@ import type { WorldTraceEntry } from '@dsh-cyber/contracts'
 import type { CyberEmployee } from '../../types.js'
 
 const categoryLabel: Record<WorldTraceEntry['category'], string> = {
-  agent: '角色', tool: '工具', skill: '技能', task: '任务', collaboration: '协作', world: '世界', schedule: '计划', system: '系统',
+  agent: '角色', tool: '工具', skill: '技能', task: '任务', collaboration: '协作', world: '世界', schedule: '日程', system: '系统',
 }
 
 const statusLabel: Record<WorldTraceEntry['status'], string> = {
