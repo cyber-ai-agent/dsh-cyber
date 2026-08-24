@@ -12,14 +12,16 @@ import { writeBinary, writeJson } from '../http/response.js'
 import { loadInstalledBlueprints } from '../installed-package-runtime.js'
 import { parseEmployeeBlueprintManifest } from '../employee-blueprint-manifest.js'
 import { parsePromptTransformDefinition } from '../prompt-transform-parser.js'
+import type { WorldPackageInstanceService } from '../services/world-package-instance-service.js'
 
 export interface CatalogRoutesDependencies {
   store: SqliteStore
   packageCatalog: LocalPackageCatalog
+  worldPackages: WorldPackageInstanceService
 }
 
 export function registerCatalogRoutes(router: Router, dependencies: CatalogRoutesDependencies): void {
-  const { store, packageCatalog } = dependencies
+  const { store, packageCatalog, worldPackages } = dependencies
 
   router.get('/api/catalog/world-templates', ({ response }) => {
     writeJson(response, 200, { items: BUILTIN_WORLD_TEMPLATES })
@@ -31,8 +33,8 @@ export function registerCatalogRoutes(router: Router, dependencies: CatalogRoute
 
   router.get('/api/catalog/blueprints', async ({ response, url }) => {
     const templateId = url.searchParams.get('templateId')
-    const workspaceId = url.searchParams.get('workspaceId')
-    const installed = workspaceId === null ? [] : store.listInstalledPackages(workspaceId)
+    const worldId = url.searchParams.get('worldId')
+    const installed = worldId === null ? [] : await worldPackages.listRuntimePackages(worldId)
     const packageBlueprints = await loadInstalledBlueprints(installed)
     for (const blueprint of packageBlueprints) store.saveBlueprint(blueprint)
     const available = [...BUILTIN_BLUEPRINTS, ...packageBlueprints]
@@ -51,6 +53,8 @@ export function registerCatalogRoutes(router: Router, dependencies: CatalogRoute
     }
     const workspaceId = url.searchParams.get('workspaceId')
     const installed = workspaceId === null ? [] : store.listInstalledPackages(workspaceId)
+    const worldId = url.searchParams.get('worldId')
+    const worldInstances = worldId === null ? [] : store.listWorldPackageInstances(worldId, 'active')
     const catalogItems = await packageCatalog.list({
       ...(market === null ? {} : { market: market as CyberMarketKind }),
       ...(url.searchParams.get('q') === null ? {} : { query: url.searchParams.get('q')! }),
@@ -58,6 +62,9 @@ export function registerCatalogRoutes(router: Router, dependencies: CatalogRoute
     })
     const items = await Promise.all(catalogItems.map(async (item) => ({
       ...item,
+      ...(worldInstances.find((instance) => instance.packageId === item.manifest.id) === undefined
+        ? {}
+        : { worldVersion: worldInstances.find((instance) => instance.packageId === item.manifest.id)!.packageVersion }),
       ...await marketActivation(packageCatalog, item),
     })))
     writeJson(response, 200, { items })

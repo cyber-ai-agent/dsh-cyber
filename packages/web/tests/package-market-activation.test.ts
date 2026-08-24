@@ -33,6 +33,14 @@ describe('package market activation flow', () => {
     expect(html).not.toContain('角色模板已安装</button>')
   })
 
+  it('distinguishes a package-library install from activation in the selected world', () => {
+    const { worldVersion: _worldVersion, ...item } = pluginItem()
+    const html = marketHtml(item)
+    expect(html).toContain('包库已有 v1.0.0 · 当前世界未启用')
+    expect(html).toContain('启用到当前世界')
+    expect(html).not.toContain('立即使用</button>')
+  })
+
   it('distinguishes an included theme from an installed theme', () => {
     const included = marketHtml(themeItem(), 'theme', [{ ...world, templateId: 'personal-world' }])
     expect(included).toContain('is-included')
@@ -155,6 +163,7 @@ function pluginItem(): CyberMarketPackage {
     sourceDirectory: 'marketplace/plugins/official-research-brief',
     verified: true,
     installedVersion: '1.0.0',
+    worldVersion: '1.0.0',
     activation: {
       kind: 'prompt-transform',
       automatic: false,
@@ -170,6 +179,7 @@ function roleItem(): CyberMarketPackage {
     sourceDirectory: 'marketplace/talent/official-archivist',
     verified: true,
     installedVersion: '1.0.0',
+    worldVersion: '1.0.0',
     activation: {
       kind: 'employee-blueprint',
       blueprintId: 'official-archivist',

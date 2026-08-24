@@ -7,6 +7,8 @@ import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import type { AgentRuntimePort, AgentTurnRequest } from '@dsh-cyber/contracts'
+import { BUILTIN_BLUEPRINTS } from '@dsh-cyber/catalog'
+import { SqliteStore } from '@dsh-cyber/persistence'
 
 import { createCyberServer, type CyberServer } from '../src/index.js'
 
@@ -133,6 +135,17 @@ async function recruit(origin: string, worldId: string, blueprintId: string) {
 }
 
 describe('Cyber local server', () => {
+  it('preserves an existing immutable built-in blueprint identity during startup', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-existing-blueprint-'))
+    const store = await SqliteStore.open(join(stateRoot, 'data', 'dsh-cyber.sqlite'))
+    const builtIn = BUILTIN_BLUEPRINTS[0]!
+    store.saveBlueprint({ ...builtIn, summary: '由旧版本持久化的蓝图定义' })
+    store.close()
+
+    const { server } = await start(stateRoot)
+    expect(server.store.getBlueprint(builtIn.id, builtIn.version)?.summary).toBe('由旧版本持久化的蓝图定义')
+  })
+
   it('starts loopback-only with an empty world and independent role catalogs', async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-server-'))
     const { origin } = await start(stateRoot)
@@ -961,6 +974,7 @@ it('searches verified market packages and activates installed plugin and talent 
         packageId: 'official-meeting-notes',
         version: '1.0.0',
         approvalToken: pluginPreview.body.preview.approvalToken,
+        worldId: world.id,
       }),
     })
     expect(pluginInstall.response.status).toBe(201)
@@ -993,6 +1007,7 @@ it('searches verified market packages and activates installed plugin and talent 
         packageId: 'official-archivist',
         version: '1.0.0',
         approvalToken: talentPreview.body.preview.approvalToken,
+        worldId: world.id,
       }),
     })
     expect(talentInstall.response.status).toBe(201)
@@ -1011,7 +1026,7 @@ it('searches verified market packages and activates installed plugin and talent 
 
     const blueprints = await json(
       origin,
-      `/api/catalog/blueprints?templateId=cyber-company&workspaceId=${workspace.id}`,
+      `/api/catalog/blueprints?templateId=cyber-company&worldId=${world.id}`,
     )
     expect(blueprints.body.items).toContainEqual(
       expect.objectContaining({ id: 'official-archivist', displayName: '档案管理员' }),

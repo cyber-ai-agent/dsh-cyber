@@ -627,7 +627,7 @@ export default function App() {
     setCatalogLoading(true)
     setError(undefined)
     try {
-      const result = await api<{ items: EmployeeBlueprint[] }>(`/api/catalog/blueprints?templateId=${encodeURIComponent(activeWorld.templateId)}&workspaceId=${encodeURIComponent(activeWorld.workspaceId)}`)
+      const result = await api<{ items: EmployeeBlueprint[] }>(`/api/catalog/blueprints?templateId=${encodeURIComponent(activeWorld.templateId)}&worldId=${encodeURIComponent(activeWorld.id)}`)
       setBlueprints(result.items)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '角色市场加载失败')
@@ -644,21 +644,21 @@ export default function App() {
   }, [demoMode, workspace])
 
   const loadInstalledPluginCommands = useCallback(async () => {
-    if (workspace === undefined || demoMode) return
-    const result = await api<{ items: InstalledPluginCommand[] }>(`/api/workspaces/${workspace.id}/plugins`)
+    if (activeWorld === undefined || demoMode) return
+    const result = await api<{ items: InstalledPluginCommand[] }>(`/api/worlds/${activeWorld.id}/plugins`)
     setInstalledPluginCommands(result.items)
-  }, [demoMode, workspace])
+  }, [activeWorld, demoMode])
 
   useEffect(() => {
-    if (demoMode || workspace === undefined) return
+    if (demoMode || activeWorld === undefined) return
     void loadInstalledPluginCommands().catch(() => setInstalledPluginCommands([]))
-  }, [demoMode, loadInstalledPluginCommands, workspace])
+  }, [activeWorld, demoMode, loadInstalledPluginCommands])
 
   const searchMarketplace = useCallback(async (market: CyberMarketKind, query = '') => {
     if (workspace === undefined) return
-    const result = await api<{ items: CyberMarketPackage[] }>(`/api/marketplace?market=${market}&workspaceId=${encodeURIComponent(workspace.id)}&q=${encodeURIComponent(query)}`)
+    const result = await api<{ items: CyberMarketPackage[] }>(`/api/marketplace?market=${market}&workspaceId=${encodeURIComponent(workspace.id)}${activeWorld === undefined ? '' : `&worldId=${encodeURIComponent(activeWorld.id)}`}&q=${encodeURIComponent(query)}`)
     setMarketplaceItems(result.items)
-  }, [workspace])
+  }, [activeWorld, workspace])
 
   const openPackageMarket = useCallback(async (market: CyberMarketKind = 'theme') => {
     setPackageMarketKind(market)
@@ -719,14 +719,14 @@ export default function App() {
       } else {
         await api(`/api/workspaces/${workspace.id}/packages/install`, {
           method: 'POST',
-          body: JSON.stringify(input),
+          body: JSON.stringify({ ...input, ...(activeWorld === undefined || input.manifest.kind === 'world-theme' ? {} : { worldId: activeWorld.id }) }),
         })
         await Promise.all([loadPackages(), loadInstalledPluginCommands()])
       }
     } finally {
       setPackageInstalling(false)
     }
-  }, [demoMode, loadInstalledPluginCommands, loadPackages, workspace])
+  }, [activeWorld, demoMode, loadInstalledPluginCommands, loadPackages, workspace])
 
   const previewMarketplacePackage = useCallback(async (item: CyberMarketPackage): Promise<PackagePermissionPreview> => {
     if (workspace === undefined) throw new Error('工作区尚未就绪')
@@ -762,7 +762,8 @@ export default function App() {
           ])
         }
         setMarketplaceItems((current) => current.map((candidate) => candidate.manifest.id === item.manifest.id
-          ? { ...candidate, installedVersion: item.manifest.version }
+          ? { ...candidate, installedVersion: item.manifest.version,
+              ...(item.market === 'theme' ? {} : { worldVersion: item.manifest.version }) }
           : candidate))
         setPackageTransactions((current) => [{
           id: `demo-market-${item.manifest.id}-${Date.now()}`,
@@ -777,14 +778,15 @@ export default function App() {
       } else {
         await api(`/api/workspaces/${workspace.id}/marketplace/install`, {
           method: 'POST',
-          body: JSON.stringify({ packageId: item.manifest.id, version: item.manifest.version, approvalToken }),
+          body: JSON.stringify({ packageId: item.manifest.id, version: item.manifest.version, approvalToken,
+            ...(item.market === 'theme' || activeWorld === undefined ? {} : { worldId: activeWorld.id }) }),
         })
         await Promise.all([loadPackages(), searchMarketplace(item.market), item.market === 'plugin' ? loadInstalledPluginCommands() : Promise.resolve()])
       }
     } finally {
       setPackageInstalling(false)
     }
-  }, [demoMode, installPackage, loadInstalledPluginCommands, loadPackages, searchMarketplace, workspace])
+  }, [activeWorld, demoMode, installPackage, loadInstalledPluginCommands, loadPackages, searchMarketplace, workspace])
 
   const recruitEmployee = useCallback(async (
     blueprint: EmployeeBlueprint,

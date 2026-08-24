@@ -44,7 +44,7 @@ macOS/Linux: ~/.dsh-cyber
 
 ```bash
 # 1. 先备份所有可移植本地创作数据
-pnpm dsh-cyber -- backup
+pnpm dsh-cyber backup
 
 # 2. 拉取最新稳定代码
 # 如果本地有未提交的源码修改，请先 commit/stash；不要用清理数据目录的方式处理冲突。
@@ -57,20 +57,22 @@ pnpm install --frozen-lockfile
 pnpm build
 
 # 4. 用原来的 stateRoot 做升级后健康检查
-pnpm dsh-cyber -- doctor
+pnpm dsh-cyber doctor
 
 # 5. 启动最新版本；默认会继续读取原本的本地世界和数据
-pnpm dsh-cyber -- web
+pnpm dsh-cyber web
 ```
 
 默认数据目录不在 Git 仓库中，因此上述 `git switch`、`git pull`、`pnpm install` 和 `pnpm build` 不会触碰用户创作数据。
+
+内置角色蓝图的 `id + version` 也是持久化身份。启动时已经存在的同版本蓝图保持本地权威，程序只补充缺失版本；发布方修改内置蓝图内容时必须提升版本号，不能覆盖旧版本或要求用户重建角色。
 
 ## 开发分支用户
 
 需要跟随某个开发分支时，只替换 Git 分支命令，其余步骤完全相同。例如：
 
 ```bash
-pnpm dsh-cyber -- backup
+pnpm dsh-cyber backup
 
 git fetch origin
 git switch feat/creative-world-platform-v1
@@ -78,8 +80,8 @@ git pull --ff-only origin feat/creative-world-platform-v1
 
 pnpm install --frozen-lockfile
 pnpm build
-pnpm dsh-cyber -- doctor
-pnpm dsh-cyber -- web
+pnpm dsh-cyber doctor
+pnpm dsh-cyber web
 ```
 
 开发分支可能包含 schema migration。migration 必须由应用版本化执行；禁止通过删除数据库、世界目录或 Workshop 项目来“解决”升级问题。
@@ -89,7 +91,7 @@ pnpm dsh-cyber -- web
 如果一直使用显式 `--data-dir`，升级后必须继续使用同一个路径：
 
 ```bash
-pnpm dsh-cyber -- backup --data-dir /path/to/my-dsh-cyber-data
+pnpm dsh-cyber backup --data-dir /path/to/my-dsh-cyber-data
 
 git fetch origin
 git switch main
@@ -97,8 +99,8 @@ git pull --ff-only origin main
 pnpm install --frozen-lockfile
 pnpm build
 
-pnpm dsh-cyber -- doctor --data-dir /path/to/my-dsh-cyber-data
-pnpm dsh-cyber -- web --data-dir /path/to/my-dsh-cyber-data
+pnpm dsh-cyber doctor --data-dir /path/to/my-dsh-cyber-data
+pnpm dsh-cyber web --data-dir /path/to/my-dsh-cyber-data
 ```
 
 推荐把自定义数据目录放在 Git 仓库之外。如果历史上使用了 `--data-dir ./data`，升级时不要运行会清理未跟踪文件的命令，例如：
@@ -135,7 +137,7 @@ git clean -fdx
 `doctor` 至少要确认：
 
 ```bash
-pnpm dsh-cyber -- doctor
+pnpm dsh-cyber doctor
 ```
 
 然后在 Web 中检查：
@@ -175,7 +177,7 @@ active runtime pointer
 Harness 更新失败时使用：
 
 ```bash
-pnpm dsh-cyber -- runtime-rollback
+pnpm dsh-cyber runtime-rollback
 ```
 
 该操作现在会先创建完整的本地数据 Bundle，再恢复内置 Harness；它不能删除用户世界或 Workshop 项目。

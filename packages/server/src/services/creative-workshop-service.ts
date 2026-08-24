@@ -16,6 +16,7 @@ import { parseEmbodimentProfile } from '../embodiment-profile.js'
 import { ServiceError } from './service-error.js'
 import { WorldRootService } from './world-root-service.js'
 import { WorldSettingsService } from './world-settings-service.js'
+import { WorldPackageInstanceService } from './world-package-instance-service.js'
 
 const PROJECT_VERSION = 1 as const
 const MAX_ROLES = 16
@@ -35,6 +36,7 @@ export class CreativeWorkshopService {
   readonly #projectRoot: string
   readonly #worldRoots: WorldRootService
   readonly #worldSettings: WorldSettingsService
+  readonly #worldPackages: WorldPackageInstanceService
 
   constructor(store: SqliteStore, packageManager: PackageManager) {
     this.#store = store
@@ -43,6 +45,7 @@ export class CreativeWorkshopService {
     this.#projectRoot = join(this.#stateRoot, 'workshop', 'projects')
     this.#worldRoots = new WorldRootService(this.#stateRoot)
     this.#worldSettings = new WorldSettingsService(this.#worldRoots)
+    this.#worldPackages = new WorldPackageInstanceService(store, this.#worldRoots)
   }
 
   async list(workspaceId: string): Promise<WorkshopProject[]> {
@@ -108,6 +111,14 @@ export class CreativeWorkshopService {
       })
       createdWorldId = world.id
       await this.#worldRoots.ensure(world.id)
+      for (const installation of reversibleInstalls) {
+        await this.#worldPackages.instantiate({
+          worldId: world.id,
+          packageId: installation.installed.packageId,
+          version: installation.installed.version,
+          actorId: 'owner',
+        })
+      }
       await this.#worldSettings.save(world.id, {
         lore: normalized.lore,
         scenario: normalized.scenario,

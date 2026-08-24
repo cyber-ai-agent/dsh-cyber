@@ -8,6 +8,8 @@ export interface WorldRoot {
   assetsPath: string
   exportsPath: string
   cachePath: string
+  sourcePath: string
+  packagesPath: string
 }
 
 export class WorldRootService {
@@ -32,13 +34,17 @@ export class WorldRootService {
     const assetsPath = join(rootPath, 'assets')
     const exportsPath = join(rootPath, 'exports')
     const cachePath = join(rootPath, 'cache')
-    await Promise.all([filesPath, assetsPath, exportsPath, cachePath].map((path) => mkdir(path, { recursive: true })))
+    const sourcePath = join(rootPath, 'source')
+    const packagesPath = join(sourcePath, 'packages')
+    await Promise.all([filesPath, assetsPath, exportsPath, cachePath, sourcePath, packagesPath].map((path) => mkdir(path, { recursive: true })))
     const resolved = {
       rootPath: await realpath(rootPath),
       filesPath: await realpath(filesPath),
       assetsPath: await realpath(assetsPath),
       exportsPath: await realpath(exportsPath),
       cachePath: await realpath(cachePath),
+      sourcePath: await realpath(sourcePath),
+      packagesPath: await realpath(packagesPath),
     }
     for (const path of Object.values(resolved)) {
       if (!isPathWithin(managedRoot, path)) throw new Error('World path escaped managed data directory')

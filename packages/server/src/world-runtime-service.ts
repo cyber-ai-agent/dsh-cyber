@@ -24,6 +24,7 @@ import {
   readInstalledWorldThemeAsset,
 } from './installed-package-runtime.js'
 import { resolveConfiguredCharacterBehavior } from './services/character-behavior-resolver.js'
+import type { WorldPackageInstanceService } from './services/world-package-instance-service.js'
 
 const ACTIVE_RENDERERS = new Set(['pixi-2d'])
 
@@ -41,6 +42,7 @@ export interface WorldRuntimeServiceOptions {
   store: SqliteStore
   simulationStore: WorldSimulationStore
   publish: (event: WorldRuntimeStreamEnvelope) => void
+  worldPackages: WorldPackageInstanceService
   clock?: () => string
 }
 
@@ -49,12 +51,14 @@ export class WorldRuntimeService {
   readonly #simulationStore: WorldSimulationStore
   readonly #publish: (event: WorldRuntimeStreamEnvelope) => void
   readonly #clock: () => string
+  readonly #worldPackages: WorldPackageInstanceService
   readonly #verificationCache = new InstalledPackageVerificationCache()
 
   constructor(options: WorldRuntimeServiceOptions) {
     this.#store = options.store
     this.#simulationStore = options.simulationStore
     this.#publish = options.publish
+    this.#worldPackages = options.worldPackages
     this.#clock = options.clock ?? (() => new Date().toISOString())
   }
 
@@ -98,7 +102,13 @@ export class WorldRuntimeService {
     if (world === undefined) throw new Error(`World not found: ${worldId}`)
     const binding = this.#store.getWorldThemeBinding(worldId)
     const builtIn = this.#manifestForTemplate(world.templateId)
-    const installed = await loadInstalledWorldThemes(this.#store.listInstalledPackages(world.workspaceId), this.#verificationCache)
+    const instancePackages = await this.#worldPackages.listRuntimePackages(world.id)
+    const libraryPackages = this.#store.listInstalledPackages(world.workspaceId).filter((item) =>
+      item.status === 'active' && item.kind === 'world-theme' &&
+      !instancePackages.some((instance) => instance.packageId === item.packageId && instance.version === item.version))
+    // The library contributes selectable templates only. Runtime activation and
+    // asset reads still require a world-owned instance created by bindInstalledTheme.
+    const installed = await loadInstalledWorldThemes([...instancePackages, ...libraryPackages], this.#verificationCache)
     const compatible = installed.filter((item) =>
       themeTemplateMatches(world.templateId, item.manifest.templateId) && ACTIVE_RENDERERS.has(item.manifest.renderer))
     const activeInstalled = binding?.status === 'active'
@@ -140,7 +150,12 @@ export class WorldRuntimeService {
   async bindInstalledTheme(worldId: string, packageId: string): Promise<WorldRuntimeSnapshot> {
     const world = this.#store.getWorld(worldId)
     if (world === undefined) throw new Error(`World not found: ${worldId}`)
-    const themes = await loadInstalledWorldThemes(this.#store.listInstalledPackages(world.workspaceId), this.#verificationCache)
+    if (!this.#store.listWorldPackageInstances(world.id, 'active').some((item) => item.packageId === packageId)) {
+      const source = this.#store.getActivePackage(world.workspaceId, packageId)
+      if (source === undefined) throw new Error(`Installed world theme not found: ${packageId}`)
+      await this.#worldPackages.instantiate({ worldId, packageId, version: source.version })
+    }
+    const themes = await loadInstalledWorldThemes(await this.#worldPackages.listRuntimePackages(world.id), this.#verificationCache)
     const selected = themes.find((item) => item.packageId === packageId)
     if (selected === undefined) throw new Error(`Installed world theme not found: ${packageId}`)
     if (!themeTemplateMatches(world.templateId, selected.manifest.templateId)) {
@@ -178,7 +193,7 @@ export class WorldRuntimeService {
     if (binding?.status !== 'active') throw new Error('The active world theme does not use package assets')
     const asset = binding.manifest.assets.find((item) => item.id === assetId)
     if (asset === undefined) throw new Error(`World theme asset not found: ${assetId}`)
-    const packages = this.#store.listInstalledPackages(world.workspaceId)
+    const packages = await this.#worldPackages.listRuntimePackages(world.id)
     const themes = await loadInstalledWorldThemes(packages, this.#verificationCache)
     const selected = themes.find((item) =>
       item.packageId === binding.packageId
@@ -448,14 +463,11 @@ export class WorldRuntimeService {
   #manifestForWorld(worldId: string, templateId: string): WorldThemeManifestV1 | undefined {
     const binding = this.#store.getWorldThemeBinding(worldId)
     const world = this.#store.getWorld(worldId)
-    const installed = world === undefined || binding?.status !== 'active'
+    const instance = world === undefined || binding?.status !== 'active'
       ? undefined
-      : this.#store.listInstalledPackages(world.workspaceId).find((item) =>
-        item.status === 'active'
-        && item.packageId === binding.packageId
-        && item.version === binding.packageVersion
-        && item.manifest.files.some((file) => file.sha256 === binding.contentDigest))
-    if (installed !== undefined && binding?.status === 'active' && themeTemplateMatches(templateId, binding.manifest.templateId) && ACTIVE_RENDERERS.has(binding.manifest.renderer)) {
+      : this.#store.listWorldPackageInstances(world.id, 'active').find((item) =>
+        item.packageId === binding.packageId && item.packageVersion === binding.packageVersion)
+    if (instance !== undefined && binding?.status === 'active' && themeTemplateMatches(templateId, binding.manifest.templateId) && ACTIVE_RENDERERS.has(binding.manifest.renderer)) {
       return binding.manifest
     }
     return this.#manifestForTemplate(templateId)

@@ -64,6 +64,7 @@ import {
   type WorldRuntimeSnapshot,
   type WorldThemeBinding,
   type WorldThemeManifestV1,
+  type WorldPackageInstance,
   type WorldSnapshot,
   type Workspace,
   type WorkspacePreferences,
@@ -366,6 +367,19 @@ export interface RollbackPackageInstallInput {
   actorId?: string
 }
 
+export interface CreateWorldPackageInstanceInput {
+  id?: string
+  workspaceId: string
+  worldId: string
+  packageId: string
+  packageVersion: string
+  packageKind: InstalledPackage['kind']
+  contentDigest: string
+  originPath: string
+  overridesPath: string
+  actorId?: string
+}
+
 export interface BeginRuntimeUpdateInput {
   candidateRoot: string
   version: string
@@ -416,6 +430,7 @@ const KNOWN_TABLES = [
   'work_session_participants',
   'messages',
   'installed_packages',
+  'world_package_instances',
   'package_install_transactions',
   'runtime_update_transactions',
   'world_runtime_snapshots',
@@ -2721,6 +2736,98 @@ export class SqliteStore {
       .map(mapInstalledPackage)
   }
 
+  getInstalledPackage(workspaceId: string, packageId: string, version: string): InstalledPackage | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT * FROM installed_packages
+         WHERE workspace_id = ? AND package_id = ? AND version = ?`,
+      )
+      .get(workspaceId, packageId, version)
+    return row ? mapInstalledPackage(row) : undefined
+  }
+
+  getWorldPackageInstance(instanceId: string): WorldPackageInstance | undefined {
+    const row = this.database
+      .prepare('SELECT * FROM world_package_instances WHERE id = ?')
+      .get(instanceId)
+    return row ? mapWorldPackageInstance(row) : undefined
+  }
+
+  listWorldPackageInstances(worldId: string, status?: WorldPackageInstance['status']): WorldPackageInstance[] {
+    const rows = status === undefined
+      ? this.database.prepare(
+          'SELECT * FROM world_package_instances WHERE world_id = ? ORDER BY created_at, id',
+        ).all(worldId)
+      : this.database.prepare(
+          'SELECT * FROM world_package_instances WHERE world_id = ? AND status = ? ORDER BY created_at, id',
+        ).all(worldId, status)
+    return rows.map(mapWorldPackageInstance)
+  }
+
+  createWorldPackageInstance(input: CreateWorldPackageInstanceInput): WorldPackageInstance {
+    this.#assertWritable()
+    const world = this.#requireWorld(input.worldId)
+    if (world.workspaceId !== input.workspaceId) {
+      throw new PersistenceError('World package instance workspace does not match its world')
+    }
+    const installed = this.getInstalledPackage(input.workspaceId, input.packageId, input.packageVersion)
+    if (installed === undefined || installed.kind !== input.packageKind) {
+      throw new PersistenceError('World package instance source package is unavailable')
+    }
+    const digest = input.contentDigest.trim().toLowerCase()
+    if (!/^[a-f0-9]{64}$/.test(digest)) throw new PersistenceError('World package content digest is invalid')
+    const originPath = assertManagedRelativePath(input.originPath, 'origin path')
+    const overridesPath = assertManagedRelativePath(input.overridesPath, 'overrides path')
+    const now = this.#clock()
+    const instance: WorldPackageInstance = {
+      id: input.id ?? this.#idFactory(), workspaceId: input.workspaceId, worldId: input.worldId,
+      packageId: input.packageId, packageVersion: input.packageVersion, packageKind: input.packageKind,
+      contentDigest: digest, status: 'active', originPath, overridesPath, createdAt: now, updatedAt: now,
+    }
+    return this.#transaction(() => {
+      this.database.prepare(
+        `INSERT INTO world_package_instances
+         (id, workspace_id, world_id, package_id, package_version, package_kind,
+          content_digest, status, origin_path, overrides_path, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
+      ).run(
+        instance.id, instance.workspaceId, instance.worldId, instance.packageId,
+        instance.packageVersion, instance.packageKind, instance.contentDigest,
+        instance.originPath, instance.overridesPath, instance.createdAt, instance.updatedAt,
+      )
+      this.#appendEvent({
+        workspaceId: instance.workspaceId, worldId: instance.worldId,
+        type: 'world.package.instantiated', actorId: input.actorId ?? 'owner', actorKind: 'owner',
+        correlationId: instance.id,
+        payload: { instanceId: instance.id, packageId: instance.packageId,
+          packageVersion: instance.packageVersion, contentDigest: instance.contentDigest },
+      })
+      return instance
+    })
+  }
+
+  disableWorldPackageInstance(instanceId: string, actorId = 'owner'): WorldPackageInstance {
+    this.#assertWritable()
+    const current = this.getWorldPackageInstance(instanceId)
+    if (current === undefined) throw new EntityNotFoundError('World package instance not found')
+    if (current.status === 'disabled') return current
+    const now = this.#clock()
+    return this.#transaction(() => {
+      const result = this.database.prepare(
+        `UPDATE world_package_instances SET status = 'disabled', updated_at = ?
+         WHERE id = ? AND status = 'active'`,
+      ).run(now, instanceId)
+      if (Number(result.changes) !== 1) throw new PersistenceError('World package instance changed concurrently')
+      this.#appendEvent({
+        workspaceId: current.workspaceId, worldId: current.worldId,
+        type: 'world.package.disabled', actorId, actorKind: 'owner', correlationId: current.id,
+        payload: { instanceId: current.id, packageId: current.packageId,
+          packageVersion: current.packageVersion },
+      })
+      return { ...current, status: 'disabled', updatedAt: now }
+    })
+  }
+
   getPackageInstallTransaction(transactionId: string): PackageInstallTransaction | undefined {
     const row = this.database
       .prepare('SELECT * FROM package_install_transactions WHERE id = ?')
@@ -3387,6 +3494,7 @@ export class SqliteStore {
         sessions: countRows(this.database, 'work_sessions'),
         messages: countRows(this.database, 'messages'),
         installedPackages: countRows(this.database, 'installed_packages'),
+        worldPackageInstances: countRows(this.database, 'world_package_instances'),
         packageTransactions: countRows(this.database, 'package_install_transactions'),
         runtimeUpdates: countRows(this.database, 'runtime_update_transactions'),
         worldRuntimeSnapshots: countRows(this.database, 'world_runtime_snapshots'),
@@ -3965,6 +4073,18 @@ function assertLocalAssetRef(value: string): void {
   }
 }
 
+function assertManagedRelativePath(value: string, label: string): string {
+  const normalized = value.trim().replace(/\\/g, '/')
+  if (
+    normalized.length === 0 || normalized.length > 512 || normalized.includes('..') ||
+    normalized.startsWith('/') || /^[A-Za-z]:\//.test(normalized) ||
+    !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(normalized)
+  ) {
+    throw new PersistenceError(`World package ${label} must be a safe relative path`)
+  }
+  return normalized
+}
+
 function assertOptionalCount(label: string, value: number | undefined): void {
   if (value !== undefined && (!Number.isInteger(value) || value < 0)) {
     throw new PersistenceError(`Model interaction ${label} must be a non-negative integer`)
@@ -4438,6 +4558,18 @@ function mapInstalledPackage(row: object): InstalledPackage {
     manifest: parseJson<CyberPackageManifest>(value.manifest_json),
     installedAt: String(value.installed_at),
     updatedAt: String(value.updated_at),
+  }
+}
+
+function mapWorldPackageInstance(row: object): WorldPackageInstance {
+  const value = row as Record<string, unknown>
+  return {
+    id: String(value.id), workspaceId: String(value.workspace_id), worldId: String(value.world_id),
+    packageId: String(value.package_id), packageVersion: String(value.package_version),
+    packageKind: value.package_kind as WorldPackageInstance['packageKind'],
+    contentDigest: String(value.content_digest), status: value.status as WorldPackageInstance['status'],
+    originPath: String(value.origin_path), overridesPath: String(value.overrides_path),
+    createdAt: String(value.created_at), updatedAt: String(value.updated_at),
   }
 }
 
