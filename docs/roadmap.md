@@ -25,6 +25,7 @@
 - [x] Complete local `.dshbackup` boundary
 - [x] Controlled Harness update / rollback
 - [x] SQLite-backed conversation continuity across runtime restart
+- [x] Approval Gate V1 for trusted external Skill actions
 - [ ] Finish Creative Workshop project lifecycle
 - [ ] Add Creative Workshop smoke E2E
 - [ ] Define Creative Platform V1 local-data compatibility baseline

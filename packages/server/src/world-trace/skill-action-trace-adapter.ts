@@ -29,6 +29,6 @@ function skillStatus(status: SkillActionStatus): WorldTraceStatus {
   if (status === 'scheduled') return 'pending'
   if (status === 'executed') return 'success'
   if (status === 'waiting-for-integration') return 'waiting'
-  if (status === 'failed') return 'failed'
+  if (status === 'failed' || status === 'rejected') return 'failed'
   return 'waiting'
 }

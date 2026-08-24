@@ -1,4 +1,4 @@
-export const CYBER_SCHEMA_VERSION = 15 as const
+export const CYBER_SCHEMA_VERSION = 16 as const
 
 export type IsoTimestamp = string
 export type JsonPrimitive = boolean | number | string | null
@@ -13,6 +13,47 @@ export type {
 
 export type ReasoningEffort = 'auto' | 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 export type AgentPermissionMode = 'read-only' | 'workspace-write' | 'danger-full-access'
+
+export type ApprovalSubjectType = 'skill-action' | 'tool-call' | 'file-write' | 'external-action'
+export type ApprovalRisk = 'read' | 'write-local' | 'external-side-effect' | 'high-risk'
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired'
+export type ApprovalScope = 'once' | 'character' | 'world'
+
+export interface ApprovalRequest {
+  id: string
+  workspaceId: string
+  worldId: string
+  sessionId?: string
+  workTurnId?: string
+  agentRunId?: string
+  characterId?: string
+  subjectType: ApprovalSubjectType
+  subjectId: string
+  risk: ApprovalRisk
+  summary: string
+  status: ApprovalStatus
+  scope: ApprovalScope
+  createdAt: IsoTimestamp
+  expiresAt: IsoTimestamp
+  decidedAt?: IsoTimestamp
+  decidedBy?: string
+}
+
+export interface ApprovalPolicy {
+  id: string
+  workspaceId: string
+  worldId: string
+  characterId?: string
+  subjectType: ApprovalSubjectType
+  skillId?: string
+  action: string
+  target: string
+  risk: ApprovalRisk
+  scope: Exclude<ApprovalScope, 'once'>
+  sourceApprovalId: string
+  createdAt: IsoTimestamp
+  revokedAt?: IsoTimestamp
+}
 
 export type TaskScheduleKind = 'once' | 'interval'
 export type TaskScheduleStatus = 'active' | 'paused' | 'completed'
@@ -870,6 +911,9 @@ export interface DatabaseDoctorReport {
     modelInteractionLogs: number
     taskSchedules: number
     taskScheduleRuns: number
+    approvalRequests: number
+    approvalPolicies: number
+    skillActions: number
     events: number
     outbox: number
   }

@@ -9,7 +9,7 @@ import type { CharacterSkillAction, CharacterSkillDescriptor } from '@dsh-cyber/
 import { SqliteStore } from '@dsh-cyber/persistence'
 
 import { CharacterSkillRuntime } from '../src/services/character-skill-runtime.js'
-import { LocalSkillActionRepository } from '../src/skills/local-skill-action-repository.js'
+import { SqliteSkillActionRepository } from '../src/skills/sqlite-skill-action-repository.js'
 import {
   CharacterSkillAdapterRegistry,
   type CharacterSkillAdapter,
@@ -138,6 +138,64 @@ describe('CharacterSkillRuntime', () => {
     })
     expect((await runtime.list(worldId))[0]).toMatchObject({ status: 'outcome-unknown' })
   })
+
+  it('never reaches an external adapter before an explicit approval is durable', async () => {
+    const { store, root, worldId, employeeId } = await setup(['test.external'])
+    const adapter = new ExternalAdapter()
+    const registry = new CharacterSkillAdapterRegistry()
+    registry.register(adapter)
+    const runtime = makeRuntime(store, root, registry)
+
+    const prepared = await runtime.prepare(worldId, employeeId, '请执行 external', new Date('2026-08-23T08:00:00.000Z'))
+
+    expect(prepared.actions[0]).toMatchObject({ status: 'waiting-for-approval', risk: 'external-side-effect' })
+    expect(adapter.executed).toBe(0)
+    const request = runtime.listApprovalRequests(worldId, 'pending')[0]!
+    expect(request).toMatchObject({ subjectType: 'skill-action', subjectId: prepared.actions[0]!.id, scope: 'once' })
+
+    const decided = await runtime.decideApproval(request.id, 'approved', 'once', 'owner', new Date('2026-08-23T08:01:00.000Z'))
+    expect(decided.action.status).toBe('executed')
+    expect(adapter.executed).toBe(1)
+  })
+
+  it('does not execute an external action when approval arrives after expiry', async () => {
+    const { store, root, worldId, employeeId } = await setup(['test.external'])
+    const adapter = new ExternalAdapter()
+    const registry = new CharacterSkillAdapterRegistry()
+    registry.register(adapter)
+    const runtime = makeRuntime(store, root, registry)
+
+    const prepared = await runtime.prepare(worldId, employeeId, '请执行 external', new Date('2026-08-23T08:00:00.000Z'))
+    const result = await runtime.decideApproval(
+      prepared.actions[0]!.approvalRequestId!, 'approved', 'once', 'owner', new Date('2026-08-23T08:11:00.000Z'),
+    )
+
+    expect(result.request.status).toBe('expired')
+    expect(result.action.status).toBe('rejected')
+    expect(adapter.executed).toBe(0)
+  })
+
+  it('reuses only an exact character policy and never broadens it to another target', async () => {
+    const { store, root, worldId, employeeId } = await setup(['test.external'])
+    const adapter = new ExternalAdapter()
+    const registry = new CharacterSkillAdapterRegistry()
+    registry.register(adapter)
+    const runtime = makeRuntime(store, root, registry)
+
+    const first = await runtime.prepare(worldId, employeeId, '请执行 external', new Date('2026-08-23T08:00:00.000Z'))
+    await runtime.decideApproval(first.actions[0]!.approvalRequestId!, 'approved', 'character', 'owner', new Date('2026-08-23T08:01:00.000Z'))
+    const sameTarget = await runtime.prepare(worldId, employeeId, '请执行 external', new Date('2026-08-23T08:02:01.000Z'))
+    const otherTarget = await runtime.prepare(worldId, employeeId, '请执行 external other', new Date('2026-08-23T08:04:02.000Z'))
+
+    expect(sameTarget.actions[0]).toMatchObject({ status: 'executed', authorization: 'preapproved-policy' })
+    expect(otherTarget.actions[0]).toMatchObject({ status: 'waiting-for-approval', target: 'other-system' })
+    expect(adapter.executed).toBe(2)
+    const policy = runtime.listApprovalPolicies(worldId)[0]!
+    runtime.revokeApprovalPolicy(policy.id)
+    const afterRevocation = await runtime.prepare(worldId, employeeId, '请执行 external', new Date('2026-08-23T08:06:03.000Z'))
+    expect(afterRevocation.actions[0]?.status).toBe('waiting-for-approval')
+    expect(adapter.executed).toBe(2)
+  })
 })
 
 class TestAdapter implements CharacterSkillAdapter {
@@ -173,6 +231,30 @@ class ThrowingAdapter implements CharacterSkillAdapter {
   }
 }
 
+class ExternalAdapter implements CharacterSkillAdapter {
+  readonly id = 'test-external-adapter'
+  readonly descriptors: readonly CharacterSkillDescriptor[] = [{
+    id: 'test.external', displayName: '外部测试技能', summary: '验证审批硬门。',
+    adapterId: this.id, risks: ['external-side-effect'], supportsScheduling: false,
+  }]
+  executed = 0
+
+  propose(context: CharacterSkillMatchContext) {
+    if (!context.prompt.includes('external')) return []
+    return [{
+      skillId: 'test.external', adapterId: this.id, action: 'external.run',
+      target: context.prompt.includes('other') ? 'other-system' : 'primary-system',
+      label: '执行外部测试动作', risk: 'external-side-effect' as const,
+      authorization: 'explicit-user-request' as const, parameters: {},
+    }]
+  }
+
+  async execute() {
+    this.executed += 1
+    return { status: 'executed' as const, detail: '外部测试动作已执行' }
+  }
+}
+
 function descriptor(adapterId: string): readonly CharacterSkillDescriptor[] {
   return [{
     id: 'test.echo',
@@ -205,7 +287,7 @@ function makeRuntime(
 ): CharacterSkillRuntime {
   return new CharacterSkillRuntime(store, {
     registry,
-    actions: new LocalSkillActionRepository(join(root, 'skills', 'actions.json')),
+    actions: new SqliteSkillActionRepository(store),
   })
 }
 
@@ -225,7 +307,7 @@ async function setup(skillGrants: string[]) {
     role: '测试员',
     summary: '用于 Skill Runtime 测试。',
     persona: '执行受控测试技能。',
-    requestedSkills: ['test.echo'],
+    requestedSkills: ['test.echo', 'test.external'],
     requestedCapabilities: [],
     createdAt: '2026-08-23T00:00:00.000Z',
   }

@@ -184,6 +184,47 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     writeJson(response, 200, { items: await skillRuntime.list(worldId) })
   })
 
+  router.get(/^\/api\/worlds\/([^/]+)\/approvals$/, async ({ request, response, params, url }) => {
+    const worldId = params[0]!
+    if (store.getWorld(worldId) === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
+    await worldAccess.assertUnlocked(worldId, request)
+    const rawStatus = url.searchParams.get('status')
+    const status = rawStatus === null ? undefined : rawStatus
+    if (status !== undefined && !['pending', 'approved', 'rejected', 'expired'].includes(status)) {
+      throw new HttpError(422, 'invalid_approval_status', '不支持的审批状态')
+    }
+    writeJson(response, 200, {
+      items: skillRuntime.listApprovalRequests(worldId, status as 'pending' | 'approved' | 'rejected' | 'expired' | undefined),
+    })
+  })
+
+  router.post(/^\/api\/approvals\/([^/]+)\/decision$/, async ({ request, response, params }) => {
+    const approval = store.getApprovalRequest(params[0]!)
+    if (approval === undefined) throw new HttpError(404, 'approval_not_found', '审批请求不存在')
+    await worldAccess.assertUnlocked(approval.worldId, request)
+    if (approval.status !== 'pending') throw new HttpError(409, 'approval_already_decided', '审批请求已经处理')
+    const body = await readJson(request)
+    const decision = requiredEnum(body, 'decision', ['approved', 'rejected'])
+    const scope = body.scope === undefined ? 'once' : requiredEnum(body, 'scope', ['once', 'character', 'world'])
+    const result = await skillRuntime.decideApproval(approval.id, decision, scope, 'local-user')
+    writeJson(response, 200, result)
+  })
+
+  router.get(/^\/api\/worlds\/([^/]+)\/approval-policies$/, async ({ request, response, params }) => {
+    const worldId = params[0]!
+    if (store.getWorld(worldId) === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
+    await worldAccess.assertUnlocked(worldId, request)
+    writeJson(response, 200, { items: skillRuntime.listApprovalPolicies(worldId) })
+  })
+
+  router.delete(/^\/api\/approval-policies\/([^/]+)$/, async ({ request, response, params }) => {
+    const policy = skillRuntime.getApprovalPolicy(params[0]!)
+    if (policy === undefined) throw new HttpError(404, 'approval_policy_not_found', '授权策略不存在')
+    await worldAccess.assertUnlocked(policy.worldId, request)
+    if (policy.revokedAt !== undefined) throw new HttpError(409, 'approval_policy_revoked', '授权策略已经撤销')
+    writeJson(response, 200, { policy: skillRuntime.revokeApprovalPolicy(policy.id) })
+  })
+
   router.post(/^\/api\/worlds\/([^/]+)\/peer-conversations$/, async ({ request, response, params }) => {
     const world = store.getWorld(params[0]!)
     if (world === undefined) throw new HttpError(404, 'world_not_found', 'World not found')

@@ -658,6 +658,78 @@ const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX agent_runs_employee_status_created_idx ON agent_runs(employee_id, status, created_at DESC, id);
     `,
   },
+  {
+    version: 16,
+    name: 'approval-gate-v1',
+    sql: `
+      CREATE TABLE skill_actions (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        character_id TEXT NOT NULL REFERENCES employee_instances(id) ON DELETE CASCADE,
+        skill_id TEXT NOT NULL,
+        adapter_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        target TEXT NOT NULL,
+        label TEXT NOT NULL,
+        risk TEXT NOT NULL CHECK (risk IN ('read', 'write-local', 'external-side-effect')),
+        authorization TEXT NOT NULL CHECK (authorization IN ('explicit-user-request', 'preapproved-policy')),
+        parameters_json TEXT NOT NULL,
+        scheduled_for TEXT,
+        approval_request_id TEXT REFERENCES approval_requests(id) ON DELETE SET NULL,
+        work_turn_id TEXT REFERENCES work_turns(id) ON DELETE SET NULL,
+        agent_run_id TEXT REFERENCES agent_runs(id) ON DELETE SET NULL,
+        status TEXT NOT NULL CHECK (status IN ('scheduled', 'waiting-for-approval', 'executed', 'waiting-for-integration', 'failed', 'outcome-unknown', 'rejected')),
+        detail TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      ) STRICT;
+      CREATE INDEX skill_actions_world_created_idx ON skill_actions(world_id, created_at DESC, id);
+      CREATE INDEX skill_actions_due_idx ON skill_actions(status, scheduled_for) WHERE scheduled_for IS NOT NULL;
+      CREATE INDEX skill_actions_subject_idx ON skill_actions(world_id, character_id, skill_id, action, target, created_at DESC);
+
+      CREATE TABLE approval_requests (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        session_id TEXT REFERENCES work_sessions(id) ON DELETE SET NULL,
+        work_turn_id TEXT REFERENCES work_turns(id) ON DELETE SET NULL,
+        agent_run_id TEXT REFERENCES agent_runs(id) ON DELETE SET NULL,
+        character_id TEXT REFERENCES employee_instances(id) ON DELETE SET NULL,
+        subject_type TEXT NOT NULL CHECK (subject_type IN ('skill-action', 'tool-call', 'file-write', 'external-action')),
+        subject_id TEXT NOT NULL,
+        risk TEXT NOT NULL CHECK (risk IN ('read', 'write-local', 'external-side-effect', 'high-risk')),
+        summary TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'rejected', 'expired')),
+        scope TEXT NOT NULL CHECK (scope IN ('once', 'character', 'world')),
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        decided_at TEXT,
+        decided_by TEXT,
+        UNIQUE(subject_type, subject_id)
+      ) STRICT;
+      CREATE INDEX approval_requests_world_status_created_idx ON approval_requests(world_id, status, created_at DESC, id);
+      CREATE INDEX approval_requests_turn_idx ON approval_requests(work_turn_id, created_at DESC) WHERE work_turn_id IS NOT NULL;
+
+      CREATE TABLE approval_policies (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        character_id TEXT REFERENCES employee_instances(id) ON DELETE CASCADE,
+        subject_type TEXT NOT NULL CHECK (subject_type IN ('skill-action', 'tool-call', 'file-write', 'external-action')),
+        skill_id TEXT,
+        action TEXT NOT NULL,
+        target TEXT NOT NULL,
+        risk TEXT NOT NULL CHECK (risk IN ('read', 'write-local', 'external-side-effect', 'high-risk')),
+        scope TEXT NOT NULL CHECK (scope IN ('character', 'world')),
+        source_approval_id TEXT NOT NULL REFERENCES approval_requests(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL,
+        revoked_at TEXT,
+        CHECK ((scope = 'character' AND character_id IS NOT NULL) OR (scope = 'world' AND character_id IS NULL))
+      ) STRICT;
+      CREATE INDEX approval_policies_match_idx ON approval_policies(world_id, subject_type, skill_id, action, target, risk, revoked_at);
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {

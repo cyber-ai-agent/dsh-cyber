@@ -16,6 +16,8 @@ export interface CharacterSkillActionReservation {
 export interface CharacterSkillActionRepository {
   reserve(action: CharacterSkillAction, duplicateWindowMs: number): Promise<CharacterSkillActionReservation>
   save(action: CharacterSkillAction): Promise<void>
+  get?(actionId: string): Promise<CharacterSkillAction | undefined>
   listByWorld(worldId: string): Promise<CharacterSkillAction[]>
   listDue(now: Date): Promise<CharacterSkillAction[]>
+  listWaitingForApproval?(): Promise<CharacterSkillAction[]>
 }

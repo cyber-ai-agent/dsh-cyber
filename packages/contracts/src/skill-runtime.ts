@@ -2,10 +2,12 @@ import type { IsoTimestamp, JsonObject } from './index.js'
 
 export type SkillActionStatus =
   | 'scheduled'
+  | 'waiting-for-approval'
   | 'executed'
   | 'waiting-for-integration'
   | 'failed'
   | 'outcome-unknown'
+  | 'rejected'
 
 export type SkillActionRisk = 'read' | 'write-local' | 'external-side-effect'
 
@@ -36,6 +38,9 @@ export interface CharacterSkillAction {
   authorization: SkillActionAuthorization
   parameters: JsonObject
   scheduledFor?: IsoTimestamp
+  approvalRequestId?: string
+  workTurnId?: string
+  agentRunId?: string
   status: SkillActionStatus
   detail: string
   createdAt: IsoTimestamp
