@@ -16,6 +16,7 @@ test.beforeAll(async () => {
   await mkdir(join(process.cwd(), 'artifacts', 'settings-experience'), { recursive: true })
   await mkdir(join(process.cwd(), 'artifacts', 'world-market-starter-content'), { recursive: true })
   await mkdir(join(process.cwd(), 'artifacts', 'market-activation-audit'), { recursive: true })
+  await mkdir(join(process.cwd(), 'artifacts', 'market-installed-state'), { recursive: true })
   server = await createCyberServer({
     stateRoot,
     workspacePath: process.cwd(),
@@ -398,8 +399,11 @@ test('discovers, installs, and creates a visually distinct world from the world-
   await expect(market).toBeVisible()
   await expect(market.locator('.market-tabs button')).toHaveText(['世界', '角色', '插件'])
   for (const worldName of ['赛博公司', '月影酒馆', '云端创作工坊', '远星观测站']) {
-    await expect(market.getByRole('article').filter({ hasText: worldName })).toBeVisible()
+    await expect(market.locator('.market-card-grid > article').filter({ hasText: worldName })).toBeVisible()
   }
+  const cyberCard = market.locator('.market-card-grid > article').filter({ hasText: '赛博公司' })
+  await expect(cyberCard).toContainText('已内置 · 当前可用')
+  await expect(cyberCard.getByRole('button', { name: '已内置' })).toBeDisabled()
   const covers = market.locator('.market-world-cover')
   await expect(covers).toHaveCount(4)
   expect(await covers.evaluateAll((images) => images.every((image) => (image as HTMLImageElement).naturalWidth > 1_000))).toBe(true)
@@ -412,12 +416,14 @@ test('discovers, installs, and creates a visually distinct world from the world-
   await page.screenshot({ path: join(process.cwd(), 'artifacts', 'world-market-starter-content', 'market-3840x2160.png') })
   await page.setViewportSize({ width: 1_920, height: 1_080 })
 
-  const tavernCard = market.getByRole('article').filter({ hasText: '月影酒馆' })
+  const tavernCard = market.locator('.market-card-grid > article').filter({ hasText: '月影酒馆' })
   await tavernCard.getByRole('button', { name: '查看并安装' }).click()
   await market.getByRole('checkbox', { name: /我已审阅发布者/ }).check()
   await market.getByRole('button', { name: /批准安装/ }).click()
-  await expect(tavernCard.getByRole('button', { name: '创建这个世界' })).toBeVisible()
-  await tavernCard.getByRole('button', { name: '创建这个世界' }).click()
+  await expect(tavernCard).toContainText('已安装 v1.0.0 · 可创建')
+  await expect(tavernCard.getByRole('button', { name: '创建新世界' })).toBeVisible()
+  await page.screenshot({ path: join(process.cwd(), 'artifacts', 'market-installed-state', 'installed-worlds-1920x1080.png') })
+  await tavernCard.getByRole('button', { name: '创建新世界' }).click()
   await expect(market.getByRole('heading', { name: /月影酒馆/ })).toBeVisible()
   await market.getByRole('textbox', { name: '新世界名称' }).fill('月影酒馆 E2E')
   await market.getByRole('button', { name: '创建并进入这个世界' }).click()
@@ -447,13 +453,13 @@ test('discovers, installs, and creates a visually distinct world from the world-
   await page.getByRole('button', { name: '市场', exact: true }).click()
   await market.getByRole('button', { name: '角色', exact: true }).click()
   for (const roleName of ['档案管理员', '织梦说书人', '视觉导演', '异星生态学家']) {
-    await expect(market.getByRole('article').filter({ hasText: roleName })).toBeVisible()
+    await expect(market.locator('.market-card-grid > article').filter({ hasText: roleName })).toBeVisible()
   }
   await expect(market.locator('.market-role-cover')).toHaveCount(4)
   expect(await market.locator('.market-role-cover').evaluateAll((images) => images.every((image) => (image as HTMLImageElement).naturalWidth > 1_000))).toBe(true)
   await page.screenshot({ path: join(process.cwd(), 'artifacts', 'world-market-starter-content', 'roles-1920x1080.png') })
 
-  const storytellerCard = market.getByRole('article').filter({ hasText: '织梦说书人' })
+  const storytellerCard = market.locator('.market-card-grid > article').filter({ hasText: '织梦说书人' })
   await storytellerCard.getByRole('button', { name: '查看并安装' }).click()
   await market.getByRole('checkbox', { name: /我已审阅发布者/ }).check()
   await market.getByRole('button', { name: /批准安装/ }).click()
@@ -476,12 +482,12 @@ test('discovers, installs, and creates a visually distinct world from the world-
   await page.getByRole('button', { name: '市场', exact: true }).click()
   await market.getByRole('button', { name: '插件', exact: true }).click()
   for (const pluginName of ['会议纪要助手', '研究简报', '决策记录', '发布检查']) {
-    await expect(market.getByRole('article').filter({ hasText: pluginName })).toBeVisible()
+    await expect(market.locator('.market-card-grid > article').filter({ hasText: pluginName })).toBeVisible()
   }
   await expect(market.getByText('全局可用 · 所有世界共享').first()).toBeVisible()
   await page.screenshot({ path: join(process.cwd(), 'artifacts', 'world-market-starter-content', 'plugins-1920x1080.png') })
 
-  const researchCard = market.getByRole('article').filter({ hasText: '研究简报' })
+  const researchCard = market.locator('.market-card-grid > article').filter({ hasText: '研究简报' })
   await researchCard.getByRole('button', { name: '查看并安装' }).click()
   await market.getByRole('checkbox', { name: /我已审阅发布者/ }).check()
   await market.getByRole('button', { name: /批准安装/ }).click()

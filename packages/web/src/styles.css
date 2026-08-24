@@ -758,6 +758,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .market-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .market-card-grid > article { min-height: 210px; display: grid; align-content: start; gap: 12px; padding: 16px; border: 1px solid var(--border); background: var(--surface-1); }
 .market-card-grid > article:hover, .market-card-grid > article.is-selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 5%, var(--surface-1)); }
+.market-card-grid > article.is-installed { border-color: color-mix(in srgb, var(--success) 52%, var(--border)); }
+.market-card-grid > article.is-included { border-color: color-mix(in srgb, var(--success) 32%, var(--border)); background: color-mix(in srgb, var(--success) 3%, var(--surface-1)); }
+.market-card-grid > article.is-upgrade { border-color: color-mix(in srgb, var(--accent) 62%, var(--border)); }
 .market-card-grid article > header { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 8px; }
 .market-card-grid article > header > svg { color: var(--accent); }
 .market-card-grid article > header > div { min-width: 0; display: grid; gap: 2px; }
@@ -778,6 +781,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .market-card-grid article > footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 9px; border-top: 1px solid var(--border); }
 .market-card-grid article > footer span { color: var(--text-muted); font: 12px var(--font-mono); }
 .market-card-grid article > footer button { min-height: 36px; padding: 0 12px; border: 1px solid var(--accent); color: var(--accent-strong); background: var(--accent-soft); font-size: 13px; }
+.market-card-grid article.is-installed > footer span, .market-card-grid article.is-included > footer span { color: var(--success); }
+.market-card-grid article.is-upgrade > footer span { color: var(--accent-strong); }
+.market-card-grid article > footer button.market-action--installed { border-color: var(--success); color: #07140f; background: var(--success); font-weight: 650; }
+.market-card-grid article > footer button.market-action--included { display: inline-flex; align-items: center; justify-content: center; gap: 5px; border-color: color-mix(in srgb, var(--success) 65%, var(--border)); color: var(--success); background: color-mix(in srgb, var(--success) 9%, var(--surface-0)); opacity: 1; cursor: default; }
+.market-card-grid article > footer button.market-action--upgrade { font-weight: 650; }
 .market-empty { min-height: 220px; display: grid; place-content: center; justify-items: center; gap: 7px; border: 1px dashed var(--border); color: var(--text-muted); text-align: center; }
 .market-empty strong { color: var(--text-soft); font-size: 15px; }
 .market-empty span { max-width: 420px; font-size: 13px; line-height: 1.55; }
