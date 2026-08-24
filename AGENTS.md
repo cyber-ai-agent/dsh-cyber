@@ -44,7 +44,7 @@
 - 应用源码目录与 `stateRoot` 必须保持物理和逻辑解耦。默认数据目录继续使用 `%LOCALAPPDATA%\\DSH Cyber`（Windows）或 `~/.dsh-cyber`（macOS/Linux）；禁止默认把用户数据写进 Git 工作树。
 - `git pull`、重新安装依赖、重新构建 Web/CLI、替换内置 Harness bundle 都不得删除、覆盖或重新初始化已有 `stateRoot`。
 - 数据迁移只能做 versioned migration，并必须保持向前迁移、失败可诊断；不得用“重新创建世界/角色”代替迁移。
-- 新增任何持久化目录时，必须同步加入本地 Backup Bundle。当前 Bundle 至少包含：SQLite、`worlds/`、`assets/`、`packages/`、`workshop/`、`skills/`；凭据、运行时二进制、缓存和旧备份继续排除。
+- 新增任何持久化目录时，必须同步加入本地 Backup Bundle。当前 Bundle 至少包含：SQLite、`worlds/`、`assets/`、`packages/`、`workshop/`、`skills/`、`integrations/`；凭据、运行时二进制、缓存和旧备份继续排除。
 - 应用更新、Harness 激活和 Harness 回滚都必须使用相同的完整本地 Backup Bundle 边界，不能只保护 SQLite 而遗漏 Workshop/Skill 文件。
 - 升级说明必须先给备份命令，再给 `git pull --ff-only` / install / build / doctor / restart 流程，并明确指出这些命令只更新程序，不触碰 `stateRoot`。
 - 文档中不得建议用户通过删除 `~/.dsh-cyber`、`%LOCALAPPDATA%\\DSH Cyber`、`data/`、`worlds/`、`workshop/` 来解决普通升级问题。

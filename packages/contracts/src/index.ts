@@ -295,6 +295,49 @@ export interface WorldPackageInstance {
   updatedAt: IsoTimestamp
 }
 
+export type IntegrationFieldKind = 'text' | 'url' | 'secret' | 'number' | 'boolean'
+
+export interface IntegrationFieldDescriptor {
+  id: string
+  displayName: string
+  description: string
+  kind: IntegrationFieldKind
+  required: boolean
+  placeholder?: string
+}
+
+/** Public, provider-neutral metadata. It never contains implementation callbacks or credentials. */
+export interface IntegrationDescriptor {
+  id: string
+  displayName: string
+  summary: string
+  configFields: IntegrationFieldDescriptor[]
+  secretFields: IntegrationFieldDescriptor[]
+  skillIds: string[]
+  dataEgress: string[]
+}
+
+export interface IntegrationConnection {
+  id: string
+  workspaceId: string
+  integrationId: string
+  displayName: string
+  config: JsonObject
+  enabled: boolean
+  credentialConfigured: boolean
+  createdAt: IsoTimestamp
+  updatedAt: IsoTimestamp
+}
+
+export type IntegrationHealthStatus = 'ready' | 'misconfigured' | 'unreachable'
+
+export interface IntegrationHealth {
+  status: IntegrationHealthStatus
+  detail: string
+  checkedAt: IsoTimestamp
+  latencyMs: number
+}
+
 export type PackageInstallTransactionStatus =
   | 'approved'
   | 'staged'

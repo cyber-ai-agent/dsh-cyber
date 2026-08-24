@@ -13,6 +13,7 @@ import {
   Moon,
   Palette,
   PencilSimple,
+  Plug,
   Plus,
   ShieldCheck,
   Sun,
@@ -22,6 +23,9 @@ import {
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import type {
   EmployeeInstance,
+  IntegrationConnection,
+  IntegrationDescriptor,
+  IntegrationHealth,
   ModelApiKind,
   ModelAssignment,
   ModelInteractionLog,
@@ -34,8 +38,9 @@ import type {
   WorkspacePreferences,
   World,
 } from '@dsh-cyber/contracts'
+import { api } from '../api.js'
 
-export type SettingsSection = 'appearance' | 'models' | 'data' | 'logs' | 'maintenance'
+export type SettingsSection = 'appearance' | 'models' | 'integrations' | 'data' | 'logs' | 'maintenance'
 export type SystemAction = 'status' | 'doctor' | 'backup' | 'export' | 'list-updates' | 'verify-update' | 'contract-update' | 'canary-update' | 'activate-update' | 'rollback-update'
 
 export interface SystemActionInput {
@@ -111,6 +116,7 @@ const sectionGroups = [
     items: [
       ['appearance', '外观与布局', Palette, '主题、背景和面板宽度'],
       ['models', 'AI 模型', Cpu, '连接模型并设置使用范围'],
+      ['integrations', '外部连接', Plug, '管理角色可使用的受信任服务'],
     ],
   },
   {
@@ -324,6 +330,7 @@ export function SettingsDialog({
                 onDelete={onDeleteModel}
               />
             ) : null}
+            {section === 'integrations' ? <IntegrationSettings workspaceId={workspace.id} /> : null}
             {section === 'logs' ? (
               <ModelInteractionLogSettings
                 onLoad={onLoadModelLogs}
@@ -335,7 +342,7 @@ export function SettingsDialog({
           </div>
         </div>
         <footer className="settings-dialog__footer">
-          <span>{section === 'appearance' ? (saving ? '正在保存…' : changed ? '有未保存的外观更改' : '外观设置已保存') : section === 'models' ? '每个模型连接单独保存，密钥不会显示在页面中' : section === 'data' ? '数据保存在当前设备' : section === 'logs' ? '记录不包含对话正文和密钥' : '高级操作只在你主动执行时运行'}</span>
+          <span>{section === 'appearance' ? (saving ? '正在保存…' : changed ? '有未保存的外观更改' : '外观设置已保存') : section === 'models' ? '每个模型连接单独保存，密钥不会显示在页面中' : section === 'integrations' ? '外部凭据仅在本机加密保存，角色仍需单独 Skill 授权' : section === 'data' ? '数据保存在当前设备' : section === 'logs' ? '记录不包含对话正文和密钥' : '高级操作只在你主动执行时运行'}</span>
           <div>
             <button className="text-button" type="button" onClick={onClose}>{section === 'appearance' ? '取消' : '关闭'}</button>
             {section === 'appearance' ? <button className="primary-button" type="button" disabled={!changed || saving} onClick={() => void onSavePreferences(draft)}>保存外观设置</button> : null}
@@ -344,6 +351,88 @@ export function SettingsDialog({
       </section>
     </div>
   )
+}
+
+function IntegrationSettings({ workspaceId }: { workspaceId: string }) {
+  const [descriptors, setDescriptors] = useState<IntegrationDescriptor[]>([])
+  const [connections, setConnections] = useState<IntegrationConnection[]>([])
+  const [selectedId, setSelectedId] = useState<string>()
+  const [baseUrl, setBaseUrl] = useState('https://api.firecrawl.dev')
+  const [credential, setCredential] = useState('')
+  const [enabled, setEnabled] = useState(true)
+  const [health, setHealth] = useState<IntegrationHealth>()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string>()
+
+  const load = async () => {
+    const result = await api<{ descriptors: IntegrationDescriptor[]; items: IntegrationConnection[] }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/integrations`)
+    setDescriptors(result.descriptors)
+    setConnections(result.items)
+    setSelectedId((current) => current ?? result.descriptors[0]?.id)
+  }
+
+  useEffect(() => {
+    void load().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : '外部连接加载失败'))
+    // load only changes local connection state for the selected workspace.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId])
+
+  const descriptor = descriptors.find((item) => item.id === selectedId)
+  const connection = connections.find((item) => item.integrationId === selectedId)
+  useEffect(() => {
+    setBaseUrl(typeof connection?.config.baseUrl === 'string'
+      ? connection.config.baseUrl
+      : descriptor?.configFields.find((field) => field.id === 'baseUrl')?.placeholder ?? '')
+    setEnabled(connection?.enabled ?? true)
+    setCredential('')
+    setHealth(undefined)
+  }, [connection?.id, descriptor?.id])
+
+  const save = async () => {
+    if (descriptor === undefined) return
+    setBusy(true); setError(undefined); setHealth(undefined)
+    try {
+      await api(`/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/${encodeURIComponent(descriptor.id)}`, {
+        method: 'PUT',
+        body: JSON.stringify({ config: { baseUrl }, enabled, ...(credential.trim() ? { credential: credential.trim() } : {}) }),
+      })
+      await load()
+      setCredential('')
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '连接保存失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const test = async () => {
+    if (descriptor === undefined) return
+    setBusy(true); setError(undefined)
+    try {
+      const result = await api<{ health: IntegrationHealth }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/${encodeURIComponent(descriptor.id)}/test`, { method: 'POST', body: '{}' })
+      setHealth(result.health)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '连接测试失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <div className="settings-section settings-section--integrations">
+    <div className="settings-section__heading"><h3>外部连接</h3><p>统一管理受信任服务。安装 Skill 只声明能力，角色获得授权后仍需经过审批策略才能发送数据。</p></div>
+    <div className="integration-provider-list" role="list">
+      {descriptors.map((item) => <button key={item.id} type="button" className={item.id === selectedId ? 'is-active' : ''} onClick={() => setSelectedId(item.id)}><strong>{item.displayName}</strong><small>{item.summary}</small></button>)}
+    </div>
+    {descriptor === undefined ? <div className="dialog-empty">当前没有可配置的外部连接。</div> : <section className="integration-editor">
+      <header><div><h4>{descriptor.displayName}</h4><p>{descriptor.summary}</p></div><label><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />启用连接</label></header>
+      <label className="dialog-field"><span>服务地址</span><input value={baseUrl} placeholder={descriptor.configFields.find((field) => field.id === 'baseUrl')?.placeholder} onChange={(event) => setBaseUrl(event.target.value)} /><small>公网服务必须使用 HTTPS；回环与私有网络可以使用 HTTP。</small></label>
+      <label className="dialog-field"><span>API 密钥</span><input type="password" autoComplete="new-password" value={credential} placeholder={connection?.credentialConfigured ? '已加密保存；留空保持不变' : '输入服务提供的密钥'} onChange={(event) => setCredential(event.target.value)} /><small>密钥不会写入连接配置、SQLite、日志、Prompt 或前端响应。</small></label>
+      <div className="integration-egress"><strong>会发送到外部服务</strong><span>{descriptor.dataEgress.join('、') || '无'}</span></div>
+      {error ? <p className="model-form-message model-form-message--error" role="alert">{error}</p> : null}
+      {health ? <p className={health.status === 'ready' ? 'model-form-message model-form-message--success' : 'model-form-message model-form-message--error'} role="status">{health.detail} · {health.latencyMs} ms</p> : null}
+      <footer><button className="secondary-button" type="button" disabled={busy || connection === undefined} onClick={() => void test()}>测试连接</button><button className="primary-button" type="button" disabled={busy || !baseUrl.trim()} onClick={() => void save()}>{busy ? '处理中…' : '保存连接'}</button></footer>
+    </section>}
+  </div>
 }
 
 function AppearanceSettings({

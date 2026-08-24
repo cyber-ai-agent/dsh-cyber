@@ -55,7 +55,7 @@ export async function createLocalBackupBundle(
 
     // Every directory here is user-owned durable state. Add new persistent roots
     // to this list before shipping the feature.
-    for (const directory of ['worlds', 'assets', 'packages', 'workshop', 'skills']) {
+    for (const directory of ['worlds', 'assets', 'packages', 'workshop', 'skills', 'integrations']) {
       const source = join(stateRoot, directory)
       if (!await exists(source)) continue
       entries.push(...await collectBackupEntries(source, directory, directory === 'worlds'))

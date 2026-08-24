@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "official-firecrawl-search",
+  "version": "1.0.0",
+  "kind": "skill",
+  "displayName": "联网搜索 Skill",
+  "summary": "为当前世界声明联网搜索能力。执行仍需角色授权、审批策略和已配置的受信任连接。",
+  "license": "MIT",
+  "publisher": "DSH Cyber",
+  "capabilities": ["integration:firecrawl"],
+  "dataEgress": ["https://api.firecrawl.dev"],
+  "files": [
+    {
+      "path": "skill.json",
+      "sha256": "ab4218091c049401be2bf84c6d71fa36a0d56fddeda8f0366452bccd62466b33"
+    }
+  ],
+  "entrypoints": [
+    {
+      "id": "web.search.firecrawl",
+      "kind": "skill",
+      "path": "skill.json"
+    }
+  ]
+}

@@ -62,4 +62,8 @@ export interface CharacterSkillDescriptor {
   adapterId: string
   risks: SkillActionRisk[]
   supportsScheduling: boolean
+  /** Declarative recipes shape how a character works; integrations can execute host actions. */
+  kind?: 'recipe' | 'integration'
+  /** Safe recipes may be selected by default during recruitment. External integrations never are. */
+  recommendedByDefault?: boolean
 }

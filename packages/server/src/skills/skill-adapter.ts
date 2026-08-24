@@ -36,6 +36,12 @@ export interface CharacterSkillExecutionResult {
   detail: string
 }
 
+export interface CharacterSkillRecipe {
+  descriptor: CharacterSkillDescriptor
+  /** Host-reviewed instruction only. It cannot contain executable callbacks or credentials. */
+  instruction: string
+}
+
 /**
  * Trusted host-side execution seam. Third-party packages may request a skill id,
  * but they never receive this interface and cannot execute arbitrary code through it.
@@ -54,6 +60,22 @@ export interface CharacterSkillAdapter {
 export class CharacterSkillAdapterRegistry {
   readonly #adapters = new Map<string, CharacterSkillAdapter>()
   readonly #skills = new Map<string, CharacterSkillAdapter>()
+  readonly #recipes = new Map<string, CharacterSkillRecipe>()
+
+  registerRecipe(recipe: CharacterSkillRecipe): () => void {
+    const { descriptor } = recipe
+    if (!descriptor.id.trim()) throw new Error('Skill recipe id cannot be empty')
+    if (!recipe.instruction.trim()) throw new Error(`Skill recipe ${descriptor.id} instruction cannot be empty`)
+    if (this.#skills.has(descriptor.id) || this.#recipes.has(descriptor.id)) {
+      throw new Error(`Duplicate skill provider: ${descriptor.id}`)
+    }
+    if (descriptor.kind !== 'recipe') throw new Error(`Skill recipe ${descriptor.id} must use kind=recipe`)
+    if (descriptor.risks.length > 0 || descriptor.supportsScheduling) {
+      throw new Error(`Skill recipe ${descriptor.id} cannot declare execution risks or scheduling`)
+    }
+    this.#recipes.set(descriptor.id, recipe)
+    return () => { if (this.#recipes.get(descriptor.id) === recipe) this.#recipes.delete(descriptor.id) }
+  }
 
   register(adapter: CharacterSkillAdapter): () => void {
     if (!adapter.id.trim()) throw new Error('Skill adapter id cannot be empty')
@@ -65,7 +87,7 @@ export class CharacterSkillAdapterRegistry {
       if (descriptor.adapterId !== adapter.id) {
         throw new Error(`Skill ${descriptor.id} points at ${descriptor.adapterId}, expected ${adapter.id}`)
       }
-      if (this.#skills.has(descriptor.id)) throw new Error(`Duplicate skill provider: ${descriptor.id}`)
+      if (this.#skills.has(descriptor.id) || this.#recipes.has(descriptor.id)) throw new Error(`Duplicate skill provider: ${descriptor.id}`)
     }
 
     this.#adapters.set(adapter.id, adapter)
@@ -81,10 +103,20 @@ export class CharacterSkillAdapterRegistry {
   }
 
   list(): CharacterSkillDescriptor[] {
-    return [...this.#adapters.values()]
+    return [
+      ...[...this.#adapters.values()]
       .flatMap((adapter) => adapter.descriptors)
-      .map((descriptor) => ({ ...descriptor, risks: [...descriptor.risks] }))
+      .map((descriptor) => ({ ...descriptor, kind: descriptor.kind ?? 'integration' as const, risks: [...descriptor.risks] })),
+      ...[...this.#recipes.values()].map(({ descriptor }) => ({ ...descriptor, risks: [...descriptor.risks] })),
+    ]
       .sort((left, right) => left.displayName.localeCompare(right.displayName, 'zh-CN') || left.id.localeCompare(right.id))
+  }
+
+  instructionsFor(skillIds: readonly string[]): string[] {
+    return skillIds.flatMap((skillId) => {
+      const recipe = this.#recipes.get(skillId)
+      return recipe === undefined ? [] : [`${recipe.descriptor.displayName}：${recipe.instruction.trim()}`]
+    })
   }
 
   adapterById(adapterId: string): CharacterSkillAdapter | undefined {

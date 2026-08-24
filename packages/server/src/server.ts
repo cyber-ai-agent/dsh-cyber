@@ -27,6 +27,7 @@ import { registerAssetRoutes } from './routes/asset-routes.js'
 import { registerCatalogRoutes } from './routes/catalog-routes.js'
 import { registerConversationRoutes } from './routes/conversation-routes.js'
 import { registerEmployeeRoutes } from './routes/employee-routes.js'
+import { registerIntegrationRoutes } from './routes/integration-routes.js'
 import { registerModelInteractionRoutes } from './routes/model-interaction-routes.js'
 import { registerModelRoutes } from './routes/model-routes.js'
 import { registerPackageRoutes } from './routes/package-routes.js'
@@ -72,6 +73,8 @@ import { RuntimeStreamHub } from './streams/runtime-stream-hub.js'
 import { WorldStreamHub } from './streams/world-stream-hub.js'
 import { validateStagedPackageEntrypoints } from './installed-package-runtime.js'
 import { WorldRuntimeService } from './world-runtime-service.js'
+import { createBuiltinIntegrationRegistry } from './integrations/builtin-integration-registry.js'
+import { IntegrationService } from './integrations/integration-service.js'
 
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_PORT = 43123
@@ -138,6 +141,15 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const worldAccess = new WorldAccessService(worldRoots)
   const credentials = await ModelCredentialService.open(stateRoot)
   const modelCatalog = new ModelCatalogService(credentials)
+  const worldPackages = new WorldPackageInstanceService(store, worldRoots)
+  const integrations = await IntegrationService.open(stateRoot, createBuiltinIntegrationRegistry())
+  const skillRegistry = options.skillRegistry ?? createBuiltinSkillRegistry({
+    firecrawl: {
+      store,
+      integrations,
+      listWorldPackages: (worldId) => worldPackages.listRuntimePackages(worldId),
+    },
+  })
 
   const activeDshBinPath = await resolveActiveRuntime(store, runtimeStateRoot, stateRoot)
   const interactions = new ModelInteractionService(store)
@@ -146,7 +158,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     ...(activeDshBinPath === undefined ? {} : { dshBinPath: activeDshBinPath }),
     resolveRoute(request) { return resolveHarnessRoute(store, request) },
   })
-  const profileRuntime = new CharacterProfileRuntime(baseRuntime, store)
+  const profileRuntime = new CharacterProfileRuntime(baseRuntime, store, skillRegistry)
   const runtime = new TurnInteractionLoggingRuntime({
     inner: profileRuntime,
     service: interactions,
@@ -171,7 +183,6 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const packageCatalog = new LocalPackageCatalog(options.marketplaceRoot ?? fileURLToPath(new URL('../../../marketplace', import.meta.url)))
   const runtimeStreamHub = new RuntimeStreamHub()
   const worldStreamHub = new WorldStreamHub()
-  const worldPackages = new WorldPackageInstanceService(store, worldRoots)
   const worldRuntime = new WorldRuntimeService({
     store,
     simulationStore: worldSimulation,
@@ -201,7 +212,6 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     settings: ambientLifeSettings,
     service: ambientLifeRuntime,
   })
-  const skillRegistry = options.skillRegistry ?? createBuiltinSkillRegistry()
   let skillActions = options.skillActionRepository
   if (skillActions === undefined) {
     const sqliteActions = new SqliteSkillActionRepository(store)
@@ -234,6 +244,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerCatalogRoutes(router, { store, packageCatalog, worldPackages })
   registerWorkspaceRoutes(router, { store })
   registerModelRoutes(router, { store, credentials, modelCatalog, interactions })
+  registerIntegrationRoutes(router, { store, integrations })
   registerAmbientLifeRoutes(router, { store, settings: ambientLifeSettings, access: worldAccess })
   registerAssetRoutes(router, { store, assets, access: worldAccess })
   registerWorldRoutes(router, { store, worldAccess, worldPackages })
@@ -288,6 +299,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       if (httpServer.listening) await closeServer(httpServer)
       await orchestrator.close()
       credentials.close()
+      integrations.close()
       store.close()
     },
   }
