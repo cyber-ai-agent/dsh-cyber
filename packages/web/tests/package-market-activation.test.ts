@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { CyberMarketPackage, World } from '@dsh-cyber/contracts'
 
+import { ChatWorkbench } from '../src/components/ChatWorkbench.js'
 import { PackageMarketDialog } from '../src/components/PackageMarketDialog.js'
 import { RecruitmentDialog } from '../src/components/RecruitmentDialog.js'
 
@@ -38,10 +39,18 @@ describe('package market activation flow', () => {
     expect(included).toContain('已内置 · 当前可用')
     expect(included).toContain('已内置</button>')
 
-    const installed = marketHtml(themeItem('1.0.1'), 'theme')
+    const installed = marketHtml(themeItem('1.0.1'), 'theme', [{ ...world, templateId: 'personal-world' }])
     expect(installed).toContain('is-installed')
     expect(installed).toContain('已安装 v1.0.1 · 可创建')
     expect(installed).toContain('创建新世界')
+  })
+
+  it('shows a created state after an installed theme has produced a world', () => {
+    const created = marketHtml(themeItem('1.0.1'), 'theme', [{ ...world, templateId: 'cyber-company' }])
+    expect(created).toContain('is-created')
+    expect(created).toContain('已安装 v1.0.1 · 已创建')
+    expect(created).toContain('已创建</button>')
+    expect(created).not.toContain('创建新世界')
   })
 
   it('shows an explicit upgrade state when an older theme is installed', () => {
@@ -49,6 +58,38 @@ describe('package market activation flow', () => {
     expect(html).toContain('is-upgrade')
     expect(html).toContain('已安装 v1.0.0 · 有新版 v1.0.1')
     expect(html).toContain('升级到 v1.0.1')
+  })
+
+  it('exposes installed plugin commands in the chat composer with a recognizable icon', () => {
+    const html = renderToStaticMarkup(createElement(ChatWorkbench, {
+      demoMode: true,
+      world,
+      messages: [],
+      employees: [],
+      installedPlugins: [{
+        packageId: 'official-research-brief',
+        packageVersion: '1.0.0',
+        displayName: 'Research Brief',
+        summary: '整理研究内容',
+        trigger: '/research-brief',
+        displayTrigger: '/研究简报',
+        description: '整理结论和证据。',
+        automatic: false,
+      }],
+      sending: false,
+      draft: '',
+      onDraftChange: vi.fn(),
+      onSend: vi.fn(async () => undefined),
+      onUploadAttachment: vi.fn(async () => ({ assetId: 'asset-1', name: 'a.txt', mimeType: 'text/plain', byteLength: 1, url: '/a.txt' })),
+      onOpenDossier: vi.fn(),
+      onOpenArtifact: vi.fn(),
+      onRecruit: vi.fn(),
+      onOpenPluginMarket: vi.fn(),
+    }))
+    expect(html).toContain('已安装插件')
+    expect(html).toContain('研究简报')
+    expect(html).toContain('/研究简报')
+    expect(html).toContain('composer-plugin-picker__icon')
   })
 
   it('opens recruitment on the market-selected blueprint', () => {

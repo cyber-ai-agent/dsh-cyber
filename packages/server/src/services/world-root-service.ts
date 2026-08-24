@@ -22,7 +22,11 @@ export class WorldRootService {
     const managedRoot = await realpath(this.#root)
     const managedInfo = await lstat(this.#root)
     if (managedInfo.isSymbolicLink() || !managedInfo.isDirectory()) throw new Error('Managed world directory is not a real directory')
-    const rootPath = this.#safeWorldRoot(worldId)
+    // Resolve the child from the canonical managed path. On Windows the
+    // configured state root may contain an 8.3 alias (for example
+    // `ADMINI~1`) while realpath returns the long form (`Administrator`);
+    // mixing the two makes a valid child look like it escaped the sandbox.
+    const rootPath = this.#safeWorldRoot(worldId, managedRoot)
     await rejectSymlink(rootPath)
     const filesPath = join(rootPath, 'files')
     const assetsPath = join(rootPath, 'assets')
@@ -49,7 +53,7 @@ export class WorldRootService {
     const managedRoot = await realpath(this.#root)
     const managedInfo = await lstat(this.#root)
     if (managedInfo.isSymbolicLink() || !managedInfo.isDirectory()) throw new Error('Managed world directory is not a real directory')
-    const rootPath = this.#safeWorldRoot(worldId)
+    const rootPath = this.#safeWorldRoot(worldId, managedRoot)
     if (!isPathWithin(managedRoot, rootPath) || rootPath === managedRoot) {
       throw new Error('Refusing to remove a path outside the managed world directory')
     }
@@ -57,10 +61,10 @@ export class WorldRootService {
     await rm(rootPath, { recursive: true, force: true })
   }
 
-  #safeWorldRoot(worldId: string): string {
+  #safeWorldRoot(worldId: string, baseRoot = this.#root): string {
     const safeId = encodeURIComponent(worldId)
-    const rootPath = resolve(this.#root, safeId)
-    if (rootPath === this.#root || !rootPath.startsWith(`${this.#root}${sep}`)) {
+    const rootPath = resolve(baseRoot, safeId)
+    if (rootPath === baseRoot || !rootPath.startsWith(`${baseRoot}${sep}`)) {
       throw new Error('World root escaped managed data directory')
     }
     return rootPath

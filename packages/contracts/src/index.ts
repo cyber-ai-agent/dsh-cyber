@@ -177,6 +177,18 @@ export interface CyberMarketCommand {
   description: string
 }
 
+/** A safe, user-facing command exposed by an installed global plugin. */
+export interface InstalledPluginCommand {
+  packageId: string
+  packageVersion: string
+  displayName: string
+  summary: string
+  trigger: string
+  displayTrigger: string
+  description: string
+  automatic: boolean
+}
+
 export type CyberMarketActivation =
   | {
       kind: 'world-theme'
