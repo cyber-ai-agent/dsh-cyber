@@ -24,6 +24,7 @@
 | 会话执行 | `WorkSession → WorkTurn → AgentRun` 持久模型；私聊一轮一次运行，群聊和角色协作按真实调用顺序记录多次运行；本轮消息关联回合，角色输出、领域事件与 SSE 关联具体运行；服务重启确定性终止遗留执行；提供会话回合和回合详情读取 API | 当前只记录生命周期、错误码和 Runtime Session ID，不持久化原始 prompt、工具输入或工具结果 | 自动重试、通用事件 items 表、远程执行同步 |
 | 世界轨迹 | 每个 AgentRun 投影为一条稳定主轨迹；中文判断摘要、结构化工具调度、状态、耗时、模型和真实 Token 归入同一次运行；按角色汇总 Token；支持角色、日期、关键词、内容和状态筛选以及游标分页；实时与重启恢复使用同一身份；全链路脱敏 | Token 只在 Harness 明确返回时展示，不进行估算；旧运行没有 Token 时保持为空 | 跨设备轨迹同步、用户配置的轨迹保留策略 |
 | 动作审批 | 外部副作用先持久化 Skill Action 与 Approval Request；未批准、已拒绝、已过期或授权已撤销时不会进入受信任 Adapter；支持单次批准、角色级和世界级精确策略，以及策略撤销；服务中断时执行中的外部动作转为结果未知并禁止自动重试 | 当前审批通过本地 HTTP API 提供，复用策略严格绑定 Skill、Action、Target、Risk 与作用域 | 审批中心 UI、工具调用与文件写入审批、远程审批同步 |
+| MCP Skill Adapter | 官方 MCP TypeScript SDK Streamable HTTP 客户端；工具发现映射为独立 Skill；调用严格经过角色 Grant、逐动作 Approval 和 SQLite Action Ledger；参数加密暂存并确定性清理；原始结果不持久化 | V1 通过显式 `/mcp 工具名 JSON` 命令提出调用；每个工作区当前配置一个 MCP 服务 | stdio Extension Host、模型原生结构化调用续跑、多 MCP 服务实例管理 |
 | 模型交互日志 | turn/discovery 双源采集、SQLite 持久化、分页/筛选/详情/清空 API、设置面板日志界面、错误信息密钥清洗；v17 将 turn 日志绑定到 WorkTurn 与 AgentRun，并保存 Harness 返回的真实 Token | 一条 turn 日志表示整轮角色运行，不拆分 worker 内部的多次模型请求；消息数为近似统计；无自动保留策略 | worker 内逐请求明细、日志自动清理和条数上限 |
 | CI | Node 22.19、pnpm 11.7、frozen lockfile、typecheck、test、Chromium、E2E | 仓库工作流名为 `required`；GitHub 分支保护需在仓库设置中另行确认 | 自动发布与包签名流水线 |
 
@@ -41,6 +42,7 @@
 - prompt transform：`packages/server/src/prompt-transform-parser.ts`、`packages/server/src/routes/conversation-routes.ts`
 - 会话记忆与执行：`packages/orchestration/src/conversation-history.ts`、`packages/orchestration/src/conversation-orchestrator.ts`、`packages/persistence/src/migrations.ts`、`packages/persistence/src/sqlite-store.ts`、`packages/harness-adapter/src/history-prompt.ts`、`packages/harness-adapter/src/adapter.ts`、`packages/orchestration/tests/conversation-history.test.ts`、`packages/orchestration/tests/conversation-memory.test.ts`、`packages/server/tests/conversation-memory-restart.test.ts`
 - 动作审批：`packages/server/src/services/character-skill-runtime.ts`、`packages/server/src/skills/sqlite-skill-action-repository.ts`、`packages/persistence/src/migrations.ts`、`packages/persistence/src/sqlite-store.ts`、`packages/server/tests/character-skill-runtime.test.ts`、[Approval Gate V1](../architecture/approval-gate-v1.md)
+- MCP Skill Adapter：`packages/server/src/skills/mcp-skill-adapter.ts`、`packages/server/src/integrations/mcp-client.ts`、`packages/server/tests/mcp-skill-adapter.test.ts`、[MCP Skill Adapter V1](../architecture/mcp-skill-adapter-v1.md)
 - 世界轨迹：`packages/server/src/services/world-trace-service.ts`、`packages/server/src/world-trace/agent-run-trace-adapter.ts`、`packages/web/src/components/world-trace/`、[世界轨迹中心](../architecture/world-trace-center-v1.md)
 - 模型交互日志：`packages/server/src/services/model-interaction-service.ts`、`packages/server/src/routes/model-interaction-routes.ts`、`packages/persistence/src/migrations.ts`（v11）、[模块说明与观测边界](model-interaction-logs.md)
 - CI：`.github/workflows/ci.yml`

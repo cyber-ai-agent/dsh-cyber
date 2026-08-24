@@ -25,6 +25,7 @@ export class IntegrationService {
     const directory = join(stateRoot, 'integrations')
     await mkdir(directory, { recursive: true })
     const service = new IntegrationService(join(directory, 'connections.json'), registry, await IntegrationSecretVault.open(stateRoot), fetch)
+    await service.#pruneExpiredMcpPayloads()
     for (const connection of await readConnections(service.#path)) {
       connection.config = registry.require(connection.integrationId).validateConfig(connection.config)
       assertSecretFree(connection.config)
@@ -49,6 +50,26 @@ export class IntegrationService {
   credential(workspaceId: string, integrationId: string): string | undefined {
     const connection = this.get(workspaceId, integrationId)
     return connection?.enabled === true ? this.#vault.resolve(connection.id) : undefined
+  }
+
+  async storeMcpPayload(value: JsonObject, now = new Date()): Promise<string> {
+    const serialized = JSON.stringify(value)
+    if (serialized.length > 12_000) throw new Error('MCP 工具参数过大')
+    const reference = `mcp-action:${now.getTime()}:${randomUUID()}`
+    await this.#vault.set(reference, serialized)
+    return reference
+  }
+
+  resolveMcpPayload(reference: string): JsonObject | undefined {
+    if (!reference.startsWith('mcp-action:')) return undefined
+    const serialized = this.#vault.resolve(reference)
+    if (serialized === undefined) return undefined
+    const value: unknown = JSON.parse(serialized)
+    return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as JsonObject : undefined
+  }
+
+  deleteMcpPayload(reference: string): Promise<void> {
+    return reference.startsWith('mcp-action:') ? this.#vault.delete(reference) : Promise.resolve()
   }
 
   async save(input: { workspaceId: string; integrationId: string; displayName?: string; config: JsonObject; enabled: boolean; credential?: string; clearCredential?: boolean }): Promise<IntegrationConnection> {
@@ -115,6 +136,14 @@ export class IntegrationService {
     const items = [...this.#connections.values()].map((item) => ({ ...item, credentialConfigured: false }))
     try { await writeFile(temporary, JSON.stringify({ version: 1, items }), { encoding: 'utf8', flag: 'wx', mode: 0o600 }); await rename(temporary, this.#path) }
     catch (error) { await rm(temporary, { force: true }).catch(() => undefined); throw error }
+  }
+
+  async #pruneExpiredMcpPayloads(now = Date.now()): Promise<void> {
+    const expiry = now - 24 * 60 * 60_000
+    for (const key of this.#vault.keys()) {
+      const match = /^mcp-action:(\d+):/.exec(key)
+      if (match !== null && Number(match[1]) < expiry) await this.#vault.delete(key)
+    }
   }
 }
 

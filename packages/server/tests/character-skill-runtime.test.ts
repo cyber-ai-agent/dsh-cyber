@@ -193,6 +193,7 @@ describe('CharacterSkillRuntime', () => {
     expect(result.request.status).toBe('expired')
     expect(result.action.status).toBe('rejected')
     expect(adapter.executed).toBe(0)
+    expect(adapter.discarded).toBe(1)
   })
 
   it('reuses only an exact character policy and never broadens it to another target', async () => {
@@ -258,6 +259,7 @@ class ExternalAdapter implements CharacterSkillAdapter {
     adapterId: this.id, risks: ['external-side-effect'], supportsScheduling: false,
   }]
   executed = 0
+  discarded = 0
 
   propose(context: CharacterSkillMatchContext) {
     if (!context.prompt.includes('external')) return []
@@ -273,6 +275,8 @@ class ExternalAdapter implements CharacterSkillAdapter {
     this.executed += 1
     return { status: 'executed' as const, detail: '外部测试动作已执行' }
   }
+
+  async discard() { this.discarded += 1 }
 }
 
 function descriptor(adapterId: string): readonly CharacterSkillDescriptor[] {

@@ -49,7 +49,7 @@ function health(status: IntegrationHealth['status'], detail: string, now: Date, 
   return { status, detail, checkedAt: now.toISOString(), latencyMs: Math.max(0, Date.now() - startedAt) }
 }
 
-function normalizeIntegrationBaseUrl(value: string): string {
+export function normalizeIntegrationBaseUrl(value: string): string {
   let url: URL
   try { url = new URL(value) } catch { throw new Error('Integration base URL is invalid') }
   if (url.username || url.password || url.hash || url.search) throw new Error('Integration base URL must not contain credentials, query or fragment')

@@ -30,7 +30,7 @@
 - [x] World Package Instance V1
 - [x] Built-in Skill Recipe catalog with role-aware default grants and on-demand loading
 - [x] Integration Registry and Firecrawl V1
-- [ ] MCP Skill Adapter V1
+- [x] MCP Skill Adapter V1 (Streamable HTTP discovery/call behind Grant, Approval and Action Ledger)
 - [ ] Extension Host and JSON-RPC Gateway
 - [ ] Finish Creative Workshop project lifecycle
 - [ ] Add Creative Workshop smoke E2E
