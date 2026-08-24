@@ -905,6 +905,24 @@ export class SqliteStore {
         throw new PersistenceError('Model interaction employee does not belong to workspace')
       }
     }
+    if (input.workTurnId !== undefined) {
+      const turn = this.getWorkTurn(input.workTurnId)
+      if (turn === undefined || turn.workspaceId !== workspace.id ||
+        (input.worldId !== undefined && turn.worldId !== input.worldId) ||
+        (input.sessionId !== undefined && turn.sessionId !== input.sessionId)) {
+        throw new PersistenceError('Model interaction turn scope does not match workspace, world or session')
+      }
+    }
+    if (input.agentRunId !== undefined) {
+      const run = this.getAgentRun(input.agentRunId)
+      if (run === undefined || run.workspaceId !== workspace.id ||
+        (input.worldId !== undefined && run.worldId !== input.worldId) ||
+        (input.sessionId !== undefined && run.sessionId !== input.sessionId) ||
+        (input.employeeId !== undefined && run.employeeId !== input.employeeId) ||
+        (input.workTurnId !== undefined && run.turnId !== input.workTurnId)) {
+        throw new PersistenceError('Model interaction agent run scope does not match its trace context')
+      }
+    }
     if (input.source !== 'turn' && input.source !== 'discovery') {
       throw new PersistenceError('Model interaction source is invalid')
     }
@@ -943,6 +961,8 @@ export class SqliteStore {
     if (input.worldId !== undefined) log.worldId = input.worldId
     if (input.sessionId !== undefined) log.sessionId = input.sessionId
     if (input.employeeId !== undefined) log.employeeId = input.employeeId
+    if (input.workTurnId !== undefined) log.workTurnId = input.workTurnId
+    if (input.agentRunId !== undefined) log.agentRunId = input.agentRunId
     if (input.errorCode?.trim()) log.errorCode = input.errorCode.trim().slice(0, 120)
     if (input.errorMessage?.trim()) log.errorMessage = input.errorMessage.trim().slice(0, 1_000)
     if (input.httpStatus !== undefined) {
@@ -960,11 +980,12 @@ export class SqliteStore {
     this.database
       .prepare(
         `INSERT INTO model_interaction_logs (
-           id, workspace_id, world_id, session_id, employee_id, source, model_id, provider,
+           id, workspace_id, world_id, session_id, employee_id, work_turn_id, agent_run_id,
+           source, model_id, provider,
            status, error_code, error_message, http_status, prompt_message_count, prompt_char_count,
            response_char_count, tool_call_count, duration_ms, tokens_prompt,
            tokens_completion, tokens_total, created_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         log.id,
@@ -972,6 +993,8 @@ export class SqliteStore {
         log.worldId ?? null,
         log.sessionId ?? null,
         log.employeeId ?? null,
+        log.workTurnId ?? null,
+        log.agentRunId ?? null,
         log.source,
         log.modelId,
         log.provider,
@@ -1040,6 +1063,25 @@ export class SqliteStore {
       .prepare('SELECT * FROM model_interaction_logs WHERE id = ?')
       .get(interactionId)
     return row ? mapModelInteractionLog(row) : undefined
+  }
+
+  getAgentRunModelInteraction(agentRunId: string): ModelInteractionLog | undefined {
+    const row = this.database
+      .prepare(`SELECT * FROM model_interaction_logs
+                WHERE agent_run_id = ? AND source = 'turn'
+                ORDER BY created_at DESC, id DESC LIMIT 1`)
+      .get(agentRunId)
+    return row ? mapModelInteractionLog(row) : undefined
+  }
+
+  listWorldModelInteractions(worldId: string): ModelInteractionLog[] {
+    this.#requireWorld(worldId)
+    return this.database
+      .prepare(`SELECT * FROM model_interaction_logs
+                WHERE world_id = ? AND source = 'turn'
+                ORDER BY created_at DESC, id DESC`)
+      .all(worldId)
+      .map(mapModelInteractionLog)
   }
 
   clearModelInteractions(workspaceId: string): number {
@@ -2146,6 +2188,14 @@ export class SqliteStore {
     return this.database.prepare('SELECT * FROM agent_runs WHERE turn_id = ? ORDER BY ordinal').all(turnId).map(mapAgentRun)
   }
 
+  listWorldAgentRuns(worldId: string): AgentRun[] {
+    this.#requireWorld(worldId)
+    return this.database
+      .prepare('SELECT * FROM agent_runs WHERE world_id = ? ORDER BY created_at DESC, id DESC')
+      .all(worldId)
+      .map(mapAgentRun)
+  }
+
   startAgentRun(runId: string): AgentRun {
     return this.#transitionAgentRun(runId, ['queued'], 'running')
   }
@@ -2511,6 +2561,20 @@ export class SqliteStore {
         'SELECT * FROM messages WHERE session_id = ? AND sequence > ? ORDER BY sequence',
       )
       .all(sessionId, afterSequence)
+      .map(mapMessage)
+  }
+
+  listWorldTraceMessages(worldId: string): WorkMessage[] {
+    this.#requireWorld(worldId)
+    return this.database
+      .prepare(
+        `SELECT messages.* FROM messages
+         INNER JOIN work_sessions ON work_sessions.id = messages.session_id
+         WHERE work_sessions.world_id = ?
+           AND messages.kind IN ('reasoning', 'tool-call', 'tool-result')
+         ORDER BY messages.created_at, messages.id`,
+      )
+      .all(worldId)
       .map(mapMessage)
   }
 
@@ -4201,6 +4265,8 @@ function mapModelInteractionLog(row: object): ModelInteractionLog {
   if (typeof value.world_id === 'string') log.worldId = value.world_id
   if (typeof value.session_id === 'string') log.sessionId = value.session_id
   if (typeof value.employee_id === 'string') log.employeeId = value.employee_id
+  if (typeof value.work_turn_id === 'string') log.workTurnId = value.work_turn_id
+  if (typeof value.agent_run_id === 'string') log.agentRunId = value.agent_run_id
   if (typeof value.error_code === 'string') log.errorCode = value.error_code
   if (typeof value.error_message === 'string') log.errorMessage = value.error_message
   if (value.http_status !== null && value.http_status !== undefined) {

@@ -24,7 +24,7 @@ class TraceRuntime implements AgentRuntimePort {
     request.onEvent?.({ kind: 'tool.completed', source: 'trace-test', sourceSessionId, sourceSequence: 4, toolName: 'sk-1234567890123456', callId: 'call-1', failed: false, metadata: {} })
     request.onEvent?.({ kind: 'assistant.message', source: 'trace-test', sourceSessionId, sourceSequence: 5, content: '最终回答', metadata: {} })
     request.onEvent?.({ kind: 'turn.completed', source: 'trace-test', sourceSessionId, sourceSequence: 6, metadata: {} })
-    return { agentSessionId: sourceSessionId, finalResponse: '最终回答', eventCount: 6 }
+    return { agentSessionId: sourceSessionId, finalResponse: '最终回答', eventCount: 6, tokenUsage: { prompt: 120, completion: 30, total: 150 } }
   }
   async close(): Promise<void> {}
 }
@@ -63,12 +63,10 @@ describe('World Trace HTTP and live recovery', () => {
     })
     const interactionLogs = first.server.store.listModelInteractions(workspace.id, { page: 1, pageSize: 10 })
     expect(chat.response.status, JSON.stringify({ body: chat.body, logs: interactionLogs.items })).toBe(200)
-    await stream.waitFor(6)
-    const live = await stream.waitForMatch((entry) => entry.category === 'task' && entry.status === 'success')
+    const live = await stream.waitForMatch((entry) => entry.sourceKind === 'agent-run' && entry.status === 'success')
     stream.close()
     expect(live.some((entry) => entry.category === 'tool' && entry.status === 'success')).toBe(true)
-    expect(live.some((entry) => entry.category === 'task' && entry.status === 'success')).toBe(true)
-    expect(live.some((entry) => entry.category === 'task' && entry.status === 'pending')).toBe(true)
+    expect(live.some((entry) => entry.sourceKind === 'agent-run' && entry.status === 'success')).toBe(true)
     expect(JSON.stringify(live)).not.toContain('sk-1234567890123456')
 
     const historyResponse = await json(first.origin, `/api/worlds/${world.id}/trace?limit=200`)
@@ -76,8 +74,10 @@ describe('World Trace HTTP and live recovery', () => {
     const history = historyResponse.body as WorldTracePage
     expect(JSON.stringify(history)).not.toContain('完整用户提示')
     expect(JSON.stringify(history)).not.toContain('sk-1234567890123456')
-    const liveTurn = live.find((entry) => entry.summary.includes('本轮处理') && entry.status === 'success')
-    const durableTurn = history.items.find((entry) => entry.summary.includes('本轮处理'))
+    const liveTurn = live.find((entry) => entry.sourceKind === 'agent-run' && entry.status === 'success')
+    const durableTurn = history.items.find((entry) => entry.sourceKind === 'agent-run')
+    expect(durableTurn?.tokenUsage).toEqual({ prompt: 120, completion: 30, total: 150 })
+    expect(durableTurn?.actorId).toBe(employee.id)
     expect(liveTurn?.id).toBe(durableTurn?.id)
     expect(history.items.filter((entry) => entry.id === durableTurn?.id)).toHaveLength(1)
     const filtered = await json(first.origin, `/api/worlds/${world.id}/trace?category=tool&status=success&actorId=${employee.id}&limit=10`)

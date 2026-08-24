@@ -730,6 +730,18 @@ const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX approval_policies_match_idx ON approval_policies(world_id, subject_type, skill_id, action, target, risk, revoked_at);
     `,
   },
+  {
+    version: 17,
+    name: 'trace-intelligence-v1',
+    sql: `
+      ALTER TABLE model_interaction_logs ADD COLUMN work_turn_id TEXT REFERENCES work_turns(id) ON DELETE SET NULL;
+      ALTER TABLE model_interaction_logs ADD COLUMN agent_run_id TEXT REFERENCES agent_runs(id) ON DELETE SET NULL;
+      CREATE UNIQUE INDEX model_interaction_logs_agent_run_idx
+        ON model_interaction_logs(agent_run_id) WHERE agent_run_id IS NOT NULL AND source = 'turn';
+      CREATE INDEX model_interaction_logs_world_employee_created_idx
+        ON model_interaction_logs(world_id, employee_id, created_at DESC, id);
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {

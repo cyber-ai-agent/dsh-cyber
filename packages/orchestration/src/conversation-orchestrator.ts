@@ -627,6 +627,8 @@ export class ConversationOrchestrator implements AsyncDisposable {
         agent: employee,
         revision,
         conversationId: session.id,
+        workTurnId: workTurn.id,
+        agentRunId: agentRun.id,
         history,
         observedThroughSequence,
         prompt,

@@ -27,6 +27,25 @@ interface DomainPresentation {
 const EXCLUDED = new Set<DomainEventType>([
   'message.appended',
   'world.runtime.snapshot.saved',
+  'world.entered',
+  'employee.milestone.recorded',
+  'employee.journal.written',
+  'employee.relationship.updated',
+  'workspace.preferences.updated',
+  'model.profile.updated',
+  'model.assignment.updated',
+  'local.asset.saved',
+  'session.created',
+  'session.participant.joined',
+  'turn.started',
+  'turn.completed',
+  'turn.failed',
+  'tool.started',
+  'tool.completed',
+  'task.started',
+  'task.waiting',
+  'task.blocked',
+  'task.completed',
 ])
 
 export class DomainEventTraceAdapter implements WorldTraceAdapter<'domain-event'> {

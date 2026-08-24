@@ -2,7 +2,9 @@ import { createHash } from 'node:crypto'
 
 import type {
   AgentRuntimeEvent,
+  AgentRun,
   DomainEvent,
+  ModelInteractionLog,
   ScheduledRunTraceFact,
   WorkMessage,
   WorkSession,
@@ -19,9 +21,19 @@ export interface RuntimeTraceFact {
   actorId: string
   event: AgentRuntimeEvent
   createdAt: string
+  workTurnId?: string
+  agentRunId?: string
+}
+
+export interface AgentRunTraceFact {
+  worldId: string
+  run: AgentRun
+  messages: WorkMessage[]
+  interaction?: ModelInteractionLog
 }
 
 export type WorldTraceFact =
+  | { kind: 'agent-run'; value: AgentRunTraceFact }
   | { kind: 'domain-event'; value: DomainEvent }
   | { kind: 'runtime-event'; value: RuntimeTraceFact }
   | { kind: 'skill-action'; value: CharacterSkillAction }

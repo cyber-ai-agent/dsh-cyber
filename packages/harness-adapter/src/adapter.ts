@@ -12,6 +12,7 @@ import type {
   EmployeeInstance,
   EmployeeRevision,
   JsonObject,
+  ModelTokenUsage,
 } from '@dsh-cyber/contracts'
 
 import { formatRecoveredHistoryPrompt, unseenHistory } from './history-prompt.js'
@@ -117,10 +118,12 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       }
     }
     const result = await this.runEmployeeTurn(employeeRequest)
+    const tokenUsage = extractHarnessTokenUsage(result.notifications)
     return {
       agentSessionId: result.agentSessionId,
       finalResponse: result.finalResponse,
       eventCount: result.notifications.length,
+      ...(tokenUsage === undefined ? {} : { tokenUsage }),
     }
   }
 
@@ -398,6 +401,12 @@ export function normalizeHarnessNotification(
       const metadata: JsonObject = { reason: reasonKind }
       const failure = record(reason?.error)
       appendFailureDiagnostics(metadata, failure, reason, data)
+      const usage = extractTokenUsageFromValue(data)
+      if (usage !== undefined) {
+        metadata.tokensPrompt = usage.prompt
+        metadata.tokensCompletion = usage.completion
+        metadata.tokensTotal = usage.total
+      }
       return [
         make(reasonKind === 'completed' ? 'turn.completed' : 'turn.failed', {
           failed: reasonKind !== 'completed',
@@ -408,6 +417,52 @@ export function normalizeHarnessNotification(
     default:
       return []
   }
+}
+
+export function extractHarnessTokenUsage(
+  notifications: readonly HarnessNotification[],
+): ModelTokenUsage | undefined {
+  let latest: ModelTokenUsage | undefined
+  for (const notification of notifications) {
+    const usage = extractTokenUsageFromValue(notification)
+    if (usage !== undefined) latest = usage
+  }
+  return latest
+}
+
+function extractTokenUsageFromValue(root: unknown): ModelTokenUsage | undefined {
+  const seen = new Set<object>()
+  let latest: ModelTokenUsage | undefined
+  const visit = (value: unknown, depth: number): void => {
+    if (depth > 6 || value === null || typeof value !== 'object' || seen.has(value)) return
+    seen.add(value)
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, depth + 1)
+      return
+    }
+    const item = value as Record<string, unknown>
+    const prompt = tokenCount(item, ['prompt_tokens', 'input_tokens', 'promptTokens', 'inputTokens'])
+    const completion = tokenCount(item, ['completion_tokens', 'output_tokens', 'completionTokens', 'outputTokens'])
+    const declaredTotal = tokenCount(item, ['total_tokens', 'totalTokens'])
+    if (prompt !== undefined && completion !== undefined) {
+      latest = {
+        prompt,
+        completion,
+        total: declaredTotal ?? prompt + completion,
+      }
+    }
+    for (const nested of Object.values(item)) visit(nested, depth + 1)
+  }
+  visit(root, 0)
+  return latest
+}
+
+function tokenCount(recordValue: Record<string, unknown>, keys: readonly string[]): number | undefined {
+  for (const key of keys) {
+    const value = recordValue[key]
+    if (typeof value === 'number' && Number.isInteger(value) && value >= 0) return value
+  }
+  return undefined
 }
 
 function requiredConversationId(value: string | undefined): string {
@@ -610,13 +665,13 @@ export function workerEnvironment(
 
 function employeeSystemPrompt(employee: EmployeeInstance, revision: EmployeeRevision): string {
   return [
-    `You are the persistent DSH Cyber character "${employee.displayName}".`,
-    'Your latest user-defined Persona and identity contract below is authoritative for who you are now:',
+    `你是 DSH Cyber 中持续存在的角色「${employee.displayName}」。`,
+    '以下最新的用户自定义 Persona 和身份约定，是你当前身份的唯一权威来源：',
     revision.persona,
-    'The blueprint or job title used when this character was first created is provenance metadata only. Do not restore or infer an older template identity unless the current Persona explicitly keeps it.',
-    'Stay consistent with your current identity, maintain your own persistent conversation, and never impersonate another character.',
-    'When another character\'s statement is included in a collaboration prompt, respond to its substance and identify agreements or disagreements.',
-    'If web search is unavailable, explain the cause in plain Chinese and direct the user to 设置 → 模型 → 编辑当前模型 → 启用联网搜索. Never invent results or tell the user to configure a hidden "Web Models" page.',
-    'Give concise, evidence-based answers from your current identity, memory and granted capabilities.',
+    '角色最初创建时使用的模板或职位只是来源信息。除非当前 Persona 明确保留，否则不得恢复或推断旧模板身份。',
+    '始终保持当前身份一致，维护属于自己的持续会话，不得冒充其他角色。',
+    '协作提示中出现其他角色的发言时，请回应其实际内容，并清楚说明认同点或分歧点。',
+    '联网搜索不可用时，用简明中文说明原因，并引导用户前往“设置 → 模型 → 编辑当前模型 → 启用联网搜索”。不得编造搜索结果，也不得引导用户寻找不存在的隐藏页面。',
+    '基于当前身份、记忆和已授权能力，使用简洁中文给出有证据的回答。需要调用工具时，向用户提供可公开、安全、简短的中文推理摘要，说明目标、判断依据和工具调度结果；不得暴露隐藏思维链、密钥、原始工具参数或原始工具结果。',
   ].join('\n\n')
 }

@@ -14,6 +14,7 @@ import {
   HarnessCompatibilityAdapter,
   HarnessModelRouter,
   ensureHarnessProfile,
+  extractHarnessTokenUsage,
   inspectHarnessCandidate,
   normalizeHarnessNotification,
   stableAgentSessionId,
@@ -54,6 +55,18 @@ function revision(modelPolicy: EmployeeRevision['modelPolicy'] = {}): EmployeeRe
 }
 
 describe('Harness profile and adapter', () => {
+  it('extracts only real provider token usage from Harness notifications', () => {
+    const notifications = [{
+      method: 'session.event' as const,
+      params: {
+        sessionId: 'employee-1',
+        event: { type: 'turn/end', data: { usage: { prompt_tokens: 420, completion_tokens: 80, total_tokens: 500 } } },
+      },
+    }]
+    expect(extractHarnessTokenUsage(notifications)).toEqual({ prompt: 420, completion: 80, total: 500 })
+    expect(extractHarnessTokenUsage([])).toBeUndefined()
+  })
+
   it('normalizes Harness facts without persisting tool arguments', () => {
     const events = normalizeHarnessNotification({
       method: 'session.event',

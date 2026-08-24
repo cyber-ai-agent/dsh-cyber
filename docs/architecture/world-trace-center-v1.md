@@ -1,149 +1,90 @@
-# World Trace Center V1
+# 世界轨迹中心
 
-## Status
+## 当前能力
 
-World Trace Center V1 is the execution-observability boundary for a world. It separates conversational results from operational evidence without introducing a second source of truth.
+世界轨迹中心是每个世界的执行观测入口。聊天只展示用户消息、最终回复、附件和明确的产品通知；轨迹展示角色如何形成可公开的判断摘要、调度了哪些工具、执行是否成功、耗时多少，以及模型实际返回的 Token 用量。
 
-The product rule is:
+轨迹不保存第二套业务事实。页面内容由 SQLite 中的 `AgentRun`、`WorkMessage`、`ModelInteractionLog`、`DomainEvent` 和 `CharacterSkillAction` 投影得到，刷新和重启后都能从权威数据恢复。
 
-> Chat surfaces final conversational results. Execution details belong to Trace.
+## 角色运行轨迹
 
-## Information architecture
+每次 `AgentRun` 对应一条主轨迹。一次运行内的开始、判断摘要、工具调用、工具结果和结束状态会合并到同一个稳定 ID，不再为每个生命周期事件生成独立卡片。
 
-The workbench has three distinct concerns:
+主轨迹可以包含：
 
-```text
-Left                Center                Right Dock
-Conversations       Chat                  World
-                                           Trace
-                                           Dossier
-```
+- 角色、会话和工作回合归属；
+- 可公开的中文判断摘要；
+- 结构化工具步骤及成功、失败、执行中状态；
+- 整轮耗时、模型 ID 和模型服务；
+- Harness 实际返回的输入、输出和合计 Token；
+- 失败时可理解的中文说明。
 
-Chat contains user messages, final assistant messages, attachments and explicit product notices. It does not render reasoning summaries, token deltas, tool calls, tool results or live turn diagnostics.
+普通用户消息、最终回复、角色日记、成长里程碑、关系变化、设置更新和重复的任务生命周期不会作为独立轨迹出现。它们分别属于聊天、角色档案或系统设置。
 
-Trace contains meaningful execution facts. It does not contain render ticks, heartbeat messages, snapshot refreshes, polling records or coordinate-by-coordinate movement.
-
-## Contract
-
-`WorldTraceEntry` is provider-, renderer- and UI-neutral. Its stable fields are:
-
-```text
-id
-worldId
-category: agent | tool | skill | task | collaboration | world | schedule | system
-status: pending | running | waiting | success | failed | cancelled | info
-summary / optional safe detail
-optional actor/session/task/skill/schedule/run references
-sourceKind / sourceId / optional sourceSequence
-createdAt / updatedAt
-```
-
-The `schedule` category and `scheduleId` / `runId` references are reserved now so a future scheduler can register an adapter without changing the core trace contract.
-
-## Read-model flow
+## 数据流
 
 ```mermaid
 flowchart LR
     H[Harness Runtime] --> O[ConversationOrchestrator]
-    O -->|persist first| M[(WorkMessage)]
-    O -->|persist first| D[(DomainEvent)]
-    S[CharacterSkillRuntime] --> A[(CharacterSkillAction)]
-    M --> C[ConversationTraceAdapter]
-    D --> E[DomainEventTraceAdapter]
-    A --> K[SkillActionTraceAdapter]
-    O --> R[RuntimeEventTraceAdapter]
-    C --> G[WorldTraceAdapterRegistry]
-    E --> G
-    K --> G
-    R --> G
+    O --> R[(AgentRun)]
+    O --> M[(WorkMessage)]
+    H --> U[真实 Token 用量]
+    U --> L[(ModelInteractionLog)]
+    R --> A[AgentRunTraceAdapter]
+    M --> A
+    L --> A
+    D[(DomainEvent)] --> B[DomainEventTraceAdapter]
+    S[(CharacterSkillAction)] --> C[SkillActionTraceAdapter]
+    A --> G[WorldTraceAdapterRegistry]
+    B --> G
+    C --> G
     G --> Z[TraceSanitizer]
-    Z --> API[History API]
-    Z --> LIVE[Existing world live transport]
-    API --> UI[useWorldTrace]
+    Z --> API[历史查询]
+    Z --> LIVE[世界 Live SSE]
+    API --> UI[轨迹面板]
     LIVE --> UI
 ```
 
-The Orchestrator persists the corresponding WorkMessage or DomainEvent before notifying subscribers. Therefore a live trace notification never becomes the canonical fact. Refresh and restart recovery always rebuild from durable sources.
+实时运行和持久化历史使用相同的 `AgentRun` 稳定 ID。实时事件先聚合成运行卡片，持久化完成后由权威投影接管，不会产生重复条目。
 
-## Adapter registry
-
-Core Trace knows how to register adapters, normalize entries, sanitize, merge by stable ID, sort, filter and paginate. It does not contain provider-specific branches.
-
-V1 registers:
-
-- `DomainEventTraceAdapter` for semantic domain lifecycle and world events;
-- `RuntimeEventTraceAdapter` for current Harness runtime events;
-- `SkillActionTraceAdapter` for durable Skill actions;
-- `ConversationTraceAdapter` for message-backed user requests, provider reasoning summaries and final responses;
-- `ScheduleTraceAdapter` as a provider-neutral future scheduler boundary.
-
-Future GitHub, browser, Feishu or scheduler sources must enter through a new adapter. They must not add `if (provider === ...)` branches to `WorldTraceService`.
-
-## Stable identity and lifecycle updates
-
-Started/completed pairs use one logical trace ID:
-
-- every orchestrated turn receives a random `traceTurnId`; turn start/completion/failure use that ID;
-- a tool action is keyed by `traceTurnId` and call ID;
-- a task is keyed by the same `traceTurnId` as its runtime turn;
-- every submitted collaboration receives a `meetingRunId`; meeting start/finish use that ID;
-- a Skill action is keyed by its durable action ID.
-
-The later fact replaces the visual status while preserving the original `createdAt`. Reusing a Harness agent session across multiple user turns does not collapse their history because `traceTurnId` is unique per orchestration. Live and historical adapters derive the same IDs from persisted runtime metadata, so reconnect recovery updates rather than duplicates entries. At the end of each conversation request, new durable conversation, domain and Skill projections are flushed to the existing world stream so `task.completed`, `task.blocked` and `meeting.finished` never wait for a manual refresh.
-
-## History API and recovery
+## 查询
 
 ```http
 GET /api/worlds/:worldId/trace
-  ?after=<opaque-trace-cursor>
+  ?after=<opaque-cursor>
   &limit=1..200
   &category=<category>
   &status=<status>
-  &actorId=<actor-id>
+  &actorId=<employee-id>
+  &date=YYYY-MM-DD
+  &search=<keyword>
 ```
 
-Response:
+结果按最新时间倒序返回。日期按运行应用的本地日历解释，关键词可匹配轨迹摘要、判断摘要、角色名、工具名称、模型和服务。游标用于继续读取更早的轨迹。
 
-```json
-{
-  "items": [],
-  "nextCursor": "optional opaque cursor"
-}
-```
+前端默认读取最新 50 条，支持加载更早记录。筛选在服务端执行，实时条目也使用相同条件。面板按角色汇总当前结果中的实际 Token，用量缺失时明确显示模型尚未返回，而不是进行估算。
 
-The trace cursor is independent from World Runtime snapshot sequence and SSE `Last-Event-ID`. The UI re-reads history whenever the existing `/api/worlds/:worldId/live` transport reconnects, then merges by stable ID. No third SSE endpoint is introduced.
+## 安全边界
 
-## Security boundary
+所有历史和实时条目都经过 `TraceSanitizer`。轨迹禁止展示：
 
-All entries pass through `TraceSanitizer`, including entries emitted live. Adapters expose semantic summaries instead of raw payloads.
+- 隐藏思维链；
+- 完整 Prompt 和用户未要求公开的内部指令；
+- 原始工具参数、原始工具结果和文件内容；
+- API key、Authorization、Cookie、密码、Token 和其他凭据；
+- 未经验证的模型自然语言声明。
 
-Never expose:
+判断摘要必须是提供方明确输出的可公开摘要。增量推理片段不会进入历史和界面。工具只展示可理解的调度名称与结果状态。
 
-- API keys, authorization headers, cookies, passwords, tokens or credentials;
-- full user/runtime prompts;
-- raw tool inputs or raw tool results;
-- file contents or arbitrary provider metadata;
-- hidden chain-of-thought.
+## 验证范围
 
-`assistant.reasoning` is projected only when the provider emitted an actual summary. Token-level `reasoning.delta` and `text.delta` events are excluded from Trace history and UI.
+自动化验证覆盖：
 
-## UI behavior
-
-Trace UI lives under `components/world-trace/` and is not embedded in `App.tsx` or `ArtifactDock` logic. The panel provides category, status and actor filters, stable lifecycle updates, safe details and a refresh action.
-
-The timeline auto-scrolls only while the user is already near the bottom. Otherwise it preserves reading position and shows a new-entry indicator. Large timelines use `content-visibility` to avoid rendering every off-screen card eagerly.
-
-## Verification
-
-V1 tests cover:
-
-- registry and future scheduler fixture;
-- normalizing and lifecycle deduplication;
-- centralized credential sanitization;
-- stable live/history identity;
-- stable updates within one turn and distinct identities across repeated turns;
-- category/status/actor filtering and cursor pagination;
-- live reconnect and restart recovery;
-- Chat final-result projection;
-- exact `世界 | 轨迹 | 档案` Dock structure;
-- live visual-entry update instead of duplicate append.
+- 一个角色运行只生成一个稳定轨迹 ID；
+- 多次运行不会因复用 Harness Session 而合并；
+- 判断摘要与工具步骤从持久化事实恢复；
+- 实时、刷新和重启使用同一轨迹身份；
+- 角色、日期、关键词、状态、内容类型和游标分页；
+- 实际 Token 与 `AgentRun`、角色和世界正确关联；
+- Prompt、凭据、原始工具输入和结果不会泄露；
+- 聊天界面不展示推理与工具明细。

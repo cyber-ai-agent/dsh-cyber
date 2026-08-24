@@ -1,4 +1,4 @@
-export const CYBER_SCHEMA_VERSION = 16 as const
+export const CYBER_SCHEMA_VERSION = 17 as const
 
 export type IsoTimestamp = string
 export type JsonPrimitive = boolean | number | string | null
@@ -504,6 +504,12 @@ export type ModelApiKind = 'openai-completions' | 'openai-responses' | 'anthropi
 export type ModelInteractionLogStatus = 'success' | 'failed'
 export type ModelInteractionLogSource = 'turn' | 'discovery'
 
+export interface ModelTokenUsage {
+  prompt: number
+  completion: number
+  total: number
+}
+
 /**
  * 一条模型交互日志。隐私红线：绝不保存 API 密钥、prompt 明文或响应明文，
  * 只保存请求摘要统计（消息数 / 字符数）与可读的错误信息（不含密钥）。
@@ -514,6 +520,8 @@ export interface ModelInteractionLog {
   worldId?: string
   sessionId?: string
   employeeId?: string
+  workTurnId?: string
+  agentRunId?: string
   /** 采集来源：turn=对话回合（服务端发起的整轮交互），discovery=/models 模型发现 */
   source: ModelInteractionLogSource
   modelId: string
@@ -543,6 +551,8 @@ export interface RecordModelInteractionInput {
   worldId?: string
   sessionId?: string
   employeeId?: string
+  workTurnId?: string
+  agentRunId?: string
   source: ModelInteractionLogSource
   modelId: string
   provider: string
@@ -842,6 +852,8 @@ export interface AgentTurnRequest {
    * runtime session and is not a conversation key.
    */
   conversationId: string
+  workTurnId?: string
+  agentRunId?: string
   /**
    * Prior user-visible messages of `conversationId`, oldest first, excluding
    * the prompt of the current turn.
@@ -869,6 +881,7 @@ export interface AgentTurnResult {
   agentSessionId: string
   finalResponse: string
   eventCount: number
+  tokenUsage?: ModelTokenUsage
 }
 
 export interface AgentRuntimePort {

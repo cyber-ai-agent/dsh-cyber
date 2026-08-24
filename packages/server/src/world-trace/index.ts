@@ -1,3 +1,4 @@
+export * from './agent-run-trace-adapter.js'
 export * from './conversation-trace-adapter.js'
 export * from './domain-event-trace-adapter.js'
 export * from './runtime-event-trace-adapter.js'
