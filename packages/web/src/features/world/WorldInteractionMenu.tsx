@@ -22,7 +22,7 @@ export function EmployeeInteractionMenu({ employee, position, onClose, onTalk, o
     { id: 'task', label: '安排任务', description: '提交消息后才会开始执行', icon: <ClipboardText size={18} />, onSelect: onAssignTask },
     ...(onPeerCollaboration === undefined ? [] : [{ id: 'peer', label: '让他去沟通', description: '选择其他角色发起真实讨论', icon: <UsersThree size={18} />, onSelect: onPeerCollaboration }]),
     { id: 'meeting', label: '发起多人协作', description: '创建包含你的群聊', icon: <UsersThree size={18} />, onSelect: onMeeting },
-    ...(onDossier === undefined ? [] : [{ id: 'dossier', label: '查看角色档案', description: '身份、能力与成长记录', icon: <AddressBook size={18} />, onSelect: onDossier }]),
+    ...(onDossier === undefined ? [] : [{ id: 'dossier', label: '查看角色', description: '身份、能力与成长记录', icon: <AddressBook size={18} />, onSelect: onDossier }]),
   ]} />
 }
 

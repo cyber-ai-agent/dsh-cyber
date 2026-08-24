@@ -179,7 +179,7 @@ export function WorldRuntimeDock({ demoMode, world, employees, selectedEmployeeI
 
           {ambientSettingsOpen ? <AmbientLifeDialog worldId={world.id} worldName={world.name} onClose={() => setAmbientSettingsOpen(false)} /> : null}
 
-          {employees.length === 0 ? <div className="world-runtime-dock__empty"><strong>这个世界还没有角色</strong><span>请到右侧「档案」新增角色。世界视图只负责展示和互动，不再承担角色管理。</span></div> : null}
+          {employees.length === 0 ? <div className="world-runtime-dock__empty"><strong>这个世界还没有角色</strong><span>请到右侧「角色」新增角色。世界视图只负责展示和互动，不再承担角色管理。</span></div> : null}
         </div>
       </section>
       {peerInitiator === undefined ? null : (

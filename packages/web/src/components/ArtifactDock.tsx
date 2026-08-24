@@ -35,7 +35,7 @@ interface ArtifactDockProps {
 
 const tabs: Array<{ id: DockTab; label: string; icon: typeof GlobeHemisphereWest }> = [
   { id: 'world', label: '世界', icon: GlobeHemisphereWest },
-  { id: 'dossier', label: '档案', icon: IdentificationBadge },
+  { id: 'dossier', label: '角色', icon: IdentificationBadge },
   { id: 'trace', label: '轨迹', icon: Path },
   { id: 'schedule', label: '日程', icon: CalendarBlank },
 ]
@@ -62,14 +62,14 @@ export function ArtifactDock({
   const visibleTab = activeTab
 
   const selectTab = (tab: DockTab) => {
-    // “档案”是角色管理的顶层入口；点击顶层 Tab 应回到目录。
-    // 具体角色详情仍通过世界角色、消息头像或档案卡片进入。
+    // “角色”是角色管理的顶层入口；点击顶层 Tab 应回到目录。
+    // 具体角色详情仍通过世界角色、消息头像或角色卡片进入。
     if (tab === 'dossier') onShowAllDossiers()
     onTabChange(tab)
   }
 
   return (
-    <section className="artifact-dock" aria-label="世界与角色档案侧边栏">
+    <section className="artifact-dock" aria-label="世界与角色侧边栏">
       <header className="dock-tabs">
         <nav aria-label="侧边栏">
           {tabs.map((tab) => {

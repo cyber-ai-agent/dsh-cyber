@@ -272,6 +272,33 @@ export interface AppendMessageInput {
   correlationId?: string
 }
 
+export interface ListMessagesPageInput {
+  /** Number of messages to return. The store clamps this to a safe range. */
+  limit?: number
+  /** Return messages before this sequence, newest first internally then restored to chat order. */
+  beforeSequence?: number
+  /** Compatibility cursor for consumers that append messages after a known sequence. */
+  afterSequence?: number
+  /** Search text matched against message content. */
+  search?: string
+  /** ISO calendar date (YYYY-MM-DD) matched against createdAt. */
+  date?: string
+  /** 1-based page number used by the history view. */
+  page?: number
+  /** Keep only user/assistant/system messages intended for the chat surface. */
+  chatOnly?: boolean
+}
+
+export interface MessagePage {
+  items: WorkMessage[]
+  total: number
+  page: number
+  pageSize: number
+  hasMore: boolean
+  nextBefore?: number
+  nextAfter?: number
+}
+
 export interface AppendDomainEventInput {
   workspaceId: string
   worldId?: string
@@ -2190,6 +2217,89 @@ export class SqliteStore {
       .map(mapMessage)
   }
 
+  listMessagesPage(sessionId: string, input: ListMessagesPageInput = {}): MessagePage {
+    this.#requireSession(sessionId)
+    const pageSize = clampMessagePageSize(input.limit)
+    const search = input.search?.trim()
+    const date = input.date?.trim()
+    const chatOnly = input.chatOnly === true
+    const filters: string[] = ['session_id = ?']
+    const parameters: Array<string | number> = [sessionId]
+
+    if (chatOnly) filters.push("kind IN ('user', 'assistant', 'system')")
+    if (search !== undefined && search.length > 0) {
+      filters.push("content LIKE ? ESCAPE '\\' COLLATE NOCASE")
+      parameters.push(`%${escapeMessageSearch(search)}%`)
+    }
+    if (date !== undefined && date.length > 0) {
+      filters.push('substr(created_at, 1, 10) = ?')
+      parameters.push(date)
+    }
+    const where = filters.join(' AND ')
+    const countRow = this.database.prepare(`SELECT COUNT(*) AS count FROM messages WHERE ${where}`).get(...parameters) as { count: number }
+    const total = Number(countRow.count)
+
+    // Search/date history uses numbered pages. The sequence cursor path is used by
+    // the chat surface so loading an older page never changes while new messages arrive.
+    if ((search !== undefined && search.length > 0) || (date !== undefined && date.length > 0) || input.page !== undefined) {
+      const page = Math.max(1, Math.floor(input.page ?? 1))
+      const offset = (page - 1) * pageSize
+      const rows = this.database
+        .prepare(`SELECT * FROM messages WHERE ${where} ORDER BY sequence LIMIT ? OFFSET ?`)
+        .all(...parameters, pageSize, offset)
+        .map(mapMessage)
+      return {
+        items: rows,
+        total,
+        page,
+        pageSize,
+        hasMore: offset + rows.length < total,
+      }
+    }
+
+    if (input.afterSequence !== undefined) {
+      const after = Math.max(0, Math.floor(input.afterSequence))
+      const afterWhere = `${where} AND sequence > ?`
+      const rows = this.database
+        .prepare(`SELECT * FROM messages WHERE ${afterWhere} ORDER BY sequence LIMIT ?`)
+        .all(...parameters, after, pageSize)
+        .map(mapMessage)
+      const remaining = rows.length === 0
+        ? 0
+        : Number((this.database.prepare(`SELECT COUNT(*) AS count FROM messages WHERE ${afterWhere} AND sequence > ?`).get(...parameters, after, rows[rows.length - 1]!.sequence) as { count: number }).count)
+      const hasMore = remaining > 0
+      return {
+        items: rows,
+        total,
+        page: 1,
+        pageSize,
+        hasMore,
+        ...(hasMore ? { nextAfter: rows[rows.length - 1]!.sequence } : {}),
+      }
+    }
+
+    const before = input.beforeSequence === undefined ? undefined : Math.max(1, Math.floor(input.beforeSequence))
+    const cursorWhere = before === undefined ? where : `${where} AND sequence < ?`
+    const cursorParameters = before === undefined ? parameters : [...parameters, before]
+    const rows = this.database
+      .prepare(`SELECT * FROM messages WHERE ${cursorWhere} ORDER BY sequence DESC LIMIT ?`)
+      .all(...cursorParameters, pageSize)
+      .map(mapMessage)
+      .reverse()
+    const remaining = rows.length === 0
+      ? 0
+      : Number((this.database.prepare(`SELECT COUNT(*) AS count FROM messages WHERE ${where} AND sequence < ?`).get(...parameters, rows[0]!.sequence) as { count: number }).count)
+    const hasMore = remaining > 0
+    return {
+      items: rows,
+      total,
+      page: 1,
+      pageSize,
+      hasMore,
+      ...(hasMore ? { nextBefore: rows[0]!.sequence } : {}),
+    }
+  }
+
   latestMessageBySender(sessionId: string, senderKind: WorkMessage['senderKind']): WorkMessage | undefined {
     const row = this.database
       .prepare(
@@ -3863,6 +3973,15 @@ function mapParticipant(row: object): WorkSessionParticipant {
     kind: value.kind as ParticipantKind,
     joinedAt: String(value.joined_at),
   }
+}
+
+function clampMessagePageSize(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value)) return 20
+  return Math.min(100, Math.max(1, Math.floor(value)))
+}
+
+function escapeMessageSearch(value: string): string {
+  return value.replace(/[\\%_]/g, (character) => `\\${character}`)
 }
 
 function mapMessage(row: object): WorkMessage {

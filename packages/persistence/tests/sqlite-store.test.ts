@@ -233,6 +233,46 @@ describe('SqliteStore', () => {
     store.close()
   })
 
+  it('pages chat messages and searches history without materializing the full transcript', async () => {
+    const { store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: '消息分页工作区' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '消息分页世界', templateId: 'cyber-company' })
+    const session = store.createSession({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      kind: 'direct',
+      title: '分页会话',
+      participants: [{ participantId: 'owner', kind: 'owner' }],
+    })
+    for (let index = 1; index <= 45; index += 1) {
+      store.appendMessage({
+        sessionId: session.id,
+        senderId: 'owner',
+        senderKind: 'owner',
+        kind: 'user',
+        content: `历史消息 ${index}`,
+      })
+    }
+
+    const latest = store.listMessagesPage(session.id, { limit: 20, chatOnly: true })
+    expect(latest.items.map((item) => item.sequence)).toEqual(Array.from({ length: 20 }, (_, index) => index + 26))
+    expect(latest.total).toBe(45)
+    expect(latest.hasMore).toBe(true)
+    expect(latest.nextBefore).toBe(26)
+
+    const older = store.listMessagesPage(session.id, { limit: 20, beforeSequence: latest.nextBefore, chatOnly: true })
+    expect(older.items.map((item) => item.sequence)).toEqual(Array.from({ length: 20 }, (_, index) => index + 6))
+    expect(older.hasMore).toBe(true)
+
+    const search = store.listMessagesPage(session.id, { limit: 20, search: '消息 4', page: 1, chatOnly: true })
+    expect(search.items.map((item) => item.content)).toEqual(expect.arrayContaining(['历史消息 4', '历史消息 40', '历史消息 41', '历史消息 45']))
+    expect(search.total).toBe(7)
+
+    const day = latest.items[0]!.createdAt.slice(0, 10)
+    const dateFiltered = store.listMessagesPage(session.id, { limit: 20, date: day, page: 1, chatOnly: true })
+    expect(dateFiltered.total).toBe(45)
+  })
+
   it('writes every domain event and cloud-sync outbox entry atomically', async () => {
     const { store } = await testDatabase()
     const workspace = store.createWorkspace({ name: '本地工作区' })

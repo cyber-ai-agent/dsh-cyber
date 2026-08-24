@@ -70,7 +70,7 @@ export function WorldView({ world, employees, sceneImage, onSelectEmployee }: Wo
       </div>
 
       <footer className="world-view__footer">
-        <span>点击角色进入对应会话 · 角色新增与管理统一在「档案」中完成</span>
+        <span>点击角色进入对应会话 · 角色新增与管理统一在「角色」中完成</span>
         <button type="button" onClick={() => setExpanded(true)}><ArrowsOutSimple size={14} />沉浸模式</button>
       </footer>
 
@@ -138,7 +138,7 @@ function WorldScene({ kind, employees, sceneImage, lightsOn, zoom, onSelectEmplo
         {employees.length === 0 ? (
           <div className="world-empty-cast">
             <strong>{isTavern ? '今夜尚无人登场' : '这个世界还没有角色'}</strong>
-            <span>{isTavern ? '前往右侧「档案」邀请角色进入场景。' : '前往右侧「档案」新增角色后，真实任务状态会在这里发生。'}</span>
+            <span>{isTavern ? '前往右侧「角色」邀请角色进入场景。' : '前往右侧「角色」新增角色后，真实任务状态会在这里发生。'}</span>
           </div>
         ) : employees.map((employee, index) => {
           const position = positions[index] ?? [50 + ((index % 3) - 1) * 15, 76 + (index % 2) * 6]

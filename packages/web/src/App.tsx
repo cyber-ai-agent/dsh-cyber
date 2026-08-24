@@ -56,10 +56,11 @@ import {
   type StreamingChatReply,
 } from './chat-realtime.js'
 import { ArtifactDock } from './components/ArtifactDock.js'
-import { ChatWorkbench } from './components/ChatWorkbench.js'
+import { ChatWorkbench, isChatMessage } from './components/ChatWorkbench.js'
 import { CreativeWorkshopLauncher } from './components/CreativeWorkshopLauncher.js'
 import { EmployeeManagementDialog } from './components/EmployeeManagementDialog.js'
 import { GroupConversationDialog } from './components/GroupConversationDialog.js'
+import { MessageHistoryDialog, MESSAGE_PAGE_SIZE } from './components/MessageHistoryDialog.js'
 import { NavigationPane } from './components/NavigationPane.js'
 import { PackageMarketDialog } from './components/PackageMarketDialog.js'
 import { RecruitmentDialog } from './components/RecruitmentDialog.js'
@@ -109,7 +110,9 @@ export default function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(demoMode ? demoData.sessions[0]?.id : undefined)
   const [sessionParticipants, setSessionParticipants] = useState<SessionParticipantMap>(() => demoMode ? inferDemoSessionParticipants(demoData.sessions, demoData.messages, demoData.employees) : {})
   const [conversationIntent, setConversationIntent] = useState<ConversationIntent>()
-  const [messages, setMessages] = useState<WorkMessage[]>(demoMode ? demoData.messages : [])
+  const [messages, setMessages] = useState<WorkMessage[]>(demoMode ? demoData.messages.slice(-MESSAGE_PAGE_SIZE) : [])
+  const [messagePage, setMessagePage] = useState({ hasMore: demoMode && demoData.messages.length > MESSAGE_PAGE_SIZE, loading: false })
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [preferences, setPreferences] = useState<WorkspacePreferences | undefined>(demoMode ? demoData.preferences : undefined)
   const [models, setModels] = useState<ModelProfile[]>(demoMode ? demoData.modelProfiles : [])
   const [modelAssignments, setModelAssignments] = useState<ModelAssignment[]>([])
@@ -199,9 +202,12 @@ export default function App() {
     setError(undefined)
     setActiveWorld(world)
     setActiveSessionId(undefined)
+    setSessions([])
     setSessionParticipants({})
     setConversationIntent(undefined)
+    setHistoryOpen(false)
     setMessages([])
+    setMessagePage({ hasMore: false, loading: false })
     setDraft('')
     setSelectedEmployeeId(undefined)
     setDockTab('world')
@@ -216,7 +222,8 @@ export default function App() {
       const nextMessages = isCompany ? demoData.messages : demoTavernMessages
       setEmployees(nextEmployees)
       setSessions(nextSessions)
-      setMessages(nextMessages)
+      setMessages(nextMessages.slice(-MESSAGE_PAGE_SIZE))
+      setMessagePage({ hasMore: nextMessages.length > MESSAGE_PAGE_SIZE, loading: false })
       setSessionParticipants(inferDemoSessionParticipants(nextSessions, nextMessages, nextEmployees))
       setDossiers(isCompany ? demoData.dossiers : demoTavernDossiers)
       setActiveSessionId(nextSessions[0]?.id)
@@ -258,6 +265,10 @@ export default function App() {
     setDossiers(nextDossiers)
     setEmployees(snapshot.employees.map((employee, index) => toCyberEmployee(employee, index, nextDossiers[employee.id])))
     setSessions(snapshot.openSessions)
+    // A world with existing sessions opens the most recently active one by default.
+    // This keeps the composer and history action attached to a real conversation
+    // instead of presenting an empty, non-sendable center pane after refresh.
+    setActiveSessionId(snapshot.openSessions[0]?.id)
     setSessionParticipants(Object.fromEntries(participantResults))
     setTaskSchedules(scheduleResult.items)
     rememberActiveWorld(world.workspaceId, world.id)
@@ -353,10 +364,11 @@ export default function App() {
 
   const refreshConversationTranscript = useCallback(async (sessionId: string, queueKey: string, worldId: string, reportError = false) => {
     try {
-      const result = await api<{ items: WorkMessage[] }>(`/api/sessions/${sessionId}/messages`)
+      const result = await api<{ items: WorkMessage[]; hasMore?: boolean }>(`/api/sessions/${sessionId}/messages?view=chat&limit=${MESSAGE_PAGE_SIZE}`)
       setOutboxMessages((current) => reconcileOutboxMessages(current, queueKey, result.items))
       if (activeWorldRef.current?.id === worldId && activeConversationKeyRef.current === queueKey) {
         setMessages(result.items)
+        setMessagePage({ hasMore: result.hasMore === true, loading: false })
         const participantIds = participantIdsFromMessages(result.items)
         if (participantIds.length > 0) {
           setSessionParticipants((current) => ({ ...current, [sessionId]: participantIds }))
@@ -375,10 +387,11 @@ export default function App() {
     if (demoMode || activeSessionId === undefined) return
     let cancelled = false
     const queueKey = queueKeyBySessionRef.current.get(activeSessionId) ?? activeConversationKeyRef.current
-    void api<{ items: WorkMessage[] }>(`/api/sessions/${activeSessionId}/messages`)
+    void api<{ items: WorkMessage[]; hasMore?: boolean }>(`/api/sessions/${activeSessionId}/messages?view=chat&limit=${MESSAGE_PAGE_SIZE}`)
       .then((result) => {
         if (cancelled) return
         setMessages(result.items)
+        setMessagePage({ hasMore: result.hasMore === true, loading: false })
         if (queueKey !== undefined) {
           sessionByQueueKeyRef.current.set(queueKey, activeSessionId)
           queueKeyBySessionRef.current.set(activeSessionId, queueKey)
@@ -506,7 +519,7 @@ export default function App() {
       const dossier = await api<EmployeeDossier>(`/api/employees/${employeeId}/dossier`)
       setDossiers((current) => ({ ...current, [employeeId]: dossier }))
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '角色档案加载失败')
+      setError(cause instanceof Error ? cause.message : '角色信息加载失败')
     }
   }, [demoMode])
 
@@ -521,7 +534,10 @@ export default function App() {
       employeeIds: [employee.id],
       title: `与 ${employee.displayName} 对话`,
     } : undefined)
-    if (existing === undefined) setMessages([])
+    if (existing === undefined) {
+      setMessages([])
+      setMessagePage({ hasMore: false, loading: false })
+    }
     setDraft('')
     setSelectedEmployeeId(employee.id)
   }, [sessionParticipants, sessions])
@@ -532,6 +548,7 @@ export default function App() {
     setGroupDialogOpen(false)
     setActiveSessionId(undefined)
     setMessages([])
+    setMessagePage({ hasMore: false, loading: false })
     setDraft('')
     setConversationIntent({
       kind: 'group',
@@ -911,15 +928,43 @@ export default function App() {
   const selectSession = useCallback((sessionId: string) => {
     setConversationIntent(undefined)
     setActiveSessionId(sessionId)
+    setMessagePage({ hasMore: false, loading: false })
     if (!demoMode) setMessages([])
     setDraft('')
     setSelectedEmployeeId(sessionParticipants[sessionId]?.[0])
     if (demoMode) {
-      setMessages(sessionId === demoData.sessions[0]?.id
-        ? demoData.messages
-        : sessionId === demoTavernSessions[0]?.id ? demoTavernMessages : [])
+      const next = demoMessagesForSession(sessionId)
+      setMessages(next.slice(-MESSAGE_PAGE_SIZE))
+      setMessagePage({ hasMore: next.length > MESSAGE_PAGE_SIZE, loading: false })
     }
   }, [sessionParticipants])
+
+  const loadOlderMessages = useCallback(async () => {
+    if (activeSessionId === undefined || messagePage.loading) return
+    const loaded = messages.filter(isChatMessage)
+    const firstSequence = loaded.reduce<number | undefined>((minimum, message) => minimum === undefined ? message.sequence : Math.min(minimum, message.sequence), undefined)
+    if (firstSequence === undefined) return
+    setMessagePage((current) => ({ ...current, loading: true }))
+    try {
+      if (demoMode) {
+        const all = demoMessagesForSession(activeSessionId).filter(isChatMessage)
+        const older = all.filter((message) => message.sequence < firstSequence).slice(-MESSAGE_PAGE_SIZE)
+        setMessages((current) => mergeMessages(older, current))
+        setMessagePage({ hasMore: all.some((message) => message.sequence < (older[0]?.sequence ?? firstSequence)), loading: false })
+        return
+      }
+      const result = await api<{ items: WorkMessage[]; hasMore?: boolean }>(`/api/sessions/${encodeURIComponent(activeSessionId)}/messages?view=chat&limit=${MESSAGE_PAGE_SIZE}&before=${firstSequence}`)
+      setMessages((current) => mergeMessages(result.items, current))
+      setMessagePage({ hasMore: result.hasMore === true, loading: false })
+    } catch (cause) {
+      setMessagePage((current) => ({ ...current, loading: false }))
+      setError(cause instanceof Error ? cause.message : '更早消息加载失败')
+    }
+  }, [activeSessionId, messagePage.loading, messages])
+
+  const openMessageHistory = useCallback(() => {
+    if (activeSession !== undefined) setHistoryOpen(true)
+  }, [activeSession])
 
   const send = useCallback((prompt: string, attachments: ChatAttachment[]): Promise<void> => {
     const world = activeWorld
@@ -1466,6 +1511,10 @@ export default function App() {
             onOpenArtifact={() => { setAppMode('world'); setDockCollapsed(false); setDockTab('world') }}
             onRecruit={() => { setSelectedEmployeeId(undefined); setDockCollapsed(false); setDockTab('dossier') }}
             onOpenPluginMarket={() => void openPackageMarket('plugin')}
+            onOpenHistory={openMessageHistory}
+            hasOlderMessages={messagePage.hasMore}
+            loadingOlderMessages={messagePage.loading}
+            onLoadOlderMessages={() => void loadOlderMessages()}
           />
         )}
         right={(
@@ -1500,6 +1549,7 @@ export default function App() {
             setConversationIntent(undefined)
             setSelectedEmployeeId(employeeIds[0])
             setMessages([])
+            setMessagePage({ hasMore: false, loading: false })
             setAppMode('workbench')
             setDockCollapsed(false)
             setDockTab('world')
@@ -1528,6 +1578,15 @@ export default function App() {
           employees={employees}
           onClose={() => setGroupDialogOpen(false)}
           onCreate={createGroupIntent}
+        />
+      ) : null}
+      {historyOpen && activeSession !== undefined ? (
+        <MessageHistoryDialog
+          demoMode={demoMode}
+          session={activeSession}
+          employees={employees}
+          {...(demoMode ? { demoMessages: demoMessagesForSession(activeSession.id) } : {})}
+          onClose={() => setHistoryOpen(false)}
         />
       ) : null}
       {settingsOpen ? (
@@ -1631,6 +1690,17 @@ function conversationQueueKey(
 function targetConversationQueueKey(employeeIds: string[], title: string): string {
   if (employeeIds.length === 1) return `direct:${employeeIds[0]}`
   return `intent:group:${[...employeeIds].sort().join(',')}:${title.trim()}`
+}
+
+function demoMessagesForSession(sessionId: string): WorkMessage[] {
+  const source = [...demoData.messages, ...demoTavernMessages]
+  return source.filter((message) => message.sessionId === sessionId)
+}
+
+function mergeMessages(older: WorkMessage[], current: WorkMessage[]): WorkMessage[] {
+  const byId = new Map<string, WorkMessage>()
+  for (const message of [...older, ...current]) byId.set(message.id, message)
+  return [...byId.values()].sort((left, right) => left.sequence - right.sequence)
 }
 
 function metadataText(value: JsonObject[string] | undefined): string | undefined {

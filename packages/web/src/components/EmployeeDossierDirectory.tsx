@@ -19,7 +19,7 @@ interface EmployeeDossierDirectoryProps {
 export function EmployeeDossierDirectory({ employees, dossiers, world, onOpen, onDirect, onManage, onInvite }: EmployeeDossierDirectoryProps) {
   const experience = worldExperience(world)
   const roleplay = experience.kind === 'tavern'
-  const directoryTitle = experience.kind === 'company' ? '全员数字档案' : `全${experience.peopleLabel}数字档案`
+  const directoryTitle = experience.peopleLabel === '角色' ? '角色目录' : `${experience.peopleLabel}角色目录`
   const verifiedSkills = Object.values(dossiers).reduce(
     (total, dossier) => total + dossier.skills.filter((skill) => skill.status === 'verified').length,
     0,
@@ -42,7 +42,7 @@ export function EmployeeDossierDirectory({ employees, dossiers, world, onOpen, o
         </div>
       </header>
 
-      <div className="dossier-directory__summary" aria-label="全员档案概览">
+      <div className="dossier-directory__summary" aria-label="角色概览">
         <div><UsersThree size={16} /><strong>{employees.length}</strong><span>在册{experience.personLabel}</span></div>
         <div><Certificate size={16} /><strong>{verifiedSkills}</strong><span>已验证技能</span></div>
         <div><CalendarDots size={16} /><strong>{milestones}</strong><span>真实事迹</span></div>
@@ -50,7 +50,7 @@ export function EmployeeDossierDirectory({ employees, dossiers, world, onOpen, o
 
       <div className="dossier-directory__list">
         {employees.length === 0 ? (
-          <div className="dossier-directory__empty"><IdentificationBadge size={30} /><strong>档案库还是空的</strong><p>新增角色后，会在这里集中管理身份、技能授权、成长记录和长期履历。</p><button className="primary-button" type="button" onClick={onInvite}><Plus size={14} />新增第一个角色</button></div>
+          <div className="dossier-directory__empty"><IdentificationBadge size={30} /><strong>还没有角色</strong><p>新增角色后，会在这里集中管理身份、技能授权、成长记录和长期履历。</p><button className="primary-button" type="button" onClick={onInvite}><Plus size={14} />新增第一个角色</button></div>
         ) : employees.map((employee) => {
           const dossier = dossiers[employee.id]
           const profile = dossier?.profile
@@ -72,7 +72,7 @@ export function EmployeeDossierDirectory({ employees, dossiers, world, onOpen, o
               <div className="dossier-card__traits">
                 {(profile?.personalityTraits ?? []).slice(0, 4).map((trait) => <span key={trait}>{trait}</span>)}
                 {profile?.birthday === undefined ? null : <span>生日 {profile.birthday}</span>}
-                {profile === undefined ? <span>档案建立中</span> : null}
+                {profile === undefined ? <span>角色信息建立中</span> : null}
               </div>
 
               <dl>
@@ -89,7 +89,7 @@ export function EmployeeDossierDirectory({ employees, dossiers, world, onOpen, o
               <footer>
                 <button type="button" className="icon-button" aria-label={`管理${employee.displayName}`} onClick={() => onManage(employee)}><GearSix size={15} /></button>
                 <button type="button" className="text-button" onClick={() => onDirect(employee)}>直接对话</button>
-                <button type="button" className="primary-button" onClick={() => onOpen(employee.id)}>完整档案<ArrowRight size={14} /></button>
+                <button type="button" className="primary-button" onClick={() => onOpen(employee.id)}>查看角色<ArrowRight size={14} /></button>
               </footer>
             </article>
           )
