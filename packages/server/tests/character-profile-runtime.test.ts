@@ -10,7 +10,9 @@ import type {
 import {
   CharacterProfileRuntime,
   composeCharacterPersona,
+  composeSkillRecipes,
 } from '../src/services/character-profile-runtime.js'
+import { createBuiltinSkillRegistry } from '../src/skills/builtin-skill-registry.js'
 
 describe('CharacterProfileRuntime', () => {
   it('composes current profile relationship and personality into the effective persona without changing the stored base persona', () => {
@@ -57,6 +59,29 @@ describe('CharacterProfileRuntime', () => {
     expect(inner.requests[0]?.revision.revision).toBe(2)
     expect(inner.requests[0]?.revision.persona).toContain('当前角色设定')
     expect(inner.requests[0]?.revision.persona).toContain('[当前角色资料]')
+  })
+
+  it('injects only granted declarative recipes and never loads the full catalog', async () => {
+    const inner = new CaptureRuntime()
+    const granted = revision(2, '当前角色设定')
+    granted.skillGrants = ['coding', 'testing']
+    const runtime = new CharacterProfileRuntime(inner, {
+      getEmployee: () => character({ currentRevision: 2 }),
+      getEmployeeRevision: () => granted,
+      getEmployeeProfile: () => undefined,
+    }, createBuiltinSkillRegistry())
+
+    await runtime.runTurn({ agent: character(), revision: revision(1, '旧设定'), prompt: '实现并验证功能', workspacePath: '/tmp/world' })
+
+    const persona = inner.requests[0]!.revision.persona
+    expect(persona).toContain('[已授权的工作方法]')
+    expect(persona).toContain('软件实现：')
+    expect(persona).toContain('测试验证：')
+    expect(persona).not.toContain('会议纪要：')
+  })
+
+  it('keeps recipe composition stable when no recipe is granted', () => {
+    expect(composeSkillRecipes('基础设定', [])).toBe('基础设定')
   })
 })
 

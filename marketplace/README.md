@@ -7,5 +7,6 @@
 - [世界主题](../docs/community/world-theme-authoring.md)
 - [员工蓝图](../docs/community/employee-blueprint-authoring.md)
 - [声明式插件](../docs/community/plugin-authoring.md)
+- [Skill Recipe](../docs/community/skill-recipe-authoring.md)
 
 不要自行添加 `official` 认证，不要提交 approval token、私有数据或来源不明的资产。当前没有 package pack/publish CLI；请以真实 manifest、逐文件哈希、安装测试和类型专项证据提交 PR。

@@ -791,6 +791,7 @@ export default function App() {
   const recruitEmployee = useCallback(async (
     blueprint: EmployeeBlueprint,
     displayName: string | undefined,
+    skillGrants: string[],
     capabilityGrants: string[],
   ) => {
     if (activeWorld === undefined) return
@@ -819,6 +820,7 @@ export default function App() {
           body: JSON.stringify({
             blueprintId: blueprint.id,
             blueprintVersion: blueprint.version,
+            skillGrants,
             capabilityGrants,
             ...(displayName === undefined ? {} : { displayName }),
           }),

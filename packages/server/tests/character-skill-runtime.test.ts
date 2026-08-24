@@ -31,6 +31,26 @@ describe('CharacterSkillAdapterRegistry', () => {
     expect(registry.list().map((item) => item.id)).toEqual(['test.echo'])
     expect(() => registry.register(new TestAdapter('another-adapter'))).toThrow('Duplicate skill provider: test.echo')
   })
+
+  it('keeps declarative recipes separate from executable adapters', () => {
+    const registry = new CharacterSkillAdapterRegistry()
+    registry.registerRecipe({
+      descriptor: {
+        id: 'test.recipe', displayName: '测试工作方法', summary: '只注入受信任说明',
+        adapterId: 'builtin.recipe', risks: [], supportsScheduling: false,
+        kind: 'recipe', recommendedByDefault: true,
+      },
+      instruction: '只根据事实总结。',
+    })
+    expect(registry.instructionsFor(['test.recipe'])).toEqual(['测试工作方法：只根据事实总结。'])
+    expect(registry.adapterForSkill('test.recipe')).toBeUndefined()
+    expect(() => registry.registerRecipe({
+      descriptor: {
+        id: 'test.recipe', displayName: '重复', summary: '重复', adapterId: 'builtin.recipe',
+        risks: [], supportsScheduling: false, kind: 'recipe',
+      }, instruction: '重复',
+    })).toThrow('Duplicate skill provider: test.recipe')
+  })
 })
 
 describe('CharacterSkillRuntime', () => {

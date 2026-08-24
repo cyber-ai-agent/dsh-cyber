@@ -4,6 +4,7 @@ import type {
   EmployeeProfile,
 } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
+import type { CharacterSkillAdapterRegistry } from '../skills/skill-adapter.js'
 
 type CharacterRuntimeStore = Pick<
   SqliteStore,
@@ -13,10 +14,12 @@ type CharacterRuntimeStore = Pick<
 export class CharacterProfileRuntime implements AgentRuntimePort {
   readonly #inner: AgentRuntimePort
   readonly #store: CharacterRuntimeStore
+  readonly #skills: Pick<CharacterSkillAdapterRegistry, 'instructionsFor'> | undefined
 
-  constructor(inner: AgentRuntimePort, store: CharacterRuntimeStore) {
+  constructor(inner: AgentRuntimePort, store: CharacterRuntimeStore, skills?: Pick<CharacterSkillAdapterRegistry, 'instructionsFor'>) {
     this.#inner = inner
     this.#store = store
+    this.#skills = skills
   }
 
   runTurn(request: AgentTurnRequest) {
@@ -29,21 +32,26 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       ?? request.revision
     const profile = this.#store.getEmployeeProfile(agent.id)
 
+    const recipeInstructions = this.#skills?.instructionsFor(revision.skillGrants) ?? []
+    const persona = profile === undefined ? revision.persona : composeCharacterPersona(revision.persona, profile)
     return this.#inner.runTurn({
       ...request,
       agent,
-      revision: profile === undefined
-        ? revision
-        : {
-            ...revision,
-            persona: composeCharacterPersona(revision.persona, profile),
-          },
+      revision: {
+        ...revision,
+        persona: composeSkillRecipes(persona, recipeInstructions),
+      },
     })
   }
 
   close(): Promise<void> {
     return this.#inner.close()
   }
+}
+
+export function composeSkillRecipes(persona: string, instructions: readonly string[]): string {
+  if (instructions.length === 0) return persona
+  return `${persona.trim()}\n\n[已授权的工作方法]\n${instructions.map((item) => `- ${item}`).join('\n')}`
 }
 
 export function composeCharacterPersona(basePersona: string, profile: EmployeeProfile): string {

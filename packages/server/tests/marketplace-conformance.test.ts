@@ -67,6 +67,7 @@ describe('community marketplace contract', () => {
       }
 
       if (item.market === 'theme') await expectTheme(item)
+      else if (item.market === 'talent' && item.manifest.kind === 'skill') await expectSkill(item)
       else if (item.market === 'talent') await expectBlueprint(item)
       else await expectPlugin(item)
     }
@@ -78,6 +79,20 @@ async function packageDirectoryCount(): Promise<number> {
     (await readdir(fileURLToPath(new URL(`../../../marketplace/${market}/`, import.meta.url)), { withFileTypes: true }))
       .filter((entry) => entry.isDirectory()).length))
   return directories.reduce((total, count) => total + count, 0)
+}
+
+async function expectSkill(item: CyberMarketPackage): Promise<void> {
+  expect(item.manifest.kind).toBe('skill')
+  expect(item.manifest.dataEgress.every((value) => value.startsWith('https://'))).toBe(true)
+  const entrypoints = item.manifest.entrypoints?.filter((entrypoint) => entrypoint.kind === 'skill') ?? []
+  expect(entrypoints).toHaveLength(1)
+  for (const entrypoint of entrypoints) {
+    const definition = JSON.parse(await readFile(join(item.sourceDirectory, ...entrypoint.path.split('/')), 'utf8')) as Record<string, unknown>
+    expect(Object.keys(definition).sort()).toEqual(['dataEgress', 'displayName', 'id', 'instructions', 'integrationId', 'schemaVersion', 'summary'])
+    expect(definition.id).toBe(entrypoint.id)
+    expect(definition.schemaVersion).toBe(1)
+    expect(typeof definition.instructions === 'string' && definition.instructions.trim().length > 0).toBe(true)
+  }
 }
 
 async function expectTheme(item: CyberMarketPackage): Promise<void> {

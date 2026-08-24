@@ -944,11 +944,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .capability-group > div { display: flex; flex-wrap: wrap; gap: 6px; }
 .capability-group span { padding: 5px 8px; border: 1px solid var(--border); color: var(--text-soft); background: var(--surface-1); font: 12px var(--font-mono); }
 .capability-approval-group { margin: 0; padding: 0; border: 0; display: grid; gap: 6px; }
-.capability-approval-group legend { margin-bottom: 7px; color: var(--text-soft); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
-.capability-approval-group > span { color: var(--text-muted); font-size: 10px; }
+.capability-approval-group legend { margin-bottom: 7px; color: var(--text-soft); font-size: 12px; font-weight: 700; letter-spacing: .04em; }
+.capability-approval-group > span { color: var(--text-muted); font-size: 12px; }
 .capability-approval-group label { min-height: 34px; display: flex; align-items: center; gap: 9px; padding: 6px 8px; border: 1px solid var(--border); color: var(--text-soft); background: var(--surface-1); cursor: pointer; }
 .capability-approval-group input { width: 16px; height: 16px; accent-color: var(--accent); }
-.capability-approval-group code { font-size: 10px; }
+.capability-approval-group label > span { display: grid; gap: 2px; }
+.capability-approval-group label strong { color: var(--text); font-size: 13px; }
+.capability-approval-group label small, .capability-approval-group code { color: var(--text-muted); font-size: 12px; }
 .permission-notice { display: flex; gap: 9px; padding: 10px; border: 1px solid var(--border); color: var(--text-muted); background: var(--surface-1); }
 .permission-notice svg { flex: 0 0 auto; color: var(--success); }
 .permission-notice p { margin: 0; font-size: 10px; line-height: 1.6; }
@@ -977,6 +979,21 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .settings-section { display: grid; gap: 20px; }
 .settings-section__heading h3 { margin: 0; font-size: 20px; }
 .settings-section__heading p { margin: 6px 0 0; color: var(--text-soft); font-size: 14px; line-height: 1.65; }
+.integration-provider-list { display: grid; gap: 8px; }
+.integration-provider-list button { display: grid; gap: 4px; padding: 14px 16px; border: 1px solid var(--border); color: var(--text); background: var(--surface-1); text-align: left; cursor: pointer; }
+.integration-provider-list button.is-active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface-1)); }
+.integration-provider-list strong { font-size: 14px; }
+.integration-provider-list small { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.integration-editor { display: grid; gap: 16px; padding: 18px; border: 1px solid var(--border); background: var(--surface-1); }
+.integration-editor > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.integration-editor h4 { margin: 0; font-size: 17px; }
+.integration-editor header p { margin: 5px 0 0; color: var(--text-muted); font-size: 13px; line-height: 1.5; }
+.integration-editor header label { display: flex; align-items: center; gap: 7px; color: var(--text-soft); font-size: 13px; white-space: nowrap; }
+.integration-editor header input { width: 16px; height: 16px; accent-color: var(--accent); }
+.integration-egress { display: grid; gap: 3px; padding: 12px 14px; border-left: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.integration-egress strong { font-size: 13px; }
+.integration-egress span { color: var(--text-soft); font-size: 12px; }
+.integration-editor > footer { display: flex; justify-content: flex-end; gap: 10px; }
 .setting-group { margin: 0; padding: 17px; border: 1px solid var(--border); }
 .setting-group legend { padding: 0 7px; color: var(--text-soft); font-size: 14px; font-weight: 600; }
 .segmented-control { display: grid; grid-template-columns: repeat(3, 1fr); }

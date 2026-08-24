@@ -28,7 +28,8 @@
 - [x] Approval Gate V1 for trusted external Skill actions
 - [x] Trace Intelligence V1 with per-run reasoning summaries, tool orchestration, Token attribution and role/date/search filters
 - [x] World Package Instance V1
-- [ ] Integration Registry and Firecrawl V1
+- [x] Built-in Skill Recipe catalog with role-aware default grants and on-demand loading
+- [x] Integration Registry and Firecrawl V1
 - [ ] MCP Skill Adapter V1
 - [ ] Extension Host and JSON-RPC Gateway
 - [ ] Finish Creative Workshop project lifecycle

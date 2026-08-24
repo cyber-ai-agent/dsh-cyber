@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "web.search.firecrawl",
+  "displayName": "联网搜索",
+  "summary": "通过宿主受信任的 Firecrawl Integration 搜索公开网页。",
+  "integrationId": "builtin.firecrawl",
+  "dataEgress": ["搜索查询文本", "用户明确提供的检索范围"],
+  "instructions": "只在用户明确要求联网搜索时使用。优先一手来源，区分搜索结果摘要与已验证事实，并保留可点击来源。"
+}

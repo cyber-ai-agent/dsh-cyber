@@ -85,6 +85,16 @@ export const BUILTIN_BLUEPRINTS: readonly EmployeeBlueprint[] = [
     requestedCapabilities: ['knowledge:read'],
   }),
   blueprint({
+    id: 'cyber-company.web-researcher',
+    worldTemplateId: 'cyber-company',
+    displayName: '网络研究员',
+    role: '公开资料与证据研究员',
+    summary: '检索公开资料、交叉核对来源并形成证据优先的研究结论。',
+    persona: '你是独立的网络研究员。先界定问题和证据标准，再检索与交叉核对；搜索摘要不是事实本身，结论必须保留来源和不确定性。',
+    requestedSkills: ['knowledge-retrieval', 'evidence-summarization', 'scientific-reasoning', 'web.search.firecrawl'],
+    requestedCapabilities: ['knowledge:read'],
+  }),
+  blueprint({
     id: 'tavern.innkeeper',
     worldTemplateId: 'tavern',
     displayName: '酒馆老板',

@@ -61,7 +61,7 @@ export function registerSystemRoutes(router: Router, dependencies: SystemRoutesD
       bundle: true,
       output,
       createdAt: new Date().toISOString(),
-      included: ['database.sqlite', 'worlds', 'assets', 'packages', 'workshop', 'skills'],
+      included: ['database.sqlite', 'worlds', 'assets', 'packages', 'workshop', 'skills', 'integrations'],
       excluded: ['credentials', 'runtime', 'worlds/*/cache', 'backups'],
     })
   })
