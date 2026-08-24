@@ -30,7 +30,9 @@ jobs:
           node-version: 22.19.0
           cache: pnpm
       - name: Apply source migration
-        run: node .github/scripts/apply-chat-realtime-v1.mjs
+        run: |
+          node .github/scripts/apply-chat-realtime-v1.mjs
+          node .github/scripts/apply-chat-realtime-fix-v1.mjs
       - run: pnpm install --frozen-lockfile
       - name: Typecheck
         run: pnpm typecheck
@@ -42,7 +44,7 @@ jobs:
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git rm .github/scripts/apply-chat-realtime-v1.mjs .github/workflows/apply-chat-realtime-v1.yml
+          git rm .github/scripts/apply-chat-realtime-v1.mjs .github/scripts/apply-chat-realtime-fix-v1.mjs .github/workflows/apply-chat-realtime-v1.yml
           git add -A
           git commit -m "feat: enable concurrent streaming conversations"
           git push origin "HEAD:${BRANCH_NAME}"
