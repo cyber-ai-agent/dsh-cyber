@@ -1,18 +1,19 @@
 name: Apply chat realtime UX
 
 on:
-  push:
-    branches: [codex/chat-realtime-ux]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: write
 
 concurrency:
-  group: apply-chat-realtime-v1
+  group: apply-chat-realtime-v1-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
 jobs:
   apply:
+    if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -41,6 +42,7 @@ jobs:
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add packages
+          git rm .github/scripts/apply-chat-realtime-v1.mjs .github/workflows/apply-chat-realtime-v1.yml
+          git add -A
           git commit -m "feat: enable concurrent streaming conversations"
           git push origin "HEAD:${BRANCH_NAME}"
