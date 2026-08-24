@@ -175,10 +175,30 @@ describe('stream lifecycle', () => {
       },
     }
     hub.publish(event)
+    hub.publishWorld({
+      contractVersion: 1,
+      id: '8',
+      worldId: 'world-1',
+      sequence: 8,
+      kind: 'world-state',
+      payload: {},
+      createdAt: '2026-08-20T00:00:01.000Z',
+    })
+    hub.publishWorld({
+      contractVersion: 1,
+      id: '8:runtime',
+      worldId: 'world-1',
+      sequence: 8,
+      kind: 'runtime',
+      payload: {},
+      createdAt: '2026-08-20T00:00:01.000Z',
+    })
 
     expect(hub.clientCount).toBe(1)
     expect(fake.text()).toContain('event: ready')
     expect(fake.text()).toContain('event: runtime')
+    expect(fake.text()).toContain('event: world-state')
+    expect(fake.text()).toContain('event: world-runtime')
     incoming.emit('close')
     expect(hub.clientCount).toBe(0)
     hub.close()

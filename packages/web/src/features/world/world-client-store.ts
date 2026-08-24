@@ -16,6 +16,7 @@ import { cyberCompanyTheme, findPath, getAnchor, getScene, moonlitTavernTheme } 
 import { api } from '../../api.js'
 import type { CyberEmployee } from '../../types.js'
 import { worldExperience } from '../../world-experience.js'
+import { subscribeWorldLive } from '../../world-live-client.js'
 
 export interface WorldClientState {
   snapshot?: WorldRuntimeSnapshot
@@ -60,7 +61,46 @@ export function useWorldClient({ demoMode, world, employees, liveEnabled = true 
   useEffect(() => {
     if (demoMode || !liveEnabled) return
     let cancelled = false
-    let stream: EventSource | undefined
+    let initialized = false
+    const onState = (event: Event) => {
+      const envelope = parseEnvelope(event)
+      if (envelope?.kind !== 'world-state' || envelope.worldId !== world.id) return
+      setState((current) => reduceWorldStreamState(current, envelope))
+    }
+    const onCue = (event: Event) => {
+      const envelope = parseEnvelope(event)
+      if (envelope?.kind !== 'world-cue' || envelope.worldId !== world.id) return
+      setState((current) => reduceWorldStreamState(current, envelope))
+    }
+    const onRuntime = (event: Event) => {
+      const envelope = parseEnvelope(event)
+      if (envelope?.kind !== 'runtime' || envelope.worldId !== world.id) return
+      setState((current) => reduceWorldStreamState(current, envelope))
+    }
+    const recoverSnapshot = () => {
+      setState((current) => ({ ...current, connected: false }))
+      void api<WorldRuntimeSnapshot>(`/api/worlds/${encodeURIComponent(world.id)}/runtime-snapshot`)
+        .then((snapshot) => {
+          if (!cancelled) setState((current) => current.snapshot !== undefined && current.snapshot.sequence > snapshot.sequence
+            ? { ...current, connected: true }
+            : { ...current, snapshot, cues: [], connected: true })
+        })
+        .catch(() => {
+          if (!cancelled) setState((current) => ({ ...current, connected: false }))
+        })
+    }
+    const onReady = () => {
+      if (initialized) recoverSnapshot()
+      else setState((current) => ({ ...current, connected: true }))
+    }
+    const onError = () => {
+      if (!cancelled) setState((current) => ({ ...current, connected: false }))
+    }
+    const unsubscribeState = subscribeWorldLive(world.id, 'world-state', onState)
+    const unsubscribeCue = subscribeWorldLive(world.id, 'world-cue', onCue)
+    const unsubscribeRuntime = subscribeWorldLive(world.id, 'world-runtime', onRuntime)
+    const unsubscribeReady = subscribeWorldLive(world.id, 'ready', onReady)
+    const unsubscribeError = subscribeWorldLive(world.id, 'error', onError)
     void Promise.all([
       api<WorldRuntimeSnapshot>(`/api/worlds/${encodeURIComponent(world.id)}/runtime-snapshot`),
       api<WorldThemeManifestV1>(`/api/worlds/${encodeURIComponent(world.id)}/theme-manifest`),
@@ -70,56 +110,13 @@ export function useWorldClient({ demoMode, world, employees, liveEnabled = true 
       const activeTheme = themes.items.find((item) => item.active)
       setState((current) => ({
         ...current,
-        snapshot,
+        snapshot: current.snapshot !== undefined && current.snapshot.sequence > snapshot.sequence ? current.snapshot : snapshot,
         manifest: nextManifest,
         rendererIdentity: activeTheme === undefined ? builtInRendererIdentity(nextManifest) : rendererIdentity(activeTheme),
         loading: false,
         connected: true,
       }))
-      stream = new EventSource(`/api/worlds/${encodeURIComponent(world.id)}/stream?after=${snapshot.sequence}`)
-      let currentSequence = snapshot.sequence
-      const onState = (event: Event) => {
-        const envelope = parseEnvelope(event)
-        if (envelope?.kind !== 'world-state') return
-        currentSequence = Math.max(currentSequence, envelope.sequence)
-        setState((current) => reduceWorldStreamState(current, envelope))
-      }
-      const onCue = (event: Event) => {
-        const envelope = parseEnvelope(event)
-        if (envelope?.kind !== 'world-cue') return
-        setState((current) => reduceWorldStreamState(current, envelope))
-      }
-      const onRuntime = (event: Event) => {
-        const envelope = parseEnvelope(event)
-        if (envelope?.kind !== 'runtime') return
-        setState((current) => reduceWorldStreamState(current, envelope))
-      }
-      const onRecovery = () => {
-        setState((current) => ({ ...current, cues: [], connected: false }))
-        void api<WorldRuntimeSnapshot>(`/api/worlds/${encodeURIComponent(world.id)}/runtime-snapshot`)
-          .then((recovered) => {
-            currentSequence = Math.max(currentSequence, recovered.sequence)
-            if (!cancelled) setState((current) => ({ ...current, snapshot: recovered, cues: [], connected: true }))
-          })
-      }
-      const onReady = (event: Event) => {
-        const envelope = parseEnvelope(event)
-        if (envelope === undefined || currentSequence >= envelope.sequence) {
-          setState((current) => ({ ...current, connected: true }))
-          return
-        }
-        void api<WorldRuntimeSnapshot>(`/api/worlds/${encodeURIComponent(world.id)}/runtime-snapshot`)
-          .then((recovered) => {
-            currentSequence = Math.max(currentSequence, recovered.sequence)
-            if (!cancelled) setState((latest) => ({ ...latest, snapshot: recovered, cues: [], connected: true }))
-          })
-      }
-      stream.addEventListener('world-state', onState)
-      stream.addEventListener('world-cue', onCue)
-      stream.addEventListener('runtime', onRuntime)
-      stream.addEventListener('recovery-required', onRecovery)
-      stream.addEventListener('ready', onReady)
-      stream.onerror = () => { if (!cancelled) setState((current) => ({ ...current, connected: false })) }
+      initialized = true
     }).catch((cause: unknown) => {
       if (!cancelled) setState((current) => ({
         ...current,
@@ -130,7 +127,11 @@ export function useWorldClient({ demoMode, world, employees, liveEnabled = true 
     })
     return () => {
       cancelled = true
-      stream?.close()
+      unsubscribeState()
+      unsubscribeCue()
+      unsubscribeRuntime()
+      unsubscribeReady()
+      unsubscribeError()
     }
   }, [demoMode, liveEnabled, world.id])
 

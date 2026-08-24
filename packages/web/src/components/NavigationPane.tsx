@@ -113,7 +113,7 @@ export function NavigationPane({
   }
 
   const openItem = (item: ConversationHubItem) => {
-    if (item.session.kind === 'direct') {
+    if (item.session.id.startsWith('contact:') && item.session.kind === 'direct') {
       const employeeId = item.canonicalCharacterId ?? item.participantIds[0]
       const employee = employees.find((candidate) => candidate.id === employeeId)
       if (employee !== undefined) {
@@ -149,7 +149,7 @@ export function NavigationPane({
                 key={item.session.id}
                 item={item}
                 employees={employees}
-                active={item.session.id === activeSessionId || (item.session.kind === 'direct' && item.participantIds.some((id) => id === sessionParticipants[activeSessionId ?? '']?.[0]))}
+                active={item.session.id === activeSessionId || (synthetic && item.participantIds.some((id) => id === sessionParticipants[activeSessionId ?? '']?.[0]))}
                 onClick={() => openItem(item)}
                 {...(synthetic ? {} : {
                   onPin: () => void updatePreference(item.session.id, { pinned: !item.pinned }).then(setHubItems).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : '置顶失败')),
