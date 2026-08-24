@@ -31,9 +31,10 @@ interface UseWorldClientInput {
   demoMode: boolean
   world: World
   employees: CyberEmployee[]
+  liveEnabled?: boolean
 }
 
-export function useWorldClient({ demoMode, world, employees }: UseWorldClientInput) {
+export function useWorldClient({ demoMode, world, employees, liveEnabled = true }: UseWorldClientInput) {
   const manifest = worldExperience(world).kind === 'tavern' ? moonlitTavernTheme : cyberCompanyTheme
   const [state, setState] = useState<WorldClientState>(() => ({
     manifest,
@@ -57,7 +58,7 @@ export function useWorldClient({ demoMode, world, employees }: UseWorldClientInp
   }, [demoMode, employees, manifest, world])
 
   useEffect(() => {
-    if (demoMode) return
+    if (demoMode || !liveEnabled) return
     let cancelled = false
     let stream: EventSource | undefined
     void Promise.all([
@@ -131,7 +132,7 @@ export function useWorldClient({ demoMode, world, employees }: UseWorldClientInp
       cancelled = true
       stream?.close()
     }
-  }, [demoMode, world.id])
+  }, [demoMode, liveEnabled, world.id])
 
   const interact = useCallback(async (request: WorldInteractionRequest) => {
     if (demoMode) {

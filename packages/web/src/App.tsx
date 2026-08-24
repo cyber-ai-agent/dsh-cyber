@@ -129,6 +129,7 @@ export default function App() {
   const sessionByQueueKeyRef = useRef(new Map<string, string>())
   const queueKeyBySessionRef = useRef(new Map<string, string>())
   const pendingTurnsRef = useRef<PendingChatTurn[]>([])
+  const worldLoadRequestRef = useRef(0)
   const activeWorldRef = useRef<World | undefined>(undefined)
   const activeSessionIdRef = useRef<string | undefined>(undefined)
   const activeConversationKeyRef = useRef<string | undefined>(undefined)
@@ -199,20 +200,32 @@ export default function App() {
   pendingTurnsRef.current = pendingTurns
 
   const loadWorld = useCallback(async (world: World) => {
+    const requestId = worldLoadRequestRef.current + 1
+    worldLoadRequestRef.current = requestId
+    const isCurrentRequest = () => worldLoadRequestRef.current === requestId
+
     setError(undefined)
     setActiveWorld(world)
+    activeWorldRef.current = world
     setActiveSessionId(undefined)
+    activeSessionIdRef.current = undefined
     setSessions([])
     setSessionParticipants({})
     setConversationIntent(undefined)
+    activeConversationKeyRef.current = undefined
     setHistoryOpen(false)
     setMessages([])
     setMessagePage({ hasMore: false, loading: false })
     setDraft('')
     setSelectedEmployeeId(undefined)
+    setEmployees([])
+    setDossiers({})
     setDockTab('world')
     setPermissionMode('read-only')
     setTaskSchedules([])
+    setWorldSettings(undefined)
+    setWorldAccess(undefined)
+    setWorldRuntimeAvailable(false)
     if (demoMode) {
       const isCompany = world.id === demoData.activeWorld.id
       setWorldRuntimeAvailable(true)
@@ -229,49 +242,69 @@ export default function App() {
       setActiveSessionId(nextSessions[0]?.id)
       return
     }
-    let snapshot: WorldSnapshot
-    try { snapshot = await api<WorldSnapshot>(`/api/worlds/${world.id}/snapshot`) } catch (cause) { if (cause instanceof ApiError && cause.status === 423) { setLockedWorld(world); return } throw cause }
-    const capability = await api<{ supported: boolean }>(`/api/worlds/${world.id}/runtime-capability`)
-    const settingsResult = await api<{ settings: WorldSettings; access: WorldAccessSummary }>(`/api/worlds/${world.id}/settings`)
-    setWorldSettings(settingsResult.settings)
-    applyWorldAppearance(settingsResult.settings)
-    setWorldAccess(settingsResult.access)
-    setReasoningEffort(settingsResult.settings.model.reasoningEffort)
-    setPermissionMode(settingsResult.settings.runtime.permissionMode)
-    setWorldRuntimeAvailable(capability.supported)
-    setAppMode(worldRuntimeV2Enabled && capability.supported ? 'world' : 'workbench')
-    const [dossierResults, participantResults, scheduleResult] = await Promise.all([
-      Promise.all(snapshot.employees.map(async (employee) => {
+    try {
+      let snapshot: WorldSnapshot
       try {
-        return await api<EmployeeDossier>(`/api/employees/${employee.id}/dossier`)
-      } catch {
-        return undefined
-      }
-      })),
-      Promise.all(snapshot.openSessions.map(async (session) => {
-        try {
-          const result = await api<{ items: WorkSessionParticipant[] }>(`/api/sessions/${session.id}/participants`)
-          return [session.id, result.items.filter((participant) => participant.kind === 'employee').map((participant) => participant.participantId)] as const
-        } catch {
-          return [session.id, []] as const
+        snapshot = await api<WorldSnapshot>(`/api/worlds/${world.id}/snapshot`)
+      } catch (cause) {
+        if (cause instanceof ApiError && cause.status === 423) {
+          if (isCurrentRequest()) setLockedWorld(world)
+          return
         }
-      })),
-      api<{ items: TaskSchedule[] }>(`/api/worlds/${world.id}/schedules`),
-    ])
-    const nextDossiers: Record<string, EmployeeDossier> = {}
-    for (const dossier of dossierResults) {
-      if (dossier !== undefined) nextDossiers[dossier.employee.id] = dossier
+        throw cause
+      }
+      if (!isCurrentRequest()) return
+
+      const [capability, settingsResult] = await Promise.all([
+        api<{ supported: boolean }>(`/api/worlds/${world.id}/runtime-capability`),
+        api<{ settings: WorldSettings; access: WorldAccessSummary }>(`/api/worlds/${world.id}/settings`),
+      ])
+      if (!isCurrentRequest()) return
+
+      const [dossierResults, participantResults, scheduleResult] = await Promise.all([
+        Promise.all(snapshot.employees.map(async (employee) => {
+          try {
+            return await api<EmployeeDossier>(`/api/employees/${employee.id}/dossier`)
+          } catch {
+            return undefined
+          }
+        })),
+        Promise.all(snapshot.openSessions.map(async (session) => {
+          try {
+            const result = await api<{ items: WorkSessionParticipant[] }>(`/api/sessions/${session.id}/participants`)
+            return [session.id, result.items.filter((participant) => participant.kind === 'employee').map((participant) => participant.participantId)] as const
+          } catch {
+            return [session.id, []] as const
+          }
+        })),
+        api<{ items: TaskSchedule[] }>(`/api/worlds/${world.id}/schedules`),
+      ])
+      if (!isCurrentRequest()) return
+
+      const nextDossiers: Record<string, EmployeeDossier> = {}
+      for (const dossier of dossierResults) {
+        if (dossier !== undefined) nextDossiers[dossier.employee.id] = dossier
+      }
+      setWorldSettings(settingsResult.settings)
+      applyWorldAppearance(settingsResult.settings)
+      setWorldAccess(settingsResult.access)
+      setReasoningEffort(settingsResult.settings.model.reasoningEffort)
+      setPermissionMode(settingsResult.settings.runtime.permissionMode)
+      setWorldRuntimeAvailable(capability.supported)
+      setAppMode(worldRuntimeV2Enabled && capability.supported ? 'world' : 'workbench')
+      setDossiers(nextDossiers)
+      setEmployees(snapshot.employees.map((employee, index) => toCyberEmployee(employee, index, nextDossiers[employee.id])))
+      setSessions(snapshot.openSessions)
+      // A world with existing sessions opens the most recently active one by default.
+      // This keeps the composer and history action attached to a real conversation
+      // instead of presenting an empty, non-sendable center pane after refresh.
+      setActiveSessionId(snapshot.openSessions[0]?.id)
+      setSessionParticipants(Object.fromEntries(participantResults))
+      setTaskSchedules(scheduleResult.items)
+      rememberActiveWorld(world.workspaceId, world.id)
+    } catch (cause) {
+      if (isCurrentRequest()) setError(cause instanceof Error ? cause.message : '世界加载失败')
     }
-    setDossiers(nextDossiers)
-    setEmployees(snapshot.employees.map((employee, index) => toCyberEmployee(employee, index, nextDossiers[employee.id])))
-    setSessions(snapshot.openSessions)
-    // A world with existing sessions opens the most recently active one by default.
-    // This keeps the composer and history action attached to a real conversation
-    // instead of presenting an empty, non-sendable center pane after refresh.
-    setActiveSessionId(snapshot.openSessions[0]?.id)
-    setSessionParticipants(Object.fromEntries(participantResults))
-    setTaskSchedules(scheduleResult.items)
-    rememberActiveWorld(world.workspaceId, world.id)
   }, [])
 
   const openWorkshopWorld = useCallback(async (worldId: string) => {
@@ -1533,6 +1566,7 @@ export default function App() {
                   demoMode={demoMode}
                   world={activeWorld}
                   employees={employees}
+                  liveEnabled={!historyOpen}
                   conversationEmployeeIds={activeParticipantIds}
                   {...(selectedEmployeeId === undefined ? {} : { selectedEmployeeId })}
                   onSelectEmployee={(employeeId) => {

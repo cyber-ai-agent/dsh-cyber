@@ -60,8 +60,8 @@ test('onboards, recruits from dossier, talks, browses dossiers and keeps file su
   const engineerCard = dock.getByRole('article').filter({ hasText: '阿帆' })
   await expect(engineerCard).toBeVisible()
   await engineerCard.getByRole('button', { name: /查看角色/ }).click()
-  await expect(dock.getByText('阿帆 / 独立角色')).toBeVisible()
-  await dock.getByRole('button', { name: '全员角色' }).click()
+  await expect(dock.getByText('阿帆 / 角色')).toBeVisible()
+  await dock.getByRole('button', { name: '全部角色' }).click()
   await expect(dock.getByText('角色目录', { exact: true })).toBeVisible()
   await expect(dock.getByRole('article').filter({ hasText: '阿帆' })).toBeVisible()
 
@@ -87,6 +87,105 @@ test('onboards, recruits from dossier, talks, browses dossiers and keeps file su
 
   await expect(page.locator('.composer')).toHaveCount(1)
   await expect(page.locator('.workbench-shell')).toBeVisible()
+})
+
+test('keeps world sessions and message history isolated when world requests finish out of order', async ({ page }) => {
+  const workspace = server.store.listWorkspaces()[0] ?? server.store.createWorkspace({ name: '世界隔离测试工作区' })
+  const returnWorld = server.store.listWorlds(workspace.id)[0]
+  const createWorld = async (name: string, employeeName: string, historyText: string) => {
+    const worldResponse = await fetch(`${origin}/api/workspaces/${workspace.id}/worlds`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name, templateId: 'personal-world' }),
+    })
+    expect(worldResponse.status).toBe(201)
+    const { world } = await worldResponse.json() as { world: { id: string; name: string } }
+    const recruitResponse = await fetch(`${origin}/api/worlds/${world.id}/recruit`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ blueprintId: 'core.butler', blueprintVersion: 1, displayName: employeeName }),
+    })
+    expect(recruitResponse.status).toBe(201)
+    const { employee } = await recruitResponse.json() as { employee: { id: string } }
+    const session = server.store.listSessions(world.id)[0]!
+    server.store.appendMessage({
+      sessionId: session.id,
+      senderId: 'owner',
+      senderKind: 'owner',
+      kind: 'user',
+      content: `${historyText}·用户`,
+    })
+    server.store.appendMessage({
+      sessionId: session.id,
+      senderId: employee.id,
+      senderKind: 'employee',
+      kind: 'assistant',
+      content: `${historyText}·角色`,
+    })
+    return { world, employeeName, historyText }
+  }
+
+  const slowWorld = await createWorld('竞态世界甲', '甲世界管家', '甲世界历史')
+  const targetWorld = await createWorld('竞态世界乙', '乙世界管家', '乙世界历史')
+  await page.route(`**/api/worlds/${slowWorld.world.id}/snapshot`, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 800))
+    await route.continue()
+  })
+
+  await page.goto(origin)
+  await expect(page.locator('.workbench-shell')).toBeVisible()
+  await page.getByLabel(/切换世界，当前为/).click()
+  await page.getByRole('menuitemradio', { name: new RegExp(slowWorld.world.name) }).click()
+  await page.getByLabel(new RegExp(`切换世界，当前为${slowWorld.world.name}`)).click()
+  await page.getByRole('menuitemradio', { name: new RegExp(targetWorld.world.name) }).click()
+
+  await expect(page.getByLabel(new RegExp(`切换世界，当前为${targetWorld.world.name}`))).toBeVisible()
+  await expect(page.getByRole('button', { name: `与${targetWorld.employeeName}私聊` })).toBeVisible()
+  await expect(page.getByRole('button', { name: `与${slowWorld.employeeName}私聊` })).toHaveCount(0)
+  await page.getByRole('button', { name: `与${targetWorld.employeeName}私聊` }).click()
+  const chat = page.getByRole('region', { name: '当前世界多角色会话' })
+  await expect(chat.getByText(`${targetWorld.historyText}·用户`, { exact: true })).toBeVisible()
+  await expect(chat.getByText(`${targetWorld.historyText}·角色`, { exact: true })).toBeVisible()
+  await page.evaluate(async (worldId) => {
+    const streams = Array.from({ length: 4 }, () => new EventSource(`/api/worlds/${encodeURIComponent(worldId)}/live`))
+    await Promise.all(streams.map((stream) => new Promise<void>((resolve) => {
+      stream.onopen = () => resolve()
+    })))
+    ;(window as typeof window & { __historyConnectionPressure?: EventSource[] }).__historyConnectionPressure = streams
+  }, targetWorld.world.id)
+  await chat.getByRole('button', { name: '查看历史消息' }).click()
+  const history = page.getByRole('dialog', { name: '历史消息' })
+  await expect(history.getByText('正在加载历史消息…')).toBeHidden()
+  await expect(history.getByText('共 2 条可查看消息')).toBeVisible()
+  await expect(history.getByText(`${targetWorld.historyText}·用户`, { exact: true })).toBeVisible()
+  await expect(history.getByText(`${targetWorld.historyText}·角色`, { exact: true })).toBeVisible()
+  await history.getByRole('button', { name: '关闭历史消息' }).click()
+  await page.evaluate(() => {
+    const target = window as typeof window & { __historyConnectionPressure?: EventSource[] }
+    target.__historyConnectionPressure?.forEach((stream) => stream.close())
+    delete target.__historyConnectionPressure
+  })
+
+  await page.waitForTimeout(1_000)
+  await expect(page.getByLabel(new RegExp(`切换世界，当前为${targetWorld.world.name}`))).toBeVisible()
+  await expect(page.getByRole('button', { name: `与${targetWorld.employeeName}私聊` })).toBeVisible()
+  await expect(page.getByRole('button', { name: `与${slowWorld.employeeName}私聊` })).toHaveCount(0)
+  await expect(chat.getByText(`${targetWorld.historyText}·角色`, { exact: true })).toBeVisible()
+
+  await page.unroute(`**/api/worlds/${slowWorld.world.id}/snapshot`)
+  await page.getByLabel(new RegExp(`切换世界，当前为${targetWorld.world.name}`)).click()
+  await page.getByRole('menuitemradio', { name: new RegExp(slowWorld.world.name) }).click()
+  await expect(page.getByRole('button', { name: `与${slowWorld.employeeName}私聊` })).toBeVisible()
+  await page.getByRole('button', { name: `与${slowWorld.employeeName}私聊` }).click()
+  await expect(chat.getByText(`${slowWorld.historyText}·用户`, { exact: true })).toBeVisible()
+  await expect(chat.getByText(`${slowWorld.historyText}·角色`, { exact: true })).toBeVisible()
+  await expect(chat.getByText(`${targetWorld.historyText}·角色`, { exact: true })).toHaveCount(0)
+
+  if (returnWorld !== undefined && returnWorld.id !== slowWorld.world.id) {
+    await page.getByLabel(new RegExp(`切换世界，当前为${slowWorld.world.name}`)).click()
+    await page.getByRole('menuitemradio', { name: new RegExp(returnWorld.name) }).click()
+    await expect(page.getByLabel(new RegExp(`切换世界，当前为${returnWorld.name}`))).toBeVisible()
+  }
 })
 
 test('runs direct and group conversations with real world lifecycle, persistence, and reconnect recovery', async ({ page }) => {

@@ -264,6 +264,12 @@ describe('SqliteStore', () => {
     expect(older.items.map((item) => item.sequence)).toEqual(Array.from({ length: 20 }, (_, index) => index + 6))
     expect(older.hasMore).toBe(true)
 
+    const firstHistoryPage = store.listMessagesPage(session.id, { limit: 20, page: 1, chatOnly: true })
+    expect(firstHistoryPage.items.map((item) => item.sequence)).toEqual(Array.from({ length: 20 }, (_, index) => index + 26))
+    expect(firstHistoryPage.hasMore).toBe(true)
+    const secondHistoryPage = store.listMessagesPage(session.id, { limit: 20, page: 2, chatOnly: true })
+    expect(secondHistoryPage.items.map((item) => item.sequence)).toEqual(Array.from({ length: 20 }, (_, index) => index + 6))
+
     const search = store.listMessagesPage(session.id, { limit: 20, search: '消息 4', page: 1, chatOnly: true })
     expect(search.items.map((item) => item.content)).toEqual(expect.arrayContaining(['历史消息 4', '历史消息 40', '历史消息 41', '历史消息 45']))
     expect(search.total).toBe(7)
