@@ -206,7 +206,14 @@ export class ConversationOrchestrator implements AsyncDisposable {
       ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
       correlationId: session.id,
     })
-    const reply = await this.#runAgent(session, employee, input.runtimePrompt?.trim() || prompt, input.reasoningEffort, input.permissionMode)
+    const reply = await this.#runAgent(
+      session,
+      employee,
+      input.runtimePrompt?.trim() || prompt,
+      input.reasoningEffort,
+      input.permissionMode,
+      clientTurnIdFrom(input.metadata),
+    )
     return { session, replies: [reply] }
   }
 
@@ -259,7 +266,14 @@ export class ConversationOrchestrator implements AsyncDisposable {
     try {
       for (const employee of employees) {
         const collaborationPrompt = groupPrompt(input.runtimePrompt?.trim() || prompt, replies)
-        replies.push(await this.#runAgent(session, employee, collaborationPrompt, input.reasoningEffort, input.permissionMode))
+        replies.push(await this.#runAgent(
+          session,
+          employee,
+          collaborationPrompt,
+          input.reasoningEffort,
+          input.permissionMode,
+          clientTurnIdFrom(input.metadata),
+        ))
       }
       this.#store.appendDomainEvent({
         workspaceId: input.workspaceId,
@@ -442,6 +456,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
     prompt: string,
     reasoningEffort?: Exclude<ReasoningEffort, 'auto'>,
     permissionMode?: AgentPermissionMode,
+    clientTurnId?: string,
   ): Promise<AgentReply> {
     const revision = this.#store.getEmployeeRevision(employee.id, employee.currentRevision)
     if (revision === undefined) {
@@ -475,7 +490,11 @@ export class ConversationOrchestrator implements AsyncDisposable {
         onEvent: (event) => {
           const tracedEvent: AgentRuntimeEvent = {
             ...event,
-            metadata: { ...event.metadata, traceTurnId },
+            metadata: {
+              ...event.metadata,
+              traceTurnId,
+              ...(clientTurnId === undefined ? {} : { clientTurnId }),
+            },
           }
           if (tracedEvent.kind === 'turn.failed') {
             failedTurn = true
@@ -511,6 +530,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
             source: 'runtime-final-response',
             agentSessionId: result.agentSessionId,
             traceTurnId,
+            ...(clientTurnId === undefined ? {} : { clientTurnId }),
           },
           correlationId: session.id,
         })
@@ -821,6 +841,11 @@ function runtimeMetadata(event: AgentRuntimeEvent): JsonObject {
   if (event.callId !== undefined) metadata.callId = event.callId
   if (event.failed !== undefined) metadata.failed = event.failed
   return metadata
+}
+
+function clientTurnIdFrom(metadata?: JsonObject): string | undefined {
+  const value = metadata?.clientTurnId
+  return typeof value === 'string' && value.trim().length > 0 ? value : undefined
 }
 
 function requiredText(value: string, label: string): string {

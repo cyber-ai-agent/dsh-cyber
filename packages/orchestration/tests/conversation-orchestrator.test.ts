@@ -177,6 +177,7 @@ describe('ConversationOrchestrator', () => {
       worldId: company.id,
       employeeId: employee.id,
       prompt: '检查登录性能',
+      metadata: { clientTurnId: 'client-turn-direct' },
     })
     await orchestrator.direct({
       workspaceId: workspace.id,
@@ -184,11 +185,13 @@ describe('ConversationOrchestrator', () => {
       employeeId: employee.id,
       sessionId: first.session.id,
       prompt: '继续给出验收标准',
+      metadata: { clientTurnId: 'client-turn-direct' },
     })
 
     expect(runtime.calls).toHaveLength(2)
     expect(store.getEmployee(employee.id)?.agentSessionId).toBe(`agent-${employee.id}`)
     expect(realtime.some((event) => event.kind === 'reasoning.delta')).toBe(true)
+    expect(realtime.every((event) => event.metadata.clientTurnId === 'client-turn-direct')).toBe(true)
     expect(durableAtEmit
       .filter((item) => ['turn.started', 'tool.started', 'assistant.message', 'turn.completed'].includes(item.kind))
       .every((item) => item.persisted)).toBe(true)

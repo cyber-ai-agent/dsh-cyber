@@ -88,11 +88,16 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     const explicitIds = optionalStringArray(body.employeeIds)
     const employeeIds = explicitIds.length > 0 ? explicitIds : mentionedEmployeeIds(prompt, store.listEmployees(world.id))
     if (employeeIds.length === 0) throw new HttpError(422, 'agent_required', '请选择或 @ 至少一个角色')
+    const clientTurnId = optionalString(body.clientTurnId)
+    if (clientTurnId !== undefined && clientTurnId.length > 128) {
+      throw new HttpError(422, 'invalid_client_turn_id', 'clientTurnId cannot exceed 128 characters')
+    }
     const metadata: JsonObject = {
       participantIds: employeeIds,
       permissionMode,
       interactionKind: body.interactionKind === 'task' || body.interactionKind === 'meeting' ? body.interactionKind : 'chat',
       ...(attachments.length === 0 ? {} : { attachments: attachments.map(chatAttachmentJson) }),
+      ...(clientTurnId === undefined ? {} : { clientTurnId }),
     }
     const title = optionalString(body.title)
     const requestedSessionId = optionalString(body.sessionId)

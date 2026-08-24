@@ -331,6 +331,7 @@ describe('Cyber local server', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         prompt: `@${engineer.displayName} @${archivist.displayName} 讨论登录性能与历史证据`,
+        clientTurnId: 'client-turn-group',
       }),
     })
     expect(chat.response.status).toBe(200)
@@ -346,6 +347,7 @@ describe('Cyber local server', () => {
       'turn.started', 'assistant.reasoning', 'tool.started', 'tool.completed', 'assistant.message', 'turn.completed',
       'turn.started', 'assistant.reasoning', 'tool.started', 'tool.completed', 'assistant.message', 'turn.completed',
     ])
+    expect(runtimeEvents.every((item) => item.event.metadata.clientTurnId === 'client-turn-group')).toBe(true)
 
     await first.server.close()
     servers.splice(servers.indexOf(first.server), 1)
@@ -360,6 +362,9 @@ describe('Cyber local server', () => {
     expect(messages.body.items.filter((item: { kind: string }) => item.kind === 'reasoning')).toHaveLength(2)
     expect(messages.body.items.filter((item: { kind: string }) => item.kind === 'tool-call')).toHaveLength(2)
     expect(messages.body.items.filter((item: { kind: string }) => item.kind === 'tool-result')).toHaveLength(2)
+    expect(messages.body.items
+      .filter((item: { kind: string }) => item.kind === 'user' || item.kind === 'assistant')
+      .every((item: { metadata: { clientTurnId?: string } }) => item.metadata.clientTurnId === 'client-turn-group')).toBe(true)
     expect(worldSnapshot.body.employees.every((item: { agentSessionId?: string }) => item.agentSessionId)).toBe(true)
   })
 

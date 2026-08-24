@@ -1260,3 +1260,24 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .ambient-life-dialog > footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 22px; border-top: 1px solid var(--border-subtle); color: var(--text-muted); }
 .ambient-life-dialog > footer > div { display: flex; gap: 9px; }
 @media (max-width: 760px) { .ambient-life-grid { grid-template-columns: 1fr; } .ambient-life-dialog > footer { align-items: stretch; flex-direction: column; } }
+
+/* Realtime conversation UX: streamed answers stay readable while the composer remains available. */
+.message--streaming .message__content {
+  border-color: color-mix(in srgb, var(--info) 52%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--info) 18%, transparent), 0 4px 16px rgb(0 0 0 / 14%);
+}
+.stream-placeholder { color: var(--text-muted); font-size: var(--text-sm); }
+.stream-cursor {
+  display: inline-block; width: 7px; height: 1.05em; margin-left: 3px; vertical-align: -2px;
+  background: var(--info); border-radius: 2px; animation: stream-cursor-blink 900ms steps(1, end) infinite;
+}
+.stream-state { flex-wrap: wrap; row-gap: 4px; }
+.stream-state strong { margin-left: auto; color: var(--text-soft); font-size: var(--text-xs); font-weight: 600; }
+.send-button { position: relative; }
+.send-button__queue {
+  position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px; padding: 0 4px;
+  display: grid; place-items: center; border: 2px solid var(--surface-1); border-radius: 999px;
+  color: #071116; background: var(--info); font-size: 10px; line-height: 1; font-weight: 750;
+}
+@keyframes stream-cursor-blink { 0%, 48% { opacity: 1; } 49%, 100% { opacity: .18; } }
+@media (prefers-reduced-motion: reduce) { .stream-cursor { animation: none; } }

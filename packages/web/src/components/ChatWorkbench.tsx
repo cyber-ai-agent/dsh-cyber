@@ -29,7 +29,9 @@ interface ChatWorkbenchProps {
   messages: WorkMessage[]
   employees: CyberEmployee[]
   installedPlugins?: InstalledPluginCommand[]
-  sending: boolean
+  sending?: boolean
+  pendingCount?: number
+  queuedCount?: number
   draft: string
   focusRequest?: number
   onDraftChange(value: string): void
@@ -41,7 +43,7 @@ interface ChatWorkbenchProps {
   onOpenPluginMarket?(): void
 }
 
-export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, installedPlugins = [], sending, draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRecruit, onOpenPluginMarket }: ChatWorkbenchProps) {
+export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, installedPlugins = [], sending = false, pendingCount = 0, queuedCount = 0, draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRecruit, onOpenPluginMarket }: ChatWorkbenchProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -60,8 +62,8 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
     const container = scrollRef.current
     if (container === null) return
     const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 160
-    if (nearBottom || sending) container.scrollTop = container.scrollHeight
-  }, [visibleMessages, sending])
+    if (nearBottom || pendingCount > 0 || sending) container.scrollTop = container.scrollHeight
+  }, [visibleMessages, pendingCount, sending])
 
   useEffect(() => {
     if (focusRequest > 0) inputRef.current?.focus()
@@ -121,7 +123,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
         <div className="chat-header__count"><span>{visibleMessages.length} 条消息</span></div>
       </header>
 
-      <div className="message-scroll" ref={scrollRef} aria-live="polite" aria-busy={sending}>
+      <div className="message-scroll" ref={scrollRef} aria-live="polite" aria-busy={pendingCount > 0 || sending}>
         {visibleMessages.length === 0 ? (
           <div className="conversation-empty">
             <TerminalWindow size={34} />
@@ -131,13 +133,14 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
         ) : visibleMessages.map((message, index) => {
           const employee = employees.find((item) => item.id === message.senderId)
           const owner = message.senderKind === 'owner'
+          const streaming = message.metadata.streaming === true
           if (message.kind === 'system') return <div key={message.id} className="chat-system-notice" role="status">{message.content}</div>
           return (
-            <article key={message.id} className={`message${owner ? ' message--owner' : ''}`}>
+            <article key={message.id} className={`message${owner ? ' message--owner' : ''}${streaming ? ' message--streaming' : ''}`}>
               {owner ? null : <button className="avatar-button" type="button" onClick={() => employee && onOpenDossier(employee.id)} aria-label={`查看${employee?.displayName ?? experience.personLabel}档案`}><Avatar index={employee?.avatarIndex ?? 7} label={employee?.displayName ?? '角色'} /></button>}
               <div className="message__body">
                 <header className="message__meta">{owner ? <span className="sr-only">我的消息</span> : <><strong>{employee?.displayName ?? experience.personLabel}</strong><span>{employee?.role}</span></>}<time>{displayTime(message)}</time></header>
-                <div className="message__content"><RichText value={message.content} /></div>
+                <div className="message__content">{streaming && message.content.length === 0 ? <span className="stream-placeholder">正在生成回复…</span> : <RichText value={message.content} />}{streaming ? <span className="stream-cursor" aria-hidden="true" /> : null}</div>
                 <MessageAttachments attachments={messageAttachments(message.metadata)} />
                 {demoMode && experience.kind === 'company' && index === 1 ? <ArtifactAttachment onOpen={onOpenArtifact} /> : null}
               </div>
@@ -145,7 +148,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
             </article>
           )
         })}
-        {sending ? <div className="stream-state"><CircleNotch size={16} className="spin" /><span>处理中…</span></div> : null}
+        {pendingCount > 0 ? <div className="stream-state" role="status"><CircleNotch size={16} className="spin" /><span>角色正在回复，你可以继续补充，也可以切换到其他会话。</span>{queuedCount > 0 ? <strong>另有 {queuedCount} 条已排队</strong> : null}</div> : sending ? <div className="stream-state" role="status"><CircleNotch size={16} className="spin" /><span>处理中…</span></div> : null}
       </div>
 
       <div className="composer-zone"><div className="composer">
@@ -157,7 +160,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
           <input ref={fileInputRef} className="composer-file-input" type="file" accept=".png,.jpg,.jpeg,.webp,.txt,.md,.json,.pdf" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAttachment(file) }} />
           <button className="icon-button" type="button" aria-label={uploading ? '正在上传附件' : '添加附件'} disabled={uploading} onClick={() => fileInputRef.current?.click()}>{uploading ? <CircleNotch size={18} className="spin" /> : <Paperclip size={18} />}</button>
           <PluginPicker plugins={installedPlugins} draft={draft} onDraftChange={onDraftChange} {...(onOpenPluginMarket === undefined ? {} : { onOpenMarket: onOpenPluginMarket })} onFocus={() => inputRef.current?.focus()} />
-        </div><button className="send-button" type="button" aria-label={sending ? '角色处理中' : '发送'} disabled={sending || uploading || employees.length === 0 || (!draft.trim() && attachments.length === 0)} onClick={() => void submit()}>{sending ? <CircleNotch size={19} className="spin" /> : <PaperPlaneRight size={19} weight="fill" />}</button></div>
+        </div><button className="send-button" type="button" aria-label={sending ? '角色处理中' : '发送'} disabled={sending || uploading || employees.length === 0 || (!draft.trim() && attachments.length === 0)} onClick={() => void submit()}>{sending ? <CircleNotch size={19} className="spin" /> : <PaperPlaneRight size={19} weight="fill" />}{queuedCount > 0 ? <span className="send-button__queue" aria-label={`${queuedCount} 条消息已排队`}>{queuedCount}</span> : null}</button></div>
       </div></div>
     </section>
   )
