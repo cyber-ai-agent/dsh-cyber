@@ -64,6 +64,7 @@ import { WorldTraceService } from './services/world-trace-service.js'
 import { WorldMarketplaceService } from './services/world-marketplace-service.js'
 import { createBuiltinSkillRegistry } from './skills/builtin-skill-registry.js'
 import { LocalSkillActionRepository } from './skills/local-skill-action-repository.js'
+import { SqliteSkillActionRepository } from './skills/sqlite-skill-action-repository.js'
 import type { CharacterSkillActionRepository } from './skills/skill-action-repository.js'
 import type { CharacterSkillAdapterRegistry } from './skills/skill-adapter.js'
 import { RuntimeStreamHub } from './streams/runtime-stream-hub.js'
@@ -192,8 +193,20 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     service: ambientLifeRuntime,
   })
   const skillRegistry = options.skillRegistry ?? createBuiltinSkillRegistry()
-  const skillActions = options.skillActionRepository
-    ?? new LocalSkillActionRepository(join(stateRoot, 'skills', 'actions.json'))
+  let skillActions = options.skillActionRepository
+  if (skillActions === undefined) {
+    const sqliteActions = new SqliteSkillActionRepository(store)
+    const legacyActions = new LocalSkillActionRepository(join(stateRoot, 'skills', 'actions.json'))
+    for (const workspace of store.listWorkspaces()) {
+      for (const world of store.listWorlds(workspace.id, true)) {
+        for (const action of await legacyActions.listByWorld(world.id)) {
+          await sqliteActions.reserve(action, 0)
+        }
+      }
+    }
+    store.recoverSkillActionsAfterRestart()
+    skillActions = sqliteActions
+  }
   const skillRuntime = new CharacterSkillRuntime(store, {
     registry: skillRegistry,
     actions: skillActions,

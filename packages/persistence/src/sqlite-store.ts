@@ -46,6 +46,12 @@ import {
   type SkillEvidenceKind,
   type SkillEvidenceOutcome,
   type AgentRun,
+  type ApprovalPolicy,
+  type ApprovalRequest,
+  type ApprovalRisk,
+  type ApprovalScope,
+  type ApprovalStatus,
+  type ApprovalSubjectType,
   type WorkTurn,
   type WorkTurnInteractionKind,
   type WorkMessage,
@@ -63,6 +69,7 @@ import {
   type WorkspacePreferences,
   type WorkspaceSnapshot,
 } from '@dsh-cyber/contracts'
+import type { CharacterSkillAction } from '@dsh-cyber/contracts/skill-runtime'
 
 import { DatabaseCorruptError, EntityNotFoundError, PersistenceError } from './errors.js'
 import { migrate, readUserVersion } from './migrations.js'
@@ -261,6 +268,34 @@ export interface ConversationRuntimeRecoveryReport {
   runsFailed: number
 }
 
+export interface CreateApprovalRequestInput {
+  workspaceId: string
+  worldId: string
+  sessionId?: string
+  workTurnId?: string
+  agentRunId?: string
+  characterId?: string
+  subjectType: ApprovalSubjectType
+  subjectId: string
+  risk: ApprovalRisk
+  summary: string
+  createdAt?: string
+  expiresAt: string
+}
+
+export interface CreateApprovalPolicyInput {
+  workspaceId: string
+  worldId: string
+  characterId?: string
+  subjectType: ApprovalSubjectType
+  skillId?: string
+  action: string
+  target: string
+  risk: ApprovalRisk
+  scope: Exclude<ApprovalScope, 'once'>
+  sourceApprovalId: string
+}
+
 export interface AppendMessageInput {
   sessionId: string
   senderId: string
@@ -375,6 +410,9 @@ const KNOWN_TABLES = [
   'work_sessions',
   'work_turns',
   'agent_runs',
+  'skill_actions',
+  'approval_requests',
+  'approval_policies',
   'work_session_participants',
   'messages',
   'installed_packages',
@@ -2140,6 +2178,265 @@ export class SqliteStore {
     })
   }
 
+  reserveSkillAction(action: CharacterSkillAction, duplicateWindowMs: number): { action: CharacterSkillAction; created: boolean } {
+    this.#assertWritable()
+    if (!Number.isSafeInteger(duplicateWindowMs) || duplicateWindowMs < 0) throw new PersistenceError('Skill duplicate window is invalid')
+    const world = this.#requireWorld(action.worldId)
+    const employee = this.#requireEmployee(action.characterId)
+    if (employee.worldId !== world.id || employee.workspaceId !== world.workspaceId) throw new PersistenceError('Skill action scope is invalid')
+    return this.#transaction(() => {
+      const existingId = this.getSkillAction(action.id)
+      if (existingId !== undefined) return { action: existingId, created: false }
+      const cutoff = new Date(Date.parse(action.createdAt) - duplicateWindowMs).toISOString()
+      const duplicate = this.database.prepare(
+        `SELECT * FROM skill_actions
+         WHERE world_id = ? AND character_id = ? AND skill_id = ? AND adapter_id = ?
+           AND action = ? AND target = ? AND scheduled_for IS ? AND created_at > ?
+         ORDER BY created_at DESC LIMIT 1`,
+      ).get(action.worldId, action.characterId, action.skillId, action.adapterId, action.action,
+        action.target, action.scheduledFor ?? null, cutoff)
+      if (duplicate !== undefined) return { action: mapSkillAction(duplicate), created: false }
+      this.database.prepare(
+        `INSERT INTO skill_actions
+         (id, workspace_id, world_id, character_id, skill_id, adapter_id, action, target, label,
+          risk, authorization, parameters_json, scheduled_for, approval_request_id, work_turn_id,
+          agent_run_id, status, detail, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(action.id, world.workspaceId, action.worldId, action.characterId, action.skillId,
+        action.adapterId, action.action, action.target, action.label, action.risk, action.authorization,
+        stringifyJson(action.parameters), action.scheduledFor ?? null, action.approvalRequestId ?? null,
+        action.workTurnId ?? null, action.agentRunId ?? null, action.status, action.detail,
+        action.createdAt, action.updatedAt)
+      return { action: structuredClone(action), created: true }
+    })
+  }
+
+  saveSkillAction(action: CharacterSkillAction): void {
+    this.#assertWritable()
+    const result = this.database.prepare(
+      `UPDATE skill_actions SET status = ?, detail = ?, authorization = ?, approval_request_id = ?, work_turn_id = ?,
+       agent_run_id = ?, updated_at = ? WHERE id = ?`,
+    ).run(action.status, action.detail, action.authorization, action.approvalRequestId ?? null, action.workTurnId ?? null,
+      action.agentRunId ?? null, action.updatedAt, action.id)
+    if (Number(result.changes) !== 1) throw new EntityNotFoundError(`Skill action not found: ${action.id}`)
+  }
+
+  getSkillAction(actionId: string): CharacterSkillAction | undefined {
+    const row = this.database.prepare('SELECT * FROM skill_actions WHERE id = ?').get(actionId)
+    return row === undefined ? undefined : mapSkillAction(row)
+  }
+
+  listWorldSkillActions(worldId: string): CharacterSkillAction[] {
+    this.#requireWorld(worldId)
+    return this.database.prepare(
+      'SELECT * FROM skill_actions WHERE world_id = ? ORDER BY created_at DESC, id DESC',
+    ).all(worldId).map(mapSkillAction)
+  }
+
+  listDueSkillActions(now: Date): CharacterSkillAction[] {
+    return this.database.prepare(
+      `SELECT * FROM skill_actions WHERE status = 'scheduled' AND scheduled_for <= ? ORDER BY scheduled_for, id`,
+    ).all(now.toISOString()).map(mapSkillAction)
+  }
+
+  listSkillActionsWaitingForApproval(): CharacterSkillAction[] {
+    return this.database.prepare(
+      `SELECT * FROM skill_actions WHERE status = 'waiting-for-approval' ORDER BY created_at, id`,
+    ).all().map(mapSkillAction)
+  }
+
+  createApprovalRequest(input: CreateApprovalRequestInput): ApprovalRequest {
+    this.#assertWritable()
+    const world = this.#requireWorld(input.worldId)
+    if (world.workspaceId !== input.workspaceId) throw new PersistenceError('Approval workspace does not match world')
+    if (input.characterId !== undefined) {
+      const employee = this.#requireEmployee(input.characterId)
+      if (employee.worldId !== world.id) throw new PersistenceError('Approval character does not match world')
+    }
+    if (input.sessionId !== undefined) {
+      const session = this.getSession(input.sessionId)
+      if (session === undefined || session.worldId !== world.id) throw new PersistenceError('Approval session does not match world')
+    }
+    if (input.workTurnId !== undefined) {
+      const turn = this.getWorkTurn(input.workTurnId)
+      if (turn === undefined || turn.worldId !== world.id || (input.sessionId !== undefined && turn.sessionId !== input.sessionId)) {
+        throw new PersistenceError('Approval turn does not match scope')
+      }
+    }
+    if (input.agentRunId !== undefined) {
+      const run = this.getAgentRun(input.agentRunId)
+      if (run === undefined || run.worldId !== world.id || (input.workTurnId !== undefined && run.turnId !== input.workTurnId)) {
+        throw new PersistenceError('Approval run does not match scope')
+      }
+    }
+    const existing = this.getApprovalRequestBySubject(input.subjectType, input.subjectId)
+    if (existing !== undefined) {
+      if (existing.workspaceId !== input.workspaceId || existing.worldId !== input.worldId
+        || existing.characterId !== input.characterId || existing.risk !== input.risk) {
+        throw new PersistenceError('Approval subject is already bound to another scope')
+      }
+      return existing
+    }
+    const createdAt = input.createdAt ?? this.#clock()
+    if (!Number.isFinite(Date.parse(createdAt))) throw new PersistenceError('Approval creation time is invalid')
+    if (!Number.isFinite(Date.parse(input.expiresAt)) || Date.parse(input.expiresAt) <= Date.parse(createdAt)) {
+      throw new PersistenceError('Approval expiry is invalid')
+    }
+    const request: ApprovalRequest = {
+      id: this.#idFactory(), workspaceId: input.workspaceId, worldId: input.worldId,
+      subjectType: input.subjectType, subjectId: input.subjectId, risk: input.risk,
+      summary: input.summary.trim(), status: 'pending', scope: 'once', createdAt, expiresAt: input.expiresAt,
+      ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
+      ...(input.workTurnId === undefined ? {} : { workTurnId: input.workTurnId }),
+      ...(input.agentRunId === undefined ? {} : { agentRunId: input.agentRunId }),
+      ...(input.characterId === undefined ? {} : { characterId: input.characterId }),
+    }
+    if (!request.summary) throw new PersistenceError('Approval summary cannot be empty')
+    this.database.prepare(
+      `INSERT INTO approval_requests
+       (id, workspace_id, world_id, session_id, work_turn_id, agent_run_id, character_id,
+        subject_type, subject_id, risk, summary, status, scope, created_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(request.id, request.workspaceId, request.worldId, request.sessionId ?? null,
+      request.workTurnId ?? null, request.agentRunId ?? null, request.characterId ?? null,
+      request.subjectType, request.subjectId, request.risk, request.summary, request.status,
+      request.scope, request.createdAt, request.expiresAt)
+    return request
+  }
+
+  getApprovalRequest(approvalId: string): ApprovalRequest | undefined {
+    const row = this.database.prepare('SELECT * FROM approval_requests WHERE id = ?').get(approvalId)
+    return row === undefined ? undefined : mapApprovalRequest(row)
+  }
+
+  getApprovalRequestBySubject(subjectType: ApprovalSubjectType, subjectId: string): ApprovalRequest | undefined {
+    const row = this.database.prepare(
+      'SELECT * FROM approval_requests WHERE subject_type = ? AND subject_id = ?',
+    ).get(subjectType, subjectId)
+    return row === undefined ? undefined : mapApprovalRequest(row)
+  }
+
+  listWorldApprovalRequests(worldId: string, status?: ApprovalStatus): ApprovalRequest[] {
+    this.#requireWorld(worldId)
+    const rows = status === undefined
+      ? this.database.prepare('SELECT * FROM approval_requests WHERE world_id = ? ORDER BY created_at DESC, id DESC').all(worldId)
+      : this.database.prepare('SELECT * FROM approval_requests WHERE world_id = ? AND status = ? ORDER BY created_at DESC, id DESC').all(worldId, status)
+    return rows.map(mapApprovalRequest)
+  }
+
+  decideApprovalRequest(approvalId: string, decision: 'approved' | 'rejected', scope: ApprovalScope, actorId: string, now = this.#clock()): ApprovalRequest {
+    this.#assertWritable()
+    if (!['once', 'character', 'world'].includes(scope)) throw new PersistenceError('Approval scope is invalid')
+    if (!actorId.trim()) throw new PersistenceError('Approval actor is required')
+    return this.#transaction(() => {
+      const request = this.getApprovalRequest(approvalId)
+      if (request === undefined) throw new EntityNotFoundError(`Approval request not found: ${approvalId}`)
+      if (request.status !== 'pending') throw new PersistenceError(`Approval request is already ${request.status}`)
+      if (Date.parse(request.expiresAt) <= Date.parse(now)) {
+        this.database.prepare(
+          `UPDATE approval_requests SET status = 'expired', decided_at = ?, decided_by = ? WHERE id = ? AND status = 'pending'`,
+        ).run(now, 'system', approvalId)
+        return this.getApprovalRequest(approvalId)!
+      }
+      this.database.prepare(
+        `UPDATE approval_requests SET status = ?, scope = ?, decided_at = ?, decided_by = ?
+         WHERE id = ? AND status = 'pending'`,
+      ).run(decision, decision === 'rejected' ? 'once' : scope, now, actorId, approvalId)
+      if (this.getApprovalRequest(approvalId)?.status !== decision) throw new PersistenceError('Approval decision lost a concurrent race')
+      return this.getApprovalRequest(approvalId)!
+    })
+  }
+
+  expirePendingApprovals(now = this.#clock()): number {
+    this.#assertWritable()
+    return Number(this.database.prepare(
+      `UPDATE approval_requests SET status = 'expired', decided_at = ?, decided_by = 'system'
+       WHERE status = 'pending' AND expires_at <= ?`,
+    ).run(now, now).changes)
+  }
+
+  createApprovalPolicy(input: CreateApprovalPolicyInput): ApprovalPolicy {
+    this.#assertWritable()
+    const approval = this.getApprovalRequest(input.sourceApprovalId)
+    if (approval === undefined || approval.status !== 'approved') throw new PersistenceError('Approval policy requires an approved request')
+    if (approval.workspaceId !== input.workspaceId || approval.worldId !== input.worldId
+      || approval.subjectType !== input.subjectType || approval.risk !== input.risk || approval.scope !== input.scope) {
+      throw new PersistenceError('Approval policy does not match its source approval')
+    }
+    if (input.scope === 'character' && !input.characterId) throw new PersistenceError('Character approval policy requires a character')
+    if (input.scope === 'character' && approval.characterId !== input.characterId) throw new PersistenceError('Approval policy character does not match')
+    if (input.subjectType === 'skill-action') {
+      const action = this.getSkillAction(approval.subjectId)
+      if (action === undefined || action.worldId !== input.worldId || action.characterId !== approval.characterId
+        || action.skillId !== input.skillId || action.action !== input.action || action.target !== input.target || action.risk !== input.risk) {
+        throw new PersistenceError('Approval policy must exactly match the approved skill action')
+      }
+    }
+    const policy: ApprovalPolicy = {
+      id: this.#idFactory(), workspaceId: input.workspaceId, worldId: input.worldId,
+      subjectType: input.subjectType, action: input.action.trim(), target: input.target.trim(),
+      risk: input.risk, scope: input.scope, sourceApprovalId: input.sourceApprovalId,
+      createdAt: this.#clock(),
+      ...(input.characterId === undefined ? {} : { characterId: input.characterId }),
+      ...(input.skillId === undefined ? {} : { skillId: input.skillId }),
+    }
+    if (!policy.action || !policy.target) throw new PersistenceError('Approval policy action and target are required')
+    this.database.prepare(
+      `INSERT INTO approval_policies
+       (id, workspace_id, world_id, character_id, subject_type, skill_id, action, target, risk,
+        scope, source_approval_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(policy.id, policy.workspaceId, policy.worldId, policy.characterId ?? null,
+      policy.subjectType, policy.skillId ?? null, policy.action, policy.target, policy.risk,
+      policy.scope, policy.sourceApprovalId, policy.createdAt)
+    return policy
+  }
+
+  findApprovalPolicy(input: Omit<CreateApprovalPolicyInput, 'scope' | 'sourceApprovalId'>): ApprovalPolicy | undefined {
+    const world = this.#requireWorld(input.worldId)
+    if (world.workspaceId !== input.workspaceId) throw new PersistenceError('Approval policy workspace does not match world')
+    const row = this.database.prepare(
+      `SELECT * FROM approval_policies
+       WHERE world_id = ? AND subject_type = ? AND skill_id IS ? AND action = ? AND target = ?
+         AND risk = ? AND revoked_at IS NULL
+         AND ((scope = 'character' AND character_id = ?) OR scope = 'world')
+       ORDER BY CASE scope WHEN 'character' THEN 0 ELSE 1 END, created_at DESC LIMIT 1`,
+    ).get(input.worldId, input.subjectType, input.skillId ?? null, input.action, input.target,
+      input.risk, input.characterId ?? null)
+    return row === undefined ? undefined : mapApprovalPolicy(row)
+  }
+
+  listWorldApprovalPolicies(worldId: string): ApprovalPolicy[] {
+    this.#requireWorld(worldId)
+    return this.database.prepare(
+      'SELECT * FROM approval_policies WHERE world_id = ? ORDER BY created_at DESC, id DESC',
+    ).all(worldId).map(mapApprovalPolicy)
+  }
+
+  getApprovalPolicy(policyId: string): ApprovalPolicy | undefined {
+    const row = this.database.prepare('SELECT * FROM approval_policies WHERE id = ?').get(policyId)
+    return row === undefined ? undefined : mapApprovalPolicy(row)
+  }
+
+  revokeApprovalPolicy(policyId: string, now = this.#clock()): ApprovalPolicy {
+    this.#assertWritable()
+    const result = this.database.prepare(
+      'UPDATE approval_policies SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL',
+    ).run(now, policyId)
+    if (Number(result.changes) !== 1) throw new PersistenceError('Approval policy is unavailable')
+    const row = this.database.prepare('SELECT * FROM approval_policies WHERE id = ?').get(policyId)
+    return mapApprovalPolicy(row!)
+  }
+
+  recoverSkillActionsAfterRestart(now = this.#clock()): number {
+    this.#assertWritable()
+    return Number(this.database.prepare(
+      `UPDATE skill_actions SET status = 'outcome-unknown',
+       detail = '应用在外部动作执行期间中断，结果未知；不得自动重试', updated_at = ?
+       WHERE status = 'waiting-for-integration'`,
+    ).run(now).changes)
+  }
+
   listParticipants(sessionId: string): WorkSessionParticipant[] {
     return this.database
       .prepare('SELECT * FROM work_session_participants WHERE session_id = ? ORDER BY joined_at, participant_id')
@@ -3035,6 +3332,9 @@ export class SqliteStore {
         modelInteractionLogs: countRows(this.database, 'model_interaction_logs'),
         taskSchedules: countRows(this.database, 'task_schedules'),
         taskScheduleRuns: countRows(this.database, 'task_schedule_runs'),
+        approvalRequests: countRows(this.database, 'approval_requests'),
+        approvalPolicies: countRows(this.database, 'approval_policies'),
+        skillActions: countRows(this.database, 'skill_actions'),
         events: countRows(this.database, 'domain_events'),
         outbox: countRows(this.database, 'sync_outbox'),
       },
@@ -3964,6 +4264,65 @@ function mapAgentRun(row: object): AgentRun {
   if (typeof value.started_at === 'string') run.startedAt = value.started_at
   if (typeof value.completed_at === 'string') run.completedAt = value.completed_at
   return run
+}
+
+function mapSkillAction(row: object): CharacterSkillAction {
+  const value = row as Record<string, unknown>
+  const action: CharacterSkillAction = {
+    id: String(value.id),
+    worldId: String(value.world_id),
+    characterId: String(value.character_id),
+    skillId: String(value.skill_id),
+    adapterId: String(value.adapter_id),
+    action: String(value.action),
+    target: String(value.target),
+    label: String(value.label),
+    risk: value.risk as CharacterSkillAction['risk'],
+    authorization: value.authorization as CharacterSkillAction['authorization'],
+    parameters: parseJson<CharacterSkillAction['parameters']>(value.parameters_json),
+    status: value.status as CharacterSkillAction['status'],
+    detail: String(value.detail),
+    createdAt: String(value.created_at),
+    updatedAt: String(value.updated_at),
+  }
+  if (typeof value.scheduled_for === 'string') action.scheduledFor = value.scheduled_for
+  if (typeof value.approval_request_id === 'string') action.approvalRequestId = value.approval_request_id
+  if (typeof value.work_turn_id === 'string') action.workTurnId = value.work_turn_id
+  if (typeof value.agent_run_id === 'string') action.agentRunId = value.agent_run_id
+  return action
+}
+
+function mapApprovalRequest(row: object): ApprovalRequest {
+  const value = row as Record<string, unknown>
+  const request: ApprovalRequest = {
+    id: String(value.id), workspaceId: String(value.workspace_id), worldId: String(value.world_id),
+    subjectType: value.subject_type as ApprovalSubjectType, subjectId: String(value.subject_id),
+    risk: value.risk as ApprovalRisk, summary: String(value.summary),
+    status: value.status as ApprovalStatus, scope: value.scope as ApprovalScope,
+    createdAt: String(value.created_at), expiresAt: String(value.expires_at),
+  }
+  if (typeof value.session_id === 'string') request.sessionId = value.session_id
+  if (typeof value.work_turn_id === 'string') request.workTurnId = value.work_turn_id
+  if (typeof value.agent_run_id === 'string') request.agentRunId = value.agent_run_id
+  if (typeof value.character_id === 'string') request.characterId = value.character_id
+  if (typeof value.decided_at === 'string') request.decidedAt = value.decided_at
+  if (typeof value.decided_by === 'string') request.decidedBy = value.decided_by
+  return request
+}
+
+function mapApprovalPolicy(row: object): ApprovalPolicy {
+  const value = row as Record<string, unknown>
+  const policy: ApprovalPolicy = {
+    id: String(value.id), workspaceId: String(value.workspace_id), worldId: String(value.world_id),
+    subjectType: value.subject_type as ApprovalSubjectType, action: String(value.action),
+    target: String(value.target), risk: value.risk as ApprovalRisk,
+    scope: value.scope as ApprovalPolicy['scope'], sourceApprovalId: String(value.source_approval_id),
+    createdAt: String(value.created_at),
+  }
+  if (typeof value.character_id === 'string') policy.characterId = value.character_id
+  if (typeof value.skill_id === 'string') policy.skillId = value.skill_id
+  if (typeof value.revoked_at === 'string') policy.revokedAt = value.revoked_at
+  return policy
 }
 
 function mapParticipant(row: object): WorkSessionParticipant {

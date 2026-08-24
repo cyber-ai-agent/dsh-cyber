@@ -38,10 +38,12 @@ const RISKS = new Set<SkillActionRisk>(['read', 'write-local', 'external-side-ef
 const AUTHORIZATIONS = new Set<SkillActionAuthorization>(['explicit-user-request', 'preapproved-policy'])
 const STATUSES = new Set<SkillActionStatus>([
   'scheduled',
+  'waiting-for-approval',
   'executed',
   'waiting-for-integration',
   'failed',
   'outcome-unknown',
+  'rejected',
 ])
 
 /**
@@ -94,6 +96,13 @@ export class LocalSkillActionRepository implements CharacterSkillActionRepositor
     })
   }
 
+  get(actionId: string): Promise<CharacterSkillAction | undefined> {
+    return this.#serial(async () => {
+      const action = (await this.#readUnlocked()).actions.find((item) => item.id === actionId)
+      return action === undefined ? undefined : clone(action)
+    })
+  }
+
   listByWorld(worldId: string): Promise<CharacterSkillAction[]> {
     return this.#serial(async () => {
       const file = await this.#readUnlocked()
@@ -115,6 +124,12 @@ export class LocalSkillActionRepository implements CharacterSkillActionRepositor
         )
         .map(clone)
     })
+  }
+
+  listWaitingForApproval(): Promise<CharacterSkillAction[]> {
+    return this.#serial(async () => (await this.#readUnlocked()).actions
+      .filter((item) => item.status === 'waiting-for-approval')
+      .map(clone))
   }
 
   #serial<T>(operation: () => Promise<T>): Promise<T> {
@@ -170,6 +185,9 @@ function parseAction(value: unknown, path: string): CharacterSkillAction {
   if (!AUTHORIZATIONS.has(authorization)) throw new Error(`Invalid ${path}.authorization`)
   const parameters = jsonObject(input.parameters, `${path}.parameters`)
   const scheduledFor = optionalString(input.scheduledFor, `${path}.scheduledFor`)
+  const approvalRequestId = optionalString(input.approvalRequestId, `${path}.approvalRequestId`)
+  const workTurnId = optionalString(input.workTurnId, `${path}.workTurnId`)
+  const agentRunId = optionalString(input.agentRunId, `${path}.agentRunId`)
   const action: CharacterSkillAction = {
     id: string(input.id, `${path}.id`),
     worldId: string(input.worldId, `${path}.worldId`),
@@ -188,6 +206,9 @@ function parseAction(value: unknown, path: string): CharacterSkillAction {
     updatedAt: iso(input.updatedAt, `${path}.updatedAt`),
   }
   if (scheduledFor !== undefined) action.scheduledFor = iso(scheduledFor, `${path}.scheduledFor`)
+  if (approvalRequestId !== undefined) action.approvalRequestId = approvalRequestId
+  if (workTurnId !== undefined) action.workTurnId = workTurnId
+  if (agentRunId !== undefined) action.agentRunId = agentRunId
   return action
 }
 
