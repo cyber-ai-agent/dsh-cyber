@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
 import type { ConversationRealtimeEnvelope } from '@dsh-cyber/orchestration'
-import type { WorldTraceEntry } from '@dsh-cyber/contracts'
+import type { WorldRuntimeStreamEnvelope, WorldTraceEntry } from '@dsh-cyber/contracts'
 
 interface RuntimeStreamClient {
   worldId: string
@@ -51,6 +51,15 @@ export class RuntimeStreamHub {
       for (const entry of entries) {
         client.response.write(`event: trace\ndata: ${JSON.stringify(entry)}\n\n`)
       }
+    }
+  }
+
+  publishWorld(event: WorldRuntimeStreamEnvelope): void {
+    const eventName = event.kind === 'runtime' ? 'world-runtime' : event.kind
+    const data = JSON.stringify(event)
+    for (const client of this.#clients) {
+      if (client.worldId !== event.worldId) continue
+      client.response.write(`event: ${eventName}\ndata: ${data}\n\n`)
     }
   }
 

@@ -2245,9 +2245,10 @@ export class SqliteStore {
       const page = Math.max(1, Math.floor(input.page ?? 1))
       const offset = (page - 1) * pageSize
       const rows = this.database
-        .prepare(`SELECT * FROM messages WHERE ${where} ORDER BY sequence LIMIT ? OFFSET ?`)
+        .prepare(`SELECT * FROM messages WHERE ${where} ORDER BY sequence DESC LIMIT ? OFFSET ?`)
         .all(...parameters, pageSize, offset)
         .map(mapMessage)
+        .reverse()
       return {
         items: rows,
         total,

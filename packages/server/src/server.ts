@@ -166,7 +166,10 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const worldRuntime = new WorldRuntimeService({
     store,
     simulationStore: worldSimulation,
-    publish: (event) => worldStreamHub.publish(event),
+    publish: (event) => {
+      worldStreamHub.publish(event)
+      runtimeStreamHub.publishWorld(event)
+    },
   })
   const worldMarketplace = new WorldMarketplaceService(store, worldRuntime)
   const ambientSlotResolver = new WorldAmbientSlotResolver({ store })

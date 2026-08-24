@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { WorldTraceEntry, WorldTracePage } from '@dsh-cyber/contracts'
 
 import { api } from '../../api.js'
+import { subscribeWorldLive } from '../../world-live-client.js'
 
 export interface UseWorldTraceResult {
   entries: WorldTraceEntry[]
@@ -42,7 +43,6 @@ export function useWorldTrace(worldId: string, demoMode: boolean): UseWorldTrace
 
   useEffect(() => {
     if (demoMode) return
-    const stream = new EventSource(`/api/worlds/${encodeURIComponent(worldId)}/live`)
     const onTrace = (raw: Event) => {
       try {
         const entry = JSON.parse((raw as MessageEvent<string>).data) as WorldTraceEntry
@@ -53,12 +53,11 @@ export function useWorldTrace(worldId: string, demoMode: boolean): UseWorldTrace
       }
     }
     const onReady = () => { void refresh() }
-    stream.addEventListener('trace', onTrace)
-    stream.addEventListener('ready', onReady)
+    const unsubscribeTrace = subscribeWorldLive(worldId, 'trace', onTrace)
+    const unsubscribeReady = subscribeWorldLive(worldId, 'ready', onReady)
     return () => {
-      stream.removeEventListener('trace', onTrace)
-      stream.removeEventListener('ready', onReady)
-      stream.close()
+      unsubscribeTrace()
+      unsubscribeReady()
     }
   }, [demoMode, refresh, worldId])
 

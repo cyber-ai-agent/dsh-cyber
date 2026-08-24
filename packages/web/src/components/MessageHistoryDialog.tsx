@@ -7,7 +7,7 @@ import {
   UserCircle,
   X,
 } from '@phosphor-icons/react'
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type { WorkMessage, WorkSession } from '@dsh-cyber/contracts'
 
 import { api } from '../api.js'
@@ -43,8 +43,12 @@ export function MessageHistoryDialog({ demoMode, session, employees, demoMessage
   const [result, setResult] = useState<MessageHistoryPage>({ items: [], total: 0, page: 1, pageSize: MESSAGE_PAGE_SIZE, hasMore: false })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
+  const [reloadRequest, setReloadRequest] = useState(0)
+  const requestIdRef = useRef(0)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal?: AbortSignal) => {
+    const requestId = requestIdRef.current + 1
+    requestIdRef.current = requestId
     setLoading(true)
     setError(undefined)
     try {
@@ -57,22 +61,39 @@ export function MessageHistoryDialog({ demoMode, session, employees, demoMessage
           .sort((left, right) => left.sequence - right.sequence)
         const offset = (pageNumber - 1) * MESSAGE_PAGE_SIZE
         const items = filtered.slice(offset, offset + MESSAGE_PAGE_SIZE)
-        setResult({ items, total: filtered.length, page: pageNumber, pageSize: MESSAGE_PAGE_SIZE, hasMore: offset + items.length < filtered.length })
+        if (requestId === requestIdRef.current) {
+          setResult({ items, total: filtered.length, page: pageNumber, pageSize: MESSAGE_PAGE_SIZE, hasMore: offset + items.length < filtered.length })
+        }
         return
       }
       const query = new URLSearchParams({ view: 'chat', limit: String(MESSAGE_PAGE_SIZE), page: String(pageNumber) })
       if (search) query.set('q', search)
       if (date) query.set('date', date)
-      const next = await api<MessageHistoryPage>(`/api/sessions/${encodeURIComponent(session.id)}/messages?${query.toString()}`)
-      setResult(next)
+      const next = await api<MessageHistoryPage>(
+        `/api/sessions/${encodeURIComponent(session.id)}/messages?${query.toString()}`,
+        signal === undefined ? undefined : { signal },
+      )
+      if (requestId === requestIdRef.current) setResult(next)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '历史消息加载失败')
+      if (requestId !== requestIdRef.current) return
+      if (signal?.aborted && signal.reason === 'history-request-cancelled') return
+      setError(signal?.aborted && signal.reason === 'history-request-timeout'
+        ? '历史消息加载超时，请重试。'
+        : cause instanceof Error ? cause.message : '历史消息加载失败')
     } finally {
-      setLoading(false)
+      if (requestId === requestIdRef.current) setLoading(false)
     }
   }, [date, demoMessages, demoMode, pageNumber, search, session.id])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort('history-request-timeout'), 10_000)
+    void load(controller.signal).finally(() => window.clearTimeout(timeout))
+    return () => {
+      window.clearTimeout(timeout)
+      controller.abort('history-request-cancelled')
+    }
+  }, [load, reloadRequest])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
@@ -125,7 +146,7 @@ export function MessageHistoryDialog({ demoMode, session, employees, demoMessage
         </form>
 
         <div className="message-history-dialog__body" aria-live="polite" aria-busy={loading}>
-          {loading ? <div className="message-history-dialog__state">正在加载历史消息…</div> : error !== undefined ? <div className="message-history-dialog__state message-history-dialog__state--error" role="alert">{error}</div> : groupedItems.length === 0 ? <div className="message-history-dialog__state">没有找到符合条件的消息。</div> : groupedItems.map((group) => (
+          {loading ? <div className="message-history-dialog__state">正在加载历史消息…</div> : error !== undefined ? <div className="message-history-dialog__state message-history-dialog__state--error" role="alert"><span>{error}</span><button className="secondary-button" type="button" onClick={() => setReloadRequest((value) => value + 1)}>重新加载</button></div> : groupedItems.length === 0 ? <div className="message-history-dialog__state">没有找到符合条件的消息。</div> : groupedItems.map((group) => (
             <section className="message-history-group" key={group.date}>
               <h3>{formatDateHeading(group.date)}</h3>
               <ol>

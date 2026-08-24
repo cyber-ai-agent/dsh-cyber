@@ -78,6 +78,7 @@ import {
 import { demoData, demoTavernDossiers, demoTavernEmployees, demoTavernMessages, demoTavernSessions } from './demo-data.js'
 import type { ConversationIntent, CyberEmployee, DockTab, SessionParticipantMap } from './types.js'
 import { worldExperience } from './world-experience.js'
+import { subscribeWorldLive } from './world-live-client.js'
 import { WorldRuntimeDock } from './features/world/WorldRuntimeDock.js'
 import { WorldTracePanel } from './components/world-trace/WorldTracePanel.js'
 import { WorldSettingsDialog, WorldUnlockDialog } from './components/WorldSettingsDialog.js'
@@ -112,6 +113,7 @@ export default function App() {
   const [conversationIntent, setConversationIntent] = useState<ConversationIntent>()
   const [messages, setMessages] = useState<WorkMessage[]>(demoMode ? demoData.messages.slice(-MESSAGE_PAGE_SIZE) : [])
   const [messagePage, setMessagePage] = useState({ hasMore: demoMode && demoData.messages.length > MESSAGE_PAGE_SIZE, loading: false })
+  const [transcriptReload, setTranscriptReload] = useState(0)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [preferences, setPreferences] = useState<WorkspacePreferences | undefined>(demoMode ? demoData.preferences : undefined)
   const [models, setModels] = useState<ModelProfile[]>(demoMode ? demoData.modelProfiles : [])
@@ -129,6 +131,8 @@ export default function App() {
   const sessionByQueueKeyRef = useRef(new Map<string, string>())
   const queueKeyBySessionRef = useRef(new Map<string, string>())
   const pendingTurnsRef = useRef<PendingChatTurn[]>([])
+  const worldLoadRequestRef = useRef(0)
+  const transcriptLoadRequestRef = useRef(0)
   const activeWorldRef = useRef<World | undefined>(undefined)
   const activeSessionIdRef = useRef<string | undefined>(undefined)
   const activeConversationKeyRef = useRef<string | undefined>(undefined)
@@ -199,20 +203,32 @@ export default function App() {
   pendingTurnsRef.current = pendingTurns
 
   const loadWorld = useCallback(async (world: World) => {
+    const requestId = worldLoadRequestRef.current + 1
+    worldLoadRequestRef.current = requestId
+    const isCurrentRequest = () => worldLoadRequestRef.current === requestId
+
     setError(undefined)
     setActiveWorld(world)
+    activeWorldRef.current = world
     setActiveSessionId(undefined)
+    activeSessionIdRef.current = undefined
     setSessions([])
     setSessionParticipants({})
     setConversationIntent(undefined)
+    activeConversationKeyRef.current = undefined
     setHistoryOpen(false)
     setMessages([])
     setMessagePage({ hasMore: false, loading: false })
     setDraft('')
     setSelectedEmployeeId(undefined)
+    setEmployees([])
+    setDossiers({})
     setDockTab('world')
     setPermissionMode('read-only')
     setTaskSchedules([])
+    setWorldSettings(undefined)
+    setWorldAccess(undefined)
+    setWorldRuntimeAvailable(false)
     if (demoMode) {
       const isCompany = world.id === demoData.activeWorld.id
       setWorldRuntimeAvailable(true)
@@ -229,49 +245,69 @@ export default function App() {
       setActiveSessionId(nextSessions[0]?.id)
       return
     }
-    let snapshot: WorldSnapshot
-    try { snapshot = await api<WorldSnapshot>(`/api/worlds/${world.id}/snapshot`) } catch (cause) { if (cause instanceof ApiError && cause.status === 423) { setLockedWorld(world); return } throw cause }
-    const capability = await api<{ supported: boolean }>(`/api/worlds/${world.id}/runtime-capability`)
-    const settingsResult = await api<{ settings: WorldSettings; access: WorldAccessSummary }>(`/api/worlds/${world.id}/settings`)
-    setWorldSettings(settingsResult.settings)
-    applyWorldAppearance(settingsResult.settings)
-    setWorldAccess(settingsResult.access)
-    setReasoningEffort(settingsResult.settings.model.reasoningEffort)
-    setPermissionMode(settingsResult.settings.runtime.permissionMode)
-    setWorldRuntimeAvailable(capability.supported)
-    setAppMode(worldRuntimeV2Enabled && capability.supported ? 'world' : 'workbench')
-    const [dossierResults, participantResults, scheduleResult] = await Promise.all([
-      Promise.all(snapshot.employees.map(async (employee) => {
+    try {
+      let snapshot: WorldSnapshot
       try {
-        return await api<EmployeeDossier>(`/api/employees/${employee.id}/dossier`)
-      } catch {
-        return undefined
-      }
-      })),
-      Promise.all(snapshot.openSessions.map(async (session) => {
-        try {
-          const result = await api<{ items: WorkSessionParticipant[] }>(`/api/sessions/${session.id}/participants`)
-          return [session.id, result.items.filter((participant) => participant.kind === 'employee').map((participant) => participant.participantId)] as const
-        } catch {
-          return [session.id, []] as const
+        snapshot = await api<WorldSnapshot>(`/api/worlds/${world.id}/snapshot`)
+      } catch (cause) {
+        if (cause instanceof ApiError && cause.status === 423) {
+          if (isCurrentRequest()) setLockedWorld(world)
+          return
         }
-      })),
-      api<{ items: TaskSchedule[] }>(`/api/worlds/${world.id}/schedules`),
-    ])
-    const nextDossiers: Record<string, EmployeeDossier> = {}
-    for (const dossier of dossierResults) {
-      if (dossier !== undefined) nextDossiers[dossier.employee.id] = dossier
+        throw cause
+      }
+      if (!isCurrentRequest()) return
+
+      const [capability, settingsResult] = await Promise.all([
+        api<{ supported: boolean }>(`/api/worlds/${world.id}/runtime-capability`),
+        api<{ settings: WorldSettings; access: WorldAccessSummary }>(`/api/worlds/${world.id}/settings`),
+      ])
+      if (!isCurrentRequest()) return
+
+      const [dossierResults, participantResults, scheduleResult] = await Promise.all([
+        Promise.all(snapshot.employees.map(async (employee) => {
+          try {
+            return await api<EmployeeDossier>(`/api/employees/${employee.id}/dossier`)
+          } catch {
+            return undefined
+          }
+        })),
+        Promise.all(snapshot.openSessions.map(async (session) => {
+          try {
+            const result = await api<{ items: WorkSessionParticipant[] }>(`/api/sessions/${session.id}/participants`)
+            return [session.id, result.items.filter((participant) => participant.kind === 'employee').map((participant) => participant.participantId)] as const
+          } catch {
+            return [session.id, []] as const
+          }
+        })),
+        api<{ items: TaskSchedule[] }>(`/api/worlds/${world.id}/schedules`),
+      ])
+      if (!isCurrentRequest()) return
+
+      const nextDossiers: Record<string, EmployeeDossier> = {}
+      for (const dossier of dossierResults) {
+        if (dossier !== undefined) nextDossiers[dossier.employee.id] = dossier
+      }
+      setWorldSettings(settingsResult.settings)
+      applyWorldAppearance(settingsResult.settings)
+      setWorldAccess(settingsResult.access)
+      setReasoningEffort(settingsResult.settings.model.reasoningEffort)
+      setPermissionMode(settingsResult.settings.runtime.permissionMode)
+      setWorldRuntimeAvailable(capability.supported)
+      setAppMode(worldRuntimeV2Enabled && capability.supported ? 'world' : 'workbench')
+      setDossiers(nextDossiers)
+      setEmployees(snapshot.employees.map((employee, index) => toCyberEmployee(employee, index, nextDossiers[employee.id])))
+      setSessions(snapshot.openSessions)
+      // A world with existing sessions opens the most recently active one by default.
+      // This keeps the composer and history action attached to a real conversation
+      // instead of presenting an empty, non-sendable center pane after refresh.
+      setActiveSessionId(snapshot.openSessions[0]?.id)
+      setSessionParticipants(Object.fromEntries(participantResults))
+      setTaskSchedules(scheduleResult.items)
+      rememberActiveWorld(world.workspaceId, world.id)
+    } catch (cause) {
+      if (isCurrentRequest()) setError(cause instanceof Error ? cause.message : '世界加载失败')
     }
-    setDossiers(nextDossiers)
-    setEmployees(snapshot.employees.map((employee, index) => toCyberEmployee(employee, index, nextDossiers[employee.id])))
-    setSessions(snapshot.openSessions)
-    // A world with existing sessions opens the most recently active one by default.
-    // This keeps the composer and history action attached to a real conversation
-    // instead of presenting an empty, non-sendable center pane after refresh.
-    setActiveSessionId(snapshot.openSessions[0]?.id)
-    setSessionParticipants(Object.fromEntries(participantResults))
-    setTaskSchedules(scheduleResult.items)
-    rememberActiveWorld(world.workspaceId, world.id)
   }, [])
 
   const openWorkshopWorld = useCallback(async (worldId: string) => {
@@ -384,32 +420,57 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    const requestId = ++transcriptLoadRequestRef.current
     if (demoMode || activeSessionId === undefined) return
-    let cancelled = false
+    const sessionId = activeSessionId
+    const worldId = activeWorldRef.current?.id
+    const controller = new AbortController()
+    let timedOut = false
+    const timeout = window.setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, 10_000)
     const queueKey = queueKeyBySessionRef.current.get(activeSessionId) ?? activeConversationKeyRef.current
-    void api<{ items: WorkMessage[]; hasMore?: boolean }>(`/api/sessions/${activeSessionId}/messages?view=chat&limit=${MESSAGE_PAGE_SIZE}`)
+    setMessages([])
+    setMessagePage({ hasMore: false, loading: false })
+    void api<{ items: WorkMessage[]; hasMore?: boolean }>(`/api/sessions/${encodeURIComponent(sessionId)}/messages?view=chat&limit=${MESSAGE_PAGE_SIZE}`, { signal: controller.signal })
       .then((result) => {
-        if (cancelled) return
+        if (
+          requestId !== transcriptLoadRequestRef.current ||
+          activeSessionIdRef.current !== sessionId ||
+          activeWorldRef.current?.id !== worldId
+        ) return
         setMessages(result.items)
         setMessagePage({ hasMore: result.hasMore === true, loading: false })
         if (queueKey !== undefined) {
-          sessionByQueueKeyRef.current.set(queueKey, activeSessionId)
-          queueKeyBySessionRef.current.set(activeSessionId, queueKey)
+          sessionByQueueKeyRef.current.set(queueKey, sessionId)
+          queueKeyBySessionRef.current.set(sessionId, queueKey)
           setOutboxMessages((current) => reconcileOutboxMessages(current, queueKey, result.items))
         }
         const participantIds = participantIdsFromMessages(result.items)
         if (participantIds.length > 0) {
-          setSessionParticipants((current) => ({ ...current, [activeSessionId]: participantIds }))
+          setSessionParticipants((current) => ({ ...current, [sessionId]: participantIds }))
         }
       })
-      .catch((cause: unknown) => { if (!cancelled) setError(cause instanceof Error ? cause.message : '会话加载失败') })
-    return () => { cancelled = true }
-  }, [activeSessionId])
+      .catch((cause: unknown) => {
+        if (requestId !== transcriptLoadRequestRef.current) return
+        if (timedOut) {
+          setError('会话加载超时，请重新点击当前会话重试')
+          return
+        }
+        if (controller.signal.aborted) return
+        setError(cause instanceof Error ? cause.message : '会话加载失败')
+      })
+      .finally(() => window.clearTimeout(timeout))
+    return () => {
+      window.clearTimeout(timeout)
+      controller.abort()
+    }
+  }, [activeSessionId, transcriptReload])
 
   useEffect(() => {
     if (demoMode || activeWorld === undefined) return
     const world = activeWorld
-    const stream = new EventSource(`/api/worlds/${encodeURIComponent(world.id)}/live`)
     const onRuntime = (raw: Event) => {
       const message = raw as MessageEvent<string>
       try {
@@ -493,11 +554,7 @@ export default function App() {
         // Ignore malformed transient data; the durable transcript remains authoritative.
       }
     }
-    stream.addEventListener('runtime', onRuntime)
-    return () => {
-      stream.removeEventListener('runtime', onRuntime)
-      stream.close()
-    }
+    return subscribeWorldLive(world.id, 'runtime', onRuntime)
   }, [activeWorld, bindConversationSession, refreshConversationTranscript])
 
   useEffect(() => {
@@ -528,19 +585,24 @@ export default function App() {
       sessionParticipants[session.id]?.includes(employee.id) === true ||
       (sessionParticipants[session.id]?.length ?? 0) === 0 && session.title.includes(employee.displayName)
     ))
+    if (existing?.id === activeSessionId) {
+      setConversationIntent(undefined)
+      setDraft('')
+      setSelectedEmployeeId(employee.id)
+      if (!demoMode && messages.length === 0) setTranscriptReload((value) => value + 1)
+      return
+    }
     setActiveSessionId(existing?.id)
     setConversationIntent(existing === undefined ? {
       kind: 'direct',
       employeeIds: [employee.id],
       title: `与 ${employee.displayName} 对话`,
     } : undefined)
-    if (existing === undefined) {
-      setMessages([])
-      setMessagePage({ hasMore: false, loading: false })
-    }
+    setMessages([])
+    setMessagePage({ hasMore: false, loading: false })
     setDraft('')
     setSelectedEmployeeId(employee.id)
-  }, [sessionParticipants, sessions])
+  }, [activeSessionId, messages.length, sessionParticipants, sessions])
 
   const createGroupIntent = useCallback((input: { title: string; employeeIds: string[] }) => {
     const selected = employees.filter((employee) => input.employeeIds.includes(employee.id))
@@ -926,6 +988,13 @@ export default function App() {
   }, [managingEmployee, selectedEmployeeId])
 
   const selectSession = useCallback((sessionId: string) => {
+    if (sessionId === activeSessionId) {
+      setConversationIntent(undefined)
+      setDraft('')
+      setSelectedEmployeeId(sessionParticipants[sessionId]?.[0])
+      if (!demoMode && messages.length === 0) setTranscriptReload((value) => value + 1)
+      return
+    }
     setConversationIntent(undefined)
     setActiveSessionId(sessionId)
     setMessagePage({ hasMore: false, loading: false })
@@ -937,26 +1006,39 @@ export default function App() {
       setMessages(next.slice(-MESSAGE_PAGE_SIZE))
       setMessagePage({ hasMore: next.length > MESSAGE_PAGE_SIZE, loading: false })
     }
-  }, [sessionParticipants])
+  }, [activeSessionId, messages.length, sessionParticipants])
 
   const loadOlderMessages = useCallback(async () => {
     if (activeSessionId === undefined || messagePage.loading) return
+    const sessionId = activeSessionId
+    const worldId = activeWorldRef.current?.id
+    const transcriptRequestId = transcriptLoadRequestRef.current
     const loaded = messages.filter(isChatMessage)
     const firstSequence = loaded.reduce<number | undefined>((minimum, message) => minimum === undefined ? message.sequence : Math.min(minimum, message.sequence), undefined)
     if (firstSequence === undefined) return
     setMessagePage((current) => ({ ...current, loading: true }))
     try {
       if (demoMode) {
-        const all = demoMessagesForSession(activeSessionId).filter(isChatMessage)
+        const all = demoMessagesForSession(sessionId).filter(isChatMessage)
         const older = all.filter((message) => message.sequence < firstSequence).slice(-MESSAGE_PAGE_SIZE)
         setMessages((current) => mergeMessages(older, current))
         setMessagePage({ hasMore: all.some((message) => message.sequence < (older[0]?.sequence ?? firstSequence)), loading: false })
         return
       }
-      const result = await api<{ items: WorkMessage[]; hasMore?: boolean }>(`/api/sessions/${encodeURIComponent(activeSessionId)}/messages?view=chat&limit=${MESSAGE_PAGE_SIZE}&before=${firstSequence}`)
+      const result = await api<{ items: WorkMessage[]; hasMore?: boolean }>(`/api/sessions/${encodeURIComponent(sessionId)}/messages?view=chat&limit=${MESSAGE_PAGE_SIZE}&before=${firstSequence}`)
+      if (
+        transcriptRequestId !== transcriptLoadRequestRef.current ||
+        activeSessionIdRef.current !== sessionId ||
+        activeWorldRef.current?.id !== worldId
+      ) return
       setMessages((current) => mergeMessages(result.items, current))
       setMessagePage({ hasMore: result.hasMore === true, loading: false })
     } catch (cause) {
+      if (
+        transcriptRequestId !== transcriptLoadRequestRef.current ||
+        activeSessionIdRef.current !== sessionId ||
+        activeWorldRef.current?.id !== worldId
+      ) return
       setMessagePage((current) => ({ ...current, loading: false }))
       setError(cause instanceof Error ? cause.message : '更早消息加载失败')
     }
@@ -1533,6 +1615,7 @@ export default function App() {
                   demoMode={demoMode}
                   world={activeWorld}
                   employees={employees}
+                  liveEnabled={!historyOpen}
                   conversationEmployeeIds={activeParticipantIds}
                   {...(selectedEmployeeId === undefined ? {} : { selectedEmployeeId })}
                   onSelectEmployee={(employeeId) => {

@@ -29,14 +29,15 @@ interface WorldRuntimeDockProps {
   demoMode: boolean
   world: World
   employees: CyberEmployee[]
+  liveEnabled?: boolean
   selectedEmployeeId?: string
   conversationEmployeeIds: string[]
   onSelectEmployee(employeeId: string): void
   onStartGroup(employeeIds: string[], session?: WorkSession): void
 }
 
-export function WorldRuntimeDock({ demoMode, world, employees, selectedEmployeeId, conversationEmployeeIds, onSelectEmployee, onStartGroup }: WorldRuntimeDockProps) {
-  const runtime = useWorldClient({ demoMode, world, employees })
+export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = true, selectedEmployeeId, conversationEmployeeIds, onSelectEmployee, onStartGroup }: WorldRuntimeDockProps) {
+  const runtime = useWorldClient({ demoMode, world, employees, liveEnabled })
   const [fitRequest, setFitRequest] = useState(0)
   const [zoomCommand, setZoomCommand] = useState<WorldZoomCommand>()
   const [selectedObjectId, setSelectedObjectId] = useState<string>()
