@@ -109,7 +109,10 @@ export default function App() {
   const [dockCollapsed, setDockCollapsed] = useState(false)
   const [draft, setDraft] = useState('')
   const [composerFocusRequest, setComposerFocusRequest] = useState(0)
-  const [sending, setSending] = useState(false)
+  // Sessions with an in-flight model turn. Keyed per session so switching the
+  // view never shows another conversation as processing.
+  const [pendingTurnSessions, setPendingTurnSessions] = useState<ReadonlySet<string>>(new Set())
+  const activeSessionIdRef = useRef<string | undefined>(undefined)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('appearance')
   const [savingSettings, setSavingSettings] = useState(false)
@@ -151,6 +154,8 @@ export default function App() {
   const managingDossier = managingEmployeeId === undefined ? undefined : dossiers[managingEmployeeId]
   const managingRevision = managingDossier?.revisions.find((revision) => revision.revision === managingEmployee?.currentRevision)
   const supportsWorldRuntime = worldRuntimeV2Enabled && worldRuntimeAvailable
+
+  useEffect(() => { activeSessionIdRef.current = activeSessionId }, [activeSessionId])
 
   const loadWorld = useCallback(async (world: World) => {
     setError(undefined)
@@ -722,7 +727,9 @@ export default function App() {
 
   const send = useCallback(async (prompt: string, attachments: ChatAttachment[]) => {
     if (activeWorld === undefined) return
-    setSending(true)
+    const turnSessionId = activeSessionId
+    const pendingKey = turnSessionId ?? '__new-turn__'
+    setPendingTurnSessions((current) => new Set(current).add(pendingKey))
     // 乐观更新：点击发送瞬间立即清空输入框，不等模型回合结束
     setDraft('')
     setError(undefined)
@@ -801,22 +808,28 @@ export default function App() {
           ...(attachments.length === 0 ? {} : { attachments }),
           ...(targetIds.length === 0 ? {} : { employeeIds: targetIds }),
           ...(conversationIntent === undefined ? {} : { title: conversationIntent.title }),
-          ...(activeSessionId === undefined ? {} : { sessionId: activeSessionId }),
+          ...(turnSessionId === undefined ? {} : { sessionId: turnSessionId }),
         }),
       })
-      setActiveSessionId(result.session.id)
+      // 会话独立处理：回合结束时用户可能已经切到别的会话，只有当仍停留在这场对话（或这是新建的会话）时才切换视图/刷新聊天记录。
+      const stayedOnTurn = activeSessionIdRef.current === result.session.id
+      if (turnSessionId === undefined || stayedOnTurn) setActiveSessionId(result.session.id)
       setSessionParticipants((current) => ({ ...current, [result.session.id]: targetIds }))
       setConversationIntent(undefined)
       setSessions((current) => [result.session, ...current.filter((item) => item.id !== result.session.id)])
       const transcript = await api<{ items: WorkMessage[] }>(`/api/sessions/${result.session.id}/messages`)
-      setMessages(transcript.items)
+      if (activeSessionIdRef.current === result.session.id) setMessages(transcript.items)
     } catch (cause) {
       // The orchestrator persists the owner's message before starting the model
       // turn. Keep that conversational fact visible even when execution fails;
       // the failure itself is explained by the toast and World Trace.
       setError(cause instanceof Error ? cause.message : '消息发送失败')
     } finally {
-      setSending(false)
+      setPendingTurnSessions((current) => {
+        const next = new Set(current)
+        next.delete(pendingKey)
+        return next
+      })
     }
   }, [activeSession, activeSessionId, activeWorld, conversationIntent, employees, messages.length, sessionParticipants, reasoningEffort, permissionMode])
 
@@ -1186,7 +1199,7 @@ export default function App() {
             participantIds={activeParticipantIds}
             messages={messages}
             employees={employees}
-            sending={sending}
+            sending={pendingTurnSessions.has(activeSessionId ?? '__new-turn__')}
             draft={draft}
             focusRequest={composerFocusRequest}
             onDraftChange={setDraft}
