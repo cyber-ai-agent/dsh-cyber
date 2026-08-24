@@ -214,7 +214,7 @@ Persist project.json
 
 会话 UI 偏好存储在独立本地文件中，不修改消息和 Agent 事实源。
 
-### 会话历史权威（Conversation Memory V1）
+### 持久会话历史
 
 ```text
 SQLite WorkSession / WorkMessage   = 会话历史权威
@@ -249,6 +249,24 @@ observedThroughSequence = 该角色在本会话中最后一条自己的消息的
 `unseenHistory()` 做这个选择，`formatRecoveredHistoryPrompt()` 负责渲染，为空时原样返回 prompt。历史块被明确标注为「恢复上下文」，不得覆盖角色 Persona、世界设定、权限和当前用户请求。
 
 已知边界：如果角色上一次发言已经掉出「24 条 / 16000 字符」预算窗口，watermark 仍然精确（它来自原始 messages，不是预算后的历史），所以不会漏；但窗口本身仍会限制能补多少。
+
+### 会话执行生命周期
+
+每次用户交互创建一个持久化 `WorkTurn`，每次实际调用角色 Runtime 创建一个 `AgentRun`：
+
+```text
+WorkSession
+  └─ WorkTurn
+       ├─ AgentRun 1
+       ├─ AgentRun 2
+       └─ AgentRun N
+```
+
+私聊每轮包含一个 `AgentRun`；群聊按角色顺序包含多个 `AgentRun`；角色协作按轮次和角色记录每次实际执行。SQLite 保存 `queued → running → completed/failed` 状态、角色、顺序和 Runtime Session ID，服务启动时把遗留的 `queued`、`running` 状态确定性标记为 `failed: service-restarted`，不自动重放可能已经产生副作用的调用。
+
+Runtime 事件携带 `workTurnId` 与 `agentRunId`；本轮消息关联 `workTurnId`，角色运行生成的消息和领域事件同时关联 `agentRunId`。兼容字段 `traceTurnId` 与 `agentRunId` 使用同一个值，不再生成另一套随机标识。读取接口提供会话回合列表以及单个回合的完整运行列表；SQLite 记录是执行状态的权威，SSE 只负责实时投影。
+
+当前持久能力覆盖会话历史恢复和回合执行审计。它不提供跨会话语义检索、向量索引、自动摘要、情景记忆整理或程序性记忆。
 
 ### 回合并发语义
 

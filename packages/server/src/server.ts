@@ -114,6 +114,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   if (!compatibility.ok) throw new Error(`Harness compatibility check failed: ${compatibility.errors.join('; ')}`)
 
   const store = await SqliteStore.open(join(stateRoot, 'data', 'dsh-cyber.sqlite'))
+  store.recoverConversationRuntimeAfterRestart()
   for (const blueprint of BUILTIN_BLUEPRINTS) store.saveBlueprint(blueprint)
   if (options.bootstrapDefaultWorld === true && store.listWorkspaces().length === 0) {
     const local = store.createWorkspace({ name: '本地实例' })

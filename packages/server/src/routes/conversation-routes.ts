@@ -235,6 +235,20 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     writeJson(response, 200, { items: store.listMessages(session.id, nonNegativeInteger(url.searchParams.get('after'))) })
   })
 
+  router.get(/^\/api\/sessions\/([^/]+)\/turns$/, async ({ request, response, params }) => {
+    const session = store.getSession(params[0]!)
+    if (session === undefined) throw new HttpError(404, 'session_not_found', 'Session not found')
+    await worldAccess.assertUnlocked(session.worldId, request)
+    writeJson(response, 200, { items: store.listSessionTurns(session.id) })
+  })
+
+  router.get(/^\/api\/turns\/([^/]+)$/, async ({ request, response, params }) => {
+    const turn = store.getWorkTurn(params[0]!)
+    if (turn === undefined) throw new HttpError(404, 'turn_not_found', 'Turn not found')
+    await worldAccess.assertUnlocked(turn.worldId, request)
+    writeJson(response, 200, { turn, runs: store.listTurnAgentRuns(turn.id) })
+  })
+
   router.get(/^\/api\/sessions\/([^/]+)\/participants$/, async ({ request, response, params }) => {
     const session = store.getSession(params[0]!)
     if (session === undefined) throw new HttpError(404, 'session_not_found', 'Session not found')

@@ -95,6 +95,8 @@ interface RuntimeEnvelope {
   worldId: string
   sessionId: string
   agentId: string
+  workTurnId: string
+  agentRunId: string
   event: AgentRuntimeEvent
 }
 
@@ -343,7 +345,7 @@ export default function App() {
     if (activeWorldRef.current?.id !== session.worldId) return
     setSessions((current) => [session, ...current.filter((item) => item.id !== session.id)])
     setSessionParticipants((current) => ({ ...current, [session.id]: employeeIds }))
-    if (activeConversationKeyRef.current === queueKey) {
+    if (activeConversationKeyRef.current === queueKey || activeConversationKeyRef.current === undefined) {
       setActiveSessionId(session.id)
       setConversationIntent(undefined)
     }
@@ -408,7 +410,7 @@ export default function App() {
         }
 
         const clientTurnId = metadataText(envelope.event.metadata.clientTurnId)
-        const traceTurnId = metadataText(envelope.event.metadata.traceTurnId)
+        const traceTurnId = envelope.agentRunId
         if (clientTurnId === undefined || traceTurnId === undefined) return
         const pending = pendingTurnsRef.current.find((turn) => turn.id === clientTurnId)
         const queueKey = pending?.queueKey
@@ -448,6 +450,8 @@ export default function App() {
                 employeeId: envelope.agentId,
                 clientTurnId,
                 traceTurnId,
+                workTurnId: envelope.workTurnId,
+                agentRunId: envelope.agentRunId,
                 content: replaceContent ? content : `${previous?.content ?? ''}${content}`,
                 createdAt,
               },

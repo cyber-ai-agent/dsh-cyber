@@ -1,8 +1,7 @@
-import { randomUUID } from 'node:crypto'
-
 import type {
   AgentRuntimeEvent,
   AgentRuntimePort,
+  AgentRun,
   AgentPermissionMode,
   ConversationHistoryEntry,
   DomainEvent,
@@ -14,6 +13,8 @@ import type {
   ReasoningEffort,
   WorkMessage,
   WorkSession,
+  WorkTurn,
+  WorkTurnInteractionKind,
   WorkSessionParticipant,
   World,
 } from '@dsh-cyber/contracts'
@@ -77,6 +78,14 @@ export interface ConversationStorePort {
     actorId: string,
   ): EmployeeInstance
   bindEmployeeAgentSession(employeeId: string, agentSessionId: string): EmployeeInstance
+  createWorkTurn(input: { workspaceId: string; worldId: string; sessionId: string; clientTurnId?: string; interactionKind: WorkTurnInteractionKind }): WorkTurn
+  startWorkTurn(turnId: string): WorkTurn
+  completeWorkTurn(turnId: string): WorkTurn
+  failWorkTurn(turnId: string, errorCode: string): WorkTurn
+  createAgentRun(input: { workspaceId: string; worldId: string; turnId: string; sessionId: string; employeeId: string; ordinal: number }): AgentRun
+  startAgentRun(runId: string): AgentRun
+  completeAgentRun(runId: string, runtimeSessionId?: string): AgentRun
+  failAgentRun(runId: string, errorCode: string, runtimeSessionId?: string): AgentRun
 }
 
 export interface ConversationRealtimeEnvelope {
@@ -84,6 +93,8 @@ export interface ConversationRealtimeEnvelope {
   worldId: string
   sessionId: string
   agentId: string
+  workTurnId: string
+  agentRunId: string
   event: AgentRuntimeEvent
 }
 
@@ -225,27 +236,40 @@ export class ConversationOrchestrator implements AsyncDisposable {
     // the current prompt is appended, otherwise this turn's prompt would reach
     // the model twice: once as recovered history and once as the live request.
     const recovered = this.#recoverConversation(session)
+    const clientTurnId = clientTurnIdFrom(input.metadata)
+    const workTurn = this.#store.createWorkTurn({
+      workspaceId: input.workspaceId,
+      worldId: input.worldId,
+      sessionId: session.id,
+      interactionKind: interactionKindFrom(input.metadata, 'chat'),
+      ...(clientTurnId === undefined ? {} : { clientTurnId }),
+    })
     this.#store.appendMessage({
       sessionId: session.id,
       senderId: 'owner',
       senderKind: 'owner',
       kind: 'user',
       content: prompt,
-      ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
+      metadata: { ...input.metadata, workTurnId: workTurn.id },
       correlationId: session.id,
     })
-    const clientTurnId = clientTurnIdFrom(input.metadata)
-    const reply = await this.#runAgent({
-      session,
-      employee,
-      prompt: input.runtimePrompt?.trim() || prompt,
-      history: recovered.history,
-      observedThroughSequence: lastAuthoredSequence(recovered.messages, employee.id),
-      ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
-      ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
-      ...(clientTurnId === undefined ? {} : { clientTurnId }),
-    })
-    return { session, replies: [reply] }
+    this.#store.startWorkTurn(workTurn.id)
+    try {
+      const reply = await this.#runAgent({
+        session, workTurn, ordinal: 1, employee,
+        prompt: input.runtimePrompt?.trim() || prompt,
+        history: recovered.history,
+        observedThroughSequence: lastAuthoredSequence(recovered.messages, employee.id),
+        ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
+        ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
+        ...(clientTurnId === undefined ? {} : { clientTurnId }),
+      })
+      this.#store.completeWorkTurn(workTurn.id)
+      return { session, replies: [reply] }
+    } catch (error) {
+      this.#store.failWorkTurn(workTurn.id, lifecycleErrorCode(error))
+      throw error
+    }
   }
 
   async group(input: GroupConversationInput): Promise<ConversationResult> {
@@ -276,16 +300,23 @@ export class ConversationOrchestrator implements AsyncDisposable {
     // current round are supplied separately by groupPrompt(), so they must not
     // be part of the recovered history as well.
     const recovered = this.#recoverConversation(session)
+    const clientTurnId = clientTurnIdFrom(input.metadata)
+    const workTurn = this.#store.createWorkTurn({
+      workspaceId: input.workspaceId, worldId: input.worldId, sessionId: session.id,
+      interactionKind: interactionKindFrom(input.metadata, 'meeting'),
+      ...(clientTurnId === undefined ? {} : { clientTurnId }),
+    })
     this.#store.appendMessage({
       sessionId: session.id,
       senderId: 'owner',
       senderKind: 'owner',
       kind: 'user',
       content: prompt,
-      ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
+      metadata: { ...input.metadata, workTurnId: workTurn.id },
       correlationId: session.id,
     })
-    const meetingRunId = randomUUID()
+    this.#store.startWorkTurn(workTurn.id)
+    const meetingRunId = workTurn.id
     this.#store.appendDomainEvent({
       workspaceId: input.workspaceId,
       worldId: input.worldId,
@@ -294,16 +325,15 @@ export class ConversationOrchestrator implements AsyncDisposable {
       actorId: 'owner',
       actorKind: 'owner',
       correlationId: session.id,
-      payload: { participantIds: employeeIds, promptMessageSequence: 1, meetingRunId },
+      payload: { participantIds: employeeIds, promptMessageSequence: 1, meetingRunId, workTurnId: workTurn.id },
     })
 
     const replies: AgentReply[] = []
     try {
-      const clientTurnId = clientTurnIdFrom(input.metadata)
-      for (const employee of employees) {
+      for (const [index, employee] of employees.entries()) {
         const collaborationPrompt = groupPrompt(input.runtimePrompt?.trim() || prompt, replies)
         replies.push(await this.#runAgent({
-          session,
+          session, workTurn, ordinal: index + 1,
           employee,
           prompt: collaborationPrompt,
           history: recovered.history,
@@ -324,8 +354,9 @@ export class ConversationOrchestrator implements AsyncDisposable {
         actorId: 'system',
         actorKind: 'system',
         correlationId: session.id,
-        payload: { participantIds: employeeIds, status: 'completed', replyCount: replies.length, meetingRunId },
+        payload: { participantIds: employeeIds, status: 'completed', replyCount: replies.length, meetingRunId, workTurnId: workTurn.id },
       })
+      this.#store.completeWorkTurn(workTurn.id)
       return { session, replies }
     } catch (error) {
       this.#store.appendDomainEvent({
@@ -336,8 +367,9 @@ export class ConversationOrchestrator implements AsyncDisposable {
         actorId: 'system',
         actorKind: 'system',
         correlationId: session.id,
-        payload: { participantIds: employeeIds, status: 'blocked', replyCount: replies.length, meetingRunId },
+        payload: { participantIds: employeeIds, status: 'blocked', replyCount: replies.length, meetingRunId, workTurnId: workTurn.id },
       })
+      this.#store.failWorkTurn(workTurn.id, lifecycleErrorCode(error))
       throw error
     }
   }
@@ -377,6 +409,12 @@ export class ConversationOrchestrator implements AsyncDisposable {
     })),
     actorId: initiator.id,
   })
+  const workTurn = this.#store.createWorkTurn({
+    workspaceId: input.workspaceId,
+    worldId: input.worldId,
+    sessionId: session.id,
+    interactionKind: 'peer',
+  })
   this.#store.appendMessage({
     sessionId: session.id,
     senderId: 'system',
@@ -390,10 +428,12 @@ export class ConversationOrchestrator implements AsyncDisposable {
       participantIds,
       purpose,
       maxRounds,
+      workTurnId: workTurn.id,
     },
     correlationId: session.id,
   })
-  const meetingRunId = randomUUID()
+  this.#store.startWorkTurn(workTurn.id)
+  const meetingRunId = workTurn.id
   this.#store.appendDomainEvent({
     workspaceId: input.workspaceId,
     worldId: input.worldId,
@@ -410,15 +450,18 @@ export class ConversationOrchestrator implements AsyncDisposable {
       purpose,
       maxRounds,
       meetingRunId,
+      workTurnId: workTurn.id,
     },
   })
 
   const replies: AgentReply[] = []
+  let ordinal = 0
   try {
     for (let round = 1; round <= maxRounds; round += 1) {
       for (const employee of orderedEmployees) {
+        ordinal += 1
         replies.push(await this.#runAgent({
-          session,
+          session, workTurn, ordinal,
           employee,
           prompt: peerPrompt({
             basePrompt: input.runtimePrompt?.trim() || purpose,
@@ -454,8 +497,10 @@ export class ConversationOrchestrator implements AsyncDisposable {
         replyCount: replies.length,
         rounds: maxRounds,
         meetingRunId,
+        workTurnId: workTurn.id,
       },
     })
+    this.#store.completeWorkTurn(workTurn.id)
     return {
       session,
       replies,
@@ -481,8 +526,10 @@ export class ConversationOrchestrator implements AsyncDisposable {
         replyCount: replies.length,
         rounds: maxRounds,
         meetingRunId,
+        workTurnId: workTurn.id,
       },
     })
+    this.#store.failWorkTurn(workTurn.id, lifecycleErrorCode(error))
     throw error
   }
 }
@@ -524,6 +571,8 @@ export class ConversationOrchestrator implements AsyncDisposable {
 
   async #runAgent(input: {
     session: WorkSession
+    workTurn: WorkTurn
+    ordinal: number
     employee: EmployeeInstance
     prompt: string
     history: ConversationHistoryEntry[]
@@ -534,6 +583,8 @@ export class ConversationOrchestrator implements AsyncDisposable {
   }): Promise<AgentReply> {
     const {
       session,
+      workTurn,
+      ordinal,
       employee,
       prompt,
       history,
@@ -546,23 +597,31 @@ export class ConversationOrchestrator implements AsyncDisposable {
     if (revision === undefined) {
       throw new ConversationOrchestrationError(`Missing agent revision: ${employee.id}`)
     }
-    const traceTurnId = randomUUID()
-    this.#store.setEmployeeStatus(employee.id, 'working', 'system')
-    this.#store.appendDomainEvent({
+    const agentRun = this.#store.createAgentRun({
       workspaceId: session.workspaceId,
       worldId: session.worldId,
+      turnId: workTurn.id,
       sessionId: session.id,
-      type: 'task.started',
-      actorId: employee.id,
-      actorKind: 'employee',
-      correlationId: session.id,
-      payload: { employeeId: employee.id, role: employee.role, traceTurnId },
+      employeeId: employee.id,
+      ordinal,
     })
-
+    this.#store.startAgentRun(agentRun.id)
+    const traceTurnId = agentRun.id
     let responsePersisted = false
     let failedTurn = false
     let failedTurnKind: AgentTurnFailureKind = 'unknown'
     try {
+      this.#store.setEmployeeStatus(employee.id, 'working', 'system')
+      this.#store.appendDomainEvent({
+        workspaceId: session.workspaceId,
+        worldId: session.worldId,
+        sessionId: session.id,
+        type: 'task.started',
+        actorId: employee.id,
+        actorKind: 'employee',
+        correlationId: session.id,
+        payload: { employeeId: employee.id, role: employee.role, traceTurnId, agentRunId: agentRun.id, workTurnId: workTurn.id },
+      })
       const workspacePath = this.#resolveWorldRoot === undefined ? this.#workspacePath! : await this.#resolveWorldRoot(session.worldId)
       const result = await this.#runtime.runTurn({
         agent: employee,
@@ -580,6 +639,8 @@ export class ConversationOrchestrator implements AsyncDisposable {
             metadata: {
               ...event.metadata,
               traceTurnId,
+              agentRunId: agentRun.id,
+              workTurnId: workTurn.id,
               ...(clientTurnId === undefined ? {} : { clientTurnId }),
             },
           }
@@ -596,13 +657,16 @@ export class ConversationOrchestrator implements AsyncDisposable {
             worldId: session.worldId,
             sessionId: session.id,
             agentId: employee.id,
+            agentRunId: agentRun.id,
+            workTurnId: workTurn.id,
             event: tracedEvent,
           })
         },
       })
       this.#store.bindEmployeeAgentSession(employee.id, result.agentSessionId)
       if (failedTurn) {
-        this.#blockAgent(session, employee, 'runtime-turn-failed', traceTurnId)
+        this.#blockAgent(session, employee, 'runtime-turn-failed', workTurn.id, agentRun.id)
+        this.#store.failAgentRun(agentRun.id, `runtime-${failedTurnKind}`, result.agentSessionId)
         throw new AgentTurnFailedError(employee.id, failedTurnKind)
       }
       const content = result.finalResponse.trim()
@@ -617,6 +681,8 @@ export class ConversationOrchestrator implements AsyncDisposable {
             source: 'runtime-final-response',
             agentSessionId: result.agentSessionId,
             traceTurnId,
+            agentRunId: agentRun.id,
+            workTurnId: workTurn.id,
             ...(clientTurnId === undefined ? {} : { clientTurnId }),
           },
           correlationId: session.id,
@@ -631,8 +697,9 @@ export class ConversationOrchestrator implements AsyncDisposable {
         actorId: employee.id,
         actorKind: 'employee',
         correlationId: session.id,
-        payload: { employeeId: employee.id, agentSessionId: result.agentSessionId, traceTurnId },
+        payload: { employeeId: employee.id, agentSessionId: result.agentSessionId, traceTurnId, agentRunId: agentRun.id, workTurnId: workTurn.id },
       })
+      this.#store.completeAgentRun(agentRun.id, result.agentSessionId)
       return {
         employeeId: employee.id,
         displayName: employee.displayName,
@@ -641,6 +708,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
       }
     } catch (error) {
       if (!(error instanceof AgentTurnFailedError)) {
+        this.#store.failAgentRun(agentRun.id, lifecycleErrorCode(error))
         this.#store.appendDomainEvent({
           workspaceId: session.workspaceId,
           worldId: session.worldId,
@@ -649,9 +717,9 @@ export class ConversationOrchestrator implements AsyncDisposable {
           actorId: employee.id,
           actorKind: 'employee',
           correlationId: session.id,
-          payload: { employeeId: employee.id, failure: 'runtime-error', traceTurnId },
+          payload: { employeeId: employee.id, failure: 'runtime-error', traceTurnId, agentRunId: agentRun.id, workTurnId: workTurn.id },
         })
-        this.#blockAgent(session, employee, 'runtime-error', traceTurnId)
+        this.#blockAgent(session, employee, 'runtime-error', workTurn.id, agentRun.id)
       }
       throw error instanceof AgentTurnFailedError
         ? error
@@ -753,7 +821,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
     })
   }
 
-  #blockAgent(session: WorkSession, employee: EmployeeInstance, reason: string, traceTurnId: string): void {
+  #blockAgent(session: WorkSession, employee: EmployeeInstance, reason: string, workTurnId: string, agentRunId: string): void {
     this.#store.setEmployeeStatus(employee.id, 'blocked', 'system')
     this.#store.appendDomainEvent({
       workspaceId: session.workspaceId,
@@ -763,7 +831,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
       actorId: employee.id,
       actorKind: 'employee',
       correlationId: session.id,
-      payload: { employeeId: employee.id, reason, traceTurnId },
+      payload: { employeeId: employee.id, reason, traceTurnId: agentRunId, agentRunId, workTurnId },
     })
   }
 
@@ -933,6 +1001,15 @@ function runtimeMetadata(event: AgentRuntimeEvent): JsonObject {
 function clientTurnIdFrom(metadata?: JsonObject): string | undefined {
   const value = metadata?.clientTurnId
   return typeof value === 'string' && value.trim().length > 0 ? value : undefined
+}
+
+function interactionKindFrom(metadata: JsonObject | undefined, fallback: WorkTurnInteractionKind): WorkTurnInteractionKind {
+  const value = metadata?.interactionKind
+  return value === 'chat' || value === 'task' || value === 'meeting' || value === 'peer' ? value : fallback
+}
+
+function lifecycleErrorCode(error: unknown): string {
+  return error instanceof AgentTurnFailedError ? `runtime-${error.failureKind}` : 'runtime-error'
 }
 
 function requiredText(value: string, label: string): string {

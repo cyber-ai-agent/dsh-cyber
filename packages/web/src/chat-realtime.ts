@@ -22,6 +22,8 @@ export interface StreamingChatReply {
   employeeId: string
   clientTurnId: string
   traceTurnId: string
+  workTurnId: string
+  agentRunId: string
   content: string
   createdAt: string
 }
