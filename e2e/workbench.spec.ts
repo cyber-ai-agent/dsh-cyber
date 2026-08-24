@@ -15,6 +15,7 @@ test.beforeAll(async () => {
   await mkdir(join(process.cwd(), 'artifacts', 'ui-world-conversations'), { recursive: true })
   await mkdir(join(process.cwd(), 'artifacts', 'settings-experience'), { recursive: true })
   await mkdir(join(process.cwd(), 'artifacts', 'world-market-starter-content'), { recursive: true })
+  await mkdir(join(process.cwd(), 'artifacts', 'market-activation-audit'), { recursive: true })
   server = await createCyberServer({
     stateRoot,
     workspacePath: process.cwd(),
@@ -451,13 +452,49 @@ test('discovers, installs, and creates a visually distinct world from the world-
   await expect(market.locator('.market-role-cover')).toHaveCount(4)
   expect(await market.locator('.market-role-cover').evaluateAll((images) => images.every((image) => (image as HTMLImageElement).naturalWidth > 1_000))).toBe(true)
   await page.screenshot({ path: join(process.cwd(), 'artifacts', 'world-market-starter-content', 'roles-1920x1080.png') })
+
+  const storytellerCard = market.getByRole('article').filter({ hasText: '织梦说书人' })
+  await storytellerCard.getByRole('button', { name: '查看并安装' }).click()
+  await market.getByRole('checkbox', { name: /我已审阅发布者/ }).check()
+  await market.getByRole('button', { name: /批准安装/ }).click()
+  await expect(storytellerCard.getByRole('button', { name: '招募到世界' })).toBeVisible()
+  await storytellerCard.getByRole('button', { name: '招募到世界' }).click()
+  await expect(market.getByText('角色模板已安装')).toBeVisible()
+  await expect(market.getByText('与当前世界兼容')).toBeVisible()
+  await page.screenshot({ path: join(process.cwd(), 'artifacts', 'market-activation-audit', 'role-ready-1920x1080.png') })
+  await market.getByRole('button', { name: '选择名字与权限' }).click()
+  await expect(market).toBeHidden()
+
+  const recruitment = page.getByRole('dialog', { name: '邀请角色' })
+  await expect(recruitment).toBeVisible()
+  await expect(recruitment.getByRole('button', { name: /织梦说书人/ })).toHaveClass(/is-active/)
+  await recruitment.getByRole('textbox', { name: '角色名字（可选）' }).fill('夜航说书人')
+  await recruitment.getByRole('button', { name: /邀请角色入场|确认新增|再创建一名/ }).click()
+  await expect(recruitment).toBeHidden()
+  await expect(page.getByRole('button', { name: '与夜航说书人私聊' })).toBeVisible()
+
+  await page.getByRole('button', { name: '市场', exact: true }).click()
   await market.getByRole('button', { name: '插件', exact: true }).click()
   for (const pluginName of ['会议纪要助手', '研究简报', '决策记录', '发布检查']) {
     await expect(market.getByRole('article').filter({ hasText: pluginName })).toBeVisible()
   }
   await expect(market.getByText('全局可用 · 所有世界共享').first()).toBeVisible()
   await page.screenshot({ path: join(process.cwd(), 'artifacts', 'world-market-starter-content', 'plugins-1920x1080.png') })
-  await market.getByRole('button', { name: '关闭市场' }).click()
+
+  const researchCard = market.getByRole('article').filter({ hasText: '研究简报' })
+  await researchCard.getByRole('button', { name: '查看并安装' }).click()
+  await market.getByRole('checkbox', { name: /我已审阅发布者/ }).check()
+  await market.getByRole('button', { name: /批准安装/ }).click()
+  await expect(researchCard.getByRole('button', { name: '立即使用' })).toBeVisible()
+  await researchCard.getByRole('button', { name: '立即使用' }).click()
+  await expect(market.getByText('插件已安装 · 所有世界可用')).toBeVisible()
+  await expect(market.getByText('/research-brief', { exact: true })).toBeVisible()
+  await page.screenshot({ path: join(process.cwd(), 'artifacts', 'market-activation-audit', 'plugin-ready-1920x1080.png') })
+  await market.getByRole('button', { name: /带入对话/ }).click()
+  await expect(market).toBeHidden()
+  const composer = page.getByRole('textbox', { name: '给当前世界的角色发送消息' })
+  await expect(composer).toHaveValue('/research-brief ')
+  await expect(composer).toBeFocused()
 
   await writeFile(
     join(process.cwd(), 'artifacts', 'world-market-starter-content', 'console.log'),

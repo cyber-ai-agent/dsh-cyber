@@ -5,6 +5,7 @@ import { worldExperience } from '../world-experience.js'
 
 interface RecruitmentDialogProps {
   blueprints: EmployeeBlueprint[]
+  initialBlueprintId?: string
   employees?: EmployeeInstance[]
   world: World
   loading: boolean
@@ -13,7 +14,7 @@ interface RecruitmentDialogProps {
   onRecruit(blueprint: EmployeeBlueprint, displayName: string | undefined, capabilityGrants: string[]): Promise<void>
 }
 
-export function RecruitmentDialog({ blueprints, employees, world, loading, recruiting, onClose, onRecruit }: RecruitmentDialogProps) {
+export function RecruitmentDialog({ blueprints, initialBlueprintId, employees, world, loading, recruiting, onClose, onRecruit }: RecruitmentDialogProps) {
   const [selectedKey, setSelectedKey] = useState<string>()
   const [loadedEmployees, setLoadedEmployees] = useState<EmployeeInstance[]>([])
   const currentEmployees = employees ?? loadedEmployees
@@ -24,8 +25,10 @@ export function RecruitmentDialog({ blueprints, employees, world, loading, recru
   const [displayName, setDisplayName] = useState('')
   const [capabilityGrants, setCapabilityGrants] = useState<string[]>([])
   const selected = useMemo(
-    () => blueprints.find((blueprint) => blueprintKey(blueprint) === selectedKey) ?? blueprints[0],
-    [blueprints, selectedKey],
+    () => blueprints.find((blueprint) => blueprintKey(blueprint) === selectedKey)
+      ?? blueprints.find((blueprint) => blueprint.id === initialBlueprintId)
+      ?? blueprints[0],
+    [blueprints, initialBlueprintId, selectedKey],
   )
   const selectedExisting = useMemo(
     () => selected === undefined
