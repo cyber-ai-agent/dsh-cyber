@@ -268,6 +268,8 @@ Runtime 事件携带 `workTurnId` 与 `agentRunId`；本轮消息关联 `workTur
 
 当前持久能力覆盖会话历史恢复和回合执行审计。它不提供跨会话语义检索、向量索引、自动摘要、情景记忆整理或程序性记忆。
 
+`WorkTurn` 与 `AgentRun` 只表达 DSH Cyber 当前所需的执行边界，并非对其他 Agent 平台 Thread、Turn、Item 模型的完整复制。消息、工具轨迹和其他执行事实继续由现有领域表承载；当前没有独立的通用 Item 事实表。
+
 ### 回合并发语义
 
 `#turnQueues` 按 `employeeId` 串行，因为一个 Harness worker 一次只能跑一个 run，且 runtime 缓存不能被两个回合同时改写。准确说法是：
