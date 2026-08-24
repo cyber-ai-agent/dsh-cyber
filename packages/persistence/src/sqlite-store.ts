@@ -45,6 +45,9 @@ import {
   type SkillEvidence,
   type SkillEvidenceKind,
   type SkillEvidenceOutcome,
+  type AgentRun,
+  type WorkTurn,
+  type WorkTurnInteractionKind,
   type WorkMessage,
   type WorkSession,
   type WorkSessionKind,
@@ -236,6 +239,28 @@ export interface CreateSessionInput {
   actorId?: string
 }
 
+export interface CreateWorkTurnInput {
+  workspaceId: string
+  worldId: string
+  sessionId: string
+  clientTurnId?: string
+  interactionKind: WorkTurnInteractionKind
+}
+
+export interface CreateAgentRunInput {
+  workspaceId: string
+  worldId: string
+  turnId: string
+  sessionId: string
+  employeeId: string
+  ordinal: number
+}
+
+export interface ConversationRuntimeRecoveryReport {
+  turnsFailed: number
+  runsFailed: number
+}
+
 export interface AppendMessageInput {
   sessionId: string
   senderId: string
@@ -321,6 +346,8 @@ const KNOWN_TABLES = [
   'model_assignments',
   'local_assets',
   'work_sessions',
+  'work_turns',
+  'agent_runs',
   'work_session_participants',
   'messages',
   'installed_packages',
@@ -1968,6 +1995,124 @@ export class SqliteStore {
     return rows.map(mapSession)
   }
 
+  createWorkTurn(input: CreateWorkTurnInput): WorkTurn {
+    this.#assertWritable()
+    const session = this.#requireSession(input.sessionId)
+    if (session.workspaceId !== input.workspaceId || session.worldId !== input.worldId) {
+      throw new PersistenceError('Work turn scope does not match session')
+    }
+    const clientTurnId = input.clientTurnId?.trim()
+    if (clientTurnId !== undefined && (clientTurnId.length === 0 || clientTurnId.length > 128)) {
+      throw new PersistenceError('Work turn client id is invalid')
+    }
+    const turn: WorkTurn = {
+      id: this.#idFactory(), workspaceId: input.workspaceId, worldId: input.worldId,
+      sessionId: input.sessionId, interactionKind: input.interactionKind,
+      status: 'queued', createdAt: this.#clock(),
+      ...(clientTurnId === undefined ? {} : { clientTurnId }),
+    }
+    this.database.prepare(
+      `INSERT INTO work_turns
+       (id, workspace_id, world_id, session_id, client_turn_id, interaction_kind, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(turn.id, turn.workspaceId, turn.worldId, turn.sessionId, turn.clientTurnId ?? null,
+      turn.interactionKind, turn.status, turn.createdAt)
+    return turn
+  }
+
+  getWorkTurn(turnId: string): WorkTurn | undefined {
+    const row = this.database.prepare('SELECT * FROM work_turns WHERE id = ?').get(turnId)
+    return row === undefined ? undefined : mapWorkTurn(row)
+  }
+
+  listSessionTurns(sessionId: string): WorkTurn[] {
+    this.#requireSession(sessionId)
+    return this.database.prepare(
+      'SELECT * FROM work_turns WHERE session_id = ? ORDER BY created_at DESC, id DESC',
+    ).all(sessionId).map(mapWorkTurn)
+  }
+
+  startWorkTurn(turnId: string): WorkTurn {
+    return this.#transitionWorkTurn(turnId, ['queued'], 'running')
+  }
+
+  completeWorkTurn(turnId: string): WorkTurn {
+    return this.#transitionWorkTurn(turnId, ['running'], 'completed')
+  }
+
+  failWorkTurn(turnId: string, errorCode: string): WorkTurn {
+    return this.#transitionWorkTurn(turnId, ['running'], 'failed', errorCode)
+  }
+
+  interruptWorkTurn(turnId: string, errorCode = 'interrupted'): WorkTurn {
+    return this.#transitionWorkTurn(turnId, ['queued', 'running'], 'interrupted', errorCode)
+  }
+
+  createAgentRun(input: CreateAgentRunInput): AgentRun {
+    this.#assertWritable()
+    const turn = this.getWorkTurn(input.turnId)
+    const employee = this.#requireEmployee(input.employeeId)
+    if (turn === undefined || turn.workspaceId !== input.workspaceId || turn.worldId !== input.worldId ||
+      turn.sessionId !== input.sessionId || employee.workspaceId !== input.workspaceId || employee.worldId !== input.worldId) {
+      throw new PersistenceError('Agent run scope does not match turn or employee')
+    }
+    if (!Number.isInteger(input.ordinal) || input.ordinal < 1) throw new PersistenceError('Agent run ordinal is invalid')
+    const run: AgentRun = {
+      id: this.#idFactory(), workspaceId: input.workspaceId, worldId: input.worldId,
+      turnId: input.turnId, sessionId: input.sessionId, employeeId: input.employeeId,
+      ordinal: input.ordinal, status: 'queued', createdAt: this.#clock(),
+    }
+    this.database.prepare(
+      `INSERT INTO agent_runs
+       (id, workspace_id, world_id, turn_id, session_id, employee_id, ordinal, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(run.id, run.workspaceId, run.worldId, run.turnId, run.sessionId, run.employeeId,
+      run.ordinal, run.status, run.createdAt)
+    return run
+  }
+
+  getAgentRun(runId: string): AgentRun | undefined {
+    const row = this.database.prepare('SELECT * FROM agent_runs WHERE id = ?').get(runId)
+    return row === undefined ? undefined : mapAgentRun(row)
+  }
+
+  listTurnAgentRuns(turnId: string): AgentRun[] {
+    if (this.getWorkTurn(turnId) === undefined) throw new EntityNotFoundError(`Work turn not found: ${turnId}`)
+    return this.database.prepare('SELECT * FROM agent_runs WHERE turn_id = ? ORDER BY ordinal').all(turnId).map(mapAgentRun)
+  }
+
+  startAgentRun(runId: string): AgentRun {
+    return this.#transitionAgentRun(runId, ['queued'], 'running')
+  }
+
+  completeAgentRun(runId: string, runtimeSessionId?: string): AgentRun {
+    return this.#transitionAgentRun(runId, ['running'], 'completed', undefined, runtimeSessionId)
+  }
+
+  failAgentRun(runId: string, errorCode: string, runtimeSessionId?: string): AgentRun {
+    return this.#transitionAgentRun(runId, ['running'], 'failed', errorCode, runtimeSessionId)
+  }
+
+  interruptAgentRun(runId: string, errorCode = 'interrupted'): AgentRun {
+    return this.#transitionAgentRun(runId, ['queued', 'running'], 'interrupted', errorCode)
+  }
+
+  recoverConversationRuntimeAfterRestart(): ConversationRuntimeRecoveryReport {
+    this.#assertWritable()
+    const now = this.#clock()
+    return this.#transaction(() => {
+      const runs = this.database.prepare(
+        `UPDATE agent_runs SET status = 'failed', error_code = 'service-restarted', completed_at = ?
+         WHERE status IN ('queued', 'running')`,
+      ).run(now)
+      const turns = this.database.prepare(
+        `UPDATE work_turns SET status = 'failed', error_code = 'service-restarted', completed_at = ?
+         WHERE status IN ('queued', 'running')`,
+      ).run(now)
+      return { turnsFailed: Number(turns.changes), runsFailed: Number(runs.changes) }
+    })
+  }
+
   listParticipants(sessionId: string): WorkSessionParticipant[] {
     return this.database
       .prepare('SELECT * FROM work_session_participants WHERE session_id = ? ORDER BY joined_at, participant_id')
@@ -3073,6 +3218,51 @@ export class SqliteStore {
     return mapEmployeeRelationship(row)
   }
 
+  #transitionWorkTurn(
+    turnId: string,
+    from: WorkTurn['status'][],
+    to: WorkTurn['status'],
+    errorCode?: string,
+  ): WorkTurn {
+    this.#assertWritable()
+    const turn = this.getWorkTurn(turnId)
+    if (turn === undefined) throw new EntityNotFoundError(`Work turn not found: ${turnId}`)
+    if (!from.includes(turn.status)) throw new PersistenceError(`Illegal work turn transition: ${turn.status} -> ${to}`)
+    const now = this.#clock()
+    const normalizedError = errorCode?.trim()
+    if ((to === 'failed' || to === 'interrupted') && !normalizedError) throw new PersistenceError('Terminal work turn requires an error code')
+    this.database.prepare(
+      `UPDATE work_turns SET status = ?, error_code = ?,
+       started_at = CASE WHEN ? = 'running' THEN ? ELSE started_at END,
+       completed_at = CASE WHEN ? IN ('completed', 'failed', 'interrupted') THEN ? ELSE completed_at END
+       WHERE id = ?`,
+    ).run(to, normalizedError ?? null, to, now, to, now, turnId)
+    return this.getWorkTurn(turnId)!
+  }
+
+  #transitionAgentRun(
+    runId: string,
+    from: AgentRun['status'][],
+    to: AgentRun['status'],
+    errorCode?: string,
+    runtimeSessionId?: string,
+  ): AgentRun {
+    this.#assertWritable()
+    const run = this.getAgentRun(runId)
+    if (run === undefined) throw new EntityNotFoundError(`Agent run not found: ${runId}`)
+    if (!from.includes(run.status)) throw new PersistenceError(`Illegal agent run transition: ${run.status} -> ${to}`)
+    const now = this.#clock()
+    const normalizedError = errorCode?.trim()
+    if ((to === 'failed' || to === 'interrupted') && !normalizedError) throw new PersistenceError('Terminal agent run requires an error code')
+    this.database.prepare(
+      `UPDATE agent_runs SET status = ?, error_code = ?, runtime_session_id = COALESCE(?, runtime_session_id),
+       started_at = CASE WHEN ? = 'running' THEN ? ELSE started_at END,
+       completed_at = CASE WHEN ? IN ('completed', 'failed', 'interrupted') THEN ? ELSE completed_at END
+       WHERE id = ?`,
+    ).run(to, normalizedError ?? null, runtimeSessionId?.trim() || null, to, now, to, now, runId)
+    return this.getAgentRun(runId)!
+  }
+
   #requireWorkspace(workspaceId: string): Workspace {
     const workspace = this.getWorkspace(workspaceId)
     if (!workspace) throw new EntityNotFoundError(`Workspace not found: ${workspaceId}`)
@@ -3635,6 +3825,34 @@ function mapSession(row: object): WorkSession {
     createdAt: String(value.created_at),
     updatedAt: String(value.updated_at),
   }
+}
+
+function mapWorkTurn(row: object): WorkTurn {
+  const value = row as Record<string, unknown>
+  const turn: WorkTurn = {
+    id: String(value.id), workspaceId: String(value.workspace_id), worldId: String(value.world_id),
+    sessionId: String(value.session_id), interactionKind: value.interaction_kind as WorkTurn['interactionKind'],
+    status: value.status as WorkTurn['status'], createdAt: String(value.created_at),
+  }
+  if (typeof value.client_turn_id === 'string') turn.clientTurnId = value.client_turn_id
+  if (typeof value.error_code === 'string') turn.errorCode = value.error_code
+  if (typeof value.started_at === 'string') turn.startedAt = value.started_at
+  if (typeof value.completed_at === 'string') turn.completedAt = value.completed_at
+  return turn
+}
+
+function mapAgentRun(row: object): AgentRun {
+  const value = row as Record<string, unknown>
+  const run: AgentRun = {
+    id: String(value.id), workspaceId: String(value.workspace_id), worldId: String(value.world_id),
+    turnId: String(value.turn_id), sessionId: String(value.session_id), employeeId: String(value.employee_id),
+    ordinal: Number(value.ordinal), status: value.status as AgentRun['status'], createdAt: String(value.created_at),
+  }
+  if (typeof value.runtime_session_id === 'string') run.runtimeSessionId = value.runtime_session_id
+  if (typeof value.error_code === 'string') run.errorCode = value.error_code
+  if (typeof value.started_at === 'string') run.startedAt = value.started_at
+  if (typeof value.completed_at === 'string') run.completedAt = value.completed_at
+  return run
 }
 
 function mapParticipant(row: object): WorkSessionParticipant {

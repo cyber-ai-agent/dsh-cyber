@@ -1,4 +1,4 @@
-export const CYBER_SCHEMA_VERSION = 14 as const
+export const CYBER_SCHEMA_VERSION = 15 as const
 
 export type IsoTimestamp = string
 export type JsonPrimitive = boolean | number | string | null
@@ -602,6 +602,41 @@ export interface WorkSession {
   status: WorkSessionStatus
   createdAt: IsoTimestamp
   updatedAt: IsoTimestamp
+}
+
+export type WorkTurnInteractionKind = 'chat' | 'task' | 'meeting' | 'peer'
+export type WorkTurnStatus = 'queued' | 'running' | 'completed' | 'failed' | 'interrupted'
+
+export interface WorkTurn {
+  id: string
+  workspaceId: string
+  worldId: string
+  sessionId: string
+  clientTurnId?: string
+  interactionKind: WorkTurnInteractionKind
+  status: WorkTurnStatus
+  errorCode?: string
+  createdAt: string
+  startedAt?: string
+  completedAt?: string
+}
+
+export type AgentRunStatus = WorkTurnStatus
+
+export interface AgentRun {
+  id: string
+  workspaceId: string
+  worldId: string
+  turnId: string
+  sessionId: string
+  employeeId: string
+  ordinal: number
+  status: AgentRunStatus
+  runtimeSessionId?: string
+  errorCode?: string
+  createdAt: string
+  startedAt?: string
+  completedAt?: string
 }
 
 export type ParticipantKind = 'owner' | 'employee' | 'system'

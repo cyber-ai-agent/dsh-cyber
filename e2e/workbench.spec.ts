@@ -49,6 +49,11 @@ test('onboards, recruits from dossier, talks, browses dossiers and keeps file su
   await createRoleFromDossier(page, /开发工程师 v1/, '阿帆')
   await expect(composer).toBeEnabled()
   await expect(page.getByRole('button', { name: '与阿帆私聊' })).toBeVisible()
+  const sessionRowTops = await page.locator('.session-list .session-row').evaluateAll((rows) =>
+    rows.slice(0, 2).map((row) => row.getBoundingClientRect().top),
+  )
+  expect(sessionRowTops).toHaveLength(2)
+  expect(sessionRowTops[1]! - sessionRowTops[0]!).toBeLessThanOrEqual(56)
 
   const dock = page.getByRole('region', { name: '世界与角色档案侧边栏' })
   await dock.getByRole('button', { name: '档案', exact: true }).click()

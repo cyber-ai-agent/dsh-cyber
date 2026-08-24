@@ -155,9 +155,11 @@ describe('ConversationOrchestrator', () => {
     const orchestrator = new ConversationOrchestrator({ store, runtime, workspacePath: directory })
     orchestrators.push(orchestrator)
     const realtime: AgentRuntimeEvent[] = []
+    const realtimeIds: Array<{ workTurnId: string; agentRunId: string; traceTurnId: unknown }> = []
     const durableAtEmit: Array<{ kind: AgentRuntimeEvent['kind']; persisted: boolean }> = []
     orchestrator.subscribe((event) => {
       realtime.push(event.event)
+      realtimeIds.push({ workTurnId: event.workTurnId, agentRunId: event.agentRunId, traceTurnId: event.event.metadata.traceTurnId })
       const eventTypes = store.listWorldDomainEvents(company.id).map((item) => item.type)
       const messages = store.listMessages(event.sessionId)
       const persisted = event.event.kind === 'turn.started'
@@ -203,6 +205,12 @@ describe('ConversationOrchestrator', () => {
     ).toHaveLength(2)
     expect(store.listWorldDomainEvents(company.id).at(-1)?.type).toBe('task.completed')
     expect(store.getEmployee(employee.id)?.status).toBe('available')
+    const directTurns = store.listSessionTurns(first.session.id)
+    expect(directTurns).toHaveLength(2)
+    expect(directTurns.every((turn) => turn.status === 'completed')).toBe(true)
+    expect(store.listTurnAgentRuns(directTurns[0]!.id)).toHaveLength(1)
+    expect(realtimeIds.every((item) => item.agentRunId === item.traceTurnId && item.workTurnId.length > 0)).toBe(true)
+    expect(store.listMessages(first.session.id).every((message) => message.metadata.workTurnId !== undefined)).toBe(true)
   })
 
   it('runs two independent agents in sequence and gives the second the first real statement', async () => {
@@ -248,6 +256,12 @@ describe('ConversationOrchestrator', () => {
     const eventTypes = store.listWorldDomainEvents(company.id).map((event) => event.type)
     expect(eventTypes).toContain('meeting.started')
     expect(eventTypes).toContain('meeting.finished')
+    const [turn] = store.listSessionTurns(result.session.id)
+    expect(turn).toMatchObject({ status: 'completed', interactionKind: 'meeting' })
+    expect(store.listTurnAgentRuns(turn!.id)).toEqual([
+      expect.objectContaining({ employeeId: lead.id, ordinal: 1, status: 'completed' }),
+      expect.objectContaining({ employeeId: engineer.id, ordinal: 2, status: 'completed' }),
+    ])
   })
 
   it('continues an existing group history without creating a duplicate session', async () => {
@@ -289,6 +303,38 @@ describe('ConversationOrchestrator', () => {
     expect(store.listSessions(company.id).filter((session) => session.kind === 'group')).toHaveLength(1)
     expect(store.listMessages(first.session.id).filter((message) => message.kind === 'user')).toHaveLength(2)
     expect(store.listWorldDomainEvents(company.id).filter((event) => event.type === 'meeting.started')).toHaveLength(2)
+  })
+
+  it('preserves completed runs when a later group agent fails', async () => {
+    const { directory, store, workspace, company } = await setup()
+    store.saveBlueprint(blueprint('lead-partial', '老王', '技术经理'))
+    store.saveBlueprint(blueprint('engineer-partial', '小刘', '软件工程师'))
+    const lead = store.recruitEmployee({ workspaceId: workspace.id, worldId: company.id, blueprintId: 'lead-partial', blueprintVersion: 1 })
+    const engineer = store.recruitEmployee({ workspaceId: workspace.id, worldId: company.id, blueprintId: 'engineer-partial', blueprintVersion: 1 })
+    let calls = 0
+    const runtime: AgentRuntimePort = {
+      async runTurn(request) {
+        calls += 1
+        if (calls === 2) throw new Error('runtime unavailable')
+        request.onEvent?.({ kind: 'assistant.message', source: 'partial-test', sourceSessionId: 'first-run', content: '第一位已完成。', metadata: {} })
+        return { agentSessionId: 'first-run', finalResponse: '第一位已完成。', eventCount: 1 }
+      },
+      async close() {},
+    }
+    const orchestrator = new ConversationOrchestrator({ store, runtime, workspacePath: directory })
+    orchestrators.push(orchestrator)
+
+    await expect(orchestrator.group({
+      workspaceId: workspace.id, worldId: company.id, employeeIds: [lead.id, engineer.id], prompt: '执行两步检查',
+    })).rejects.toThrow('Agent model turn failed')
+
+    const [session] = store.listSessions(company.id)
+    const [turn] = store.listSessionTurns(session!.id)
+    expect(turn).toMatchObject({ status: 'failed', errorCode: 'runtime-unknown' })
+    expect(store.listTurnAgentRuns(turn!.id)).toEqual([
+      expect.objectContaining({ employeeId: lead.id, status: 'completed', ordinal: 1 }),
+      expect.objectContaining({ employeeId: engineer.id, status: 'failed', ordinal: 2 }),
+    ])
   })
 
   it('rejects cross-world role mixing before a runtime starts', async () => {

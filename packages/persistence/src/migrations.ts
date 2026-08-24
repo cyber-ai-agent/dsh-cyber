@@ -612,6 +612,52 @@ const MIGRATIONS: readonly Migration[] = [
         ON task_schedule_runs(schedule_id, started_at DESC);
     `,
   },
+  {
+    version: 15,
+    name: 'conversation-runtime-lifecycle',
+    sql: `
+      CREATE TABLE work_turns (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        session_id TEXT NOT NULL REFERENCES work_sessions(id) ON DELETE CASCADE,
+        client_turn_id TEXT,
+        interaction_kind TEXT NOT NULL CHECK (interaction_kind IN ('chat', 'task', 'meeting', 'peer')),
+        status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed', 'interrupted')),
+        error_code TEXT,
+        created_at TEXT NOT NULL,
+        started_at TEXT,
+        completed_at TEXT
+      ) STRICT;
+
+      CREATE INDEX work_turns_session_created_idx ON work_turns(session_id, created_at DESC, id);
+      CREATE INDEX work_turns_world_status_created_idx ON work_turns(world_id, status, created_at DESC, id);
+      CREATE INDEX work_turns_client_turn_idx ON work_turns(client_turn_id) WHERE client_turn_id IS NOT NULL;
+      CREATE INDEX work_turns_session_client_turn_idx
+        ON work_turns(session_id, client_turn_id) WHERE client_turn_id IS NOT NULL;
+
+      CREATE TABLE agent_runs (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        turn_id TEXT NOT NULL REFERENCES work_turns(id) ON DELETE CASCADE,
+        session_id TEXT NOT NULL REFERENCES work_sessions(id) ON DELETE CASCADE,
+        employee_id TEXT NOT NULL REFERENCES employee_instances(id) ON DELETE CASCADE,
+        ordinal INTEGER NOT NULL CHECK (ordinal > 0),
+        status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed', 'interrupted')),
+        runtime_session_id TEXT,
+        error_code TEXT,
+        created_at TEXT NOT NULL,
+        started_at TEXT,
+        completed_at TEXT,
+        UNIQUE(turn_id, ordinal)
+      ) STRICT;
+
+      CREATE INDEX agent_runs_turn_ordinal_idx ON agent_runs(turn_id, ordinal);
+      CREATE INDEX agent_runs_session_created_idx ON agent_runs(session_id, created_at DESC, id);
+      CREATE INDEX agent_runs_employee_status_created_idx ON agent_runs(employee_id, status, created_at DESC, id);
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {

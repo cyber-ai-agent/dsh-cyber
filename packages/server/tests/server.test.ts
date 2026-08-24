@@ -348,11 +348,35 @@ describe('Cyber local server', () => {
       'turn.started', 'assistant.reasoning', 'tool.started', 'tool.completed', 'assistant.message', 'turn.completed',
     ])
     expect(runtimeEvents.every((item) => item.event.metadata.clientTurnId === 'client-turn-group')).toBe(true)
+    expect(runtimeEvents.every((item) => item.agentRunId === item.event.metadata.traceTurnId)).toBe(true)
+    expect(runtimeEvents.every((item) => item.workTurnId === item.event.metadata.workTurnId)).toBe(true)
+
+    const turns = await json(first.origin, `/api/sessions/${sessionId}/turns`)
+    expect(turns.response.status).toBe(200)
+    expect(turns.body.items).toHaveLength(1)
+    const turnId = turns.body.items[0].id as string
+    const turnDetail = await json(first.origin, `/api/turns/${turnId}`)
+    expect(turnDetail.body.turn).toMatchObject({ id: turnId, status: 'completed', interactionKind: 'chat' })
+    expect(turnDetail.body.runs).toEqual([
+      expect.objectContaining({ employeeId: engineer.id, ordinal: 1, status: 'completed' }),
+      expect.objectContaining({ employeeId: archivist.id, ordinal: 2, status: 'completed' }),
+    ])
+    const staleTurn = first.server.store.createWorkTurn({
+      workspaceId: workspace.id, worldId: world.id, sessionId, interactionKind: 'task',
+    })
+    first.server.store.startWorkTurn(staleTurn.id)
+    const staleRun = first.server.store.createAgentRun({
+      workspaceId: workspace.id, worldId: world.id, sessionId, turnId: staleTurn.id,
+      employeeId: engineer.id, ordinal: 1,
+    })
+    first.server.store.startAgentRun(staleRun.id)
 
     await first.server.close()
     servers.splice(servers.indexOf(first.server), 1)
 
     const second = await start(stateRoot, new FakeRuntime())
+    expect(second.server.store.getWorkTurn(staleTurn.id)).toMatchObject({ status: 'failed', errorCode: 'service-restarted' })
+    expect(second.server.store.getAgentRun(staleRun.id)).toMatchObject({ status: 'failed', errorCode: 'service-restarted' })
     const workspaceSnapshot = await json(second.origin, `/api/workspaces/${workspace.id}/snapshot`)
     const worldSnapshot = await json(second.origin, `/api/worlds/${world.id}/snapshot`)
     const messages = await json(second.origin, `/api/sessions/${sessionId}/messages`)

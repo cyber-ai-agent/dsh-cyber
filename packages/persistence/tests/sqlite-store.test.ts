@@ -175,7 +175,7 @@ describe('SqliteStore', () => {
       '收到，我先建立基线。',
     ])
     expect(reopened.getEmployee(employee.id)?.agentSessionId).toBe('harness-session-1')
-    expect(reopened.doctor()).toMatchObject({ ok: true, schemaVersion: 14 })
+    expect(reopened.doctor()).toMatchObject({ ok: true, schemaVersion: 15 })
   })
 
   it('returns the latest message of one sender without loading the full transcript', async () => {
@@ -315,7 +315,7 @@ describe('SqliteStore', () => {
     expect(backupStore.getWorkspace(workspace.id)?.name).toBe('赛博公司')
     const exported = JSON.parse(await readFile(exportPath, 'utf8')) as any
     expect(exported.format).toBe('dsh-cyber-export')
-    expect(exported.schemaVersion).toBe(14)
+    expect(exported.schemaVersion).toBe(15)
     expect(exported.workspaces[0].worlds[0].world.id).toBe(world.id)
     expect(exported.workspaces[0].worlds[0].employees[0].employee.id).toBe(employee.id)
     expect(exported.workspaces[0].worlds[0].sessions[0].messages[0].content).toBe('世界内记录')
@@ -630,6 +630,8 @@ describe('SqliteStore', () => {
       DROP TABLE model_interaction_logs;
       DROP TABLE task_schedule_runs;
       DROP TABLE task_schedules;
+      DROP TABLE agent_runs;
+      DROP TABLE work_turns;
       ALTER TABLE employee_blueprints DROP COLUMN embodiment_json;
       DELETE FROM schema_migrations WHERE version > 2;
       PRAGMA user_version = 2;
@@ -641,7 +643,7 @@ describe('SqliteStore', () => {
     expect(migrated.listWorkspaces()[0]?.name).toBe('迁移前工作区')
     expect(migrated.doctor()).toMatchObject({
       ok: true,
-      schemaVersion: 14,
+      schemaVersion: 15,
       counts: {
         installedPackages: 0,
         packageTransactions: 0,
@@ -867,5 +869,58 @@ describe('SqliteStore', () => {
       durationMs: 5,
       tokensTotal: -2,
     })).toThrow('tokens total must be a non-negative integer')
+  })
+
+  it('persists strict conversation runtime lifecycles and recovers stale work after restart', async () => {
+    const { path, store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: 'Runtime lifecycle' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: 'Company', templateId: 'cyber-company' })
+    store.saveBlueprint(blueprint())
+    const employee = store.recruitEmployee({
+      workspaceId: workspace.id, worldId: world.id, blueprintId: 'software-engineer', blueprintVersion: 1,
+    })
+    const session = store.createSession({ workspaceId: workspace.id, worldId: world.id, kind: 'direct', title: 'Lifecycle' })
+    const completedTurn = store.createWorkTurn({
+      workspaceId: workspace.id, worldId: world.id, sessionId: session.id,
+      interactionKind: 'chat', clientTurnId: 'client-1',
+    })
+    expect(() => store.completeWorkTurn(completedTurn.id)).toThrow('Illegal work turn transition')
+    store.startWorkTurn(completedTurn.id)
+    const completedRun = store.createAgentRun({
+      workspaceId: workspace.id, worldId: world.id, sessionId: session.id,
+      turnId: completedTurn.id, employeeId: employee.id, ordinal: 1,
+    })
+    store.startAgentRun(completedRun.id)
+    store.completeAgentRun(completedRun.id, 'runtime-session-1')
+    store.completeWorkTurn(completedTurn.id)
+
+    const staleTurn = store.createWorkTurn({
+      workspaceId: workspace.id, worldId: world.id, sessionId: session.id, interactionKind: 'task',
+    })
+    store.startWorkTurn(staleTurn.id)
+    const staleRun = store.createAgentRun({
+      workspaceId: workspace.id, worldId: world.id, sessionId: session.id,
+      turnId: staleTurn.id, employeeId: employee.id, ordinal: 1,
+    })
+    store.startAgentRun(staleRun.id)
+    const queuedTurn = store.createWorkTurn({
+      workspaceId: workspace.id, worldId: world.id, sessionId: session.id, interactionKind: 'chat',
+    })
+    const queuedRun = store.createAgentRun({
+      workspaceId: workspace.id, worldId: world.id, sessionId: session.id,
+      turnId: queuedTurn.id, employeeId: employee.id, ordinal: 1,
+    })
+    store.close()
+    stores.splice(stores.indexOf(store), 1)
+
+    const reopened = await SqliteStore.open(path)
+    stores.push(reopened)
+    expect(reopened.getAgentRun(completedRun.id)).toMatchObject({ status: 'completed', runtimeSessionId: 'runtime-session-1' })
+    expect(reopened.recoverConversationRuntimeAfterRestart()).toEqual({ turnsFailed: 2, runsFailed: 2 })
+    expect(reopened.getWorkTurn(staleTurn.id)).toMatchObject({ status: 'failed', errorCode: 'service-restarted' })
+    expect(reopened.getAgentRun(staleRun.id)).toMatchObject({ status: 'failed', errorCode: 'service-restarted' })
+    expect(reopened.getWorkTurn(queuedTurn.id)).toMatchObject({ status: 'failed', errorCode: 'service-restarted' })
+    expect(reopened.getAgentRun(queuedRun.id)).toMatchObject({ status: 'failed', errorCode: 'service-restarted' })
+    expect(reopened.recoverConversationRuntimeAfterRestart()).toEqual({ turnsFailed: 0, runsFailed: 0 })
   })
 })

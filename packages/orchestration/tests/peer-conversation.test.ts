@@ -114,6 +114,9 @@ describe('peer conversations', () => {
     expect(participants.every((participant) => participant.kind === 'employee')).toBe(true)
     expect(participants.some((participant) => participant.participantId === 'owner')).toBe(false)
     expect(store.listMessages(result.session.id).filter((message) => message.kind === 'assistant')).toHaveLength(4)
+    const [turn] = store.listSessionTurns(result.session.id)
+    expect(turn).toMatchObject({ interactionKind: 'peer', status: 'completed' })
+    expect(store.listTurnAgentRuns(turn!.id).map((run) => run.ordinal)).toEqual([1, 2, 3, 4])
 
     const events = store.listWorldDomainEvents(company.id).filter((event) => event.sessionId === result.session.id)
     expect(events.find((event) => event.type === 'meeting.started')?.payload).toMatchObject({
