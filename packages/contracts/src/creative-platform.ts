@@ -53,6 +53,8 @@ export interface ConversationHubItem {
   pinned: boolean
   hidden: boolean
   canonicalCharacterId?: string
+  /** Compact preview of the most recent owner prompt, capped server-side. */
+  lastPrompt?: string
 }
 
 // Compatibility re-exports. Skill Runtime is a core host capability and must

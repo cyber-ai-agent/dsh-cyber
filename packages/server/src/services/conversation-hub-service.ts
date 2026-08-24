@@ -18,6 +18,16 @@ interface ConversationHubState {
   entries: Record<string, ConversationEntryState>
 }
 
+/** Upper bound for the last-prompt preview carried in hub payloads. */
+const LAST_PROMPT_PREVIEW_MAX = 120
+
+function compactPromptPreview(content: string | undefined): string | undefined {
+  if (content === undefined) return undefined
+  const compact = content.replace(/\s+/gu, ' ').trim()
+  if (compact.length === 0) return undefined
+  return compact.length > LAST_PROMPT_PREVIEW_MAX ? `${compact.slice(0, LAST_PROMPT_PREVIEW_MAX)}…` : compact
+}
+
 export class ConversationHubService {
   readonly #store: SqliteStore
   readonly #roots: WorldRootService
@@ -72,12 +82,14 @@ export class ConversationHubService {
         : this.#store.getEmployee(canonicalCharacterId)
       const explicit = state.entries[session.id]
       const pinned = explicit?.pinned ?? character?.blueprintId === 'core.butler'
+      const lastPrompt = compactPromptPreview(this.#store.latestMessageBySender(session.id, 'owner')?.content)
       items.push({
         session,
         participantIds,
         pinned,
         hidden: explicit?.hidden ?? false,
         ...(canonicalCharacterId === undefined ? {} : { canonicalCharacterId }),
+        ...(lastPrompt === undefined ? {} : { lastPrompt }),
       })
     }
     return items.sort((left, right) => {

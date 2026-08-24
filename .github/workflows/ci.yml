@@ -33,8 +33,12 @@ jobs:
         run: pnpm typecheck
       - name: Unit and integration tests
         run: pnpm test
+      # The status can only be written to a commit inside this repository.
+      # For fork pull requests the head sha lives in the contributor's fork,
+      # where GITHUB_TOKEN has no write access (403), so skip instead of failing.
       - name: Publish protected branch status
-        if: ${{ success() }}
+        if: >-
+          ${{ success() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
         env:
           GH_TOKEN: ${{ github.token }}
           TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}

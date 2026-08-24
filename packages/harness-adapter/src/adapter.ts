@@ -69,7 +69,7 @@ export interface HarnessAdapterOptions {
 
 export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDisposable {
   readonly #options: HarnessAdapterOptions
-  readonly #runtimes = new Map<string, { permissionMode: AgentPermissionMode; runtime: HarnessRuntime }>()
+  readonly #runtimes = new Map<string, { permissionMode: AgentPermissionMode; runtime: HarnessRuntime; sessionId?: string }>()
   #profile: Promise<HarnessProfilePaths> | undefined
 
   constructor(options: HarnessAdapterOptions) {
@@ -101,15 +101,14 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
 
   async runEmployeeTurn(request: EmployeeTurnRequest): Promise<EmployeeTurnResult> {
     const profile = await this.#getProfile()
-    let agentSessionId = request.employee.agentSessionId ?? stableAgentSessionId(request.employee.id)
     const permissionMode = request.permissionMode ?? 'read-only'
     let cached = this.#runtimes.get(request.employee.id)
-    let createdRuntime = false
     if (cached !== undefined && cached.permissionMode !== permissionMode) {
       this.#runtimes.delete(request.employee.id)
       await cached.runtime.close()
       cached = undefined
     }
+    let createdRuntime = false
     if (cached === undefined) {
       const spec: HarnessRuntimeSpec = {
         employee: request.employee,
@@ -125,13 +124,24 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       createdRuntime = true
     }
     // DSH 0.1.1-rc.1 cannot resume a named session whose JSONL log was
-    // created by an earlier worker process. A newly created runtime therefore
-    // receives a fresh id up front, before it can emit turn/tool events. The
-    // recovered id is returned and persisted by the orchestrator; subsequent
-    // turns in this runtime keep using that same id.
-    if (createdRuntime && request.employee.agentSessionId !== undefined) {
-      agentSessionId = freshAgentSessionId(request.employee.id)
+    // created by an earlier worker process, and it creates the named session
+    // lazily on first append. Every freshly created runtime therefore gets a
+    // brand-new random id up front, before it can emit turn/tool events:
+    //
+    // - rotating away from the employee's durable id is mandatory (that log
+    //   belongs to some other process), and
+    // - employees whose turns never completed have no durable id at all —
+    //   the deterministic fallback id would collide with their own leftover
+    //   log from a previous process, which is exactly the recurring
+    //   "历史记录冲突" loop reported in the field.
+    //
+    // The rotated id lives on the cached runtime so every later turn in this
+    // process keeps conversing in the same session, and it is returned so the
+    // orchestrator can persist it.
+    if (cached.sessionId === undefined) {
+      cached.sessionId = freshAgentSessionId(request.employee.id)
     }
+    const agentSessionId = cached.sessionId
     let observedNotification = false
     const onNotification = request.onNotification === undefined
       ? undefined
@@ -149,6 +159,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       // Only that exact, side-effect-free failure is safe to retry.
       if (observedNotification || !isPersistedSessionCollision(error)) throw error
       const recoveredSessionId = freshAgentSessionId(request.employee.id)
+      cached.sessionId = recoveredSessionId
       const result = await cached.runtime.run(recoveredSessionId, request.prompt, request.onNotification)
       return { agentSessionId: recoveredSessionId, ...result }
     }

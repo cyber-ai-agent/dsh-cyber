@@ -1,7 +1,7 @@
 import type { ModelProfile } from '@dsh-cyber/contracts'
 import { describe, expect, it } from 'vitest'
 
-import { harnessModelRoute } from '../src/services/harness-model-route.js'
+import { harnessModelRoute, supportedReasoningEffort } from '../src/services/harness-model-route.js'
 
 function profile(overrides: Partial<ModelProfile> = {}): ModelProfile {
   return {
@@ -35,5 +35,29 @@ describe('harnessModelRoute', () => {
         apiKeyEnv: 'DSH_CYBER_MODEL_KEY_TEST',
       },
     })
+  })
+
+  it('keeps a requested effort the profile declares', () => {
+    const route = harnessModelRoute(profile({
+      settings: { reasoningEfforts: { off: 'none', low: 'low', medium: 'medium', high: 'high' } },
+    }), 'medium')
+    expect(route.reasoning).toBe('medium')
+    expect(route.reasoningEfforts).toMatchObject({ medium: 'medium' })
+  })
+
+  it('degrades an undeclared effort to no explicit reasoning instead of failing the turn', () => {
+    const route = harnessModelRoute(profile({
+      settings: { reasoningEfforts: { off: 'none', low: 'low' } },
+    }), 'max')
+    expect(route.reasoning).toBeUndefined()
+    expect(supportedReasoningEffort(profile({ settings: {} }), 'medium')).toBe('medium')
+    expect(harnessModelRoute(profile({ settings: {} }), 'medium').reasoning).toBe('medium')
+  })
+
+  it('drops every effort for a declared non-reasoning model', () => {
+    const nonReasoning = profile({ settings: { reasoningEfforts: false } })
+    expect(harnessModelRoute(nonReasoning, 'medium')).not.toHaveProperty('reasoning')
+    expect(harnessModelRoute(nonReasoning)).not.toHaveProperty('reasoning')
+    expect(supportedReasoningEffort(nonReasoning, 'off')).toBeUndefined()
   })
 })
