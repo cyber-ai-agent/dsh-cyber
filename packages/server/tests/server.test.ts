@@ -1049,6 +1049,14 @@ it('searches verified market packages and activates installed plugin and talent 
 
     const themeCatalog = await json(origin, `/api/marketplace?market=theme&workspaceId=${workspace.id}`)
     expect(themeCatalog.body.items).toHaveLength(4)
+    expect(themeCatalog.body.items.find((item: { manifest: { id: string } }) => item.manifest.id === 'official-cyber-nocturne')).toMatchObject({
+      activation: {
+        kind: 'world-theme',
+        themeId: 'official-cyber-nocturne',
+        themeVersion: '1.0.1',
+        templateId: 'cyber-company',
+      },
+    })
     const visualPreview = await fetch(`${origin}/api/marketplace/packages/official-moonlit-tavern/1.0.0/preview`)
     expect(visualPreview.status).toBe(200)
     expect(visualPreview.headers.get('content-type')).toBe('image/png')

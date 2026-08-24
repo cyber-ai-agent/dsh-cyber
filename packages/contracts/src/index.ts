@@ -179,6 +179,12 @@ export interface CyberMarketCommand {
 
 export type CyberMarketActivation =
   | {
+      kind: 'world-theme'
+      themeId: string
+      themeVersion: string
+      templateId: string
+    }
+  | {
       kind: 'prompt-transform'
       automatic: boolean
       commands: CyberMarketCommand[]

@@ -90,6 +90,22 @@ async function marketActivation(
   item: CyberMarketPackage,
 ): Promise<{ activation?: CyberMarketActivation }> {
   try {
+    if (item.market === 'theme' && item.manifest.kind === 'world-theme') {
+      const entrypoint = item.manifest.entrypoints?.find((candidate) => candidate.kind === 'world-theme')
+      if (entrypoint === undefined) return {}
+      const rawManifest = JSON.parse((await packageCatalog.readDeclaredFile(item, entrypoint.path)).toString('utf8')) as unknown
+      const validation = validateWorldThemeManifest(rawManifest)
+      if (!validation.valid) return {}
+      const manifest = rawManifest as WorldThemeManifestV1
+      return {
+        activation: {
+          kind: 'world-theme',
+          themeId: manifest.id,
+          themeVersion: manifest.version,
+          templateId: manifest.templateId,
+        },
+      }
+    }
     if (item.market === 'plugin') {
       const entrypoint = item.manifest.entrypoints?.find((candidate) => candidate.kind === 'prompt-transform')
       if (entrypoint === undefined) return {}

@@ -1293,6 +1293,7 @@ export default function App() {
         <PackageMarketDialog
           initialMarket={packageMarketKind}
           world={activeWorld}
+          worlds={worlds}
           items={marketplaceItems}
           installed={installedPackages}
           transactions={packageTransactions}

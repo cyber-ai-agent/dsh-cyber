@@ -25,6 +25,7 @@ import type {
 interface PackageMarketDialogProps {
   initialMarket: CyberMarketKind
   world: World
+  worlds: World[]
   items: CyberMarketPackage[]
   installed: InstalledPackage[]
   transactions: PackageInstallTransaction[]
@@ -169,22 +170,26 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
               <div className="market-empty"><Cube size={30} /><strong>没有匹配的扩展</strong><span>可以修改关键词，或使用下方“本地导入”安装自定义包。</span></div>
             ) : (
               <div className="market-card-grid">
-                {props.items.map((item) => (
-                  <article key={`${item.manifest.id}-${item.manifest.version}`} className={selected?.manifest.id === item.manifest.id ? 'is-selected' : ''}>
-                    {item.market === 'theme' ? <img className="market-world-cover" src={marketplacePreviewUrl(item)} alt={`${item.manifest.displayName}世界预览`} /> : null}
-                    {item.market === 'talent' ? <img className="market-role-cover" src={marketplacePreviewUrl(item)} alt={`${item.manifest.displayName}角色风格预览`} /> : null}
-                    <header><MarketIcon market={item.market} /><div><strong>{item.manifest.displayName}</strong><span>{item.manifest.publisher} · v{item.manifest.version}</span></div>{item.verified ? <em><ShieldCheck size={14} />官方校验</em> : <em className="is-community">社区包</em>}</header>
-                    <p>{item.manifest.summary}</p>
-                    {item.market === 'theme' ? <div className="market-world-facts"><span>完整场景皮肤</span><span>专属角色外观</span><span>独立会话与档案</span></div> : null}
-                    {item.market === 'talent' ? <div className="market-role-world">适合：{roleWorldLabel(item.activation?.kind === 'employee-blueprint' ? item.activation.worldTemplateId : undefined)}</div> : null}
-                    {item.market === 'plugin' ? <div className="market-plugin-scope">全局可用 · 所有世界共享</div> : null}
-                    <div className="market-capabilities">{item.manifest.capabilities.slice(0, 4).map((capability) => <code key={capability}>{capabilityLabel(capability)}</code>)}</div>
-                    <footer>
-                      <span>{item.installedVersion === undefined ? '未安装' : `已安装 v${item.installedVersion}`}</span>
-                      {marketAction(item, () => prepareWorld(item), () => void inspect(item), () => activate(item))}
-                    </footer>
-                  </article>
-                ))}
+                {props.items.map((item) => {
+                  const state = packageCardState(item, props.worlds)
+                  const selectedClass = selected?.manifest.id === item.manifest.id ? ' is-selected' : ''
+                  return (
+                    <article key={`${item.manifest.id}-${item.manifest.version}`} className={`is-${state}${selectedClass}`}>
+                      {item.market === 'theme' ? <img className="market-world-cover" src={marketplacePreviewUrl(item)} alt={`${item.manifest.displayName}世界预览`} /> : null}
+                      {item.market === 'talent' ? <img className="market-role-cover" src={marketplacePreviewUrl(item)} alt={`${item.manifest.displayName}角色风格预览`} /> : null}
+                      <header><MarketIcon market={item.market} /><div><strong>{item.manifest.displayName}</strong><span>{item.manifest.publisher} · v{item.manifest.version}</span></div>{item.verified ? <em><ShieldCheck size={14} />官方校验</em> : <em className="is-community">社区包</em>}</header>
+                      <p>{item.manifest.summary}</p>
+                      {item.market === 'theme' ? <div className="market-world-facts"><span>完整场景皮肤</span><span>专属角色外观</span><span>独立会话与档案</span></div> : null}
+                      {item.market === 'talent' ? <div className="market-role-world">适合：{roleWorldLabel(item.activation?.kind === 'employee-blueprint' ? item.activation.worldTemplateId : undefined)}</div> : null}
+                      {item.market === 'plugin' ? <div className="market-plugin-scope">全局可用 · 所有世界共享</div> : null}
+                      <div className="market-capabilities">{item.manifest.capabilities.slice(0, 4).map((capability) => <code key={capability}>{capabilityLabel(capability)}</code>)}</div>
+                      <footer>
+                        <span>{packageStateLabel(item, state)}</span>
+                        {marketAction(item, state, () => prepareWorld(item), () => void inspect(item), () => activate(item))}
+                      </footer>
+                    </article>
+                  )
+                })}
               </div>
             )}
             <button className="manual-install-toggle" type="button" onClick={() => setManualOpen((value) => !value)}><FolderOpen size={16} />{manualOpen ? '收起本地导入' : '本地导入自定义包'}</button>
@@ -256,11 +261,42 @@ function PluginActivationReview({ item, onUse }: { item: CyberMarketPackage; onU
   </section>
 }
 
-function marketAction(item: CyberMarketPackage, onBind: () => void, onInspect: () => void, onActivate: () => void) {
-  const installed = item.installedVersion === item.manifest.version
-  if (item.market === 'theme' && installed) return <button type="button" onClick={onBind}>创建这个世界</button>
-  if (installed) return <button type="button" onClick={onActivate}>{item.market === 'talent' ? '招募到世界' : '立即使用'}</button>
-  return <button type="button" onClick={onInspect}>{item.installedVersion === undefined ? '查看并安装' : '查看升级'}</button>
+type PackageCardState = 'uninstalled' | 'included' | 'upgrade' | 'installed'
+
+function packageCardState(item: CyberMarketPackage, worlds: World[]): PackageCardState {
+  if (item.installedVersion === item.manifest.version) return 'installed'
+  if (item.installedVersion !== undefined) return 'upgrade'
+  const activation = item.activation
+  if (activation?.kind === 'world-theme' && worlds.some((world) => builtInThemeMatches(world.templateId, activation.templateId))) {
+    return 'included'
+  }
+  return 'uninstalled'
+}
+
+function packageStateLabel(item: CyberMarketPackage, state: PackageCardState): string {
+  if (state === 'installed') {
+    const next = item.market === 'theme' ? '可创建' : item.market === 'talent' ? '可招募' : '可使用'
+    return `已安装 v${item.installedVersion} · ${next}`
+  }
+  if (state === 'upgrade') return `已安装 v${item.installedVersion} · 有新版 v${item.manifest.version}`
+  if (state === 'included') return '已内置 · 当前可用'
+  return '未安装'
+}
+
+function marketAction(item: CyberMarketPackage, state: PackageCardState, onBind: () => void, onInspect: () => void, onActivate: () => void) {
+  if (item.market === 'theme' && state === 'installed') return <button className="market-action--installed" type="button" onClick={onBind}>创建新世界</button>
+  if (state === 'installed') return <button className="market-action--installed" type="button" onClick={onActivate}>{item.market === 'talent' ? '招募到世界' : '立即使用'}</button>
+  if (state === 'upgrade') return <button className="market-action--upgrade" type="button" onClick={onInspect}>升级到 v{item.manifest.version}</button>
+  if (state === 'included') return <button className="market-action--included" type="button" disabled><CheckCircle size={15} />已内置</button>
+  return <button type="button" onClick={onInspect}>查看并安装</button>
+}
+
+function builtInThemeMatches(worldTemplateId: string, packageTemplateId: string): boolean {
+  if (worldTemplateId === packageTemplateId) return true
+  if (worldTemplateId === 'personal-world' && packageTemplateId === 'cyber-company') return true
+  if (['company', 'cyber-company'].includes(worldTemplateId) && packageTemplateId === 'cyber-company') return true
+  if (['tavern', 'moonlit-tavern'].includes(worldTemplateId) && ['tavern', 'moonlit-tavern'].includes(packageTemplateId)) return true
+  return false
 }
 
 function marketplacePreviewUrl(item: CyberMarketPackage): string {

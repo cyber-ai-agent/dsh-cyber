@@ -22,13 +22,33 @@ describe('package market activation flow', () => {
     const html = marketHtml(pluginItem())
     expect(html.indexOf('世界</button>')).toBeLessThan(html.indexOf('角色</button>'))
     expect(html.indexOf('角色</button>')).toBeLessThan(html.indexOf('插件</button>'))
-    expect(html).toMatch(/<button type="button">立即使用<\/button>/)
+    expect(html).toContain('已安装 v1.0.0 · 可使用')
+    expect(html).toContain('立即使用</button>')
   })
 
   it('gives installed role templates a recruitment action instead of a dead installed state', () => {
     const html = marketHtml(roleItem(), 'talent')
     expect(html).toContain('招募到世界')
     expect(html).not.toContain('角色模板已安装</button>')
+  })
+
+  it('distinguishes an included theme from an installed theme', () => {
+    const included = marketHtml(themeItem(), 'theme', [{ ...world, templateId: 'personal-world' }])
+    expect(included).toContain('is-included')
+    expect(included).toContain('已内置 · 当前可用')
+    expect(included).toContain('已内置</button>')
+
+    const installed = marketHtml(themeItem('1.0.1'), 'theme')
+    expect(installed).toContain('is-installed')
+    expect(installed).toContain('已安装 v1.0.1 · 可创建')
+    expect(installed).toContain('创建新世界')
+  })
+
+  it('shows an explicit upgrade state when an older theme is installed', () => {
+    const html = marketHtml(themeItem('1.0.0'), 'theme')
+    expect(html).toContain('is-upgrade')
+    expect(html).toContain('已安装 v1.0.0 · 有新版 v1.0.1')
+    expect(html).toContain('升级到 v1.0.1')
   })
 
   it('opens recruitment on the market-selected blueprint', () => {
@@ -50,10 +70,11 @@ describe('package market activation flow', () => {
   })
 })
 
-function marketHtml(item: CyberMarketPackage, initialMarket: 'plugin' | 'talent' = 'plugin'): string {
+function marketHtml(item: CyberMarketPackage, initialMarket: 'theme' | 'plugin' | 'talent' = 'plugin', worlds: World[] = [world]): string {
   return renderToStaticMarkup(createElement(PackageMarketDialog, {
     initialMarket,
     world,
+    worlds,
     items: [item],
     installed: [],
     transactions: [],
@@ -69,6 +90,22 @@ function marketHtml(item: CyberMarketPackage, initialMarket: 'plugin' | 'talent'
     onPreview: vi.fn(),
     onInstall: vi.fn(async () => undefined),
   }))
+}
+
+function themeItem(installedVersion?: string): CyberMarketPackage {
+  return {
+    market: 'theme',
+    sourceDirectory: 'marketplace/themes/official-cyber-nocturne',
+    verified: true,
+    ...(installedVersion === undefined ? {} : { installedVersion }),
+    activation: {
+      kind: 'world-theme',
+      themeId: 'official-cyber-nocturne',
+      themeVersion: '1.0.1',
+      templateId: 'cyber-company',
+    },
+    manifest: manifest('official-cyber-nocturne', 'world-theme', '赛博公司 · 夜班总部', ['world:render'], '1.0.1'),
+  }
 }
 
 function pluginItem(): CyberMarketPackage {
@@ -102,11 +139,11 @@ function roleItem(): CyberMarketPackage {
   }
 }
 
-function manifest(id: string, kind: 'plugin' | 'employee-blueprint', displayName: string, capabilities: string[]) {
+function manifest(id: string, kind: 'plugin' | 'employee-blueprint' | 'world-theme', displayName: string, capabilities: string[], version = '1.0.0') {
   return {
     schemaVersion: 1 as const,
     id,
-    version: '1.0.0',
+    version,
     kind,
     displayName,
     summary: `${displayName}说明`,
