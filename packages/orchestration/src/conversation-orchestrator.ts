@@ -21,6 +21,7 @@ import type {
 import {
   buildConversationHistory,
   DEFAULT_CONVERSATION_HISTORY_BUDGET,
+  lastAuthoredSequence,
   type ConversationHistoryBudget,
   type ConversationHistorySpeaker,
 } from './conversation-history.js'
@@ -153,6 +154,13 @@ export interface ConversationResult {
   replies: AgentReply[]
 }
 
+interface RecoveredConversation {
+  /** Every durable message of the session, oldest first. */
+  messages: WorkMessage[]
+  /** The user-visible subset, filtered and budgeted. */
+  history: ConversationHistoryEntry[]
+}
+
 export class ConversationOrchestrationError extends Error {}
 
 export type AgentTurnFailureKind =
@@ -216,7 +224,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
     // SQLite is the conversation authority. Read the durable transcript before
     // the current prompt is appended, otherwise this turn's prompt would reach
     // the model twice: once as recovered history and once as the live request.
-    const history = this.#historyFor(session)
+    const recovered = this.#recoverConversation(session)
     this.#store.appendMessage({
       sessionId: session.id,
       senderId: 'owner',
@@ -231,7 +239,8 @@ export class ConversationOrchestrator implements AsyncDisposable {
       session,
       employee,
       prompt: input.runtimePrompt?.trim() || prompt,
-      history,
+      history: recovered.history,
+      observedThroughSequence: lastAuthoredSequence(recovered.messages, employee.id),
       ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
       ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
       ...(clientTurnId === undefined ? {} : { clientTurnId }),
@@ -266,7 +275,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
     // Prior turns of this group session only. The replies produced inside the
     // current round are supplied separately by groupPrompt(), so they must not
     // be part of the recovered history as well.
-    const history = this.#historyFor(session)
+    const recovered = this.#recoverConversation(session)
     this.#store.appendMessage({
       sessionId: session.id,
       senderId: 'owner',
@@ -297,7 +306,11 @@ export class ConversationOrchestrator implements AsyncDisposable {
           session,
           employee,
           prompt: collaborationPrompt,
-          history,
+          history: recovered.history,
+          // Each character catches up from its own last statement. A character
+          // that spoke first in the previous round has not seen what the ones
+          // after it said, and its runtime session never will unless we replay.
+          observedThroughSequence: lastAuthoredSequence(recovered.messages, employee.id),
           ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
           ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
           ...(clientTurnId === undefined ? {} : { clientTurnId }),
@@ -420,6 +433,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
           // A peer session is always freshly created, and every statement of
           // the running collaboration is already carried by peerPrompt().
           history: [],
+          observedThroughSequence: 0,
           ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
         }))
       }
@@ -486,14 +500,15 @@ export class ConversationOrchestrator implements AsyncDisposable {
    *
    * Only messages of `session` are read, so a direct chat can never inherit
    * group context, a group can never inherit a private chat, and no world can
-   * leak into another.
+   * leak into another. The raw messages are returned alongside the history so
+   * each character can be given its own catch-up watermark.
    */
-  #historyFor(session: WorkSession): ConversationHistoryEntry[] {
-    return buildConversationHistory(
-      this.#store.listMessages(session.id),
-      this.#speakersFor(session),
-      this.#historyBudget,
-    )
+  #recoverConversation(session: WorkSession): RecoveredConversation {
+    const messages = this.#store.listMessages(session.id)
+    return {
+      messages,
+      history: buildConversationHistory(messages, this.#speakersFor(session), this.#historyBudget),
+    }
   }
 
   #speakersFor(session: WorkSession): ConversationHistorySpeaker[] {
@@ -512,11 +527,21 @@ export class ConversationOrchestrator implements AsyncDisposable {
     employee: EmployeeInstance
     prompt: string
     history: ConversationHistoryEntry[]
+    observedThroughSequence: number
     reasoningEffort?: Exclude<ReasoningEffort, 'auto'>
     permissionMode?: AgentPermissionMode
     clientTurnId?: string
   }): Promise<AgentReply> {
-    const { session, employee, prompt, history, reasoningEffort, permissionMode, clientTurnId } = input
+    const {
+      session,
+      employee,
+      prompt,
+      history,
+      observedThroughSequence,
+      reasoningEffort,
+      permissionMode,
+      clientTurnId,
+    } = input
     const revision = this.#store.getEmployeeRevision(employee.id, employee.currentRevision)
     if (revision === undefined) {
       throw new ConversationOrchestrationError(`Missing agent revision: ${employee.id}`)
@@ -544,6 +569,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
         revision,
         conversationId: session.id,
         history,
+        observedThroughSequence,
         prompt,
         workspacePath,
         ...(reasoningEffort === undefined ? {} : { reasoningEffort }),

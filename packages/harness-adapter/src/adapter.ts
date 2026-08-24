@@ -14,7 +14,7 @@ import type {
   JsonObject,
 } from '@dsh-cyber/contracts'
 
-import { formatFreshSessionPrompt } from './history-prompt.js'
+import { formatRecoveredHistoryPrompt, unseenHistory } from './history-prompt.js'
 import {
   ensureHarnessProfile,
   resolveDshBin,
@@ -30,6 +30,8 @@ export interface EmployeeTurnRequest {
   conversationId: string
   /** User-visible history of `conversationId`, oldest first, without this turn. */
   history: ConversationHistoryEntry[]
+  /** Sequence of this employee's own last statement in the conversation, or 0. */
+  observedThroughSequence: number
   prompt: string
   workspacePath: string
   permissionMode?: AgentPermissionMode
@@ -102,6 +104,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       revision: request.revision,
       conversationId: request.conversationId,
       history: request.history,
+      observedThroughSequence: request.observedThroughSequence,
       prompt: request.prompt,
       workspacePath: request.workspacePath,
       ...(request.permissionMode === undefined ? {} : { permissionMode: request.permissionMode }),
@@ -173,14 +176,20 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     // The mapping is per conversation, so a private chat and a group meeting of
     // the same character never share worker context. Because the id is random
     // and the log is not resumed, the recovered SQLite history — not the DSH
-    // JSONL — is what makes the character remember, and it is injected exactly
-    // once per session: the worker keeps its own context for later turns.
+    // JSONL — is what makes the character remember.
+    //
+    // A live session is not replayed wholesale, or the character would read its
+    // own past twice; it receives only what it has not observed. That is empty
+    // for a private chat, where the character has seen every message of the
+    // conversation, and non-empty in a group, where whoever spoke first last
+    // round never saw the characters that answered after it.
     const existingSessionId = cached.sessionIds.get(conversationId)
     const agentSessionId = existingSessionId ?? freshAgentSessionId(request.employee.id)
     if (existingSessionId === undefined) cached.sessionIds.set(conversationId, agentSessionId)
-    const prompt = existingSessionId === undefined
-      ? formatFreshSessionPrompt(request.history, request.prompt)
-      : request.prompt
+    const prompt = formatRecoveredHistoryPrompt(
+      unseenHistory(request.history, request.observedThroughSequence, existingSessionId === undefined),
+      request.prompt,
+    )
 
     let observedNotification = false
     const onNotification = request.onNotification === undefined
@@ -201,11 +210,11 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       const recoveredSessionId = freshAgentSessionId(request.employee.id)
       cached.sessionIds.set(conversationId, recoveredSessionId)
       // Only this conversation rotates. The recovered session starts empty, so
-      // local history is injected again even if the conversation had already
-      // run in this process.
+      // the whole history is replayed even if the conversation had already run
+      // in this process.
       const result = await cached.runtime.run(
         recoveredSessionId,
-        formatFreshSessionPrompt(request.history, request.prompt),
+        formatRecoveredHistoryPrompt(unseenHistory(request.history, 0, true), request.prompt),
         request.onNotification,
       )
       return { agentSessionId: recoveredSessionId, ...result }

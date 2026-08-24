@@ -6,6 +6,7 @@ import {
   buildConversationHistory,
   CONVERSATION_HISTORY_TRUNCATION_NOTICE,
   DEFAULT_CONVERSATION_HISTORY_BUDGET,
+  lastAuthoredSequence,
 } from '../src/index.js'
 
 let sequence = 0
@@ -153,5 +154,38 @@ describe('buildConversationHistory', () => {
 
   it('recovers roughly twelve exchanges by default', () => {
     expect(DEFAULT_CONVERSATION_HISTORY_BUDGET).toEqual({ maxMessages: 24, maxCharacters: 16_000 })
+  })
+
+  it('carries the durable sequence of every entry', () => {
+    const first = message('user', 'owner', '第一句')
+    const second = message('assistant', 'engineer', '第二句')
+    const history = buildConversationHistory([first, second], SPEAKERS)
+    expect(history.map((entry) => entry.sequence)).toEqual([first.sequence, second.sequence])
+  })
+})
+
+describe('lastAuthoredSequence', () => {
+  it('reports the last conversational statement of one speaker', () => {
+    const messages = [
+      message('user', 'owner', '问题一'),
+      message('assistant', 'engineer', '小刘回答一'),
+      message('assistant', 'architect', '老王回答一'),
+    ]
+    expect(lastAuthoredSequence(messages, 'engineer')).toBe(messages[1]!.sequence)
+    expect(lastAuthoredSequence(messages, 'architect')).toBe(messages[2]!.sequence)
+    expect(lastAuthoredSequence(messages, 'owner')).toBe(messages[0]!.sequence)
+  })
+
+  it('returns 0 for a speaker that has never spoken here', () => {
+    expect(lastAuthoredSequence([message('user', 'owner', '问题')], 'engineer')).toBe(0)
+  })
+
+  it('ignores reasoning and tool rows so the watermark matches what is replayable', () => {
+    const messages = [
+      message('assistant', 'engineer', '真正的回答'),
+      message('reasoning', 'engineer', '内部推理'),
+      message('tool-call', 'engineer', '调用工具：read_file'),
+    ]
+    expect(lastAuthoredSequence(messages, 'engineer')).toBe(messages[0]!.sequence)
   })
 })

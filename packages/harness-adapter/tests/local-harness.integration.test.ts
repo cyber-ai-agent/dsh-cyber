@@ -118,6 +118,7 @@ describe('real Harness worker with a loopback model provider', () => {
         revision,
         conversationId: 'conversation-local-integration',
         history: [],
+        observedThroughSequence: 0,
         prompt: '第一轮：确认本地 Harness 会话。',
         workspacePath: stateRoot,
       })
@@ -129,6 +130,7 @@ describe('real Harness worker with a loopback model provider', () => {
         revision,
         conversationId: 'conversation-local-integration',
         history: [],
+        observedThroughSequence: 0,
         prompt: '第二轮：继续同一会话。',
         workspacePath: stateRoot,
       })

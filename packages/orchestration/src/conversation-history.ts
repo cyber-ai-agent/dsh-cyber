@@ -115,6 +115,27 @@ function isConversationalMessage(message: WorkMessage): boolean {
   return !NON_CONVERSATIONAL_FLAGS.some((flag) => message.metadata[flag] === true)
 }
 
+/**
+ * Sequence of the last conversational message `speakerId` contributed, or 0.
+ *
+ * This is the watermark a live runtime session can be trusted to have observed:
+ * a character necessarily knows everything up to its own last statement. What
+ * came after it — another character speaking later in the same round — has to
+ * be replayed.
+ */
+export function lastAuthoredSequence(
+  messages: readonly WorkMessage[],
+  speakerId: string,
+): number {
+  let latest = 0
+  for (const message of messages) {
+    if (message.senderId !== speakerId) continue
+    if (!isConversationalMessage(message)) continue
+    if (message.sequence > latest) latest = message.sequence
+  }
+  return latest
+}
+
 function entryFor(
   message: WorkMessage,
   content: string,
@@ -123,6 +144,7 @@ function entryFor(
   const role = message.kind === 'user' ? 'user' : 'assistant'
   return {
     role,
+    sequence: message.sequence,
     speakerId: message.senderId,
     speakerName: speakerName(message, role, names),
     content,

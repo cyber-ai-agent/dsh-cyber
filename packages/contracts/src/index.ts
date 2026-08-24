@@ -747,6 +747,8 @@ export interface AgentRuntimeEvent {
  */
 export interface ConversationHistoryEntry {
   role: 'user' | 'assistant'
+  /** Durable ordering key of the message inside its conversation. */
+  sequence: number
   speakerId: string
   speakerName: string
   content: string
@@ -769,6 +771,17 @@ export interface AgentTurnRequest {
    * the prompt of the current turn.
    */
   history: ConversationHistoryEntry[]
+  /**
+   * Sequence of the last message this agent itself contributed to the
+   * conversation, or 0 when it has never spoken there.
+   *
+   * A live runtime session has necessarily observed everything up to its own
+   * last statement, so only later entries need replaying into it. This matters
+   * in group conversations: a character that speaks early never sees what the
+   * characters after it said, because those statements land after its turn has
+   * already finished.
+   */
+  observedThroughSequence: number
   prompt: string
   workspacePath: string
   reasoningEffort?: Exclude<ReasoningEffort, 'auto'>

@@ -8,25 +8,26 @@ const HISTORY_INSTRUCTION = [
 ].join('\n')
 
 /**
- * Renders recovered conversation history for a brand-new Harness session.
+ * Renders recovered conversation history in front of the live prompt.
  *
  * DSH 0.1.1-rc.1 cannot resume a named session whose JSONL log belongs to an
  * earlier worker process, so every conversation gets a fresh random session id
- * per process. Continuity is therefore restored from the local store on the
- * first run of that session — and only then, because the worker keeps its own
- * context for every later turn of the same session. Re-injecting would make the
- * character read its own past twice.
+ * per process. Continuity is therefore restored from the local store, not from
+ * the DSH log.
  *
  * The block is framed as recovered context rather than as instructions: it must
  * never be able to override persona, world settings, permissions or the live
  * user request, all of which are already part of `currentPrompt`.
+ *
+ * An empty `entries` list means the session is already up to date and the
+ * prompt is passed through untouched.
  */
-export function formatFreshSessionPrompt(
-  history: readonly ConversationHistoryEntry[],
+export function formatRecoveredHistoryPrompt(
+  entries: readonly ConversationHistoryEntry[],
   currentPrompt: string,
 ): string {
-  if (history.length === 0) return currentPrompt
-  const transcript = history
+  if (entries.length === 0) return currentPrompt
+  const transcript = entries
     .map((entry) => `${entry.speakerName}：${entry.content}`)
     .join('\n')
   return [
@@ -39,4 +40,22 @@ export function formatFreshSessionPrompt(
     '',
     currentPrompt,
   ].join('\n')
+}
+
+/**
+ * Selects the history a runtime session still needs.
+ *
+ * A newly allocated session has observed nothing and receives everything that
+ * was recovered. A session that is still alive in this process has observed the
+ * conversation up to this agent's own last statement — but no further. In a
+ * group, characters that spoke after it did so once its turn had already
+ * finished, so those statements exist only in SQLite and have to be replayed.
+ */
+export function unseenHistory(
+  history: readonly ConversationHistoryEntry[],
+  observedThroughSequence: number,
+  freshSession: boolean,
+): ConversationHistoryEntry[] {
+  if (freshSession) return [...history]
+  return history.filter((entry) => entry.sequence > observedThroughSequence)
 }

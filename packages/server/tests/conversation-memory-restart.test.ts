@@ -40,12 +40,15 @@ interface WorkerScript {
 function recordingAdapter(
   stateRoot: string,
   runs: RecordedRun[],
-  reply: string,
+  reply: string | Record<string, string>,
   script: WorkerScript = {},
 ): HarnessCompatibilityAdapter {
   return new HarnessCompatibilityAdapter({
     stateRoot,
-    runtimeFactory() {
+    runtimeFactory(spec) {
+      const answer = typeof reply === 'string'
+        ? reply
+        : reply[spec.employee.displayName] ?? `reply:${spec.employee.displayName}`
       return {
         async run(sessionId, prompt, onNotification) {
           runs.push({ sessionId, prompt })
@@ -66,11 +69,11 @@ function recordingAdapter(
               sessionId,
               event: {
                 type: 'assistant/message',
-                data: { message: { content: [{ type: 'text', text: reply }] } },
+                data: { message: { content: [{ type: 'text', text: answer }] } },
               },
             },
           })
-          return { finalResponse: reply, notifications: [] }
+          return { finalResponse: answer, notifications: [] }
         },
         async close() {},
       }
@@ -304,6 +307,86 @@ describe('SQLite conversation memory across runtime restarts', () => {
     })).rejects.toThrow()
 
     expect(runs).toHaveLength(1)
+  })
+
+  it('lets an early group speaker read what a later speaker said in the previous round', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-cyber-group-catchup-'))
+    const runs: RecordedRun[] = []
+    const { store, workspace, world, engineer } = await seed(join(directory, 'cyber.sqlite'))
+    const architect = store.recruitEmployee({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      blueprintId: 'architect',
+      blueprintVersion: 1,
+    })
+    const orchestrator = orchestratorFor(
+      store,
+      recordingAdapter(directory, runs, { 小刘: '回归测试还没跑完。', 老王: '我建议延后一天。' }),
+      directory,
+    )
+
+    // Round 1 speaks in order 小刘 → 老王, so 老王's statement lands after
+    // 小刘's own worker session has already finished its turn.
+    const meeting = await orchestrator.group({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      employeeIds: [engineer.id, architect.id],
+      prompt: '这次发布要不要延后？',
+    })
+    await orchestrator.group({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      employeeIds: [engineer.id, architect.id],
+      sessionId: meeting.session.id,
+      prompt: '那就按结论走，谁来通知？',
+    })
+
+    expect(runs).toHaveLength(4)
+    const engineerRoundTwo = runs[2]!
+    // 小刘 speaks first again, so groupPrompt() carries nothing from round 1.
+    // Without a catch-up the character simply never learns what 老王 said.
+    expect(engineerRoundTwo.prompt).toContain('老王：我建议延后一天。')
+    expect(engineerRoundTwo.prompt).toContain('那就按结论走，谁来通知？')
+  })
+
+  it('does not replay what a character already saw in its own live session', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-cyber-no-duplicate-'))
+    const runs: RecordedRun[] = []
+    const { store, workspace, world, engineer } = await seed(join(directory, 'cyber.sqlite'))
+    const architect = store.recruitEmployee({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      blueprintId: 'architect',
+      blueprintVersion: 1,
+    })
+    const orchestrator = orchestratorFor(
+      store,
+      recordingAdapter(directory, runs, { 小刘: '回归测试还没跑完。', 老王: '我建议延后一天。' }),
+      directory,
+    )
+
+    const meeting = await orchestrator.group({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      employeeIds: [engineer.id, architect.id],
+      prompt: '这次发布要不要延后？',
+    })
+    await orchestrator.group({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      employeeIds: [engineer.id, architect.id],
+      sessionId: meeting.session.id,
+      prompt: '那就按结论走，谁来通知？',
+    })
+
+    const engineerRoundTwo = runs[2]!
+    const architectRoundTwo = runs[3]!
+    // 小刘 only needs the one statement it missed, not its own past.
+    expect(engineerRoundTwo.prompt).not.toContain('用户：这次发布要不要延后？')
+    expect(engineerRoundTwo.prompt).not.toContain('小刘：回归测试还没跑完。')
+    // 老王 spoke last in round 1, so its session already saw everything and
+    // gets no recovered history at all.
+    expect(architectRoundTwo.prompt).not.toContain(HISTORY_HEADER)
   })
 
   it('gives a private chat and a group meeting of one character separate Harness sessions', async () => {
