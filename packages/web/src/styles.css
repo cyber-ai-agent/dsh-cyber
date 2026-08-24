@@ -237,7 +237,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .world-row.is-active { border-left-color: var(--accent); color: var(--accent-strong); }
 .isolation-note { margin: 8px 6px 0; padding: 7px 8px; border: 1px solid var(--border); color: var(--text-muted); font-size: var(--text-xs); line-height: 1.5; }
 .nav-section--sessions { flex: 1 1 auto; min-height: 110px; display: flex; flex-direction: column; overflow: hidden; }
-.session-list { flex: 1; min-height: 0; overflow-y: auto; }
+.session-list { flex: 1; min-height: 0; align-content: start; grid-auto-rows: max-content; overflow-y: auto; }
 .session-row { min-height: 50px; display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 6px 8px; border-left: 2px solid transparent; color: var(--text-muted); font-size: var(--text-xs); }
 .session-row:hover { background: var(--surface-2); color: var(--text); }
 .session-row.is-active { border-left-color: var(--accent); background: var(--accent-soft); color: var(--text); }
