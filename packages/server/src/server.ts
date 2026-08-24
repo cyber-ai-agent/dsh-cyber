@@ -62,6 +62,7 @@ import { WorldRootService } from './services/world-root-service.js'
 import { WorldSettingsService } from './services/world-settings-service.js'
 import { WorldTraceService } from './services/world-trace-service.js'
 import { WorldMarketplaceService } from './services/world-marketplace-service.js'
+import { WorldPackageInstanceService } from './services/world-package-instance-service.js'
 import { createBuiltinSkillRegistry } from './skills/builtin-skill-registry.js'
 import { LocalSkillActionRepository } from './skills/local-skill-action-repository.js'
 import { SqliteSkillActionRepository } from './skills/sqlite-skill-action-repository.js'
@@ -116,7 +117,13 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
 
   const store = await SqliteStore.open(join(stateRoot, 'data', 'dsh-cyber.sqlite'))
   store.recoverConversationRuntimeAfterRestart()
-  for (const blueprint of BUILTIN_BLUEPRINTS) store.saveBlueprint(blueprint)
+  // Built-in blueprint identities are immutable once persisted. Older local
+  // states may already contain the same id/version from a previous release;
+  // keep that durable source record and only seed genuinely missing versions.
+  // Any changed built-in definition must ship with a higher blueprint version.
+  for (const blueprint of BUILTIN_BLUEPRINTS) {
+    if (store.getBlueprint(blueprint.id, blueprint.version) === undefined) store.saveBlueprint(blueprint)
+  }
   if (options.bootstrapDefaultWorld === true && store.listWorkspaces().length === 0) {
     const local = store.createWorkspace({ name: '本地实例' })
     const world = store.createWorld({ workspaceId: local.id, name: '我的世界', templateId: 'personal-world' })
@@ -164,15 +171,17 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const packageCatalog = new LocalPackageCatalog(options.marketplaceRoot ?? fileURLToPath(new URL('../../../marketplace', import.meta.url)))
   const runtimeStreamHub = new RuntimeStreamHub()
   const worldStreamHub = new WorldStreamHub()
+  const worldPackages = new WorldPackageInstanceService(store, worldRoots)
   const worldRuntime = new WorldRuntimeService({
     store,
     simulationStore: worldSimulation,
+    worldPackages,
     publish: (event) => {
       worldStreamHub.publish(event)
       runtimeStreamHub.publishWorld(event)
     },
   })
-  const worldMarketplace = new WorldMarketplaceService(store, worldRuntime)
+  const worldMarketplace = new WorldMarketplaceService(store, worldRuntime, worldPackages)
   const ambientSlotResolver = new WorldAmbientSlotResolver({ store })
   const ambientStateProvider = new WorldAmbientStateProvider({
     store,
@@ -222,19 +231,19 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const router = new Router()
   registerSystemRoutes(router, { store, stateRoot, runtimeUpdates })
   registerWorkspaceFileRoutes(router, { worldFiles, access: worldAccess })
-  registerCatalogRoutes(router, { store, packageCatalog })
+  registerCatalogRoutes(router, { store, packageCatalog, worldPackages })
   registerWorkspaceRoutes(router, { store })
   registerModelRoutes(router, { store, credentials, modelCatalog, interactions })
   registerAmbientLifeRoutes(router, { store, settings: ambientLifeSettings, access: worldAccess })
   registerAssetRoutes(router, { store, assets, access: worldAccess })
-  registerWorldRoutes(router, { store, worldAccess })
+  registerWorldRoutes(router, { store, worldAccess, worldPackages })
   registerWorldSettingsRoutes(router, { store, settings: worldSettings, access: worldAccess })
   registerTaskScheduleRoutes(router, { store, schedules: taskSchedules, access: worldAccess })
-  registerPackageRoutes(router, { store, packageManager, packageCatalog, skillRuntime, worldMarketplace })
+  registerPackageRoutes(router, { store, packageManager, packageCatalog, skillRuntime, worldMarketplace, worldPackages, worldAccess })
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
   registerWorldTraceRoutes(router, { store, trace: worldTrace, access: worldAccess })
   registerModelInteractionRoutes(router, { store, interactions })
-  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, worldTrace, employeeActivity })
+  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, worldTrace, employeeActivity, worldPackages })
   registerEmployeeRoutes(router, { store, worldAccess })
 
   const httpServer = createServer((request, response) => {

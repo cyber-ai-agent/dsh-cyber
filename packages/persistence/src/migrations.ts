@@ -742,6 +742,33 @@ const MIGRATIONS: readonly Migration[] = [
         ON model_interaction_logs(world_id, employee_id, created_at DESC, id);
     `,
   },
+  {
+    version: 18,
+    name: 'world-package-instance-v1',
+    sql: `
+      CREATE TABLE world_package_instances (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        package_id TEXT NOT NULL,
+        package_version TEXT NOT NULL,
+        package_kind TEXT NOT NULL,
+        content_digest TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('active', 'disabled')),
+        origin_path TEXT NOT NULL,
+        overrides_path TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (workspace_id, package_id, package_version)
+          REFERENCES installed_packages(workspace_id, package_id, version)
+          ON DELETE RESTRICT
+      ) STRICT;
+      CREATE UNIQUE INDEX world_package_instances_active_idx
+        ON world_package_instances(world_id, package_id) WHERE status = 'active';
+      CREATE INDEX world_package_instances_world_idx
+        ON world_package_instances(world_id, status, created_at, id);
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {

@@ -38,6 +38,9 @@ describe('CreativeWorkshopService', () => {
     })
 
     expect(project.generatedPackageIds).toHaveLength(1)
+    expect(store.listWorldPackageInstances(project.worldId, 'active')).toEqual([
+      expect.objectContaining({ packageId: project.generatedPackageIds[0], packageKind: 'employee-blueprint' }),
+    ])
     const employee = store.listEmployees(project.worldId)[0]!
     const revision = store.getEmployeeRevision(employee.id, employee.currentRevision)!
     const blueprint = store.getBlueprint(employee.blueprintId, employee.blueprintVersion)!

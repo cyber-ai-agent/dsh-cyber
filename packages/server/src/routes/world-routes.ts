@@ -7,6 +7,7 @@ import type { Router } from '../http/router.js'
 import { loadInstalledBlueprints } from '../installed-package-runtime.js'
 import { ConversationHubService } from '../services/conversation-hub-service.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
+import type { WorldPackageInstanceService } from '../services/world-package-instance-service.js'
 import {
   nonNegativeInteger,
   optionalPositiveInteger,
@@ -20,10 +21,11 @@ import { writeJson } from '../http/response.js'
 export interface WorldRoutesDependencies {
   store: SqliteStore
   worldAccess?: WorldAccessService
+  worldPackages?: WorldPackageInstanceService
 }
 
 export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDependencies): void {
-  const { store, worldAccess } = dependencies
+  const { store, worldAccess, worldPackages } = dependencies
   const conversationHub = new ConversationHubService(store)
 
   router.get(/^\/api\/workspaces\/([^/]+)\/worlds$/, ({ response, params }) => {
@@ -92,7 +94,7 @@ export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDep
     const body = await readJson(request)
     const blueprintId = requiredString(body, 'blueprintId')
     const blueprintVersion = optionalPositiveInteger(body.blueprintVersion) ?? 1
-    const liveBlueprint = await findLiveBlueprint(store, world.workspaceId, blueprintId, blueprintVersion)
+    const liveBlueprint = await findLiveBlueprint(store, world.id, blueprintId, blueprintVersion, worldPackages)
     const recruitInput: Parameters<SqliteStore['recruitEmployee']>[0] = {
       workspaceId: world.workspaceId,
       worldId: world.id,
@@ -132,12 +134,13 @@ export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDep
 
 async function findLiveBlueprint(
   store: SqliteStore,
-  workspaceId: string,
+  worldId: string,
   blueprintId: string,
   blueprintVersion: number,
+  worldPackages?: WorldPackageInstanceService,
 ): Promise<EmployeeBlueprint | undefined> {
   const builtIn = BUILTIN_BLUEPRINTS.find((item) => item.id === blueprintId && item.version === blueprintVersion)
   if (builtIn !== undefined) return builtIn
-  const installed = await loadInstalledBlueprints(store.listInstalledPackages(workspaceId))
+  const installed = await loadInstalledBlueprints(worldPackages === undefined ? [] : await worldPackages.listRuntimePackages(worldId))
   return installed.find((item) => item.id === blueprintId && item.version === blueprintVersion)
 }

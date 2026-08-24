@@ -10,6 +10,8 @@ import { loadInstalledBlueprints, loadInstalledPromptTransformCommands } from '.
 import type { CharacterSkillRuntime } from '../services/character-skill-runtime.js'
 import { CreativeWorkshopService } from '../services/creative-workshop-service.js'
 import type { WorldMarketplaceService } from '../services/world-marketplace-service.js'
+import type { WorldPackageInstanceService } from '../services/world-package-instance-service.js'
+import type { WorldAccessService } from '../services/world-access-service.js'
 
 export interface PackageRoutesDependencies {
   store: SqliteStore
@@ -17,10 +19,12 @@ export interface PackageRoutesDependencies {
   packageCatalog: LocalPackageCatalog
   skillRuntime: CharacterSkillRuntime
   worldMarketplace: WorldMarketplaceService
+  worldPackages: WorldPackageInstanceService
+  worldAccess: WorldAccessService
 }
 
 export function registerPackageRoutes(router: Router, dependencies: PackageRoutesDependencies): void {
-  const { store, packageManager, packageCatalog, skillRuntime, worldMarketplace } = dependencies
+  const { store, packageManager, packageCatalog, skillRuntime, worldMarketplace, worldPackages, worldAccess } = dependencies
   const workshop = new CreativeWorkshopService(store, packageManager)
 
   router.get(/^\/api\/workspaces\/([^/]+)\/packages$/, ({ response, params }) => {
@@ -37,6 +41,38 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
     if (store.getWorkspace(workspaceId) === undefined) throw new HttpError(404, 'workspace_not_found', 'Workspace not found')
     const items = await loadInstalledPromptTransformCommands(store.listInstalledPackages(workspaceId))
     writeJson(response, 200, { items })
+  })
+
+  router.get(/^\/api\/worlds\/([^/]+)\/packages$/, async ({ request, response, params }) => {
+    const worldId = params[0]!
+    if (store.getWorld(worldId) === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
+    await worldAccess.assertUnlocked(worldId, request)
+    writeJson(response, 200, { items: store.listWorldPackageInstances(worldId) })
+  })
+
+  router.get(/^\/api\/worlds\/([^/]+)\/plugins$/, async ({ request, response, params }) => {
+    const worldId = params[0]!
+    if (store.getWorld(worldId) === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
+    await worldAccess.assertUnlocked(worldId, request)
+    const items = await loadInstalledPromptTransformCommands(await worldPackages.listRuntimePackages(worldId))
+    writeJson(response, 200, { items })
+  })
+
+  router.post(/^\/api\/worlds\/([^/]+)\/packages\/instantiate$/, async ({ request, response, params }) => {
+    const body = await readJson(request)
+    await worldAccess.assertUnlocked(params[0]!, request)
+    const instance = await worldPackages.instantiate({
+      worldId: params[0]!, packageId: requiredString(body, 'packageId'),
+      version: requiredString(body, 'version'), actorId: 'owner',
+    })
+    writeJson(response, 201, { instance })
+  })
+
+  router.post(/^\/api\/world-package-instances\/([^/]+)\/disable$/, async ({ request, response, params }) => {
+    const instance = store.getWorldPackageInstance(params[0]!)
+    if (instance === undefined) throw new HttpError(404, 'world_package_instance_not_found', 'World package instance not found')
+    await worldAccess.assertUnlocked(instance.worldId, request)
+    writeJson(response, 200, { instance: store.disableWorldPackageInstance(instance.id) })
   })
 
   router.get(/^\/api\/workspaces\/([^/]+)\/skill-catalog$/, ({ response, params }) => {
@@ -56,6 +92,8 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
     const workspaceId = params[0]!
     if (store.getWorkspace(workspaceId) === undefined) throw new HttpError(404, 'workspace_not_found', 'Workspace not found')
     const body = await readJson(request)
+    const worldId = optionalString(body.worldId)
+    if (worldId !== undefined) await assertTargetWorld(store, worldAccess, request, workspaceId, worldId)
     const installed = await packageManager.install({
       workspaceId,
       manifest: packageManifest(body.manifest),
@@ -66,7 +104,10 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
     if (installed.kind === 'employee-blueprint') {
       for (const blueprint of await loadInstalledBlueprints([installed])) store.saveBlueprint(blueprint)
     }
-    writeJson(response, 201, { installed })
+    const instance = worldId === undefined ? undefined : await worldPackages.instantiate({
+      worldId, packageId: installed.packageId, version: installed.version, actorId: 'owner',
+    })
+    writeJson(response, 201, { installed, ...(instance === undefined ? {} : { instance }) })
   })
 
   router.post(/^\/api\/workspaces\/([^/]+)\/marketplace\/preview$/, async ({ request, response, params }) => {
@@ -81,10 +122,13 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
 
   router.post(/^\/api\/workspaces\/([^/]+)\/marketplace\/install$/, async ({ request, response, params }) => {
     const body = await readJson(request)
+    const workspaceId = params[0]!
+    const worldId = optionalString(body.worldId)
+    if (worldId !== undefined) await assertTargetWorld(store, worldAccess, request, workspaceId, worldId)
     const item = await packageCatalog.find(requiredString(body, 'packageId'), optionalString(body.version))
     if (item === undefined) throw new HttpError(404, 'market_package_not_found', 'Marketplace package not found')
     const installed = await packageManager.install({
-      workspaceId: params[0]!,
+      workspaceId,
       manifest: item.manifest,
       sourceDirectory: item.sourceDirectory,
       approvalToken: requiredString(body, 'approvalToken'),
@@ -93,7 +137,10 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
     if (installed.kind === 'employee-blueprint') {
       for (const blueprint of await loadInstalledBlueprints([installed])) store.saveBlueprint(blueprint)
     }
-    writeJson(response, 201, { installed })
+    const instance = worldId === undefined ? undefined : await worldPackages.instantiate({
+      worldId, packageId: installed.packageId, version: installed.version, actorId: 'owner',
+    })
+    writeJson(response, 201, { installed, ...(instance === undefined ? {} : { instance }) })
   })
 
   router.post(/^\/api\/workspaces\/([^/]+)\/marketplace\/worlds$/, async ({ request, response, params }) => {
@@ -119,4 +166,18 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
   router.get(/^\/api\/workspaces\/([^/]+)\/workshop\/projects\/([^/]+)$/, async ({ response, params }) => {
     writeJson(response, 200, { project: await workshop.readProject(params[0]!, params[1]!) })
   })
+}
+
+async function assertTargetWorld(
+  store: SqliteStore,
+  access: WorldAccessService,
+  request: Parameters<WorldAccessService['assertUnlocked']>[1],
+  workspaceId: string,
+  worldId: string,
+): Promise<void> {
+  const world = store.getWorld(worldId)
+  if (world === undefined || world.workspaceId !== workspaceId) {
+    throw new HttpError(404, 'world_not_found', 'World not found in this workspace')
+  }
+  await access.assertUnlocked(worldId, request)
 }

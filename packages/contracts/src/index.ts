@@ -1,4 +1,4 @@
-export const CYBER_SCHEMA_VERSION = 17 as const
+export const CYBER_SCHEMA_VERSION = 18 as const
 
 export type IsoTimestamp = string
 export type JsonPrimitive = boolean | number | string | null
@@ -255,6 +255,8 @@ export interface CyberMarketPackage {
   sourceDirectory: string
   verified: boolean
   installedVersion?: string
+  /** Version instantiated in the selected world. Omitted when the package is library-only there. */
+  worldVersion?: string
   activation?: CyberMarketActivation
 }
 
@@ -270,6 +272,26 @@ export interface InstalledPackage {
   capabilities: string[]
   manifest: CyberPackageManifest
   installedAt: IsoTimestamp
+  updatedAt: IsoTimestamp
+}
+
+export type WorldPackageInstanceStatus = 'active' | 'disabled'
+
+/** A world-owned, version-pinned copy of a package from the local package library. */
+export interface WorldPackageInstance {
+  id: string
+  workspaceId: string
+  worldId: string
+  packageId: string
+  packageVersion: string
+  packageKind: CyberPackageKind
+  contentDigest: string
+  status: WorldPackageInstanceStatus
+  /** Path relative to the owning WorldRoot. Never an absolute machine path. */
+  originPath: string
+  /** Path relative to the owning WorldRoot. Never an absolute machine path. */
+  overridesPath: string
+  createdAt: IsoTimestamp
   updatedAt: IsoTimestamp
 }
 
@@ -767,6 +789,8 @@ export const DOMAIN_EVENT_TYPES = [
   'package.install.staged',
   'package.install.activated',
   'package.install.rolled-back',
+  'world.package.instantiated',
+  'world.package.disabled',
 ] as const
 
 export type DomainEventType = (typeof DOMAIN_EVENT_TYPES)[number]
@@ -915,6 +939,7 @@ export interface DatabaseDoctorReport {
     sessions: number
     messages: number
     installedPackages: number
+    worldPackageInstances: number
     packageTransactions: number
     runtimeUpdates: number
     worldRuntimeSnapshots: number

@@ -13,6 +13,7 @@
 | 包审批 | 完整 manifest 内容绑定、加密随机 token、TTL、单次消费、活动版本绑定、失败回滚 | grant 存于进程内，重启后需重新 preview | 跨设备/远程审批 |
 | 包完整性 | 严格 manifest、未知字段/长度/唯一性、入口-类型-能力关系、完整源目录库存、逐文件 SHA-256、路径/symlink 防护、staged 入口校验、激活后目标文件复验 | license 当前做 SPDX 表达式语法校验，不内置完整注册表 | 密码学签名、透明日志 |
 | 本地市场 | themes/plugins/talent 独立目录、搜索、官方 authority + digest、本地安装 | `certification` 不是签名；`verified` 级别不存在 | 远程 index、publish、付费、依赖、更新、卸载 |
+| 世界包实例 | 市场目录、工作区只读包库和世界私有实例分层；固定包版本与内容摘要；`origin`、`overrides` 和 SQLite 身份归属世界；Prompt、主题资源和角色蓝图只从当前世界实例进入运行时；创建失败精确补偿 | 主题绑定会显式创建世界实例；同版本请求幂等；不同版本拒绝隐式覆盖 | 带差异预览的更新、rebase、三方合并、overrides 编辑器 |
 | 世界主题 | 严格 nested/JSON parser、资源限制、引用/唯一性、八项核心 activity mapping、极端导航拒绝、安装/绑定/切换/禁用/内置回退 | 当前正式官方 roster 多数状态使用受控单帧 fallback | 音频、多场景切换、Three renderer |
 | 主题身份 | package + packageVersion + theme + themeVersion + digest，renderer key 不冲突 | 内置主题使用专用 builtin identity | 签名内容寻址分发 |
 | 主题资产 | staged 时整包与逐资产验证、`assets/` 包内路径、PNG/JPEG/WebP 签名、4/8 MiB 上限、不可变身份缓存、请求目标文件复验、越界/symlink 拒绝 | 缓存为进程内可信缓存 | 远程内容存储/CDN（当前明确禁止） |
@@ -30,6 +31,7 @@
 
 - 包审批与事务：`packages/package-runtime/src/package-manager.ts`、`packages/package-runtime/tests/package-manager.test.ts`
 - 本地市场与完整性：`packages/package-runtime/src/local-package-catalog.ts`、`packages/package-runtime/src/local-package-runtime.ts`
+- 世界包实例：`packages/server/src/services/world-package-instance-service.ts`、`packages/persistence/src/migrations.ts`、[世界包实例](../architecture/world-package-instance-v1.md)
 - 主题 parser：`packages/world-runtime/src/manifest.ts`、`packages/world-runtime/tests/world-runtime.test.ts`
 - 安装入口与资产缓存：`packages/server/src/installed-package-runtime.ts`、`packages/server/src/world-theme-package.ts`、对应 tests
 - 社区包门禁：`packages/server/tests/marketplace-conformance.test.ts`

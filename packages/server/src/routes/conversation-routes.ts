@@ -33,6 +33,7 @@ import type { WorldAccessService } from '../services/world-access-service.js'
 import type { WorldFileService } from '../services/world-file-service.js'
 import type { WorldSettingsService } from '../services/world-settings-service.js'
 import type { WorldTraceService } from '../services/world-trace-service.js'
+import type { WorldPackageInstanceService } from '../services/world-package-instance-service.js'
 import { ServiceError } from '../services/service-error.js'
 
 export interface ConversationRoutesDependencies {
@@ -47,6 +48,7 @@ export interface ConversationRoutesDependencies {
   worldSettings: WorldSettingsService
   worldTrace: WorldTraceService
   employeeActivity: EmployeeActivityProjectionService
+  worldPackages: WorldPackageInstanceService
 }
 
 export function registerConversationRoutes(router: Router, dependencies: ConversationRoutesDependencies): void {
@@ -62,6 +64,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     worldSettings,
     worldTrace,
     employeeActivity,
+    worldPackages,
   } = dependencies
   const delegatedCollaboration = new DelegatedCollaborationService({
     store,
@@ -79,7 +82,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     const prompt = requiredString(body, 'prompt')
     const attachments = await validatedChatAttachments(body.attachments, store, world.workspaceId, world.id, worldFiles)
     const attachmentPrompt = attachments.length === 0 ? prompt : attachmentAwarePrompt(prompt, attachments)
-    const transformedPrompt = await applyInstalledPromptTransforms(store.listInstalledPackages(world.workspaceId), attachmentPrompt)
+    const transformedPrompt = await applyInstalledPromptTransforms(await worldPackages.listRuntimePackages(world.id), attachmentPrompt)
     const worldSettingsValue = await worldSettings.get(world.id)
     const requestedReasoning = body.reasoningEffort === undefined
       ? worldSettingsValue.model.reasoningEffort
@@ -240,7 +243,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     const requestedReasoning = body.reasoningEffort === undefined
       ? settings.model.reasoningEffort
       : requiredEnum<ReasoningEffort>(body, 'reasoningEffort', ['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
-    const transformedPurpose = await applyInstalledPromptTransforms(store.listInstalledPackages(world.workspaceId), purpose)
+    const transformedPurpose = await applyInstalledPromptTransforms(await worldPackages.listRuntimePackages(world.id), purpose)
     const peerTitle = optionalString(body.title)
     const traceCheckpoint = await createTraceCheckpoint(world.id, worldTrace)
     try {

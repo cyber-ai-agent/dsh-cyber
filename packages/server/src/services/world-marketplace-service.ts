@@ -5,11 +5,13 @@ import type { SqliteStore } from '@dsh-cyber/persistence'
 import { loadInstalledWorldThemes } from '../installed-package-runtime.js'
 import type { WorldRuntimeService } from '../world-runtime-service.js'
 import { ServiceError } from './service-error.js'
+import type { WorldPackageInstanceService } from './world-package-instance-service.js'
 
 export class WorldMarketplaceService {
   constructor(
     private readonly store: SqliteStore,
     private readonly worldRuntime: WorldRuntimeService,
+    private readonly worldPackages: WorldPackageInstanceService,
   ) {}
 
   async createFromInstalledTheme(input: {
@@ -39,6 +41,9 @@ export class WorldMarketplaceService {
       templateId: theme.manifest.templateId,
     })
     try {
+      await this.worldPackages.instantiate({
+        worldId: world.id, packageId: installed.packageId, version: installed.version,
+      })
       await this.worldRuntime.bindInstalledTheme(world.id, installed.packageId)
       const starters = BUILTIN_BLUEPRINTS.filter((blueprint) => blueprint.worldTemplateId === world.templateId).slice(0, 3)
       const employees = starters.map((blueprint) => this.store.recruitEmployee({
@@ -51,6 +56,7 @@ export class WorldMarketplaceService {
       return { world, employees }
     } catch (error) {
       this.store.rollbackWorldCreation(world.id, 'marketplace-world-creation-failed')
+      await this.worldPackages.compensateRolledBackWorld(world.id)
       throw error
     }
   }

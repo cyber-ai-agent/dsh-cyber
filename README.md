@@ -268,7 +268,7 @@ git clone https://github.com/cyber-ai-agent/dsh-cyber.git
 cd dsh-cyber
 pnpm install
 pnpm build
-pnpm dsh-cyber -- web
+pnpm dsh-cyber web
 ```
 
 默认监听：
@@ -280,9 +280,9 @@ pnpm dsh-cyber -- web
 常用命令：
 
 ```bash
-pnpm dsh-cyber -- doctor
-pnpm dsh-cyber -- backup --output ./backup.dshbackup
-pnpm dsh-cyber -- web --no-open
+pnpm dsh-cyber doctor
+pnpm dsh-cyber backup --output ./backup.dshbackup
+pnpm dsh-cyber web --no-open
 pnpm typecheck
 pnpm test
 pnpm test:e2e
@@ -296,7 +296,7 @@ pnpm test:e2e
 
 ```bash
 # 1. 先备份本地状态
-pnpm dsh-cyber -- backup
+pnpm dsh-cyber backup
 
 # 2. 更新程序代码
 git fetch origin
@@ -308,10 +308,10 @@ pnpm install --frozen-lockfile
 pnpm build
 
 # 4. 检查本地状态
-pnpm dsh-cyber -- doctor
+pnpm dsh-cyber doctor
 
 # 5. 启动
-pnpm dsh-cyber -- web
+pnpm dsh-cyber web
 ```
 
 如果你使用自定义 `--data-dir`，升级前后继续使用**同一个目录**。

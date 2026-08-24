@@ -45,7 +45,7 @@ interface PackageMarketDialogProps {
 const MARKET_META: Record<CyberMarketKind, { label: string; description: string }> = {
   theme: { label: '世界', description: '选择完整场景皮肤、空间设定和起始角色，创建彼此独立的新世界。' },
   talent: { label: '角色', description: '安装不同世界观与专长的角色模板，再把角色招募到兼容世界。' },
-  plugin: { label: '插件', description: '全局扩展，安装一次即可在所有世界使用；每次安装都可审阅、回滚。' },
+  plugin: { label: '插件', description: '先安装到本地包库，再为需要的世界单独启用；每次安装都可审阅、回滚。' },
 }
 
 export function PackageMarketDialog(props: PackageMarketDialogProps) {
@@ -149,7 +149,7 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && props.onClose()}>
       <section className="package-market-dialog package-market-dialog--catalog" role="dialog" aria-modal="true" aria-labelledby="package-market-title">
         <header className="dialog-header package-market-header">
-          <div><h2 id="package-market-title">扩展市场</h2><p>先选择世界，再发现角色与全局插件。所有内容经过完整性校验和事务安装。</p></div>
+          <div><h2 id="package-market-title">扩展市场</h2><p>先选择世界，再发现角色与插件。所有内容经过完整性校验和事务安装。</p></div>
           <button className="icon-button" type="button" aria-label="关闭市场" onClick={props.onClose}><X size={18} /></button>
         </header>
         <nav className="market-tabs" aria-label="市场分类">
@@ -181,7 +181,7 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
                       <p>{item.manifest.summary}</p>
                       {item.market === 'theme' ? <div className="market-world-facts"><span>完整场景皮肤</span><span>专属角色外观</span><span>独立会话与档案</span></div> : null}
                       {item.market === 'talent' ? <div className="market-role-world">适合：{roleWorldLabel(item.activation?.kind === 'employee-blueprint' ? item.activation.worldTemplateId : undefined)}</div> : null}
-                      {item.market === 'plugin' ? <div className="market-plugin-scope">全局可用 · 所有世界共享</div> : null}
+                      {item.market === 'plugin' ? <div className="market-plugin-scope">按世界启用 · 设置与会话相互隔离</div> : null}
                       <div className="market-capabilities">{item.manifest.capabilities.slice(0, 4).map((capability) => <code key={capability}>{capabilityLabel(capability)}</code>)}</div>
                       <footer>
                         <span>{packageStateLabel(item, state)}</span>
@@ -261,12 +261,16 @@ function PluginActivationReview({ item, onUse }: { item: CyberMarketPackage; onU
   </section>
 }
 
-type PackageCardState = 'uninstalled' | 'included' | 'upgrade' | 'installed' | 'created'
+type PackageCardState = 'uninstalled' | 'included' | 'upgrade' | 'available' | 'installed' | 'created'
 
 function packageCardState(item: CyberMarketPackage, worlds: World[]): PackageCardState {
   const activation = item.activation
   const hasCreatedWorld = item.market === 'theme' && activation?.kind === 'world-theme' && worlds.some((world) => world.templateId === activation.templateId)
-  if (item.installedVersion === item.manifest.version) return hasCreatedWorld ? 'created' : 'installed'
+  if (item.installedVersion === item.manifest.version) {
+    if (hasCreatedWorld) return 'created'
+    if (item.market !== 'theme' && item.worldVersion !== item.manifest.version) return 'available'
+    return 'installed'
+  }
   if (item.installedVersion !== undefined) return 'upgrade'
   if (activation?.kind === 'world-theme' && worlds.some((world) => builtInThemeMatches(world.templateId, activation.templateId))) {
     return 'included'
@@ -281,6 +285,7 @@ function packageStateLabel(item: CyberMarketPackage, state: PackageCardState): s
     return `已安装 v${item.installedVersion} · ${next}`
   }
   if (state === 'upgrade') return `已安装 v${item.installedVersion} · 有新版 v${item.manifest.version}`
+  if (state === 'available') return `包库已有 v${item.installedVersion} · 当前世界未启用`
   if (state === 'included') return '已内置 · 当前可用'
   return '未安装'
 }
@@ -289,6 +294,7 @@ function marketAction(item: CyberMarketPackage, state: PackageCardState, onBind:
   if (item.market === 'theme' && state === 'created') return <button className="market-action--created" type="button" disabled><CheckCircle size={15} />已创建</button>
   if (item.market === 'theme' && state === 'installed') return <button className="market-action--installed" type="button" onClick={onBind}>创建新世界</button>
   if (state === 'installed') return <button className="market-action--installed" type="button" onClick={onActivate}>{item.market === 'talent' ? '招募到世界' : '立即使用'}</button>
+  if (state === 'available') return <button type="button" onClick={onInspect}>启用到当前世界</button>
   if (state === 'upgrade') return <button className="market-action--upgrade" type="button" onClick={onInspect}>升级到 v{item.manifest.version}</button>
   if (state === 'included') return <button className="market-action--included" type="button" disabled><CheckCircle size={15} />已内置</button>
   return <button type="button" onClick={onInspect}>查看并安装</button>

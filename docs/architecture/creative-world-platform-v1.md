@@ -96,8 +96,8 @@ git switch main
 git pull --ff-only origin main
 pnpm install --frozen-lockfile
 pnpm build
-pnpm dsh-cyber -- doctor
-pnpm dsh-cyber -- web
+pnpm dsh-cyber doctor
+pnpm dsh-cyber web
 ```
 
 正式升级流程见 [`docs/operations/local-first-upgrades.md`](../operations/local-first-upgrades.md)。
@@ -105,7 +105,7 @@ pnpm dsh-cyber -- web
 升级前推荐：
 
 ```bash
-pnpm dsh-cyber -- backup
+pnpm dsh-cyber backup
 ```
 
 `.dshbackup` 当前包含 SQLite、世界、资产、已安装包、Workshop 项目和 Skill 动作。Harness/程序升级不得要求用户重新创建世界或角色。
@@ -428,6 +428,6 @@ Codex 对额外网络/文件能力采取最小权限、按动作请求和 sandbo
 5. 左侧只显示会话；每个角色只有一个私聊，管家默认置顶；群聊可多建；会话可置顶/取消置顶/隐藏并恢复；
 6. 带 `smart-home.control` Grant 的角色能够把“18:30 到家，开启空调并播放音乐”解析为受控计划动作；没有真实连接时明确提示未执行；
 7. 延迟 Skill 在授权被撤销后不能执行；
-8. `pnpm dsh-cyber -- backup` 包含 `workshop/` 与 `skills/`；
+8. `pnpm dsh-cyber backup` 包含 `workshop/` 与 `skills/`；
 9. 拉取新程序版本后使用同一 `stateRoot`，世界、角色、Workshop、会话和 Skill 状态保持；
 10. typecheck、单元/集成测试和 Chromium E2E 全部通过后才允许合并。
