@@ -48,6 +48,13 @@ import type {
 } from '@dsh-cyber/contracts'
 
 import { ApiError, api } from './api.js'
+import {
+  ChatTurnQueue,
+  mergeChatTimeline,
+  messageClientTurnId,
+  type PendingChatTurn,
+  type StreamingChatReply,
+} from './chat-realtime.js'
 import { ArtifactDock } from './components/ArtifactDock.js'
 import { ChatWorkbench } from './components/ChatWorkbench.js'
 import { CreativeWorkshopLauncher } from './components/CreativeWorkshopLauncher.js'
@@ -110,10 +117,16 @@ export default function App() {
   const [dockCollapsed, setDockCollapsed] = useState(false)
   const [draft, setDraft] = useState('')
   const [composerFocusRequest, setComposerFocusRequest] = useState(0)
-  // Sessions with an in-flight model turn. Keyed per session so switching the
-  // view never shows another conversation as processing.
-  const [pendingTurnSessions, setPendingTurnSessions] = useState<ReadonlySet<string>>(new Set())
+  const [pendingTurns, setPendingTurns] = useState<PendingChatTurn[]>([])
+  const [outboxMessages, setOutboxMessages] = useState<Record<string, WorkMessage[]>>({})
+  const [streamingReplies, setStreamingReplies] = useState<Record<string, StreamingChatReply>>({})
+  const turnQueueRef = useRef(new ChatTurnQueue())
+  const sessionByQueueKeyRef = useRef(new Map<string, string>())
+  const queueKeyBySessionRef = useRef(new Map<string, string>())
+  const pendingTurnsRef = useRef<PendingChatTurn[]>([])
+  const activeWorldRef = useRef<World | undefined>(undefined)
   const activeSessionIdRef = useRef<string | undefined>(undefined)
+  const activeConversationKeyRef = useRef<string | undefined>(undefined)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('appearance')
   const [savingSettings, setSavingSettings] = useState(false)
@@ -156,8 +169,29 @@ export default function App() {
   const managingDossier = managingEmployeeId === undefined ? undefined : dossiers[managingEmployeeId]
   const managingRevision = managingDossier?.revisions.find((revision) => revision.revision === managingEmployee?.currentRevision)
   const supportsWorldRuntime = worldRuntimeV2Enabled && worldRuntimeAvailable
-
-  useEffect(() => { activeSessionIdRef.current = activeSessionId }, [activeSessionId])
+  const activeConversationKey = conversationQueueKey(
+    conversationIntent,
+    activeSession,
+    activeParticipantIds,
+    queueKeyBySessionRef.current,
+  )
+  const activePendingTurns = pendingTurns.filter((turn) =>
+    turn.worldId === activeWorld?.id && turn.queueKey === activeConversationKey,
+  )
+  const activeStreamingReplies = Object.values(streamingReplies).filter((reply) =>
+    reply.worldId === activeWorld?.id && reply.queueKey === activeConversationKey,
+  )
+  const activeOutboxMessages = activeConversationKey === undefined ? [] : outboxMessages[activeConversationKey] ?? []
+  const chatMessages = useMemo(
+    () => mergeChatTimeline(messages, activeOutboxMessages, activePendingTurns, activeStreamingReplies),
+    [activeOutboxMessages, activePendingTurns, activeStreamingReplies, messages],
+  )
+  const activePendingCount = activePendingTurns.filter((turn) => turn.status === 'queued' || turn.status === 'running').length
+  const activeQueuedCount = activePendingTurns.filter((turn) => turn.status === 'queued').length
+  activeWorldRef.current = activeWorld
+  activeSessionIdRef.current = activeSessionId
+  activeConversationKeyRef.current = activeConversationKey
+  pendingTurnsRef.current = pendingTurns
 
   const loadWorld = useCallback(async (world: World) => {
     setError(undefined)
@@ -280,13 +314,74 @@ export default function App() {
     return () => { cancelled = true }
   }, [loadWorld])
 
+  const patchPendingTurn = useCallback((turnId: string, patch: Partial<PendingChatTurn>) => {
+    setPendingTurns((current) => {
+      const next = current.map((turn) => turn.id === turnId ? { ...turn, ...patch } : turn)
+      pendingTurnsRef.current = next
+      return next
+    })
+  }, [])
+
+  const removePendingTurn = useCallback((turnId: string) => {
+    setPendingTurns((current) => {
+      const next = current.filter((turn) => turn.id !== turnId)
+      pendingTurnsRef.current = next
+      return next
+    })
+  }, [])
+
+  const bindConversationSession = useCallback((queueKey: string, session: WorkSession, employeeIds: string[]) => {
+    sessionByQueueKeyRef.current.set(queueKey, session.id)
+    queueKeyBySessionRef.current.set(session.id, queueKey)
+    setPendingTurns((current) => {
+      const next = current.map((turn) => turn.queueKey === queueKey && turn.sessionId === undefined
+        ? { ...turn, sessionId: session.id }
+        : turn)
+      pendingTurnsRef.current = next
+      return next
+    })
+    if (activeWorldRef.current?.id !== session.worldId) return
+    setSessions((current) => [session, ...current.filter((item) => item.id !== session.id)])
+    setSessionParticipants((current) => ({ ...current, [session.id]: employeeIds }))
+    if (activeConversationKeyRef.current === queueKey) {
+      setActiveSessionId(session.id)
+      setConversationIntent(undefined)
+    }
+  }, [])
+
+  const refreshConversationTranscript = useCallback(async (sessionId: string, queueKey: string, worldId: string, reportError = false) => {
+    try {
+      const result = await api<{ items: WorkMessage[] }>(`/api/sessions/${sessionId}/messages`)
+      setOutboxMessages((current) => reconcileOutboxMessages(current, queueKey, result.items))
+      if (activeWorldRef.current?.id === worldId && activeConversationKeyRef.current === queueKey) {
+        setMessages(result.items)
+        const participantIds = participantIdsFromMessages(result.items)
+        if (participantIds.length > 0) {
+          setSessionParticipants((current) => ({ ...current, [sessionId]: participantIds }))
+        }
+      }
+      return result.items
+    } catch (cause) {
+      if (reportError && activeWorldRef.current?.id === worldId && activeConversationKeyRef.current === queueKey) {
+        setError(cause instanceof Error ? cause.message : '会话加载失败')
+      }
+      return undefined
+    }
+  }, [])
+
   useEffect(() => {
     if (demoMode || activeSessionId === undefined) return
     let cancelled = false
+    const queueKey = queueKeyBySessionRef.current.get(activeSessionId) ?? activeConversationKeyRef.current
     void api<{ items: WorkMessage[] }>(`/api/sessions/${activeSessionId}/messages`)
       .then((result) => {
         if (cancelled) return
         setMessages(result.items)
+        if (queueKey !== undefined) {
+          sessionByQueueKeyRef.current.set(queueKey, activeSessionId)
+          queueKeyBySessionRef.current.set(activeSessionId, queueKey)
+          setOutboxMessages((current) => reconcileOutboxMessages(current, queueKey, result.items))
+        }
         const participantIds = participantIdsFromMessages(result.items)
         if (participantIds.length > 0) {
           setSessionParticipants((current) => ({ ...current, [activeSessionId]: participantIds }))
@@ -298,17 +393,84 @@ export default function App() {
 
   useEffect(() => {
     if (demoMode || activeWorld === undefined) return
-    const stream = new EventSource(`/api/worlds/${encodeURIComponent(activeWorld.id)}/live`)
+    const world = activeWorld
+    const stream = new EventSource(`/api/worlds/${encodeURIComponent(world.id)}/live`)
     const onRuntime = (raw: Event) => {
       const message = raw as MessageEvent<string>
       try {
         const envelope = JSON.parse(message.data) as RuntimeEnvelope
-        if (envelope.worldId !== activeWorld.id) return
+        if (envelope.worldId !== world.id) return
         const status = runtimeEmployeeStatus(envelope.event)
         if (status !== undefined) {
           setEmployees((current) => current.map((employee) => employee.id === envelope.agentId
             ? { ...employee, status, currentActivity: runtimeActivity(envelope.event, employee.role) }
             : employee))
+        }
+
+        const clientTurnId = metadataText(envelope.event.metadata.clientTurnId)
+        const traceTurnId = metadataText(envelope.event.metadata.traceTurnId)
+        if (clientTurnId === undefined || traceTurnId === undefined) return
+        const pending = pendingTurnsRef.current.find((turn) => turn.id === clientTurnId)
+        const queueKey = pending?.queueKey
+          ?? queueKeyBySessionRef.current.get(envelope.sessionId)
+          ?? (activeSessionIdRef.current === envelope.sessionId ? activeConversationKeyRef.current : undefined)
+        if (queueKey === undefined) return
+
+        if (pending !== undefined && pending.sessionId !== envelope.sessionId) {
+          const timestamp = new Date().toISOString()
+          bindConversationSession(queueKey, {
+            id: envelope.sessionId,
+            workspaceId: world.workspaceId,
+            worldId: world.id,
+            kind: pending.employeeIds.length > 1 ? 'group' : 'direct',
+            title: pending.title,
+            status: 'open',
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          }, pending.employeeIds)
+        } else {
+          sessionByQueueKeyRef.current.set(queueKey, envelope.sessionId)
+          queueKeyBySessionRef.current.set(envelope.sessionId, queueKey)
+        }
+
+        const streamId = `stream-${traceTurnId}`
+        const upsertStream = (content: string, replaceContent: boolean) => {
+          setStreamingReplies((current) => {
+            const previous = current[streamId]
+            const createdAt = previous?.createdAt ?? new Date().toISOString()
+            return {
+              ...current,
+              [streamId]: {
+                id: streamId,
+                queueKey,
+                worldId: world.id,
+                sessionId: envelope.sessionId,
+                employeeId: envelope.agentId,
+                clientTurnId,
+                traceTurnId,
+                content: replaceContent ? content : `${previous?.content ?? ''}${content}`,
+                createdAt,
+              },
+            }
+          })
+        }
+
+        if (envelope.event.kind === 'turn.started') upsertStream('', true)
+        if (envelope.event.kind === 'text.delta' && envelope.event.content !== undefined) {
+          upsertStream(envelope.event.content, false)
+        }
+        if (envelope.event.kind === 'assistant.message' && envelope.event.content?.trim()) {
+          upsertStream(envelope.event.content, true)
+        }
+        if (envelope.event.kind === 'turn.completed' || envelope.event.kind === 'turn.failed') {
+          void refreshConversationTranscript(envelope.sessionId, queueKey, world.id).finally(() => {
+            setStreamingReplies((current) => {
+              if (current[streamId] === undefined) return current
+              const next = { ...current }
+              delete next[streamId]
+              return next
+            })
+          })
         }
       } catch {
         // Ignore malformed transient data; the durable transcript remains authoritative.
@@ -319,7 +481,7 @@ export default function App() {
       stream.removeEventListener('runtime', onRuntime)
       stream.close()
     }
-  }, [activeWorld])
+  }, [activeWorld, bindConversationSession, refreshConversationTranscript])
 
   useEffect(() => {
     const root = document.documentElement
@@ -745,6 +907,7 @@ export default function App() {
   const selectSession = useCallback((sessionId: string) => {
     setConversationIntent(undefined)
     setActiveSessionId(sessionId)
+    if (!demoMode) setMessages([])
     setDraft('')
     setSelectedEmployeeId(sessionParticipants[sessionId]?.[0])
     if (demoMode) {
@@ -754,113 +917,172 @@ export default function App() {
     }
   }, [sessionParticipants])
 
-  const send = useCallback(async (prompt: string, attachments: ChatAttachment[]) => {
-    if (activeWorld === undefined) return
-    const turnSessionId = activeSessionId
-    const pendingKey = turnSessionId ?? '__new-turn__'
-    setPendingTurnSessions((current) => new Set(current).add(pendingKey))
-    // 乐观更新：点击发送瞬间立即清空输入框，不等模型回合结束
+  const send = useCallback((prompt: string, attachments: ChatAttachment[]): Promise<void> => {
+    const world = activeWorld
+    if (world === undefined) return Promise.resolve()
+    const explicitEmployeeIds = conversationIntent?.employeeIds
+      ?? (activeSessionId === undefined ? [] : sessionParticipants[activeSessionId] ?? [])
+    const mentioned = employees.filter((employee) => prompt.includes(`@${employee.displayName}`))
+    const targetIds = explicitEmployeeIds.length > 0 ? explicitEmployeeIds : mentioned.map((employee) => employee.id)
+    if (targetIds.length === 0) {
+      setError('请选择或 @ 至少一个角色')
+      return Promise.resolve()
+    }
+
+    const title = conversationIntent?.title
+      ?? activeSession?.title
+      ?? (targetIds.length === 1
+        ? `与 ${employees.find((employee) => employee.id === targetIds[0])?.displayName ?? '角色'} 对话`
+        : compactPrompt(prompt))
+    const queueKey = activeConversationKey ?? targetConversationQueueKey(targetIds, title)
+    const clientTurnId = crypto.randomUUID()
+    const createdAt = new Date().toISOString()
+    const capturedSessionId = activeSessionId
+    const interactionKind = conversationIntent?.kind === 'group' || targetIds.length > 1
+      ? 'meeting'
+      : /(?:^|\s)任务[：:]/.test(prompt) ? 'task' : 'chat'
+    if (capturedSessionId !== undefined) {
+      sessionByQueueKeyRef.current.set(queueKey, capturedSessionId)
+      queueKeyBySessionRef.current.set(capturedSessionId, queueKey)
+    }
+
+    const pendingTurn: PendingChatTurn = {
+      id: clientTurnId,
+      queueKey,
+      worldId: world.id,
+      employeeIds: targetIds,
+      title,
+      status: 'queued',
+      createdAt,
+      ...(capturedSessionId === undefined ? {} : { sessionId: capturedSessionId }),
+    }
+    const optimisticMessage: WorkMessage = {
+      id: `local-owner-${clientTurnId}`,
+      sessionId: capturedSessionId ?? `pending-${clientTurnId}`,
+      sequence: Number.MAX_SAFE_INTEGER,
+      senderId: 'owner',
+      senderKind: 'owner',
+      kind: 'user',
+      content: prompt,
+      metadata: {
+        clientTurnId,
+        localPending: true,
+        displayTime: new Date(createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+        participantIds: targetIds,
+        ...(attachments.length === 0 ? {} : { attachments: serializableAttachments(attachments) }),
+      },
+      createdAt,
+    }
+
     setDraft('')
     setError(undefined)
-    try {
-      const explicitEmployeeIds = conversationIntent?.employeeIds
-        ?? (activeSessionId === undefined ? [] : sessionParticipants[activeSessionId] ?? [])
-      const mentioned = employees.filter((employee) => prompt.includes(`@${employee.displayName}`))
-      const targetIds = explicitEmployeeIds.length > 0 ? explicitEmployeeIds : mentioned.map((employee) => employee.id)
-      if (demoMode) {
-        const targets = targetIds.length > 0
-          ? targetIds.map((id) => employees.find((employee) => employee.id === id)).filter((employee): employee is CyberEmployee => employee !== undefined)
-          : employees.slice(0, 1)
-        const session = activeSession ?? makeDemoSession(
-          activeWorld,
-          prompt,
-          targets.length > 1 ? 'group' : 'direct',
-          conversationIntent?.title,
-        )
-        const ownerMessage = makeDemoMessage(
-          session.id,
-          messages.length + 1,
-          'owner',
-          'owner',
-          'user',
-          prompt,
-          {
-            participantIds: targets.map((employee) => employee.id),
+    setPendingTurns((current) => {
+      const next = [...current, pendingTurn]
+      pendingTurnsRef.current = next
+      return next
+    })
+    setOutboxMessages((current) => ({
+      ...current,
+      [queueKey]: [...(current[queueKey] ?? []), optimisticMessage],
+    }))
+
+    const runTurn = async () => {
+      patchPendingTurn(clientTurnId, { status: 'running' })
+      try {
+        const resolvedSessionId = sessionByQueueKeyRef.current.get(queueKey) ?? capturedSessionId
+        if (demoMode) {
+          const session = resolvedSessionId === undefined
+            ? makeDemoSession(world, prompt, targetIds.length > 1 ? 'group' : 'direct', title)
+            : {
+                id: resolvedSessionId,
+                workspaceId: world.workspaceId,
+                worldId: world.id,
+                kind: targetIds.length > 1 ? 'group' as const : 'direct' as const,
+                title,
+                status: 'open' as const,
+                createdAt,
+                updatedAt: new Date().toISOString(),
+              }
+          bindConversationSession(queueKey, session, targetIds)
+          await delay(650)
+          const targets = targetIds
+            .map((id) => employees.find((employee) => employee.id === id))
+            .filter((employee): employee is CyberEmployee => employee !== undefined)
+          const ownerMessage = makeDemoMessage(session.id, Date.now(), 'owner', 'owner', 'user', prompt, {
+            clientTurnId,
+            participantIds: targetIds,
             ...(attachments.length === 0 ? {} : { attachments: serializableAttachments(attachments) }),
-          },
-        )
-        setSessions((current) => current.some((item) => item.id === session.id) ? current : [session, ...current])
-        setActiveSessionId(session.id)
-        setSessionParticipants((current) => ({ ...current, [session.id]: targets.map((employee) => employee.id) }))
-        setConversationIntent(undefined)
-        setMessages((current) => [...current, ownerMessage])
-        await delay(650)
-        const replies = targets.map((employee, index) => makeDemoMessage(
-          session.id,
-          messages.length + index + 2,
-          employee.id,
-          'employee',
-          'assistant',
-          worldExperience(activeWorld).kind === 'tavern'
-            ? tavernDemoReply(employee, prompt)
-            : `${employee.displayName}收到。我会以${employee.role}的职责独立处理“${compactPrompt(prompt)}”，完成后给出证据、产物和下一步。`,
-        ))
-        setMessages((current) => [...current, ...replies])
-        return
+          })
+          const replies = targets.map((employee, index) => makeDemoMessage(
+            session.id,
+            Date.now() + index + 1,
+            employee.id,
+            'employee',
+            'assistant',
+            worldExperience(world).kind === 'tavern'
+              ? tavernDemoReply(employee, prompt)
+              : `${employee.displayName}收到。我会以${employee.role}的职责独立处理“${compactPrompt(prompt)}”，完成后给出证据、产物和下一步。`,
+            { clientTurnId },
+          ))
+          if (activeWorldRef.current?.id === world.id && activeConversationKeyRef.current === queueKey) {
+            setMessages((current) => [...current.filter((message) => messageClientTurnId(message) !== clientTurnId), ownerMessage, ...replies])
+          }
+          setOutboxMessages((current) => removeOutboxTurn(current, queueKey, clientTurnId))
+          removePendingTurn(clientTurnId)
+          return
+        }
+
+        const result = await api<ChatResult>(`/api/worlds/${world.id}/chat`, {
+          method: 'POST',
+          body: JSON.stringify({
+            prompt,
+            clientTurnId,
+            reasoningEffort,
+            permissionMode,
+            interactionKind,
+            ...(attachments.length === 0 ? {} : { attachments }),
+            employeeIds: targetIds,
+            ...(conversationIntent === undefined ? {} : { title }),
+            ...(resolvedSessionId === undefined ? {} : { sessionId: resolvedSessionId }),
+          }),
+        })
+        bindConversationSession(queueKey, result.session, targetIds)
+        await refreshConversationTranscript(result.session.id, queueKey, world.id, true)
+        setStreamingReplies((current) => removeStreamingTurn(current, clientTurnId))
+        removePendingTurn(clientTurnId)
+      } catch (cause) {
+        const failure = cause instanceof Error ? cause.message : '消息发送失败'
+        const failedSessionId = sessionByQueueKeyRef.current.get(queueKey) ?? capturedSessionId
+        if (failedSessionId !== undefined && !demoMode) {
+          await refreshConversationTranscript(failedSessionId, queueKey, world.id)
+        }
+        patchPendingTurn(clientTurnId, {
+          status: 'failed',
+          error: failure,
+          ...(failedSessionId === undefined ? {} : { sessionId: failedSessionId }),
+        })
+        setStreamingReplies((current) => removeStreamingTurn(current, clientTurnId))
+        if (activeWorldRef.current?.id === world.id && activeConversationKeyRef.current === queueKey) setError(failure)
       }
-      // 乐观更新：用户消息立即上屏，不依赖 chat 响应返回
-      const ownerMessage: WorkMessage = {
-        id: `local-owner-${Date.now()}`,
-        sessionId: activeSessionId ?? `pending-${Date.now()}`,
-        sequence: messages.length + 1,
-        senderId: 'owner',
-        senderKind: 'owner',
-        kind: 'user',
-        content: prompt,
-        metadata: {
-          displayTime: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
-          participantIds: targetIds,
-          ...(attachments.length === 0 ? {} : { attachments: serializableAttachments(attachments) }),
-        },
-        createdAt: new Date().toISOString(),
-      }
-      setMessages((current) => [...current, ownerMessage])
-      const result = await api<ChatResult>(`/api/worlds/${activeWorld.id}/chat`, {
-        method: 'POST',
-        body: JSON.stringify({
-          prompt,
-          reasoningEffort,
-          permissionMode,
-          interactionKind: conversationIntent?.kind === 'group' || targetIds.length > 1
-            ? 'meeting'
-            : /(?:^|\s)任务[：:]/.test(prompt) ? 'task' : 'chat',
-          ...(attachments.length === 0 ? {} : { attachments }),
-          ...(targetIds.length === 0 ? {} : { employeeIds: targetIds }),
-          ...(conversationIntent === undefined ? {} : { title: conversationIntent.title }),
-          ...(turnSessionId === undefined ? {} : { sessionId: turnSessionId }),
-        }),
-      })
-      // 会话独立处理：回合结束时用户可能已经切到别的会话，只有当仍停留在这场对话（或这是新建的会话）时才切换视图/刷新聊天记录。
-      const stayedOnTurn = activeSessionIdRef.current === result.session.id
-      if (turnSessionId === undefined || stayedOnTurn) setActiveSessionId(result.session.id)
-      setSessionParticipants((current) => ({ ...current, [result.session.id]: targetIds }))
-      setConversationIntent(undefined)
-      setSessions((current) => [result.session, ...current.filter((item) => item.id !== result.session.id)])
-      const transcript = await api<{ items: WorkMessage[] }>(`/api/sessions/${result.session.id}/messages`)
-      if (activeSessionIdRef.current === result.session.id) setMessages(transcript.items)
-    } catch (cause) {
-      // The orchestrator persists the owner's message before starting the model
-      // turn. Keep that conversational fact visible even when execution fails;
-      // the failure itself is explained by the toast and World Trace.
-      setError(cause instanceof Error ? cause.message : '消息发送失败')
-    } finally {
-      setPendingTurnSessions((current) => {
-        const next = new Set(current)
-        next.delete(pendingKey)
-        return next
-      })
     }
-  }, [activeSession, activeSessionId, activeWorld, conversationIntent, employees, messages.length, sessionParticipants, reasoningEffort, permissionMode])
+
+    void turnQueueRef.current.enqueue(queueKey, runTurn)
+    return Promise.resolve()
+  }, [
+    activeConversationKey,
+    activeSession,
+    activeSessionId,
+    activeWorld,
+    bindConversationSession,
+    conversationIntent,
+    employees,
+    patchPendingTurn,
+    permissionMode,
+    reasoningEffort,
+    refreshConversationTranscript,
+    removePendingTurn,
+    sessionParticipants,
+  ])
 
   const refreshTaskSchedules = useCallback(async () => {
     if (activeWorld === undefined || demoMode) return
@@ -1226,10 +1448,11 @@ export default function App() {
             {...(activeSession === undefined ? {} : { session: activeSession })}
             {...(conversationIntent === undefined ? {} : { intent: conversationIntent })}
             participantIds={activeParticipantIds}
-            messages={messages}
+            messages={chatMessages}
             employees={employees}
             installedPlugins={installedPluginCommands}
-            sending={pendingTurnSessions.has(activeSessionId ?? '__new-turn__')}
+            pendingCount={activePendingCount}
+            queuedCount={activeQueuedCount}
             draft={draft}
             focusRequest={composerFocusRequest}
             onDraftChange={setDraft}
@@ -1385,6 +1608,69 @@ export default function App() {
       ) : null}
     </div>
   )
+}
+
+function conversationQueueKey(
+  intent: ConversationIntent | undefined,
+  session: WorkSession | undefined,
+  participantIds: string[],
+  aliases: Map<string, string>,
+): string | undefined {
+  const kind = intent?.kind ?? session?.kind
+  const ids = intent?.employeeIds ?? participantIds
+  if (kind === 'direct' && ids[0] !== undefined) return `direct:${ids[0]}`
+  if (session !== undefined) return aliases.get(session.id) ?? `session:${session.id}`
+  if (intent !== undefined) return targetConversationQueueKey(intent.employeeIds, intent.title)
+  return undefined
+}
+
+function targetConversationQueueKey(employeeIds: string[], title: string): string {
+  if (employeeIds.length === 1) return `direct:${employeeIds[0]}`
+  return `intent:group:${[...employeeIds].sort().join(',')}:${title.trim()}`
+}
+
+function metadataText(value: JsonObject[string] | undefined): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined
+}
+
+function reconcileOutboxMessages(
+  current: Record<string, WorkMessage[]>,
+  queueKey: string,
+  durableMessages: WorkMessage[],
+): Record<string, WorkMessage[]> {
+  const persistedTurnIds = new Set(durableMessages.flatMap((message) => {
+    const clientTurnId = messageClientTurnId(message)
+    return clientTurnId === undefined ? [] : [clientTurnId]
+  }))
+  const remaining = (current[queueKey] ?? []).filter((message) => {
+    const clientTurnId = messageClientTurnId(message)
+    return clientTurnId === undefined || !persistedTurnIds.has(clientTurnId)
+  })
+  if (remaining.length === (current[queueKey] ?? []).length) return current
+  const next = { ...current }
+  if (remaining.length === 0) delete next[queueKey]
+  else next[queueKey] = remaining
+  return next
+}
+
+function removeOutboxTurn(
+  current: Record<string, WorkMessage[]>,
+  queueKey: string,
+  clientTurnId: string,
+): Record<string, WorkMessage[]> {
+  const remaining = (current[queueKey] ?? []).filter((message) => messageClientTurnId(message) !== clientTurnId)
+  const next = { ...current }
+  if (remaining.length === 0) delete next[queueKey]
+  else next[queueKey] = remaining
+  return next
+}
+
+function removeStreamingTurn(
+  current: Record<string, StreamingChatReply>,
+  clientTurnId: string,
+): Record<string, StreamingChatReply> {
+  const entries = Object.entries(current).filter(([, reply]) => reply.clientTurnId !== clientTurnId)
+  return entries.length === Object.keys(current).length ? current : Object.fromEntries(entries)
 }
 
 function scheduleErrorLabel(code?: string): string {
