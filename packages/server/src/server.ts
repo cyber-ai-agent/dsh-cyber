@@ -75,6 +75,9 @@ import { validateStagedPackageEntrypoints } from './installed-package-runtime.js
 import { WorldRuntimeService } from './world-runtime-service.js'
 import { createBuiltinIntegrationRegistry } from './integrations/builtin-integration-registry.js'
 import { IntegrationService } from './integrations/integration-service.js'
+import { OfficialMcpClientFactory, type McpClientFactory } from './integrations/mcp-client.js'
+import { MCP_INTEGRATION_ID } from './integrations/mcp-provider.js'
+import { McpSkillAdapter } from './skills/mcp-skill-adapter.js'
 
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_PORT = 43123
@@ -91,6 +94,7 @@ export interface CyberServerOptions {
   skillActionRepository?: CharacterSkillActionRepository
   marketplaceRoot?: string
   bootstrapDefaultWorld?: boolean
+  mcpClientFactory?: McpClientFactory
 }
 
 export interface CyberServerAddress { host: string; port: number; origin: string }
@@ -142,7 +146,8 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const credentials = await ModelCredentialService.open(stateRoot)
   const modelCatalog = new ModelCatalogService(credentials)
   const worldPackages = new WorldPackageInstanceService(store, worldRoots)
-  const integrations = await IntegrationService.open(stateRoot, createBuiltinIntegrationRegistry())
+  const mcpClients = options.mcpClientFactory ?? new OfficialMcpClientFactory()
+  const integrations = await IntegrationService.open(stateRoot, createBuiltinIntegrationRegistry(mcpClients))
   const skillRegistry = options.skillRegistry ?? createBuiltinSkillRegistry({
     firecrawl: {
       store,
@@ -150,6 +155,11 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       listWorldPackages: (worldId) => worldPackages.listRuntimePackages(worldId),
     },
   })
+  const mcpAdapter = options.skillRegistry === undefined ? new McpSkillAdapter({ store, integrations, clients: mcpClients }) : undefined
+  if (mcpAdapter !== undefined) {
+    skillRegistry.register(mcpAdapter)
+    await refreshMcpCatalog(mcpAdapter, skillRegistry)
+  }
 
   const activeDshBinPath = await resolveActiveRuntime(store, runtimeStateRoot, stateRoot)
   const interactions = new ModelInteractionService(store)
@@ -244,7 +254,13 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerCatalogRoutes(router, { store, packageCatalog, worldPackages })
   registerWorkspaceRoutes(router, { store })
   registerModelRoutes(router, { store, credentials, modelCatalog, interactions })
-  registerIntegrationRoutes(router, { store, integrations })
+  registerIntegrationRoutes(router, {
+    store,
+    integrations,
+    onChanged: async (integrationId) => {
+      if (integrationId === MCP_INTEGRATION_ID && mcpAdapter !== undefined) await refreshMcpCatalog(mcpAdapter, skillRegistry)
+    },
+  })
   registerAmbientLifeRoutes(router, { store, settings: ambientLifeSettings, access: worldAccess })
   registerAssetRoutes(router, { store, assets, access: worldAccess })
   registerWorldRoutes(router, { store, worldAccess, worldPackages })
@@ -303,6 +319,11 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       store.close()
     },
   }
+}
+
+async function refreshMcpCatalog(adapter: McpSkillAdapter, registry: CharacterSkillAdapterRegistry): Promise<void> {
+  try { await adapter.refresh() } catch { adapter.clear() }
+  registry.refresh(adapter)
 }
 
 async function resolveActiveRuntime(store: SqliteStore, runtimeStateRoot: string, stateRoot: string): Promise<string | undefined> {

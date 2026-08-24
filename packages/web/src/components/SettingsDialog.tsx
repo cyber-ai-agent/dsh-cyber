@@ -26,6 +26,7 @@ import type {
   IntegrationConnection,
   IntegrationDescriptor,
   IntegrationHealth,
+  JsonObject,
   ModelApiKind,
   ModelAssignment,
   ModelInteractionLog,
@@ -357,7 +358,7 @@ function IntegrationSettings({ workspaceId }: { workspaceId: string }) {
   const [descriptors, setDescriptors] = useState<IntegrationDescriptor[]>([])
   const [connections, setConnections] = useState<IntegrationConnection[]>([])
   const [selectedId, setSelectedId] = useState<string>()
-  const [baseUrl, setBaseUrl] = useState('https://api.firecrawl.dev')
+  const [config, setConfig] = useState<JsonObject>({})
   const [credential, setCredential] = useState('')
   const [enabled, setEnabled] = useState(true)
   const [health, setHealth] = useState<IntegrationHealth>()
@@ -380,9 +381,10 @@ function IntegrationSettings({ workspaceId }: { workspaceId: string }) {
   const descriptor = descriptors.find((item) => item.id === selectedId)
   const connection = connections.find((item) => item.integrationId === selectedId)
   useEffect(() => {
-    setBaseUrl(typeof connection?.config.baseUrl === 'string'
-      ? connection.config.baseUrl
-      : descriptor?.configFields.find((field) => field.id === 'baseUrl')?.placeholder ?? '')
+    setConfig(Object.fromEntries((descriptor?.configFields ?? []).map((field) => [
+      field.id,
+      connection?.config[field.id] ?? (field.kind === 'boolean' ? false : field.kind === 'number' ? 0 : field.placeholder ?? ''),
+    ])) as JsonObject)
     setEnabled(connection?.enabled ?? true)
     setCredential('')
     setHealth(undefined)
@@ -394,7 +396,7 @@ function IntegrationSettings({ workspaceId }: { workspaceId: string }) {
     try {
       await api(`/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/${encodeURIComponent(descriptor.id)}`, {
         method: 'PUT',
-        body: JSON.stringify({ config: { baseUrl }, enabled, ...(credential.trim() ? { credential: credential.trim() } : {}) }),
+        body: JSON.stringify({ config, enabled, ...(credential.trim() ? { credential: credential.trim() } : {}) }),
       })
       await load()
       setCredential('')
@@ -418,6 +420,8 @@ function IntegrationSettings({ workspaceId }: { workspaceId: string }) {
     }
   }
 
+  const requiredConfigMissing = descriptor?.configFields.some((field) => field.required && String(config[field.id] ?? '').trim() === '') ?? true
+
   return <div className="settings-section settings-section--integrations">
     <div className="settings-section__heading"><h3>外部连接</h3><p>统一管理受信任服务。安装 Skill 只声明能力，角色获得授权后仍需经过审批策略才能发送数据。</p></div>
     <div className="integration-provider-list" role="list">
@@ -425,12 +429,16 @@ function IntegrationSettings({ workspaceId }: { workspaceId: string }) {
     </div>
     {descriptor === undefined ? <div className="dialog-empty">当前没有可配置的外部连接。</div> : <section className="integration-editor">
       <header><div><h4>{descriptor.displayName}</h4><p>{descriptor.summary}</p></div><label><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />启用连接</label></header>
-      <label className="dialog-field"><span>服务地址</span><input value={baseUrl} placeholder={descriptor.configFields.find((field) => field.id === 'baseUrl')?.placeholder} onChange={(event) => setBaseUrl(event.target.value)} /><small>公网服务必须使用 HTTPS；回环与私有网络可以使用 HTTP。</small></label>
-      <label className="dialog-field"><span>API 密钥</span><input type="password" autoComplete="new-password" value={credential} placeholder={connection?.credentialConfigured ? '已加密保存；留空保持不变' : '输入服务提供的密钥'} onChange={(event) => setCredential(event.target.value)} /><small>密钥不会写入连接配置、SQLite、日志、Prompt 或前端响应。</small></label>
+      {descriptor.configFields.map((field) => field.kind === 'boolean' ? (
+        <label className="dialog-field dialog-field--checkbox" key={field.id}><input type="checkbox" checked={config[field.id] === true} onChange={(event) => setConfig((current) => ({ ...current, [field.id]: event.target.checked }))} /><span>{field.displayName}</span><small>{field.description}</small></label>
+      ) : (
+        <label className="dialog-field" key={field.id}><span>{field.displayName}</span><input type={field.kind === 'number' ? 'number' : 'text'} value={String(config[field.id] ?? '')} placeholder={field.placeholder} onChange={(event) => setConfig((current) => ({ ...current, [field.id]: field.kind === 'number' ? Number(event.target.value) : event.target.value }))} /><small>{field.description}</small></label>
+      ))}
+      {descriptor.secretFields.map((field) => <label className="dialog-field" key={field.id}><span>{field.displayName}</span><input type="password" autoComplete="new-password" value={credential} placeholder={connection?.credentialConfigured ? '已加密保存；留空保持不变' : field.required ? '请输入连接凭据' : '可选'} onChange={(event) => setCredential(event.target.value)} /><small>{field.description}</small></label>)}
       <div className="integration-egress"><strong>会发送到外部服务</strong><span>{descriptor.dataEgress.join('、') || '无'}</span></div>
       {error ? <p className="model-form-message model-form-message--error" role="alert">{error}</p> : null}
       {health ? <p className={health.status === 'ready' ? 'model-form-message model-form-message--success' : 'model-form-message model-form-message--error'} role="status">{health.detail} · {health.latencyMs} ms</p> : null}
-      <footer><button className="secondary-button" type="button" disabled={busy || connection === undefined} onClick={() => void test()}>测试连接</button><button className="primary-button" type="button" disabled={busy || !baseUrl.trim()} onClick={() => void save()}>{busy ? '处理中…' : '保存连接'}</button></footer>
+      <footer><button className="secondary-button" type="button" disabled={busy || connection === undefined} onClick={() => void test()}>测试连接</button><button className="primary-button" type="button" disabled={busy || requiredConfigMissing} onClick={() => void save()}>{busy ? '处理中…' : '保存连接'}</button></footer>
     </section>}
   </div>
 }

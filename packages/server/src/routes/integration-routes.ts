@@ -7,8 +7,8 @@ import { writeJson } from '../http/response.js'
 import type { Router } from '../http/router.js'
 import type { IntegrationService } from '../integrations/integration-service.js'
 
-export function registerIntegrationRoutes(router: Router, dependencies: { store: SqliteStore; integrations: IntegrationService }): void {
-  const { store, integrations } = dependencies
+export function registerIntegrationRoutes(router: Router, dependencies: { store: SqliteStore; integrations: IntegrationService; onChanged?: (integrationId: string) => Promise<void> }): void {
+  const { store, integrations, onChanged } = dependencies
 
   router.get(/^\/api\/workspaces\/([^/]+)\/integrations$/, ({ response, params }) => {
     const workspaceId = requireWorkspace(store, params[0]!)
@@ -31,17 +31,24 @@ export function registerIntegrationRoutes(router: Router, dependencies: { store:
     } catch (error) {
       throw new HttpError(422, 'integration_config_invalid', error instanceof Error ? error.message : 'Integration configuration is invalid')
     }
+    await onChanged?.(integrationId)
     writeJson(response, 200, { connection })
   })
 
   router.post(/^\/api\/workspaces\/([^/]+)\/integrations\/([^/]+)\/test$/, async ({ response, params }) => {
     const workspaceId = requireWorkspace(store, params[0]!)
-    writeJson(response, 200, { health: await integrations.test(workspaceId, params[1]!) })
+    const integrationId = params[1]!
+    const health = await integrations.test(workspaceId, integrationId)
+    if (health.status === 'ready') await onChanged?.(integrationId)
+    writeJson(response, 200, { health })
   })
 
   router.delete(/^\/api\/workspaces\/([^/]+)\/integrations\/([^/]+)$/, async ({ response, params }) => {
     const workspaceId = requireWorkspace(store, params[0]!)
-    writeJson(response, 200, { removed: await integrations.delete(workspaceId, params[1]!) })
+    const integrationId = params[1]!
+    const removed = await integrations.delete(workspaceId, integrationId)
+    if (removed) await onChanged?.(integrationId)
+    writeJson(response, 200, { removed })
   })
 }
 

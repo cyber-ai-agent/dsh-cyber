@@ -49,8 +49,12 @@ export interface CharacterSkillRecipe {
 export interface CharacterSkillAdapter {
   readonly id: string
   readonly descriptors: readonly CharacterSkillDescriptor[]
+  /** Dynamic adapters (for example MCP) may expose no skills until discovery completes. */
+  readonly dynamicDescriptors?: boolean
   propose(context: CharacterSkillMatchContext): Promise<CharacterSkillActionProposal[]> | CharacterSkillActionProposal[]
   execute(action: CharacterSkillAction, context: CharacterSkillExecutionContext): Promise<CharacterSkillExecutionResult>
+  /** Remove encrypted or ephemeral inputs when an action will never execute. */
+  discard?(action: CharacterSkillAction): Promise<void>
 }
 
 /**
@@ -80,7 +84,7 @@ export class CharacterSkillAdapterRegistry {
   register(adapter: CharacterSkillAdapter): () => void {
     if (!adapter.id.trim()) throw new Error('Skill adapter id cannot be empty')
     if (this.#adapters.has(adapter.id)) throw new Error(`Duplicate skill adapter: ${adapter.id}`)
-    if (adapter.descriptors.length === 0) throw new Error(`Skill adapter ${adapter.id} must expose at least one skill`)
+    if (adapter.descriptors.length === 0 && adapter.dynamicDescriptors !== true) throw new Error(`Skill adapter ${adapter.id} must expose at least one skill`)
 
     for (const descriptor of adapter.descriptors) {
       if (!descriptor.id.trim()) throw new Error(`Skill adapter ${adapter.id} contains an empty skill id`)
@@ -99,6 +103,27 @@ export class CharacterSkillAdapterRegistry {
       for (const descriptor of adapter.descriptors) {
         if (this.#skills.get(descriptor.id) === adapter) this.#skills.delete(descriptor.id)
       }
+    }
+  }
+
+  /** Re-index a registered dynamic adapter after trusted capability discovery. */
+  refresh(adapter: CharacterSkillAdapter): void {
+    if (adapter.dynamicDescriptors !== true || this.#adapters.get(adapter.id) !== adapter) {
+      throw new Error(`Skill adapter ${adapter.id} is not a registered dynamic adapter`)
+    }
+    const previous = [...this.#skills.entries()].filter(([, owner]) => owner === adapter).map(([skillId]) => skillId)
+    for (const skillId of previous) this.#skills.delete(skillId)
+    try {
+      for (const descriptor of adapter.descriptors) {
+        if (!descriptor.id.trim() || descriptor.adapterId !== adapter.id) throw new Error(`Invalid dynamic skill descriptor: ${descriptor.id}`)
+        const owner = this.#skills.get(descriptor.id)
+        if (owner !== undefined && owner !== adapter || this.#recipes.has(descriptor.id)) throw new Error(`Duplicate skill provider: ${descriptor.id}`)
+        this.#skills.set(descriptor.id, adapter)
+      }
+    } catch (error) {
+      for (const [skillId, owner] of [...this.#skills]) if (owner === adapter) this.#skills.delete(skillId)
+      for (const skillId of previous) this.#skills.set(skillId, adapter)
+      throw error
     }
   }
 

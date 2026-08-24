@@ -26,6 +26,7 @@ export class IntegrationSecretVault {
   }
 
   has(connectionId: string): boolean { return this.#entries[connectionId] !== undefined }
+  keys(): string[] { this.#assertOpen(); return Object.keys(this.#entries) }
 
   resolve(connectionId: string): string | undefined {
     this.#assertOpen()

@@ -110,6 +110,7 @@ export class CharacterSkillRuntime {
       const reservation = await this.#actions.reserve(candidate, DUPLICATE_WINDOW_MS)
       const action = reservation.action
       if (!reservation.created) {
+        await this.#discard(candidate)
         actions.push(action)
         continue
       }
@@ -181,6 +182,7 @@ export class CharacterSkillRuntime {
       action.status = 'rejected'
       action.detail = request.status === 'expired' ? '审批请求已过期，外部动作未执行' : '用户已拒绝此外部动作'
       action.updatedAt = now.toISOString()
+      await this.#discard(action)
       await this.#actions.save(action)
       return { request, action }
     }
@@ -229,6 +231,7 @@ export class CharacterSkillRuntime {
         action.status = 'rejected'
         action.detail = '审批请求已过期，外部动作未执行'
         action.updatedAt = now.toISOString()
+        await this.#discard(action)
         await this.#actions.save(action)
       }
       for (const action of await this.#actions.listDue(now)) {
@@ -244,6 +247,7 @@ export class CharacterSkillRuntime {
           action.status = 'failed'
           action.detail = '计划执行前角色已不可用或技能授权已撤销'
           action.updatedAt = now.toISOString()
+          await this.#discard(action)
           await this.#actions.save(action)
           continue
         }
@@ -260,6 +264,7 @@ export class CharacterSkillRuntime {
       action.status = 'failed'
       action.detail = '执行前角色已不可用或技能授权已撤销'
       action.updatedAt = now.toISOString()
+      await this.#discard(action)
       return
     }
     if (!this.#isApproved(action)) {
@@ -299,6 +304,11 @@ export class CharacterSkillRuntime {
       action.detail = '技能适配器执行过程异常，外部动作结果未知；不得自动重试'
     }
     action.updatedAt = now.toISOString()
+  }
+
+  async #discard(action: CharacterSkillAction): Promise<void> {
+    const adapter = this.#registry.adapterById(action.adapterId) ?? this.#registry.adapterForSkill(action.skillId)
+    await adapter?.discard?.(action).catch(() => undefined)
   }
 
   #authorize(action: CharacterSkillAction, now: Date): boolean {
