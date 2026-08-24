@@ -31,6 +31,28 @@ export interface HarnessModelRoute {
   compat?: { thinkingFormat?: string; supportsReasoningEffort?: boolean }
 }
 
+/**
+ * Drop a requested reasoning effort the routed model does not declare.
+ *
+ * Worlds persist one effort knob while model profiles differ in what they can
+ * serve; when the routed profile declares its levels explicitly (or declares a
+ * non-reasoning model), an unsupported request must degrade to "no explicit
+ * effort" instead of failing the whole turn inside the worker. Profiles without
+ * a declaration keep the request untouched — their capability lives in the
+ * installed catalog and cannot be judged here.
+ */
+export function withoutUnsupportedReasoningEffort(
+  request: AgentTurnRequest,
+  route: HarnessModelRoute | undefined,
+): AgentTurnRequest {
+  const effort = request.reasoningEffort
+  if (effort === undefined || route?.reasoningEfforts === undefined) return request
+  const declared = route.reasoningEfforts
+  if (declared !== false && Object.hasOwn(declared, effort)) return request
+  const { reasoningEffort: _dropped, ...rest } = request
+  return rest
+}
+
 export interface HarnessModelRouterOptions {
   stateRoot: string
   resolveRoute(request: AgentTurnRequest): HarnessModelRoute | undefined
@@ -76,8 +98,9 @@ export class HarnessModelRouter implements AgentRuntimePort, AsyncDisposable {
     const fingerprint = routeFingerprint(route)
     let entry = await this.#entry(routeId, route, fingerprint)
     const observation: AttemptObservation = { unsafeToRetry: false }
+    const turnRequest = withoutUnsupportedReasoningEffort(request, route)
     const observedRequest: AgentTurnRequest = {
-      ...request,
+      ...turnRequest,
       onEvent: (event) => {
         if (event.kind === 'turn.failed') {
           observation.terminalFailure = event
@@ -105,7 +128,7 @@ export class HarnessModelRouter implements AgentRuntimePort, AsyncDisposable {
         && entry.adapter.closeAgent !== undefined
       ) {
         await entry.adapter.closeAgent(request.agent.id)
-        return entry.adapter.runTurn(request)
+        return entry.adapter.runTurn(turnRequest)
       }
       if (failure !== undefined) request.onEvent?.(failure)
       return result
