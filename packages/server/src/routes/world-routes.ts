@@ -52,6 +52,13 @@ export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDep
     writeJson(response, 200, store.getWorldSnapshot(params[0]!))
   })
 
+  router.put(/^\/api\/worlds\/([^/]+)\/administrator$/, async ({ request, response, params }) => {
+    const worldId = params[0]!
+    await worldAccess?.assertUnlocked(worldId, request)
+    const body = await readJson(request)
+    writeJson(response, 200, { world: store.setWorldAdministrator(worldId, requiredString(body, 'employeeId')) })
+  })
+
   router.get(/^\/api\/worlds\/([^/]+)\/events$/, async ({ request, response, params, url }) => {
     const worldId = params[0]!
     if (store.getWorld(worldId) === undefined) throw new HttpError(404, 'world_not_found', 'World not found')

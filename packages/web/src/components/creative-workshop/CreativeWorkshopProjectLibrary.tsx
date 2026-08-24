@@ -35,7 +35,7 @@ export function CreativeWorkshopProjectLibrary({
           <div className="creative-workshop-library-empty">
             <Cube size={30} />
             <strong>还没有本地创意项目</strong>
-            <p>从一个基础世界模板开始，定义世界观、角色与 Skill 请求。项目会保存在本机，不随程序升级消失。</p>
+            <p>跟随四步引导选择世界模板、创建角色并配置能力。项目保存在本机，不会随程序升级消失。</p>
             <button type="button" className="primary-button" onClick={onCreate}>创建第一个世界</button>
           </div>
         ) : (
@@ -55,7 +55,7 @@ export function CreativeWorkshopProjectLibrary({
           <div className="creative-workshop-project-placeholder">
             <Cube size={34} />
             <strong>{projects.length === 0 ? '创建你的第一个本地世界' : '选择一个项目查看详情'}</strong>
-            <p>项目源、生成的角色包和世界数据都保存在本地 `stateRoot`。</p>
+            <p>世界设置、角色和生成内容都保存在当前设备。</p>
           </div>
         ) : (
           <>
@@ -92,9 +92,9 @@ export function CreativeWorkshopProjectLibrary({
             </section>
 
             <section className="creative-workshop-project-storage">
-              <strong>本地持久化</strong>
-              <p><code>workshop/projects/{selectedProject.id}/project.json</code></p>
-              <small>源码更新只替换程序；这个项目和对应世界仍由当前 `stateRoot` 持有。</small>
+              <strong>本地保存</strong>
+              <p>项目、角色包和世界数据均保存在当前设备。</p>
+              <small>应用更新只替换程序，不会覆盖这个项目或对应世界。</small>
             </section>
           </>
         )}

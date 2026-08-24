@@ -18,11 +18,13 @@ import { LocalPackageCatalog, LocalPackageRuntime, PackageManager, type PackageR
 import { SqliteStore, WorldSimulationStore } from '@dsh-cyber/persistence'
 
 import { dispatchHttpRequest } from './http/context.js'
+import { assertApplicationAccess } from './http/application-access-guard.js'
 import { writeError } from './http/errors.js'
 import { Router } from './http/router.js'
 import { isLoopbackHost } from './http/security.js'
 import { closeServer, listenBrowserSafe } from './http/server-lifecycle.js'
 import { registerAmbientLifeRoutes } from './routes/ambient-life-routes.js'
+import { registerApplicationAccessRoutes } from './routes/application-access-routes.js'
 import { registerAssetRoutes } from './routes/asset-routes.js'
 import { registerCatalogRoutes } from './routes/catalog-routes.js'
 import { registerConversationRoutes } from './routes/conversation-routes.js'
@@ -44,6 +46,7 @@ import { AmbientLifeRuntime } from './services/ambient-life-runtime.js'
 import { AmbientLifeScheduler } from './services/ambient-life-scheduler.js'
 import { AmbientLifeSettingsService } from './services/ambient-life-settings-service.js'
 import { AssetService } from './services/asset-service.js'
+import { ApplicationAccessService } from './services/application-access-service.js'
 import { CharacterProfileRuntime } from './services/character-profile-runtime.js'
 import { CharacterSkillRuntime } from './services/character-skill-runtime.js'
 import { EmployeeActivityProjectionService } from './services/employee-activity-projection-service.js'
@@ -54,6 +57,7 @@ import { ModelInteractionService, TurnInteractionLoggingRuntime } from './servic
 import { PeerCollaborationService } from './services/peer-collaboration-service.js'
 import { RoleAwareAmbientLifeService } from './services/role-aware-ambient-life-service.js'
 import { RuntimeUpdateService } from './services/runtime-update-service.js'
+import { ApplicationUpdateService } from './services/application-update-service.js'
 import { TaskScheduleService } from './services/task-schedule-service.js'
 import { WorldAccessService } from './services/world-access-service.js'
 import { WorldAmbientSlotResolver } from './services/world-ambient-slot-resolver.js'
@@ -245,11 +249,14 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   employeeActivity.projectAll()
   const taskSchedules = new TaskScheduleService({ store, orchestrator, settings: worldSettings, employeeActivity })
   const runtimeUpdates = new RuntimeUpdateService(store, stateRoot, workspaceRoot)
+  const applicationUpdates = new ApplicationUpdateService(store, stateRoot, workspaceRoot)
+  const applicationAccess = new ApplicationAccessService(stateRoot)
   const assets = new AssetService(store, stateRoot)
   const worldFiles = new WorldFileService(worldRoots)
 
   const router = new Router()
-  registerSystemRoutes(router, { store, stateRoot, runtimeUpdates })
+  registerApplicationAccessRoutes(router, applicationAccess)
+  registerSystemRoutes(router, { store, stateRoot, runtimeUpdates, applicationUpdates })
   registerWorkspaceFileRoutes(router, { worldFiles, access: worldAccess })
   registerCatalogRoutes(router, { store, packageCatalog, worldPackages })
   registerWorkspaceRoutes(router, { store })
@@ -274,7 +281,10 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerEmployeeRoutes(router, { store, worldAccess })
 
   const httpServer = createServer((request, response) => {
-    void dispatchHttpRequest(router, webRoot, request, response).catch((error: unknown) => writeError(response, error))
+    void (async () => {
+      await assertApplicationAccess(applicationAccess, request)
+      await dispatchHttpRequest(router, webRoot, request, response)
+    })().catch((error: unknown) => writeError(response, error))
   })
   httpServer.requestTimeout = 0
   httpServer.headersTimeout = 10_000

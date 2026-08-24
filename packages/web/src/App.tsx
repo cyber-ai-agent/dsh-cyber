@@ -9,7 +9,7 @@ import {
   SidebarSimple,
   Storefront,
 } from '@phosphor-icons/react'
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type {
   AgentRuntimeEvent,
   AgentPermissionMode,
@@ -32,7 +32,6 @@ import type {
   ModelProfile,
   PackageInstallTransaction,
   PackagePermissionPreview,
-  RuntimeUpdateTransaction,
   TaskSchedule,
   WorkMessage,
   WorkSession,
@@ -55,37 +54,40 @@ import {
   type PendingChatTurn,
   type StreamingChatReply,
 } from './chat-realtime.js'
-import { ArtifactDock } from './components/ArtifactDock.js'
 import { ChatWorkbench, isChatMessage } from './components/ChatWorkbench.js'
 import { CreativeWorkshopLauncher } from './components/CreativeWorkshopLauncher.js'
-import { EmployeeManagementDialog } from './components/EmployeeManagementDialog.js'
-import { GroupConversationDialog } from './components/GroupConversationDialog.js'
-import { MessageHistoryDialog, MESSAGE_PAGE_SIZE } from './components/MessageHistoryDialog.js'
 import { NavigationPane } from './components/NavigationPane.js'
-import { PackageMarketDialog } from './components/PackageMarketDialog.js'
-import { RecruitmentDialog } from './components/RecruitmentDialog.js'
 import { ResizableShell } from './components/ResizableShell.js'
-import {
-  SettingsDialog,
-  type DiscoveredModel,
-  type ModelDiscoveryDraft,
-  type ModelProfileSaveDraft,
-  type SettingsSection,
-  type SystemAction,
-  type SystemActionInput,
-  type SystemActionResult,
+import type {
+  DiscoveredModel,
+  ModelDiscoveryDraft,
+  ModelProfileSaveDraft,
+  SettingsSection,
+  SystemAction,
+  SystemActionInput,
+  SystemActionResult,
 } from './components/SettingsDialog.js'
 import { demoData, demoTavernDossiers, demoTavernEmployees, demoTavernMessages, demoTavernSessions } from './demo-data.js'
 import type { ConversationIntent, CyberEmployee, DockTab, SessionParticipantMap } from './types.js'
 import { worldExperience } from './world-experience.js'
 import { subscribeWorldLive } from './world-live-client.js'
-import { WorldRuntimeDock } from './features/world/WorldRuntimeDock.js'
-import { WorldTracePanel } from './components/world-trace/WorldTracePanel.js'
-import { WorldSettingsDialog, WorldUnlockDialog } from './components/WorldSettingsDialog.js'
-import { TaskSchedulePanel } from './components/TaskSchedulePanel.js'
+
+const SettingsDialog = lazy(async () => ({ default: (await import('./components/SettingsDialog.js')).SettingsDialog }))
+const ArtifactDock = lazy(async () => ({ default: (await import('./components/ArtifactDock.js')).ArtifactDock }))
+const EmployeeManagementDialog = lazy(async () => ({ default: (await import('./components/EmployeeManagementDialog.js')).EmployeeManagementDialog }))
+const GroupConversationDialog = lazy(async () => ({ default: (await import('./components/GroupConversationDialog.js')).GroupConversationDialog }))
+const MessageHistoryDialog = lazy(async () => ({ default: (await import('./components/MessageHistoryDialog.js')).MessageHistoryDialog }))
+const PackageMarketDialog = lazy(async () => ({ default: (await import('./components/PackageMarketDialog.js')).PackageMarketDialog }))
+const RecruitmentDialog = lazy(async () => ({ default: (await import('./components/RecruitmentDialog.js')).RecruitmentDialog }))
+const WorldSettingsDialog = lazy(async () => ({ default: (await import('./components/WorldSettingsDialog.js')).WorldSettingsDialog }))
+const WorldUnlockDialog = lazy(async () => ({ default: (await import('./components/WorldSettingsDialog.js')).WorldUnlockDialog }))
+const WorldRuntimeDock = lazy(async () => ({ default: (await import('./features/world/WorldRuntimeDock.js')).WorldRuntimeDock }))
+const WorldTracePanel = lazy(async () => ({ default: (await import('./components/world-trace/WorldTracePanel.js')).WorldTracePanel }))
+const TaskSchedulePanel = lazy(async () => ({ default: (await import('./components/TaskSchedulePanel.js')).TaskSchedulePanel }))
 
 const demoMode = new URLSearchParams(window.location.search).get('demo') === '1'
 const worldRuntimeV2Enabled = new URLSearchParams(window.location.search).get('legacyWorld') !== '1'
+const MESSAGE_PAGE_SIZE = 20
 type AppMode = 'world' | 'workbench'
 
 interface ChatResult {
@@ -991,11 +993,22 @@ export default function App() {
     }
   }, [managingEmployee, selectedEmployeeId])
 
-  const selectSession = useCallback((sessionId: string) => {
+  const selectSession = useCallback((sessionId: string, discoveredSession?: WorkSession, discoveredParticipantIds: string[] = []) => {
+    if (discoveredSession !== undefined) {
+      setSessions((current) => current.some((session) => session.id === sessionId)
+        ? current
+        : [discoveredSession, ...current])
+    }
+    if (discoveredParticipantIds.length > 0) {
+      setSessionParticipants((current) => current[sessionId] !== undefined
+        ? current
+        : { ...current, [sessionId]: discoveredParticipantIds })
+    }
+    const participantIds = sessionParticipants[sessionId] ?? discoveredParticipantIds
     if (sessionId === activeSessionId) {
       setConversationIntent(undefined)
       setDraft('')
-      setSelectedEmployeeId(sessionParticipants[sessionId]?.[0])
+      setSelectedEmployeeId(participantIds[0])
       if (!demoMode && messages.length === 0) setTranscriptReload((value) => value + 1)
       return
     }
@@ -1004,7 +1017,7 @@ export default function App() {
     setMessagePage({ hasMore: false, loading: false })
     if (!demoMode) setMessages([])
     setDraft('')
-    setSelectedEmployeeId(sessionParticipants[sessionId]?.[0])
+    setSelectedEmployeeId(participantIds[0])
     if (demoMode) {
       const next = demoMessagesForSession(sessionId)
       setMessages(next.slice(-MESSAGE_PAGE_SIZE))
@@ -1420,28 +1433,15 @@ export default function App() {
           createdAt: new Date().toISOString(),
         }
       }
-      if (action === 'verify-update') {
-        return { ok: true, version: '0.1.1-rc.1', supported: true, contractId: 'dsh-session-events-v1', checks: { packageVersions: true, isolatedProfile: true }, transaction: demoRuntimeTransaction('verified') }
-      }
-      if (action === 'contract-update') return { ok: true, transaction: demoRuntimeTransaction('contract-tested') }
-      if (action === 'canary-update') return { ok: true, transaction: demoRuntimeTransaction('canary-passed') }
-      if (action === 'activate-update') return { ok: true, transaction: demoRuntimeTransaction('activated'), restartRequired: true }
-      if (action === 'rollback-update') return { ok: true, transaction: demoRuntimeTransaction('rolled-back'), restartRequired: true }
-      if (action === 'list-updates') return { ok: true, items: [] }
+      if (action === 'check-application-update' || action === 'apply-application-update') return { ok: true, applicationUpdate: { supported: true, channel: 'main', currentRevision: '1234567890abcdef', targetRevision: action === 'check-application-update' ? 'abcdef1234567890' : 'abcdef1234567890', commitsBehind: action === 'check-application-update' ? 3 : 0, updateAvailable: action === 'check-application-update' }, restartRequired: action === 'apply-application-update' }
       return { ok: true, checkedAt: new Date().toISOString(), compatibility: { expectedVersion: '0.1.1-rc.1', errors: [] }, database: { schemaVersion: 5, integrity: ['ok'], errors: [] } }
     }
     if (action === 'status') return api<SystemActionResult>('/api/system/status')
     if (action === 'doctor') return api<SystemActionResult>('/api/system/doctor', { method: 'POST', body: '{}' })
     if (action === 'backup') return api<SystemActionResult>('/api/system/backup', { method: 'POST', body: '{}' })
     if (action === 'export') return api<SystemActionResult>('/api/system/export', { method: 'POST', body: '{}' })
-    if (action === 'list-updates') return api<SystemActionResult>('/api/system/updates')
-    if (action === 'verify-update') return api<SystemActionResult>('/api/system/update/verify', { method: 'POST', body: JSON.stringify({ candidateRoot: input?.candidateRoot }) })
-    const transactionId = input?.transactionId
-    if (!transactionId) throw new Error('缺少更新事务，请重新验证候选版本。')
-    if (action === 'contract-update') return api<SystemActionResult>(`/api/system/update/${transactionId}/contract-test`, { method: 'POST', body: '{}' })
-    if (action === 'canary-update') return api<SystemActionResult>(`/api/system/update/${transactionId}/canary`, { method: 'POST', body: JSON.stringify({ modelProfileId: input?.modelProfileId }) })
-    if (action === 'activate-update') return api<SystemActionResult>(`/api/system/update/${transactionId}/activate`, { method: 'POST', body: JSON.stringify({ approved: input?.approved === true }) })
-    return api<SystemActionResult>(`/api/system/update/${transactionId}/rollback`, { method: 'POST', body: JSON.stringify({ approved: input?.approved === true }) })
+    if (action === 'check-application-update') return api<SystemActionResult>('/api/system/application-update')
+    return api<SystemActionResult>('/api/system/application-update/apply', { method: 'POST', body: JSON.stringify({ approved: input?.approved === true }) })
   }, [])
 
   const loadModelLogs = useCallback(async (filter: ModelInteractionLogFilter): Promise<ModelInteractionLogPage> => {
@@ -1604,7 +1604,7 @@ export default function App() {
           />
         )}
         right={(
-          <ArtifactDock
+          <Suspense fallback={<div className="world-runtime world-runtime--loading"><strong>正在加载工作区</strong></div>}><ArtifactDock
             demoMode={demoMode}
             activeTab={dockTab}
             {...(selectedEmployee === undefined ? {} : { selectedEmployee })}
@@ -1614,7 +1614,8 @@ export default function App() {
             {...(backgroundImage === undefined ? {} : { sceneImage: backgroundImage })}
             {...(supportsWorldRuntime ? {
               worldContent: (
-                <WorldRuntimeDock
+                <Suspense fallback={<div className="world-runtime world-runtime--loading"><strong>正在进入世界</strong><span>加载互动场景与角色状态</span></div>}>
+                  <WorldRuntimeDock
                   key={`${activeWorld.id}:${worldRuntimeRevision}`}
                   demoMode={demoMode}
                   world={activeWorld}
@@ -1644,11 +1645,12 @@ export default function App() {
           }
           createGroupIntent({ employeeIds: selected.map((employee) => employee.id), title: selected.map((employee) => employee.displayName).join('、') })
         }}
-                />
+                  />
+                </Suspense>
               ),
             } : {})}
-            traceContent={<WorldTracePanel key={activeWorld.id} world={activeWorld} employees={employees} demoMode={demoMode} />}
-            scheduleContent={<TaskSchedulePanel employees={employees} items={taskSchedules} busy={scheduleBusy} onCreate={createTaskSchedule} onStatus={updateTaskScheduleStatus} onRun={runTaskSchedule} onDelete={deleteTaskSchedule} />}
+            traceContent={<Suspense fallback={<div className="world-runtime world-runtime--loading"><strong>正在加载轨迹</strong></div>}><WorldTracePanel key={activeWorld.id} world={activeWorld} employees={employees} demoMode={demoMode} /></Suspense>}
+            scheduleContent={<Suspense fallback={<div className="world-runtime world-runtime--loading"><strong>正在加载日程</strong></div>}><TaskSchedulePanel employees={employees} items={taskSchedules} busy={scheduleBusy} onCreate={createTaskSchedule} onStatus={updateTaskScheduleStatus} onRun={runTaskSchedule} onDelete={deleteTaskSchedule} /></Suspense>}
             onTabChange={(tab) => { setDockTab(tab); setAppMode(tab === 'world' ? 'world' : 'workbench') }}
             onCollapse={() => setDockCollapsed(true)}
             onSelectEmployee={(employeeId) => void openDossier(employeeId)}
@@ -1656,28 +1658,28 @@ export default function App() {
             onManageEmployee={(employee) => setManagingEmployeeId(employee.id)}
             onShowAllDossiers={() => setSelectedEmployeeId(undefined)}
             onInvite={() => void openRecruitment()}
-          />
+          /></Suspense>
         )}
       />
       {dockCollapsed ? <button className="dock-reopen" type="button" onClick={() => setDockCollapsed(false)} aria-label="展开侧边栏"><SidebarSimple size={18} /></button> : null}
       {groupDialogOpen ? (
-        <GroupConversationDialog
+        <Suspense fallback={<div className="dialog-loading" role="status">正在准备群聊…</div>}><GroupConversationDialog
           employees={employees}
           onClose={() => setGroupDialogOpen(false)}
           onCreate={createGroupIntent}
-        />
+        /></Suspense>
       ) : null}
       {historyOpen && activeSession !== undefined ? (
-        <MessageHistoryDialog
+        <Suspense fallback={<div className="dialog-loading" role="status">正在打开历史消息…</div>}><MessageHistoryDialog
           demoMode={demoMode}
           session={activeSession}
           employees={employees}
           {...(demoMode ? { demoMessages: demoMessagesForSession(activeSession.id) } : {})}
           onClose={() => setHistoryOpen(false)}
-        />
+        /></Suspense>
       ) : null}
       {settingsOpen ? (
-        <SettingsDialog
+        <Suspense fallback={<div className="dialog-loading" role="status">正在打开设置…</div>}><SettingsDialog
           preferences={preferences}
           models={models}
           assignments={modelAssignments}
@@ -1696,10 +1698,10 @@ export default function App() {
           onSystemAction={runSystemAction}
           onLoadModelLogs={loadModelLogs}
           onClearModelLogs={clearModelLogs}
-        />
+        /></Suspense>
       ) : null}
       {recruitmentOpen ? (
-        <RecruitmentDialog
+        <Suspense fallback={<div className="dialog-loading" role="status">正在打开角色档案…</div>}><RecruitmentDialog
           blueprints={blueprints}
           {...(preferredBlueprintId === undefined ? {} : { initialBlueprintId: preferredBlueprintId })}
           employees={employees}
@@ -1708,10 +1710,10 @@ export default function App() {
           recruiting={recruiting}
           onClose={() => { setRecruitmentOpen(false); setPreferredBlueprintId(undefined) }}
           onRecruit={recruitEmployee}
-        />
+        /></Suspense>
       ) : null}
       {packageMarketOpen ? (
-        <PackageMarketDialog
+        <Suspense fallback={<div className="dialog-loading" role="status">正在打开市场…</div>}><PackageMarketDialog
           initialMarket={packageMarketKind}
           world={activeWorld}
           worlds={worlds}
@@ -1738,12 +1740,12 @@ export default function App() {
             setDraft(`${command} `)
             setComposerFocusRequest((value) => value + 1)
           }}
-        />
+        /></Suspense>
       ) : null}
-      {worldSettingsOpen && activeWorld !== undefined && worldSettings !== undefined && worldAccess !== undefined ? <WorldSettingsDialog world={activeWorld} value={worldSettings} access={worldAccess} models={models} saving={savingSettings} onClose={()=>setWorldSettingsOpen(false)} onSave={async (value)=>{ setSavingSettings(true); try { const result = await api<{settings:WorldSettings}>(`/api/worlds/${activeWorld.id}/settings`, { method:'PUT', body:JSON.stringify(value) }); setWorldSettings(result.settings); setReasoningEffort(result.settings.model.reasoningEffort); setPermissionMode(result.settings.runtime.permissionMode); applyWorldAppearance(result.settings) } finally { setSavingSettings(false) } }} onSetPassword={async(password)=>{ const result=await api<{access:WorldAccessSummary}>(`/api/worlds/${activeWorld.id}/access/password`,{method:'POST',body:JSON.stringify({password})});setWorldAccess(result.access)}} onClearPassword={async()=>{const result=await api<{access:WorldAccessSummary}>(`/api/worlds/${activeWorld.id}/access/password`,{method:'DELETE'});setWorldAccess(result.access)}} onLock={async()=>{await api(`/api/worlds/${activeWorld.id}/access/lock`,{method:'POST',body:'{}'});setWorldSettingsOpen(false);setLockedWorld(activeWorld)}} /> : null}
-      {lockedWorld !== undefined ? <WorldUnlockDialog worldName={lockedWorld.name} onUnlock={async(password)=>{ await api(`/api/worlds/${lockedWorld.id}/access/unlock`,{method:'POST',body:JSON.stringify({password})}); const world=lockedWorld; setLockedWorld(undefined); await loadWorld(world) }} /> : null}
+      {worldSettingsOpen && activeWorld !== undefined && worldSettings !== undefined && worldAccess !== undefined ? <Suspense fallback={<div className="dialog-loading" role="status">正在打开世界设置…</div>}><WorldSettingsDialog world={activeWorld} value={worldSettings} models={models} employees={employees} saving={savingSettings} onClose={()=>setWorldSettingsOpen(false)} onSave={async (value)=>{ setSavingSettings(true); try { const result = await api<{settings:WorldSettings}>(`/api/worlds/${activeWorld.id}/settings`, { method:'PUT', body:JSON.stringify(value) }); setWorldSettings(result.settings); setReasoningEffort(result.settings.model.reasoningEffort); setPermissionMode(result.settings.runtime.permissionMode); applyWorldAppearance(result.settings) } finally { setSavingSettings(false) } }} onSetAdministrator={async(employeeId)=>{ const result=await api<{world:World}>(`/api/worlds/${activeWorld.id}/administrator`,{method:'PUT',body:JSON.stringify({employeeId})}); setActiveWorld(result.world); setWorlds((current)=>current.map((item)=>item.id===result.world.id?result.world:item)) }} /></Suspense> : null}
+      {lockedWorld !== undefined ? <Suspense fallback={<div className="dialog-loading" role="status">正在打开访问验证…</div>}><WorldUnlockDialog worldName={lockedWorld.name} onUnlock={async(password)=>{ await api(`/api/worlds/${lockedWorld.id}/access/unlock`,{method:'POST',body:JSON.stringify({password})}); const world=lockedWorld; setLockedWorld(undefined); await loadWorld(world) }} /></Suspense> : null}
       {managingEmployee !== undefined ? (
-        <EmployeeManagementDialog
+        <Suspense fallback={<div className="dialog-loading" role="status">正在打开角色设置…</div>}><EmployeeManagementDialog
           employee={managingEmployee}
           {...(managingDossier?.profile === undefined ? {} : { profile: managingDossier.profile })}
           {...(managingRevision === undefined ? {} : { currentRevision: managingRevision })}
@@ -1754,7 +1756,7 @@ export default function App() {
           onRevise={reviseEmployee}
           onUpdateProfile={updateEmployeeProfile}
           onArchive={archiveEmployee}
-        />
+        /></Suspense>
       ) : null}
     </div>
   )
@@ -2114,20 +2116,6 @@ function serializableAttachments(attachments: ChatAttachment[]): JsonObject[] {
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
-}
-
-function demoRuntimeTransaction(status: RuntimeUpdateTransaction['status']): RuntimeUpdateTransaction {
-  const timestamp = new Date().toISOString()
-  return {
-    id: 'demo-runtime-update',
-    candidateRoot: '演示候选运行时',
-    version: '0.1.1-rc.1',
-    contractId: 'dsh-session-events-v1',
-    status,
-    report: { ok: true, demo: true },
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  }
 }
 
 function runtimeEmployeeStatus(event: AgentRuntimeEvent): EmployeeInstance['status'] | undefined {

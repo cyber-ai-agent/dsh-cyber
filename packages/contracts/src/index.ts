@@ -1,4 +1,4 @@
-export const CYBER_SCHEMA_VERSION = 18 as const
+export const CYBER_SCHEMA_VERSION = 19 as const
 
 export type IsoTimestamp = string
 export type JsonPrimitive = boolean | number | string | null
@@ -157,6 +157,8 @@ export interface World {
   name: string
   templateId: string
   status: WorldStatus
+  /** Character that administers this world. Empty only while the world has no characters. */
+  administratorEmployeeId?: string
   createdAt: IsoTimestamp
   updatedAt: IsoTimestamp
 }
@@ -787,6 +789,7 @@ export interface WorkMessage {
 export const DOMAIN_EVENT_TYPES = [
   'workspace.created',
   'world.created',
+  'world.administrator.changed',
   'world.creation.rolled-back',
   'world.entered',
   'employee.recruited',

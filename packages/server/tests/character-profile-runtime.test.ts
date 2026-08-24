@@ -11,6 +11,7 @@ import {
   CharacterProfileRuntime,
   composeCharacterPersona,
   composeSkillRecipes,
+  composeWorldAdministratorPersona,
 } from '../src/services/character-profile-runtime.js'
 import { createBuiltinSkillRegistry } from '../src/skills/builtin-skill-registry.js'
 
@@ -45,6 +46,7 @@ describe('CharacterProfileRuntime', () => {
         ? currentRevision
         : staleRevision,
       getEmployeeProfile: () => characterProfile(),
+      getWorld: () => ({ id: 'world-1', workspaceId: 'workspace-1', name: '测试世界', templateId: 'personal-world', status: 'active', administratorEmployeeId: 'character-1', createdAt: '', updatedAt: '' }),
     })
 
     await runtime.runTurn({
@@ -59,6 +61,7 @@ describe('CharacterProfileRuntime', () => {
     expect(inner.requests[0]?.revision.revision).toBe(2)
     expect(inner.requests[0]?.revision.persona).toContain('当前角色设定')
     expect(inner.requests[0]?.revision.persona).toContain('[当前角色资料]')
+    expect(inner.requests[0]?.revision.persona).toContain('[世界管理员职责]')
   })
 
   it('injects only granted declarative recipes and never loads the full catalog', async () => {
@@ -69,6 +72,7 @@ describe('CharacterProfileRuntime', () => {
       getEmployee: () => character({ currentRevision: 2 }),
       getEmployeeRevision: () => granted,
       getEmployeeProfile: () => undefined,
+      getWorld: () => undefined,
     }, createBuiltinSkillRegistry())
 
     await runtime.runTurn({ agent: character(), revision: revision(1, '旧设定'), prompt: '实现并验证功能', workspacePath: '/tmp/world' })
@@ -82,6 +86,11 @@ describe('CharacterProfileRuntime', () => {
 
   it('keeps recipe composition stable when no recipe is granted', () => {
     expect(composeSkillRecipes('基础设定', [])).toBe('基础设定')
+  })
+
+  it('adds bounded administrator authority without granting cross-world control', () => {
+    expect(composeWorldAdministratorPersona('基础设定', true)).toContain('不得读取或修改其他世界的角色')
+    expect(composeWorldAdministratorPersona('基础设定', false)).toBe('基础设定')
   })
 })
 

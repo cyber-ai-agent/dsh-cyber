@@ -117,10 +117,10 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
     await this.#loadAssets(manifest)
     this.#buildScene()
     this.updateSnapshot(snapshot)
-    this.fillScene()
+    this.#resizeViewport()
     this.#wireCamera()
     this.#app.ticker.add((ticker) => this.#tick(ticker.deltaMS))
-    this.#resizeObserver = new ResizeObserver(() => this.fillScene())
+    this.#resizeObserver = new ResizeObserver(() => this.#resizeViewport())
     this.#resizeObserver.observe(host)
     this.#callbacks.onReady?.({
       initializationMs: Math.round(performance.now() - startedAt),
@@ -243,6 +243,21 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
       y: (availableHeight - this.#scene.size.height * scale) / 2,
     }
     this.#applyCamera()
+  }
+
+  #resizeViewport(): void {
+    if (!this.#host || !this.#initialized) return
+    const width = Math.max(1, Math.round(this.#host.clientWidth))
+    const height = Math.max(1, Math.round(this.#host.clientHeight))
+    // Pixi's resizeTo plugin follows window resize events. The world pane can
+    // also change size when navigation panels move without resizing the
+    // browser, so keep the renderer buffer and interaction hit area in sync
+    // with the observed host before recalculating the cover camera.
+    if (this.#app.screen.width !== width || this.#app.screen.height !== height) {
+      this.#app.renderer.resize(width, height)
+    }
+    this.#app.stage.hitArea = this.#app.screen
+    this.fillScene()
   }
 
   zoomBy(delta: number): void {

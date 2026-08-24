@@ -10,6 +10,7 @@ import {
   EyeSlash,
   ImageSquare,
   ListMagnifyingGlass,
+  LockKey,
   Moon,
   Palette,
   PencilSimple,
@@ -34,21 +35,29 @@ import type {
   ModelInteractionLogPage,
   ModelProfile,
   ModelProviderKind,
-  RuntimeUpdateTransaction,
   Workspace,
   WorkspacePreferences,
   World,
 } from '@dsh-cyber/contracts'
 import { api } from '../api.js'
+import type { ApplicationAccessSummary } from './ApplicationLockGate.js'
 
-export type SettingsSection = 'appearance' | 'models' | 'integrations' | 'data' | 'logs' | 'maintenance'
-export type SystemAction = 'status' | 'doctor' | 'backup' | 'export' | 'list-updates' | 'verify-update' | 'contract-update' | 'canary-update' | 'activate-update' | 'rollback-update'
+export type SettingsSection = 'appearance' | 'models' | 'integrations' | 'privacy' | 'data' | 'logs' | 'maintenance'
+export type SystemAction = 'status' | 'doctor' | 'backup' | 'export' | 'check-application-update' | 'apply-application-update'
 
 export interface SystemActionInput {
-  candidateRoot?: string
-  transactionId?: string
-  modelProfileId?: string
   approved?: boolean
+}
+
+export interface ApplicationUpdateStatus {
+  supported: boolean
+  channel: 'main'
+  branch?: string
+  currentRevision?: string
+  targetRevision?: string
+  commitsBehind?: number
+  updateAvailable?: boolean
+  reason?: string
 }
 
 export interface SystemActionResult {
@@ -65,9 +74,7 @@ export interface SystemActionResult {
   compatibility?: { expectedVersion?: string; errors?: string[] }
   checks?: Record<string, boolean>
   errors?: string[]
-  transaction?: RuntimeUpdateTransaction
-  items?: RuntimeUpdateTransaction[]
-  activeRuntime?: { transactionId: string; candidateRoot: string; version: string }
+  applicationUpdate?: ApplicationUpdateStatus
   restartRequired?: boolean
 }
 
@@ -118,6 +125,7 @@ const sectionGroups = [
       ['appearance', '外观与布局', Palette, '主题、背景和面板宽度'],
       ['models', 'AI 模型', Cpu, '连接模型并设置使用范围'],
       ['integrations', '外部连接', Plug, '管理角色可使用的受信任服务'],
+      ['privacy', '隐私与锁屏', LockKey, '保护整个本地工作台'],
     ],
   },
   {
@@ -130,7 +138,7 @@ const sectionGroups = [
   {
     label: '高级',
     items: [
-      ['maintenance', '维护与更新', ShieldCheck, '检查状态和更新 DSH'],
+      ['maintenance', '应用更新', ShieldCheck, '安全检查并安装新版本'],
     ],
   },
 ] as const
@@ -332,6 +340,7 @@ export function SettingsDialog({
               />
             ) : null}
             {section === 'integrations' ? <IntegrationSettings workspaceId={workspace.id} /> : null}
+            {section === 'privacy' ? <PrivacySettings /> : null}
             {section === 'logs' ? (
               <ModelInteractionLogSettings
                 onLoad={onLoadModelLogs}
@@ -339,11 +348,11 @@ export function SettingsDialog({
               />
             ) : null}
             {section === 'data' ? <DataSettings pending={pendingAction} result={actionResult} error={actionError} onRun={runSystemAction} /> : null}
-            {section === 'maintenance' ? <MaintenanceSettings models={models} pending={pendingAction} result={actionResult} error={actionError} onRun={runSystemAction} /> : null}
+            {section === 'maintenance' ? <MaintenanceSettings pending={pendingAction} result={actionResult} error={actionError} onRun={runSystemAction} /> : null}
           </div>
         </div>
         <footer className="settings-dialog__footer">
-          <span>{section === 'appearance' ? (saving ? '正在保存…' : changed ? '有未保存的外观更改' : '外观设置已保存') : section === 'models' ? '每个模型连接单独保存，密钥不会显示在页面中' : section === 'integrations' ? '外部凭据仅在本机加密保存，角色仍需单独 Skill 授权' : section === 'data' ? '数据保存在当前设备' : section === 'logs' ? '记录不包含对话正文和密钥' : '高级操作只在你主动执行时运行'}</span>
+          <span>{section === 'appearance' ? (saving ? '正在保存…' : changed ? '有未保存的外观更改' : '外观设置已保存') : section === 'models' ? '每个模型连接单独保存，密钥不会显示在页面中' : section === 'integrations' ? '外部凭据仅在本机加密保存，角色仍需单独 Skill 授权' : section === 'privacy' ? '锁屏保护整个应用，不代替磁盘加密' : section === 'data' ? '数据保存在当前设备' : section === 'logs' ? '记录不包含对话正文和密钥' : '更新只在你主动确认后运行'}</span>
           <div>
             <button className="text-button" type="button" onClick={onClose}>{section === 'appearance' ? '取消' : '关闭'}</button>
             {section === 'appearance' ? <button className="primary-button" type="button" disabled={!changed || saving} onClick={() => void onSavePreferences(draft)}>保存外观设置</button> : null}
@@ -443,6 +452,67 @@ function IntegrationSettings({ workspaceId }: { workspaceId: string }) {
   </div>
 }
 
+function PrivacySettings() {
+  const [access, setAccess] = useState<ApplicationAccessSummary>()
+  const [password, setPassword] = useState('')
+  const [confirmation, setConfirmation] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string>()
+  const [notice, setNotice] = useState<string>()
+
+  useEffect(() => {
+    void api<{ access: ApplicationAccessSummary }>('/api/application-access')
+      .then((result) => setAccess(result.access))
+      .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : '锁屏状态读取失败'))
+  }, [])
+
+  const savePassword = async () => {
+    if (password.length < 6) { setError('密码至少需要 6 个字符'); return }
+    if (password !== confirmation) { setError('两次输入的密码不一致'); return }
+    setBusy(true); setError(undefined); setNotice(undefined)
+    try {
+      const result = await api<{ access: ApplicationAccessSummary }>('/api/application-access/password', { method: 'POST', body: JSON.stringify({ password }) })
+      setAccess(result.access); setPassword(''); setConfirmation(''); setNotice('应用锁密码已保存')
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '密码保存失败')
+    } finally { setBusy(false) }
+  }
+  const removePassword = async () => {
+    if (!window.confirm('确定关闭应用锁吗？之后启动时将直接进入工作台。')) return
+    setBusy(true); setError(undefined); setNotice(undefined)
+    try {
+      const result = await api<{ access: ApplicationAccessSummary }>('/api/application-access/password', { method: 'DELETE' })
+      setAccess(result.access); setNotice('应用锁已关闭')
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '应用锁关闭失败')
+    } finally { setBusy(false) }
+  }
+  const lockNow = async () => {
+    setBusy(true); setError(undefined)
+    try {
+      await api('/api/application-access/lock', { method: 'POST', body: '{}' })
+      window.location.reload()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '锁定失败')
+      setBusy(false)
+    }
+  }
+
+  return <div className="settings-section settings-section--privacy">
+    <div className="settings-section__heading"><h3>隐私与锁屏</h3><p>设置一个本机访问密码。锁定后会遮住整个工作台，服务端同时拒绝世界、会话、消息和设置请求。</p></div>
+    <section className="privacy-lock-card">
+      <header><span><LockKey size={22}/></span><div><strong>{access?.passwordEnabled ? '应用锁已启用' : '应用锁未启用'}</strong><small>{access?.passwordEnabled ? '每次服务启动和会话过期后都需要重新解锁。' : '设置后可从这里立即锁定整个 DSH Cyber。'}</small></div></header>
+      <div className="privacy-lock-fields">
+        <label><span>{access?.passwordEnabled ? '新密码' : '密码'}</span><input type="password" autoComplete="new-password" value={password} placeholder="至少 6 个字符" onChange={(event) => setPassword(event.target.value)} /></label>
+        <label><span>再次输入</span><input type="password" autoComplete="new-password" value={confirmation} placeholder="重复输入密码" onChange={(event) => setConfirmation(event.target.value)} /></label>
+      </div>
+      {error ? <p className="model-form-message model-form-message--error" role="alert">{error}</p> : null}
+      {notice ? <p className="model-form-message model-form-message--success" role="status"><CheckCircle size={16}/>{notice}</p> : null}
+      <footer><div>{access?.passwordEnabled ? <button className="text-button is-danger" type="button" disabled={busy} onClick={() => void removePassword()}>关闭应用锁</button> : null}</div><div>{access?.passwordEnabled ? <button className="secondary-button" type="button" disabled={busy} onClick={() => void lockNow()}>立即锁定</button> : null}<button className="primary-button" type="button" disabled={busy || password.length < 6 || confirmation.length < 6} onClick={() => void savePassword()}>{busy ? '处理中…' : access?.passwordEnabled ? '更改密码' : '启用应用锁'}</button></div></footer>
+    </section>
+  </div>
+}
+
 function AppearanceSettings({
   value,
   uploading,
@@ -456,7 +526,7 @@ function AppearanceSettings({
 }) {
   return (
     <div className="settings-section">
-      <div className="settings-section__heading"><h3>外观与布局</h3><p>调整颜色、背景和面板宽度。这里的设置会应用到整个工作台。</p></div>
+      <div className="settings-section__heading"><h3>外观与布局</h3><p>选择一套经过统一配色的界面主题。背景和面板尺寸等低频选项收在下方。</p></div>
       <fieldset className="setting-group">
         <legend>颜色模式</legend>
         <div className="segmented-control">
@@ -471,9 +541,9 @@ function AppearanceSettings({
         <legend>界面皮肤</legend>
         <div className="skin-options">
           {([
-            ['cyber-graphite', '赛博石墨', '#0d1114', '#e0a72f'],
-            ['midnight-violet', '午夜紫', '#11101a', '#a98df0'],
-            ['paper-daylight', '纸张日光', '#f2f0e9', '#996c18'],
+            ['cyber-graphite', '石墨金', '#0d1114', '#d6a534'],
+            ['midnight-violet', '深海蓝', '#0b1117', '#67a9c4'],
+            ['paper-daylight', '暖灰日光', '#eeeee9', '#806321'],
           ] as const).map(([id, label, background, accent]) => (
             <button key={id} type="button" className={value.skinId === id ? 'is-active' : ''} onClick={() => onChange({ ...value, skinId: id })}>
               <span style={{ background, borderColor: accent }}><i style={{ background: accent }} /></span><strong>{label}</strong>
@@ -481,27 +551,32 @@ function AppearanceSettings({
           ))}
         </div>
       </fieldset>
-      <fieldset className="setting-group">
-        <legend>自定义背景</legend>
-        <label className="background-upload">
-          <ImageSquare size={24} />
-          <span><strong>{uploading ? '正在保存到本地…' : '上传 PNG、JPEG 或 WebP'}</strong><small>最大 5 MiB。文件保存在本机，并同步作为当前世界场景底图；人物、灯光与状态层仍可交互。</small></span>
-          <input type="file" accept="image/png,image/jpeg,image/webp" disabled={uploading} onChange={(event) => { const file = event.target.files?.[0]; if (file) void onUpload(file) }} />
-        </label>
-        <div className="setting-grid setting-grid--three">
-          <label><span>适配方式</span><select value={value.backgroundFit} onChange={(event) => onChange({ ...value, backgroundFit: event.target.value as WorkspacePreferences['backgroundFit'] })}><option value="cover">铺满</option><option value="contain">完整显示</option><option value="tile">平铺</option></select></label>
-          <label><span>背景透明度</span><input type="range" min="0" max="0.6" step="0.02" value={value.backgroundOpacity} onChange={(event) => onChange({ ...value, backgroundOpacity: Number(event.target.value) })} /></label>
-          <label><span>动效</span><select value={value.motion} onChange={(event) => onChange({ ...value, motion: event.target.value as WorkspacePreferences['motion'] })}><option value="system">跟随系统</option><option value="reduced">减少</option><option value="full">完整</option></select></label>
+      <details className="settings-disclosure appearance-advanced">
+        <summary><span><strong>更多外观选项</strong><small>自定义背景、动效、信息密度和面板宽度</small></span><CaretDown size={16} /></summary>
+        <div className="settings-disclosure__content appearance-advanced__content">
+          <fieldset className="setting-group">
+            <legend>自定义背景</legend>
+            <label className="background-upload">
+              <ImageSquare size={24} />
+              <span><strong>{uploading ? '正在保存到本地…' : '上传 PNG、JPEG 或 WebP'}</strong><small>最大 5 MiB。文件只保存在本机，并作为当前世界的场景底图。</small></span>
+              <input type="file" accept="image/png,image/jpeg,image/webp" disabled={uploading} onChange={(event) => { const file = event.target.files?.[0]; if (file) void onUpload(file) }} />
+            </label>
+            <div className="setting-grid">
+              <label><span>适配方式</span><select value={value.backgroundFit} onChange={(event) => onChange({ ...value, backgroundFit: event.target.value as WorkspacePreferences['backgroundFit'] })}><option value="cover">铺满</option><option value="contain">完整显示</option><option value="tile">平铺</option></select></label>
+              <label><span>背景透明度</span><input type="range" min="0" max="0.6" step="0.02" value={value.backgroundOpacity} onChange={(event) => onChange({ ...value, backgroundOpacity: Number(event.target.value) })} /></label>
+              <label><span>动效</span><select value={value.motion} onChange={(event) => onChange({ ...value, motion: event.target.value as WorkspacePreferences['motion'] })}><option value="system">跟随系统</option><option value="reduced">减少</option><option value="full">完整</option></select></label>
+            </div>
+          </fieldset>
+          <fieldset className="setting-group">
+            <legend>工作台布局</legend>
+            <div className="setting-grid">
+              <label><span>界面密度</span><select value={value.interfaceDensity} onChange={(event) => onChange({ ...value, interfaceDensity: event.target.value as WorkspacePreferences['interfaceDensity'] })}><option value="compact">紧凑</option><option value="comfortable">舒适</option></select></label>
+              <label><span>左栏 {value.leftPaneWidth}px</span><input type="range" min="220" max="520" value={value.leftPaneWidth} onChange={(event) => onChange({ ...value, leftPaneWidth: Number(event.target.value) })} /></label>
+              <label><span>右栏 {value.rightPaneWidth}px</span><input type="range" min="300" max="760" value={value.rightPaneWidth} onChange={(event) => onChange({ ...value, rightPaneWidth: Number(event.target.value) })} /></label>
+            </div>
+          </fieldset>
         </div>
-      </fieldset>
-      <fieldset className="setting-group">
-        <legend>工作台布局</legend>
-        <div className="setting-grid">
-          <label><span>界面密度</span><select value={value.interfaceDensity} onChange={(event) => onChange({ ...value, interfaceDensity: event.target.value as WorkspacePreferences['interfaceDensity'] })}><option value="compact">紧凑</option><option value="comfortable">舒适</option></select></label>
-          <label><span>左栏 {value.leftPaneWidth}px</span><input type="range" min="220" max="520" value={value.leftPaneWidth} onChange={(event) => onChange({ ...value, leftPaneWidth: Number(event.target.value) })} /></label>
-          <label><span>右栏 {value.rightPaneWidth}px</span><input type="range" min="300" max="760" value={value.rightPaneWidth} onChange={(event) => onChange({ ...value, rightPaneWidth: Number(event.target.value) })} /></label>
-        </div>
-      </fieldset>
+      </details>
     </div>
   )
 }
@@ -679,10 +754,10 @@ function ModelSettings({
             <label><span>模型服务</span><select value={draft.providerId} onChange={(event) => { const preset = MODEL_PRESETS.find((item) => item.id === event.target.value); if (preset) { setDraft({ ...modelDraftForPreset(preset, draft.isDefault), ...(draft.id ? { id: draft.id } : {}) }); setDiscoveredModels([]); setManualModelId(true) } }}>{MODEL_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}</select></label>
             <label><span>连接名称</span><input value={draft.displayName} placeholder="例如：公司的 AI 服务" onChange={(event) => setDraft({ ...draft, displayName: event.target.value })} /></label>
             <label className="setting-grid__wide"><span>服务地址</span><input inputMode="url" value={draft.baseUrl} placeholder={draft.providerKind === 'openai-compatible-local' ? 'http://192.168.1.10:11434/v1' : 'https://api.example.com/v1'} onChange={(event) => { setDraft({ ...draft, baseUrl: event.target.value }); setDiscoveredModels([]); setManualModelId(true) }} /><small>本机或局域网服务可以使用 HTTP，公网服务必须使用 HTTPS。</small></label>
-            <label className="setting-grid__wide"><span>模型 ID</span><div className="model-catalog-input">{discoveredModels.length > 0 && !manualModelId ? <select aria-label="选择可用模型" value={draft.modelId} onChange={(event) => setDraft({ ...draft, modelId: event.target.value })}>{discoveredModels.map((model) => <option key={model.id} value={model.id}>{model.displayName && model.displayName !== model.id ? `${model.displayName}（${model.id}）` : model.id}</option>)}</select> : <input value={draft.modelId} placeholder={MODEL_PRESETS.find((item) => item.id === draft.providerId)?.modelPlaceholder} onChange={(event) => setDraft({ ...draft, modelId: event.target.value })} />}<button type="button" disabled={discoveringModels} onClick={() => void discoverModels()}>{discoveringModels ? '正在获取…' : '获取可用模型'}</button></div>{discoveredModels.length > 0 ? <button className="model-catalog-mode" type="button" onClick={() => { if (manualModelId && discoveredModels[0]) setDraft((current) => ({ ...current, modelId: discoveredModels.some((item) => item.id === current.modelId) ? current.modelId : discoveredModels[0]!.id })); setManualModelId((current) => !current) }}>{manualModelId ? '从已获取列表选择' : '手动填写其他模型 ID'}</button> : null}<small>{discoveredModels.length > 0 ? `已获取 ${discoveredModels.length} 个模型，当前可直接点选。` : '先获取服务提供的模型列表，也可以直接手动填写模型 ID。'}</small></label>
             {draft.credentialMode === 'api-key' ? (
               <label className="setting-grid__wide"><span>API 密钥</span><div className="model-secret-input"><input type={showApiKey ? 'text' : 'password'} autoComplete="new-password" spellCheck={false} value={draft.apiKey} placeholder={draft.hasStoredApiKey ? '已保存；留空保持原密钥' : '输入 sk-... 或服务商提供的密钥'} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} /><button type="button" aria-label={showApiKey ? '隐藏 API 密钥' : '显示 API 密钥'} onClick={() => setShowApiKey((current) => !current)}>{showApiKey ? <EyeSlash size={18} /> : <Eye size={18} />}</button></div><small>{draft.hasStoredApiKey && !draft.apiKey ? '密钥已加密保存。输入新密钥可替换，留空不会改变。' : '密钥仅发送到本机服务，并加密保存；保存后不再回显明文。'}</small></label>
             ) : null}
+            <div className="model-field setting-grid__wide"><span>模型 ID</span><div className="model-catalog-input">{discoveredModels.length > 0 && !manualModelId ? <SearchableModelPicker models={discoveredModels} value={draft.modelId} onChange={(modelId) => setDraft({ ...draft, modelId })} /> : <input aria-label="模型 ID" value={draft.modelId} placeholder={MODEL_PRESETS.find((item) => item.id === draft.providerId)?.modelPlaceholder} onChange={(event) => setDraft({ ...draft, modelId: event.target.value })} />}<button type="button" disabled={discoveringModels} onClick={() => void discoverModels()}>{discoveringModels ? '正在获取…' : '获取可用模型'}</button></div>{discoveredModels.length > 0 ? <button className="model-catalog-mode" type="button" onClick={() => { if (manualModelId && discoveredModels[0]) setDraft((current) => ({ ...current, modelId: discoveredModels.some((item) => item.id === current.modelId) ? current.modelId : discoveredModels[0]!.id })); setManualModelId((current) => !current) }}>{manualModelId ? '从已获取列表选择' : '手动填写其他模型 ID'}</button> : null}<small>{discoveredModels.length > 0 ? `已获取 ${discoveredModels.length} 个模型，可按名称或 ID 搜索。` : draft.credentialMode === 'api-key' && !draft.apiKey.trim() && !draft.hasStoredApiKey ? '先填写 API 密钥，再获取模型列表。' : '获取服务提供的模型列表，或切换为手动填写。'}</small></div>
             <details className="settings-disclosure setting-grid__wide">
               <summary><span><strong>高级连接设置</strong><small>接口兼容方式、环境变量和模型容量</small></span><CaretDown size={16} /></summary>
               <div className="setting-grid settings-disclosure__content">
@@ -725,6 +800,41 @@ function ModelSettings({
       </details>
     </div>
   )
+}
+
+function SearchableModelPicker({ models, value, onChange }: { models: DiscoveredModel[]; value: string; onChange(value: string): void }) {
+  const [query, setQuery] = useState(value)
+  const [open, setOpen] = useState(false)
+  const [activeIndex, setActiveIndex] = useState(0)
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase()
+    return (needle ? models.filter((model) => `${model.displayName ?? ''} ${model.id}`.toLocaleLowerCase().includes(needle)) : models).slice(0, 100)
+  }, [models, query])
+  useEffect(() => { setQuery(value) }, [value])
+  useEffect(() => { setActiveIndex(0) }, [query])
+  const choose = (model: DiscoveredModel) => { onChange(model.id); setQuery(model.displayName && model.displayName !== model.id ? `${model.displayName}（${model.id}）` : model.id); setOpen(false) }
+  return <div className="model-search-picker" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false) }}>
+    <input
+      type="search"
+      role="combobox"
+      aria-label="搜索并选择可用模型"
+      aria-expanded={open}
+      aria-controls="model-search-listbox"
+      aria-autocomplete="list"
+      value={query}
+      onFocus={() => setOpen(true)}
+      onChange={(event) => { setQuery(event.target.value); setOpen(true) }}
+      onKeyDown={(event) => {
+        if (event.key === 'ArrowDown') { event.preventDefault(); setOpen(true); setActiveIndex((current) => Math.min(current + 1, filtered.length - 1)) }
+        if (event.key === 'ArrowUp') { event.preventDefault(); setActiveIndex((current) => Math.max(0, current - 1)) }
+        if (event.key === 'Enter' && open && filtered[activeIndex]) { event.preventDefault(); choose(filtered[activeIndex]!) }
+        if (event.key === 'Escape') setOpen(false)
+      }}
+    />
+    {open ? <div className="model-search-picker__list" id="model-search-listbox" role="listbox">
+      {filtered.length === 0 ? <span>没有匹配的模型</span> : filtered.map((model, index) => <button key={model.id} type="button" role="option" aria-selected={model.id === value} className={index === activeIndex ? 'is-active' : ''} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(model)}><strong>{model.displayName ?? model.id}</strong>{model.displayName && model.displayName !== model.id ? <small>{model.id}</small> : null}</button>)}
+    </div> : null}
+  </div>
 }
 
 function ModelInteractionLogSettings({
@@ -944,19 +1054,23 @@ interface ActionSettingsProps {
   onRun(action: SystemAction, input?: SystemActionInput): Promise<void>
 }
 
-function MaintenanceSettings({ models, pending, result, error, onRun }: ActionSettingsProps & { models: ModelProfile[] }) {
+function MaintenanceSettings({ pending, result, error, onRun }: ActionSettingsProps) {
+  const [approved, setApproved] = useState(false)
+  const update = result?.applicationUpdate
   return (
     <div className="settings-section settings-section--maintenance">
-      <div className="settings-section__heading"><h3>维护与更新</h3><p>应用出现异常时可先运行状态检查。版本验证和回滚属于开发者工具，日常使用无需操作。</p></div>
-      <section className="maintenance-card">
-        <div><ShieldCheck size={22} /><span><strong>应用状态检查</strong><small>检查 AI 执行引擎和本机数据是否可以正常工作。</small></span></div>
-        <ActionButton label="立即检查" action="status" pending={pending} onRun={onRun} />
+      <div className="settings-section__heading"><h3>应用更新</h3><p>检查 main 稳定通道。安装前会在隔离目录完成依赖安装和构建，并备份全部本地数据。</p></div>
+      <section className="application-update-card">
+        <div className="application-update-card__summary"><ShieldCheck size={24} /><span><strong>{update === undefined ? '尚未检查更新' : update.supported ? update.updateAvailable ? `发现 ${update.commitsBehind ?? 0} 个新提交` : '当前已是最新版本' : '当前不能自动更新'}</strong><small>{update?.reason ?? '自动更新只会执行可验证的 main 分支快进，不会覆盖本地改动。'}</small></span></div>
+        {update?.currentRevision ? <dl><div><dt>当前版本</dt><dd>{shortRevision(update.currentRevision)}</dd></div><div><dt>目标版本</dt><dd>{shortRevision(update.targetRevision)}</dd></div><div><dt>更新通道</dt><dd>main</dd></div></dl> : null}
+        {error ? <p className="model-form-message model-form-message--error" role="alert">{error}</p> : null}
+        {update?.supported && update.updateAvailable ? <label className="approval-check"><input type="checkbox" checked={approved} onChange={(event) => setApproved(event.target.checked)} /><span>我确认立即备份数据、验证新版本并安装更新。完成后需要重启应用。</span></label> : null}
+        <footer>
+          <button className="secondary-button" type="button" disabled={pending !== undefined} onClick={() => { setApproved(false); void onRun('check-application-update') }}>{pending === 'check-application-update' ? '正在检查…' : '检查更新'}</button>
+          {update?.supported && update.updateAvailable ? <button className="primary-button" type="button" disabled={!approved || pending !== undefined} onClick={() => void onRun('apply-application-update', { approved: true })}>{pending === 'apply-application-update' ? '正在验证并安装…' : '安装更新'}</button> : null}
+        </footer>
       </section>
-      {error === undefined && result === undefined ? null : <SystemResultCard {...(result === undefined ? {} : { result })} {...(error === undefined ? {} : { error })} />}
-      <details className="settings-disclosure settings-disclosure--maintenance">
-        <summary><span><strong>开发者更新工具</strong><small>验证其他 DSH 版本、执行兼容测试或回滚</small></span><CaretDown size={16} /></summary>
-        <UpdateSettings models={models} pending={pending} result={result} error={error} onRun={onRun} embedded />
-      </details>
+      {result?.restartRequired ? <p className="model-form-message model-form-message--success" role="status"><CheckCircle size={16} />更新已安装。请重启 DSH Cyber 以使用新版本。</p> : null}
     </div>
   )
 }
@@ -967,30 +1081,6 @@ function DataSettings({ pending, result, error, onRun }: ActionSettingsProps) {
       <ActionButton label="检查数据是否完整" action="doctor" pending={pending} onRun={onRun} />
       <ActionButton label="创建完整备份" action="backup" pending={pending} onRun={onRun} />
       <ActionButton label="导出通用 JSON 文件" action="export" pending={pending} onRun={onRun} />
-    </ActionSettings>
-  )
-}
-
-function UpdateSettings({ models, pending, result, error, onRun, embedded = false }: ActionSettingsProps & { models: ModelProfile[]; embedded?: boolean }) {
-  const [candidateRoot, setCandidateRoot] = useState('')
-  const [modelProfileId, setModelProfileId] = useState(models.find((item) => item.isDefault)?.id ?? models[0]?.id ?? '')
-  const [approved, setApproved] = useState(false)
-  const transaction = result?.transaction ?? result?.items?.[0]
-  return (
-    <ActionSettings title="DSH 版本验证" copy="仅用于开发和升级测试。选择候选版本后，系统会依次验证兼容性、进行真实模型测试，并在启用前自动备份。" result={embedded ? undefined : result} error={embedded ? undefined : error}>
-      <button className="settings-action-button" type="button" disabled={pending !== undefined} onClick={() => void onRun('list-updates')}><span>读取更新记录与当前运行时</span><span>{pending === 'list-updates' ? '读取中…' : '刷新'}</span></button>
-      <label className="dialog-field update-candidate-field"><span>候选 DSH 安装目录</span><input value={candidateRoot} placeholder="例如 F:\\runtime\\dsh-candidate" onChange={(event) => setCandidateRoot(event.target.value)} /></label>
-      <button className="settings-action-button" type="button" disabled={!candidateRoot.trim() || pending !== undefined} onClick={() => void onRun('verify-update', { candidateRoot: candidateRoot.trim() })}><span>验证候选版本与隔离 profile</span><span>{pending === 'verify-update' ? '验证中…' : '开始验证'}</span></button>
-      {transaction?.status === 'verified' ? <button className="settings-action-button" type="button" disabled={pending !== undefined} onClick={() => void onRun('contract-update', { transactionId: transaction.id })}><span>执行协议合同测试</span><span>{pending === 'contract-update' ? '测试中…' : '继续'}</span></button> : null}
-      {transaction?.status === 'contract-tested' ? (
-        <>
-          <label className="dialog-field"><span>金丝雀使用的模型</span><select value={modelProfileId} onChange={(event) => setModelProfileId(event.target.value)}><option value="">请选择模型</option>{models.map((model) => <option key={model.id} value={model.id}>{model.displayName} · {model.modelId}</option>)}</select></label>
-          <button className="settings-action-button" type="button" disabled={!modelProfileId || pending !== undefined} onClick={() => void onRun('canary-update', { transactionId: transaction.id, modelProfileId })}><span>运行两轮真实 Harness 金丝雀</span><span>{pending === 'canary-update' ? '运行中…' : '继续'}</span></button>
-        </>
-      ) : null}
-      {transaction?.status === 'canary-passed' || transaction?.status === 'activated' ? <label className="approval-check"><input type="checkbox" checked={approved} onChange={(event) => setApproved(event.target.checked)} /><span>我已审阅验证结果，并批准{transaction.status === 'activated' ? '回滚' : '启用'}该运行时。</span></label> : null}
-      {transaction?.status === 'canary-passed' ? <button className="settings-action-button" type="button" disabled={!approved || pending !== undefined} onClick={() => void onRun('activate-update', { transactionId: transaction.id, approved: true })}><span>备份并启用候选运行时</span><span>{pending === 'activate-update' ? '启用中…' : '启用'}</span></button> : null}
-      {transaction?.status === 'activated' ? <button className="settings-action-button" type="button" disabled={!approved || pending !== undefined} onClick={() => void onRun('rollback-update', { transactionId: transaction.id, approved: true })}><span>备份并回滚运行时</span><span>{pending === 'rollback-update' ? '回滚中…' : '回滚'}</span></button> : null}
     </ActionSettings>
   )
 }
@@ -1014,22 +1104,11 @@ function SystemResultCard({ result, error }: { result?: SystemActionResult; erro
       {version === undefined ? null : <p>AI 执行引擎版本：{version}</p>}
       {database === undefined ? null : <p>本机数据：{(database.integrity ?? []).includes('ok') && (database.errors ?? []).length === 0 ? '正常' : '需要检查'}</p>}
       {result.output === undefined ? null : <p className="system-result__path">已生成：{result.output}</p>}
-      {result.transaction === undefined ? null : <p>版本验证状态：{updateStatusLabel(result.transaction.status)}{result.restartRequired ? ' · 重启后生效' : ''}</p>}
-      {result.activeRuntime === undefined ? null : <p>当前测试版本：{result.activeRuntime.version}</p>}
-      {result.items === undefined ? null : <p>更新记录：{result.items.length} 条</p>}
       {(result.errors ?? result.compatibility?.errors ?? database?.errors ?? []).map((item) => <p key={item}>{item}</p>)}
     </div>
   )
 }
 
-function updateStatusLabel(status: RuntimeUpdateTransaction['status']): string {
-  return ({
-    discovered: '已发现',
-    verified: '基础检查通过',
-    'contract-tested': '兼容测试通过',
-    'canary-passed': '真实模型测试通过',
-    activated: '已启用',
-    'rolled-back': '已回滚',
-    failed: '失败',
-  } as Partial<Record<RuntimeUpdateTransaction['status'], string>>)[status] ?? status
+function shortRevision(value: string | undefined): string {
+  return value === undefined ? '—' : value.slice(0, 10)
 }

@@ -17,8 +17,8 @@
 .world-settings-entry button { width: 100%; display: flex; align-items: center; gap: 8px; justify-content: center; min-height: 38px; padding: 0 12px; border: 1px solid color-mix(in srgb, var(--accent) 62%, var(--border)); border-radius: var(--radius-control); background: color-mix(in srgb, var(--accent) 5%, transparent); color: var(--text); cursor: pointer; }
 .world-settings-entry button:hover { border-color: var(--accent); background: var(--accent-soft); }
 
-.world-settings-dialog { width: min(1120px, 94vw); max-height: 90vh; overflow: hidden; display: flex; flex-direction: column; background: var(--surface-0); border: 1px solid var(--border-strong); border-radius: var(--world-panel-radius, 14px); box-shadow: 0 28px 90px rgba(0,0,0,.48); }
-.world-settings-grid { flex: 1; min-height: 0; overflow: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 18px; }
+.world-settings-dialog { width: min(980px, 94vw); max-height: 90vh; overflow: hidden; display: flex; flex-direction: column; background: var(--surface-0); border: 1px solid var(--border-strong); border-radius: var(--radius-dialog); box-shadow: 0 28px 90px rgba(0,0,0,.48); }
+.world-settings-grid { width: min(100%, 820px); flex: 1; min-height: 0; overflow: auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; padding: 22px 24px 38px; }
 .world-settings-grid fieldset { min-width: 0; border: 1px solid var(--border); border-radius: var(--world-panel-radius, 10px); padding: 15px; display: grid; align-content: start; gap: 11px; background: color-mix(in srgb, var(--surface-1) 78%, transparent); }
 .world-settings-grid legend { display: flex; align-items: center; gap: 7px; padding: 0 7px; color: var(--text); font-weight: 650; }
 .world-settings-grid label { display: grid; gap: 6px; color: var(--text-soft); font-size: 13px; }
@@ -45,10 +45,20 @@
 .world-chat-preview span { width: fit-content; max-width: 82%; padding: 8px 10px; border-radius: var(--world-bubble-radius, 8px); font-size: 12px; line-height: 1.5; }
 .world-chat-preview .is-character { color: var(--world-text, var(--text)); background: var(--world-character-bubble, var(--surface-1)); }
 .world-chat-preview .is-owner { justify-self: end; color: var(--world-text, var(--text)); background: var(--world-owner-bubble, var(--accent-soft)); }
+.world-theme-presets { display: grid; gap: 8px; }
+.world-theme-presets > button { min-height: 74px; display: grid; grid-template-columns: 132px minmax(0, 1fr); align-items: center; gap: 13px; padding: 8px; border: 1px solid var(--border); color: var(--text-soft); background: var(--surface-0); text-align: left; }
+.world-theme-presets > button:hover, .world-theme-presets > button.is-active { border-color: var(--accent); color: var(--text); background: var(--accent-soft); }
+.world-theme-presets > button > span { height: 56px; position: relative; display: block; border: 1px solid; }
+.world-theme-presets > button > span i { position: absolute; bottom: 8px; width: 40px; height: 12px; border: 1px solid rgb(255 255 255 / 14%); }
+.world-theme-presets > button > span i:first-child { right: 8px; }
+.world-theme-presets > button > span i:last-child { left: 8px; }
+.world-theme-presets > button > div { display: grid; gap: 4px; }
+.world-theme-presets strong { font-size: 14px; }
+.world-theme-presets small { color: var(--text-muted); font-size: 12px; line-height: 1.45; }
 
 .settings-inline-actions { display: flex; gap: 8px; align-items: center; }
 .settings-inline-actions > input { flex: 1; }
-.world-settings-advanced { grid-column: 1 / -1; }
+.world-settings-advanced { grid-column: auto; }
 .world-settings-advanced details { border: 1px dashed var(--border); border-radius: var(--radius-control); background: var(--surface-0); }
 .world-settings-advanced summary { padding: 11px 12px; color: var(--text-soft); cursor: pointer; }
 .advanced-terminology-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 0 12px 12px; }

@@ -13,15 +13,17 @@ import { readJson, requiredBoolean, requiredString } from '../http/request.js'
 import { writeJson } from '../http/response.js'
 import { createLocalBackupBundle } from '../services/local-backup-service.js'
 import type { RuntimeUpdateService } from '../services/runtime-update-service.js'
+import type { ApplicationUpdateService } from '../services/application-update-service.js'
 
 export interface SystemRoutesDependencies {
   store: SqliteStore
   stateRoot: string
   runtimeUpdates: RuntimeUpdateService
+  applicationUpdates: ApplicationUpdateService
 }
 
 export function registerSystemRoutes(router: Router, dependencies: SystemRoutesDependencies): void {
-  const { store, stateRoot, runtimeUpdates } = dependencies
+  const { store, stateRoot, runtimeUpdates, applicationUpdates } = dependencies
   const runtimeRoot = join(stateRoot, 'runtime')
 
   router.get('/api/health', ({ response }) => {
@@ -72,6 +74,15 @@ export function registerSystemRoutes(router: Router, dependencies: SystemRoutesD
     const destination = join(backupRoot, `dsh-cyber-${artifactTimestamp()}.json`)
     const output = await store.exportJson(destination)
     writeJson(response, 201, { ok: true, kind: 'export', output, createdAt: new Date().toISOString() })
+  })
+
+  router.get('/api/system/application-update', async ({ response }) => {
+    writeJson(response, 200, { ok: true, applicationUpdate: await applicationUpdates.check(true) })
+  })
+
+  router.post('/api/system/application-update/apply', async ({ request, response }) => {
+    const body = await readJson(request)
+    writeJson(response, 200, await applicationUpdates.apply(requiredBoolean(body, 'approved')))
   })
 
   router.post('/api/system/update/verify', async ({ request, response }) => {

@@ -134,8 +134,8 @@ function searchableText(manifest: CyberPackageManifest): string {
 
 function kindMatchesMarket(manifest: CyberPackageManifest, market: CyberMarketKind): boolean {
   if (market === 'theme') return manifest.kind === 'world-theme'
-  if (market === 'talent') return manifest.kind === 'employee-blueprint' || manifest.kind === 'skill'
-  return manifest.kind === 'plugin' || manifest.kind === 'asset' || manifest.kind === 'model-provider'
+  if (market === 'talent') return manifest.kind === 'employee-blueprint'
+  return manifest.kind === 'plugin' || manifest.kind === 'skill' || manifest.kind === 'asset' || manifest.kind === 'model-provider'
 }
 
 function safeRelativePath(value: string): boolean {

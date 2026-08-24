@@ -24,7 +24,7 @@ interface NavigationPaneProps {
   employees: CyberEmployee[]
   /** Bumped whenever the transcript of the open session changes, so previews stay fresh. */
   activityPulse: number
-  onSelectSession(sessionId: string): void
+  onSelectSession(sessionId: string, session?: WorkSession, participantIds?: string[]): void
   onSelectEmployee(employeeId: string): void
   onDirectEmployee(employee: CyberEmployee): void
   onRecruit(): void
@@ -121,7 +121,7 @@ export function NavigationPane({
         return
       }
     }
-    onSelectSession(item.session.id)
+    onSelectSession(item.session.id, item.session, item.participantIds)
   }
 
   return (

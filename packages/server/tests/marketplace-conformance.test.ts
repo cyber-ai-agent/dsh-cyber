@@ -67,7 +67,7 @@ describe('community marketplace contract', () => {
       }
 
       if (item.market === 'theme') await expectTheme(item)
-      else if (item.market === 'talent' && item.manifest.kind === 'skill') await expectSkill(item)
+      else if (item.manifest.kind === 'skill') await expectSkill(item)
       else if (item.market === 'talent') await expectBlueprint(item)
       else await expectPlugin(item)
     }

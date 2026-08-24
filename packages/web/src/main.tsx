@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import App from './App.js'
+import { ApplicationLockGate } from './components/ApplicationLockGate.js'
 import './styles.css'
 import './styles-world-settings.css'
 import './features/world/world-runtime.css'
@@ -11,6 +12,6 @@ if (root === null) throw new Error('Missing #root')
 
 createRoot(root).render(
   <StrictMode>
-    <App />
+    <ApplicationLockGate><App /></ApplicationLockGate>
   </StrictMode>,
 )
