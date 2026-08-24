@@ -1,0 +1,46 @@
+name: Apply chat realtime UX
+
+on:
+  push:
+    branches: [codex/chat-realtime-ux]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-chat-realtime-v1
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/chat-realtime-ux
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: pnpm
+      - name: Apply source migration
+        run: node .github/scripts/apply-chat-realtime-v1.mjs
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Unit and integration tests
+        run: pnpm test
+      - name: Commit verified implementation
+        env:
+          BRANCH_NAME: codex/chat-realtime-ux
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add packages
+          git commit -m "feat: enable concurrent streaming conversations"
+          git push origin "HEAD:${BRANCH_NAME}"
