@@ -2045,6 +2045,15 @@ export class SqliteStore {
       .map(mapMessage)
   }
 
+  latestMessageBySender(sessionId: string, senderKind: WorkMessage['senderKind']): WorkMessage | undefined {
+    const row = this.database
+      .prepare(
+        'SELECT * FROM messages WHERE session_id = ? AND sender_kind = ? ORDER BY sequence DESC LIMIT 1',
+      )
+      .get(sessionId, senderKind)
+    return row === undefined ? undefined : mapMessage(row)
+  }
+
   appendDomainEvent(input: AppendDomainEventInput): DomainEvent {
     this.#assertWritable()
     this.#requireWorkspace(input.workspaceId)

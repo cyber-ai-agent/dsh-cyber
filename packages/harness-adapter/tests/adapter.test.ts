@@ -167,13 +167,16 @@ describe('Harness profile and adapter', () => {
         workspacePath: stateRoot,
         onNotification: (notification) => observed.push(notification.method),
       })
-      expect(result.agentSessionId).toBe(stableAgentSessionId('employee-1'))
+      expect(result.agentSessionId).toBe(calls[calls.length - 1]!.sessionId)
     }
     expect(specs).toHaveLength(1)
+    const firstSessionId = calls[0]!.sessionId
     expect(calls).toEqual([
-      { sessionId: 'employee-employee-1', prompt: '第一轮' },
-      { sessionId: 'employee-employee-1', prompt: '第二轮' },
+      { sessionId: firstSessionId, prompt: '第一轮' },
+      { sessionId: firstSessionId, prompt: '第二轮' },
     ])
+    expect(firstSessionId).toMatch(/^employee-employee-1-[a-f0-9]{32}$/)
+    expect(firstSessionId).not.toBe(stableAgentSessionId('employee-1'))
     expect(observed).toEqual(['session.event', 'session.event'])
     await adapter.close()
     expect(closes).toBe(1)
@@ -205,8 +208,10 @@ describe('Harness profile and adapter', () => {
       workspacePath: stateRoot,
     })
 
-    expect(calls[0]).toBe(stableAgentSessionId('employee-1'))
+    expect(calls[0]).toMatch(/^employee-employee-1-[a-f0-9]{32}$/)
+    expect(calls[0]).not.toBe(stableAgentSessionId('employee-1'))
     expect(calls[1]).toMatch(/^employee-employee-1-[a-f0-9]{32}$/)
+    expect(calls[1]).not.toBe(calls[0])
     expect(result).toMatchObject({ agentSessionId: calls[1], finalResponse: '已恢复' })
     await adapter.close()
   })
