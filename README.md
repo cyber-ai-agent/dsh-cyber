@@ -53,6 +53,11 @@ DSH Cyber 想把这件事做成一个**可视化、可玩、可扩展的本地 A
 - 角色可以参与真实多角色协作，不由一个“总控 Prompt”假装所有人发言。
 - 角色之间的共享经历和关系证据可以持久化。
 
+**Persistent Memory 的当前边界（请按这个理解，不要按 Memory V2 理解）：**
+
+- **已实现**：同一个会话的最近聊天历史由本地 SQLite 恢复，可以跨应用重启、跨 Harness Runtime 重建和权限模式切换。SQLite 是会话历史的权威，DSH Session 只是当前进程内的可丢弃运行时缓存。私聊、群聊和不同世界之间不共享历史。
+- **尚未实现**：Semantic Memory、Episodic Memory 分类、向量检索、Embedding、自动摘要与记忆整理。角色不会跨会话回忆，也不会主动提炼长期知识。
+
 ### 🌍 Embodied Worlds
 
 - World Runtime + World Simulation 分层。

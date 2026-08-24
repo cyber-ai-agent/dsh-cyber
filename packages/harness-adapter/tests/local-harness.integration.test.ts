@@ -116,12 +116,21 @@ describe('real Harness worker with a loopback model provider', () => {
       const first = await adapter.runEmployeeTurn({
         employee,
         revision,
+        conversationId: 'conversation-local-integration',
+        history: [],
+        observedThroughSequence: 0,
         prompt: '第一轮：确认本地 Harness 会话。',
         workspacePath: stateRoot,
       })
+      // The same conversation keeps the same worker session inside one process.
+      // The employee's last runtime session id is not threaded back in: it is a
+      // diagnostic field, never the reason a session resumes.
       const second = await adapter.runEmployeeTurn({
-        employee: { ...employee, agentSessionId: first.agentSessionId },
+        employee,
         revision,
+        conversationId: 'conversation-local-integration',
+        history: [],
+        observedThroughSequence: 0,
         prompt: '第二轮：继续同一会话。',
         workspacePath: stateRoot,
       })

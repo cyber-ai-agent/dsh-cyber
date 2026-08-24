@@ -738,9 +738,50 @@ export interface AgentRuntimeEvent {
   metadata: JsonObject
 }
 
+/**
+ * One user-visible chat fact recovered from the local conversation store.
+ *
+ * The entry is provider-neutral: it carries who spoke and what the user could
+ * actually read, never reasoning, tool traffic, hidden prompts or credentials.
+ * A runtime adapter decides how to render it for its own model protocol.
+ */
+export interface ConversationHistoryEntry {
+  role: 'user' | 'assistant'
+  /** Durable ordering key of the message inside its conversation. */
+  sequence: number
+  speakerId: string
+  speakerName: string
+  content: string
+  createdAt: IsoTimestamp
+}
+
 export interface AgentTurnRequest {
   agent: EmployeeInstance
   revision: EmployeeRevision
+  /**
+   * The durable WorkSession this turn belongs to.
+   *
+   * Conversation identity is always supplied by the caller. It must never be
+   * inferred from `agent.agentSessionId`, which only records the most recent
+   * runtime session and is not a conversation key.
+   */
+  conversationId: string
+  /**
+   * Prior user-visible messages of `conversationId`, oldest first, excluding
+   * the prompt of the current turn.
+   */
+  history: ConversationHistoryEntry[]
+  /**
+   * Sequence of the last message this agent itself contributed to the
+   * conversation, or 0 when it has never spoken there.
+   *
+   * A live runtime session has necessarily observed everything up to its own
+   * last statement, so only later entries need replaying into it. This matters
+   * in group conversations: a character that speaks early never sees what the
+   * characters after it said, because those statements land after its turn has
+   * already finished.
+   */
+  observedThroughSequence: number
   prompt: string
   workspacePath: string
   reasoningEffort?: Exclude<ReasoningEffort, 'auto'>

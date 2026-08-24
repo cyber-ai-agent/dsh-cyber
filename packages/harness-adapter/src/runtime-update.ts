@@ -159,17 +159,28 @@ export async function runHarnessCandidateCanary(options: {
       },
     },
   })
+  // Both canary turns belong to the same conversation, which is what makes the
+  // candidate reuse a single Harness session. The employee's last runtime
+  // session id is deliberately not threaded back in: conversation identity is
+  // the only thing that may decide session reuse.
+  const canaryConversationId = `canary-conversation-${fingerprint}`
   try {
     const first = await adapter.runTurn({
       agent: employee,
       revision,
+      conversationId: canaryConversationId,
+      history: [],
+      observedThroughSequence: 0,
       prompt: '回复 DSH-CYBER-CANARY-OK。',
       workspacePath: resolve(options.workspacePath),
       onEvent: (event) => events.push(event.kind),
     })
     const second = await adapter.runTurn({
-      agent: { ...employee, agentSessionId: first.agentSessionId },
+      agent: employee,
       revision,
+      conversationId: canaryConversationId,
+      history: [],
+      observedThroughSequence: 0,
       prompt: '保持同一会话，再次回复 DSH-CYBER-CANARY-OK。',
       workspacePath: resolve(options.workspacePath),
       onEvent: (event) => events.push(event.kind),
@@ -177,7 +188,7 @@ export async function runHarnessCandidateCanary(options: {
     const required: AgentRuntimeEventKind[] = ['turn.started', 'assistant.message', 'turn.completed']
     const missing = required.filter((kind) => !events.includes(kind))
     if (!first.finalResponse.trim() || !second.finalResponse.trim()) throw new Error('Candidate canary returned an empty response')
-    if (first.agentSessionId !== second.agentSessionId) throw new Error('Candidate canary did not resume the same employee session')
+    if (first.agentSessionId !== second.agentSessionId) throw new Error('Candidate canary did not keep one session per conversation')
     if (missing.length > 0) throw new Error(`Candidate canary missed events: ${missing.join(', ')}`)
     return {
       ok: true,

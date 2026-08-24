@@ -214,6 +214,55 @@ Persist project.json
 
 会话 UI 偏好存储在独立本地文件中，不修改消息和 Agent 事实源。
 
+### 会话历史权威（Conversation Memory V1）
+
+```text
+SQLite WorkSession / WorkMessage   = 会话历史权威
+DSH Session                        = 当前进程内可丢弃的运行时缓存
+```
+
+DSH 0.1.1-rc.1 无法恢复由其他 worker 进程写入的具名 session JSONL，所以每个会话在每个进程内都拿到一个全新随机 session id。连续性因此来自本地存储，而不是 Harness 日志：
+
+1. `ConversationOrchestrator` 在写入当前用户消息**之前**读取该 session 的持久消息，避免本轮 prompt 同时出现在历史和请求中；
+2. 纯函数 `buildConversationHistory` 只保留 `kind=user` / `kind=assistant` 的用户可见事实，排除 reasoning、tool-call、tool-result、system、临时气泡、失败提示和凭据，并保留群聊真实发言人；
+3. 预算是确定性的「最多 24 条 + 最多 16000 字符」，从最新向前选取后恢复正序，单条超预算时截断并标注 `[内容因上下文预算已截断]`；不引入 tokenizer、向量库或额外模型调用；
+4. `HarnessCompatibilityAdapter` 按 `employeeId → conversationId → dshSessionId` 维护映射，私聊与群聊因此永远不共用 worker 上下文；
+5. 每个角色按**自己的 watermark** 增量补齐，而不是整段重播。
+
+### 为什么需要 per-character watermark
+
+一个角色的 Harness session 只见过「注入给它的历史 + 它收到的 prompt + 它自己的回答」。
+
+私聊里这就是全部：会话中的每一条消息要么是用户 prompt，要么是它自己的回答。所以复用 session 时不需要补任何东西。
+
+群聊不同。第 1 轮 A 先发言、B 后发言时，**B 的发言晚于 A 的回合结束**，A 的 session 永远不会收到它。第 2 轮如果 A 又先发言，`groupPrompt()` 只带本轮已产生的 replies（此时为空），于是 A 依然不知道 B 上一轮说了什么。
+
+因此：
+
+```text
+observedThroughSequence = 该角色在本会话中最后一条自己的消息的 sequence
+```
+
+- **新 session**（进程重启、runtime 重建、权限模式切换、persisted-log 碰撞轮换）→ 重播全部恢复历史；
+- **存活 session** → 只重播 `sequence > observedThroughSequence` 的条目。私聊恒为空；群聊里上一轮先发言的角色会拿到它错过的那几条。
+
+`unseenHistory()` 做这个选择，`formatRecoveredHistoryPrompt()` 负责渲染，为空时原样返回 prompt。历史块被明确标注为「恢复上下文」，不得覆盖角色 Persona、世界设定、权限和当前用户请求。
+
+已知边界：如果角色上一次发言已经掉出「24 条 / 16000 字符」预算窗口，watermark 仍然精确（它来自原始 messages，不是预算后的历史），所以不会漏；但窗口本身仍会限制能补多少。
+
+### 回合并发语义
+
+`#turnQueues` 按 `employeeId` 串行，因为一个 Harness worker 一次只能跑一个 run，且 runtime 缓存不能被两个回合同时改写。准确说法是：
+
+```text
+不同员工               → 并行
+同一员工的不同会话     → 串行排队
+```
+
+而不是「不同会话并行」。前端 `ChatTurnQueue` 的 per-conversation FIFO 是另一层，两者不冲突。
+
+`employee.agentSessionId` 降级为“最近一次 Runtime Session”的诊断字段，不再是会话记忆权威，也不允许用来推断 `conversationId`。
+
 ## Skill Runtime 架构
 
 ### 稳定接口
