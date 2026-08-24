@@ -24,6 +24,7 @@
 - [x] Home Assistant adapter V1
 - [x] Complete local `.dshbackup` boundary
 - [x] Controlled Harness update / rollback
+- [x] SQLite-backed conversation continuity across runtime restart
 - [ ] Finish Creative Workshop project lifecycle
 - [ ] Add Creative Workshop smoke E2E
 - [ ] Define Creative Platform V1 local-data compatibility baseline
@@ -40,6 +41,10 @@
 - [ ] Smoke E2E becomes Required CI
 
 ## Alpha — Memory & Growth V2
+
+> Conversation continuity (one session, recovered from SQLite) already ships in
+> Pre-Alpha. Everything below is still unimplemented and must not be described
+> as part of it.
 
 - [ ] Episodic memory
 - [ ] Semantic memory

@@ -8,11 +8,13 @@ import type {
   AgentRuntimePort,
   AgentTurnRequest,
   AgentTurnResult,
+  ConversationHistoryEntry,
   EmployeeInstance,
   EmployeeRevision,
   JsonObject,
 } from '@dsh-cyber/contracts'
 
+import { formatFreshSessionPrompt } from './history-prompt.js'
 import {
   ensureHarnessProfile,
   resolveDshBin,
@@ -24,6 +26,10 @@ import {
 export interface EmployeeTurnRequest {
   employee: EmployeeInstance
   revision: EmployeeRevision
+  /** Durable WorkSession id. Every conversation owns its own Harness session. */
+  conversationId: string
+  /** User-visible history of `conversationId`, oldest first, without this turn. */
+  history: ConversationHistoryEntry[]
   prompt: string
   workspacePath: string
   permissionMode?: AgentPermissionMode
@@ -56,6 +62,19 @@ export interface HarnessRuntimeSpec {
 
 export type HarnessRuntimeFactory = (spec: HarnessRuntimeSpec) => HarnessRuntime
 
+/**
+ * One employee worker plus the Harness sessions it currently owns.
+ *
+ * `sessionIds` maps a durable conversation id to the random Harness session id
+ * allocated for it in this process. It is deliberately process-local: a session
+ * id from an earlier process cannot be resumed by DSH 0.1.1-rc.1.
+ */
+interface EmployeeWorker {
+  permissionMode: AgentPermissionMode
+  runtime: HarnessRuntime
+  sessionIds: Map<string, string>
+}
+
 export interface HarnessAdapterOptions {
   stateRoot: string
   runtimeFactory?: HarnessRuntimeFactory
@@ -69,7 +88,8 @@ export interface HarnessAdapterOptions {
 
 export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDisposable {
   readonly #options: HarnessAdapterOptions
-  readonly #runtimes = new Map<string, { permissionMode: AgentPermissionMode; runtime: HarnessRuntime; sessionId?: string }>()
+  readonly #runtimes = new Map<string, EmployeeWorker>()
+  readonly #turnQueues = new Map<string, Promise<unknown>>()
   #profile: Promise<HarnessProfilePaths> | undefined
 
   constructor(options: HarnessAdapterOptions) {
@@ -80,6 +100,8 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     const employeeRequest: EmployeeTurnRequest = {
       employee: request.agent,
       revision: request.revision,
+      conversationId: request.conversationId,
+      history: request.history,
       prompt: request.prompt,
       workspacePath: request.workspacePath,
       ...(request.permissionMode === undefined ? {} : { permissionMode: request.permissionMode }),
@@ -100,15 +122,31 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
   }
 
   async runEmployeeTurn(request: EmployeeTurnRequest): Promise<EmployeeTurnResult> {
+    const conversationId = requiredConversationId(request.conversationId)
+    // A Harness worker serves one run at a time, and the runtime cache itself
+    // must not be mutated by two turns at once. Serializing per employee keeps
+    // every conversation of that character in order while different characters
+    // continue to run in parallel.
+    return this.#serializeByEmployee(
+      request.employee.id,
+      () => this.#runEmployeeTurnExclusive(request, conversationId),
+    )
+  }
+
+  async #runEmployeeTurnExclusive(
+    request: EmployeeTurnRequest,
+    conversationId: string,
+  ): Promise<EmployeeTurnResult> {
     const profile = await this.#getProfile()
     const permissionMode = request.permissionMode ?? 'read-only'
     let cached = this.#runtimes.get(request.employee.id)
     if (cached !== undefined && cached.permissionMode !== permissionMode) {
       this.#runtimes.delete(request.employee.id)
+      // The worker is going away, so every session it owned is gone with it.
+      cached.sessionIds.clear()
       await cached.runtime.close()
       cached = undefined
     }
-    let createdRuntime = false
     if (cached === undefined) {
       const spec: HarnessRuntimeSpec = {
         employee: request.employee,
@@ -119,29 +157,31 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
         permissionMode,
       }
       const runtime = this.#options.runtimeFactory?.(spec) ?? this.#createRuntime(spec)
-      cached = { permissionMode, runtime }
+      cached = { permissionMode, runtime, sessionIds: new Map() }
       this.#runtimes.set(request.employee.id, cached)
-      createdRuntime = true
     }
-    // DSH 0.1.1-rc.1 cannot resume a named session whose JSONL log was
-    // created by an earlier worker process, and it creates the named session
-    // lazily on first append. Every freshly created runtime therefore gets a
-    // brand-new random id up front, before it can emit turn/tool events:
+    // DSH 0.1.1-rc.1 cannot resume a named session whose JSONL log was created
+    // by an earlier worker process, and it creates the named session lazily on
+    // first append. Every conversation therefore gets a brand-new random id the
+    // first time it runs inside this process:
     //
-    // - rotating away from the employee's durable id is mandatory (that log
-    //   belongs to some other process), and
-    // - employees whose turns never completed have no durable id at all —
-    //   the deterministic fallback id would collide with their own leftover
-    //   log from a previous process, which is exactly the recurring
-    //   "历史记录冲突" loop reported in the field.
+    // - rotating away from any durable id is mandatory (that log belongs to
+    //   some other process), and
+    // - a deterministic fallback id would collide with the employee's own
+    //   leftover log, which is exactly the recurring "历史记录冲突" loop.
     //
-    // The rotated id lives on the cached runtime so every later turn in this
-    // process keeps conversing in the same session, and it is returned so the
-    // orchestrator can persist it.
-    if (cached.sessionId === undefined) {
-      cached.sessionId = freshAgentSessionId(request.employee.id)
-    }
-    const agentSessionId = cached.sessionId
+    // The mapping is per conversation, so a private chat and a group meeting of
+    // the same character never share worker context. Because the id is random
+    // and the log is not resumed, the recovered SQLite history — not the DSH
+    // JSONL — is what makes the character remember, and it is injected exactly
+    // once per session: the worker keeps its own context for later turns.
+    const existingSessionId = cached.sessionIds.get(conversationId)
+    const agentSessionId = existingSessionId ?? freshAgentSessionId(request.employee.id)
+    if (existingSessionId === undefined) cached.sessionIds.set(conversationId, agentSessionId)
+    const prompt = existingSessionId === undefined
+      ? formatFreshSessionPrompt(request.history, request.prompt)
+      : request.prompt
+
     let observedNotification = false
     const onNotification = request.onNotification === undefined
       ? undefined
@@ -150,26 +190,49 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
           request.onNotification?.(notification)
         }
     try {
-      const result = await cached.runtime.run(agentSessionId, request.prompt, onNotification)
+      const result = await cached.runtime.run(agentSessionId, prompt, onNotification)
       return { agentSessionId, ...result }
     } catch (error) {
       // DSH 0.1.1-rc.1's JSON-RPC server creates a named session on every
-      // process start instead of resuming its persisted log. Reusing the
-      // employee's durable id can therefore fail before the prompt is queued.
-      // Only that exact, side-effect-free failure is safe to retry.
+      // process start instead of resuming its persisted log. Reusing an id can
+      // therefore fail before the prompt is queued. Only that exact,
+      // side-effect-free failure is safe to retry.
       if (observedNotification || !isPersistedSessionCollision(error)) throw error
       const recoveredSessionId = freshAgentSessionId(request.employee.id)
-      cached.sessionId = recoveredSessionId
-      const result = await cached.runtime.run(recoveredSessionId, request.prompt, request.onNotification)
+      cached.sessionIds.set(conversationId, recoveredSessionId)
+      // Only this conversation rotates. The recovered session starts empty, so
+      // local history is injected again even if the conversation had already
+      // run in this process.
+      const result = await cached.runtime.run(
+        recoveredSessionId,
+        formatFreshSessionPrompt(request.history, request.prompt),
+        request.onNotification,
+      )
       return { agentSessionId: recoveredSessionId, ...result }
     }
   }
 
+  #serializeByEmployee<TResult>(employeeId: string, task: () => Promise<TResult>): Promise<TResult> {
+    const previous = this.#turnQueues.get(employeeId) ?? Promise.resolve()
+    const current = previous.catch(() => undefined).then(task)
+    this.#turnQueues.set(employeeId, current)
+    void current
+      .catch(() => undefined)
+      .finally(() => {
+        if (this.#turnQueues.get(employeeId) === current) this.#turnQueues.delete(employeeId)
+      })
+    return current
+  }
+
   async closeEmployee(employeeId: string): Promise<void> {
-    const runtime = this.#runtimes.get(employeeId)
-    if (runtime === undefined) return
+    const worker = this.#runtimes.get(employeeId)
+    if (worker === undefined) return
     this.#runtimes.delete(employeeId)
-    await runtime.runtime.close()
+    // Closing the worker invalidates every conversation session it owned. The
+    // next turn of each conversation allocates a new id and replays the local
+    // SQLite history into it.
+    worker.sessionIds.clear()
+    await worker.runtime.close()
   }
 
   closeAgent(agentId: string): Promise<void> {
@@ -336,6 +399,16 @@ export function normalizeHarnessNotification(
     default:
       return []
   }
+}
+
+function requiredConversationId(value: string | undefined): string {
+  const conversationId = value?.trim() ?? ''
+  if (conversationId.length === 0) {
+    // Conversation identity is never inferred from the employee's last runtime
+    // session: that value says nothing about which chat this turn belongs to.
+    throw new Error('A Harness turn requires the conversation it belongs to')
+  }
+  return conversationId
 }
 
 export function stableAgentSessionId(employeeId: string): string {

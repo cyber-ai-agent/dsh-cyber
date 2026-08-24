@@ -4,6 +4,7 @@ import type {
   AgentRuntimeEvent,
   AgentRuntimePort,
   AgentPermissionMode,
+  ConversationHistoryEntry,
   DomainEvent,
   DomainEventType,
   EmployeeInstance,
@@ -17,12 +18,24 @@ import type {
   World,
 } from '@dsh-cyber/contracts'
 
+import {
+  buildConversationHistory,
+  DEFAULT_CONVERSATION_HISTORY_BUDGET,
+  type ConversationHistoryBudget,
+  type ConversationHistorySpeaker,
+} from './conversation-history.js'
+
 export interface ConversationStorePort {
   getWorld(worldId: string): World | undefined
   getEmployee(employeeId: string): EmployeeInstance | undefined
   getEmployeeRevision(employeeId: string, revision: number): EmployeeRevision | undefined
   getSession(sessionId: string): WorkSession | undefined
   listParticipants(sessionId: string): WorkSessionParticipant[]
+  /**
+   * Durable messages of exactly one session, oldest first. SQLite is the
+   * authority for conversation history; the runtime session is a cache.
+   */
+  listMessages(sessionId: string): WorkMessage[]
   createSession(input: {
     workspaceId: string
     worldId: string
@@ -80,6 +93,7 @@ export interface ConversationOrchestratorOptions {
   runtime: AgentRuntimePort
   workspacePath?: string
   resolveWorldRoot?: (worldId: string) => Promise<string>
+  historyBudget?: ConversationHistoryBudget
 }
 
 export interface DirectConversationInput {
@@ -166,6 +180,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
   readonly #runtime: AgentRuntimePort
   readonly #workspacePath: string | undefined
   readonly #resolveWorldRoot: ((worldId: string) => Promise<string>) | undefined
+  readonly #historyBudget: ConversationHistoryBudget
   readonly #listeners = new Set<ConversationRealtimeListener>()
 
   constructor(options: ConversationOrchestratorOptions) {
@@ -173,6 +188,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
     this.#runtime = options.runtime
     this.#workspacePath = options.workspacePath
     this.#resolveWorldRoot = options.resolveWorldRoot
+    this.#historyBudget = options.historyBudget ?? DEFAULT_CONVERSATION_HISTORY_BUDGET
     if (this.#workspacePath === undefined && this.#resolveWorldRoot === undefined) throw new Error('ConversationOrchestrator requires workspacePath or resolveWorldRoot')
   }
 
@@ -197,6 +213,10 @@ export class ConversationOrchestrator implements AsyncDisposable {
           ],
         })
 
+    // SQLite is the conversation authority. Read the durable transcript before
+    // the current prompt is appended, otherwise this turn's prompt would reach
+    // the model twice: once as recovered history and once as the live request.
+    const history = this.#historyFor(session)
     this.#store.appendMessage({
       sessionId: session.id,
       senderId: 'owner',
@@ -206,14 +226,16 @@ export class ConversationOrchestrator implements AsyncDisposable {
       ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
       correlationId: session.id,
     })
-    const reply = await this.#runAgent(
+    const clientTurnId = clientTurnIdFrom(input.metadata)
+    const reply = await this.#runAgent({
       session,
       employee,
-      input.runtimePrompt?.trim() || prompt,
-      input.reasoningEffort,
-      input.permissionMode,
-      clientTurnIdFrom(input.metadata),
-    )
+      prompt: input.runtimePrompt?.trim() || prompt,
+      history,
+      ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
+      ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
+      ...(clientTurnId === undefined ? {} : { clientTurnId }),
+    })
     return { session, replies: [reply] }
   }
 
@@ -241,6 +263,10 @@ export class ConversationOrchestrator implements AsyncDisposable {
             })),
           ],
         })
+    // Prior turns of this group session only. The replies produced inside the
+    // current round are supplied separately by groupPrompt(), so they must not
+    // be part of the recovered history as well.
+    const history = this.#historyFor(session)
     this.#store.appendMessage({
       sessionId: session.id,
       senderId: 'owner',
@@ -264,16 +290,18 @@ export class ConversationOrchestrator implements AsyncDisposable {
 
     const replies: AgentReply[] = []
     try {
+      const clientTurnId = clientTurnIdFrom(input.metadata)
       for (const employee of employees) {
         const collaborationPrompt = groupPrompt(input.runtimePrompt?.trim() || prompt, replies)
-        replies.push(await this.#runAgent(
+        replies.push(await this.#runAgent({
           session,
           employee,
-          collaborationPrompt,
-          input.reasoningEffort,
-          input.permissionMode,
-          clientTurnIdFrom(input.metadata),
-        ))
+          prompt: collaborationPrompt,
+          history,
+          ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
+          ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
+          ...(clientTurnId === undefined ? {} : { clientTurnId }),
+        }))
       }
       this.#store.appendDomainEvent({
         workspaceId: input.workspaceId,
@@ -376,10 +404,10 @@ export class ConversationOrchestrator implements AsyncDisposable {
   try {
     for (let round = 1; round <= maxRounds; round += 1) {
       for (const employee of orderedEmployees) {
-        replies.push(await this.#runAgent(
+        replies.push(await this.#runAgent({
           session,
           employee,
-          peerPrompt({
+          prompt: peerPrompt({
             basePrompt: input.runtimePrompt?.trim() || purpose,
             purpose,
             employee,
@@ -389,8 +417,11 @@ export class ConversationOrchestrator implements AsyncDisposable {
             round,
             maxRounds,
           }),
-          input.reasoningEffort,
-        ))
+          // A peer session is always freshly created, and every statement of
+          // the running collaboration is already carried by peerPrompt().
+          history: [],
+          ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
+        }))
       }
     }
     this.#store.appendDomainEvent({
@@ -450,14 +481,42 @@ export class ConversationOrchestrator implements AsyncDisposable {
     return this.close()
   }
 
-  async #runAgent(
-    session: WorkSession,
-    employee: EmployeeInstance,
-    prompt: string,
-    reasoningEffort?: Exclude<ReasoningEffort, 'auto'>,
-    permissionMode?: AgentPermissionMode,
-    clientTurnId?: string,
-  ): Promise<AgentReply> {
+  /**
+   * Recovers the user-visible history of one session from the local store.
+   *
+   * Only messages of `session` are read, so a direct chat can never inherit
+   * group context, a group can never inherit a private chat, and no world can
+   * leak into another.
+   */
+  #historyFor(session: WorkSession): ConversationHistoryEntry[] {
+    return buildConversationHistory(
+      this.#store.listMessages(session.id),
+      this.#speakersFor(session),
+      this.#historyBudget,
+    )
+  }
+
+  #speakersFor(session: WorkSession): ConversationHistorySpeaker[] {
+    const speakers: ConversationHistorySpeaker[] = []
+    for (const participant of this.#store.listParticipants(session.id)) {
+      if (participant.kind !== 'employee') continue
+      const employee = this.#store.getEmployee(participant.participantId)
+      if (employee === undefined) continue
+      speakers.push({ id: employee.id, displayName: employee.displayName })
+    }
+    return speakers
+  }
+
+  async #runAgent(input: {
+    session: WorkSession
+    employee: EmployeeInstance
+    prompt: string
+    history: ConversationHistoryEntry[]
+    reasoningEffort?: Exclude<ReasoningEffort, 'auto'>
+    permissionMode?: AgentPermissionMode
+    clientTurnId?: string
+  }): Promise<AgentReply> {
+    const { session, employee, prompt, history, reasoningEffort, permissionMode, clientTurnId } = input
     const revision = this.#store.getEmployeeRevision(employee.id, employee.currentRevision)
     if (revision === undefined) {
       throw new ConversationOrchestrationError(`Missing agent revision: ${employee.id}`)
@@ -483,6 +542,8 @@ export class ConversationOrchestrator implements AsyncDisposable {
       const result = await this.#runtime.runTurn({
         agent: employee,
         revision,
+        conversationId: session.id,
+        history,
         prompt,
         workspacePath,
         ...(reasoningEffort === undefined ? {} : { reasoningEffort }),

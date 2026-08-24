@@ -214,6 +214,25 @@ Persist project.json
 
 会话 UI 偏好存储在独立本地文件中，不修改消息和 Agent 事实源。
 
+### 会话历史权威（Conversation Memory V1）
+
+```text
+SQLite WorkSession / WorkMessage   = 会话历史权威
+DSH Session                        = 当前进程内可丢弃的运行时缓存
+```
+
+DSH 0.1.1-rc.1 无法恢复由其他 worker 进程写入的具名 session JSONL，所以每个会话在每个进程内都拿到一个全新随机 session id。连续性因此来自本地存储，而不是 Harness 日志：
+
+1. `ConversationOrchestrator` 在写入当前用户消息**之前**读取该 session 的持久消息，避免本轮 prompt 同时出现在历史和请求中；
+2. 纯函数 `buildConversationHistory` 只保留 `kind=user` / `kind=assistant` 的用户可见事实，排除 reasoning、tool-call、tool-result、system、临时气泡、失败提示和凭据，并保留群聊真实发言人；
+3. 预算是确定性的「最多 24 条 + 最多 16000 字符」，从最新向前选取后恢复正序，单条超预算时截断并标注 `[内容因上下文预算已截断]`；不引入 tokenizer、向量库或额外模型调用；
+4. `HarnessCompatibilityAdapter` 按 `employeeId → conversationId → dshSessionId` 维护映射，私聊与群聊因此永远不共用 worker 上下文；
+5. 历史**只在某个 DSH session 第一次运行时**通过 `formatFreshSessionPrompt` 注入。之后 worker 自己保有上下文，重复注入会让角色读到两遍过去。进程重启、runtime 重建、权限模式切换和 persisted-log 碰撞轮换都会产生新的 session，因此都会重新注入。
+
+历史块被明确标注为「恢复上下文」，不得覆盖角色 Persona、世界设定、权限和当前用户请求。
+
+`employee.agentSessionId` 降级为“最近一次 Runtime Session”的诊断字段，不再是会话记忆权威，也不允许用来推断 `conversationId`。
+
 ## Skill Runtime 架构
 
 ### 稳定接口

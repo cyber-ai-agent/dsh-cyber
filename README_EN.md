@@ -54,6 +54,11 @@ DSH Cyber is building this as a **visual, local-first, moddable AI world platfor
 - Real multi-character conversations and bounded peer collaboration.
 - Persistent shared episodes and relationship evidence.
 
+**Scope of "persistent memory" today — read this as conversation continuity, not as Memory V2:**
+
+- **Implemented**: recent chat history of one conversation is restored from the local SQLite database, across application restarts, Harness runtime rebuilds and permission-mode switches. SQLite is the authority for conversation history; a DSH session is only a disposable in-process runtime cache. Direct chats, group meetings and separate worlds never share history.
+- **Not implemented**: semantic memory, episodic memory classification, vector retrieval, embeddings, automatic summarisation and memory consolidation. A character does not recall across conversations and does not distil long-term knowledge on its own.
+
 ### Embodied worlds
 
 - World Runtime and World Simulation are separated.

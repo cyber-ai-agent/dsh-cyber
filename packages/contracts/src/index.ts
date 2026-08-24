@@ -738,9 +738,37 @@ export interface AgentRuntimeEvent {
   metadata: JsonObject
 }
 
+/**
+ * One user-visible chat fact recovered from the local conversation store.
+ *
+ * The entry is provider-neutral: it carries who spoke and what the user could
+ * actually read, never reasoning, tool traffic, hidden prompts or credentials.
+ * A runtime adapter decides how to render it for its own model protocol.
+ */
+export interface ConversationHistoryEntry {
+  role: 'user' | 'assistant'
+  speakerId: string
+  speakerName: string
+  content: string
+  createdAt: IsoTimestamp
+}
+
 export interface AgentTurnRequest {
   agent: EmployeeInstance
   revision: EmployeeRevision
+  /**
+   * The durable WorkSession this turn belongs to.
+   *
+   * Conversation identity is always supplied by the caller. It must never be
+   * inferred from `agent.agentSessionId`, which only records the most recent
+   * runtime session and is not a conversation key.
+   */
+  conversationId: string
+  /**
+   * Prior user-visible messages of `conversationId`, oldest first, excluding
+   * the prompt of the current turn.
+   */
+  history: ConversationHistoryEntry[]
   prompt: string
   workspacePath: string
   reasoningEffort?: Exclude<ReasoningEffort, 'auto'>

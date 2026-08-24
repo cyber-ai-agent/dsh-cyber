@@ -163,6 +163,8 @@ describe('Harness profile and adapter', () => {
       const result = await adapter.runEmployeeTurn({
         employee: employee(),
         revision: revision(),
+        conversationId: 'conversation-direct',
+        history: [],
         prompt,
         workspacePath: stateRoot,
         onNotification: (notification) => observed.push(notification.method),
@@ -204,6 +206,8 @@ describe('Harness profile and adapter', () => {
     const result = await adapter.runEmployeeTurn({
       employee: employee(),
       revision: revision(),
+      conversationId: 'conversation-direct',
+      history: [],
       prompt: '继续处理',
       workspacePath: stateRoot,
     })
@@ -235,6 +239,8 @@ describe('Harness profile and adapter', () => {
     const result = await adapter.runEmployeeTurn({
       employee: { ...employee(), agentSessionId: 'employee-persisted-session' },
       revision: revision(),
+      conversationId: 'conversation-direct',
+      history: [],
       prompt: '继续处理',
       workspacePath: stateRoot,
     })
@@ -266,6 +272,8 @@ describe('Harness profile and adapter', () => {
     await expect(adapter.runEmployeeTurn({
       employee: employee(),
       revision: revision(),
+      conversationId: 'conversation-direct',
+      history: [],
       prompt: '不要重复执行',
       workspacePath: stateRoot,
       onNotification: () => undefined,
@@ -421,9 +429,9 @@ describe('Harness profile and adapter', () => {
         return { run: async () => ({ finalResponse: 'ok', notifications: [] }), close: async () => { closes += 1 } }
       },
     })
-    await adapter.runEmployeeTurn({ employee: employee(), revision: revision(), prompt: '查看文件', workspacePath: stateRoot, permissionMode: 'read-only' })
-    await adapter.runEmployeeTurn({ employee: employee(), revision: revision(), prompt: '修改文件', workspacePath: stateRoot, permissionMode: 'workspace-write' })
-    await adapter.runEmployeeTurn({ employee: employee(), revision: revision(), prompt: '跨目录修改文件', workspacePath: stateRoot, permissionMode: 'danger-full-access' })
+    await adapter.runEmployeeTurn({ employee: employee(), revision: revision(), conversationId: 'conversation-direct', history: [], prompt: '查看文件', workspacePath: stateRoot, permissionMode: 'read-only' })
+    await adapter.runEmployeeTurn({ employee: employee(), revision: revision(), conversationId: 'conversation-direct', history: [], prompt: '修改文件', workspacePath: stateRoot, permissionMode: 'workspace-write' })
+    await adapter.runEmployeeTurn({ employee: employee(), revision: revision(), conversationId: 'conversation-direct', history: [], prompt: '跨目录修改文件', workspacePath: stateRoot, permissionMode: 'danger-full-access' })
     expect(modes).toEqual(['read-only', 'workspace-write', 'danger-full-access'])
     expect(closes).toBe(2)
     await adapter.close()
