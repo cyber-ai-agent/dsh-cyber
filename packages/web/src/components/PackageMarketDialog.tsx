@@ -261,12 +261,13 @@ function PluginActivationReview({ item, onUse }: { item: CyberMarketPackage; onU
   </section>
 }
 
-type PackageCardState = 'uninstalled' | 'included' | 'upgrade' | 'installed'
+type PackageCardState = 'uninstalled' | 'included' | 'upgrade' | 'installed' | 'created'
 
 function packageCardState(item: CyberMarketPackage, worlds: World[]): PackageCardState {
-  if (item.installedVersion === item.manifest.version) return 'installed'
-  if (item.installedVersion !== undefined) return 'upgrade'
   const activation = item.activation
+  const hasCreatedWorld = item.market === 'theme' && activation?.kind === 'world-theme' && worlds.some((world) => world.templateId === activation.templateId)
+  if (item.installedVersion === item.manifest.version) return hasCreatedWorld ? 'created' : 'installed'
+  if (item.installedVersion !== undefined) return 'upgrade'
   if (activation?.kind === 'world-theme' && worlds.some((world) => builtInThemeMatches(world.templateId, activation.templateId))) {
     return 'included'
   }
@@ -274,6 +275,7 @@ function packageCardState(item: CyberMarketPackage, worlds: World[]): PackageCar
 }
 
 function packageStateLabel(item: CyberMarketPackage, state: PackageCardState): string {
+  if (state === 'created') return `已安装 v${item.installedVersion} · 已创建`
   if (state === 'installed') {
     const next = item.market === 'theme' ? '可创建' : item.market === 'talent' ? '可招募' : '可使用'
     return `已安装 v${item.installedVersion} · ${next}`
@@ -284,6 +286,7 @@ function packageStateLabel(item: CyberMarketPackage, state: PackageCardState): s
 }
 
 function marketAction(item: CyberMarketPackage, state: PackageCardState, onBind: () => void, onInspect: () => void, onActivate: () => void) {
+  if (item.market === 'theme' && state === 'created') return <button className="market-action--created" type="button" disabled><CheckCircle size={15} />已创建</button>
   if (item.market === 'theme' && state === 'installed') return <button className="market-action--installed" type="button" onClick={onBind}>创建新世界</button>
   if (state === 'installed') return <button className="market-action--installed" type="button" onClick={onActivate}>{item.market === 'talent' ? '招募到世界' : '立即使用'}</button>
   if (state === 'upgrade') return <button className="market-action--upgrade" type="button" onClick={onInspect}>升级到 v{item.manifest.version}</button>

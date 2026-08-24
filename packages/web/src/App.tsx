@@ -22,6 +22,7 @@ import type {
   EmployeeInstance,
   EmployeeRevision,
   InstalledPackage,
+  InstalledPluginCommand,
   JsonObject,
   LocalAssetMimeType,
   ModelAssignment,
@@ -119,6 +120,7 @@ export default function App() {
   const [packageMarketKind, setPackageMarketKind] = useState<CyberMarketKind>('theme')
   const [marketplaceItems, setMarketplaceItems] = useState<CyberMarketPackage[]>([])
   const [installedPackages, setInstalledPackages] = useState<InstalledPackage[]>([])
+  const [installedPluginCommands, setInstalledPluginCommands] = useState<InstalledPluginCommand[]>([])
   const [packageTransactions, setPackageTransactions] = useState<PackageInstallTransaction[]>([])
   const [packageLoading, setPackageLoading] = useState(false)
   const [packageInstalling, setPackageInstalling] = useState(false)
@@ -388,6 +390,17 @@ export default function App() {
     setPackageTransactions(result.transactions)
   }, [demoMode, workspace])
 
+  const loadInstalledPluginCommands = useCallback(async () => {
+    if (workspace === undefined || demoMode) return
+    const result = await api<{ items: InstalledPluginCommand[] }>(`/api/workspaces/${workspace.id}/plugins`)
+    setInstalledPluginCommands(result.items)
+  }, [demoMode, workspace])
+
+  useEffect(() => {
+    if (demoMode || workspace === undefined) return
+    void loadInstalledPluginCommands().catch(() => setInstalledPluginCommands([]))
+  }, [demoMode, loadInstalledPluginCommands, workspace])
+
   const searchMarketplace = useCallback(async (market: CyberMarketKind, query = '') => {
     if (workspace === undefined) return
     const result = await api<{ items: CyberMarketPackage[] }>(`/api/marketplace?market=${market}&workspaceId=${encodeURIComponent(workspace.id)}&q=${encodeURIComponent(query)}`)
@@ -455,12 +468,12 @@ export default function App() {
           method: 'POST',
           body: JSON.stringify(input),
         })
-        await loadPackages()
+        await Promise.all([loadPackages(), loadInstalledPluginCommands()])
       }
     } finally {
       setPackageInstalling(false)
     }
-  }, [loadPackages, workspace])
+  }, [demoMode, loadInstalledPluginCommands, loadPackages, workspace])
 
   const previewMarketplacePackage = useCallback(async (item: CyberMarketPackage): Promise<PackagePermissionPreview> => {
     if (workspace === undefined) throw new Error('工作区尚未就绪')
@@ -479,6 +492,22 @@ export default function App() {
       if (demoMode) {
         await installPackage({ manifest: item.manifest, sourceDirectory: item.sourceDirectory, approvalToken })
         const timestamp = new Date().toISOString()
+        const activation = item.activation
+        if (item.market === 'plugin' && activation?.kind === 'prompt-transform') {
+          setInstalledPluginCommands((current) => [
+            ...current.filter((command) => command.packageId !== item.manifest.id),
+            ...activation.commands.map((command) => ({
+              packageId: item.manifest.id,
+              packageVersion: item.manifest.version,
+              displayName: item.manifest.displayName,
+              summary: item.manifest.summary,
+              trigger: command.trigger,
+              displayTrigger: localizedPluginTrigger(item.manifest.id, command.trigger),
+              description: command.description,
+              automatic: activation.automatic,
+            })),
+          ])
+        }
         setMarketplaceItems((current) => current.map((candidate) => candidate.manifest.id === item.manifest.id
           ? { ...candidate, installedVersion: item.manifest.version }
           : candidate))
@@ -497,12 +526,12 @@ export default function App() {
           method: 'POST',
           body: JSON.stringify({ packageId: item.manifest.id, version: item.manifest.version, approvalToken }),
         })
-        await Promise.all([loadPackages(), searchMarketplace(item.market)])
+        await Promise.all([loadPackages(), searchMarketplace(item.market), item.market === 'plugin' ? loadInstalledPluginCommands() : Promise.resolve()])
       }
     } finally {
       setPackageInstalling(false)
     }
-  }, [installPackage, loadPackages, searchMarketplace, workspace])
+  }, [demoMode, installPackage, loadInstalledPluginCommands, loadPackages, searchMarketplace, workspace])
 
   const recruitEmployee = useCallback(async (
     blueprint: EmployeeBlueprint,
@@ -1182,6 +1211,7 @@ export default function App() {
             participantIds={activeParticipantIds}
             messages={messages}
             employees={employees}
+            installedPlugins={installedPluginCommands}
             sending={sending}
             draft={draft}
             focusRequest={composerFocusRequest}
@@ -1191,6 +1221,7 @@ export default function App() {
             onOpenDossier={(employeeId) => void openDossier(employeeId)}
             onOpenArtifact={() => { setAppMode('world'); setDockCollapsed(false); setDockTab('world') }}
             onRecruit={() => { setSelectedEmployeeId(undefined); setDockCollapsed(false); setDockTab('dossier') }}
+            onOpenPluginMarket={() => void openPackageMarket('plugin')}
           />
         )}
         right={(
@@ -1452,6 +1483,16 @@ function Onboarding({ error, onCreated }: { error?: string; onCreated(): Promise
       <a href="?demo=1">先体验交互演示</a>
     </main>
   )
+}
+
+function localizedPluginTrigger(packageId: string, trigger: string): string {
+  const localized: Record<string, Record<string, string>> = {
+    'official-decision-log': { '/decision-log': '/决策记录' },
+    'official-meeting-notes': { '/meeting-summary': '/会议纪要' },
+    'official-release-check': { '/release-check': '/发布检查' },
+    'official-research-brief': { '/research-brief': '/研究简报' },
+  }
+  return localized[packageId]?.[trigger] ?? trigger
 }
 
 function toCyberEmployee(employee: EmployeeInstance, index: number, dossier?: EmployeeDossier): CyberEmployee {

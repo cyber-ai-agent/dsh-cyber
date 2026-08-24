@@ -6,7 +6,7 @@ import { HttpError } from '../http/errors.js'
 import type { Router } from '../http/router.js'
 import { optionalString, packageManifest, readJson, requiredString } from '../http/request.js'
 import { writeJson } from '../http/response.js'
-import { loadInstalledBlueprints } from '../installed-package-runtime.js'
+import { loadInstalledBlueprints, loadInstalledPromptTransformCommands } from '../installed-package-runtime.js'
 import type { CharacterSkillRuntime } from '../services/character-skill-runtime.js'
 import { CreativeWorkshopService } from '../services/creative-workshop-service.js'
 import type { WorldMarketplaceService } from '../services/world-marketplace-service.js'
@@ -30,6 +30,13 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
       items: store.listInstalledPackages(workspaceId),
       transactions: store.listPackageInstallTransactions(workspaceId),
     })
+  })
+
+  router.get(/^\/api\/workspaces\/([^/]+)\/plugins$/, async ({ response, params }) => {
+    const workspaceId = params[0]!
+    if (store.getWorkspace(workspaceId) === undefined) throw new HttpError(404, 'workspace_not_found', 'Workspace not found')
+    const items = await loadInstalledPromptTransformCommands(store.listInstalledPackages(workspaceId))
+    writeJson(response, 200, { items })
   })
 
   router.get(/^\/api\/workspaces\/([^/]+)\/skill-catalog$/, ({ response, params }) => {

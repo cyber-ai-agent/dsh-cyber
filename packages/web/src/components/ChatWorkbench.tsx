@@ -1,9 +1,11 @@
 import {
   BracketsCurly,
+  CaretDown,
   CircleNotch,
   File as FileIcon,
   PaperPlaneRight,
   Paperclip,
+  PuzzlePiece,
   TerminalWindow,
   UserCircle,
   X,
@@ -11,7 +13,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { ChatAttachment, JsonObject, LocalAssetMimeType, WorkMessage, WorkSession, World } from '@dsh-cyber/contracts'
+import type { ChatAttachment, InstalledPluginCommand, JsonObject, LocalAssetMimeType, WorkMessage, WorkSession, World } from '@dsh-cyber/contracts'
 
 import { mentionPlugin } from './mention-plugin.js'
 import type { ConversationIntent, CyberEmployee } from '../types.js'
@@ -26,6 +28,7 @@ interface ChatWorkbenchProps {
   participantIds?: string[]
   messages: WorkMessage[]
   employees: CyberEmployee[]
+  installedPlugins?: InstalledPluginCommand[]
   sending: boolean
   draft: string
   focusRequest?: number
@@ -35,9 +38,10 @@ interface ChatWorkbenchProps {
   onOpenDossier(employeeId: string): void
   onOpenArtifact(): void
   onRecruit(): void
+  onOpenPluginMarket?(): void
 }
 
-export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, sending, draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRecruit }: ChatWorkbenchProps) {
+export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, installedPlugins = [], sending, draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRecruit, onOpenPluginMarket }: ChatWorkbenchProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -152,11 +156,47 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
         <div className="composer__toolbar"><div>
           <input ref={fileInputRef} className="composer-file-input" type="file" accept=".png,.jpg,.jpeg,.webp,.txt,.md,.json,.pdf" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAttachment(file) }} />
           <button className="icon-button" type="button" aria-label={uploading ? '正在上传附件' : '添加附件'} disabled={uploading} onClick={() => fileInputRef.current?.click()}>{uploading ? <CircleNotch size={18} className="spin" /> : <Paperclip size={18} />}</button>
-          <span className="composer__hint">Enter 发送 · Shift+Enter 换行</span>
+          <PluginPicker plugins={installedPlugins} draft={draft} onDraftChange={onDraftChange} {...(onOpenPluginMarket === undefined ? {} : { onOpenMarket: onOpenPluginMarket })} onFocus={() => inputRef.current?.focus()} />
         </div><button className="send-button" type="button" aria-label={sending ? '角色处理中' : '发送'} disabled={sending || uploading || employees.length === 0 || (!draft.trim() && attachments.length === 0)} onClick={() => void submit()}>{sending ? <CircleNotch size={19} className="spin" /> : <PaperPlaneRight size={19} weight="fill" />}</button></div>
       </div></div>
     </section>
   )
+}
+
+function PluginPicker({ plugins, draft, onDraftChange, onOpenMarket, onFocus }: { plugins: InstalledPluginCommand[]; draft: string; onDraftChange(value: string): void; onOpenMarket?: () => void; onFocus(): void }) {
+  return (
+    <details className="composer-plugin-picker">
+      <summary aria-label="打开已安装插件"><PuzzlePiece size={17} /><span>插件</span>{plugins.length > 0 ? <b>{plugins.length}</b> : null}<CaretDown size={13} /></summary>
+      <div className="composer-plugin-picker__menu" role="menu" aria-label="已安装插件">
+        <header><strong>已安装插件</strong><span>点击后把指令放入输入框</span></header>
+        {plugins.length === 0 ? <div className="composer-plugin-picker__empty"><PuzzlePiece size={22} /><span>还没有可用插件</span>{onOpenMarket === undefined ? null : <button type="button" onClick={onOpenMarket}>前往插件市场</button>}</div> : plugins.map((plugin) => {
+          const copy = pluginCopy(plugin)
+          const automatic = plugin.automatic || plugin.trigger === 'always'
+          return <button key={`${plugin.packageId}:${plugin.packageVersion}:${plugin.trigger}`} className="composer-plugin-picker__item" type="button" role="menuitem" disabled={automatic} onClick={(event) => { onDraftChange(insertPluginTrigger(draft, plugin.displayTrigger)); event.currentTarget.closest('details')?.removeAttribute('open'); onFocus() }}>
+            <span className="composer-plugin-picker__icon"><PuzzlePiece size={17} weight="duotone" /></span>
+            <span className="composer-plugin-picker__copy"><strong>{copy.name}</strong><small>{copy.description}</small><code>{automatic ? '自动运行' : plugin.displayTrigger}</code></span>
+            <span className="composer-plugin-picker__version">v{plugin.packageVersion}</span>
+          </button>
+        })}
+      </div>
+    </details>
+  )
+}
+
+function insertPluginTrigger(draft: string, trigger: string): string {
+  if (trigger === 'always') return draft
+  const separator = draft.trim().length === 0 ? '' : ' '
+  return `${draft.trimEnd()}${separator}${trigger} `
+}
+
+function pluginCopy(plugin: InstalledPluginCommand): { name: string; description: string } {
+  const localized: Record<string, { name: string; description: string }> = {
+    'official-decision-log': { name: '决策记录', description: '整理背景、决策、取舍与复核事项。' },
+    'official-meeting-notes': { name: '会议纪要助手', description: '整理会议事实、行动项和风险。' },
+    'official-release-check': { name: '发布检查', description: '检查阻断项、证据、风险与回滚。' },
+    'official-research-brief': { name: '研究简报', description: '整理结论、证据、不确定性和下一步。' },
+  }
+  return localized[plugin.packageId] ?? { name: plugin.displayName, description: plugin.description || plugin.summary }
 }
 
 async function uploadWorldAttachment(worldId: string, file: File): Promise<ChatAttachment> {

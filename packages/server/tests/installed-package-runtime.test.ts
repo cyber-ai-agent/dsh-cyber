@@ -12,6 +12,7 @@ import {
   applyInstalledPromptTransforms,
   InstalledPackageVerificationCache,
   loadInstalledBlueprints,
+  loadInstalledPromptTransformCommands,
   loadInstalledWorldThemes,
   parsePromptTransformDefinition,
   readInstalledWorldThemeAsset,
@@ -23,12 +24,14 @@ describe('installed package entrypoints', () => {
     const content = `${JSON.stringify({ schemaVersion: 1, transforms: [{ id: 'meeting-summary', trigger: '/meeting-summary', description: '整理会议事实。', instruction: '输出决策、负责人和截止日期。', mode: 'prepend', priority: 10 }] })}\n`
     await writeFile(join(root, 'commands.json'), content, 'utf8')
     const installed = packageRecord(root, {
+      id: 'official-meeting-notes',
       kind: 'plugin',
       capabilities: ['prompt:transform'],
       files: [{ path: 'commands.json', sha256: createHash('sha256').update(content).digest('hex') }],
       entrypoints: [{ id: 'commands', kind: 'prompt-transform', path: 'commands.json' }],
     })
     await expect(applyInstalledPromptTransforms([installed], '/meeting-summary 今天的发布会')).resolves.toBe('输出决策、负责人和截止日期。\n\n/meeting-summary 今天的发布会')
+    await expect(applyInstalledPromptTransforms([installed], '/会议纪要 今天的发布会')).resolves.toBe('输出决策、负责人和截止日期。\n\n/会议纪要 今天的发布会')
     await expect(applyInstalledPromptTransforms([installed], '普通消息')).resolves.toBe('普通消息')
   })
 
@@ -42,6 +45,30 @@ describe('installed package entrypoints', () => {
       entrypoints: [{ id: 'commands', kind: 'prompt-transform', path: 'commands.json' }],
     })
     await expect(applyInstalledPromptTransforms([installed], '/meeting-summary 今天的发布会')).resolves.toBe('输出纪要。\n\n/meeting-summary 今天的发布会')
+  })
+
+  it('exposes only safe command metadata for the chat plugin picker', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-cyber-plugin-commands-'))
+    const content = `${JSON.stringify({ schemaVersion: 1, transforms: [{ id: 'research', trigger: '/research-brief', description: '整理研究简报。', instruction: '只在服务端使用。', mode: 'prepend', priority: 10 }] })}\n`
+    await writeFile(join(root, 'commands.json'), content, 'utf8')
+    const installed = packageRecord(root, {
+      id: 'official-research-brief',
+      displayName: 'Research Brief',
+      summary: 'Research helper',
+      capabilities: ['prompt:transform'],
+      files: [{ path: 'commands.json', sha256: createHash('sha256').update(content).digest('hex') }],
+      entrypoints: [{ id: 'commands', kind: 'prompt-transform', path: 'commands.json' }],
+    })
+    await expect(loadInstalledPromptTransformCommands([installed])).resolves.toEqual([{
+      packageId: 'official-research-brief',
+      packageVersion: '1.0.0',
+      displayName: 'Research Brief',
+      summary: 'Research helper',
+      trigger: '/research-brief',
+      displayTrigger: '/研究简报',
+      description: '整理研究简报。',
+      automatic: false,
+    }])
   })
 
   it('applies matching transforms by priority with deterministic mode semantics', async () => {

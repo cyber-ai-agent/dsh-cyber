@@ -24,6 +24,17 @@ export interface InstalledWorldTheme {
   manifest: WorldThemeManifestV1
 }
 
+export interface InstalledPromptTransformCommand {
+  packageId: string
+  packageVersion: string
+  displayName: string
+  summary: string
+  trigger: string
+  displayTrigger: string
+  description: string
+  automatic: boolean
+}
+
 export class InstalledPackageVerificationCache {
   readonly #verifiedPackages = new Set<string>()
   #fullVerificationPasses = 0
@@ -63,7 +74,7 @@ export async function applyInstalledPromptTransforms(
       assertPromptTransformPackage(installed)
       const definition = parsePromptTransformDefinition(await readEntrypoint<unknown>(installed, entrypoint.path))
       for (const [index, transform] of definition.transforms.entries()) {
-        if (!transformMatches(originalPrompt, transform.trigger)) continue
+        if (!transformMatches(originalPrompt, transform.trigger) && !transformMatches(originalPrompt, localizedPluginTrigger(installed.packageId, transform.trigger))) continue
         matched.push({
           packageId: installed.packageId,
           packageVersion: installed.version,
@@ -86,6 +97,53 @@ export async function applyInstalledPromptTransforms(
     .filter((item) => item.transform.mode === 'append')
     .map((item) => item.transform.instruction)
   return [...prepends, base, ...appends].join('\n\n')
+}
+
+/**
+ * Returns only the command metadata needed by the chat composer. The prompt
+ * instructions themselves never leave the server, so the picker cannot leak
+ * plugin implementation details or credentials into the browser.
+ */
+export async function loadInstalledPromptTransformCommands(
+  packages: InstalledPackage[],
+): Promise<InstalledPromptTransformCommand[]> {
+  const commands: InstalledPromptTransformCommand[] = []
+  for (const installed of packages.filter((item) => item.status === 'active' && item.kind === 'plugin')) {
+    const entrypoints = (installed.manifest.entrypoints ?? []).filter((entrypoint) => entrypoint.kind === 'prompt-transform')
+    if (entrypoints.length === 0) continue
+    try {
+      assertPromptTransformPackage(installed)
+      for (const entrypoint of entrypoints) {
+        const definition = parsePromptTransformDefinition(await readEntrypoint<unknown>(installed, entrypoint.path))
+        for (const transform of definition.transforms) {
+          commands.push({
+            packageId: installed.packageId,
+            packageVersion: installed.version,
+            displayName: installed.manifest.displayName,
+            summary: installed.manifest.summary,
+            trigger: transform.trigger,
+            displayTrigger: localizedPluginTrigger(installed.packageId, transform.trigger),
+            description: transform.description,
+            automatic: transform.trigger === 'always',
+          })
+        }
+      }
+    } catch {
+      // A malformed installed package stays unavailable to the picker. The
+      // runtime's strict parser remains the authority when a turn executes.
+    }
+  }
+  return commands.sort((left, right) => left.displayName.localeCompare(right.displayName) || left.trigger.localeCompare(right.trigger))
+}
+
+function localizedPluginTrigger(packageId: string, trigger: string): string {
+  const localized: Record<string, Record<string, string>> = {
+    'official-decision-log': { '/decision-log': '/决策记录' },
+    'official-meeting-notes': { '/meeting-summary': '/会议纪要' },
+    'official-release-check': { '/release-check': '/发布检查' },
+    'official-research-brief': { '/research-brief': '/研究简报' },
+  }
+  return localized[packageId]?.[trigger] ?? trigger
 }
 
 export async function loadInstalledBlueprints(packages: InstalledPackage[]): Promise<EmployeeBlueprint[]> {
