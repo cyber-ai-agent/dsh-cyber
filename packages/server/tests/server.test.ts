@@ -912,6 +912,11 @@ it('searches verified market packages and activates installed plugin and talent 
       market: 'plugin',
       verified: true,
       manifest: { id: 'official-meeting-notes', version: '1.0.0' },
+      activation: {
+        kind: 'prompt-transform',
+        automatic: false,
+        commands: [{ trigger: '/meeting-summary' }],
+      },
     })
 
     const pluginPreview = await json(origin, `/api/workspaces/${workspace.id}/marketplace/preview`, {
@@ -962,6 +967,18 @@ it('searches verified market packages and activates installed plugin and talent 
       }),
     })
     expect(talentInstall.response.status).toBe(201)
+
+    const talents = await json(origin, `/api/marketplace?market=talent&workspaceId=${workspace.id}&q=${encodeURIComponent('档案')}`)
+    expect(talents.body.items[0]).toMatchObject({
+      manifest: { id: 'official-archivist' },
+      installedVersion: '1.0.0',
+      activation: {
+        kind: 'employee-blueprint',
+        blueprintId: 'official-archivist',
+        blueprintVersion: 1,
+        worldTemplateId: 'cyber-company',
+      },
+    })
 
     const blueprints = await json(
       origin,

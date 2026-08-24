@@ -28,6 +28,7 @@ interface ChatWorkbenchProps {
   employees: CyberEmployee[]
   sending: boolean
   draft: string
+  focusRequest?: number
   onDraftChange(value: string): void
   onSend(prompt: string, attachments: ChatAttachment[]): Promise<void>
   onUploadAttachment(file: File): Promise<ChatAttachment>
@@ -36,7 +37,7 @@ interface ChatWorkbenchProps {
   onRecruit(): void
 }
 
-export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, sending, draft, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRecruit }: ChatWorkbenchProps) {
+export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, sending, draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRecruit }: ChatWorkbenchProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -57,6 +58,10 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
     const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 160
     if (nearBottom || sending) container.scrollTop = container.scrollHeight
   }, [visibleMessages, sending])
+
+  useEffect(() => {
+    if (focusRequest > 0) inputRef.current?.focus()
+  }, [focusRequest])
 
   const lastSessionIdRef = useRef<string | undefined>(undefined)
   useEffect(() => {

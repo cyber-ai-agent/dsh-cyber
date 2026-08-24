@@ -779,8 +779,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .market-card-grid article > footer span { color: var(--text-muted); font: 12px var(--font-mono); }
 .market-card-grid article > footer button { min-height: 36px; padding: 0 12px; border: 1px solid var(--accent); color: var(--accent-strong); background: var(--accent-soft); font-size: 13px; }
 .market-empty { min-height: 220px; display: grid; place-content: center; justify-items: center; gap: 7px; border: 1px dashed var(--border); color: var(--text-muted); text-align: center; }
-.market-empty strong { color: var(--text-soft); font-size: 12px; }
-.market-empty span { font-size: 9px; }
+.market-empty strong { color: var(--text-soft); font-size: 15px; }
+.market-empty span { max-width: 420px; font-size: 13px; line-height: 1.55; }
 .manual-install-toggle { width: max-content; min-height: 36px; display: flex; align-items: center; gap: 7px; border: 0; color: var(--text-soft); background: transparent; font-size: 13px; }
 .manual-install-toggle:hover { color: var(--accent-strong); }
 .manual-installer { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--border); background: var(--surface-1); }
@@ -796,6 +796,33 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .world-creation-review h3 { margin: 0; font-size: 20px; }
 .world-creation-review p { margin: 0; color: var(--text-soft); font-size: 14px; line-height: 1.7; }
 .world-creation-review ul { display: grid; gap: 8px; margin: 0; padding: 14px 14px 14px 32px; border: 1px solid var(--border); color: var(--text-soft); background: var(--surface-0); font-size: 13px; line-height: 1.5; }
+.market-activation-review { display: grid; align-content: start; gap: 16px; }
+.market-activation-review > img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; object-position: center 36%; outline: 1px solid rgba(255,255,255,.1); outline-offset: -1px; }
+.market-activation-review > header { display: grid; grid-template-columns: 42px minmax(0, 1fr); align-items: start; gap: 12px; }
+.market-activation-review__mark { width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid var(--accent); color: var(--accent-strong); background: var(--accent-soft); }
+.market-activation-review header > div { min-width: 0; display: grid; gap: 5px; }
+.market-activation-review header span { color: var(--success); font-size: 12px; font-weight: 600; }
+.market-activation-review h3 { margin: 0; font-size: 20px; }
+.market-activation-review header p { margin: 0; color: var(--text-soft); font-size: 14px; line-height: 1.65; }
+.market-activation-review dl { margin: 0; display: grid; border: 1px solid var(--border); background: var(--surface-0); }
+.market-activation-review dl > div { min-height: 48px; display: grid; grid-template-columns: 92px minmax(0, 1fr); align-items: center; gap: 12px; padding: 8px 12px; }
+.market-activation-review dl > div + div { border-top: 1px solid var(--border); }
+.market-activation-review dt { color: var(--text-muted); font-size: 13px; }
+.market-activation-review dd { margin: 0; color: var(--text); font-size: 14px; }
+.market-activation-review__notice { margin: 0; display: flex; align-items: flex-start; gap: 8px; padding: 12px; border-left: 3px solid var(--success); color: var(--text-soft); background: color-mix(in srgb, var(--success) 7%, var(--surface-0)); font-size: 13px; line-height: 1.6; }
+.market-activation-review__notice svg { flex: 0 0 auto; margin-top: 2px; color: var(--success); }
+.market-activation-review__notice.is-warning { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--surface-0)); }
+.market-activation-review__notice.is-warning svg { color: var(--accent); }
+.market-activation-review > .primary-button { min-height: 44px; display: flex; align-items: center; justify-content: center; gap: 8px; }
+.market-command-list { display: grid; gap: 8px; }
+.market-command-list > strong { color: var(--text-soft); font-size: 13px; }
+.market-command-list > button { width: 100%; min-height: 68px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 12px; border: 1px solid var(--border); color: var(--text); background: var(--surface-0); text-align: left; }
+.market-command-list > button:hover, .market-command-list > button:focus-visible { border-color: var(--accent); background: var(--accent-soft); }
+.market-command-list > button > span:first-child { min-width: 0; display: grid; gap: 5px; }
+.market-command-list code { width: max-content; color: var(--accent-strong); font: 600 14px var(--font-mono); }
+.market-command-list small { color: var(--text-soft); font-size: 13px; line-height: 1.5; }
+.market-command-list > button > span:last-child { flex: 0 0 auto; display: flex; align-items: center; gap: 5px; color: var(--accent-strong); font-size: 13px; }
+.market-activation-review__footnote { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.55; }
 
 @media (min-width: 2560px) {
   .package-market-dialog--catalog { width: min(2400px, 92vw); grid-template-rows: auto 72px minmax(0, 1fr); }
@@ -819,8 +846,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .market-card-grid article > p { font-size: 18px; }
   .market-world-facts span, .market-role-world, .market-plugin-scope, .market-capabilities code, .market-card-grid article > footer span { font-size: 16px; }
   .market-card-grid article > footer button { min-height: 48px; padding-inline: 18px; font-size: 17px; }
-  .installed-overview h3, .world-creation-review h3 { font-size: 26px; }
-  .installed-overview > p, .world-creation-review p, .world-creation-review ul, .permission-review p, .approval-check { font-size: 17px; }
+  .installed-overview h3, .world-creation-review h3, .market-activation-review h3 { font-size: 26px; }
+  .installed-overview > p, .world-creation-review p, .world-creation-review ul, .permission-review p, .approval-check, .market-activation-review header p, .market-activation-review dd, .market-command-list code, .market-command-list small { font-size: 17px; }
   .permission-group > strong, .permission-group > div { font-size: 17px; }
   .permission-group code, .package-file-summary { font-size: 16px; }
 }

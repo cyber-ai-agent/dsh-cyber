@@ -1,6 +1,6 @@
 import { BUILTIN_BLUEPRINTS, BUILTIN_WORLD_TEMPLATES } from '@dsh-cyber/catalog'
 import { BUILTIN_EMBODIMENT_PRESETS } from '@dsh-cyber/catalog/creative'
-import type { CyberMarketKind } from '@dsh-cyber/contracts'
+import type { CyberMarketActivation, CyberMarketKind, CyberMarketPackage } from '@dsh-cyber/contracts'
 import type { WorldThemeManifestV1 } from '@dsh-cyber/contracts'
 import type { LocalPackageCatalog } from '@dsh-cyber/package-runtime'
 import type { SqliteStore } from '@dsh-cyber/persistence'
@@ -10,6 +10,8 @@ import type { Router } from '../http/router.js'
 import { HttpError } from '../http/errors.js'
 import { writeBinary, writeJson } from '../http/response.js'
 import { loadInstalledBlueprints } from '../installed-package-runtime.js'
+import { parseEmployeeBlueprintManifest } from '../employee-blueprint-manifest.js'
+import { parsePromptTransformDefinition } from '../prompt-transform-parser.js'
 
 export interface CatalogRoutesDependencies {
   store: SqliteStore
@@ -49,11 +51,15 @@ export function registerCatalogRoutes(router: Router, dependencies: CatalogRoute
     }
     const workspaceId = url.searchParams.get('workspaceId')
     const installed = workspaceId === null ? [] : store.listInstalledPackages(workspaceId)
-    const items = await packageCatalog.list({
+    const catalogItems = await packageCatalog.list({
       ...(market === null ? {} : { market: market as CyberMarketKind }),
       ...(url.searchParams.get('q') === null ? {} : { query: url.searchParams.get('q')! }),
       installed,
     })
+    const items = await Promise.all(catalogItems.map(async (item) => ({
+      ...item,
+      ...await marketActivation(packageCatalog, item),
+    })))
     writeJson(response, 200, { items })
   })
 
@@ -77,4 +83,41 @@ export function registerCatalogRoutes(router: Router, dependencies: CatalogRoute
     const contentType = previewPath.endsWith('.webp') ? 'image/webp' : previewPath.endsWith('.jpg') || previewPath.endsWith('.jpeg') ? 'image/jpeg' : 'image/png'
     writeBinary(response, 200, body, contentType)
   })
+}
+
+async function marketActivation(
+  packageCatalog: LocalPackageCatalog,
+  item: CyberMarketPackage,
+): Promise<{ activation?: CyberMarketActivation }> {
+  try {
+    if (item.market === 'plugin') {
+      const entrypoint = item.manifest.entrypoints?.find((candidate) => candidate.kind === 'prompt-transform')
+      if (entrypoint === undefined) return {}
+      const definition = parsePromptTransformDefinition(JSON.parse((await packageCatalog.readDeclaredFile(item, entrypoint.path)).toString('utf8')))
+      const commands = definition.transforms
+        .filter((transform) => transform.trigger !== 'always')
+        .map((transform) => ({ trigger: transform.trigger, description: transform.description }))
+      return { activation: { kind: 'prompt-transform', automatic: definition.transforms.some((transform) => transform.trigger === 'always'), commands } }
+    }
+    if (item.market === 'talent' && item.manifest.kind === 'employee-blueprint') {
+      const entrypoint = item.manifest.entrypoints?.find((candidate) => candidate.kind === 'employee-blueprint')
+      if (entrypoint === undefined) return {}
+      const blueprint = parseEmployeeBlueprintManifest(
+        JSON.parse((await packageCatalog.readDeclaredFile(item, entrypoint.path)).toString('utf8')),
+        { packageId: item.manifest.id, packageCapabilities: item.manifest.capabilities },
+      )
+      return {
+        activation: {
+          kind: 'employee-blueprint',
+          blueprintId: blueprint.id,
+          blueprintVersion: blueprint.version,
+          worldTemplateId: blueprint.worldTemplateId,
+        },
+      }
+    }
+  } catch {
+    // Marketplace discovery remains available for malformed third-party packages;
+    // the strict preview/install path will still reject their entrypoint content.
+  }
+  return {}
 }

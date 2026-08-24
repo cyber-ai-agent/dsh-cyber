@@ -172,12 +172,31 @@ export interface CyberPackageManifest {
 
 export type CyberMarketKind = 'theme' | 'plugin' | 'talent'
 
+export interface CyberMarketCommand {
+  trigger: string
+  description: string
+}
+
+export type CyberMarketActivation =
+  | {
+      kind: 'prompt-transform'
+      automatic: boolean
+      commands: CyberMarketCommand[]
+    }
+  | {
+      kind: 'employee-blueprint'
+      blueprintId: string
+      blueprintVersion: number
+      worldTemplateId: string
+    }
+
 export interface CyberMarketPackage {
   market: CyberMarketKind
   manifest: CyberPackageManifest
   sourceDirectory: string
   verified: boolean
   installedVersion?: string
+  activation?: CyberMarketActivation
 }
 
 export type InstalledPackageStatus = 'active' | 'superseded' | 'disabled'

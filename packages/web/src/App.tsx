@@ -108,6 +108,7 @@ export default function App() {
   const [dockTab, setDockTab] = useState<DockTab>('world')
   const [dockCollapsed, setDockCollapsed] = useState(false)
   const [draft, setDraft] = useState('')
+  const [composerFocusRequest, setComposerFocusRequest] = useState(0)
   const [sending, setSending] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('appearance')
@@ -122,6 +123,7 @@ export default function App() {
   const [packageLoading, setPackageLoading] = useState(false)
   const [packageInstalling, setPackageInstalling] = useState(false)
   const [blueprints, setBlueprints] = useState<EmployeeBlueprint[]>([])
+  const [preferredBlueprintId, setPreferredBlueprintId] = useState<string>()
   const [catalogLoading, setCatalogLoading] = useState(false)
   const [recruiting, setRecruiting] = useState(false)
   const [managingEmployeeId, setManagingEmployeeId] = useState<string>()
@@ -363,8 +365,9 @@ export default function App() {
     setSelectedEmployeeId(selected[0]?.id)
   }, [employees])
 
-  const openRecruitment = useCallback(async () => {
+  const openRecruitment = useCallback(async (preferredId?: string) => {
     if (activeWorld === undefined) return
+    setPreferredBlueprintId(preferredId)
     setRecruitmentOpen(true)
     setCatalogLoading(true)
     setError(undefined)
@@ -541,6 +544,7 @@ export default function App() {
       const mapped = toCyberEmployee(employee, employees.length)
       setEmployees((current) => [...current, mapped])
       setRecruitmentOpen(false)
+      setPreferredBlueprintId(undefined)
       setActiveSessionId(undefined)
       setConversationIntent({
         kind: 'direct',
@@ -1180,6 +1184,7 @@ export default function App() {
             employees={employees}
             sending={sending}
             draft={draft}
+            focusRequest={composerFocusRequest}
             onDraftChange={setDraft}
             onSend={send}
             onUploadAttachment={uploadChatAttachment}
@@ -1275,17 +1280,19 @@ export default function App() {
       {recruitmentOpen ? (
         <RecruitmentDialog
           blueprints={blueprints}
+          {...(preferredBlueprintId === undefined ? {} : { initialBlueprintId: preferredBlueprintId })}
           employees={employees}
           world={activeWorld}
           loading={catalogLoading}
           recruiting={recruiting}
-          onClose={() => setRecruitmentOpen(false)}
+          onClose={() => { setRecruitmentOpen(false); setPreferredBlueprintId(undefined) }}
           onRecruit={recruitEmployee}
         />
       ) : null}
       {packageMarketOpen ? (
         <PackageMarketDialog
           initialMarket={packageMarketKind}
+          world={activeWorld}
           items={marketplaceItems}
           installed={installedPackages}
           transactions={packageTransactions}
@@ -1298,6 +1305,17 @@ export default function App() {
           onPreviewMarketplace={previewMarketplacePackage}
           onInstallMarketplace={installMarketplacePackage}
           onCreateThemeWorld={createWorldFromTheme}
+          onRecruitTalent={async (item) => {
+            const activation = item.activation?.kind === 'employee-blueprint' ? item.activation : undefined
+            if (activation === undefined) throw new Error('这份角色模板没有可用的招募入口')
+            setPackageMarketOpen(false)
+            await openRecruitment(activation.blueprintId)
+          }}
+          onUsePlugin={(command) => {
+            setPackageMarketOpen(false)
+            setDraft(`${command} `)
+            setComposerFocusRequest((value) => value + 1)
+          }}
         />
       ) : null}
       {worldSettingsOpen && activeWorld !== undefined && worldSettings !== undefined && worldAccess !== undefined ? <WorldSettingsDialog world={activeWorld} value={worldSettings} access={worldAccess} models={models} saving={savingSettings} onClose={()=>setWorldSettingsOpen(false)} onSave={async (value)=>{ setSavingSettings(true); try { const result = await api<{settings:WorldSettings}>(`/api/worlds/${activeWorld.id}/settings`, { method:'PUT', body:JSON.stringify(value) }); setWorldSettings(result.settings); setReasoningEffort(result.settings.model.reasoningEffort); setPermissionMode(result.settings.runtime.permissionMode); applyWorldAppearance(result.settings) } finally { setSavingSettings(false) } }} onSetPassword={async(password)=>{ const result=await api<{access:WorldAccessSummary}>(`/api/worlds/${activeWorld.id}/access/password`,{method:'POST',body:JSON.stringify({password})});setWorldAccess(result.access)}} onClearPassword={async()=>{const result=await api<{access:WorldAccessSummary}>(`/api/worlds/${activeWorld.id}/access/password`,{method:'DELETE'});setWorldAccess(result.access)}} onLock={async()=>{await api(`/api/worlds/${activeWorld.id}/access/lock`,{method:'POST',body:'{}'});setWorldSettingsOpen(false);setLockedWorld(activeWorld)}} /> : null}
