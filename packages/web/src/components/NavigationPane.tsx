@@ -22,6 +22,8 @@ interface NavigationPaneProps {
   activeEmployeeIds: string[]
   sessionParticipants: SessionParticipantMap
   employees: CyberEmployee[]
+  /** Bumped whenever the transcript of the open session changes, so previews stay fresh. */
+  activityPulse: number
   onSelectSession(sessionId: string): void
   onSelectEmployee(employeeId: string): void
   onDirectEmployee(employee: CyberEmployee): void
@@ -36,6 +38,7 @@ export function NavigationPane({
   activeSessionId,
   sessionParticipants,
   employees,
+  activityPulse,
   onSelectSession,
   onDirectEmployee,
   onCreateGroup,
@@ -51,7 +54,7 @@ export function NavigationPane({
       .then((result) => { if (!cancelled) { setHubItems(result.items); setError(undefined) } })
       .catch((cause: unknown) => { if (!cancelled) setError(cause instanceof Error ? cause.message : '会话列表加载失败') })
     return () => { cancelled = true }
-  }, [world.id, sessions.length, employees.length])
+  }, [world.id, sessions.length, employees.length, activityPulse])
 
   useEffect(() => {
     if (activeSessionId === undefined || hubItems === undefined) return
@@ -191,9 +194,12 @@ function SessionRow({
   const participants = participantIds
     .map((id) => employees.find((employee) => employee.id === id))
     .filter((employee): employee is CyberEmployee => employee !== undefined)
-  const subtitle = session.kind === 'group' || session.kind === 'meeting'
+  const lastPrompt = item.lastPrompt !== undefined && item.lastPrompt.trim().length > 0
+    ? item.lastPrompt.trim().length > 20 ? `${item.lastPrompt.trim().slice(0, 20)}…` : item.lastPrompt.trim()
+    : undefined
+  const subtitle = lastPrompt ?? (session.kind === 'group' || session.kind === 'meeting'
     ? `群聊 · ${participants.length || participantIds.length} 名成员`
-    : participants[0]?.role ?? '私聊'
+    : participants[0]?.role ?? '私聊')
   const openMenu = (position: ContextMenuPosition) => { if (onPin !== undefined && onDelete !== undefined) setMenuPosition(position) }
   return (
     <div className={`session-row-wrap${active ? ' is-active' : ''}${item.pinned ? ' is-pinned' : ''}`}>

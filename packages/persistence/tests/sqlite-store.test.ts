@@ -178,6 +178,61 @@ describe('SqliteStore', () => {
     expect(reopened.doctor()).toMatchObject({ ok: true, schemaVersion: 14 })
   })
 
+  it('returns the latest message of one sender without loading the full transcript', async () => {
+    const { store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: '本地工作区' })
+    const world = store.createWorld({
+      workspaceId: workspace.id,
+      name: '赛博公司',
+      templateId: 'cyber-company',
+    })
+    store.saveBlueprint(blueprint())
+    const employee = store.recruitEmployee({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      blueprintId: 'software-engineer',
+      blueprintVersion: 1,
+    })
+    const session = store.createSession({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      kind: 'direct',
+      title: '最近提问预览',
+      participants: [
+        { participantId: 'owner', kind: 'owner' },
+        { participantId: employee.id, kind: 'employee' },
+      ],
+    })
+    expect(store.latestMessageBySender(session.id, 'owner')).toBeUndefined()
+    store.appendMessage({
+      sessionId: session.id,
+      senderId: 'owner',
+      senderKind: 'owner',
+      kind: 'user',
+      content: '第一条提问',
+    })
+    store.appendMessage({
+      sessionId: session.id,
+      senderId: employee.id,
+      senderKind: 'employee',
+      kind: 'assistant',
+      content: '收到。',
+    })
+    store.appendMessage({
+      sessionId: session.id,
+      senderId: 'owner',
+      senderKind: 'owner',
+      kind: 'user',
+      content: '第二条更长的提问',
+    })
+    expect(store.latestMessageBySender(session.id, 'owner')).toMatchObject({
+      senderKind: 'owner',
+      content: '第二条更长的提问',
+      sequence: 3,
+    })
+    store.close()
+  })
+
   it('writes every domain event and cloud-sync outbox entry atomically', async () => {
     const { store } = await testDatabase()
     const workspace = store.createWorkspace({ name: '本地工作区' })

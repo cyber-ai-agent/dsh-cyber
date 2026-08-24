@@ -219,6 +219,7 @@ export default function App() {
     setSessions(snapshot.openSessions)
     setSessionParticipants(Object.fromEntries(participantResults))
     setTaskSchedules(scheduleResult.items)
+    rememberActiveWorld(world.workspaceId, world.id)
   }, [])
 
   const openWorkshopWorld = useCallback(async (worldId: string) => {
@@ -262,7 +263,9 @@ export default function App() {
         setPreferences(preferenceResult.preferences)
         setModels(modelResult.items)
         setModelAssignments(modelResult.assignments)
-        if (snapshot.worlds[0] !== undefined) await loadWorld(snapshot.worlds[0])
+        const remembered = readRememberedWorldId(first.id)
+        const target = snapshot.worlds.find((world) => world.id === remembered) ?? snapshot.worlds[0]
+        if (target !== undefined) await loadWorld(target)
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : '无法连接本地 DSH Cyber 服务')
       } finally {
@@ -1194,6 +1197,7 @@ export default function App() {
             activeEmployeeIds={activeParticipantIds}
             sessionParticipants={sessionParticipants}
             employees={employees}
+            activityPulse={messages.length}
             onSelectSession={selectSession}
             onSelectEmployee={(employeeId) => void openDossier(employeeId)}
             onDirectEmployee={directEmployee}
@@ -1520,6 +1524,27 @@ function statusActivity(employee: EmployeeInstance): string {
   if (employee.status === 'blocked') return '等待依赖或进一步处理'
   if (employee.status === 'waiting') return '等待下一步处理'
   return '可接新任务'
+}
+
+function activeWorldStorageKey(workspaceId: string): string {
+  return `dsh-cyber.active-world:${workspaceId}`
+}
+
+function readRememberedWorldId(workspaceId: string): string | undefined {
+  try {
+    const value = window.localStorage.getItem(activeWorldStorageKey(workspaceId))
+    return value === null || value.length === 0 ? undefined : value
+  } catch {
+    return undefined
+  }
+}
+
+function rememberActiveWorld(workspaceId: string, worldId: string): void {
+  try {
+    window.localStorage.setItem(activeWorldStorageKey(workspaceId), worldId)
+  } catch {
+    // localStorage may be unavailable (private mode); restoring simply falls back to the first world.
+  }
 }
 
 function makeDemoSession(
