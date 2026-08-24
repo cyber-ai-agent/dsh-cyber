@@ -26,6 +26,11 @@
 - [x] Controlled Harness update / rollback
 - [x] SQLite-backed conversation continuity across runtime restart
 - [x] Approval Gate V1 for trusted external Skill actions
+- [x] Trace Intelligence V1 with per-run reasoning summaries, tool orchestration, Token attribution and role/date/search filters
+- [ ] World Package Instance V1
+- [ ] Integration Registry and Firecrawl V1
+- [ ] MCP Skill Adapter V1
+- [ ] Extension Host and JSON-RPC Gateway
 - [ ] Finish Creative Workshop project lifecycle
 - [ ] Add Creative Workshop smoke E2E
 - [ ] Define Creative Platform V1 local-data compatibility baseline

@@ -8,6 +8,7 @@ import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import type { CharacterSkillActionRepository } from '../skills/skill-action-repository.js'
 import {
+  AgentRunTraceAdapter,
   ConversationTraceAdapter,
   DomainEventTraceAdapter,
   RuntimeEventTraceAdapter,
@@ -46,6 +47,7 @@ export class WorldTraceService {
   readonly #registry: WorldTraceAdapterRegistry
   readonly #sanitizer: TraceSanitizer
   readonly #clock: () => string
+  readonly #liveRuns = new Map<string, WorldTraceEntry>()
 
   constructor(options: WorldTraceServiceOptions) {
     this.#store = options.store
@@ -58,15 +60,19 @@ export class WorldTraceService {
   async list(worldId: string, query: WorldTraceQuery = {}): Promise<WorldTracePage> {
     const world = this.#store.getWorld(worldId)
     if (world === undefined) return { items: [] }
+    const actorNames = new Map(this.#store.listEmployees(worldId, true).map((employee) => [employee.id, employee.displayName]))
+    const search = query.search?.trim().toLocaleLowerCase('zh-CN')
     const entries = (await this.#materialize(worldId))
       .filter((entry) => query.category === undefined || entry.category === query.category)
       .filter((entry) => query.status === undefined || entry.status === query.status)
       .filter((entry) => query.actorId === undefined || entry.actorId === query.actorId)
+      .filter((entry) => query.date === undefined || localCalendarDate(entry.createdAt) === query.date)
+      .filter((entry) => search === undefined || search.length === 0 || traceSearchText(entry, actorNames).includes(search))
       .sort(compareTraceEntries)
     const cursor = query.after === undefined ? undefined : decodeTraceCursor(query.after)
     const after = cursor === undefined
       ? entries
-      : entries.filter((entry) => compareCursor(entry, cursor) > 0)
+      : entries.filter((entry) => compareCursor(entry, cursor) < 0)
     const limit = Math.min(200, Math.max(1, query.limit ?? 50))
     const items = after.slice(0, limit)
     return {
@@ -86,18 +92,26 @@ export class WorldTraceService {
   }
 
   adaptRuntime(envelope: ConversationRealtimeEnvelope): WorldTraceEntry[] {
-    return this.#registry.adapt({
+    const updates = this.#registry.adapt({
       kind: 'runtime-event',
       value: {
         worldId: envelope.worldId,
         sessionId: envelope.sessionId,
         actorId: envelope.agentId,
         event: envelope.event,
+        workTurnId: envelope.workTurnId,
+        agentRunId: envelope.agentRunId,
         createdAt: envelope.event.sourceTime === undefined
           ? this.#clock()
           : new Date(envelope.event.sourceTime).toISOString(),
       },
     }, this.#context(envelope.worldId))
+    return updates.map((update) => {
+      const merged = mergeTraceEntry(this.#liveRuns.get(update.id), update)
+      this.#liveRuns.set(update.id, merged)
+      if (merged.status !== 'running') setTimeout(() => this.#liveRuns.delete(merged.id), 30_000).unref?.()
+      return merged
+    })
   }
 
   #context(worldId: string) {
@@ -110,21 +124,32 @@ export class WorldTraceService {
 
   async #materialize(worldId: string): Promise<WorldTraceEntry[]> {
     const context = this.#context(worldId)
+    const messages = this.#store.listWorldTraceMessages(worldId)
+    const interactions = new Map(this.#store.listWorldModelInteractions(worldId)
+      .filter((interaction) => interaction.agentRunId !== undefined)
+      .map((interaction) => [interaction.agentRunId!, interaction]))
     const facts: WorldTraceFact[] = [
+      ...this.#store.listWorldAgentRuns(worldId).map((run) => ({
+        kind: 'agent-run' as const,
+        value: {
+          worldId,
+          run,
+          messages,
+          ...(interactions.get(run.id) === undefined ? {} : { interaction: interactions.get(run.id)! }),
+        },
+      })),
       ...this.#store.listWorldDomainEvents(worldId).map((value) => ({ kind: 'domain-event' as const, value })),
-      ...this.#store.listSessions(worldId).flatMap((session) =>
-        this.#store.listMessages(session.id).map((message) => ({
-          kind: 'conversation' as const,
-          value: { worldId, session, message },
-        }))),
       ...(await this.#actions.listByWorld(worldId)).map((value) => ({ kind: 'skill-action' as const, value })),
     ]
-    return deduplicate(facts.flatMap((fact) => this.#registry.adapt(fact, context)))
+    const persisted = deduplicate(facts.flatMap((fact) => this.#registry.adapt(fact, context)))
+    const live = [...this.#liveRuns.values()].filter((entry) => entry.worldId === worldId)
+    return deduplicate([...persisted, ...live])
   }
 }
 
 export function createWorldTraceRegistry(): WorldTraceAdapterRegistry {
   const registry = new WorldTraceAdapterRegistry()
+  registry.register(new AgentRunTraceAdapter())
   registry.register(new DomainEventTraceAdapter())
   registry.register(new RuntimeEventTraceAdapter())
   registry.register(new SkillActionTraceAdapter())
@@ -170,9 +195,50 @@ function deduplicate(entries: WorldTraceEntry[]): WorldTraceEntry[] {
 }
 
 function compareTraceEntries(left: WorldTraceEntry, right: WorldTraceEntry): number {
-  return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)
+  return right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id)
 }
 
 function compareCursor(entry: WorldTraceEntry, cursor: TraceCursor): number {
   return entry.createdAt.localeCompare(cursor.createdAt) || entry.id.localeCompare(cursor.id)
+}
+
+function traceSearchText(entry: WorldTraceEntry, actorNames: ReadonlyMap<string, string>): string {
+  return [
+    entry.summary,
+    entry.detail,
+    entry.reasoningSummary,
+    entry.actorId === undefined ? undefined : actorNames.get(entry.actorId),
+    entry.modelId,
+    entry.provider,
+    ...((entry.tools ?? []).flatMap((tool) => [tool.label, tool.name])),
+  ].filter((value): value is string => typeof value === 'string')
+    .join('\n')
+    .toLocaleLowerCase('zh-CN')
+}
+
+function localCalendarDate(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.valueOf())) return ''
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function mergeTraceEntry(current: WorldTraceEntry | undefined, next: WorldTraceEntry): WorldTraceEntry {
+  if (current === undefined) return next
+  const tools = new Map((current.tools ?? []).map((tool) => [tool.callId, tool]))
+  for (const tool of next.tools ?? []) tools.set(tool.callId, { ...tools.get(tool.callId), ...tool })
+  const reasoning = [current.reasoningSummary, next.reasoningSummary]
+    .filter((value, index, values): value is string => Boolean(value) && values.indexOf(value) === index)
+    .join('\n\n')
+  return {
+    ...current,
+    ...next,
+    category: tools.size > 0 ? 'tool' : next.category,
+    createdAt: current.createdAt.localeCompare(next.createdAt) <= 0 ? current.createdAt : next.createdAt,
+    updatedAt: current.updatedAt.localeCompare(next.updatedAt) >= 0 ? current.updatedAt : next.updatedAt,
+    ...(reasoning ? { reasoningSummary: reasoning } : {}),
+    ...(tools.size > 0 ? { tools: [...tools.values()] } : {}),
+  }
 }

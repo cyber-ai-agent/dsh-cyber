@@ -24,11 +24,20 @@ export class TraceSanitizer {
   entry(entry: WorldTraceEntry): WorldTraceEntry {
     const summary = this.text(entry.summary, 160)
     const detail = entry.detail === undefined ? undefined : this.text(entry.detail, 500)
-    const { detail: _originalDetail, ...rest } = entry
+    const reasoningSummary = entry.reasoningSummary === undefined ? undefined : this.text(entry.reasoningSummary, 1_200)
+    const tools = entry.tools?.map((tool) => ({
+      ...tool,
+      callId: this.text(tool.callId, 160),
+      ...(tool.name === undefined ? {} : { name: this.text(tool.name, 160) }),
+      label: this.text(tool.label, 200),
+    }))
+    const { detail: _originalDetail, reasoningSummary: _originalReasoning, tools: _originalTools, ...rest } = entry
     return {
       ...rest,
       summary: summary || '世界活动已更新',
       ...(detail === undefined || detail.length === 0 ? {} : { detail }),
+      ...(reasoningSummary === undefined || reasoningSummary.length === 0 ? {} : { reasoningSummary }),
+      ...(tools === undefined ? {} : { tools }),
     }
   }
 

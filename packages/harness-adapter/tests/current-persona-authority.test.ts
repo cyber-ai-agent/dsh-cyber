@@ -46,7 +46,8 @@ describe('current character persona authority', () => {
     const prompt = environment.DSH_SYSTEM_PROMPT ?? ''
     expect(prompt).toContain('团子')
     expect(prompt).toContain(revision.persona)
-    expect(prompt).toContain('latest user-defined Persona and identity contract')
+    expect(prompt).toContain('最新的用户自定义 Persona 和身份约定')
+    expect(prompt).toContain('简短的中文推理摘要')
     expect(prompt).not.toContain('秘书')
   })
 })

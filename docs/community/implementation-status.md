@@ -21,8 +21,9 @@
 | 插件 | canonical `prompt-transform` 进入真实 conversation runtime prompt；legacy `commands` 明确转换；staged 校验；原始用户消息持久化不被改写 | 仅声明式 JSON；支持 `/command`、`always`、prepend/append/replace、priority 与资源上限；强制无外发 | 可执行代码、skill/tool/event/widget、网络代理与外发审计 |
 | 会话记忆 | 单个 WorkSession 的用户可见聊天历史由本地 SQLite 恢复：跨进程重启、Harness Runtime 重建、权限模式切换和 persisted-log 碰撞轮换都能继续对话；私聊/群聊/世界之间严格隔离；群聊历史保留真实发言人；reasoning、tool-call、tool-result、system、临时气泡与凭据不进入历史 | 预算为「24 条 + 16000 字符」的确定性截断，不使用 tokenizer；超长单条消息截断并标注；每个角色按自身 watermark 增量补齐——新 Session 重播全部，存活 Session 只补它未见过的部分（私聊恒为空，群聊补上一轮晚于自己发言的角色）；同一员工的回合串行、不同员工并行 | Episodic/Semantic/Procedural memory 分类、向量检索、Embedding、自动摘要与记忆整理、跨会话回忆 |
 | 会话执行 | `WorkSession → WorkTurn → AgentRun` 持久模型；私聊一轮一次运行，群聊和角色协作按真实调用顺序记录多次运行；本轮消息关联回合，角色输出、领域事件与 SSE 关联具体运行；服务重启确定性终止遗留执行；提供会话回合和回合详情读取 API | 当前只记录生命周期、错误码和 Runtime Session ID，不持久化原始 prompt、工具输入或工具结果 | 自动重试、通用事件 items 表、远程执行同步 |
+| 世界轨迹 | 每个 AgentRun 投影为一条稳定主轨迹；中文判断摘要、结构化工具调度、状态、耗时、模型和真实 Token 归入同一次运行；按角色汇总 Token；支持角色、日期、关键词、内容和状态筛选以及游标分页；实时与重启恢复使用同一身份；全链路脱敏 | Token 只在 Harness 明确返回时展示，不进行估算；旧运行没有 Token 时保持为空 | 跨设备轨迹同步、用户配置的轨迹保留策略 |
 | 动作审批 | 外部副作用先持久化 Skill Action 与 Approval Request；未批准、已拒绝、已过期或授权已撤销时不会进入受信任 Adapter；支持单次批准、角色级和世界级精确策略，以及策略撤销；服务中断时执行中的外部动作转为结果未知并禁止自动重试 | 当前审批通过本地 HTTP API 提供，复用策略严格绑定 Skill、Action、Target、Risk 与作用域 | 审批中心 UI、工具调用与文件写入审批、远程审批同步 |
-| 模型交互日志 | turn/discovery 双源采集、SQLite 持久化（v11 STRICT 表 + 三索引）、分页/筛选/详情/清空 API、设置面板「日志记录」界面、错误信息密钥清洗（`sk-…`/`Bearer …`/键值对 → `[已隐藏]`） | token 用量字段预留但当前恒为空（DSH worker 未透出单次请求用量）；消息数为近似统计；无自动保留策略 | worker 进程内逐请求采集与 token 透出、日志自动清理/条数上限 |
+| 模型交互日志 | turn/discovery 双源采集、SQLite 持久化、分页/筛选/详情/清空 API、设置面板日志界面、错误信息密钥清洗；v17 将 turn 日志绑定到 WorkTurn 与 AgentRun，并保存 Harness 返回的真实 Token | 一条 turn 日志表示整轮角色运行，不拆分 worker 内部的多次模型请求；消息数为近似统计；无自动保留策略 | worker 内逐请求明细、日志自动清理和条数上限 |
 | CI | Node 22.19、pnpm 11.7、frozen lockfile、typecheck、test、Chromium、E2E | 仓库工作流名为 `required`；GitHub 分支保护需在仓库设置中另行确认 | 自动发布与包签名流水线 |
 
 ## 关键证据
@@ -38,6 +39,7 @@
 - prompt transform：`packages/server/src/prompt-transform-parser.ts`、`packages/server/src/routes/conversation-routes.ts`
 - 会话记忆与执行：`packages/orchestration/src/conversation-history.ts`、`packages/orchestration/src/conversation-orchestrator.ts`、`packages/persistence/src/migrations.ts`、`packages/persistence/src/sqlite-store.ts`、`packages/harness-adapter/src/history-prompt.ts`、`packages/harness-adapter/src/adapter.ts`、`packages/orchestration/tests/conversation-history.test.ts`、`packages/orchestration/tests/conversation-memory.test.ts`、`packages/server/tests/conversation-memory-restart.test.ts`
 - 动作审批：`packages/server/src/services/character-skill-runtime.ts`、`packages/server/src/skills/sqlite-skill-action-repository.ts`、`packages/persistence/src/migrations.ts`、`packages/persistence/src/sqlite-store.ts`、`packages/server/tests/character-skill-runtime.test.ts`、[Approval Gate V1](../architecture/approval-gate-v1.md)
+- 世界轨迹：`packages/server/src/services/world-trace-service.ts`、`packages/server/src/world-trace/agent-run-trace-adapter.ts`、`packages/web/src/components/world-trace/`、[世界轨迹中心](../architecture/world-trace-center-v1.md)
 - 模型交互日志：`packages/server/src/services/model-interaction-service.ts`、`packages/server/src/routes/model-interaction-routes.ts`、`packages/persistence/src/migrations.ts`（v11）、[模块说明与观测边界](model-interaction-logs.md)
 - CI：`.github/workflows/ci.yml`
 

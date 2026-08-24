@@ -55,6 +55,33 @@ async function fixture() {
   return { store, workspace, world, session, employee }
 }
 
+function completeAgentRun(store: SqliteStore, context: Awaited<ReturnType<typeof fixture>>, reasoning = '先核对事实，再执行工具。') {
+  const turn = store.createWorkTurn({
+    workspaceId: context.workspace.id, worldId: context.world.id, sessionId: context.session.id, interactionKind: 'chat',
+  })
+  store.startWorkTurn(turn.id)
+  const run = store.createAgentRun({
+    workspaceId: context.workspace.id, worldId: context.world.id, sessionId: context.session.id,
+    turnId: turn.id, employeeId: context.employee.id, ordinal: 1,
+  })
+  store.startAgentRun(run.id)
+  store.appendMessage({
+    sessionId: context.session.id, senderId: context.employee.id, senderKind: 'employee', kind: 'reasoning',
+    content: reasoning, metadata: { agentRunId: run.id, traceTurnId: run.id },
+  })
+  store.appendMessage({
+    sessionId: context.session.id, senderId: context.employee.id, senderKind: 'employee', kind: 'tool-call',
+    content: 'search', metadata: { agentRunId: run.id, traceTurnId: run.id, callId: `call-${run.id}`, toolName: 'search' },
+  })
+  store.appendMessage({
+    sessionId: context.session.id, senderId: context.employee.id, senderKind: 'employee', kind: 'tool-result',
+    content: '已完成', metadata: { agentRunId: run.id, traceTurnId: run.id, callId: `call-${run.id}`, failed: false },
+  })
+  store.completeAgentRun(run.id, `runtime-${run.id}`)
+  store.completeWorkTurn(turn.id)
+  return run
+}
+
 describe('World Trace projection', () => {
   it('merges lifecycle updates into stable ids, filters, and paginates canonical facts', async () => {
     const { store, workspace, world, session, employee } = await fixture()
@@ -66,24 +93,7 @@ describe('World Trace projection', () => {
       content: '这是完整提示词，不应该进入轨迹详情',
       metadata: { participantIds: [employee.id] },
     })
-    store.appendDomainEvent({
-      workspaceId: workspace.id,
-      worldId: world.id,
-      sessionId: session.id,
-      type: 'turn.started',
-      actorId: employee.id,
-      actorKind: 'employee',
-      payload: { source: 'test', sourceSessionId: 'runtime-1', sourceSequence: 1 },
-    })
-    store.appendDomainEvent({
-      workspaceId: workspace.id,
-      worldId: world.id,
-      sessionId: session.id,
-      type: 'turn.completed',
-      actorId: employee.id,
-      actorKind: 'employee',
-      payload: { source: 'test', sourceSessionId: 'runtime-1', sourceSequence: 2 },
-    })
+    completeAgentRun(store, { store, workspace, world, session, employee })
     const actions = new MemoryActions([{
       id: 'action-1',
       worldId: world.id,
@@ -104,14 +114,24 @@ describe('World Trace projection', () => {
     const service = new WorldTraceService({ store, actions })
 
     const all = await service.list(world.id, { limit: 200 })
-    expect(all.items.filter((item) => item.summary.includes('本轮处理'))).toHaveLength(1)
-    expect(all.items.find((item) => item.summary.includes('本轮处理'))?.status).toBe('success')
+    expect(all.items.filter((item) => item.sourceKind === 'agent-run')).toHaveLength(1)
+    expect(all.items.find((item) => item.sourceKind === 'agent-run')).toMatchObject({
+      status: 'success', reasoningSummary: '先核对事实，再执行工具。', tools: [expect.objectContaining({ status: 'success' })],
+    })
     expect(JSON.stringify(all)).not.toContain('这是完整提示词')
     expect((await service.list(world.id, { category: 'skill' })).items).toEqual([
       expect.objectContaining({ category: 'skill', status: 'success', skillId: 'lights' }),
     ])
     expect((await service.list(world.id, { status: 'success', actorId: employee.id })).items.every((item) => item.status === 'success' && item.actorId === employee.id)).toBe(true)
     expect((await service.list(world.id, { actorId: 'missing-actor' })).items).toEqual([])
+    expect((await service.list(world.id, { search: '核对事实' })).items).toEqual([
+      expect.objectContaining({ sourceKind: 'agent-run', actorId: employee.id }),
+    ])
+    expect((await service.list(world.id, { search: '测试角色' })).items.some((item) => item.actorId === employee.id)).toBe(true)
+    const runEntry = all.items.find((item) => item.sourceKind === 'agent-run')!
+    const runDate = new Date(runEntry.createdAt)
+    const localDate = `${runDate.getFullYear()}-${String(runDate.getMonth() + 1).padStart(2, '0')}-${String(runDate.getDate()).padStart(2, '0')}`
+    expect((await service.list(world.id, { date: localDate })).items).toContainEqual(expect.objectContaining({ id: runEntry.id }))
 
     const first = await service.list(world.id, { limit: 1 })
     expect(first.items).toHaveLength(1)
@@ -142,6 +162,8 @@ describe('World Trace projection', () => {
       worldId: world.id,
       sessionId: session.id,
       agentId: employee.id,
+      workTurnId: 'work-turn-1',
+      agentRunId: 'turn-1',
       event: {
         kind: 'tool.started',
         source: 'test',
@@ -157,30 +179,13 @@ describe('World Trace projection', () => {
   })
 
   it('keeps lifecycle updates stable within a turn and distinct across turns', async () => {
-    const { store, workspace, world, session, employee } = await fixture()
-    for (const traceTurnId of ['turn-1', 'turn-2']) {
-      store.appendDomainEvent({
-        workspaceId: workspace.id,
-        worldId: world.id,
-        sessionId: session.id,
-        type: 'turn.started',
-        actorId: employee.id,
-        actorKind: 'employee',
-        payload: { source: 'test', sourceSessionId: 'shared-runtime-session', sourceSequence: 1, traceTurnId },
-      })
-      store.appendDomainEvent({
-        workspaceId: workspace.id,
-        worldId: world.id,
-        sessionId: session.id,
-        type: 'turn.completed',
-        actorId: employee.id,
-        actorKind: 'employee',
-        payload: { source: 'test', sourceSessionId: 'shared-runtime-session', sourceSequence: 2, traceTurnId },
-      })
-    }
+    const context = await fixture()
+    const { store, workspace, world, session, employee } = context
+    completeAgentRun(store, context, '第一轮判断摘要')
+    completeAgentRun(store, context, '第二轮判断摘要')
     const service = new WorldTraceService({ store, actions: new MemoryActions() })
-    const turns = (await service.list(world.id, { category: 'agent', actorId: employee.id, limit: 200 })).items
-      .filter((entry) => entry.summary.includes('本轮处理'))
+    const turns = (await service.list(world.id, { actorId: employee.id, limit: 200 })).items
+      .filter((entry) => entry.sourceKind === 'agent-run')
     expect(turns).toHaveLength(2)
     expect(new Set(turns.map((entry) => entry.id)).size).toBe(2)
     expect(turns.every((entry) => entry.status === 'success')).toBe(true)
@@ -213,28 +218,14 @@ describe('World Trace projection', () => {
   })
 
   it('returns only new or updated durable facts after a live checkpoint', async () => {
-    const { store, workspace, world, session, employee } = await fixture()
+    const context = await fixture()
+    const { store, world } = context
     const service = new WorldTraceService({ store, actions: new MemoryActions() })
     const checkpoint = await service.checkpoint(world.id)
-    store.appendDomainEvent({
-      workspaceId: workspace.id,
-      worldId: world.id,
-      sessionId: session.id,
-      type: 'task.started',
-      actorId: employee.id,
-      actorKind: 'employee',
-    })
-    store.appendDomainEvent({
-      workspaceId: workspace.id,
-      worldId: world.id,
-      sessionId: session.id,
-      type: 'task.completed',
-      actorId: employee.id,
-      actorKind: 'employee',
-    })
+    completeAgentRun(store, context)
     const changes = await service.changesSince(world.id, checkpoint)
-    expect(changes.filter((entry) => entry.taskId !== undefined)).toEqual([
-      expect.objectContaining({ category: 'task', status: 'success', summary: '真实任务已完成' }),
+    expect(changes.filter((entry) => entry.sourceKind === 'agent-run')).toEqual([
+      expect.objectContaining({ status: 'success', reasoningSummary: '先核对事实，再执行工具。' }),
     ])
   })
 })

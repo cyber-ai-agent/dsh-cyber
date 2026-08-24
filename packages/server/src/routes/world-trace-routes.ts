@@ -47,12 +47,22 @@ function traceQuery(search: URLSearchParams): WorldTraceQuery {
   const status = optionalEnum(search.get('status'), WORLD_TRACE_STATUSES, 'invalid_trace_status')
   const after = search.get('after')?.trim() || undefined
   const actorId = search.get('actorId')?.trim() || undefined
+  const date = search.get('date')?.trim() || undefined
+  const keyword = search.get('search')?.trim() || undefined
+  if (date !== undefined && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00`)))) {
+    throw new HttpError(422, 'invalid_trace_date', '轨迹日期格式必须为 YYYY-MM-DD')
+  }
+  if (keyword !== undefined && keyword.length > 120) {
+    throw new HttpError(422, 'invalid_trace_search', '轨迹搜索内容不能超过 120 个字符')
+  }
   return {
     ...(after === undefined ? {} : { after }),
     ...(limit === undefined ? {} : { limit }),
     ...(category === undefined ? {} : { category: category as WorldTraceCategory }),
     ...(status === undefined ? {} : { status: status as WorldTraceStatus }),
     ...(actorId === undefined ? {} : { actorId }),
+    ...(date === undefined ? {} : { date }),
+    ...(keyword === undefined ? {} : { search: keyword }),
   }
 }
 

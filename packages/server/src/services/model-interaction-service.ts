@@ -29,14 +29,17 @@ export class ModelInteractionService {
    * 记录一次对话回合级交互（source='turn'）。
    * 观测边界：模型 API 请求发生在 DSH worker 内部，服务端只能观测整轮交互
    * （开始时间、worker 返回的成功/失败、耗时、工具调用次数、最终响应摘要）。
-   * 消息数按「1 条用户 prompt + 每轮工具回填 1 条」近似；worker 内部单次请求的
-   * token 用量接口未透出，字段保持为空。
+   * 消息数按「1 条用户 prompt + 每轮工具回填 1 条」统计。Token 只记录 Harness
+   * 明确返回的真实用量，不做字符数估算。
    */
   recordTurn(input: RecordTurnInteractionInput): ModelInteractionLog {
     return this.#store.recordModelInteraction({
       workspaceId: input.workspaceId,
       ...(input.worldId === undefined ? {} : { worldId: input.worldId }),
+      ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
       ...(input.employeeId === undefined ? {} : { employeeId: input.employeeId }),
+      ...(input.workTurnId === undefined ? {} : { workTurnId: input.workTurnId }),
+      ...(input.agentRunId === undefined ? {} : { agentRunId: input.agentRunId }),
       source: 'turn',
       modelId: input.modelId,
       provider: input.provider,
@@ -49,6 +52,11 @@ export class ModelInteractionService {
       ...(input.responseCharCount === undefined ? {} : { responseCharCount: input.responseCharCount }),
       ...(input.toolCallCount === undefined ? {} : { toolCallCount: input.toolCallCount }),
       durationMs: input.durationMs,
+      ...(input.tokenUsage === undefined ? {} : {
+        tokensPrompt: input.tokenUsage.prompt,
+        tokensCompletion: input.tokenUsage.completion,
+        tokensTotal: input.tokenUsage.total,
+      }),
     })
   }
 
@@ -88,7 +96,10 @@ export class ModelInteractionService {
 export interface RecordTurnInteractionInput {
   workspaceId: string
   worldId?: string
+  sessionId?: string
   employeeId?: string
+  workTurnId?: string
+  agentRunId?: string
   modelId: string
   provider: string
   status: ModelInteractionLogStatus
@@ -99,6 +110,7 @@ export interface RecordTurnInteractionInput {
   responseCharCount?: number
   toolCallCount?: number
   durationMs: number
+  tokenUsage?: AgentTurnResult['tokenUsage']
 }
 
 export interface RecordDiscoveryInteractionInput {
@@ -159,6 +171,11 @@ export class TurnInteractionLoggingRuntime implements AgentRuntimePort {
         request.onEvent?.(event)
       },
     }
+    const traceContext = {
+      sessionId: request.conversationId,
+      ...(request.workTurnId === undefined ? {} : { workTurnId: request.workTurnId }),
+      ...(request.agentRunId === undefined ? {} : { agentRunId: request.agentRunId }),
+    }
     try {
       const result = await this.#inner.runTurn(wrapped)
       // worker 返回 turn.failed 事件但 runTurn 未抛异常时（如空回复），
@@ -168,6 +185,7 @@ export class TurnInteractionLoggingRuntime implements AgentRuntimePort {
           workspaceId: request.agent.workspaceId,
           worldId: request.agent.worldId,
           employeeId: request.agent.id,
+          ...traceContext,
           modelId,
           provider,
           status: 'failed',
@@ -178,6 +196,7 @@ export class TurnInteractionLoggingRuntime implements AgentRuntimePort {
           responseCharCount: result.finalResponse.length,
           toolCallCount,
           durationMs: Date.now() - startedAt,
+          ...(result.tokenUsage === undefined ? {} : { tokenUsage: result.tokenUsage }),
         })
         return result
       }
@@ -185,6 +204,7 @@ export class TurnInteractionLoggingRuntime implements AgentRuntimePort {
         workspaceId: request.agent.workspaceId,
         worldId: request.agent.worldId,
         employeeId: request.agent.id,
+        ...traceContext,
         modelId,
         provider,
         status: 'success',
@@ -192,6 +212,7 @@ export class TurnInteractionLoggingRuntime implements AgentRuntimePort {
         responseCharCount: result.finalResponse.length,
         toolCallCount,
         durationMs: Date.now() - startedAt,
+        ...(result.tokenUsage === undefined ? {} : { tokenUsage: result.tokenUsage }),
       })
       return result
     } catch (error) {
@@ -201,6 +222,7 @@ export class TurnInteractionLoggingRuntime implements AgentRuntimePort {
         workspaceId: request.agent.workspaceId,
         worldId: request.agent.worldId,
         employeeId: request.agent.id,
+        ...traceContext,
         modelId,
         provider,
         status: 'failed',
