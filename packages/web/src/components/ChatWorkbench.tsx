@@ -1,7 +1,9 @@
 import {
+  ArrowUp,
   BracketsCurly,
   CaretDown,
   CircleNotch,
+  ClockCounterClockwise,
   File as FileIcon,
   PaperPlaneRight,
   Paperclip,
@@ -41,9 +43,13 @@ interface ChatWorkbenchProps {
   onOpenArtifact(): void
   onRecruit(): void
   onOpenPluginMarket?(): void
+  onOpenHistory?(): void
+  hasOlderMessages?: boolean
+  loadingOlderMessages?: boolean
+  onLoadOlderMessages?(): void
 }
 
-export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, installedPlugins = [], sending = false, pendingCount = 0, queuedCount = 0, draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRecruit, onOpenPluginMarket }: ChatWorkbenchProps) {
+export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, installedPlugins = [], sending = false, pendingCount = 0, queuedCount = 0, draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages }: ChatWorkbenchProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -54,8 +60,11 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
   const mention = useMemo(() => currentMention(draft), [draft])
   const suggestions = useMemo(() => mention === undefined ? [] : employees.filter((employee) => employee.displayName.includes(mention)).slice(0, 6), [employees, mention])
   const participantEmployees = participantIds.map((employeeId) => employees.find((employee) => employee.id === employeeId)).filter((employee): employee is CyberEmployee => employee !== undefined)
-  const conversationTitle = session?.title ?? intent?.title ?? '选择角色开始对话'
   const conversationKind = session?.kind ?? intent?.kind
+  const directEmployee = conversationKind === 'direct' ? participantEmployees[0] : undefined
+  const conversationTitle = conversationKind === 'direct'
+    ? directEmployee?.displayName ?? displayDirectConversationTitle(session?.title ?? intent?.title) ?? '选择角色开始对话'
+    : session?.title ?? intent?.title ?? '选择角色开始对话'
   const visibleMessages = useMemo(() => messages.filter(isChatMessage), [messages])
 
   useEffect(() => {
@@ -117,18 +126,25 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
     <section className="chat-workbench" aria-label="当前世界多角色会话">
       <header className="chat-header">
         <div className="chat-header__identity">
-          <span className="chat-header__avatars" aria-hidden="true">{participantEmployees.slice(0, 3).map((employee) => <Avatar key={employee.id} index={employee.avatarIndex} size="sm" label={employee.displayName} />)}</span>
-          <span><h1>{conversationTitle}</h1><p>{conversationKind === undefined ? `从左侧会话列表进入私聊，或创建群聊` : `${conversationKind === 'group' ? '群聊' : '私聊'} · ${participantEmployees.length} 名成员 · ${world.name}`}</p></span>
+          <span className="chat-header__avatars" aria-hidden={directEmployee === undefined}>
+            {directEmployee !== undefined
+              ? <button className="chat-header__avatar-button" type="button" onClick={() => onOpenDossier(directEmployee.id)} aria-label={`打开${directEmployee.displayName}角色`} title={`打开${directEmployee.displayName}角色`}><Avatar index={directEmployee.avatarIndex} size="sm" label={directEmployee.displayName} /></button>
+              : participantEmployees.slice(0, 3).map((employee) => <Avatar key={employee.id} index={employee.avatarIndex} size="sm" label={employee.displayName} />)}
+          </span>
+           <span><h1>{conversationTitle}</h1><p>{conversationKind === undefined ? `从左侧会话列表进入私聊，或创建群聊` : `${conversationKind === 'group' ? '群聊' : '私聊'} · ${world.name}`}</p></span>
         </div>
-        <div className="chat-header__count"><span>{visibleMessages.length} 条消息</span></div>
+        <div className="chat-header__actions">
+          {onOpenHistory === undefined || session === undefined ? null : <button className="chat-header__history" type="button" aria-label="查看历史消息" title="查看历史消息" onClick={onOpenHistory}><ClockCounterClockwise size={19} /><span>历史消息</span></button>}
+        </div>
       </header>
 
       <div className="message-scroll" ref={scrollRef} aria-live="polite" aria-busy={pendingCount > 0 || sending}>
+        {hasOlderMessages && onLoadOlderMessages !== undefined ? <button className="message-history-more" type="button" disabled={loadingOlderMessages} onClick={onLoadOlderMessages}>{loadingOlderMessages ? <CircleNotch size={15} className="spin" /> : <ArrowUp size={15} />}<span>{loadingOlderMessages ? '正在加载更早消息…' : '加载更早消息'}</span></button> : null}
         {visibleMessages.length === 0 ? (
           <div className="conversation-empty">
             <TerminalWindow size={34} />
             <h2>{employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? '群聊已准备好' : conversationKind === 'direct' ? `开始与${participantEmployees[0]?.displayName ?? experience.personLabel}对话` : '选择会话开始互动'}</h2>
-            <p>{employees.length === 0 ? experience.emptyCopy : conversationKind === 'group' ? '发送第一条消息后，群聊和多人协作才会正式创建。关闭或切换不会让角色提前进入会议状态。' : conversationKind === 'direct' ? '历史记录会保留在当前世界；发送消息后角色才会进入真实运行过程。' : '左侧只保留会话：每个角色固定一个私聊，也可以创建多人群聊；角色新增与管理统一在右侧档案。'}</p>
+            <p>{employees.length === 0 ? experience.emptyCopy : conversationKind === 'group' ? '发送第一条消息后，群聊和多人协作才会正式创建。关闭或切换不会让角色提前进入会议状态。' : conversationKind === 'direct' ? '历史记录会保留在当前世界；发送消息后角色才会进入真实运行过程。' : '左侧只保留会话：每个角色固定一个私聊，也可以创建多人群聊；角色新增与管理统一在右侧角色。'}</p>
           </div>
         ) : visibleMessages.map((message, index) => {
           const employee = employees.find((item) => item.id === message.senderId)
@@ -137,7 +153,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
           if (message.kind === 'system') return <div key={message.id} className="chat-system-notice" role="status">{message.content}</div>
           return (
             <article key={message.id} className={`message${owner ? ' message--owner' : ''}${streaming ? ' message--streaming' : ''}`}>
-              {owner ? null : <button className="avatar-button" type="button" onClick={() => employee && onOpenDossier(employee.id)} aria-label={`查看${employee?.displayName ?? experience.personLabel}档案`}><Avatar index={employee?.avatarIndex ?? 7} label={employee?.displayName ?? '角色'} /></button>}
+              {owner ? null : <button className="avatar-button" type="button" onClick={() => employee && onOpenDossier(employee.id)} aria-label={`打开${employee?.displayName ?? experience.personLabel}角色`}><Avatar index={employee?.avatarIndex ?? 7} label={employee?.displayName ?? '角色'} /></button>}
               <div className="message__body">
                 <header className="message__meta">{owner ? <span className="sr-only">我的消息</span> : <><strong>{employee?.displayName ?? experience.personLabel}</strong><span>{employee?.role}</span></>}<time>{displayTime(message)}</time></header>
                 <div className="message__content">{streaming && message.content.length === 0 ? <span className="stream-placeholder">正在生成回复…</span> : <RichText value={message.content} />}{streaming ? <span className="stream-cursor" aria-hidden="true" /> : null}</div>
@@ -164,6 +180,12 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
       </div></div>
     </section>
   )
+}
+
+function displayDirectConversationTitle(title: string | undefined): string | undefined {
+  if (title === undefined) return undefined
+  const displayTitle = title.replace(/^与\s*/, '').replace(/\s*对话$/, '').trim()
+  return displayTitle.length > 0 ? displayTitle : undefined
 }
 
 function PluginPicker({ plugins, draft, onDraftChange, onOpenMarket, onFocus }: { plugins: InstalledPluginCommand[]; draft: string; onDraftChange(value: string): void; onOpenMarket?: () => void; onFocus(): void }) {

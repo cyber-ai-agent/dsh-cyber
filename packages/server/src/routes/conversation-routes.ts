@@ -232,7 +232,36 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     const session = store.getSession(params[0]!)
     if (session === undefined) throw new HttpError(404, 'session_not_found', 'Session not found')
     await worldAccess.assertUnlocked(session.worldId, request)
-    writeJson(response, 200, { items: store.listMessages(session.id, nonNegativeInteger(url.searchParams.get('after'))) })
+    // Keep the original after-cursor response for existing stream/recovery clients.
+    // New chat/history clients use bounded pages so opening a long conversation never
+    // materializes the complete transcript in the browser.
+    const afterParam = url.searchParams.get('after')
+    const hasPageOptions = ['limit', 'before', 'page', 'q', 'search', 'date', 'view'].some((key) => url.searchParams.has(key))
+    if (afterParam !== null && !hasPageOptions) {
+      writeJson(response, 200, { items: store.listMessages(session.id, nonNegativeInteger(afterParam)) })
+      return
+    }
+    const limit = queryPositiveInteger(url.searchParams.get('limit'), 20) ?? 20
+    const before = queryNonNegativeInteger(url.searchParams.get('before'))
+    const page = queryPositiveInteger(url.searchParams.get('page'))
+    const search = optionalString(url.searchParams.get('q') ?? url.searchParams.get('search'))
+    const date = optionalString(url.searchParams.get('date'))
+    if (date !== undefined && !isIsoCalendarDate(date)) {
+      throw new HttpError(422, 'invalid_message_date', '日期必须使用 YYYY-MM-DD 格式')
+    }
+    if (search !== undefined && search.length > 160) {
+      throw new HttpError(422, 'message_search_too_long', '搜索内容不能超过 160 个字符')
+    }
+    const result = store.listMessagesPage(session.id, {
+      limit,
+      ...(before === undefined ? {} : { beforeSequence: before }),
+      ...(afterParam === null ? {} : { afterSequence: nonNegativeInteger(afterParam) }),
+      ...(page === undefined ? {} : { page }),
+      ...(search === undefined ? {} : { search }),
+      ...(date === undefined ? {} : { date }),
+      ...(url.searchParams.get('view') === 'chat' ? { chatOnly: true } : {}),
+    })
+    writeJson(response, 200, result)
   })
 
   router.get(/^\/api\/sessions\/([^/]+)\/turns$/, async ({ request, response, params }) => {
@@ -255,6 +284,27 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     await worldAccess.assertUnlocked(session.worldId, request)
     writeJson(response, 200, { items: store.listParticipants(session.id) })
   })
+}
+
+function queryPositiveInteger(value: string | null, fallback?: number): number | undefined {
+  if (value === null) return fallback
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed <= 0) throw new HttpError(422, 'invalid_message_page', '分页参数必须是正整数')
+  return parsed
+}
+
+function queryNonNegativeInteger(value: string | null): number | undefined {
+  if (value === null) return undefined
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 0) throw new HttpError(422, 'invalid_message_cursor', '消息游标必须是非负整数')
+  return parsed
+}
+
+function isIsoCalendarDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const [year, month, day] = value.split('-').map(Number)
+  const parsed = new Date(Date.UTC(year!, month! - 1, day!))
+  return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month! - 1 && parsed.getUTCDate() === day
 }
 
 async function publishTraceChanges(

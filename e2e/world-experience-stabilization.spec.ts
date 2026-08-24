@@ -69,8 +69,8 @@ test('shows existing role instances and warns before creating a duplicate name',
   await ensureWorld(page)
   await expect(page.getByRole('button', { name: '与管家私聊' })).toBeVisible()
 
-  const dock = page.getByRole('region', { name: '世界与角色档案侧边栏' })
-  await dock.getByRole('button', { name: '档案', exact: true }).click()
+  const dock = page.getByRole('region', { name: '世界与角色侧边栏' })
+  await dock.getByRole('button', { name: '角色', exact: true }).click()
   await dock.getByRole('button', { name: '新增角色', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: '新增角色' })
   await expect(dialog).toBeVisible()

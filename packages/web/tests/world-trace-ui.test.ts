@@ -2,7 +2,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 
-import type { WorkMessage, World, WorldTraceEntry } from '@dsh-cyber/contracts'
+import type { WorkMessage, WorkSession, World, WorldTraceEntry } from '@dsh-cyber/contracts'
 
 import { ArtifactDock } from '../src/components/ArtifactDock.js'
 import { ChatWorkbench, isChatMessage } from '../src/components/ChatWorkbench.js'
@@ -15,6 +15,17 @@ const world: World = {
   name: '测试世界',
   templateId: 'personal-world',
   status: 'active',
+  createdAt: '2026-08-23T00:00:00.000Z',
+  updatedAt: '2026-08-23T00:00:00.000Z',
+}
+
+const session: WorkSession = {
+  id: 'session-1',
+  workspaceId: world.workspaceId,
+  worldId: world.id,
+  kind: 'direct',
+  title: '与测试角色对话',
+  status: 'open',
   createdAt: '2026-08-23T00:00:00.000Z',
   updatedAt: '2026-08-23T00:00:00.000Z',
 }
@@ -65,10 +76,50 @@ describe('Chat final-result projection', () => {
     expect(html).not.toContain('不应出现在聊天中的推理')
     expect(html).not.toContain('工具调用')
   })
+
+  it('opens history from a compact header action instead of rendering a message counter', () => {
+    const html = renderToStaticMarkup(createElement(ChatWorkbench, {
+      demoMode: false,
+      world,
+      session,
+      messages: [message('user', '当前消息')],
+      employees: [],
+      draft: '',
+      onDraftChange: () => undefined,
+      onSend: async () => undefined,
+      onUploadAttachment: async () => { throw new Error('not used') },
+      onOpenDossier: () => undefined,
+      onOpenArtifact: () => undefined,
+      onRecruit: () => undefined,
+      onOpenHistory: () => undefined,
+    }))
+    expect(html).toContain('aria-label="查看历史消息"')
+    expect(html).toContain('历史消息')
+    expect(html).toContain('<h1>测试角色</h1>')
+    expect(html).not.toContain('条消息')
+  })
+
+  it('keeps the empty center state actionable without exposing an empty history entry', () => {
+    const html = renderToStaticMarkup(createElement(ChatWorkbench, {
+      demoMode: false,
+      world,
+      messages: [],
+      employees: [],
+      draft: '',
+      onDraftChange: () => undefined,
+      onSend: async () => undefined,
+      onUploadAttachment: async () => { throw new Error('not used') },
+      onOpenDossier: () => undefined,
+      onOpenArtifact: () => undefined,
+      onRecruit: () => undefined,
+    }))
+    expect(html).toContain('选择角色开始对话')
+    expect(html).not.toContain('aria-label="查看历史消息"')
+  })
 })
 
 describe('Trace dock and live merge', () => {
-  it('keeps 世界、档案、轨迹、日程 in the requested dock order', () => {
+  it('keeps 世界、角色、轨迹、日程 in the requested dock order', () => {
     const html = renderToStaticMarkup(createElement(ArtifactDock, {
       demoMode: false,
       activeTab: 'trace',
@@ -85,11 +136,11 @@ describe('Trace dock and live merge', () => {
       onInvite: () => undefined,
     }))
     expect(html).toContain('世界')
-    expect(html).toContain('档案')
+    expect(html).toContain('角色')
     expect(html).toContain('轨迹')
     expect(html).toContain('日程')
-    expect(html.indexOf('世界')).toBeLessThan(html.indexOf('档案'))
-    expect(html.indexOf('档案')).toBeLessThan(html.indexOf('轨迹'))
+    expect(html.indexOf('世界')).toBeLessThan(html.indexOf('角色'))
+    expect(html.indexOf('角色')).toBeLessThan(html.indexOf('轨迹'))
     expect(html.indexOf('轨迹')).toBeLessThan(html.indexOf('日程'))
     expect(html).toContain('轨迹内容')
     expect(html).not.toContain('文件')

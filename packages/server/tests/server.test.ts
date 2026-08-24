@@ -1219,6 +1219,37 @@ it('searches verified market packages and activates installed plugin and talent 
     const afterRollback = await json(origin, '/api/system/updates')
     expect(afterRollback.body.activeRuntime).toBeUndefined()
   })
+
+  it('returns bounded chat pages and searchable dated history', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-message-page-'))
+    const { server, origin } = await start(stateRoot)
+    const { workspace, world } = await createWorld(origin)
+    const session = server.store.createSession({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      kind: 'direct',
+      title: '历史分页',
+      participants: [{ participantId: 'owner', kind: 'owner' }],
+    })
+    for (let index = 1; index <= 25; index += 1) {
+      server.store.appendMessage({
+        sessionId: session.id,
+        senderId: 'owner',
+        senderKind: 'owner',
+        kind: 'user',
+        content: `可搜索消息 ${index}`,
+      })
+    }
+    const latest = await json(origin, `/api/sessions/${session.id}/messages?view=chat&limit=20`)
+    expect(latest.response.status).toBe(200)
+    expect(latest.body.items).toHaveLength(20)
+    expect(latest.body.hasMore).toBe(true)
+    expect(latest.body.items[0].sequence).toBe(6)
+    const history = await json(origin, `/api/sessions/${session.id}/messages?view=chat&limit=20&page=1&q=消息%202`)
+    expect(history.response.status).toBe(200)
+    expect(history.body.total).toBe(7)
+    expect(history.body.items.every((item: { content: string }) => item.content.includes('消息 2'))).toBe(true)
+  })
 })
 
 function rawStatus(

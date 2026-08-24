@@ -29,7 +29,7 @@ interface EmployeeDossierProps {
 }
 
 const sections: Array<{ id: DossierSection; label: string; icon: typeof IdentificationCard }> = [
-  { id: 'profile', label: '档案', icon: IdentificationCard },
+  { id: 'profile', label: '角色', icon: IdentificationCard },
   { id: 'skills', label: '技能', icon: Certificate },
   { id: 'milestones', label: '事迹', icon: CalendarDots },
   { id: 'journal', label: '日志', icon: BookOpenText },
@@ -40,14 +40,16 @@ export function EmployeeDossier({ dossier, employees, avatarIndex, world, onDire
   const [section, setSection] = useState<DossierSection>('profile')
   const experience = worldExperience(world)
   const roleplay = experience.kind === 'tavern'
+  const backLabel = experience.kind === 'company' ? '全员角色' : experience.peopleLabel === '角色' ? '全部角色' : `全${experience.peopleLabel}角色`
+  const identityLabel = experience.personLabel === '角色' ? '角色' : `独立${experience.personLabel}`
   const verified = dossier.skills.filter((skill) => skill.status === 'verified').length
   const profile = dossier.profile
 
   return (
     <div className="dossier">
       <div className="dossier-breadcrumb">
-        <button type="button" onClick={onBack}><ArrowLeft size={14} />{experience.kind === 'company' ? '全员档案' : `全${experience.peopleLabel}档案`}</button>
-        <span>{dossier.employee.displayName} / 独立{experience.personLabel}档案</span>
+        <button type="button" onClick={onBack}><ArrowLeft size={14} />{backLabel}</button>
+        <span>{dossier.employee.displayName} / {identityLabel}</span>
       </div>
       <header className="dossier-hero">
         <button className="avatar-edit-button" type="button" aria-label={`修改${dossier.employee.displayName}的名字和头像`} onClick={onManage}>
@@ -71,7 +73,7 @@ export function EmployeeDossier({ dossier, employees, avatarIndex, world, onDire
         <div><strong>{dossier.journals.length}</strong><span>{roleplay ? '角色日志' : '工作日志'}</span></div>
       </div>
 
-      <nav className="dossier-tabs" aria-label={`${experience.personLabel}档案栏目`}>
+      <nav className="dossier-tabs" aria-label={`${experience.personLabel}栏目`}>
         {sections.map((item) => {
           const Icon = item.icon
           return (
@@ -93,7 +95,7 @@ export function EmployeeDossier({ dossier, employees, avatarIndex, world, onDire
           <div className="profile-section">
             <div className="profile-row"><span>{roleplay ? '入场时间' : '入职时间'}</span><strong>{formatDate(dossier.employee.createdAt)}</strong></div>
             <div className="profile-row"><span>生日</span><strong>{profile?.birthday ?? '未设置'}</strong></div>
-            <div className="profile-block"><span>身份背景</span><p>{profile?.background ?? '等待建立角色档案。'}</p></div>
+            <div className="profile-block"><span>身份背景</span><p>{profile?.background ?? '等待建立角色信息。'}</p></div>
             <div className="profile-block">
               <span>性格标签</span>
               <div className="trait-list">{profile?.personalityTraits.map((trait) => <span key={trait}>{trait}</span>)}</div>
