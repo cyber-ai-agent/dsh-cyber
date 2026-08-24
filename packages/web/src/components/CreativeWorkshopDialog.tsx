@@ -116,7 +116,7 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
         <header className="dialog-header">
           <div>
             <h2 id="creative-workshop-title">创意工坊</h2>
-            <p>本地世界项目库。世界、角色身体、Agent 身份和 Skill 请求分别建模，再由运行时组合。</p>
+            <p>用分步引导创建世界、初始角色和能力范围。草稿与生成结果都保存在当前设备。</p>
           </div>
           <button className="icon-button" type="button" aria-label="关闭创意工坊" onClick={onClose}><X size={18} /></button>
         </header>

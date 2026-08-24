@@ -1,23 +1,20 @@
 import { CheckCircle, LockKey, Palette, SlidersHorizontal, UserCircle, WarningCircle, X } from '@phosphor-icons/react'
 import { useEffect, useRef, useState } from 'react'
-import type { AgentPermissionMode, ModelProfile, ReasoningEffort, World, WorldAccessSummary, WorldSettings } from '@dsh-cyber/contracts'
+import type { AgentPermissionMode, EmployeeInstance, ModelProfile, ReasoningEffort, World, WorldSettings } from '@dsh-cyber/contracts'
 
 interface WorldSettingsDialogProps {
   world: World
   value: WorldSettings
-  access: WorldAccessSummary
   models: ModelProfile[]
+  employees: EmployeeInstance[]
   saving: boolean
   onClose(): void
   onSave(value: WorldSettings): Promise<void>
-  onSetPassword(password: string): Promise<void>
-  onClearPassword(): Promise<void>
-  onLock(): Promise<void>
+  onSetAdministrator(employeeId: string): Promise<void>
 }
 
-export function WorldSettingsDialog({ world, value, access, models, saving, onClose, onSave, onSetPassword, onClearPassword, onLock }: WorldSettingsDialogProps) {
+export function WorldSettingsDialog({ world, value, models, employees, saving, onClose, onSave, onSetAdministrator }: WorldSettingsDialogProps) {
   const [draft, setDraft] = useState(value)
-  const [password, setPassword] = useState('')
   const [notice, setNotice] = useState<string>()
   const [error, setError] = useState<string>()
   const [fullAccessConfirmed, setFullAccessConfirmed] = useState(false)
@@ -58,22 +55,11 @@ export function WorldSettingsDialog({ world, value, access, models, saving, onCl
     }
   }
 
-  const setPasswordAction = async () => {
-    setError(undefined)
-    try {
-      await onSetPassword(password)
-      setPassword('')
-      setNotice('访问密码已设置')
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '密码设置失败')
-    }
-  }
-
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && close()}>
       <section className="world-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="world-settings-title">
         <header className="dialog-header">
-          <div><h2 id="world-settings-title">世界设置 · {world.name}</h2><p>设定、视觉、模型与访问锁只属于当前世界。修改视觉会立即预览，取消不会保存。</p></div>
+          <div><h2 id="world-settings-title">世界设置 · {world.name}</h2><p>设定、管理员、视觉和运行策略只属于当前世界。修改视觉会立即预览，取消不会保存。</p></div>
           <button className="icon-button" onClick={close} aria-label="关闭"><X size={18}/></button>
         </header>
 
@@ -89,6 +75,7 @@ export function WorldSettingsDialog({ world, value, access, models, saving, onCl
 
           <fieldset>
             <legend><UserCircle size={16}/> 你与角色</legend>
+            <label>世界管理员<select value={world.administratorEmployeeId ?? ''} onChange={(event)=>void onSetAdministrator(event.target.value)}><option value="" disabled>选择本世界角色</option>{employees.filter((employee)=>employee.worldId===world.id && employee.status!=='archived').map((employee)=><option key={employee.id} value={employee.id}>{employee.displayName} · {employee.role}</option>)}</select><small>管理员只在当前世界生效，可以修改本世界其他角色的设定。</small></label>
             <label>你的名字<input value={draft.userIdentity.displayName} onChange={(event)=>setDraft({...draft,userIdentity:{...draft.userIdentity,displayName:event.target.value}})} placeholder="你希望角色怎么识别你"/></label>
             <label>你在这个世界的身份<input value={draft.userIdentity.worldRole} onChange={(event)=>setDraft({...draft,userIdentity:{...draft.userIdentity,worldRole:event.target.value}})} placeholder="主人 / 院长 / 旅人 / 负责人"/></label>
             <label>角色默认如何称呼你<input value={draft.userIdentity.addressAs} onChange={(event)=>setDraft({...draft,userIdentity:{...draft.userIdentity,addressAs:event.target.value}})} placeholder="主人 / 院长 / 名字"/></label>
@@ -97,13 +84,8 @@ export function WorldSettingsDialog({ world, value, access, models, saving, onCl
 
           <fieldset className="world-visual-settings">
             <legend><Palette size={16}/> 视觉</legend>
-            <div className="color-setting-row">
-              <ColorControl label="强调色" value={draft.appearance.accentColor} onChange={(value)=>setDraft({...draft,appearance:{...draft.appearance,accentColor:value}})} />
-              <ColorControl label="背景" value={draft.appearance.pageBackground} onChange={(value)=>setDraft({...draft,appearance:{...draft.appearance,pageBackground:value}})} />
-              <ColorControl label="角色气泡" value={draft.appearance.characterBubbleColor} onChange={(value)=>setDraft({...draft,appearance:{...draft.appearance,characterBubbleColor:value}})} />
-              <ColorControl label="你的气泡" value={draft.appearance.ownerBubbleColor} onChange={(value)=>setDraft({...draft,appearance:{...draft.appearance,ownerBubbleColor:value}})} />
-            </div>
-            <label className="radius-setting"><span>对话框圆角 <strong>{draft.appearance.bubbleRadius}px</strong></span><input type="range" min="0" max="28" value={draft.appearance.bubbleRadius} onChange={(event)=>setDraft({...draft,appearance:{...draft.appearance,bubbleRadius:Number(event.target.value)}})}/></label>
+            <p className="setting-help">选择统一设计的完整配色，不需要逐个调整颜色值。</p>
+            <div className="world-theme-presets">{WORLD_APPEARANCE_PRESETS.map((preset)=><button key={preset.id} type="button" className={appearanceMatches(draft.appearance,preset.appearance)?'is-active':''} onClick={()=>setDraft({...draft,appearance:{...draft.appearance,...preset.appearance}})}><span style={{background:preset.appearance.pageBackground,borderColor:preset.appearance.accentColor}}><i style={{background:preset.appearance.ownerBubbleColor}}/><i style={{background:preset.appearance.characterBubbleColor}}/></span><div><strong>{preset.label}</strong><small>{preset.description}</small></div></button>)}</div>
             <div className="world-chat-preview" aria-label="聊天视觉预览">
               <span className="is-character">角色：欢迎来到这个世界。</span>
               <span className="is-owner">你：这里的样式会跟着设置实时变化。</span>
@@ -117,16 +99,6 @@ export function WorldSettingsDialog({ world, value, access, models, saving, onCl
             <label>任务权限<select value={draft.runtime.permissionMode} onChange={(event)=>{ const permissionMode=event.target.value as AgentPermissionMode; setDraft({...draft,runtime:{permissionMode}}); if(permissionMode!=='danger-full-access') setFullAccessConfirmed(false) }}><option value="read-only">只读：查看和搜索当前世界文件</option><option value="workspace-write">世界读写：修改当前世界目录</option><option value="danger-full-access">完整访问：读写此电脑上可访问的文件</option></select></label>
             {draft.runtime.permissionMode === 'danger-full-access' ? <label className="permission-risk-confirm"><input type="checkbox" checked={fullAccessConfirmed} onChange={(event)=>setFullAccessConfirmed(event.target.checked)}/><span><strong>我确认允许角色访问当前世界目录之外的文件</strong><small>这是 DSH 原生完整访问模式。只用于当前世界的手动任务；持久化计划不会使用此权限。</small></span></label> : null}
             <p className="setting-help">权限只应用于当前世界，下次对话生效。需要跨目录工作时使用完整访问，并在任务中写明目标路径。</p>
-          </fieldset>
-
-          <fieldset>
-            <legend><LockKey size={16}/> 隐私</legend>
-            <p>{access.passwordEnabled ? '当前世界已启用本地访问锁。密码不会明文保存。' : '可为当前世界单独设置访问密码。第一阶段是本机访问锁，不等同磁盘加密。'}</p>
-            {access.passwordEnabled ? (
-              <div className="settings-inline-actions"><button className="secondary-button" onClick={()=>void onLock()}>立即锁定</button><button className="text-button" onClick={()=>void onClearPassword()}>移除密码</button></div>
-            ) : (
-              <div className="settings-inline-actions"><input type="password" value={password} onChange={(event)=>setPassword(event.target.value)} placeholder="至少 4 位"/><button className="secondary-button" disabled={password.length<4} onClick={()=>void setPasswordAction()}>设置密码</button></div>
-            )}
           </fieldset>
 
           <fieldset className="world-settings-advanced">
@@ -150,14 +122,14 @@ export function WorldSettingsDialog({ world, value, access, models, saving, onCl
   )
 }
 
-function ColorControl({ label, value, onChange }: { label: string; value: string; onChange(value: string): void }) {
-  const normalized = /^#[0-9a-fA-F]{6}$/.test(value) ? value : '#000000'
-  return (
-    <label className="color-control">
-      <span>{label}</span>
-      <span className="color-control__input"><input type="color" value={normalized} onChange={(event)=>onChange(event.target.value)}/><code>{value.toUpperCase()}</code></span>
-    </label>
-  )
+const WORLD_APPEARANCE_PRESETS = [
+  { id:'graphite', label:'石墨金', description:'深色中性表面与克制琥珀强调', appearance:{accentColor:'#d7a52a',pageBackground:'#080d10',panelBackground:'#0d1419',ownerBubbleColor:'#263629',characterBubbleColor:'#141c22',textColor:'#edf2f4',mutedTextColor:'#84919a'}},
+  { id:'deep-ocean', label:'深海蓝', description:'冷灰背景与清晰蓝色状态提示', appearance:{accentColor:'#67a9c4',pageBackground:'#081017',panelBackground:'#101b22',ownerBubbleColor:'#18323d',characterBubbleColor:'#13232c',textColor:'#e7eef1',mutedTextColor:'#91a2ab'}},
+  { id:'warm-paper', label:'暖灰日光', description:'低眩光浅色表面与深色正文', appearance:{accentColor:'#806321',pageBackground:'#e7e7e2',panelBackground:'#f1f0eb',ownerBubbleColor:'#ded6bd',characterBubbleColor:'#f7f6f2',textColor:'#252a27',mutedTextColor:'#626b65'}},
+] as const
+
+function appearanceMatches(appearance: WorldSettings['appearance'], candidate: typeof WORLD_APPEARANCE_PRESETS[number]['appearance']): boolean {
+  return appearance.accentColor === candidate.accentColor && appearance.pageBackground === candidate.pageBackground && appearance.panelBackground === candidate.panelBackground
 }
 
 const reasoningOptions: Array<[ReasoningEffort, string]> = [

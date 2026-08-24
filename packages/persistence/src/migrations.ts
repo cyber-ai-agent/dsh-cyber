@@ -769,6 +769,31 @@ const MIGRATIONS: readonly Migration[] = [
         ON world_package_instances(world_id, status, created_at, id);
     `,
   },
+  {
+    version: 19,
+    name: 'world-default-administrator',
+    sql: `
+      ALTER TABLE worlds
+        ADD COLUMN administrator_employee_id TEXT
+        REFERENCES employee_instances(id) ON DELETE SET NULL;
+      CREATE INDEX worlds_administrator_idx
+        ON worlds(administrator_employee_id)
+        WHERE administrator_employee_id IS NOT NULL;
+      UPDATE worlds
+      SET administrator_employee_id = (
+        SELECT employee_instances.id
+        FROM employee_instances
+        WHERE employee_instances.world_id = worlds.id
+          AND employee_instances.status <> 'archived'
+        ORDER BY
+          CASE WHEN employee_instances.blueprint_id = 'core.butler' THEN 0 ELSE 1 END,
+          employee_instances.created_at,
+          employee_instances.id
+        LIMIT 1
+      )
+      WHERE administrator_employee_id IS NULL;
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {

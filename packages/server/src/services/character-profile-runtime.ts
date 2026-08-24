@@ -8,7 +8,7 @@ import type { CharacterSkillAdapterRegistry } from '../skills/skill-adapter.js'
 
 type CharacterRuntimeStore = Pick<
   SqliteStore,
-  'getEmployee' | 'getEmployeeRevision' | 'getEmployeeProfile'
+  'getEmployee' | 'getEmployeeRevision' | 'getEmployeeProfile' | 'getWorld'
 >
 
 export class CharacterProfileRuntime implements AgentRuntimePort {
@@ -33,7 +33,11 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
     const profile = this.#store.getEmployeeProfile(agent.id)
 
     const recipeInstructions = this.#skills?.instructionsFor(revision.skillGrants) ?? []
-    const persona = profile === undefined ? revision.persona : composeCharacterPersona(revision.persona, profile)
+    const profiledPersona = profile === undefined ? revision.persona : composeCharacterPersona(revision.persona, profile)
+    const persona = composeWorldAdministratorPersona(
+      profiledPersona,
+      this.#store.getWorld(agent.worldId)?.administratorEmployeeId === agent.id,
+    )
     return this.#inner.runTurn({
       ...request,
       agent,
@@ -52,6 +56,11 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
 export function composeSkillRecipes(persona: string, instructions: readonly string[]): string {
   if (instructions.length === 0) return persona
   return `${persona.trim()}\n\n[已授权的工作方法]\n${instructions.map((item) => `- ${item}`).join('\n')}`
+}
+
+export function composeWorldAdministratorPersona(persona: string, isAdministrator: boolean): string {
+  if (!isAdministrator) return persona
+  return `${persona.trim()}\n\n[世界管理员职责]\n你是当前世界的管理员。你可以在明确授权的角色管理动作中调整本世界其他角色的设定与权限；不得读取或修改其他世界的角色。`
 }
 
 export function composeCharacterPersona(basePersona: string, profile: EmployeeProfile): string {

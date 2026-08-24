@@ -1228,6 +1228,43 @@ export class SqliteStore {
     return row ? mapWorld(row) : undefined
   }
 
+  setWorldAdministrator(worldId: string, employeeId: string, actorId = 'owner'): World {
+    this.#assertWritable()
+    const world = this.#requireWorld(worldId)
+    const employee = this.#requireEmployee(employeeId)
+    if (employee.worldId !== world.id || employee.workspaceId !== world.workspaceId || employee.status === 'archived') {
+      throw new PersistenceError('World administrator must be an active character in the same world')
+    }
+    const now = this.#clock()
+    return this.#transaction(() => {
+      this.database.prepare(
+        'UPDATE worlds SET administrator_employee_id = ?, updated_at = ? WHERE id = ?',
+      ).run(employee.id, now, world.id)
+      this.#appendEvent({
+        workspaceId: world.workspaceId,
+        worldId: world.id,
+        type: 'world.administrator.changed',
+        actorId,
+        actorKind: actorId === 'owner' ? 'owner' : 'employee',
+        payload: { worldId: world.id, administratorEmployeeId: employee.id },
+      })
+      return this.#requireWorld(world.id)
+    })
+  }
+
+  isWorldAdministrator(worldId: string, employeeId: string): boolean {
+    return this.getWorld(worldId)?.administratorEmployeeId === employeeId
+  }
+
+  canManageEmployee(actorEmployeeId: string, targetEmployeeId: string): boolean {
+    const actor = this.getEmployee(actorEmployeeId)
+    const target = this.getEmployee(targetEmployeeId)
+    if (actor === undefined || target === undefined || actor.status === 'archived' || target.status === 'archived') return false
+    return actor.worldId === target.worldId
+      && actor.workspaceId === target.workspaceId
+      && this.isWorldAdministrator(actor.worldId, actor.id)
+  }
+
   listWorlds(workspaceId: string, includeArchived = false): World[] {
     const sql = includeArchived
       ? 'SELECT * FROM worlds WHERE workspace_id = ? ORDER BY created_at, id'
@@ -1374,6 +1411,11 @@ export class SqliteStore {
     return this.#transaction(() => {
       this.#insertEmployee(employee)
       this.#insertRevision(revision)
+      if (world.administratorEmployeeId === undefined) {
+        this.database.prepare(
+          'UPDATE worlds SET administrator_employee_id = ?, updated_at = ? WHERE id = ? AND administrator_employee_id IS NULL',
+        ).run(employee.id, now, world.id)
+      }
       this.database
         .prepare(
           `INSERT INTO employee_profile_revisions
@@ -1489,6 +1531,29 @@ export class SqliteStore {
            SET status = 'archived', archived_at = ?, updated_at = ? WHERE id = ?`,
         )
         .run(now, now, employee.id)
+      const world = this.#requireWorld(employee.worldId)
+      if (world.administratorEmployeeId === employee.id) {
+        const successorRow = this.database
+          .prepare(
+            `SELECT id FROM employee_instances
+             WHERE world_id = ? AND status <> 'archived' AND id <> ?
+             ORDER BY CASE WHEN blueprint_id = 'core.butler' THEN 0 ELSE 1 END, created_at, id
+             LIMIT 1`,
+          )
+          .get(employee.worldId, employee.id) as { id: string } | undefined
+        const successorId = successorRow?.id ?? null
+        this.database
+          .prepare('UPDATE worlds SET administrator_employee_id = ?, updated_at = ? WHERE id = ?')
+          .run(successorId, now, employee.worldId)
+        this.#appendEvent({
+          workspaceId: employee.workspaceId,
+          worldId: employee.worldId,
+          type: 'world.administrator.changed',
+          actorId,
+          actorKind: actorId === 'owner' ? 'owner' : 'employee',
+          payload: { worldId: employee.worldId, administratorEmployeeId: successorId },
+        })
+      }
       this.#appendEvent({
         workspaceId: employee.workspaceId,
         worldId: employee.worldId,
@@ -4145,7 +4210,7 @@ function mapWorkspace(row: object): Workspace {
 
 function mapWorld(row: object): World {
   const value = row as Record<string, unknown>
-  return {
+  const world: World = {
     id: String(value.id),
     workspaceId: String(value.workspace_id),
     name: String(value.name),
@@ -4154,6 +4219,8 @@ function mapWorld(row: object): World {
     createdAt: String(value.created_at),
     updatedAt: String(value.updated_at),
   }
+  if (typeof value.administrator_employee_id === 'string') world.administratorEmployeeId = value.administrator_employee_id
+  return world
 }
 
 function mapBlueprint(row: object): EmployeeBlueprint {

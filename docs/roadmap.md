@@ -33,7 +33,13 @@
 - [x] MCP Skill Adapter V1 (Streamable HTTP discovery/call behind Grant, Approval and Action Ledger)
 - [ ] Extension Host and JSON-RPC Gateway
 - [ ] Finish Creative Workshop project lifecycle
-- [ ] Add Creative Workshop smoke E2E
+- [x] Add Creative Workshop smoke E2E
+- [x] Guided Creative Workshop flow for world, role, permission and review
+- [x] Application-level startup lock screen with server-side API guard
+- [x] World-scoped default administrator and administrator handoff
+- [x] Single-column settings, key-first model discovery and searchable model selection
+- [x] Safe application updater for clean `main` fast-forward installs
+- [x] Responsive Pixi viewport resizing without world-view black strips
 - [ ] Define Creative Platform V1 local-data compatibility baseline
 - [ ] Remove remaining new-path role-name inference
 - [ ] Final visual QA for conversation / dossier / workshop information architecture
@@ -47,11 +53,10 @@
 - [ ] Bounded autonomous delegation policy
 - [ ] Smoke E2E becomes Required CI
 
-## Alpha — Memory & Growth V2
+## Alpha — Memory and Growth
 
-> Conversation continuity (one session, recovered from SQLite) already ships in
-> Pre-Alpha. Everything below is still unimplemented and must not be described
-> as part of it.
+Persistent sessions currently restore conversations from SQLite. The capabilities
+listed below are future roadmap work and are not part of the current memory system.
 
 - [ ] Episodic memory
 - [ ] Semantic memory

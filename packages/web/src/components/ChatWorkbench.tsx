@@ -12,15 +12,14 @@ import {
   UserCircle,
   X,
 } from '@phosphor-icons/react'
-import { useEffect, useMemo, useRef, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChatAttachment, InstalledPluginCommand, JsonObject, LocalAssetMimeType, WorkMessage, WorkSession, World } from '@dsh-cyber/contracts'
 
-import { mentionPlugin } from './mention-plugin.js'
 import type { ConversationIntent, CyberEmployee } from '../types.js'
 import { worldExperience } from '../world-experience.js'
 import { Avatar } from './Avatar.js'
+
+const MarkdownMessage = lazy(async () => ({ default: (await import('./MarkdownMessage.js')).MarkdownMessage }))
 
 interface ChatWorkbenchProps {
   demoMode: boolean
@@ -273,7 +272,9 @@ function messageAttachments(metadata: JsonObject): ChatAttachment[] {
 
 function formatBytes(value: number): string { if (value < 1024) return `${value} B`; if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`; return `${(value / 1024 / 1024).toFixed(1)} MB` }
 
-function RichText({ value }: { value: string }) { return <div className="markdown-body"><ReactMarkdown remarkPlugins={[remarkGfm, mentionPlugin]}>{value}</ReactMarkdown></div> }
+function RichText({ value }: { value: string }) {
+  return <Suspense fallback={<div className="markdown-body"><p>{value}</p></div>}><MarkdownMessage value={value} /></Suspense>
+}
 function ArtifactAttachment({ onOpen }: { onOpen(): void }) { return <button className="artifact-attachment" type="button" onClick={onOpen}><span className="artifact-attachment__icon"><BracketsCurly size={18} /></span><span><strong>v0.3.0-架构设计.md</strong><small>1.2 MB · 已保存到世界产物</small></span><span>预览</span></button> }
 function displayTime(message: WorkMessage): string { const metadataTime = message.metadata.displayTime; return typeof metadataTime === 'string' ? metadataTime : new Date(message.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }
 function currentMention(value: string): string | undefined { return /@([^\s@]*)$/.exec(value)?.[1] }

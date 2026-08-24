@@ -70,11 +70,48 @@ describe('SqliteStore', () => {
       skillGrants: ['coding', 'testing'],
     })
 
+    expect(store.getWorld(world.id)?.administratorEmployeeId).toBe(employee.id)
+    expect(store.isWorldAdministrator(world.id, employee.id)).toBe(true)
     expect(revision.revision).toBe(2)
     expect(store.getEmployee(employee.id)?.currentRevision).toBe(2)
     expect(store.listEmployeeRevisions(employee.id)).toHaveLength(2)
     expect(store.getWorkspaceSnapshot(workspace.id).worlds).toHaveLength(1)
     expect(store.getWorldSnapshot(world.id).employees).toHaveLength(1)
+  })
+
+  it('keeps administrator authority inside one world and allows an explicit same-world handoff', async () => {
+    const { store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: '管理员隔离工作区' })
+    const firstWorld = store.createWorld({ workspaceId: workspace.id, name: '第一世界', templateId: 'cyber-company' })
+    const secondWorld = store.createWorld({ workspaceId: workspace.id, name: '第二世界', templateId: 'cyber-company' })
+    store.saveBlueprint(blueprint())
+    store.saveBlueprint(blueprint({ id: 'reviewer', displayName: '审阅员' }))
+    const firstAdministrator = store.recruitEmployee({
+      workspaceId: workspace.id, worldId: firstWorld.id, blueprintId: 'software-engineer', blueprintVersion: 1,
+    })
+    const successor = store.recruitEmployee({
+      workspaceId: workspace.id, worldId: firstWorld.id, blueprintId: 'reviewer', blueprintVersion: 1,
+    })
+    const otherWorldAdministrator = store.recruitEmployee({
+      workspaceId: workspace.id, worldId: secondWorld.id, blueprintId: 'software-engineer', blueprintVersion: 1,
+    })
+
+    expect(store.isWorldAdministrator(firstWorld.id, firstAdministrator.id)).toBe(true)
+    expect(store.canManageEmployee(firstAdministrator.id, successor.id)).toBe(true)
+    expect(store.canManageEmployee(firstAdministrator.id, otherWorldAdministrator.id)).toBe(false)
+    expect(() => store.setWorldAdministrator(firstWorld.id, otherWorldAdministrator.id)).toThrow('same world')
+    expect(store.setWorldAdministrator(firstWorld.id, successor.id).administratorEmployeeId).toBe(successor.id)
+    expect(store.isWorldAdministrator(firstWorld.id, firstAdministrator.id)).toBe(false)
+    expect(store.canManageEmployee(firstAdministrator.id, successor.id)).toBe(false)
+    expect(store.canManageEmployee(successor.id, firstAdministrator.id)).toBe(true)
+    expect(store.isWorldAdministrator(secondWorld.id, otherWorldAdministrator.id)).toBe(true)
+
+    store.archiveEmployee(successor.id)
+    expect(store.getWorld(firstWorld.id)?.administratorEmployeeId).toBe(firstAdministrator.id)
+    expect(store.canManageEmployee(firstAdministrator.id, successor.id)).toBe(false)
+
+    store.archiveEmployee(firstAdministrator.id)
+    expect(store.getWorld(firstWorld.id)?.administratorEmployeeId).toBeUndefined()
   })
 
   it('limits initial and revised employee capability grants to the approved blueprint request', async () => {
@@ -682,6 +719,8 @@ describe('SqliteStore', () => {
       DROP TABLE world_package_instances;
       DROP TABLE agent_runs;
       DROP TABLE work_turns;
+      DROP INDEX worlds_administrator_idx;
+      ALTER TABLE worlds DROP COLUMN administrator_employee_id;
       ALTER TABLE employee_blueprints DROP COLUMN embodiment_json;
       DELETE FROM schema_migrations WHERE version > 2;
       PRAGMA user_version = 2;
