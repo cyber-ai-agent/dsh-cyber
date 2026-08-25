@@ -67,7 +67,6 @@ import {
   type StreamingChatReply,
 } from './chat-realtime.js'
 import { ChatWorkbench, isChatMessage } from './components/ChatWorkbench.js'
-import { AuthorityBadge } from './components/AuthorityBadge.js'
 import { CreativeWorkshopLauncher } from './components/CreativeWorkshopLauncher.js'
 import { NavigationPane } from './components/NavigationPane.js'
 import { ResizableShell } from './components/ResizableShell.js'
@@ -82,6 +81,7 @@ import type {
 } from './components/SettingsDialog.js'
 import { demoData, demoTavernDossiers, demoTavernEmployees, demoTavernMessages, demoTavernSessions } from './demo-data.js'
 import type { ConversationIntent, CyberEmployee, DockTab, SessionParticipantMap } from './types.js'
+import type { EmployeeSettingsSection } from './components/EmployeeManagementDialog.js'
 import { worldExperience } from './world-experience.js'
 import { subscribeWorldLive } from './world-live-client.js'
 
@@ -173,6 +173,7 @@ export default function App() {
   const [catalogLoading, setCatalogLoading] = useState(false)
   const [recruiting, setRecruiting] = useState(false)
   const [managingEmployeeId, setManagingEmployeeId] = useState<string>()
+  const [managingEmployeeSection, setManagingEmployeeSection] = useState<EmployeeSettingsSection>('profile')
   const [savingEmployee, setSavingEmployee] = useState(false)
   const [loading, setLoading] = useState(!demoMode)
   const [error, setError] = useState<string | undefined>()
@@ -1086,7 +1087,7 @@ export default function App() {
       }
       setManagingEmployeeId(undefined)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '角色版本更新失败')
+      setError(cause instanceof Error ? cause.message : '角色设定保存失败')
     } finally {
       setSavingEmployee(false)
     }
@@ -1781,7 +1782,7 @@ export default function App() {
           onSelect={(world) => void loadWorld(world)}
           onExplore={() => void openPackageMarket('theme')}
         />
-        {administratorCount > 0 ? <div className="topbar-world-authority" aria-label={`${administratorCount} 名世界管理员`}><AuthorityBadge role="administrator" size="sm" /><span>{administratorCount} 名世界管理员</span></div> : null}
+        {administratorCount > 0 ? <div className="topbar-world-authority" aria-label={`${administratorCount} 名世界管理员`}><span>{administratorCount} 名世界管理员</span></div> : null}
         <nav aria-label="全局功能">
           <CreativeWorkshopLauncher workspaceId={workspace.id} onCreated={(project) => void openWorkshopWorld(project.worldId)} onOpenWorld={(worldId) => void openWorkshopWorld(worldId)} />
           <button type="button" onClick={() => void openPackageMarket('theme')}><Storefront size={16} />市场</button>
@@ -1844,6 +1845,7 @@ export default function App() {
             onDecideWorldPermissionRequest={decideWorldPermissionRequest}
             onOpenWorldPermissionSettings={(employeeId) => {
               setWorldSettingsOpen(false)
+              setManagingEmployeeSection('permissions')
               setManagingEmployeeId(employeeId)
             }}
           />
@@ -1900,7 +1902,7 @@ export default function App() {
             onCollapse={() => setDockCollapsed(true)}
             onSelectEmployee={(employeeId) => void openDossier(employeeId)}
             onDirectEmployee={directEmployee}
-            onManageEmployee={(employee) => setManagingEmployeeId(employee.id)}
+            onManageEmployee={(employee) => { setManagingEmployeeSection('profile'); setManagingEmployeeId(employee.id) }}
             onShowAllDossiers={() => setSelectedEmployeeId(undefined)}
             onInvite={() => void openRecruitment()}
           /></Suspense>
@@ -2007,6 +2009,7 @@ export default function App() {
             }}
             onManageEmployee={(employeeId) => {
               setWorldSettingsOpen(false)
+              setManagingEmployeeSection('permissions')
               setManagingEmployeeId(employeeId)
             }}
             onSave={async (value) => {
@@ -2050,6 +2053,7 @@ export default function App() {
           models={models}
           avatarIndex={managingEmployee.avatarIndex}
           authority={authorities.find((authority) => authority.employeeId === managingEmployee.id)}
+          initialSection={managingEmployeeSection}
           saving={savingEmployee}
           onClose={() => setManagingEmployeeId(undefined)}
           onRevise={reviseEmployee}

@@ -36,8 +36,8 @@ export function SkillGrantEditor({ employee, value, onChange }: SkillGrantEditor
   const descriptorMap = useMemo(() => new Map(descriptors.map((item) => [item.id, item])), [descriptors])
 
   if (error !== undefined) return <div className="permission-notice permission-notice--warning"><p>{error}</p></div>
-  if (blueprint === undefined) return <div className="dialog-empty">正在读取角色技能请求…</div>
-  if (requested.length === 0) return <div className="dialog-empty">这份角色 Blueprint 没有请求任何 Skill。</div>
+  if (blueprint === undefined) return <div className="dialog-empty">正在读取可用能力…</div>
+  if (requested.length === 0) return <div className="dialog-empty">这个角色模板没有申请可用能力。</div>
 
   return (
     <div className="skill-grant-editor">
@@ -56,17 +56,16 @@ export function SkillGrantEditor({ employee, value, onChange }: SkillGrantEditor
                 : value.filter((item) => item !== skillId))}
             />
             <span>
-              <strong>{descriptor?.displayName ?? skillId}</strong>
-              <small>{descriptor?.summary ?? '当前宿主没有注册这个 Skill Adapter，不能新增授权。'}</small>
+              <strong>{descriptor?.displayName ?? '未识别的能力'}</strong>
+              <small>{descriptor?.summary ?? '当前环境尚未提供这项能力，暂时不能授权。'}</small>
               <span className="skill-grant-row__meta">
-                <code>{skillId}</code>
-                {descriptor === undefined ? <em>Adapter 未安装</em> : <em>{descriptor.risks.includes('external-side-effect') ? '包含外部副作用' : '受控能力'}</em>}
+                {descriptor === undefined ? <em>当前不可用</em> : <em>{descriptor.risks.includes('external-side-effect') ? '涉及外部操作' : '受控能力'}</em>}
               </span>
             </span>
           </label>
         )
       })}
-      <p className="skill-grant-editor__note">勾选只授予 Blueprint 已请求且当前宿主可执行的 Skill。具体外部副作用仍要遵循 Skill Action 的授权策略，不因角色拥有 Skill 就默认放行所有操作。</p>
+      <p className="skill-grant-editor__note">勾选后，角色可以使用当前环境提供的对应能力。涉及外部操作时，系统仍会针对具体动作请求确认，不会因为已启用能力而自动放行。</p>
     </div>
   )
 }

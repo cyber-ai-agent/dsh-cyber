@@ -1,4 +1,4 @@
-import { CrownSimple, ShieldCheck } from '@phosphor-icons/react'
+import { CrownSimple } from '@phosphor-icons/react'
 import type { WorldCharacterRole } from '@dsh-cyber/contracts'
 
 interface AuthorityBadgeProps {
@@ -8,10 +8,8 @@ interface AuthorityBadgeProps {
 }
 
 /**
- * The single visual identity for a world administrator.
- *
- * Keep this compact and deliberately quieter than availability/status markers:
- * authority is a world-scoped fact, not an activity state.
+ * 世界管理员只在姓名后显示一个克制的皇冠标识。
+ * 头像、计数和其他装饰位置不得重复显示。
  */
 export function AuthorityBadge({ role, size = 'sm', className = '' }: AuthorityBadgeProps) {
   if (role !== 'administrator') return null
@@ -19,7 +17,6 @@ export function AuthorityBadge({ role, size = 'sm', className = '' }: AuthorityB
   return (
     <span className={classes} role="img" aria-label="世界管理员" title="世界管理员">
       <CrownSimple aria-hidden="true" weight="fill" />
-      <ShieldCheck className="authority-badge__shield" aria-hidden="true" weight="duotone" />
     </span>
   )
 }

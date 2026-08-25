@@ -113,7 +113,8 @@ test('keeps World authority isolated, supports multi-admin handoff, and caps run
 
   await page.goto(origin)
   await expect(page.locator('.workbench-shell')).toBeVisible()
-  await expect(page.locator('.authority-badge').first()).toBeVisible()
+  await expect(page.locator('.avatar .authority-badge')).toHaveCount(0)
+  await expect(page.locator('.session-row__copy .authority-badge').first()).toBeVisible()
   const pendingUrls: string[] = []
   page.on('request', (request) => {
     if (request.url().includes(`/api/worlds/${firstWorld.id}/`)

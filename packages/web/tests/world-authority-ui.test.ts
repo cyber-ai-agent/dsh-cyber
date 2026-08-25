@@ -6,6 +6,7 @@ import type { WorldCharacterAuthority, WorldPermissionRequest } from '@dsh-cyber
 
 import { AuthorityBadge } from '../src/components/AuthorityBadge.js'
 import { Avatar } from '../src/components/Avatar.js'
+import { EmployeeManagementDialog } from '../src/components/EmployeeManagementDialog.js'
 import { WorldPermissionRequests } from '../src/components/ChatWorkbench.js'
 import { stripManagementPermissions, WorldPermissionEditor } from '../src/components/WorldPermissionEditor.js'
 import type { CyberEmployee } from '../src/types.js'
@@ -50,10 +51,12 @@ const request: WorldPermissionRequest = {
 }
 
 describe('world authority UI', () => {
-  it('uses one accessible warm-gold administrator badge across avatar surfaces', () => {
-    const markup = renderToStaticMarkup(createElement(Avatar, { index: 0, label: '阿开', authorityRole: 'administrator' }))
-    expect(markup).toContain('aria-label="阿开，世界管理员"')
-    expect(markup).toContain('aria-label="世界管理员"')
+  it('keeps administrator identity accessible without placing a crown on the avatar', () => {
+    const avatarMarkup = renderToStaticMarkup(createElement(Avatar, { index: 0, label: '阿开', authorityRole: 'administrator' }))
+    const badgeMarkup = renderToStaticMarkup(createElement(AuthorityBadge, { role: 'administrator' }))
+    expect(avatarMarkup).toContain('aria-label="阿开，世界管理员"')
+    expect(avatarMarkup).not.toContain('authority-badge')
+    expect(badgeMarkup).toContain('aria-label="世界管理员"')
     expect(renderToStaticMarkup(createElement(AuthorityBadge, { role: 'member' }))).toBe('')
   })
 
@@ -61,11 +64,36 @@ describe('world authority UI', () => {
     const markup = renderToStaticMarkup(createElement(WorldPermissionEditor, { authority, onSave: async () => undefined }))
     expect(markup).toContain('世界权限')
     expect(markup).toContain('世界管理员')
-    expect(markup).toContain('world.permissions.manage')
+    expect(markup).toContain('管理角色权限')
+    expect(markup).not.toContain('world.permissions.manage')
     expect(markup).toContain('管理世界连接')
     expect(markup).toContain('disabled=""')
     expect(markup).toContain('暂不可授予，需单独安全审批')
     expect(markup.indexOf('世界权限')).toBeLessThan(markup.indexOf('保存世界权限'))
+  })
+
+  it('presents role settings as focused Chinese sections without internal version copy', () => {
+    const markup = renderToStaticMarkup(createElement(EmployeeManagementDialog, {
+      employee,
+      models: [],
+      avatarIndex: 0,
+      saving: false,
+      authority,
+      onClose: () => undefined,
+      onRevise: async () => undefined,
+      onUpdateProfile: async () => undefined,
+      onArchive: async () => undefined,
+    }))
+    expect(markup).toContain('身份资料')
+    expect(markup).toContain('行为方式')
+    expect(markup).toContain('可用能力')
+    expect(markup).toContain('世界权限')
+    expect(markup).toContain('高级设置')
+    expect(markup).toContain('保存角色资料')
+    expect(markup).not.toContain('保存为 r')
+    expect(markup).not.toContain('revision')
+    expect(markup).not.toContain('Capability')
+    expect(markup).not.toContain('Blueprint')
   })
 
   it('strips management grants immediately when demoting a character', () => {

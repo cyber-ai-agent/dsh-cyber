@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import type { CyberEmployee } from '../types.js'
 import { Avatar } from './Avatar.js'
+import { AuthorityBadge } from './AuthorityBadge.js'
 
 export interface PeerCollaborationDraft {
   participantIds: string[]
@@ -72,7 +73,7 @@ export function PeerCollaborationDialog({ initiator, employees, busy, error, onC
             <span>发起角色</span>
             <div className="group-member is-selected">
               <Avatar index={initiator.avatarIndex} label={initiator.displayName} status={initiator.status} authorityRole={initiator.authorityRole} />
-              <span><strong>{initiator.displayName}</strong><small>{initiator.role} · 将在每轮最后归纳</small></span>
+              <span><strong>{initiator.displayName}<AuthorityBadge role={initiator.authorityRole} /></strong><small>{initiator.role} · 将在每轮最后归纳</small></span>
             </div>
           </div>
 
@@ -105,7 +106,7 @@ export function PeerCollaborationDialog({ initiator, employees, busy, error, onC
                 <label key={employee.id} className={`group-member${selected ? ' is-selected' : ''}`}>
                   <input type="checkbox" checked={selected} disabled={busy} onChange={() => toggle(employee.id)} />
                   <Avatar index={employee.avatarIndex} label={employee.displayName} status={employee.status} authorityRole={employee.authorityRole} />
-                  <span><strong>{employee.displayName}</strong><small>{employee.role} · {employee.currentActivity}</small></span>
+                  <span><strong>{employee.displayName}<AuthorityBadge role={employee.authorityRole} /></strong><small>{employee.role} · {employee.currentActivity}</small></span>
                 </label>
               )
             })}

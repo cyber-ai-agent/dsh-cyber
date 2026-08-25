@@ -15,6 +15,7 @@ import type { World } from '@dsh-cyber/contracts'
 import type { CyberEmployee } from '../types.js'
 import { worldExperience } from '../world-experience.js'
 import { Avatar } from './Avatar.js'
+import { AuthorityBadge } from './AuthorityBadge.js'
 import { StatusDot } from './StatusDot.js'
 
 interface WorldViewProps {
@@ -152,7 +153,7 @@ function WorldScene({ kind, employees, sceneImage, lightsOn, zoom, onSelectEmplo
               aria-label={`进入${employee.displayName}的会话`}
             >
               <span className="world-agent__sprite"><Avatar index={employee.avatarIndex} size="world" label={employee.displayName} authorityRole={employee.authorityRole} /></span>
-              <span className="world-agent__label"><strong>{employee.displayName}</strong><small>{activityLabel(employee, isTavern)}</small></span>
+              <span className="world-agent__label"><strong>{employee.displayName}<AuthorityBadge role={employee.authorityRole} /></strong><small>{activityLabel(employee, isTavern)}</small></span>
             </button>
           )
         })}

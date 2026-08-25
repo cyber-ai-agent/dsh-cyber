@@ -133,7 +133,7 @@ export function WorldPermissionEditor({ authority, saving = false, disabled = fa
       <div className="world-permission-editor__heading">
         <div>
           <h3 id="world-permission-editor-title"><ShieldCheck size={18} />世界权限</h3>
-          <p>权限只在当前世界生效，与角色 Skill 和底层 Capability 分开管理。</p>
+          <p>权限只在当前世界生效，与角色能力和底层兼容权限分开管理。</p>
         </div>
         <span className="world-permission-editor__scope"><LockKey size={14} />当前世界</span>
       </div>
@@ -147,7 +147,7 @@ export function WorldPermissionEditor({ authority, saving = false, disabled = fa
           </label>
           <label className={role === 'administrator' ? 'is-selected' : ''}>
             <input type="radio" name="world-character-role" value="administrator" checked={role === 'administrator'} onChange={() => applyPreset('administrator', grants.length === 0 ? RECOMMENDED_ADMIN_PERMISSIONS : grants)} />
-            <span><strong><CrownSimple size={15} weight="fill" />世界管理员</strong><small>可管理当前世界，但不会自动获得 danger-full-access。</small></span>
+            <span><strong><CrownSimple size={15} weight="fill" />世界管理员</strong><small>可管理当前世界，但不会自动获得完整系统访问权限。</small></span>
           </label>
         </div>
       </fieldset>
@@ -171,7 +171,7 @@ export function WorldPermissionEditor({ authority, saving = false, disabled = fa
                 return (
                   <label key={descriptor.id} className={`world-permission-row${checked ? ' is-checked' : ''}${unavailable ? ' is-disabled' : ''}`}>
                     <input type="checkbox" checked={checked} disabled={unavailable} onChange={() => togglePermission(descriptor.id)} />
-                    <span><strong>{PERMISSION_LABELS[descriptor.id]}</strong><small>{unavailable ? '暂不可授予，需单独安全审批' : descriptor.id}</small></span>
+                    <span><strong>{PERMISSION_LABELS[descriptor.id]}</strong><small>{unavailable ? '暂不可授予，需单独安全审批' : descriptor.management ? '可管理当前世界范围内的对应内容' : descriptor.sensitive ? '包含敏感信息，请谨慎授予' : '仅在当前世界范围内生效'}</small></span>
                     {descriptor.sensitive ? <WarningCircle className="is-sensitive" size={16} aria-label="敏感权限" /> : descriptor.management ? <CrownSimple className="is-management" size={15} aria-label="管理权限" /> : null}
                   </label>
                 )

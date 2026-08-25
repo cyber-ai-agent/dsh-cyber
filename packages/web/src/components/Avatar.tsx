@@ -1,8 +1,6 @@
 import type { CSSProperties } from 'react'
 import type { WorldCharacterRole } from '@dsh-cyber/contracts'
 
-import { AuthorityBadge } from './AuthorityBadge.js'
-
 interface AvatarProps {
   index: number
   size?: 'sm' | 'md' | 'lg' | 'world'
@@ -22,7 +20,6 @@ export function Avatar({ index, size = 'md', label, status, authorityRole }: Ava
   return (
     <span className={`avatar avatar--${size}`} style={style} aria-label={accessibleLabel} role="img">
       {status === undefined ? null : <span className={`avatar__status status--${status}`} />}
-      <AuthorityBadge role={authorityRole} size={size === 'lg' || size === 'world' ? 'md' : 'sm'} />
     </span>
   )
 }

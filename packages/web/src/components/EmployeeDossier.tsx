@@ -14,6 +14,7 @@ import type { EmployeeDossier as EmployeeDossierData, World } from '@dsh-cyber/c
 import type { CyberEmployee } from '../types.js'
 import { worldExperience } from '../world-experience.js'
 import { Avatar } from './Avatar.js'
+import { AuthorityBadge } from './AuthorityBadge.js'
 import { StatusDot } from './StatusDot.js'
 
 type DossierSection = 'profile' | 'skills' | 'milestones' | 'journal' | 'relations'
@@ -56,8 +57,8 @@ export function EmployeeDossier({ dossier, employees, avatarIndex, world, onDire
           <Avatar index={avatarIndex} size="lg" label={dossier.employee.displayName} status={dossier.employee.status} authorityRole={employees.find((employee) => employee.id === dossier.employee.id)?.authorityRole} />
         </button>
         <div className="dossier-hero__identity">
-          <h2>{dossier.employee.displayName}</h2>
-          <p>{dossier.employee.role} · 独立 Agent</p>
+          <h2>{dossier.employee.displayName}<AuthorityBadge role={employees.find((employee) => employee.id === dossier.employee.id)?.authorityRole} size="md" /></h2>
+          <p>{dossier.employee.role} · 独立角色</p>
           <StatusDot status={dossier.employee.status} label={statusLabel(dossier.employee.status, roleplay)} />
         </div>
         <div className="dossier-hero__actions">
@@ -166,7 +167,7 @@ export function EmployeeDossier({ dossier, employees, avatarIndex, world, onDire
               return (
                 <article key={relationship.colleagueId}>
                   <Avatar index={colleague?.avatarIndex ?? 7} label={colleague?.displayName ?? '关联角色'} size="sm" authorityRole={colleague?.authorityRole} />
-                  <div><strong>{colleague?.displayName ?? relationship.colleagueId}</strong><span>{colleague?.role ?? '关联角色'}</span></div>
+                  <div><strong>{colleague?.displayName ?? relationship.colleagueId}<AuthorityBadge role={colleague?.authorityRole} /></strong><span>{colleague?.role ?? '关联角色'}</span></div>
                   <dl>
                     <div><dt>{roleplay ? '互动' : '协作'}</dt><dd>{relationship.collaborationCount}</dd></div>
                     <div><dt>{roleplay ? '同场' : '评审'}</dt><dd>{relationship.reviewCount}</dd></div>

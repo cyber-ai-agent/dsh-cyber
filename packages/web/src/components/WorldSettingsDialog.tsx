@@ -4,6 +4,7 @@ import type { AgentPermissionMode, EmployeeInstance, ModelProfile, ReasoningEffo
 
 import type { CyberEmployee } from '../types.js'
 import { Avatar } from './Avatar.js'
+import { AuthorityBadge } from './AuthorityBadge.js'
 
 interface WorldSettingsDialogProps {
   world: World
@@ -100,7 +101,7 @@ export function WorldSettingsDialog({ world, value, models, employees, authoriti
                       <li key={employee.id}>
                         <button type="button" className="world-admin-list__item" onClick={() => onManageEmployee?.(employee.id)} aria-label={`管理${employee.displayName}的世界权限`}>
                           <Avatar index={cyberEmployee.avatarIndex ?? 0} size="sm" label={employee.displayName} authorityRole="administrator" />
-                          <span><strong>{employee.displayName}</strong><small>{employee.role}</small></span>
+                          <span><strong>{employee.displayName}<AuthorityBadge role="administrator" /></strong><small>{employee.role}</small></span>
                         </button>
                       </li>
                     )

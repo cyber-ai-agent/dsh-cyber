@@ -69,7 +69,6 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
   const participantEmployees = participantIds.map((employeeId) => employees.find((employee) => employee.id === employeeId)).filter((employee): employee is CyberEmployee => employee !== undefined)
   const conversationKind = session?.kind ?? intent?.kind
   const directEmployee = conversationKind === 'direct' ? participantEmployees[0] : undefined
-  const hasAdministratorParticipant = participantEmployees.some((employee) => employee.authorityRole === 'administrator')
   const conversationTitle = conversationKind === 'direct'
     ? directEmployee?.displayName ?? displayDirectConversationTitle(session?.title ?? intent?.title) ?? '选择角色开始对话'
     : session?.title ?? intent?.title ?? '选择角色开始对话'
@@ -139,7 +138,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
               ? <button className="chat-header__avatar-button" type="button" onClick={() => onOpenDossier(directEmployee.id)} aria-label={`打开${directEmployee.displayName}角色`} title={`打开${directEmployee.displayName}角色`}><Avatar index={directEmployee.avatarIndex} size="sm" label={directEmployee.displayName} authorityRole={directEmployee.authorityRole} /></button>
               : <>{participantEmployees.slice(0, 2).map((employee) => <Avatar key={employee.id} index={employee.avatarIndex} size="sm" label={employee.displayName} authorityRole={employee.authorityRole} />)}{participantEmployees.length > 2 ? <span className="chat-header__avatar-more">+{participantEmployees.length - 2}</span> : null}</>}
           </span>
-           <span><h1>{conversationTitle}{hasAdministratorParticipant ? <span className="chat-header__title-authority"><AuthorityBadge role="administrator" size="sm" /></span> : null}</h1><p>{conversationKind === undefined ? `从左侧会话列表进入私聊，或创建群聊` : `${conversationKind === 'group' ? '群聊' : '私聊'} · ${world.name}`}</p></span>
+          <span><h1>{conversationTitle}{conversationKind === 'direct' ? <AuthorityBadge role={directEmployee?.authorityRole} /> : null}</h1><p>{conversationKind === undefined ? `从左侧会话列表进入私聊，或创建群聊` : `${conversationKind === 'group' ? '群聊' : '私聊'} · ${world.name}`}</p></span>
         </div>
         <div className="chat-header__actions">
           {onOpenHistory === undefined || session === undefined ? null : <button className="chat-header__history" type="button" aria-label="查看历史消息" title="查看历史消息" onClick={onOpenHistory}><ClockCounterClockwise size={19} /><span>历史消息</span></button>}
@@ -163,7 +162,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
             <article key={message.id} className={`message${owner ? ' message--owner' : ''}${streaming ? ' message--streaming' : ''}`}>
               {owner ? null : <button className="avatar-button" type="button" onClick={() => employee && onOpenDossier(employee.id)} aria-label={`打开${employee?.displayName ?? experience.personLabel}角色`}><Avatar index={employee?.avatarIndex ?? 7} label={employee?.displayName ?? '角色'} authorityRole={employee?.authorityRole} /></button>}
               <div className="message__body">
-                <header className="message__meta">{owner ? <span className="sr-only">我的消息</span> : <><strong>{employee?.displayName ?? experience.personLabel}</strong><span>{employee?.role}</span></>}<time>{displayTime(message)}</time></header>
+                <header className="message__meta">{owner ? <span className="sr-only">我的消息</span> : <><strong>{employee?.displayName ?? experience.personLabel}<AuthorityBadge role={employee?.authorityRole} /></strong><span>{employee?.role}</span></>}<time>{displayTime(message)}</time></header>
                 <div className="message__content">{streaming && message.content.length === 0 ? <span className="stream-placeholder">正在生成回复…</span> : <RichText value={message.content} worldId={world.id} />}{streaming ? <span className="stream-cursor" aria-hidden="true" /> : null}</div>
                 <MessageAttachments attachments={messageAttachments(message.metadata)} />
                 {demoMode && experience.kind === 'company' && index === 1 ? <ArtifactAttachment onOpen={onOpenArtifact} /> : null}
@@ -179,7 +178,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
         {onDecideWorldPermissionRequest === undefined ? null : <WorldPermissionRequests items={permissionRequests} employees={employees} onDecide={onDecideWorldPermissionRequest} onOpenSettings={onOpenWorldPermissionSettings} />}
         {onDecideApproval === undefined ? null : <ApprovalRequests items={approvals} onDecide={onDecideApproval} />}
         <div className="composer">
-        {suggestions.length === 0 ? null : <div className="mention-menu" role="listbox" aria-label="当前世界角色">{suggestions.map((employee) => <button key={employee.id} type="button" onClick={() => insertMention(employee)}><Avatar index={employee.avatarIndex} size="sm" label={employee.displayName} authorityRole={employee.authorityRole} /><span><strong>{employee.displayName}</strong><small>{employee.role} · 独立角色</small></span></button>)}</div>}
+        {suggestions.length === 0 ? null : <div className="mention-menu" role="listbox" aria-label="当前世界角色">{suggestions.map((employee) => <button key={employee.id} type="button" onClick={() => insertMention(employee)}><Avatar index={employee.avatarIndex} size="sm" label={employee.displayName} authorityRole={employee.authorityRole} /><span><strong>{employee.displayName}<AuthorityBadge role={employee.authorityRole} /></strong><small>{employee.role} · 独立角色</small></span></button>)}</div>}
         {attachments.length > 0 ? <div className="composer-attachments" aria-label="待发送附件">{attachments.map((attachment) => <span key={attachment.assetId}><FileIcon size={15} /><span><strong>{attachment.name}</strong><small>{formatBytes(attachment.byteLength)}</small></span><button type="button" aria-label={`移除附件 ${attachment.name}`} onClick={() => setAttachments((current) => current.filter((item) => item.assetId !== attachment.assetId))}><X size={13} /></button></span>)}</div> : null}
         {attachmentError === undefined ? null : <p className="composer-error" role="alert">{attachmentError}</p>}
         <textarea ref={inputRef} value={draft} onChange={(event) => onDraftChange(event.target.value)} disabled={employees.length === 0} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit() } }} placeholder={employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? `发送消息给 ${participantEmployees.map((employee) => employee.displayName).join('、')}` : conversationKind === 'direct' ? `发送消息给 ${participantEmployees[0]?.displayName ?? experience.personLabel}` : '先从左侧选择会话，或输入 @角色名'} rows={2} aria-label={`给当前世界的${experience.peopleLabel}发送消息`} />
