@@ -11,6 +11,7 @@ import type {
   WorldThemeManifestV1,
   WorldThemeOption,
 } from '@dsh-cyber/contracts'
+import type { WorldCharacterAuthority } from '@dsh-cyber/contracts/world-authority'
 import type { SqliteStore, WorldSimulationStore } from '@dsh-cyber/persistence'
 import {
   cyberCompanyTheme,
@@ -368,7 +369,10 @@ export class WorldRuntimeService {
       ...(previous === undefined ? {} : { previous }),
       now: this.#clock(),
     })
-    const snapshot = this.#applyCharacterVisuals(result.snapshot)
+    const authorities = new Map(
+      this.#store.listWorldCharacterAuthorities(worldId).map((value) => [value.employeeId, value]),
+    )
+    const snapshot = this.#applyCharacterVisuals(result.snapshot, authorities)
     this.#store.saveWorldRuntimeSnapshot(snapshot)
     this.#syncPresences(snapshot)
     return { ...result, snapshot }
@@ -410,16 +414,25 @@ export class WorldRuntimeService {
     }
   }
 
-  #applyCharacterVisuals(snapshot: WorldRuntimeSnapshot): WorldRuntimeSnapshot {
+  #applyCharacterVisuals(
+    snapshot: WorldRuntimeSnapshot,
+    authorities: ReadonlyMap<string, WorldCharacterAuthority>,
+  ): WorldRuntimeSnapshot {
     return {
       ...snapshot,
       entities: snapshot.entities.map((entity) => {
         if (entity.kind !== 'agent') return entity
         const profile = this.#store.getEmployeeProfile(entity.id)
         const configured = profile?.appearance['worldSkinIndex'] ?? profile?.appearance['avatarIndex']
-        if (typeof configured !== 'number' || !Number.isInteger(configured)) return entity
-        const rosterIndex = Math.min(7, Math.max(0, configured))
-        return { ...entity, visualState: { ...entity.visualState, rosterIndex } }
+        const authority = authorities.get(entity.id)
+        const rosterIndex = typeof configured === 'number' && Number.isInteger(configured)
+          ? Math.min(7, Math.max(0, configured))
+          : undefined
+        return {
+          ...entity,
+          ...(authority === undefined ? {} : { authorityRole: authority.role }),
+          ...(rosterIndex === undefined ? {} : { visualState: { ...entity.visualState, rosterIndex } }),
+        }
       }),
     }
   }

@@ -5,6 +5,7 @@ import { assertCharacterBehaviorProfileAppearance } from '@dsh-cyber/world-simul
 import { HttpError } from '../http/errors.js'
 import type { Router } from '../http/router.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
+import type { WorldCharacterAuthorityService } from '../services/world-character-authority-service.js'
 import {
   nullableString,
   optionalString,
@@ -19,10 +20,11 @@ import { writeJson } from '../http/response.js'
 export interface EmployeeRoutesDependencies {
   store: SqliteStore
   worldAccess?: WorldAccessService
+  authority?: WorldCharacterAuthorityService
 }
 
 export function registerEmployeeRoutes(router: Router, dependencies: EmployeeRoutesDependencies): void {
-  const { store, worldAccess } = dependencies
+  const { store, worldAccess, authority } = dependencies
 
   const assertCharacterUnlocked = async (employeeId: string, request: Parameters<WorldAccessService['assertUnlocked']>[1]) => {
     const employee = store.getEmployee(employeeId)
@@ -147,7 +149,10 @@ export function registerEmployeeRoutes(router: Router, dependencies: EmployeeRou
   })
 
   router.post(/^\/api\/employees\/([^/]+)\/archive$/, async ({ request, response, params }) => {
-    await assertCharacterUnlocked(params[0]!, request)
-    writeJson(response, 200, { employee: store.archiveEmployee(params[0]!) })
+    const employee = await assertCharacterUnlocked(params[0]!, request)
+    const archived = authority === undefined
+      ? store.archiveEmployee(employee.id, 'local-user')
+      : authority.archiveEmployee(employee.worldId, employee.id, { kind: 'owner', id: 'local-user' })
+    writeJson(response, 200, { employee: archived })
   })
 }

@@ -199,11 +199,27 @@ export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = tru
 
 function withCharacterVisuals(snapshot: WorldRuntimeSnapshot, employees: CyberEmployee[]): WorldRuntimeSnapshot {
   const visualIndex = new Map(employees.map((employee) => [employee.id, employee.avatarIndex]))
+  const authorityRole = new Map(employees.map((employee) => [employee.id, employee.authorityRole]))
   return {
     ...snapshot,
     entities: snapshot.entities.map((entity) => {
       const rosterIndex = visualIndex.get(entity.id)
-      return rosterIndex === undefined ? entity : { ...entity, visualState: { ...entity.visualState, rosterIndex } }
+      const role = authorityRole.get(entity.id)
+      return rosterIndex === undefined && role === undefined
+        ? entity
+        : withEntityVisuals(entity, rosterIndex, role)
     }),
   }
+}
+
+function withEntityVisuals(
+  entity: WorldRuntimeSnapshot['entities'][number],
+  rosterIndex: number | undefined,
+  role: CyberEmployee['authorityRole'],
+): WorldRuntimeSnapshot['entities'][number] {
+  const next = { ...entity }
+  if (rosterIndex !== undefined) next.visualState = { ...entity.visualState, rosterIndex }
+  if (role === undefined) delete next.authorityRole
+  else next.authorityRole = role
+  return next
 }

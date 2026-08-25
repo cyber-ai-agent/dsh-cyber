@@ -5,12 +5,17 @@ import type {
   CharacterSkillAction,
   CharacterSkillDescriptor,
   CharacterSkillResult,
+  SkillAuthorizationSource,
 } from '@dsh-cyber/contracts/skill-runtime'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import type { CharacterSkillActionRepository } from '../skills/skill-action-repository.js'
 import type { CharacterSkillAdapterRegistry } from '../skills/skill-adapter.js'
 import { ServiceError } from './service-error.js'
+import type {
+  DecideWorldPermissionInput,
+  WorldPermissionRequestService,
+} from './world-permission-request-service.js'
 
 const TICK_MS = 30_000
 const DUPLICATE_WINDOW_MS = 60_000
@@ -19,6 +24,7 @@ const APPROVAL_TTL_MS = 10 * 60_000
 export interface CharacterSkillRuntimeOptions {
   registry: CharacterSkillAdapterRegistry
   actions: CharacterSkillActionRepository
+  worldPermissions?: WorldPermissionRequestService
 }
 
 export interface SkillPreparationContext {
@@ -44,6 +50,7 @@ export class CharacterSkillRuntime {
   readonly #store: SqliteStore
   readonly #registry: CharacterSkillAdapterRegistry
   readonly #actions: CharacterSkillActionRepository
+  readonly #worldPermissions: WorldPermissionRequestService | undefined
   #timer: NodeJS.Timeout | undefined
   #ticking = false
   #approvalSettlementHandler: ((workTurnId: string) => Promise<void>) | undefined
@@ -52,6 +59,7 @@ export class CharacterSkillRuntime {
     this.#store = store
     this.#registry = options.registry
     this.#actions = options.actions
+    this.#worldPermissions = options.worldPermissions
   }
 
   start(): void {
@@ -83,7 +91,7 @@ export class CharacterSkillRuntime {
       return { handled: false, actions: [] }
     }
     const revision = this.#store.getEmployeeRevision(employee.id, employee.currentRevision)
-    if (revision === undefined || revision.skillGrants.length === 0) return { handled: false, actions: [] }
+    if (revision === undefined) return { handled: false, actions: [] }
 
     const proposals = await this.#registry.propose({
       worldId,
@@ -91,12 +99,17 @@ export class CharacterSkillRuntime {
       prompt,
       grantedSkillIds: revision.skillGrants,
       now,
+      promptSource: 'raw-user',
     })
     if (proposals.length === 0) return { handled: false, actions: [] }
 
     const actions: CharacterSkillAction[] = []
     for (const proposal of proposals) {
-      if (!revision.skillGrants.includes(proposal.skillId)) continue
+      const descriptor = this.#registry.descriptorForSkill(proposal.skillId)
+      const authorizationSource = proposal.authorizationSource
+        ?? descriptor?.authorizationSource
+        ?? 'skill-grant'
+      if (authorizationSource === 'skill-grant' && !revision.skillGrants.includes(proposal.skillId)) continue
 
       const candidate: CharacterSkillAction = {
         id: randomUUID(),
@@ -109,6 +122,8 @@ export class CharacterSkillRuntime {
         label: proposal.label,
         risk: proposal.risk,
         authorization: proposal.authorization,
+        ...(proposal.authorizationSource === undefined ? {} : { authorizationSource: proposal.authorizationSource }),
+        ...(proposal.requiredWorldPermission === undefined ? {} : { requiredWorldPermission: proposal.requiredWorldPermission }),
         parameters: proposal.parameters ?? {},
         ...(proposal.scheduledFor === undefined ? {} : { scheduledFor: proposal.scheduledFor }),
         workTurnId,
@@ -251,6 +266,37 @@ export class CharacterSkillRuntime {
     return { request, action }
   }
 
+  /** Decide a durable WorldPermissionRequest and prepare its exact action. */
+  async decideWorldPermission(
+    input: DecideWorldPermissionInput,
+    now = input.now ?? new Date(),
+  ): Promise<{ request: Awaited<ReturnType<WorldPermissionRequestService['decide']>>; action?: CharacterSkillAction }> {
+    if (this.#worldPermissions === undefined) throw new Error('World permission service is unavailable')
+    const request = await this.#worldPermissions.decide({ ...input, now })
+    if (this.#actions.get === undefined) return { request }
+    const action = await this.#actions.get(request.skillActionId)
+    if (action === undefined) return { request }
+    if (request.status === 'rejected' || request.status === 'expired') {
+      action.status = 'rejected'
+      action.detail = request.status === 'expired'
+        ? '该操作未执行，因为世界权限请求已过期。'
+        : '该操作未执行，因为世界权限请求被拒绝。'
+      action.executionState = 'settled'
+      action.executionCompletedAt = now.toISOString()
+      action.updatedAt = now.toISOString()
+      await this.#discard(action)
+      await this.#actions.save(action)
+      return { request, action }
+    }
+    action.status = 'waiting-for-integration'
+    action.detail = request.decisionScope === 'once'
+      ? '本次世界权限已批准，正在继续原动作'
+      : '世界权限已持久授予，正在继续原动作'
+    await this.#actions.save(action)
+    Object.assign(action, this.#store.prepareSkillActionExecution(action.id, now.toISOString()))
+    return { request, action }
+  }
+
   async tick(now = new Date()): Promise<void> {
     if (this.#ticking) return
     this.#ticking = true
@@ -280,7 +326,7 @@ export class CharacterSkillRuntime {
           || employee.status === 'archived'
           || employee.worldId !== action.worldId
           || revision === undefined
-          || !revision.skillGrants.includes(action.skillId)
+          || (this.#authorizationSource(action) === 'skill-grant' && !revision.skillGrants.includes(action.skillId))
         ) {
           action.status = 'failed'
           action.detail = '计划执行前角色已不可用或技能授权已撤销'
@@ -305,6 +351,11 @@ export class CharacterSkillRuntime {
   }
 
   async recoverApprovedActions(now = new Date()): Promise<CharacterSkillAction[]> {
+    const worlds = this.#store.listWorkspaces().flatMap((workspace) => this.#store.listWorlds(workspace.id, true))
+    for (const world of worlds) await this.#worldPermissions?.recoverPending(world.id, now)
+    await this.#worldPermissions?.expire(now)
+    await this.#settleExpiredWorldPermissionActions(now)
+    await this.#prepareRecoveredWorldPermissionActions(now)
     this.#store.reconcileApprovedSkillActions(now.toISOString())
     const recovered: CharacterSkillAction[] = []
     for (const action of this.#store.listSkillActionsReadyForExecution()) {
@@ -312,6 +363,66 @@ export class CharacterSkillRuntime {
       recovered.push(await this.executeReadyAction(action.id, now))
     }
     return recovered
+  }
+
+  /** Recover the gap after a world request was approved but before its action
+   * reached `approved-ready` (including a restart between those two writes). */
+  async #prepareRecoveredWorldPermissionActions(now: Date): Promise<void> {
+    if (this.#worldPermissions === undefined) return
+    const worlds = this.#store.listWorkspaces().flatMap((workspace) => this.#store.listWorlds(workspace.id, true))
+    for (const world of worlds) {
+      const actions = await this.#actions.listByWorld(world.id)
+      for (const action of actions) {
+        if (this.#authorizationSource(action) !== 'world-authority') continue
+        if (action.status !== 'waiting-for-approval' && action.status !== 'waiting-for-integration') continue
+        if (action.executionState !== undefined && action.executionState !== 'approved-ready') continue
+        const check = await this.#worldPermissions.check(action)
+        if (check.status !== 'granted') continue
+        action.status = 'waiting-for-integration'
+        action.detail = '世界权限已持久确认，恢复原动作继续执行'
+        Object.assign(action, this.#store.prepareSkillActionExecution(action.id, now.toISOString()))
+        await this.#actions.save(action)
+      }
+    }
+  }
+
+  /**
+   * Expiry is a durable terminal decision, not merely removal from the
+   * coordinator gate. Settle the exact waiting action as well so a recovered
+   * WorkTurn can produce a factual "已过期" answer instead of remaining
+   * permanently blocked on `waiting-for-approval`.
+   */
+  async #settleExpiredWorldPermissionActions(now: Date): Promise<void> {
+    if (this.#worldPermissions === undefined) return
+    const worlds = this.#store.listWorkspaces().flatMap((workspace) => this.#store.listWorlds(workspace.id, true))
+    for (const world of worlds) {
+      const actions = (await this.#actions.listByWorld(world.id)).filter((action) =>
+        (action.status === 'waiting-for-approval' || action.status === 'waiting-for-integration')
+        && this.#authorizationSource(action) === 'world-authority',
+      )
+      for (const action of actions) {
+        const check = await this.#worldPermissions.check(action)
+        const consumedOnce = check.request?.status === 'approved'
+          && check.request.decisionScope === 'once'
+          && check.request.consumedAt !== undefined
+        const revokedPersistent = check.status === 'rejected'
+          && check.request?.status === 'approved'
+          && check.request.decisionScope === 'persistent'
+        if (check.status !== 'expired' && !consumedOnce && !revokedPersistent) continue
+        action.status = consumedOnce ? 'outcome-unknown' : 'rejected'
+        action.detail = consumedOnce
+          ? '世界权限已消费但进程在动作结算前中断，外部结果未知；不得自动重试。'
+          : revokedPersistent
+          ? '该操作未执行，因为持久世界权限已被撤销。'
+          : '该操作未执行，因为世界权限请求已过期。'
+        action.executionState = 'settled'
+        action.executionCompletedAt = now.toISOString()
+        action.updatedAt = now.toISOString()
+        await this.#discard(action)
+        await this.#actions.save(action)
+        if (action.workTurnId !== undefined) await this.#approvalSettlementHandler?.(action.workTurnId)
+      }
+    }
   }
 
   async #execute(action: CharacterSkillAction, now: Date): Promise<boolean> {
@@ -322,6 +433,8 @@ export class CharacterSkillRuntime {
       await this.#discard(action)
       return true
     }
+    const worldPermission = await this.#checkWorldPermission(action, now)
+    if (worldPermission !== 'granted') return true
     if (!this.#isApproved(action)) {
       action.status = 'waiting-for-approval'
       action.detail = '外部动作缺少有效审批，已阻止执行'
@@ -380,6 +493,12 @@ export class CharacterSkillRuntime {
     action.executionState = 'settled'
     action.executionCompletedAt = now.toISOString()
     action.updatedAt = now.toISOString()
+    if (worldPermission === 'granted' && this.#authorizationSource(action) === 'world-authority') {
+      const check = await this.#worldPermissions?.check(action)
+      if (check?.request?.decisionScope === 'once' && check.request.status === 'approved') {
+        await this.#worldPermissions?.consumeOnce(check.request.id, now)
+      }
+    }
     return true
   }
 
@@ -439,8 +558,46 @@ export class CharacterSkillRuntime {
   #isGrantActive(action: CharacterSkillAction): boolean {
     const employee = this.#store.getEmployee(action.characterId)
     if (employee === undefined || employee.status === 'archived' || employee.worldId !== action.worldId) return false
+    if (this.#authorizationSource(action) === 'world-authority') return true
     const revision = this.#store.getEmployeeRevision(employee.id, employee.currentRevision)
     return revision !== undefined && revision.skillGrants.includes(action.skillId)
+  }
+
+  async #checkWorldPermission(action: CharacterSkillAction, now: Date): Promise<'granted' | 'blocked'> {
+    if (this.#authorizationSource(action) !== 'world-authority') return 'granted'
+    const permission = this.#requiredWorldPermission(action)
+    if (permission === undefined || this.#worldPermissions === undefined) {
+      action.status = 'failed'
+      action.detail = '世界管理动作缺少受信任的世界权限约束，已阻止执行'
+      action.executionState = 'settled'
+      action.executionCompletedAt = now.toISOString()
+      action.updatedAt = now.toISOString()
+      return 'blocked'
+    }
+    if (action.requiredWorldPermission === undefined) action.requiredWorldPermission = permission
+    const check = await this.#worldPermissions.check(action)
+    if (check.status === 'granted') return 'granted'
+    const world = this.#store.getWorld(action.worldId)
+    if (world !== undefined && check.status === 'pending') {
+      await this.#worldPermissions.ensureForAction(action, world.workspaceId, now)
+    }
+    action.status = check.status === 'rejected' || check.status === 'expired' ? 'rejected' : 'waiting-for-approval'
+    action.detail = check.status === 'expired'
+      ? '世界权限请求已过期，动作未执行'
+      : check.status === 'rejected'
+      ? '世界权限请求被拒绝，动作未执行'
+      : '缺少世界权限，等待用户决定'
+    action.updatedAt = now.toISOString()
+    return 'blocked'
+  }
+
+  #authorizationSource(action: CharacterSkillAction): SkillAuthorizationSource {
+    if (action.authorizationSource !== undefined) return action.authorizationSource
+    return this.#registry.descriptorForSkill(action.skillId)?.authorizationSource ?? 'skill-grant'
+  }
+
+  #requiredWorldPermission(action: CharacterSkillAction) {
+    return action.requiredWorldPermission ?? this.#registry.descriptorForSkill(action.skillId)?.requiredWorldPermission
   }
 
   #matchingPolicy(action: CharacterSkillAction): ApprovalPolicy | undefined {

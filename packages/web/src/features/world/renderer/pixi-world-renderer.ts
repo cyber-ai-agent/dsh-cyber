@@ -159,11 +159,12 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
       actor.state = entity
       if (actor.motion === undefined) actor.root.position.set(entity.position.x, entity.position.y)
       actor.root.zIndex = 600 + actor.root.y
-      actor.name.text = entity.displayName
+      actor.name.text = entity.authorityRole === 'administrator' ? `${entity.displayName}  ♛` : entity.displayName
       actor.activity.text = entity.activityLabel
       actor.selection.visible = entity.id === this.#selectedEntityId
       actor.activity.visible = entity.id === this.#selectedEntityId
       actor.status.clear().circle(-43, -112, 4).fill({ color: statusColor(entity), alpha: 1 })
+      actor.root.label = entity.authorityRole === 'administrator' ? `${entity.displayName}，世界管理员` : entity.displayName
       this.#applyAnimation(actor)
     }
     for (const object of snapshot.objects) {
@@ -360,7 +361,7 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
     const selection = new Graphics().ellipse(0, -2, 45, 15).stroke({ color: 0x58e2ff, width: 3, alpha: 0.95 })
     selection.visible = false
     const status = new Graphics()
-    const name = new Text({ text: entity.displayName, style: { fontFamily: 'Microsoft YaHei, sans-serif', fontSize: 15, fontWeight: '700', fill: 0xf4f7fb, stroke: { color: 0x05080b, width: 4 } } })
+    const name = new Text({ text: entity.authorityRole === 'administrator' ? `${entity.displayName}  ♛` : entity.displayName, style: { fontFamily: 'Microsoft YaHei, sans-serif', fontSize: 15, fontWeight: '700', fill: 0xf4f7fb, stroke: { color: 0x05080b, width: 4 } } })
     name.anchor.set(0.5, 0)
     name.position.set(0, -151)
     const activity = new Text({ text: entity.activityLabel, style: { fontFamily: 'Microsoft YaHei, sans-serif', fontSize: 12, fill: 0x8fd9e6, stroke: { color: 0x05080b, width: 3 } } })
@@ -372,6 +373,7 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
     root.on('rightclick', (event: FederatedPointerEvent) => { event.stopPropagation(); this.#callbacks.onEntityContext?.(entity.id, { x: event.global.x, y: event.global.y }) })
     root.on('pointerover', () => { activity.visible = true })
     root.on('pointerout', () => { activity.visible = this.#selectedEntityId === entity.id })
+    root.label = entity.authorityRole === 'administrator' ? `${entity.displayName}，世界管理员` : entity.displayName
     const actor: ActorView = { root, animation, selection, status, name, activity, state: entity, motion: undefined }
     this.#sceneRoot.addChild(root)
     this.#actors.set(entity.id, actor)

@@ -328,6 +328,7 @@ function demoEntity(
     activity: employee.status === 'working' ? 'working' : employee.status === 'blocked' ? 'blocked' : 'idle',
     activityLabel: employee.currentActivity,
     status: employee.status,
+    ...(employee.authorityRole === undefined ? {} : { authorityRole: employee.authorityRole }),
     route: [],
     visualState: { rosterIndex: employee.avatarIndex },
     updatedAt: now,

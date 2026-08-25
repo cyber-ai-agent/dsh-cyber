@@ -13,12 +13,13 @@ import {
   X,
 } from '@phosphor-icons/react'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import type { ChatAttachment, InstalledPluginCommand, JsonObject, LocalAssetMimeType, WorkMessage, WorkSession, World } from '@dsh-cyber/contracts'
+import { WORLD_CHARACTER_MANAGEMENT_PERMISSIONS, type ChatAttachment, type InstalledPluginCommand, type JsonObject, type LocalAssetMimeType, type WorkMessage, type WorkSession, type World, type WorldCharacterPermission, type WorldPermissionDecisionScope, type WorldPermissionRequest } from '@dsh-cyber/contracts'
 
 import type { ConversationIntent, CyberEmployee } from '../types.js'
 import { worldExperience } from '../world-experience.js'
 import { ApprovalRequests, type ApprovalRequestsProps } from './ApprovalRequests.js'
 import { Avatar } from './Avatar.js'
+import { AuthorityBadge } from './AuthorityBadge.js'
 
 const MarkdownMessage = lazy(async () => ({ default: (await import('./MarkdownMessage.js')).MarkdownMessage }))
 
@@ -50,9 +51,12 @@ interface ChatWorkbenchProps {
   /** Real-world actions this world is holding until a person decides. */
   approvals?: ApprovalRequestsProps['items']
   onDecideApproval?: ApprovalRequestsProps['onDecide']
+  permissionRequests?: WorldPermissionRequest[]
+  onDecideWorldPermissionRequest?(requestId: string, scope: WorldPermissionDecisionScope | 'reject'): Promise<void>
+  onOpenWorldPermissionSettings?(employeeId: string): void
 }
 
-export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, installedPlugins = [], sending = false, pendingCount = 0, queuedCount = 0, draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval }: ChatWorkbenchProps) {
+export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, installedPlugins = [], sending = false, pendingCount = 0, queuedCount = 0, draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, onOpenWorldPermissionSettings }: ChatWorkbenchProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -131,10 +135,10 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
         <div className="chat-header__identity">
           <span className={`chat-header__avatars${conversationKind === 'group' || conversationKind === 'meeting' ? ' chat-header__avatars--group' : ''}`} aria-hidden={directEmployee === undefined}>
             {directEmployee !== undefined
-              ? <button className="chat-header__avatar-button" type="button" onClick={() => onOpenDossier(directEmployee.id)} aria-label={`打开${directEmployee.displayName}角色`} title={`打开${directEmployee.displayName}角色`}><Avatar index={directEmployee.avatarIndex} size="sm" label={directEmployee.displayName} /></button>
-              : <>{participantEmployees.slice(0, 2).map((employee) => <Avatar key={employee.id} index={employee.avatarIndex} size="sm" label={employee.displayName} />)}{participantEmployees.length > 2 ? <span className="chat-header__avatar-more">+{participantEmployees.length - 2}</span> : null}</>}
+              ? <button className="chat-header__avatar-button" type="button" onClick={() => onOpenDossier(directEmployee.id)} aria-label={`打开${directEmployee.displayName}角色`} title={`打开${directEmployee.displayName}角色`}><Avatar index={directEmployee.avatarIndex} size="sm" label={directEmployee.displayName} authorityRole={directEmployee.authorityRole} /></button>
+              : <>{participantEmployees.slice(0, 2).map((employee) => <Avatar key={employee.id} index={employee.avatarIndex} size="sm" label={employee.displayName} authorityRole={employee.authorityRole} />)}{participantEmployees.length > 2 ? <span className="chat-header__avatar-more">+{participantEmployees.length - 2}</span> : null}</>}
           </span>
-           <span><h1>{conversationTitle}</h1><p>{conversationKind === undefined ? `从左侧会话列表进入私聊，或创建群聊` : `${conversationKind === 'group' ? '群聊' : '私聊'} · ${world.name}`}</p></span>
+          <span><h1>{conversationTitle}{conversationKind === 'direct' ? <AuthorityBadge role={directEmployee?.authorityRole} /> : null}</h1><p>{conversationKind === undefined ? `从左侧会话列表进入私聊，或创建群聊` : `${conversationKind === 'group' ? '群聊' : '私聊'} · ${world.name}`}</p></span>
         </div>
         <div className="chat-header__actions">
           {onOpenHistory === undefined || session === undefined ? null : <button className="chat-header__history" type="button" aria-label="查看历史消息" title="查看历史消息" onClick={onOpenHistory}><ClockCounterClockwise size={19} /><span>历史消息</span></button>}
@@ -156,9 +160,9 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
           if (message.kind === 'system') return <div key={message.id} className="chat-system-notice" role="status">{message.content}</div>
           return (
             <article key={message.id} className={`message${owner ? ' message--owner' : ''}${streaming ? ' message--streaming' : ''}`}>
-              {owner ? null : <button className="avatar-button" type="button" onClick={() => employee && onOpenDossier(employee.id)} aria-label={`打开${employee?.displayName ?? experience.personLabel}角色`}><Avatar index={employee?.avatarIndex ?? 7} label={employee?.displayName ?? '角色'} /></button>}
+              {owner ? null : <button className="avatar-button" type="button" onClick={() => employee && onOpenDossier(employee.id)} aria-label={`打开${employee?.displayName ?? experience.personLabel}角色`}><Avatar index={employee?.avatarIndex ?? 7} label={employee?.displayName ?? '角色'} authorityRole={employee?.authorityRole} /></button>}
               <div className="message__body">
-                <header className="message__meta">{owner ? <span className="sr-only">我的消息</span> : <><strong>{employee?.displayName ?? experience.personLabel}</strong><span>{employee?.role}</span></>}<time>{displayTime(message)}</time></header>
+                <header className="message__meta">{owner ? <span className="sr-only">我的消息</span> : <><strong>{employee?.displayName ?? experience.personLabel}<AuthorityBadge role={employee?.authorityRole} /></strong><span>{employee?.role}</span></>}<time>{displayTime(message)}</time></header>
                 <div className="message__content">{streaming && message.content.length === 0 ? <span className="stream-placeholder">正在生成回复…</span> : <RichText value={message.content} worldId={world.id} />}{streaming ? <span className="stream-cursor" aria-hidden="true" /> : null}</div>
                 <MessageAttachments attachments={messageAttachments(message.metadata)} />
                 {demoMode && experience.kind === 'company' && index === 1 ? <ArtifactAttachment onOpen={onOpenArtifact} /> : null}
@@ -171,9 +175,10 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
       </div>
 
       <div className="composer-zone">
+        {onDecideWorldPermissionRequest === undefined ? null : <WorldPermissionRequests items={permissionRequests} employees={employees} onDecide={onDecideWorldPermissionRequest} onOpenSettings={onOpenWorldPermissionSettings} />}
         {onDecideApproval === undefined ? null : <ApprovalRequests items={approvals} onDecide={onDecideApproval} />}
         <div className="composer">
-        {suggestions.length === 0 ? null : <div className="mention-menu" role="listbox" aria-label="当前世界角色">{suggestions.map((employee) => <button key={employee.id} type="button" onClick={() => insertMention(employee)}><Avatar index={employee.avatarIndex} size="sm" label={employee.displayName} /><span><strong>{employee.displayName}</strong><small>{employee.role} · 独立角色</small></span></button>)}</div>}
+        {suggestions.length === 0 ? null : <div className="mention-menu" role="listbox" aria-label="当前世界角色">{suggestions.map((employee) => <button key={employee.id} type="button" onClick={() => insertMention(employee)}><Avatar index={employee.avatarIndex} size="sm" label={employee.displayName} authorityRole={employee.authorityRole} /><span><strong>{employee.displayName}<AuthorityBadge role={employee.authorityRole} /></strong><small>{employee.role} · 独立角色</small></span></button>)}</div>}
         {attachments.length > 0 ? <div className="composer-attachments" aria-label="待发送附件">{attachments.map((attachment) => <span key={attachment.assetId}><FileIcon size={15} /><span><strong>{attachment.name}</strong><small>{formatBytes(attachment.byteLength)}</small></span><button type="button" aria-label={`移除附件 ${attachment.name}`} onClick={() => setAttachments((current) => current.filter((item) => item.assetId !== attachment.assetId))}><X size={13} /></button></span>)}</div> : null}
         {attachmentError === undefined ? null : <p className="composer-error" role="alert">{attachmentError}</p>}
         <textarea ref={inputRef} value={draft} onChange={(event) => onDraftChange(event.target.value)} disabled={employees.length === 0} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit() } }} placeholder={employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? `发送消息给 ${participantEmployees.map((employee) => employee.displayName).join('、')}` : conversationKind === 'direct' ? `发送消息给 ${participantEmployees[0]?.displayName ?? experience.personLabel}` : '先从左侧选择会话，或输入 @角色名'} rows={2} aria-label={`给当前世界的${experience.peopleLabel}发送消息`} />
@@ -281,6 +286,80 @@ function formatBytes(value: number): string { if (value < 1024) return `${value}
 function RichText({ value, worldId }: { value: string; worldId: string }) {
   return <Suspense fallback={<div className="markdown-body"><p>{value}</p></div>}><MarkdownMessage value={value} worldId={worldId} /></Suspense>
 }
+
+export function WorldPermissionRequests({
+  items,
+  employees,
+  onDecide,
+  onOpenSettings,
+}: {
+  items: WorldPermissionRequest[]
+  employees: CyberEmployee[]
+  onDecide(requestId: string, scope: WorldPermissionDecisionScope | 'reject'): Promise<void>
+  onOpenSettings?: ((employeeId: string) => void) | undefined
+}) {
+  const pending = items.filter((item) => item.status === 'pending')
+  if (pending.length === 0) return null
+  return (
+    <div className="world-permission-requests" aria-label="待处理的世界权限请求">
+      {pending.map((request) => {
+        const employee = employees.find((item) => item.id === request.employeeId)
+        const integrationMutation = request.permission === 'world.integrations.manage'
+        const persistentNeedsAdministrator = employee?.authorityRole !== 'administrator'
+          && (WORLD_CHARACTER_MANAGEMENT_PERMISSIONS as readonly WorldCharacterPermission[]).includes(request.permission)
+        const persistentDisabled = integrationMutation || persistentNeedsAdministrator
+        return (
+          <article key={request.id} className="world-permission-request" aria-labelledby={`permission-request-${request.id}`}>
+            <header>
+              <div><strong id={`permission-request-${request.id}`}>需要世界权限</strong><span>当前世界 · {employee?.displayName ?? '角色'}</span></div>
+              <span className="world-permission-request__tag">权限请求</span>
+            </header>
+            <p>{employee?.displayName ?? '当前角色'}想要{worldPermissionLabel(request.permission)}，仅用于这次工作回合。长期授权仍会记录在角色设置中。</p>
+            {integrationMutation ? <p className="world-permission-request__blocked" role="note">连接管理权限暂不可在这里授予，需要通过连接管理流程单独安全审批。</p> : null}
+            {persistentNeedsAdministrator && !integrationMutation ? <p className="world-permission-request__blocked" role="note">管理权限只能长期授予世界管理员；你仍可仅批准本次动作，或先在角色设置中提升其身份。</p> : null}
+            <dl><div><dt>请求权限</dt><dd><code>{request.permission}</code></dd></div><div><dt>到期时间</dt><dd>{formatPermissionExpiry(request.expiresAt)}</dd></div></dl>
+            <footer>
+              <button className="primary-button" type="button" disabled={integrationMutation} onClick={() => void onDecide(request.id, 'once')}>仅本次允许</button>
+              <button className="secondary-button" type="button" disabled={persistentDisabled} onClick={() => void onDecide(request.id, 'persistent')}>{integrationMutation ? '暂不可授予' : persistentNeedsAdministrator ? '需先设为管理员' : '授予该权限并执行'}</button>
+              {onOpenSettings === undefined ? null : <button className="text-button" type="button" onClick={() => onOpenSettings(request.employeeId)}>打开权限设置</button>}
+              <button className="danger-button" type="button" onClick={() => void onDecide(request.id, 'reject')}>拒绝</button>
+            </footer>
+          </article>
+        )
+      })}
+    </div>
+  )
+}
+
+function worldPermissionLabel(permission: WorldCharacterPermission): string {
+  const labels: Record<WorldCharacterPermission, string> = {
+    'world.files.read': '读取当前世界文件',
+    'world.files.write': '修改当前世界文件',
+    'world.settings.read': '查看世界设置',
+    'world.settings.write': '修改世界设置',
+    'world.characters.read': '查看其他角色',
+    'world.characters.manage': '管理其他角色',
+    'world.permissions.read': '查看角色权限',
+    'world.permissions.manage': '管理角色权限',
+    'world.packages.read': '查看当前世界扩展',
+    'world.packages.manage': '管理当前世界扩展',
+    'world.integrations.read': '查看连接状态',
+    'world.integrations.manage': '管理世界连接',
+    'world.model.read': '查看模型',
+    'world.model.assign': '修改世界模型',
+    'world.approvals.read': '查看审批',
+    'world.trace.read': '查看轨迹',
+    'world.conversations.read-metadata': '查看会话列表与元数据',
+    'world.conversations.read-content': '读取其他会话正文',
+  }
+  return labels[permission]
+}
+
+function formatPermissionExpiry(value: string): string {
+  const date = new Date(value)
+  return Number.isNaN(date.valueOf()) ? value : date.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
 function ArtifactAttachment({ onOpen }: { onOpen(): void }) { return <button className="artifact-attachment" type="button" onClick={onOpen}><span className="artifact-attachment__icon"><BracketsCurly size={18} /></span><span><strong>v0.3.0-架构设计.md</strong><small>1.2 MB · 已保存到世界产物</small></span><span>预览</span></button> }
 function displayTime(message: WorkMessage): string { const metadataTime = message.metadata.displayTime; return typeof metadataTime === 'string' ? metadataTime : new Date(message.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }
 function currentMention(value: string): string | undefined { return /@([^\s@]*)$/.exec(value)?.[1] }

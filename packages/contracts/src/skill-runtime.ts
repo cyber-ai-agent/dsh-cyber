@@ -1,4 +1,5 @@
 import type { IsoTimestamp, JsonObject } from './index.js'
+import type { WorldCharacterPermission } from './world-authority.js'
 
 export type SkillActionStatus =
   | 'scheduled'
@@ -14,6 +15,9 @@ export type SkillActionRisk = 'read' | 'write-local' | 'external-side-effect'
 export type SkillActionAuthorization =
   | 'explicit-user-request'
   | 'preapproved-policy'
+
+/** The authority domain which is allowed to authorize a concrete action. */
+export type SkillAuthorizationSource = 'skill-grant' | 'world-authority'
 
 export type SkillActionExecutionState = 'approved-ready' | 'executing' | 'settled'
 export type PersistentApprovalCapability = 'forbidden' | 'exact-target'
@@ -39,6 +43,10 @@ export interface CharacterSkillAction {
   label: string
   risk: SkillActionRisk
   authorization: SkillActionAuthorization
+  /** Provider-neutral authorization provenance; omitted means skill-grant for legacy rows. */
+  authorizationSource?: SkillAuthorizationSource
+  /** World-local permission checked immediately before execution. */
+  requiredWorldPermission?: WorldCharacterPermission
   parameters: JsonObject
   scheduledFor?: IsoTimestamp
   approvalRequestId?: string
@@ -71,6 +79,10 @@ export interface CharacterSkillDescriptor {
   supportsScheduling: boolean
   /** Whether a one-time decision may create a reusable exact-target policy. */
   persistentApproval: PersistentApprovalCapability
+  /** Defaults to skill-grant. Only trusted host adapters may opt into world-authority. */
+  authorizationSource?: SkillAuthorizationSource
+  /** Declarative default for actions emitted by this descriptor. */
+  requiredWorldPermission?: WorldCharacterPermission
   /** Declarative recipes shape how a character works; integrations can execute host actions. */
   kind?: 'recipe' | 'integration'
   /** Safe recipes may be selected by default during recruitment. External integrations never are. */

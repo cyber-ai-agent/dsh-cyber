@@ -37,12 +37,18 @@
 - [x] Guided Creative Workshop flow for world, role, permission and review
 - [x] Application-level startup lock screen with server-side API guard
 - [x] World-scoped default administrator and administrator handoff
+- [x] World-scoped multi-admin authority, permission grants, audit ledger and last-admin protection
+- [x] In-chat World Permission requests with same-WorkTurn continuation
+- [x] Trusted World Management Adapter with raw-user intent parsing
+- [x] SQLite model-assignment authority and revision-protected World settings
+- [x] World-scoped runtime file permission resolver capped at workspace-write
 - [x] Single-column settings, key-first model discovery and searchable model selection
 - [x] Safe application updater for clean `main` fast-forward installs
 - [x] Responsive Pixi viewport resizing without world-view black strips
 - [ ] Define Creative Platform V1 local-data compatibility baseline
 - [ ] Remove remaining new-path role-name inference
 - [ ] Final visual QA for conversation / dossier / workshop information architecture
+- [ ] Publish the World Administrator product-level E2E matrix as a required release gate
 
 ## Alpha — Work System
 

@@ -121,11 +121,18 @@ describe('world experience stabilization', () => {
     const { origin } = await start(stateRoot)
     const { world } = await createPersonalWorld(origin)
 
-    await json(origin, `/api/worlds/${world.id}/settings`, {
+    const currentSettings = await json(origin, `/api/worlds/${world.id}/settings`)
+    expect(currentSettings.response.status).toBe(200)
+    const savedSettings = await json(origin, `/api/worlds/${world.id}/settings`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lore: '备份测试世界', scenario: '本地验证' }),
+      body: JSON.stringify({
+        expectedRevision: currentSettings.body.revision,
+        lore: '备份测试世界',
+        scenario: '本地验证',
+      }),
     })
+    expect(savedSettings.response.status).toBe(200)
     const upload = await json(origin, `/api/worlds/${world.id}/assets/attachment`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

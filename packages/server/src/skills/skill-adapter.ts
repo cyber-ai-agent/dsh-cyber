@@ -2,10 +2,12 @@ import type { JsonObject } from '@dsh-cyber/contracts'
 import type {
   CharacterSkillAction,
   CharacterSkillDescriptor,
+  SkillAuthorizationSource,
   SkillActionAuthorization,
   SkillActionRisk,
   SkillActionStatus,
 } from '@dsh-cyber/contracts/skill-runtime'
+import type { WorldCharacterPermission } from '@dsh-cyber/contracts/world-authority'
 
 export interface CharacterSkillMatchContext {
   worldId: string
@@ -13,6 +15,8 @@ export interface CharacterSkillMatchContext {
   prompt: string
   grantedSkillIds: readonly string[]
   now: Date
+  /** The prompt must be the untransformed user message for world management. */
+  promptSource?: 'raw-user'
 }
 
 export interface CharacterSkillActionProposal {
@@ -23,6 +27,9 @@ export interface CharacterSkillActionProposal {
   label: string
   risk: SkillActionRisk
   authorization: SkillActionAuthorization
+  /** Defaults to the adapter's source, then to skill-grant for legacy adapters. */
+  authorizationSource?: SkillAuthorizationSource
+  requiredWorldPermission?: WorldCharacterPermission
   parameters?: JsonObject
   scheduledFor?: string
 }
@@ -59,6 +66,8 @@ export interface CharacterSkillAdapter {
   descriptorsFor?(workspaceId: string): readonly CharacterSkillDescriptor[]
   readonly id: string
   readonly descriptors: readonly CharacterSkillDescriptor[]
+  /** Provider-neutral authorization source. World authority is host-only. */
+  readonly authorizationSource?: SkillAuthorizationSource
   /** Dynamic adapters (for example MCP) may expose no skills until discovery completes. */
   readonly dynamicDescriptors?: boolean
   propose(context: CharacterSkillMatchContext): Promise<CharacterSkillActionProposal[]> | CharacterSkillActionProposal[]
@@ -183,22 +192,46 @@ export class CharacterSkillAdapterRegistry {
   async propose(context: CharacterSkillMatchContext): Promise<CharacterSkillActionProposal[]> {
     const grants = new Set(context.grantedSkillIds)
     const adapters = new Set<CharacterSkillAdapter>()
-    for (const skillId of grants) {
-      const adapter = this.#skills.get(skillId)
-      if (adapter !== undefined) adapters.add(adapter)
+    for (const adapter of this.#adapters.values()) {
+      const source = adapter.authorizationSource
+        ?? adapter.descriptors.find((descriptor) => descriptor.authorizationSource !== undefined)?.authorizationSource
+        ?? 'skill-grant'
+      // World management is intentionally not an EmployeeRevision Skill Grant.
+      // It is still constrained by the adapter registry and the runtime's
+      // WorldPermissionGate before any action can execute.
+      if (source === 'world-authority') {
+        adapters.add(adapter)
+        continue
+      }
+      if (adapter.descriptors.some((descriptor) => grants.has(descriptor.id))) adapters.add(adapter)
     }
 
     const proposals: CharacterSkillActionProposal[] = []
     for (const adapter of adapters) {
       for (const proposal of await adapter.propose(context)) {
-        if (!grants.has(proposal.skillId)) continue
+        const descriptor = adapter.descriptors.find((item) => item.id === proposal.skillId)
+        const source = proposal.authorizationSource
+          ?? descriptor?.authorizationSource
+          ?? adapter.authorizationSource
+          ?? 'skill-grant'
+        if (!grants.has(proposal.skillId) && source !== 'world-authority') continue
         if (proposal.adapterId !== adapter.id) {
           throw new Error(`Skill proposal ${proposal.skillId} escaped adapter ${adapter.id}`)
         }
         if (this.#skills.get(proposal.skillId) !== adapter) {
           throw new Error(`Skill proposal ${proposal.skillId} is not registered by adapter ${adapter.id}`)
         }
-        proposals.push({ ...proposal, parameters: proposal.parameters ?? {} })
+        if (source !== (adapter.authorizationSource ?? descriptor?.authorizationSource ?? 'skill-grant')) {
+          throw new Error(`Skill proposal ${proposal.skillId} has an invalid authorization source`)
+        }
+        const requiredWorldPermission = proposal.requiredWorldPermission ?? descriptor?.requiredWorldPermission
+        const normalized: CharacterSkillActionProposal = {
+          ...proposal,
+          authorizationSource: source,
+          parameters: proposal.parameters ?? {},
+        }
+        if (requiredWorldPermission !== undefined) normalized.requiredWorldPermission = requiredWorldPermission
+        proposals.push(normalized)
       }
     }
     return proposals

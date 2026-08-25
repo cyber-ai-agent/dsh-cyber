@@ -13,6 +13,7 @@ import type { ConversationHubItem } from '@dsh-cyber/contracts/creative-platform
 import { api } from '../api.js'
 import type { CyberEmployee, SessionParticipantMap } from '../types.js'
 import { Avatar } from './Avatar.js'
+import { AuthorityBadge } from './AuthorityBadge.js'
 import { ContextMenu, type ContextMenuPosition } from './ContextMenu.js'
 
 interface NavigationPaneProps {
@@ -207,9 +208,9 @@ function SessionRow({
         <span className={`session-row__avatar${session.kind === 'group' || session.kind === 'meeting' ? ' session-row__avatar--group' : ''}`} aria-hidden="true">
           {participants.length === 0
             ? session.kind === 'group' || session.kind === 'meeting' ? <UsersThree size={16} /> : <ChatCircleDots size={16} />
-            : participants.slice(0, 2).map((employee) => <Avatar key={employee.id} index={employee.avatarIndex} size="sm" label={employee.displayName} />)}
+            : participants.slice(0, 2).map((employee) => <Avatar key={employee.id} index={employee.avatarIndex} size="sm" label={employee.displayName} authorityRole={employee.authorityRole} />)}
         </span>
-        <span className="session-row__copy"><strong>{directTitle(session, participants)}</strong><small>{subtitle}</small></span>
+        <span className="session-row__copy"><strong>{directTitle(session, participants)}{session.kind === 'direct' ? <AuthorityBadge role={participants[0]?.authorityRole} /> : null}</strong><small>{subtitle}</small></span>
         <time>{formatSessionTime(session.updatedAt)}</time>
       </button>
       {menuPosition === undefined || onPin === undefined || onDelete === undefined ? null : <ContextMenu label={`${directTitle(session, participants)}会话操作`} position={menuPosition} onClose={() => setMenuPosition(undefined)} items={[

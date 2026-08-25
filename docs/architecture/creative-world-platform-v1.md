@@ -12,7 +12,8 @@ DSH Cyber 从“内置几个世界和角色”升级为可长期扩展的**本�
 2. **创意工坊**：用户基于受支持的世界模板创建自己的世界和角色，项目作为本地 Mod 持久化，并把角色编译成标准 DSH Cyber 扩展包。
 3. **会话即联系人**：左栏只保留会话；一个角色对应一个稳定私聊，群聊可以有多个，会话支持置顶和从列表移除。角色档案继续放在右侧。
 4. **角色 Skill Runtime**：角色通过显式 `skillGrants` 获得能力；Skill 只产生受约束的结构化动作，由宿主受信任 Adapter 执行。
-5. **安全升级**：程序、Harness 与用户数据三个生命周期分离；更新程序不会覆盖世界、角色、Workshop 或 Skill 状态。
+5. **World Authority**：角色在单个 World 中的管理员身份与细粒度权限由 SQLite `WorldCharacterAuthority` 管理；权限申请进入现有 WorkTurn/Approval 生命周期，不通过 Persona 或 Skill Grant 推断。
+6. **安全升级**：程序、Harness 与用户数据三个生命周期分离；更新程序不会覆盖世界、角色、Workshop 或 Skill 状态。
 
 ## 核心不变量
 
@@ -33,6 +34,18 @@ Character identity
 ```text
 World != Character != Skill
 ```
+
+权限边界也保持独立：
+
+```text
+World Permission != Skill Grant != Runtime Capability != Approval Decision
+```
+
+一个 World 可以有多个管理员，但至少保留一个活动管理员。World Administrator 只
+管理当前 World；它不是应用管理员，也不是外部 Approval Reviewer。当前权限、审计
+和待处理 World Permission Request 由 SQLite 保存，设置文件只负责 WorldSettings，
+模型分配由 `model_assignments` 保存。详见[World Character Authority V1](./world-character-authority-v1.md)
+和[World Management Adapter V1](./world-management-adapter-v1.md)。
 
 三者只通过显式契约组合：
 
@@ -418,6 +431,10 @@ Codex 对额外网络/文件能力采取最小权限、按动作请求和 sandbo
 - Workshop 的世界编辑、角色编辑、语义预设与 Skill 选择应继续拆为可复用组件；
 - Skill 目录必须来自服务端 Adapter Registry，前端不得硬编码“当前有哪些 Skill”；
 - 角色浏览、档案、能力和管理继续由右侧 Dossier/World 入口承担。
+- 角色权限编辑器只编辑当前 World 的 `WorldCharacterAuthority`；Skill Grant、Runtime
+  Capability 和外部 Approval 继续由各自界面与生命周期管理。
+- World Settings 展示管理员概览，但具体角色权限始终从角色档案进入，避免复制第二套
+  权限编辑器。
 
 ## V1 验收
 
@@ -431,3 +448,5 @@ Codex 对额外网络/文件能力采取最小权限、按动作请求和 sandbo
 8. `pnpm dsh-cyber backup` 包含 `workshop/` 与 `skills/`；
 9. 拉取新程序版本后使用同一 `stateRoot`，世界、角色、Workshop、会话和 Skill 状态保持；
 10. typecheck、单元/集成测试和 Chromium E2E 全部通过后才允许合并。
+11. World Administrator E2E 覆盖多管理员、最后管理员、跨 World 隔离、即时权限申请、
+    same WorkTurn continuation、设置 revision 冲突和运行时 workspace-write 上限。

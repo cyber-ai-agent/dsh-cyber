@@ -5,6 +5,8 @@ import { DatabaseSync, backup } from 'node:sqlite'
 
 import {
   CYBER_SCHEMA_VERSION,
+  RECOMMENDED_ADMIN_PERMISSIONS,
+  isWorldCharacterPermission,
   isDomainEventType,
   type DatabaseDoctorReport,
   type DomainEvent,
@@ -75,6 +77,12 @@ import type { CharacterSkillAction } from '@dsh-cyber/contracts/skill-runtime'
 import { DatabaseCorruptError, EntityNotFoundError, PersistenceError } from './errors.js'
 import { migrate, readUserVersion } from './migrations.js'
 import { assertSecretFree } from './secrets.js'
+import {
+  WorldCharacterAuthorityRepository,
+  type AppendWorldAuthorityChangeInput,
+  type CommitWorldAuthorityChangeInput,
+  type SaveWorldCharacterAuthorityInput,
+} from './world-character-authority-repository.js'
 
 type Clock = () => string
 
@@ -456,6 +464,9 @@ const KNOWN_TABLES = [
   'task_schedule_runs',
   'domain_events',
   'sync_outbox',
+  'world_character_authorities',
+  'world_authority_changes',
+  'world_permission_requests',
 ] as const
 
 export class SqliteStore {
@@ -464,6 +475,7 @@ export class SqliteStore {
   readonly database: DatabaseSync
   readonly #clock: Clock
   readonly #idFactory: () => string
+  readonly #worldAuthorities: WorldCharacterAuthorityRepository
   #closed = false
 
   private constructor(databasePath: string, database: DatabaseSync, options: StoreOptions) {
@@ -472,6 +484,10 @@ export class SqliteStore {
     this.readOnly = options.readOnly ?? false
     this.#clock = options.clock ?? (() => new Date().toISOString())
     this.#idFactory = options.idFactory ?? randomUUID
+    this.#worldAuthorities = new WorldCharacterAuthorityRepository(this.database, {
+      clock: this.#clock,
+      idFactory: this.#idFactory,
+    })
   }
 
   static async open(databasePath: string, options: StoreOptions = {}): Promise<SqliteStore> {
@@ -1281,6 +1297,150 @@ export class SqliteStore {
     return row ? mapWorld(row) : undefined
   }
 
+  getWorldCharacterAuthority(worldId: string, employeeId: string) {
+    return this.#worldAuthorities.get(worldId, employeeId)
+  }
+
+  listWorldCharacterAuthorities(worldId: string) {
+    return this.#worldAuthorities.list(worldId)
+  }
+
+  listActiveWorldCharacterAuthorities(worldId: string) {
+    return this.#worldAuthorities.listActive(worldId)
+  }
+
+  saveWorldCharacterAuthority(input: SaveWorldCharacterAuthorityInput) {
+    this.#assertWritable()
+    return this.#worldAuthorities.save(input)
+  }
+
+  appendWorldAuthorityChange(input: AppendWorldAuthorityChangeInput) {
+    this.#assertWritable()
+    return this.#worldAuthorities.appendChange(input)
+  }
+
+  /**
+   * Commit one authority transition, its immutable ledger row, the real-time
+   * DomainEvent and compatibility primary pointer under one write lock.
+   * `expectedAuthority` is re-read inside BEGIN IMMEDIATE so concurrent
+   * demotions cannot both pass a last-admin preflight.
+   */
+  commitWorldAuthorityChange(input: CommitWorldAuthorityChangeInput) {
+    this.#assertWritable()
+    return this.#transaction(() => {
+      const current = this.#worldAuthorities.get(input.authority.worldId, input.authority.employeeId)
+      if (!sameAuthority(current, input.expectedAuthority)) {
+        throw new PersistenceError('World authority changed concurrently; reload before retrying')
+      }
+      const updated = this.#worldAuthorities.save(input.authority)
+      const activeEmployees = this.listEmployees(input.authority.worldId)
+        .filter((employee) => employee.status !== 'archived')
+      const activeAdmins = this.#worldAuthorities.listActive(input.authority.worldId)
+        .filter((authority) => authority.role === 'administrator')
+      if (activeEmployees.length > 0 && activeAdmins.length === 0) {
+        throw new PersistenceError('last_world_administrator')
+      }
+      this.#worldAuthorities.appendChange(input.audit)
+      this.#appendEvent({
+        workspaceId: input.event.workspaceId,
+        worldId: input.event.worldId,
+        type: 'world.character.authority.changed',
+        actorId: input.event.actorId,
+        actorKind: input.event.actorKind,
+        payload: input.event.payload,
+      })
+      this.#syncCompatibilityPrimaryAdministrator(input.authority.worldId, this.#clock())
+      return updated
+    })
+  }
+
+  syncWorldCompatibilityPrimaryAdministrator(worldId: string, updatedAt = this.#clock()): void {
+    this.#assertWritable()
+    this.#syncCompatibilityPrimaryAdministrator(worldId, updatedAt)
+  }
+
+  getWorldAuthorityChange(id: string) {
+    return this.#worldAuthorities.getChange(id)
+  }
+
+  listWorldAuthorityChanges(worldId: string, employeeId?: string) {
+    return this.#worldAuthorities.listChanges(worldId, employeeId)
+  }
+
+  hasWorldCharacterPermission(
+    worldId: string,
+    employeeId: string,
+    permission: import('@dsh-cyber/contracts').WorldCharacterPermission,
+  ): boolean {
+    return this.#worldAuthorities.hasPermission(worldId, employeeId, permission)
+  }
+
+  createWorldPermissionRequest(
+    input: import('@dsh-cyber/contracts').CreateWorldPermissionRequestInput,
+  ) {
+    this.#assertWritable()
+    return this.#worldAuthorities.createPermissionRequest(input)
+  }
+
+  getWorldPermissionRequest(id: string) {
+    return this.#worldAuthorities.getPermissionRequest(id)
+  }
+
+  getWorldPermissionRequestBySkillActionId(worldId: string, skillActionId: string) {
+    return this.#worldAuthorities.getPermissionRequestBySkillActionId(worldId, skillActionId)
+  }
+
+  getWorldPermissionRequestForAction(skillActionId: string, permission?: import('@dsh-cyber/contracts').WorldCharacterPermission) {
+    return this.#worldAuthorities.getPermissionRequestForAction(skillActionId, permission)
+  }
+
+  listWorldPermissionRequestsBySkillActionId(worldId: string, skillActionId: string) {
+    return this.#worldAuthorities.listPermissionRequestsBySkillActionId(worldId, skillActionId)
+  }
+
+  listWorldPermissionRequestsByWorkTurnId(worldId: string, workTurnId: string) {
+    return this.#worldAuthorities.listPermissionRequestsByWorkTurnId(worldId, workTurnId)
+  }
+
+  listWorldPermissionRequestsForTurn(workTurnId: string) {
+    return this.#worldAuthorities.listPermissionRequestsForTurn(workTurnId)
+  }
+
+  listWorldPermissionRequests(
+    worldId: string,
+    status?: import('@dsh-cyber/contracts').WorldPermissionRequestStatus,
+  ) {
+    return this.#worldAuthorities.listPermissionRequests(worldId, status)
+  }
+
+  listPendingWorldPermissionRequests(worldId: string) {
+    return this.#worldAuthorities.listPendingPermissionRequests(worldId)
+  }
+
+  decideWorldPermissionRequest(
+    id: string,
+    input: import('@dsh-cyber/contracts').DecideWorldPermissionRequestInput,
+    now?: string,
+  ) {
+    this.#assertWritable()
+    return this.#worldAuthorities.decidePermissionRequest(id, input, now)
+  }
+
+  consumeWorldPermissionRequest(id: string, consumedAt?: string) {
+    this.#assertWritable()
+    return this.#worldAuthorities.consumePermissionRequest(id, consumedAt)
+  }
+
+  expireWorldPermissionRequest(id: string, now?: string) {
+    this.#assertWritable()
+    return this.#worldAuthorities.expirePermissionRequestResult(id, now)
+  }
+
+  expireWorldPermissionRequests(now?: string): number {
+    this.#assertWritable()
+    return this.#worldAuthorities.expireAllPermissionRequests(now)
+  }
+
   setWorldAdministrator(worldId: string, employeeId: string, actorId = 'owner'): World {
     this.#assertWritable()
     const world = this.#requireWorld(worldId)
@@ -1290,6 +1450,20 @@ export class SqliteStore {
     }
     const now = this.#clock()
     return this.#transaction(() => {
+      const previousAdministratorId = world.administratorEmployeeId
+      const targetAuthority = this.#worldAuthorities.get(world.id, employee.id)
+      if (previousAdministratorId !== employee.id) {
+        this.#worldAuthorities.save({
+          worldId: world.id,
+          employeeId: employee.id,
+          role: 'administrator',
+          permissionGrants: targetAuthority?.role === 'administrator'
+            ? targetAuthority.permissionGrants
+            : recommendedAdminPermissions(),
+          createdAt: targetAuthority?.createdAt ?? now,
+          updatedAt: now,
+        })
+      }
       this.database.prepare(
         'UPDATE worlds SET administrator_employee_id = ?, updated_at = ? WHERE id = ?',
       ).run(employee.id, now, world.id)
@@ -1464,7 +1638,18 @@ export class SqliteStore {
     return this.#transaction(() => {
       this.#insertEmployee(employee)
       this.#insertRevision(revision)
-      if (world.administratorEmployeeId === undefined) {
+      const isFirstActiveCharacter = world.administratorEmployeeId === undefined
+      this.#worldAuthorities.save({
+        worldId: world.id,
+        employeeId: employee.id,
+        role: isFirstActiveCharacter ? 'administrator' : 'member',
+        permissionGrants: isFirstActiveCharacter
+          ? recommendedAdminPermissions()
+          : ['world.files.read'],
+        createdAt: now,
+        updatedAt: now,
+      })
+      if (isFirstActiveCharacter) {
         this.database.prepare(
           'UPDATE worlds SET administrator_employee_id = ?, updated_at = ? WHERE id = ? AND administrator_employee_id IS NULL',
         ).run(employee.id, now, world.id)
@@ -1587,13 +1772,17 @@ export class SqliteStore {
       const world = this.#requireWorld(employee.worldId)
       if (world.administratorEmployeeId === employee.id) {
         const successorRow = this.database
-          .prepare(
+        .prepare(
             `SELECT id FROM employee_instances
              WHERE world_id = ? AND status <> 'archived' AND id <> ?
-             ORDER BY CASE WHEN blueprint_id = 'core.butler' THEN 0 ELSE 1 END, created_at, id
+               AND id IN (
+                 SELECT employee_id FROM world_character_authorities
+                 WHERE world_id = ? AND role = 'administrator'
+               )
+             ORDER BY created_at, id
              LIMIT 1`,
           )
-          .get(employee.worldId, employee.id) as { id: string } | undefined
+          .get(employee.worldId, employee.id, employee.worldId) as { id: string } | undefined
         const successorId = successorRow?.id ?? null
         this.database
           .prepare('UPDATE worlds SET administrator_employee_id = ?, updated_at = ? WHERE id = ?')
@@ -2437,6 +2626,9 @@ export class SqliteStore {
         action.executionAttemptId ?? null, action.executionStartedAt ?? null,
         action.executionCompletedAt ?? null, action.status, action.detail,
         action.createdAt, action.updatedAt)
+      this.database.prepare(
+        'UPDATE skill_actions SET authorization_source = ?, required_world_permission = ? WHERE id = ?',
+      ).run(action.authorizationSource ?? null, action.requiredWorldPermission ?? null, action.id)
       return { action: structuredClone(action), created: true }
     })
   }
@@ -2450,6 +2642,9 @@ export class SqliteStore {
     ).run(action.status, action.detail, action.authorization, action.approvalRequestId ?? null, action.workTurnId ?? null,
       action.agentRunId ?? null, action.executionState ?? null, action.executionAttemptId ?? null,
       action.executionStartedAt ?? null, action.executionCompletedAt ?? null, action.updatedAt, action.id)
+    this.database.prepare(
+      'UPDATE skill_actions SET authorization_source = ?, required_world_permission = ? WHERE id = ?',
+    ).run(action.authorizationSource ?? null, action.requiredWorldPermission ?? null, action.id)
     if (Number(result.changes) !== 1) throw new EntityNotFoundError(`Skill action not found: ${action.id}`)
   }
 
@@ -3488,6 +3683,7 @@ export class SqliteStore {
       workspace,
       world,
       employees: this.listEmployees(worldId),
+      authorities: this.#worldAuthorities.list(worldId),
       openSessions: this.listSessions(worldId, 'open'),
       lastEventSequence: Number(row.last),
     }
@@ -3701,6 +3897,9 @@ export class SqliteStore {
           })),
           runtime: this.getWorldRuntimeSnapshot(world.id),
           themeBinding: this.getWorldThemeBinding(world.id),
+          authorities: this.listWorldCharacterAuthorities(world.id),
+          authorityChanges: this.listWorldAuthorityChanges(world.id),
+          permissionRequests: this.listWorldPermissionRequests(world.id),
           events: this.listWorldDomainEvents(world.id),
         })),
         events: this.listDomainEvents(workspace.id).filter((event) => event.worldId === undefined),
@@ -3762,6 +3961,9 @@ export class SqliteStore {
         approvalRequests: countRows(this.database, 'approval_requests'),
         approvalPolicies: countRows(this.database, 'approval_policies'),
         skillActions: countRows(this.database, 'skill_actions'),
+        worldAuthorities: countRows(this.database, 'world_character_authorities'),
+        worldAuthorityChanges: countRows(this.database, 'world_authority_changes'),
+        worldPermissionRequests: countRows(this.database, 'world_permission_requests'),
         events: countRows(this.database, 'domain_events'),
         outbox: countRows(this.database, 'sync_outbox'),
       },
@@ -3787,6 +3989,28 @@ export class SqliteStore {
   #assertWritable(): void {
     if (this.readOnly) throw new PersistenceError('Database is open in read-only mode')
     if (this.#closed) throw new PersistenceError('Database is closed')
+  }
+
+  #syncCompatibilityPrimaryAdministrator(worldId: string, updatedAt: string): void {
+    const world = this.getWorld(worldId)
+    if (world === undefined) return
+    const activeEmployees = this.listEmployees(worldId)
+    const activeIds = new Set(activeEmployees.map((employee) => employee.id))
+    const pointerAuthority = world.administratorEmployeeId === undefined
+      ? undefined
+      : this.#worldAuthorities.get(worldId, world.administratorEmployeeId)
+    const pointerIsValid = world.administratorEmployeeId !== undefined &&
+      activeIds.has(world.administratorEmployeeId) && pointerAuthority?.role === 'administrator'
+    if (pointerIsValid) return
+    const next = this.#worldAuthorities
+      .listActive(worldId)
+      .filter((authority) => authority.role === 'administrator')
+      .map((authority) => activeEmployees.find((employee) => employee.id === authority.employeeId))
+      .filter((employee): employee is EmployeeInstance => employee !== undefined)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))[0]
+    this.database
+      .prepare('UPDATE worlds SET administrator_employee_id = ?, updated_at = ? WHERE id = ?')
+      .run(next?.id ?? null, updatedAt, worldId)
   }
 
   #transaction<T>(operation: () => T): T {
@@ -4737,6 +4961,12 @@ function mapSkillAction(row: object): CharacterSkillAction {
   if (typeof value.execution_attempt_id === 'string') action.executionAttemptId = value.execution_attempt_id
   if (typeof value.execution_started_at === 'string') action.executionStartedAt = value.execution_started_at
   if (typeof value.execution_completed_at === 'string') action.executionCompletedAt = value.execution_completed_at
+  if (value.authorization_source === 'skill-grant' || value.authorization_source === 'world-authority') {
+    action.authorizationSource = value.authorization_source
+  }
+  if (typeof value.required_world_permission === 'string' && isWorldCharacterPermission(value.required_world_permission)) {
+    action.requiredWorldPermission = value.required_world_permission
+  }
   return action
 }
 
@@ -4890,4 +5120,18 @@ function mapDomainEvent(row: object): DomainEvent {
   if (typeof value.causation_id === 'string') event.causationId = value.causation_id
   if (typeof value.correlation_id === 'string') event.correlationId = value.correlation_id
   return event
+}
+
+function recommendedAdminPermissions() {
+  return [...RECOMMENDED_ADMIN_PERMISSIONS]
+}
+
+function sameAuthority(
+  left: ReturnType<WorldCharacterAuthorityRepository['get']>,
+  right: ReturnType<WorldCharacterAuthorityRepository['get']>,
+): boolean {
+  if (left === undefined || right === undefined) return left === right
+  return left.role === right.role && left.updatedAt === right.updatedAt &&
+    left.permissionGrants.length === right.permissionGrants.length &&
+    left.permissionGrants.every((permission, index) => permission === right.permissionGrants[index])
 }

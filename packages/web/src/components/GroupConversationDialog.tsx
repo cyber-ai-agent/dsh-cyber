@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import type { CyberEmployee } from '../types.js'
 import { Avatar } from './Avatar.js'
+import { AuthorityBadge } from './AuthorityBadge.js'
 
 interface GroupConversationDialogProps {
   employees: CyberEmployee[]
@@ -69,8 +70,8 @@ export function GroupConversationDialog({ employees, creating = false, onClose, 
               return (
                 <label key={employee.id} className={`group-member${selected ? ' is-selected' : ''}`}>
                   <input type="checkbox" checked={selected} disabled={creating} onChange={() => toggle(employee.id)} />
-                  <Avatar index={employee.avatarIndex} label={employee.displayName} status={employee.status} />
-                  <span><strong>{employee.displayName}</strong><small>{employee.role} · {employee.currentActivity}</small></span>
+                  <Avatar index={employee.avatarIndex} label={employee.displayName} status={employee.status} authorityRole={employee.authorityRole} />
+                  <span><strong>{employee.displayName}<AuthorityBadge role={employee.authorityRole} /></strong><small>{employee.role} · {employee.currentActivity}</small></span>
                 </label>
               )
             })}

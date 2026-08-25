@@ -1,4 +1,6 @@
-export const CYBER_SCHEMA_VERSION = 20 as const
+import type { WorldCharacterAuthority } from './world-authority.js'
+
+export const CYBER_SCHEMA_VERSION = 21 as const
 
 export type IsoTimestamp = string
 export type JsonPrimitive = boolean | number | string | null
@@ -814,6 +816,7 @@ export const DOMAIN_EVENT_TYPES = [
   'workspace.created',
   'world.created',
   'world.administrator.changed',
+  'world.character.authority.changed',
   'world.creation.rolled-back',
   'world.entered',
   'employee.recruited',
@@ -891,6 +894,8 @@ export interface WorldSnapshot {
   workspace: Workspace
   world: World
   employees: EmployeeInstance[]
+  /** World-scoped role/permission projection; populated in one world load. */
+  authorities: WorldCharacterAuthority[]
   openSessions: WorkSession[]
   lastEventSequence: number
 }
@@ -1023,6 +1028,9 @@ export interface DatabaseDoctorReport {
     approvalRequests: number
     approvalPolicies: number
     skillActions: number
+    worldAuthorities: number
+    worldAuthorityChanges: number
+    worldPermissionRequests: number
     events: number
     outbox: number
   }
@@ -1035,3 +1043,4 @@ export function isDomainEventType(value: string): value is DomainEventType {
 
 export * from './world-runtime.js'
 export * from './world-trace.js'
+export * from './world-authority.js'

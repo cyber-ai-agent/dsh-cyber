@@ -1,5 +1,5 @@
 import { BUILTIN_BLUEPRINTS, worldTemplate } from '@dsh-cyber/catalog'
-import type { EmployeeBlueprint } from '@dsh-cyber/contracts'
+import { RECOMMENDED_ADMIN_PERMISSIONS, type EmployeeBlueprint } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { HttpError } from '../http/errors.js'
@@ -7,6 +7,7 @@ import type { Router } from '../http/router.js'
 import { loadInstalledBlueprints } from '../installed-package-runtime.js'
 import { ConversationHubService } from '../services/conversation-hub-service.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
+import type { WorldCharacterAuthorityService } from '../services/world-character-authority-service.js'
 import type { WorldPackageInstanceService } from '../services/world-package-instance-service.js'
 import {
   nonNegativeInteger,
@@ -22,10 +23,11 @@ export interface WorldRoutesDependencies {
   store: SqliteStore
   worldAccess?: WorldAccessService
   worldPackages?: WorldPackageInstanceService
+  authority?: WorldCharacterAuthorityService
 }
 
 export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDependencies): void {
-  const { store, worldAccess, worldPackages } = dependencies
+  const { store, worldAccess, worldPackages, authority } = dependencies
   const conversationHub = new ConversationHubService(store)
 
   router.get(/^\/api\/workspaces\/([^/]+)\/worlds$/, ({ response, params }) => {
@@ -56,7 +58,23 @@ export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDep
     const worldId = params[0]!
     await worldAccess?.assertUnlocked(worldId, request)
     const body = await readJson(request)
-    writeJson(response, 200, { world: store.setWorldAdministrator(worldId, requiredString(body, 'employeeId')) })
+    const employeeId = requiredString(body, 'employeeId')
+    if (authority === undefined) {
+      // Kept for embedders that still compose this route in isolation. The
+      // production server always supplies WorldCharacterAuthorityService, so
+      // normal legacy calls take the same audited promotion path as V1 APIs.
+      writeJson(response, 200, { world: store.setWorldAdministrator(worldId, employeeId, 'local-user') })
+      return
+    }
+    const value = authority.updateAuthority({
+      worldId,
+      targetEmployeeId: employeeId,
+      actor: { kind: 'owner', id: 'local-user' },
+      role: 'administrator',
+      permissionGrants: [...RECOMMENDED_ADMIN_PERMISSIONS],
+      reason: 'legacy administrator promotion',
+    })
+    writeJson(response, 200, { world: store.getWorld(worldId), authority: value })
   })
 
   router.get(/^\/api\/worlds\/([^/]+)\/events$/, async ({ request, response, params, url }) => {

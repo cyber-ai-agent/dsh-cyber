@@ -67,6 +67,13 @@ DSH Cyber is building this as a **visual, local-first, moddable AI world platfor
 - Explicit semantic `EmbodimentProfile` for custom roles.
 - World, Character and Skill are separate domains.
 
+### World-scoped administration
+
+- Each World has one or more `World Administrator` characters. Their role and 18 fine-grained World Permissions are persisted by SQLite `WorldCharacterAuthority`, with an append-only audit ledger and a last-active-administrator invariant.
+- Authority is isolated to the current World. It is not an application-admin role, an Approval Reviewer role, or a Skill Grant. A World Administrator can receive current-World `workspace-write` access, but never automatic `danger-full-access`.
+- A missing World Permission can be requested from the active chat. The choice is one-time, persistent, or reject; approval resumes the original WorkTurn and does not replay the user's entire turn. External side effects still use the existing Approval Gate.
+- The trusted `builtin.world-management` adapter handles narrowly scoped World settings, character, package-instance, and model-assignment actions. `settings.json` uses revision checks, while SQLite remains authoritative for model assignments.
+
 ### Creative Workshop
 
 - A dedicated global Creative Workshop entry.

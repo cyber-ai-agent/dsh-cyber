@@ -4,6 +4,7 @@ import type { EmployeeDossier, World } from '@dsh-cyber/contracts'
 import type { CyberEmployee } from '../types.js'
 import { worldExperience } from '../world-experience.js'
 import { Avatar } from './Avatar.js'
+import { AuthorityBadge } from './AuthorityBadge.js'
 import { StatusDot } from './StatusDot.js'
 
 interface EmployeeDossierDirectoryProps {
@@ -61,9 +62,9 @@ export function EmployeeDossierDirectory({ employees, dossiers, world, onOpen, o
             <article key={employee.id} className="dossier-card">
               <header>
                 <button className="avatar-edit-button" type="button" aria-label={`修改${employee.displayName}的名字和头像`} onClick={() => onManage(employee)}>
-                  <Avatar index={employee.avatarIndex} size="md" label={employee.displayName} status={employee.status} />
+                  <Avatar index={employee.avatarIndex} size="md" label={employee.displayName} status={employee.status} authorityRole={employee.authorityRole} />
                 </button>
-                <div><strong>{employee.displayName}</strong><span>{employee.role} · r{employee.currentRevision}</span></div>
+                <div><strong>{employee.displayName}<AuthorityBadge role={employee.authorityRole} /></strong><span>{employee.role}</span></div>
                 <StatusDot status={employee.status} label={statusLabel(employee.status, roleplay)} />
               </header>
 
@@ -83,7 +84,7 @@ export function EmployeeDossierDirectory({ employees, dossiers, world, onOpen, o
 
               <div className="dossier-card__evidence">
                 <span>{latestMilestone === undefined ? '尚无里程碑' : `最近事迹 · ${latestMilestone.title}`}</span>
-                <small>{latestJournal === undefined ? employee.summary : `${latestJournal.localDate} · ${latestJournal.summary}`}</small>
+                <small>{latestJournal === undefined ? localizeRoleSummary(employee.summary) : `${latestJournal.localDate} · ${latestJournal.summary}`}</small>
               </div>
 
               <footer>
@@ -102,4 +103,8 @@ export function EmployeeDossierDirectory({ employees, dossiers, world, onOpen, o
 function statusLabel(status: CyberEmployee['status'], roleplay: boolean): string {
   if (roleplay) return ({ available: '可登场', working: '演绎中', waiting: '等待发言', blocked: '剧情暂停', archived: '已退场' })[status]
   return ({ available: '可接任务', working: '工作中', waiting: '等待中', blocked: '被阻塞', archived: '已归档' })[status]
+}
+
+function localizeRoleSummary(value: string): string {
+  return value.replace(/独立\s*Agent/gi, '独立角色').replace(/\bAgent\b/gi, '角色')
 }

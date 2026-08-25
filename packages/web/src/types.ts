@@ -7,6 +7,8 @@ import type {
   Workspace,
   WorkspacePreferences,
   World,
+  WorldCharacterPermission,
+  WorldCharacterRole,
 } from '@dsh-cyber/contracts'
 
 export type DockTab = 'world' | 'trace' | 'schedule' | 'dossier'
@@ -23,6 +25,9 @@ export interface CyberEmployee extends EmployeeInstance {
   avatarIndex: number
   summary: string
   currentActivity: string
+  /** Compact world-scoped authority projection used by every visual surface. */
+  authorityRole?: WorldCharacterRole
+  worldPermissions?: WorldCharacterPermission[]
 }
 
 export interface WorkbenchData {
