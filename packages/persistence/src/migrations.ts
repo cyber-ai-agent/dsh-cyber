@@ -1206,6 +1206,265 @@ const MIGRATIONS: readonly Migration[] = [
       END;
     `,
   },
+  {
+    version: 25,
+    name: 'world-knowledge-graph-v1',
+    sql: `
+      /* Extend the telemetry source vocabulary without losing an existing
+         database. SQLite cannot alter a CHECK constraint in place, so rebuild
+         this small append-only table and retain every column/row. */
+      DROP INDEX IF EXISTS model_interaction_logs_workspace_idx;
+      DROP INDEX IF EXISTS model_interaction_logs_status_idx;
+      DROP INDEX IF EXISTS model_interaction_logs_model_idx;
+      DROP INDEX IF EXISTS model_interaction_logs_agent_run_idx;
+      DROP INDEX IF EXISTS model_interaction_logs_world_employee_created_idx;
+      ALTER TABLE model_interaction_logs RENAME TO model_interaction_logs_v25;
+      CREATE TABLE model_interaction_logs (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT REFERENCES worlds(id) ON DELETE CASCADE,
+        session_id TEXT REFERENCES work_sessions(id) ON DELETE CASCADE,
+        employee_id TEXT REFERENCES employee_instances(id) ON DELETE CASCADE,
+        source TEXT NOT NULL CHECK (source IN ('turn', 'discovery', 'knowledge')),
+        model_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('success', 'failed')),
+        error_code TEXT,
+        error_message TEXT,
+        prompt_message_count INTEGER NOT NULL CHECK (prompt_message_count >= 0),
+        prompt_char_count INTEGER NOT NULL CHECK (prompt_char_count >= 0),
+        response_char_count INTEGER CHECK (response_char_count >= 0),
+        tool_call_count INTEGER CHECK (tool_call_count >= 0),
+        duration_ms INTEGER NOT NULL CHECK (duration_ms >= 0),
+        tokens_prompt INTEGER CHECK (tokens_prompt >= 0),
+        tokens_completion INTEGER CHECK (tokens_completion >= 0),
+        tokens_total INTEGER CHECK (tokens_total >= 0),
+        created_at TEXT NOT NULL,
+        http_status INTEGER CHECK (http_status BETWEEN 100 AND 599),
+        work_turn_id TEXT REFERENCES work_turns(id) ON DELETE SET NULL,
+        agent_run_id TEXT REFERENCES agent_runs(id) ON DELETE SET NULL
+      ) STRICT;
+      INSERT INTO model_interaction_logs
+        (id, workspace_id, world_id, session_id, employee_id, source, model_id, provider, status,
+         error_code, error_message, prompt_message_count, prompt_char_count, response_char_count,
+         tool_call_count, duration_ms, tokens_prompt, tokens_completion, tokens_total, created_at,
+         http_status, work_turn_id, agent_run_id)
+      SELECT id, workspace_id, world_id, session_id, employee_id, source, model_id, provider, status,
+         error_code, error_message, prompt_message_count, prompt_char_count, response_char_count,
+         tool_call_count, duration_ms, tokens_prompt, tokens_completion, tokens_total, created_at,
+         http_status, work_turn_id, agent_run_id
+      FROM model_interaction_logs_v25;
+      DROP TABLE model_interaction_logs_v25;
+      CREATE INDEX model_interaction_logs_workspace_idx
+        ON model_interaction_logs(workspace_id, created_at DESC, id);
+      CREATE INDEX model_interaction_logs_status_idx
+        ON model_interaction_logs(workspace_id, status, created_at DESC, id);
+      CREATE INDEX model_interaction_logs_model_idx
+        ON model_interaction_logs(workspace_id, model_id, created_at DESC, id);
+      CREATE UNIQUE INDEX model_interaction_logs_agent_run_idx
+        ON model_interaction_logs(agent_run_id) WHERE agent_run_id IS NOT NULL AND source = 'turn';
+      CREATE INDEX model_interaction_logs_world_employee_created_idx
+        ON model_interaction_logs(world_id, employee_id, created_at DESC, id);
+
+      /* The graph is a world-owned, evidence-backed projection. Every table
+         carries workspace_id and world_id so repository checks and SQLite
+         foreign keys enforce isolation together. */
+      CREATE TABLE IF NOT EXISTS knowledge_entities (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        world_id TEXT NOT NULL,
+        type TEXT NOT NULL CHECK (type IN ('character', 'person', 'place', 'organization', 'project', 'artifact', 'technology', 'concept', 'tool', 'process', 'event', 'topic', 'object', 'other')),
+        canonical_name TEXT NOT NULL,
+        aliases_json TEXT NOT NULL DEFAULT '[]',
+        summary TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL CHECK (status IN ('active', 'archived')),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        archived_at TEXT,
+        UNIQUE (workspace_id, world_id, id),
+        FOREIGN KEY (workspace_id, world_id)
+          REFERENCES worlds(workspace_id, id)
+          ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS knowledge_entities_world_status_updated_idx
+        ON knowledge_entities(world_id, status, updated_at DESC, id);
+      CREATE INDEX IF NOT EXISTS knowledge_entities_world_name_idx
+        ON knowledge_entities(world_id, canonical_name COLLATE NOCASE, id);
+
+      CREATE TABLE IF NOT EXISTS knowledge_evidence (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        world_id TEXT NOT NULL,
+        source_type TEXT NOT NULL CHECK (source_type IN ('conversation', 'document', 'artifact', 'manual')),
+        session_id TEXT,
+        message_id TEXT,
+        sequence INTEGER CHECK (sequence IS NULL OR sequence >= 0),
+        document_id TEXT,
+        chunk_id TEXT,
+        artifact_id TEXT,
+        artifact_version INTEGER CHECK (artifact_version IS NULL OR artifact_version > 0),
+        excerpt TEXT NOT NULL,
+        note TEXT,
+        source_weight REAL NOT NULL CHECK (source_weight >= 0 AND source_weight <= 1),
+        created_by TEXT,
+        created_at TEXT NOT NULL,
+        UNIQUE (workspace_id, world_id, id),
+        FOREIGN KEY (workspace_id, world_id)
+          REFERENCES worlds(workspace_id, id)
+          ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS knowledge_evidence_world_source_created_idx
+        ON knowledge_evidence(world_id, source_type, created_at DESC, id);
+      CREATE INDEX IF NOT EXISTS knowledge_evidence_session_sequence_idx
+        ON knowledge_evidence(world_id, session_id, sequence, id)
+        WHERE session_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS knowledge_evidence_document_idx
+        ON knowledge_evidence(world_id, document_id, chunk_id, id)
+        WHERE document_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS knowledge_evidence_artifact_idx
+        ON knowledge_evidence(world_id, artifact_id, artifact_version, id)
+        WHERE artifact_id IS NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS knowledge_claims (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        world_id TEXT NOT NULL,
+        type TEXT NOT NULL CHECK (type IN ('fact', 'decision', 'preference', 'rule', 'definition', 'procedure', 'constraint', 'insight', 'lore')),
+        subject_entity_id TEXT NOT NULL,
+        predicate TEXT NOT NULL,
+        object_entity_id TEXT,
+        object_text TEXT,
+        confidence REAL NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
+        status TEXT NOT NULL CHECK (status IN ('active', 'conflicted', 'superseded', 'archived')),
+        source TEXT NOT NULL CHECK (source IN ('auto', 'manual')),
+        evidence_ids_json TEXT NOT NULL DEFAULT '[]',
+        conflict_group TEXT,
+        superseded_by_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (workspace_id, world_id, id),
+        CHECK ((object_entity_id IS NOT NULL AND object_text IS NULL) OR (object_entity_id IS NULL AND object_text IS NOT NULL)),
+        FOREIGN KEY (workspace_id, world_id)
+          REFERENCES worlds(workspace_id, id)
+          ON DELETE CASCADE,
+        FOREIGN KEY (workspace_id, world_id, subject_entity_id)
+          REFERENCES knowledge_entities(workspace_id, world_id, id)
+          ON DELETE RESTRICT,
+        FOREIGN KEY (workspace_id, world_id, object_entity_id)
+          REFERENCES knowledge_entities(workspace_id, world_id, id)
+          ON DELETE RESTRICT
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS knowledge_claims_world_status_updated_idx
+        ON knowledge_claims(world_id, status, updated_at DESC, id);
+      CREATE INDEX IF NOT EXISTS knowledge_claims_subject_predicate_idx
+        ON knowledge_claims(world_id, subject_entity_id, predicate, status, id);
+      CREATE INDEX IF NOT EXISTS knowledge_claims_object_entity_idx
+        ON knowledge_claims(world_id, object_entity_id, status, id)
+        WHERE object_entity_id IS NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS knowledge_relations (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        world_id TEXT NOT NULL,
+        from_entity_id TEXT NOT NULL,
+        to_entity_id TEXT NOT NULL,
+        predicate TEXT NOT NULL,
+        confidence REAL NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
+        status TEXT NOT NULL CHECK (status IN ('active', 'conflicted', 'superseded', 'archived')),
+        source TEXT NOT NULL CHECK (source IN ('auto', 'manual')),
+        evidence_ids_json TEXT NOT NULL DEFAULT '[]',
+        conflict_group TEXT,
+        superseded_by_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (workspace_id, world_id, id),
+        FOREIGN KEY (workspace_id, world_id)
+          REFERENCES worlds(workspace_id, id)
+          ON DELETE CASCADE,
+        FOREIGN KEY (workspace_id, world_id, from_entity_id)
+          REFERENCES knowledge_entities(workspace_id, world_id, id)
+          ON DELETE RESTRICT,
+        FOREIGN KEY (workspace_id, world_id, to_entity_id)
+          REFERENCES knowledge_entities(workspace_id, world_id, id)
+          ON DELETE RESTRICT
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS knowledge_relations_world_status_updated_idx
+        ON knowledge_relations(world_id, status, updated_at DESC, id);
+      CREATE INDEX IF NOT EXISTS knowledge_relations_from_idx
+        ON knowledge_relations(world_id, from_entity_id, status, id);
+      CREATE INDEX IF NOT EXISTS knowledge_relations_to_idx
+        ON knowledge_relations(world_id, to_entity_id, status, id);
+
+      CREATE TABLE IF NOT EXISTS knowledge_conversation_cursors (
+        workspace_id TEXT NOT NULL,
+        world_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        processed_through_sequence INTEGER NOT NULL CHECK (processed_through_sequence >= 0),
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (world_id, session_id),
+        FOREIGN KEY (workspace_id, world_id)
+          REFERENCES worlds(workspace_id, id)
+          ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE TABLE IF NOT EXISTS knowledge_consolidation_jobs (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        world_id TEXT NOT NULL,
+        source_type TEXT NOT NULL CHECK (source_type IN ('conversation', 'document', 'artifact')),
+        source_id TEXT NOT NULL,
+        from_cursor INTEGER NOT NULL CHECK (from_cursor >= 0),
+        to_cursor INTEGER NOT NULL CHECK (to_cursor >= from_cursor),
+        status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed')),
+        attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
+        error_code TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        started_at TEXT,
+        completed_at TEXT,
+        UNIQUE (world_id, source_type, source_id, from_cursor, to_cursor),
+        FOREIGN KEY (workspace_id, world_id)
+          REFERENCES worlds(workspace_id, id)
+          ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS knowledge_consolidation_jobs_world_status_updated_idx
+        ON knowledge_consolidation_jobs(world_id, status, updated_at, id);
+
+      CREATE TABLE IF NOT EXISTS world_knowledge_settings (
+        workspace_id TEXT NOT NULL,
+        world_id TEXT PRIMARY KEY,
+        retrieval_enabled INTEGER NOT NULL DEFAULT 1 CHECK (retrieval_enabled IN (0, 1)),
+        auto_consolidation_mode TEXT NOT NULL DEFAULT 'balanced' CHECK (auto_consolidation_mode IN ('off', 'balanced')),
+        extraction_model_profile_id TEXT,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (workspace_id, world_id)
+          REFERENCES worlds(workspace_id, id)
+          ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE TABLE IF NOT EXISTS knowledge_suppressions (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        world_id TEXT NOT NULL,
+        target_type TEXT NOT NULL CHECK (target_type IN ('entity', 'claim', 'relation')),
+        fingerprint TEXT NOT NULL,
+        evidence_ids_json TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL,
+        UNIQUE (world_id, target_type, fingerprint),
+        FOREIGN KEY (workspace_id, world_id)
+          REFERENCES worlds(workspace_id, id)
+          ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS knowledge_suppressions_world_fingerprint_idx
+        ON knowledge_suppressions(world_id, fingerprint, target_type);
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {

@@ -1,6 +1,8 @@
 import { Archive, ArrowLeft, Clock, IdentificationBadge, LinkSimple, PencilSimple, PlusCircle } from '@phosphor-icons/react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
+import { api, jsonBody } from '../../api.js'
+import { knowledgeConsolidatePath } from '../knowledge/knowledge-api.js'
 import { artifactFileUrl, artifactKindLabel, type ArtifactRecord } from './useWorldArtifacts.js'
 import { ArtifactPreview } from './ArtifactPreview.js'
 
@@ -10,15 +12,31 @@ interface ArtifactDetailProps {
   onBack(): void
   onRename(title: string): Promise<void>
   onArchive(): Promise<void>
+  demoMode?: boolean
+  canAddToKnowledge?: boolean
 }
 
-export function ArtifactDetail({ worldId, artifact, onBack, onRename, onArchive }: ArtifactDetailProps) {
+type KnowledgeConsolidationState = 'idle' | 'pending' | 'queued' | 'success' | 'error'
+
+interface KnowledgeConsolidationResponse {
+  job?: unknown
+}
+
+export function ArtifactDetail({ worldId, artifact, onBack, onRename, onArchive, demoMode = false, canAddToKnowledge: canAddToKnowledgeProp = true }: ArtifactDetailProps) {
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(artifact.title)
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<string>()
+  const [knowledgeState, setKnowledgeState] = useState<KnowledgeConsolidationState>('idle')
+  const [knowledgeMessage, setKnowledgeMessage] = useState<string>()
   const currentVersion = artifact.currentVersionInfo
   const versions = artifact.versions ?? (currentVersion === undefined ? [] : [currentVersion])
+  const knowledgeActionAllowed = !demoMode && canAddToKnowledgeProp && artifact.status !== 'archived'
+
+  useEffect(() => {
+    setKnowledgeState('idle')
+    setKnowledgeMessage(undefined)
+  }, [artifact.id])
 
   const rename = async () => {
     const next = title.trim()
@@ -50,6 +68,31 @@ export function ArtifactDetail({ worldId, artifact, onBack, onRename, onArchive 
     }
   }
 
+  const addToKnowledge = async () => {
+    if (!knowledgeActionAllowed || busy || knowledgeState === 'pending' || knowledgeState === 'queued' || knowledgeState === 'success') return
+    setKnowledgeState('pending')
+    setKnowledgeMessage('正在加入知识图谱…')
+    try {
+      const response = await api<KnowledgeConsolidationResponse>(knowledgeConsolidatePath(worldId), {
+        ...jsonBody({ sourceType: 'artifact', sourceId: artifact.id }),
+      })
+      const queued = response.job !== undefined
+      setKnowledgeState(queued ? 'queued' : 'success')
+      setKnowledgeMessage(queued ? '已排队，后台整理中。' : '已加入知识图谱。')
+    } catch (cause) {
+      setKnowledgeState('error')
+      setKnowledgeMessage(toKnowledgeConsolidationError(cause))
+    }
+  }
+
+  const knowledgeDisabledReason = demoMode
+    ? '演示模式下暂不可加入知识图谱'
+    : canAddToKnowledgeProp === false
+      ? '当前没有加入知识图谱的权限'
+      : artifact.status === 'archived'
+        ? '已归档产物不能加入知识图谱'
+        : undefined
+
   return <section className="artifact-detail" aria-label={`${artifact.title}产物详情`}>
     <header className="artifact-detail__header">
       <button type="button" className="artifact-detail__back" onClick={onBack} aria-label="返回产物列表" title="返回产物列表"><ArrowLeft size={17} />返回产物</button>
@@ -61,9 +104,10 @@ export function ArtifactDetail({ worldId, artifact, onBack, onRename, onArchive 
       <div className="artifact-detail__actions">
         <a className="artifact-button" href={artifactFileUrl(worldId, artifact.id, artifact.currentVersion)} target="_blank" rel="noreferrer"><LinkSimple size={16} />打开文件</a>
         <button type="button" className="artifact-button" disabled={busy || artifact.status === 'archived'} onClick={() => void archive()}><Archive size={16} />{artifact.status === 'archived' ? '已归档' : '归档'}</button>
-        <button type="button" className="artifact-button artifact-button--future" disabled title="知识库将在后续版本开放"><PlusCircle size={16} />加入知识（即将开放）</button>
+        <button type="button" className="artifact-button" disabled={!knowledgeActionAllowed || busy || knowledgeState === 'pending' || knowledgeState === 'queued' || knowledgeState === 'success'} title={knowledgeDisabledReason ?? '将这个产物吸收到知识图谱'} onClick={() => void addToKnowledge()}><PlusCircle size={16} />{knowledgeState === 'pending' ? '正在加入…' : knowledgeState === 'queued' ? '已排队' : knowledgeState === 'success' ? '已加入知识图谱' : '加入知识'}</button>
       </div>
       {status === undefined ? null : <p className="artifact-detail__status" role="status">{status}</p>}
+      {knowledgeMessage === undefined ? null : <p id="artifact-knowledge-status" className={`artifact-detail__knowledge-status artifact-detail__knowledge-status--${knowledgeState}`} role={knowledgeState === 'error' ? 'alert' : 'status'} aria-live="polite">{knowledgeMessage}</p>}
     </header>
 
     <div className="artifact-detail__body">
@@ -93,4 +137,9 @@ export function ArtifactDetail({ worldId, artifact, onBack, onRename, onArchive 
 function formatDate(value: string): string {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+function toKnowledgeConsolidationError(cause: unknown): string {
+  if (cause instanceof Error && /[\u3400-\u9fff]/u.test(cause.message) && !cause.message.startsWith('Request failed:')) return cause.message
+  return '加入知识图谱失败，请稍后重试。'
 }

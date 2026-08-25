@@ -60,7 +60,12 @@
 .artifact-detail__title-row input { min-width: 0; flex: 1; height: 40px; border: 1px solid var(--accent); background: var(--surface-1); color: var(--text); padding: 0 10px; font: inherit; font-size: 16px; }
 .artifact-detail__header > p { margin: 0; color: var(--text-muted); font-size: 13px; line-height: 1.6; }
 .artifact-detail__actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.artifact-detail__actions .artifact-button { min-height: 44px; }
 .artifact-detail__status { color: var(--accent-strong) !important; }
+.artifact-detail__knowledge-status { margin: 0; color: var(--text-muted); font-size: 13px; line-height: 1.5; }
+.artifact-detail__knowledge-status--pending, .artifact-detail__knowledge-status--queued { color: var(--accent-strong); }
+.artifact-detail__knowledge-status--success { color: var(--success); }
+.artifact-detail__knowledge-status--error { color: var(--danger); }
 .artifact-detail__body { display: grid; gap: 20px; padding-top: 18px; }
 .artifact-detail__preview { min-width: 0; }
 .artifact-detail__metadata, .artifact-detail__versions { display: grid; gap: 9px; }

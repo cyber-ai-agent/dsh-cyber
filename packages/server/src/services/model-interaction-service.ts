@@ -80,6 +80,34 @@ export class ModelInteractionService {
     })
   }
 
+  /**
+   * Records one background semantic extraction without storing source text,
+   * extraction instructions or the model response.
+   */
+  recordKnowledge(input: RecordKnowledgeInteractionInput): ModelInteractionLog {
+    return this.#store.recordModelInteraction({
+      workspaceId: input.workspaceId,
+      worldId: input.worldId,
+      source: 'knowledge',
+      modelId: input.modelId,
+      provider: input.provider,
+      status: input.status,
+      ...(input.errorCode === undefined ? {} : { errorCode: input.errorCode }),
+      ...(input.errorMessage === undefined ? {} : { errorMessage: sanitizeErrorMessage(input.errorMessage) }),
+      ...(input.httpStatus === undefined ? {} : { httpStatus: input.httpStatus }),
+      promptMessageCount: 1,
+      promptCharCount: input.promptCharCount,
+      responseCharCount: input.responseCharCount,
+      toolCallCount: 0,
+      durationMs: input.durationMs,
+      ...(input.tokensPrompt === undefined ? {} : { tokensPrompt: input.tokensPrompt }),
+      ...(input.tokensCompletion === undefined ? {} : { tokensCompletion: input.tokensCompletion }),
+      ...(input.tokensPrompt === undefined && input.tokensCompletion === undefined ? {} : {
+        tokensTotal: (input.tokensPrompt ?? 0) + (input.tokensCompletion ?? 0),
+      }),
+    })
+  }
+
   list(workspaceId: string, filter: ModelInteractionLogFilter): ModelInteractionLogPage {
     return this.#store.listModelInteractions(workspaceId, filter)
   }
@@ -122,6 +150,22 @@ export interface RecordDiscoveryInteractionInput {
   errorMessage?: string
   httpStatus?: number
   durationMs: number
+}
+
+export interface RecordKnowledgeInteractionInput {
+  workspaceId: string
+  worldId: string
+  modelId: string
+  provider: string
+  status: ModelInteractionLogStatus
+  errorCode?: string
+  errorMessage?: string
+  httpStatus?: number
+  promptCharCount: number
+  responseCharCount: number
+  durationMs: number
+  tokensPrompt?: number
+  tokensCompletion?: number
 }
 
 /**

@@ -15,6 +15,7 @@ import {
 export interface ArtifactCenterProps {
   world: World
   demoMode?: boolean
+  canAddToKnowledge?: boolean
   focusArtifactId?: string
   onFocusArtifact?(artifactId: string | undefined): void
   initialArtifacts?: ArtifactRecord[]
@@ -30,11 +31,12 @@ const filters: Array<{ id: ArtifactKindFilter; label: string }> = [
   { id: 'code', label: '代码' },
 ]
 
-export function ArtifactCenter({ world, demoMode = false, focusArtifactId, onFocusArtifact, initialArtifacts = [] }: ArtifactCenterProps) {
+export function ArtifactCenter({ world, demoMode = false, canAddToKnowledge, focusArtifactId, onFocusArtifact, initialArtifacts = [] }: ArtifactCenterProps) {
   const [publishOpen, setPublishOpen] = useState(false)
   const artifactsState = useWorldArtifacts({ worldId: world.id, enabled: !demoMode, initialArtifacts })
   const { artifacts, loading, error, query, setQuery, kind, setKind, selectedArtifactId, setSelectedArtifactId, reload, publishFromWorkspace, rename, archive } = artifactsState
   const selected = artifactsState.allArtifacts.find((artifact) => artifact.id === selectedArtifactId)
+  const knowledgeActionAllowed = !demoMode && canAddToKnowledge !== false
 
   useEffect(() => {
     if (focusArtifactId !== undefined) setSelectedArtifactId(focusArtifactId)
@@ -44,7 +46,7 @@ export function ArtifactCenter({ world, demoMode = false, focusArtifactId, onFoc
     onFocusArtifact?.(selectedArtifactId)
   }, [onFocusArtifact, selectedArtifactId])
 
-  if (selected !== undefined) return <ArtifactDetail worldId={world.id} artifact={selected} onBack={() => setSelectedArtifactId(undefined)} onRename={async (title) => { await rename(selected.id, title) }} onArchive={async () => { await archive(selected.id) }} />
+  if (selected !== undefined) return <ArtifactDetail worldId={world.id} artifact={selected} demoMode={demoMode} canAddToKnowledge={knowledgeActionAllowed} onBack={() => setSelectedArtifactId(undefined)} onRename={async (title) => { await rename(selected.id, title) }} onArchive={async () => { await archive(selected.id) }} />
 
   return <section className="artifact-center" aria-label="世界产物中心">
     <header className="artifact-center__header">

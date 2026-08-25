@@ -19,6 +19,7 @@ import { worldExperience } from '../world-experience.js'
 import { ApprovalRequests, type ApprovalRequestsProps } from './ApprovalRequests.js'
 import { Avatar } from './Avatar.js'
 import { AuthorityBadge } from './AuthorityBadge.js'
+import { ContextMenu, type ContextMenuPosition } from './ContextMenu.js'
 
 const MarkdownMessage = lazy(async () => ({ default: (await import('./MarkdownMessage.js')).MarkdownMessage }))
 const ArtifactReferenceCards = lazy(async () => ({ default: (await import('../features/artifacts/ArtifactCenter.js')).ArtifactReferenceCards }))
@@ -63,6 +64,10 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
   const [uploading, setUploading] = useState(false)
   const [attachmentError, setAttachmentError] = useState<string>()
+  const [messageMenu, setMessageMenu] = useState<{ message: WorkMessage; position: ContextMenuPosition }>()
+  const [rememberingMessageId, setRememberingMessageId] = useState<string>()
+  const [rememberedMessageIds, setRememberedMessageIds] = useState<Set<string>>(() => new Set())
+  const [knowledgeError, setKnowledgeError] = useState<string>()
   const experience = worldExperience(world)
   const mention = useMemo(() => currentMention(draft), [draft])
   const suggestions = useMemo(() => mention === undefined ? [] : employees.filter((employee) => employee.displayName.includes(mention)).slice(0, 6), [employees, mention])
@@ -129,6 +134,32 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
     requestAnimationFrame(() => inputRef.current?.focus())
   }
 
+  const rememberMessage = async (message: WorkMessage) => {
+    if (session === undefined || rememberingMessageId !== undefined || rememberedMessageIds.has(message.id)) return
+    setMessageMenu(undefined)
+    setKnowledgeError(undefined)
+    setRememberingMessageId(message.id)
+    try {
+      const response = await fetch(`/api/worlds/${encodeURIComponent(world.id)}/knowledge/consolidate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceType: 'conversation',
+          sourceId: session.id,
+          fromCursor: Math.max(0, message.sequence - 1),
+          toCursor: message.sequence,
+        }),
+      })
+      const result = await response.json() as { error?: { message?: string } }
+      if (!response.ok) throw new Error(result.error?.message ?? '这条消息暂时无法加入长期知识')
+      setRememberedMessageIds((current) => new Set(current).add(message.id))
+    } catch (cause) {
+      setKnowledgeError(cause instanceof Error ? cause.message : '这条消息暂时无法加入长期知识')
+    } finally {
+      setRememberingMessageId(undefined)
+    }
+  }
+
   return (
     <section className="chat-workbench" aria-label="当前世界多角色会话">
       <header className="chat-header">
@@ -159,10 +190,10 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
           const streaming = message.metadata.streaming === true
           if (message.kind === 'system') return <div key={message.id} className="chat-system-notice" role="status">{message.content}</div>
           return (
-            <article key={message.id} className={`message${owner ? ' message--owner' : ''}${streaming ? ' message--streaming' : ''}`}>
+            <article key={message.id} className={`message${owner ? ' message--owner' : ''}${streaming ? ' message--streaming' : ''}`} onContextMenu={(event) => { if (streaming) return; event.preventDefault(); setMessageMenu({ message, position: { x: event.clientX, y: event.clientY } }) }} onKeyDown={(event) => { if (streaming || (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10'))) return; event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); setMessageMenu({ message, position: { x: rect.left + Math.min(rect.width, 220), y: rect.top + 28 } }) }} tabIndex={streaming ? undefined : 0}>
               {owner ? null : <button className="avatar-button" type="button" onClick={() => employee && onOpenDossier(employee.id)} aria-label={`打开${employee?.displayName ?? experience.personLabel}角色`}><Avatar index={employee?.avatarIndex ?? 7} label={employee?.displayName ?? '角色'} authorityRole={employee?.authorityRole} /></button>}
               <div className="message__body">
-                <header className="message__meta">{owner ? <span className="sr-only">我的消息</span> : <><strong>{employee?.displayName ?? experience.personLabel}<AuthorityBadge role={employee?.authorityRole} /></strong><span>{employee?.role}</span></>}<time>{displayTime(message)}</time></header>
+                <header className="message__meta">{owner ? <span className="sr-only">我的消息</span> : <><strong>{employee?.displayName ?? experience.personLabel}<AuthorityBadge role={employee?.authorityRole} /></strong><span>{employee?.role}</span></>}<time>{displayTime(message)}</time>{rememberingMessageId === message.id ? <span role="status">正在整理…</span> : rememberedMessageIds.has(message.id) ? <span role="status">已加入长期知识</span> : null}</header>
                 <div className="message__content">{streaming && message.content.length === 0 ? <span className="stream-placeholder">正在生成回复…</span> : <RichText value={message.content} worldId={world.id} />}{streaming ? <span className="stream-cursor" aria-hidden="true" /> : null}</div>
                 <MessageAttachments attachments={messageAttachments(message.metadata)} />
                 {artifactRefsFromMetadata(message.metadata).length === 0 ? null : <Suspense fallback={<div className="chat-artifact-refs" role="status">正在载入产物卡…</div>}><ArtifactReferenceCards worldId={world.id} artifactRefs={artifactRefsFromMetadata(message.metadata)} onOpen={onOpenArtifact} /></Suspense>}
@@ -174,7 +205,16 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
         {pendingCount > 0 ? <div className="stream-state" role="status"><CircleNotch size={16} className="spin" /><span>角色正在回复，你可以继续补充，也可以切换到其他会话。</span>{queuedCount > 0 ? <strong>另有 {queuedCount} 条已排队</strong> : null}</div> : sending ? <div className="stream-state" role="status"><CircleNotch size={16} className="spin" /><span>处理中…</span></div> : null}
       </div>
 
+      {messageMenu === undefined ? null : <ContextMenu label="消息操作" position={messageMenu.position} onClose={() => setMessageMenu(undefined)} items={[{
+        id: 'remember-message',
+        label: rememberedMessageIds.has(messageMenu.message.id) ? '已加入长期知识' : '加入长期知识',
+        description: '引用这条消息作为证据，在后台整理为可追溯知识',
+        icon: <ClockCounterClockwise size={17} />,
+        disabled: rememberingMessageId !== undefined || rememberedMessageIds.has(messageMenu.message.id),
+        onSelect: () => { void rememberMessage(messageMenu.message) },
+      }]} />}
       <div className="composer-zone">
+        {knowledgeError === undefined ? null : <div className="chat-knowledge-error" role="alert"><span>{knowledgeError}</span><button type="button" onClick={() => setKnowledgeError(undefined)} aria-label="关闭提示"><X size={14} /></button></div>}
         {onDecideWorldPermissionRequest === undefined ? null : <WorldPermissionRequests items={permissionRequests} employees={employees} activeSessionId={session?.id} onDecide={onDecideWorldPermissionRequest} onOpenSettings={onOpenWorldPermissionSettings} />}
         {onDecideApproval === undefined ? null : <ApprovalRequests items={approvals} onDecide={onDecideApproval} />}
         <div className="composer">

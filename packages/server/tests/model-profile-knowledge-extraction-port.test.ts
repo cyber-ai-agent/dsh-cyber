@@ -1,0 +1,88 @@
+import { describe, expect, it, vi } from 'vitest'
+
+import type { ModelProfile } from '@dsh-cyber/contracts'
+
+import { ModelProfileKnowledgeExtractionPort } from '../src/services/model-profile-knowledge-extraction-port.js'
+
+const profile: ModelProfile = {
+  id: 'profile-1',
+  workspaceId: 'workspace-1',
+  displayName: '本地模型',
+  providerKind: 'openai-compatible-local',
+  baseUrl: 'http://127.0.0.1:11434/v1',
+  modelId: 'model-1',
+  api: 'openai-completions',
+  isDefault: true,
+  settings: {},
+  createdAt: '2026-08-26T00:00:00.000Z',
+  updatedAt: '2026-08-26T00:00:00.000Z',
+}
+
+describe('ModelProfileKnowledgeExtractionPort', () => {
+  it('uses the configured profile without creating a character runtime identity', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
+      expect(String(url)).toBe('http://127.0.0.1:11434/v1/chat/completions')
+      expect(init?.headers).toMatchObject({ Authorization: 'Bearer local-secret' })
+      const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> }
+      expect(body.messages[1]?.content).toContain('evidence-1')
+      return new Response(JSON.stringify({
+        model: 'model-1',
+        choices: [{ message: { content: '{"entities":[],"claims":[],"relations":[],"evidenceRefs":[]}' } }],
+        usage: { prompt_tokens: 21, completion_tokens: 8 },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    const port = new ModelProfileKnowledgeExtractionPort({
+      store: {
+        getModelAssignment: () => undefined,
+        getModelProfile: (id) => id === profile.id ? profile : undefined,
+        listModelProfiles: () => [profile],
+      },
+      credentials: { resolve: () => 'local-secret' } as never,
+      fetch: fetchMock,
+    })
+    const result = await port.extract({
+      workspaceId: 'workspace-1',
+      worldId: 'world-1',
+      sourceType: 'conversation',
+      sourceId: 'session-1',
+      modelProfileId: profile.id,
+      inputChars: 4,
+      visibleText: '事实',
+      evidence: [{
+        evidenceId: 'evidence-1',
+        workspaceId: 'workspace-1',
+        worldId: 'world-1',
+        sourceType: 'conversation',
+        sourceId: 'session-1',
+        excerpt: '事实',
+        sessionId: 'session-1',
+        messageId: 'message-1',
+        sequence: 1,
+      }],
+    })
+    expect(result).toMatchObject({ usage: { model: 'model-1', inputTokens: 21, outputTokens: 8 } })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not use an explicit profile from another workspace', async () => {
+    const port = new ModelProfileKnowledgeExtractionPort({
+      store: {
+        getModelAssignment: () => undefined,
+        getModelProfile: () => ({ ...profile, workspaceId: 'another-workspace' }),
+        listModelProfiles: () => [],
+      },
+      credentials: { resolve: () => undefined } as never,
+      fetch: vi.fn(),
+    })
+    await expect(port.extract({
+      workspaceId: 'workspace-1',
+      worldId: 'world-1',
+      sourceType: 'document',
+      sourceId: 'document-1',
+      modelProfileId: profile.id,
+      inputChars: 4,
+      visibleText: '事实',
+      evidence: [],
+    })).rejects.toMatchObject({ code: 'knowledge_model_unconfigured' })
+  })
+})

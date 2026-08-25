@@ -933,7 +933,7 @@ function ModelInteractionLogSettings({
                   <button className="log-entry__row" type="button" aria-expanded={expanded} onClick={() => setExpandedId(expanded ? undefined : log.id)}>
                     <span className="log-entry__time">{formatLogTime(log.createdAt)}</span>
                     <span className="log-entry__model"><strong>{log.modelId}</strong><small>{log.provider}</small></span>
-                    <span className="log-entry__source">{log.source === 'turn' ? '对话回合' : '模型发现'}</span>
+                    <span className="log-entry__source">{modelInteractionSourceLabel(log.source)}</span>
                     <span className={log.status === 'success' ? 'log-status log-status--success' : 'log-status log-status--failed'}>{log.status === 'success' ? '成功' : '失败'}</span>
                     <span className="log-entry__http">{log.httpStatus === undefined ? '' : `HTTP ${log.httpStatus}`}</span>
                     <span className="log-entry__duration">{formatDuration(log.durationMs)}</span>
@@ -964,7 +964,7 @@ function LogDetail({ log }: { log: ModelInteractionLog }) {
       <dl>
         <div><dt>模型</dt><dd>{log.modelId}</dd></div>
         <div><dt>提供商</dt><dd>{log.provider}</dd></div>
-        <div><dt>交互类型</dt><dd>{log.source === 'turn' ? '对话回合（服务端整轮交互）' : '/models 模型发现'}</dd></div>
+        <div><dt>交互类型</dt><dd>{modelInteractionSourceDetail(log.source)}</dd></div>
         <div><dt>状态</dt><dd>{log.status === 'success' ? '成功' : '失败'}{log.errorCode === undefined ? '' : ` · ${log.errorCode}`}</dd></div>
         <div><dt>HTTP 状态码</dt><dd>{log.httpStatus === undefined ? '—' : log.httpStatus}</dd></div>
         <div><dt>耗时</dt><dd>{log.durationMs} ms</dd></div>
@@ -989,6 +989,18 @@ function formatLogTime(value: string, full = false): string {
 function formatDuration(value: number): string {
   if (value < 1_000) return `${value} ms`
   return `${(value / 1_000).toFixed(1)} s`
+}
+
+function modelInteractionSourceLabel(source: ModelInteractionLog['source']): string {
+  if (source === 'turn') return '对话回合'
+  if (source === 'knowledge') return '知识整理'
+  return '模型发现'
+}
+
+function modelInteractionSourceDetail(source: ModelInteractionLog['source']): string {
+  if (source === 'turn') return '对话回合（服务端整轮交互）'
+  if (source === 'knowledge') return '知识整理（后台语义提取）'
+  return '模型目录发现'
 }
 
 function tokensSummary(log: ModelInteractionLog): string {

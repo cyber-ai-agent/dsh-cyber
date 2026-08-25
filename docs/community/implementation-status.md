@@ -6,7 +6,7 @@
 
 世界主题、本地包、员工蓝图和 prompt-transform 已收敛到严格声明式边界；现有领域模型更安全的部分继续保留。远程市场、发布 CLI、密码学签名、依赖解析、任意插件代码和外发监控仍未实现，不能通过文档字段假装存在。World Administrator V1 已进入真实的 SQLite、Server、Skill Runtime 和 Web 路径；产品级 E2E 仍是合并门禁，不通过门禁就不能把该能力标记为稳定发布能力。
 
-会话连续性支持同一会话跨重启恢复，回合与角色执行生命周期也已持久化到本地 SQLite。当前世界可以检索知识库中的外部原始资料；对话自动整理、知识图谱、情景记忆和向量检索尚未实现。
+会话连续性支持同一会话跨重启恢复，回合与角色执行生命周期也已持久化到本地 SQLite。当前世界可以检索外部原始资料和有证据的长期知识；对话、资料和产物可以通过持久化后台任务整理为世界知识图谱。情景记忆、向量检索和跨设备知识同步尚未实现。
 
 | 领域 | 已实现 | 部分实现/约定补强 | 未实现（ROADMAP） |
 | --- | --- | --- | --- |
@@ -26,12 +26,13 @@
 | 应用访问锁 | 全局锁屏覆盖整个工作台；锁定状态下服务端拒绝除健康检查和解锁外的应用 API；密码使用 scrypt 派生哈希保存在本机凭据目录；错误尝试限速；服务重启后默认重新锁定 | 会话当前保存在进程内并具有固定有效期；应用锁不代替操作系统账号、磁盘加密或文件权限 | 系统生物识别、设备间锁状态同步 |
 | 世界管理员 | 多管理员、18 项 World Permission、权限审计账本、内联决策与 same-WorkTurn 续跑；权限增删为增量 patch（grant/revoke 不改身份也不丢其他授权，promote 应用完整推荐集），给成员授予管理类权限返回结构化拒绝而非静默过滤；决策按会话隔离；决策审计不随 `prune` 删除；文件访问分 none/read/write 三档，无 read 时运行时锚定在空的受管工作区；每个已发布 Descriptor 都有生产 handler（契约测试保证） | 管理能力是身份标记加权限判定，没有独立 Admin Runtime；一句话中的多个管理动作只执行被识别的那一个 | 计划编译器（多动作）、全局决策中心、插件/模型的中文名解析、一次性 Owner danger 授权 |
 | 世界产物 | SQLite 产物登记、不可变版本、精确运行清单、同世界聊天引用、搜索与类型筛选、重命名和归档；Markdown、代码、JSON、PDF、图片、HTML 与项目文件树使用对应阅读器；HTML 预览受 CSP 与 iframe 沙箱隔离；产物随世界备份并由 doctor 检查缺失文件 | 工作目录只在用户或角色提供精确清单时发布，不扫描猜测；当前支持手动填写相对路径发布，用户可明确把已发布版本加入知识库 | 产物差异对比、产物自动入库、跨设备产物同步 |
-| 世界知识库 | 世界独立的 KnowledgeCollection、KnowledgeDocument 与 KnowledgeChunk；原始文件位于 `knowledge/library`；支持 Markdown、TXT、JSON、PDF、文件夹、ZIP、粘贴和网页导入；SQLite FTS5 能力检测与可移植回退；聊天热路径使用一次本地检索并通过统一上下文组合器注入；外部资料按不可信数据隔离 | 全文检索为本地词法检索；产物只有在用户明确操作后才加入；缺失源文件保持可诊断状态 | 证据知识图谱、自动对话整理、向量索引、跨设备知识同步 |
+| 世界知识库 | 世界独立的 KnowledgeCollection、KnowledgeDocument 与 KnowledgeChunk；原始文件位于 `knowledge/library`；支持 Markdown、TXT、JSON、PDF、文件夹、ZIP、粘贴和网页导入；SQLite FTS5 能力检测与可移植回退；聊天热路径使用一次本地检索并通过统一上下文组合器注入；外部资料按不可信数据隔离 | 全文检索为本地词法检索；产物只有在用户明确操作后才加入；缺失源文件保持可诊断状态 | 向量索引、跨设备知识同步 |
+| 世界知识图谱 | 世界独立的 Entity、Claim、Relation 与 Evidence；对话游标、整理任务、世界设置和归档抑制均持久化；后台平衡模式按消息量、字符数和空闲时间整理；严格 JSON 与批次证据校验；支持 Canvas 图谱、聚焦、筛选、证据详情、实体改名和主张归档/恢复；运行时组合主张检索、资料分块和一层邻居 | 当前使用词法检索和本地邻居展开；知识提取依赖已配置的世界模型；冲突内容保留并标记，不自动裁决 | 可选 Embedding 适配器、情景记忆、跨设备图谱同步 |
 | 设置与模型连接 | 设置内容采用单列信息流；模型连接先配置地址与密钥，再拉取并搜索选择模型 ID；维护页只保留真实应用更新；主题采用完整预设并折叠低频自定义项 | 公开模型目录依赖供应商接口；手动模型 ID 保留为显式备用模式 | 自动供应商账户导入、跨设备设置同步 |
 | 应用更新 | 仅支持干净 `main` 分支从 `origin/main` 快进；更新前在隔离工作树完成 frozen install 与 build，并创建完整本地 Backup Bundle | 更新完成后需要用户重启当前进程；非 Git 安装和开发分支会明确显示不支持原因 | 桌面安装包增量更新、签名发布通道 |
 | 动作审批 | 外部副作用先持久化 Skill Action 与 Approval Request；两者关联 WorkTurn；未批准、已拒绝、已过期或授权已撤销时不会进入受信任 Adapter；持久执行 CAS 保证单次进入外部边界；审批后崩溃可安全续跑，已进入外部边界的崩溃转为结果未知并禁止自动重试 | 会话内审批卡展示适配器、技能、调用、目标与参数，提供本次允许/一直允许/拒绝，并有一条穿 HTTP 的 propose→approve→execute 回归测试；可复用策略由 Skill Descriptor 显式授权，严格绑定 Skill、Action、Target、Risk 与作用域，**永不绑定 `parameters`**，因此语义装在参数里的技能（Firecrawl、MCP）声明 `forbidden` | 独立审批中心界面、通用文件写入审批、远程审批同步 |
 | MCP Skill Adapter | 官方 MCP TypeScript SDK Streamable HTTP 客户端；工具发现映射为独立 Skill；调用严格经过角色 Grant、单次 Approval 和 SQLite Action Ledger；禁止创建角色级或世界级持久策略；参数加密暂存并确定性清理；原始结果不持久化 | V1 通过显式 `/mcp 工具名 JSON` 命令提出调用；每个工作区当前配置一个 MCP 服务 | stdio Extension Host、模型原生结构化调用、多 MCP 服务实例管理 |
-| 模型交互日志 | turn/discovery 双源采集、SQLite 持久化、分页/筛选/详情/清空 API、设置面板日志界面、错误信息密钥清洗；v17 将 turn 日志绑定到 WorkTurn 与 AgentRun，并保存 Harness 返回的真实 Token | 一条 turn 日志表示整轮角色运行，不拆分 worker 内部的多次模型请求；消息数为近似统计；无自动保留策略 | worker 内逐请求明细、日志自动清理和条数上限 |
+| 模型交互日志 | turn/discovery/knowledge 三类来源采集、SQLite 持久化、分页/筛选/详情/清空 API、设置面板日志界面、错误信息密钥清洗；turn 日志绑定 WorkTurn 与 AgentRun，知识整理只保存模型、耗时、字符数、真实 Token 和错误分类 | 一条 turn 日志表示整轮角色运行，不拆分 worker 内部的多次模型请求；知识整理不保存来源正文、提取提示或模型原始响应；无自动保留策略 | worker 内逐请求明细、日志自动清理和条数上限 |
 | CI | Node 22.19、pnpm 11.7、frozen lockfile、typecheck、test、Chromium、E2E | 仓库工作流名为 `required`；GitHub 分支保护需在仓库设置中另行确认 | 自动发布与包签名流水线 |
 
 ## 关键证据
@@ -57,6 +58,7 @@
 - 世界管理员：`packages/contracts/src/world-authority.ts`、`packages/persistence/src/world-character-authority-repository.ts`、`packages/persistence/src/sqlite-store.ts`、`packages/server/src/services/world-character-authority-service.ts`、`packages/server/src/services/world-permission-request-service.ts`、`packages/server/src/services/world-management-intent-parser.ts`、`packages/server/src/skills/world-management-adapter.ts`、`packages/server/src/routes/world-authority-routes.ts`、`packages/web/src/components/WorldPermissionEditor.tsx`、`docs/architecture/world-character-authority-v1.md`
 - 世界产物：`packages/contracts/src/world-artifact.ts`、`packages/persistence/src/world-artifact-repository.ts`、`packages/server/src/services/world-artifact-service.ts`、`packages/server/src/routes/world-artifact-routes.ts`、`packages/orchestration/src/agent-run-completion-hook.ts`、`packages/web/src/features/artifacts/`、[世界产物中心](../architecture/world-artifact-center-v1.md)
 - 世界知识库：`packages/contracts/src/world-knowledge.ts`、`packages/persistence/src/world-knowledge-repository.ts`、`packages/server/src/services/world-knowledge-library-service.ts`、`packages/server/src/services/world-runtime-context-composer.ts`、`packages/server/src/routes/world-knowledge-routes.ts`、`packages/web/src/features/knowledge/`、[世界知识库](../architecture/world-knowledge-library-v1.md)
+- 世界知识图谱：`packages/contracts/src/world-knowledge-graph.ts`、`packages/persistence/src/world-knowledge-graph-repository.ts`、`packages/server/src/services/world-knowledge-consolidation-service.ts`、`packages/server/src/services/world-knowledge-graph-service.ts`、`packages/server/src/services/model-profile-knowledge-extraction-port.ts`、`packages/web/src/features/knowledge/KnowledgeGraph.tsx`、[世界知识图谱](../architecture/world-knowledge-graph-v1.md)
 - 设置、创意工坊与更新：`packages/web/src/components/SettingsDialog.tsx`、`packages/web/src/components/creative-workshop/CreativeWorkshopEditor.tsx`、`packages/server/src/services/application-update-service.ts`
 - 模型交互日志：`packages/server/src/services/model-interaction-service.ts`、`packages/server/src/routes/model-interaction-routes.ts`、`packages/persistence/src/migrations.ts`（v11）、[模块说明与观测边界](model-interaction-logs.md)
 - CI：`.github/workflows/ci.yml`

@@ -74,6 +74,8 @@ import { createKnowledgeSearchPort } from './services/knowledge-search-port.js'
 import { KnowledgeWebImportService } from './services/knowledge-web-import-service.js'
 import { WorldKnowledgeLibraryService } from './services/world-knowledge-library-service.js'
 import { WorldKnowledgeRetrievalService } from './services/world-knowledge-retrieval-service.js'
+import type { KnowledgeExtractionPort } from './services/knowledge-extraction.js'
+import { createWorldKnowledgeGraphRuntime } from './services/world-knowledge-graph-runtime.js'
 import { WorldKnowledgeRuntimeContextContributor, WorldRuntimeContextComposer } from './services/world-runtime-context-composer.js'
 import { WorldTraceService } from './services/world-trace-service.js'
 import { WorldMarketplaceService } from './services/world-marketplace-service.js'
@@ -116,6 +118,7 @@ export interface CyberServerOptions {
   marketplaceRoot?: string
   bootstrapDefaultWorld?: boolean
   mcpClientFactory?: McpClientFactory
+  knowledgeExtractionPort?: KnowledgeExtractionPort
 }
 
 export interface CyberServerAddress { host: string; port: number; origin: string }
@@ -255,6 +258,15 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
 
   const activeDshBinPath = await resolveActiveRuntime(store, runtimeStateRoot, stateRoot)
   const interactions = new ModelInteractionService(store)
+  const knowledgeGraphRuntime = createWorldKnowledgeGraphRuntime({
+    store,
+    libraryRepository: worldKnowledgeRepository,
+    artifacts: worldArtifacts,
+    credentials,
+    interactions,
+    ...(options.knowledgeExtractionPort === undefined ? {} : { extractionPort: options.knowledgeExtractionPort }),
+    publish: (worldId, payload) => publishKnowledgeChanged?.(worldId, payload),
+  })
   const baseRuntime = options.runtime ?? new HarnessModelRouter({
     stateRoot: runtimeStateRoot,
     ...(activeDshBinPath === undefined ? {} : { dshBinPath: activeDshBinPath }),
@@ -304,7 +316,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   publishDecisionChanged = (worldId, payload) => worldRuntime.publishDecisionChanged(worldId, payload)
   const worldRuntimeContext = new WorldRuntimeContextComposer({
     settings: worldSettings,
-    contributors: [new WorldKnowledgeRuntimeContextContributor(
+    contributors: [knowledgeGraphRuntime.contributor, new WorldKnowledgeRuntimeContextContributor(
       new WorldKnowledgeRetrievalService({ search: worldKnowledgeSearch }),
       (input, context) => {
         const world = store.getWorld(input.worldId)
@@ -418,7 +430,17 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
   registerWorldTraceRoutes(router, { store, trace: worldTrace, access: worldAccess })
   registerWorldArtifactRoutes(router, { store, artifacts: worldArtifacts, access: worldAccess, authority })
-  registerWorldKnowledgeRoutes(router, { store, library: worldKnowledge, web: knowledgeWeb, access: worldAccess })
+  registerWorldKnowledgeRoutes(router, {
+    store,
+    library: worldKnowledge,
+    web: knowledgeWeb,
+    access: worldAccess,
+    graph: knowledgeGraphRuntime.graph,
+    graphAdmin: knowledgeGraphRuntime.admin,
+    graphRetrieval: knowledgeGraphRuntime.retrieval,
+    consolidation: knowledgeGraphRuntime.consolidation,
+    consolidationScheduler: knowledgeGraphRuntime.scheduler,
+  })
   registerModelInteractionRoutes(router, { store, interactions })
   registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, turnContinuations, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, runtimeContext: worldRuntimeContext, worldTrace, employeeActivity, worldPackages, worldRuntimePermissions, ownerRuntimeAccess })
   registerEmployeeRoutes(router, { store, worldAccess, authority })
@@ -455,6 +477,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       ambientLifeScheduler.start()
       taskSchedules.start()
       skillRuntime.start()
+      await knowledgeGraphRuntime.start()
       // Neither of these may gate the listener. MCP discovery talks to
       // user-configured endpoints that can black-hole, and continuation runs
       // live model turns that fail when a provider is down or a credential is
@@ -475,6 +498,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     async close() {
       if (closed) return
       closed = true
+      knowledgeGraphRuntime.stop()
       skillRuntime.close()
       await taskSchedules.close()
       await ambientLifeScheduler.close()

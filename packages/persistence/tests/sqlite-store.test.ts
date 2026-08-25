@@ -970,6 +970,32 @@ describe('SqliteStore', () => {
     })).toThrow('tokens total must be a non-negative integer')
   })
 
+  it('records knowledge extraction telemetry as summaries without model content', async () => {
+    const { store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: '知识模型日志' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '知识世界', templateId: 'cyber-company' })
+    const log = store.recordModelInteraction({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      source: 'knowledge',
+      modelId: 'knowledge-extractor',
+      provider: '本地模型',
+      status: 'success',
+      promptMessageCount: 1,
+      promptCharCount: 520,
+      responseCharCount: 240,
+      durationMs: 900,
+      tokensPrompt: 120,
+      tokensCompletion: 70,
+      tokensTotal: 190,
+    })
+    expect(log.source).toBe('knowledge')
+    expect(JSON.stringify(log)).not.toContain('原始提示词')
+    expect(store.listModelInteractions(workspace.id, { page: 1, pageSize: 20 }).items).toEqual([
+      expect.objectContaining({ id: log.id, source: 'knowledge', tokensTotal: 190 }),
+    ])
+  })
+
   it('persists strict conversation runtime lifecycles and recovers stale work after restart', async () => {
     const { path, store } = await testDatabase()
     const workspace = store.createWorkspace({ name: 'Runtime lifecycle' })

@@ -153,6 +153,13 @@ Available
 - 角色回答问题时最多增加一次本地知识检索。外部资料始终是不可信数据，不能直接修改权限、批准操作或触发文件与 Skill 副作用。
 - 知识源文件和 SQLite 一起进入本地备份，`doctor` 会报告集合、文档、分块与缺失源文件数量。
 
+### 🕸️ 世界知识图谱
+
+- 对话中的可见消息、知识库资料、世界产物和用户明确确认的信息可以在后台整理为实体、主张和关系；每条有效知识都保留可返回原消息、资料分块或产物版本的证据。
+- 自动整理按世界独立运行，任务、会话游标、设置、冲突状态和用户归档记录都保存在 SQLite。服务重启不会重放已经完成的批次。
+- “知识”页使用 Canvas 显示真实节点与连线，支持搜索、缩放、平移、聚焦、类型与来源筛选，并能查看主张、关系和证据详情。
+- 运行时检索组合长期主张、知识库片段和一层图谱邻居。知识只作为回答上下文，不能修改权限、批准操作、写入文件或触发外部副作用。
+
 ### 💾 Local-first & Safe Upgrades
 
 本地 `stateRoot` 当前是权威数据源。
@@ -274,6 +281,7 @@ Agent identity
 - [Creative World Platform V1](./docs/architecture/creative-world-platform-v1.md)
 - [世界产物中心 V1](./docs/architecture/world-artifact-center-v1.md)
 - [世界知识库 V1](./docs/architecture/world-knowledge-library-v1.md)
+- [世界知识图谱 V1](./docs/architecture/world-knowledge-graph-v1.md)
 - [Architecture & Development Guidelines](./docs/development/architecture-guidelines.md)
 - [CI Strategy](./docs/development/ci-strategy.md)
 
@@ -405,7 +413,7 @@ Harness 被限制在兼容适配层，不允许世界、角色、Skill 领域代
 - [ ] Creative Platform V1 稳定化
 - [ ] Workshop 项目版本与编辑生命周期
 - [ ] Character Identity / Persona / Embodiment 完全以用户当前设定为准
-- [ ] 有证据的长期知识图谱与对话整理
+- [x] 有证据的长期知识图谱与对话整理
 - [ ] Task / Job / Deliverable / Review 工作系统
 - [ ] GitHub Skill Adapter
 - [ ] Browser Skill Adapter
