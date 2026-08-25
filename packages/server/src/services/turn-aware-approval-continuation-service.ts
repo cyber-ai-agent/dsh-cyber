@@ -291,7 +291,10 @@ const sanitizer = new TraceSanitizer()
  */
 function factualRuntimeSource(prompt: string, actions: CharacterSkillAction[]): string {
   if (actions.length === 0) return prompt
-  const summary = actions.map((action) => `${action.label}：${statusPhrase(action)}`).join('\n')
+  const summary = actions.map((action) => {
+    const notice = unhandledClauseNotice(action)
+    return `${action.label}：${statusPhrase(action)}${notice === undefined ? '' : `；${notice}`}`
+  }).join('\n')
   const sections = [
     prompt,
     `${FACT_BLOCK_OPEN}\n${summary}\n只能根据以上持久化事实说明动作已执行、未执行、等待连接、失败或结果未知。不得自动重试结果未知的外部动作。`,
@@ -327,6 +330,17 @@ function statusPhrase(action: CharacterSkillAction): string {
     case 'outcome-unknown': return '结果未知，不得声称成功或失败，也不得自动重试'
     default: return String(action.status)
   }
+}
+
+/** A parser diagnostic is a host fact, not third-party detail. */
+function unhandledClauseNotice(action: CharacterSkillAction): string | undefined {
+  const value = action.parameters?.unhandledClauses
+  const clauses = Array.isArray(value)
+    ? value
+      .filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+      .map((item) => sanitizer.text(item, MAX_EXTERNAL_LINE_LENGTH))
+    : []
+  return clauses.length === 0 ? undefined : `未识别，未执行：${clauses.join('；')}`
 }
 
 function quoteExternalContent(detail: string | undefined): string | undefined {
