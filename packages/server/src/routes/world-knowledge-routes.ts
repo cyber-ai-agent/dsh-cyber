@@ -8,6 +8,16 @@ import { optionalString, readJson, record, requiredString } from '../http/reques
 import { writeJson } from '../http/response.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
 import { KnowledgeWebImportService } from '../services/knowledge-web-import-service.js'
+import {
+  KNOWLEDGE_ENTITY_TYPES,
+  type KnowledgeGraphAdminPort,
+  WorldKnowledgeGraphRetrievalService,
+  WorldKnowledgeGraphService,
+} from '../services/world-knowledge-graph-service.js'
+import {
+  WorldKnowledgeConsolidationService,
+} from '../services/world-knowledge-consolidation-service.js'
+import type { WorldKnowledgeConsolidationScheduler } from '../services/world-knowledge-consolidation-scheduler.js'
 import { WorldKnowledgeLibraryService } from '../services/world-knowledge-library-service.js'
 
 const MAX_MULTIPART_BODY_BYTES = 204 * 1024 * 1024
@@ -18,10 +28,149 @@ export interface WorldKnowledgeRoutesDependencies {
   library: WorldKnowledgeLibraryService
   web?: KnowledgeWebImportService
   access?: WorldAccessService
+  graph?: WorldKnowledgeGraphService
+  graphAdmin?: KnowledgeGraphAdminPort
+  graphRetrieval?: WorldKnowledgeGraphRetrievalService
+  consolidation?: WorldKnowledgeConsolidationService
+  consolidationScheduler?: Pick<WorldKnowledgeConsolidationScheduler, 'scanOnce'>
 }
 
 export function registerWorldKnowledgeRoutes(router: Router, dependencies: WorldKnowledgeRoutesDependencies): void {
   const { store, library, web, access } = dependencies
+
+  router.get(/^\/api\/worlds\/([^/]+)\/knowledge\/graph$/, async ({ request, response, params, url }) => {
+    const world = assertWorld(store, params[0]!)
+    await access?.assertUnlocked(world.id, request)
+    if (dependencies.graph === undefined) throw new HttpError(503, 'knowledge_graph_unavailable', '知识图谱服务尚未配置')
+    const focus = optionalString(url.searchParams.get('focus'))
+    const depth = parseBoundedNumber(url.searchParams.get('depth'), 0, 2)
+    const limit = parseBoundedNumber(url.searchParams.get('limit'), 1, 300)
+    const entityType = optionalString(url.searchParams.get('entityType'))
+    const sourceType = optionalString(url.searchParams.get('sourceType'))
+    if (entityType !== undefined && !KNOWLEDGE_ENTITY_TYPES.includes(entityType as typeof KNOWLEDGE_ENTITY_TYPES[number])) {
+      throw new HttpError(422, 'knowledge_entity_type_invalid', '实体类型无效')
+    }
+    if (sourceType !== undefined && !['conversation', 'document', 'artifact', 'manual'].includes(sourceType)) {
+      throw new HttpError(422, 'knowledge_source_type_invalid', '知识来源类型无效')
+    }
+    writeJson(response, 200, await dependencies.graph.graph({
+      worldId: world.id,
+      ...(focus === undefined ? {} : { focusEntityId: focus }),
+      ...(depth === undefined ? {} : { depth }),
+      ...(limit === undefined ? {} : { limit }),
+      ...(entityType === undefined ? {} : { entityType: entityType as typeof KNOWLEDGE_ENTITY_TYPES[number] }),
+      ...(sourceType === undefined ? {} : { sourceType: sourceType as 'conversation' | 'document' | 'artifact' | 'manual' }),
+    }))
+  })
+
+  router.get(/^\/api\/worlds\/([^/]+)\/knowledge\/entities\/([^/]+)$/, async ({ request, response, params, url }) => {
+    const world = assertWorld(store, params[0]!)
+    await access?.assertUnlocked(world.id, request)
+    if (dependencies.graph === undefined) throw new HttpError(503, 'knowledge_graph_unavailable', '知识图谱服务尚未配置')
+    const limit = parseBoundedNumber(url.searchParams.get('limit'), 1, 500)
+    const detail = await dependencies.graph.detail({ worldId: world.id, entityId: params[1]!, ...(limit === undefined ? {} : { limit }) })
+    if (detail === undefined) throw new HttpError(404, 'knowledge_entity_not_found', '知识实体不存在')
+    writeJson(response, 200, detail)
+  })
+
+  router.get(/^\/api\/worlds\/([^/]+)\/knowledge\/retrieve$/, async ({ request, response, params, url }) => {
+    const world = assertWorld(store, params[0]!)
+    await access?.assertUnlocked(world.id, request)
+    if (dependencies.graphRetrieval === undefined) throw new HttpError(503, 'knowledge_graph_unavailable', '知识检索服务尚未配置')
+    const query = optionalString(url.searchParams.get('q')) ?? optionalString(url.searchParams.get('query'))
+    if (query === undefined) throw new HttpError(422, 'knowledge_query_required', '查询文本不能为空')
+    const limit = parseBoundedNumber(url.searchParams.get('limit'), 1, 12)
+    const budgetChars = parseBoundedNumber(url.searchParams.get('budgetChars'), 1000, 8000)
+    const context = await dependencies.graphRetrieval.retrieve({ worldId: world.id, query, ...(limit === undefined ? {} : { limit }), ...(budgetChars === undefined ? {} : { budgetChars }) })
+    writeJson(response, 200, context ?? { text: '', hits: [], charCount: 0, sourceType: 'world-knowledge-graph' })
+  })
+
+  router.get(/^\/api\/worlds\/([^/]+)\/knowledge\/graph\/search$/, async ({ request, response, params, url }) => {
+    const world = assertWorld(store, params[0]!)
+    await access?.assertUnlocked(world.id, request)
+    if (dependencies.graph === undefined) throw new HttpError(503, 'knowledge_graph_unavailable', '知识图谱服务尚未配置')
+    const query = optionalString(url.searchParams.get('q')) ?? optionalString(url.searchParams.get('query'))
+    if (query === undefined) throw new HttpError(422, 'knowledge_query_required', '查询文本不能为空')
+    if (Array.from(query).length > 500) throw new HttpError(422, 'knowledge_query_too_long', '查询文本不能超过 500 个字')
+    const limit = parseBoundedNumber(url.searchParams.get('limit'), 1, 100)
+    writeJson(response, 200, await dependencies.graph.search({ worldId: world.id, query, ...(limit === undefined ? {} : { limit }) }))
+  })
+
+  router.get(/^\/api\/worlds\/([^/]+)\/knowledge(?:\/graph)?\/settings$/, async ({ request, response, params }) => {
+    const world = assertWorld(store, params[0]!)
+    await access?.assertUnlocked(world.id, request)
+    if (dependencies.graphAdmin === undefined) throw new HttpError(503, 'knowledge_graph_unavailable', '知识图谱设置服务尚未配置')
+    writeJson(response, 200, await dependencies.graphAdmin.getSettings(world.id))
+  })
+
+  router.put(/^\/api\/worlds\/([^/]+)\/knowledge(?:\/graph)?\/settings$/, async ({ request, response, params }) => {
+    const world = assertWorld(store, params[0]!)
+    await access?.assertUnlocked(world.id, request)
+    if (dependencies.graphAdmin === undefined) throw new HttpError(503, 'knowledge_graph_unavailable', '知识图谱设置服务尚未配置')
+    const body = await readJson(request)
+    assertKeys(body, ['retrievalEnabled', 'autoConsolidationMode', 'extractionModelProfileId'])
+    if (typeof body.retrievalEnabled !== 'boolean') throw new HttpError(422, 'knowledge_settings_invalid', 'retrievalEnabled 必须是布尔值')
+    if (body.autoConsolidationMode !== 'off' && body.autoConsolidationMode !== 'balanced') throw new HttpError(422, 'knowledge_settings_invalid', 'autoConsolidationMode 无效')
+    if (body.extractionModelProfileId !== undefined && typeof body.extractionModelProfileId !== 'string') throw new HttpError(422, 'knowledge_settings_invalid', '提取模型必须是字符串')
+    const extractionModelProfileId = body.extractionModelProfileId === undefined ? undefined : optionalString(body.extractionModelProfileId)
+    writeJson(response, 200, await dependencies.graphAdmin.saveSettings({
+      workspaceId: world.workspaceId,
+      worldId: world.id,
+      retrievalEnabled: body.retrievalEnabled,
+      autoConsolidationMode: body.autoConsolidationMode,
+      ...(extractionModelProfileId === undefined ? {} : { extractionModelProfileId }),
+    }))
+  })
+
+  router.patch(/^\/api\/worlds\/([^/]+)\/knowledge\/entities\/([^/]+)$/, async ({ request, response, params }) => {
+    const world = assertWorld(store, params[0]!)
+    await access?.assertUnlocked(world.id, request)
+    if (dependencies.graphAdmin === undefined) throw new HttpError(503, 'knowledge_graph_unavailable', '知识图谱管理服务尚未配置')
+    const body = await readJson(request)
+    assertKeys(body, ['canonicalName', 'aliases'])
+    const canonicalName = requiredString(body, 'canonicalName')
+    const aliases = body.aliases === undefined ? undefined : parseAliases(body.aliases)
+    writeJson(response, 200, await dependencies.graphAdmin.renameEntity({ worldId: world.id, entityId: params[1]!, canonicalName, ...(aliases === undefined ? {} : { aliases }) }))
+  })
+
+  router.post(/^\/api\/worlds\/([^/]+)\/knowledge\/claims\/([^/]+)\/(archive|restore)$/, async ({ request, response, params }) => {
+    const world = assertWorld(store, params[0]!)
+    await access?.assertUnlocked(world.id, request)
+    if (dependencies.graphAdmin === undefined) throw new HttpError(503, 'knowledge_graph_unavailable', '知识图谱管理服务尚未配置')
+    const action = params[2]
+    writeJson(response, 200, await dependencies.graphAdmin.setClaimStatus({ worldId: world.id, claimId: params[1]!, status: action === 'archive' ? 'archived' : 'active' }))
+  })
+
+  router.post(/^\/api\/worlds\/([^/]+)\/knowledge(?:\/graph)?\/consolidate$/, async ({ request, response, params }) => {
+    const world = assertWorld(store, params[0]!)
+    await access?.assertUnlocked(world.id, request)
+    if (dependencies.consolidation === undefined) throw new HttpError(503, 'knowledge_consolidation_unavailable', '知识整合服务尚未配置')
+    const body = await readJson(request)
+    assertKeys(body, ['sourceType', 'sourceId', 'workspaceId', 'fromCursor', 'toCursor'])
+    if (body.sourceType !== undefined && typeof body.sourceType !== 'string') throw new HttpError(422, 'knowledge_source_type_invalid', '知识来源类型无效')
+    const sourceType = body.sourceType === undefined ? undefined : optionalString(body.sourceType)
+    if (body.sourceType !== undefined && sourceType === undefined) throw new HttpError(422, 'knowledge_source_type_invalid', '知识来源类型无效')
+    if (sourceType === undefined) {
+      if (dependencies.consolidationScheduler === undefined) throw new HttpError(503, 'knowledge_consolidation_unavailable', '知识整理扫描服务尚未配置')
+      writeJson(response, 202, { scan: await dependencies.consolidationScheduler.scanOnce() })
+      return
+    }
+    if (sourceType !== 'conversation' && sourceType !== 'document' && sourceType !== 'artifact') {
+      throw new HttpError(422, 'knowledge_source_type_invalid', '知识来源类型无效')
+    }
+    const sourceId = requiredString(body, 'sourceId')
+    if (body.workspaceId !== undefined && typeof body.workspaceId !== 'string') throw new HttpError(422, 'knowledge_world_scope_mismatch', '工作区标识无效')
+    const workspaceId = body.workspaceId === undefined ? world.workspaceId : requiredString(body, 'workspaceId')
+    if (workspaceId !== world.workspaceId) throw new HttpError(403, 'knowledge_world_scope_mismatch', '知识来源不属于当前工作区')
+    const fromCursor = optionalNumber(body.fromCursor)
+    const toCursor = optionalNumber(body.toCursor)
+    const job = sourceType === 'conversation'
+      ? await dependencies.consolidation.enqueueConversation({ workspaceId, worldId: world.id, sessionId: sourceId, ...(fromCursor === undefined ? {} : { fromCursor }), ...(toCursor === undefined ? {} : { toCursor }) })
+      : sourceType === 'document'
+        ? await dependencies.consolidation.enqueueDocument({ workspaceId, worldId: world.id, documentId: sourceId })
+        : await dependencies.consolidation.enqueueArtifact({ workspaceId, worldId: world.id, artifactId: sourceId })
+    writeJson(response, 202, { job })
+  })
 
   router.get(/^\/api\/worlds\/([^/]+)\/knowledge$/, async ({ request, response, params }) => {
     const world = assertWorld(store, params[0]!)
@@ -218,6 +367,36 @@ function parseLimit(value: string | null): number {
   const number = Number(value)
   if (!Number.isSafeInteger(number) || number < 1 || number > 8) throw new HttpError(422, 'knowledge_limit_invalid', '检索数量必须在 1 到 8 之间')
   return number
+}
+
+function parseBoundedNumber(value: string | null, min: number, max: number): number | undefined {
+  if (value === null || value.trim() === '') return undefined
+  const number = Number(value)
+  if (!Number.isSafeInteger(number) || number < min || number > max) {
+    throw new HttpError(422, 'knowledge_number_invalid', '知识查询参数超出范围')
+  }
+  return number
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new HttpError(422, 'knowledge_cursor_invalid', '知识游标无效')
+  }
+  return value
+}
+
+function assertKeys(body: Record<string, unknown>, allowed: readonly string[]): void {
+  const keys = new Set(allowed)
+  const unknown = Object.keys(body).find((key) => !keys.has(key))
+  if (unknown !== undefined) throw new HttpError(422, 'knowledge_settings_invalid', '请求包含未知字段：' + unknown)
+}
+
+function parseAliases(value: unknown): string[] {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) throw new HttpError(422, 'knowledge_aliases_invalid', 'aliases 必须是字符串数组')
+  const aliases = [...new Set(value.map((item) => item.trim()).filter(Boolean))]
+  if (aliases.length > 12 || aliases.some((item) => Array.from(item).length > 180)) throw new HttpError(422, 'knowledge_aliases_invalid', 'aliases 数量或长度超出限制')
+  return aliases
 }
 
 function decodeBase64(value: string): Buffer {

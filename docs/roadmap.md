@@ -47,6 +47,7 @@
 - [x] Responsive Pixi viewport resizing without world-view black strips
 - [x] Durable World Artifact Center with immutable versions, chat references and format-aware readers
 - [x] World Knowledge Library with durable sources, lexical retrieval and runtime context composition
+- [x] Evidence-backed World Knowledge Graph with durable background consolidation
 - [ ] Define Creative Platform V1 local-data compatibility baseline
 - [ ] Remove remaining new-path role-name inference
 - [ ] Final visual QA for conversation / dossier / workshop information architecture
@@ -63,12 +64,14 @@
 
 ## Alpha — Memory and Growth
 
-Persistent sessions currently restore conversations from SQLite. The capabilities
-listed below are future roadmap work and are not part of the current memory system.
+Persistent sessions restore conversations from SQLite. The evidence-backed World
+Knowledge Graph and its background consolidation are implemented; the unchecked
+memory categories below remain future work and are not implied by the graph.
 
 - [ ] Episodic memory
 - [ ] Semantic memory
-- [ ] Evidence-backed World Knowledge Graph
+- [x] Evidence-backed World Knowledge Graph
+- [x] Durable conversation, document and artifact knowledge consolidation
 - [ ] Procedural memory
 - [ ] Relationship memory
 - [ ] Memory retrieval scopes

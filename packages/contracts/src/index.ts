@@ -1,6 +1,6 @@
 import type { WorldCharacterAuthority } from './world-authority.js'
 
-export const CYBER_SCHEMA_VERSION = 24 as const
+export const CYBER_SCHEMA_VERSION = 25 as const
 
 export type IsoTimestamp = string
 export type JsonPrimitive = boolean | number | string | null
@@ -595,7 +595,7 @@ export type ModelProviderKind = 'deepseek' | 'openai-compatible-local' | 'openai
 export type ModelApiKind = 'openai-completions' | 'openai-responses' | 'anthropic-messages'
 
 export type ModelInteractionLogStatus = 'success' | 'failed'
-export type ModelInteractionLogSource = 'turn' | 'discovery'
+export type ModelInteractionLogSource = 'turn' | 'discovery' | 'knowledge'
 
 export interface ModelTokenUsage {
   prompt: number
@@ -615,7 +615,7 @@ export interface ModelInteractionLog {
   employeeId?: string
   workTurnId?: string
   agentRunId?: string
-  /** 采集来源：turn=对话回合（服务端发起的整轮交互），discovery=/models 模型发现 */
+  /** 采集来源：turn=对话回合，discovery=/models 模型发现，knowledge=知识整理 */
   source: ModelInteractionLogSource
   modelId: string
   /** provider 展示名（模型配置显示名，或默认 DSH 模型） */
@@ -1040,6 +1040,11 @@ export interface DatabaseDoctorReport {
     knowledgeDocuments: number
     knowledgeDocumentsMissing: number
     knowledgeChunks: number
+    knowledgeEntities: number
+    knowledgeEvidence: number
+    knowledgeClaims: number
+    knowledgeRelations: number
+    knowledgeConsolidationJobs: number
     events: number
     outbox: number
   }
@@ -1055,3 +1060,4 @@ export * from './world-trace.js'
 export * from './world-authority.js'
 export * from './world-artifact.js'
 export * from './world-knowledge.js'
+export * from './world-knowledge-graph.js'

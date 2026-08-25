@@ -20,6 +20,8 @@ import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type Mut
 
 import type { World } from '@dsh-cyber/contracts'
 
+import { api, jsonBody } from '../../api.js'
+
 import type {
   KnowledgeCollection,
   KnowledgeDocument,
@@ -27,6 +29,7 @@ import type {
   KnowledgeSearchResult,
   UseWorldKnowledgeResult,
 } from './useWorldKnowledge.js'
+import { knowledgeConsolidatePath } from './knowledge-api.js'
 
 export interface KnowledgeLibraryProps {
   world: World
@@ -35,6 +38,16 @@ export interface KnowledgeLibraryProps {
 }
 
 type DialogKind = 'paste' | 'web' | undefined
+type KnowledgeConsolidationState = 'pending' | 'queued' | 'success' | 'error'
+
+interface KnowledgeConsolidationEntry {
+  state: KnowledgeConsolidationState
+  message: string
+}
+
+interface KnowledgeConsolidationResponse {
+  job?: unknown
+}
 
 const collectionOriginLabels: Record<KnowledgeCollection['origin'], string> = {
   folder: '文件夹',
@@ -63,6 +76,7 @@ export function KnowledgeLibrary({ world, demoMode, state }: KnowledgeLibraryPro
   const [dialog, setDialog] = useState<DialogKind>()
   const [importMenuOpen, setImportMenuOpen] = useState(false)
   const [queryInput, setQueryInput] = useState('')
+  const [consolidationByDocument, setConsolidationByDocument] = useState<Record<string, KnowledgeConsolidationEntry>>({})
   const fileInputRef = useRef<HTMLInputElement>(null)
   const zipInputRef = useRef<HTMLInputElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
@@ -94,6 +108,27 @@ export function KnowledgeLibrary({ world, demoMode, state }: KnowledgeLibraryPro
     event.currentTarget.value = ''
     if (files.length === 0) return
     void state.importPack(files, inferCollectionName(files)).catch(() => undefined)
+  }
+
+  const consolidateDocument = async (document: KnowledgeDocument) => {
+    if (demoMode || document.status !== 'indexed') return
+    const current = consolidationByDocument[document.id]
+    if (current?.state === 'pending' || current?.state === 'queued' || current?.state === 'success') return
+    setConsolidationByDocument((entries) => ({ ...entries, [document.id]: { state: 'pending', message: '正在加入知识图谱…' } }))
+    try {
+      const response = await api<KnowledgeConsolidationResponse>(knowledgeConsolidatePath(world.id), {
+        ...jsonBody({ sourceType: 'document', sourceId: document.id }),
+      })
+      const queued = response.job !== undefined
+      setConsolidationByDocument((entries) => ({
+        ...entries,
+        [document.id]: queued
+          ? { state: 'queued', message: '已排队，后台整理中。' }
+          : { state: 'success', message: '已加入知识图谱。' },
+      }))
+    } catch (cause) {
+      setConsolidationByDocument((entries) => ({ ...entries, [document.id]: { state: 'error', message: toConsolidationError(cause) } }))
+    }
   }
 
   return <section className="knowledge-library" aria-label={`${world.name}知识库`} aria-busy={state.loading || state.busyAction !== undefined}>
@@ -142,7 +177,7 @@ export function KnowledgeLibrary({ world, demoMode, state }: KnowledgeLibraryPro
 
     {state.loading ? <div className="knowledge-state" role="status"><SpinnerGap size={22} className="knowledge-spin" aria-hidden="true" /><span>正在读取知识库…</span></div> : hasSearch ? <SearchResults results={state.searchResults} query={state.searchQuery} /> : <>
       <CollectionSection collections={state.collections} documents={state.documents} />
-      <DocumentSection documents={state.documents} />
+      <DocumentSection documents={state.documents} consolidationByDocument={consolidationByDocument} demoMode={demoMode} onConsolidate={(document) => void consolidateDocument(document)} />
     </>}
 
     {dialog === 'paste' ? <PasteDialog busy={state.busyAction === 'paste'} onClose={() => setDialog(undefined)} onSubmit={async (input) => { await state.createFromText(input); setDialog(undefined) }} /> : null}
@@ -167,19 +202,22 @@ function CollectionRow({ collection, documents }: { collection: KnowledgeCollect
   </li>
 }
 
-function DocumentSection({ documents }: { documents: KnowledgeDocument[] }) {
+function DocumentSection({ documents, consolidationByDocument, demoMode, onConsolidate }: { documents: KnowledgeDocument[]; consolidationByDocument: Record<string, KnowledgeConsolidationEntry>; demoMode: boolean; onConsolidate(document: KnowledgeDocument): void }) {
   return <section className="knowledge-section" aria-labelledby="knowledge-documents-heading">
     <header className="knowledge-section__heading"><div><h4 id="knowledge-documents-heading">资料</h4><span>可检索的原始内容</span></div><b>{documents.length}</b></header>
-    {documents.length === 0 ? <div className="knowledge-empty"><FileText size={23} aria-hidden="true" /><strong>还没有资料</strong><span>导入 Markdown、TXT、JSON、PDF，或粘贴一段内容开始建立这个世界的参考资料。</span></div> : <ul className="knowledge-rows" aria-label="知识资料列表">{documents.map((document) => <DocumentRow key={document.id} document={document} />)}</ul>}
+    {documents.length === 0 ? <div className="knowledge-empty"><FileText size={23} aria-hidden="true" /><strong>还没有资料</strong><span>导入 Markdown、TXT、JSON、PDF，或粘贴一段内容开始建立这个世界的参考资料。</span></div> : <ul className="knowledge-rows" aria-label="知识资料列表">{documents.map((document) => <DocumentRow key={document.id} document={document} consolidation={consolidationByDocument[document.id]} demoMode={demoMode} onConsolidate={onConsolidate} />)}</ul>}
   </section>
 }
 
-function DocumentRow({ document }: { document: KnowledgeDocument }) {
+function DocumentRow({ document, consolidation, demoMode, onConsolidate }: { document: KnowledgeDocument; consolidation?: KnowledgeConsolidationEntry | undefined; demoMode: boolean; onConsolidate(document: KnowledgeDocument): void }) {
+  const consolidationActive = consolidation?.state === 'pending' || consolidation?.state === 'queued' || consolidation?.state === 'success'
+  const canConsolidate = document.status === 'indexed' && !demoMode && !consolidationActive
   return <li className="knowledge-row knowledge-row--document">
     <span className="knowledge-row__icon" aria-hidden="true"><FileText size={18} /></span>
     <span className="knowledge-row__body"><strong>{document.title}</strong><small>{documentOriginLabels[document.origin]} · {document.relativePath || '来源路径未提供'}</small></span>
     <span className="knowledge-row__status"><span className={`knowledge-status knowledge-status--${document.status}`}><StatusIcon status={document.status} aria-hidden="true" />{statusLabels[document.status]}</span><small>{document.chunkCount} 段 · {formatBytes(document.byteLength)}</small></span>
     <span className="knowledge-row__evidence"><span>来源 {document.sourceUrl || document.relativePath || '本地资料'}</span><span>更新 {formatDate(document.updatedAt)}</span></span>
+    {document.status === 'indexed' ? <span className="knowledge-row__consolidation"><button type="button" className="knowledge-row__consolidation-button" onClick={() => onConsolidate(document)} disabled={!canConsolidate} aria-describedby={`knowledge-consolidation-${document.id}`} title={demoMode ? '演示世界暂不可整理知识' : consolidation?.state === 'error' ? '重新加入知识图谱' : '将这份资料吸收到知识图谱'}>{consolidation?.state === 'pending' ? '正在加入…' : consolidation?.state === 'queued' ? '已排队' : consolidation?.state === 'success' ? '已加入知识图谱' : '吸收到知识图谱'}</button>{consolidation === undefined ? null : <small id={`knowledge-consolidation-${document.id}`} className={`knowledge-row__consolidation-status knowledge-row__consolidation-status--${consolidation.state}`} role={consolidation.state === 'error' ? 'alert' : 'status'} aria-live="polite">{consolidation.message}</small>}</span> : null}
   </li>
 }
 
@@ -308,4 +346,9 @@ function formatBytes(value: number): string {
 
 function formatScore(value: number | undefined): string {
   return value === undefined ? '—' : value.toFixed(2)
+}
+
+function toConsolidationError(cause: unknown): string {
+  if (cause instanceof Error && /[\u3400-\u9fff]/u.test(cause.message) && !cause.message.startsWith('Request failed:')) return cause.message
+  return '加入知识图谱失败，请稍后重试。'
 }

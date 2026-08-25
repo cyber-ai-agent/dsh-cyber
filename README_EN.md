@@ -57,7 +57,7 @@ DSH Cyber is building this as a **visual, local-first, moddable AI world platfor
 #### Conversation continuity
 
 - Recent chat history from one conversation is restored from local SQLite across application restarts, Harness runtime rebuilds and permission-mode switches. SQLite is authoritative; a DSH session is a disposable runtime cache. Direct chats, group meetings and separate worlds never share history.
-- Roles can retrieve external source material from the current World's Knowledge Library. Automatic conversation consolidation, a Knowledge Graph, episodic memory, vector retrieval and cross-conversation semantic memory are not available yet.
+- Roles can retrieve external source material and evidence-backed long-term knowledge from the current World. Durable background consolidation and the World Knowledge Graph are available; episodic memory, vector retrieval and cross-device semantic memory are not.
 
 ### Embodied worlds
 
@@ -127,6 +127,13 @@ An Agent may only claim an external action succeeded after the trusted Adapter r
 - Search prefers SQLite FTS5 and falls back to portable, World-scoped SQL when FTS5 is unavailable. No vector database or extra model call is required.
 - A role response adds at most one local indexed search. External sources are always untrusted data and cannot directly change permissions, approve actions, or trigger file and Skill side effects.
 - Knowledge source files are included with SQLite in local backups, and `doctor` reports collection, document, chunk and missing-source counts.
+
+### World Knowledge Graph
+
+- Visible conversation messages, Knowledge Library sources, World Artifacts and owner-confirmed information can be consolidated into entities, claims and relations. Every active generated statement retains evidence that points back to its message, document chunk or artifact version.
+- Consolidation runs independently per World. Jobs, conversation cursors, settings, conflicts and user suppressions are durable SQLite records and survive service restarts.
+- The Knowledge dock renders a real Canvas node-link graph with search, zoom, pan, focus, type and source filters, plus claim, relation and evidence details.
+- Runtime retrieval combines long-term claims, source chunks and bounded graph neighbors. Knowledge is context only: it cannot grant permissions, approve actions, write files or trigger external side effects.
 
 ### Local-first persistence and safe upgrades
 
@@ -249,6 +256,7 @@ Read more:
 - [Creative World Platform V1](./docs/architecture/creative-world-platform-v1.md)
 - [World Artifact Center V1](./docs/architecture/world-artifact-center-v1.md)
 - [World Knowledge Library V1](./docs/architecture/world-knowledge-library-v1.md)
+- [World Knowledge Graph V1](./docs/architecture/world-knowledge-graph-v1.md)
 - [Architecture Guidelines](./docs/development/architecture-guidelines.md)
 - [CI Strategy](./docs/development/ci-strategy.md)
 
@@ -382,7 +390,7 @@ Current priorities:
 - [ ] stabilize Creative Platform V1
 - [ ] Workshop project versioning and edit lifecycle
 - [ ] make current user-defined Character Identity / Persona / Embodiment authoritative everywhere
-- [ ] evidence-backed World Knowledge Graph and conversation consolidation
+- [x] evidence-backed World Knowledge Graph and conversation consolidation
 - [ ] Task / Job / Deliverable / Review work system
 - [ ] GitHub Skill Adapter
 - [ ] Browser Skill Adapter

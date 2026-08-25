@@ -430,6 +430,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .stream-caret { width: 5px; height: 13px; background: var(--accent); animation: blink 1s steps(1) infinite; }
 .spin { animation: spin 1s linear infinite; }
 .composer-zone { padding-block: 8px 10px; padding-inline: max(12px, calc((100% - 1120px) / 2)); border-top: 1px solid var(--border); background: var(--surface-0); }
+.chat-knowledge-error { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 8px; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--danger) 55%, var(--border)); background: color-mix(in srgb, var(--danger) 10%, var(--surface-1)); color: var(--text-primary); font-size: 13px; line-height: 1.45; }
+.chat-knowledge-error button { display: inline-grid; flex: none; width: 28px; height: 28px; place-items: center; border: 0; background: transparent; color: var(--text-soft); cursor: pointer; }
+.chat-knowledge-error button:hover { color: var(--text-primary); background: var(--surface-hover); }
 .composer { position: relative; border: 1px solid var(--border-strong); background: var(--surface-1); }
 .composer:focus-within { border-color: color-mix(in srgb, var(--info) 44%, var(--border-strong)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--info) 18%, transparent); }
 .composer textarea { width: 100%; min-height: 68px; max-height: 150px; resize: vertical; padding: 12px 13px 3px; border: 0; background: transparent; font-size: var(--text-sm); line-height: 1.6; }

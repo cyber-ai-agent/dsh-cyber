@@ -479,6 +479,14 @@ const KNOWN_TABLES = [
   'knowledge_collections',
   'knowledge_documents',
   'knowledge_chunks',
+  'knowledge_entities',
+  'knowledge_evidence',
+  'knowledge_claims',
+  'knowledge_relations',
+  'knowledge_conversation_cursors',
+  'knowledge_consolidation_jobs',
+  'world_knowledge_settings',
+  'knowledge_suppressions',
 ] as const
 
 export class SqliteStore {
@@ -980,7 +988,7 @@ export class SqliteStore {
         throw new PersistenceError('Model interaction agent run scope does not match its trace context')
       }
     }
-    if (input.source !== 'turn' && input.source !== 'discovery') {
+    if (input.source !== 'turn' && input.source !== 'discovery' && input.source !== 'knowledge') {
       throw new PersistenceError('Model interaction source is invalid')
     }
     if (input.status !== 'success' && input.status !== 'failed') {
@@ -4013,6 +4021,11 @@ export class SqliteStore {
         knowledgeDocuments: countRows(this.database, 'knowledge_documents'),
         knowledgeDocumentsMissing: countMissingKnowledgeDocuments(this.database),
         knowledgeChunks: countRows(this.database, 'knowledge_chunks'),
+        knowledgeEntities: countRows(this.database, 'knowledge_entities'),
+        knowledgeEvidence: countRows(this.database, 'knowledge_evidence'),
+        knowledgeClaims: countRows(this.database, 'knowledge_claims'),
+        knowledgeRelations: countRows(this.database, 'knowledge_relations'),
+        knowledgeConsolidationJobs: countRows(this.database, 'knowledge_consolidation_jobs'),
         events: countRows(this.database, 'domain_events'),
         outbox: countRows(this.database, 'sync_outbox'),
       },
