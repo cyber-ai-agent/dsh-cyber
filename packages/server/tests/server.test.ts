@@ -203,8 +203,17 @@ describe('Cyber local server', () => {
     const sourceV2 = join(stateRoot, 'package-source-v2')
     await mkdir(sourceV1, { recursive: true })
     await mkdir(sourceV2, { recursive: true })
-    await writeFile(join(sourceV1, 'SKILL.md'), '# V1\n', 'utf8')
-    await writeFile(join(sourceV2, 'SKILL.md'), '# tampered\n', 'utf8')
+    const skillDefinition = `${JSON.stringify({
+      schemaVersion: 1,
+      id: 'local.skill',
+      displayName: '本地技能',
+      summary: '测试最小权限安装。',
+      integrationId: 'builtin.local',
+      dataEgress: [],
+      instructions: '只用于验证包安装。',
+    })}\n`
+    await writeFile(join(sourceV1, 'skill.json'), skillDefinition, 'utf8')
+    await writeFile(join(sourceV2, 'skill.json'), '# tampered\n', 'utf8')
     const packageManifest = {
       schemaVersion: 1,
       id: '@cyber/local-skill',
@@ -216,10 +225,11 @@ describe('Cyber local server', () => {
       publisher: 'Local',
       capabilities: ['workspace:read'],
       dataEgress: [],
+      entrypoints: [{ id: 'local.skill', kind: 'skill', path: 'skill.json' }],
       files: [
         {
-          path: 'SKILL.md',
-          sha256: createHash('sha256').update('# V1\n').digest('hex'),
+          path: 'skill.json',
+          sha256: createHash('sha256').update(skillDefinition).digest('hex'),
         },
       ],
     }
@@ -298,7 +308,7 @@ describe('Cyber local server', () => {
       ...packageManifest,
       version: '2.0.0',
       capabilities: ['workspace:read', 'workspace:write'],
-      files: [{ path: 'SKILL.md', sha256: packageManifest.files[0]!.sha256 }],
+      files: [{ path: 'skill.json', sha256: packageManifest.files[0]!.sha256 }],
     }
     const v2Preview = await json(origin, `/api/workspaces/${workspace.id}/packages/preview`, {
       method: 'POST',

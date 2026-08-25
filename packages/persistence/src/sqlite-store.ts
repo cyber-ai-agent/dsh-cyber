@@ -1658,7 +1658,10 @@ export class SqliteStore {
     }
     const initialSkillGrants = input.skillGrants ?? []
     const initialCapabilityGrants = input.capabilityGrants ?? []
-    assertSubset(initialSkillGrants, blueprint.requestedSkills, 'skill grant')
+    // Blueprint.requestedSkills are initial recommendations, not a lifetime
+    // allow-list.  World-aware availability is validated by the Server seam;
+    // persistence only owns the durable shape and uniqueness boundary.
+    assertUnique(initialSkillGrants, 'skill grant')
     assertSubset(initialCapabilityGrants, blueprint.requestedCapabilities, 'capability grant')
     const now = this.#clock()
     const employee: EmployeeInstance = {
@@ -1772,7 +1775,10 @@ export class SqliteStore {
     const blueprint = this.getBlueprint(employee.blueprintId, employee.blueprintVersion)
     if (blueprint === undefined) throw new EntityNotFoundError(`Employee blueprint not found: ${employee.blueprintId}@${employee.blueprintVersion}`)
     if (input.skillGrants !== undefined) {
-      assertSubset(input.skillGrants, blueprint.requestedSkills, 'skill grant')
+      // A revision can explicitly grant a skill discovered after recruitment;
+      // World Skill Availability is a host/runtime concern, not a Blueprint
+      // subset constraint.  Keep the persistence-level uniqueness check.
+      assertUnique(input.skillGrants, 'skill grant')
     }
     if (input.capabilityGrants !== undefined) {
       assertSubset(input.capabilityGrants, blueprint.requestedCapabilities, 'capability grant')
@@ -4591,10 +4597,14 @@ function uniqueStrings(values: readonly string[]): string[] {
 }
 
 function assertSubset(values: string[], allowedValues: string[], label: string): void {
-  if (new Set(values).size !== values.length) throw new PersistenceError(`Employee ${label}s must be unique`)
+  assertUnique(values, label)
   const allowed = new Set(allowedValues)
   const denied = values.find((value) => !allowed.has(value))
   if (denied !== undefined) throw new PersistenceError(`Employee ${label} is not requested by the blueprint: ${denied}`)
+}
+
+function assertUnique(values: string[], label: string): void {
+  if (new Set(values).size !== values.length) throw new PersistenceError(`Employee ${label}s must be unique`)
 }
 
 function employeeBlueprintEquals(left: EmployeeBlueprint, right: EmployeeBlueprint): boolean {

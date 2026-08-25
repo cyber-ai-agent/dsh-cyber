@@ -1061,3 +1061,19 @@ export * from './world-authority.js'
 export * from './world-artifact.js'
 export * from './world-knowledge.js'
 export * from './world-knowledge-graph.js'
+
+export type {
+  CharacterSkillAction,
+  CharacterSkillDescriptor,
+  CharacterSkillResult,
+  SkillActionAuthorization,
+  SkillActionExecutionState,
+  SkillActionRisk,
+  SkillActionStatus,
+  SkillAuthorizationSource,
+  SkillCatalogAvailability,
+  SkillCatalogEntry,
+  SkillCatalogScope,
+  SkillCatalogSource,
+  PersistentApprovalCapability,
+} from './skill-runtime.js'

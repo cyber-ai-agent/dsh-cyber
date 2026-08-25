@@ -16,6 +16,7 @@ import {
   type CharacterSkillAdapter,
   type CharacterSkillMatchContext,
 } from '../src/skills/skill-adapter.js'
+import type { WorldSkillAvailabilityPort } from '../src/services/world-skill-availability.js'
 
 const roots: string[] = []
 const stores: SqliteStore[] = []
@@ -100,6 +101,21 @@ describe('CharacterSkillRuntime', () => {
     expect(adapter.executed).toBe(0)
   })
 
+  it('does not propose a granted skill that is unavailable in the current World', async () => {
+    const { store, root, worldId, employeeId } = await setup(['test.echo'])
+    const adapter = new TestAdapter()
+    const registry = new CharacterSkillAdapterRegistry()
+    registry.register(adapter)
+    const runtime = makeRuntime(store, root, registry, {
+      isAvailable: ({ skillId }) => skillId !== 'test.echo',
+    })
+
+    const result = await runtime.prepare(skillContext(store, worldId, employeeId, '请执行 echo'))
+
+    expect(result).toEqual({ handled: false, actions: [] })
+    expect(adapter.executed).toBe(0)
+  })
+
   it('rechecks grants before a scheduled side effect executes', async () => {
     const { store, root, worldId, employeeId } = await setup(['test.echo'])
     const adapter = new TestAdapter('test-adapter', '2026-08-23T09:00:00.000Z')
@@ -122,6 +138,23 @@ describe('CharacterSkillRuntime', () => {
       status: 'failed',
       detail: '计划执行前角色已不可用或技能授权已撤销',
     })
+    expect(adapter.executed).toBe(0)
+  })
+
+  it('rechecks World Availability before a scheduled action executes', async () => {
+    const { store, root, worldId, employeeId } = await setup(['test.echo'])
+    const adapter = new TestAdapter('test-adapter', '2026-08-23T09:00:00.000Z')
+    const registry = new CharacterSkillAdapterRegistry()
+    registry.register(adapter)
+    let available = true
+    const runtime = makeRuntime(store, root, registry, { isAvailable: () => available })
+
+    const prepared = await runtime.prepare(skillContext(store, worldId, employeeId, '请执行 echo'), new Date('2026-08-23T08:00:00.000Z'))
+    expect(prepared.actions[0]?.status).toBe('scheduled')
+    available = false
+    await runtime.tick(new Date('2026-08-23T09:01:00.000Z'))
+
+    expect((await runtime.list(worldId))[0]).toMatchObject({ status: 'failed' })
     expect(adapter.executed).toBe(0)
   })
 
@@ -200,6 +233,40 @@ describe('CharacterSkillRuntime', () => {
     expect(result.action.status).toBe('rejected')
     expect(adapter.executed).toBe(0)
     expect(adapter.discarded).toBe(1)
+  })
+
+  it('rechecks World Availability when an approval resumes an action', async () => {
+    const { store, root, worldId, employeeId } = await setup(['test.external'])
+    const adapter = new ExternalAdapter()
+    const registry = new CharacterSkillAdapterRegistry()
+    registry.register(adapter)
+    let available = true
+    const runtime = makeRuntime(store, root, registry, { isAvailable: () => available })
+
+    const prepared = await runtime.prepare(skillContext(store, worldId, employeeId, '请执行 external'))
+    available = false
+    const result = await runtime.decideApproval(
+      prepared.actions[0]!.approvalRequestId!, 'approved', 'once', 'owner', new Date('2026-08-23T08:01:00.000Z'),
+    )
+
+    expect(result.action.status).toBe('failed')
+    expect(adapter.executed).toBe(0)
+  })
+
+  it('rechecks World Availability while recovering ready actions after restart', async () => {
+    const { store, root, worldId, employeeId } = await setup(['test.echo'])
+    const adapter = new TestAdapter('test-adapter', '2026-08-23T09:00:00.000Z')
+    const registry = new CharacterSkillAdapterRegistry()
+    registry.register(adapter)
+    let available = true
+    const runtime = makeRuntime(store, root, registry, { isAvailable: () => available })
+
+    await runtime.prepare(skillContext(store, worldId, employeeId, '请执行 echo'), new Date('2026-08-23T08:00:00.000Z'))
+    available = false
+    const recovered = await runtime.recoverApprovedActions(new Date('2026-08-23T09:01:00.000Z'))
+
+    expect(recovered[0]).toMatchObject({ status: 'failed' })
+    expect(adapter.executed).toBe(0)
   })
 
   it('reuses only an exact character policy and never broadens it to another target', async () => {
@@ -315,10 +382,12 @@ function makeRuntime(
   store: SqliteStore,
   root: string,
   registry: CharacterSkillAdapterRegistry,
+  skillAvailability?: WorldSkillAvailabilityPort,
 ): CharacterSkillRuntime {
   return new CharacterSkillRuntime(store, {
     registry,
     actions: new SqliteSkillActionRepository(store),
+    ...(skillAvailability === undefined ? {} : { skillAvailability }),
   })
 }
 

@@ -11,6 +11,7 @@ import {
   parsePromptTransformDefinition,
   type PromptTransform,
 } from './prompt-transform-parser.js'
+import { parseSkillManifest, type SkillManifest } from './skill-manifest.js'
 import { validateWorldThemePackageAssets } from './world-theme-package.js'
 
 export { parsePromptTransformDefinition } from './prompt-transform-parser.js'
@@ -33,6 +34,15 @@ export interface InstalledPromptTransformCommand {
   displayTrigger: string
   description: string
   automatic: boolean
+}
+
+/** A parsed, package-owned Skill declaration. It still has no executable code. */
+export interface InstalledSkillManifest {
+  packageId: string
+  packageVersion: string
+  entrypointId: string
+  entrypointPath: string
+  manifest: SkillManifest
 }
 
 export class InstalledPackageVerificationCache {
@@ -163,6 +173,37 @@ export async function loadInstalledBlueprints(packages: InstalledPackage[]): Pro
   return blueprints
 }
 
+/**
+ * Read declaration-only Skill entrypoints from verified installed packages.
+ * The caller still needs a trusted host Adapter for the returned Skill id;
+ * package metadata never supplies an execution implementation.
+ */
+export async function loadInstalledSkills(
+  packages: InstalledPackage[],
+  verificationCache = defaultVerificationCache,
+): Promise<InstalledSkillManifest[]> {
+  const skills: InstalledSkillManifest[] = []
+  for (const installed of packages.filter((item) => item.status === 'active' && item.kind === 'skill')) {
+    const entrypoints = installed.manifest.entrypoints ?? []
+    assertSkillPackage(installed, entrypoints.length)
+    await verificationCache.verifyPackage(installed)
+    for (const entrypoint of entrypoints) {
+      const value = await readEntrypoint<unknown>(installed, entrypoint.path, verificationCache)
+      skills.push({
+        packageId: installed.packageId,
+        packageVersion: installed.version,
+        entrypointId: entrypoint.id,
+        entrypointPath: entrypoint.path,
+        manifest: parseSkillManifest(value, {
+          packageId: installed.packageId,
+          entrypointId: entrypoint.id,
+        }),
+      })
+    }
+  }
+  return skills
+}
+
 export async function loadInstalledWorldThemes(
   packages: InstalledPackage[],
   verificationCache = defaultVerificationCache,
@@ -211,6 +252,10 @@ export async function validateStagedPackageEntrypoints(staged: StagedPackage): P
   }
   if (installed.kind === 'employee-blueprint') {
     await loadInstalledBlueprints([installed])
+    return
+  }
+  if (installed.kind === 'skill') {
+    await loadInstalledSkills([installed], verificationCache)
     return
   }
   if (installed.kind === 'world-theme') {
@@ -330,6 +375,18 @@ function assertEmployeeBlueprintPackage(installed: InstalledPackage, entrypointC
   }
   if (installed.manifest.dataEgress.length !== 0) {
     throw new Error(`Employee-blueprint package must not declare data egress: ${installed.packageId}`)
+  }
+}
+
+function assertSkillPackage(installed: InstalledPackage, entrypointCount: number): void {
+  if (installed.kind !== 'skill' || installed.manifest.kind !== 'skill') {
+    throw new Error(`Skill entrypoint requires skill package: ${installed.packageId}`)
+  }
+  if (entrypointCount === 0) {
+    throw new Error(`Skill package requires at least one skill entrypoint: ${installed.packageId}`)
+  }
+  if (installed.manifest.entrypoints?.some((entrypoint) => entrypoint.kind !== 'skill') === true) {
+    throw new Error(`Skill package cannot mix entrypoint kinds: ${installed.packageId}`)
   }
 }
 

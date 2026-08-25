@@ -7,6 +7,10 @@ import type { Router } from '../http/router.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
 import type { WorldCharacterAuthorityService } from '../services/world-character-authority-service.js'
 import {
+  unavailableWorldSkillIds,
+  type WorldSkillAvailabilityPort,
+} from '../services/world-skill-availability.js'
+import {
   nullableString,
   optionalString,
   optionalStringArray,
@@ -21,10 +25,11 @@ export interface EmployeeRoutesDependencies {
   store: SqliteStore
   worldAccess?: WorldAccessService
   authority?: WorldCharacterAuthorityService
+  skillAvailability: WorldSkillAvailabilityPort
 }
 
 export function registerEmployeeRoutes(router: Router, dependencies: EmployeeRoutesDependencies): void {
-  const { store, worldAccess, authority } = dependencies
+  const { store, worldAccess, authority, skillAvailability } = dependencies
 
   const assertCharacterUnlocked = async (employeeId: string, request: Parameters<WorldAccessService['assertUnlocked']>[1]) => {
     const employee = store.getEmployee(employeeId)
@@ -34,7 +39,7 @@ export function registerEmployeeRoutes(router: Router, dependencies: EmployeeRou
   }
 
   router.post(/^\/api\/employees\/([^/]+)\/revisions$/, async ({ request, response, params }) => {
-    await assertCharacterUnlocked(params[0]!, request)
+    const employee = await assertCharacterUnlocked(params[0]!, request)
     const body = await readJson(request)
     const reviseInput: Parameters<SqliteStore['reviseEmployee']>[0] = {
       employeeId: params[0]!,
@@ -42,7 +47,31 @@ export function registerEmployeeRoutes(router: Router, dependencies: EmployeeRou
     }
     const persona = optionalString(body.persona)
     if (persona !== undefined) reviseInput.persona = persona
-    if (body.skillGrants !== undefined) reviseInput.skillGrants = optionalStringArray(body.skillGrants)
+    if (body.skillGrants !== undefined) {
+      if (!Array.isArray(body.skillGrants) || body.skillGrants.some((item) => typeof item !== 'string' || item.trim() === '')) {
+        throw new HttpError(422, 'invalid_skill_grants', 'skillGrants must be an array of non-empty strings')
+      }
+      const skillGrants = optionalStringArray(body.skillGrants)
+      const unavailable = await unavailableWorldSkillIds(skillAvailability, {
+        workspaceId: employee.workspaceId,
+        worldId: employee.worldId,
+        skillIds: skillGrants,
+      })
+      const previous = store.getEmployeeRevision(employee.id, employee.currentRevision)
+      const historical = new Set(previous?.skillGrants ?? [])
+      const denied = unavailable.find((skillId) => !historical.has(skillId))
+      if (denied !== undefined) {
+        throw new HttpError(
+          422,
+          'skill_unavailable_in_world',
+          `当前世界暂不可用：${denied}`,
+        )
+      }
+      // An unavailable skill already present in the revision is deliberately
+      // retained only when the caller keeps it in this explicit list. Omitting
+      // it is the durable revoke operation.
+      reviseInput.skillGrants = skillGrants
+    }
     if (body.capabilityGrants !== undefined) {
       reviseInput.capabilityGrants = optionalStringArray(body.capabilityGrants)
     }

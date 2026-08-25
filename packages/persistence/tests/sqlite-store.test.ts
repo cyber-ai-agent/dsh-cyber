@@ -114,7 +114,7 @@ describe('SqliteStore', () => {
     expect(store.getWorld(firstWorld.id)?.administratorEmployeeId).toBeUndefined()
   })
 
-  it('limits initial and revised employee capability grants to the approved blueprint request', async () => {
+  it('limits capability grants while allowing skills learned after blueprint creation', async () => {
     const { path, store } = await testDatabase()
     const workspace = store.createWorkspace({ name: 'Grant boundary' })
     const world = store.createWorld({ workspaceId: workspace.id, name: 'Company', templateId: 'cyber-company' })
@@ -139,11 +139,11 @@ describe('SqliteStore', () => {
       reason: 'attempt escalation',
       capabilityGrants: ['workspace:read', 'workspace:write'],
     })).toThrow('not requested by the blueprint')
-    expect(() => store.reviseEmployee({
+    expect(store.reviseEmployee({
       employeeId: employee.id,
       reason: 'attempt skill escalation',
       skillGrants: ['shell-access'],
-    })).toThrow('not requested by the blueprint')
+    })).toMatchObject({ skillGrants: ['shell-access'], capabilityGrants: ['workspace:read'] })
     expect(store.reviseEmployee({
       employeeId: employee.id,
       reason: 'revoke all grants',
@@ -154,7 +154,7 @@ describe('SqliteStore', () => {
     stores.splice(stores.indexOf(store), 1)
     const reopened = await SqliteStore.open(path)
     stores.push(reopened)
-    expect(reopened.getEmployeeRevision(employee.id, 2)).toMatchObject({
+    expect(reopened.getEmployeeRevision(employee.id, 3)).toMatchObject({
       skillGrants: [],
       capabilityGrants: [],
     })

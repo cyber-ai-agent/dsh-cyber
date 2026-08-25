@@ -29,6 +29,7 @@
 - [x] Trace Intelligence V1 with per-run reasoning summaries, tool orchestration, Token attribution and role/date/search filters
 - [x] World Package Instance V1
 - [x] Built-in Skill Recipe catalog with role-aware default grants and on-demand loading
+- [x] World-scoped Skill Catalog 与角色学习 V2（Catalog Service、Runtime gate、Web 与真实 E2E）
 - [x] Integration Registry and Firecrawl V1
 - [x] MCP Skill Adapter V1 (Streamable HTTP discovery/call behind Grant, Approval and Action Ledger)
 - [ ] Extension Host and JSON-RPC Gateway
@@ -77,6 +78,7 @@ memory categories below remain future work and are not implied by the graph.
 - [ ] Memory retrieval scopes
 - [ ] Memory consolidation and retention
 - [ ] Evidence-based skill proficiency
+- [ ] Character Skill learning evidence and proficiency
 - [ ] Growth timeline and milestone UI
 
 ## Alpha/Beta — Real-world Skill ecosystem

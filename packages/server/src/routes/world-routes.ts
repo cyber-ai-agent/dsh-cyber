@@ -10,6 +10,11 @@ import type { WorldAccessService } from '../services/world-access-service.js'
 import type { WorldCharacterAuthorityService } from '../services/world-character-authority-service.js'
 import type { WorldPackageInstanceService } from '../services/world-package-instance-service.js'
 import {
+  availableWorldSkillIds,
+  unavailableWorldSkillIds,
+  type WorldSkillAvailabilityPort,
+} from '../services/world-skill-availability.js'
+import {
   nonNegativeInteger,
   optionalPositiveInteger,
   optionalString,
@@ -24,10 +29,11 @@ export interface WorldRoutesDependencies {
   worldAccess?: WorldAccessService
   worldPackages?: WorldPackageInstanceService
   authority?: WorldCharacterAuthorityService
+  skillAvailability: WorldSkillAvailabilityPort
 }
 
 export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDependencies): void {
-  const { store, worldAccess, worldPackages, authority } = dependencies
+  const { store, worldAccess, worldPackages, authority, skillAvailability } = dependencies
   const conversationHub = new ConversationHubService(store)
 
   router.get(/^\/api\/workspaces\/([^/]+)\/worlds$/, ({ response, params }) => {
@@ -144,10 +150,29 @@ export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDep
         throw new HttpError(422, 'invalid_skill_grants', 'skillGrants must be an array of non-empty strings')
       }
       const skillGrants = optionalStringArray(body.skillGrants)
-      const requestedSkills = new Set(liveBlueprint.requestedSkills)
-      const denied = skillGrants.find((skill) => !requestedSkills.has(skill))
-      if (denied !== undefined) throw new HttpError(422, 'skill_not_requested', `Skill was not requested by the blueprint: ${denied}`)
+      const unavailable = await unavailableWorldSkillIds(skillAvailability, {
+        workspaceId: world.workspaceId,
+        worldId: world.id,
+        skillIds: skillGrants,
+      })
+      if (unavailable.length > 0) {
+        throw new HttpError(
+          422,
+          'skill_unavailable_in_world',
+          `当前世界暂不可用：${unavailable.join('、')}`,
+        )
+      }
       recruitInput.skillGrants = skillGrants
+    } else {
+      // requestedSkills are initial recommendations.  A new recruit receives
+      // only recommendations that the current World can actually execute;
+      // an explicit [] above remains an intentional empty grant set.
+      const defaults = await availableWorldSkillIds(skillAvailability, {
+        workspaceId: world.workspaceId,
+        worldId: world.id,
+        skillIds: liveBlueprint.requestedSkills,
+      })
+      if (defaults.length > 0) recruitInput.skillGrants = defaults
     }
     if (body.capabilityGrants !== undefined) {
       if (!Array.isArray(body.capabilityGrants) || body.capabilityGrants.some((item) => typeof item !== 'string' || item.trim() === '')) {
