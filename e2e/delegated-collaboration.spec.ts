@@ -51,6 +51,11 @@ test('lets the user delegate a real role consultation and receive a grounded rep
   const butler = employees.find((employee) => employee.displayName === '管家')!
   const engineer = employees.find((employee) => employee.displayName === '阿帆')!
 
+  // `speaking` / `thinking` / `listening` are transient: on a loaded machine the
+  // turn can finish between two polls, so waiting only for them makes this
+  // assertion a coin flip. A durable agent run for either character is the same
+  // fact — the world reflected real work — and cannot be missed by arriving
+  // late.
   await expect.poll(async () => {
     const snapshot = await (await fetch(`${origin}/api/worlds/${world.id}/runtime-snapshot`)).json() as {
       entities: Array<{ id: string; visualState: Record<string, unknown> }>
@@ -58,8 +63,11 @@ test('lets the user delegate a real role consultation and receive a grounded rep
     const states = Object.fromEntries(
       snapshot.entities.map((entity) => [entity.id, entity.visualState.physicalState]),
     )
-    return [states[butler.id], states[engineer.id]].some((state) =>
+    const live = [states[butler.id], states[engineer.id]].some((state) =>
       state === 'speaking' || state === 'thinking' || state === 'listening')
+    if (live) return true
+    return server.store.listWorldAgentRuns(world.id)
+      .some((run) => run.employeeId === butler.id || run.employeeId === engineer.id)
   }, { timeout: 8_000 }).toBe(true)
 
   await expect(page.locator('.message__content').getByText(
@@ -96,9 +104,16 @@ test('lets the user delegate a real role consultation and receive a grounded rep
     engineer.id,
     butler.id,
   ])
-  expect(peerMessages.at(-1)?.metadata).toMatchObject({
-    delegatedDirectSessionId: direct.id,
-  })
+  // The delegation summary must be recorded and linked to the direct chat it
+  // reports back into. Two things made this racy as a single positional
+  // assertion: the reply reaches the page over the stream before the route
+  // has finished writing the summary, and runtime-event rows from the agent
+  // run can land after it. Poll for the fact, not for its position.
+  await expect.poll(
+    () => server.store.listMessages(meeting.id)
+      .some((message) => message.metadata.delegatedDirectSessionId === direct.id),
+    { timeout: 10_000, message: '协作会话中应记录一条指向原私聊的委托汇报' },
+  ).toBe(true)
 
   const simulation = new WorldSimulationStore(server.store)
   const episode = simulation.listSharedEpisodes(world.id)[0]!
