@@ -1,3 +1,4 @@
+import type { JsonObject } from '@dsh-cyber/contracts'
 import type {
   CharacterSkillAction,
   CharacterSkillDescriptor,
@@ -17,7 +18,11 @@ import type {
   CharacterSkillMatchContext,
   CharacterSkillPreflightResult,
 } from './skill-adapter.js'
-import { WorldManagementIntentParser, type WorldManagementCharacterRef } from '../services/world-management-intent-parser.js'
+import {
+  WorldManagementIntentParser,
+  type WorldAuthorityOperation,
+  type WorldManagementCharacterRef,
+} from '../services/world-management-intent-parser.js'
 import type { WorldAuthorityPort } from '../services/world-permission-request-service.js'
 
 export interface WorldManagementSettingsPort {
@@ -262,22 +267,37 @@ export class WorldManagementAdapter implements CharacterSkillAdapter {
     if (authority?.updateAuthority === undefined || employeeId === undefined) return { status: 'failed', detail: '世界权限管理服务不可用或目标无效' }
     const current = await authority.get(action.worldId, employeeId)
     if (current === undefined) return { status: 'failed', detail: '未找到目标角色的世界权限' }
-    const role = stringParameter(action.parameters, 'role') as WorldCharacterRole | undefined
+    const operation = authorityOperation(action.parameters, current.role)
     const requested = arrayParameter(action.parameters, 'permissionGrants')
     const remove = arrayParameter(action.parameters, 'removePermissions')
-    const permissions = role === 'administrator' && requested.length === 0
-      ? [...RECOMMENDED_ADMIN_PERMISSIONS]
-      : requested.length > 0 ? requested : current.permissionGrants
-    const next = permissions.filter((permission) => !remove.includes(permission))
-    await authority.updateAuthority({
+    // The role only changes when the user asked for it. A grant or a revoke
+    // carries the current role through untouched, and adds to or subtracts
+    // from the grants that already exist rather than replacing the set — the
+    // replacement semantics used to demote administrators and erase every
+    // permission the utterance did not happen to name.
+    const base = operation === 'promote'
+      ? [...current.permissionGrants, ...RECOMMENDED_ADMIN_PERMISSIONS, ...requested]
+      : operation === 'revoke'
+        ? current.permissionGrants
+        : [...current.permissionGrants, ...requested]
+    const next = [...new Set(base)].filter((permission) => !remove.includes(permission))
+    const role: WorldCharacterRole = operation === 'promote'
+      ? 'administrator'
+      : operation === 'demote' ? 'member' : current.role
+    const saved = await authority.updateAuthority({
       worldId: action.worldId,
       targetEmployeeId: employeeId,
       actor: this.#host.managementActor?.(action) ?? { kind: 'employee', id: action.characterId },
-      role: role === 'administrator' || role === 'member' ? role : current.role,
+      role,
       permissionGrants: next,
       reason: action.label,
+      ...(operation === 'demote' ? { allowManagementStrip: true } : {}),
     })
-    return { status: 'executed', detail: `已更新角色的世界身份与权限（${next.length} 项）` }
+    // Report what was persisted, not what was requested: the two diverged
+    // whenever the service filtered or refused something.
+    const persisted = saved?.permissionGrants ?? next
+    const roleLabel = (saved?.role ?? role) === 'administrator' ? '世界管理员' : '普通角色'
+    return { status: 'executed', detail: `角色当前为${roleLabel}，持有 ${persisted.length} 项世界权限` }
   }
 
   async #listPackages(action: CharacterSkillAction): Promise<CharacterSkillExecutionResult> {
@@ -341,6 +361,21 @@ function patchMatches(value: Record<string, unknown>, patch: Record<string, unkn
     }
     return actual === expected
   })
+}
+
+/**
+ * Reads the requested operation, tolerating the older role-shaped payload.
+ *
+ * Durable actions written before operations existed still carry `role`, and a
+ * restart must be able to finish them.
+ */
+function authorityOperation(parameters: JsonObject, currentRole: WorldCharacterRole): WorldAuthorityOperation {
+  const operation = stringParameter(parameters, 'operation')
+  if (operation === 'promote' || operation === 'demote' || operation === 'grant' || operation === 'revoke') return operation
+  const role = stringParameter(parameters, 'role')
+  if (role === 'administrator') return 'promote'
+  if (role === 'member' && currentRole === 'administrator') return 'demote'
+  return arrayParameter(parameters, 'removePermissions').length > 0 ? 'revoke' : 'grant'
 }
 
 function safeSummary(value: unknown): string {

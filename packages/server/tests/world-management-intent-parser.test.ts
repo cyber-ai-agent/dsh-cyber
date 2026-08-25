@@ -27,11 +27,16 @@ describe('WorldManagementIntentParser', () => {
     expect(parser.parse('把老王设成管理员', context, 'external')).toEqual([])
   })
 
-  it('keeps a compound administrator request all-or-none in one proposal', () => {
+  it('promotes and names the extra permissions in one proposal', () => {
     const [proposal] = parser.parse('把老王也设置成管理员，给他世界设置、角色管理和文件读写权限', context)
     expect(proposal).toMatchObject({ kind: 'authority-update', action: 'world.authority.update' })
+    // The proposal states the operation, not a replacement role. A promotion
+    // seeds the recommended administrator set in the adapter and then adds the
+    // permissions the user named — the old payload replaced the whole grant
+    // list with just these four, producing an administrator with no
+    // world.permissions.read and no world.files.read of their own.
     expect(proposal?.parameters).toMatchObject({
-      role: 'administrator',
+      operation: 'promote',
       permissionGrants: [
         'world.settings.write',
         'world.characters.manage',
@@ -39,6 +44,20 @@ describe('WorldManagementIntentParser', () => {
         'world.files.write',
       ],
     })
+    expect(proposal?.parameters.role).toBeUndefined()
+  })
+
+  it('never invents a role when the user only edits permissions', () => {
+    // "给老王世界设置权限" used to emit role: 'member', which demoted an
+    // administrator and erased every grant the sentence did not mention.
+    const [grant] = parser.parse('给老王世界设置权限', context)
+    expect(grant?.parameters).toMatchObject({ operation: 'grant', permissionGrants: ['world.settings.write'] })
+    expect(grant?.parameters.role).toBeUndefined()
+
+    const [revoke] = parser.parse('取消老王文件写入权限', context)
+    expect(revoke?.parameters).toMatchObject({ operation: 'revoke', removePermissions: ['world.files.write'] })
+    expect(revoke?.parameters.role).toBeUndefined()
+    expect(revoke?.parameters.permissionGrants).toEqual([])
   })
 
   it('rejects ambiguous character names instead of guessing a target', () => {

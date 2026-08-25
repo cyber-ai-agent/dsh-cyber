@@ -203,14 +203,23 @@ export class WorldPermissionRequestService {
       const grants = authority.permissionGrants.includes(current.permission)
         ? authority.permissionGrants
         : [...authority.permissionGrants, current.permission]
-      await this.#authority.updateAuthority({
-        worldId: current.worldId,
-        targetEmployeeId: current.employeeId,
-        actor,
-        role: authority.role,
-        permissionGrants: grants,
-        reason: `授予世界权限并继续动作 ${current.skillActionId}`,
-      })
+      try {
+        await this.#authority.updateAuthority({
+          worldId: current.worldId,
+          targetEmployeeId: current.employeeId,
+          actor,
+          role: authority.role,
+          permissionGrants: grants,
+          reason: `授予世界权限并继续动作 ${current.skillActionId}`,
+        })
+      } catch (error) {
+        // "This character must be an administrator first" is an answer to the
+        // user, delivered through the same 409 the caller already handles.
+        if ((error as { code?: unknown } | null)?.code === 'requires_administrator_promotion') {
+          throw new WorldPermissionGrantRejectedError()
+        }
+        throw error
+      }
       // Authority services may safely cap or strip grants (for example a
       // member cannot receive a management permission). Never settle the
       // request as approved if the durable authority row did not actually

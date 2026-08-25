@@ -932,6 +932,69 @@ const MIGRATIONS: readonly Migration[] = [
       INNER JOIN worlds ON worlds.id = employee_instances.world_id;
     `,
   },
+  {
+    version: 22,
+    name: 'world-permission-audit-retention',
+    foreignKeysOff: true,
+    sql: `
+      /* A permission decision is evidence of who allowed what, and it has to
+         outlive the turn it authorized. work_turn_id was NOT NULL with
+         ON DELETE CASCADE, so pruning settled telemetry destroyed the very
+         audit trail the product promises to keep. The turn edge becomes
+         nullable with ON DELETE SET NULL, and session_id is captured durably
+         so the decision remains attributable after the turn is gone. */
+      CREATE TABLE world_permission_requests_v22 (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        employee_id TEXT NOT NULL REFERENCES employee_instances(id) ON DELETE CASCADE,
+        session_id TEXT,
+        work_turn_id TEXT REFERENCES work_turns(id) ON DELETE SET NULL,
+        /* The action edge stays a hard CASCADE: a decision must never outlive
+           the exact execution fact it authorized. Only the turn edge softens,
+           because settled turns are prunable telemetry and the decision is
+           not. */
+        skill_action_id TEXT NOT NULL REFERENCES skill_actions(id) ON DELETE CASCADE,
+        permission TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'rejected', 'expired')),
+        decision_scope TEXT CHECK (decision_scope IS NULL OR decision_scope IN ('once', 'persistent')),
+        decided_by TEXT,
+        decided_at TEXT,
+        consumed_at TEXT,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        UNIQUE (skill_action_id)
+      ) STRICT;
+
+      INSERT INTO world_permission_requests_v22 (
+        id, workspace_id, world_id, employee_id, session_id, work_turn_id, skill_action_id,
+        permission, status, decision_scope, decided_by, decided_at, consumed_at, created_at, expires_at
+      )
+      SELECT
+        request.id, request.workspace_id, request.world_id, request.employee_id,
+        (SELECT session_id FROM work_turns WHERE work_turns.id = request.work_turn_id),
+        request.work_turn_id, request.skill_action_id,
+        request.permission, request.status, request.decision_scope, request.decided_by,
+        request.decided_at, request.consumed_at, request.created_at, request.expires_at
+      FROM world_permission_requests AS request;
+
+      DROP TABLE world_permission_requests;
+      ALTER TABLE world_permission_requests_v22 RENAME TO world_permission_requests;
+
+      CREATE INDEX IF NOT EXISTS world_permission_requests_world_status_idx
+        ON world_permission_requests(world_id, status, expires_at);
+      CREATE INDEX IF NOT EXISTS world_permission_requests_pending_idx
+        ON world_permission_requests(status, expires_at)
+        WHERE status = 'pending';
+
+      /* Recovery reads only what still needs recovering. Without these it
+         scanned every settled action of every world at every startup. */
+      CREATE INDEX IF NOT EXISTS skill_actions_recovery_idx
+        ON skill_actions(execution_state, status, world_id);
+      CREATE INDEX IF NOT EXISTS work_turns_status_idx
+        ON work_turns(status, created_at);
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {

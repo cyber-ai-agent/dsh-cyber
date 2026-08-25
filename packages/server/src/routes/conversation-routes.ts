@@ -142,8 +142,13 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
           writeJson(response, 200, { ...approval.continuation, permissionRequest: approval.request })
           return
         }
-        const originalTurn = store.getWorkTurn(approval.request.workTurnId)
-        const originalSession = originalTurn === undefined ? undefined : store.getSession(originalTurn.sessionId)
+        // A decision whose turn was already pruned can still be shown, but it
+        // has nothing left to continue.
+        const originalTurn = approval.request.workTurnId === undefined
+          ? undefined
+          : store.getWorkTurn(approval.request.workTurnId)
+        const sessionId = originalTurn?.sessionId ?? approval.request.sessionId
+        const originalSession = sessionId === undefined ? undefined : store.getSession(sessionId)
         if (originalTurn === undefined || originalSession === undefined) {
           throw new HttpError(409, 'world_permission_continuation_unavailable', '原工作回合无法继续')
         }

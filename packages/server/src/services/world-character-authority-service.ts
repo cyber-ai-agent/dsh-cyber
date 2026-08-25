@@ -65,6 +65,79 @@ export class WorldCharacterAuthorityService {
     }
   }
 
+  /**
+   * Adds permissions, leaving role and every other grant untouched.
+   *
+   * The natural-language path used to send a whole replacement object with a
+   * fabricated `role: 'member'`, which demoted administrators and erased
+   * grants the user never mentioned.
+   */
+  grantPermissions(input: WorldAuthorityPatchInput): WorldCharacterAuthority {
+    const current = this.get(input.worldId, input.targetEmployeeId)
+    return this.updateAuthority({
+      worldId: input.worldId,
+      targetEmployeeId: input.targetEmployeeId,
+      actor: input.actor,
+      reason: input.reason,
+      role: current?.role ?? 'member',
+      permissionGrants: [...(current?.permissionGrants ?? []), ...input.permissions],
+    })
+  }
+
+  /** Removes permissions, leaving role and every other grant untouched. */
+  revokePermissions(input: WorldAuthorityPatchInput): WorldCharacterAuthority {
+    const current = this.get(input.worldId, input.targetEmployeeId)
+    const removed = new Set<string>(input.permissions)
+    return this.updateAuthority({
+      worldId: input.worldId,
+      targetEmployeeId: input.targetEmployeeId,
+      actor: input.actor,
+      reason: input.reason,
+      role: current?.role ?? 'member',
+      permissionGrants: (current?.permissionGrants ?? []).filter((permission) => !removed.has(permission)),
+    })
+  }
+
+  /**
+   * Promotes to administrator with the recommended set applied in full.
+   *
+   * A promotion that carried forward only whatever the member happened to
+   * hold produced administrators who could not administrate.
+   */
+  promote(input: WorldAuthorityPatchInput): WorldCharacterAuthority {
+    const current = this.get(input.worldId, input.targetEmployeeId)
+    const removed = new Set<string>(input.removePermissions ?? [])
+    const next = [
+      ...(current?.permissionGrants ?? []),
+      ...RECOMMENDED_ADMIN_PERMISSIONS,
+      ...input.permissions,
+    ].filter((permission: WorldCharacterPermission) => !removed.has(permission))
+    return this.updateAuthority({
+      worldId: input.worldId,
+      targetEmployeeId: input.targetEmployeeId,
+      actor: input.actor,
+      reason: input.reason,
+      role: 'administrator',
+      permissionGrants: next,
+    })
+  }
+
+  /** Demotes to member, keeping every grant a member may legitimately hold. */
+  demote(input: WorldAuthorityPatchInput): WorldCharacterAuthority {
+    const current = this.get(input.worldId, input.targetEmployeeId)
+    return this.updateAuthority({
+      worldId: input.worldId,
+      targetEmployeeId: input.targetEmployeeId,
+      actor: input.actor,
+      reason: input.reason,
+      role: 'member',
+      permissionGrants: current?.permissionGrants ?? [],
+      // Demotion is the one operation whose whole purpose is to drop
+      // management permissions, so the refusal does not apply.
+      allowManagementStrip: true,
+    })
+  }
+
   updateAuthority(input: UpdateWorldCharacterAuthorityInput): WorldCharacterAuthority {
     const world = this.#store.getWorld(input.worldId)
     if (world === undefined) throw notFound('world_not_found', '世界不存在')
@@ -79,9 +152,17 @@ export class WorldCharacterAuthorityService {
     const current = this.#currentAuthority(world.id, target)
     this.#assertActorMayManage(world.id, target, input.actor, requestedPermissions)
 
-    // Management permissions are meaningful only for administrators. Keeping
-    // read/file grants when demoting prevents an administrator from becoming
-    // an empty member while removing every control-plane capability.
+    // Management permissions are meaningful only for administrators. Asking
+    // for one as a member is a real request with a real answer — promote
+    // first — so it is refused with the offending list instead of being
+    // silently dropped, which used to persist a partial row and leave no
+    // trace of the rejection in the audit ledger.
+    const refusedPermissions = input.role === 'member'
+      ? requestedPermissions.filter((permission) => isManagementPermission(permission))
+      : []
+    if (refusedPermissions.length > 0 && input.allowManagementStrip !== true) {
+      throw new WorldAuthorityPromotionRequiredError(target.displayName, refusedPermissions)
+    }
     const nextPermissions = input.role === 'member'
       ? requestedPermissions.filter((permission) => !isManagementPermission(permission))
       : requestedPermissions
@@ -306,4 +387,31 @@ function conflict(code: string, message: string): ServiceError {
 
 function invalid(code: string, message: string): ServiceError {
   return new ServiceError('invalid', code, message)
+}
+
+
+export interface WorldAuthorityPatchInput {
+  worldId: string
+  targetEmployeeId: string
+  actor: WorldAuthorityActor
+  reason: string
+  permissions: WorldCharacterPermission[]
+  removePermissions?: WorldCharacterPermission[]
+}
+
+/**
+ * A member was asked to hold a permission only administrators may hold.
+ *
+ * The caller decides what to do — the UI offers "promote and grant", the chat
+ * path explains — but the answer is never a silent partial write.
+ */
+export class WorldAuthorityPromotionRequiredError extends Error {
+  readonly code = 'requires_administrator_promotion'
+  readonly permissions: readonly WorldCharacterPermission[]
+
+  constructor(displayName: string, permissions: readonly WorldCharacterPermission[]) {
+    super(`角色“${displayName}”需要先成为世界管理员才能持有：${permissions.join('、')}`)
+    this.name = 'WorldAuthorityPromotionRequiredError'
+    this.permissions = permissions
+  }
 }

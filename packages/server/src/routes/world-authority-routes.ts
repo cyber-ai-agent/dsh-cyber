@@ -61,9 +61,13 @@ export function registerWorldAuthorityRoutes(
     requireEmployeeInWorld(store, world.id, params[1]!)
     const body = await readJson(request)
     const role = requiredEnum<WorldCharacterRole>(body, 'role', ['member', 'administrator'])
-    const permissionGrants = body.permissionGrants === undefined && role === 'administrator'
+    // An administrator with no permissions cannot administrate. The recommended
+    // set stands in whether the caller omitted the field or sent an empty
+    // array — the second case used to persist a powerless administrator.
+    const requested = body.permissionGrants === undefined ? [] : requiredPermissions(body, 'permissionGrants')
+    const permissionGrants = role === 'administrator' && requested.length === 0
       ? [...RECOMMENDED_ADMIN_PERMISSIONS]
-      : requiredPermissions(body, 'permissionGrants')
+      : requested
     const value = authority.updateAuthority({
       worldId: world.id,
       targetEmployeeId: params[1]!,
