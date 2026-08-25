@@ -5,6 +5,7 @@ const SKILL_KEYS = new Set([
   'id',
   'displayName',
   'summary',
+  'routingHints',
   'integrationId',
   'dataEgress',
   'instructions',
@@ -20,6 +21,7 @@ export interface SkillManifest {
   id: string
   displayName: string
   summary: string
+  routingHints?: string[]
   integrationId: string
   dataEgress: string[]
   instructions: string
@@ -45,10 +47,22 @@ export function parseSkillManifest(value: unknown, context: SkillManifestParseCo
   if (!ID.test(context.packageId)) throw new Error('Skill package id is invalid')
   const displayName = text(input.displayName, 'displayName', 100)
   const summary = text(input.summary, 'summary', 500)
+  const routingHints = input.routingHints === undefined
+    ? undefined
+    : stringSet(input.routingHints, 'routingHints', 32, 80)
   const integrationId = text(input.integrationId, 'integrationId', 160, ID)
   const dataEgress = stringSet(input.dataEgress, 'dataEgress', MAX_EGRESS_ITEMS, MAX_EGRESS_LENGTH)
   const instructions = text(input.instructions, 'instructions', MAX_INSTRUCTIONS_LENGTH)
-  return { schemaVersion: 1, id, displayName, summary, integrationId, dataEgress, instructions }
+  return {
+    schemaVersion: 1,
+    id,
+    displayName,
+    summary,
+    ...(routingHints === undefined ? {} : { routingHints }),
+    integrationId,
+    dataEgress,
+    instructions,
+  }
 }
 
 /** Infer only the catalog label; this does not select or instantiate an adapter. */

@@ -15,6 +15,7 @@ const DESCRIPTOR: CharacterSkillDescriptor = {
   id: FIRECRAWL_SEARCH_SKILL,
   displayName: '联网搜索',
   summary: '通过当前工作区配置的 Firecrawl 搜索公开网页；查询文本会发送到外部服务。',
+  routingHints: ['联网搜索', '网页搜索', '搜索官网', '查官网', '公开资料', 'web search', 'search the web', 'research website'],
   adapterId: FIRECRAWL_ADAPTER_ID,
   packageId: FIRECRAWL_PACKAGE_ID,
   risks: ['external-side-effect'],

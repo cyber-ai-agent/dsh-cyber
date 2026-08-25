@@ -11,8 +11,14 @@ import type {
   JsonObject,
   ParticipantKind,
   ReasoningEffort,
+  TaskCollaborationExecutionMode,
+  TaskCollaborationPlan,
+  TaskCollaborationPlanStatus,
+  TaskCollaborationStep,
+  TaskCollaborationStepStatus,
   WorkMessage,
   WorkSession,
+  WorkSessionCollaborationMode,
   WorkTurn,
   WorkTurnInteractionKind,
   WorkSessionParticipant,
@@ -48,6 +54,7 @@ export interface ConversationStorePort {
     worldId: string
     kind: WorkSession['kind']
     title: string
+    collaborationMode?: WorkSessionCollaborationMode
     participants?: Array<{ participantId: string; kind: ParticipantKind }>
     actorId?: string
   }): WorkSession
@@ -93,6 +100,57 @@ export interface ConversationStorePort {
   startAgentRun(runId: string): AgentRun
   completeAgentRun(runId: string, runtimeSessionId?: string): AgentRun
   failAgentRun(runId: string, errorCode: string, runtimeSessionId?: string): AgentRun
+  createTaskCollaborationPlan?(input: {
+    id?: string
+    taskId: string
+    workspaceId: string
+    worldId: string
+    sessionId: string
+    workTurnId: string
+    status?: TaskCollaborationPlanStatus
+    steps: Array<{
+      id?: string
+      requiredSkills: string[]
+      assignedEmployeeIds: string[]
+      dependsOn: string[]
+      executionMode: TaskCollaborationExecutionMode
+      status?: TaskCollaborationStepStatus
+      errorCode?: string | null
+    }>
+    actorId?: string
+  }): TaskCollaborationPlan
+  getTaskCollaborationPlan?(planId: string): TaskCollaborationPlan | undefined
+  getTaskCollaborationPlanByTask?(worldId: string, taskId: string): TaskCollaborationPlan | undefined
+  updateTaskCollaborationPlan?(input: {
+    planId: string
+    expectedRevision?: number
+    revision?: number
+    status?: TaskCollaborationPlanStatus
+    steps?: Array<{
+      id?: string
+      requiredSkills: string[]
+      assignedEmployeeIds: string[]
+      dependsOn: string[]
+      executionMode: TaskCollaborationExecutionMode
+      status?: TaskCollaborationStepStatus
+      errorCode?: string | null
+    }>
+    errorCode?: string | null
+    actorId?: string
+  }): TaskCollaborationPlan
+  updateTaskCollaborationStep?(input: {
+    planId: string
+    stepId: string
+    expectedRevision?: number
+    revision?: number
+    requiredSkills?: string[]
+    assignedEmployeeIds?: string[]
+    dependsOn?: string[]
+    executionMode?: TaskCollaborationExecutionMode
+    status?: TaskCollaborationStepStatus
+    errorCode?: string | null
+    actorId?: string
+  }): TaskCollaborationPlan
 }
 
 export interface ConversationRealtimeEnvelope {
@@ -152,6 +210,38 @@ export interface GroupConversationInput {
   permissionMode?: AgentPermissionMode
   sessionId?: string
   title?: string
+  collaborationMode?: WorkSessionCollaborationMode
+}
+
+export interface TaskCollaborationStepDraft {
+  id: string
+  ordinal: number
+  requiredSkills: string[]
+  assignedEmployeeIds: string[]
+  dependsOn: string[]
+  executionMode: TaskCollaborationExecutionMode
+}
+
+export interface TaskConversationInput {
+  workspaceId: string
+  worldId: string
+  prompt: string
+  employeeIds: string[]
+  coordinatorEmployeeId: string
+  steps: TaskCollaborationStepDraft[]
+  runtimePrompt?: string
+  metadata?: JsonObject
+  reasoningEffort?: Exclude<ReasoningEffort, 'auto'>
+  permissionMode?: AgentPermissionMode
+  sessionId?: string
+  title?: string
+}
+
+export interface TaskConversationResult extends ConversationResult {
+  workTurnId: string
+  collaborationMode: 'task'
+  plan: TaskCollaborationPlan
+  coordinatorEmployeeId: string
 }
 
 export interface PeerConversationInput {
@@ -368,6 +458,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
           workspaceId: input.workspaceId,
           worldId: input.worldId,
           kind: 'group',
+          collaborationMode: input.collaborationMode ?? 'discussion',
           title: input.title?.trim() || conciseTitle(prompt),
           participants: [
             { participantId: 'owner', kind: 'owner' },
@@ -451,6 +542,264 @@ export class ConversationOrchestrator implements AsyncDisposable {
         payload: { participantIds: employeeIds, status: 'blocked', replyCount: replies.length, meetingRunId, workTurnId: workTurn.id },
       })
       this.#store.failWorkTurn(workTurn.id, lifecycleErrorCode(error))
+      throw error
+    }
+  }
+
+  /**
+   * Executes a persisted deterministic task plan inside one WorkTurn.
+   * Discussion mode intentionally stays in `group()` above; this path only
+   * runs steps whose assignments were produced by the host Task Router.
+   */
+  async task(input: TaskConversationInput): Promise<TaskConversationResult> {
+    const prompt = requiredText(input.prompt, 'Prompt')
+    const employeeIds = [...new Set(input.employeeIds.map((id) => id.trim()).filter(Boolean))]
+    if (employeeIds.length < 2) throw new ConversationOrchestrationError('A task group requires at least two agents')
+    if (!employeeIds.includes(input.coordinatorEmployeeId)) {
+      throw new ConversationOrchestrationError('Task coordinator must be a group participant')
+    }
+    const employees = employeeIds.map((employeeId) =>
+      this.#requireEmployeeInWorld(employeeId, input.workspaceId, input.worldId),
+    )
+    validateTaskDraft(input.steps, employeeIds)
+
+    const session = input.sessionId
+      ? this.#requireGroupSession(input.sessionId, input.workspaceId, input.worldId, employeeIds)
+      : this.#store.createSession({
+          workspaceId: input.workspaceId,
+          worldId: input.worldId,
+          kind: 'group',
+          collaborationMode: 'task',
+          title: input.title?.trim() || conciseTitle(prompt),
+          participants: [
+            { participantId: 'owner', kind: 'owner' },
+            ...employees.map((employee) => ({ participantId: employee.id, kind: 'employee' as const })),
+          ],
+        })
+    if (session.collaborationMode !== undefined && session.collaborationMode !== 'task') {
+      throw new ConversationOrchestrationError('Task execution requires a task collaboration session')
+    }
+
+    const recovered = this.#recoverConversation(session)
+    const clientTurnId = clientTurnIdFrom(input.metadata)
+    const workTurn = this.#store.createWorkTurn({
+      workspaceId: input.workspaceId,
+      worldId: input.worldId,
+      sessionId: session.id,
+      interactionKind: 'task',
+      ...(clientTurnId === undefined ? {} : { clientTurnId }),
+    })
+    this.#store.appendMessage({
+      sessionId: session.id,
+      senderId: 'owner',
+      senderKind: 'owner',
+      kind: 'user',
+      content: prompt,
+      metadata: {
+        ...input.metadata,
+        participantIds: employeeIds,
+        collaborationMode: 'task',
+        interactionKind: 'task',
+        workTurnId: workTurn.id,
+      },
+      correlationId: session.id,
+    })
+    this.#store.startWorkTurn(workTurn.id)
+
+    let plan: TaskCollaborationPlan | undefined
+    try {
+      plan = this.#store.createTaskCollaborationPlan?.({
+        taskId: `task-${workTurn.id}`,
+        workspaceId: input.workspaceId,
+        worldId: input.worldId,
+        sessionId: session.id,
+        workTurnId: workTurn.id,
+        steps: input.steps.map((step) => ({
+          id: step.id,
+          requiredSkills: [...step.requiredSkills],
+          assignedEmployeeIds: [...step.assignedEmployeeIds],
+          dependsOn: [...step.dependsOn],
+          executionMode: step.executionMode,
+          status: 'pending' as const,
+        })),
+        actorId: 'owner',
+      })
+    } catch (error) {
+      if (this.#store.getWorkTurn(workTurn.id)?.status === 'running') {
+        this.#store.failWorkTurn(workTurn.id, lifecycleErrorCode(error))
+      }
+      throw error
+    }
+    if (plan === undefined) {
+      this.#store.failWorkTurn(workTurn.id, 'task-plan-persistence-unavailable')
+      throw new ConversationOrchestrationError('Task collaboration plan persistence is unavailable')
+    }
+
+    let currentPlan = this.#updateTaskPlan(plan, { status: 'running' })
+    const replies: AgentReply[] = []
+    const repliesByStep = new Map<string, AgentReply[]>()
+    let nextOrdinal = 0
+
+    try {
+      while (currentPlan.steps.some((step) => step.status === 'pending' || step.status === 'ready' || step.status === 'running')) {
+        const blocked = currentPlan.steps.filter((step) =>
+          (step.status === 'pending' || step.status === 'ready')
+          && step.dependsOn.some((dependency) => {
+            const source = currentPlan.steps.find((candidate) => candidate.id === dependency)
+            return source?.status === 'failed' || source?.status === 'blocked' || source?.status === 'interrupted' || source?.status === 'cancelled'
+          }),
+        )
+        if (blocked.length > 0) {
+          currentPlan = this.#updateTaskPlan(currentPlan, {
+            steps: currentPlan.steps.map((step) => blocked.some((item) => item.id === step.id)
+              ? taskStepInput(step, 'blocked', 'dependency-failed')
+              : taskStepInput(step)),
+          })
+        }
+
+        const ready = currentPlan.steps.filter((step) =>
+          step.status === 'pending'
+          && step.dependsOn.every((dependency) => currentPlan.steps.find((candidate) => candidate.id === dependency)?.status === 'completed'),
+        )
+        if (ready.length === 0) {
+          if (currentPlan.steps.some((step) => step.status === 'running')) {
+            // A step can only remain running while its Promise.allSettled
+            // batch is in flight; reaching this point means the plan storage
+            // changed concurrently and should fail closed.
+            throw new ConversationOrchestrationError('Task collaboration plan has a running step without an executor')
+          }
+          if (currentPlan.steps.some((step) => step.status === 'pending')) {
+            throw new ConversationOrchestrationError('Task collaboration plan cannot make progress')
+          }
+          break
+        }
+
+        // Persistence intentionally models pending -> ready -> running so a
+        // recovered plan can distinguish dependency resolution from execution.
+        // Keep the two transitions explicit instead of collapsing them into a
+        // single update (which would be rejected by the store contract).
+        currentPlan = this.#updateTaskPlan(currentPlan, {
+          steps: currentPlan.steps.map((step) => ready.some((item) => item.id === step.id)
+            ? taskStepInput(step, 'ready')
+            : taskStepInput(step)),
+        })
+        currentPlan = this.#updateTaskPlan(currentPlan, {
+          steps: currentPlan.steps.map((step) => ready.some((item) => item.id === step.id)
+            ? taskStepInput(step, 'running')
+            : taskStepInput(step)),
+        })
+
+        const executions = ready.map(async (step) => {
+          const dependencyReplies = step.dependsOn.flatMap((dependency) => repliesByStep.get(dependency) ?? [])
+          const stepReplies: AgentReply[] = []
+          const assigned = step.assignedEmployeeIds.map((employeeId) => {
+            const employee = employees.find((item) => item.id === employeeId)!
+            nextOrdinal += 1
+            return this.#runAgent({
+              session,
+              workTurn,
+              ordinal: nextOrdinal,
+              employee,
+              prompt: taskStepPrompt(input.runtimePrompt?.trim() || prompt, step, dependencyReplies),
+              history: recovered.history,
+              observedThroughSequence: lastAuthoredSequence(recovered.messages, employee.id),
+              ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
+              ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
+              ...(clientTurnId === undefined ? {} : { clientTurnId }),
+            })
+          })
+          const settled = await Promise.allSettled(assigned)
+          for (const result of settled) {
+            if (result.status === 'fulfilled') {
+              stepReplies.push(result.value)
+              replies.push(result.value)
+            }
+          }
+          const failure = settled.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+          return { stepId: step.id, replies: stepReplies, failure }
+        })
+        const settledSteps = await Promise.all(executions)
+        const failedStepIds = new Set(settledSteps.filter((item) => item.failure !== undefined).map((item) => item.stepId))
+        for (const item of settledSteps) repliesByStep.set(item.stepId, item.replies)
+        const failedOrBlockedStepIds = new Set(failedStepIds)
+        let blockedChanged = true
+        while (blockedChanged) {
+          blockedChanged = false
+          for (const step of currentPlan.steps) {
+            if (
+              (step.status === 'pending' || step.status === 'ready')
+              && step.dependsOn.some((dependency) => failedOrBlockedStepIds.has(dependency))
+              && !failedOrBlockedStepIds.has(step.id)
+            ) {
+              failedOrBlockedStepIds.add(step.id)
+              blockedChanged = true
+            }
+          }
+        }
+        const stepUpdate: {
+          status?: TaskCollaborationPlanStatus
+          steps: Array<{
+            id: string
+            requiredSkills: string[]
+            assignedEmployeeIds: string[]
+            dependsOn: string[]
+            executionMode: TaskCollaborationExecutionMode
+            status?: TaskCollaborationStepStatus
+            errorCode?: string | null
+          }>
+        } = {
+          steps: currentPlan.steps.map((step) => {
+            const result = settledSteps.find((item) => item.stepId === step.id)
+            if (result === undefined && failedOrBlockedStepIds.has(step.id)) {
+              return taskStepInput(step, 'blocked', 'dependency-failed')
+            }
+            if (result === undefined) return taskStepInput(step)
+            return taskStepInput(step, result.failure === undefined ? 'completed' : 'failed', result.failure === undefined ? undefined : lifecycleErrorCode(result.failure.reason))
+          }),
+        }
+        if (failedStepIds.size > 0) stepUpdate.status = 'failed'
+        currentPlan = this.#updateTaskPlan(currentPlan, stepUpdate)
+        // Independent steps should continue after a sibling failure, but a
+        // failed plan cannot execute its coordinator summary. Dependent steps
+        // are marked blocked on the next loop before any new run starts.
+        if (failedStepIds.size > 0) break
+      }
+
+      if (currentPlan.status === 'failed' || currentPlan.steps.some((step) => step.status === 'failed' || step.status === 'blocked')) {
+        throw new AgentTurnFailedError(input.coordinatorEmployeeId, 'unknown')
+      }
+      const coordinator = employees.find((employee) => employee.id === input.coordinatorEmployeeId)!
+      nextOrdinal += 1
+      const coordinatorReply = await this.#runAgent({
+        session,
+        workTurn,
+        ordinal: nextOrdinal,
+        employee: coordinator,
+        prompt: coordinatorPrompt(input.runtimePrompt?.trim() || prompt, currentPlan, repliesByStep),
+        history: recovered.history,
+        observedThroughSequence: lastAuthoredSequence(recovered.messages, coordinator.id),
+        ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
+        ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
+        ...(clientTurnId === undefined ? {} : { clientTurnId }),
+      })
+      replies.push(coordinatorReply)
+      currentPlan = this.#updateTaskPlan(currentPlan, { status: 'completed' })
+      this.#store.completeWorkTurn(workTurn.id)
+      return {
+        session,
+        replies,
+        workTurnId: workTurn.id,
+        collaborationMode: 'task',
+        plan: currentPlan,
+        coordinatorEmployeeId: input.coordinatorEmployeeId,
+      }
+    } catch (error) {
+      if (currentPlan.status !== 'failed' && currentPlan.status !== 'completed') {
+        try { currentPlan = this.#updateTaskPlan(currentPlan, { status: 'failed', errorCode: lifecycleErrorCode(error) }) } catch { /* preserve original task error */ }
+      }
+      if (this.#store.getWorkTurn(workTurn.id)?.status === 'running') {
+        this.#store.failWorkTurn(workTurn.id, lifecycleErrorCode(error))
+      }
       throw error
     }
   }
@@ -637,6 +986,35 @@ export class ConversationOrchestrator implements AsyncDisposable {
       messages,
       history: buildConversationHistory(messages, this.#speakersFor(session), this.#historyBudget),
     }
+  }
+
+  #updateTaskPlan(
+    current: TaskCollaborationPlan,
+    patch: {
+      status?: TaskCollaborationPlanStatus
+      steps?: Array<{
+        id?: string
+        requiredSkills: string[]
+        assignedEmployeeIds: string[]
+        dependsOn: string[]
+        executionMode: TaskCollaborationExecutionMode
+        status?: TaskCollaborationStepStatus
+        errorCode?: string | null
+      }>
+      errorCode?: string | null
+    },
+  ): TaskCollaborationPlan {
+    if (this.#store.updateTaskCollaborationPlan === undefined) {
+      throw new ConversationOrchestrationError('Task collaboration plan persistence is unavailable')
+    }
+    return this.#store.updateTaskCollaborationPlan({
+      planId: current.id,
+      expectedRevision: current.revision,
+      ...(patch.status === undefined ? {} : { status: patch.status }),
+      ...(patch.steps === undefined ? {} : { steps: patch.steps }),
+      ...(patch.errorCode === undefined ? {} : { errorCode: patch.errorCode }),
+      actorId: 'system',
+    })
   }
 
   #speakersFor(session: WorkSession): ConversationHistorySpeaker[] {
@@ -1103,6 +1481,103 @@ function peerPrompt(input: {
 function compactPeerStatement(value: string): string {
   const compact = value.replaceAll(/\s+/g, ' ').trim()
   return compact.length <= 1_200 ? compact : `${compact.slice(0, 1_199)}…`
+}
+
+function compact(value: string, limit: number): string {
+  const normalized = value.replaceAll(/\s+/g, ' ').trim()
+  return normalized.length <= limit ? normalized : `${normalized.slice(0, Math.max(1, limit - 1))}…`
+}
+
+function validateTaskDraft(steps: readonly TaskCollaborationStepDraft[], employeeIds: readonly string[]): void {
+  if (steps.length === 0 || steps.length > 3) throw new ConversationOrchestrationError('A task collaboration plan must contain 1 to 3 steps')
+  const employeeSet = new Set(employeeIds)
+  const ids = new Set<string>()
+  for (const step of steps) {
+    if (!step.id.trim() || ids.has(step.id)) throw new ConversationOrchestrationError(`Duplicate task collaboration step: ${step.id}`)
+    ids.add(step.id)
+    if (step.assignedEmployeeIds.length === 0) throw new ConversationOrchestrationError(`Task step has no assigned employee: ${step.id}`)
+    if (step.assignedEmployeeIds.some((employeeId) => !employeeSet.has(employeeId))) {
+      throw new ConversationOrchestrationError(`Task step employee is not a group participant: ${step.id}`)
+    }
+    if (new Set(step.assignedEmployeeIds).size !== step.assignedEmployeeIds.length) {
+      throw new ConversationOrchestrationError(`Task step assigns one employee more than once: ${step.id}`)
+    }
+    if (step.dependsOn.includes(step.id) || step.dependsOn.some((dependency) => !ids.has(dependency) && !steps.some((candidate) => candidate.id === dependency))) {
+      throw new ConversationOrchestrationError(`Task step dependency is invalid: ${step.id}`)
+    }
+  }
+  const byId = new Map(steps.map((step) => [step.id, step]))
+  const visiting = new Set<string>()
+  const visited = new Set<string>()
+  const visit = (id: string): void => {
+    if (visited.has(id)) return
+    if (visiting.has(id)) throw new ConversationOrchestrationError('Task collaboration plan contains a dependency cycle')
+    visiting.add(id)
+    for (const dependency of byId.get(id)!.dependsOn) visit(dependency)
+    visiting.delete(id)
+    visited.add(id)
+  }
+  for (const step of steps) visit(step.id)
+}
+
+function taskStepInput(
+  step: TaskCollaborationStep,
+  status?: TaskCollaborationStepStatus,
+  errorCode?: string,
+): {
+  id: string
+  requiredSkills: string[]
+  assignedEmployeeIds: string[]
+  dependsOn: string[]
+  executionMode: TaskCollaborationExecutionMode
+  status?: TaskCollaborationStepStatus
+  errorCode?: string | null
+} {
+  return {
+    id: step.id,
+    requiredSkills: [...step.requiredSkills],
+    assignedEmployeeIds: [...step.assignedEmployeeIds],
+    dependsOn: [...step.dependsOn],
+    executionMode: step.executionMode,
+    ...(status === undefined ? { status: step.status } : { status }),
+    ...(errorCode === undefined
+      ? (step.errorCode === undefined ? {} : { errorCode: step.errorCode })
+      : { errorCode }),
+  }
+}
+
+function taskStepPrompt(basePrompt: string, step: TaskCollaborationStep, dependencies: readonly AgentReply[]): string {
+  const dependencyText = dependencies.length === 0
+    ? '无'
+    : dependencies.map((reply) => `${reply.displayName}：${compact(reply.content, 1_200)}`).join('\n\n')
+  return [
+    basePrompt,
+    '[任务协作步骤]',
+    `步骤 ${step.ordinal}，所需技能：${step.requiredSkills.join('、') || '综合处理'}`,
+    `前置步骤的真实结果：\n${dependencyText}`,
+    '只完成分配给你的步骤；不要替其他角色执行，也不要把未完成或未知内容写成事实。完成后给出证据、产物和下一步。',
+  ].join('\n\n')
+}
+
+function coordinatorPrompt(
+  basePrompt: string,
+  plan: TaskCollaborationPlan,
+  repliesByStep: ReadonlyMap<string, readonly AgentReply[]>,
+): string {
+  const results = plan.steps.map((step) => {
+    const replies = repliesByStep.get(step.id) ?? []
+    const content = replies.length === 0
+      ? '该步骤没有形成正式回复。'
+      : replies.map((reply) => `${reply.displayName}：${compact(reply.content, 1_200)}`).join('\n\n')
+    return `步骤 ${step.ordinal}（${step.status}）：\n${content}`
+  }).join('\n\n')
+  return [
+    basePrompt,
+    '[任务协作汇总]',
+    '你是明确指定的协调角色。以下是其他 AgentRun 的真实步骤结果：',
+    results,
+    '请只依据这些真实结果汇总结论、未决问题、证据/产物和下一步；不要声称未执行的步骤已完成，不要补造其他角色的观点。',
+  ].join('\n\n')
 }
 
 function groupPrompt(original: string, replies: readonly AgentReply[]): string {

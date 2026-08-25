@@ -265,6 +265,46 @@ describe('ConversationOrchestrator', () => {
     ])
   })
 
+  it('persists a task plan, executes dependent steps, and asks the coordinator for a real summary AgentRun', async () => {
+    const { directory, store, workspace, company } = await setup()
+    store.saveBlueprint(blueprint('researcher', '小刘', '网络研究员'))
+    store.saveBlueprint(blueprint('frontend', '老王', '前端工程师'))
+    store.saveBlueprint(blueprint('story', '小陈', '故事作者'))
+    const researcher = store.recruitEmployee({ workspaceId: workspace.id, worldId: company.id, blueprintId: 'researcher', blueprintVersion: 1 })
+    const frontend = store.recruitEmployee({ workspaceId: workspace.id, worldId: company.id, blueprintId: 'frontend', blueprintVersion: 1 })
+    const story = store.recruitEmployee({ workspaceId: workspace.id, worldId: company.id, blueprintId: 'story', blueprintVersion: 1 })
+    const runtime = new FakeRuntime({
+      [researcher.id]: '官网资料已核对，保留来源。',
+      [frontend.id]: '根据资料完成 HTML 对比页。',
+      [story.id]: '不应执行。',
+    })
+    const orchestrator = new ConversationOrchestrator({ store, runtime, workspacePath: directory })
+    orchestrators.push(orchestrator)
+
+    const result = await orchestrator.task({
+      workspaceId: workspace.id,
+      worldId: company.id,
+      employeeIds: [researcher.id, frontend.id, story.id],
+      coordinatorEmployeeId: researcher.id,
+      prompt: '查官网并制作 HTML 对比页',
+      runtimePrompt: '请完成任务协作。',
+      steps: [
+        { id: 'research', ordinal: 1, requiredSkills: ['web.search'], assignedEmployeeIds: [researcher.id], dependsOn: [], executionMode: 'parallel' },
+        { id: 'build', ordinal: 2, requiredSkills: ['coding'], assignedEmployeeIds: [frontend.id], dependsOn: ['research'], executionMode: 'sequential' },
+      ],
+    })
+
+    expect(result.collaborationMode).toBe('task')
+    expect(result.plan.status).toBe('completed')
+    expect(result.plan.steps.map((step) => step.status)).toEqual(['completed', 'completed'])
+    expect(result.replies.map((reply) => reply.employeeId)).toEqual([researcher.id, frontend.id, researcher.id])
+    expect(runtime.calls.some((call) => call.agent.id === story.id)).toBe(false)
+    expect(runtime.calls.find((call) => call.agent.id === frontend.id)?.prompt).toContain('官网资料已核对')
+    expect(store.getSession(result.session.id)?.collaborationMode).toBe('task')
+    expect(store.getTaskCollaborationPlan(result.plan.id)).toMatchObject({ status: 'completed', workTurnId: result.workTurnId })
+    expect(store.listTurnAgentRuns(result.workTurnId)).toHaveLength(3)
+  })
+
   it('continues an existing group history without creating a duplicate session', async () => {
     const { directory, store, workspace, company } = await setup()
     store.saveBlueprint(blueprint('tech-lead', '老王', '技术经理'))

@@ -17,6 +17,7 @@ export interface ConversationIntent {
   kind: 'direct' | 'group'
   employeeIds: string[]
   title: string
+  collaborationMode?: 'discussion' | 'task'
 }
 
 export type SessionParticipantMap = Record<string, string[]>

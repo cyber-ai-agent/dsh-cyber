@@ -44,6 +44,11 @@ import {
   type RecordModelInteractionInput,
   type RuntimeUpdateStatus,
   type RuntimeUpdateTransaction,
+  type TaskCollaborationExecutionMode,
+  type TaskCollaborationPlan,
+  type TaskCollaborationPlanStatus,
+  type TaskCollaborationStep,
+  type TaskCollaborationStepStatus,
   type SkillEvidence,
   type SkillEvidenceKind,
   type SkillEvidenceOutcome,
@@ -58,6 +63,7 @@ import {
   type WorkTurnInteractionKind,
   type WorkMessage,
   type WorkSession,
+  type WorkSessionCollaborationMode,
   type WorkSessionKind,
   type WorkSessionParticipant,
   type World,
@@ -258,8 +264,67 @@ export interface CreateSessionInput {
   worldId: string
   kind: WorkSessionKind
   title: string
+  collaborationMode?: WorkSessionCollaborationMode
   participants?: Array<{ participantId: string; kind: ParticipantKind }>
   actorId?: string
+}
+
+export interface UpdateSessionCollaborationModeInput {
+  sessionId: string
+  collaborationMode: WorkSessionCollaborationMode
+  actorId?: string
+}
+
+export interface TaskCollaborationStepInput {
+  id?: string
+  requiredSkills: string[]
+  assignedEmployeeIds: string[]
+  dependsOn: string[]
+  executionMode: TaskCollaborationExecutionMode
+  status?: TaskCollaborationStepStatus
+  errorCode?: string | null
+}
+
+export interface CreateTaskCollaborationPlanInput {
+  id?: string
+  taskId: string
+  workspaceId: string
+  worldId: string
+  sessionId: string
+  workTurnId: string
+  status?: TaskCollaborationPlanStatus
+  steps: TaskCollaborationStepInput[]
+  actorId?: string
+}
+
+export interface UpdateTaskCollaborationPlanInput {
+  planId: string
+  /** Optimistic concurrency token. `revision` is accepted as a compatibility alias. */
+  expectedRevision?: number
+  revision?: number
+  status?: TaskCollaborationPlanStatus
+  steps?: TaskCollaborationStepInput[]
+  errorCode?: string | null
+  actorId?: string
+}
+
+export interface UpdateTaskCollaborationStepInput {
+  planId: string
+  stepId: string
+  expectedRevision?: number
+  revision?: number
+  requiredSkills?: string[]
+  assignedEmployeeIds?: string[]
+  dependsOn?: string[]
+  executionMode?: TaskCollaborationExecutionMode
+  status?: TaskCollaborationStepStatus
+  errorCode?: string | null
+  actorId?: string
+}
+
+export interface TaskCollaborationRecoveryReport {
+  plansInterrupted: number
+  stepsInterrupted: number
 }
 
 export interface CreateWorkTurnInput {
@@ -451,6 +516,8 @@ const KNOWN_TABLES = [
   'model_assignments',
   'local_assets',
   'work_sessions',
+  'task_collaboration_plans',
+  'task_collaboration_steps',
   'work_turns',
   'agent_runs',
   'skill_actions',
@@ -2407,6 +2474,7 @@ export class SqliteStore {
       workspaceId: input.workspaceId,
       worldId: input.worldId,
       kind: input.kind,
+      collaborationMode: validateSessionCollaborationMode(input.collaborationMode ?? 'discussion'),
       title: input.title.trim(),
       status: 'open',
       createdAt: now,
@@ -2418,14 +2486,15 @@ export class SqliteStore {
       this.database
         .prepare(
           `INSERT INTO work_sessions
-           (id, workspace_id, world_id, kind, title, status, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, workspace_id, world_id, kind, collaboration_mode, title, status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           session.id,
           session.workspaceId,
           session.worldId,
           session.kind,
+          session.collaborationMode ?? 'discussion',
           session.title,
           session.status,
           session.createdAt,
@@ -2478,6 +2547,222 @@ export class SqliteStore {
           .prepare('SELECT * FROM work_sessions WHERE world_id = ? ORDER BY updated_at DESC, id')
           .all(worldId)
     return rows.map(mapSession)
+  }
+
+  setSessionCollaborationMode(sessionId: string, collaborationMode: WorkSessionCollaborationMode): WorkSession {
+    this.#assertWritable()
+    const session = this.#requireSession(sessionId)
+    if (session.kind !== 'group') throw new PersistenceError('Only group sessions can change collaboration mode')
+    const mode = validateSessionCollaborationMode(collaborationMode)
+    if (session.collaborationMode === mode) return session
+    const now = this.#clock()
+    return this.#transaction(() => {
+      const result = this.database.prepare(
+        `UPDATE work_sessions SET collaboration_mode = ?, updated_at = ?
+         WHERE id = ? AND collaboration_mode = ?`,
+      ).run(mode, now, session.id, session.collaborationMode ?? 'discussion')
+      if (Number(result.changes) !== 1) throw new PersistenceError('Session collaboration mode changed concurrently')
+      return this.getSession(session.id)!
+    })
+  }
+
+  updateSessionCollaborationMode(input: UpdateSessionCollaborationModeInput): WorkSession {
+    return this.setSessionCollaborationMode(input.sessionId, input.collaborationMode)
+  }
+
+  createTaskCollaborationPlan(input: CreateTaskCollaborationPlanInput): TaskCollaborationPlan {
+    this.#assertWritable()
+    const world = this.#requireWorld(input.worldId)
+    const workspace = this.#requireWorkspace(input.workspaceId)
+    if (world.workspaceId !== workspace.id || world.status === 'archived') {
+      throw new PersistenceError('Task collaboration plan cannot be created in this world')
+    }
+    const session = this.#requireSession(input.sessionId)
+    if (session.workspaceId !== workspace.id || session.worldId !== world.id) {
+      throw new PersistenceError('Task collaboration plan session does not match its world')
+    }
+    if (session.kind !== 'group' || session.collaborationMode !== 'task') {
+      throw new PersistenceError('Task collaboration plan requires a task group session')
+    }
+    const turn = this.getWorkTurn(input.workTurnId)
+    if (turn === undefined || turn.workspaceId !== workspace.id || turn.worldId !== world.id || turn.sessionId !== session.id) {
+      throw new PersistenceError('Task collaboration plan work turn does not match its session')
+    }
+    const taskId = normalizeRequiredToken(input.taskId, 'Task collaboration task id', 160)
+    const status = validateTaskPlanStatus(input.status ?? 'planned')
+    const steps = normalizeTaskSteps(input.steps, this.#idFactory)
+    assertTerminalTaskPlanSteps(status, steps)
+    this.#assertTaskStepEmployees(world, steps)
+    assertTaskStepGraph(steps)
+
+    const existing = this.getTaskCollaborationPlanByTask(world.id, taskId)
+    if (existing !== undefined) {
+      if (existing.sessionId !== session.id || existing.workTurnId !== turn.id) {
+        throw new PersistenceError('Task collaboration task id is already bound to another scope')
+      }
+      return existing
+    }
+
+    const now = this.#clock()
+    const planId = normalizeOptionalId(input.id, this.#idFactory)
+    const plan: TaskCollaborationPlan = {
+      id: planId,
+      taskId,
+      workspaceId: workspace.id,
+      worldId: world.id,
+      sessionId: session.id,
+      workTurnId: turn.id,
+      revision: 1,
+      status,
+      steps: steps.map((step) => taskStepFromNormalized(step, planId, now)),
+      createdAt: now,
+      updatedAt: now,
+    }
+    return this.#transaction(() => {
+      this.database.prepare(
+        `INSERT INTO task_collaboration_plans
+         (id, task_id, workspace_id, world_id, session_id, work_turn_id, revision,
+          status, error_code, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        plan.id, plan.taskId, plan.workspaceId, plan.worldId, plan.sessionId,
+        plan.workTurnId, plan.revision, plan.status, null, plan.createdAt, plan.updatedAt,
+      )
+      for (const step of plan.steps) this.#insertTaskCollaborationStep(step)
+      return this.getTaskCollaborationPlan(plan.id)!
+    })
+  }
+
+  getTaskCollaborationPlan(planId: string): TaskCollaborationPlan | undefined {
+    const row = this.database.prepare('SELECT * FROM task_collaboration_plans WHERE id = ?').get(planId)
+    return row === undefined ? undefined : this.#mapTaskCollaborationPlan(row)
+  }
+
+  getTaskCollaborationPlanByTask(worldId: string, taskId: string): TaskCollaborationPlan | undefined {
+    this.#requireWorld(worldId)
+    const row = this.database.prepare(
+      'SELECT * FROM task_collaboration_plans WHERE world_id = ? AND task_id = ?',
+    ).get(worldId, taskId.trim())
+    return row === undefined ? undefined : this.#mapTaskCollaborationPlan(row)
+  }
+
+  getLatestTaskCollaborationPlanForSession(sessionId: string): TaskCollaborationPlan | undefined
+  getLatestTaskCollaborationPlanForSession(worldId: string, sessionId: string): TaskCollaborationPlan | undefined
+  getLatestTaskCollaborationPlanForSession(firstId: string, secondId?: string): TaskCollaborationPlan | undefined {
+    const sessionId = secondId ?? firstId
+    const session = this.#requireSession(sessionId)
+    if (secondId !== undefined && session.worldId !== firstId) {
+      throw new PersistenceError('Task collaboration plan session does not match its world')
+    }
+    const row = this.database.prepare(
+      `SELECT * FROM task_collaboration_plans
+       WHERE session_id = ? ORDER BY created_at DESC, id DESC LIMIT 1`,
+    ).get(sessionId)
+    return row === undefined ? undefined : this.#mapTaskCollaborationPlan(row)
+  }
+
+  getTaskCollaborationPlanByTurn(worldId: string, workTurnId: string): TaskCollaborationPlan | undefined {
+    this.#requireWorld(worldId)
+    const row = this.database.prepare(
+      `SELECT * FROM task_collaboration_plans
+       WHERE world_id = ? AND work_turn_id = ?
+       ORDER BY created_at DESC, id DESC LIMIT 1`,
+    ).get(worldId, workTurnId)
+    return row === undefined ? undefined : this.#mapTaskCollaborationPlan(row)
+  }
+
+  listTaskCollaborationPlans(worldId: string, status?: TaskCollaborationPlanStatus): TaskCollaborationPlan[] {
+    this.#requireWorld(worldId)
+    const rows = status === undefined
+      ? this.database.prepare(
+          'SELECT * FROM task_collaboration_plans WHERE world_id = ? ORDER BY created_at, id',
+        ).all(worldId)
+      : this.database.prepare(
+          'SELECT * FROM task_collaboration_plans WHERE world_id = ? AND status = ? ORDER BY created_at, id',
+        ).all(worldId, status)
+    return rows.map((row) => this.#mapTaskCollaborationPlan(row))
+  }
+
+  updateTaskCollaborationPlan(input: UpdateTaskCollaborationPlanInput): TaskCollaborationPlan {
+    this.#assertWritable()
+    const current = this.getTaskCollaborationPlan(input.planId)
+    if (current === undefined) throw new EntityNotFoundError(`Task collaboration plan not found: ${input.planId}`)
+    const expectedRevision = input.expectedRevision ?? input.revision
+    if (expectedRevision === undefined || !Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
+      throw new PersistenceError('Task collaboration plan revision is required')
+    }
+    if (current.revision !== expectedRevision) {
+      throw new PersistenceError('Task collaboration plan changed concurrently')
+    }
+    if (input.steps !== undefined && isTerminalTaskPlanStatus(current.status)) {
+      throw new PersistenceError('Terminal task collaboration plan cannot change steps')
+    }
+    const steps = normalizeTaskSteps(
+      input.steps === undefined ? current.steps.map(taskStepToInput) : input.steps,
+      this.#idFactory,
+    )
+    const world = this.#requireWorld(current.worldId)
+    this.#assertTaskStepEmployees(world, steps)
+    assertTaskStepGraph(steps)
+    const status = validateTaskPlanStatus(input.status ?? current.status)
+    assertTaskPlanTransition(current.status, status)
+    assertTerminalTaskPlanSteps(status, steps)
+    const currentSteps = new Map(current.steps.map((step) => [step.id, step]))
+    for (const step of steps) {
+      const previous = currentSteps.get(step.id)
+      if (previous !== undefined) assertTaskStepTransition(previous.status, step.status)
+    }
+    const errorCode = input.errorCode === undefined ? current.errorCode : normalizeOptionalError(input.errorCode)
+    const now = this.#clock()
+    return this.#transaction(() => {
+      const result = this.database.prepare(
+        `UPDATE task_collaboration_plans
+         SET revision = revision + 1, status = ?, error_code = ?, updated_at = ?
+         WHERE id = ? AND revision = ?`,
+      ).run(status, errorCode ?? null, now, current.id, expectedRevision)
+      if (Number(result.changes) !== 1) throw new PersistenceError('Task collaboration plan changed concurrently')
+      this.database.prepare('DELETE FROM task_collaboration_steps WHERE plan_id = ?').run(current.id)
+      const createdAtByStepId = new Map(current.steps.map((step) => [step.id, step.createdAt]))
+      for (const step of steps) {
+        this.#insertTaskCollaborationStep(taskStepFromNormalized(
+          step,
+          current.id,
+          now,
+          createdAtByStepId.get(step.id),
+        ))
+      }
+      return this.getTaskCollaborationPlan(current.id)!
+    })
+  }
+
+  updateTaskCollaborationStep(input: UpdateTaskCollaborationStepInput): TaskCollaborationPlan {
+    const current = this.getTaskCollaborationPlan(input.planId)
+    if (current === undefined) throw new EntityNotFoundError(`Task collaboration plan not found: ${input.planId}`)
+    const step = current.steps.find((item) => item.id === input.stepId)
+    if (step === undefined) throw new EntityNotFoundError(`Task collaboration step not found: ${input.stepId}`)
+    const next: TaskCollaborationStepInput = {
+      id: step.id,
+      requiredSkills: input.requiredSkills ?? step.requiredSkills,
+      assignedEmployeeIds: input.assignedEmployeeIds ?? step.assignedEmployeeIds,
+      dependsOn: input.dependsOn ?? step.dependsOn,
+      executionMode: input.executionMode ?? step.executionMode,
+      status: input.status ?? step.status,
+      ...(input.errorCode === undefined
+        ? (step.errorCode === undefined ? {} : { errorCode: step.errorCode })
+        : { errorCode: input.errorCode }),
+    }
+    return this.updateTaskCollaborationPlan({
+      planId: input.planId,
+      ...(input.expectedRevision === undefined ? {} : { expectedRevision: input.expectedRevision }),
+      ...(input.revision === undefined ? {} : { revision: input.revision }),
+      steps: current.steps.map((item) => item.id === step.id ? next : taskStepToInput(item)),
+      ...(input.actorId === undefined ? {} : { actorId: input.actorId }),
+    })
+  }
+
+  recoverTaskCollaborationPlansAfterRestart(now = this.#clock()): TaskCollaborationRecoveryReport {
+    this.#assertWritable()
+    return this.#transaction(() => this.#recoverTaskCollaborationPlansAfterRestart(now))
   }
 
   createWorkTurn(input: CreateWorkTurnInput): WorkTurn {
@@ -2646,6 +2931,7 @@ export class SqliteStore {
         `UPDATE work_turns SET status = 'failed', error_code = 'service-restarted', completed_at = ?
          WHERE status IN ('queued', 'running')`,
       ).run(now)
+      this.#recoverTaskCollaborationPlansAfterRestart(now)
       return { turnsFailed: Number(turns.changes), runsFailed: Number(runs.changes) }
     })
   }
@@ -3951,6 +4237,7 @@ export class SqliteStore {
             participants: this.listParticipants(session.id),
             messages: this.listMessages(session.id),
           })),
+          collaborationPlans: this.listTaskCollaborationPlans(world.id),
           runtime: this.getWorldRuntimeSnapshot(world.id),
           themeBinding: this.getWorldThemeBinding(world.id),
           authorities: this.listWorldCharacterAuthorities(world.id),
@@ -4002,6 +4289,8 @@ export class SqliteStore {
         modelAssignments: countRows(this.database, 'model_assignments'),
         localAssets: countRows(this.database, 'local_assets'),
         sessions: countRows(this.database, 'work_sessions'),
+        taskCollaborationPlans: countRows(this.database, 'task_collaboration_plans'),
+        taskCollaborationSteps: countRows(this.database, 'task_collaboration_steps'),
         messages: countRows(this.database, 'messages'),
         installedPackages: countRows(this.database, 'installed_packages'),
         worldPackageInstances: countRows(this.database, 'world_package_instances'),
@@ -4222,6 +4511,79 @@ export class SqliteStore {
         revision.reason,
         revision.createdAt,
       )
+  }
+
+  #insertTaskCollaborationStep(step: TaskCollaborationStep): void {
+    this.database.prepare(
+      `INSERT INTO task_collaboration_steps
+       (id, plan_id, ordinal, required_skills_json, assigned_employee_ids_json,
+        depends_on_json, execution_mode, status, error_code, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      step.id,
+      step.planId,
+      step.ordinal,
+      stringifyJson(step.requiredSkills),
+      stringifyJson(step.assignedEmployeeIds),
+      stringifyJson(step.dependsOn),
+      step.executionMode,
+      step.status,
+      step.errorCode ?? null,
+      step.createdAt,
+      step.updatedAt,
+    )
+  }
+
+  #mapTaskCollaborationPlan(row: object): TaskCollaborationPlan {
+    const value = row as Record<string, unknown>
+    const plan: TaskCollaborationPlan = {
+      id: String(value.id),
+      taskId: String(value.task_id),
+      workspaceId: String(value.workspace_id),
+      worldId: String(value.world_id),
+      sessionId: String(value.session_id),
+      workTurnId: String(value.work_turn_id),
+      revision: Number(value.revision),
+      status: value.status as TaskCollaborationPlanStatus,
+      steps: this.database.prepare(
+        `SELECT * FROM task_collaboration_steps
+         WHERE plan_id = ? ORDER BY ordinal, id`,
+      ).all(String(value.id)).map(mapTaskCollaborationStep),
+      createdAt: String(value.created_at),
+      updatedAt: String(value.updated_at),
+    }
+    if (typeof value.error_code === 'string') plan.errorCode = value.error_code
+    return plan
+  }
+
+  #assertTaskStepEmployees(world: World, steps: NormalizedTaskStep[]): void {
+    for (const step of steps) {
+      for (const employeeId of step.assignedEmployeeIds) {
+        const employee = this.#requireEmployee(employeeId)
+        if (employee.workspaceId !== world.workspaceId || employee.worldId !== world.id || employee.status === 'archived') {
+          throw new PersistenceError(`Task collaboration step employee does not belong to this world: ${employeeId}`)
+        }
+      }
+    }
+  }
+
+  #recoverTaskCollaborationPlansAfterRestart(now: string, worldId?: string): TaskCollaborationRecoveryReport {
+    const planWhere = worldId === undefined ? '' : ' AND world_id = ?'
+    const planParams = worldId === undefined ? [] : [worldId]
+    const steps = this.database.prepare(
+      `UPDATE task_collaboration_steps
+       SET status = 'interrupted', error_code = 'service-restarted', updated_at = ?
+       WHERE status IN ('pending', 'ready', 'running', 'blocked')
+         AND plan_id IN (
+           SELECT id FROM task_collaboration_plans WHERE status = 'running'${planWhere}
+         )`,
+    ).run(now, ...planParams)
+    const plans = this.database.prepare(
+      `UPDATE task_collaboration_plans
+       SET status = 'interrupted', revision = revision + 1, error_code = 'service-restarted', updated_at = ?
+       WHERE status = 'running'${planWhere}`,
+    ).run(now, ...planParams)
+    return { plansInterrupted: Number(plans.changes), stepsInterrupted: Number(steps.changes) }
   }
 
   #assertEvidenceSources(
@@ -4993,6 +5355,7 @@ function mapSession(row: object): WorkSession {
     workspaceId: String(value.workspace_id),
     worldId: String(value.world_id),
     kind: value.kind as WorkSession['kind'],
+    collaborationMode: value.collaboration_mode === 'task' ? 'task' : 'discussion',
     title: String(value.title),
     status: value.status as WorkSession['status'],
     createdAt: String(value.created_at),
@@ -5228,4 +5591,207 @@ function sameAuthority(
   return left.role === right.role && left.updatedAt === right.updatedAt &&
     left.permissionGrants.length === right.permissionGrants.length &&
     left.permissionGrants.every((permission, index) => permission === right.permissionGrants[index])
+}
+
+interface NormalizedTaskStep {
+  id: string
+  ordinal: number
+  requiredSkills: string[]
+  assignedEmployeeIds: string[]
+  dependsOn: string[]
+  executionMode: TaskCollaborationExecutionMode
+  status: TaskCollaborationStepStatus
+  errorCode?: string
+}
+
+function normalizeTaskSteps(
+  inputs: TaskCollaborationStepInput[],
+  idFactory: () => string,
+): NormalizedTaskStep[] {
+  if (!Array.isArray(inputs) || inputs.length === 0) {
+    throw new PersistenceError('Task collaboration plan requires at least one step')
+  }
+  const ids = new Set<string>()
+  return inputs.map((input, ordinal) => {
+    const id = normalizeOptionalId(input.id, idFactory)
+    if (ids.has(id)) throw new PersistenceError(`Task collaboration step id is duplicated: ${id}`)
+    ids.add(id)
+    const step: NormalizedTaskStep = {
+      id,
+      ordinal: ordinal + 1,
+      requiredSkills: normalizeStringList(input.requiredSkills, 'required skills'),
+      assignedEmployeeIds: normalizeStringList(input.assignedEmployeeIds, 'assigned employee ids'),
+      dependsOn: normalizeStringList(input.dependsOn, 'step dependencies'),
+      executionMode: validateTaskExecutionMode(input.executionMode),
+      status: validateTaskStepStatus(input.status ?? 'pending'),
+    }
+    const errorCode = normalizeOptionalError(input.errorCode)
+    if (errorCode !== undefined) step.errorCode = errorCode
+    return step
+  })
+}
+
+function taskStepFromNormalized(step: NormalizedTaskStep, planId: string, now: string, createdAt = now): TaskCollaborationStep {
+  const result: TaskCollaborationStep = {
+    id: step.id,
+    planId,
+    ordinal: step.ordinal,
+    requiredSkills: [...step.requiredSkills],
+    assignedEmployeeIds: [...step.assignedEmployeeIds],
+    dependsOn: [...step.dependsOn],
+    executionMode: step.executionMode,
+    status: step.status,
+    createdAt,
+    updatedAt: now,
+  }
+  if (step.errorCode !== undefined) result.errorCode = step.errorCode
+  return result
+}
+
+function taskStepToInput(step: TaskCollaborationStep): TaskCollaborationStepInput {
+  return {
+    id: step.id,
+    requiredSkills: [...step.requiredSkills],
+    assignedEmployeeIds: [...step.assignedEmployeeIds],
+    dependsOn: [...step.dependsOn],
+    executionMode: step.executionMode,
+    status: step.status,
+    ...(step.errorCode === undefined ? {} : { errorCode: step.errorCode }),
+  }
+}
+
+function assertTaskStepGraph(steps: NormalizedTaskStep[]): void {
+  const ids = new Set(steps.map((step) => step.id))
+  for (const step of steps) {
+    if (step.dependsOn.includes(step.id)) throw new PersistenceError(`Task collaboration step cannot depend on itself: ${step.id}`)
+    for (const dependency of step.dependsOn) {
+      if (!ids.has(dependency)) throw new PersistenceError(`Task collaboration step dependency is missing: ${dependency}`)
+    }
+  }
+  const visiting = new Set<string>()
+  const visited = new Set<string>()
+  const byId = new Map(steps.map((step) => [step.id, step]))
+  const visit = (id: string): void => {
+    if (visited.has(id)) return
+    if (visiting.has(id)) throw new PersistenceError('Task collaboration step dependencies contain a cycle')
+    visiting.add(id)
+    for (const dependency of byId.get(id)!.dependsOn) visit(dependency)
+    visiting.delete(id)
+    visited.add(id)
+  }
+  for (const step of steps) visit(step.id)
+}
+
+function normalizeStringList(values: string[], label: string): string[] {
+  if (!Array.isArray(values)) throw new PersistenceError(`Task collaboration ${label} must be an array`)
+  const normalized = values.map((value) => {
+    if (typeof value !== 'string') throw new PersistenceError(`Task collaboration ${label} must contain strings`)
+    return normalizeRequiredToken(value, `Task collaboration ${label} item`, 160)
+  })
+  if (new Set(normalized).size !== normalized.length) throw new PersistenceError(`Task collaboration ${label} must be unique`)
+  return normalized
+}
+
+function normalizeRequiredToken(value: string, label: string, maximum: number): string {
+  const normalized = value.trim()
+  if (!normalized || normalized.length > maximum || /[\u0000-\u001f\u007f]/.test(normalized)) {
+    throw new PersistenceError(`${label} is invalid`)
+  }
+  return normalized
+}
+
+function normalizeOptionalId(value: string | undefined, idFactory: () => string): string {
+  return normalizeRequiredToken(value ?? idFactory(), 'Task collaboration id', 160)
+}
+
+function normalizeOptionalError(value: string | null | undefined): string | undefined {
+  if (value === null || value === undefined) return undefined
+  const normalized = value.trim()
+  if (!normalized || normalized.length > 160 || /[\u0000-\u001f\u007f]/.test(normalized)) {
+    throw new PersistenceError('Task collaboration error code is invalid')
+  }
+  return normalized
+}
+
+function validateTaskPlanStatus(value: TaskCollaborationPlanStatus): TaskCollaborationPlanStatus {
+  if (!['planned', 'running', 'completed', 'failed', 'interrupted', 'cancelled'].includes(value)) {
+    throw new PersistenceError(`Task collaboration plan status is invalid: ${value}`)
+  }
+  return value
+}
+
+function validateTaskStepStatus(value: TaskCollaborationStepStatus): TaskCollaborationStepStatus {
+  if (!['pending', 'ready', 'running', 'completed', 'failed', 'blocked', 'interrupted', 'cancelled'].includes(value)) {
+    throw new PersistenceError(`Task collaboration step status is invalid: ${value}`)
+  }
+  return value
+}
+
+function validateTaskExecutionMode(value: TaskCollaborationExecutionMode): TaskCollaborationExecutionMode {
+  if (value !== 'parallel' && value !== 'sequential') {
+    throw new PersistenceError(`Task collaboration execution mode is invalid: ${value}`)
+  }
+  return value
+}
+
+function assertTaskPlanTransition(from: TaskCollaborationPlanStatus, to: TaskCollaborationPlanStatus): void {
+  if (from === to) return
+  const allowed: Record<TaskCollaborationPlanStatus, readonly TaskCollaborationPlanStatus[]> = {
+    planned: ['running', 'cancelled', 'interrupted'],
+    running: ['completed', 'failed', 'interrupted', 'cancelled'],
+    completed: [],
+    failed: [],
+    interrupted: [],
+    cancelled: [],
+  }
+  if (!allowed[from].includes(to)) throw new PersistenceError(`Illegal task collaboration plan transition: ${from} -> ${to}`)
+}
+
+function isTerminalTaskPlanStatus(value: TaskCollaborationPlanStatus): boolean {
+  return value === 'completed' || value === 'failed' || value === 'interrupted' || value === 'cancelled'
+}
+
+function assertTerminalTaskPlanSteps(status: TaskCollaborationPlanStatus, steps: readonly NormalizedTaskStep[]): void {
+  if (!isTerminalTaskPlanStatus(status)) return
+  if (steps.some((step) => step.status === 'pending' || step.status === 'ready' || step.status === 'running')) {
+    throw new PersistenceError('Terminal task collaboration plan cannot contain unfinished steps')
+  }
+}
+
+function assertTaskStepTransition(from: TaskCollaborationStepStatus, to: TaskCollaborationStepStatus): void {
+  if (from === to) return
+  const allowed: Record<TaskCollaborationStepStatus, readonly TaskCollaborationStepStatus[]> = {
+    pending: ['ready', 'running', 'blocked', 'interrupted', 'cancelled'],
+    ready: ['running', 'blocked', 'interrupted', 'cancelled'],
+    running: ['completed', 'failed', 'blocked', 'interrupted', 'cancelled'],
+    blocked: ['ready', 'running', 'interrupted', 'cancelled'],
+    completed: [],
+    failed: [],
+    interrupted: [],
+    cancelled: [],
+  }
+  if (!allowed[from].includes(to)) throw new PersistenceError(`Illegal task collaboration step transition: ${from} -> ${to}`)
+}
+
+function validateSessionCollaborationMode(value: WorkSessionCollaborationMode): WorkSessionCollaborationMode {
+  if (value !== 'discussion' && value !== 'task') throw new PersistenceError(`Session collaboration mode is invalid: ${value}`)
+  return value
+}
+
+function mapTaskCollaborationStep(row: object): TaskCollaborationStep {
+  const value = row as Record<string, unknown>
+  const step: TaskCollaborationStep = {
+    id: String(value.id),
+    planId: String(value.plan_id),
+    ordinal: Number(value.ordinal),
+    requiredSkills: parseJson<string[]>(value.required_skills_json),
+    assignedEmployeeIds: parseJson<string[]>(value.assigned_employee_ids_json),
+    dependsOn: parseJson<string[]>(value.depends_on_json),
+    executionMode: value.execution_mode as TaskCollaborationExecutionMode,
+    status: value.status as TaskCollaborationStepStatus,
+    createdAt: String(value.created_at),
+    updatedAt: String(value.updated_at),
+  }
+  if (typeof value.error_code === 'string') step.errorCode = value.error_code
+  return step
 }

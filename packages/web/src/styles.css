@@ -58,6 +58,9 @@
 .context-menu small { color: #9eabb4; font-size: 12px; line-height: 1.35; }
 
 .chat-header__actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.chat-header__collaboration-mode { display: inline-flex; flex: none; gap: 2px; padding: 2px; border: 1px solid var(--border-strong); border-radius: var(--radius-control); background: var(--surface-1); }
+.chat-header__collaboration-mode button { min-height: 36px; padding: 0 9px; border: 0; border-radius: calc(var(--radius-control) - 2px); color: var(--text-muted); background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
+.chat-header__collaboration-mode button:hover, .chat-header__collaboration-mode button.is-active { color: var(--text); background: var(--accent-soft); }
 .chat-header__history { min-height: 36px; display: inline-flex; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-control); color: var(--text-soft); background: var(--surface-1); font-size: 12px; }
 .chat-header__history:hover, .chat-header__history:focus-visible { border-color: var(--accent); color: var(--accent-strong); background: var(--accent-soft); }
 .chat-header__history svg { color: var(--accent-strong); }
@@ -496,6 +499,24 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .dock-tabs nav button.is-active { border-bottom-color: var(--accent); color: var(--accent-strong); }
 .dock-content { min-height: 0; overflow: auto; }
 .chat-system-notice { align-self: center; max-width: min(520px, 90%); margin: 8px auto; padding: 9px 14px; color: var(--text-soft); border: 1px solid var(--border); background: var(--surface-1); font-size: 13px; line-height: 1.5; text-align: center; }
+.task-collaboration-summary { width: min(100%, 720px); display: grid; gap: 8px; margin: 0 auto 10px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border)); background: color-mix(in srgb, var(--accent) 7%, var(--surface-1)); }
+.task-collaboration-summary > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.task-collaboration-summary > header > div { display: grid; gap: 2px; }
+.task-collaboration-summary > header strong { color: var(--text); font-size: 13px; }
+.task-collaboration-summary > header span, .task-collaboration-summary__empty { color: var(--text-muted); font-size: 12px; }
+.task-collaboration-summary ol { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.task-collaboration-step { min-height: 44px; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--border); background: var(--surface-0); }
+.task-collaboration-step__icon { display: grid; place-items: center; color: var(--accent-strong); }
+.task-collaboration-step__dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.task-collaboration-step > span:nth-child(2) { min-width: 0; display: grid; gap: 2px; }
+.task-collaboration-step strong { overflow: hidden; color: var(--text); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.task-collaboration-step small { overflow: hidden; color: var(--text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.task-collaboration-step em { color: var(--accent-strong); font-size: 12px; font-style: normal; }
+.task-collaboration-step--completed { border-color: color-mix(in srgb, var(--success) 35%, var(--border)); }
+.task-collaboration-step--completed .task-collaboration-step__icon, .task-collaboration-step--completed em { color: var(--success); }
+.task-collaboration-step--blocked { border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
+.task-collaboration-step--blocked .task-collaboration-step__icon, .task-collaboration-step--blocked em { color: var(--danger); }
+.task-collaboration-summary__empty { margin: 0; line-height: 1.45; }
 .dock-empty { height: 100%; display: grid; place-content: center; justify-items: center; text-align: center; color: var(--text-muted); }
 .dock-empty strong { margin-top: 10px; color: var(--text); }
 .dock-empty p { max-width: 260px; margin: 5px 0; font-size: 11px; }
@@ -762,6 +783,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .group-dialog__search input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; font-size: 13px; }
 .group-dialog__name { display: grid; grid-template-columns: 80px minmax(0, 1fr); align-items: center; gap: 10px; color: var(--text-muted); font-size: var(--text-xs); }
 .group-dialog__name input { height: 38px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-1); }
+.group-dialog--conversation .group-dialog__body { grid-template-rows: auto auto auto minmax(0, 1fr); }
+.group-dialog__mode { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 0; border: 0; }
+.group-dialog__mode legend { grid-column: 1 / -1; padding: 0; color: var(--text-muted); font-size: var(--text-xs); }
+.group-dialog__mode label { min-height: 50px; display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 8px; padding: 7px 9px; border: 1px solid var(--border); border-radius: var(--radius-control); color: var(--text-soft); background: var(--surface-1); cursor: pointer; }
+.group-dialog__mode label.is-selected { border-color: var(--accent); background: var(--accent-soft); }
+.group-dialog__mode input { width: 16px; height: 16px; accent-color: var(--accent); }
+.group-dialog__mode label > span { display: grid; gap: 2px; }
+.group-dialog__mode strong { color: var(--text); font-size: 13px; }
+.group-dialog__mode small { color: var(--text-muted); font-size: 12px; line-height: 1.35; }
 .group-dialog__list { min-height: 0; display: grid; align-content: start; gap: 4px; overflow: auto; }
 .group-member { min-height: 58px; display: grid; grid-template-columns: 18px 38px minmax(0, 1fr); align-items: center; gap: 10px; padding: 7px 10px; border: 1px solid transparent; border-radius: var(--radius-control); cursor: pointer; }
 .group-member:hover { background: var(--surface-2); }

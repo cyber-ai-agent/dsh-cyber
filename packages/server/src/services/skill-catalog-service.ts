@@ -241,6 +241,7 @@ function unboundPackageDescriptor(record: PackageSkillRecord | undefined): Chara
     id: record.manifest.id,
     displayName: record.manifest.displayName,
     summary: record.manifest.summary,
+    ...(record.manifest.routingHints === undefined ? {} : { routingHints: [...record.manifest.routingHints] }),
     adapterId: 'unbound.package',
     risks: [],
     supportsScheduling: false,

@@ -4,12 +4,13 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CyberEmployee } from '../types.js'
 import { Avatar } from './Avatar.js'
 import { AuthorityBadge } from './AuthorityBadge.js'
+import type { CollaborationMode } from './group-collaboration.js'
 
 interface GroupConversationDialogProps {
   employees: CyberEmployee[]
   creating?: boolean
   onClose(): void
-  onCreate(input: { title: string; employeeIds: string[] }): Promise<void>
+  onCreate(input: { title: string; employeeIds: string[]; collaborationMode: CollaborationMode }): Promise<void>
 }
 
 export function GroupConversationDialog({ employees, creating = false, onClose, onCreate }: GroupConversationDialogProps) {
@@ -17,6 +18,11 @@ export function GroupConversationDialog({ employees, creating = false, onClose, 
   const [query, setQuery] = useState('')
   const [title, setTitle] = useState('')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [collaborationMode, setCollaborationMode] = useState<CollaborationMode>('discussion')
+  const onCloseRef = useRef(onClose)
+  const creatingRef = useRef(creating)
+  onCloseRef.current = onClose
+  creatingRef.current = creating
   const filteredEmployees = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase()
     if (!normalized) return employees
@@ -27,14 +33,14 @@ export function GroupConversationDialog({ employees, creating = false, onClose, 
     const previous = document.activeElement as HTMLElement | null
     searchRef.current?.focus()
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !creating) onClose()
+      if (event.key === 'Escape' && !creatingRef.current) onCloseRef.current()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => {
       window.removeEventListener('keydown', onKeyDown)
       previous?.focus()
     }
-  }, [creating, onClose])
+  }, [])
 
   const toggle = (employeeId: string) => {
     setSelectedIds((current) => current.includes(employeeId)
@@ -44,7 +50,7 @@ export function GroupConversationDialog({ employees, creating = false, onClose, 
 
   return (
     <div className="modal-backdrop group-dialog-backdrop" onMouseDown={(event) => { if (!creating && event.target === event.currentTarget) onClose() }}>
-      <section className="group-dialog" role="dialog" aria-modal="true" aria-labelledby="group-dialog-title">
+      <section className="group-dialog group-dialog--conversation" role="dialog" aria-modal="true" aria-labelledby="group-dialog-title">
         <header className="group-dialog__header">
           <div>
             <span><UsersThree size={16} weight="fill" /> 当前世界</span>
@@ -63,6 +69,18 @@ export function GroupConversationDialog({ employees, creating = false, onClose, 
             <span>群聊名称</span>
             <input value={title} maxLength={48} onChange={(event) => setTitle(event.target.value)} placeholder="可选，默认使用成员名称" />
           </label>
+
+          <fieldset className="group-dialog__mode">
+            <legend>协作模式</legend>
+            <label className={collaborationMode === 'discussion' ? 'is-selected' : ''}>
+              <input type="radio" name="group-collaboration-mode" value="discussion" checked={collaborationMode === 'discussion'} disabled={creating} onChange={() => setCollaborationMode('discussion')} />
+              <span><strong>讨论</strong><small>默认由所有成员参与多轮讨论。</small></span>
+            </label>
+            <label className={collaborationMode === 'task' ? 'is-selected' : ''}>
+              <input type="radio" name="group-collaboration-mode" value="task" checked={collaborationMode === 'task'} disabled={creating} onChange={() => setCollaborationMode('task')} />
+              <span><strong>任务协作</strong><small>按角色和技能分配步骤，执行细节进入轨迹。</small></span>
+            </label>
+          </fieldset>
 
           <div className="group-dialog__list" role="group" aria-label="选择群聊成员">
             {filteredEmployees.map((employee) => {
@@ -85,6 +103,7 @@ export function GroupConversationDialog({ employees, creating = false, onClose, 
             <button className="primary-button" type="button" disabled={creating || selectedIds.length < 2} onClick={() => void onCreate({
               title: title.trim() || selectedIds.map((id) => employees.find((employee) => employee.id === id)?.displayName).filter((name): name is string => name !== undefined).join('、'),
               employeeIds: selectedIds,
+              collaborationMode,
             })}>{creating ? '正在创建…' : '创建群聊'}</button>
           </div>
         </footer>

@@ -20,6 +20,8 @@ import { ApprovalRequests, type ApprovalRequestsProps } from './ApprovalRequests
 import { Avatar } from './Avatar.js'
 import { AuthorityBadge } from './AuthorityBadge.js'
 import { ContextMenu, type ContextMenuPosition } from './ContextMenu.js'
+import { collaborationModeOf } from './group-collaboration.js'
+import { TaskCollaborationSummary } from './TaskCollaborationSummary.js'
 
 const MarkdownMessage = lazy(async () => ({ default: (await import('./MarkdownMessage.js')).MarkdownMessage }))
 const ArtifactReferenceCards = lazy(async () => ({ default: (await import('../features/artifacts/ArtifactCenter.js')).ArtifactReferenceCards }))
@@ -55,9 +57,10 @@ interface ChatWorkbenchProps {
   permissionRequests?: WorldPermissionRequest[]
   onDecideWorldPermissionRequest?(requestId: string, scope: WorldPermissionDecisionScope | 'reject'): Promise<void>
   onOpenWorldPermissionSettings?(employeeId: string): void
+  onChangeCollaborationMode?(mode: 'discussion' | 'task'): Promise<void>
 }
 
-export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, installedPlugins = [], sending = false, pendingCount = 0, queuedCount = 0, draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, onOpenWorldPermissionSettings }: ChatWorkbenchProps) {
+export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, installedPlugins = [], sending = false, pendingCount = 0, queuedCount = 0, draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, onOpenWorldPermissionSettings, onChangeCollaborationMode }: ChatWorkbenchProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -73,6 +76,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
   const suggestions = useMemo(() => mention === undefined ? [] : employees.filter((employee) => employee.displayName.includes(mention)).slice(0, 6), [employees, mention])
   const participantEmployees = participantIds.map((employeeId) => employees.find((employee) => employee.id === employeeId)).filter((employee): employee is CyberEmployee => employee !== undefined)
   const conversationKind = session?.kind ?? intent?.kind
+  const collaborationMode = conversationKind === 'group' ? collaborationModeOf(session ?? intent) : 'discussion'
   const directEmployee = conversationKind === 'direct' ? participantEmployees[0] : undefined
   const conversationTitle = conversationKind === 'direct'
     ? directEmployee?.displayName ?? displayDirectConversationTitle(session?.title ?? intent?.title) ?? '选择角色开始对话'
@@ -169,7 +173,8 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
               ? <button className="chat-header__avatar-button" type="button" onClick={() => onOpenDossier(directEmployee.id)} aria-label={`打开${directEmployee.displayName}角色`} title={`打开${directEmployee.displayName}角色`}><Avatar index={directEmployee.avatarIndex} size="sm" label={directEmployee.displayName} authorityRole={directEmployee.authorityRole} /></button>
               : <>{participantEmployees.slice(0, 2).map((employee) => <Avatar key={employee.id} index={employee.avatarIndex} size="sm" label={employee.displayName} authorityRole={employee.authorityRole} />)}{participantEmployees.length > 2 ? <span className="chat-header__avatar-more">+{participantEmployees.length - 2}</span> : null}</>}
           </span>
-          <span><h1>{conversationTitle}{conversationKind === 'direct' ? <AuthorityBadge role={directEmployee?.authorityRole} /> : null}</h1><p>{conversationKind === undefined ? `从左侧会话列表进入私聊，或创建群聊` : `${conversationKind === 'group' ? '群聊' : '私聊'} · ${world.name}`}</p></span>
+          <span><h1>{conversationTitle}{conversationKind === 'direct' ? <AuthorityBadge role={directEmployee?.authorityRole} /> : null}</h1><p>{conversationKind === undefined ? `从左侧会话列表进入私聊，或创建群聊` : `${conversationKind === 'group' ? collaborationMode === 'task' ? '任务协作' : '讨论' : '私聊'} · ${world.name}`}</p></span>
+          {conversationKind === 'group' && onChangeCollaborationMode !== undefined ? <div className="chat-header__collaboration-mode" role="group" aria-label="群聊协作模式"><button type="button" className={collaborationMode === 'discussion' ? 'is-active' : ''} aria-pressed={collaborationMode === 'discussion'} onClick={() => void onChangeCollaborationMode('discussion')}>讨论</button><button type="button" className={collaborationMode === 'task' ? 'is-active' : ''} aria-pressed={collaborationMode === 'task'} onClick={() => void onChangeCollaborationMode('task')}>任务协作</button></div> : null}
         </div>
         <div className="chat-header__actions">
           {onOpenHistory === undefined || session === undefined ? null : <button className="chat-header__history" type="button" aria-label="查看历史消息" title="查看历史消息" onClick={onOpenHistory}><ClockCounterClockwise size={19} /><span>历史消息</span></button>}
@@ -177,12 +182,13 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
       </header>
 
       <div className="message-scroll" ref={scrollRef} aria-live="polite" aria-busy={pendingCount > 0 || sending}>
+        {conversationKind === 'group' && collaborationMode === 'task' && session?.id !== undefined ? <TaskCollaborationSummary worldId={world.id} sessionId={session.id} employees={participantEmployees} demoMode={demoMode} /> : null}
         {hasOlderMessages && onLoadOlderMessages !== undefined ? <button className="message-history-more" type="button" disabled={loadingOlderMessages} onClick={onLoadOlderMessages}>{loadingOlderMessages ? <CircleNotch size={15} className="spin" /> : <ArrowUp size={15} />}<span>{loadingOlderMessages ? '正在加载更早消息…' : '加载更早消息'}</span></button> : null}
         {visibleMessages.length === 0 ? (
           <div className="conversation-empty">
             <TerminalWindow size={34} />
             <h2>{employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? '群聊已准备好' : conversationKind === 'direct' ? `开始与${participantEmployees[0]?.displayName ?? experience.personLabel}对话` : '选择会话开始互动'}</h2>
-            <p>{employees.length === 0 ? experience.emptyCopy : conversationKind === 'group' ? '群聊已经创建并保存在当前世界，发送消息开始多人协作。' : conversationKind === 'direct' ? '历史记录会保留在当前世界；发送消息后角色才会进入真实运行过程。' : '左侧只保留会话：每个角色固定一个私聊，也可以创建多人群聊；角色新增与管理统一在右侧角色。'}</p>
+            <p>{employees.length === 0 ? experience.emptyCopy : conversationKind === 'group' ? collaborationMode === 'task' ? '任务协作已经创建，发送目标后按分工推进；详细执行过程请查看轨迹。' : '讨论已经创建并保存在当前世界，发送消息开始多人讨论。' : conversationKind === 'direct' ? '历史记录会保留在当前世界；发送消息后角色才会进入真实运行过程。' : '左侧只保留会话：每个角色固定一个私聊，也可以创建多人群聊；角色新增与管理统一在右侧角色。'}</p>
           </div>
         ) : visibleMessages.map((message) => {
           const employee = employees.find((item) => item.id === message.senderId)

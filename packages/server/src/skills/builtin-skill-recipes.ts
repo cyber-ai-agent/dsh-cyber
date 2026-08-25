@@ -4,6 +4,23 @@ import type { CharacterSkillAdapterRegistry, CharacterSkillRecipe } from './skil
 
 type RecipeInput = Pick<CharacterSkillDescriptor, 'id' | 'displayName' | 'summary'> & { instruction: string }
 
+const ROUTING_HINTS: Readonly<Record<string, readonly string[]>> = {
+  'world-setup': ['世界', '设置', '配置', 'world', 'setup', 'configure'],
+  'conversation-organization': ['会话', '聊天', '整理', 'conversation', 'organize', 'chat'],
+  'meeting-notes': ['会议', '纪要', 'meeting', 'notes', 'minutes'],
+  'task-coordination': ['任务', '协调', '计划', '依赖', 'task', 'coordinate', 'plan'],
+  coding: ['代码', '编程', '实现', '开发', '软件', 'html', '前端', 'coding', 'code', 'frontend', 'build'],
+  testing: ['测试', '验证', '回归', 'test', 'testing', 'verify', 'qa'],
+  'archive-curation': ['档案', '归档', 'archive', 'curate'],
+  'knowledge-retrieval': ['知识', '检索', '搜索', '资料', 'research', 'retrieve', 'search', 'knowledge'],
+  'evidence-summarization': ['证据', '总结', '分析', 'evidence', 'summarize', 'analysis'],
+  storytelling: ['故事', '叙事', 'story', 'storytelling'],
+  'editorial-review': ['编辑', '审校', '校对', 'review', 'edit', 'editorial'],
+  'content-production': ['内容', '制作', '脚本', 'content', 'produce', 'production'],
+  'scientific-reasoning': ['科学', '研究', '假设', 'scientific', 'reasoning', 'research'],
+  'systems-diagnostics': ['诊断', '系统', '故障', 'diagnostic', 'systems', 'debug'],
+}
+
 const BUILTIN_RECIPES: readonly CharacterSkillRecipe[] = [
   recipe('world-setup', '世界配置', '把世界设定转化为清晰、可验证且不越权的配置建议。', '先确认用户目标与当前世界边界；区分建议和已执行变更，未经确认不修改关键设置。'),
   recipe('conversation-organization', '会话整理', '梳理会话主题、结论、未决问题与下一步。', '按主题整理当前会话，保留说话者和事实来源；不得把推测写成已确认结论。'),
@@ -32,6 +49,7 @@ function recipe(id: string, displayName: string, summary: string, instruction: s
       id: input.id,
       displayName: input.displayName,
       summary: input.summary,
+      routingHints: [...(ROUTING_HINTS[input.id] ?? [])],
       adapterId: 'builtin.recipe',
       risks: [],
       supportsScheduling: false,
