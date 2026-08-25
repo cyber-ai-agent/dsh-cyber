@@ -161,10 +161,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     },
   })
   const mcpAdapter = options.skillRegistry === undefined ? new McpSkillAdapter({ store, integrations, clients: mcpClients }) : undefined
-  if (mcpAdapter !== undefined) {
-    skillRegistry.register(mcpAdapter)
-    await refreshMcpCatalog(mcpAdapter, skillRegistry)
-  }
+  if (mcpAdapter !== undefined) skillRegistry.register(mcpAdapter)
 
   const activeDshBinPath = await resolveActiveRuntime(store, runtimeStateRoot, stateRoot)
   const interactions = new ModelInteractionService(store)
@@ -252,7 +249,6 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     settings: worldSettings,
     worldPackages,
   })
-  await turnContinuations.recover()
   const worldTrace = new WorldTraceService({ store, actions: skillActions })
   const employeeActivity = new EmployeeActivityProjectionService(store)
   employeeActivity.projectAll()
@@ -319,6 +315,17 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       ambientLifeScheduler.start()
       taskSchedules.start()
       skillRuntime.start()
+      // Neither of these may gate the listener. MCP discovery talks to
+      // user-configured endpoints that can black-hole, and continuation runs
+      // live model turns that fail when a provider is down or a credential is
+      // stale. A local-first application must still start — and must still be
+      // reachable so the user can open Settings and fix the cause.
+      if (mcpAdapter !== undefined) {
+        void refreshMcpCatalog(mcpAdapter, skillRegistry)
+      }
+      void turnContinuations.recover().catch((error: unknown) => {
+        console.warn('[dsh-cyber] 恢复等待审批的回合失败，已跳过：', errorText(error))
+      })
       return startedAddress
     },
     address() { return startedAddress },
@@ -340,9 +347,31 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   }
 }
 
+/** MCP servers are user-configured endpoints; discovery is best-effort. */
+const MCP_DISCOVERY_TIMEOUT_MS = 5_000
+
 async function refreshMcpCatalog(adapter: McpSkillAdapter, registry: CharacterSkillAdapterRegistry): Promise<void> {
-  try { await adapter.refresh() } catch { adapter.clear() }
+  try {
+    await withTimeout(adapter.refresh(), MCP_DISCOVERY_TIMEOUT_MS)
+  } catch (error) {
+    // A stalled or hostile endpoint must not hold the process, and a catalog
+    // that could not be read stays empty rather than stale.
+    adapter.clear()
+    console.warn('[dsh-cyber] MCP 工具目录刷新失败，本次保持为空：', errorText(error))
+  }
   registry.refresh(adapter)
+}
+
+function withTimeout<TValue>(work: Promise<TValue>, milliseconds: number): Promise<TValue> {
+  return new Promise<TValue>((resolvePromise, rejectPromise) => {
+    const timer = setTimeout(() => rejectPromise(new Error(`操作超过 ${milliseconds} 毫秒未完成`)), milliseconds)
+    timer.unref?.()
+    work.then(resolvePromise, rejectPromise).finally(() => clearTimeout(timer))
+  })
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 async function resolveActiveRuntime(store: SqliteStore, runtimeStateRoot: string, stateRoot: string): Promise<string | undefined> {

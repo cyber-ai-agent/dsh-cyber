@@ -154,11 +154,18 @@ describe('world experience stabilization', () => {
     expect((await stat(destination)).isFile()).toBe(true)
     expect(destination.endsWith('.dshbackup')).toBe(true)
 
-    const bundle = JSON.parse((await gunzipAsync(await readFile(destination))).toString('utf8')) as {
-      excluded: string[]
-      entries: Array<{ path: string; sha256: string; dataBase64: string }>
-    }
-    const entries = new Map(bundle.entries.map((entry) => [entry.path, entry]))
+    // Newline-delimited JSON: header record first, then one record per chunk.
+    const lines = (await gunzipAsync(await readFile(destination))).toString('utf8').split('\n').filter(Boolean)
+    const bundle = JSON.parse(lines[0]!) as { excluded: string[] }
+    const records = lines.slice(1).map((line) => JSON.parse(line) as {
+      path: string
+      sha256: string
+      chunkIndex: number
+      dataBase64: string
+    })
+    const entries = new Map(records
+      .filter((record) => record.chunkIndex === 0)
+      .map((record) => [record.path, record]))
     expect(entries.has('database.sqlite')).toBe(true)
     expect(Buffer.from(entries.get(`worlds/${encodeURIComponent(world.id)}/settings.json`)!.dataBase64, 'base64').toString('utf8')).toContain('备份测试世界')
     expect(Buffer.from(entries.get(`worlds/${encodeURIComponent(world.id)}/files/note.md`)!.dataBase64, 'base64').toString('utf8')).toContain('# kept')
@@ -167,6 +174,6 @@ describe('world experience stabilization', () => {
     expect([...entries.keys()].some((path) => path.includes('/cache/'))).toBe(false)
     expect([...entries.keys()].some((path) => path.startsWith('credentials/'))).toBe(false)
     expect(bundle.excluded).toContain('credentials')
-    for (const entry of bundle.entries) expect(entry.sha256).toMatch(/^[a-f0-9]{64}$/)
+    for (const record of records) expect(record.sha256).toMatch(/^[a-f0-9]{64}$/)
   })
 })
