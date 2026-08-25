@@ -34,6 +34,7 @@ import type { WorldFileService } from '../services/world-file-service.js'
 import type { WorldSettingsService } from '../services/world-settings-service.js'
 import type { WorldTraceService } from '../services/world-trace-service.js'
 import type { WorldPackageInstanceService } from '../services/world-package-instance-service.js'
+import type { TurnAwareApprovalContinuationService } from '../services/turn-aware-approval-continuation-service.js'
 import { ServiceError } from '../services/service-error.js'
 
 export interface ConversationRoutesDependencies {
@@ -49,6 +50,7 @@ export interface ConversationRoutesDependencies {
   worldTrace: WorldTraceService
   employeeActivity: EmployeeActivityProjectionService
   worldPackages: WorldPackageInstanceService
+  turnContinuations: TurnAwareApprovalContinuationService
 }
 
 export function registerConversationRoutes(router: Router, dependencies: ConversationRoutesDependencies): void {
@@ -65,6 +67,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     worldTrace,
     employeeActivity,
     worldPackages,
+    turnContinuations,
   } = dependencies
   const delegatedCollaboration = new DelegatedCollaborationService({
     store,
@@ -101,6 +104,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
       interactionKind: body.interactionKind === 'task' || body.interactionKind === 'meeting' ? body.interactionKind : 'chat',
       ...(attachments.length === 0 ? {} : { attachments: attachments.map(chatAttachmentJson) }),
       ...(clientTurnId === undefined ? {} : { clientTurnId }),
+      ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
     }
     const title = optionalString(body.title)
     const requestedSessionId = optionalString(body.sessionId)
@@ -135,28 +139,18 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
           ...(title === undefined ? {} : { title }),
         })
       } else {
-        const skillResult = await skillRuntime.prepare(world.id, character.id, prompt)
-        const runtimeSource = skillResult.handled && skillResult.summary
-          ? `${transformedPrompt}\n\n[已授权角色技能的真实执行结果]\n${skillResult.summary}\n只能根据以上真实状态向用户说明“已执行、已计划、等待绑定、失败或结果未知”。对“结果未知”不得声称已经成功或确定失败，也不得自动重试可能产生外部副作用的动作。`
-          : transformedPrompt
-        if (skillResult.handled) {
-          metadata.skillId = skillResult.skillId ?? ''
-          metadata.skillActionIds = skillResult.actions.map((item) => item.id)
-          metadata.skillActionStatuses = skillResult.actions.map((item) => item.status)
-        }
         const directInput: DirectConversationInput = {
           workspaceId: world.workspaceId,
           worldId: world.id,
           employeeId: character.id,
           prompt,
           metadata,
-          runtimePrompt: await worldSettings.composeRuntimePrompt(world.id, character, runtimeSource),
           ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
           permissionMode,
         }
         if (sessionId !== undefined) directInput.sessionId = sessionId
         if (title !== undefined) directInput.title = title
-        result = await orchestrator.direct(directInput)
+        result = await turnContinuations.direct({ ...directInput, skillPrompt: prompt, transformedPrompt })
       }
     } else {
       result = await orchestrator.group({
@@ -209,7 +203,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     const body = await readJson(request)
     const decision = requiredEnum(body, 'decision', ['approved', 'rejected'])
     const scope = body.scope === undefined ? 'once' : requiredEnum(body, 'scope', ['once', 'character', 'world'])
-    const result = await skillRuntime.decideApproval(approval.id, decision, scope, 'local-user')
+    const result = await turnContinuations.decideApproval(approval.id, decision, scope, 'local-user')
     writeJson(response, 200, result)
   })
 

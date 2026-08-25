@@ -1,4 +1,4 @@
-export const CYBER_SCHEMA_VERSION = 19 as const
+export const CYBER_SCHEMA_VERSION = 20 as const
 
 export type IsoTimestamp = string
 export type JsonPrimitive = boolean | number | string | null
@@ -723,7 +723,7 @@ export interface WorkSession {
 }
 
 export type WorkTurnInteractionKind = 'chat' | 'task' | 'meeting' | 'peer'
-export type WorkTurnStatus = 'queued' | 'running' | 'completed' | 'failed' | 'interrupted'
+export type WorkTurnStatus = 'queued' | 'running' | 'waiting-approval' | 'completed' | 'failed' | 'interrupted'
 
 export interface WorkTurn {
   id: string
@@ -739,7 +739,7 @@ export interface WorkTurn {
   completedAt?: string
 }
 
-export type AgentRunStatus = WorkTurnStatus
+export type AgentRunStatus = Exclude<WorkTurnStatus, 'waiting-approval'>
 
 export interface AgentRun {
   id: string

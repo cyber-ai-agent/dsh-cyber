@@ -16,6 +16,7 @@ const DESCRIPTOR: CharacterSkillDescriptor = {
   adapterId: FIRECRAWL_ADAPTER_ID,
   risks: ['external-side-effect'],
   supportsScheduling: false,
+  persistentApproval: 'exact-target',
   kind: 'integration',
   recommendedByDefault: false,
 }
@@ -41,6 +42,20 @@ export class FirecrawlSkillAdapter implements CharacterSkillAdapter {
       label: `联网搜索：${query.length > 40 ? `${query.slice(0, 39)}…` : query}`,
       risk: 'external-side-effect', authorization: 'explicit-user-request', parameters: { query },
     }]
+  }
+
+  async preflight(action: CharacterSkillAction) {
+    const world = this.#store.getWorld(action.worldId)
+    const query = typeof action.parameters.query === 'string' ? action.parameters.query.trim() : ''
+    if (world === undefined || !query) return { ready: false, detail: '联网搜索缺少有效世界或查询文本' }
+    const worldPackages = await this.#listWorldPackages(world.id)
+    const recipeInstalled = worldPackages.some((item) => item.manifest.entrypoints?.some((entrypoint) => entrypoint.kind === 'skill' && entrypoint.id === FIRECRAWL_SEARCH_SKILL))
+    if (!recipeInstalled) return { ready: false, detail: '当前世界尚未安装联网搜索 Skill Recipe' }
+    const connection = this.#integrations.get(world.workspaceId, FIRECRAWL_INTEGRATION_ID)
+    const credential = this.#integrations.credential(world.workspaceId, FIRECRAWL_INTEGRATION_ID)
+    return connection !== undefined && connection.enabled && Boolean(credential)
+      ? { ready: true }
+      : { ready: false, detail: 'Firecrawl 连接尚未启用或缺少凭据' }
   }
 
   async execute(action: CharacterSkillAction): Promise<CharacterSkillExecutionResult> {

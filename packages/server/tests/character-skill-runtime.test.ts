@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -37,7 +38,7 @@ describe('CharacterSkillAdapterRegistry', () => {
     registry.registerRecipe({
       descriptor: {
         id: 'test.recipe', displayName: '测试工作方法', summary: '只注入受信任说明',
-        adapterId: 'builtin.recipe', risks: [], supportsScheduling: false,
+        adapterId: 'builtin.recipe', risks: [], supportsScheduling: false, persistentApproval: 'forbidden',
         kind: 'recipe', recommendedByDefault: true,
       },
       instruction: '只根据事实总结。',
@@ -47,7 +48,7 @@ describe('CharacterSkillAdapterRegistry', () => {
     expect(() => registry.registerRecipe({
       descriptor: {
         id: 'test.recipe', displayName: '重复', summary: '重复', adapterId: 'builtin.recipe',
-        risks: [], supportsScheduling: false, kind: 'recipe',
+        risks: [], supportsScheduling: false, persistentApproval: 'forbidden', kind: 'recipe',
       }, instruction: '重复',
     })).toThrow('Duplicate skill provider: test.recipe')
   })
@@ -69,7 +70,7 @@ describe('CharacterSkillRuntime', () => {
     registry.register(adapter)
     const runtime = makeRuntime(store, root, registry)
 
-    const result = await runtime.prepare(worldId, employeeId, '请执行 echo', new Date('2026-08-23T08:00:00.000Z'))
+    const result = await runtime.prepare(skillContext(store, worldId, employeeId, '请执行 echo'), new Date('2026-08-23T08:00:00.000Z'))
 
     expect(result.handled).toBe(true)
     expect(result.actions).toHaveLength(1)
@@ -93,7 +94,7 @@ describe('CharacterSkillRuntime', () => {
     registry.register(adapter)
     const runtime = makeRuntime(store, root, registry)
 
-    const result = await runtime.prepare(worldId, employeeId, '请执行 echo')
+    const result = await runtime.prepare(skillContext(store, worldId, employeeId, '请执行 echo'))
 
     expect(result).toEqual({ handled: false, actions: [] })
     expect(adapter.executed).toBe(0)
@@ -106,7 +107,7 @@ describe('CharacterSkillRuntime', () => {
     registry.register(adapter)
     const runtime = makeRuntime(store, root, registry)
 
-    const prepared = await runtime.prepare(worldId, employeeId, '请执行 echo', new Date('2026-08-23T08:00:00.000Z'))
+    const prepared = await runtime.prepare(skillContext(store, worldId, employeeId, '请执行 echo'), new Date('2026-08-23T08:00:00.000Z'))
     expect(prepared.actions[0]?.status).toBe('scheduled')
 
     store.reviseEmployee({
@@ -132,9 +133,10 @@ describe('CharacterSkillRuntime', () => {
     const runtime = makeRuntime(store, root, registry)
     const now = new Date('2026-08-23T08:00:00.000Z')
 
+    const context = skillContext(store, worldId, employeeId, '请执行 echo')
     const [left, right] = await Promise.all([
-      runtime.prepare(worldId, employeeId, '请执行 echo', now),
-      runtime.prepare(worldId, employeeId, '请执行 echo', now),
+      runtime.prepare(context, now),
+      runtime.prepare(context, now),
     ])
 
     expect(left.handled).toBe(true)
@@ -150,7 +152,7 @@ describe('CharacterSkillRuntime', () => {
     registry.register(new ThrowingAdapter())
     const runtime = makeRuntime(store, root, registry)
 
-    const result = await runtime.prepare(worldId, employeeId, '请执行 echo', new Date('2026-08-23T08:00:00.000Z'))
+    const result = await runtime.prepare(skillContext(store, worldId, employeeId, '请执行 echo'), new Date('2026-08-23T08:00:00.000Z'))
 
     expect(result.actions[0]).toMatchObject({
       status: 'outcome-unknown',
@@ -166,12 +168,16 @@ describe('CharacterSkillRuntime', () => {
     registry.register(adapter)
     const runtime = makeRuntime(store, root, registry)
 
-    const prepared = await runtime.prepare(worldId, employeeId, '请执行 external', new Date('2026-08-23T08:00:00.000Z'))
+    const prepared = await runtime.prepare(skillContext(store, worldId, employeeId, '请执行 external'), new Date('2026-08-23T08:00:00.000Z'))
 
     expect(prepared.actions[0]).toMatchObject({ status: 'waiting-for-approval', risk: 'external-side-effect' })
     expect(adapter.executed).toBe(0)
     const request = runtime.listApprovalRequests(worldId, 'pending')[0]!
-    expect(request).toMatchObject({ subjectType: 'skill-action', subjectId: prepared.actions[0]!.id, scope: 'once' })
+    expect(prepared.actions[0]?.workTurnId).toBeTruthy()
+    expect(request).toMatchObject({
+      subjectType: 'skill-action', subjectId: prepared.actions[0]!.id, scope: 'once',
+      sessionId: expect.any(String), workTurnId: prepared.actions[0]!.workTurnId,
+    })
 
     const decided = await runtime.decideApproval(request.id, 'approved', 'once', 'owner', new Date('2026-08-23T08:01:00.000Z'))
     expect(decided.action.status).toBe('executed')
@@ -185,7 +191,7 @@ describe('CharacterSkillRuntime', () => {
     registry.register(adapter)
     const runtime = makeRuntime(store, root, registry)
 
-    const prepared = await runtime.prepare(worldId, employeeId, '请执行 external', new Date('2026-08-23T08:00:00.000Z'))
+    const prepared = await runtime.prepare(skillContext(store, worldId, employeeId, '请执行 external'), new Date('2026-08-23T08:00:00.000Z'))
     const result = await runtime.decideApproval(
       prepared.actions[0]!.approvalRequestId!, 'approved', 'once', 'owner', new Date('2026-08-23T08:11:00.000Z'),
     )
@@ -203,17 +209,17 @@ describe('CharacterSkillRuntime', () => {
     registry.register(adapter)
     const runtime = makeRuntime(store, root, registry)
 
-    const first = await runtime.prepare(worldId, employeeId, '请执行 external', new Date('2026-08-23T08:00:00.000Z'))
+    const first = await runtime.prepare(skillContext(store, worldId, employeeId, '请执行 external'), new Date('2026-08-23T08:00:00.000Z'))
     await runtime.decideApproval(first.actions[0]!.approvalRequestId!, 'approved', 'character', 'owner', new Date('2026-08-23T08:01:00.000Z'))
-    const sameTarget = await runtime.prepare(worldId, employeeId, '请执行 external', new Date('2026-08-23T08:02:01.000Z'))
-    const otherTarget = await runtime.prepare(worldId, employeeId, '请执行 external other', new Date('2026-08-23T08:04:02.000Z'))
+    const sameTarget = await runtime.prepare(skillContext(store, worldId, employeeId, '请执行 external'), new Date('2026-08-23T08:02:01.000Z'))
+    const otherTarget = await runtime.prepare(skillContext(store, worldId, employeeId, '请执行 external other'), new Date('2026-08-23T08:04:02.000Z'))
 
     expect(sameTarget.actions[0]).toMatchObject({ status: 'executed', authorization: 'preapproved-policy' })
     expect(otherTarget.actions[0]).toMatchObject({ status: 'waiting-for-approval', target: 'other-system' })
     expect(adapter.executed).toBe(2)
     const policy = runtime.listApprovalPolicies(worldId)[0]!
     runtime.revokeApprovalPolicy(policy.id)
-    const afterRevocation = await runtime.prepare(worldId, employeeId, '请执行 external', new Date('2026-08-23T08:06:03.000Z'))
+    const afterRevocation = await runtime.prepare(skillContext(store, worldId, employeeId, '请执行 external'), new Date('2026-08-23T08:06:03.000Z'))
     expect(afterRevocation.actions[0]?.status).toBe('waiting-for-approval')
     expect(adapter.executed).toBe(2)
   })
@@ -256,7 +262,7 @@ class ExternalAdapter implements CharacterSkillAdapter {
   readonly id = 'test-external-adapter'
   readonly descriptors: readonly CharacterSkillDescriptor[] = [{
     id: 'test.external', displayName: '外部测试技能', summary: '验证审批硬门。',
-    adapterId: this.id, risks: ['external-side-effect'], supportsScheduling: false,
+    adapterId: this.id, risks: ['external-side-effect'], supportsScheduling: false, persistentApproval: 'exact-target',
   }]
   executed = 0
   discarded = 0
@@ -287,6 +293,7 @@ function descriptor(adapterId: string): readonly CharacterSkillDescriptor[] {
     adapterId,
     risks: ['write-local'],
     supportsScheduling: true,
+    persistentApproval: 'forbidden',
   }]
 }
 
@@ -313,6 +320,41 @@ function makeRuntime(
     registry,
     actions: new SqliteSkillActionRepository(store),
   })
+}
+
+function skillContext(
+  store: SqliteStore,
+  worldId: string,
+  characterId: string,
+  prompt: string,
+) {
+  const world = store.getWorld(worldId)!
+  const session = store.createSession({
+    workspaceId: world.workspaceId,
+    worldId,
+    kind: 'direct',
+    title: '测试会话',
+    participants: [
+      { participantId: 'owner', kind: 'owner' },
+      { participantId: characterId, kind: 'employee' },
+    ],
+  })
+  const turn = store.createWorkTurn({
+    workspaceId: world.workspaceId,
+    worldId,
+    sessionId: session.id,
+    clientTurnId: `test-${randomUUID()}`,
+    interactionKind: 'chat',
+  })
+  store.startWorkTurn(turn.id)
+  return {
+    workspaceId: world.workspaceId,
+    worldId,
+    sessionId: session.id,
+    workTurnId: turn.id,
+    characterId,
+    prompt,
+  }
 }
 
 async function setup(skillGrants: string[]) {

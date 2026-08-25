@@ -35,6 +35,7 @@ function recipe(id: string, displayName: string, summary: string, instruction: s
       adapterId: 'builtin.recipe',
       risks: [],
       supportsScheduling: false,
+      persistentApproval: 'forbidden',
       kind: 'recipe',
       recommendedByDefault: true,
     },

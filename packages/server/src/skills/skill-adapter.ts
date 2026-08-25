@@ -31,6 +31,11 @@ export interface CharacterSkillExecutionContext {
   now: Date
 }
 
+export interface CharacterSkillPreflightResult {
+  ready: boolean
+  detail?: string
+}
+
 export interface CharacterSkillExecutionResult {
   status: Extract<SkillActionStatus, 'executed' | 'waiting-for-integration' | 'failed' | 'outcome-unknown'>
   detail: string
@@ -52,6 +57,8 @@ export interface CharacterSkillAdapter {
   /** Dynamic adapters (for example MCP) may expose no skills until discovery completes. */
   readonly dynamicDescriptors?: boolean
   propose(context: CharacterSkillMatchContext): Promise<CharacterSkillActionProposal[]> | CharacterSkillActionProposal[]
+  /** Revalidates provider/package/integration availability before the exactly-once claim. */
+  preflight?(action: CharacterSkillAction): Promise<CharacterSkillPreflightResult> | CharacterSkillPreflightResult
   execute(action: CharacterSkillAction, context: CharacterSkillExecutionContext): Promise<CharacterSkillExecutionResult>
   /** Remove encrypted or ephemeral inputs when an action will never execute. */
   discard?(action: CharacterSkillAction): Promise<void>
@@ -150,6 +157,12 @@ export class CharacterSkillAdapterRegistry {
 
   adapterForSkill(skillId: string): CharacterSkillAdapter | undefined {
     return this.#skills.get(skillId)
+  }
+
+  descriptorForSkill(skillId: string): CharacterSkillDescriptor | undefined {
+    const adapter = this.#skills.get(skillId)
+    return adapter?.descriptors.find((descriptor) => descriptor.id === skillId)
+      ?? this.#recipes.get(skillId)?.descriptor
   }
 
   async propose(context: CharacterSkillMatchContext): Promise<CharacterSkillActionProposal[]> {

@@ -21,6 +21,16 @@ export interface CharacterSkillRuntimeOptions {
   actions: CharacterSkillActionRepository
 }
 
+export interface SkillPreparationContext {
+  workspaceId: string
+  worldId: string
+  sessionId: string
+  workTurnId: string
+  characterId: string
+  prompt: string
+  agentRunId?: string
+}
+
 /**
  * Provider- and persistence-neutral Skill orchestration.
  *
@@ -36,6 +46,7 @@ export class CharacterSkillRuntime {
   readonly #actions: CharacterSkillActionRepository
   #timer: NodeJS.Timeout | undefined
   #ticking = false
+  #approvalSettlementHandler: ((workTurnId: string) => Promise<void>) | undefined
 
   constructor(store: SqliteStore, options: CharacterSkillRuntimeOptions) {
     this.#store = store
@@ -55,13 +66,20 @@ export class CharacterSkillRuntime {
     this.#timer = undefined
   }
 
+  setApprovalSettlementHandler(handler: (workTurnId: string) => Promise<void>): void {
+    this.#approvalSettlementHandler = handler
+  }
+
   listDescriptors(): CharacterSkillDescriptor[] {
     return this.#registry.list()
   }
 
-  async prepare(worldId: string, characterId: string, prompt: string, now = new Date()): Promise<CharacterSkillResult> {
+  async prepare(context: SkillPreparationContext, now = new Date()): Promise<CharacterSkillResult> {
+    const { workspaceId, worldId, sessionId, workTurnId, characterId, prompt, agentRunId } = context
     const employee = this.#store.getEmployee(characterId)
-    if (employee === undefined || employee.worldId !== worldId || employee.status === 'archived') {
+    const turn = this.#store.getWorkTurn(workTurnId)
+    if (employee === undefined || employee.workspaceId !== workspaceId || employee.worldId !== worldId || employee.status === 'archived'
+      || turn === undefined || turn.workspaceId !== workspaceId || turn.worldId !== worldId || turn.sessionId !== sessionId) {
       return { handled: false, actions: [] }
     }
     const revision = this.#store.getEmployeeRevision(employee.id, employee.currentRevision)
@@ -93,6 +111,8 @@ export class CharacterSkillRuntime {
         authorization: proposal.authorization,
         parameters: proposal.parameters ?? {},
         ...(proposal.scheduledFor === undefined ? {} : { scheduledFor: proposal.scheduledFor }),
+        workTurnId,
+        ...(agentRunId === undefined ? {} : { agentRunId }),
         status: proposal.risk === 'external-side-effect'
           ? 'waiting-for-approval'
           : proposal.scheduledFor === undefined ? 'waiting-for-integration' : 'scheduled',
@@ -121,9 +141,15 @@ export class CharacterSkillRuntime {
         continue
       }
 
+      // Authorization can change status and provenance (for example when an
+      // exact-target policy matches). Persist that fact before the execution
+      // state machine reloads the action from SQLite.
+      await this.#actions.save(action)
+
       if (action.scheduledFor === undefined) {
-        await this.#execute(action, now)
-        await this.#actions.save(action)
+        if (await this.#execute(action, now)) await this.#actions.save(action)
+      } else {
+        Object.assign(action, this.#store.prepareSkillActionExecution(action.id, now.toISOString()))
       }
       actions.push(action)
     }
@@ -177,10 +203,18 @@ export class CharacterSkillRuntime {
     if (this.#store.getApprovalRequest(approvalId)?.status !== 'pending') {
       throw new ServiceError('conflict', 'approval_already_decided', '审批请求已经处理')
     }
+    const descriptor = this.#registry.descriptorForSkill(action.skillId)
+    if (decision === 'approved' && scope !== 'once' && descriptor?.persistentApproval !== 'exact-target') {
+      throw new ServiceError('invalid', 'persistent_approval_forbidden', '该动态工具只允许单次审批')
+    }
     const request = this.#store.decideApprovalRequest(approvalId, decision, scope, actorId, now.toISOString())
     if (request.status !== 'approved') {
       action.status = 'rejected'
-      action.detail = request.status === 'expired' ? '审批请求已过期，外部动作未执行' : '用户已拒绝此外部动作'
+      action.detail = request.status === 'expired'
+        ? '该操作未执行，因为审批已过期。'
+        : '该操作未执行，因为审批被拒绝。'
+      action.executionState = 'settled'
+      action.executionCompletedAt = now.toISOString()
       action.updatedAt = now.toISOString()
       await this.#discard(action)
       await this.#actions.save(action)
@@ -203,11 +237,14 @@ export class CharacterSkillRuntime {
     if (action.scheduledFor !== undefined && Date.parse(action.scheduledFor) > now.getTime()) {
       action.status = 'scheduled'
       action.detail = `已获批准，将在 ${localTimeLabel(action.scheduledFor)} 尝试执行`
+      await this.#actions.save(action)
+      Object.assign(action, this.#store.prepareSkillActionExecution(action.id, now.toISOString()))
     } else {
       action.status = 'waiting-for-integration'
-      action.detail = '审批已通过，正在通过受信任技能适配器执行'
+      action.detail = '审批已通过，等待安全进入受信任技能适配器'
       await this.#actions.save(action)
-      await this.#execute(action, now)
+      Object.assign(action, this.#store.prepareSkillActionExecution(action.id, now.toISOString()))
+      if (!await this.#execute(action, now)) return { request, action }
     }
     action.updatedAt = now.toISOString()
     await this.#actions.save(action)
@@ -229,10 +266,11 @@ export class CharacterSkillRuntime {
         const request = this.#store.getApprovalRequest(action.approvalRequestId)
         if (request?.status !== 'expired') continue
         action.status = 'rejected'
-        action.detail = '审批请求已过期，外部动作未执行'
+        action.detail = '该操作未执行，因为审批已过期。'
         action.updatedAt = now.toISOString()
         await this.#discard(action)
         await this.#actions.save(action)
+        if (request.workTurnId !== undefined) await this.#approvalSettlementHandler?.(request.workTurnId)
       }
       for (const action of await this.#actions.listDue(now)) {
         const employee = this.#store.getEmployee(action.characterId)
@@ -251,27 +289,44 @@ export class CharacterSkillRuntime {
           await this.#actions.save(action)
           continue
         }
-        await this.#execute(action, now)
-        await this.#actions.save(action)
+        if (await this.#execute(action, now)) await this.#actions.save(action)
       }
     } finally {
       this.#ticking = false
     }
   }
 
-  async #execute(action: CharacterSkillAction, now: Date): Promise<void> {
+  async executeReadyAction(actionId: string, now = new Date()): Promise<CharacterSkillAction> {
+    if (this.#actions.get === undefined) throw new Error('Skill action repository cannot load actions')
+    const action = await this.#actions.get(actionId)
+    if (action === undefined) throw new Error(`Skill action not found: ${actionId}`)
+    if (await this.#execute(action, now)) await this.#actions.save(action)
+    return action
+  }
+
+  async recoverApprovedActions(now = new Date()): Promise<CharacterSkillAction[]> {
+    this.#store.reconcileApprovedSkillActions(now.toISOString())
+    const recovered: CharacterSkillAction[] = []
+    for (const action of this.#store.listSkillActionsReadyForExecution()) {
+      if (action.scheduledFor !== undefined && Date.parse(action.scheduledFor) > now.getTime()) continue
+      recovered.push(await this.executeReadyAction(action.id, now))
+    }
+    return recovered
+  }
+
+  async #execute(action: CharacterSkillAction, now: Date): Promise<boolean> {
     if (!this.#isGrantActive(action)) {
       action.status = 'failed'
       action.detail = '执行前角色已不可用或技能授权已撤销'
       action.updatedAt = now.toISOString()
       await this.#discard(action)
-      return
+      return true
     }
     if (!this.#isApproved(action)) {
       action.status = 'waiting-for-approval'
       action.detail = '外部动作缺少有效审批，已阻止执行'
       action.updatedAt = now.toISOString()
-      return
+      return true
     }
     if (action.risk === 'external-side-effect' && action.status !== 'waiting-for-integration') {
       action.status = 'waiting-for-integration'
@@ -283,15 +338,34 @@ export class CharacterSkillRuntime {
       action.status = 'waiting-for-approval'
       action.detail = '审批在执行前已失效，外部动作未执行'
       action.updatedAt = now.toISOString()
-      return
+      return true
     }
+    const descriptor = this.#registry.descriptorForSkill(action.skillId)
     const adapter = this.#registry.adapterById(action.adapterId) ?? this.#registry.adapterForSkill(action.skillId)
-    if (adapter === undefined) {
+    if (adapter === undefined || descriptor === undefined || descriptor.adapterId !== action.adapterId) {
       action.status = 'failed'
       action.detail = `当前宿主没有提供技能 ${action.skillId} 的受信任适配器`
+      action.executionState = 'settled'
+      action.executionCompletedAt = now.toISOString()
       action.updatedAt = now.toISOString()
-      return
+      return true
     }
+    const preflight = await adapter.preflight?.(action)
+    if (preflight !== undefined && !preflight.ready) {
+      action.status = 'waiting-for-integration'
+      action.detail = `${preflight.detail ?? '当前 Integration 不可用'}，未发送外部请求`
+      action.executionState = 'settled'
+      action.executionCompletedAt = now.toISOString()
+      action.updatedAt = now.toISOString()
+      return true
+    }
+    if (action.executionState === undefined) Object.assign(action, this.#store.prepareSkillActionExecution(action.id, now.toISOString()))
+    if (action.executionState !== 'approved-ready') return false
+    const claimed = this.#store.claimSkillActionExecution(action.id, randomUUID(), now.toISOString())
+    // Losing this compare-and-set means another executor owns the attempt. The
+    // caller must not persist its stale copy over that attempt or its result.
+    if (claimed === undefined) return false
+    Object.assign(action, claimed)
     try {
       const result = await adapter.execute(action, { now })
       action.status = result.status
@@ -303,7 +377,10 @@ export class CharacterSkillRuntime {
       action.status = 'outcome-unknown'
       action.detail = '技能适配器执行过程异常，外部动作结果未知；不得自动重试'
     }
+    action.executionState = 'settled'
+    action.executionCompletedAt = now.toISOString()
     action.updatedAt = now.toISOString()
+    return true
   }
 
   async #discard(action: CharacterSkillAction): Promise<void> {
@@ -324,9 +401,15 @@ export class CharacterSkillRuntime {
     }
     const world = this.#store.getWorld(action.worldId)
     if (world === undefined) return false
+    const linkedTurn = action.workTurnId === undefined ? undefined : this.#store.getWorkTurn(action.workTurnId)
     const request = this.#store.createApprovalRequest({
       workspaceId: world.workspaceId,
       worldId: action.worldId,
+      ...(action.workTurnId === undefined || linkedTurn === undefined ? {} : {
+        sessionId: linkedTurn.sessionId,
+        workTurnId: action.workTurnId,
+      }),
+      ...(action.agentRunId === undefined ? {} : { agentRunId: action.agentRunId }),
       characterId: action.characterId,
       subjectType: 'skill-action',
       subjectId: action.id,
@@ -361,6 +444,7 @@ export class CharacterSkillRuntime {
   }
 
   #matchingPolicy(action: CharacterSkillAction): ApprovalPolicy | undefined {
+    if (this.#registry.descriptorForSkill(action.skillId)?.persistentApproval !== 'exact-target') return undefined
     const world = this.#store.getWorld(action.worldId)
     if (world === undefined) return undefined
     return this.#store.findApprovalPolicy({

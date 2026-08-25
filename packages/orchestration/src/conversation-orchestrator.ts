@@ -79,6 +79,8 @@ export interface ConversationStorePort {
   ): EmployeeInstance
   bindEmployeeAgentSession(employeeId: string, agentSessionId: string): EmployeeInstance
   createWorkTurn(input: { workspaceId: string; worldId: string; sessionId: string; clientTurnId?: string; interactionKind: WorkTurnInteractionKind }): WorkTurn
+  getWorkTurn(turnId: string): WorkTurn | undefined
+  listTurnAgentRuns(turnId: string): AgentRun[]
   startWorkTurn(turnId: string): WorkTurn
   completeWorkTurn(turnId: string): WorkTurn
   failWorkTurn(turnId: string, errorCode: string): WorkTurn
@@ -165,6 +167,23 @@ export interface ConversationResult {
   replies: AgentReply[]
 }
 
+export interface DirectConversationTurn {
+  session: WorkSession
+  workTurn: WorkTurn
+  previousMessages: WorkMessage[]
+  history: ConversationHistoryEntry[]
+}
+
+export interface ContinueDirectConversationInput {
+  workTurnId: string
+  employeeId: string
+  runtimePrompt: string
+  reasoningEffort?: Exclude<ReasoningEffort, 'auto'>
+  permissionMode?: AgentPermissionMode
+  previousMessages?: WorkMessage[]
+  history?: ConversationHistoryEntry[]
+}
+
 interface RecoveredConversation {
   /** Every durable message of the session, oldest first. */
   messages: WorkMessage[]
@@ -217,6 +236,19 @@ export class ConversationOrchestrator implements AsyncDisposable {
   }
 
   async direct(input: DirectConversationInput): Promise<ConversationResult> {
+    const begun = this.beginDirect(input)
+    return this.continueDirect({
+      workTurnId: begun.workTurn.id,
+      employeeId: input.employeeId,
+      runtimePrompt: input.runtimePrompt?.trim() || requiredText(input.prompt, 'Prompt'),
+      ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
+      ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
+      previousMessages: begun.previousMessages,
+      history: begun.history,
+    })
+  }
+
+  beginDirect(input: DirectConversationInput): DirectConversationTurn {
     const prompt = requiredText(input.prompt, 'Prompt')
     const employee = this.#requireEmployeeInWorld(input.employeeId, input.workspaceId, input.worldId)
     const session = input.sessionId
@@ -254,20 +286,44 @@ export class ConversationOrchestrator implements AsyncDisposable {
       correlationId: session.id,
     })
     this.#store.startWorkTurn(workTurn.id)
+    return { session, workTurn: this.#store.getWorkTurn(workTurn.id)!, previousMessages: recovered.messages, history: recovered.history }
+  }
+
+  async continueDirect(input: ContinueDirectConversationInput): Promise<ConversationResult> {
+    const workTurn = this.#store.getWorkTurn(input.workTurnId)
+    if (workTurn === undefined || workTurn.status !== 'running') {
+      throw new ConversationOrchestrationError('Work turn is not ready to continue')
+    }
+    const session = this.#store.getSession(workTurn.sessionId)
+    if (session === undefined || session.kind !== 'direct' || session.workspaceId !== workTurn.workspaceId || session.worldId !== workTurn.worldId) {
+      throw new ConversationOrchestrationError('Direct continuation session is unavailable')
+    }
+    const employee = this.#requireEmployeeInWorld(input.employeeId, workTurn.workspaceId, workTurn.worldId)
+    const participants = this.#store.listParticipants(session.id)
+    if (!participants.some((participant) => participant.kind === 'employee' && participant.participantId === employee.id)) {
+      throw new ConversationOrchestrationError('Direct continuation character is not a session participant')
+    }
+    const previousMessages = input.previousMessages
+      ?? this.#store.listMessages(session.id).filter((message) => message.metadata.workTurnId !== workTurn.id)
+    const recovered = {
+      messages: previousMessages,
+      history: input.history ?? buildConversationHistory(previousMessages, this.#speakersFor(session), this.#historyBudget),
+    }
+    const ordinal = Math.max(0, ...this.#store.listTurnAgentRuns(workTurn.id).map((run) => run.ordinal)) + 1
     try {
       const reply = await this.#runAgent({
-        session, workTurn, ordinal: 1, employee,
-        prompt: input.runtimePrompt?.trim() || prompt,
+        session, workTurn, ordinal, employee,
+        prompt: requiredText(input.runtimePrompt, 'Runtime prompt'),
         history: recovered.history,
         observedThroughSequence: lastAuthoredSequence(recovered.messages, employee.id),
         ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
         ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
-        ...(clientTurnId === undefined ? {} : { clientTurnId }),
+        ...(workTurn.clientTurnId === undefined ? {} : { clientTurnId: workTurn.clientTurnId }),
       })
       this.#store.completeWorkTurn(workTurn.id)
       return { session, replies: [reply] }
     } catch (error) {
-      this.#store.failWorkTurn(workTurn.id, lifecycleErrorCode(error))
+      if (this.#store.getWorkTurn(workTurn.id)?.status === 'running') this.#store.failWorkTurn(workTurn.id, lifecycleErrorCode(error))
       throw error
     }
   }
