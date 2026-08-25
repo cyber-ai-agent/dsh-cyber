@@ -148,10 +148,10 @@ function samePath(left: string, right: string): boolean {
 function canonicalPath(value: string): string {
   const normalized = resolve(value)
   try {
-    return realpathSync.native(normalized)
+    return realpathSync.native(normalized).replaceAll('\\', '/')
   } catch {
     // A path that does not exist cannot be a repository root either; compare
     // the normalized form so the caller still gets a defined answer.
-    return normalized
+    return normalized.replaceAll('\\', '/')
   }
 }

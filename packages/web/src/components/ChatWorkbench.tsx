@@ -129,10 +129,10 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
     <section className="chat-workbench" aria-label="当前世界多角色会话">
       <header className="chat-header">
         <div className="chat-header__identity">
-          <span className="chat-header__avatars" aria-hidden={directEmployee === undefined}>
+          <span className={`chat-header__avatars${conversationKind === 'group' || conversationKind === 'meeting' ? ' chat-header__avatars--group' : ''}`} aria-hidden={directEmployee === undefined}>
             {directEmployee !== undefined
               ? <button className="chat-header__avatar-button" type="button" onClick={() => onOpenDossier(directEmployee.id)} aria-label={`打开${directEmployee.displayName}角色`} title={`打开${directEmployee.displayName}角色`}><Avatar index={directEmployee.avatarIndex} size="sm" label={directEmployee.displayName} /></button>
-              : participantEmployees.slice(0, 3).map((employee) => <Avatar key={employee.id} index={employee.avatarIndex} size="sm" label={employee.displayName} />)}
+              : <>{participantEmployees.slice(0, 2).map((employee) => <Avatar key={employee.id} index={employee.avatarIndex} size="sm" label={employee.displayName} />)}{participantEmployees.length > 2 ? <span className="chat-header__avatar-more">+{participantEmployees.length - 2}</span> : null}</>}
           </span>
            <span><h1>{conversationTitle}</h1><p>{conversationKind === undefined ? `从左侧会话列表进入私聊，或创建群聊` : `${conversationKind === 'group' ? '群聊' : '私聊'} · ${world.name}`}</p></span>
         </div>
@@ -147,7 +147,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
           <div className="conversation-empty">
             <TerminalWindow size={34} />
             <h2>{employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? '群聊已准备好' : conversationKind === 'direct' ? `开始与${participantEmployees[0]?.displayName ?? experience.personLabel}对话` : '选择会话开始互动'}</h2>
-            <p>{employees.length === 0 ? experience.emptyCopy : conversationKind === 'group' ? '发送第一条消息后，群聊和多人协作才会正式创建。关闭或切换不会让角色提前进入会议状态。' : conversationKind === 'direct' ? '历史记录会保留在当前世界；发送消息后角色才会进入真实运行过程。' : '左侧只保留会话：每个角色固定一个私聊，也可以创建多人群聊；角色新增与管理统一在右侧角色。'}</p>
+            <p>{employees.length === 0 ? experience.emptyCopy : conversationKind === 'group' ? '群聊已经创建并保存在当前世界，发送消息开始多人协作。' : conversationKind === 'direct' ? '历史记录会保留在当前世界；发送消息后角色才会进入真实运行过程。' : '左侧只保留会话：每个角色固定一个私聊，也可以创建多人群聊；角色新增与管理统一在右侧角色。'}</p>
           </div>
         ) : visibleMessages.map((message, index) => {
           const employee = employees.find((item) => item.id === message.senderId)
@@ -159,7 +159,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
               {owner ? null : <button className="avatar-button" type="button" onClick={() => employee && onOpenDossier(employee.id)} aria-label={`打开${employee?.displayName ?? experience.personLabel}角色`}><Avatar index={employee?.avatarIndex ?? 7} label={employee?.displayName ?? '角色'} /></button>}
               <div className="message__body">
                 <header className="message__meta">{owner ? <span className="sr-only">我的消息</span> : <><strong>{employee?.displayName ?? experience.personLabel}</strong><span>{employee?.role}</span></>}<time>{displayTime(message)}</time></header>
-                <div className="message__content">{streaming && message.content.length === 0 ? <span className="stream-placeholder">正在生成回复…</span> : <RichText value={message.content} />}{streaming ? <span className="stream-cursor" aria-hidden="true" /> : null}</div>
+                <div className="message__content">{streaming && message.content.length === 0 ? <span className="stream-placeholder">正在生成回复…</span> : <RichText value={message.content} worldId={world.id} />}{streaming ? <span className="stream-cursor" aria-hidden="true" /> : null}</div>
                 <MessageAttachments attachments={messageAttachments(message.metadata)} />
                 {demoMode && experience.kind === 'company' && index === 1 ? <ArtifactAttachment onOpen={onOpenArtifact} /> : null}
               </div>
@@ -278,8 +278,8 @@ function messageAttachments(metadata: JsonObject): ChatAttachment[] {
 
 function formatBytes(value: number): string { if (value < 1024) return `${value} B`; if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`; return `${(value / 1024 / 1024).toFixed(1)} MB` }
 
-function RichText({ value }: { value: string }) {
-  return <Suspense fallback={<div className="markdown-body"><p>{value}</p></div>}><MarkdownMessage value={value} /></Suspense>
+function RichText({ value, worldId }: { value: string; worldId: string }) {
+  return <Suspense fallback={<div className="markdown-body"><p>{value}</p></div>}><MarkdownMessage value={value} worldId={worldId} /></Suspense>
 }
 function ArtifactAttachment({ onOpen }: { onOpen(): void }) { return <button className="artifact-attachment" type="button" onClick={onOpen}><span className="artifact-attachment__icon"><BracketsCurly size={18} /></span><span><strong>v0.3.0-架构设计.md</strong><small>1.2 MB · 已保存到世界产物</small></span><span>预览</span></button> }
 function displayTime(message: WorkMessage): string { const metadataTime = message.metadata.displayTime; return typeof metadataTime === 'string' ? metadataTime : new Date(message.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }

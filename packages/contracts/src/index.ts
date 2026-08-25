@@ -859,6 +859,7 @@ export const DOMAIN_EVENT_TYPES = [
   'package.install.staged',
   'package.install.activated',
   'package.install.rolled-back',
+  'package.uninstalled',
   'world.package.instantiated',
   'world.package.disabled',
 ] as const

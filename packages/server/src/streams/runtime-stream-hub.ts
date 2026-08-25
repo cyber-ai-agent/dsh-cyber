@@ -33,7 +33,10 @@ export class RuntimeStreamHub {
     response.write('event: ready\ndata: {}\n\n')
     const client = { worldId, response }
     this.#clients.add(client)
-    request.once('close', () => this.#clients.delete(client))
+    const remove = () => this.#clients.delete(client)
+    if (typeof response.once === 'function') response.once('close', remove)
+    request.once('aborted', remove)
+    request.once('close', remove)
   }
 
   publish(event: ConversationRealtimeEnvelope): void {

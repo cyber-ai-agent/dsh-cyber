@@ -77,6 +77,32 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
   })
   const conversationHub = new ConversationHubService(store)
 
+  router.post(/^\/api\/worlds\/([^/]+)\/group-sessions$/, async ({ request, response, params }) => {
+    const world = store.getWorld(params[0]!)
+    if (world === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
+    await worldAccess.assertUnlocked(world.id, request)
+    const body = await readJson(request)
+    const employeeIds = [...new Set(optionalStringArray(body.employeeIds))]
+    if (employeeIds.length < 2) throw new HttpError(422, 'group_participants_required', '群聊至少需要两名角色')
+    const employees = employeeIds.map((employeeId) => store.getEmployee(employeeId))
+    if (employees.some((employee) => employee === undefined || employee.worldId !== world.id || employee.status === 'archived')) {
+      throw new HttpError(422, 'group_participant_unavailable', '群聊成员必须来自当前世界且处于可用状态')
+    }
+    const title = optionalString(body.title) ?? employees.map((employee) => employee!.displayName).join('、')
+    const session = store.createSession({
+      workspaceId: world.workspaceId,
+      worldId: world.id,
+      kind: 'group',
+      title,
+      participants: [
+        { participantId: 'owner', kind: 'owner' },
+        ...employeeIds.map((employeeId) => ({ participantId: employeeId, kind: 'employee' as const })),
+      ],
+      actorId: 'owner',
+    })
+    writeJson(response, 201, { session, participantIds: employeeIds })
+  })
+
   router.post(/^\/api\/worlds\/([^/]+)\/chat$/, async ({ request, response, params }) => {
     const world = store.getWorld(params[0]!)
     if (world === undefined) throw new HttpError(404, 'world_not_found', 'World not found')

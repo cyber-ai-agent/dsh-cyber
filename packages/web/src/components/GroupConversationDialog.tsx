@@ -6,11 +6,12 @@ import { Avatar } from './Avatar.js'
 
 interface GroupConversationDialogProps {
   employees: CyberEmployee[]
+  creating?: boolean
   onClose(): void
-  onCreate(input: { title: string; employeeIds: string[] }): void
+  onCreate(input: { title: string; employeeIds: string[] }): Promise<void>
 }
 
-export function GroupConversationDialog({ employees, onClose, onCreate }: GroupConversationDialogProps) {
+export function GroupConversationDialog({ employees, creating = false, onClose, onCreate }: GroupConversationDialogProps) {
   const searchRef = useRef<HTMLInputElement>(null)
   const [query, setQuery] = useState('')
   const [title, setTitle] = useState('')
@@ -25,14 +26,14 @@ export function GroupConversationDialog({ employees, onClose, onCreate }: GroupC
     const previous = document.activeElement as HTMLElement | null
     searchRef.current?.focus()
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape' && !creating) onClose()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => {
       window.removeEventListener('keydown', onKeyDown)
       previous?.focus()
     }
-  }, [onClose])
+  }, [creating, onClose])
 
   const toggle = (employeeId: string) => {
     setSelectedIds((current) => current.includes(employeeId)
@@ -40,33 +41,22 @@ export function GroupConversationDialog({ employees, onClose, onCreate }: GroupC
       : [...current, employeeId])
   }
 
-  const submit = () => {
-    if (selectedIds.length < 2) return
-    const selectedEmployees = selectedIds
-      .map((id) => employees.find((employee) => employee.id === id))
-      .filter((employee): employee is CyberEmployee => employee !== undefined)
-    onCreate({
-      title: title.trim() || selectedEmployees.map((employee) => employee.displayName).join('、'),
-      employeeIds: selectedIds,
-    })
-  }
-
   return (
-    <div className="modal-backdrop group-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+    <div className="modal-backdrop group-dialog-backdrop" onMouseDown={(event) => { if (!creating && event.target === event.currentTarget) onClose() }}>
       <section className="group-dialog" role="dialog" aria-modal="true" aria-labelledby="group-dialog-title">
         <header className="group-dialog__header">
           <div>
             <span><UsersThree size={16} weight="fill" /> 当前世界</span>
             <h2 id="group-dialog-title">创建群聊</h2>
-            <p>选择至少两名角色。群聊会在你发送第一条消息时正式创建。</p>
+            <p>选择至少两名角色，创建后立即出现在左侧会话列表。</p>
           </div>
-          <button className="icon-button" type="button" aria-label="关闭创建群聊" onClick={onClose}><X size={18} /></button>
+          <button className="icon-button" type="button" aria-label="关闭创建群聊" disabled={creating} onClick={onClose}><X size={18} /></button>
         </header>
 
         <div className="group-dialog__body">
           <label className="group-dialog__search">
             <MagnifyingGlass size={17} />
-            <input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索角色或角色" aria-label="搜索群聊成员" />
+            <input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索角色或职责" aria-label="搜索群聊成员" />
           </label>
           <label className="group-dialog__name">
             <span>群聊名称</span>
@@ -78,7 +68,7 @@ export function GroupConversationDialog({ employees, onClose, onCreate }: GroupC
               const selected = selectedIds.includes(employee.id)
               return (
                 <label key={employee.id} className={`group-member${selected ? ' is-selected' : ''}`}>
-                  <input type="checkbox" checked={selected} onChange={() => toggle(employee.id)} />
+                  <input type="checkbox" checked={selected} disabled={creating} onChange={() => toggle(employee.id)} />
                   <Avatar index={employee.avatarIndex} label={employee.displayName} status={employee.status} />
                   <span><strong>{employee.displayName}</strong><small>{employee.role} · {employee.currentActivity}</small></span>
                 </label>
@@ -90,8 +80,11 @@ export function GroupConversationDialog({ employees, onClose, onCreate }: GroupC
         <footer className="group-dialog__footer">
           <span>已选择 {selectedIds.length} 人</span>
           <div>
-            <button className="secondary-button" type="button" onClick={onClose}>取消</button>
-            <button className="primary-button" type="button" disabled={selectedIds.length < 2} onClick={submit}>创建群聊</button>
+            <button className="secondary-button" type="button" disabled={creating} onClick={onClose}>取消</button>
+            <button className="primary-button" type="button" disabled={creating || selectedIds.length < 2} onClick={() => void onCreate({
+              title: title.trim() || selectedIds.map((id) => employees.find((employee) => employee.id === id)?.displayName).filter((name): name is string => name !== undefined).join('、'),
+              employeeIds: selectedIds,
+            })}>{creating ? '正在创建…' : '创建群聊'}</button>
           </div>
         </footer>
       </section>

@@ -8,6 +8,7 @@ import {
   MagnifyingGlass,
   ShieldCheck,
   Storefront,
+  Trash,
   UserPlus,
   Warning,
   X,
@@ -35,6 +36,8 @@ interface PackageMarketDialogProps {
   onSearch(market: CyberMarketKind, query: string): Promise<void>
   onPreviewMarketplace(item: CyberMarketPackage): Promise<PackagePermissionPreview>
   onInstallMarketplace(item: CyberMarketPackage, approvalToken: string): Promise<void>
+  onUninstall(item: InstalledPackage): Promise<void>
+  onOpenSettings(): void
   onCreateThemeWorld(item: CyberMarketPackage, name: string): Promise<void>
   onRecruitTalent(item: CyberMarketPackage): Promise<void>
   onUsePlugin(command: string): void
@@ -59,10 +62,12 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
   const [creatingWorldFor, setCreatingWorldFor] = useState<CyberMarketPackage>()
   const [worldName, setWorldName] = useState('')
   const [creatingWorld, setCreatingWorld] = useState(false)
+  const [confirmingUninstall, setConfirmingUninstall] = useState<string>()
   const selectedCurrent = selected === undefined
     ? undefined
     : props.items.find((item) => item.manifest.id === selected.manifest.id && item.manifest.version === selected.manifest.version) ?? selected
   const selectedInstalled = selectedCurrent?.installedVersion === selectedCurrent?.manifest.version ? selectedCurrent : undefined
+  const selectedInstalledPackage = selectedCurrent === undefined ? undefined : props.installed.find((item) => item.packageId === selectedCurrent.manifest.id && item.status === 'active')
 
   useEffect(() => {
     setMarket(props.initialMarket)
@@ -201,10 +206,10 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
               : selectedCurrent !== undefined && preview !== undefined
                 ? <PermissionReview manifest={selectedCurrent.manifest} preview={preview} approved={approved} installing={props.installing} onApproved={setApproved} onInstall={() => void install()} />
                 : selectedInstalled?.market === 'talent'
-                  ? <TalentActivationReview item={selectedInstalled} world={props.world} onRecruit={() => props.onRecruitTalent(selectedInstalled)} />
+                  ? <TalentActivationReview item={selectedInstalled} world={props.world} installedPackage={selectedInstalledPackage} installing={props.installing} confirmingUninstall={confirmingUninstall} onConfirmUninstall={setConfirmingUninstall} onUninstall={props.onUninstall} onRecruit={() => props.onRecruitTalent(selectedInstalled)} />
                   : selectedInstalled?.market === 'plugin'
-                    ? <PluginActivationReview item={selectedInstalled} onUse={props.onUsePlugin} />
-                    : <InstalledOverview installed={props.installed} transactions={props.transactions} />}
+                    ? <PluginActivationReview item={selectedInstalled} installedPackage={selectedInstalledPackage} installing={props.installing} confirmingUninstall={confirmingUninstall} onConfirmUninstall={setConfirmingUninstall} onUninstall={props.onUninstall} onOpenSettings={props.onOpenSettings} onUse={props.onUsePlugin} />
+                    : <InstalledOverview installed={props.installed} transactions={props.transactions} installing={props.installing} confirmingUninstall={confirmingUninstall} onConfirmUninstall={setConfirmingUninstall} onUninstall={props.onUninstall} />}
           </aside>
         </div>
       </section>
@@ -220,9 +225,14 @@ function MarketIcon({ market }: { market: CyberMarketKind }) {
   return market === 'theme' ? <Buildings size={18} /> : market === 'talent' ? <Storefront size={18} /> : <Cube size={18} />
 }
 
-function InstalledOverview({ installed, transactions }: { installed: InstalledPackage[]; transactions: PackageInstallTransaction[] }) {
+function InstalledOverview({ installed, transactions, installing, confirmingUninstall, onConfirmUninstall, onUninstall }: { installed: InstalledPackage[]; transactions: PackageInstallTransaction[]; installing: boolean; confirmingUninstall?: string | undefined; onConfirmUninstall(packageId?: string): void; onUninstall(item: InstalledPackage): Promise<void> }) {
   const active = installed.filter((item) => item.status === 'active')
-  return <div className="installed-overview"><h3>运行中的扩展</h3><p>{active.length} 个活动版本。所有变更均保留安装事务，失败自动回滚。</p><div className="installed-package-list">{active.length === 0 ? <span className="dialog-empty">尚未安装扩展</span> : active.slice(0, 8).map((item) => <article key={`${item.packageId}-${item.version}`}><span className="package-kind">{packageKindLabel(item.kind)}</span><strong>{item.manifest.displayName}</strong><small>v{item.version}</small></article>)}</div><div className="package-history"><strong>最近安装</strong>{transactions.length === 0 ? <span>暂无记录</span> : transactions.slice(0, 6).map((item) => <span key={item.id} className={`transaction-status transaction-status--${item.status}`}>{installed.find((installedItem) => installedItem.packageId === item.packageId)?.manifest.displayName ?? item.packageId} · {transactionLabel(item.status)}</span>)}</div></div>
+  return <div className="installed-overview"><h3>运行中的扩展</h3><p>{active.length} 个活动版本。卸载会同步停用各世界实例，安装文件保留在本机包库中。</p><div className="installed-package-list">{active.length === 0 ? <span className="dialog-empty">尚未安装扩展</span> : active.slice(0, 12).map((item) => <article key={`${item.packageId}-${item.version}`}><span className="package-kind">{packageKindLabel(item.kind)}</span><span className="installed-package-copy"><strong>{item.manifest.displayName}</strong><small>v{item.version}</small></span><PackageRemovalAction item={item} installing={installing} confirming={confirmingUninstall === item.packageId} onConfirm={() => onConfirmUninstall(item.packageId)} onCancel={() => onConfirmUninstall(undefined)} onUninstall={onUninstall} /></article>)}</div><div className="package-history"><strong>最近安装</strong>{transactions.length === 0 ? <span>暂无记录</span> : transactions.slice(0, 6).map((item) => <span key={item.id} className={`transaction-status transaction-status--${item.status}`}>{installed.find((installedItem) => installedItem.packageId === item.packageId)?.manifest.displayName ?? item.packageId} · {transactionLabel(item.status)}</span>)}</div></div>
+}
+
+function PackageRemovalAction({ item, installing, confirming, onConfirm, onCancel, onUninstall }: { item: InstalledPackage; installing: boolean; confirming: boolean; onConfirm(): void; onCancel(): void; onUninstall(item: InstalledPackage): Promise<void> }) {
+  if (confirming) return <span className="package-removal-confirm"><button className="text-button" type="button" disabled={installing} onClick={onCancel}>取消</button><button className="danger-button" type="button" disabled={installing} onClick={() => void onUninstall(item).finally(onCancel)}>{installing ? '处理中…' : '确认卸载'}</button></span>
+  return <button className="text-button package-remove-button" type="button" disabled={installing} onClick={onConfirm}><Trash size={14} />卸载</button>
 }
 
 function PermissionReview({ manifest, preview, approved, installing, onApproved, onInstall }: { manifest: CyberPackageManifest; preview: PackagePermissionPreview; approved: boolean; installing: boolean; onApproved(value: boolean): void; onInstall(): void }) {
@@ -239,7 +249,7 @@ function WorldCreationReview({ item, name, creating, onName, onCreate }: { item:
   </section>
 }
 
-function TalentActivationReview({ item, world, onRecruit }: { item: CyberMarketPackage; world: World; onRecruit(): Promise<void> }) {
+function TalentActivationReview({ item, world, installedPackage, installing, confirmingUninstall, onConfirmUninstall, onUninstall, onRecruit }: { item: CyberMarketPackage; world: World; installedPackage?: InstalledPackage | undefined; installing: boolean; confirmingUninstall?: string | undefined; onConfirmUninstall(packageId?: string): void; onUninstall(item: InstalledPackage): Promise<void>; onRecruit(): Promise<void> }) {
   const activation = item.activation?.kind === 'employee-blueprint' ? item.activation : undefined
   const compatible = activation !== undefined && (world.templateId === 'personal-world' || activation.worldTemplateId === world.templateId)
   return <section className="market-activation-review">
@@ -248,16 +258,20 @@ function TalentActivationReview({ item, world, onRecruit }: { item: CyberMarketP
     <dl><div><dt>目标世界</dt><dd>{world.name}</dd></div><div><dt>适用设定</dt><dd>{roleWorldLabel(activation?.worldTemplateId)}</dd></div></dl>
     {activation === undefined ? <p className="market-activation-review__notice is-warning">模板入口缺少可用的角色定义，请重新安装或检查软件包。</p> : compatible ? <p className="market-activation-review__notice"><CheckCircle size={16} />与当前世界兼容。下一步可确认名字和最小权限，完成后会直接打开私聊。</p> : <p className="market-activation-review__notice is-warning"><Warning size={16} />这名角色属于“{roleWorldLabel(activation.worldTemplateId)}”，请先切换到对应世界再招募。</p>}
     <button className="primary-button" type="button" disabled={!compatible} onClick={() => void onRecruit()}><UserPlus size={17} />选择名字与权限<ArrowRight size={16} /></button>
+    {installedPackage === undefined ? null : <PackageRemovalAction item={installedPackage} installing={installing} confirming={confirmingUninstall === installedPackage.packageId} onConfirm={() => onConfirmUninstall(installedPackage.packageId)} onCancel={() => onConfirmUninstall(undefined)} onUninstall={onUninstall} />}
   </section>
 }
 
-function PluginActivationReview({ item, onUse }: { item: CyberMarketPackage; onUse(command: string): void }) {
+function PluginActivationReview({ item, installedPackage, installing, confirmingUninstall, onConfirmUninstall, onUninstall, onOpenSettings, onUse }: { item: CyberMarketPackage; installedPackage?: InstalledPackage | undefined; installing: boolean; confirmingUninstall?: string | undefined; onConfirmUninstall(packageId?: string): void; onUninstall(item: InstalledPackage): Promise<void>; onOpenSettings(): void; onUse(command: string): void }) {
   const activation = item.activation?.kind === 'prompt-transform' ? item.activation : undefined
   const commands = activation?.commands ?? []
+  const hasFirecrawlSkill = item.manifest.id.toLocaleLowerCase().includes('firecrawl') || item.manifest.entrypoints?.some((entrypoint) => entrypoint.kind === 'skill' && entrypoint.id === 'web.search.firecrawl') === true
   return <section className="market-activation-review market-activation-review--plugin">
     <header><span className="market-activation-review__mark"><ChatCircleDots size={20} /></span><div><span>插件已安装 · 所有世界可用</span><h3>{item.manifest.displayName}</h3><p>{item.manifest.summary}</p></div></header>
     {commands.length > 0 ? <div className="market-command-list"><strong>选择一种用法</strong>{commands.map((command) => <button key={command.trigger} type="button" onClick={() => onUse(command.trigger)}><span><code>{command.trigger}</code><small>{command.description}</small></span><span>带入对话<ArrowRight size={15} /></span></button>)}</div> : activation?.automatic ? <p className="market-activation-review__notice"><CheckCircle size={16} />该插件会自动参与符合条件的对话，无需输入命令。</p> : <p className="market-activation-review__notice is-warning"><Warning size={16} />插件已安装，但没有声明可直接触发的指令。</p>}
-    <p className="market-activation-review__footnote">点击后只会把指令带入输入框，不会自动发送；你仍可以补充任务内容并确认。</p>
+    <p className="market-activation-review__footnote">点击后只会把指令带入输入框，你可以补充任务内容并确认。</p>
+    {hasFirecrawlSkill ? <button className="secondary-button" type="button" onClick={onOpenSettings}>打开 Firecrawl 设置</button> : null}
+    {installedPackage === undefined ? null : <PackageRemovalAction item={installedPackage} installing={installing} confirming={confirmingUninstall === installedPackage.packageId} onConfirm={() => onConfirmUninstall(installedPackage.packageId)} onCancel={() => onConfirmUninstall(undefined)} onUninstall={onUninstall} />}
   </section>
 }
 
