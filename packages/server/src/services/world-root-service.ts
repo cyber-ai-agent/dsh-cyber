@@ -5,6 +5,13 @@ export interface WorldRoot {
   worldId: string
   rootPath: string
   filesPath: string
+  /**
+   * An empty, host-managed workspace for characters without file access.
+   *
+   * Pointing them at the real `filesPath` made `world.files.read` inert: with
+   * or without the permission the runtime saw the same directory.
+   */
+  restrictedFilesPath: string
   assetsPath: string
   exportsPath: string
   cachePath: string
@@ -36,7 +43,10 @@ export class WorldRootService {
     const cachePath = join(rootPath, 'cache')
     const sourcePath = join(rootPath, 'source')
     const packagesPath = join(sourcePath, 'packages')
-    await Promise.all([filesPath, assetsPath, exportsPath, cachePath, sourcePath, packagesPath].map((path) => mkdir(path, { recursive: true })))
+    // A character with no world.files.read still needs somewhere to run. It
+    // must not be the world's real files directory, and it must stay empty.
+    const restrictedPath = join(cachePath, 'restricted-workspace')
+    await Promise.all([filesPath, assetsPath, exportsPath, cachePath, sourcePath, packagesPath, restrictedPath].map((path) => mkdir(path, { recursive: true })))
     const resolved = {
       rootPath: await realpath(rootPath),
       filesPath: await realpath(filesPath),
@@ -45,6 +55,7 @@ export class WorldRootService {
       cachePath: await realpath(cachePath),
       sourcePath: await realpath(sourcePath),
       packagesPath: await realpath(packagesPath),
+      restrictedFilesPath: await realpath(restrictedPath),
     }
     for (const path of Object.values(resolved)) {
       if (!isPathWithin(managedRoot, path)) throw new Error('World path escaped managed data directory')

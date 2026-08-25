@@ -209,7 +209,11 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     store,
     runtime,
     workspacePath: workspaceRoot,
-    resolveWorldRoot: async (worldId) => (await worldRoots.ensure(worldId)).filesPath,
+    // Per character, not per world: a character without world.files.read runs
+    // in an empty host-managed workspace so the permission actually means
+    // something at runtime.
+    resolveWorldRoot: async (worldId, employeeId) =>
+      (await worldRuntimePermissions.resolve({ worldId, employeeId })).workspacePath,
   })
   const peerCollaboration = new PeerCollaborationService({
     store,

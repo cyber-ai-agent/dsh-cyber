@@ -106,7 +106,14 @@ export interface ConversationOrchestratorOptions {
   store: ConversationStorePort
   runtime: AgentRuntimePort
   workspacePath?: string
-  resolveWorldRoot?: (worldId: string) => Promise<string>
+  /**
+   * The workspace a character may run in.
+   *
+   * It takes the character because file access is per character: one without
+   * `world.files.read` must be anchored at an empty host-managed workspace,
+   * not at the world's real files.
+   */
+  resolveWorldRoot?: (worldId: string, employeeId: string) => Promise<string>
   historyBudget?: ConversationHistoryBudget
 }
 
@@ -217,7 +224,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
   readonly #store: ConversationStorePort
   readonly #runtime: AgentRuntimePort
   readonly #workspacePath: string | undefined
-  readonly #resolveWorldRoot: ((worldId: string) => Promise<string>) | undefined
+  readonly #resolveWorldRoot: ((worldId: string, employeeId: string) => Promise<string>) | undefined
   readonly #historyBudget: ConversationHistoryBudget
   readonly #listeners = new Set<ConversationRealtimeListener>()
 
@@ -678,7 +685,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
         correlationId: session.id,
         payload: { employeeId: employee.id, role: employee.role, traceTurnId, agentRunId: agentRun.id, workTurnId: workTurn.id },
       })
-      const workspacePath = this.#resolveWorldRoot === undefined ? this.#workspacePath! : await this.#resolveWorldRoot(session.worldId)
+      const workspacePath = this.#resolveWorldRoot === undefined ? this.#workspacePath! : await this.#resolveWorldRoot(session.worldId, employee.id)
       const result = await this.#runtime.runTurn({
         agent: employee,
         revision,

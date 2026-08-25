@@ -3,9 +3,13 @@ import type { AgentPermissionMode } from '@dsh-cyber/contracts'
 import type { WorldPermissionRequestService, WorldAuthorityPort } from './world-permission-request-service.js'
 import type { WorldRootService } from './world-root-service.js'
 
+/** What a character may do with this world's files. */
+export type WorldFileAccess = 'none' | 'read' | 'write'
+
 export interface WorldRuntimePermissionResolution {
   worldId: string
   employeeId: string
+  fileAccess: WorldFileAccess
   permissionMode: AgentPermissionMode
   workspacePath: string
 }
@@ -42,12 +46,18 @@ export class WorldRuntimePermissionResolver {
       : await this.#authority.hasPermission(input.worldId, input.employeeId, 'world.files.write')
     // A character runtime is capped at workspace-write even when legacy
     // settings or an untrusted prompt asks for full host access.
+    const fileAccess: WorldFileAccess = canWrite ? 'write' : canRead ? 'read' : 'none'
     const permissionMode: AgentPermissionMode = requested === 'danger-full-access'
       ? canWrite ? 'workspace-write' : 'read-only'
       : requested === 'workspace-write' && canWrite
       ? 'workspace-write'
-      : canRead ? 'read-only' : 'read-only'
-    return { worldId: input.worldId, employeeId: input.employeeId, permissionMode, workspacePath: root.filesPath }
+      : 'read-only'
+    // Without world.files.read the runtime is anchored at an empty
+    // host-managed workspace instead of the world's real files. Handing both
+    // cases the same directory is what made the permission inert: a character
+    // that had never been granted it could still list, search and read.
+    const workspacePath = fileAccess === 'none' ? root.restrictedFilesPath : root.filesPath
+    return { worldId: input.worldId, employeeId: input.employeeId, fileAccess, permissionMode, workspacePath }
   }
 
   async resolveForCharacter(input: ResolveWorldRuntimePermissionInput): Promise<WorldRuntimePermissionResolution> {

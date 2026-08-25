@@ -122,6 +122,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     }
 
     // Settle an existing narrow approval phrase before tracing or beginning a
+    const requestedSessionId = optionalString(body.sessionId)
     // turn. The approval response may continue its original WorkTurn, but it
     // never creates a second one.
     if (employeeIds.length === 1) {
@@ -132,6 +133,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
       const approval = await decideTextApprovalSafely(turnContinuations, {
         worldId: world.id,
         employeeId: employeeIds[0]!,
+        ...(requestedSessionId === undefined ? {} : { sessionId: requestedSessionId }),
         text: prompt,
         decidedBy: 'local-user',
         actor: { kind: 'owner', id: 'local-user' },
@@ -196,7 +198,6 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
       ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
     }
     const title = optionalString(body.title)
-    const requestedSessionId = optionalString(body.sessionId)
     const traceCheckpoint = await createTraceCheckpoint(world.id, worldTrace)
     try {
     let result

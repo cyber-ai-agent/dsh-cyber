@@ -1,3 +1,4 @@
+import { WorldAuthorityPromotionRequiredError } from '../services/world-character-authority-service.js'
 import {
   WorldPermissionGrantRejectedError,
   WorldPermissionRequestConflictError,
@@ -19,6 +20,9 @@ export function mapPermissionDecisionError(error: unknown): Error {
   }
   if (error instanceof WorldPermissionRequestConflictError) {
     return new HttpError(409, 'world_permission_request_already_decided', error.message)
+  }
+  if (error instanceof WorldAuthorityPromotionRequiredError) {
+    return new HttpError(409, error.code, error.message)
   }
   if (error instanceof WorldPermissionGrantRejectedError) {
     return new HttpError(409, 'world_permission_grant_rejected', error.message)

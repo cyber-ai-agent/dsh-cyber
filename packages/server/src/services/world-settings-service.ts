@@ -64,6 +64,22 @@ export class WorldSettingsService {
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
       throw new TypeError('World settings revision must be a non-negative integer')
     }
+    // Read, compare and publish must be one critical section. Without it the
+    // revision check is advisory: two writers holding the same expected
+    // revision both read, both find it current, and both publish — the second
+    // silently overwriting the first while each reports success.
+    //
+    // The lock is module-scoped rather than an instance field because the
+    // Creative Workshop constructs its own WorldSettingsService over the same
+    // files. Per world, so unrelated worlds still write concurrently.
+    return withWorldSettingsLock(worldId, () => this.#savePatchExclusive(worldId, value, expectedRevision))
+  }
+
+  async #savePatchExclusive(
+    worldId: string,
+    value: Record<string, unknown>,
+    expectedRevision: number,
+  ): Promise<WorldSettingsSnapshot> {
     const current = await this.getSnapshot(worldId)
     if (current.revision !== expectedRevision) {
       throw new WorldSettingsConflictError(worldId, expectedRevision, current.revision)
@@ -94,6 +110,27 @@ export class WorldSettingsService {
     const settings = await this.get(worldId)
     return `${worldHeader(settings)}\n多人会话中的每个角色都必须保持自己的当前身份、知识边界和立场，不替其他角色发言。角色的最新 Persona / Identity 优先于创建时模板中的旧岗位。\n\n[用户请求]\n${prompt}`
   }
+}
+
+/**
+ * One in-flight settings write per world, shared by every service instance.
+ *
+ * Module scope is deliberate: `CreativeWorkshopService` builds a second
+ * `WorldSettingsService` over the same `settings.json`, and an instance-level
+ * lock would let those two writers race each other.
+ */
+const worldSettingsLocks = new Map<string, Promise<unknown>>()
+
+function withWorldSettingsLock<TResult>(worldId: string, work: () => Promise<TResult>): Promise<TResult> {
+  const previous = worldSettingsLocks.get(worldId) ?? Promise.resolve()
+  const current = previous.then(work, work)
+  worldSettingsLocks.set(worldId, current)
+  void current
+    .catch(() => undefined)
+    .finally(() => {
+      if (worldSettingsLocks.get(worldId) === current) worldSettingsLocks.delete(worldId)
+    })
+  return current
 }
 
 function worldHeader(settings: WorldSettings): string {

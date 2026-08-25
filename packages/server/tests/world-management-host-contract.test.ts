@@ -165,3 +165,55 @@ describe('one-time world permission decisions', () => {
     void server
   })
 })
+
+describe('permission decisions belong to their conversation', () => {
+  it('does not let a typed approval in one session settle another session request', async () => {
+    const { origin, server } = await start()
+    const { world, characterId } = await administratorWorld(origin)
+
+    // Two conversations with the same character, one of them holding a
+    // pending decision.
+    const sessionA = server.store.createSession({
+      workspaceId: world.workspaceId,
+      worldId: world.id,
+      kind: 'direct',
+      title: '会话 A',
+      participants: [{ participantId: 'owner', kind: 'owner' }, { participantId: characterId, kind: 'employee' }],
+    })
+    const sessionB = server.store.createSession({
+      workspaceId: world.workspaceId,
+      worldId: world.id,
+      kind: 'direct',
+      title: '会话 B',
+      participants: [{ participantId: 'owner', kind: 'owner' }, { participantId: characterId, kind: 'employee' }],
+    })
+
+    // Strip the permission so a management request in session A must wait.
+    await json(origin, `/api/worlds/${world.id}/authorities/${characterId}`, send('PUT', {
+      role: 'member',
+      permissionGrants: ['world.files.read'],
+      reason: 'session-isolation-test',
+    }))
+    await json(origin, `/api/worlds/${world.id}/chat`, send('POST', {
+      prompt: '把这个世界改名为 A 会话世界',
+      employeeIds: [characterId],
+      sessionId: sessionA.id,
+    }))
+    const pendingBefore = await json(origin, `/api/worlds/${world.id}/permission-requests`)
+    const before = (pendingBefore.body.requests ?? pendingBefore.body.items ?? []) as Array<{ id: string; status: string }>
+
+    // "批准" typed in session B must not answer session A's card.
+    await json(origin, `/api/worlds/${world.id}/chat`, send('POST', {
+      prompt: '批准',
+      employeeIds: [characterId],
+      sessionId: sessionB.id,
+    }))
+
+    const pendingAfter = await json(origin, `/api/worlds/${world.id}/permission-requests`)
+    const after = (pendingAfter.body.requests ?? pendingAfter.body.items ?? []) as Array<{ id: string; status: string }>
+    for (const request of before) {
+      const survivor = after.find((item) => item.id === request.id)
+      expect(survivor?.status, '另一个会话的请求不得被批准').toBe('pending')
+    }
+  })
+})

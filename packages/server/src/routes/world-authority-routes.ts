@@ -68,14 +68,21 @@ export function registerWorldAuthorityRoutes(
     const permissionGrants = role === 'administrator' && requested.length === 0
       ? [...RECOMMENDED_ADMIN_PERMISSIONS]
       : requested
-    const value = authority.updateAuthority({
-      worldId: world.id,
-      targetEmployeeId: params[1]!,
-      actor: OWNER_ACTOR,
-      role,
-      permissionGrants,
-      reason: requiredString(body, 'reason'),
-    })
+    // "This character must be an administrator first" is an answer the editor
+    // can act on — it offers promote-and-grant — not a server fault.
+    let value
+    try {
+      value = authority.updateAuthority({
+        worldId: world.id,
+        targetEmployeeId: params[1]!,
+        actor: OWNER_ACTOR,
+        role,
+        permissionGrants,
+        reason: requiredString(body, 'reason'),
+      })
+    } catch (error) {
+      throw mapPermissionDecisionError(error)
+    }
     writeJson(response, 200, { authority: value })
   })
 
