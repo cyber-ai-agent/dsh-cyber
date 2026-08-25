@@ -1,4 +1,15 @@
-type WorldLiveEventName = 'error' | 'ready' | 'runtime' | 'trace' | 'world-cue' | 'world-decision' | 'world-runtime' | 'world-state'
+const WORLD_LIVE_EVENT_NAMES = [
+  'error',
+  'ready',
+  'runtime',
+  'trace',
+  'world-cue',
+  'world-decision',
+  'world-runtime',
+  'world-state',
+] as const
+
+type WorldLiveEventName = (typeof WORLD_LIVE_EVENT_NAMES)[number]
 type WorldLiveListener = (event: Event) => void
 
 interface SharedWorldLiveClient {
@@ -24,7 +35,10 @@ export function subscribeWorldLive(
     window.clearTimeout(client.closeTimer)
     delete client.closeTimer
   }
-  client.listeners.get(eventName)!.add(listener)
+  // Never assert here: an unknown name should register, not crash the app.
+  const bucket = client.listeners.get(eventName) ?? new Set<WorldLiveListener>()
+  client.listeners.set(eventName, bucket)
+  bucket.add(listener)
 
   return () => {
     const current = clients.get(worldId)
@@ -48,15 +62,13 @@ function getOrCreateClient(worldId: string): SharedWorldLiveClient {
   if (existing !== undefined) return existing
 
   const source = new EventSource(`/api/worlds/${encodeURIComponent(worldId)}/live`)
-  const listeners = new Map<WorldLiveEventName, Set<WorldLiveListener>>([
-    ['error', new Set()],
-    ['ready', new Set()],
-    ['runtime', new Set()],
-    ['trace', new Set()],
-    ['world-cue', new Set()],
-    ['world-runtime', new Set()],
-    ['world-state', new Set()],
-  ])
+  // Derived from the event union rather than hand-listed: a name added to the
+  // type but forgotten here used to become a runtime crash on first subscribe,
+  // and no test caught it because web tests render to static markup and never
+  // run effects.
+  const listeners = new Map<WorldLiveEventName, Set<WorldLiveListener>>(
+    WORLD_LIVE_EVENT_NAMES.map((name) => [name, new Set<WorldLiveListener>()]),
+  )
   const client: SharedWorldLiveClient = { source, listeners }
   for (const eventName of listeners.keys()) {
     source.addEventListener(eventName, (event) => {

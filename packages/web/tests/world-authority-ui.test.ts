@@ -181,3 +181,18 @@ describe('world permission card content and routing', () => {
     expect(markup).toContain('其他会话')
   })
 })
+
+describe('world live subscription', () => {
+  it('registers every event name the union declares', async () => {
+    // A name added to the union but forgotten in the client's listener map
+    // became a crash on first subscribe — and no test caught it, because web
+    // tests render to static markup and never run effects.
+    const source = await import('../src/world-live-client.js')
+    const text = await import('node:fs/promises').then((fs) =>
+      fs.readFile(new URL('../src/world-live-client.ts', import.meta.url), 'utf8'))
+    expect(typeof source.subscribeWorldLive).toBe('function')
+    // The map is derived from the union rather than hand-listed.
+    expect(text).toContain('WORLD_LIVE_EVENT_NAMES.map')
+    expect(text).not.toContain("client.listeners.get(eventName)!.add")
+  })
+})
