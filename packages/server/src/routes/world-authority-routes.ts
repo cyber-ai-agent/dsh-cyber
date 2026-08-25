@@ -1,15 +1,20 @@
 import type {
   ApprovalRequestView,
+  JsonObject,
   WorldCharacterPermission,
   WorldCharacterRole,
+  WorldPermissionRequest,
 } from '@dsh-cyber/contracts'
 import { RECOMMENDED_ADMIN_PERMISSIONS } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { HttpError } from '../http/errors.js'
 import { mapPermissionDecisionError } from '../http/world-permission-errors.js'
+import { TraceSanitizer } from '../world-trace/trace-sanitizer.js'
+import type { OwnerRuntimeAccessService } from '../services/owner-runtime-access-service.js'
 import type { Router } from '../http/router.js'
-import { readJson, requiredEnum, requiredString } from '../http/request.js'
+import {
+  optionalStringArray, readJson, requiredEnum, requiredString } from '../http/request.js'
 import { writeJson } from '../http/response.js'
 import type { CharacterSkillRuntime } from '../services/character-skill-runtime.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
@@ -31,6 +36,8 @@ export interface WorldAuthorityRoutesDependencies {
   worldPermissions: WorldPermissionRequestService
   skillRuntime: CharacterSkillRuntime
   turnContinuations: TurnAwareApprovalContinuationService
+  /** Issues one-time owner host-access grants. */
+  ownerRuntimeAccess?: OwnerRuntimeAccessService
 }
 
 /** World-local authority and decision endpoints. */
@@ -38,7 +45,7 @@ export function registerWorldAuthorityRoutes(
   router: Router,
   dependencies: WorldAuthorityRoutesDependencies,
 ): void {
-  const { store, worldAccess, authority, worldPermissions, skillRuntime, turnContinuations } = dependencies
+  const { store, worldAccess, authority, worldPermissions, skillRuntime, turnContinuations, ownerRuntimeAccess } = dependencies
 
   router.get(/^\/api\/worlds\/([^/]+)\/authorities$/, async ({ request, response, params }) => {
     const world = requireWorld(store, params[0]!)
@@ -86,6 +93,34 @@ export function registerWorldAuthorityRoutes(
     writeJson(response, 200, { authority: value })
   })
 
+  router.post(/^\/api\/worlds\/([^/]+)\/runtime-access-grants$/, async ({ request, response, params }) => {
+    const world = requireWorld(store, params[0]!)
+    await worldAccess.assertUnlocked(world.id, request)
+    if (ownerRuntimeAccess === undefined) {
+      throw new HttpError(501, 'owner_runtime_access_unavailable', '完整访问授权服务不可用')
+    }
+    const body = await readJson(request)
+    // This route is the only way a grant comes into existence, and nothing on
+    // the skill path can reach it: a character can never elevate itself.
+    for (const employeeId of optionalStringArray(body.employeeIds)) {
+      requireEmployeeInWorld(store, world.id, employeeId)
+    }
+    try {
+      const grant = ownerRuntimeAccess.issue({
+        worldId: world.id,
+        employeeIds: optionalStringArray(body.employeeIds),
+        clientTurnId: requiredString(body, 'clientTurnId'),
+        confirmed: body.confirmed === true,
+      })
+      writeJson(response, 201, { grant: { id: grant.id, expiresAt: new Date(grant.expiresAt).toISOString() } })
+    } catch (error) {
+      if ((error as { code?: unknown } | null)?.code === 'owner_runtime_access_denied') {
+        throw new HttpError(422, 'owner_runtime_access_denied', (error as Error).message)
+      }
+      throw error
+    }
+  })
+
   router.get(/^\/api\/worlds\/([^/]+)\/permission-requests$/, async ({ request, response, params }) => {
     const world = requireWorld(store, params[0]!)
     await worldAccess.assertUnlocked(world.id, request)
@@ -100,7 +135,8 @@ export function registerWorldAuthorityRoutes(
   router.get(/^\/api\/worlds\/([^/]+)\/pending-decisions$/, async ({ request, response, params }) => {
     const world = requireWorld(store, params[0]!)
     await worldAccess.assertUnlocked(world.id, request)
-    const permissionRequests = await worldPermissions.listPending(world.id)
+    const permissionRequests = (await worldPermissions.listPending(world.id))
+      .map((item) => withSubject(store, item))
     const approvals = listPendingApprovalViews(store, skillRuntime, world.id)
     writeJson(response, 200, {
       worldId: world.id,
@@ -174,6 +210,37 @@ function requiredPermissions(
   }
   return value.map((item) => (item as string).trim()) as WorldCharacterPermission[]
 }
+
+/**
+ * Attaches the concrete action a permission request is gating.
+ *
+ * A card that says only "requests world.settings.write" asks the user to
+ * consent to a permission key, not to a change. The same argument is already
+ * written down for the approval card next to it; the world card was strictly
+ * weaker.
+ */
+function withSubject(store: SqliteStore, request: WorldPermissionRequest): WorldPermissionRequest & {
+  subject?: { id: string; action: string; target: string; label: string; parameters: JsonObject }
+} {
+  const action = store.getSkillAction?.(request.skillActionId)
+    ?? store.listWorldSkillActions(request.worldId).find((item) => item.id === request.skillActionId)
+  if (action === undefined) return request
+  return {
+    ...request,
+    subject: {
+      id: action.id,
+      action: action.action,
+      target: action.target,
+      label: action.label,
+      // Adapter parameters are host-authored but small and open-ended; run
+      // them through the same redaction the audit trail uses so a card can
+      // never show more than the trace would.
+      parameters: sanitizer.json(action.parameters),
+    },
+  }
+}
+
+const sanitizer = new TraceSanitizer()
 
 function listPendingApprovalViews(
   store: SqliteStore,

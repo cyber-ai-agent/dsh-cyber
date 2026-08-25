@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { BUILTIN_BLUEPRINTS } from '@dsh-cyber/catalog'
-import type { AgentRuntimePort, AgentTurnRequest } from '@dsh-cyber/contracts'
+import type { JsonObject, AgentRuntimePort, AgentTurnRequest } from '@dsh-cyber/contracts'
 import {
   HarnessModelRouter,
   inspectHarnessCandidate,
@@ -73,6 +73,7 @@ import { WorldPackageInstanceService } from './services/world-package-instance-s
 import { WorldCharacterAuthorityService } from './services/world-character-authority-service.js'
 import { WorldPermissionRequestService } from './services/world-permission-request-service.js'
 import { WorldAuthorityBackfillService } from './services/world-authority-backfill-service.js'
+import { OwnerRuntimeAccessService } from './services/owner-runtime-access-service.js'
 import { WorldRuntimePermissionResolver } from './services/world-runtime-permission-resolver.js'
 import { createBuiltinSkillRegistry } from './skills/builtin-skill-registry.js'
 import { LocalSkillActionRepository } from './skills/local-skill-action-repository.js'
@@ -170,7 +171,16 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     roots: worldRoots,
   })
   await authorityBackfill.run(store.listWorkspaces().map((workspace) => workspace.id))
-  const worldPermissions = new WorldPermissionRequestService({ store, authority })
+  // The runtime service is constructed later, so the publisher is resolved
+  // lazily. Decisions announce a change rather than the client polling a
+  // snapshot that fires once per streamed token.
+  let publishDecisionChanged: ((worldId: string, payload: JsonObject) => void) | undefined
+  const worldPermissions = new WorldPermissionRequestService({
+    store,
+    authority,
+    onDecisionChanged: (worldId, payload) => publishDecisionChanged?.(worldId, payload),
+  })
+  const ownerRuntimeAccess = new OwnerRuntimeAccessService()
   const worldRuntimePermissions = new WorldRuntimePermissionResolver({
     roots: worldRoots,
     authority,
@@ -237,6 +247,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       runtimeStreamHub.publishWorld(event)
     },
   })
+  publishDecisionChanged = (worldId, payload) => worldRuntime.publishDecisionChanged(worldId, payload)
   const worldMarketplace = new WorldMarketplaceService(store, worldRuntime, worldPackages)
   const ambientSlotResolver = new WorldAmbientSlotResolver({ store })
   const ambientStateProvider = new WorldAmbientStateProvider({
@@ -317,14 +328,14 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerAmbientLifeRoutes(router, { store, settings: ambientLifeSettings, access: worldAccess })
   registerAssetRoutes(router, { store, assets, access: worldAccess })
   registerWorldRoutes(router, { store, worldAccess, worldPackages, authority })
-  registerWorldAuthorityRoutes(router, { store, worldAccess, authority, worldPermissions, skillRuntime, turnContinuations })
+  registerWorldAuthorityRoutes(router, { store, worldAccess, authority, worldPermissions, skillRuntime, turnContinuations , ownerRuntimeAccess })
   registerWorldSettingsRoutes(router, { store, settings: worldSettings, access: worldAccess })
   registerTaskScheduleRoutes(router, { store, schedules: taskSchedules, access: worldAccess })
   registerPackageRoutes(router, { store, packageManager, packageCatalog, skillRuntime, worldMarketplace, worldPackages, worldAccess })
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
   registerWorldTraceRoutes(router, { store, trace: worldTrace, access: worldAccess })
   registerModelInteractionRoutes(router, { store, interactions })
-  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, turnContinuations, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, worldTrace, employeeActivity, worldPackages, worldRuntimePermissions })
+  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, turnContinuations, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, worldTrace, employeeActivity, worldPackages, worldRuntimePermissions, ownerRuntimeAccess })
   registerEmployeeRoutes(router, { store, worldAccess, authority })
 
   const httpServer = createServer((request, response) => {

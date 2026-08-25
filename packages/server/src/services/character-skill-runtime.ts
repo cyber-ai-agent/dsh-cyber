@@ -10,7 +10,8 @@ import type {
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import type { CharacterSkillActionRepository } from '../skills/skill-action-repository.js'
-import type { CharacterSkillAdapterRegistry } from '../skills/skill-adapter.js'
+import type {
+  CharacterSkillActionProposal, CharacterSkillAdapterRegistry } from '../skills/skill-adapter.js'
 import { ServiceError } from './service-error.js'
 import type {
   DecideWorldPermissionInput,
@@ -102,6 +103,20 @@ export class CharacterSkillRuntime {
       promptSource: 'raw-user',
     })
     if (proposals.length === 0) return { handled: false, actions: [] }
+
+    // A plan is all-or-nothing at the gate. Every proposal is checked before
+    // any of them mutates, so a compound request cannot half-apply because its
+    // second target turned out not to exist. Without this, "改场景，然后把老王
+    // 设成管理员" could change the scenario and then discover 老王 belongs to
+    // another world.
+    const blocked = await this.#firstBlockedProposal(proposals, worldId, characterId)
+    if (blocked !== undefined) {
+      return {
+        handled: true,
+        actions: [],
+        ...(blocked.detail === undefined ? {} : { summary: `未执行任何管理动作：${blocked.detail}` }),
+      } as CharacterSkillResult
+    }
 
     const actions: CharacterSkillAction[] = []
     for (const proposal of proposals) {
@@ -507,6 +522,46 @@ export class CharacterSkillRuntime {
       }
     }
     return true
+  }
+
+  /**
+   * Finds the first proposal a batch cannot legally perform.
+   *
+   * Only adapters that publish a preflight participate, and only proposals
+   * that carry enough identity to be checked without side effects.
+   */
+  async #firstBlockedProposal(
+    proposals: readonly CharacterSkillActionProposal[],
+    worldId: string,
+    characterId: string,
+  ): Promise<{ detail?: string } | undefined> {
+    if (proposals.length < 2) return undefined
+    for (const proposal of proposals) {
+      const adapter = this.#registry.adapterForSkill(proposal.skillId)
+      if (adapter?.preflight === undefined) continue
+      const probe = {
+        id: 'preflight-probe',
+        worldId,
+        characterId,
+        skillId: proposal.skillId,
+        adapterId: proposal.adapterId,
+        action: proposal.action,
+        target: proposal.target,
+        label: proposal.label,
+        risk: proposal.risk,
+        authorization: proposal.authorization,
+        parameters: proposal.parameters ?? {},
+        status: 'waiting-for-integration',
+        detail: '',
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+      } as unknown as CharacterSkillAction
+      const result = await adapter.preflight(probe)
+      if (result !== undefined && !result.ready) {
+        return result.detail === undefined ? {} : { detail: result.detail }
+      }
+    }
+    return undefined
   }
 
   async #discard(action: CharacterSkillAction): Promise<void> {

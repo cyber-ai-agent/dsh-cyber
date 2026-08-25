@@ -154,7 +154,12 @@ export class WorldManagementAdapter implements CharacterSkillAdapter {
   propose(context: CharacterSkillMatchContext): CharacterSkillActionProposal[] {
     if (context.promptSource !== undefined && context.promptSource !== 'raw-user') return []
     const characters = this.#host.listCharacters?.(context.worldId) ?? []
-    return this.#parser.parse(context.prompt, { worldId: context.worldId, characters }, 'raw-user').map((proposal) => ({
+    const plan = this.#parser.compile(context.prompt, { worldId: context.worldId, characters }, 'raw-user')
+    // A clause the compiler could not read is reported on the first action of
+    // the plan, so the character can tell the user what it did not do instead
+    // of quietly performing half the request.
+    const unhandled = plan.unhandled.length > 0 ? { unhandledClauses: plan.unhandled } : {}
+    return plan.proposals.map((proposal, index) => ({
       skillId: proposal.skillId,
       adapterId: this.id,
       action: proposal.action,
@@ -164,7 +169,12 @@ export class WorldManagementAdapter implements CharacterSkillAdapter {
       authorization: 'explicit-user-request',
       authorizationSource: AUTHORITY_SOURCE,
       requiredWorldPermission: proposal.requiredWorldPermission,
-      parameters: { ...proposal.parameters, managementKind: proposal.kind },
+      parameters: {
+        ...proposal.parameters,
+        managementKind: proposal.kind,
+        ...(proposal.ordinal === undefined ? {} : { planOrdinal: proposal.ordinal, planSize: plan.proposals.length }),
+        ...(index === 0 ? unhandled : {}),
+      },
     }))
   }
 

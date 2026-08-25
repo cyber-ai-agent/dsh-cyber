@@ -175,7 +175,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
       </div>
 
       <div className="composer-zone">
-        {onDecideWorldPermissionRequest === undefined ? null : <WorldPermissionRequests items={permissionRequests} employees={employees} onDecide={onDecideWorldPermissionRequest} onOpenSettings={onOpenWorldPermissionSettings} />}
+        {onDecideWorldPermissionRequest === undefined ? null : <WorldPermissionRequests items={permissionRequests} employees={employees} activeSessionId={session?.id} onDecide={onDecideWorldPermissionRequest} onOpenSettings={onOpenWorldPermissionSettings} />}
         {onDecideApproval === undefined ? null : <ApprovalRequests items={approvals} onDecide={onDecideApproval} />}
         <div className="composer">
         {suggestions.length === 0 ? null : <div className="mention-menu" role="listbox" aria-label="当前世界角色">{suggestions.map((employee) => <button key={employee.id} type="button" onClick={() => insertMention(employee)}><Avatar index={employee.avatarIndex} size="sm" label={employee.displayName} authorityRole={employee.authorityRole} /><span><strong>{employee.displayName}<AuthorityBadge role={employee.authorityRole} /></strong><small>{employee.role} · 独立角色</small></span></button>)}</div>}
@@ -290,16 +290,34 @@ function RichText({ value, worldId }: { value: string; worldId: string }) {
 export function WorldPermissionRequests({
   items,
   employees,
+  activeSessionId,
   onDecide,
   onOpenSettings,
 }: {
   items: WorldPermissionRequest[]
   employees: CyberEmployee[]
+  activeSessionId?: string | undefined
   onDecide(requestId: string, scope: WorldPermissionDecisionScope | 'reject'): Promise<void>
   onOpenSettings?: ((employeeId: string) => void) | undefined
 }) {
-  const pending = items.filter((item) => item.status === 'pending')
-  if (pending.length === 0) return null
+  const allPending = items.filter((item) => item.status === 'pending')
+  // A decision belongs above the conversation that produced it. Cards from
+  // other conversations are counted rather than hidden: a decision surface
+  // that silently shows nothing is worse than one that is merely elsewhere.
+  const pending = activeSessionId === undefined
+    ? allPending
+    : allPending.filter((item) => item.sessionId === undefined || item.sessionId === activeSessionId)
+  const elsewhere = allPending.length - pending.length
+  if (pending.length === 0 && elsewhere === 0) return null
+  if (pending.length === 0) {
+    return (
+      <div className="world-permission-requests" aria-label="其他会话的待处理请求">
+        <p className="world-permission-request__blocked" role="note">
+          另有 {elsewhere} 个待处理的世界权限请求属于其他会话，请切换到对应会话处理。
+        </p>
+      </div>
+    )
+  }
   return (
     <div className="world-permission-requests" aria-label="待处理的世界权限请求">
       {pending.map((request) => {
@@ -317,7 +335,28 @@ export function WorldPermissionRequests({
             <p>{employee?.displayName ?? '当前角色'}想要{worldPermissionLabel(request.permission)}，仅用于这次工作回合。长期授权仍会记录在角色设置中。</p>
             {integrationMutation ? <p className="world-permission-request__blocked" role="note">连接管理权限暂不可在这里授予，需要通过连接管理流程单独安全审批。</p> : null}
             {persistentNeedsAdministrator && !integrationMutation ? <p className="world-permission-request__blocked" role="note">管理权限只能长期授予世界管理员；你仍可仅批准本次动作，或先在角色设置中提升其身份。</p> : null}
-            <dl><div><dt>请求权限</dt><dd><code>{request.permission}</code></dd></div><div><dt>到期时间</dt><dd>{formatPermissionExpiry(request.expiresAt)}</dd></div></dl>
+            <dl>
+              {subjectOf(request) === undefined ? null : (
+                <>
+                  <div><dt>具体动作</dt><dd>{subjectOf(request)!.label}</dd></div>
+                  <div><dt>调用</dt><dd><code>{subjectOf(request)!.action}</code></dd></div>
+                  <div><dt>目标</dt><dd><code>{subjectOf(request)!.target}</code></dd></div>
+                  {Object.entries(subjectOf(request)!.parameters ?? {}).length === 0 ? null : (
+                    <div className="world-permission-request__parameters">
+                      <dt>参数</dt>
+                      <dd>{Object.entries(subjectOf(request)!.parameters ?? {}).map(([key, value]) => (
+                        <code key={key}>{key}={typeof value === 'string' ? value : JSON.stringify(value)}</code>
+                      ))}</dd>
+                    </div>
+                  )}
+                </>
+              )}
+              <div><dt>请求权限</dt><dd><code>{request.permission}</code></dd></div>
+              <div><dt>到期时间</dt><dd>{formatPermissionExpiry(request.expiresAt)}</dd></div>
+            </dl>
+            {elsewhere === 0 ? null : (
+              <p className="world-permission-request__blocked" role="note">另有 {elsewhere} 个请求属于其他会话。</p>
+            )}
             <footer>
               <button className="primary-button" type="button" disabled={integrationMutation} onClick={() => void onDecide(request.id, 'once')}>仅本次允许</button>
               <button className="secondary-button" type="button" disabled={persistentDisabled} onClick={() => void onDecide(request.id, 'persistent')}>{integrationMutation ? '暂不可授予' : persistentNeedsAdministrator ? '需先设为管理员' : '授予该权限并执行'}</button>
@@ -329,6 +368,27 @@ export function WorldPermissionRequests({
       })}
     </div>
   )
+}
+
+/** The concrete action a request is gating, when the server supplied one. */
+function subjectOf(request: WorldPermissionRequest): {
+  action: string
+  target: string
+  label: string
+  parameters?: Record<string, unknown>
+} | undefined {
+  const subject = (request as { subject?: unknown }).subject
+  if (subject === null || typeof subject !== 'object') return undefined
+  const value = subject as { action?: unknown; target?: unknown; label?: unknown; parameters?: unknown }
+  if (typeof value.action !== 'string' || typeof value.target !== 'string' || typeof value.label !== 'string') return undefined
+  return {
+    action: value.action,
+    target: value.target,
+    label: value.label,
+    ...(value.parameters !== null && typeof value.parameters === 'object'
+      ? { parameters: value.parameters as Record<string, unknown> }
+      : {}),
+  }
 }
 
 function worldPermissionLabel(permission: WorldCharacterPermission): string {

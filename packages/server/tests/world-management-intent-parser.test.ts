@@ -60,11 +60,42 @@ describe('WorldManagementIntentParser', () => {
     expect(revoke?.parameters.permissionGrants).toEqual([])
   })
 
-  it('rejects ambiguous character names instead of guessing a target', () => {
-    expect(parser.parse('把王设置成管理员', {
+  it('asks which character it meant instead of guessing or going silent', () => {
+    // Returning [] told the user nothing happened, by way of a model that was
+    // never told anything happened. A clarification names the candidates.
+    const [proposal] = parser.parse('把王设置成管理员', {
       worldId: 'world-1',
       characters: [{ id: 'a', displayName: '王' }, { id: 'b', displayName: '王' }],
-    })).toEqual([])
+    })
+    expect(proposal).toMatchObject({ kind: 'clarification' })
+    expect(proposal?.parameters).toMatchObject({ reason: 'ambiguous-character' })
+    expect((proposal?.parameters.candidates as unknown[])).toHaveLength(2)
+  })
+
+  it('resolves the longest matching name rather than refusing on a false ambiguity', () => {
+    const [proposal] = parser.parse('把老王设成管理员', {
+      worldId: 'world-1',
+      characters: [{ id: 'a', displayName: '王' }, { id: 'b', displayName: '老王' }],
+    })
+    expect(proposal).toMatchObject({ kind: 'authority-update', target: 'character:b' })
+  })
+
+  it('splits a compound request into an ordered plan instead of swallowing it', () => {
+    const proposals = parser.parse('把当前场景改成产品评审，然后把老王设成管理员', context)
+    expect(proposals.map((item) => item.action)).toEqual([
+      'world.settings.update',
+      'world.authority.update',
+    ])
+    // The scenario used to become the entire sentence, administrator included.
+    expect(proposals[0]?.parameters).toMatchObject({ scenario: '产品评审' })
+    expect(JSON.stringify(proposals[0]?.parameters)).not.toContain('管理员')
+    expect(proposals.map((item) => item.ordinal)).toEqual([1, 2])
+  })
+
+  it('reports a clause it could not compile instead of dropping it', () => {
+    const plan = parser.compile('把当前场景改成产品评审，然后请他喝杯咖啡', context)
+    expect(plan.proposals).toHaveLength(1)
+    expect(plan.unhandled).toEqual(['请老王喝杯咖啡'.replace('老王', '他')])
   })
 })
 

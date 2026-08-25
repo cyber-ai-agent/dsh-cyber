@@ -130,3 +130,69 @@ describe('world authority UI', () => {
     expect(integrationMarkup).not.toContain('授予该权限并执行')
   })
 })
+
+describe('world permission card content and routing', () => {
+  const base = {
+    id: 'request-1',
+    workspaceId: 'workspace-1',
+    worldId: 'world-1',
+    employeeId: 'employee-1',
+    skillActionId: 'action-1',
+    permission: 'world.settings.write' as const,
+    status: 'pending' as const,
+    createdAt: '2026-08-25T10:00:00.000Z',
+    expiresAt: '2026-08-25T10:10:00.000Z',
+  }
+  const employees = [{ id: 'employee-1', displayName: '小刘', authorityRole: 'member' } as never]
+  const noop = async () => {}
+
+  it('shows the concrete action, not only the permission key', () => {
+    const markup = renderToStaticMarkup(createElement(WorldPermissionRequests, {
+      items: [{
+        ...base,
+        sessionId: 'session-a',
+        subject: {
+          id: 'action-1',
+          action: 'world.settings.update',
+          target: 'world:world-1',
+          label: '修改当前场景',
+          parameters: { scenario: '产品评审' },
+        },
+      } as never],
+      employees,
+      activeSessionId: 'session-a',
+      onDecide: noop,
+    }))
+    expect(markup).toContain('修改当前场景')
+    expect(markup).toContain('world.settings.update')
+    expect(markup).toContain('scenario=产品评审')
+  })
+
+  it('keeps another conversation card out of this composer but visible as a count', () => {
+    const markup = renderToStaticMarkup(createElement(WorldPermissionRequests, {
+      items: [{ ...base, sessionId: 'session-b' } as never],
+      employees,
+      activeSessionId: 'session-a',
+      onDecide: noop,
+    }))
+    // Not decidable here…
+    expect(markup).not.toContain('仅本次允许')
+    // …but never silently absent.
+    expect(markup).toContain('其他会话')
+  })
+})
+
+describe('world live subscription', () => {
+  it('registers every event name the union declares', async () => {
+    // A name added to the union but forgotten in the client's listener map
+    // became a crash on first subscribe — and no test caught it, because web
+    // tests render to static markup and never run effects.
+    const source = await import('../src/world-live-client.js')
+    const text = await import('node:fs/promises').then((fs) =>
+      fs.readFile(new URL('../src/world-live-client.ts', import.meta.url), 'utf8'))
+    expect(typeof source.subscribeWorldLive).toBe('function')
+    // The map is derived from the union rather than hand-listed.
+    expect(text).toContain('WORLD_LIVE_EVENT_NAMES.map')
+    expect(text).not.toContain("client.listeners.get(eventName)!.add")
+  })
+})

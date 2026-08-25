@@ -30,6 +30,11 @@ test.afterAll(async () => {
 async function ensureWorld(page: import('@playwright/test').Page) {
   await page.goto(origin)
   const onboarding = page.getByRole('heading', { name: '创建第一个本地世界' })
+  const shell = page.locator('.workbench-shell')
+  // isVisible() does not wait. Without this the check runs before React has
+  // mounted, returns false, the onboarding click is skipped and the shell
+  // never appears — a race the rest of the suite already guards against.
+  await expect(shell.or(onboarding)).toBeVisible()
   if (await onboarding.isVisible()) await page.getByRole('button', { name: '创建我的世界' }).click()
   await expect(page.locator('.workbench-shell')).toBeVisible()
   await expect(page.locator('.world-runtime-canvas')).toBeVisible()
