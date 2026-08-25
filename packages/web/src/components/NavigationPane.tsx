@@ -207,7 +207,7 @@ function SessionRow({
         <span className={`session-row__avatar${session.kind === 'group' || session.kind === 'meeting' ? ' session-row__avatar--group' : ''}`} aria-hidden="true">
           {participants.length === 0
             ? session.kind === 'group' || session.kind === 'meeting' ? <UsersThree size={16} /> : <ChatCircleDots size={16} />
-            : participants.slice(0, 2).map((employee) => <Avatar key={employee.id} index={employee.avatarIndex} size="sm" label={employee.displayName} />)}
+            : participants.slice(0, 2).map((employee) => <Avatar key={employee.id} index={employee.avatarIndex} size="sm" label={employee.displayName} authorityRole={employee.authorityRole} />)}
         </span>
         <span className="session-row__copy"><strong>{directTitle(session, participants)}</strong><small>{subtitle}</small></span>
         <time>{formatSessionTime(session.updatedAt)}</time>

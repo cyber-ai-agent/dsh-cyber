@@ -1,19 +1,24 @@
 import { CheckCircle, LockKey, Palette, SlidersHorizontal, UserCircle, WarningCircle, X } from '@phosphor-icons/react'
 import { useEffect, useRef, useState } from 'react'
-import type { AgentPermissionMode, EmployeeInstance, ModelProfile, ReasoningEffort, World, WorldSettings } from '@dsh-cyber/contracts'
+import type { AgentPermissionMode, EmployeeInstance, ModelProfile, ReasoningEffort, World, WorldCharacterAuthority, WorldSettings } from '@dsh-cyber/contracts'
+
+import type { CyberEmployee } from '../types.js'
+import { Avatar } from './Avatar.js'
 
 interface WorldSettingsDialogProps {
   world: World
   value: WorldSettings
   models: ModelProfile[]
   employees: EmployeeInstance[]
+  authorities?: WorldCharacterAuthority[]
   saving: boolean
   onClose(): void
   onSave(value: WorldSettings): Promise<void>
-  onSetAdministrator(employeeId: string): Promise<void>
+  onManageAdministrators?(): void
+  onManageEmployee?(employeeId: string): void
 }
 
-export function WorldSettingsDialog({ world, value, models, employees, saving, onClose, onSave, onSetAdministrator }: WorldSettingsDialogProps) {
+export function WorldSettingsDialog({ world, value, models, employees, authorities, saving, onClose, onSave, onManageAdministrators, onManageEmployee }: WorldSettingsDialogProps) {
   const [draft, setDraft] = useState(value)
   const [notice, setNotice] = useState<string>()
   const [error, setError] = useState<string>()
@@ -37,6 +42,13 @@ export function WorldSettingsDialog({ world, value, models, employees, saving, o
     applyWorldPreview(value)
     onClose()
   }
+
+  const administratorIds = authorities === undefined
+    ? (world.administratorEmployeeId === undefined ? [] : [world.administratorEmployeeId])
+    : authorities.filter((authority) => authority.role === 'administrator').map((authority) => authority.employeeId)
+  const administrators = administratorIds
+    .map((employeeId) => employees.find((employee) => employee.id === employeeId))
+    .filter((employee): employee is EmployeeInstance => employee !== undefined && employee.status !== 'archived')
 
   const save = async () => {
     setError(undefined)
@@ -75,7 +87,28 @@ export function WorldSettingsDialog({ world, value, models, employees, saving, o
 
           <fieldset>
             <legend><UserCircle size={16}/> 你与角色</legend>
-            <label>世界管理员<select value={world.administratorEmployeeId ?? ''} onChange={(event)=>void onSetAdministrator(event.target.value)}><option value="" disabled>选择本世界角色</option>{employees.filter((employee)=>employee.worldId===world.id && employee.status!=='archived').map((employee)=><option key={employee.id} value={employee.id}>{employee.displayName} · {employee.role}</option>)}</select><small>管理员只在当前世界生效，可以修改本世界其他角色的设定。</small></label>
+            <div className="world-admin-overview" aria-labelledby="world-admin-overview-title">
+              <div className="world-admin-overview__heading">
+                <div><strong id="world-admin-overview-title">世界管理员</strong><small>共 {administrators.length} 名管理员</small></div>
+                <button className="secondary-button" type="button" onClick={onManageAdministrators}>管理角色</button>
+              </div>
+              {administrators.length === 0 ? <p className="world-admin-overview__empty">当前世界还没有管理员。请在角色设置中授予管理员身份。</p> : (
+                <ul className="world-admin-list">
+                  {administrators.map((employee) => {
+                    const cyberEmployee = employee as CyberEmployee
+                    return (
+                      <li key={employee.id}>
+                        <button type="button" className="world-admin-list__item" onClick={() => onManageEmployee?.(employee.id)} aria-label={`管理${employee.displayName}的世界权限`}>
+                          <Avatar index={cyberEmployee.avatarIndex ?? 0} size="sm" label={employee.displayName} authorityRole="administrator" />
+                          <span><strong>{employee.displayName}</strong><small>{employee.role}</small></span>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+              <p className="setting-help">管理员身份和具体世界权限请在角色设置中管理。</p>
+            </div>
             <label>你的名字<input value={draft.userIdentity.displayName} onChange={(event)=>setDraft({...draft,userIdentity:{...draft.userIdentity,displayName:event.target.value}})} placeholder="你希望角色怎么识别你"/></label>
             <label>你在这个世界的身份<input value={draft.userIdentity.worldRole} onChange={(event)=>setDraft({...draft,userIdentity:{...draft.userIdentity,worldRole:event.target.value}})} placeholder="主人 / 院长 / 旅人 / 负责人"/></label>
             <label>角色默认如何称呼你<input value={draft.userIdentity.addressAs} onChange={(event)=>setDraft({...draft,userIdentity:{...draft.userIdentity,addressAs:event.target.value}})} placeholder="主人 / 院长 / 名字"/></label>

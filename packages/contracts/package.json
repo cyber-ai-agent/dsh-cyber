@@ -29,6 +29,10 @@
     "./world-trace": {
       "types": "./lib/world-trace.d.ts",
       "default": "./lib/world-trace.js"
+    },
+    "./world-authority": {
+      "types": "./lib/world-authority.d.ts",
+      "default": "./lib/world-authority.js"
     }
   },
   "files": ["lib"],

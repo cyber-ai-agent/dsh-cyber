@@ -9,36 +9,80 @@ const reasoning = new Set<ReasoningEffort>(['auto', 'off', 'minimal', 'low', 'me
 const permissionModes = new Set<AgentPermissionMode>(['read-only', 'workspace-write', 'danger-full-access'])
 const COLOR = /^#[0-9a-f]{6}$/i
 
+export interface WorldSettingsSnapshot {
+  settings: WorldSettings
+  revision: number
+}
+
+export class WorldSettingsConflictError extends Error {
+  readonly code = 'world_settings_revision_conflict'
+
+  constructor(
+    readonly worldId: string,
+    readonly expectedRevision: number,
+    readonly actualRevision: number,
+  ) {
+    super(`World settings changed concurrently (expected revision ${expectedRevision}, actual ${actualRevision})`)
+    this.name = 'WorldSettingsConflictError'
+  }
+}
+
 export class WorldSettingsService {
   readonly #roots: WorldRootService
 
   constructor(roots: WorldRootService) { this.#roots = roots }
 
   async get(worldId: string): Promise<WorldSettings> {
+    return (await this.getSnapshot(worldId)).settings
+  }
+
+  async getSnapshot(worldId: string): Promise<WorldSettingsSnapshot> {
     const root = await this.#roots.ensure(worldId)
     try {
-      return normalize(worldId, JSON.parse(await readFile(join(root.rootPath, 'settings.json'), 'utf8')) as Partial<WorldSettings>)
+      const raw = JSON.parse(await readFile(join(root.rootPath, 'settings.json'), 'utf8')) as Record<string, unknown>
+      const revision = typeof raw.revision === 'number' && Number.isSafeInteger(raw.revision) && raw.revision >= 0
+        ? raw.revision
+        : 0
+      return { settings: normalize(worldId, raw as Partial<WorldSettings>), revision }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      return defaults(worldId)
+      return { settings: defaults(worldId), revision: 0 }
     }
   }
 
   async save(worldId: string, value: Partial<WorldSettings>): Promise<WorldSettings> {
-    const current = await this.get(worldId)
+    const current = await this.getSnapshot(worldId)
+    const next = await this.savePatch(worldId, value as Record<string, unknown>, current.revision)
+    return next.settings
+  }
+
+  async savePatch(
+    worldId: string,
+    value: Record<string, unknown>,
+    expectedRevision: number,
+  ): Promise<WorldSettingsSnapshot> {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+      throw new TypeError('World settings revision must be a non-negative integer')
+    }
+    const current = await this.getSnapshot(worldId)
+    if (current.revision !== expectedRevision) {
+      throw new WorldSettingsConflictError(worldId, expectedRevision, current.revision)
+    }
+    const currentSettings = current.settings
     const next = normalize(worldId, {
-      ...current,
+      ...currentSettings,
       ...value,
-      userIdentity: { ...current.userIdentity, ...value.userIdentity },
-      terminology: { ...current.terminology, ...value.terminology },
-      appearance: { ...current.appearance, ...value.appearance },
-      model: { ...current.model, ...value.model },
-      runtime: { ...current.runtime, ...value.runtime },
+      userIdentity: { ...currentSettings.userIdentity, ...asRecord(value.userIdentity) },
+      terminology: { ...currentSettings.terminology, ...asRecord(value.terminology) },
+      appearance: { ...currentSettings.appearance, ...asRecord(value.appearance) },
+      model: { ...currentSettings.model, ...asRecord(value.model) },
+      runtime: { ...currentSettings.runtime, ...asRecord(value.runtime) },
       updatedAt: new Date().toISOString(),
     })
     const root = await this.#roots.ensure(worldId)
-    await atomic(join(root.rootPath, 'settings.json'), `${JSON.stringify(next, null, 2)}\n`)
-    return next
+    const revision = current.revision + 1
+    await atomic(join(root.rootPath, 'settings.json'), `${JSON.stringify({ ...next, revision }, null, 2)}\n`)
+    return { settings: next, revision }
   }
 
   async composeRuntimePrompt(worldId: string, character: EmployeeInstance, prompt: string): Promise<string> {
@@ -132,9 +176,9 @@ function normalize(worldId: string, value: Partial<WorldSettings>): WorldSetting
       fontScale: clampNumber(raw.appearance.fontScale, 0.8, 1.4, base.appearance.fontScale),
     },
     model: {
-      ...(typeof raw.model.defaultModelProfileId === 'string' && raw.model.defaultModelProfileId.trim()
-        ? { defaultModelProfileId: raw.model.defaultModelProfileId.trim().slice(0, 160) }
-        : {}),
+      // Model identity is authoritative in SQLite model_assignments. Keep
+      // only the local reasoning preference in settings.json; a legacy
+      // defaultModelProfileId is intentionally ignored and never rewritten.
       reasoningEffort: reasoning.has(raw.model.reasoningEffort) ? raw.model.reasoningEffort : 'auto',
     },
     runtime: {
@@ -147,6 +191,12 @@ function normalize(worldId: string, value: Partial<WorldSettings>): WorldSetting
 
 function cleanText(value: unknown, max: number): string {
   return typeof value === 'string' ? value.replaceAll('\0', '').trim().slice(0, max) : ''
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
 }
 
 function color(value: unknown, fallback: string): string {

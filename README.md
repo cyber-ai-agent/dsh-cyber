@@ -116,7 +116,9 @@ Available
 
 - 可设置全局应用锁；锁定后整个工作台被锁屏界面遮住，服务端同时拒绝世界、会话、消息和设置请求。
 - 密码使用本机派生哈希保存，不写入 SQLite、日志或前端响应；每次服务启动后需要重新解锁。
-- 每个世界拥有一个默认管理员。管理员绑定强制不跨世界（跨世界指派会被存储层拒绝）；管理员目前是写入角色 Persona 的身份标记，尚未实现由它强制的角色管理能力。
+- 每个世界拥有一个或多个 World Administrator。管理员身份和 18 项 World Permission 由 SQLite `WorldCharacterAuthority` 持久化；管理员 Badge、角色权限编辑器、审计记录、最后管理员保护和同世界权限委托都走真实服务端边界。World Administrator 只在当前世界生效，不等于应用管理员，也不会自动获得 `danger-full-access`。
+- 缺少世界权限时，角色可以在当前聊天中发起精确的 World Permission Request；用户选择本次允许、长期授予或拒绝后，原 WorkTurn 继续，不重复执行整轮用户消息。外部副作用仍须经过现有 Approval Gate。
+- 管理员可通过受信任的 `builtin.world-management` 动作修改当前世界设置、角色、World Package Instance 和模型分配；设置使用 revision 冲突保护，模型分配以 SQLite 为权威。
 - AI 模型连接先填写服务地址和密钥，再拉取、搜索并选择模型 ID；模型密钥只在当前设备加密保存。
 - 设置页采用单列内容流，维护入口只保留真实的检查和安装更新功能。
 

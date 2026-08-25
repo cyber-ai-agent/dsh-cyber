@@ -151,7 +151,7 @@ function WorldScene({ kind, employees, sceneImage, lightsOn, zoom, onSelectEmplo
               onClick={() => onSelectEmployee(employee.id)}
               aria-label={`进入${employee.displayName}的会话`}
             >
-              <span className="world-agent__sprite"><Avatar index={employee.avatarIndex} size="world" label={employee.displayName} /></span>
+              <span className="world-agent__sprite"><Avatar index={employee.avatarIndex} size="world" label={employee.displayName} authorityRole={employee.authorityRole} /></span>
               <span className="world-agent__label"><strong>{employee.displayName}</strong><small>{activityLabel(employee, isTavern)}</small></span>
             </button>
           )

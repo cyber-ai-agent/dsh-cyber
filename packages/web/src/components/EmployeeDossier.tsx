@@ -53,7 +53,7 @@ export function EmployeeDossier({ dossier, employees, avatarIndex, world, onDire
       </div>
       <header className="dossier-hero">
         <button className="avatar-edit-button" type="button" aria-label={`修改${dossier.employee.displayName}的名字和头像`} onClick={onManage}>
-          <Avatar index={avatarIndex} size="lg" label={dossier.employee.displayName} status={dossier.employee.status} />
+          <Avatar index={avatarIndex} size="lg" label={dossier.employee.displayName} status={dossier.employee.status} authorityRole={employees.find((employee) => employee.id === dossier.employee.id)?.authorityRole} />
         </button>
         <div className="dossier-hero__identity">
           <h2>{dossier.employee.displayName}</h2>
@@ -165,7 +165,7 @@ export function EmployeeDossier({ dossier, employees, avatarIndex, world, onDire
               const colleague = employees.find((employee) => employee.id === relationship.colleagueId)
               return (
                 <article key={relationship.colleagueId}>
-                  <Avatar index={colleague?.avatarIndex ?? 7} label={colleague?.displayName ?? '关联角色'} size="sm" />
+                  <Avatar index={colleague?.avatarIndex ?? 7} label={colleague?.displayName ?? '关联角色'} size="sm" authorityRole={colleague?.authorityRole} />
                   <div><strong>{colleague?.displayName ?? relationship.colleagueId}</strong><span>{colleague?.role ?? '关联角色'}</span></div>
                   <dl>
                     <div><dt>{roleplay ? '互动' : '协作'}</dt><dd>{relationship.collaborationCount}</dd></div>

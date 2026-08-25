@@ -1,11 +1,11 @@
-import type { WorldSettings } from '@dsh-cyber/contracts'
+import type { ModelAssignment, WorldSettings } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 import { HttpError } from '../http/errors.js'
 import type { Router } from '../http/router.js'
-import { readJson, record, requiredString } from '../http/request.js'
+import { readJson, record, requiredNumber, requiredString } from '../http/request.js'
 import { writeJson } from '../http/response.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
-import type { WorldSettingsService } from '../services/world-settings-service.js'
+import { WorldSettingsConflictError, type WorldSettingsService } from '../services/world-settings-service.js'
 
 export function registerWorldSettingsRoutes(
   router: Router,
@@ -18,8 +18,12 @@ export function registerWorldSettingsRoutes(
     const world = store.getWorld(worldId)
     if (world === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
     await access.assertUnlocked(worldId, request)
+    const snapshot = await settings.getSnapshot(worldId)
+    const modelAssignment = store.getModelAssignment(world.workspaceId, 'world', world.id)
     writeJson(response, 200, {
-      settings: await settings.get(worldId),
+      settings: settingsWithModelAssignment(snapshot.settings, modelAssignment),
+      revision: snapshot.revision,
+      modelAssignment,
       access: await access.summary(worldId, request),
       models: store.listModelProfiles(world.workspaceId),
     })
@@ -31,28 +35,58 @@ export function registerWorldSettingsRoutes(
     if (world === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
     await access.assertUnlocked(worldId, request)
     const body = await readJson(request)
-    const modelInput = record(body.model)
-    const requestedProfileId = modelInput?.defaultModelProfileId === undefined
+    const expectedRevision = requiredNumber(body, 'expectedRevision')
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+      throw new HttpError(422, 'invalid_revision', 'expectedRevision must be a non-negative integer')
+    }
+    const modelInputValue = body.model
+    const modelInput = modelInputValue === undefined ? undefined : record(modelInputValue)
+    if (modelInputValue !== undefined && modelInput === undefined) {
+      throw new HttpError(422, 'invalid_model_patch', 'model must be an object')
+    }
+    const hasModelAssignmentPatch = modelInput !== undefined
+      && Object.prototype.hasOwnProperty.call(modelInput, 'defaultModelProfileId')
+    const requestedProfileId = !hasModelAssignmentPatch || modelInput!.defaultModelProfileId === null
       ? undefined
-      : requiredString(modelInput, 'defaultModelProfileId')
-    if (requestedProfileId !== undefined) {
+      : requiredString(modelInput!, 'defaultModelProfileId')
+    if (hasModelAssignmentPatch && requestedProfileId !== undefined) {
       const profile = store.getModelProfile(requestedProfileId)
       if (profile === undefined || profile.workspaceId !== world.workspaceId) {
         throw new HttpError(422, 'world_model_profile_invalid', '所选模型不属于当前本地实例')
       }
     }
-    const saved = await settings.save(worldId, body as Partial<WorldSettings>)
-    if (saved.model.defaultModelProfileId === undefined) {
+    const settingsPatch: Record<string, unknown> = { ...body }
+    delete settingsPatch.expectedRevision
+    delete settingsPatch.model
+    if (modelInput !== undefined) {
+      const { defaultModelProfileId: _defaultModelProfileId, ...fileModelPatch } = modelInput
+      if (Object.keys(fileModelPatch).length > 0) settingsPatch.model = fileModelPatch
+    }
+    let saved: { settings: WorldSettings; revision: number }
+    try {
+      saved = await settings.savePatch(worldId, settingsPatch, expectedRevision)
+    } catch (error) {
+      if (error instanceof WorldSettingsConflictError) {
+        throw new HttpError(409, 'world_settings_revision_conflict', error.message)
+      }
+      throw error
+    }
+    if (hasModelAssignmentPatch && requestedProfileId === undefined) {
       store.clearModelAssignment(world.workspaceId, 'world', world.id)
-    } else {
+    } else if (hasModelAssignmentPatch) {
       store.saveModelAssignment({
         workspaceId: world.workspaceId,
         scope: 'world',
         scopeId: world.id,
-        modelProfileId: saved.model.defaultModelProfileId,
+        modelProfileId: requestedProfileId!,
       })
     }
-    writeJson(response, 200, { settings: saved })
+    const modelAssignment = store.getModelAssignment(world.workspaceId, 'world', world.id)
+    writeJson(response, 200, {
+      settings: settingsWithModelAssignment(saved.settings, modelAssignment),
+      revision: saved.revision,
+      modelAssignment,
+    })
   })
 
   router.get(/^\/api\/worlds\/([^/]+)\/access$/, async ({ request, response, params }) => {
@@ -94,4 +128,14 @@ export function registerWorldSettingsRoutes(
     access.lock(worldId, request, response)
     writeJson(response, 200, { ok: true })
   })
+}
+
+function settingsWithModelAssignment(settings: WorldSettings, assignment: ModelAssignment | undefined): WorldSettings {
+  return {
+    ...settings,
+    model: {
+      ...settings.model,
+      ...(assignment === undefined ? {} : { defaultModelProfileId: assignment.modelProfileId }),
+    },
+  }
 }

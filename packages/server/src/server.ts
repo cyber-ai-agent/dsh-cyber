@@ -39,6 +39,7 @@ import { registerWorkspaceFileRoutes } from './routes/workspace-file-routes.js'
 import { registerWorkspaceRoutes } from './routes/workspace-routes.js'
 import { registerWorldRuntimeRoutes } from './routes/world-runtime-routes.js'
 import { registerWorldTraceRoutes } from './routes/world-trace-routes.js'
+import { registerWorldAuthorityRoutes } from './routes/world-authority-routes.js'
 import { registerWorldRoutes } from './routes/world-routes.js'
 import { registerWorldSettingsRoutes } from './routes/world-settings-routes.js'
 import { AmbientLifeExecutor } from './services/ambient-life-executor.js'
@@ -69,11 +70,16 @@ import { WorldSettingsService } from './services/world-settings-service.js'
 import { WorldTraceService } from './services/world-trace-service.js'
 import { WorldMarketplaceService } from './services/world-marketplace-service.js'
 import { WorldPackageInstanceService } from './services/world-package-instance-service.js'
+import { WorldCharacterAuthorityService } from './services/world-character-authority-service.js'
+import { WorldPermissionRequestService } from './services/world-permission-request-service.js'
+import { WorldAuthorityBackfillService } from './services/world-authority-backfill-service.js'
+import { WorldRuntimePermissionResolver } from './services/world-runtime-permission-resolver.js'
 import { createBuiltinSkillRegistry } from './skills/builtin-skill-registry.js'
 import { LocalSkillActionRepository } from './skills/local-skill-action-repository.js'
 import { SqliteSkillActionRepository } from './skills/sqlite-skill-action-repository.js'
 import type { CharacterSkillActionRepository } from './skills/skill-action-repository.js'
 import type { CharacterSkillAdapterRegistry } from './skills/skill-adapter.js'
+import type { WorldManagementHost } from './skills/world-management-adapter.js'
 import { RuntimeStreamHub } from './streams/runtime-stream-hub.js'
 import { WorldStreamHub } from './streams/world-stream-hub.js'
 import { validateStagedPackageEntrypoints } from './installed-package-runtime.js'
@@ -151,14 +157,109 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const credentials = await ModelCredentialService.open(stateRoot)
   const modelCatalog = new ModelCatalogService(credentials)
   const worldPackages = new WorldPackageInstanceService(store, worldRoots)
+  const authority = new WorldCharacterAuthorityService(store)
+  const authorityBackfill = new WorldAuthorityBackfillService({
+    authority: {
+      get: authority.get.bind(authority),
+      hasPermission: authority.hasPermission.bind(authority),
+      updateAuthority: authority.updateAuthority.bind(authority),
+      listWorlds: (workspaceId) => store.listWorlds(workspaceId),
+      listEmployees: (worldId) => store.listEmployees(worldId),
+      listAuthorityChanges: (worldId, employeeId) => authority.listChanges(worldId, employeeId),
+    },
+    roots: worldRoots,
+  })
+  await authorityBackfill.run(store.listWorkspaces().map((workspace) => workspace.id))
+  const worldPermissions = new WorldPermissionRequestService({ store, authority })
+  const worldRuntimePermissions = new WorldRuntimePermissionResolver({
+    roots: worldRoots,
+    authority,
+    worldPermissions,
+  })
   const mcpClients = options.mcpClientFactory ?? new OfficialMcpClientFactory()
   const integrations = await IntegrationService.open(stateRoot, createBuiltinIntegrationRegistry(mcpClients))
+
+  const worldManagementHost: WorldManagementHost = {
+    listCharacters: (worldId) => store.listEmployees(worldId).map((employee) => ({
+      id: employee.id,
+      displayName: employee.displayName,
+      status: employee.status,
+    })),
+    settings: {
+      get: async (worldId) => {
+        const settings = await worldSettings.get(worldId)
+        return { ...settings }
+      },
+      getSnapshot: async (worldId) => {
+        const snapshot = await worldSettings.getSnapshot(worldId)
+        return { settings: { ...snapshot.settings }, revision: snapshot.revision }
+      },
+      savePatch: async (worldId, patch, expectedRevision) => {
+        const snapshot = await worldSettings.savePatch(worldId, patch, expectedRevision)
+        return { settings: { ...snapshot.settings }, revision: snapshot.revision }
+      },
+    },
+    authority,
+    managementActor: (action) => {
+      const request = action.requiredWorldPermission === undefined
+        ? undefined
+        : store.getWorldPermissionRequestForAction(action.id, action.requiredWorldPermission)
+      const onceApproved = request?.status === 'approved'
+        && request.decisionScope === 'once'
+        && request.consumedAt === undefined
+      return onceApproved
+        ? { kind: 'owner', id: 'local-user' }
+        : { kind: 'employee', id: action.characterId }
+    },
+    getWorld: (worldId) => {
+      const world = store.getWorld(worldId)
+      return world === undefined ? undefined : { id: world.id, workspaceId: world.workspaceId }
+    },
+    listPackages: (worldId) => worldPackages.listRuntimePackages(worldId),
+    instantiatePackage: async (worldId, packageId) => {
+      const world = store.getWorld(worldId)
+      if (world === undefined) throw new Error('世界不存在')
+      const installed = store.getActivePackage(world.workspaceId, packageId)
+      if (installed === undefined) throw new Error('当前工作区没有这个插件的活动版本')
+      await worldPackages.instantiate({
+        worldId,
+        packageId,
+        version: installed.version,
+        actorId: 'local-user',
+      })
+    },
+    disablePackage: (worldId, packageId) => {
+      const instance = store.listWorldPackageInstances(worldId, 'active').find((item) => item.packageId === packageId)
+      if (instance === undefined) throw new Error('当前世界没有这个插件实例')
+      store.disableWorldPackageInstance(instance.id, 'local-user')
+    },
+    readModel: (worldId) => {
+      const world = store.getWorld(worldId)
+      if (world === undefined) throw new Error('世界不存在')
+      return store.getModelAssignment(world.workspaceId, 'world', world.id)
+    },
+    assignModel: (worldId, modelProfileId) => {
+      const world = store.getWorld(worldId)
+      const profile = world === undefined ? undefined : store.getModelProfile(modelProfileId)
+      if (world === undefined || profile === undefined || profile.workspaceId !== world.workspaceId) {
+        throw new Error('模型档案不属于当前世界')
+      }
+      store.saveModelAssignment({
+        workspaceId: world.workspaceId,
+        scope: 'world',
+        scopeId: world.id,
+        modelProfileId,
+        actorId: 'local-user',
+      })
+    },
+  }
   const skillRegistry = options.skillRegistry ?? createBuiltinSkillRegistry({
     firecrawl: {
       store,
       integrations,
       listWorldPackages: (worldId) => worldPackages.listRuntimePackages(worldId),
     },
+    worldManagement: worldManagementHost,
   })
   const mcpAdapter = options.skillRegistry === undefined ? new McpSkillAdapter({ store, integrations, clients: mcpClients }) : undefined
   if (mcpAdapter !== undefined) skillRegistry.register(mcpAdapter)
@@ -170,7 +271,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     ...(activeDshBinPath === undefined ? {} : { dshBinPath: activeDshBinPath }),
     resolveRoute(request) { return resolveHarnessRoute(store, request) },
   })
-  const profileRuntime = new CharacterProfileRuntime(baseRuntime, store, skillRegistry)
+  const profileRuntime = new CharacterProfileRuntime(baseRuntime, store, skillRegistry, authority)
   const runtime = new TurnInteractionLoggingRuntime({
     inner: profileRuntime,
     service: interactions,
@@ -247,6 +348,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const skillRuntime = new CharacterSkillRuntime(store, {
     registry: skillRegistry,
     actions: skillActions,
+    worldPermissions,
   })
   const turnContinuations = new TurnAwareApprovalContinuationService({
     store,
@@ -254,6 +356,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     skills: skillRuntime,
     settings: worldSettings,
     worldPackages,
+    worldPermissions,
   })
   const worldTrace = new WorldTraceService({ store, actions: skillActions })
   const employeeActivity = new EmployeeActivityProjectionService(store)
@@ -281,15 +384,16 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   })
   registerAmbientLifeRoutes(router, { store, settings: ambientLifeSettings, access: worldAccess })
   registerAssetRoutes(router, { store, assets, access: worldAccess })
-  registerWorldRoutes(router, { store, worldAccess, worldPackages })
+  registerWorldRoutes(router, { store, worldAccess, worldPackages, authority })
+  registerWorldAuthorityRoutes(router, { store, worldAccess, authority, worldPermissions, skillRuntime, turnContinuations })
   registerWorldSettingsRoutes(router, { store, settings: worldSettings, access: worldAccess })
   registerTaskScheduleRoutes(router, { store, schedules: taskSchedules, access: worldAccess })
   registerPackageRoutes(router, { store, packageManager, packageCatalog, skillRuntime, worldMarketplace, worldPackages, worldAccess })
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
   registerWorldTraceRoutes(router, { store, trace: worldTrace, access: worldAccess })
   registerModelInteractionRoutes(router, { store, interactions })
-  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, turnContinuations, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, worldTrace, employeeActivity, worldPackages })
-  registerEmployeeRoutes(router, { store, worldAccess })
+  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, turnContinuations, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, worldTrace, employeeActivity, worldPackages, worldRuntimePermissions })
+  registerEmployeeRoutes(router, { store, worldAccess, authority })
 
   const httpServer = createServer((request, response) => {
     void (async () => {

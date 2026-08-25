@@ -1,4 +1,4 @@
-import type { EmployeeStatus, IsoTimestamp, JsonObject } from './index.js'
+import type { EmployeeStatus, IsoTimestamp, JsonObject, WorldCharacterRole } from './index.js'
 
 export const WORLD_RUNTIME_CONTRACT_VERSION = 1 as const
 
@@ -44,6 +44,8 @@ export interface WorldRuntimeEntityState {
   activity: WorldActivityKind
   activityLabel: string
   status?: EmployeeStatus
+  /** Compact world-scoped authority projection used by renderers for badges. */
+  authorityRole?: WorldCharacterRole
   activityRef?: string
   targetEntityId?: string
   route: WorldPoint[]

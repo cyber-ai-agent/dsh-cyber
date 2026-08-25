@@ -714,6 +714,9 @@ describe('SqliteStore', () => {
       DROP TABLE task_schedule_runs;
       DROP TABLE task_schedules;
       DROP TABLE approval_policies;
+      DROP TABLE world_permission_requests;
+      DROP TABLE world_authority_changes;
+      DROP TABLE world_character_authorities;
       DROP TABLE skill_actions;
       DROP TABLE approval_requests;
       DROP TABLE world_package_instances;
@@ -730,6 +733,13 @@ describe('SqliteStore', () => {
     const migrated = await SqliteStore.open(databasePath)
     stores.push(migrated)
     expect(migrated.listWorkspaces()[0]?.name).toBe('迁移前工作区')
+    expect(migrated.database.prepare(`PRAGMA foreign_key_list(world_permission_requests)`).all()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ table: 'work_turns' }),
+        expect.objectContaining({ table: 'skill_actions' }),
+      ]),
+    )
+    expect(migrated.database.prepare('PRAGMA foreign_key_check').all()).toEqual([])
     expect(migrated.doctor()).toMatchObject({
       ok: true,
       schemaVersion: CYBER_SCHEMA_VERSION,

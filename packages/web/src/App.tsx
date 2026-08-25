@@ -42,10 +42,20 @@ import type {
   WorkspacePreferences,
   WorkspaceSnapshot,
   World,
+  WorldCharacterAuthority,
+  WorldCharacterPermission,
+  WorldCharacterRole,
+  WorldPermissionDecisionScope,
+  WorldPermissionRequest,
   WorldAccessSummary,
   WorldSettings,
   ReasoningEffort,
   WorldSnapshot,
+} from '@dsh-cyber/contracts'
+import {
+  isWorldCharacterPermission,
+  isWorldCharacterRole,
+  RECOMMENDED_ADMIN_PERMISSIONS,
 } from '@dsh-cyber/contracts'
 
 import { ApiError, api } from './api.js'
@@ -57,6 +67,7 @@ import {
   type StreamingChatReply,
 } from './chat-realtime.js'
 import { ChatWorkbench, isChatMessage } from './components/ChatWorkbench.js'
+import { AuthorityBadge } from './components/AuthorityBadge.js'
 import { CreativeWorkshopLauncher } from './components/CreativeWorkshopLauncher.js'
 import { NavigationPane } from './components/NavigationPane.js'
 import { ResizableShell } from './components/ResizableShell.js'
@@ -118,12 +129,14 @@ export default function App() {
   const [messages, setMessages] = useState<WorkMessage[]>(demoMode ? demoData.messages.slice(-MESSAGE_PAGE_SIZE) : [])
   const [messagePage, setMessagePage] = useState({ hasMore: demoMode && demoData.messages.length > MESSAGE_PAGE_SIZE, loading: false })
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequestView[]>([])
+  const [pendingWorldPermissionRequests, setPendingWorldPermissionRequests] = useState<WorldPermissionRequest[]>([])
   const [transcriptReload, setTranscriptReload] = useState(0)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [preferences, setPreferences] = useState<WorkspacePreferences | undefined>(demoMode ? demoData.preferences : undefined)
   const [models, setModels] = useState<ModelProfile[]>(demoMode ? demoData.modelProfiles : [])
   const [modelAssignments, setModelAssignments] = useState<ModelAssignment[]>([])
   const [dossiers, setDossiers] = useState<Record<string, EmployeeDossier>>(demoMode ? demoData.dossiers : {})
+  const [authorities, setAuthorities] = useState<WorldCharacterAuthority[]>([])
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | undefined>()
   const [dockTab, setDockTab] = useState<DockTab>('world')
   const [dockCollapsed, setDockCollapsed] = useState(false)
@@ -168,6 +181,7 @@ export default function App() {
   const [worldRuntimeRevision, setWorldRuntimeRevision] = useState(0)
   const [worldSettingsOpen, setWorldSettingsOpen] = useState(false)
   const [worldSettings, setWorldSettings] = useState<WorldSettings>()
+  const [worldSettingsRevision, setWorldSettingsRevision] = useState<number>()
   const [worldAccess, setWorldAccess] = useState<WorldAccessSummary>()
   const [lockedWorld, setLockedWorld] = useState<World>()
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('auto')
@@ -208,6 +222,23 @@ export default function App() {
   activeConversationKeyRef.current = activeConversationKey
   pendingTurnsRef.current = pendingTurns
 
+  const refreshPendingDecisions = useCallback(async (worldId: string): Promise<void> => {
+    if (demoMode) return
+    try {
+      const result = await api<{
+        approvals?: ApprovalRequestView[]
+        permissionRequests?: WorldPermissionRequest[]
+        worldPermissionRequests?: WorldPermissionRequest[]
+        requests?: WorldPermissionRequest[]
+      }>(`/api/worlds/${encodeURIComponent(worldId)}/pending-decisions`)
+      if (activeWorldRef.current?.id !== worldId) return
+      setPendingApprovals(result.approvals ?? [])
+      setPendingWorldPermissionRequests(result.permissionRequests ?? result.worldPermissionRequests ?? result.requests ?? [])
+    } catch {
+      // A failed refresh must never interrupt the conversation; the next live or polling pass retries.
+    }
+  }, [])
+
   const loadWorld = useCallback(async (world: World) => {
     const requestId = worldLoadRequestRef.current + 1
     worldLoadRequestRef.current = requestId
@@ -229,10 +260,14 @@ export default function App() {
     setSelectedEmployeeId(undefined)
     setEmployees([])
     setDossiers({})
+    setAuthorities([])
+    setPendingApprovals([])
+    setPendingWorldPermissionRequests([])
     setDockTab('world')
     setPermissionMode('read-only')
     setTaskSchedules([])
     setWorldSettings(undefined)
+    setWorldSettingsRevision(undefined)
     setWorldAccess(undefined)
     setWorldRuntimeAvailable(false)
     if (demoMode) {
@@ -240,9 +275,12 @@ export default function App() {
       setWorldRuntimeAvailable(true)
       setAppMode(worldRuntimeV2Enabled ? 'world' : 'workbench')
       const nextEmployees = isCompany ? demoData.employees : demoTavernEmployees
+      const nextAuthorities = demoAuthorities(world, nextEmployees)
+      const authorityByEmployee = new Map(nextAuthorities.map((authority) => [authority.employeeId, authority]))
       const nextSessions = isCompany ? demoData.sessions : demoTavernSessions
       const nextMessages = isCompany ? demoData.messages : demoTavernMessages
-      setEmployees(nextEmployees)
+      setAuthorities(nextAuthorities)
+      setEmployees(nextEmployees.map((employee) => applyAuthorityToEmployee(employee, authorityByEmployee.get(employee.id))))
       setSessions(nextSessions)
       setMessages(nextMessages.slice(-MESSAGE_PAGE_SIZE))
       setMessagePage({ hasMore: nextMessages.length > MESSAGE_PAGE_SIZE, loading: false })
@@ -266,7 +304,7 @@ export default function App() {
 
       const [capability, settingsResult] = await Promise.all([
         api<{ supported: boolean }>(`/api/worlds/${world.id}/runtime-capability`),
-        api<{ settings: WorldSettings; access: WorldAccessSummary }>(`/api/worlds/${world.id}/settings`),
+        api<{ settings: WorldSettings; access: WorldAccessSummary; revision?: number; settingsRevision?: number }>(`/api/worlds/${world.id}/settings`),
       ])
       if (!isCurrentRequest()) return
 
@@ -295,6 +333,7 @@ export default function App() {
         if (dossier !== undefined) nextDossiers[dossier.employee.id] = dossier
       }
       setWorldSettings(settingsResult.settings)
+      setWorldSettingsRevision(settingsResult.revision ?? settingsResult.settingsRevision)
       applyWorldAppearance(settingsResult.settings)
       setWorldAccess(settingsResult.access)
       setReasoningEffort(settingsResult.settings.model.reasoningEffort)
@@ -302,7 +341,10 @@ export default function App() {
       setWorldRuntimeAvailable(capability.supported)
       setAppMode(worldRuntimeV2Enabled && capability.supported ? 'world' : 'workbench')
       setDossiers(nextDossiers)
-      setEmployees(snapshot.employees.map((employee, index) => toCyberEmployee(employee, index, nextDossiers[employee.id])))
+      const nextAuthorities = snapshot.authorities ?? []
+      const authorityByEmployee = new Map(nextAuthorities.map((authority) => [authority.employeeId, authority]))
+      setAuthorities(nextAuthorities)
+      setEmployees(snapshot.employees.map((employee, index) => toCyberEmployee(employee, index, nextDossiers[employee.id], authorityByEmployee.get(employee.id))))
       setSessions(snapshot.openSessions)
       // A world with existing sessions opens the most recently active one by default.
       // This keeps the composer and history action attached to a real conversation
@@ -585,6 +627,31 @@ export default function App() {
     return () => window.clearInterval(timer)
   }, [activeWorld, demoMode, pendingTurns.length, refreshConversationTranscript])
 
+  // Authority changes are world-scoped facts. Reuse the shared /live stream so
+  // another tab can update badges without reloading messages or dossiers.
+  useEffect(() => {
+    const worldId = activeWorld?.id
+    if (demoMode || worldId === undefined) return
+    const onWorldState = (event: Event) => {
+      try {
+        const envelope = JSON.parse((event as MessageEvent<string>).data) as { worldId?: string; payload?: unknown; authorities?: unknown }
+        if (envelope.worldId !== undefined && envelope.worldId !== worldId) return
+        void refreshPendingDecisions(worldId)
+        const payload = envelope.payload
+        const raw = envelope.authorities ?? (payload !== null && typeof payload === 'object' && !Array.isArray(payload) ? (payload as Record<string, unknown>).authorities : undefined)
+        if (!Array.isArray(raw)) return
+        const next = raw.filter((value): value is WorldCharacterAuthority => isWorldCharacterAuthority(value) && value.worldId === worldId)
+        if (next.length === 0 && raw.length > 0) return
+        const authorityByEmployee = new Map(next.map((authority) => [authority.employeeId, authority]))
+        setAuthorities(next)
+        setEmployees((current) => current.map((employee) => applyAuthorityToEmployee(employee, authorityByEmployee.get(employee.id))))
+      } catch {
+        // Runtime stream payloads are intentionally tolerant; HTTP remains authoritative.
+      }
+    }
+    return subscribeWorldLive(worldId, 'world-state', onWorldState)
+  }, [activeWorld, demoMode, refreshPendingDecisions])
+
   useEffect(() => {
     const root = document.documentElement
     const scheme = preferences?.colorScheme ?? 'dark'
@@ -686,6 +753,53 @@ export default function App() {
       setCatalogLoading(false)
     }
   }, [activeWorld])
+
+  const refreshWorldAuthorities = useCallback(async (worldId: string): Promise<WorldCharacterAuthority[]> => {
+    if (demoMode) return authorities
+    const result = await api<{ worldId: string; authorities: WorldCharacterAuthority[] }>(`/api/worlds/${encodeURIComponent(worldId)}/authorities`)
+    if (activeWorldRef.current?.id === worldId) {
+      const authorityByEmployee = new Map(result.authorities.map((authority) => [authority.employeeId, authority]))
+      setAuthorities(result.authorities)
+      setEmployees((current) => current.map((employee) => applyAuthorityToEmployee(employee, authorityByEmployee.get(employee.id))))
+    }
+    return result.authorities
+  }, [authorities, demoMode])
+
+  const updateWorldAuthority = useCallback(async (employeeId: string, input: { role: WorldCharacterRole; permissionGrants: WorldCharacterPermission[]; reason: string }): Promise<void> => {
+    const world = activeWorldRef.current
+    if (world === undefined) return
+    setSavingEmployee(true)
+    setError(undefined)
+    try {
+      let authority: WorldCharacterAuthority
+      if (demoMode) {
+        const previous = authorities.find((item) => item.employeeId === employeeId)
+        const timestamp = new Date().toISOString()
+        authority = {
+          worldId: world.id,
+          employeeId,
+          role: input.role,
+          permissionGrants: input.permissionGrants,
+          createdAt: previous?.createdAt ?? timestamp,
+          updatedAt: timestamp,
+        }
+      } else {
+        const result = await api<{ authority: WorldCharacterAuthority }>(`/api/worlds/${encodeURIComponent(world.id)}/authorities/${encodeURIComponent(employeeId)}`, {
+          method: 'PUT',
+          body: JSON.stringify(input),
+        })
+        authority = result.authority
+      }
+      setAuthorities((current) => [...current.filter((item) => item.employeeId !== employeeId), authority])
+      setEmployees((current) => current.map((employee) => employee.id === employeeId ? applyAuthorityToEmployee(employee, authority) : employee))
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : '世界权限保存失败'
+      setError(message)
+      throw cause
+    } finally {
+      setSavingEmployee(false)
+    }
+  }, [authorities, demoMode])
 
   const loadPackages = useCallback(async () => {
     if (workspace === undefined || demoMode) return
@@ -1143,19 +1257,23 @@ export default function App() {
     if (activeSession !== undefined) setHistoryOpen(true)
   }, [activeSession])
 
-  // The gate refuses to execute anything nobody approved, so a turn that is
-  // waiting is simply stopped until this list is answered. It is polled rather
-  // than pushed because an approval can also be created by a scheduled action
-  // that no open conversation is watching.
-  const refreshPendingApprovals = useCallback(async (worldId: string): Promise<void> => {
-    if (demoMode) return
-    try {
-      const result = await api<{ items: ApprovalRequestView[] }>(`/api/worlds/${worldId}/approvals?status=pending`)
-      setPendingApprovals(result.items)
-    } catch {
-      // A failed poll must never break the conversation; the next one retries.
+  // Decisions are durable facts. The unified pending-decisions refresh keeps
+  // both approval gates and world-permission prompts in sync before resuming a turn.
+  const decideWorldPermissionRequest = useCallback(async (requestId: string, scope: WorldPermissionDecisionScope | 'reject'): Promise<void> => {
+    const worldId = activeWorldRef.current?.id
+    await api(`/api/world-permission-requests/${encodeURIComponent(requestId)}/decision`, {
+      method: 'POST',
+      body: JSON.stringify({ decisionScope: scope, decidedBy: 'owner' }),
+    })
+    setPendingWorldPermissionRequests((current) => current.filter((request) => request.id !== requestId))
+    if (worldId === undefined) return
+    if (scope === 'persistent') await refreshWorldAuthorities(worldId)
+    await refreshPendingDecisions(worldId)
+    if (activeSessionIdRef.current !== undefined) {
+      const queueKey = queueKeyBySessionRef.current.get(activeSessionIdRef.current) ?? activeSessionIdRef.current
+      await refreshConversationTranscript(activeSessionIdRef.current, queueKey, worldId)
     }
-  }, [demoMode])
+  }, [refreshConversationTranscript, refreshPendingDecisions, refreshWorldAuthorities])
 
   const decideApproval = useCallback(async (
     approvalId: string,
@@ -1165,11 +1283,11 @@ export default function App() {
     const worldId = activeWorld?.id
     await api(`/api/approvals/${approvalId}/decision`, { method: 'POST', body: JSON.stringify({ decision, scope }) })
     if (worldId === undefined) return
-    await refreshPendingApprovals(worldId)
+    await refreshPendingDecisions(worldId)
     // A decision usually settles the stalled turn, so pull the durable
     // transcript rather than waiting for the next stream event.
     if (activeSessionId !== undefined) await refreshConversationTranscript(activeSessionId, activeSessionId, worldId)
-  }, [activeSessionId, activeWorld, refreshConversationTranscript, refreshPendingApprovals])
+  }, [activeSessionId, activeWorld, refreshConversationTranscript, refreshPendingDecisions])
 
   useEffect(() => {
     const worldId = activeWorld?.id
@@ -1177,10 +1295,10 @@ export default function App() {
       setPendingApprovals([])
       return
     }
-    void refreshPendingApprovals(worldId)
-    const timer = setInterval(() => { void refreshPendingApprovals(worldId) }, 4_000)
+    void refreshPendingDecisions(worldId)
+    const timer = setInterval(() => { void refreshPendingDecisions(worldId) }, 4_000)
     return () => clearInterval(timer)
-  }, [activeWorld, demoMode, refreshPendingApprovals])
+  }, [activeWorld, demoMode, refreshPendingDecisions])
 
   const send = useCallback((prompt: string, attachments: ChatAttachment[]): Promise<void> => {
     const world = activeWorld
@@ -1644,6 +1762,7 @@ export default function App() {
     '--workspace-background-size': preferences?.backgroundFit === 'contain' ? 'contain' : preferences?.backgroundFit === 'tile' ? 'auto' : 'cover',
     '--workspace-background-repeat': preferences?.backgroundFit === 'tile' ? 'repeat' : 'no-repeat',
   } as CSSProperties, [backgroundImage, preferences?.backgroundFit, preferences?.backgroundOpacity])
+  const administratorCount = authorities.filter((authority) => authority.role === 'administrator').length
 
   if (loading) return <LoadingScreen />
   if (workspace === undefined || activeWorld === undefined || preferences === undefined) {
@@ -1662,6 +1781,7 @@ export default function App() {
           onSelect={(world) => void loadWorld(world)}
           onExplore={() => void openPackageMarket('theme')}
         />
+        {administratorCount > 0 ? <div className="topbar-world-authority" aria-label={`${administratorCount} 名世界管理员`}><AuthorityBadge role="administrator" size="sm" /><span>{administratorCount} 名世界管理员</span></div> : null}
         <nav aria-label="全局功能">
           <CreativeWorkshopLauncher workspaceId={workspace.id} onCreated={(project) => void openWorkshopWorld(project.worldId)} onOpenWorld={(worldId) => void openWorkshopWorld(worldId)} />
           <button type="button" onClick={() => void openPackageMarket('theme')}><Storefront size={16} />市场</button>
@@ -1720,6 +1840,12 @@ export default function App() {
             onLoadOlderMessages={() => void loadOlderMessages()}
             approvals={pendingApprovals}
             onDecideApproval={decideApproval}
+            permissionRequests={pendingWorldPermissionRequests}
+            onDecideWorldPermissionRequest={decideWorldPermissionRequest}
+            onOpenWorldPermissionSettings={(employeeId) => {
+              setWorldSettingsOpen(false)
+              setManagingEmployeeId(employeeId)
+            }}
           />
         )}
         right={(
@@ -1864,7 +1990,57 @@ export default function App() {
           }}
         /></Suspense>
       ) : null}
-      {worldSettingsOpen && activeWorld !== undefined && worldSettings !== undefined && worldAccess !== undefined ? <Suspense fallback={<div className="dialog-loading" role="status">正在打开世界设置…</div>}><WorldSettingsDialog world={activeWorld} value={worldSettings} models={models} employees={employees} saving={savingSettings} onClose={()=>setWorldSettingsOpen(false)} onSave={async (value)=>{ setSavingSettings(true); try { const result = await api<{settings:WorldSettings}>(`/api/worlds/${activeWorld.id}/settings`, { method:'PUT', body:JSON.stringify(value) }); setWorldSettings(result.settings); setReasoningEffort(result.settings.model.reasoningEffort); setPermissionMode(result.settings.runtime.permissionMode); applyWorldAppearance(result.settings) } finally { setSavingSettings(false) } }} onSetAdministrator={async(employeeId)=>{ const result=await api<{world:World}>(`/api/worlds/${activeWorld.id}/administrator`,{method:'PUT',body:JSON.stringify({employeeId})}); setActiveWorld(result.world); setWorlds((current)=>current.map((item)=>item.id===result.world.id?result.world:item)) }} /></Suspense> : null}
+      {worldSettingsOpen && activeWorld !== undefined && worldSettings !== undefined && worldAccess !== undefined ? (
+        <Suspense fallback={<div className="dialog-loading" role="status">正在打开世界设置…</div>}>
+          <WorldSettingsDialog
+            world={activeWorld}
+            value={worldSettings}
+            models={models}
+            employees={employees}
+            authorities={authorities}
+            saving={savingSettings}
+            onClose={() => setWorldSettingsOpen(false)}
+            onManageAdministrators={() => {
+              setWorldSettingsOpen(false)
+              setDockCollapsed(false)
+              setDockTab('dossier')
+            }}
+            onManageEmployee={(employeeId) => {
+              setWorldSettingsOpen(false)
+              setManagingEmployeeId(employeeId)
+            }}
+            onSave={async (value) => {
+              setSavingSettings(true)
+              try {
+                const body = worldSettingsRevision === undefined ? value : { ...value, expectedRevision: worldSettingsRevision }
+                try {
+                  const result = await api<{ settings: WorldSettings; revision?: number; settingsRevision?: number }>(`/api/worlds/${activeWorld.id}/settings`, {
+                    method: 'PUT',
+                    body: JSON.stringify(body),
+                  })
+                  setWorldSettings(result.settings)
+                  setWorldSettingsRevision(result.revision ?? result.settingsRevision)
+                  setReasoningEffort(result.settings.model.reasoningEffort)
+                  setPermissionMode(result.settings.runtime.permissionMode)
+                  applyWorldAppearance(result.settings)
+                } catch (cause) {
+                  if (!(cause instanceof ApiError) || cause.status !== 409) throw cause
+                  try {
+                    const latest = await api<{ settings: WorldSettings; revision?: number; settingsRevision?: number }>(`/api/worlds/${activeWorld.id}/settings`)
+                    setWorldSettings(latest.settings)
+                    setWorldSettingsRevision(latest.revision ?? latest.settingsRevision)
+                  } catch {
+                    // Keep the editor open with its current draft if the conflict refresh fails.
+                  }
+                  throw new Error('世界设置已被其他页面更新。已载入最新版本，请确认变更后再保存。')
+                }
+              } finally {
+                setSavingSettings(false)
+              }
+            }}
+          />
+        </Suspense>
+      ) : null}
       {lockedWorld !== undefined ? <Suspense fallback={<div className="dialog-loading" role="status">正在打开访问验证…</div>}><WorldUnlockDialog worldName={lockedWorld.name} onUnlock={async(password)=>{ await api(`/api/worlds/${lockedWorld.id}/access/unlock`,{method:'POST',body:JSON.stringify({password})}); const world=lockedWorld; setLockedWorld(undefined); await loadWorld(world) }} /></Suspense> : null}
       {managingEmployee !== undefined ? (
         <Suspense fallback={<div className="dialog-loading" role="status">正在打开角色设置…</div>}><EmployeeManagementDialog
@@ -1873,9 +2049,11 @@ export default function App() {
           {...(managingRevision === undefined ? {} : { currentRevision: managingRevision })}
           models={models}
           avatarIndex={managingEmployee.avatarIndex}
+          authority={authorities.find((authority) => authority.employeeId === managingEmployee.id)}
           saving={savingEmployee}
           onClose={() => setManagingEmployeeId(undefined)}
           onRevise={reviseEmployee}
+          onAuthorityChange={(input) => updateWorldAuthority(managingEmployee.id, input)}
           onUpdateProfile={updateEmployeeProfile}
           onArchive={archiveEmployee}
         /></Suspense>
@@ -2083,13 +2261,64 @@ function localizedPluginTrigger(packageId: string, trigger: string): string {
   return localized[packageId]?.[trigger] ?? trigger
 }
 
-function toCyberEmployee(employee: EmployeeInstance, index: number, dossier?: EmployeeDossier): CyberEmployee {
+function toCyberEmployee(
+  employee: EmployeeInstance,
+  index: number,
+  dossier?: EmployeeDossier,
+  authority?: WorldCharacterAuthority,
+): CyberEmployee {
   return {
     ...employee,
     avatarIndex: profileAvatarIndex(dossier) ?? stableAvatar(employee.id, index),
     summary: `${employee.role}独立 Agent，拥有自己的会话、记忆与成长记录。`,
     currentActivity: statusActivity(employee),
+    ...(authority === undefined ? {} : {
+      authorityRole: authority.role,
+      worldPermissions: authority.permissionGrants,
+    }),
   }
+}
+
+function demoAuthorities(world: World, employees: EmployeeInstance[]): WorldCharacterAuthority[] {
+  const employeeId = world.administratorEmployeeId
+    ?? employees.find((employee) => employee.blueprintId === 'core.butler')?.id
+  if (employeeId === undefined) return []
+  const timestamp = world.updatedAt
+  return [{
+    worldId: world.id,
+    employeeId,
+    role: 'administrator',
+    permissionGrants: [...RECOMMENDED_ADMIN_PERMISSIONS],
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  }]
+}
+
+function applyAuthorityToEmployee(employee: CyberEmployee, authority: WorldCharacterAuthority | undefined): CyberEmployee {
+  if (authority === undefined) {
+    const next = { ...employee }
+    delete next.authorityRole
+    delete next.worldPermissions
+    return next
+  }
+  return {
+    ...employee,
+    authorityRole: authority.role,
+    worldPermissions: authority.permissionGrants,
+  }
+}
+
+function isWorldCharacterAuthority(value: unknown): value is WorldCharacterAuthority {
+  if (value === null || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return typeof candidate.worldId === 'string'
+    && typeof candidate.employeeId === 'string'
+    && typeof candidate.createdAt === 'string'
+    && typeof candidate.updatedAt === 'string'
+    && typeof candidate.role === 'string'
+    && isWorldCharacterRole(candidate.role)
+    && Array.isArray(candidate.permissionGrants)
+    && candidate.permissionGrants.every((permission) => typeof permission === 'string' && isWorldCharacterPermission(permission))
 }
 
 function profileAvatarIndex(dossier?: EmployeeDossier): number | undefined {

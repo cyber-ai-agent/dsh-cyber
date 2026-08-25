@@ -71,7 +71,7 @@ export function PeerCollaborationDialog({ initiator, employees, busy, error, onC
           <div className="group-dialog__name">
             <span>发起角色</span>
             <div className="group-member is-selected">
-              <Avatar index={initiator.avatarIndex} label={initiator.displayName} status={initiator.status} />
+              <Avatar index={initiator.avatarIndex} label={initiator.displayName} status={initiator.status} authorityRole={initiator.authorityRole} />
               <span><strong>{initiator.displayName}</strong><small>{initiator.role} · 将在每轮最后归纳</small></span>
             </div>
           </div>
@@ -104,7 +104,7 @@ export function PeerCollaborationDialog({ initiator, employees, busy, error, onC
               return (
                 <label key={employee.id} className={`group-member${selected ? ' is-selected' : ''}`}>
                   <input type="checkbox" checked={selected} disabled={busy} onChange={() => toggle(employee.id)} />
-                  <Avatar index={employee.avatarIndex} label={employee.displayName} status={employee.status} />
+                  <Avatar index={employee.avatarIndex} label={employee.displayName} status={employee.status} authorityRole={employee.authorityRole} />
                   <span><strong>{employee.displayName}</strong><small>{employee.role} · {employee.currentActivity}</small></span>
                 </label>
               )

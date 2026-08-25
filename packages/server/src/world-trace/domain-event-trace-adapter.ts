@@ -130,6 +130,7 @@ export class DomainEventTraceAdapter implements WorldTraceAdapter<'domain-event'
 function presentDomainEvent(type: DomainEventType, payload: Record<string, unknown>): DomainPresentation | undefined {
   switch (type) {
     case 'world.created': return { category: 'world', status: 'success', summary: '世界已创建' }
+    case 'world.character.authority.changed': return { category: 'world', status: 'success', summary: '角色世界职权已更新' }
     case 'world.creation.rolled-back': return { category: 'world', status: 'failed', summary: '世界创建已回滚' }
     case 'world.entered': return { category: 'world', status: 'info', summary: '已进入世界' }
     case 'employee.recruited': return { category: 'world', status: 'success', summary: '新角色已加入世界' }

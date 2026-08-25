@@ -5,6 +5,8 @@ import type {
 } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 import type { CharacterSkillAdapterRegistry } from '../skills/skill-adapter.js'
+import type { WorldCharacterAuthority } from '@dsh-cyber/contracts/world-authority'
+import type { WorldAuthorityPort } from './world-permission-request-service.js'
 
 type CharacterRuntimeStore = Pick<
   SqliteStore,
@@ -15,14 +17,21 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
   readonly #inner: AgentRuntimePort
   readonly #store: CharacterRuntimeStore
   readonly #skills: Pick<CharacterSkillAdapterRegistry, 'instructionsFor'> | undefined
+  readonly #authority: Pick<WorldAuthorityPort, 'get'> | undefined
 
-  constructor(inner: AgentRuntimePort, store: CharacterRuntimeStore, skills?: Pick<CharacterSkillAdapterRegistry, 'instructionsFor'>) {
+  constructor(
+    inner: AgentRuntimePort,
+    store: CharacterRuntimeStore,
+    skills?: Pick<CharacterSkillAdapterRegistry, 'instructionsFor'>,
+    authority?: Pick<WorldAuthorityPort, 'get'>,
+  ) {
     this.#inner = inner
     this.#store = store
     this.#skills = skills
+    this.#authority = authority
   }
 
-  runTurn(request: AgentTurnRequest) {
+  async runTurn(request: AgentTurnRequest) {
     // A multi-round collaboration can bind a persistent Agent session during an
     // earlier turn. Always reload the current character and revision so the next
     // turn resumes that session instead of using the stale object captured when
@@ -34,11 +43,19 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
 
     const recipeInstructions = this.#skills?.instructionsFor(revision.skillGrants) ?? []
     const profiledPersona = profile === undefined ? revision.persona : composeCharacterPersona(revision.persona, profile)
-    const persona = composeWorldAdministratorPersona(
-      profiledPersona,
-      this.#store.getWorld(agent.worldId)?.administratorEmployeeId === agent.id,
-    )
-    return this.#inner.runTurn({
+    // Once the authority service is composed, the compatibility pointer is no
+    // longer an authorization source. The fallback only keeps isolated legacy
+    // embedders/tests working while they migrate to the authority port.
+    const currentAuthority = this.#authority === undefined
+      ? undefined
+      : await this.#authority.get(agent.worldId, agent.id)
+    const persona = this.#authority === undefined
+      ? composeWorldAdministratorPersona(
+          profiledPersona,
+          this.#store.getWorld(agent.worldId)?.administratorEmployeeId === agent.id,
+        )
+      : composeWorldAuthorityPersona(profiledPersona, currentAuthority)
+    return await this.#inner.runTurn({
       ...request,
       agent,
       revision: {
@@ -61,6 +78,23 @@ export function composeSkillRecipes(persona: string, instructions: readonly stri
 export function composeWorldAdministratorPersona(persona: string, isAdministrator: boolean): string {
   if (!isAdministrator) return persona
   return `${persona.trim()}\n\n[世界管理员职责]\n你是当前世界的管理员。你可以在明确授权的角色管理动作中调整本世界其他角色的设定与权限；不得读取或修改其他世界的角色。`
+}
+
+/**
+ * Adds the durable World authority projection to the model prompt. The
+ * projection is deliberately explicit and bounded: it contains only the
+ * current role and permission IDs, never a compatibility pointer or another
+ * world's data.
+ */
+export function composeWorldAuthorityPersona(
+  persona: string,
+  authority: WorldCharacterAuthority | undefined,
+): string {
+  const role = authority?.role === 'administrator' ? '世界管理员' : '普通角色'
+  const grants = authority === undefined || authority.permissionGrants.length === 0
+    ? '无'
+    : authority.permissionGrants.join('、')
+  return `${persona.trim()}\n\n[当前世界职权]\n角色：${role}\n已授予的世界权限：${grants}\n权限仅适用于当前世界；没有列出的权限不得执行。`
 }
 
 export function composeCharacterPersona(basePersona: string, profile: EmployeeProfile): string {

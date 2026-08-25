@@ -836,6 +836,102 @@ const MIGRATIONS: readonly Migration[] = [
         ON skill_actions(execution_state, updated_at) WHERE execution_state IS NOT NULL;
     `,
   },
+  {
+    version: 21,
+    name: 'world-character-authority-v1',
+    sql: `
+      CREATE TABLE IF NOT EXISTS world_character_authorities (
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        employee_id TEXT NOT NULL REFERENCES employee_instances(id) ON DELETE CASCADE,
+        role TEXT NOT NULL CHECK (role IN ('member', 'administrator')),
+        permissions_json TEXT NOT NULL CHECK (json_valid(permissions_json)),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (world_id, employee_id)
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS world_character_authorities_world_role_idx
+        ON world_character_authorities(world_id, role, created_at, employee_id);
+      CREATE INDEX IF NOT EXISTS world_character_authorities_employee_idx
+        ON world_character_authorities(employee_id);
+
+      CREATE TABLE IF NOT EXISTS world_authority_changes (
+        id TEXT PRIMARY KEY,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        employee_id TEXT NOT NULL REFERENCES employee_instances(id) ON DELETE CASCADE,
+        actor_kind TEXT NOT NULL CHECK (actor_kind IN ('owner', 'employee')),
+        actor_id TEXT NOT NULL,
+        previous_role TEXT CHECK (previous_role IS NULL OR previous_role IN ('member', 'administrator')),
+        next_role TEXT NOT NULL CHECK (next_role IN ('member', 'administrator')),
+        added_permissions_json TEXT NOT NULL CHECK (json_valid(added_permissions_json)),
+        removed_permissions_json TEXT NOT NULL CHECK (json_valid(removed_permissions_json)),
+        reason TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS world_authority_changes_world_created_idx
+        ON world_authority_changes(world_id, created_at DESC, id);
+      CREATE INDEX IF NOT EXISTS world_authority_changes_employee_created_idx
+        ON world_authority_changes(employee_id, created_at DESC, id);
+
+      CREATE TABLE IF NOT EXISTS world_permission_requests (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        employee_id TEXT NOT NULL REFERENCES employee_instances(id) ON DELETE CASCADE,
+        /* Authority decisions must never outlive the execution facts they
+           authorize. Keep both edges as real SQLite foreign keys so orphaned
+           WorkTurns/SkillActions cannot become security decisions. */
+        work_turn_id TEXT NOT NULL REFERENCES work_turns(id) ON DELETE CASCADE,
+        skill_action_id TEXT NOT NULL REFERENCES skill_actions(id) ON DELETE CASCADE,
+        permission TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'rejected', 'expired')),
+        decision_scope TEXT CHECK (decision_scope IS NULL OR decision_scope IN ('once', 'persistent')),
+        decided_by TEXT,
+        decided_at TEXT,
+        consumed_at TEXT,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        /* One missing-authority gate is bound to one exact SkillAction. */
+        UNIQUE (skill_action_id)
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS world_permission_requests_world_status_created_idx
+        ON world_permission_requests(world_id, status, created_at DESC, id);
+      CREATE INDEX IF NOT EXISTS world_permission_requests_turn_idx
+        ON world_permission_requests(work_turn_id, status, created_at DESC, id);
+      CREATE INDEX IF NOT EXISTS world_permission_requests_action_idx
+        ON world_permission_requests(skill_action_id, status, id);
+      CREATE UNIQUE INDEX IF NOT EXISTS world_permission_requests_skill_action_unique_idx
+        ON world_permission_requests(skill_action_id);
+
+      ALTER TABLE skill_actions ADD COLUMN authorization_source TEXT
+        CHECK (authorization_source IS NULL OR authorization_source IN ('skill-grant', 'world-authority'));
+      ALTER TABLE skill_actions ADD COLUMN required_world_permission TEXT;
+      CREATE INDEX IF NOT EXISTS skill_actions_world_permission_idx
+        ON skill_actions(world_id, character_id, required_world_permission, status)
+        WHERE required_world_permission IS NOT NULL;
+
+      /* The administratorEmployeeId column is retained as a compatibility
+         pointer only. Existing worlds are promoted into the real authority
+         table without losing their legacy administrator identity. */
+      INSERT OR IGNORE INTO world_character_authorities (
+        world_id, employee_id, role, permissions_json, created_at, updated_at
+      )
+      SELECT
+        employee_instances.world_id,
+        employee_instances.id,
+        CASE WHEN worlds.administrator_employee_id = employee_instances.id
+          THEN 'administrator' ELSE 'member' END,
+        CASE WHEN worlds.administrator_employee_id = employee_instances.id
+          THEN '["world.files.read","world.files.write","world.settings.read","world.settings.write","world.characters.read","world.characters.manage","world.permissions.read","world.permissions.manage","world.packages.read","world.packages.manage","world.integrations.read","world.model.read","world.model.assign","world.approvals.read","world.trace.read","world.conversations.read-metadata"]'
+          ELSE '["world.files.read"]' END,
+        employee_instances.created_at,
+        employee_instances.updated_at
+      FROM employee_instances
+      INNER JOIN worlds ON worlds.id = employee_instances.world_id;
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {

@@ -34,6 +34,7 @@ import type { WorldFileService } from '../services/world-file-service.js'
 import type { WorldSettingsService } from '../services/world-settings-service.js'
 import type { WorldTraceService } from '../services/world-trace-service.js'
 import type { WorldPackageInstanceService } from '../services/world-package-instance-service.js'
+import type { WorldRuntimePermissionResolver } from '../services/world-runtime-permission-resolver.js'
 import type { TurnAwareApprovalContinuationService } from '../services/turn-aware-approval-continuation-service.js'
 import { ServiceError } from '../services/service-error.js'
 
@@ -50,6 +51,7 @@ export interface ConversationRoutesDependencies {
   worldTrace: WorldTraceService
   employeeActivity: EmployeeActivityProjectionService
   worldPackages: WorldPackageInstanceService
+  worldRuntimePermissions?: WorldRuntimePermissionResolver
   turnContinuations: TurnAwareApprovalContinuationService
 }
 
@@ -67,6 +69,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     worldTrace,
     employeeActivity,
     worldPackages,
+    worldRuntimePermissions,
     turnContinuations,
   } = dependencies
   const delegatedCollaboration = new DelegatedCollaborationService({
@@ -109,6 +112,46 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     await worldAccess.assertUnlocked(world.id, request)
     const body = await readJson(request)
     const prompt = requiredString(body, 'prompt')
+    const explicitIds = optionalStringArray(body.employeeIds)
+    const employeeIds = explicitIds.length > 0 ? explicitIds : mentionedEmployeeIds(prompt, store.listEmployees(world.id))
+    const employees = employeeIds.map((employeeId) => store.getEmployee(employeeId))
+    if (employeeIds.length === 0) throw new HttpError(422, 'agent_required', '至少需要一个角色')
+    if (employees.some((employee) => employee === undefined || employee.worldId !== world.id || employee.status === 'archived')) {
+      throw new HttpError(422, 'character_unavailable', '所选角色不属于当前世界或已归档')
+    }
+
+    // Settle an existing narrow approval phrase before tracing or beginning a
+    // turn. The approval response may continue its original WorkTurn, but it
+    // never creates a second one.
+    if (employeeIds.length === 1) {
+      const approval = await turnContinuations.tryDecideWorldPermissionText({
+        worldId: world.id,
+        employeeId: employeeIds[0]!,
+        text: prompt,
+        decidedBy: 'local-user',
+        actor: { kind: 'owner', id: 'local-user' },
+        source: 'raw-user',
+      })
+      if (approval.handled) {
+        if (approval.continuation !== undefined) {
+          writeJson(response, 200, { ...approval.continuation, permissionRequest: approval.request })
+          return
+        }
+        const originalTurn = store.getWorkTurn(approval.request.workTurnId)
+        const originalSession = originalTurn === undefined ? undefined : store.getSession(originalTurn.sessionId)
+        if (originalTurn === undefined || originalSession === undefined) {
+          throw new HttpError(409, 'world_permission_continuation_unavailable', '原工作回合无法继续')
+        }
+        writeJson(response, 202, {
+          session: originalSession,
+          replies: [],
+          workTurnId: originalTurn.id,
+          waitingForApproval: true,
+          permissionRequest: approval.request,
+        })
+        return
+      }
+    }
     const attachments = await validatedChatAttachments(body.attachments, store, world.workspaceId, world.id, worldFiles)
     const attachmentPrompt = attachments.length === 0 ? prompt : attachmentAwarePrompt(prompt, attachments)
     const transformedPrompt = await applyInstalledPromptTransforms(await worldPackages.listRuntimePackages(world.id), attachmentPrompt)
@@ -116,9 +159,19 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     const requestedReasoning = body.reasoningEffort === undefined
       ? worldSettingsValue.model.reasoningEffort
       : requiredEnum<ReasoningEffort>(body, 'reasoningEffort', ['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
-    const permissionMode = body.permissionMode === undefined ? 'read-only' : requiredEnum<AgentPermissionMode>(body, 'permissionMode', ['read-only', 'workspace-write', 'danger-full-access'])
-    const explicitIds = optionalStringArray(body.employeeIds)
-    const employeeIds = explicitIds.length > 0 ? explicitIds : mentionedEmployeeIds(prompt, store.listEmployees(world.id))
+    const requestedPermissionMode = body.permissionMode === undefined ? 'read-only' : requiredEnum<AgentPermissionMode>(body, 'permissionMode', ['read-only', 'workspace-write', 'danger-full-access'])
+    const resolvedPermissions = worldRuntimePermissions === undefined
+      ? undefined
+      : await Promise.all(employeeIds.map((employeeId) => worldRuntimePermissions.resolve({
+          worldId: world.id,
+          employeeId,
+          requestedMode: requestedPermissionMode,
+        })))
+    const permissionMode: AgentPermissionMode = resolvedPermissions === undefined
+      ? requestedPermissionMode
+      : resolvedPermissions.every((item) => item.permissionMode === 'workspace-write')
+        ? 'workspace-write'
+        : 'read-only'
     if (employeeIds.length === 0) throw new HttpError(422, 'agent_required', '请选择或 @ 至少一个角色')
     const clientTurnId = optionalString(body.clientTurnId)
     if (clientTurnId !== undefined && clientTurnId.length > 128) {

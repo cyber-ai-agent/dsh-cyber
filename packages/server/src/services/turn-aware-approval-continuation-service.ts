@@ -1,5 +1,6 @@
 import type { AgentPermissionMode, ApprovalScope, JsonObject, ReasoningEffort, WorkMessage } from '@dsh-cyber/contracts'
 import type { CharacterSkillAction } from '@dsh-cyber/contracts/skill-runtime'
+import type { WorldAuthorityActor, WorldPermissionRequest } from '@dsh-cyber/contracts/world-authority'
 import type { ConversationOrchestrator, ConversationResult, DirectConversationInput } from '@dsh-cyber/orchestration'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
@@ -8,6 +9,8 @@ import { TraceSanitizer } from '../world-trace/trace-sanitizer.js'
 import type { CharacterSkillRuntime } from './character-skill-runtime.js'
 import type { WorldPackageInstanceService } from './world-package-instance-service.js'
 import type { WorldSettingsService } from './world-settings-service.js'
+import type { WorldPermissionRequestService, DecideWorldPermissionInput } from './world-permission-request-service.js'
+import { TurnDecisionCoordinator } from './turn-decision-coordinator.js'
 import { PersistenceError } from '@dsh-cyber/persistence'
 
 export interface TurnAwareDirectInput extends DirectConversationInput {
@@ -30,6 +33,8 @@ export class TurnAwareApprovalContinuationService {
   readonly #skills: CharacterSkillRuntime
   readonly #settings: WorldSettingsService
   readonly #worldPackages: WorldPackageInstanceService
+  readonly #worldPermissions: WorldPermissionRequestService | undefined
+  readonly #decisionCoordinator: TurnDecisionCoordinator
 
   constructor(options: {
     store: SqliteStore
@@ -37,12 +42,17 @@ export class TurnAwareApprovalContinuationService {
     skills: CharacterSkillRuntime
     settings: WorldSettingsService
     worldPackages: WorldPackageInstanceService
+    worldPermissions?: WorldPermissionRequestService
   }) {
     this.#store = options.store
     this.#orchestrator = options.orchestrator
     this.#skills = options.skills
     this.#settings = options.settings
     this.#worldPackages = options.worldPackages
+    this.#worldPermissions = options.worldPermissions
+    this.#decisionCoordinator = new TurnDecisionCoordinator(options.worldPermissions === undefined ? [] : [{
+      hasPending: async (workTurnId: string) => (await options.worldPermissions!.listForTurn(workTurnId)).some((item) => item.status === 'pending'),
+    }])
     this.#skills.setApprovalSettlementHandler(async (workTurnId) => { await this.continueIfReady(workTurnId) })
   }
 
@@ -107,7 +117,58 @@ export class TurnAwareApprovalContinuationService {
     return { ...decided, ...(continuation === undefined ? {} : { continuation }) }
   }
 
+  async decideWorldPermission(
+    input: DecideWorldPermissionInput,
+    now = input.now ?? new Date(),
+  ) {
+    const decided = await this.#skills.decideWorldPermission(input, now)
+    const continuation = decided.request.workTurnId === undefined
+      ? undefined
+      : await this.continueIfReady(decided.request.workTurnId, now)
+    return { ...decided, ...(continuation === undefined ? {} : { continuation }) }
+  }
+
+  /**
+   * Handle the three deliberately narrow Chinese approval phrases before a
+   * route calls `beginDirect()`. The text is never sent through Skill
+   * proposal, transforms, packages, or a model, and therefore cannot create
+   * a second WorkTurn. Ambiguous (zero or multiple) pending requests are
+   * intentionally left untouched so the caller can ask the user to choose.
+   */
+  async tryDecideWorldPermissionText(input: {
+    worldId: string
+    employeeId: string
+    text: string
+    decidedBy: string
+    actor?: WorldAuthorityActor
+    source?: 'raw-user' | 'external'
+    now?: Date
+  }): Promise<
+    | { handled: false }
+    | { handled: true; request: WorldPermissionRequest; continuation?: TurnAwareConversationResult }
+  > {
+    if (input.source !== undefined && input.source !== 'raw-user') return { handled: false }
+    const decision = parseWorldPermissionDecisionText(input.text)
+    if (decision === undefined || this.#worldPermissions === undefined) return { handled: false }
+    const pending = (await this.#worldPermissions.listPending(input.worldId))
+      .filter((request) => request.employeeId === input.employeeId)
+    if (pending.length !== 1) return { handled: false }
+    const decided = await this.decideWorldPermission({
+      requestId: pending[0]!.id,
+      decision,
+      decidedBy: input.decidedBy,
+      ...(input.actor === undefined ? {} : { actor: input.actor }),
+      ...(input.now === undefined ? {} : { now: input.now }),
+    }, input.now ?? new Date())
+    return {
+      handled: true,
+      request: decided.request,
+      ...(decided.continuation === undefined ? {} : { continuation: decided.continuation }),
+    }
+  }
+
   async recover(now = new Date()): Promise<void> {
+    await this.#worldPermissions?.expire(now)
     await this.#skills.recoverApprovedActions(now)
     for (const turn of this.#store.listWorkTurnsByStatus('waiting-approval')) {
       await this.continueIfReady(turn.id, now)
@@ -117,6 +178,7 @@ export class TurnAwareApprovalContinuationService {
   async continueIfReady(workTurnId: string, now = new Date()): Promise<TurnAwareConversationResult | undefined> {
     const turn = this.#store.getWorkTurn(workTurnId)
     if (turn === undefined || turn.status !== 'waiting-approval') return undefined
+    if (await this.#decisionCoordinator.hasPending(workTurnId)) return undefined
     let actions = this.#store.listWorldSkillActions(turn.worldId).filter((action) => action.workTurnId === turn.id)
     if (actions.length === 0 || actions.some((action) => action.status === 'waiting-for-approval')) return undefined
 
@@ -282,4 +344,12 @@ function permissionModeFrom(metadata: JsonObject): AgentPermissionMode | undefin
 function reasoningEffortFrom(metadata: JsonObject): Exclude<ReasoningEffort, 'auto'> | undefined {
   const value = metadata.reasoningEffort
   return value === 'off' || value === 'minimal' || value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh' || value === 'max' ? value : undefined
+}
+
+function parseWorldPermissionDecisionText(text: string): 'once' | 'persistent' | 'reject' | undefined {
+  const normalized = text.replace(/[\s\u3000]+/gu, '').replace(/[。！!？?，,。]+$/gu, '')
+  if (/^(?:批准|允许一次|本次允许|本次可以|这次允许)$/u.test(normalized)) return 'once'
+  if (/^(?:以后都允许|以后允许|始终允许|授予(?:这个|该)?权限)$/u.test(normalized)) return 'persistent'
+  if (/^(?:拒绝|不允许|取消|不要)$/u.test(normalized)) return 'reject'
+  return undefined
 }

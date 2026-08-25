@@ -69,7 +69,7 @@ export function GroupConversationDialog({ employees, creating = false, onClose, 
               return (
                 <label key={employee.id} className={`group-member${selected ? ' is-selected' : ''}`}>
                   <input type="checkbox" checked={selected} disabled={creating} onChange={() => toggle(employee.id)} />
-                  <Avatar index={employee.avatarIndex} label={employee.displayName} status={employee.status} />
+                  <Avatar index={employee.avatarIndex} label={employee.displayName} status={employee.status} authorityRole={employee.authorityRole} />
                   <span><strong>{employee.displayName}</strong><small>{employee.role} · {employee.currentActivity}</small></span>
                 </label>
               )

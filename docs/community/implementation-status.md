@@ -4,7 +4,7 @@
 
 ## 结论
 
-世界主题、本地包、员工蓝图和 prompt-transform 已收敛到严格声明式边界；现有领域模型更安全的部分继续保留。远程市场、发布 CLI、密码学签名、依赖解析、任意插件代码和外发监控仍未实现，不能通过文档字段假装存在。
+世界主题、本地包、员工蓝图和 prompt-transform 已收敛到严格声明式边界；现有领域模型更安全的部分继续保留。远程市场、发布 CLI、密码学签名、依赖解析、任意插件代码和外发监控仍未实现，不能通过文档字段假装存在。World Administrator V1 已进入真实的 SQLite、Server、Skill Runtime 和 Web 路径；产品级 E2E 仍是合并门禁，不通过门禁就不能把该能力标记为稳定发布能力。
 
 会话连续性支持同一会话跨重启恢复，回合与角色执行生命周期也已持久化到本地 SQLite。当前能力不包含跨会话语义检索、情景记忆、向量检索和自动记忆整理。
 
@@ -24,7 +24,7 @@
 | 会话执行 | `WorkSession → WorkTurn → AgentRun` 持久模型；Skill Action 和 Approval Request 绑定同一会话与回合；`waiting-approval` 不占用 Worker 且跨重启保留；审批完成后在原 WorkTurn 新建 AgentRun，不重放用户回合；群聊和角色协作按真实调用顺序记录多次运行 | 当前只记录生命周期、错误码和 Runtime Session ID，不持久化原始 prompt、工具输入或工具结果 | 通用事件 items 表、远程执行同步 |
 | 世界轨迹 | 每个 AgentRun 投影为一条稳定主轨迹；中文判断摘要、结构化工具调度、状态、耗时、模型和真实 Token 归入同一次运行；按角色汇总 Token；支持角色、日期、关键词、内容和状态筛选以及游标分页；实时与重启恢复使用同一身份；全链路脱敏 | Token 只在 Harness 明确返回时展示，不进行估算；旧运行没有 Token 时保持为空 | 跨设备轨迹同步、用户配置的轨迹保留策略 |
 | 应用访问锁 | 全局锁屏覆盖整个工作台；锁定状态下服务端拒绝除健康检查和解锁外的应用 API；密码使用 scrypt 派生哈希保存在本机凭据目录；错误尝试限速；服务重启后默认重新锁定 | 会话当前保存在进程内并具有固定有效期；应用锁不代替操作系统账号、磁盘加密或文件权限 | 系统生物识别、设备间锁状态同步 |
-| 世界管理员 | 新世界首个角色自动成为管理员；已有世界迁移时优先选择管家，否则选择最早的活动角色；支持同世界内管理员移交；角色运行时只获得当前世界的管理员职责 | 同世界绑定由存储层强制（跨世界指派被拒绝）；管理能力本身目前只是写入 Persona 的身份标记，没有运行时强制点 | 多管理员、细粒度世界管理角色 |
+| 世界管理员 | WorldCharacterAuthority 使用 `member / administrator` 与 18 项 World Permission；SQLite 保存当前权限、append-only 审计和 WorldPermissionRequest；支持同世界多管理员、最后管理员保护、员工委托边界、权限请求继续原 WorkTurn、管理员 Badge、角色权限编辑器、统一待处理决策读取，以及受信任 `builtin.world-management` 动作 | 新世界首个活动角色自动成为管理员；旧世界按兼容指针/管家/最早活动角色回填；管理员可获得当前世界文件 `workspace-write`，但永不自动升级 `danger-full-access`；产品级 E2E 是发布门禁 | Application Administrator、跨 World 管理、多人类账户 ACL、Remote Administrator、Department/Team hierarchy |
 | 设置与模型连接 | 设置内容采用单列信息流；模型连接先配置地址与密钥，再拉取并搜索选择模型 ID；维护页只保留真实应用更新；主题采用完整预设并折叠低频自定义项 | 公开模型目录依赖供应商接口；手动模型 ID 保留为显式备用模式 | 自动供应商账户导入、跨设备设置同步 |
 | 应用更新 | 仅支持干净 `main` 分支从 `origin/main` 快进；更新前在隔离工作树完成 frozen install 与 build，并创建完整本地 Backup Bundle | 更新完成后需要用户重启当前进程；非 Git 安装和开发分支会明确显示不支持原因 | 桌面安装包增量更新、签名发布通道 |
 | 动作审批 | 外部副作用先持久化 Skill Action 与 Approval Request；两者关联 WorkTurn；未批准、已拒绝、已过期或授权已撤销时不会进入受信任 Adapter；持久执行 CAS 保证单次进入外部边界；审批后崩溃可安全续跑，已进入外部边界的崩溃转为结果未知并禁止自动重试 | 会话内审批卡展示适配器、技能、调用、目标与参数，提供本次允许/一直允许/拒绝，并有一条穿 HTTP 的 propose→approve→execute 回归测试；可复用策略由 Skill Descriptor 显式授权，严格绑定 Skill、Action、Target、Risk 与作用域，**永不绑定 `parameters`**，因此语义装在参数里的技能（Firecrawl、MCP）声明 `forbidden` | 独立审批中心界面、通用文件写入审批、远程审批同步 |
@@ -51,7 +51,7 @@
 - MCP Skill Adapter：`packages/server/src/skills/mcp-skill-adapter.ts`、`packages/server/src/integrations/mcp-client.ts`、`packages/server/tests/mcp-skill-adapter.test.ts`、[MCP Skill Adapter V1](../architecture/mcp-skill-adapter-v1.md)
 - 世界轨迹：`packages/server/src/services/world-trace-service.ts`、`packages/server/src/world-trace/agent-run-trace-adapter.ts`、`packages/web/src/components/world-trace/`、[世界轨迹中心](../architecture/world-trace-center-v1.md)
 - 应用访问锁：`packages/server/src/services/application-access-service.ts`、`packages/server/src/http/application-access-guard.ts`、`packages/web/src/components/ApplicationLockGate.tsx`
-- 世界管理员：`packages/persistence/src/sqlite-store.ts`、`packages/server/src/routes/world-routes.ts`、`packages/server/src/services/character-profile-runtime.ts`
+- 世界管理员：`packages/contracts/src/world-authority.ts`、`packages/persistence/src/world-character-authority-repository.ts`、`packages/persistence/src/sqlite-store.ts`、`packages/server/src/services/world-character-authority-service.ts`、`packages/server/src/services/world-permission-request-service.ts`、`packages/server/src/services/world-management-intent-parser.ts`、`packages/server/src/skills/world-management-adapter.ts`、`packages/server/src/routes/world-authority-routes.ts`、`packages/web/src/components/WorldPermissionEditor.tsx`、`docs/architecture/world-character-authority-v1.md`
 - 设置、创意工坊与更新：`packages/web/src/components/SettingsDialog.tsx`、`packages/web/src/components/creative-workshop/CreativeWorkshopEditor.tsx`、`packages/server/src/services/application-update-service.ts`
 - 模型交互日志：`packages/server/src/services/model-interaction-service.ts`、`packages/server/src/routes/model-interaction-routes.ts`、`packages/persistence/src/migrations.ts`（v11）、[模块说明与观测边界](model-interaction-logs.md)
 - CI：`.github/workflows/ci.yml`
