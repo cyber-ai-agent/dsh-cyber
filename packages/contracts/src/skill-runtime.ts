@@ -15,6 +15,9 @@ export type SkillActionAuthorization =
   | 'explicit-user-request'
   | 'preapproved-policy'
 
+export type SkillActionExecutionState = 'approved-ready' | 'executing' | 'settled'
+export type PersistentApprovalCapability = 'forbidden' | 'exact-target'
+
 /**
  * Durable, provider-neutral representation of one concrete Skill side effect.
  *
@@ -41,6 +44,10 @@ export interface CharacterSkillAction {
   approvalRequestId?: string
   workTurnId?: string
   agentRunId?: string
+  executionState?: SkillActionExecutionState
+  executionAttemptId?: string
+  executionStartedAt?: IsoTimestamp
+  executionCompletedAt?: IsoTimestamp
   status: SkillActionStatus
   detail: string
   createdAt: IsoTimestamp
@@ -62,6 +69,8 @@ export interface CharacterSkillDescriptor {
   adapterId: string
   risks: SkillActionRisk[]
   supportsScheduling: boolean
+  /** Whether a one-time decision may create a reusable exact-target policy. */
+  persistentApproval: PersistentApprovalCapability
   /** Declarative recipes shape how a character works; integrations can execute host actions. */
   kind?: 'recipe' | 'integration'
   /** Safe recipes may be selected by default during recruitment. External integrations never are. */

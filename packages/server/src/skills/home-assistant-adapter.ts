@@ -20,6 +20,7 @@ const DESCRIPTOR: CharacterSkillDescriptor = {
   adapterId: HOME_ASSISTANT_ADAPTER_ID,
   risks: ['external-side-effect'],
   supportsScheduling: true,
+  persistentApproval: 'exact-target',
 }
 
 export interface HomeAssistantSkillAdapterOptions {
@@ -54,6 +55,12 @@ export class HomeAssistantSkillAdapter implements CharacterSkillAdapter {
       parameters: {},
       ...(scheduledFor === undefined ? {} : { scheduledFor }),
     }))
+  }
+
+  preflight(action: CharacterSkillAction) {
+    return homeAssistantConfig(this.#env, action.target) === undefined
+      ? { ready: false, detail: 'Home Assistant 连接或对应设备实体尚未配置' }
+      : { ready: true }
   }
 
   async execute(

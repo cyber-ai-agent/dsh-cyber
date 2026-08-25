@@ -59,6 +59,7 @@ import { RoleAwareAmbientLifeService } from './services/role-aware-ambient-life-
 import { RuntimeUpdateService } from './services/runtime-update-service.js'
 import { ApplicationUpdateService } from './services/application-update-service.js'
 import { TaskScheduleService } from './services/task-schedule-service.js'
+import { TurnAwareApprovalContinuationService } from './services/turn-aware-approval-continuation-service.js'
 import { WorldAccessService } from './services/world-access-service.js'
 import { WorldAmbientSlotResolver } from './services/world-ambient-slot-resolver.js'
 import { WorldAmbientStateProvider } from './services/world-ambient-state-provider.js'
@@ -244,6 +245,14 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     registry: skillRegistry,
     actions: skillActions,
   })
+  const turnContinuations = new TurnAwareApprovalContinuationService({
+    store,
+    orchestrator,
+    skills: skillRuntime,
+    settings: worldSettings,
+    worldPackages,
+  })
+  await turnContinuations.recover()
   const worldTrace = new WorldTraceService({ store, actions: skillActions })
   const employeeActivity = new EmployeeActivityProjectionService(store)
   employeeActivity.projectAll()
@@ -277,7 +286,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
   registerWorldTraceRoutes(router, { store, trace: worldTrace, access: worldAccess })
   registerModelInteractionRoutes(router, { store, interactions })
-  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, worldTrace, employeeActivity, worldPackages })
+  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, turnContinuations, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, worldTrace, employeeActivity, worldPackages })
   registerEmployeeRoutes(router, { store, worldAccess })
 
   const httpServer = createServer((request, response) => {

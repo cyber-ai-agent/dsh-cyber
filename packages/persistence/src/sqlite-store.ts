@@ -2219,8 +2219,22 @@ export class SqliteStore {
     ).all(sessionId).map(mapWorkTurn)
   }
 
+  listWorkTurnsByStatus(status: WorkTurn['status']): WorkTurn[] {
+    return this.database.prepare(
+      'SELECT * FROM work_turns WHERE status = ? ORDER BY created_at, id',
+    ).all(status).map(mapWorkTurn)
+  }
+
   startWorkTurn(turnId: string): WorkTurn {
     return this.#transitionWorkTurn(turnId, ['queued'], 'running')
+  }
+
+  waitWorkTurnForApproval(turnId: string): WorkTurn {
+    return this.#transitionWorkTurn(turnId, ['running'], 'waiting-approval')
+  }
+
+  resumeWorkTurnAfterApproval(turnId: string): WorkTurn {
+    return this.#transitionWorkTurn(turnId, ['waiting-approval'], 'running')
   }
 
   completeWorkTurn(turnId: string): WorkTurn {
@@ -2232,7 +2246,7 @@ export class SqliteStore {
   }
 
   interruptWorkTurn(turnId: string, errorCode = 'interrupted'): WorkTurn {
-    return this.#transitionWorkTurn(turnId, ['queued', 'running'], 'interrupted', errorCode)
+    return this.#transitionWorkTurn(turnId, ['queued', 'running', 'waiting-approval'], 'interrupted', errorCode)
   }
 
   createAgentRun(input: CreateAgentRunInput): AgentRun {
@@ -2321,21 +2335,24 @@ export class SqliteStore {
       const duplicate = this.database.prepare(
         `SELECT * FROM skill_actions
          WHERE world_id = ? AND character_id = ? AND skill_id = ? AND adapter_id = ?
-           AND action = ? AND target = ? AND scheduled_for IS ? AND created_at > ?
+           AND action = ? AND target = ? AND scheduled_for IS ? AND work_turn_id IS ? AND created_at > ?
          ORDER BY created_at DESC LIMIT 1`,
       ).get(action.worldId, action.characterId, action.skillId, action.adapterId, action.action,
-        action.target, action.scheduledFor ?? null, cutoff)
+        action.target, action.scheduledFor ?? null, action.workTurnId ?? null, cutoff)
       if (duplicate !== undefined) return { action: mapSkillAction(duplicate), created: false }
       this.database.prepare(
         `INSERT INTO skill_actions
          (id, workspace_id, world_id, character_id, skill_id, adapter_id, action, target, label,
           risk, authorization, parameters_json, scheduled_for, approval_request_id, work_turn_id,
-          agent_run_id, status, detail, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          agent_run_id, execution_state, execution_attempt_id, execution_started_at,
+          execution_completed_at, status, detail, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(action.id, world.workspaceId, action.worldId, action.characterId, action.skillId,
         action.adapterId, action.action, action.target, action.label, action.risk, action.authorization,
         stringifyJson(action.parameters), action.scheduledFor ?? null, action.approvalRequestId ?? null,
-        action.workTurnId ?? null, action.agentRunId ?? null, action.status, action.detail,
+        action.workTurnId ?? null, action.agentRunId ?? null, action.executionState ?? null,
+        action.executionAttemptId ?? null, action.executionStartedAt ?? null,
+        action.executionCompletedAt ?? null, action.status, action.detail,
         action.createdAt, action.updatedAt)
       return { action: structuredClone(action), created: true }
     })
@@ -2345,9 +2362,11 @@ export class SqliteStore {
     this.#assertWritable()
     const result = this.database.prepare(
       `UPDATE skill_actions SET status = ?, detail = ?, authorization = ?, approval_request_id = ?, work_turn_id = ?,
-       agent_run_id = ?, updated_at = ? WHERE id = ?`,
+       agent_run_id = ?, execution_state = ?, execution_attempt_id = ?, execution_started_at = ?,
+       execution_completed_at = ?, updated_at = ? WHERE id = ?`,
     ).run(action.status, action.detail, action.authorization, action.approvalRequestId ?? null, action.workTurnId ?? null,
-      action.agentRunId ?? null, action.updatedAt, action.id)
+      action.agentRunId ?? null, action.executionState ?? null, action.executionAttemptId ?? null,
+      action.executionStartedAt ?? null, action.executionCompletedAt ?? null, action.updatedAt, action.id)
     if (Number(result.changes) !== 1) throw new EntityNotFoundError(`Skill action not found: ${action.id}`)
   }
 
@@ -2373,6 +2392,44 @@ export class SqliteStore {
     return this.database.prepare(
       `SELECT * FROM skill_actions WHERE status = 'waiting-for-approval' ORDER BY created_at, id`,
     ).all().map(mapSkillAction)
+  }
+
+  listSkillActionsReadyForExecution(): CharacterSkillAction[] {
+    return this.database.prepare(
+      `SELECT * FROM skill_actions WHERE execution_state = 'approved-ready' ORDER BY updated_at, id`,
+    ).all().map(mapSkillAction)
+  }
+
+  prepareSkillActionExecution(actionId: string, now = this.#clock()): CharacterSkillAction {
+    this.#assertWritable()
+    const result = this.database.prepare(
+      `UPDATE skill_actions SET execution_state = 'approved-ready', execution_attempt_id = NULL,
+       execution_started_at = NULL, execution_completed_at = NULL, updated_at = ?
+       WHERE id = ? AND (execution_state IS NULL OR execution_state = 'approved-ready')`,
+    ).run(now, actionId)
+    if (Number(result.changes) !== 1) throw new PersistenceError('Skill action cannot be prepared for execution')
+    return this.getSkillAction(actionId)!
+  }
+
+  claimSkillActionExecution(actionId: string, attemptId: string, now = this.#clock()): CharacterSkillAction | undefined {
+    this.#assertWritable()
+    if (!attemptId.trim()) throw new PersistenceError('Skill action execution attempt is required')
+    const result = this.database.prepare(
+      `UPDATE skill_actions SET execution_state = 'executing', execution_attempt_id = ?,
+       execution_started_at = ?, execution_completed_at = NULL, status = 'waiting-for-integration', updated_at = ?
+       WHERE id = ? AND execution_state = 'approved-ready'`,
+    ).run(attemptId, now, now, actionId)
+    return Number(result.changes) === 1 ? this.getSkillAction(actionId)! : undefined
+  }
+
+  reconcileApprovedSkillActions(now = this.#clock()): number {
+    this.#assertWritable()
+    return Number(this.database.prepare(
+      `UPDATE skill_actions SET execution_state = 'approved-ready', status = 'waiting-for-integration',
+       detail = '审批已通过，等待安全继续原工作回合', updated_at = ?
+       WHERE status = 'waiting-for-approval' AND execution_state IS NULL
+         AND approval_request_id IN (SELECT id FROM approval_requests WHERE status = 'approved')`,
+    ).run(now).changes)
   }
 
   createApprovalRequest(input: CreateApprovalRequestInput): ApprovalRequest {
@@ -2402,7 +2459,9 @@ export class SqliteStore {
     const existing = this.getApprovalRequestBySubject(input.subjectType, input.subjectId)
     if (existing !== undefined) {
       if (existing.workspaceId !== input.workspaceId || existing.worldId !== input.worldId
-        || existing.characterId !== input.characterId || existing.risk !== input.risk) {
+        || existing.sessionId !== input.sessionId || existing.workTurnId !== input.workTurnId
+        || existing.agentRunId !== input.agentRunId || existing.characterId !== input.characterId
+        || existing.risk !== input.risk) {
         throw new PersistenceError('Approval subject is already bound to another scope')
       }
       return existing
@@ -2561,10 +2620,12 @@ export class SqliteStore {
   recoverSkillActionsAfterRestart(now = this.#clock()): number {
     this.#assertWritable()
     return Number(this.database.prepare(
-      `UPDATE skill_actions SET status = 'outcome-unknown',
+      `UPDATE skill_actions SET status = 'outcome-unknown', execution_state = 'settled',
+       execution_completed_at = ?,
        detail = '应用在外部动作执行期间中断，结果未知；不得自动重试', updated_at = ?
-       WHERE status = 'waiting-for-integration'`,
-    ).run(now).changes)
+       WHERE status = 'waiting-for-integration'
+         AND (execution_state = 'executing' OR execution_state IS NULL)`,
+    ).run(now, now).changes)
   }
 
   listParticipants(sessionId: string): WorkSessionParticipant[] {
@@ -3879,12 +3940,13 @@ export class SqliteStore {
     const now = this.#clock()
     const normalizedError = errorCode?.trim()
     if ((to === 'failed' || to === 'interrupted') && !normalizedError) throw new PersistenceError('Terminal work turn requires an error code')
-    this.database.prepare(
+    const result = this.database.prepare(
       `UPDATE work_turns SET status = ?, error_code = ?,
-       started_at = CASE WHEN ? = 'running' THEN ? ELSE started_at END,
+       started_at = CASE WHEN ? = 'running' THEN COALESCE(started_at, ?) ELSE started_at END,
        completed_at = CASE WHEN ? IN ('completed', 'failed', 'interrupted') THEN ? ELSE completed_at END
-       WHERE id = ?`,
-    ).run(to, normalizedError ?? null, to, now, to, now, turnId)
+       WHERE id = ? AND status = ?`,
+    ).run(to, normalizedError ?? null, to, now, to, now, turnId, turn.status)
+    if (Number(result.changes) !== 1) throw new PersistenceError('Work turn transition lost a concurrent race')
     return this.getWorkTurn(turnId)!
   }
 
@@ -4542,6 +4604,10 @@ function mapSkillAction(row: object): CharacterSkillAction {
   if (typeof value.approval_request_id === 'string') action.approvalRequestId = value.approval_request_id
   if (typeof value.work_turn_id === 'string') action.workTurnId = value.work_turn_id
   if (typeof value.agent_run_id === 'string') action.agentRunId = value.agent_run_id
+  if (typeof value.execution_state === 'string') action.executionState = value.execution_state as NonNullable<CharacterSkillAction['executionState']>
+  if (typeof value.execution_attempt_id === 'string') action.executionAttemptId = value.execution_attempt_id
+  if (typeof value.execution_started_at === 'string') action.executionStartedAt = value.execution_started_at
+  if (typeof value.execution_completed_at === 'string') action.executionCompletedAt = value.execution_completed_at
   return action
 }
 

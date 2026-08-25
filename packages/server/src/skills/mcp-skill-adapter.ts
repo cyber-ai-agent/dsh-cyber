@@ -36,6 +36,7 @@ export class McpSkillAdapter implements CharacterSkillAdapter {
       adapterId: this.id,
       risks: ['external-side-effect'],
       supportsScheduling: false,
+      persistentApproval: 'forbidden',
       kind: 'integration',
       recommendedByDefault: false,
     }))
@@ -84,6 +85,17 @@ export class McpSkillAdapter implements CharacterSkillAdapter {
       authorization: 'explicit-user-request',
       parameters: { toolName: command.toolName, payloadRef, argumentFields: Object.keys(command.arguments).slice(0, 50) },
     }]
+  }
+
+  preflight(action: CharacterSkillAction) {
+    const world = this.#store.getWorld(action.worldId)
+    const toolName = typeof action.parameters.toolName === 'string' ? action.parameters.toolName : ''
+    const payloadRef = typeof action.parameters.payloadRef === 'string' ? action.parameters.payloadRef : ''
+    const connection = world === undefined ? undefined : this.#integrations.get(world.workspaceId, MCP_INTEGRATION_ID)
+    const discovered = world === undefined ? undefined : this.#tools.get(action.skillId)?.find((entry) => entry.workspaceId === world.workspaceId && entry.tool.name === toolName)
+    return world !== undefined && Boolean(toolName) && Boolean(payloadRef) && connection?.enabled === true && discovered !== undefined
+      ? { ready: true }
+      : { ready: false, detail: '当前工作区的 MCP 连接、工具目录或加密参数不可用' }
   }
 
   async execute(action: CharacterSkillAction): Promise<CharacterSkillExecutionResult> {

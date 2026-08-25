@@ -8,6 +8,7 @@ interface Migration {
   version: number
   name: string
   sql: string
+  foreignKeysOff?: boolean
 }
 
 const MIGRATIONS: readonly Migration[] = [
@@ -794,6 +795,47 @@ const MIGRATIONS: readonly Migration[] = [
       WHERE administrator_employee_id IS NULL;
     `,
   },
+  {
+    version: 20,
+    name: 'turn-aware-approval-continuation',
+    foreignKeysOff: true,
+    sql: `
+      CREATE TABLE work_turns_v20 (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        session_id TEXT NOT NULL REFERENCES work_sessions(id) ON DELETE CASCADE,
+        client_turn_id TEXT,
+        interaction_kind TEXT NOT NULL CHECK (interaction_kind IN ('chat', 'task', 'meeting', 'peer')),
+        status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'waiting-approval', 'completed', 'failed', 'interrupted')),
+        error_code TEXT,
+        created_at TEXT NOT NULL,
+        started_at TEXT,
+        completed_at TEXT
+      ) STRICT;
+      INSERT INTO work_turns_v20
+        (id, workspace_id, world_id, session_id, client_turn_id, interaction_kind, status,
+         error_code, created_at, started_at, completed_at)
+      SELECT id, workspace_id, world_id, session_id, client_turn_id, interaction_kind, status,
+             error_code, created_at, started_at, completed_at
+      FROM work_turns;
+      DROP TABLE work_turns;
+      ALTER TABLE work_turns_v20 RENAME TO work_turns;
+      CREATE INDEX work_turns_session_created_idx ON work_turns(session_id, created_at DESC, id);
+      CREATE INDEX work_turns_world_status_created_idx ON work_turns(world_id, status, created_at DESC, id);
+      CREATE INDEX work_turns_client_turn_idx ON work_turns(client_turn_id) WHERE client_turn_id IS NOT NULL;
+      CREATE INDEX work_turns_session_client_turn_idx
+        ON work_turns(session_id, client_turn_id) WHERE client_turn_id IS NOT NULL;
+
+      ALTER TABLE skill_actions ADD COLUMN execution_state TEXT
+        CHECK (execution_state IN ('approved-ready', 'executing', 'settled'));
+      ALTER TABLE skill_actions ADD COLUMN execution_attempt_id TEXT;
+      ALTER TABLE skill_actions ADD COLUMN execution_started_at TEXT;
+      ALTER TABLE skill_actions ADD COLUMN execution_completed_at TEXT;
+      CREATE INDEX skill_actions_execution_state_idx
+        ON skill_actions(execution_state, updated_at) WHERE execution_state IS NOT NULL;
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {
@@ -807,9 +849,14 @@ export function migrate(database: DatabaseSync, now: () => string): void {
   for (const migration of MIGRATIONS) {
     if (migration.version <= userVersion) continue
 
+    if (migration.foreignKeysOff === true) database.exec('PRAGMA foreign_keys = OFF')
     database.exec('BEGIN IMMEDIATE')
     try {
       database.exec(migration.sql)
+      if (migration.foreignKeysOff === true) {
+        const violation = database.prepare('PRAGMA foreign_key_check').get()
+        if (violation !== undefined) throw new DatabaseSchemaError(`Migration ${migration.version} violates foreign keys`)
+      }
       database
         .prepare('INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)')
         .run(migration.version, migration.name, now())
@@ -818,6 +865,8 @@ export function migrate(database: DatabaseSync, now: () => string): void {
     } catch (error) {
       database.exec('ROLLBACK')
       throw error
+    } finally {
+      if (migration.foreignKeysOff === true) database.exec('PRAGMA foreign_keys = ON')
     }
   }
 }

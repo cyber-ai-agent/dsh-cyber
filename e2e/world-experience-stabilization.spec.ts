@@ -30,6 +30,7 @@ test.afterAll(async () => {
 async function ensureWorld(page: import('@playwright/test').Page) {
   await page.goto(origin)
   const onboarding = page.getByRole('heading', { name: '创建第一个本地世界' })
+  await expect(onboarding.or(page.locator('.workbench-shell'))).toBeVisible()
   if (await onboarding.isVisible()) await page.getByRole('button', { name: '创建我的世界' }).click()
   await expect(page.locator('.workbench-shell')).toBeVisible()
 }
@@ -43,8 +44,8 @@ test('previews, cancels and persists world appearance settings', async ({ page }
   await page.getByRole('button', { name: '世界设置' }).click()
   let dialog = page.getByRole('dialog', { name: /世界设置 · 我的世界/ })
   await expect(dialog).toBeVisible()
-  const accent = dialog.getByLabel('强调色')
-  await accent.fill('#3366ff')
+  const deepOcean = dialog.getByRole('button', { name: /深海蓝/ })
+  await deepOcean.click()
   await expect.poll(() => app.evaluate((element) => getComputedStyle(element).getPropertyValue('--accent').trim())).not.toBe(before)
   await expect(dialog.getByText('这里的样式会跟着设置实时变化。')).toBeVisible()
 
@@ -54,14 +55,14 @@ test('previews, cancels and persists world appearance settings', async ({ page }
 
   await page.getByRole('button', { name: '世界设置' }).click()
   dialog = page.getByRole('dialog', { name: /世界设置 · 我的世界/ })
-  await dialog.getByLabel('强调色').fill('#3366ff')
+  await dialog.getByRole('button', { name: /深海蓝/ }).click()
   await dialog.getByRole('button', { name: '保存世界设置' }).click()
   await expect(dialog.getByRole('status')).toContainText('世界设置已保存')
   await expect(dialog).toBeHidden({ timeout: 3_000 })
 
   await page.getByRole('button', { name: '世界设置' }).click()
   dialog = page.getByRole('dialog', { name: /世界设置 · 我的世界/ })
-  await expect(dialog.getByLabel('强调色')).toHaveValue('#3366ff')
+  await expect(dialog.getByRole('button', { name: /深海蓝/ })).toHaveClass(/is-active/)
   await dialog.getByRole('button', { name: '取消' }).click()
 })
 

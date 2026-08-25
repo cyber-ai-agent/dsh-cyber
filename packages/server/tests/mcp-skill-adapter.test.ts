@@ -48,11 +48,28 @@ describe('MCP Skill Adapter V1', () => {
 
     const denied = await registry.propose({ worldId: world.id, characterId: employee.id, prompt: '/mcp github.create_issue {"title":"secret subject"}', grantedSkillIds: [], now: new Date() })
     expect(denied).toEqual([])
-    const prepared = await runtime.prepare(world.id, employee.id, '/mcp github.create_issue {"title":"secret subject","body":"secret body"}', new Date('2026-08-25T01:00:00.000Z'))
+    const session = store.createSession({
+      workspaceId: workspace.id, worldId: world.id, kind: 'direct', title: 'MCP 测试',
+      participants: [{ participantId: 'owner', kind: 'owner' }, { participantId: employee.id, kind: 'employee' }],
+    })
+    const turn = store.createWorkTurn({
+      workspaceId: workspace.id, worldId: world.id, sessionId: session.id, interactionKind: 'chat',
+    })
+    store.startWorkTurn(turn.id)
+    const prepared = await runtime.prepare({
+      workspaceId: workspace.id, worldId: world.id, sessionId: session.id,
+      workTurnId: turn.id, characterId: employee.id,
+      prompt: '/mcp github.create_issue {"title":"secret subject","body":"secret body"}',
+    }, new Date('2026-08-25T01:00:00.000Z'))
     expect(prepared.actions[0]).toMatchObject({ status: 'waiting-for-approval', skillId, target: 'mcp:github.create_issue' })
     expect(JSON.stringify(prepared.actions[0]!.parameters)).not.toContain('secret subject')
     expect(clients.calls).toHaveLength(0)
     const approval = runtime.listApprovalRequests(world.id, 'pending')[0]!
+    expect(approval).toMatchObject({ sessionId: session.id, workTurnId: turn.id })
+    await expect(runtime.decideApproval(
+      approval.id, 'approved', 'character', 'owner', new Date('2026-08-25T01:01:00.000Z'),
+    )).rejects.toMatchObject({ code: 'persistent_approval_forbidden' })
+    expect(clients.calls).toHaveLength(0)
     const result = await runtime.decideApproval(approval.id, 'approved', 'once', 'owner', new Date('2026-08-25T01:01:00.000Z'))
     expect(result.action).toMatchObject({ status: 'executed', detail: expect.stringContaining('原始结果未持久化') })
     expect(clients.calls).toEqual([{ name: 'github.create_issue', args: { title: 'secret subject', body: 'secret body' } }])
