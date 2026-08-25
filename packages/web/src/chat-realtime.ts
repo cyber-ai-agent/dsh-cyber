@@ -1,6 +1,7 @@
 import type { WorkMessage } from '@dsh-cyber/contracts'
 
-export type PendingChatTurnStatus = 'queued' | 'running' | 'failed'
+export type ChatQueueMode = 'normal' | 'next'
+export type PendingChatTurnStatus = 'queued' | 'running' | 'waiting-approval' | 'failed' | 'interrupted' | 'cancelled'
 
 export interface PendingChatTurn {
   id: string
@@ -11,6 +12,8 @@ export interface PendingChatTurn {
   status: PendingChatTurnStatus
   createdAt: string
   sessionId?: string
+  workTurnId?: string
+  serverQueueId?: string
   error?: string
 }
 
@@ -33,20 +36,62 @@ export interface StreamingChatReply {
  * conversation keys are intentionally allowed to run in parallel.
  */
 export class ChatTurnQueue {
-  readonly #tails = new Map<string, Promise<void>>()
+  readonly #queues = new Map<string, Array<{ id: string; task: () => Promise<void>; resolve: () => void }>>()
+  readonly #running = new Set<string>()
 
-  enqueue(key: string, task: () => Promise<void>): Promise<void> {
-    const previous = this.#tails.get(key) ?? Promise.resolve()
-    const current = previous.catch(() => undefined).then(task)
-    this.#tails.set(key, current)
-    void current.finally(() => {
-      if (this.#tails.get(key) === current) this.#tails.delete(key)
-    }).catch(() => undefined)
-    return current
+  enqueue(key: string, task: () => Promise<void>, id = `${key}:${Date.now()}`): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const queue = this.#queues.get(key) ?? []
+      queue.push({ id, task, resolve })
+      this.#queues.set(key, queue)
+      this.startNext(key)
+    })
   }
 
   isPending(key: string): boolean {
-    return this.#tails.has(key)
+    return this.#running.has(key) || (this.#queues.get(key)?.length ?? 0) > 0
+  }
+
+  isRunning(key: string): boolean {
+    return this.#running.has(key)
+  }
+
+  remove(id: string): boolean {
+    for (const [key, queue] of this.#queues) {
+      const index = queue.findIndex((item) => item.id === id)
+      if (index < 0) continue
+      const [removed] = queue.splice(index, 1)
+      removed?.resolve()
+      if (queue.length === 0 && !this.#running.has(key)) this.#queues.delete(key)
+      return true
+    }
+    return false
+  }
+
+  promote(key: string, id: string): boolean {
+    const queue = this.#queues.get(key)
+    if (queue === undefined) return false
+    const index = queue.findIndex((item) => item.id === id)
+    if (index <= 0) return index === 0
+    const [item] = queue.splice(index, 1)
+    if (item !== undefined) queue.unshift(item)
+    return item !== undefined
+  }
+
+  private startNext(key: string): void {
+    if (this.#running.has(key)) return
+    const queue = this.#queues.get(key)
+    const item = queue?.shift()
+    if (item === undefined) {
+      if (queue !== undefined && queue.length === 0) this.#queues.delete(key)
+      return
+    }
+    this.#running.add(key)
+    void item.task().catch(() => undefined).finally(() => {
+      this.#running.delete(key)
+      item.resolve()
+      this.startNext(key)
+    })
   }
 }
 

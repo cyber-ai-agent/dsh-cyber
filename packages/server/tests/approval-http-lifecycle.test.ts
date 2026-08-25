@@ -200,4 +200,23 @@ describe('approval gate over the HTTP surface', () => {
     expect(decided.response.status).toBeGreaterThanOrEqual(400)
     expect(adapter.executed).toEqual([])
   })
+
+  it('does not execute a pending approval after its WorkTurn is stopped', async () => {
+    const adapter = new SwitchAdapter()
+    const { origin } = await start(adapter, new QuietRuntime())
+    const { world, characterId } = await bootstrap(origin)
+
+    const turn = await chat(origin, world.id, characterId, '帮我关灯')
+    expect(turn.body.waitingForApproval).toBe(true)
+    const pending = await json(origin, `/api/worlds/${world.id}/approvals?status=pending`)
+    const view = (pending.body.items as ApprovalRequestView[])[0]!
+    const stopped = await json(origin, `/api/turns/${turn.body.workTurnId}/abort`, post({ reason: 'user-stop' }))
+    expect(stopped.response.status).toBe(200)
+    expect((await json(origin, `/api/turns/${turn.body.workTurnId}`)).body.turn.status).toBe('interrupted')
+
+    const decided = await json(origin, `/api/approvals/${view.request.id}/decision`, post({ decision: 'approved', scope: 'once' }))
+    expect(decided.response.status).toBe(200)
+    expect(decided.body.request.status).toBe('rejected')
+    expect(adapter.executed).toHaveLength(0)
+  })
 })

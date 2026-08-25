@@ -92,6 +92,7 @@ export interface ConversationStorePort {
   bindEmployeeAgentSession(employeeId: string, agentSessionId: string): EmployeeInstance
   createWorkTurn(input: { workspaceId: string; worldId: string; sessionId: string; clientTurnId?: string; interactionKind: WorkTurnInteractionKind }): WorkTurn
   getWorkTurn(turnId: string): WorkTurn | undefined
+  getAgentRun(runId: string): AgentRun | undefined
   listTurnAgentRuns(turnId: string): AgentRun[]
   startWorkTurn(turnId: string): WorkTurn
   completeWorkTurn(turnId: string): WorkTurn
@@ -100,6 +101,8 @@ export interface ConversationStorePort {
   startAgentRun(runId: string): AgentRun
   completeAgentRun(runId: string, runtimeSessionId?: string): AgentRun
   failAgentRun(runId: string, errorCode: string, runtimeSessionId?: string): AgentRun
+  interruptAgentRun(runId: string, errorCode?: string): AgentRun
+  interruptWorkTurn(turnId: string, errorCode?: string): WorkTurn
   createTaskCollaborationPlan?(input: {
     id?: string
     taskId: string
@@ -163,7 +166,18 @@ export interface ConversationRealtimeEnvelope {
   event: AgentRuntimeEvent
 }
 
+export interface ConversationControlEnvelope {
+  workspaceId: string
+  worldId: string
+  sessionId: string
+  workTurnId: string
+  agentRunIds: string[]
+  status: 'interrupted'
+  content: '已停止'
+}
+
 export type ConversationRealtimeListener = (event: ConversationRealtimeEnvelope) => void
+export type ConversationControlListener = (event: ConversationControlEnvelope) => void
 
 export interface ConversationOrchestratorOptions {
   store: ConversationStorePort
@@ -301,6 +315,16 @@ interface RecoveredConversation {
 
 export class ConversationOrchestrationError extends Error {}
 
+export class AgentTurnInterruptedError extends ConversationOrchestrationError {
+  readonly employeeId: string
+
+  constructor(employeeId: string) {
+    super('Agent run was interrupted')
+    this.name = 'AgentTurnInterruptedError'
+    this.employeeId = employeeId
+  }
+}
+
 export type AgentTurnFailureKind =
   | 'authentication'
   | 'model-not-found'
@@ -330,6 +354,9 @@ export class ConversationOrchestrator implements AsyncDisposable {
   readonly #completionHook: AgentRunCompletionHook
   readonly #deferAssistantMessages: boolean
   readonly #listeners = new Set<ConversationRealtimeListener>()
+  readonly #controlListeners = new Set<ConversationControlListener>()
+  readonly #activeAgentRuns = new Map<string, { workTurnId: string; employeeId: string }>()
+  readonly #abortedAgentRuns = new Set<string>()
 
   constructor(options: ConversationOrchestratorOptions) {
     this.#store = options.store
@@ -350,6 +377,54 @@ export class ConversationOrchestrator implements AsyncDisposable {
     return () => this.#listeners.delete(listener)
   }
 
+  subscribeControl(listener: ConversationControlListener): () => void {
+    this.#controlListeners.add(listener)
+    return () => this.#controlListeners.delete(listener)
+  }
+
+  /**
+   * Stop every live AgentRun belonging to one WorkTurn. The runtime receives
+   * only the affected AgentRun ids, so another conversation of the same
+   * employee remains alive in its own Harness lane.
+   */
+  async interruptWorkTurn(workTurnId: string): Promise<ConversationControlEnvelope | undefined> {
+    const workTurn = this.#store.getWorkTurn(workTurnId)
+    if (workTurn === undefined) throw new ConversationOrchestrationError('Work turn is unavailable')
+    if (!['queued', 'running', 'waiting-approval'].includes(workTurn.status)) {
+      // Stop is idempotent for a terminal turn. Do not append a misleading
+      // "已停止" notice after a completed or failed response.
+      return undefined
+    }
+    const activeRunIds = [...this.#activeAgentRuns.entries()]
+      .filter(([, value]) => value.workTurnId === workTurnId)
+      .map(([runId]) => runId)
+    const persistedRunIds = this.#store.listTurnAgentRuns(workTurnId)
+      .filter((run) => run.status === 'queued' || run.status === 'running')
+      .map((run) => run.id)
+    const runIds = [...new Set([...activeRunIds, ...persistedRunIds])]
+    for (const runId of activeRunIds) this.#abortedAgentRuns.add(runId)
+    await Promise.allSettled(activeRunIds.map((runId) => this.#runtime.abortRun?.(runId)))
+    for (const runId of runIds) {
+      try { this.#store.interruptAgentRun(runId, 'interrupted') } catch { /* a runtime race already settled it */ }
+    }
+    const current = this.#store.getWorkTurn(workTurnId)
+    if (current !== undefined && ['queued', 'running', 'waiting-approval'].includes(current.status)) {
+      try { this.#store.interruptWorkTurn(workTurnId, 'interrupted') } catch { /* another controller won */ }
+    }
+    const envelope: ConversationControlEnvelope = {
+      workspaceId: workTurn.workspaceId,
+      worldId: workTurn.worldId,
+      sessionId: workTurn.sessionId,
+      workTurnId,
+      agentRunIds: runIds,
+      status: 'interrupted',
+      content: '已停止',
+    }
+    this.#appendStopNotice(envelope)
+    this.#emitControl(envelope)
+    return envelope
+  }
+
   async direct(input: DirectConversationInput): Promise<ConversationResult> {
     const begun = this.beginDirect(input)
     return this.continueDirect({
@@ -364,6 +439,15 @@ export class ConversationOrchestrator implements AsyncDisposable {
   }
 
   beginDirect(input: DirectConversationInput): DirectConversationTurn {
+    return this.#beginDirect(input, true)
+  }
+
+  /** Create the durable user message without claiming a runtime slot yet. */
+  beginDirectQueued(input: DirectConversationInput): DirectConversationTurn {
+    return this.#beginDirect(input, false)
+  }
+
+  #beginDirect(input: DirectConversationInput, start: boolean): DirectConversationTurn {
     const prompt = requiredText(input.prompt, 'Prompt')
     const employee = this.#requireEmployeeInWorld(input.employeeId, input.workspaceId, input.worldId)
     const session = input.sessionId
@@ -400,7 +484,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
       metadata: { ...input.metadata, workTurnId: workTurn.id },
       correlationId: session.id,
     })
-    this.#store.startWorkTurn(workTurn.id)
+    if (start) this.#store.startWorkTurn(workTurn.id)
     return { session, workTurn: this.#store.getWorkTurn(workTurn.id)!, previousMessages: recovered.messages, history: recovered.history }
   }
 
@@ -531,6 +615,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
       this.#store.completeWorkTurn(workTurn.id)
       return { session, replies }
     } catch (error) {
+      const interrupted = error instanceof AgentTurnInterruptedError || this.#store.getWorkTurn(workTurn.id)?.status === 'interrupted'
       this.#store.appendDomainEvent({
         workspaceId: input.workspaceId,
         worldId: input.worldId,
@@ -539,9 +624,11 @@ export class ConversationOrchestrator implements AsyncDisposable {
         actorId: 'system',
         actorKind: 'system',
         correlationId: session.id,
-        payload: { participantIds: employeeIds, status: 'blocked', replyCount: replies.length, meetingRunId, workTurnId: workTurn.id },
+        payload: { participantIds: employeeIds, status: interrupted ? 'interrupted' : 'blocked', replyCount: replies.length, meetingRunId, workTurnId: workTurn.id },
       })
-      this.#store.failWorkTurn(workTurn.id, lifecycleErrorCode(error))
+      if (!interrupted && this.#store.getWorkTurn(workTurn.id)?.status === 'running') {
+        this.#store.failWorkTurn(workTurn.id, lifecycleErrorCode(error))
+      }
       throw error
     }
   }
@@ -794,8 +881,13 @@ export class ConversationOrchestrator implements AsyncDisposable {
         coordinatorEmployeeId: input.coordinatorEmployeeId,
       }
     } catch (error) {
+      const interrupted = error instanceof AgentTurnInterruptedError || this.#store.getWorkTurn(workTurn.id)?.status === 'interrupted'
       if (currentPlan.status !== 'failed' && currentPlan.status !== 'completed') {
-        try { currentPlan = this.#updateTaskPlan(currentPlan, { status: 'failed', errorCode: lifecycleErrorCode(error) }) } catch { /* preserve original task error */ }
+        try {
+          currentPlan = this.#updateTaskPlan(currentPlan, interrupted
+            ? { status: 'interrupted', errorCode: 'interrupted' }
+            : { status: 'failed', errorCode: lifecycleErrorCode(error) })
+        } catch { /* preserve original task error */ }
       }
       if (this.#store.getWorkTurn(workTurn.id)?.status === 'running') {
         this.#store.failWorkTurn(workTurn.id, lifecycleErrorCode(error))
@@ -940,6 +1032,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
       rounds: maxRounds,
     }
   } catch (error) {
+    const interrupted = error instanceof AgentTurnInterruptedError || this.#store.getWorkTurn(workTurn.id)?.status === 'interrupted'
     this.#store.appendDomainEvent({
       workspaceId: input.workspaceId,
       worldId: input.worldId,
@@ -952,14 +1045,16 @@ export class ConversationOrchestrator implements AsyncDisposable {
         participantIds,
         initiatorId: initiator.id,
         peerConversation: true,
-        status: 'blocked',
+        status: interrupted ? 'interrupted' : 'blocked',
         replyCount: replies.length,
         rounds: maxRounds,
         meetingRunId,
         workTurnId: workTurn.id,
       },
     })
-    this.#store.failWorkTurn(workTurn.id, lifecycleErrorCode(error))
+    if (!interrupted && this.#store.getWorkTurn(workTurn.id)?.status === 'running') {
+      this.#store.failWorkTurn(workTurn.id, lifecycleErrorCode(error))
+    }
     throw error
   }
 }
@@ -1065,6 +1160,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
       ordinal,
     })
     this.#store.startAgentRun(agentRun.id)
+    this.#activeAgentRuns.set(agentRun.id, { workTurnId: workTurn.id, employeeId: employee.id })
     const traceTurnId = agentRun.id
     let responsePersisted = false
     const pendingAssistantMessages: PendingAssistantMessage[] | undefined = this.#deferAssistantMessages ? [] : undefined
@@ -1083,6 +1179,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
         payload: { employeeId: employee.id, role: employee.role, traceTurnId, agentRunId: agentRun.id, workTurnId: workTurn.id },
       })
       const workspacePath = this.#resolveWorldRoot === undefined ? this.#workspacePath! : await this.#resolveWorldRoot(session.worldId, employee.id)
+      if (this.#abortedAgentRuns.has(agentRun.id)) throw new AgentTurnInterruptedError(employee.id)
       const result = await this.#runtime.runTurn({
         agent: employee,
         revision,
@@ -1125,6 +1222,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
           })
         },
       })
+      if (this.#abortedAgentRuns.has(agentRun.id)) throw new AgentTurnInterruptedError(employee.id)
       this.#store.bindEmployeeAgentSession(employee.id, result.agentSessionId)
       if (failedTurn) {
         this.#blockAgent(session, employee, 'runtime-turn-failed', workTurn.id, agentRun.id)
@@ -1194,6 +1292,11 @@ export class ConversationOrchestrator implements AsyncDisposable {
         content,
       }
     } catch (error) {
+      if (this.#abortedAgentRuns.has(agentRun.id) || error instanceof AgentTurnInterruptedError) {
+        try { this.#store.interruptAgentRun(agentRun.id, 'interrupted') } catch { /* controller may have won the race */ }
+        try { this.#store.setEmployeeStatus(employee.id, 'available', 'system') } catch { /* preserve interruption */ }
+        throw error instanceof AgentTurnInterruptedError ? error : new AgentTurnInterruptedError(employee.id)
+      }
       if (!(error instanceof AgentTurnFailedError)) {
         this.#store.failAgentRun(agentRun.id, lifecycleErrorCode(error))
         this.#store.appendDomainEvent({
@@ -1211,6 +1314,9 @@ export class ConversationOrchestrator implements AsyncDisposable {
       throw error instanceof AgentTurnFailedError
         ? error
         : new AgentTurnFailedError(employee.id, classifyRuntimeFailure(error))
+    } finally {
+      this.#activeAgentRuns.delete(agentRun.id)
+      this.#abortedAgentRuns.delete(agentRun.id)
     }
   }
 
@@ -1407,6 +1513,34 @@ export class ConversationOrchestrator implements AsyncDisposable {
         listener(envelope)
       } catch {
         // An observer cannot veto or corrupt an already-running agent turn.
+      }
+    }
+  }
+
+  #appendStopNotice(envelope: ConversationControlEnvelope): void {
+    this.#store.appendMessage({
+      sessionId: envelope.sessionId,
+      senderId: 'system',
+      senderKind: 'system',
+      kind: 'system',
+      content: envelope.content,
+      metadata: {
+        productNotice: true,
+        control: 'stop',
+        status: envelope.status,
+        workTurnId: envelope.workTurnId,
+        ...(envelope.agentRunIds.length === 0 ? {} : { agentRunIds: envelope.agentRunIds }),
+      },
+      correlationId: envelope.sessionId,
+    })
+  }
+
+  #emitControl(envelope: ConversationControlEnvelope): void {
+    for (const listener of this.#controlListeners) {
+      try {
+        listener(envelope)
+      } catch {
+        // A live observer cannot veto a durable interruption.
       }
     }
   }

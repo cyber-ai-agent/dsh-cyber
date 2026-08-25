@@ -42,6 +42,33 @@ class FakeRuntime implements AgentRuntimePort {
   async close(): Promise<void> {}
 }
 
+class AbortableRuntime implements AgentRuntimePort {
+  workTurnId: string | undefined
+  agentRunId: string | undefined
+  readonly abortedRunIds: string[] = []
+  #startedResolve: (() => void) | undefined
+  #runReject: ((error: unknown) => void) | undefined
+
+  async runTurn(request: AgentTurnRequest): Promise<never> {
+    this.workTurnId = request.workTurnId
+    this.agentRunId = request.agentRunId
+    this.#startedResolve?.()
+    return await new Promise<never>((_resolve, reject) => { this.#runReject = reject })
+  }
+
+  async abortRun(agentRunId: string): Promise<void> {
+    this.abortedRunIds.push(agentRunId)
+    this.#runReject?.(new Error('runtime aborted'))
+  }
+
+  async waitUntilStarted(): Promise<void> {
+    if (this.agentRunId !== undefined) return
+    await new Promise<void>((resolve) => { this.#startedResolve = resolve })
+  }
+
+  async close(): Promise<void> {}
+}
+
 function runtimeEvents(sessionId: string, content: string): AgentRuntimeEvent[] {
   return [
     {
@@ -412,6 +439,28 @@ describe('ConversationOrchestrator', () => {
       expect.objectContaining({ employeeId: lead.id, status: 'completed', ordinal: 1 }),
       expect.objectContaining({ employeeId: engineer.id, status: 'failed', ordinal: 2 }),
     ])
+  })
+
+  it('interrupts one live AgentRun as interrupted and publishes a durable stop notice', async () => {
+    const { directory, store, workspace, company } = await setup()
+    store.saveBlueprint(blueprint('interruptible', '小刘', '软件工程师'))
+    const employee = store.recruitEmployee({ workspaceId: workspace.id, worldId: company.id, blueprintId: 'interruptible', blueprintVersion: 1 })
+    const runtime = new AbortableRuntime()
+    const orchestrator = new ConversationOrchestrator({ store, runtime, workspacePath: directory })
+    orchestrators.push(orchestrator)
+
+    const running = orchestrator.direct({ workspaceId: workspace.id, worldId: company.id, employeeId: employee.id, prompt: '长任务' })
+    await runtime.waitUntilStarted()
+    const control = await orchestrator.interruptWorkTurn(runtime.workTurnId!)
+    await expect(running).rejects.toThrow('interrupted')
+
+    expect(control).toMatchObject({ workTurnId: runtime.workTurnId, status: 'interrupted', content: '已停止' })
+    expect(runtime.abortedRunIds).toEqual([runtime.agentRunId])
+    expect(store.getWorkTurn(runtime.workTurnId!)?.status).toBe('interrupted')
+    expect(store.listTurnAgentRuns(runtime.workTurnId!)[0]).toMatchObject({ status: 'interrupted', errorCode: 'interrupted' })
+    expect(store.listMessages(store.getWorkTurn(runtime.workTurnId!)!.sessionId)).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'system', content: '已停止' })]),
+    )
   })
 
   it('rejects cross-world role mixing before a runtime starts', async () => {

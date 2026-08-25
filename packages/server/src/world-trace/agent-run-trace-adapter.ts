@@ -120,7 +120,7 @@ function traceStatus(status: AgentRunStatus): WorldTraceStatus {
 function traceSummary(status: AgentRunStatus, toolCount: number): string {
   if (status === 'completed') return toolCount > 0 ? `完成处理，调度了 ${toolCount} 个工具` : '完成本轮分析与回复'
   if (status === 'failed') return '本轮处理失败'
-  if (status === 'interrupted') return '本轮处理已中断'
+  if (status === 'interrupted') return '用户停止执行'
   if (status === 'queued') return '等待开始处理'
   return toolCount > 0 ? `正在处理，已调度 ${toolCount} 个工具` : '正在分析请求'
 }

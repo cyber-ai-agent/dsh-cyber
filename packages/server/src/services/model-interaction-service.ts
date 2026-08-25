@@ -285,6 +285,10 @@ export class TurnInteractionLoggingRuntime implements AgentRuntimePort {
     return this.#inner.closeAgent?.(agentId) ?? Promise.resolve()
   }
 
+  abortRun(agentRunId: string): Promise<void> {
+    return this.#inner.abortRun?.(agentRunId) ?? Promise.resolve()
+  }
+
   async close(): Promise<void> {
     await this.#inner.close()
   }

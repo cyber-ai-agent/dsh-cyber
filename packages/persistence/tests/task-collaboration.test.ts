@@ -1,4 +1,4 @@
-import { mkdtemp } from 'node:fs/promises'
+import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -161,6 +161,110 @@ describe('TaskCollaborationPlan persistence', () => {
     store.completeWorkTurn(turn.id)
     store.pruneHistory({ before: '9999-01-01T00:00:00.000Z', workspaceId: workspace.id })
     expect(store.getTaskCollaborationPlan(plan.id)).toEqual(recovered)
+  })
+
+  it('durably queues provider-neutral turns with CAS, approval release, isolation and export', async () => {
+    const { store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: '会话队列工作区' })
+    const worldA = store.createWorld({ workspaceId: workspace.id, name: '队列甲世界', templateId: 'cyber-company' })
+    const worldB = store.createWorld({ workspaceId: workspace.id, name: '队列乙世界', templateId: 'cyber-company' })
+    const employeeA = recruit(store, workspace.id, worldA.id, '队列甲员工')
+    const sessionA = store.createSession({ workspaceId: workspace.id, worldId: worldA.id, kind: 'direct', title: '甲私聊' })
+    const sessionB = store.createSession({ workspaceId: workspace.id, worldId: worldB.id, kind: 'direct', title: '乙私聊' })
+    const turnA = store.createWorkTurn({ workspaceId: workspace.id, worldId: worldA.id, sessionId: sessionA.id, interactionKind: 'chat' })
+    const turnB = store.createWorkTurn({ workspaceId: workspace.id, worldId: worldA.id, sessionId: sessionA.id, interactionKind: 'chat' })
+    const turnC = store.createWorkTurn({ workspaceId: workspace.id, worldId: worldA.id, sessionId: sessionA.id, interactionKind: 'chat' })
+    const queued = store.enqueueConversationTurn({
+      id: 'queue-a', workspaceId: workspace.id, worldId: worldA.id, sessionId: sessionA.id, workTurnId: turnA.id,
+      employeeIds: [employeeA.id], conversationKind: 'direct', reasoningEffort: 'medium', permissionMode: 'read-only', priority: 2,
+    })
+    expect(queued).toMatchObject({ id: 'queue-a', status: 'queued', priority: 2, revision: 1, conversationKind: 'direct' })
+    expect('prompt' in queued).toBe(false)
+    expect(store.enqueueConversationTurn({
+      id: 'retry-with-another-id', workspaceId: workspace.id, worldId: worldA.id, sessionId: sessionA.id, workTurnId: turnA.id,
+      employeeIds: [employeeA.id], conversationKind: 'direct', reasoningEffort: 'medium', permissionMode: 'read-only', priority: 2,
+    })).toEqual(queued)
+    const next = store.enqueueNextConversationTurn({
+      workspaceId: workspace.id, worldId: worldA.id, sessionId: sessionA.id, workTurnId: turnB.id,
+      employeeIds: [employeeA.id], conversationKind: 'direct', priority: -100,
+    })
+    expect(next.priority).toBe(3)
+    expect(store.listConversationQueue(worldA.id, sessionA.id).map((entry) => entry.id)).toEqual([next.id, 'queue-a'])
+    expect(store.getConversationQueueEntryByTurn(worldA.id, turnA.id)).toEqual(queued)
+    expect(store.getConversationQueueEntryByTurn(worldB.id, turnA.id)).toBeUndefined()
+    expect(store.listConversationQueue(worldB.id)).toEqual([])
+    expect(() => store.listConversationQueue(worldB.id, sessionA.id)).toThrow('does not match world')
+    expect(() => store.enqueueConversationTurn({
+      workspaceId: workspace.id, worldId: worldB.id, sessionId: sessionB.id, workTurnId: turnA.id,
+      employeeIds: [employeeA.id], conversationKind: 'direct',
+    })).toThrow('does not match its session')
+
+    const claimed = store.claimConversationQueueEntry({ queueEntryId: queued.id, expectedRevision: 1 })
+    expect(claimed).toMatchObject({ status: 'running', revision: 2 })
+    expect(store.getWorkTurn(turnA.id)?.status).toBe('running')
+    expect(() => store.claimConversationQueueEntry({ queueEntryId: queued.id, expectedRevision: 2 })).toThrow('not queued')
+    expect(() => store.completeConversationQueueEntry({ queueEntryId: queued.id, expectedRevision: 1 })).toThrow('changed concurrently')
+    expect(store.waitConversationQueueEntryForApproval({ queueEntryId: queued.id, expectedRevision: 2 })).toMatchObject({ status: 'waiting-approval', revision: 3 })
+    expect(store.getWorkTurn(turnA.id)?.status).toBe('waiting-approval')
+    expect(store.resumeConversationQueueEntryAfterApproval({ queueEntryId: queued.id, expectedRevision: 3 })).toMatchObject({ status: 'running', revision: 4 })
+    store.completeWorkTurn(turnA.id)
+    expect(store.completeConversationQueueEntry({ queueEntryId: queued.id, expectedRevision: 4 })).toMatchObject({ status: 'completed', revision: 5 })
+
+    const claimedNext = store.claimConversationQueueEntry({ queueEntryId: next.id, expectedRevision: 1 })
+    store.failWorkTurn(turnB.id, 'model-failed')
+    expect(store.failConversationQueueEntry({ queueEntryId: next.id, expectedRevision: claimedNext.revision, errorCode: 'different-error' }))
+      .toMatchObject({ status: 'failed', errorCode: 'model-failed', revision: 3 })
+
+    const cancellable = store.enqueueConversationTurn({
+      workspaceId: workspace.id, worldId: worldA.id, sessionId: sessionA.id, workTurnId: turnC.id,
+      employeeIds: [employeeA.id], conversationKind: 'direct',
+    })
+    expect(store.removeConversationQueueEntry({ queueEntryId: cancellable.id })).toMatchObject({ status: 'cancelled', revision: 2 })
+    expect(store.getWorkTurn(turnC.id)).toMatchObject({ status: 'interrupted', errorCode: 'queue-cancelled' })
+    expect(store.doctor()).toMatchObject({ counts: { conversationQueueEntries: 3 } })
+
+    const exportPath = `${store.databasePath}.queue-export.json`
+    await store.exportJson(exportPath)
+    const exported = JSON.parse(await readFile(exportPath, 'utf8')) as { workspaces: Array<{ worlds: Array<{ conversationQueue: unknown[] }> }> }
+    expect(exported.workspaces[0]?.worlds.flatMap((world) => world.conversationQueue)).toHaveLength(3)
+  })
+
+  it('keeps queued and waiting-approval lanes across restart, interrupts running lanes and prunes settled queue rows', async () => {
+    const { path, store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: '队列恢复工作区' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '队列恢复世界', templateId: 'cyber-company' })
+    const employee = recruit(store, workspace.id, world.id, '队列恢复员工')
+    const session = store.createSession({ workspaceId: workspace.id, worldId: world.id, kind: 'direct', title: '恢复私聊' })
+    const queuedTurn = store.createWorkTurn({ workspaceId: workspace.id, worldId: world.id, sessionId: session.id, interactionKind: 'chat' })
+    const runningTurn = store.createWorkTurn({ workspaceId: workspace.id, worldId: world.id, sessionId: session.id, interactionKind: 'chat' })
+    const approvalTurn = store.createWorkTurn({ workspaceId: workspace.id, worldId: world.id, sessionId: session.id, interactionKind: 'chat' })
+    const queued = store.enqueueConversationTurn({ workspaceId: workspace.id, worldId: world.id, sessionId: session.id, workTurnId: queuedTurn.id, employeeIds: [employee.id], conversationKind: 'direct' })
+    const running = store.enqueueConversationTurn({ workspaceId: workspace.id, worldId: world.id, sessionId: session.id, workTurnId: runningTurn.id, employeeIds: [employee.id], conversationKind: 'direct' })
+    const approval = store.enqueueConversationTurn({ workspaceId: workspace.id, worldId: world.id, sessionId: session.id, workTurnId: approvalTurn.id, employeeIds: [employee.id], conversationKind: 'direct' })
+    store.claimConversationQueueEntry({ queueEntryId: running.id })
+    const run = store.createAgentRun({ workspaceId: workspace.id, worldId: world.id, sessionId: session.id, turnId: runningTurn.id, employeeId: employee.id, ordinal: 1 })
+    store.startAgentRun(run.id)
+    store.claimConversationQueueEntry({ queueEntryId: approval.id })
+    store.waitConversationQueueEntryForApproval({ queueEntryId: approval.id, expectedRevision: 2 })
+    store.close()
+    stores.splice(stores.indexOf(store), 1)
+
+    const reopened = await SqliteStore.open(path)
+    stores.push(reopened)
+    expect(reopened.recoverConversationRuntimeAfterRestart()).toEqual({ turnsFailed: 1, runsFailed: 1 })
+    expect(reopened.getConversationQueueEntry(queued.id)).toMatchObject({ status: 'queued', revision: 1 })
+    expect(reopened.getWorkTurn(queuedTurn.id)).toMatchObject({ status: 'queued' })
+    expect(reopened.getConversationQueueEntry(running.id)).toMatchObject({ status: 'interrupted', errorCode: 'service-restarted', revision: 3 })
+    expect(reopened.getWorkTurn(runningTurn.id)).toMatchObject({ status: 'interrupted', errorCode: 'service-restarted' })
+    expect(reopened.getAgentRun(run.id)).toMatchObject({ status: 'failed', errorCode: 'service-restarted' })
+    expect(reopened.getConversationQueueEntry(approval.id)).toMatchObject({ status: 'waiting-approval', revision: 3 })
+    expect(reopened.getWorkTurn(approvalTurn.id)?.status).toBe('waiting-approval')
+    expect(reopened.recoverConversationRuntimeAfterRestart()).toEqual({ turnsFailed: 0, runsFailed: 0 })
+
+    reopened.pruneHistory({ before: '9999-01-01T00:00:00.000Z', workspaceId: workspace.id })
+    expect(reopened.getConversationQueueEntry(running.id)).toBeUndefined()
+    expect(reopened.getConversationQueueEntry(queued.id)).toMatchObject({ status: 'queued' })
+    expect(reopened.getConversationQueueEntry(approval.id)).toMatchObject({ status: 'waiting-approval' })
   })
 })
 

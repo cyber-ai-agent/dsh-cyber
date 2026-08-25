@@ -216,8 +216,10 @@ test('continues the same WorkTurn after inline and chat-text permission decision
       && response.request().method() === 'POST')
   await composer.fill('把当前场景改成星港议事厅')
   await composer.press('Enter')
-  const browserChat = await (await chatResponsePromise).json() as any
-  expect(browserChat.waitingForApproval).toBe(true)
+  const browserChatResponse = await chatResponsePromise
+  expect(browserChatResponse.status()).toBe(202)
+  const browserChat = await browserChatResponse.json() as any
+  expect(browserChat.queueItem?.workTurnId).toBe(browserChat.workTurnId)
   await expect(page.locator('[aria-label="待处理的世界权限请求"]')).toBeVisible()
 
   const decisionResponsePromise = page.waitForResponse((response) =>

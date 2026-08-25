@@ -1522,6 +1522,46 @@ const MIGRATIONS: readonly Migration[] = [
         ON task_collaboration_steps(plan_id, status, ordinal, id);
     `,
   },
+  {
+    version: 27,
+    name: 'durable-conversation-queue-v1',
+    sql: `
+      CREATE TABLE conversation_queue_entries (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        session_id TEXT NOT NULL REFERENCES work_sessions(id) ON DELETE CASCADE,
+        work_turn_id TEXT NOT NULL UNIQUE REFERENCES work_turns(id) ON DELETE CASCADE,
+        employee_ids_json TEXT NOT NULL CHECK (json_valid(employee_ids_json)),
+        conversation_kind TEXT NOT NULL CHECK (conversation_kind IN ('direct', 'group', 'meeting', 'task')),
+        collaboration_mode TEXT NOT NULL DEFAULT 'discussion'
+          CHECK (collaboration_mode IN ('discussion', 'task')),
+        reasoning_effort TEXT CHECK (
+          reasoning_effort IS NULL OR reasoning_effort IN ('off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max')
+        ),
+        permission_mode TEXT CHECK (
+          permission_mode IS NULL OR permission_mode IN ('read-only', 'workspace-write', 'danger-full-access')
+        ),
+        priority INTEGER NOT NULL DEFAULT 0,
+        revision INTEGER NOT NULL CHECK (revision > 0),
+        status TEXT NOT NULL CHECK (
+          status IN ('queued', 'running', 'waiting-approval', 'completed', 'failed', 'interrupted', 'cancelled')
+        ),
+        error_code TEXT,
+        enqueued_at TEXT NOT NULL,
+        claimed_at TEXT,
+        completed_at TEXT,
+        updated_at TEXT NOT NULL
+      ) STRICT;
+
+      CREATE INDEX conversation_queue_world_order_idx
+        ON conversation_queue_entries(world_id, status, priority DESC, enqueued_at, id);
+      CREATE INDEX conversation_queue_session_order_idx
+        ON conversation_queue_entries(session_id, status, priority DESC, enqueued_at, id);
+      CREATE INDEX conversation_queue_turn_idx
+        ON conversation_queue_entries(work_turn_id, status, id);
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {

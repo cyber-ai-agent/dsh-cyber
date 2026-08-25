@@ -41,6 +41,7 @@ import type { TurnAwareApprovalContinuationService } from '../services/turn-awar
 import type { WorldRuntimePromptComposer } from '../services/world-runtime-context-composer.js'
 import { ServiceError } from '../services/service-error.js'
 import type { GroupTaskCollaborationService } from '../services/group-task-collaboration-service.js'
+import type { ConversationQueueService } from '../services/conversation-queue-service.js'
 
 export interface ConversationRoutesDependencies {
   store: SqliteStore
@@ -61,6 +62,7 @@ export interface ConversationRoutesDependencies {
   ownerRuntimeAccess?: OwnerRuntimeAccessService
   turnContinuations: TurnAwareApprovalContinuationService
   groupTasks?: GroupTaskCollaborationService
+  conversationQueue?: ConversationQueueService
 }
 
 export function registerConversationRoutes(router: Router, dependencies: ConversationRoutesDependencies): void {
@@ -82,6 +84,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     ownerRuntimeAccess,
     turnContinuations,
     groupTasks,
+    conversationQueue,
   } = dependencies
   const delegatedCollaboration = new DelegatedCollaborationService({
     store,
@@ -181,6 +184,9 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     const requestedCollaborationMode = body.collaborationMode === undefined
       ? undefined
       : requiredEnum<WorkSessionCollaborationMode>(body, 'collaborationMode', ['discussion', 'task'])
+    const queueMode = body.queueMode === undefined
+      ? undefined
+      : requiredEnum<'normal' | 'next'>(body, 'queueMode', ['normal', 'next'])
     // Resolve the persisted mode before consuming attachments, permissions, or
     // a one-time host-access grant. A stale client hint must be rejected as a
     // no-op against the session authority, not after partial request setup.
@@ -196,7 +202,9 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     }
     const attachments = await validatedChatAttachments(body.attachments, store, world.workspaceId, world.id, worldFiles)
     const attachmentPrompt = attachments.length === 0 ? prompt : attachmentAwarePrompt(prompt, attachments)
-    const transformedPrompt = await applyInstalledPromptTransforms(await worldPackages.listRuntimePackages(world.id), attachmentPrompt)
+    const transformedPrompt = queueMode === undefined
+      ? await applyInstalledPromptTransforms(await worldPackages.listRuntimePackages(world.id), attachmentPrompt)
+      : attachmentPrompt
     const worldSettingsValue = await worldSettings.get(world.id)
     const requestedReasoning = body.reasoningEffort === undefined
       ? worldSettingsValue.model.reasoningEffort
@@ -247,6 +255,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     const traceCheckpoint = await createTraceCheckpoint(world.id, worldTrace)
     try {
     let result
+    let responseStatus = 200
     if (employeeIds.length === 1) {
       const character = store.getEmployee(employeeIds[0]!)
       if (character === undefined || character.worldId !== world.id) {
@@ -296,7 +305,14 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
         }
         if (sessionId !== undefined) directInput.sessionId = sessionId
         if (title !== undefined) directInput.title = title
-        result = await turnContinuations.direct({ ...directInput, skillPrompt: prompt, transformedPrompt })
+        const turnAwareInput = { ...directInput, skillPrompt: prompt, transformedPrompt }
+        if (queueMode !== undefined) {
+          if (conversationQueue === undefined) throw new HttpError(501, 'conversation_queue_unavailable', '对话队列服务不可用')
+          result = conversationQueue.enqueueDirect(turnAwareInput, queueMode === 'next')
+          responseStatus = 202
+        } else {
+          result = await turnContinuations.direct(turnAwareInput)
+        }
       }
     } else {
       const persistedMode = requestedSession?.collaborationMode ?? 'discussion'
@@ -347,7 +363,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     }
     for (const employeeId of employeeIds) employeeActivity.project(employeeId)
     worldRuntime.publishCurrent(world.id)
-    writeJson(response, 200, result)
+    writeJson(response, responseStatus, result)
     } finally {
       await publishTraceChanges(world.id, worldTrace, traceCheckpoint, runtimeStreamHub)
     }

@@ -1,7 +1,7 @@
 import type { AgentPermissionMode, ApprovalScope, JsonObject, ReasoningEffort, WorkMessage } from '@dsh-cyber/contracts'
 import type { CharacterSkillAction } from '@dsh-cyber/contracts/skill-runtime'
 import type { WorldAuthorityActor, WorldPermissionRequest } from '@dsh-cyber/contracts/world-authority'
-import type { ConversationOrchestrator, ConversationResult, DirectConversationInput } from '@dsh-cyber/orchestration'
+import type { ConversationOrchestrator, ConversationResult, ContinueDirectConversationInput, DirectConversationInput } from '@dsh-cyber/orchestration'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { applyInstalledPromptTransforms } from '../installed-package-runtime.js'
@@ -21,6 +21,12 @@ export interface TurnAwareDirectInput extends DirectConversationInput {
 export interface TurnAwareConversationResult extends ConversationResult {
   workTurnId: string
   waitingForApproval: boolean
+}
+
+export interface QueuedDirectConversationResult {
+  session: ConversationResult['session']
+  workTurnId: string
+  status: 'queued'
 }
 
 /**
@@ -71,6 +77,79 @@ export class TurnAwareApprovalContinuationService {
     }
   }
 
+  /** Persist the user message and WorkTurn without occupying a runtime lane. */
+  enqueueDirect(input: TurnAwareDirectInput): QueuedDirectConversationResult {
+    const begun = this.#orchestrator.beginDirectQueued({
+      ...input,
+      metadata: {
+        ...input.metadata,
+        queueEmployeeId: input.employeeId,
+      },
+    })
+    return { session: begun.session, workTurnId: begun.workTurn.id, status: 'queued' }
+  }
+
+  /** Rehydrate one queued WorkTurn; the original user message remains durable. */
+  async runQueuedDirect(workTurnId: string): Promise<TurnAwareConversationResult | undefined> {
+    const turn = this.#store.getWorkTurn(workTurnId)
+    if (turn === undefined || (turn.status !== 'queued' && turn.status !== 'running')) return undefined
+    const session = this.#store.getSession(turn.sessionId)
+    if (session === undefined || session.kind !== 'direct') return undefined
+    const userMessage = currentTurnUserMessage(this.#store.listMessages(session.id), turn.id)
+    const employeeId = stringMetadata(userMessage?.metadata, 'queueEmployeeId')
+      ?? this.#store.listParticipants(session.id).find((item) => item.kind === 'employee')?.participantId
+    if (userMessage === undefined || employeeId === undefined) {
+      this.#store.interruptWorkTurn(turn.id, 'queued-turn-invalid')
+      return undefined
+    }
+    const employee = this.#store.getEmployee(employeeId)
+    if (employee === undefined || employee.worldId !== turn.worldId) {
+      this.#store.interruptWorkTurn(turn.id, 'queued-turn-invalid')
+      return undefined
+    }
+    // Queue claiming atomically moves the WorkTurn to running. The direct
+    // continuation also accepts a freshly recovered queued row for embedders
+    // that use the legacy claim path, but never starts a running row twice.
+    if (turn.status === 'queued') this.#store.startWorkTurn(turn.id)
+    try {
+      const queuedPrompt = attachmentAwareQueuedPrompt(userMessage.content, userMessage.metadata)
+      const transformed = await applyInstalledPromptTransforms(
+        await this.#worldPackages.listRuntimePackages(turn.worldId),
+        queuedPrompt,
+      )
+      const skillResult = await this.#skills.prepare({
+        workspaceId: turn.workspaceId,
+        worldId: turn.worldId,
+        sessionId: turn.sessionId,
+        workTurnId: turn.id,
+        characterId: employee.id,
+        prompt: queuedPrompt,
+      })
+      if (skillResult.actions.some((action) => action.status === 'waiting-for-approval')) {
+        this.#store.waitWorkTurnForApproval(turn.id)
+        return { session, replies: [], workTurnId: turn.id, waitingForApproval: true }
+      }
+      const queuedContinuation: ContinueDirectConversationInput = {
+        workTurnId: turn.id,
+        employeeId: employee.id,
+        runtimePrompt: await this.#settings.composeRuntimePrompt(
+          turn.worldId,
+          employee,
+          factualRuntimeSource(transformed, skillResult.actions),
+        ),
+      }
+      const queuedPermissionMode = permissionModeFrom(userMessage.metadata)
+      const queuedReasoningEffort = reasoningEffortFrom(userMessage.metadata)
+      if (queuedPermissionMode !== undefined) queuedContinuation.permissionMode = queuedPermissionMode
+      if (queuedReasoningEffort !== undefined) queuedContinuation.reasoningEffort = queuedReasoningEffort
+      const result = await this.#orchestrator.continueDirect(queuedContinuation)
+      return { ...result, workTurnId: turn.id, waitingForApproval: false }
+    } catch (error) {
+      if (this.#store.getWorkTurn(turn.id)?.status === 'running') this.#store.failWorkTurn(turn.id, 'queued-turn-failed')
+      throw error
+    }
+  }
+
   async #directAfterBegin(
     input: TurnAwareDirectInput,
     begun: ReturnType<ConversationOrchestrator['beginDirect']>,
@@ -110,6 +189,17 @@ export class TurnAwareApprovalContinuationService {
     actorId: string,
     now = new Date(),
   ) {
+    const pendingApproval = this.#store.getApprovalRequest(approvalId)
+    const pendingTurn = pendingApproval?.workTurnId === undefined
+      ? undefined
+      : this.#store.getWorkTurn(pendingApproval.workTurnId)
+    if (pendingTurn?.status === 'interrupted') {
+      // Stop is terminal for the turn. Settle the approval as rejected before
+      // CharacterSkillRuntime can prepare or execute its action.
+      return {
+        ...(await this.#skills.decideApproval(approvalId, 'rejected', 'once', actorId, now)),
+      }
+    }
     const decided = await this.#skills.decideApproval(approvalId, decision, scope, actorId, now)
     const continuation = decided.request.workTurnId === undefined
       ? undefined
@@ -121,7 +211,17 @@ export class TurnAwareApprovalContinuationService {
     input: DecideWorldPermissionInput,
     now = input.now ?? new Date(),
   ) {
-    const decided = await this.#skills.decideWorldPermission(input, now)
+    let decision = input
+    if (input.decision !== 'reject' && this.#worldPermissions !== undefined) {
+      const request = this.#store.getWorldPermissionRequest(input.requestId)
+      const turn = request?.workTurnId === undefined ? undefined : this.#store.getWorkTurn(request.workTurnId)
+      if (turn?.status === 'interrupted') {
+        // A stopped turn cannot be resurrected by a later world-permission
+        // click; reject the durable request without entering the adapter path.
+        decision = { ...input, decision: 'reject' }
+      }
+    }
+    const decided = await this.#skills.decideWorldPermission(decision, now)
     const continuation = decided.request.workTurnId === undefined
       ? undefined
       : await this.continueIfReady(decided.request.workTurnId, now)
@@ -231,9 +331,10 @@ export class TurnAwareApprovalContinuationService {
       this.#store.failWorkTurn(turn.id, 'approval-continuation-invalid')
       return undefined
     }
+    const queuedPrompt = attachmentAwareQueuedPrompt(userMessage.content, userMessage.metadata)
     const transformed = await applyInstalledPromptTransforms(
       await this.#worldPackages.listRuntimePackages(turn.worldId),
-      userMessage.content,
+      queuedPrompt,
     )
     const permissionMode = permissionModeFrom(userMessage.metadata)
     const reasoningEffort = reasoningEffortFrom(userMessage.metadata)
@@ -359,6 +460,28 @@ function quoteExternalContent(detail: string | undefined): string | undefined {
 
 function currentTurnUserMessage(messages: WorkMessage[], workTurnId: string): WorkMessage | undefined {
   return messages.findLast((message) => message.kind === 'user' && message.metadata.workTurnId === workTurnId)
+}
+
+function stringMetadata(metadata: JsonObject | undefined, key: string): string | undefined {
+  const value = metadata?.[key]
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function attachmentAwareQueuedPrompt(prompt: string, metadata: JsonObject): string {
+  const raw = metadata.attachments
+  if (!Array.isArray(raw) || raw.length === 0) return prompt
+  const inventory = raw.flatMap((value) => {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return []
+    const item = value as Record<string, unknown>
+    const name = typeof item.name === 'string' ? item.name.trim() : ''
+    const mimeType = typeof item.mimeType === 'string' ? item.mimeType.trim() : ''
+    const assetId = typeof item.assetId === 'string' ? item.assetId.trim() : ''
+    if (!name || !mimeType || !assetId) return []
+    return [`- ${name} (${mimeType}, asset ${assetId})`]
+  })
+  return inventory.length === 0
+    ? prompt
+    : `${prompt}\n\n用户随消息附加了以下本地文件：\n${inventory.join('\n')}\n请在回复中明确说明你如何使用这些附件；无法读取内容时不要臆测。`
 }
 
 function isFutureSchedule(action: CharacterSkillAction, now: Date): boolean {

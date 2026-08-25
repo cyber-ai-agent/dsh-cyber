@@ -721,6 +721,7 @@ describe('SqliteStore', () => {
       DROP TABLE approval_requests;
       DROP TABLE world_package_instances;
       DROP TABLE agent_runs;
+      DROP TABLE conversation_queue_entries;
       DROP TABLE work_turns;
       DROP TABLE task_collaboration_steps;
       DROP TABLE task_collaboration_plans;
@@ -1044,11 +1045,11 @@ describe('SqliteStore', () => {
     const reopened = await SqliteStore.open(path)
     stores.push(reopened)
     expect(reopened.getAgentRun(completedRun.id)).toMatchObject({ status: 'completed', runtimeSessionId: 'runtime-session-1' })
-    expect(reopened.recoverConversationRuntimeAfterRestart()).toEqual({ turnsFailed: 2, runsFailed: 2 })
-    expect(reopened.getWorkTurn(staleTurn.id)).toMatchObject({ status: 'failed', errorCode: 'service-restarted' })
+    expect(reopened.recoverConversationRuntimeAfterRestart()).toEqual({ turnsFailed: 1, runsFailed: 1 })
+    expect(reopened.getWorkTurn(staleTurn.id)).toMatchObject({ status: 'interrupted', errorCode: 'service-restarted' })
     expect(reopened.getAgentRun(staleRun.id)).toMatchObject({ status: 'failed', errorCode: 'service-restarted' })
-    expect(reopened.getWorkTurn(queuedTurn.id)).toMatchObject({ status: 'failed', errorCode: 'service-restarted' })
-    expect(reopened.getAgentRun(queuedRun.id)).toMatchObject({ status: 'failed', errorCode: 'service-restarted' })
+    expect(reopened.getWorkTurn(queuedTurn.id)).toMatchObject({ status: 'queued' })
+    expect(reopened.getAgentRun(queuedRun.id)).toMatchObject({ status: 'queued' })
     expect(reopened.recoverConversationRuntimeAfterRestart()).toEqual({ turnsFailed: 0, runsFailed: 0 })
   })
 })

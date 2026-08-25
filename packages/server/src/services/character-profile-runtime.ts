@@ -83,6 +83,10 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
   close(): Promise<void> {
     return this.#inner.close()
   }
+
+  abortRun(agentRunId: string): Promise<void> {
+    return this.#inner.abortRun?.(agentRunId) ?? Promise.resolve()
+  }
 }
 
 export function composeSkillRecipes(persona: string, instructions: readonly string[]): string {

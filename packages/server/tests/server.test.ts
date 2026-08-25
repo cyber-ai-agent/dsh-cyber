@@ -398,7 +398,7 @@ describe('Cyber local server', () => {
     servers.splice(servers.indexOf(first.server), 1)
 
     const second = await start(stateRoot, new FakeRuntime())
-    expect(second.server.store.getWorkTurn(staleTurn.id)).toMatchObject({ status: 'failed', errorCode: 'service-restarted' })
+    expect(second.server.store.getWorkTurn(staleTurn.id)).toMatchObject({ status: 'interrupted', errorCode: 'service-restarted' })
     expect(second.server.store.getAgentRun(staleRun.id)).toMatchObject({ status: 'failed', errorCode: 'service-restarted' })
     const workspaceSnapshot = await json(second.origin, `/api/workspaces/${workspace.id}/snapshot`)
     const worldSnapshot = await json(second.origin, `/api/worlds/${world.id}/snapshot`)

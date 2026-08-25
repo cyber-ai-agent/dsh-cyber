@@ -33,6 +33,8 @@ export interface EmployeeTurnRequest {
   history: ConversationHistoryEntry[]
   /** Sequence of this employee's own last statement in the conversation, or 0. */
   observedThroughSequence: number
+  /** Durable AgentRun used to target one runtime lane for interruption. */
+  agentRunId?: string
   prompt: string
   workspacePath: string
   permissionMode?: AgentPermissionMode
@@ -61,22 +63,44 @@ export interface HarnessRuntimeSpec {
   workspacePath: string
   sessionsRoot: string
   permissionMode: AgentPermissionMode
+  /** Provider-neutral lane identity; never inferred from employeeSessionId. */
+  conversationId?: string
+  laneId?: string
 }
 
 export type HarnessRuntimeFactory = (spec: HarnessRuntimeSpec) => HarnessRuntime
 
-/**
- * One employee worker plus the Harness sessions it currently owns.
- *
- * `sessionIds` maps a durable conversation id to the random Harness session id
- * allocated for it in this process. It is deliberately process-local: a session
- * id from an earlier process cannot be resumed by DSH 0.1.1-rc.1.
- */
-interface EmployeeWorker {
-  permissionMode: AgentPermissionMode
-  runtime: HarnessRuntime
-  sessionIds: Map<string, string>
+/** One employee's bounded pool of independent conversation runtime lanes. */
+interface LaneTask {
+  request: EmployeeTurnRequest
+  resolve: (result: EmployeeTurnResult) => void
+  reject: (error: unknown) => void
+  aborted: boolean
 }
+
+interface EmployeeLane {
+  id: string
+  conversationId: string
+  permissionMode: AgentPermissionMode | undefined
+  runtime: HarnessRuntime | undefined
+  agentSessionId: string | undefined
+  current: LaneTask | undefined
+  pending: LaneTask[]
+  lastUsed: number
+}
+
+interface EmployeeWorker {
+  lanes: Map<string, EmployeeLane>
+  waiting: LaneTask[]
+}
+
+interface RunTaskRecord {
+  task: LaneTask
+  worker: EmployeeWorker
+  lane: EmployeeLane | undefined
+}
+
+const MAX_ACTIVE_LANES_PER_EMPLOYEE = 2
 
 export interface HarnessAdapterOptions {
   stateRoot: string
@@ -92,7 +116,8 @@ export interface HarnessAdapterOptions {
 export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDisposable {
   readonly #options: HarnessAdapterOptions
   readonly #runtimes = new Map<string, EmployeeWorker>()
-  readonly #turnQueues = new Map<string, Promise<unknown>>()
+  readonly #activeRuns = new Map<string, { lane: EmployeeLane; task: LaneTask }>()
+  readonly #runTasks = new Map<string, RunTaskRecord>()
   #profile: Promise<HarnessProfilePaths> | undefined
 
   constructor(options: HarnessAdapterOptions) {
@@ -106,6 +131,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       conversationId: request.conversationId,
       history: request.history,
       observedThroughSequence: request.observedThroughSequence,
+      ...(request.agentRunId === undefined ? {} : { agentRunId: request.agentRunId }),
       prompt: request.prompt,
       workspacePath: request.workspacePath,
       ...(request.permissionMode === undefined ? {} : { permissionMode: request.permissionMode }),
@@ -129,42 +155,56 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
 
   async runEmployeeTurn(request: EmployeeTurnRequest): Promise<EmployeeTurnResult> {
     const conversationId = requiredConversationId(request.conversationId)
-    // A Harness worker serves one run at a time, and the runtime cache itself
-    // must not be mutated by two turns at once. Serializing per employee keeps
-    // every conversation of that character in order while different characters
-    // continue to run in parallel.
-    return this.#serializeByEmployee(
-      request.employee.id,
-      () => this.#runEmployeeTurnExclusive(request, conversationId),
-    )
+    const worker = this.#runtimes.get(request.employee.id) ?? this.#createWorker(request.employee.id)
+    const existingLane = worker.lanes.get(conversationId)
+    return new Promise<EmployeeTurnResult>((resolvePromise, rejectPromise) => {
+      const task: LaneTask = {
+        request,
+        resolve: resolvePromise,
+        reject: rejectPromise,
+        aborted: false,
+      }
+      if (existingLane !== undefined) {
+        existingLane.pending.push(task)
+        existingLane.lastUsed = Date.now()
+        if (request.agentRunId !== undefined) this.#runTasks.set(request.agentRunId, { task, worker, lane: existingLane })
+        this.#pumpLane(worker, existingLane)
+        return
+      }
+      if (request.agentRunId !== undefined) this.#runTasks.set(request.agentRunId, { task, worker, lane: undefined })
+      this.#scheduleNewLane(worker, task, conversationId)
+    })
   }
 
   async #runEmployeeTurnExclusive(
     request: EmployeeTurnRequest,
     conversationId: string,
+    lane: EmployeeLane,
+    task: LaneTask,
   ): Promise<EmployeeTurnResult> {
     const profile = await this.#getProfile()
     const permissionMode = request.permissionMode ?? 'read-only'
-    let cached = this.#runtimes.get(request.employee.id)
-    if (cached !== undefined && cached.permissionMode !== permissionMode) {
-      this.#runtimes.delete(request.employee.id)
-      // The worker is going away, so every session it owned is gone with it.
-      cached.sessionIds.clear()
-      await cached.runtime.close()
-      cached = undefined
+    if (lane.permissionMode !== undefined && lane.permissionMode !== permissionMode) {
+      // Permission is lane-local. Changing a private chat from read-only to
+      // workspace-write must not tear down the same employee's group lane.
+      await lane.runtime?.close()
+      lane.runtime = undefined
+      lane.agentSessionId = undefined
     }
-    if (cached === undefined) {
+    if (lane.runtime === undefined) {
       const spec: HarnessRuntimeSpec = {
         employee: request.employee,
         revision: request.revision,
         profile,
         workspacePath: resolve(request.workspacePath),
-        sessionsRoot: join(resolve(this.#options.stateRoot), 'harness-sessions', request.employee.id),
+        sessionsRoot: join(resolve(this.#options.stateRoot), 'harness-sessions', request.employee.id, 'lanes', lane.id),
         permissionMode,
+        conversationId,
+        laneId: lane.id,
       }
       const runtime = this.#options.runtimeFactory?.(spec) ?? this.#createRuntime(spec)
-      cached = { permissionMode, runtime, sessionIds: new Map() }
-      this.#runtimes.set(request.employee.id, cached)
+      lane.permissionMode = permissionMode
+      lane.runtime = runtime
     }
     // DSH 0.1.1-rc.1 cannot resume a named session whose JSONL log was created
     // by an earlier worker process, and it creates the named session lazily on
@@ -186,9 +226,9 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     // for a private chat, where the character has seen every message of the
     // conversation, and non-empty in a group, where whoever spoke first last
     // round never saw the characters that answered after it.
-    const existingSessionId = cached.sessionIds.get(conversationId)
+    const existingSessionId = lane.agentSessionId
     const agentSessionId = existingSessionId ?? freshAgentSessionId(request.employee.id)
-    if (existingSessionId === undefined) cached.sessionIds.set(conversationId, agentSessionId)
+    if (existingSessionId === undefined) lane.agentSessionId = agentSessionId
     const prompt = formatRecoveredHistoryPrompt(
       unseenHistory(request.history, request.observedThroughSequence, existingSessionId === undefined),
       request.prompt,
@@ -202,20 +242,22 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
           request.onNotification?.(notification)
         }
     try {
-      const result = await cached.runtime.run(agentSessionId, prompt, onNotification)
+      const result = await lane.runtime!.run(agentSessionId, prompt, onNotification)
       return { agentSessionId, ...result }
     } catch (error) {
+      if (task.aborted) throw error
       // DSH 0.1.1-rc.1's JSON-RPC server creates a named session on every
       // process start instead of resuming its persisted log. Reusing an id can
       // therefore fail before the prompt is queued. Only that exact,
       // side-effect-free failure is safe to retry.
       if (observedNotification || !isPersistedSessionCollision(error)) throw error
       const recoveredSessionId = freshAgentSessionId(request.employee.id)
-      cached.sessionIds.set(conversationId, recoveredSessionId)
+      if (task.aborted) throw error
+      lane.agentSessionId = recoveredSessionId
       // Only this conversation rotates. The recovered session starts empty, so
       // the whole history is replayed even if the conversation had already run
       // in this process.
-      const result = await cached.runtime.run(
+      const result = await lane.runtime!.run(
         recoveredSessionId,
         formatRecoveredHistoryPrompt(unseenHistory(request.history, 0, true), request.prompt),
         request.onNotification,
@@ -224,27 +266,159 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     }
   }
 
-  #serializeByEmployee<TResult>(employeeId: string, task: () => Promise<TResult>): Promise<TResult> {
-    const previous = this.#turnQueues.get(employeeId) ?? Promise.resolve()
-    const current = previous.catch(() => undefined).then(task)
-    this.#turnQueues.set(employeeId, current)
-    void current
-      .catch(() => undefined)
-      .finally(() => {
-        if (this.#turnQueues.get(employeeId) === current) this.#turnQueues.delete(employeeId)
+  #createWorker(employeeId: string): EmployeeWorker {
+    const worker: EmployeeWorker = { lanes: new Map(), waiting: [] }
+    this.#runtimes.set(employeeId, worker)
+    return worker
+  }
+
+  #createLane(worker: EmployeeWorker, conversationId: string): EmployeeLane {
+    const lane: EmployeeLane = {
+      id: randomUUID().replaceAll('-', ''),
+      conversationId,
+      permissionMode: undefined,
+      runtime: undefined,
+      agentSessionId: undefined,
+      current: undefined,
+      pending: [],
+      lastUsed: Date.now(),
+    }
+    worker.lanes.set(conversationId, lane)
+    return lane
+  }
+
+  #activeLaneCount(worker: EmployeeWorker): number {
+    return [...worker.lanes.values()].filter((lane) => lane.current !== undefined || lane.pending.length > 0).length
+  }
+
+  #pumpLane(worker: EmployeeWorker, lane: EmployeeLane): void {
+    if (lane.current !== undefined) return
+    const task = lane.pending.shift()
+    if (task === undefined) {
+      this.#drainWaiting(worker)
+      return
+    }
+    lane.current = task
+    lane.lastUsed = Date.now()
+    if (task.request.agentRunId !== undefined) this.#activeRuns.set(task.request.agentRunId, { lane, task })
+    void this.#runEmployeeTurnExclusive(task.request, lane.conversationId, lane, task)
+      .then((result) => {
+        if (!task.aborted) task.resolve(result)
       })
-    return current
+      .catch((error) => {
+        if (!task.aborted) task.reject(error)
+      })
+      .finally(() => {
+        if (task.request.agentRunId !== undefined) this.#activeRuns.delete(task.request.agentRunId)
+        if (task.request.agentRunId !== undefined) this.#runTasks.delete(task.request.agentRunId)
+        if (lane.current === task) lane.current = undefined
+        this.#pumpLane(worker, lane)
+        this.#drainWaiting(worker)
+      })
+  }
+
+  #drainWaiting(worker: EmployeeWorker): void {
+    if (worker.waiting.length === 0 || this.#activeLaneCount(worker) >= MAX_ACTIVE_LANES_PER_EMPLOYEE) return
+    const task = worker.waiting.shift()!
+    const conversationId = requiredConversationId(task.request.conversationId)
+    const existing = worker.lanes.get(conversationId)
+    if (existing !== undefined) {
+      existing.pending.push(task)
+      existing.lastUsed = Date.now()
+      if (task.request.agentRunId !== undefined) {
+        const record = this.#runTasks.get(task.request.agentRunId)
+        if (record !== undefined) record.lane = existing
+      }
+      this.#pumpLane(worker, existing)
+      return
+    }
+    this.#scheduleNewLane(worker, task, conversationId)
+  }
+
+  #scheduleNewLane(worker: EmployeeWorker, task: LaneTask, conversationId: string): void {
+    if (this.#activeLaneCount(worker) >= MAX_ACTIVE_LANES_PER_EMPLOYEE) {
+      worker.waiting.push(task)
+      return
+    }
+    const idle = [...worker.lanes.values()]
+      .filter((lane) => lane.current === undefined && lane.pending.length === 0)
+      .sort((left, right) => left.lastUsed - right.lastUsed)[0]
+    if (worker.lanes.size >= MAX_ACTIVE_LANES_PER_EMPLOYEE && idle !== undefined) {
+      worker.lanes.delete(idle.conversationId)
+      void (idle.runtime?.close() ?? Promise.resolve())
+        .catch(() => undefined)
+        .then(() => {
+          if (task.aborted) return
+          const lane = this.#createLane(worker, conversationId)
+          lane.pending.push(task)
+          if (task.request.agentRunId !== undefined) {
+            const record = this.#runTasks.get(task.request.agentRunId)
+            if (record !== undefined) record.lane = lane
+          }
+          this.#pumpLane(worker, lane)
+        })
+      return
+    }
+    const lane = this.#createLane(worker, conversationId)
+    lane.pending.push(task)
+    if (task.request.agentRunId !== undefined) {
+      const record = this.#runTasks.get(task.request.agentRunId)
+      if (record !== undefined) record.lane = lane
+    }
+    this.#pumpLane(worker, lane)
   }
 
   async closeEmployee(employeeId: string): Promise<void> {
     const worker = this.#runtimes.get(employeeId)
     if (worker === undefined) return
     this.#runtimes.delete(employeeId)
-    // Closing the worker invalidates every conversation session it owned. The
-    // next turn of each conversation allocates a new id and replays the local
-    // SQLite history into it.
-    worker.sessionIds.clear()
-    await worker.runtime.close()
+    for (const task of worker.waiting.splice(0)) {
+      task.aborted = true
+      task.reject(new Error('Employee runtime closed'))
+      if (task.request.agentRunId !== undefined) this.#runTasks.delete(task.request.agentRunId)
+    }
+    const lanes = [...worker.lanes.values()]
+    worker.lanes.clear()
+    await Promise.allSettled(lanes.map(async (lane) => {
+      if (lane.current !== undefined) {
+        lane.current.aborted = true
+        lane.current.reject(new Error('Employee runtime closed'))
+        if (lane.current.request.agentRunId !== undefined) this.#runTasks.delete(lane.current.request.agentRunId)
+      }
+      for (const task of lane.pending.splice(0)) {
+        task.aborted = true
+        task.reject(new Error('Employee runtime closed'))
+        if (task.request.agentRunId !== undefined) this.#runTasks.delete(task.request.agentRunId)
+      }
+      await lane.runtime?.close()
+    }))
+  }
+
+  async abortRun(agentRunId: string): Promise<void> {
+    const record = this.#runTasks.get(agentRunId)
+    if (record === undefined) return
+    const { task, worker, lane } = record
+    task.aborted = true
+    task.reject(new Error('Agent run aborted'))
+    this.#runTasks.delete(agentRunId)
+    if (lane === undefined) {
+      const index = worker.waiting.indexOf(task)
+      if (index >= 0) worker.waiting.splice(index, 1)
+      return
+    }
+    const active = this.#activeRuns.get(agentRunId)
+    if (active === undefined) {
+      const index = lane.pending.indexOf(task)
+      if (index >= 0) lane.pending.splice(index, 1)
+      this.#pumpLane(worker, lane)
+      return
+    }
+    // The SDK wire has no prompt-level cancel. Closing this lane's owned
+    // runtime is the provider-neutral abort boundary and cannot touch another
+    // conversation lane of the same employee.
+    await active.lane.runtime?.close()
+    active.lane.runtime = undefined
+    active.lane.agentSessionId = undefined
   }
 
   closeAgent(agentId: string): Promise<void> {
@@ -252,9 +426,8 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
   }
 
   async close(): Promise<void> {
-    const runtimes = [...this.#runtimes.values()].map((entry) => entry.runtime)
-    this.#runtimes.clear()
-    const results = await Promise.allSettled(runtimes.map((runtime) => runtime.close()))
+    const employeeIds = [...this.#runtimes.keys()]
+    const results = await Promise.allSettled(employeeIds.map((employeeId) => this.closeEmployee(employeeId)))
     const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
     if (failures.length > 0) {
       throw new AggregateError(
