@@ -17,7 +17,7 @@ import type {
   PeerCollaborationService,
 } from './peer-collaboration-service.js'
 import { ServiceError } from './service-error.js'
-import type { WorldSettingsService } from './world-settings-service.js'
+import type { WorldRuntimePromptComposer } from './world-runtime-context-composer.js'
 
 const MAX_DELEGATED_TARGETS = 3
 const DELEGATION_REQUEST = /(帮我|替我|请你|麻烦你|劳烦你|帮忙|去问|去找)/
@@ -54,7 +54,7 @@ export interface DelegatedCollaborationServiceOptions {
   store: Pick<SqliteStore, 'getEmployee' | 'appendMessage'>
   orchestrator: Pick<ConversationOrchestrator, 'direct'>
   peerCollaboration: Pick<PeerCollaborationService, 'run'>
-  worldSettings: Pick<WorldSettingsService, 'composeGroupRuntimePrompt' | 'composeRuntimePrompt'>
+  worldSettings: WorldRuntimePromptComposer
 }
 
 export class DelegatedCollaborationService {

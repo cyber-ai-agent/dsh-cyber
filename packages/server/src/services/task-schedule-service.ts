@@ -11,7 +11,7 @@ import type { ConversationOrchestrator } from '@dsh-cyber/orchestration'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import type { EmployeeActivityProjectionService } from './employee-activity-projection-service.js'
-import type { WorldSettingsService } from './world-settings-service.js'
+import type { WorldRuntimePromptComposer } from './world-runtime-context-composer.js'
 
 export interface CreateTaskScheduleInput {
   worldId: string
@@ -28,13 +28,13 @@ export interface CreateTaskScheduleInput {
 export class TaskScheduleService {
   readonly #store: SqliteStore
   readonly #orchestrator: ConversationOrchestrator
-  readonly #settings: WorldSettingsService
+  readonly #settings: Pick<WorldRuntimePromptComposer, 'composeRuntimePrompt'>
   readonly #employeeActivity: EmployeeActivityProjectionService
   #timer: NodeJS.Timeout | undefined
   #running = false
   readonly #activeRuns = new Set<Promise<TaskScheduleRun>>()
 
-  constructor(input: { store: SqliteStore; orchestrator: ConversationOrchestrator; settings: WorldSettingsService; employeeActivity: EmployeeActivityProjectionService }) {
+  constructor(input: { store: SqliteStore; orchestrator: ConversationOrchestrator; settings: Pick<WorldRuntimePromptComposer, 'composeRuntimePrompt'>; employeeActivity: EmployeeActivityProjectionService }) {
     this.#store = input.store
     this.#orchestrator = input.orchestrator
     this.#settings = input.settings

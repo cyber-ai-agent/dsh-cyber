@@ -6,7 +6,7 @@ import { gunzip, gzip } from 'node:zlib'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { SqliteStore, WorldArtifactRepository } from '@dsh-cyber/persistence'
+import { SqliteStore, WorldArtifactRepository, WorldKnowledgeRepository } from '@dsh-cyber/persistence'
 
 import { createLocalBackupBundle, restoreLocalBackupBundle } from '../src/services/local-backup-service.js'
 import { WorldArtifactService } from '../src/services/world-artifact-service.js'
@@ -40,6 +40,25 @@ async function seededRoot() {
   const worldRoot = await worldRoots.ensure(world.id)
   await writeFile(join(worldRoot.filesPath, 'note.md'), '# 保留这份笔记\n')
   await writeFile(join(worldRoot.filesPath, 'report.md'), '# 已发布产物\n\n这是恢复后仍可阅读的 Markdown。\n')
+  await writeFile(join(worldRoot.knowledgeLibraryPath, 'manual.md'), '# 世界知识\n\n只属于这个世界的资料。\n')
+  const knowledge = new WorldKnowledgeRepository(store.database)
+  const collection = knowledge.createCollection({
+    worldId: world.id,
+    name: '测试资料',
+    origin: 'folder',
+    relativeRoot: 'manual',
+  })
+  const knowledgeDocument = knowledge.createDocument({
+    workspaceId: workspace.id,
+    worldId: world.id,
+    collectionId: collection.id,
+    relativePath: 'manual.md',
+    title: '世界知识',
+    mimeType: 'text/markdown',
+    byteLength: 42,
+    sha256: 'a'.repeat(64),
+    origin: 'filesystem',
+  })
   const artifactService = new WorldArtifactService({
     repository: new WorldArtifactRepository(store.database),
     roots: worldRoots,
@@ -57,7 +76,7 @@ async function seededRoot() {
   await writeFile(join(root, 'skills', 'actions.json'), '{"actions":[]}')
   await mkdir(join(root, 'credentials'), { recursive: true })
   await writeFile(join(root, 'credentials', 'secret.txt'), 'must-not-travel')
-  return { root, store, workspace, world, publication }
+  return { root, store, workspace, world, publication, knowledgeDocument }
 }
 
 async function emptyRoot(prefix: string) {
@@ -68,7 +87,7 @@ async function emptyRoot(prefix: string) {
 
 describe('local backup restore', () => {
   it('round-trips a state root a backup can actually recover', async () => {
-    const { root, store, world, publication } = await seededRoot()
+    const { root, store, world, publication, knowledgeDocument } = await seededRoot()
     const bundle = join(root, 'backups', 'round-trip.dshbackup')
     await createLocalBackupBundle(root, store, { output: bundle })
     store.close()
@@ -76,9 +95,10 @@ describe('local backup restore', () => {
     const target = await emptyRoot('dsh-restore-target-')
     const result = await restoreLocalBackupBundle(target, bundle)
 
-    expect(result.included).toEqual(expect.arrayContaining(['database.sqlite', 'worlds', 'skills']))
+    expect(result.included).toEqual(expect.arrayContaining(['database.sqlite', 'worlds', 'worlds/*/knowledge/library', 'skills']))
     expect(result.files).toBeGreaterThan(0)
     expect(await readFile(join(target, 'worlds', world.id, 'files', 'note.md'), 'utf8')).toContain('保留这份笔记')
+    expect(await readFile(join(target, 'worlds', world.id, 'knowledge', 'library', 'manual.md'), 'utf8')).toContain('只属于这个世界')
     expect(await readFile(join(target, 'worlds', world.id, ...publication.version.relativePath.split('/')), 'utf8')).toContain('已发布产物')
     expect(await readFile(join(target, 'skills', 'actions.json'), 'utf8')).toBe('{"actions":[]}')
 
@@ -86,6 +106,7 @@ describe('local backup restore', () => {
     const restored = await SqliteStore.open(join(target, 'data', 'dsh-cyber.sqlite'))
     stores.push(restored)
     expect(restored.getWorld(world.id)?.name).toBe('我的世界')
+    expect(new WorldKnowledgeRepository(restored.database).getDocument(world.id, knowledgeDocument.id)).toMatchObject({ title: '世界知识' })
     const restoredArtifacts = new WorldArtifactService({
       repository: new WorldArtifactRepository(restored.database),
       roots: new WorldRootService(target),

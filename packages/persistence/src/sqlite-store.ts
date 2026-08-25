@@ -476,6 +476,9 @@ const KNOWN_TABLES = [
   'world_permission_requests',
   'world_artifacts',
   'world_artifact_versions',
+  'knowledge_collections',
+  'knowledge_documents',
+  'knowledge_chunks',
 ] as const
 
 export class SqliteStore {
@@ -4006,6 +4009,10 @@ export class SqliteStore {
         worldArtifacts: countRows(this.database, 'world_artifacts'),
         worldArtifactVersions: countRows(this.database, 'world_artifact_versions'),
         worldArtifactsMissing: countMissingWorldArtifacts(this.database),
+        knowledgeCollections: countRows(this.database, 'knowledge_collections'),
+        knowledgeDocuments: countRows(this.database, 'knowledge_documents'),
+        knowledgeDocumentsMissing: countMissingKnowledgeDocuments(this.database),
+        knowledgeChunks: countRows(this.database, 'knowledge_chunks'),
         events: countRows(this.database, 'domain_events'),
         outbox: countRows(this.database, 'sync_outbox'),
       },
@@ -4524,6 +4531,17 @@ function countRows(database: DatabaseSync, table: string): number {
 function countMissingWorldArtifacts(database: DatabaseSync): number {
   try {
     const row = database.prepare("SELECT COUNT(*) AS count FROM world_artifacts WHERE status = 'missing'").get() as
+      | { count?: number }
+      | undefined
+    return Number(row?.count ?? 0)
+  } catch {
+    return 0
+  }
+}
+
+function countMissingKnowledgeDocuments(database: DatabaseSync): number {
+  try {
+    const row = database.prepare("SELECT COUNT(*) AS count FROM knowledge_documents WHERE status = 'missing'").get() as
       | { count?: number }
       | undefined
     return Number(row?.count ?? 0)

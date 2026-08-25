@@ -37,6 +37,10 @@
     "./world-artifact": {
       "types": "./lib/world-artifact.d.ts",
       "default": "./lib/world-artifact.js"
+    },
+    "./world-knowledge": {
+      "types": "./lib/world-knowledge.d.ts",
+      "default": "./lib/world-knowledge.js"
     }
   },
   "files": ["lib"],

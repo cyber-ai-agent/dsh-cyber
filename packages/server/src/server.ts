@@ -1,6 +1,6 @@
 import { createServer } from 'node:http'
 import { mkdir, realpath } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { BUILTIN_BLUEPRINTS } from '@dsh-cyber/catalog'
@@ -15,7 +15,7 @@ import {
 } from '@dsh-cyber/harness-adapter'
 import { ConversationOrchestrator } from '@dsh-cyber/orchestration'
 import { LocalPackageCatalog, LocalPackageRuntime, PackageManager, type PackageRuntimePort } from '@dsh-cyber/package-runtime'
-import { SqliteStore, WorldArtifactRepository, WorldSimulationStore } from '@dsh-cyber/persistence'
+import { SqliteStore, WorldArtifactRepository, WorldKnowledgeRepository, WorldSimulationStore } from '@dsh-cyber/persistence'
 
 import { dispatchHttpRequest } from './http/context.js'
 import { assertApplicationAccess } from './http/application-access-guard.js'
@@ -41,6 +41,7 @@ import { registerWorldRuntimeRoutes } from './routes/world-runtime-routes.js'
 import { registerWorldTraceRoutes } from './routes/world-trace-routes.js'
 import { registerWorldAuthorityRoutes } from './routes/world-authority-routes.js'
 import { registerWorldArtifactRoutes } from './routes/world-artifact-routes.js'
+import { registerWorldKnowledgeRoutes } from './routes/world-knowledge-routes.js'
 import { registerWorldRoutes } from './routes/world-routes.js'
 import { registerWorldSettingsRoutes } from './routes/world-settings-routes.js'
 import { AmbientLifeExecutor } from './services/ambient-life-executor.js'
@@ -69,6 +70,11 @@ import { WorldAmbientStateProvider } from './services/world-ambient-state-provid
 import { WorldFileService } from './services/world-file-service.js'
 import { WorldRootService } from './services/world-root-service.js'
 import { WorldSettingsService } from './services/world-settings-service.js'
+import { createKnowledgeSearchPort } from './services/knowledge-search-port.js'
+import { KnowledgeWebImportService } from './services/knowledge-web-import-service.js'
+import { WorldKnowledgeLibraryService } from './services/world-knowledge-library-service.js'
+import { WorldKnowledgeRetrievalService } from './services/world-knowledge-retrieval-service.js'
+import { WorldKnowledgeRuntimeContextContributor, WorldRuntimeContextComposer } from './services/world-runtime-context-composer.js'
 import { WorldTraceService } from './services/world-trace-service.js'
 import { WorldMarketplaceService } from './services/world-marketplace-service.js'
 import { WorldPackageInstanceService } from './services/world-package-instance-service.js'
@@ -89,6 +95,7 @@ import { validateStagedPackageEntrypoints } from './installed-package-runtime.js
 import { WorldRuntimeService } from './world-runtime-service.js'
 import { createBuiltinIntegrationRegistry } from './integrations/builtin-integration-registry.js'
 import { IntegrationService } from './integrations/integration-service.js'
+import { FirecrawlClient } from './integrations/firecrawl-client.js'
 import { OfficialMcpClientFactory, type McpClientFactory } from './integrations/mcp-client.js'
 import { MCP_INTEGRATION_ID } from './integrations/mcp-provider.js'
 import { McpSkillAdapter } from './skills/mcp-skill-adapter.js'
@@ -116,6 +123,7 @@ export interface CyberServer {
   readonly store: SqliteStore
   readonly orchestrator: ConversationOrchestrator
   readonly artifacts: WorldArtifactService
+  readonly knowledge: WorldKnowledgeLibraryService
   readonly packageManager: PackageManager
   start(): Promise<CyberServerAddress>
   address(): CyberServerAddress | undefined
@@ -163,10 +171,35 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const worldPackages = new WorldPackageInstanceService(store, worldRoots)
   const authority = new WorldCharacterAuthorityService(store)
   let publishArtifactChanged: ((worldId: string, payload: JsonObject) => void) | undefined
+  let publishKnowledgeChanged: ((worldId: string, payload: JsonObject) => void) | undefined
   const worldArtifacts = new WorldArtifactService({
     repository: new WorldArtifactRepository(store.database),
     roots: worldRoots,
     onChanged: (worldId, payload) => publishArtifactChanged?.(worldId, payload),
+  })
+  const worldKnowledgeRepository = new WorldKnowledgeRepository(store.database)
+  const worldKnowledgeSearch = createKnowledgeSearchPort({
+    // The repository always exposes a world-scoped indexed SQL path. This
+    // fallback is deliberately empty so the chat hot path can never degrade
+    // into reading every chunk into JavaScript.
+    listChunks: () => [],
+    searchIndexed: (input) => worldKnowledgeRepository.search(input.worldId, input.query, input.limit),
+  }, store.database)
+  const worldKnowledge = new WorldKnowledgeLibraryService({
+    repository: worldKnowledgeRepository,
+    roots: worldRoots,
+    search: worldKnowledgeSearch,
+    getWorld: (worldId) => store.getWorld(worldId),
+    onChanged: (worldId, payload) => publishKnowledgeChanged?.(worldId, payload),
+    readArtifact: async (worldId, artifactId) => {
+      const preview = await worldArtifacts.preview(worldId, artifactId)
+      return {
+        fileName: basename(preview.version.relativePath),
+        ...(preview.contentType.split(';')[0] === undefined ? {} : { mimeType: preview.contentType.split(';')[0] }),
+        body: preview.body,
+        title: preview.artifact.title,
+      }
+    },
   })
   const authorityBackfill = new WorldAuthorityBackfillService({
     authority: {
@@ -197,6 +230,14 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   })
   const mcpClients = options.mcpClientFactory ?? new OfficialMcpClientFactory()
   const integrations = await IntegrationService.open(stateRoot, createBuiltinIntegrationRegistry(mcpClients))
+  // Keep one transport/timeout boundary for both the Skill adapter and the
+  // Knowledge Library. Credentials remain owned by IntegrationService; the
+  // client is only the provider-neutral request path.
+  const firecrawlClient = new FirecrawlClient({ integrations })
+  const knowledgeWeb = new KnowledgeWebImportService({
+    client: firecrawlClient,
+    library: worldKnowledge,
+  })
 
   const worldManagementHost = createWorldManagementHost({ store, worldSettings, worldPackages, authority })
 
@@ -204,6 +245,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     firecrawl: {
       store,
       integrations,
+      client: firecrawlClient,
       listWorldPackages: (worldId) => worldPackages.listRuntimePackages(worldId),
     },
     worldManagement: worldManagementHost,
@@ -258,7 +300,37 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     },
   })
   publishArtifactChanged = (worldId, payload) => worldRuntime.publishArtifactChanged(worldId, payload)
+  publishKnowledgeChanged = (worldId, payload) => worldRuntime.publishKnowledgeChanged(worldId, payload)
   publishDecisionChanged = (worldId, payload) => worldRuntime.publishDecisionChanged(worldId, payload)
+  const worldRuntimeContext = new WorldRuntimeContextComposer({
+    settings: worldSettings,
+    contributors: [new WorldKnowledgeRuntimeContextContributor(
+      new WorldKnowledgeRetrievalService({ search: worldKnowledgeSearch }),
+      (input, context) => {
+        const world = store.getWorld(input.worldId)
+        if (world === undefined) return
+        store.appendDomainEvent({
+          workspaceId: world.workspaceId,
+          worldId: world.id,
+          type: 'knowledge.retrieval.completed',
+          actorId: input.characterId ?? 'system',
+          actorKind: input.characterId === undefined ? 'system' : 'employee',
+          payload: {
+            sourceType: context.sourceType,
+            hitCount: context.hits.length,
+            charCount: context.charCount,
+            hits: context.hits.map((hit) => ({
+              documentId: hit.documentId,
+              chunkId: hit.chunkId,
+              ordinal: hit.ordinal,
+              score: hit.score,
+              ...(hit.origin === undefined ? {} : { origin: hit.origin }),
+            })),
+          },
+        })
+      },
+    )],
+  })
   const worldMarketplace = new WorldMarketplaceService(store, worldRuntime, worldPackages)
   const ambientSlotResolver = new WorldAmbientSlotResolver({ store })
   const ambientStateProvider = new WorldAmbientStateProvider({
@@ -308,14 +380,14 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     store,
     orchestrator,
     skills: skillRuntime,
-    settings: worldSettings,
+    settings: worldRuntimeContext,
     worldPackages,
     worldPermissions,
   })
   const worldTrace = new WorldTraceService({ store, actions: skillActions })
   const employeeActivity = new EmployeeActivityProjectionService(store)
   employeeActivity.projectAll()
-  const taskSchedules = new TaskScheduleService({ store, orchestrator, settings: worldSettings, employeeActivity })
+  const taskSchedules = new TaskScheduleService({ store, orchestrator, settings: worldRuntimeContext, employeeActivity })
   const runtimeUpdates = new RuntimeUpdateService(store, stateRoot, workspaceRoot)
   const applicationUpdates = new ApplicationUpdateService(store, stateRoot, workspaceRoot)
   const applicationAccess = new ApplicationAccessService(stateRoot)
@@ -346,8 +418,9 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
   registerWorldTraceRoutes(router, { store, trace: worldTrace, access: worldAccess })
   registerWorldArtifactRoutes(router, { store, artifacts: worldArtifacts, access: worldAccess, authority })
+  registerWorldKnowledgeRoutes(router, { store, library: worldKnowledge, web: knowledgeWeb, access: worldAccess })
   registerModelInteractionRoutes(router, { store, interactions })
-  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, turnContinuations, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, worldTrace, employeeActivity, worldPackages, worldRuntimePermissions, ownerRuntimeAccess })
+  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, turnContinuations, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, runtimeContext: worldRuntimeContext, worldTrace, employeeActivity, worldPackages, worldRuntimePermissions, ownerRuntimeAccess })
   registerEmployeeRoutes(router, { store, worldAccess, authority })
 
   const httpServer = createServer((request, response) => {
@@ -372,6 +445,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     store,
     orchestrator,
     artifacts: worldArtifacts,
+    knowledge: worldKnowledge,
     packageManager,
     async start() {
       if (closed) throw new Error('Server is closed')

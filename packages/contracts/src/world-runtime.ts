@@ -116,6 +116,8 @@ export type WorldRuntimeStreamEventKind =
   | 'world-decision'
   /** A durable World artifact was published, renamed, archived or restored. */
   | 'world-artifact'
+  /** A durable Knowledge document, collection or index projection changed. */
+  | 'world-knowledge'
   | 'world-state'
   | 'world-cue'
   | 'heartbeat'

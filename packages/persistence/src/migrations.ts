@@ -1070,6 +1070,142 @@ const MIGRATIONS: readonly Migration[] = [
         WHERE idempotency_key IS NOT NULL;
     `,
   },
+  {
+    version: 24,
+    name: 'world-knowledge-library-v1',
+    sql: `
+      /* Knowledge source files live below WorldRoot/knowledge/library. These
+         tables hold metadata and replaceable search projections only. */
+      CREATE TABLE IF NOT EXISTS knowledge_collections (
+        id TEXT PRIMARY KEY,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        description TEXT,
+        origin TEXT NOT NULL CHECK (origin IN ('folder', 'zip', 'manual', 'web', 'artifact')),
+        relative_root TEXT NOT NULL,
+        document_count INTEGER NOT NULL DEFAULT 0 CHECK (document_count >= 0),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (world_id, id),
+        UNIQUE (id, world_id)
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS knowledge_collections_world_updated_idx
+        ON knowledge_collections(world_id, updated_at DESC, id);
+
+      CREATE TABLE IF NOT EXISTS knowledge_documents (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        collection_id TEXT,
+        relative_path TEXT NOT NULL,
+        title TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        byte_length INTEGER NOT NULL CHECK (byte_length >= 0),
+        sha256 TEXT NOT NULL CHECK (length(sha256) = 64),
+        origin TEXT NOT NULL CHECK (origin IN ('upload', 'paste', 'web', 'filesystem', 'artifact')),
+        source_url TEXT,
+        artifact_id TEXT,
+        status TEXT NOT NULL CHECK (status IN ('pending', 'indexed', 'failed', 'missing')),
+        chunk_count INTEGER NOT NULL DEFAULT 0 CHECK (chunk_count >= 0),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        indexed_at TEXT,
+        UNIQUE (world_id, id),
+        UNIQUE (world_id, relative_path),
+        FOREIGN KEY (workspace_id, world_id)
+          REFERENCES worlds(workspace_id, id)
+          ON DELETE CASCADE,
+        FOREIGN KEY (collection_id, world_id)
+          REFERENCES knowledge_collections(id, world_id)
+          ON DELETE CASCADE,
+        FOREIGN KEY (artifact_id)
+          REFERENCES world_artifacts(id)
+          ON DELETE SET NULL
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS knowledge_documents_world_status_updated_idx
+        ON knowledge_documents(world_id, status, updated_at DESC, id);
+      CREATE INDEX IF NOT EXISTS knowledge_documents_collection_updated_idx
+        ON knowledge_documents(world_id, collection_id, updated_at DESC, id)
+        WHERE collection_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS knowledge_documents_world_origin_idx
+        ON knowledge_documents(world_id, origin, updated_at DESC, id);
+      CREATE INDEX IF NOT EXISTS knowledge_documents_sha256_idx
+        ON knowledge_documents(world_id, sha256, id);
+      CREATE INDEX IF NOT EXISTS knowledge_documents_artifact_idx
+        ON knowledge_documents(world_id, artifact_id, id)
+        WHERE artifact_id IS NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS knowledge_chunks (
+        id TEXT PRIMARY KEY,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        document_id TEXT NOT NULL,
+        ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+        content TEXT NOT NULL,
+        content_hash TEXT NOT NULL CHECK (length(content_hash) = 64),
+        start_offset INTEGER CHECK (start_offset IS NULL OR start_offset >= 0),
+        end_offset INTEGER CHECK (end_offset IS NULL OR end_offset >= 0),
+        created_at TEXT NOT NULL,
+        UNIQUE (world_id, id),
+        UNIQUE (document_id, ordinal),
+        CHECK (
+          start_offset IS NULL OR end_offset IS NULL OR end_offset >= start_offset
+        ),
+        FOREIGN KEY (world_id, document_id)
+          REFERENCES knowledge_documents(world_id, id)
+          ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS knowledge_chunks_world_document_ordinal_idx
+        ON knowledge_chunks(world_id, document_id, ordinal);
+      CREATE INDEX IF NOT EXISTS knowledge_chunks_world_created_idx
+        ON knowledge_chunks(world_id, created_at DESC, id);
+      CREATE INDEX IF NOT EXISTS knowledge_chunks_content_hash_idx
+        ON knowledge_chunks(world_id, content_hash, document_id, ordinal);
+
+      /* Keep denormalized collection counts correct while retaining a
+         rebuildable projection: deleting/replacing documents never requires
+         callers to hand-maintain this count. */
+      CREATE TRIGGER IF NOT EXISTS knowledge_documents_collection_insert_count
+      AFTER INSERT ON knowledge_documents
+      WHEN NEW.collection_id IS NOT NULL
+      BEGIN
+        UPDATE knowledge_collections
+        SET document_count = document_count + 1,
+            updated_at = NEW.updated_at
+        WHERE world_id = NEW.world_id AND id = NEW.collection_id;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS knowledge_documents_collection_delete_count
+      AFTER DELETE ON knowledge_documents
+      WHEN OLD.collection_id IS NOT NULL
+      BEGIN
+        UPDATE knowledge_collections
+        SET document_count = MAX(0, document_count - 1),
+            updated_at = OLD.updated_at
+        WHERE world_id = OLD.world_id AND id = OLD.collection_id;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS knowledge_documents_collection_update_count
+      AFTER UPDATE OF collection_id ON knowledge_documents
+      WHEN COALESCE(OLD.collection_id, '') <> COALESCE(NEW.collection_id, '')
+      BEGIN
+        UPDATE knowledge_collections
+        SET document_count = MAX(0, document_count - 1),
+            updated_at = NEW.updated_at
+        WHERE OLD.collection_id IS NOT NULL
+          AND world_id = OLD.world_id
+          AND id = OLD.collection_id;
+        UPDATE knowledge_collections
+        SET document_count = document_count + 1,
+            updated_at = NEW.updated_at
+        WHERE NEW.collection_id IS NOT NULL
+          AND world_id = NEW.world_id
+          AND id = NEW.collection_id;
+      END;
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {

@@ -17,8 +17,12 @@ export function assertLocalRequest(request: IncomingMessage): void {
     throw new HttpError(403, 'origin_rejected', 'Cross-origin request rejected')
   }
   if (request.method !== 'GET' && request.method !== 'HEAD') {
-    const contentType = request.headers['content-type'] ?? ''
-    if (!String(contentType).toLowerCase().startsWith('application/json')) {
+    const contentType = String(request.headers['content-type'] ?? '').toLowerCase()
+    const pathname = new URL(request.url ?? '/', `http://${hostHeader}`).pathname
+    const isBoundedKnowledgeImport = request.method === 'POST'
+      && /^\/api\/worlds\/[^/]+\/knowledge\/library\/import$/.test(pathname)
+      && contentType.startsWith('multipart/form-data;')
+    if (!contentType.startsWith('application/json') && !isBoundedKnowledgeImport) {
       throw new HttpError(415, 'json_required', 'Application JSON content type required')
     }
   }

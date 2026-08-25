@@ -46,6 +46,7 @@
 - [x] Safe application updater for clean `main` fast-forward installs
 - [x] Responsive Pixi viewport resizing without world-view black strips
 - [x] Durable World Artifact Center with immutable versions, chat references and format-aware readers
+- [x] World Knowledge Library with durable sources, lexical retrieval and runtime context composition
 - [ ] Define Creative Platform V1 local-data compatibility baseline
 - [ ] Remove remaining new-path role-name inference
 - [ ] Final visual QA for conversation / dossier / workshop information architecture
@@ -67,6 +68,7 @@ listed below are future roadmap work and are not part of the current memory syst
 
 - [ ] Episodic memory
 - [ ] Semantic memory
+- [ ] Evidence-backed World Knowledge Graph
 - [ ] Procedural memory
 - [ ] Relationship memory
 - [ ] Memory retrieval scopes

@@ -84,6 +84,13 @@ export async function createLocalBackupBundle(
       sources.push(...await collectBackupSources(source, directory, directory === 'worlds'))
       included.push(directory)
     }
+    // Knowledge source files are nested under worlds and are intentionally
+    // captured by the same recursive walk. Advertise the durable sub-root in
+    // the manifest when it contains files so restore/doctor tooling can show
+    // that the source authority traveled with the SQLite projection.
+    if (sources.some(({ archivePath }) => /^worlds\/[^/]+\/knowledge\/library(?:\/|$)/.test(archivePath))) {
+      included.push('worlds/*/knowledge/library')
+    }
     sources.sort((left, right) => left.archivePath.localeCompare(right.archivePath))
 
     const header: LocalBackupBundleHeader = {
@@ -92,7 +99,7 @@ export async function createLocalBackupBundle(
       createdAt: new Date().toISOString(),
       included,
       excluded: ['credentials', 'runtime', 'worlds/*/cache', 'backups'],
-      notes: '包含 SQLite、世界文件/设置/资产、已安装包、创意工坊项目与 Skill 动作。模型密钥和运行时二进制不进入普通备份。逐行 JSON：首行为头部，其余每行是一个文件分片。',
+      notes: '包含 SQLite、世界文件/设置/资产、knowledge/library、已安装包、创意工坊项目与 Skill 动作。模型密钥和运行时二进制不进入普通备份。逐行 JSON：首行为头部，其余每行是一个文件分片。',
     }
     await pipeline(
       Readable.from(bundleRecords(header, sources), { objectMode: false }),

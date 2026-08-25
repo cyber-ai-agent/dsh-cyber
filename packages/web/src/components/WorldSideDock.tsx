@@ -7,13 +7,15 @@ import {
   Package,
   Path,
 } from '@phosphor-icons/react'
-import type { ReactNode } from 'react'
+import { lazy, Suspense, type ReactNode } from 'react'
 import type { EmployeeDossier as EmployeeDossierData, World } from '@dsh-cyber/contracts'
 
 import type { CyberEmployee, DockTab } from '../types.js'
 import { EmployeeDossier } from './EmployeeDossier.js'
 import { EmployeeDossierDirectory } from './EmployeeDossierDirectory.js'
 import { WorldView } from './WorldView.js'
+
+const KnowledgeDock = lazy(async () => ({ default: (await import('../features/knowledge/KnowledgeDock.js')).KnowledgeDock }))
 
 interface WorldSideDockProps {
   demoMode: boolean
@@ -48,6 +50,7 @@ const tabs: Array<{ id: DockTab; label: string; icon: typeof GlobeHemisphereWest
 
 /** Shared right-side World context. Artifact domain content lives in a feature module. */
 export function WorldSideDock({
+  demoMode,
   activeTab,
   selectedEmployee,
   dossiers,
@@ -84,16 +87,12 @@ export function WorldSideDock({
     <div className="dock-content">
       {activeTab === 'world' ? worldContent ?? <WorldView world={world} employees={employees} {...(sceneImage === undefined ? {} : { sceneImage })} onSelectEmployee={onSelectEmployee} /> : null}
       {activeTab === 'dossier' ? selectedEmployee !== undefined && dossiers[selectedEmployee.id] !== undefined ? <EmployeeDossier dossier={dossiers[selectedEmployee.id]!} employees={employees} world={world} avatarIndex={selectedEmployee.avatarIndex} onDirect={() => onDirectEmployee(selectedEmployee)} onManage={() => onManageEmployee(selectedEmployee)} onBack={onShowAllDossiers} /> : <EmployeeDossierDirectory employees={employees} dossiers={dossiers} world={world} onOpen={onSelectEmployee} onDirect={onDirectEmployee} onManage={onManageEmployee} onInvite={onInvite} /> : null}
-      {activeTab === 'knowledge' ? knowledgeContent ?? <KnowledgeEmptyState /> : null}
+      {activeTab === 'knowledge' ? knowledgeContent ?? <Suspense fallback={<div className="dock-empty-state" role="status"><strong>正在加载知识库</strong></div>}><KnowledgeDock world={world} demoMode={demoMode} /></Suspense> : null}
       {activeTab === 'artifacts' ? artifactContent ?? <ArtifactEmptyState /> : null}
       {activeTab === 'trace' ? traceContent : null}
       {activeTab === 'schedule' ? scheduleContent : null}
     </div>
   </section>
-}
-
-function KnowledgeEmptyState() {
-  return <div className="dock-empty-state" aria-label="知识空状态"><span className="dock-empty-state__mark" aria-hidden="true"><Cube size={22} /></span><h2>知识库正在准备中</h2><p>当前版本只展示正式空状态，不会把示例图谱或未验证内容混入世界。</p></div>
 }
 
 function ArtifactEmptyState() {

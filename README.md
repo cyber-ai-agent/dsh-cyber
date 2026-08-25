@@ -58,7 +58,7 @@ DSH Cyber 想把这件事做成一个**可视化、可玩、可扩展的本地 A
 - 同一个会话的最近聊天历史由本地 SQLite 恢复，可以跨应用重启、Harness Runtime 重建和权限模式切换。私聊、群聊和不同世界之间不共享历史。
 - 每次用户交互和每次实际角色运行都有持久状态，可查看私聊、群聊和角色协作的运行顺序与结果。服务重启会安全终止未完成记录，不自动重放可能产生副作用的调用。
 - SQLite 是会话历史与执行状态的权威；DSH Session 和实时事件是可重建的运行时状态。
-- 跨会话语义检索、情景记忆、向量索引、自动摘要与记忆整理尚未实现。角色不会跨会话自动回忆或提炼长期知识。
+- 当前世界可以从知识库检索外部原始资料并用于回答；对话自动提炼、知识图谱、情景记忆、向量索引和跨会话语义记忆仍在后续阶段。
 - 世界轨迹按角色、日期、关键词和执行状态检索中文执行记录，展示安全的判断摘要、工具调度、耗时与模型返回的真实 Token 用量。完整 Prompt、原始工具输入和原始工具结果不会进入轨迹；模型返回的已完成 reasoning 块会经密钥脱敏和长度截断后展示，不做摘要或翻译，流式 reasoning 增量则被直接丢弃。
 
 ### 🌍 Embodied Worlds
@@ -143,7 +143,15 @@ Available
 - 角色运行或用户可以把当前世界工作目录中的成果明确发布为世界产物；SQLite 保存稳定身份、来源、版本和会话关联，发布文件保存为世界内的不可变版本。
 - 最终回复可附带产物卡。点击后使用对应阅读器打开：Markdown 文档排版、代码与行号、JSON 结构、PDF、图片、隔离网页预览或项目文件树。
 - 产物与世界严格隔离，随 `worlds/` 和 SQLite 一起进入本地备份；刷新或重启不会丢失。工作目录中的临时文件不会被扫描或自动发布。
-- “知识”当前只提供正式入口和空状态，产物不会自动进入知识库。
+- 产物不会自动进入知识库，只有用户明确加入时才建立带来源的知识文档。
+
+### 📚 世界知识库
+
+- 每个世界拥有独立的原始资料库，支持 Markdown、TXT、JSON、PDF、文件夹、ZIP 知识包、粘贴内容和公开网页。
+- 原始文件保存在 `worlds/<worldId>/knowledge/library`，SQLite 保存集合、文档元数据和可重建的文本分块。
+- 搜索优先使用 SQLite FTS5；运行环境不支持时使用世界范围内的可移植 SQL 检索，不依赖向量数据库或额外模型。
+- 角色回答问题时最多增加一次本地知识检索。外部资料始终是不可信数据，不能直接修改权限、批准操作或触发文件与 Skill 副作用。
+- 知识源文件和 SQLite 一起进入本地备份，`doctor` 会报告集合、文档、分块与缺失源文件数量。
 
 ### 💾 Local-first & Safe Upgrades
 
@@ -158,7 +166,10 @@ assets/
 packages/
 workshop/
 skills/
+integrations/
 ```
+
+世界目录中的 `knowledge/library` 与 `exports/artifacts` 属于用户长期资产，并随 `worlds/` 一起备份。
 
 凭据、运行时二进制和可重建缓存不进入普通备份。
 
@@ -262,6 +273,7 @@ Agent identity
 - [技术报告](./docs/technical-report.md)
 - [Creative World Platform V1](./docs/architecture/creative-world-platform-v1.md)
 - [世界产物中心 V1](./docs/architecture/world-artifact-center-v1.md)
+- [世界知识库 V1](./docs/architecture/world-knowledge-library-v1.md)
 - [Architecture & Development Guidelines](./docs/development/architecture-guidelines.md)
 - [CI Strategy](./docs/development/ci-strategy.md)
 
@@ -393,7 +405,7 @@ Harness 被限制在兼容适配层，不允许世界、角色、Skill 领域代
 - [ ] Creative Platform V1 稳定化
 - [ ] Workshop 项目版本与编辑生命周期
 - [ ] Character Identity / Persona / Embodiment 完全以用户当前设定为准
-- [ ] 跨会话长期记忆与语义检索
+- [ ] 有证据的长期知识图谱与对话整理
 - [ ] Task / Job / Deliverable / Review 工作系统
 - [ ] GitHub Skill Adapter
 - [ ] Browser Skill Adapter

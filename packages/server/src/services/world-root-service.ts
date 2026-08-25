@@ -16,6 +16,10 @@ export interface WorldRoot {
   exportsPath: string
   /** Stable published artifact authority: exports/artifacts/<artifactId>/vN. */
   exportsArtifactsPath: string
+  /** World-owned knowledge source root; never aliases the agent files workspace. */
+  knowledgePath: string
+  /** Durable source files below knowledgePath; SQLite only stores projections. */
+  knowledgeLibraryPath: string
   /** Hidden, run-scoped publication request area: files/.dsh/artifacts/<agentRunId>.json. */
   dshPath: string
   dshArtifactsPath: string
@@ -62,6 +66,8 @@ export class WorldRootService {
     const assetsPath = join(rootPath, 'assets')
     const exportsPath = join(rootPath, 'exports')
     const exportsArtifactsPath = join(exportsPath, 'artifacts')
+    const knowledgePath = join(rootPath, 'knowledge')
+    const knowledgeLibraryPath = join(knowledgePath, 'library')
     // Agent runtimes receive `filesPath` as their workspace root. Keep the
     // publication seam below that same root so a run can write its exact
     // request without escaping the workspace sandbox. WorkspaceFileService
@@ -75,13 +81,15 @@ export class WorldRootService {
     // A character with no world.files.read still needs somewhere to run. It
     // must not be the world's real files directory, and it must stay empty.
     const restrictedPath = join(cachePath, 'restricted-workspace')
-    await Promise.all([filesPath, assetsPath, exportsPath, exportsArtifactsPath, dshPath, dshArtifactsPath, cachePath, sourcePath, packagesPath, restrictedPath].map((path) => mkdir(path, { recursive: true })))
+    await Promise.all([filesPath, assetsPath, exportsPath, exportsArtifactsPath, knowledgePath, knowledgeLibraryPath, dshPath, dshArtifactsPath, cachePath, sourcePath, packagesPath, restrictedPath].map((path) => mkdir(path, { recursive: true })))
     const resolved = {
       rootPath: await realpath(rootPath),
       filesPath: await realpath(filesPath),
       assetsPath: await realpath(assetsPath),
       exportsPath: await realpath(exportsPath),
       exportsArtifactsPath: await realpath(exportsArtifactsPath),
+      knowledgePath: await realpath(knowledgePath),
+      knowledgeLibraryPath: await realpath(knowledgeLibraryPath),
       dshPath: await realpath(dshPath),
       dshArtifactsPath: await realpath(dshArtifactsPath),
       cachePath: await realpath(cachePath),
