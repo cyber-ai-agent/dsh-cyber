@@ -184,6 +184,17 @@ function presentDomainEvent(type: DomainEventType, payload: Record<string, unkno
     case 'schedule.run.started': return { category: 'schedule', status: 'running', summary: '计划任务开始执行' }
     case 'schedule.run.completed': return { category: 'schedule', status: 'success', summary: '计划任务执行完成' }
     case 'schedule.run.failed': return { category: 'schedule', status: 'failed', summary: '计划任务执行失败' }
+    case 'knowledge.retrieval.completed': {
+      const hitCount = numberField(payload, 'hitCount') ?? 0
+      const charCount = numberField(payload, 'charCount') ?? 0
+      const sourceType = stringField(payload, 'sourceType') ?? '本地索引'
+      return {
+        category: 'tool',
+        status: 'success',
+        summary: `已检索世界知识：${hitCount} 条引用`,
+        detail: `来源：${sourceType}；引用字符：${charCount}`,
+      }
+    }
     case 'world.interaction.requested': return { category: 'world', status: 'pending', summary: interactionSummary(payload, false) }
     case 'world.interaction.completed': return { category: 'world', status: 'success', summary: interactionSummary(payload, true) }
     case 'world.object.activated': return { category: 'world', status: 'success', summary: '世界对象已激活' }

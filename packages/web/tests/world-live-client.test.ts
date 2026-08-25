@@ -37,6 +37,8 @@ const EVENT_NAMES = [
   'trace',
   'world-cue',
   'world-decision',
+  'world-artifact',
+  'world-knowledge',
   'world-runtime',
   'world-state',
 ] as const

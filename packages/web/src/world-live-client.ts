@@ -6,6 +6,7 @@ const WORLD_LIVE_EVENT_NAMES = [
   'world-cue',
   'world-decision',
   'world-artifact',
+  'world-knowledge',
   'world-runtime',
   'world-state',
 ] as const

@@ -354,6 +354,23 @@ export class WorldRuntimeService {
     })
   }
 
+  /** Announces Knowledge Library changes on the shared world/live SSE. */
+  publishKnowledgeChanged(worldId: string, payload: JsonObject): void {
+    const snapshot = this.#store.getWorldRuntimeSnapshot(worldId)
+    const marker = typeof payload.documentId === 'string'
+      ? payload.documentId
+      : typeof payload.collectionId === 'string' ? payload.collectionId : 'library'
+    this.#publish({
+      contractVersion: 1,
+      id: `knowledge-${marker}-${this.#clock()}`,
+      worldId,
+      sequence: snapshot?.sequence ?? 0,
+      kind: 'world-knowledge',
+      payload,
+      createdAt: this.#clock(),
+    })
+  }
+
   publishState(snapshot: WorldRuntimeSnapshot): void {
     this.#publish({
       contractVersion: 1,

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { CharacterSkillAction } from '@dsh-cyber/contracts/skill-runtime'
 
 import { createBuiltinIntegrationRegistry } from '../src/integrations/builtin-integration-registry.js'
+import { FirecrawlClient, normalizePublicWebUrl } from '../src/integrations/firecrawl-client.js'
 import { FIRECRAWL_INTEGRATION_ID } from '../src/integrations/firecrawl-provider.js'
 import { IntegrationService } from '../src/integrations/integration-service.js'
 import { FIRECRAWL_SEARCH_SKILL, FirecrawlSkillAdapter } from '../src/skills/firecrawl-skill-adapter.js'
@@ -14,6 +15,34 @@ const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
 
 describe('Integration Registry + Firecrawl', () => {
+  it('rejects private, loopback, link-local, and mapped IPv4 web targets', () => {
+    for (const target of [
+      'http://127.0.0.1/admin',
+      'http://10.0.0.1/',
+      'http://169.254.169.254/latest/meta-data',
+      'http://localhost/',
+      'http://service.local/',
+      'http://[::1]/',
+      'http://[fd00::1]/',
+      'http://[::ffff:127.0.0.1]/',
+    ]) {
+      expect(() => normalizePublicWebUrl(target)).toThrow(/本机|私有|无效/i)
+    }
+    expect(normalizePublicWebUrl('https://example.com/reference')).toBe('https://example.com/reference')
+  })
+
+  it('bounds a chunked Firecrawl response before buffering it in memory', async () => {
+    const client = new FirecrawlClient({
+      integrations: {
+        get: () => ({ enabled: true, config: {} }),
+        credential: () => 'fc-test',
+      },
+      maxResponseBytes: 64 * 1024,
+      fetch: async () => new Response(JSON.stringify({ success: true, data: { web: [{ title: 'x'.repeat(128 * 1024), url: 'https://example.com' }] } })),
+    })
+    await expect(client.search({ workspaceId: 'workspace-1', query: 'bounded' })).rejects.toMatchObject({ kind: 'too-large' })
+  })
+
   it('persists public configuration separately from encrypted credentials and restores both after restart', async () => {
     const root = await makeRoot()
     const service = await IntegrationService.open(root, createBuiltinIntegrationRegistry(), async () => Response.json({ success: true, data: [] }))

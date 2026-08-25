@@ -38,6 +38,7 @@ import type { WorldPackageInstanceService } from '../services/world-package-inst
 import type { OwnerRuntimeAccessService } from '../services/owner-runtime-access-service.js'
 import type { WorldRuntimePermissionResolver } from '../services/world-runtime-permission-resolver.js'
 import type { TurnAwareApprovalContinuationService } from '../services/turn-aware-approval-continuation-service.js'
+import type { WorldRuntimePromptComposer } from '../services/world-runtime-context-composer.js'
 import { ServiceError } from '../services/service-error.js'
 
 export interface ConversationRoutesDependencies {
@@ -50,6 +51,7 @@ export interface ConversationRoutesDependencies {
   worldAccess: WorldAccessService
   worldFiles: WorldFileService
   worldSettings: WorldSettingsService
+  runtimeContext?: WorldRuntimePromptComposer
   worldTrace: WorldTraceService
   employeeActivity: EmployeeActivityProjectionService
   worldPackages: WorldPackageInstanceService
@@ -70,6 +72,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     worldAccess,
     worldFiles,
     worldSettings,
+    runtimeContext = worldSettings,
     worldTrace,
     employeeActivity,
     worldPackages,
@@ -81,7 +84,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     store,
     orchestrator,
     peerCollaboration,
-    worldSettings,
+    worldSettings: runtimeContext,
   })
   const conversationHub = new ConversationHubService(store)
 
@@ -278,7 +281,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
         employeeIds,
         prompt,
         metadata,
-        runtimePrompt: await worldSettings.composeGroupRuntimePrompt(world.id, transformedPrompt),
+        runtimePrompt: await runtimeContext.composeGroupRuntimePrompt(world.id, transformedPrompt),
         ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
         permissionMode,
         ...(requestedSessionId === undefined ? {} : { sessionId: requestedSessionId }),
@@ -390,7 +393,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
       participantIds,
       purpose,
       maxRounds,
-      runtimePrompt: await worldSettings.composeGroupRuntimePrompt(world.id, transformedPurpose),
+      runtimePrompt: await runtimeContext.composeGroupRuntimePrompt(world.id, transformedPurpose),
       ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
       ...(peerTitle === undefined ? {} : { title: peerTitle }),
     })

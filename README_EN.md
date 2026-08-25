@@ -57,7 +57,7 @@ DSH Cyber is building this as a **visual, local-first, moddable AI world platfor
 #### Conversation continuity
 
 - Recent chat history from one conversation is restored from local SQLite across application restarts, Harness runtime rebuilds and permission-mode switches. SQLite is authoritative; a DSH session is a disposable runtime cache. Direct chats, group meetings and separate worlds never share history.
-- Cross-conversation recall, semantic or episodic memory, vector retrieval, embeddings, automatic summarisation and memory consolidation are not available yet.
+- Roles can retrieve external source material from the current World's Knowledge Library. Automatic conversation consolidation, a Knowledge Graph, episodic memory, vector retrieval and cross-conversation semantic memory are not available yet.
 
 ### Embodied worlds
 
@@ -118,7 +118,15 @@ An Agent may only claim an external action succeeded after the trusted Adapter r
 - A role run or the owner can explicitly publish a result from the current World workspace. SQLite keeps its stable identity, provenance, versions and conversation linkage; published files are immutable World-local versions.
 - Final replies can include artifact cards. Opening one uses a format-aware reader for Markdown, code, structured JSON, PDF, images, sandboxed HTML or a project file tree.
 - Artifacts stay isolated by World and are included through SQLite plus `worlds/` in local backups. Workspace scratch files are never discovered or published automatically.
-- Knowledge currently has a real navigation entry and empty state only. Artifacts are not automatically promoted into knowledge.
+- Artifacts are not automatically promoted into knowledge. A user must explicitly add one before it becomes a sourced Knowledge Document.
+
+### World Knowledge Library
+
+- Every World has an isolated raw-source library for Markdown, TXT, JSON, PDF, folders, ZIP knowledge packs, pasted text and public web pages.
+- Source files live under `worlds/<worldId>/knowledge/library`; SQLite stores collections, document metadata and rebuildable text chunks.
+- Search prefers SQLite FTS5 and falls back to portable, World-scoped SQL when FTS5 is unavailable. No vector database or extra model call is required.
+- A role response adds at most one local indexed search. External sources are always untrusted data and cannot directly change permissions, approve actions, or trigger file and Skill side effects.
+- Knowledge source files are included with SQLite in local backups, and `doctor` reports collection, document, chunk and missing-source counts.
 
 ### Local-first persistence and safe upgrades
 
@@ -133,7 +141,10 @@ assets/
 packages/
 workshop/
 skills/
+integrations/
 ```
+
+`knowledge/library` and `exports/artifacts` inside each World are durable user assets and travel with `worlds/`.
 
 Credentials, runtime binaries and rebuildable caches are excluded from normal backups.
 
@@ -237,6 +248,7 @@ Read more:
 - [Technical Report](./docs/technical-report.md)
 - [Creative World Platform V1](./docs/architecture/creative-world-platform-v1.md)
 - [World Artifact Center V1](./docs/architecture/world-artifact-center-v1.md)
+- [World Knowledge Library V1](./docs/architecture/world-knowledge-library-v1.md)
 - [Architecture Guidelines](./docs/development/architecture-guidelines.md)
 - [CI Strategy](./docs/development/ci-strategy.md)
 
@@ -370,7 +382,7 @@ Current priorities:
 - [ ] stabilize Creative Platform V1
 - [ ] Workshop project versioning and edit lifecycle
 - [ ] make current user-defined Character Identity / Persona / Embodiment authoritative everywhere
-- [ ] cross-conversation episodic and semantic memory
+- [ ] evidence-backed World Knowledge Graph and conversation consolidation
 - [ ] Task / Job / Deliverable / Review work system
 - [ ] GitHub Skill Adapter
 - [ ] Browser Skill Adapter

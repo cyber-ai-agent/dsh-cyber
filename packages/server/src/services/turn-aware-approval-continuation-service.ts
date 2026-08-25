@@ -8,7 +8,7 @@ import { applyInstalledPromptTransforms } from '../installed-package-runtime.js'
 import { TraceSanitizer } from '../world-trace/trace-sanitizer.js'
 import type { CharacterSkillRuntime } from './character-skill-runtime.js'
 import type { WorldPackageInstanceService } from './world-package-instance-service.js'
-import type { WorldSettingsService } from './world-settings-service.js'
+import type { WorldRuntimePromptComposer } from './world-runtime-context-composer.js'
 import type { WorldPermissionRequestService, DecideWorldPermissionInput } from './world-permission-request-service.js'
 import { TurnDecisionCoordinator } from './turn-decision-coordinator.js'
 import { PersistenceError } from '@dsh-cyber/persistence'
@@ -31,7 +31,7 @@ export class TurnAwareApprovalContinuationService {
   readonly #store: SqliteStore
   readonly #orchestrator: ConversationOrchestrator
   readonly #skills: CharacterSkillRuntime
-  readonly #settings: WorldSettingsService
+  readonly #settings: WorldRuntimePromptComposer
   readonly #worldPackages: WorldPackageInstanceService
   readonly #worldPermissions: WorldPermissionRequestService | undefined
   readonly #decisionCoordinator: TurnDecisionCoordinator
@@ -40,7 +40,7 @@ export class TurnAwareApprovalContinuationService {
     store: SqliteStore
     orchestrator: ConversationOrchestrator
     skills: CharacterSkillRuntime
-    settings: WorldSettingsService
+    settings: WorldRuntimePromptComposer
     worldPackages: WorldPackageInstanceService
     worldPermissions?: WorldPermissionRequestService
   }) {

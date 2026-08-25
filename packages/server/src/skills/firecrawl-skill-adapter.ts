@@ -2,7 +2,8 @@ import type { CharacterSkillAction, CharacterSkillDescriptor } from '@dsh-cyber/
 import type { SqliteStore } from '@dsh-cyber/persistence'
 import type { InstalledPackage } from '@dsh-cyber/contracts'
 
-import { FIRECRAWL_INTEGRATION_ID, firecrawlBaseUrl } from '../integrations/firecrawl-provider.js'
+import { FIRECRAWL_INTEGRATION_ID } from '../integrations/firecrawl-provider.js'
+import { FirecrawlClient, FirecrawlClientError } from '../integrations/firecrawl-client.js'
 import type { IntegrationService } from '../integrations/integration-service.js'
 import type { CharacterSkillActionProposal, CharacterSkillAdapter, CharacterSkillExecutionResult, CharacterSkillMatchContext } from './skill-adapter.js'
 
@@ -32,11 +33,12 @@ export class FirecrawlSkillAdapter implements CharacterSkillAdapter {
   readonly descriptors = [DESCRIPTOR] as const
   readonly #store: Pick<SqliteStore, 'getWorld'>
   readonly #integrations: IntegrationService
-  readonly #fetch: typeof globalThis.fetch
+  readonly #client: FirecrawlClient
   readonly #listWorldPackages: (worldId: string) => Promise<InstalledPackage[]>
 
-  constructor(options: { store: Pick<SqliteStore, 'getWorld'>; integrations: IntegrationService; listWorldPackages?: (worldId: string) => Promise<InstalledPackage[]>; fetch?: typeof globalThis.fetch }) {
-    this.#store = options.store; this.#integrations = options.integrations; this.#fetch = options.fetch ?? globalThis.fetch
+  constructor(options: { store: Pick<SqliteStore, 'getWorld'>; integrations: IntegrationService; listWorldPackages?: (worldId: string) => Promise<InstalledPackage[]>; fetch?: typeof globalThis.fetch; client?: FirecrawlClient }) {
+    this.#store = options.store; this.#integrations = options.integrations
+    this.#client = options.client ?? new FirecrawlClient({ integrations: options.integrations, ...(options.fetch === undefined ? {} : { fetch: options.fetch }) })
     this.#listWorldPackages = options.listWorldPackages ?? (async () => [])
   }
 
@@ -74,32 +76,20 @@ export class FirecrawlSkillAdapter implements CharacterSkillAdapter {
     const connection = this.#integrations.get(world.workspaceId, FIRECRAWL_INTEGRATION_ID)
     const credential = this.#integrations.credential(world.workspaceId, FIRECRAWL_INTEGRATION_ID)
     if (connection === undefined || !connection.enabled || !credential) return { status: 'waiting-for-integration', detail: '已获得搜索授权，但 Firecrawl 连接尚未启用或缺少凭据' }
-    const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 30_000)
     try {
-      const response = await this.#fetch(`${firecrawlBaseUrl(connection.config)}/v2/search`, {
-        method: 'POST', headers: { Authorization: `Bearer ${credential}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, limit: 5, sources: ['web'] }), signal: controller.signal,
-      })
-      if (!response.ok) return { status: 'failed', detail: firecrawlFailure(response.status) }
-      const summary = summarizeSearchResponse(await response.json())
-      return summary === undefined ? { status: 'failed', detail: 'Firecrawl 返回了无法识别的搜索结果' } : { status: 'executed', detail: summary }
+      const results = await this.#client.search({ workspaceId: world.workspaceId, query, limit: 5 })
+      return { status: 'executed', detail: summarizeSearchResults(results) }
     } catch (error) {
       // A 30s abort happens after the request was sent: it may have been
       // accepted and billed. Reporting that as `failed` claims knowledge the
       // host does not have, which is exactly what `outcome-unknown` exists for.
       // A refused connection never left the machine and stays `failed`.
-      const aborted = error instanceof Error && error.name === 'AbortError'
-      if (aborted) return { status: 'outcome-unknown', detail: 'Firecrawl 搜索超时，外部请求结果未知；不得自动重试' }
-      if (isConnectionRefused(error)) return { status: 'failed', detail: 'Firecrawl 连接被拒绝，请求未发出' }
+      if (error instanceof FirecrawlClientError && error.kind === 'unreachable') return { status: 'failed', detail: error.message }
+      if (error instanceof FirecrawlClientError && error.kind === 'not-configured') return { status: 'waiting-for-integration', detail: error.message }
+      if (error instanceof FirecrawlClientError && (error.kind === 'http' || error.kind === 'invalid-response' || error.kind === 'too-large')) return { status: 'failed', detail: error.message }
       return { status: 'outcome-unknown', detail: 'Firecrawl 搜索连接中断，外部请求结果未知；不得自动重试' }
-    } finally { clearTimeout(timeout) }
+    }
   }
-}
-
-function isConnectionRefused(error: unknown): boolean {
-  const code = (error as { cause?: { code?: unknown }; code?: unknown } | null)?.cause?.code
-    ?? (error as { code?: unknown } | null)?.code
-  return code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'EAI_AGAIN'
 }
 
 /**
@@ -124,25 +114,7 @@ function requestedSearchQuery(prompt: string): string | undefined {
   return value && value.length <= 500 ? value : undefined
 }
 
-function summarizeSearchResponse(value: unknown): string | undefined {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
-  const data = (value as Record<string, unknown>).data
-  if (data === null || typeof data !== 'object' || Array.isArray(data)) return undefined
-  const web = (data as Record<string, unknown>).web
-  if (!Array.isArray(web)) return undefined
-  const lines = web.slice(0, 5).flatMap((item, index) => {
-    if (item === null || typeof item !== 'object' || Array.isArray(item)) return []
-    const row = item as Record<string, unknown>; const url = typeof row.url === 'string' ? row.url : ''; if (!/^https?:\/\//.test(url)) return []
-    const title = typeof row.title === 'string' ? row.title.trim().slice(0, 160) : url
-    const description = typeof row.description === 'string' ? row.description.replace(/\s+/g, ' ').trim().slice(0, 320) : ''
-    return [`${index + 1}. ${title}\n${url}${description ? `\n${description}` : ''}`]
-  })
+function summarizeSearchResults(results: Array<{ title: string; url: string; description?: string }>): string {
+  const lines = results.slice(0, 5).map((item, index) => `${index + 1}. ${item.title}\n${item.url}${item.description ? `\n${item.description}` : ''}`)
   return lines.length === 0 ? 'Firecrawl 搜索完成，但没有找到可展示的公开网页结果' : `Firecrawl 搜索完成，共返回 ${lines.length} 条结果：\n${lines.join('\n\n')}`
-}
-
-function firecrawlFailure(status: number): string {
-  if (status === 401 || status === 403) return 'Firecrawl 凭据无效或没有访问权限'
-  if (status === 402) return 'Firecrawl 账户额度不足'
-  if (status === 429) return 'Firecrawl 请求过于频繁，请稍后重试'
-  return `Firecrawl 搜索失败（HTTP ${status}）`
 }
