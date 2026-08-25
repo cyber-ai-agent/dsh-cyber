@@ -52,6 +52,11 @@ export interface CharacterSkillRecipe {
  * but they never receive this interface and cannot execute arbitrary code through it.
  */
 export interface CharacterSkillAdapter {
+  /**
+   * Narrows dynamic skills to one workspace. Adapters whose skills are static
+   * omit it and are listed everywhere.
+   */
+  descriptorsFor?(workspaceId: string): readonly CharacterSkillDescriptor[]
   readonly id: string
   readonly descriptors: readonly CharacterSkillDescriptor[]
   /** Dynamic adapters (for example MCP) may expose no skills until discovery completes. */
@@ -134,10 +139,20 @@ export class CharacterSkillAdapterRegistry {
     }
   }
 
-  list(): CharacterSkillDescriptor[] {
+  /**
+   * Skills a workspace may actually be granted.
+   *
+   * Dynamically discovered skills belong to the workspace whose integration
+   * produced them: listing them globally exposed one workspace's MCP tool names
+   * and server-written descriptions to another, and a grant made from that
+   * listing silently did nothing.
+   */
+  list(workspaceId?: string): CharacterSkillDescriptor[] {
     return [
       ...[...this.#adapters.values()]
-      .flatMap((adapter) => adapter.descriptors)
+      .flatMap((adapter) => (workspaceId !== undefined && adapter.descriptorsFor !== undefined
+        ? adapter.descriptorsFor(workspaceId)
+        : adapter.descriptors))
       .map((descriptor) => ({ ...descriptor, kind: descriptor.kind ?? 'integration' as const, risks: [...descriptor.risks] })),
       ...[...this.#recipes.values()].map(({ descriptor }) => ({ ...descriptor, risks: [...descriptor.risks] })),
     ]

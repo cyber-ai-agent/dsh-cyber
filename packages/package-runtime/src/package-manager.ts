@@ -413,6 +413,10 @@ function assertEntrypointContract(manifest: CyberPackageManifest, kind: string):
     'prompt-transform': { packageKind: 'plugin', capability: 'prompt:transform', noEgress: true },
     'employee-blueprint': { packageKind: 'employee-blueprint', capability: 'employee:blueprint', noEgress: true },
     'world-theme': { packageKind: 'world-theme', capability: 'world:render', noEgress: true },
+    // A skill entrypoint is the one kind whose declared egress is not enforced
+    // by the runtime, so the declaration itself has to be non-trivial: it must
+    // name a capability, and a capability that reaches an external integration
+    // must name where the data goes.
     skill: { packageKind: 'skill', capability: undefined, noEgress: false },
   } as const)[kind as 'prompt-transform' | 'employee-blueprint' | 'world-theme' | 'skill']
   if (expectation === undefined || manifest.kind !== expectation.packageKind) {
@@ -420,6 +424,14 @@ function assertEntrypointContract(manifest: CyberPackageManifest, kind: string):
   }
   if (expectation.capability !== undefined && !manifest.capabilities.includes(expectation.capability)) {
     throw new Error(`Entrypoint ${kind} requires capability ${expectation.capability}`)
+  }
+  if (kind === 'skill') {
+    if (manifest.capabilities.length === 0) {
+      throw new Error('Entrypoint skill must declare at least one capability')
+    }
+    if (manifest.capabilities.some((capability) => capability.startsWith('integration:')) && manifest.dataEgress.length === 0) {
+      throw new Error('Entrypoint skill with an integration capability must declare its data egress')
+    }
   }
   if (expectation.noEgress && manifest.dataEgress.length > 0) {
     throw new Error(`Entrypoint ${kind} does not support data egress`)

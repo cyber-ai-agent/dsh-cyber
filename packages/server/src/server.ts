@@ -227,13 +227,19 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   let skillActions = options.skillActionRepository
   if (skillActions === undefined) {
     const sqliteActions = new SqliteSkillActionRepository(store)
-    const legacyActions = new LocalSkillActionRepository(join(stateRoot, 'skills', 'actions.json'))
-    for (const workspace of store.listWorkspaces()) {
-      for (const world of store.listWorlds(workspace.id, true)) {
-        for (const action of await legacyActions.listByWorld(world.id)) {
-          await sqliteActions.reserve(action, 0)
+    // A corrupt legacy ledger must not stop a local-first application from
+    // starting; the SQLite ledger is authoritative and already loaded.
+    try {
+      const legacyActions = new LocalSkillActionRepository(join(stateRoot, 'skills', 'actions.json'))
+      for (const workspace of store.listWorkspaces()) {
+        for (const world of store.listWorlds(workspace.id, true)) {
+          for (const action of await legacyActions.listByWorld(world.id)) {
+            await sqliteActions.reserve(action, 0)
+          }
         }
       }
+    } catch (error) {
+      console.warn('[dsh-cyber] 旧版 skills/actions.json 无法读取，已跳过迁移：', errorText(error))
     }
     store.recoverSkillActionsAfterRestart()
     skillActions = sqliteActions
@@ -323,6 +329,9 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       if (mcpAdapter !== undefined) {
         void refreshMcpCatalog(mcpAdapter, skillRegistry)
       }
+      void sweepOrphanedPackageStaging(store, worldPackages).catch((error: unknown) => {
+        console.warn('[dsh-cyber] 清理残留的包暂存目录失败：', errorText(error))
+      })
       void turnContinuations.recover().catch((error: unknown) => {
         console.warn('[dsh-cyber] 恢复等待审批的回合失败，已跳过：', errorText(error))
       })
@@ -368,6 +377,17 @@ function withTimeout<TValue>(work: Promise<TValue>, milliseconds: number): Promi
     timer.unref?.()
     work.then(resolvePromise, rejectPromise).finally(() => clearTimeout(timer))
   })
+}
+
+/** Crash residue from `instantiate`; safe to remove because nothing reads it. */
+async function sweepOrphanedPackageStaging(store: SqliteStore, worldPackages: WorldPackageInstanceService): Promise<void> {
+  let removed = 0
+  for (const workspace of store.listWorkspaces()) {
+    for (const world of store.listWorlds(workspace.id, true)) {
+      removed += await worldPackages.sweepOrphanedStaging(world.id)
+    }
+  }
+  if (removed > 0) console.warn(`[dsh-cyber] 已清理 ${removed} 个残留的包暂存目录。`)
 }
 
 function errorText(error: unknown): string {

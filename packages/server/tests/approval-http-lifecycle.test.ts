@@ -27,7 +27,9 @@ class QuietRuntime implements AgentRuntimePort {
   async close(): Promise<void> {}
 }
 
-const TEST_SKILL = 'test.external-switch'
+// A skill the built-in butler blueprint already requests, so the grant is a
+// real subset of the request rather than a fixture shortcut.
+const TEST_SKILL = 'world-setup'
 
 /**
  * Minimal adapter with a real external side effect, so the approval gate is
@@ -79,10 +81,11 @@ async function start(adapter: SwitchAdapter, runtime: QuietRuntime) {
     port: 0,
     runtime,
     skillRegistry: registry,
+    bootstrapDefaultWorld: true,
   })
   servers.push(server)
   const address = await server.start()
-  return { origin: address.origin, server }
+  return { origin: address.origin }
 }
 
 async function json(origin: string, path: string, init?: RequestInit): Promise<{ response: Response; body: any }> {
@@ -94,35 +97,20 @@ function post(body: unknown): RequestInit {
   return { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
 }
 
-async function bootstrap(origin: string, server: CyberServer): Promise<{ world: World; characterId: string }> {
-  const workspace = await json(origin, '/api/workspaces', post({ name: '本地实例' }))
-  const workspaceId = workspace.body.workspace.id as string
-  const created = await json(origin, `/api/workspaces/${workspaceId}/worlds`, post({ name: '我的世界', templateId: 'personal-world' }))
-  const world = created.body.world as World
-
-  // A grant must be a subset of what the blueprint requested, so the fixture
-  // declares the request. Everything the approval gate touches after this runs
-  // over HTTP.
-  server.store.saveBlueprint({
-    schemaVersion: 1,
-    id: 'test-operator',
-    version: 1,
-    worldTemplateId: 'personal-world',
-    displayName: '阿开',
-    role: '设备管家',
-    summary: '负责真实设备操作的角色。',
-    persona: '你负责真实设备操作，只在获得授权后执行。',
-    requestedSkills: [TEST_SKILL],
-    requestedCapabilities: [],
-    createdAt: '2026-08-24T00:00:00.000Z',
-  })
-  const recruited = await json(origin, `/api/worlds/${world.id}/recruit`, post({
-    blueprintId: 'test-operator',
-    blueprintVersion: 1,
+async function bootstrap(origin: string): Promise<{ world: World; characterId: string }> {
+  const workspaces = await json(origin, '/api/workspaces')
+  const workspaceId = workspaces.body.items[0].id as string
+  const worlds = await json(origin, `/api/workspaces/${workspaceId}/worlds`)
+  const world = worlds.body.items[0] as World
+  const snapshot = await json(origin, `/api/worlds/${world.id}/snapshot`)
+  const characterId = snapshot.body.employees[0].id as string
+  // Requested capability is not granted capability: the grant is an explicit act.
+  const granted = await json(origin, `/api/employees/${characterId}/revisions`, post({
+    reason: 'grant-external-switch',
     skillGrants: [TEST_SKILL],
   }))
-  expect(recruited.response.status).toBeLessThan(300)
-  return { world, characterId: recruited.body.employee.id as string }
+  expect(granted.response.status).toBe(201)
+  return { world, characterId }
 }
 
 async function chat(origin: string, worldId: string, characterId: string, prompt: string) {
@@ -133,8 +121,8 @@ describe('approval gate over the HTTP surface', () => {
   it('drives propose to approve to execute entirely through the API a client can call', async () => {
     const adapter = new SwitchAdapter()
     const runtime = new QuietRuntime()
-    const { origin, server } = await start(adapter, runtime)
-    const { world, characterId } = await bootstrap(origin, server)
+    const { origin } = await start(adapter, runtime)
+    const { world, characterId } = await bootstrap(origin)
 
     // --- propose -------------------------------------------------------
     const turn = await chat(origin, world.id, characterId, '帮我关灯')
@@ -183,8 +171,8 @@ describe('approval gate over the HTTP surface', () => {
 
   it('never touches the device when the user rejects', async () => {
     const adapter = new SwitchAdapter()
-    const { origin, server } = await start(adapter, new QuietRuntime())
-    const { world, characterId } = await bootstrap(origin, server)
+    const { origin } = await start(adapter, new QuietRuntime())
+    const { world, characterId } = await bootstrap(origin)
 
     await chat(origin, world.id, characterId, '帮我关灯')
     const pending = await json(origin, `/api/worlds/${world.id}/approvals?status=pending`)
@@ -200,8 +188,8 @@ describe('approval gate over the HTTP surface', () => {
 
   it('refuses a persistent scope for a skill that forbids one', async () => {
     const adapter = new SwitchAdapter()
-    const { origin, server } = await start(adapter, new QuietRuntime())
-    const { world, characterId } = await bootstrap(origin, server)
+    const { origin } = await start(adapter, new QuietRuntime())
+    const { world, characterId } = await bootstrap(origin)
 
     await chat(origin, world.id, characterId, '帮我关灯')
     const pending = await json(origin, `/api/worlds/${world.id}/approvals?status=pending`)

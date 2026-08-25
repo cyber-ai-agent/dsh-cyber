@@ -145,7 +145,17 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
       const canonical = (await conversationHub.list(world.id))
         .find((item) => item.canonicalCharacterId === character.id)
       const sessionId = requestedSessionId ?? canonical?.session.id
-      if (sessionId !== undefined) await conversationHub.restoreCanonicalDirect(sessionId)
+      if (sessionId !== undefined) {
+        // restoreCanonicalDirect writes this world's hub state. A session id
+        // supplied by the client is checked against the world *before* that
+        // write, or one world's chat endpoint can un-hide a conversation
+        // belonging to another world.
+        const requested = store.getSession(sessionId)
+        if (requested === undefined || requested.worldId !== world.id) {
+          throw new HttpError(422, 'session_unavailable', '所选会话不属于当前世界')
+        }
+        await conversationHub.restoreCanonicalDirect(sessionId)
+      }
 
       const delegation = detectDelegatedCollaboration({
         prompt,

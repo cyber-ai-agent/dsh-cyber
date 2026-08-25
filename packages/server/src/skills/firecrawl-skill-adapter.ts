@@ -84,9 +84,22 @@ export class FirecrawlSkillAdapter implements CharacterSkillAdapter {
       const summary = summarizeSearchResponse(await response.json())
       return summary === undefined ? { status: 'failed', detail: 'Firecrawl 返回了无法识别的搜索结果' } : { status: 'executed', detail: summary }
     } catch (error) {
-      return { status: 'failed', detail: error instanceof Error && error.name === 'AbortError' ? 'Firecrawl 搜索超时' : 'Firecrawl 搜索连接中断' }
+      // A 30s abort happens after the request was sent: it may have been
+      // accepted and billed. Reporting that as `failed` claims knowledge the
+      // host does not have, which is exactly what `outcome-unknown` exists for.
+      // A refused connection never left the machine and stays `failed`.
+      const aborted = error instanceof Error && error.name === 'AbortError'
+      if (aborted) return { status: 'outcome-unknown', detail: 'Firecrawl 搜索超时，外部请求结果未知；不得自动重试' }
+      if (isConnectionRefused(error)) return { status: 'failed', detail: 'Firecrawl 连接被拒绝，请求未发出' }
+      return { status: 'outcome-unknown', detail: 'Firecrawl 搜索连接中断，外部请求结果未知；不得自动重试' }
     } finally { clearTimeout(timeout) }
   }
+}
+
+function isConnectionRefused(error: unknown): boolean {
+  const code = (error as { cause?: { code?: unknown }; code?: unknown } | null)?.cause?.code
+    ?? (error as { code?: unknown } | null)?.code
+  return code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'EAI_AGAIN'
 }
 
 /**

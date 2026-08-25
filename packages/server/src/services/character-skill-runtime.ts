@@ -70,8 +70,8 @@ export class CharacterSkillRuntime {
     this.#approvalSettlementHandler = handler
   }
 
-  listDescriptors(): CharacterSkillDescriptor[] {
-    return this.#registry.list()
+  listDescriptors(workspaceId?: string): CharacterSkillDescriptor[] {
+    return this.#registry.list(workspaceId)
   }
 
   async prepare(context: SkillPreparationContext, now = new Date()): Promise<CharacterSkillResult> {
