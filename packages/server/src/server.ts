@@ -28,6 +28,7 @@ import { registerApplicationAccessRoutes } from './routes/application-access-rou
 import { registerAssetRoutes } from './routes/asset-routes.js'
 import { registerCatalogRoutes } from './routes/catalog-routes.js'
 import { registerConversationRoutes } from './routes/conversation-routes.js'
+import { registerGroupTaskRoutes } from './routes/group-task-routes.js'
 import { registerEmployeeRoutes } from './routes/employee-routes.js'
 import { registerIntegrationRoutes } from './routes/integration-routes.js'
 import { registerModelInteractionRoutes } from './routes/model-interaction-routes.js'
@@ -53,6 +54,7 @@ import { ApplicationAccessService } from './services/application-access-service.
 import { CharacterProfileRuntime } from './services/character-profile-runtime.js'
 import { CharacterSkillRuntime } from './services/character-skill-runtime.js'
 import { SkillCatalogService } from './services/skill-catalog-service.js'
+import { GroupTaskCollaborationService } from './services/group-task-collaboration-service.js'
 import { EmployeeActivityProjectionService } from './services/employee-activity-projection-service.js'
 import { harnessModelRoute } from './services/harness-model-route.js'
 import { ModelCatalogService } from './services/model-catalog-service.js'
@@ -351,6 +353,12 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       },
     )],
   })
+  const groupTasks = new GroupTaskCollaborationService({
+    store,
+    catalog: skillCatalog,
+    orchestrator,
+    runtimeContext: worldRuntimeContext,
+  })
   const worldMarketplace = new WorldMarketplaceService(store, worldRuntime, worldPackages)
   const ambientSlotResolver = new WorldAmbientSlotResolver({ store })
   const ambientStateProvider = new WorldAmbientStateProvider({
@@ -457,7 +465,8 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     consolidationScheduler: knowledgeGraphRuntime.scheduler,
   })
   registerModelInteractionRoutes(router, { store, interactions })
-  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, turnContinuations, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, runtimeContext: worldRuntimeContext, worldTrace, employeeActivity, worldPackages, worldRuntimePermissions, ownerRuntimeAccess })
+  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, turnContinuations, groupTasks, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, runtimeContext: worldRuntimeContext, worldTrace, employeeActivity, worldPackages, worldRuntimePermissions, ownerRuntimeAccess })
+  registerGroupTaskRoutes(router, { store, worldAccess, groupTasks })
   registerEmployeeRoutes(router, {
     store,
     worldAccess,

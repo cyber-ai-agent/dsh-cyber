@@ -1465,6 +1465,63 @@ const MIGRATIONS: readonly Migration[] = [
         ON knowledge_suppressions(world_id, fingerprint, target_type);
     `,
   },
+  {
+    version: 26,
+    name: 'task-collaboration-plans-v1',
+    sql: `
+      ALTER TABLE work_sessions
+        ADD COLUMN collaboration_mode TEXT NOT NULL DEFAULT 'discussion'
+        CHECK (collaboration_mode IN ('discussion', 'task'));
+
+      CREATE TABLE task_collaboration_plans (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT NOT NULL,
+        session_id TEXT NOT NULL REFERENCES work_sessions(id) ON DELETE RESTRICT,
+        /* Deliberately no FK to work_turns: pruneHistory must not delete plans. */
+        work_turn_id TEXT NOT NULL,
+        revision INTEGER NOT NULL CHECK (revision > 0),
+        status TEXT NOT NULL CHECK (
+          status IN ('planned', 'running', 'completed', 'failed', 'interrupted', 'cancelled')
+        ),
+        error_code TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (world_id, task_id),
+        FOREIGN KEY (workspace_id, world_id)
+          REFERENCES worlds(workspace_id, id)
+          ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE INDEX task_collaboration_plans_world_status_updated_idx
+        ON task_collaboration_plans(world_id, status, updated_at DESC, id);
+      CREATE INDEX task_collaboration_plans_session_idx
+        ON task_collaboration_plans(session_id, created_at DESC, id);
+      CREATE INDEX task_collaboration_plans_work_turn_idx
+        ON task_collaboration_plans(work_turn_id, created_at DESC, id);
+
+      CREATE TABLE task_collaboration_steps (
+        id TEXT PRIMARY KEY,
+        plan_id TEXT NOT NULL REFERENCES task_collaboration_plans(id) ON DELETE CASCADE,
+        ordinal INTEGER NOT NULL CHECK (ordinal > 0),
+        required_skills_json TEXT NOT NULL CHECK (json_valid(required_skills_json)),
+        assigned_employee_ids_json TEXT NOT NULL CHECK (json_valid(assigned_employee_ids_json)),
+        depends_on_json TEXT NOT NULL CHECK (json_valid(depends_on_json)),
+        execution_mode TEXT NOT NULL CHECK (execution_mode IN ('parallel', 'sequential')),
+        status TEXT NOT NULL CHECK (
+          status IN ('pending', 'ready', 'running', 'completed', 'failed', 'blocked', 'interrupted', 'cancelled')
+        ),
+        error_code TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (plan_id, ordinal)
+      ) STRICT;
+
+      CREATE INDEX task_collaboration_steps_plan_status_idx
+        ON task_collaboration_steps(plan_id, status, ordinal, id);
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {

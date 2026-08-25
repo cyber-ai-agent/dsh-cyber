@@ -722,6 +722,9 @@ describe('SqliteStore', () => {
       DROP TABLE world_package_instances;
       DROP TABLE agent_runs;
       DROP TABLE work_turns;
+      DROP TABLE task_collaboration_steps;
+      DROP TABLE task_collaboration_plans;
+      ALTER TABLE work_sessions DROP COLUMN collaboration_mode;
       DROP INDEX worlds_administrator_idx;
       ALTER TABLE worlds DROP COLUMN administrator_employee_id;
       ALTER TABLE employee_blueprints DROP COLUMN embodiment_json;

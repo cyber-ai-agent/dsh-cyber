@@ -88,10 +88,14 @@ async function expectSkill(item: CyberMarketPackage): Promise<void> {
   expect(entrypoints).toHaveLength(1)
   for (const entrypoint of entrypoints) {
     const definition = JSON.parse(await readFile(join(item.sourceDirectory, ...entrypoint.path.split('/')), 'utf8')) as Record<string, unknown>
-    expect(Object.keys(definition).sort()).toEqual(['dataEgress', 'displayName', 'id', 'instructions', 'integrationId', 'schemaVersion', 'summary'])
+    expect(Object.keys(definition).filter((key) => key !== 'routingHints').sort()).toEqual(['dataEgress', 'displayName', 'id', 'instructions', 'integrationId', 'schemaVersion', 'summary'])
     expect(definition.id).toBe(entrypoint.id)
     expect(definition.schemaVersion).toBe(1)
     expect(typeof definition.instructions === 'string' && definition.instructions.trim().length > 0).toBe(true)
+    if (definition.routingHints !== undefined) {
+      expect(Array.isArray(definition.routingHints)).toBe(true)
+      expect((definition.routingHints as unknown[]).every((item) => typeof item === 'string' && item.trim().length > 0)).toBe(true)
+    }
   }
 }
 

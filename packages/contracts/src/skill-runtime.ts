@@ -74,6 +74,8 @@ export interface CharacterSkillDescriptor {
   id: string
   displayName: string
   summary: string
+  /** Deterministic task-routing vocabulary; never includes provider internals. */
+  routingHints?: string[]
   adapterId: string
   /** Optional immutable package binding for integration capabilities. */
   packageId?: string

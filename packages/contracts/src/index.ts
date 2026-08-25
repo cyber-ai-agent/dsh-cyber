@@ -1,6 +1,6 @@
 import type { WorldCharacterAuthority } from './world-authority.js'
 
-export const CYBER_SCHEMA_VERSION = 25 as const
+export const CYBER_SCHEMA_VERSION = 26 as const
 
 export type IsoTimestamp = string
 export type JsonPrimitive = boolean | number | string | null
@@ -742,6 +742,8 @@ export interface WorkSession {
   workspaceId: string
   worldId: string
   kind: WorkSessionKind
+  /** Omitted by legacy callers/readers; persistence defaults it to discussion. */
+  collaborationMode?: import('./task-collaboration.js').WorkSessionCollaborationMode
   title: string
   status: WorkSessionStatus
   createdAt: IsoTimestamp
@@ -1015,6 +1017,8 @@ export interface DatabaseDoctorReport {
     modelAssignments: number
     localAssets: number
     sessions: number
+    taskCollaborationPlans: number
+    taskCollaborationSteps: number
     messages: number
     installedPackages: number
     worldPackageInstances: number
@@ -1061,6 +1065,7 @@ export * from './world-authority.js'
 export * from './world-artifact.js'
 export * from './world-knowledge.js'
 export * from './world-knowledge-graph.js'
+export * from './task-collaboration.js'
 
 export type {
   CharacterSkillAction,

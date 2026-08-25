@@ -9,6 +9,7 @@
 - [x] Local-first workspace/world persistence
 - [x] Independent Agent sessions through Harness adapter
 - [x] Real multi-character conversations
+- [ ] Group discussion/task collaboration mode with lightweight task routing projection（Web 已接入，后端任务路由待合并）
 - [x] Bounded character-to-character collaboration
 - [x] Deterministic ambient life and world simulation
 - [x] Explicit semantic embodiment for custom roles
@@ -30,6 +31,7 @@
 - [x] World Package Instance V1
 - [x] Built-in Skill Recipe catalog with role-aware default grants and on-demand loading
 - [x] World-scoped Skill Catalog 与角色学习 V2（Catalog Service、Runtime gate、Web 与真实 E2E）
+- [x] Group Task Router 与任务协作 V1（确定性选人、持久计划、并行/依赖执行和协调汇总）
 - [x] Integration Registry and Firecrawl V1
 - [x] MCP Skill Adapter V1 (Streamable HTTP discovery/call behind Grant, Approval and Action Ledger)
 - [ ] Extension Host and JSON-RPC Gateway

@@ -1,4 +1,4 @@
-import type { AgentPermissionMode, ApprovalRequestView, ChatAttachment, JsonObject, ReasoningEffort } from '@dsh-cyber/contracts'
+import type { AgentPermissionMode, ApprovalRequestView, ChatAttachment, JsonObject, ReasoningEffort, WorkSessionCollaborationMode } from '@dsh-cyber/contracts'
 import type {
   ConversationOrchestrator,
   DirectConversationInput,
@@ -40,6 +40,7 @@ import type { WorldRuntimePermissionResolver } from '../services/world-runtime-p
 import type { TurnAwareApprovalContinuationService } from '../services/turn-aware-approval-continuation-service.js'
 import type { WorldRuntimePromptComposer } from '../services/world-runtime-context-composer.js'
 import { ServiceError } from '../services/service-error.js'
+import type { GroupTaskCollaborationService } from '../services/group-task-collaboration-service.js'
 
 export interface ConversationRoutesDependencies {
   store: SqliteStore
@@ -59,6 +60,7 @@ export interface ConversationRoutesDependencies {
   /** Issues and spends one-time owner host-access grants. */
   ownerRuntimeAccess?: OwnerRuntimeAccessService
   turnContinuations: TurnAwareApprovalContinuationService
+  groupTasks?: GroupTaskCollaborationService
 }
 
 export function registerConversationRoutes(router: Router, dependencies: ConversationRoutesDependencies): void {
@@ -79,6 +81,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     worldRuntimePermissions,
     ownerRuntimeAccess,
     turnContinuations,
+    groupTasks,
   } = dependencies
   const delegatedCollaboration = new DelegatedCollaborationService({
     store,
@@ -100,10 +103,14 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
       throw new HttpError(422, 'group_participant_unavailable', '群聊成员必须来自当前世界且处于可用状态')
     }
     const title = optionalString(body.title) ?? employees.map((employee) => employee!.displayName).join('、')
+    const collaborationMode = body.collaborationMode === undefined
+      ? 'discussion' as const
+      : requiredEnum<WorkSessionCollaborationMode>(body, 'collaborationMode', ['discussion', 'task'])
     const session = store.createSession({
       workspaceId: world.workspaceId,
       worldId: world.id,
       kind: 'group',
+      collaborationMode,
       title,
       participants: [
         { participantId: 'owner', kind: 'owner' },
@@ -111,7 +118,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
       ],
       actorId: 'owner',
     })
-    writeJson(response, 201, { session, participantIds: employeeIds })
+    writeJson(response, 201, { session, participantIds: employeeIds, collaborationMode })
   })
 
   router.post(/^\/api\/worlds\/([^/]+)\/chat$/, async ({ request, response, params }) => {
@@ -171,6 +178,22 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
         return
       }
     }
+    const requestedCollaborationMode = body.collaborationMode === undefined
+      ? undefined
+      : requiredEnum<WorkSessionCollaborationMode>(body, 'collaborationMode', ['discussion', 'task'])
+    // Resolve the persisted mode before consuming attachments, permissions, or
+    // a one-time host-access grant. A stale client hint must be rejected as a
+    // no-op against the session authority, not after partial request setup.
+    const requestedSession = employeeIds.length > 1 && requestedSessionId !== undefined
+      ? store.getSession(requestedSessionId)
+      : undefined
+    if (employeeIds.length > 1 && requestedSessionId !== undefined && (requestedSession === undefined || requestedSession.worldId !== world.id)) {
+      throw new HttpError(422, 'session_unavailable', '所选会话不属于当前世界')
+    }
+    const persistedSessionMode = requestedSession?.collaborationMode ?? 'discussion'
+    if (requestedSession !== undefined && requestedCollaborationMode !== undefined && requestedCollaborationMode !== persistedSessionMode) {
+      throw new HttpError(409, 'session_mode_mismatch', '当前群聊已持久化为另一种协作模式，请先切换会话模式')
+    }
     const attachments = await validatedChatAttachments(body.attachments, store, world.workspaceId, world.id, worldFiles)
     const attachmentPrompt = attachments.length === 0 ? prompt : attachmentAwarePrompt(prompt, attachments)
     const transformedPrompt = await applyInstalledPromptTransforms(await worldPackages.listRuntimePackages(world.id), attachmentPrompt)
@@ -219,6 +242,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
       ...(clientTurnId === undefined ? {} : { clientTurnId }),
       ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
     }
+    if (requestedCollaborationMode !== undefined) metadata.collaborationMode = requestedCollaborationMode
     const title = optionalString(body.title)
     const traceCheckpoint = await createTraceCheckpoint(world.id, worldTrace)
     try {
@@ -275,18 +299,51 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
         result = await turnContinuations.direct({ ...directInput, skillPrompt: prompt, transformedPrompt })
       }
     } else {
-      result = await orchestrator.group({
-        workspaceId: world.workspaceId,
-        worldId: world.id,
-        employeeIds,
-        prompt,
-        metadata,
-        runtimePrompt: await runtimeContext.composeGroupRuntimePrompt(world.id, transformedPrompt),
-        ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
-        permissionMode,
-        ...(requestedSessionId === undefined ? {} : { sessionId: requestedSessionId }),
-        ...(title === undefined ? {} : { title }),
-      })
+      const persistedMode = requestedSession?.collaborationMode ?? 'discussion'
+      const collaborationMode = requestedSession === undefined
+        ? requestedCollaborationMode ?? (body.interactionKind === 'task' ? 'task' : 'discussion')
+        : persistedMode
+      // The persisted session mode is the authority for an existing group.
+      // Keep the WorkTurn interaction kind aligned with it too: a stale
+      // interactionKind=task from a client must not make a discussion turn
+      // look like a task turn (or vice versa) in durable history.
+      const collaborationMetadata: JsonObject = {
+        ...metadata,
+        interactionKind: collaborationMode === 'task'
+          ? 'task'
+          : metadata.interactionKind === 'task' || metadata.interactionKind === 'meeting' ? 'meeting' : 'chat',
+      }
+      if (collaborationMode === 'task') {
+        if (groupTasks === undefined) throw new HttpError(501, 'task_router_unavailable', '任务协作调度服务不可用')
+        const coordinatorEmployeeId = optionalString(body.coordinatorEmployeeId)
+        result = await groupTasks.run({
+          workspaceId: world.workspaceId,
+          worldId: world.id,
+          employeeIds,
+          prompt,
+          transformedPrompt,
+          metadata: collaborationMetadata,
+          ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
+          permissionMode,
+          ...(requestedSessionId === undefined ? {} : { sessionId: requestedSessionId }),
+          ...(title === undefined ? {} : { title }),
+          ...(coordinatorEmployeeId === undefined ? {} : { coordinatorEmployeeId }),
+        })
+      } else {
+        result = await orchestrator.group({
+          workspaceId: world.workspaceId,
+          worldId: world.id,
+          employeeIds,
+          prompt,
+          metadata: collaborationMetadata,
+          collaborationMode: 'discussion',
+          runtimePrompt: await runtimeContext.composeGroupRuntimePrompt(world.id, transformedPrompt),
+          ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
+          permissionMode,
+          ...(requestedSessionId === undefined ? {} : { sessionId: requestedSessionId }),
+          ...(title === undefined ? {} : { title }),
+        })
+      }
     }
     for (const employeeId of employeeIds) employeeActivity.project(employeeId)
     worldRuntime.publishCurrent(world.id)

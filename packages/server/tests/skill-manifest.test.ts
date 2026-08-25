@@ -15,6 +15,7 @@ const valid = {
   id: 'web.search.firecrawl',
   displayName: '联网搜索',
   summary: '通过受信任的网页搜索连接查找公开资料。',
+  routingHints: ['联网搜索', 'web search'],
   integrationId: 'builtin.firecrawl',
   dataEgress: ['搜索查询文本'],
   instructions: '只在用户明确要求联网搜索时使用，并保留可点击来源。',
