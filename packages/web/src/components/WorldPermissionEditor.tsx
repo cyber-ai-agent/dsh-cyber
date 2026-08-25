@@ -27,6 +27,8 @@ const CATEGORY_ORDER: WorldCharacterPermissionCategory[] = [
   'files',
   'settings',
   'characters',
+  'knowledge',
+  'artifacts',
   'extensions',
   'models',
   'audit',
@@ -37,6 +39,8 @@ const CATEGORY_LABELS: Record<WorldCharacterPermissionCategory, string> = {
   files: '当前世界文件',
   settings: '世界设置',
   characters: '角色管理',
+  knowledge: '世界知识',
+  artifacts: '世界产物',
   extensions: '扩展',
   models: '模型',
   audit: '审计',
@@ -62,6 +66,10 @@ const PERMISSION_LABELS: Record<WorldCharacterPermission, string> = {
   'world.trace.read': '查看轨迹',
   'world.conversations.read-metadata': '查看会话列表与元数据',
   'world.conversations.read-content': '读取其他会话正文',
+  'world.artifacts.read': '浏览世界产物',
+  'world.artifacts.manage': '管理世界产物',
+  'world.knowledge.read': '浏览世界知识',
+  'world.knowledge.manage': '管理世界知识',
 }
 
 const READ_ONLY_ADMIN_PERMISSIONS = RECOMMENDED_ADMIN_PERMISSIONS.filter((permission) =>

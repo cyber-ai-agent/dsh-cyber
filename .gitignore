@@ -29,6 +29,10 @@ data/
 .private/
 .ui-craft/
 artifacts/
+# The Web artifact feature is source code, not generated runtime evidence.
+!packages/web/src/features/
+!packages/web/src/features/artifacts/
+!packages/web/src/features/artifacts/**
 
 # Credentials and private keys
 .env

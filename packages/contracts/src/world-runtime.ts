@@ -114,6 +114,8 @@ export type WorldRuntimeStreamEventKind =
   | 'domain'
   /** A pending decision was created, decided, consumed or expired. */
   | 'world-decision'
+  /** A durable World artifact was published, renamed, archived or restored. */
+  | 'world-artifact'
   | 'world-state'
   | 'world-cue'
   | 'heartbeat'

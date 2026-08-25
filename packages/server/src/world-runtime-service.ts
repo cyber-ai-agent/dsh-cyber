@@ -339,6 +339,21 @@ export class WorldRuntimeService {
     })
   }
 
+  /** Announces durable artifact registry changes on the shared world/live SSE. */
+  publishArtifactChanged(worldId: string, payload: JsonObject): void {
+    const snapshot = this.#store.getWorldRuntimeSnapshot(worldId)
+    const marker = typeof payload.artifactId === 'string' ? payload.artifactId : 'unknown'
+    this.#publish({
+      contractVersion: 1,
+      id: `artifact-${marker}-${this.#clock()}`,
+      worldId,
+      sequence: snapshot?.sequence ?? 0,
+      kind: 'world-artifact',
+      payload,
+      createdAt: this.#clock(),
+    })
+  }
+
   publishState(snapshot: WorldRuntimeSnapshot): void {
     this.#publish({
       contractVersion: 1,

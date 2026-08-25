@@ -1,6 +1,6 @@
 import type { WorldCharacterAuthority } from './world-authority.js'
 
-export const CYBER_SCHEMA_VERSION = 22 as const
+export const CYBER_SCHEMA_VERSION = 23 as const
 
 export type IsoTimestamp = string
 export type JsonPrimitive = boolean | number | string | null
@@ -1032,6 +1032,9 @@ export interface DatabaseDoctorReport {
     worldAuthorities: number
     worldAuthorityChanges: number
     worldPermissionRequests: number
+    worldArtifacts: number
+    worldArtifactVersions: number
+    worldArtifactsMissing: number
     events: number
     outbox: number
   }
@@ -1045,3 +1048,4 @@ export function isDomainEventType(value: string): value is DomainEventType {
 export * from './world-runtime.js'
 export * from './world-trace.js'
 export * from './world-authority.js'
+export * from './world-artifact.js'

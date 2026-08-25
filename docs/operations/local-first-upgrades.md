@@ -26,7 +26,7 @@ macOS/Linux: ~/.dsh-cyber
 ```text
 <stateRoot>/
   data/dsh-cyber.sqlite     # 世界、角色、会话、档案、授权、事件等
-  worlds/                   # 各世界设置、文件和本地世界资产
+  worlds/                   # 各世界设置、工作文件、已发布产物和本地世界资产
   assets/                   # 工作区本地资产
   packages/                 # 已安装扩展包
   workshop/                 # 创意工坊项目源与 generated 包
@@ -121,7 +121,7 @@ git clean -fdx
 当前 `backup` 生成 `.dshbackup` 本地 Bundle，包含：
 
 - SQLite 数据库；
-- `worlds/` 世界文件、设置和非缓存资产；
+- `worlds/` 世界文件、设置、`exports/artifacts/` 已发布产物和非缓存资产；
 - `assets/`；
 - `packages/`；
 - `workshop/` 创意工坊项目源与生成包；
@@ -152,6 +152,7 @@ pnpm dsh-cyber doctor
 4. 已安装扩展包仍能识别；
 5. 已计划的 Skill 动作仍保留，并在执行前重新校验角色授权；
 6. 世界设置、附件和本地资产仍能读取。
+7. 聊天中的产物卡仍能打开，产物版本和格式化阅读器仍能读取对应文件。
 
 只要用户继续使用同一 `stateRoot`，应用升级不得要求重新创建这些内容。
 

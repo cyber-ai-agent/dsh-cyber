@@ -474,6 +474,8 @@ const KNOWN_TABLES = [
   'world_character_authorities',
   'world_authority_changes',
   'world_permission_requests',
+  'world_artifacts',
+  'world_artifact_versions',
 ] as const
 
 export class SqliteStore {
@@ -4001,6 +4003,9 @@ export class SqliteStore {
         worldAuthorities: countRows(this.database, 'world_character_authorities'),
         worldAuthorityChanges: countRows(this.database, 'world_authority_changes'),
         worldPermissionRequests: countRows(this.database, 'world_permission_requests'),
+        worldArtifacts: countRows(this.database, 'world_artifacts'),
+        worldArtifactVersions: countRows(this.database, 'world_artifact_versions'),
+        worldArtifactsMissing: countMissingWorldArtifacts(this.database),
         events: countRows(this.database, 'domain_events'),
         outbox: countRows(this.database, 'sync_outbox'),
       },
@@ -4508,6 +4513,17 @@ function readPragmaNumber(database: DatabaseSync, pragma: string): number | unde
 function countRows(database: DatabaseSync, table: string): number {
   try {
     const row = database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as
+      | { count?: number }
+      | undefined
+    return Number(row?.count ?? 0)
+  } catch {
+    return 0
+  }
+}
+
+function countMissingWorldArtifacts(database: DatabaseSync): number {
+  try {
+    const row = database.prepare("SELECT COUNT(*) AS count FROM world_artifacts WHERE status = 'missing'").get() as
       | { count?: number }
       | undefined
     return Number(row?.count ?? 0)

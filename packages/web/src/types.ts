@@ -11,7 +11,7 @@ import type {
   WorldCharacterRole,
 } from '@dsh-cyber/contracts'
 
-export type DockTab = 'world' | 'trace' | 'schedule' | 'dossier'
+export type DockTab = 'world' | 'dossier' | 'knowledge' | 'artifacts' | 'trace' | 'schedule'
 
 export interface ConversationIntent {
   kind: 'direct' | 'group'

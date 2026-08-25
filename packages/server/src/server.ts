@@ -15,7 +15,7 @@ import {
 } from '@dsh-cyber/harness-adapter'
 import { ConversationOrchestrator } from '@dsh-cyber/orchestration'
 import { LocalPackageCatalog, LocalPackageRuntime, PackageManager, type PackageRuntimePort } from '@dsh-cyber/package-runtime'
-import { SqliteStore, WorldSimulationStore } from '@dsh-cyber/persistence'
+import { SqliteStore, WorldArtifactRepository, WorldSimulationStore } from '@dsh-cyber/persistence'
 
 import { dispatchHttpRequest } from './http/context.js'
 import { assertApplicationAccess } from './http/application-access-guard.js'
@@ -40,6 +40,7 @@ import { registerWorkspaceRoutes } from './routes/workspace-routes.js'
 import { registerWorldRuntimeRoutes } from './routes/world-runtime-routes.js'
 import { registerWorldTraceRoutes } from './routes/world-trace-routes.js'
 import { registerWorldAuthorityRoutes } from './routes/world-authority-routes.js'
+import { registerWorldArtifactRoutes } from './routes/world-artifact-routes.js'
 import { registerWorldRoutes } from './routes/world-routes.js'
 import { registerWorldSettingsRoutes } from './routes/world-settings-routes.js'
 import { AmbientLifeExecutor } from './services/ambient-life-executor.js'
@@ -62,6 +63,7 @@ import { ApplicationUpdateService } from './services/application-update-service.
 import { TaskScheduleService } from './services/task-schedule-service.js'
 import { TurnAwareApprovalContinuationService } from './services/turn-aware-approval-continuation-service.js'
 import { WorldAccessService } from './services/world-access-service.js'
+import { WorldArtifactService } from './services/world-artifact-service.js'
 import { WorldAmbientSlotResolver } from './services/world-ambient-slot-resolver.js'
 import { WorldAmbientStateProvider } from './services/world-ambient-state-provider.js'
 import { WorldFileService } from './services/world-file-service.js'
@@ -113,6 +115,7 @@ export interface CyberServerAddress { host: string; port: number; origin: string
 export interface CyberServer {
   readonly store: SqliteStore
   readonly orchestrator: ConversationOrchestrator
+  readonly artifacts: WorldArtifactService
   readonly packageManager: PackageManager
   start(): Promise<CyberServerAddress>
   address(): CyberServerAddress | undefined
@@ -159,6 +162,12 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const modelCatalog = new ModelCatalogService(credentials)
   const worldPackages = new WorldPackageInstanceService(store, worldRoots)
   const authority = new WorldCharacterAuthorityService(store)
+  let publishArtifactChanged: ((worldId: string, payload: JsonObject) => void) | undefined
+  const worldArtifacts = new WorldArtifactService({
+    repository: new WorldArtifactRepository(store.database),
+    roots: worldRoots,
+    onChanged: (worldId, payload) => publishArtifactChanged?.(worldId, payload),
+  })
   const authorityBackfill = new WorldAuthorityBackfillService({
     authority: {
       get: authority.get.bind(authority),
@@ -224,6 +233,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     // something at runtime.
     resolveWorldRoot: async (worldId, employeeId) =>
       (await worldRuntimePermissions.resolve({ worldId, employeeId })).workspacePath,
+    completionHook: worldArtifacts.completionHook(),
   })
   const peerCollaboration = new PeerCollaborationService({
     store,
@@ -247,6 +257,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       runtimeStreamHub.publishWorld(event)
     },
   })
+  publishArtifactChanged = (worldId, payload) => worldRuntime.publishArtifactChanged(worldId, payload)
   publishDecisionChanged = (worldId, payload) => worldRuntime.publishDecisionChanged(worldId, payload)
   const worldMarketplace = new WorldMarketplaceService(store, worldRuntime, worldPackages)
   const ambientSlotResolver = new WorldAmbientSlotResolver({ store })
@@ -334,6 +345,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerPackageRoutes(router, { store, packageManager, packageCatalog, skillRuntime, worldMarketplace, worldPackages, worldAccess })
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
   registerWorldTraceRoutes(router, { store, trace: worldTrace, access: worldAccess })
+  registerWorldArtifactRoutes(router, { store, artifacts: worldArtifacts, access: worldAccess, authority })
   registerModelInteractionRoutes(router, { store, interactions })
   registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, turnContinuations, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, worldTrace, employeeActivity, worldPackages, worldRuntimePermissions, ownerRuntimeAccess })
   registerEmployeeRoutes(router, { store, worldAccess, authority })
@@ -359,6 +371,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   return {
     store,
     orchestrator,
+    artifacts: worldArtifacts,
     packageManager,
     async start() {
       if (closed) throw new Error('Server is closed')

@@ -14,6 +14,11 @@ export interface WorldRoot {
   restrictedFilesPath: string
   assetsPath: string
   exportsPath: string
+  /** Stable published artifact authority: exports/artifacts/<artifactId>/vN. */
+  exportsArtifactsPath: string
+  /** Hidden, run-scoped publication request area: files/.dsh/artifacts/<agentRunId>.json. */
+  dshPath: string
+  dshArtifactsPath: string
   cachePath: string
   sourcePath: string
   packagesPath: string
@@ -24,6 +29,22 @@ export class WorldRootService {
 
   constructor(stateRoot: string) {
     this.#root = resolve(stateRoot, 'worlds')
+  }
+
+  /** Resolve the only accepted publication manifest location for one run. */
+  publicationManifestPath(root: WorldRoot, agentRunId: string): string {
+    return join(root.dshArtifactsPath, `${safePathSegment(agentRunId, 'agent run')}.json`)
+  }
+
+  /** Resolve the same exact manifest seam for a run-scoped workspace. */
+  publicationManifestPathAt(workspacePath: string, agentRunId: string): string {
+    return join(workspacePath, '.dsh', 'artifacts', `${safePathSegment(agentRunId, 'agent run')}.json`)
+  }
+
+  /** Resolve a version staging location below the published artifact root. */
+  artifactVersionPath(root: WorldRoot, artifactId: string, version: number): string {
+    if (!Number.isSafeInteger(version) || version < 1) throw new Error('Artifact version must be a positive integer')
+    return join(root.exportsArtifactsPath, safePathSegment(artifactId, 'artifact'), `v${version}`)
   }
 
   async ensure(worldId: string): Promise<WorldRoot> {
@@ -40,18 +61,29 @@ export class WorldRootService {
     const filesPath = join(rootPath, 'files')
     const assetsPath = join(rootPath, 'assets')
     const exportsPath = join(rootPath, 'exports')
+    const exportsArtifactsPath = join(exportsPath, 'artifacts')
+    // Agent runtimes receive `filesPath` as their workspace root. Keep the
+    // publication seam below that same root so a run can write its exact
+    // request without escaping the workspace sandbox. WorkspaceFileService
+    // hides dot-prefixed entries, so this control directory never appears in
+    // the ordinary file browser.
+    const dshPath = join(filesPath, '.dsh')
+    const dshArtifactsPath = join(dshPath, 'artifacts')
     const cachePath = join(rootPath, 'cache')
     const sourcePath = join(rootPath, 'source')
     const packagesPath = join(sourcePath, 'packages')
     // A character with no world.files.read still needs somewhere to run. It
     // must not be the world's real files directory, and it must stay empty.
     const restrictedPath = join(cachePath, 'restricted-workspace')
-    await Promise.all([filesPath, assetsPath, exportsPath, cachePath, sourcePath, packagesPath, restrictedPath].map((path) => mkdir(path, { recursive: true })))
+    await Promise.all([filesPath, assetsPath, exportsPath, exportsArtifactsPath, dshPath, dshArtifactsPath, cachePath, sourcePath, packagesPath, restrictedPath].map((path) => mkdir(path, { recursive: true })))
     const resolved = {
       rootPath: await realpath(rootPath),
       filesPath: await realpath(filesPath),
       assetsPath: await realpath(assetsPath),
       exportsPath: await realpath(exportsPath),
+      exportsArtifactsPath: await realpath(exportsArtifactsPath),
+      dshPath: await realpath(dshPath),
+      dshArtifactsPath: await realpath(dshArtifactsPath),
       cachePath: await realpath(cachePath),
       sourcePath: await realpath(sourcePath),
       packagesPath: await realpath(packagesPath),
@@ -97,9 +129,14 @@ async function rejectSymlink(path: string): Promise<void> {
   }
 }
 
-function isPathWithin(parent: string, candidate: string): boolean {
+export function isPathWithin(parent: string, candidate: string): boolean {
   const normalize = (value: string) => value.endsWith(sep) ? value.slice(0, -1) : value
   const base = normalize(parent).toLowerCase()
   const target = normalize(candidate).toLowerCase()
   return target === base || target.startsWith(`${base}${sep}`)
+}
+
+function safePathSegment(value: string, label: string): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value)) throw new Error(`Invalid ${label} path segment`)
+  return value
 }
