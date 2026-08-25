@@ -6,6 +6,7 @@ import type {
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { HttpError } from '../http/errors.js'
+import { mapPermissionDecisionError } from '../http/world-permission-errors.js'
 import type { Router } from '../http/router.js'
 import {
   nonNegativeInteger,
@@ -124,7 +125,11 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     // turn. The approval response may continue its original WorkTurn, but it
     // never creates a second one.
     if (employeeIds.length === 1) {
-      const approval = await turnContinuations.tryDecideWorldPermissionText({
+      // A refusal from the authority layer is a legitimate answer to the user
+      // ("a member cannot hold a management permission"), not a server fault.
+      // This call sits outside the handler's main try block, so it needs its
+      // own mapping or it escapes as an opaque 500.
+      const approval = await decideTextApprovalSafely(turnContinuations, {
         worldId: world.id,
         employeeId: employeeIds[0]!,
         text: prompt,
@@ -523,4 +528,26 @@ function mentionedEmployeeIds(prompt: string, employees: Array<{ id: string; dis
     .filter((employee) => prompt.includes(`@${employee.displayName}`))
     .sort((left, right) => prompt.indexOf(`@${left.displayName}`) - prompt.indexOf(`@${right.displayName}`))
     .map((employee) => employee.id)
+}
+
+
+/**
+ * Decides a chat-typed world permission answer without letting a legitimate
+ * refusal escape as an internal error.
+ *
+ * This call happens before the handler's own try block, so the authority
+ * layer's refusals — "a member cannot hold a management permission", an
+ * expired or already-decided request — reached the client as HTTP 500. The
+ * inline card path has always mapped them to 409; this makes the two agree.
+ */
+async function decideTextApprovalSafely(
+  turnContinuations: TurnAwareApprovalContinuationService,
+  input: Parameters<TurnAwareApprovalContinuationService['tryDecideWorldPermissionText']>[0],
+): ReturnType<TurnAwareApprovalContinuationService['tryDecideWorldPermissionText']> {
+  try {
+    return await turnContinuations.tryDecideWorldPermissionText(input)
+  } catch (error) {
+    const mapped = mapPermissionDecisionError(error)
+    throw mapped instanceof HttpError ? mapped : error
+  }
 }

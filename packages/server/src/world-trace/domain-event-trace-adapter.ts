@@ -130,6 +130,7 @@ export class DomainEventTraceAdapter implements WorldTraceAdapter<'domain-event'
 function presentDomainEvent(type: DomainEventType, payload: Record<string, unknown>): DomainPresentation | undefined {
   switch (type) {
     case 'world.created': return { category: 'world', status: 'success', summary: '世界已创建' }
+    case 'world.renamed': return { category: 'world', status: 'success', summary: worldRenameSummary(payload) }
     case 'world.character.authority.changed': return { category: 'world', status: 'success', summary: '角色世界职权已更新' }
     case 'world.creation.rolled-back': return { category: 'world', status: 'failed', summary: '世界创建已回滚' }
     case 'world.entered': return { category: 'world', status: 'info', summary: '已进入世界' }
@@ -200,6 +201,13 @@ function presentDomainEvent(type: DomainEventType, payload: Record<string, unkno
     case 'world.runtime.snapshot.saved':
       return undefined
   }
+}
+
+function worldRenameSummary(payload: Record<string, unknown>): string {
+  const previous = stringField(payload, 'previousName')
+  const next = stringField(payload, 'name')
+  if (!next) return '世界已重命名'
+  return previous ? `世界已重命名：${previous} → ${next}` : `世界已重命名为「${next}」`
 }
 
 function runtimeTurnKind(type: DomainEventType): 'turn.started' | 'turn.completed' | 'turn.failed' {

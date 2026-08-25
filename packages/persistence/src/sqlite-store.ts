@@ -97,6 +97,13 @@ export interface CreateWorkspaceInput {
   actorId?: string
 }
 
+export interface RenameWorldInput {
+  worldId: string
+  name: string
+  actorId?: string
+  actorKind?: ParticipantKind
+}
+
 export interface CreateWorldInput {
   workspaceId: string
   name: string
@@ -1247,6 +1254,36 @@ export class SqliteStore {
           )
           .all(workspaceId, kind)
     return rows.map(mapLocalAsset)
+  }
+
+  /**
+   * Renames a world as an audited domain fact.
+   *
+   * World management actions reach this through the host seam; skill adapters
+   * never write SQL, so the rename keeps the same validation, transaction and
+   * event trail as creation.
+   */
+  renameWorld(input: RenameWorldInput): World {
+    this.#assertWritable()
+    const world = this.#requireWorld(input.worldId)
+    const name = input.name.trim()
+    if (!name) throw new PersistenceError('World name cannot be empty')
+    if (name.length > 120) throw new PersistenceError('World name is too long')
+    const now = this.#clock()
+    return this.#transaction(() => {
+      this.database
+        .prepare('UPDATE worlds SET name = ?, updated_at = ? WHERE id = ?')
+        .run(name, now, world.id)
+      this.#appendEvent({
+        workspaceId: world.workspaceId,
+        worldId: world.id,
+        type: 'world.renamed',
+        actorId: input.actorId ?? 'owner',
+        actorKind: input.actorKind ?? 'owner',
+        payload: { worldId: world.id, previousName: world.name, name },
+      })
+      return { ...world, name, updatedAt: now }
+    })
   }
 
   createWorld(input: CreateWorldInput): World {

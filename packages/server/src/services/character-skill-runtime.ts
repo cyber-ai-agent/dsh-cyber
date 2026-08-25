@@ -493,7 +493,14 @@ export class CharacterSkillRuntime {
     action.executionState = 'settled'
     action.executionCompletedAt = now.toISOString()
     action.updatedAt = now.toISOString()
-    if (worldPermission === 'granted' && this.#authorizationSource(action) === 'world-authority') {
+    // A one-time decision authorises one successful action, not one attempt.
+    // Spending it on a failure makes the user re-approve work they already
+    // approved, and leaves the audit trail claiming the grant was used.
+    if (
+      action.status === 'executed'
+      && worldPermission === 'granted'
+      && this.#authorizationSource(action) === 'world-authority'
+    ) {
       const check = await this.#worldPermissions?.check(action)
       if (check?.request?.decisionScope === 'once' && check.request.status === 'approved') {
         await this.#worldPermissions?.consumeOnce(check.request.id, now)

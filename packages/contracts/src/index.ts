@@ -815,6 +815,7 @@ export interface WorkMessage {
 export const DOMAIN_EVENT_TYPES = [
   'workspace.created',
   'world.created',
+  'world.renamed',
   'world.administrator.changed',
   'world.character.authority.changed',
   'world.creation.rolled-back',
