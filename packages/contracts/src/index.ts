@@ -39,6 +39,30 @@ export interface ApprovalRequest {
   decidedBy?: string
 }
 
+/**
+ * A pending approval as the user must see it before deciding.
+ *
+ * The request itself only carries a one-line summary, which is not enough to
+ * consent to a real-world side effect: the decision needs the adapter, the
+ * concrete call and its parameters. The subject action is therefore resolved
+ * server-side and delivered with the request.
+ */
+export interface ApprovalRequestView {
+  request: ApprovalRequest
+  characterName?: string
+  subject?: {
+    id: string
+    skillId: string
+    adapterId: string
+    action: string
+    target: string
+    label: string
+    risk: string
+    parameters: JsonObject
+    scheduledFor?: IsoTimestamp
+  }
+}
+
 export interface ApprovalPolicy {
   id: string
   workspaceId: string
