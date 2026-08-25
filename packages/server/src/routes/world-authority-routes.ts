@@ -7,6 +7,7 @@ import { RECOMMENDED_ADMIN_PERMISSIONS } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { HttpError } from '../http/errors.js'
+import { mapPermissionDecisionError } from '../http/world-permission-errors.js'
 import type { Router } from '../http/router.js'
 import { readJson, requiredEnum, requiredString } from '../http/request.js'
 import { writeJson } from '../http/response.js'
@@ -60,17 +61,28 @@ export function registerWorldAuthorityRoutes(
     requireEmployeeInWorld(store, world.id, params[1]!)
     const body = await readJson(request)
     const role = requiredEnum<WorldCharacterRole>(body, 'role', ['member', 'administrator'])
-    const permissionGrants = body.permissionGrants === undefined && role === 'administrator'
+    // An administrator with no permissions cannot administrate. The recommended
+    // set stands in whether the caller omitted the field or sent an empty
+    // array — the second case used to persist a powerless administrator.
+    const requested = body.permissionGrants === undefined ? [] : requiredPermissions(body, 'permissionGrants')
+    const permissionGrants = role === 'administrator' && requested.length === 0
       ? [...RECOMMENDED_ADMIN_PERMISSIONS]
-      : requiredPermissions(body, 'permissionGrants')
-    const value = authority.updateAuthority({
-      worldId: world.id,
-      targetEmployeeId: params[1]!,
-      actor: OWNER_ACTOR,
-      role,
-      permissionGrants,
-      reason: requiredString(body, 'reason'),
-    })
+      : requested
+    // "This character must be an administrator first" is an answer the editor
+    // can act on — it offers promote-and-grant — not a server fault.
+    let value
+    try {
+      value = authority.updateAuthority({
+        worldId: world.id,
+        targetEmployeeId: params[1]!,
+        actor: OWNER_ACTOR,
+        role,
+        permissionGrants,
+        reason: requiredString(body, 'reason'),
+      })
+    } catch (error) {
+      throw mapPermissionDecisionError(error)
+    }
     writeJson(response, 200, { authority: value })
   })
 
@@ -194,22 +206,3 @@ function listPendingApprovalViews(
   })
 }
 
-function mapPermissionDecisionError(error: unknown): Error {
-  if (error instanceof WorldPermissionRequestExpiredError) {
-    return new HttpError(409, 'world_permission_request_expired', error.message)
-  }
-  if (error instanceof WorldPermissionRequestConflictError) {
-    return new HttpError(409, 'world_permission_request_already_decided', error.message)
-  }
-  if (error instanceof WorldPermissionGrantRejectedError) {
-    return new HttpError(409, 'world_permission_grant_rejected', error.message)
-  }
-  const code = error instanceof Error ? (error as Error & { code?: unknown }).code : undefined
-  if (code === 'world_permission_request_expired') {
-    return new HttpError(409, 'world_permission_request_expired', '世界权限请求已过期')
-  }
-  if (code === 'world_permission_request_already_decided') {
-    return new HttpError(409, 'world_permission_request_already_decided', '世界权限请求已经处理')
-  }
-  return error instanceof Error ? error : new Error(String(error))
-}

@@ -165,6 +165,14 @@ export interface UpdateWorldCharacterAuthorityInput {
   role: WorldCharacterRole
   permissionGrants: WorldCharacterPermission[]
   reason: string
+  /**
+   * Allows a demotion to drop management permissions.
+   *
+   * Every other path refuses that combination instead of stripping silently,
+   * because "grant a member a management permission" is a request with a real
+   * answer — promote first — not something to quietly half-perform.
+   */
+  allowManagementStrip?: boolean
 }
 
 /** Alias kept for callers that use the longer API-oriented name. */
@@ -189,7 +197,16 @@ export interface WorldPermissionRequest {
   workspaceId: string
   worldId: string
   employeeId: string
-  workTurnId: string
+  /**
+   * The turn this decision unblocked, while that turn still exists.
+   *
+   * Settled turns are prunable telemetry; the decision is not. It becomes
+   * undefined once the turn is swept, which is why `sessionId` and
+   * `skillActionId` carry the attribution.
+   */
+  workTurnId?: string
+  /** The conversation the decision belongs to, captured when it was created. */
+  sessionId?: string
   skillActionId: string
   permission: WorldCharacterPermission
   status: WorldPermissionRequestStatus

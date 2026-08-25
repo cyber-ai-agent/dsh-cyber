@@ -1,6 +1,6 @@
 import type { WorldCharacterAuthority } from './world-authority.js'
 
-export const CYBER_SCHEMA_VERSION = 21 as const
+export const CYBER_SCHEMA_VERSION = 22 as const
 
 export type IsoTimestamp = string
 export type JsonPrimitive = boolean | number | string | null
@@ -815,6 +815,7 @@ export interface WorkMessage {
 export const DOMAIN_EVENT_TYPES = [
   'workspace.created',
   'world.created',
+  'world.renamed',
   'world.administrator.changed',
   'world.character.authority.changed',
   'world.creation.rolled-back',

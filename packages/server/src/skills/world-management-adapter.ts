@@ -1,3 +1,4 @@
+import type { JsonObject } from '@dsh-cyber/contracts'
 import type {
   CharacterSkillAction,
   CharacterSkillDescriptor,
@@ -17,7 +18,11 @@ import type {
   CharacterSkillMatchContext,
   CharacterSkillPreflightResult,
 } from './skill-adapter.js'
-import { WorldManagementIntentParser, type WorldManagementCharacterRef } from '../services/world-management-intent-parser.js'
+import {
+  WorldManagementIntentParser,
+  type WorldAuthorityOperation,
+  type WorldManagementCharacterRef,
+} from '../services/world-management-intent-parser.js'
 import type { WorldAuthorityPort } from '../services/world-permission-request-service.js'
 
 export interface WorldManagementSettingsPort {
@@ -27,25 +32,34 @@ export interface WorldManagementSettingsPort {
   save?(worldId: string, value: Record<string, unknown>): Promise<Record<string, unknown>>
 }
 
+/**
+ * Everything this adapter publishes, it must be able to perform.
+ *
+ * Each member here backs a descriptor below, so they are required rather than
+ * optional: an incomplete composition root is a compile error instead of a
+ * runtime "服务不可用" the user discovers. `world.rename` and
+ * `world.characters.update` shipped advertised-but-unwired precisely because
+ * these were optional.
+ */
 export interface WorldManagementHost {
-  listCharacters?(worldId: string): WorldManagementCharacterRef[]
-  settings?: WorldManagementSettingsPort
-  authority?: WorldAuthorityPort
+  listCharacters(worldId: string): WorldManagementCharacterRef[]
+  settings: WorldManagementSettingsPort
+  authority: WorldAuthorityPort
   /** The route/session supplies the real owner or delegating employee actor. */
-  managementActor?(action: CharacterSkillAction): WorldAuthorityActor
-  renameWorld?(worldId: string, name: string): Promise<void> | void
-  updateCharacter?(worldId: string, employeeId: string, patch: Record<string, unknown>): Promise<void> | void
-  listPackages?(worldId: string): Promise<unknown> | unknown
-  instantiatePackage?(worldId: string, packageId: string): Promise<void> | void
-  disablePackage?(worldId: string, packageId: string): Promise<void> | void
-  readModel?(worldId: string): Promise<unknown> | unknown
-  assignModel?(worldId: string, modelProfileId: string): Promise<void> | void
-  getWorld?(worldId: string): { id: string; workspaceId: string } | undefined
+  managementActor(action: CharacterSkillAction): WorldAuthorityActor
+  renameWorld(worldId: string, name: string): Promise<void> | void
+  updateCharacter(worldId: string, employeeId: string, patch: Record<string, unknown>): Promise<void> | void
+  listPackages(worldId: string): Promise<unknown> | unknown
+  instantiatePackage(worldId: string, packageId: string): Promise<void> | void
+  disablePackage(worldId: string, packageId: string): Promise<void> | void
+  readModel(worldId: string): Promise<unknown> | unknown
+  assignModel(worldId: string, modelProfileId: string): Promise<void> | void
+  getWorld(worldId: string): { id: string; workspaceId: string } | undefined
 }
 
 const AUTHORITY_SOURCE = 'world-authority' as const
 
-const descriptors: readonly CharacterSkillDescriptor[] = [
+export const WORLD_MANAGEMENT_DESCRIPTORS: readonly CharacterSkillDescriptor[] = [
   descriptor('builtin.world.settings.read', '读取世界设置', '查看当前世界的受信任设置快照', 'read', 'world.settings.read'),
   descriptor('builtin.world.settings.update', '修改世界设置', '修改当前世界场景、世界观或称呼', 'write-local', 'world.settings.write'),
   descriptor('builtin.world.rename', '重命名世界', '修改当前世界名称', 'write-local', 'world.settings.write'),
@@ -60,7 +74,49 @@ const descriptors: readonly CharacterSkillDescriptor[] = [
   descriptor('builtin.world.model.assign', '修改世界模型', '修改当前世界默认模型', 'write-local', 'world.model.assign'),
 ]
 
+const descriptors = WORLD_MANAGEMENT_DESCRIPTORS
 const descriptorBySkillId = new Map(descriptors.map((item) => [item.id, item]))
+
+/**
+ * Which host member each published skill needs. A descriptor missing from this
+ * table, or a table entry the host does not satisfy, is a broken promise; a
+ * contract test asserts both directions.
+ */
+export const WORLD_MANAGEMENT_REQUIREMENTS: Readonly<Record<string, keyof WorldManagementHost>> = {
+  'builtin.world.settings.read': 'settings',
+  'builtin.world.settings.update': 'settings',
+  'builtin.world.rename': 'renameWorld',
+  'builtin.world.characters.list': 'listCharacters',
+  'builtin.world.characters.update': 'updateCharacter',
+  'builtin.world.authority.read': 'authority',
+  'builtin.world.authority.update': 'authority',
+  'builtin.world.packages.list': 'listPackages',
+  'builtin.world.packages.instantiate': 'instantiatePackage',
+  'builtin.world.packages.disable': 'disablePackage',
+  'builtin.world.model.read': 'readModel',
+  'builtin.world.model.assign': 'assignModel',
+}
+
+/** Action names the execute switch handles, kept in step with the descriptors. */
+export const WORLD_MANAGEMENT_HANDLED_ACTIONS: readonly string[] = [
+  'world.settings.read',
+  'world.settings.update',
+  'world.rename',
+  'world.characters.list',
+  'world.characters.update',
+  'world.authority.read',
+  'world.authority.update',
+  'world.packages.list',
+  'world.packages.instantiate',
+  'world.packages.disable',
+  'world.model.read',
+  'world.model.assign',
+]
+
+/** Descriptor ids are the action name behind a `builtin.` prefix. */
+export function worldManagementAction(skillId: string): string {
+  return skillId.replace(/^builtin\./, '')
+}
 
 function descriptor(
   id: string,
@@ -182,7 +238,10 @@ export class WorldManagementAdapter implements CharacterSkillAdapter {
   }
 
   #listCharacters(action: CharacterSkillAction): CharacterSkillExecutionResult {
-    const list = this.#host.listCharacters?.(action.worldId) ?? []
+    // Reporting "0 characters" when the capability is absent is worse than
+    // failing: it is a confident wrong answer the model will repeat.
+    if (this.#host.listCharacters === undefined) return { status: 'failed', detail: '角色列表服务不可用' }
+    const list = this.#host.listCharacters(action.worldId)
     return { status: 'executed', detail: `当前世界共有 ${list.length} 个可用角色` }
   }
 
@@ -208,22 +267,37 @@ export class WorldManagementAdapter implements CharacterSkillAdapter {
     if (authority?.updateAuthority === undefined || employeeId === undefined) return { status: 'failed', detail: '世界权限管理服务不可用或目标无效' }
     const current = await authority.get(action.worldId, employeeId)
     if (current === undefined) return { status: 'failed', detail: '未找到目标角色的世界权限' }
-    const role = stringParameter(action.parameters, 'role') as WorldCharacterRole | undefined
+    const operation = authorityOperation(action.parameters, current.role)
     const requested = arrayParameter(action.parameters, 'permissionGrants')
     const remove = arrayParameter(action.parameters, 'removePermissions')
-    const permissions = role === 'administrator' && requested.length === 0
-      ? [...RECOMMENDED_ADMIN_PERMISSIONS]
-      : requested.length > 0 ? requested : current.permissionGrants
-    const next = permissions.filter((permission) => !remove.includes(permission))
-    await authority.updateAuthority({
+    // The role only changes when the user asked for it. A grant or a revoke
+    // carries the current role through untouched, and adds to or subtracts
+    // from the grants that already exist rather than replacing the set — the
+    // replacement semantics used to demote administrators and erase every
+    // permission the utterance did not happen to name.
+    const base = operation === 'promote'
+      ? [...current.permissionGrants, ...RECOMMENDED_ADMIN_PERMISSIONS, ...requested]
+      : operation === 'revoke'
+        ? current.permissionGrants
+        : [...current.permissionGrants, ...requested]
+    const next = [...new Set(base)].filter((permission) => !remove.includes(permission))
+    const role: WorldCharacterRole = operation === 'promote'
+      ? 'administrator'
+      : operation === 'demote' ? 'member' : current.role
+    const saved = await authority.updateAuthority({
       worldId: action.worldId,
       targetEmployeeId: employeeId,
       actor: this.#host.managementActor?.(action) ?? { kind: 'employee', id: action.characterId },
-      role: role === 'administrator' || role === 'member' ? role : current.role,
+      role,
       permissionGrants: next,
       reason: action.label,
+      ...(operation === 'demote' ? { allowManagementStrip: true } : {}),
     })
-    return { status: 'executed', detail: `已更新角色的世界身份与权限（${next.length} 项）` }
+    // Report what was persisted, not what was requested: the two diverged
+    // whenever the service filtered or refused something.
+    const persisted = saved?.permissionGrants ?? next
+    const roleLabel = (saved?.role ?? role) === 'administrator' ? '世界管理员' : '普通角色'
+    return { status: 'executed', detail: `角色当前为${roleLabel}，持有 ${persisted.length} 项世界权限` }
   }
 
   async #listPackages(action: CharacterSkillAction): Promise<CharacterSkillExecutionResult> {
@@ -287,6 +361,21 @@ function patchMatches(value: Record<string, unknown>, patch: Record<string, unkn
     }
     return actual === expected
   })
+}
+
+/**
+ * Reads the requested operation, tolerating the older role-shaped payload.
+ *
+ * Durable actions written before operations existed still carry `role`, and a
+ * restart must be able to finish them.
+ */
+function authorityOperation(parameters: JsonObject, currentRole: WorldCharacterRole): WorldAuthorityOperation {
+  const operation = stringParameter(parameters, 'operation')
+  if (operation === 'promote' || operation === 'demote' || operation === 'grant' || operation === 'revoke') return operation
+  const role = stringParameter(parameters, 'role')
+  if (role === 'administrator') return 'promote'
+  if (role === 'member' && currentRole === 'administrator') return 'demote'
+  return arrayParameter(parameters, 'removePermissions').length > 0 ? 'revoke' : 'grant'
 }
 
 function safeSummary(value: unknown): string {

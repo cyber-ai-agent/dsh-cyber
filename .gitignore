@@ -21,6 +21,10 @@ data/
 *.sqlite-shm
 *.sqlite-wal
 
+# IDE workspace settings
+.idea/
+*.iml
+
 # Local product planning (never commit)
 .private/
 .ui-craft/

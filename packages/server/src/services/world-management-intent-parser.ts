@@ -12,6 +12,9 @@ export interface WorldManagementIntentContext {
   characters: readonly WorldManagementCharacterRef[]
 }
 
+/** What a permission utterance asks the authority layer to do. */
+export type WorldAuthorityOperation = 'promote' | 'demote' | 'grant' | 'revoke'
+
 export type WorldManagementProposalKind =
   | 'read-authority'
   | 'settings-patch'
@@ -76,18 +79,22 @@ export class WorldManagementIntentParser {
           context.worldId,
           employeeId,
           displayName,
-          'administrator',
+          'promote',
           permission?.grants ?? [],
           permission === undefined ? '将角色设为世界管理员' : '将角色设为管理员并更新组合权限',
           permission?.remove ?? [],
         )]
       }
       if (/取消.*管理员|撤销.*管理员|降为普通角色|取消.*管理身份/u.test(text)) {
-        return [this.authority(context.worldId, employeeId, displayName, 'member', [], '取消角色的世界管理员身份')]
+        return [this.authority(context.worldId, employeeId, displayName, 'demote', [], '取消角色的世界管理员身份')]
       }
       const permission = parsePermissionMutation(text)
       if (permission !== undefined) {
-        return [this.authority(context.worldId, employeeId, displayName, 'member', permission.grants, permission.label, permission.remove)]
+        // A permission edit says nothing about the role. Emitting `member`
+        // here is what demoted administrators and erased every grant the user
+        // did not happen to mention.
+        const operation = permission.grants.length > 0 ? 'grant' : 'revoke'
+        return [this.authority(context.worldId, employeeId, displayName, operation, permission.grants, permission.label, permission.remove)]
       }
       const identity = capture(text, new RegExp(`把${escapeRegExp(displayName)}的身份改成\\s*[「“"']?(.+?)[」”"']?$`, 'u'))
       if (identity !== undefined) {
@@ -126,7 +133,7 @@ export class WorldManagementIntentParser {
     worldId: string,
     employeeId: string,
     displayName: string,
-    role: 'member' | 'administrator',
+    operation: WorldAuthorityOperation,
     grants: WorldCharacterPermission[],
     label: string,
     remove: WorldCharacterPermission[] = [],
@@ -134,7 +141,7 @@ export class WorldManagementIntentParser {
     return {
       kind: 'authority-update', skillId: 'builtin.world.authority.update', action: 'world.authority.update',
       target: `character:${employeeId}`, label, requiredWorldPermission: 'world.permissions.manage',
-      parameters: { employeeId, displayName, role, permissionGrants: grants, removePermissions: remove },
+      parameters: { employeeId, displayName, operation, permissionGrants: grants, removePermissions: remove },
     }
   }
 
@@ -175,7 +182,9 @@ function parsePermissionMutation(text: string): { grants: WorldCharacterPermissi
   return {
     grants: remove ? [] : permissions,
     remove: remove ? permissions : [],
-    label: permissions.length === 1 ? '更新世界权限' : '更新组合世界权限',
+    label: remove
+      ? (permissions.length === 1 ? '撤销世界权限' : '撤销组合世界权限')
+      : (permissions.length === 1 ? '新增世界权限' : '新增组合世界权限'),
   }
 }
 

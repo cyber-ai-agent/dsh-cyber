@@ -169,3 +169,37 @@ World Administrator 不等于 Application Administrator，也不等于 Approval 
 - `packages/server/src/skills/world-management-adapter.ts`
 - `packages/server/src/services/world-runtime-permission-resolver.ts`
 - `packages/server/src/routes/world-authority-routes.ts`
+
+
+## 权限变更语义（V2 稳定化）
+
+权限操作是**增量 patch**，不是整体替换：
+
+| 操作 | 身份 | 权限 |
+|---|---|---|
+| `grant` | 不变 | 在现有基础上新增 |
+| `revoke` | 不变 | 只移除指定项 |
+| `promote` | → administrator | 现有 ∪ 推荐管理员集 ∪ 显式新增 |
+| `demote` | → member | 保留成员可持有的授权，去掉管理类 |
+
+自然语言解析器只产出 operation，**永不产出 role**。此前「给老王世界设置权限」会带上 `role: 'member'`，把管理员降级并清空全部授权——一句只谈权限的话改变了身份。
+
+给普通成员授予管理类权限返回结构化拒绝（`requires_administrator_promotion`，HTTP 409）并列出被拒的权限，由调用方决定「设为管理员并授予」还是取消。此前是静默过滤，而且 added/removed 在过滤之后计算，所以审计账本记录的是一次成功的较小授权，看不出发生过拒绝。
+
+## 决策审计保留
+
+`world_permission_requests.work_turn_id` 从 `NOT NULL … ON DELETE CASCADE` 改为可空 + `ON DELETE SET NULL`（migration 22），并持久化 `session_id`。
+
+已结束的 WorkTurn 是可清理的运行遥测；**授权决策不是**。`skill_action_id` 仍是硬 CASCADE —— 一条决策绝不能比它授权的那个确切执行事实活得更久。
+
+## 文件访问
+
+```text
+none  → 空的受管工作区（cache/restricted-workspace），read-only
+read  → 真实 worlds/<id>/files，read-only
+write → 真实 worlds/<id>/files，workspace-write
+```
+
+此前无论有没有 `world.files.read`，运行时拿到的都是同一个真实目录和 read-only 模式——这个权限在运行时没有任何效果。workspace seam 因此改为按角色解析而不是按世界。
+
+管理员权限本身永远不会解析成 `danger-full-access`。

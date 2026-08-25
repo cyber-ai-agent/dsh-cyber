@@ -6,6 +6,7 @@ import type {
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { HttpError } from '../http/errors.js'
+import { mapPermissionDecisionError } from '../http/world-permission-errors.js'
 import type { Router } from '../http/router.js'
 import {
   nonNegativeInteger,
@@ -121,12 +122,18 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     }
 
     // Settle an existing narrow approval phrase before tracing or beginning a
+    const requestedSessionId = optionalString(body.sessionId)
     // turn. The approval response may continue its original WorkTurn, but it
     // never creates a second one.
     if (employeeIds.length === 1) {
-      const approval = await turnContinuations.tryDecideWorldPermissionText({
+      // A refusal from the authority layer is a legitimate answer to the user
+      // ("a member cannot hold a management permission"), not a server fault.
+      // This call sits outside the handler's main try block, so it needs its
+      // own mapping or it escapes as an opaque 500.
+      const approval = await decideTextApprovalSafely(turnContinuations, {
         worldId: world.id,
         employeeId: employeeIds[0]!,
+        ...(requestedSessionId === undefined ? {} : { sessionId: requestedSessionId }),
         text: prompt,
         decidedBy: 'local-user',
         actor: { kind: 'owner', id: 'local-user' },
@@ -137,8 +144,13 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
           writeJson(response, 200, { ...approval.continuation, permissionRequest: approval.request })
           return
         }
-        const originalTurn = store.getWorkTurn(approval.request.workTurnId)
-        const originalSession = originalTurn === undefined ? undefined : store.getSession(originalTurn.sessionId)
+        // A decision whose turn was already pruned can still be shown, but it
+        // has nothing left to continue.
+        const originalTurn = approval.request.workTurnId === undefined
+          ? undefined
+          : store.getWorkTurn(approval.request.workTurnId)
+        const sessionId = originalTurn?.sessionId ?? approval.request.sessionId
+        const originalSession = sessionId === undefined ? undefined : store.getSession(sessionId)
         if (originalTurn === undefined || originalSession === undefined) {
           throw new HttpError(409, 'world_permission_continuation_unavailable', '原工作回合无法继续')
         }
@@ -186,7 +198,6 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
       ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
     }
     const title = optionalString(body.title)
-    const requestedSessionId = optionalString(body.sessionId)
     const traceCheckpoint = await createTraceCheckpoint(world.id, worldTrace)
     try {
     let result
@@ -523,4 +534,26 @@ function mentionedEmployeeIds(prompt: string, employees: Array<{ id: string; dis
     .filter((employee) => prompt.includes(`@${employee.displayName}`))
     .sort((left, right) => prompt.indexOf(`@${left.displayName}`) - prompt.indexOf(`@${right.displayName}`))
     .map((employee) => employee.id)
+}
+
+
+/**
+ * Decides a chat-typed world permission answer without letting a legitimate
+ * refusal escape as an internal error.
+ *
+ * This call happens before the handler's own try block, so the authority
+ * layer's refusals — "a member cannot hold a management permission", an
+ * expired or already-decided request — reached the client as HTTP 500. The
+ * inline card path has always mapped them to 409; this makes the two agree.
+ */
+async function decideTextApprovalSafely(
+  turnContinuations: TurnAwareApprovalContinuationService,
+  input: Parameters<TurnAwareApprovalContinuationService['tryDecideWorldPermissionText']>[0],
+): ReturnType<TurnAwareApprovalContinuationService['tryDecideWorldPermissionText']> {
+  try {
+    return await turnContinuations.tryDecideWorldPermissionText(input)
+  } catch (error) {
+    const mapped = mapPermissionDecisionError(error)
+    throw mapped instanceof HttpError ? mapped : error
+  }
 }

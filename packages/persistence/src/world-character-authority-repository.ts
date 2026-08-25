@@ -77,6 +77,14 @@ export class WorldCharacterAuthorityRepository {
     this.#idFactory = options.idFactory ?? randomUUID
   }
 
+  /** The conversation a work turn belongs to, captured when a request is made. */
+  #sessionOf(workTurnId: string): string | null {
+    const row = this.#database
+      .prepare('SELECT session_id FROM work_turns WHERE id = ?')
+      .get(workTurnId) as { session_id?: string } | undefined
+    return row?.session_id ?? null
+  }
+
   get(worldId: string, employeeId: string): WorldCharacterAuthority | undefined {
     const row = this.#database
       .prepare('SELECT * FROM world_character_authorities WHERE world_id = ? AND employee_id = ?')
@@ -242,16 +250,20 @@ export class WorldCharacterAuthorityRepository {
     this.#database
       .prepare(
         `INSERT INTO world_permission_requests
-         (id, workspace_id, world_id, employee_id, work_turn_id, skill_action_id,
+         (id, workspace_id, world_id, employee_id, session_id, work_turn_id, skill_action_id,
           permission, status, decision_scope, decided_by, decided_at, consumed_at,
           created_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, NULL, NULL, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, NULL, NULL, ?, ?)`,
       )
       .run(
         id,
         input.workspaceId,
         input.worldId,
         employee.id,
+        // Captured durably: a decision must stay attributable to its
+        // conversation after the work turn has been pruned, and the client
+        // needs it to show a card only in the session it belongs to.
+        this.#sessionOf(input.workTurnId),
         input.workTurnId,
         input.skillActionId,
         input.permission,
@@ -593,7 +605,11 @@ function mapPermissionRequest(row: unknown): WorldPermissionRequest {
     workspaceId: stringColumn(value, 'workspace_id'),
     worldId: stringColumn(value, 'world_id'),
     employeeId: stringColumn(value, 'employee_id'),
-    workTurnId: stringColumn(value, 'work_turn_id'),
+    // The turn edge is nullable so a retention sweep can prune settled
+    // telemetry without deleting the decision. The session and the action
+    // keep the record attributable after the turn is gone.
+    ...optionalString(value, 'work_turn_id', 'workTurnId'),
+    ...optionalString(value, 'session_id', 'sessionId'),
     skillActionId: stringColumn(value, 'skill_action_id'),
     permission,
     status: status as WorldPermissionRequestStatus,

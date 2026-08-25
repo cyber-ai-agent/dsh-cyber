@@ -135,9 +135,18 @@ export class TurnAwareApprovalContinuationService {
    * a second WorkTurn. Ambiguous (zero or multiple) pending requests are
    * intentionally left untouched so the caller can ask the user to choose.
    */
+  /** Resolves the conversation a request belongs to, after a prune if needed. */
+  #sessionOf(request: WorldPermissionRequest): string | undefined {
+    if (request.sessionId !== undefined) return request.sessionId
+    if (request.workTurnId === undefined) return undefined
+    return this.#store.getWorkTurn(request.workTurnId)?.sessionId
+  }
+
   async tryDecideWorldPermissionText(input: {
     worldId: string
     employeeId: string
+    /** Scopes the decision to the conversation the user is actually looking at. */
+    sessionId?: string
     text: string
     decidedBy: string
     actor?: WorldAuthorityActor
@@ -150,8 +159,14 @@ export class TurnAwareApprovalContinuationService {
     if (input.source !== undefined && input.source !== 'raw-user') return { handled: false }
     const decision = parseWorldPermissionDecisionText(input.text)
     if (decision === undefined || this.#worldPermissions === undefined) return { handled: false }
+    // A typed "批准" answers the request in front of the user, not whichever
+    // one this character happens to have open somewhere else. Filtering on
+    // world + character alone let a decision in one conversation settle a
+    // pending request belonging to another.
     const pending = (await this.#worldPermissions.listPending(input.worldId))
       .filter((request) => request.employeeId === input.employeeId)
+      .filter((request) => input.sessionId === undefined || this.#sessionOf(request) === input.sessionId)
+    // Zero or several is not something to guess at.
     if (pending.length !== 1) return { handled: false }
     const decided = await this.decideWorldPermission({
       requestId: pending[0]!.id,
