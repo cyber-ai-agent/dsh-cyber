@@ -178,25 +178,37 @@ describe('world file access', () => {
 describe('pending decisions are announced, not polled for', () => {
   it('publishes a decision envelope on change and none per streamed token', async () => {
     const { origin, server, world, characterId } = await start()
-    const envelopes: Array<{ kind: string; worldId: string }> = []
+    const envelopes: Array<{
+      kind: string
+      worldId: string
+      payload?: { requestId?: string; status?: string }
+    }> = []
+    let targetRequestId: string | undefined
     // Watch the live stream the client subscribes to.
     const response = await fetch(`${origin}/api/worlds/${world.id}/live`, { headers: { Accept: 'text/event-stream' } })
     const reader = response.body!.getReader()
     const decoder = new TextDecoder()
     const read = (async () => {
       const deadline = Date.now() + 4_000
-      while (Date.now() < deadline) {
+      while (Date.now() < deadline && !envelopes.some((item) => item.payload?.requestId === targetRequestId && item.payload.status === 'rejected')) {
         const chunk = await Promise.race([
           reader.read(),
-          new Promise<{ done: true; value: undefined }>((resolvePromise) =>
-            setTimeout(() => resolvePromise({ done: true, value: undefined }), 600)),
+          new Promise<{ timedOut: true }>((resolvePromise) =>
+            setTimeout(() => resolvePromise({ timedOut: true }), 600)),
         ])
+        if ('timedOut' in chunk) continue
         if (chunk.done || chunk.value === undefined) break
         for (const line of decoder.decode(chunk.value).split('\n')) {
           if (!line.startsWith('data:')) continue
           try {
-            const envelope = JSON.parse(line.slice(5).trim()) as { kind?: string; worldId?: string }
-            if (envelope.kind !== undefined) envelopes.push({ kind: envelope.kind, worldId: envelope.worldId ?? '' })
+            const envelope = JSON.parse(line.slice(5).trim()) as {
+              kind?: string
+              worldId?: string
+              payload?: { requestId?: string; status?: string }
+            }
+            if (envelope.kind !== undefined) {
+              envelopes.push({ kind: envelope.kind, worldId: envelope.worldId ?? '', payload: envelope.payload })
+            }
           } catch {
             // Non-JSON keep-alive lines.
           }
@@ -210,11 +222,18 @@ describe('pending decisions are announced, not polled for', () => {
       prompt: '把这个世界改名为 通知测试世界',
       employeeIds: [characterId],
     }))
+    const pending = await json(origin, `/api/worlds/${world.id}/permission-requests`)
+    const request = (pending.body.permissionRequests ?? pending.body.requests ?? [])[0] as { id?: string } | undefined
+    expect(request?.id, '应当创建待处理的世界权限请求').toBeDefined()
+    targetRequestId = request!.id
+    const rejected = await json(origin, `/api/world-permission-requests/${request!.id}/decision`, send('POST', { decision: 'reject' }))
+    expect(rejected.response.status).toBe(200)
     await read
     await reader.cancel().catch(() => undefined)
 
     const decisions = envelopes.filter((item) => item.kind === 'world-decision')
-    expect(decisions.length, '决策变化应当被广播').toBeGreaterThan(0)
+    expect(decisions.some((item) => item.payload?.requestId === request!.id && item.payload.status === 'pending'), '创建决策应当被广播').toBe(true)
+    expect(decisions.some((item) => item.payload?.requestId === request!.id && item.payload.status === 'rejected'), '拒绝决策也应当被广播').toBe(true)
     void server
   })
 })

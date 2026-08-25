@@ -216,10 +216,12 @@ export class WorldPermissionRequestService {
       throw new WorldPermissionRequestExpiredError()
     }
     if (input.decision === 'reject') {
-      return await this.#store.decideWorldPermissionRequest(input.requestId, {
+      const decided = await this.#store.decideWorldPermissionRequest(input.requestId, {
         decisionScope: 'reject',
         decidedBy: input.decidedBy,
       }, now.toISOString())
+      this.#announce(decided)
+      return decided
     }
     if (input.decision === 'persistent') {
       if (this.#authority.updateAuthority === undefined) {

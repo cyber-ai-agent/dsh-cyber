@@ -194,23 +194,29 @@ export class WorldManagementAdapter implements CharacterSkillAdapter {
 
   async execute(action: CharacterSkillAction, _context: CharacterSkillExecutionContext): Promise<CharacterSkillExecutionResult> {
     try {
-      switch (action.action) {
-        case 'world.settings.read': return await this.#readSettings(action)
-        case 'world.settings.update': return await this.#updateSettings(action)
-        case 'world.rename': return await this.#rename(action)
-        case 'world.characters.list': return this.#listCharacters(action)
-        case 'world.characters.update': return await this.#updateCharacter(action)
-        case 'world.authority.read': return await this.#readAuthority(action)
-        case 'world.authority.update': return await this.#updateAuthority(action)
-        case 'world.packages.list': return await this.#listPackages(action)
-        case 'world.packages.instantiate': return await this.#instantiatePackage(action)
-        case 'world.packages.disable': return await this.#disablePackage(action)
-        case 'world.model.read': return await this.#readModel(action)
-        case 'world.model.assign': return await this.#assignModel(action)
-        default: return { status: 'failed', detail: '未知的世界管理动作，已阻止执行' }
-      }
+      const result = await (async (): Promise<CharacterSkillExecutionResult> => {
+        switch (action.action) {
+          case 'world.settings.read': return await this.#readSettings(action)
+          case 'world.settings.update': return await this.#updateSettings(action)
+          case 'world.rename': return await this.#rename(action)
+          case 'world.characters.list': return this.#listCharacters(action)
+          case 'world.characters.update': return await this.#updateCharacter(action)
+          case 'world.authority.read': return await this.#readAuthority(action)
+          case 'world.authority.update': return await this.#updateAuthority(action)
+          case 'world.packages.list': return await this.#listPackages(action)
+          case 'world.packages.instantiate': return await this.#instantiatePackage(action)
+          case 'world.packages.disable': return await this.#disablePackage(action)
+          case 'world.model.read': return await this.#readModel(action)
+          case 'world.model.assign': return await this.#assignModel(action)
+          default: return { status: 'failed', detail: '未知的世界管理动作，已阻止执行' }
+        }
+      })()
+      return appendUnhandledClauseNotice(action, result)
     } catch (error) {
-      return { status: 'failed', detail: error instanceof Error ? error.message : '世界管理动作执行失败' }
+      return appendUnhandledClauseNotice(action, {
+        status: 'failed',
+        detail: error instanceof Error ? error.message : '世界管理动作执行失败',
+      })
     }
   }
 
@@ -252,6 +258,18 @@ export class WorldManagementAdapter implements CharacterSkillAdapter {
     // failing: it is a confident wrong answer the model will repeat.
     if (this.#host.listCharacters === undefined) return { status: 'failed', detail: '角色列表服务不可用' }
     const list = this.#host.listCharacters(action.worldId)
+    if (stringParameter(action.parameters, 'reason') === 'ambiguous-character') {
+      const candidateIds = objectArrayParameter(action.parameters, 'candidates')
+        .map((candidate) => stringParameter(candidate, 'id'))
+        .filter((candidate): candidate is string => candidate !== undefined)
+      const candidates = candidateIds
+        .map((id) => list.find((item) => item.id === id))
+        .filter((item): item is WorldManagementCharacterRef => item !== undefined)
+      if (candidates.length > 0) {
+        const labels = candidates.map((item, index) => `${index + 1}. ${item.displayName}（${item.id}）`)
+        return { status: 'executed', detail: `目标角色存在歧义，请从候选中选择：${labels.join('、')}` }
+      }
+    }
     return { status: 'executed', detail: `当前世界共有 ${list.length} 个可用角色` }
   }
 
@@ -352,6 +370,25 @@ function arrayParameter(parameters: Record<string, unknown>, key: string): World
   return Array.isArray(value) ? value.filter((item): item is WorldCharacterPermission => typeof item === 'string') : []
 }
 
+function objectArrayParameter(parameters: Record<string, unknown>, key: string): Record<string, unknown>[] {
+  const value = parameters[key]
+  return Array.isArray(value)
+    ? value.filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object' && !Array.isArray(item))
+    : []
+}
+
+function appendUnhandledClauseNotice(
+  action: CharacterSkillAction,
+  result: CharacterSkillExecutionResult,
+): CharacterSkillExecutionResult {
+  const value = action.parameters?.unhandledClauses
+  const clauses = Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+    : []
+  if (clauses.length === 0) return result
+  return { ...result, detail: `${result.detail}；未识别，未执行：${clauses.join('；')}` }
+}
+
 function withoutManagementFields(parameters: Record<string, unknown>): Record<string, unknown> {
   const result = { ...parameters }
   delete result.managementKind
@@ -360,6 +397,9 @@ function withoutManagementFields(parameters: Record<string, unknown>): Record<st
   delete result.role
   delete result.permissionGrants
   delete result.removePermissions
+  delete result.unhandledClauses
+  delete result.planOrdinal
+  delete result.planSize
   return result
 }
 
