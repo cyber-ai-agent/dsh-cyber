@@ -53,6 +53,7 @@ import { AssetService } from './services/asset-service.js'
 import { ApplicationAccessService } from './services/application-access-service.js'
 import { CharacterProfileRuntime } from './services/character-profile-runtime.js'
 import { CharacterSkillRuntime } from './services/character-skill-runtime.js'
+import { composeConversationControl } from './services/conversation-control-composition.js'
 import { SkillCatalogService } from './services/skill-catalog-service.js'
 import { GroupTaskCollaborationService } from './services/group-task-collaboration-service.js'
 import { EmployeeActivityProjectionService } from './services/employee-activity-projection-service.js'
@@ -105,10 +106,8 @@ import { FirecrawlClient } from './integrations/firecrawl-client.js'
 import { OfficialMcpClientFactory, type McpClientFactory } from './integrations/mcp-client.js'
 import { MCP_INTEGRATION_ID } from './integrations/mcp-provider.js'
 import { McpSkillAdapter } from './skills/mcp-skill-adapter.js'
-
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_PORT = 43123
-
 export interface CyberServerOptions {
   stateRoot: string
   workspacePath: string
@@ -465,7 +464,8 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     consolidationScheduler: knowledgeGraphRuntime.scheduler,
   })
   registerModelInteractionRoutes(router, { store, interactions })
-  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, turnContinuations, groupTasks, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, runtimeContext: worldRuntimeContext, worldTrace, employeeActivity, worldPackages, worldRuntimePermissions, ownerRuntimeAccess })
+  const conversationControl = composeConversationControl({ store, router, worldAccess, orchestrator, continuations: turnContinuations, employeeActivity, worldRuntime, worldTrace, runtimeStreamHub })
+  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, turnContinuations, groupTasks, conversationQueue: conversationControl.queue, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, runtimeContext: worldRuntimeContext, worldTrace, employeeActivity, worldPackages, worldRuntimePermissions, ownerRuntimeAccess })
   registerGroupTaskRoutes(router, { store, worldAccess, groupTasks })
   registerEmployeeRoutes(router, {
     store,
@@ -489,6 +489,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     runtimeStreamHub.publishTrace(event.worldId, worldTrace.adaptRuntime(event))
     worldRuntime.publishRuntime(event.worldId, event.event, event.agentId, event.sessionId)
   })
+  const unsubscribeControl = orchestrator.subscribeControl((event) => runtimeStreamHub.publishControl(event))
   let startedAddress: CyberServerAddress | undefined
   let closed = false
 
@@ -505,7 +506,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       startedAddress = { host, port: address.port, origin: `http://${host}:${address.port}` }
       ambientLifeScheduler.start()
       taskSchedules.start()
-      skillRuntime.start()
+      skillRuntime.start(); conversationControl.start()
       await knowledgeGraphRuntime.start()
       // Neither of these may gate the listener. MCP discovery talks to
       // user-configured endpoints that can black-hole, and continuation runs
@@ -531,7 +532,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       skillRuntime.close()
       await taskSchedules.close()
       await ambientLifeScheduler.close()
-      unsubscribe()
+      unsubscribe(); unsubscribeControl(); await conversationControl.close()
       runtimeStreamHub.close()
       worldStreamHub.close()
       if (httpServer.listening) await closeServer(httpServer)

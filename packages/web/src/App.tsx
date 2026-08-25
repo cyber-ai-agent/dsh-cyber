@@ -107,6 +107,8 @@ type AppMode = 'world' | 'workbench'
 
 interface ChatResult {
   session: WorkSession
+  workTurnId?: string
+  queueItem?: { id?: string; workTurnId?: string; status?: PendingChatTurn['status'] }
 }
 
 interface RuntimeEnvelope {
@@ -440,6 +442,53 @@ export default function App() {
     })
   }, [])
 
+  const cancelQueuedTurn = useCallback(async (turnId: string): Promise<void> => {
+    const turn = pendingTurnsRef.current.find((item) => item.id === turnId)
+    if (turn === undefined || turn.status !== 'queued') return
+    const worldId = activeWorldRef.current?.id
+    if (worldId === undefined) return
+    try {
+      await api(`/api/worlds/${encodeURIComponent(worldId)}/chat-queue/${encodeURIComponent(turn.serverQueueId ?? turn.id)}`, { method: 'DELETE' })
+      turnQueueRef.current.remove(turnId)
+      patchPendingTurn(turnId, { status: 'cancelled' })
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '撤销排队消息失败')
+    }
+  }, [patchPendingTurn])
+
+  const promoteQueuedTurn = useCallback(async (turnId: string): Promise<void> => {
+    const turn = pendingTurnsRef.current.find((item) => item.id === turnId)
+    const worldId = activeWorldRef.current?.id
+    if (turn?.status !== 'queued' || worldId === undefined) return
+    try {
+      await api(`/api/worlds/${encodeURIComponent(worldId)}/chat-queue/${encodeURIComponent(turn.serverQueueId ?? turn.id)}`, { method: 'PATCH', body: JSON.stringify({ queueMode: 'next' }) })
+      turnQueueRef.current.promote(turn.queueKey, turnId)
+      patchPendingTurn(turnId, { createdAt: new Date(0).toISOString() })
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '提前执行消息失败')
+    }
+  }, [patchPendingTurn])
+
+  const stopTurn = useCallback(async (turnId: string): Promise<void> => {
+    const reply = Object.values(streamingReplies).find((item) => item.clientTurnId === turnId)
+    const turn = pendingTurnsRef.current.find((item) => item.id === turnId)
+    if (turn === undefined) return
+    const workTurnId = turn.workTurnId ?? reply?.workTurnId
+    if (workTurnId === undefined) return
+    const paths = [`/api/turns/${encodeURIComponent(workTurnId)}/stop`, `/api/turns/${encodeURIComponent(workTurnId)}/abort`, `/api/work-turns/${encodeURIComponent(workTurnId)}/abort`]
+    let lastError: unknown
+    for (const path of paths) {
+      try {
+        await api(path, { method: 'POST', body: JSON.stringify({ reason: 'user-stop' }) })
+        patchPendingTurn(turnId, { status: 'interrupted' })
+        return
+      } catch (cause) {
+        lastError = cause
+      }
+    }
+    setError(lastError instanceof Error ? lastError.message : '停止请求失败')
+  }, [patchPendingTurn, streamingReplies])
+
   const bindConversationSession = useCallback((queueKey: string, session: WorkSession, employeeIds: string[]) => {
     sessionByQueueKeyRef.current.set(queueKey, session.id)
     queueKeyBySessionRef.current.set(session.id, queueKey)
@@ -556,6 +605,10 @@ export default function App() {
         )
         const effectiveClientTurnId = clientTurnId ?? pending?.id
         if (effectiveClientTurnId === undefined) return
+        patchPendingTurn(effectiveClientTurnId, {
+          workTurnId: envelope.workTurnId,
+          ...(pending?.status === 'queued' ? { status: 'running' } : {}),
+        })
         const queueKey = pending?.queueKey
           ?? queueKeyBySessionRef.current.get(envelope.sessionId)
           ?? (activeSessionIdRef.current === envelope.sessionId ? activeConversationKeyRef.current : undefined)
@@ -610,13 +663,34 @@ export default function App() {
           upsertStream(envelope.event.content, true)
         }
         if (envelope.event.kind === 'turn.completed' || envelope.event.kind === 'turn.failed') {
-          void refreshConversationTranscript(envelope.sessionId, queueKey, world.id).finally(() => {
+          if (envelope.event.kind === 'turn.failed' && envelope.event.metadata.interrupted === true) {
+            patchPendingTurn(effectiveClientTurnId, { status: 'interrupted' })
+          } else if (envelope.event.kind === 'turn.failed') {
+            const failure = runtimeFailureMessage(envelope.event)
+            patchPendingTurn(effectiveClientTurnId, { status: 'failed', error: failure })
+            if (activeWorldRef.current?.id === world.id && activeConversationKeyRef.current === queueKey) setError(failure)
+          }
+          const refreshTerminalTranscript = async () => {
+            // Runtime completion is emitted before the orchestrator appends the
+            // final assistant message. Keep the queue card until SQLite exposes
+            // that durable result instead of racing one early HTTP refresh.
+            const maximumAttempts = envelope.event.kind === 'turn.completed' ? 20 : 1
+            for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
+              const items = await refreshConversationTranscript(envelope.sessionId, queueKey, world.id)
+              if (envelope.event.kind !== 'turn.completed' || items?.some((item) =>
+                item.kind === 'assistant' && messageClientTurnId(item) === effectiveClientTurnId,
+              )) return
+              await new Promise<void>((resolve) => window.setTimeout(resolve, 100))
+            }
+          }
+          void refreshTerminalTranscript().finally(() => {
             setStreamingReplies((current) => {
               if (current[streamId] === undefined) return current
               const next = { ...current }
               delete next[streamId]
               return next
             })
+            if (envelope.event.kind === 'turn.completed') removePendingTurn(effectiveClientTurnId)
           })
         }
       } catch {
@@ -624,7 +698,7 @@ export default function App() {
       }
     }
     return subscribeWorldLive(world.id, 'runtime', onRuntime)
-  }, [activeWorld, bindConversationSession, refreshConversationTranscript])
+  }, [activeWorld, bindConversationSession, patchPendingTurn, refreshConversationTranscript, removePendingTurn])
 
   useEffect(() => {
     if (demoMode || activeWorld === undefined || pendingTurns.length === 0) return
@@ -639,6 +713,16 @@ export default function App() {
     const timer = window.setInterval(reconcile, 900)
     return () => window.clearInterval(timer)
   }, [activeWorld, demoMode, pendingTurns.length, refreshConversationTranscript])
+
+  useEffect(() => {
+    if (demoMode || activeWorld === undefined) return
+    const worldId = activeWorld.id
+    void api<{ items?: PendingChatTurn[] }>(`/api/worlds/${encodeURIComponent(worldId)}/chat-queue`).then((result) => {
+      if (activeWorldRef.current?.id !== worldId || !Array.isArray(result.items)) return
+      setPendingTurns(result.items)
+      pendingTurnsRef.current = result.items
+    }).catch(() => undefined)
+  }, [activeWorld, demoMode])
 
   // Authority changes are world-scoped facts. Reuse the shared /live stream so
   // another tab can update badges without reloading messages or dossiers.
@@ -1356,7 +1440,7 @@ export default function App() {
     return () => clearInterval(timer)
   }, [activeWorld, demoMode, refreshPendingDecisions])
 
-  const send = useCallback((prompt: string, attachments: ChatAttachment[]): Promise<void> => {
+  const send = useCallback((prompt: string, attachments: ChatAttachment[], queueMode: 'normal' | 'next' = 'normal'): Promise<void> => {
     const world = activeWorld
     if (world === undefined) return Promise.resolve()
     const explicitEmployeeIds = conversationIntent?.employeeIds
@@ -1469,7 +1553,7 @@ export default function App() {
             setMessages((current) => [...current.filter((message) => messageClientTurnId(message) !== clientTurnId), ownerMessage, ...replies])
           }
           setOutboxMessages((current) => removeOutboxTurn(current, queueKey, clientTurnId))
-          removePendingTurn(clientTurnId)
+          if (!pendingTurnsRef.current.some((item) => item.id === clientTurnId && (item.status === 'interrupted' || item.status === 'cancelled'))) removePendingTurn(clientTurnId)
           return
         }
 
@@ -1481,6 +1565,7 @@ export default function App() {
             reasoningEffort,
             permissionMode,
             interactionKind,
+            queueMode,
             ...(targetIds.length > 1 ? { collaborationMode } : {}),
             ...(attachments.length === 0 ? {} : { attachments }),
             employeeIds: targetIds,
@@ -1488,10 +1573,23 @@ export default function App() {
             ...(resolvedSessionId === undefined ? {} : { sessionId: resolvedSessionId }),
           }),
         })
+        if (result.workTurnId !== undefined || result.queueItem !== undefined) {
+          setPendingTurns((current) => {
+            const next = current.map((turn) => turn.id === clientTurnId ? {
+              ...turn,
+              ...(result.queueItem?.status === undefined ? {} : { status: result.queueItem.status }),
+              ...(result.workTurnId === undefined ? {} : { workTurnId: result.workTurnId }),
+              ...(result.queueItem?.workTurnId === undefined ? {} : { workTurnId: result.queueItem.workTurnId }),
+              ...(result.queueItem?.id === undefined ? {} : { serverQueueId: result.queueItem.id }),
+            } : turn)
+            pendingTurnsRef.current = next
+            return next
+          })
+        }
         bindConversationSession(queueKey, result.session, targetIds)
         await refreshConversationTranscript(result.session.id, queueKey, world.id, true)
         setStreamingReplies((current) => removeStreamingTurn(current, clientTurnId))
-        removePendingTurn(clientTurnId)
+        if (result.queueItem === undefined && !pendingTurnsRef.current.some((item) => item.id === clientTurnId && (item.status === 'interrupted' || item.status === 'cancelled'))) removePendingTurn(clientTurnId)
       } catch (cause) {
         const failure = cause instanceof Error ? cause.message : '消息发送失败'
         const failedSessionId = sessionByQueueKeyRef.current.get(queueKey) ?? capturedSessionId
@@ -1508,7 +1606,8 @@ export default function App() {
       }
     }
 
-    void turnQueueRef.current.enqueue(queueKey, runTurn)
+    if (demoMode) void turnQueueRef.current.enqueue(queueKey, runTurn, clientTurnId)
+    else void runTurn()
     return Promise.resolve()
   }, [
     activeConversationKey,
@@ -1884,6 +1983,7 @@ export default function App() {
             installedPlugins={installedPluginCommands}
             pendingCount={activePendingCount}
             queuedCount={activeQueuedCount}
+            queueItems={activePendingTurns}
             draft={draft}
             focusRequest={composerFocusRequest}
             onDraftChange={setDraft}
@@ -1895,6 +1995,9 @@ export default function App() {
             onOpenPluginMarket={() => void openPackageMarket('plugin')}
             onOpenHistory={openMessageHistory}
             onChangeCollaborationMode={changeCollaborationMode}
+            onCancelQueuedTurn={cancelQueuedTurn}
+            onPromoteQueuedTurn={promoteQueuedTurn}
+            onStopTurn={stopTurn}
             hasOlderMessages={messagePage.hasMore}
             loadingOlderMessages={messagePage.loading}
             onLoadOlderMessages={() => void loadOlderMessages()}
@@ -2546,4 +2649,15 @@ function runtimeActivity(event: AgentRuntimeEvent, role: string): string {
   if (event.kind === 'turn.started') return `正在处理${role}任务`
   if (event.kind === 'turn.failed') return '执行失败，等待推进'
   return '可接新任务'
+}
+
+function runtimeFailureMessage(event: AgentRuntimeEvent): string {
+  const failure = metadataText(event.metadata.failure) ?? metadataText(event.metadata.errorCode)
+  if (failure === 'provider-authentication' || failure === 'authentication') {
+    return 'API 密钥被模型服务拒绝。请打开“设置 → 模型”重新填写密钥，并先获取模型列表确认连接成功。'
+  }
+  if (failure === 'provider-rate-limited' || failure === 'rate-limited') return '模型服务正在限流或账户额度不足，请稍后重试。'
+  if (failure === 'provider-timeout' || failure === 'timeout') return '模型服务响应超时，请检查连接后重试。'
+  if (failure === 'provider-unreachable' || failure === 'unreachable') return '模型服务当前不可达，请检查接口地址和网络。'
+  return '角色未能完成这次回复，请在轨迹中查看原因。'
 }

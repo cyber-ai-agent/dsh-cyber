@@ -47,6 +47,21 @@ describe('ChatTurnQueue', () => {
     expect(order).toEqual(['a1:start', 'b1', 'a1:end', 'a2'])
     expect(queue.isPending('direct:a')).toBe(false)
   })
+
+  it('supports explicit promotion and removal of queued work', async () => {
+    const queue = new ChatTurnQueue()
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const order: string[] = []
+    void queue.enqueue('lane', async () => { order.push('running'); await gate }, 'running')
+    void queue.enqueue('lane', async () => { order.push('second') }, 'second')
+    void queue.enqueue('lane', async () => { order.push('third') }, 'third')
+    expect(queue.promote('lane', 'third')).toBe(true)
+    expect(queue.remove('second')).toBe(true)
+    release()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(order).toEqual(['running', 'third'])
+  })
 })
 
 describe('mergeChatTimeline', () => {

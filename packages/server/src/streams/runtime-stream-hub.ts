@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
-import type { ConversationRealtimeEnvelope } from '@dsh-cyber/orchestration'
+import type { ConversationControlEnvelope, ConversationRealtimeEnvelope } from '@dsh-cyber/orchestration'
 import type { WorldRuntimeStreamEnvelope, WorldTraceEntry } from '@dsh-cyber/contracts'
 
 interface RuntimeStreamClient {
@@ -44,6 +44,14 @@ export class RuntimeStreamHub {
     for (const client of this.#clients) {
       if (client.worldId !== event.worldId) continue
       client.response.write(`event: runtime\ndata: ${data}\n\n`)
+    }
+  }
+
+  publishControl(event: ConversationControlEnvelope): void {
+    const data = JSON.stringify(event)
+    for (const client of this.#clients) {
+      if (client.worldId !== event.worldId) continue
+      client.response.write(`event: conversation-control\ndata: ${data}\n\n`)
     }
   }
 

@@ -6,6 +6,9 @@ import { DatabaseSync, backup } from 'node:sqlite'
 import {
   CYBER_SCHEMA_VERSION,
   RECOMMENDED_ADMIN_PERMISSIONS,
+  type AgentPermissionMode,
+  type ConversationQueueEntry,
+  type ConversationQueueEntryStatus,
   isWorldCharacterPermission,
   isDomainEventType,
   type DatabaseDoctorReport,
@@ -44,6 +47,7 @@ import {
   type RecordModelInteractionInput,
   type RuntimeUpdateStatus,
   type RuntimeUpdateTransaction,
+  type ReasoningEffort,
   type TaskCollaborationExecutionMode,
   type TaskCollaborationPlan,
   type TaskCollaborationPlanStatus,
@@ -335,6 +339,58 @@ export interface CreateWorkTurnInput {
   interactionKind: WorkTurnInteractionKind
 }
 
+export interface EnqueueConversationTurnInput {
+  id?: string
+  workspaceId: string
+  worldId: string
+  sessionId: string
+  workTurnId: string
+  employeeIds: string[]
+  conversationKind: WorkSessionKind
+  collaborationMode?: WorkSessionCollaborationMode | undefined
+  reasoningEffort?: Exclude<ReasoningEffort, 'auto'> | undefined
+  permissionMode?: AgentPermissionMode | undefined
+  priority?: number
+  actorId?: string
+}
+
+export interface ClaimConversationQueueEntryInput {
+  queueEntryId: string
+  expectedRevision?: number
+}
+
+export interface CompleteConversationQueueEntryInput {
+  queueEntryId: string
+  expectedRevision?: number
+}
+
+export interface FailConversationQueueEntryInput {
+  queueEntryId: string
+  errorCode: string
+  expectedRevision?: number
+}
+
+export interface RemoveConversationQueueEntryInput {
+  queueEntryId: string
+  expectedRevision?: number
+  errorCode?: string
+}
+
+export interface ClearConversationQueueInput {
+  workspaceId?: string
+  worldId: string
+  sessionId?: string
+}
+
+export interface ConversationQueueTransitionInput {
+  queueEntryId: string
+  expectedRevision?: number
+}
+
+export interface InterruptConversationQueueEntryInput extends ConversationQueueTransitionInput {
+  errorCode?: string
+}
+
 export interface CreateAgentRunInput {
   workspaceId: string
   worldId: string
@@ -516,6 +572,7 @@ const KNOWN_TABLES = [
   'model_assignments',
   'local_assets',
   'work_sessions',
+  'conversation_queue_entries',
   'task_collaboration_plans',
   'task_collaboration_steps',
   'work_turns',
@@ -2795,6 +2852,15 @@ export class SqliteStore {
     return row === undefined ? undefined : mapWorkTurn(row)
   }
 
+  getWorkTurnByClientTurnId(workspaceId: string, worldId: string, clientTurnId: string): WorkTurn | undefined {
+    const row = this.database.prepare(
+      `SELECT * FROM work_turns
+       WHERE workspace_id = ? AND world_id = ? AND client_turn_id = ?
+       ORDER BY created_at DESC, id DESC LIMIT 1`,
+    ).get(workspaceId, worldId, clientTurnId.trim())
+    return row === undefined ? undefined : mapWorkTurn(row)
+  }
+
   listSessionTurns(sessionId: string): WorkTurn[] {
     this.#requireSession(sessionId)
     return this.database.prepare(
@@ -2806,6 +2872,355 @@ export class SqliteStore {
     return this.database.prepare(
       'SELECT * FROM work_turns WHERE status = ? ORDER BY created_at, id',
     ).all(status).map(mapWorkTurn)
+  }
+
+  enqueueConversationTurn(input: EnqueueConversationTurnInput): ConversationQueueEntry {
+    return this.#enqueueConversationTurn(input, input.priority ?? 0)
+  }
+
+  enqueue(input: EnqueueConversationTurnInput): ConversationQueueEntry {
+    return this.enqueueConversationTurn(input)
+  }
+
+  enqueueNextConversationTurn(input: EnqueueConversationTurnInput): ConversationQueueEntry {
+    this.#assertWritable()
+    const world = this.#requireWorld(input.worldId)
+    const next = this.database.prepare(
+      `SELECT COALESCE(MAX(priority), -1) + 1 AS priority
+       FROM conversation_queue_entries
+       WHERE world_id = ? AND status IN ('queued', 'running', 'waiting-approval')`,
+    ).get(world.id) as { priority: number }
+    return this.#enqueueConversationTurn(input, Number(next.priority))
+  }
+
+  enqueueNext(input: EnqueueConversationTurnInput): ConversationQueueEntry {
+    return this.enqueueNextConversationTurn(input)
+  }
+
+  promoteConversationQueueEntry(queueEntryId: string, expectedRevision?: number): ConversationQueueEntry {
+    this.#assertWritable()
+    const entry = this.#requireQueueEntryForTransition(queueEntryId, 'queued', expectedRevision)
+    const next = this.database.prepare(
+      `SELECT COALESCE(MAX(priority), -1) + 1 AS priority
+       FROM conversation_queue_entries
+       WHERE world_id = ? AND status IN ('queued', 'running', 'waiting-approval')`,
+    ).get(entry.worldId) as { priority: number }
+    const now = this.#clock()
+    const result = this.database.prepare(
+      `UPDATE conversation_queue_entries
+       SET priority = ?, revision = revision + 1, updated_at = ?
+       WHERE id = ? AND status = 'queued' AND revision = ?`,
+    ).run(Number(next.priority), now, entry.id, entry.revision)
+    if (Number(result.changes) !== 1) throw new PersistenceError('Conversation queue entry changed concurrently')
+    return this.getConversationQueueEntry(entry.id)!
+  }
+
+  getConversationQueueEntry(queueEntryId: string): ConversationQueueEntry | undefined {
+    const row = this.database.prepare('SELECT * FROM conversation_queue_entries WHERE id = ?').get(queueEntryId)
+    return row === undefined ? undefined : mapConversationQueueEntry(row)
+  }
+
+  getConversationQueueEntryByTurn(worldId: string, workTurnId: string): ConversationQueueEntry | undefined {
+    this.#requireWorld(worldId)
+    const row = this.database.prepare(
+      `SELECT * FROM conversation_queue_entries
+       WHERE world_id = ? AND work_turn_id = ?
+       ORDER BY enqueued_at DESC, id DESC LIMIT 1`,
+    ).get(worldId, workTurnId)
+    return row === undefined ? undefined : mapConversationQueueEntry(row)
+  }
+
+  getConversationQueueEntryByWorkTurn(worldId: string, workTurnId: string): ConversationQueueEntry | undefined {
+    return this.getConversationQueueEntryByTurn(worldId, workTurnId)
+  }
+
+  getConversationQueueEntryForTurn(worldId: string, workTurnId: string): ConversationQueueEntry | undefined {
+    return this.getConversationQueueEntryByTurn(worldId, workTurnId)
+  }
+
+  listConversationQueue(
+    worldId: string,
+    sessionId?: string,
+    status?: ConversationQueueEntryStatus,
+  ): ConversationQueueEntry[] {
+    this.#requireWorld(worldId)
+    if (sessionId !== undefined) {
+      const session = this.#requireSession(sessionId)
+      if (session.worldId !== worldId) throw new PersistenceError('Conversation queue session does not match world')
+    }
+    const rows = status === undefined
+      ? sessionId === undefined
+        ? this.database.prepare(
+            'SELECT * FROM conversation_queue_entries WHERE world_id = ? ORDER BY priority DESC, enqueued_at, id',
+          ).all(worldId)
+        : this.database.prepare(
+            'SELECT * FROM conversation_queue_entries WHERE world_id = ? AND session_id = ? ORDER BY priority DESC, enqueued_at, id',
+          ).all(worldId, sessionId)
+      : sessionId === undefined
+        ? this.database.prepare(
+            'SELECT * FROM conversation_queue_entries WHERE world_id = ? AND status = ? ORDER BY priority DESC, enqueued_at, id',
+          ).all(worldId, status)
+        : this.database.prepare(
+            'SELECT * FROM conversation_queue_entries WHERE world_id = ? AND session_id = ? AND status = ? ORDER BY priority DESC, enqueued_at, id',
+          ).all(worldId, sessionId, status)
+    return rows.map(mapConversationQueueEntry)
+  }
+
+  listQueuedConversationTurns(worldId: string, sessionId?: string): ConversationQueueEntry[] {
+    return this.listConversationQueue(worldId, sessionId).filter((entry) =>
+      entry.status === 'queued' || entry.status === 'running' || entry.status === 'waiting-approval')
+  }
+
+  claimConversationQueueEntry(input: ClaimConversationQueueEntryInput): ConversationQueueEntry {
+    this.#assertWritable()
+    const entry = this.getConversationQueueEntry(input.queueEntryId)
+    if (entry === undefined) throw new EntityNotFoundError(`Conversation queue entry not found: ${input.queueEntryId}`)
+    if (entry.status !== 'queued') throw new PersistenceError('Conversation queue entry is not queued')
+    if (input.expectedRevision !== undefined && input.expectedRevision !== entry.revision) {
+      throw new PersistenceError('Conversation queue entry changed concurrently')
+    }
+    const turn = this.getWorkTurn(entry.workTurnId)
+    if (turn === undefined || turn.status !== 'queued') throw new PersistenceError('Queued WorkTurn is unavailable')
+    const now = this.#clock()
+    return this.#transaction(() => {
+      const turnResult = this.database.prepare(
+        `UPDATE work_turns SET status = 'running', started_at = COALESCE(started_at, ?)
+         WHERE id = ? AND status = 'queued'`,
+      ).run(now, entry.workTurnId)
+      if (Number(turnResult.changes) !== 1) throw new PersistenceError('Queued WorkTurn changed concurrently')
+      const result = this.database.prepare(
+        `UPDATE conversation_queue_entries
+         SET status = 'running', revision = revision + 1, claimed_at = COALESCE(claimed_at, ?), updated_at = ?
+         WHERE id = ? AND status = 'queued' AND revision = ?`,
+      ).run(now, now, entry.id, entry.revision)
+      if (Number(result.changes) !== 1) throw new PersistenceError('Conversation queue entry changed concurrently')
+      return this.getConversationQueueEntry(entry.id)!
+    })
+  }
+
+  claimConversationTurn(input: ClaimConversationQueueEntryInput): ConversationQueueEntry {
+    return this.claimConversationQueueEntry(input)
+  }
+
+  waitConversationQueueEntryForApproval(input: ConversationQueueTransitionInput): ConversationQueueEntry {
+    this.#assertWritable()
+    const entry = this.#requireQueueEntryForTransition(input.queueEntryId, ['running', 'waiting-approval'], input.expectedRevision)
+    const turn = this.getWorkTurn(entry.workTurnId)
+    if (turn === undefined || (turn.status !== 'running' && turn.status !== 'waiting-approval')) {
+      throw new PersistenceError('Conversation queue WorkTurn cannot wait for approval')
+    }
+    const now = this.#clock()
+    return this.#transaction(() => {
+      if (turn.status === 'running') {
+        const turnResult = this.database.prepare(
+          `UPDATE work_turns SET status = 'waiting-approval'
+           WHERE id = ? AND status = 'running'`,
+        ).run(entry.workTurnId)
+        if (Number(turnResult.changes) !== 1) throw new PersistenceError('WorkTurn changed concurrently')
+      }
+      const result = this.database.prepare(
+        `UPDATE conversation_queue_entries
+         SET status = 'waiting-approval', revision = revision + 1, updated_at = ?
+         WHERE id = ? AND status IN ('running', 'waiting-approval') AND revision = ?`,
+      ).run(now, entry.id, entry.revision)
+      if (Number(result.changes) !== 1) throw new PersistenceError('Conversation queue entry changed concurrently')
+      return this.getConversationQueueEntry(entry.id)!
+    })
+  }
+
+  waitConversationTurnForApproval(input: ConversationQueueTransitionInput): ConversationQueueEntry {
+    return this.waitConversationQueueEntryForApproval(input)
+  }
+
+  resumeConversationQueueEntryAfterApproval(input: ConversationQueueTransitionInput): ConversationQueueEntry {
+    this.#assertWritable()
+    const entry = this.#requireQueueEntryForTransition(input.queueEntryId, 'waiting-approval', input.expectedRevision)
+    const turn = this.getWorkTurn(entry.workTurnId)
+    if (turn === undefined || (turn.status !== 'waiting-approval' && turn.status !== 'running')) {
+      throw new PersistenceError('Conversation queue WorkTurn cannot resume after approval')
+    }
+    const now = this.#clock()
+    return this.#transaction(() => {
+      if (turn.status === 'waiting-approval') {
+        const turnResult = this.database.prepare(
+          `UPDATE work_turns SET status = 'running', started_at = COALESCE(started_at, ?)
+           WHERE id = ? AND status = 'waiting-approval'`,
+        ).run(now, entry.workTurnId)
+        if (Number(turnResult.changes) !== 1) throw new PersistenceError('WorkTurn changed concurrently')
+      }
+      const result = this.database.prepare(
+        `UPDATE conversation_queue_entries
+         SET status = 'running', revision = revision + 1, updated_at = ?
+         WHERE id = ? AND status = 'waiting-approval' AND revision = ?`,
+      ).run(now, entry.id, entry.revision)
+      if (Number(result.changes) !== 1) throw new PersistenceError('Conversation queue entry changed concurrently')
+      return this.getConversationQueueEntry(entry.id)!
+    })
+  }
+
+  resumeConversationTurnAfterApproval(input: ConversationQueueTransitionInput): ConversationQueueEntry {
+    return this.resumeConversationQueueEntryAfterApproval(input)
+  }
+
+  completeConversationQueueEntry(input: CompleteConversationQueueEntryInput): ConversationQueueEntry {
+    this.#assertWritable()
+    const entry = this.#requireQueueEntryForTransition(input.queueEntryId, ['running', 'waiting-approval'], input.expectedRevision)
+    const turn = this.getWorkTurn(entry.workTurnId)
+    if (turn === undefined || (turn.status !== 'running' && turn.status !== 'completed')) {
+      throw new PersistenceError('Running WorkTurn is unavailable')
+    }
+    const now = this.#clock()
+    return this.#transaction(() => {
+      if (turn.status === 'running') {
+        const turnResult = this.database.prepare(
+          `UPDATE work_turns SET status = 'completed', completed_at = ?
+           WHERE id = ? AND status = 'running'`,
+        ).run(now, entry.workTurnId)
+        if (Number(turnResult.changes) !== 1) throw new PersistenceError('WorkTurn changed concurrently')
+      }
+      const result = this.database.prepare(
+        `UPDATE conversation_queue_entries
+         SET status = 'completed', revision = revision + 1, completed_at = ?, updated_at = ?
+         WHERE id = ? AND status IN ('running', 'waiting-approval') AND revision = ?`,
+      ).run(now, now, entry.id, entry.revision)
+      if (Number(result.changes) !== 1) throw new PersistenceError('Conversation queue entry changed concurrently')
+      return this.getConversationQueueEntry(entry.id)!
+    })
+  }
+
+  completeConversationTurn(input: CompleteConversationQueueEntryInput): ConversationQueueEntry {
+    return this.completeConversationQueueEntry(input)
+  }
+
+  failConversationQueueEntry(input: FailConversationQueueEntryInput): ConversationQueueEntry {
+    this.#assertWritable()
+    const errorCode = normalizeQueueErrorCode(input.errorCode)
+    const entry = this.#requireQueueEntryForTransition(input.queueEntryId, ['running', 'waiting-approval'], input.expectedRevision)
+    const turn = this.getWorkTurn(entry.workTurnId)
+    if (turn === undefined || (turn.status !== 'running' && turn.status !== 'waiting-approval' && turn.status !== 'failed')) {
+      throw new PersistenceError('WorkTurn cannot be failed from its current state')
+    }
+    const finalErrorCode = turn.status === 'failed' ? (turn.errorCode ?? errorCode) : errorCode
+    const now = this.#clock()
+    return this.#transaction(() => {
+      if (turn.status === 'running' || turn.status === 'waiting-approval') {
+        const turnResult = this.database.prepare(
+          `UPDATE work_turns SET status = 'failed', error_code = ?, completed_at = ?
+           WHERE id = ? AND status IN ('running', 'waiting-approval')`,
+        ).run(finalErrorCode, now, entry.workTurnId)
+        if (Number(turnResult.changes) !== 1) throw new PersistenceError('WorkTurn changed concurrently')
+      }
+      const result = this.database.prepare(
+        `UPDATE conversation_queue_entries
+         SET status = 'failed', error_code = ?, revision = revision + 1, completed_at = ?, updated_at = ?
+         WHERE id = ? AND status IN ('running', 'waiting-approval') AND revision = ?`,
+      ).run(finalErrorCode, now, now, entry.id, entry.revision)
+      if (Number(result.changes) !== 1) throw new PersistenceError('Conversation queue entry changed concurrently')
+      return this.getConversationQueueEntry(entry.id)!
+    })
+  }
+
+  failConversationTurn(input: FailConversationQueueEntryInput): ConversationQueueEntry {
+    return this.failConversationQueueEntry(input)
+  }
+
+  interruptConversationQueueEntry(input: InterruptConversationQueueEntryInput): ConversationQueueEntry {
+    this.#assertWritable()
+    const entry = this.#requireQueueEntryForTransition(
+      input.queueEntryId,
+      ['queued', 'running', 'waiting-approval'],
+      input.expectedRevision,
+    )
+    const turn = this.getWorkTurn(entry.workTurnId)
+    if (turn === undefined || (turn.status !== 'queued' && turn.status !== 'running' && turn.status !== 'waiting-approval' && turn.status !== 'interrupted')) {
+      throw new PersistenceError('Conversation queue WorkTurn cannot be interrupted')
+    }
+    const errorCode = normalizeQueueErrorCode(input.errorCode ?? 'interrupted')
+    const finalErrorCode = turn.status === 'interrupted' ? (turn.errorCode ?? errorCode) : errorCode
+    const now = this.#clock()
+    return this.#transaction(() => {
+      if (turn.status === 'queued' || turn.status === 'running' || turn.status === 'waiting-approval') {
+        const turnResult = this.database.prepare(
+          `UPDATE work_turns SET status = 'interrupted', error_code = ?, completed_at = ?
+           WHERE id = ? AND status IN ('queued', 'running', 'waiting-approval')`,
+        ).run(finalErrorCode, now, entry.workTurnId)
+        if (Number(turnResult.changes) !== 1) throw new PersistenceError('WorkTurn changed concurrently')
+      }
+      const runs = this.database.prepare(
+        `SELECT id FROM agent_runs WHERE turn_id = ? AND status IN ('queued', 'running')`,
+      ).all(entry.workTurnId) as Array<{ id: string }>
+      for (const run of runs) {
+        this.database.prepare(
+          `UPDATE agent_runs SET status = 'interrupted', error_code = ?, completed_at = ?
+           WHERE id = ? AND status IN ('queued', 'running')`,
+        ).run(finalErrorCode, now, run.id)
+        this.#markRunOutputUnfinished(run.id)
+      }
+      const result = this.database.prepare(
+        `UPDATE conversation_queue_entries
+         SET status = 'interrupted', error_code = ?, revision = revision + 1, completed_at = ?, updated_at = ?
+         WHERE id = ? AND status IN ('queued', 'running', 'waiting-approval') AND revision = ?`,
+      ).run(finalErrorCode, now, now, entry.id, entry.revision)
+      if (Number(result.changes) !== 1) throw new PersistenceError('Conversation queue entry changed concurrently')
+      return this.getConversationQueueEntry(entry.id)!
+    })
+  }
+
+  interruptConversationTurn(input: InterruptConversationQueueEntryInput): ConversationQueueEntry {
+    return this.interruptConversationQueueEntry(input)
+  }
+
+  removeConversationQueueEntry(input: RemoveConversationQueueEntryInput): ConversationQueueEntry {
+    this.#assertWritable()
+    const entry = this.#requireQueueEntryForTransition(input.queueEntryId, 'queued', input.expectedRevision)
+    const errorCode = normalizeQueueErrorCode(input.errorCode ?? 'queue-cancelled')
+    const turn = this.getWorkTurn(entry.workTurnId)
+    if (turn === undefined || turn.status !== 'queued') throw new PersistenceError('Queued WorkTurn is unavailable')
+    const now = this.#clock()
+    return this.#transaction(() => {
+      const turnResult = this.database.prepare(
+        `UPDATE work_turns SET status = 'interrupted', error_code = ?, completed_at = ?
+         WHERE id = ? AND status = 'queued'`,
+      ).run(errorCode, now, entry.workTurnId)
+      if (Number(turnResult.changes) !== 1) throw new PersistenceError('Queued WorkTurn changed concurrently')
+      const result = this.database.prepare(
+        `UPDATE conversation_queue_entries
+         SET status = 'cancelled', error_code = ?, revision = revision + 1, completed_at = ?, updated_at = ?
+         WHERE id = ? AND status = 'queued' AND revision = ?`,
+      ).run(errorCode, now, now, entry.id, entry.revision)
+      if (Number(result.changes) !== 1) throw new PersistenceError('Conversation queue entry changed concurrently')
+      return this.getConversationQueueEntry(entry.id)!
+    })
+  }
+
+  cancelQueuedConversationTurn(input: RemoveConversationQueueEntryInput): ConversationQueueEntry {
+    return this.removeConversationQueueEntry(input)
+  }
+
+  clearConversationQueue(input: ClearConversationQueueInput): number {
+    this.#assertWritable()
+    const world = this.#requireWorld(input.worldId)
+    if (input.workspaceId !== undefined && input.workspaceId !== world.workspaceId) {
+      throw new PersistenceError('Conversation queue workspace does not match world')
+    }
+    if (input.sessionId !== undefined) {
+      const session = this.#requireSession(input.sessionId)
+      if (session.worldId !== world.id) throw new PersistenceError('Conversation queue session does not match world')
+    }
+    const rows = input.sessionId === undefined
+      ? this.database.prepare(
+          `SELECT * FROM conversation_queue_entries
+           WHERE world_id = ? AND status = 'queued' ORDER BY priority DESC, enqueued_at, id`,
+        ).all(world.id)
+      : this.database.prepare(
+          `SELECT * FROM conversation_queue_entries
+           WHERE world_id = ? AND session_id = ? AND status = 'queued'
+           ORDER BY priority DESC, enqueued_at, id`,
+        ).all(world.id, input.sessionId)
+    const entries = rows.map(mapConversationQueueEntry)
+    if (entries.length === 0) return 0
+    const now = this.#clock()
+    return this.#transaction(() => entries.reduce((count, entry) => count + (this.#cancelQueuedQueueEntry(entry, now) ? 1 : 0), 0))
   }
 
   startWorkTurn(turnId: string): WorkTurn {
@@ -2920,17 +3335,51 @@ export class SqliteStore {
         `UPDATE messages
          SET metadata_json = json_set(metadata_json, '$.failed', json('true'))
          WHERE kind = 'assistant' AND json_extract(metadata_json, '$.agentRunId') IN (
-           SELECT id FROM agent_runs WHERE status IN ('queued', 'running')
+           SELECT agent_runs.id FROM agent_runs
+           INNER JOIN work_turns ON work_turns.id = agent_runs.turn_id
+           WHERE agent_runs.status IN ('queued', 'running') AND work_turns.status = 'running'
          )`,
       ).run()
       const runs = this.database.prepare(
         `UPDATE agent_runs SET status = 'failed', error_code = 'service-restarted', completed_at = ?
-         WHERE status IN ('queued', 'running')`,
+         WHERE status IN ('queued', 'running')
+           AND turn_id IN (SELECT id FROM work_turns WHERE status = 'running')`,
       ).run(now)
       const turns = this.database.prepare(
-        `UPDATE work_turns SET status = 'failed', error_code = 'service-restarted', completed_at = ?
-         WHERE status IN ('queued', 'running')`,
+        `UPDATE work_turns SET status = 'interrupted', error_code = 'service-restarted', completed_at = ?
+         WHERE status = 'running'`,
       ).run(now)
+      this.database.prepare(
+        `UPDATE conversation_queue_entries
+         SET status = 'interrupted', error_code = 'service-restarted', revision = revision + 1,
+             completed_at = ?, updated_at = ?
+         WHERE status IN ('running', 'waiting-approval')
+           AND work_turn_id IN (
+             SELECT id FROM work_turns WHERE status = 'interrupted' AND error_code = 'service-restarted'
+           )`,
+      ).run(now, now)
+      this.database.prepare(
+        `UPDATE conversation_queue_entries
+         SET status = 'waiting-approval', revision = revision + 1, updated_at = ?
+         WHERE status = 'running'
+           AND work_turn_id IN (SELECT id FROM work_turns WHERE status = 'waiting-approval')`,
+      ).run(now)
+      this.database.prepare(
+        `UPDATE conversation_queue_entries
+         SET status = 'completed', revision = revision + 1,
+             completed_at = COALESCE(completed_at, ?), updated_at = ?
+         WHERE status IN ('running', 'waiting-approval')
+           AND work_turn_id IN (SELECT id FROM work_turns WHERE status = 'completed')`,
+      ).run(now, now)
+      this.database.prepare(
+        `UPDATE conversation_queue_entries
+         SET status = 'failed',
+             error_code = COALESCE((SELECT error_code FROM work_turns WHERE work_turns.id = conversation_queue_entries.work_turn_id), 'turn-failed'),
+             revision = revision + 1,
+             completed_at = COALESCE(completed_at, ?), updated_at = ?
+         WHERE status IN ('running', 'waiting-approval')
+           AND work_turn_id IN (SELECT id FROM work_turns WHERE status = 'failed')`,
+      ).run(now, now)
       this.#recoverTaskCollaborationPlansAfterRestart(now)
       return { turnsFailed: Number(turns.changes), runsFailed: Number(runs.changes) }
     })
@@ -4238,6 +4687,7 @@ export class SqliteStore {
             messages: this.listMessages(session.id),
           })),
           collaborationPlans: this.listTaskCollaborationPlans(world.id),
+          conversationQueue: this.listConversationQueue(world.id),
           runtime: this.getWorldRuntimeSnapshot(world.id),
           themeBinding: this.getWorldThemeBinding(world.id),
           authorities: this.listWorldCharacterAuthorities(world.id),
@@ -4289,6 +4739,7 @@ export class SqliteStore {
         modelAssignments: countRows(this.database, 'model_assignments'),
         localAssets: countRows(this.database, 'local_assets'),
         sessions: countRows(this.database, 'work_sessions'),
+        conversationQueueEntries: countRows(this.database, 'conversation_queue_entries'),
         taskCollaborationPlans: countRows(this.database, 'task_collaboration_plans'),
         taskCollaborationSteps: countRows(this.database, 'task_collaboration_steps'),
         messages: countRows(this.database, 'messages'),
@@ -4346,6 +4797,125 @@ export class SqliteStore {
   #assertWritable(): void {
     if (this.readOnly) throw new PersistenceError('Database is open in read-only mode')
     if (this.#closed) throw new PersistenceError('Database is closed')
+  }
+
+  #enqueueConversationTurn(input: EnqueueConversationTurnInput, priority: number): ConversationQueueEntry {
+    this.#assertWritable()
+    const workspace = this.#requireWorkspace(input.workspaceId)
+    const world = this.#requireWorld(input.worldId)
+    if (world.workspaceId !== workspace.id || world.status === 'archived') {
+      throw new PersistenceError('Conversation queue world does not belong to workspace')
+    }
+    const session = this.#requireSession(input.sessionId)
+    if (session.workspaceId !== workspace.id || session.worldId !== world.id) {
+      throw new PersistenceError('Conversation queue session does not match world')
+    }
+    const turn = this.getWorkTurn(input.workTurnId)
+    if (turn === undefined || turn.workspaceId !== workspace.id || turn.worldId !== world.id || turn.sessionId !== session.id) {
+      throw new PersistenceError('Conversation queue WorkTurn does not match its session')
+    }
+    if (turn.status !== 'queued') throw new PersistenceError('Only queued WorkTurns can be enqueued')
+    if (input.conversationKind !== session.kind) {
+      throw new PersistenceError('Conversation queue kind does not match its session')
+    }
+    const collaborationMode = validateSessionCollaborationMode(
+      input.collaborationMode ?? session.collaborationMode ?? 'discussion',
+    )
+    if (collaborationMode !== (session.collaborationMode ?? 'discussion')) {
+      throw new PersistenceError('Conversation queue collaboration mode does not match its session')
+    }
+    if (collaborationMode === 'task' && session.kind !== 'group') {
+      throw new PersistenceError('Task collaboration mode requires a group session')
+    }
+    const employeeIds = normalizeQueueEmployeeIds(input.employeeIds)
+    for (const employeeId of employeeIds) {
+      const employee = this.#requireEmployee(employeeId)
+      if (employee.workspaceId !== workspace.id || employee.worldId !== world.id || employee.status === 'archived') {
+        throw new PersistenceError('Conversation queue employee does not belong to this world')
+      }
+    }
+    const normalizedPriority = validateQueuePriority(priority)
+    const reasoningEffort = input.reasoningEffort === undefined
+      ? undefined
+      : validateQueueReasoningEffort(input.reasoningEffort)
+    const permissionMode = input.permissionMode === undefined
+      ? undefined
+      : validateQueuePermissionMode(input.permissionMode)
+    const id = normalizeRequiredToken(input.id ?? this.#idFactory(), 'Conversation queue id', 160)
+    const now = this.#clock()
+
+    return this.#transaction(() => {
+      const existingByTurn = this.database
+        .prepare('SELECT * FROM conversation_queue_entries WHERE work_turn_id = ?')
+        .get(turn.id)
+      if (existingByTurn !== undefined) {
+        const existing = mapConversationQueueEntry(existingByTurn)
+        const metadata: NormalizedConversationQueueMetadata = {
+          workspaceId: input.workspaceId,
+          worldId: input.worldId,
+          sessionId: input.sessionId,
+          workTurnId: input.workTurnId,
+          conversationKind: input.conversationKind,
+          priority: normalizedPriority,
+          collaborationMode,
+          employeeIds,
+          ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+          ...(permissionMode === undefined ? {} : { permissionMode }),
+        }
+        if (sameConversationQueueMetadata(existing, metadata)) return existing
+        throw new PersistenceError('Conversation queue WorkTurn already has a different entry')
+      }
+      const existingById = this.database.prepare('SELECT * FROM conversation_queue_entries WHERE id = ?').get(id)
+      if (existingById !== undefined) throw new PersistenceError(`Conversation queue entry already exists: ${id}`)
+      this.database.prepare(
+        `INSERT INTO conversation_queue_entries
+         (id, workspace_id, world_id, session_id, work_turn_id, employee_ids_json,
+          conversation_kind, collaboration_mode, reasoning_effort, permission_mode,
+          priority, revision, status, error_code, enqueued_at, claimed_at, completed_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        id, workspace.id, world.id, session.id, turn.id, stringifyJson(employeeIds),
+        session.kind, collaborationMode, reasoningEffort ?? null, permissionMode ?? null,
+        normalizedPriority, 1, 'queued', null, now, null, null, now,
+      )
+      return mapConversationQueueEntry(this.database.prepare(
+        'SELECT * FROM conversation_queue_entries WHERE id = ?',
+      ).get(id)!)
+    })
+  }
+
+  #requireQueueEntryForTransition(
+    queueEntryId: string,
+    expectedStatus: ConversationQueueEntryStatus | readonly ConversationQueueEntryStatus[],
+    expectedRevision?: number,
+  ): ConversationQueueEntry {
+    const entry = this.getConversationQueueEntry(queueEntryId)
+    if (entry === undefined) throw new EntityNotFoundError(`Conversation queue entry not found: ${queueEntryId}`)
+    const statuses = Array.isArray(expectedStatus) ? expectedStatus : [expectedStatus]
+    if (!statuses.includes(entry.status)) {
+      throw new PersistenceError(`Conversation queue entry cannot transition from ${entry.status}`)
+    }
+    if (expectedRevision !== undefined && (!Number.isSafeInteger(expectedRevision) || expectedRevision !== entry.revision)) {
+      throw new PersistenceError('Conversation queue entry changed concurrently')
+    }
+    return entry
+  }
+
+  #cancelQueuedQueueEntry(entry: ConversationQueueEntry, now: string): boolean {
+    if (entry.status !== 'queued') return false
+    const errorCode = 'queue-cancelled'
+    const turnResult = this.database.prepare(
+      `UPDATE work_turns SET status = 'interrupted', error_code = ?, completed_at = ?
+       WHERE id = ? AND status = 'queued'`,
+    ).run(errorCode, now, entry.workTurnId)
+    if (Number(turnResult.changes) !== 1) return false
+    const queueResult = this.database.prepare(
+      `UPDATE conversation_queue_entries
+       SET status = 'cancelled', error_code = ?, revision = revision + 1, completed_at = ?, updated_at = ?
+       WHERE id = ? AND status = 'queued' AND revision = ?`,
+    ).run(errorCode, now, now, entry.id, entry.revision)
+    if (Number(queueResult.changes) !== 1) throw new PersistenceError('Conversation queue entry changed concurrently')
+    return true
   }
 
   #syncCompatibilityPrimaryAdministrator(worldId: string, updatedAt: string): void {
@@ -5377,6 +5947,31 @@ function mapWorkTurn(row: object): WorkTurn {
   return turn
 }
 
+function mapConversationQueueEntry(row: object): ConversationQueueEntry {
+  const value = row as Record<string, unknown>
+  const entry: ConversationQueueEntry = {
+    id: String(value.id),
+    workspaceId: String(value.workspace_id),
+    worldId: String(value.world_id),
+    sessionId: String(value.session_id),
+    workTurnId: String(value.work_turn_id),
+    employeeIds: parseJson<string[]>(value.employee_ids_json),
+    conversationKind: value.conversation_kind as ConversationQueueEntry['conversationKind'],
+    collaborationMode: value.collaboration_mode === 'task' ? 'task' : 'discussion',
+    priority: Number(value.priority),
+    revision: Number(value.revision),
+    status: value.status as ConversationQueueEntryStatus,
+    enqueuedAt: String(value.enqueued_at),
+    updatedAt: String(value.updated_at),
+  }
+  if (typeof value.reasoning_effort === 'string') entry.reasoningEffort = value.reasoning_effort as Exclude<ReasoningEffort, 'auto'>
+  if (typeof value.permission_mode === 'string') entry.permissionMode = value.permission_mode as AgentPermissionMode
+  if (typeof value.error_code === 'string') entry.errorCode = value.error_code
+  if (typeof value.claimed_at === 'string') entry.claimedAt = value.claimed_at
+  if (typeof value.completed_at === 'string') entry.completedAt = value.completed_at
+  return entry
+}
+
 function mapAgentRun(row: object): AgentRun {
   const value = row as Record<string, unknown>
   const run: AgentRun = {
@@ -5690,6 +6285,75 @@ function normalizeStringList(values: string[], label: string): string[] {
   })
   if (new Set(normalized).size !== normalized.length) throw new PersistenceError(`Task collaboration ${label} must be unique`)
   return normalized
+}
+
+type NormalizedConversationQueueMetadata = {
+  workspaceId: string
+  worldId: string
+  sessionId: string
+  workTurnId: string
+  employeeIds: string[]
+  conversationKind: WorkSessionKind
+  collaborationMode: WorkSessionCollaborationMode
+  reasoningEffort?: Exclude<ReasoningEffort, 'auto'>
+  permissionMode?: AgentPermissionMode
+  priority: number
+}
+
+function normalizeQueueEmployeeIds(values: string[]): string[] {
+  if (!Array.isArray(values) || values.length === 0) {
+    throw new PersistenceError('Conversation queue requires at least one employee')
+  }
+  const normalized = values.map((value) => {
+    if (typeof value !== 'string') throw new PersistenceError('Conversation queue employee id is invalid')
+    return normalizeRequiredToken(value, 'Conversation queue employee id', 160)
+  })
+  if (new Set(normalized).size !== normalized.length) {
+    throw new PersistenceError('Conversation queue employee ids must be unique')
+  }
+  return normalized
+}
+
+function validateQueuePriority(value: number): number {
+  if (!Number.isSafeInteger(value) || value < -1_000_000_000 || value > 1_000_000_000) {
+    throw new PersistenceError('Conversation queue priority is invalid')
+  }
+  return value
+}
+
+function validateQueueReasoningEffort(value: Exclude<ReasoningEffort, 'auto'>): Exclude<ReasoningEffort, 'auto'> {
+  if (!['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(value)) {
+    throw new PersistenceError('Conversation queue reasoning effort is invalid')
+  }
+  return value
+}
+
+function validateQueuePermissionMode(value: AgentPermissionMode): AgentPermissionMode {
+  if (!['read-only', 'workspace-write', 'danger-full-access'].includes(value)) {
+    throw new PersistenceError('Conversation queue permission mode is invalid')
+  }
+  return value
+}
+
+function normalizeQueueErrorCode(value: string): string {
+  return normalizeRequiredToken(value, 'Conversation queue error code', 160)
+}
+
+function sameConversationQueueMetadata(
+  existing: ConversationQueueEntry,
+  input: NormalizedConversationQueueMetadata,
+): boolean {
+  return existing.workspaceId === input.workspaceId &&
+    existing.worldId === input.worldId &&
+    existing.sessionId === input.sessionId &&
+    existing.workTurnId === input.workTurnId &&
+    existing.conversationKind === input.conversationKind &&
+    (existing.collaborationMode ?? 'discussion') === input.collaborationMode &&
+    (existing.reasoningEffort ?? undefined) === input.reasoningEffort &&
+    (existing.permissionMode ?? undefined) === input.permissionMode &&
+    existing.priority === input.priority &&
+    existing.employeeIds.length === input.employeeIds.length &&
+    existing.employeeIds.every((employeeId, index) => employeeId === input.employeeIds[index])
 }
 
 function normalizeRequiredToken(value: string, label: string, maximum: number): string {

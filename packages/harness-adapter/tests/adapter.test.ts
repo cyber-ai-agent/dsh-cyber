@@ -54,6 +54,14 @@ function revision(modelPolicy: EmployeeRevision['modelPolicy'] = {}): EmployeeRe
   }
 }
 
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (predicate()) return
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+  throw new Error('Timed out waiting for Harness lane state')
+}
+
 describe('Harness profile and adapter', () => {
   it('extracts only real provider token usage from Harness notifications', () => {
     const notifications = [{
@@ -196,6 +204,84 @@ describe('Harness profile and adapter', () => {
     expect(observed).toEqual(['session.event', 'session.event'])
     await adapter.close()
     expect(closes).toBe(1)
+  })
+
+  it('keeps at most two employee lanes and aborts a waiting third before it starts', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-lanes-'))
+    const specs: HarnessRuntimeSpec[] = []
+    const started: string[] = []
+    const releases = new Map<string, () => void>()
+    const adapter = new HarnessCompatibilityAdapter({
+      stateRoot,
+      runtimeFactory(spec) {
+        specs.push(spec)
+        return {
+          async run(sessionId) {
+            started.push(spec.conversationId ?? '')
+            await new Promise<void>((resolve) => releases.set(spec.conversationId ?? '', resolve))
+            return { finalResponse: `reply:${sessionId}`, notifications: [] }
+          },
+          async close() {},
+        }
+      },
+    })
+    const request = (conversationId: string, agentRunId: string) => adapter.runTurn({
+      agent: employee(),
+      revision: revision(),
+      conversationId,
+      agentRunId,
+      history: [],
+      observedThroughSequence: 0,
+      prompt: conversationId,
+      workspacePath: stateRoot,
+    })
+    const first = request('conversation-a', 'run-a')
+    const second = request('conversation-b', 'run-b')
+    await waitFor(() => started.length === 2)
+    const third = request('conversation-c', 'run-c')
+    await Promise.resolve()
+    expect(started).toEqual(['conversation-a', 'conversation-b'])
+    await adapter.abortRun('run-c')
+    await expect(third).rejects.toThrow('aborted')
+    expect(started).not.toContain('conversation-c')
+    await adapter.abortRun('run-a')
+    await expect(first).rejects.toThrow('aborted')
+    releases.get('conversation-b')?.()
+    await second
+    expect(new Set(specs.map((spec) => spec.laneId)).size).toBe(2)
+    await adapter.close()
+  })
+
+  it('evicts the oldest idle lane instead of accumulating workers across conversations', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-lane-eviction-'))
+    const specs: HarnessRuntimeSpec[] = []
+    let closes = 0
+    const adapter = new HarnessCompatibilityAdapter({
+      stateRoot,
+      runtimeFactory(spec) {
+        specs.push(spec)
+        return {
+          async run(sessionId) { return { finalResponse: sessionId, notifications: [] } },
+          async close() { closes += 1 },
+        }
+      },
+    })
+    for (const [index, conversationId] of ['one', 'two', 'three', 'four']) {
+      await adapter.runTurn({
+        agent: employee(),
+        revision: revision(),
+        conversationId,
+        agentRunId: `run-${index}`,
+        history: [],
+        observedThroughSequence: 0,
+        prompt: conversationId,
+        workspacePath: stateRoot,
+      })
+    }
+    expect(specs).toHaveLength(4)
+    expect(closes).toBe(2)
+    await adapter.close()
+    expect(closes).toBe(4)
   })
 
   it('recovers a persisted-session id collision before the prompt produces side effects', async () => {
@@ -408,6 +494,43 @@ describe('Harness profile and adapter', () => {
     expect(closedAgents).toEqual([employeeA.id, employeeA.id])
     await router.close()
     expect(closes).toBe(3)
+  })
+
+  it('routes abortRun to the selected model adapter without retrying another lane', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-model-abort-'))
+    let started = false
+    let rejectRun: ((error: unknown) => void) | undefined
+    const aborted: string[] = []
+    const router = new HarnessModelRouter({
+      stateRoot,
+      resolveRoute: () => undefined,
+      adapterFactory: () => ({
+        async runTurn() {
+          started = true
+          return await new Promise<never>((_resolve, reject) => { rejectRun = reject })
+        },
+        async abortRun(agentRunId) {
+          aborted.push(agentRunId)
+          rejectRun?.(new Error('transport closed'))
+        },
+        async close() {},
+      }),
+    })
+    const running = router.runTurn({
+      agent: employee(),
+      revision: revision(),
+      conversationId: 'conversation-abort',
+      agentRunId: 'run-abort',
+      history: [],
+      observedThroughSequence: 0,
+      prompt: '停止',
+      workspacePath: stateRoot,
+    })
+    await waitFor(() => started)
+    await router.abortRun('run-abort')
+    await expect(running).rejects.toThrow('transport closed')
+    expect(aborted).toEqual(['run-abort'])
+    await router.close()
   })
 
   it('passes only an allowlisted host environment plus worker-owned values', async () => {

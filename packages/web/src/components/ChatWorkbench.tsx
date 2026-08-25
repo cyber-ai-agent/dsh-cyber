@@ -15,6 +15,8 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { WORLD_CHARACTER_MANAGEMENT_PERMISSIONS, type ChatAttachment, type InstalledPluginCommand, type JsonObject, type LocalAssetMimeType, type WorkMessage, type WorkSession, type World, type WorldCharacterPermission, type WorldPermissionDecisionScope, type WorldPermissionRequest } from '@dsh-cyber/contracts'
 
 import type { ConversationIntent, CyberEmployee } from '../types.js'
+import type { PendingChatTurn } from '../chat-realtime.js'
+import type { ChatQueueMode } from '../chat-realtime.js'
 import { worldExperience } from '../world-experience.js'
 import { ApprovalRequests, type ApprovalRequestsProps } from './ApprovalRequests.js'
 import { Avatar } from './Avatar.js'
@@ -38,10 +40,11 @@ interface ChatWorkbenchProps {
   sending?: boolean
   pendingCount?: number
   queuedCount?: number
+  queueItems?: PendingChatTurn[]
   draft: string
   focusRequest?: number
   onDraftChange(value: string): void
-  onSend(prompt: string, attachments: ChatAttachment[]): Promise<void>
+  onSend(prompt: string, attachments: ChatAttachment[], queueMode?: ChatQueueMode): Promise<void>
   onUploadAttachment(file: File): Promise<ChatAttachment>
   onOpenDossier(employeeId: string): void
   onOpenArtifact(artifactId?: string): void
@@ -58,9 +61,12 @@ interface ChatWorkbenchProps {
   onDecideWorldPermissionRequest?(requestId: string, scope: WorldPermissionDecisionScope | 'reject'): Promise<void>
   onOpenWorldPermissionSettings?(employeeId: string): void
   onChangeCollaborationMode?(mode: 'discussion' | 'task'): Promise<void>
+  onCancelQueuedTurn?(turnId: string): Promise<void>
+  onPromoteQueuedTurn?(turnId: string): Promise<void>
+  onStopTurn?(turnId: string): Promise<void>
 }
 
-export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, installedPlugins = [], sending = false, pendingCount = 0, queuedCount = 0, draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, onOpenWorldPermissionSettings, onChangeCollaborationMode }: ChatWorkbenchProps) {
+export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, installedPlugins = [], sending = false, pendingCount = 0, queuedCount = 0, queueItems = [], draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, onOpenWorldPermissionSettings, onChangeCollaborationMode, onCancelQueuedTurn, onPromoteQueuedTurn, onStopTurn }: ChatWorkbenchProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -71,6 +77,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
   const [rememberingMessageId, setRememberingMessageId] = useState<string>()
   const [rememberedMessageIds, setRememberedMessageIds] = useState<Set<string>>(() => new Set())
   const [knowledgeError, setKnowledgeError] = useState<string>()
+  const [queueMode, setQueueMode] = useState<ChatQueueMode>('normal')
   const experience = worldExperience(world)
   const mention = useMemo(() => currentMention(draft), [draft])
   const suggestions = useMemo(() => mention === undefined ? [] : employees.filter((employee) => employee.displayName.includes(mention)).slice(0, 6), [employees, mention])
@@ -82,6 +89,12 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
     ? directEmployee?.displayName ?? displayDirectConversationTitle(session?.title ?? intent?.title) ?? '选择角色开始对话'
     : session?.title ?? intent?.title ?? '选择角色开始对话'
   const visibleMessages = useMemo(() => messages.filter(isChatMessage), [messages])
+  const runningLaneCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const turn of queueItems) if (turn.status === 'running') for (const employeeId of turn.employeeIds) counts.set(employeeId, (counts.get(employeeId) ?? 0) + 1)
+    return counts
+  }, [queueItems])
+  const saturatedWaiting = queueItems.some((turn) => turn.status === 'queued' && turn.employeeIds.some((employeeId) => (runningLaneCounts.get(employeeId) ?? 0) >= 2))
 
   useEffect(() => {
     const container = scrollRef.current
@@ -111,9 +124,10 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
 
   const submit = async () => {
     const prompt = draft.trim()
-    if ((!prompt && attachments.length === 0) || sending || uploading) return
-    await onSend(prompt || '请查看随消息发送的附件。', attachments)
+    if ((!prompt && attachments.length === 0) || uploading) return
+    await onSend(prompt || '请查看随消息发送的附件。', attachments, queueMode)
     setAttachments([])
+    setQueueMode('normal')
   }
 
   const uploadAttachment = async (file: File) => {
@@ -182,6 +196,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
       </header>
 
       <div className="message-scroll" ref={scrollRef} aria-live="polite" aria-busy={pendingCount > 0 || sending}>
+        {queueItems.length > 0 ? <div className="chat-turn-queue" aria-label="消息队列">{saturatedWaiting ? <p className="chat-turn-queue__lane-note" role="status">同一角色已有 2 条通道运行，第三条消息等待中</p> : null}{queueItems.map((turn) => <article key={turn.id} className={`chat-turn-queue__item chat-turn-queue__item--${turn.status}`}><div><strong>{turn.status === 'running' ? '正在回复中' : turn.status === 'waiting-approval' ? '等待批准' : turn.status === 'queued' ? '等待中' : turn.status === 'interrupted' ? '已停止' : turn.status === 'cancelled' ? '已撤销' : '发送失败'}</strong><small>{turn.title}</small></div><span>{(turn.status === 'running' || turn.status === 'waiting-approval') && onStopTurn !== undefined ? <button type="button" onClick={() => void onStopTurn(turn.id)}>■ 停止</button> : turn.status === 'queued' && onPromoteQueuedTurn !== undefined ? <button type="button" onClick={() => void onPromoteQueuedTurn(turn.id)}>下一条执行</button> : null}{turn.status === 'queued' && onCancelQueuedTurn !== undefined ? <button type="button" onClick={() => void onCancelQueuedTurn(turn.id)}>撤销</button> : null}</span></article>)}</div> : null}
         {conversationKind === 'group' && collaborationMode === 'task' && session?.id !== undefined ? <TaskCollaborationSummary worldId={world.id} sessionId={session.id} employees={participantEmployees} demoMode={demoMode} /> : null}
         {hasOlderMessages && onLoadOlderMessages !== undefined ? <button className="message-history-more" type="button" disabled={loadingOlderMessages} onClick={onLoadOlderMessages}>{loadingOlderMessages ? <CircleNotch size={15} className="spin" /> : <ArrowUp size={15} />}<span>{loadingOlderMessages ? '正在加载更早消息…' : '加载更早消息'}</span></button> : null}
         {visibleMessages.length === 0 ? (
@@ -200,7 +215,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
               {owner ? null : <button className="avatar-button" type="button" onClick={() => employee && onOpenDossier(employee.id)} aria-label={`打开${employee?.displayName ?? experience.personLabel}角色`}><Avatar index={employee?.avatarIndex ?? 7} label={employee?.displayName ?? '角色'} authorityRole={employee?.authorityRole} /></button>}
               <div className="message__body">
                 <header className="message__meta">{owner ? <span className="sr-only">我的消息</span> : <><strong>{employee?.displayName ?? experience.personLabel}<AuthorityBadge role={employee?.authorityRole} /></strong><span>{employee?.role}</span></>}<time>{displayTime(message)}</time>{rememberingMessageId === message.id ? <span role="status">正在整理…</span> : rememberedMessageIds.has(message.id) ? <span role="status">已加入长期知识</span> : null}</header>
-                <div className="message__content">{streaming && message.content.length === 0 ? <span className="stream-placeholder">正在生成回复…</span> : <RichText value={message.content} worldId={world.id} />}{streaming ? <span className="stream-cursor" aria-hidden="true" /> : null}</div>
+                <div className="message__content">{streaming && message.content.length === 0 ? <span className="stream-placeholder">正在回复中…</span> : <RichText value={message.content} worldId={world.id} />}{streaming ? <span className="stream-cursor" aria-hidden="true" /> : null}</div>
                 <MessageAttachments attachments={messageAttachments(message.metadata)} />
                 {artifactRefsFromMetadata(message.metadata).length === 0 ? null : <Suspense fallback={<div className="chat-artifact-refs" role="status">正在载入产物卡…</div>}><ArtifactReferenceCards worldId={world.id} artifactRefs={artifactRefsFromMetadata(message.metadata)} onOpen={onOpenArtifact} /></Suspense>}
               </div>
@@ -228,11 +243,11 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
         {attachments.length > 0 ? <div className="composer-attachments" aria-label="待发送附件">{attachments.map((attachment) => <span key={attachment.assetId}><FileIcon size={15} /><span><strong>{attachment.name}</strong><small>{formatBytes(attachment.byteLength)}</small></span><button type="button" aria-label={`移除附件 ${attachment.name}`} onClick={() => setAttachments((current) => current.filter((item) => item.assetId !== attachment.assetId))}><X size={13} /></button></span>)}</div> : null}
         {attachmentError === undefined ? null : <p className="composer-error" role="alert">{attachmentError}</p>}
         <textarea ref={inputRef} value={draft} onChange={(event) => onDraftChange(event.target.value)} disabled={employees.length === 0} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit() } }} placeholder={employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? `发送消息给 ${participantEmployees.map((employee) => employee.displayName).join('、')}` : conversationKind === 'direct' ? `发送消息给 ${participantEmployees[0]?.displayName ?? experience.personLabel}` : '先从左侧选择会话，或输入 @角色名'} rows={2} aria-label={`给当前世界的${experience.peopleLabel}发送消息`} />
-        <div className="composer__toolbar"><div>
+        <div className="composer__toolbar">{pendingCount > 0 ? <div className="composer__queue-mode" role="group" aria-label="发送方式"><button type="button" aria-label="普通排队" className={queueMode === 'normal' ? 'is-active' : ''} aria-pressed={queueMode === 'normal'} onClick={() => setQueueMode('normal')}>排队发送</button><button type="button" aria-label="优先为下一条" className={queueMode === 'next' ? 'is-active' : ''} aria-pressed={queueMode === 'next'} onClick={() => setQueueMode('next')}>下一条执行</button></div> : null}<div>
           <input ref={fileInputRef} className="composer-file-input" type="file" accept=".png,.jpg,.jpeg,.webp,.txt,.md,.json,.pdf" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAttachment(file) }} />
           <button className="icon-button" type="button" aria-label={uploading ? '正在上传附件' : '添加附件'} disabled={uploading} onClick={() => fileInputRef.current?.click()}>{uploading ? <CircleNotch size={18} className="spin" /> : <Paperclip size={18} />}</button>
           <PluginPicker plugins={installedPlugins} draft={draft} onDraftChange={onDraftChange} {...(onOpenPluginMarket === undefined ? {} : { onOpenMarket: onOpenPluginMarket })} onFocus={() => inputRef.current?.focus()} />
-        </div><button className="send-button" type="button" aria-label={sending ? '角色处理中' : '发送'} disabled={sending || uploading || employees.length === 0 || (!draft.trim() && attachments.length === 0)} onClick={() => void submit()}>{sending ? <CircleNotch size={19} className="spin" /> : <PaperPlaneRight size={19} weight="fill" />}{queuedCount > 0 ? <span className="send-button__queue" aria-label={`${queuedCount} 条消息已排队`}>{queuedCount}</span> : null}</button></div>
+        </div><button className="send-button" type="button" aria-label={sending ? '正在回复中，发送新消息' : '发送'} disabled={uploading || employees.length === 0 || (!draft.trim() && attachments.length === 0)} onClick={() => void submit()}>{sending ? <CircleNotch size={19} className="spin" /> : <PaperPlaneRight size={19} weight="fill" />}{queuedCount > 0 ? <span className="send-button__queue" aria-label={`${queuedCount} 条消息已排队`}>{queuedCount}</span> : null}</button></div>
       </div></div>
     </section>
   )

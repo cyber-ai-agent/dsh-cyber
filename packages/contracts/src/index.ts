@@ -1,6 +1,6 @@
 import type { WorldCharacterAuthority } from './world-authority.js'
 
-export const CYBER_SCHEMA_VERSION = 26 as const
+export const CYBER_SCHEMA_VERSION = 27 as const
 
 export type IsoTimestamp = string
 export type JsonPrimitive = boolean | number | string | null
@@ -990,6 +990,8 @@ export interface AgentTurnResult {
 
 export interface AgentRuntimePort {
   runTurn(request: AgentTurnRequest): Promise<AgentTurnResult>
+  /** Abort exactly one live AgentRun without closing another conversation lane. */
+  abortRun?(agentRunId: string): Promise<void>
   closeAgent?(agentId: string): Promise<void>
   close(): Promise<void>
 }
@@ -1017,6 +1019,7 @@ export interface DatabaseDoctorReport {
     modelAssignments: number
     localAssets: number
     sessions: number
+    conversationQueueEntries: number
     taskCollaborationPlans: number
     taskCollaborationSteps: number
     messages: number
@@ -1066,6 +1069,7 @@ export * from './world-artifact.js'
 export * from './world-knowledge.js'
 export * from './world-knowledge-graph.js'
 export * from './task-collaboration.js'
+export * from './conversation-queue.js'
 
 export type {
   CharacterSkillAction,

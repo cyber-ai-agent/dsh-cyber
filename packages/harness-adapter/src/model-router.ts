@@ -87,6 +87,8 @@ interface AttemptObservation {
 export class HarnessModelRouter implements AgentRuntimePort, AsyncDisposable {
   readonly #options: HarnessModelRouterOptions
   readonly #entries = new Map<string, AdapterEntry>()
+  readonly #runEntries = new Map<string, AdapterEntry>()
+  readonly #abortedRuns = new Set<string>()
 
   constructor(options: HarnessModelRouterOptions) {
     this.#options = options
@@ -97,6 +99,10 @@ export class HarnessModelRouter implements AgentRuntimePort, AsyncDisposable {
     const routeId = route?.id ?? '__dsh-default__'
     const fingerprint = routeFingerprint(route)
     let entry = await this.#entry(routeId, route, fingerprint)
+    if (request.agentRunId !== undefined && this.#abortedRuns.has(request.agentRunId)) {
+      throw new Error('Agent run aborted')
+    }
+    if (request.agentRunId !== undefined) this.#runEntries.set(request.agentRunId, entry)
     const observation: AttemptObservation = { unsafeToRetry: false }
     const turnRequest = withoutUnsupportedReasoningEffort(request, route)
     const observedRequest: AgentTurnRequest = {
@@ -124,10 +130,11 @@ export class HarnessModelRouter implements AgentRuntimePort, AsyncDisposable {
       if (
         failure !== undefined
         && !observation.unsafeToRetry
+        && !this.#isAborted(request)
         && isTransientRuntimeFailure(failure.metadata)
-        && entry.adapter.closeAgent !== undefined
+        && (entry.adapter.abortRun !== undefined || entry.adapter.closeAgent !== undefined)
       ) {
-        await entry.adapter.closeAgent(request.agent.id)
+        await this.#resetFailedRun(entry, request)
         return entry.adapter.runTurn(turnRequest)
       }
       if (failure !== undefined) request.onEvent?.(failure)
@@ -136,16 +143,34 @@ export class HarnessModelRouter implements AgentRuntimePort, AsyncDisposable {
       const failureSignal = observation.terminalFailure?.metadata ?? error
       if (
         !observation.unsafeToRetry
+        && !this.#isAborted(request)
         && isTransientRuntimeFailure(failureSignal)
-        && entry.adapter.closeAgent !== undefined
+        && (entry.adapter.abortRun !== undefined || entry.adapter.closeAgent !== undefined)
       ) {
-        await entry.adapter.closeAgent(request.agent.id)
+        await this.#resetFailedRun(entry, request)
         entry = await this.#entry(routeId, route, fingerprint)
         return entry.adapter.runTurn(request)
       }
       if (observation.terminalFailure !== undefined) request.onEvent?.(observation.terminalFailure)
       throw error
+    } finally {
+      if (request.agentRunId !== undefined) {
+        this.#runEntries.delete(request.agentRunId)
+        this.#abortedRuns.delete(request.agentRunId)
+      }
     }
+  }
+
+  async abortRun(agentRunId: string): Promise<void> {
+    this.#abortedRuns.add(agentRunId)
+    const entry = this.#runEntries.get(agentRunId)
+    if (entry !== undefined) {
+      await entry.adapter.abortRun?.(agentRunId)
+      return
+    }
+    // A queued/just-starting run may not have reached the adapter map yet.
+    // Keep the tombstone so a late runTurn cannot start it after Stop.
+    await Promise.all([...this.#entries.values()].map((item) => item.adapter.abortRun?.(agentRunId)))
   }
 
   async closeAgent(agentId: string): Promise<void> {
@@ -157,6 +182,8 @@ export class HarnessModelRouter implements AgentRuntimePort, AsyncDisposable {
   async close(): Promise<void> {
     const adapters = [...this.#entries.values()].map((entry) => entry.adapter)
     this.#entries.clear()
+    this.#runEntries.clear()
+    this.#abortedRuns.clear()
     const results = await Promise.allSettled(adapters.map((adapter) => adapter.close()))
     const failures = results.filter(
       (result): result is PromiseRejectedResult => result.status === 'rejected',
@@ -171,6 +198,18 @@ export class HarnessModelRouter implements AgentRuntimePort, AsyncDisposable {
 
   [Symbol.asyncDispose](): Promise<void> {
     return this.close()
+  }
+
+  #isAborted(request: AgentTurnRequest): boolean {
+    return request.agentRunId !== undefined && this.#abortedRuns.has(request.agentRunId)
+  }
+
+  async #resetFailedRun(entry: AdapterEntry, request: AgentTurnRequest): Promise<void> {
+    if (request.agentRunId !== undefined && entry.adapter.abortRun !== undefined) {
+      await entry.adapter.abortRun(request.agentRunId)
+      return
+    }
+    await entry.adapter.closeAgent?.(request.agent.id)
   }
 
   async #entry(
