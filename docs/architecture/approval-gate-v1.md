@@ -37,7 +37,9 @@ Skill proposal
 
 目标、动作或风险发生变化时必须重新审批。系统不提供“永久允许整个插件”或“永久允许全部外部动作”的宽泛授权。
 
-MCP 动态工具声明 `persistentApproval: forbidden`，因此只允许 `once` 审批。Firecrawl 和 Home Assistant 保留精确目标策略。
+策略键是 `(skillId, action, target, risk)`，**永不包含 `parameters`**。因此只有当一个技能的语义完全由目标和动作决定时，才可以声明 `exact-target`；语义装在参数里的技能（例如搜索查询）必须声明 `forbidden`，直到参数约束和策略指纹存在为止。
+
+MCP 动态工具与 Firecrawl 都声明 `persistentApproval: forbidden`，因此只允许 `once` 审批。Home Assistant 保留精确目标策略：它的目标和动作已经完全确定了语义，`parameters` 恒为空。
 
 ## 中断与重试
 

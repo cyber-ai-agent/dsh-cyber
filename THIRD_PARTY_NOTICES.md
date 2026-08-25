@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-This repository currently contains research and architecture documents only. It does not vendor source code or visual assets from the projects below.
+This repository contains its own TypeScript source. It does not vendor source code or visual assets from the projects below; third-party code is consumed as declared dependencies resolved at install time, including the `@deepseek-ai/*` runtime packages that the Harness compatibility adapter loads.
 
 ## DeepSeek Harness
 

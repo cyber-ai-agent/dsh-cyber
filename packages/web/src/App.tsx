@@ -13,6 +13,8 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type
 import type {
   AgentRuntimeEvent,
   AgentPermissionMode,
+  ApprovalRequestView,
+  ApprovalScope,
   ChatAttachment,
   CyberMarketKind,
   CyberMarketPackage,
@@ -115,6 +117,7 @@ export default function App() {
   const [conversationIntent, setConversationIntent] = useState<ConversationIntent>()
   const [messages, setMessages] = useState<WorkMessage[]>(demoMode ? demoData.messages.slice(-MESSAGE_PAGE_SIZE) : [])
   const [messagePage, setMessagePage] = useState({ hasMore: demoMode && demoData.messages.length > MESSAGE_PAGE_SIZE, loading: false })
+  const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequestView[]>([])
   const [transcriptReload, setTranscriptReload] = useState(0)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [preferences, setPreferences] = useState<WorkspacePreferences | undefined>(demoMode ? demoData.preferences : undefined)
@@ -1137,6 +1140,45 @@ export default function App() {
     if (activeSession !== undefined) setHistoryOpen(true)
   }, [activeSession])
 
+  // The gate refuses to execute anything nobody approved, so a turn that is
+  // waiting is simply stopped until this list is answered. It is polled rather
+  // than pushed because an approval can also be created by a scheduled action
+  // that no open conversation is watching.
+  const refreshPendingApprovals = useCallback(async (worldId: string): Promise<void> => {
+    if (demoMode) return
+    try {
+      const result = await api<{ items: ApprovalRequestView[] }>(`/api/worlds/${worldId}/approvals?status=pending`)
+      setPendingApprovals(result.items)
+    } catch {
+      // A failed poll must never break the conversation; the next one retries.
+    }
+  }, [demoMode])
+
+  const decideApproval = useCallback(async (
+    approvalId: string,
+    decision: 'approved' | 'rejected',
+    scope: ApprovalScope,
+  ): Promise<void> => {
+    const worldId = activeWorld?.id
+    await api(`/api/approvals/${approvalId}/decision`, { method: 'POST', body: JSON.stringify({ decision, scope }) })
+    if (worldId === undefined) return
+    await refreshPendingApprovals(worldId)
+    // A decision usually settles the stalled turn, so pull the durable
+    // transcript rather than waiting for the next stream event.
+    if (activeSessionId !== undefined) await refreshConversationTranscript(activeSessionId, activeSessionId, worldId)
+  }, [activeSessionId, activeWorld, refreshConversationTranscript, refreshPendingApprovals])
+
+  useEffect(() => {
+    const worldId = activeWorld?.id
+    if (demoMode || worldId === undefined) {
+      setPendingApprovals([])
+      return
+    }
+    void refreshPendingApprovals(worldId)
+    const timer = setInterval(() => { void refreshPendingApprovals(worldId) }, 4_000)
+    return () => clearInterval(timer)
+  }, [activeWorld, demoMode, refreshPendingApprovals])
+
   const send = useCallback((prompt: string, attachments: ChatAttachment[]): Promise<void> => {
     const world = activeWorld
     if (world === undefined) return Promise.resolve()
@@ -1673,6 +1715,8 @@ export default function App() {
             hasOlderMessages={messagePage.hasMore}
             loadingOlderMessages={messagePage.loading}
             onLoadOlderMessages={() => void loadOlderMessages()}
+            approvals={pendingApprovals}
+            onDecideApproval={decideApproval}
           />
         )}
         right={(

@@ -13,7 +13,7 @@
 | 包审批 | 完整 manifest 内容绑定、加密随机 token、TTL、单次消费、活动版本绑定、失败回滚 | grant 存于进程内，重启后需重新 preview | 跨设备/远程审批 |
 | 包完整性 | 严格 manifest、未知字段/长度/唯一性、入口-类型-能力关系、完整源目录库存、逐文件 SHA-256、路径/symlink 防护、staged 入口校验、激活后目标文件复验 | license 当前做 SPDX 表达式语法校验，不内置完整注册表 | 密码学签名、透明日志 |
 | 本地市场 | themes/plugins/talent 独立目录、搜索、官方 authority + digest、本地安装 | `certification` 不是签名；`verified` 级别不存在 | 远程 index、publish、付费、依赖、更新、卸载 |
-| 世界包实例 | 市场目录、工作区只读包库和世界私有实例分层；固定包版本与内容摘要；`origin`、`overrides` 和 SQLite 身份归属世界；Prompt、主题资源和角色蓝图只从当前世界实例进入运行时；创建失败精确补偿 | 主题绑定会显式创建世界实例；同版本请求幂等；不同版本拒绝隐式覆盖 | 带差异预览的更新、rebase、三方合并、overrides 编辑器 |
+| 世界包实例 | 市场目录、工作区只读包库和世界私有实例分层；固定包版本与内容摘要；`origin`、`overrides` 和 SQLite 身份归属世界；Prompt、主题资源和角色蓝图只从当前世界实例进入运行时；创建失败精确补偿 | 主题绑定会显式创建世界实例；同版本请求幂等；不同版本拒绝隐式覆盖；**「蓝图只有在世界存在实例时才可招募」在目录与运行时路径强制，但 `POST /api/worlds/:id/recruit` 仍会回退到工作区全局蓝图** | 带差异预览的更新、rebase、三方合并、overrides 编辑器 |
 | 世界主题 | 严格 nested/JSON parser、资源限制、引用/唯一性、八项核心 activity mapping、极端导航拒绝、安装/绑定/切换/禁用/内置回退 | 当前正式官方 roster 多数状态使用受控单帧 fallback | 音频、多场景切换、Three renderer |
 | 主题身份 | package + packageVersion + theme + themeVersion + digest，renderer key 不冲突 | 内置主题使用专用 builtin identity | 签名内容寻址分发 |
 | 主题资产 | staged 时整包与逐资产验证、`assets/` 包内路径、PNG/JPEG/WebP 签名、4/8 MiB 上限、不可变身份缓存、请求目标文件复验、越界/symlink 拒绝 | 缓存为进程内可信缓存 | 远程内容存储/CDN（当前明确禁止） |
@@ -24,10 +24,10 @@
 | 会话执行 | `WorkSession → WorkTurn → AgentRun` 持久模型；Skill Action 和 Approval Request 绑定同一会话与回合；`waiting-approval` 不占用 Worker 且跨重启保留；审批完成后在原 WorkTurn 新建 AgentRun，不重放用户回合；群聊和角色协作按真实调用顺序记录多次运行 | 当前只记录生命周期、错误码和 Runtime Session ID，不持久化原始 prompt、工具输入或工具结果 | 通用事件 items 表、远程执行同步 |
 | 世界轨迹 | 每个 AgentRun 投影为一条稳定主轨迹；中文判断摘要、结构化工具调度、状态、耗时、模型和真实 Token 归入同一次运行；按角色汇总 Token；支持角色、日期、关键词、内容和状态筛选以及游标分页；实时与重启恢复使用同一身份；全链路脱敏 | Token 只在 Harness 明确返回时展示，不进行估算；旧运行没有 Token 时保持为空 | 跨设备轨迹同步、用户配置的轨迹保留策略 |
 | 应用访问锁 | 全局锁屏覆盖整个工作台；锁定状态下服务端拒绝除健康检查和解锁外的应用 API；密码使用 scrypt 派生哈希保存在本机凭据目录；错误尝试限速；服务重启后默认重新锁定 | 会话当前保存在进程内并具有固定有效期；应用锁不代替操作系统账号、磁盘加密或文件权限 | 系统生物识别、设备间锁状态同步 |
-| 世界管理员 | 新世界首个角色自动成为管理员；已有世界迁移时优先选择管家，否则选择最早的活动角色；支持同世界内管理员移交；角色运行时只获得当前世界的管理员职责 | 管理边界当前覆盖角色设定，审批与审计仍沿用既有 Skill/Action 机制 | 多管理员、细粒度世界管理角色 |
+| 世界管理员 | 新世界首个角色自动成为管理员；已有世界迁移时优先选择管家，否则选择最早的活动角色；支持同世界内管理员移交；角色运行时只获得当前世界的管理员职责 | 同世界绑定由存储层强制（跨世界指派被拒绝）；管理能力本身目前只是写入 Persona 的身份标记，没有运行时强制点 | 多管理员、细粒度世界管理角色 |
 | 设置与模型连接 | 设置内容采用单列信息流；模型连接先配置地址与密钥，再拉取并搜索选择模型 ID；维护页只保留真实应用更新；主题采用完整预设并折叠低频自定义项 | 公开模型目录依赖供应商接口；手动模型 ID 保留为显式备用模式 | 自动供应商账户导入、跨设备设置同步 |
 | 应用更新 | 仅支持干净 `main` 分支从 `origin/main` 快进；更新前在隔离工作树完成 frozen install 与 build，并创建完整本地 Backup Bundle | 更新完成后需要用户重启当前进程；非 Git 安装和开发分支会明确显示不支持原因 | 桌面安装包增量更新、签名发布通道 |
-| 动作审批 | 外部副作用先持久化 Skill Action 与 Approval Request；两者关联 WorkTurn；未批准、已拒绝、已过期或授权已撤销时不会进入受信任 Adapter；持久执行 CAS 保证单次进入外部边界；审批后崩溃可安全续跑，已进入外部边界的崩溃转为结果未知并禁止自动重试 | 可复用策略由 Skill Descriptor 显式授权，严格绑定 Skill、Action、Target、Risk 与作用域 | 审批中心 UI、通用文件写入审批、远程审批同步 |
+| 动作审批 | 外部副作用先持久化 Skill Action 与 Approval Request；两者关联 WorkTurn；未批准、已拒绝、已过期或授权已撤销时不会进入受信任 Adapter；持久执行 CAS 保证单次进入外部边界；审批后崩溃可安全续跑，已进入外部边界的崩溃转为结果未知并禁止自动重试 | 会话内审批卡展示适配器、技能、调用、目标与参数，提供本次允许/一直允许/拒绝，并有一条穿 HTTP 的 propose→approve→execute 回归测试；可复用策略由 Skill Descriptor 显式授权，严格绑定 Skill、Action、Target、Risk 与作用域，**永不绑定 `parameters`**，因此语义装在参数里的技能（Firecrawl、MCP）声明 `forbidden` | 独立审批中心界面、通用文件写入审批、远程审批同步 |
 | MCP Skill Adapter | 官方 MCP TypeScript SDK Streamable HTTP 客户端；工具发现映射为独立 Skill；调用严格经过角色 Grant、单次 Approval 和 SQLite Action Ledger；禁止创建角色级或世界级持久策略；参数加密暂存并确定性清理；原始结果不持久化 | V1 通过显式 `/mcp 工具名 JSON` 命令提出调用；每个工作区当前配置一个 MCP 服务 | stdio Extension Host、模型原生结构化调用、多 MCP 服务实例管理 |
 | 模型交互日志 | turn/discovery 双源采集、SQLite 持久化、分页/筛选/详情/清空 API、设置面板日志界面、错误信息密钥清洗；v17 将 turn 日志绑定到 WorkTurn 与 AgentRun，并保存 Harness 返回的真实 Token | 一条 turn 日志表示整轮角色运行，不拆分 worker 内部的多次模型请求；消息数为近似统计；无自动保留策略 | worker 内逐请求明细、日志自动清理和条数上限 |
 | CI | Node 22.19、pnpm 11.7、frozen lockfile、typecheck、test、Chromium、E2E | 仓库工作流名为 `required`；GitHub 分支保护需在仓库设置中另行确认 | 自动发布与包签名流水线 |

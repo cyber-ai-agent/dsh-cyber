@@ -267,7 +267,7 @@ git clone https://github.com/cyber-ai-agent/dsh-cyber.git
 cd dsh-cyber
 pnpm install
 pnpm build
-pnpm dsh-cyber -- web
+pnpm dsh-cyber web
 ```
 
 Default local address:
@@ -279,9 +279,9 @@ Default local address:
 Useful commands:
 
 ```bash
-pnpm dsh-cyber -- doctor
-pnpm dsh-cyber -- backup --output ./backup.dshbackup
-pnpm dsh-cyber -- web --no-open
+pnpm dsh-cyber doctor
+pnpm dsh-cyber backup --output ./backup.dshbackup
+pnpm dsh-cyber web --no-open
 pnpm typecheck
 pnpm test
 pnpm test:e2e
@@ -293,7 +293,7 @@ pnpm test:e2e
 
 ```bash
 # 1. Back up local state
-pnpm dsh-cyber -- backup
+pnpm dsh-cyber backup
 
 # 2. Update program code
 git fetch origin
@@ -305,10 +305,10 @@ pnpm install --frozen-lockfile
 pnpm build
 
 # 4. Validate local state
-pnpm dsh-cyber -- doctor
+pnpm dsh-cyber doctor
 
 # 5. Start
-pnpm dsh-cyber -- web
+pnpm dsh-cyber web
 ```
 
 If you use a custom `--data-dir`, keep using the **same directory** after upgrading.

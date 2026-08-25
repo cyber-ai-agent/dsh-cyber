@@ -138,8 +138,20 @@ function samePath(left: string, right: string): boolean {
     : normalizedLeft === normalizedRight
 }
 
+/**
+ * `git rev-parse --show-toplevel` reports the real path, so the launch
+ * directory has to be resolved the same way before the two can be compared.
+ * On macOS the default temporary and volume paths traverse a symlink
+ * (/var -> /private/var), where a plain resolve() leaves the two strings
+ * different and the update check fails closed on a perfectly valid checkout.
+ */
 function canonicalPath(value: string): string {
-  const resolved = resolve(value)
-  try { return realpathSync.native(resolved).replaceAll('\\', '/') }
-  catch { return resolved.replaceAll('\\', '/') }
+  const normalized = resolve(value)
+  try {
+    return realpathSync.native(normalized).replaceAll('\\', '/')
+  } catch {
+    // A path that does not exist cannot be a repository root either; compare
+    // the normalized form so the caller still gets a defined answer.
+    return normalized.replaceAll('\\', '/')
+  }
 }
