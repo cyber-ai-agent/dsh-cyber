@@ -22,6 +22,7 @@
   "devDependencies": {
     "@playwright/test": "1.55.0",
     "@types/node": "22.20.0",
+    "happy-dom": "^20.11.6",
     "tsx": "4.22.4",
     "typescript": "6.0.3",
     "vitest": "4.1.8"
