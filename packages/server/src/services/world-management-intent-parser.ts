@@ -7,6 +7,12 @@ export interface WorldManagementCharacterRef {
   status?: string
 }
 
+export interface WorldManagementPlan {
+  proposals: WorldManagementIntentProposal[]
+  /** Clauses of a compound request that matched no supported action. */
+  unhandled: string[]
+}
+
 export interface WorldManagementIntentContext {
   worldId: string
   characters: readonly WorldManagementCharacterRef[]
@@ -16,6 +22,7 @@ export interface WorldManagementIntentContext {
 export type WorldAuthorityOperation = 'promote' | 'demote' | 'grant' | 'revoke'
 
 export type WorldManagementProposalKind =
+  | 'clarification'
   | 'read-authority'
   | 'settings-patch'
   | 'world-rename'
@@ -32,7 +39,12 @@ export interface WorldManagementIntentProposal {
   label: string
   requiredWorldPermission: WorldCharacterPermission
   parameters: JsonObject
+  /** Position within a compound request; 1 for a single-action prompt. */
+  ordinal?: number
 }
+
+/** Connectors a compound management request may legitimately be split on. */
+const CLAUSE_SEPARATORS = /[，,。;；]|然后|接着|再把|并且|同时/u
 
 /**
  * Deliberately small, deterministic V1 parser. It consumes only the raw user
@@ -41,13 +53,74 @@ export interface WorldManagementIntentProposal {
  * package, tool, or agent output.
  */
 export class WorldManagementIntentParser {
+  /**
+   * Compiles a management request into an ordered plan.
+   *
+   * A compound sentence is split on its connectors first, and each clause is
+   * matched on its own. Without that split every value regex ended at `$` and
+   * the first one to match swallowed the rest of the sentence — "把当前场景改成
+   * 产品评审，然后把老王设成管理员" set the scenario to the whole string and the
+   * promotion never happened.
+   *
+   * Splitting is conservative: only the listed connectors, and a clause that
+   * matches nothing is reported rather than silently dropped.
+   */
   parse(prompt: string, context: WorldManagementIntentContext, source: 'raw-user' | 'external' = 'raw-user'): WorldManagementIntentProposal[] {
-    if (source !== 'raw-user') return []
-    const text = cleanPrompt(prompt)
-    if (text === '') return []
+    return this.compile(prompt, context, source).proposals
+  }
 
+  compile(
+    prompt: string,
+    context: WorldManagementIntentContext,
+    source: 'raw-user' | 'external' = 'raw-user',
+  ): WorldManagementPlan {
+    if (source !== 'raw-user') return { proposals: [], unhandled: [] }
+    const text = cleanPrompt(prompt)
+    if (text === '') return { proposals: [], unhandled: [] }
+
+    const segments = splitClauses(text)
+    const proposals: WorldManagementIntentProposal[] = []
+    const unhandled: string[] = []
+    let lastCharacter: WorldManagementCharacterRef | undefined
+    for (const segment of segments) {
+      // "把老王设成管理员，给他世界设置权限" keeps talking about 老王. Carrying
+      // the previous clause's character across a pronoun is what makes
+      // splitting safe; without it the second clause resolves nobody.
+      const clauseContext = carriesPronoun(segment) && lastCharacter !== undefined
+        ? { ...context, characters: [lastCharacter] }
+        : context
+      const resolvedHere = resolveCharacter(segment, context.characters).character
+      if (resolvedHere !== undefined) lastCharacter = resolvedHere
+      const matched = this.#parseClause(carriesPronoun(segment) && lastCharacter !== undefined
+        ? segment.replace(/他|她|它|TA|ta/u, lastCharacter.displayName)
+        : segment, clauseContext)
+      if (matched.length === 0) {
+        // Only worth reporting when the sentence was actually compound: a
+        // single clause that matches nothing is an ordinary chat message.
+        if (segments.length > 1) unhandled.push(segment)
+        continue
+      }
+      for (const proposal of matched) {
+        const existing = proposals.find((item) => item.action === proposal.action && item.target === proposal.target)
+        if (existing === undefined) {
+          proposals.push({ ...proposal, ordinal: proposals.length + 1 })
+          continue
+        }
+        // Two clauses about the same character's authority are one decision,
+        // not two: "设成管理员" then "给他这些权限" merges into one promotion.
+        if (proposal.action === 'world.authority.update') mergeAuthorityProposal(existing, proposal)
+      }
+    }
+    return { proposals, unhandled }
+  }
+
+  #parseClause(text: string, context: WorldManagementIntentContext): WorldManagementIntentProposal[] {
     const target = resolveCharacter(text, context.characters)
-    if (target.ambiguous) return []
+    // Ambiguity is scoped to the character branch: two names appearing in a
+    // sentence used to veto world-scoped actions that merely mentioned them.
+    if (target.ambiguous && mentionsCharacterAction(text)) {
+      return [this.clarification(context.worldId, target.candidates)]
+    }
     // A narrowly-scoped authority query is safe even when written as a
     // question. It must be answered from the authority store, never guessed
     // by the model. All other questions remain non-mutating no-ops.
@@ -119,6 +192,21 @@ export class WorldManagementIntentParser {
     return []
   }
 
+  private clarification(worldId: string, candidates: readonly WorldManagementCharacterRef[]): WorldManagementIntentProposal {
+    return {
+      kind: 'clarification',
+      skillId: 'builtin.world.characters.list',
+      action: 'world.characters.list',
+      target: `world:${worldId}`,
+      label: '需要确认目标角色',
+      requiredWorldPermission: 'world.characters.read',
+      parameters: {
+        reason: 'ambiguous-character',
+        candidates: candidates.map((item) => ({ id: item.id, displayName: item.displayName })),
+      },
+    }
+  }
+
   private settingsPatch(worldId: string, field: 'scenario' | 'lore' | 'addressAs', value: string, label: string): WorldManagementIntentProposal {
     const parameters: JsonObject = field === 'addressAs'
       ? { userIdentity: { addressAs: value } }
@@ -188,13 +276,62 @@ function parsePermissionMutation(text: string): { grants: WorldCharacterPermissi
   }
 }
 
-function resolveCharacter(text: string, characters: readonly WorldManagementCharacterRef[]): { character?: WorldManagementCharacterRef; ambiguous: boolean } {
-  const matches = characters.filter((item) => item.status !== 'archived' && item.displayName.length > 0 && text.includes(item.displayName))
-  const unique = [...new Map(matches.map((item) => [item.id, item])).values()]
-  const only = unique[0]
-  return unique.length === 1 && only !== undefined
-    ? { character: only, ambiguous: false }
-    : { ambiguous: unique.length > 1 }
+/**
+ * Resolves a character by exact id, then by display name.
+ *
+ * Names are matched case-insensitively and the longest match wins, so a world
+ * holding both 王 and 老王 resolves "把老王设成管理员" to 老王 instead of
+ * refusing on a false ambiguity.
+ */
+function resolveCharacter(
+  text: string,
+  characters: readonly WorldManagementCharacterRef[],
+): { character?: WorldManagementCharacterRef; ambiguous: boolean; candidates: WorldManagementCharacterRef[] } {
+  const active = characters.filter((item) => item.status !== 'archived' && item.displayName.length > 0)
+  const byId = active.find((item) => item.id.length > 0 && text.includes(item.id))
+  if (byId !== undefined) return { character: byId, ambiguous: false, candidates: [byId] }
+  const folded = text.toLocaleLowerCase()
+  const matches = active.filter((item) => folded.includes(item.displayName.toLocaleLowerCase()))
+  if (matches.length === 0) return { ambiguous: false, candidates: [] }
+  const longest = Math.max(...matches.map((item) => item.displayName.length))
+  const best = [...new Map(matches
+    .filter((item) => item.displayName.length === longest)
+    .map((item) => [item.id, item])).values()]
+  const only = best[0]
+  return best.length === 1 && only !== undefined
+    ? { character: only, ambiguous: false, candidates: best }
+    : { ambiguous: true, candidates: best }
+}
+
+/** Whether a clause continues talking about the previous clause's character. */
+function carriesPronoun(text: string): boolean {
+  return /他|她|它|TA|ta/u.test(text)
+}
+
+/** Folds a follow-up authority clause into the decision already proposed. */
+function mergeAuthorityProposal(existing: WorldManagementIntentProposal, next: WorldManagementIntentProposal): void {
+  const merge = (key: 'permissionGrants' | 'removePermissions'): void => {
+    const before = Array.isArray(existing.parameters[key]) ? existing.parameters[key] as string[] : []
+    const after = Array.isArray(next.parameters[key]) ? next.parameters[key] as string[] : []
+    existing.parameters[key] = [...new Set([...before, ...after])]
+  }
+  merge('permissionGrants')
+  merge('removePermissions')
+  // A promotion outranks a plain grant: the user asked for both.
+  if (next.parameters.operation === 'promote' || next.parameters.operation === 'demote') {
+    existing.parameters.operation = next.parameters.operation
+  }
+}
+
+/** Splits a compound request on its connectors, keeping non-empty clauses. */
+function splitClauses(text: string): string[] {
+  const parts = text.split(CLAUSE_SEPARATORS).map((part) => part.trim()).filter((part) => part.length > 0)
+  return parts.length === 0 ? [text] : parts
+}
+
+/** Whether a clause actually asks for something scoped to a character. */
+function mentionsCharacterAction(text: string): boolean {
+  return /管理员|权限|身份|岗位/u.test(text)
 }
 
 function isQuestion(text: string): boolean {

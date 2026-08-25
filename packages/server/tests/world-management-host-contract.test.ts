@@ -217,3 +217,44 @@ describe('permission decisions belong to their conversation', () => {
     }
   })
 })
+
+describe('compound world management requests', () => {
+  it('performs both actions of a two-clause request in one turn', async () => {
+    const { origin, server } = await start()
+    const { world, characterId } = await administratorWorld(origin)
+    server.store.saveBlueprint({
+      schemaVersion: 1,
+      id: 'laowang',
+      version: 1,
+      worldTemplateId: 'personal-world',
+      displayName: '老王',
+      role: '成员',
+      summary: '测试角色',
+      persona: '你是老王。',
+      requestedSkills: [],
+      requestedCapabilities: [],
+      createdAt: '2026-08-25T00:00:00.000Z',
+    })
+    const laowang = server.store.recruitEmployee({
+      workspaceId: world.workspaceId,
+      worldId: world.id,
+      blueprintId: 'laowang',
+      blueprintVersion: 1,
+    })
+
+    await chat(origin, world.id, characterId, '把当前场景改成产品评审，然后把老王设成管理员')
+
+    const actions = await skillActions(origin, world.id)
+    const performed = actions.filter((item) => item.status === 'executed').map((item) => item.action)
+    // The scenario regex used to swallow the whole sentence and the promotion
+    // never happened at all.
+    expect(performed).toEqual(expect.arrayContaining(['world.settings.update', 'world.authority.update']))
+
+    const settings = await json(origin, `/api/worlds/${world.id}/settings`)
+    expect(settings.body.settings.scenario).toBe('产品评审')
+    expect(settings.body.settings.scenario).not.toContain('管理员')
+
+    const authority = await json(origin, `/api/worlds/${world.id}/authorities/${laowang.id}`)
+    expect(authority.body.authority.role).toBe('administrator')
+  })
+})
