@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { realpathSync } from 'node:fs'
 import { mkdir, rm } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { join, resolve } from 'node:path'
@@ -130,9 +131,15 @@ function errorMessage(error: unknown): string {
 }
 
 function samePath(left: string, right: string): boolean {
-  const normalizedLeft = resolve(left)
-  const normalizedRight = resolve(right)
+  const normalizedLeft = canonicalPath(left)
+  const normalizedRight = canonicalPath(right)
   return process.platform === 'win32'
     ? normalizedLeft.toLocaleLowerCase() === normalizedRight.toLocaleLowerCase()
     : normalizedLeft === normalizedRight
+}
+
+function canonicalPath(value: string): string {
+  const resolved = resolve(value)
+  try { return realpathSync.native(resolved).replaceAll('\\', '/') }
+  catch { return resolved.replaceAll('\\', '/') }
 }

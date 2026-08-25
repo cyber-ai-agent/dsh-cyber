@@ -137,6 +137,7 @@ function workspaceEntryIsHidden(relativePath: string): boolean {
 
 function workspacePreviewKind(fileName: string): { kind: 'text' | 'image'; contentType: string } | undefined {
   const extension = extname(fileName).toLowerCase()
+  if (extension === '.html') return { kind: 'text', contentType: 'text/html; charset=utf-8' }
   const images: Record<string, string> = {
     '.png': 'image/png',
     '.jpg': 'image/jpeg',

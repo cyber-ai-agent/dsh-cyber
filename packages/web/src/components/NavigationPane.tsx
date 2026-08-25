@@ -204,7 +204,7 @@ function SessionRow({
   return (
     <div className={`session-row-wrap${active ? ' is-active' : ''}${item.pinned ? ' is-pinned' : ''}`}>
       <button className="session-row session-row--hub" type="button" onClick={onClick} onContextMenu={(event) => { event.preventDefault(); openMenu({ x: event.clientX, y: event.clientY }) }} onKeyDown={(event) => { if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return; event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); openMenu({ x: rect.left + 28, y: rect.top + 28 }) }} aria-label={session.kind === 'direct' && participants[0] !== undefined ? `与${participants[0].displayName}私聊` : directTitle(session, participants)}>
-        <span className="session-row__avatar" aria-hidden="true">
+        <span className={`session-row__avatar${session.kind === 'group' || session.kind === 'meeting' ? ' session-row__avatar--group' : ''}`} aria-hidden="true">
           {participants.length === 0
             ? session.kind === 'group' || session.kind === 'meeting' ? <UsersThree size={16} /> : <ChatCircleDots size={16} />
             : participants.slice(0, 2).map((employee) => <Avatar key={employee.id} index={employee.avatarIndex} size="sm" label={employee.displayName} />)}

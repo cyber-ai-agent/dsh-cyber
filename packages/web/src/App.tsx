@@ -143,6 +143,7 @@ export default function App() {
   const [savingSettings, setSavingSettings] = useState(false)
   const [recruitmentOpen, setRecruitmentOpen] = useState(false)
   const [groupDialogOpen, setGroupDialogOpen] = useState(false)
+  const [groupCreating, setGroupCreating] = useState(false)
   const [packageMarketOpen, setPackageMarketOpen] = useState(false)
   const [packageMarketKind, setPackageMarketKind] = useState<CyberMarketKind>('theme')
   const [marketplaceItems, setMarketplaceItems] = useState<CyberMarketPackage[]>([])
@@ -487,8 +488,13 @@ export default function App() {
 
         const clientTurnId = metadataText(envelope.event.metadata.clientTurnId)
         const traceTurnId = envelope.agentRunId
-        if (clientTurnId === undefined || traceTurnId === undefined) return
-        const pending = pendingTurnsRef.current.find((turn) => turn.id === clientTurnId)
+        if (traceTurnId === undefined) return
+        const pending = pendingTurnsRef.current.find((turn) =>
+          (clientTurnId !== undefined && turn.id === clientTurnId) ||
+          (clientTurnId === undefined && turn.sessionId === envelope.sessionId),
+        )
+        const effectiveClientTurnId = clientTurnId ?? pending?.id
+        if (effectiveClientTurnId === undefined) return
         const queueKey = pending?.queueKey
           ?? queueKeyBySessionRef.current.get(envelope.sessionId)
           ?? (activeSessionIdRef.current === envelope.sessionId ? activeConversationKeyRef.current : undefined)
@@ -524,7 +530,7 @@ export default function App() {
                 worldId: world.id,
                 sessionId: envelope.sessionId,
                 employeeId: envelope.agentId,
-                clientTurnId,
+                clientTurnId: effectiveClientTurnId,
                 traceTurnId,
                 workTurnId: envelope.workTurnId,
                 agentRunId: envelope.agentRunId,
@@ -558,6 +564,20 @@ export default function App() {
     }
     return subscribeWorldLive(world.id, 'runtime', onRuntime)
   }, [activeWorld, bindConversationSession, refreshConversationTranscript])
+
+  useEffect(() => {
+    if (demoMode || activeWorld === undefined || pendingTurns.length === 0) return
+    const world = activeWorld
+    const reconcile = () => {
+      for (const turn of pendingTurnsRef.current) {
+        if (turn.worldId !== world.id || (turn.status !== 'queued' && turn.status !== 'running')) continue
+        const sessionId = turn.sessionId ?? sessionByQueueKeyRef.current.get(turn.queueKey)
+        if (sessionId !== undefined) void refreshConversationTranscript(sessionId, turn.queueKey, world.id)
+      }
+    }
+    const timer = window.setInterval(reconcile, 900)
+    return () => window.clearInterval(timer)
+  }, [activeWorld, demoMode, pendingTurns.length, refreshConversationTranscript])
 
   useEffect(() => {
     const root = document.documentElement
@@ -606,21 +626,44 @@ export default function App() {
     setSelectedEmployeeId(employee.id)
   }, [activeSessionId, messages.length, sessionParticipants, sessions])
 
-  const createGroupIntent = useCallback((input: { title: string; employeeIds: string[] }) => {
+  const createGroupSession = useCallback(async (input: { title: string; employeeIds: string[] }) => {
+    const world = activeWorld
     const selected = employees.filter((employee) => input.employeeIds.includes(employee.id))
-    if (selected.length < 2) return
-    setGroupDialogOpen(false)
-    setActiveSessionId(undefined)
-    setMessages([])
-    setMessagePage({ hasMore: false, loading: false })
-    setDraft('')
-    setConversationIntent({
-      kind: 'group',
-      employeeIds: selected.map((employee) => employee.id),
-      title: input.title.trim() || selected.map((employee) => employee.displayName).join('、'),
-    })
-    setSelectedEmployeeId(selected[0]?.id)
-  }, [employees])
+    if (world === undefined || selected.length < 2 || groupCreating) return
+    setGroupCreating(true)
+    setError(undefined)
+    try {
+      const title = input.title.trim() || selected.map((employee) => employee.displayName).join('、')
+      let session: WorkSession
+      let participantIds = selected.map((employee) => employee.id)
+      if (demoMode) {
+        session = makeDemoSession(world, title, 'group', title)
+      } else {
+        const result = await api<{ session: WorkSession; participantIds: string[] }>(`/api/worlds/${encodeURIComponent(world.id)}/group-sessions`, {
+          method: 'POST',
+          body: JSON.stringify({ title, employeeIds: participantIds }),
+        })
+        session = result.session
+        participantIds = result.participantIds
+      }
+      setSessions((current) => [session, ...current.filter((item) => item.id !== session.id)])
+      setSessionParticipants((current) => ({ ...current, [session.id]: participantIds }))
+      setActiveSessionId(session.id)
+      setGroupDialogOpen(false)
+      setConversationIntent(undefined)
+      setMessages([])
+      setMessagePage({ hasMore: false, loading: false })
+      setDraft('')
+      setSelectedEmployeeId(selected[0]?.id)
+      setAppMode('workbench')
+      setDockCollapsed(false)
+      setDockTab('world')
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '群聊创建失败')
+    } finally {
+      setGroupCreating(false)
+    }
+  }, [activeWorld, demoMode, employees, groupCreating])
 
   const openRecruitment = useCallback(async (preferredId?: string) => {
     if (activeWorld === undefined) return
@@ -789,6 +832,35 @@ export default function App() {
       setPackageInstalling(false)
     }
   }, [activeWorld, demoMode, installPackage, loadInstalledPluginCommands, loadPackages, searchMarketplace, workspace])
+
+  const uninstallPackage = useCallback(async (installed: InstalledPackage) => {
+    if (workspace === undefined) throw new Error('工作区尚未就绪')
+    setPackageInstalling(true)
+    try {
+      if (demoMode) {
+        setInstalledPackages((current) => current.map((item) => item.packageId === installed.packageId && item.version === installed.version ? { ...item, status: 'disabled' } : item))
+        setInstalledPluginCommands((current) => current.filter((command) => command.packageId !== installed.packageId))
+        setMarketplaceItems((current) => current.map((item) => {
+          if (item.manifest.id !== installed.packageId) return item
+          const next = { ...item }
+          delete next.installedVersion
+          delete next.worldVersion
+          return next
+        }))
+      } else {
+        await api(`/api/workspaces/${encodeURIComponent(workspace.id)}/packages/${encodeURIComponent(installed.packageId)}`, { method: 'DELETE' })
+        await Promise.all([loadPackages(), searchMarketplace(packageMarketKind), loadInstalledPluginCommands()])
+      }
+    } finally {
+      setPackageInstalling(false)
+    }
+  }, [demoMode, loadInstalledPluginCommands, loadPackages, packageMarketKind, searchMarketplace, workspace])
+
+  const openIntegrationSettings = useCallback(() => {
+    setPackageMarketOpen(false)
+    setSettingsSection('integrations')
+    setSettingsOpen(true)
+  }, [])
 
   const recruitEmployee = useCallback(async (
     blueprint: EmployeeBlueprint,
@@ -1627,7 +1699,7 @@ export default function App() {
                     const employee = employees.find((item) => item.id === employeeId)
                     if (employee !== undefined) directEmployee(employee)
                   }}
-                  onStartGroup={(employeeIds, session) => {
+          onStartGroup={(employeeIds, session) => {
           const selected = employees.filter((employee) => employeeIds.includes(employee.id))
           if (selected.length < 2) return
           if (session !== undefined) {
@@ -1643,7 +1715,7 @@ export default function App() {
             setDockTab('world')
             return
           }
-          createGroupIntent({ employeeIds: selected.map((employee) => employee.id), title: selected.map((employee) => employee.displayName).join('、') })
+          void createGroupSession({ employeeIds: selected.map((employee) => employee.id), title: selected.map((employee) => employee.displayName).join('、') })
         }}
                   />
                 </Suspense>
@@ -1665,8 +1737,9 @@ export default function App() {
       {groupDialogOpen ? (
         <Suspense fallback={<div className="dialog-loading" role="status">正在准备群聊…</div>}><GroupConversationDialog
           employees={employees}
+          creating={groupCreating}
           onClose={() => setGroupDialogOpen(false)}
-          onCreate={createGroupIntent}
+          onCreate={createGroupSession}
         /></Suspense>
       ) : null}
       {historyOpen && activeSession !== undefined ? (
@@ -1728,6 +1801,8 @@ export default function App() {
           onSearch={searchMarketplace}
           onPreviewMarketplace={previewMarketplacePackage}
           onInstallMarketplace={installMarketplacePackage}
+          onUninstall={uninstallPackage}
+          onOpenSettings={openIntegrationSettings}
           onCreateThemeWorld={createWorldFromTheme}
           onRecruitTalent={async (item) => {
             const activation = item.activation?.kind === 'employee-blueprint' ? item.activation : undefined

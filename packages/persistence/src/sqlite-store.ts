@@ -2872,6 +2872,32 @@ export class SqliteStore {
     return row ? mapInstalledPackage(row) : undefined
   }
 
+  disableInstalledPackage(workspaceId: string, packageId: string, version: string, actorId = 'owner'): InstalledPackage {
+    this.#assertWritable()
+    const current = this.getInstalledPackage(workspaceId, packageId, version)
+    if (current === undefined) throw new EntityNotFoundError('Installed package not found')
+    if (current.status === 'disabled') return current
+    if (current.status !== 'active') throw new PersistenceError('Only the active package version can be uninstalled')
+    const now = this.#clock()
+    return this.#transaction(() => {
+      const result = this.database.prepare(
+        `UPDATE installed_packages SET status = 'disabled', updated_at = ?
+         WHERE workspace_id = ? AND package_id = ? AND version = ? AND status = 'active'`,
+      ).run(now, workspaceId, packageId, version)
+      if (Number(result.changes) !== 1) throw new PersistenceError('Installed package changed concurrently')
+      const disabled = { ...current, status: 'disabled' as const, updatedAt: now }
+      this.#appendEvent({
+        workspaceId,
+        type: 'package.uninstalled',
+        actorId,
+        actorKind: actorId === 'system' ? 'system' : 'owner',
+        correlationId: `${packageId}@${version}`,
+        payload: { packageId, version },
+      })
+      return disabled
+    })
+  }
+
   getWorldPackageInstance(instanceId: string): WorldPackageInstance | undefined {
     const row = this.database
       .prepare('SELECT * FROM world_package_instances WHERE id = ?')
