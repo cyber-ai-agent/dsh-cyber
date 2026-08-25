@@ -320,6 +320,25 @@ export class WorldRuntimeService {
     this.publishState(projected.snapshot)
   }
 
+  /**
+   * Announces that a world's pending decisions changed.
+   *
+   * Change-driven, unlike the world-state snapshot the client used to refetch
+   * on: that fires once per streamed token, so one character turn produced
+   * dozens of requests for a list that had not moved.
+   */
+  publishDecisionChanged(worldId: string, payload: JsonObject): void {
+    this.#publish({
+      contractVersion: 1,
+      id: `decision-${payload.requestId ?? payload.approvalId ?? this.#clock()}`,
+      worldId,
+      sequence: 0,
+      kind: 'world-decision',
+      payload,
+      createdAt: this.#clock(),
+    })
+  }
+
   publishState(snapshot: WorldRuntimeSnapshot): void {
     this.#publish({
       contractVersion: 1,

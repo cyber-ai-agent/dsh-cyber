@@ -112,6 +112,8 @@ export interface WorldCue {
 export type WorldRuntimeStreamEventKind =
   | 'runtime'
   | 'domain'
+  /** A pending decision was created, decided, consumed or expired. */
+  | 'world-decision'
   | 'world-state'
   | 'world-cue'
   | 'heartbeat'

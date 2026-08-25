@@ -35,6 +35,7 @@ import type { WorldFileService } from '../services/world-file-service.js'
 import type { WorldSettingsService } from '../services/world-settings-service.js'
 import type { WorldTraceService } from '../services/world-trace-service.js'
 import type { WorldPackageInstanceService } from '../services/world-package-instance-service.js'
+import type { OwnerRuntimeAccessService } from '../services/owner-runtime-access-service.js'
 import type { WorldRuntimePermissionResolver } from '../services/world-runtime-permission-resolver.js'
 import type { TurnAwareApprovalContinuationService } from '../services/turn-aware-approval-continuation-service.js'
 import { ServiceError } from '../services/service-error.js'
@@ -53,6 +54,8 @@ export interface ConversationRoutesDependencies {
   employeeActivity: EmployeeActivityProjectionService
   worldPackages: WorldPackageInstanceService
   worldRuntimePermissions?: WorldRuntimePermissionResolver
+  /** Issues and spends one-time owner host-access grants. */
+  ownerRuntimeAccess?: OwnerRuntimeAccessService
   turnContinuations: TurnAwareApprovalContinuationService
 }
 
@@ -71,6 +74,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     employeeActivity,
     worldPackages,
     worldRuntimePermissions,
+    ownerRuntimeAccess,
     turnContinuations,
   } = dependencies
   const delegatedCollaboration = new DelegatedCollaborationService({
@@ -172,18 +176,33 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
       ? worldSettingsValue.model.reasoningEffort
       : requiredEnum<ReasoningEffort>(body, 'reasoningEffort', ['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
     const requestedPermissionMode = body.permissionMode === undefined ? 'read-only' : requiredEnum<AgentPermissionMode>(body, 'permissionMode', ['read-only', 'workspace-write', 'danger-full-access'])
+    // Full host access requires a one-time grant the owner issued for this
+    // exact turn. It is spent on the first check, so it cannot be replayed,
+    // and nothing on the skill path can mint one.
+    const ownerHostAccess = requestedPermissionMode === 'danger-full-access'
+      && ownerRuntimeAccess?.consume({
+        grantId: optionalString(body.runtimeAccessGrantId),
+        worldId: world.id,
+        employeeIds,
+        clientTurnId: optionalString(body.clientTurnId),
+      }) === true
     const resolvedPermissions = worldRuntimePermissions === undefined
       ? undefined
       : await Promise.all(employeeIds.map((employeeId) => worldRuntimePermissions.resolve({
           worldId: world.id,
           employeeId,
           requestedMode: requestedPermissionMode,
+          ownerHostAccess,
         })))
     const permissionMode: AgentPermissionMode = resolvedPermissions === undefined
-      ? requestedPermissionMode
-      : resolvedPermissions.every((item) => item.permissionMode === 'workspace-write')
-        ? 'workspace-write'
-        : 'read-only'
+      // Without a resolver the request cannot be trusted to cap itself; the
+      // safe default is the least privilege, not what the client asked for.
+      ? requestedPermissionMode === 'danger-full-access' ? 'read-only' : requestedPermissionMode
+      : resolvedPermissions.every((item) => item.permissionMode === 'danger-full-access')
+        ? 'danger-full-access'
+        : resolvedPermissions.every((item) => item.permissionMode === 'workspace-write' || item.permissionMode === 'danger-full-access')
+          ? 'workspace-write'
+          : 'read-only'
     if (employeeIds.length === 0) throw new HttpError(422, 'agent_required', '请选择或 @ 至少一个角色')
     const clientTurnId = optionalString(body.clientTurnId)
     if (clientTurnId !== undefined && clientTurnId.length > 128) {

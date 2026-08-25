@@ -1,3 +1,4 @@
+import type { JsonObject } from '@dsh-cyber/contracts'
 import type {
   CreateWorldPermissionRequestInput,
   DecideWorldPermissionRequestInput,
@@ -81,6 +82,8 @@ export interface WorldPermissionRequestServiceOptions {
   store: WorldPermissionRequestStore
   authority: WorldAuthorityPort
   clock?: () => Date
+  /** Announces that this world's pending decisions changed. */
+  onDecisionChanged?(worldId: string, payload: JsonObject): void
 }
 
 const DEFAULT_TTL_MS = 10 * 60_000
@@ -97,18 +100,41 @@ export class WorldPermissionRequestService {
   readonly #store: WorldPermissionRequestStore
   readonly #authority: WorldAuthorityPort
   readonly #clock: () => Date
+  readonly #onDecisionChanged: ((worldId: string, payload: JsonObject) => void) | undefined
 
   constructor(options: WorldPermissionRequestServiceOptions) {
     this.#store = options.store
     this.#authority = options.authority
     this.#clock = options.clock ?? (() => new Date())
+    this.#onDecisionChanged = options.onDecisionChanged
+  }
+
+  /**
+   * Tells the world its pending decisions moved.
+   *
+   * Fire-and-forget: the HTTP list stays authoritative, and a stream failure
+   * must never break a decision.
+   */
+  #announce(request: WorldPermissionRequest): void {
+    try {
+      this.#onDecisionChanged?.(request.worldId, {
+        requestId: request.id,
+        employeeId: request.employeeId,
+        permission: request.permission,
+        status: request.status,
+        ...(request.sessionId === undefined ? {} : { sessionId: request.sessionId }),
+        ...(request.decisionScope === undefined ? {} : { decisionScope: request.decisionScope }),
+      })
+    } catch {
+      // Intentionally swallowed.
+    }
   }
 
   async ensure(input: EnsureWorldPermissionRequestInput): Promise<WorldPermissionRequest> {
     const existing = await this.findForAction(input.skillActionId, input.permission, input.worldId)
     if (existing !== undefined) return existing
     const now = input.now ?? this.#clock()
-    return await this.#store.createWorldPermissionRequest({
+    const created = await this.#store.createWorldPermissionRequest({
       workspaceId: input.workspaceId,
       worldId: input.worldId,
       employeeId: input.employeeId,
@@ -118,6 +144,8 @@ export class WorldPermissionRequestService {
       createdAt: now.toISOString(),
       expiresAt: new Date(now.getTime() + (input.expiresInMs ?? DEFAULT_TTL_MS)).toISOString(),
     })
+    this.#announce(created)
+    return created
   }
 
   async check(action: Pick<CharacterSkillAction, 'worldId' | 'characterId' | 'workTurnId' | 'id' | 'requiredWorldPermission'> & {
@@ -229,17 +257,21 @@ export class WorldPermissionRequestService {
         throw new WorldPermissionGrantRejectedError()
       }
     }
-    return await this.#store.decideWorldPermissionRequest(input.requestId, {
+    const decided = await this.#store.decideWorldPermissionRequest(input.requestId, {
       decisionScope: input.decision,
       decidedBy: input.decidedBy,
     }, now.toISOString())
+    this.#announce(decided)
+    return decided
   }
 
   async consumeOnce(requestId: string, now = this.#clock()): Promise<WorldPermissionRequest> {
     const request = await this.#store.getWorldPermissionRequest(requestId)
     if (request === undefined) throw new Error(`World permission request not found: ${requestId}`)
     if (request.status !== 'approved' || request.decisionScope !== 'once' || request.consumedAt !== undefined) return request
-    return await this.#store.consumeWorldPermissionRequest(requestId, now.toISOString())
+    const consumed = await this.#store.consumeWorldPermissionRequest(requestId, now.toISOString())
+    this.#announce(consumed)
+    return consumed
   }
 
   async findForAction(actionId: string, permission?: WorldCharacterPermission, worldId?: string): Promise<WorldPermissionRequest | undefined> {

@@ -1,4 +1,4 @@
-type WorldLiveEventName = 'error' | 'ready' | 'runtime' | 'trace' | 'world-cue' | 'world-runtime' | 'world-state'
+type WorldLiveEventName = 'error' | 'ready' | 'runtime' | 'trace' | 'world-cue' | 'world-decision' | 'world-runtime' | 'world-state'
 type WorldLiveListener = (event: Event) => void
 
 interface SharedWorldLiveClient {

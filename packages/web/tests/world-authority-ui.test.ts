@@ -130,3 +130,54 @@ describe('world authority UI', () => {
     expect(integrationMarkup).not.toContain('授予该权限并执行')
   })
 })
+
+describe('world permission card content and routing', () => {
+  const base = {
+    id: 'request-1',
+    workspaceId: 'workspace-1',
+    worldId: 'world-1',
+    employeeId: 'employee-1',
+    skillActionId: 'action-1',
+    permission: 'world.settings.write' as const,
+    status: 'pending' as const,
+    createdAt: '2026-08-25T10:00:00.000Z',
+    expiresAt: '2026-08-25T10:10:00.000Z',
+  }
+  const employees = [{ id: 'employee-1', displayName: '小刘', authorityRole: 'member' } as never]
+  const noop = async () => {}
+
+  it('shows the concrete action, not only the permission key', () => {
+    const markup = renderToStaticMarkup(createElement(WorldPermissionRequests, {
+      items: [{
+        ...base,
+        sessionId: 'session-a',
+        subject: {
+          id: 'action-1',
+          action: 'world.settings.update',
+          target: 'world:world-1',
+          label: '修改当前场景',
+          parameters: { scenario: '产品评审' },
+        },
+      } as never],
+      employees,
+      activeSessionId: 'session-a',
+      onDecide: noop,
+    }))
+    expect(markup).toContain('修改当前场景')
+    expect(markup).toContain('world.settings.update')
+    expect(markup).toContain('scenario=产品评审')
+  })
+
+  it('keeps another conversation card out of this composer but visible as a count', () => {
+    const markup = renderToStaticMarkup(createElement(WorldPermissionRequests, {
+      items: [{ ...base, sessionId: 'session-b' } as never],
+      employees,
+      activeSessionId: 'session-a',
+      onDecide: noop,
+    }))
+    // Not decidable here…
+    expect(markup).not.toContain('仅本次允许')
+    // …but never silently absent.
+    expect(markup).toContain('其他会话')
+  })
+})

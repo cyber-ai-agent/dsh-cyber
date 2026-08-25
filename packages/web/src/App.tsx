@@ -223,8 +223,14 @@ export default function App() {
   activeConversationKeyRef.current = activeConversationKey
   pendingTurnsRef.current = pendingTurns
 
+  const pendingDecisionFetchRef = useRef<string | undefined>(undefined)
+
   const refreshPendingDecisions = useCallback(async (worldId: string): Promise<void> => {
     if (demoMode) return
+    // One in-flight fetch per world: a burst of events collapses into a single
+    // request instead of a queue of identical ones.
+    if (pendingDecisionFetchRef.current === worldId) return
+    pendingDecisionFetchRef.current = worldId
     try {
       const result = await api<{
         approvals?: ApprovalRequestView[]
@@ -237,6 +243,8 @@ export default function App() {
       setPendingWorldPermissionRequests(result.permissionRequests ?? result.worldPermissionRequests ?? result.requests ?? [])
     } catch {
       // A failed refresh must never interrupt the conversation; the next live or polling pass retries.
+    } finally {
+      if (pendingDecisionFetchRef.current === worldId) pendingDecisionFetchRef.current = undefined
     }
   }, [])
 
@@ -637,7 +645,10 @@ export default function App() {
       try {
         const envelope = JSON.parse((event as MessageEvent<string>).data) as { worldId?: string; payload?: unknown; authorities?: unknown }
         if (envelope.worldId !== undefined && envelope.worldId !== worldId) return
-        void refreshPendingDecisions(worldId)
+        // Pending decisions are refreshed by the `world-decision` stream, not
+        // by every world-state envelope: this handler fires once per streamed
+        // token, so refetching here turned one character turn into dozens of
+        // requests for a list that had not changed.
         const payload = envelope.payload
         const raw = envelope.authorities ?? (payload !== null && typeof payload === 'object' && !Array.isArray(payload) ? (payload as Record<string, unknown>).authorities : undefined)
         if (!Array.isArray(raw)) return
@@ -651,6 +662,23 @@ export default function App() {
       }
     }
     return subscribeWorldLive(worldId, 'world-state', onWorldState)
+  }, [activeWorld, demoMode, refreshPendingDecisions])
+
+  // Pending decisions refresh when a decision actually moves. The world-state
+  // snapshot fires once per streamed token and says nothing about decisions.
+  useEffect(() => {
+    const worldId = activeWorld?.id
+    if (demoMode || worldId === undefined) return
+    const onDecision = (event: Event) => {
+      try {
+        const envelope = JSON.parse((event as MessageEvent<string>).data) as { worldId?: string }
+        if (envelope.worldId !== undefined && envelope.worldId !== worldId) return
+      } catch {
+        // A malformed envelope still means something changed; refresh anyway.
+      }
+      void refreshPendingDecisions(worldId)
+    }
+    return subscribeWorldLive(worldId, 'world-decision', onDecision)
   }, [activeWorld, demoMode, refreshPendingDecisions])
 
   useEffect(() => {
@@ -1297,7 +1325,10 @@ export default function App() {
       return
     }
     void refreshPendingDecisions(worldId)
-    const timer = setInterval(() => { void refreshPendingDecisions(worldId) }, 4_000)
+    // The stream is the primary signal. This is a safety net for a dropped
+    // connection, not the mechanism — but it must stay, because a decision
+    // surface that silently shows nothing is worse than one that is late.
+    const timer = setInterval(() => { void refreshPendingDecisions(worldId) }, 30_000)
     return () => clearInterval(timer)
   }, [activeWorld, demoMode, refreshPendingDecisions])
 
