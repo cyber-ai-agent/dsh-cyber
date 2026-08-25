@@ -8,7 +8,7 @@ import type { CharacterSkillAction } from '@dsh-cyber/contracts/skill-runtime'
 import { createBuiltinIntegrationRegistry } from '../src/integrations/builtin-integration-registry.js'
 import { FIRECRAWL_INTEGRATION_ID } from '../src/integrations/firecrawl-provider.js'
 import { IntegrationService } from '../src/integrations/integration-service.js'
-import { FirecrawlSkillAdapter } from '../src/skills/firecrawl-skill-adapter.js'
+import { FIRECRAWL_SEARCH_SKILL, FirecrawlSkillAdapter } from '../src/skills/firecrawl-skill-adapter.js'
 
 const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
@@ -85,6 +85,46 @@ describe('Integration Registry + Firecrawl', () => {
     expect(requests).toBe(0)
     service.close()
   })
+
+  it('refuses to arm the search when the user explicitly declined it', async () => {
+    const adapter = await grantedAdapter()
+    // The trigger used to match the bare substring anywhere and capture the
+    // rest of the prompt, so an explicit refusal egressed the tail — including
+    // whatever personal data followed it.
+    for (const prompt of [
+      '不要联网搜索，直接根据下面内容回答：客户张三 手机 13800000000',
+      '不用联网搜索了，我自己查',
+      '请不要联网搜索 我的家庭住址',
+      '别联网搜索：银行卡号 1234-5678',
+    ]) {
+      expect(adapter.propose({ worldId: 'world-1', characterId: 'character-1', prompt, grantedSkillIds: ['web.search.firecrawl'], now: new Date() })).toEqual([])
+    }
+  })
+
+  it('keeps the query on the request line instead of swallowing the rest of the prompt', async () => {
+    const adapter = await grantedAdapter()
+    const proposal = adapter.propose({
+      worldId: 'world-1',
+      characterId: 'character-1',
+      prompt: '请联网搜索 DSH Cyber\n另外这是我的手机号 13800000000，不要外发。',
+      grantedSkillIds: ['web.search.firecrawl'],
+      now: new Date(),
+    })[0]!
+    expect(proposal.parameters).toEqual({ query: 'DSH Cyber' })
+    expect(JSON.stringify(proposal)).not.toContain('13800000000')
+  })
+
+  it('forbids a persistent approval policy, because a policy cannot bind the query', async () => {
+    // An approval policy binds (skill, action, target, risk) and never
+    // parameters. This skill's whole payload is parameters.query, so any
+    // persistent scope would authorize every future query text — the same rule
+    // already written down for MCP.
+    const adapter = await grantedAdapter()
+    const descriptor = adapter.descriptors.find((item) => item.id === FIRECRAWL_SEARCH_SKILL)
+    expect(descriptor).toBeDefined()
+    expect(descriptor!.persistentApproval).toBe('forbidden')
+    expect(adapter.descriptors.every((item) => item.persistentApproval !== 'exact-target')).toBe(true)
+  })
 })
 
 async function makeRoot(): Promise<string> { const root = await mkdtemp(join(tmpdir(), 'dsh-integrations-')); roots.push(root); return root }
@@ -96,4 +136,16 @@ function actionFrom(proposal: ReturnType<FirecrawlSkillAdapter['propose']>[numbe
     risk: proposal.risk, authorization: proposal.authorization, parameters: proposal.parameters ?? {},
     status: 'waiting-for-integration', detail: '', createdAt: '2026-08-25T00:00:00.000Z', updatedAt: '2026-08-25T00:00:00.000Z',
   }
+}
+
+async function grantedAdapter(): Promise<FirecrawlSkillAdapter> {
+  const root = await makeRoot()
+  const service = await IntegrationService.open(root, createBuiltinIntegrationRegistry(), async () => Response.json({ success: true, data: { web: [] } }))
+  await service.save({ workspaceId: 'workspace-1', integrationId: FIRECRAWL_INTEGRATION_ID, config: {}, enabled: true, credential: 'fc-test' })
+  return new FirecrawlSkillAdapter({
+    store: { getWorld: () => ({ id: 'world-1', workspaceId: 'workspace-1', name: '世界', templateId: 'personal-world', status: 'active', createdAt: '2026-08-25T00:00:00.000Z', updatedAt: '2026-08-25T00:00:00.000Z' }) },
+    integrations: service,
+    listWorldPackages: async () => [{ manifest: { entrypoints: [{ id: 'web.search.firecrawl', kind: 'skill', path: 'skill.json' }] } } as never],
+    fetch: async () => Response.json({ success: true, data: { web: [] } }),
+  })
 }

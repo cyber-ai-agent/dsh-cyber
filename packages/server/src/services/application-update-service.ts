@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { realpathSync } from 'node:fs'
 import { mkdir, rm } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { join, resolve } from 'node:path'
@@ -130,9 +131,27 @@ function errorMessage(error: unknown): string {
 }
 
 function samePath(left: string, right: string): boolean {
-  const normalizedLeft = resolve(left)
-  const normalizedRight = resolve(right)
+  const normalizedLeft = canonicalPath(left)
+  const normalizedRight = canonicalPath(right)
   return process.platform === 'win32'
     ? normalizedLeft.toLocaleLowerCase() === normalizedRight.toLocaleLowerCase()
     : normalizedLeft === normalizedRight
+}
+
+/**
+ * `git rev-parse --show-toplevel` reports the real path, so the launch
+ * directory has to be resolved the same way before the two can be compared.
+ * On macOS the default temporary and volume paths traverse a symlink
+ * (/var -> /private/var), where a plain resolve() leaves the two strings
+ * different and the update check fails closed on a perfectly valid checkout.
+ */
+function canonicalPath(value: string): string {
+  const normalized = resolve(value)
+  try {
+    return realpathSync.native(normalized)
+  } catch {
+    // A path that does not exist cannot be a repository root either; compare
+    // the normalized form so the caller still gets a defined answer.
+    return normalized
+  }
 }

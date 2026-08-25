@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -80,13 +81,34 @@ describe('local-first creative state compatibility', () => {
 
     const output = join(root, 'backups', 'local-state.dshbackup')
     await createLocalBackupBundle(root, store, { output })
-    const bundle = JSON.parse((await gunzipAsync(await readFile(output))).toString('utf8')) as {
+    // The bundle is newline-delimited JSON: one header record, then one record
+    // per file chunk, so nothing is ever held as a single unbounded string.
+    const lines = (await gunzipAsync(await readFile(output))).toString('utf8').split('\n').filter(Boolean)
+    const bundle = JSON.parse(lines[0]!) as {
+      schemaVersion: number
       format: string
       included: string[]
       excluded: string[]
-      entries: Array<{ path: string }>
     }
-    const paths = bundle.entries.map((entry) => entry.path)
+    const entries = lines.slice(1).map((line) => JSON.parse(line) as {
+      path: string
+      byteLength: number
+      sha256: string
+      chunkIndex: number
+      chunkCount: number
+      dataBase64: string
+    })
+    const paths = entries.map((entry) => entry.path)
+
+    expect(bundle.schemaVersion).toBe(2)
+    // Every chunk of every file must round-trip to its declared digest.
+    for (const [path, group] of groupBy(entries, (entry) => entry.path)) {
+      const body = Buffer.concat(group
+        .sort((left, right) => left.chunkIndex - right.chunkIndex)
+        .map((entry) => Buffer.from(entry.dataBase64, 'base64')))
+      expect(body.byteLength, path).toBe(group[0]!.byteLength)
+      expect(createHash('sha256').update(body).digest('hex'), path).toBe(group[0]!.sha256)
+    }
 
     expect(bundle.format).toBe('dsh-cyber-local-backup')
     expect(bundle.included).toEqual(expect.arrayContaining(['database.sqlite', 'workshop', 'skills', 'integrations']))
@@ -96,6 +118,32 @@ describe('local-first creative state compatibility', () => {
     expect(paths.some((path) => path.startsWith('credentials/'))).toBe(false)
     expect(paths.some((path) => path.startsWith('runtime/'))).toBe(false)
     expect(bundle.excluded).toEqual(expect.arrayContaining(['credentials', 'runtime']))
+  })
+  it('splits a file larger than one chunk instead of building an unbounded string', async () => {
+    const { root, store } = await setup()
+    // The v1 layout base64-encoded every file into one JS string and threw
+    // RangeError above roughly 400 MB of state — which also permanently blocked
+    // application updates, because the backup is their mandatory precondition.
+    // Nine megabytes is enough to prove the chunking without a slow test.
+    const body = Buffer.alloc(9 * 1024 * 1024, 'dsh')
+    await mkdir(join(root, 'packages', 'big'), { recursive: true })
+    await writeFile(join(root, 'packages', 'big', 'payload.bin'), body)
+
+    const output = join(root, 'backups', 'large-state.dshbackup')
+    await createLocalBackupBundle(root, store, { output })
+    const lines = (await gunzipAsync(await readFile(output))).toString('utf8').split('\n').filter(Boolean)
+    const chunks = lines.slice(1)
+      .map((line) => JSON.parse(line) as { path: string; chunkIndex: number; chunkCount: number; sha256: string; dataBase64: string })
+      .filter((entry) => entry.path === 'packages/big/payload.bin')
+      .sort((left, right) => left.chunkIndex - right.chunkIndex)
+
+    expect(chunks).toHaveLength(3)
+    expect(chunks[0]!.chunkCount).toBe(3)
+    // No single record carries the whole file, and the file still round-trips.
+    for (const chunk of chunks) expect(chunk.dataBase64.length).toBeLessThan(body.byteLength)
+    const restored = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk.dataBase64, 'base64')))
+    expect(restored.equals(body)).toBe(true)
+    expect(createHash('sha256').update(restored).digest('hex')).toBe(chunks[0]!.sha256)
   })
 })
 
@@ -108,11 +156,22 @@ async function setup() {
   const packageManager = new PackageManager({
     store,
     runtime: new LocalPackageRuntime(join(root, 'packages')),
-  })
+  
+})
   return {
     root,
     store,
     workspaceId: workspace.id,
     workshop: new CreativeWorkshopService(store, packageManager),
   }
+}
+
+function groupBy<TItem, TKey>(items: readonly TItem[], key: (item: TItem) => TKey): Map<TKey, TItem[]> {
+  const groups = new Map<TKey, TItem[]>()
+  for (const item of items) {
+    const group = groups.get(key(item))
+    if (group === undefined) groups.set(key(item), [item])
+    else group.push(item)
+  }
+  return groups
 }

@@ -16,7 +16,13 @@ const DESCRIPTOR: CharacterSkillDescriptor = {
   adapterId: FIRECRAWL_ADAPTER_ID,
   risks: ['external-side-effect'],
   supportsScheduling: false,
-  persistentApproval: 'exact-target',
+  // The whole semantic payload of this skill is `parameters.query`, and an
+  // approval policy binds (skill, action, target, risk) only. An 'exact-target'
+  // policy would therefore let one approved search authorize every later query
+  // text, which is the rule already written down for MCP in
+  // docs/architecture/mcp-skill-adapter-v1.md: no persistent policy before
+  // parameter constraints and policy fingerprints exist.
+  persistentApproval: 'forbidden',
   kind: 'integration',
   recommendedByDefault: false,
 }
@@ -83,9 +89,25 @@ export class FirecrawlSkillAdapter implements CharacterSkillAdapter {
   }
 }
 
+/**
+ * The trigger only fires in an imperative position: a slash command, an
+ * explicit request verb, the start of a line, or a named Firecrawl request.
+ * The query is bounded to the current line so an unrelated remainder of the
+ * prompt can never become the text that leaves the machine.
+ */
+const SEARCH_TRIGGER =
+  /(?:\/web-search|\/联网搜索|(?:请|帮我|帮忙|麻烦|去|来|现在|立刻|立即)\s*联网搜索|(?:^|\n)\s*联网搜索|(?:使用|用)\s*Firecrawl\s*搜索)\s*[：:，,]?\s*([^\n]+)/i
+
+/** A negation right before the trigger cancels it rather than arming it. */
+const TRIGGER_NEGATION = /(?:不要|不用|不需要|不想|无需|无须|别|勿|禁止|不准|不许|避免)[^，,。；;]{0,4}$/
+
 function requestedSearchQuery(prompt: string): string | undefined {
-  const match = /(?:\/web-search|\/联网搜索|请联网搜索|联网搜索|使用\s*Firecrawl\s*搜索|用\s*Firecrawl\s*搜索)\s*[：:]?\s*([\s\S]+)/i.exec(prompt)
-  const value = match?.[1]?.trim()
+  const match = SEARCH_TRIGGER.exec(prompt)
+  if (match === null || match.index === undefined) return undefined
+  // "不要联网搜索，直接根据下面内容回答：客户张三 手机 138…" must not egress the
+  // rest of the sentence. An explicit refusal is not a request.
+  if (TRIGGER_NEGATION.test(prompt.slice(Math.max(0, match.index - 12), match.index))) return undefined
+  const value = match[1]?.replace(/^[，,、。：:\s]+/, '').trim()
   return value && value.length <= 500 ? value : undefined
 }
 
