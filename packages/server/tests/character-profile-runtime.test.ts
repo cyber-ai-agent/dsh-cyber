@@ -84,6 +84,33 @@ describe('CharacterProfileRuntime', () => {
     expect(persona).not.toContain('会议纪要：')
   })
 
+  it('does not inject a historically granted recipe while its World is unavailable', async () => {
+    const inner = new CaptureRuntime()
+    const granted = revision(2, '当前角色设定')
+    granted.skillGrants = ['coding', 'testing']
+    let availabilityCalls = 0
+    const runtime = new CharacterProfileRuntime(inner, {
+      getEmployee: () => character({ currentRevision: 2 }),
+      getEmployeeRevision: () => granted,
+      getEmployeeProfile: () => undefined,
+      getWorld: () => undefined,
+    }, createBuiltinSkillRegistry(), undefined, {
+      availableSkillIds: ({ skillIds }) => {
+        availabilityCalls += 1
+        return skillIds.filter((skillId) => skillId !== 'testing')
+      },
+      isAvailable: () => { throw new Error('batch availability should be preferred') },
+    })
+
+    await runtime.runTurn({ agent: character(), revision: revision(1, '旧设定'), prompt: '继续', workspacePath: '/tmp/world' })
+
+    const request = inner.requests[0]!
+    expect(request.revision.skillGrants).toEqual(['coding'])
+    expect(request.revision.persona).toContain('软件实现')
+    expect(request.revision.persona).not.toContain('测试验证')
+    expect(availabilityCalls).toBe(1)
+  })
+
   it('keeps recipe composition stable when no recipe is granted', () => {
     expect(composeSkillRecipes('基础设定', [])).toBe('基础设定')
   })

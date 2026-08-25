@@ -7,6 +7,10 @@ import type { SqliteStore } from '@dsh-cyber/persistence'
 import type { CharacterSkillAdapterRegistry } from '../skills/skill-adapter.js'
 import type { WorldCharacterAuthority } from '@dsh-cyber/contracts/world-authority'
 import type { WorldAuthorityPort } from './world-permission-request-service.js'
+import {
+  availableWorldSkillIds,
+  type WorldSkillAvailabilityPort,
+} from './world-skill-availability.js'
 
 type CharacterRuntimeStore = Pick<
   SqliteStore,
@@ -18,17 +22,20 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
   readonly #store: CharacterRuntimeStore
   readonly #skills: Pick<CharacterSkillAdapterRegistry, 'instructionsFor'> | undefined
   readonly #authority: Pick<WorldAuthorityPort, 'get'> | undefined
+  readonly #skillAvailability: WorldSkillAvailabilityPort | undefined
 
   constructor(
     inner: AgentRuntimePort,
     store: CharacterRuntimeStore,
     skills?: Pick<CharacterSkillAdapterRegistry, 'instructionsFor'>,
     authority?: Pick<WorldAuthorityPort, 'get'>,
+    skillAvailability?: WorldSkillAvailabilityPort,
   ) {
     this.#inner = inner
     this.#store = store
     this.#skills = skills
     this.#authority = authority
+    this.#skillAvailability = skillAvailability
   }
 
   async runTurn(request: AgentTurnRequest) {
@@ -41,7 +48,12 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       ?? request.revision
     const profile = this.#store.getEmployeeProfile(agent.id)
 
-    const recipeInstructions = this.#skills?.instructionsFor(revision.skillGrants) ?? []
+    const grantedSkillIds = await availableWorldSkillIds(this.#skillAvailability, {
+      workspaceId: agent.workspaceId,
+      worldId: agent.worldId,
+      skillIds: revision.skillGrants,
+    })
+    const recipeInstructions = this.#skills?.instructionsFor(grantedSkillIds) ?? []
     const profiledPersona = profile === undefined ? revision.persona : composeCharacterPersona(revision.persona, profile)
     // Once the authority service is composed, the compatibility pointer is no
     // longer an authorization source. The fallback only keeps isolated legacy
@@ -60,6 +72,9 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       agent,
       revision: {
         ...revision,
+        // Keep historical unavailable grants durable, but do not expose them
+        // to the model prompt or downstream Harness runtime for this turn.
+        skillGrants: grantedSkillIds,
         persona: composeSkillRecipes(persona, recipeInstructions),
       },
     })

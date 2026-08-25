@@ -17,6 +17,10 @@ import type {
   DecideWorldPermissionInput,
   WorldPermissionRequestService,
 } from './world-permission-request-service.js'
+import {
+  availableWorldSkillIds,
+  type WorldSkillAvailabilityPort,
+} from './world-skill-availability.js'
 
 const TICK_MS = 30_000
 const DUPLICATE_WINDOW_MS = 60_000
@@ -26,6 +30,8 @@ export interface CharacterSkillRuntimeOptions {
   registry: CharacterSkillAdapterRegistry
   actions: CharacterSkillActionRepository
   worldPermissions?: WorldPermissionRequestService
+  /** Host-provided World Availability; omitted by legacy embedders. */
+  skillAvailability?: WorldSkillAvailabilityPort
 }
 
 export interface SkillPreparationContext {
@@ -52,6 +58,7 @@ export class CharacterSkillRuntime {
   readonly #registry: CharacterSkillAdapterRegistry
   readonly #actions: CharacterSkillActionRepository
   readonly #worldPermissions: WorldPermissionRequestService | undefined
+  readonly #skillAvailability: WorldSkillAvailabilityPort | undefined
   #timer: NodeJS.Timeout | undefined
   #ticking = false
   #approvalSettlementHandler: ((workTurnId: string) => Promise<void>) | undefined
@@ -61,6 +68,7 @@ export class CharacterSkillRuntime {
     this.#registry = options.registry
     this.#actions = options.actions
     this.#worldPermissions = options.worldPermissions
+    this.#skillAvailability = options.skillAvailability
   }
 
   start(): void {
@@ -94,11 +102,19 @@ export class CharacterSkillRuntime {
     const revision = this.#store.getEmployeeRevision(employee.id, employee.currentRevision)
     if (revision === undefined) return { handled: false, actions: [] }
 
+    const grantedSkillIds = await availableWorldSkillIds(this.#skillAvailability, {
+      workspaceId,
+      worldId,
+      skillIds: revision.skillGrants,
+    })
     const proposals = await this.#registry.propose({
       worldId,
       characterId,
       prompt,
-      grantedSkillIds: revision.skillGrants,
+      // Do not let an unavailable historical grant reach an adapter proposal.
+      // The durable grant remains untouched so the user can retain or revoke
+      // it from the next revision once the World becomes available again.
+      grantedSkillIds,
       now,
       promptSource: 'raw-user',
     })
@@ -125,6 +141,10 @@ export class CharacterSkillRuntime {
         ?? descriptor?.authorizationSource
         ?? 'skill-grant'
       if (authorizationSource === 'skill-grant' && !revision.skillGrants.includes(proposal.skillId)) continue
+      if (
+        authorizationSource === 'skill-grant'
+        && !await this.#isWorldSkillAvailable(workspaceId, worldId, proposal.skillId)
+      ) continue
 
       const candidate: CharacterSkillAction = {
         id: randomUUID(),
@@ -441,7 +461,7 @@ export class CharacterSkillRuntime {
   }
 
   async #execute(action: CharacterSkillAction, now: Date): Promise<boolean> {
-    if (!this.#isGrantActive(action)) {
+    if (!await this.#isGrantActive(action)) {
       action.status = 'failed'
       action.detail = '执行前角色已不可用或技能授权已撤销'
       action.updatedAt = now.toISOString()
@@ -617,12 +637,19 @@ export class CharacterSkillRuntime {
       && request.characterId === action.characterId
   }
 
-  #isGrantActive(action: CharacterSkillAction): boolean {
+  async #isGrantActive(action: CharacterSkillAction): Promise<boolean> {
     const employee = this.#store.getEmployee(action.characterId)
     if (employee === undefined || employee.status === 'archived' || employee.worldId !== action.worldId) return false
     if (this.#authorizationSource(action) === 'world-authority') return true
     const revision = this.#store.getEmployeeRevision(employee.id, employee.currentRevision)
-    return revision !== undefined && revision.skillGrants.includes(action.skillId)
+    return revision !== undefined
+      && revision.skillGrants.includes(action.skillId)
+      && await this.#isWorldSkillAvailable(employee.workspaceId, action.worldId, action.skillId)
+  }
+
+  async #isWorldSkillAvailable(workspaceId: string, worldId: string, skillId: string): Promise<boolean> {
+    if (this.#skillAvailability === undefined) return true
+    return await this.#skillAvailability.isAvailable({ workspaceId, worldId, skillId })
   }
 
   async #checkWorldPermission(action: CharacterSkillAction, now: Date): Promise<'granted' | 'blocked'> {

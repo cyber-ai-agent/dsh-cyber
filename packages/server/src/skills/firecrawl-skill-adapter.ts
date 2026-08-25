@@ -9,12 +9,14 @@ import type { CharacterSkillActionProposal, CharacterSkillAdapter, CharacterSkil
 
 export const FIRECRAWL_SEARCH_SKILL = 'web.search.firecrawl'
 export const FIRECRAWL_ADAPTER_ID = 'builtin.firecrawl'
+export const FIRECRAWL_PACKAGE_ID = 'official-firecrawl-search'
 
 const DESCRIPTOR: CharacterSkillDescriptor = {
   id: FIRECRAWL_SEARCH_SKILL,
   displayName: '联网搜索',
   summary: '通过当前工作区配置的 Firecrawl 搜索公开网页；查询文本会发送到外部服务。',
   adapterId: FIRECRAWL_ADAPTER_ID,
+  packageId: FIRECRAWL_PACKAGE_ID,
   risks: ['external-side-effect'],
   supportsScheduling: false,
   // The whole semantic payload of this skill is `parameters.query`, and an

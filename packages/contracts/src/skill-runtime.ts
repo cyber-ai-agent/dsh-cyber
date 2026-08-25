@@ -75,6 +75,8 @@ export interface CharacterSkillDescriptor {
   displayName: string
   summary: string
   adapterId: string
+  /** Optional immutable package binding for integration capabilities. */
+  packageId?: string
   risks: SkillActionRisk[]
   supportsScheduling: boolean
   /** Whether a one-time decision may create a reusable exact-target policy. */
@@ -87,4 +89,38 @@ export interface CharacterSkillDescriptor {
   kind?: 'recipe' | 'integration'
   /** Safe recipes may be selected by default during recruitment. External integrations never are. */
   recommendedByDefault?: boolean
+}
+
+/**
+ * The source that made a skill discoverable to the host catalog.
+ *
+ * This is deliberately separate from `CharacterSkillDescriptor.kind`: a
+ * trusted host adapter may expose an integration on behalf of a marketplace
+ * package, while MCP discovery is workspace-scoped and builtin recipes are
+ * globally provided by the host.
+ */
+export type SkillCatalogSource = 'builtin' | 'plugin' | 'mcp' | 'other'
+
+/** The scope which owns the discovery record. */
+export type SkillCatalogScope = 'builtin' | 'workspace' | 'world'
+
+/** Availability of the entry in the scope used to build the catalog response. */
+export type SkillCatalogAvailability = 'available' | 'unavailable'
+
+/**
+ * A provider-neutral, UI-safe view of one known Skill.
+ *
+ * `globalKnown` answers whether the host can identify the capability at all;
+ * `worldAvailable` answers whether the current World may use it. The latter
+ * is intentionally derived per request from World Package Instances (or the
+ * explicit builtin/workspace scope), never persisted on the descriptor.
+ */
+export interface SkillCatalogEntry extends CharacterSkillDescriptor {
+  source: SkillCatalogSource
+  scope: SkillCatalogScope
+  globalKnown: boolean
+  worldAvailable: boolean
+  availability: SkillCatalogAvailability
+  packageId?: string
+  packageVersion?: string
 }

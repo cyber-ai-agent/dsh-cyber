@@ -8,6 +8,7 @@ import { optionalString, packageManifest, readJson, requiredString } from '../ht
 import { writeJson } from '../http/response.js'
 import { loadInstalledBlueprints, loadInstalledPromptTransformCommands } from '../installed-package-runtime.js'
 import type { CharacterSkillRuntime } from '../services/character-skill-runtime.js'
+import type { SkillCatalogService } from '../services/skill-catalog-service.js'
 import { CreativeWorkshopService } from '../services/creative-workshop-service.js'
 import type { WorldMarketplaceService } from '../services/world-marketplace-service.js'
 import type { WorldPackageInstanceService } from '../services/world-package-instance-service.js'
@@ -21,10 +22,11 @@ export interface PackageRoutesDependencies {
   worldMarketplace: WorldMarketplaceService
   worldPackages: WorldPackageInstanceService
   worldAccess: WorldAccessService
+  skillCatalog: SkillCatalogService
 }
 
 export function registerPackageRoutes(router: Router, dependencies: PackageRoutesDependencies): void {
-  const { store, packageManager, packageCatalog, skillRuntime, worldMarketplace, worldPackages, worldAccess } = dependencies
+  const { store, packageManager, packageCatalog, skillRuntime, worldMarketplace, worldPackages, worldAccess, skillCatalog } = dependencies
   const workshop = new CreativeWorkshopService(store, packageManager)
 
   router.get(/^\/api\/workspaces\/([^/]+)\/packages$/, ({ response, params }) => {
@@ -94,10 +96,17 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
     writeJson(response, 200, { instance: store.disableWorldPackageInstance(instance.id) })
   })
 
-  router.get(/^\/api\/workspaces\/([^/]+)\/skill-catalog$/, ({ response, params }) => {
+  router.get(/^\/api\/workspaces\/([^/]+)\/skill-catalog$/, async ({ response, params }) => {
     const workspaceId = params[0]!
     if (store.getWorkspace(workspaceId) === undefined) throw new HttpError(404, 'workspace_not_found', 'Workspace not found')
-    writeJson(response, 200, { items: skillRuntime.listDescriptors(workspaceId) })
+    writeJson(response, 200, { items: await skillCatalog.listWorkspace(workspaceId) })
+  })
+
+  router.get(/^\/api\/worlds\/([^/]+)\/skill-catalog$/, async ({ request, response, params }) => {
+    const worldId = params[0]!
+    if (store.getWorld(worldId) === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
+    await worldAccess.assertUnlocked(worldId, request)
+    writeJson(response, 200, { items: await skillCatalog.listWorld(worldId) })
   })
 
   router.post(/^\/api\/workspaces\/([^/]+)\/packages\/preview$/, async ({ request, response, params }) => {

@@ -52,6 +52,7 @@ import { AssetService } from './services/asset-service.js'
 import { ApplicationAccessService } from './services/application-access-service.js'
 import { CharacterProfileRuntime } from './services/character-profile-runtime.js'
 import { CharacterSkillRuntime } from './services/character-skill-runtime.js'
+import { SkillCatalogService } from './services/skill-catalog-service.js'
 import { EmployeeActivityProjectionService } from './services/employee-activity-projection-service.js'
 import { harnessModelRoute } from './services/harness-model-route.js'
 import { ModelCatalogService } from './services/model-catalog-service.js'
@@ -90,6 +91,7 @@ import { LocalSkillActionRepository } from './skills/local-skill-action-reposito
 import { SqliteSkillActionRepository } from './skills/sqlite-skill-action-repository.js'
 import type { CharacterSkillActionRepository } from './skills/skill-action-repository.js'
 import type { CharacterSkillAdapterRegistry } from './skills/skill-adapter.js'
+import type { WorldSkillAvailabilityPort } from './services/world-skill-availability.js'
 import { createWorldManagementHost } from './skills/world-management-host.js'
 import { RuntimeStreamHub } from './streams/runtime-stream-hub.js'
 import { WorldStreamHub } from './streams/world-stream-hub.js'
@@ -119,6 +121,8 @@ export interface CyberServerOptions {
   bootstrapDefaultWorld?: boolean
   mcpClientFactory?: McpClientFactory
   knowledgeExtractionPort?: KnowledgeExtractionPort
+  /** Optional host-owned World Skill Availability provider for PR A+. */
+  skillAvailability?: WorldSkillAvailabilityPort
 }
 
 export interface CyberServerAddress { host: string; port: number; origin: string }
@@ -255,6 +259,10 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   })
   const mcpAdapter = options.skillRegistry === undefined ? new McpSkillAdapter({ store, integrations, clients: mcpClients }) : undefined
   if (mcpAdapter !== undefined) skillRegistry.register(mcpAdapter)
+  const skillCatalog = new SkillCatalogService({ store, registry: skillRegistry, worldPackages })
+  // Production uses the derived World Catalog by default. Tests and legacy
+  // embedders may still inject a narrower availability port explicitly.
+  const skillAvailability = options.skillAvailability ?? skillCatalog
 
   const activeDshBinPath = await resolveActiveRuntime(store, runtimeStateRoot, stateRoot)
   const interactions = new ModelInteractionService(store)
@@ -272,7 +280,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     ...(activeDshBinPath === undefined ? {} : { dshBinPath: activeDshBinPath }),
     resolveRoute(request) { return resolveHarnessRoute(store, request) },
   })
-  const profileRuntime = new CharacterProfileRuntime(baseRuntime, store, skillRegistry, authority)
+  const profileRuntime = new CharacterProfileRuntime(baseRuntime, store, skillRegistry, authority, skillAvailability)
   const runtime = new TurnInteractionLoggingRuntime({
     inner: profileRuntime,
     service: interactions,
@@ -387,6 +395,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     registry: skillRegistry,
     actions: skillActions,
     worldPermissions,
+    skillAvailability,
   })
   const turnContinuations = new TurnAwareApprovalContinuationService({
     store,
@@ -422,11 +431,17 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   })
   registerAmbientLifeRoutes(router, { store, settings: ambientLifeSettings, access: worldAccess })
   registerAssetRoutes(router, { store, assets, access: worldAccess })
-  registerWorldRoutes(router, { store, worldAccess, worldPackages, authority })
+  registerWorldRoutes(router, {
+    store,
+    worldAccess,
+    worldPackages,
+    authority,
+    skillAvailability,
+  })
   registerWorldAuthorityRoutes(router, { store, worldAccess, authority, worldPermissions, skillRuntime, turnContinuations , ownerRuntimeAccess })
   registerWorldSettingsRoutes(router, { store, settings: worldSettings, access: worldAccess })
   registerTaskScheduleRoutes(router, { store, schedules: taskSchedules, access: worldAccess })
-  registerPackageRoutes(router, { store, packageManager, packageCatalog, skillRuntime, worldMarketplace, worldPackages, worldAccess })
+  registerPackageRoutes(router, { store, packageManager, packageCatalog, skillRuntime, worldMarketplace, worldPackages, worldAccess, skillCatalog })
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
   registerWorldTraceRoutes(router, { store, trace: worldTrace, access: worldAccess })
   registerWorldArtifactRoutes(router, { store, artifacts: worldArtifacts, access: worldAccess, authority })
@@ -443,7 +458,12 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   })
   registerModelInteractionRoutes(router, { store, interactions })
   registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, turnContinuations, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, runtimeContext: worldRuntimeContext, worldTrace, employeeActivity, worldPackages, worldRuntimePermissions, ownerRuntimeAccess })
-  registerEmployeeRoutes(router, { store, worldAccess, authority })
+  registerEmployeeRoutes(router, {
+    store,
+    worldAccess,
+    authority,
+    skillAvailability,
+  })
 
   const httpServer = createServer((request, response) => {
     void (async () => {
