@@ -559,6 +559,10 @@ test('discovers, installs, and creates a visually distinct world from the world-
   await page.setViewportSize({ width: 1_920, height: 1_080 })
   await page.goto(origin)
   const onboarding = page.getByRole('heading', { name: '创建第一个本地世界' })
+  // Same guard as every other entry point: isVisible() does not wait, so
+  // without it the onboarding click is skipped whenever the bundle takes a
+  // moment longer to hydrate.
+  await expect(page.locator('.workbench-shell').or(onboarding)).toBeVisible()
   if (await onboarding.isVisible()) await page.getByRole('button', { name: '创建我的世界' }).click()
 
   await page.getByRole('button', { name: '市场', exact: true }).click()
