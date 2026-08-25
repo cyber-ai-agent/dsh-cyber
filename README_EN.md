@@ -46,7 +46,7 @@ DSH Cyber is building this as a **visual, local-first, moddable AI world platfor
 
 ## What already works
 
-### Persistent AI characters
+### Persistent characters and conversation continuity
 
 - Independent Agent sessions, model policies and dossiers.
 - One canonical direct conversation per active character.
@@ -54,10 +54,10 @@ DSH Cyber is building this as a **visual, local-first, moddable AI world platfor
 - Real multi-character conversations and bounded peer collaboration.
 - Persistent shared episodes and relationship evidence.
 
-**Scope of "persistent memory" today — read this as conversation continuity, not as Memory V2:**
+#### Conversation continuity
 
-- **Implemented**: recent chat history of one conversation is restored from the local SQLite database, across application restarts, Harness runtime rebuilds and permission-mode switches. SQLite is the authority for conversation history; a DSH session is only a disposable in-process runtime cache. Direct chats, group meetings and separate worlds never share history.
-- **Not implemented**: semantic memory, episodic memory classification, vector retrieval, embeddings, automatic summarisation and memory consolidation. A character does not recall across conversations and does not distil long-term knowledge on its own.
+- Recent chat history from one conversation is restored from local SQLite across application restarts, Harness runtime rebuilds and permission-mode switches. SQLite is authoritative; a DSH session is a disposable runtime cache. Direct chats, group meetings and separate worlds never share history.
+- Cross-conversation recall, semantic or episodic memory, vector retrieval, embeddings, automatic summarisation and memory consolidation are not available yet.
 
 ### Embodied worlds
 
@@ -112,6 +112,13 @@ Implemented foundations include:
 - Home Assistant Adapter V1
 
 An Agent may only claim an external action succeeded after the trusted Adapter reports a factual execution result.
+
+### World artifacts
+
+- A role run or the owner can explicitly publish a result from the current World workspace. SQLite keeps its stable identity, provenance, versions and conversation linkage; published files are immutable World-local versions.
+- Final replies can include artifact cards. Opening one uses a format-aware reader for Markdown, code, structured JSON, PDF, images, sandboxed HTML or a project file tree.
+- Artifacts stay isolated by World and are included through SQLite plus `worlds/` in local backups. Workspace scratch files are never discovered or published automatically.
+- Knowledge currently has a real navigation entry and empty state only. Artifacts are not automatically promoted into knowledge.
 
 ### Local-first persistence and safe upgrades
 
@@ -168,7 +175,11 @@ Center
 
 Right
 ├─ World
-└─ Dossier
+├─ Dossier
+├─ Knowledge
+├─ Artifacts
+├─ Trace
+└─ Schedule
 ```
 
 Market installs templates and extensions. Dossier manages concrete character instances, configuration and grants.
@@ -225,6 +236,7 @@ Read more:
 
 - [Technical Report](./docs/technical-report.md)
 - [Creative World Platform V1](./docs/architecture/creative-world-platform-v1.md)
+- [World Artifact Center V1](./docs/architecture/world-artifact-center-v1.md)
 - [Architecture Guidelines](./docs/development/architecture-guidelines.md)
 - [CI Strategy](./docs/development/ci-strategy.md)
 
@@ -358,7 +370,7 @@ Current priorities:
 - [ ] stabilize Creative Platform V1
 - [ ] Workshop project versioning and edit lifecycle
 - [ ] make current user-defined Character Identity / Persona / Embodiment authoritative everywhere
-- [ ] Persistent Memory V2
+- [ ] cross-conversation episodic and semantic memory
 - [ ] Task / Job / Deliverable / Review work system
 - [ ] GitHub Skill Adapter
 - [ ] Browser Skill Adapter

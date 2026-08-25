@@ -43,6 +43,22 @@ export function writeWorkspaceFile(response: ServerResponse, body: Buffer, conte
   response.end(body)
 }
 
+/** Artifact previews are never allowed to inherit the host application's origin. */
+export function writeArtifactPreview(response: ServerResponse, body: Buffer, contentType: string, isHtml: boolean): void {
+  response.writeHead(200, {
+    'Content-Type': contentType,
+    'Content-Length': body.byteLength,
+    'Content-Disposition': 'inline',
+    'Cache-Control': 'no-store',
+    'Content-Security-Policy': isHtml
+      ? "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; media-src data:; font-src 'none'; object-src 'none'; connect-src 'none'; form-action 'none'; frame-src 'none'; base-uri 'none'; frame-ancestors 'self'; sandbox allow-scripts"
+      : "default-src 'none'; media-src data:; font-src 'none'; object-src 'none'; connect-src 'none'; form-action 'none'; frame-src 'none'; base-uri 'none'; frame-ancestors 'self'; sandbox",
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'no-referrer',
+  })
+  response.end(body)
+}
+
 export function writeHtml(response: ServerResponse, status: number, body: string): void {
   response.writeHead(status, {
     'Content-Type': 'text/html; charset=utf-8',

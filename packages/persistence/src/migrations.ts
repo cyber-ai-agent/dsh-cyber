@@ -995,6 +995,81 @@ const MIGRATIONS: readonly Migration[] = [
         ON work_turns(status, created_at);
     `,
   },
+  {
+    version: 23,
+    name: 'world-artifact-registry',
+    sql: `
+      /* Pair the World id with its workspace so registry rows cannot combine
+         a valid workspace and a valid World from different scopes. */
+      CREATE UNIQUE INDEX IF NOT EXISTS worlds_workspace_id_unique_idx
+        ON worlds(workspace_id, id);
+
+      CREATE TABLE IF NOT EXISTS world_artifacts (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        description TEXT,
+        kind TEXT NOT NULL CHECK (
+          kind IN ('image', 'html', 'markdown', 'document', 'code', 'data', 'archive', 'project', 'other')
+        ),
+        status TEXT NOT NULL CHECK (status IN ('active', 'archived', 'missing')),
+        current_version INTEGER NOT NULL CHECK (current_version > 0),
+        created_by_kind TEXT NOT NULL CHECK (created_by_kind IN ('owner', 'employee')),
+        created_by_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (workspace_id, world_id, id),
+        FOREIGN KEY (workspace_id, world_id)
+          REFERENCES worlds(workspace_id, id)
+          ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS world_artifacts_world_status_updated_idx
+        ON world_artifacts(world_id, status, updated_at DESC, id);
+      CREATE INDEX IF NOT EXISTS world_artifacts_world_kind_updated_idx
+        ON world_artifacts(world_id, kind, updated_at DESC, id);
+      CREATE INDEX IF NOT EXISTS world_artifacts_creator_idx
+        ON world_artifacts(world_id, created_by_kind, created_by_id, created_at DESC, id);
+
+      CREATE TABLE IF NOT EXISTS world_artifact_versions (
+        artifact_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        world_id TEXT NOT NULL,
+        version INTEGER NOT NULL CHECK (version > 0),
+        relative_path TEXT NOT NULL,
+        entrypoint TEXT,
+        mime_type TEXT,
+        byte_length INTEGER NOT NULL CHECK (byte_length >= 0),
+        sha256 TEXT NOT NULL CHECK (length(sha256) = 64),
+        source_relative_path TEXT,
+        employee_id TEXT,
+        session_id TEXT,
+        work_turn_id TEXT,
+        agent_run_id TEXT,
+        idempotency_key TEXT,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (artifact_id, version),
+        FOREIGN KEY (workspace_id, world_id, artifact_id)
+          REFERENCES world_artifacts(workspace_id, world_id, id)
+          ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS world_artifact_versions_artifact_idx
+        ON world_artifact_versions(artifact_id, version DESC);
+      CREATE INDEX IF NOT EXISTS world_artifact_versions_world_created_idx
+        ON world_artifact_versions(world_id, created_at DESC, artifact_id, version);
+      CREATE INDEX IF NOT EXISTS world_artifact_versions_employee_idx
+        ON world_artifact_versions(world_id, employee_id, created_at DESC)
+        WHERE employee_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS world_artifact_versions_work_turn_idx
+        ON world_artifact_versions(world_id, work_turn_id, created_at DESC)
+        WHERE work_turn_id IS NOT NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS world_artifact_versions_idempotency_idx
+        ON world_artifact_versions(world_id, idempotency_key)
+        WHERE idempotency_key IS NOT NULL;
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {

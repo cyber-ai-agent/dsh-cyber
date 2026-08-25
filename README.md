@@ -46,14 +46,14 @@ DSH Cyber 想把这件事做成一个**可视化、可玩、可扩展的本地 A
 
 ## 当前已经实现
 
-### 🧠 Persistent AI Characters
+### 🧠 持久角色与会话连续性
 
 - 每个角色拥有独立 Agent session、模型策略、档案和长期身份。
 - 一个角色对应一个稳定 canonical 私聊，会话可以置顶/隐藏，管家默认置顶。
 - 角色可以参与真实多角色协作，不由一个“总控 Prompt”假装所有人发言。
 - 角色之间的共享经历和关系证据可以持久化。
 
-#### Persistent Memory 的当前边界
+#### 当前会话连续性
 
 - 同一个会话的最近聊天历史由本地 SQLite 恢复，可以跨应用重启、Harness Runtime 重建和权限模式切换。私聊、群聊和不同世界之间不共享历史。
 - 每次用户交互和每次实际角色运行都有持久状态，可查看私聊、群聊和角色协作的运行顺序与结果。服务重启会安全终止未完成记录，不自动重放可能产生副作用的调用。
@@ -138,6 +138,13 @@ Available
 
 外部动作只有 Adapter 返回真实执行结果后，Agent 才能告诉用户“已经完成”。
 
+### 📦 世界产物
+
+- 角色运行或用户可以把当前世界工作目录中的成果明确发布为世界产物；SQLite 保存稳定身份、来源、版本和会话关联，发布文件保存为世界内的不可变版本。
+- 最终回复可附带产物卡。点击后使用对应阅读器打开：Markdown 文档排版、代码与行号、JSON 结构、PDF、图片、隔离网页预览或项目文件树。
+- 产物与世界严格隔离，随 `worlds/` 和 SQLite 一起进入本地备份；刷新或重启不会丢失。工作目录中的临时文件不会被扫描或自动发布。
+- “知识”当前只提供正式入口和空状态，产物不会自动进入知识库。
+
 ### 💾 Local-first & Safe Upgrades
 
 本地 `stateRoot` 当前是权威数据源。
@@ -193,9 +200,11 @@ Center
 
 Right
 ├─ 世界
+├─ 角色
+├─ 知识
+├─ 产物
 ├─ 轨迹
-├─ 计划
-└─ 档案
+└─ 日程
 ```
 
 市场负责安装模板和扩展；档案负责实例化、配置、授权和查看具体角色。
@@ -252,6 +261,7 @@ Agent identity
 
 - [技术报告](./docs/technical-report.md)
 - [Creative World Platform V1](./docs/architecture/creative-world-platform-v1.md)
+- [世界产物中心 V1](./docs/architecture/world-artifact-center-v1.md)
 - [Architecture & Development Guidelines](./docs/development/architecture-guidelines.md)
 - [CI Strategy](./docs/development/ci-strategy.md)
 

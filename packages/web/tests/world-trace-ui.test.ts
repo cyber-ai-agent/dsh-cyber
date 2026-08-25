@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { WorkMessage, WorkSession, World, WorldTraceEntry } from '@dsh-cyber/contracts'
 
-import { ArtifactDock } from '../src/components/ArtifactDock.js'
+import { WorldSideDock } from '../src/components/WorldSideDock.js'
 import { ChatWorkbench, isChatMessage } from '../src/components/ChatWorkbench.js'
 import { WorldTraceItem } from '../src/components/world-trace/WorldTraceItem.js'
 import { mergeTraceEntries } from '../src/components/world-trace/useWorldTrace.js'
@@ -120,7 +120,7 @@ describe('Chat final-result projection', () => {
 
 describe('Trace dock and live merge', () => {
   it('keeps 世界、角色、轨迹、日程 in the requested dock order', () => {
-    const html = renderToStaticMarkup(createElement(ArtifactDock, {
+    const html = renderToStaticMarkup(createElement(WorldSideDock, {
       demoMode: false,
       activeTab: 'trace',
       dossiers: {},
@@ -137,10 +137,14 @@ describe('Trace dock and live merge', () => {
     }))
     expect(html).toContain('世界')
     expect(html).toContain('角色')
+    expect(html).toContain('知识')
+    expect(html).toContain('产物')
     expect(html).toContain('轨迹')
     expect(html).toContain('日程')
     expect(html.indexOf('世界')).toBeLessThan(html.indexOf('角色'))
-    expect(html.indexOf('角色')).toBeLessThan(html.indexOf('轨迹'))
+    expect(html.indexOf('角色')).toBeLessThan(html.indexOf('知识'))
+    expect(html.indexOf('知识')).toBeLessThan(html.indexOf('产物'))
+    expect(html.indexOf('产物')).toBeLessThan(html.indexOf('轨迹'))
     expect(html.indexOf('轨迹')).toBeLessThan(html.indexOf('日程'))
     expect(html).toContain('轨迹内容')
     expect(html).not.toContain('文件')

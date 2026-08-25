@@ -26,6 +26,11 @@ import {
   type ConversationHistoryBudget,
   type ConversationHistorySpeaker,
 } from './conversation-history.js'
+import {
+  NOOP_AGENT_RUN_COMPLETION_HOOK,
+  type AgentRunCompletionContribution,
+  type AgentRunCompletionHook,
+} from './agent-run-completion-hook.js'
 
 export interface ConversationStorePort {
   getWorld(worldId: string): World | undefined
@@ -115,6 +120,12 @@ export interface ConversationOrchestratorOptions {
    */
   resolveWorldRoot?: (worldId: string, employeeId: string) => Promise<string>
   historyBudget?: ConversationHistoryBudget
+  /**
+   * A host-provided completion contribution.  Orchestration invokes it once
+   * after the runtime turn has completed and before the final assistant
+   * WorkMessage is made durable.
+   */
+  completionHook?: AgentRunCompletionHook
 }
 
 export interface DirectConversationInput {
@@ -226,6 +237,8 @@ export class ConversationOrchestrator implements AsyncDisposable {
   readonly #workspacePath: string | undefined
   readonly #resolveWorldRoot: ((worldId: string, employeeId: string) => Promise<string>) | undefined
   readonly #historyBudget: ConversationHistoryBudget
+  readonly #completionHook: AgentRunCompletionHook
+  readonly #deferAssistantMessages: boolean
   readonly #listeners = new Set<ConversationRealtimeListener>()
 
   constructor(options: ConversationOrchestratorOptions) {
@@ -234,6 +247,11 @@ export class ConversationOrchestrator implements AsyncDisposable {
     this.#workspacePath = options.workspacePath
     this.#resolveWorldRoot = options.resolveWorldRoot
     this.#historyBudget = options.historyBudget ?? DEFAULT_CONVERSATION_HISTORY_BUDGET
+    this.#completionHook = options.completionHook ?? NOOP_AGENT_RUN_COMPLETION_HOOK
+    // Existing provider-neutral consumers expect streamed assistant facts to
+    // be durable at emit time.  A host that supplies a completion publisher
+    // opts into the short defer window needed to attach durable artifactRefs.
+    this.#deferAssistantMessages = options.completionHook !== undefined
     if (this.#workspacePath === undefined && this.#resolveWorldRoot === undefined) throw new Error('ConversationOrchestrator requires workspacePath or resolveWorldRoot')
   }
 
@@ -671,6 +689,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
     this.#store.startAgentRun(agentRun.id)
     const traceTurnId = agentRun.id
     let responsePersisted = false
+    const pendingAssistantMessages: PendingAssistantMessage[] | undefined = this.#deferAssistantMessages ? [] : undefined
     let failedTurn = false
     let failedTurnKind: AgentTurnFailureKind = 'unknown'
     try {
@@ -716,7 +735,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
           if (tracedEvent.kind === 'assistant.message' && tracedEvent.content?.trim()) {
             responsePersisted = true
           }
-          this.#persistRuntimeEvent(session, employee, tracedEvent)
+          this.#persistRuntimeEvent(session, employee, tracedEvent, pendingAssistantMessages)
           this.#emit({
             workspaceId: session.workspaceId,
             worldId: session.worldId,
@@ -735,7 +754,31 @@ export class ConversationOrchestrator implements AsyncDisposable {
         throw new AgentTurnFailedError(employee.id, failedTurnKind)
       }
       const content = result.finalResponse.trim()
-      if (!responsePersisted && content) {
+      const contribution = await this.#completionHook.onCompleted({
+        workspaceId: session.workspaceId,
+        worldId: session.worldId,
+        employeeId: employee.id,
+        sessionId: session.id,
+        workTurnId: workTurn.id,
+        agentRunId: agentRun.id,
+        workspacePath,
+      })
+      if (pendingAssistantMessages !== undefined && pendingAssistantMessages.length > 0) {
+        for (const [index, pending] of pendingAssistantMessages.entries()) {
+          const isFinalMessage = index === pendingAssistantMessages.length - 1
+          this.#store.appendMessage({
+            sessionId: session.id,
+            senderId: employee.id,
+            senderKind: 'employee',
+            kind: 'assistant',
+            content: pending.content,
+            metadata: isFinalMessage
+              ? withCompletionMetadata(pending.metadata, contribution)
+              : pending.metadata,
+            correlationId: session.id,
+          })
+        }
+      } else if (!responsePersisted && content) {
         this.#store.appendMessage({
           sessionId: session.id,
           senderId: employee.id,
@@ -749,6 +792,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
             agentRunId: agentRun.id,
             workTurnId: workTurn.id,
             ...(clientTurnId === undefined ? {} : { clientTurnId }),
+            ...withCompletionMetadata({}, contribution),
           },
           correlationId: session.id,
         })
@@ -796,6 +840,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
     session: WorkSession,
     employee: EmployeeInstance,
     event: AgentRuntimeEvent,
+    pendingAssistantMessages?: PendingAssistantMessage[],
   ): void {
     const metadata = runtimeMetadata(event)
     switch (event.kind) {
@@ -814,15 +859,19 @@ export class ConversationOrchestrator implements AsyncDisposable {
         break
       case 'assistant.message':
         if (event.content?.trim()) {
-          this.#store.appendMessage({
-            sessionId: session.id,
-            senderId: employee.id,
-            senderKind: 'employee',
-            kind: 'assistant',
-            content: event.content,
-            metadata,
-            correlationId: session.id,
-          })
+          if (pendingAssistantMessages !== undefined) {
+            pendingAssistantMessages.push({ content: event.content, metadata })
+          } else {
+            this.#store.appendMessage({
+              sessionId: session.id,
+              senderId: employee.id,
+              senderKind: 'employee',
+              kind: 'assistant',
+              content: event.content,
+              metadata,
+              correlationId: session.id,
+            })
+          }
         }
         break
       case 'tool.started':
@@ -982,6 +1031,25 @@ export class ConversationOrchestrator implements AsyncDisposable {
         // An observer cannot veto or corrupt an already-running agent turn.
       }
     }
+  }
+}
+
+interface PendingAssistantMessage {
+  content: string
+  metadata: JsonObject
+}
+
+function withCompletionMetadata(
+  metadata: JsonObject,
+  contribution: AgentRunCompletionContribution,
+): JsonObject {
+  const artifactRefs = contribution.artifactRefs === undefined
+    ? undefined
+    : [...new Set(contribution.artifactRefs.filter((value): value is string => typeof value === 'string' && value.trim() !== ''))]
+  return {
+    ...metadata,
+    ...(contribution.messageMetadata ?? {}),
+    ...(artifactRefs === undefined || artifactRefs.length === 0 ? {} : { artifactRefs }),
   }
 }
 

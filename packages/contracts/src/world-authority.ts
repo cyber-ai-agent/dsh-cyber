@@ -24,6 +24,10 @@ export type WorldCharacterPermission =
   | 'world.trace.read'
   | 'world.conversations.read-metadata'
   | 'world.conversations.read-content'
+  | 'world.artifacts.read'
+  | 'world.artifacts.manage'
+  | 'world.knowledge.read'
+  | 'world.knowledge.manage'
 
 export const WORLD_CHARACTER_PERMISSIONS = [
   'world.files.read',
@@ -44,10 +48,16 @@ export const WORLD_CHARACTER_PERMISSIONS = [
   'world.trace.read',
   'world.conversations.read-metadata',
   'world.conversations.read-content',
+  'world.artifacts.read',
+  'world.artifacts.manage',
+  'world.knowledge.read',
+  'world.knowledge.manage',
 ] as const satisfies readonly WorldCharacterPermission[]
 
 export type WorldCharacterPermissionCategory =
   | 'files'
+  | 'artifacts'
+  | 'knowledge'
   | 'settings'
   | 'characters'
   | 'extensions'
@@ -87,6 +97,10 @@ export const WORLD_CHARACTER_PERMISSION_DESCRIPTORS = [
   { id: 'world.trace.read', category: 'audit', management: false, sensitive: false },
   { id: 'world.conversations.read-metadata', category: 'conversations', management: false, sensitive: false },
   { id: 'world.conversations.read-content', category: 'conversations', management: false, sensitive: true },
+  { id: 'world.artifacts.read', category: 'artifacts', management: false, sensitive: false },
+  { id: 'world.artifacts.manage', category: 'artifacts', management: true, sensitive: false },
+  { id: 'world.knowledge.read', category: 'knowledge', management: false, sensitive: false },
+  { id: 'world.knowledge.manage', category: 'knowledge', management: true, sensitive: false },
 ] as const satisfies readonly WorldCharacterPermissionDescriptor[]
 
 export const WORLD_CHARACTER_PERMISSION_DESCRIPTOR_MAP: Readonly<
@@ -103,6 +117,8 @@ export const WORLD_CHARACTER_MANAGEMENT_PERMISSIONS = [
   'world.packages.manage',
   'world.integrations.manage',
   'world.model.assign',
+  'world.artifacts.manage',
+  'world.knowledge.manage',
 ] as const satisfies readonly WorldCharacterPermission[]
 
 /**
@@ -126,6 +142,10 @@ export const RECOMMENDED_ADMIN_PERMISSIONS = [
   'world.approvals.read',
   'world.trace.read',
   'world.conversations.read-metadata',
+  'world.artifacts.read',
+  'world.artifacts.manage',
+  'world.knowledge.read',
+  'world.knowledge.manage',
 ] as const satisfies readonly WorldCharacterPermission[]
 
 export type WorldAuthorityActorKind = 'owner' | 'employee'

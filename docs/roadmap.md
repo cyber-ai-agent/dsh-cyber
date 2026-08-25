@@ -45,6 +45,7 @@
 - [x] Single-column settings, key-first model discovery and searchable model selection
 - [x] Safe application updater for clean `main` fast-forward installs
 - [x] Responsive Pixi viewport resizing without world-view black strips
+- [x] Durable World Artifact Center with immutable versions, chat references and format-aware readers
 - [ ] Define Creative Platform V1 local-data compatibility baseline
 - [ ] Remove remaining new-path role-name inference
 - [ ] Final visual QA for conversation / dossier / workshop information architecture
@@ -55,7 +56,7 @@
 - [ ] Task / Job / Run / Assignment domain model
 - [ ] Deliverable / Review / Approval domain model
 - [ ] Character current-work and history UI
-- [ ] Artifact ownership and evidence links
+- [x] Artifact ownership and evidence links
 - [ ] Bounded autonomous delegation policy
 - [ ] Smoke E2E becomes Required CI
 

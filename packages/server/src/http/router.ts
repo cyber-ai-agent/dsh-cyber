@@ -30,6 +30,10 @@ export class Router {
     this.route('PUT', pattern, handler)
   }
 
+  patch(pattern: HttpRoutePattern, handler: HttpRouteHandler): void {
+    this.route('PATCH', pattern, handler)
+  }
+
   delete(pattern: HttpRoutePattern, handler: HttpRouteHandler): void {
     this.route('DELETE', pattern, handler)
   }

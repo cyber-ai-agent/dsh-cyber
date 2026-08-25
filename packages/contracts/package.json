@@ -33,6 +33,10 @@
     "./world-authority": {
       "types": "./lib/world-authority.d.ts",
       "default": "./lib/world-authority.js"
+    },
+    "./world-artifact": {
+      "types": "./lib/world-artifact.d.ts",
+      "default": "./lib/world-artifact.js"
     }
   },
   "files": ["lib"],

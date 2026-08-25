@@ -13,6 +13,7 @@ import type {
 import { SqliteStore } from '@dsh-cyber/persistence'
 
 import { ConversationOrchestrator } from '../src/index.js'
+import type { AgentRunCompletionHook } from '../src/index.js'
 
 const stores: SqliteStore[] = []
 const orchestrators: ConversationOrchestrator[] = []
@@ -303,6 +304,42 @@ describe('ConversationOrchestrator', () => {
     expect(store.listSessions(company.id).filter((session) => session.kind === 'group')).toHaveLength(1)
     expect(store.listMessages(first.session.id).filter((message) => message.kind === 'user')).toHaveLength(2)
     expect(store.listWorldDomainEvents(company.id).filter((event) => event.type === 'meeting.started')).toHaveLength(2)
+  })
+
+  it('runs completion publication once for direct, group, and peer AgentRuns before durable assistant append', async () => {
+    const { directory, store, workspace, company } = await setup()
+    store.saveBlueprint(blueprint('completion-a', '甲', '分析师'))
+    store.saveBlueprint(blueprint('completion-b', '乙', '工程师'))
+    const first = store.recruitEmployee({ workspaceId: workspace.id, worldId: company.id, blueprintId: 'completion-a', blueprintVersion: 1 })
+    const second = store.recruitEmployee({ workspaceId: workspace.id, worldId: company.id, blueprintId: 'completion-b', blueprintVersion: 1 })
+    const runtime = new FakeRuntime({ [first.id]: '甲的交付', [second.id]: '乙的交付' })
+    const contexts: string[] = []
+    const completionHook: AgentRunCompletionHook = {
+      async onCompleted(context) {
+        contexts.push(`${context.agentRunId}:${context.workspacePath}`)
+        return {
+          artifactRefs: [`artifact-${context.agentRunId}`],
+          messageMetadata: { publication: 'durable' },
+        }
+      },
+    }
+    const orchestrator = new ConversationOrchestrator({ store, runtime, workspacePath: directory, completionHook })
+    orchestrators.push(orchestrator)
+
+    const direct = await orchestrator.direct({ workspaceId: workspace.id, worldId: company.id, employeeId: first.id, prompt: '直接交付' })
+    const group = await orchestrator.group({ workspaceId: workspace.id, worldId: company.id, employeeIds: [first.id, second.id], prompt: '群组交付' })
+    const peer = await orchestrator.peer({ workspaceId: workspace.id, worldId: company.id, initiatorId: first.id, participantIds: [second.id], purpose: '协作交付' })
+
+    expect(contexts).toHaveLength(5)
+    expect(contexts.every((value) => value.endsWith(`:${directory}`))).toBe(true)
+    for (const session of [direct.session, group.session, peer.session]) {
+      const assistantMessages = store.listMessages(session.id).filter((message) => message.kind === 'assistant')
+      expect(assistantMessages.length).toBeGreaterThan(0)
+      expect(assistantMessages.every((message) => message.metadata.publication === 'durable')).toBe(true)
+      expect(assistantMessages.every((message) => Array.isArray(message.metadata.artifactRefs))).toBe(true)
+    }
+    expect(store.listMessages(group.session.id).filter((message) => message.kind === 'assistant')).toHaveLength(2)
+    expect(store.listMessages(peer.session.id).filter((message) => message.kind === 'assistant')).toHaveLength(2)
   })
 
   it('preserves completed runs when a later group agent fails', async () => {

@@ -1,6 +1,5 @@
 import {
   ArrowUp,
-  BracketsCurly,
   CaretDown,
   CircleNotch,
   ClockCounterClockwise,
@@ -22,6 +21,7 @@ import { Avatar } from './Avatar.js'
 import { AuthorityBadge } from './AuthorityBadge.js'
 
 const MarkdownMessage = lazy(async () => ({ default: (await import('./MarkdownMessage.js')).MarkdownMessage }))
+const ArtifactReferenceCards = lazy(async () => ({ default: (await import('../features/artifacts/ArtifactCenter.js')).ArtifactReferenceCards }))
 
 interface ChatWorkbenchProps {
   demoMode: boolean
@@ -41,7 +41,7 @@ interface ChatWorkbenchProps {
   onSend(prompt: string, attachments: ChatAttachment[]): Promise<void>
   onUploadAttachment(file: File): Promise<ChatAttachment>
   onOpenDossier(employeeId: string): void
-  onOpenArtifact(): void
+  onOpenArtifact(artifactId?: string): void
   onRecruit(): void
   onOpenPluginMarket?(): void
   onOpenHistory?(): void
@@ -153,7 +153,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
             <h2>{employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? '群聊已准备好' : conversationKind === 'direct' ? `开始与${participantEmployees[0]?.displayName ?? experience.personLabel}对话` : '选择会话开始互动'}</h2>
             <p>{employees.length === 0 ? experience.emptyCopy : conversationKind === 'group' ? '群聊已经创建并保存在当前世界，发送消息开始多人协作。' : conversationKind === 'direct' ? '历史记录会保留在当前世界；发送消息后角色才会进入真实运行过程。' : '左侧只保留会话：每个角色固定一个私聊，也可以创建多人群聊；角色新增与管理统一在右侧角色。'}</p>
           </div>
-        ) : visibleMessages.map((message, index) => {
+        ) : visibleMessages.map((message) => {
           const employee = employees.find((item) => item.id === message.senderId)
           const owner = message.senderKind === 'owner'
           const streaming = message.metadata.streaming === true
@@ -165,7 +165,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
                 <header className="message__meta">{owner ? <span className="sr-only">我的消息</span> : <><strong>{employee?.displayName ?? experience.personLabel}<AuthorityBadge role={employee?.authorityRole} /></strong><span>{employee?.role}</span></>}<time>{displayTime(message)}</time></header>
                 <div className="message__content">{streaming && message.content.length === 0 ? <span className="stream-placeholder">正在生成回复…</span> : <RichText value={message.content} worldId={world.id} />}{streaming ? <span className="stream-cursor" aria-hidden="true" /> : null}</div>
                 <MessageAttachments attachments={messageAttachments(message.metadata)} />
-                {demoMode && experience.kind === 'company' && index === 1 ? <ArtifactAttachment onOpen={onOpenArtifact} /> : null}
+                {artifactRefsFromMetadata(message.metadata).length === 0 ? null : <Suspense fallback={<div className="chat-artifact-refs" role="status">正在载入产物卡…</div>}><ArtifactReferenceCards worldId={world.id} artifactRefs={artifactRefsFromMetadata(message.metadata)} onOpen={onOpenArtifact} /></Suspense>}
               </div>
               {owner ? <span className="owner-avatar" role="img" aria-label="我的头像"><UserCircle size={28} weight="fill" /></span> : null}
             </article>
@@ -278,6 +278,16 @@ function messageAttachments(metadata: JsonObject): ChatAttachment[] {
     if (item === null || typeof item !== 'object' || Array.isArray(item)) return []
     const attachment = item as Record<string, unknown>
     return typeof attachment.assetId === 'string' && typeof attachment.name === 'string' && typeof attachment.mimeType === 'string' && typeof attachment.byteLength === 'number' && typeof attachment.url === 'string' ? [attachment as unknown as ChatAttachment] : []
+  })
+}
+
+function artifactRefsFromMetadata(metadata: JsonObject): string[] {
+  const value = metadata.artifactRefs
+  if (!Array.isArray(value)) return []
+  return value.flatMap((entry) => {
+    if (typeof entry === 'string' && entry.length > 0 && !/[\\/]/.test(entry)) return [entry]
+    if (entry !== null && typeof entry === 'object' && !Array.isArray(entry) && typeof entry.id === 'string' && entry.id.length > 0 && !/[\\/]/.test(entry.id)) return [entry.id]
+    return []
   })
 }
 
@@ -411,6 +421,10 @@ function worldPermissionLabel(permission: WorldCharacterPermission): string {
     'world.trace.read': '查看轨迹',
     'world.conversations.read-metadata': '查看会话列表与元数据',
     'world.conversations.read-content': '读取其他会话正文',
+    'world.artifacts.read': '浏览世界产物',
+    'world.artifacts.manage': '管理世界产物',
+    'world.knowledge.read': '浏览世界知识',
+    'world.knowledge.manage': '管理世界知识',
   }
   return labels[permission]
 }
@@ -420,7 +434,6 @@ function formatPermissionExpiry(value: string): string {
   return Number.isNaN(date.valueOf()) ? value : date.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-function ArtifactAttachment({ onOpen }: { onOpen(): void }) { return <button className="artifact-attachment" type="button" onClick={onOpen}><span className="artifact-attachment__icon"><BracketsCurly size={18} /></span><span><strong>v0.3.0-架构设计.md</strong><small>1.2 MB · 已保存到世界产物</small></span><span>预览</span></button> }
 function displayTime(message: WorkMessage): string { const metadataTime = message.metadata.displayTime; return typeof metadataTime === 'string' ? metadataTime : new Date(message.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }
 function currentMention(value: string): string | undefined { return /@([^\s@]*)$/.exec(value)?.[1] }
 export function isChatMessage(message: WorkMessage): boolean {

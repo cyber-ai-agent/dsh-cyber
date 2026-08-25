@@ -86,7 +86,8 @@ import { worldExperience } from './world-experience.js'
 import { subscribeWorldLive } from './world-live-client.js'
 
 const SettingsDialog = lazy(async () => ({ default: (await import('./components/SettingsDialog.js')).SettingsDialog }))
-const ArtifactDock = lazy(async () => ({ default: (await import('./components/ArtifactDock.js')).ArtifactDock }))
+const WorldSideDock = lazy(async () => ({ default: (await import('./components/WorldSideDock.js')).WorldSideDock }))
+const ArtifactCenter = lazy(async () => ({ default: (await import('./features/artifacts/ArtifactCenter.js')).ArtifactCenter }))
 const EmployeeManagementDialog = lazy(async () => ({ default: (await import('./components/EmployeeManagementDialog.js')).EmployeeManagementDialog }))
 const GroupConversationDialog = lazy(async () => ({ default: (await import('./components/GroupConversationDialog.js')).GroupConversationDialog }))
 const MessageHistoryDialog = lazy(async () => ({ default: (await import('./components/MessageHistoryDialog.js')).MessageHistoryDialog }))
@@ -138,6 +139,7 @@ export default function App() {
   const [dossiers, setDossiers] = useState<Record<string, EmployeeDossier>>(demoMode ? demoData.dossiers : {})
   const [authorities, setAuthorities] = useState<WorldCharacterAuthority[]>([])
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | undefined>()
+  const [selectedArtifactId, setSelectedArtifactId] = useState<string | undefined>()
   const [dockTab, setDockTab] = useState<DockTab>('world')
   const [dockCollapsed, setDockCollapsed] = useState(false)
   const [draft, setDraft] = useState('')
@@ -267,6 +269,7 @@ export default function App() {
     setMessagePage({ hasMore: false, loading: false })
     setDraft('')
     setSelectedEmployeeId(undefined)
+    setSelectedArtifactId(undefined)
     setEmployees([])
     setDossiers({})
     setAuthorities([])
@@ -1863,7 +1866,7 @@ export default function App() {
             onSend={send}
             onUploadAttachment={uploadChatAttachment}
             onOpenDossier={(employeeId) => void openDossier(employeeId)}
-            onOpenArtifact={() => { setAppMode('world'); setDockCollapsed(false); setDockTab('world') }}
+            onOpenArtifact={(artifactId) => { setSelectedArtifactId(artifactId); setAppMode('workbench'); setDockCollapsed(false); setDockTab('artifacts') }}
             onRecruit={() => { setSelectedEmployeeId(undefined); setDockCollapsed(false); setDockTab('dossier') }}
             onOpenPluginMarket={() => void openPackageMarket('plugin')}
             onOpenHistory={openMessageHistory}
@@ -1882,7 +1885,7 @@ export default function App() {
           />
         )}
         right={(
-          <Suspense fallback={<div className="world-runtime world-runtime--loading"><strong>正在加载工作区</strong></div>}><ArtifactDock
+          <Suspense fallback={<div className="world-runtime world-runtime--loading"><strong>正在加载工作区</strong></div>}><WorldSideDock
             demoMode={demoMode}
             activeTab={dockTab}
             {...(selectedEmployee === undefined ? {} : { selectedEmployee })}
@@ -1927,6 +1930,8 @@ export default function App() {
                 </Suspense>
               ),
             } : {})}
+            knowledgeContent={undefined}
+            artifactContent={<Suspense fallback={<div className="world-runtime world-runtime--loading"><strong>正在加载产物</strong></div>}><ArtifactCenter world={activeWorld} demoMode={demoMode} {...(selectedArtifactId === undefined ? {} : { focusArtifactId: selectedArtifactId })} onFocusArtifact={setSelectedArtifactId} /></Suspense>}
             traceContent={<Suspense fallback={<div className="world-runtime world-runtime--loading"><strong>正在加载轨迹</strong></div>}><WorldTracePanel key={activeWorld.id} world={activeWorld} employees={employees} demoMode={demoMode} /></Suspense>}
             scheduleContent={<Suspense fallback={<div className="world-runtime world-runtime--loading"><strong>正在加载日程</strong></div>}><TaskSchedulePanel employees={employees} items={taskSchedules} busy={scheduleBusy} onCreate={createTaskSchedule} onStatus={updateTaskScheduleStatus} onRun={runTaskSchedule} onDelete={deleteTaskSchedule} /></Suspense>}
             onTabChange={(tab) => { setDockTab(tab); setAppMode(tab === 'world' ? 'world' : 'workbench') }}
