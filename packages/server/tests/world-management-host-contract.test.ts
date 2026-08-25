@@ -22,7 +22,10 @@ afterEach(async () => {
 })
 
 class QuietRuntime implements AgentRuntimePort {
+  readonly prompts: string[] = []
+
   async runTurn(request: AgentTurnRequest) {
+    this.prompts.push(request.prompt)
     return { agentSessionId: `agent-${request.agent.id}`, finalResponse: '好的。', eventCount: 0 }
   }
   async close(): Promise<void> {}
@@ -37,16 +40,17 @@ class QuietRuntime implements AgentRuntimePort {
  */
 async function start() {
   const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-world-mgmt-'))
+  const runtime = new QuietRuntime()
   const server = await createCyberServer({
     stateRoot,
     workspacePath: stateRoot,
     port: 0,
-    runtime: new QuietRuntime(),
+    runtime,
     bootstrapDefaultWorld: true,
   })
   servers.push(server)
   const address = await server.start()
-  return { origin: address.origin, server }
+  return { origin: address.origin, server, runtime }
 }
 
 async function json(origin: string, path: string, init?: RequestInit): Promise<{ response: Response; body: any }> {
@@ -121,6 +125,55 @@ describe('world management host wiring', () => {
     // The change must go through the profile revision chain, not a raw row
     // update: character history is an audit trail, not mutable state.
     expect(server.store.getEmployeeProfile(characterId)!.revision).toBeGreaterThan(profileBefore)
+  })
+
+  it('reports unsupported compound clauses as not executed', async () => {
+    const { origin, runtime } = await start()
+    const { world, characterId } = await administratorWorld(origin)
+
+    await chat(origin, world.id, characterId, '把当前场景改成产品评审，然后请老王喝杯咖啡')
+
+    const actions = await skillActions(origin, world.id)
+    const update = actions.find((item) => item.action === 'world.settings.update')
+    expect(update, '可识别的子句应当执行').toBeDefined()
+    expect(update!.detail).toContain('未识别，未执行：请老王喝杯咖啡')
+    expect(runtime.prompts.at(-1)).toContain('未识别，未执行：请老王喝杯咖啡')
+  })
+
+  it('lists candidate identities when a character name is ambiguous', async () => {
+    const { origin, server } = await start()
+    const { world, characterId } = await administratorWorld(origin)
+    const recruitedIds: string[] = []
+    for (const id of ['wang-a', 'wang-b']) {
+      server.store.saveBlueprint({
+        schemaVersion: 1,
+        id,
+        version: 1,
+        worldTemplateId: 'personal-world',
+        displayName: '王',
+        role: '成员',
+        summary: '重名测试角色',
+        persona: '你是王。',
+        requestedSkills: [],
+        requestedCapabilities: [],
+        createdAt: '2026-08-25T00:00:00.000Z',
+      })
+      recruitedIds.push(server.store.recruitEmployee({
+        workspaceId: world.workspaceId,
+        worldId: world.id,
+        blueprintId: id,
+        blueprintVersion: 1,
+      }).id)
+    }
+
+    await chat(origin, world.id, characterId, '把王设置成管理员')
+
+    const actions = await skillActions(origin, world.id)
+    const clarification = actions.find((item) => item.action === 'world.characters.list')
+    expect(clarification, '重名时应当执行角色候选查询').toBeDefined()
+    expect(clarification!.detail).toContain('目标角色存在歧义')
+    expect(clarification!.detail).toContain('王')
+    for (const id of recruitedIds) expect(clarification!.detail).toContain(id)
   })
 
   it('publishes no skill whose host capability is missing', () => {
