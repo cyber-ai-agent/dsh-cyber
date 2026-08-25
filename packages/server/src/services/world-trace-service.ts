@@ -1,4 +1,5 @@
 import type {
+  WorkMessage,
   WorldTraceEntry,
   WorldTracePage,
   WorldTraceQuery,
@@ -11,6 +12,7 @@ import {
   AgentRunTraceAdapter,
   ConversationTraceAdapter,
   DomainEventTraceAdapter,
+  TRACE_INVISIBLE_EVENT_TYPES,
   RuntimeEventTraceAdapter,
   ScheduleTraceAdapter,
   SkillActionTraceAdapter,
@@ -124,7 +126,11 @@ export class WorldTraceService {
 
   async #materialize(worldId: string): Promise<WorldTraceEntry[]> {
     const context = this.#context(worldId)
-    const messages = this.#store.listWorldTraceMessages(worldId)
+    // Each run only ever reads its own messages. Handing the whole world's
+    // transcript to every run made this quadratic: at 6,400 runs / 38,400
+    // messages a single materialization spent over 1.6s in the nested scan,
+    // and a chat POST materializes twice.
+    const messagesByRun = groupMessagesByRun(this.#store.listWorldTraceMessages(worldId))
     const interactions = new Map(this.#store.listWorldModelInteractions(worldId)
       .filter((interaction) => interaction.agentRunId !== undefined)
       .map((interaction) => [interaction.agentRunId!, interaction]))
@@ -134,17 +140,39 @@ export class WorldTraceService {
         value: {
           worldId,
           run,
-          messages,
+          messages: messagesByRun.get(run.id) ?? [],
           ...(interactions.get(run.id) === undefined ? {} : { interaction: interactions.get(run.id)! }),
         },
       })),
-      ...this.#store.listWorldDomainEvents(worldId).map((value) => ({ kind: 'domain-event' as const, value })),
+      ...this.#store.listWorldTraceDomainEvents(worldId, TRACE_INVISIBLE_EVENT_TYPES).map((value) => ({ kind: 'domain-event' as const, value })),
       ...(await this.#actions.listByWorld(worldId)).map((value) => ({ kind: 'skill-action' as const, value })),
     ]
     const persisted = deduplicate(facts.flatMap((fact) => this.#registry.adapt(fact, context)))
     const live = [...this.#liveRuns.values()].filter((entry) => entry.worldId === worldId)
     return deduplicate([...persisted, ...live])
   }
+}
+
+/**
+ * Indexes trace messages by the run they belong to.
+ *
+ * A message is claimed by `agentRunId` and by `traceTurnId`, and the two can
+ * differ, so a message may legitimately land under both keys — exactly what the
+ * per-run filter used to accept.
+ */
+export function groupMessagesByRun(messages: readonly WorkMessage[]): Map<string, WorkMessage[]> {
+  const grouped = new Map<string, WorkMessage[]>()
+  const add = (runId: unknown, message: WorkMessage): void => {
+    if (typeof runId !== 'string' || runId.length === 0) return
+    const bucket = grouped.get(runId)
+    if (bucket === undefined) grouped.set(runId, [message])
+    else if (bucket.at(-1) !== message) bucket.push(message)
+  }
+  for (const message of messages) {
+    add(message.metadata.agentRunId, message)
+    add(message.metadata.traceTurnId, message)
+  }
+  return grouped
 }
 
 export function createWorldTraceRegistry(): WorldTraceAdapterRegistry {

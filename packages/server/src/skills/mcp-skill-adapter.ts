@@ -42,8 +42,17 @@ export class McpSkillAdapter implements CharacterSkillAdapter {
     }))
   }
 
+  /**
+   * Rediscovers MCP tools, one workspace at a time.
+   *
+   * A workspace whose server is unreachable, or whose catalog contains a single
+   * malformed tool, loses only its own tools. Previously any failure escaped
+   * the loop and the caller cleared the whole catalog, so one bad server
+   * discarded every healthy sibling.
+   */
   async refresh(): Promise<void> {
     const next = new Map<string, DiscoveredTool[]>()
+    const failures: string[] = []
     for (const workspace of this.#store.listWorkspaces()) {
       const connection = this.#integrations.get(workspace.id, MCP_INTEGRATION_ID)
       if (connection === undefined || !connection.enabled) continue
@@ -51,17 +60,36 @@ export class McpSkillAdapter implements CharacterSkillAdapter {
       try {
         client = await this.#clients.connect(mcpEndpoint(connection.config), this.#integrations.credential(workspace.id, MCP_INTEGRATION_ID))
         const tools = (await client.listTools()).slice(0, 100)
+        const discovered: DiscoveredTool[] = []
         for (const tool of tools) {
           validateTool(tool)
           const skillId = mcpSkillId(tool.name)
-          const entries = next.get(skillId) ?? []
-          if (entries.some((entry) => entry.tool.name !== tool.name)) throw new Error(`MCP tool id collision: ${tool.name}`)
-          entries.push({ workspaceId: workspace.id, skillId, tool })
-          next.set(skillId, entries)
+          if (discovered.some((entry) => entry.skillId === skillId && entry.tool.name !== tool.name)) {
+            throw new Error(`MCP tool id collision: ${tool.name}`)
+          }
+          discovered.push({ workspaceId: workspace.id, skillId, tool })
         }
+        // Only a fully validated catalog is published, so a workspace never
+        // ends up with half of its tools.
+        for (const entry of discovered) {
+          next.set(entry.skillId, [...(next.get(entry.skillId) ?? []), entry])
+        }
+      } catch (error) {
+        failures.push(`${workspace.id}: ${error instanceof Error ? error.message : String(error)}`)
       } finally { await client?.close().catch(() => undefined) }
     }
     this.#tools = next
+    if (failures.length > 0) {
+      console.warn(`[dsh-cyber] ${failures.length} 个工作区的 MCP 工具目录刷新失败：${failures.join('；')}`)
+    }
+  }
+
+  /** Descriptors a given workspace may actually use. */
+  descriptorsFor(workspaceId: string): readonly CharacterSkillDescriptor[] {
+    const visible = new Set([...this.#tools.entries()]
+      .filter(([, entries]) => entries.some((entry) => entry.workspaceId === workspaceId))
+      .map(([skillId]) => skillId))
+    return this.descriptors.filter((descriptor) => visible.has(descriptor.id))
   }
 
   clear(): void { this.#tools = new Map() }

@@ -48,6 +48,42 @@ const EXCLUDED = new Set<DomainEventType>([
   'task.completed',
 ])
 
+/**
+ * Domain event types the world trace can never render.
+ *
+ * Three are explicitly discarded by `describe`, and three have no case at all.
+ * Reading them only to drop them is what made the trace read model expensive on
+ * a long-lived world, so they are excluded in SQL. A test asserts this list is
+ * exactly the set the adapter produces nothing for.
+ */
+export const TRACE_INVISIBLE_EVENT_TYPES: readonly DomainEventType[] = [
+  'workspace.created',
+  'world.administrator.changed',
+  'world.entered',
+  'employee.milestone.recorded',
+  'employee.journal.written',
+  'employee.relationship.updated',
+  'workspace.preferences.updated',
+  'model.profile.updated',
+  'model.assignment.updated',
+  'local.asset.saved',
+  'session.created',
+  'session.participant.joined',
+  'message.appended',
+  'turn.started',
+  'turn.completed',
+  'turn.failed',
+  'tool.started',
+  'tool.completed',
+  'task.started',
+  'task.waiting',
+  'task.blocked',
+  'task.completed',
+  'world.runtime.snapshot.saved',
+  'world.package.instantiated',
+  'world.package.disabled',
+]
+
 export class DomainEventTraceAdapter implements WorldTraceAdapter<'domain-event'> {
   readonly kind = 'domain-event' as const
 
@@ -154,6 +190,10 @@ function presentDomainEvent(type: DomainEventType, payload: Record<string, unkno
     case 'package.install.staged': return { category: 'system', status: 'running', summary: '软件包正在暂存验证' }
     case 'package.install.activated': return { category: 'system', status: 'success', summary: '软件包已激活' }
     case 'package.install.rolled-back': return { category: 'system', status: 'failed', summary: '软件包安装已回滚' }
+    // Uninstall is the same class of system fact as the four install events
+    // beside it; leaving it unrendered made a package silently vanish from the
+    // trace that recorded it arriving.
+    case 'package.uninstalled': return { category: 'system', status: 'success', summary: '软件包已卸载' }
     case 'workspace.created':
     case 'message.appended':
     case 'world.runtime.snapshot.saved':

@@ -22,7 +22,7 @@
 - [x] Requested Skill vs granted Skill separation
 - [x] Trusted Skill Adapter registry foundation
 - [x] Home Assistant adapter V1
-- [ ] Complete local `.dshbackup` boundary — 备份包已流式写出且逐文件校验，但仓库里还没有读取端；它目前是人工恢复产物，不是受支持的 restore 路径
+- [x] Complete local `.dshbackup` boundary — 流式写出、逐分片与整文件校验，`dsh-cyber restore` 完整校验后才替换目标目录
 - [x] Controlled Harness update / rollback
 - [x] SQLite-backed conversation continuity across runtime restart
 - [x] Approval Gate V1 for trusted external Skill actions

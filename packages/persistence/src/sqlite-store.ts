@@ -361,6 +361,20 @@ export interface CompletePackageInstallInput {
   actorId?: string
 }
 
+export interface PruneHistoryInput {
+  /** ISO timestamp; rows created strictly before this are eligible. */
+  before: string
+  workspaceId?: string
+}
+
+export interface PruneHistoryResult {
+  before: string
+  workTurns: number
+  agentRuns: number
+  domainEvents: number
+  modelInteractions: number
+}
+
 export interface RollbackPackageInstallInput {
   transactionId: string
   errorCode: string
@@ -1097,6 +1111,45 @@ export class SqliteStore {
                 ORDER BY created_at DESC, id DESC`)
       .all(worldId)
       .map(mapModelInteractionLog)
+  }
+
+  /**
+   * Deletes telemetry older than `before`, bounding the tables the world trace
+   * reads. Nothing here is user content.
+   *
+   * Conversations, Skill actions and approval history are deliberately kept:
+   * they are the audit trail for real-world effects, and a retention sweep is
+   * not the place to lose them. Pruning a work turn cascades to its agent runs
+   * and leaves the ledger rows intact with their links set to null.
+   *
+   * Only settled rows are eligible — a queued or running turn is live state.
+   */
+  pruneHistory(input: PruneHistoryInput): PruneHistoryResult {
+    this.#assertWritable()
+    if (!Number.isFinite(Date.parse(input.before))) {
+      throw new PersistenceError(`Invalid prune cutoff: ${input.before}`)
+    }
+    if (input.workspaceId !== undefined) this.#requireWorkspace(input.workspaceId)
+    const before = input.before
+    const scope = input.workspaceId
+    const settled = "('completed', 'failed', 'interrupted')"
+
+    return this.#transaction(() => {
+      const workTurns = Number(this.database
+        .prepare(`DELETE FROM work_turns WHERE status IN ${settled} AND created_at < ?${scope === undefined ? '' : ' AND workspace_id = ?'}`)
+        .run(...(scope === undefined ? [before] : [before, scope])).changes)
+      // Runs whose turn is still live but which settled long ago.
+      const agentRuns = Number(this.database
+        .prepare(`DELETE FROM agent_runs WHERE status IN ${settled} AND created_at < ?${scope === undefined ? '' : ' AND workspace_id = ?'}`)
+        .run(...(scope === undefined ? [before] : [before, scope])).changes)
+      const domainEvents = Number(this.database
+        .prepare(`DELETE FROM domain_events WHERE created_at < ?${scope === undefined ? '' : ' AND workspace_id = ?'}`)
+        .run(...(scope === undefined ? [before] : [before, scope])).changes)
+      const modelInteractions = Number(this.database
+        .prepare(`DELETE FROM model_interaction_logs WHERE created_at < ?${scope === undefined ? '' : ' AND workspace_id = ?'}`)
+        .run(...(scope === undefined ? [before] : [before, scope])).changes)
+      return { before, workTurns, agentRuns, domainEvents, modelInteractions }
+    })
   }
 
   clearModelInteractions(workspaceId: string): number {
@@ -2299,17 +2352,47 @@ export class SqliteStore {
   }
 
   failAgentRun(runId: string, errorCode: string, runtimeSessionId?: string): AgentRun {
-    return this.#transitionAgentRun(runId, ['running'], 'failed', errorCode, runtimeSessionId)
+    const run = this.#transitionAgentRun(runId, ['running'], 'failed', errorCode, runtimeSessionId)
+    this.#markRunOutputUnfinished(runId)
+    return run
   }
 
   interruptAgentRun(runId: string, errorCode = 'interrupted'): AgentRun {
-    return this.#transitionAgentRun(runId, ['queued', 'running'], 'interrupted', errorCode)
+    const run = this.#transitionAgentRun(runId, ['queued', 'running'], 'interrupted', errorCode)
+    this.#markRunOutputUnfinished(runId)
+    return run
+  }
+
+  /**
+   * Marks whatever a failed run had already streamed as unfinished.
+   *
+   * The partial text stays in the transcript, because the user watched it
+   * arrive and the provider's own session already carries it forward. What it
+   * must not do is come back as recovered history: replaying it into a fresh
+   * runtime session would present a half-written answer as something the
+   * character actually said.
+   */
+  #markRunOutputUnfinished(runId: string): void {
+    this.database
+      .prepare(
+        `UPDATE messages
+         SET metadata_json = json_set(metadata_json, '$.failed', json('true'))
+         WHERE kind = 'assistant' AND json_extract(metadata_json, '$.agentRunId') = ?`,
+      )
+      .run(runId)
   }
 
   recoverConversationRuntimeAfterRestart(): ConversationRuntimeRecoveryReport {
     this.#assertWritable()
     const now = this.#clock()
     return this.#transaction(() => {
+      this.database.prepare(
+        `UPDATE messages
+         SET metadata_json = json_set(metadata_json, '$.failed', json('true'))
+         WHERE kind = 'assistant' AND json_extract(metadata_json, '$.agentRunId') IN (
+           SELECT id FROM agent_runs WHERE status IN ('queued', 'running')
+         )`,
+      ).run()
       const runs = this.database.prepare(
         `UPDATE agent_runs SET status = 'failed', error_code = 'service-restarted', completed_at = ?
          WHERE status IN ('queued', 'running')`,
@@ -2830,6 +2913,26 @@ export class SqliteStore {
         'SELECT * FROM domain_events WHERE workspace_id = ? AND sequence > ? ORDER BY sequence',
       )
       .all(workspaceId, afterSequence)
+      .map(mapDomainEvent)
+  }
+
+  /**
+   * Domain events a world trace can actually render.
+   *
+   * The trace discards every other type after loading it, which at a few
+   * thousand turns means tens of thousands of rows read and thrown away on
+   * every materialization. The exclusion list is asserted against the adapter
+   * in packages/server/tests, so it cannot drift silently.
+   */
+  listWorldTraceDomainEvents(worldId: string, excludedTypes: readonly string[]): DomainEvent[] {
+    this.#requireWorld(worldId)
+    if (excludedTypes.length === 0) return this.listWorldDomainEvents(worldId)
+    const placeholders = excludedTypes.map(() => '?').join(', ')
+    return this.database
+      .prepare(
+        `SELECT * FROM domain_events WHERE world_id = ? AND type NOT IN (${placeholders}) ORDER BY sequence`,
+      )
+      .all(worldId, ...excludedTypes)
       .map(mapDomainEvent)
   }
 

@@ -102,6 +102,17 @@ export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDep
     const blueprintId = requiredString(body, 'blueprintId')
     const blueprintVersion = optionalPositiveInteger(body.blueprintVersion) ?? 1
     const liveBlueprint = await findLiveBlueprint(store, world.id, blueprintId, blueprintVersion, worldPackages)
+    if (liveBlueprint === undefined) {
+      // A blueprint is only recruitable where its package is instantiated.
+      // Falling back to the workspace-global record let a character be
+      // recruited into a world holding no instance of its package, which is
+      // exactly what docs/architecture/world-package-instance-v1.md forbids.
+      throw new HttpError(
+        422,
+        'blueprint_not_available_in_world',
+        `当前世界没有这个角色蓝图的实例：${blueprintId}@${blueprintVersion}`,
+      )
+    }
     const recruitInput: Parameters<SqliteStore['recruitEmployee']>[0] = {
       workspaceId: world.workspaceId,
       worldId: world.id,
@@ -115,7 +126,7 @@ export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDep
         throw new HttpError(422, 'invalid_skill_grants', 'skillGrants must be an array of non-empty strings')
       }
       const skillGrants = optionalStringArray(body.skillGrants)
-      const requestedSkills = new Set(liveBlueprint?.requestedSkills ?? store.getBlueprint(blueprintId, blueprintVersion)?.requestedSkills ?? [])
+      const requestedSkills = new Set(liveBlueprint.requestedSkills)
       const denied = skillGrants.find((skill) => !requestedSkills.has(skill))
       if (denied !== undefined) throw new HttpError(422, 'skill_not_requested', `Skill was not requested by the blueprint: ${denied}`)
       recruitInput.skillGrants = skillGrants

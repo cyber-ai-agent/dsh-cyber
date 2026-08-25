@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { copyFile, lstat, mkdir, rename, rm, writeFile } from 'node:fs/promises'
-import { dirname, relative, resolve, sep } from 'node:path'
+import { copyFile, lstat, mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 
 import type { InstalledPackage, WorldPackageInstance } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
@@ -18,6 +18,28 @@ export interface InstantiateWorldPackageInput {
 
 /** Materializes immutable package-library content inside one world's authority boundary. */
 export class WorldPackageInstanceService {
+  /**
+   * Removes staging trees a crash left behind.
+   *
+   * `instantiate` renames a staging directory into place before the database
+   * row exists, so an interruption between the two leaves a `.<id>.staging`
+   * tree that nothing references and that a backup would faithfully copy.
+   */
+  async sweepOrphanedStaging(worldId: string): Promise<number> {
+    let removed = 0
+    try {
+      const root = await this.roots.ensure(worldId)
+      for (const entry of await readdir(root.packagesPath, { withFileTypes: true })) {
+        if (!entry.isDirectory() || !entry.name.startsWith('.') || !entry.name.endsWith('.staging')) continue
+        await rm(join(root.packagesPath, entry.name), { recursive: true, force: true })
+        removed += 1
+      }
+    } catch {
+      // A world whose package root does not exist has nothing to sweep.
+    }
+    return removed
+  }
+
   readonly #verification = new InstalledPackageVerificationCache()
 
   constructor(

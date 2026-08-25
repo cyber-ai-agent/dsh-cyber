@@ -10,7 +10,7 @@ import {
   readActiveHarnessRuntime,
 } from '@dsh-cyber/harness-adapter'
 import { SqliteStore } from '@dsh-cyber/persistence'
-import { createCyberServer, createLocalBackupBundle, type CyberServer } from '@dsh-cyber/server'
+import { createCyberServer, createLocalBackupBundle, restoreLocalBackupBundle, type CyberServer } from '@dsh-cyber/server'
 
 export interface CliIo {
   stdout: (line: string) => void
@@ -135,11 +135,63 @@ export async function runCli(args: string[], context: CliContext = {}): Promise<
       return 0
     }
 
+    if (command === 'restore') {
+      const input = optionString(options, 'input')
+      if (input === undefined) throw new Error('restore 需要 --input <备份文件>')
+      const source = resolve(cwd, input)
+      if (!existsSync(source)) throw new Error(`Backup not found: ${source}`)
+      const result = await restoreLocalBackupBundle(stateRoot, source, { force: optionBoolean(options, 'force') })
+      io.stdout(`已恢复到：${result.stateRoot}`)
+      io.stdout(`备份创建于：${result.createdAt}`)
+      io.stdout(`恢复内容：${result.included.join('、')}`)
+      io.stdout(`文件数：${result.files}，字节数：${result.bytes}`)
+      return 0
+    }
+
+    if (command === 'prune') {
+      const before = pruneCutoff(options)
+      const databasePath = join(stateRoot, 'data', 'dsh-cyber.sqlite')
+      if (!existsSync(databasePath)) throw new Error(`Database not found: ${databasePath}`)
+      const store = await SqliteStore.open(databasePath)
+      try {
+        const result = store.pruneHistory({ before })
+        io.stdout(`已清理 ${before} 之前的运行记录：`)
+        io.stdout(`  领域事件 ${result.domainEvents}`)
+        io.stdout(`  会话回合 ${result.workTurns}`)
+        io.stdout(`  代理运行 ${result.agentRuns}`)
+        io.stdout(`  模型调用日志 ${result.modelInteractions}`)
+        io.stdout('聊天记录、Skill 动作账本和审批历史不在清理范围内。')
+      } finally {
+        store.close()
+      }
+      return 0
+    }
+
     throw new Error(`Unknown command: ${command}`)
   } catch (error) {
     io.stderr(error instanceof Error ? error.message : String(error))
     return 1
   }
+}
+
+/**
+ * Retention needs an explicit cutoff. There is no default, because a wrong
+ * default here silently deletes history the user wanted.
+ */
+function pruneCutoff(options: Map<string, string | true>): string {
+  const before = optionString(options, 'before')
+  const keepDays = optionInteger(options, 'keep-days')
+  if (before !== undefined && keepDays !== undefined) throw new Error('--before 和 --keep-days 只能选一个')
+  if (before !== undefined) {
+    const parsed = Date.parse(before)
+    if (!Number.isFinite(parsed)) throw new Error(`无法解析日期：${before}`)
+    return new Date(parsed).toISOString()
+  }
+  if (keepDays !== undefined) {
+    if (keepDays < 1) throw new Error('--keep-days 至少为 1')
+    return new Date(Date.now() - keepDays * 24 * 60 * 60 * 1_000).toISOString()
+  }
+  throw new Error('prune 需要 --before <日期> 或 --keep-days <天数>')
 }
 
 function parseOptions(args: string[]): Map<string, string | true> {
@@ -231,9 +283,13 @@ function helpText(): string {
     '  dsh-cyber runtime-check --candidate-root PATH [--data-dir PATH]',
     '  dsh-cyber runtime-rollback [--data-dir PATH]',
     '  dsh-cyber backup [--data-dir PATH] [--output FILE.dshbackup]',
+    '  dsh-cyber restore --input FILE.dshbackup [--data-dir PATH] [--force]',
     '  dsh-cyber export [--data-dir PATH] [--output FILE.json]',
+    '  dsh-cyber prune (--before DATE | --keep-days N) [--data-dir PATH]',
     '',
     'backup 会包含数据库、世界、资产、已安装包、创意工坊项目和 Skill 动作；不包含模型密钥与运行时缓存。',
+    'restore 会先完整校验每个分片和整文件摘要，再替换目标目录；目标已有数据时需要 --force。',
+    'prune 只清理运行遥测（领域事件、会话回合、代理运行、模型调用日志）；聊天记录、Skill 动作账本和审批历史保留。',
     'Web 服务固定监听 loopback；Phase 1 不开放公网监听。',
   ].join('\n')
 }

@@ -583,7 +583,10 @@ describe('Cyber local server', () => {
       }),
     })
     expect(leakedSession.response.status).toBe(422)
-    expect(leakedSession.body.error.code).toBe('conversation_rejected')
+    // Rejected before the hub is touched, not after: restoreCanonicalDirect
+    // writes the other world's conversation state, so the world check has to
+    // happen ahead of it rather than downstream in the orchestrator.
+    expect(leakedSession.body.error.code).toBe('session_unavailable')
     expect(runtime.calls).toHaveLength(1)
 
     const tavernChat = await json(origin, `/api/worlds/${tavern.id}/chat`, {

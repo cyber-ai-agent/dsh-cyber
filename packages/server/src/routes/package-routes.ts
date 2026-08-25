@@ -97,7 +97,7 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
   router.get(/^\/api\/workspaces\/([^/]+)\/skill-catalog$/, ({ response, params }) => {
     const workspaceId = params[0]!
     if (store.getWorkspace(workspaceId) === undefined) throw new HttpError(404, 'workspace_not_found', 'Workspace not found')
-    writeJson(response, 200, { items: skillRuntime.listDescriptors() })
+    writeJson(response, 200, { items: skillRuntime.listDescriptors(workspaceId) })
   })
 
   router.post(/^\/api\/workspaces\/([^/]+)\/packages\/preview$/, async ({ request, response, params }) => {

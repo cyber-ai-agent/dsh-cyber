@@ -409,8 +409,11 @@ export default function App() {
       const result = await api<{ items: WorkMessage[]; hasMore?: boolean }>(`/api/sessions/${sessionId}/messages?view=chat&limit=${MESSAGE_PAGE_SIZE}`)
       setOutboxMessages((current) => reconcileOutboxMessages(current, queueKey, result.items))
       if (activeWorldRef.current?.id === worldId && activeConversationKeyRef.current === queueKey) {
-        setMessages(result.items)
-        setMessagePage({ hasMore: result.hasMore === true, loading: false })
+        // Merge rather than replace: this refresh returns only the newest page,
+        // and replacing would throw away everything loadOlder() pulled in every
+        // time one of this client's own turns completes.
+        setMessages((current) => mergeMessages(current, result.items))
+        setMessagePage((current) => ({ hasMore: current.hasMore || result.hasMore === true, loading: false }))
         const participantIds = participantIdsFromMessages(result.items)
         if (participantIds.length > 0) {
           setSessionParticipants((current) => ({ ...current, [sessionId]: participantIds }))

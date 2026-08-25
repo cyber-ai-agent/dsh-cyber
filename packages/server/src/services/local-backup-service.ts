@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto'
 import { createReadStream, createWriteStream } from 'node:fs'
-import { mkdir, open, readdir, rm, stat } from 'node:fs/promises'
-import { basename, dirname, join, resolve } from 'node:path'
+import { appendFile, mkdir, open, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { createInterface } from 'node:readline'
+import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
-import { createGzip } from 'node:zlib'
+import { createGunzip, createGzip } from 'node:zlib'
 
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
@@ -188,4 +189,156 @@ async function exists(path: string): Promise<boolean> {
 
 function artifactTimestamp(): string {
   return new Date().toISOString().replaceAll(/[:.]/g, '-').replace('T', '_').replace('Z', '')
+}
+
+
+export interface RestoreLocalBackupOptions {
+  /** Replace an existing state root instead of refusing to touch it. */
+  force?: boolean
+}
+
+export interface RestoreLocalBackupResult {
+  createdAt: string
+  included: string[]
+  files: number
+  bytes: number
+  stateRoot: string
+}
+
+/** Where the live database sits inside a state root. */
+const DATABASE_ARCHIVE_PATH = 'database.sqlite'
+const DATABASE_TARGET_PATH = join('data', 'dsh-cyber.sqlite')
+
+/**
+ * Restores a `.dshbackup` into a state root.
+ *
+ * The bundle was write-only until now, which meant the mandatory pre-update
+ * snapshot was not actually a recovery path. Everything is verified before
+ * anything is replaced: each chunk against its digest, each file against the
+ * whole-file digest, and every archive path against the state root. Only once
+ * the entire bundle has materialized in a staging directory is it swapped in.
+ */
+export async function restoreLocalBackupBundle(
+  stateRoot: string,
+  bundlePath: string,
+  options: RestoreLocalBackupOptions = {},
+): Promise<RestoreLocalBackupResult> {
+  const root = resolve(stateRoot)
+  const source = resolve(bundlePath)
+  const existingDatabase = join(root, DATABASE_TARGET_PATH)
+  if (options.force !== true && await exists(existingDatabase)) {
+    throw new Error(`State root already holds a database: ${existingDatabase}。请先备份，再使用 --force 覆盖。`)
+  }
+
+  await mkdir(root, { recursive: true })
+  const staging = join(root, `.restore-staging-${artifactTimestamp()}`)
+  await mkdir(staging, { recursive: true })
+  try {
+    const materialized = await materializeBundle(source, staging)
+    // Only now is anything in the live state root touched.
+    for (const top of new Set(materialized.topLevelEntries)) {
+      await rm(join(root, top), { recursive: true, force: true })
+      await mkdir(dirname(join(root, top)), { recursive: true })
+      await rename(join(staging, top), join(root, top))
+    }
+    return {
+      createdAt: materialized.header.createdAt,
+      included: materialized.header.included,
+      files: materialized.files,
+      bytes: materialized.bytes,
+      stateRoot: root,
+    }
+  } finally {
+    await rm(staging, { recursive: true, force: true })
+  }
+}
+
+interface MaterializedBundle {
+  header: LocalBackupBundleHeader
+  files: number
+  bytes: number
+  topLevelEntries: string[]
+}
+
+async function materializeBundle(source: string, staging: string): Promise<MaterializedBundle> {
+  const lines = createInterface({ input: createReadStream(source).pipe(createGunzip()), crlfDelay: Infinity })
+  let header: LocalBackupBundleHeader | undefined
+  const topLevelEntries: string[] = []
+  let current: { path: string; target: string; digest: ReturnType<typeof createHash>; expected: string; written: number; chunks: number; chunkCount: number } | undefined
+  let files = 0
+  let bytes = 0
+
+  const finishFile = (): void => {
+    if (current === undefined) return
+    if (current.chunks !== current.chunkCount) {
+      throw new Error(`Backup entry is incomplete: ${current.path}`)
+    }
+    const actual = current.digest.digest('hex')
+    if (actual !== current.expected) throw new Error(`Backup entry failed verification: ${current.path}`)
+    files += 1
+    current = undefined
+  }
+
+  for await (const line of lines) {
+    if (line.trim().length === 0) continue
+    if (header === undefined) {
+      header = JSON.parse(line) as LocalBackupBundleHeader
+      if (header.format !== 'dsh-cyber-local-backup') throw new Error('不是 DSH Cyber 备份包')
+      if (header.schemaVersion !== LOCAL_BACKUP_SCHEMA_VERSION) {
+        throw new Error(`不支持的备份包版本：${String(header.schemaVersion)}（当前支持 ${LOCAL_BACKUP_SCHEMA_VERSION}）`)
+      }
+      continue
+    }
+    const entry = JSON.parse(line) as LocalBackupBundleEntry
+    if (current?.path !== entry.path) {
+      finishFile()
+      const target = restoreTargetPath(staging, entry.path)
+      topLevelEntries.push(topLevelOf(entry.path))
+      await mkdir(dirname(target), { recursive: true })
+      await writeFile(target, '')
+      current = {
+        path: entry.path,
+        target,
+        digest: createHash('sha256'),
+        expected: entry.sha256,
+        written: 0,
+        chunks: 0,
+        chunkCount: entry.chunkCount,
+      }
+    }
+    if (entry.chunkIndex !== current.chunks) {
+      throw new Error(`Backup chunks are out of order: ${entry.path}`)
+    }
+    const chunk = Buffer.from(entry.dataBase64, 'base64')
+    if (createHash('sha256').update(chunk).digest('hex') !== entry.chunkSha256) {
+      throw new Error(`Backup chunk failed verification: ${entry.path}#${entry.chunkIndex}`)
+    }
+    await appendFile(current.target, chunk)
+    current.digest.update(chunk)
+    current.written += chunk.byteLength
+    current.chunks += 1
+    bytes += chunk.byteLength
+  }
+  finishFile()
+  if (header === undefined) throw new Error('备份包是空的')
+  return { header, files, bytes, topLevelEntries }
+}
+
+/** Maps an archive path into the staging tree, refusing anything that escapes. */
+function restoreTargetPath(staging: string, archivePath: string): string {
+  if (archivePath.length === 0 || archivePath.startsWith('/') || archivePath.includes('\\')) {
+    throw new Error(`Unsafe backup entry path: ${archivePath}`)
+  }
+  const mapped = archivePath === DATABASE_ARCHIVE_PATH ? DATABASE_TARGET_PATH : archivePath
+  const target = resolve(join(staging, mapped))
+  const inside = relative(resolve(staging), target)
+  if (inside.length === 0 || inside.startsWith('..') || inside.startsWith(`..${sep}`)) {
+    throw new Error(`Unsafe backup entry path: ${archivePath}`)
+  }
+  return target
+}
+
+function topLevelOf(archivePath: string): string {
+  const mapped = archivePath === DATABASE_ARCHIVE_PATH ? DATABASE_TARGET_PATH : archivePath
+  return mapped.split(/[\\/]/)[0]!
 }
