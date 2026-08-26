@@ -273,7 +273,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .session-row__avatar { width: 40px; height: 32px; display: flex; align-items: center; color: var(--text-muted); overflow: hidden; }
 .session-row__avatar .avatar { width: 28px; height: 28px; }
 .session-row__avatar .avatar + .avatar { margin-left: -10px; border-color: var(--surface-0); }
-.session-row__avatar--group { align-items: center; justify-content: center; overflow: visible; }
+.session-row__avatar--group { align-items: center; justify-content: flex-start; overflow: visible; }
 .session-row__copy { min-width: 0; display: grid; gap: 2px; }
 .session-row__copy strong, .session-row__copy small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .session-row__copy strong { color: var(--text-soft); font-size: 12px; font-weight: 600; }
