@@ -14,7 +14,7 @@ interface CreativeWorkshopEditorProps {
   error?: string
   promptReply?: string
   onChange(next: WorkshopDraft): void
-  onAnalyzePrompt(input: string): void
+  onAnalyzePrompt(input: string): Promise<void>
   onBack(): void
   onSubmit(): void
 }
@@ -129,16 +129,22 @@ export function CreativeWorkshopEditor({
   )
 }
 
-function WorkshopPromptAssistant({ reply, onAnalyze }: { reply: string | undefined; onAnalyze(input: string): void }) {
+function WorkshopPromptAssistant({ reply, onAnalyze }: { reply: string | undefined; onAnalyze(input: string): Promise<void> }) {
   const [value, setValue] = useState('')
   const [reading, setReading] = useState(false)
   const [fileError, setFileError] = useState<string>()
+  const [analyzing, setAnalyzing] = useState(false)
 
-  const submit = () => {
+  const submit = async () => {
     const input = value.trim()
     if (input.length === 0) return
     setFileError(undefined)
-    onAnalyze(input)
+    setAnalyzing(true)
+    try {
+      await onAnalyze(input)
+    } finally {
+      setAnalyzing(false)
+    }
   }
 
   const importPrompt = async (file: File) => {
@@ -151,7 +157,7 @@ function WorkshopPromptAssistant({ reply, onAnalyze }: { reply: string | undefin
       const text = await file.text()
       setFileError(undefined)
       setValue(text)
-      onAnalyze(text)
+      await onAnalyze(text)
     } catch {
       setFileError('提示词文件读取失败，请重新选择')
     } finally {
@@ -163,11 +169,11 @@ function WorkshopPromptAssistant({ reply, onAnalyze }: { reply: string | undefin
     <section className="creative-workshop-prompt-assistant" aria-labelledby="workshop-prompt-assistant-title">
       <header>
         <ChatCircleDots size={20} />
-        <div><strong id="workshop-prompt-assistant-title">创意助手</strong><small>可以直接描述目标，也可以粘贴完整 JSON 或导入提示词文件</small></div>
+        <div><strong id="workshop-prompt-assistant-title">创意助手</strong><small>输入描述后会直接生成世界，也可以粘贴完整 JSON 或导入提示词文件</small></div>
       </header>
       <textarea value={value} rows={4} placeholder="例如：创建一个围绕短剧制作的内容工作室，包含编剧、剪辑和审校角色……" onChange={(event) => { setFileError(undefined); setValue(event.target.value) }} />
       <footer>
-        <button className="primary-button" type="button" disabled={reading || value.trim().length === 0} onClick={submit}>根据描述生成草稿</button>
+        <button className="primary-button" type="button" disabled={reading || analyzing || value.trim().length === 0} onClick={() => void submit()}>{analyzing ? '正在生成世界…' : '生成世界'}</button>
         <label className="creative-workshop-prompt-assistant__import"><FileArrowUp size={16} />导入提示词文件<input type="file" accept=".txt,.md,.json,application/json,text/plain,text/markdown" disabled={reading} onChange={(event) => { const file = event.target.files?.[0]; if (file) void importPrompt(file); event.target.value = '' }} /></label>
       </footer>
       {fileError === undefined ? null : <p className="creative-workshop-prompt-assistant__error" role="alert">{fileError}</p>}
