@@ -6,6 +6,7 @@ import {
   File as FileIcon,
   PaperPlaneRight,
   Paperclip,
+  Stop,
   TerminalWindow,
   UserCircle,
   X,
@@ -83,6 +84,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
   const [copiedMessageId, setCopiedMessageId] = useState<string>()
   const [copyError, setCopyError] = useState<string>()
   const [queueMode, setQueueMode] = useState<ChatQueueMode>('normal')
+  const [topicNotice, setTopicNotice] = useState(false)
   const experience = worldExperience(world)
   const mention = useMemo(() => currentMention(draft), [draft])
   const suggestions = useMemo(() => mention === undefined ? [] : employees.filter((employee) => employee.displayName.includes(mention)).slice(0, 6), [employees, mention])
@@ -101,6 +103,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
   }, [queueItems])
   const saturatedWaiting = queueItems.some((turn) => turn.status === 'queued' && turn.employeeIds.some((employeeId) => (runningLaneCounts.get(employeeId) ?? 0) >= 2))
   const activeTurn = useMemo(() => queueItems.find((turn) => turn.status === 'running' || turn.status === 'waiting-approval'), [queueItems])
+  const canStopCurrentTurn = activeTurn !== undefined && onStopTurn !== undefined
   const hasQueueActions = pendingCount > 0 || queuedCount > 0 || queueItems.some((turn) => turn.status === 'running' || turn.status === 'waiting-approval' || turn.status === 'queued')
 
   useEffect(() => {
@@ -113,6 +116,10 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
   useEffect(() => {
     if (focusRequest > 0) inputRef.current?.focus()
   }, [focusRequest])
+
+  useEffect(() => {
+    setTopicNotice(false)
+  }, [session?.id])
 
   const lastSessionIdRef = useRef<string | undefined>(undefined)
   useEffect(() => {
@@ -129,9 +136,51 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
     return () => window.clearInterval(timer)
   }, [session?.id])
 
+  const executeLocalCommand = async (prompt: string): Promise<boolean> => {
+    const command = prompt.split(/\s+/, 1)[0]
+    if (command === '/换个话题') {
+      setTopicNotice(true)
+      onDraftChange('')
+      setAttachments([])
+      setQueueMode('normal')
+      return true
+    }
+    if (command === '/查看历史') {
+      onOpenHistory?.()
+      onDraftChange('')
+      return true
+    }
+    if (command === '/清空输入') {
+      onDraftChange('')
+      setAttachments([])
+      setQueueMode('normal')
+      return true
+    }
+    if (command === '/停止回复') {
+      if (canStopCurrentTurn && activeTurn !== undefined && onStopTurn !== undefined) await onStopTurn(activeTurn.id)
+      onDraftChange('')
+      return true
+    }
+    const skillMatch = /^\/技能\/([^\s]+)(?:\s+([\s\S]*))?$/.exec(prompt)
+    if (skillMatch !== null) {
+      const skillName = skillMatch[1] ?? '当前技能'
+      const task = skillMatch[2]?.trim() ?? ''
+      if (task.length === 0) {
+        onDraftChange(`请告诉我需要使用“${skillName}”技能处理什么。`)
+        return true
+      }
+      await onSend(`请使用“${skillName}”技能处理以下内容：\n${task}`, attachments, queueMode)
+      setAttachments([])
+      setQueueMode('normal')
+      return true
+    }
+    return false
+  }
+
   const submit = async () => {
     const prompt = draft.trim()
     if ((!prompt && attachments.length === 0) || uploading) return
+    if (prompt.length > 0 && await executeLocalCommand(prompt)) return
     await onSend(prompt || '请查看随消息发送的附件。', attachments, queueMode)
     setAttachments([])
     setQueueMode('normal')
@@ -267,17 +316,18 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
         {knowledgeError === undefined ? null : <div className="chat-knowledge-error" role="alert"><span>{knowledgeError}</span><button type="button" onClick={() => setKnowledgeError(undefined)} aria-label="关闭提示"><X size={14} /></button></div>}
         {onDecideWorldPermissionRequest === undefined ? null : <WorldPermissionRequests items={permissionRequests} employees={employees} activeSessionId={session?.id} onDecide={onDecideWorldPermissionRequest} />}
         {onDecideApproval === undefined ? null : <ApprovalRequests items={approvals} onDecide={onDecideApproval} />}
+        {topicNotice ? <div className="composer-topic-notice" role="status"><span>已开启新话题，之前的对话记录已保留</span></div> : null}
         <div className="composer">
         {suggestions.length === 0 ? null : <div className="mention-menu" role="listbox" aria-label="当前世界角色">{suggestions.map((employee) => <button key={employee.id} type="button" onClick={() => insertMention(employee)}><Avatar index={employee.avatarIndex} size="sm" label={employee.displayName} authorityRole={employee.authorityRole} /><span><strong>{employee.displayName}<AuthorityBadge role={employee.authorityRole} /></strong><small>{employee.role} · 独立角色</small></span></button>)}</div>}
         {attachments.length > 0 ? <div className="composer-attachments" aria-label="待发送附件">{attachments.map((attachment) => <span key={attachment.assetId}><FileIcon size={15} /><span><strong>{attachment.name}</strong><small>{formatBytes(attachment.byteLength)}</small></span><button type="button" aria-label={`移除附件 ${attachment.name}`} onClick={() => setAttachments((current) => current.filter((item) => item.assetId !== attachment.assetId))}><X size={13} /></button></span>)}</div> : null}
         {attachmentError === undefined ? null : <p className="composer-error" role="alert">{attachmentError}</p>}
         <textarea ref={inputRef} value={draft} onChange={(event) => onDraftChange(event.target.value)} disabled={employees.length === 0} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit() } }} placeholder={employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? `发送消息给 ${participantEmployees.map((employee) => employee.displayName).join('、')}` : conversationKind === 'direct' ? `发送消息给 ${participantEmployees[0]?.displayName ?? experience.personLabel}` : '先从左侧选择会话，或输入 @角色名'} rows={2} aria-label={`给当前世界的${experience.peopleLabel}发送消息`} />
-        <div className="composer__toolbar">{hasQueueActions ? <div className="composer__queue-mode" role="group" aria-label="队列操作"><button type="button" aria-label="排队发送" title="排队发送" className={queueMode === 'normal' ? 'is-active' : ''} aria-pressed={queueMode === 'normal'} onClick={() => setQueueMode('normal')}>排队</button><button type="button" aria-label="插入队列前方" title="插入队列前方" className={queueMode === 'next' ? 'is-active' : ''} aria-pressed={queueMode === 'next'} onClick={() => setQueueMode('next')}>插入</button><button type="button" className="composer__queue-stop" aria-label={activeTurn === undefined ? '当前没有正在执行的消息' : '停止当前回复'} title={activeTurn === undefined ? '当前没有正在执行的消息' : '停止当前回复'} disabled={activeTurn === undefined || onStopTurn === undefined} onClick={() => { if (activeTurn !== undefined && onStopTurn !== undefined) void onStopTurn(activeTurn.id) }}>■ 停止</button></div> : null}<div>
+        <div className="composer__toolbar">{hasQueueActions ? <div className="composer__queue-mode" role="group" aria-label="队列操作"><button type="button" aria-label="排队发送" title="排队发送" className={queueMode === 'normal' ? 'is-active' : ''} aria-pressed={queueMode === 'normal'} onClick={() => setQueueMode('normal')}>排队</button><button type="button" aria-label="插入队列前方" title="插入队列前方" className={queueMode === 'next' ? 'is-active' : ''} aria-pressed={queueMode === 'next'} onClick={() => setQueueMode('next')}>插入</button></div> : null}<div>
+          {onChangePermissionMode === undefined ? null : <ConversationPermissionControl value={permissionMode} onChange={onChangePermissionMode} {...(onRequestFullAccess === undefined ? {} : { onRequestFullAccess })} />}
           <input ref={fileInputRef} className="composer-file-input" type="file" accept=".png,.jpg,.jpeg,.webp,.txt,.md,.json,.pdf" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAttachment(file) }} />
           <button className="icon-button" type="button" aria-label={uploading ? '正在上传附件' : '添加附件'} disabled={uploading} onClick={() => fileInputRef.current?.click()}>{uploading ? <CircleNotch size={18} className="spin" /> : <Paperclip size={18} />}</button>
-          {onChangePermissionMode === undefined ? null : <ConversationPermissionControl value={permissionMode} onChange={onChangePermissionMode} {...(onRequestFullAccess === undefined ? {} : { onRequestFullAccess })} />}
           <CommandPicker commands={installedPlugins} draft={draft} onDraftChange={onDraftChange} {...(onOpenPluginMarket === undefined ? {} : { onOpenMarket: onOpenPluginMarket })} onFocus={() => inputRef.current?.focus()} />
-        </div><button className="send-button" type="button" aria-label={sending ? '正在回复中，发送新消息' : queueMode === 'next' ? '插入并发送' : hasQueueActions ? '排队发送' : '发送'} title={sending ? '继续发送消息' : queueMode === 'next' ? '插入并发送' : hasQueueActions ? '排队发送' : '发送'} disabled={uploading || employees.length === 0 || (!draft.trim() && attachments.length === 0)} onClick={() => void submit()}>{sending ? <CircleNotch size={19} className="spin" /> : <PaperPlaneRight size={19} weight="fill" />}{queuedCount > 0 ? <span className="send-button__queue" aria-label={`${queuedCount} 条消息已排队`}>{queuedCount}</span> : null}</button></div>
+        </div><button className={`send-button${canStopCurrentTurn ? ' send-button--stop' : ''}`} type="button" aria-label={canStopCurrentTurn ? '停止当前回复' : sending ? '正在回复中，发送新消息' : queueMode === 'next' ? '插入并发送' : hasQueueActions ? '排队发送' : '发送'} title={canStopCurrentTurn ? '停止当前回复' : sending ? '继续发送消息' : queueMode === 'next' ? '插入并发送' : hasQueueActions ? '排队发送' : '发送'} disabled={canStopCurrentTurn ? false : uploading || employees.length === 0 || (!draft.trim() && attachments.length === 0)} onClick={() => { if (canStopCurrentTurn) void onStopTurn(activeTurn.id); else void submit() }}>{canStopCurrentTurn ? <Stop size={19} weight="bold" /> : sending ? <CircleNotch size={19} className="spin" /> : <PaperPlaneRight size={19} weight="fill" />}{canStopCurrentTurn ? null : queuedCount > 0 ? <span className="send-button__queue" aria-label={`${queuedCount} 条消息已排队`}>{queuedCount}</span> : null}</button></div>
       </div></div>
     </section>
   )
