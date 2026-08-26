@@ -6,6 +6,7 @@ import type { AgentPermissionMode, EmployeeInstance, ReasoningEffort, WorldSetti
 import type { WorldRootService } from './world-root-service.js'
 
 const reasoning = new Set<ReasoningEffort>(['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+const responseLanguages = new Set<WorldSettings['model']['responseLanguage']>(['zh-CN', 'en-US', 'auto'])
 const permissionModes = new Set<AgentPermissionMode>(['read-only', 'workspace-write', 'danger-full-access'])
 const COLOR = /^#[0-9a-f]{6}$/i
 
@@ -140,7 +141,18 @@ function worldHeader(settings: WorldSettings): string {
     settings.scenario ? `当前场景：${settings.scenario}` : '',
     `用户在这个世界中的身份：${settings.userIdentity.displayName}（${settings.userIdentity.worldRole}），请称呼用户为“${settings.userIdentity.addressAs}”。`,
     '当前世界与其他世界的数据、文件、记忆相互隔离。',
+    responseLanguageInstruction(settings.model.responseLanguage),
   ].filter(Boolean).join('\n')
+}
+
+function responseLanguageInstruction(language: WorldSettings['model']['responseLanguage']): string {
+  if (language === 'en-US') {
+    return '[回复偏好语言]\nUse English for the final response, visible reasoning summaries, plans, and tool-use explanations. Keep code, commands, paths, API names, protocols, and brand names unchanged.'
+  }
+  if (language === 'auto') {
+    return '[回复偏好语言]\n跟随用户当前消息使用的主要语言生成最终回复、可展示的判断摘要、计划和工具使用说明；代码、命令、路径、API、协议与品牌标识保留原文。'
+  }
+  return '[回复偏好语言]\n最终回复、可展示的判断摘要、计划和工具使用说明统一使用简体中文；代码、命令、路径、API、协议与品牌标识保留原文。'
 }
 
 function characterIdentity(character: EmployeeInstance): string {
@@ -164,7 +176,7 @@ function defaults(worldId: string): WorldSettings {
       ownerBubbleColor: '#263629', characterBubbleColor: '#141c22', textColor: '#edf2f4', mutedTextColor: '#84919a',
       panelRadius: 10, bubbleRadius: 8, buttonRadius: 7, fontScale: 1,
     },
-    model: { reasoningEffort: 'auto' },
+    model: { reasoningEffort: 'auto', responseLanguage: 'zh-CN' },
     runtime: { permissionMode: 'read-only' },
     updatedAt: new Date().toISOString(),
   }
@@ -217,6 +229,7 @@ function normalize(worldId: string, value: Partial<WorldSettings>): WorldSetting
       // only the local reasoning preference in settings.json; a legacy
       // defaultModelProfileId is intentionally ignored and never rewritten.
       reasoningEffort: reasoning.has(raw.model.reasoningEffort) ? raw.model.reasoningEffort : 'auto',
+      responseLanguage: responseLanguages.has(raw.model.responseLanguage) ? raw.model.responseLanguage : 'zh-CN',
     },
     runtime: {
       permissionMode: permissionModes.has(raw.runtime.permissionMode) ? raw.runtime.permissionMode : 'read-only',

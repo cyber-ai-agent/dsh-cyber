@@ -178,6 +178,34 @@ describe('World Trace projection', () => {
     expect(live[0]?.id).toBe(history.items[0]?.id)
   })
 
+  it('keeps the readable tool meaning when completion events omit the tool name', async () => {
+    const { store, workspace, world, session, employee } = await fixture()
+    const service = new WorldTraceService({ store, actions: new MemoryActions() })
+    const base = {
+      workspaceId: workspace.id,
+      worldId: world.id,
+      sessionId: session.id,
+      agentId: employee.id,
+      workTurnId: 'work-turn-tool-meaning',
+      agentRunId: 'run-tool-meaning',
+    }
+    service.adaptRuntime({
+      ...base,
+      event: { kind: 'tool.started', source: 'test', sourceSessionId: 'runtime-tool-meaning', sourceSequence: 1, callId: 'call-tool-meaning', toolName: 'exec_command', metadata: {} },
+    })
+    const completed = service.adaptRuntime({
+      ...base,
+      event: { kind: 'tool.completed', source: 'test', sourceSessionId: 'runtime-tool-meaning', sourceSequence: 2, callId: 'call-tool-meaning', failed: false, metadata: {} },
+    })[0]
+
+    expect(completed?.tools?.[0]).toMatchObject({
+      name: 'exec_command',
+      label: '执行本地命令',
+      description: '在当前权限范围内运行命令或开发工具',
+      status: 'success',
+    })
+  })
+
   it('keeps lifecycle updates stable within a turn and distinct across turns', async () => {
     const context = await fixture()
     const { store, workspace, world, session, employee } = context

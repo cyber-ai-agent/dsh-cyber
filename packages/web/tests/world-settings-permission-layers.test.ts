@@ -16,7 +16,7 @@ describe('WorldSettingsDialog permission layers', () => {
         userIdentity: { displayName: '', worldRole: '', addressAs: '' },
         terminology: { characterSingular: '角色', characterPlural: '角色', addCharacterVerb: '添加角色', groupConversation: '群聊', assignment: '任务' },
         appearance: { accentColor: '#e0a72f', pageBackground: '#080b0d', panelBackground: '#0d1114', ownerBubbleColor: '#1a2b1d', characterBubbleColor: '#12171b', textColor: '#edf1f2', mutedTextColor: '#9aa6ad', panelRadius: 7, bubbleRadius: 7, buttonRadius: 4, fontScale: 1 },
-        model: { reasoningEffort: 'auto' },
+        model: { reasoningEffort: 'auto', responseLanguage: 'zh-CN' },
         runtime: { permissionMode: 'danger-full-access' },
         updatedAt: '2026-08-25T08:00:00.000Z',
       } as never,
@@ -27,6 +27,8 @@ describe('WorldSettingsDialog permission layers', () => {
       onSave: async () => undefined,
     }))
     expect(markup).toContain('技能与工具')
+    expect(markup).toContain('回复偏好语言')
+    expect(markup).toContain('简体中文（默认）')
     expect(markup).not.toContain('世界内文件权限')
     expect(markup).not.toContain('完整访问：读写此电脑')
     expect(markup).not.toContain('本次电脑访问')

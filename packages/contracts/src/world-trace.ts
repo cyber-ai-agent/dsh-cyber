@@ -37,6 +37,7 @@ export interface WorldTraceToolStep {
   callId: string
   name?: string
   label: string
+  description?: string
   status: 'running' | 'success' | 'failed'
   createdAt?: IsoTimestamp
   completedAt?: IsoTimestamp

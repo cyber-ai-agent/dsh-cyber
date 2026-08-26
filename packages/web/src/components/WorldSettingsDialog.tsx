@@ -127,8 +127,10 @@ export function WorldSettingsDialog({ world, value, models, employees, authoriti
 
           <fieldset>
             <legend><SlidersHorizontal size={16}/> 模型与运行</legend>
-            <label>世界默认模型<select value={draft.model.defaultModelProfileId ?? ''} onChange={(event)=>setDraft({...draft,model:event.target.value ? {...draft.model,defaultModelProfileId:event.target.value} : {reasoningEffort:draft.model.reasoningEffort}})}><option value="">继承全局或角色设置</option>{models.map((model)=><option key={model.id} value={model.id}>{model.displayName} · {model.modelId}</option>)}</select></label>
+            <label>世界默认模型<select value={draft.model.defaultModelProfileId ?? ''} onChange={(event)=>setDraft({...draft,model:event.target.value ? {...draft.model,defaultModelProfileId:event.target.value} : {reasoningEffort:draft.model.reasoningEffort,responseLanguage:draft.model.responseLanguage}})}><option value="">继承全局或角色设置</option>{models.map((model)=><option key={model.id} value={model.id}>{model.displayName} · {model.modelId}</option>)}</select></label>
             <label>默认推理<select value={draft.model.reasoningEffort} onChange={(event)=>setDraft({...draft,model:{...draft.model,reasoningEffort:event.target.value as ReasoningEffort}})}>{reasoningOptions.map(([id,label])=><option key={id} value={id}>{label}</option>)}</select></label>
+            <label>回复偏好语言<select value={draft.model.responseLanguage} onChange={(event)=>setDraft({...draft,model:{...draft.model,responseLanguage:event.target.value as WorldSettings['model']['responseLanguage']}})}><option value="zh-CN">简体中文（默认）</option><option value="auto">跟随用户消息</option><option value="en-US">English</option></select></label>
+            <p className="setting-help">用于最终回复、轨迹中的判断摘要、计划和工具说明。代码、命令与技术标识保留原文。</p>
           </fieldset>
 
           <fieldset className="world-permission-layers">

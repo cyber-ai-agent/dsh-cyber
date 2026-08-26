@@ -256,7 +256,15 @@ function localCalendarDate(value: string): string {
 function mergeTraceEntry(current: WorldTraceEntry | undefined, next: WorldTraceEntry): WorldTraceEntry {
   if (current === undefined) return next
   const tools = new Map((current.tools ?? []).map((tool) => [tool.callId, tool]))
-  for (const tool of next.tools ?? []) tools.set(tool.callId, { ...tools.get(tool.callId), ...tool })
+  for (const tool of next.tools ?? []) {
+    const previous = tools.get(tool.callId)
+    const completedWithoutIdentity = previous?.name !== undefined && tool.name === undefined
+    tools.set(tool.callId, {
+      ...previous,
+      ...tool,
+      ...(completedWithoutIdentity ? { name: previous.name, label: previous.label, description: previous.description } : {}),
+    })
+  }
   const reasoning = [current.reasoningSummary, next.reasoningSummary]
     .filter((value, index, values): value is string => Boolean(value) && values.indexOf(value) === index)
     .join('\n\n')

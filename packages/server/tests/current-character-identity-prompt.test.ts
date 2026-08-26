@@ -31,6 +31,7 @@ describe('world prompt character identity boundary', () => {
     expect(prompt).toContain('持久角色“团子”')
     expect(prompt).toContain('最新角色 Persona / Identity 契约')
     expect(prompt).toContain('初始岗位只属于来源元数据')
+    expect(prompt).toContain('最终回复、可展示的判断摘要、计划和工具使用说明统一使用简体中文')
     expect(prompt).not.toContain('身份为“秘书”')
     expect(prompt).not.toContain('秘书')
   })
