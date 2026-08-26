@@ -120,7 +120,7 @@ describe('Chat final-result projection', () => {
 })
 
 describe('Trace dock and live merge', () => {
-  it('keeps 世界、角色、轨迹、日程 in the requested dock order', () => {
+  it('keeps 世界 and 轨迹 fixed while secondary tabs stay behind 更多', () => {
     const html = renderToStaticMarkup(createElement(WorldSideDock, {
       demoMode: false,
       activeTab: 'trace',
@@ -137,19 +137,31 @@ describe('Trace dock and live merge', () => {
       onInvite: () => undefined,
     }))
     expect(html).toContain('世界')
-    expect(html).toContain('角色')
-    expect(html).toContain('知识')
-    expect(html).toContain('产物')
     expect(html).toContain('轨迹')
-    expect(html).toContain('日程')
-    expect(html.indexOf('世界')).toBeLessThan(html.indexOf('角色'))
-    expect(html.indexOf('角色')).toBeLessThan(html.indexOf('知识'))
-    expect(html.indexOf('知识')).toBeLessThan(html.indexOf('产物'))
-    expect(html.indexOf('产物')).toBeLessThan(html.indexOf('轨迹'))
-    expect(html.indexOf('轨迹')).toBeLessThan(html.indexOf('日程'))
+    expect(html).toContain('更多')
+    expect(html).not.toContain('日程')
+    expect(html).not.toContain('dock-tabs__more-menu')
+    expect(html.match(/class="dock-tab__select"/g)).toHaveLength(2)
     expect(html).toContain('轨迹内容')
     expect(html).not.toContain('文件')
     expect(html).not.toContain('预览')
+
+    const dossierHtml = renderToStaticMarkup(createElement(WorldSideDock, {
+      demoMode: false,
+      activeTab: 'dossier',
+      dossiers: {},
+      employees: [],
+      world,
+      onTabChange: () => undefined,
+      onCollapse: () => undefined,
+      onSelectEmployee: () => undefined,
+      onDirectEmployee: () => undefined,
+      onManageEmployee: () => undefined,
+      onShowAllDossiers: () => undefined,
+      onInvite: () => undefined,
+    }))
+    expect(dossierHtml).toContain('关闭角色页签')
+    expect(dossierHtml).toContain('角色目录')
   })
 
   it('updates one stable visual entry instead of appending a duplicate', () => {

@@ -33,6 +33,7 @@
 | 世界知识库 | 世界独立的 KnowledgeCollection、KnowledgeDocument 与 KnowledgeChunk；原始文件位于 `knowledge/library`；支持 Markdown、TXT、JSON、PDF、文件夹、ZIP、粘贴和网页导入；SQLite FTS5 能力检测与可移植回退；聊天热路径使用一次本地检索并通过统一上下文组合器注入；外部资料按不可信数据隔离 | 全文检索为本地词法检索；产物只有在用户明确操作后才加入；缺失源文件保持可诊断状态 | 向量索引、跨设备知识同步 |
 | 世界知识图谱 | 世界独立的 Entity、Claim、Relation 与 Evidence；对话游标、整理任务、世界设置和归档抑制均持久化；后台平衡模式按消息量、字符数和空闲时间整理；严格 JSON 与批次证据校验；支持 Canvas 图谱、聚焦、筛选、证据详情、实体改名和主张归档/恢复；运行时组合主张检索、资料分块和一层邻居 | 当前使用词法检索和本地邻居展开；知识提取依赖已配置的世界模型；冲突内容保留并标记，不自动裁决 | 可选 Embedding 适配器、情景记忆、跨设备图谱同步 |
 | 设置与模型连接 | 设置内容采用单列信息流；模型连接先配置地址与密钥，再拉取并搜索选择模型 ID；维护页只保留真实应用更新；主题采用完整预设并折叠低频自定义项 | 公开模型目录依赖供应商接口；手动模型 ID 保留为显式备用模式 | 自动供应商账户导入、跨设备设置同步 |
+| 世界侧栏导航 | “世界”“轨迹”与“更多”保持常驻；角色、知识、产物和日程从“更多”提升为可关闭的一级临时页签；打开顺序按世界在本机恢复；临时页签区可滚动且不挤走“更多” | 关闭页签只收起入口，不删除内容；聊天和设置中的直接跳转会自动打开目标页签 | 跨设备同步侧栏布局、用户自定义常驻入口 |
 | 应用更新 | 仅支持干净 `main` 分支从 `origin/main` 快进；更新前在隔离工作树完成 frozen install 与 build，并创建完整本地 Backup Bundle | 更新完成后需要用户重启当前进程；非 Git 安装和开发分支会明确显示不支持原因 | 桌面安装包增量更新、签名发布通道 |
 | 动作审批 | 外部副作用先持久化 Skill Action 与 Approval Request；两者关联 WorkTurn；未批准、已拒绝、已过期或授权已撤销时不会进入受信任 Adapter；持久执行 CAS 保证单次进入外部边界；审批后崩溃可安全续跑，已进入外部边界的崩溃转为结果未知并禁止自动重试 | 会话内审批卡先展示中文操作、目标和风险，技术标识折叠在详情中；按钮只依据服务端 `allowedScopes` 显示本次、本角色或本世界范围；可复用策略由 Skill Descriptor 显式授权并绑定 Skill、Action、Target、Risk 与作用域，不支持精确参数约束的动态能力只能单次批准 | 独立审批中心界面、通用文件写入审批、远程审批同步 |
 | MCP Skill Adapter | 官方 MCP TypeScript SDK Streamable HTTP 客户端；工具发现映射为独立 Skill；调用严格经过角色 Grant、单次 Approval 和 SQLite Action Ledger；禁止创建角色级或世界级持久策略；参数加密暂存并确定性清理；原始结果不持久化 | V1 通过显式 `/mcp 工具名 JSON` 命令提出调用；每个工作区当前配置一个 MCP 服务 | stdio Extension Host、模型原生结构化调用、多 MCP 服务实例管理 |
@@ -68,6 +69,7 @@
 - 世界知识图谱：`packages/contracts/src/world-knowledge-graph.ts`、`packages/persistence/src/world-knowledge-graph-repository.ts`、`packages/server/src/services/world-knowledge-consolidation-service.ts`、`packages/server/src/services/world-knowledge-graph-service.ts`、`packages/server/src/services/model-profile-knowledge-extraction-port.ts`、`packages/web/src/features/knowledge/KnowledgeGraph.tsx`、[世界知识图谱](../architecture/world-knowledge-graph-v1.md)
 - Skill Catalog 与角色学习：`packages/contracts/src/skill-runtime.ts`、`packages/web/src/components/skill-catalog.ts`、`packages/web/src/components/SkillGrantEditor.tsx`、`packages/web/src/components/RecruitmentDialog.tsx`、[Skill Catalog 与角色学习 V2](../architecture/skill-catalog-character-learning-v2.md)
 - 设置、创意工坊与更新：`packages/web/src/components/SettingsDialog.tsx`、`packages/web/src/components/creative-workshop/CreativeWorkshopEditor.tsx`、`packages/server/src/services/application-update-service.ts`
+- 世界侧栏动态页签：`packages/web/src/components/WorldSideDock.tsx`、`packages/web/tests/world-side-dock-tabs.test.ts`、[世界侧栏动态页签 V1](../architecture/dynamic-world-dock-tabs-v1.md)
 - 模型交互日志：`packages/server/src/services/model-interaction-service.ts`、`packages/server/src/routes/model-interaction-routes.ts`、`packages/persistence/src/migrations.ts`（v11）、[模块说明与观测边界](model-interaction-logs.md)
 - CI：`.github/workflows/ci.yml`
 
