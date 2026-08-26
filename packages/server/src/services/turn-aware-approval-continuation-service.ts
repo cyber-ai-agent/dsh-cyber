@@ -41,6 +41,7 @@ export class TurnAwareApprovalContinuationService {
   readonly #worldPackages: WorldPackageInstanceService
   readonly #worldPermissions: WorldPermissionRequestService | undefined
   readonly #decisionCoordinator: TurnDecisionCoordinator
+  #groupContinuationHandler: ((turn: { id: string; workspaceId: string; worldId: string; sessionId: string }, actions: CharacterSkillAction[], now: Date) => Promise<TurnAwareConversationResult | undefined>) | undefined
 
   constructor(options: {
     store: SqliteStore
@@ -60,6 +61,10 @@ export class TurnAwareApprovalContinuationService {
       hasPending: async (workTurnId: string) => (await options.worldPermissions!.listForTurn(workTurnId)).some((item) => item.status === 'pending'),
     }])
     this.#skills.setApprovalSettlementHandler(async (workTurnId) => { await this.continueIfReady(workTurnId) })
+  }
+
+  setGroupContinuationHandler(handler: (turn: { id: string; workspaceId: string; worldId: string; sessionId: string }, actions: CharacterSkillAction[], now: Date) => Promise<TurnAwareConversationResult | undefined>): void {
+    this.#groupContinuationHandler = handler
   }
 
   async direct(input: TurnAwareDirectInput): Promise<TurnAwareConversationResult> {
@@ -320,10 +325,18 @@ export class TurnAwareApprovalContinuationService {
   }
 
   async #continueAfterResume(
-    turn: { id: string; worldId: string; sessionId: string },
+    turn: { id: string; workspaceId: string; worldId: string; sessionId: string },
     actions: CharacterSkillAction[],
-    _now: Date,
+    now: Date,
   ): Promise<TurnAwareConversationResult | undefined> {
+    const session = this.#store.getSession(turn.sessionId)
+    if (session?.kind === 'group') {
+      if (this.#groupContinuationHandler === undefined) {
+        this.#store.failWorkTurn(turn.id, 'group-approval-continuation-unavailable')
+        return undefined
+      }
+      return this.#groupContinuationHandler(turn, actions, now)
+    }
     const userMessage = currentTurnUserMessage(this.#store.listMessages(turn.sessionId), turn.id)
     const characterId = actions[0]?.characterId ?? this.#store.listParticipants(turn.sessionId).find((item) => item.kind === 'employee')?.participantId
     const character = characterId === undefined ? undefined : this.#store.getEmployee(characterId)
@@ -390,7 +403,7 @@ const sanitizer = new TraceSanitizer()
  * audit trail applies — the model must never see a less-sanitized string than
  * the user reviews.
  */
-function factualRuntimeSource(prompt: string, actions: CharacterSkillAction[]): string {
+export function factualRuntimeSource(prompt: string, actions: CharacterSkillAction[]): string {
   if (actions.length === 0) return prompt
   const summary = actions.map((action) => {
     const notice = unhandledClauseNotice(action)

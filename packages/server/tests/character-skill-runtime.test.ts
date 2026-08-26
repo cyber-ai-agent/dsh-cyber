@@ -88,6 +88,21 @@ describe('CharacterSkillRuntime', () => {
     expect(await runtime.list(worldId)).toEqual(result.actions)
   })
 
+  it('caps host-scoped preparation before extra proposals can persist or execute', async () => {
+    const { store, root, worldId, employeeId } = await setup(['test.echo'])
+    const adapter = new MultiActionAdapter()
+    const registry = new CharacterSkillAdapterRegistry()
+    registry.register(adapter)
+    const runtime = makeRuntime(store, root, registry)
+    const context = skillContext(store, worldId, employeeId, '请执行 echo')
+
+    const result = await runtime.prepare({ ...context, maxActions: 1 }, new Date('2026-08-23T08:00:00.000Z'))
+
+    expect(result.actions).toHaveLength(1)
+    expect(adapter.executed).toBe(1)
+    expect(await runtime.list(worldId)).toHaveLength(1)
+  })
+
   it('never executes a skill that the character did not receive as a grant', async () => {
     const { store, root, worldId, employeeId } = await setup([])
     const adapter = new TestAdapter()
@@ -322,6 +337,14 @@ class ThrowingAdapter implements CharacterSkillAdapter {
 
   async execute(): Promise<never> {
     throw new Error('transport disappeared after dispatch')
+  }
+}
+
+class MultiActionAdapter extends TestAdapter {
+  override propose(context: CharacterSkillMatchContext) {
+    if (!context.prompt.includes('echo')) return []
+    const first = proposal(this.id)[0]!
+    return [first, { ...first, action: 'echo.second', target: 'local-test-2', label: '执行第二个测试动作' }]
   }
 }
 
