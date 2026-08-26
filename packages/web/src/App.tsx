@@ -2106,7 +2106,7 @@ export default function App() {
             hasOlderMessages={messagePage.hasMore}
             loadingOlderMessages={messagePage.loading}
             onLoadOlderMessages={() => void loadOlderMessages()}
-            approvals={pendingApprovals}
+            approvals={pendingApprovals.filter((item) => item.request.sessionId === undefined || item.request.sessionId === activeSessionId)}
             onDecideApproval={decideApproval}
             permissionRequests={pendingWorldPermissionRequests}
             onDecideWorldPermissionRequest={decideWorldPermissionRequest}

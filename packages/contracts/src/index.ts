@@ -913,6 +913,8 @@ export type AgentRuntimeEventKind =
   | 'text.delta'
   | 'assistant.reasoning'
   | 'assistant.message'
+  | 'approval.requested'
+  | 'approval.decided'
   | 'tool.started'
   | 'tool.completed'
   | 'turn.completed'
@@ -993,6 +995,8 @@ export interface AgentTurnResult {
 
 export interface AgentRuntimePort {
   runTurn(request: AgentTurnRequest): Promise<AgentTurnResult>
+  /** Decide one live DSH action-level approval inside its original turn. */
+  decideApproval?(agentRunId: string, approvalRequestId: string, decision: 'approved' | 'rejected'): Promise<void>
   /** Abort exactly one live AgentRun without closing another conversation lane. */
   abortRun?(agentRunId: string): Promise<void>
   closeAgent?(agentId: string): Promise<void>

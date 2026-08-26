@@ -20,6 +20,7 @@ import { listApprovalRequestViews } from '../services/approval-request-views.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
 import type { WorldCharacterAuthorityService } from '../services/world-character-authority-service.js'
 import type { TurnAwareApprovalContinuationService } from '../services/turn-aware-approval-continuation-service.js'
+import type { HarnessToolApprovalService } from '../services/harness-tool-approval-service.js'
 import {
   WorldPermissionGrantRejectedError,
   WorldPermissionRequestConflictError,
@@ -36,6 +37,7 @@ export interface WorldAuthorityRoutesDependencies {
   worldPermissions: WorldPermissionRequestService
   skillRuntime: CharacterSkillRuntime
   turnContinuations: TurnAwareApprovalContinuationService
+  toolApprovals?: HarnessToolApprovalService
   /** Issues current-session owner host-access grants. */
   ownerRuntimeAccess?: OwnerRuntimeAccessService
 }
@@ -45,7 +47,7 @@ export function registerWorldAuthorityRoutes(
   router: Router,
   dependencies: WorldAuthorityRoutesDependencies,
 ): void {
-  const { store, worldAccess, authority, worldPermissions, skillRuntime, turnContinuations, ownerRuntimeAccess } = dependencies
+  const { store, worldAccess, authority, worldPermissions, skillRuntime, turnContinuations, toolApprovals, ownerRuntimeAccess } = dependencies
 
   router.get(/^\/api\/worlds\/([^/]+)\/authorities$/, async ({ request, response, params }) => {
     const world = requireWorld(store, params[0]!)
@@ -153,7 +155,7 @@ export function registerWorldAuthorityRoutes(
     await worldAccess.assertUnlocked(world.id, request)
     const permissionRequests = (await worldPermissions.listPending(world.id))
       .map((item) => withSubject(store, item))
-    const approvals = listPendingApprovalViews(store, skillRuntime, world.id)
+    const approvals = listPendingApprovalViews(store, skillRuntime, world.id, toolApprovals)
     writeJson(response, 200, {
       worldId: world.id,
       approvals,
@@ -262,6 +264,7 @@ function listPendingApprovalViews(
   store: SqliteStore,
   skillRuntime: CharacterSkillRuntime,
   worldId: string,
+  toolApprovals?: HarnessToolApprovalService,
 ): ReturnType<typeof listApprovalRequestViews> {
-  return listApprovalRequestViews(store, skillRuntime, worldId)
+  return listApprovalRequestViews(store, skillRuntime, worldId, 'pending', toolApprovals)
 }

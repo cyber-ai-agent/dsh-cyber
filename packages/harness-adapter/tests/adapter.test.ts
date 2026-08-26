@@ -107,6 +107,35 @@ describe('Harness profile and adapter', () => {
     expect(JSON.stringify(events)).not.toContain('apiKey')
   })
 
+  it('turns a native DSH approval question into a host decision event', () => {
+    const events = normalizeHarnessNotification({
+      method: 'session.event',
+      params: {
+        sessionId: 'conversation-1',
+        event: {
+          type: 'approval/asked',
+          data: {
+            id: 'approval-1',
+            toolName: 'pwsh',
+            callId: 'call-1',
+            reason: '需要写入桌面文件',
+          },
+        },
+      },
+    } as never)
+
+    expect(events).toEqual([expect.objectContaining({
+      kind: 'approval.requested',
+      sourceSessionId: 'conversation-1',
+      toolName: 'pwsh',
+      callId: 'call-1',
+      metadata: {
+        approvalRequestId: 'approval-1',
+        reason: '需要写入桌面文件',
+      },
+    })])
+  })
+
   it('materializes a dedicated profile that composes the declared worker bundle', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-cyber-profile-'))
     const profile = await ensureHarnessProfile(directory)

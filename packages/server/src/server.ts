@@ -16,7 +16,6 @@ import {
 import { ConversationOrchestrator } from '@dsh-cyber/orchestration'
 import { LocalPackageCatalog, LocalPackageRuntime, PackageManager, type PackageRuntimePort } from '@dsh-cyber/package-runtime'
 import { SqliteStore, WorldArtifactRepository, WorldKnowledgeRepository, WorldSimulationStore } from '@dsh-cyber/persistence'
-
 import { dispatchHttpRequest } from './http/context.js'
 import { assertApplicationAccess } from './http/application-access-guard.js'
 import { writeError } from './http/errors.js'
@@ -61,6 +60,7 @@ import { harnessModelRoute } from './services/harness-model-route.js'
 import { ModelCatalogService } from './services/model-catalog-service.js'
 import { ModelCredentialService } from './services/model-credential-service.js'
 import { ModelInteractionService, TurnInteractionLoggingRuntime } from './services/model-interaction-service.js'
+import { HarnessToolApprovalService } from './services/harness-tool-approval-service.js'
 import { PeerCollaborationService } from './services/peer-collaboration-service.js'
 import { RoleAwareAmbientLifeService } from './services/role-aware-ambient-life-service.js'
 import { RuntimeUpdateService } from './services/runtime-update-service.js'
@@ -321,6 +321,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   publishArtifactChanged = (worldId, payload) => worldRuntime.publishArtifactChanged(worldId, payload)
   publishKnowledgeChanged = (worldId, payload) => worldRuntime.publishKnowledgeChanged(worldId, payload)
   publishDecisionChanged = (worldId, payload) => worldRuntime.publishDecisionChanged(worldId, payload)
+  const toolApprovals = new HarnessToolApprovalService({ store, runtime, onChanged: (worldId, payload) => publishDecisionChanged?.(worldId, payload) })
   const worldRuntimeContext = new WorldRuntimeContextComposer({
     settings: worldSettings,
     contributors: [knowledgeGraphRuntime.contributor, new WorldKnowledgeRuntimeContextContributor(
@@ -443,7 +444,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     authority,
     skillAvailability,
   })
-  registerWorldAuthorityRoutes(router, { store, worldAccess, authority, worldPermissions, skillRuntime, turnContinuations , ownerRuntimeAccess })
+  registerWorldAuthorityRoutes(router, { store, worldAccess, authority, worldPermissions, skillRuntime, turnContinuations, toolApprovals, ownerRuntimeAccess })
   registerWorldSettingsRoutes(router, { store, settings: worldSettings, access: worldAccess })
   registerTaskScheduleRoutes(router, { store, schedules: taskSchedules, access: worldAccess })
   registerPackageRoutes(router, { store, packageManager, packageCatalog, skillRuntime, worldMarketplace, worldPackages, worldAccess, skillCatalog })
@@ -463,7 +464,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   })
   registerModelInteractionRoutes(router, { store, interactions })
   const conversationControl = composeConversationControl({ store, router, worldAccess, orchestrator, continuations: turnContinuations, employeeActivity, worldRuntime, worldTrace, runtimeStreamHub, groupTasks, worldPackages, runtimeContext: worldRuntimeContext, skillRuntime })
-  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, turnContinuations, groupTasks, conversationQueue: conversationControl.queue, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, runtimeContext: worldRuntimeContext, worldTrace, employeeActivity, worldPackages, worldRuntimePermissions, ownerRuntimeAccess })
+  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, turnContinuations, toolApprovals, groupTasks, conversationQueue: conversationControl.queue, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, runtimeContext: worldRuntimeContext, worldTrace, employeeActivity, worldPackages, worldRuntimePermissions, ownerRuntimeAccess })
   registerGroupTaskRoutes(router, { store, worldAccess, groupTasks })
   registerEmployeeRoutes(router, {
     store,
@@ -483,6 +484,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   httpServer.keepAliveTimeout = 5_000
 
   const unsubscribe = orchestrator.subscribe((event) => {
+    toolApprovals.capture(event)
     runtimeStreamHub.publish(event)
     runtimeStreamHub.publishTrace(event.worldId, worldTrace.adaptRuntime(event))
     worldRuntime.publishRuntime(event.worldId, event.event, event.agentId, event.sessionId)
@@ -530,7 +532,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       skillRuntime.close()
       await taskSchedules.close()
       await ambientLifeScheduler.close()
-      unsubscribe(); unsubscribeControl(); await conversationControl.close()
+      unsubscribe(); unsubscribeControl(); toolApprovals.close(); await conversationControl.close()
       runtimeStreamHub.close()
       worldStreamHub.close()
       if (httpServer.listening) await closeServer(httpServer)

@@ -53,6 +53,7 @@ export interface HarnessRuntime {
     prompt: string,
     onNotification?: (notification: HarnessNotification) => void,
   ): Promise<{ finalResponse: string; notifications: HarnessNotification[] }>
+  decideApproval?(approvalRequestId: string, decision: 'approved' | 'rejected'): Promise<void>
   close(): Promise<void>
 }
 
@@ -176,6 +177,14 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       if (request.agentRunId !== undefined) this.#runTasks.set(request.agentRunId, { task, worker, lane: undefined })
       this.#scheduleNewLane(worker, task, conversationId)
     })
+  }
+
+  async decideApproval(agentRunId: string, approvalRequestId: string, decision: 'approved' | 'rejected'): Promise<void> {
+    const active = this.#activeRuns.get(agentRunId)
+    if (active?.lane.runtime?.decideApproval === undefined) {
+      throw new Error('审批对应的运行回合已经结束')
+    }
+    await active.lane.runtime.decideApproval(approvalRequestId, decision)
   }
 
   async #runEmployeeTurnExclusive(
@@ -517,6 +526,13 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
           .run(prompt, onNotification === undefined ? undefined : { onNotification })
         return { finalResponse: result.finalResponse, notifications: result.notifications }
       },
+      async decideApproval(approvalRequestId, decision) {
+        await harness.start()
+        await harness.client.request('approval/decide', {
+          approvalRequestId,
+          outcome: decision === 'approved' ? 'allowed-once' : 'rejected',
+        })
+      },
       close: () => harness.close(),
     }
   }
@@ -586,6 +602,29 @@ export function normalizeHarnessNotification(
         }
       }
       return normalized
+    }
+    case 'approval/asked': {
+      const approvalRequestId = stringValue(data.id)
+      if (approvalRequestId === undefined) return []
+      const toolName = stringValue(data.toolName) ?? 'unknown-tool'
+      const metadata: JsonObject = { approvalRequestId }
+      const reason = stringValue(data.reason)
+      const callId = stringValue(data.callId)
+      if (reason !== undefined) metadata.reason = reason
+      return [make('approval.requested', {
+        toolName,
+        ...(callId === undefined ? {} : { callId }),
+        metadata,
+      })]
+    }
+    case 'approval/decided': {
+      const approvalRequestId = stringValue(data.id)
+      const outcome = stringValue(data.outcome)
+      if (approvalRequestId === undefined || outcome === undefined) return []
+      return [make('approval.decided', {
+        failed: outcome !== 'allowed-once',
+        metadata: { approvalRequestId, outcome },
+      })]
     }
     case 'tool/call': {
       const toolName = stringValue(data.name) ?? 'unknown-tool'

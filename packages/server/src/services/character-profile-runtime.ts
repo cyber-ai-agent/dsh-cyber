@@ -89,6 +89,11 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
   abortRun(agentRunId: string): Promise<void> {
     return this.#inner.abortRun?.(agentRunId) ?? Promise.resolve()
   }
+
+  decideApproval(agentRunId: string, approvalRequestId: string, decision: 'approved' | 'rejected'): Promise<void> {
+    return this.#inner.decideApproval?.(agentRunId, approvalRequestId, decision)
+      ?? Promise.reject(new Error('当前运行时未提供动作审批能力'))
+  }
 }
 
 export function composeSkillRecipes(persona: string, instructions: readonly string[]): string {

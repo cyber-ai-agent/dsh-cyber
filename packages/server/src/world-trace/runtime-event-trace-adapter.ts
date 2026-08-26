@@ -52,6 +52,11 @@ function runtimePresentation(event: AgentRuntimeEvent): { status: WorldTraceStat
     case 'turn.failed': return { status: 'failed', summary: '本轮处理失败' }
     case 'assistant.reasoning': return { status: 'running', summary: '正在整理判断依据' }
     case 'assistant.message': return { status: 'running', summary: '正在生成最终回复' }
+    case 'approval.requested': return { status: 'waiting', summary: `等待批准${toolDisplayLabel(event.toolName)}` }
+    case 'approval.decided': return {
+      status: event.failed ? 'cancelled' : 'running',
+      summary: event.failed ? '操作审批已关闭' : '操作已批准，继续执行',
+    }
     case 'tool.started': return { status: 'running', summary: `正在${toolDisplayLabel(event.toolName)}` }
     case 'tool.completed': return {
       status: event.failed ? 'failed' : 'running',

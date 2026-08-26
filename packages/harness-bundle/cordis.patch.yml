@@ -15,8 +15,8 @@
   config:
     persona: !!js process.env.DSH_SYSTEM_PROMPT ?? 'You are a professional AI employee. Stay in role, report evidence, and never impersonate another employee.'
 
-# SDK workers have no in-turn approval UI. The product requires a separate,
-# explicit high-risk confirmation before selecting danger-full-access.
+# DSH Cyber answers native same-turn approval requests through its conversation
+# UI. The Harness keeps the sandbox boundary and pauses the exact tool call.
 - id: sandbox-policy
   config:
     mode: !!js process.env.DSH_PERMISSION_MODE ?? 'read-only'
@@ -24,7 +24,7 @@
 
 - id: approval
   config:
-    policy: never
+    policy: ask
 
 - id: permission
   config:
@@ -32,22 +32,22 @@
     presets:
       read-only:
         sandbox: read-only
-        approval: never
+        approval: ask
       workspace-write:
         sandbox: workspace-write
-        approval: never
+        approval: ask
       danger-full-access:
         sandbox: danger-full-access
         approval: never
 
 - id: tool-bash
-  disabled: !!js process.env.DSH_PERMISSION_MODE === 'read-only'
+  disabled: false
 
 - id: tool-pwsh
-  disabled: !!js process.env.DSH_PERMISSION_MODE === 'read-only'
+  disabled: false
 
 - id: tool-str-replace-editor
-  disabled: !!js process.env.DSH_PERMISSION_MODE === 'read-only'
+  disabled: false
 
 - id: tool-fs
   disabled: false
@@ -56,10 +56,10 @@
   disabled: false
 
 - id: tool-workflow
-  disabled: !!js process.env.DSH_PERMISSION_MODE === 'read-only'
+  disabled: false
 
 - id: tool-ralph
-  disabled: !!js process.env.DSH_PERMISSION_MODE === 'read-only'
+  disabled: false
 
 - insert:
     - id: dsh-cyber-sdk-jsonrpc
