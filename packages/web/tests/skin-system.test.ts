@@ -47,22 +47,28 @@ describe('modern skin system and marketplace category', () => {
     expect(html).toContain('角色</button>')
     expect(html).toContain('插件</button>')
     expect(html).toContain('皮肤</button>')
+    expect(html).toContain('深海女仆工坊 (Maid Atelier · 鲸鱼娘)')
+    expect(html).toContain('虎鲸链路 (Orca Link · 虎鲸娘)')
+    expect(html).toContain('绝区零 · 星见雅 (ZZZ Miyabi)')
+    expect(html).toContain('绝区零 · 艾莲 (ZZZ Ellen)')
+    expect(html).toContain('初恋时刻 (First Love)')
+    expect(html).toContain('蛛网都市 (Spider Verse)')
+    expect(html).toContain('宝可梦黄昏 (Pokemon Sunset)')
+    expect(html).toContain('木叶忍界 (Naruto Konoha)')
+    expect(html).toContain('鬼灭藤夜 (Demon Slayer Night)')
     expect(html).toContain('赛博霓虹 2.0 (Cyberpunk Horizon)')
     expect(html).toContain('极简黑曜 (Linear Obsidian Pro)')
-    expect(html).toContain('极光星云 (Nebula Velvet)')
     expect(html).toContain('暖阳白昼 (Claude Warm Daylight)')
-    expect(html).toContain('战术机甲 (Tactical Armor Mech)')
-    expect(html).toContain('深海冷蓝 (Midnight Ocean)')
     expect(html).toContain('✓ 正在使用')
     expect(html).toContain('立即换肤')
   })
 
-  it('provides rich skin selector cards in SettingsDialog with all 6 modern themes', () => {
+  it('provides rich skin selector cards in SettingsDialog with all 12 DSH universe themes', () => {
     const html = renderToStaticMarkup(createElement(SettingsDialog, {
       initialSection: 'appearance',
       preferences: {
         colorScheme: 'dark',
-        skinId: 'linear-obsidian',
+        skinId: 'maid-atelier',
         customBackground: '',
         backgroundFit: 'cover',
         backgroundPosition: 'center',
@@ -92,25 +98,37 @@ describe('modern skin system and marketplace category', () => {
       onSystemAction: vi.fn(async () => ({ ok: true })),
     }))
 
+    expect(html).toContain('深海女仆工坊')
+    expect(html).toContain('虎鲸链路')
+    expect(html).toContain('绝区零 · 星见雅')
+    expect(html).toContain('绝区零 · 艾莲')
+    expect(html).toContain('初恋时刻')
+    expect(html).toContain('蛛网都市')
+    expect(html).toContain('宝可梦黄昏')
+    expect(html).toContain('木叶忍界')
+    expect(html).toContain('鬼灭藤夜')
     expect(html).toContain('赛博霓虹 2.0')
     expect(html).toContain('极简黑曜')
-    expect(html).toContain('极光星云')
     expect(html).toContain('暖阳白昼')
-    expect(html).toContain('战术机甲')
-    expect(html).toContain('深海冷蓝')
-    expect(html).toContain('Linear 旗舰质感')
+    expect(html).toContain('鲸鱼娘 · 深海幽蓝蕾丝双女仆')
   })
 
-  it('defines 6 modern skin package descriptors in MARKET_SKIN_PACKAGES', () => {
-    expect(MARKET_SKIN_PACKAGES.length).toBe(6)
+  it('defines 12 modern skin package descriptors in MARKET_SKIN_PACKAGES', () => {
+    expect(MARKET_SKIN_PACKAGES.length).toBe(12)
     const ids = MARKET_SKIN_PACKAGES.map((s) => s.id)
     expect(ids).toEqual([
+      'maid-atelier',
+      'orca-link',
+      'zzz-miyabi',
+      'zzz-ellen',
+      'first-love',
+      'spider-verse',
+      'pokemon-sunset',
+      'naruto-konoha',
+      'demon-slayer-night',
       'cyber-graphite',
       'linear-obsidian',
-      'nebula-velvet',
       'paper-daylight',
-      'mecha-tactical',
-      'midnight-violet',
     ])
   })
 })

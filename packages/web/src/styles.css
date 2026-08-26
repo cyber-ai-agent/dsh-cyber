@@ -81,85 +81,298 @@
 }
 
 /* ==========================================================================
-   5 Modern High-End Skin Themes
+   DSH Cyber 8 Immersive Skins & Theme Ecosystem (DSH Skin Universe)
    ========================================================================== */
 
-/* Theme 1: 赛博黑金 / 霓虹 (Cyberpunk Horizon 2.0) - Default */
+/* 1. 深海女仆工坊 (Deep Whale Maid Atelier) - 源自 Small-tailqwq/dsh-deep-whale 鲸鱼娘 */
+:root[data-skin='maid-atelier'] {
+  --bg: #070e17;
+  --surface-0: rgba(10, 20, 34, 0.78);
+  --surface-1: rgba(15, 28, 48, 0.84);
+  --surface-2: rgba(22, 40, 68, 0.88);
+  --surface-3: rgba(30, 54, 90, 0.92);
+  --border: rgba(56, 189, 248, 0.24);
+  --border-strong: rgba(56, 189, 248, 0.42);
+  --border-highlight: rgba(125, 211, 252, 0.6);
+  --accent: #38bdf8;
+  --accent-strong: #7dd3fc;
+  --accent-soft: rgba(56, 189, 248, 0.18);
+  --accent-glow: 0 0 24px rgba(56, 189, 248, 0.5);
+  --text: #f0f9ff;
+  --text-muted: #93c5fd;
+  --text-soft: #e0f2fe;
+  --glass-bg: rgba(10, 20, 36, 0.74);
+  --glass-blur: blur(24px);
+  --skin-backdrop: radial-gradient(circle at 80% 20%, rgba(56, 189, 248, 0.35) 0%, transparent 55%),
+    radial-gradient(circle at 20% 80%, rgba(125, 211, 252, 0.25) 0%, transparent 60%),
+    radial-gradient(ellipse at 50% 50%, rgba(14, 165, 233, 0.12) 0%, transparent 70%),
+    linear-gradient(175deg, #091321 0%, #0d1e34 45%, #050b14 100%);
+}
+
+/* 2. 虎鲸链路 (Orca Link) - 源自 Small-tailqwq/dsh-deep-whale 虎鲸娘 */
+:root[data-skin='orca-link'] {
+  --bg: #0b1118;
+  --surface-0: rgba(14, 22, 32, 0.8);
+  --surface-1: rgba(20, 31, 46, 0.86);
+  --surface-2: rgba(28, 43, 64, 0.9);
+  --surface-3: rgba(38, 58, 86, 0.94);
+  --border: rgba(2, 132, 199, 0.26);
+  --border-strong: rgba(56, 189, 248, 0.44);
+  --border-highlight: rgba(56, 189, 248, 0.65);
+  --accent: #0284c7;
+  --accent-strong: #38bdf8;
+  --accent-soft: rgba(2, 132, 199, 0.2);
+  --accent-glow: 0 0 24px rgba(2, 132, 199, 0.5);
+  --text: #f0fdf4;
+  --text-muted: #7dd3fc;
+  --text-soft: #e0f2fe;
+  --glass-bg: rgba(14, 22, 34, 0.76);
+  --glass-blur: blur(20px);
+  --skin-backdrop: radial-gradient(circle at 50% 10%, rgba(2, 132, 199, 0.35) 0%, transparent 60%),
+    radial-gradient(circle at 85% 85%, rgba(56, 189, 248, 0.2) 0%, transparent 55%),
+    repeating-linear-gradient(0deg, transparent, transparent 29px, rgba(56, 189, 248, 0.04) 30px),
+    linear-gradient(180deg, #091017 0%, #0f1925 50%, #060a0f 100%);
+}
+
+/* 3. 绝区零 · 星见雅 (ZZZ Miyabi) - 源自 whyihaveyou/dsh-themes */
+:root[data-skin='zzz-miyabi'] {
+  --bg: #06090e;
+  --surface-0: rgba(10, 14, 22, 0.8);
+  --surface-1: rgba(15, 22, 34, 0.85);
+  --surface-2: rgba(22, 32, 48, 0.89);
+  --surface-3: rgba(30, 43, 64, 0.93);
+  --border: rgba(0, 240, 255, 0.24);
+  --border-strong: rgba(0, 240, 255, 0.45);
+  --border-highlight: rgba(0, 240, 255, 0.65);
+  --accent: #00f0ff;
+  --accent-strong: #67e8f9;
+  --accent-soft: rgba(0, 240, 255, 0.18);
+  --accent-glow: 0 0 26px rgba(0, 240, 255, 0.55);
+  --text: #f0fdff;
+  --text-muted: #7dd3fc;
+  --text-soft: #cffafe;
+  --glass-bg: rgba(10, 14, 24, 0.74);
+  --glass-blur: blur(20px);
+  --skin-backdrop: radial-gradient(circle at 85% 15%, rgba(0, 240, 255, 0.36) 0%, transparent 50%),
+    radial-gradient(circle at 15% 85%, rgba(147, 51, 234, 0.25) 0%, transparent 55%),
+    linear-gradient(135deg, rgba(0, 240, 255, 0.08) 0%, transparent 100%),
+    linear-gradient(180deg, #06090e 0%, #0b111a 60%, #040609 100%);
+}
+
+/* 4. 绝区零 · 艾莲 (ZZZ Ellen) - 源自 whyihaveyou/dsh-themes */
+:root[data-skin='zzz-ellen'] {
+  --bg: #0d0a0d;
+  --surface-0: rgba(19, 14, 20, 0.8);
+  --surface-1: rgba(28, 20, 30, 0.85);
+  --surface-2: rgba(40, 28, 42, 0.89);
+  --surface-3: rgba(54, 38, 56, 0.93);
+  --border: rgba(244, 63, 94, 0.25);
+  --border-strong: rgba(244, 63, 94, 0.45);
+  --border-highlight: rgba(251, 113, 133, 0.6);
+  --accent: #f43f5e;
+  --accent-strong: #fb7185;
+  --accent-soft: rgba(244, 63, 94, 0.18);
+  --accent-glow: 0 0 24px rgba(244, 63, 94, 0.5);
+  --text: #fff1f2;
+  --text-muted: #fda4af;
+  --text-soft: #ffe4e6;
+  --glass-bg: rgba(19, 14, 22, 0.74);
+  --glass-blur: blur(20px);
+  --skin-backdrop: radial-gradient(circle at 80% 20%, rgba(244, 63, 94, 0.35) 0%, transparent 50%),
+    radial-gradient(circle at 20% 80%, rgba(225, 29, 72, 0.22) 0%, transparent 55%),
+    linear-gradient(180deg, #110c12 0%, #1a111c 50%, #09060a 100%);
+}
+
+/* 5. 初恋时刻 (First Love) - 日系电影治愈 / 清透粉白水润玻璃 / 晨曦微风 */
+:root[data-skin='first-love'] {
+  --bg: #0f0d14;
+  --surface-0: rgba(22, 18, 30, 0.76);
+  --surface-1: rgba(30, 24, 42, 0.82);
+  --surface-2: rgba(44, 34, 60, 0.88);
+  --surface-3: rgba(58, 44, 80, 0.92);
+  --border: rgba(255, 182, 193, 0.2);
+  --border-strong: rgba(255, 182, 193, 0.38);
+  --border-highlight: rgba(255, 192, 203, 0.55);
+  --accent: #ff7597;
+  --accent-strong: #ffa3b8;
+  --accent-soft: rgba(255, 117, 151, 0.18);
+  --accent-glow: 0 0 24px rgba(255, 117, 151, 0.45);
+  --text: #fff5f8;
+  --text-muted: #c9b8c2;
+  --text-soft: #f5e4ec;
+  --glass-bg: rgba(22, 18, 32, 0.72);
+  --glass-blur: blur(24px);
+  --skin-backdrop: radial-gradient(ellipse at 80% 15%, rgba(255, 130, 160, 0.32) 0%, transparent 55%),
+    radial-gradient(ellipse at 15% 85%, rgba(168, 85, 247, 0.26) 0%, transparent 60%),
+    radial-gradient(circle at 50% 50%, rgba(255, 182, 193, 0.12) 0%, transparent 70%),
+    linear-gradient(145deg, #181222 0%, #0d0a14 50%, #171020 100%);
+}
+
+/* 6. 蛛网都市 (Spider Verse) - 纽约赛博高空夜景 / 经典红蓝撞色 / 蛛网高光 */
+:root[data-skin='spider-verse'] {
+  --bg: #070910;
+  --surface-0: rgba(11, 15, 26, 0.78);
+  --surface-1: rgba(16, 22, 38, 0.84);
+  --surface-2: rgba(24, 32, 56, 0.88);
+  --surface-3: rgba(34, 45, 76, 0.92);
+  --border: rgba(239, 68, 68, 0.24);
+  --border-strong: rgba(56, 189, 248, 0.4);
+  --border-highlight: rgba(239, 68, 68, 0.55);
+  --accent: #ef4444;
+  --accent-strong: #38bdf8;
+  --accent-soft: rgba(239, 68, 68, 0.18);
+  --accent-glow: 0 0 24px rgba(239, 68, 68, 0.5);
+  --text: #f8fafc;
+  --text-muted: #94a3b8;
+  --text-soft: #e2e8f0;
+  --glass-bg: rgba(11, 15, 28, 0.74);
+  --glass-blur: blur(20px);
+  --skin-backdrop: radial-gradient(circle at 85% 18%, rgba(239, 68, 68, 0.36) 0%, transparent 50%),
+    radial-gradient(circle at 12% 75%, rgba(14, 165, 233, 0.32) 0%, transparent 55%),
+    repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(56, 189, 248, 0.05) 40px),
+    repeating-linear-gradient(90deg, transparent, transparent 39px, rgba(239, 68, 68, 0.05) 40px),
+    linear-gradient(180deg, #070910 0%, #0c121e 50%, #06080d 100%);
+}
+
+/* 7. 宝可梦黄昏 (Pokemon Sunset) - 原野旅途夕阳 / 暖金暮云 / 治愈温暖 */
+:root[data-skin='pokemon-sunset'] {
+  --bg: #140d09;
+  --surface-0: rgba(28, 18, 13, 0.78);
+  --surface-1: rgba(38, 24, 17, 0.84);
+  --surface-2: rgba(52, 32, 23, 0.88);
+  --surface-3: rgba(68, 42, 30, 0.92);
+  --border: rgba(245, 158, 11, 0.26);
+  --border-strong: rgba(249, 115, 22, 0.42);
+  --border-highlight: rgba(251, 191, 36, 0.55);
+  --accent: #f59e0b;
+  --accent-strong: #fbbf24;
+  --accent-soft: rgba(245, 158, 11, 0.18);
+  --accent-glow: 0 0 24px rgba(245, 158, 11, 0.45);
+  --text: #fffbeb;
+  --text-muted: #d97706;
+  --text-soft: #fef3c7;
+  --glass-bg: rgba(28, 18, 13, 0.72);
+  --glass-blur: blur(20px);
+  --skin-backdrop: radial-gradient(ellipse at 50% 12%, rgba(251, 191, 36, 0.4) 0%, transparent 60%),
+    radial-gradient(ellipse at 85% 65%, rgba(239, 68, 68, 0.3) 0%, transparent 55%),
+    radial-gradient(ellipse at 15% 85%, rgba(217, 119, 6, 0.32) 0%, transparent 60%),
+    linear-gradient(180deg, #1f120b 0%, #2b160c 45%, #120b06 100%);
+}
+
+/* 8. 木叶忍界 (Naruto Konoha) - 火之意志 / 木叶火影岩黄昏 / 深炭金橙装甲 */
+:root[data-skin='naruto-konoha'] {
+  --bg: #110d08;
+  --surface-0: rgba(25, 18, 12, 0.78);
+  --surface-1: rgba(35, 24, 16, 0.84);
+  --surface-2: rgba(48, 33, 22, 0.88);
+  --surface-3: rgba(64, 44, 28, 0.92);
+  --border: rgba(234, 88, 12, 0.28);
+  --border-strong: rgba(249, 115, 22, 0.46);
+  --border-highlight: rgba(251, 146, 60, 0.6);
+  --accent: #ea580c;
+  --accent-strong: #f97316;
+  --accent-soft: rgba(234, 88, 12, 0.2);
+  --accent-glow: 0 0 26px rgba(234, 88, 12, 0.5);
+  --text: #fff7ed;
+  --text-muted: #fdba74;
+  --text-soft: #ffedd5;
+  --glass-bg: rgba(25, 18, 12, 0.74);
+  --glass-blur: blur(20px);
+  --skin-backdrop: radial-gradient(circle at 18% 28%, rgba(234, 88, 12, 0.4) 0%, transparent 55%),
+    radial-gradient(circle at 82% 72%, rgba(180, 83, 9, 0.35) 0%, transparent 55%),
+    radial-gradient(ellipse at 50% 92%, rgba(239, 68, 68, 0.26) 0%, transparent 60%),
+    linear-gradient(150deg, #1a110a 0%, #20140b 50%, #0e0906 100%);
+}
+
+/* 9. 鬼灭藤夜 (Demon Slayer Night) - 深靛紫夜 / 紫藤花光尘 / 月下水墨刀光 */
+:root[data-skin='demon-slayer-night'] {
+  --bg: #090712;
+  --surface-0: rgba(16, 13, 29, 0.78);
+  --surface-1: rgba(23, 19, 42, 0.84);
+  --surface-2: rgba(33, 27, 60, 0.88);
+  --surface-3: rgba(45, 37, 80, 0.92);
+  --border: rgba(168, 85, 247, 0.26);
+  --border-strong: rgba(192, 132, 252, 0.42);
+  --border-highlight: rgba(216, 180, 254, 0.55);
+  --accent: #a855f7;
+  --accent-strong: #c084fc;
+  --accent-soft: rgba(168, 85, 247, 0.18);
+  --accent-glow: 0 0 26px rgba(168, 85, 247, 0.5);
+  --text: #faf5ff;
+  --text-muted: #d8b4fe;
+  --text-soft: #f3e8ff;
+  --glass-bg: rgba(16, 13, 30, 0.74);
+  --glass-blur: blur(24px);
+  --skin-backdrop: radial-gradient(circle at 82% 18%, rgba(168, 85, 247, 0.38) 0%, transparent 55%),
+    radial-gradient(circle at 18% 78%, rgba(99, 102, 241, 0.32) 0%, transparent 55%),
+    radial-gradient(ellipse at 50% 35%, rgba(236, 72, 153, 0.22) 0%, transparent 60%),
+    linear-gradient(160deg, #0e0b1d 0%, #150f2b 50%, #07050e 100%);
+}
+
+/* 10. 赛博霓虹 2.0 (Cyber Horizon) - 黑曜石深空 / 电光青流光 / 全息网格 */
 :root[data-skin='cyber-graphite'] {
-  --bg: #090d13;
-  --surface-0: #0e131b;
-  --surface-1: #131a24;
-  --surface-2: #1a2330;
-  --surface-3: #222d3d;
-  --border: #233140;
-  --border-strong: #334457;
-  --border-highlight: rgba(0, 229, 255, 0.28);
+  --bg: #080c12;
+  --surface-0: rgba(13, 18, 26, 0.8);
+  --surface-1: rgba(18, 25, 36, 0.85);
+  --surface-2: rgba(25, 34, 48, 0.88);
+  --surface-3: rgba(33, 45, 62, 0.92);
+  --border: rgba(0, 229, 255, 0.2);
+  --border-strong: rgba(0, 229, 255, 0.38);
+  --border-highlight: rgba(0, 229, 255, 0.5);
   --accent: #00e5ff;
   --accent-strong: #38bdf8;
-  --accent-soft: rgba(0, 229, 255, 0.13);
-  --accent-glow: 0 0 18px rgba(0, 229, 255, 0.35);
+  --accent-soft: rgba(0, 229, 255, 0.16);
+  --accent-glow: 0 0 24px rgba(0, 229, 255, 0.45);
   --text: #f8fafc;
   --text-muted: #94a3b8;
   --text-soft: #cbd5e1;
+  --glass-bg: rgba(13, 18, 28, 0.74);
+  --glass-blur: blur(20px);
+  --skin-backdrop: radial-gradient(circle at 85% 15%, rgba(0, 229, 255, 0.26) 0%, transparent 50%),
+    radial-gradient(circle at 15% 85%, rgba(168, 85, 247, 0.22) 0%, transparent 55%),
+    repeating-linear-gradient(0deg, transparent, transparent 49px, rgba(0, 229, 255, 0.04) 50px),
+    repeating-linear-gradient(90deg, transparent, transparent 49px, rgba(0, 229, 255, 0.04) 50px),
+    linear-gradient(180deg, #080c12 0%, #0f1724 60%, #05080d 100%);
 }
 
-/* Theme 2: 极简黑曜 (Linear Obsidian Pro) - Linear/Raycast/Cursor Modern SaaS */
+/* 11. 极简黑曜 (Linear Obsidian Pro) - Linear/Raycast/Cursor 顶级现代工程极简 */
 :root[data-skin='linear-obsidian'] {
   --bg: #0d0f12;
-  --surface-0: #12151a;
-  --surface-1: #181c22;
-  --surface-2: #1f242c;
-  --surface-3: #272e38;
+  --surface-0: rgba(18, 21, 26, 0.85);
+  --surface-1: rgba(24, 28, 34, 0.88);
+  --surface-2: rgba(31, 36, 44, 0.92);
+  --surface-3: rgba(39, 46, 56, 0.95);
   --border: #272d37;
   --border-strong: #384252;
-  --border-highlight: rgba(255, 255, 255, 0.1);
+  --border-highlight: rgba(255, 255, 255, 0.12);
   --accent: #5e6ad2;
   --accent-strong: #7c8cf8;
-  --accent-soft: rgba(94, 106, 210, 0.14);
-  --accent-glow: 0 0 16px rgba(94, 106, 210, 0.3);
+  --accent-soft: rgba(94, 106, 210, 0.16);
+  --accent-glow: 0 0 18px rgba(94, 106, 210, 0.35);
   --text: #f8fafc;
   --text-muted: #8b95a5;
   --text-soft: #c8d0dc;
-  --success: #34d399;
-  --danger: #fb7185;
-  --info: #60a5fa;
-  --violet: #a78bfa;
+  --glass-bg: rgba(18, 21, 28, 0.78);
+  --glass-blur: blur(20px);
+  --skin-backdrop: radial-gradient(circle at 50% 0%, rgba(94, 106, 210, 0.22) 0%, transparent 60%),
+    radial-gradient(circle at 80% 80%, rgba(52, 211, 153, 0.1) 0%, transparent 50%),
+    linear-gradient(180deg, #0d0f12 0%, #13171e 100%);
 }
 
-/* Theme 3: 极光星云 (Nebula Velvet) - Deep Space Purple Glass */
-:root[data-skin='nebula-velvet'] {
-  --bg: #0b0a14;
-  --surface-0: #110f1f;
-  --surface-1: #17142a;
-  --surface-2: #201c3a;
-  --surface-3: #2b254d;
-  --border: #2e2752;
-  --border-strong: #453a78;
-  --border-highlight: rgba(192, 132, 252, 0.22);
-  --accent: #c084fc;
-  --accent-strong: #e879f9;
-  --accent-soft: rgba(192, 132, 252, 0.15);
-  --accent-glow: 0 0 18px rgba(192, 132, 252, 0.35);
-  --text: #fdfcff;
-  --text-muted: #9e93bf;
-  --text-soft: #ddd6fe;
-  --info: #818cf8;
-}
-
-/* Theme 4: 暖阳白昼 (Claude Warm Daylight) - Warm Ivory Paper Modern Light */
+/* 12. 暖阳白昼 (Claude Warm Daylight) - 羊皮纸暖白 / 舒适护眼 / 日间模式 */
 :root[data-skin='paper-daylight'],
 :root[data-color-scheme='light'] {
   color-scheme: light;
   --bg: #f5f2eb;
-  --surface-0: #faf8f4;
-  --surface-1: #f0ece1;
-  --surface-2: #e6e0d2;
-  --surface-3: #dad2c1;
+  --surface-0: rgba(250, 248, 244, 0.9);
+  --surface-1: rgba(240, 236, 225, 0.92);
+  --surface-2: rgba(230, 224, 210, 0.95);
+  --surface-3: rgba(218, 210, 193, 0.98);
   --surface-hover: rgba(0, 0, 0, 0.04);
   --surface-active: rgba(0, 0, 0, 0.07);
   --border: #d2c8b5;
   --border-strong: #b5a992;
-  --border-highlight: rgba(255, 255, 255, 0.7);
+  --border-highlight: rgba(255, 255, 255, 0.8);
   --text: #1f1c18;
   --text-primary: #1f1c18;
   --text-muted: #686053;
@@ -167,8 +380,10 @@
   --text-strong: #0f0d0b;
   --accent: #926315;
   --accent-strong: #734c0b;
-  --accent-soft: rgba(146, 99, 21, 0.12);
-  --accent-glow: 0 2px 12px rgba(146, 99, 21, 0.2);
+  --accent-soft: rgba(146, 99, 21, 0.14);
+  --accent-glow: 0 2px 14px rgba(146, 99, 21, 0.25);
+  --glass-bg: rgba(250, 248, 244, 0.85);
+  --glass-blur: blur(20px);
   --shadow: 0 12px 28px rgba(83, 70, 45, 0.1);
   --shadow-sm: 0 2px 6px rgba(83, 70, 45, 0.08);
   --shadow-md: 0 8px 24px rgba(83, 70, 45, 0.12);
@@ -178,58 +393,19 @@
   --danger: #b91c1c;
   --info: #0369a1;
   --violet: #7e22ce;
-}
-
-/* Theme 5: 战术机甲 (Tactical Armor Mech) - Matte Titanium Industrial */
-:root[data-skin='mecha-tactical'] {
-  --bg: #0f1316;
-  --surface-0: #141a1f;
-  --surface-1: #1a2228;
-  --surface-2: #222c34;
-  --surface-3: #2d3a44;
-  --border: #2e3b46;
-  --border-strong: #415362;
-  --border-highlight: rgba(249, 115, 22, 0.25);
-  --accent: #f97316;
-  --accent-strong: #fb923c;
-  --accent-soft: rgba(249, 115, 22, 0.14);
-  --accent-glow: 0 0 18px rgba(249, 115, 22, 0.32);
-  --text: #f0f4f8;
-  --text-muted: #8b9ba8;
-  --text-soft: #c2d1dc;
-  --success: #22c55e;
-  --danger: #ef4444;
-  --info: #38bdf8;
-}
-
-/* Theme 6: 深海冷蓝 (Midnight Ocean) */
-:root[data-skin='midnight-violet'] {
-  --bg: #070c14;
-  --surface-0: #0c1320;
-  --surface-1: #111c2e;
-  --surface-2: #18273e;
-  --surface-3: #213350;
-  --border: #233752;
-  --border-strong: #344f74;
-  --border-highlight: rgba(56, 189, 248, 0.25);
-  --accent: #38bdf8;
-  --accent-strong: #7dd3fc;
-  --accent-soft: rgba(56, 189, 248, 0.14);
-  --accent-glow: 0 0 16px rgba(56, 189, 248, 0.3);
-  --text: #eef4fa;
-  --text-muted: #879db5;
-  --text-soft: #c0d2e5;
-  --info: #38bdf8;
+  --skin-backdrop: radial-gradient(circle at 12% 12%, rgba(254, 240, 138, 0.5) 0%, transparent 60%),
+    radial-gradient(circle at 88% 88%, rgba(251, 191, 36, 0.28) 0%, transparent 65%),
+    linear-gradient(180deg, #f7f4ed 0%, #ede7dc 100%);
 }
 
 @media (prefers-color-scheme: light) {
   :root[data-color-scheme='system'] {
     color-scheme: light;
     --bg: #f5f2eb;
-    --surface-0: #faf8f4;
-    --surface-1: #f0ece1;
-    --surface-2: #e6e0d2;
-    --surface-3: #dad2c1;
+    --surface-0: rgba(250, 248, 244, 0.9);
+    --surface-1: rgba(240, 236, 225, 0.92);
+    --surface-2: rgba(230, 224, 210, 0.95);
+    --surface-3: rgba(218, 210, 193, 0.98);
     --border: #d2c8b5;
     --border-strong: #b5a992;
     --text: #1f1c18;
@@ -241,6 +417,9 @@
     --success: #15803d;
     --danger: #b91c1c;
     --info: #0369a1;
+    --skin-backdrop: radial-gradient(circle at 12% 12%, rgba(254, 240, 138, 0.5) 0%, transparent 60%),
+      radial-gradient(circle at 88% 88%, rgba(251, 191, 36, 0.28) 0%, transparent 65%),
+      linear-gradient(180deg, #f7f4ed 0%, #ede7dc 100%);
   }
 }
 
@@ -290,7 +469,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .application-lock-recovery-result code { overflow-wrap: anywhere; color: #f4d36e; font: 600 14px var(--font-mono); letter-spacing: .04em; }
 .application-lock-recovery-result small { color: #9fb2a5; font-size: 11px; line-height: 1.45; }
 .application-lock-error { width: 100%; margin-top: 12px; color: #ffafb1; font-size: 13px; text-align: left; }
-.workspace-backdrop { position: fixed; inset: var(--topbar-h) 0 0; pointer-events: none; background-image: var(--workspace-background-image); background-size: var(--workspace-background-size, cover); background-repeat: var(--workspace-background-repeat, no-repeat); background-position: center; opacity: var(--workspace-background-opacity, 0); filter: saturate(.65) contrast(1.05); }
+.workspace-backdrop { position: fixed; inset: var(--topbar-h) 0 0; pointer-events: none; background-image: var(--workspace-background-image, var(--skin-backdrop)); background-size: var(--workspace-background-size, cover); background-repeat: var(--workspace-background-repeat, no-repeat); background-position: center; opacity: var(--workspace-background-opacity, 0.95); filter: saturate(1.1) contrast(1.05); transition: opacity var(--duration-normal) var(--ease-smooth); }
 .topbar { position: relative; z-index: 5; height: var(--topbar-h); display: flex; align-items: center; border-bottom: 1px solid var(--border); background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: 0 1px 0 var(--border-subtle), 0 4px 20px -2px rgba(0,0,0,.25); }
 .brand-lockup { height: 100%; min-width: 178px; display: flex; align-items: center; gap: 9px; padding: 0 18px; border-right: 1px solid var(--border); }
 .brand-lockup svg { color: var(--accent); filter: drop-shadow(0 0 8px var(--accent)); transition: transform var(--duration-normal) var(--ease-smooth); }
@@ -335,7 +514,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .error-banner button:hover { color: var(--text); background: var(--surface-3); }
 
 .workbench-shell { position: relative; z-index: 1; height: calc(100dvh - var(--topbar-h)); display: grid; overflow: hidden; }
-.left-pane, .center-pane, .right-pane { min-width: 0; min-height: 0; background: color-mix(in srgb, var(--surface-0) 96%, transparent); overflow: hidden; }
+.left-pane, .center-pane, .right-pane { min-width: 0; min-height: 0; background: var(--surface-0); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); overflow: hidden; }
 .left-pane { border-right: 1px solid var(--border); }
 .right-pane { border-left: 1px solid var(--border); }
 .resize-handle { z-index: 3; width: 6px; padding: 0; border: 0; border-left: 1px solid var(--border); border-right: 1px solid transparent; background: var(--surface-0); cursor: col-resize; transition: background var(--duration-fast) var(--ease-smooth); }

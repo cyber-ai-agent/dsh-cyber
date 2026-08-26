@@ -544,15 +544,21 @@ function AppearanceSettings({
         </div>
       </fieldset>
       <fieldset className="setting-group">
-        <legend>界面皮肤</legend>
+        <legend>界面皮肤 (DSH 皮肤宇宙)</legend>
         <div className="skin-options">
           {([
-            { id: 'cyber-graphite', label: '赛博霓虹 2.0', desc: '黑曜石深空 · 电光青流光', background: '#090d13', accent: '#00e5ff' },
+            { id: 'maid-atelier', label: '深海女仆工坊', desc: '鲸鱼娘 · 深海幽蓝蕾丝双女仆', background: '#070e17', accent: '#38bdf8' },
+            { id: 'orca-link', label: '虎鲸链路', desc: '虎鲸娘 · 机械航行舱电蓝链路', background: '#0b1118', accent: '#0284c7' },
+            { id: 'zzz-miyabi', label: '绝区零 · 星见雅', desc: '对魔六课 · 极霜冰蓝水墨拔刀', background: '#06090e', accent: '#00f0ff' },
+            { id: 'zzz-ellen', label: '绝区零 · 艾莲', desc: '维多利亚家政 · 剪刀鲨黑白朋克', background: '#0d0a0d', accent: '#f43f5e' },
+            { id: 'first-love', label: '初恋时刻', desc: '日系电影感 · 晨曦粉白水润', background: '#0f0d14', accent: '#ff7597' },
+            { id: 'spider-verse', label: '蛛网都市', desc: '纽约赛博高空 · 红蓝撞色', background: '#070910', accent: '#ef4444' },
+            { id: 'pokemon-sunset', label: '宝可梦黄昏', desc: '原野夕阳霞光 · 暖金冒险', background: '#140d09', accent: '#f59e0b' },
+            { id: 'naruto-konoha', label: '木叶忍界', desc: '火影岩黄昏 · 查克拉金橙', background: '#110d08', accent: '#ea580c' },
+            { id: 'demon-slayer-night', label: '鬼灭藤夜', desc: '幽邃深靛紫夜 · 紫藤水墨', background: '#090712', accent: '#a855f7' },
+            { id: 'cyber-graphite', label: '赛博霓虹 2.0', desc: '黑曜石深空 · 电光青全息', background: '#080c12', accent: '#00e5ff' },
             { id: 'linear-obsidian', label: '极简黑曜', desc: 'Linear 旗舰质感 · 极细高光', background: '#0d0f12', accent: '#5e6ad2' },
-            { id: 'nebula-velvet', label: '极光星云', desc: '深邃星夜紫 · 梦幻弥散光', background: '#0b0a14', accent: '#c084fc' },
             { id: 'paper-daylight', label: '暖阳白昼', desc: '羊皮纸暖白 · 护眼舒适阅读', background: '#f5f2eb', accent: '#926315' },
-            { id: 'mecha-tactical', label: '战术机甲', desc: '哑光钛黑 · 战术琥珀橙', background: '#0f1316', accent: '#f97316' },
-            { id: 'midnight-violet', label: '深海冷蓝', desc: '深邃海夜 · 极地冰川蓝', background: '#070c14', accent: '#38bdf8' },
           ] as const).map((item) => (
             <button
               key={item.id}
