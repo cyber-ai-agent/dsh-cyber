@@ -23,6 +23,7 @@ import { AuthorityBadge } from './AuthorityBadge.js'
 import { CommandPicker } from './CommandPicker.js'
 import { ContextMenu, type ContextMenuPosition } from './ContextMenu.js'
 import { collaborationModeOf } from './group-collaboration.js'
+import { ConversationPermissionControl, type ConversationPermissionMode } from './ConversationPermissionControl.js'
 import { TaskCollaborationSummary } from './TaskCollaborationSummary.js'
 
 const MarkdownMessage = lazy(async () => ({ default: (await import('./MarkdownMessage.js')).MarkdownMessage }))
@@ -59,14 +60,16 @@ interface ChatWorkbenchProps {
   onDecideApproval?: ApprovalRequestsProps['onDecide']
   permissionRequests?: WorldPermissionRequest[]
   onDecideWorldPermissionRequest?(requestId: string, scope: WorldPermissionDecisionScope | 'reject'): Promise<void>
-  onOpenWorldPermissionSettings?(employeeId: string): void
+  permissionMode?: ConversationPermissionMode
+  onChangePermissionMode?(mode: ConversationPermissionMode): void
+  onRequestFullAccess?(): void
   onChangeCollaborationMode?(mode: 'discussion' | 'task'): Promise<void>
   onCancelQueuedTurn?(turnId: string): Promise<void>
   onPromoteQueuedTurn?(turnId: string): Promise<void>
   onStopTurn?(turnId: string): Promise<void>
 }
 
-export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, installedPlugins = [], sending = false, pendingCount = 0, queuedCount = 0, queueItems = [], draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, onOpenWorldPermissionSettings, onChangeCollaborationMode, onCancelQueuedTurn, onPromoteQueuedTurn, onStopTurn }: ChatWorkbenchProps) {
+export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, installedPlugins = [], sending = false, pendingCount = 0, queuedCount = 0, queueItems = [], draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, permissionMode = 'read-only', onChangePermissionMode, onRequestFullAccess, onChangeCollaborationMode, onCancelQueuedTurn, onPromoteQueuedTurn, onStopTurn }: ChatWorkbenchProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -262,7 +265,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
       <div className="composer-zone">
         {copyError === undefined ? null : <div className="chat-knowledge-error" role="alert"><span>{copyError}</span><button type="button" onClick={() => setCopyError(undefined)} aria-label="关闭提示"><X size={14} /></button></div>}
         {knowledgeError === undefined ? null : <div className="chat-knowledge-error" role="alert"><span>{knowledgeError}</span><button type="button" onClick={() => setKnowledgeError(undefined)} aria-label="关闭提示"><X size={14} /></button></div>}
-        {onDecideWorldPermissionRequest === undefined ? null : <WorldPermissionRequests items={permissionRequests} employees={employees} activeSessionId={session?.id} onDecide={onDecideWorldPermissionRequest} onOpenSettings={onOpenWorldPermissionSettings} />}
+        {onDecideWorldPermissionRequest === undefined ? null : <WorldPermissionRequests items={permissionRequests} employees={employees} activeSessionId={session?.id} onDecide={onDecideWorldPermissionRequest} />}
         {onDecideApproval === undefined ? null : <ApprovalRequests items={approvals} onDecide={onDecideApproval} />}
         <div className="composer">
         {suggestions.length === 0 ? null : <div className="mention-menu" role="listbox" aria-label="当前世界角色">{suggestions.map((employee) => <button key={employee.id} type="button" onClick={() => insertMention(employee)}><Avatar index={employee.avatarIndex} size="sm" label={employee.displayName} authorityRole={employee.authorityRole} /><span><strong>{employee.displayName}<AuthorityBadge role={employee.authorityRole} /></strong><small>{employee.role} · 独立角色</small></span></button>)}</div>}
@@ -272,6 +275,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
         <div className="composer__toolbar">{hasQueueActions ? <div className="composer__queue-mode" role="group" aria-label="队列操作"><button type="button" aria-label="排队发送" title="排队发送" className={queueMode === 'normal' ? 'is-active' : ''} aria-pressed={queueMode === 'normal'} onClick={() => setQueueMode('normal')}>排队</button><button type="button" aria-label="插入队列前方" title="插入队列前方" className={queueMode === 'next' ? 'is-active' : ''} aria-pressed={queueMode === 'next'} onClick={() => setQueueMode('next')}>插入</button><button type="button" className="composer__queue-stop" aria-label={activeTurn === undefined ? '当前没有正在执行的消息' : '停止当前回复'} title={activeTurn === undefined ? '当前没有正在执行的消息' : '停止当前回复'} disabled={activeTurn === undefined || onStopTurn === undefined} onClick={() => { if (activeTurn !== undefined && onStopTurn !== undefined) void onStopTurn(activeTurn.id) }}>■ 停止</button></div> : null}<div>
           <input ref={fileInputRef} className="composer-file-input" type="file" accept=".png,.jpg,.jpeg,.webp,.txt,.md,.json,.pdf" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAttachment(file) }} />
           <button className="icon-button" type="button" aria-label={uploading ? '正在上传附件' : '添加附件'} disabled={uploading} onClick={() => fileInputRef.current?.click()}>{uploading ? <CircleNotch size={18} className="spin" /> : <Paperclip size={18} />}</button>
+          {onChangePermissionMode === undefined ? null : <ConversationPermissionControl value={permissionMode} onChange={onChangePermissionMode} {...(onRequestFullAccess === undefined ? {} : { onRequestFullAccess })} />}
           <CommandPicker commands={installedPlugins} draft={draft} onDraftChange={onDraftChange} {...(onOpenPluginMarket === undefined ? {} : { onOpenMarket: onOpenPluginMarket })} onFocus={() => inputRef.current?.focus()} />
         </div><button className="send-button" type="button" aria-label={sending ? '正在回复中，发送新消息' : queueMode === 'next' ? '插入并发送' : hasQueueActions ? '排队发送' : '发送'} title={sending ? '继续发送消息' : queueMode === 'next' ? '插入并发送' : hasQueueActions ? '排队发送' : '发送'} disabled={uploading || employees.length === 0 || (!draft.trim() && attachments.length === 0)} onClick={() => void submit()}>{sending ? <CircleNotch size={19} className="spin" /> : <PaperPlaneRight size={19} weight="fill" />}{queuedCount > 0 ? <span className="send-button__queue" aria-label={`${queuedCount} 条消息已排队`}>{queuedCount}</span> : null}</button></div>
       </div></div>
@@ -382,13 +386,11 @@ export function WorldPermissionRequests({
   employees,
   activeSessionId,
   onDecide,
-  onOpenSettings,
 }: {
   items: WorldPermissionRequest[]
   employees: CyberEmployee[]
   activeSessionId?: string | undefined
   onDecide(requestId: string, scope: WorldPermissionDecisionScope | 'reject'): Promise<void>
-  onOpenSettings?: ((employeeId: string) => void) | undefined
 }) {
   const allPending = items.filter((item) => item.status === 'pending')
   // A decision belongs above the conversation that produced it. Cards from
@@ -450,7 +452,6 @@ export function WorldPermissionRequests({
             <footer>
               <button className="primary-button" type="button" disabled={integrationMutation} onClick={() => void onDecide(request.id, 'once')}>仅本次允许</button>
               <button className="secondary-button" type="button" disabled={persistentDisabled} onClick={() => void onDecide(request.id, 'persistent')}>{integrationMutation ? '暂不可授予' : persistentNeedsAdministrator ? '需先设为管理员' : '授予该权限并执行'}</button>
-              {onOpenSettings === undefined ? null : <button className="text-button" type="button" onClick={() => onOpenSettings(request.employeeId)}>打开权限设置</button>}
               <button className="danger-button" type="button" onClick={() => void onDecide(request.id, 'reject')}>拒绝</button>
             </footer>
           </article>

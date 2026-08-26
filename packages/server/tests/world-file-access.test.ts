@@ -251,16 +251,15 @@ describe('full host access needs the owner, never the character', () => {
     expect(runtime.turns.at(-1)!.permissionMode).not.toBe('danger-full-access')
   })
 
-  it('honours a one-time grant the owner issued for that exact turn', async () => {
+  it('keeps a confirmed full-access grant active for the current session', async () => {
     const { origin, server, runtime, world, characterId } = await start()
     await setAccess(origin, world.id, characterId, ['world.files.read', 'world.files.write'])
     const session = server.store.createSession({ workspaceId: world.workspaceId, worldId: world.id, kind: 'direct', title: '完整访问测试', participants: [{ participantId: 'owner', kind: 'owner' }, { participantId: characterId, kind: 'employee' }] })
 
     const issued = await json(origin, `/api/worlds/${world.id}/runtime-access-grants`, send('POST', {
+      scope: 'session',
       sessionId: session.id,
       employeeIds: [characterId],
-      clientTurnId: 'turn-granted',
-      prompt: '你好',
       confirmed: true,
     }))
     expect(issued.response.status).toBe(201)
@@ -270,31 +269,30 @@ describe('full host access needs the owner, never the character', () => {
       employeeIds: [characterId],
       sessionId: session.id,
       permissionMode: 'danger-full-access',
-      clientTurnId: 'turn-granted',
+      clientTurnId: 'turn-granted-1',
       runtimeAccessGrantId: issued.body.grant.id,
     }))
     expect(runtime.turns.at(-1)!.permissionMode).toBe('danger-full-access')
 
-    // The grant is spent: replaying it does not elevate a second turn.
     await json(origin, `/api/worlds/${world.id}/chat`, send('POST', {
       prompt: '再来一次',
       employeeIds: [characterId],
       sessionId: session.id,
       permissionMode: 'danger-full-access',
-      clientTurnId: 'turn-granted',
+      clientTurnId: 'turn-granted-2',
       runtimeAccessGrantId: issued.body.grant.id,
     }))
-    expect(runtime.turns.at(-1)!.permissionMode).not.toBe('danger-full-access')
+    expect(runtime.turns.slice(-2).every((turn) => turn.permissionMode === 'danger-full-access')).toBe(true)
   })
 
   it('refuses to issue a grant without an explicit risk confirmation', async () => {
     const { origin, server, world, characterId } = await start()
     const session = server.store.createSession({ workspaceId: world.workspaceId, worldId: world.id, kind: 'direct', title: '拒绝授权测试', participants: [{ participantId: 'owner', kind: 'owner' }, { participantId: characterId, kind: 'employee' }] })
     const refused = await json(origin, `/api/worlds/${world.id}/runtime-access-grants`, send('POST', {
+      scope: 'session',
       sessionId: session.id,
       employeeIds: [characterId],
-      clientTurnId: 'turn-unconfirmed',
-      prompt: '你好',
+      confirmed: false,
     }))
     expect(refused.response.status).toBe(422)
     expect(refused.body.error.code).toBe('owner_runtime_access_denied')
@@ -318,10 +316,9 @@ describe('full host access needs the owner, never the character', () => {
     })
 
     const refused = await json(origin, `/api/worlds/${world.id}/runtime-access-grants`, send('POST', {
+      scope: 'session',
       sessionId: session.id,
       employeeIds: [outsider.id],
-      clientTurnId: 'turn-outsider',
-      prompt: '读取电脑文件',
       confirmed: true,
     }))
     expect(refused.response.status).toBe(422)

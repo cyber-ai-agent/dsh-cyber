@@ -36,7 +36,7 @@ export interface WorldAuthorityRoutesDependencies {
   worldPermissions: WorldPermissionRequestService
   skillRuntime: CharacterSkillRuntime
   turnContinuations: TurnAwareApprovalContinuationService
-  /** Issues one-time owner host-access grants. */
+  /** Issues current-session owner host-access grants. */
   ownerRuntimeAccess?: OwnerRuntimeAccessService
 }
 
@@ -108,28 +108,27 @@ export function registerWorldAuthorityRoutes(
     }
     const sessionId = requiredString(body, 'sessionId')
     const session = store.getSession(sessionId)
+    if (body.scope !== 'session') throw new HttpError(422, 'permission_scope_required', '完全访问必须绑定当前会话')
     if (session === undefined || session.worldId !== world.id) {
-      throw new HttpError(422, 'session_unavailable', '一次性电脑访问必须绑定当前世界的已有会话')
+      throw new HttpError(422, 'session_unavailable', '会话完全访问必须绑定当前世界的已有会话')
     }
     if (session.status !== 'open') {
-      throw new HttpError(422, 'session_unavailable', '一次性电脑访问只能绑定仍在进行的会话')
+      throw new HttpError(422, 'session_unavailable', '会话完全访问只能绑定仍在进行的会话')
     }
     const sessionEmployees = new Set(store.listParticipants(session.id)
       .filter((participant) => participant.kind === 'employee')
       .map((participant) => participant.participantId))
     if (employeeIds.some((employeeId) => !sessionEmployees.has(employeeId))) {
-      throw new HttpError(422, 'session_participant_mismatch', '一次性电脑访问只能授权当前会话中的角色')
+      throw new HttpError(422, 'session_participant_mismatch', '会话完全访问只能授权当前会话中的角色')
     }
     try {
-      const grant = ownerRuntimeAccess.issue({
+      const grant = ownerRuntimeAccess.issueSession({
         worldId: world.id,
         sessionId,
         employeeIds,
-        clientTurnId: requiredString(body, 'clientTurnId'),
-        prompt: requiredString(body, 'prompt'),
         confirmed: body.confirmed === true,
       })
-      writeJson(response, 201, { grant: { id: grant.id, expiresAt: new Date(grant.expiresAt).toISOString() } })
+      writeJson(response, 201, { grant: { id: grant.id, scope: 'session' } })
     } catch (error) {
       if ((error as { code?: unknown } | null)?.code === 'owner_runtime_access_denied') {
         throw new HttpError(422, 'owner_runtime_access_denied', (error as Error).message)

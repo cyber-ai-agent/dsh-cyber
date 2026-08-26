@@ -67,6 +67,7 @@ import {
   type StreamingChatReply,
 } from './chat-realtime.js'
 import { ChatWorkbench, isChatMessage } from './components/ChatWorkbench.js'
+import type { ConversationPermissionMode } from './components/ConversationPermissionControl.js'
 import { CreativeWorkshopLauncher } from './components/CreativeWorkshopLauncher.js'
 import { collaborationModeOf, type CollaborationMode } from './components/group-collaboration.js'
 import { NavigationPane } from './components/NavigationPane.js'
@@ -83,7 +84,7 @@ import type {
 import { demoData, demoTavernDossiers, demoTavernEmployees, demoTavernMessages, demoTavernSessions } from './demo-data.js'
 import type { ConversationIntent, CyberEmployee, DockTab, SessionParticipantMap } from './types.js'
 import type { EmployeeSettingsSection } from './components/EmployeeManagementDialog.js'
-import type { OneShotHostAccessRequest } from './components/OneShotHostAccessDialog.js'
+import { ConversationHostAccessDialog, type ConversationHostAccessRequest } from './components/ConversationHostAccessDialog.js'
 import { worldExperience } from './world-experience.js'
 import { subscribeWorldLive } from './world-live-client.js'
 
@@ -112,10 +113,11 @@ interface ChatResult {
   queueItem?: { id?: string; workTurnId?: string; status?: PendingChatTurn['status'] }
 }
 
-interface PreparedHostAccessGrant {
+interface PreparedSessionHostAccessGrant {
   id: string
-  expiresAt: string
-  request: OneShotHostAccessRequest
+  worldId: string
+  sessionId: string
+  employeeIds: string[]
 }
 
 interface RuntimeEnvelope {
@@ -195,19 +197,18 @@ export default function App() {
   const [worldSettingsOpen, setWorldSettingsOpen] = useState(false)
   const [worldSettings, setWorldSettings] = useState<WorldSettings>()
   const [worldSettingsRevision, setWorldSettingsRevision] = useState<number>()
-  const [hostAccessRequest, setHostAccessRequest] = useState<OneShotHostAccessRequest>()
-  const [hostAccessGrant, setHostAccessGrant] = useState<PreparedHostAccessGrant>()
+  const [conversationPermissionModes, setConversationPermissionModes] = useState<Record<string, ConversationPermissionMode>>({})
+  const [hostAccessRequest, setHostAccessRequest] = useState<ConversationHostAccessRequest>()
+  const [sessionHostAccessGrants, setSessionHostAccessGrants] = useState<Record<string, PreparedSessionHostAccessGrant>>({})
   const [worldAccess, setWorldAccess] = useState<WorldAccessSummary>()
   const [lockedWorld, setLockedWorld] = useState<World>()
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('auto')
-  const [permissionMode, setPermissionMode] = useState<AgentPermissionMode>('read-only')
   const [taskSchedules, setTaskSchedules] = useState<TaskSchedule[]>([])
   const [scheduleBusy, setScheduleBusy] = useState(false)
 
   const activeSession = sessions.find((session) => session.id === activeSessionId)
   const activeParticipantIds = conversationIntent?.employeeIds
     ?? (activeSessionId === undefined ? [] : sessionParticipants[activeSessionId] ?? [])
-  const activeParticipantKey = [...activeParticipantIds].sort().join('\u0000')
   const experience = activeWorld === undefined ? undefined : worldExperience(activeWorld)
   const selectedEmployee = employees.find((employee) => employee.id === selectedEmployeeId)
   const managingEmployee = employees.find((employee) => employee.id === managingEmployeeId)
@@ -220,6 +221,18 @@ export default function App() {
     activeParticipantIds,
     queueKeyBySessionRef.current,
   )
+  const activePermissionKey = activeSessionId === undefined
+    ? activeConversationKey
+    : `session:${activeSessionId}`
+  const conversationPermissionMode = activePermissionKey === undefined
+    ? undefined
+    : conversationPermissionModes[activePermissionKey]
+  const setConversationPermissionMode = useCallback((mode: ConversationPermissionMode) => {
+    if (activePermissionKey === undefined) return
+    setConversationPermissionModes((current) => current[activePermissionKey] === mode
+      ? current
+      : { ...current, [activePermissionKey]: mode })
+  }, [activePermissionKey])
   const activePendingTurns = pendingTurns.filter((turn) =>
     turn.worldId === activeWorld?.id && turn.queueKey === activeConversationKey,
   )
@@ -237,19 +250,6 @@ export default function App() {
   activeSessionIdRef.current = activeSessionId
   activeConversationKeyRef.current = activeConversationKey
   pendingTurnsRef.current = pendingTurns
-
-  useEffect(() => {
-    if (hostAccessGrant === undefined) return
-    const remainingMs = Date.parse(hostAccessGrant.expiresAt) - Date.now()
-    const stillBound = hostAccessGrant.request.worldId === activeWorld?.id
-      && hostAccessGrant.request.sessionId === activeSessionId
-      && hostAccessGrant.request.prompt === draft.trim()
-      && sameStringSet(hostAccessGrant.request.employeeIds, activeParticipantIds)
-      && remainingMs > 0
-    if (!stillBound) { setHostAccessGrant(undefined); return }
-    const timer = window.setTimeout(() => setHostAccessGrant(undefined), remainingMs)
-    return () => window.clearTimeout(timer)
-  }, [activeParticipantKey, activeSessionId, activeWorld?.id, draft, hostAccessGrant])
 
   const pendingDecisionFetchRef = useRef<string | undefined>(undefined)
 
@@ -302,12 +302,12 @@ export default function App() {
     setPendingApprovals([])
     setPendingWorldPermissionRequests([])
     setDockTab('world')
-    setPermissionMode('read-only')
+    setConversationPermissionModes({})
+    setSessionHostAccessGrants({})
     setTaskSchedules([])
     setWorldSettings(undefined)
     setWorldSettingsRevision(undefined)
     setHostAccessRequest(undefined)
-    setHostAccessGrant(undefined)
     setWorldAccess(undefined)
     setWorldRuntimeAvailable(false)
     if (demoMode) {
@@ -377,7 +377,6 @@ export default function App() {
       applyWorldAppearance(settingsResult.settings)
       setWorldAccess(settingsResult.access)
       setReasoningEffort(settingsResult.settings.model.reasoningEffort)
-      setPermissionMode(settingsResult.settings.runtime.permissionMode === 'danger-full-access' ? 'read-only' : settingsResult.settings.runtime.permissionMode)
       setWorldRuntimeAvailable(capability.supported)
       setAppMode(worldRuntimeV2Enabled && capability.supported ? 'world' : 'workbench')
       setDossiers(nextDossiers)
@@ -1483,16 +1482,19 @@ export default function App() {
         ? `与 ${employees.find((employee) => employee.id === targetIds[0])?.displayName ?? '角色'} 对话`
         : compactPrompt(prompt))
     const queueKey = activeConversationKey ?? targetConversationQueueKey(targetIds, title)
-    const preparedHostAccess = hostAccessGrant !== undefined
-      && hostAccessGrant.request.worldId === world.id
-      && hostAccessGrant.request.sessionId === activeSessionId
-      && Date.parse(hostAccessGrant.expiresAt) > Date.now()
-      && sameStringSet(hostAccessGrant.request.employeeIds, targetIds)
-      && hostAccessGrant.request.prompt === prompt
-      ? hostAccessGrant
+    const sessionHostAccessGrant = activeSessionId === undefined ? undefined : sessionHostAccessGrants[activeSessionId]
+    const preparedSessionHostAccess = sessionHostAccessGrant !== undefined
+      && sessionHostAccessGrant.worldId === world.id
+      && sessionHostAccessGrant.sessionId === activeSessionId
+      && targetIds.every((employeeId) => sessionHostAccessGrant.employeeIds.includes(employeeId))
+      ? sessionHostAccessGrant
       : undefined
-    const clientTurnId = preparedHostAccess?.request.clientTurnId ?? crypto.randomUUID()
-    const effectivePermissionMode: AgentPermissionMode = preparedHostAccess === undefined ? permissionMode : 'danger-full-access'
+    if (!demoMode && conversationPermissionMode === 'danger-full-access' && preparedSessionHostAccess === undefined) {
+      setError('请先确认当前会话的完全访问。')
+      return Promise.resolve()
+    }
+    const clientTurnId = crypto.randomUUID()
+    const effectivePermissionMode: AgentPermissionMode = conversationPermissionMode ?? 'read-only'
     const createdAt = new Date().toISOString()
     const capturedSessionId = activeSessionId
     const collaborationMode = conversationIntent?.collaborationMode
@@ -1535,7 +1537,6 @@ export default function App() {
 
     setDraft('')
     setError(undefined)
-    if (hostAccessGrant !== undefined) setHostAccessGrant(undefined)
     setPendingTurns((current) => {
       const next = [...current, pendingTurn]
       pendingTurnsRef.current = next
@@ -1599,7 +1600,7 @@ export default function App() {
             clientTurnId,
             reasoningEffort,
             permissionMode: effectivePermissionMode,
-            ...(preparedHostAccess === undefined ? {} : { runtimeAccessGrantId: preparedHostAccess.id }),
+            ...(preparedSessionHostAccess === undefined ? {} : { runtimeAccessGrantId: preparedSessionHostAccess.id }),
             interactionKind,
             queueMode,
             ...(targetIds.length > 1 ? { collaborationMode } : {}),
@@ -1652,15 +1653,62 @@ export default function App() {
     activeWorld,
     bindConversationSession,
     conversationIntent,
+    demoMode,
     employees,
-    hostAccessGrant,
+    conversationPermissionMode,
     patchPendingTurn,
-    permissionMode,
     reasoningEffort,
     refreshConversationTranscript,
     removePendingTurn,
     sessionParticipants,
+    sessionHostAccessGrants,
   ])
+
+  const requestSessionHostAccess = useCallback(() => {
+    const world = activeWorld
+    if (world === undefined) return
+    const explicitEmployeeIds = conversationIntent?.employeeIds
+      ?? (activeSessionId === undefined ? [] : sessionParticipants[activeSessionId] ?? [])
+    const mentioned = employees.filter((employee) => draft.includes(`@${employee.displayName}`)).map((employee) => employee.id)
+    const targetIds = explicitEmployeeIds.length > 0 ? explicitEmployeeIds : mentioned
+    if (activeSessionId === undefined || targetIds.length === 0) {
+      setError('请先选择一个已有会话和至少一个角色，再确认完全访问。')
+      return
+    }
+    const currentGrant = sessionHostAccessGrants[activeSessionId]
+    if (currentGrant !== undefined
+      && currentGrant.worldId === world.id
+      && currentGrant.sessionId === activeSessionId
+      && targetIds.every((employeeId) => currentGrant.employeeIds.includes(employeeId))) {
+      setError(undefined)
+      setConversationPermissionMode('danger-full-access')
+      return
+    }
+    setError(undefined)
+    setHostAccessRequest({
+      worldId: world.id,
+      sessionId: activeSessionId,
+      employeeIds: targetIds,
+      employeeNames: targetIds.map((employeeId) => employees.find((employee) => employee.id === employeeId)?.displayName ?? '未知角色'),
+    })
+  }, [activeSessionId, activeWorld, conversationIntent, draft, employees, sessionHostAccessGrants, sessionParticipants, setConversationPermissionMode])
+
+  const confirmHostAccess = useCallback(async (request: ConversationHostAccessRequest) => {
+    const result = await api<{ grant: { id: string; scope: 'session' } }>(`/api/worlds/${encodeURIComponent(request.worldId)}/runtime-access-grants`, {
+      method: 'POST',
+      body: JSON.stringify({ scope: 'session', sessionId: request.sessionId, employeeIds: request.employeeIds, confirmed: true }),
+    })
+    setSessionHostAccessGrants((current) => ({
+      ...current,
+      [request.sessionId]: {
+        id: result.grant.id,
+        worldId: request.worldId,
+        sessionId: request.sessionId,
+        employeeIds: request.employeeIds,
+      },
+    }))
+    setConversationPermissionMode('danger-full-access')
+  }, [setConversationPermissionMode])
 
   const refreshTaskSchedules = useCallback(async () => {
     if (activeWorld === undefined || demoMode) return
@@ -2042,11 +2090,9 @@ export default function App() {
             onDecideApproval={decideApproval}
             permissionRequests={pendingWorldPermissionRequests}
             onDecideWorldPermissionRequest={decideWorldPermissionRequest}
-            onOpenWorldPermissionSettings={(employeeId) => {
-              setWorldSettingsOpen(false)
-              setManagingEmployeeSection('permissions')
-              setManagingEmployeeId(employeeId)
-            }}
+            permissionMode={conversationPermissionMode ?? 'read-only'}
+            onChangePermissionMode={setConversationPermissionMode}
+            {...(demoMode ? {} : { onRequestFullAccess: requestSessionHostAccess })}
           />
         )}
         right={(
@@ -2202,39 +2248,6 @@ export default function App() {
             employees={employees}
             authorities={authorities}
             saving={savingSettings}
-            {...(demoMode ? {} : {
-              ...(hostAccessRequest === undefined ? {} : { hostAccessRequest }),
-              ...(hostAccessGrant?.request.worldId === activeWorld.id ? { hostAccessReadyUntil: hostAccessGrant.expiresAt } : {}),
-              onPrepareHostAccess: () => {
-                if (activeSessionId === undefined || activeParticipantIds.length === 0) {
-                  setError('请先选择一个已有会话，再为下一条消息确认电脑访问。')
-                  return
-                }
-                if (!draft.trim()) {
-                  setError('请先在消息框写明要访问的电脑路径和用途。')
-                  return
-                }
-                setError(undefined)
-                setHostAccessRequest({
-                  worldId: activeWorld.id,
-                  sessionId: activeSessionId!,
-                  employeeIds: [...activeParticipantIds],
-                  employeeNames: activeParticipantIds.map((employeeId) => employees.find((employee) => employee.id === employeeId)?.displayName ?? '未知角色'),
-                  clientTurnId: crypto.randomUUID(),
-                  prompt: draft.trim(),
-                  target: hostAccessTarget(draft),
-                  reason: compactPrompt(draft),
-                })
-              },
-              onRequestHostAccess: async (request: OneShotHostAccessRequest) => {
-                const result = await api<{ grant: { id: string; expiresAt: string } }>(`/api/worlds/${encodeURIComponent(request.worldId)}/runtime-access-grants`, {
-                  method: 'POST',
-                  body: JSON.stringify({ sessionId: request.sessionId, employeeIds: request.employeeIds, clientTurnId: request.clientTurnId, prompt: request.prompt, confirmed: true }),
-                })
-                setHostAccessGrant({ id: result.grant.id, expiresAt: result.grant.expiresAt, request })
-              },
-              onDismissHostAccess: () => setHostAccessRequest(undefined),
-            })}
             onClose={() => setWorldSettingsOpen(false)}
             onManageAdministrators={() => {
               setWorldSettingsOpen(false)
@@ -2258,7 +2271,6 @@ export default function App() {
                   setWorldSettings(result.settings)
                   setWorldSettingsRevision(result.revision ?? result.settingsRevision)
                   setReasoningEffort(result.settings.model.reasoningEffort)
-                  setPermissionMode(result.settings.runtime.permissionMode === 'danger-full-access' ? 'read-only' : result.settings.runtime.permissionMode)
                   applyWorldAppearance(result.settings)
                 } catch (cause) {
                   if (!(cause instanceof ApiError) || cause.status !== 409) throw cause
@@ -2278,6 +2290,7 @@ export default function App() {
           />
         </Suspense>
       ) : null}
+      {hostAccessRequest !== undefined ? <ConversationHostAccessDialog request={hostAccessRequest} onConfirm={confirmHostAccess} onClose={() => setHostAccessRequest(undefined)} /> : null}
       {lockedWorld !== undefined ? <Suspense fallback={<div className="dialog-loading" role="status">正在打开访问验证…</div>}><WorldUnlockDialog worldName={lockedWorld.name} onUnlock={async(password)=>{ await api(`/api/worlds/${lockedWorld.id}/access/unlock`,{method:'POST',body:JSON.stringify({password})}); const world=lockedWorld; setLockedWorld(undefined); await loadWorld(world) }} /></Suspense> : null}
       {managingEmployee !== undefined ? (
         <Suspense fallback={<div className="dialog-loading" role="status">正在打开角色设置…</div>}><EmployeeManagementDialog
@@ -2332,12 +2345,6 @@ function mergeMessages(older: WorkMessage[], current: WorkMessage[]): WorkMessag
 
 function metadataText(value: JsonObject[string] | undefined): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined
-}
-
-function sameStringSet(left: readonly string[], right: readonly string[]): boolean {
-  if (left.length !== right.length) return false
-  const values = new Set(left)
-  return values.size === left.length && right.every((value) => values.has(value))
 }
 
 function reconcileOutboxMessages(
@@ -2656,11 +2663,6 @@ function makeDemoMessage(sessionId: string, sequence: number, senderId: string, 
 function compactPrompt(value: string): string {
   const compact = value.replace(/\s+/g, ' ').trim()
   return compact.length > 36 ? `${compact.slice(0, 35)}…` : compact
-}
-
-function hostAccessTarget(prompt: string): string {
-  const path = prompt.match(/(?:[A-Za-z]:[\\/][^\s，。；;]+|\\\\[^\s，。；;]+|\/(?:Users|home|etc|opt|var|tmp)\/[^\s，。；;]+)/)?.[0]
-  return path ?? '世界目录之外的电脑文件（以消息中写明的目标为准）'
 }
 
 function tavernDemoReply(employee: CyberEmployee, prompt: string): string {

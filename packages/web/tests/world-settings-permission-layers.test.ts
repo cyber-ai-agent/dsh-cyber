@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { WorldSettingsDialog } from '../src/components/WorldSettingsDialog.js'
 
 describe('WorldSettingsDialog permission layers', () => {
-  it('keeps world, skill/tool, and one-shot computer access in one reading column', () => {
+  it('keeps world settings focused on world configuration and role capability guidance', () => {
     const markup = renderToStaticMarkup(createElement(WorldSettingsDialog, {
       world: { id: 'world-1', name: '石墨世界', workspaceId: 'workspace-1', templateId: 'cyber-company', status: 'active' } as never,
       value: {
@@ -26,11 +26,10 @@ describe('WorldSettingsDialog permission layers', () => {
       onClose: () => undefined,
       onSave: async () => undefined,
     }))
-    expect(markup).toContain('世界权限')
     expect(markup).toContain('技能与工具')
-    expect(markup).toContain('本次电脑访问')
-    expect(markup).toContain('世界内文件权限')
+    expect(markup).not.toContain('世界内文件权限')
     expect(markup).not.toContain('完整访问：读写此电脑')
+    expect(markup).not.toContain('本次电脑访问')
     expect(markup).not.toContain('permission-risk-confirm')
   })
 })

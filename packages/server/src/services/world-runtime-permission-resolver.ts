@@ -19,7 +19,7 @@ export interface ResolveWorldRuntimePermissionInput {
   employeeId: string
   requestedMode?: AgentPermissionMode
   /**
-   * A one-time host-access grant the owner issued for this exact turn.
+   * An explicit owner grant for the current conversation session.
    *
    * Never derived from a World Permission or a stored setting: administrator
    * rights administrate a world, not the machine.
@@ -55,9 +55,9 @@ export class WorldRuntimePermissionResolver {
     // settings or an untrusted prompt asks for full host access.
     const fileAccess: WorldFileAccess = canWrite ? 'write' : canRead ? 'read' : 'none'
     const permissionMode: AgentPermissionMode = requested === 'danger-full-access'
-      // Full host access is reachable only through an explicit, single-use
-      // owner grant, and still requires the character to hold file write —
-      // the grant lifts the host boundary, not the world one.
+      // Full host access is reachable only through an explicit current-session
+      // owner grant, and still requires the character to hold file write — the
+      // grant lifts the host boundary, not the world one.
       ? input.ownerHostAccess === true && canWrite
         ? 'danger-full-access'
         : canWrite ? 'workspace-write' : 'read-only'
@@ -80,4 +80,3 @@ export class WorldRuntimePermissionResolver {
     return (await this.#roots.ensure(worldId)).filesPath
   }
 }
-
