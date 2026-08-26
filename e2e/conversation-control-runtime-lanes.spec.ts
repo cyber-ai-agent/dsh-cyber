@@ -76,6 +76,48 @@ test('keeps durable queue controls, reload state and stop facts visible across r
   expect(consoleIssues, consoleIssues.join('\n')).toEqual([])
 })
 
+test('runs two sessions for one role concurrently, queues the third, and isolates Stop', async () => {
+  const current = requireServer()
+  const workspace = current.store.listWorkspaces()[0]!
+  const world = current.store.listWorlds(workspace.id)[0]!
+  const employee = current.store.listEmployees(world.id)[0]!
+  const callsBefore = runtime.calls.filter((call) => call.agent.id === employee.id).length
+  const sessions = ['跨会话 A', '跨会话 B', '跨会话 C'].map((title) => current.store.createSession({
+    workspaceId: workspace.id,
+    worldId: world.id,
+    kind: 'direct',
+    title,
+    participants: [{ participantId: 'owner', kind: 'owner' }, { participantId: employee.id, kind: 'employee' }],
+  }))
+  const queue = (index: number) => postJson<{ workTurnId: string; queueItem: { id: string } }>(`${origin}/api/worlds/${world.id}/chat`, {
+    employeeIds: [employee.id],
+    sessionId: sessions[index]!.id,
+    prompt: `跨会话长任务 ${index + 1}`,
+    queueMode: 'normal',
+    clientTurnId: `cross-session-${index + 1}`,
+  })
+  const first = await queue(0)
+  const second = await queue(1)
+  const third = await queue(2)
+  expect([first.status, second.status, third.status]).toEqual([202, 202, 202])
+  await expect.poll(() => runtime.calls.filter((call) => call.agent.id === employee.id).length).toBeGreaterThanOrEqual(callsBefore + 2)
+  expect(current.store.getConversationQueueEntry(first.body.queueItem.id)?.status).toBe('running')
+  expect(current.store.getConversationQueueEntry(second.body.queueItem.id)?.status).toBe('running')
+  expect(current.store.getConversationQueueEntry(third.body.queueItem.id)?.status).toBe('queued')
+
+  const firstRunId = current.store.listTurnAgentRuns(first.body.workTurnId)[0]!.id
+  const secondRunId = current.store.listTurnAgentRuns(second.body.workTurnId)[0]!.id
+  const stopped = await postJson(`${origin}/api/turns/${first.body.workTurnId}/abort`, { reason: 'isolation-check' })
+  expect(stopped.status).toBe(200)
+  await expect.poll(() => current.store.getConversationQueueEntry(third.body.queueItem.id)?.status).toBe('running')
+  expect(runtime.aborted).toContain(firstRunId)
+  expect(runtime.aborted).not.toContain(secondRunId)
+  expect(current.store.getConversationQueueEntry(second.body.queueItem.id)?.status).toBe('running')
+
+  await postJson(`${origin}/api/turns/${second.body.workTurnId}/abort`, { reason: 'test-cleanup' })
+  await postJson(`${origin}/api/turns/${third.body.workTurnId}/abort`, { reason: 'test-cleanup' })
+})
+
 async function recruit(worldId: string): Promise<EmployeeInstance> {
   const result = await postJson<{ employee: EmployeeInstance }>(`${origin}/api/worlds/${worldId}/recruit`, { blueprintId: 'cyber-company.secretary', blueprintVersion: 1, displayName: '并发秘书' })
   expect(result.status).toBe(201)
@@ -111,8 +153,11 @@ function recordConsole(page: Page, issues: string[]): void {
 
 class LaneRuntime implements AgentRuntimePort {
   readonly #pending = new Map<string, { timer: ReturnType<typeof setTimeout>; reject(error: unknown): void }>()
+  readonly calls: AgentTurnRequest[] = []
+  readonly aborted: string[] = []
 
   async runTurn(request: AgentTurnRequest) {
+    this.calls.push(request)
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(resolve, 10_000)
       if (request.agentRunId !== undefined) this.#pending.set(request.agentRunId, { timer, reject })
@@ -123,6 +168,7 @@ class LaneRuntime implements AgentRuntimePort {
   }
 
   async abortRun(agentRunId: string): Promise<void> {
+    this.aborted.push(agentRunId)
     const pending = this.#pending.get(agentRunId)
     if (pending === undefined) return
     clearTimeout(pending.timer)

@@ -42,6 +42,7 @@ export interface GroupTaskRunInput {
   sessionId?: string
   title?: string
   coordinatorEmployeeId?: string
+  existingWorkTurnId?: string
 }
 
 export interface GroupTaskAssignmentView {
@@ -127,6 +128,7 @@ export class GroupTaskCollaborationService {
       ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
       ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
       ...(input.title === undefined ? {} : { title: input.title }),
+      ...(input.existingWorkTurnId === undefined ? {} : { existingWorkTurnId: input.existingWorkTurnId }),
     })
     return {
       ...result,

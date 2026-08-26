@@ -9,7 +9,7 @@
 - [x] Local-first workspace/world persistence
 - [x] Independent Agent sessions through Harness adapter
 - [x] Real multi-character conversations
-- [x] Conversation Control 与 Runtime Lanes V1（持久队列、下一条执行、撤销、真实停止、同角色双会话运行通道）
+- [x] Conversation Control 与 Runtime Lanes V1（私聊与群聊持久队列、下一条执行、撤销、真实停止、审批顺序锁、同角色双会话运行通道）
 - [x] Group discussion/task collaboration mode with lightweight task routing projection
 - [x] Bounded character-to-character collaboration
 - [x] Deterministic ambient life and world simulation

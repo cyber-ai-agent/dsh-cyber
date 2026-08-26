@@ -322,45 +322,45 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
       const collaborationMode = requestedSession === undefined
         ? requestedCollaborationMode ?? (body.interactionKind === 'task' ? 'task' : 'discussion')
         : persistedMode
+      const coordinatorEmployeeId = optionalString(body.coordinatorEmployeeId)
       // The persisted session mode is the authority for an existing group.
       // Keep the WorkTurn interaction kind aligned with it too: a stale
       // interactionKind=task from a client must not make a discussion turn
       // look like a task turn (or vice versa) in durable history.
       const collaborationMetadata: JsonObject = {
         ...metadata,
+        ...(coordinatorEmployeeId === undefined ? {} : { coordinatorEmployeeId }),
         interactionKind: collaborationMode === 'task'
           ? 'task'
           : metadata.interactionKind === 'task' || metadata.interactionKind === 'meeting' ? 'meeting' : 'chat',
       }
-      if (collaborationMode === 'task') {
-        if (groupTasks === undefined) throw new HttpError(501, 'task_router_unavailable', '任务协作调度服务不可用')
-        const coordinatorEmployeeId = optionalString(body.coordinatorEmployeeId)
-        result = await groupTasks.run({
-          workspaceId: world.workspaceId,
-          worldId: world.id,
-          employeeIds,
-          prompt,
+      if (collaborationMode === 'task' && groupTasks === undefined) throw new HttpError(501, 'task_router_unavailable', '任务协作调度服务不可用')
+      const groupInput = {
+        workspaceId: world.workspaceId,
+        worldId: world.id,
+        employeeIds,
+        prompt,
+        metadata: collaborationMetadata,
+        collaborationMode,
+        ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
+        permissionMode,
+        ...(requestedSessionId === undefined ? {} : { sessionId: requestedSessionId }),
+        ...(title === undefined ? {} : { title }),
+      }
+      if (queueMode !== undefined) {
+        if (conversationQueue === undefined) throw new HttpError(501, 'conversation_queue_unavailable', '对话队列服务不可用')
+        result = conversationQueue.enqueueGroup(groupInput, queueMode === 'next')
+        responseStatus = 202
+      } else if (collaborationMode === 'task') {
+        result = await groupTasks!.run({
+          ...groupInput,
           transformedPrompt,
-          metadata: collaborationMetadata,
-          ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
-          permissionMode,
-          ...(requestedSessionId === undefined ? {} : { sessionId: requestedSessionId }),
-          ...(title === undefined ? {} : { title }),
           ...(coordinatorEmployeeId === undefined ? {} : { coordinatorEmployeeId }),
         })
       } else {
         result = await orchestrator.group({
-          workspaceId: world.workspaceId,
-          worldId: world.id,
-          employeeIds,
-          prompt,
-          metadata: collaborationMetadata,
-          collaborationMode: 'discussion',
+          ...groupInput,
           runtimePrompt: await runtimeContext.composeGroupRuntimePrompt(world.id, transformedPrompt),
-          ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
-          permissionMode,
-          ...(requestedSessionId === undefined ? {} : { sessionId: requestedSessionId }),
-          ...(title === undefined ? {} : { title }),
         })
       }
     }

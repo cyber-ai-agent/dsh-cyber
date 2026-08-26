@@ -5,7 +5,7 @@ import type {
 } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
-import type { ConversationControlEnvelope, ConversationOrchestrator, ConversationResult } from '@dsh-cyber/orchestration'
+import type { ConversationControlEnvelope, ConversationOrchestrator, ConversationResult, GroupConversationInput } from '@dsh-cyber/orchestration'
 import type { TurnAwareApprovalContinuationService, TurnAwareDirectInput } from './turn-aware-approval-continuation-service.js'
 
 type QueueStore = Pick<SqliteStore,
@@ -59,6 +59,8 @@ export interface QueuedDirectServiceResult {
   queueItem: ConversationQueueEntry
   status: 'queued'
 }
+
+export type QueuedGroupServiceResult = QueuedDirectServiceResult
 
 /**
  * Durable queue dispatcher for conversation WorkTurns.
@@ -144,6 +146,45 @@ export class ConversationQueueService implements AsyncDisposable {
     const queueInput = this.#queueInput(input, queued.session, queued.workTurnId)
     const queueEntry = next ? this.enqueueNext(queueInput) : this.enqueue(queueInput)
     return { session: queued.session, workTurnId: queued.workTurnId, queueEntry, queueItem: queueEntry, status: 'queued' }
+  }
+
+  enqueueGroup(input: GroupConversationInput, next = false): QueuedGroupServiceResult {
+    const clientTurnId = stringMetadata(input.metadata, 'clientTurnId')
+    const existingByClient = clientTurnId === undefined
+      ? undefined
+      : this.#store.getWorkTurnByClientTurnId?.(input.workspaceId, input.worldId, clientTurnId)
+    if (existingByClient !== undefined) {
+      const session = this.#store.getSession(existingByClient.sessionId)
+      const existingEntry = this.#entryForTurn(input.worldId, existingByClient.id)
+      if (session !== undefined && existingEntry !== undefined) {
+        const entry = next && existingEntry.status === 'queued' ? this.promote(existingEntry.id, existingEntry.revision) : existingEntry
+        return { session, workTurnId: existingByClient.id, queueEntry: entry, queueItem: entry, status: 'queued' }
+      }
+      if (session !== undefined && existingByClient.status === 'queued') {
+        const queueEntry = next
+          ? this.enqueueNext(this.#groupQueueInput(input, session, existingByClient.id))
+          : this.enqueue(this.#groupQueueInput(input, session, existingByClient.id))
+        return { session, workTurnId: existingByClient.id, queueEntry, queueItem: queueEntry, status: 'queued' }
+      }
+    }
+    if (input.sessionId !== undefined && clientTurnId !== undefined) {
+      const session = this.#store.getSession(input.sessionId)
+      const existingMessage = session === undefined
+        ? undefined
+        : this.#store.listMessages(session.id).find((message) => message.kind === 'user' && stringMetadata(message.metadata, 'clientTurnId') === clientTurnId)
+      const existingWorkTurnId = stringMetadata(existingMessage?.metadata, 'workTurnId')
+      if (session !== undefined && existingWorkTurnId !== undefined) {
+        const existingEntry = this.#entryForTurn(session.worldId, existingWorkTurnId)
+        if (existingEntry !== undefined) {
+          const entry = next && existingEntry.status === 'queued' ? this.promote(existingEntry.id, existingEntry.revision) : existingEntry
+          return { session, workTurnId: existingWorkTurnId, queueEntry: entry, queueItem: entry, status: 'queued' }
+        }
+      }
+    }
+    const begun = this.#orchestrator.beginGroupQueued(input)
+    const queueInput = this.#groupQueueInput(input, begun.session, begun.workTurn.id)
+    const queueEntry = next ? this.enqueueNext(queueInput) : this.enqueue(queueInput)
+    return { session: begun.session, workTurnId: begun.workTurn.id, queueEntry, queueItem: queueEntry, status: 'queued' }
   }
 
   list(worldId: string, sessionId?: string, status?: ConversationQueueEntryStatus): ConversationQueueEntry[] {
@@ -373,6 +414,12 @@ export class ConversationQueueService implements AsyncDisposable {
           occupiedSessions.add(entry.sessionId)
           for (const employeeId of entry.employeeIds) employeeLoads.set(employeeId, (employeeLoads.get(employeeId) ?? 0) + 1)
         }
+        // Approval releases every employee lane, but the conversation itself
+        // remains ordered. A later message in the same session must not pass
+        // the unresolved turn while other sessions may continue.
+        for (const entry of this.#store.listConversationQueue(world.id, undefined, 'waiting-approval')) {
+          occupiedSessions.add(entry.sessionId)
+        }
       }
     }
     return { employeeLoads, occupiedSessions }
@@ -392,6 +439,20 @@ export class ConversationQueueService implements AsyncDisposable {
       workTurnId,
       employeeIds: [input.employeeId],
       conversationKind: 'direct' as const,
+      ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
+      ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
+    }
+  }
+
+  #groupQueueInput(input: GroupConversationInput, session: ConversationResult['session'], workTurnId: string) {
+    return {
+      workspaceId: input.workspaceId,
+      worldId: input.worldId,
+      sessionId: session.id,
+      workTurnId,
+      employeeIds: [...new Set(input.employeeIds)],
+      conversationKind: 'group' as const,
+      collaborationMode: input.collaborationMode ?? session.collaborationMode ?? 'discussion',
       ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
       ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
     }

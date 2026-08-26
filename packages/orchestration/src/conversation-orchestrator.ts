@@ -225,6 +225,8 @@ export interface GroupConversationInput {
   sessionId?: string
   title?: string
   collaborationMode?: WorkSessionCollaborationMode
+  /** Internal durable-queue continuation. HTTP callers never supply this. */
+  existingWorkTurnId?: string
 }
 
 export interface TaskCollaborationStepDraft {
@@ -249,6 +251,8 @@ export interface TaskConversationInput {
   permissionMode?: AgentPermissionMode
   sessionId?: string
   title?: string
+  /** Internal durable-queue continuation. HTTP callers never supply this. */
+  existingWorkTurnId?: string
 }
 
 export interface TaskConversationResult extends ConversationResult {
@@ -311,6 +315,15 @@ interface RecoveredConversation {
   messages: WorkMessage[]
   /** The user-visible subset, filtered and budgeted. */
   history: ConversationHistoryEntry[]
+}
+
+interface GroupConversationTurnContext {
+  prompt: string
+  employeeIds: string[]
+  employees: EmployeeInstance[]
+  session: WorkSession
+  workTurn: WorkTurn
+  recovered: RecoveredConversation
 }
 
 export class ConversationOrchestrationError extends Error {}
@@ -527,15 +540,17 @@ export class ConversationOrchestrator implements AsyncDisposable {
     }
   }
 
-  async group(input: GroupConversationInput): Promise<ConversationResult> {
+  /** Persist one group user turn without occupying any employee runtime lane. */
+  beginGroupQueued(input: GroupConversationInput): DirectConversationTurn {
+    const begun = this.#beginGroupTurn(input, false)
+    return { session: begun.session, workTurn: begun.workTurn, previousMessages: begun.recovered.messages, history: begun.recovered.history }
+  }
+
+  #beginGroupTurn(input: GroupConversationInput, start: boolean): GroupConversationTurnContext {
     const prompt = requiredText(input.prompt, 'Prompt')
     const employeeIds = [...new Set(input.employeeIds.map((id) => id.trim()).filter(Boolean))]
-    if (employeeIds.length < 2) {
-      throw new ConversationOrchestrationError('A group conversation requires at least two agents')
-    }
-    const employees = employeeIds.map((employeeId) =>
-      this.#requireEmployeeInWorld(employeeId, input.workspaceId, input.worldId),
-    )
+    if (employeeIds.length < 2) throw new ConversationOrchestrationError('A group conversation requires at least two agents')
+    const employees = employeeIds.map((employeeId) => this.#requireEmployeeInWorld(employeeId, input.workspaceId, input.worldId))
     const session = input.sessionId
       ? this.#requireGroupSession(input.sessionId, input.workspaceId, input.worldId, employeeIds)
       : this.#store.createSession({
@@ -546,20 +561,16 @@ export class ConversationOrchestrator implements AsyncDisposable {
           title: input.title?.trim() || conciseTitle(prompt),
           participants: [
             { participantId: 'owner', kind: 'owner' },
-            ...employees.map((employee) => ({
-              participantId: employee.id,
-              kind: 'employee' as const,
-            })),
+            ...employees.map((employee) => ({ participantId: employee.id, kind: 'employee' as const })),
           ],
         })
-    // Prior turns of this group session only. The replies produced inside the
-    // current round are supplied separately by groupPrompt(), so they must not
-    // be part of the recovered history as well.
     const recovered = this.#recoverConversation(session)
     const clientTurnId = clientTurnIdFrom(input.metadata)
     const workTurn = this.#store.createWorkTurn({
-      workspaceId: input.workspaceId, worldId: input.worldId, sessionId: session.id,
-      interactionKind: interactionKindFrom(input.metadata, 'meeting'),
+      workspaceId: input.workspaceId,
+      worldId: input.worldId,
+      sessionId: session.id,
+      interactionKind: interactionKindFrom(input.metadata, input.collaborationMode === 'task' ? 'task' : 'meeting'),
       ...(clientTurnId === undefined ? {} : { clientTurnId }),
     })
     this.#store.appendMessage({
@@ -568,10 +579,47 @@ export class ConversationOrchestrator implements AsyncDisposable {
       senderKind: 'owner',
       kind: 'user',
       content: prompt,
-      metadata: { ...input.metadata, workTurnId: workTurn.id },
+      metadata: {
+        ...input.metadata,
+        participantIds: employeeIds,
+        collaborationMode: input.collaborationMode ?? session.collaborationMode ?? 'discussion',
+        workTurnId: workTurn.id,
+      },
       correlationId: session.id,
     })
-    this.#store.startWorkTurn(workTurn.id)
+    if (start) this.#store.startWorkTurn(workTurn.id)
+    return { prompt, employeeIds, employees, session, workTurn: this.#store.getWorkTurn(workTurn.id)!, recovered }
+  }
+
+  #resumeGroupTurn(input: GroupConversationInput): GroupConversationTurnContext {
+    const prompt = requiredText(input.prompt, 'Prompt')
+    const employeeIds = [...new Set(input.employeeIds.map((id) => id.trim()).filter(Boolean))]
+    if (employeeIds.length < 2) throw new ConversationOrchestrationError('A group conversation requires at least two agents')
+    const turn = input.existingWorkTurnId === undefined ? undefined : this.#store.getWorkTurn(input.existingWorkTurnId)
+    if (turn === undefined || (turn.status !== 'queued' && turn.status !== 'running') || turn.workspaceId !== input.workspaceId || turn.worldId !== input.worldId) {
+      throw new ConversationOrchestrationError('Queued group WorkTurn is unavailable')
+    }
+    const session = this.#requireGroupSession(turn.sessionId, input.workspaceId, input.worldId, employeeIds)
+    if (input.sessionId !== undefined && input.sessionId !== session.id) throw new ConversationOrchestrationError('Queued group session does not match')
+    const message = this.#store.listMessages(session.id).find((item) => item.kind === 'user' && item.metadata.workTurnId === turn.id)
+    if (message === undefined || message.content !== prompt) throw new ConversationOrchestrationError('Queued group message is unavailable')
+    const employees = employeeIds.map((employeeId) => this.#requireEmployeeInWorld(employeeId, input.workspaceId, input.worldId))
+    const previousMessages = this.#store.listMessages(session.id).filter((item) => item.metadata.workTurnId !== turn.id)
+    if (turn.status === 'queued') this.#store.startWorkTurn(turn.id)
+    return {
+      prompt,
+      employeeIds,
+      employees,
+      session,
+      workTurn: this.#store.getWorkTurn(turn.id)!,
+      recovered: { messages: previousMessages, history: buildConversationHistory(previousMessages, this.#speakersFor(session), this.#historyBudget) },
+    }
+  }
+
+  async group(input: GroupConversationInput): Promise<ConversationResult> {
+    const begun = input.existingWorkTurnId === undefined ? this.#beginGroupTurn(input, true) : this.#resumeGroupTurn(input)
+    const { prompt, employeeIds, employees, session, workTurn, recovered } = begun
+    const clientTurnId = workTurn.clientTurnId
     const meetingRunId = workTurn.id
     this.#store.appendDomainEvent({
       workspaceId: input.workspaceId,
@@ -650,7 +698,17 @@ export class ConversationOrchestrator implements AsyncDisposable {
     )
     validateTaskDraft(input.steps, employeeIds)
 
-    const session = input.sessionId
+    const queuedTurn = input.existingWorkTurnId === undefined ? undefined : this.#store.getWorkTurn(input.existingWorkTurnId)
+    if (input.existingWorkTurnId !== undefined && (
+      queuedTurn === undefined
+      || (queuedTurn.status !== 'queued' && queuedTurn.status !== 'running')
+      || queuedTurn.workspaceId !== input.workspaceId
+      || queuedTurn.worldId !== input.worldId
+    )) throw new ConversationOrchestrationError('Queued task WorkTurn is unavailable')
+
+    const session = queuedTurn !== undefined
+      ? this.#requireGroupSession(queuedTurn.sessionId, input.workspaceId, input.worldId, employeeIds)
+      : input.sessionId
       ? this.#requireGroupSession(input.sessionId, input.workspaceId, input.worldId, employeeIds)
       : this.#store.createSession({
           workspaceId: input.workspaceId,
@@ -666,32 +724,43 @@ export class ConversationOrchestrator implements AsyncDisposable {
     if (session.collaborationMode !== undefined && session.collaborationMode !== 'task') {
       throw new ConversationOrchestrationError('Task execution requires a task collaboration session')
     }
+    if (input.sessionId !== undefined && input.sessionId !== session.id) throw new ConversationOrchestrationError('Queued task session does not match')
 
-    const recovered = this.#recoverConversation(session)
-    const clientTurnId = clientTurnIdFrom(input.metadata)
-    const workTurn = this.#store.createWorkTurn({
+    const recovered = queuedTurn === undefined
+      ? this.#recoverConversation(session)
+      : (() => {
+          const messages = this.#store.listMessages(session.id)
+          const current = messages.find((item) => item.kind === 'user' && item.metadata.workTurnId === queuedTurn.id)
+          if (current === undefined || current.content !== prompt) throw new ConversationOrchestrationError('Queued task message is unavailable')
+          const previous = messages.filter((item) => item.metadata.workTurnId !== queuedTurn.id)
+          return { messages: previous, history: buildConversationHistory(previous, this.#speakersFor(session), this.#historyBudget) }
+        })()
+    const clientTurnId = queuedTurn?.clientTurnId ?? clientTurnIdFrom(input.metadata)
+    const workTurn = queuedTurn ?? this.#store.createWorkTurn({
       workspaceId: input.workspaceId,
       worldId: input.worldId,
       sessionId: session.id,
       interactionKind: 'task',
       ...(clientTurnId === undefined ? {} : { clientTurnId }),
     })
-    this.#store.appendMessage({
-      sessionId: session.id,
-      senderId: 'owner',
-      senderKind: 'owner',
-      kind: 'user',
-      content: prompt,
-      metadata: {
-        ...input.metadata,
-        participantIds: employeeIds,
-        collaborationMode: 'task',
-        interactionKind: 'task',
-        workTurnId: workTurn.id,
-      },
-      correlationId: session.id,
-    })
-    this.#store.startWorkTurn(workTurn.id)
+    if (queuedTurn === undefined) {
+      this.#store.appendMessage({
+        sessionId: session.id,
+        senderId: 'owner',
+        senderKind: 'owner',
+        kind: 'user',
+        content: prompt,
+        metadata: {
+          ...input.metadata,
+          participantIds: employeeIds,
+          collaborationMode: 'task',
+          interactionKind: 'task',
+          workTurnId: workTurn.id,
+        },
+        correlationId: session.id,
+      })
+    }
+    if (workTurn.status === 'queued') this.#store.startWorkTurn(workTurn.id)
 
     let plan: TaskCollaborationPlan | undefined
     try {

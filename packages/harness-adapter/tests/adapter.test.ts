@@ -284,6 +284,100 @@ describe('Harness profile and adapter', () => {
     expect(closes).toBe(4)
   })
 
+  it('reserves lane capacity while an evicted runtime is still closing', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-lane-close-race-'))
+    let alive = 0
+    let maxAlive = 0
+    let releaseOldest: (() => void) | undefined
+    const adapter = new HarnessCompatibilityAdapter({
+      stateRoot,
+      runtimeFactory(spec) {
+        alive += 1
+        maxAlive = Math.max(maxAlive, alive)
+        return {
+          async run(sessionId) { return { finalResponse: sessionId, notifications: [] } },
+          async close() {
+            if (spec.conversationId === 'one') await new Promise<void>((resolve) => { releaseOldest = resolve })
+            alive -= 1
+          },
+        }
+      },
+    })
+    const run = (conversationId: string) => adapter.runTurn({
+      agent: employee(),
+      revision: revision(),
+      conversationId,
+      agentRunId: `run-${conversationId}`,
+      history: [],
+      observedThroughSequence: 0,
+      prompt: conversationId,
+      workspacePath: stateRoot,
+    })
+
+    await run('one')
+    await new Promise((resolve) => setTimeout(resolve, 2))
+    await run('two')
+    const third = run('three')
+    await waitFor(() => releaseOldest !== undefined)
+    const fourth = run('four')
+    await Promise.resolve()
+    expect(maxAlive).toBeLessThanOrEqual(2)
+    releaseOldest?.()
+    await Promise.all([third, fourth])
+    expect(maxAlive).toBeLessThanOrEqual(2)
+    await adapter.close()
+    expect(alive).toBe(0)
+  })
+
+  it('does not start a replacement runtime after closeEmployee wins an async lane reset', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-lane-close-employee-race-'))
+    let runtimeCreates = 0
+    let runCalls = 0
+    let closeStarted = false
+    let releaseClose: (() => void) | undefined
+    let closePromise: Promise<void> | undefined
+    const adapter = new HarnessCompatibilityAdapter({
+      stateRoot,
+      runtimeFactory() {
+        runtimeCreates += 1
+        return {
+          async run(sessionId) {
+            runCalls += 1
+            return { finalResponse: sessionId, notifications: [] }
+          },
+          close() {
+            closeStarted = true
+            closePromise ??= new Promise<void>((resolve) => { releaseClose = resolve })
+            return closePromise
+          },
+        }
+      },
+    })
+    const request = (permissionMode: 'read-only' | 'workspace-write', agentRunId: string) => adapter.runTurn({
+      agent: employee(),
+      revision: revision(),
+      conversationId: 'permission-reset-race',
+      agentRunId,
+      history: [],
+      observedThroughSequence: 0,
+      prompt: permissionMode,
+      permissionMode,
+      workspacePath: stateRoot,
+    })
+
+    await request('read-only', 'run-read')
+    const replacing = request('workspace-write', 'run-write')
+    await waitFor(() => closeStarted)
+    const closingEmployee = adapter.closeEmployee('employee-1')
+    await expect(replacing).rejects.toThrow('closed')
+    releaseClose?.()
+    await closingEmployee
+    await Promise.resolve()
+    expect(runtimeCreates).toBe(1)
+    expect(runCalls).toBe(1)
+    await adapter.close()
+  })
+
   it('recovers a persisted-session id collision before the prompt produces side effects', async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-session-recovery-'))
     const calls: string[] = []
