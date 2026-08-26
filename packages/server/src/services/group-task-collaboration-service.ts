@@ -67,8 +67,9 @@ export interface GroupTaskPlanView {
  *
  * The Router only selects employees and declared skills. This service creates
  * real AgentRuns through the provider-neutral orchestrator; it does not call a
- * Skill Adapter or claim an external action happened. Concrete Skill actions
- * remain gated at the per-run CharacterSkillRuntime boundary.
+ * Skill Adapter or claim an external action happened. The conversation-control
+ * lifecycle prepares at most one matching host Skill action before this
+ * service runs and passes only its durable factual result in transformedPrompt.
  */
 export class GroupTaskCollaborationService {
   readonly #store: GroupTaskCollaborationServiceOptions['store']

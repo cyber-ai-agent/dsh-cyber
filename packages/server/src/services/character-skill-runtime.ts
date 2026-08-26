@@ -42,6 +42,8 @@ export interface SkillPreparationContext {
   characterId: string
   prompt: string
   agentRunId?: string
+  /** Optional host lifecycle cap; proposals beyond it are never persisted or executed. */
+  maxActions?: number
 }
 
 /**
@@ -107,7 +109,7 @@ export class CharacterSkillRuntime {
       worldId,
       skillIds: revision.skillGrants,
     })
-    const proposals = await this.#registry.propose({
+    const proposed = await this.#registry.propose({
       worldId,
       characterId,
       prompt,
@@ -118,6 +120,9 @@ export class CharacterSkillRuntime {
       now,
       promptSource: 'raw-user',
     })
+    const proposals = context.maxActions === undefined
+      ? proposed
+      : proposed.slice(0, Math.max(0, Math.floor(context.maxActions)))
     if (proposals.length === 0) return { handled: false, actions: [] }
 
     // A plan is all-or-nothing at the gate. Every proposal is checked before

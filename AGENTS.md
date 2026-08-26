@@ -60,6 +60,7 @@
 - 第三方包不能拿到 Adapter 实例、系统命令、任意网络或任意文件权限。包只声明请求，宿主受信任 Adapter 执行结构化动作。
 - 外部副作用必须记录 `risk`、`authorization`、`adapterId`、结构化参数和最终执行状态；凭据不得进入动作记录、Prompt、SQLite 普通字段或前端响应。
 - 计划任务执行前必须重新检查角色是否存在、是否归档、世界归属和当前 Skill Grant；撤销授权后不得继续执行旧计划。
+- 群聊按 Skill 选中角色不等于外部动作已执行。讨论或任务协作在创建 AgentRun 前必须进入 CharacterSkillRuntime；同一用户请求只允许首个实际匹配且已授权的角色提出一个宿主动作，额外 proposal 在持久化和执行前截断，避免多人或多动作重复外发。需要审批时 WorkTurn 与 Queue 同时 `waiting-approval` 且不占角色通道；批准、拒绝或过期后继续原群聊 WorkTurn，复用已持久化 Action 事实，禁止重新 prepare 或重复 Adapter。
 
 ## Harness 设计采用规则
 
