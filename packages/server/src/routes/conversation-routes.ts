@@ -59,7 +59,7 @@ export interface ConversationRoutesDependencies {
   employeeActivity: EmployeeActivityProjectionService
   worldPackages: WorldPackageInstanceService
   worldRuntimePermissions?: WorldRuntimePermissionResolver
-  /** Issues and spends one-time owner host-access grants. */
+  /** Issues current-session owner host-access grants. */
   ownerRuntimeAccess?: OwnerRuntimeAccessService
   turnContinuations: TurnAwareApprovalContinuationService
   groupTasks?: GroupTaskCollaborationService
@@ -189,7 +189,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
       ? undefined
       : requiredEnum<'normal' | 'next'>(body, 'queueMode', ['normal', 'next'])
     // Resolve the persisted mode before consuming attachments, permissions, or
-    // a one-time host-access grant. A stale client hint must be rejected as a
+    // a current-session host-access grant. A stale client hint must be rejected as a
     // no-op against the session authority, not after partial request setup.
     const requestedSession = employeeIds.length > 1 && requestedSessionId !== undefined
       ? store.getSession(requestedSessionId)
@@ -211,18 +211,19 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
       ? worldSettingsValue.model.reasoningEffort
       : requiredEnum<ReasoningEffort>(body, 'reasoningEffort', ['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
     const requestedPermissionMode = body.permissionMode === undefined ? 'read-only' : requiredEnum<AgentPermissionMode>(body, 'permissionMode', ['read-only', 'workspace-write', 'danger-full-access'])
-    // Full host access requires a one-time grant the owner issued for this
-    // exact turn. It is spent on the first check, so it cannot be replayed,
-    // and nothing on the skill path can mint one.
+    // Full host access requires a current-session grant issued by the owner;
+    // nothing on the skill path can mint one.
+    const runtimeAccessGrantId = optionalString(body.runtimeAccessGrantId)
     const ownerHostAccess = requestedPermissionMode === 'danger-full-access'
-      && ownerRuntimeAccess?.consume({
-        grantId: optionalString(body.runtimeAccessGrantId),
+      && ownerRuntimeAccess?.authorizeSession({
+        grantId: runtimeAccessGrantId,
         worldId: world.id,
         sessionId: requestedSessionId,
         employeeIds,
-        clientTurnId: optionalString(body.clientTurnId),
-        prompt,
       }) === true
+    if (requestedPermissionMode === 'danger-full-access' && !ownerHostAccess) {
+      throw new HttpError(403, 'owner_runtime_access_denied', '当前会话完全访问授权已失效，请重新确认')
+    }
     const resolvedPermissions = worldRuntimePermissions === undefined
       ? undefined
       : await Promise.all(employeeIds.map((employeeId) => worldRuntimePermissions.resolve({
@@ -232,9 +233,9 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
           ownerHostAccess,
         })))
     const permissionMode: AgentPermissionMode = resolvedPermissions === undefined
-      // Without a resolver the request cannot be trusted to cap itself; the
-      // safe default is the least privilege, not what the client asked for.
-      ? requestedPermissionMode === 'danger-full-access' ? 'read-only' : requestedPermissionMode
+      ? requestedPermissionMode === 'danger-full-access'
+        ? ownerHostAccess ? 'danger-full-access' : 'read-only'
+        : requestedPermissionMode
       : resolvedPermissions.every((item) => item.permissionMode === 'danger-full-access')
         ? 'danger-full-access'
         : resolvedPermissions.every((item) => item.permissionMode === 'workspace-write' || item.permissionMode === 'danger-full-access')

@@ -30,6 +30,7 @@ export class TraceSanitizer {
       callId: this.text(tool.callId, 160),
       ...(tool.name === undefined ? {} : { name: this.text(tool.name, 160) }),
       label: this.text(tool.label, 200),
+      ...(tool.description === undefined ? {} : { description: this.text(tool.description, 300) }),
     }))
     const { detail: _originalDetail, reasoningSummary: _originalReasoning, tools: _originalTools, ...rest } = entry
     return {

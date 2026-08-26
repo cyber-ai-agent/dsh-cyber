@@ -1,4 +1,5 @@
 import type {
+  AgentPermissionMode,
   AgentRuntimePort,
   AgentTurnRequest,
   EmployeeProfile,
@@ -67,6 +68,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
           this.#store.getWorld(agent.worldId)?.administratorEmployeeId === agent.id,
         )
       : composeWorldAuthorityPersona(profiledPersona, currentAuthority)
+    const runtimePersona = composeConversationPermissionPersona(persona, request.permissionMode ?? 'read-only')
     return await this.#inner.runTurn({
       ...request,
       agent,
@@ -75,7 +77,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
         // Keep historical unavailable grants durable, but do not expose them
         // to the model prompt or downstream Harness runtime for this turn.
         skillGrants: grantedSkillIds,
-        persona: composeSkillRecipes(persona, recipeInstructions),
+        persona: composeSkillRecipes(runtimePersona, recipeInstructions),
       },
     })
   }
@@ -113,7 +115,16 @@ export function composeWorldAuthorityPersona(
   const grants = authority === undefined || authority.permissionGrants.length === 0
     ? '无'
     : authority.permissionGrants.join('、')
-  return `${persona.trim()}\n\n[当前世界职权]\n角色：${role}\n已授予的世界权限：${grants}\n权限仅适用于当前世界；没有列出的权限不得执行。`
+  return `${persona.trim()}\n\n[当前世界职权]\n角色：${role}\n已授予的世界权限：${grants}\n世界管理与业务动作只使用上述权限；本轮文件和命令执行遵循当前会话 DSH 操作权限。`
+}
+
+export function composeConversationPermissionPersona(persona: string, permissionMode: AgentPermissionMode): string {
+  const guidance: Record<AgentPermissionMode, string> = {
+    'read-only': '模式：read-only（请求批准）\n当前工作目录只读；文件写入和命令工具由运行时关闭。需要更高权限时，请在回复中说明所需操作。',
+    'workspace-write': '模式：workspace-write（帮我批准）\n可以读取、创建和修改当前工作目录中的文件，也可以使用工作区命令工具。外部 Skill 的风险动作继续使用产品审批流程。',
+    'danger-full-access': '模式：danger-full-access（完全访问）\n用户已为当前会话和当前角色完成高风险确认。可以访问当前系统账号可访问的路径，并使用文件和命令工具完成用户要求。',
+  }
+  return `${persona.trim()}\n\n[当前会话 DSH 操作权限]\n${guidance[permissionMode]}`
 }
 
 export function composeCharacterPersona(basePersona: string, profile: EmployeeProfile): string {

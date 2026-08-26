@@ -88,7 +88,6 @@ describe('world authority UI', () => {
     expect(markup).toContain('身份资料')
     expect(markup).toContain('行为方式')
     expect(markup).toContain('技能与工具')
-    expect(markup).toContain('本次电脑访问')
     expect(markup).toContain('世界权限')
     expect(markup).toContain('高级设置')
     expect(markup).toContain('保存能力设置')
@@ -117,7 +116,6 @@ describe('world authority UI', () => {
     expect(markup).toContain('阿开想要修改当前世界文件')
     expect(markup).toContain('仅本次允许')
     expect(markup).toContain('授予该权限并执行')
-    expect(markup).toContain('打开权限设置')
     expect(markup).toContain('拒绝')
 
     const integrationMarkup = renderToStaticMarkup(createElement(WorldPermissionRequests, {

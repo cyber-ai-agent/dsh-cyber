@@ -154,6 +154,7 @@ export interface WorldSettings {
   model: {
     defaultModelProfileId?: string
     reasoningEffort: ReasoningEffort
+    responseLanguage: 'zh-CN' | 'en-US' | 'auto'
   }
   runtime: {
     permissionMode: AgentPermissionMode

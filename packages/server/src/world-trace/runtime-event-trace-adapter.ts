@@ -1,6 +1,6 @@
 import type { AgentRuntimeEvent, WorldTraceEntry, WorldTraceStatus } from '@dsh-cyber/contracts'
 
-import { toolDisplayLabel } from './agent-run-trace-adapter.js'
+import { toolDisplayLabel, toolPresentation } from './agent-run-trace-adapter.js'
 import { traceId, type RuntimeTraceFact, type WorldTraceAdapter } from './trace-adapter.js'
 
 export class RuntimeEventTraceAdapter implements WorldTraceAdapter<'runtime-event'> {
@@ -30,10 +30,11 @@ export class RuntimeEventTraceAdapter implements WorldTraceAdapter<'runtime-even
     if (event.kind === 'assistant.reasoning' && event.content?.trim()) entry.reasoningSummary = event.content.trim()
     if (event.kind === 'tool.started' || event.kind === 'tool.completed') {
       const callId = event.callId ?? `event-${event.sourceSequence ?? value.createdAt}`
+      const presentation = toolPresentation(event.toolName)
       entry.tools = [{
         callId,
         ...(event.toolName === undefined ? {} : { name: event.toolName }),
-        label: toolDisplayLabel(event.toolName),
+        ...presentation,
         status: event.kind === 'tool.started' ? 'running' : event.failed ? 'failed' : 'success',
         ...(event.kind === 'tool.started' ? { createdAt: value.createdAt } : { completedAt: value.createdAt }),
       }]

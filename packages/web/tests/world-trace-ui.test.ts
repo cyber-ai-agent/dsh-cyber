@@ -180,7 +180,7 @@ describe('Trace dock and live merge', () => {
 
   it('renders reasoning and tool facts as keyboard-expandable cards', () => {
     const reasoning = { ...trace('reasoning', 'info', '2026-08-23T00:02:00.000Z'), category: 'agent' as const, summary: '角色生成了推理摘要', reasoningSummary: '先核对事实，再执行工具。' }
-    const tool = { ...trace('tool', 'success', '2026-08-23T00:01:00.000Z'), category: 'tool' as const, summary: '工具执行完成', tools: [{ callId: 'read-1', name: 'read_file', label: '读取信息', status: 'success' as const }] }
+    const tool = { ...trace('tool', 'success', '2026-08-23T00:01:00.000Z'), category: 'tool' as const, summary: '工具执行完成', tools: [{ callId: 'read-1', name: 'read_file', label: '读取文件', description: '读取文件内容用于分析或处理', status: 'success' as const }] }
     const html = renderToStaticMarkup(createElement('ol', {},
       createElement(WorldTraceItem, { entry: reasoning, employees: [] }),
       createElement(WorldTraceItem, { entry: tool, employees: [] }),
@@ -190,7 +190,9 @@ describe('Trace dock and live merge', () => {
     expect(html).toContain('判断摘要')
     expect(html).toContain('工具调度')
     expect(html).toContain('先核对事实，再执行工具。')
-    expect(html).toContain('读取信息')
+    expect(html).toContain('读取文件')
+    expect(html).toContain('读取文件内容用于分析或处理')
+    expect(html).toContain('<code>read_file</code>')
   })
 })
 

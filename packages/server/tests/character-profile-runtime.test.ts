@@ -10,6 +10,7 @@ import type {
 import {
   CharacterProfileRuntime,
   composeCharacterPersona,
+  composeConversationPermissionPersona,
   composeSkillRecipes,
   composeWorldAdministratorPersona,
 } from '../src/services/character-profile-runtime.js'
@@ -113,6 +114,12 @@ describe('CharacterProfileRuntime', () => {
 
   it('keeps recipe composition stable when no recipe is granted', () => {
     expect(composeSkillRecipes('基础设定', [])).toBe('基础设定')
+  })
+
+  it('describes the effective DSH operation permission for every turn', () => {
+    expect(composeConversationPermissionPersona('基础设定', 'read-only')).toContain('模式：read-only（请求批准）')
+    expect(composeConversationPermissionPersona('基础设定', 'workspace-write')).toContain('模式：workspace-write（帮我批准）')
+    expect(composeConversationPermissionPersona('基础设定', 'danger-full-access')).toContain('模式：danger-full-access（完全访问）')
   })
 
   it('adds bounded administrator authority without granting cross-world control', () => {

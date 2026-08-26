@@ -1,42 +1,25 @@
-import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 
 /**
- * One-time host-access grants issued by the person at the keyboard.
- *
- * `danger-full-access` lets a runtime read and write outside the world
- * directory, so it is not a World Permission and never can be: world
- * administrators administrate a world, not the machine. It is also not a
- * setting — a value stored in `settings.json` would silently elevate every
- * later turn, which is why the resolver has always ignored the stored one.
- *
- * A grant is instead an explicit, single act by the owner: bound to one world,
- * one set of characters and one client turn, single-use, and short-lived.
- *
- * Deliberately in memory. Durability would buy nothing here and would create a
- * window in which a grant outlives the intent behind it; a restart should
- * revoke elevation, not preserve it.
+ * Full access is a conversation permission confirmed by the person at the
+ * keyboard. It is scoped to the current world, conversation session and
+ * selected characters, then remains valid for later messages in that session.
+ * The grant lives in memory so a server restart clears the elevated mode.
  */
-export interface OwnerRuntimeAccessGrant {
+export interface OwnerRuntimeSessionAccessGrant {
   id: string
   worldId: string
   sessionId: string
   employeeIds: readonly string[]
-  clientTurnId: string
-  promptDigest: string
-  expiresAt: number
 }
 
-export interface IssueOwnerRuntimeAccessInput {
+export interface IssueOwnerRuntimeSessionAccessInput {
   worldId: string
   sessionId: string
   employeeIds: readonly string[]
-  clientTurnId: string
-  prompt: string
-  /** The owner has seen and accepted what full host access means. */
+  /** The owner has seen and accepted what full session access means. */
   confirmed: boolean
 }
-
-const DEFAULT_TTL_MS = 2 * 60_000
 
 export class OwnerRuntimeAccessDeniedError extends Error {
   readonly code = 'owner_runtime_access_denied'
@@ -48,83 +31,39 @@ export class OwnerRuntimeAccessDeniedError extends Error {
 }
 
 export class OwnerRuntimeAccessService {
-  readonly #grants = new Map<string, OwnerRuntimeAccessGrant>()
-  readonly #ttlMs: number
-  readonly #now: () => number
+  readonly #sessionGrants = new Map<string, OwnerRuntimeSessionAccessGrant>()
 
-  constructor(options: { ttlMs?: number; now?: () => number } = {}) {
-    this.#ttlMs = options.ttlMs ?? DEFAULT_TTL_MS
-    this.#now = options.now ?? (() => Date.now())
-  }
-
-  issue(input: IssueOwnerRuntimeAccessInput): OwnerRuntimeAccessGrant {
+  issueSession(input: IssueOwnerRuntimeSessionAccessInput): OwnerRuntimeSessionAccessGrant {
     if (input.confirmed !== true) {
-      throw new OwnerRuntimeAccessDeniedError('完整访问需要显式风险确认')
+      throw new OwnerRuntimeAccessDeniedError('当前会话完全访问需要显式风险确认')
     }
     const employeeIds = [...new Set(input.employeeIds.map((id) => id.trim()).filter(Boolean))]
-    if (employeeIds.length === 0) throw new OwnerRuntimeAccessDeniedError('完整访问必须指定角色')
+    if (employeeIds.length === 0) throw new OwnerRuntimeAccessDeniedError('当前会话完全访问必须指定角色')
     const sessionId = input.sessionId.trim()
-    if (!sessionId) throw new OwnerRuntimeAccessDeniedError('完整访问必须绑定一个已有会话')
-    const clientTurnId = input.clientTurnId.trim()
-    if (!clientTurnId) throw new OwnerRuntimeAccessDeniedError('完整访问必须绑定一次具体请求')
-    const prompt = input.prompt.trim()
-    if (!prompt) throw new OwnerRuntimeAccessDeniedError('完整访问必须绑定具体任务内容')
-    this.#sweep()
-    const grant: OwnerRuntimeAccessGrant = {
+    if (!sessionId) throw new OwnerRuntimeAccessDeniedError('当前会话完全访问必须绑定一个已有会话')
+    const grant: OwnerRuntimeSessionAccessGrant = {
       id: randomUUID(),
       worldId: input.worldId,
       sessionId,
       employeeIds,
-      clientTurnId,
-      promptDigest: digestPrompt(prompt),
-      expiresAt: this.#now() + this.#ttlMs,
     }
-    this.#grants.set(grant.id, grant)
+    for (const [id, current] of this.#sessionGrants) {
+      if (current.worldId === grant.worldId && current.sessionId === grant.sessionId) this.#sessionGrants.delete(id)
+    }
+    this.#sessionGrants.set(grant.id, grant)
     return grant
   }
 
-  /**
-   * Spends a grant, or refuses.
-   *
-   * Consumption happens on the first check, so a replayed request finds
-   * nothing — the grant authorises one turn, not a window of turns.
-   */
-  consume(input: {
+  authorizeSession(input: {
     grantId: string | undefined
     worldId: string
     sessionId: string | undefined
     employeeIds: readonly string[]
-    clientTurnId: string | undefined
-    prompt: string
   }): boolean {
-    if (input.grantId === undefined) return false
-    this.#sweep()
-    const grant = this.#grants.get(input.grantId)
+    if (input.grantId === undefined || input.sessionId === undefined) return false
+    const grant = this.#sessionGrants.get(input.grantId)
     if (grant === undefined) return false
-    this.#grants.delete(grant.id)
-    if (grant.worldId !== input.worldId) return false
-    if (grant.sessionId !== (input.sessionId ?? '')) return false
-    if (grant.clientTurnId !== (input.clientTurnId ?? '')) return false
-    if (!sameDigest(grant.promptDigest, digestPrompt(input.prompt.trim()))) return false
-    // Every character in the turn must be covered; a grant for one character
-    // does not elevate the others in a group.
+    if (grant.worldId !== input.worldId || grant.sessionId !== input.sessionId) return false
     return input.employeeIds.every((employeeId) => grant.employeeIds.includes(employeeId))
   }
-
-  #sweep(): void {
-    const now = this.#now()
-    for (const [id, grant] of this.#grants) {
-      if (grant.expiresAt <= now) this.#grants.delete(id)
-    }
-  }
-}
-
-function digestPrompt(value: string): string {
-  return createHash('sha256').update(value, 'utf8').digest('hex')
-}
-
-function sameDigest(left: string, right: string): boolean {
-  const leftBytes = Buffer.from(left, 'hex')
-  const rightBytes = Buffer.from(right, 'hex')
-  return leftBytes.byteLength === rightBytes.byteLength && timingSafeEqual(leftBytes, rightBytes)
 }
