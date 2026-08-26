@@ -5,6 +5,7 @@ import type { ApplicationAccessService } from '../services/application-access-se
 const PUBLIC_API_PATHS = new Set([
   '/api/application-access',
   '/api/application-access/unlock',
+  '/api/application-access/recover',
   '/api/health',
 ])
 

@@ -97,7 +97,6 @@ const MessageHistoryDialog = lazy(async () => ({ default: (await import('./compo
 const PackageMarketDialog = lazy(async () => ({ default: (await import('./components/PackageMarketDialog.js')).PackageMarketDialog }))
 const RecruitmentDialog = lazy(async () => ({ default: (await import('./components/RecruitmentDialog.js')).RecruitmentDialog }))
 const WorldSettingsDialog = lazy(async () => ({ default: (await import('./components/WorldSettingsDialog.js')).WorldSettingsDialog }))
-const WorldUnlockDialog = lazy(async () => ({ default: (await import('./components/WorldSettingsDialog.js')).WorldUnlockDialog }))
 const WorldRuntimeDock = lazy(async () => ({ default: (await import('./features/world/WorldRuntimeDock.js')).WorldRuntimeDock }))
 const WorldTracePanel = lazy(async () => ({ default: (await import('./components/world-trace/WorldTracePanel.js')).WorldTracePanel }))
 const TaskSchedulePanel = lazy(async () => ({ default: (await import('./components/TaskSchedulePanel.js')).TaskSchedulePanel }))
@@ -201,7 +200,6 @@ export default function App() {
   const [hostAccessRequest, setHostAccessRequest] = useState<ConversationHostAccessRequest>()
   const [sessionHostAccessGrants, setSessionHostAccessGrants] = useState<Record<string, PreparedSessionHostAccessGrant>>({})
   const [worldAccess, setWorldAccess] = useState<WorldAccessSummary>()
-  const [lockedWorld, setLockedWorld] = useState<World>()
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('auto')
   const [taskSchedules, setTaskSchedules] = useState<TaskSchedule[]>([])
   const [scheduleBusy, setScheduleBusy] = useState(false)
@@ -339,7 +337,8 @@ export default function App() {
         snapshot = await api<WorldSnapshot>(`/api/worlds/${world.id}/snapshot`)
       } catch (cause) {
         if (cause instanceof ApiError && cause.status === 423) {
-          if (isCurrentRequest()) setLockedWorld(world)
+          if (cause.code === 'application_locked') window.location.reload()
+          else if (isCurrentRequest()) setError('当前工作台已锁定，请重新进入应用')
           return
         }
         throw cause
@@ -2315,7 +2314,6 @@ export default function App() {
         </Suspense>
       ) : null}
       {hostAccessRequest !== undefined ? <ConversationHostAccessDialog request={hostAccessRequest} onConfirm={confirmHostAccess} onClose={() => setHostAccessRequest(undefined)} /> : null}
-      {lockedWorld !== undefined ? <Suspense fallback={<div className="dialog-loading" role="status">正在打开访问验证…</div>}><WorldUnlockDialog worldName={lockedWorld.name} onUnlock={async(password)=>{ await api(`/api/worlds/${lockedWorld.id}/access/unlock`,{method:'POST',body:JSON.stringify({password})}); const world=lockedWorld; setLockedWorld(undefined); await loadWorld(world) }} /></Suspense> : null}
       {managingEmployee !== undefined ? (
         <Suspense fallback={<div className="dialog-loading" role="status">正在打开角色设置…</div>}><EmployeeManagementDialog
           employee={managingEmployee}
@@ -2625,7 +2623,7 @@ function conversationPermissionStorageKey(worldId: string, permissionKey: string
 function readConversationPermissionMode(worldId: string, permissionKey: string): ConversationPermissionMode | undefined {
   try {
     const value = window.localStorage.getItem(conversationPermissionStorageKey(worldId, permissionKey))
-    return value === 'workspace-write' || value === 'read-only' ? value : undefined
+    return value === 'danger-full-access' || value === 'workspace-write' || value === 'read-only' ? value : undefined
   } catch {
     return undefined
   }
@@ -2634,10 +2632,10 @@ function readConversationPermissionMode(worldId: string, permissionKey: string):
 function persistConversationPermissionMode(worldId: string, permissionKey: string, mode: ConversationPermissionMode): void {
   try {
     const key = conversationPermissionStorageKey(worldId, permissionKey)
-    // Full computer access is a one-session owner confirmation by design. It
-    // must never survive a refresh or become an implicit default.
-    if (mode === 'danger-full-access') window.localStorage.removeItem(key)
-    else window.localStorage.setItem(key, mode)
+    // Remember the selector choice so a refresh does not silently change the
+    // user's workflow. A full-access grant is still held only in memory and
+    // is re-confirmed before the next action when the session grant is gone.
+    window.localStorage.setItem(key, mode)
   } catch {
     // localStorage may be unavailable; the in-memory mode still applies now.
   }

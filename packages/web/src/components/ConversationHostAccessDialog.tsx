@@ -56,7 +56,7 @@ export function ConversationHostAccessDialog({ request, onConfirm, onClose }: Co
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
       <section ref={dialogRef} className="host-access-dialog" role="dialog" aria-modal="true" aria-labelledby="host-access-title">
         <header className="dialog-header">
-          <div><h2 id="host-access-title"><ShieldWarning size={19} />完全访问</h2><p>授权当前会话持续使用，切换会话后重新确认。</p></div>
+          <div><h2 id="host-access-title"><ShieldWarning size={19} />完全访问</h2><p>只对当前会话生效，刷新页面或切换会话后需要重新确认。</p></div>
           <button className="icon-button" type="button" aria-label="关闭" onClick={onClose}><X size={18} /></button>
         </header>
         <dl className="host-access-dialog__facts">

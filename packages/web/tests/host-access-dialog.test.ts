@@ -13,7 +13,7 @@ describe('ConversationHostAccessDialog', () => {
     }))
     expect(markup).toContain('完全访问')
     expect(markup).toContain('阿开')
-    expect(markup).toContain('当前会话持续使用')
+    expect(markup).toContain('刷新页面或切换会话后需要重新确认')
     expect(markup).toContain('允许当前会话')
     expect(markup).not.toContain('目标')
     expect(markup).not.toContain('用途')

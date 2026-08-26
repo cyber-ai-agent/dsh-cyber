@@ -1,4 +1,4 @@
-import { CheckCircle, LockKey, Palette, ShieldCheck, SlidersHorizontal, UserCircle, WarningCircle, X } from '@phosphor-icons/react'
+import { CheckCircle, Palette, ShieldCheck, SlidersHorizontal, UserCircle, WarningCircle, X } from '@phosphor-icons/react'
 import { useEffect, useRef, useState } from 'react'
 import type { AgentPermissionMode, EmployeeInstance, ModelProfile, ReasoningEffort, World, WorldCharacterAuthority, WorldSettings } from '@dsh-cyber/contracts'
 
@@ -194,12 +194,4 @@ function applyWorldPreview(settings: WorldSettings): void {
   root.style.setProperty('--world-bubble-radius', `${appearance.bubbleRadius}px`)
   root.style.setProperty('--world-button-radius', `${appearance.buttonRadius}px`)
   root.style.setProperty('--world-font-scale', String(appearance.fontScale))
-}
-
-export function WorldUnlockDialog({ worldName, onUnlock }: { worldName: string; onUnlock(password: string): Promise<void> }) {
-  const [password,setPassword]=useState('')
-  const [error,setError]=useState<string>()
-  const [busy,setBusy]=useState(false)
-  return <div className="modal-backdrop"><section className="world-unlock-dialog" role="dialog" aria-modal="true"><LockKey size={30}/><h2>{worldName} 已锁定</h2><p>输入当前世界的本地密码继续。</p><input autoFocus type="password" value={password} onChange={(event)=>setPassword(event.target.value)} onKeyDown={(event)=>{ if(event.key==='Enter' && password) void submit() }}/><button className="primary-button" disabled={!password||busy} onClick={()=>void submit()}>{busy?'正在解锁…':'解锁世界'}</button>{error?<p className="package-error">{error}</p>:null}</section></div>
-  async function submit(){setBusy(true);setError(undefined);try{await onUnlock(password)}catch(cause){setError(cause instanceof Error?cause.message:'解锁失败')}finally{setBusy(false)}}
 }

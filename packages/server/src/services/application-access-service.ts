@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto'
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
@@ -8,9 +8,11 @@ import { HttpError } from '../http/errors.js'
 
 const scrypt = promisify(scryptCallback)
 const COOKIE_NAME = 'dsh_application_access'
-interface AccessFile { schemaVersion: 1; salt: string; hash: string; updatedAt: string }
+interface AccessFile { schemaVersion: 1; salt: string; hash: string; recoveryHash?: string; updatedAt: string }
 
-export interface ApplicationAccessSummary { passwordEnabled: boolean; unlocked: boolean }
+export interface ApplicationAccessSummary { passwordEnabled: boolean; unlocked: boolean; recoveryConfigured: boolean }
+export interface ApplicationAccessResponse extends ApplicationAccessSummary { recoveryCode?: string }
+export interface ApplicationAccessMutation extends ApplicationAccessSummary { recoveryCode: string }
 
 export class ApplicationAccessService {
   readonly #path: string
@@ -21,18 +23,19 @@ export class ApplicationAccessService {
 
   async summary(request?: IncomingMessage): Promise<ApplicationAccessSummary> {
     const policy = await this.#read()
-    return { passwordEnabled: policy !== undefined, unlocked: policy === undefined || (request !== undefined && this.#token(request) !== undefined) }
+    return { passwordEnabled: policy !== undefined, unlocked: policy === undefined || (request !== undefined && this.#token(request) !== undefined), recoveryConfigured: policy?.recoveryHash !== undefined }
   }
 
-  async setPassword(password: string, response: ServerResponse): Promise<ApplicationAccessSummary> {
-    if (password.length < 6 || password.length > 128) throw new HttpError(422, 'invalid_application_password', '密码长度需为 6 到 128 个字符')
+  async setPassword(password: string, response: ServerResponse): Promise<ApplicationAccessMutation> {
+    validatePassword(password)
+    const recoveryCode = newRecoveryCode()
     const salt = randomBytes(16)
     const derived = await scrypt(password, salt, 32) as Buffer
     await mkdir(dirname(this.#path), { recursive: true, mode: 0o700 })
-    await durableWrite(this.#path, JSON.stringify({ schemaVersion: 1, salt: salt.toString('base64url'), hash: derived.toString('base64url'), updatedAt: new Date().toISOString() }, null, 2) + '\n')
+    await durableWrite(this.#path, JSON.stringify({ schemaVersion: 1, salt: salt.toString('base64url'), hash: derived.toString('base64url'), recoveryHash: hashRecoveryCode(recoveryCode), updatedAt: new Date().toISOString() }, null, 2) + '\n')
     this.#sessions.clear()
     this.#issue(response)
-    return { passwordEnabled: true, unlocked: true }
+    return { passwordEnabled: true, unlocked: true, recoveryConfigured: true, recoveryCode }
   }
 
   async clearPassword(request: IncomingMessage, response: ServerResponse): Promise<ApplicationAccessSummary> {
@@ -40,25 +43,47 @@ export class ApplicationAccessService {
     await rm(this.#path, { force: true })
     this.#sessions.clear()
     clearCookie(response)
-    return { passwordEnabled: false, unlocked: true }
+    return { passwordEnabled: false, unlocked: true, recoveryConfigured: false }
   }
 
-  async unlock(password: string, request: IncomingMessage, response: ServerResponse): Promise<ApplicationAccessSummary> {
+  async unlock(password: string, request: IncomingMessage, response: ServerResponse): Promise<ApplicationAccessResponse> {
     const policy = await this.#read()
-    if (policy === undefined) return { passwordEnabled: false, unlocked: true }
-    const key = request.socket.remoteAddress ?? 'loopback'
-    const failure = this.#failures.get(key)
-    if (failure !== undefined && failure.blockedUntil > Date.now()) throw new HttpError(429, 'application_unlock_rate_limited', '尝试过于频繁，请稍后再试')
+    if (policy === undefined) return { passwordEnabled: false, unlocked: true, recoveryConfigured: false }
+    this.#checkRateLimit(request)
     const derived = await scrypt(password, Buffer.from(policy.salt, 'base64url'), 32) as Buffer
     const expected = Buffer.from(policy.hash, 'base64url')
     if (derived.length !== expected.length || !timingSafeEqual(derived, expected)) {
-      const count = (failure?.count ?? 0) + 1
-      this.#failures.set(key, { count, blockedUntil: count >= 5 ? Date.now() + 30_000 : 0 })
+      this.#recordFailure(request)
       throw new HttpError(401, 'application_password_invalid', '密码不正确')
     }
-    this.#failures.delete(key)
+    this.#failures.delete(request.socket.remoteAddress ?? 'loopback')
+    let recoveryCode: string | undefined
+    if (policy.recoveryHash === undefined) {
+      recoveryCode = newRecoveryCode()
+      await durableWrite(this.#path, JSON.stringify({ ...policy, recoveryHash: hashRecoveryCode(recoveryCode), updatedAt: new Date().toISOString() }, null, 2) + '\n')
+    }
     this.#issue(response)
-    return { passwordEnabled: true, unlocked: true }
+    return { passwordEnabled: true, unlocked: true, recoveryConfigured: true, ...(recoveryCode === undefined ? {} : { recoveryCode }) }
+  }
+
+  async recover(recoveryCode: string, password: string, request: IncomingMessage, response: ServerResponse): Promise<ApplicationAccessMutation> {
+    validatePassword(password)
+    const policy = await this.#read()
+    if (policy === undefined) throw new HttpError(409, 'application_password_not_enabled', '应用锁没有启用')
+    if (policy.recoveryHash === undefined) throw new HttpError(409, 'application_recovery_not_configured', '当前应用锁没有配置恢复码，请联系本机管理员处理')
+    this.#checkRateLimit(request)
+    if (!sameSecret(hashRecoveryCode(recoveryCode), policy.recoveryHash)) {
+      this.#recordFailure(request)
+      throw new HttpError(401, 'application_recovery_invalid', '恢复码不正确')
+    }
+    this.#failures.delete(request.socket.remoteAddress ?? 'loopback')
+    const nextRecoveryCode = newRecoveryCode()
+    const salt = randomBytes(16)
+    const derived = await scrypt(password, salt, 32) as Buffer
+    await durableWrite(this.#path, JSON.stringify({ schemaVersion: 1, salt: salt.toString('base64url'), hash: derived.toString('base64url'), recoveryHash: hashRecoveryCode(nextRecoveryCode), updatedAt: new Date().toISOString() }, null, 2) + '\n')
+    this.#sessions.clear()
+    this.#issue(response)
+    return { passwordEnabled: true, unlocked: true, recoveryConfigured: true, recoveryCode: nextRecoveryCode }
   }
 
   lock(request: IncomingMessage, response: ServerResponse): void {
@@ -89,7 +114,7 @@ export class ApplicationAccessService {
   async #read(): Promise<AccessFile | undefined> {
     try {
       const value = JSON.parse(await readFile(this.#path, 'utf8')) as AccessFile
-      if (value.schemaVersion !== 1 || typeof value.salt !== 'string' || typeof value.hash !== 'string') {
+      if (value.schemaVersion !== 1 || typeof value.salt !== 'string' || typeof value.hash !== 'string' || (value.recoveryHash !== undefined && typeof value.recoveryHash !== 'string')) {
         throw new HttpError(500, 'application_access_policy_invalid', '应用锁配置损坏，请从本机备份恢复访问配置')
       }
       return value
@@ -97,6 +122,18 @@ export class ApplicationAccessService {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
       throw error
     }
+  }
+
+  #checkRateLimit(request: IncomingMessage): void {
+    const failure = this.#failures.get(request.socket.remoteAddress ?? 'loopback')
+    if (failure !== undefined && failure.blockedUntil > Date.now()) throw new HttpError(429, 'application_unlock_rate_limited', '尝试过于频繁，请稍后再试')
+  }
+
+  #recordFailure(request: IncomingMessage): void {
+    const key = request.socket.remoteAddress ?? 'loopback'
+    const failure = this.#failures.get(key)
+    const count = (failure?.count ?? 0) + 1
+    this.#failures.set(key, { count, blockedUntil: count >= 5 ? Date.now() + 30_000 : 0 })
   }
 }
 
@@ -125,4 +162,22 @@ async function durableWrite(path: string, content: string): Promise<void> {
     await handle.close()
   }
   await rename(temp, path)
+}
+
+function validatePassword(password: string): void {
+  if (password.length < 6 || password.length > 128) throw new HttpError(422, 'invalid_application_password', '密码长度需为 6 到 128 个字符')
+}
+
+function newRecoveryCode(): string {
+  return randomBytes(15).toString('hex').toUpperCase().match(/.{1,5}/g)!.join('-')
+}
+
+function hashRecoveryCode(value: string): string {
+  return createHash('sha256').update(value.replaceAll(/[^a-z0-9]/gi, '').toUpperCase()).digest('base64url')
+}
+
+function sameSecret(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left)
+  const rightBuffer = Buffer.from(right)
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer)
 }

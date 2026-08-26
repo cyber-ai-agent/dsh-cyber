@@ -415,7 +415,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
       .filter((run) => run.status === 'queued' || run.status === 'running')
       .map((run) => run.id)
     const runIds = [...new Set([...activeRunIds, ...persistedRunIds])]
-    for (const runId of activeRunIds) this.#abortedAgentRuns.add(runId)
+    for (const runId of runIds) this.#abortedAgentRuns.add(runId)
     await Promise.allSettled(activeRunIds.map((runId) => this.#runtime.abortRun?.(runId)))
     for (const runId of runIds) {
       try { this.#store.interruptAgentRun(runId, 'interrupted') } catch { /* a runtime race already settled it */ }
@@ -1230,6 +1230,14 @@ export class ConversationOrchestrator implements AsyncDisposable {
     })
     this.#store.startAgentRun(agentRun.id)
     this.#activeAgentRuns.set(agentRun.id, { workTurnId: workTurn.id, employeeId: employee.id })
+    // A Stop command may win immediately after the queue entry becomes
+    // running but before this AgentRun reaches the runtime. Keep that race
+    // durable: the run is recorded as interrupted and never starts work for
+    // an already-interrupted WorkTurn.
+    if (this.#abortedAgentRuns.has(agentRun.id) || this.#store.getWorkTurn(workTurn.id)?.status !== 'running') {
+      try { this.#store.interruptAgentRun(agentRun.id, 'interrupted') } catch { /* another controller won */ }
+      throw new AgentTurnInterruptedError(employee.id)
+    }
     const traceTurnId = agentRun.id
     let responsePersisted = false
     const pendingAssistantMessages: PendingAssistantMessage[] | undefined = this.#deferAssistantMessages ? [] : undefined

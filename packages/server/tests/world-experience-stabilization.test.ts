@@ -56,12 +56,6 @@ async function createPersonalWorld(origin: string): Promise<{ workspaceId: strin
   return { workspaceId, world: worldResult.body.world as World }
 }
 
-function cookieFrom(response: Response): string {
-  const raw = response.headers.get('set-cookie')
-  if (!raw) throw new Error('missing set-cookie')
-  return raw.split(';', 1)[0]!
-}
-
 describe('world experience stabilization', () => {
   it('uses the same personal-world template in server bootstrap and browser onboarding semantics', async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-bootstrap-'))
@@ -76,7 +70,7 @@ describe('world experience stabilization', () => {
     expect(snapshot.body.employees.map((employee: { displayName: string }) => employee.displayName)).toEqual(['管家'])
   })
 
-  it('stores new attachments inside the world and requires that world access lock to read them', async () => {
+  it('stores new attachments inside the world without creating a second world lock', async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-world-assets-'))
     const { origin } = await start(stateRoot)
     const { world } = await createPersonalWorld(origin)
@@ -100,18 +94,9 @@ describe('world experience stabilization', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password: 'world-secret' }),
     })
-    expect(password.response.status).toBe(200)
+    expect(password.response.status).toBe(410)
 
-    const locked = await fetch(`${origin}${attachment.url}`)
-    expect(locked.status).toBe(423)
-
-    const unlock = await json(origin, `/api/worlds/${world.id}/access/unlock`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: 'world-secret' }),
-    })
-    const cookie = cookieFrom(unlock.response)
-    const restored = await fetch(`${origin}${attachment.url}`, { headers: { Cookie: cookie } })
+    const restored = await fetch(`${origin}${attachment.url}`)
     expect(restored.status).toBe(200)
     expect(Buffer.from(await restored.arrayBuffer()).equals(source)).toBe(true)
   })

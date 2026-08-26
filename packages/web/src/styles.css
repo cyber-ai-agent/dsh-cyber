@@ -185,10 +185,25 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .application-lock-panel__icon { width: 52px; height: 52px; display: grid; place-items: center; border: 1px solid #566872; color: #d7a52f; background: #162128; }
 .application-lock-panel h1 { margin: 17px 0 5px; font-size: 24px; font-weight: 620; }
 .application-lock-panel > p { margin: 0 0 22px; color: #aeb8bd; font-size: 14px; }
-.application-lock-panel > label { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 46px; }
-.application-lock-panel input { min-width: 0; height: 46px; padding: 0 13px; border: 1px solid #465861; border-right: 0; color: #edf1f2; background: #0b1216; }
-.application-lock-panel label button { width: 46px; height: 46px; display: grid; place-items: center; border: 1px solid #d7a52f; color: #0a1014; background: #d7a52f; }
-.application-lock-panel label button:disabled { border-color: #465861; color: #70808a; background: #18232a; }
+.application-lock-form > label { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 46px; }
+.application-lock-form > label input { min-width: 0; height: 46px; padding: 0 13px; border: 1px solid #465861; border-right: 0; color: #edf1f2; background: #0b1216; }
+.application-lock-form > label button { width: 46px; height: 46px; display: grid; place-items: center; border: 1px solid #d7a52f; color: #0a1014; background: #d7a52f; }
+.application-lock-form > label button:disabled { border-color: #465861; color: #70808a; background: #18232a; }
+.application-lock-form { width: 100%; display: grid; gap: 12px; }
+.application-lock-recovery-fields { display: grid; gap: 10px; text-align: left; }
+.application-lock-recovery-fields label { display: grid; gap: 5px; color: #b7c1c5; font-size: 12px; }
+.application-lock-recovery-fields input { width: 100%; height: 42px; border: 1px solid #465861; }
+.application-lock-recovery-fields .primary-button { min-height: 42px; margin-top: 3px; }
+.application-lock-recovery-unavailable { padding: 11px 12px; border: 1px solid #665f42; color: #d7c98f; background: #242218; font-size: 12px; line-height: 1.55; text-align: left; }
+.application-lock-link { display: inline-flex; align-items: center; gap: 5px; justify-self: center; margin-top: 13px; padding: 3px 6px; border: 0; color: #c7d0d4; background: transparent; font-size: 12px; cursor: pointer; }
+.application-lock-link:hover, .application-lock-link:focus-visible { color: #e6b940; text-decoration: underline; }
+.application-lock-recovery-result { width: 100%; display: flex; align-items: flex-start; gap: 9px; margin-top: 14px; padding: 11px 12px; border: 1px solid #536f5c; color: #d4ead9; background: #142019; text-align: left; }
+.application-lock-recovery-result > svg { flex: none; margin-top: 2px; color: #78c88d; }
+.application-lock-recovery-result span { display: grid; gap: 4px; min-width: 0; }
+.application-lock-recovery-result strong { font-size: 12px; }
+.application-lock-recovery-result code { overflow-wrap: anywhere; color: #f4d36e; font: 600 14px var(--font-mono); letter-spacing: .04em; }
+.application-lock-recovery-result small { color: #9fb2a5; font-size: 11px; line-height: 1.45; }
+.application-lock-recovery-result span > div { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 4px; }
 .application-lock-error { width: 100%; margin-top: 12px; color: #ffafb1; font-size: 13px; text-align: left; }
 .workspace-backdrop { position: fixed; inset: var(--topbar-h) 0 0; pointer-events: none; background-image: var(--workspace-background-image); background-size: var(--workspace-background-size, cover); background-repeat: var(--workspace-background-repeat, no-repeat); background-position: center; opacity: var(--workspace-background-opacity, 0); filter: saturate(.65) contrast(1.05); }
 .topbar { position: relative; z-index: 5; height: var(--topbar-h); display: flex; align-items: center; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--surface-0) 95%, transparent); }
@@ -1225,8 +1240,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .privacy-lock-fields { display: grid; gap: 12px; }
 .privacy-lock-fields label { display: grid; gap: 6px; color: var(--text-soft); font-size: 13px; }
 .privacy-lock-fields input { width: 100%; height: 42px; padding: 0 11px; border: 1px solid var(--border); background: var(--surface-0); }
+.privacy-recovery-status { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
 .privacy-lock-card > footer, .privacy-lock-card > footer > div { display: flex; align-items: center; gap: 9px; }
 .privacy-lock-card > footer { justify-content: space-between; }
+.privacy-recovery-code { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid color-mix(in srgb, var(--success) 48%, var(--border)); color: var(--text); background: color-mix(in srgb, var(--success) 8%, var(--surface-0)); }
+.privacy-recovery-code > svg { flex: none; margin-top: 2px; color: var(--success); }
+.privacy-recovery-code > span { min-width: 0; display: grid; gap: 4px; flex: 1; }
+.privacy-recovery-code strong { font-size: 13px; }
+.privacy-recovery-code code { overflow-wrap: anywhere; color: var(--accent-strong); font: 600 14px var(--font-mono); letter-spacing: .04em; }
+.privacy-recovery-code small { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
 .setting-group { margin: 0; padding: 17px; border: 1px solid var(--border); }
 .setting-group legend { padding: 0 7px; color: var(--text-soft); font-size: 14px; font-weight: 600; }
 .segmented-control { display: grid; grid-template-columns: repeat(3, 1fr); }
