@@ -7,9 +7,10 @@ import type {
   WorkshopProject,
 } from '@dsh-cyber/contracts/creative-platform'
 
-import { api } from '../api.js'
+import { api, ApiError } from '../api.js'
 import { CreativeWorkshopEditor } from './creative-workshop/CreativeWorkshopEditor.js'
 import { CreativeWorkshopProjectLibrary } from './creative-workshop/CreativeWorkshopProjectLibrary.js'
+import { analyzeWorkshopPrompt } from './creative-workshop/prompt-parser.js'
 import {
   createEmptyWorkshopDraft,
   draftToCreateInput,
@@ -39,6 +40,7 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
+  const [promptReply, setPromptReply] = useState<string>()
 
   useEffect(() => {
     let cancelled = false
@@ -80,7 +82,20 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
       ? createEmptyWorkshopDraft(templateId, preset!)
       : projectToDraft(source, presets))
     setError(undefined)
+    setPromptReply(undefined)
     setView('editor')
+  }
+
+  const analyzePrompt = (input: string) => {
+    if (draft === undefined) return
+    try {
+      const result = analyzeWorkshopPrompt(input, templates, presets, draft)
+      setDraft(result.draft)
+      setPromptReply(result.reply)
+      setError(undefined)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '提示词无法转换为世界草稿')
+    }
   }
 
   const create = async () => {
@@ -102,9 +117,12 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
       setSelectedProjectId(result.project.id)
       setView('library')
       setDraft(undefined)
+      setPromptReply(undefined)
       onCreated(result.project)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '世界创建失败')
+      setError(cause instanceof ApiError && cause.code === 'internal_error'
+        ? '创意工坊创建失败，服务没有完成这次操作。请重试；如果持续失败，请打开系统状态查看详情。'
+        : cause instanceof Error ? cause.message : '世界创建失败')
     } finally {
       setSaving(false)
     }
@@ -131,8 +149,10 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
             skills={skills}
             saving={saving}
             {...(error === undefined ? {} : { error })}
+            {...(promptReply === undefined ? {} : { promptReply })}
             onChange={setDraft}
-            onBack={() => { setView('library'); setDraft(undefined); setError(undefined) }}
+            onAnalyzePrompt={analyzePrompt}
+            onBack={() => { setView('library'); setDraft(undefined); setPromptReply(undefined); setError(undefined) }}
             onSubmit={() => void create()}
           />
         ) : (

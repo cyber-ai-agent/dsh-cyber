@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Check, MagnifyingGlass, Plus, Sparkle, Trash, UsersThree } from '@phosphor-icons/react'
+import { ArrowLeft, ArrowRight, ChatCircleDots, Check, FileArrowUp, MagnifyingGlass, Plus, Sparkle, Trash, UsersThree } from '@phosphor-icons/react'
 import { useEffect, useMemo, useState } from 'react'
 import type { WorldTemplateManifest } from '@dsh-cyber/contracts'
 import type { CharacterSkillDescriptor, EmbodimentPresetDescriptor } from '@dsh-cyber/contracts/creative-platform'
@@ -12,7 +12,9 @@ interface CreativeWorkshopEditorProps {
   skills: CharacterSkillDescriptor[]
   saving: boolean
   error?: string
+  promptReply?: string
   onChange(next: WorkshopDraft): void
+  onAnalyzePrompt(input: string): void
   onBack(): void
   onSubmit(): void
 }
@@ -25,7 +27,7 @@ const STEPS = [
 ] as const
 
 export function CreativeWorkshopEditor({
-  draft, templates, presets, skills, saving, error, onChange, onBack, onSubmit,
+  draft, templates, presets, skills, saving, error, promptReply, onChange, onAnalyzePrompt, onBack, onSubmit,
 }: CreativeWorkshopEditorProps) {
   const [step, setStep] = useState(0)
   const [selectedRoleId, setSelectedRoleId] = useState(draft.roles[0]?.clientId)
@@ -84,6 +86,7 @@ export function CreativeWorkshopEditor({
       <main className="creative-workshop-wizard__body">
         {step === 0 ? <section className="creative-workshop-wizard__section" aria-labelledby="workshop-world-step">
           <header><Sparkle size={22} /><div><h3 id="workshop-world-step">先描述你要创建的世界</h3><p>名称和当前目标足以开始；详细背景可以稍后继续完善。</p></div></header>
+          <WorkshopPromptAssistant reply={promptReply} onAnalyze={onAnalyzePrompt} />
           <label className="dialog-field"><span>世界名称</span><input autoFocus value={draft.displayName} maxLength={80} placeholder="例如：短剧增长工作室" onChange={(event) => patchDraft({ displayName: event.target.value })} /></label>
           <label className="dialog-field"><span>基础世界模板</span><select value={draft.baseTemplateId} onChange={(event) => patchDraft({ baseTemplateId: event.target.value })}>{templates.map((item) => <option key={item.id} value={item.id}>{item.displayName}</option>)}</select><small>模板只决定场景和运行能力，不会替角色决定身份或权限。</small></label>
           <label className="dialog-field"><span>当前目标</span><textarea rows={3} value={draft.scenario} placeholder="这个世界现在要完成什么？" onChange={(event) => patchDraft({ scenario: event.target.value })} /></label>
@@ -123,6 +126,53 @@ export function CreativeWorkshopEditor({
       {localError ?? error ? <div className="creative-workshop-error" role="alert">{localError ?? error}</div> : null}
       <footer className="dialog-footer creative-workshop-editor-footer"><span>第 {step + 1} 步，共 {STEPS.length} 步</span><div>{step === 0 ? <button className="text-button" type="button" onClick={onBack}>取消</button> : <button className="text-button" type="button" onClick={() => { setLocalError(undefined); setStep((current) => Math.max(0, current - 1)) }}><ArrowLeft size={14} />上一步</button>}{step < STEPS.length - 1 ? <button className="primary-button" type="button" onClick={goNext}>下一步<ArrowRight size={14} /></button> : <button className="primary-button" type="button" disabled={saving} onClick={onSubmit}>{saving ? '正在构建世界…' : '创建世界'}</button>}</div></footer>
     </div>
+  )
+}
+
+function WorkshopPromptAssistant({ reply, onAnalyze }: { reply: string | undefined; onAnalyze(input: string): void }) {
+  const [value, setValue] = useState('')
+  const [reading, setReading] = useState(false)
+  const [fileError, setFileError] = useState<string>()
+
+  const submit = () => {
+    const input = value.trim()
+    if (input.length === 0) return
+    setFileError(undefined)
+    onAnalyze(input)
+  }
+
+  const importPrompt = async (file: File) => {
+    if (file.size > 2 * 1024 * 1024) {
+      setFileError('提示词文件不能超过 2 MiB')
+      return
+    }
+    setReading(true)
+    try {
+      const text = await file.text()
+      setFileError(undefined)
+      setValue(text)
+      onAnalyze(text)
+    } catch {
+      setFileError('提示词文件读取失败，请重新选择')
+    } finally {
+      setReading(false)
+    }
+  }
+
+  return (
+    <section className="creative-workshop-prompt-assistant" aria-labelledby="workshop-prompt-assistant-title">
+      <header>
+        <ChatCircleDots size={20} />
+        <div><strong id="workshop-prompt-assistant-title">创意助手</strong><small>可以直接描述目标，也可以粘贴完整 JSON 或导入提示词文件</small></div>
+      </header>
+      <textarea value={value} rows={4} placeholder="例如：创建一个围绕短剧制作的内容工作室，包含编剧、剪辑和审校角色……" onChange={(event) => { setFileError(undefined); setValue(event.target.value) }} />
+      <footer>
+        <button className="primary-button" type="button" disabled={reading || value.trim().length === 0} onClick={submit}>根据描述生成草稿</button>
+        <label className="creative-workshop-prompt-assistant__import"><FileArrowUp size={16} />导入提示词文件<input type="file" accept=".txt,.md,.json,application/json,text/plain,text/markdown" disabled={reading} onChange={(event) => { const file = event.target.files?.[0]; if (file) void importPrompt(file); event.target.value = '' }} /></label>
+      </footer>
+      {fileError === undefined ? null : <p className="creative-workshop-prompt-assistant__error" role="alert">{fileError}</p>}
+      {reply === undefined ? null : <p role="status">{reply}</p>}
+    </section>
   )
 }
 

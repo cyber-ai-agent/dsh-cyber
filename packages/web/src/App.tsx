@@ -224,15 +224,19 @@ export default function App() {
   const activePermissionKey = activeSessionId === undefined
     ? activeConversationKey
     : `session:${activeSessionId}`
+  const persistedConversationPermissionMode = activeWorld === undefined || activePermissionKey === undefined
+    ? undefined
+    : readConversationPermissionMode(activeWorld.id, activePermissionKey)
   const conversationPermissionMode = activePermissionKey === undefined
     ? undefined
-    : conversationPermissionModes[activePermissionKey]
+    : conversationPermissionModes[activePermissionKey] ?? persistedConversationPermissionMode
   const setConversationPermissionMode = useCallback((mode: ConversationPermissionMode) => {
     if (activePermissionKey === undefined) return
+    if (activeWorld !== undefined) persistConversationPermissionMode(activeWorld.id, activePermissionKey, mode)
     setConversationPermissionModes((current) => current[activePermissionKey] === mode
       ? current
       : { ...current, [activePermissionKey]: mode })
-  }, [activePermissionKey])
+  }, [activePermissionKey, activeWorld])
   const activePendingTurns = pendingTurns.filter((turn) =>
     turn.worldId === activeWorld?.id && turn.queueKey === activeConversationKey,
   )
@@ -2046,7 +2050,7 @@ export default function App() {
         />
         {administratorCount > 0 ? <div className="topbar-world-authority" aria-label={`${administratorCount} 名世界管理员`}><span>{administratorCount} 名世界管理员</span></div> : null}
         <nav aria-label="全局功能">
-          <CreativeWorkshopLauncher workspaceId={workspace.id} onCreated={(project) => void openWorkshopWorld(project.worldId)} onOpenWorld={(worldId) => void openWorkshopWorld(worldId)} />
+          <CreativeWorkshopLauncher workspaceId={workspace.id} onCreated={(project) => { void openWorkshopWorld(project.worldId).catch((cause) => setError(cause instanceof Error ? cause.message : '创意工坊世界已创建，但打开失败，请从世界列表重新进入。')) }} onOpenWorld={(worldId) => { void openWorkshopWorld(worldId).catch((cause) => setError(cause instanceof Error ? cause.message : '世界打开失败')) }} />
           <button type="button" onClick={() => void openPackageMarket('theme')}><Storefront size={16} />市场</button>
           <button type="button" onClick={() => { setSettingsSection('maintenance'); setSettingsOpen(true) }}><Pulse size={16} /><span>系统状态</span><i className="health-indicator" />良好</button>
           <button type="button" onClick={() => { setSettingsSection('appearance'); setSettingsOpen(true) }}><GearSix size={17} />设置</button>
@@ -2612,6 +2616,31 @@ function statusActivity(employee: EmployeeInstance): string {
 
 function activeWorldStorageKey(workspaceId: string): string {
   return `dsh-cyber.active-world:${workspaceId}`
+}
+
+function conversationPermissionStorageKey(worldId: string, permissionKey: string): string {
+  return `dsh-cyber.conversation-permission:${worldId}:${permissionKey}`
+}
+
+function readConversationPermissionMode(worldId: string, permissionKey: string): ConversationPermissionMode | undefined {
+  try {
+    const value = window.localStorage.getItem(conversationPermissionStorageKey(worldId, permissionKey))
+    return value === 'workspace-write' || value === 'read-only' ? value : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function persistConversationPermissionMode(worldId: string, permissionKey: string, mode: ConversationPermissionMode): void {
+  try {
+    const key = conversationPermissionStorageKey(worldId, permissionKey)
+    // Full computer access is a one-session owner confirmation by design. It
+    // must never survive a refresh or become an implicit default.
+    if (mode === 'danger-full-access') window.localStorage.removeItem(key)
+    else window.localStorage.setItem(key, mode)
+  } catch {
+    // localStorage may be unavailable; the in-memory mode still applies now.
+  }
 }
 
 function readRememberedWorldId(workspaceId: string): string | undefined {
