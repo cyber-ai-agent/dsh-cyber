@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import type { AgentRuntimePort, AgentTurnRequest } from '../packages/contracts/lib/index.js'
 import { createCyberServer, type CyberServer } from '../packages/server/lib/index.js'
+import { openDockTab } from './dock-test-helpers.js'
 
 const MARKDOWN_TITLE = '运行交付说明'
 const HTML_TITLE = '运行预览页面'
@@ -89,7 +90,7 @@ test('publishes one BrowserRuntime run into the world artifact center and keeps 
   }
 
   const dock = page.getByRole('region', { name: '世界与角色侧边栏' })
-  await dock.getByRole('button', { name: '产物', exact: true }).click()
+  await openDockTab(dock, '产物')
   const center = page.getByRole('region', { name: '世界产物中心' })
   await expect(center).toBeVisible()
   await expect(center.getByRole('list', { name: '产物列表' })).toContainText(MARKDOWN_TITLE)
@@ -136,7 +137,7 @@ test('publishes one BrowserRuntime run into the world artifact center and keeps 
   await page.reload()
   await expect(page.locator('.workbench-shell')).toBeVisible()
   const afterReloadDock = page.getByRole('region', { name: '世界与角色侧边栏' })
-  await afterReloadDock.getByRole('button', { name: '产物', exact: true }).click()
+  await openDockTab(afterReloadDock, '产物')
   await expect(page.getByRole('region', { name: '世界产物中心' })).toContainText(MARKDOWN_TITLE)
   await expect(page.getByRole('region', { name: '世界产物中心' })).toContainText(HTML_TITLE)
 
@@ -174,7 +175,7 @@ test('publishes one BrowserRuntime run into the world artifact center and keeps 
   await restartedPage.getByRole('menuitemradio', { name: new RegExp(secondWorld.name) }).click()
   await expect(restartedPage.getByLabel(`切换世界，当前为${secondWorld.name}`)).toBeVisible()
   const secondDock = restartedPage.getByRole('region', { name: '世界与角色侧边栏' })
-  await secondDock.getByRole('button', { name: '产物', exact: true }).click()
+  await openDockTab(secondDock, '产物')
   const secondCenter = restartedPage.getByRole('region', { name: '世界产物中心' })
   await expect(secondCenter.getByText('这个世界还没有已发布产物')).toBeVisible()
   await expect(secondCenter.getByRole('button', { name: `打开产物 ${MARKDOWN_TITLE}` })).toHaveCount(0)

@@ -4,6 +4,7 @@ import { join } from 'node:path'
 
 import { expect, test, type Page } from '@playwright/test'
 import { createCyberServer, type CyberServer } from '../packages/server/lib/index.js'
+import { openDockTab } from './dock-test-helpers.js'
 import type {
   KnowledgeExtractionPort,
   KnowledgeExtractionRequest,
@@ -72,7 +73,7 @@ test('consolidates visible evidence, renders the Canvas graph, and survives rest
   attachConsoleRecorder(page, consoleIssues)
   await page.goto(origin)
   await expect(page.locator('.workbench-shell')).toBeVisible()
-  await page.getByRole('region', { name: '世界与角色侧边栏' }).getByRole('button', { name: '知识', exact: true }).click()
+  await openDockTab(page.getByRole('region', { name: '世界与角色侧边栏' }), '知识')
   await page.getByRole('tab', { name: /知识图谱/ }).click()
   await expect(page.getByRole('heading', { name: '知识图谱' })).toBeVisible()
   const canvas = page.locator('canvas[aria-label*="知识图谱画布"]')

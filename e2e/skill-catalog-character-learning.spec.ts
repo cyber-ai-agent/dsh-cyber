@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import type { AgentRuntimePort, AgentTurnRequest } from '../packages/contracts/lib/index.js'
 import { createCyberServer, type CyberServer } from '../packages/server/lib/index.js'
+import { openDockTab } from './dock-test-helpers.js'
 
 let server: CyberServer | undefined
 let origin = ''
@@ -66,7 +67,7 @@ test('uses real world Catalog, revision persistence, availability gates and an a
   await page.goto(origin)
   await expect(page.locator('.workbench-shell')).toBeVisible()
   const dock = page.getByRole('region', { name: '世界与角色侧边栏' })
-  await dock.getByRole('button', { name: '角色', exact: true }).click()
+  await openDockTab(dock, '角色')
   await dock.getByRole('article').first().getByRole('button', { name: `管理${employee.displayName}` }).click()
   const management = page.getByRole('dialog', { name: new RegExp(`角色设置 · ${employee.displayName}`) })
   await management.getByRole('tab', { name: '技能与工具' }).click()
@@ -100,7 +101,7 @@ test('uses real world Catalog, revision persistence, availability gates and an a
 
   await page.reload()
   await expect(page.locator('.workbench-shell')).toBeVisible()
-  await page.getByRole('region', { name: '世界与角色侧边栏' }).getByRole('button', { name: '角色', exact: true }).click()
+  await openDockTab(page.getByRole('region', { name: '世界与角色侧边栏' }), '角色')
   await page.getByRole('region', { name: '世界与角色侧边栏' }).getByRole('article').first().getByRole('button', { name: `管理${employee.displayName}` }).click()
   const refreshedManagement = page.getByRole('dialog', { name: new RegExp(`角色设置 · ${employee.displayName}`) })
   await refreshedManagement.getByRole('tab', { name: '技能与工具' }).click()

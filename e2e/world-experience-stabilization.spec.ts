@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import type { AgentRuntimePort, AgentTurnRequest } from '../packages/contracts/lib/index.js'
 import { createCyberServer, type CyberServer } from '../packages/server/lib/index.js'
+import { openDockTab } from './dock-test-helpers.js'
 
 let server: CyberServer
 let origin: string
@@ -71,7 +72,7 @@ test('shows existing role instances and warns before creating a duplicate name',
   await expect(page.getByRole('button', { name: '与管家私聊' })).toBeVisible()
 
   const dock = page.getByRole('region', { name: '世界与角色侧边栏' })
-  await dock.getByRole('button', { name: '角色', exact: true }).click()
+  await openDockTab(dock, '角色')
   await dock.getByRole('button', { name: '新增角色', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: '新增角色' })
   await expect(dialog).toBeVisible()
