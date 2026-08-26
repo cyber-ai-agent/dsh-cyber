@@ -226,6 +226,18 @@ export class CharacterSkillRuntime {
     return this.#store.listWorldApprovalPolicies(worldId)
   }
 
+  /**
+   * Computes the allowed approval scopes from the trusted descriptor that
+   * produced the action. Routes must not infer this from adapter ids or UI
+   * labels: only exact-target descriptors can create reusable policies.
+   */
+  allowedApprovalScopes(skillId: string): ApprovalScope[] {
+    const descriptor = this.#registry.descriptorForSkill(skillId)
+    return descriptor?.persistentApproval === 'exact-target'
+      ? ['once', 'character', 'world']
+      : ['once']
+  }
+
   getApprovalPolicy(policyId: string): ApprovalPolicy | undefined {
     return this.#store.getApprovalPolicy(policyId)
   }
@@ -253,8 +265,7 @@ export class CharacterSkillRuntime {
     if (this.#store.getApprovalRequest(approvalId)?.status !== 'pending') {
       throw new ServiceError('conflict', 'approval_already_decided', '审批请求已经处理')
     }
-    const descriptor = this.#registry.descriptorForSkill(action.skillId)
-    if (decision === 'approved' && scope !== 'once' && descriptor?.persistentApproval !== 'exact-target') {
+    if (decision === 'approved' && !this.allowedApprovalScopes(action.skillId).includes(scope)) {
       throw new ServiceError('invalid', 'persistent_approval_forbidden', '该动态工具只允许单次审批')
     }
     const request = this.#store.decideApprovalRequest(approvalId, decision, scope, actorId, now.toISOString())

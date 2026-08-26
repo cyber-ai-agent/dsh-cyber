@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
 
 /**
  * One-time host-access grants issued by the person at the keyboard.
@@ -19,15 +19,19 @@ import { randomUUID } from 'node:crypto'
 export interface OwnerRuntimeAccessGrant {
   id: string
   worldId: string
+  sessionId: string
   employeeIds: readonly string[]
   clientTurnId: string
+  promptDigest: string
   expiresAt: number
 }
 
 export interface IssueOwnerRuntimeAccessInput {
   worldId: string
+  sessionId: string
   employeeIds: readonly string[]
   clientTurnId: string
+  prompt: string
   /** The owner has seen and accepted what full host access means. */
   confirmed: boolean
 }
@@ -59,14 +63,20 @@ export class OwnerRuntimeAccessService {
     }
     const employeeIds = [...new Set(input.employeeIds.map((id) => id.trim()).filter(Boolean))]
     if (employeeIds.length === 0) throw new OwnerRuntimeAccessDeniedError('完整访问必须指定角色')
+    const sessionId = input.sessionId.trim()
+    if (!sessionId) throw new OwnerRuntimeAccessDeniedError('完整访问必须绑定一个已有会话')
     const clientTurnId = input.clientTurnId.trim()
     if (!clientTurnId) throw new OwnerRuntimeAccessDeniedError('完整访问必须绑定一次具体请求')
+    const prompt = input.prompt.trim()
+    if (!prompt) throw new OwnerRuntimeAccessDeniedError('完整访问必须绑定具体任务内容')
     this.#sweep()
     const grant: OwnerRuntimeAccessGrant = {
       id: randomUUID(),
       worldId: input.worldId,
+      sessionId,
       employeeIds,
       clientTurnId,
+      promptDigest: digestPrompt(prompt),
       expiresAt: this.#now() + this.#ttlMs,
     }
     this.#grants.set(grant.id, grant)
@@ -82,8 +92,10 @@ export class OwnerRuntimeAccessService {
   consume(input: {
     grantId: string | undefined
     worldId: string
+    sessionId: string | undefined
     employeeIds: readonly string[]
     clientTurnId: string | undefined
+    prompt: string
   }): boolean {
     if (input.grantId === undefined) return false
     this.#sweep()
@@ -91,7 +103,9 @@ export class OwnerRuntimeAccessService {
     if (grant === undefined) return false
     this.#grants.delete(grant.id)
     if (grant.worldId !== input.worldId) return false
+    if (grant.sessionId !== (input.sessionId ?? '')) return false
     if (grant.clientTurnId !== (input.clientTurnId ?? '')) return false
+    if (!sameDigest(grant.promptDigest, digestPrompt(input.prompt.trim()))) return false
     // Every character in the turn must be covered; a grant for one character
     // does not elevate the others in a group.
     return input.employeeIds.every((employeeId) => grant.employeeIds.includes(employeeId))
@@ -103,4 +117,14 @@ export class OwnerRuntimeAccessService {
       if (grant.expiresAt <= now) this.#grants.delete(id)
     }
   }
+}
+
+function digestPrompt(value: string): string {
+  return createHash('sha256').update(value, 'utf8').digest('hex')
+}
+
+function sameDigest(left: string, right: string): boolean {
+  const leftBytes = Buffer.from(left, 'hex')
+  const rightBytes = Buffer.from(right, 'hex')
+  return leftBytes.byteLength === rightBytes.byteLength && timingSafeEqual(leftBytes, rightBytes)
 }

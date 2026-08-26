@@ -1,4 +1,4 @@
-import type { AgentPermissionMode, ApprovalRequestView, ChatAttachment, JsonObject, ReasoningEffort, WorkSessionCollaborationMode } from '@dsh-cyber/contracts'
+import type { AgentPermissionMode, ChatAttachment, JsonObject, ReasoningEffort, WorkSessionCollaborationMode } from '@dsh-cyber/contracts'
 import type {
   ConversationOrchestrator,
   DirectConversationInput,
@@ -42,6 +42,7 @@ import type { WorldRuntimePromptComposer } from '../services/world-runtime-conte
 import { ServiceError } from '../services/service-error.js'
 import type { GroupTaskCollaborationService } from '../services/group-task-collaboration-service.js'
 import type { ConversationQueueService } from '../services/conversation-queue-service.js'
+import { listApprovalRequestViews } from '../services/approval-request-views.js'
 
 export interface ConversationRoutesDependencies {
   store: SqliteStore
@@ -217,8 +218,10 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
       && ownerRuntimeAccess?.consume({
         grantId: optionalString(body.runtimeAccessGrantId),
         worldId: world.id,
+        sessionId: requestedSessionId,
         employeeIds,
         clientTurnId: optionalString(body.clientTurnId),
+        prompt,
       }) === true
     const resolvedPermissions = worldRuntimePermissions === undefined
       ? undefined
@@ -385,31 +388,12 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     if (status !== undefined && !['pending', 'approved', 'rejected', 'expired'].includes(status)) {
       throw new HttpError(422, 'invalid_approval_status', '不支持的审批状态')
     }
-    const requests = skillRuntime.listApprovalRequests(worldId, status as 'pending' | 'approved' | 'rejected' | 'expired' | undefined)
-    const actions = new Map(store.listWorldSkillActions(worldId).map((action) => [action.id, action]))
-    // Consent to a real-world side effect needs the concrete call, not a
-    // one-line summary, so the subject action travels with its request.
-    const items: ApprovalRequestView[] = requests.map((request) => {
-      const subject = request.subjectType === 'skill-action' ? actions.get(request.subjectId) : undefined
-      const character = request.characterId === undefined ? undefined : store.getEmployee(request.characterId)
-      return {
-        request,
-        ...(character === undefined ? {} : { characterName: character.displayName }),
-        ...(subject === undefined ? {} : {
-          subject: {
-            id: subject.id,
-            skillId: subject.skillId,
-            adapterId: subject.adapterId,
-            action: subject.action,
-            target: subject.target,
-            label: subject.label,
-            risk: subject.risk,
-            parameters: subject.parameters,
-            ...(subject.scheduledFor === undefined ? {} : { scheduledFor: subject.scheduledFor }),
-          },
-        }),
-      }
-    })
+    const items = listApprovalRequestViews(
+      store,
+      skillRuntime,
+      worldId,
+      status as 'pending' | 'approved' | 'rejected' | 'expired' | undefined,
+    )
     writeJson(response, 200, { items })
   })
 

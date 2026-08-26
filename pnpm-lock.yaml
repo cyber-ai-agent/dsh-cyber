@@ -171,6 +171,9 @@ importers:
       pdfjs-dist:
         specifier: ^5.4.149
         version: 5.7.284
+      playwright:
+        specifier: 1.55.0
+        version: 1.55.0
 
   packages/web:
     dependencies:

@@ -1,5 +1,4 @@
 import type {
-  ApprovalRequestView,
   JsonObject,
   WorldCharacterPermission,
   WorldCharacterRole,
@@ -17,6 +16,7 @@ import {
   optionalStringArray, readJson, requiredEnum, requiredString } from '../http/request.js'
 import { writeJson } from '../http/response.js'
 import type { CharacterSkillRuntime } from '../services/character-skill-runtime.js'
+import { listApprovalRequestViews } from '../services/approval-request-views.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
 import type { WorldCharacterAuthorityService } from '../services/world-character-authority-service.js'
 import type { TurnAwareApprovalContinuationService } from '../services/turn-aware-approval-continuation-service.js'
@@ -102,14 +102,31 @@ export function registerWorldAuthorityRoutes(
     const body = await readJson(request)
     // This route is the only way a grant comes into existence, and nothing on
     // the skill path can reach it: a character can never elevate itself.
-    for (const employeeId of optionalStringArray(body.employeeIds)) {
+    const employeeIds = optionalStringArray(body.employeeIds)
+    for (const employeeId of employeeIds) {
       requireEmployeeInWorld(store, world.id, employeeId)
+    }
+    const sessionId = requiredString(body, 'sessionId')
+    const session = store.getSession(sessionId)
+    if (session === undefined || session.worldId !== world.id) {
+      throw new HttpError(422, 'session_unavailable', '一次性电脑访问必须绑定当前世界的已有会话')
+    }
+    if (session.status !== 'open') {
+      throw new HttpError(422, 'session_unavailable', '一次性电脑访问只能绑定仍在进行的会话')
+    }
+    const sessionEmployees = new Set(store.listParticipants(session.id)
+      .filter((participant) => participant.kind === 'employee')
+      .map((participant) => participant.participantId))
+    if (employeeIds.some((employeeId) => !sessionEmployees.has(employeeId))) {
+      throw new HttpError(422, 'session_participant_mismatch', '一次性电脑访问只能授权当前会话中的角色')
     }
     try {
       const grant = ownerRuntimeAccess.issue({
         worldId: world.id,
-        employeeIds: optionalStringArray(body.employeeIds),
+        sessionId,
+        employeeIds,
         clientTurnId: requiredString(body, 'clientTurnId'),
+        prompt: requiredString(body, 'prompt'),
         confirmed: body.confirmed === true,
       })
       writeJson(response, 201, { grant: { id: grant.id, expiresAt: new Date(grant.expiresAt).toISOString() } })
@@ -246,30 +263,6 @@ function listPendingApprovalViews(
   store: SqliteStore,
   skillRuntime: CharacterSkillRuntime,
   worldId: string,
-): ApprovalRequestView[] {
-  const requests = skillRuntime.listApprovalRequests(worldId, 'pending')
-  const actions = new Map(store.listWorldSkillActions(worldId).map((action) => [action.id, action]))
-  const characters = new Map(store.listEmployees(worldId, true).map((character) => [character.id, character]))
-  return requests.map((request) => {
-    const subject = request.subjectType === 'skill-action' ? actions.get(request.subjectId) : undefined
-    const character = request.characterId === undefined ? undefined : characters.get(request.characterId)
-    return {
-      request,
-      ...(character === undefined ? {} : { characterName: character.displayName }),
-      ...(subject === undefined ? {} : {
-        subject: {
-          id: subject.id,
-          skillId: subject.skillId,
-          adapterId: subject.adapterId,
-          action: subject.action,
-          target: subject.target,
-          label: subject.label,
-          risk: subject.risk,
-          parameters: subject.parameters,
-          ...(subject.scheduledFor === undefined ? {} : { scheduledFor: subject.scheduledFor }),
-        },
-      }),
-    }
-  })
+): ReturnType<typeof listApprovalRequestViews> {
+  return listApprovalRequestViews(store, skillRuntime, worldId)
 }
-

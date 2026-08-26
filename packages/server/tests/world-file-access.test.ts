@@ -252,12 +252,15 @@ describe('full host access needs the owner, never the character', () => {
   })
 
   it('honours a one-time grant the owner issued for that exact turn', async () => {
-    const { origin, runtime, world, characterId } = await start()
+    const { origin, server, runtime, world, characterId } = await start()
     await setAccess(origin, world.id, characterId, ['world.files.read', 'world.files.write'])
+    const session = server.store.createSession({ workspaceId: world.workspaceId, worldId: world.id, kind: 'direct', title: '完整访问测试', participants: [{ participantId: 'owner', kind: 'owner' }, { participantId: characterId, kind: 'employee' }] })
 
     const issued = await json(origin, `/api/worlds/${world.id}/runtime-access-grants`, send('POST', {
+      sessionId: session.id,
       employeeIds: [characterId],
       clientTurnId: 'turn-granted',
+      prompt: '你好',
       confirmed: true,
     }))
     expect(issued.response.status).toBe(201)
@@ -265,6 +268,7 @@ describe('full host access needs the owner, never the character', () => {
     await json(origin, `/api/worlds/${world.id}/chat`, send('POST', {
       prompt: '你好',
       employeeIds: [characterId],
+      sessionId: session.id,
       permissionMode: 'danger-full-access',
       clientTurnId: 'turn-granted',
       runtimeAccessGrantId: issued.body.grant.id,
@@ -275,6 +279,7 @@ describe('full host access needs the owner, never the character', () => {
     await json(origin, `/api/worlds/${world.id}/chat`, send('POST', {
       prompt: '再来一次',
       employeeIds: [characterId],
+      sessionId: session.id,
       permissionMode: 'danger-full-access',
       clientTurnId: 'turn-granted',
       runtimeAccessGrantId: issued.body.grant.id,
@@ -283,12 +288,43 @@ describe('full host access needs the owner, never the character', () => {
   })
 
   it('refuses to issue a grant without an explicit risk confirmation', async () => {
-    const { origin, world, characterId } = await start()
+    const { origin, server, world, characterId } = await start()
+    const session = server.store.createSession({ workspaceId: world.workspaceId, worldId: world.id, kind: 'direct', title: '拒绝授权测试', participants: [{ participantId: 'owner', kind: 'owner' }, { participantId: characterId, kind: 'employee' }] })
     const refused = await json(origin, `/api/worlds/${world.id}/runtime-access-grants`, send('POST', {
+      sessionId: session.id,
       employeeIds: [characterId],
       clientTurnId: 'turn-unconfirmed',
+      prompt: '你好',
     }))
     expect(refused.response.status).toBe(422)
     expect(refused.body.error.code).toBe('owner_runtime_access_denied')
+  })
+
+  it('refuses to issue a grant for a role outside the bound conversation', async () => {
+    const { origin, server, world, characterId } = await start()
+    server.store.saveBlueprint(blueprint('outsider', '会话外角色'))
+    const outsider = server.store.recruitEmployee({
+      workspaceId: world.workspaceId,
+      worldId: world.id,
+      blueprintId: 'outsider',
+      blueprintVersion: 1,
+    })
+    const session = server.store.createSession({
+      workspaceId: world.workspaceId,
+      worldId: world.id,
+      kind: 'direct',
+      title: '成员绑定测试',
+      participants: [{ participantId: 'owner', kind: 'owner' }, { participantId: characterId, kind: 'employee' }],
+    })
+
+    const refused = await json(origin, `/api/worlds/${world.id}/runtime-access-grants`, send('POST', {
+      sessionId: session.id,
+      employeeIds: [outsider.id],
+      clientTurnId: 'turn-outsider',
+      prompt: '读取电脑文件',
+      confirmed: true,
+    }))
+    expect(refused.response.status).toBe(422)
+    expect(refused.body.error.code).toBe('session_participant_mismatch')
   })
 })

@@ -22,6 +22,7 @@ function view(overrides: Partial<ApprovalRequestView> = {}): ApprovalRequestView
       expiresAt: '2026-08-24T10:10:00.000Z',
     },
     characterName: '阿开',
+    allowedScopes: ['once'],
     subject: {
       id: 'action-1',
       skillId: 'smart-home.control',
@@ -55,12 +56,17 @@ describe('ApprovalRequests', () => {
     expect(markup).toContain('会影响真实世界')
   })
 
-  it('offers all three decisions and says what happens if none is made', () => {
+  it('renders only server-authorized approval scopes', () => {
     const markup = renderToStaticMarkup(createElement(ApprovalRequests, { items: [view()], onDecide: noop }))
     expect(markup).toContain('本次允许')
-    expect(markup).toContain('一直允许')
+    expect(markup).not.toContain('一直允许')
+    expect(markup).toContain('当前仅支持本次批准')
     expect(markup).toContain('拒绝')
     expect(markup).toContain('自动拒绝')
+
+    const persistentMarkup = renderToStaticMarkup(createElement(ApprovalRequests, { items: [view({ allowedScopes: ['once', 'character', 'world'] })], onDecide: noop }))
+    expect(persistentMarkup).toContain('本角色持续允许')
+    expect(persistentMarkup).toContain('本世界持续允许')
   })
 
   it('still renders a decision surface when the subject action cannot be resolved', () => {

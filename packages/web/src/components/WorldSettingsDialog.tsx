@@ -1,10 +1,12 @@
-import { CheckCircle, LockKey, Palette, SlidersHorizontal, UserCircle, WarningCircle, X } from '@phosphor-icons/react'
+import { CheckCircle, LockKey, Palette, ShieldCheck, SlidersHorizontal, UserCircle, WarningCircle, X } from '@phosphor-icons/react'
 import { useEffect, useRef, useState } from 'react'
 import type { AgentPermissionMode, EmployeeInstance, ModelProfile, ReasoningEffort, World, WorldCharacterAuthority, WorldSettings } from '@dsh-cyber/contracts'
 
 import type { CyberEmployee } from '../types.js'
 import { Avatar } from './Avatar.js'
 import { AuthorityBadge } from './AuthorityBadge.js'
+import { OneShotHostAccessDialog, type OneShotHostAccessRequest } from './OneShotHostAccessDialog.js'
+import { useDialogFocusTrap } from './useDialogFocusTrap.js'
 
 interface WorldSettingsDialogProps {
   world: World
@@ -17,17 +19,32 @@ interface WorldSettingsDialogProps {
   onSave(value: WorldSettings): Promise<void>
   onManageAdministrators?(): void
   onManageEmployee?(employeeId: string): void
+  hostAccessRequest?: OneShotHostAccessRequest
+  onRequestHostAccess?(request: OneShotHostAccessRequest): Promise<void>
+  onDismissHostAccess?(): void
+  onPrepareHostAccess?(): void
+  hostAccessReadyUntil?: string
 }
 
-export function WorldSettingsDialog({ world, value, models, employees, authorities, saving, onClose, onSave, onManageAdministrators, onManageEmployee }: WorldSettingsDialogProps) {
-  const [draft, setDraft] = useState(value)
-  const [notice, setNotice] = useState<string>()
+export function WorldSettingsDialog({ world, value, models, employees, authorities, saving, onClose, onSave, onManageAdministrators, onManageEmployee, hostAccessRequest, onRequestHostAccess, onDismissHostAccess, onPrepareHostAccess, hostAccessReadyUntil }: WorldSettingsDialogProps) {
+  const [draft, setDraft] = useState(normalizeWorldSettings(value))
+  const [notice, setNotice] = useState<string | undefined>(value.runtime.permissionMode === 'danger-full-access'
+    ? '旧版完整电脑访问已改为具体任务中的一次性确认。'
+    : undefined)
   const [error, setError] = useState<string>()
-  const [fullAccessConfirmed, setFullAccessConfirmed] = useState(false)
   const savedRef = useRef(false)
+  const dialogRef = useRef<HTMLElement>(null)
+
+  const close = () => {
+    applyWorldPreview(value)
+    onClose()
+  }
+
+  useDialogFocusTrap(dialogRef, close)
 
   useEffect(() => {
-    setDraft(value)
+    setDraft(normalizeWorldSettings(value))
+    if (value.runtime.permissionMode === 'danger-full-access') setNotice('旧版完整电脑访问已改为具体任务中的一次性确认。')
     applyWorldPreview(value)
   }, [value])
 
@@ -38,11 +55,6 @@ export function WorldSettingsDialog({ world, value, models, employees, authoriti
   useEffect(() => () => {
     if (!savedRef.current) applyWorldPreview(value)
   }, [value])
-
-  const close = () => {
-    applyWorldPreview(value)
-    onClose()
-  }
 
   const administratorIds = authorities === undefined
     ? (world.administratorEmployeeId === undefined ? [] : [world.administratorEmployeeId])
@@ -55,10 +67,6 @@ export function WorldSettingsDialog({ world, value, models, employees, authoriti
     setError(undefined)
     setNotice(undefined)
     try {
-      if (draft.runtime.permissionMode === 'danger-full-access' && !fullAccessConfirmed) {
-        setError('完整访问可读写当前 Windows 账号能够访问的文件。请先勾选风险确认。')
-        return
-      }
       await onSave(draft)
       savedRef.current = true
       setNotice('世界设置已保存')
@@ -70,10 +78,10 @@ export function WorldSettingsDialog({ world, value, models, employees, authoriti
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && close()}>
-      <section className="world-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="world-settings-title">
+      <section ref={dialogRef} className="world-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="world-settings-title">
         <header className="dialog-header">
           <div><h2 id="world-settings-title">世界设置 · {world.name}</h2><p>设定、管理员、视觉和运行策略只属于当前世界。修改视觉会立即预览，取消不会保存。</p></div>
-          <button className="icon-button" onClick={close} aria-label="关闭"><X size={18}/></button>
+          <button data-dialog-initial-focus className="icon-button" onClick={close} aria-label="关闭"><X size={18}/></button>
         </header>
 
         {notice ? <div className="world-settings-feedback is-success" role="status"><CheckCircle size={16}/>{notice}</div> : null}
@@ -130,9 +138,27 @@ export function WorldSettingsDialog({ world, value, models, employees, authoriti
             <legend><SlidersHorizontal size={16}/> 模型与运行</legend>
             <label>世界默认模型<select value={draft.model.defaultModelProfileId ?? ''} onChange={(event)=>setDraft({...draft,model:event.target.value ? {...draft.model,defaultModelProfileId:event.target.value} : {reasoningEffort:draft.model.reasoningEffort}})}><option value="">继承全局或角色设置</option>{models.map((model)=><option key={model.id} value={model.id}>{model.displayName} · {model.modelId}</option>)}</select></label>
             <label>默认推理<select value={draft.model.reasoningEffort} onChange={(event)=>setDraft({...draft,model:{...draft.model,reasoningEffort:event.target.value as ReasoningEffort}})}>{reasoningOptions.map(([id,label])=><option key={id} value={id}>{label}</option>)}</select></label>
-            <label>任务权限<select value={draft.runtime.permissionMode} onChange={(event)=>{ const permissionMode=event.target.value as AgentPermissionMode; setDraft({...draft,runtime:{permissionMode}}); if(permissionMode!=='danger-full-access') setFullAccessConfirmed(false) }}><option value="read-only">只读：查看和搜索当前世界文件</option><option value="workspace-write">世界读写：修改当前世界目录</option><option value="danger-full-access">完整访问：读写此电脑上可访问的文件</option></select></label>
-            {draft.runtime.permissionMode === 'danger-full-access' ? <label className="permission-risk-confirm"><input type="checkbox" checked={fullAccessConfirmed} onChange={(event)=>setFullAccessConfirmed(event.target.checked)}/><span><strong>我确认允许角色访问当前世界目录之外的文件</strong><small>这是 DSH 原生完整访问模式。只用于当前世界的手动任务；持久化计划不会使用此权限。</small></span></label> : null}
-            <p className="setting-help">权限只应用于当前世界，下次对话生效。需要跨目录工作时使用完整访问，并在任务中写明目标路径。</p>
+          </fieldset>
+
+          <fieldset className="world-permission-layers">
+            <legend><LockKey size={16}/> 世界权限</legend>
+            <label>世界内文件权限<select value={draft.runtime.permissionMode} onChange={(event)=>setDraft({...draft,runtime:{permissionMode:event.target.value as Exclude<AgentPermissionMode, 'danger-full-access'>}})}><option value="read-only">只读：查看和搜索当前世界文件</option><option value="workspace-write">世界内读写：修改当前世界目录</option></select></label>
+            <p className="setting-help">这是世界内的默认权限，不包含浏览器、命令或电脑其他目录。技能与工具授权请在角色设置中单独管理。</p>
+          </fieldset>
+
+          <fieldset className="world-permission-layers">
+            <legend><ShieldCheck size={16}/> 技能与工具</legend>
+            <p className="setting-help">浏览器、外部连接和命令属于角色能力，不会因为世界内文件权限而自动开启。</p>
+            <span className="host-access-unavailable">请在角色设置的“技能与工具”中管理已启用能力。</span>
+          </fieldset>
+
+          <fieldset className="world-permission-layers">
+            <legend><LockKey size={16}/> 本次电脑访问</legend>
+            <p className="setting-help">完整电脑访问不是长期世界设置。只有所有者在具体任务中明确确认，且只对指定角色和本次任务生效。</p>
+            {hostAccessReadyUntil === undefined
+              ? <span className="host-access-unavailable">需要电脑范围访问时，先选择会话并写好任务，再在这里为下一条消息确认。</span>
+              : <span className="host-access-ready" role="status">下一条消息已获得一次性授权，将在 {new Date(hostAccessReadyUntil).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 前失效。</span>}
+            {onPrepareHostAccess === undefined ? null : <button className="secondary-button" type="button" onClick={onPrepareHostAccess}>{hostAccessReadyUntil === undefined ? '为下一条消息确认' : '重新确认下一条消息'}</button>}
           </fieldset>
 
           <fieldset className="world-settings-advanced">
@@ -152,6 +178,7 @@ export function WorldSettingsDialog({ world, value, models, employees, authoriti
 
         <footer className="settings-dialog__footer"><span>{saving ? '正在保存…' : notice ?? '视觉修改正在实时预览，只有保存后才会持久化'}</span><div><button className="text-button" onClick={close}>取消</button><button className="primary-button" disabled={saving} onClick={()=>void save()}>{saving ? '正在保存…' : '保存世界设置'}</button></div></footer>
       </section>
+      {hostAccessRequest === undefined || onRequestHostAccess === undefined ? null : <OneShotHostAccessDialog request={hostAccessRequest} onConfirm={onRequestHostAccess} onClose={() => onDismissHostAccess?.()} />}
     </div>
   )
 }
@@ -169,6 +196,12 @@ function appearanceMatches(appearance: WorldSettings['appearance'], candidate: t
 const reasoningOptions: Array<[ReasoningEffort, string]> = [
   ['auto','自动'], ['off','关闭'], ['minimal','极低'], ['low','低'], ['medium','中'], ['high','高'], ['xhigh','极高'], ['max','最大'],
 ]
+
+function normalizeWorldSettings(settings: WorldSettings): WorldSettings {
+  return settings.runtime.permissionMode === 'danger-full-access'
+    ? { ...settings, runtime: { permissionMode: 'read-only' } }
+    : settings
+}
 
 function applyWorldPreview(settings: WorldSettings): void {
   const root = document.documentElement

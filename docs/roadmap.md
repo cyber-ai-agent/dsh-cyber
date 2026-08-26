@@ -88,12 +88,12 @@ memory categories below remain future work and are not implied by the graph.
 
 - [ ] Generic Host Skill Registry with scope resolution
 - [ ] GitHub Adapter
-- [ ] Browser Adapter
+- [x] 受控网页浏览适配器（公开网页只读、单次审批、世界隔离、截图进入产物中心）
 - [ ] Feishu Adapter
 - [ ] QQ Adapter
 - [ ] WeChat integration strategy
 - [ ] MQTT / Home automation adapters
-- [ ] Action approval policy UI
+- [x] 动作审批范围界面（服务端声明本次、本角色或本世界范围）
 - [ ] Skill audit timeline
 - [ ] Credential scopes and rotation
 

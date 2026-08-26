@@ -85,7 +85,7 @@ async function expectSkill(item: CyberMarketPackage): Promise<void> {
   expect(item.manifest.kind).toBe('skill')
   expect(item.manifest.dataEgress.every((value) => value.startsWith('https://'))).toBe(true)
   const entrypoints = item.manifest.entrypoints?.filter((entrypoint) => entrypoint.kind === 'skill') ?? []
-  expect(entrypoints).toHaveLength(1)
+  expect(entrypoints).toHaveLength(item.manifest.id === 'official-browser' ? 4 : 1)
   for (const entrypoint of entrypoints) {
     const definition = JSON.parse(await readFile(join(item.sourceDirectory, ...entrypoint.path.split('/')), 'utf8')) as Record<string, unknown>
     expect(Object.keys(definition).filter((key) => key !== 'routingHints').sort()).toEqual(['dataEgress', 'displayName', 'id', 'instructions', 'integrationId', 'schemaVersion', 'summary'])

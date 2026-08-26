@@ -51,6 +51,8 @@ export interface ApprovalRequest {
  */
 export interface ApprovalRequestView {
   request: ApprovalRequest
+  /** Server-authoritative scopes the current descriptor permits for this exact action. */
+  allowedScopes: ApprovalScope[]
   characterName?: string
   subject?: {
     id: string
@@ -1070,6 +1072,7 @@ export * from './world-knowledge.js'
 export * from './world-knowledge-graph.js'
 export * from './task-collaboration.js'
 export * from './conversation-queue.js'
+export * from './browser-skill.js'
 
 export type {
   CharacterSkillAction,

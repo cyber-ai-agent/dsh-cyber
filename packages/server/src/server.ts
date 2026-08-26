@@ -121,6 +121,8 @@ export interface CyberServerOptions {
   marketplaceRoot?: string
   bootstrapDefaultWorld?: boolean
   mcpClientFactory?: McpClientFactory
+  browserClientFactory?: import('./integrations/browser-client.js').BrowserClientFactory
+  browserPolicy?: import('./services/browser-policy.js').BrowserPolicy
   knowledgeExtractionPort?: KnowledgeExtractionPort
   /** Optional host-owned World Skill Availability provider for PR A+. */
   skillAvailability?: WorldSkillAvailabilityPort
@@ -250,12 +252,8 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const worldManagementHost = createWorldManagementHost({ store, worldSettings, worldPackages, authority })
 
   const skillRegistry = options.skillRegistry ?? createBuiltinSkillRegistry({
-    firecrawl: {
-      store,
-      integrations,
-      client: firecrawlClient,
-      listWorldPackages: (worldId) => worldPackages.listRuntimePackages(worldId),
-    },
+    firecrawl: { store, integrations, client: firecrawlClient, listWorldPackages: (worldId) => worldPackages.listRuntimePackages(worldId) },
+    browser: { store, listWorldPackages: (worldId) => worldPackages.listRuntimePackages(worldId), publishScreenshot: (input) => worldArtifacts.publishBrowserScreenshot(input), ...(options.browserClientFactory === undefined ? {} : { clientFactory: options.browserClientFactory }), ...(options.browserPolicy === undefined ? {} : { policy: options.browserPolicy }) },
     worldManagement: worldManagementHost,
   })
   const mcpAdapter = options.skillRegistry === undefined ? new McpSkillAdapter({ store, integrations, clients: mcpClients }) : undefined

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -118,6 +118,26 @@ describe('WorldArtifactService', () => {
     const fixture = await createFixture()
     const listing = await new WorkspaceFileService(fixture.root.filesPath).list('')
     expect(listing.items.some((item) => item.name === '.dsh')).toBe(false)
+  })
+
+  it('publishes Browser screenshots from managed cache without writing world/files', async () => {
+    const fixture = await createFixture()
+    const bytes = Buffer.from('browser-png-bytes')
+    const publication = await fixture.service.publishBrowserScreenshot({
+      workspaceId: fixture.workspace.id,
+      worldId: fixture.world.id,
+      bytes,
+      title: '网页截图',
+      createdById: fixture.employee.id,
+      workTurnId: fixture.turn.id,
+      agentRunId: fixture.run.id,
+      idempotencyKey: 'browser-screenshot:test-1',
+    })
+    expect(publication.artifact.kind).toBe('image')
+    expect(publication.version.relativePath).toContain('exports/artifacts/')
+    expect((await fixture.service.preview(fixture.world.id, publication.artifact.id)).body).toEqual(bytes)
+    expect(await readdir(join(fixture.root.cachePath, 'browser-screenshots'))).toEqual([])
+    await expect(readFile(join(fixture.root.filesPath, 'browser-screenshots', 'test-1.png'))).rejects.toThrow()
   })
 
   it('removes only the published version directory and keeps the workspace source', async () => {

@@ -29,6 +29,9 @@ export function composeConversationControl(options: {
     onSettled: async (entry) => {
       for (const employeeId of entry.employeeIds) options.employeeActivity.project(employeeId)
       options.worldRuntime.publishCurrent(entry.worldId)
+      if (options.store.getWorkTurn(entry.workTurnId)?.status === 'waiting-approval') {
+        options.worldRuntime.publishDecisionChanged(entry.worldId, { workTurnId: entry.workTurnId, status: 'waiting-approval' })
+      }
       const trace = await options.worldTrace.list(entry.worldId, { limit: 50 })
       options.runtimeStreamHub.publishTrace(entry.worldId, trace.items.filter((item) => item.workTurnId === entry.workTurnId))
     },
