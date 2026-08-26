@@ -78,7 +78,7 @@ export function GroupConversationDialog({ employees, creating = false, onClose, 
             </label>
             <label className={collaborationMode === 'task' ? 'is-selected' : ''}>
               <input type="radio" name="group-collaboration-mode" value="task" checked={collaborationMode === 'task'} disabled={creating} onChange={() => setCollaborationMode('task')} />
-              <span><strong>任务协作</strong><small>按角色和技能分配步骤，执行细节进入轨迹。</small></span>
+              <span><strong>协作</strong><small>按角色和技能分配步骤，执行细节进入轨迹。</small></span>
             </label>
           </fieldset>
 

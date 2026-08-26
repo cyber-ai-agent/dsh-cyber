@@ -43,8 +43,8 @@ export function TaskCollaborationSummary({ worldId, sessionId, employees, demoMo
     return () => { window.clearInterval(timer) }
   }, [demoMode, employees, loadPlan, sessionId])
 
-  return <section className="task-collaboration-summary" aria-label="任务协作分配">
-    <header><div><strong>任务协作</strong><span>角色分工与步骤状态</span></div>{loading ? <CircleNotch size={16} className="spin" aria-label="正在读取任务分配" /> : null}</header>
+  return <section className="task-collaboration-summary" aria-label="协作分配">
+    <header><div><strong>协作</strong><span>角色分工与步骤状态</span></div>{loading ? <CircleNotch size={16} className="spin" aria-label="正在读取任务分配" /> : null}</header>
     {loading ? <p className="task-collaboration-summary__empty">正在读取任务分配…</p> : plan?.steps.length === 0 ? <p className="task-collaboration-summary__empty">任务分配正在准备，详细执行过程请查看轨迹。</p> : <ol>{plan?.steps.map((step) => {
       const employee = employees.find((item) => item.id === step.employeeId)
       const assignees = step.employeeIds.map((employeeId) => employees.find((item) => item.id === employeeId)?.displayName ?? employeeId).join('、')
