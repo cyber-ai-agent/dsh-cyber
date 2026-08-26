@@ -462,7 +462,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     consolidationScheduler: knowledgeGraphRuntime.scheduler,
   })
   registerModelInteractionRoutes(router, { store, interactions })
-  const conversationControl = composeConversationControl({ store, router, worldAccess, orchestrator, continuations: turnContinuations, employeeActivity, worldRuntime, worldTrace, runtimeStreamHub })
+  const conversationControl = composeConversationControl({ store, router, worldAccess, orchestrator, continuations: turnContinuations, employeeActivity, worldRuntime, worldTrace, runtimeStreamHub, groupTasks, worldPackages, runtimeContext: worldRuntimeContext })
   registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, turnContinuations, groupTasks, conversationQueue: conversationControl.queue, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, runtimeContext: worldRuntimeContext, worldTrace, employeeActivity, worldPackages, worldRuntimePermissions, ownerRuntimeAccess })
   registerGroupTaskRoutes(router, { store, worldAccess, groupTasks })
   registerEmployeeRoutes(router, {

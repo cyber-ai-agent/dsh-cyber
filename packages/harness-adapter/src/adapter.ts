@@ -92,6 +92,8 @@ interface EmployeeLane {
 interface EmployeeWorker {
   lanes: Map<string, EmployeeLane>
   waiting: LaneTask[]
+  closingLanes: number
+  closed: boolean
 }
 
 interface RunTaskRecord {
@@ -183,6 +185,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     task: LaneTask,
   ): Promise<EmployeeTurnResult> {
     const profile = await this.#getProfile()
+    assertLaneTaskActive(task)
     const permissionMode = request.permissionMode ?? 'read-only'
     if (lane.permissionMode !== undefined && lane.permissionMode !== permissionMode) {
       // Permission is lane-local. Changing a private chat from read-only to
@@ -190,8 +193,10 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       await lane.runtime?.close()
       lane.runtime = undefined
       lane.agentSessionId = undefined
+      assertLaneTaskActive(task)
     }
     if (lane.runtime === undefined) {
+      assertLaneTaskActive(task)
       const spec: HarnessRuntimeSpec = {
         employee: request.employee,
         revision: request.revision,
@@ -203,6 +208,10 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
         laneId: lane.id,
       }
       const runtime = this.#options.runtimeFactory?.(spec) ?? this.#createRuntime(spec)
+      if (task.aborted) {
+        await runtime.close().catch(() => undefined)
+        throw new Error('Employee runtime closed')
+      }
       lane.permissionMode = permissionMode
       lane.runtime = runtime
     }
@@ -242,6 +251,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
           request.onNotification?.(notification)
         }
     try {
+      assertLaneTaskActive(task)
       const result = await lane.runtime!.run(agentSessionId, prompt, onNotification)
       return { agentSessionId, ...result }
     } catch (error) {
@@ -267,7 +277,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
   }
 
   #createWorker(employeeId: string): EmployeeWorker {
-    const worker: EmployeeWorker = { lanes: new Map(), waiting: [] }
+    const worker: EmployeeWorker = { lanes: new Map(), waiting: [], closingLanes: 0, closed: false }
     this.#runtimes.set(employeeId, worker)
     return worker
   }
@@ -336,6 +346,12 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
   }
 
   #scheduleNewLane(worker: EmployeeWorker, task: LaneTask, conversationId: string): void {
+    if (worker.closed) {
+      task.aborted = true
+      task.reject(new Error('Employee runtime closed'))
+      if (task.request.agentRunId !== undefined) this.#runTasks.delete(task.request.agentRunId)
+      return
+    }
     if (this.#activeLaneCount(worker) >= MAX_ACTIVE_LANES_PER_EMPLOYEE) {
       worker.waiting.push(task)
       return
@@ -343,12 +359,28 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     const idle = [...worker.lanes.values()]
       .filter((lane) => lane.current === undefined && lane.pending.length === 0)
       .sort((left, right) => left.lastUsed - right.lastUsed)[0]
-    if (worker.lanes.size >= MAX_ACTIVE_LANES_PER_EMPLOYEE && idle !== undefined) {
+    if (worker.lanes.size + worker.closingLanes >= MAX_ACTIVE_LANES_PER_EMPLOYEE && idle !== undefined) {
       worker.lanes.delete(idle.conversationId)
+      worker.closingLanes += 1
       void (idle.runtime?.close() ?? Promise.resolve())
         .catch(() => undefined)
         .then(() => {
-          if (task.aborted) return
+          worker.closingLanes = Math.max(0, worker.closingLanes - 1)
+          if (worker.closed) {
+            task.aborted = true
+            task.reject(new Error('Employee runtime closed'))
+            if (task.request.agentRunId !== undefined) this.#runTasks.delete(task.request.agentRunId)
+            return
+          }
+          if (task.aborted) {
+            this.#drainWaiting(worker)
+            return
+          }
+          if (worker.lanes.size + worker.closingLanes >= MAX_ACTIVE_LANES_PER_EMPLOYEE) {
+            worker.waiting.unshift(task)
+            this.#drainWaiting(worker)
+            return
+          }
           const lane = this.#createLane(worker, conversationId)
           lane.pending.push(task)
           if (task.request.agentRunId !== undefined) {
@@ -356,7 +388,12 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
             if (record !== undefined) record.lane = lane
           }
           this.#pumpLane(worker, lane)
+          this.#drainWaiting(worker)
         })
+      return
+    }
+    if (worker.lanes.size + worker.closingLanes >= MAX_ACTIVE_LANES_PER_EMPLOYEE) {
+      worker.waiting.push(task)
       return
     }
     const lane = this.#createLane(worker, conversationId)
@@ -372,6 +409,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     const worker = this.#runtimes.get(employeeId)
     if (worker === undefined) return
     this.#runtimes.delete(employeeId)
+    worker.closed = true
     for (const task of worker.waiting.splice(0)) {
       task.aborted = true
       task.reject(new Error('Employee runtime closed'))
@@ -391,6 +429,8 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
         if (task.request.agentRunId !== undefined) this.#runTasks.delete(task.request.agentRunId)
       }
       await lane.runtime?.close()
+      lane.runtime = undefined
+      lane.agentSessionId = undefined
     }))
   }
 
@@ -646,6 +686,10 @@ function requiredConversationId(value: string | undefined): string {
     throw new Error('A Harness turn requires the conversation it belongs to')
   }
   return conversationId
+}
+
+function assertLaneTaskActive(task: LaneTask): void {
+  if (task.aborted) throw new Error('Employee runtime closed')
 }
 
 export function stableAgentSessionId(employeeId: string): string {

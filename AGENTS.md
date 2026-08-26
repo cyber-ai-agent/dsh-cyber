@@ -87,6 +87,8 @@
 - 切换世界必须同时切换该世界的角色、会话历史、角色设定、任务状态、主题与运行时快照，不得跨世界复用当前联系人或会话。
 - 世界主题不得通过 `templateId.includes('company')` 等前端字符串判断启用；使用服务端运行时能力与已绑定主题结果。
 - 触发：聊天、轨迹和世界地图分别创建长期 `EventSource`，或组件重挂载时短暂重复建流。现象：HTTP/1.1 同源连接槽被占满，会话、历史和世界切换请求排队，随后旧响应覆盖新选择。固定处理：同一世界的聊天、轨迹和世界状态统一复用一条 `/live` SSE；组件只订阅事件，不直接持有连接；卸载采用短延迟引用计数关闭以吸收 React 开发模式重挂载。会话正文以明确 `sessionId` 为权威，切换时立即清空旧正文，并以世界 ID、会话 ID 和请求代际三重校验拒绝晚到响应；重复选择当前会话必须幂等。验证：E2E 注入延迟世界/消息响应后快速切换，检查标题、选中行、消息和历史始终同属一个会话；网络断言 Web 客户端不再请求 `/stream`，每个世界只创建一次 `/live`。
+- 触发：Web 对私聊和群聊统一发送 `queueMode`，但服务端只在 direct 分支消费。现象：群聊“排队发送/下一条执行”仍立即运行，且因为 queueMode 存在而跳过 prompt transform。固定处理：私聊、群聊讨论和任务协作都先创建唯一的 queued WorkTurn 与用户消息，再由类型明确的 runner 继续原 WorkTurn；禁止 runner 调用会再次创建 WorkTurn 的入口。等待审批释放 employee lane，但必须继续占用 session 顺序锁。验证：群聊 queue 返回 202，discussion/task 各只保留一个 WorkTurn 和一条用户消息；重启后继续；同 session 后续仍 queued，另一 session 可运行。
+- 触发：Harness 淘汰 idle lane 时先从 Map 删除，再异步等待 runtime.close。现象：关闭 Promise 未完成期间的两个新会话分别创建 lane，短暂突破每角色最多两条通道。固定处理：EmployeeWorker 记录 closing lane reservation，任何创建都以 `lanes.size + closingLanes` 校验容量；close 回调恢复后再次校验，worker 关闭后不得复活 lane。验证：用 deferred close 制造两个并发新会话，断言存活 runtime 峰值不超过 2，所有任务仍能完成或明确中止。
 - 触发：Pixi 画布挂载后左右面板宽度变化，但浏览器窗口尺寸没有变化。现象：renderer 仍使用旧容器宽度，世界视图右侧出现黑边或裁切，切换 Dock 后更明显。固定处理：用 `ResizeObserver` 监听实际画布宿主，显式调用 renderer resize，更新 stage hit area，再按新视口重新计算 cover camera；不能只依赖 Pixi 的 `resizeTo: window`。验证：单元测试改变宿主宽度后断言 renderer 尺寸和 cover scale 更新；浏览器在 1440×900、1920×1080、3840×2160 截图中检查画布铺满且无黑边。
 
 ## 市场安装与启用闭环

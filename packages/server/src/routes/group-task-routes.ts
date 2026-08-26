@@ -24,6 +24,9 @@ export function registerGroupTaskRoutes(router: Router, dependencies: GroupTaskR
     if (session.kind !== 'group' || session.status !== 'open') {
       throw new HttpError(409, 'session_mode_change_unavailable', '只有开放中的群聊可以切换协作模式')
     }
+    if (store.listConversationQueue(session.worldId, session.id).some((entry) => entry.status === 'queued' || entry.status === 'running' || entry.status === 'waiting-approval')) {
+      throw new HttpError(409, 'session_mode_change_unavailable', '当前群聊仍有排队或运行中的消息，暂时不能切换协作模式')
+    }
     const body = await readJson(request)
     const collaborationMode = requiredEnum<WorkSessionCollaborationMode>(body, 'collaborationMode', ['discussion', 'task'])
     try {

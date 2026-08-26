@@ -3,14 +3,19 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 import { afterEach, describe, expect, it } from 'vitest'
-import type { AgentRuntimePort, AgentTurnRequest } from '@dsh-cyber/contracts'
+import type { AgentRuntimePort, AgentTurnRequest, EmployeeBlueprint } from '@dsh-cyber/contracts'
+import { SqliteStore } from '@dsh-cyber/persistence'
+import type { ConversationOrchestrator } from '@dsh-cyber/orchestration'
 import { createCyberServer, type CyberServer } from '../src/index.js'
+import { ConversationQueueService } from '../src/services/conversation-queue-service.js'
 
 const servers: CyberServer[] = []
 const roots: string[] = []
+const stores: SqliteStore[] = []
 
 afterEach(async () => {
   for (const server of servers.splice(0)) await server.close()
+  for (const store of stores.splice(0)) store.close()
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
 
@@ -199,4 +204,252 @@ describe('Conversation control and durable queue', () => {
     await waitFor(() => server.store.getWorkTurn(followUp.body.workTurnId)?.status === 'completed')
     expect(runtime.calls).toHaveLength(2)
   })
+
+  it('queues a group discussion and continues the same WorkTurn without duplicating the user message', async () => {
+    const { origin, server, runtime, world, employee } = await start()
+    const colleague = server.store.recruitEmployee({
+      workspaceId: world.workspaceId,
+      worldId: world.id,
+      blueprintId: 'core.butler',
+      blueprintVersion: 1,
+      displayName: '协作角色',
+    })
+    const market = await json(origin, '/api/marketplace?market=plugin')
+    const meetingPlugin = (market.body.items as Array<{ manifest: { id: string; version: string } }>).find((item) => item.manifest.id === 'official-meeting-notes')
+    expect(meetingPlugin).toBeDefined()
+    const preview = await json(origin, `/api/workspaces/${world.workspaceId}/marketplace/preview`, post({ packageId: meetingPlugin!.manifest.id, version: meetingPlugin!.manifest.version }))
+    const installed = await json(origin, `/api/workspaces/${world.workspaceId}/marketplace/install`, post({
+      packageId: meetingPlugin!.manifest.id,
+      version: meetingPlugin!.manifest.version,
+      approvalToken: preview.body.preview.approvalToken,
+      worldId: world.id,
+    }))
+    expect(installed.response.status).toBe(201)
+    const queued = await json(origin, `/api/worlds/${world.id}/chat`, post({
+      employeeIds: [employee.id, colleague.id],
+      prompt: '/meeting-summary 请讨论这份交付方案并分别给出意见',
+      collaborationMode: 'discussion',
+      queueMode: 'normal',
+      clientTurnId: 'group-discussion-queued',
+    }))
+    expect(queued.response.status).toBe(202)
+    await waitFor(() => server.store.getWorkTurn(queued.body.workTurnId)?.status === 'completed')
+    expect(server.store.listTurnAgentRuns(queued.body.workTurnId)).toHaveLength(2)
+    expect(runtime.calls).toHaveLength(2)
+    for (const call of runtime.calls) expect(call.prompt).toContain('当前世界的会议纪要助手')
+    const messages = server.store.listMessages(queued.body.session.id)
+    expect(messages.filter((message) => message.kind === 'user')).toHaveLength(1)
+    expect(server.store.listSessionTurns(queued.body.session.id)).toHaveLength(1)
+    expect(server.store.getConversationQueueEntry(queued.body.queueItem.id)).toMatchObject({
+      conversationKind: 'group',
+      collaborationMode: 'discussion',
+      status: 'completed',
+    })
+  })
+
+  it('queues task collaboration, persists one plan on the original WorkTurn, and runs the coordinator once', async () => {
+    const { origin, server, world, employee } = await start()
+    const colleague = server.store.recruitEmployee({
+      workspaceId: world.workspaceId,
+      worldId: world.id,
+      blueprintId: 'core.butler',
+      blueprintVersion: 1,
+      displayName: '任务协作角色',
+    })
+    const queued = await json(origin, `/api/worlds/${world.id}/chat`, post({
+      employeeIds: [employee.id, colleague.id],
+      prompt: '任务：整理当前交付信息并形成一份协调总结',
+      collaborationMode: 'task',
+      queueMode: 'next',
+      clientTurnId: 'group-task-queued',
+      coordinatorEmployeeId: employee.id,
+    }))
+    expect(queued.response.status).toBe(202)
+    await waitFor(() => ['completed', 'failed'].includes(server.store.getWorkTurn(queued.body.workTurnId)?.status ?? ''))
+    expect(server.store.getWorkTurn(queued.body.workTurnId)?.status).toBe('completed')
+    const plan = server.store.getTaskCollaborationPlanByTurn(world.id, queued.body.workTurnId)
+    expect(plan).toMatchObject({ workTurnId: queued.body.workTurnId, sessionId: queued.body.session.id, status: 'completed' })
+    expect(server.store.listSessionTurns(queued.body.session.id)).toHaveLength(1)
+    expect(server.store.listMessages(queued.body.session.id).filter((message) => message.kind === 'user')).toHaveLength(1)
+    const expectedRuns = plan!.steps.reduce((count, step) => count + step.assignedEmployeeIds.length, 0) + 1
+    expect(server.store.listTurnAgentRuns(queued.body.workTurnId)).toHaveLength(expectedRuns)
+  })
+
+  it('keeps waiting approval as a session lock while releasing the employee lane to another session', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-waiting-approval-order-'))
+    roots.push(stateRoot)
+    const store = await SqliteStore.open(join(stateRoot, 'queue.sqlite'))
+    stores.push(store)
+    const workspace = store.createWorkspace({ name: '队列顺序测试' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '队列世界', templateId: 'personal-world' })
+    store.saveBlueprint(testBlueprint())
+    const employee = store.recruitEmployee({ workspaceId: workspace.id, worldId: world.id, blueprintId: 'queue.employee', blueprintVersion: 1 })
+    const sessionA = createDirectSession(store, workspace.id, world.id, employee.id, '会话 A')
+    const sessionB = createDirectSession(store, workspace.id, world.id, employee.id, '会话 B')
+    const first = enqueueStoredTurn(store, workspace.id, world.id, sessionA.id, employee.id, '等待审批的第一条')
+    const followUp = enqueueStoredTurn(store, workspace.id, world.id, sessionA.id, employee.id, '同会话第二条')
+    const independent = enqueueStoredTurn(store, workspace.id, world.id, sessionB.id, employee.id, '另一会话可运行')
+    store.promoteConversationQueueEntry(first.id, first.revision)
+    let releaseIndependent: (() => void) | undefined
+    const seen: string[] = []
+    const queue = new ConversationQueueService({
+      store,
+      orchestrator: { interruptWorkTurn: async () => undefined } as unknown as ConversationOrchestrator,
+      runner: async (entry) => {
+        seen.push(entry.id)
+        if (entry.id === first.id) return { waitingForApproval: true }
+        if (entry.id === independent.id) await new Promise<void>((resolve) => { releaseIndependent = resolve })
+      },
+      pollIntervalMs: 10_000,
+    })
+
+    await queue.dispatchOnce()
+    await waitFor(() => store.getConversationQueueEntry(first.id)?.status === 'waiting-approval' && store.getConversationQueueEntry(independent.id)?.status === 'running')
+    expect(store.getConversationQueueEntry(followUp.id)?.status).toBe('queued')
+    await queue.dispatchOnce()
+    expect(seen).toEqual(expect.arrayContaining([first.id, independent.id]))
+    expect(seen).not.toContain(followUp.id)
+    expect(store.getConversationQueueEntry(followUp.id)?.status).toBe('queued')
+
+    releaseIndependent?.()
+    await waitFor(() => store.getConversationQueueEntry(independent.id)?.status === 'completed')
+    await queue.close()
+  })
+
+  it('recovers a queued group discussion after a full service restart', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-group-queue-restart-'))
+    roots.push(stateRoot)
+    const seed = await createCyberServer({ stateRoot, workspacePath: stateRoot, port: 0, runtime: new QueueRuntime(), bootstrapDefaultWorld: true })
+    const workspace = seed.store.listWorkspaces()[0]!
+    const world = seed.store.listWorlds(workspace.id)[0]!
+    const employee = seed.store.listEmployees(world.id)[0]!
+    const colleague = seed.store.recruitEmployee({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      blueprintId: 'core.butler',
+      blueprintVersion: 1,
+      displayName: '重启协作角色',
+    })
+    const begun = seed.orchestrator.beginGroupQueued({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      employeeIds: [employee.id, colleague.id],
+      prompt: '服务重启后继续这次群聊',
+      collaborationMode: 'discussion',
+      metadata: { clientTurnId: 'group-restart-turn' },
+    })
+    seed.store.enqueueConversationTurn({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      sessionId: begun.session.id,
+      workTurnId: begun.workTurn.id,
+      employeeIds: [employee.id, colleague.id],
+      conversationKind: 'group',
+      collaborationMode: 'discussion',
+    })
+    await seed.close()
+
+    const runtime = new QueueRuntime()
+    const recovered = await createCyberServer({ stateRoot, workspacePath: stateRoot, port: 0, runtime })
+    servers.push(recovered)
+    await recovered.start()
+    await waitFor(() => recovered.store.getWorkTurn(begun.workTurn.id)?.status === 'completed')
+    expect(recovered.store.listTurnAgentRuns(begun.workTurn.id)).toHaveLength(2)
+    expect(runtime.calls).toHaveLength(2)
+    expect(recovered.store.listMessages(begun.session.id).filter((message) => message.kind === 'user')).toHaveLength(1)
+  })
+
+  it('cancels a queued group follow-up and stops only the running group WorkTurn', async () => {
+    const { origin, server, runtime, world, employee } = await start()
+    const colleague = server.store.recruitEmployee({
+      workspaceId: world.workspaceId,
+      worldId: world.id,
+      blueprintId: 'core.butler',
+      blueprintVersion: 1,
+      displayName: '群聊停止角色',
+    })
+    const running = await json(origin, `/api/worlds/${world.id}/chat`, post({
+      employeeIds: [employee.id, colleague.id],
+      prompt: '请停止这个群聊长任务',
+      collaborationMode: 'discussion',
+      queueMode: 'normal',
+      clientTurnId: 'group-running-stop',
+    }))
+    const followUp = await json(origin, `/api/worlds/${world.id}/chat`, post({
+      employeeIds: [employee.id, colleague.id],
+      sessionId: running.body.session.id,
+      prompt: '这条群聊消息必须保持排队',
+      collaborationMode: 'discussion',
+      queueMode: 'normal',
+      clientTurnId: 'group-follow-up-cancel',
+    }))
+    await waitFor(() => server.store.getConversationQueueEntry(running.body.queueItem.id)?.status === 'running')
+    const modeChange = await json(origin, `/api/sessions/${running.body.session.id}/collaboration-mode`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ collaborationMode: 'task' }),
+    })
+    expect(modeChange.response.status).toBe(409)
+    expect(server.store.getConversationQueueEntry(followUp.body.queueItem.id)?.status).toBe('queued')
+    const cancelled = await json(origin, `/api/worlds/${world.id}/chat-queue/${followUp.body.queueItem.id}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' } })
+    expect(cancelled.response.status).toBe(200)
+    expect(server.store.getConversationQueueEntry(followUp.body.queueItem.id)?.status).toBe('cancelled')
+    expect(server.store.getWorkTurn(followUp.body.workTurnId)?.status).toBe('interrupted')
+    expect(server.store.listTurnAgentRuns(followUp.body.workTurnId)).toHaveLength(0)
+
+    const stopped = await json(origin, `/api/turns/${running.body.workTurnId}/abort`, post({ reason: 'group-stop' }))
+    expect(stopped.response.status).toBe(200)
+    await waitFor(() => server.store.getConversationQueueEntry(running.body.queueItem.id)?.status === 'interrupted')
+    expect(server.store.listTurnAgentRuns(running.body.workTurnId)).toEqual(
+      expect.arrayContaining([expect.objectContaining({ status: 'interrupted' })]),
+    )
+    expect(runtime.aborted.length).toBeGreaterThan(0)
+  })
 })
+
+function testBlueprint(): EmployeeBlueprint {
+  return {
+    schemaVersion: 1,
+    id: 'queue.employee',
+    version: 1,
+    worldTemplateId: 'personal-world',
+    displayName: '队列角色',
+    role: '测试角色',
+    summary: '用于验证会话顺序',
+    persona: '你负责验证队列顺序。',
+    requestedSkills: [],
+    requestedCapabilities: [],
+    createdAt: '2026-08-26T00:00:00.000Z',
+  }
+}
+
+function createDirectSession(store: SqliteStore, workspaceId: string, worldId: string, employeeId: string, title: string) {
+  return store.createSession({
+    workspaceId,
+    worldId,
+    kind: 'direct',
+    title,
+    participants: [{ participantId: 'owner', kind: 'owner' }, { participantId: employeeId, kind: 'employee' }],
+  })
+}
+
+function enqueueStoredTurn(store: SqliteStore, workspaceId: string, worldId: string, sessionId: string, employeeId: string, content: string) {
+  const turn = store.createWorkTurn({ workspaceId, worldId, sessionId, interactionKind: 'chat' })
+  store.appendMessage({
+    sessionId,
+    senderId: 'owner',
+    senderKind: 'owner',
+    kind: 'user',
+    content,
+    metadata: { workTurnId: turn.id, queueEmployeeId: employeeId },
+    correlationId: sessionId,
+  })
+  return store.enqueueConversationTurn({
+    workspaceId,
+    worldId,
+    sessionId,
+    workTurnId: turn.id,
+    employeeIds: [employeeId],
+    conversationKind: 'direct',
+  })
+}
