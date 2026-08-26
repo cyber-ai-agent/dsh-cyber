@@ -20,13 +20,14 @@ describe('ApplicationAccessService', () => {
     const service = new ApplicationAccessService(root)
     const issued = response()
 
-    await expect(service.summary(request())).resolves.toEqual({ passwordEnabled: false, unlocked: true })
-    await service.setPassword('correct horse', issued.value)
+    await expect(service.summary(request())).resolves.toEqual({ passwordEnabled: false, unlocked: true, recoveryConfigured: false })
+    const mutation = await service.setPassword('correct horse', issued.value)
+    expect(mutation.recoveryCode).toMatch(/^[A-F0-9]{5}(?:-[A-F0-9]{5}){5}$/)
     const cookie = cookieHeader(issued.headers.get('set-cookie'))
 
-    await expect(service.summary(request())).resolves.toEqual({ passwordEnabled: true, unlocked: false })
+    await expect(service.summary(request())).resolves.toEqual({ passwordEnabled: true, unlocked: false, recoveryConfigured: true })
     await expect(service.assertUnlocked(request())).rejects.toMatchObject({ status: 423, code: 'application_locked' })
-    await expect(service.summary(request(cookie))).resolves.toEqual({ passwordEnabled: true, unlocked: true })
+    await expect(service.summary(request(cookie))).resolves.toEqual({ passwordEnabled: true, unlocked: true, recoveryConfigured: true })
     await expect(service.assertUnlocked(request(cookie))).resolves.toBeUndefined()
   })
 
@@ -35,17 +36,23 @@ describe('ApplicationAccessService', () => {
     cleanup.push(root)
     const service = new ApplicationAccessService(root)
     const first = response()
-    await service.setPassword('first secret', first.value)
+    const firstMutation = await service.setPassword('first secret', first.value)
     const second = response()
-    await service.setPassword('second secret', second.value)
+    const secondMutation = await service.setPassword('second secret', second.value)
 
     const persisted = await readFile(join(root, 'credentials', 'application-access.json'), 'utf8')
     expect(persisted).not.toContain('first secret')
     expect(persisted).not.toContain('second secret')
     await expect(service.unlock('first secret', request(), response().value)).rejects.toMatchObject({ status: 401 })
     const unlocked = response()
-    await expect(service.unlock('second secret', request(), unlocked.value)).resolves.toEqual({ passwordEnabled: true, unlocked: true })
-    await expect(service.summary(request(cookieHeader(unlocked.headers.get('set-cookie'))))).resolves.toEqual({ passwordEnabled: true, unlocked: true })
+    await expect(service.unlock('second secret', request(), unlocked.value)).resolves.toEqual({ passwordEnabled: true, unlocked: true, recoveryConfigured: true })
+    await expect(service.summary(request(cookieHeader(unlocked.headers.get('set-cookie'))))).resolves.toEqual({ passwordEnabled: true, unlocked: true, recoveryConfigured: true })
+    await expect(service.recover(firstMutation.recoveryCode, 'third secret', request(), response().value)).rejects.toMatchObject({ status: 401, code: 'application_recovery_invalid' })
+    const recovered = response()
+    const recoveredMutation = await service.recover(secondMutation.recoveryCode.toLowerCase().replaceAll('-', ''), 'third secret', request(), recovered.value)
+    expect(recoveredMutation.recoveryCode).not.toBe(secondMutation.recoveryCode)
+    await expect(service.unlock('second secret', request(), response().value)).rejects.toMatchObject({ status: 401 })
+    await expect(service.unlock('third secret', request(), response().value)).resolves.toMatchObject({ passwordEnabled: true, unlocked: true, recoveryConfigured: true })
   })
 
   it('fails closed when the persisted application lock policy is invalid', async () => {
@@ -57,6 +64,24 @@ describe('ApplicationAccessService', () => {
 
     await expect(service.summary(request())).rejects.toMatchObject({ status: 500, code: 'application_access_policy_invalid' })
     await expect(service.assertUnlocked(request())).rejects.toMatchObject({ status: 500, code: 'application_access_policy_invalid' })
+  })
+
+  it('upgrades a legacy lock with a recovery code after a valid unlock', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-application-access-'))
+    cleanup.push(root)
+    const service = new ApplicationAccessService(root)
+    const initial = response()
+    await service.setPassword('legacy secret', initial.value)
+    const path = join(root, 'credentials', 'application-access.json')
+    const legacy = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>
+    delete legacy.recoveryHash
+    await writeFile(path, JSON.stringify(legacy), 'utf8')
+
+    const unlocked = response()
+    const result = await service.unlock('legacy secret', request(), unlocked.value)
+    expect(result.recoveryCode).toMatch(/^[A-F0-9]{5}(?:-[A-F0-9]{5}){5}$/)
+    expect(result.recoveryConfigured).toBe(true)
+    expect(JSON.parse(await readFile(path, 'utf8')).recoveryHash).toEqual(expect.any(String))
   })
 })
 

@@ -14,5 +14,9 @@ export function registerApplicationAccessRoutes(router: Router, access: Applicat
     const body = await readJson(request)
     writeJson(response, 200, { access: await access.unlock(requiredString(body, 'password'), request, response) })
   })
+  router.post('/api/application-access/recover', async ({ request, response }) => {
+    const body = await readJson(request)
+    writeJson(response, 200, { access: await access.recover(requiredString(body, 'recoveryCode'), requiredString(body, 'password'), request, response) })
+  })
   router.post('/api/application-access/lock', ({ request, response }) => { access.lock(request, response); writeJson(response, 200, { ok: true }) })
 }

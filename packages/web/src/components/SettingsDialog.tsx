@@ -42,6 +42,8 @@ import type {
 import { api } from '../api.js'
 import type { ApplicationAccessSummary } from './ApplicationLockGate.js'
 
+interface ApplicationAccessMutation extends ApplicationAccessSummary { recoveryCode?: string }
+
 export type SettingsSection = 'appearance' | 'models' | 'integrations' | 'privacy' | 'data' | 'logs' | 'maintenance'
 export type SystemAction = 'status' | 'doctor' | 'backup' | 'export' | 'check-application-update' | 'apply-application-update'
 
@@ -454,6 +456,7 @@ function IntegrationSettings({ workspaceId }: { workspaceId: string }) {
 
 function PrivacySettings() {
   const [access, setAccess] = useState<ApplicationAccessSummary>()
+  const [recoveryCode, setRecoveryCode] = useState<string>()
   const [password, setPassword] = useState('')
   const [confirmation, setConfirmation] = useState('')
   const [busy, setBusy] = useState(false)
@@ -471,8 +474,8 @@ function PrivacySettings() {
     if (password !== confirmation) { setError('两次输入的密码不一致'); return }
     setBusy(true); setError(undefined); setNotice(undefined)
     try {
-      const result = await api<{ access: ApplicationAccessSummary }>('/api/application-access/password', { method: 'POST', body: JSON.stringify({ password }) })
-      setAccess(result.access); setPassword(''); setConfirmation(''); setNotice('应用锁密码已保存')
+      const result = await api<{ access: ApplicationAccessMutation }>('/api/application-access/password', { method: 'POST', body: JSON.stringify({ password }) })
+      setAccess(result.access); setRecoveryCode(result.access.recoveryCode); setPassword(''); setConfirmation(''); setNotice('应用锁密码已保存，请保存新的恢复码')
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '密码保存失败')
     } finally { setBusy(false) }
@@ -482,7 +485,7 @@ function PrivacySettings() {
     setBusy(true); setError(undefined); setNotice(undefined)
     try {
       const result = await api<{ access: ApplicationAccessSummary }>('/api/application-access/password', { method: 'DELETE' })
-      setAccess(result.access); setNotice('应用锁已关闭')
+      setAccess(result.access); setRecoveryCode(undefined); setNotice('应用锁已关闭')
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '应用锁关闭失败')
     } finally { setBusy(false) }
@@ -499,13 +502,16 @@ function PrivacySettings() {
   }
 
   return <div className="settings-section settings-section--privacy">
-    <div className="settings-section__heading"><h3>隐私与锁屏</h3><p>设置一个本机访问密码。锁定后会遮住整个工作台，服务端同时拒绝世界、会话、消息和设置请求。</p></div>
+    <div className="settings-section__heading"><h3>隐私与锁屏</h3><p>这里只有一个全局入口锁。锁定后会遮住整个工作台，切换世界不会额外要求密码。</p></div>
     <section className="privacy-lock-card">
-      <header><span><LockKey size={22}/></span><div><strong>{access?.passwordEnabled ? '应用锁已启用' : '应用锁未启用'}</strong><small>{access?.passwordEnabled ? '每次服务启动和会话过期后都需要重新解锁。' : '设置后可从这里立即锁定整个 DSH Cyber。'}</small></div></header>
+      <header><span><LockKey size={22}/></span><div><strong>{access?.passwordEnabled ? '应用锁已启用' : '应用锁未启用'}</strong><small>{access?.passwordEnabled ? '每次服务启动和会话过期后都需要重新解锁。' : '设置后可从这里立即锁定整个 DSH Cyber。世界切换不会另设密码。'}</small></div></header>
       <div className="privacy-lock-fields">
         <label><span>{access?.passwordEnabled ? '新密码' : '密码'}</span><input type="password" autoComplete="new-password" value={password} placeholder="至少 6 个字符" onChange={(event) => setPassword(event.target.value)} /></label>
         <label><span>再次输入</span><input type="password" autoComplete="new-password" value={confirmation} placeholder="重复输入密码" onChange={(event) => setConfirmation(event.target.value)} /></label>
       </div>
+      {access?.passwordEnabled ? <p className="privacy-recovery-status">{access.recoveryConfigured ? '恢复码已配置。忘记密码时可在入口锁屏使用；更改密码会生成新的恢复码。' : '这个入口锁来自旧版本。输入当前密码并保存一次即可生成恢复码。'}</p> : null}
+      {recoveryCode ? <div className="privacy-recovery-code" role="status"><CheckCircle size={18}/><span><strong>请保存恢复码</strong><code>{recoveryCode}</code><small>忘记密码时使用。恢复码只在本次保存后显示，离开页面后无法再次查看。</small></span><button className="secondary-button" type="button" onClick={() => void navigator.clipboard?.writeText(recoveryCode)}>复制</button></div> : null}
+      {access?.passwordEnabled && !access.recoveryConfigured ? <p className="model-form-message model-form-message--error" role="alert">这个应用锁来自旧版本，没有恢复码。请先输入当前密码并保存一次新密码，生成恢复码。</p> : null}
       {error ? <p className="model-form-message model-form-message--error" role="alert">{error}</p> : null}
       {notice ? <p className="model-form-message model-form-message--success" role="status"><CheckCircle size={16}/>{notice}</p> : null}
       <footer><div>{access?.passwordEnabled ? <button className="text-button is-danger" type="button" disabled={busy} onClick={() => void removePassword()}>关闭应用锁</button> : null}</div><div>{access?.passwordEnabled ? <button className="secondary-button" type="button" disabled={busy} onClick={() => void lockNow()}>立即锁定</button> : null}<button className="primary-button" type="button" disabled={busy || password.length < 6 || confirmation.length < 6} onClick={() => void savePassword()}>{busy ? '处理中…' : access?.passwordEnabled ? '更改密码' : '启用应用锁'}</button></div></footer>
