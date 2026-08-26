@@ -86,14 +86,49 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
     setView('editor')
   }
 
-  const analyzePrompt = (input: string) => {
+  const createProject = async (nextDraft: WorkshopDraft): Promise<boolean> => {
+    const validationError = validateWorkshopDraft(nextDraft)
+    if (validationError !== undefined) {
+      setPromptReply(undefined)
+      setError(validationError)
+      return false
+    }
+    setSaving(true)
+    setError(undefined)
+    try {
+      const input = draftToCreateInput(nextDraft)
+      const result = await api<{ project: WorkshopProject }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/workshop/projects`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      })
+      setProjects((current) => [result.project, ...current.filter((project) => project.id !== result.project.id)])
+      setSelectedProjectId(result.project.id)
+      setView('library')
+      setDraft(undefined)
+      setPromptReply(undefined)
+      onCreated(result.project)
+      return true
+    } catch (cause) {
+      setPromptReply(undefined)
+      setError(cause instanceof ApiError && cause.code === 'internal_error'
+        ? '创意工坊创建失败，服务没有完成这次操作。请重试；如果持续失败，请打开系统状态查看详情。'
+        : cause instanceof Error ? cause.message : '世界创建失败')
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const analyzePrompt = async (input: string): Promise<void> => {
     if (draft === undefined) return
     try {
       const result = analyzeWorkshopPrompt(input, templates, presets, draft)
       setDraft(result.draft)
-      setPromptReply(result.reply)
+      setPromptReply('正在生成世界，请稍候…')
       setError(undefined)
+      await createProject(result.draft)
     } catch (cause) {
+      setPromptReply(undefined)
       setError(cause instanceof Error ? cause.message : '提示词无法转换为世界草稿')
     }
   }
@@ -134,7 +169,7 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
         <header className="dialog-header">
           <div>
             <h2 id="creative-workshop-title">创意工坊</h2>
-            <p>用分步引导创建世界、初始角色和能力范围。草稿与生成结果都保存在当前设备。</p>
+            <p>用分步引导创建世界、初始角色和能力范围。项目与生成结果都保存在当前设备。</p>
           </div>
           <button className="icon-button" type="button" aria-label="关闭创意工坊" onClick={onClose}><X size={18} /></button>
         </header>

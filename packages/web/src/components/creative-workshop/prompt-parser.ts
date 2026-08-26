@@ -22,10 +22,10 @@ export function analyzeWorkshopPrompt(
 
   const parsed = parseJsonPrompt(source)
   if (parsed !== undefined) {
-    return { draft: draftFromRecord(parsed, templates, presets, currentDraft), reply: '我已读取这份 JSON，并生成了世界草稿。请检查名称、模板、角色和能力范围。', source: 'json' }
+    return { draft: draftFromRecord(parsed, templates, presets, currentDraft), reply: '我已读取这份 JSON，可以直接生成世界。', source: 'json' }
   }
   const draft = draftFromText(source, templates, preset, currentDraft)
-  return { draft, reply: '我先根据这段描述生成了世界草稿。你可以继续补充规则、角色职责或能力，我会在当前草稿上继续调整。', source: 'text' }
+  return { draft, reply: '我已理解这段描述，可以直接生成世界。', source: 'text' }
 }
 
 function parseJsonPrompt(value: string): Record<string, unknown> | undefined {
