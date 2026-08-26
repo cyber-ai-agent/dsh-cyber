@@ -1696,7 +1696,13 @@ export default function App() {
   const confirmHostAccess = useCallback(async (request: ConversationHostAccessRequest) => {
     const result = await api<{ grant: { id: string; scope: 'session' } }>(`/api/worlds/${encodeURIComponent(request.worldId)}/runtime-access-grants`, {
       method: 'POST',
-      body: JSON.stringify({ scope: 'session', sessionId: request.sessionId, employeeIds: request.employeeIds, confirmed: true }),
+      body: JSON.stringify({
+        scope: 'session',
+        sessionId: request.sessionId,
+        employeeIds: request.employeeIds,
+        confirmed: true,
+        clientTurnId: crypto.randomUUID(),
+      }),
     })
     setSessionHostAccessGrants((current) => ({
       ...current,
