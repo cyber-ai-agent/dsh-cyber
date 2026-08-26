@@ -1427,6 +1427,12 @@ export class ConversationOrchestrator implements AsyncDisposable {
           }
         }
         break
+      case 'approval.requested':
+        // The host turns this runtime event into a dedicated approval card.
+        // Keep it out of the chat transcript and preserve the live AgentRun.
+        break
+      case 'approval.decided':
+        break
       case 'tool.started':
         this.#store.appendMessage({
           sessionId: session.id,

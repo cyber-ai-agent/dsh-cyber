@@ -27,6 +27,41 @@ class QuietRuntime implements AgentRuntimePort {
   async close(): Promise<void> {}
 }
 
+class PausedApprovalRuntime implements AgentRuntimePort {
+  readonly decisions: Array<{ agentRunId: string; approvalRequestId: string; decision: 'approved' | 'rejected' }> = []
+  #settle: ((decision: 'approved' | 'rejected') => void) | undefined
+
+  async runTurn(request: AgentTurnRequest) {
+    request.onEvent?.({
+      kind: 'turn.started', source: 'test-harness', sourceSessionId: request.conversationId, metadata: {},
+    })
+    request.onEvent?.({
+      kind: 'approval.requested',
+      source: 'test-harness',
+      sourceSessionId: request.conversationId,
+      toolName: 'pwsh',
+      callId: 'call-write-desktop',
+      metadata: { approvalRequestId: 'dsh-approval-1', reason: '写入桌面测试文件' },
+    })
+    const decision = await new Promise<'approved' | 'rejected'>((resolvePromise) => { this.#settle = resolvePromise })
+    const content = decision === 'approved' ? '文件已经写入。' : '操作已取消。'
+    request.onEvent?.({
+      kind: 'assistant.message', source: 'test-harness', sourceSessionId: request.conversationId, content, metadata: {},
+    })
+    request.onEvent?.({
+      kind: 'turn.completed', source: 'test-harness', sourceSessionId: request.conversationId, metadata: {},
+    })
+    return { agentSessionId: 'session-approval', finalResponse: content, eventCount: 4 }
+  }
+
+  async decideApproval(agentRunId: string, approvalRequestId: string, decision: 'approved' | 'rejected') {
+    this.decisions.push({ agentRunId, approvalRequestId, decision })
+    this.#settle?.(decision)
+  }
+
+  async close(): Promise<void> {}
+}
+
 // A skill the built-in butler blueprint already requests, so the grant is a
 // real subset of the request rather than a fixture shortcut.
 const TEST_SKILL = 'world-setup'
@@ -84,7 +119,7 @@ class SwitchAdapter implements CharacterSkillAdapter {
   }
 }
 
-async function start(adapter: SwitchAdapter, runtime: QuietRuntime) {
+async function start(adapter: SwitchAdapter, runtime: AgentRuntimePort) {
   const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-approval-http-'))
   const registry = new CharacterSkillAdapterRegistry()
   registry.register(adapter)
@@ -131,6 +166,60 @@ async function chat(origin: string, worldId: string, characterId: string, prompt
 }
 
 describe('approval gate over the HTTP surface', () => {
+  it('pauses one DSH tool call, shows its reason, and resumes the same turn after approval', async () => {
+    const runtime = new PausedApprovalRuntime()
+    const { origin } = await start(new SwitchAdapter(), runtime)
+    const { world, characterId } = await bootstrap(origin)
+
+    const turn = chat(origin, world.id, characterId, '在桌面创建测试文件')
+    let pending: Awaited<ReturnType<typeof json>> | undefined
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      pending = await json(origin, `/api/worlds/${world.id}/pending-decisions`)
+      if ((pending.body.approvals as ApprovalRequestView[]).length > 0) break
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 10))
+    }
+    const view = (pending?.body.approvals as ApprovalRequestView[])[0]!
+    expect(view.request).toMatchObject({ subjectType: 'tool-call', risk: 'write-local', status: 'pending' })
+    expect(view.subject).toMatchObject({
+      adapterId: 'deepseek-harness',
+      action: 'pwsh',
+      target: '写入桌面测试文件',
+      parameters: { reason: '写入桌面测试文件', callId: 'call-write-desktop' },
+    })
+
+    const decided = await json(origin, `/api/approvals/${view.request.id}/decision`, post({ decision: 'approved', scope: 'once' }))
+    expect(decided.response.status).toBe(200)
+    expect(runtime.decisions).toEqual([expect.objectContaining({
+      approvalRequestId: 'dsh-approval-1',
+      decision: 'approved',
+    })])
+    expect((await turn).body.replies[0].content).toBe('文件已经写入。')
+  })
+
+  it('rejects the exact paused DSH tool call and resumes its original turn', async () => {
+    const runtime = new PausedApprovalRuntime()
+    const { origin } = await start(new SwitchAdapter(), runtime)
+    const { world, characterId } = await bootstrap(origin)
+
+    const turn = chat(origin, world.id, characterId, '在桌面创建测试文件')
+    let view: ApprovalRequestView | undefined
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const pending = await json(origin, `/api/worlds/${world.id}/pending-decisions`)
+      view = (pending.body.approvals as ApprovalRequestView[])[0]
+      if (view !== undefined) break
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 10))
+    }
+    expect(view).toBeDefined()
+
+    const decided = await json(origin, `/api/approvals/${view!.request.id}/decision`, post({ decision: 'rejected', scope: 'once' }))
+    expect(decided.response.status).toBe(200)
+    expect(runtime.decisions).toEqual([expect.objectContaining({
+      approvalRequestId: 'dsh-approval-1',
+      decision: 'rejected',
+    })])
+    expect((await turn).body.replies[0].content).toBe('操作已取消。')
+  })
+
   it('drives propose to approve to execute entirely through the API a client can call', async () => {
     const adapter = new SwitchAdapter()
     const runtime = new QuietRuntime()

@@ -9,8 +9,9 @@ export interface ApprovalRequestsProps {
 
 const RISK_LABEL: Record<string, string> = {
   'external-side-effect': '会影响真实世界',
-  'workspace-write': '会修改本地文件',
-  'read-only': '只读取信息',
+  'write-local': '会修改本地文件',
+  'high-risk': '需要提升操作权限',
+  read: '只读取信息',
 }
 
 /**
@@ -41,7 +42,7 @@ export function ApprovalRequests({ items, onDecide }: ApprovalRequestsProps) {
   }
 
   return (
-    <section className="approval-requests" aria-label="等待你批准的真实动作">
+    <section className="approval-requests" aria-label="等待你批准的操作">
       {items.map((item) => {
         const subject = item.subject
         const busy = busyId === item.request.id
@@ -63,7 +64,7 @@ export function ApprovalRequests({ items, onDecide }: ApprovalRequestsProps) {
               <strong>{subject?.label ?? item.request.summary}</strong>
             </header>
             <p id={requestDescriptionId} className="approval-request__who">
-              {item.characterName ?? '角色'} 请求执行一个不会自动发生的动作。批准之前不会有任何外部效果。
+              {item.characterName ?? '角色'} 请求继续执行当前操作。请核对操作与目标后决定。
             </p>
             {subject === undefined ? null : (
               <dl className="approval-request__facts">

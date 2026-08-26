@@ -43,6 +43,7 @@ import { ServiceError } from '../services/service-error.js'
 import type { GroupTaskCollaborationService } from '../services/group-task-collaboration-service.js'
 import type { ConversationQueueService } from '../services/conversation-queue-service.js'
 import { listApprovalRequestViews } from '../services/approval-request-views.js'
+import type { HarnessToolApprovalService } from '../services/harness-tool-approval-service.js'
 
 export interface ConversationRoutesDependencies {
   store: SqliteStore
@@ -62,6 +63,7 @@ export interface ConversationRoutesDependencies {
   /** Issues current-session owner host-access grants. */
   ownerRuntimeAccess?: OwnerRuntimeAccessService
   turnContinuations: TurnAwareApprovalContinuationService
+  toolApprovals?: HarnessToolApprovalService
   groupTasks?: GroupTaskCollaborationService
   conversationQueue?: ConversationQueueService
 }
@@ -84,6 +86,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     worldRuntimePermissions,
     ownerRuntimeAccess,
     turnContinuations,
+    toolApprovals,
     groupTasks,
     conversationQueue,
   } = dependencies
@@ -394,6 +397,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
       skillRuntime,
       worldId,
       status as 'pending' | 'approved' | 'rejected' | 'expired' | undefined,
+      toolApprovals,
     )
     writeJson(response, 200, { items })
   })
@@ -406,7 +410,13 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     const body = await readJson(request)
     const decision = requiredEnum(body, 'decision', ['approved', 'rejected'])
     const scope = body.scope === undefined ? 'once' : requiredEnum(body, 'scope', ['once', 'character', 'world'])
-    const result = await turnContinuations.decideApproval(approval.id, decision, scope, 'local-user')
+    if (approval.subjectType === 'tool-call' && scope !== 'once') {
+      throw new HttpError(422, 'tool_approval_scope_forbidden', '运行时工具只支持本次批准')
+    }
+    const result = approval.subjectType === 'tool-call'
+      ? await toolApprovals?.decide(approval.id, decision)
+        ?? (() => { throw new HttpError(503, 'tool_approval_unavailable', '动作审批服务当前不可用') })()
+      : await turnContinuations.decideApproval(approval.id, decision, scope, 'local-user')
     writeJson(response, 200, result)
   })
 

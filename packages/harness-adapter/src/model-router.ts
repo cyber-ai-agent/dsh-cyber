@@ -173,6 +173,12 @@ export class HarnessModelRouter implements AgentRuntimePort, AsyncDisposable {
     await Promise.all([...this.#entries.values()].map((item) => item.adapter.abortRun?.(agentRunId)))
   }
 
+  async decideApproval(agentRunId: string, approvalRequestId: string, decision: 'approved' | 'rejected'): Promise<void> {
+    const entry = this.#runEntries.get(agentRunId)
+    if (entry?.adapter.decideApproval === undefined) throw new Error('审批对应的运行回合已经结束')
+    await entry.adapter.decideApproval(agentRunId, approvalRequestId, decision)
+  }
+
   async closeAgent(agentId: string): Promise<void> {
     await Promise.all(
       [...this.#entries.values()].map((entry) => entry.adapter.closeAgent?.(agentId)),
