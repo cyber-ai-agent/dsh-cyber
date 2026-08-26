@@ -1,4 +1,4 @@
-import { CaretDown, TerminalWindow } from '@phosphor-icons/react'
+import { TerminalWindow } from '@phosphor-icons/react'
 import type { InstalledPluginCommand } from '@dsh-cyber/contracts'
 
 interface CommandPickerProps {
@@ -9,31 +9,50 @@ interface CommandPickerProps {
   onFocus(): void
 }
 
-/** Explicit prompt commands only; Agent Skills and automatic transforms stay out of the composer. */
+/** Explicit prompt commands only; Agent Skills and automatic transforms stay out of the slash menu. */
 export function CommandPicker({ commands, draft, onDraftChange, onOpenMarket, onFocus }: CommandPickerProps) {
   const explicitCommands = commands.filter((command) => !command.automatic && command.trigger !== 'always')
+  const invocation = slashInvocation(draft)
+
+  if (invocation === undefined) return null
+
+  const query = invocation.query.toLocaleLowerCase()
+  const visibleCommands = explicitCommands.filter((command) => {
+    if (query.length === 0) return true
+    const copy = commandCopy(command)
+    return [command.displayTrigger, command.trigger, command.displayName, command.summary, command.description, copy.name, copy.description]
+      .some((value) => value.toLocaleLowerCase().includes(query))
+  })
+  const selectCommand = (command: InstalledPluginCommand) => {
+    onDraftChange(replaceSlashInvocation(draft, invocation.start, command.displayTrigger))
+    onFocus()
+  }
 
   return (
-    <details className="composer-plugin-picker">
-      <summary aria-label="打开命令选择器"><TerminalWindow size={17} /><span>命令</span>{explicitCommands.length > 0 ? <b>{explicitCommands.length}</b> : null}<CaretDown size={13} /></summary>
+    <div className="composer-plugin-picker composer-plugin-picker--slash" role="dialog" aria-label="斜杠操作">
       <div className="composer-plugin-picker__menu" aria-label="已安装命令">
-        <header><strong>已安装命令</strong><span>点击后把指令放入输入框，不会自动发送</span></header>
-        {explicitCommands.length === 0 ? <div className="composer-plugin-picker__empty"><TerminalWindow size={22} /><span>还没有可直接使用的命令</span>{onOpenMarket === undefined ? null : <button type="button" onClick={onOpenMarket}>前往扩展市场</button>}</div> : explicitCommands.map((command) => {
+        <header><strong><TerminalWindow size={16} />斜杠操作</strong><span>继续输入筛选操作，选择后放回消息输入框</span></header>
+        {visibleCommands.length === 0 ? <div className="composer-plugin-picker__empty"><TerminalWindow size={22} /><span>{explicitCommands.length === 0 ? '还没有可直接使用的操作' : '没有匹配的操作'}</span>{onOpenMarket === undefined ? null : <button type="button" onClick={() => { onDraftChange(draft.slice(0, invocation.start)); onOpenMarket() }}>前往扩展市场</button>}</div> : visibleCommands.map((command) => {
           const copy = commandCopy(command)
-          return <button key={`${command.packageId}:${command.packageVersion}:${command.trigger}`} className="composer-plugin-picker__item" type="button" onClick={(event) => { onDraftChange(insertCommandTrigger(draft, command.displayTrigger)); event.currentTarget.closest('details')?.removeAttribute('open'); onFocus() }}>
+          return <button key={`${command.packageId}:${command.packageVersion}:${command.trigger}`} className="composer-plugin-picker__item" type="button" role="option" onClick={() => selectCommand(command)}>
             <span className="composer-plugin-picker__icon"><TerminalWindow size={17} weight="duotone" /></span>
             <span className="composer-plugin-picker__copy"><strong>{copy.name}</strong><small>{copy.description}</small><code>{command.displayTrigger}</code></span>
             <span className="composer-plugin-picker__version">v{command.packageVersion}</span>
           </button>
         })}
       </div>
-    </details>
+    </div>
   )
 }
 
-function insertCommandTrigger(draft: string, trigger: string): string {
-  const separator = draft.trim().length === 0 ? '' : ' '
-  return `${draft.trimEnd()}${separator}${trigger} `
+export function slashInvocation(draft: string): { start: number; query: string } | undefined {
+  const match = /(^|\s)\/([^\s\/]*)$/.exec(draft)
+  if (match === null || match.index === undefined) return undefined
+  return { start: match.index + (match[1] ?? '').length, query: match[2] ?? '' }
+}
+
+export function replaceSlashInvocation(draft: string, start: number, trigger: string): string {
+  return `${draft.slice(0, start)}${trigger} `
 }
 
 function commandCopy(command: InstalledPluginCommand): { name: string; description: string } {

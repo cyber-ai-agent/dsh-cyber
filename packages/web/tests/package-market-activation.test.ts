@@ -68,7 +68,7 @@ describe('package market activation flow', () => {
     expect(html).toContain('升级到 v1.0.1')
   })
 
-  it('exposes installed plugin commands in the chat composer with a recognizable icon', () => {
+  it('exposes installed plugin operations after slash input with a recognizable icon', () => {
     const html = renderToStaticMarkup(createElement(ChatWorkbench, {
       demoMode: true,
       world,
@@ -85,7 +85,7 @@ describe('package market activation flow', () => {
         automatic: false,
       }],
       sending: false,
-      draft: '',
+      draft: '/',
       onDraftChange: vi.fn(),
       onSend: vi.fn(async () => undefined),
       onUploadAttachment: vi.fn(async () => ({ assetId: 'asset-1', name: 'a.txt', mimeType: 'text/plain', byteLength: 1, url: '/a.txt' })),
@@ -94,7 +94,7 @@ describe('package market activation flow', () => {
       onRecruit: vi.fn(),
       onOpenPluginMarket: vi.fn(),
     }))
-    expect(html).toContain('已安装命令')
+    expect(html).toContain('斜杠操作')
     expect(html).toContain('研究简报')
     expect(html).toContain('/研究简报')
     expect(html).toContain('composer-plugin-picker__icon')

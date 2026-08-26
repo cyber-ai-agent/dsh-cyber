@@ -19,23 +19,34 @@ const command = (overrides: Partial<InstalledPluginCommand> = {}): InstalledPlug
 })
 
 describe('CommandPicker', () => {
-  it('only exposes explicit commands and keeps skills/automatic transforms out', () => {
+  it('stays out of the composer until slash is entered', () => {
     const markup = renderToStaticMarkup(createElement(CommandPicker, {
-      commands: [command(), command({ packageId: 'automatic', trigger: 'always', automatic: true })],
-      draft: '',
+      commands: [command()],
+      draft: '普通消息',
       onDraftChange: () => undefined,
       onFocus: () => undefined,
     }))
-    expect(markup).toContain('命令')
+    expect(markup).toBe('')
+  })
+
+  it('only exposes explicit commands from the slash menu', () => {
+    const markup = renderToStaticMarkup(createElement(CommandPicker, {
+      commands: [command(), command({ packageId: 'automatic', trigger: 'always', automatic: true })],
+      draft: '/',
+      onDraftChange: () => undefined,
+      onFocus: () => undefined,
+    }))
+    expect(markup).toContain('斜杠操作')
     expect(markup).toContain('研究简报')
     expect(markup).not.toContain('automatic')
     expect(markup).not.toContain('自动运行')
-    expect(markup).not.toContain('插件')
+    expect(markup).not.toContain('命令选择器')
   })
 
-  it('explains that selecting a command only fills the composer', () => {
-    const markup = renderToStaticMarkup(createElement(CommandPicker, { commands: [command()], draft: '', onDraftChange: () => undefined, onFocus: () => undefined }))
-    expect(markup).toContain('不会自动发送')
-    expect(markup).toContain('打开命令选择器')
+  it('filters operations by the text after slash', () => {
+    const markup = renderToStaticMarkup(createElement(CommandPicker, { commands: [command(), command({ packageId: 'official-decision-log', displayName: '决策记录', summary: '整理背景', trigger: '/decision-log', displayTrigger: '/决策', description: '整理背景、决策与取舍。' })], draft: '/研究', onDraftChange: () => undefined, onFocus: () => undefined }))
+    expect(markup).toContain('研究简报')
+    expect(markup).not.toContain('决策记录')
+    expect(markup).toContain('选择后放回消息输入框')
   })
 })

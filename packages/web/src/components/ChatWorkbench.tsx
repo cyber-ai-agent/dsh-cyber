@@ -2,6 +2,7 @@ import {
   ArrowUp,
   CircleNotch,
   ClockCounterClockwise,
+  Copy,
   File as FileIcon,
   PaperPlaneRight,
   Paperclip,
@@ -76,6 +77,8 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
   const [rememberingMessageId, setRememberingMessageId] = useState<string>()
   const [rememberedMessageIds, setRememberedMessageIds] = useState<Set<string>>(() => new Set())
   const [knowledgeError, setKnowledgeError] = useState<string>()
+  const [copiedMessageId, setCopiedMessageId] = useState<string>()
+  const [copyError, setCopyError] = useState<string>()
   const [queueMode, setQueueMode] = useState<ChatQueueMode>('normal')
   const experience = worldExperience(world)
   const mention = useMemo(() => currentMention(draft), [draft])
@@ -94,6 +97,8 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
     return counts
   }, [queueItems])
   const saturatedWaiting = queueItems.some((turn) => turn.status === 'queued' && turn.employeeIds.some((employeeId) => (runningLaneCounts.get(employeeId) ?? 0) >= 2))
+  const activeTurn = useMemo(() => queueItems.find((turn) => turn.status === 'running' || turn.status === 'waiting-approval'), [queueItems])
+  const hasQueueActions = pendingCount > 0 || queuedCount > 0 || queueItems.some((turn) => turn.status === 'running' || turn.status === 'waiting-approval' || turn.status === 'queued')
 
   useEffect(() => {
     const container = scrollRef.current
@@ -177,6 +182,17 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
     }
   }
 
+  const copyMessage = async (message: WorkMessage) => {
+    setMessageMenu(undefined)
+    setCopyError(undefined)
+    if (await copyTextToClipboard(message.content)) {
+      setCopiedMessageId(message.id)
+      window.setTimeout(() => setCopiedMessageId((current) => current === message.id ? undefined : current), 1_600)
+      return
+    }
+    setCopyError('复制回复失败，请检查剪贴板权限')
+  }
+
   return (
     <section className="chat-workbench" aria-label="当前世界多角色会话">
       <header className="chat-header">
@@ -195,7 +211,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
       </header>
 
       <div className="message-scroll" ref={scrollRef} aria-live="polite" aria-busy={pendingCount > 0 || sending}>
-        {queueItems.length > 0 ? <div className="chat-turn-queue" aria-label="消息队列">{saturatedWaiting ? <p className="chat-turn-queue__lane-note" role="status">同一角色已有 2 条通道运行，第三条消息等待中</p> : null}{queueItems.map((turn) => <article key={turn.id} className={`chat-turn-queue__item chat-turn-queue__item--${turn.status}`}><div><strong>{turn.status === 'running' ? '正在回复中' : turn.status === 'waiting-approval' ? '等待批准' : turn.status === 'queued' ? '等待中' : turn.status === 'interrupted' ? '已停止' : turn.status === 'cancelled' ? '已撤销' : '发送失败'}</strong><small>{turn.title}</small></div><span>{(turn.status === 'running' || turn.status === 'waiting-approval') && onStopTurn !== undefined ? <button type="button" onClick={() => void onStopTurn(turn.id)}>■ 停止</button> : turn.status === 'queued' && onPromoteQueuedTurn !== undefined ? <button type="button" onClick={() => void onPromoteQueuedTurn(turn.id)}>下一条执行</button> : null}{turn.status === 'queued' && onCancelQueuedTurn !== undefined ? <button type="button" onClick={() => void onCancelQueuedTurn(turn.id)}>撤销</button> : null}</span></article>)}</div> : null}
+        {queueItems.length > 0 ? <div className="chat-turn-queue" aria-label="消息队列">{saturatedWaiting ? <p className="chat-turn-queue__lane-note" role="status">同一角色已有 2 条通道运行，第三条消息等待中</p> : null}{queueItems.map((turn) => <article key={turn.id} className={`chat-turn-queue__item chat-turn-queue__item--${turn.status}`}><div><strong>{turn.status === 'running' ? '正在回复中' : turn.status === 'waiting-approval' ? '等待批准' : turn.status === 'queued' ? '等待中' : turn.status === 'interrupted' ? '已停止' : turn.status === 'cancelled' ? '已撤销' : '发送失败'}</strong><small>{turn.title}</small></div><span>{(turn.status === 'running' || turn.status === 'waiting-approval') && onStopTurn !== undefined ? <button type="button" onClick={() => void onStopTurn(turn.id)}>■ 停止</button> : turn.status === 'queued' && onPromoteQueuedTurn !== undefined ? <button type="button" onClick={() => void onPromoteQueuedTurn(turn.id)}>插入</button> : null}{turn.status === 'queued' && onCancelQueuedTurn !== undefined ? <button type="button" onClick={() => void onCancelQueuedTurn(turn.id)}>撤销</button> : null}</span></article>)}</div> : null}
         {conversationKind === 'group' && collaborationMode === 'task' && session?.id !== undefined ? <TaskCollaborationSummary worldId={world.id} sessionId={session.id} employees={participantEmployees} demoMode={demoMode} /> : null}
         {hasOlderMessages && onLoadOlderMessages !== undefined ? <button className="message-history-more" type="button" disabled={loadingOlderMessages} onClick={onLoadOlderMessages}>{loadingOlderMessages ? <CircleNotch size={15} className="spin" /> : <ArrowUp size={15} />}<span>{loadingOlderMessages ? '正在加载更早消息…' : '加载更早消息'}</span></button> : null}
         {visibleMessages.length === 0 ? (
@@ -213,7 +229,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
             <article key={message.id} className={`message${owner ? ' message--owner' : ''}${streaming ? ' message--streaming' : ''}`} onContextMenu={(event) => { if (streaming) return; event.preventDefault(); setMessageMenu({ message, position: { x: event.clientX, y: event.clientY } }) }} onKeyDown={(event) => { if (streaming || (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10'))) return; event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); setMessageMenu({ message, position: { x: rect.left + Math.min(rect.width, 220), y: rect.top + 28 } }) }} tabIndex={streaming ? undefined : 0}>
               {owner ? null : <button className="avatar-button" type="button" onClick={() => employee && onOpenDossier(employee.id)} aria-label={`打开${employee?.displayName ?? experience.personLabel}角色`}><Avatar index={employee?.avatarIndex ?? 7} label={employee?.displayName ?? '角色'} authorityRole={employee?.authorityRole} /></button>}
               <div className="message__body">
-                <header className="message__meta">{owner ? <span className="sr-only">我的消息</span> : <><strong>{employee?.displayName ?? experience.personLabel}<AuthorityBadge role={employee?.authorityRole} /></strong><span>{employee?.role}</span></>}<time>{displayTime(message)}</time>{rememberingMessageId === message.id ? <span role="status">正在整理…</span> : rememberedMessageIds.has(message.id) ? <span role="status">已加入长期知识</span> : null}</header>
+                <header className="message__meta">{owner ? <span className="sr-only">我的消息</span> : <><strong>{employee?.displayName ?? experience.personLabel}<AuthorityBadge role={employee?.authorityRole} /></strong><span>{employee?.role}</span></>}<time>{displayTime(message)}</time>{copiedMessageId === message.id ? <span role="status">已复制</span> : rememberingMessageId === message.id ? <span role="status">正在整理…</span> : rememberedMessageIds.has(message.id) ? <span role="status">已加入长期知识</span> : null}</header>
                 <div className="message__content">{streaming && message.content.length === 0 ? <span className="stream-placeholder">正在回复中…</span> : <RichText value={message.content} worldId={world.id} />}{streaming ? <span className="stream-cursor" aria-hidden="true" /> : null}</div>
                 <MessageAttachments attachments={messageAttachments(message.metadata)} />
                 {artifactRefsFromMetadata(message.metadata).length === 0 ? null : <Suspense fallback={<div className="chat-artifact-refs" role="status">正在载入产物卡…</div>}><ArtifactReferenceCards worldId={world.id} artifactRefs={artifactRefsFromMetadata(message.metadata)} onOpen={onOpenArtifact} /></Suspense>}
@@ -225,15 +241,26 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
         {pendingCount > 0 ? <div className="stream-state" role="status"><CircleNotch size={16} className="spin" /><span>正在回复中，你可以继续补充，也可以切换到其他会话。</span>{queuedCount > 0 ? <strong>另有 {queuedCount} 条已排队</strong> : null}</div> : sending ? <div className="stream-state" role="status"><CircleNotch size={16} className="spin" /><span>正在回复中…</span></div> : null}
       </div>
 
-      {messageMenu === undefined ? null : <ContextMenu label="消息操作" position={messageMenu.position} onClose={() => setMessageMenu(undefined)} items={[{
-        id: 'remember-message',
-        label: rememberedMessageIds.has(messageMenu.message.id) ? '已加入长期知识' : '加入长期知识',
-        description: '引用这条消息作为证据，在后台整理为可追溯知识',
-        icon: <ClockCounterClockwise size={17} />,
-        disabled: rememberingMessageId !== undefined || rememberedMessageIds.has(messageMenu.message.id),
-        onSelect: () => { void rememberMessage(messageMenu.message) },
-      }]} />}
+      {messageMenu === undefined ? null : <ContextMenu label="消息操作" position={messageMenu.position} onClose={() => setMessageMenu(undefined)} items={[
+        ...(messageMenu.message.senderKind === 'employee' && messageMenu.message.content.trim().length > 0 ? [{
+          id: 'copy-message',
+          label: copiedMessageId === messageMenu.message.id ? '已复制' : '复制回复',
+          description: '复制这条回复的完整内容到剪贴板',
+          icon: <Copy size={17} />,
+          disabled: copiedMessageId === messageMenu.message.id,
+          onSelect: () => { void copyMessage(messageMenu.message) },
+        }] : []),
+        {
+          id: 'remember-message',
+          label: rememberedMessageIds.has(messageMenu.message.id) ? '已加入长期知识' : '加入长期知识',
+          description: '引用这条消息作为证据，在后台整理为可追溯知识',
+          icon: <ClockCounterClockwise size={17} />,
+          disabled: rememberingMessageId !== undefined || rememberedMessageIds.has(messageMenu.message.id),
+          onSelect: () => { void rememberMessage(messageMenu.message) },
+        },
+      ]} />}
       <div className="composer-zone">
+        {copyError === undefined ? null : <div className="chat-knowledge-error" role="alert"><span>{copyError}</span><button type="button" onClick={() => setCopyError(undefined)} aria-label="关闭提示"><X size={14} /></button></div>}
         {knowledgeError === undefined ? null : <div className="chat-knowledge-error" role="alert"><span>{knowledgeError}</span><button type="button" onClick={() => setKnowledgeError(undefined)} aria-label="关闭提示"><X size={14} /></button></div>}
         {onDecideWorldPermissionRequest === undefined ? null : <WorldPermissionRequests items={permissionRequests} employees={employees} activeSessionId={session?.id} onDecide={onDecideWorldPermissionRequest} onOpenSettings={onOpenWorldPermissionSettings} />}
         {onDecideApproval === undefined ? null : <ApprovalRequests items={approvals} onDecide={onDecideApproval} />}
@@ -242,11 +269,11 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
         {attachments.length > 0 ? <div className="composer-attachments" aria-label="待发送附件">{attachments.map((attachment) => <span key={attachment.assetId}><FileIcon size={15} /><span><strong>{attachment.name}</strong><small>{formatBytes(attachment.byteLength)}</small></span><button type="button" aria-label={`移除附件 ${attachment.name}`} onClick={() => setAttachments((current) => current.filter((item) => item.assetId !== attachment.assetId))}><X size={13} /></button></span>)}</div> : null}
         {attachmentError === undefined ? null : <p className="composer-error" role="alert">{attachmentError}</p>}
         <textarea ref={inputRef} value={draft} onChange={(event) => onDraftChange(event.target.value)} disabled={employees.length === 0} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit() } }} placeholder={employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? `发送消息给 ${participantEmployees.map((employee) => employee.displayName).join('、')}` : conversationKind === 'direct' ? `发送消息给 ${participantEmployees[0]?.displayName ?? experience.personLabel}` : '先从左侧选择会话，或输入 @角色名'} rows={2} aria-label={`给当前世界的${experience.peopleLabel}发送消息`} />
-        <div className="composer__toolbar">{pendingCount > 0 ? <div className="composer__queue-mode" role="group" aria-label="发送方式"><button type="button" aria-label="普通排队" className={queueMode === 'normal' ? 'is-active' : ''} aria-pressed={queueMode === 'normal'} onClick={() => setQueueMode('normal')}>排队发送</button><button type="button" aria-label="优先为下一条" className={queueMode === 'next' ? 'is-active' : ''} aria-pressed={queueMode === 'next'} onClick={() => setQueueMode('next')}>下一条执行</button></div> : null}<div>
+        <div className="composer__toolbar">{hasQueueActions ? <div className="composer__queue-mode" role="group" aria-label="队列操作"><button type="button" aria-label="排队发送" title="排队发送" className={queueMode === 'normal' ? 'is-active' : ''} aria-pressed={queueMode === 'normal'} onClick={() => setQueueMode('normal')}>排队</button><button type="button" aria-label="插入队列前方" title="插入队列前方" className={queueMode === 'next' ? 'is-active' : ''} aria-pressed={queueMode === 'next'} onClick={() => setQueueMode('next')}>插入</button><button type="button" className="composer__queue-stop" aria-label={activeTurn === undefined ? '当前没有正在执行的消息' : '停止当前回复'} title={activeTurn === undefined ? '当前没有正在执行的消息' : '停止当前回复'} disabled={activeTurn === undefined || onStopTurn === undefined} onClick={() => { if (activeTurn !== undefined && onStopTurn !== undefined) void onStopTurn(activeTurn.id) }}>■ 停止</button></div> : null}<div>
           <input ref={fileInputRef} className="composer-file-input" type="file" accept=".png,.jpg,.jpeg,.webp,.txt,.md,.json,.pdf" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAttachment(file) }} />
           <button className="icon-button" type="button" aria-label={uploading ? '正在上传附件' : '添加附件'} disabled={uploading} onClick={() => fileInputRef.current?.click()}>{uploading ? <CircleNotch size={18} className="spin" /> : <Paperclip size={18} />}</button>
           <CommandPicker commands={installedPlugins} draft={draft} onDraftChange={onDraftChange} {...(onOpenPluginMarket === undefined ? {} : { onOpenMarket: onOpenPluginMarket })} onFocus={() => inputRef.current?.focus()} />
-        </div><button className="send-button" type="button" aria-label={sending ? '正在回复中，发送新消息' : '发送'} disabled={uploading || employees.length === 0 || (!draft.trim() && attachments.length === 0)} onClick={() => void submit()}>{sending ? <CircleNotch size={19} className="spin" /> : <PaperPlaneRight size={19} weight="fill" />}{queuedCount > 0 ? <span className="send-button__queue" aria-label={`${queuedCount} 条消息已排队`}>{queuedCount}</span> : null}</button></div>
+        </div><button className="send-button" type="button" aria-label={sending ? '正在回复中，发送新消息' : queueMode === 'next' ? '插入并发送' : hasQueueActions ? '排队发送' : '发送'} title={sending ? '继续发送消息' : queueMode === 'next' ? '插入并发送' : hasQueueActions ? '排队发送' : '发送'} disabled={uploading || employees.length === 0 || (!draft.trim() && attachments.length === 0)} onClick={() => void submit()}>{sending ? <CircleNotch size={19} className="spin" /> : <PaperPlaneRight size={19} weight="fill" />}{queuedCount > 0 ? <span className="send-button__queue" aria-label={`${queuedCount} 条消息已排队`}>{queuedCount}</span> : null}</button></div>
       </div></div>
     </section>
   )
@@ -256,6 +283,35 @@ function displayDirectConversationTitle(title: string | undefined): string | und
   if (title === undefined) return undefined
   const displayTitle = title.replace(/^与\s*/, '').replace(/\s*对话$/, '').trim()
   return displayTitle.length > 0 ? displayTitle : undefined
+}
+
+export async function copyTextToClipboard(value: string): Promise<boolean> {
+  if (value.trim().length === 0) return false
+  if (typeof navigator !== 'undefined' && typeof navigator.clipboard?.writeText === 'function') {
+    try {
+      await navigator.clipboard.writeText(value)
+      return true
+    } catch {
+      // The textarea fallback covers browsers that deny clipboard access for
+      // the current document while still allowing a user-initiated copy.
+    }
+  }
+  if (typeof document === 'undefined' || document.body === null) return false
+  const textarea = document.createElement('textarea')
+  textarea.value = value
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.inset = '0 auto auto 0'
+  textarea.style.opacity = '0'
+  document.body.append(textarea)
+  textarea.select()
+  try {
+    return document.execCommand('copy')
+  } catch {
+    return false
+  } finally {
+    textarea.remove()
+  }
 }
 
 async function uploadWorldAttachment(worldId: string, file: File): Promise<ChatAttachment> {

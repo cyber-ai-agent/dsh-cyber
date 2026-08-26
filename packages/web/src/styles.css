@@ -451,18 +451,22 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .composer-error { margin: 6px 10px 0; color: var(--danger); font-size: 9px; }
 .composer__toolbar { min-height: 38px; display: flex; align-items: center; justify-content: space-between; padding: 3px 6px; }
 .composer__queue-mode { display: inline-flex; gap: 2px; margin-right: 6px; padding: 2px; border: 1px solid var(--border); background: var(--surface-0); }
-.composer__queue-mode button { min-height: 32px; padding: 0 7px; border: 0; color: var(--text-muted); background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
-.composer__queue-mode button:hover, .composer__queue-mode button.is-active { color: var(--text); background: var(--accent-soft); }
+.composer__queue-mode button { min-height: 32px; padding: 0 8px; border: 0; color: var(--text-muted); background: transparent; font: inherit; font-size: 13px; cursor: pointer; }
+.composer__queue-mode button:hover:not(:disabled), .composer__queue-mode button.is-active { color: var(--text); background: var(--accent-soft); }
+.composer__queue-mode button:disabled { color: var(--text-muted); cursor: not-allowed; opacity: .5; }
+.composer__queue-mode .composer__queue-stop { border-left: 1px solid var(--border); color: var(--danger); }
+.composer__queue-mode .composer__queue-stop:hover:not(:disabled) { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, var(--surface-0)); }
 .composer__toolbar > div { min-width: 0; display: flex; align-items: center; }
 .composer__hint { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-muted); font-size: 9px; }
 .composer-plugin-picker { position: relative; margin-left: 4px; }
+.composer-plugin-picker--slash { min-width: 0; }
 .composer-plugin-picker > summary { min-height: 40px; display: inline-flex; align-items: center; gap: 5px; padding: 0 10px; border: 1px solid var(--border); background: var(--surface-0); color: var(--text-soft); cursor: pointer; list-style: none; font-size: 14px; }
 .composer-plugin-picker > summary::-webkit-details-marker { display: none; }
 .composer-plugin-picker > summary:hover, .composer-plugin-picker[open] > summary { border-color: var(--info); color: var(--text); background: color-mix(in srgb, var(--info) 8%, var(--surface-0)); }
 .composer-plugin-picker > summary b { min-width: 17px; height: 17px; display: inline-grid; place-items: center; border-radius: 99px; background: color-mix(in srgb, var(--info) 20%, var(--surface-2)); color: var(--info); font: 11px var(--font-mono); }
 .composer-plugin-picker__menu { position: absolute; z-index: 90; left: 0; bottom: calc(100% + 8px); width: min(400px, calc(100vw - 36px)); overflow: hidden; border: 1px solid var(--border-strong); background: var(--surface-1); box-shadow: 0 18px 46px rgb(0 0 0 / 32%); }
 .composer-plugin-picker__menu > header { display: grid; gap: 2px; padding: 12px 13px 10px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--info) 5%, var(--surface-1)); }
-.composer-plugin-picker__menu > header strong { color: var(--text); font-size: 14px; }
+.composer-plugin-picker__menu > header strong { display: inline-flex; align-items: center; gap: 6px; color: var(--text); font-size: 14px; }
 .composer-plugin-picker__menu > header span { color: var(--text-muted); font-size: 12px; }
 .composer-plugin-picker__item { width: 100%; min-height: 58px; display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 9px 12px; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--text-soft); text-align: left; cursor: pointer; }
 .composer-plugin-picker__item:last-child { border-bottom: 0; }
