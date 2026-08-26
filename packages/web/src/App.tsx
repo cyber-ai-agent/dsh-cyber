@@ -1497,6 +1497,7 @@ export default function App() {
     const effectivePermissionMode: AgentPermissionMode = conversationPermissionMode ?? 'read-only'
     const createdAt = new Date().toISOString()
     const capturedSessionId = activeSessionId
+    const capturedPermissionKey = activePermissionKey
     const collaborationMode = conversationIntent?.collaborationMode
       ?? (activeSession === undefined ? 'discussion' : collaborationModeOf(activeSession))
     const interactionKind = targetIds.length > 1
@@ -1628,6 +1629,18 @@ export default function App() {
         setStreamingReplies((current) => removeStreamingTurn(current, clientTurnId))
         if (result.queueItem === undefined && !pendingTurnsRef.current.some((item) => item.id === clientTurnId && (item.status === 'interrupted' || item.status === 'cancelled'))) removePendingTurn(clientTurnId)
       } catch (cause) {
+        if (cause instanceof ApiError && cause.code === 'owner_runtime_access_denied') {
+          if (capturedSessionId !== undefined) {
+            setSessionHostAccessGrants((current) => {
+              const next = { ...current }
+              delete next[capturedSessionId]
+              return next
+            })
+          }
+          if (capturedPermissionKey !== undefined) {
+            setConversationPermissionModes((current) => ({ ...current, [capturedPermissionKey]: 'read-only' }))
+          }
+        }
         const failure = cause instanceof Error ? cause.message : '消息发送失败'
         const failedSessionId = sessionByQueueKeyRef.current.get(queueKey) ?? capturedSessionId
         if (failedSessionId !== undefined && !demoMode) {
@@ -1648,6 +1661,7 @@ export default function App() {
     return Promise.resolve()
   }, [
     activeConversationKey,
+    activePermissionKey,
     activeSession,
     activeSessionId,
     activeWorld,

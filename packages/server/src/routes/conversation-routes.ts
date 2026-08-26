@@ -221,6 +221,9 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
         sessionId: requestedSessionId,
         employeeIds,
       }) === true
+    if (requestedPermissionMode === 'danger-full-access' && !ownerHostAccess) {
+      throw new HttpError(403, 'owner_runtime_access_denied', '当前会话完全访问授权已失效，请重新确认')
+    }
     const resolvedPermissions = worldRuntimePermissions === undefined
       ? undefined
       : await Promise.all(employeeIds.map((employeeId) => worldRuntimePermissions.resolve({
@@ -230,9 +233,9 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
           ownerHostAccess,
         })))
     const permissionMode: AgentPermissionMode = resolvedPermissions === undefined
-      // Without a resolver the request cannot be trusted to cap itself; the
-      // safe default is the least privilege, not what the client asked for.
-      ? requestedPermissionMode === 'danger-full-access' ? 'read-only' : requestedPermissionMode
+      ? requestedPermissionMode === 'danger-full-access'
+        ? ownerHostAccess ? 'danger-full-access' : 'read-only'
+        : requestedPermissionMode
       : resolvedPermissions.every((item) => item.permissionMode === 'danger-full-access')
         ? 'danger-full-access'
         : resolvedPermissions.every((item) => item.permissionMode === 'workspace-write' || item.permissionMode === 'danger-full-access')

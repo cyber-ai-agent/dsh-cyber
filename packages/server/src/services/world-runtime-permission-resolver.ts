@@ -28,10 +28,9 @@ export interface ResolveWorldRuntimePermissionInput {
 }
 
 /**
- * Resolves the effective DSH runtime sandbox from the world authority row.
- * This is intentionally provider-neutral and always anchors writes inside
- * `worlds/<worldId>/files`; a world character can never turn a settings value
- * into `danger-full-access`.
+ * Resolves the DSH conversation sandbox and the character's world workspace.
+ * The conversation permission controls DSH tools. World authority controls
+ * which workspace directory the character receives by default.
  */
 export class WorldRuntimePermissionResolver {
   readonly #roots: WorldRootService
@@ -51,19 +50,15 @@ export class WorldRuntimePermissionResolver {
     const canWrite = this.#authority === undefined
       ? false
       : await this.#authority.hasPermission(input.worldId, input.employeeId, 'world.files.write')
-    // A character runtime is capped at workspace-write even when legacy
-    // settings or an untrusted prompt asks for full host access.
     const fileAccess: WorldFileAccess = canWrite ? 'write' : canRead ? 'read' : 'none'
     const permissionMode: AgentPermissionMode = requested === 'danger-full-access'
       // Full host access is reachable only through an explicit current-session
-      // owner grant, and still requires the character to hold file write — the
-      // grant lifts the host boundary, not the world one.
-      ? input.ownerHostAccess === true && canWrite
+      // owner grant. The grant itself is already bound to world, session and
+      // character IDs before this resolver is called.
+      ? input.ownerHostAccess === true
         ? 'danger-full-access'
-        : canWrite ? 'workspace-write' : 'read-only'
-      : requested === 'workspace-write' && canWrite
-      ? 'workspace-write'
-      : 'read-only'
+        : 'read-only'
+      : requested
     // Without world.files.read the runtime is anchored at an empty
     // host-managed workspace instead of the world's real files. Handing both
     // cases the same directory is what made the permission inert: a character

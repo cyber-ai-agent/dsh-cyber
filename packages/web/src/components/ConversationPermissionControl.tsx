@@ -50,7 +50,7 @@ export function ConversationPermissionControl({ value, onChange, onRequestFullAc
       {open ? <div className="conversation-permission-menu" role="menu" aria-label="当前消息权限">
         <button className={value === 'read-only' ? 'is-selected' : ''} type="button" role="menuitemradio" aria-checked={value === 'read-only'} onClick={() => select('read-only')}>
           <ShieldCheck size={18} />
-          <span><strong>请求批准</strong><small>以只读模式执行，写入、命令和外部能力按具体动作请求确认。</small></span>
+          <span><strong>请求批准</strong><small>以只读模式执行；需要写入或命令时，角色会说明所需操作。</small></span>
           {value === 'read-only' ? <Check size={17} /> : null}
         </button>
         <button className={value === 'workspace-write' ? 'is-selected' : ''} type="button" role="menuitemradio" aria-checked={value === 'workspace-write'} onClick={() => select('workspace-write')}>

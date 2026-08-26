@@ -17,12 +17,13 @@ afterEach(async () => {
 
 /** Records the sandbox each turn was actually given. */
 class WorkspaceRecordingRuntime implements AgentRuntimePort {
-  readonly turns: Array<{ agentId: string; workspacePath: string; permissionMode?: string }> = []
+  readonly turns: Array<{ agentId: string; workspacePath: string; persona: string; permissionMode?: string }> = []
 
   async runTurn(request: AgentTurnRequest) {
     this.turns.push({
       agentId: request.agent.id,
       workspacePath: request.workspacePath,
+      persona: request.revision.persona,
       ...(request.permissionMode === undefined ? {} : { permissionMode: request.permissionMode }),
     })
     return { agentSessionId: `agent-${request.agent.id}`, finalResponse: '好的。', eventCount: 0 }
@@ -142,15 +143,25 @@ describe('world file access', () => {
     expect(turn.permissionMode).toBe('workspace-write')
   })
 
-  it('never lets a request escalate itself to danger-full-access', async () => {
+  it('passes workspace-write to DSH while keeping a role without world file access in its restricted workspace', async () => {
     const { origin, runtime, world, characterId } = await start()
-    await setAccess(origin, world.id, characterId, [...RECOMMENDED_ADMIN_PERMISSIONS], 'administrator')
-    await chat(origin, world.id, characterId, 'danger-full-access')
+    await setAccess(origin, world.id, characterId, [])
+    await chat(origin, world.id, characterId, 'workspace-write')
 
     const turn = runtime.turns.at(-1)!
-    // Administrator rights are not host rights. The cap holds regardless of
-    // what the client asks for.
-    expect(turn.permissionMode).not.toBe('danger-full-access')
+    expect(turn.workspacePath).toContain('restricted-workspace')
+    expect(turn.permissionMode).toBe('workspace-write')
+    expect(turn.persona).toContain('模式：workspace-write（帮我批准）')
+  })
+
+  it('rejects danger-full-access when the current session grant is absent', async () => {
+    const { origin, runtime, world, characterId } = await start()
+    await setAccess(origin, world.id, characterId, [...RECOMMENDED_ADMIN_PERMISSIONS], 'administrator')
+    const result = await chat(origin, world.id, characterId, 'danger-full-access')
+
+    expect(result.response.status).toBe(403)
+    expect(result.body.error.code).toBe('owner_runtime_access_denied')
+    expect(runtime.turns).toHaveLength(0)
   })
 
   it('keeps each character in its own sandbox within one world', async () => {
@@ -239,21 +250,23 @@ describe('pending decisions are announced, not polled for', () => {
 })
 
 describe('full host access needs the owner, never the character', () => {
-  it('stays capped without a grant even for a world administrator', async () => {
+  it('returns an explicit authorization error without a session grant', async () => {
     const { origin, runtime, world, characterId } = await start()
     await setAccess(origin, world.id, characterId, [...RECOMMENDED_ADMIN_PERMISSIONS], 'administrator')
-    await json(origin, `/api/worlds/${world.id}/chat`, send('POST', {
+    const refused = await json(origin, `/api/worlds/${world.id}/chat`, send('POST', {
       prompt: '你好',
       employeeIds: [characterId],
       permissionMode: 'danger-full-access',
       clientTurnId: 'turn-no-grant',
     }))
-    expect(runtime.turns.at(-1)!.permissionMode).not.toBe('danger-full-access')
+    expect(refused.response.status).toBe(403)
+    expect(refused.body.error.code).toBe('owner_runtime_access_denied')
+    expect(runtime.turns).toHaveLength(0)
   })
 
   it('keeps a confirmed full-access grant active for the current session', async () => {
     const { origin, server, runtime, world, characterId } = await start()
-    await setAccess(origin, world.id, characterId, ['world.files.read', 'world.files.write'])
+    await setAccess(origin, world.id, characterId, ['world.files.read'])
     const session = server.store.createSession({ workspaceId: world.workspaceId, worldId: world.id, kind: 'direct', title: '完整访问测试', participants: [{ participantId: 'owner', kind: 'owner' }, { participantId: characterId, kind: 'employee' }] })
 
     const issued = await json(origin, `/api/worlds/${world.id}/runtime-access-grants`, send('POST', {
@@ -273,6 +286,8 @@ describe('full host access needs the owner, never the character', () => {
       runtimeAccessGrantId: issued.body.grant.id,
     }))
     expect(runtime.turns.at(-1)!.permissionMode).toBe('danger-full-access')
+    expect(runtime.turns.at(-1)!.persona).toContain('模式：danger-full-access（完全访问）')
+    expect(runtime.turns.at(-1)!.persona).toContain('用户已为当前会话和当前角色完成高风险确认')
 
     await json(origin, `/api/worlds/${world.id}/chat`, send('POST', {
       prompt: '再来一次',
