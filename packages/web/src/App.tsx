@@ -798,9 +798,10 @@ export default function App() {
 
   useEffect(() => {
     const root = document.documentElement
+    const savedSkin = typeof localStorage !== 'undefined' ? localStorage.getItem('dsh_cyber_skin') : null
     const scheme = preferences?.colorScheme ?? 'dark'
     root.dataset.colorScheme = scheme
-    root.dataset.skin = preferences?.skinId ?? 'cyber-graphite'
+    root.dataset.skin = preferences?.skinId ?? savedSkin ?? 'maid-atelier'
     root.dataset.density = preferences?.interfaceDensity ?? 'compact'
     root.dataset.motion = preferences?.motion ?? 'system'
   }, [preferences])
@@ -1801,6 +1802,8 @@ export default function App() {
   }, [workspace])
 
   const savePreferences = useCallback(async (next: WorkspacePreferences) => {
+    if (typeof localStorage !== 'undefined' && next.skinId) localStorage.setItem('dsh_cyber_skin', next.skinId)
+    if (next.skinId) document.documentElement.dataset.skin = next.skinId
     if (workspace === undefined) return
     setSavingSettings(true)
     try {
@@ -1817,7 +1820,7 @@ export default function App() {
     } finally {
       setSavingSettings(false)
     }
-  }, [workspace])
+  }, [demoMode, workspace])
 
   const uploadBackground = useCallback(async (file: File) => {
     if (workspace === undefined) throw new Error('请先创建工作区')
@@ -2242,8 +2245,15 @@ export default function App() {
           installing={packageInstalling}
           currentSkinId={preferences?.skinId}
           onApplySkin={async (skinId) => {
-            if (preferences !== undefined) {
-              await savePreferences({ ...preferences, skinId })
+            try {
+              if (typeof localStorage !== 'undefined') localStorage.setItem('dsh_cyber_skin', skinId)
+              document.documentElement.dataset.skin = skinId
+              setPreferences((curr) => curr ? { ...curr, skinId } : { skinId } as any)
+              if (preferences !== undefined) {
+                await savePreferences({ ...preferences, skinId })
+              }
+            } catch {
+              // ignore
             }
           }}
           onClose={() => setPackageMarketOpen(false)}

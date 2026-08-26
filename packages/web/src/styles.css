@@ -81,282 +81,359 @@
 }
 
 /* ==========================================================================
-   DSH Cyber 8 Immersive Skins & Theme Ecosystem (DSH Skin Universe)
+   DSH Cyber 12 Immersive Skins & Theme Ecosystem (DSH Skin Universe)
    ========================================================================== */
 
 /* 1. 深海女仆工坊 (Deep Whale Maid Atelier) - 源自 Small-tailqwq/dsh-deep-whale 鲸鱼娘 */
 :root[data-skin='maid-atelier'] {
   --bg: #070e17;
-  --surface-0: rgba(10, 20, 34, 0.78);
-  --surface-1: rgba(15, 28, 48, 0.84);
-  --surface-2: rgba(22, 40, 68, 0.88);
-  --surface-3: rgba(30, 54, 90, 0.92);
-  --border: rgba(56, 189, 248, 0.24);
-  --border-strong: rgba(56, 189, 248, 0.42);
-  --border-highlight: rgba(125, 211, 252, 0.6);
+  --surface-0: rgba(9, 18, 30, 0.74);
+  --surface-1: rgba(14, 26, 44, 0.82);
+  --surface-2: rgba(20, 36, 62, 0.88);
+  --surface-3: rgba(28, 50, 84, 0.92);
+  --border: rgba(56, 189, 248, 0.26);
+  --border-strong: rgba(56, 189, 248, 0.46);
+  --border-highlight: rgba(125, 211, 252, 0.65);
   --accent: #38bdf8;
   --accent-strong: #7dd3fc;
-  --accent-soft: rgba(56, 189, 248, 0.18);
-  --accent-glow: 0 0 24px rgba(56, 189, 248, 0.5);
+  --accent-soft: rgba(56, 189, 248, 0.2);
+  --accent-glow: 0 0 24px rgba(56, 189, 248, 0.55);
   --text: #f0f9ff;
   --text-muted: #93c5fd;
   --text-soft: #e0f2fe;
-  --glass-bg: rgba(10, 20, 36, 0.74);
+  --bubble-owner-bg: linear-gradient(135deg, #0ea5e9 0%, #0284c7 60%, #0369a1 100%);
+  --bubble-owner-color: #ffffff;
+  --bubble-owner-border: rgba(125, 211, 252, 0.7);
+  --bubble-owner-shadow: 0 4px 24px rgba(2, 132, 199, 0.45);
+  --bubble-assistant-bg: rgba(10, 22, 38, 0.82);
+  --bubble-assistant-border: rgba(56, 189, 248, 0.32);
+  --glass-bg: rgba(9, 18, 32, 0.72);
   --glass-blur: blur(24px);
-  --skin-backdrop: radial-gradient(circle at 80% 20%, rgba(56, 189, 248, 0.35) 0%, transparent 55%),
-    radial-gradient(circle at 20% 80%, rgba(125, 211, 252, 0.25) 0%, transparent 60%),
-    radial-gradient(ellipse at 50% 50%, rgba(14, 165, 233, 0.12) 0%, transparent 70%),
+  --skin-backdrop: radial-gradient(circle at 80% 20%, rgba(56, 189, 248, 0.4) 0%, transparent 55%),
+    radial-gradient(circle at 20% 80%, rgba(125, 211, 252, 0.28) 0%, transparent 60%),
+    radial-gradient(ellipse at 50% 50%, rgba(14, 165, 233, 0.16) 0%, transparent 70%),
     linear-gradient(175deg, #091321 0%, #0d1e34 45%, #050b14 100%);
+  --skin-watermark: radial-gradient(circle at 75% 75%, rgba(56, 189, 248, 0.22) 0%, transparent 60%);
 }
 
 /* 2. 虎鲸链路 (Orca Link) - 源自 Small-tailqwq/dsh-deep-whale 虎鲸娘 */
 :root[data-skin='orca-link'] {
   --bg: #0b1118;
-  --surface-0: rgba(14, 22, 32, 0.8);
-  --surface-1: rgba(20, 31, 46, 0.86);
-  --surface-2: rgba(28, 43, 64, 0.9);
-  --surface-3: rgba(38, 58, 86, 0.94);
-  --border: rgba(2, 132, 199, 0.26);
-  --border-strong: rgba(56, 189, 248, 0.44);
-  --border-highlight: rgba(56, 189, 248, 0.65);
+  --surface-0: rgba(12, 19, 28, 0.76);
+  --surface-1: rgba(18, 28, 42, 0.84);
+  --surface-2: rgba(26, 40, 60, 0.89);
+  --surface-3: rgba(36, 54, 80, 0.93);
+  --border: rgba(2, 132, 199, 0.28);
+  --border-strong: rgba(56, 189, 248, 0.48);
+  --border-highlight: rgba(56, 189, 248, 0.7);
   --accent: #0284c7;
   --accent-strong: #38bdf8;
-  --accent-soft: rgba(2, 132, 199, 0.2);
-  --accent-glow: 0 0 24px rgba(2, 132, 199, 0.5);
+  --accent-soft: rgba(2, 132, 199, 0.22);
+  --accent-glow: 0 0 24px rgba(2, 132, 199, 0.55);
   --text: #f0fdf4;
   --text-muted: #7dd3fc;
   --text-soft: #e0f2fe;
-  --glass-bg: rgba(14, 22, 34, 0.76);
+  --bubble-owner-bg: linear-gradient(135deg, #0284c7 0%, #0369a1 60%, #0c4a6e 100%);
+  --bubble-owner-color: #ffffff;
+  --bubble-owner-border: rgba(56, 189, 248, 0.8);
+  --bubble-owner-shadow: 0 4px 24px rgba(2, 132, 199, 0.5);
+  --bubble-assistant-bg: rgba(14, 24, 38, 0.82);
+  --bubble-assistant-border: rgba(2, 132, 199, 0.35);
+  --glass-bg: rgba(12, 19, 30, 0.74);
   --glass-blur: blur(20px);
-  --skin-backdrop: radial-gradient(circle at 50% 10%, rgba(2, 132, 199, 0.35) 0%, transparent 60%),
-    radial-gradient(circle at 85% 85%, rgba(56, 189, 248, 0.2) 0%, transparent 55%),
-    repeating-linear-gradient(0deg, transparent, transparent 29px, rgba(56, 189, 248, 0.04) 30px),
+  --skin-backdrop: radial-gradient(circle at 50% 10%, rgba(2, 132, 199, 0.38) 0%, transparent 60%),
+    radial-gradient(circle at 85% 85%, rgba(56, 189, 248, 0.24) 0%, transparent 55%),
+    repeating-linear-gradient(0deg, transparent, transparent 29px, rgba(56, 189, 248, 0.05) 30px),
     linear-gradient(180deg, #091017 0%, #0f1925 50%, #060a0f 100%);
+  --skin-watermark: radial-gradient(circle at 75% 75%, rgba(2, 132, 199, 0.25) 0%, transparent 60%);
 }
 
 /* 3. 绝区零 · 星见雅 (ZZZ Miyabi) - 源自 whyihaveyou/dsh-themes */
 :root[data-skin='zzz-miyabi'] {
   --bg: #06090e;
-  --surface-0: rgba(10, 14, 22, 0.8);
-  --surface-1: rgba(15, 22, 34, 0.85);
-  --surface-2: rgba(22, 32, 48, 0.89);
-  --surface-3: rgba(30, 43, 64, 0.93);
-  --border: rgba(0, 240, 255, 0.24);
-  --border-strong: rgba(0, 240, 255, 0.45);
-  --border-highlight: rgba(0, 240, 255, 0.65);
+  --surface-0: rgba(9, 13, 20, 0.76);
+  --surface-1: rgba(14, 20, 32, 0.84);
+  --surface-2: rgba(20, 30, 46, 0.89);
+  --surface-3: rgba(28, 40, 62, 0.93);
+  --border: rgba(0, 240, 255, 0.26);
+  --border-strong: rgba(0, 240, 255, 0.48);
+  --border-highlight: rgba(0, 240, 255, 0.7);
   --accent: #00f0ff;
   --accent-strong: #67e8f9;
-  --accent-soft: rgba(0, 240, 255, 0.18);
-  --accent-glow: 0 0 26px rgba(0, 240, 255, 0.55);
+  --accent-soft: rgba(0, 240, 255, 0.2);
+  --accent-glow: 0 0 26px rgba(0, 240, 255, 0.6);
   --text: #f0fdff;
   --text-muted: #7dd3fc;
   --text-soft: #cffafe;
-  --glass-bg: rgba(10, 14, 24, 0.74);
+  --bubble-owner-bg: linear-gradient(135deg, #00f0ff 0%, #06b6d4 60%, #0891b2 100%);
+  --bubble-owner-color: #040810;
+  --bubble-owner-border: #00f0ff;
+  --bubble-owner-shadow: 0 0 24px rgba(0, 240, 255, 0.55);
+  --bubble-assistant-bg: rgba(8, 12, 18, 0.85);
+  --bubble-assistant-border: rgba(0, 240, 255, 0.35);
+  --glass-bg: rgba(9, 13, 22, 0.74);
   --glass-blur: blur(20px);
-  --skin-backdrop: radial-gradient(circle at 85% 15%, rgba(0, 240, 255, 0.36) 0%, transparent 50%),
-    radial-gradient(circle at 15% 85%, rgba(147, 51, 234, 0.25) 0%, transparent 55%),
-    linear-gradient(135deg, rgba(0, 240, 255, 0.08) 0%, transparent 100%),
+  --skin-backdrop: radial-gradient(circle at 85% 15%, rgba(0, 240, 255, 0.4) 0%, transparent 50%),
+    radial-gradient(circle at 15% 85%, rgba(147, 51, 234, 0.28) 0%, transparent 55%),
+    linear-gradient(135deg, rgba(0, 240, 255, 0.1) 0%, transparent 100%),
     linear-gradient(180deg, #06090e 0%, #0b111a 60%, #040609 100%);
+  --skin-watermark: radial-gradient(circle at 75% 75%, rgba(0, 240, 255, 0.25) 0%, transparent 60%);
 }
 
 /* 4. 绝区零 · 艾莲 (ZZZ Ellen) - 源自 whyihaveyou/dsh-themes */
 :root[data-skin='zzz-ellen'] {
   --bg: #0d0a0d;
-  --surface-0: rgba(19, 14, 20, 0.8);
-  --surface-1: rgba(28, 20, 30, 0.85);
-  --surface-2: rgba(40, 28, 42, 0.89);
-  --surface-3: rgba(54, 38, 56, 0.93);
-  --border: rgba(244, 63, 94, 0.25);
-  --border-strong: rgba(244, 63, 94, 0.45);
-  --border-highlight: rgba(251, 113, 133, 0.6);
+  --surface-0: rgba(17, 12, 18, 0.76);
+  --surface-1: rgba(26, 18, 28, 0.84);
+  --surface-2: rgba(38, 26, 40, 0.89);
+  --surface-3: rgba(50, 34, 54, 0.93);
+  --border: rgba(244, 63, 94, 0.28);
+  --border-strong: rgba(244, 63, 94, 0.48);
+  --border-highlight: rgba(251, 113, 133, 0.65);
   --accent: #f43f5e;
   --accent-strong: #fb7185;
-  --accent-soft: rgba(244, 63, 94, 0.18);
-  --accent-glow: 0 0 24px rgba(244, 63, 94, 0.5);
+  --accent-soft: rgba(244, 63, 94, 0.2);
+  --accent-glow: 0 0 24px rgba(244, 63, 94, 0.55);
   --text: #fff1f2;
   --text-muted: #fda4af;
   --text-soft: #ffe4e6;
-  --glass-bg: rgba(19, 14, 22, 0.74);
+  --bubble-owner-bg: linear-gradient(135deg, #f43f5e 0%, #e11d48 60%, #be123c 100%);
+  --bubble-owner-color: #ffffff;
+  --bubble-owner-border: rgba(251, 113, 133, 0.7);
+  --bubble-owner-shadow: 0 4px 24px rgba(244, 63, 94, 0.45);
+  --bubble-assistant-bg: rgba(18, 12, 18, 0.85);
+  --bubble-assistant-border: rgba(244, 63, 94, 0.35);
+  --glass-bg: rgba(17, 12, 20, 0.74);
   --glass-blur: blur(20px);
-  --skin-backdrop: radial-gradient(circle at 80% 20%, rgba(244, 63, 94, 0.35) 0%, transparent 50%),
-    radial-gradient(circle at 20% 80%, rgba(225, 29, 72, 0.22) 0%, transparent 55%),
+  --skin-backdrop: radial-gradient(circle at 80% 20%, rgba(244, 63, 94, 0.38) 0%, transparent 50%),
+    radial-gradient(circle at 20% 80%, rgba(225, 29, 72, 0.25) 0%, transparent 55%),
     linear-gradient(180deg, #110c12 0%, #1a111c 50%, #09060a 100%);
+  --skin-watermark: radial-gradient(circle at 75% 75%, rgba(244, 63, 94, 0.22) 0%, transparent 60%);
 }
 
 /* 5. 初恋时刻 (First Love) - 日系电影治愈 / 清透粉白水润玻璃 / 晨曦微风 */
 :root[data-skin='first-love'] {
   --bg: #0f0d14;
-  --surface-0: rgba(22, 18, 30, 0.76);
-  --surface-1: rgba(30, 24, 42, 0.82);
-  --surface-2: rgba(44, 34, 60, 0.88);
-  --surface-3: rgba(58, 44, 80, 0.92);
-  --border: rgba(255, 182, 193, 0.2);
-  --border-strong: rgba(255, 182, 193, 0.38);
-  --border-highlight: rgba(255, 192, 203, 0.55);
+  --surface-0: rgba(20, 16, 28, 0.74);
+  --surface-1: rgba(28, 22, 40, 0.82);
+  --surface-2: rgba(42, 32, 58, 0.88);
+  --surface-3: rgba(56, 42, 78, 0.92);
+  --border: rgba(255, 182, 193, 0.24);
+  --border-strong: rgba(255, 182, 193, 0.42);
+  --border-highlight: rgba(255, 192, 203, 0.6);
   --accent: #ff7597;
   --accent-strong: #ffa3b8;
-  --accent-soft: rgba(255, 117, 151, 0.18);
-  --accent-glow: 0 0 24px rgba(255, 117, 151, 0.45);
+  --accent-soft: rgba(255, 117, 151, 0.2);
+  --accent-glow: 0 0 24px rgba(255, 117, 151, 0.5);
   --text: #fff5f8;
   --text-muted: #c9b8c2;
   --text-soft: #f5e4ec;
-  --glass-bg: rgba(22, 18, 32, 0.72);
+  --bubble-owner-bg: linear-gradient(135deg, #ff7597 0%, #fb7185 60%, #f43f5e 100%);
+  --bubble-owner-color: #ffffff;
+  --bubble-owner-border: rgba(255, 182, 193, 0.8);
+  --bubble-owner-shadow: 0 4px 24px rgba(255, 117, 151, 0.45);
+  --bubble-assistant-bg: rgba(26, 18, 34, 0.8);
+  --bubble-assistant-border: rgba(255, 182, 193, 0.32);
+  --glass-bg: rgba(20, 16, 30, 0.72);
   --glass-blur: blur(24px);
-  --skin-backdrop: radial-gradient(ellipse at 80% 15%, rgba(255, 130, 160, 0.32) 0%, transparent 55%),
-    radial-gradient(ellipse at 15% 85%, rgba(168, 85, 247, 0.26) 0%, transparent 60%),
-    radial-gradient(circle at 50% 50%, rgba(255, 182, 193, 0.12) 0%, transparent 70%),
+  --skin-backdrop: radial-gradient(ellipse at 80% 15%, rgba(255, 130, 160, 0.36) 0%, transparent 55%),
+    radial-gradient(ellipse at 15% 85%, rgba(168, 85, 247, 0.3) 0%, transparent 60%),
+    radial-gradient(circle at 50% 50%, rgba(255, 182, 193, 0.15) 0%, transparent 70%),
     linear-gradient(145deg, #181222 0%, #0d0a14 50%, #171020 100%);
+  --skin-watermark: radial-gradient(circle at 75% 75%, rgba(255, 117, 151, 0.22) 0%, transparent 60%);
 }
 
 /* 6. 蛛网都市 (Spider Verse) - 纽约赛博高空夜景 / 经典红蓝撞色 / 蛛网高光 */
 :root[data-skin='spider-verse'] {
   --bg: #070910;
-  --surface-0: rgba(11, 15, 26, 0.78);
-  --surface-1: rgba(16, 22, 38, 0.84);
-  --surface-2: rgba(24, 32, 56, 0.88);
-  --surface-3: rgba(34, 45, 76, 0.92);
-  --border: rgba(239, 68, 68, 0.24);
-  --border-strong: rgba(56, 189, 248, 0.4);
-  --border-highlight: rgba(239, 68, 68, 0.55);
+  --surface-0: rgba(10, 14, 24, 0.76);
+  --surface-1: rgba(15, 20, 36, 0.84);
+  --surface-2: rgba(22, 30, 52, 0.89);
+  --surface-3: rgba(32, 42, 72, 0.93);
+  --border: rgba(239, 68, 68, 0.26);
+  --border-strong: rgba(56, 189, 248, 0.44);
+  --border-highlight: rgba(239, 68, 68, 0.6);
   --accent: #ef4444;
   --accent-strong: #38bdf8;
-  --accent-soft: rgba(239, 68, 68, 0.18);
-  --accent-glow: 0 0 24px rgba(239, 68, 68, 0.5);
+  --accent-soft: rgba(239, 68, 68, 0.2);
+  --accent-glow: 0 0 24px rgba(239, 68, 68, 0.55);
   --text: #f8fafc;
   --text-muted: #94a3b8;
   --text-soft: #e2e8f0;
-  --glass-bg: rgba(11, 15, 28, 0.74);
+  --bubble-owner-bg: linear-gradient(135deg, #ef4444 0%, #dc2626 60%, #991b1b 100%);
+  --bubble-owner-color: #ffffff;
+  --bubble-owner-border: #38bdf8;
+  --bubble-owner-shadow: 0 4px 24px rgba(239, 68, 68, 0.5);
+  --bubble-assistant-bg: rgba(10, 14, 24, 0.85);
+  --bubble-assistant-border: rgba(239, 68, 68, 0.32);
+  --glass-bg: rgba(10, 14, 26, 0.74);
   --glass-blur: blur(20px);
-  --skin-backdrop: radial-gradient(circle at 85% 18%, rgba(239, 68, 68, 0.36) 0%, transparent 50%),
-    radial-gradient(circle at 12% 75%, rgba(14, 165, 233, 0.32) 0%, transparent 55%),
+  --skin-backdrop: radial-gradient(circle at 85% 18%, rgba(239, 68, 68, 0.4) 0%, transparent 50%),
+    radial-gradient(circle at 12% 75%, rgba(14, 165, 233, 0.36) 0%, transparent 55%),
     repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(56, 189, 248, 0.05) 40px),
     repeating-linear-gradient(90deg, transparent, transparent 39px, rgba(239, 68, 68, 0.05) 40px),
     linear-gradient(180deg, #070910 0%, #0c121e 50%, #06080d 100%);
+  --skin-watermark: radial-gradient(circle at 75% 75%, rgba(239, 68, 68, 0.25) 0%, transparent 60%);
 }
 
 /* 7. 宝可梦黄昏 (Pokemon Sunset) - 原野旅途夕阳 / 暖金暮云 / 治愈温暖 */
 :root[data-skin='pokemon-sunset'] {
   --bg: #140d09;
-  --surface-0: rgba(28, 18, 13, 0.78);
-  --surface-1: rgba(38, 24, 17, 0.84);
-  --surface-2: rgba(52, 32, 23, 0.88);
-  --surface-3: rgba(68, 42, 30, 0.92);
-  --border: rgba(245, 158, 11, 0.26);
-  --border-strong: rgba(249, 115, 22, 0.42);
-  --border-highlight: rgba(251, 191, 36, 0.55);
+  --surface-0: rgba(26, 16, 11, 0.76);
+  --surface-1: rgba(36, 22, 15, 0.84);
+  --surface-2: rgba(50, 30, 21, 0.89);
+  --surface-3: rgba(65, 39, 28, 0.93);
+  --border: rgba(245, 158, 11, 0.28);
+  --border-strong: rgba(249, 115, 22, 0.46);
+  --border-highlight: rgba(251, 191, 36, 0.6);
   --accent: #f59e0b;
   --accent-strong: #fbbf24;
-  --accent-soft: rgba(245, 158, 11, 0.18);
-  --accent-glow: 0 0 24px rgba(245, 158, 11, 0.45);
+  --accent-soft: rgba(245, 158, 11, 0.2);
+  --accent-glow: 0 0 24px rgba(245, 158, 11, 0.5);
   --text: #fffbeb;
   --text-muted: #d97706;
   --text-soft: #fef3c7;
-  --glass-bg: rgba(28, 18, 13, 0.72);
+  --bubble-owner-bg: linear-gradient(135deg, #f59e0b 0%, #d97706 60%, #b45309 100%);
+  --bubble-owner-color: #ffffff;
+  --bubble-owner-border: rgba(251, 191, 36, 0.8);
+  --bubble-owner-shadow: 0 4px 24px rgba(245, 158, 11, 0.45);
+  --bubble-assistant-bg: rgba(24, 16, 11, 0.82);
+  --bubble-assistant-border: rgba(245, 158, 11, 0.32);
+  --glass-bg: rgba(26, 16, 12, 0.72);
   --glass-blur: blur(20px);
-  --skin-backdrop: radial-gradient(ellipse at 50% 12%, rgba(251, 191, 36, 0.4) 0%, transparent 60%),
-    radial-gradient(ellipse at 85% 65%, rgba(239, 68, 68, 0.3) 0%, transparent 55%),
-    radial-gradient(ellipse at 15% 85%, rgba(217, 119, 6, 0.32) 0%, transparent 60%),
+  --skin-backdrop: radial-gradient(ellipse at 50% 12%, rgba(251, 191, 36, 0.44) 0%, transparent 60%),
+    radial-gradient(ellipse at 85% 65%, rgba(239, 68, 68, 0.34) 0%, transparent 55%),
+    radial-gradient(ellipse at 15% 85%, rgba(217, 119, 6, 0.36) 0%, transparent 60%),
     linear-gradient(180deg, #1f120b 0%, #2b160c 45%, #120b06 100%);
+  --skin-watermark: radial-gradient(circle at 75% 75%, rgba(245, 158, 11, 0.22) 0%, transparent 60%);
 }
 
 /* 8. 木叶忍界 (Naruto Konoha) - 火之意志 / 木叶火影岩黄昏 / 深炭金橙装甲 */
 :root[data-skin='naruto-konoha'] {
   --bg: #110d08;
-  --surface-0: rgba(25, 18, 12, 0.78);
-  --surface-1: rgba(35, 24, 16, 0.84);
-  --surface-2: rgba(48, 33, 22, 0.88);
-  --surface-3: rgba(64, 44, 28, 0.92);
-  --border: rgba(234, 88, 12, 0.28);
-  --border-strong: rgba(249, 115, 22, 0.46);
-  --border-highlight: rgba(251, 146, 60, 0.6);
+  --surface-0: rgba(23, 16, 10, 0.76);
+  --surface-1: rgba(33, 22, 14, 0.84);
+  --surface-2: rgba(45, 31, 20, 0.89);
+  --surface-3: rgba(60, 41, 26, 0.93);
+  --border: rgba(234, 88, 12, 0.3);
+  --border-strong: rgba(249, 115, 22, 0.48);
+  --border-highlight: rgba(251, 146, 60, 0.65);
   --accent: #ea580c;
   --accent-strong: #f97316;
-  --accent-soft: rgba(234, 88, 12, 0.2);
-  --accent-glow: 0 0 26px rgba(234, 88, 12, 0.5);
+  --accent-soft: rgba(234, 88, 12, 0.22);
+  --accent-glow: 0 0 26px rgba(234, 88, 12, 0.55);
   --text: #fff7ed;
   --text-muted: #fdba74;
   --text-soft: #ffedd5;
-  --glass-bg: rgba(25, 18, 12, 0.74);
+  --bubble-owner-bg: linear-gradient(135deg, #ea580c 0%, #c2410c 60%, #9a3412 100%);
+  --bubble-owner-color: #ffffff;
+  --bubble-owner-border: rgba(251, 146, 60, 0.8);
+  --bubble-owner-shadow: 0 4px 24px rgba(234, 88, 12, 0.5);
+  --bubble-assistant-bg: rgba(22, 15, 10, 0.85);
+  --bubble-assistant-border: rgba(234, 88, 12, 0.35);
+  --glass-bg: rgba(23, 16, 11, 0.74);
   --glass-blur: blur(20px);
-  --skin-backdrop: radial-gradient(circle at 18% 28%, rgba(234, 88, 12, 0.4) 0%, transparent 55%),
-    radial-gradient(circle at 82% 72%, rgba(180, 83, 9, 0.35) 0%, transparent 55%),
-    radial-gradient(ellipse at 50% 92%, rgba(239, 68, 68, 0.26) 0%, transparent 60%),
+  --skin-backdrop: radial-gradient(circle at 18% 28%, rgba(234, 88, 12, 0.44) 0%, transparent 55%),
+    radial-gradient(circle at 82% 72%, rgba(180, 83, 9, 0.38) 0%, transparent 55%),
+    radial-gradient(ellipse at 50% 92%, rgba(239, 68, 68, 0.3) 0%, transparent 60%),
     linear-gradient(150deg, #1a110a 0%, #20140b 50%, #0e0906 100%);
+  --skin-watermark: radial-gradient(circle at 75% 75%, rgba(234, 88, 12, 0.24) 0%, transparent 60%);
 }
 
 /* 9. 鬼灭藤夜 (Demon Slayer Night) - 深靛紫夜 / 紫藤花光尘 / 月下水墨刀光 */
 :root[data-skin='demon-slayer-night'] {
   --bg: #090712;
-  --surface-0: rgba(16, 13, 29, 0.78);
-  --surface-1: rgba(23, 19, 42, 0.84);
-  --surface-2: rgba(33, 27, 60, 0.88);
-  --surface-3: rgba(45, 37, 80, 0.92);
-  --border: rgba(168, 85, 247, 0.26);
-  --border-strong: rgba(192, 132, 252, 0.42);
-  --border-highlight: rgba(216, 180, 254, 0.55);
+  --surface-0: rgba(14, 11, 26, 0.76);
+  --surface-1: rgba(21, 17, 38, 0.84);
+  --surface-2: rgba(30, 24, 55, 0.89);
+  --surface-3: rgba(42, 34, 74, 0.93);
+  --border: rgba(168, 85, 247, 0.28);
+  --border-strong: rgba(192, 132, 252, 0.45);
+  --border-highlight: rgba(216, 180, 254, 0.6);
   --accent: #a855f7;
   --accent-strong: #c084fc;
-  --accent-soft: rgba(168, 85, 247, 0.18);
-  --accent-glow: 0 0 26px rgba(168, 85, 247, 0.5);
+  --accent-soft: rgba(168, 85, 247, 0.2);
+  --accent-glow: 0 0 26px rgba(168, 85, 247, 0.55);
   --text: #faf5ff;
   --text-muted: #d8b4fe;
   --text-soft: #f3e8ff;
-  --glass-bg: rgba(16, 13, 30, 0.74);
+  --bubble-owner-bg: linear-gradient(135deg, #a855f7 0%, #9333ea 60%, #7e22ce 100%);
+  --bubble-owner-color: #ffffff;
+  --bubble-owner-border: rgba(216, 180, 254, 0.8);
+  --bubble-owner-shadow: 0 4px 24px rgba(168, 85, 247, 0.5);
+  --bubble-assistant-bg: rgba(14, 10, 24, 0.85);
+  --bubble-assistant-border: rgba(168, 85, 247, 0.35);
+  --glass-bg: rgba(14, 11, 28, 0.74);
   --glass-blur: blur(24px);
-  --skin-backdrop: radial-gradient(circle at 82% 18%, rgba(168, 85, 247, 0.38) 0%, transparent 55%),
-    radial-gradient(circle at 18% 78%, rgba(99, 102, 241, 0.32) 0%, transparent 55%),
-    radial-gradient(ellipse at 50% 35%, rgba(236, 72, 153, 0.22) 0%, transparent 60%),
+  --skin-backdrop: radial-gradient(circle at 82% 18%, rgba(168, 85, 247, 0.42) 0%, transparent 55%),
+    radial-gradient(circle at 18% 78%, rgba(99, 102, 241, 0.36) 0%, transparent 55%),
+    radial-gradient(ellipse at 50% 35%, rgba(236, 72, 153, 0.25) 0%, transparent 60%),
     linear-gradient(160deg, #0e0b1d 0%, #150f2b 50%, #07050e 100%);
+  --skin-watermark: radial-gradient(circle at 75% 75%, rgba(168, 85, 247, 0.24) 0%, transparent 60%);
 }
 
 /* 10. 赛博霓虹 2.0 (Cyber Horizon) - 黑曜石深空 / 电光青流光 / 全息网格 */
 :root[data-skin='cyber-graphite'] {
   --bg: #080c12;
-  --surface-0: rgba(13, 18, 26, 0.8);
-  --surface-1: rgba(18, 25, 36, 0.85);
-  --surface-2: rgba(25, 34, 48, 0.88);
-  --surface-3: rgba(33, 45, 62, 0.92);
-  --border: rgba(0, 229, 255, 0.2);
-  --border-strong: rgba(0, 229, 255, 0.38);
-  --border-highlight: rgba(0, 229, 255, 0.5);
+  --surface-0: rgba(11, 16, 24, 0.78);
+  --surface-1: rgba(16, 23, 34, 0.85);
+  --surface-2: rgba(23, 32, 46, 0.89);
+  --surface-3: rgba(30, 42, 60, 0.93);
+  --border: rgba(0, 229, 255, 0.22);
+  --border-strong: rgba(0, 229, 255, 0.42);
+  --border-highlight: rgba(0, 229, 255, 0.55);
   --accent: #00e5ff;
   --accent-strong: #38bdf8;
-  --accent-soft: rgba(0, 229, 255, 0.16);
-  --accent-glow: 0 0 24px rgba(0, 229, 255, 0.45);
+  --accent-soft: rgba(0, 229, 255, 0.18);
+  --accent-glow: 0 0 24px rgba(0, 229, 255, 0.5);
   --text: #f8fafc;
   --text-muted: #94a3b8;
   --text-soft: #cbd5e1;
-  --glass-bg: rgba(13, 18, 28, 0.74);
+  --bubble-owner-bg: linear-gradient(135deg, #00e5ff 0%, #00b4d8 60%, #0284c7 100%);
+  --bubble-owner-color: #040810;
+  --bubble-owner-border: #00e5ff;
+  --bubble-owner-shadow: 0 0 24px rgba(0, 229, 255, 0.5);
+  --bubble-assistant-bg: rgba(11, 16, 24, 0.82);
+  --bubble-assistant-border: rgba(0, 229, 255, 0.3);
+  --glass-bg: rgba(11, 16, 26, 0.74);
   --glass-blur: blur(20px);
-  --skin-backdrop: radial-gradient(circle at 85% 15%, rgba(0, 229, 255, 0.26) 0%, transparent 50%),
-    radial-gradient(circle at 15% 85%, rgba(168, 85, 247, 0.22) 0%, transparent 55%),
+  --skin-backdrop: radial-gradient(circle at 85% 15%, rgba(0, 229, 255, 0.3) 0%, transparent 50%),
+    radial-gradient(circle at 15% 85%, rgba(168, 85, 247, 0.25) 0%, transparent 55%),
     repeating-linear-gradient(0deg, transparent, transparent 49px, rgba(0, 229, 255, 0.04) 50px),
     repeating-linear-gradient(90deg, transparent, transparent 49px, rgba(0, 229, 255, 0.04) 50px),
     linear-gradient(180deg, #080c12 0%, #0f1724 60%, #05080d 100%);
+  --skin-watermark: radial-gradient(circle at 75% 75%, rgba(0, 229, 255, 0.2) 0%, transparent 60%);
 }
 
 /* 11. 极简黑曜 (Linear Obsidian Pro) - Linear/Raycast/Cursor 顶级现代工程极简 */
 :root[data-skin='linear-obsidian'] {
   --bg: #0d0f12;
-  --surface-0: rgba(18, 21, 26, 0.85);
-  --surface-1: rgba(24, 28, 34, 0.88);
-  --surface-2: rgba(31, 36, 44, 0.92);
-  --surface-3: rgba(39, 46, 56, 0.95);
+  --surface-0: rgba(16, 19, 24, 0.82);
+  --surface-1: rgba(22, 26, 32, 0.86);
+  --surface-2: rgba(29, 34, 42, 0.9);
+  --surface-3: rgba(37, 44, 54, 0.94);
   --border: #272d37;
   --border-strong: #384252;
-  --border-highlight: rgba(255, 255, 255, 0.12);
+  --border-highlight: rgba(255, 255, 255, 0.15);
   --accent: #5e6ad2;
   --accent-strong: #7c8cf8;
-  --accent-soft: rgba(94, 106, 210, 0.16);
-  --accent-glow: 0 0 18px rgba(94, 106, 210, 0.35);
+  --accent-soft: rgba(94, 106, 210, 0.18);
+  --accent-glow: 0 0 18px rgba(94, 106, 210, 0.4);
   --text: #f8fafc;
   --text-muted: #8b95a5;
   --text-soft: #c8d0dc;
-  --glass-bg: rgba(18, 21, 28, 0.78);
+  --bubble-owner-bg: linear-gradient(135deg, #5e6ad2 0%, #4f46e5 60%, #4338ca 100%);
+  --bubble-owner-color: #ffffff;
+  --bubble-owner-border: rgba(124, 140, 248, 0.6);
+  --bubble-owner-shadow: 0 4px 20px rgba(94, 106, 210, 0.4);
+  --bubble-assistant-bg: rgba(18, 21, 28, 0.85);
+  --bubble-assistant-border: #272d37;
+  --glass-bg: rgba(16, 19, 26, 0.76);
   --glass-blur: blur(20px);
-  --skin-backdrop: radial-gradient(circle at 50% 0%, rgba(94, 106, 210, 0.22) 0%, transparent 60%),
-    radial-gradient(circle at 80% 80%, rgba(52, 211, 153, 0.1) 0%, transparent 50%),
+  --skin-backdrop: radial-gradient(circle at 50% 0%, rgba(94, 106, 210, 0.25) 0%, transparent 60%),
+    radial-gradient(circle at 80% 80%, rgba(52, 211, 153, 0.12) 0%, transparent 50%),
     linear-gradient(180deg, #0d0f12 0%, #13171e 100%);
+  --skin-watermark: radial-gradient(circle at 75% 75%, rgba(94, 106, 210, 0.18) 0%, transparent 60%);
 }
 
 /* 12. 暖阳白昼 (Claude Warm Daylight) - 羊皮纸暖白 / 舒适护眼 / 日间模式 */
@@ -382,6 +459,12 @@
   --accent-strong: #734c0b;
   --accent-soft: rgba(146, 99, 21, 0.14);
   --accent-glow: 0 2px 14px rgba(146, 99, 21, 0.25);
+  --bubble-owner-bg: linear-gradient(135deg, #926315 0%, #734c0b 60%, #583a08 100%);
+  --bubble-owner-color: #ffffff;
+  --bubble-owner-border: rgba(146, 99, 21, 0.5);
+  --bubble-owner-shadow: 0 4px 16px rgba(146, 99, 21, 0.3);
+  --bubble-assistant-bg: rgba(250, 248, 244, 0.94);
+  --bubble-assistant-border: #d2c8b5;
   --glass-bg: rgba(250, 248, 244, 0.85);
   --glass-blur: blur(20px);
   --shadow: 0 12px 28px rgba(83, 70, 45, 0.1);
@@ -396,6 +479,7 @@
   --skin-backdrop: radial-gradient(circle at 12% 12%, rgba(254, 240, 138, 0.5) 0%, transparent 60%),
     radial-gradient(circle at 88% 88%, rgba(251, 191, 36, 0.28) 0%, transparent 65%),
     linear-gradient(180deg, #f7f4ed 0%, #ede7dc 100%);
+  --skin-watermark: radial-gradient(circle at 75% 75%, rgba(146, 99, 21, 0.16) 0%, transparent 60%);
 }
 
 @media (prefers-color-scheme: light) {
@@ -553,7 +637,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .session-list { flex: 1; min-height: 0; align-content: start; grid-auto-rows: max-content; overflow-y: auto; padding: 2px 4px; }
 .session-row { min-height: 56px; display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid transparent; color: var(--text-muted); font-size: var(--text-xs); }
 .session-row:hover { background: var(--surface-2); color: var(--text); border-color: var(--border-subtle); }
-.session-row.is-active { border-color: color-mix(in srgb, var(--accent) 36%, transparent); background: var(--accent-soft); color: var(--text); box-shadow: 0 2px 10px var(--accent-soft); }
+.session-row.is-active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, var(--surface-1)); color: var(--text-strong); box-shadow: 0 2px 14px var(--accent-soft), inset 3px 0 0 var(--accent); }
 .session-row__avatar { width: 42px; height: 36px; display: flex; align-items: center; color: var(--text-muted); overflow: hidden; }
 .session-row__avatar .avatar { width: 32px; height: 32px; border-radius: var(--radius-sm); }
 .session-row__avatar .avatar + .avatar { margin-left: -12px; border-color: var(--surface-0); }
@@ -613,6 +697,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .chat-header__avatar-button { width: 36px; height: 36px; display: inline-grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: var(--radius-control); background: transparent; transition: all var(--duration-fast) var(--ease-smooth); }
 .chat-header__avatar-button:hover, .chat-header__avatar-button:focus-visible { border-color: var(--accent); background: var(--accent-soft); }
 .chat-header__avatars .avatar + .avatar { margin-left: -11px; border-color: var(--surface-0); }
+.chat-workbench { position: relative; height: 100%; display: grid; grid-template-rows: 56px minmax(0, 1fr) auto; background: color-mix(in srgb, var(--surface-0) 70%, transparent); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); overflow: hidden; }
+.chat-workbench::before { content: ''; position: absolute; inset: 0; pointer-events: none; background-image: var(--skin-watermark); background-size: min(500px, 50vw) min(500px, 50vw); background-repeat: no-repeat; background-position: right 30px bottom 90px; opacity: 0.18; filter: drop-shadow(0 0 30px var(--accent-soft)); transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1); z-index: 0; }
+.chat-header { position: relative; z-index: 2; justify-content: space-between; gap: 16px; padding-inline: max(20px, calc((100% - 1120px) / 2)); background: var(--glass-bg); backdrop-filter: var(--glass-blur); border-bottom: 1px solid var(--border); box-shadow: 0 2px 16px rgba(0,0,0,0.12); }
+.chat-header__identity { min-width: 0; display: flex; align-items: center; gap: 12px; }
+.chat-header__identity > span:last-child { min-width: 0; }
+.chat-header__avatars { width: 44px; min-width: 44px; height: 38px; display: flex; align-items: center; overflow: hidden; }
+.chat-header__avatar-button { width: 36px; height: 36px; display: inline-grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: var(--radius-control); background: transparent; transition: all var(--duration-fast) var(--ease-smooth); }
+.chat-header__avatar-button:hover, .chat-header__avatar-button:focus-visible { border-color: var(--accent); background: var(--accent-soft); }
+.chat-header__avatars .avatar + .avatar { margin-left: -11px; border-color: var(--surface-0); }
 .chat-header__avatars--group { justify-content: center; overflow: visible; }
 .group-avatar { box-sizing: border-box; display: grid; width: 34px; height: 34px; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 2px; padding: 2px; border: 1px solid var(--border-strong); border-radius: var(--radius-control); background: var(--surface-3); overflow: hidden; box-shadow: var(--shadow-xs); }
 .group-avatar--sm { width: 30px; height: 30px; gap: 1px; padding: 2px; border-radius: 6px; }
@@ -628,7 +721,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .chat-header p { overflow: hidden; margin: 3px 0 0; color: var(--text-muted); font-size: var(--text-xs); white-space: nowrap; text-overflow: ellipsis; }
 .chat-header__count { flex: none; display: grid; justify-items: end; color: var(--text-soft); font: 600 13px var(--font-mono); }
 .chat-header__count span { color: var(--text-muted); font: 10px inherit; }
-.message-scroll { min-height: 0; overflow: auto; padding-block: 16px 28px; padding-inline: max(20px, calc((100% - 1120px) / 2)); scroll-behavior: smooth; }
+.message-scroll { position: relative; z-index: 1; min-height: 0; overflow: auto; padding-block: 16px 28px; padding-inline: max(20px, calc((100% - 1120px) / 2)); scroll-behavior: smooth; }
 .message-history-more { min-height: 36px; display: flex; align-items: center; justify-content: center; gap: 8px; width: min(100%, 520px); margin: 0 auto 16px; padding: 0 14px; border: 1px dashed var(--border-strong); border-radius: var(--radius-control); color: var(--text-muted); background: var(--surface-1); font-size: 13px; font-weight: 500; transition: all var(--duration-fast) var(--ease-smooth); }
 .message-history-more:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-strong); background: var(--accent-soft); }
 .conversation-empty { height: 100%; display: grid; place-content: center; justify-items: center; text-align: center; color: var(--text-muted); }
@@ -636,17 +729,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .conversation-empty h2 { margin: 14px 0 6px; color: var(--text-strong); font-size: 18px; font-weight: 700; }
 .conversation-empty p { max-width: 440px; margin: 0; font-size: 13px; line-height: 1.7; }
 .conversation-empty .primary-button { margin-top: 18px; }
-.message { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 12px; align-items: start; padding: 12px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent); }
+.message { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 12px; align-items: start; padding: 12px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 35%, transparent); }
 .message--owner { grid-template-columns: 1fr; justify-items: end; }
 .message--owner .message__body { width: min(78%, 780px); }
 .avatar-button { width: 36px; height: 36px; padding: 0; border: 0; background: transparent; }
 .message__body { min-width: 0; }
 .message__meta { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
 .message__meta strong { font-size: 14px; font-weight: 650; }
-.message__meta span { color: var(--success); font-size: var(--text-xs); font-weight: 500; }
+.message__meta span { color: var(--accent-strong); font-size: var(--text-xs); font-weight: 500; }
 .message__meta time { margin-left: auto; color: var(--text-muted); font: 11px var(--font-mono); }
-.message__content { padding: 12px 16px; border-radius: var(--radius-lg); border: 1px solid var(--border); background: var(--surface-1); font-size: var(--text-sm); line-height: 1.75; box-shadow: var(--shadow-sm); }
-.message--owner .message__content { border-radius: var(--radius-lg) var(--radius-lg) 4px var(--radius-lg); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); background: var(--accent-soft); box-shadow: 0 4px 16px var(--accent-soft); }
+.message__content { padding: 12px 16px; border-radius: var(--radius-lg); border: 1px solid var(--bubble-assistant-border, var(--border)); background: var(--bubble-assistant-bg, var(--surface-1)); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); color: var(--text); font-size: var(--text-sm); line-height: 1.75; box-shadow: var(--shadow-sm); transition: all var(--duration-fast) var(--ease-smooth); }
+.message--owner .message__content { border-radius: var(--radius-lg) var(--radius-lg) 4px var(--radius-lg); border: 1px solid var(--bubble-owner-border, color-mix(in srgb, var(--accent) 50%, transparent)); background: var(--bubble-owner-bg, var(--accent)); color: var(--bubble-owner-color, #ffffff); box-shadow: var(--bubble-owner-shadow, 0 4px 20px var(--accent-soft)); }
+.message--owner .message__content p, .message--owner .message__content strong, .message--owner .message__content span { color: inherit; }
 .message__content p { margin: 0 0 8px; }
 .message__content p:last-child { margin-bottom: 0; }
 .message__content mark { color: var(--accent-strong); background: transparent; font-weight: 600; }
@@ -671,9 +765,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .message__content .markdown-body hr { margin: 10px 0; border: 0; border-top: 1px solid var(--border); }
 .message__content .markdown-body a { color: var(--accent-strong); text-decoration: underline; text-underline-offset: 2px; }
 
-.composer-zone { padding-block: 10px 14px; padding-inline: max(16px, calc((100% - 1120px) / 2)); border-top: 1px solid var(--border); background: var(--surface-0); }
+.composer-zone { position: relative; z-index: 3; padding-block: 10px 14px; padding-inline: max(16px, calc((100% - 1120px) / 2)); border-top: 1px solid var(--border); background: var(--glass-bg); backdrop-filter: var(--glass-blur); }
 .composer { position: relative; border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: var(--shadow-md); transition: all var(--duration-fast) var(--ease-smooth); }
-.composer:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft), var(--shadow-md); }
+.composer:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft), var(--accent-glow); }
 .composer textarea { width: 100%; min-height: 72px; max-height: 160px; resize: vertical; padding: 14px 16px 4px; border: 0; background: transparent; font-size: var(--text-sm); line-height: 1.6; color: var(--text); }
 .composer textarea:focus-visible { outline: 0; }
 .composer-file-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }

@@ -565,6 +565,7 @@ function AppearanceSettings({
               type="button"
               className={value.skinId === item.id ? 'is-active' : ''}
               onClick={() => {
+                if (typeof localStorage !== 'undefined') localStorage.setItem('dsh_cyber_skin', item.id)
                 document.documentElement.dataset.skin = item.id
                 onChange({ ...value, skinId: item.id })
               }}
