@@ -2240,6 +2240,12 @@ export default function App() {
           transactions={packageTransactions}
           loading={packageLoading}
           installing={packageInstalling}
+          currentSkinId={preferences?.skinId}
+          onApplySkin={async (skinId) => {
+            if (preferences !== undefined) {
+              await savePreferences({ ...preferences, skinId })
+            }
+          }}
           onClose={() => setPackageMarketOpen(false)}
           onPreview={previewPackage}
           onInstall={installPackage}

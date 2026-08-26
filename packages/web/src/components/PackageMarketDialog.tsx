@@ -6,6 +6,7 @@ import {
   Cube,
   FolderOpen,
   MagnifyingGlass,
+  Palette,
   ShieldCheck,
   Storefront,
   Trash,
@@ -23,6 +24,64 @@ import type {
   PackagePermissionPreview,
   World,
 } from '@dsh-cyber/contracts'
+
+export const MARKET_SKIN_PACKAGES = [
+  {
+    id: 'cyber-graphite',
+    displayName: '赛博霓虹 2.0 (Cyberpunk Horizon)',
+    publisher: 'DSH Official',
+    version: '2.0.0',
+    summary: '黑曜石深空底色搭配赛博电光青流光与发光倒角，营造顶尖未来科幻与赛博朋克指挥终端质感。',
+    colors: ['#090d13', '#131a24', '#00e5ff', '#a855f7'],
+    tags: ['黑曜石深空', '电光青霓虹', '高斯模糊', '科幻终端'],
+  },
+  {
+    id: 'linear-obsidian',
+    displayName: '极简黑曜 (Linear Obsidian Pro)',
+    publisher: 'DSH Official',
+    version: '2.0.0',
+    summary: '对标 Linear / Raycast / Cursor 旗舰 SaaS 质感，极致克制深灰黑、1px 细微高光与极高阅读效率。',
+    colors: ['#0d0f12', '#181c22', '#5e6ad2', '#34d399'],
+    tags: ['现代工程美学', 'Linear 极简', '1px 倒角光', '生产力优先'],
+  },
+  {
+    id: 'nebula-velvet',
+    displayName: '极光星云 (Nebula Velvet)',
+    publisher: 'DSH Official',
+    version: '2.0.0',
+    summary: '深邃星空紫色调搭配浪漫粉紫高光与星云弥散光影，带来神秘、优雅且沉浸的 Agent 协作体验。',
+    colors: ['#0b0a14', '#17142a', '#c084fc', '#818cf8'],
+    tags: ['星空暗夜紫', '极光星云', '优雅弥散', '梦幻质感'],
+  },
+  {
+    id: 'paper-daylight',
+    displayName: '暖阳白昼 (Claude Warm Daylight)',
+    publisher: 'DSH Official',
+    version: '2.0.0',
+    summary: '对标 Claude / Notion 现代日间质感，温润羊皮纸奶油白搭配茶金点缀，长时间文字交互极其舒适护眼。',
+    colors: ['#f5f2eb', '#f0ece1', '#926315', '#15803d'],
+    tags: ['羊皮纸暖白', '护眼舒适', '大地色系', 'Claude 风格'],
+  },
+  {
+    id: 'mecha-tactical',
+    displayName: '战术机甲 (Tactical Armor Mech)',
+    publisher: 'DSH Official',
+    version: '2.0.0',
+    summary: '硬核工业机甲风格，钛黑哑光装甲质感结合战术琥珀橙指示灯，适合高强度工业调度与任务管理。',
+    colors: ['#0f1316', '#1a2228', '#f97316', '#22c55e'],
+    tags: ['钛黑装甲', '战术琥珀橙', '硬核工业', '精密倒角'],
+  },
+  {
+    id: 'midnight-violet',
+    displayName: '深海冷蓝 (Midnight Ocean)',
+    publisher: 'DSH Official',
+    version: '2.0.0',
+    summary: '深邃冷峻的北大西洋深海蓝黑调，搭配极地冰川蓝光晕，宁静、专注且充满科技纵深感。',
+    colors: ['#070c14', '#111c2e', '#38bdf8', '#34d399'],
+    tags: ['深海暗夜', '极地冰川蓝', '专注沉浸', '科技纵深'],
+  },
+] as const
+
 interface PackageMarketDialogProps {
   initialMarket: CyberMarketKind
   world: World
@@ -32,6 +91,8 @@ interface PackageMarketDialogProps {
   transactions: PackageInstallTransaction[]
   loading: boolean
   installing: boolean
+  currentSkinId?: string
+  onApplySkin?(skinId: string): Promise<void> | void
   onClose(): void
   onSearch(market: CyberMarketKind, query: string): Promise<void>
   onPreviewMarketplace(item: CyberMarketPackage): Promise<PackagePermissionPreview>
@@ -49,6 +110,7 @@ const MARKET_META: Record<CyberMarketKind, { label: string; description: string 
   theme: { label: '世界', description: '选择完整场景皮肤、空间设定和起始角色，创建彼此独立的新世界。' },
   talent: { label: '角色', description: '安装不同世界观与专长的角色模板，再把角色招募到兼容世界。' },
   plugin: { label: '插件', description: '先安装到本地包库，再为需要的世界单独启用；每次安装都可审阅、回滚。' },
+  skin: { label: '皮肤', description: '一键应用现代高颜值 UI 主题与配色体系，自由切换赛博霓虹、极简黑曜、极光星云等风格。' },
 }
 
 export function PackageMarketDialog(props: PackageMarketDialogProps) {
@@ -161,17 +223,69 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
           <MarketTab market="theme" active={market === 'theme'} onSelect={switchMarket} />
           <MarketTab market="talent" active={market === 'talent'} onSelect={switchMarket} />
           <MarketTab market="plugin" active={market === 'plugin'} onSelect={switchMarket} />
+          <MarketTab market="skin" active={market === 'skin'} onSelect={switchMarket} />
         </nav>
         <div className="package-market-layout package-market-layout--catalog">
           <main className="market-catalog">
-            <div className="market-intro"><div><strong>{MARKET_META[market].label}</strong><span>{MARKET_META[market].description}</span></div><span>{props.items.length} 个扩展</span></div>
+            <div className="market-intro">
+              <div>
+                <strong>{MARKET_META[market].label}</strong>
+                <span>{MARKET_META[market].description}</span>
+              </div>
+              <span>{market === 'skin' ? MARKET_SKIN_PACKAGES.length : props.items.length} 个扩展</span>
+            </div>
             <form className="market-search" onSubmit={search}>
               <MagnifyingGlass size={17} />
               <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`搜索${MARKET_META[market].label}、发布者或能力`} />
               <button type="submit">搜索</button>
             </form>
             {error === undefined ? null : <div className="package-error" role="alert"><Warning size={16} />{error}</div>}
-            {props.loading ? <div className="dialog-empty">正在校验本地市场目录…</div> : props.items.length === 0 ? (
+            {market === 'skin' ? (
+              <div className="market-card-grid">
+                {MARKET_SKIN_PACKAGES
+                  .filter((skin) => query.trim() === '' || skin.displayName.toLowerCase().includes(query.toLowerCase()) || skin.summary.toLowerCase().includes(query.toLowerCase()) || skin.tags.some((t) => t.toLowerCase().includes(query.toLowerCase())))
+                  .map((skin) => {
+                    const isActive = (props.currentSkinId ?? 'cyber-graphite') === skin.id
+                    return (
+                      <article key={skin.id} className={isActive ? 'is-created is-selected' : ''}>
+                        <div className="market-skin-preview">
+                          <div className="market-skin-palette">
+                            {skin.colors.map((color, idx) => (
+                              <span key={idx} style={{ background: color }} title={color} />
+                            ))}
+                          </div>
+                        </div>
+                        <header>
+                          <Palette size={20} />
+                          <div>
+                            <strong>{skin.displayName}</strong>
+                            <span>{skin.publisher} · v{skin.version}</span>
+                          </div>
+                          <em><ShieldCheck size={14} />官方主题</em>
+                        </header>
+                        <p>{skin.summary}</p>
+                        <div className="market-capabilities">
+                          {skin.tags.map((tag) => <code key={tag}>{tag}</code>)}
+                        </div>
+                        <footer>
+                          <span>{isActive ? '当前已应用' : '可用主题'}</span>
+                          <button
+                            type="button"
+                            className={isActive ? 'market-action--created' : 'primary-button'}
+                            disabled={isActive}
+                            onClick={() => {
+                              document.documentElement.dataset.skin = skin.id
+                              void props.onApplySkin?.(skin.id)
+                            }}
+                          >
+                            {isActive ? '✓ 正在使用' : '立即换肤'}
+                          </button>
+                        </footer>
+                      </article>
+                    )
+                  })}
+              </div>
+            ) : props.loading ? <div className="dialog-empty">正在校验本地市场目录…</div> : props.items.length === 0 ? (
               <div className="market-empty"><Cube size={30} /><strong>没有匹配的扩展</strong><span>可以修改关键词，或使用下方“本地导入”安装自定义包。</span></div>
             ) : (
               <div className="market-card-grid">
@@ -222,7 +336,7 @@ function MarketTab({ market, active, onSelect }: { market: CyberMarketKind; acti
 }
 
 function MarketIcon({ market }: { market: CyberMarketKind }) {
-  return market === 'theme' ? <Buildings size={18} /> : market === 'talent' ? <Storefront size={18} /> : <Cube size={18} />
+  return market === 'theme' ? <Buildings size={18} /> : market === 'talent' ? <Storefront size={18} /> : market === 'skin' ? <Palette size={18} /> : <Cube size={18} />
 }
 
 function InstalledOverview({ installed, transactions, installing, confirmingUninstall, onConfirmUninstall, onUninstall }: { installed: InstalledPackage[]; transactions: PackageInstallTransaction[]; installing: boolean; confirmingUninstall?: string | undefined; onConfirmUninstall(packageId?: string): void; onUninstall(item: InstalledPackage): Promise<void> }) {
@@ -337,7 +451,16 @@ function roleWorldLabel(templateId: string | undefined): string {
 }
 
 function packageKindLabel(kind: CyberPackageManifest['kind']): string {
-  return ({ plugin: '插件', skill: '技能包', 'model-provider': '模型服务', asset: '资产包', 'employee-blueprint': '角色模板', 'world-theme': '世界主题' })[kind]
+  const map: Record<CyberPackageManifest['kind'], string> = {
+    plugin: '插件',
+    skill: '技能包',
+    'model-provider': '模型服务',
+    asset: '资产包',
+    'employee-blueprint': '角色模板',
+    'world-theme': '世界主题',
+    skin: '界面皮肤',
+  }
+  return map[kind] ?? '扩展包'
 }
 
 function capabilityLabel(capability: string): string {

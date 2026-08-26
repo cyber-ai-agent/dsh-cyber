@@ -547,12 +547,29 @@ function AppearanceSettings({
         <legend>界面皮肤</legend>
         <div className="skin-options">
           {([
-            ['cyber-graphite', '石墨金', '#0d1114', '#d6a534'],
-            ['midnight-violet', '深海蓝', '#0b1117', '#67a9c4'],
-            ['paper-daylight', '暖灰日光', '#eeeee9', '#806321'],
-          ] as const).map(([id, label, background, accent]) => (
-            <button key={id} type="button" className={value.skinId === id ? 'is-active' : ''} onClick={() => onChange({ ...value, skinId: id })}>
-              <span style={{ background, borderColor: accent }}><i style={{ background: accent }} /></span><strong>{label}</strong>
+            { id: 'cyber-graphite', label: '赛博霓虹 2.0', desc: '黑曜石深空 · 电光青流光', background: '#090d13', accent: '#00e5ff' },
+            { id: 'linear-obsidian', label: '极简黑曜', desc: 'Linear 旗舰质感 · 极细高光', background: '#0d0f12', accent: '#5e6ad2' },
+            { id: 'nebula-velvet', label: '极光星云', desc: '深邃星夜紫 · 梦幻弥散光', background: '#0b0a14', accent: '#c084fc' },
+            { id: 'paper-daylight', label: '暖阳白昼', desc: '羊皮纸暖白 · 护眼舒适阅读', background: '#f5f2eb', accent: '#926315' },
+            { id: 'mecha-tactical', label: '战术机甲', desc: '哑光钛黑 · 战术琥珀橙', background: '#0f1316', accent: '#f97316' },
+            { id: 'midnight-violet', label: '深海冷蓝', desc: '深邃海夜 · 极地冰川蓝', background: '#070c14', accent: '#38bdf8' },
+          ] as const).map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={value.skinId === item.id ? 'is-active' : ''}
+              onClick={() => {
+                document.documentElement.dataset.skin = item.id
+                onChange({ ...value, skinId: item.id })
+              }}
+            >
+              <span style={{ background: item.background, borderColor: item.accent }}>
+                <i style={{ background: item.accent, boxShadow: `0 0 8px ${item.accent}` }} />
+              </span>
+              <div>
+                <strong>{item.label}</strong>
+                <small>{item.desc}</small>
+              </div>
             </button>
           ))}
         </div>
