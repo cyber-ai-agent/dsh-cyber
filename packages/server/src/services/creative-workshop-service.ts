@@ -189,7 +189,11 @@ export class CreativeWorkshopService {
       if (compensationFailures.length > 0) {
         throw new AggregateError([error, ...compensationFailures], 'Creative Workshop build failed and compensation was incomplete')
       }
-      throw error
+      if (error instanceof ServiceError || error instanceof Error && (error.name === 'PackageInstallError' || error.name === 'PackageApprovalRequiredError')) {
+        throw error
+      }
+      const detail = error instanceof Error && error.message.trim().length > 0 ? `：${error.message}` : ''
+      throw new ServiceError('unavailable', 'workshop_build_failed', `创意工坊创建失败，未留下半成品${detail}`)
     }
   }
 
@@ -274,7 +278,12 @@ function normalizeCreateInput(input: WorkshopCreateInput): Required<Omit<Worksho
     const id = value.id === undefined ? `role-${index + 1}` : token(value.id, `角色 ${index + 1} ID`)
     if (ids.has(id)) throw new ServiceError('invalid', 'workshop_role_duplicate', `角色 ID 重复：${id}`)
     ids.add(id)
-    const embodiment = parseEmbodimentProfile(value.embodiment, `roles[${index}].embodiment`)
+    let embodiment: WorkshopRoleDefinition['embodiment']
+    try {
+      embodiment = parseEmbodimentProfile(value.embodiment, `roles[${index}].embodiment`)
+    } catch (cause) {
+      throw new ServiceError('invalid', 'workshop_embodiment_invalid', cause instanceof Error ? cause.message : `角色 ${index + 1} 的行为语义无效`)
+    }
     return {
       id,
       displayName: text(value.displayName, `角色 ${index + 1} 名称`, 50),

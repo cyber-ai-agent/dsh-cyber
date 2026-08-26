@@ -289,6 +289,19 @@
 .creative-workshop-wizard__section > header h3 { margin: 0 0 4px; font-size: 20px; }
 .creative-workshop-wizard__section > header p { margin: 0; color: var(--text-soft); font-size: 13px; line-height: 1.55; }
 .creative-workshop-wizard__section .dialog-field { margin: 0; }
+.creative-workshop-prompt-assistant { display: grid; gap: 10px; padding: 14px; border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border)); background: color-mix(in srgb, var(--accent) 5%, var(--surface-1)); }
+.creative-workshop-prompt-assistant > header { display: flex; align-items: flex-start; gap: 9px; }
+.creative-workshop-prompt-assistant > header > svg { flex: none; color: var(--accent); }
+.creative-workshop-prompt-assistant > header > div { min-width: 0; display: grid; gap: 3px; }
+.creative-workshop-prompt-assistant strong { font-size: 14px; color: var(--text); }
+.creative-workshop-prompt-assistant small { color: var(--text-muted); font-size: 12px; line-height: 1.45; }
+.creative-workshop-prompt-assistant textarea { width: 100%; min-height: 88px; resize: vertical; }
+.creative-workshop-prompt-assistant > footer { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.creative-workshop-prompt-assistant__import { min-height: 32px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--border-strong); color: var(--text-soft); background: var(--surface-2); font-size: 12px; cursor: pointer; }
+.creative-workshop-prompt-assistant__import:hover { border-color: var(--accent); color: var(--text); }
+.creative-workshop-prompt-assistant__import input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.creative-workshop-prompt-assistant__error { border-top: 0 !important; padding-top: 0 !important; color: var(--danger) !important; }
+.creative-workshop-prompt-assistant > p { margin: 0; padding-top: 8px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 12px; line-height: 1.5; }
 .workshop-disclosure { border: 1px solid var(--border); background: var(--surface-1); }
 .workshop-disclosure summary { min-height: 44px; display: flex; align-items: center; padding: 0 13px; color: var(--text-soft); cursor: pointer; }
 .workshop-disclosure .dialog-field { padding: 0 13px 13px; }
