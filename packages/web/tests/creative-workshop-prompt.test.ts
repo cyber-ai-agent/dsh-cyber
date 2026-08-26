@@ -3,6 +3,7 @@ import type { WorldTemplateManifest } from '@dsh-cyber/contracts'
 import type { EmbodimentPresetDescriptor } from '@dsh-cyber/contracts/creative-platform'
 
 import { analyzeWorkshopPrompt } from '../src/components/creative-workshop/prompt-parser.js'
+import { validateWorkshopDraft } from '../src/components/creative-workshop/model.js'
 
 const templates = [
   { schemaVersion: 1, id: 'personal-world', version: 1, displayName: '我的世界', summary: '' },
@@ -43,6 +44,24 @@ describe('creative workshop prompt parser', () => {
     expect(result.draft.displayName).toBe('研究站')
     expect(result.draft.scenario).toBe('分析观测数据')
     expect(result.draft.roles[0]).toMatchObject({ displayName: '观测员', role: '研究员', requestedSkillIds: ['scientific-reasoning'] })
+  })
+
+  it('fills a valid default administrator for a one-line world request', () => {
+    const result = analyzeWorkshopPrompt('生成一个修仙世界', templates, presets)
+    expect(result.draft.displayName).toBe('修仙世界')
+    expect(result.draft.roles[0]).toMatchObject({
+      displayName: '管家',
+      role: '世界管理员',
+    })
+    expect(result.draft.roles[0]?.summary).toBeTruthy()
+    expect(result.draft.roles[0]?.persona).toBeTruthy()
+    expect(validateWorkshopDraft(result.draft)).toBeUndefined()
+  })
+
+  it('fills a default administrator when a JSON prompt omits roles', () => {
+    const result = analyzeWorkshopPrompt(JSON.stringify({ name: '修仙世界', goal: '探索修行体系' }), templates, presets)
+    expect(result.draft.roles[0]).toMatchObject({ displayName: '管家', role: '世界管理员' })
+    expect(validateWorkshopDraft(result.draft)).toBeUndefined()
   })
 
   it('returns a user-facing error for malformed JSON', () => {

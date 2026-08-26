@@ -52,7 +52,9 @@ function draftFromRecord(
   const templateId = chooseTemplate(stringValue(source.baseTemplateId, source.templateId, source.template), templates, fallback.baseTemplateId)
   const rawRoles = arrayValue(source.roles, source.characters, source.agents, source.team)
   const roles = rawRoles.length === 0
-    ? fallback.roles
+    ? fallback.roles.some(hasRoleContent)
+      ? fallback.roles.map((role, index) => roleFromValue({}, index, presets[index % presets.length] ?? presets[0]!, role))
+      : [roleFromValue({ displayName: '管家', role: '世界管理员', summary: '帮助维护这个世界并协调后续角色。' }, 0, presets[0]!, fallback.roles[0])]
     : rawRoles.map((item, index) => roleFromValue(item, index, presets[index % presets.length] ?? presets[0]!, fallback.roles[index]))
   return {
     ...fallback,
@@ -82,7 +84,7 @@ function draftFromText(
     : roleLines.slice(0, 16).map((name, index) => roleFromValue({ displayName: name }, index, preset, fallback.roles[index]))
   return {
     ...fallback,
-    displayName: title ?? fallback.displayName,
+    displayName: title ?? stringValue(fallback.displayName) ?? inferWorldName(input),
     baseTemplateId: chooseTemplate(input, templates, fallback.baseTemplateId),
     scenario: input.slice(0, 8_000),
     roles,
@@ -96,10 +98,10 @@ function roleFromValue(
   fallback?: WorkshopRoleDraft,
 ): WorkshopRoleDraft {
   const source = typeof value === 'string' ? { displayName: value } : record(value) ?? {}
-  const role = stringValue(source.displayName, source.name, source.label) ?? fallback?.displayName ?? `角色 ${index + 1}`
-  const identity = stringValue(source.role, source.job, source.identity) ?? fallback?.role ?? '协作角色'
-  const summary = stringValue(source.summary, source.description, source.responsibilities) ?? fallback?.summary ?? `负责${identity}相关工作`
-  const persona = stringValue(source.persona, source.personality, source.systemPrompt, source.principles) ?? fallback?.persona ?? `你是${role}，以事实和清晰边界推进工作。`
+  const role = stringValue(source.displayName, source.name, source.label) ?? stringValue(fallback?.displayName) ?? `角色 ${index + 1}`
+  const identity = stringValue(source.role, source.job, source.identity) ?? stringValue(fallback?.role) ?? '协作角色'
+  const summary = stringValue(source.summary, source.description, source.responsibilities) ?? stringValue(fallback?.summary) ?? `负责${identity}相关工作`
+  const persona = stringValue(source.persona, source.personality, source.systemPrompt, source.principles) ?? stringValue(fallback?.persona) ?? `你是${role}，以事实和清晰边界推进工作。`
   const draft = fallback === undefined ? createRoleDraft(index + 1, preset) : { ...fallback, embodiment: structuredClone(fallback.embodiment) }
   return {
     ...draft,
@@ -123,6 +125,22 @@ function chooseTemplate(value: unknown, templates: readonly WorldTemplateManifes
   ]
   const match = hints.find(([, words]) => words.some((word) => text.includes(word)))
   return templates.some((item) => item.id === match?.[0]) ? match![0] : fallback
+}
+
+function hasRoleContent(role: WorkshopRoleDraft): boolean {
+  return [role.displayName, role.role, role.summary, role.persona].some((value) => value.trim().length > 0)
+}
+
+function inferWorldName(input: string): string {
+  const normalized = input.replace(/\s+/g, ' ').trim()
+  const withoutAction = normalized
+    .replace(/^(请|帮我|帮忙|想要|我想|我要|为我|给我)?\s*/u, '')
+    .replace(/^(创建|建立|生成|打造|设计|构建|做一个|做一座|来一个|来一座)\s*/u, '')
+    .replace(/^(一个|一座|一间|一处)\s*/u, '')
+    .replace(/[，。！？!?,；;].*$/u, '')
+    .trim()
+  if (withoutAction.length >= 2 && withoutAction.length <= 32) return withoutAction
+  return '新世界'
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {
