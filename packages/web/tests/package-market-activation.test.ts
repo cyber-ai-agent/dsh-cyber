@@ -95,9 +95,9 @@ describe('package market activation flow', () => {
       onOpenPluginMarket: vi.fn(),
     }))
     expect(html).toContain('斜杠操作')
-    expect(html).toContain('研究简报')
-    expect(html).toContain('/研究简报')
-    expect(html).toContain('composer-plugin-picker__icon')
+    expect(html).toContain('插件')
+    expect(html).toContain('/插件')
+    expect(html).not.toContain('composer-plugin-picker__item')
   })
 
   it('opens recruitment on the market-selected blueprint', () => {

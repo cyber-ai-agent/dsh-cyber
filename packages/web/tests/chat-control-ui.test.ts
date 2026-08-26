@@ -42,13 +42,42 @@ describe('Chat control UI', () => {
     }))
     expect(html).toContain('正在回复中')
     expect(html).toContain('等待批准')
-    expect(html).toContain('■ 停止')
+    expect(html).toContain('send-button--stop')
     expect(html).toContain('插入')
     expect(html).toContain('撤销')
     expect(html).toContain('排队')
     expect(html).toContain('停止当前回复')
     expect(html).not.toContain('下一条执行')
     expect(html).not.toContain('打开命令选择器')
+  })
+
+  it('executes the topic command locally and keeps the transcript intact', async () => {
+    const employee = { id: 'employee-topic', displayName: '话题角色', role: '分析', avatarIndex: 0, currentActivity: '正在工作' } as CyberEmployee
+    const world = { id: 'world-topic', workspaceId: 'workspace-topic', name: '话题测试世界', templateId: 'personal-world', status: 'active', createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString() } as World
+    const host = document.createElement('div')
+    document.body.append(host)
+    const root = createRoot(host)
+    const onSend = vi.fn(async () => undefined)
+    const onDraftChange = vi.fn()
+    await act(async () => { root.render(createElement(ChatWorkbench, {
+      demoMode: false,
+      world,
+      participantIds: [employee.id],
+      messages: [],
+      employees: [employee],
+      draft: '/换个话题',
+      onDraftChange,
+      onSend,
+      onUploadAttachment: vi.fn(async () => { throw new Error('not used') }),
+      onOpenDossier: vi.fn(),
+      onOpenArtifact: vi.fn(),
+      onRecruit: vi.fn(),
+    })) })
+    await act(async () => { host.querySelector<HTMLButtonElement>('.send-button')?.click() })
+    expect(onSend).not.toHaveBeenCalled()
+    expect(onDraftChange).toHaveBeenCalledWith('')
+    expect(host.textContent).toContain('已开启新话题，之前的对话记录已保留')
+    await act(async () => { root.unmount() })
   })
 
   it('copies an assistant reply from its context menu', async () => {
