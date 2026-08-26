@@ -1,11 +1,12 @@
 import { Archive, IdentificationCard, PuzzlePiece, ShieldCheck, ShieldWarning, SlidersHorizontal, Sparkle, X } from '@phosphor-icons/react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { EmployeeInstance, EmployeeProfile, EmployeeRevision, ModelProfile, WorldCharacterAuthority } from '@dsh-cyber/contracts'
 
 import { Avatar } from './Avatar.js'
 import { AuthorityBadge } from './AuthorityBadge.js'
 import { SkillGrantEditor } from './SkillGrantEditor.js'
 import { WorldPermissionEditor, type WorldPermissionEditorValue } from './WorldPermissionEditor.js'
+import { useDialogFocusTrap } from './useDialogFocusTrap.js'
 
 export type EmployeeSettingsSection = 'profile' | 'behavior' | 'abilities' | 'permissions' | 'advanced'
 
@@ -63,6 +64,8 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
   const [capabilities, setCapabilities] = useState(currentRevision?.capabilityGrants.join(', ') ?? '')
   const [confirmArchive, setConfirmArchive] = useState(false)
   const [activeSection, setActiveSection] = useState<EmployeeSettingsSection>(initialSection)
+  const dialogRef = useRef<HTMLElement>(null)
+  useDialogFocusTrap(dialogRef, onClose)
 
   const runtimeProfile = (): CharacterRuntimeProfile => ({
     identityLabel: role.trim(),
@@ -109,16 +112,16 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section className="employee-management-dialog" role="dialog" aria-modal="true" aria-labelledby="employee-management-title">
+      <section ref={dialogRef} className="employee-management-dialog" role="dialog" aria-modal="true" aria-labelledby="employee-management-title">
         <header className="dialog-header">
           <div><h2 id="employee-management-title">角色设置 · {employee.displayName}<AuthorityBadge role={authority?.role} size="md" /></h2><p>{employee.role} · 独立角色</p></div>
-          <button className="icon-button" type="button" aria-label="关闭角色设置" onClick={onClose}><X size={18} /></button>
+          <button data-dialog-initial-focus className="icon-button" type="button" aria-label="关闭角色设置" onClick={onClose}><X size={18} /></button>
         </header>
 
         <nav className="employee-settings-nav" role="tablist" aria-label="角色设置栏目">
           <button type="button" role="tab" aria-selected={activeSection === 'profile'} className={activeSection === 'profile' ? 'is-active' : ''} onClick={() => setActiveSection('profile')}><IdentificationCard size={16} /><span>身份资料</span></button>
           <button type="button" role="tab" aria-selected={activeSection === 'behavior'} className={activeSection === 'behavior' ? 'is-active' : ''} onClick={() => setActiveSection('behavior')}><Sparkle size={16} /><span>行为方式</span></button>
-          <button type="button" role="tab" aria-selected={activeSection === 'abilities'} className={activeSection === 'abilities' ? 'is-active' : ''} onClick={() => setActiveSection('abilities')}><PuzzlePiece size={16} /><span>可用能力</span></button>
+          <button type="button" role="tab" aria-selected={activeSection === 'abilities'} className={activeSection === 'abilities' ? 'is-active' : ''} onClick={() => setActiveSection('abilities')}><PuzzlePiece size={16} /><span>技能与工具</span></button>
           <button type="button" role="tab" aria-selected={activeSection === 'permissions'} className={activeSection === 'permissions' ? 'is-active' : ''} onClick={() => setActiveSection('permissions')}><ShieldCheck size={16} /><span>世界权限</span></button>
           <button type="button" role="tab" aria-selected={activeSection === 'advanced'} className={activeSection === 'advanced' ? 'is-active' : ''} onClick={() => setActiveSection('advanced')}><SlidersHorizontal size={16} /><span>高级设置</span></button>
         </nav>
@@ -149,8 +152,9 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
           </section> : null}
 
           {activeSection === 'abilities' ? <section className="employee-settings-panel" role="tabpanel">
-            <div className="settings-section__heading"><h3><PuzzlePiece size={18} />可用能力</h3><p>选择这个角色可以使用的能力。执行计划和外部操作前，系统仍会重新检查当前授权。</p></div>
+            <div className="settings-section__heading"><h3><PuzzlePiece size={18} />技能与工具</h3><p>选择这个角色可以使用的技能与工具。执行计划和外部操作前，系统仍会重新检查当前授权。</p></div>
             <SkillGrantEditor employee={employee} value={skills} onChange={setSkills} />
+            <section className="permission-layer-stack" aria-labelledby="employee-host-access-title"><div className="settings-section__heading"><h4 id="employee-host-access-title"><ShieldWarning size={17} />本次电脑访问</h4><p>完整电脑访问不是角色长期权限。只有所有者在具体任务中明确确认，且只对指定角色和本次任务生效。</p></div><p className="setting-help">当前没有待确认的电脑访问请求。</p></section>
             <footer className="employee-settings-actions"><span>高风险操作仍会单独请求确认。</span><button className="primary-button" type="button" disabled={!role.trim() || !persona.trim() || saving} onClick={() => void saveBehavior()}>{saving ? '正在保存…' : '保存能力设置'}</button></footer>
           </section> : null}
 

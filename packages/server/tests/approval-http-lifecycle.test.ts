@@ -38,17 +38,30 @@ const TEST_SKILL = 'world-setup'
 class SwitchAdapter implements CharacterSkillAdapter {
   readonly id = 'test.switch'
   readonly executed: CharacterSkillAction[] = []
-  readonly descriptors = [{
-    id: TEST_SKILL,
-    displayName: '外部开关',
-    summary: '切换一个真实设备。',
-    adapterId: 'test.switch',
-    risks: ['external-side-effect' as const],
-    supportsScheduling: false,
-    persistentApproval: 'forbidden' as const,
-    kind: 'integration' as const,
-    recommendedByDefault: false,
+  readonly descriptors: readonly [{
+    id: string
+    displayName: string
+    summary: string
+    adapterId: string
+    risks: ['external-side-effect']
+    supportsScheduling: false
+    persistentApproval: 'forbidden' | 'exact-target'
+    kind: 'integration'
+    recommendedByDefault: false
   }]
+  constructor(persistentApproval: 'forbidden' | 'exact-target' = 'forbidden') {
+    this.descriptors = [{
+      id: TEST_SKILL,
+      displayName: '外部开关',
+      summary: '切换一个真实设备。',
+      adapterId: this.id,
+      risks: ['external-side-effect'],
+      supportsScheduling: false,
+      persistentApproval,
+      kind: 'integration',
+      recommendedByDefault: false,
+    }]
+  }
 
   propose(context: { worldId: string; characterId: string; prompt: string; grantedSkillIds: string[]; now: Date }) {
     if (!context.prompt.includes('关灯')) return []
@@ -139,6 +152,9 @@ describe('approval gate over the HTTP surface', () => {
     expect(items).toHaveLength(1)
     const view = items[0]!
     expect(view.request).toMatchObject({ status: 'pending', risk: 'external-side-effect', worldId: world.id })
+    expect(view.allowedScopes).toEqual(['once'])
+    const pendingDecisions = await json(origin, `/api/worlds/${world.id}/pending-decisions`)
+    expect(pendingDecisions.body.approvals[0].allowedScopes).toEqual(['once'])
     // A one-line summary is not enough to consent to a real side effect.
     expect(view.subject).toMatchObject({
       adapterId: 'test.switch',
@@ -199,6 +215,16 @@ describe('approval gate over the HTTP surface', () => {
     const decided = await json(origin, `/api/approvals/${view.request.id}/decision`, post({ decision: 'approved', scope: 'world' }))
     expect(decided.response.status).toBeGreaterThanOrEqual(400)
     expect(adapter.executed).toEqual([])
+  })
+
+  it('returns reusable scopes only for an exact-target descriptor', async () => {
+    const adapter = new SwitchAdapter('exact-target')
+    const { origin } = await start(adapter, new QuietRuntime())
+    const { world, characterId } = await bootstrap(origin)
+    await chat(origin, world.id, characterId, '帮我关灯')
+    const pending = await json(origin, `/api/worlds/${world.id}/approvals?status=pending`)
+    const view = (pending.body.items as ApprovalRequestView[])[0]!
+    expect(view.allowedScopes).toEqual(['once', 'character', 'world'])
   })
 
   it('does not execute a pending approval after its WorkTurn is stopped', async () => {

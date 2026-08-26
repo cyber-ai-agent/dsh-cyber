@@ -94,7 +94,7 @@ describe('package market activation flow', () => {
       onRecruit: vi.fn(),
       onOpenPluginMarket: vi.fn(),
     }))
-    expect(html).toContain('已安装插件')
+    expect(html).toContain('已安装命令')
     expect(html).toContain('研究简报')
     expect(html).toContain('/研究简报')
     expect(html).toContain('composer-plugin-picker__icon')

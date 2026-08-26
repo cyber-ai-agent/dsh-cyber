@@ -79,6 +79,7 @@ describe('world authority UI', () => {
       avatarIndex: 0,
       saving: false,
       authority,
+      initialSection: 'abilities',
       onClose: () => undefined,
       onRevise: async () => undefined,
       onUpdateProfile: async () => undefined,
@@ -86,10 +87,11 @@ describe('world authority UI', () => {
     }))
     expect(markup).toContain('身份资料')
     expect(markup).toContain('行为方式')
-    expect(markup).toContain('可用能力')
+    expect(markup).toContain('技能与工具')
+    expect(markup).toContain('本次电脑访问')
     expect(markup).toContain('世界权限')
     expect(markup).toContain('高级设置')
-    expect(markup).toContain('保存角色资料')
+    expect(markup).toContain('保存能力设置')
     expect(markup).not.toContain('保存为 r')
     expect(markup).not.toContain('revision')
     expect(markup).not.toContain('Capability')

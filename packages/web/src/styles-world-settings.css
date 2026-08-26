@@ -62,6 +62,24 @@
 .world-settings-advanced details { border: 1px dashed var(--border); border-radius: var(--radius-control); background: var(--surface-0); }
 .world-settings-advanced summary { padding: 11px 12px; color: var(--text-soft); cursor: pointer; }
 .advanced-terminology-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 0 12px 12px; }
+.world-permission-layers { border-color: color-mix(in srgb, var(--accent) 32%, var(--border)) !important; }
+.host-access-unavailable { color: var(--text-muted); font-size: 14px; line-height: 1.55; }
+.host-access-ready { color: var(--success); font-size: 14px; line-height: 1.55; }
+.world-permission-layers > .secondary-button { width: fit-content; }
+.host-access-dialog { width: min(560px, 92vw); display: grid; gap: 16px; padding: 20px; background: var(--surface-0); border: 1px solid var(--border-strong); border-radius: var(--radius-dialog); box-shadow: 0 28px 90px rgba(0,0,0,.48); }
+.host-access-dialog .dialog-header h2 { display: flex; align-items: center; gap: 7px; }
+.host-access-dialog__facts { display: grid; gap: 8px; margin: 0; padding: 12px; border: 1px solid var(--border); background: var(--surface-1); }
+.host-access-dialog__facts div { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; }
+.host-access-dialog__facts dt { color: var(--text-muted); font-size: 12px; }
+.host-access-dialog__facts dd { margin: 0; color: var(--text); font-size: 14px; overflow-wrap: anywhere; }
+.host-access-dialog__confirm { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border)); background: color-mix(in srgb, var(--accent) 9%, var(--surface-1)); }
+.host-access-dialog__confirm input { width: 20px; min-width: 20px; height: 20px; margin-top: 2px; accent-color: var(--accent); }
+.host-access-dialog__confirm span { display: grid; gap: 4px; }
+.host-access-dialog__confirm strong { color: var(--text); font-size: 14px; line-height: 1.45; }
+.host-access-dialog__confirm small { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.host-access-dialog__error { margin: 0; color: var(--danger); font-size: 14px; }
+.host-access-dialog footer { display: flex; justify-content: flex-end; gap: 8px; }
+.host-access-dialog footer button { min-height: 40px; font-size: 14px; }
 
 .world-unlock-dialog { width: min(380px,90vw); padding: 28px; background: var(--surface-0); border: 1px solid var(--border-strong); border-radius: var(--radius-dialog); display: grid; gap: 14px; text-align: center; box-shadow: 0 24px 70px rgba(0,0,0,.45); }
 .composer-reasoning { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); }
@@ -86,7 +104,5 @@
   .world-settings-advanced { grid-column: auto; }
   .advanced-terminology-grid, .color-setting-row, .character-profile-grid { grid-template-columns: 1fr; }
   .character-profile-grid__wide { grid-column: auto; }
+  .host-access-dialog footer button { min-height: 44px; }
 }
-.permission-risk-confirm{display:flex!important;align-items:flex-start;gap:10px;padding:12px;border:1px solid #8d5b25;background:#24170d;color:#f2d5ae}
-.permission-risk-confirm input{width:18px!important;min-height:18px!important;margin-top:2px;accent-color:#e8ac31}
-.permission-risk-confirm span{display:grid;gap:4px}.permission-risk-confirm strong{font-size:14px}.permission-risk-confirm small{font-size:12px;line-height:1.5;color:#d2b792}

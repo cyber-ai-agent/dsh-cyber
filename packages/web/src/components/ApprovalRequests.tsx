@@ -45,45 +45,49 @@ export function ApprovalRequests({ items, onDecide }: ApprovalRequestsProps) {
       {items.map((item) => {
         const subject = item.subject
         const busy = busyId === item.request.id
+        // The server is authoritative. The fallback keeps older snapshots
+        // safe while the API rolls out allowedScopes.
+        const allowedScopes = item.allowedScopes ?? ['once']
+        const hasPersistentScope = allowedScopes.includes('character') || allowedScopes.includes('world')
         const parameters = Object.entries(subject?.parameters ?? {})
+        const riskLabel = subject?.action.startsWith('browser.')
+          ? '将访问公开网页'
+          : RISK_LABEL[item.request.risk] ?? item.request.risk
+        const requestDescriptionId = `approval-description-${item.request.id}`
+        const requestRiskId = `approval-risk-${item.request.id}`
+        const requestScopeId = `approval-scope-${item.request.id}`
         return (
-          <article key={item.request.id} className="approval-request">
+          <article key={item.request.id} className="approval-request" aria-describedby={`${requestRiskId} ${requestDescriptionId}${hasPersistentScope ? '' : ` ${requestScopeId}`}`}>
             <header>
-              <span className="approval-request__risk">{RISK_LABEL[item.request.risk] ?? item.request.risk}</span>
+              <span id={requestRiskId} className="approval-request__risk">{riskLabel}</span>
               <strong>{subject?.label ?? item.request.summary}</strong>
             </header>
-            <p className="approval-request__who">
+            <p id={requestDescriptionId} className="approval-request__who">
               {item.characterName ?? '角色'} 请求执行一个不会自动发生的动作。批准之前不会有任何外部效果。
             </p>
             {subject === undefined ? null : (
               <dl className="approval-request__facts">
-                <div><dt>适配器</dt><dd><code>{subject.adapterId}</code></dd></div>
-                <div><dt>技能</dt><dd><code>{subject.skillId}</code></dd></div>
-                <div><dt>调用</dt><dd><code>{subject.action}</code></dd></div>
+                <div><dt>操作</dt><dd>{subject.label}</dd></div>
                 <div><dt>目标</dt><dd><code>{subject.target}</code></dd></div>
                 {subject.scheduledFor === undefined ? null : (
                   <div><dt>计划时间</dt><dd>{new Date(subject.scheduledFor).toLocaleString()}</dd></div>
                 )}
-                {parameters.length === 0 ? null : (
-                  <div className="approval-request__parameters">
-                    <dt>参数</dt>
-                    <dd>
-                      {parameters.map(([key, value]) => (
-                        <code key={key}>{key}={typeof value === 'string' ? value : JSON.stringify(value)}</code>
-                      ))}
-                    </dd>
-                  </div>
-                )}
               </dl>
             )}
+            {subject === undefined ? null : <details className="approval-request__technical"><summary>查看技术详情</summary><dl className="approval-request__facts">
+              <div><dt>能力标识</dt><dd><code>{subject.skillId}</code></dd></div>
+              <div><dt>执行组件</dt><dd><code>{subject.adapterId}</code></dd></div>
+              <div><dt>调用</dt><dd><code>{subject.action}</code></dd></div>
+              {parameters.length === 0 ? null : <div className="approval-request__parameters"><dt>参数</dt><dd>{parameters.map(([key, value]) => <code key={key}>{key}={typeof value === 'string' ? value : JSON.stringify(value)}</code>)}</dd></div>}
+            </dl></details>}
             {error === undefined || !busy ? null : <p className="approval-request__error" role="alert">{error}</p>}
             <footer>
-              <button type="button" className="primary-button" disabled={busy} onClick={() => void decide(item.request.id, 'approved', 'once')}>
+              {allowedScopes.includes('once') ? <button type="button" className="primary-button" disabled={busy} onClick={() => void decide(item.request.id, 'approved', 'once')}>
                 本次允许
-              </button>
-              <button type="button" className="text-button" disabled={busy} onClick={() => void decide(item.request.id, 'approved', 'world')}>
-                一直允许
-              </button>
+              </button> : null}
+              {!hasPersistentScope ? <span id={requestScopeId} className="approval-request__scope-note" role="note">当前仅支持本次批准</span> : null}
+              {allowedScopes.includes('character') ? <button type="button" className="text-button" disabled={busy} onClick={() => void decide(item.request.id, 'approved', 'character')}>本角色持续允许</button> : null}
+              {allowedScopes.includes('world') ? <button type="button" className="text-button" disabled={busy} onClick={() => void decide(item.request.id, 'approved', 'world')}>本世界持续允许</button> : null}
               <button type="button" className="text-button" disabled={busy} onClick={() => void decide(item.request.id, 'rejected', 'once')}>
                 拒绝
               </button>

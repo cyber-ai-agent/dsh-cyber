@@ -41,6 +41,10 @@
     "./world-knowledge": {
       "types": "./lib/world-knowledge.d.ts",
       "default": "./lib/world-knowledge.js"
+    },
+    "./browser-skill": {
+      "types": "./lib/browser-skill.d.ts",
+      "default": "./lib/browser-skill.js"
     }
   },
   "files": ["lib"],

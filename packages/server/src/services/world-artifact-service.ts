@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { copyFile, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from 'node:fs/promises'
+import { copyFile, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path'
 
 import type {
@@ -66,6 +66,18 @@ export interface PublishImportedArtifactInput extends Omit<PublishWorkspaceArtif
   sourcePath: string
 }
 
+/** Host-managed cache input for read-only Browser screenshots. */
+export interface PublishBrowserScreenshotInput {
+  workspaceId: string
+  worldId: string
+  bytes: Buffer
+  title: string
+  createdById: string
+  workTurnId?: string
+  agentRunId?: string
+  idempotencyKey?: string
+}
+
 export interface ArtifactPreview {
   artifact: WorldArtifact
   version: WorldArtifactVersion
@@ -118,6 +130,39 @@ export class WorldArtifactService {
     const root = await this.#roots.ensure(input.worldId)
     const { sourcePath, sourceRelativePath } = await this.#resolveImportedPath(root, input.sourcePath)
     return this.#publishSource(root, sourcePath, sourceRelativePath, { ...input, sourceRelativePath }, root.rootPath)
+  }
+
+  /**
+   * Publish a Browser screenshot through the host cache. The screenshot never
+   * enters `world/files`; it is copied from a short-lived managed cache file
+   * into the Artifact Center's immutable exports area and then removed.
+   */
+  async publishBrowserScreenshot(input: PublishBrowserScreenshotInput): Promise<WorldArtifactPublication> {
+    if (!Buffer.isBuffer(input.bytes) || input.bytes.byteLength === 0 || input.bytes.byteLength > 4 * 1024 * 1024) {
+      throw invalid('browser_screenshot_size_invalid', 'Browser 截图大小无效')
+    }
+    const root = await this.#roots.ensure(input.worldId)
+    const cacheDirectory = join(root.cachePath, 'browser-screenshots')
+    await mkdir(cacheDirectory, { recursive: true })
+    const cachePath = join(cacheDirectory, `${randomUUID()}.png`)
+    await writeFile(cachePath, input.bytes, { flag: 'wx', mode: 0o600 })
+    try {
+      return await this.publishImportedFile({
+        workspaceId: input.workspaceId,
+        worldId: input.worldId,
+        sourcePath: cachePath,
+        title: input.title,
+        kind: 'image',
+        mimeType: 'image/png',
+        createdByKind: 'employee',
+        createdById: input.createdById,
+        ...(input.workTurnId === undefined ? {} : { workTurnId: input.workTurnId }),
+        ...(input.agentRunId === undefined ? {} : { agentRunId: input.agentRunId }),
+        ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),
+      })
+    } finally {
+      await rm(cachePath, { force: true }).catch(() => undefined)
+    }
   }
 
   /** Append a new immutable version using an already registered artifact id. */

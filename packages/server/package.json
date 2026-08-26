@@ -28,6 +28,7 @@
     "@dsh-cyber/world-runtime": "workspace:*",
     "@dsh-cyber/world-simulation": "workspace:*",
     "@modelcontextprotocol/client": "^2.0.0",
-    "pdfjs-dist": "^5.4.149"
+    "pdfjs-dist": "^5.4.149",
+    "playwright": "1.55.0"
   }
 }

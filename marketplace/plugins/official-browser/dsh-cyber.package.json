@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "id": "official-browser",
+  "version": "1.0.0",
+  "kind": "skill",
+  "displayName": "只读网页浏览",
+  "summary": "为当前世界声明只读网页浏览能力；执行仍由宿主受信任浏览器适配器完成。",
+  "license": "MIT",
+  "publisher": "DSH Cyber",
+  "capabilities": ["integration:browser"],
+  "dataEgress": ["https://user-requested-public-web"],
+  "files": [
+    {
+      "path": "skill-open.json",
+      "sha256": "d59706507b6d1d3724c0ef4f8ab45ea327048db275f6c521496bea78a4fd81ac"
+    },
+    {
+      "path": "skill-read.json",
+      "sha256": "a5333dafdca212aaa89f18769c2cc0f1c4d036745cc33fa2699cd8084f29ee60"
+    },
+    {
+      "path": "skill-extract.json",
+      "sha256": "0ef56d1e14e35504314e83f5094af26d59ad112104b4df1e75acbd4a0e14bfbe"
+    },
+    {
+      "path": "skill-screenshot.json",
+      "sha256": "2a244245413fb423fe3a8cd16c165ff14eab13166531a5d341bb80e55ac65f7b"
+    }
+  ],
+  "entrypoints": [
+    {
+      "id": "browser.open",
+      "kind": "skill",
+      "path": "skill-open.json"
+    },
+    {
+      "id": "browser.read",
+      "kind": "skill",
+      "path": "skill-read.json"
+    },
+    {
+      "id": "browser.extract",
+      "kind": "skill",
+      "path": "skill-extract.json"
+    },
+    {
+      "id": "browser.screenshot",
+      "kind": "skill",
+      "path": "skill-screenshot.json"
+    }
+  ]
+}

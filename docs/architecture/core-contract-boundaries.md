@@ -180,7 +180,7 @@ CharacterSkillAdapterRegistry
   │
   ├─ HomeAssistantSkillAdapter
   ├─ future GitHubAdapter
-  ├─ future BrowserAdapter
+  ├─ BrowserSkillAdapter
   ├─ future FeishuAdapter
   └─ ...
 ```

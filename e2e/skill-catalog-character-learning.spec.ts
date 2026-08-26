@@ -69,7 +69,7 @@ test('uses real world Catalog, revision persistence, availability gates and an a
   await dock.getByRole('button', { name: '角色', exact: true }).click()
   await dock.getByRole('article').first().getByRole('button', { name: `管理${employee.displayName}` }).click()
   const management = page.getByRole('dialog', { name: new RegExp(`角色设置 · ${employee.displayName}`) })
-  await management.getByRole('tab', { name: '可用能力' }).click()
+  await management.getByRole('tab', { name: '技能与工具' }).click()
   const firecrawlGrant = management.locator('.skill-grant-row').filter({ hasText: '联网搜索' }).getByRole('checkbox')
   await expect(firecrawlGrant).toBeVisible()
   await expect(firecrawlGrant).toBeEnabled()
@@ -103,7 +103,7 @@ test('uses real world Catalog, revision persistence, availability gates and an a
   await page.getByRole('region', { name: '世界与角色侧边栏' }).getByRole('button', { name: '角色', exact: true }).click()
   await page.getByRole('region', { name: '世界与角色侧边栏' }).getByRole('article').first().getByRole('button', { name: `管理${employee.displayName}` }).click()
   const refreshedManagement = page.getByRole('dialog', { name: new RegExp(`角色设置 · ${employee.displayName}`) })
-  await refreshedManagement.getByRole('tab', { name: '可用能力' }).click()
+  await refreshedManagement.getByRole('tab', { name: '技能与工具' }).click()
   await expect(refreshedManagement.locator('.skill-grant-row').filter({ hasText: '联网搜索' }).getByRole('checkbox')).toBeChecked()
   await refreshedManagement.getByRole('button', { name: '关闭角色设置' }).click()
 
