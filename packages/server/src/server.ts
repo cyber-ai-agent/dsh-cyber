@@ -38,7 +38,6 @@ import { registerSystemRoutes } from './routes/system-routes.js'
 import { registerTaskScheduleRoutes } from './routes/task-schedule-routes.js'
 import { registerWorkspaceFileRoutes } from './routes/workspace-file-routes.js'
 import { registerWorkspaceRoutes } from './routes/workspace-routes.js'
-import { registerWorkSystemRoutes } from './routes/work-system-routes.js'
 import { registerWorldRuntimeRoutes } from './routes/world-runtime-routes.js'
 import { registerWorldTraceRoutes } from './routes/world-trace-routes.js'
 import { registerWorldAuthorityRoutes } from './routes/world-authority-routes.js'
@@ -71,7 +70,8 @@ import { ApplicationUpdateService } from './services/application-update-service.
 import { TaskScheduleService } from './services/task-schedule-service.js'
 import { TurnAwareApprovalContinuationService } from './services/turn-aware-approval-continuation-service.js'
 import { WorldAccessService } from './services/world-access-service.js'
-import { WorkSystemService } from './services/work-system-service.js'
+import type { WorkSystemService } from './services/work-system-service.js'
+import { composeWorkSystem } from './composition/compose-work-system.js'
 import { WorldArtifactService } from './services/world-artifact-service.js'
 import { WorldAmbientSlotResolver } from './services/world-ambient-slot-resolver.js'
 import { WorldAmbientStateProvider } from './services/world-ambient-state-provider.js'
@@ -390,7 +390,6 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     orchestrator,
     runtimeContext: worldRuntimeContext,
   })
-  const workSystem = new WorkSystemService({ store, groupTasks })
   const worldMarketplace = new WorldMarketplaceService(store, worldRuntime, worldPackages)
   const ambientSlotResolver = new WorldAmbientSlotResolver({ store })
   const ambientStateProvider = new WorldAmbientStateProvider({
@@ -456,6 +455,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const worldFiles = new WorldFileService(worldRoots)
 
   const router = new Router()
+  const workSystem = composeWorkSystem({ store, groupTasks, router, worldAccess })
   registerApplicationAccessRoutes(router, applicationAccess)
   registerSystemRoutes(router, { store, stateRoot, runtimeUpdates, applicationUpdates })
   registerWorkspaceFileRoutes(router, { worldFiles, access: worldAccess })
@@ -484,7 +484,6 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerPackageRoutes(router, { store, packageManager, packageCatalog, skillRuntime, worldMarketplace, worldPackages, worldAccess, skillCatalog })
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
   registerWorldTraceRoutes(router, { store, trace: worldTrace, access: worldAccess })
-  registerWorkSystemRoutes(router, { store, work: workSystem, access: worldAccess })
   registerCompletionJobRoutes(router, { store, access: worldAccess, wake: () => completionWorker.wake() })
   registerWorldArtifactRoutes(router, { store, artifacts: worldArtifacts, access: worldAccess, authority })
   registerWorldKnowledgeRoutes(router, {
