@@ -4206,6 +4206,17 @@ export class SqliteStore {
     ) {
       throw new PersistenceError('Package install transaction cannot be activated')
     }
+    const existingRow = this.database.prepare(
+      `SELECT * FROM installed_packages
+       WHERE workspace_id = ? AND package_id = ? AND version = ?`,
+    ).get(transaction.workspaceId, input.manifest.id, input.manifest.version)
+    const existing = existingRow === undefined ? undefined : mapInstalledPackage(existingRow)
+    if (
+      existing !== undefined
+      && stableJson(existing.manifest as unknown as JsonValue) !== stableJson(input.manifest as unknown as JsonValue)
+    ) {
+      throw new PersistenceError('package_version_content_conflict')
+    }
     const now = this.#clock()
     const installed: InstalledPackage = {
       workspaceId: transaction.workspaceId,
@@ -4213,10 +4224,10 @@ export class SqliteStore {
       version: input.manifest.version,
       kind: input.manifest.kind,
       status: 'active',
-      installedPath: resolve(input.installedPath),
+      installedPath: existing?.installedPath ?? resolve(input.installedPath),
       capabilities: [...transaction.approvedCapabilities],
       manifest: input.manifest,
-      installedAt: now,
+      installedAt: existing?.installedAt ?? now,
       updatedAt: now,
     }
     return this.#transaction(() => {
@@ -5566,6 +5577,12 @@ async function fileExists(filePath: string): Promise<boolean> {
 
 function stringifyJson(value: JsonValue): string {
   return JSON.stringify(value)
+}
+
+function stableJson(value: JsonValue): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`
+  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key]!)}`).join(',')}}`
 }
 
 function parseJson<T>(value: unknown): T {

@@ -301,9 +301,13 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     simulationStore: worldSimulation,
     orchestrator,
   })
+  const packageRuntime = options.packageRuntime ?? new LocalPackageRuntime(join(stateRoot, 'packages'))
+  await packageRuntime.recover?.(
+    store.listWorkspaces().flatMap((workspace) => store.listInstalledPackages(workspace.id)),
+  )
   const packageManager = new PackageManager({
     store,
-    runtime: options.packageRuntime ?? new LocalPackageRuntime(join(stateRoot, 'packages')),
+    runtime: packageRuntime,
     validateStaged: validateStagedPackageEntrypoints,
   })
   const packageCatalog = new LocalPackageCatalog(options.marketplaceRoot ?? fileURLToPath(new URL('../../../marketplace', import.meta.url)))
