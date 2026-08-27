@@ -4234,6 +4234,28 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 @layer reset, tokens, shell, components, features, skins, overrides;
 
 @layer components {
+.locale-setting > p {
+  margin: -2px 0 4px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.locale-setting > label {
+  display: grid;
+  grid-template-columns: minmax(120px, .45fr) minmax(220px, 1fr);
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.locale-setting > label > span { color: var(--text-strong); font-size: 14px; font-weight: 650; }
+.locale-setting > label > small { grid-column: 2; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+
+.locale-setting select { min-height: 40px; }
+
+html[dir='rtl'] .settings-dialog,
+html[dir='rtl'] .task-workspace { text-align: start; }
+
 .runtime-permission-selector {
   display: grid;
   gap: 10px;
@@ -4272,4 +4294,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .runtime-permission-selector span { display: grid; gap: 3px; }
 .runtime-permission-selector strong { color: var(--text-strong); font-size: 14px; }
 .runtime-permission-selector small { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+
+@media (max-width: 720px) {
+  .locale-setting > label { grid-template-columns: 1fr; }
+  .locale-setting > label > small { grid-column: 1; }
+}
 }

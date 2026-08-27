@@ -48,6 +48,9 @@ export function registerWorkspaceRoutes(
     const body = await readJson(request)
     const preferences = store.updateWorkspacePreferences({
       workspaceId: params[0]!,
+      ...(body.locale === undefined
+        ? {}
+        : { locale: requiredEnum(body, 'locale', ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'ko-KR', 'es-ES', 'fr-FR', 'de-DE', 'pt-BR', 'ru-RU', 'ar-SA', 'hi-IN']) }),
       ...(body.colorScheme === undefined
         ? {}
         : { colorScheme: requiredEnum(body, 'colorScheme', ['system', 'light', 'dark']) }),

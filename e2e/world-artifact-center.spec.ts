@@ -29,6 +29,10 @@ test.afterAll(async () => {
 })
 
 test('publishes one BrowserRuntime run into the world artifact center and keeps it isolated', async ({ page }) => {
+  // Three production-resolution screenshots plus a real server restart can
+  // exceed Playwright's default on shared CI runners. Keep the assertions
+  // strict while allowing the same visual/restart coverage to finish.
+  test.setTimeout(180_000)
   const consoleIssues: string[] = []
   attachAppConsoleRecorder(page, consoleIssues)
   const screenshotRoot = join(process.cwd(), 'artifacts', 'world-artifact-center')
@@ -170,11 +174,11 @@ test('publishes one BrowserRuntime run into the world artifact center and keeps 
   expect((await readJson<{ artifacts: unknown[] }>(`${origin}/api/worlds/${secondWorld.id}/artifacts`)).artifacts).toHaveLength(0)
 
   await restartedPage.reload()
-  const worldSwitcher = restartedPage.getByLabel(`切换世界，当前为${world.name}`)
+  const worldSwitcher = restartedPage.getByLabel(new RegExp(`切换世界.*${escapeRegExp(world.name)}`))
   await expect(worldSwitcher).toBeVisible()
   await worldSwitcher.click()
   await restartedPage.getByRole('menuitemradio', { name: new RegExp(secondWorld.name) }).click()
-  await expect(restartedPage.getByLabel(`切换世界，当前为${secondWorld.name}`)).toBeVisible()
+  await expect(restartedPage.getByLabel(new RegExp(`切换世界.*${escapeRegExp(secondWorld.name)}`))).toBeVisible()
   const secondDock = restartedPage.getByRole('region', { name: '世界与角色侧边栏' })
   await openDockTab(secondDock, '产物')
   const secondCenter = restartedPage.getByRole('region', { name: '世界产物中心' })
@@ -238,4 +242,8 @@ class ArtifactBrowserRuntime implements AgentRuntimePort {
   }
 
   async close(): Promise<void> {}
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }

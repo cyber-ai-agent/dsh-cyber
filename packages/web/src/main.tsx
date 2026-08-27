@@ -8,6 +8,15 @@ import './styles-world-settings.css'
 import './features/world/world-runtime.css'
 import './features/artifacts/artifacts.css'
 
+// Keep translation catalogs outside the main application chunk while still
+// registering them before the first React render, so locale changes never flash
+// untranslated fallback copy.
+await Promise.all([
+  import('./i18n/messages.js'),
+  import('./i18n/shell-messages.js'),
+  import('./i18n/workbench-messages.js'),
+])
+
 const root = document.getElementById('root')
 if (root === null) throw new Error('Missing #root')
 

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentPermissionMode, TaskSchedule } from '@dsh-cyber/contracts'
 
 import type { CyberEmployee } from '../types.js'
+import { formatDateTime } from '../i18n/format.js'
 import './TaskSchedulePanel.css'
 
 interface TaskSchedulePanelProps {
@@ -169,5 +170,5 @@ export function validateScheduleDraft(input: { employeeId: string; title: string
 }
 
 function defaultTime(): string { const date = new Date(Date.now() + 10 * 60_000); date.setSeconds(0, 0); return new Date(date.valueOf() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16) }
-function formatTime(value: string): string { return new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }
+function formatTime(value: string): string { return formatDateTime(value, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }
 function statusLabel(value: TaskSchedule['status']): string { return value === 'active' ? '已启用' : value === 'paused' ? '已暂停' : '已完成' }

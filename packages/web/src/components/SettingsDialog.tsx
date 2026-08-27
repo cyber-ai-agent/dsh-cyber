@@ -41,6 +41,8 @@ import type {
   World,
 } from '@dsh-cyber/contracts'
 import { api } from '../api.js'
+import { setUiLocale, UI_LOCALES, useI18n } from '../i18n/runtime.js'
+import { formatDateTime, formatDuration as localeFormatDuration, formatNumber } from '../i18n/format.js'
 import type { ApplicationAccessSummary } from './ApplicationLockGate.js'
 
 interface ApplicationAccessMutation extends ApplicationAccessSummary { recoveryCode?: string }
@@ -271,6 +273,7 @@ export function SettingsDialog({
   onLoadModelLogs,
   onClearModelLogs,
 }: SettingsDialogProps) {
+  const { t } = useI18n()
   const [section, setSection] = useState<SettingsSection>(initialSection)
   const [draft, setDraft] = useState(preferences)
   const [uploading, setUploading] = useState(false)
@@ -278,6 +281,7 @@ export function SettingsDialog({
   const [actionResult, setActionResult] = useState<SystemActionResult>()
   const [actionError, setActionError] = useState<string>()
   const changed = useMemo(() => JSON.stringify(draft) !== JSON.stringify(preferences), [draft, preferences])
+  const close = () => { setUiLocale(preferences.locale); onClose() }
   const runSystemAction = async (action: SystemAction, input?: SystemActionInput) => {
     setPendingAction(action)
     setActionResult(undefined)
@@ -292,21 +296,21 @@ export function SettingsDialog({
   }
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && close()}>
       <section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <header className="settings-dialog__header">
-          <div><h2 id="settings-title">设置</h2><p>管理界面、AI 模型、数据备份与应用维护。角色、权限和世界规则请到“世界设置”调整。</p></div>
-          <button className="icon-button" type="button" aria-label="关闭设置" onClick={onClose}><X size={18} /></button>
+          <div><h2 id="settings-title">{t('settings.title', '设置')}</h2><p>{t('settings.intro', '管理界面、AI 模型、数据备份与应用维护。')}</p></div>
+          <button className="icon-button" type="button" aria-label={t('settings.close', '关闭设置')} onClick={close}><X size={18} /></button>
         </header>
         <div className="settings-layout">
           <nav className="settings-nav" aria-label="设置栏目">
-            {sectionGroups.map((group) => (
+            {sectionGroups.map((group, groupIndex) => (
               <div className="settings-nav__group" key={group.label}>
-                <span className="settings-nav__label">{group.label}</span>
+                <span className="settings-nav__label">{t((['settings.group.common', 'settings.group.data', 'settings.group.advanced'] as const)[groupIndex]!, group.label)}</span>
                 {group.items.map(([id, label, Icon, description]) => (
                   <button key={id} type="button" className={section === id ? 'is-active' : ''} onClick={() => setSection(id)}>
                     <Icon size={18} />
-                    <span><strong>{label}</strong><small>{description}</small></span>
+                    <span><strong>{t(`settings.${id}`, label)}</strong><small>{t(`settings.${id}Description`, description)}</small></span>
                   </button>
                 ))}
               </div>
@@ -355,10 +359,10 @@ export function SettingsDialog({
           </div>
         </div>
         <footer className="settings-dialog__footer">
-          <span>{section === 'appearance' ? (saving ? '正在保存…' : changed ? '有未保存的外观更改' : '外观设置已保存') : section === 'models' ? '每个模型连接单独保存，密钥不会显示在页面中' : section === 'integrations' ? '外部凭据仅在本机加密保存，角色仍需单独 Skill 授权' : section === 'privacy' ? '锁屏保护整个应用，不代替磁盘加密' : section === 'data' ? '数据保存在当前设备' : section === 'logs' ? '记录不包含对话正文和密钥' : '更新只在你主动确认后运行'}</span>
+          <span>{section === 'appearance' ? (saving ? t('settings.saving', '正在保存…') : changed ? t('settings.unsaved', '有未保存的外观更改') : t('settings.saved', '外观设置已保存')) : t(`settings.${section}Description`, '')}</span>
           <div>
-            <button className="text-button" type="button" onClick={onClose}>{section === 'appearance' ? '取消' : '关闭'}</button>
-            {section === 'appearance' ? <button className="primary-button" type="button" disabled={!changed || saving} onClick={() => void onSavePreferences(draft)}>保存外观设置</button> : null}
+            <button className="text-button" type="button" onClick={close}>{section === 'appearance' ? t('common.cancel', '取消') : t('common.close', '关闭')}</button>
+            {section === 'appearance' ? <button className="primary-button" type="button" disabled={!changed || saving} onClick={() => void onSavePreferences(draft)}>{t('settings.saveAppearance', '保存外观设置')}</button> : null}
           </div>
         </footer>
       </section>
@@ -531,9 +535,15 @@ function AppearanceSettings({
   onChange(value: WorkspacePreferences | ((current: WorkspacePreferences) => WorkspacePreferences)): void
   onUpload(file: File): Promise<void>
 }) {
+  const { t } = useI18n()
   return (
     <div className="settings-section">
       <div className="settings-section__heading"><h3>外观与布局</h3><p>调整颜色模式、背景和工作区布局。皮肤请前往扩展市场选择。</p></div>
+      <fieldset className="setting-group locale-setting">
+        <legend>{t('settings.language.title', '语言与地区')}</legend>
+        <p>{t('settings.language.description', '选择界面语言。更改会立即预览，并在保存后同步到当前工作区。')}</p>
+        <label><span>{t('settings.language.label', '界面语言')}</span><select value={value.locale} onChange={(event) => { const locale = event.target.value as WorkspacePreferences['locale']; setUiLocale(locale); onChange({ ...value, locale }) }}>{UI_LOCALES.map((locale) => <option key={locale.id} value={locale.id}>{locale.nativeName}</option>)}</select><small>{t('settings.language.hint', '日期、数字、状态和产品文案会使用同一语言；技术标识保持原样。')}</small></label>
+      </fieldset>
       <fieldset className="setting-group">
         <legend>颜色模式</legend>
         <div className="segmented-control">
@@ -975,13 +985,12 @@ function LogDetail({ log }: { log: ModelInteractionLog }) {
 function formatLogTime(value: string, full = false): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  if (full) return date.toLocaleString('zh-CN', { hour12: false })
-  return date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+  if (full) return formatDateTime(date, { dateStyle: 'medium', timeStyle: 'medium', hour12: false })
+  return formatDateTime(date, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
 }
 
 function formatDuration(value: number): string {
-  if (value < 1_000) return `${value} ms`
-  return `${(value / 1_000).toFixed(1)} s`
+  return localeFormatDuration(value)
 }
 
 function modelInteractionSourceLabel(source: ModelInteractionLog['source']): string {
@@ -998,7 +1007,7 @@ function modelInteractionSourceDetail(source: ModelInteractionLog['source']): st
 
 function tokensSummary(log: ModelInteractionLog): string {
   if (log.tokensTotal === undefined) return '—'
-  return `Token ${log.tokensTotal.toLocaleString('zh-CN')}`
+  return `Token ${formatNumber(log.tokensTotal)}`
 }
 
 function validateModelDraft(draft: ModelDraft): string | undefined {

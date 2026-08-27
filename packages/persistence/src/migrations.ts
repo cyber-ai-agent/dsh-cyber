@@ -1798,6 +1798,15 @@ const MIGRATIONS: readonly Migration[] = [
         CHECK (runtime_permission_mode IN ('read-only','workspace-write','danger-full-access'));
     `,
   },
+  {
+    version: 34,
+    name: 'workspace-ui-locale',
+    sql: `
+      ALTER TABLE workspace_preferences
+        ADD COLUMN locale TEXT NOT NULL DEFAULT 'zh-CN'
+        CHECK (locale IN ('zh-CN','zh-TW','en-US','ja-JP','ko-KR','es-ES','fr-FR','de-DE','pt-BR','ru-RU','ar-SA','hi-IN'));
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {

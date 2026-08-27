@@ -1,6 +1,7 @@
 import { Check, CaretDown, FolderSimple, ShieldCheck, ShieldWarning } from '@phosphor-icons/react'
 import { useEffect, useRef, useState } from 'react'
 import type { AgentPermissionMode } from '@dsh-cyber/contracts'
+import { useI18n } from '../i18n/runtime.js'
 
 export type ConversationPermissionMode = AgentPermissionMode
 
@@ -11,6 +12,7 @@ interface ConversationPermissionControlProps {
 }
 
 export function ConversationPermissionControl({ value, onChange, onRequestFullAccess }: ConversationPermissionControlProps) {
+  const { t } = useI18n()
   const rootRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
 
@@ -44,13 +46,13 @@ export function ConversationPermissionControl({ value, onChange, onRequestFullAc
     <div ref={rootRef} className="conversation-permission-control">
       <button className="conversation-permission-control__trigger" type="button" aria-haspopup="menu" aria-expanded={open} aria-label="当前消息权限" title="当前消息权限" onClick={() => setOpen((current) => !current)}>
         <PermissionIcon value={value} size={17} />
-        <span>{permissionLabel(value)}</span>
+        <span>{permissionLabel(value, t)}</span>
         <CaretDown size={13} />
       </button>
       {open ? <div className="conversation-permission-menu" role="menu" aria-label="当前消息权限">
         <button className={value === 'read-only' ? 'is-selected' : ''} type="button" role="menuitemradio" aria-checked={value === 'read-only'} onClick={() => select('read-only')}>
           <ShieldCheck size={18} />
-          <span><strong>请求批准</strong><small>编辑外部文件和使用互联网时始终询问</small></span>
+          <span><strong>{t('workbench.approval', '请求批准')}</strong><small>编辑外部文件和使用互联网时始终询问</small></span>
           {value === 'read-only' ? <Check size={17} /> : null}
         </button>
         <button className={value === 'workspace-write' ? 'is-selected' : ''} type="button" role="menuitemradio" aria-checked={value === 'workspace-write'} onClick={() => select('workspace-write')}>
@@ -68,9 +70,9 @@ export function ConversationPermissionControl({ value, onChange, onRequestFullAc
   )
 }
 
-function permissionLabel(value: ConversationPermissionMode): string {
+function permissionLabel(value: ConversationPermissionMode, t: (key: string, fallback: string) => string): string {
   if (value === 'danger-full-access') return '完全访问'
-  return value === 'workspace-write' ? '帮我批准' : '请求批准'
+  return value === 'workspace-write' ? '帮我批准' : t('workbench.approval', '请求批准')
 }
 
 function PermissionIcon({ value, size }: { value: ConversationPermissionMode; size: number }) {

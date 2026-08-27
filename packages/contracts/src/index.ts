@@ -1,8 +1,10 @@
 import type { WorldCharacterAuthority } from './world-authority.js'
+import type { UiLocale } from './locales.js'
 
-export const CYBER_SCHEMA_VERSION = 33 as const
+export const CYBER_SCHEMA_VERSION = 34 as const
 
 export * from './runtime-access.js'
+export * from './locales.js'
 
 export type IsoTimestamp = string
 export type JsonPrimitive = boolean | number | string | null
@@ -613,6 +615,7 @@ export type BackgroundFit = 'cover' | 'contain' | 'tile'
 
 export interface WorkspacePreferences {
   workspaceId: string
+  locale: UiLocale
   colorScheme: ColorSchemePreference
   skinId: string
   backgroundAssetRef?: string
