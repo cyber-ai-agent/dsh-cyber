@@ -15,6 +15,7 @@ import type { CyberEmployee } from '../types.js'
 import { worldExperience } from '../world-experience.js'
 import { Avatar } from './Avatar.js'
 import { AuthorityBadge } from './AuthorityBadge.js'
+import { EmployeeCurrentWork } from '../features/tasks/EmployeeCurrentWork.js'
 import { StatusDot } from './StatusDot.js'
 
 type DossierSection = 'profile' | 'skills' | 'milestones' | 'journal' | 'relations'
@@ -70,6 +71,8 @@ export function EmployeeDossier({ dossier, employees, avatarIndex, world, onDire
           <button className="primary-button" type="button" onClick={onDirect}>直接对话</button>
         </div>
       </header>
+
+      <EmployeeCurrentWork employeeId={dossier.employee.id} />
 
       <div className="dossier-facts" aria-label={`${experience.personLabel}事实摘要`}>
         <div><strong>{verified}</strong><span>已验证技能</span></div>

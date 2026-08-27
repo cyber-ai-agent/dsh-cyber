@@ -1038,6 +1038,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .status--archived { background: #64748b; }
 .status-inline { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 12px; }
 .employee-runtime-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.dossier-current-work { display: grid; gap: 7px; }.dossier-current-work article { display: grid; gap: 5px; padding: 9px; border: 1px solid var(--border); background: var(--surface-1); }.dossier-current-work article > div { display: flex; justify-content: space-between; gap: 8px; }.dossier-current-work article p { margin: 0; color: var(--text-soft); font-size: 13px; }.dossier-current-work article small, .dossier-empty { color: var(--text-muted); font-size: 12px; }
 .completion-job-status { width: fit-content; display: inline-flex; align-items: center; gap: 7px; margin-top: 8px; padding: 6px 9px; border: 1px solid var(--border); color: var(--text-muted); background: var(--surface-1); font-size: 12px; }
 .completion-job-status--completed { color: var(--success); }
 .completion-job-status--failed { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 42%, var(--border)); }
@@ -4230,3 +4231,4 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
     -webkit-backdrop-filter: none !important;
   }
 }
+@layer reset, tokens, shell, components, features, skins, overrides;
