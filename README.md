@@ -2,7 +2,7 @@
 
 # DSH Cyber
 
-### 一个本地优先、可具身、可成长、可连接真实世界的 AI 角色与世界平台
+### 一个本地优先、可接任务、可协作、可交付、可验收和可恢复的数字员工工作系统
 
 **Build a living AI world — characters with identity, memory, bodies, skills, relationships and real actions.**
 
@@ -40,11 +40,33 @@ Character
 
 一个角色应该能长期存在，有自己的会话、档案、身体、关系、技能和成长轨迹；进入不同世界时保持身份一致；需要调用真实世界能力时，通过受控 Skill Adapter 完成真实动作，并把结果写回可审计状态。
 
-DSH Cyber 想把这件事做成一个**可视化、可玩、可扩展的本地 AI 世界平台**：你可以经营一家公司，也可以创建酒馆、创作工作室、家庭空间、虚拟伙伴世界，甚至通过 Skills 联动 GitHub、浏览器、Home Assistant、IM 机器人和其他真实系统。
+DSH Cyber 正在把这件事做成一个**可视化、可扩展的本地数字员工工作系统**：你可以提交任务、让多个长期角色按 Skill 和负载协作、审阅不可变交付版本，并通过受控 Skills 联动 GitHub、浏览器、Home Assistant、IM 机器人和其他真实系统。世界和主题提供沉浸式工作上下文，但不会伪造任务完成或外部动作成功。
+
+## 真实任务工作流
+
+![DSH Cyber Work System V1：任务、计划、分工、交付与验收](./artifacts/core-work-system/work-system-1920x1080.png)
+
+```text
+用户目标 → Task → Plan Revision → Assignment → WorkTurn → AgentRun
+        → ArtifactVersion → DeliverableVersion → Review → Evidence
+```
+
+- 同一个数字员工可以在两个会话并发工作，Presence 从真实 AgentRun/审批事实派生。
+- Artifact 后处理通过 Completion Outbox 重试；整理失败不会反向把模型主回答判为失败。
+- 用户接受、要求修改或拒绝交付；要求修改会保留旧版本并生成新的 Plan/Run/Deliverable。
+- Queue 使用 SQLite claim/lease，重启后按幂等与外部副作用边界恢复。
 
 ---
 
 ## 当前已经实现
+
+### ✅ Work System V1
+
+- 世界级 Task Inbox / Board、任务详情、计划步骤、分工原因、执行与证据。
+- 复用现有 Group Task Router、WorkTurn、AgentRun、Approval、Trace 和 Artifact，不平行复制执行系统。
+- 不可变 Deliverable 版本与追加式 Review；要求修改后把反馈注入新一轮执行。
+- 接受的交付产生受信 Growth Evidence；模型自述不会直接提升熟练度。
+- Task、Queue、Completion Job、Artifact、Deliverable 和 Review 随 SQLite/`worlds/` 进入本地备份边界。
 
 ### 🧠 持久角色与会话连续性
 
@@ -442,7 +464,7 @@ Harness 被限制在兼容适配层，不允许世界、角色、Skill 领域代
 - [ ] Workshop 项目版本与编辑生命周期
 - [ ] Character Identity / Persona / Embodiment 完全以用户当前设定为准
 - [x] 有证据的长期知识图谱与对话整理
-- [ ] Task / Job / Deliverable / Review 工作系统
+- [x] Task / Plan / Assignment / Run / Deliverable / Review 工作系统 V1
 - [ ] GitHub Skill Adapter
 - [ ] Browser Skill Adapter
 - [ ] 飞书 / QQ / 微信 Channel Adapter

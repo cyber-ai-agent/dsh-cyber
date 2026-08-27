@@ -2,7 +2,7 @@
 
 # DSH Cyber
 
-### A local-first platform for embodied, persistent and extensible AI characters
+### A local-first work system where persistent AI employees take tasks, collaborate, deliver, recover and grow from evidence
 
 **Build a living AI world — characters with identity, memory, bodies, skills, relationships and real actions.**
 
@@ -40,11 +40,29 @@ Character
 
 A character should persist over time, keep its own conversation and dossier, inhabit a visual world, form relationships, gain skills from evidence, and perform real actions through trusted integrations when the user allows it.
 
-DSH Cyber is building this as a **visual, local-first, moddable AI world platform**. A world may be a company, a tavern, a creator studio, a home, a companion space or something entirely different. Trusted Skills can eventually connect selected characters to GitHub, browsers, Home Assistant, messaging channels and other real systems.
+DSH Cyber is building this as a **visual, local-first digital employee work system**. Users submit Tasks, employees collaborate through real AgentRuns, immutable Artifact and Deliverable versions are reviewed, and trusted Skills connect selected characters to real systems without faking outcomes.
+
+## Real task workflow
+
+![DSH Cyber Work System V1](./artifacts/core-work-system/work-system-1920x1080.png)
+
+```text
+Goal → Task → Plan Revision → Assignment → WorkTurn → AgentRun
+     → ArtifactVersion → DeliverableVersion → Review → Evidence
+```
+
+The SQLite-backed queue uses claim/lease recovery, post-answer work runs through a durable Completion Outbox, and review feedback creates a new immutable delivery version instead of overwriting history.
 
 ---
 
 ## What already works
+
+### Work System V1
+
+- World-scoped Task board and detail views with plans, assignments, selection reasons, runs and evidence.
+- Existing Group Task Router, WorkTurn, AgentRun, Approval, Trace and Artifact paths remain authoritative.
+- Immutable Deliverable versions and append-only Reviews support accept, request changes and reject.
+- Accepted deliveries can create trusted Growth Evidence.
 
 ### Persistent characters and conversation continuity
 
@@ -391,7 +409,7 @@ Current priorities:
 - [ ] Workshop project versioning and edit lifecycle
 - [ ] make current user-defined Character Identity / Persona / Embodiment authoritative everywhere
 - [x] evidence-backed World Knowledge Graph and conversation consolidation
-- [ ] Task / Job / Deliverable / Review work system
+- [x] Task / Plan / Assignment / Run / Deliverable / Review Work System V1
 - [ ] GitHub Skill Adapter
 - [ ] Browser Skill Adapter
 - [ ] Feishu / QQ / WeChat Channel Adapters

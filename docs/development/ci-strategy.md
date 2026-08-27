@@ -4,7 +4,7 @@ DSH Cyber 当前处于 Pre-Alpha / 架构快速演进期。CI 的目标是尽早
 
 ## 分层原则
 
-### L1 — Fast Required CI
+### L1 — Required PR CI
 
 每个 Pull Request 和 `main` push 都运行：
 
@@ -12,6 +12,9 @@ DSH Cyber 当前处于 Pre-Alpha / 架构快速演进期。CI 的目标是尽早
 pnpm install --frozen-lockfile
 pnpm typecheck
 pnpm test
+pnpm test:migration
+pnpm test:schema
+pnpm test:smoke
 ```
 
 这层是当前唯一 Required Gate，保护：
@@ -25,15 +28,18 @@ pnpm test
 - Workshop service；
 - migration / backup 等核心逻辑。
 
-### L2 — Smoke E2E
+### L2 — Required Smoke E2E
 
-计划在 Creative Platform V1 稳定后加入。只覆盖少量核心用户路径：
+Core Reliability & Work System V1 起进入 Required，覆盖：
 
 - 首次启动；
 - 创建世界；
 - canonical 私聊；
 - 创意工坊创建世界；
 - 重启恢复本地状态。
+- 同员工双会话和 SQLite lease；
+- Task → 多角色执行 → Deliverable → Review → 新版本；
+- Package/Artifact 核心闭环。
 
 目标运行时间不超过数分钟，并在进入 Alpha 后升级为 Required。
 
@@ -81,8 +87,8 @@ E2E 应验证：
 
 | 阶段 | Required Gate |
 | --- | --- |
-| Pre-Alpha（当前） | Typecheck + Unit/Integration |
-| Alpha | + Smoke E2E |
+| Pre-Alpha（当前） | Typecheck + Unit/Integration + Migration/Schema + Smoke E2E |
+| Alpha | + 完整 Work System / Backup Restore smoke |
 | Beta | + Full E2E |
 | Stable | + Migration + Backup/Restore + OS matrix |
 | Release | + Real Harness Canary + package/release validation |

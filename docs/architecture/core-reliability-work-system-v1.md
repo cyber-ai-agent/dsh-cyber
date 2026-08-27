@@ -1,6 +1,6 @@
 # DSH Cyber Core Reliability & Work System V1
 
-- 状态：实施中
+- 状态：V1 主闭环已实现；完整兼容基线与全量发布矩阵仍在验收
 - 基线：`main@ebf486917e92e811eccd9cdcf7d90337fc549dc2`
 - 分支：`feat/core-reliability-work-system-v1`
 - 日期：2026-08-27
@@ -285,4 +285,4 @@ Review 永不更新或删除旧 Deliverable；要求修改必须创建新 Plan/R
 
 ## 13. 兼容基线声明
 
-本阶段目标是宣布 **Creative Platform V1 Local Data Compatibility Baseline**。只有在 schema 迁移、升级前备份、恢复后完整性检查、历史 fixture 和 Work System Smoke 全部通过后才能把状态改为“已建立”。在此之前文档和设置页必须显示“候选基线”，不能宣称稳定兼容。
+本阶段目标是宣布 **Creative Platform V1 Local Data Compatibility Baseline**。当前 schema 31、升级前 SQLite 备份、恢复完整性检查、v2 fixture 回放和 Work System Smoke 已实现；完整历史 fixture、全量 20 步 Smoke、Windows/macOS matrix 尚未完成，因此状态仍是“候选基线”，不能宣称稳定兼容。

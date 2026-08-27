@@ -59,12 +59,14 @@
 
 ## Alpha — Work System
 
-- [ ] Task / Job / Run / Assignment domain model
-- [ ] Deliverable / Review / Approval domain model
-- [ ] Character current-work and history UI
+- [x] Task / Plan Revision / Run / Assignment domain model V1
+- [x] Immutable Deliverable / Review domain model V1
+- [x] Character current-work and Task Workspace UI
+- [x] Durable Completion Outbox and SQLite Queue Lease recovery
 - [x] Artifact ownership and evidence links
 - [ ] Bounded autonomous delegation policy
-- [ ] Smoke E2E becomes Required CI
+- [x] Work-system Smoke E2E becomes Required CI
+- [ ] Full 20-step release smoke matrix and OS matrix
 
 ## Alpha — Memory and Growth
 
