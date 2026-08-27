@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { CYBER_SCHEMA_VERSION, type EmployeeBlueprint } from '@dsh-cyber/contracts'
+import { CYBER_SCHEMA_VERSION, WORKSPACE_PREFERENCES_LIMITS, type EmployeeBlueprint } from '@dsh-cyber/contracts'
 
 import {
   DatabaseCorruptError,
@@ -568,6 +568,15 @@ describe('SqliteStore', () => {
   it('persists appearance, skin and safe model settings without storing credentials', async () => {
     const { path, store } = await testDatabase()
     const workspace = store.createWorkspace({ name: '个性化工作区' })
+    const preferenceSchema = store.database.prepare(
+      `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'workspace_preferences'`,
+    ).get() as { sql: string }
+    expect(preferenceSchema.sql).toContain(`left_pane_width >= ${WORKSPACE_PREFERENCES_LIMITS.leftPaneWidth.minimum}`)
+    expect(preferenceSchema.sql).toContain(`left_pane_width <= ${WORKSPACE_PREFERENCES_LIMITS.leftPaneWidth.maximum}`)
+    expect(preferenceSchema.sql).toContain(`right_pane_width >= ${WORKSPACE_PREFERENCES_LIMITS.rightPaneWidth.minimum}`)
+    expect(preferenceSchema.sql).toContain(`right_pane_width <= ${WORKSPACE_PREFERENCES_LIMITS.rightPaneWidth.maximum}`)
+    expect(() => store.updateWorkspacePreferences({ workspaceId: workspace.id, rightPaneWidth: 761 }))
+      .toThrow('300 到 760')
     store.updateWorkspacePreferences({
       workspaceId: workspace.id,
       colorScheme: 'dark',

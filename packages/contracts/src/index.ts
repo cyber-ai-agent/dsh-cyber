@@ -1106,6 +1106,7 @@ export * from './world-knowledge-graph.js'
 export * from './task-collaboration.js'
 export * from './conversation-queue.js'
 export * from './browser-skill.js'
+export * from './workspace-preferences.js'
 
 export type {
   CharacterSkillAction,

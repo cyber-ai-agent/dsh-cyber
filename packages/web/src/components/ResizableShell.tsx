@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { WORKSPACE_PREFERENCES_LIMITS } from '@dsh-cyber/contracts'
 
 interface ResizableShellProps {
   left: ReactNode
@@ -44,10 +45,18 @@ export function ResizableShell({
     const onMove = (event: PointerEvent) => {
       const delta = (event.clientX - originX) / paneScale
       const nextLeft = side === 'left'
-        ? clamp(initial.leftWidth + delta, 220, Math.min(520, shellWidth - 700))
+        ? clamp(
+            initial.leftWidth + delta,
+            WORKSPACE_PREFERENCES_LIMITS.leftPaneWidth.minimum,
+            Math.min(WORKSPACE_PREFERENCES_LIMITS.leftPaneWidth.maximum, shellWidth - 700),
+          )
         : initial.leftWidth
       const nextRight = side === 'right'
-        ? clamp(initial.rightWidth - delta, 300, Math.min(1_440, shellWidth - 700))
+        ? clamp(
+            initial.rightWidth - delta,
+            WORKSPACE_PREFERENCES_LIMITS.rightPaneWidth.minimum,
+            Math.min(WORKSPACE_PREFERENCES_LIMITS.rightPaneWidth.maximum, shellWidth - 700),
+          )
         : initial.rightWidth
       onResize(nextLeft, nextRight)
     }

@@ -6,6 +6,8 @@ import { DatabaseSync, backup } from 'node:sqlite'
 import {
   CYBER_SCHEMA_VERSION,
   RECOMMENDED_ADMIN_PERMISSIONS,
+  WORKSPACE_PREFERENCES_LIMITS,
+  parseWorkspacePaneWidth,
   type AgentPermissionMode,
   type ConversationQueueEntry,
   type ConversationQueueEntryStatus,
@@ -767,14 +769,17 @@ export class SqliteStore {
     }
     if (backgroundAssetRef !== undefined) preferences.backgroundAssetRef = backgroundAssetRef
     if (!preferences.skinId) throw new PersistenceError('Skin id cannot be empty')
-    if (preferences.backgroundOpacity < 0 || preferences.backgroundOpacity > 1) {
+    if (
+      preferences.backgroundOpacity < WORKSPACE_PREFERENCES_LIMITS.backgroundOpacity.minimum
+      || preferences.backgroundOpacity > WORKSPACE_PREFERENCES_LIMITS.backgroundOpacity.maximum
+    ) {
       throw new PersistenceError('Background opacity must be between 0 and 1')
     }
-    if (!Number.isInteger(preferences.leftPaneWidth) || preferences.leftPaneWidth < 220 || preferences.leftPaneWidth > 520) {
-      throw new PersistenceError('Left pane width must be between 220 and 520 pixels')
-    }
-    if (!Number.isInteger(preferences.rightPaneWidth) || preferences.rightPaneWidth < 300 || preferences.rightPaneWidth > 1_440) {
-      throw new PersistenceError('Right pane width must be between 300 and 760 pixels')
+    try {
+      parseWorkspacePaneWidth('leftPaneWidth', preferences.leftPaneWidth)
+      parseWorkspacePaneWidth('rightPaneWidth', preferences.rightPaneWidth)
+    } catch (error) {
+      throw new PersistenceError(error instanceof Error ? error.message : 'Workspace pane width is invalid')
     }
 
     return this.#transaction(() => {
