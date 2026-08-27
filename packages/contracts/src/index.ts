@@ -208,6 +208,7 @@ export type CyberPackageKind =
   | 'world-theme'
   | 'asset'
   | 'model-provider'
+  | 'skin'
 
 export interface CyberPackageFile {
   path: string
@@ -242,7 +243,7 @@ export interface CyberPackageManifest {
   }
 }
 
-export type CyberMarketKind = 'theme' | 'plugin' | 'talent'
+export type CyberMarketKind = 'theme' | 'talent' | 'plugin' | 'skin'
 
 export interface CyberMarketCommand {
   trigger: string

@@ -24,7 +24,7 @@ export const cyberCompanyTheme: WorldThemeManifestV1 = {
   assets: [
     {
       id: 'office-scene',
-      src: '/assets/cyber-office-world-clean.png',
+      src: '/assets/cyber-office-world.png',
       kind: 'image',
       preload: true,
       pixelArt: true,

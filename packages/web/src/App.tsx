@@ -72,6 +72,8 @@ import { CreativeWorkshopLauncher } from './components/CreativeWorkshopLauncher.
 import { collaborationModeOf, type CollaborationMode } from './components/group-collaboration.js'
 import { NavigationPane } from './components/NavigationPane.js'
 import { ResizableShell } from './components/ResizableShell.js'
+import { WorldThemeSwitcher } from './components/WorldThemeSwitcher.js'
+import { applyWorldTheme, readWorldTheme } from './features/world/world-themes.js'
 import type {
   DiscoveredModel,
   ModelDiscoveryDraft,
@@ -286,6 +288,7 @@ export default function App() {
     setError(undefined)
     setActiveWorld(world)
     activeWorldRef.current = world
+    applyWorldTheme(readWorldTheme(world))
     setActiveSessionId(undefined)
     activeSessionIdRef.current = undefined
     setSessions([])
@@ -798,9 +801,10 @@ export default function App() {
 
   useEffect(() => {
     const root = document.documentElement
+    const savedSkin = typeof localStorage !== 'undefined' ? localStorage.getItem('dsh_cyber_skin') : null
     const scheme = preferences?.colorScheme ?? 'dark'
     root.dataset.colorScheme = scheme
-    root.dataset.skin = preferences?.skinId ?? 'cyber-graphite'
+    root.dataset.skin = preferences?.skinId ?? savedSkin ?? 'maid-atelier'
     root.dataset.density = preferences?.interfaceDensity ?? 'compact'
     root.dataset.motion = preferences?.motion ?? 'system'
   }, [preferences])
@@ -1801,6 +1805,8 @@ export default function App() {
   }, [workspace])
 
   const savePreferences = useCallback(async (next: WorkspacePreferences) => {
+    if (typeof localStorage !== 'undefined' && next.skinId) localStorage.setItem('dsh_cyber_skin', next.skinId)
+    if (next.skinId) document.documentElement.dataset.skin = next.skinId
     if (workspace === undefined) return
     setSavingSettings(true)
     try {
@@ -1817,7 +1823,7 @@ export default function App() {
     } finally {
       setSavingSettings(false)
     }
-  }, [workspace])
+  }, [demoMode, workspace])
 
   const uploadBackground = useCallback(async (file: File) => {
     if (workspace === undefined) throw new Error('请先创建工作区')
@@ -2047,7 +2053,7 @@ export default function App() {
           onSelect={(world) => void loadWorld(world)}
           onExplore={() => void openPackageMarket('theme')}
         />
-        {administratorCount > 0 ? <div className="topbar-world-authority" aria-label={`${administratorCount} 名世界管理员`}><span>{administratorCount} 名世界管理员</span></div> : null}
+        <WorldThemeSwitcher activeWorld={activeWorld} />
         <nav aria-label="全局功能">
           <CreativeWorkshopLauncher workspaceId={workspace.id} onCreated={(project) => { void openWorkshopWorld(project.worldId).catch((cause) => setError(cause instanceof Error ? cause.message : '创意工坊世界已创建，但打开失败，请从世界列表重新进入。')) }} onOpenWorld={(worldId) => { void openWorkshopWorld(worldId).catch((cause) => setError(cause instanceof Error ? cause.message : '世界打开失败')) }} />
           <button type="button" onClick={() => void openPackageMarket('theme')}><Storefront size={16} />市场</button>
@@ -2240,6 +2246,19 @@ export default function App() {
           transactions={packageTransactions}
           loading={packageLoading}
           installing={packageInstalling}
+          currentSkinId={preferences?.skinId}
+          onApplySkin={async (skinId) => {
+            try {
+              if (typeof localStorage !== 'undefined') localStorage.setItem('dsh_cyber_skin', skinId)
+              document.documentElement.dataset.skin = skinId
+              setPreferences((curr) => curr ? { ...curr, skinId } : { skinId } as any)
+              if (preferences !== undefined) {
+                await savePreferences({ ...preferences, skinId })
+              }
+            } catch {
+              // ignore
+            }
+          }}
           onClose={() => setPackageMarketOpen(false)}
           onPreview={previewPackage}
           onInstall={installPackage}

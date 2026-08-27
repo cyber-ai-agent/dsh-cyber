@@ -78,6 +78,7 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
   #resizeObserver: ResizeObserver | undefined
   #initialized = false
   #destroyed = false
+  #sharedScene = false
   #wheelListener: ((event: WheelEvent) => void) | undefined
 
   constructor(callbacks: WorldRendererCallbacks) {
@@ -88,6 +89,7 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
     const startedAt = performance.now()
     this.#destroyed = false
     this.#host = host
+    this.#sharedScene = host.classList.contains('world-canvas-host--shared-scene')
     this.#manifest = manifest
     const scene = manifest.scenes.find((candidate) => candidate.id === snapshot.sceneId) ?? manifest.scenes[0]
     if (scene === undefined) throw new Error(`主题 ${manifest.id} 没有可用场景`)
@@ -95,7 +97,10 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
     await this.#app.init({
       resizeTo: host,
       backgroundColor: 0x05080b,
-      backgroundAlpha: 1,
+      // The shell owns one continuous scene image spanning the chat and
+      // World panes. Keep the Pixi surface transparent there and draw only
+      // actors, cues, and interaction hit areas on top of it.
+      backgroundAlpha: this.#sharedScene ? 0 : 1,
       antialias: true,
       autoDensity: true,
       resolution: Math.min(window.devicePixelRatio || 1, 2),
@@ -292,6 +297,7 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
     for (const texture of this.#assetTextures.values()) texture.destroy(true)
     this.#assetTextures.clear()
     this.#initialized = false
+    this.#sharedScene = false
   }
 
   async #loadAssets(manifest: WorldThemeManifestV1): Promise<void> {
@@ -307,6 +313,7 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
     if (!this.#scene) return
     const actorZ = 600
     for (const layer of this.#scene.layers) {
+      if (this.#sharedScene) continue
       const sourceTexture = this.#assetTextures.get(layer.assetId)
       if (sourceTexture === undefined) continue
       const texture = layer.source === undefined
@@ -480,6 +487,10 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
 
   #setLights(lightsOn: boolean): void {
     if (!this.#darkness || !this.#scene) return
+    if (this.#sharedScene) {
+      this.#darkness.clear()
+      return
+    }
     this.#darkness.clear().rect(0, 0, this.#scene.size.width, this.#scene.size.height).fill({ color: 0x02050a, alpha: lightsOn ? 0.04 : 0.58 })
   }
 

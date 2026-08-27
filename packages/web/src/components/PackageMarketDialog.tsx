@@ -6,6 +6,7 @@ import {
   Cube,
   FolderOpen,
   MagnifyingGlass,
+  Palette,
   ShieldCheck,
   Storefront,
   Trash,
@@ -23,6 +24,119 @@ import type {
   PackagePermissionPreview,
   World,
 } from '@dsh-cyber/contracts'
+import { applyWorldTheme, saveWorldTheme } from '../features/world/world-themes.js'
+
+export const MARKET_SKIN_PACKAGES = [
+  {
+    id: 'maid-atelier',
+    displayName: '深海女仆工坊 (Maid Atelier · 鲸鱼娘)',
+    publisher: 'Small-tailqwq · 上善 / ZipZipPipe',
+    version: '2.0.0',
+    summary: '深海女仆工坊经典系列：深海幽蓝波纹、双女仆蕾丝深海蓝界面、半透气泡波纹与深海微光粒子。',
+    colors: ['#070e17', '#0f1c30', '#38bdf8', '#7dd3fc'],
+    tags: ['深海鲸鱼娘', '双女仆壁纸', '深海蕾丝', '日夜双模'],
+  },
+  {
+    id: 'orca-link',
+    displayName: '虎鲸链路 (Orca Link · 虎鲸娘)',
+    publisher: 'Small-tailqwq · 上善',
+    version: '2.0.0',
+    summary: '虎鲸娘机械系列：珍珠白航行机械舱、电蓝链路信号纹理、深海航行数据流与 HUD 机能透光。',
+    colors: ['#0b1118', '#142232', '#0284c7', '#38bdf8'],
+    tags: ['虎鲸娘', '机械航行舱', '电蓝链路', '机能HUD'],
+  },
+  {
+    id: 'zzz-miyabi',
+    displayName: '绝区零 · 星见雅 (ZZZ Miyabi)',
+    publisher: 'whyihaveyou · DSH Themes',
+    version: '2.0.0',
+    summary: '对魔特务六课极霜冰蓝、水墨拔刀斩击光痕与高对比赛博黑曜石，凌冽冷艳刀客风。',
+    colors: ['#06090e', '#0f1622', '#00f0ff', '#67e8f9'],
+    tags: ['绝区零', '对魔六课', '极霜冰蓝', '水墨拔刀'],
+  },
+  {
+    id: 'zzz-ellen',
+    displayName: '绝区零 · 艾莲 (ZZZ Ellen)',
+    publisher: 'whyihaveyou · DSH Themes',
+    version: '2.0.0',
+    summary: '维多利亚家政黑白双拼女仆、朋克绯红鲨鱼齿纹理与暗黑甜酷光晕，剪刀鲨女仆专属质感。',
+    colors: ['#0d0a0d', '#1c141e', '#f43f5e', '#fb7185'],
+    tags: ['绝区零', '维多利亚家政', '黑白双拼', '暗黑甜酷'],
+  },
+  {
+    id: 'first-love',
+    displayName: '初恋时刻 (First Love)',
+    publisher: 'SpringBrand · DSH Skin Universe',
+    version: '2.0.0',
+    summary: '电影感治愈肖像，日系清晨自然光滤镜与清透水润毛玻璃面板，淡粉樱花柔光光晕与晨曦微风。',
+    colors: ['#0f0d14', '#1e182a', '#ff7597', '#ffa3b8'],
+    tags: ['治愈系', '日系电影感', '清透水润玻璃', '粉樱晨光'],
+  },
+  {
+    id: 'spider-verse',
+    displayName: '蛛网都市 (Spider Verse)',
+    publisher: 'SpringBrand · DSH Skin Universe',
+    version: '2.0.0',
+    summary: '纽约赛博高空夜景，经典电光绯红与次元蓝撞色，高空蛛网 HUD 激光线与暗黑半透晶体。',
+    colors: ['#070910', '#101626', '#ef4444', '#38bdf8'],
+    tags: ['赛博高空', '红蓝撞色', '蛛网透视', '霓虹HUD'],
+  },
+  {
+    id: 'pokemon-sunset',
+    displayName: '宝可梦黄昏 (Pokemon Sunset)',
+    publisher: 'SpringBrand · DSH Skin Universe',
+    version: '2.0.0',
+    summary: '金色原野与旅途夕阳氛围，琥珀暖金暮霞与地平线余晖，带来温暖、治愈而沉浸的冒险质感。',
+    colors: ['#140d09', '#261811', '#f59e0b', '#fbbf24'],
+    tags: ['原野夕阳', '暖金暮霞', '治愈冒险', '琥珀光晕'],
+  },
+  {
+    id: 'naruto-konoha',
+    displayName: '木叶忍界 (Naruto Konoha)',
+    publisher: 'SpringBrand · DSH Skin Universe',
+    version: '2.0.0',
+    summary: '火之意志与木叶火影岩黄昏，深炭黑钛装甲切角、查克拉金橙呼吸灯与水墨战术卷轴质感。',
+    colors: ['#110d08', '#231810', '#ea580c', '#f97316'],
+    tags: ['火之意志', '木叶黄昏', '深炭黑金', '战术卷轴'],
+  },
+  {
+    id: 'demon-slayer-night',
+    displayName: '鬼灭藤夜 (Demon Slayer Night)',
+    publisher: 'SpringBrand · DSH Skin Universe',
+    version: '2.0.0',
+    summary: '幽邃深靛紫夜，紫藤花弥散光尘与月下水墨刀光流线，搭配深靛紫晶半透面板与羽织微光。',
+    colors: ['#090712', '#17132a', '#a855f7', '#c084fc'],
+    tags: ['幽邃紫夜', '紫藤花流光', '水墨刀影', '暗夜紫晶'],
+  },
+  {
+    id: 'cyber-graphite',
+    displayName: '赛博霓虹 2.0 (Cyberpunk Horizon)',
+    publisher: 'DSH Official',
+    version: '2.0.0',
+    summary: '黑曜石深空底色搭配赛博电光青流光与全息网格，打造顶尖未来科幻与赛博朋克指挥终端。',
+    colors: ['#080c12', '#121924', '#00e5ff', '#38bdf8'],
+    tags: ['黑曜石深空', '电光青霓虹', '全息网格', '科幻终端'],
+  },
+  {
+    id: 'linear-obsidian',
+    displayName: '极简黑曜 (Linear Obsidian Pro)',
+    publisher: 'DSH Official',
+    version: '2.0.0',
+    summary: '对标 Linear / Raycast / Cursor 顶级工程美学，极致克制深灰黑、1px 细微高光与极高阅读效率。',
+    colors: ['#0d0f12', '#181c22', '#5e6ad2', '#34d399'],
+    tags: ['现代工程美学', 'Linear 极简', '1px 倒角光', '生产力优先'],
+  },
+  {
+    id: 'paper-daylight',
+    displayName: '暖阳白昼 (Claude Warm Daylight)',
+    publisher: 'DSH Official',
+    version: '2.0.0',
+    summary: '对标 Claude / Notion 现代日间质感，温润羊皮纸奶油白搭配茶金点缀，长时间文字交互极其舒适护眼。',
+    colors: ['#f5f2eb', '#f0ece1', '#926315', '#15803d'],
+    tags: ['羊皮纸暖白', '护眼舒适', '大地色系', 'Claude 风格'],
+  },
+] as const
+
 interface PackageMarketDialogProps {
   initialMarket: CyberMarketKind
   world: World
@@ -32,6 +146,8 @@ interface PackageMarketDialogProps {
   transactions: PackageInstallTransaction[]
   loading: boolean
   installing: boolean
+  currentSkinId?: string
+  onApplySkin?(skinId: string): Promise<void> | void
   onClose(): void
   onSearch(market: CyberMarketKind, query: string): Promise<void>
   onPreviewMarketplace(item: CyberMarketPackage): Promise<PackagePermissionPreview>
@@ -49,6 +165,7 @@ const MARKET_META: Record<CyberMarketKind, { label: string; description: string 
   theme: { label: '世界', description: '选择完整场景皮肤、空间设定和起始角色，创建彼此独立的新世界。' },
   talent: { label: '角色', description: '安装不同世界观与专长的角色模板，再把角色招募到兼容世界。' },
   plugin: { label: '插件', description: '先安装到本地包库，再为需要的世界单独启用；每次安装都可审阅、回滚。' },
+  skin: { label: '主题', description: '为各个世界应用高颜值主题与配色体系，自由切换深海女仆、虎鲸链路、月影酒馆等空间风格。' },
 }
 
 export function PackageMarketDialog(props: PackageMarketDialogProps) {
@@ -161,17 +278,70 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
           <MarketTab market="theme" active={market === 'theme'} onSelect={switchMarket} />
           <MarketTab market="talent" active={market === 'talent'} onSelect={switchMarket} />
           <MarketTab market="plugin" active={market === 'plugin'} onSelect={switchMarket} />
+          <MarketTab market="skin" active={market === 'skin'} onSelect={switchMarket} />
         </nav>
         <div className="package-market-layout package-market-layout--catalog">
           <main className="market-catalog">
-            <div className="market-intro"><div><strong>{MARKET_META[market].label}</strong><span>{MARKET_META[market].description}</span></div><span>{props.items.length} 个扩展</span></div>
+            <div className="market-intro">
+              <div>
+                <strong>{MARKET_META[market].label}</strong>
+                <span>{MARKET_META[market].description}</span>
+              </div>
+              <span>{market === 'skin' ? MARKET_SKIN_PACKAGES.length : props.items.length} 个扩展</span>
+            </div>
             <form className="market-search" onSubmit={search}>
               <MagnifyingGlass size={17} />
               <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`搜索${MARKET_META[market].label}、发布者或能力`} />
               <button type="submit">搜索</button>
             </form>
             {error === undefined ? null : <div className="package-error" role="alert"><Warning size={16} />{error}</div>}
-            {props.loading ? <div className="dialog-empty">正在校验本地市场目录…</div> : props.items.length === 0 ? (
+            {market === 'skin' ? (
+              <div className="market-card-grid">
+                {MARKET_SKIN_PACKAGES
+                  .filter((skin) => query.trim() === '' || skin.displayName.toLowerCase().includes(query.toLowerCase()) || skin.summary.toLowerCase().includes(query.toLowerCase()) || skin.tags.some((t) => t.toLowerCase().includes(query.toLowerCase())))
+                  .map((skin) => {
+                    const isActive = (props.currentSkinId ?? 'cyber-graphite') === skin.id
+                    return (
+                      <article key={skin.id} className={isActive ? 'is-created is-selected' : ''}>
+                        <div className="market-skin-preview">
+                          <div className="market-skin-palette">
+                            {skin.colors.map((color, idx) => (
+                              <span key={idx} style={{ background: color }} title={color} />
+                            ))}
+                          </div>
+                        </div>
+                        <header>
+                          <Palette size={20} />
+                          <div>
+                            <strong>{skin.displayName}</strong>
+                            <span>{skin.publisher} · v{skin.version}</span>
+                          </div>
+                          <em><ShieldCheck size={14} />官方主题</em>
+                        </header>
+                        <p>{skin.summary}</p>
+                        <div className="market-capabilities">
+                          {skin.tags.map((tag) => <code key={tag}>{tag}</code>)}
+                        </div>
+                        <footer>
+                          <span>{isActive ? '当前已应用' : '可用主题'}</span>
+                          <button
+                            type="button"
+                            className={isActive ? 'market-action--created' : 'primary-button'}
+                            disabled={isActive}
+                            onClick={() => {
+                              saveWorldTheme(props.world.id, skin.id)
+                              applyWorldTheme(skin.id)
+                              void props.onApplySkin?.(skin.id)
+                            }}
+                          >
+                            {isActive ? '✓ 正在使用' : '应用到当前世界'}
+                          </button>
+                        </footer>
+                      </article>
+                    )
+                  })}
+              </div>
+            ) : props.loading ? <div className="dialog-empty">正在校验本地市场目录…</div> : props.items.length === 0 ? (
               <div className="market-empty"><Cube size={30} /><strong>没有匹配的扩展</strong><span>可以修改关键词，或使用下方“本地导入”安装自定义包。</span></div>
             ) : (
               <div className="market-card-grid">
@@ -222,7 +392,7 @@ function MarketTab({ market, active, onSelect }: { market: CyberMarketKind; acti
 }
 
 function MarketIcon({ market }: { market: CyberMarketKind }) {
-  return market === 'theme' ? <Buildings size={18} /> : market === 'talent' ? <Storefront size={18} /> : <Cube size={18} />
+  return market === 'theme' ? <Buildings size={18} /> : market === 'talent' ? <Storefront size={18} /> : market === 'skin' ? <Palette size={18} /> : <Cube size={18} />
 }
 
 function InstalledOverview({ installed, transactions, installing, confirmingUninstall, onConfirmUninstall, onUninstall }: { installed: InstalledPackage[]; transactions: PackageInstallTransaction[]; installing: boolean; confirmingUninstall?: string | undefined; onConfirmUninstall(packageId?: string): void; onUninstall(item: InstalledPackage): Promise<void> }) {
@@ -337,7 +507,16 @@ function roleWorldLabel(templateId: string | undefined): string {
 }
 
 function packageKindLabel(kind: CyberPackageManifest['kind']): string {
-  return ({ plugin: '插件', skill: '技能包', 'model-provider': '模型服务', asset: '资产包', 'employee-blueprint': '角色模板', 'world-theme': '世界主题' })[kind]
+  const map: Record<CyberPackageManifest['kind'], string> = {
+    plugin: '插件',
+    skill: '技能包',
+    'model-provider': '模型服务',
+    asset: '资产包',
+    'employee-blueprint': '角色模板',
+    'world-theme': '世界主题',
+    skin: '世界主题',
+  }
+  return map[kind] ?? '扩展包'
 }
 
 function capabilityLabel(capability: string): string {

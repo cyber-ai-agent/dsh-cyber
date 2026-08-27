@@ -11,12 +11,13 @@ import type {
   WorldThemeOption,
   WorldThemeSceneManifest,
 } from '@dsh-cyber/contracts'
-import { cyberCompanyTheme, findPath, getAnchor, getScene, moonlitTavernTheme } from '@dsh-cyber/world-runtime'
+import { cyberCompanyTheme, findPath, getAnchor, getScene, maidPalaceTheme, moonlitTavernTheme } from '@dsh-cyber/world-runtime'
 
 import { api } from '../../api.js'
 import type { CyberEmployee } from '../../types.js'
 import { worldExperience } from '../../world-experience.js'
 import { subscribeWorldLive } from '../../world-live-client.js'
+import { readWorldTheme, resolveThemeManifest } from './world-themes.js'
 
 export interface WorldClientState {
   snapshot?: WorldRuntimeSnapshot
@@ -35,8 +36,32 @@ interface UseWorldClientInput {
   liveEnabled?: boolean
 }
 
+function useCurrentSkin(): string | undefined {
+  const [skin, setSkin] = useState<string | undefined>(() => {
+    return typeof document !== 'undefined' ? document.documentElement.dataset.skin : undefined
+  })
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    const observer = new MutationObserver(() => {
+      setSkin(document.documentElement.dataset.skin)
+    })
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-skin'] })
+    return () => observer.disconnect()
+  }, [])
+
+  return skin
+}
+
+
+function resolveSkinManifest(world: World, baseManifest?: WorldThemeManifestV1, currentSkin?: string): WorldThemeManifestV1 {
+  const themeId = currentSkin ?? readWorldTheme(world)
+  return resolveThemeManifest(world, themeId, baseManifest)
+}
+
 export function useWorldClient({ demoMode, world, employees, liveEnabled = true }: UseWorldClientInput) {
-  const manifest = worldExperience(world).kind === 'tavern' ? moonlitTavernTheme : cyberCompanyTheme
+  const currentSkin = useCurrentSkin()
+  const manifest = resolveSkinManifest(world, undefined, currentSkin)
   const [state, setState] = useState<WorldClientState>(() => ({
     manifest,
     rendererIdentity: builtInRendererIdentity(manifest),
@@ -45,6 +70,18 @@ export function useWorldClient({ demoMode, world, employees, liveEnabled = true 
     connected: demoMode,
     ...(demoMode ? { snapshot: demoSnapshot(world, employees, manifest) } : {}),
   }))
+
+  useEffect(() => {
+    const effective = resolveSkinManifest(world, undefined, currentSkin)
+    setState((current) => {
+      if (current.manifest.id === effective.id) return current
+      return {
+        ...current,
+        manifest: effective,
+        rendererIdentity: builtInRendererIdentity(effective),
+      }
+    })
+  }, [currentSkin, world])
 
   useEffect(() => {
     if (!demoMode) return
@@ -108,11 +145,14 @@ export function useWorldClient({ demoMode, world, employees, liveEnabled = true 
     ]).then(([snapshot, nextManifest, themes]) => {
       if (cancelled) return
       const activeTheme = themes.items.find((item) => item.active)
+      const effectiveManifest = resolveSkinManifest(world, nextManifest, currentSkin)
       setState((current) => ({
         ...current,
         snapshot: current.snapshot !== undefined && current.snapshot.sequence > snapshot.sequence ? current.snapshot : snapshot,
-        manifest: nextManifest,
-        rendererIdentity: activeTheme === undefined ? builtInRendererIdentity(nextManifest) : rendererIdentity(activeTheme),
+        manifest: effectiveManifest,
+        rendererIdentity: activeTheme === undefined || effectiveManifest.id === maidPalaceTheme.id
+          ? builtInRendererIdentity(effectiveManifest)
+          : rendererIdentity(activeTheme),
         loading: false,
         connected: true,
       }))
