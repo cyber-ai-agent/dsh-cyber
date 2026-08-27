@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "cyber-company",
+  "version": "1.0.0",
+  "kind": "skin",
+  "displayName": "赛博原厂",
+  "summary": "黑曜高光与冷色全息办公室，适合专注协作和运行监控。",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "publisher": "DSH Cyber",
+  "capabilities": ["ui:skin"],
+  "dataEgress": [],
+  "files": [{"path": "skin.json", "sha256": "592d9e0a0e7c8f995b71c20f1de1473ecadf5087c725c48ac9f73de34352c790"}],
+  "entrypoints": [{"id": "cyber-company", "kind": "skin", "path": "skin.json"}],
+  "certification": {"authority": "DSH Cyber", "level": "official", "contentSha256": "b1e26db15d37b6b4d567cea3e63a6578b1072ca4db70e83103a8132ceea83b29"}
+}

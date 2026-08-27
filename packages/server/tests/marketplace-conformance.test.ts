@@ -14,6 +14,7 @@ import { LocalPackageCatalog } from '@dsh-cyber/package-runtime'
 import {
   applyInstalledPromptTransforms,
   loadInstalledBlueprints,
+  loadInstalledSkins,
   loadInstalledWorldThemes,
 } from '../src/installed-package-runtime.js'
 
@@ -67,6 +68,7 @@ describe('community marketplace contract', () => {
       }
 
       if (item.market === 'theme') await expectTheme(item)
+      else if (item.market === 'skin') await expectSkin(item)
       else if (item.manifest.kind === 'skill') await expectSkill(item)
       else if (item.market === 'talent') await expectBlueprint(item)
       else await expectPlugin(item)
@@ -75,10 +77,25 @@ describe('community marketplace contract', () => {
 })
 
 async function packageDirectoryCount(): Promise<number> {
-  const directories = await Promise.all(['themes', 'plugins', 'talent'].map(async (market) =>
+  const directories = await Promise.all(['themes', 'plugins', 'talent', 'skins'].map(async (market) =>
     (await readdir(fileURLToPath(new URL(`../../../marketplace/${market}/`, import.meta.url)), { withFileTypes: true }))
       .filter((entry) => entry.isDirectory()).length))
   return directories.reduce((total, count) => total + count, 0)
+}
+
+async function expectSkin(item: CyberMarketPackage): Promise<void> {
+  expect(item.manifest.kind).toBe('skin')
+  expect(item.manifest.capabilities).toContain('ui:skin')
+  expect(item.manifest.dataEgress).toEqual([])
+  const entrypoints = item.manifest.entrypoints?.filter((entrypoint) => entrypoint.kind === 'skin') ?? []
+  expect(entrypoints).toHaveLength(1)
+  const skins = await loadInstalledSkins([installed(item)])
+  expect(skins).toHaveLength(1)
+  const raw = JSON.parse(await readFile(join(item.sourceDirectory, ...entrypoints[0]!.path.split('/')), 'utf8')) as Record<string, unknown>
+  expect(Object.keys(raw).sort()).toEqual(['displayName', 'id', 'schemaVersion', 'skinId', 'summary', 'themeId'])
+  expect(raw.id).toBe(item.manifest.id)
+  expect(raw.skinId).toBe(item.manifest.id === 'default-skin' ? 'default' : item.manifest.id)
+  expect(typeof raw.themeId).toBe('string')
 }
 
 async function expectSkill(item: CyberMarketPackage): Promise<void> {

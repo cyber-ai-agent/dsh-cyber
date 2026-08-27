@@ -4,6 +4,7 @@ import { cyberCompanyTheme, maidPalaceTheme, moonlitTavernTheme } from '@dsh-cyb
 
 export const WORLD_THEME_STORAGE_PREFIX = 'dsh_world_theme:'
 export const CUSTOM_THEMES_STORAGE_KEY = 'dsh_custom_themes'
+export const DEFAULT_SKIN_ID = 'default'
 
 /**
  * 标准世界主题令牌集 (Token Spec)
@@ -128,6 +129,28 @@ export const orcaLinkManifest: WorldThemeManifestV1 = {
  * 系统官方内置主题 (Built-in Themes)
  */
 export const BUILTIN_THEMES: WorldThemeConfig[] = [
+  {
+    id: DEFAULT_SKIN_ID,
+    displayName: '默认皮肤',
+    description: 'DSH Cyber 原生深色工作台，保持清晰克制的默认阅读体验',
+    author: '官方内置',
+    source: 'builtin',
+    tokens: {
+      accentColor: '#e6b940',
+      accentSoft: 'rgba(230, 185, 64, 0.16)',
+      accentStrong: '#f4d36e',
+      pageBackground: '#080d12',
+      panelBackground: 'rgba(10, 17, 24, 0.95)',
+      panelBorder: 'rgba(230, 185, 64, 0.32)',
+      textColor: '#edf2f7',
+      mutedTextColor: '#9eabb8',
+      ownerBubbleColor: '#263629',
+      characterBubbleColor: '#141c22',
+      backdropImage: '/assets/cyber-office-world-clean.png',
+      backdropOpacity: 0.9,
+      worldMapImage: '/assets/cyber-office-world-clean.png',
+    },
+  },
   {
     id: 'maid-atelier',
     displayName: '深海女仆工坊',
@@ -278,6 +301,23 @@ class WorldThemeRegistry {
   }
 
   /**
+   * Return only skins that may be selected in the world switcher.
+   *
+   * The default skin and user-created skins are always available. Built-in
+   * visual skins become selectable only after their matching skin package is
+   * installed in the local package library.
+   */
+  public listAvailable(installedSkinIds?: Iterable<string>): WorldThemeConfig[] {
+    if (installedSkinIds === undefined) return this.list()
+    const installed = new Set(installedSkinIds)
+    return this.list().filter((theme) => {
+      if (theme.id === DEFAULT_SKIN_ID || theme.source === 'custom') return true
+      const packageId = theme.packageId ?? theme.id
+      return installed.has(theme.id) || installed.has(packageId)
+    })
+  }
+
+  /**
    * 根据 ID 检索主题，未找到时安全回退
    */
   public get(id: string): WorldThemeConfig {
@@ -287,7 +327,7 @@ class WorldThemeRegistry {
       BUILTIN_THEMES.find((t) => t.id === id)
 
     if (found) return found
-    return BUILTIN_THEMES[0]!
+    return BUILTIN_THEMES.find((theme) => theme.id === DEFAULT_SKIN_ID) ?? BUILTIN_THEMES[0]!
   }
 
   /**
@@ -336,11 +376,10 @@ export const themeRegistry = new WorldThemeRegistry()
  * 读取特定世界绑定的主题 ID
  */
 export function readWorldTheme(world: World): string {
-  if (typeof window === 'undefined') return 'maid-atelier'
+  if (typeof window === 'undefined') return DEFAULT_SKIN_ID
   const saved = window.localStorage.getItem(`${WORLD_THEME_STORAGE_PREFIX}${world.id}`)
   if (saved) return saved
-  if (worldExperience(world).kind === 'tavern') return 'moonlit-tavern'
-  return 'maid-atelier'
+  return DEFAULT_SKIN_ID
 }
 
 /**

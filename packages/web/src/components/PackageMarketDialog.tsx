@@ -24,136 +24,17 @@ import type {
   PackagePermissionPreview,
   World,
 } from '@dsh-cyber/contracts'
-import { applyWorldTheme, saveWorldTheme } from '../features/world/world-themes.js'
+import { DEFAULT_SKIN_ID } from '../features/world/world-themes.js'
 
-export const MARKET_SKIN_PACKAGES = [
-  {
-    id: 'maid-atelier',
-    displayName: '深海女仆工坊 (Maid Atelier · 鲸鱼娘)',
-    publisher: 'Small-tailqwq · 上善 / ZipZipPipe',
-    version: '2.0.0',
-    summary: '深海女仆工坊经典系列：深海幽蓝波纹、双女仆蕾丝深海蓝界面、半透气泡波纹与深海微光粒子。',
-    colors: ['#070e17', '#0f1c30', '#38bdf8', '#7dd3fc'],
-    tags: ['深海鲸鱼娘', '双女仆壁纸', '深海蕾丝', '日夜双模'],
-  },
-  {
-    id: 'orca-link',
-    displayName: '虎鲸链路 (Orca Link · 虎鲸娘)',
-    publisher: 'Small-tailqwq · 上善',
-    version: '2.0.0',
-    summary: '虎鲸娘机械系列：珍珠白航行机械舱、电蓝链路信号纹理、深海航行数据流与 HUD 机能透光。',
-    colors: ['#0b1118', '#142232', '#0284c7', '#38bdf8'],
-    tags: ['虎鲸娘', '机械航行舱', '电蓝链路', '机能HUD'],
-  },
-  {
-    id: 'zzz-miyabi',
-    displayName: '绝区零 · 星见雅 (ZZZ Miyabi)',
-    publisher: 'whyihaveyou · DSH Themes',
-    version: '2.0.0',
-    summary: '对魔特务六课极霜冰蓝、水墨拔刀斩击光痕与高对比赛博黑曜石，凌冽冷艳刀客风。',
-    colors: ['#06090e', '#0f1622', '#00f0ff', '#67e8f9'],
-    tags: ['绝区零', '对魔六课', '极霜冰蓝', '水墨拔刀'],
-  },
-  {
-    id: 'zzz-ellen',
-    displayName: '绝区零 · 艾莲 (ZZZ Ellen)',
-    publisher: 'whyihaveyou · DSH Themes',
-    version: '2.0.0',
-    summary: '维多利亚家政黑白双拼女仆、朋克绯红鲨鱼齿纹理与暗黑甜酷光晕，剪刀鲨女仆专属质感。',
-    colors: ['#0d0a0d', '#1c141e', '#f43f5e', '#fb7185'],
-    tags: ['绝区零', '维多利亚家政', '黑白双拼', '暗黑甜酷'],
-  },
-  {
-    id: 'first-love',
-    displayName: '初恋时刻 (First Love)',
-    publisher: 'SpringBrand · DSH Skin Universe',
-    version: '2.0.0',
-    summary: '电影感治愈肖像，日系清晨自然光滤镜与清透水润毛玻璃面板，淡粉樱花柔光光晕与晨曦微风。',
-    colors: ['#0f0d14', '#1e182a', '#ff7597', '#ffa3b8'],
-    tags: ['治愈系', '日系电影感', '清透水润玻璃', '粉樱晨光'],
-  },
-  {
-    id: 'spider-verse',
-    displayName: '蛛网都市 (Spider Verse)',
-    publisher: 'SpringBrand · DSH Skin Universe',
-    version: '2.0.0',
-    summary: '纽约赛博高空夜景，经典电光绯红与次元蓝撞色，高空蛛网 HUD 激光线与暗黑半透晶体。',
-    colors: ['#070910', '#101626', '#ef4444', '#38bdf8'],
-    tags: ['赛博高空', '红蓝撞色', '蛛网透视', '霓虹HUD'],
-  },
-  {
-    id: 'pokemon-sunset',
-    displayName: '宝可梦黄昏 (Pokemon Sunset)',
-    publisher: 'SpringBrand · DSH Skin Universe',
-    version: '2.0.0',
-    summary: '金色原野与旅途夕阳氛围，琥珀暖金暮霞与地平线余晖，带来温暖、治愈而沉浸的冒险质感。',
-    colors: ['#140d09', '#261811', '#f59e0b', '#fbbf24'],
-    tags: ['原野夕阳', '暖金暮霞', '治愈冒险', '琥珀光晕'],
-  },
-  {
-    id: 'naruto-konoha',
-    displayName: '木叶忍界 (Naruto Konoha)',
-    publisher: 'SpringBrand · DSH Skin Universe',
-    version: '2.0.0',
-    summary: '火之意志与木叶火影岩黄昏，深炭黑钛装甲切角、查克拉金橙呼吸灯与水墨战术卷轴质感。',
-    colors: ['#110d08', '#231810', '#ea580c', '#f97316'],
-    tags: ['火之意志', '木叶黄昏', '深炭黑金', '战术卷轴'],
-  },
-  {
-    id: 'demon-slayer-night',
-    displayName: '鬼灭藤夜 (Demon Slayer Night)',
-    publisher: 'SpringBrand · DSH Skin Universe',
-    version: '2.0.0',
-    summary: '幽邃深靛紫夜，紫藤花弥散光尘与月下水墨刀光流线，搭配深靛紫晶半透面板与羽织微光。',
-    colors: ['#090712', '#17132a', '#a855f7', '#c084fc'],
-    tags: ['幽邃紫夜', '紫藤花流光', '水墨刀影', '暗夜紫晶'],
-  },
-  {
-    id: 'cyber-graphite',
-    displayName: '赛博霓虹 2.0 (Cyberpunk Horizon)',
-    publisher: 'DSH Official',
-    version: '2.0.0',
-    summary: '黑曜石深空底色搭配赛博电光青流光与全息网格，打造顶尖未来科幻与赛博朋克指挥终端。',
-    colors: ['#080c12', '#121924', '#00e5ff', '#38bdf8'],
-    tags: ['黑曜石深空', '电光青霓虹', '全息网格', '科幻终端'],
-  },
-  {
-    id: 'linear-obsidian',
-    displayName: '极简黑曜 (Linear Obsidian Pro)',
-    publisher: 'DSH Official',
-    version: '2.0.0',
-    summary: '对标 Linear / Raycast / Cursor 顶级工程美学，极致克制深灰黑、1px 细微高光与极高阅读效率。',
-    colors: ['#0d0f12', '#181c22', '#5e6ad2', '#34d399'],
-    tags: ['现代工程美学', 'Linear 极简', '1px 倒角光', '生产力优先'],
-  },
-  {
-    id: 'paper-daylight',
-    displayName: '暖阳白昼 (Claude Warm Daylight)',
-    publisher: 'DSH Official',
-    version: '2.0.0',
-    summary: '对标 Claude / Notion 现代日间质感，温润羊皮纸奶油白搭配茶金点缀，长时间文字交互极其舒适护眼。',
-    colors: ['#f5f2eb', '#f0ece1', '#926315', '#15803d'],
-    tags: ['羊皮纸暖白', '护眼舒适', '大地色系', 'Claude 风格'],
-  },
-] as const
-
-// Each skin card gets a real visual sample instead of a palette-only strip.
-// The previews reuse the same local scene/character assets that the skin
-// runtime uses, so the catalog and the active workspace speak the same visual
-// language without adding a second preview format.
+// Official skin packages point at the same host-registered scene used by the
+// world switcher. The package catalog remains the source of truth for which
+// cards are installable; this map only supplies an honest local thumbnail.
 const MARKET_SKIN_PREVIEW_IMAGES: Record<string, string> = {
+  'default-skin': '/assets/cyber-office-world-clean.png',
   'maid-atelier': '/assets/skins/maid-palace-night.webp',
   'orca-link': '/assets/skins/orca-bridge-night.png',
-  'zzz-miyabi': '/assets/skins/orca-bridge-night.png',
-  'zzz-ellen': '/assets/skins/maid-palace-night.webp',
-  'first-love': '/assets/skins/maid-palace-day.webp',
-  'spider-verse': '/assets/cyber-office-world.png',
-  'pokemon-sunset': '/assets/moonlit-tavern-world.png',
-  'naruto-konoha': '/assets/cyber-office-world.png',
-  'demon-slayer-night': '/assets/skins/maid-palace-night.webp',
-  'cyber-graphite': '/assets/cyber-office-world.png',
-  'linear-obsidian': '/assets/cyber-office-world-clean.png',
-  'paper-daylight': '/assets/skins/maid-palace-day.webp',
+  'cyber-company': '/assets/cyber-office-world-clean.png',
+  'moonlit-tavern': '/assets/moonlit-tavern-world.png',
 }
 
 interface PackageMarketDialogProps {
@@ -184,7 +65,7 @@ const MARKET_META: Record<CyberMarketKind, { label: string; description: string 
   theme: { label: '世界', description: '选择完整场景皮肤、空间设定和起始角色，创建彼此独立的新世界。' },
   talent: { label: '角色', description: '安装不同世界观与专长的角色模板，再把角色招募到兼容世界。' },
   plugin: { label: '插件', description: '先安装到本地包库，再为需要的世界单独启用；每次安装都可审阅、回滚。' },
-  skin: { label: '皮肤', description: '为当前世界选择界面皮肤与配色风格，切换后会立即应用。' },
+  skin: { label: '皮肤', description: '安装完整的场景皮肤；安装后才会出现在世界皮肤下拉，默认皮肤始终可用。' },
 }
 
 export function PackageMarketDialog(props: PackageMarketDialogProps) {
@@ -271,6 +152,11 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
     setApproved(false)
     setError(undefined)
     setCreatingWorldFor(undefined)
+    if (item.market === 'skin') {
+      const activation = item.activation?.kind === 'skin' ? item.activation : undefined
+      const skinId = activation?.themeId ?? (item.manifest.id === 'default-skin' ? DEFAULT_SKIN_ID : item.manifest.id)
+      void Promise.resolve(props.onApplySkin?.(skinId)).catch((cause) => setError(cause instanceof Error ? cause.message : '皮肤应用失败'))
+    }
   }
 
   const createWorld = async () => {
@@ -306,7 +192,7 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
                 <strong>{MARKET_META[market].label}</strong>
                 <span>{MARKET_META[market].description}</span>
               </div>
-              <span>{market === 'skin' ? MARKET_SKIN_PACKAGES.length : props.items.length} 个扩展</span>
+              <span>{props.items.length} 个扩展</span>
             </div>
             <form className="market-search" onSubmit={search}>
               <MagnifyingGlass size={17} />
@@ -314,53 +200,7 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
               <button type="submit">搜索</button>
             </form>
             {error === undefined ? null : <div className="package-error" role="alert"><Warning size={16} />{error}</div>}
-            {market === 'skin' ? (
-              <div className="market-card-grid">
-                {MARKET_SKIN_PACKAGES
-                  .filter((skin) => query.trim() === '' || skin.displayName.toLowerCase().includes(query.toLowerCase()) || skin.summary.toLowerCase().includes(query.toLowerCase()) || skin.tags.some((t) => t.toLowerCase().includes(query.toLowerCase())))
-                  .map((skin) => {
-                    const isActive = (props.currentSkinId ?? 'cyber-graphite') === skin.id
-                    return (
-                      <article key={skin.id} className={isActive ? 'is-created is-selected' : ''}>
-                        <div className="market-skin-preview">
-                          <img
-                            src={MARKET_SKIN_PREVIEW_IMAGES[skin.id]}
-                            alt={`${skin.displayName}皮肤预览`}
-                            loading="lazy"
-                          />
-                        </div>
-                        <header>
-                          <Palette size={20} />
-                          <div>
-                            <strong>{skin.displayName}</strong>
-                            <span>{skin.publisher} · v{skin.version}</span>
-                          </div>
-                          <em><ShieldCheck size={14} />官方皮肤</em>
-                        </header>
-                        <p>{skin.summary}</p>
-                        <div className="market-capabilities">
-                          {skin.tags.map((tag) => <code key={tag}>{tag}</code>)}
-                        </div>
-                        <footer>
-                          <span>{isActive ? '当前已应用' : '可用皮肤'}</span>
-                          <button
-                            type="button"
-                            className={isActive ? 'market-action--created' : 'primary-button'}
-                            disabled={isActive}
-                            onClick={() => {
-                              saveWorldTheme(props.world.id, skin.id)
-                              applyWorldTheme(skin.id)
-                              void props.onApplySkin?.(skin.id)
-                            }}
-                          >
-                            {isActive ? '✓ 正在使用' : '应用到当前世界'}
-                          </button>
-                        </footer>
-                      </article>
-                    )
-                  })}
-              </div>
-            ) : props.loading ? <div className="dialog-empty">正在校验本地市场目录…</div> : props.items.length === 0 ? (
+            {props.loading ? <div className="dialog-empty">正在校验本地市场目录…</div> : props.items.length === 0 ? (
               <div className="market-empty"><Cube size={30} /><strong>没有匹配的扩展</strong><span>可以修改关键词，或使用下方“本地导入”安装自定义包。</span></div>
             ) : (
               <div className="market-card-grid">
@@ -371,11 +211,13 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
                     <article key={`${item.manifest.id}-${item.manifest.version}`} className={`is-${state}${selectedClass}`}>
                       {item.market === 'theme' ? <img className="market-world-cover" src={marketplacePreviewUrl(item)} alt={`${item.manifest.displayName}世界预览`} /> : null}
                       {item.market === 'talent' ? <img className="market-role-cover" src={marketplacePreviewUrl(item)} alt={`${item.manifest.displayName}角色风格预览`} /> : null}
+                      {item.market === 'skin' ? <SkinPreview item={item} /> : null}
                       <header><MarketIcon market={item.market} /><div><strong>{item.manifest.displayName}</strong><span>{item.manifest.publisher} · v{item.manifest.version}</span></div>{item.verified ? <em><ShieldCheck size={14} />官方校验</em> : <em className="is-community">社区包</em>}</header>
                       <p>{item.manifest.summary}</p>
                       {item.market === 'theme' ? <div className="market-world-facts"><span>完整场景皮肤</span><span>专属角色外观</span><span>独立会话与档案</span></div> : null}
                       {item.market === 'talent' ? <div className="market-role-world">适合：{roleWorldLabel(item.activation?.kind === 'employee-blueprint' ? item.activation.worldTemplateId : undefined)}</div> : null}
                       {item.market === 'plugin' ? <div className="market-plugin-scope">按世界启用 · 设置与会话相互隔离</div> : null}
+                      {item.market === 'skin' ? <div className="market-plugin-scope">安装后出现在世界皮肤下拉 · 完整场景与聊天样式同步</div> : null}
                       <div className="market-capabilities">{item.manifest.capabilities.slice(0, 4).map((capability) => <code key={capability}>{capabilityLabel(capability)}</code>)}</div>
                       <footer>
                         <span>{packageStateLabel(item, state)}</span>
@@ -394,7 +236,9 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
               ? <WorldCreationReview item={creatingWorldFor} name={worldName} creating={creatingWorld} onName={setWorldName} onCreate={() => void createWorld()} />
               : selectedCurrent !== undefined && preview !== undefined
                 ? <PermissionReview manifest={selectedCurrent.manifest} preview={preview} approved={approved} installing={props.installing} onApproved={setApproved} onInstall={() => void install()} />
-                : selectedInstalled?.market === 'talent'
+                : selectedCurrent?.market === 'skin' && (selectedInstalled !== undefined || selectedCurrent.manifest.id === 'default-skin')
+                  ? <SkinActivationReview item={selectedCurrent} currentSkinId={props.currentSkinId} installedPackage={selectedInstalledPackage} installing={props.installing} confirmingUninstall={confirmingUninstall} onConfirmUninstall={setConfirmingUninstall} onUninstall={props.onUninstall} onApplySkin={props.onApplySkin} />
+                  : selectedInstalled?.market === 'talent'
                   ? <TalentActivationReview item={selectedInstalled} world={props.world} installedPackage={selectedInstalledPackage} installing={props.installing} confirmingUninstall={confirmingUninstall} onConfirmUninstall={setConfirmingUninstall} onUninstall={props.onUninstall} onRecruit={() => props.onRecruitTalent(selectedInstalled)} />
                   : selectedInstalled?.market === 'plugin'
                     ? <PluginActivationReview item={selectedInstalled} installedPackage={selectedInstalledPackage} installing={props.installing} confirmingUninstall={confirmingUninstall} onConfirmUninstall={setConfirmingUninstall} onUninstall={props.onUninstall} onOpenSettings={props.onOpenSettings} onUse={props.onUsePlugin} />
@@ -420,6 +264,7 @@ function InstalledOverview({ installed, transactions, installing, confirmingUnin
 }
 
 function PackageRemovalAction({ item, installing, confirming, onConfirm, onCancel, onUninstall }: { item: InstalledPackage; installing: boolean; confirming: boolean; onConfirm(): void; onCancel(): void; onUninstall(item: InstalledPackage): Promise<void> }) {
+  if (item.kind === 'skin' && item.packageId === 'default-skin') return <span className="package-default-note">默认皮肤</span>
   if (confirming) return <span className="package-removal-confirm"><button className="text-button" type="button" disabled={installing} onClick={onCancel}>取消</button><button className="danger-button" type="button" disabled={installing} onClick={() => void onUninstall(item).finally(onCancel)}>{installing ? '处理中…' : '确认卸载'}</button></span>
   return <button className="text-button package-remove-button" type="button" disabled={installing} onClick={onConfirm}><Trash size={14} />卸载</button>
 }
@@ -469,8 +314,10 @@ type PackageCardState = 'uninstalled' | 'included' | 'upgrade' | 'available' | '
 function packageCardState(item: CyberMarketPackage, worlds: World[]): PackageCardState {
   const activation = item.activation
   const hasCreatedWorld = item.market === 'theme' && activation?.kind === 'world-theme' && worlds.some((world) => world.templateId === activation.templateId)
+  if (item.market === 'skin' && item.manifest.id === 'default-skin') return 'included'
   if (item.installedVersion === item.manifest.version) {
     if (hasCreatedWorld) return 'created'
+    if (item.market === 'skin') return 'installed'
     if (item.market !== 'theme' && item.worldVersion !== item.manifest.version) return 'available'
     return 'installed'
   }
@@ -484,19 +331,20 @@ function packageCardState(item: CyberMarketPackage, worlds: World[]): PackageCar
 function packageStateLabel(item: CyberMarketPackage, state: PackageCardState): string {
   if (state === 'created') return `已安装 v${item.installedVersion} · 已创建`
   if (state === 'installed') {
-    const next = item.market === 'theme' ? '可创建' : item.market === 'talent' ? '可招募' : '可使用'
+    const next = item.market === 'theme' ? '可创建' : item.market === 'talent' ? '可招募' : item.market === 'skin' ? '可应用' : '可使用'
     return `已安装 v${item.installedVersion} · ${next}`
   }
   if (state === 'upgrade') return `已安装 v${item.installedVersion} · 有新版 v${item.manifest.version}`
   if (state === 'available') return `包库已有 v${item.installedVersion} · 当前世界未启用`
-  if (state === 'included') return '已内置 · 当前可用'
+  if (state === 'included') return item.market === 'skin' ? '默认皮肤 · 始终可用' : '已内置 · 当前可用'
   return '未安装'
 }
 
 function marketAction(item: CyberMarketPackage, state: PackageCardState, onBind: () => void, onInspect: () => void, onActivate: () => void) {
   if (item.market === 'theme' && state === 'created') return <button className="market-action--created" type="button" disabled><CheckCircle size={15} />已创建</button>
   if (item.market === 'theme' && state === 'installed') return <button className="market-action--installed" type="button" onClick={onBind}>创建新世界</button>
-  if (state === 'installed') return <button className="market-action--installed" type="button" onClick={onActivate}>{item.market === 'talent' ? '招募到世界' : '立即使用'}</button>
+  if (state === 'installed') return <button className="market-action--installed" type="button" onClick={onActivate}>{item.market === 'talent' ? '招募到世界' : item.market === 'skin' ? '应用到当前世界' : '立即使用'}</button>
+  if (item.market === 'skin' && state === 'included') return <button className="market-action--installed" type="button" onClick={onActivate}>应用到当前世界</button>
   if (state === 'available') return <button type="button" onClick={onInspect}>启用到当前世界</button>
   if (state === 'upgrade') return <button className="market-action--upgrade" type="button" onClick={onInspect}>升级到 v{item.manifest.version}</button>
   if (state === 'included') return <button className="market-action--included" type="button" disabled><CheckCircle size={15} />已内置</button>
@@ -509,6 +357,60 @@ function builtInThemeMatches(worldTemplateId: string, packageTemplateId: string)
   if (['company', 'cyber-company'].includes(worldTemplateId) && packageTemplateId === 'cyber-company') return true
   if (['tavern', 'moonlit-tavern'].includes(worldTemplateId) && ['tavern', 'moonlit-tavern'].includes(packageTemplateId)) return true
   return false
+}
+
+function SkinPreview({ item }: { item: CyberMarketPackage }) {
+  const preview = MARKET_SKIN_PREVIEW_IMAGES[item.manifest.id]
+  return (
+    <div className="market-skin-preview">
+      {preview === undefined
+        ? <><Palette size={28} /><span>安装后使用该皮肤声明的完整场景</span></>
+        : <img src={preview} alt={`${item.manifest.displayName}预览`} loading="lazy" />}
+    </div>
+  )
+}
+
+function SkinActivationReview({
+  item,
+  currentSkinId,
+  installedPackage,
+  installing,
+  confirmingUninstall,
+  onConfirmUninstall,
+  onUninstall,
+  onApplySkin,
+}: {
+  item: CyberMarketPackage
+  currentSkinId?: string | undefined
+  installedPackage?: InstalledPackage | undefined
+  installing: boolean
+  confirmingUninstall?: string | undefined
+  onConfirmUninstall(packageId?: string): void
+  onUninstall(item: InstalledPackage): Promise<void>
+  onApplySkin?: ((skinId: string) => Promise<void> | void) | undefined
+}) {
+  const activation = item.activation?.kind === 'skin' ? item.activation : undefined
+  const themeId = activation?.themeId ?? (item.manifest.id === 'default-skin' ? DEFAULT_SKIN_ID : item.manifest.id)
+  const applied = currentSkinId === themeId
+  return (
+    <section className="market-activation-review market-activation-review--skin">
+      <SkinPreview item={item} />
+      <header>
+        <span className="market-activation-review__mark"><Palette size={20} /></span>
+        <div><span>{item.manifest.id === 'default-skin' ? '默认皮肤 · 始终可用' : '皮肤已安装'}</span><h3>{item.manifest.displayName}</h3><p>{item.manifest.summary}</p></div>
+      </header>
+      <p className="market-activation-review__notice"><CheckCircle size={16} />完整场景、聊天气泡和文字样式会一起切换，绑定到当前世界。</p>
+      <button
+        className={applied ? 'market-action--created' : 'primary-button'}
+        type="button"
+        disabled={applied}
+        onClick={() => { void Promise.resolve(onApplySkin?.(themeId)).catch(() => undefined) }}
+      >
+        {applied ? '✓ 当前正在使用' : '应用到当前世界'}
+      </button>
+      {installedPackage === undefined || item.manifest.id === 'default-skin' ? null : <PackageRemovalAction item={installedPackage} installing={installing} confirming={confirmingUninstall === installedPackage.packageId} onConfirm={() => onConfirmUninstall(installedPackage.packageId)} onCancel={() => onConfirmUninstall(undefined)} onUninstall={onUninstall} />}
+    </section>
+  )
 }
 
 function marketplacePreviewUrl(item: CyberMarketPackage): string {

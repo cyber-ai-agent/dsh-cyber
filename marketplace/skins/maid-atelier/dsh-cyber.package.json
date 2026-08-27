@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "maid-atelier",
+  "version": "1.0.0",
+  "kind": "skin",
+  "displayName": "深海女仆工坊",
+  "summary": "深海宫殿、蓝金微晶与月光大厅，聊天和世界视图使用同一幅完整场景。",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "publisher": "DSH Cyber",
+  "capabilities": ["ui:skin"],
+  "dataEgress": [],
+  "files": [{"path": "skin.json", "sha256": "546147264cfdd45f7835c57c5a298d45d2efad444e7f8601b9e913ccc6dba294"}],
+  "entrypoints": [{"id": "maid-atelier", "kind": "skin", "path": "skin.json"}],
+  "certification": {"authority": "DSH Cyber", "level": "official", "contentSha256": "6b4bae0455a090ec98d5fc33dbecd77271102d8e3e45b961731657a61979924b"}
+}

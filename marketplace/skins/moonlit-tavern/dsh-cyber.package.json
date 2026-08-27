@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "moonlit-tavern",
+  "version": "1.0.0",
+  "kind": "skin",
+  "displayName": "月影酒馆",
+  "summary": "雨夜酒馆、壁炉和暖色木质大厅，适合叙事角色与同桌会话。",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "publisher": "DSH Cyber",
+  "capabilities": ["ui:skin"],
+  "dataEgress": [],
+  "files": [{"path": "skin.json", "sha256": "fe8359a24c637c04b4a368214be062a7531c7e77c68287327e2f5061b7aa8469"}],
+  "entrypoints": [{"id": "moonlit-tavern", "kind": "skin", "path": "skin.json"}],
+  "certification": {"authority": "DSH Cyber", "level": "official", "contentSha256": "70de6fa37cccd1a8ce2faaa1733349905fbbadc37c2beb97699d22ff8ee189f4"}
+}

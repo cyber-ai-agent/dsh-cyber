@@ -9,10 +9,11 @@
 | `marketplace/themes` | `theme` | `world-theme` / `world-theme` |
 | `marketplace/plugins` | `plugin` | `plugin` / `prompt-transform` |
 | `marketplace/talent` | `talent` | `employee-blueprint` / `employee-blueprint` |
+| `marketplace/skins` | `skin` | `skin` / `skin` |
 
 `talent` 是 UI/目录分类，不是包 kind。员工蓝图清单的 `kind` MUST 为 `employee-blueprint`。
 
-当前市场是仓库内的本地只读目录。远程索引、发布者账号、付费、依赖解析、自动更新、卸载、签名验证和 `package pack|verify|publish` CLI 均为 ROADMAP。
+当前市场是仓库内的本地目录。远程索引、发布者账号、付费、依赖解析、自动更新、签名验证和 `package pack|verify|publish` CLI 均为 ROADMAP；本地包支持预览、安装、启用和卸载。
 
 ## 包布局
 
@@ -53,6 +54,7 @@
 严格 parser 会拒绝未知字段、重复项、超限集合、非法路径/SHA、非法 SemVer、控制字符和不符合 SPDX 表达式语法的 license，并强制入口与包类型、能力及外发边界一致。当前只做 SPDX 语法校验，不内置完整 SPDX 许可证注册表。
 
 `prompt-transform` 必须属于 `plugin`，声明 `prompt:transform` 且 `dataEgress: []`；`employee-blueprint` 必须声明 `employee:blueprint`；`world-theme` 必须声明 `world:render`。后两类当前各只允许一个入口，避免现有选择 API 出现身份歧义。
+`skin` 必须声明 `ui:skin`、`dataEgress: []`，并且只能有一个 `skin` 入口。入口中的 `themeId` 由宿主主题注册中心解析；皮肤包不能注入脚本或任意样式。
 
 ## 发现、预览与安装
 
@@ -84,7 +86,7 @@ discover -> preview -> approve -> stage -> verify files -> activate -> persist
 
 ## 身份与不可变性
 
-包身份是 `packageId + packageVersion`。世界主题还具有独立的主题身份：
+包身份是 `packageId + packageVersion`。世界主题还具有独立的主题身份，皮肤包通过声明绑定宿主主题：
 
 ```text
 packageId + packageVersion + themeId + themeVersion + contentDigest

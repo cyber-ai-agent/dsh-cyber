@@ -95,8 +95,8 @@ interface PackageApprovalGrant {
 
 const DEFAULT_APPROVAL_TTL_MS = 5 * 60 * 1_000
 const MAX_APPROVAL_GRANTS = 2_048
-const PACKAGE_KINDS = new Set(['plugin', 'skill', 'employee-blueprint', 'world-theme', 'asset', 'model-provider'])
-const ENTRYPOINT_KINDS = new Set(['prompt-transform', 'employee-blueprint', 'world-theme', 'skill'])
+const PACKAGE_KINDS = new Set(['plugin', 'skill', 'employee-blueprint', 'world-theme', 'asset', 'model-provider', 'skin'])
+const ENTRYPOINT_KINDS = new Set(['prompt-transform', 'employee-blueprint', 'world-theme', 'skill', 'skin'])
 const PACKAGE_KEYS = new Set([
   'schemaVersion',
   'id',
@@ -344,10 +344,10 @@ export function validatePackageManifest(manifest: CyberPackageManifest): void {
     assertEntrypointContract(manifest, entrypoint.kind)
   }
   assertUnique(entrypointIds, 'entrypoint id')
-  if (['plugin', 'employee-blueprint', 'world-theme'].includes(manifest.kind) && entrypoints.length === 0) {
+  if (['plugin', 'employee-blueprint', 'world-theme', 'skin'].includes(manifest.kind) && entrypoints.length === 0) {
     throw new Error(`Package kind ${manifest.kind} requires an entrypoint`)
   }
-  if (['employee-blueprint', 'world-theme'].includes(manifest.kind) && entrypoints.length !== 1) {
+  if (['employee-blueprint', 'world-theme', 'skin'].includes(manifest.kind) && entrypoints.length !== 1) {
     throw new Error(`Package kind ${manifest.kind} requires exactly one entrypoint`)
   }
   if (manifest.certification !== undefined) {
@@ -418,7 +418,8 @@ function assertEntrypointContract(manifest: CyberPackageManifest, kind: string):
     // name a capability, and a capability that reaches an external integration
     // must name where the data goes.
     skill: { packageKind: 'skill', capability: undefined, noEgress: false },
-  } as const)[kind as 'prompt-transform' | 'employee-blueprint' | 'world-theme' | 'skill']
+    skin: { packageKind: 'skin', capability: 'ui:skin', noEgress: true },
+  } as const)[kind as 'prompt-transform' | 'employee-blueprint' | 'world-theme' | 'skill' | 'skin']
   if (expectation === undefined || manifest.kind !== expectation.packageKind) {
     throw new Error(`Entrypoint ${kind} is incompatible with package kind ${manifest.kind}`)
   }

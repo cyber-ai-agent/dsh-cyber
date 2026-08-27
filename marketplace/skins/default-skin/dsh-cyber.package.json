@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "default-skin",
+  "version": "1.0.0",
+  "kind": "skin",
+  "displayName": "默认皮肤",
+  "summary": "DSH Cyber 原生深色工作台，保持清晰克制的默认阅读体验。",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "publisher": "DSH Cyber",
+  "capabilities": ["ui:skin"],
+  "dataEgress": [],
+  "files": [{"path": "skin.json", "sha256": "a069ca3f2f8f969aa6f90fdb23b929fb78ee46b19b7e695f15d2432e518c7546"}],
+  "entrypoints": [{"id": "default-skin", "kind": "skin", "path": "skin.json"}],
+  "certification": {"authority": "DSH Cyber", "level": "official", "contentSha256": "0fe6505abdb47ec1f4ec8416e003405227501dbd088e61610c1e689cc548dc04"}
+}

@@ -40,7 +40,7 @@ export class LocalPackageCatalog {
 
   async list(input: PackageCatalogQuery = {}): Promise<CyberMarketPackage[]> {
     const markets: CyberMarketKind[] = input.market === undefined
-      ? ['theme', 'plugin', 'talent']
+      ? ['theme', 'plugin', 'talent', 'skin']
       : [input.market]
     const packages = (await Promise.all(markets.map((market) => this.#scanMarket(market)))).flat()
     const installed = new Map<string, string>()

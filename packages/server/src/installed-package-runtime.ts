@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { lstat, readFile } from 'node:fs/promises'
 import { extname, resolve, sep } from 'node:path'
 
-import type { EmployeeBlueprint, InstalledPackage, WorldThemeManifestV1 } from '@dsh-cyber/contracts'
+import type { CyberSkinManifestV1, EmployeeBlueprint, InstalledPackage, WorldThemeManifestV1 } from '@dsh-cyber/contracts'
 import type { StagedPackage } from '@dsh-cyber/package-runtime'
 import { validateWorldThemeManifest } from '@dsh-cyber/world-runtime'
 
@@ -12,6 +12,7 @@ import {
   type PromptTransform,
 } from './prompt-transform-parser.js'
 import { parseSkillManifest, type SkillManifest } from './skill-manifest.js'
+import { parseSkinManifest } from './skin-manifest.js'
 import { validateWorldThemePackageAssets } from './world-theme-package.js'
 
 export { parsePromptTransformDefinition } from './prompt-transform-parser.js'
@@ -43,6 +44,14 @@ export interface InstalledSkillManifest {
   entrypointId: string
   entrypointPath: string
   manifest: SkillManifest
+}
+
+export interface InstalledSkinManifest {
+  packageId: string
+  packageVersion: string
+  entrypointId: string
+  entrypointPath: string
+  manifest: CyberSkinManifestV1
 }
 
 export class InstalledPackageVerificationCache {
@@ -231,6 +240,30 @@ export async function loadInstalledWorldThemes(
   return themes
 }
 
+/** Load declaration-only skin packages from the workspace package library. */
+export async function loadInstalledSkins(
+  packages: InstalledPackage[],
+  verificationCache = defaultVerificationCache,
+): Promise<InstalledSkinManifest[]> {
+  const skins: InstalledSkinManifest[] = []
+  for (const installed of packages.filter((item) => item.status === 'active' && item.kind === 'skin')) {
+    const entrypoints = (installed.manifest.entrypoints ?? []).filter((entrypoint) => entrypoint.kind === 'skin')
+    assertSkinPackage(installed, entrypoints.length)
+    await verificationCache.verifyPackage(installed)
+    for (const entrypoint of entrypoints) {
+      const value = await readEntrypoint<unknown>(installed, entrypoint.path, verificationCache)
+      skins.push({
+        packageId: installed.packageId,
+        packageVersion: installed.version,
+        entrypointId: entrypoint.id,
+        entrypointPath: entrypoint.path,
+        manifest: parseSkinManifest(value, { packageId: installed.packageId, packageVersion: installed.version }),
+      })
+    }
+  }
+  return skins
+}
+
 export async function validateStagedPackageEntrypoints(staged: StagedPackage): Promise<void> {
   const installed: InstalledPackage = {
     workspaceId: '__staged__',
@@ -260,6 +293,10 @@ export async function validateStagedPackageEntrypoints(staged: StagedPackage): P
   }
   if (installed.kind === 'world-theme') {
     await loadInstalledWorldThemes([installed], verificationCache)
+    return
+  }
+  if (installed.kind === 'skin') {
+    await loadInstalledSkins([installed], verificationCache)
   }
 }
 
@@ -402,6 +439,24 @@ function assertWorldThemePackage(installed: InstalledPackage, entrypointCount: n
   }
   if (installed.manifest.dataEgress.length !== 0) {
     throw new Error(`World-theme package must not declare data egress: ${installed.packageId}`)
+  }
+}
+
+function assertSkinPackage(installed: InstalledPackage, entrypointCount: number): void {
+  if (installed.kind !== 'skin' || installed.manifest.kind !== 'skin') {
+    throw new Error(`Skin entrypoint requires skin package: ${installed.packageId}`)
+  }
+  if (entrypointCount !== 1) {
+    throw new Error(`Skin package requires exactly one entrypoint: ${installed.packageId}`)
+  }
+  if (!installed.manifest.capabilities.includes('ui:skin')) {
+    throw new Error(`Skin package is missing ui:skin capability: ${installed.packageId}`)
+  }
+  if (installed.manifest.dataEgress.length !== 0) {
+    throw new Error(`Skin package must not declare data egress: ${installed.packageId}`)
+  }
+  if (installed.manifest.entrypoints?.some((entrypoint) => entrypoint.kind !== 'skin') === true) {
+    throw new Error(`Skin package cannot mix entrypoint kinds: ${installed.packageId}`)
   }
 }
 

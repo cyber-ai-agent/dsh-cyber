@@ -3,6 +3,7 @@ import { CaretDown, Check, Palette, PencilSimple, Plus } from '@phosphor-icons/r
 import type { World } from '@dsh-cyber/contracts'
 import {
   applyWorldTheme,
+  DEFAULT_SKIN_ID,
   readWorldTheme,
   saveWorldTheme,
   themeRegistry,
@@ -12,10 +13,11 @@ import { ThemeCustomizerDialog } from './ThemeCustomizerDialog.js'
 
 interface WorldThemeSwitcherProps {
   activeWorld: World
+  installedSkinIds?: readonly string[]
   onThemeChange?(themeId: string): void
 }
 
-export function WorldThemeSwitcher({ activeWorld, onThemeChange }: WorldThemeSwitcherProps) {
+export function WorldThemeSwitcher({ activeWorld, installedSkinIds, onThemeChange }: WorldThemeSwitcherProps) {
   const [currentThemeId, setCurrentThemeId] = useState<string>(() => readWorldTheme(activeWorld))
   const [open, setOpen] = useState(false)
   const [customizerOpen, setCustomizerOpen] = useState(false)
@@ -24,10 +26,13 @@ export function WorldThemeSwitcher({ activeWorld, onThemeChange }: WorldThemeSwi
 
   // 当切换世界时，自动同步为该世界的主题
   useEffect(() => {
-    const theme = readWorldTheme(activeWorld)
+    const persisted = readWorldTheme(activeWorld)
+    const available = themeRegistry.listAvailable(installedSkinIds ?? [])
+    const theme = available.some((candidate) => candidate.id === persisted) ? persisted : DEFAULT_SKIN_ID
+    if (theme !== persisted) saveWorldTheme(activeWorld.id, theme)
     setCurrentThemeId(theme)
     applyWorldTheme(theme)
-  }, [activeWorld])
+  }, [activeWorld, installedSkinIds])
 
   // 点击外部关闭下拉菜单
   useEffect(() => {
@@ -41,8 +46,9 @@ export function WorldThemeSwitcher({ activeWorld, onThemeChange }: WorldThemeSwi
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [open])
 
-  const themes = themeRegistry.list()
-  const currentTheme = themeRegistry.get(currentThemeId)
+  const themes = themeRegistry.listAvailable(installedSkinIds ?? [])
+  const resolvedCurrentThemeId = themes.some((theme) => theme.id === currentThemeId) ? currentThemeId : DEFAULT_SKIN_ID
+  const currentTheme = themeRegistry.get(resolvedCurrentThemeId)
 
   const handleSelect = (theme: WorldThemeConfig) => {
     setCurrentThemeId(theme.id)
@@ -102,7 +108,7 @@ export function WorldThemeSwitcher({ activeWorld, onThemeChange }: WorldThemeSwi
 
             <div className="topbar-world-theme-menu__items">
               {themes.map((theme) => {
-                const selected = theme.id === currentThemeId
+                const selected = theme.id === resolvedCurrentThemeId
                 const previewImage = theme.tokens.worldMapImage ?? theme.tokens.backdropImage
                 const sourceBadge =
                   theme.source === 'custom'

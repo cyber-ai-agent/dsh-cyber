@@ -1,10 +1,10 @@
 # 创作规范实现状态
 
-本表只描述仓库当前可执行能力。`packages/server/tests/marketplace-conformance.test.ts` 把仓库内市场包的目录可发现性、类型/入口/能力一致性和三类 entrypoint schema 纳入持续测试。
+本表只描述仓库当前可执行能力。`packages/server/tests/marketplace-conformance.test.ts` 把仓库内市场包的目录可发现性、类型/入口/能力一致性和四类 entrypoint schema 纳入持续测试。
 
 ## 结论
 
-世界主题、本地包、员工蓝图和 prompt-transform 已收敛到严格声明式边界；现有领域模型更安全的部分继续保留。远程市场、发布 CLI、密码学签名、依赖解析、任意插件代码和外发监控仍未实现，不能通过文档字段假装存在。World Administrator V1 已进入真实的 SQLite、Server、Skill Runtime 和 Web 路径；产品级 E2E 仍是合并门禁，不通过门禁就不能把该能力标记为稳定发布能力。
+世界主题、皮肤包、本地包、员工蓝图和 prompt-transform 已收敛到严格声明式边界；现有领域模型更安全的部分继续保留。远程市场、发布 CLI、密码学签名、依赖解析、任意插件代码和外发监控仍未实现，不能通过文档字段假装存在。World Administrator V1 已进入真实的 SQLite、Server、Skill Runtime 和 Web 路径；产品级 E2E 仍是合并门禁，不通过门禁就不能把该能力标记为稳定发布能力。
 
 会话连续性支持同一会话跨重启恢复，回合与角色执行生命周期也已持久化到本地 SQLite。当前世界可以检索外部原始资料和有证据的长期知识；对话、资料和产物可以通过持久化后台任务整理为世界知识图谱。情景记忆、向量检索和跨设备知识同步尚未实现。
 
@@ -12,7 +12,7 @@
 | --- | --- | --- | --- |
 | 包审批 | 完整 manifest 内容绑定、加密随机 token、TTL、单次消费、活动版本绑定、失败回滚 | grant 存于进程内，重启后需重新 preview | 跨设备/远程审批 |
 | 包完整性 | 严格 manifest、未知字段/长度/唯一性、入口-类型-能力关系、完整源目录库存、逐文件 SHA-256、路径/symlink 防护、staged 入口校验、激活后目标文件复验 | license 当前做 SPDX 表达式语法校验，不内置完整注册表 | 密码学签名、透明日志 |
-| 本地市场 | themes/plugins/talent 独立目录、搜索、官方 authority + digest、本地安装 | `certification` 不是签名；`verified` 级别不存在 | 远程 index、publish、付费、依赖、更新、卸载 |
+| 本地市场 | themes/plugins/talent/skins 独立目录、搜索、官方 authority + digest、本地安装、启用和卸载；皮肤包绑定世界皮肤下拉 | `certification` 不是签名；第三方皮肤仍需宿主注册对应视觉主题 | 远程 index、publish、付费、依赖、自动更新 |
 | 世界包实例 | 市场目录、工作区只读包库和世界私有实例分层；固定包版本与内容摘要；`origin`、`overrides` 和 SQLite 身份归属世界；Prompt、主题资源和角色蓝图只从当前世界实例进入运行时；创建失败精确补偿 | 主题绑定会显式创建世界实例；同版本请求幂等；不同版本拒绝隐式覆盖；「蓝图只有在世界存在实例时才可招募」在目录、运行时路径与 `POST /api/worlds/:id/recruit` 三处一致强制，非内置蓝图缺少世界实例时返回 422 | 带差异预览的更新、rebase、三方合并、overrides 编辑器 |
 | 世界主题 | 严格 nested/JSON parser、资源限制、引用/唯一性、八项核心 activity mapping、极端导航拒绝、安装/绑定/切换/禁用/内置回退 | 当前正式官方 roster 多数状态使用受控单帧 fallback | 音频、多场景切换、Three renderer |
 | 主题身份 | package + packageVersion + theme + themeVersion + digest，renderer key 不冲突 | 内置主题使用专用 builtin identity | 签名内容寻址分发 |
@@ -47,6 +47,7 @@
 - 世界包实例：`packages/server/src/services/world-package-instance-service.ts`、`packages/persistence/src/migrations.ts`、[世界包实例](../architecture/world-package-instance-v1.md)
 - 主题 parser：`packages/world-runtime/src/manifest.ts`、`packages/world-runtime/tests/world-runtime.test.ts`
 - 安装入口与资产缓存：`packages/server/src/installed-package-runtime.ts`、`packages/server/src/world-theme-package.ts`、对应 tests
+- 皮肤包声明与市场绑定：`packages/server/src/skin-manifest.ts`、`marketplace/skins`、`packages/web/src/features/world/world-themes.ts`
 - 社区包门禁：`packages/server/tests/marketplace-conformance.test.ts`
 - 主题绑定与资产服务：`packages/server/src/world-runtime-service.ts`
 - renderer 与动画：`packages/web/src/features/world/renderer`、`packages/web/tests`

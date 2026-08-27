@@ -4,6 +4,7 @@
 
 - [包生态与信任边界](package-ecosystem.md)
 - [世界主题创作约定](world-theme-authoring.md)
+- [皮肤包创作约定](skin-authoring.md)
 - [员工蓝图创作约定](employee-blueprint-authoring.md)
 - [声明式插件创作约定](plugin-authoring.md)
 - [模型交互日志（运行时能力说明）](model-interaction-logs.md)
