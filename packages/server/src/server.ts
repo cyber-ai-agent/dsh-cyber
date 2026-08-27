@@ -54,7 +54,6 @@ import { ApplicationAccessService } from './services/application-access-service.
 import { CharacterProfileRuntime } from './services/character-profile-runtime.js'
 import { CharacterSkillRuntime } from './services/character-skill-runtime.js'
 import { composeConversationControl } from './services/conversation-control-composition.js'
-import { CompletionWorker } from './services/completion-worker.js'
 import { SkillCatalogService } from './services/skill-catalog-service.js'
 import { GroupTaskCollaborationService } from './services/group-task-collaboration-service.js'
 import { EmployeeActivityProjectionService } from './services/employee-activity-projection-service.js'
@@ -72,6 +71,8 @@ import { TurnAwareApprovalContinuationService } from './services/turn-aware-appr
 import { WorldAccessService } from './services/world-access-service.js'
 import type { WorkSystemService } from './services/work-system-service.js'
 import { composeWorkSystem } from './composition/compose-work-system.js'
+import { composeCompletionWorker } from './composition/compose-completion.js'
+import { refreshMcpCatalog } from './composition/mcp-lifecycle.js'
 import { WorldArtifactService } from './services/world-artifact-service.js'
 import { WorldAmbientSlotResolver } from './services/world-ambient-slot-resolver.js'
 import { WorldAmbientStateProvider } from './services/world-ambient-state-provider.js'
@@ -291,7 +292,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     service: interactions,
     resolveRoute(request) { return resolveHarnessRoute(store, request) },
   })
-  let wakeCompletionJob = (): void => undefined
+  const completionWorker = composeCompletionWorker(store, worldArtifacts)
   const orchestrator = new ConversationOrchestrator({
     store,
     runtime,
@@ -302,29 +303,8 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     resolveWorldRoot: async (worldId, employeeId) =>
       (await worldRuntimePermissions.resolve({ worldId, employeeId })).workspacePath,
     completionJobType: 'world-artifact-publication',
-    onCompletionJobQueued: () => wakeCompletionJob(),
+    onCompletionJobQueued: () => completionWorker.wake(),
   })
-  const completionWorker = new CompletionWorker({
-    store,
-    handlers: new Map([[
-      'world-artifact-publication',
-      async (job) => {
-        const employeeId = typeof job.payload.employeeId === 'string' ? job.payload.employeeId : undefined
-        const workspacePath = typeof job.payload.workspacePath === 'string' ? job.payload.workspacePath : undefined
-        if (employeeId === undefined || workspacePath === undefined) throw new Error('completion_job_payload_invalid')
-        return worldArtifacts.publishAgentRun({
-          workspaceId: job.workspaceId,
-          worldId: job.worldId,
-          employeeId,
-          sessionId: job.sessionId,
-          workTurnId: job.workTurnId,
-          agentRunId: job.agentRunId,
-          workspacePath,
-        })
-      },
-    ]]),
-  })
-  wakeCompletionJob = () => completionWorker.wake()
   const peerCollaboration = new PeerCollaborationService({
     store,
     simulationStore: worldSimulation,
@@ -579,29 +559,6 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       store.close()
     },
   }
-}
-
-/** MCP servers are user-configured endpoints; discovery is best-effort. */
-const MCP_DISCOVERY_TIMEOUT_MS = 5_000
-
-async function refreshMcpCatalog(adapter: McpSkillAdapter, registry: CharacterSkillAdapterRegistry): Promise<void> {
-  try {
-    await withTimeout(adapter.refresh(), MCP_DISCOVERY_TIMEOUT_MS)
-  } catch (error) {
-    // A stalled or hostile endpoint must not hold the process, and a catalog
-    // that could not be read stays empty rather than stale.
-    adapter.clear()
-    console.warn('[dsh-cyber] MCP 工具目录刷新失败，本次保持为空：', errorText(error))
-  }
-  registry.refresh(adapter)
-}
-
-function withTimeout<TValue>(work: Promise<TValue>, milliseconds: number): Promise<TValue> {
-  return new Promise<TValue>((resolvePromise, rejectPromise) => {
-    const timer = setTimeout(() => rejectPromise(new Error(`操作超过 ${milliseconds} 毫秒未完成`)), milliseconds)
-    timer.unref?.()
-    work.then(resolvePromise, rejectPromise).finally(() => clearTimeout(timer))
-  })
 }
 
 /** Crash residue from `instantiate`; safe to remove because nothing reads it. */
