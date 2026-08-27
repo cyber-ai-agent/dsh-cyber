@@ -43,7 +43,7 @@ export function WorldCanvas({
   const hostRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<WorldRenderer<HTMLElement> | undefined>(undefined)
   const appliedCueIds = useRef(new Set<string>())
-  const mountedKey = `${rendererIdentity}:${snapshot.sceneId}`
+  const mountedKey = `${rendererIdentity}:${manifest.id}:${snapshot.sceneId}`
 
   useEffect(() => {
     const host = hostRef.current
