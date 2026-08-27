@@ -2212,9 +2212,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   color: #ffffff;
 }
 
-/* 全局左侧会话栏：深邃藏蓝天鹅绒 + 奢华金线镶边 */
+/* 全局左侧会话栏：深邃藏蓝天鹅绒 + 奢华金线镶边 + 现代圆角卡片 */
 :root[data-skin='maid-atelier'] .navigation-pane {
-  background: linear-gradient(180deg, rgba(16, 36, 86, 0.97) 0%, rgba(8, 18, 48, 0.98) 100%);
+  background: linear-gradient(180deg, rgba(14, 32, 80, 0.98) 0%, rgba(8, 18, 48, 0.99) 100%);
   border-right: 1px solid rgba(197, 164, 104, 0.6);
   box-shadow: 8px 0 32px rgba(4, 11, 35, 0.45), inset -1px 0 rgba(255, 245, 215, 0.35);
 }
@@ -2231,29 +2231,57 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 
 :root[data-skin='maid-atelier'] .session-row {
-  border-radius: 8px;
-  margin: 3px 0;
-  border: 1px solid transparent;
-  transition: all 0.25s ease;
+  margin: 6px 8px !important;
+  padding: 10px 12px !important;
+  border-radius: 12px !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+  border: 1px solid rgba(197, 164, 104, 0.15) !important;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
 
 :root[data-skin='maid-atelier'] .session-row:hover {
-  background: rgba(82, 106, 168, 0.3);
-  border-color: rgba(197, 164, 104, 0.4);
+  background: rgba(82, 106, 168, 0.28) !important;
+  border-color: rgba(197, 164, 104, 0.45) !important;
+  transform: translateX(2px) !important;
 }
 
 :root[data-skin='maid-atelier'] .session-row.is-active {
-  background: linear-gradient(90deg, rgba(82, 106, 168, 0.5) 0%, rgba(197, 164, 104, 0.25) 100%);
-  border: 1px solid rgba(197, 164, 104, 0.9);
-  box-shadow: 0 2px 16px rgba(197, 164, 104, 0.4), inset 3px 0 0 #c5a468;
+  background: linear-gradient(135deg, rgba(82, 106, 168, 0.55) 0%, rgba(197, 164, 104, 0.28) 100%) !important;
+  border: 1.5px solid rgba(212, 178, 114, 0.9) !important;
+  box-shadow: 0 4px 20px rgba(4, 11, 35, 0.5), inset 4px 0 0 #c5a468 !important;
+}
+
+:root[data-skin='maid-atelier'] .session-row__avatar .avatar {
+  border-radius: 50% !important;
+  border: 1.5px solid rgba(197, 164, 104, 0.75) !important;
+  box-shadow: 0 0 10px rgba(197, 164, 104, 0.45) !important;
 }
 
 :root[data-skin='maid-atelier'] .session-row.is-active .session-row__copy strong {
-  color: #ffffff;
+  color: #ffffff !important;
 }
 
 :root[data-skin='maid-atelier'] .session-row.is-active .session-row__copy small {
-  color: #e2cfaa;
+  color: #e2cfaa !important;
+}
+
+:root[data-skin='maid-atelier'] .world-settings-entry {
+  border-top: 1px solid rgba(197, 164, 104, 0.3) !important;
+  padding: 12px 14px !important;
+}
+
+:root[data-skin='maid-atelier'] .world-settings-entry button {
+  border-radius: 999px !important;
+  background: rgba(197, 164, 104, 0.12) !important;
+  border: 1px solid rgba(197, 164, 104, 0.5) !important;
+  color: #f8f6f0 !important;
+  font-weight: 500 !important;
+  transition: all 0.2s ease !important;
+}
+
+:root[data-skin='maid-atelier'] .world-settings-entry button:hover {
+  background: rgba(197, 164, 104, 0.25) !important;
+  border-color: #e2cfaa !important;
 }
 
 /* 聊天工作台顶部 */
@@ -2273,54 +2301,165 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 
 :root[data-skin='maid-atelier'] .chat-header__history {
-  border: 1px solid rgba(197, 164, 104, 0.7);
-  background: rgba(197, 164, 104, 0.15);
-  color: #f8f6f0;
-  border-radius: 6px;
+  border-radius: 999px !important;
+  background: rgba(197, 164, 104, 0.14) !important;
+  border: 1px solid rgba(197, 164, 104, 0.65) !important;
+  padding: 6px 16px !important;
+  color: #f8f6f0 !important;
+  font-size: 12.5px !important;
+  font-weight: 500 !important;
+  transition: all 0.2s ease !important;
 }
 
 :root[data-skin='maid-atelier'] .chat-header__history:hover {
-  background: rgba(197, 164, 104, 0.3);
-  border-color: #c5a468;
+  background: rgba(197, 164, 104, 0.28) !important;
+  border-color: #e2cfaa !important;
+  box-shadow: 0 0 12px rgba(197, 164, 104, 0.4) !important;
 }
 
-/* 输入框与操作区 */
+/* 现代自适应圆润双层微光对话气泡 */
+:root[data-skin='maid-atelier'] .message {
+  padding: 10px 0 !important;
+  border-bottom: 0 !important;
+}
+
+:root[data-skin='maid-atelier'] .message--owner {
+  display: flex !important;
+  justify-content: flex-end !important;
+}
+
+:root[data-skin='maid-atelier'] .message--owner .message__body {
+  width: auto !important;
+  max-width: min(78%, 680px) !important;
+}
+
+:root[data-skin='maid-atelier'] .message--owner .message__content {
+  background: linear-gradient(135deg, rgba(28, 56, 125, 0.92) 0%, rgba(14, 32, 80, 0.96) 100%) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(212, 178, 114, 0.8) !important;
+  border-radius: 20px 20px 4px 20px !important;
+  box-shadow: 0 8px 26px rgba(4, 11, 35, 0.5), 0 0 16px rgba(197, 164, 104, 0.25) !important;
+  padding: 12px 18px !important;
+  font-size: 14.5px !important;
+  line-height: 1.65 !important;
+}
+
+:root[data-skin='maid-atelier'] .message:not(.message--owner) {
+  display: flex !important;
+  justify-content: flex-start !important;
+  align-items: flex-start !important;
+  gap: 12px !important;
+}
+
+:root[data-skin='maid-atelier'] .message:not(.message--owner) .message__body {
+  width: auto !important;
+  max-width: min(85%, 720px) !important;
+}
+
+:root[data-skin='maid-atelier'] .message:not(.message--owner) .message__content {
+  background: linear-gradient(135deg, rgba(12, 25, 62, 0.88) 0%, rgba(8, 17, 44, 0.94) 100%) !important;
+  color: #f8f6f0 !important;
+  border: 1px solid rgba(142, 165, 218, 0.45) !important;
+  border-radius: 20px 20px 20px 4px !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  padding: 14px 20px !important;
+  font-size: 14.5px !important;
+  line-height: 1.7 !important;
+}
+
+:root[data-skin='maid-atelier'] .stream-cursor {
+  background: #38bdf8 !important;
+  box-shadow: 0 0 10px #38bdf8 !important;
+  border-radius: 2px !important;
+}
+
+:root[data-skin='maid-atelier'] .stream-state {
+  color: #c5a468 !important;
+}
+
+:root[data-skin='maid-atelier'] .composer-topic-notice,
+:root[data-skin='maid-atelier'] .isolation-note {
+  background: rgba(10, 23, 59, 0.75) !important;
+  border: 1px solid rgba(197, 164, 104, 0.45) !important;
+  border-radius: 999px !important;
+  padding: 6px 18px !important;
+  color: #e2cfaa !important;
+  width: fit-content !important;
+  margin: 12px auto !important;
+  box-shadow: 0 4px 16px rgba(4, 11, 35, 0.4) !important;
+}
+
+/* 优雅居中悬浮输入框 */
 :root[data-skin='maid-atelier'] .composer-zone {
-  background: rgba(10, 23, 59, 0.9);
-  border-top: 1px solid rgba(197, 164, 104, 0.6);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background: transparent !important;
+  border-top: 0 !important;
+  padding-bottom: 22px !important;
 }
 
 :root[data-skin='maid-atelier'] .composer {
-  background: rgba(16, 32, 77, 0.94);
-  border: 1px solid rgba(197, 164, 104, 0.75);
-  box-shadow: 0 8px 32px rgba(4, 11, 35, 0.5), inset 0 0 0 1px rgba(226, 207, 170, 0.3);
-  border-radius: 12px;
+  max-width: min(840px, 94%) !important;
+  margin: 0 auto !important;
+  background: rgba(9, 20, 54, 0.92) !important;
+  border: 1.5px solid rgba(212, 178, 114, 0.75) !important;
+  border-radius: 22px !important;
+  box-shadow: 0 14px 44px rgba(4, 11, 35, 0.65), 0 0 24px rgba(197, 164, 104, 0.22) !important;
+  backdrop-filter: blur(24px) !important;
+  -webkit-backdrop-filter: blur(24px) !important;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
 
 :root[data-skin='maid-atelier'] .composer:focus-within {
-  border-color: #c5a468;
-  box-shadow: 0 0 0 2px rgba(197, 164, 104, 0.4), 0 0 28px rgba(197, 164, 104, 0.55);
+  border-color: #e2cfaa !important;
+  box-shadow: 0 0 0 3px rgba(197, 164, 104, 0.35), 0 16px 48px rgba(4, 11, 35, 0.75), 0 0 32px rgba(197, 164, 104, 0.5) !important;
 }
 
 :root[data-skin='maid-atelier'] .composer textarea {
-  color: #f8f6f0;
+  color: #ffffff !important;
+  font-size: 15px !important;
+  padding: 16px 20px 8px !important;
 }
 
-:root[data-skin='maid-atelier'] .send-button,
-:root[data-skin='maid-atelier'] .primary-button {
-  background: linear-gradient(135deg, #c5a468 0%, #a07e42 100%);
-  color: #0a173b;
-  font-weight: 700;
-  border: 1px solid rgba(255, 245, 215, 0.7);
-  box-shadow: 0 4px 16px rgba(197, 164, 104, 0.45);
+:root[data-skin='maid-atelier'] .composer textarea::placeholder {
+  color: rgba(181, 193, 221, 0.6) !important;
 }
 
-:root[data-skin='maid-atelier'] .send-button:hover:not(:disabled),
-:root[data-skin='maid-atelier'] .primary-button:hover:not(:disabled) {
-  background: linear-gradient(135deg, #d8bc80 0%, #b8934f 100%);
-  box-shadow: 0 6px 24px rgba(197, 164, 104, 0.65);
+:root[data-skin='maid-atelier'] .composer__toolbar {
+  padding: 8px 16px 12px !important;
+}
+
+:root[data-skin='maid-atelier'] .conversation-permission-control__trigger {
+  border-radius: 999px !important;
+  background: rgba(197, 164, 104, 0.12) !important;
+  border: 1px solid rgba(197, 164, 104, 0.6) !important;
+  color: #f8f6f0 !important;
+  padding: 5px 14px !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  transition: all 0.2s ease !important;
+}
+
+:root[data-skin='maid-atelier'] .conversation-permission-control__trigger:hover {
+  background: rgba(197, 164, 104, 0.25) !important;
+  border-color: #e2cfaa !important;
+}
+
+:root[data-skin='maid-atelier'] .send-button {
+  width: 38px !important;
+  height: 38px !important;
+  border-radius: 50% !important;
+  background: linear-gradient(135deg, #f8e5be 0%, #c5a468 55%, #9b793d 100%) !important;
+  color: #08122d !important;
+  border: 1px solid rgba(255, 245, 215, 0.8) !important;
+  box-shadow: 0 4px 18px rgba(197, 164, 104, 0.55) !important;
+  cursor: pointer !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+:root[data-skin='maid-atelier'] .send-button:hover:not(:disabled) {
+  transform: translateY(-2px) scale(1.06) !important;
+  box-shadow: 0 6px 24px rgba(197, 164, 104, 0.8) !important;
 }
 
 /* 右侧面板 (Dock) 融合 */
@@ -2341,6 +2480,34 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 :root[data-skin='maid-atelier'] .dock-tabs button.is-active {
   border-bottom-color: #c5a468;
   color: #f8f6f0;
+}
+
+:root[data-skin='maid-atelier'] .world-runtime-dock {
+  background: rgba(8, 18, 48, 0.97) !important;
+  color: #f8f6f0 !important;
+}
+
+:root[data-skin='maid-atelier'] .world-runtime-dock__header {
+  background: rgba(10, 23, 59, 0.95) !important;
+  border-bottom: 1px solid rgba(197, 164, 104, 0.5) !important;
+}
+
+:root[data-skin='maid-atelier'] .world-runtime-dock__mark {
+  border-color: rgba(197, 164, 104, 0.8) !important;
+  background: rgba(197, 164, 104, 0.15) !important;
+  color: #e2cfaa !important;
+}
+
+:root[data-skin='maid-atelier'] .world-runtime-dock__controls {
+  background: rgba(10, 23, 59, 0.88) !important;
+  border: 1px solid rgba(197, 164, 104, 0.55) !important;
+  border-radius: 8px !important;
+}
+
+:root[data-skin='maid-atelier'] .world-runtime-dock__controls button:hover,
+:root[data-skin='maid-atelier'] .world-runtime-dock__controls button.is-active {
+  background: rgba(197, 164, 104, 0.25) !important;
+  color: #e2cfaa !important;
 }
 
 /* 2. Orca Link (虎鲸链路) 全局深度 UI 蜕变 */

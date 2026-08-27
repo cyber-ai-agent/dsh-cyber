@@ -11,7 +11,7 @@ import type {
   WorldThemeOption,
   WorldThemeSceneManifest,
 } from '@dsh-cyber/contracts'
-import { cyberCompanyTheme, findPath, getAnchor, getScene, moonlitTavernTheme } from '@dsh-cyber/world-runtime'
+import { cyberCompanyTheme, findPath, getAnchor, getScene, maidPalaceTheme, moonlitTavernTheme } from '@dsh-cyber/world-runtime'
 
 import { api } from '../../api.js'
 import type { CyberEmployee } from '../../types.js'
@@ -35,8 +35,16 @@ interface UseWorldClientInput {
   liveEnabled?: boolean
 }
 
+function resolveSkinManifest(world: World): WorldThemeManifestV1 {
+  const currentSkin = typeof document !== 'undefined' ? document.documentElement.dataset.skin : undefined
+  if (currentSkin === 'maid-atelier') {
+    return maidPalaceTheme
+  }
+  return worldExperience(world).kind === 'tavern' ? moonlitTavernTheme : cyberCompanyTheme
+}
+
 export function useWorldClient({ demoMode, world, employees, liveEnabled = true }: UseWorldClientInput) {
-  const manifest = worldExperience(world).kind === 'tavern' ? moonlitTavernTheme : cyberCompanyTheme
+  const manifest = resolveSkinManifest(world)
   const [state, setState] = useState<WorldClientState>(() => ({
     manifest,
     rendererIdentity: builtInRendererIdentity(manifest),
