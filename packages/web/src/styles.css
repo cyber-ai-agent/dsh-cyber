@@ -84,52 +84,83 @@
    DSH Cyber 12 Immersive Skins & Theme Ecosystem (DSH Skin Universe)
    ========================================================================== */
 
-/* 1. 深海女仆工坊 (Deep Whale Maid Atelier) - 源自 Small-tailqwq/dsh-deep-whale 鲸鱼娘 */
+/* 1. 深海女仆工坊 (Deep Whale Maid Atelier) - 原创 AI 拟人化双女仆宫殿 */
 :root[data-skin='maid-atelier'] {
   --bg: #070e17;
-  --surface-0: rgba(9, 18, 30, 0.74);
-  --surface-1: rgba(14, 26, 44, 0.82);
-  --surface-2: rgba(20, 36, 62, 0.88);
-  --surface-3: rgba(28, 50, 84, 0.92);
-  --border: rgba(56, 189, 248, 0.26);
-  --border-strong: rgba(56, 189, 248, 0.46);
-  --border-highlight: rgba(125, 211, 252, 0.65);
-  --accent: #38bdf8;
-  --accent-strong: #7dd3fc;
-  --accent-soft: rgba(56, 189, 248, 0.2);
-  --accent-glow: 0 0 24px rgba(56, 189, 248, 0.55);
-  --text: #f0f9ff;
-  --text-muted: #93c5fd;
-  --text-soft: #e0f2fe;
-  --bubble-owner-bg: linear-gradient(135deg, #0ea5e9 0%, #0284c7 60%, #0369a1 100%);
-  --bubble-owner-color: #ffffff;
-  --bubble-owner-border: rgba(125, 211, 252, 0.7);
-  --bubble-owner-shadow: 0 4px 24px rgba(2, 132, 199, 0.45);
-  --bubble-assistant-bg: rgba(10, 22, 38, 0.82);
-  --bubble-assistant-border: rgba(56, 189, 248, 0.32);
-  --glass-bg: rgba(9, 18, 32, 0.72);
-  --glass-blur: blur(24px);
-  --skin-backdrop: radial-gradient(circle at 80% 20%, rgba(56, 189, 248, 0.4) 0%, transparent 55%),
-    radial-gradient(circle at 20% 80%, rgba(125, 211, 252, 0.28) 0%, transparent 60%),
-    radial-gradient(ellipse at 50% 50%, rgba(14, 165, 233, 0.16) 0%, transparent 70%),
-    linear-gradient(175deg, #091321 0%, #0d1e34 45%, #050b14 100%);
-  --skin-watermark: radial-gradient(circle at 75% 75%, rgba(56, 189, 248, 0.22) 0%, transparent 60%);
+  --surface-0: rgba(9, 18, 30, 0.42);
+  --surface-1: rgba(14, 26, 44, 0.65);
+  --surface-2: rgba(20, 36, 62, 0.76);
+  --surface-3: rgba(28, 50, 84, 0.84);
+  --border: rgba(142, 165, 218, 0.32);
+  --border-strong: rgba(197, 164, 104, 0.6);
+  --border-highlight: rgba(226, 207, 170, 0.8);
+  --accent: #526aa8;
+  --accent-strong: #8ea5da;
+  --accent-soft: rgba(82, 106, 168, 0.28);
+  --accent-glow: 0 0 28px rgba(82, 106, 168, 0.65);
+  --text: #f0f6ff;
+  --text-muted: #9bb0e1;
+  --text-soft: #d5dff3;
+  --bubble-owner-bg: linear-gradient(135deg, #1c326b 0%, #10204d 100%);
+  --bubble-owner-color: #f8f6f0;
+  --bubble-owner-border: rgba(197, 164, 104, 0.8);
+  --bubble-owner-shadow: 0 4px 24px rgba(16, 32, 77, 0.65);
+  --bubble-assistant-bg: rgba(13, 25, 59, 0.8);
+  --bubble-assistant-border: rgba(142, 165, 218, 0.35);
+  --glass-bg: rgba(9, 19, 51, 0.62);
+  --glass-blur: blur(16px);
+  --skin-backdrop: url('/assets/skins/whale-palace-night.jpg');
+  --skin-character-left: url('/assets/skins/whale-maid-left.jpg');
+  --skin-character-right: url('/assets/skins/whale-maid-right.jpg');
+  --skin-composer-frame: url('/assets/skins/maid-composer-frame.webp');
+  --skin-watermark: none;
 }
 
-/* 2. 虎鲸链路 (Orca Link) - 源自 Small-tailqwq/dsh-deep-whale 虎鲸娘 */
+:root[data-skin='maid-atelier'][data-color-scheme='light'] {
+  --bg: #dce6f5;
+  --surface-0: rgba(248, 250, 255, 0.52);
+  --surface-1: rgba(248, 250, 255, 0.72);
+  --surface-2: rgba(235, 240, 250, 0.82);
+  --surface-3: rgba(224, 231, 246, 0.88);
+  --border: rgba(71, 91, 145, 0.25);
+  --border-strong: rgba(197, 164, 104, 0.65);
+  --border-highlight: rgba(197, 164, 104, 0.9);
+  --accent: #526aa8;
+  --accent-strong: #172347;
+  --accent-soft: rgba(82, 106, 168, 0.2);
+  --accent-glow: 0 0 24px rgba(82, 106, 168, 0.5);
+  --text: #172347;
+  --text-muted: #4d5d7f;
+  --text-soft: #243866;
+  --bubble-owner-bg: linear-gradient(135deg, #526aa8 0%, #3e5287 100%);
+  --bubble-owner-color: #ffffff;
+  --bubble-owner-border: rgba(197, 164, 104, 0.85);
+  --bubble-owner-shadow: 0 4px 20px rgba(82, 106, 168, 0.35);
+  --bubble-assistant-bg: rgba(255, 253, 248, 0.86);
+  --bubble-assistant-border: rgba(71, 91, 145, 0.3);
+  --glass-bg: rgba(248, 250, 255, 0.65);
+  --glass-blur: blur(16px);
+  --skin-backdrop: url('/assets/skins/whale-palace-day.jpg');
+  --skin-character-left: url('/assets/skins/whale-maid-left.jpg');
+  --skin-character-right: url('/assets/skins/whale-maid-right.jpg');
+  --skin-composer-frame: url('/assets/skins/maid-composer-frame.webp');
+  --skin-watermark: none;
+}
+
+/* 2. 虎鲸链路 (Orca Link) - 原创 AI 拟人化虎鲸机能少女 */
 :root[data-skin='orca-link'] {
-  --bg: #0b1118;
-  --surface-0: rgba(12, 19, 28, 0.76);
-  --surface-1: rgba(18, 28, 42, 0.84);
-  --surface-2: rgba(26, 40, 60, 0.89);
-  --surface-3: rgba(36, 54, 80, 0.93);
-  --border: rgba(2, 132, 199, 0.28);
-  --border-strong: rgba(56, 189, 248, 0.48);
-  --border-highlight: rgba(56, 189, 248, 0.7);
+  --bg: #090e15;
+  --surface-0: rgba(12, 18, 26, 0.52);
+  --surface-1: rgba(18, 28, 42, 0.7);
+  --surface-2: rgba(26, 40, 60, 0.8);
+  --surface-3: rgba(36, 54, 80, 0.86);
+  --border: rgba(56, 189, 248, 0.32);
+  --border-strong: rgba(56, 189, 248, 0.55);
+  --border-highlight: rgba(125, 211, 252, 0.75);
   --accent: #0284c7;
   --accent-strong: #38bdf8;
-  --accent-soft: rgba(2, 132, 199, 0.22);
-  --accent-glow: 0 0 24px rgba(2, 132, 199, 0.55);
+  --accent-soft: rgba(2, 132, 199, 0.25);
+  --accent-glow: 0 0 26px rgba(2, 132, 199, 0.6);
   --text: #f0fdf4;
   --text-muted: #7dd3fc;
   --text-soft: #e0f2fe;
@@ -137,15 +168,46 @@
   --bubble-owner-color: #ffffff;
   --bubble-owner-border: rgba(56, 189, 248, 0.8);
   --bubble-owner-shadow: 0 4px 24px rgba(2, 132, 199, 0.5);
-  --bubble-assistant-bg: rgba(14, 24, 38, 0.82);
+  --bubble-assistant-bg: rgba(14, 24, 38, 0.85);
   --bubble-assistant-border: rgba(2, 132, 199, 0.35);
-  --glass-bg: rgba(12, 19, 30, 0.74);
-  --glass-blur: blur(20px);
-  --skin-backdrop: radial-gradient(circle at 50% 10%, rgba(2, 132, 199, 0.38) 0%, transparent 60%),
-    radial-gradient(circle at 85% 85%, rgba(56, 189, 248, 0.24) 0%, transparent 55%),
-    repeating-linear-gradient(0deg, transparent, transparent 29px, rgba(56, 189, 248, 0.05) 30px),
-    linear-gradient(180deg, #091017 0%, #0f1925 50%, #060a0f 100%);
-  --skin-watermark: radial-gradient(circle at 75% 75%, rgba(2, 132, 199, 0.25) 0%, transparent 60%);
+  --glass-bg: rgba(12, 19, 30, 0.68);
+  --glass-blur: blur(16px);
+  --skin-backdrop: radial-gradient(circle at 70% 30%, rgba(2, 132, 199, 0.25) 0%, transparent 65%), linear-gradient(180deg, #070b10 0%, #0c141d 100%);
+  --skin-character-left: none;
+  --skin-character-right: url('/assets/skins/orca-dark-hero.jpg');
+  --skin-composer-frame: none;
+  --skin-watermark: none;
+}
+
+:root[data-skin='orca-link'][data-color-scheme='light'] {
+  --bg: #eceff4;
+  --surface-0: rgba(245, 247, 250, 0.58);
+  --surface-1: rgba(255, 255, 255, 0.75);
+  --surface-2: rgba(235, 240, 248, 0.85);
+  --surface-3: rgba(220, 230, 242, 0.9);
+  --border: rgba(2, 132, 199, 0.28);
+  --border-strong: rgba(2, 132, 199, 0.55);
+  --border-highlight: rgba(2, 132, 199, 0.8);
+  --accent: #0284c7;
+  --accent-strong: #0369a1;
+  --accent-soft: rgba(2, 132, 199, 0.18);
+  --accent-glow: 0 0 24px rgba(2, 132, 199, 0.45);
+  --text: #0f172a;
+  --text-muted: #475569;
+  --text-soft: #1e293b;
+  --bubble-owner-bg: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+  --bubble-owner-color: #ffffff;
+  --bubble-owner-border: rgba(2, 132, 199, 0.75);
+  --bubble-owner-shadow: 0 4px 18px rgba(2, 132, 199, 0.3);
+  --bubble-assistant-bg: rgba(255, 255, 255, 0.86);
+  --bubble-assistant-border: rgba(2, 132, 199, 0.28);
+  --glass-bg: rgba(245, 247, 250, 0.7);
+  --glass-blur: blur(16px);
+  --skin-backdrop: radial-gradient(circle at 75% 35%, rgba(2, 132, 199, 0.18) 0%, transparent 60%), linear-gradient(180deg, #f1f5f9 0%, #e2e8f0 100%);
+  --skin-character-left: none;
+  --skin-character-right: url('/assets/skins/orca-light-hero.jpg');
+  --skin-composer-frame: none;
+  --skin-watermark: none;
 }
 
 /* 3. 绝区零 · 星见雅 (ZZZ Miyabi) - 源自 whyihaveyou/dsh-themes */
@@ -689,17 +751,34 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .status--archived { background: #64748b; }
 .status-inline { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 11px; }
 
-.chat-workbench { height: 100%; display: grid; grid-template-rows: 56px minmax(0, 1fr) auto; background: color-mix(in srgb, var(--surface-0) 90%, transparent); }
-.chat-header { justify-content: space-between; gap: 16px; padding-inline: max(20px, calc((100% - 1120px) / 2)); background: var(--glass-bg); backdrop-filter: var(--glass-blur); }
-.chat-header__identity { min-width: 0; display: flex; align-items: center; gap: 12px; }
-.chat-header__identity > span:last-child { min-width: 0; }
-.chat-header__avatars { width: 44px; min-width: 44px; height: 38px; display: flex; align-items: center; overflow: hidden; }
-.chat-header__avatar-button { width: 36px; height: 36px; display: inline-grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: var(--radius-control); background: transparent; transition: all var(--duration-fast) var(--ease-smooth); }
-.chat-header__avatar-button:hover, .chat-header__avatar-button:focus-visible { border-color: var(--accent); background: var(--accent-soft); }
-.chat-header__avatars .avatar + .avatar { margin-left: -11px; border-color: var(--surface-0); }
-.chat-workbench { position: relative; height: 100%; display: grid; grid-template-rows: 56px minmax(0, 1fr) auto; background: color-mix(in srgb, var(--surface-0) 70%, transparent); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); overflow: hidden; }
-.chat-workbench::before { content: ''; position: absolute; inset: 0; pointer-events: none; background-image: var(--skin-watermark); background-size: min(500px, 50vw) min(500px, 50vw); background-repeat: no-repeat; background-position: right 30px bottom 90px; opacity: 0.18; filter: drop-shadow(0 0 30px var(--accent-soft)); transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1); z-index: 0; }
-.chat-header { position: relative; z-index: 2; justify-content: space-between; gap: 16px; padding-inline: max(20px, calc((100% - 1120px) / 2)); background: var(--glass-bg); backdrop-filter: var(--glass-blur); border-bottom: 1px solid var(--border); box-shadow: 0 2px 16px rgba(0,0,0,0.12); }
+.chat-workbench { position: relative; height: 100%; display: grid; grid-template-rows: 56px minmax(0, 1fr) auto; background: transparent; overflow: hidden; }
+
+/* 沉浸式皮肤全景舞台：宫殿背景 + 左右立绘角色 */
+.skin-stage { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 0; contain: strict; }
+.skin-stage__backdrop { position: absolute; inset: 0; background-image: var(--skin-backdrop); background-size: cover; background-position: center; filter: contrast(1.05) saturate(1.1); transition: background-image 0.6s cubic-bezier(0.16, 1, 0.3, 1); opacity: 0.95; }
+.skin-stage__character { position: absolute; bottom: 0; width: min(440px, 34vw); height: 94%; background-repeat: no-repeat; background-size: contain; pointer-events: none; z-index: 1; transition: all 0.6s cubic-bezier(0.22, 0.78, 0.2, 1); mask-image: radial-gradient(ellipse at 50% 50%, black 72%, transparent 100%), linear-gradient(to top, black 85%, transparent 100%); -webkit-mask-image: radial-gradient(ellipse at 50% 50%, black 72%, transparent 100%), linear-gradient(to top, black 85%, transparent 100%); }
+.skin-stage__character--left { left: clamp(8px, 1.8vw, 32px); background-image: var(--skin-character-left); background-position: left bottom; filter: drop-shadow(0 20px 30px rgba(0, 0, 0, 0.45)); animation: skinFloatLeft 6s ease-in-out infinite alternate; }
+.skin-stage__character--right { right: clamp(8px, 1.8vw, 32px); background-image: var(--skin-character-right); background-position: right bottom; filter: drop-shadow(0 20px 30px rgba(0, 0, 0, 0.45)); animation: skinFloatRight 6s ease-in-out infinite alternate; }
+
+@keyframes skinFloatLeft {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(-10px); }
+}
+
+@keyframes skinFloatRight {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(-8px); }
+}
+
+@media (max-width: 1280px) {
+  .skin-stage__character { width: min(320px, 28vw); height: 78%; }
+}
+
+@media (max-width: 900px) {
+  .skin-stage__character { opacity: 0.35; height: 60%; }
+}
+
+.chat-header { position: relative; z-index: 3; justify-content: space-between; gap: 16px; padding-inline: max(20px, calc((100% - 1120px) / 2)); background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); border-bottom: 1px solid var(--border); box-shadow: 0 2px 16px rgba(0,0,0,0.12); }
 .chat-header__identity { min-width: 0; display: flex; align-items: center; gap: 12px; }
 .chat-header__identity > span:last-child { min-width: 0; }
 .chat-header__avatars { width: 44px; min-width: 44px; height: 38px; display: flex; align-items: center; overflow: hidden; }
@@ -721,7 +800,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .chat-header p { overflow: hidden; margin: 3px 0 0; color: var(--text-muted); font-size: var(--text-xs); white-space: nowrap; text-overflow: ellipsis; }
 .chat-header__count { flex: none; display: grid; justify-items: end; color: var(--text-soft); font: 600 13px var(--font-mono); }
 .chat-header__count span { color: var(--text-muted); font: 10px inherit; }
-.message-scroll { position: relative; z-index: 1; min-height: 0; overflow: auto; padding-block: 16px 28px; padding-inline: max(20px, calc((100% - 1120px) / 2)); scroll-behavior: smooth; }
+.message-scroll { position: relative; z-index: 2; min-height: 0; overflow: auto; padding-block: 16px 28px; padding-inline: max(24px, calc((100% - 820px) / 2)); scroll-behavior: smooth; }
 .message-history-more { min-height: 36px; display: flex; align-items: center; justify-content: center; gap: 8px; width: min(100%, 520px); margin: 0 auto 16px; padding: 0 14px; border: 1px dashed var(--border-strong); border-radius: var(--radius-control); color: var(--text-muted); background: var(--surface-1); font-size: 13px; font-weight: 500; transition: all var(--duration-fast) var(--ease-smooth); }
 .message-history-more:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-strong); background: var(--accent-soft); }
 .conversation-empty { height: 100%; display: grid; place-content: center; justify-items: center; text-align: center; color: var(--text-muted); }
@@ -765,7 +844,24 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .message__content .markdown-body hr { margin: 10px 0; border: 0; border-top: 1px solid var(--border); }
 .message__content .markdown-body a { color: var(--accent-strong); text-decoration: underline; text-underline-offset: 2px; }
 
-.composer-zone { position: relative; z-index: 3; padding-block: 10px 14px; padding-inline: max(16px, calc((100% - 1120px) / 2)); border-top: 1px solid var(--border); background: var(--glass-bg); backdrop-filter: var(--glass-blur); }
+.composer-zone { position: relative; z-index: 3; padding-block: 10px 14px; padding-inline: max(16px, calc((100% - 820px) / 2)); border-top: 1px solid var(--border); background: var(--glass-bg); backdrop-filter: var(--glass-blur); }
+
+:root[data-skin='maid-atelier'] .composer-zone::before {
+  content: '';
+  position: absolute;
+  top: -24px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(340px, 85%);
+  height: 38px;
+  background-image: var(--skin-composer-frame);
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  pointer-events: none;
+  z-index: 4;
+  filter: drop-shadow(0 4px 10px rgba(197, 164, 104, 0.5));
+}
 .composer { position: relative; border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: var(--shadow-md); transition: all var(--duration-fast) var(--ease-smooth); }
 .composer:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft), var(--accent-glow); }
 .composer textarea { width: 100%; min-height: 72px; max-height: 160px; resize: vertical; padding: 14px 16px 4px; border: 0; background: transparent; font-size: var(--text-sm); line-height: 1.6; color: var(--text); }

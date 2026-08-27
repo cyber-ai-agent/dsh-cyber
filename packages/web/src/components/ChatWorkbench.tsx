@@ -247,6 +247,11 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
 
   return (
     <section className="chat-workbench" aria-label="当前世界多角色会话">
+      <div className="skin-stage" aria-hidden="true">
+        <div className="skin-stage__backdrop" />
+        <div className="skin-stage__character skin-stage__character--left" />
+        <div className="skin-stage__character skin-stage__character--right" />
+      </div>
       <header className="chat-header">
         <div className="chat-header__identity">
           <span className={`chat-header__avatars${conversationKind === 'group' || conversationKind === 'meeting' ? ' chat-header__avatars--group' : ''}`} aria-hidden={directEmployee === undefined}>
