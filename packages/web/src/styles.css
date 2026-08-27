@@ -1248,9 +1248,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 
 /* 核心消息滚动与黄金列 */
-/* 核心消息滚动与黄金列 */
-.message-scroll { position: relative; z-index: 2; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 20px 32px 40px; scroll-behavior: smooth; }
-.conversation-column { width: 100%; max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; position: relative; z-index: 2; }
+/* 核心消息滚动与全宽对话区 */
+.message-scroll { position: relative; z-index: 2; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 18px 24px 32px; scroll-behavior: smooth; }
+.conversation-column { width: 100%; max-width: 100%; margin: 0; display: flex; flex-direction: column; gap: 16px; position: relative; z-index: 2; }
 
 .message-history-more { min-height: 36px; display: flex; align-items: center; justify-content: center; gap: 8px; width: min(100%, 520px); margin: 0 auto 16px; padding: 0 14px; border: 1px dashed var(--border-strong); border-radius: var(--radius-control); color: var(--text-muted); background: var(--surface-1); font-size: 13px; font-weight: 500; transition: all var(--duration-fast) var(--ease-smooth); }
 .message-history-more:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-strong); background: var(--accent-soft); }
@@ -1302,7 +1302,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .message__content .markdown-body hr { margin: 10px 0; border: 0; border-top: 1px solid var(--border); }
 .message__content .markdown-body a { color: var(--accent-strong); text-decoration: underline; text-underline-offset: 2px; }
 
-.composer-zone { position: relative; z-index: 3; padding-block: 10px 14px; padding-inline: max(16px, calc((100% - 820px) / 2)); border-top: 1px solid var(--border); background: var(--glass-bg); backdrop-filter: var(--glass-blur); }
+.composer-zone { position: relative; z-index: 3; width: 100%; padding: 10px 20px 16px; border-top: 1px solid var(--border); background: var(--glass-bg); backdrop-filter: var(--glass-blur); }
 
 :root[data-skin='maid-atelier'] .composer-zone::before {
   content: '';
@@ -1320,7 +1320,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   z-index: 4;
   filter: drop-shadow(0 4px 10px rgba(197, 164, 104, 0.5));
 }
-.composer { position: relative; border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: var(--shadow-md); transition: all var(--duration-fast) var(--ease-smooth); }
+.composer { position: relative; width: 100%; max-width: 100%; border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: var(--shadow-md); transition: all var(--duration-fast) var(--ease-smooth); }
 .composer:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft), var(--accent-glow); }
 .composer textarea { width: 100%; min-height: 72px; max-height: 160px; resize: vertical; padding: 14px 16px 4px; border: 0; background: transparent; font-size: var(--text-sm); line-height: 1.6; color: var(--text); }
 .composer textarea:focus-visible { outline: 0; }
@@ -1395,12 +1395,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .tool-event-message code, .tool-event-message small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 8px var(--font-mono); }
 .stream-caret { width: 5px; height: 13px; background: var(--accent); animation: blink 1s steps(1) infinite; }
 .spin { animation: spin 1s linear infinite; }
-.composer-zone { padding-block: 8px 10px; padding-inline: max(12px, calc((100% - 1120px) / 2)); border-top: 1px solid var(--border); background: var(--surface-0); }
 .chat-knowledge-error { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 8px; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--danger) 55%, var(--border)); background: color-mix(in srgb, var(--danger) 10%, var(--surface-1)); color: var(--text-primary); font-size: 13px; line-height: 1.45; }
 .chat-knowledge-error button { display: inline-grid; flex: none; width: 28px; height: 28px; place-items: center; border: 0; background: transparent; color: var(--text-soft); cursor: pointer; }
 .chat-knowledge-error button:hover { color: var(--text-primary); background: var(--surface-hover); }
-.composer { position: relative; border: 1px solid var(--border-strong); background: var(--surface-1); }
-.composer:focus-within { border-color: color-mix(in srgb, var(--info) 44%, var(--border-strong)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--info) 18%, transparent); }
 .composer textarea { width: 100%; min-height: 68px; max-height: 150px; resize: vertical; padding: 12px 13px 3px; border: 0; background: transparent; font-size: var(--text-sm); line-height: 1.6; }
 .composer textarea:focus-visible { outline: 0; }
 .composer-file-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
@@ -3484,11 +3481,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 
 :root[data-skin='maid-atelier'] .composer {
-  max-width: min(840px, 94%) !important;
-  margin: 0 auto !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0 !important;
   background: rgba(9, 20, 54, 0.92) !important;
   border: 1.5px solid rgba(212, 178, 114, 0.75) !important;
-  border-radius: 22px !important;
+  border-radius: 18px !important;
   box-shadow: 0 14px 44px rgba(4, 11, 35, 0.65), 0 0 24px rgba(197, 164, 104, 0.22) !important;
   backdrop-filter: blur(24px) !important;
   -webkit-backdrop-filter: blur(24px) !important;
@@ -3721,6 +3719,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   color: #f1f5f9 !important;
 }
 :root[data-skin='cyber-company'] .composer {
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0 !important;
+  border-radius: 18px !important;
   background: rgba(10, 18, 28, 0.94);
   border: 1px solid rgba(0, 229, 255, 0.4);
 }
@@ -3780,6 +3782,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   color: #f0f9ff !important;
 }
 :root[data-skin='orca-link'] .composer {
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0 !important;
+  border-radius: 18px !important;
   background: rgba(10, 20, 34, 0.94);
   border: 1px solid rgba(56, 189, 248, 0.45);
 }
@@ -3839,6 +3845,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   color: #fef3c7 !important;
 }
 :root[data-skin='moonlit-tavern'] .composer {
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0 !important;
+  border-radius: 18px !important;
   background: rgba(28, 19, 12, 0.94);
   border: 1px solid rgba(245, 158, 11, 0.45);
 }

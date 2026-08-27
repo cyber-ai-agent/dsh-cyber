@@ -43,6 +43,87 @@ export interface WorldThemeConfig {
   runtimeManifest?: WorldThemeManifestV1
 }
 
+export const orcaLinkManifest: WorldThemeManifestV1 = {
+  schemaVersion: 1,
+  id: 'dsh-cyber.orca.vessel',
+  version: '1.0.0',
+  templateId: 'orca-link',
+  displayName: '虎鲸链路 · 机械航行舱',
+  renderer: 'pixi-2d',
+  terminology: {
+    world: '航行舱',
+    participant: '船员',
+    session: '舰桥通信',
+    milestone: '航海日志',
+  },
+  assets: [
+    {
+      id: 'orca-scene',
+      src: '/assets/skins/orca-dark-hero.webp',
+      kind: 'image',
+      preload: true,
+      pixelArt: false,
+    },
+    cyberCompanyTheme.assets[1]!,
+  ],
+  actorSets: cyberCompanyTheme.actorSets,
+  scenes: [
+    {
+      id: 'orca-bridge',
+      displayName: '虎鲸舰桥甲板',
+      size: { width: 1672, height: 941 },
+      cameraBounds: { x: 0, y: 0, width: 1672, height: 941 },
+      safeArea: { x: 40, y: 40, width: 1592, height: 861 },
+      layers: [
+        {
+          id: 'vessel-interior',
+          assetId: 'orca-scene',
+          destination: { x: 0, y: 0, width: 1672, height: 941 },
+          zIndex: 0,
+        },
+      ],
+      anchors: [
+        { id: 'spawn', position: { x: 836, y: 800 }, facing: 'north', capacity: 8, tags: ['spawn'] },
+        { id: 'bridge', position: { x: 836, y: 480 }, facing: 'north', capacity: 3, tags: ['work', 'talk'] },
+        { id: 'nav-deck', position: { x: 400, y: 520 }, facing: 'east', capacity: 2, tags: ['work', 'inspect'] },
+        { id: 'comms', position: { x: 1250, y: 520 }, facing: 'west', capacity: 2, tags: ['idle', 'talk'] },
+        { id: 'meeting-bridge', position: { x: 836, y: 640 }, facing: 'south', capacity: 4, tags: ['meeting'] },
+      ],
+      navigation: {
+        origin: { x: 0, y: 0 },
+        cellSize: 64,
+        columns: 26,
+        rows: 15,
+        blocked: [],
+      },
+      interactables: [
+        {
+          id: 'vessel-bridge',
+          kind: 'meeting-table',
+          displayName: '舰桥指挥席',
+          bounds: { x: 600, y: 400, width: 480, height: 300 },
+          approachAnchorIds: ['meeting-bridge'],
+          actions: [{ id: 'start-meeting', label: '发起全舰广播与会议' }],
+          zIndex: 160,
+        },
+        {
+          id: 'vessel-comms',
+          kind: 'notice-board',
+          displayName: '战舰通信终端',
+          bounds: { x: 1180, y: 440, width: 220, height: 260 },
+          approachAnchorIds: ['comms'],
+          actions: [{ id: 'assign-task', label: '下达航行指令' }],
+          zIndex: 150,
+        },
+      ],
+      growthSlots: [
+        { id: 'vessel-skill', category: 'skill', position: { x: 1200, y: 350 }, zIndex: 130 },
+      ],
+    },
+  ],
+  activityMapping: cyberCompanyTheme.activityMapping,
+}
+
 /**
  * 系统官方内置主题 (Built-in Themes)
  */
@@ -95,6 +176,7 @@ export const BUILTIN_THEMES: WorldThemeConfig[] = [
     },
     runtimeManifest: cyberCompanyTheme,
   },
+
   {
     id: 'orca-link',
     displayName: '虎鲸链路',
@@ -114,7 +196,9 @@ export const BUILTIN_THEMES: WorldThemeConfig[] = [
       characterBubbleColor: '#081a2e',
       backdropImage: '/assets/skins/orca-dark-hero.webp',
       backdropOpacity: 0.92,
+      worldMapImage: '/assets/skins/orca-dark-hero.webp',
     },
+    runtimeManifest: orcaLinkManifest,
   },
   {
     id: 'moonlit-tavern',
