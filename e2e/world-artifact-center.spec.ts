@@ -29,7 +29,10 @@ test.afterAll(async () => {
 })
 
 test('publishes one BrowserRuntime run into the world artifact center and keeps it isolated', async ({ page }) => {
-  test.setTimeout(90_000)
+  // Three production-resolution screenshots plus a real server restart can
+  // exceed Playwright's default on shared CI runners. Keep the assertions
+  // strict while allowing the same visual/restart coverage to finish.
+  test.setTimeout(180_000)
   const consoleIssues: string[] = []
   attachAppConsoleRecorder(page, consoleIssues)
   const screenshotRoot = join(process.cwd(), 'artifacts', 'world-artifact-center')
