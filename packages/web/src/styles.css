@@ -134,7 +134,7 @@
   --bubble-assistant-border: rgba(142, 165, 218, 0.35);
   --glass-bg: rgba(10, 23, 59, 0.85);
   --glass-blur: blur(20px);
-  --skin-backdrop: url('/assets/maid-palace-world.png');
+  --skin-backdrop: url('/assets/skins/maid-palace-night.webp');
   --skin-character-left: url('/assets/skins/maid-left.webp');
   --skin-character-right: url('/assets/skins/maid-right.webp');
   --skin-composer-frame: url('/assets/skins/maid-composer-frame.webp');

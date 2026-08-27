@@ -143,11 +143,6 @@ export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = tru
   return (
     <>
       <section className="world-runtime-dock" aria-label={`${world.name}实时世界`}>
-        <header className="world-runtime-dock__header">
-          <div className="world-runtime-dock__identity"><span className="world-runtime-dock__mark"><Buildings size={17} weight="fill" /></span><span><strong>{world.name}</strong><small>{runtime.manifest.displayName}</small></span></div>
-          <div className="world-runtime-dock__status"><i className={runtime.connected ? 'is-online' : 'is-offline'} /><span>{runtime.connected ? '实时同步' : '正在重连'}</span><b>{employees.length} 人</b></div>
-        </header>
-
         <div className="world-runtime-dock__canvas">
           <WorldCanvas
             manifest={runtime.manifest}
