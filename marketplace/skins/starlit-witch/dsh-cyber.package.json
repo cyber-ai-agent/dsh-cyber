@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "starlit-witch",
+  "version": "1.0.0",
+  "kind": "skin",
+  "displayName": "星月魔女",
+  "summary": "秘术工坊、幽夜星金与星象浑天仪炼金密室，完整覆盖聊天和世界视图。",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "publisher": "DSH Cyber",
+  "capabilities": [
+    "ui:skin"
+  ],
+  "dataEgress": [],
+  "files": [
+    {
+      "path": "skin.json",
+      "sha256": "3ff1ef8ab0b0f21869506863a0924a351f86b3ca6ed16662a83d8a2752ff3c6a"
+    }
+  ],
+  "entrypoints": [
+    {
+      "id": "starlit-witch",
+      "kind": "skin",
+      "path": "skin.json"
+    }
+  ],
+  "certification": {
+    "authority": "DSH Cyber",
+    "level": "official",
+    "contentSha256": "47a6d3f636f8a819c00de7df69896aadc543a70478ac975aad124d8d7417b8fb"
+  }
+}

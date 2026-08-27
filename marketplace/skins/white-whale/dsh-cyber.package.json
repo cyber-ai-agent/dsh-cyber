@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "white-whale",
+  "version": "1.0.0",
+  "kind": "skin",
+  "displayName": "白鲸圣女",
+  "summary": "极地纯白、极光冰蓝与纯白丝袜水下极光圣殿，完整覆盖聊天和世界视图。",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "publisher": "DSH Cyber",
+  "capabilities": [
+    "ui:skin"
+  ],
+  "dataEgress": [],
+  "files": [
+    {
+      "path": "skin.json",
+      "sha256": "4caa6a7cbe55e08448bafda20c929ee196db910a294d5f4ca569fcd3fd3f2419"
+    }
+  ],
+  "entrypoints": [
+    {
+      "id": "white-whale",
+      "kind": "skin",
+      "path": "skin.json"
+    }
+  ],
+  "certification": {
+    "authority": "DSH Cyber",
+    "level": "official",
+    "contentSha256": "f583472bad1ef6387fa517c59a42491d119745b945c5dba49453ec706108907f"
+  }
+}

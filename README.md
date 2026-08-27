@@ -186,17 +186,45 @@ integrations/
 
 ## 界面与世界示例
 
-> Creative Platform V1 的 UI 仍在快速调整。下面先展示当前内置世界视觉资产；稳定后的工作台 / 创意工坊 / 角色档案截图会统一放入 `docs/assets/screenshots/`，避免 README 长期挂着已经失效的开发截图。
+DSH Cyber 采用**空间延伸设计哲学**：左侧沉浸聊天视窗作为场景透视底衬，右侧 2.5D 可交互世界画布自然接续天顶、地砖与光影，向右延伸展开为中央大厅与设施互动区，浑然一体。
+
+### 🎨 多套高颜值沉浸二次元主题
 
 <table>
 <tr>
 <td width="50%">
-<img src="./packages/web/public/assets/cyber-office-world.png" alt="Cyber Office World" />
-<br/><b>赛博公司世界</b><br/>角色工作、协作、会议与状态会投影到可视化世界。
+<img src="./docs/assets/screenshots/06-white-whale-maiden.png" alt="白鲸圣女 · 纯白极光" />
+<br/><b>🤍 白鲸圣女 · 纯白极光</b><br/>圣洁极地 · 纯白丝袜与白金荷叶长裙 · 水下大理石圣殿与白鲸游弋
 </td>
 <td width="50%">
-<img src="./packages/web/public/assets/moonlit-tavern-world.png" alt="Moonlit Tavern World" />
-<br/><b>月影酒馆世界</b><br/>同一套 Character / Conversation / World Runtime 可以承载完全不同的世界语义。
+<img src="./docs/assets/screenshots/07-black-orca-maiden.png" alt="漆黑虎鲸 · 深渊机能" />
+<br/><b>🖤 漆黑虎鲸 · 深渊机能</b><br/>深潜魅影 · 诱人黑丝与机能吊带袜 · 深渊未来舰桥与虎鲸群水幕
+</td>
+</tr>
+<tr>
+<td width="50%">
+<img src="./docs/assets/screenshots/02-sakura-shrine.png" alt="千樱神殿 · 樱落古院" />
+<br/><b>🌸 千樱神殿 · 樱落古院</b><br/>和风古雅 · 樱吹雪与绯粉霞光 · 朱红鸟居与祈愿神苑
+</td>
+<td width="50%">
+<img src="./docs/assets/screenshots/03-starlit-witch.png" alt="星月魔女 · 秘术工坊" />
+<br/><b>🔮 星月魔女 · 秘术工坊</b><br/>奇幻秘术 · 幽夜星金 · 星象浑天仪与魔导炼金密室
+</td>
+</tr>
+<tr>
+<td width="50%">
+<img src="./docs/assets/screenshots/04-neon-cyber.png" alt="霓虹电波 · 虚拟演播室" />
+<br/><b>⚡ 霓虹电波 · 虚拟演播室</b><br/>机能未来 · 赛博姬电波 · 全息频谱律动与电竞全景视窗
+</td>
+<td width="50%">
+<img src="./docs/assets/screenshots/01-maid-atelier.png" alt="深海女仆工坊" />
+<br/><b>🏰 深海女仆工坊</b><br/>欧式宫殿 · 蓝金微晶 · 月光大厅与连贯深海殿堂
+</td>
+</tr>
+<tr>
+<td colspan="2" width="100%">
+<img src="./docs/assets/screenshots/05-moonlit-tavern.png" alt="月影酒馆" />
+<br/><b>🍺 月影酒馆 · 雨夜古典奇幻沙龙</b><br/>暖灰琥珀 · 木质壁炉暖色调 · 适合叙事角色与同桌研讨会话
 </td>
 </tr>
 </table>
