@@ -1237,6 +1237,8 @@ export class ConversationOrchestrator implements AsyncDisposable {
       throw new AgentTurnInterruptedError(employee.id)
     }
     const traceTurnId = agentRun.id
+    const turnMessage = this.#store.listMessages(session.id).find((message) => message.metadata.workTurnId === workTurn.id && message.kind === 'user')
+    const modelProfileId = typeof turnMessage?.metadata.modelProfileId === 'string' ? turnMessage.metadata.modelProfileId : undefined
     let responsePersisted = false
     const pendingAssistantMessages: PendingAssistantMessage[] = []
     let failedTurn = false
@@ -1266,6 +1268,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
         workspacePath,
         ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
         ...(permissionMode === undefined ? {} : { permissionMode }),
+        ...(modelProfileId === undefined ? {} : { modelProfileId }),
         onEvent: (event) => {
           const tracedEvent: AgentRuntimeEvent = {
             ...event,

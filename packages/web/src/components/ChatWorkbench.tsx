@@ -12,7 +12,7 @@ import {
   X,
 } from '@phosphor-icons/react'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { WORLD_CHARACTER_MANAGEMENT_PERMISSIONS, type ChatAttachment, type CompletionJob, type InstalledPluginCommand, type JsonObject, type LocalAssetMimeType, type WorkMessage, type WorkSession, type World, type WorldCharacterPermission, type WorldPermissionDecisionScope, type WorldPermissionRequest } from '@dsh-cyber/contracts'
+import { WORLD_CHARACTER_MANAGEMENT_PERMISSIONS, type ChatAttachment, type CompletionJob, type InstalledPluginCommand, type JsonObject, type LocalAssetMimeType, type ModelProfile, type WorkMessage, type WorkSession, type World, type WorldCharacterPermission, type WorldPermissionDecisionScope, type WorldPermissionRequest } from '@dsh-cyber/contracts'
 
 import { api } from '../api.js'
 import { formatDateTime, formatTime } from '../i18n/format.js'
@@ -29,6 +29,7 @@ import { ContextMenu, type ContextMenuPosition } from './ContextMenu.js'
 import { collaborationModeOf } from './group-collaboration.js'
 import { ConversationPermissionControl, type ConversationPermissionMode } from './ConversationPermissionControl.js'
 import { TaskCollaborationSummary } from './TaskCollaborationSummary.js'
+import { ModelPicker } from '../features/models/ModelPicker.js'
 
 const MarkdownMessage = lazy(async () => ({ default: (await import('./MarkdownMessage.js')).MarkdownMessage }))
 const ArtifactReferenceCards = lazy(async () => ({ default: (await import('../features/artifacts/ArtifactCenter.js')).ArtifactReferenceCards }))
@@ -42,6 +43,9 @@ interface ChatWorkbenchProps {
   messages: WorkMessage[]
   employees: CyberEmployee[]
   installedPlugins?: InstalledPluginCommand[]
+  models?: ModelProfile[]
+  modelProfileId?: string
+  onChangeModelProfile?(modelProfileId: string | undefined): void
   sending?: boolean
   pendingCount?: number
   queuedCount?: number
@@ -75,7 +79,7 @@ interface ChatWorkbenchProps {
   onStopTurn?(turnId: string): Promise<void>
 }
 
-export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, installedPlugins = [], sending = false, pendingCount = 0, queuedCount = 0, queueItems = [], draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRetryCompletionJob, onCompletionJobSettled, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, permissionMode = 'read-only', onChangePermissionMode, onRequestFullAccess, onChangeCollaborationMode, onCancelQueuedTurn, onPromoteQueuedTurn, onStopTurn }: ChatWorkbenchProps) {
+export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, installedPlugins = [], models = [], modelProfileId, onChangeModelProfile, sending = false, pendingCount = 0, queuedCount = 0, queueItems = [], draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRetryCompletionJob, onCompletionJobSettled, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, permissionMode = 'read-only', onChangePermissionMode, onRequestFullAccess, onChangeCollaborationMode, onCancelQueuedTurn, onPromoteQueuedTurn, onStopTurn }: ChatWorkbenchProps) {
   const { t } = useI18n()
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -338,6 +342,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
         {attachmentError === undefined ? null : <p className="composer-error" role="alert">{attachmentError}</p>}
         <textarea ref={inputRef} value={draft} onChange={(event) => onDraftChange(event.target.value)} disabled={employees.length === 0} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit() } }} placeholder={employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? t('workbench.composer', '发送消息给 {name}', { name: participantEmployees.map((employee) => employee.displayName).join('、') }) : conversationKind === 'direct' ? t('workbench.composer', '发送消息给 {name}', { name: participantEmployees[0]?.displayName ?? experience.personLabel }) : '先从左侧选择会话，或输入 @角色名'} rows={2} aria-label={`给当前世界的${experience.peopleLabel}发送消息`} />
         <div className="composer__toolbar">{hasQueueActions ? <div className="composer__queue-mode" role="group" aria-label="队列操作"><button type="button" aria-label="排队发送" title="排队发送" className={queueMode === 'normal' ? 'is-active' : ''} aria-pressed={queueMode === 'normal'} onClick={() => setQueueMode('normal')}>排队</button><button type="button" aria-label="插入队列前方" title="插入队列前方" className={queueMode === 'next' ? 'is-active' : ''} aria-pressed={queueMode === 'next'} onClick={() => setQueueMode('next')}>插入</button></div> : null}<div>
+          {onChangeModelProfile === undefined ? null : <div className="composer-model-picker"><ModelPicker models={models} value={modelProfileId} inheritLabel={t('workbench.modelDefault', '恢复角色默认模型')} ariaLabel={t('workbench.modelLabel', '当前会话模型')} onChange={onChangeModelProfile} />{modelProfileId === undefined ? null : <small>{t('workbench.modelTemporary', '会话临时选择')}</small>}</div>}
           {onChangePermissionMode === undefined ? null : <ConversationPermissionControl value={permissionMode} onChange={onChangePermissionMode} {...(onRequestFullAccess === undefined ? {} : { onRequestFullAccess })} />}
           <input ref={fileInputRef} className="composer-file-input" type="file" accept=".png,.jpg,.jpeg,.webp,.txt,.md,.json,.pdf" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAttachment(file) }} />
           <button className="icon-button" type="button" aria-label={uploading ? '正在上传附件' : '添加附件'} disabled={uploading} onClick={() => fileInputRef.current?.click()}>{uploading ? <CircleNotch size={18} className="spin" /> : <Paperclip size={18} />}</button>

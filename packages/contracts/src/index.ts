@@ -1017,6 +1017,8 @@ export interface AgentTurnRequest {
   workspacePath: string
   reasoningEffort?: Exclude<ReasoningEffort, 'auto'>
   permissionMode?: AgentPermissionMode
+  /** One-turn model override. It never mutates world or character assignments. */
+  modelProfileId?: string
   onEvent?: (event: AgentRuntimeEvent) => void
 }
 

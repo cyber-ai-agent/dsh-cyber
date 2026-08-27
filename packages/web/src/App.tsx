@@ -152,6 +152,7 @@ export default function App() {
   const [preferences, setPreferences] = useState<WorkspacePreferences | undefined>(demoMode ? demoData.preferences : undefined)
   const [models, setModels] = useState<ModelProfile[]>(demoMode ? demoData.modelProfiles : [])
   const [modelAssignments, setModelAssignments] = useState<ModelAssignment[]>([])
+  const [conversationModelProfiles, setConversationModelProfiles] = useState<Record<string, string>>({})
   const [dossiers, setDossiers] = useState<Record<string, EmployeeDossier>>(demoMode ? demoData.dossiers : {})
   const [authorities, setAuthorities] = useState<WorldCharacterAuthority[]>([])
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | undefined>()
@@ -263,6 +264,7 @@ export default function App() {
   const activeRunningCount = activePendingTurns.filter((turn) => turn.status === 'running' || turn.status === 'waiting-approval' || turn.status === 'stopping').length
   const queuedInConversation = activePendingTurns.filter((turn) => turn.status === 'queued').length
   const activeQueuedCount = Math.max(0, queuedInConversation - (activeRunningCount === 0 && queuedInConversation > 0 ? 1 : 0))
+  const conversationModelProfileId = activeConversationKey === undefined ? undefined : conversationModelProfiles[activeConversationKey]
   activeWorldRef.current = activeWorld
   activeSessionIdRef.current = activeSessionId
   activeConversationKeyRef.current = activeConversationKey
@@ -1551,6 +1553,7 @@ export default function App() {
         ? `与 ${employees.find((employee) => employee.id === targetIds[0])?.displayName ?? '角色'} 对话`
         : compactPrompt(prompt))
     const queueKey = activeConversationKey ?? targetConversationQueueKey(targetIds, title)
+    const capturedModelProfileId = conversationModelProfiles[queueKey]
     const sessionHostAccessGrant = activeSessionId === undefined ? undefined : sessionHostAccessGrants[activeSessionId]
     const preparedSessionHostAccess = sessionHostAccessGrant !== undefined
       && sessionHostAccessGrant.worldId === world.id
@@ -1678,6 +1681,7 @@ export default function App() {
             employeeIds: targetIds,
             ...(conversationIntent === undefined ? {} : { title }),
             ...(resolvedSessionId === undefined ? {} : { sessionId: resolvedSessionId }),
+            ...(capturedModelProfileId === undefined ? {} : { modelProfileId: capturedModelProfileId }),
           }),
         })
         if (result.workTurnId !== undefined || result.queueItem !== undefined) {
@@ -1739,6 +1743,7 @@ export default function App() {
     demoMode,
     employees,
     conversationPermissionMode,
+    conversationModelProfiles,
     patchPendingTurn,
     reasoningEffort,
     refreshConversationTranscript,
@@ -1963,6 +1968,7 @@ export default function App() {
         return remaining
       })
       setModelAssignments((current) => current.filter((item) => item.modelProfileId !== modelProfileId))
+      setConversationModelProfiles((current) => Object.fromEntries(Object.entries(current).filter(([, id]) => id !== modelProfileId)))
       return
     }
     const result = await api<{ removed: boolean; items: ModelProfile[]; assignments: ModelAssignment[] }>(`/api/workspaces/${workspace.id}/model-profiles/${encodeURIComponent(modelProfileId)}`, {
@@ -1971,6 +1977,7 @@ export default function App() {
     if (!result.removed) throw new Error('模型配置不存在或已被删除')
     setModels(result.items)
     setModelAssignments(result.assignments)
+    setConversationModelProfiles((current) => Object.fromEntries(Object.entries(current).filter(([, id]) => id !== modelProfileId)))
   }, [workspace])
 
   const assignModel = useCallback(async (input: { scope: ModelAssignment['scope']; scopeId: string; modelProfileId?: string }) => {
@@ -2179,6 +2186,17 @@ export default function App() {
             messages={chatMessages}
             employees={employees}
             installedPlugins={installedPluginCommands}
+            models={models}
+            {...(conversationModelProfileId === undefined ? {} : { modelProfileId: conversationModelProfileId })}
+            onChangeModelProfile={(modelProfileId) => {
+              if (activeConversationKey === undefined) return
+              setConversationModelProfiles((current) => {
+                const next = { ...current }
+                if (modelProfileId === undefined) delete next[activeConversationKey]
+                else next[activeConversationKey] = modelProfileId
+                return next
+              })
+            }}
             pendingCount={activePendingCount}
             queuedCount={activeQueuedCount}
             queueItems={activePendingTurns}

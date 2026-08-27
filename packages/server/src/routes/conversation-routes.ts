@@ -255,6 +255,13 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     if (clientTurnId !== undefined && clientTurnId.length > 128) {
       throw new HttpError(422, 'invalid_client_turn_id', 'clientTurnId cannot exceed 128 characters')
     }
+    const modelProfileId = optionalString(body.modelProfileId)
+    if (modelProfileId !== undefined) {
+      const profile = store.getModelProfile(modelProfileId)
+      if (profile === undefined || profile.workspaceId !== world.workspaceId) {
+        throw new HttpError(422, 'conversation_model_unavailable', '所选临时会话模型不存在或不属于当前工作区')
+      }
+    }
     const metadata: JsonObject = {
       participantIds: employeeIds,
       permissionMode,
@@ -262,6 +269,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
       ...(attachments.length === 0 ? {} : { attachments: attachments.map(chatAttachmentJson) }),
       ...(clientTurnId === undefined ? {} : { clientTurnId }),
       ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
+      ...(modelProfileId === undefined ? {} : { modelProfileId }),
     }
     if (requestedCollaborationMode !== undefined) metadata.collaborationMode = requestedCollaborationMode
     const title = optionalString(body.title)

@@ -578,6 +578,9 @@ async function resolveActiveRuntime(store: SqliteStore, runtimeStateRoot: string
 }
 
 function resolveHarnessRoute(store: SqliteStore, request: AgentTurnRequest): HarnessModelRoute | undefined {
-  const profile = store.resolveModelProfile(request.agent.workspaceId, request.agent.worldId, request.agent.id)
+  const temporary = request.modelProfileId === undefined ? undefined : store.getModelProfile(request.modelProfileId)
+  const profile = temporary?.workspaceId === request.agent.workspaceId
+    ? temporary
+    : store.resolveModelProfile(request.agent.workspaceId, request.agent.worldId, request.agent.id)
   return profile === undefined ? undefined : harnessModelRoute(profile, request.reasoningEffort)
 }

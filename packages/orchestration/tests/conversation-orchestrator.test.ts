@@ -206,7 +206,7 @@ describe('ConversationOrchestrator', () => {
       worldId: company.id,
       employeeId: employee.id,
       prompt: '检查登录性能',
-      metadata: { clientTurnId: 'client-turn-direct' },
+      metadata: { clientTurnId: 'client-turn-direct', modelProfileId: 'temporary-model' },
     })
     await orchestrator.direct({
       workspaceId: workspace.id,
@@ -218,6 +218,8 @@ describe('ConversationOrchestrator', () => {
     })
 
     expect(runtime.calls).toHaveLength(2)
+    expect(runtime.calls[0]?.modelProfileId).toBe('temporary-model')
+    expect(runtime.calls[1]?.modelProfileId).toBeUndefined()
     expect(store.getEmployee(employee.id)?.agentSessionId).toBe(`agent-${employee.id}`)
     expect(realtime.some((event) => event.kind === 'reasoning.delta')).toBe(true)
     expect(realtime.every((event) => event.metadata.clientTurnId === 'client-turn-direct')).toBe(true)
