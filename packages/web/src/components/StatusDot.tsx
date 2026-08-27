@@ -1,5 +1,5 @@
 interface StatusDotProps {
-  status: 'available' | 'working' | 'waiting' | 'blocked' | 'archived' | 'healthy'
+  status: 'available' | 'working' | 'waiting' | 'blocked' | 'archived' | 'healthy' | 'degraded'
   label?: string
 }
 
@@ -11,4 +11,3 @@ export function StatusDot({ status, label }: StatusDotProps) {
     </span>
   )
 }
-

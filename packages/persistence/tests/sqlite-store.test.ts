@@ -79,6 +79,40 @@ describe('SqliteStore', () => {
     expect(store.getWorldSnapshot(world.id).employees).toHaveLength(1)
   })
 
+  it('keeps actionable employee health separate from derived presence', async () => {
+    const { path, store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: '角色健康工作区' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '角色健康世界', templateId: 'cyber-company' })
+    store.saveBlueprint(blueprint())
+    const employee = store.recruitEmployee({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      blueprintId: 'software-engineer',
+      blueprintVersion: 1,
+    })
+
+    expect(employee).toMatchObject({ presence: 'available', health: 'healthy', status: 'available' })
+    expect(() => store.setEmployeeStatus(employee.id, 'working', 'system')).toThrow('derived from durable work')
+    expect(store.setEmployeeHealth(employee.id, 'blocked', {
+      errorCode: 'model_credentials_missing',
+      detail: '请在设置中补充模型凭据',
+    })).toMatchObject({ presence: 'available', health: 'blocked', status: 'blocked' })
+
+    store.close()
+    stores.splice(stores.indexOf(store), 1)
+    const reopened = await SqliteStore.open(path)
+    stores.push(reopened)
+    expect(reopened.getEmployee(employee.id)).toMatchObject({
+      presence: 'available',
+      health: 'blocked',
+      healthErrorCode: 'model_credentials_missing',
+      status: 'blocked',
+    })
+    expect(reopened.setEmployeeHealth(employee.id, 'healthy')).toMatchObject({
+      presence: 'available', health: 'healthy', status: 'available',
+    })
+  })
+
   it('keeps administrator authority inside one world and allows an explicit same-world handoff', async () => {
     const { store } = await testDatabase()
     const workspace = store.createWorkspace({ name: '管理员隔离工作区' })
@@ -729,6 +763,10 @@ describe('SqliteStore', () => {
       DROP INDEX worlds_administrator_idx;
       ALTER TABLE worlds DROP COLUMN administrator_employee_id;
       ALTER TABLE employee_blueprints DROP COLUMN embodiment_json;
+      DROP INDEX employee_instances_world_health_idx;
+      ALTER TABLE employee_instances DROP COLUMN health_detail;
+      ALTER TABLE employee_instances DROP COLUMN health_error_code;
+      ALTER TABLE employee_instances DROP COLUMN health;
       DELETE FROM schema_migrations WHERE version > 2;
       PRAGMA user_version = 2;
     `)

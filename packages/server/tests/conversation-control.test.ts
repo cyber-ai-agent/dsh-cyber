@@ -26,6 +26,7 @@ class QueueRuntime implements AgentRuntimePort {
 
   async runTurn(request: AgentTurnRequest) {
     this.calls.push(request)
+    if (request.prompt.includes('单轮失败')) throw new Error('single turn failed')
     if (request.prompt.includes('并发') || request.prompt.includes('请停止')) {
       return await new Promise<never>((_resolve, reject) => {
         if (request.agentRunId !== undefined) this.#pending.set(request.agentRunId, { reject })
@@ -152,6 +153,7 @@ describe('Conversation control and durable queue', () => {
     const fourth = await queue(sessions[3]!.id, 4)
     expect([first.response.status, second.response.status, third.response.status, fourth.response.status]).toEqual([202, 202, 202, 202])
     await waitFor(() => runtime.calls.length === 2)
+    expect(server.store.getEmployee(employee.id)).toMatchObject({ presence: 'working', health: 'healthy', status: 'working' })
     expect(server.store.getConversationQueueEntry(third.body.queueItem.id)?.status).toBe('queued')
     expect(server.store.getConversationQueueEntry(fourth.body.queueItem.id)?.status).toBe('queued')
 
@@ -169,7 +171,48 @@ describe('Conversation control and durable queue', () => {
     expect(stopped.response.status).toBe(200)
     await waitFor(() => server.store.getConversationQueueEntry(third.body.queueItem.id)?.status === 'running')
     expect(server.store.getConversationQueueEntry(second.body.queueItem.id)?.status).toBe('running')
+    expect(server.store.getEmployee(employee.id)).toMatchObject({ presence: 'working', health: 'healthy', status: 'working' })
     expect(runtime.aborted).toHaveLength(1)
+
+    await json(origin, `/api/work-turns/${second.body.workTurnId}/abort`, post({ reason: 'test-finished' }))
+    await json(origin, `/api/work-turns/${third.body.workTurnId}/abort`, post({ reason: 'test-finished' }))
+    await waitFor(() => server.store.getEmployee(employee.id)?.presence === 'available')
+    expect(server.store.getEmployee(employee.id)).toMatchObject({ presence: 'available', health: 'healthy', status: 'available' })
+  })
+
+  it('keeps presence working when one concurrent turn fails and another is still active', async () => {
+    const { origin, server, world, employee } = await start()
+    const createSession = (title: string) => server.store.createSession({
+      workspaceId: world.workspaceId,
+      worldId: world.id,
+      kind: 'direct',
+      title,
+      participants: [
+        { participantId: 'owner', kind: 'owner' },
+        { participantId: employee.id, kind: 'employee' },
+      ],
+    })
+    const activeSession = createSession('持续运行会话')
+    const failingSession = createSession('单轮失败会话')
+    const active = await json(origin, `/api/worlds/${world.id}/chat-queue`, post({
+      employeeIds: [employee.id],
+      sessionId: activeSession.id,
+      prompt: '并发任务保持运行',
+      queueMode: 'normal',
+    }))
+    const failing = await json(origin, `/api/worlds/${world.id}/chat-queue`, post({
+      employeeIds: [employee.id],
+      sessionId: failingSession.id,
+      prompt: '单轮失败',
+      queueMode: 'normal',
+    }))
+
+    await waitFor(() => server.store.getWorkTurn(failing.body.workTurnId)?.status === 'failed')
+    expect(server.store.getEmployee(employee.id)).toMatchObject({ presence: 'working', health: 'healthy', status: 'working' })
+
+    await json(origin, `/api/work-turns/${active.body.workTurnId}/abort`, post({ reason: 'test-finished' }))
+    await waitFor(() => server.store.getEmployee(employee.id)?.presence === 'available')
+    expect(server.store.getEmployee(employee.id)).toMatchObject({ presence: 'available', health: 'healthy', status: 'available' })
   })
 
   it('keeps follow-up messages in one conversation ordered on a single lane', async () => {
@@ -305,6 +348,7 @@ describe('Conversation control and durable queue', () => {
 
     await queue.dispatchOnce()
     await waitFor(() => store.getConversationQueueEntry(first.id)?.status === 'waiting-approval' && store.getConversationQueueEntry(independent.id)?.status === 'running')
+    expect(store.getEmployee(employee.id)).toMatchObject({ presence: 'working', health: 'healthy' })
     expect(store.getConversationQueueEntry(followUp.id)?.status).toBe('queued')
     await queue.dispatchOnce()
     expect(seen).toEqual(expect.arrayContaining([first.id, independent.id]))
@@ -313,6 +357,7 @@ describe('Conversation control and durable queue', () => {
 
     releaseIndependent?.()
     await waitFor(() => store.getConversationQueueEntry(independent.id)?.status === 'completed')
+    expect(store.getEmployee(employee.id)).toMatchObject({ presence: 'working', health: 'healthy' })
     await queue.close()
   })
 

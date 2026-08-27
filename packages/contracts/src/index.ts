@@ -1,6 +1,6 @@
 import type { WorldCharacterAuthority } from './world-authority.js'
 
-export const CYBER_SCHEMA_VERSION = 27 as const
+export const CYBER_SCHEMA_VERSION = 28 as const
 
 export type IsoTimestamp = string
 export type JsonPrimitive = boolean | number | string | null
@@ -458,6 +458,8 @@ export interface EmployeeBlueprint {
 }
 
 export type EmployeeStatus = 'available' | 'working' | 'waiting' | 'blocked' | 'archived'
+export type EmployeePresence = 'available' | 'working'
+export type EmployeeHealth = 'healthy' | 'degraded' | 'blocked'
 
 export interface EmployeeInstance {
   id: string
@@ -467,6 +469,13 @@ export interface EmployeeInstance {
   blueprintVersion: number
   displayName: string
   role: string
+  /** Runtime projection derived from active AgentRuns and durable waiting work. */
+  presence: EmployeePresence
+  /** Persistent, actionable configuration/runtime health; not a single-turn outcome. */
+  health: EmployeeHealth
+  healthErrorCode?: string
+  healthDetail?: string
+  /** @deprecated Compatibility projection. Prefer presence + health. */
   status: EmployeeStatus
   currentRevision: number
   agentSessionId?: string

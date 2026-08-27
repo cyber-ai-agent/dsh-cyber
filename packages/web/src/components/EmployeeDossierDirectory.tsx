@@ -65,7 +65,10 @@ export function EmployeeDossierDirectory({ employees, dossiers, world, onOpen, o
                   <Avatar index={employee.avatarIndex} size="md" label={employee.displayName} status={employee.status} authorityRole={employee.authorityRole} />
                 </button>
                 <div><strong>{employee.displayName}<AuthorityBadge role={employee.authorityRole} /></strong><span>{employee.role}</span></div>
-                <StatusDot status={employee.status} label={statusLabel(employee.status, roleplay)} />
+                <div className="employee-runtime-status">
+                  <StatusDot status={employee.presence} label={presenceLabel(employee.presence, roleplay)} />
+                  <StatusDot status={employee.health} label={healthLabel(employee.health)} />
+                </div>
               </header>
 
               <p className="dossier-card__activity">{employee.currentActivity}</p>
@@ -100,9 +103,13 @@ export function EmployeeDossierDirectory({ employees, dossiers, world, onOpen, o
   )
 }
 
-function statusLabel(status: CyberEmployee['status'], roleplay: boolean): string {
-  if (roleplay) return ({ available: '可登场', working: '演绎中', waiting: '等待发言', blocked: '剧情暂停', archived: '已退场' })[status]
-  return ({ available: '可接任务', working: '工作中', waiting: '等待中', blocked: '被阻塞', archived: '已归档' })[status]
+function presenceLabel(presence: CyberEmployee['presence'], roleplay: boolean): string {
+  if (roleplay) return presence === 'working' ? '演绎中' : '可登场'
+  return presence === 'working' ? '工作中' : '可接任务'
+}
+
+function healthLabel(health: CyberEmployee['health']): string {
+  return ({ healthy: '运行健康', degraded: '需要检查', blocked: '需要处理' })[health]
 }
 
 function localizeRoleSummary(value: string): string {

@@ -551,9 +551,9 @@ function createEmployeeEntity(
     position: { ...currentSlot.position },
     footOffset: { x: 0, y: 112 },
     facing: presence?.facing ?? currentSlot.facing,
-    activity: employee.status === 'blocked' ? 'blocked' : employee.status === 'working' ? 'working' : 'idle',
-    activityLabel: statusLabel(employee.status),
-    status: employee.status,
+    activity: employee.health === 'blocked' ? 'blocked' : employee.presence === 'working' ? 'working' : 'idle',
+    activityLabel: statusLabel(employee),
+    status: employee.status === 'archived' ? 'archived' : employee.health === 'blocked' ? 'blocked' : employee.presence,
     route: [],
     visualState: compactVisualState({
       rosterIndex: 0,
@@ -748,9 +748,9 @@ function activityLabel(type: string): string {
   return labels[type] ?? '状态已更新'
 }
 
-function statusLabel(status: EmployeeInstance['status']): string {
-  if (status === 'working') return '正在执行'
-  if (status === 'blocked') return '等待处理'
-  if (status === 'waiting') return '等待依赖'
+function statusLabel(employee: EmployeeInstance): string {
+  if (employee.health === 'blocked') return '运行问题等待处理'
+  if (employee.health === 'degraded') return '运行配置需要检查'
+  if (employee.presence === 'working') return '正在执行'
   return '可接任务'
 }

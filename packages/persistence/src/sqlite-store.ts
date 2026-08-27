@@ -17,6 +17,7 @@ import {
   type EmployeeBlueprint,
   type EmployeeDailyJournal,
   type EmployeeDossier,
+  type EmployeeHealth,
   type EmployeeInstance,
   type EmployeeMilestone,
   type EmployeeMilestoneCategory,
@@ -1796,6 +1797,8 @@ export class SqliteStore {
       blueprintVersion: blueprint.version,
       displayName: input.displayName ?? blueprint.displayName,
       role: input.role ?? blueprint.role,
+      presence: 'available',
+      health: 'healthy',
       status: 'available',
       currentRevision: 1,
       createdAt: now,
@@ -1990,12 +1993,34 @@ export class SqliteStore {
 
   setEmployeeStatus(employeeId: string, status: EmployeeStatus, actorId: string): EmployeeInstance {
     this.#assertWritable()
-    const employee = this.#requireEmployee(employeeId)
     if (status === 'archived') return this.archiveEmployee(employeeId, actorId)
+    if (status === 'blocked') {
+      return this.setEmployeeHealth(employeeId, 'blocked', {
+        errorCode: 'legacy_employee_status_update',
+        detail: '角色运行配置需要用户处理',
+      })
+    }
+    throw new PersistenceError('Employee presence is derived from durable work and cannot be set directly')
+  }
+
+  setEmployeeHealth(
+    employeeId: string,
+    health: EmployeeHealth,
+    issue?: { errorCode: string; detail: string },
+  ): EmployeeInstance {
+    this.#assertWritable()
+    const employee = this.#requireEmployee(employeeId)
+    if (employee.status === 'archived') throw new PersistenceError('Archived employee health cannot be changed')
+    if (health === 'healthy' && issue !== undefined) throw new PersistenceError('Healthy employee cannot retain a health issue')
+    if (health !== 'healthy' && (issue?.errorCode.trim() === '' || issue?.detail.trim() === '')) {
+      throw new PersistenceError('Unhealthy employee requires an actionable error code and detail')
+    }
     const now = this.#clock()
-    this.database
-      .prepare('UPDATE employee_instances SET status = ?, updated_at = ? WHERE id = ?')
-      .run(status, now, employee.id)
+    this.database.prepare(
+      `UPDATE employee_instances
+       SET health = ?, health_error_code = ?, health_detail = ?, updated_at = ?
+       WHERE id = ?`,
+    ).run(health, issue?.errorCode.trim() ?? null, issue?.detail.trim() ?? null, now, employee.id)
     return this.#requireEmployee(employee.id)
   }
 
@@ -2010,7 +2035,7 @@ export class SqliteStore {
 
   getEmployee(employeeId: string): EmployeeInstance | undefined {
     const row = this.database.prepare('SELECT * FROM employee_instances WHERE id = ?').get(employeeId)
-    return row ? mapEmployee(row) : undefined
+    return row ? this.#mapEmployeeRuntimeState(row) : undefined
   }
 
   listEmployees(worldId: string, includeArchived = false): EmployeeInstance[] {
@@ -2018,7 +2043,7 @@ export class SqliteStore {
       ? 'SELECT * FROM employee_instances WHERE world_id = ? ORDER BY created_at, id'
       : `SELECT * FROM employee_instances
          WHERE world_id = ? AND status <> 'archived' ORDER BY created_at, id`
-    return this.database.prepare(sql).all(worldId).map(mapEmployee)
+    return this.database.prepare(sql).all(worldId).map((row) => this.#mapEmployeeRuntimeState(row))
   }
 
   getEmployeeRevision(employeeId: string, revision: number): EmployeeRevision | undefined {
@@ -5043,8 +5068,9 @@ export class SqliteStore {
       .prepare(
         `INSERT INTO employee_instances (
           id, workspace_id, world_id, blueprint_id, blueprint_version, display_name, role,
-          status, current_revision, agent_session_id, created_at, updated_at, archived_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          status, health, health_error_code, health_detail, current_revision,
+          agent_session_id, created_at, updated_at, archived_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         employee.id,
@@ -5055,12 +5081,34 @@ export class SqliteStore {
         employee.displayName,
         employee.role,
         employee.status,
+        employee.health,
+        employee.healthErrorCode ?? null,
+        employee.healthDetail ?? null,
         employee.currentRevision,
         employee.agentSessionId ?? null,
         employee.createdAt,
         employee.updatedAt,
         employee.archivedAt ?? null,
       )
+  }
+
+  #mapEmployeeRuntimeState(row: object): EmployeeInstance {
+    const employee = mapEmployee(row)
+    if (employee.status === 'archived') return employee
+    const activeRunRow = this.database.prepare(
+      `SELECT COUNT(*) AS count FROM agent_runs
+       WHERE employee_id = ? AND status IN ('queued', 'running')`,
+    ).get(employee.id) as { count: number | bigint }
+    const waitingApprovalRow = this.database.prepare(
+      `SELECT COUNT(DISTINCT queue.id) AS count
+       FROM conversation_queue_entries AS queue, json_each(queue.employee_ids_json) AS participant
+       WHERE queue.status = 'waiting-approval' AND participant.value = ?`,
+    ).get(employee.id) as { count: number | bigint }
+    const activeRunCount = Number(activeRunRow.count)
+    const waitingApprovalCount = Number(waitingApprovalRow.count)
+    employee.presence = activeRunCount + waitingApprovalCount > 0 ? 'working' : 'available'
+    employee.status = employee.health === 'blocked' ? 'blocked' : employee.presence
+    return employee
   }
 
   #insertRevision(revision: EmployeeRevision): void {
@@ -5687,6 +5735,7 @@ function mapBlueprint(row: object): EmployeeBlueprint {
 
 function mapEmployee(row: object): EmployeeInstance {
   const value = row as Record<string, unknown>
+  const persistedStatus = value.status as EmployeeStatus
   const employee: EmployeeInstance = {
     id: String(value.id),
     workspaceId: String(value.workspace_id),
@@ -5695,11 +5744,15 @@ function mapEmployee(row: object): EmployeeInstance {
     blueprintVersion: Number(value.blueprint_version),
     displayName: String(value.display_name),
     role: String(value.role),
-    status: value.status as EmployeeStatus,
+    presence: persistedStatus === 'working' ? 'working' : 'available',
+    health: (typeof value.health === 'string' ? value.health : persistedStatus === 'blocked' ? 'degraded' : 'healthy') as EmployeeHealth,
+    status: persistedStatus,
     currentRevision: Number(value.current_revision),
     createdAt: String(value.created_at),
     updatedAt: String(value.updated_at),
   }
+  if (typeof value.health_error_code === 'string') employee.healthErrorCode = value.health_error_code
+  if (typeof value.health_detail === 'string') employee.healthDetail = value.health_detail
   if (typeof value.agent_session_id === 'string') employee.agentSessionId = value.agent_session_id
   if (typeof value.archived_at === 'string') employee.archivedAt = value.archived_at
   return employee

@@ -1192,6 +1192,8 @@ export default function App() {
           blueprintVersion: blueprint.version,
           displayName: displayName ?? blueprint.displayName,
           role: blueprint.role,
+          presence: 'available',
+          health: 'healthy',
           status: 'available',
           currentRevision: 1,
           createdAt: timestamp,
@@ -2653,9 +2655,9 @@ function stableAvatar(id: string, fallback: number): number {
 }
 
 function statusActivity(employee: EmployeeInstance): string {
-  if (employee.status === 'working') return `正在执行${employee.role}任务`
-  if (employee.status === 'blocked') return '等待依赖或进一步处理'
-  if (employee.status === 'waiting') return '等待下一步处理'
+  if (employee.health === 'blocked') return employee.healthDetail ?? '运行问题等待处理'
+  if (employee.health === 'degraded') return employee.healthDetail ?? '运行配置需要检查'
+  if (employee.presence === 'working') return `正在执行${employee.role}任务`
   return '可接新任务'
 }
 

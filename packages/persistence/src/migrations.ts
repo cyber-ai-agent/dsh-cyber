@@ -1562,6 +1562,30 @@ const MIGRATIONS: readonly Migration[] = [
         ON conversation_queue_entries(work_turn_id, status, id);
     `,
   },
+  {
+    version: 28,
+    name: 'employee-presence-and-health',
+    sql: `
+      ALTER TABLE employee_instances
+        ADD COLUMN health TEXT NOT NULL DEFAULT 'healthy'
+        CHECK (health IN ('healthy', 'degraded', 'blocked'));
+      ALTER TABLE employee_instances ADD COLUMN health_error_code TEXT;
+      ALTER TABLE employee_instances ADD COLUMN health_detail TEXT;
+
+      /* Legacy blocked values did not distinguish a one-turn failure from an
+         actionable configuration problem. Preserve the signal as degraded,
+         require an explicit new health decision for blocked, and make runtime
+         presence entirely derivable from durable work facts. */
+      UPDATE employee_instances
+      SET health = CASE WHEN status = 'blocked' THEN 'degraded' ELSE 'healthy' END,
+          health_error_code = CASE WHEN status = 'blocked' THEN 'legacy_employee_blocked' ELSE NULL END,
+          health_detail = CASE WHEN status = 'blocked' THEN '需要重新检查角色运行配置' ELSE NULL END,
+          status = CASE WHEN status = 'archived' THEN 'archived' ELSE 'available' END;
+
+      CREATE INDEX employee_instances_world_health_idx
+        ON employee_instances(world_id, health, created_at, id);
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {

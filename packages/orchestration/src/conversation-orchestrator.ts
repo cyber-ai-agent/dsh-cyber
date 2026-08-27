@@ -84,11 +84,6 @@ export interface ConversationStorePort {
     causationId?: string
     correlationId?: string
   }): DomainEvent
-  setEmployeeStatus(
-    employeeId: string,
-    status: EmployeeInstance['status'],
-    actorId: string,
-  ): EmployeeInstance
   bindEmployeeAgentSession(employeeId: string, agentSessionId: string): EmployeeInstance
   createWorkTurn(input: { workspaceId: string; worldId: string; sessionId: string; clientTurnId?: string; interactionKind: WorkTurnInteractionKind }): WorkTurn
   getWorkTurn(turnId: string): WorkTurn | undefined
@@ -1244,7 +1239,6 @@ export class ConversationOrchestrator implements AsyncDisposable {
     let failedTurn = false
     let failedTurnKind: AgentTurnFailureKind = 'unknown'
     try {
-      this.#store.setEmployeeStatus(employee.id, 'working', 'system')
       this.#store.appendDomainEvent({
         workspaceId: session.workspaceId,
         worldId: session.worldId,
@@ -1302,7 +1296,6 @@ export class ConversationOrchestrator implements AsyncDisposable {
       if (this.#abortedAgentRuns.has(agentRun.id)) throw new AgentTurnInterruptedError(employee.id)
       this.#store.bindEmployeeAgentSession(employee.id, result.agentSessionId)
       if (failedTurn) {
-        this.#blockAgent(session, employee, 'runtime-turn-failed', workTurn.id, agentRun.id)
         this.#store.failAgentRun(agentRun.id, `runtime-${failedTurnKind}`, result.agentSessionId)
         throw new AgentTurnFailedError(employee.id, failedTurnKind)
       }
@@ -1350,7 +1343,6 @@ export class ConversationOrchestrator implements AsyncDisposable {
           correlationId: session.id,
         })
       }
-      this.#store.setEmployeeStatus(employee.id, 'available', 'system')
       this.#store.appendDomainEvent({
         workspaceId: session.workspaceId,
         worldId: session.worldId,
@@ -1371,7 +1363,6 @@ export class ConversationOrchestrator implements AsyncDisposable {
     } catch (error) {
       if (this.#abortedAgentRuns.has(agentRun.id) || error instanceof AgentTurnInterruptedError) {
         try { this.#store.interruptAgentRun(agentRun.id, 'interrupted') } catch { /* controller may have won the race */ }
-        try { this.#store.setEmployeeStatus(employee.id, 'available', 'system') } catch { /* preserve interruption */ }
         throw error instanceof AgentTurnInterruptedError ? error : new AgentTurnInterruptedError(employee.id)
       }
       if (!(error instanceof AgentTurnFailedError)) {
@@ -1386,7 +1377,6 @@ export class ConversationOrchestrator implements AsyncDisposable {
           correlationId: session.id,
           payload: { employeeId: employee.id, failure: 'runtime-error', traceTurnId, agentRunId: agentRun.id, workTurnId: workTurn.id },
         })
-        this.#blockAgent(session, employee, 'runtime-error', workTurn.id, agentRun.id)
       }
       throw error instanceof AgentTurnFailedError
         ? error
@@ -1499,20 +1489,6 @@ export class ConversationOrchestrator implements AsyncDisposable {
         employeeId: employee.id,
         ...runtimeMetadata(event),
       },
-    })
-  }
-
-  #blockAgent(session: WorkSession, employee: EmployeeInstance, reason: string, workTurnId: string, agentRunId: string): void {
-    this.#store.setEmployeeStatus(employee.id, 'blocked', 'system')
-    this.#store.appendDomainEvent({
-      workspaceId: session.workspaceId,
-      worldId: session.worldId,
-      sessionId: session.id,
-      type: 'task.blocked',
-      actorId: employee.id,
-      actorKind: 'employee',
-      correlationId: session.id,
-      payload: { employeeId: employee.id, reason, traceTurnId: agentRunId, agentRunId, workTurnId },
     })
   }
 
