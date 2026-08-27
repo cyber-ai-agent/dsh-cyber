@@ -683,7 +683,14 @@ export class SqliteStore {
     const store = new SqliteStore(absolutePath, database, { ...options, readOnly })
     try {
       store.#configure()
-      if (!readOnly) migrate(database, store.#clock)
+      if (!readOnly) {
+        const previousVersion = readUserVersion(database)
+        if (exists && previousVersion > 0 && previousVersion < CYBER_SCHEMA_VERSION) {
+          const safeTime = store.#clock().replaceAll(/[^0-9A-Za-z.-]/g, '-')
+          await backup(database, `${absolutePath}.pre-migration-v${previousVersion}-${safeTime}.sqlite`)
+        }
+        migrate(database, store.#clock)
+      }
       return store
     } catch (error) {
       store.close()
@@ -4895,9 +4902,15 @@ export class SqliteStore {
     const errors: string[] = []
     const integrity = readIntegrity(this.database)
     if (integrity.length !== 1 || integrity[0] !== 'ok') errors.push(...integrity)
+    const foreignKeyViolations = this.database.prepare('PRAGMA foreign_key_check').all()
+    if (foreignKeyViolations.length > 0) errors.push(`Foreign key check found ${foreignKeyViolations.length} violation(s)`)
     const schemaVersion = readUserVersion(this.database)
     if (schemaVersion !== CYBER_SCHEMA_VERSION) {
       errors.push(`Expected schema ${CYBER_SCHEMA_VERSION}, found ${schemaVersion}`)
+    }
+    const migrationHistory = this.database.prepare('SELECT COUNT(*) AS count, MAX(version) AS maximum FROM schema_migrations').get() as { count: number; maximum: number | null }
+    if (Number(migrationHistory.count) !== CYBER_SCHEMA_VERSION || Number(migrationHistory.maximum) !== CYBER_SCHEMA_VERSION) {
+      errors.push(`Migration history is incomplete: ${migrationHistory.count} entries, latest ${migrationHistory.maximum ?? 'none'}`)
     }
 
     const report: DatabaseDoctorReport = {

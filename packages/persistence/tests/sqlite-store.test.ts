@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -792,6 +792,7 @@ describe('SqliteStore', () => {
 
     const migrated = await SqliteStore.open(databasePath)
     stores.push(migrated)
+    expect((await readdir(directory)).some((file) => file.startsWith('cyber.sqlite.pre-migration-v2-') && file.endsWith('.sqlite'))).toBe(true)
     expect(migrated.listWorkspaces()[0]?.name).toBe('迁移前工作区')
     expect(migrated.database.prepare(`PRAGMA foreign_key_list(world_permission_requests)`).all()).toEqual(
       expect.arrayContaining([
