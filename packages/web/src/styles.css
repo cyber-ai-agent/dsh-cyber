@@ -759,9 +759,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* 沉浸式皮肤全景舞台：宫殿背景 + 左右立绘角色 */
 .skin-stage { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 0; contain: strict; }
 .skin-stage__backdrop { position: absolute; inset: 0; background-image: var(--skin-backdrop); background-size: cover; background-position: center; filter: contrast(1.05) saturate(1.1); transition: background-image 0.6s cubic-bezier(0.16, 1, 0.3, 1); opacity: 0.95; }
-.skin-stage__character { position: absolute; bottom: 0; width: min(380px, 30vw); height: 90%; background-repeat: no-repeat; background-size: contain; pointer-events: none; z-index: 1; transition: all 0.6s cubic-bezier(0.22, 0.78, 0.2, 1); filter: drop-shadow(0 15px 30px rgba(4, 11, 35, 0.65)); }
-.skin-stage__character--left { left: clamp(4px, 1.2vw, 20px); background-image: var(--skin-character-left); background-position: left bottom; animation: skinFloatLeft 6s ease-in-out infinite alternate; }
-.skin-stage__character--right { right: clamp(4px, 1.2vw, 20px); background-image: var(--skin-character-right); background-position: right bottom; filter: drop-shadow(0 15px 30px rgba(4, 11, 35, 0.65)); animation: skinFloatRight 6s ease-in-out infinite alternate; }
+.skin-stage__character { position: absolute; bottom: 0; width: min(340px, 28vw); height: 85%; background-repeat: no-repeat; background-size: contain; pointer-events: none; z-index: 1; transition: all 0.5s cubic-bezier(0.22, 0.78, 0.2, 1); filter: drop-shadow(0 15px 30px rgba(4, 11, 35, 0.65)); }
+.skin-stage__character--left { left: clamp(2px, 1vw, 16px); background-image: var(--skin-character-left); background-position: left bottom; animation: skinFloatLeft 6s ease-in-out infinite alternate; }
+.skin-stage__character--right { right: clamp(2px, 1vw, 16px); background-image: var(--skin-character-right); background-position: right bottom; filter: drop-shadow(0 15px 30px rgba(4, 11, 35, 0.65)); animation: skinFloatRight 6s ease-in-out infinite alternate; }
 
 @keyframes skinFloatLeft {
   0% { transform: translateY(0); }
@@ -773,12 +773,32 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   100% { transform: translateY(-6px); }
 }
 
-@media (max-width: 1360px) {
-  .skin-stage__character { width: min(280px, 24vw); height: 75%; opacity: 0.85; }
+/* 当会话有消息正在进行时，立绘自动避让到两侧边缘并缩小透明度，确保文字绝不被挡住 */
+.chat-workbench.has-messages .skin-stage__character--left {
+  width: min(240px, 20vw);
+  height: 65%;
+  opacity: 0.35;
 }
 
-@media (max-width: 960px) {
-  .skin-stage__character { opacity: 0.25; height: 50%; }
+.chat-workbench.has-messages .skin-stage__character--right {
+  width: min(240px, 20vw);
+  height: 65%;
+  opacity: 0.35;
+}
+
+@media (max-width: 1280px) {
+  .skin-stage__character {
+    width: min(200px, 18vw) !important;
+    height: 55% !important;
+    opacity: 0.22 !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .skin-stage__character {
+    opacity: 0.12 !important;
+    height: 40% !important;
+  }
 }
 
 .chat-header { position: relative; z-index: 3; justify-content: space-between; gap: 16px; padding-inline: max(20px, calc((100% - 1120px) / 2)); background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); border-bottom: 1px solid var(--border); box-shadow: 0 2px 16px rgba(0,0,0,0.12); }
@@ -803,7 +823,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .chat-header p { overflow: hidden; margin: 3px 0 0; color: var(--text-muted); font-size: var(--text-xs); white-space: nowrap; text-overflow: ellipsis; }
 .chat-header__count { flex: none; display: grid; justify-items: end; color: var(--text-soft); font: 600 13px var(--font-mono); }
 .chat-header__count span { color: var(--text-muted); font: 10px inherit; }
-.message-scroll { position: relative; z-index: 2; min-height: 0; overflow: auto; padding-block: 16px 28px; padding-inline: max(24px, calc((100% - 820px) / 2)); scroll-behavior: smooth; }
+
+/* 核心消息滚动与黄金列 */
+.message-scroll { position: relative; z-index: 2; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 16px 20px 32px; scroll-behavior: smooth; }
+.conversation-column { width: 100%; max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; position: relative; z-index: 2; }
+
 .message-history-more { min-height: 36px; display: flex; align-items: center; justify-content: center; gap: 8px; width: min(100%, 520px); margin: 0 auto 16px; padding: 0 14px; border: 1px dashed var(--border-strong); border-radius: var(--radius-control); color: var(--text-muted); background: var(--surface-1); font-size: 13px; font-weight: 500; transition: all var(--duration-fast) var(--ease-smooth); }
 .message-history-more:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-strong); background: var(--accent-soft); }
 .conversation-empty { height: 100%; display: grid; place-content: center; justify-items: center; text-align: center; color: var(--text-muted); }
@@ -811,16 +835,20 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .conversation-empty h2 { margin: 14px 0 6px; color: var(--text-strong); font-size: 18px; font-weight: 700; }
 .conversation-empty p { max-width: 440px; margin: 0; font-size: 13px; line-height: 1.7; }
 .conversation-empty .primary-button { margin-top: 18px; }
-.message { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 12px; align-items: start; padding: 12px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 35%, transparent); }
-.message--owner { grid-template-columns: 1fr; justify-items: end; }
-.message--owner .message__body { width: min(78%, 780px); }
-.avatar-button { width: 36px; height: 36px; padding: 0; border: 0; background: transparent; }
+
+/* 消息流对齐 */
+.message { display: flex; align-items: flex-start; gap: 12px; padding: 6px 0; border-bottom: 0; width: 100%; }
+.message:not(.message--owner) { justify-content: flex-start; }
+.message:not(.message--owner) .message__body { width: auto; max-width: min(85%, 660px); }
+.message--owner { justify-content: flex-end; }
+.message--owner .message__body { width: auto; max-width: min(82%, 640px); }
+.avatar-button { width: 36px; height: 36px; padding: 0; border: 0; background: transparent; flex-shrink: 0; }
 .message__body { min-width: 0; }
 .message__meta { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
 .message__meta strong { font-size: 14px; font-weight: 650; }
 .message__meta span { color: var(--accent-strong); font-size: var(--text-xs); font-weight: 500; }
 .message__meta time { margin-left: auto; color: var(--text-muted); font: 11px var(--font-mono); }
-.message__content { padding: 12px 16px; border-radius: var(--radius-lg); border: 1px solid var(--bubble-assistant-border, var(--border)); background: var(--bubble-assistant-bg, var(--surface-1)); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); color: var(--text); font-size: var(--text-sm); line-height: 1.75; box-shadow: var(--shadow-sm); transition: all var(--duration-fast) var(--ease-smooth); }
+.message__content { padding: 12px 18px; border-radius: var(--radius-lg); border: 1px solid var(--bubble-assistant-border, var(--border)); background: var(--bubble-assistant-bg, var(--surface-1)); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); color: var(--text); font-size: var(--text-sm); line-height: 1.75; box-shadow: var(--shadow-sm); transition: all var(--duration-fast) var(--ease-smooth); }
 .message--owner .message__content { border-radius: var(--radius-lg) var(--radius-lg) 4px var(--radius-lg); border: 1px solid var(--bubble-owner-border, color-mix(in srgb, var(--accent) 50%, transparent)); background: var(--bubble-owner-bg, var(--accent)); color: var(--bubble-owner-color, #ffffff); box-shadow: var(--bubble-owner-shadow, 0 4px 20px var(--accent-soft)); }
 .message--owner .message__content p, .message--owner .message__content strong, .message--owner .message__content span { color: inherit; }
 .message__content p { margin: 0 0 8px; }
@@ -1233,42 +1261,325 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .trait-list span { padding: 3px 6px; border: 1px solid var(--border); color: var(--text-soft); }
 .evidence-principle { display: flex; gap: 8px; margin-top: 14px; padding: 10px; border-left: 2px solid var(--accent); background: var(--accent-soft); color: var(--text-muted); font-size: 10px; line-height: 1.6; }
 
-.dossier-directory { min-height: 100%; display: grid; align-content: start; background: var(--surface-0); }
-.dossier-directory__header { min-height: 68px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
-.dossier-directory__header > div { display: flex; align-items: center; gap: 9px; }
-.dossier-directory__header > div > svg { color: var(--accent); }
-.dossier-directory__header > div > span { display: grid; gap: 3px; }
-.dossier-directory__header strong { font-size: 13px; }
-.dossier-directory__header small, .dossier-directory__header > span { color: var(--text-muted); font-size: 11px; }
-.dossier-directory__summary { display: grid; grid-template-columns: repeat(3, 1fr); border-bottom: 1px solid var(--border); background: var(--surface-1); }
-.dossier-directory__summary > div { min-width: 0; display: grid; grid-template-columns: 18px auto; grid-template-rows: auto auto; align-items: center; column-gap: 5px; padding: 10px 12px; border-right: 1px solid var(--border); }
-.dossier-directory__summary > div:last-child { border-right: 0; }
-.dossier-directory__summary svg { grid-row: 1 / 3; color: var(--accent); }
-.dossier-directory__summary strong { color: var(--text); font: 600 14px var(--font-mono); }
-.dossier-directory__summary span { overflow: hidden; color: var(--text-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.dossier-directory__list { display: grid; gap: 8px; padding: 10px; }
-.dossier-directory__empty { min-height: 320px; display: grid; place-content: center; justify-items: center; color: var(--text-muted); text-align: center; }
-.dossier-directory__empty strong { margin-top: 8px; color: var(--text); }
-.dossier-directory__empty p { max-width: 300px; font-size: 10px; line-height: 1.7; }
-.dossier-card { display: grid; gap: 9px; padding: 11px; border: 1px solid var(--border); background: var(--surface-1); }
-.dossier-card:hover { border-color: var(--border-strong); background: color-mix(in srgb, var(--surface-2) 72%, var(--surface-1)); }
-.dossier-card > header { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 8px; }
-.dossier-card > header > div { min-width: 0; display: grid; gap: 2px; }
-.dossier-card > header > div strong { font-size: 14px; }
-.dossier-card > header > div span { overflow: hidden; color: var(--text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.dossier-card__activity { margin: 0; padding: 8px 9px; border-left: 2px solid var(--accent); background: var(--accent-soft); color: var(--text-soft); font-size: 12px; line-height: 1.5; }
-.dossier-card__traits { display: flex; flex-wrap: wrap; gap: 4px; }
-.dossier-card__traits span { padding: 3px 6px; border: 1px solid var(--border); color: var(--text-muted); font-size: 10px; }
-.dossier-card dl { display: grid; grid-template-columns: repeat(3, 1fr); margin: 0; border: 1px solid var(--border); }
-.dossier-card dl > div { min-width: 0; display: grid; gap: 2px; padding: 6px 7px; border-right: 1px solid var(--border); }
-.dossier-card dl > div:last-child { border-right: 0; }
-.dossier-card dt { color: var(--text-muted); font-size: 10px; }
-.dossier-card dd { margin: 0; overflow: hidden; color: var(--text-soft); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.dossier-card__evidence { display: grid; gap: 3px; }
-.dossier-card__evidence span { overflow: hidden; color: var(--text-soft); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.dossier-card__evidence small { display: -webkit-box; overflow: hidden; color: var(--text-muted); font-size: 10px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.dossier-card > footer { display: flex; align-items: center; justify-content: flex-end; gap: 5px; padding-top: 2px; }
-.dossier-card > footer .primary-button { display: inline-flex; align-items: center; gap: 5px; }
+.dossier-directory {
+  min-height: 100%;
+  display: grid;
+  align-content: start;
+  background: var(--surface-0);
+}
+
+.dossier-directory__header {
+  min-height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-1);
+}
+
+.dossier-directory__header > div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dossier-directory__header > div > svg {
+  color: var(--accent);
+  filter: drop-shadow(0 0 8px var(--accent-soft));
+}
+
+.dossier-directory__header > div > span {
+  display: grid;
+  gap: 4px;
+}
+
+.dossier-directory__header strong {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+
+.dossier-directory__header small,
+.dossier-directory__header > span {
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.dossier-directory__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dossier-directory__header-actions > span {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.dossier-directory__invite {
+  border-radius: 999px !important;
+  padding: 8px 18px !important;
+  font-size: 13px !important;
+  box-shadow: 0 4px 14px var(--accent-soft) !important;
+}
+
+.dossier-directory__summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+}
+
+.dossier-directory__summary > div {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 12px);
+  background: var(--surface-1);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+  transition: all var(--duration-fast) var(--ease-smooth);
+}
+
+.dossier-directory__summary > div:hover {
+  border-color: var(--accent);
+  background: var(--surface-2);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.15);
+}
+
+.dossier-directory__summary svg {
+  color: var(--accent);
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.dossier-directory__summary strong {
+  color: var(--text-strong);
+  font: 700 18px var(--font-mono);
+}
+
+.dossier-directory__summary span {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dossier-directory__list {
+  display: grid;
+  gap: 14px;
+  padding: 16px 18px;
+}
+
+.dossier-directory__empty {
+  min-height: 320px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.dossier-directory__empty strong {
+  margin-top: 12px;
+  color: var(--text-strong);
+  font-size: 15px;
+}
+
+.dossier-directory__empty p {
+  max-width: 340px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+/* 现代圆润流线角色卡片 */
+.dossier-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.12);
+  transition: all var(--duration-normal) var(--ease-smooth);
+}
+
+.dossier-card:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--surface-2) 75%, var(--surface-1));
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+  transform: translateY(-2px);
+}
+
+.dossier-card > header {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.dossier-card > header > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.dossier-card > header > div strong {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+
+.dossier-card > header > div span {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dossier-card__activity {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  background: var(--accent-soft);
+  color: var(--text-strong);
+  font-size: 13px;
+  line-height: 1.55;
+  font-weight: 500;
+}
+
+.dossier-card__traits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dossier-card__traits span {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.dossier-card dl {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 0;
+  border: 0;
+}
+
+.dossier-card dl > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.dossier-card dl > div:last-child {
+  border-right: 1px solid var(--border);
+}
+
+.dossier-card dt {
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.dossier-card dd {
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dossier-card__evidence {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+
+.dossier-card__evidence span {
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dossier-card__evidence small {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.dossier-card > footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.dossier-card > footer .icon-button {
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  display: inline-grid;
+  place-items: center;
+}
+
+.dossier-card > footer .text-button {
+  border-radius: 999px;
+  padding: 8px 16px;
+  font-size: 13px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-strong);
+  transition: all var(--duration-fast) var(--ease-smooth);
+}
+
+.dossier-card > footer .text-button:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.dossier-card > footer .primary-button {
+  border-radius: 999px;
+  padding: 8px 18px;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 4px 14px var(--accent-soft);
+}
 .evidence-principle svg { flex: none; color: var(--accent); }
 .evidence-principle p { margin: 0; }
 .skill-list, .journal-list { display: grid; gap: 9px; }
@@ -2508,6 +2819,66 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 :root[data-skin='maid-atelier'] .world-runtime-dock__controls button.is-active {
   background: rgba(197, 164, 104, 0.25) !important;
   color: #e2cfaa !important;
+}
+
+:root[data-skin='maid-atelier'] .dossier-directory {
+  background: transparent !important;
+}
+
+:root[data-skin='maid-atelier'] .dossier-directory__header {
+  background: rgba(10, 23, 59, 0.94) !important;
+  border-bottom: 1px solid rgba(197, 164, 104, 0.5) !important;
+}
+
+:root[data-skin='maid-atelier'] .dossier-directory__summary > div {
+  background: rgba(14, 28, 68, 0.85) !important;
+  border: 1px solid rgba(197, 164, 104, 0.4) !important;
+  box-shadow: 0 4px 16px rgba(4, 11, 35, 0.4) !important;
+}
+
+:root[data-skin='maid-atelier'] .dossier-directory__summary > div:hover {
+  border-color: #c5a468 !important;
+  background: rgba(22, 42, 98, 0.92) !important;
+}
+
+:root[data-skin='maid-atelier'] .dossier-card {
+  background: rgba(12, 25, 62, 0.92) !important;
+  border: 1px solid rgba(197, 164, 104, 0.45) !important;
+  box-shadow: 0 8px 28px rgba(4, 11, 35, 0.5) !important;
+}
+
+:root[data-skin='maid-atelier'] .dossier-card:hover {
+  border-color: #c5a468 !important;
+  box-shadow: 0 12px 36px rgba(4, 11, 35, 0.65), 0 0 20px rgba(197, 164, 104, 0.25) !important;
+}
+
+:root[data-skin='maid-atelier'] .dossier-card__activity {
+  background: rgba(197, 164, 104, 0.12) !important;
+  border: 1px solid rgba(197, 164, 104, 0.5) !important;
+  color: #f8f6f0 !important;
+}
+
+:root[data-skin='maid-atelier'] .dossier-card dl > div {
+  background: rgba(8, 18, 48, 0.85) !important;
+  border: 1px solid rgba(197, 164, 104, 0.3) !important;
+}
+
+:root[data-skin='maid-atelier'] .dossier-card__evidence {
+  background: rgba(8, 18, 48, 0.85) !important;
+  border: 1px solid rgba(197, 164, 104, 0.3) !important;
+}
+
+:root[data-skin='maid-atelier'] .dossier-card > footer .primary-button {
+  background: linear-gradient(135deg, #f8e5be 0%, #c5a468 55%, #9b793d 100%) !important;
+  color: #08122d !important;
+  border: 1px solid rgba(255, 245, 215, 0.8) !important;
+  font-weight: 700 !important;
+}
+
+:root[data-skin='maid-atelier'] .dossier-card > footer .text-button {
+  background: rgba(197, 164, 104, 0.12) !important;
+  border: 1px solid rgba(197, 164, 104, 0.5) !important;
+  color: #f8f6f0 !important;
 }
 
 /* 2. Orca Link (虎鲸链路) 全局深度 UI 蜕变 */

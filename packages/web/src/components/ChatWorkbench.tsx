@@ -246,7 +246,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
   }
 
   return (
-    <section className="chat-workbench" aria-label="当前世界多角色会话">
+    <section className={`chat-workbench${visibleMessages.length > 0 ? ' has-messages' : ''}`} aria-label="当前世界多角色会话">
       <div className="skin-stage" aria-hidden="true">
         <div className="skin-stage__backdrop" />
         <div className="skin-stage__character skin-stage__character--left" />
@@ -268,34 +268,36 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
       </header>
 
       <div className="message-scroll" ref={scrollRef} aria-live="polite" aria-busy={pendingCount > 0 || sending}>
-        {queueItems.length > 0 ? <div className="chat-turn-queue" aria-label="消息队列">{saturatedWaiting ? <p className="chat-turn-queue__lane-note" role="status">同一角色已有 2 条通道运行，第三条消息等待中</p> : null}{queueItems.map((turn) => <article key={turn.id} className={`chat-turn-queue__item chat-turn-queue__item--${turn.status}`}><div><strong>{turn.status === 'running' ? '正在回复中' : turn.status === 'waiting-approval' ? '等待批准' : turn.status === 'queued' ? '等待中' : turn.status === 'interrupted' ? '已停止' : turn.status === 'cancelled' ? '已撤销' : '发送失败'}</strong><small>{turn.title}</small></div><span>{(turn.status === 'running' || turn.status === 'waiting-approval') && onStopTurn !== undefined ? <button type="button" onClick={() => void onStopTurn(turn.id)}>■ 停止</button> : turn.status === 'queued' && onPromoteQueuedTurn !== undefined ? <button type="button" onClick={() => void onPromoteQueuedTurn(turn.id)}>插入</button> : null}{turn.status === 'queued' && onCancelQueuedTurn !== undefined ? <button type="button" onClick={() => void onCancelQueuedTurn(turn.id)}>撤销</button> : null}</span></article>)}</div> : null}
-        {conversationKind === 'group' && collaborationMode === 'task' && session?.id !== undefined ? <TaskCollaborationSummary worldId={world.id} sessionId={session.id} employees={participantEmployees} demoMode={demoMode} /> : null}
-        {hasOlderMessages && onLoadOlderMessages !== undefined ? <button className="message-history-more" type="button" disabled={loadingOlderMessages} onClick={onLoadOlderMessages}>{loadingOlderMessages ? <CircleNotch size={15} className="spin" /> : <ArrowUp size={15} />}<span>{loadingOlderMessages ? '正在加载更早消息…' : '加载更早消息'}</span></button> : null}
-        {visibleMessages.length === 0 ? (
-          <div className="conversation-empty">
-            <TerminalWindow size={34} />
-            <h2>{employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? '群聊已准备好' : conversationKind === 'direct' ? `开始与${participantEmployees[0]?.displayName ?? experience.personLabel}对话` : '选择会话开始互动'}</h2>
-            <p>{employees.length === 0 ? experience.emptyCopy : conversationKind === 'group' ? collaborationMode === 'task' ? '协作已经创建，发送目标后按分工推进；详细执行过程请查看轨迹。' : '讨论已经创建并保存在当前世界，发送消息开始多人讨论。' : conversationKind === 'direct' ? '历史记录会保留在当前世界；发送消息后角色才会进入真实运行过程。' : '左侧只保留会话：每个角色固定一个私聊，也可以创建多人群聊；角色新增与管理统一在右侧角色。'}</p>
-          </div>
-        ) : visibleMessages.map((message) => {
-          const employee = employees.find((item) => item.id === message.senderId)
-          const owner = message.senderKind === 'owner'
-          const streaming = message.metadata.streaming === true
-          if (message.kind === 'system') return <div key={message.id} className="chat-system-notice" role="status">{message.content}</div>
-          return (
-            <article key={message.id} className={`message${owner ? ' message--owner' : ''}${streaming ? ' message--streaming' : ''}`} onContextMenu={(event) => { if (streaming) return; event.preventDefault(); setMessageMenu({ message, position: { x: event.clientX, y: event.clientY } }) }} onKeyDown={(event) => { if (streaming || (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10'))) return; event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); setMessageMenu({ message, position: { x: rect.left + Math.min(rect.width, 220), y: rect.top + 28 } }) }} tabIndex={streaming ? undefined : 0}>
-              {owner ? null : <button className="avatar-button" type="button" onClick={() => employee && onOpenDossier(employee.id)} aria-label={`打开${employee?.displayName ?? experience.personLabel}角色`}><Avatar index={employee?.avatarIndex ?? 7} label={employee?.displayName ?? '角色'} authorityRole={employee?.authorityRole} /></button>}
-              <div className="message__body">
-                <header className="message__meta">{owner ? <span className="sr-only">我的消息</span> : <><strong>{employee?.displayName ?? experience.personLabel}<AuthorityBadge role={employee?.authorityRole} /></strong><span>{employee?.role}</span></>}<time>{displayTime(message)}</time>{copiedMessageId === message.id ? <span role="status">已复制</span> : rememberingMessageId === message.id ? <span role="status">正在整理…</span> : rememberedMessageIds.has(message.id) ? <span role="status">已加入长期知识</span> : null}</header>
-                <div className="message__content">{streaming && message.content.length === 0 ? <span className="stream-placeholder">正在回复中…</span> : <RichText value={message.content} worldId={world.id} />}{streaming ? <span className="stream-cursor" aria-hidden="true" /> : null}</div>
-                <MessageAttachments attachments={messageAttachments(message.metadata)} />
-                {artifactRefsFromMetadata(message.metadata).length === 0 ? null : <Suspense fallback={<div className="chat-artifact-refs" role="status">正在载入产物卡…</div>}><ArtifactReferenceCards worldId={world.id} artifactRefs={artifactRefsFromMetadata(message.metadata)} onOpen={onOpenArtifact} /></Suspense>}
-              </div>
-              {owner ? <span className="owner-avatar" role="img" aria-label="我的头像"><UserCircle size={28} weight="fill" /></span> : null}
-            </article>
-          )
-        })}
-        {pendingCount > 0 ? <div className="stream-state" role="status"><CircleNotch size={16} className="spin" /><span>正在回复中，你可以继续补充，也可以切换到其他会话。</span>{queuedCount > 0 ? <strong>另有 {queuedCount} 条已排队</strong> : null}</div> : sending ? <div className="stream-state" role="status"><CircleNotch size={16} className="spin" /><span>正在回复中…</span></div> : null}
+        <div className="conversation-column">
+          {queueItems.length > 0 ? <div className="chat-turn-queue" aria-label="消息队列">{saturatedWaiting ? <p className="chat-turn-queue__lane-note" role="status">同一角色已有 2 条通道运行，第三条消息等待中</p> : null}{queueItems.map((turn) => <article key={turn.id} className={`chat-turn-queue__item chat-turn-queue__item--${turn.status}`}><div><strong>{turn.status === 'running' ? '正在回复中' : turn.status === 'waiting-approval' ? '等待批准' : turn.status === 'queued' ? '等待中' : turn.status === 'interrupted' ? '已停止' : turn.status === 'cancelled' ? '已撤销' : '发送失败'}</strong><small>{turn.title}</small></div><span>{(turn.status === 'running' || turn.status === 'waiting-approval') && onStopTurn !== undefined ? <button type="button" onClick={() => void onStopTurn(turn.id)}>■ 停止</button> : turn.status === 'queued' && onPromoteQueuedTurn !== undefined ? <button type="button" onClick={() => void onPromoteQueuedTurn(turn.id)}>插入</button> : null}{turn.status === 'queued' && onCancelQueuedTurn !== undefined ? <button type="button" onClick={() => void onCancelQueuedTurn(turn.id)}>撤销</button> : null}</span></article>)}</div> : null}
+          {conversationKind === 'group' && collaborationMode === 'task' && session?.id !== undefined ? <TaskCollaborationSummary worldId={world.id} sessionId={session.id} employees={participantEmployees} demoMode={demoMode} /> : null}
+          {hasOlderMessages && onLoadOlderMessages !== undefined ? <button className="message-history-more" type="button" disabled={loadingOlderMessages} onClick={onLoadOlderMessages}>{loadingOlderMessages ? <CircleNotch size={15} className="spin" /> : <ArrowUp size={15} />}<span>{loadingOlderMessages ? '正在加载更早消息…' : '加载更早消息'}</span></button> : null}
+          {visibleMessages.length === 0 ? (
+            <div className="conversation-empty">
+              <TerminalWindow size={34} />
+              <h2>{employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? '群聊已准备好' : conversationKind === 'direct' ? `开始与${participantEmployees[0]?.displayName ?? experience.personLabel}对话` : '选择会话开始互动'}</h2>
+              <p>{employees.length === 0 ? experience.emptyCopy : conversationKind === 'group' ? collaborationMode === 'task' ? '协作已经创建，发送目标后按分工推进；详细执行过程请查看轨迹。' : '讨论已经创建并保存在当前世界，发送消息开始多人讨论。' : conversationKind === 'direct' ? '历史记录会保留在当前世界；发送消息后角色才会进入真实运行过程。' : '左侧只保留会话：每个角色固定一个私聊，也可以创建多人群聊；角色新增与管理统一在右侧角色。'}</p>
+            </div>
+          ) : visibleMessages.map((message) => {
+            const employee = employees.find((item) => item.id === message.senderId)
+            const owner = message.senderKind === 'owner'
+            const streaming = message.metadata.streaming === true
+            if (message.kind === 'system') return <div key={message.id} className="chat-system-notice" role="status">{message.content}</div>
+            return (
+              <article key={message.id} className={`message${owner ? ' message--owner' : ''}${streaming ? ' message--streaming' : ''}`} onContextMenu={(event) => { if (streaming) return; event.preventDefault(); setMessageMenu({ message, position: { x: event.clientX, y: event.clientY } }) }} onKeyDown={(event) => { if (streaming || (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10'))) return; event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); setMessageMenu({ message, position: { x: rect.left + Math.min(rect.width, 220), y: rect.top + 28 } }) }} tabIndex={streaming ? undefined : 0}>
+                {owner ? null : <button className="avatar-button" type="button" onClick={() => employee && onOpenDossier(employee.id)} aria-label={`打开${employee?.displayName ?? experience.personLabel}角色`}><Avatar index={employee?.avatarIndex ?? 7} label={employee?.displayName ?? '角色'} authorityRole={employee?.authorityRole} /></button>}
+                <div className="message__body">
+                  <header className="message__meta">{owner ? <span className="sr-only">我的消息</span> : <><strong>{employee?.displayName ?? experience.personLabel}<AuthorityBadge role={employee?.authorityRole} /></strong><span>{employee?.role}</span></>}<time>{displayTime(message)}</time>{copiedMessageId === message.id ? <span role="status">已复制</span> : rememberingMessageId === message.id ? <span role="status">正在整理…</span> : rememberedMessageIds.has(message.id) ? <span role="status">已加入长期知识</span> : null}</header>
+                  <div className="message__content">{streaming && message.content.length === 0 ? <span className="stream-placeholder">正在回复中…</span> : <RichText value={message.content} worldId={world.id} />}{streaming ? <span className="stream-cursor" aria-hidden="true" /> : null}</div>
+                  <MessageAttachments attachments={messageAttachments(message.metadata)} />
+                  {artifactRefsFromMetadata(message.metadata).length === 0 ? null : <Suspense fallback={<div className="chat-artifact-refs" role="status">正在载入产物卡…</div>}><ArtifactReferenceCards worldId={world.id} artifactRefs={artifactRefsFromMetadata(message.metadata)} onOpen={onOpenArtifact} /></Suspense>}
+                </div>
+                {owner ? <span className="owner-avatar" role="img" aria-label="我的头像"><UserCircle size={28} weight="fill" /></span> : null}
+              </article>
+            )
+          })}
+          {pendingCount > 0 ? <div className="stream-state" role="status"><CircleNotch size={16} className="spin" /><span>正在回复中，你可以继续补充，也可以切换到其他会话。</span>{queuedCount > 0 ? <strong>另有 {queuedCount} 条已排队</strong> : null}</div> : sending ? <div className="stream-state" role="status"><CircleNotch size={16} className="spin" /><span>正在回复中…</span></div> : null}
+        </div>
       </div>
 
       {messageMenu === undefined ? null : <ContextMenu label="消息操作" position={messageMenu.position} onClose={() => setMessageMenu(undefined)} items={[
