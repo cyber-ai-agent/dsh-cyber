@@ -84,44 +84,45 @@
    DSH Cyber 12 Immersive Skins & Theme Ecosystem (DSH Skin Universe)
    ========================================================================== */
 
-/* 1. 深海女仆工坊 (Deep Whale Maid Atelier) - 原创 AI 拟人化双女仆宫殿 */
+/* 1. 深海女仆工坊 (Deep Whale Maid Atelier) */
 :root[data-skin='maid-atelier'] {
-  --bg: #070e17;
-  --surface-0: rgba(9, 18, 30, 0.42);
-  --surface-1: rgba(14, 26, 44, 0.65);
-  --surface-2: rgba(20, 36, 62, 0.76);
-  --surface-3: rgba(28, 50, 84, 0.84);
+  --bg: #080f27;
+  --surface-0: rgba(10, 23, 59, 0.82);
+  --surface-1: rgba(14, 28, 70, 0.88);
+  --surface-2: rgba(20, 38, 92, 0.9);
+  --surface-3: rgba(28, 50, 115, 0.92);
   --border: rgba(142, 165, 218, 0.32);
-  --border-strong: rgba(197, 164, 104, 0.6);
-  --border-highlight: rgba(226, 207, 170, 0.8);
-  --accent: #526aa8;
-  --accent-strong: #8ea5da;
-  --accent-soft: rgba(82, 106, 168, 0.28);
-  --accent-glow: 0 0 28px rgba(82, 106, 168, 0.65);
-  --text: #f0f6ff;
-  --text-muted: #9bb0e1;
-  --text-soft: #d5dff3;
+  --border-strong: rgba(197, 164, 104, 0.65);
+  --border-highlight: #e2cfaa;
+  --accent: #c5a468;
+  --accent-strong: #e2cfaa;
+  --accent-soft: rgba(197, 164, 104, 0.22);
+  --accent-glow: 0 0 24px rgba(197, 164, 104, 0.55);
+  --text: #f8f6f0;
+  --text-strong: #ffffff;
+  --text-muted: #96a8ce;
+  --text-soft: #d7def0;
   --bubble-owner-bg: linear-gradient(135deg, #1c326b 0%, #10204d 100%);
   --bubble-owner-color: #f8f6f0;
-  --bubble-owner-border: rgba(197, 164, 104, 0.8);
-  --bubble-owner-shadow: 0 4px 24px rgba(16, 32, 77, 0.65);
-  --bubble-assistant-bg: rgba(13, 25, 59, 0.8);
+  --bubble-owner-border: rgba(197, 164, 104, 0.75);
+  --bubble-owner-shadow: 0 6px 24px rgba(4, 11, 35, 0.55);
+  --bubble-assistant-bg: rgba(13, 25, 59, 0.86);
   --bubble-assistant-border: rgba(142, 165, 218, 0.35);
-  --glass-bg: rgba(9, 19, 51, 0.62);
-  --glass-blur: blur(16px);
-  --skin-backdrop: url('/assets/skins/whale-palace-night.jpg');
-  --skin-character-left: url('/assets/skins/whale-maid-left.jpg');
-  --skin-character-right: url('/assets/skins/whale-maid-right.jpg');
+  --glass-bg: rgba(10, 23, 59, 0.85);
+  --glass-blur: blur(20px);
+  --skin-backdrop: url('/assets/skins/maid-palace-night.webp');
+  --skin-character-left: url('/assets/skins/maid-left.webp');
+  --skin-character-right: url('/assets/skins/maid-right.webp');
   --skin-composer-frame: url('/assets/skins/maid-composer-frame.webp');
   --skin-watermark: none;
 }
 
 :root[data-skin='maid-atelier'][data-color-scheme='light'] {
   --bg: #dce6f5;
-  --surface-0: rgba(248, 250, 255, 0.52);
-  --surface-1: rgba(248, 250, 255, 0.72);
-  --surface-2: rgba(235, 240, 250, 0.82);
-  --surface-3: rgba(224, 231, 246, 0.88);
+  --surface-0: rgba(248, 250, 255, 0.75);
+  --surface-1: rgba(248, 250, 255, 0.88);
+  --surface-2: rgba(235, 240, 250, 0.92);
+  --surface-3: rgba(224, 231, 246, 0.95);
   --border: rgba(71, 91, 145, 0.25);
   --border-strong: rgba(197, 164, 104, 0.65);
   --border-highlight: rgba(197, 164, 104, 0.9);
@@ -130,30 +131,31 @@
   --accent-soft: rgba(82, 106, 168, 0.2);
   --accent-glow: 0 0 24px rgba(82, 106, 168, 0.5);
   --text: #172347;
+  --text-strong: #0a173b;
   --text-muted: #4d5d7f;
   --text-soft: #243866;
   --bubble-owner-bg: linear-gradient(135deg, #526aa8 0%, #3e5287 100%);
   --bubble-owner-color: #ffffff;
   --bubble-owner-border: rgba(197, 164, 104, 0.85);
   --bubble-owner-shadow: 0 4px 20px rgba(82, 106, 168, 0.35);
-  --bubble-assistant-bg: rgba(255, 253, 248, 0.86);
+  --bubble-assistant-bg: rgba(255, 253, 248, 0.92);
   --bubble-assistant-border: rgba(71, 91, 145, 0.3);
-  --glass-bg: rgba(248, 250, 255, 0.65);
-  --glass-blur: blur(16px);
-  --skin-backdrop: url('/assets/skins/whale-palace-day.jpg');
-  --skin-character-left: url('/assets/skins/whale-maid-left.jpg');
-  --skin-character-right: url('/assets/skins/whale-maid-right.jpg');
+  --glass-bg: rgba(248, 250, 255, 0.8);
+  --glass-blur: blur(20px);
+  --skin-backdrop: url('/assets/skins/maid-palace-day.webp');
+  --skin-character-left: url('/assets/skins/maid-left.webp');
+  --skin-character-right: url('/assets/skins/maid-right.webp');
   --skin-composer-frame: url('/assets/skins/maid-composer-frame.webp');
   --skin-watermark: none;
 }
 
-/* 2. 虎鲸链路 (Orca Link) - 原创 AI 拟人化虎鲸机能少女 */
+/* 2. 虎鲸链路 (Orca Link) */
 :root[data-skin='orca-link'] {
   --bg: #090e15;
-  --surface-0: rgba(12, 18, 26, 0.52);
-  --surface-1: rgba(18, 28, 42, 0.7);
-  --surface-2: rgba(26, 40, 60, 0.8);
-  --surface-3: rgba(36, 54, 80, 0.86);
+  --surface-0: rgba(12, 18, 26, 0.75);
+  --surface-1: rgba(18, 28, 42, 0.85);
+  --surface-2: rgba(26, 40, 60, 0.9);
+  --surface-3: rgba(36, 54, 80, 0.94);
   --border: rgba(56, 189, 248, 0.32);
   --border-strong: rgba(56, 189, 248, 0.55);
   --border-highlight: rgba(125, 211, 252, 0.75);
@@ -162,6 +164,7 @@
   --accent-soft: rgba(2, 132, 199, 0.25);
   --accent-glow: 0 0 26px rgba(2, 132, 199, 0.6);
   --text: #f0fdf4;
+  --text-strong: #ffffff;
   --text-muted: #7dd3fc;
   --text-soft: #e0f2fe;
   --bubble-owner-bg: linear-gradient(135deg, #0284c7 0%, #0369a1 60%, #0c4a6e 100%);
@@ -756,26 +759,26 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* 沉浸式皮肤全景舞台：宫殿背景 + 左右立绘角色 */
 .skin-stage { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 0; contain: strict; }
 .skin-stage__backdrop { position: absolute; inset: 0; background-image: var(--skin-backdrop); background-size: cover; background-position: center; filter: contrast(1.05) saturate(1.1); transition: background-image 0.6s cubic-bezier(0.16, 1, 0.3, 1); opacity: 0.95; }
-.skin-stage__character { position: absolute; bottom: 0; width: min(440px, 34vw); height: 94%; background-repeat: no-repeat; background-size: contain; pointer-events: none; z-index: 1; transition: all 0.6s cubic-bezier(0.22, 0.78, 0.2, 1); mask-image: radial-gradient(ellipse at 50% 50%, black 72%, transparent 100%), linear-gradient(to top, black 85%, transparent 100%); -webkit-mask-image: radial-gradient(ellipse at 50% 50%, black 72%, transparent 100%), linear-gradient(to top, black 85%, transparent 100%); }
-.skin-stage__character--left { left: clamp(8px, 1.8vw, 32px); background-image: var(--skin-character-left); background-position: left bottom; filter: drop-shadow(0 20px 30px rgba(0, 0, 0, 0.45)); animation: skinFloatLeft 6s ease-in-out infinite alternate; }
-.skin-stage__character--right { right: clamp(8px, 1.8vw, 32px); background-image: var(--skin-character-right); background-position: right bottom; filter: drop-shadow(0 20px 30px rgba(0, 0, 0, 0.45)); animation: skinFloatRight 6s ease-in-out infinite alternate; }
+.skin-stage__character { position: absolute; bottom: 0; width: min(380px, 30vw); height: 90%; background-repeat: no-repeat; background-size: contain; pointer-events: none; z-index: 1; transition: all 0.6s cubic-bezier(0.22, 0.78, 0.2, 1); filter: drop-shadow(0 15px 30px rgba(4, 11, 35, 0.65)); }
+.skin-stage__character--left { left: clamp(4px, 1.2vw, 20px); background-image: var(--skin-character-left); background-position: left bottom; animation: skinFloatLeft 6s ease-in-out infinite alternate; }
+.skin-stage__character--right { right: clamp(4px, 1.2vw, 20px); background-image: var(--skin-character-right); background-position: right bottom; filter: drop-shadow(0 15px 30px rgba(4, 11, 35, 0.65)); animation: skinFloatRight 6s ease-in-out infinite alternate; }
 
 @keyframes skinFloatLeft {
-  0% { transform: translateY(0); }
-  100% { transform: translateY(-10px); }
-}
-
-@keyframes skinFloatRight {
   0% { transform: translateY(0); }
   100% { transform: translateY(-8px); }
 }
 
-@media (max-width: 1280px) {
-  .skin-stage__character { width: min(320px, 28vw); height: 78%; }
+@keyframes skinFloatRight {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(-6px); }
 }
 
-@media (max-width: 900px) {
-  .skin-stage__character { opacity: 0.35; height: 60%; }
+@media (max-width: 1360px) {
+  .skin-stage__character { width: min(280px, 24vw); height: 75%; opacity: 0.85; }
+}
+
+@media (max-width: 960px) {
+  .skin-stage__character { opacity: 0.25; height: 50%; }
 }
 
 .chat-header { position: relative; z-index: 3; justify-content: space-between; gap: 16px; padding-inline: max(20px, calc((100% - 1120px) / 2)); background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); border-bottom: 1px solid var(--border); box-shadow: 0 2px 16px rgba(0,0,0,0.12); }
@@ -2160,3 +2163,229 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .permission-layer-stack { display: grid; gap: 8px; margin-top: 16px; padding: 12px; border: 1px solid var(--border); background: var(--surface-0); }
 .permission-layer-stack .settings-section__heading { margin: 0; }
 .permission-layer-stack h4 { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--text); font-size: 14px; }
+
+/* ==========================================================================
+   Full-Scope Immersive UI Transformation for Maid Atelier & Orca Link
+   ========================================================================== */
+
+/* 1. Maid Atelier (深海女仆工坊) 全局深度 UI 蜕变 */
+:root[data-skin='maid-atelier'] .topbar {
+  background: rgba(10, 23, 59, 0.94);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(197, 164, 104, 0.65);
+  box-shadow: 0 4px 24px rgba(4, 11, 35, 0.55), inset 0 -1px 0 rgba(226, 207, 170, 0.4);
+}
+
+:root[data-skin='maid-atelier'] .brand-lockup strong {
+  background: linear-gradient(135deg, #ffffff 0%, #f8f6f0 50%, #c5a468 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 0 16px rgba(197, 164, 104, 0.4);
+}
+
+:root[data-skin='maid-atelier'] .brand-lockup svg {
+  color: #c5a468;
+  filter: drop-shadow(0 0 8px rgba(197, 164, 104, 0.7));
+}
+
+:root[data-skin='maid-atelier'] .topbar-world-switcher {
+  border-color: rgba(197, 164, 104, 0.4);
+}
+
+:root[data-skin='maid-atelier'] .topbar-world-switcher summary {
+  color: #f8f6f0;
+}
+
+:root[data-skin='maid-atelier'] .topbar-world-switcher summary:hover {
+  background: rgba(197, 164, 104, 0.18);
+}
+
+:root[data-skin='maid-atelier'] .topbar-actions button {
+  border-color: rgba(197, 164, 104, 0.45);
+  color: #f8f6f0;
+}
+
+:root[data-skin='maid-atelier'] .topbar-actions button:hover {
+  background: rgba(197, 164, 104, 0.2);
+  border-color: #c5a468;
+  color: #ffffff;
+}
+
+/* 全局左侧会话栏：深邃藏蓝天鹅绒 + 奢华金线镶边 */
+:root[data-skin='maid-atelier'] .navigation-pane {
+  background: linear-gradient(180deg, rgba(16, 36, 86, 0.97) 0%, rgba(8, 18, 48, 0.98) 100%);
+  border-right: 1px solid rgba(197, 164, 104, 0.6);
+  box-shadow: 8px 0 32px rgba(4, 11, 35, 0.45), inset -1px 0 rgba(255, 245, 215, 0.35);
+}
+
+:root[data-skin='maid-atelier'] .nav-section {
+  border-bottom: 1px solid rgba(197, 164, 104, 0.28);
+}
+
+:root[data-skin='maid-atelier'] .nav-section__title {
+  color: #c5a468;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
+:root[data-skin='maid-atelier'] .session-row {
+  border-radius: 8px;
+  margin: 3px 0;
+  border: 1px solid transparent;
+  transition: all 0.25s ease;
+}
+
+:root[data-skin='maid-atelier'] .session-row:hover {
+  background: rgba(82, 106, 168, 0.3);
+  border-color: rgba(197, 164, 104, 0.4);
+}
+
+:root[data-skin='maid-atelier'] .session-row.is-active {
+  background: linear-gradient(90deg, rgba(82, 106, 168, 0.5) 0%, rgba(197, 164, 104, 0.25) 100%);
+  border: 1px solid rgba(197, 164, 104, 0.9);
+  box-shadow: 0 2px 16px rgba(197, 164, 104, 0.4), inset 3px 0 0 #c5a468;
+}
+
+:root[data-skin='maid-atelier'] .session-row.is-active .session-row__copy strong {
+  color: #ffffff;
+}
+
+:root[data-skin='maid-atelier'] .session-row.is-active .session-row__copy small {
+  color: #e2cfaa;
+}
+
+/* 聊天工作台顶部 */
+:root[data-skin='maid-atelier'] .chat-header {
+  background: rgba(10, 23, 59, 0.92);
+  border-bottom: 1px solid rgba(197, 164, 104, 0.6);
+  box-shadow: 0 4px 20px rgba(4, 11, 35, 0.45);
+}
+
+:root[data-skin='maid-atelier'] .chat-header h1 {
+  color: #f8f6f0;
+  text-shadow: 0 1px 4px rgba(4, 11, 35, 0.7);
+}
+
+:root[data-skin='maid-atelier'] .chat-header p {
+  color: #c5a468;
+}
+
+:root[data-skin='maid-atelier'] .chat-header__history {
+  border: 1px solid rgba(197, 164, 104, 0.7);
+  background: rgba(197, 164, 104, 0.15);
+  color: #f8f6f0;
+  border-radius: 6px;
+}
+
+:root[data-skin='maid-atelier'] .chat-header__history:hover {
+  background: rgba(197, 164, 104, 0.3);
+  border-color: #c5a468;
+}
+
+/* 输入框与操作区 */
+:root[data-skin='maid-atelier'] .composer-zone {
+  background: rgba(10, 23, 59, 0.9);
+  border-top: 1px solid rgba(197, 164, 104, 0.6);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+:root[data-skin='maid-atelier'] .composer {
+  background: rgba(16, 32, 77, 0.94);
+  border: 1px solid rgba(197, 164, 104, 0.75);
+  box-shadow: 0 8px 32px rgba(4, 11, 35, 0.5), inset 0 0 0 1px rgba(226, 207, 170, 0.3);
+  border-radius: 12px;
+}
+
+:root[data-skin='maid-atelier'] .composer:focus-within {
+  border-color: #c5a468;
+  box-shadow: 0 0 0 2px rgba(197, 164, 104, 0.4), 0 0 28px rgba(197, 164, 104, 0.55);
+}
+
+:root[data-skin='maid-atelier'] .composer textarea {
+  color: #f8f6f0;
+}
+
+:root[data-skin='maid-atelier'] .send-button,
+:root[data-skin='maid-atelier'] .primary-button {
+  background: linear-gradient(135deg, #c5a468 0%, #a07e42 100%);
+  color: #0a173b;
+  font-weight: 700;
+  border: 1px solid rgba(255, 245, 215, 0.7);
+  box-shadow: 0 4px 16px rgba(197, 164, 104, 0.45);
+}
+
+:root[data-skin='maid-atelier'] .send-button:hover:not(:disabled),
+:root[data-skin='maid-atelier'] .primary-button:hover:not(:disabled) {
+  background: linear-gradient(135deg, #d8bc80 0%, #b8934f 100%);
+  box-shadow: 0 6px 24px rgba(197, 164, 104, 0.65);
+}
+
+/* 右侧面板 (Dock) 融合 */
+:root[data-skin='maid-atelier'] .workspace-workbench__dock,
+:root[data-skin='maid-atelier'] .world-dock,
+:root[data-skin='maid-atelier'] .runtime-dock,
+:root[data-skin='maid-atelier'] .world-runtime-panel {
+  background: rgba(10, 23, 59, 0.94);
+  border-left: 1px solid rgba(197, 164, 104, 0.6);
+  box-shadow: -8px 0 32px rgba(4, 11, 35, 0.45);
+}
+
+:root[data-skin='maid-atelier'] .dock-tabs {
+  background: rgba(6, 15, 42, 0.95);
+  border-bottom: 1px solid rgba(197, 164, 104, 0.4);
+}
+
+:root[data-skin='maid-atelier'] .dock-tabs button.is-active {
+  border-bottom-color: #c5a468;
+  color: #f8f6f0;
+}
+
+/* 2. Orca Link (虎鲸链路) 全局深度 UI 蜕变 */
+:root[data-skin='orca-link'] .topbar {
+  background: rgba(12, 19, 30, 0.94);
+  border-bottom: 1px solid rgba(56, 189, 248, 0.5);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6), inset 0 -1px 0 rgba(56, 189, 248, 0.25);
+}
+
+:root[data-skin='orca-link'] .brand-lockup strong {
+  background: linear-gradient(135deg, #f0fdf4 0%, #38bdf8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+:root[data-skin='orca-link'] .navigation-pane {
+  background: linear-gradient(180deg, #0d1522 0%, #080d15 100%);
+  border-right: 1px solid rgba(56, 189, 248, 0.45);
+  box-shadow: 6px 0 24px rgba(0, 0, 0, 0.5);
+}
+
+:root[data-skin='orca-link'] .session-row.is-active {
+  background: rgba(2, 132, 199, 0.35);
+  border: 1px solid #38bdf8;
+  box-shadow: 0 0 16px rgba(2, 132, 199, 0.4), inset 3px 0 0 #38bdf8;
+}
+
+:root[data-skin='orca-link'] .chat-header {
+  background: rgba(12, 19, 30, 0.92);
+  border-bottom: 1px solid rgba(56, 189, 248, 0.45);
+}
+
+:root[data-skin='orca-link'] .composer {
+  background: rgba(18, 28, 42, 0.94);
+  border: 1px solid rgba(56, 189, 248, 0.5);
+}
+
+:root[data-skin='orca-link'] .composer:focus-within {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.3), 0 0 24px rgba(2, 132, 199, 0.5);
+}
+
+:root[data-skin='orca-link'] .send-button,
+:root[data-skin='orca-link'] .primary-button {
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+  border: 1px solid #38bdf8;
+  box-shadow: 0 4px 18px rgba(2, 132, 199, 0.45);
+}
