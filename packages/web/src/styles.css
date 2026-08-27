@@ -4063,6 +4063,132 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   -webkit-backdrop-filter: blur(24px) saturate(.88) !important;
 }
 
+/* ==========================================================================
+   主题深度适配：白鲸圣女 (White Whale Maiden) - 极地纯白 / 纯白丝袜 / 水下极光
+   ========================================================================== */
+:root[data-skin='white-whale'] .topbar {
+  background: rgba(10, 24, 46, 0.95);
+  border-bottom: 1px solid rgba(186, 230, 253, 0.45);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.7), inset 0 -1px 0 rgba(56, 189, 248, 0.25);
+}
+:root[data-skin='white-whale'] .brand-lockup strong {
+  background: linear-gradient(135deg, #ffffff 0%, #bae6fd 50%, #38bdf8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+:root[data-skin='white-whale'] .navigation-pane {
+  background: linear-gradient(180deg, rgba(10, 24, 46, 0.96) 0%, rgba(6, 16, 32, 0.98) 100%);
+  border-right: 1px solid rgba(186, 230, 253, 0.35);
+  box-shadow: 6px 0 24px rgba(0, 0, 0, 0.6);
+}
+:root[data-skin='white-whale'] .session-row.is-active {
+  background: rgba(56, 189, 248, 0.22);
+  border: 1px solid #7dd3fc;
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.35), inset 3px 0 0 #bae6fd;
+}
+:root[data-skin='white-whale'] .chat-header {
+  background: rgba(10, 24, 46, 0.92);
+  border-bottom: 1px solid rgba(186, 230, 253, 0.35);
+}
+:root[data-skin='white-whale'] .message--owner .message__content {
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 60%, #075985 100%) !important;
+  border: 1px solid rgba(186, 230, 253, 0.75) !important;
+  border-radius: 18px 18px 4px 18px !important;
+  box-shadow: 0 4px 18px rgba(56, 189, 248, 0.3) !important;
+  color: #ffffff !important;
+}
+:root[data-skin='white-whale'] .message:not(.message--owner) .message__content {
+  background: rgba(12, 28, 52, 0.88) !important;
+  border: 1px solid rgba(186, 230, 253, 0.35) !important;
+  border-radius: 18px 18px 18px 4px !important;
+  backdrop-filter: blur(14px) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5) !important;
+  color: #f0f9ff !important;
+}
+:root[data-skin='white-whale'] .composer {
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0 !important;
+  border-radius: 18px !important;
+  background: rgba(12, 28, 52, 0.94);
+  border: 1px solid rgba(186, 230, 253, 0.45);
+}
+:root[data-skin='white-whale'] .composer:focus-within {
+  border-color: #7dd3fc;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.25), 0 0 24px rgba(56, 189, 248, 0.4);
+}
+:root[data-skin='white-whale'] .send-button,
+:root[data-skin='white-whale'] .primary-button {
+  background: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%);
+  border: 1px solid #bae6fd;
+  box-shadow: 0 4px 18px rgba(56, 189, 248, 0.35);
+  color: #ffffff;
+}
+
+/* ==========================================================================
+   主题深度适配：漆黑虎鲸 (Black Orca Maiden) - 深渊机能 / 魅惑黑丝 / 虎鲸电光
+   ========================================================================== */
+:root[data-skin='black-orca'] .topbar {
+  background: rgba(5, 10, 18, 0.95);
+  border-bottom: 1px solid rgba(0, 242, 255, 0.45);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.7), inset 0 -1px 0 rgba(0, 242, 255, 0.2);
+}
+:root[data-skin='black-orca'] .brand-lockup strong {
+  background: linear-gradient(135deg, #f1f5f9 0%, #00f2ff 50%, #f43f5e 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+:root[data-skin='black-orca'] .navigation-pane {
+  background: linear-gradient(180deg, rgba(7, 13, 24, 0.96) 0%, rgba(3, 7, 14, 0.98) 100%);
+  border-right: 1px solid rgba(0, 242, 255, 0.35);
+  box-shadow: 6px 0 24px rgba(0, 0, 0, 0.6);
+}
+:root[data-skin='black-orca'] .session-row.is-active {
+  background: rgba(0, 242, 255, 0.22);
+  border: 1px solid #00f2ff;
+  box-shadow: 0 0 16px rgba(0, 242, 255, 0.35), inset 3px 0 0 #f43f5e;
+}
+:root[data-skin='black-orca'] .chat-header {
+  background: rgba(5, 10, 18, 0.92);
+  border-bottom: 1px solid rgba(0, 242, 255, 0.35);
+}
+:root[data-skin='black-orca'] .message--owner .message__content {
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 60%, #0f172a 100%) !important;
+  border: 1px solid rgba(0, 242, 255, 0.75) !important;
+  border-radius: 18px 18px 4px 18px !important;
+  box-shadow: 0 4px 18px rgba(0, 242, 255, 0.3) !important;
+  color: #ffffff !important;
+}
+:root[data-skin='black-orca'] .message:not(.message--owner) .message__content {
+  background: rgba(8, 16, 28, 0.88) !important;
+  border: 1px solid rgba(0, 242, 255, 0.35) !important;
+  border-radius: 18px 18px 18px 4px !important;
+  backdrop-filter: blur(14px) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5) !important;
+  color: #f1f5f9 !important;
+}
+:root[data-skin='black-orca'] .composer {
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0 !important;
+  border-radius: 18px !important;
+  background: rgba(8, 16, 28, 0.94);
+  border: 1px solid rgba(0, 242, 255, 0.45);
+}
+:root[data-skin='black-orca'] .composer:focus-within {
+  border-color: #00f2ff;
+  box-shadow: 0 0 0 2px rgba(0, 242, 255, 0.25), 0 0 24px rgba(0, 242, 255, 0.4);
+}
+:root[data-skin='black-orca'] .send-button,
+:root[data-skin='black-orca'] .primary-button {
+  background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
+  border: 1px solid #00f2ff;
+  box-shadow: 0 4px 18px rgba(0, 242, 255, 0.35);
+  color: #ffffff;
+}
+
 :root[data-skin] .message__meta {
   margin-bottom: 7px;
   text-shadow: 0 1px 5px rgba(0, 0, 0, .78);

@@ -370,6 +370,168 @@ export const neonCyberManifest: WorldThemeManifestV1 = {
   activityMapping: cyberCompanyTheme.activityMapping,
 }
 
+export const whiteWhaleMaidenManifest: WorldThemeManifestV1 = {
+  schemaVersion: 1,
+  id: 'dsh-cyber.white.whale',
+  version: '1.0.0',
+  templateId: 'white-whale',
+  displayName: '白鲸圣女 · 纯白极光',
+  renderer: 'pixi-2d',
+  terminology: {
+    world: '水下圣殿',
+    participant: '圣女/侍者',
+    session: '海音祈祷',
+    milestone: '珍珠誓约',
+  },
+  assets: [
+    {
+      id: 'white-whale-scene',
+      src: '/assets/skins/white-whale-maiden.jpg',
+      kind: 'image',
+      preload: true,
+      pixelArt: false,
+    },
+    cyberCompanyTheme.assets[1]!,
+  ],
+  actorSets: cyberCompanyTheme.actorSets,
+  scenes: [
+    {
+      id: 'white-crystal-palace',
+      displayName: '水晶极光圣殿',
+      size: { width: 1792, height: 1008 },
+      cameraBounds: { x: 0, y: 0, width: 1792, height: 1008 },
+      safeArea: { x: 40, y: 40, width: 1712, height: 928 },
+      layers: [
+        {
+          id: 'crystal-interior',
+          assetId: 'white-whale-scene',
+          destination: { x: 0, y: 0, width: 1792, height: 1008 },
+          zIndex: 0,
+        },
+      ],
+      anchors: [
+        { id: 'spawn', position: { x: 800, y: 920 }, facing: 'north', capacity: 8, tags: ['spawn'] },
+        { id: 'crystal-altar', position: { x: 1150, y: 740 }, facing: 'north', capacity: 3, tags: ['work', 'talk'] },
+        { id: 'whale-bay', position: { x: 400, y: 720 }, facing: 'south', capacity: 3, tags: ['idle', 'inspect'] },
+        { id: 'pillar-aisle', position: { x: 1550, y: 840 }, facing: 'west', capacity: 2, tags: ['work', 'inspect'] },
+        { id: 'meeting-altar', position: { x: 850, y: 800 }, facing: 'south', capacity: 4, tags: ['meeting'] },
+      ],
+      navigation: {
+        origin: { x: 0, y: 0 },
+        cellSize: 64,
+        columns: 28,
+        rows: 16,
+        blocked: [],
+      },
+      interactables: [
+        {
+          id: 'crystal-prayer-desk',
+          kind: 'meeting-table',
+          displayName: '水下祈愿圣台',
+          bounds: { x: 960, y: 560, width: 440, height: 320 },
+          approachAnchorIds: ['crystal-altar', 'meeting-altar'],
+          actions: [{ id: 'start-meeting', label: '发起圣殿共鸣会谈' }],
+          zIndex: 160,
+        },
+        {
+          id: 'shell-chime-shrine',
+          kind: 'notice-board',
+          displayName: '海音贝壳留音壁',
+          bounds: { x: 300, y: 620, width: 280, height: 260 },
+          approachAnchorIds: ['whale-bay'],
+          actions: [{ id: 'assign-task', label: '留置祈祷信标' }, { id: 'inspect', label: '聆听白鲸海音' }],
+          zIndex: 150,
+        },
+      ],
+      growthSlots: [
+        { id: 'white-skill', category: 'skill', position: { x: 1200, y: 460 }, zIndex: 130 },
+      ],
+    },
+  ],
+  activityMapping: cyberCompanyTheme.activityMapping,
+}
+
+export const blackOrcaMaidenManifest: WorldThemeManifestV1 = {
+  schemaVersion: 1,
+  id: 'dsh-cyber.black.orca',
+  version: '1.0.0',
+  templateId: 'black-orca',
+  displayName: '漆黑虎鲸 · 深渊机能',
+  renderer: 'pixi-2d',
+  terminology: {
+    world: '深渊舰桥',
+    participant: '领航员/特工',
+    session: '声呐连线',
+    milestone: '深渊日志',
+  },
+  assets: [
+    {
+      id: 'black-orca-scene',
+      src: '/assets/skins/black-orca-maiden.jpg',
+      kind: 'image',
+      preload: true,
+      pixelArt: false,
+    },
+    cyberCompanyTheme.assets[1]!,
+  ],
+  actorSets: cyberCompanyTheme.actorSets,
+  scenes: [
+    {
+      id: 'abyssal-bridge-deck',
+      displayName: '深渊机能观景台',
+      size: { width: 1792, height: 1008 },
+      cameraBounds: { x: 0, y: 0, width: 1792, height: 1008 },
+      safeArea: { x: 40, y: 40, width: 1712, height: 928 },
+      layers: [
+        {
+          id: 'abyssal-interior',
+          assetId: 'black-orca-scene',
+          destination: { x: 0, y: 0, width: 1792, height: 1008 },
+          zIndex: 0,
+        },
+      ],
+      anchors: [
+        { id: 'spawn', position: { x: 850, y: 920 }, facing: 'north', capacity: 8, tags: ['spawn'] },
+        { id: 'bridge-helm', position: { x: 1200, y: 720 }, facing: 'north', capacity: 3, tags: ['work', 'talk'] },
+        { id: 'sonar-deck', position: { x: 400, y: 740 }, facing: 'south', capacity: 3, tags: ['idle', 'inspect'] },
+        { id: 'corridor-edge', position: { x: 1550, y: 840 }, facing: 'west', capacity: 2, tags: ['work', 'inspect'] },
+        { id: 'meeting-deck', position: { x: 900, y: 800 }, facing: 'south', capacity: 4, tags: ['meeting'] },
+      ],
+      navigation: {
+        origin: { x: 0, y: 0 },
+        cellSize: 64,
+        columns: 28,
+        rows: 16,
+        blocked: [],
+      },
+      interactables: [
+        {
+          id: 'abyssal-command-console',
+          kind: 'meeting-table',
+          displayName: '深渊全息主控台',
+          bounds: { x: 1050, y: 550, width: 440, height: 320 },
+          approachAnchorIds: ['bridge-helm', 'meeting-deck'],
+          actions: [{ id: 'start-meeting', label: '发起深渊舰队会议' }],
+          zIndex: 160,
+        },
+        {
+          id: 'sonar-radar-matrix',
+          kind: 'notice-board',
+          displayName: '深渊声呐雷达矩阵',
+          bounds: { x: 320, y: 640, width: 280, height: 260 },
+          approachAnchorIds: ['sonar-deck'],
+          actions: [{ id: 'assign-task', label: '下达深潜勘测令' }, { id: 'inspect', label: '扫描虎鲸生态' }],
+          zIndex: 150,
+        },
+      ],
+      growthSlots: [
+        { id: 'orca-skill', category: 'skill', position: { x: 1250, y: 440 }, zIndex: 130 },
+      ],
+    },
+  ],
+  activityMapping: cyberCompanyTheme.activityMapping,
+}
+
 /**
  * 系统官方内置主题 (Built-in Themes)
  */
@@ -562,6 +724,52 @@ export const BUILTIN_THEMES: WorldThemeConfig[] = [
       worldMapImage: '/assets/skins/neon-cyber-world.jpg',
     },
     runtimeManifest: neonCyberManifest,
+  },
+  {
+    id: 'white-whale',
+    displayName: '白鲸圣女',
+    description: '极地纯白 · 极光冰蓝 · 纯白丝袜与水下极光圣殿',
+    author: '官方内置',
+    source: 'builtin',
+    tokens: {
+      accentColor: '#38bdf8',
+      accentSoft: 'rgba(56, 189, 248, 0.18)',
+      accentStrong: '#bae6fd',
+      pageBackground: '#081324',
+      panelBackground: 'rgba(10, 24, 46, 0.93)',
+      panelBorder: 'rgba(186, 230, 253, 0.5)',
+      textColor: '#f0f9ff',
+      mutedTextColor: '#7dd3fc',
+      ownerBubbleColor: '#0c365c',
+      characterBubbleColor: '#0e223e',
+      backdropImage: '/assets/skins/white-whale-maiden.jpg',
+      backdropOpacity: 0.93,
+      worldMapImage: '/assets/skins/white-whale-maiden.jpg',
+    },
+    runtimeManifest: whiteWhaleMaidenManifest,
+  },
+  {
+    id: 'black-orca',
+    displayName: '漆黑虎鲸',
+    description: '深渊机能 · 魅影黑丝 · 虎鲸电光与未来深潜舰桥',
+    author: '官方内置',
+    source: 'builtin',
+    tokens: {
+      accentColor: '#00f2ff',
+      accentSoft: 'rgba(0, 242, 255, 0.18)',
+      accentStrong: '#f43f5e',
+      pageBackground: '#040810',
+      panelBackground: 'rgba(7, 13, 24, 0.94)',
+      panelBorder: 'rgba(0, 242, 255, 0.45)',
+      textColor: '#f1f5f9',
+      mutedTextColor: '#38bdf8',
+      ownerBubbleColor: '#09283e',
+      characterBubbleColor: '#0a121e',
+      backdropImage: '/assets/skins/black-orca-maiden.jpg',
+      backdropOpacity: 0.93,
+      worldMapImage: '/assets/skins/black-orca-maiden.jpg',
+    },
+    runtimeManifest: blackOrcaMaidenManifest,
   },
 ]
 

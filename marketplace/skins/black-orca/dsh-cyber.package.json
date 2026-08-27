@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "black-orca",
+  "version": "1.0.0",
+  "kind": "skin",
+  "displayName": "漆黑虎鲸",
+  "summary": "深渊机能、魅影黑丝与深潜声呐未来战舰观景台，完整覆盖聊天和世界视图。",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "publisher": "DSH Cyber",
+  "capabilities": [
+    "ui:skin"
+  ],
+  "dataEgress": [],
+  "files": [
+    {
+      "path": "skin.json",
+      "sha256": "42935e8935e21e415da54b7009fb5b36152fa9f56bffcb028da09b00627bfd4f"
+    }
+  ],
+  "entrypoints": [
+    {
+      "id": "black-orca",
+      "kind": "skin",
+      "path": "skin.json"
+    }
+  ],
+  "certification": {
+    "authority": "DSH Cyber",
+    "level": "official",
+    "contentSha256": "31c6a271b841571dbc4b194c7933dea33d97ba4071fd896f7bbcdb095fecde54"
+  }
+}

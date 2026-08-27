@@ -38,6 +38,8 @@ const MARKET_SKIN_PREVIEW_IMAGES: Record<string, string> = {
   'sakura-shrine': '/assets/skins/sakura-shrine-world.jpg',
   'starlit-witch': '/assets/skins/starlit-witch-world.jpg',
   'neon-cyber': '/assets/skins/neon-cyber-world.jpg',
+  'white-whale': '/assets/skins/white-whale-maiden.jpg',
+  'black-orca': '/assets/skins/black-orca-maiden.jpg',
 }
 
 interface PackageMarketDialogProps {

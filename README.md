@@ -193,6 +193,16 @@ DSH Cyber 采用**空间延伸设计哲学**：左侧沉浸聊天视窗作为场
 <table>
 <tr>
 <td width="50%">
+<img src="./docs/assets/screenshots/06-white-whale-maiden.png" alt="白鲸圣女 · 纯白极光" />
+<br/><b>🤍 白鲸圣女 · 纯白极光</b><br/>圣洁极地 · 纯白丝袜与白金荷叶长裙 · 水下大理石圣殿与白鲸游弋
+</td>
+<td width="50%">
+<img src="./docs/assets/screenshots/07-black-orca-maiden.png" alt="漆黑虎鲸 · 深渊机能" />
+<br/><b>🖤 漆黑虎鲸 · 深渊机能</b><br/>深潜魅影 · 诱人黑丝与机能吊带袜 · 深渊未来舰桥与虎鲸群水幕
+</td>
+</tr>
+<tr>
+<td width="50%">
 <img src="./docs/assets/screenshots/02-sakura-shrine.png" alt="千樱神殿 · 樱落古院" />
 <br/><b>🌸 千樱神殿 · 樱落古院</b><br/>和风古雅 · 樱吹雪与绯粉霞光 · 朱红鸟居与祈愿神苑
 </td>
