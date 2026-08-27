@@ -2551,7 +2551,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .market-card-grid article > header span { color: var(--text-muted); font: 12px var(--font-mono); }
 .market-card-grid article > header em { display: flex; align-items: center; gap: 4px; color: var(--success); font-size: 12px; font-style: normal; font-weight: 550; }
 .market-card-grid article > header em.is-community { color: var(--text-muted); }
-.market-card-grid article > p { margin: 0; color: var(--text-soft); font-size: 13px; line-height: 1.65; }
+.market-card-grid article > p { margin: 0; color: var(--text-soft); font-size: 14px; line-height: 1.65; }
 .market-world-cover { width: calc(100% + 36px); height: 160px; margin: -18px -18px 4px; border-bottom: 1px solid var(--border); object-fit: cover; object-position: center; background: var(--surface-0); }
 .market-role-cover { width: calc(100% + 36px); height: 128px; margin: -18px -18px 4px; border-bottom: 1px solid var(--border); object-fit: cover; object-position: center 36%; background: var(--surface-0); }
 .market-world-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--border); border-radius: var(--radius-sm, 6px); background: var(--surface-0); overflow: hidden; }
@@ -2562,7 +2562,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .market-capabilities code { padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-xs); color: var(--text-soft); background: var(--surface-0); font: 12px var(--font-mono); }
 .market-card-grid article > footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border); }
 .market-card-grid article > footer span { color: var(--text-muted); font: 12px var(--font-mono); }
-.market-card-grid article > footer button { min-height: 36px; padding: 0 16px; border: 1px solid color-mix(in srgb, var(--accent) 70%, transparent); border-radius: var(--radius-control, 8px); color: #ffffff; background: linear-gradient(135deg, var(--accent), var(--accent-strong, var(--accent))); font-size: 13px; font-weight: 650; cursor: pointer; box-shadow: 0 2px 10px color-mix(in srgb, var(--accent) 30%, transparent); transition: all var(--duration-fast) var(--ease-smooth); }
+.market-card-grid article > footer button { min-height: 36px; padding: 0 16px; border: 1px solid color-mix(in srgb, var(--accent) 70%, transparent); border-radius: var(--radius-control, 8px); color: #ffffff; background: linear-gradient(135deg, var(--accent), var(--accent-strong, var(--accent))); font-size: 14px; font-weight: 650; cursor: pointer; box-shadow: 0 2px 10px color-mix(in srgb, var(--accent) 30%, transparent); transition: all var(--duration-fast) var(--ease-smooth); }
 .market-card-grid article > footer button:hover:not(:disabled) { filter: brightness(1.08); box-shadow: 0 4px 18px color-mix(in srgb, var(--accent) 45%, transparent); transform: translateY(-1px); }
 .market-card-grid article.is-installed > footer span, .market-card-grid article.is-created > footer span, .market-card-grid article.is-included > footer span { color: var(--success); }
 .market-card-grid article.is-upgrade > footer span { color: var(--accent-strong); }

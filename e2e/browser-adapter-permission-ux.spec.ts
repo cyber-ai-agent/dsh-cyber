@@ -41,7 +41,7 @@ test.afterAll(async () => {
   await rm(stateRoot, { recursive: true, force: true })
 })
 
-test('installs governed Browser read, exposes once-only approval, and consumes one-shot host access', async ({ page }) => {
+test('installs governed Browser read, exposes once-only action approval, and scopes host access to the current session', async ({ page }) => {
   test.setTimeout(90_000)
   const current = requireServer()
   const workspace = current.store.listWorkspaces()[0]!
@@ -115,11 +115,10 @@ test('installs governed Browser read, exposes once-only approval, and consumes o
 
   const hostPrompt = '请读取 C:\\Users\\Public\\report.txt，并总结其中的内容'
   await composer.fill(hostPrompt)
-  await page.getByRole('button', { name: '世界设置', exact: true }).click()
-  const settings = page.getByRole('dialog', { name: new RegExp(`世界设置 · ${world.name}`) })
-  await settings.getByRole('button', { name: '为下一条消息确认' }).click()
-  const hostDialog = page.getByRole('dialog', { name: '本次电脑访问' })
-  await expect(hostDialog).toContainText('C:\\Users\\Public\\report.txt')
+  await page.getByRole('button', { name: '当前消息权限' }).click()
+  await page.getByRole('menuitemradio', { name: /完全访问/ }).click()
+  const hostDialog = page.getByRole('dialog', { name: '完全访问' })
+  await expect(hostDialog).toContainText('当前世界 · 当前会话')
   for (const viewport of [{ width: 1_440, height: 900, label: '1440x900' }, { width: 1_920, height: 1_080, label: '1920x1080' }, { width: 3_840, height: 2_160, label: '3840x2160' }]) {
     await page.setViewportSize(viewport)
     expect(await hostDialog.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
@@ -129,15 +128,14 @@ test('installs governed Browser read, exposes once-only approval, and consumes o
   await page.setViewportSize({ width: 1_584, height: 992 })
   await hostDialog.getByRole('checkbox').check()
   const grantResponsePromise = page.waitForResponse((response) => response.url().endsWith(`/api/worlds/${world.id}/runtime-access-grants`) && response.request().method() === 'POST')
-  await hostDialog.getByRole('button', { name: '仅允许本次任务' }).click()
+  await hostDialog.getByRole('button', { name: '允许当前会话' }).click()
   const grantResponse = await grantResponsePromise
   expect(grantResponse.status()).toBe(201)
   const grant = await grantResponse.json() as { grant: { id: string; expiresAt: string } }
-  await expect(settings.getByText(/下一条消息已获得一次性授权/)).toBeVisible()
-  await settings.getByRole('button', { name: '取消' }).click()
+  await expect(page.getByRole('button', { name: '当前消息权限' })).toContainText('完全访问')
 
   const chatRequestPromise = page.waitForRequest((request) => request.url().endsWith(`/api/worlds/${world.id}/chat`) && request.method() === 'POST')
-  await page.getByRole('button', { name: '发送', exact: true }).click()
+  await page.locator('.composer .send-button').click()
   const chatRequest = await chatRequestPromise
   const chatBody = chatRequest.postDataJSON() as Record<string, unknown>
   expect(chatBody).toMatchObject({
@@ -151,8 +149,10 @@ test('installs governed Browser read, exposes once-only approval, and consumes o
 
   const replay = await postJson(`${origin}/api/worlds/${world.id}/chat`, { ...chatBody, clientTurnId: crypto.randomUUID() })
   expect(replay.status).toBe(202)
-  await expect.poll(() => runtime.permissionModes.at(-1)).toBe('workspace-write')
-  expect(runtime.permissionModes.filter((mode) => mode === 'danger-full-access')).toHaveLength(1)
+  await expect.poll(
+    () => runtime.permissionModes.filter((mode) => mode === 'danger-full-access').length,
+    { timeout: 20_000 },
+  ).toBe(2)
   await writeFile(join(screenshotRoot, 'console.log'), consoleIssues.length === 0 ? 'No console errors or warnings.\n' : `${consoleIssues.join('\n')}\n`, 'utf8')
   expect(consoleIssues, consoleIssues.join('\n')).toEqual([])
 })

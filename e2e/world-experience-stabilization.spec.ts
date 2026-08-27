@@ -19,8 +19,26 @@ test.beforeAll(async () => {
     webRoot: join(process.cwd(), 'packages', 'web', 'dist'),
     port: 0,
     runtime: new QuietBrowserRuntime(),
+    bootstrapDefaultWorld: true,
   })
   origin = (await server.start()).origin
+  const workspace = server.store.listWorkspaces()[0]!
+  const world = server.store.listWorlds(workspace.id)[0]!
+  const market = await getJson<{ items: Array<{ manifest: { id: string; version: string } }> }>(`${origin}/api/marketplace?market=skin`)
+  const skin = market.items.find((item) => item.manifest.id === 'maid-atelier')
+  if (skin === undefined) throw new Error('maid-atelier skin is missing from the local marketplace')
+  const preview = await postJson<{ preview: { approvalToken: string } }>(`${origin}/api/workspaces/${workspace.id}/marketplace/preview`, {
+    packageId: skin.manifest.id,
+    version: skin.manifest.version,
+  })
+  expect(preview.status, JSON.stringify(preview.body)).toBe(200)
+  const install = await postJson(`${origin}/api/workspaces/${workspace.id}/marketplace/install`, {
+    packageId: skin.manifest.id,
+    version: skin.manifest.version,
+    approvalToken: preview.body.preview.approvalToken,
+    worldId: world.id,
+  })
+  expect(install.status, JSON.stringify(install.body)).toBe(201)
 })
 
 test.afterAll(async () => {
@@ -39,31 +57,31 @@ async function ensureWorld(page: import('@playwright/test').Page) {
 test('previews, cancels and persists world appearance settings', async ({ page }) => {
   await ensureWorld(page)
 
-  const app = page.locator('.app-frame')
-  const before = await app.evaluate((element) => getComputedStyle(element).getPropertyValue('--accent').trim())
+  const root = page.locator('html')
+  const before = await root.getAttribute('data-skin')
 
   await page.getByRole('button', { name: '世界设置' }).click()
   let dialog = page.getByRole('dialog', { name: /世界设置 · 我的世界/ })
   await expect(dialog).toBeVisible()
-  const deepOcean = dialog.getByRole('button', { name: /深海蓝/ })
+  const deepOcean = dialog.getByRole('button', { name: /深海女仆工坊/ })
   await deepOcean.click()
-  await expect.poll(() => app.evaluate((element) => getComputedStyle(element).getPropertyValue('--accent').trim())).not.toBe(before)
+  await expect(root).toHaveAttribute('data-skin', 'maid-atelier')
   await expect(dialog.getByText('这里的样式会跟着设置实时变化。')).toBeVisible()
 
   await dialog.getByRole('button', { name: '取消' }).click()
   await expect(dialog).toBeHidden()
-  await expect.poll(() => app.evaluate((element) => getComputedStyle(element).getPropertyValue('--accent').trim())).toBe(before)
+  await expect.poll(() => root.getAttribute('data-skin')).toBe(before)
 
   await page.getByRole('button', { name: '世界设置' }).click()
   dialog = page.getByRole('dialog', { name: /世界设置 · 我的世界/ })
-  await dialog.getByRole('button', { name: /深海蓝/ }).click()
+  await dialog.getByRole('button', { name: /深海女仆工坊/ }).click()
   await dialog.getByRole('button', { name: '保存世界设置' }).click()
   await expect(dialog.getByRole('status')).toContainText('世界设置已保存')
   await expect(dialog).toBeHidden({ timeout: 3_000 })
 
   await page.getByRole('button', { name: '世界设置' }).click()
   dialog = page.getByRole('dialog', { name: /世界设置 · 我的世界/ })
-  await expect(dialog.getByRole('button', { name: /深海蓝/ })).toHaveClass(/is-active/)
+  await expect(dialog.getByRole('button', { name: /深海女仆工坊/ })).toHaveClass(/is-active/)
   await dialog.getByRole('button', { name: '取消' }).click()
 })
 
@@ -97,4 +115,20 @@ class QuietBrowserRuntime implements AgentRuntimePort {
   }
 
   async close(): Promise<void> {}
+}
+
+async function getJson<T>(url: string): Promise<T> {
+  const response = await fetch(url)
+  const body = await response.json() as unknown
+  if (!response.ok) throw new Error(`${url} returned ${response.status}: ${JSON.stringify(body)}`)
+  return body as T
+}
+
+async function postJson<T = unknown>(url: string, body: unknown): Promise<{ status: number; body: T }> {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return { status: response.status, body: await response.json() as T }
 }

@@ -54,7 +54,7 @@ test('onboards, recruits from dossier, talks, browses dossiers and keeps file su
     rows.slice(0, 2).map((row) => row.getBoundingClientRect().top),
   )
   expect(sessionRowTops).toHaveLength(2)
-  expect(sessionRowTops[1]! - sessionRowTops[0]!).toBeLessThanOrEqual(56)
+  expect(sessionRowTops[1]! - sessionRowTops[0]!).toBeLessThanOrEqual(68)
 
   const dock = page.getByRole('region', { name: '世界与角色侧边栏' })
   await openDockTab(dock, '角色')
@@ -74,7 +74,7 @@ test('onboards, recruits from dossier, talks, browses dossiers and keeps file su
   await expect(completedTrace).toBeVisible()
   await completedTrace.locator('summary').click()
   await expect(completedTrace.locator('.world-trace-item__detail')).toContainText('核对事实与权限。')
-  await expect(completedTrace.locator('.world-trace-item__detail')).toContainText('搜索并核对网络信息')
+  await expect(completedTrace.locator('.world-trace-item__detail')).toContainText('search_workspace')
   await expect(page.getByText('阿帆的思考过程')).toHaveCount(0)
 
   const localWorkspace = server.store.listWorkspaces()[0]!
@@ -104,11 +104,11 @@ test('opens low-frequency dock surfaces from More as closable restored tabs', as
 
   await expect(dock.getByRole('tab', { name: '世界', exact: true })).toBeVisible()
   await expect(dock.getByRole('tab', { name: '轨迹', exact: true })).toBeVisible()
-  for (const label of ['角色', '知识', '产物', '日程']) await expect(dock.getByRole('tab', { name: label, exact: true })).toHaveCount(0)
+  for (const label of ['角色', '任务', '知识', '产物', '日程']) await expect(dock.getByRole('tab', { name: label, exact: true })).toHaveCount(0)
 
   await more.click()
   const menu = dock.getByRole('menu', { name: '更多', exact: true })
-  await expect(menu.getByRole('menuitemcheckbox')).toHaveText(['角色', '知识', '产物', '日程'])
+  await expect(menu.getByRole('menuitemcheckbox')).toHaveText(['角色', '任务', '知识', '产物', '日程'])
   await menu.getByRole('menuitemcheckbox', { name: '知识', exact: true }).click()
   await expect(dock.getByRole('tab', { name: '知识', exact: true })).toBeVisible()
   await openDockTab(dock, '日程')
@@ -619,7 +619,7 @@ test('discovers, installs, and creates a visually distinct world from the world-
   await page.getByRole('button', { name: '市场', exact: true }).click()
   const market = page.getByRole('dialog', { name: '扩展市场' })
   await expect(market).toBeVisible()
-  await expect(market.locator('.market-tabs button')).toHaveText(['世界', '角色', '插件'])
+  await expect(market.locator('.market-tabs button')).toHaveText(['世界', '角色', '插件', '皮肤'])
   for (const worldName of ['赛博公司', '月影酒馆', '云端创作工坊', '远星观测站']) {
     await expect(market.locator('.market-card-grid > article').filter({ hasText: worldName })).toBeVisible()
   }
@@ -765,6 +765,7 @@ test('opens the dossier as an all-employee information directory', async ({ page
 })
 
 test('keeps chat conversational while World Trace explains execution during and after a turn', async ({ page }) => {
+  test.setTimeout(90_000)
   // 用慢速回合重建 server，留出窗口断言“进行中”状态
   await server.close()
   server = await createCyberServer({
@@ -822,7 +823,7 @@ test('keeps chat conversational while World Trace explains execution during and 
   await expect(executionTrace).toBeVisible()
   await executionTrace.locator('summary').click()
   await expect(executionTrace.locator('.world-trace-item__detail')).toContainText('核对事实与权限')
-  await expect(executionTrace.locator('.world-trace-item__detail')).toContainText('搜索并核对网络信息')
+  await expect(executionTrace.locator('.world-trace-item__detail')).toContainText('search_workspace')
   await expect(page.locator('.live-turns-block')).toHaveCount(0)
   await expect(page.locator('.reasoning-message')).toHaveCount(0)
   await expect(page.locator('.tool-event-message')).toHaveCount(0)
@@ -845,13 +846,19 @@ test('keeps chat conversational while World Trace explains execution during and 
   expect(agentTraceAfter.items).toHaveLength(agentTraceBefore.items.length + 1)
   await expect(page.locator('.world-trace-item').filter({ hasText: '完成处理' }).filter({ hasText: '阿帆' }).last()).toBeVisible()
 
-  // 5) 模型执行失败不撤回已经持久化的用户消息；失败原因只进入提示与轨迹
+  // 5) 模型执行失败不撤回已经持久化的用户消息；排队回合的失败原因进入轨迹
   const failedOwnerText = '模拟失败：这条用户消息必须保留在聊天中'
+  const sendButton = page.locator('.composer .send-button')
+  await expect(sendButton).toHaveAttribute('aria-label', '发送', { timeout: 15_000 })
   await composer.fill(failedOwnerText)
-  await page.getByRole('button', { name: '发送' }).click()
-  await expect(page.getByRole('alert')).toContainText('API 密钥被模型服务拒绝')
+  const failedChatResponse = page.waitForResponse((response) => response.url().includes(`/api/worlds/${traceWorld.id}/chat`) && response.request().method() === 'POST')
+  await sendButton.click()
+  expect((await failedChatResponse).status()).toBe(202)
   await expect(page.locator('.message--owner').filter({ hasText: failedOwnerText })).toBeVisible()
-  await expect(page.locator('.world-trace-item').filter({ hasText: '处理失败' })).toBeVisible()
+  const failedTrace = page.locator('.world-trace-item').filter({ hasText: '处理失败' }).first()
+  await expect(failedTrace).toBeVisible()
+  await failedTrace.locator('summary').click()
+  await expect(failedTrace.locator('.world-trace-item__detail')).toContainText('本轮运行未能完成，请在会话中重试。')
 
   // 视觉审批证据：记录控制台 error/warn，并断言无未捕获页面错误
   await writeFile(

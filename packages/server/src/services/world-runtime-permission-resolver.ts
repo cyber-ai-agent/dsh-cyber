@@ -58,7 +58,13 @@ export class WorldRuntimePermissionResolver {
       ? input.ownerHostAccess === true
         ? 'danger-full-access'
         : 'read-only'
-      : requested
+      // A role with read-only World authority receives the real World path,
+      // so the Harness must be capped to read-only there. A role with no file
+      // authority receives the isolated restricted workspace and may still
+      // use workspace-write safely inside that host-managed sandbox.
+      : requested === 'workspace-write' && canRead && !canWrite
+        ? 'read-only'
+        : requested
     // Without world.files.read the runtime is anchored at an empty
     // host-managed workspace instead of the world's real files. Handing both
     // cases the same directory is what made the permission inert: a character

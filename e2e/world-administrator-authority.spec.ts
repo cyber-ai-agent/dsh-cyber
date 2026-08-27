@@ -102,8 +102,16 @@ test('keeps World authority isolated, supports multi-admin handoff, and caps run
     employeeId: secondRole.id,
     requestedMode: 'danger-full-access',
   })
-  expect(administratorRuntime.permissionMode).toBe('workspace-write')
+  expect(administratorRuntime.permissionMode).toBe('read-only')
+  expect(administratorRuntime.fileAccess).toBe('write')
   expect(administratorRuntime.workspacePath).toContain(join('worlds', encodeURIComponent(firstWorld.id), 'files'))
+  const administratorWorkspaceRuntime = await resolver.resolve({
+    worldId: firstWorld.id,
+    employeeId: secondRole.id,
+    requestedMode: 'workspace-write',
+  })
+  expect(administratorWorkspaceRuntime.permissionMode).toBe('workspace-write')
+  expect(administratorWorkspaceRuntime.fileAccess).toBe('write')
   const memberRuntime = await resolver.resolve({
     worldId: firstWorld.id,
     employeeId: firstAdmin.id,

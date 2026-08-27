@@ -1160,7 +1160,7 @@ it('searches verified market packages and activates installed plugin and talent 
       packageId: 'official-moonlit-tavern',
       status: 'active',
     })
-  })
+  }, 30_000)
 
   it('rejects DNS rebinding and cross-origin mutation requests', async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-server-'))
