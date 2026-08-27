@@ -1038,6 +1038,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .status--archived { background: #64748b; }
 .status-inline { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 12px; }
 .employee-runtime-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.completion-job-status { width: fit-content; display: inline-flex; align-items: center; gap: 7px; margin-top: 8px; padding: 6px 9px; border: 1px solid var(--border); color: var(--text-muted); background: var(--surface-1); font-size: 12px; }
+.completion-job-status--completed { color: var(--success); }
+.completion-job-status--failed { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 42%, var(--border)); }
+.completion-job-status button { min-height: 32px; padding: 5px 9px; border: 1px solid currentColor; color: inherit; background: transparent; cursor: pointer; }
+.completion-job-status button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .chat-workbench { position: relative; height: 100%; display: grid; grid-template-rows: 56px minmax(0, 1fr) auto; background: transparent; overflow: hidden; }
 

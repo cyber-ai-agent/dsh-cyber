@@ -11,6 +11,8 @@ import {
   type AgentPermissionMode,
   type ConversationQueueEntry,
   type ConversationQueueEntryStatus,
+  type CompletionJob,
+  type CompletionJobDraft,
   isWorldCharacterPermission,
   isDomainEventType,
   type DatabaseDoctorReport,
@@ -88,6 +90,7 @@ import {
 import type { CharacterSkillAction } from '@dsh-cyber/contracts/skill-runtime'
 
 import { DatabaseCorruptError, EntityNotFoundError, PersistenceError } from './errors.js'
+import { CompletionJobRepository } from './completion-job-repository.js'
 import { migrate, readUserVersion } from './migrations.js'
 import { assertSecretFree } from './secrets.js'
 import {
@@ -447,6 +450,13 @@ export interface AppendMessageInput {
   correlationId?: string
 }
 
+export interface CommitAgentRunCompletionInput {
+  runId: string
+  runtimeSessionId?: string
+  messages: AppendMessageInput[]
+  completionJob?: CompletionJobDraft
+}
+
 export interface ListMessagesPageInput {
   /** Number of messages to return. The store clamps this to a safe range. */
   limit?: number
@@ -623,6 +633,7 @@ export class SqliteStore {
   readonly #clock: Clock
   readonly #idFactory: () => string
   readonly #worldAuthorities: WorldCharacterAuthorityRepository
+  readonly #completionJobs: CompletionJobRepository
   #closed = false
 
   private constructor(databasePath: string, database: DatabaseSync, options: StoreOptions) {
@@ -632,6 +643,10 @@ export class SqliteStore {
     this.#clock = options.clock ?? (() => new Date().toISOString())
     this.#idFactory = options.idFactory ?? randomUUID
     this.#worldAuthorities = new WorldCharacterAuthorityRepository(this.database, {
+      clock: this.#clock,
+      idFactory: this.#idFactory,
+    })
+    this.#completionJobs = new CompletionJobRepository(this.database, {
       clock: this.#clock,
       idFactory: this.#idFactory,
     })
@@ -3326,6 +3341,106 @@ export class SqliteStore {
     return this.#transitionAgentRun(runId, ['running'], 'completed', undefined, runtimeSessionId)
   }
 
+  commitAgentRunCompletion(input: CommitAgentRunCompletionInput): {
+    run: AgentRun
+    messages: WorkMessage[]
+    completionJob?: CompletionJob
+  } {
+    this.#assertWritable()
+    return this.#transaction(() => {
+      const completionJob = input.completionJob === undefined
+        ? undefined
+        : this.#completionJobs.create(input.completionJob)
+      const messages = input.messages.map((message, index) => this.#appendMessage(
+        completionJob !== undefined && index === input.messages.length - 1
+          ? { ...message, metadata: { ...(message.metadata ?? {}), completionJobId: completionJob.id } }
+          : message,
+      ))
+      const run = this.#transitionAgentRun(input.runId, ['running'], 'completed', undefined, input.runtimeSessionId)
+      return { run, messages, ...(completionJob === undefined ? {} : { completionJob }) }
+    })
+  }
+
+  getCompletionJob(jobId: string): CompletionJob | undefined {
+    return this.#completionJobs.get(jobId)
+  }
+
+  listCompletionJobs(worldId: string, status?: CompletionJob['status']): CompletionJob[] {
+    this.#requireWorld(worldId)
+    return this.#completionJobs.list(worldId, status)
+  }
+
+  claimCompletionJob(owner: string, leaseDurationMs: number): CompletionJob | undefined {
+    this.#assertWritable()
+    return this.#completionJobs.claim(owner, leaseDurationMs)
+  }
+
+  renewCompletionJob(jobId: string, owner: string, leaseDurationMs: number): CompletionJob {
+    this.#assertWritable()
+    return this.#completionJobs.renew(jobId, owner, leaseDurationMs)
+  }
+
+  completeCompletionJob(
+    jobId: string,
+    owner: string,
+    contribution: { artifactRefs?: string[]; messageMetadata?: JsonObject },
+  ): CompletionJob {
+    this.#assertWritable()
+    return this.#transaction(() => {
+      const job = this.#completionJobs.get(jobId)
+      if (job === undefined) throw new EntityNotFoundError(`Completion job not found: ${jobId}`)
+      this.#mergeCompletionMessageMetadata(job.agentRunId, {
+        ...(contribution.messageMetadata ?? {}),
+        ...(contribution.artifactRefs === undefined ? {} : { artifactRefs: uniqueStrings(contribution.artifactRefs) }),
+        completionStatus: 'completed',
+      })
+      return this.#completionJobs.complete(jobId, owner)
+    })
+  }
+
+  retryCompletionJob(jobId: string, owner: string, errorCode: string, availableAt: string): CompletionJob {
+    this.#assertWritable()
+    return this.#transaction(() => {
+      const job = this.#completionJobs.get(jobId)
+      if (job === undefined) throw new EntityNotFoundError(`Completion job not found: ${jobId}`)
+      this.#mergeCompletionMessageMetadata(job.agentRunId, { completionStatus: 'retrying' })
+      return this.#completionJobs.retry(jobId, owner, errorCode, availableAt)
+    })
+  }
+
+  failCompletionJob(jobId: string, owner: string, errorCode: string): CompletionJob {
+    this.#assertWritable()
+    return this.#transaction(() => {
+      const job = this.#completionJobs.get(jobId)
+      if (job === undefined) throw new EntityNotFoundError(`Completion job not found: ${jobId}`)
+      this.#mergeCompletionMessageMetadata(job.agentRunId, {
+        completionStatus: 'failed',
+        completionErrorCode: errorCode,
+      })
+      return this.#completionJobs.fail(jobId, owner, errorCode)
+    })
+  }
+
+  requeueCompletionJob(jobId: string): CompletionJob {
+    this.#assertWritable()
+    const job = this.#completionJobs.get(jobId)
+    if (job === undefined || job.status !== 'failed') throw new PersistenceError('Only a failed completion job can be retried')
+    const now = this.#clock()
+    this.database.prepare(
+      `UPDATE completion_jobs
+       SET status = 'retrying', available_at = ?, lease_owner = NULL,
+           lease_expires_at = NULL, last_error_code = NULL, updated_at = ?
+       WHERE id = ? AND status = 'failed'`,
+    ).run(now, now, jobId)
+    this.#mergeCompletionMessageMetadata(job.agentRunId, { completionStatus: 'retrying' })
+    return this.#completionJobs.get(jobId)!
+  }
+
+  recoverCompletionJobsAfterRestart(): number {
+    this.#assertWritable()
+    return this.#completionJobs.recoverExpired()
+  }
+
   failAgentRun(runId: string, errorCode: string, runtimeSessionId?: string): AgentRun {
     const run = this.#transitionAgentRun(runId, ['running'], 'failed', errorCode, runtimeSessionId)
     this.#markRunOutputUnfinished(runId)
@@ -3736,63 +3851,7 @@ export class SqliteStore {
 
   appendMessage(input: AppendMessageInput): WorkMessage {
     this.#assertWritable()
-    const session = this.#requireSession(input.sessionId)
-    const now = this.#clock()
-
-    return this.#transaction(() => {
-      const next = this.database
-        .prepare('SELECT COALESCE(MAX(sequence), 0) + 1 AS next FROM messages WHERE session_id = ?')
-        .get(session.id) as { next: number }
-      const message: WorkMessage = {
-        id: this.#idFactory(),
-        sessionId: session.id,
-        sequence: Number(next.next),
-        senderId: input.senderId,
-        senderKind: input.senderKind,
-        kind: input.kind,
-        content: input.content,
-        metadata: input.metadata ?? {},
-        createdAt: now,
-      }
-      this.database
-        .prepare(
-          `INSERT INTO messages
-           (id, session_id, sequence, sender_id, sender_kind, kind, content, metadata_json, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          message.id,
-          message.sessionId,
-          message.sequence,
-          message.senderId,
-          message.senderKind,
-          message.kind,
-          message.content,
-          stringifyJson(message.metadata),
-          message.createdAt,
-        )
-      this.database
-        .prepare('UPDATE work_sessions SET updated_at = ? WHERE id = ?')
-        .run(now, session.id)
-      const eventInput: AppendDomainEventInput = {
-        workspaceId: session.workspaceId,
-        worldId: session.worldId,
-        type: 'message.appended',
-        actorId: message.senderId,
-        actorKind: message.senderKind,
-        sessionId: session.id,
-        payload: {
-          messageId: message.id,
-          messageSequence: message.sequence,
-          messageKind: message.kind,
-          senderId: message.senderId,
-        },
-      }
-      if (input.causationId !== undefined) eventInput.causationId = input.causationId
-      if (input.correlationId !== undefined) eventInput.correlationId = input.correlationId
-      this.#appendEvent(eventInput)
-      return message
-    })
+    return this.#transaction(() => this.#appendMessage(input))
   }
 
   listMessages(sessionId: string, afterSequence = 0): WorkMessage[] {
@@ -4781,6 +4840,7 @@ export class SqliteStore {
         localAssets: countRows(this.database, 'local_assets'),
         sessions: countRows(this.database, 'work_sessions'),
         conversationQueueEntries: countRows(this.database, 'conversation_queue_entries'),
+        completionJobs: countRows(this.database, 'completion_jobs'),
         taskCollaborationPlans: countRows(this.database, 'task_collaboration_plans'),
         taskCollaborationSteps: countRows(this.database, 'task_collaboration_steps'),
         messages: countRows(this.database, 'messages'),
@@ -4991,6 +5051,65 @@ export class SqliteStore {
       this.database.exec('ROLLBACK')
       throw error
     }
+  }
+
+  #appendMessage(input: AppendMessageInput): WorkMessage {
+    const session = this.#requireSession(input.sessionId)
+    const now = this.#clock()
+    const next = this.database
+      .prepare('SELECT COALESCE(MAX(sequence), 0) + 1 AS next FROM messages WHERE session_id = ?')
+      .get(session.id) as { next: number }
+    const message: WorkMessage = {
+      id: this.#idFactory(),
+      sessionId: session.id,
+      sequence: Number(next.next),
+      senderId: input.senderId,
+      senderKind: input.senderKind,
+      kind: input.kind,
+      content: input.content,
+      metadata: input.metadata ?? {},
+      createdAt: now,
+    }
+    this.database.prepare(
+      `INSERT INTO messages
+       (id, session_id, sequence, sender_id, sender_kind, kind, content, metadata_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      message.id, message.sessionId, message.sequence, message.senderId, message.senderKind,
+      message.kind, message.content, stringifyJson(message.metadata), message.createdAt,
+    )
+    this.database.prepare('UPDATE work_sessions SET updated_at = ? WHERE id = ?').run(now, session.id)
+    const eventInput: AppendDomainEventInput = {
+      workspaceId: session.workspaceId,
+      worldId: session.worldId,
+      type: 'message.appended',
+      actorId: message.senderId,
+      actorKind: message.senderKind,
+      sessionId: session.id,
+      payload: {
+        messageId: message.id,
+        messageSequence: message.sequence,
+        messageKind: message.kind,
+        senderId: message.senderId,
+      },
+    }
+    if (input.causationId !== undefined) eventInput.causationId = input.causationId
+    if (input.correlationId !== undefined) eventInput.correlationId = input.correlationId
+    this.#appendEvent(eventInput)
+    return message
+  }
+
+  #mergeCompletionMessageMetadata(agentRunId: string, patch: JsonObject): void {
+    const row = this.database.prepare(
+      `SELECT id, metadata_json FROM messages
+       WHERE kind = 'assistant' AND json_extract(metadata_json, '$.agentRunId') = ?
+       ORDER BY sequence DESC LIMIT 1`,
+    ).get(agentRunId) as { id: string; metadata_json: string } | undefined
+    if (row === undefined) throw new PersistenceError('Completion job lost its final assistant message')
+    const metadata = { ...parseJson<JsonObject>(row.metadata_json), ...patch }
+    assertSecretFree(metadata)
+    this.database.prepare('UPDATE messages SET metadata_json = ? WHERE id = ?')
+      .run(stringifyJson(metadata), row.id)
   }
 
   #appendEvent(input: AppendDomainEventInput): DomainEvent {

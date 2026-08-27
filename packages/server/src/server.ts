@@ -27,6 +27,7 @@ import { registerApplicationAccessRoutes } from './routes/application-access-rou
 import { registerAssetRoutes } from './routes/asset-routes.js'
 import { registerCatalogRoutes } from './routes/catalog-routes.js'
 import { registerConversationRoutes } from './routes/conversation-routes.js'
+import { registerCompletionJobRoutes } from './routes/completion-job-routes.js'
 import { registerGroupTaskRoutes } from './routes/group-task-routes.js'
 import { registerEmployeeRoutes } from './routes/employee-routes.js'
 import { registerIntegrationRoutes } from './routes/integration-routes.js'
@@ -53,6 +54,7 @@ import { ApplicationAccessService } from './services/application-access-service.
 import { CharacterProfileRuntime } from './services/character-profile-runtime.js'
 import { CharacterSkillRuntime } from './services/character-skill-runtime.js'
 import { composeConversationControl } from './services/conversation-control-composition.js'
+import { CompletionWorker } from './services/completion-worker.js'
 import { SkillCatalogService } from './services/skill-catalog-service.js'
 import { GroupTaskCollaborationService } from './services/group-task-collaboration-service.js'
 import { EmployeeActivityProjectionService } from './services/employee-activity-projection-service.js'
@@ -285,6 +287,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     service: interactions,
     resolveRoute(request) { return resolveHarnessRoute(store, request) },
   })
+  let wakeCompletionJob = (): void => undefined
   const orchestrator = new ConversationOrchestrator({
     store,
     runtime,
@@ -294,8 +297,30 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     // something at runtime.
     resolveWorldRoot: async (worldId, employeeId) =>
       (await worldRuntimePermissions.resolve({ worldId, employeeId })).workspacePath,
-    completionHook: worldArtifacts.completionHook(),
+    completionJobType: 'world-artifact-publication',
+    onCompletionJobQueued: () => wakeCompletionJob(),
   })
+  const completionWorker = new CompletionWorker({
+    store,
+    handlers: new Map([[
+      'world-artifact-publication',
+      async (job) => {
+        const employeeId = typeof job.payload.employeeId === 'string' ? job.payload.employeeId : undefined
+        const workspacePath = typeof job.payload.workspacePath === 'string' ? job.payload.workspacePath : undefined
+        if (employeeId === undefined || workspacePath === undefined) throw new Error('completion_job_payload_invalid')
+        return worldArtifacts.publishAgentRun({
+          workspaceId: job.workspaceId,
+          worldId: job.worldId,
+          employeeId,
+          sessionId: job.sessionId,
+          workTurnId: job.workTurnId,
+          agentRunId: job.agentRunId,
+          workspacePath,
+        })
+      },
+    ]]),
+  })
+  wakeCompletionJob = () => completionWorker.wake()
   const peerCollaboration = new PeerCollaborationService({
     store,
     simulationStore: worldSimulation,
@@ -454,6 +479,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerPackageRoutes(router, { store, packageManager, packageCatalog, skillRuntime, worldMarketplace, worldPackages, worldAccess, skillCatalog })
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
   registerWorldTraceRoutes(router, { store, trace: worldTrace, access: worldAccess })
+  registerCompletionJobRoutes(router, { store, access: worldAccess, wake: () => completionWorker.wake() })
   registerWorldArtifactRoutes(router, { store, artifacts: worldArtifacts, access: worldAccess, authority })
   registerWorldKnowledgeRoutes(router, {
     store,
@@ -510,7 +536,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       startedAddress = { host, port: address.port, origin: `http://${host}:${address.port}` }
       ambientLifeScheduler.start()
       taskSchedules.start()
-      skillRuntime.start(); conversationControl.start()
+      skillRuntime.start(); conversationControl.start(); completionWorker.start()
       await knowledgeGraphRuntime.start()
       // Neither of these may gate the listener. MCP discovery talks to
       // user-configured endpoints that can black-hole, and continuation runs
@@ -541,6 +567,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       worldStreamHub.close()
       if (httpServer.listening) await closeServer(httpServer)
       await orchestrator.close()
+      await completionWorker.close()
       credentials.close()
       integrations.close()
       store.close()

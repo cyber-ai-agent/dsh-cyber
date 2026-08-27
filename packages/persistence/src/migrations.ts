@@ -1586,6 +1586,41 @@ const MIGRATIONS: readonly Migration[] = [
         ON employee_instances(world_id, health, created_at, id);
     `,
   },
+  {
+    version: 29,
+    name: 'durable-completion-outbox',
+    sql: `
+      CREATE TABLE completion_jobs (
+        id TEXT PRIMARY KEY,
+        idempotency_key TEXT NOT NULL UNIQUE,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        session_id TEXT NOT NULL REFERENCES work_sessions(id) ON DELETE CASCADE,
+        work_turn_id TEXT NOT NULL REFERENCES work_turns(id) ON DELETE CASCADE,
+        agent_run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+        type TEXT NOT NULL,
+        payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+        status TEXT NOT NULL CHECK (
+          status IN ('pending', 'running', 'retrying', 'completed', 'failed', 'cancelled')
+        ),
+        attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+        available_at TEXT NOT NULL,
+        lease_owner TEXT,
+        lease_expires_at TEXT,
+        last_error_code TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (workspace_id, world_id) REFERENCES worlds(workspace_id, id) ON DELETE CASCADE
+      ) STRICT;
+
+      CREATE INDEX completion_jobs_claim_idx
+        ON completion_jobs(status, available_at, lease_expires_at, created_at, id);
+      CREATE INDEX completion_jobs_world_status_idx
+        ON completion_jobs(world_id, status, updated_at DESC, id);
+      CREATE INDEX completion_jobs_agent_run_idx
+        ON completion_jobs(agent_run_id, created_at DESC, id);
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {

@@ -1,6 +1,6 @@
 import type { WorldCharacterAuthority } from './world-authority.js'
 
-export const CYBER_SCHEMA_VERSION = 28 as const
+export const CYBER_SCHEMA_VERSION = 29 as const
 
 export type IsoTimestamp = string
 export type JsonPrimitive = boolean | number | string | null
@@ -1055,6 +1055,7 @@ export interface DatabaseDoctorReport {
     localAssets: number
     sessions: number
     conversationQueueEntries: number
+    completionJobs: number
     taskCollaborationPlans: number
     taskCollaborationSteps: number
     messages: number
@@ -1107,6 +1108,7 @@ export * from './task-collaboration.js'
 export * from './conversation-queue.js'
 export * from './browser-skill.js'
 export * from './workspace-preferences.js'
+export * from './completion-job.js'
 
 export type {
   CharacterSkillAction,

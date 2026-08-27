@@ -13,7 +13,6 @@ import type {
 import { SqliteStore } from '@dsh-cyber/persistence'
 
 import { ConversationOrchestrator } from '../src/index.js'
-import type { AgentRunCompletionHook } from '../src/index.js'
 
 const stores: SqliteStore[] = []
 const orchestrators: ConversationOrchestrator[] = []
@@ -223,8 +222,9 @@ describe('ConversationOrchestrator', () => {
     expect(realtime.some((event) => event.kind === 'reasoning.delta')).toBe(true)
     expect(realtime.every((event) => event.metadata.clientTurnId === 'client-turn-direct')).toBe(true)
     expect(durableAtEmit
-      .filter((item) => ['turn.started', 'tool.started', 'assistant.message', 'turn.completed'].includes(item.kind))
+      .filter((item) => ['turn.started', 'tool.started', 'turn.completed'].includes(item.kind))
       .every((item) => item.persisted)).toBe(true)
+    expect(durableAtEmit.filter((item) => item.kind === 'assistant.message').some((item) => !item.persisted)).toBe(true)
     expect(store.listMessages(first.session.id).some((message) => message.content === 'stream-only')).toBe(
       false,
     )
@@ -373,38 +373,38 @@ describe('ConversationOrchestrator', () => {
     expect(store.listWorldDomainEvents(company.id).filter((event) => event.type === 'meeting.started')).toHaveLength(2)
   })
 
-  it('runs completion publication once for direct, group, and peer AgentRuns before durable assistant append', async () => {
+  it('atomically commits replies and durable completion jobs for direct, group, and peer AgentRuns', async () => {
     const { directory, store, workspace, company } = await setup()
     store.saveBlueprint(blueprint('completion-a', '甲', '分析师'))
     store.saveBlueprint(blueprint('completion-b', '乙', '工程师'))
     const first = store.recruitEmployee({ workspaceId: workspace.id, worldId: company.id, blueprintId: 'completion-a', blueprintVersion: 1 })
     const second = store.recruitEmployee({ workspaceId: workspace.id, worldId: company.id, blueprintId: 'completion-b', blueprintVersion: 1 })
     const runtime = new FakeRuntime({ [first.id]: '甲的交付', [second.id]: '乙的交付' })
-    const contexts: string[] = []
-    const completionHook: AgentRunCompletionHook = {
-      async onCompleted(context) {
-        contexts.push(`${context.agentRunId}:${context.workspacePath}`)
-        return {
-          artifactRefs: [`artifact-${context.agentRunId}`],
-          messageMetadata: { publication: 'durable' },
-        }
-      },
-    }
-    const orchestrator = new ConversationOrchestrator({ store, runtime, workspacePath: directory, completionHook })
+    let wakeCount = 0
+    const orchestrator = new ConversationOrchestrator({
+      store,
+      runtime,
+      workspacePath: directory,
+      completionJobType: 'test-publication',
+      onCompletionJobQueued: () => { wakeCount += 1 },
+    })
     orchestrators.push(orchestrator)
 
     const direct = await orchestrator.direct({ workspaceId: workspace.id, worldId: company.id, employeeId: first.id, prompt: '直接交付' })
     const group = await orchestrator.group({ workspaceId: workspace.id, worldId: company.id, employeeIds: [first.id, second.id], prompt: '群组交付' })
     const peer = await orchestrator.peer({ workspaceId: workspace.id, worldId: company.id, initiatorId: first.id, participantIds: [second.id], purpose: '协作交付' })
 
-    expect(contexts).toHaveLength(5)
-    expect(contexts.every((value) => value.endsWith(`:${directory}`))).toBe(true)
+    const completionJobs = store.listCompletionJobs(company.id)
+    expect(completionJobs).toHaveLength(5)
+    expect(completionJobs.every((job) => job.status === 'pending' && job.type === 'test-publication')).toBe(true)
+    expect(completionJobs.every((job) => job.payload.workspacePath === directory)).toBe(true)
+    expect(wakeCount).toBe(5)
     for (const session of [direct.session, group.session, peer.session]) {
       const assistantMessages = store.listMessages(session.id).filter((message) => message.kind === 'assistant')
       expect(assistantMessages.length).toBeGreaterThan(0)
-      expect(assistantMessages.every((message) => message.metadata.publication === 'durable')).toBe(true)
-      expect(assistantMessages.every((message) => Array.isArray(message.metadata.artifactRefs))).toBe(true)
+      expect(assistantMessages.every((message) => message.metadata.completionStatus === 'pending')).toBe(true)
     }
+    expect(completionJobs.every((job) => store.getAgentRun(job.agentRunId)?.status === 'completed')).toBe(true)
     expect(store.listMessages(group.session.id).filter((message) => message.kind === 'assistant')).toHaveLength(2)
     expect(store.listMessages(peer.session.id).filter((message) => message.kind === 'assistant')).toHaveLength(2)
   })

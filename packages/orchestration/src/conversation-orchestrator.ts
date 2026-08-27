@@ -3,6 +3,7 @@ import type {
   AgentRuntimePort,
   AgentRun,
   AgentPermissionMode,
+  CompletionJobDraft,
   ConversationHistoryEntry,
   DomainEvent,
   DomainEventType,
@@ -32,12 +33,6 @@ import {
   type ConversationHistoryBudget,
   type ConversationHistorySpeaker,
 } from './conversation-history.js'
-import {
-  NOOP_AGENT_RUN_COMPLETION_HOOK,
-  type AgentRunCompletionContribution,
-  type AgentRunCompletionHook,
-} from './agent-run-completion-hook.js'
-
 export interface ConversationStorePort {
   getWorld(worldId: string): World | undefined
   getEmployee(employeeId: string): EmployeeInstance | undefined
@@ -95,6 +90,20 @@ export interface ConversationStorePort {
   createAgentRun(input: { workspaceId: string; worldId: string; turnId: string; sessionId: string; employeeId: string; ordinal: number }): AgentRun
   startAgentRun(runId: string): AgentRun
   completeAgentRun(runId: string, runtimeSessionId?: string): AgentRun
+  commitAgentRunCompletion(input: {
+    runId: string
+    runtimeSessionId?: string
+    messages: Array<{
+      sessionId: string
+      senderId: string
+      senderKind: ParticipantKind
+      kind: WorkMessage['kind']
+      content: string
+      metadata?: JsonObject
+      correlationId?: string
+    }>
+    completionJob?: CompletionJobDraft
+  }): { run: AgentRun; messages: WorkMessage[] }
   failAgentRun(runId: string, errorCode: string, runtimeSessionId?: string): AgentRun
   interruptAgentRun(runId: string, errorCode?: string): AgentRun
   interruptWorkTurn(turnId: string, errorCode?: string): WorkTurn
@@ -187,12 +196,9 @@ export interface ConversationOrchestratorOptions {
    */
   resolveWorldRoot?: (worldId: string, employeeId: string) => Promise<string>
   historyBudget?: ConversationHistoryBudget
-  /**
-   * A host-provided completion contribution.  Orchestration invokes it once
-   * after the runtime turn has completed and before the final assistant
-   * WorkMessage is made durable.
-   */
-  completionHook?: AgentRunCompletionHook
+  /** Durable outbox handler type. The host processes it after the answer commits. */
+  completionJobType?: string
+  onCompletionJobQueued?: () => void
 }
 
 export interface DirectConversationInput {
@@ -359,8 +365,8 @@ export class ConversationOrchestrator implements AsyncDisposable {
   readonly #workspacePath: string | undefined
   readonly #resolveWorldRoot: ((worldId: string, employeeId: string) => Promise<string>) | undefined
   readonly #historyBudget: ConversationHistoryBudget
-  readonly #completionHook: AgentRunCompletionHook
-  readonly #deferAssistantMessages: boolean
+  readonly #completionJobType: string | undefined
+  readonly #onCompletionJobQueued: (() => void) | undefined
   readonly #listeners = new Set<ConversationRealtimeListener>()
   readonly #controlListeners = new Set<ConversationControlListener>()
   readonly #activeAgentRuns = new Map<string, { workTurnId: string; employeeId: string }>()
@@ -372,11 +378,8 @@ export class ConversationOrchestrator implements AsyncDisposable {
     this.#workspacePath = options.workspacePath
     this.#resolveWorldRoot = options.resolveWorldRoot
     this.#historyBudget = options.historyBudget ?? DEFAULT_CONVERSATION_HISTORY_BUDGET
-    this.#completionHook = options.completionHook ?? NOOP_AGENT_RUN_COMPLETION_HOOK
-    // Existing provider-neutral consumers expect streamed assistant facts to
-    // be durable at emit time.  A host that supplies a completion publisher
-    // opts into the short defer window needed to attach durable artifactRefs.
-    this.#deferAssistantMessages = options.completionHook !== undefined
+    this.#completionJobType = options.completionJobType?.trim() || undefined
+    this.#onCompletionJobQueued = options.onCompletionJobQueued
     if (this.#workspacePath === undefined && this.#resolveWorldRoot === undefined) throw new Error('ConversationOrchestrator requires workspacePath or resolveWorldRoot')
   }
 
@@ -1235,7 +1238,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
     }
     const traceTurnId = agentRun.id
     let responsePersisted = false
-    const pendingAssistantMessages: PendingAssistantMessage[] | undefined = this.#deferAssistantMessages ? [] : undefined
+    const pendingAssistantMessages: PendingAssistantMessage[] = []
     let failedTurn = false
     let failedTurnKind: AgentTurnFailureKind = 'unknown'
     try {
@@ -1300,32 +1303,28 @@ export class ConversationOrchestrator implements AsyncDisposable {
         throw new AgentTurnFailedError(employee.id, failedTurnKind)
       }
       const content = result.finalResponse.trim()
-      const contribution = await this.#completionHook.onCompleted({
-        workspaceId: session.workspaceId,
-        worldId: session.worldId,
-        employeeId: employee.id,
+      const completionStatus = this.#completionJobType === undefined ? 'completed' : 'pending'
+      const completionMessages = pendingAssistantMessages.map((pending, index) => ({
         sessionId: session.id,
-        workTurnId: workTurn.id,
-        agentRunId: agentRun.id,
-        workspacePath,
-      })
-      if (pendingAssistantMessages !== undefined && pendingAssistantMessages.length > 0) {
-        for (const [index, pending] of pendingAssistantMessages.entries()) {
-          const isFinalMessage = index === pendingAssistantMessages.length - 1
-          this.#store.appendMessage({
-            sessionId: session.id,
-            senderId: employee.id,
-            senderKind: 'employee',
-            kind: 'assistant',
-            content: pending.content,
-            metadata: isFinalMessage
-              ? withCompletionMetadata(pending.metadata, contribution)
-              : pending.metadata,
-            correlationId: session.id,
-          })
-        }
-      } else if (!responsePersisted && content) {
-        this.#store.appendMessage({
+        senderId: employee.id,
+        senderKind: 'employee' as const,
+        kind: 'assistant' as const,
+        content: pending.content,
+        metadata: index === pendingAssistantMessages.length - 1
+          ? {
+              ...pending.metadata,
+              agentSessionId: result.agentSessionId,
+              traceTurnId,
+              agentRunId: agentRun.id,
+              workTurnId: workTurn.id,
+              completionStatus,
+              ...(clientTurnId === undefined ? {} : { clientTurnId }),
+            }
+          : pending.metadata,
+        correlationId: session.id,
+      }))
+      if (completionMessages.length === 0 && !responsePersisted && content) {
+        completionMessages.push({
           sessionId: session.id,
           senderId: employee.id,
           senderKind: 'employee',
@@ -1338,10 +1337,31 @@ export class ConversationOrchestrator implements AsyncDisposable {
             agentRunId: agentRun.id,
             workTurnId: workTurn.id,
             ...(clientTurnId === undefined ? {} : { clientTurnId }),
-            ...withCompletionMetadata({}, contribution),
+            completionStatus,
           },
           correlationId: session.id,
         })
+      }
+      const completionJob = this.#completionJobType === undefined || completionMessages.length === 0
+        ? undefined
+        : {
+            idempotencyKey: `agent-run-completion:v1:${this.#completionJobType}:${agentRun.id}`,
+            workspaceId: session.workspaceId,
+            worldId: session.worldId,
+            sessionId: session.id,
+            workTurnId: workTurn.id,
+            agentRunId: agentRun.id,
+            type: this.#completionJobType,
+            payload: { employeeId: employee.id, workspacePath },
+          }
+      this.#store.commitAgentRunCompletion({
+        runId: agentRun.id,
+        runtimeSessionId: result.agentSessionId,
+        messages: completionMessages,
+        ...(completionJob === undefined ? {} : { completionJob }),
+      })
+      if (completionJob !== undefined) {
+        try { this.#onCompletionJobQueued?.() } catch { /* durable polling remains the fallback */ }
       }
       this.#store.appendDomainEvent({
         workspaceId: session.workspaceId,
@@ -1353,7 +1373,6 @@ export class ConversationOrchestrator implements AsyncDisposable {
         correlationId: session.id,
         payload: { employeeId: employee.id, agentSessionId: result.agentSessionId, traceTurnId, agentRunId: agentRun.id, workTurnId: workTurn.id },
       })
-      this.#store.completeAgentRun(agentRun.id, result.agentSessionId)
       return {
         employeeId: employee.id,
         displayName: employee.displayName,
@@ -1608,20 +1627,6 @@ export class ConversationOrchestrator implements AsyncDisposable {
 interface PendingAssistantMessage {
   content: string
   metadata: JsonObject
-}
-
-function withCompletionMetadata(
-  metadata: JsonObject,
-  contribution: AgentRunCompletionContribution,
-): JsonObject {
-  const artifactRefs = contribution.artifactRefs === undefined
-    ? undefined
-    : [...new Set(contribution.artifactRefs.filter((value): value is string => typeof value === 'string' && value.trim() !== ''))]
-  return {
-    ...metadata,
-    ...(contribution.messageMetadata ?? {}),
-    ...(artifactRefs === undefined || artifactRefs.length === 0 ? {} : { artifactRefs }),
-  }
 }
 
 function classifyRuntimeFailure(value: unknown): AgentTurnFailureKind {

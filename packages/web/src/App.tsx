@@ -2050,6 +2050,15 @@ export default function App() {
     setPreferences((current) => current === undefined ? current : { ...current, leftPaneWidth, rightPaneWidth })
   }, [])
 
+  const retryCompletionJob = useCallback(async (jobId: string) => {
+    await api(`/api/completion-jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST', body: '{}' })
+    setTranscriptReload((value) => value + 1)
+  }, [])
+
+  const refreshSettledCompletion = useCallback(() => {
+    setTranscriptReload((value) => value + 1)
+  }, [])
+
   const backgroundImage = resolveBackground(preferences?.backgroundAssetRef)
   const shellStyle = useMemo(() => backgroundImage === undefined ? undefined : {
     '--workspace-background-image': `url("${backgroundImage}")`,
@@ -2132,6 +2141,8 @@ export default function App() {
             onUploadAttachment={uploadChatAttachment}
             onOpenDossier={(employeeId) => void openDossier(employeeId)}
             onOpenArtifact={(artifactId) => { setSelectedArtifactId(artifactId); setAppMode('workbench'); setDockCollapsed(false); setDockTab('artifacts') }}
+            onRetryCompletionJob={retryCompletionJob}
+            onCompletionJobSettled={refreshSettledCompletion}
             onRecruit={() => { setSelectedEmployeeId(undefined); setDockCollapsed(false); setDockTab('dossier') }}
             onOpenPluginMarket={() => void openPackageMarket('plugin')}
             onOpenHistory={openMessageHistory}

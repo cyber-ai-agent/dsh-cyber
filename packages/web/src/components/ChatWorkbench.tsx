@@ -12,8 +12,9 @@ import {
   X,
 } from '@phosphor-icons/react'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { WORLD_CHARACTER_MANAGEMENT_PERMISSIONS, type ChatAttachment, type InstalledPluginCommand, type JsonObject, type LocalAssetMimeType, type WorkMessage, type WorkSession, type World, type WorldCharacterPermission, type WorldPermissionDecisionScope, type WorldPermissionRequest } from '@dsh-cyber/contracts'
+import { WORLD_CHARACTER_MANAGEMENT_PERMISSIONS, type ChatAttachment, type CompletionJob, type InstalledPluginCommand, type JsonObject, type LocalAssetMimeType, type WorkMessage, type WorkSession, type World, type WorldCharacterPermission, type WorldPermissionDecisionScope, type WorldPermissionRequest } from '@dsh-cyber/contracts'
 
+import { api } from '../api.js'
 import type { ConversationIntent, CyberEmployee } from '../types.js'
 import type { PendingChatTurn } from '../chat-realtime.js'
 import type { ChatQueueMode } from '../chat-realtime.js'
@@ -50,6 +51,8 @@ interface ChatWorkbenchProps {
   onUploadAttachment(file: File): Promise<ChatAttachment>
   onOpenDossier(employeeId: string): void
   onOpenArtifact(artifactId?: string): void
+  onRetryCompletionJob?(jobId: string): Promise<void>
+  onCompletionJobSettled?(): void
   onRecruit(): void
   onOpenPluginMarket?(): void
   onOpenHistory?(): void
@@ -70,7 +73,7 @@ interface ChatWorkbenchProps {
   onStopTurn?(turnId: string): Promise<void>
 }
 
-export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, installedPlugins = [], sending = false, pendingCount = 0, queuedCount = 0, queueItems = [], draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, permissionMode = 'read-only', onChangePermissionMode, onRequestFullAccess, onChangeCollaborationMode, onCancelQueuedTurn, onPromoteQueuedTurn, onStopTurn }: ChatWorkbenchProps) {
+export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, installedPlugins = [], sending = false, pendingCount = 0, queuedCount = 0, queueItems = [], draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRetryCompletionJob, onCompletionJobSettled, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, permissionMode = 'read-only', onChangePermissionMode, onRequestFullAccess, onChangeCollaborationMode, onCancelQueuedTurn, onPromoteQueuedTurn, onStopTurn }: ChatWorkbenchProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -290,6 +293,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
                   <header className="message__meta">{owner ? <span className="sr-only">我的消息</span> : <><strong>{employee?.displayName ?? experience.personLabel}<AuthorityBadge role={employee?.authorityRole} /></strong><span>{employee?.role}</span></>}<time>{displayTime(message)}</time>{copiedMessageId === message.id ? <span role="status">已复制</span> : rememberingMessageId === message.id ? <span role="status">正在整理…</span> : rememberedMessageIds.has(message.id) ? <span role="status">已加入长期知识</span> : null}</header>
                   <div className="message__content">{streaming && message.content.length === 0 ? <span className="stream-placeholder">正在回复中…</span> : <RichText value={message.content} worldId={world.id} />}{streaming ? <span className="stream-cursor" aria-hidden="true" /> : null}</div>
                   <MessageAttachments attachments={messageAttachments(message.metadata)} />
+                  <CompletionJobStatus metadata={message.metadata} {...(onRetryCompletionJob === undefined ? {} : { onRetry: onRetryCompletionJob })} {...(onCompletionJobSettled === undefined ? {} : { onSettled: onCompletionJobSettled })} />
                   {artifactRefsFromMetadata(message.metadata).length === 0 ? null : <Suspense fallback={<div className="chat-artifact-refs" role="status">正在载入产物卡…</div>}><ArtifactReferenceCards worldId={world.id} artifactRefs={artifactRefsFromMetadata(message.metadata)} onOpen={onOpenArtifact} /></Suspense>}
                 </div>
                 {owner ? <span className="owner-avatar" role="img" aria-label="我的头像"><UserCircle size={28} weight="fill" /></span> : null}
@@ -430,6 +434,71 @@ function artifactRefsFromMetadata(metadata: JsonObject): string[] {
     if (entry !== null && typeof entry === 'object' && !Array.isArray(entry) && typeof entry.id === 'string' && entry.id.length > 0 && !/[\\/]/.test(entry.id)) return [entry.id]
     return []
   })
+}
+
+function CompletionJobStatus({ metadata, onRetry, onSettled }: {
+  metadata: JsonObject
+  onRetry?: (jobId: string) => Promise<void>
+  onSettled?: () => void
+}) {
+  const jobId = typeof metadata.completionJobId === 'string' ? metadata.completionJobId : undefined
+  const initialStatus = completionStatus(metadata.completionStatus)
+  const [status, setStatus] = useState<CompletionJob['status'] | undefined>(initialStatus)
+  const [retrying, setRetrying] = useState(false)
+  const settledRef = useRef(false)
+
+  useEffect(() => {
+    setStatus(initialStatus)
+    settledRef.current = false
+  }, [initialStatus, jobId])
+
+  useEffect(() => {
+    if (jobId === undefined || status === 'completed' || status === 'failed' || status === 'cancelled') return
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const poll = async () => {
+      try {
+        const result = await api<{ job: CompletionJob }>(`/api/completion-jobs/${encodeURIComponent(jobId)}`)
+        if (cancelled) return
+        setStatus(result.job.status)
+        if (result.job.status === 'completed' || result.job.status === 'failed' || result.job.status === 'cancelled') {
+          if (!settledRef.current) {
+            settledRef.current = true
+            onSettled?.()
+          }
+          return
+        }
+      } catch {
+        if (cancelled) return
+      }
+      timer = setTimeout(() => { void poll() }, 1_000)
+    }
+    void poll()
+    return () => { cancelled = true; if (timer !== undefined) clearTimeout(timer) }
+  }, [jobId, onSettled, status])
+
+  if (jobId === undefined || status === undefined) return null
+  const label = status === 'completed'
+    ? '产物可用'
+    : status === 'failed'
+      ? '产物整理失败'
+      : status === 'cancelled'
+        ? '产物整理已取消'
+        : '产物整理中'
+  return <div className={`completion-job-status completion-job-status--${status}`} role="status">
+    {status === 'pending' || status === 'running' || status === 'retrying' ? <CircleNotch size={14} className="spin" aria-hidden="true" /> : null}
+    <span>{label}</span>
+    {status === 'failed' && onRetry !== undefined ? <button type="button" disabled={retrying} onClick={() => {
+      setRetrying(true)
+      void onRetry(jobId).then(() => setStatus('retrying')).finally(() => setRetrying(false))
+    }}>{retrying ? '正在重试…' : '重试'}</button> : null}
+  </div>
+}
+
+function completionStatus(value: unknown): CompletionJob['status'] | undefined {
+  return value === 'pending' || value === 'running' || value === 'retrying' || value === 'completed' || value === 'failed' || value === 'cancelled'
+    ? value
+    : undefined
 }
 
 function formatBytes(value: number): string { if (value < 1024) return `${value} B`; if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`; return `${(value / 1024 / 1024).toFixed(1)} MB` }
