@@ -43,6 +43,7 @@ import type {
 import { api } from '../api.js'
 import { setUiLocale, UI_LOCALES, useI18n } from '../i18n/runtime.js'
 import { formatDateTime, formatDuration as localeFormatDuration, formatNumber } from '../i18n/format.js'
+import { ModelPicker } from '../features/models/ModelPicker.js'
 import type { ApplicationAccessSummary } from './ApplicationLockGate.js'
 
 interface ApplicationAccessMutation extends ApplicationAccessSummary { recoveryCode?: string }
@@ -1043,7 +1044,7 @@ function validateModelConnection(draft: ModelDraft): string | undefined {
 }
 
 function ModelRouteRow({ label, detail, value, models, onChange }: { label: string; detail: string; value: string; models: ModelProfile[]; onChange(value: string): void }) {
-  return <label className="model-route-row"><span><strong>{label}</strong><small>{detail}</small></span><select value={value} disabled={models.length === 0} onChange={(event) => onChange(event.target.value)}><option value="">继承上级 / 默认模型</option>{models.map((model) => <option key={model.id} value={model.id}>{model.displayName} · {model.modelId}</option>)}</select></label>
+  return <label className="model-route-row"><span><strong>{label}</strong><small>{detail}</small></span><ModelPicker models={models} value={value || undefined} ariaLabel={`${label}模型`} inheritLabel="继承上级 / 默认模型" onChange={(modelId) => onChange(modelId ?? '')} /></label>
 }
 
 function providerLabel(model: ModelProfile): string {

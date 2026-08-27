@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { AgentPermissionMode, ModelProfile, ReasoningEffort, World, WorldSettings } from '@dsh-cyber/contracts'
 
 import { useDialogFocusTrap } from './useDialogFocusTrap.js'
+import { ModelPicker } from '../features/models/ModelPicker.js'
 import { applyWorldTheme, DEFAULT_SKIN_ID, readWorldTheme, saveWorldTheme, themeRegistry } from '../features/world/world-themes.js'
 
 interface WorldSettingsDialogProps {
@@ -176,10 +177,18 @@ export function WorldSettingsDialog({ world, value, models, installedSkinIds, sa
             <div className="world-settings-card__body">
               <div className="dialog-field">
                 <span>世界默认模型</span>
-                <select value={draft.model.defaultModelProfileId ?? ''} onChange={(event)=>setDraft({...draft,model:event.target.value ? {...draft.model,defaultModelProfileId:event.target.value} : {reasoningEffort:draft.model.reasoningEffort,responseLanguage:draft.model.responseLanguage}})}>
-                  <option value="">继承全局或角色设置</option>
-                  {models.map((model)=><option key={model.id} value={model.id}>{model.displayName} · {model.modelId}</option>)}
-                </select>
+                <ModelPicker
+                  models={models}
+                  value={draft.model.defaultModelProfileId}
+                  ariaLabel="世界默认模型"
+                  inheritLabel="继承全局或角色设置"
+                  onChange={(modelProfileId) => setDraft({
+                    ...draft,
+                    model: modelProfileId
+                      ? { ...draft.model, defaultModelProfileId: modelProfileId }
+                      : { reasoningEffort: draft.model.reasoningEffort, responseLanguage: draft.model.responseLanguage },
+                  })}
+                />
               </div>
               <div className="dialog-field-grid">
                 <div className="dialog-field">
