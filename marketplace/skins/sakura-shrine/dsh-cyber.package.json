@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "sakura-shrine",
+  "version": "1.0.0",
+  "kind": "skin",
+  "displayName": "千樱神殿",
+  "summary": "樱落古院、绯粉霞光与朱红鸟居祈愿神苑，完整覆盖聊天和世界视图。",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "publisher": "DSH Cyber",
+  "capabilities": [
+    "ui:skin"
+  ],
+  "dataEgress": [],
+  "files": [
+    {
+      "path": "skin.json",
+      "sha256": "a667b0a93a30702e9eae25227dd93a4da32afbdc2113704ca64ee00a02b4a44c"
+    }
+  ],
+  "entrypoints": [
+    {
+      "id": "sakura-shrine",
+      "kind": "skin",
+      "path": "skin.json"
+    }
+  ],
+  "certification": {
+    "authority": "DSH Cyber",
+    "level": "official",
+    "contentSha256": "942a43aa2000f68eea56fa8d4d080f724fcd5a7f9a6c72e76b9af04ac48db5ed"
+  }
+}

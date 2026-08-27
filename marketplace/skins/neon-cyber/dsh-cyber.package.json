@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "neon-cyber",
+  "version": "1.0.0",
+  "kind": "skin",
+  "displayName": "霓虹电波",
+  "summary": "虚拟演播、赛博姬电波与全息电竞全景工作室，完整覆盖聊天和世界视图。",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "publisher": "DSH Cyber",
+  "capabilities": [
+    "ui:skin"
+  ],
+  "dataEgress": [],
+  "files": [
+    {
+      "path": "skin.json",
+      "sha256": "466b44852d0d8e190e5a7714b3ff4514436b78d12636f5bcc214fb1eaed7cbb6"
+    }
+  ],
+  "entrypoints": [
+    {
+      "id": "neon-cyber",
+      "kind": "skin",
+      "path": "skin.json"
+    }
+  ],
+  "certification": {
+    "authority": "DSH Cyber",
+    "level": "official",
+    "contentSha256": "08cfc7d182540635bd993dff10c091ce8e851d64e4dfd1d27bd87b77261c7072"
+  }
+}
