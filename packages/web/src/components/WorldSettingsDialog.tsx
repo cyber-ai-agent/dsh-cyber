@@ -133,7 +133,7 @@ export function WorldSettingsDialog({ world, value, models, employees, authoriti
             <header className="world-settings-card__header">
               <span className="card-icon"><Palette size={17}/></span>
               <div>
-                <h4>世界专属主题</h4>
+                <h4>世界专属皮肤</h4>
                 <small>为【{world.name}】选择空间视觉风格，世界之间完全独立隔离</small>
               </div>
             </header>
@@ -141,6 +141,7 @@ export function WorldSettingsDialog({ world, value, models, employees, authoriti
               <div className="world-theme-presets">
                 {themeRegistry.list().map((theme) => {
                   const active = selectedThemeId === theme.id
+                  const previewImage = theme.tokens.worldMapImage ?? theme.tokens.backdropImage
                   return (
                     <button
                       key={theme.id}
@@ -151,8 +152,8 @@ export function WorldSettingsDialog({ world, value, models, employees, authoriti
                         applyWorldTheme(theme.id)
                       }}
                     >
-                      <span style={{ background: theme.tokens.pageBackground, borderColor: theme.tokens.accentColor }}>
-                        <i style={{ background: theme.tokens.accentColor }} />
+                      <span style={{ background: previewImage === undefined ? theme.tokens.pageBackground : `url("${previewImage}") center / cover`, borderColor: theme.tokens.accentColor }}>
+                        {previewImage === undefined ? <i style={{ background: theme.tokens.accentColor }} /> : null}
                       </span>
                       <div>
                         <strong>{theme.displayName}</strong>
