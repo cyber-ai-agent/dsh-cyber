@@ -17,6 +17,7 @@ import { api } from '../../api.js'
 import type { CyberEmployee } from '../../types.js'
 import { worldExperience } from '../../world-experience.js'
 import { subscribeWorldLive } from '../../world-live-client.js'
+import { readWorldTheme, resolveThemeManifest } from './world-themes.js'
 
 export interface WorldClientState {
   snapshot?: WorldRuntimeSnapshot
@@ -52,13 +53,10 @@ function useCurrentSkin(): string | undefined {
   return skin
 }
 
+
 function resolveSkinManifest(world: World, baseManifest?: WorldThemeManifestV1, currentSkin?: string): WorldThemeManifestV1 {
-  const activeSkin = currentSkin ?? (typeof document !== 'undefined' ? document.documentElement.dataset.skin : undefined)
-  if (activeSkin === 'maid-atelier') {
-    return maidPalaceTheme
-  }
-  if (baseManifest !== undefined) return baseManifest
-  return worldExperience(world).kind === 'tavern' ? moonlitTavernTheme : cyberCompanyTheme
+  const themeId = currentSkin ?? readWorldTheme(world)
+  return resolveThemeManifest(world, themeId, baseManifest)
 }
 
 export function useWorldClient({ demoMode, world, employees, liveEnabled = true }: UseWorldClientInput) {

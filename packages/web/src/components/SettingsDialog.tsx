@@ -1,5 +1,6 @@
 import {
   ArrowsClockwise,
+  Buildings,
   CaretDown,
   CaretUp,
   CheckCircle,
@@ -17,6 +18,8 @@ import {
   Plug,
   Plus,
   ShieldCheck,
+  Sparkle,
+  Storefront,
   Sun,
   Trash,
   X,
@@ -543,44 +546,35 @@ function AppearanceSettings({
           ))}
         </div>
       </fieldset>
-      <fieldset className="setting-group">
-        <legend>界面皮肤 (DSH 皮肤宇宙)</legend>
-        <div className="skin-options">
-          {([
-            { id: 'maid-atelier', label: '深海女仆工坊', desc: '鲸鱼娘 · 深海幽蓝蕾丝双女仆', background: '#070e17', accent: '#38bdf8' },
-            { id: 'orca-link', label: '虎鲸链路', desc: '虎鲸娘 · 机械航行舱电蓝链路', background: '#0b1118', accent: '#0284c7' },
-            { id: 'zzz-miyabi', label: '绝区零 · 星见雅', desc: '对魔六课 · 极霜冰蓝水墨拔刀', background: '#06090e', accent: '#00f0ff' },
-            { id: 'zzz-ellen', label: '绝区零 · 艾莲', desc: '维多利亚家政 · 剪刀鲨黑白朋克', background: '#0d0a0d', accent: '#f43f5e' },
-            { id: 'first-love', label: '初恋时刻', desc: '日系电影感 · 晨曦粉白水润', background: '#0f0d14', accent: '#ff7597' },
-            { id: 'spider-verse', label: '蛛网都市', desc: '纽约赛博高空 · 红蓝撞色', background: '#070910', accent: '#ef4444' },
-            { id: 'pokemon-sunset', label: '宝可梦黄昏', desc: '原野夕阳霞光 · 暖金冒险', background: '#140d09', accent: '#f59e0b' },
-            { id: 'naruto-konoha', label: '木叶忍界', desc: '火影岩黄昏 · 查克拉金橙', background: '#110d08', accent: '#ea580c' },
-            { id: 'demon-slayer-night', label: '鬼灭藤夜', desc: '幽邃深靛紫夜 · 紫藤水墨', background: '#090712', accent: '#a855f7' },
-            { id: 'cyber-graphite', label: '赛博霓虹 2.0', desc: '黑曜石深空 · 电光青全息', background: '#080c12', accent: '#00e5ff' },
-            { id: 'linear-obsidian', label: '极简黑曜', desc: 'Linear 旗舰质感 · 极细高光', background: '#0d0f12', accent: '#5e6ad2' },
-            { id: 'paper-daylight', label: '暖阳白昼', desc: '羊皮纸暖白 · 护眼舒适阅读', background: '#f5f2eb', accent: '#926315' },
-          ] as const).map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={value.skinId === item.id ? 'is-active' : ''}
-              onClick={() => {
-                if (typeof localStorage !== 'undefined') localStorage.setItem('dsh_cyber_skin', item.id)
-                document.documentElement.dataset.skin = item.id
-                onChange({ ...value, skinId: item.id })
-              }}
-            >
-              <span style={{ background: item.background, borderColor: item.accent }}>
-                <i style={{ background: item.accent, boxShadow: `0 0 8px ${item.accent}` }} />
-              </span>
-              <div>
-                <strong>{item.label}</strong>
-                <small>{item.desc}</small>
-              </div>
-            </button>
-          ))}
+      <div className="world-theme-notice-card">
+        <Palette size={20} />
+        <div>
+          <strong>世界专属主题模式已生效</strong>
+          <p>主题已全面升级为与各个世界独立绑定与隔离。请在顶部工具栏的世界主题切换胶囊或左下角的【世界设置】中，为各个世界独立选择或创建专属主题。</p>
         </div>
-      </fieldset>
+      </div>
+      <div className="world-theme-features-grid">
+        <div className="world-theme-feature-card">
+          <div className="theme-card-icon" style={{ color: '#38bdf8' }}><Sparkle size={20} /></div>
+          <strong>深海女仆工坊</strong>
+          <small>蓝金微晶 · 双女仆立绘 · 欧式图书殿堂</small>
+        </div>
+        <div className="world-theme-feature-card">
+          <div className="theme-card-icon" style={{ color: '#00e5ff' }}><Buildings size={20} /></div>
+          <strong>赛博原厂</strong>
+          <small>赛博办公室 · 黑曜高光 · 极简全息科技</small>
+        </div>
+        <div className="world-theme-feature-card">
+          <div className="theme-card-icon" style={{ color: '#0284c7' }}><Cpu size={20} /></div>
+          <strong>虎鲸链路</strong>
+          <small>机械航行舱 · 深蓝电光 · 虎鲸机能立绘</small>
+        </div>
+        <div className="world-theme-feature-card">
+          <div className="theme-card-icon" style={{ color: '#d7a52a' }}><Storefront size={20} /></div>
+          <strong>月影酒馆</strong>
+          <small>中世纪奇幻沙龙 · 暖灰琥珀 · 木质壁炉</small>
+        </div>
+      </div>
       <details className="settings-disclosure appearance-advanced">
         <summary><span><strong>更多外观选项</strong><small>自定义背景、动效、信息密度和面板宽度</small></span><CaretDown size={16} /></summary>
         <div className="settings-disclosure__content appearance-advanced__content">

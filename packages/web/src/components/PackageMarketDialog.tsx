@@ -24,6 +24,7 @@ import type {
   PackagePermissionPreview,
   World,
 } from '@dsh-cyber/contracts'
+import { applyWorldTheme, saveWorldTheme } from '../features/world/world-themes.js'
 
 export const MARKET_SKIN_PACKAGES = [
   {
@@ -164,7 +165,7 @@ const MARKET_META: Record<CyberMarketKind, { label: string; description: string 
   theme: { label: '世界', description: '选择完整场景皮肤、空间设定和起始角色，创建彼此独立的新世界。' },
   talent: { label: '角色', description: '安装不同世界观与专长的角色模板，再把角色招募到兼容世界。' },
   plugin: { label: '插件', description: '先安装到本地包库，再为需要的世界单独启用；每次安装都可审阅、回滚。' },
-  skin: { label: '皮肤', description: '一键应用现代高颜值 UI 主题与配色体系，自由切换赛博霓虹、极简黑曜、极光星云等风格。' },
+  skin: { label: '主题', description: '为各个世界应用高颜值主题与配色体系，自由切换深海女仆、虎鲸链路、月影酒馆等空间风格。' },
 }
 
 export function PackageMarketDialog(props: PackageMarketDialogProps) {
@@ -328,11 +329,12 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
                             className={isActive ? 'market-action--created' : 'primary-button'}
                             disabled={isActive}
                             onClick={() => {
-                              document.documentElement.dataset.skin = skin.id
+                              saveWorldTheme(props.world.id, skin.id)
+                              applyWorldTheme(skin.id)
                               void props.onApplySkin?.(skin.id)
                             }}
                           >
-                            {isActive ? '✓ 正在使用' : '立即换肤'}
+                            {isActive ? '✓ 正在使用' : '应用到当前世界'}
                           </button>
                         </footer>
                       </article>
@@ -512,7 +514,7 @@ function packageKindLabel(kind: CyberPackageManifest['kind']): string {
     asset: '资产包',
     'employee-blueprint': '角色模板',
     'world-theme': '世界主题',
-    skin: '界面皮肤',
+    skin: '世界主题',
   }
   return map[kind] ?? '扩展包'
 }

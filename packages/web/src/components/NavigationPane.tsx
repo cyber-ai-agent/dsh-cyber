@@ -134,11 +134,7 @@ export function NavigationPane({
         </button>
       </header>
 
-      <section className="nav-section nav-section--sessions nav-section--conversation-only" aria-labelledby="sessions-title">
-        <div className="nav-section__title nav-section__title--inline" id="sessions-title">
-          <span>当前世界</span>
-          <small>{items.length} 个会话</small>
-        </div>
+      <section className="nav-section nav-section--sessions nav-section--conversation-only" aria-label="会话列表">
         {error === undefined || fallbackItems.length > 0 ? null : <div className="compact-empty" role="status">{error}</div>}
         <div className="session-list">
           {items.length === 0 ? (
