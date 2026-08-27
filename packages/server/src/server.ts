@@ -158,6 +158,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   if (!compatibility.ok) throw new Error(`Harness compatibility check failed: ${compatibility.errors.join('; ')}`)
 
   const store = await SqliteStore.open(join(stateRoot, 'data', 'dsh-cyber.sqlite'))
+  store.recoverConversationQueueLeases(true)
   store.recoverConversationRuntimeAfterRestart()
   // Built-in blueprint identities are immutable once persisted. Older local
   // states may already contain the same id/version from a previous release;

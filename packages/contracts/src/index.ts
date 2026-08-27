@@ -1,6 +1,6 @@
 import type { WorldCharacterAuthority } from './world-authority.js'
 
-export const CYBER_SCHEMA_VERSION = 29 as const
+export const CYBER_SCHEMA_VERSION = 30 as const
 
 export type IsoTimestamp = string
 export type JsonPrimitive = boolean | number | string | null

@@ -34,6 +34,10 @@ export interface ConversationQueueEntry {
   revision: number
   status: ConversationQueueEntryStatus
   errorCode?: string
+  attemptCount: number
+  availableAt: IsoTimestamp
+  leaseOwner?: string
+  leaseExpiresAt?: IsoTimestamp
   enqueuedAt: IsoTimestamp
   claimedAt?: IsoTimestamp
   completedAt?: IsoTimestamp

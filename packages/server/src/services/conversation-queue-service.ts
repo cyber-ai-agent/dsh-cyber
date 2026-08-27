@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import type {
   ConversationQueueEntry,
   ConversationQueueEntryStatus,
@@ -16,6 +18,8 @@ type QueueStore = Pick<SqliteStore,
   | 'enqueueConversationTurn'
   | 'enqueueNextConversationTurn'
   | 'claimConversationQueueEntry'
+  | 'renewConversationQueueLease'
+  | 'recoverConversationQueueLeases'
   | 'waitConversationQueueEntryForApproval'
   | 'resumeConversationQueueEntryAfterApproval'
   | 'completeConversationQueueEntry'
@@ -42,6 +46,8 @@ export interface ConversationQueueServiceOptions {
   /** Provider-neutral runner seam for tests or future group/task continuations. */
   runner?: (entry: ConversationQueueEntry) => Promise<{ waitingForApproval?: boolean } | void>
   pollIntervalMs?: number
+  leaseDurationMs?: number
+  leaseOwner?: string
   onSettled?: (entry: ConversationQueueEntry) => void | Promise<void>
 }
 
@@ -77,9 +83,13 @@ export class ConversationQueueService implements AsyncDisposable {
   readonly #runner: ((entry: ConversationQueueEntry) => Promise<{ waitingForApproval?: boolean } | void>) | undefined
   readonly #active = new Set<string>()
   readonly #pollIntervalMs: number
+  readonly #leaseDurationMs: number
+  readonly #leaseOwner: string
   readonly #onSettled: ConversationQueueServiceOptions['onSettled']
   #timer: NodeJS.Timeout | undefined
+  #wakeTimer: NodeJS.Timeout | undefined
   #dispatching = false
+  #closed = false
 
   constructor(options: ConversationQueueServiceOptions) {
     if (options.runner === undefined && options.continuations === undefined) {
@@ -89,16 +99,22 @@ export class ConversationQueueService implements AsyncDisposable {
     this.#orchestrator = options.orchestrator
     this.#continuations = options.continuations
     this.#runner = options.runner
-    this.#pollIntervalMs = Math.max(25, Math.floor(options.pollIntervalMs ?? 250))
+    this.#pollIntervalMs = Math.max(250, Math.floor(options.pollIntervalMs ?? 2_000))
+    this.#leaseDurationMs = Math.max(1_000, Math.floor(options.leaseDurationMs ?? 30_000))
+    this.#leaseOwner = options.leaseOwner?.trim() || `conversation-worker-${randomUUID()}`
     this.#onSettled = options.onSettled
   }
 
   enqueue(input: Parameters<QueueStore['enqueueConversationTurn']>[0]): ConversationQueueEntry {
-    return this.#store.enqueueConversationTurn(input)
+    const entry = this.#store.enqueueConversationTurn(input)
+    this.wake()
+    return entry
   }
 
   enqueueNext(input: Parameters<QueueStore['enqueueNextConversationTurn']>[0]): ConversationQueueEntry {
-    return this.#store.enqueueNextConversationTurn(input)
+    const entry = this.#store.enqueueNextConversationTurn(input)
+    this.wake()
+    return entry
   }
 
   enqueueDirect(input: TurnAwareDirectInput, next = false): QueuedDirectServiceResult {
@@ -258,10 +274,21 @@ export class ConversationQueueService implements AsyncDisposable {
   }
 
   start(): void {
+    if (this.#closed) return
     if (this.#timer !== undefined) return
     this.#timer = setInterval(() => void this.dispatchOnce(), this.#pollIntervalMs)
     this.#timer.unref()
     void this.recover().then(() => this.dispatchOnce()).catch(() => undefined)
+  }
+
+  wake(): void {
+    if (this.#closed) return
+    if (this.#wakeTimer !== undefined) return
+    this.#wakeTimer = setTimeout(() => {
+      this.#wakeTimer = undefined
+      void this.dispatchOnce()
+    }, 0)
+    this.#wakeTimer.unref()
   }
 
   async recover(): Promise<{ repaired: number; interrupted: number }> {
@@ -303,9 +330,10 @@ export class ConversationQueueService implements AsyncDisposable {
   }
 
   async dispatchOnce(): Promise<number> {
-    if (this.#dispatching) return 0
+    if (this.#closed || this.#dispatching) return 0
     this.#dispatching = true
     try {
+      this.#store.recoverConversationQueueLeases()
       await this.reconcileWaiting()
       const queued = this.#listQueuedEntries()
       const { employeeLoads: loads, occupiedSessions } = this.#durableScheduleState()
@@ -321,6 +349,8 @@ export class ConversationQueueService implements AsyncDisposable {
           claimedEntry = this.#store.claimConversationQueueEntry({
             queueEntryId: entry.id,
             expectedRevision: entry.revision,
+            leaseOwner: this.#leaseOwner,
+            leaseDurationMs: this.#leaseDurationMs,
           })
         } catch {
           continue
@@ -333,6 +363,7 @@ export class ConversationQueueService implements AsyncDisposable {
           .catch(() => undefined)
           .finally(() => {
             this.#active.delete(entry.id)
+            this.wake()
           })
       }
       return claimed
@@ -378,12 +409,14 @@ export class ConversationQueueService implements AsyncDisposable {
   }
 
   stopDispatcher(): void {
-    if (this.#timer === undefined) return
-    clearInterval(this.#timer)
+    if (this.#timer !== undefined) clearInterval(this.#timer)
     this.#timer = undefined
+    if (this.#wakeTimer !== undefined) clearTimeout(this.#wakeTimer)
+    this.#wakeTimer = undefined
   }
 
   async close(): Promise<void> {
+    this.#closed = true
     this.stopDispatcher()
     // Do not abort live conversations during server shutdown. Their durable
     // running state is recovered by the normal runtime recovery path; queued
@@ -459,6 +492,10 @@ export class ConversationQueueService implements AsyncDisposable {
   }
 
   async #runClaimed(entry: ConversationQueueEntry): Promise<void> {
+    const renewal = setInterval(() => {
+      try { this.#store.renewConversationQueueLease(entry.id, this.#leaseOwner, this.#leaseDurationMs) } catch { /* settlement or recovery won */ }
+    }, Math.max(250, Math.floor(this.#leaseDurationMs / 3)))
+    renewal.unref()
     try {
       const customRunner = this.#runner
       const result = customRunner !== undefined
@@ -496,6 +533,7 @@ export class ConversationQueueService implements AsyncDisposable {
         // A Stop/cancel/recovery transition won the durable race.
       }
     } finally {
+      clearInterval(renewal)
       try { await this.#onSettled?.(entry) } catch { /* projections never replace the durable turn result */ }
     }
   }

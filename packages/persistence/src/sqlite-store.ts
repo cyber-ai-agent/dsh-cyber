@@ -362,6 +362,8 @@ export interface EnqueueConversationTurnInput {
 
 export interface ClaimConversationQueueEntryInput {
   queueEntryId: string
+  leaseOwner: string
+  leaseDurationMs: number
   expectedRevision?: number
 }
 
@@ -3018,6 +3020,10 @@ export class SqliteStore {
 
   claimConversationQueueEntry(input: ClaimConversationQueueEntryInput): ConversationQueueEntry {
     this.#assertWritable()
+    const leaseOwner = normalizeRequiredToken(input.leaseOwner, 'Conversation queue lease owner', 160)
+    if (!Number.isSafeInteger(input.leaseDurationMs) || input.leaseDurationMs <= 0) {
+      throw new PersistenceError('Conversation queue lease duration must be positive')
+    }
     const entry = this.getConversationQueueEntry(input.queueEntryId)
     if (entry === undefined) throw new EntityNotFoundError(`Conversation queue entry not found: ${input.queueEntryId}`)
     if (entry.status !== 'queued') throw new PersistenceError('Conversation queue entry is not queued')
@@ -3025,21 +3031,88 @@ export class SqliteStore {
       throw new PersistenceError('Conversation queue entry changed concurrently')
     }
     const turn = this.getWorkTurn(entry.workTurnId)
-    if (turn === undefined || turn.status !== 'queued') throw new PersistenceError('Queued WorkTurn is unavailable')
+    if (turn === undefined || (turn.status !== 'queued' && turn.status !== 'running')) throw new PersistenceError('Queued WorkTurn is unavailable')
     const now = this.#clock()
+    const leaseExpiresAt = new Date(Date.parse(now) + input.leaseDurationMs).toISOString()
     return this.#transaction(() => {
-      const turnResult = this.database.prepare(
-        `UPDATE work_turns SET status = 'running', started_at = COALESCE(started_at, ?)
-         WHERE id = ? AND status = 'queued'`,
-      ).run(now, entry.workTurnId)
-      if (Number(turnResult.changes) !== 1) throw new PersistenceError('Queued WorkTurn changed concurrently')
       const result = this.database.prepare(
         `UPDATE conversation_queue_entries
-         SET status = 'running', revision = revision + 1, claimed_at = COALESCE(claimed_at, ?), updated_at = ?
-         WHERE id = ? AND status = 'queued' AND revision = ?`,
-      ).run(now, now, entry.id, entry.revision)
+         SET status = 'running', revision = revision + 1,
+             attempt_count = attempt_count + 1, claimed_at = COALESCE(claimed_at, ?),
+             lease_owner = ?, lease_expires_at = ?, updated_at = ?
+         WHERE id = ? AND status = 'queued' AND revision = ? AND available_at <= ?
+           AND NOT EXISTS (
+             SELECT 1 FROM conversation_queue_entries AS occupied
+             WHERE occupied.session_id = conversation_queue_entries.session_id
+               AND occupied.id <> conversation_queue_entries.id
+               AND occupied.status IN ('running', 'waiting-approval')
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM json_each(conversation_queue_entries.employee_ids_json) AS candidate_employee
+             WHERE (
+               SELECT COUNT(*) FROM conversation_queue_entries AS running,
+                    json_each(running.employee_ids_json) AS running_employee
+               WHERE running.status = 'running'
+                 AND (running.lease_expires_at IS NULL OR running.lease_expires_at > ?)
+                 AND running_employee.value = candidate_employee.value
+             ) >= 2
+           )`,
+      ).run(now, leaseOwner, leaseExpiresAt, now, entry.id, entry.revision, now, now)
       if (Number(result.changes) !== 1) throw new PersistenceError('Conversation queue entry changed concurrently')
+      if (turn.status === 'queued') {
+        const turnResult = this.database.prepare(
+          `UPDATE work_turns SET status = 'running', started_at = COALESCE(started_at, ?)
+           WHERE id = ? AND status = 'queued'`,
+        ).run(now, entry.workTurnId)
+        if (Number(turnResult.changes) !== 1) throw new PersistenceError('Queued WorkTurn changed concurrently')
+      }
       return this.getConversationQueueEntry(entry.id)!
+    })
+  }
+
+  renewConversationQueueLease(queueEntryId: string, leaseOwner: string, leaseDurationMs: number): ConversationQueueEntry {
+    this.#assertWritable()
+    if (!Number.isSafeInteger(leaseDurationMs) || leaseDurationMs <= 0) throw new PersistenceError('Conversation queue lease duration must be positive')
+    const now = this.#clock()
+    const leaseExpiresAt = new Date(Date.parse(now) + leaseDurationMs).toISOString()
+    const row = this.database.prepare(
+      `UPDATE conversation_queue_entries SET lease_expires_at = ?, updated_at = ?
+       WHERE id = ? AND status = 'running' AND lease_owner = ? RETURNING *`,
+    ).get(leaseExpiresAt, now, queueEntryId, leaseOwner.trim())
+    if (row === undefined) throw new PersistenceError('Conversation queue lease cannot be renewed')
+    return mapConversationQueueEntry(row)
+  }
+
+  recoverConversationQueueLeases(afterRestart = false): { requeued: number } {
+    this.#assertWritable()
+    const now = this.#clock()
+    return this.#transaction(() => {
+      const predicate = afterRestart
+        ? `status = 'running'`
+        : `status = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?`
+      const parameters = afterRestart ? [] : [now]
+      const rows = this.database.prepare(
+        `SELECT id, work_turn_id FROM conversation_queue_entries
+         WHERE ${predicate}
+           AND NOT EXISTS (
+             SELECT 1 FROM agent_runs
+             WHERE agent_runs.turn_id = conversation_queue_entries.work_turn_id
+               AND agent_runs.status IN ('queued', 'running')
+           )`,
+      ).all(...parameters) as Array<{ id: string; work_turn_id: string }>
+      for (const row of rows) {
+        this.database.prepare(
+          `UPDATE conversation_queue_entries
+           SET status = 'queued', revision = revision + 1, available_at = ?,
+               lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+           WHERE id = ? AND status = 'running'`,
+        ).run(now, now, row.id)
+        this.database.prepare(
+          `UPDATE work_turns SET status = 'queued', started_at = NULL
+           WHERE id = ? AND status = 'running'`,
+        ).run(row.work_turn_id)
+      }
+      return { requeued: rows.length }
     })
   }
 
@@ -3065,7 +3138,8 @@ export class SqliteStore {
       }
       const result = this.database.prepare(
         `UPDATE conversation_queue_entries
-         SET status = 'waiting-approval', revision = revision + 1, updated_at = ?
+         SET status = 'waiting-approval', revision = revision + 1,
+             lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
          WHERE id = ? AND status IN ('running', 'waiting-approval') AND revision = ?`,
       ).run(now, entry.id, entry.revision)
       if (Number(result.changes) !== 1) throw new PersistenceError('Conversation queue entry changed concurrently')
@@ -3085,6 +3159,7 @@ export class SqliteStore {
       throw new PersistenceError('Conversation queue WorkTurn cannot resume after approval')
     }
     const now = this.#clock()
+    const leaseExpiresAt = new Date(Date.parse(now) + 30_000).toISOString()
     return this.#transaction(() => {
       if (turn.status === 'waiting-approval') {
         const turnResult = this.database.prepare(
@@ -3095,9 +3170,10 @@ export class SqliteStore {
       }
       const result = this.database.prepare(
         `UPDATE conversation_queue_entries
-         SET status = 'running', revision = revision + 1, updated_at = ?
+         SET status = 'running', revision = revision + 1,
+             lease_owner = 'approval-continuation', lease_expires_at = ?, updated_at = ?
          WHERE id = ? AND status = 'waiting-approval' AND revision = ?`,
-      ).run(now, entry.id, entry.revision)
+      ).run(leaseExpiresAt, now, entry.id, entry.revision)
       if (Number(result.changes) !== 1) throw new PersistenceError('Conversation queue entry changed concurrently')
       return this.getConversationQueueEntry(entry.id)!
     })
@@ -3125,7 +3201,8 @@ export class SqliteStore {
       }
       const result = this.database.prepare(
         `UPDATE conversation_queue_entries
-         SET status = 'completed', revision = revision + 1, completed_at = ?, updated_at = ?
+         SET status = 'completed', revision = revision + 1, completed_at = ?,
+             lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
          WHERE id = ? AND status IN ('running', 'waiting-approval') AND revision = ?`,
       ).run(now, now, entry.id, entry.revision)
       if (Number(result.changes) !== 1) throw new PersistenceError('Conversation queue entry changed concurrently')
@@ -3157,7 +3234,8 @@ export class SqliteStore {
       }
       const result = this.database.prepare(
         `UPDATE conversation_queue_entries
-         SET status = 'failed', error_code = ?, revision = revision + 1, completed_at = ?, updated_at = ?
+         SET status = 'failed', error_code = ?, revision = revision + 1, completed_at = ?,
+             lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
          WHERE id = ? AND status IN ('running', 'waiting-approval') AND revision = ?`,
       ).run(finalErrorCode, now, now, entry.id, entry.revision)
       if (Number(result.changes) !== 1) throw new PersistenceError('Conversation queue entry changed concurrently')
@@ -3203,7 +3281,8 @@ export class SqliteStore {
       }
       const result = this.database.prepare(
         `UPDATE conversation_queue_entries
-         SET status = 'interrupted', error_code = ?, revision = revision + 1, completed_at = ?, updated_at = ?
+         SET status = 'interrupted', error_code = ?, revision = revision + 1, completed_at = ?,
+             lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
          WHERE id = ? AND status IN ('queued', 'running', 'waiting-approval') AND revision = ?`,
       ).run(finalErrorCode, now, now, entry.id, entry.revision)
       if (Number(result.changes) !== 1) throw new PersistenceError('Conversation queue entry changed concurrently')
@@ -3497,7 +3576,7 @@ export class SqliteStore {
       this.database.prepare(
         `UPDATE conversation_queue_entries
          SET status = 'interrupted', error_code = 'service-restarted', revision = revision + 1,
-             completed_at = ?, updated_at = ?
+             lease_owner = NULL, lease_expires_at = NULL, completed_at = ?, updated_at = ?
          WHERE status IN ('running', 'waiting-approval')
            AND work_turn_id IN (
              SELECT id FROM work_turns WHERE status = 'interrupted' AND error_code = 'service-restarted'
@@ -3505,13 +3584,15 @@ export class SqliteStore {
       ).run(now, now)
       this.database.prepare(
         `UPDATE conversation_queue_entries
-         SET status = 'waiting-approval', revision = revision + 1, updated_at = ?
+         SET status = 'waiting-approval', revision = revision + 1,
+             lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
          WHERE status = 'running'
            AND work_turn_id IN (SELECT id FROM work_turns WHERE status = 'waiting-approval')`,
       ).run(now)
       this.database.prepare(
         `UPDATE conversation_queue_entries
          SET status = 'completed', revision = revision + 1,
+             lease_owner = NULL, lease_expires_at = NULL,
              completed_at = COALESCE(completed_at, ?), updated_at = ?
          WHERE status IN ('running', 'waiting-approval')
            AND work_turn_id IN (SELECT id FROM work_turns WHERE status = 'completed')`,
@@ -3521,6 +3602,7 @@ export class SqliteStore {
          SET status = 'failed',
              error_code = COALESCE((SELECT error_code FROM work_turns WHERE work_turns.id = conversation_queue_entries.work_turn_id), 'turn-failed'),
              revision = revision + 1,
+             lease_owner = NULL, lease_expires_at = NULL,
              completed_at = COALESCE(completed_at, ?), updated_at = ?
          WHERE status IN ('running', 'waiting-approval')
            AND work_turn_id IN (SELECT id FROM work_turns WHERE status = 'failed')`,
@@ -4972,12 +5054,13 @@ export class SqliteStore {
         `INSERT INTO conversation_queue_entries
          (id, workspace_id, world_id, session_id, work_turn_id, employee_ids_json,
           conversation_kind, collaboration_mode, reasoning_effort, permission_mode,
-          priority, revision, status, error_code, enqueued_at, claimed_at, completed_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          priority, revision, status, error_code, attempt_count, available_at,
+          lease_owner, lease_expires_at, enqueued_at, claimed_at, completed_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id, workspace.id, world.id, session.id, turn.id, stringifyJson(employeeIds),
         session.kind, collaborationMode, reasoningEffort ?? null, permissionMode ?? null,
-        normalizedPriority, 1, 'queued', null, now, null, null, now,
+        normalizedPriority, 1, 'queued', null, 0, now, null, null, now, null, null, now,
       )
       return mapConversationQueueEntry(this.database.prepare(
         'SELECT * FROM conversation_queue_entries WHERE id = ?',
@@ -6155,12 +6238,16 @@ function mapConversationQueueEntry(row: object): ConversationQueueEntry {
     priority: Number(value.priority),
     revision: Number(value.revision),
     status: value.status as ConversationQueueEntryStatus,
+    attemptCount: Number(value.attempt_count ?? 0),
+    availableAt: typeof value.available_at === 'string' ? value.available_at : String(value.enqueued_at),
     enqueuedAt: String(value.enqueued_at),
     updatedAt: String(value.updated_at),
   }
   if (typeof value.reasoning_effort === 'string') entry.reasoningEffort = value.reasoning_effort as Exclude<ReasoningEffort, 'auto'>
   if (typeof value.permission_mode === 'string') entry.permissionMode = value.permission_mode as AgentPermissionMode
   if (typeof value.error_code === 'string') entry.errorCode = value.error_code
+  if (typeof value.lease_owner === 'string') entry.leaseOwner = value.lease_owner
+  if (typeof value.lease_expires_at === 'string') entry.leaseExpiresAt = value.lease_expires_at
   if (typeof value.claimed_at === 'string') entry.claimedAt = value.claimed_at
   if (typeof value.completed_at === 'string') entry.completedAt = value.completed_at
   return entry

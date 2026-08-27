@@ -1621,6 +1621,25 @@ const MIGRATIONS: readonly Migration[] = [
         ON completion_jobs(agent_run_id, created_at DESC, id);
     `,
   },
+  {
+    version: 30,
+    name: 'sqlite-conversation-queue-lease',
+    sql: `
+      ALTER TABLE conversation_queue_entries ADD COLUMN lease_owner TEXT;
+      ALTER TABLE conversation_queue_entries ADD COLUMN lease_expires_at TEXT;
+      ALTER TABLE conversation_queue_entries
+        ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0);
+      ALTER TABLE conversation_queue_entries ADD COLUMN available_at TEXT;
+      UPDATE conversation_queue_entries SET available_at = enqueued_at WHERE available_at IS NULL;
+
+      DROP INDEX conversation_queue_world_order_idx;
+      CREATE INDEX conversation_queue_claim_idx
+        ON conversation_queue_entries(status, available_at, priority DESC, enqueued_at, id);
+      CREATE INDEX conversation_queue_lease_idx
+        ON conversation_queue_entries(status, lease_expires_at, id)
+        WHERE status = 'running';
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {
