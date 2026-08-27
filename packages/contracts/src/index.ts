@@ -1116,6 +1116,7 @@ export * from './browser-skill.js'
 export * from './workspace-preferences.js'
 export * from './completion-job.js'
 export * from './work-system.js'
+export * from './prompt-safety.js'
 
 export type {
   CharacterSkillAction,

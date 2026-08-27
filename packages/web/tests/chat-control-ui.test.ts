@@ -13,6 +13,31 @@ afterEach(() => {
 })
 
 describe('Chat control UI', () => {
+  it('treats the first accepted message as current work, not an extra queued message', () => {
+    const employee = { id: 'employee-one', displayName: '单条角色', role: '分析', avatarIndex: 0, currentActivity: '等待处理' } as CyberEmployee
+    const world = { id: 'world-one', workspaceId: 'workspace-one', name: '单条测试世界', templateId: 'personal-world', status: 'active', createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString() } as World
+    const html = renderToStaticMarkup(createElement(ChatWorkbench, {
+      demoMode: false,
+      world,
+      participantIds: [employee.id],
+      messages: [],
+      employees: [employee],
+      pendingCount: 1,
+      queuedCount: 0,
+      queueItems: [{ id: 'only', queueKey: 'direct:employee-one', worldId: world.id, employeeIds: [employee.id], title: '当前消息', status: 'queued', createdAt: new Date().toISOString() }],
+      draft: '',
+      onDraftChange: vi.fn(),
+      onSend: vi.fn(async () => undefined),
+      onUploadAttachment: vi.fn(async () => { throw new Error('not used') }),
+      onOpenDossier: vi.fn(),
+      onOpenArtifact: vi.fn(),
+      onRecruit: vi.fn(),
+    }))
+    expect(html).toContain('消息已接收，正在等待角色处理')
+    expect(html).toContain('已接收，等待执行')
+    expect(html).not.toContain('另有 1 条')
+  })
+
   it('keeps input controls available while showing queue and stop actions', () => {
     const employee = { id: 'employee-a', displayName: '甲角色', role: '分析', avatarIndex: 0, currentActivity: '正在工作' } as CyberEmployee
     const world = { id: 'world-chat-control', workspaceId: 'workspace-chat-control', name: '控制测试世界', templateId: 'personal-world', status: 'active', createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString() } as World

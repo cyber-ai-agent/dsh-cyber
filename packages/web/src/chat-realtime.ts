@@ -2,7 +2,7 @@ import type { WorkMessage } from '@dsh-cyber/contracts'
 import { formatTime } from './i18n/format.js'
 
 export type ChatQueueMode = 'normal' | 'next'
-export type PendingChatTurnStatus = 'queued' | 'running' | 'waiting-approval' | 'failed' | 'interrupted' | 'cancelled'
+export type PendingChatTurnStatus = 'queued' | 'running' | 'waiting-approval' | 'stopping' | 'failed' | 'interrupted' | 'cancelled'
 
 export interface PendingChatTurn {
   id: string

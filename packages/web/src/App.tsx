@@ -259,8 +259,10 @@ export default function App() {
     () => mergeChatTimeline(messages, activeOutboxMessages, activePendingTurns, activeStreamingReplies),
     [activeOutboxMessages, activePendingTurns, activeStreamingReplies, messages],
   )
-  const activePendingCount = activePendingTurns.filter((turn) => turn.status === 'queued' || turn.status === 'running').length
-  const activeQueuedCount = activePendingTurns.filter((turn) => turn.status === 'queued').length
+  const activePendingCount = activePendingTurns.filter((turn) => turn.status === 'queued' || turn.status === 'running' || turn.status === 'waiting-approval' || turn.status === 'stopping').length
+  const activeRunningCount = activePendingTurns.filter((turn) => turn.status === 'running' || turn.status === 'waiting-approval' || turn.status === 'stopping').length
+  const queuedInConversation = activePendingTurns.filter((turn) => turn.status === 'queued').length
+  const activeQueuedCount = Math.max(0, queuedInConversation - (activeRunningCount === 0 && queuedInConversation > 0 ? 1 : 0))
   activeWorldRef.current = activeWorld
   activeSessionIdRef.current = activeSessionId
   activeConversationKeyRef.current = activeConversationKey
@@ -526,19 +528,29 @@ export default function App() {
     if (turn === undefined) return
     const workTurnId = turn.workTurnId ?? reply?.workTurnId
     if (workTurnId === undefined) return
-    const paths = [`/api/turns/${encodeURIComponent(workTurnId)}/stop`, `/api/turns/${encodeURIComponent(workTurnId)}/abort`, `/api/work-turns/${encodeURIComponent(workTurnId)}/abort`]
-    let lastError: unknown
-    for (const path of paths) {
-      try {
-        await api(path, { method: 'POST', body: JSON.stringify({ reason: 'user-stop' }) })
+    const previousStatus = turn.status
+    patchPendingTurn(turnId, { status: 'stopping' })
+    try {
+      const result = await api<{
+        workTurn?: { status?: string }
+        control?: { status?: string; sessionId?: string; workTurnId?: string }
+      }>(`/api/turns/${encodeURIComponent(workTurnId)}/stop`, { method: 'POST', body: JSON.stringify({ reason: 'user-stop' }) })
+      const status = result.control?.status ?? result.workTurn?.status
+      if (status === 'interrupted') {
         patchPendingTurn(turnId, { status: 'interrupted' })
-        return
-      } catch (cause) {
-        lastError = cause
+        setStreamingReplies((current) => removeStreamingTurn(current, turnId))
+      } else if (status === 'completed' || status === 'failed') {
+        removePendingTurn(turnId)
+      } else {
+        patchPendingTurn(turnId, { status: previousStatus })
       }
+      const sessionId = result.control?.sessionId ?? turn.sessionId
+      if (sessionId !== undefined && activeSessionIdRef.current === sessionId) setTranscriptReload((value) => value + 1)
+    } catch (cause) {
+      patchPendingTurn(turnId, { status: previousStatus })
+      setError(cause instanceof Error ? cause.message : '停止请求失败')
     }
-    setError(lastError instanceof Error ? lastError.message : '停止请求失败')
-  }, [patchPendingTurn, streamingReplies])
+  }, [patchPendingTurn, removePendingTurn, streamingReplies])
 
   const bindConversationSession = useCallback((queueKey: string, session: WorkSession, employeeIds: string[]) => {
     sessionByQueueKeyRef.current.set(queueKey, session.id)
@@ -750,6 +762,34 @@ export default function App() {
     }
     return subscribeWorldLive(world.id, 'runtime', onRuntime)
   }, [activeWorld, bindConversationSession, patchPendingTurn, refreshConversationTranscript, removePendingTurn])
+
+  useEffect(() => {
+    if (demoMode || activeWorld === undefined) return
+    const world = activeWorld
+    const onControl = (raw: Event) => {
+      try {
+        const control = JSON.parse((raw as MessageEvent<string>).data) as {
+          worldId?: string
+          sessionId?: string
+          workTurnId?: string
+          status?: string
+        }
+        if (control.worldId !== world.id || control.status !== 'interrupted' || control.workTurnId === undefined) return
+        const pending = pendingTurnsRef.current.find((turn) => turn.workTurnId === control.workTurnId)
+        if (pending !== undefined) {
+          patchPendingTurn(pending.id, { status: 'interrupted' })
+          setStreamingReplies((current) => removeStreamingTurn(current, pending.id))
+        }
+        if (control.sessionId !== undefined) {
+          const queueKey = pending?.queueKey ?? queueKeyBySessionRef.current.get(control.sessionId)
+          if (queueKey !== undefined) void refreshConversationTranscript(control.sessionId, queueKey, world.id)
+        }
+      } catch {
+        // Durable transcript refresh and the Stop HTTP response remain authoritative.
+      }
+    }
+    return subscribeWorldLive(world.id, 'conversation-control', onControl)
+  }, [activeWorld, demoMode, patchPendingTurn, refreshConversationTranscript])
 
   useEffect(() => {
     if (demoMode || activeWorld === undefined || pendingTurns.length === 0) return

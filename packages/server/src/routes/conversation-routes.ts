@@ -3,6 +3,10 @@ import type {
   ConversationOrchestrator,
   DirectConversationInput,
 } from '@dsh-cyber/orchestration'
+import {
+  normalizeUserPrompt,
+  UserPromptValidationError,
+} from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { HttpError } from '../http/errors.js'
@@ -133,7 +137,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     if (world === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
     await worldAccess.assertUnlocked(world.id, request)
     const body = await readJson(request)
-    const prompt = requiredString(body, 'prompt')
+    const prompt = requiredChatPrompt(body.prompt)
     const explicitIds = optionalStringArray(body.employeeIds)
     const employeeIds = explicitIds.length > 0 ? explicitIds : mentionedEmployeeIds(prompt, store.listEmployees(world.id))
     const employees = employeeIds.map((employeeId) => store.getEmployee(employeeId))
@@ -544,6 +548,17 @@ function queryPositiveInteger(value: string | null, fallback?: number): number |
   const parsed = Number(value)
   if (!Number.isInteger(parsed) || parsed <= 0) throw new HttpError(422, 'invalid_message_page', '分页参数必须是正整数')
   return parsed
+}
+
+function requiredChatPrompt(value: unknown): string {
+  try {
+    return normalizeUserPrompt(value)
+  } catch (error) {
+    if (error instanceof UserPromptValidationError) {
+      throw new HttpError(422, error.code, error.message)
+    }
+    throw error
+  }
 }
 
 function queryNonNegativeInteger(value: string | null): number | undefined {
