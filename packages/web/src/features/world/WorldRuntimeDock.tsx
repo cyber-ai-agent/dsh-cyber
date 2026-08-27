@@ -51,7 +51,7 @@ export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = tru
   useEffect(() => setActiveEmployeeId(selectedEmployeeId), [selectedEmployeeId])
 
   if (runtime.loading || runtime.snapshot === undefined) {
-    return <div className="world-runtime-dock world-runtime-dock--loading"><Buildings size={28} /><strong>正在恢复实时世界</strong><span>同步角色位置、任务状态和场景主题…</span></div>
+    return <div className="world-runtime-dock world-runtime-dock--loading world-runtime-dock--shared-scene"><Buildings size={28} /><strong>正在恢复实时世界</strong><span>同步角色位置、任务状态和场景主题…</span></div>
   }
 
   const renderedSnapshot = withCharacterVisuals(runtime.snapshot, employees)
@@ -142,13 +142,14 @@ export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = tru
 
   return (
     <>
-      <section className="world-runtime-dock" aria-label={`${world.name}实时世界`}>
+      <section className="world-runtime-dock world-runtime-dock--shared-scene" aria-label={`${world.name}实时世界`}>
         <div className="world-runtime-dock__canvas">
           <WorldCanvas
             manifest={runtime.manifest}
             rendererIdentity={runtime.rendererIdentity}
             snapshot={renderedSnapshot}
             cues={runtime.cues}
+            sharedScene
             {...(activeEmployeeId === undefined ? {} : { selectedEntityId: activeEmployeeId })}
             {...(selectedObjectId === undefined ? {} : { selectedObjectId })}
             fitRequest={fitRequest}

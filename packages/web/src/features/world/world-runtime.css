@@ -92,6 +92,28 @@
   background: #05090c;
 }
 
+/* The shell paints one canonical scene across the chat and World panes.
+   Pixi contributes only live actors and interaction affordances here. */
+:root[data-skin] .world-runtime-dock--shared-scene {
+  background: transparent !important;
+}
+
+.world-runtime-dock--shared-scene .world-runtime-dock__canvas,
+.world-canvas-host--shared-scene {
+  background: transparent;
+}
+
+.workbench-shell:has(.world-runtime-dock--shared-scene) > .center-pane,
+.workbench-shell:has(.world-runtime-dock--shared-scene) > .right-pane {
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.workbench-shell:has(.world-runtime-dock--shared-scene) .skin-stage__backdrop {
+  background-image: none !important;
+}
+
 .world-runtime-dock--loading {
   place-content: center;
   justify-items: center;

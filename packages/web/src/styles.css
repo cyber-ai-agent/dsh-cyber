@@ -199,7 +199,7 @@
   --bubble-assistant-border: rgba(2, 132, 199, 0.35);
   --glass-bg: rgba(12, 19, 30, 0.68);
   --glass-blur: blur(16px);
-  --skin-backdrop: url('/assets/skins/orca-dark-hero.webp');
+  --skin-backdrop: url('/assets/skins/orca-bridge-night.png');
   --skin-character-left: none;
   --skin-character-right: none;
   --skin-composer-frame: none;
@@ -230,7 +230,7 @@
   --bubble-assistant-border: rgba(2, 132, 199, 0.28);
   --glass-bg: rgba(245, 247, 250, 0.7);
   --glass-blur: blur(16px);
-  --skin-backdrop: url('/assets/skins/orca-light-hero.webp');
+  --skin-backdrop: url('/assets/skins/orca-bridge-night.png');
   --skin-character-left: none;
   --skin-character-right: none;
   --skin-composer-frame: none;

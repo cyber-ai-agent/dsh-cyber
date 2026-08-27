@@ -48,7 +48,7 @@ export const orcaLinkManifest: WorldThemeManifestV1 = {
   id: 'dsh-cyber.orca.vessel',
   version: '1.0.0',
   templateId: 'orca-link',
-  displayName: '虎鲸链路 · 机械航行舱',
+  displayName: '虎鲸链路 · 深海舰桥',
   renderer: 'pixi-2d',
   terminology: {
     world: '航行舱',
@@ -59,7 +59,7 @@ export const orcaLinkManifest: WorldThemeManifestV1 = {
   assets: [
     {
       id: 'orca-scene',
-      src: '/assets/skins/orca-dark-hero.webp',
+      src: '/assets/skins/orca-bridge-night.png',
       kind: 'image',
       preload: true,
       pixelArt: false,
@@ -71,14 +71,14 @@ export const orcaLinkManifest: WorldThemeManifestV1 = {
     {
       id: 'orca-bridge',
       displayName: '虎鲸舰桥甲板',
-      size: { width: 1672, height: 941 },
-      cameraBounds: { x: 0, y: 0, width: 1672, height: 941 },
-      safeArea: { x: 40, y: 40, width: 1592, height: 861 },
+      size: { width: 1792, height: 1120 },
+      cameraBounds: { x: 0, y: 0, width: 1792, height: 1120 },
+      safeArea: { x: 40, y: 40, width: 1712, height: 1040 },
       layers: [
         {
           id: 'vessel-interior',
           assetId: 'orca-scene',
-          destination: { x: 0, y: 0, width: 1672, height: 941 },
+          destination: { x: 0, y: 0, width: 1792, height: 1120 },
           zIndex: 0,
         },
       ],
@@ -131,7 +131,7 @@ export const BUILTIN_THEMES: WorldThemeConfig[] = [
   {
     id: 'maid-atelier',
     displayName: '深海女仆工坊',
-    description: '鲸鱼神殿 · 蓝金微晶 · 双女仆立绘与欧式图书殿堂',
+    description: '深海宫殿 · 蓝金微晶 · 双女仆立绘与月光大厅',
     author: '官方内置',
     source: 'builtin',
     tokens: {
@@ -145,11 +145,14 @@ export const BUILTIN_THEMES: WorldThemeConfig[] = [
       mutedTextColor: '#c5a468',
       ownerBubbleColor: '#122648',
       characterBubbleColor: '#0a1630',
+      // The chat surface and the World dock are two views into the same
+      // palace scene. Keep the backdrop and the runtime map on one source so
+      // a pane resize or theme switch never presents unrelated rooms.
       backdropImage: '/assets/skins/maid-palace-night.webp',
       backdropOpacity: 0.95,
       characterLeftImage: '/assets/skins/maid-left.webp',
       characterRightImage: '/assets/skins/maid-right.webp',
-      worldMapImage: '/assets/maid-palace-world.png',
+      worldMapImage: '/assets/skins/maid-palace-night.webp',
     },
     runtimeManifest: maidPalaceTheme,
   },
@@ -170,7 +173,7 @@ export const BUILTIN_THEMES: WorldThemeConfig[] = [
       mutedTextColor: '#00e5ff',
       ownerBubbleColor: '#0c2233',
       characterBubbleColor: '#08131d',
-      backdropImage: '/assets/cyber-office-world-clean.png',
+      backdropImage: '/assets/cyber-office-world.png',
       backdropOpacity: 0.92,
       worldMapImage: '/assets/cyber-office-world.png',
     },
@@ -180,7 +183,7 @@ export const BUILTIN_THEMES: WorldThemeConfig[] = [
   {
     id: 'orca-link',
     displayName: '虎鲸链路',
-    description: '机械航行舱 · 深蓝电光 · 虎鲸机能全景',
+    description: '深海舰桥 · 深蓝电光 · 虎鲸导航全景',
     author: '官方内置',
     source: 'builtin',
     tokens: {
@@ -194,9 +197,9 @@ export const BUILTIN_THEMES: WorldThemeConfig[] = [
       mutedTextColor: '#38bdf8',
       ownerBubbleColor: '#0c2e4e',
       characterBubbleColor: '#081a2e',
-      backdropImage: '/assets/skins/orca-dark-hero.webp',
+      backdropImage: '/assets/skins/orca-bridge-night.png',
       backdropOpacity: 0.92,
-      worldMapImage: '/assets/skins/orca-dark-hero.webp',
+      worldMapImage: '/assets/skins/orca-bridge-night.png',
     },
     runtimeManifest: orcaLinkManifest,
   },
@@ -374,9 +377,13 @@ export function applyWorldTheme(themeId: string): void {
   root.style.setProperty('--theme-character-bubble', tokens.characterBubbleColor)
 
   // 3. 背景全景与立绘
-  if (tokens.backdropImage) {
-    root.style.setProperty('--theme-backdrop-image', `url('${tokens.backdropImage}')`)
-    root.style.setProperty('--skin-backdrop', `url('${tokens.backdropImage}')`)
+  // A theme's runtime map is the canonical scene. When both panes are
+  // visible, the conversation backdrop must be a view of that same scene,
+  // otherwise the center and the World dock read as unrelated rooms.
+  const sceneImage = tokens.worldMapImage ?? tokens.backdropImage
+  if (sceneImage) {
+    root.style.setProperty('--theme-backdrop-image', `url('${sceneImage}')`)
+    root.style.setProperty('--skin-backdrop', `url('${sceneImage}')`)
     root.style.setProperty('--theme-backdrop-opacity', String(tokens.backdropOpacity ?? 0.95))
   } else {
     root.style.removeProperty('--theme-backdrop-image')

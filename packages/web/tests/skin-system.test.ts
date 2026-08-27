@@ -6,6 +6,7 @@ import type { World } from '@dsh-cyber/contracts'
 
 import { MARKET_SKIN_PACKAGES, PackageMarketDialog } from '../src/components/PackageMarketDialog.js'
 import { SettingsDialog } from '../src/components/SettingsDialog.js'
+import { BUILTIN_THEMES, applyWorldTheme } from '../src/features/world/world-themes.js'
 
 const world: World = {
   id: 'world-1',
@@ -46,7 +47,7 @@ describe('modern skin system and marketplace category', () => {
     expect(html).toContain('世界</button>')
     expect(html).toContain('角色</button>')
     expect(html).toContain('插件</button>')
-    expect(html).toContain('皮肤</button>')
+    expect(html).toContain('主题</button>')
     expect(html).toContain('深海女仆工坊 (Maid Atelier · 鲸鱼娘)')
     expect(html).toContain('虎鲸链路 (Orca Link · 虎鲸娘)')
     expect(html).toContain('绝区零 · 星见雅 (ZZZ Miyabi)')
@@ -60,10 +61,10 @@ describe('modern skin system and marketplace category', () => {
     expect(html).toContain('极简黑曜 (Linear Obsidian Pro)')
     expect(html).toContain('暖阳白昼 (Claude Warm Daylight)')
     expect(html).toContain('✓ 正在使用')
-    expect(html).toContain('立即换肤')
+    expect(html).toContain('应用到当前世界')
   })
 
-  it('provides rich skin selector cards in SettingsDialog with all 12 DSH universe themes', () => {
+  it('provides the four world theme cards in SettingsDialog', () => {
     const html = renderToStaticMarkup(createElement(SettingsDialog, {
       initialSection: 'appearance',
       preferences: {
@@ -100,17 +101,9 @@ describe('modern skin system and marketplace category', () => {
 
     expect(html).toContain('深海女仆工坊')
     expect(html).toContain('虎鲸链路')
-    expect(html).toContain('绝区零 · 星见雅')
-    expect(html).toContain('绝区零 · 艾莲')
-    expect(html).toContain('初恋时刻')
-    expect(html).toContain('蛛网都市')
-    expect(html).toContain('宝可梦黄昏')
-    expect(html).toContain('木叶忍界')
-    expect(html).toContain('鬼灭藤夜')
-    expect(html).toContain('赛博霓虹 2.0')
-    expect(html).toContain('极简黑曜')
-    expect(html).toContain('暖阳白昼')
-    expect(html).toContain('鲸鱼娘 · 深海幽蓝蕾丝双女仆')
+    expect(html).toContain('赛博原厂')
+    expect(html).toContain('月影酒馆')
+    expect(html).not.toContain('欧式图书殿堂')
   })
 
   it('defines 12 modern skin package descriptors in MARKET_SKIN_PACKAGES', () => {
@@ -130,5 +123,16 @@ describe('modern skin system and marketplace category', () => {
       'linear-obsidian',
       'paper-daylight',
     ])
+  })
+
+  it('keeps every runtime theme on one canonical scene source', () => {
+    for (const theme of BUILTIN_THEMES) {
+      const sceneImage = theme.tokens.worldMapImage ?? theme.tokens.backdropImage
+      expect(sceneImage, `${theme.id} must declare a scene image`).toBeDefined()
+      expect(theme.tokens.backdropImage).toBe(sceneImage)
+      expect(theme.runtimeManifest?.assets.find((asset) => asset.kind === 'image')?.src).toBe(sceneImage)
+      applyWorldTheme(theme.id)
+      expect(document.documentElement.style.getPropertyValue('--theme-backdrop-image')).toContain(sceneImage!)
+    }
   })
 })

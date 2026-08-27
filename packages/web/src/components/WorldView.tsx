@@ -118,7 +118,7 @@ function WorldScene({ kind, employees, sceneImage, lightsOn, zoom, onSelectEmplo
 }) {
   const isTavern = kind === 'tavern'
   const currentSkin = typeof document !== 'undefined' ? document.documentElement.dataset.skin : undefined
-  const defaultScene = currentSkin === 'maid-atelier' ? '/assets/maid-palace-world.png' : (isTavern ? '/assets/moonlit-tavern-world.png' : '/assets/cyber-office-world-clean.png')
+  const defaultScene = currentSkin === 'maid-atelier' ? '/assets/skins/maid-palace-night.webp' : (isTavern ? '/assets/moonlit-tavern-world.png' : '/assets/cyber-office-world.png')
   const positions = isTavern ? tavernPositions : companyPositions
   const image = sceneImage ?? defaultScene
   const activeSpeaker = employees.find((employee) => employee.status === 'working')

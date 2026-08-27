@@ -97,7 +97,7 @@ export function WorldSettingsDialog({ world, value, models, employees, authoriti
               </div>
               <div className="dialog-field">
                 <span>当前场景</span>
-                <textarea rows={2} value={draft.scenario} onChange={(event)=>setDraft({...draft,scenario:event.target.value})} placeholder="例如：深夜的图书馆，窗外正在下雨。"/>
+                <textarea rows={2} value={draft.scenario} onChange={(event)=>setDraft({...draft,scenario:event.target.value})} placeholder="例如：深夜的观测舱，舷窗外有微光航迹。"/>
               </div>
             </div>
           </section>

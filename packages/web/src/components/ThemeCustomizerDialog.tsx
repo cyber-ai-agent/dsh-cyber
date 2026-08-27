@@ -284,7 +284,7 @@ export function ThemeCustomizerDialog({
                   type="text"
                   value={tokens.worldMapImage ?? ''}
                   onChange={(e) => updateToken('worldMapImage', e.target.value)}
-                  placeholder="如: /assets/maid-palace-world.png 或自定义俯视地图"
+                  placeholder="如: /assets/skins/maid-palace-night.webp 或自定义场景图"
                 />
               </label>
             </div>

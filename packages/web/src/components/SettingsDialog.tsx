@@ -557,7 +557,7 @@ function AppearanceSettings({
         <div className="world-theme-feature-card">
           <div className="theme-card-icon" style={{ color: '#38bdf8' }}><Sparkle size={20} /></div>
           <strong>深海女仆工坊</strong>
-          <small>蓝金微晶 · 双女仆立绘 · 欧式图书殿堂</small>
+          <small>深海宫殿 · 蓝金微晶 · 双女仆立绘</small>
         </div>
         <div className="world-theme-feature-card">
           <div className="theme-card-icon" style={{ color: '#00e5ff' }}><Buildings size={20} /></div>

@@ -14,6 +14,8 @@ interface WorldCanvasProps {
   rendererIdentity: string
   snapshot: WorldRuntimeSnapshot
   cues: WorldCue[]
+  /** Render actors and interaction layers over the shell's shared scene. */
+  sharedScene?: boolean
   selectedEntityId?: string
   selectedObjectId?: string
   fitRequest: number
@@ -30,6 +32,7 @@ export function WorldCanvas({
   rendererIdentity,
   snapshot,
   cues,
+  sharedScene = false,
   selectedEntityId,
   selectedObjectId,
   fitRequest,
@@ -43,7 +46,7 @@ export function WorldCanvas({
   const hostRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<WorldRenderer<HTMLElement> | undefined>(undefined)
   const appliedCueIds = useRef(new Set<string>())
-  const mountedKey = `${rendererIdentity}:${manifest.id}:${snapshot.sceneId}`
+  const mountedKey = `${rendererIdentity}:${manifest.id}:${snapshot.sceneId}:${sharedScene ? 'shared' : 'local'}`
 
   useEffect(() => {
     const host = hostRef.current
@@ -82,7 +85,7 @@ export function WorldCanvas({
   }, [zoomCommand?.id])
 
   const keyboardPosition = () => { const rect = hostRef.current?.getBoundingClientRect(); return rect === undefined ? { x: 24, y: 24 } : { x: rect.left + 48, y: rect.top + 48 } }
-  return <><div ref={hostRef} className="world-canvas-host" aria-label="互动世界画布" onContextMenu={(event) => event.preventDefault()} />
+  return <><div ref={hostRef} className={`world-canvas-host${sharedScene ? ' world-canvas-host--shared-scene' : ''}`} aria-label="互动世界画布" onContextMenu={(event) => event.preventDefault()} />
     <div className="sr-only" aria-label="世界角色与设施快捷操作">
       {snapshot.entities.filter((entity) => entity.kind === 'agent').map((entity) => <button key={entity.id} type="button" aria-label={`${entity.displayName}世界角色`} onClick={() => onEntitySelect(entity.id)} onContextMenu={(event) => { event.preventDefault(); onEntityContext?.(entity.id, { x: event.clientX, y: event.clientY }) }} onKeyDown={(event) => { if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return; event.preventDefault(); onEntityContext?.(entity.id, keyboardPosition()) }}>{entity.displayName}</button>)}
       {snapshot.objects.map((object) => <button key={object.id} type="button" aria-label={`${object.displayName}世界设施`} onClick={() => onObjectSelect(object.id)} onContextMenu={(event) => { event.preventDefault(); onObjectContext?.(object.id, { x: event.clientX, y: event.clientY }) }} onKeyDown={(event) => { if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return; event.preventDefault(); onObjectContext?.(object.id, keyboardPosition()) }}>{object.displayName}</button>)}
