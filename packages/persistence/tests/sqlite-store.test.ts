@@ -763,6 +763,14 @@ describe('SqliteStore', () => {
       DROP TABLE skill_actions;
       DROP TABLE approval_requests;
       DROP TABLE world_package_instances;
+      DROP TABLE growth_evidence;
+      DROP TABLE reviews;
+      DROP TABLE deliverables;
+      DROP TABLE task_runs;
+      DROP TABLE task_assignments;
+      DROP TABLE task_plan_steps;
+      DROP TABLE task_plan_revisions;
+      DROP TABLE work_tasks;
       DROP TABLE completion_jobs;
       DROP TABLE agent_runs;
       DROP TABLE conversation_queue_entries;

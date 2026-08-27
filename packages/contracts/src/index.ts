@@ -1,6 +1,6 @@
 import type { WorldCharacterAuthority } from './world-authority.js'
 
-export const CYBER_SCHEMA_VERSION = 30 as const
+export const CYBER_SCHEMA_VERSION = 31 as const
 
 export type IsoTimestamp = string
 export type JsonPrimitive = boolean | number | string | null
@@ -1109,6 +1109,7 @@ export * from './conversation-queue.js'
 export * from './browser-skill.js'
 export * from './workspace-preferences.js'
 export * from './completion-job.js'
+export * from './work-system.js'
 
 export type {
   CharacterSkillAction,

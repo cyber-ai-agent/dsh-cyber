@@ -1640,6 +1640,138 @@ const MIGRATIONS: readonly Migration[] = [
         WHERE status = 'running';
     `,
   },
+  {
+    version: 31,
+    name: 'work-system-v1',
+    sql: `
+      CREATE TABLE work_tasks (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('draft','planning','ready','running','waiting-approval','waiting-review','changes-requested','completed','failed','cancelled','recovery-required')),
+        priority TEXT NOT NULL CHECK (priority IN ('low','normal','high','urgent')),
+        due_at TEXT,
+        budget_json TEXT NOT NULL CHECK (json_valid(budget_json)),
+        created_by TEXT NOT NULL,
+        coordinator_employee_id TEXT REFERENCES employee_instances(id) ON DELETE SET NULL,
+        current_plan_revision INTEGER NOT NULL DEFAULT 0 CHECK (current_plan_revision >= 0),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (workspace_id, world_id) REFERENCES worlds(workspace_id, id) ON DELETE CASCADE
+      ) STRICT;
+      CREATE INDEX work_tasks_world_status_idx ON work_tasks(world_id, status, updated_at DESC, id);
+
+      CREATE TABLE task_plan_revisions (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL REFERENCES work_tasks(id) ON DELETE CASCADE,
+        revision INTEGER NOT NULL CHECK (revision > 0),
+        status TEXT NOT NULL CHECK (status IN ('draft','active','superseded','completed','failed')),
+        summary TEXT NOT NULL,
+        execution_mode TEXT NOT NULL CHECK (execution_mode IN ('parallel','sequential','mixed')),
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE (task_id, revision)
+      ) STRICT;
+      CREATE INDEX task_plan_revisions_task_idx ON task_plan_revisions(task_id, revision DESC);
+
+      CREATE TABLE task_plan_steps (
+        id TEXT PRIMARY KEY,
+        plan_revision_id TEXT NOT NULL REFERENCES task_plan_revisions(id) ON DELETE CASCADE,
+        ordinal INTEGER NOT NULL CHECK (ordinal > 0),
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        required_skills_json TEXT NOT NULL CHECK (json_valid(required_skills_json)),
+        assigned_employee_ids_json TEXT NOT NULL CHECK (json_valid(assigned_employee_ids_json)),
+        depends_on_json TEXT NOT NULL CHECK (json_valid(depends_on_json)),
+        execution_mode TEXT NOT NULL CHECK (execution_mode IN ('parallel','sequential')),
+        expected_output TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('pending','ready','running','waiting','completed','failed','cancelled')),
+        UNIQUE (plan_revision_id, ordinal)
+      ) STRICT;
+
+      CREATE TABLE task_assignments (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL REFERENCES work_tasks(id) ON DELETE CASCADE,
+        plan_revision_id TEXT NOT NULL REFERENCES task_plan_revisions(id) ON DELETE CASCADE,
+        step_id TEXT NOT NULL REFERENCES task_plan_steps(id) ON DELETE CASCADE,
+        employee_id TEXT NOT NULL REFERENCES employee_instances(id) ON DELETE RESTRICT,
+        assignment_reason_json TEXT NOT NULL CHECK (json_valid(assignment_reason_json)),
+        required_skills_json TEXT NOT NULL CHECK (json_valid(required_skills_json)),
+        status TEXT NOT NULL CHECK (status IN ('assigned','running','waiting','completed','failed','cancelled')),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (plan_revision_id, step_id, employee_id)
+      ) STRICT;
+      CREATE INDEX task_assignments_employee_status_idx ON task_assignments(employee_id, status, updated_at DESC, id);
+
+      CREATE TABLE task_runs (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL REFERENCES work_tasks(id) ON DELETE CASCADE,
+        plan_revision_id TEXT NOT NULL REFERENCES task_plan_revisions(id) ON DELETE RESTRICT,
+        attempt INTEGER NOT NULL CHECK (attempt > 0),
+        work_turn_id TEXT NOT NULL REFERENCES work_turns(id) ON DELETE RESTRICT,
+        agent_run_ids_json TEXT NOT NULL CHECK (json_valid(agent_run_ids_json)),
+        status TEXT NOT NULL CHECK (status IN ('running','waiting-approval','completed','failed','cancelled','recovery-required')),
+        cost REAL,
+        latency REAL,
+        error_code TEXT,
+        started_at TEXT NOT NULL,
+        completed_at TEXT,
+        UNIQUE (task_id, attempt)
+      ) STRICT;
+      CREATE INDEX task_runs_task_idx ON task_runs(task_id, attempt DESC);
+
+      CREATE TABLE deliverables (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL REFERENCES work_tasks(id) ON DELETE CASCADE,
+        task_run_id TEXT NOT NULL REFERENCES task_runs(id) ON DELETE RESTRICT,
+        step_id TEXT REFERENCES task_plan_steps(id) ON DELETE SET NULL,
+        submitted_by_employee_id TEXT NOT NULL REFERENCES employee_instances(id) ON DELETE RESTRICT,
+        artifact_id TEXT NOT NULL,
+        artifact_version_id INTEGER NOT NULL CHECK (artifact_version_id > 0),
+        title TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        evidence_refs_json TEXT NOT NULL CHECK (json_valid(evidence_refs_json)),
+        version INTEGER NOT NULL CHECK (version > 0),
+        status TEXT NOT NULL CHECK (status IN ('draft','submitted','accepted','changes-requested','rejected','superseded')),
+        created_at TEXT NOT NULL,
+        UNIQUE (task_id, version),
+        UNIQUE (task_run_id, artifact_id, artifact_version_id),
+        FOREIGN KEY (artifact_id, artifact_version_id) REFERENCES world_artifact_versions(artifact_id, version) ON DELETE RESTRICT
+      ) STRICT;
+      CREATE INDEX deliverables_task_idx ON deliverables(task_id, version DESC);
+
+      CREATE TABLE reviews (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL REFERENCES work_tasks(id) ON DELETE CASCADE,
+        deliverable_id TEXT NOT NULL REFERENCES deliverables(id) ON DELETE RESTRICT,
+        reviewer_kind TEXT NOT NULL CHECK (reviewer_kind IN ('owner','employee','system')),
+        reviewer_id TEXT NOT NULL,
+        decision TEXT NOT NULL CHECK (decision IN ('accept','request-changes','reject')),
+        feedback TEXT NOT NULL,
+        rubric_json TEXT NOT NULL CHECK (json_valid(rubric_json)),
+        created_at TEXT NOT NULL
+      ) STRICT;
+      CREATE INDEX reviews_task_idx ON reviews(task_id, created_at DESC, id);
+
+      CREATE TABLE growth_evidence (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        task_id TEXT NOT NULL REFERENCES work_tasks(id) ON DELETE CASCADE,
+        deliverable_id TEXT NOT NULL REFERENCES deliverables(id) ON DELETE RESTRICT,
+        employee_id TEXT NOT NULL REFERENCES employee_instances(id) ON DELETE RESTRICT,
+        skill_ids_json TEXT NOT NULL CHECK (json_valid(skill_ids_json)),
+        outcome TEXT NOT NULL CHECK (outcome IN ('accepted','rejected')),
+        summary TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE (deliverable_id, employee_id, outcome)
+      ) STRICT;
+      CREATE INDEX growth_evidence_employee_idx ON growth_evidence(employee_id, created_at DESC, id);
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {

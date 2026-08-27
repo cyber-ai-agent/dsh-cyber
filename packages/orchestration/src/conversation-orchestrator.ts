@@ -769,10 +769,10 @@ export class ConversationOrchestrator implements AsyncDisposable {
         sessionId: session.id,
         workTurnId: workTurn.id,
         steps: input.steps.map((step) => ({
-          id: step.id,
+          id: `${workTurn.id}:${step.id}`,
           requiredSkills: [...step.requiredSkills],
           assignedEmployeeIds: [...step.assignedEmployeeIds],
-          dependsOn: [...step.dependsOn],
+          dependsOn: step.dependsOn.map((dependency) => `${workTurn.id}:${dependency}`),
           executionMode: step.executionMode,
           status: 'pending' as const,
         })),
