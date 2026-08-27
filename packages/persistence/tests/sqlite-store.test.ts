@@ -585,6 +585,7 @@ describe('SqliteStore', () => {
       .toThrow('300 到 760')
     store.updateWorkspacePreferences({
       workspaceId: workspace.id,
+      locale: 'ja-JP',
       colorScheme: 'dark',
       skinId: 'cyber-graphite',
       backgroundAssetRef: 'backgrounds/night-office.webp',
@@ -627,6 +628,7 @@ describe('SqliteStore', () => {
     const reopened = await SqliteStore.open(path)
     stores.push(reopened)
     expect(reopened.getWorkspacePreferences(workspace.id)).toMatchObject({
+      locale: 'ja-JP',
       colorScheme: 'dark',
       backgroundAssetRef: 'backgrounds/night-office.webp',
       motion: 'reduced',

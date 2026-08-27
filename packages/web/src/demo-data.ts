@@ -301,6 +301,7 @@ export const demoData: WorkbenchData = {
   sessions,
   messages: demoMessages,
   preferences: {
+    locale: 'zh-CN',
     workspaceId,
     colorScheme: 'dark',
     skinId: 'cyber-graphite',

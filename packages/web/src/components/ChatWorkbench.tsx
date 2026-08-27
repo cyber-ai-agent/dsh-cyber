@@ -15,6 +15,8 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { WORLD_CHARACTER_MANAGEMENT_PERMISSIONS, type ChatAttachment, type CompletionJob, type InstalledPluginCommand, type JsonObject, type LocalAssetMimeType, type WorkMessage, type WorkSession, type World, type WorldCharacterPermission, type WorldPermissionDecisionScope, type WorldPermissionRequest } from '@dsh-cyber/contracts'
 
 import { api } from '../api.js'
+import { formatDateTime, formatTime } from '../i18n/format.js'
+import { useI18n } from '../i18n/runtime.js'
 import type { ConversationIntent, CyberEmployee } from '../types.js'
 import type { PendingChatTurn } from '../chat-realtime.js'
 import type { ChatQueueMode } from '../chat-realtime.js'
@@ -74,6 +76,7 @@ interface ChatWorkbenchProps {
 }
 
 export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, installedPlugins = [], sending = false, pendingCount = 0, queuedCount = 0, queueItems = [], draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRetryCompletionJob, onCompletionJobSettled, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, permissionMode = 'read-only', onChangePermissionMode, onRequestFullAccess, onChangeCollaborationMode, onCancelQueuedTurn, onPromoteQueuedTurn, onStopTurn }: ChatWorkbenchProps) {
+  const { t } = useI18n()
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -266,7 +269,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
           {conversationKind === 'group' && onChangeCollaborationMode !== undefined ? <div className="chat-header__collaboration-mode" role="group" aria-label="群聊协作模式"><button type="button" className={collaborationMode === 'discussion' ? 'is-active' : ''} aria-pressed={collaborationMode === 'discussion'} onClick={() => void onChangeCollaborationMode('discussion')}>讨论</button><button type="button" className={collaborationMode === 'task' ? 'is-active' : ''} aria-pressed={collaborationMode === 'task'} onClick={() => void onChangeCollaborationMode('task')}>协作</button></div> : null}
         </div>
         <div className="chat-header__actions">
-          {onOpenHistory === undefined || session === undefined ? null : <button className="chat-header__history" type="button" aria-label="查看历史消息" title="查看历史消息" onClick={onOpenHistory}><ClockCounterClockwise size={19} /><span>历史消息</span></button>}
+          {onOpenHistory === undefined || session === undefined ? null : <button className="chat-header__history" type="button" aria-label={t('workbench.history', '查看历史消息')} title={t('workbench.history', '查看历史消息')} onClick={onOpenHistory}><ClockCounterClockwise size={19} /><span>{t('workbench.history', '查看历史消息')}</span></button>}
         </div>
       </header>
 
@@ -278,8 +281,8 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
           {visibleMessages.length === 0 ? (
             <div className="conversation-empty">
               <TerminalWindow size={34} />
-              <h2>{employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? '群聊已准备好' : conversationKind === 'direct' ? `开始与${participantEmployees[0]?.displayName ?? experience.personLabel}对话` : '选择会话开始互动'}</h2>
-              <p>{employees.length === 0 ? experience.emptyCopy : conversationKind === 'group' ? collaborationMode === 'task' ? '协作已经创建，发送目标后按分工推进；详细执行过程请查看轨迹。' : '讨论已经创建并保存在当前世界，发送消息开始多人讨论。' : conversationKind === 'direct' ? '历史记录会保留在当前世界；发送消息后角色才会进入真实运行过程。' : '左侧只保留会话：每个角色固定一个私聊，也可以创建多人群聊；角色新增与管理统一在右侧角色。'}</p>
+              <h2>{employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? '群聊已准备好' : conversationKind === 'direct' ? t('workbench.startChat', '开始与角色对话') : '选择会话开始互动'}</h2>
+              <p>{employees.length === 0 ? experience.emptyCopy : conversationKind === 'group' ? collaborationMode === 'task' ? '协作已经创建，发送目标后按分工推进；详细执行过程请查看轨迹。' : '讨论已经创建并保存在当前世界，发送消息开始多人讨论。' : conversationKind === 'direct' ? t('workbench.startChatHint', '历史记录保留在当前世界；发送消息后角色才会开始处理。') : '左侧只保留会话：每个角色固定一个私聊，也可以创建多人群聊；角色新增与管理统一在右侧角色。'}</p>
             </div>
           ) : visibleMessages.map((message) => {
             const employee = employees.find((item) => item.id === message.senderId)
@@ -332,7 +335,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
         {suggestions.length === 0 ? null : <div className="mention-menu" role="listbox" aria-label="当前世界角色">{suggestions.map((employee) => <button key={employee.id} type="button" onClick={() => insertMention(employee)}><Avatar index={employee.avatarIndex} size="sm" label={employee.displayName} authorityRole={employee.authorityRole} /><span><strong>{employee.displayName}<AuthorityBadge role={employee.authorityRole} /></strong><small>{employee.role} · 独立角色</small></span></button>)}</div>}
         {attachments.length > 0 ? <div className="composer-attachments" aria-label="待发送附件">{attachments.map((attachment) => <span key={attachment.assetId}><FileIcon size={15} /><span><strong>{attachment.name}</strong><small>{formatBytes(attachment.byteLength)}</small></span><button type="button" aria-label={`移除附件 ${attachment.name}`} onClick={() => setAttachments((current) => current.filter((item) => item.assetId !== attachment.assetId))}><X size={13} /></button></span>)}</div> : null}
         {attachmentError === undefined ? null : <p className="composer-error" role="alert">{attachmentError}</p>}
-        <textarea ref={inputRef} value={draft} onChange={(event) => onDraftChange(event.target.value)} disabled={employees.length === 0} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit() } }} placeholder={employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? `发送消息给 ${participantEmployees.map((employee) => employee.displayName).join('、')}` : conversationKind === 'direct' ? `发送消息给 ${participantEmployees[0]?.displayName ?? experience.personLabel}` : '先从左侧选择会话，或输入 @角色名'} rows={2} aria-label={`给当前世界的${experience.peopleLabel}发送消息`} />
+        <textarea ref={inputRef} value={draft} onChange={(event) => onDraftChange(event.target.value)} disabled={employees.length === 0} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit() } }} placeholder={employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? t('workbench.composer', '发送消息给 {name}', { name: participantEmployees.map((employee) => employee.displayName).join('、') }) : conversationKind === 'direct' ? t('workbench.composer', '发送消息给 {name}', { name: participantEmployees[0]?.displayName ?? experience.personLabel }) : '先从左侧选择会话，或输入 @角色名'} rows={2} aria-label={`给当前世界的${experience.peopleLabel}发送消息`} />
         <div className="composer__toolbar">{hasQueueActions ? <div className="composer__queue-mode" role="group" aria-label="队列操作"><button type="button" aria-label="排队发送" title="排队发送" className={queueMode === 'normal' ? 'is-active' : ''} aria-pressed={queueMode === 'normal'} onClick={() => setQueueMode('normal')}>排队</button><button type="button" aria-label="插入队列前方" title="插入队列前方" className={queueMode === 'next' ? 'is-active' : ''} aria-pressed={queueMode === 'next'} onClick={() => setQueueMode('next')}>插入</button></div> : null}<div>
           {onChangePermissionMode === undefined ? null : <ConversationPermissionControl value={permissionMode} onChange={onChangePermissionMode} {...(onRequestFullAccess === undefined ? {} : { onRequestFullAccess })} />}
           <input ref={fileInputRef} className="composer-file-input" type="file" accept=".png,.jpg,.jpeg,.webp,.txt,.md,.json,.pdf" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAttachment(file) }} />
@@ -638,10 +641,10 @@ function worldPermissionLabel(permission: WorldCharacterPermission): string {
 
 function formatPermissionExpiry(value: string): string {
   const date = new Date(value)
-  return Number.isNaN(date.valueOf()) ? value : date.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  return Number.isNaN(date.valueOf()) ? value : formatDateTime(date, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-function displayTime(message: WorkMessage): string { const metadataTime = message.metadata.displayTime; return typeof metadataTime === 'string' ? metadataTime : new Date(message.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }
+function displayTime(message: WorkMessage): string { const metadataTime = message.metadata.displayTime; return typeof metadataTime === 'string' ? metadataTime : formatTime(message.createdAt) }
 function currentMention(value: string): string | undefined { return /@([^\s@]*)$/.exec(value)?.[1] }
 export function isChatMessage(message: WorkMessage): boolean {
   if (message.kind === 'user' || message.kind === 'assistant') return true

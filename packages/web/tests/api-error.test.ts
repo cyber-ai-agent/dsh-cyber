@@ -1,6 +1,9 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError, api } from '../src/api.js'
+import { setUiLocale } from '../src/i18n/runtime.js'
+
+beforeEach(() => setUiLocale('zh-CN'))
 
 afterEach(() => {
   vi.unstubAllGlobals()

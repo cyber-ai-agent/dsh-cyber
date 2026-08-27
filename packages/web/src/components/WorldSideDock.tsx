@@ -16,6 +16,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState, type KeyboardEven
 import type { EmployeeDossier as EmployeeDossierData, World } from '@dsh-cyber/contracts'
 
 import type { CyberEmployee, DockTab } from '../types.js'
+import { useI18n } from '../i18n/runtime.js'
 import { EmployeeDossier } from './EmployeeDossier.js'
 import { EmployeeDossierDirectory } from './EmployeeDossierDirectory.js'
 import { WorldView } from './WorldView.js'
@@ -83,6 +84,7 @@ export function WorldSideDock({
   onShowAllDossiers,
   onInvite,
 }: WorldSideDockProps) {
+  const { t } = useI18n()
   const [openTabs, setOpenTabs] = useState<Exclude<DockTab, 'world' | 'trace'>[]>(() => {
     const restored = readOpenTabs(world.id)
     return isSecondaryTab(activeTab) && !restored.includes(activeTab) ? [...restored, activeTab] : restored
@@ -127,8 +129,10 @@ export function WorldSideDock({
     }
   }, [moreOpen])
 
-  const visibleSecondaryTabs = useMemo(() => SECONDARY_TABS.filter((tab) => openTabs.includes(tab.id)), [openTabs])
-  const visibleTabs = useMemo(() => [...FIXED_TABS, ...visibleSecondaryTabs], [visibleSecondaryTabs])
+  const localizedFixedTabs = FIXED_TABS.map((tab) => ({ ...tab, label: t(`dock.${tab.id}`, tab.label) }))
+  const localizedSecondaryTabs = SECONDARY_TABS.map((tab) => ({ ...tab, label: t(`dock.${tab.id === 'dossier' ? 'roles' : tab.id}`, tab.label) }))
+  const visibleSecondaryTabs = localizedSecondaryTabs.filter((tab) => openTabs.includes(tab.id))
+  const visibleTabs = [...localizedFixedTabs, ...visibleSecondaryTabs]
 
   const selectTab = (tab: DockTab) => {
     setHistory((current) => [tab, ...current.filter((item) => item !== tab)])
@@ -191,22 +195,22 @@ export function WorldSideDock({
   return <section className="artifact-dock world-side-dock" aria-label="世界与角色侧边栏">
     <header className="dock-tabs">
       <nav className="dock-tabs__primary" aria-label="世界侧栏" role="tablist">
-        {FIXED_TABS.map((tab) => <DockTabButton key={tab.id} tab={tab} active={activeTab === tab.id} buttonRef={(element) => setTabButtonRef(tabButtonRefs.current, tab.id, element)} onSelect={() => selectTab(tab.id)} onKeyDown={(event) => onTabKeyDown(event, tab.id)} />)}
+        {localizedFixedTabs.map((tab) => <DockTabButton key={tab.id} tab={tab} active={activeTab === tab.id} buttonRef={(element) => setTabButtonRef(tabButtonRefs.current, tab.id, element)} onSelect={() => selectTab(tab.id)} onKeyDown={(event) => onTabKeyDown(event, tab.id)} />)}
         {visibleSecondaryTabs.map((tab) => <DockTabButton key={tab.id} tab={tab} active={activeTab === tab.id} closable buttonRef={(element) => setTabButtonRef(tabButtonRefs.current, tab.id, element)} onSelect={() => selectTab(tab.id)} onKeyDown={(event) => onTabKeyDown(event, tab.id)} onClose={() => closeTab(tab.id)} />)}
       </nav>
       <div ref={moreRef} className="dock-tabs__more">
-        <button ref={moreButtonRef} className="dock-tabs__more-button" type="button" aria-label="更多" aria-haspopup="menu" aria-expanded={moreOpen} aria-controls="world-side-dock-more" onClick={() => setMoreOpen((current) => !current)} onKeyDown={onMoreKeyDown}><span>更多</span>{moreOpen ? <CaretUp size={14} aria-hidden="true" /> : <CaretDown size={14} aria-hidden="true" />}</button>
-        {moreOpen ? <div id="world-side-dock-more" className="dock-tabs__more-menu" role="menu" aria-label="更多">
-          {SECONDARY_TABS.map((tab, index) => { const Icon = tab.icon; const opened = openTabs.includes(tab.id); return <button key={tab.id} ref={(element) => { menuItemRefs.current[index] = element }} type="button" role="menuitemcheckbox" aria-checked={opened} onClick={() => { selectTab(tab.id); window.setTimeout(() => tabButtonRefs.current.get(tab.id)?.focus(), 0) }} onKeyDown={(event) => onMenuKeyDown(event, index)}><Icon size={16} aria-hidden="true" /><span>{tab.label}</span>{opened ? <Check size={15} aria-hidden="true" /> : null}</button> })}
+        <button ref={moreButtonRef} className="dock-tabs__more-button" type="button" aria-label={t('dock.more', '更多')} aria-haspopup="menu" aria-expanded={moreOpen} aria-controls="world-side-dock-more" onClick={() => setMoreOpen((current) => !current)} onKeyDown={onMoreKeyDown}><span>{t('dock.more', '更多')}</span>{moreOpen ? <CaretUp size={14} aria-hidden="true" /> : <CaretDown size={14} aria-hidden="true" />}</button>
+        {moreOpen ? <div id="world-side-dock-more" className="dock-tabs__more-menu" role="menu" aria-label={t('dock.more', '更多')}>
+          {localizedSecondaryTabs.map((tab, index) => { const Icon = tab.icon; const opened = openTabs.includes(tab.id); return <button key={tab.id} ref={(element) => { menuItemRefs.current[index] = element }} type="button" role="menuitemcheckbox" aria-checked={opened} onClick={() => { selectTab(tab.id); window.setTimeout(() => tabButtonRefs.current.get(tab.id)?.focus(), 0) }} onKeyDown={(event) => onMenuKeyDown(event, index)}><Icon size={16} aria-hidden="true" /><span>{tab.label}</span>{opened ? <Check size={15} aria-hidden="true" /> : null}</button> })}
         </div> : null}
       </div>
-      <button className="icon-button" type="button" aria-label="收起侧边栏" title="收起侧边栏" onClick={onCollapse}><CaretDoubleRight size={17} /></button>
+      <button className="icon-button" type="button" aria-label={t('dock.collapse', '收起侧边栏')} title={t('dock.collapse', '收起侧边栏')} onClick={onCollapse}><CaretDoubleRight size={17} /></button>
     </header>
     <div id="world-side-dock-panel" className="dock-content" role="tabpanel" aria-labelledby={`world-side-dock-tab-${activeTab}`}>
       {activeTab === 'world' ? worldContent ?? <WorldView world={world} employees={employees} {...(sceneImage === undefined ? {} : { sceneImage })} onSelectEmployee={onSelectEmployee} /> : null}
       {activeTab === 'dossier' ? selectedEmployee !== undefined && dossiers[selectedEmployee.id] !== undefined ? <EmployeeDossier dossier={dossiers[selectedEmployee.id]!} employees={employees} world={world} avatarIndex={selectedEmployee.avatarIndex} onDirect={() => onDirectEmployee(selectedEmployee)} onManage={() => onManageEmployee(selectedEmployee)} onBack={onShowAllDossiers} /> : <EmployeeDossierDirectory employees={employees} dossiers={dossiers} world={world} onOpen={onSelectEmployee} onDirect={onDirectEmployee} onManage={onManageEmployee} onInvite={onInvite} /> : null}
-      {activeTab === 'tasks' ? <Suspense fallback={<div className="dock-empty-state" role="status"><strong>正在加载任务工作台</strong></div>}><TaskWorkspace world={world} employees={employees} /></Suspense> : null}
-      {activeTab === 'knowledge' ? knowledgeContent ?? <Suspense fallback={<div className="dock-empty-state" role="status"><strong>正在加载知识库</strong></div>}><KnowledgeDock world={world} demoMode={demoMode} /></Suspense> : null}
+      {activeTab === 'tasks' ? <Suspense fallback={<div className="dock-empty-state" role="status"><strong>{t('dock.loadingTasks', '正在加载任务工作台')}</strong></div>}><TaskWorkspace world={world} employees={employees} /></Suspense> : null}
+      {activeTab === 'knowledge' ? knowledgeContent ?? <Suspense fallback={<div className="dock-empty-state" role="status"><strong>{t('dock.loadingKnowledge', '正在加载知识库')}</strong></div>}><KnowledgeDock world={world} demoMode={demoMode} /></Suspense> : null}
       {activeTab === 'artifacts' ? artifactContent ?? <ArtifactEmptyState /> : null}
       {activeTab === 'trace' ? traceContent : null}
       {activeTab === 'schedule' ? scheduleContent : null}

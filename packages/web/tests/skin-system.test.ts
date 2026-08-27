@@ -61,6 +61,7 @@ describe('modern skin system and marketplace category', () => {
     const html = renderToStaticMarkup(createElement(SettingsDialog, {
       initialSection: 'appearance',
       preferences: {
+        locale: 'zh-CN',
         colorScheme: 'dark',
         skinId: 'maid-atelier',
         customBackground: '',

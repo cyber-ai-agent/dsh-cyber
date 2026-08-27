@@ -1,3 +1,21 @@
+import type { UiLocale } from '@dsh-cyber/contracts'
+import { getUiLocale } from './i18n/runtime.js'
+
+const requestFailureMessages: Record<UiLocale, string> = {
+  'zh-CN': '请求失败，请稍后重试。',
+  'zh-TW': '請求失敗，請稍後再試。',
+  'en-US': 'The request failed. Please try again.',
+  'ja-JP': 'リクエストに失敗しました。もう一度お試しください。',
+  'ko-KR': '요청에 실패했습니다. 다시 시도해 주세요.',
+  'es-ES': 'La solicitud falló. Inténtalo de nuevo.',
+  'fr-FR': 'La requête a échoué. Veuillez réessayer.',
+  'de-DE': 'Die Anfrage ist fehlgeschlagen. Bitte versuchen Sie es erneut.',
+  'pt-BR': 'A solicitação falhou. Tente novamente.',
+  'ru-RU': 'Не удалось выполнить запрос. Повторите попытку.',
+  'ar-SA': 'فشل الطلب. يُرجى المحاولة مرة أخرى.',
+  'hi-IN': 'अनुरोध विफल हुआ। कृपया फिर से प्रयास करें।',
+}
+
 export class ApiError extends Error {
   readonly status: number
   readonly code?: string
@@ -22,11 +40,12 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   })
   if (!response.ok) {
     const body = await response.json().catch(() => undefined) as
-      | { error?: { code?: string; message?: string } }
+      | { error?: { code?: string; message?: string; messageKey?: string } }
       | undefined
+    const locale = getUiLocale()
     throw new ApiError(
       response.status,
-      body?.error?.message ?? `Request failed: ${response.status}`,
+      locale === 'zh-CN' ? (body?.error?.message ?? requestFailureMessages[locale]) : requestFailureMessages[locale],
       body?.error?.code,
     )
   }

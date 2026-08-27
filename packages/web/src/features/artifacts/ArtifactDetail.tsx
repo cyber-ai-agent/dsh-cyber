@@ -2,6 +2,7 @@ import { Archive, ArrowLeft, Clock, IdentificationBadge, LinkSimple, PencilSimpl
 import { useEffect, useState } from 'react'
 
 import { api, jsonBody } from '../../api.js'
+import { formatDateTime } from '../../i18n/format.js'
 import { knowledgeConsolidatePath } from '../knowledge/knowledge-api.js'
 import { artifactFileUrl, artifactKindLabel, type ArtifactRecord } from './useWorldArtifacts.js'
 import { ArtifactPreview } from './ArtifactPreview.js'
@@ -136,7 +137,7 @@ export function ArtifactDetail({ worldId, artifact, onBack, onRename, onArchive,
 
 function formatDate(value: string): string {
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { dateStyle: 'medium', timeStyle: 'short' })
+  return Number.isNaN(date.getTime()) ? value : formatDateTime(date)
 }
 
 function toKnowledgeConsolidationError(cause: unknown): string {

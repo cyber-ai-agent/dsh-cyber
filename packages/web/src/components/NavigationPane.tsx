@@ -11,6 +11,8 @@ import type { WorkSession, World } from '@dsh-cyber/contracts'
 import type { ConversationHubItem } from '@dsh-cyber/contracts/creative-platform'
 
 import { api } from '../api.js'
+import { formatDateTime, formatTime } from '../i18n/format.js'
+import { useI18n } from '../i18n/runtime.js'
 import type { CyberEmployee, SessionParticipantMap } from '../types.js'
 import { Avatar, GroupAvatar } from './Avatar.js'
 import { AuthorityBadge } from './AuthorityBadge.js'
@@ -45,6 +47,7 @@ export function NavigationPane({
   onCreateGroup,
   onWorldSettings,
 }: NavigationPaneProps) {
+  const { t } = useI18n()
   const [hubItems, setHubItems] = useState<ConversationHubItem[]>()
   const [error, setError] = useState<string>()
 
@@ -126,19 +129,19 @@ export function NavigationPane({
   }
 
   return (
-    <div className="navigation-pane navigation-pane--conversations" role="region" aria-label="当前世界的会话">
+    <div className="navigation-pane navigation-pane--conversations" role="region" aria-label={t('nav.conversations', '会话')}>
       <header className="pane-heading">
-        <span>会话</span>
-        <button className="icon-button" type="button" aria-label="创建群聊" title="创建群聊" onClick={onCreateGroup}>
+        <span>{t('nav.conversations', '会话')}</span>
+        <button className="icon-button" type="button" aria-label={t('nav.createGroup', '创建群聊')} title={t('nav.createGroup', '创建群聊')} onClick={onCreateGroup}>
           <UsersThree size={18} weight="bold" />
         </button>
       </header>
 
-      <section className="nav-section nav-section--sessions nav-section--conversation-only" aria-label="会话列表">
+      <section className="nav-section nav-section--sessions nav-section--conversation-only" aria-label={t('nav.conversationList', '会话列表')}>
         {error === undefined || fallbackItems.length > 0 ? null : <div className="compact-empty" role="status">{error}</div>}
         <div className="session-list">
           {items.length === 0 ? (
-            <div className="compact-empty">还没有会话。新增角色后会自动生成唯一私聊，也可以创建群聊。</div>
+            <div className="compact-empty">{t('nav.empty', '还没有会话')}</div>
           ) : items.map((item) => {
             const synthetic = item.session.id.startsWith('contact:')
             return (
@@ -165,7 +168,7 @@ export function NavigationPane({
       </section>
 
       <footer className="world-settings-entry">
-        <button type="button" onClick={onWorldSettings}><GearSix size={17} /><span>世界设置</span></button>
+        <button type="button" onClick={onWorldSettings}><GearSix size={17} /><span>{t('nav.worldSettings', '世界设置')}</span></button>
       </footer>
     </div>
   )
@@ -186,6 +189,7 @@ function SessionRow({
   onPin?: () => void
   onDelete?: () => void
 }) {
+  const { t } = useI18n()
   const [menuPosition, setMenuPosition] = useState<ContextMenuPosition>()
   const { session, participantIds } = item
   const participants = participantIds
@@ -195,8 +199,8 @@ function SessionRow({
     ? item.lastPrompt.trim().length > 20 ? `${item.lastPrompt.trim().slice(0, 20)}…` : item.lastPrompt.trim()
     : undefined
   const subtitle = lastPrompt ?? (session.kind === 'group' || session.kind === 'meeting'
-    ? `群聊 · ${participants.length || participantIds.length} 名成员`
-    : participants[0]?.role ?? '私聊')
+    ? t('nav.groupMembers', '群聊 · {count} 名成员', { count: participants.length || participantIds.length })
+    : participants[0]?.role ?? t('nav.directChat', '私聊'))
   const openMenu = (position: ContextMenuPosition) => { if (onPin !== undefined && onDelete !== undefined) setMenuPosition(position) }
   return (
     <div className={`session-row-wrap${active ? ' is-active' : ''}${item.pinned ? ' is-pinned' : ''}`}>
@@ -227,7 +231,7 @@ function formatSessionTime(value: string): string {
   const date = new Date(value)
   const today = new Date()
   if (date.toDateString() === today.toDateString()) {
-    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    return formatTime(date)
   }
-  return `${date.getMonth() + 1}-${String(date.getDate()).padStart(2, '0')}`
+  return formatDateTime(date, { month: 'numeric', day: 'numeric' })
 }

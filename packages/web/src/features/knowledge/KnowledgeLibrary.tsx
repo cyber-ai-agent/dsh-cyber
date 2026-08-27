@@ -21,6 +21,7 @@ import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type Mut
 import type { World } from '@dsh-cyber/contracts'
 
 import { api, jsonBody } from '../../api.js'
+import { formatDateTime } from '../../i18n/format.js'
 
 import type {
   KnowledgeCollection,
@@ -335,7 +336,7 @@ function latestUpdatedAt(items: Array<{ updatedAt: string }>): string {
 function formatDate(value: string | undefined): string {
   if (!value) return '尚未记录'
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  return Number.isNaN(date.getTime()) ? value : formatDateTime(date, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
 function formatBytes(value: number): string {

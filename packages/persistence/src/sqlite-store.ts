@@ -86,6 +86,7 @@ import {
   type WorldSnapshot,
   type Workspace,
   type WorkspacePreferences,
+  type UiLocale,
   type WorkspaceSnapshot,
 } from '@dsh-cyber/contracts'
 import type { CharacterSkillAction } from '@dsh-cyber/contracts/skill-runtime'
@@ -220,6 +221,7 @@ export interface RecordEmployeeInteractionInput {
 
 export interface UpdateWorkspacePreferencesInput {
   workspaceId: string
+  locale?: UiLocale
   colorScheme?: WorkspacePreferences['colorScheme']
   skinId?: string
   backgroundAssetRef?: string | null
@@ -764,6 +766,7 @@ export class SqliteStore {
     if (row !== undefined) return mapWorkspacePreferences(row)
     return {
       workspaceId: workspace.id,
+      locale: 'zh-CN',
       colorScheme: 'dark',
       skinId: 'cyber-graphite',
       backgroundFit: 'cover',
@@ -785,6 +788,7 @@ export class SqliteStore {
     if (backgroundAssetRef !== undefined) assertLocalAssetRef(backgroundAssetRef)
     const preferences: WorkspacePreferences = {
       workspaceId: previous.workspaceId,
+      locale: input.locale ?? previous.locale,
       colorScheme: input.colorScheme ?? previous.colorScheme,
       skinId: (input.skinId ?? previous.skinId).trim(),
       backgroundFit: input.backgroundFit ?? previous.backgroundFit,
@@ -814,11 +818,12 @@ export class SqliteStore {
       this.database
         .prepare(
           `INSERT INTO workspace_preferences
-           (workspace_id, color_scheme, skin_id, background_asset_ref, background_fit,
+           (workspace_id, locale, color_scheme, skin_id, background_asset_ref, background_fit,
             background_opacity, interface_density, motion, left_pane_width, right_pane_width,
             updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (workspace_id) DO UPDATE SET
+             locale = excluded.locale,
              color_scheme = excluded.color_scheme,
              skin_id = excluded.skin_id,
              background_asset_ref = excluded.background_asset_ref,
@@ -832,6 +837,7 @@ export class SqliteStore {
         )
         .run(
           preferences.workspaceId,
+          preferences.locale,
           preferences.colorScheme,
           preferences.skinId,
           preferences.backgroundAssetRef ?? null,
@@ -6154,6 +6160,7 @@ function mapWorkspacePreferences(row: object): WorkspacePreferences {
   const value = row as Record<string, unknown>
   const preferences: WorkspacePreferences = {
     workspaceId: String(value.workspace_id),
+    locale: (typeof value.locale === 'string' ? value.locale : 'zh-CN') as WorkspacePreferences['locale'],
     colorScheme: value.color_scheme as WorkspacePreferences['colorScheme'],
     skinId: String(value.skin_id),
     backgroundFit: value.background_fit as WorkspacePreferences['backgroundFit'],

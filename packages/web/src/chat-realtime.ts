@@ -1,4 +1,5 @@
 import type { WorkMessage } from '@dsh-cyber/contracts'
+import { formatTime } from './i18n/format.js'
 
 export type ChatQueueMode = 'normal' | 'next'
 export type PendingChatTurnStatus = 'queued' | 'running' | 'waiting-approval' | 'failed' | 'interrupted' | 'cancelled'
@@ -193,7 +194,7 @@ function streamingMessage(reply: StreamingChatReply, previousSequence: number): 
       streaming: true,
       clientTurnId: reply.clientTurnId,
       traceTurnId: reply.traceTurnId,
-      displayTime: new Date(reply.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+      displayTime: formatTime(reply.createdAt),
     },
     createdAt: reply.createdAt,
   }

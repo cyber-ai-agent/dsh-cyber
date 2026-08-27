@@ -115,7 +115,7 @@ describe('HTTP error mapping', () => {
 
     expect(fake.statusCode).toBe(409)
     expect(JSON.parse(fake.text())).toEqual({
-      error: { code: 'conflict', message: 'Already active' },
+      error: { code: 'conflict', message: 'Already active', messageKey: 'error.conflict' },
     })
   })
 
@@ -125,7 +125,7 @@ describe('HTTP error mapping', () => {
 
     expect(fake.statusCode).toBe(500)
     expect(JSON.parse(fake.text())).toEqual({
-      error: { code: 'internal_error', message: 'Internal server error' },
+      error: { code: 'internal_error', message: '服务器内部错误', messageKey: 'error.internal_error' },
     })
   })
 
@@ -135,7 +135,7 @@ describe('HTTP error mapping', () => {
 
     expect(fake.statusCode).toBe(413)
     expect(JSON.parse(fake.text())).toEqual({
-      error: { code: 'preview_too_large', message: 'Preview is too large' },
+      error: { code: 'preview_too_large', message: 'Preview is too large', messageKey: 'error.preview_too_large' },
     })
   })
 
@@ -148,6 +148,7 @@ describe('HTTP error mapping', () => {
       error: {
         code: 'model_turn_authentication',
         message: 'API 密钥被模型服务拒绝。请打开“设置 → 模型”重新填写密钥，并先获取模型列表确认连接成功。',
+        messageKey: 'error.model_turn_authentication',
       },
     })
     expect(fake.text()).not.toContain('employee-private-id')

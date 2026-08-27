@@ -1,6 +1,7 @@
 import { Archive, ArrowLeft, FileArrowUp, FolderOpen, MagnifyingGlass, Package, Plus, SpinnerGap } from '@phosphor-icons/react'
 import { useEffect, useState } from 'react'
 import type { World, WorldArtifactKind } from '@dsh-cyber/contracts'
+import { formatDateTime } from '../../i18n/format.js'
 
 import { ArtifactDetail } from './ArtifactDetail.js'
 import {
@@ -114,5 +115,5 @@ export function artifactRefsFromMetadata(metadata: Record<string, unknown>): str
 
 function formatDate(value: string): string {
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  return Number.isNaN(date.getTime()) ? value : formatDateTime(date, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }

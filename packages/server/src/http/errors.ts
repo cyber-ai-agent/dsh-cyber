@@ -31,7 +31,7 @@ export function writeError(response: ServerResponse, error: unknown): void {
     return
   }
   if (error instanceof HttpError) {
-    writeJson(response, error.status, { error: { code: error.code, message: error.message } })
+    writeJson(response, error.status, errorPayload(error.code, error.message))
     return
   }
   if (error instanceof ServiceError) {
@@ -45,52 +45,47 @@ export function writeError(response: ServerResponse, error: unknown): void {
       unavailable: 502,
       unsupported: 415,
     }[error.kind]
-    writeJson(response, status, { error: { code: error.code, message: error.message } })
+    writeJson(response, status, errorPayload(error.code, error.message))
     return
   }
   if (error instanceof AgentTurnFailedError) {
     writeJson(response, 502, {
-      error: {
-        code: `model_turn_${error.failureKind.replaceAll('-', '_')}`,
-        message: agentTurnFailureMessage(error.failureKind),
-      },
+      ...errorPayload(`model_turn_${error.failureKind.replaceAll('-', '_')}`, agentTurnFailureMessage(error.failureKind)),
     })
     return
   }
   if (error instanceof ConversationOrchestrationError) {
     writeJson(response, 422, {
-      error: { code: 'conversation_rejected', message: '当前会话暂时无法执行，请检查参与角色、模型分配和世界设置后重试。' },
+      ...errorPayload('conversation_rejected', '当前会话暂时无法执行，请检查参与角色、模型分配和世界设置后重试。'),
     })
     return
   }
   if (error instanceof PackageApprovalRequiredError) {
     writeJson(response, 409, {
-      error: { code: 'package_approval_required', message: error.message },
+      ...errorPayload('package_approval_required', error.message),
     })
     return
   }
   if (error instanceof PackageInstallError) {
     writeJson(response, 422, {
-      error: { code: 'package_install_failed', message: error.message },
+      ...errorPayload('package_install_failed', error.message),
     })
     return
   }
   if (error instanceof UnsupportedWorldRuntimeError) {
     writeJson(response, 409, {
-      error: {
-        code: 'world_runtime_unavailable',
-        message: 'This world uses the legacy renderer. Switch to a Runtime V2 theme to enable the live world.',
-      },
+      ...errorPayload('world_runtime_unavailable', '当前世界使用旧版渲染器。请切换到运行时 V2 主题以启用实时世界。'),
     })
     return
   }
   const notFound = error instanceof Error && error.name === 'EntityNotFoundError'
   writeJson(response, notFound ? 404 : 500, {
-    error: {
-      code: notFound ? 'entity_not_found' : 'internal_error',
-      message: notFound ? error.message : 'Internal server error',
-    },
+    ...errorPayload(notFound ? 'entity_not_found' : 'internal_error', notFound ? error.message : '服务器内部错误'),
   })
+}
+
+function errorPayload(code: string, message: string): { error: { code: string; message: string; messageKey: string } } {
+  return { error: { code, message, messageKey: `error.${code}` } }
 }
 
 export function agentTurnFailureMessage(kind: AgentTurnFailureKind): string {

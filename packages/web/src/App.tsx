@@ -59,6 +59,8 @@ import {
 } from '@dsh-cyber/contracts'
 
 import { ApiError, api } from './api.js'
+import { setUiLocale, useI18n } from './i18n/runtime.js'
+import { formatTime } from './i18n/format.js'
 import {
   ChatTurnQueue,
   mergeChatTimeline,
@@ -132,6 +134,7 @@ interface RuntimeEnvelope {
 }
 
 export default function App() {
+  const { t } = useI18n()
   const [workspace, setWorkspace] = useState<Workspace | undefined>(demoMode ? demoData.workspace : undefined)
   const [worlds, setWorlds] = useState<World[]>(demoMode ? demoData.worlds : [])
   const [activeWorld, setActiveWorld] = useState<World | undefined>(demoMode ? demoData.activeWorld : undefined)
@@ -457,6 +460,7 @@ export default function App() {
         setWorkspace(first)
         setWorlds(snapshot.worlds)
         setPreferences(preferenceResult.preferences)
+        setUiLocale(preferenceResult.preferences.locale)
         setModels(modelResult.items)
         setModelAssignments(modelResult.assignments)
         setInstalledPackages(packageResult.items)
@@ -1550,7 +1554,7 @@ export default function App() {
       metadata: {
         clientTurnId,
         localPending: true,
-        displayTime: new Date(createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+        displayTime: formatTime(createdAt),
         participantIds: targetIds,
         ...(attachments.length === 0 ? {} : { attachments: serializableAttachments(attachments) }),
       },
@@ -1826,12 +1830,14 @@ export default function App() {
     try {
       if (demoMode) {
         setPreferences({ ...next, updatedAt: new Date().toISOString() })
+        setUiLocale(next.locale)
       } else {
         const result = await api<{ preferences: WorkspacePreferences }>(`/api/workspaces/${workspace.id}/preferences`, {
           method: 'PUT',
           body: JSON.stringify(next),
         })
         setPreferences(result.preferences)
+        setUiLocale(result.preferences.locale)
       }
       setSettingsOpen(false)
     } finally {
@@ -2081,9 +2087,9 @@ export default function App() {
         />
         <nav aria-label="全局功能">
           <CreativeWorkshopLauncher workspaceId={workspace.id} onCreated={(project) => { void openWorkshopWorld(project.worldId).catch((cause) => setError(cause instanceof Error ? cause.message : '创意工坊世界已创建，但打开失败，请从世界列表重新进入。')) }} onOpenWorld={(worldId) => { void openWorkshopWorld(worldId).catch((cause) => setError(cause instanceof Error ? cause.message : '世界打开失败')) }} />
-          <button type="button" onClick={() => void openPackageMarket('theme')}><Storefront size={16} />市场</button>
-          <button type="button" onClick={() => { setSettingsSection('maintenance'); setSettingsOpen(true) }}><Pulse size={16} /><span>系统状态</span><i className="health-indicator" />良好</button>
-          <button type="button" onClick={() => { setSettingsSection('appearance'); setSettingsOpen(true) }}><GearSix size={17} />设置</button>
+          <button type="button" onClick={() => void openPackageMarket('theme')}><Storefront size={16} />{t('app.market', '市场')}</button>
+          <button type="button" onClick={() => { setSettingsSection('maintenance'); setSettingsOpen(true) }}><Pulse size={16} /><span>{t('app.systemStatus', '系统状态')}</span><i className="health-indicator" />{t('app.healthy', '良好')}</button>
+          <button type="button" onClick={() => { setSettingsSection('appearance'); setSettingsOpen(true) }}><GearSix size={17} />{t('app.settings', '设置')}</button>
         </nav>
       </header>
       {error === undefined ? null : <div className="error-banner" role="alert">{error}<button type="button" onClick={() => setError(undefined)}>关闭</button></div>}
@@ -2483,6 +2489,7 @@ function WorldSwitcher({
   onExplore(): void
 }) {
   const detailsRef = useRef<HTMLDetailsElement>(null)
+  const { t } = useI18n()
   const close = () => { if (detailsRef.current) detailsRef.current.open = false }
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
@@ -2498,9 +2505,9 @@ function WorldSwitcher({
   }, [])
   return (
     <details ref={detailsRef} className="topbar-world-switcher">
-      <summary aria-label={`切换世界，当前为${activeWorld.name}`}>
+      <summary aria-label={`${t('workbench.switchWorld', '切换世界')}：${activeWorld.name}`}>
         <Buildings size={17} />
-        <span>当前世界：</span>
+        <span>{t('workbench.currentWorld', '当前世界：')}</span>
         <strong>{activeWorld.name}</strong>
         <CaretDown size={14} />
       </summary>
@@ -2531,7 +2538,8 @@ function WorldSwitcher({
 }
 
 function LoadingScreen() {
-  return <div className="loading-screen"><Cube size={28} weight="fill" /><strong>DSH Cyber</strong><span>正在恢复本地世界…</span></div>
+  const { t } = useI18n()
+  return <div className="loading-screen"><Cube size={28} weight="fill" /><strong>DSH Cyber</strong><span>{t('workbench.restoring', '正在恢复本地世界…')}</span></div>
 }
 
 function Onboarding({ error, onCreated }: { error?: string; onCreated(): Promise<void> }) {
@@ -2760,7 +2768,7 @@ function inferDemoSessionParticipants(
 
 function makeDemoMessage(sessionId: string, sequence: number, senderId: string, senderKind: WorkMessage['senderKind'], kind: WorkMessage['kind'], content: string, metadata?: JsonObject): WorkMessage {
   const createdAt = new Date().toISOString()
-  return { id: `message-${Date.now()}-${sequence}`, sessionId, sequence, senderId, senderKind, kind, content, metadata: { displayTime: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }), ...metadata }, createdAt }
+  return { id: `message-${Date.now()}-${sequence}`, sessionId, sequence, senderId, senderKind, kind, content, metadata: { displayTime: formatTime(createdAt), ...metadata }, createdAt }
 }
 
 function compactPrompt(value: string): string {
