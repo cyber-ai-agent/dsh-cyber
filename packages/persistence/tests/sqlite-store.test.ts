@@ -738,6 +738,40 @@ describe('SqliteStore', () => {
     expect(store.resolveModelProfile(workspace.id, world.id, employee.id)?.id).toBe(worldModel.id)
   })
 
+  it('falls back to the default when a legacy assignment points to a missing profile', async () => {
+    const { store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: '模型回退工作区' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '回退世界', templateId: 'cyber-company' })
+    store.saveBlueprint(blueprint())
+    const employee = store.recruitEmployee({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      blueprintId: 'software-engineer',
+      blueprintVersion: 1,
+    })
+    const fallback = store.saveModelProfile({
+      workspaceId: workspace.id,
+      displayName: '回退模型',
+      providerKind: 'deepseek',
+      baseUrl: 'https://api.deepseek.com/v1',
+      modelId: 'deepseek-chat',
+      api: 'openai-completions',
+      isDefault: true,
+      settings: {},
+    })
+
+    // This simulates a legacy/corrupt database opened with foreign-key checks
+    // disabled. Normal deletes still remove assignments through ON DELETE CASCADE.
+    store.database.exec('PRAGMA foreign_keys = OFF')
+    store.database.prepare(
+      `INSERT INTO model_assignments (workspace_id, scope, scope_id, model_profile_id, updated_at)
+       VALUES (?, 'employee', ?, ?, ?)`,
+    ).run(workspace.id, employee.id, 'missing-model-profile', new Date().toISOString())
+    store.database.exec('PRAGMA foreign_keys = ON')
+
+    expect(store.resolveModelProfile(workspace.id, world.id, employee.id)?.id).toBe(fallback.id)
+  })
+
   it('migrates an existing v2 database forward without losing workspace data', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-cyber-migration-'))
     const databasePath = join(directory, 'cyber.sqlite')

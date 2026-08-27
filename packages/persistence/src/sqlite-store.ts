@@ -1108,9 +1108,16 @@ export class SqliteStore {
     const world = this.getModelAssignment(workspaceId, 'world', worldId)
     const workspace = this.getModelAssignment(workspaceId, 'workspace', workspaceId)
     const profileId = employee?.modelProfileId ?? world?.modelProfileId ?? workspace?.modelProfileId
-    if (profileId !== undefined) return this.getModelProfile(profileId)
-    return this.listModelProfiles(workspaceId).find((profile) => profile.isDefault)
-      ?? this.listModelProfiles(workspaceId)[0]
+    // Assignments are normally removed by the model-profile foreign-key
+    // cascade. Keep resolution defensive for legacy databases or an offline
+    // repair that left a stale assignment behind: a missing higher-scope
+    // profile must not disable all lower-scope/default routing.
+    if (profileId !== undefined) {
+      const assigned = this.getModelProfile(profileId)
+      if (assigned !== undefined && assigned.workspaceId === workspaceId) return assigned
+    }
+    const profiles = this.listModelProfiles(workspaceId)
+    return profiles.find((profile) => profile.isDefault) ?? profiles[0]
   }
 
   recordModelInteraction(input: RecordModelInteractionInput): ModelInteractionLog {
