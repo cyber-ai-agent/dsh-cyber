@@ -1,11 +1,10 @@
 import { Archive, IdentificationCard, PuzzlePiece, ShieldCheck, ShieldWarning, SlidersHorizontal, Sparkle, X } from '@phosphor-icons/react'
 import { useRef, useState } from 'react'
-import type { EmployeeInstance, EmployeeProfile, EmployeeRevision, ModelProfile, WorldCharacterAuthority } from '@dsh-cyber/contracts'
+import type { AgentPermissionMode, EmployeeInstance, EmployeeProfile, EmployeeRevision, ModelProfile } from '@dsh-cyber/contracts'
 
 import { Avatar } from './Avatar.js'
-import { AuthorityBadge } from './AuthorityBadge.js'
 import { SkillGrantEditor } from './SkillGrantEditor.js'
-import { WorldPermissionEditor, type WorldPermissionEditorValue } from './WorldPermissionEditor.js'
+import { RuntimePermissionSelector } from './RuntimePermissionSelector.js'
 import { useDialogFocusTrap } from './useDialogFocusTrap.js'
 
 export type EmployeeSettingsSection = 'profile' | 'behavior' | 'abilities' | 'permissions' | 'advanced'
@@ -17,11 +16,9 @@ interface EmployeeManagementDialogProps {
   models: ModelProfile[]
   avatarIndex: number
   saving: boolean
-  authority?: WorldCharacterAuthority | undefined
   initialSection?: EmployeeSettingsSection
   onClose(): void
-  onRevise(input: { reason: string; persona?: string; skillGrants?: string[]; capabilityGrants?: string[]; modelPolicy: { modelProfileId?: string } }): Promise<void>
-  onAuthorityChange?(input: WorldPermissionEditorValue): Promise<void>
+  onRevise(input: { reason: string; persona?: string; skillGrants?: string[]; capabilityGrants?: string[]; modelPolicy: { modelProfileId?: string }; runtimePermissionMode?: AgentPermissionMode; confirmedFullAccess?: boolean }): Promise<void>
   onUpdateProfile(input: {
     displayName: string
     role: string
@@ -48,7 +45,7 @@ interface CharacterRuntimeProfile {
 const PROFILE_START = '[角色关系与背景]'
 const PROFILE_END = '[/角色关系与背景]'
 
-export function EmployeeManagementDialog({ employee, profile, currentRevision, models, avatarIndex, saving, authority, initialSection = 'profile', onClose, onRevise, onAuthorityChange = async () => undefined, onUpdateProfile, onArchive }: EmployeeManagementDialogProps) {
+export function EmployeeManagementDialog({ employee, profile, currentRevision, models, avatarIndex, saving, initialSection = 'profile', onClose, onRevise, onUpdateProfile, onArchive }: EmployeeManagementDialogProps) {
   const parsed = parseCharacterRuntimeProfile(currentRevision?.persona ?? '', profile, employee.role)
   const [displayName, setDisplayName] = useState(employee.displayName)
   const [role, setRole] = useState(parsed.identityLabel)
@@ -62,6 +59,8 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
   const [persona, setPersona] = useState(parsed.persona)
   const [skills, setSkills] = useState<string[]>(currentRevision?.skillGrants ?? [])
   const [capabilities, setCapabilities] = useState(currentRevision?.capabilityGrants.join(', ') ?? '')
+  const [runtimePermissionMode, setRuntimePermissionMode] = useState<AgentPermissionMode>(currentRevision?.runtimePermissionMode ?? 'read-only')
+  const [confirmedFullAccess, setConfirmedFullAccess] = useState(currentRevision?.runtimePermissionMode === 'danger-full-access')
   const [confirmArchive, setConfirmArchive] = useState(false)
   const [activeSection, setActiveSection] = useState<EmployeeSettingsSection>(initialSection)
   const dialogRef = useRef<HTMLElement>(null)
@@ -114,7 +113,7 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section ref={dialogRef} className="employee-management-dialog" role="dialog" aria-modal="true" aria-labelledby="employee-management-title">
         <header className="dialog-header">
-          <div><h2 id="employee-management-title">角色设置 · {employee.displayName}<AuthorityBadge role={authority?.role} size="md" /></h2><p>{employee.role} · 独立角色</p></div>
+          <div><h2 id="employee-management-title">角色设置 · {employee.displayName}</h2><p>{employee.role} · 独立角色</p></div>
           <button data-dialog-initial-focus className="icon-button" type="button" aria-label="关闭角色设置" onClick={onClose}><X size={18} /></button>
         </header>
 
@@ -122,7 +121,7 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
           <button type="button" role="tab" aria-selected={activeSection === 'profile'} className={activeSection === 'profile' ? 'is-active' : ''} onClick={() => setActiveSection('profile')}><IdentificationCard size={16} /><span>身份资料</span></button>
           <button type="button" role="tab" aria-selected={activeSection === 'behavior'} className={activeSection === 'behavior' ? 'is-active' : ''} onClick={() => setActiveSection('behavior')}><Sparkle size={16} /><span>行为方式</span></button>
           <button type="button" role="tab" aria-selected={activeSection === 'abilities'} className={activeSection === 'abilities' ? 'is-active' : ''} onClick={() => setActiveSection('abilities')}><PuzzlePiece size={16} /><span>技能与工具</span></button>
-          <button type="button" role="tab" aria-selected={activeSection === 'permissions'} className={activeSection === 'permissions' ? 'is-active' : ''} onClick={() => setActiveSection('permissions')}><ShieldCheck size={16} /><span>世界权限</span></button>
+          <button type="button" role="tab" aria-selected={activeSection === 'permissions'} className={activeSection === 'permissions' ? 'is-active' : ''} onClick={() => setActiveSection('permissions')}><ShieldCheck size={16} /><span>对话权限</span></button>
           <button type="button" role="tab" aria-selected={activeSection === 'advanced'} className={activeSection === 'advanced' ? 'is-active' : ''} onClick={() => setActiveSection('advanced')}><SlidersHorizontal size={16} /><span>高级设置</span></button>
         </nav>
 
@@ -157,12 +156,17 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
             <footer className="employee-settings-actions"><span>高风险操作仍会单独请求确认。</span><button className="primary-button" type="button" disabled={!role.trim() || !persona.trim() || saving} onClick={() => void saveBehavior()}>{saving ? '正在保存…' : '保存能力设置'}</button></footer>
           </section> : null}
 
-          {activeSection === 'permissions' ? <section className="employee-settings-panel" role="tabpanel"><WorldPermissionEditor authority={authority} saving={saving} onSave={onAuthorityChange} /></section> : null}
+          {activeSection === 'permissions' ? <section className="employee-settings-panel" role="tabpanel">
+            <div className="settings-section__heading"><h3><ShieldCheck size={18} />默认对话权限</h3><p>这个角色进入新私聊时自动使用所选档位；你仍可在输入区为单条消息临时调整。</p></div>
+            <RuntimePermissionSelector value={runtimePermissionMode} onChange={(mode) => { setRuntimePermissionMode(mode); setConfirmedFullAccess(mode === 'danger-full-access' && currentRevision?.runtimePermissionMode === 'danger-full-access') }} />
+            {runtimePermissionMode === 'danger-full-access' ? <label className="host-access-dialog__confirm"><input type="checkbox" checked={confirmedFullAccess} onChange={(event) => setConfirmedFullAccess(event.target.checked)} /><span><strong>我确认允许这个角色默认完全访问</strong><small>确认会持久保存，并在刷新、切换和重启后继续生效。</small></span></label> : null}
+            <footer className="employee-settings-actions"><span>多人会话会采用所有参与角色中最保守的默认档位。</span><button className="primary-button" type="button" disabled={saving || (runtimePermissionMode === 'danger-full-access' && !confirmedFullAccess)} onClick={() => void onRevise({ reason: '更新角色默认对话权限', skillGrants: skills, capabilityGrants: splitList(capabilities), modelPolicy: currentRevision?.modelPolicy ?? {}, runtimePermissionMode, confirmedFullAccess })}>{saving ? '正在保存…' : '保存对话权限'}</button></footer>
+          </section> : null}
 
           {activeSection === 'advanced' ? <section className="employee-settings-panel" role="tabpanel">
             <div className="settings-section__heading"><h3><SlidersHorizontal size={18} />高级设置</h3><p>这些设置主要用于旧扩展兼容。普通使用无需修改。</p></div>
             <div className="character-model-note"><strong>运行模型</strong><span>当前角色使用的模型请前往“设置 → 模型 → 模型分配”选择。这里不重复提供模型配置，避免设置冲突。</span><small>当前可选模型：{models.length === 0 ? '尚未配置' : models.map((model)=>model.displayName).join('、')}</small></div>
-            <label className="dialog-field"><span>兼容权限标识</span><input value={capabilities} onChange={(event) => setCapabilities(event.target.value)} /><small>仅用于兼容旧扩展，不会授予世界管理员身份，也不会开启完整系统访问。</small></label>
+            <label className="dialog-field"><span>兼容权限标识</span><input value={capabilities} onChange={(event) => setCapabilities(event.target.value)} /><small>仅用于兼容旧扩展，不会改变上方默认对话权限。</small></label>
             <footer className="employee-settings-actions"><span>不确定时请保持原值。</span><button className="primary-button" type="button" disabled={!role.trim() || !persona.trim() || saving} onClick={() => void saveBehavior()}>{saving ? '正在保存…' : '保存高级设置'}</button></footer>
             <div className="archive-section">
               <div><Archive size={18} /><div><strong>归档角色</strong><p>角色将从当前世界和提及列表移除，但会话、交付物、成长记录和审计历史不会删除。</p></div></div>

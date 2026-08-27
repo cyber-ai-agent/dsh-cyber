@@ -2,23 +2,14 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 
-import type { WorldCharacterAuthority, WorldPermissionRequest } from '@dsh-cyber/contracts'
+import type { WorldPermissionRequest } from '@dsh-cyber/contracts'
 
 import { AuthorityBadge } from '../src/components/AuthorityBadge.js'
 import { Avatar } from '../src/components/Avatar.js'
 import { EmployeeManagementDialog } from '../src/components/EmployeeManagementDialog.js'
 import { WorldPermissionRequests } from '../src/components/ChatWorkbench.js'
-import { stripManagementPermissions, WorldPermissionEditor } from '../src/components/WorldPermissionEditor.js'
+import { RuntimePermissionSelector } from '../src/components/RuntimePermissionSelector.js'
 import type { CyberEmployee } from '../src/types.js'
-
-const authority: WorldCharacterAuthority = {
-  worldId: 'world-1',
-  employeeId: 'employee-1',
-  role: 'administrator',
-  permissionGrants: ['world.files.read', 'world.permissions.manage', 'world.conversations.read-content'],
-  createdAt: '2026-08-25T08:00:00.000Z',
-  updatedAt: '2026-08-25T08:00:00.000Z',
-}
 
 const employee = {
   id: 'employee-1',
@@ -50,26 +41,23 @@ const request: WorldPermissionRequest = {
   expiresAt: '2026-08-25T08:05:00.000Z',
 }
 
-describe('world authority UI', () => {
-  it('keeps administrator identity accessible without placing a crown on the avatar', () => {
+describe('role runtime permission UI', () => {
+  it('does not render administrator identity or badges', () => {
     const avatarMarkup = renderToStaticMarkup(createElement(Avatar, { index: 0, label: '阿开', authorityRole: 'administrator' }))
     const badgeMarkup = renderToStaticMarkup(createElement(AuthorityBadge, { role: 'administrator' }))
-    expect(avatarMarkup).toContain('aria-label="阿开，世界管理员"')
+    expect(avatarMarkup).toContain('aria-label="阿开"')
+    expect(avatarMarkup).not.toContain('世界管理员')
     expect(avatarMarkup).not.toContain('authority-badge')
-    expect(badgeMarkup).toContain('aria-label="世界管理员"')
+    expect(badgeMarkup).toBe('')
     expect(renderToStaticMarkup(createElement(AuthorityBadge, { role: 'member' }))).toBe('')
   })
 
-  it('renders world authority before advanced capability details', () => {
-    const markup = renderToStaticMarkup(createElement(WorldPermissionEditor, { authority, onSave: async () => undefined }))
-    expect(markup).toContain('世界权限')
-    expect(markup).toContain('世界管理员')
-    expect(markup).toContain('管理角色权限')
-    expect(markup).not.toContain('world.permissions.manage')
-    expect(markup).toContain('管理世界连接')
-    expect(markup).toContain('disabled=""')
-    expect(markup).toContain('暂不可授予，需单独安全审批')
-    expect(markup.indexOf('世界权限')).toBeLessThan(markup.indexOf('保存世界权限'))
+  it('renders the same three permission levels as the conversation control', () => {
+    const markup = renderToStaticMarkup(createElement(RuntimePermissionSelector, { value: 'workspace-write', onChange: () => undefined }))
+    expect(markup).toContain('请求批准')
+    expect(markup).toContain('帮我批准')
+    expect(markup).toContain('完全访问')
+    expect(markup).not.toContain('世界管理员')
   })
 
   it('presents role settings as focused Chinese sections without internal version copy', () => {
@@ -78,7 +66,7 @@ describe('world authority UI', () => {
       models: [],
       avatarIndex: 0,
       saving: false,
-      authority,
+      currentRevision: { employeeId: employee.id, revision: 1, persona: '负责交付', skillGrants: [], capabilityGrants: [], modelPolicy: {}, runtimePermissionMode: 'workspace-write', reason: 'test', createdAt: employee.createdAt },
       initialSection: 'abilities',
       onClose: () => undefined,
       onRevise: async () => undefined,
@@ -88,22 +76,13 @@ describe('world authority UI', () => {
     expect(markup).toContain('身份资料')
     expect(markup).toContain('行为方式')
     expect(markup).toContain('技能与工具')
-    expect(markup).toContain('世界权限')
+    expect(markup).toContain('对话权限')
     expect(markup).toContain('高级设置')
     expect(markup).toContain('保存能力设置')
     expect(markup).not.toContain('保存为 r')
     expect(markup).not.toContain('revision')
     expect(markup).not.toContain('Capability')
     expect(markup).not.toContain('Blueprint')
-  })
-
-  it('strips management grants immediately when demoting a character', () => {
-    expect(stripManagementPermissions([
-      'world.files.read',
-      'world.characters.manage',
-      'world.permissions.manage',
-      'world.conversations.read-metadata',
-    ])).toEqual(['world.files.read', 'world.conversations.read-metadata'])
   })
 
   it('renders an inline request card with bounded decisions', () => {

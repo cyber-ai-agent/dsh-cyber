@@ -1,11 +1,11 @@
-import { mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { CYBER_SCHEMA_VERSION, type EmployeeBlueprint } from '@dsh-cyber/contracts'
+import { CYBER_SCHEMA_VERSION, WORKSPACE_PREFERENCES_LIMITS, type EmployeeBlueprint } from '@dsh-cyber/contracts'
 
 import {
   DatabaseCorruptError,
@@ -70,13 +70,48 @@ describe('SqliteStore', () => {
       skillGrants: ['coding', 'testing'],
     })
 
-    expect(store.getWorld(world.id)?.administratorEmployeeId).toBe(employee.id)
-    expect(store.isWorldAdministrator(world.id, employee.id)).toBe(true)
+    expect(store.getWorld(world.id)?.administratorEmployeeId).toBeUndefined()
+    expect(store.getWorldCharacterAuthority(world.id, employee.id)).toMatchObject({ role: 'member', permissionGrants: [] })
+    expect(revision.runtimePermissionMode).toBe('read-only')
     expect(revision.revision).toBe(2)
     expect(store.getEmployee(employee.id)?.currentRevision).toBe(2)
     expect(store.listEmployeeRevisions(employee.id)).toHaveLength(2)
     expect(store.getWorkspaceSnapshot(workspace.id).worlds).toHaveLength(1)
     expect(store.getWorldSnapshot(world.id).employees).toHaveLength(1)
+  })
+
+  it('keeps actionable employee health separate from derived presence', async () => {
+    const { path, store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: '角色健康工作区' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '角色健康世界', templateId: 'cyber-company' })
+    store.saveBlueprint(blueprint())
+    const employee = store.recruitEmployee({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      blueprintId: 'software-engineer',
+      blueprintVersion: 1,
+    })
+
+    expect(employee).toMatchObject({ presence: 'available', health: 'healthy', status: 'available' })
+    expect(() => store.setEmployeeStatus(employee.id, 'working', 'system')).toThrow('derived from durable work')
+    expect(store.setEmployeeHealth(employee.id, 'blocked', {
+      errorCode: 'model_credentials_missing',
+      detail: '请在设置中补充模型凭据',
+    })).toMatchObject({ presence: 'available', health: 'blocked', status: 'blocked' })
+
+    store.close()
+    stores.splice(stores.indexOf(store), 1)
+    const reopened = await SqliteStore.open(path)
+    stores.push(reopened)
+    expect(reopened.getEmployee(employee.id)).toMatchObject({
+      presence: 'available',
+      health: 'blocked',
+      healthErrorCode: 'model_credentials_missing',
+      status: 'blocked',
+    })
+    expect(reopened.setEmployeeHealth(employee.id, 'healthy')).toMatchObject({
+      presence: 'available', health: 'healthy', status: 'available',
+    })
   })
 
   it('keeps administrator authority inside one world and allows an explicit same-world handoff', async () => {
@@ -95,6 +130,11 @@ describe('SqliteStore', () => {
     const otherWorldAdministrator = store.recruitEmployee({
       workspaceId: workspace.id, worldId: secondWorld.id, blueprintId: 'software-engineer', blueprintVersion: 1,
     })
+
+    // Legacy APIs remain readable for old databases, but new recruits no
+    // longer receive administrator identity implicitly.
+    store.setWorldAdministrator(firstWorld.id, firstAdministrator.id)
+    store.setWorldAdministrator(secondWorld.id, otherWorldAdministrator.id)
 
     expect(store.isWorldAdministrator(firstWorld.id, firstAdministrator.id)).toBe(true)
     expect(store.canManageEmployee(firstAdministrator.id, successor.id)).toBe(true)
@@ -534,6 +574,15 @@ describe('SqliteStore', () => {
   it('persists appearance, skin and safe model settings without storing credentials', async () => {
     const { path, store } = await testDatabase()
     const workspace = store.createWorkspace({ name: '个性化工作区' })
+    const preferenceSchema = store.database.prepare(
+      `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'workspace_preferences'`,
+    ).get() as { sql: string }
+    expect(preferenceSchema.sql).toContain(`left_pane_width >= ${WORKSPACE_PREFERENCES_LIMITS.leftPaneWidth.minimum}`)
+    expect(preferenceSchema.sql).toContain(`left_pane_width <= ${WORKSPACE_PREFERENCES_LIMITS.leftPaneWidth.maximum}`)
+    expect(preferenceSchema.sql).toContain(`right_pane_width >= ${WORKSPACE_PREFERENCES_LIMITS.rightPaneWidth.minimum}`)
+    expect(preferenceSchema.sql).toContain(`right_pane_width <= ${WORKSPACE_PREFERENCES_LIMITS.rightPaneWidth.maximum}`)
+    expect(() => store.updateWorkspacePreferences({ workspaceId: workspace.id, rightPaneWidth: 761 }))
+      .toThrow('300 到 760')
     store.updateWorkspacePreferences({
       workspaceId: workspace.id,
       colorScheme: 'dark',
@@ -720,6 +769,16 @@ describe('SqliteStore', () => {
       DROP TABLE skill_actions;
       DROP TABLE approval_requests;
       DROP TABLE world_package_instances;
+      DROP TABLE owner_runtime_access_grants;
+      DROP TABLE growth_evidence;
+      DROP TABLE reviews;
+      DROP TABLE deliverables;
+      DROP TABLE task_runs;
+      DROP TABLE task_assignments;
+      DROP TABLE task_plan_steps;
+      DROP TABLE task_plan_revisions;
+      DROP TABLE work_tasks;
+      DROP TABLE completion_jobs;
       DROP TABLE agent_runs;
       DROP TABLE conversation_queue_entries;
       DROP TABLE work_turns;
@@ -729,6 +788,11 @@ describe('SqliteStore', () => {
       DROP INDEX worlds_administrator_idx;
       ALTER TABLE worlds DROP COLUMN administrator_employee_id;
       ALTER TABLE employee_blueprints DROP COLUMN embodiment_json;
+      DROP INDEX employee_instances_world_health_idx;
+      ALTER TABLE employee_instances DROP COLUMN health_detail;
+      ALTER TABLE employee_instances DROP COLUMN health_error_code;
+      ALTER TABLE employee_instances DROP COLUMN health;
+      ALTER TABLE employee_revisions DROP COLUMN runtime_permission_mode;
       DELETE FROM schema_migrations WHERE version > 2;
       PRAGMA user_version = 2;
     `)
@@ -736,6 +800,7 @@ describe('SqliteStore', () => {
 
     const migrated = await SqliteStore.open(databasePath)
     stores.push(migrated)
+    expect((await readdir(directory)).some((file) => file.startsWith('cyber.sqlite.pre-migration-v2-') && file.endsWith('.sqlite'))).toBe(true)
     expect(migrated.listWorkspaces()[0]?.name).toBe('迁移前工作区')
     expect(migrated.database.prepare(`PRAGMA foreign_key_list(world_permission_requests)`).all()).toEqual(
       expect.arrayContaining([

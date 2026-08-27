@@ -1,5 +1,6 @@
 import {
   CalendarBlank,
+  ClipboardText,
   CaretDown,
   CaretDoubleRight,
   CaretUp,
@@ -20,6 +21,7 @@ import { EmployeeDossierDirectory } from './EmployeeDossierDirectory.js'
 import { WorldView } from './WorldView.js'
 
 const KnowledgeDock = lazy(async () => ({ default: (await import('../features/knowledge/KnowledgeDock.js')).KnowledgeDock }))
+const TaskWorkspace = lazy(async () => ({ default: (await import('../features/tasks/TaskWorkspace.js')).TaskWorkspace }))
 
 interface WorldSideDockProps {
   demoMode: boolean
@@ -50,6 +52,7 @@ const FIXED_TABS: Array<{ id: 'world' | 'trace'; label: string; icon: typeof Glo
 
 const SECONDARY_TABS: Array<{ id: Exclude<DockTab, 'world' | 'trace'>; label: string; icon: typeof GlobeHemisphereWest }> = [
   { id: 'dossier', label: '角色', icon: IdentificationBadge },
+  { id: 'tasks', label: '任务', icon: ClipboardText },
   { id: 'knowledge', label: '知识', icon: Cube },
   { id: 'artifacts', label: '产物', icon: Package },
   { id: 'schedule', label: '日程', icon: CalendarBlank },
@@ -202,6 +205,7 @@ export function WorldSideDock({
     <div id="world-side-dock-panel" className="dock-content" role="tabpanel" aria-labelledby={`world-side-dock-tab-${activeTab}`}>
       {activeTab === 'world' ? worldContent ?? <WorldView world={world} employees={employees} {...(sceneImage === undefined ? {} : { sceneImage })} onSelectEmployee={onSelectEmployee} /> : null}
       {activeTab === 'dossier' ? selectedEmployee !== undefined && dossiers[selectedEmployee.id] !== undefined ? <EmployeeDossier dossier={dossiers[selectedEmployee.id]!} employees={employees} world={world} avatarIndex={selectedEmployee.avatarIndex} onDirect={() => onDirectEmployee(selectedEmployee)} onManage={() => onManageEmployee(selectedEmployee)} onBack={onShowAllDossiers} /> : <EmployeeDossierDirectory employees={employees} dossiers={dossiers} world={world} onOpen={onSelectEmployee} onDirect={onDirectEmployee} onManage={onManageEmployee} onInvite={onInvite} /> : null}
+      {activeTab === 'tasks' ? <Suspense fallback={<div className="dock-empty-state" role="status"><strong>正在加载任务工作台</strong></div>}><TaskWorkspace world={world} employees={employees} /></Suspense> : null}
       {activeTab === 'knowledge' ? knowledgeContent ?? <Suspense fallback={<div className="dock-empty-state" role="status"><strong>正在加载知识库</strong></div>}><KnowledgeDock world={world} demoMode={demoMode} /></Suspense> : null}
       {activeTab === 'artifacts' ? artifactContent ?? <ArtifactEmptyState /> : null}
       {activeTab === 'trace' ? traceContent : null}

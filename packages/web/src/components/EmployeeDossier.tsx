@@ -15,6 +15,7 @@ import type { CyberEmployee } from '../types.js'
 import { worldExperience } from '../world-experience.js'
 import { Avatar } from './Avatar.js'
 import { AuthorityBadge } from './AuthorityBadge.js'
+import { EmployeeCurrentWork } from '../features/tasks/EmployeeCurrentWork.js'
 import { StatusDot } from './StatusDot.js'
 
 type DossierSection = 'profile' | 'skills' | 'milestones' | 'journal' | 'relations'
@@ -59,7 +60,10 @@ export function EmployeeDossier({ dossier, employees, avatarIndex, world, onDire
         <div className="dossier-hero__identity">
           <h2>{dossier.employee.displayName}<AuthorityBadge role={employees.find((employee) => employee.id === dossier.employee.id)?.authorityRole} size="md" /></h2>
           <p>{dossier.employee.role} · 独立角色</p>
-          <StatusDot status={dossier.employee.status} label={statusLabel(dossier.employee.status, roleplay)} />
+          <div className="employee-runtime-status">
+            <StatusDot status={dossier.employee.presence} label={presenceLabel(dossier.employee.presence, roleplay)} />
+            <StatusDot status={dossier.employee.health} label={healthLabel(dossier.employee.health)} />
+          </div>
         </div>
         <div className="dossier-hero__actions">
           <span>{experience.personLabel}版本 r{dossier.employee.currentRevision}</span>
@@ -67,6 +71,8 @@ export function EmployeeDossier({ dossier, employees, avatarIndex, world, onDire
           <button className="primary-button" type="button" onClick={onDirect}>直接对话</button>
         </div>
       </header>
+
+      <EmployeeCurrentWork employeeId={dossier.employee.id} />
 
       <div className="dossier-facts" aria-label={`${experience.personLabel}事实摘要`}>
         <div><strong>{verified}</strong><span>已验证技能</span></div>
@@ -183,9 +189,13 @@ export function EmployeeDossier({ dossier, employees, avatarIndex, world, onDire
   )
 }
 
-function statusLabel(status: EmployeeDossierData['employee']['status'], roleplay: boolean): string {
-  if (roleplay) return ({ available: '可登场', working: '演绎中', waiting: '等待发言', blocked: '剧情暂停', archived: '已退场' })[status]
-  return ({ available: '可用', working: '工作中', waiting: '等待中', blocked: '被阻塞', archived: '已归档' })[status]
+function presenceLabel(presence: EmployeeDossierData['employee']['presence'], roleplay: boolean): string {
+  if (roleplay) return presence === 'working' ? '演绎中' : '可登场'
+  return presence === 'working' ? '工作中' : '可接任务'
+}
+
+function healthLabel(health: EmployeeDossierData['employee']['health']): string {
+  return ({ healthy: '运行健康', degraded: '需要检查', blocked: '需要处理' })[health]
 }
 
 function formatDate(value: string): string {

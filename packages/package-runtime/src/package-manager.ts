@@ -15,7 +15,10 @@ export interface StagedPackage {
 export interface PackageActivationReceipt {
   packageId: string
   version: string
+  contentDigest: string
   installedPath: string
+  /** True only when this activation moved the staged directory into place. */
+  createdInstalledDirectory: boolean
   previousState?: string
 }
 
@@ -24,6 +27,14 @@ export interface PackageRuntimePort {
   activate(staged: StagedPackage): Promise<PackageActivationReceipt>
   rollback(receipt: PackageActivationReceipt): Promise<void>
   discard(staged: StagedPackage): Promise<void>
+  recover?(installedPackages: readonly InstalledPackage[]): Promise<PackageRuntimeRecoveryReport>
+}
+
+export interface PackageRuntimeRecoveryReport {
+  removedStagingEntries: number
+  repairedPointers: number
+  removedDanglingPointers: number
+  verifiedInstalledVersions: number
 }
 
 export interface PackageStorePort {
@@ -82,6 +93,15 @@ export class PackageInstallError extends Error {
     super(`Package installation failed: ${causeCode}`, { cause })
     this.name = 'PackageInstallError'
     this.causeCode = causeCode
+  }
+}
+
+export class PackageVersionContentConflictError extends Error {
+  readonly code = 'package_version_content_conflict'
+
+  constructor(packageId: string, version: string) {
+    super(`Package ${packageId}@${version} already exists with different content`)
+    this.name = 'PackageVersionContentConflictError'
   }
 }
 
@@ -470,6 +490,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function packageErrorCode(error: unknown): string {
   if (error instanceof PackageInstallError) return error.causeCode
+  if (error instanceof PackageVersionContentConflictError) return error.code
+  if (error instanceof Error && error.message.includes('package_version_content_conflict')) return 'package_version_content_conflict'
   if (error instanceof Error && error.name) return error.name.replaceAll(/[^A-Za-z0-9_-]/g, '-').toLowerCase()
   return 'install-failed'
 }

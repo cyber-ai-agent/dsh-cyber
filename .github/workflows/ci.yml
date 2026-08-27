@@ -17,7 +17,7 @@ jobs:
   verify:
     name: required
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -33,6 +33,12 @@ jobs:
         run: pnpm typecheck
       - name: Unit and integration tests
         run: pnpm test
+      - name: Migration replay and schema contracts
+        run: pnpm test:migration && pnpm test:schema
+      - name: Install Chromium for required smoke
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Required smoke E2E
+        run: pnpm test:smoke
       # The status can only be written to a commit inside this repository.
       # For fork pull requests the head sha lives in the contributor's fork,
       # where GITHUB_TOKEN has no write access (403), so skip instead of failing.

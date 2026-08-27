@@ -4,7 +4,6 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
-  RECOMMENDED_ADMIN_PERMISSIONS,
   type EmployeeBlueprint,
 } from '@dsh-cyber/contracts'
 
@@ -190,26 +189,6 @@ describe('WorldArtifactRepository', () => {
     })).toThrow(/outside this world/i)
   })
 
-  it('includes artifact and knowledge read/manage permissions in the administrator defaults', async () => {
-    const store = await database()
-    const workspace = store.createWorkspace({ name: '权限工作区' })
-    const world = store.createWorld({ workspaceId: workspace.id, name: '权限世界', templateId: 'cyber-company' })
-    store.saveBlueprint(blueprint('permission-engineer', '权限角色'))
-    const employee = store.recruitEmployee({ workspaceId: workspace.id, worldId: world.id, blueprintId: 'permission-engineer', blueprintVersion: 1 })
-    const authority = store.getWorldCharacterAuthority(world.id, employee.id)
-    expect(authority?.permissionGrants).toEqual(expect.arrayContaining([
-      'world.artifacts.read',
-      'world.artifacts.manage',
-      'world.knowledge.read',
-      'world.knowledge.manage',
-    ]))
-    expect(RECOMMENDED_ADMIN_PERMISSIONS).toEqual(expect.arrayContaining([
-      'world.artifacts.read',
-      'world.artifacts.manage',
-      'world.knowledge.read',
-      'world.knowledge.manage',
-    ]))
-  })
 })
 
 async function fsMkdtemp(prefix: string): Promise<string> {

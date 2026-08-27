@@ -38,7 +38,7 @@ export function WorldView({ world, employees, sceneImage, onSelectEmployee }: Wo
   const [zoom, setZoom] = useState(1)
   const [expanded, setExpanded] = useState(false)
   const experience = worldExperience(world)
-  const working = employees.filter((employee) => employee.status === 'working').length
+  const working = employees.filter((employee) => employee.presence === 'working').length
 
   const scene = useMemo(() => (
     <WorldScene
@@ -121,7 +121,7 @@ function WorldScene({ kind, employees, sceneImage, lightsOn, zoom, onSelectEmplo
   const defaultScene = currentSkin === 'maid-atelier' ? '/assets/skins/maid-palace-night.webp' : (isTavern ? '/assets/moonlit-tavern-world.png' : '/assets/cyber-office-world.png')
   const positions = isTavern ? tavernPositions : companyPositions
   const image = sceneImage ?? defaultScene
-  const activeSpeaker = employees.find((employee) => employee.status === 'working')
+  const activeSpeaker = employees.find((employee) => employee.presence === 'working')
 
   return (
     <div className={`world-stage world-stage--${kind}`}>
@@ -148,7 +148,7 @@ function WorldScene({ kind, employees, sceneImage, lightsOn, zoom, onSelectEmplo
           return (
             <button
               key={employee.id}
-              className={`world-agent world-agent--${employee.status}${activeSpeaker?.id === employee.id ? ' is-speaking' : ''}`}
+              className={`world-agent world-agent--${visualStatus(employee)}${activeSpeaker?.id === employee.id ? ' is-speaking' : ''}`}
               type="button"
               style={{ left: `${position[0]}%`, top: `${position[1]}%`, zIndex: Math.round(position[1]) }}
               onClick={() => onSelectEmployee(employee.id)}
@@ -165,8 +165,13 @@ function WorldScene({ kind, employees, sceneImage, lightsOn, zoom, onSelectEmplo
 }
 
 function activityLabel(employee: CyberEmployee, roleplay: boolean): string {
-  if (employee.status === 'blocked') return roleplay ? '剧情等待中' : '等待推进'
-  if (employee.status === 'waiting') return roleplay ? '等待发言' : '等待任务'
-  if (employee.status === 'available') return roleplay ? '可被点名' : '可接任务'
+  if (employee.health === 'blocked') return roleplay ? '剧情等待中' : '需要处理运行问题'
+  if (employee.health === 'degraded') return roleplay ? '状态需检查' : '运行配置需要检查'
+  if (employee.presence === 'available') return roleplay ? '可被点名' : '可接任务'
   return employee.currentActivity
+}
+
+function visualStatus(employee: CyberEmployee): CyberEmployee['status'] {
+  if (employee.status === 'archived') return 'archived'
+  return employee.health === 'blocked' ? 'blocked' : employee.presence
 }

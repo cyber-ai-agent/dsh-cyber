@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { ApplicationAccessService } from '../src/services/application-access-service.js'
+import type { SecretStoragePort } from '../src/security/secret-storage.js'
 
 const cleanup: string[] = []
 
@@ -83,7 +84,27 @@ describe('ApplicationAccessService', () => {
     expect(result.recoveryConfigured).toBe(true)
     expect(JSON.parse(await readFile(path, 'utf8')).recoveryHash).toEqual(expect.any(String))
   })
+
+  it('keeps the previous lock policy readable when a replacement write fails', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-application-access-'))
+    cleanup.push(root)
+    const storage = new FailingStorage()
+    const service = new ApplicationAccessService(root, storage)
+    await service.setPassword('first secret', response().value)
+    storage.failNextWrite = true
+    await expect(service.setPassword('second secret', response().value)).rejects.toThrow('persist failed')
+    await expect(service.unlock('first secret', request(), response().value)).resolves.toMatchObject({ unlocked: true })
+    await expect(service.unlock('second secret', request(), response().value)).rejects.toMatchObject({ status: 401 })
+  })
 })
+
+class FailingStorage implements SecretStoragePort {
+  value: Buffer | undefined
+  failNextWrite = false
+  async read() { return this.value === undefined ? undefined : Buffer.from(this.value) }
+  async write(value: Buffer) { if (this.failNextWrite) { this.failNextWrite = false; throw new Error('persist failed') }; this.value = Buffer.from(value) }
+  async delete() { this.value = undefined }
+}
 
 function request(cookie?: string): IncomingMessage {
   return { headers: cookie === undefined ? {} : { cookie }, socket: { remoteAddress: '127.0.0.1' } } as IncomingMessage

@@ -6,7 +6,7 @@ import { gunzip, gzip } from 'node:zlib'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { SqliteStore, WorldArtifactRepository, WorldKnowledgeRepository } from '@dsh-cyber/persistence'
+import { SqliteStore, WorkSystemRepository, WorldArtifactRepository, WorldKnowledgeRepository } from '@dsh-cyber/persistence'
 
 import { createLocalBackupBundle, restoreLocalBackupBundle } from '../src/services/local-backup-service.js'
 import { WorldArtifactService } from '../src/services/world-artifact-service.js'
@@ -36,6 +36,7 @@ async function seededRoot() {
   stores.push(store)
   const workspace = store.createWorkspace({ name: '本地工作区' })
   const world = store.createWorld({ workspaceId: workspace.id, name: '我的世界', templateId: 'personal-world' })
+  const workTask = new WorkSystemRepository(store.database).createTask({ workspaceId: workspace.id, worldId: world.id, title: '备份中的任务', description: '恢复后必须保留', priority: 'high', createdBy: 'owner' })
   const worldRoots = new WorldRootService(root)
   const worldRoot = await worldRoots.ensure(world.id)
   await writeFile(join(worldRoot.filesPath, 'note.md'), '# 保留这份笔记\n')
@@ -76,7 +77,7 @@ async function seededRoot() {
   await writeFile(join(root, 'skills', 'actions.json'), '{"actions":[]}')
   await mkdir(join(root, 'credentials'), { recursive: true })
   await writeFile(join(root, 'credentials', 'secret.txt'), 'must-not-travel')
-  return { root, store, workspace, world, publication, knowledgeDocument }
+  return { root, store, workspace, world, publication, knowledgeDocument, workTask }
 }
 
 async function emptyRoot(prefix: string) {
@@ -87,7 +88,7 @@ async function emptyRoot(prefix: string) {
 
 describe('local backup restore', () => {
   it('round-trips a state root a backup can actually recover', async () => {
-    const { root, store, world, publication, knowledgeDocument } = await seededRoot()
+    const { root, store, world, publication, knowledgeDocument, workTask } = await seededRoot()
     const bundle = join(root, 'backups', 'round-trip.dshbackup')
     await createLocalBackupBundle(root, store, { output: bundle })
     store.close()
@@ -106,6 +107,7 @@ describe('local backup restore', () => {
     const restored = await SqliteStore.open(join(target, 'data', 'dsh-cyber.sqlite'))
     stores.push(restored)
     expect(restored.getWorld(world.id)?.name).toBe('我的世界')
+    expect(new WorkSystemRepository(restored.database).getTask(workTask.id)).toMatchObject({ title: '备份中的任务', status: 'draft' })
     expect(new WorldKnowledgeRepository(restored.database).getDocument(world.id, knowledgeDocument.id)).toMatchObject({ title: '世界知识' })
     const restoredArtifacts = new WorldArtifactService({
       repository: new WorldArtifactRepository(restored.database),

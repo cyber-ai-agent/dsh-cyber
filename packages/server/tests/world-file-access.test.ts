@@ -1,11 +1,10 @@
-import { mkdtemp, readdir, writeFile } from 'node:fs/promises'
+import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
 import type { AgentRuntimePort, AgentTurnRequest, EmployeeBlueprint, World } from '@dsh-cyber/contracts'
-import { RECOMMENDED_ADMIN_PERMISSIONS } from '@dsh-cyber/contracts/world-authority'
 
 import { createCyberServer, type CyberServer } from '../src/index.js'
 
@@ -84,19 +83,18 @@ async function start() {
   return { origin: address.origin, server, runtime, world, characterId: character.id }
 }
 
-async function setAccess(
+async function setDefaultPermission(
   origin: string,
-  worldId: string,
   employeeId: string,
-  permissions: string[],
-  role: 'member' | 'administrator' = 'member',
+  runtimePermissionMode: 'read-only' | 'workspace-write' | 'danger-full-access',
+  confirmedFullAccess = false,
 ) {
-  const result = await json(origin, `/api/worlds/${worldId}/authorities/${employeeId}`, send('PUT', {
-    role,
-    permissionGrants: permissions,
-    reason: 'file-access-test',
+  const result = await json(origin, `/api/employees/${employeeId}/revisions`, send('POST', {
+    runtimePermissionMode,
+    confirmedFullAccess,
+    reason: 'runtime-permission-test',
   }))
-  expect(result.response.status).toBe(200)
+  expect(result.response.status).toBe(201)
 }
 
 async function chat(origin: string, worldId: string, employeeId: string, permissionMode?: string) {
@@ -107,56 +105,41 @@ async function chat(origin: string, worldId: string, employeeId: string, permiss
   }))
 }
 
-describe('world file access', () => {
-  it('anchors a character without world.files.read at an empty workspace', async () => {
+describe('role runtime access', () => {
+  it('defaults a role to read-only in the real World workspace', async () => {
     const { origin, runtime, world, characterId } = await start()
-    await setAccess(origin, world.id, characterId, [])
-    await chat(origin, world.id, characterId)
-
-    const turn = runtime.turns.at(-1)!
-    // With or without the permission the runtime used to receive the same real
-    // filesPath, so world.files.read did nothing at all.
-    expect(turn.workspacePath).toContain('restricted-workspace')
-    expect(await readdir(turn.workspacePath)).toEqual([])
-  })
-
-  it('gives a character with world.files.read the real world files, read-only', async () => {
-    const { origin, runtime, world, characterId } = await start()
-    await setAccess(origin, world.id, characterId, ['world.files.read'])
     await chat(origin, world.id, characterId)
 
     const turn = runtime.turns.at(-1)!
     expect(turn.workspacePath).toContain(join('worlds'))
     expect(turn.workspacePath).not.toContain('restricted-workspace')
     expect(turn.permissionMode).toBe('read-only')
-    await writeFile(join(turn.workspacePath, 'note.md'), '# real\n')
-    expect(await readdir(turn.workspacePath)).toContain('note.md')
   })
 
-  it('gives a character with world.files.write the real files and workspace-write', async () => {
+  it('uses the role workspace-write default when the request omits a mode', async () => {
     const { origin, runtime, world, characterId } = await start()
-    await setAccess(origin, world.id, characterId, ['world.files.read', 'world.files.write'])
-    await chat(origin, world.id, characterId, 'workspace-write')
+    await setDefaultPermission(origin, characterId, 'workspace-write')
+    await chat(origin, world.id, characterId)
 
     const turn = runtime.turns.at(-1)!
+    expect(turn.workspacePath).toContain(join('worlds'))
     expect(turn.workspacePath).not.toContain('restricted-workspace')
-    expect(turn.permissionMode).toBe('workspace-write')
-  })
-
-  it('passes workspace-write to DSH while keeping a role without world file access in its restricted workspace', async () => {
-    const { origin, runtime, world, characterId } = await start()
-    await setAccess(origin, world.id, characterId, [])
-    await chat(origin, world.id, characterId, 'workspace-write')
-
-    const turn = runtime.turns.at(-1)!
-    expect(turn.workspacePath).toContain('restricted-workspace')
     expect(turn.permissionMode).toBe('workspace-write')
     expect(turn.persona).toContain('模式：workspace-write（帮我批准）')
   })
 
+  it('allows a conversation to temporarily choose a safer mode', async () => {
+    const { origin, runtime, world, characterId } = await start()
+    await setDefaultPermission(origin, characterId, 'workspace-write')
+    await chat(origin, world.id, characterId, 'read-only')
+
+    const turn = runtime.turns.at(-1)!
+    expect(turn.workspacePath).not.toContain('restricted-workspace')
+    expect(turn.permissionMode).toBe('read-only')
+  })
+
   it('rejects danger-full-access when the current session grant is absent', async () => {
     const { origin, runtime, world, characterId } = await start()
-    await setAccess(origin, world.id, characterId, [...RECOMMENDED_ADMIN_PERMISSIONS], 'administrator')
     const result = await chat(origin, world.id, characterId, 'danger-full-access')
 
     expect(result.response.status).toBe(403)
@@ -164,7 +147,7 @@ describe('world file access', () => {
     expect(runtime.turns).toHaveLength(0)
   })
 
-  it('keeps each character in its own sandbox within one world', async () => {
+  it('keeps role defaults independent inside one world', async () => {
     const { origin, server, runtime, world, characterId } = await start()
     server.store.saveBlueprint(blueprint('writer', '小写'))
     const writer = server.store.recruitEmployee({
@@ -173,16 +156,17 @@ describe('world file access', () => {
       blueprintId: 'writer',
       blueprintVersion: 1,
     })
-    await setAccess(origin, world.id, characterId, [])
-    await setAccess(origin, world.id, writer.id, ['world.files.read'])
+    await setDefaultPermission(origin, characterId, 'read-only')
+    await setDefaultPermission(origin, writer.id, 'workspace-write')
 
     await chat(origin, world.id, characterId)
     await chat(origin, world.id, writer.id)
 
     const denied = runtime.turns.find((turn) => turn.agentId === characterId)!
     const allowed = runtime.turns.find((turn) => turn.agentId === writer.id)!
-    expect(denied.workspacePath).not.toBe(allowed.workspacePath)
-    expect(denied.workspacePath).toContain('restricted-workspace')
+    expect(denied.workspacePath).toBe(allowed.workspacePath)
+    expect(denied.permissionMode).toBe('read-only')
+    expect(allowed.permissionMode).toBe('workspace-write')
   })
 })
 
@@ -228,7 +212,6 @@ describe('pending decisions are announced, not polled for', () => {
     })()
 
     // A member asking for a management action creates a pending decision.
-    await setAccess(origin, world.id, characterId, [])
     await json(origin, `/api/worlds/${world.id}/chat`, send('POST', {
       prompt: '把这个世界改名为 通知测试世界',
       employeeIds: [characterId],
@@ -252,7 +235,6 @@ describe('pending decisions are announced, not polled for', () => {
 describe('full host access needs the owner, never the character', () => {
   it('returns an explicit authorization error without a session grant', async () => {
     const { origin, runtime, world, characterId } = await start()
-    await setAccess(origin, world.id, characterId, [...RECOMMENDED_ADMIN_PERMISSIONS], 'administrator')
     const refused = await json(origin, `/api/worlds/${world.id}/chat`, send('POST', {
       prompt: '你好',
       employeeIds: [characterId],
@@ -266,7 +248,6 @@ describe('full host access needs the owner, never the character', () => {
 
   it('keeps a confirmed full-access grant active for the current session', async () => {
     const { origin, server, runtime, world, characterId } = await start()
-    await setAccess(origin, world.id, characterId, ['world.files.read'])
     const session = server.store.createSession({ workspaceId: world.workspaceId, worldId: world.id, kind: 'direct', title: '完整访问测试', participants: [{ participantId: 'owner', kind: 'owner' }, { participantId: characterId, kind: 'employee' }] })
 
     const issued = await json(origin, `/api/worlds/${world.id}/runtime-access-grants`, send('POST', {

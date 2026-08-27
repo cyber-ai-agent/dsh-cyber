@@ -27,6 +27,7 @@ import { registerApplicationAccessRoutes } from './routes/application-access-rou
 import { registerAssetRoutes } from './routes/asset-routes.js'
 import { registerCatalogRoutes } from './routes/catalog-routes.js'
 import { registerConversationRoutes } from './routes/conversation-routes.js'
+import { registerCompletionJobRoutes } from './routes/completion-job-routes.js'
 import { registerGroupTaskRoutes } from './routes/group-task-routes.js'
 import { registerEmployeeRoutes } from './routes/employee-routes.js'
 import { registerIntegrationRoutes } from './routes/integration-routes.js'
@@ -68,6 +69,10 @@ import { ApplicationUpdateService } from './services/application-update-service.
 import { TaskScheduleService } from './services/task-schedule-service.js'
 import { TurnAwareApprovalContinuationService } from './services/turn-aware-approval-continuation-service.js'
 import { WorldAccessService } from './services/world-access-service.js'
+import type { WorkSystemService } from './services/work-system-service.js'
+import { composeWorkSystem } from './composition/compose-work-system.js'
+import { composeCompletionWorker } from './composition/compose-completion.js'
+import { refreshMcpCatalog } from './composition/mcp-lifecycle.js'
 import { WorldArtifactService } from './services/world-artifact-service.js'
 import { WorldAmbientSlotResolver } from './services/world-ambient-slot-resolver.js'
 import { WorldAmbientStateProvider } from './services/world-ambient-state-provider.js'
@@ -86,7 +91,6 @@ import { WorldMarketplaceService } from './services/world-marketplace-service.js
 import { WorldPackageInstanceService } from './services/world-package-instance-service.js'
 import { WorldCharacterAuthorityService } from './services/world-character-authority-service.js'
 import { WorldPermissionRequestService } from './services/world-permission-request-service.js'
-import { WorldAuthorityBackfillService } from './services/world-authority-backfill-service.js'
 import { OwnerRuntimeAccessService } from './services/owner-runtime-access-service.js'
 import { WorldRuntimePermissionResolver } from './services/world-runtime-permission-resolver.js'
 import { createBuiltinSkillRegistry } from './skills/builtin-skill-registry.js'
@@ -134,6 +138,7 @@ export interface CyberServer {
   readonly orchestrator: ConversationOrchestrator
   readonly artifacts: WorldArtifactService
   readonly knowledge: WorldKnowledgeLibraryService
+  readonly work: WorkSystemService
   readonly packageManager: PackageManager
   start(): Promise<CyberServerAddress>
   address(): CyberServerAddress | undefined
@@ -156,6 +161,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   if (!compatibility.ok) throw new Error(`Harness compatibility check failed: ${compatibility.errors.join('; ')}`)
 
   const store = await SqliteStore.open(join(stateRoot, 'data', 'dsh-cyber.sqlite'))
+  store.recoverConversationQueueLeases(true)
   store.recoverConversationRuntimeAfterRestart()
   // Built-in blueprint identities are immutable once persisted. Older local
   // states may already contain the same id/version from a previous release;
@@ -211,18 +217,6 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       }
     },
   })
-  const authorityBackfill = new WorldAuthorityBackfillService({
-    authority: {
-      get: authority.get.bind(authority),
-      hasPermission: authority.hasPermission.bind(authority),
-      updateAuthority: authority.updateAuthority.bind(authority),
-      listWorlds: (workspaceId) => store.listWorlds(workspaceId),
-      listEmployees: (worldId) => store.listEmployees(worldId),
-      listAuthorityChanges: (worldId, employeeId) => authority.listChanges(worldId, employeeId),
-    },
-    roots: worldRoots,
-  })
-  await authorityBackfill.run(store.listWorkspaces().map((workspace) => workspace.id))
   // The runtime service is constructed later, so the publisher is resolved
   // lazily. Decisions announce a change rather than the client polling a
   // snapshot that fires once per streamed token.
@@ -232,7 +226,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     authority,
     onDecisionChanged: (worldId, payload) => publishDecisionChanged?.(worldId, payload),
   })
-  const ownerRuntimeAccess = new OwnerRuntimeAccessService()
+  const ownerRuntimeAccess = new OwnerRuntimeAccessService(store)
   const worldRuntimePermissions = new WorldRuntimePermissionResolver({
     roots: worldRoots,
     authority,
@@ -285,6 +279,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     service: interactions,
     resolveRoute(request) { return resolveHarnessRoute(store, request) },
   })
+  const completionWorker = composeCompletionWorker(store, worldArtifacts)
   const orchestrator = new ConversationOrchestrator({
     store,
     runtime,
@@ -294,16 +289,21 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     // something at runtime.
     resolveWorldRoot: async (worldId, employeeId) =>
       (await worldRuntimePermissions.resolve({ worldId, employeeId })).workspacePath,
-    completionHook: worldArtifacts.completionHook(),
+    completionJobType: 'world-artifact-publication',
+    onCompletionJobQueued: () => completionWorker.wake(),
   })
   const peerCollaboration = new PeerCollaborationService({
     store,
     simulationStore: worldSimulation,
     orchestrator,
   })
+  const packageRuntime = options.packageRuntime ?? new LocalPackageRuntime(join(stateRoot, 'packages'))
+  await packageRuntime.recover?.(
+    store.listWorkspaces().flatMap((workspace) => store.listInstalledPackages(workspace.id)),
+  )
   const packageManager = new PackageManager({
     store,
-    runtime: options.packageRuntime ?? new LocalPackageRuntime(join(stateRoot, 'packages')),
+    runtime: packageRuntime,
     validateStaged: validateStagedPackageEntrypoints,
   })
   const packageCatalog = new LocalPackageCatalog(options.marketplaceRoot ?? fileURLToPath(new URL('../../../marketplace', import.meta.url)))
@@ -422,6 +422,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const worldFiles = new WorldFileService(worldRoots)
 
   const router = new Router()
+  const workSystem = composeWorkSystem({ store, groupTasks, router, worldAccess })
   registerApplicationAccessRoutes(router, applicationAccess)
   registerSystemRoutes(router, { store, stateRoot, runtimeUpdates, applicationUpdates })
   registerWorkspaceFileRoutes(router, { worldFiles, access: worldAccess })
@@ -441,7 +442,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     store,
     worldAccess,
     worldPackages,
-    authority,
+    ownerRuntimeAccess,
     skillAvailability,
   })
   registerWorldAuthorityRoutes(router, { store, worldAccess, authority, worldPermissions, skillRuntime, turnContinuations, toolApprovals, ownerRuntimeAccess })
@@ -450,6 +451,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerPackageRoutes(router, { store, packageManager, packageCatalog, skillRuntime, worldMarketplace, worldPackages, worldAccess, skillCatalog })
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
   registerWorldTraceRoutes(router, { store, trace: worldTrace, access: worldAccess })
+  registerCompletionJobRoutes(router, { store, access: worldAccess, wake: () => completionWorker.wake() })
   registerWorldArtifactRoutes(router, { store, artifacts: worldArtifacts, access: worldAccess, authority })
   registerWorldKnowledgeRoutes(router, {
     store,
@@ -470,6 +472,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     store,
     worldAccess,
     authority,
+    ownerRuntimeAccess,
     skillAvailability,
   })
 
@@ -498,6 +501,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     orchestrator,
     artifacts: worldArtifacts,
     knowledge: worldKnowledge,
+    work: workSystem,
     packageManager,
     async start() {
       if (closed) throw new Error('Server is closed')
@@ -506,7 +510,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       startedAddress = { host, port: address.port, origin: `http://${host}:${address.port}` }
       ambientLifeScheduler.start()
       taskSchedules.start()
-      skillRuntime.start(); conversationControl.start()
+      skillRuntime.start(); conversationControl.start(); completionWorker.start()
       await knowledgeGraphRuntime.start()
       // Neither of these may gate the listener. MCP discovery talks to
       // user-configured endpoints that can black-hole, and continuation runs
@@ -537,34 +541,12 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       worldStreamHub.close()
       if (httpServer.listening) await closeServer(httpServer)
       await orchestrator.close()
+      await completionWorker.close()
       credentials.close()
       integrations.close()
       store.close()
     },
   }
-}
-
-/** MCP servers are user-configured endpoints; discovery is best-effort. */
-const MCP_DISCOVERY_TIMEOUT_MS = 5_000
-
-async function refreshMcpCatalog(adapter: McpSkillAdapter, registry: CharacterSkillAdapterRegistry): Promise<void> {
-  try {
-    await withTimeout(adapter.refresh(), MCP_DISCOVERY_TIMEOUT_MS)
-  } catch (error) {
-    // A stalled or hostile endpoint must not hold the process, and a catalog
-    // that could not be read stays empty rather than stale.
-    adapter.clear()
-    console.warn('[dsh-cyber] MCP 工具目录刷新失败，本次保持为空：', errorText(error))
-  }
-  registry.refresh(adapter)
-}
-
-function withTimeout<TValue>(work: Promise<TValue>, milliseconds: number): Promise<TValue> {
-  return new Promise<TValue>((resolvePromise, rejectPromise) => {
-    const timer = setTimeout(() => rejectPromise(new Error(`操作超过 ${milliseconds} 毫秒未完成`)), milliseconds)
-    timer.unref?.()
-    work.then(resolvePromise, rejectPromise).finally(() => clearTimeout(timer))
-  })
 }
 
 /** Crash residue from `instantiate`; safe to remove because nothing reads it. */

@@ -1,5 +1,11 @@
+import {
+  parseWorkspacePaneWidth,
+  WorkspacePreferencesContractError,
+  type WorkspacePaneWidthKey,
+} from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
+import { HttpError } from '../http/errors.js'
 import type { Router } from '../http/router.js'
 import {
   nullableString,
@@ -63,11 +69,22 @@ export function registerWorkspaceRoutes(
         : { motion: requiredEnum(body, 'motion', ['system', 'reduced', 'full']) }),
       ...(body.leftPaneWidth === undefined
         ? {}
-        : { leftPaneWidth: requiredNumber(body, 'leftPaneWidth') }),
+        : { leftPaneWidth: workspacePaneWidth(body, 'leftPaneWidth') }),
       ...(body.rightPaneWidth === undefined
         ? {}
-        : { rightPaneWidth: requiredNumber(body, 'rightPaneWidth') }),
+        : { rightPaneWidth: workspacePaneWidth(body, 'rightPaneWidth') }),
     })
     writeJson(response, 200, { preferences })
   })
+}
+
+function workspacePaneWidth(body: Record<string, unknown>, key: WorkspacePaneWidthKey): number {
+  try {
+    return parseWorkspacePaneWidth(key, requiredNumber(body, key))
+  } catch (error) {
+    if (error instanceof WorkspacePreferencesContractError) {
+      throw new HttpError(422, error.code, error.message)
+    }
+    throw error
+  }
 }

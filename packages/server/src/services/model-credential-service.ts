@@ -3,10 +3,11 @@ import {
   createDecipheriv,
   createHash,
   randomBytes,
-  randomUUID,
 } from 'node:crypto'
-import { chmod, mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, open, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+
+import { AtomicFileSecretStorage, SerializedWriteQueue, type SecretStoragePort } from '../security/secret-storage.js'
 
 const VAULT_VERSION = 1 as const
 const MANAGED_ENV_PREFIX = 'DSH_CYBER_MODEL_KEY_'
@@ -30,29 +31,31 @@ interface CredentialVaultFile {
  * Harness runtime.
  */
 export class ModelCredentialService {
-  readonly #vaultPath: string
   readonly #key: Buffer
-  readonly #entries: Record<string, EncryptedCredential>
+  readonly #storage: SecretStoragePort
+  readonly #writes = new SerializedWriteQueue()
+  #entries: Record<string, EncryptedCredential>
   #closed = false
 
   private constructor(
-    vaultPath: string,
     key: Buffer,
     entries: Record<string, EncryptedCredential>,
+    storage: SecretStoragePort,
   ) {
-    this.#vaultPath = vaultPath
     this.#key = key
     this.#entries = entries
+    this.#storage = storage
   }
 
-  static async open(stateRoot: string): Promise<ModelCredentialService> {
+  static async open(stateRoot: string, storage?: SecretStoragePort): Promise<ModelCredentialService> {
     const directory = join(stateRoot, 'credentials')
     const keyPath = join(directory, 'model-credentials.key')
     const vaultPath = join(directory, 'model-credentials.json')
     await mkdir(directory, { recursive: true, mode: 0o700 })
     const key = await readOrCreateKey(keyPath)
-    const entries = await readVault(vaultPath)
-    const service = new ModelCredentialService(vaultPath, key, entries)
+    const vaultStorage = storage ?? new AtomicFileSecretStorage(vaultPath)
+    const entries = await readVault(vaultStorage)
+    const service = new ModelCredentialService(key, entries, vaultStorage)
     service.#activateAll()
     return service
   }
@@ -76,20 +79,28 @@ export class ModelCredentialService {
     const secret = apiKey.trim()
     if (!secret) throw new Error('API key cannot be empty')
     if (secret.length > MAX_API_KEY_LENGTH) throw new Error('API key is too large')
-    this.#entries[profileId] = encryptCredential(this.#key, profileId, secret)
-    await this.#persist()
-    const envName = managedCredentialEnvName(profileId)
-    process.env[envName] = secret
-    return envName
+    return this.#writes.run(async () => {
+      this.#assertOpen()
+      const nextEntries = { ...this.#entries, [profileId]: encryptCredential(this.#key, profileId, secret) }
+      await this.#persist(nextEntries)
+      this.#entries = nextEntries
+      const envName = managedCredentialEnvName(profileId)
+      process.env[envName] = secret
+      return envName
+    })
   }
 
   async delete(profileId: string): Promise<void> {
     this.#assertOpen()
-    const envName = managedCredentialEnvName(profileId)
-    delete process.env[envName]
-    if (this.#entries[profileId] === undefined) return
-    delete this.#entries[profileId]
-    await this.#persist()
+    await this.#writes.run(async () => {
+      this.#assertOpen()
+      if (this.#entries[profileId] === undefined) return
+      const nextEntries = { ...this.#entries }
+      delete nextEntries[profileId]
+      await this.#persist(nextEntries)
+      this.#entries = nextEntries
+      delete process.env[managedCredentialEnvName(profileId)]
+    })
   }
 
   close(): void {
@@ -107,17 +118,9 @@ export class ModelCredentialService {
     }
   }
 
-  async #persist(): Promise<void> {
-    const temporaryPath = `${this.#vaultPath}.tmp-${randomUUID()}`
-    const vault: CredentialVaultFile = { version: VAULT_VERSION, entries: this.#entries }
-    try {
-      await writeFile(temporaryPath, JSON.stringify(vault), { encoding: 'utf8', flag: 'wx', mode: 0o600 })
-      await rename(temporaryPath, this.#vaultPath)
-      await chmod(this.#vaultPath, 0o600).catch(() => undefined)
-    } catch (error) {
-      await rm(temporaryPath, { force: true }).catch(() => undefined)
-      throw error
-    }
+  async #persist(entries: Record<string, EncryptedCredential>): Promise<void> {
+    const vault: CredentialVaultFile = { version: VAULT_VERSION, entries }
+    await this.#storage.write(Buffer.from(JSON.stringify(vault), 'utf8'))
   }
 
   #assertOpen(): void {
@@ -146,6 +149,7 @@ async function readOrCreateKey(path: string): Promise<Buffer> {
     const handle = await open(path, 'wx', 0o600)
     try {
       await handle.writeFile(key)
+      await handle.sync()
     } finally {
       await handle.close()
     }
@@ -163,12 +167,13 @@ function validateKey(key: Buffer): Buffer {
   return key
 }
 
-async function readVault(path: string): Promise<Record<string, EncryptedCredential>> {
+async function readVault(storage: SecretStoragePort): Promise<Record<string, EncryptedCredential>> {
   let value: unknown
   try {
-    value = JSON.parse(await readFile(path, 'utf8'))
+    const content = await storage.read()
+    if (content === undefined) return {}
+    value = JSON.parse(content.toString('utf8'))
   } catch (error) {
-    if (isMissingFile(error)) return {}
     throw new Error('Model credential vault cannot be read', { cause: error })
   }
   if (!isRecord(value) || value.version !== VAULT_VERSION || !isRecord(value.entries)) {

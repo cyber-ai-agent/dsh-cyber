@@ -117,4 +117,36 @@ describe('Chat control UI', () => {
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: originalClipboard })
     }
   })
+
+  it('shows completion outbox progress and a retry action without changing the main answer', () => {
+    const employee = { id: 'employee-completion', displayName: '交付角色', role: '分析', avatarIndex: 0, currentActivity: '可接任务' } as CyberEmployee
+    const world = { id: 'world-completion', workspaceId: 'workspace-completion', name: '交付测试世界', templateId: 'personal-world', status: 'active', createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString() } as World
+    const common = {
+      demoMode: false,
+      world,
+      employees: [employee],
+      draft: '',
+      onDraftChange: vi.fn(),
+      onSend: vi.fn(async () => undefined),
+      onUploadAttachment: vi.fn(async () => { throw new Error('not used') }),
+      onOpenDossier: vi.fn(),
+      onOpenArtifact: vi.fn(),
+      onRecruit: vi.fn(),
+    }
+    const pending = renderToStaticMarkup(createElement(ChatWorkbench, {
+      ...common,
+      messages: [{ id: 'pending', sessionId: 'session', sequence: 1, senderId: employee.id, senderKind: 'employee', kind: 'assistant', content: '主回答可见', metadata: { completionJobId: 'job-pending', completionStatus: 'pending' }, createdAt: new Date(0).toISOString() }],
+    }))
+    expect(pending).toContain('主回答可见')
+    expect(pending).toContain('产物整理中')
+
+    const failed = renderToStaticMarkup(createElement(ChatWorkbench, {
+      ...common,
+      messages: [{ id: 'failed', sessionId: 'session', sequence: 1, senderId: employee.id, senderKind: 'employee', kind: 'assistant', content: '主回答仍然成功', metadata: { completionJobId: 'job-failed', completionStatus: 'failed' }, createdAt: new Date(0).toISOString() }],
+      onRetryCompletionJob: vi.fn(async () => undefined),
+    }))
+    expect(failed).toContain('主回答仍然成功')
+    expect(failed).toContain('产物整理失败')
+    expect(failed).toContain('重试')
+  })
 })

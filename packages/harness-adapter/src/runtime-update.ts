@@ -121,6 +121,8 @@ export async function runHarnessCandidateCanary(options: {
     blueprintVersion: 1,
     displayName: '运行时金丝雀',
     role: '兼容性验证员',
+    presence: 'available',
+    health: 'healthy',
     status: 'available',
     currentRevision: 1,
     createdAt: now,

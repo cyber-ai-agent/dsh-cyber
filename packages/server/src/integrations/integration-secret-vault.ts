@@ -1,28 +1,32 @@
-import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:crypto'
-import { chmod, mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
+import { chmod, mkdir, open, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+
+import { AtomicFileSecretStorage, SerializedWriteQueue, type SecretStoragePort } from '../security/secret-storage.js'
 
 interface EncryptedSecret { iv: string; tag: string; ciphertext: string }
 interface VaultFile { version: 1; entries: Record<string, EncryptedSecret> }
 
 export class IntegrationSecretVault {
-  readonly #path: string
   readonly #key: Buffer
-  readonly #entries: Record<string, EncryptedSecret>
+  readonly #storage: SecretStoragePort
+  readonly #writes = new SerializedWriteQueue()
+  #entries: Record<string, EncryptedSecret>
   #closed = false
 
-  private constructor(path: string, key: Buffer, entries: Record<string, EncryptedSecret>) {
-    this.#path = path
+  private constructor(key: Buffer, entries: Record<string, EncryptedSecret>, storage: SecretStoragePort) {
     this.#key = key
     this.#entries = entries
+    this.#storage = storage
   }
 
-  static async open(stateRoot: string): Promise<IntegrationSecretVault> {
+  static async open(stateRoot: string, storage?: SecretStoragePort): Promise<IntegrationSecretVault> {
     const directory = join(stateRoot, 'credentials')
     await mkdir(directory, { recursive: true, mode: 0o700 })
     const key = await readOrCreateKey(join(directory, 'integration-credentials.key'))
     const path = join(directory, 'integration-credentials.json')
-    return new IntegrationSecretVault(path, key, await readVault(path))
+    const vaultStorage = storage ?? new AtomicFileSecretStorage(path)
+    return new IntegrationSecretVault(key, await readVault(vaultStorage), vaultStorage)
   }
 
   has(connectionId: string): boolean { return this.#entries[connectionId] !== undefined }
@@ -39,15 +43,24 @@ export class IntegrationSecretVault {
     const value = secret.trim()
     if (!value) throw new Error('Integration credential cannot be empty')
     if (value.length > 16_384) throw new Error('Integration credential is too large')
-    this.#entries[connectionId] = encrypt(this.#key, connectionId, value)
-    await this.#persist()
+    await this.#writes.run(async () => {
+      this.#assertOpen()
+      const nextEntries = { ...this.#entries, [connectionId]: encrypt(this.#key, connectionId, value) }
+      await this.#persist(nextEntries)
+      this.#entries = nextEntries
+    })
   }
 
   async delete(connectionId: string): Promise<void> {
     this.#assertOpen()
-    if (this.#entries[connectionId] === undefined) return
-    delete this.#entries[connectionId]
-    await this.#persist()
+    await this.#writes.run(async () => {
+      this.#assertOpen()
+      if (this.#entries[connectionId] === undefined) return
+      const nextEntries = { ...this.#entries }
+      delete nextEntries[connectionId]
+      await this.#persist(nextEntries)
+      this.#entries = nextEntries
+    })
   }
 
   close(): void {
@@ -56,16 +69,8 @@ export class IntegrationSecretVault {
     this.#key.fill(0)
   }
 
-  async #persist(): Promise<void> {
-    const temporary = `${this.#path}.tmp-${randomUUID()}`
-    try {
-      await writeFile(temporary, JSON.stringify({ version: 1, entries: this.#entries }), { encoding: 'utf8', flag: 'wx', mode: 0o600 })
-      await rename(temporary, this.#path)
-      await chmod(this.#path, 0o600).catch(() => undefined)
-    } catch (error) {
-      await rm(temporary, { force: true }).catch(() => undefined)
-      throw error
-    }
+  async #persist(entries: Record<string, EncryptedSecret>): Promise<void> {
+    await this.#storage.write(Buffer.from(JSON.stringify({ version: 1, entries }), 'utf8'))
   }
 
   #assertOpen(): void { if (this.#closed) throw new Error('Integration secret vault is closed') }
@@ -76,7 +81,7 @@ async function readOrCreateKey(path: string): Promise<Buffer> {
   const key = randomBytes(32)
   try {
     const handle = await open(path, 'wx', 0o600)
-    try { await handle.writeFile(key) } finally { await handle.close() }
+    try { await handle.writeFile(key); await handle.sync() } finally { await handle.close() }
     await chmod(path, 0o600).catch(() => undefined)
     return key
   } catch (error) {
@@ -86,10 +91,13 @@ async function readOrCreateKey(path: string): Promise<Buffer> {
   }
 }
 
-async function readVault(path: string): Promise<Record<string, EncryptedSecret>> {
+async function readVault(storage: SecretStoragePort): Promise<Record<string, EncryptedSecret>> {
   let value: unknown
-  try { value = JSON.parse(await readFile(path, 'utf8')) } catch (error) {
-    if (isNodeError(error, 'ENOENT')) return {}
+  try {
+    const content = await storage.read()
+    if (content === undefined) return {}
+    value = JSON.parse(content.toString('utf8'))
+  } catch (error) {
     throw new Error('Integration credential vault cannot be read', { cause: error })
   }
   if (!isRecord(value) || value.version !== 1 || !isRecord(value.entries)) throw new Error('Integration credential vault format is invalid')

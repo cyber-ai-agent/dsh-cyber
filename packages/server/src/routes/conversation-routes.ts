@@ -213,7 +213,9 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     const requestedReasoning = body.reasoningEffort === undefined
       ? worldSettingsValue.model.reasoningEffort
       : requiredEnum<ReasoningEffort>(body, 'reasoningEffort', ['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
-    const requestedPermissionMode = body.permissionMode === undefined ? 'read-only' : requiredEnum<AgentPermissionMode>(body, 'permissionMode', ['read-only', 'workspace-write', 'danger-full-access'])
+    const requestedPermissionMode = body.permissionMode === undefined
+      ? defaultRuntimePermissionMode(store, employeeIds)
+      : requiredEnum<AgentPermissionMode>(body, 'permissionMode', ['read-only', 'workspace-write', 'danger-full-access'])
     // Full host access requires a current-session grant issued by the owner;
     // nothing on the skill path can mint one.
     const runtimeAccessGrantId = optionalString(body.runtimeAccessGrantId)
@@ -624,6 +626,22 @@ function mentionedEmployeeIds(prompt: string, employees: Array<{ id: string; dis
     .filter((employee) => prompt.includes(`@${employee.displayName}`))
     .sort((left, right) => prompt.indexOf(`@${left.displayName}`) - prompt.indexOf(`@${right.displayName}`))
     .map((employee) => employee.id)
+}
+
+function defaultRuntimePermissionMode(store: SqliteStore, employeeIds: string[]): AgentPermissionMode {
+  const rank: Record<AgentPermissionMode, number> = {
+    'read-only': 0,
+    'workspace-write': 1,
+    'danger-full-access': 2,
+  }
+  return employeeIds
+    .map((employeeId) => {
+      const employee = store.getEmployee(employeeId)
+      return employee === undefined
+        ? 'read-only'
+        : store.getEmployeeRevision(employee.id, employee.currentRevision)?.runtimePermissionMode ?? 'read-only'
+    })
+    .reduce<AgentPermissionMode>((least, mode) => rank[mode] < rank[least] ? mode : least, 'danger-full-access')
 }
 
 

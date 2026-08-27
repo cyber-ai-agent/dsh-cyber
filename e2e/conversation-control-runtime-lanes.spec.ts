@@ -2,9 +2,10 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 import type { AgentRuntimePort, AgentTurnRequest, EmployeeInstance } from '../packages/contracts/lib/index.js'
 import { createCyberServer, type CyberServer } from '../packages/server/lib/index.js'
+import { attachAppConsoleRecorder } from './console-test-helpers.js'
 
 let server: CyberServer | undefined
 let origin = ''
@@ -30,7 +31,7 @@ test('keeps durable queue controls, reload state and stop facts visible across r
   const employee = current.store.listEmployees(world.id)[0]!
   const second = await recruit(world.id)
   const consoleIssues: string[] = []
-  recordConsole(page, consoleIssues)
+  attachAppConsoleRecorder(page, consoleIssues)
 
   await page.goto(origin)
   await expect(page.locator('.workbench-shell')).toBeVisible()
@@ -144,11 +145,6 @@ async function patchJson(url: string, body: Record<string, unknown>): Promise<{ 
 function requireServer(): CyberServer {
   if (server === undefined) throw new Error('Conversation control E2E 服务尚未启动')
   return server
-}
-
-function recordConsole(page: Page, issues: string[]): void {
-  page.on('console', (message) => { if (message.type() === 'error' || message.type() === 'warning') issues.push(`[console:${message.type()}] ${message.text()}`) })
-  page.on('pageerror', (error) => issues.push(`[pageerror] ${error.message}`))
 }
 
 class LaneRuntime implements AgentRuntimePort {

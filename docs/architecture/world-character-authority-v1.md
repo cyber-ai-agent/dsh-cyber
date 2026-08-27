@@ -1,5 +1,9 @@
 # World Character Authority V1
 
+> **已被 ADR 0007 取代。** 本文只记录旧开发快照的兼容模型。当前产品不再创建或
+> 展示世界管理员，也不再用 World Authority 决定角色运行权限；请以
+> `docs/adr/0007-role-runtime-permissions.md` 为准。
+
 ## 目的
 
 World Character Authority 把“这个角色在当前世界能做什么”从 Persona 文本和

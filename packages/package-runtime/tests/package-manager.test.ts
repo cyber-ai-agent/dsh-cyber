@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -133,6 +133,94 @@ describe('PackageManager', () => {
       sourceDirectory: source,
       approvalToken: preview.approvalToken,
     })).rejects.toBeInstanceOf(PackageApprovalRequiredError)
+  })
+
+  it('treats the same version and digest as idempotent and rejects different content without deleting the original', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-cyber-package-immutable-'))
+    const source = join(directory, 'source')
+    const conflictingSource = join(directory, 'conflicting-source')
+    await mkdir(source, { recursive: true })
+    await mkdir(conflictingSource, { recursive: true })
+    await writeFile(join(source, 'SKILL.md'), '# Immutable\n', 'utf8')
+    await writeFile(join(conflictingSource, 'SKILL.md'), '# Conflicting\n', 'utf8')
+    const store = await SqliteStore.open(join(directory, 'cyber.sqlite'))
+    stores.push(store)
+    const workspace = store.createWorkspace({ name: 'Immutable versions' })
+    const packageRoot = join(directory, 'packages')
+    const manager = new PackageManager({ store, runtime: new LocalPackageRuntime(packageRoot) })
+    const original = manifest('1.0.0', '# Immutable\n')
+
+    const first = await manager.installReversible({
+      workspaceId: workspace.id,
+      manifest: original,
+      sourceDirectory: source,
+      approvalToken: manager.preview(workspace.id, original).approvalToken,
+    })
+    expect(first.receipt.createdInstalledDirectory).toBe(true)
+
+    const repeated = await manager.installReversible({
+      workspaceId: workspace.id,
+      manifest: original,
+      sourceDirectory: source,
+      approvalToken: manager.preview(workspace.id, original).approvalToken,
+    })
+    expect(repeated.receipt.createdInstalledDirectory).toBe(false)
+    expect(repeated.receipt.installedPath).toBe(first.receipt.installedPath)
+    expect(await readFile(join(first.receipt.installedPath, 'SKILL.md'), 'utf8')).toBe('# Immutable\n')
+    await manager.compensate(repeated, 'parent-transaction-failed')
+    await expect(manager.compensate(repeated, 'parent-transaction-failed')).resolves.toBeUndefined()
+    expect(await readFile(join(first.receipt.installedPath, 'SKILL.md'), 'utf8')).toBe('# Immutable\n')
+    expect(store.getActivePackage(workspace.id, original.id)?.version).toBe(original.version)
+
+    const conflict = manifest('1.0.0', '# Conflicting\n')
+    await expect(manager.install({
+      workspaceId: workspace.id,
+      manifest: conflict,
+      sourceDirectory: conflictingSource,
+      approvalToken: manager.preview(workspace.id, conflict).approvalToken,
+    })).rejects.toMatchObject({ causeCode: 'package_version_content_conflict' })
+
+    expect(await readFile(join(first.receipt.installedPath, 'SKILL.md'), 'utf8')).toBe('# Immutable\n')
+    expect(store.getActivePackage(workspace.id, original.id)?.manifest.files).toEqual(original.files)
+  })
+
+  it('recovers orphaned staging and pointers while failing closed for missing installed files', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-cyber-package-recovery-'))
+    const source = join(directory, 'source')
+    await mkdir(source, { recursive: true })
+    await writeFile(join(source, 'SKILL.md'), '# Recovery\n', 'utf8')
+    const store = await SqliteStore.open(join(directory, 'cyber.sqlite'))
+    stores.push(store)
+    const workspace = store.createWorkspace({ name: 'Package recovery' })
+    const packageRoot = join(directory, 'packages')
+    const runtime = new LocalPackageRuntime(packageRoot)
+    const manager = new PackageManager({ store, runtime })
+    const packageManifest = manifest('1.0.0', '# Recovery\n')
+    const installed = await manager.installReversible({
+      workspaceId: workspace.id,
+      manifest: packageManifest,
+      sourceDirectory: source,
+      approvalToken: manager.preview(workspace.id, packageManifest).approvalToken,
+    })
+    const pointerPath = join(packageRoot, 'active', `${encodeURIComponent(packageManifest.id)}.json`)
+    await rm(pointerPath)
+    await mkdir(join(packageRoot, '.staging', 'orphaned'), { recursive: true })
+    await writeFile(join(packageRoot, 'active', 'dangling.json'), JSON.stringify({ packageId: 'missing', version: '1.0.0', installedPath: 'missing' }), 'utf8')
+
+    await expect(runtime.recover(store.listInstalledPackages(workspace.id))).resolves.toMatchObject({
+      removedStagingEntries: 1,
+      repairedPointers: 1,
+      removedDanglingPointers: 1,
+      verifiedInstalledVersions: 1,
+    })
+    expect(JSON.parse(await readFile(pointerPath, 'utf8'))).toMatchObject({
+      packageId: packageManifest.id,
+      version: packageManifest.version,
+    })
+
+    await rm(installed.receipt.installedPath, { recursive: true, force: true })
+    await expect(runtime.recover(store.listInstalledPackages(workspace.id)))
+      .rejects.toThrow('package_active_files_missing')
   })
 
   it('binds a one-time random grant to all manifest content', async () => {

@@ -6,9 +6,13 @@ import { DatabaseSync, backup } from 'node:sqlite'
 import {
   CYBER_SCHEMA_VERSION,
   RECOMMENDED_ADMIN_PERMISSIONS,
+  WORKSPACE_PREFERENCES_LIMITS,
+  parseWorkspacePaneWidth,
   type AgentPermissionMode,
   type ConversationQueueEntry,
   type ConversationQueueEntryStatus,
+  type CompletionJob,
+  type CompletionJobDraft,
   isWorldCharacterPermission,
   isDomainEventType,
   type DatabaseDoctorReport,
@@ -17,6 +21,7 @@ import {
   type EmployeeBlueprint,
   type EmployeeDailyJournal,
   type EmployeeDossier,
+  type EmployeeHealth,
   type EmployeeInstance,
   type EmployeeMilestone,
   type EmployeeMilestoneCategory,
@@ -40,6 +45,7 @@ import {
   type ModelInteractionLogStatus,
   type ModelProfile,
   type ModelProviderKind,
+  type OwnerRuntimeAccessGrant,
   type CyberPackageManifest,
   type InstalledPackage,
   type PackageInstallTransaction,
@@ -85,6 +91,7 @@ import {
 import type { CharacterSkillAction } from '@dsh-cyber/contracts/skill-runtime'
 
 import { DatabaseCorruptError, EntityNotFoundError, PersistenceError } from './errors.js'
+import { CompletionJobRepository } from './completion-job-repository.js'
 import { migrate, readUserVersion } from './migrations.js'
 import { assertSecretFree } from './secrets.js'
 import {
@@ -132,6 +139,7 @@ export interface RecruitEmployeeInput {
   skillGrants?: string[]
   capabilityGrants?: string[]
   modelPolicy?: JsonObject
+  runtimePermissionMode?: AgentPermissionMode
   reason?: string
   actorId?: string
 }
@@ -142,6 +150,7 @@ export interface ReviseEmployeeInput {
   skillGrants?: string[]
   capabilityGrants?: string[]
   modelPolicy?: JsonObject
+  runtimePermissionMode?: AgentPermissionMode
   reason: string
   actorId?: string
 }
@@ -356,6 +365,8 @@ export interface EnqueueConversationTurnInput {
 
 export interface ClaimConversationQueueEntryInput {
   queueEntryId: string
+  leaseOwner: string
+  leaseDurationMs: number
   expectedRevision?: number
 }
 
@@ -442,6 +453,13 @@ export interface AppendMessageInput {
   metadata?: JsonObject
   causationId?: string
   correlationId?: string
+}
+
+export interface CommitAgentRunCompletionInput {
+  runId: string
+  runtimeSessionId?: string
+  messages: AppendMessageInput[]
+  completionJob?: CompletionJobDraft
 }
 
 export interface ListMessagesPageInput {
@@ -572,6 +590,7 @@ const KNOWN_TABLES = [
   'model_assignments',
   'local_assets',
   'work_sessions',
+  'owner_runtime_access_grants',
   'conversation_queue_entries',
   'task_collaboration_plans',
   'task_collaboration_steps',
@@ -620,6 +639,7 @@ export class SqliteStore {
   readonly #clock: Clock
   readonly #idFactory: () => string
   readonly #worldAuthorities: WorldCharacterAuthorityRepository
+  readonly #completionJobs: CompletionJobRepository
   #closed = false
 
   private constructor(databasePath: string, database: DatabaseSync, options: StoreOptions) {
@@ -629,6 +649,10 @@ export class SqliteStore {
     this.#clock = options.clock ?? (() => new Date().toISOString())
     this.#idFactory = options.idFactory ?? randomUUID
     this.#worldAuthorities = new WorldCharacterAuthorityRepository(this.database, {
+      clock: this.#clock,
+      idFactory: this.#idFactory,
+    })
+    this.#completionJobs = new CompletionJobRepository(this.database, {
       clock: this.#clock,
       idFactory: this.#idFactory,
     })
@@ -663,7 +687,14 @@ export class SqliteStore {
     const store = new SqliteStore(absolutePath, database, { ...options, readOnly })
     try {
       store.#configure()
-      if (!readOnly) migrate(database, store.#clock)
+      if (!readOnly) {
+        const previousVersion = readUserVersion(database)
+        if (exists && previousVersion > 0 && previousVersion < CYBER_SCHEMA_VERSION) {
+          const safeTime = store.#clock().replaceAll(/[^0-9A-Za-z.-]/g, '-')
+          await backup(database, `${absolutePath}.pre-migration-v${previousVersion}-${safeTime}.sqlite`)
+        }
+        migrate(database, store.#clock)
+      }
       return store
     } catch (error) {
       store.close()
@@ -766,14 +797,17 @@ export class SqliteStore {
     }
     if (backgroundAssetRef !== undefined) preferences.backgroundAssetRef = backgroundAssetRef
     if (!preferences.skinId) throw new PersistenceError('Skin id cannot be empty')
-    if (preferences.backgroundOpacity < 0 || preferences.backgroundOpacity > 1) {
+    if (
+      preferences.backgroundOpacity < WORKSPACE_PREFERENCES_LIMITS.backgroundOpacity.minimum
+      || preferences.backgroundOpacity > WORKSPACE_PREFERENCES_LIMITS.backgroundOpacity.maximum
+    ) {
       throw new PersistenceError('Background opacity must be between 0 and 1')
     }
-    if (!Number.isInteger(preferences.leftPaneWidth) || preferences.leftPaneWidth < 220 || preferences.leftPaneWidth > 520) {
-      throw new PersistenceError('Left pane width must be between 220 and 520 pixels')
-    }
-    if (!Number.isInteger(preferences.rightPaneWidth) || preferences.rightPaneWidth < 300 || preferences.rightPaneWidth > 1_440) {
-      throw new PersistenceError('Right pane width must be between 300 and 760 pixels')
+    try {
+      parseWorkspacePaneWidth('leftPaneWidth', preferences.leftPaneWidth)
+      parseWorkspacePaneWidth('rightPaneWidth', preferences.rightPaneWidth)
+    } catch (error) {
+      throw new PersistenceError(error instanceof Error ? error.message : 'Workspace pane width is invalid')
     }
 
     return this.#transaction(() => {
@@ -1796,6 +1830,8 @@ export class SqliteStore {
       blueprintVersion: blueprint.version,
       displayName: input.displayName ?? blueprint.displayName,
       role: input.role ?? blueprint.role,
+      presence: 'available',
+      health: 'healthy',
       status: 'available',
       currentRevision: 1,
       createdAt: now,
@@ -1808,6 +1844,7 @@ export class SqliteStore {
       skillGrants: initialSkillGrants,
       capabilityGrants: initialCapabilityGrants,
       modelPolicy: input.modelPolicy ?? {},
+      runtimePermissionMode: input.runtimePermissionMode ?? 'read-only',
       reason: input.reason ?? 'recruited',
       createdAt: now,
     }
@@ -1815,22 +1852,14 @@ export class SqliteStore {
     return this.#transaction(() => {
       this.#insertEmployee(employee)
       this.#insertRevision(revision)
-      const isFirstActiveCharacter = world.administratorEmployeeId === undefined
       this.#worldAuthorities.save({
         worldId: world.id,
         employeeId: employee.id,
-        role: isFirstActiveCharacter ? 'administrator' : 'member',
-        permissionGrants: isFirstActiveCharacter
-          ? recommendedAdminPermissions()
-          : ['world.files.read'],
+        role: 'member',
+        permissionGrants: [],
         createdAt: now,
         updatedAt: now,
       })
-      if (isFirstActiveCharacter) {
-        this.database.prepare(
-          'UPDATE worlds SET administrator_employee_id = ?, updated_at = ? WHERE id = ? AND administrator_employee_id IS NULL',
-        ).run(employee.id, now, world.id)
-      }
       this.database
         .prepare(
           `INSERT INTO employee_profile_revisions
@@ -1915,6 +1944,7 @@ export class SqliteStore {
       skillGrants: input.skillGrants ?? previous.skillGrants,
       capabilityGrants: input.capabilityGrants ?? previous.capabilityGrants,
       modelPolicy: input.modelPolicy ?? previous.modelPolicy,
+      runtimePermissionMode: input.runtimePermissionMode ?? previous.runtimePermissionMode ?? 'read-only',
       reason: input.reason,
       createdAt: now,
     }
@@ -1990,12 +2020,34 @@ export class SqliteStore {
 
   setEmployeeStatus(employeeId: string, status: EmployeeStatus, actorId: string): EmployeeInstance {
     this.#assertWritable()
-    const employee = this.#requireEmployee(employeeId)
     if (status === 'archived') return this.archiveEmployee(employeeId, actorId)
+    if (status === 'blocked') {
+      return this.setEmployeeHealth(employeeId, 'blocked', {
+        errorCode: 'legacy_employee_status_update',
+        detail: '角色运行配置需要用户处理',
+      })
+    }
+    throw new PersistenceError('Employee presence is derived from durable work and cannot be set directly')
+  }
+
+  setEmployeeHealth(
+    employeeId: string,
+    health: EmployeeHealth,
+    issue?: { errorCode: string; detail: string },
+  ): EmployeeInstance {
+    this.#assertWritable()
+    const employee = this.#requireEmployee(employeeId)
+    if (employee.status === 'archived') throw new PersistenceError('Archived employee health cannot be changed')
+    if (health === 'healthy' && issue !== undefined) throw new PersistenceError('Healthy employee cannot retain a health issue')
+    if (health !== 'healthy' && (issue?.errorCode.trim() === '' || issue?.detail.trim() === '')) {
+      throw new PersistenceError('Unhealthy employee requires an actionable error code and detail')
+    }
     const now = this.#clock()
-    this.database
-      .prepare('UPDATE employee_instances SET status = ?, updated_at = ? WHERE id = ?')
-      .run(status, now, employee.id)
+    this.database.prepare(
+      `UPDATE employee_instances
+       SET health = ?, health_error_code = ?, health_detail = ?, updated_at = ?
+       WHERE id = ?`,
+    ).run(health, issue?.errorCode.trim() ?? null, issue?.detail.trim() ?? null, now, employee.id)
     return this.#requireEmployee(employee.id)
   }
 
@@ -2010,7 +2062,7 @@ export class SqliteStore {
 
   getEmployee(employeeId: string): EmployeeInstance | undefined {
     const row = this.database.prepare('SELECT * FROM employee_instances WHERE id = ?').get(employeeId)
-    return row ? mapEmployee(row) : undefined
+    return row ? this.#mapEmployeeRuntimeState(row) : undefined
   }
 
   listEmployees(worldId: string, includeArchived = false): EmployeeInstance[] {
@@ -2018,7 +2070,7 @@ export class SqliteStore {
       ? 'SELECT * FROM employee_instances WHERE world_id = ? ORDER BY created_at, id'
       : `SELECT * FROM employee_instances
          WHERE world_id = ? AND status <> 'archived' ORDER BY created_at, id`
-    return this.database.prepare(sql).all(worldId).map(mapEmployee)
+    return this.database.prepare(sql).all(worldId).map((row) => this.#mapEmployeeRuntimeState(row))
   }
 
   getEmployeeRevision(employeeId: string, revision: number): EmployeeRevision | undefined {
@@ -2973,6 +3025,10 @@ export class SqliteStore {
 
   claimConversationQueueEntry(input: ClaimConversationQueueEntryInput): ConversationQueueEntry {
     this.#assertWritable()
+    const leaseOwner = normalizeRequiredToken(input.leaseOwner, 'Conversation queue lease owner', 160)
+    if (!Number.isSafeInteger(input.leaseDurationMs) || input.leaseDurationMs <= 0) {
+      throw new PersistenceError('Conversation queue lease duration must be positive')
+    }
     const entry = this.getConversationQueueEntry(input.queueEntryId)
     if (entry === undefined) throw new EntityNotFoundError(`Conversation queue entry not found: ${input.queueEntryId}`)
     if (entry.status !== 'queued') throw new PersistenceError('Conversation queue entry is not queued')
@@ -2980,21 +3036,88 @@ export class SqliteStore {
       throw new PersistenceError('Conversation queue entry changed concurrently')
     }
     const turn = this.getWorkTurn(entry.workTurnId)
-    if (turn === undefined || turn.status !== 'queued') throw new PersistenceError('Queued WorkTurn is unavailable')
+    if (turn === undefined || (turn.status !== 'queued' && turn.status !== 'running')) throw new PersistenceError('Queued WorkTurn is unavailable')
     const now = this.#clock()
+    const leaseExpiresAt = new Date(Date.parse(now) + input.leaseDurationMs).toISOString()
     return this.#transaction(() => {
-      const turnResult = this.database.prepare(
-        `UPDATE work_turns SET status = 'running', started_at = COALESCE(started_at, ?)
-         WHERE id = ? AND status = 'queued'`,
-      ).run(now, entry.workTurnId)
-      if (Number(turnResult.changes) !== 1) throw new PersistenceError('Queued WorkTurn changed concurrently')
       const result = this.database.prepare(
         `UPDATE conversation_queue_entries
-         SET status = 'running', revision = revision + 1, claimed_at = COALESCE(claimed_at, ?), updated_at = ?
-         WHERE id = ? AND status = 'queued' AND revision = ?`,
-      ).run(now, now, entry.id, entry.revision)
+         SET status = 'running', revision = revision + 1,
+             attempt_count = attempt_count + 1, claimed_at = COALESCE(claimed_at, ?),
+             lease_owner = ?, lease_expires_at = ?, updated_at = ?
+         WHERE id = ? AND status = 'queued' AND revision = ? AND available_at <= ?
+           AND NOT EXISTS (
+             SELECT 1 FROM conversation_queue_entries AS occupied
+             WHERE occupied.session_id = conversation_queue_entries.session_id
+               AND occupied.id <> conversation_queue_entries.id
+               AND occupied.status IN ('running', 'waiting-approval')
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM json_each(conversation_queue_entries.employee_ids_json) AS candidate_employee
+             WHERE (
+               SELECT COUNT(*) FROM conversation_queue_entries AS running,
+                    json_each(running.employee_ids_json) AS running_employee
+               WHERE running.status = 'running'
+                 AND (running.lease_expires_at IS NULL OR running.lease_expires_at > ?)
+                 AND running_employee.value = candidate_employee.value
+             ) >= 2
+           )`,
+      ).run(now, leaseOwner, leaseExpiresAt, now, entry.id, entry.revision, now, now)
       if (Number(result.changes) !== 1) throw new PersistenceError('Conversation queue entry changed concurrently')
+      if (turn.status === 'queued') {
+        const turnResult = this.database.prepare(
+          `UPDATE work_turns SET status = 'running', started_at = COALESCE(started_at, ?)
+           WHERE id = ? AND status = 'queued'`,
+        ).run(now, entry.workTurnId)
+        if (Number(turnResult.changes) !== 1) throw new PersistenceError('Queued WorkTurn changed concurrently')
+      }
       return this.getConversationQueueEntry(entry.id)!
+    })
+  }
+
+  renewConversationQueueLease(queueEntryId: string, leaseOwner: string, leaseDurationMs: number): ConversationQueueEntry {
+    this.#assertWritable()
+    if (!Number.isSafeInteger(leaseDurationMs) || leaseDurationMs <= 0) throw new PersistenceError('Conversation queue lease duration must be positive')
+    const now = this.#clock()
+    const leaseExpiresAt = new Date(Date.parse(now) + leaseDurationMs).toISOString()
+    const row = this.database.prepare(
+      `UPDATE conversation_queue_entries SET lease_expires_at = ?, updated_at = ?
+       WHERE id = ? AND status = 'running' AND lease_owner = ? RETURNING *`,
+    ).get(leaseExpiresAt, now, queueEntryId, leaseOwner.trim())
+    if (row === undefined) throw new PersistenceError('Conversation queue lease cannot be renewed')
+    return mapConversationQueueEntry(row)
+  }
+
+  recoverConversationQueueLeases(afterRestart = false): { requeued: number } {
+    this.#assertWritable()
+    const now = this.#clock()
+    return this.#transaction(() => {
+      const predicate = afterRestart
+        ? `status = 'running'`
+        : `status = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?`
+      const parameters = afterRestart ? [] : [now]
+      const rows = this.database.prepare(
+        `SELECT id, work_turn_id FROM conversation_queue_entries
+         WHERE ${predicate}
+           AND NOT EXISTS (
+             SELECT 1 FROM agent_runs
+             WHERE agent_runs.turn_id = conversation_queue_entries.work_turn_id
+               AND agent_runs.status IN ('queued', 'running')
+           )`,
+      ).all(...parameters) as Array<{ id: string; work_turn_id: string }>
+      for (const row of rows) {
+        this.database.prepare(
+          `UPDATE conversation_queue_entries
+           SET status = 'queued', revision = revision + 1, available_at = ?,
+               lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+           WHERE id = ? AND status = 'running'`,
+        ).run(now, now, row.id)
+        this.database.prepare(
+          `UPDATE work_turns SET status = 'queued', started_at = NULL
+           WHERE id = ? AND status = 'running'`,
+        ).run(row.work_turn_id)
+      }
+      return { requeued: rows.length }
     })
   }
 
@@ -3020,7 +3143,8 @@ export class SqliteStore {
       }
       const result = this.database.prepare(
         `UPDATE conversation_queue_entries
-         SET status = 'waiting-approval', revision = revision + 1, updated_at = ?
+         SET status = 'waiting-approval', revision = revision + 1,
+             lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
          WHERE id = ? AND status IN ('running', 'waiting-approval') AND revision = ?`,
       ).run(now, entry.id, entry.revision)
       if (Number(result.changes) !== 1) throw new PersistenceError('Conversation queue entry changed concurrently')
@@ -3040,6 +3164,7 @@ export class SqliteStore {
       throw new PersistenceError('Conversation queue WorkTurn cannot resume after approval')
     }
     const now = this.#clock()
+    const leaseExpiresAt = new Date(Date.parse(now) + 30_000).toISOString()
     return this.#transaction(() => {
       if (turn.status === 'waiting-approval') {
         const turnResult = this.database.prepare(
@@ -3050,9 +3175,10 @@ export class SqliteStore {
       }
       const result = this.database.prepare(
         `UPDATE conversation_queue_entries
-         SET status = 'running', revision = revision + 1, updated_at = ?
+         SET status = 'running', revision = revision + 1,
+             lease_owner = 'approval-continuation', lease_expires_at = ?, updated_at = ?
          WHERE id = ? AND status = 'waiting-approval' AND revision = ?`,
-      ).run(now, entry.id, entry.revision)
+      ).run(leaseExpiresAt, now, entry.id, entry.revision)
       if (Number(result.changes) !== 1) throw new PersistenceError('Conversation queue entry changed concurrently')
       return this.getConversationQueueEntry(entry.id)!
     })
@@ -3080,7 +3206,8 @@ export class SqliteStore {
       }
       const result = this.database.prepare(
         `UPDATE conversation_queue_entries
-         SET status = 'completed', revision = revision + 1, completed_at = ?, updated_at = ?
+         SET status = 'completed', revision = revision + 1, completed_at = ?,
+             lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
          WHERE id = ? AND status IN ('running', 'waiting-approval') AND revision = ?`,
       ).run(now, now, entry.id, entry.revision)
       if (Number(result.changes) !== 1) throw new PersistenceError('Conversation queue entry changed concurrently')
@@ -3112,7 +3239,8 @@ export class SqliteStore {
       }
       const result = this.database.prepare(
         `UPDATE conversation_queue_entries
-         SET status = 'failed', error_code = ?, revision = revision + 1, completed_at = ?, updated_at = ?
+         SET status = 'failed', error_code = ?, revision = revision + 1, completed_at = ?,
+             lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
          WHERE id = ? AND status IN ('running', 'waiting-approval') AND revision = ?`,
       ).run(finalErrorCode, now, now, entry.id, entry.revision)
       if (Number(result.changes) !== 1) throw new PersistenceError('Conversation queue entry changed concurrently')
@@ -3158,7 +3286,8 @@ export class SqliteStore {
       }
       const result = this.database.prepare(
         `UPDATE conversation_queue_entries
-         SET status = 'interrupted', error_code = ?, revision = revision + 1, completed_at = ?, updated_at = ?
+         SET status = 'interrupted', error_code = ?, revision = revision + 1, completed_at = ?,
+             lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
          WHERE id = ? AND status IN ('queued', 'running', 'waiting-approval') AND revision = ?`,
       ).run(finalErrorCode, now, now, entry.id, entry.revision)
       if (Number(result.changes) !== 1) throw new PersistenceError('Conversation queue entry changed concurrently')
@@ -3296,6 +3425,106 @@ export class SqliteStore {
     return this.#transitionAgentRun(runId, ['running'], 'completed', undefined, runtimeSessionId)
   }
 
+  commitAgentRunCompletion(input: CommitAgentRunCompletionInput): {
+    run: AgentRun
+    messages: WorkMessage[]
+    completionJob?: CompletionJob
+  } {
+    this.#assertWritable()
+    return this.#transaction(() => {
+      const completionJob = input.completionJob === undefined
+        ? undefined
+        : this.#completionJobs.create(input.completionJob)
+      const messages = input.messages.map((message, index) => this.#appendMessage(
+        completionJob !== undefined && index === input.messages.length - 1
+          ? { ...message, metadata: { ...(message.metadata ?? {}), completionJobId: completionJob.id } }
+          : message,
+      ))
+      const run = this.#transitionAgentRun(input.runId, ['running'], 'completed', undefined, input.runtimeSessionId)
+      return { run, messages, ...(completionJob === undefined ? {} : { completionJob }) }
+    })
+  }
+
+  getCompletionJob(jobId: string): CompletionJob | undefined {
+    return this.#completionJobs.get(jobId)
+  }
+
+  listCompletionJobs(worldId: string, status?: CompletionJob['status']): CompletionJob[] {
+    this.#requireWorld(worldId)
+    return this.#completionJobs.list(worldId, status)
+  }
+
+  claimCompletionJob(owner: string, leaseDurationMs: number): CompletionJob | undefined {
+    this.#assertWritable()
+    return this.#completionJobs.claim(owner, leaseDurationMs)
+  }
+
+  renewCompletionJob(jobId: string, owner: string, leaseDurationMs: number): CompletionJob {
+    this.#assertWritable()
+    return this.#completionJobs.renew(jobId, owner, leaseDurationMs)
+  }
+
+  completeCompletionJob(
+    jobId: string,
+    owner: string,
+    contribution: { artifactRefs?: string[]; messageMetadata?: JsonObject },
+  ): CompletionJob {
+    this.#assertWritable()
+    return this.#transaction(() => {
+      const job = this.#completionJobs.get(jobId)
+      if (job === undefined) throw new EntityNotFoundError(`Completion job not found: ${jobId}`)
+      this.#mergeCompletionMessageMetadata(job.agentRunId, {
+        ...(contribution.messageMetadata ?? {}),
+        ...(contribution.artifactRefs === undefined ? {} : { artifactRefs: uniqueStrings(contribution.artifactRefs) }),
+        completionStatus: 'completed',
+      })
+      return this.#completionJobs.complete(jobId, owner)
+    })
+  }
+
+  retryCompletionJob(jobId: string, owner: string, errorCode: string, availableAt: string): CompletionJob {
+    this.#assertWritable()
+    return this.#transaction(() => {
+      const job = this.#completionJobs.get(jobId)
+      if (job === undefined) throw new EntityNotFoundError(`Completion job not found: ${jobId}`)
+      this.#mergeCompletionMessageMetadata(job.agentRunId, { completionStatus: 'retrying' })
+      return this.#completionJobs.retry(jobId, owner, errorCode, availableAt)
+    })
+  }
+
+  failCompletionJob(jobId: string, owner: string, errorCode: string): CompletionJob {
+    this.#assertWritable()
+    return this.#transaction(() => {
+      const job = this.#completionJobs.get(jobId)
+      if (job === undefined) throw new EntityNotFoundError(`Completion job not found: ${jobId}`)
+      this.#mergeCompletionMessageMetadata(job.agentRunId, {
+        completionStatus: 'failed',
+        completionErrorCode: errorCode,
+      })
+      return this.#completionJobs.fail(jobId, owner, errorCode)
+    })
+  }
+
+  requeueCompletionJob(jobId: string): CompletionJob {
+    this.#assertWritable()
+    const job = this.#completionJobs.get(jobId)
+    if (job === undefined || job.status !== 'failed') throw new PersistenceError('Only a failed completion job can be retried')
+    const now = this.#clock()
+    this.database.prepare(
+      `UPDATE completion_jobs
+       SET status = 'retrying', available_at = ?, lease_owner = NULL,
+           lease_expires_at = NULL, last_error_code = NULL, updated_at = ?
+       WHERE id = ? AND status = 'failed'`,
+    ).run(now, now, jobId)
+    this.#mergeCompletionMessageMetadata(job.agentRunId, { completionStatus: 'retrying' })
+    return this.#completionJobs.get(jobId)!
+  }
+
+  recoverCompletionJobsAfterRestart(): number {
+    this.#assertWritable()
+    return this.#completionJobs.recoverExpired()
+  }
+
   failAgentRun(runId: string, errorCode: string, runtimeSessionId?: string): AgentRun {
     const run = this.#transitionAgentRun(runId, ['running'], 'failed', errorCode, runtimeSessionId)
     this.#markRunOutputUnfinished(runId)
@@ -3352,7 +3581,7 @@ export class SqliteStore {
       this.database.prepare(
         `UPDATE conversation_queue_entries
          SET status = 'interrupted', error_code = 'service-restarted', revision = revision + 1,
-             completed_at = ?, updated_at = ?
+             lease_owner = NULL, lease_expires_at = NULL, completed_at = ?, updated_at = ?
          WHERE status IN ('running', 'waiting-approval')
            AND work_turn_id IN (
              SELECT id FROM work_turns WHERE status = 'interrupted' AND error_code = 'service-restarted'
@@ -3360,13 +3589,15 @@ export class SqliteStore {
       ).run(now, now)
       this.database.prepare(
         `UPDATE conversation_queue_entries
-         SET status = 'waiting-approval', revision = revision + 1, updated_at = ?
+         SET status = 'waiting-approval', revision = revision + 1,
+             lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
          WHERE status = 'running'
            AND work_turn_id IN (SELECT id FROM work_turns WHERE status = 'waiting-approval')`,
       ).run(now)
       this.database.prepare(
         `UPDATE conversation_queue_entries
          SET status = 'completed', revision = revision + 1,
+             lease_owner = NULL, lease_expires_at = NULL,
              completed_at = COALESCE(completed_at, ?), updated_at = ?
          WHERE status IN ('running', 'waiting-approval')
            AND work_turn_id IN (SELECT id FROM work_turns WHERE status = 'completed')`,
@@ -3376,6 +3607,7 @@ export class SqliteStore {
          SET status = 'failed',
              error_code = COALESCE((SELECT error_code FROM work_turns WHERE work_turns.id = conversation_queue_entries.work_turn_id), 'turn-failed'),
              revision = revision + 1,
+             lease_owner = NULL, lease_expires_at = NULL,
              completed_at = COALESCE(completed_at, ?), updated_at = ?
          WHERE status IN ('running', 'waiting-approval')
            AND work_turn_id IN (SELECT id FROM work_turns WHERE status = 'failed')`,
@@ -3704,65 +3936,59 @@ export class SqliteStore {
       .map(mapParticipant)
   }
 
+  saveOwnerRuntimeAccessGrant(input: {
+    id: string
+    worldId: string
+    sessionId: string
+    employeeIds: string[]
+  }): OwnerRuntimeAccessGrant {
+    this.#assertWritable()
+    this.#requireWorld(input.worldId)
+    const session = this.#requireSession(input.sessionId)
+    if (session.worldId !== input.worldId) throw new PersistenceError('Runtime access grant session belongs to another world')
+    const employeeIds = [...new Set(input.employeeIds.map((value) => value.trim()).filter(Boolean))]
+    if (employeeIds.length === 0) throw new PersistenceError('Runtime access grant requires at least one employee')
+    const now = this.#clock()
+    const current = this.getOwnerRuntimeAccessGrantForSession(input.worldId, input.sessionId)
+    this.database.prepare(
+      `INSERT INTO owner_runtime_access_grants (
+        id, world_id, session_id, employee_ids_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(world_id, session_id) DO UPDATE SET
+        id = excluded.id,
+        employee_ids_json = excluded.employee_ids_json,
+        updated_at = excluded.updated_at`,
+    ).run(input.id, input.worldId, input.sessionId, JSON.stringify(employeeIds), current?.createdAt ?? now, now)
+    return this.getOwnerRuntimeAccessGrant(input.id)!
+  }
+
+  getOwnerRuntimeAccessGrant(id: string): OwnerRuntimeAccessGrant | undefined {
+    const row = this.database.prepare('SELECT * FROM owner_runtime_access_grants WHERE id = ?').get(id)
+    return row === undefined ? undefined : mapOwnerRuntimeAccessGrant(row)
+  }
+
+  getOwnerRuntimeAccessGrantForSession(worldId: string, sessionId: string): OwnerRuntimeAccessGrant | undefined {
+    const row = this.database
+      .prepare('SELECT * FROM owner_runtime_access_grants WHERE world_id = ? AND session_id = ?')
+      .get(worldId, sessionId)
+    return row === undefined ? undefined : mapOwnerRuntimeAccessGrant(row)
+  }
+
+  listOwnerRuntimeAccessGrants(worldId: string): OwnerRuntimeAccessGrant[] {
+    return this.database
+      .prepare('SELECT * FROM owner_runtime_access_grants WHERE world_id = ? ORDER BY updated_at DESC, id')
+      .all(worldId)
+      .map(mapOwnerRuntimeAccessGrant)
+  }
+
+  deleteOwnerRuntimeAccessGrant(id: string): boolean {
+    this.#assertWritable()
+    return this.database.prepare('DELETE FROM owner_runtime_access_grants WHERE id = ?').run(id).changes > 0
+  }
+
   appendMessage(input: AppendMessageInput): WorkMessage {
     this.#assertWritable()
-    const session = this.#requireSession(input.sessionId)
-    const now = this.#clock()
-
-    return this.#transaction(() => {
-      const next = this.database
-        .prepare('SELECT COALESCE(MAX(sequence), 0) + 1 AS next FROM messages WHERE session_id = ?')
-        .get(session.id) as { next: number }
-      const message: WorkMessage = {
-        id: this.#idFactory(),
-        sessionId: session.id,
-        sequence: Number(next.next),
-        senderId: input.senderId,
-        senderKind: input.senderKind,
-        kind: input.kind,
-        content: input.content,
-        metadata: input.metadata ?? {},
-        createdAt: now,
-      }
-      this.database
-        .prepare(
-          `INSERT INTO messages
-           (id, session_id, sequence, sender_id, sender_kind, kind, content, metadata_json, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          message.id,
-          message.sessionId,
-          message.sequence,
-          message.senderId,
-          message.senderKind,
-          message.kind,
-          message.content,
-          stringifyJson(message.metadata),
-          message.createdAt,
-        )
-      this.database
-        .prepare('UPDATE work_sessions SET updated_at = ? WHERE id = ?')
-        .run(now, session.id)
-      const eventInput: AppendDomainEventInput = {
-        workspaceId: session.workspaceId,
-        worldId: session.worldId,
-        type: 'message.appended',
-        actorId: message.senderId,
-        actorKind: message.senderKind,
-        sessionId: session.id,
-        payload: {
-          messageId: message.id,
-          messageSequence: message.sequence,
-          messageKind: message.kind,
-          senderId: message.senderId,
-        },
-      }
-      if (input.causationId !== undefined) eventInput.causationId = input.causationId
-      if (input.correlationId !== undefined) eventInput.correlationId = input.correlationId
-      this.#appendEvent(eventInput)
-      return message
-    })
+    return this.#transaction(() => this.#appendMessage(input))
   }
 
   listMessages(sessionId: string, afterSequence = 0): WorkMessage[] {
@@ -4181,6 +4407,17 @@ export class SqliteStore {
     ) {
       throw new PersistenceError('Package install transaction cannot be activated')
     }
+    const existingRow = this.database.prepare(
+      `SELECT * FROM installed_packages
+       WHERE workspace_id = ? AND package_id = ? AND version = ?`,
+    ).get(transaction.workspaceId, input.manifest.id, input.manifest.version)
+    const existing = existingRow === undefined ? undefined : mapInstalledPackage(existingRow)
+    if (
+      existing !== undefined
+      && stableJson(existing.manifest as unknown as JsonValue) !== stableJson(input.manifest as unknown as JsonValue)
+    ) {
+      throw new PersistenceError('package_version_content_conflict')
+    }
     const now = this.#clock()
     const installed: InstalledPackage = {
       workspaceId: transaction.workspaceId,
@@ -4188,10 +4425,10 @@ export class SqliteStore {
       version: input.manifest.version,
       kind: input.manifest.kind,
       status: 'active',
-      installedPath: resolve(input.installedPath),
+      installedPath: existing?.installedPath ?? resolve(input.installedPath),
       capabilities: [...transaction.approvedCapabilities],
       manifest: input.manifest,
-      installedAt: now,
+      installedAt: existing?.installedAt ?? now,
       updatedAt: now,
     }
     return this.#transaction(() => {
@@ -4713,9 +4950,15 @@ export class SqliteStore {
     const errors: string[] = []
     const integrity = readIntegrity(this.database)
     if (integrity.length !== 1 || integrity[0] !== 'ok') errors.push(...integrity)
+    const foreignKeyViolations = this.database.prepare('PRAGMA foreign_key_check').all()
+    if (foreignKeyViolations.length > 0) errors.push(`Foreign key check found ${foreignKeyViolations.length} violation(s)`)
     const schemaVersion = readUserVersion(this.database)
     if (schemaVersion !== CYBER_SCHEMA_VERSION) {
       errors.push(`Expected schema ${CYBER_SCHEMA_VERSION}, found ${schemaVersion}`)
+    }
+    const migrationHistory = this.database.prepare('SELECT COUNT(*) AS count, MAX(version) AS maximum FROM schema_migrations').get() as { count: number; maximum: number | null }
+    if (Number(migrationHistory.count) !== CYBER_SCHEMA_VERSION || Number(migrationHistory.maximum) !== CYBER_SCHEMA_VERSION) {
+      errors.push(`Migration history is incomplete: ${migrationHistory.count} entries, latest ${migrationHistory.maximum ?? 'none'}`)
     }
 
     const report: DatabaseDoctorReport = {
@@ -4740,6 +4983,7 @@ export class SqliteStore {
         localAssets: countRows(this.database, 'local_assets'),
         sessions: countRows(this.database, 'work_sessions'),
         conversationQueueEntries: countRows(this.database, 'conversation_queue_entries'),
+        completionJobs: countRows(this.database, 'completion_jobs'),
         taskCollaborationPlans: countRows(this.database, 'task_collaboration_plans'),
         taskCollaborationSteps: countRows(this.database, 'task_collaboration_steps'),
         messages: countRows(this.database, 'messages'),
@@ -4871,12 +5115,13 @@ export class SqliteStore {
         `INSERT INTO conversation_queue_entries
          (id, workspace_id, world_id, session_id, work_turn_id, employee_ids_json,
           conversation_kind, collaboration_mode, reasoning_effort, permission_mode,
-          priority, revision, status, error_code, enqueued_at, claimed_at, completed_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          priority, revision, status, error_code, attempt_count, available_at,
+          lease_owner, lease_expires_at, enqueued_at, claimed_at, completed_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id, workspace.id, world.id, session.id, turn.id, stringifyJson(employeeIds),
         session.kind, collaborationMode, reasoningEffort ?? null, permissionMode ?? null,
-        normalizedPriority, 1, 'queued', null, now, null, null, now,
+        normalizedPriority, 1, 'queued', null, 0, now, null, null, now, null, null, now,
       )
       return mapConversationQueueEntry(this.database.prepare(
         'SELECT * FROM conversation_queue_entries WHERE id = ?',
@@ -4950,6 +5195,65 @@ export class SqliteStore {
       this.database.exec('ROLLBACK')
       throw error
     }
+  }
+
+  #appendMessage(input: AppendMessageInput): WorkMessage {
+    const session = this.#requireSession(input.sessionId)
+    const now = this.#clock()
+    const next = this.database
+      .prepare('SELECT COALESCE(MAX(sequence), 0) + 1 AS next FROM messages WHERE session_id = ?')
+      .get(session.id) as { next: number }
+    const message: WorkMessage = {
+      id: this.#idFactory(),
+      sessionId: session.id,
+      sequence: Number(next.next),
+      senderId: input.senderId,
+      senderKind: input.senderKind,
+      kind: input.kind,
+      content: input.content,
+      metadata: input.metadata ?? {},
+      createdAt: now,
+    }
+    this.database.prepare(
+      `INSERT INTO messages
+       (id, session_id, sequence, sender_id, sender_kind, kind, content, metadata_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      message.id, message.sessionId, message.sequence, message.senderId, message.senderKind,
+      message.kind, message.content, stringifyJson(message.metadata), message.createdAt,
+    )
+    this.database.prepare('UPDATE work_sessions SET updated_at = ? WHERE id = ?').run(now, session.id)
+    const eventInput: AppendDomainEventInput = {
+      workspaceId: session.workspaceId,
+      worldId: session.worldId,
+      type: 'message.appended',
+      actorId: message.senderId,
+      actorKind: message.senderKind,
+      sessionId: session.id,
+      payload: {
+        messageId: message.id,
+        messageSequence: message.sequence,
+        messageKind: message.kind,
+        senderId: message.senderId,
+      },
+    }
+    if (input.causationId !== undefined) eventInput.causationId = input.causationId
+    if (input.correlationId !== undefined) eventInput.correlationId = input.correlationId
+    this.#appendEvent(eventInput)
+    return message
+  }
+
+  #mergeCompletionMessageMetadata(agentRunId: string, patch: JsonObject): void {
+    const row = this.database.prepare(
+      `SELECT id, metadata_json FROM messages
+       WHERE kind = 'assistant' AND json_extract(metadata_json, '$.agentRunId') = ?
+       ORDER BY sequence DESC LIMIT 1`,
+    ).get(agentRunId) as { id: string; metadata_json: string } | undefined
+    if (row === undefined) throw new PersistenceError('Completion job lost its final assistant message')
+    const metadata = { ...parseJson<JsonObject>(row.metadata_json), ...patch }
+    assertSecretFree(metadata)
+    this.database.prepare('UPDATE messages SET metadata_json = ? WHERE id = ?')
+      .run(stringifyJson(metadata), row.id)
   }
 
   #appendEvent(input: AppendDomainEventInput): DomainEvent {
@@ -5043,8 +5347,9 @@ export class SqliteStore {
       .prepare(
         `INSERT INTO employee_instances (
           id, workspace_id, world_id, blueprint_id, blueprint_version, display_name, role,
-          status, current_revision, agent_session_id, created_at, updated_at, archived_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          status, health, health_error_code, health_detail, current_revision,
+          agent_session_id, created_at, updated_at, archived_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         employee.id,
@@ -5055,6 +5360,9 @@ export class SqliteStore {
         employee.displayName,
         employee.role,
         employee.status,
+        employee.health,
+        employee.healthErrorCode ?? null,
+        employee.healthDetail ?? null,
         employee.currentRevision,
         employee.agentSessionId ?? null,
         employee.createdAt,
@@ -5063,13 +5371,32 @@ export class SqliteStore {
       )
   }
 
+  #mapEmployeeRuntimeState(row: object): EmployeeInstance {
+    const employee = mapEmployee(row)
+    if (employee.status === 'archived') return employee
+    const activeRunRow = this.database.prepare(
+      `SELECT COUNT(*) AS count FROM agent_runs
+       WHERE employee_id = ? AND status IN ('queued', 'running')`,
+    ).get(employee.id) as { count: number | bigint }
+    const waitingApprovalRow = this.database.prepare(
+      `SELECT COUNT(DISTINCT queue.id) AS count
+       FROM conversation_queue_entries AS queue, json_each(queue.employee_ids_json) AS participant
+       WHERE queue.status = 'waiting-approval' AND participant.value = ?`,
+    ).get(employee.id) as { count: number | bigint }
+    const activeRunCount = Number(activeRunRow.count)
+    const waitingApprovalCount = Number(waitingApprovalRow.count)
+    employee.presence = activeRunCount + waitingApprovalCount > 0 ? 'working' : 'available'
+    employee.status = employee.health === 'blocked' ? 'blocked' : employee.presence
+    return employee
+  }
+
   #insertRevision(revision: EmployeeRevision): void {
     this.database
       .prepare(
         `INSERT INTO employee_revisions
          (employee_id, revision, persona, skill_grants_json, capability_grants_json,
-          model_policy_json, reason, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           model_policy_json, runtime_permission_mode, reason, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         revision.employeeId,
@@ -5078,6 +5405,7 @@ export class SqliteStore {
         stringifyJson(revision.skillGrants),
         stringifyJson(revision.capabilityGrants),
         stringifyJson(revision.modelPolicy),
+        revision.runtimePermissionMode ?? 'read-only',
         revision.reason,
         revision.createdAt,
       )
@@ -5520,6 +5848,12 @@ function stringifyJson(value: JsonValue): string {
   return JSON.stringify(value)
 }
 
+function stableJson(value: JsonValue): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`
+  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key]!)}`).join(',')}}`
+}
+
 function parseJson<T>(value: unknown): T {
   return JSON.parse(String(value)) as T
 }
@@ -5687,6 +6021,7 @@ function mapBlueprint(row: object): EmployeeBlueprint {
 
 function mapEmployee(row: object): EmployeeInstance {
   const value = row as Record<string, unknown>
+  const persistedStatus = value.status as EmployeeStatus
   const employee: EmployeeInstance = {
     id: String(value.id),
     workspaceId: String(value.workspace_id),
@@ -5695,11 +6030,15 @@ function mapEmployee(row: object): EmployeeInstance {
     blueprintVersion: Number(value.blueprint_version),
     displayName: String(value.display_name),
     role: String(value.role),
-    status: value.status as EmployeeStatus,
+    presence: persistedStatus === 'working' ? 'working' : 'available',
+    health: (typeof value.health === 'string' ? value.health : persistedStatus === 'blocked' ? 'degraded' : 'healthy') as EmployeeHealth,
+    status: persistedStatus,
     currentRevision: Number(value.current_revision),
     createdAt: String(value.created_at),
     updatedAt: String(value.updated_at),
   }
+  if (typeof value.health_error_code === 'string') employee.healthErrorCode = value.health_error_code
+  if (typeof value.health_detail === 'string') employee.healthDetail = value.health_detail
   if (typeof value.agent_session_id === 'string') employee.agentSessionId = value.agent_session_id
   if (typeof value.archived_at === 'string') employee.archivedAt = value.archived_at
   return employee
@@ -5714,6 +6053,7 @@ function mapRevision(row: object): EmployeeRevision {
     skillGrants: parseJson<string[]>(value.skill_grants_json),
     capabilityGrants: parseJson<string[]>(value.capability_grants_json),
     modelPolicy: parseJson<JsonObject>(value.model_policy_json),
+    runtimePermissionMode: (typeof value.runtime_permission_mode === 'string' ? value.runtime_permission_mode : 'read-only') as AgentPermissionMode,
     reason: String(value.reason),
     createdAt: String(value.created_at),
   }
@@ -5961,12 +6301,16 @@ function mapConversationQueueEntry(row: object): ConversationQueueEntry {
     priority: Number(value.priority),
     revision: Number(value.revision),
     status: value.status as ConversationQueueEntryStatus,
+    attemptCount: Number(value.attempt_count ?? 0),
+    availableAt: typeof value.available_at === 'string' ? value.available_at : String(value.enqueued_at),
     enqueuedAt: String(value.enqueued_at),
     updatedAt: String(value.updated_at),
   }
   if (typeof value.reasoning_effort === 'string') entry.reasoningEffort = value.reasoning_effort as Exclude<ReasoningEffort, 'auto'>
   if (typeof value.permission_mode === 'string') entry.permissionMode = value.permission_mode as AgentPermissionMode
   if (typeof value.error_code === 'string') entry.errorCode = value.error_code
+  if (typeof value.lease_owner === 'string') entry.leaseOwner = value.lease_owner
+  if (typeof value.lease_expires_at === 'string') entry.leaseExpiresAt = value.lease_expires_at
   if (typeof value.claimed_at === 'string') entry.claimedAt = value.claimed_at
   if (typeof value.completed_at === 'string') entry.completedAt = value.completed_at
   return entry
@@ -6062,6 +6406,18 @@ function mapParticipant(row: object): WorkSessionParticipant {
     participantId: String(value.participant_id),
     kind: value.kind as ParticipantKind,
     joinedAt: String(value.joined_at),
+  }
+}
+
+function mapOwnerRuntimeAccessGrant(row: object): OwnerRuntimeAccessGrant {
+  const value = row as Record<string, unknown>
+  return {
+    id: String(value.id),
+    worldId: String(value.world_id),
+    sessionId: String(value.session_id),
+    employeeIds: parseJson<string[]>(value.employee_ids_json),
+    createdAt: String(value.created_at),
+    updatedAt: String(value.updated_at),
   }
 }
 

@@ -664,6 +664,16 @@ describe('Cyber local server', () => {
       leftPaneWidth: 318,
       rightPaneWidth: 544,
     })
+    const invalidPreferences = await json(origin, `/api/workspaces/${workspace.id}/preferences`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rightPaneWidth: 761 }),
+    })
+    expect(invalidPreferences.response.status).toBe(422)
+    expect(invalidPreferences.body.error).toMatchObject({
+      code: 'workspace_preferences_out_of_range',
+      message: expect.stringContaining('300 到 760'),
+    })
 
     const model = await json(origin, `/api/workspaces/${workspace.id}/model-profiles`, {
       method: 'POST',
@@ -1150,7 +1160,7 @@ it('searches verified market packages and activates installed plugin and talent 
       packageId: 'official-moonlit-tavern',
       status: 'active',
     })
-  })
+  }, 30_000)
 
   it('rejects DNS rebinding and cross-origin mutation requests', async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-server-'))

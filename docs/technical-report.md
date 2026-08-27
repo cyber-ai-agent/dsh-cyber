@@ -1,6 +1,6 @@
 # DSH Cyber Technical Report
 
-> Status: Pre-Alpha / Creative Platform V1 in active development
+> Status: Pre-Alpha / Core Reliability & Work System V1 implemented; local-data compatibility baseline remains a candidate
 
 ## Abstract
 
@@ -69,6 +69,10 @@ The current branch already includes:
 - pinned/hidden conversation preferences;
 - full local `.dshbackup` including Workshop and Skill state;
 - controlled Harness update / rollback flow.
+- Task / Plan Revision / Assignment / TaskRun / immutable Deliverable / Review domain model;
+- SQLite queue claim/lease recovery and derived Employee Presence/Health;
+- durable Completion Outbox that separates the final answer from Artifact post-processing;
+- atomic serialized credential file fallback behind a SecretStoragePort;
 - World Trace Center with adapter-based projections over durable domain, conversation and Skill facts;
 - chat/result and execution/trace separation with reconnect recovery and centralized sanitization.
 
@@ -79,7 +83,7 @@ The following areas are still platform work rather than finished product feature
 - general-purpose Skill Adapter ecosystem;
 - persistent memory architecture beyond current dossier/history evidence;
 - autonomous operating loop and autonomous delegation policy;
-- task/job/deliverable/review domain model;
+- bounded autonomous delegation beyond the explicit Work System V1 flow;
 - Feishu / QQ / WeChat channel adapters;
 - remote extension registry and cryptographic signatures;
 - stable project editing/versioning inside Creative Workshop;

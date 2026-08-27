@@ -2,7 +2,7 @@
 
 # DSH Cyber
 
-### A local-first platform for embodied, persistent and extensible AI characters
+### A local-first work system where persistent AI employees take tasks, collaborate, deliver, recover and grow from evidence
 
 **Build a living AI world — characters with identity, memory, bodies, skills, relationships and real actions.**
 
@@ -40,11 +40,29 @@ Character
 
 A character should persist over time, keep its own conversation and dossier, inhabit a visual world, form relationships, gain skills from evidence, and perform real actions through trusted integrations when the user allows it.
 
-DSH Cyber is building this as a **visual, local-first, moddable AI world platform**. A world may be a company, a tavern, a creator studio, a home, a companion space or something entirely different. Trusted Skills can eventually connect selected characters to GitHub, browsers, Home Assistant, messaging channels and other real systems.
+DSH Cyber is building this as a **visual, local-first digital employee work system**. Users submit Tasks, employees collaborate through real AgentRuns, immutable Artifact and Deliverable versions are reviewed, and trusted Skills connect selected characters to real systems without faking outcomes.
+
+## Real task workflow
+
+![DSH Cyber Work System V1](./artifacts/core-work-system/work-system-1920x1080.png)
+
+```text
+Goal → Task → Plan Revision → Assignment → WorkTurn → AgentRun
+     → ArtifactVersion → DeliverableVersion → Review → Evidence
+```
+
+The SQLite-backed queue uses claim/lease recovery, post-answer work runs through a durable Completion Outbox, and review feedback creates a new immutable delivery version instead of overwriting history.
 
 ---
 
 ## What already works
+
+### Work System V1
+
+- World-scoped Task board and detail views with plans, assignments, selection reasons, runs and evidence.
+- Existing Group Task Router, WorkTurn, AgentRun, Approval, Trace and Artifact paths remain authoritative.
+- Immutable Deliverable versions and append-only Reviews support accept, request changes and reject.
+- Accepted deliveries can create trusted Growth Evidence.
 
 ### Persistent characters and conversation continuity
 
@@ -67,12 +85,13 @@ DSH Cyber is building this as a **visual, local-first, moddable AI world platfor
 - Explicit semantic `EmbodimentProfile` for custom roles.
 - World, Character and Skill are separate domains.
 
-### World-scoped administration
+### Role conversation permissions
 
-- Each World has one or more `World Administrator` characters. Their role and 18 fine-grained World Permissions are persisted by SQLite `WorldCharacterAuthority`, with an append-only audit ledger and a last-active-administrator invariant.
-- Authority is isolated to the current World. It is not an application-admin role, an Approval Reviewer role, or a Skill Grant. A World Administrator can receive current-World `workspace-write` access, but never automatic `danger-full-access`.
-- A missing World Permission can be requested from the active chat. The choice is one-time, persistent, or reject; approval resumes the original WorkTurn and does not replay the user's entire turn. External side effects still use the existing Approval Gate.
-- The trusted `builtin.world-management` adapter handles narrowly scoped World settings, character, package-instance, and model-assignment actions. `settings.json` uses revision checks, while SQLite remains authoritative for model assignments.
+- The product no longer assigns a `World Administrator` character role, badge, or administrator permission editor. The local owner manages World settings directly.
+- Every role has one default conversation mode matching the composer control: **Ask for approval**, **Auto-approve**, or **Full access**.
+- Recruitment records the selected default in the role revision. Direct chats use that default automatically; group chats use the least privileged default among their participants. A single message may still choose a safer mode.
+- Full access requires one explicit high-risk confirmation. Its grant is bound to the World, conversation session, and selected roles, persisted in local SQLite, and restored after refreshes, switches, and service restarts. Lowering the role default revokes the related grant.
+- A role, Skill, or plugin can never issue its own full-access grant. External side effects still pass through structured Skill Actions and the Approval Gate.
 
 ### Creative Workshop
 
@@ -391,7 +410,7 @@ Current priorities:
 - [ ] Workshop project versioning and edit lifecycle
 - [ ] make current user-defined Character Identity / Persona / Embodiment authoritative everywhere
 - [x] evidence-backed World Knowledge Graph and conversation consolidation
-- [ ] Task / Job / Deliverable / Review work system
+- [x] Task / Plan / Assignment / Run / Deliverable / Review Work System V1
 - [ ] GitHub Skill Adapter
 - [ ] Browser Skill Adapter
 - [ ] Feishu / QQ / WeChat Channel Adapters

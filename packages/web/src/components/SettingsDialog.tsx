@@ -22,6 +22,7 @@ import {
   X,
 } from '@phosphor-icons/react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { WORKSPACE_PREFERENCES_LIMITS } from '@dsh-cyber/contracts'
 import type {
   EmployeeInstance,
   IntegrationConnection,
@@ -563,8 +564,8 @@ function AppearanceSettings({
             <legend>工作台布局</legend>
             <div className="setting-grid">
               <label><span>界面密度</span><select value={value.interfaceDensity} onChange={(event) => onChange({ ...value, interfaceDensity: event.target.value as WorkspacePreferences['interfaceDensity'] })}><option value="compact">紧凑</option><option value="comfortable">舒适</option></select></label>
-              <label><span>左栏 {value.leftPaneWidth}px</span><input type="range" min="220" max="520" value={value.leftPaneWidth} onChange={(event) => onChange({ ...value, leftPaneWidth: Number(event.target.value) })} /></label>
-              <label><span>右栏 {value.rightPaneWidth}px</span><input type="range" min="300" max="760" value={value.rightPaneWidth} onChange={(event) => onChange({ ...value, rightPaneWidth: Number(event.target.value) })} /></label>
+              <label><span>左栏 {value.leftPaneWidth}px</span><input type="range" min={WORKSPACE_PREFERENCES_LIMITS.leftPaneWidth.minimum} max={WORKSPACE_PREFERENCES_LIMITS.leftPaneWidth.maximum} value={value.leftPaneWidth} onChange={(event) => onChange({ ...value, leftPaneWidth: Number(event.target.value) })} /></label>
+              <label><span>右栏 {value.rightPaneWidth}px</span><input type="range" min={WORKSPACE_PREFERENCES_LIMITS.rightPaneWidth.minimum} max={WORKSPACE_PREFERENCES_LIMITS.rightPaneWidth.maximum} value={value.rightPaneWidth} onChange={(event) => onChange({ ...value, rightPaneWidth: Number(event.target.value) })} /></label>
             </div>
           </fieldset>
         </div>

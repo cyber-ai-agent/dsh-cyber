@@ -54,7 +54,7 @@ function draftFromRecord(
   const roles = rawRoles.length === 0
     ? fallback.roles.some(hasRoleContent)
       ? fallback.roles.map((role, index) => roleFromValue({}, index, presets[index % presets.length] ?? presets[0]!, role))
-      : [roleFromValue({ displayName: '管家', role: '世界管理员', summary: '帮助维护这个世界并协调后续角色。' }, 0, presets[0]!, fallback.roles[0])]
+      : [roleFromValue({ displayName: '管家', role: '世界管家', summary: '帮助维护这个世界并协调后续角色。' }, 0, presets[0]!, fallback.roles[0])]
     : rawRoles.map((item, index) => roleFromValue(item, index, presets[index % presets.length] ?? presets[0]!, fallback.roles[index]))
   return {
     ...fallback,
@@ -80,7 +80,7 @@ function draftFromText(
   const roles = roleLines.length === 0
     ? fallback.roles.some((role) => role.displayName.trim() || role.role.trim())
       ? fallback.roles
-      : [roleFromValue({ displayName: '管家', role: '世界管理员', summary: '帮助维护这个世界并协调后续角色。' }, 0, preset, fallback.roles[0])]
+      : [roleFromValue({ displayName: '管家', role: '世界管家', summary: '帮助维护这个世界并协调后续角色。' }, 0, preset, fallback.roles[0])]
     : roleLines.slice(0, 16).map((name, index) => roleFromValue({ displayName: name }, index, preset, fallback.roles[index]))
   return {
     ...fallback,

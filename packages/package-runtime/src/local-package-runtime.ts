@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import type { Dirent } from 'node:fs'
 import {
   copyFile,
   lstat,
@@ -11,11 +12,13 @@ import {
 } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 
-import type { CyberPackageManifest } from '@dsh-cyber/contracts'
+import type { CyberPackageManifest, InstalledPackage } from '@dsh-cyber/contracts'
 
 import {
   type PackageActivationReceipt,
+  type PackageRuntimeRecoveryReport,
   type PackageRuntimePort,
+  PackageVersionContentConflictError,
   type StagedPackage,
   packageManifestDigest,
   validatePackageManifest,
@@ -30,6 +33,106 @@ export class LocalPackageRuntime implements PackageRuntimePort {
 
   constructor(root: string) {
     this.#root = resolve(root)
+  }
+
+  async recover(installedPackages: readonly InstalledPackage[]): Promise<PackageRuntimeRecoveryReport> {
+    const stagingRoot = join(this.#root, '.staging')
+    const stagingEntries = await readDirectoryOptional(stagingRoot)
+    await rm(stagingRoot, { recursive: true, force: true })
+    await mkdir(stagingRoot, { recursive: true })
+
+    const installedByIdentity = new Map<string, InstalledPackage>()
+    const activeByPackageId = new Map<string, InstalledPackage>()
+    for (const installed of installedPackages) {
+      const identity = packageIdentity(installed.packageId, installed.version)
+      const previous = installedByIdentity.get(identity)
+      if (
+        previous !== undefined
+        && packageManifestDigest(previous.manifest) !== packageManifestDigest(installed.manifest)
+      ) throw new Error(`package_version_content_conflict:${identity}`)
+      installedByIdentity.set(identity, installed)
+      if (installed.status === 'active') {
+        const otherActive = activeByPackageId.get(installed.packageId)
+        if (otherActive !== undefined && otherActive.version !== installed.version) {
+          throw new Error(`package_runtime_workspace_pointer_conflict:${installed.packageId}`)
+        }
+        activeByPackageId.set(installed.packageId, installed)
+      }
+    }
+
+    let verifiedInstalledVersions = 0
+    for (const installed of installedByIdentity.values()) {
+      const expectedPath = join(this.#root, 'installed', encodeURIComponent(installed.packageId), installed.version)
+      if (resolve(installed.installedPath) !== resolve(expectedPath)) {
+        throw new Error(`package_installed_path_mismatch:${installed.packageId}@${installed.version}`)
+      }
+      const manifest = await readInstalledManifest(expectedPath)
+      if (manifest === undefined) throw new Error(`package_active_files_missing:${installed.packageId}@${installed.version}`)
+      if (packageManifestDigest(manifest) !== packageManifestDigest(installed.manifest)) {
+        throw new Error(`package_version_content_conflict:${installed.packageId}@${installed.version}`)
+      }
+      await verifyInstalledFiles(expectedPath, installed.manifest)
+      verifiedInstalledVersions += 1
+    }
+
+    for (const packageDirectory of await readDirectoryOptional(join(this.#root, 'installed'))) {
+      if (!packageDirectory.isDirectory() || packageDirectory.isSymbolicLink()) {
+        throw new Error(`package_runtime_invalid_installed_entry:${packageDirectory.name}`)
+      }
+      const packageId = decodeURIComponent(packageDirectory.name)
+      for (const versionDirectory of await readDirectoryOptional(join(this.#root, 'installed', packageDirectory.name))) {
+        if (!versionDirectory.isDirectory() || versionDirectory.isSymbolicLink()) {
+          throw new Error(`package_runtime_invalid_version_entry:${packageId}/${versionDirectory.name}`)
+        }
+        if (!installedByIdentity.has(packageIdentity(packageId, versionDirectory.name))) {
+          throw new Error(`package_files_without_database_record:${packageId}@${versionDirectory.name}`)
+        }
+      }
+    }
+
+    let repairedPointers = 0
+    let removedDanglingPointers = 0
+    const pointerRoot = join(this.#root, 'active')
+    const seenPointers = new Set<string>()
+    for (const entry of await readDirectoryOptional(pointerRoot)) {
+      if (!entry.isFile() || entry.isSymbolicLink() || !entry.name.endsWith('.json')) {
+        throw new Error(`package_runtime_invalid_pointer_entry:${entry.name}`)
+      }
+      const pointerPath = join(pointerRoot, entry.name)
+      const pointer = JSON.parse(await readFile(pointerPath, 'utf8')) as { packageId?: unknown; version?: unknown; contentDigest?: unknown; installedPath?: unknown }
+      const packageId = typeof pointer.packageId === 'string' ? pointer.packageId : ''
+      const active = activeByPackageId.get(packageId)
+      if (active === undefined) {
+        await rm(pointerPath, { force: true })
+        removedDanglingPointers += 1
+        continue
+      }
+      seenPointers.add(packageId)
+      const expectedPath = join(this.#root, 'installed', encodeURIComponent(active.packageId), active.version)
+      const expectedDigest = packageManifestDigest(active.manifest)
+      if (pointer.version !== active.version || pointer.contentDigest !== expectedDigest || resolve(String(pointer.installedPath ?? '')) !== resolve(expectedPath)) {
+        await writeAtomic(pointerPath, { packageId, version: active.version, contentDigest: expectedDigest, installedPath: expectedPath })
+        repairedPointers += 1
+      }
+    }
+    for (const active of activeByPackageId.values()) {
+      if (seenPointers.has(active.packageId)) continue
+      const installedPath = join(this.#root, 'installed', encodeURIComponent(active.packageId), active.version)
+      await writeAtomic(join(pointerRoot, `${encodeURIComponent(active.packageId)}.json`), {
+        packageId: active.packageId,
+        version: active.version,
+        contentDigest: packageManifestDigest(active.manifest),
+        installedPath,
+      })
+      repairedPointers += 1
+    }
+
+    return {
+      removedStagingEntries: stagingEntries.length,
+      repairedPointers,
+      removedDanglingPointers,
+      verifiedInstalledVersions,
+    }
   }
 
   async stage(manifest: CyberPackageManifest, sourceDirectory: string): Promise<StagedPackage> {
@@ -80,23 +183,51 @@ export class LocalPackageRuntime implements PackageRuntimePort {
     const installedPath = join(packageRoot, staged.manifest.version)
     const pointerPath = join(this.#root, 'active', `${encodeURIComponent(staged.manifest.id)}.json`)
     const previousState = await readOptional(pointerPath)
+    const contentDigest = packageManifestDigest(staged.manifest)
     await mkdir(packageRoot, { recursive: true })
+    let createdInstalledDirectory = false
     try {
+      const existingManifest = await readInstalledManifest(installedPath)
+      if (existingManifest !== undefined) {
+        if (packageManifestDigest(existingManifest) !== contentDigest) {
+          throw new PackageVersionContentConflictError(staged.manifest.id, staged.manifest.version)
+        }
+        await verifyInstalledFiles(installedPath, staged.manifest)
+        await rm(staged.path, { recursive: true, force: true })
+        await writeAtomic(pointerPath, {
+          packageId: staged.manifest.id,
+          version: staged.manifest.version,
+          contentDigest,
+          installedPath,
+        })
+        return {
+          packageId: staged.manifest.id,
+          version: staged.manifest.version,
+          contentDigest,
+          installedPath,
+          createdInstalledDirectory: false,
+          ...(previousState === undefined ? {} : { previousState }),
+        }
+      }
       await rename(staged.path, installedPath)
+      createdInstalledDirectory = true
       await verifyInstalledFiles(installedPath, staged.manifest)
       await writeAtomic(pointerPath, {
         packageId: staged.manifest.id,
         version: staged.manifest.version,
+        contentDigest,
         installedPath,
       })
       return {
         packageId: staged.manifest.id,
         version: staged.manifest.version,
+        contentDigest,
         installedPath,
+        createdInstalledDirectory: true,
         ...(previousState === undefined ? {} : { previousState }),
       }
     } catch (error) {
-      await rm(installedPath, { recursive: true, force: true })
+      if (createdInstalledDirectory) await rm(installedPath, { recursive: true, force: true })
       throw error
     }
   }
@@ -108,7 +239,9 @@ export class LocalPackageRuntime implements PackageRuntimePort {
     } else {
       await writeAtomicText(pointerPath, receipt.previousState)
     }
-    await rm(receipt.installedPath, { recursive: true, force: true })
+    if (receipt.createdInstalledDirectory) {
+      await rm(receipt.installedPath, { recursive: true, force: true })
+    }
   }
 
   async discard(staged: StagedPackage): Promise<void> {
@@ -119,6 +252,27 @@ export class LocalPackageRuntime implements PackageRuntimePort {
     }
     await rm(stagedPath, { recursive: true, force: true })
   }
+}
+
+async function readInstalledManifest(installedPath: string): Promise<CyberPackageManifest | undefined> {
+  const raw = await readOptional(join(installedPath, 'dsh-cyber.package.json'))
+  if (raw === undefined) return undefined
+  const manifest = JSON.parse(raw) as CyberPackageManifest
+  validatePackageManifest(manifest)
+  return manifest
+}
+
+async function readDirectoryOptional(path: string): Promise<Dirent[]> {
+  try {
+    return await readdir(path, { withFileTypes: true })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw error
+  }
+}
+
+function packageIdentity(packageId: string, version: string): string {
+  return `${packageId}@${version}`
 }
 
 async function verifyInstalledFiles(installedPath: string, manifest: CyberPackageManifest): Promise<void> {

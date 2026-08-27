@@ -22,7 +22,7 @@ describe('WorldSideDock dynamic tabs', () => {
 
     expect(tabLabels(host)).toEqual(['世界', '轨迹'])
     await click(host, '更多')
-    expect(Array.from(host.querySelectorAll('[role="menuitemcheckbox"]')).map((item) => item.textContent)).toEqual(['角色', '知识', '产物', '日程'])
+    expect(Array.from(host.querySelectorAll('[role="menuitemcheckbox"]')).map((item) => item.textContent)).toEqual(['角色', '任务', '知识', '产物', '日程'])
     await click(host, '角色')
     expect(tabLabels(host)).toEqual(['世界', '轨迹', '角色'])
     await click(host, '更多')
