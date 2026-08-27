@@ -11,6 +11,7 @@ import {
 import type { World } from '@dsh-cyber/contracts'
 import {
   applyWorldTheme,
+  DEFAULT_SKIN_ID,
   saveWorldTheme,
   themeRegistry,
   type WorldThemeConfig,
@@ -42,7 +43,7 @@ export function ThemeCustomizerDialog({
   onClose,
   onSaved,
 }: ThemeCustomizerDialogProps) {
-  const baseTheme = themeRegistry.get(initialThemeId ?? 'maid-atelier')
+  const baseTheme = themeRegistry.get(initialThemeId ?? DEFAULT_SKIN_ID)
   const isCustom = baseTheme.source === 'custom'
 
   const [id] = useState(() =>
@@ -65,7 +66,7 @@ export function ThemeCustomizerDialog({
   const close = () => {
     // 恢复之前应用的主题
     if (previewActive) {
-      applyWorldTheme(initialThemeId ?? 'maid-atelier')
+      applyWorldTheme(initialThemeId ?? DEFAULT_SKIN_ID)
     }
     onClose()
   }
@@ -103,7 +104,7 @@ export function ThemeCustomizerDialog({
       applyWorldTheme(id)
       setPreviewActive(true)
     } else {
-      applyWorldTheme(initialThemeId ?? 'maid-atelier')
+      applyWorldTheme(initialThemeId ?? DEFAULT_SKIN_ID)
       setPreviewActive(false)
     }
   }
@@ -128,9 +129,9 @@ export function ThemeCustomizerDialog({
     if (!isCustom) return
     if (window.confirm(`确定删除自定义主题【${displayName}】吗？`)) {
       themeRegistry.deleteCustomTheme(id)
-      saveWorldTheme(world.id, 'maid-atelier')
-      applyWorldTheme('maid-atelier')
-      onSaved('maid-atelier')
+      saveWorldTheme(world.id, DEFAULT_SKIN_ID)
+      applyWorldTheme(DEFAULT_SKIN_ID)
+      onSaved(DEFAULT_SKIN_ID)
       onClose()
     }
   }

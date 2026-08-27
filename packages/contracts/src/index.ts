@@ -215,7 +215,7 @@ export interface CyberPackageFile {
   sha256: string
 }
 
-export type CyberPackageEntrypointKind = 'prompt-transform' | 'employee-blueprint' | 'world-theme' | 'skill'
+export type CyberPackageEntrypointKind = 'prompt-transform' | 'employee-blueprint' | 'world-theme' | 'skill' | 'skin'
 
 export interface CyberPackageEntrypoint {
   id: string
@@ -241,6 +241,18 @@ export interface CyberPackageManifest {
     level: 'official' | 'community'
     contentSha256: string
   }
+}
+
+/** Declaration-only metadata for an installable workspace skin. */
+export interface CyberSkinManifestV1 {
+  schemaVersion: 1
+  id: string
+  skinId: string
+  themeId: string
+  displayName: string
+  summary: string
+  /** Optional package-local preview image, relative to the package root. */
+  previewAsset?: string
 }
 
 export type CyberMarketKind = 'theme' | 'talent' | 'plugin' | 'skin'
@@ -279,6 +291,12 @@ export type CyberMarketActivation =
       blueprintId: string
       blueprintVersion: number
       worldTemplateId: string
+    }
+  | {
+      kind: 'skin'
+      skinId: string
+      skinVersion: string
+      themeId: string
     }
 
 export interface CyberMarketPackage {

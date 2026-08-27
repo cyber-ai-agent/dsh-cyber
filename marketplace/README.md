@@ -5,6 +5,7 @@
 - [参与共创](../CONTRIBUTING.md)
 - [包生态与信任边界](../docs/community/package-ecosystem.md)
 - [世界主题](../docs/community/world-theme-authoring.md)
+- [皮肤包](../docs/community/skin-authoring.md)
 - [员工蓝图](../docs/community/employee-blueprint-authoring.md)
 - [声明式插件](../docs/community/plugin-authoring.md)
 - [Skill Recipe](../docs/community/skill-recipe-authoring.md)

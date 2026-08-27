@@ -73,7 +73,7 @@ import { collaborationModeOf, type CollaborationMode } from './components/group-
 import { NavigationPane } from './components/NavigationPane.js'
 import { ResizableShell } from './components/ResizableShell.js'
 import { WorldThemeSwitcher } from './components/WorldThemeSwitcher.js'
-import { applyWorldTheme, readWorldTheme } from './features/world/world-themes.js'
+import { applyWorldTheme, readWorldTheme, saveWorldTheme } from './features/world/world-themes.js'
 import type {
   DiscoveredModel,
   ModelDiscoveryDraft,
@@ -195,6 +195,7 @@ export default function App() {
   const [appMode, setAppMode] = useState<AppMode>(worldRuntimeV2Enabled ? 'world' : 'workbench')
   const [worldRuntimeAvailable, setWorldRuntimeAvailable] = useState(demoMode)
   const [worldRuntimeRevision, setWorldRuntimeRevision] = useState(0)
+  const [skinRevision, setSkinRevision] = useState(0)
   const [worldSettingsOpen, setWorldSettingsOpen] = useState(false)
   const [worldSettings, setWorldSettings] = useState<WorldSettings>()
   const [worldSettingsRevision, setWorldSettingsRevision] = useState<number>()
@@ -205,6 +206,11 @@ export default function App() {
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('auto')
   const [taskSchedules, setTaskSchedules] = useState<TaskSchedule[]>([])
   const [scheduleBusy, setScheduleBusy] = useState(false)
+
+  const installedSkinIds = useMemo(
+    () => installedPackages.filter((item) => item.status === 'active' && item.kind === 'skin').map((item) => item.packageId),
+    [installedPackages],
+  )
 
   const activeSession = sessions.find((session) => session.id === activeSessionId)
   const activeParticipantIds = conversationIntent?.employeeIds
@@ -433,10 +439,11 @@ export default function App() {
         const result = await api<{ items: Workspace[] }>('/api/workspaces')
         if (cancelled || result.items.length === 0) return
         const first = result.items[0]!
-        const [snapshot, preferenceResult, modelResult] = await Promise.all([
+        const [snapshot, preferenceResult, modelResult, packageResult] = await Promise.all([
           api<WorkspaceSnapshot>(`/api/workspaces/${first.id}/snapshot`),
           api<{ preferences: WorkspacePreferences }>(`/api/workspaces/${first.id}/preferences`),
           api<{ items: ModelProfile[]; assignments: ModelAssignment[] }>(`/api/workspaces/${first.id}/model-profiles`),
+          api<{ items: InstalledPackage[]; transactions: PackageInstallTransaction[] }>(`/api/workspaces/${first.id}/packages`),
         ])
         if (cancelled) return
         setWorkspace(first)
@@ -444,6 +451,8 @@ export default function App() {
         setPreferences(preferenceResult.preferences)
         setModels(modelResult.items)
         setModelAssignments(modelResult.assignments)
+        setInstalledPackages(packageResult.items)
+        setPackageTransactions(packageResult.transactions)
         const remembered = readRememberedWorldId(first.id)
         const target = snapshot.worlds.find((world) => world.id === remembered) ?? snapshot.worlds[0]
         if (target !== undefined) await loadWorld(target)
@@ -804,10 +813,10 @@ export default function App() {
     const savedSkin = typeof localStorage !== 'undefined' ? localStorage.getItem('dsh_cyber_skin') : null
     const scheme = preferences?.colorScheme ?? 'dark'
     root.dataset.colorScheme = scheme
-    root.dataset.skin = preferences?.skinId ?? savedSkin ?? 'maid-atelier'
+    root.dataset.skin = activeWorld === undefined ? preferences?.skinId ?? savedSkin ?? 'default' : readWorldTheme(activeWorld)
     root.dataset.density = preferences?.interfaceDensity ?? 'compact'
     root.dataset.motion = preferences?.motion ?? 'system'
-  }, [preferences])
+  }, [activeWorld, preferences])
 
   const openDossier = useCallback(async (employeeId: string) => {
     setSelectedEmployeeId(employeeId)
@@ -989,9 +998,16 @@ export default function App() {
 
   const searchMarketplace = useCallback(async (market: CyberMarketKind, query = '') => {
     if (workspace === undefined) return
+    if (demoMode) {
+      setMarketplaceItems(market === 'skin' ? demoSkinPackages().filter((item) => {
+        const needle = query.trim().toLocaleLowerCase()
+        return needle === '' || `${item.manifest.displayName} ${item.manifest.summary}`.toLocaleLowerCase().includes(needle)
+      }) : [])
+      return
+    }
     const result = await api<{ items: CyberMarketPackage[] }>(`/api/marketplace?market=${market}&workspaceId=${encodeURIComponent(workspace.id)}${activeWorld === undefined ? '' : `&worldId=${encodeURIComponent(activeWorld.id)}`}&q=${encodeURIComponent(query)}`)
     setMarketplaceItems(result.items)
-  }, [activeWorld, workspace])
+  }, [activeWorld, demoMode, workspace])
 
   const openPackageMarket = useCallback(async (market: CyberMarketKind = 'theme') => {
     setPackageMarketKind(market)
@@ -1052,7 +1068,7 @@ export default function App() {
       } else {
         await api(`/api/workspaces/${workspace.id}/packages/install`, {
           method: 'POST',
-          body: JSON.stringify({ ...input, ...(activeWorld === undefined || input.manifest.kind === 'world-theme' ? {} : { worldId: activeWorld.id }) }),
+          body: JSON.stringify({ ...input, ...(activeWorld === undefined || input.manifest.kind === 'world-theme' || input.manifest.kind === 'skin' ? {} : { worldId: activeWorld.id }) }),
         })
         await Promise.all([loadPackages(), loadInstalledPluginCommands()])
       }
@@ -1112,7 +1128,7 @@ export default function App() {
         await api(`/api/workspaces/${workspace.id}/marketplace/install`, {
           method: 'POST',
           body: JSON.stringify({ packageId: item.manifest.id, version: item.manifest.version, approvalToken,
-            ...(item.market === 'theme' || activeWorld === undefined ? {} : { worldId: activeWorld.id }) }),
+            ...(item.market === 'theme' || item.market === 'skin' || activeWorld === undefined ? {} : { worldId: activeWorld.id }) }),
         })
         await Promise.all([loadPackages(), searchMarketplace(item.market), item.market === 'plugin' ? loadInstalledPluginCommands() : Promise.resolve()])
       }
@@ -1139,10 +1155,15 @@ export default function App() {
         await api(`/api/workspaces/${encodeURIComponent(workspace.id)}/packages/${encodeURIComponent(installed.packageId)}`, { method: 'DELETE' })
         await Promise.all([loadPackages(), searchMarketplace(packageMarketKind), loadInstalledPluginCommands()])
       }
+      if (installed.kind === 'skin' && activeWorld !== undefined && readWorldTheme(activeWorld) === installed.packageId) {
+        saveWorldTheme(activeWorld.id, 'default')
+        setSkinRevision((value) => value + 1)
+        setPreferences((current) => current === undefined ? current : { ...current, skinId: 'default' })
+      }
     } finally {
       setPackageInstalling(false)
     }
-  }, [demoMode, loadInstalledPluginCommands, loadPackages, packageMarketKind, searchMarketplace, workspace])
+  }, [activeWorld, demoMode, loadInstalledPluginCommands, loadPackages, packageMarketKind, searchMarketplace, workspace])
 
   const openIntegrationSettings = useCallback(() => {
     setPackageMarketOpen(false)
@@ -2053,7 +2074,11 @@ export default function App() {
           onSelect={(world) => void loadWorld(world)}
           onExplore={() => void openPackageMarket('theme')}
         />
-        <WorldThemeSwitcher activeWorld={activeWorld} />
+        <WorldThemeSwitcher
+          key={`${activeWorld.id}:${skinRevision}`}
+          activeWorld={activeWorld}
+          installedSkinIds={installedSkinIds}
+        />
         <nav aria-label="全局功能">
           <CreativeWorkshopLauncher workspaceId={workspace.id} onCreated={(project) => { void openWorkshopWorld(project.worldId).catch((cause) => setError(cause instanceof Error ? cause.message : '创意工坊世界已创建，但打开失败，请从世界列表重新进入。')) }} onOpenWorld={(worldId) => { void openWorkshopWorld(worldId).catch((cause) => setError(cause instanceof Error ? cause.message : '世界打开失败')) }} />
           <button type="button" onClick={() => void openPackageMarket('theme')}><Storefront size={16} />市场</button>
@@ -2246,11 +2271,13 @@ export default function App() {
           transactions={packageTransactions}
           loading={packageLoading}
           installing={packageInstalling}
-          currentSkinId={preferences?.skinId}
+          currentSkinId={readWorldTheme(activeWorld)}
           onApplySkin={async (skinId) => {
             try {
+              saveWorldTheme(activeWorld.id, skinId)
               if (typeof localStorage !== 'undefined') localStorage.setItem('dsh_cyber_skin', skinId)
-              document.documentElement.dataset.skin = skinId
+              applyWorldTheme(skinId)
+              setSkinRevision((value) => value + 1)
               setPreferences((curr) => curr ? { ...curr, skinId } : { skinId } as any)
               if (preferences !== undefined) {
                 await savePreferences({ ...preferences, skinId })
@@ -2289,6 +2316,7 @@ export default function App() {
             models={models}
             employees={employees}
             authorities={authorities}
+            installedSkinIds={installedSkinIds}
             saving={savingSettings}
             onClose={() => setWorldSettingsOpen(false)}
             onManageAdministrators={() => {
@@ -2798,6 +2826,36 @@ function runtimeActivity(event: AgentRuntimeEvent, role: string): string {
   if (event.kind === 'turn.started') return `正在处理${role}任务`
   if (event.kind === 'turn.failed') return '执行失败，等待推进'
   return '可接新任务'
+}
+
+function demoSkinPackages(): CyberMarketPackage[] {
+  const skins = [
+    ['default-skin', '默认皮肤', 'DSH Cyber 原生深色工作台，保持清晰克制的默认阅读体验。'],
+    ['maid-atelier', '深海女仆工坊', '深海宫殿、蓝金微晶与月光大厅，聊天和世界视图使用同一幅完整场景。'],
+    ['cyber-company', '赛博原厂', '黑曜高光与冷色全息办公室，适合专注协作和运行监控。'],
+    ['orca-link', '虎鲸链路', '深海舰桥、电蓝链路与虎鲸导航全景，完整覆盖聊天和世界视图。'],
+    ['moonlit-tavern', '月影酒馆', '雨夜酒馆、壁炉和暖色木质大厅，适合叙事角色与同桌会话。'],
+  ] as const
+  return skins.map(([id, displayName, summary]) => ({
+    market: 'skin' as const,
+    manifest: {
+      schemaVersion: 1 as const,
+      id,
+      version: '1.0.0',
+      kind: 'skin' as const,
+      displayName,
+      summary,
+      license: 'PolyForm-Noncommercial-1.0.0',
+      publisher: 'DSH Cyber',
+      capabilities: ['ui:skin'],
+      dataEgress: [],
+      files: [{ path: 'skin.json', sha256: '0'.repeat(64) }],
+      entrypoints: [{ id, kind: 'skin' as const, path: 'skin.json' }],
+    },
+    sourceDirectory: `marketplace/skins/${id}`,
+    verified: true,
+    ...(id === 'default-skin' ? {} : { activation: { kind: 'skin' as const, skinId: id, skinVersion: '1.0.0', themeId: id } }),
+  }))
 }
 
 function runtimeFailureMessage(event: AgentRuntimeEvent): string {

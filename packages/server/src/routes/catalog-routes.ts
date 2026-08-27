@@ -12,6 +12,7 @@ import { writeBinary, writeJson } from '../http/response.js'
 import { loadInstalledBlueprints } from '../installed-package-runtime.js'
 import { parseEmployeeBlueprintManifest } from '../employee-blueprint-manifest.js'
 import { parsePromptTransformDefinition } from '../prompt-transform-parser.js'
+import { parseSkinManifest } from '../skin-manifest.js'
 import type { WorldPackageInstanceService } from '../services/world-package-instance-service.js'
 
 export interface CatalogRoutesDependencies {
@@ -48,7 +49,7 @@ export function registerCatalogRoutes(router: Router, dependencies: CatalogRoute
 
   router.get('/api/marketplace', async ({ response, url }) => {
     const market = url.searchParams.get('market')
-    if (market !== null && !['theme', 'plugin', 'talent'].includes(market)) {
+    if (market !== null && !['theme', 'plugin', 'talent', 'skin'].includes(market)) {
       throw new HttpError(422, 'invalid_market', 'Unknown marketplace')
     }
     const workspaceId = url.searchParams.get('workspaceId')
@@ -84,6 +85,15 @@ export function registerCatalogRoutes(router: Router, dependencies: CatalogRoute
       previewPath = manifest.assets.find((asset) => asset.kind === 'image')?.src
     } else if (item.market === 'talent') {
       previewPath = item.manifest.files.find((file) => /\.(png|webp|jpe?g)$/i.test(file.path))?.path
+    } else if (item.market === 'skin') {
+      // Skin declarations are host-resolved and may reuse a bundled scene.
+      // Packages can optionally ship a declared preview image.
+      const entrypoint = item.manifest.entrypoints?.find((candidate) => candidate.kind === 'skin')
+      if (entrypoint !== undefined) {
+        const raw = JSON.parse((await packageCatalog.readDeclaredFile(item, entrypoint.path)).toString('utf8')) as Record<string, unknown>
+        const skin = parseSkinManifest(raw, { packageId: item.manifest.id, packageVersion: item.manifest.version })
+        if (skin.previewAsset !== undefined && item.manifest.files.some((file) => file.path === skin.previewAsset)) previewPath = skin.previewAsset
+      }
     }
     if (previewPath === undefined) throw new HttpError(404, 'market_preview_missing', 'Marketplace preview is missing')
     const body = await packageCatalog.readDeclaredFile(item, previewPath)
@@ -135,6 +145,22 @@ async function marketActivation(
           blueprintId: blueprint.id,
           blueprintVersion: blueprint.version,
           worldTemplateId: blueprint.worldTemplateId,
+        },
+      }
+    }
+    if (item.market === 'skin' && item.manifest.kind === 'skin') {
+      const entrypoint = item.manifest.entrypoints?.find((candidate) => candidate.kind === 'skin')
+      if (entrypoint === undefined) return {}
+      const skin = parseSkinManifest(
+        JSON.parse((await packageCatalog.readDeclaredFile(item, entrypoint.path)).toString('utf8')),
+        { packageId: item.manifest.id, packageVersion: item.manifest.version },
+      )
+      return {
+        activation: {
+          kind: 'skin',
+          skinId: skin.skinId,
+          skinVersion: item.manifest.version,
+          themeId: skin.themeId,
         },
       }
     }

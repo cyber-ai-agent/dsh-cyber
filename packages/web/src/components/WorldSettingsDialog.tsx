@@ -6,7 +6,7 @@ import type { CyberEmployee } from '../types.js'
 import { Avatar } from './Avatar.js'
 import { AuthorityBadge } from './AuthorityBadge.js'
 import { useDialogFocusTrap } from './useDialogFocusTrap.js'
-import { applyWorldTheme, readWorldTheme, saveWorldTheme, themeRegistry } from '../features/world/world-themes.js'
+import { applyWorldTheme, DEFAULT_SKIN_ID, readWorldTheme, saveWorldTheme, themeRegistry } from '../features/world/world-themes.js'
 
 interface WorldSettingsDialogProps {
   world: World
@@ -14,6 +14,7 @@ interface WorldSettingsDialogProps {
   models: ModelProfile[]
   employees: EmployeeInstance[]
   authorities?: WorldCharacterAuthority[]
+  installedSkinIds?: readonly string[]
   saving: boolean
   onClose(): void
   onSave(value: WorldSettings): Promise<void>
@@ -21,7 +22,7 @@ interface WorldSettingsDialogProps {
   onManageEmployee?(employeeId: string): void
 }
 
-export function WorldSettingsDialog({ world, value, models, employees, authorities, saving, onClose, onSave, onManageAdministrators, onManageEmployee }: WorldSettingsDialogProps) {
+export function WorldSettingsDialog({ world, value, models, employees, authorities, installedSkinIds, saving, onClose, onSave, onManageAdministrators, onManageEmployee }: WorldSettingsDialogProps) {
   const [draft, setDraft] = useState(normalizeWorldSettings(value))
   const [notice, setNotice] = useState<string | undefined>()
   const [error, setError] = useState<string>()
@@ -42,7 +43,12 @@ export function WorldSettingsDialog({ world, value, models, employees, authoriti
   useEffect(() => {
     setDraft(normalizeWorldSettings(value))
     applyWorldPreview(value)
-  }, [value])
+    const persisted = readWorldTheme(world)
+    const available = themeRegistry.listAvailable(installedSkinIds ?? [])
+    const resolvedThemeId = available.some((theme) => theme.id === persisted) ? persisted : DEFAULT_SKIN_ID
+    initialThemeIdRef.current = resolvedThemeId
+    setSelectedThemeId(resolvedThemeId)
+  }, [installedSkinIds, value, world])
 
   useEffect(() => {
     applyWorldPreview(draft)
@@ -54,13 +60,15 @@ export function WorldSettingsDialog({ world, value, models, employees, authoriti
   const administrators = administratorIds
     .map((employeeId) => employees.find((employee) => employee.id === employeeId))
     .filter((employee): employee is EmployeeInstance => employee !== undefined && employee.status !== 'archived')
+  const availableThemes = themeRegistry.listAvailable(installedSkinIds ?? [])
+  const visibleSelectedThemeId = availableThemes.some((theme) => theme.id === selectedThemeId) ? selectedThemeId : DEFAULT_SKIN_ID
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
     setError(undefined)
     setNotice(undefined)
     try {
-      saveWorldTheme(world.id, selectedThemeId)
+      saveWorldTheme(world.id, visibleSelectedThemeId)
       await onSave(draft)
       savedRef.current = true
       setNotice('世界设置已保存')
@@ -139,8 +147,8 @@ export function WorldSettingsDialog({ world, value, models, employees, authoriti
             </header>
             <div className="world-settings-card__body">
               <div className="world-theme-presets">
-                {themeRegistry.list().map((theme) => {
-                  const active = selectedThemeId === theme.id
+                {availableThemes.map((theme) => {
+                  const active = visibleSelectedThemeId === theme.id
                   const previewImage = theme.tokens.worldMapImage ?? theme.tokens.backdropImage
                   return (
                     <button

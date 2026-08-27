@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "orca-link",
+  "version": "1.0.0",
+  "kind": "skin",
+  "displayName": "虎鲸链路",
+  "summary": "深海舰桥、电蓝链路与虎鲸导航全景，完整覆盖聊天和世界视图。",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "publisher": "DSH Cyber",
+  "capabilities": ["ui:skin"],
+  "dataEgress": [],
+  "files": [{"path": "skin.json", "sha256": "d5577a59157ae065f1ea62b7cf77e1b2e6a16211232df517f2061961b0cbc9db"}],
+  "entrypoints": [{"id": "orca-link", "kind": "skin", "path": "skin.json"}],
+  "certification": {"authority": "DSH Cyber", "level": "official", "contentSha256": "06cf5a726727004e8aa818c5ef6141c6d933a6fb3bcc372ecbb202b2a743dd5c"}
+}

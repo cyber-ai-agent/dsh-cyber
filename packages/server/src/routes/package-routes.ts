@@ -51,6 +51,9 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
     if (store.getWorkspace(workspaceId) === undefined) throw new HttpError(404, 'workspace_not_found', 'Workspace not found')
     const installed = store.getActivePackage(workspaceId, packageId)
     if (installed === undefined) throw new HttpError(404, 'package_not_installed', 'Package is not installed')
+    if (installed.kind === 'skin' && installed.packageId === 'default-skin') {
+      throw new HttpError(409, 'default_skin_required', '默认皮肤始终保留，不能卸载')
+    }
     const worlds = store.listWorlds(workspaceId, true).filter((world) => world.status === 'active')
     for (const world of worlds) await worldAccess.assertUnlocked(world.id, request)
     let disabledWorldInstances = 0

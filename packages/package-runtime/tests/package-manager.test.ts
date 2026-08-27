@@ -227,6 +227,19 @@ describe('PackageManager', () => {
       ],
     })).toThrow('requires exactly one entrypoint')
 
+    const skin: CyberPackageManifest = {
+      ...plugin,
+      id: 'maid-atelier',
+      kind: 'skin',
+      displayName: '深海女仆工坊',
+      summary: '完整场景皮肤',
+      capabilities: ['ui:skin'],
+      files: [{ path: 'skin.json', sha256: 'a'.repeat(64) }],
+      entrypoints: [{ id: 'maid-atelier', kind: 'skin', path: 'skin.json' }],
+    }
+    expect(() => validatePackageManifest(skin)).not.toThrow()
+    expect(() => validatePackageManifest({ ...skin, capabilities: [] })).toThrow('requires capability ui:skin')
+
     const certified = structuredClone(plugin)
     certified.certification = {
       authority: 'DSH Cyber',

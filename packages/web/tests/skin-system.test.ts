@@ -2,12 +2,12 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { World } from '@dsh-cyber/contracts'
+import type { CyberMarketPackage, World } from '@dsh-cyber/contracts'
 
-import { MARKET_SKIN_PACKAGES, PackageMarketDialog } from '../src/components/PackageMarketDialog.js'
+import { PackageMarketDialog } from '../src/components/PackageMarketDialog.js'
 import { SettingsDialog } from '../src/components/SettingsDialog.js'
 import { WorldThemeSwitcher } from '../src/components/WorldThemeSwitcher.js'
-import { BUILTIN_THEMES, applyWorldTheme } from '../src/features/world/world-themes.js'
+import { BUILTIN_THEMES, applyWorldTheme, themeRegistry } from '../src/features/world/world-themes.js'
 
 const world: World = {
   id: 'world-1',
@@ -21,11 +21,12 @@ const world: World = {
 
 describe('modern skin system and marketplace category', () => {
   it('renders skin category tab in package market dialog', () => {
+    const items = skinItems()
     const html = renderToStaticMarkup(createElement(PackageMarketDialog, {
       initialMarket: 'skin',
       world,
       worlds: [world],
-      items: [],
+      items,
       installed: [],
       transactions: [],
       loading: false,
@@ -49,20 +50,11 @@ describe('modern skin system and marketplace category', () => {
     expect(html).toContain('角色</button>')
     expect(html).toContain('插件</button>')
     expect(html).toContain('皮肤</button>')
-    expect(html).toContain('深海女仆工坊 (Maid Atelier · 鲸鱼娘)')
-    expect(html).toContain('虎鲸链路 (Orca Link · 虎鲸娘)')
-    expect(html).toContain('绝区零 · 星见雅 (ZZZ Miyabi)')
-    expect(html).toContain('绝区零 · 艾莲 (ZZZ Ellen)')
-    expect(html).toContain('初恋时刻 (First Love)')
-    expect(html).toContain('蛛网都市 (Spider Verse)')
-    expect(html).toContain('宝可梦黄昏 (Pokemon Sunset)')
-    expect(html).toContain('木叶忍界 (Naruto Konoha)')
-    expect(html).toContain('鬼灭藤夜 (Demon Slayer Night)')
-    expect(html).toContain('赛博霓虹 2.0 (Cyberpunk Horizon)')
-    expect(html).toContain('极简黑曜 (Linear Obsidian Pro)')
-    expect(html).toContain('暖阳白昼 (Claude Warm Daylight)')
-    expect(html).toContain('✓ 正在使用')
-    expect(html).toContain('应用到当前世界')
+    expect(html).toContain('默认皮肤')
+    expect(html).toContain('深海女仆工坊')
+    expect(html).toContain('虎鲸链路')
+    expect(html).toContain('默认皮肤 · 始终可用')
+    expect(html).toContain('查看并安装')
   })
 
   it('keeps skin selection in the market instead of duplicating it in SettingsDialog', () => {
@@ -110,31 +102,13 @@ describe('modern skin system and marketplace category', () => {
     expect(html).not.toContain('世界专属主题')
   })
 
-  it('defines 12 modern skin package descriptors in MARKET_SKIN_PACKAGES', () => {
-    expect(MARKET_SKIN_PACKAGES.length).toBe(12)
-    const ids = MARKET_SKIN_PACKAGES.map((s) => s.id)
-    expect(ids).toEqual([
-      'maid-atelier',
-      'orca-link',
-      'zzz-miyabi',
-      'zzz-ellen',
-      'first-love',
-      'spider-verse',
-      'pokemon-sunset',
-      'naruto-konoha',
-      'demon-slayer-night',
-      'cyber-graphite',
-      'linear-obsidian',
-      'paper-daylight',
-    ])
-  })
-
   it('renders visual skin thumbnails instead of palette-only cards', () => {
+    const items = skinItems()
     const html = renderToStaticMarkup(createElement(PackageMarketDialog, {
       initialMarket: 'skin',
       world,
       worlds: [world],
-      items: [],
+      items,
       installed: [],
       transactions: [],
       loading: false,
@@ -155,14 +129,18 @@ describe('modern skin system and marketplace category', () => {
     }))
 
     expect(html).not.toContain('market-skin-palette')
-    expect((html.match(/class="market-skin-preview"/g) ?? []).length).toBe(MARKET_SKIN_PACKAGES.length)
+    expect((html.match(/class="market-skin-preview"/g) ?? []).length).toBe(items.length)
     expect(html).toContain('/assets/skins/maid-palace-night.webp')
     expect(html).toContain('/assets/skins/orca-bridge-night.png')
   })
 
   it('labels the world skin switcher consistently', () => {
-    const html = renderToStaticMarkup(createElement(WorldThemeSwitcher, { activeWorld: world }))
+    const html = renderToStaticMarkup(createElement(WorldThemeSwitcher, { activeWorld: world, installedSkinIds: ['maid-atelier'] }))
     expect(html).toContain('皮肤:')
+    expect(html).toContain('默认皮肤')
+    const available = themeRegistry.listAvailable(['maid-atelier']).map((theme) => theme.id)
+    expect(available).toEqual(expect.arrayContaining(['default', 'maid-atelier']))
+    expect(available).not.toContain('orca-link')
   })
 
   it('keeps every runtime theme on one canonical scene source', () => {
@@ -170,9 +148,40 @@ describe('modern skin system and marketplace category', () => {
       const sceneImage = theme.tokens.worldMapImage ?? theme.tokens.backdropImage
       expect(sceneImage, `${theme.id} must declare a scene image`).toBeDefined()
       expect(theme.tokens.backdropImage).toBe(sceneImage)
-      expect(theme.runtimeManifest?.assets.find((asset) => asset.kind === 'image')?.src).toBe(sceneImage)
+      if (theme.runtimeManifest !== undefined) {
+        expect(theme.runtimeManifest.assets.find((asset) => asset.kind === 'image')?.src).toBe(sceneImage)
+      }
       applyWorldTheme(theme.id)
       expect(document.documentElement.style.getPropertyValue('--theme-backdrop-image')).toContain(sceneImage!)
     }
   })
 })
+
+function skinItems(): CyberMarketPackage[] {
+  return [
+    ['default-skin', '默认皮肤'],
+    ['maid-atelier', '深海女仆工坊'],
+    ['cyber-company', '赛博原厂'],
+    ['orca-link', '虎鲸链路'],
+    ['moonlit-tavern', '月影酒馆'],
+  ].map(([id, displayName]) => ({
+    market: 'skin',
+    manifest: {
+      schemaVersion: 1,
+      id,
+      version: '1.0.0',
+      kind: 'skin',
+      displayName,
+      summary: `${displayName}完整场景皮肤`,
+      license: 'PolyForm-Noncommercial-1.0.0',
+      publisher: 'DSH Cyber',
+      capabilities: ['ui:skin'],
+      dataEgress: [],
+      files: [{ path: 'skin.json', sha256: 'a'.repeat(64) }],
+      entrypoints: [{ id, kind: 'skin', path: 'skin.json' }],
+    },
+    sourceDirectory: `marketplace/skins/${id}`,
+    verified: true,
+    ...(id === 'default-skin' ? {} : { activation: { kind: 'skin' as const, skinId: id, skinVersion: '1.0.0', themeId: id } }),
+  }))
+}
