@@ -140,3 +140,11 @@ memory categories below remain future work and are not implied by the graph.
 7. Growth is evidence-driven.
 8. Visual world state must reflect real domain state instead of fabricating work.
 9. Chat surfaces final conversational results; execution details belong to Trace.
+
+# 当前开发重点：Creative Workshop V2
+
+- AI 生成严格 JSON 草稿，进入人工审查而不是直接创建。
+- 世界与角色采用最小必填和渐进展开；草稿自动保存并可通过 JSON 双向编辑。
+- 统一 ModelPicker 覆盖设置、世界和角色，模型按会话 → 角色 → 世界 → 应用继承。
+- 核心会话修复输入边界、单条消息误报排队和停止状态反馈。
+- 外观与皮肤继续保持多语言一致、上传式自定义素材和聊天/世界统一场景。

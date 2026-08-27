@@ -1080,7 +1080,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .completion-job-status button { min-height: 32px; padding: 5px 9px; border: 1px solid currentColor; color: inherit; background: transparent; cursor: pointer; }
 .completion-job-status button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.chat-workbench { position: relative; height: 100%; display: grid; grid-template-rows: 56px minmax(0, 1fr) auto; background: transparent; overflow: hidden; }
+.chat-workbench { position: relative; min-width: 0; height: 100%; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 56px minmax(0, 1fr) auto; background: transparent; overflow: hidden; }
 
 /* 沉浸式皮肤全景舞台：宫殿背景 + 左右立绘角色 */
 .skin-stage { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 0; contain: strict; }

@@ -33,7 +33,7 @@
 .model-picker__inherit { width: calc(100% - 12px); min-height: 36px; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 6px 6px; padding: 6px 9px; border: 1px dashed var(--border-strong); border-radius: 5px; background: transparent; color: var(--text-muted); font-size: 12px; text-align: left; cursor: pointer; }
 .model-picker__inherit:hover { border-color: var(--accent); color: var(--text); background: var(--surface-2); }
 @media (max-width: 720px) { .model-picker__panel { left: 0; right: auto; width: min(620px, calc(100vw - 32px)); min-width: 0; } .model-picker__columns { grid-template-columns: 1fr; max-height: 420px; } .model-picker__providers { max-height: 150px; border-right: 0; border-bottom: 1px solid var(--border); } }
-.composer-model-picker { width: min(250px, 34vw); }
+.composer-model-picker { width: clamp(120px, 12vw, 160px); min-width: 0; flex: 0 1 160px; }
 .composer-model-picker .model-picker__trigger { min-height: 34px; padding-block: 5px; }
 .composer-model-picker > small { display: block; margin-top: 2px; color: var(--text-muted); font-size: 10px; text-align: start; }
 .model-picker { position: relative; min-width: 0; }

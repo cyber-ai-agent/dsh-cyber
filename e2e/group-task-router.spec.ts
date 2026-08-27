@@ -84,7 +84,15 @@ test('routes task collaboration to matching roles while discussion keeps all rou
   for (const viewport of [{ width: 1_440, height: 900, label: '1440x900' }, { width: 1_920, height: 1_080, label: '1920x1080' }, { width: 3_840, height: 2_160, label: '3840x2160' }]) {
     await page.setViewportSize(viewport)
     const region = page.getByRole('region', { name: '当前世界多角色会话' })
-    expect(await region.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
+    const layout = await region.evaluate((element) => {
+      const bounds = element.getBoundingClientRect()
+      const offenders = [...element.querySelectorAll<HTMLElement>('*')]
+        .filter((child) => child.getBoundingClientRect().right > bounds.right + 1)
+        .slice(0, 8)
+        .map((child) => ({ className: child.className, right: Math.round(child.getBoundingClientRect().right), width: Math.round(child.getBoundingClientRect().width) }))
+      return { scrollWidth: element.scrollWidth, clientWidth: element.clientWidth, offenders }
+    })
+    expect(layout.scrollWidth, JSON.stringify(layout)).toBeLessThanOrEqual(layout.clientWidth + 1)
     await page.screenshot({ path: join(screenshotRoot, `group-task-${viewport.label}.png`) })
   }
   await writeFile(join(screenshotRoot, 'console.log'), consoleIssues.length === 0 ? 'No console errors or warnings.\n' : `${consoleIssues.join('\n')}\n`, 'utf8')

@@ -47,6 +47,14 @@ test('persists one selected interface language across reload and service restart
     await page.screenshot({ path: join(screenshotRoot, `english-settings-${viewport.label}.png`) })
   }
   await page.getByRole('button', { name: 'Close settings' }).click()
+  await page.getByRole('button', { name: 'Creative workshop', exact: true }).click()
+  const englishWorkshop = page.getByRole('dialog', { name: 'Creative workshop' })
+  await expect(englishWorkshop).toBeVisible()
+  await expect(englishWorkshop.getByText('My local projects', { exact: true })).toBeVisible()
+  expect(await englishWorkshop.textContent()).not.toMatch(/创意工坊|我的本地项目|创建第一个世界/)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.screenshot({ path: join(screenshotRoot, 'english-workshop-1440x900.png') })
+  await englishWorkshop.getByRole('button', { name: 'Close creative workshop' }).click()
   await openTasks(page)
   await expect(page.getByRole('region', { name: 'Task workspace' })).toBeVisible()
   await expect(page.getByText(/completed|superseded|accepted|request-changes/, { exact: true })).toHaveCount(0)
@@ -73,6 +81,11 @@ test('persists one selected interface language across reload and service restart
   await page.reload()
   await expect(page.locator('html')).toHaveAttribute('lang', 'ar-SA')
   await expect(page.locator('html')).toHaveAttribute('dir', 'rtl')
+  await page.getByRole('button', { name: 'الورشة الإبداعية', exact: true }).click()
+  const arabicWorkshop = page.getByRole('dialog', { name: 'الورشة الإبداعية' })
+  await expect(arabicWorkshop.getByText('مشاريعي المحلية', { exact: true })).toBeVisible()
+  expect(await arabicWorkshop.textContent()).not.toMatch(/创意工坊|我的本地项目|创建第一个世界/)
+  await arabicWorkshop.getByRole('button', { name: 'إغلاق الورشة الإبداعية' }).click()
 
   // Existing workspaces may have a browser bootstrap locale that differs from
   // the saved preference. Switching back must update every mounted surface,
