@@ -2,6 +2,12 @@
 
 本文件约束本仓库中的 Agent、贡献者与自动化改动。实现功能前遵守现有 contracts、持久化与领域边界；修改界面时必须完成以下视觉审批，不能只以类型检查或单张截图代替。
 
+## 新开发分支基线（强制）
+
+- 每个新需求开始前必须执行 `git fetch origin --prune`，并从当时的 `origin/main` 新建分支；不得从旧功能分支继续派生后声称基于最新代码。
+- 若依赖 PR 尚未合并，必须先按依赖顺序合并、重新 fetch，再创建或快进新分支。恢复暂存改动前核对基线。
+- 开发前验证并记录：`git branch --show-current`、`git rev-parse HEAD`、`git rev-parse origin/main`、`git merge-base HEAD origin/main`；开始改动前后三个提交值必须一致。
+
 ## 基础视觉审批（合并门禁）
 
 1. 图片与世界地图自适应

@@ -32,19 +32,17 @@ let activeLocale = bootLocale()
 
 export function registerMessages(locale: UiLocale, messages: MessageCatalog): void {
   catalogs.set(locale, { ...(catalogs.get(locale) ?? {}), ...messages })
+  if (locale === activeLocale) for (const listener of listeners) listener()
 }
 
 export function getUiLocale(): UiLocale { return activeLocale }
 
 export function setUiLocale(locale: UiLocale): void {
-  if (activeLocale === locale) {
-    applyDocumentLocale(locale)
-    return
-  }
+  const changed = activeLocale !== locale
   activeLocale = locale
   try { window.localStorage.setItem(UI_LOCALE_STORAGE_KEY, locale) } catch { /* optional storage */ }
   applyDocumentLocale(locale)
-  for (const listener of listeners) listener()
+  if (changed) for (const listener of listeners) listener()
 }
 
 export function translate(key: string, fallback: string, variables: MessageVariables = {}, locale = activeLocale): string {

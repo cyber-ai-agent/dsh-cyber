@@ -1,13 +1,14 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { CyberMarketPackage, World } from '@dsh-cyber/contracts'
 
 import { PackageMarketDialog } from '../src/components/PackageMarketDialog.js'
 import { SettingsDialog } from '../src/components/SettingsDialog.js'
 import { WorldThemeSwitcher } from '../src/components/WorldThemeSwitcher.js'
-import { BUILTIN_THEMES, applyWorldTheme, themeRegistry } from '../src/features/world/world-themes.js'
+import { BUILTIN_THEMES, applyWorldTheme, resolveThemeManifest, themeRegistry } from '../src/features/world/world-themes.js'
+import { setUiLocale } from '../src/i18n/runtime.js'
 
 const world: World = {
   id: 'world-1',
@@ -20,6 +21,8 @@ const world: World = {
 }
 
 describe('modern skin system and marketplace category', () => {
+  beforeEach(() => setUiLocale('zh-CN'))
+
   it('renders skin category tab in package market dialog', () => {
     const items = skinItems()
     const html = renderToStaticMarkup(createElement(PackageMarketDialog, {
@@ -154,6 +157,29 @@ describe('modern skin system and marketplace category', () => {
       }
       applyWorldTheme(theme.id)
       expect(document.documentElement.style.getPropertyValue('--theme-backdrop-image')).toContain(sceneImage!)
+    }
+  })
+
+  it('compiles an uploaded custom panorama into the same runtime scene', () => {
+    const customId = 'custom-uploaded-scene-test'
+    themeRegistry.saveCustomTheme({
+      id: customId,
+      displayName: '上传场景',
+      description: '测试',
+      author: '测试',
+      source: 'custom',
+      tokens: {
+        ...BUILTIN_THEMES[0]!.tokens,
+        backdropImage: '/api/assets/scene-asset',
+        worldMapImage: '/api/assets/scene-asset',
+      },
+    })
+    try {
+      const manifest = resolveThemeManifest(world, customId)
+      expect(manifest.assets[0]?.src).toBe('/api/assets/scene-asset')
+      expect(manifest.scenes[0]?.layers[0]?.assetId).toBe(`${customId}-shared-scene`)
+    } finally {
+      themeRegistry.deleteCustomTheme(customId)
     }
   })
 })

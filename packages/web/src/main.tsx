@@ -15,6 +15,7 @@ await Promise.all([
   import('./i18n/messages.js'),
   import('./i18n/shell-messages.js'),
   import('./i18n/workbench-messages.js'),
+  import('./i18n/appearance-messages.js'),
 ])
 
 const root = document.getElementById('root')

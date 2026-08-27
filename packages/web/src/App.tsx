@@ -59,7 +59,7 @@ import {
 } from '@dsh-cyber/contracts'
 
 import { ApiError, api } from './api.js'
-import { setUiLocale, useI18n } from './i18n/runtime.js'
+import { resolveUiLocale, setUiLocale, useI18n } from './i18n/runtime.js'
 import { formatTime } from './i18n/format.js'
 import {
   ChatTurnQueue,
@@ -75,7 +75,7 @@ import { collaborationModeOf, type CollaborationMode } from './components/group-
 import { NavigationPane } from './components/NavigationPane.js'
 import { ResizableShell } from './components/ResizableShell.js'
 import { WorldThemeSwitcher } from './components/WorldThemeSwitcher.js'
-import { applyWorldTheme, readWorldTheme, saveWorldTheme } from './features/world/world-themes.js'
+import { applyWorldTheme, readWorldTheme, saveWorldTheme, themeRegistry } from './features/world/world-themes.js'
 import type {
   DiscoveredModel,
   ModelDiscoveryDraft,
@@ -267,6 +267,10 @@ export default function App() {
   activeSessionIdRef.current = activeSessionId
   activeConversationKeyRef.current = activeConversationKey
   pendingTurnsRef.current = pendingTurns
+
+  useEffect(() => {
+    if (preferences?.locale !== undefined) setUiLocale(resolveUiLocale(preferences.locale))
+  }, [preferences?.locale])
 
   const pendingDecisionFetchRef = useRef<string | undefined>(undefined)
 
@@ -2097,6 +2101,11 @@ export default function App() {
   }, [])
 
   const backgroundImage = resolveBackground(preferences?.backgroundAssetRef)
+  const worldSceneImage = activeWorld === undefined
+    ? backgroundImage
+    : themeRegistry.get(readWorldTheme(activeWorld)).tokens.worldMapImage
+      ?? themeRegistry.get(readWorldTheme(activeWorld)).tokens.backdropImage
+      ?? backgroundImage
   const shellStyle = useMemo(() => backgroundImage === undefined ? undefined : {
     '--workspace-background-image': `url("${backgroundImage}")`,
     '--workspace-background-opacity': String(preferences?.backgroundOpacity ?? 0.2),
@@ -2124,6 +2133,10 @@ export default function App() {
           key={`${activeWorld.id}:${skinRevision}`}
           activeWorld={activeWorld}
           installedSkinIds={installedSkinIds}
+          onThemeChange={() => {
+            setSkinRevision((value) => value + 1)
+            setWorldRuntimeRevision((value) => value + 1)
+          }}
         />
         <nav aria-label="全局功能">
           <CreativeWorkshopLauncher workspaceId={workspace.id} onCreated={(project) => { void openWorkshopWorld(project.worldId).catch((cause) => setError(cause instanceof Error ? cause.message : '创意工坊世界已创建，但打开失败，请从世界列表重新进入。')) }} onOpenWorld={(worldId) => { void openWorkshopWorld(worldId).catch((cause) => setError(cause instanceof Error ? cause.message : '世界打开失败')) }} />
@@ -2205,7 +2218,7 @@ export default function App() {
             dossiers={dossiers}
             employees={employees}
             world={activeWorld}
-            {...(backgroundImage === undefined ? {} : { sceneImage: backgroundImage })}
+            {...(worldSceneImage === undefined ? {} : { sceneImage: worldSceneImage })}
             {...(supportsWorldRuntime ? {
               worldContent: (
                 <Suspense fallback={<div className="world-runtime world-runtime--loading"><strong>正在进入世界</strong><span>加载互动场景与角色状态</span></div>}>

@@ -6,7 +6,6 @@ import {
   Moon,
   Plus,
   Sun,
-  UsersThree,
   X,
 } from '@phosphor-icons/react'
 import { useMemo, useState, type CSSProperties } from 'react'
@@ -16,7 +15,6 @@ import type { CyberEmployee } from '../types.js'
 import { worldExperience } from '../world-experience.js'
 import { Avatar } from './Avatar.js'
 import { AuthorityBadge } from './AuthorityBadge.js'
-import { StatusDot } from './StatusDot.js'
 
 interface WorldViewProps {
   world: World
@@ -38,7 +36,6 @@ export function WorldView({ world, employees, sceneImage, onSelectEmployee }: Wo
   const [zoom, setZoom] = useState(1)
   const [expanded, setExpanded] = useState(false)
   const experience = worldExperience(world)
-  const working = employees.filter((employee) => employee.presence === 'working').length
 
   const scene = useMemo(() => (
     <WorldScene
@@ -53,18 +50,6 @@ export function WorldView({ world, employees, sceneImage, onSelectEmployee }: Wo
 
   return (
     <div className={`world-view world-view--${experience.kind}`}>
-      <header className="world-view__header">
-        <div>
-          <strong>{world.name} · {experience.sceneTitle}</strong>
-          <span>{experience.sceneSubtitle}</span>
-        </div>
-        <div className="world-view__stats">
-          <StatusDot status="healthy" label="实时运行" />
-          <span><UsersThree size={14} />{employees.length} 名{experience.personLabel}</span>
-          <span>{working} 名行动中</span>
-        </div>
-      </header>
-
       <div className="world-view__viewport">
         {scene}
         <WorldControls lightsOn={lightsOn} zoom={zoom} setLightsOn={setLightsOn} setZoom={setZoom} />
