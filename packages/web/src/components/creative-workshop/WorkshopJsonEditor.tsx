@@ -67,7 +67,7 @@ export function portableDraftJson(draft: WorkshopDraft): string {
       description: draft.lore,
       purpose: draft.scenario,
       templateId: draft.baseTemplateId,
-      modelPolicy: { mode: 'inherit' },
+      modelPolicy: draft.worldModelProfileId === undefined ? { mode: 'inherit' } : { mode: 'override', modelProfileId: draft.worldModelProfileId },
     },
     characters: draft.roles.map((role) => ({
       tempId: role.clientId,
@@ -76,7 +76,7 @@ export function portableDraftJson(draft: WorkshopDraft): string {
       ...(role.summary.trim() ? { summary: role.summary } : {}),
       ...(role.persona.trim() ? { persona: { background: role.persona } } : {}),
       requestedSkills: role.requestedSkillIds,
-      modelPolicy: { mode: 'inherit' },
+      modelPolicy: role.modelProfileId === undefined ? { mode: 'inherit' } : { mode: 'override', modelProfileId: role.modelProfileId },
     })),
   }, null, 2)
 }

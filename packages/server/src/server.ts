@@ -99,6 +99,7 @@ import { SqliteSkillActionRepository } from './skills/sqlite-skill-action-reposi
 import type { CharacterSkillActionRepository } from './skills/skill-action-repository.js'
 import type { CharacterSkillAdapterRegistry } from './skills/skill-adapter.js'
 import type { WorldSkillAvailabilityPort } from './services/world-skill-availability.js'
+import type { CreativeWorkshopDraftGeneratorPort } from './services/creative-workshop-draft-generator.js'
 import { createWorldManagementHost } from './skills/world-management-host.js'
 import { RuntimeStreamHub } from './streams/runtime-stream-hub.js'
 import { WorldStreamHub } from './streams/world-stream-hub.js'
@@ -130,6 +131,7 @@ export interface CyberServerOptions {
   knowledgeExtractionPort?: KnowledgeExtractionPort
   /** Optional host-owned World Skill Availability provider for PR A+. */
   skillAvailability?: WorldSkillAvailabilityPort
+  workshopDraftGenerator?: CreativeWorkshopDraftGeneratorPort
 }
 
 export interface CyberServerAddress { host: string; port: number; origin: string }
@@ -448,7 +450,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerWorldAuthorityRoutes(router, { store, worldAccess, authority, worldPermissions, skillRuntime, turnContinuations, toolApprovals, ownerRuntimeAccess })
   registerWorldSettingsRoutes(router, { store, settings: worldSettings, access: worldAccess })
   registerTaskScheduleRoutes(router, { store, schedules: taskSchedules, access: worldAccess })
-  registerPackageRoutes(router, { store, packageManager, packageCatalog, skillRuntime, worldMarketplace, worldPackages, worldAccess, skillCatalog })
+  registerPackageRoutes(router, { store, packageManager, packageCatalog, skillRuntime, worldMarketplace, worldPackages, worldAccess, skillCatalog, credentials, ...(options.workshopDraftGenerator === undefined ? {} : { workshopDraftGenerator: options.workshopDraftGenerator }) })
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
   registerWorldTraceRoutes(router, { store, trace: worldTrace, access: worldAccess })
   registerCompletionJobRoutes(router, { store, access: worldAccess, wake: () => completionWorker.wake() })

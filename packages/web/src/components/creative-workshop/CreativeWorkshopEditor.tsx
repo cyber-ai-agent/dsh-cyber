@@ -1,16 +1,18 @@
 import { ArrowLeft, ArrowRight, BracketsCurly, ChatCircleDots, Check, FileArrowUp, MagnifyingGlass, Plus, Sparkle, Trash, UsersThree } from '@phosphor-icons/react'
 import { useEffect, useMemo, useState } from 'react'
-import type { WorldTemplateManifest } from '@dsh-cyber/contracts'
+import type { ModelProfile, WorldTemplateManifest } from '@dsh-cyber/contracts'
 import type { CharacterSkillDescriptor, EmbodimentPresetDescriptor } from '@dsh-cyber/contracts/creative-platform'
 
 import { createRoleDraft, type WorkshopDraft, type WorkshopRoleDraft } from './model.js'
 import { WorkshopJsonEditor } from './WorkshopJsonEditor.js'
+import { ModelPicker } from '../../features/models/ModelPicker.js'
 
 interface CreativeWorkshopEditorProps {
   draft: WorkshopDraft
   templates: WorldTemplateManifest[]
   presets: EmbodimentPresetDescriptor[]
   skills: CharacterSkillDescriptor[]
+  models: ModelProfile[]
   saving: boolean
   error?: string
   promptReply?: string
@@ -28,7 +30,7 @@ const STEPS = [
 ] as const
 
 export function CreativeWorkshopEditor({
-  draft, templates, presets, skills, saving, error, promptReply, onChange, onAnalyzePrompt, onBack, onSubmit,
+  draft, templates, presets, skills, models, saving, error, promptReply, onChange, onAnalyzePrompt, onBack, onSubmit,
 }: CreativeWorkshopEditorProps) {
   const [step, setStep] = useState(0)
   const [selectedRoleId, setSelectedRoleId] = useState(draft.roles[0]?.clientId)
@@ -53,6 +55,19 @@ export function CreativeWorkshopEditor({
     if (selected === undefined) return
     setLocalError(undefined)
     onChange({ ...draft, roles: draft.roles.map((role) => role.clientId === selected.clientId ? { ...role, ...patch } : role) })
+  }
+  const setWorldModel = (modelProfileId: string | undefined) => {
+    if (modelProfileId !== undefined) { patchDraft({ worldModelProfileId: modelProfileId }); return }
+    const next = { ...draft }
+    delete next.worldModelProfileId
+    onChange(next)
+  }
+  const setSelectedModel = (modelProfileId: string | undefined) => {
+    if (selected === undefined) return
+    const next = { ...selected }
+    if (modelProfileId === undefined) delete next.modelProfileId
+    else next.modelProfileId = modelProfileId
+    onChange({ ...draft, roles: draft.roles.map((role) => role.clientId === selected.clientId ? next : role) })
   }
   const addRole = () => {
     if (draft.roles.length >= 16 || fallbackPreset === undefined) return
@@ -110,7 +125,11 @@ export function CreativeWorkshopEditor({
         </section> : null}
 
         {step === 2 ? <section className="creative-workshop-wizard__section" aria-labelledby="workshop-permission-step">
-          <header><Sparkle size={22} /><div><h3 id="workshop-permission-step">为角色配置能力范围</h3><p>这里决定角色会请求哪些 Skills。外部写入和副作用仍会在具体动作发生时经过审批。</p></div></header>
+          <header><Sparkle size={22} /><div><h3 id="workshop-permission-step">检查模型与能力</h3><p>模型按应用 → 世界 → 角色继承；Skills 仍只是请求，外部写入和副作用必须在具体动作时审批。</p></div></header>
+          <div className="workshop-model-review">
+            <label><span><strong>世界默认模型</strong><small>未单独设置的角色会继承它</small></span><ModelPicker models={models} value={draft.worldModelProfileId} inheritLabel="继承应用默认模型" ariaLabel="选择世界默认模型" onChange={setWorldModel} /></label>
+            {selected === undefined ? null : <label><span><strong>{selected.displayName || '当前角色'}的模型</strong><small>角色覆盖只保存 ModelProfile 引用，不复制 API 密钥</small></span><ModelPicker models={models} value={selected.modelProfileId} inheritLabel="继承世界默认模型" ariaLabel="选择角色模型" onChange={setSelectedModel} /></label>}
+          </div>
           <RolePicker draft={draft} selectedRoleId={selected?.clientId} presetMap={presetMap} onSelect={setSelectedRoleId} onAdd={addRole} onRemove={removeRole} canAdd={false} compact />
           {selected === undefined ? null : <>
             <label className="workshop-skill-search"><MagnifyingGlass size={17} /><input type="search" value={skillQuery} placeholder="搜索 Skill 名称、用途或 ID" aria-label="搜索角色 Skills" onChange={(event) => setSkillQuery(event.target.value)} /></label>
@@ -124,7 +143,7 @@ export function CreativeWorkshopEditor({
           <header><Check size={22} /><div><h3 id="workshop-review-step">确认后创建本地世界</h3><p>项目源和生成包都会保存在本地，程序更新不会覆盖它们。</p></div></header>
           <button type="button" className="secondary-button workshop-json-open" onClick={() => setJsonOpen(true)}><BracketsCurly size={16}/>查看和编辑 JSON</button>
           <dl className="creative-workshop-review"><div><dt>世界</dt><dd>{draft.displayName}</dd></div><div><dt>基础模板</dt><dd>{templates.find((item) => item.id === draft.baseTemplateId)?.displayName ?? draft.baseTemplateId}</dd></div><div><dt>当前目标</dt><dd>{draft.scenario || '未填写'}</dd></div><div><dt>初始角色</dt><dd>{draft.roles.length} 个</dd></div></dl>
-          <div className="creative-workshop-review-roles">{draft.roles.map((role) => <article key={role.clientId}><header><strong>{role.displayName}</strong><span>{role.role}</span></header><p>{role.summary}</p><small>{role.requestedSkillIds.length === 0 ? '未请求额外 Skill' : `请求 ${role.requestedSkillIds.length} 个 Skill`}</small></article>)}</div>
+          <div className="creative-workshop-review-roles">{draft.roles.map((role) => <article key={role.clientId}><header><strong>{role.displayName}</strong><span>{role.role || '身份可稍后完善'}</span></header><p>{role.summary || '职责可稍后完善'}</p><small>{role.modelProfileId === undefined ? '模型继承世界默认' : `自定义模型：${models.find((model) => model.id === role.modelProfileId)?.displayName ?? '当前模型不可用'}`} · {role.requestedSkillIds.length === 0 ? '未请求额外 Skill' : `请求 ${role.requestedSkillIds.length} 个 Skill`}</small></article>)}</div>
         </section> : null}
       </main>
 

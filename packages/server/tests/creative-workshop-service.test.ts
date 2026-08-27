@@ -20,12 +20,15 @@ afterEach(async () => {
 describe('CreativeWorkshopService', () => {
   it('compiles portable role packages while keeping requested skills ungranted', async () => {
     const { store, workshop, workspaceId } = await setup()
+    const worldModel = store.saveModelProfile({ workspaceId, displayName: '世界模型', providerKind: 'openai-compatible-local', baseUrl: 'http://127.0.0.1:11434/v1', modelId: 'world-model', api: 'openai-completions', isDefault: true, settings: {} })
+    const roleModel = store.saveModelProfile({ workspaceId, displayName: '角色模型', providerKind: 'openai-compatible-local', baseUrl: 'http://127.0.0.1:11434/v1', modelId: 'role-model', api: 'openai-completions', settings: {} })
 
     const project = await workshop.create(workspaceId, {
       displayName: '短剧工作室',
       baseTemplateId: 'personal-world',
       lore: '一支负责短剧增长与制作的数字团队。',
       scenario: '持续分析内容表现并协作交付。',
+      worldModelProfileId: worldModel.id,
       roles: [{
         id: 'growth-operator',
         displayName: '阿策',
@@ -34,6 +37,7 @@ describe('CreativeWorkshopService', () => {
         persona: '基于事实数据工作，重要外部操作需要明确授权。',
         embodiment: embodiment(),
         requestedSkillIds: ['smart-home.control'],
+        modelProfileId: roleModel.id,
       }],
     })
 
@@ -46,6 +50,9 @@ describe('CreativeWorkshopService', () => {
     const blueprint = store.getBlueprint(employee.blueprintId, employee.blueprintVersion)!
     expect(blueprint.requestedSkills).toEqual(['smart-home.control'])
     expect(revision.skillGrants).toEqual([])
+    expect(store.getModelAssignment(workspaceId, 'world', project.worldId)?.modelProfileId).toBe(worldModel.id)
+    expect(store.getModelAssignment(workspaceId, 'employee', employee.id)?.modelProfileId).toBe(roleModel.id)
+    expect(store.resolveModelProfile(workspaceId, project.worldId, employee.id)?.id).toBe(roleModel.id)
     expect(blueprint.embodiment).toMatchObject({
       preferredZoneTags: ['operations'],
     })

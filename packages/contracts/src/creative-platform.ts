@@ -24,6 +24,8 @@ export interface WorkshopRoleDefinition {
   embodiment: EmbodimentProfile
   /** Capabilities the generated blueprint may request. Grants happen separately. */
   requestedSkillIds: string[]
+  /** Host-owned assignment reference; never copied into the generated Blueprint. */
+  modelProfileId?: string
 }
 
 export interface WorkshopProject {
@@ -37,6 +39,7 @@ export interface WorkshopProject {
   scenario: string
   roles: WorkshopRoleDefinition[]
   generatedPackageIds: string[]
+  worldModelProfileId?: string
   createdAt: IsoTimestamp
   updatedAt: IsoTimestamp
 }
@@ -46,6 +49,7 @@ export interface WorkshopCreateInput {
   baseTemplateId: string
   lore?: string
   scenario?: string
+  worldModelProfileId?: string
   roles: Array<Omit<WorkshopRoleDefinition, 'id'> & { id?: string }>
 }
 

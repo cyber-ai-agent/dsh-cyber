@@ -64,6 +64,7 @@ function draftFromRecord(
     lore: stringValue(source.lore, source.background, source.rules) ?? fallback.lore,
     scenario: stringValue(source.scenario, source.goal, source.objective, source.purpose, source.description, source.prompt) ?? fallback.scenario,
     roles,
+    ...(modelProfileIdFromPolicy(source.modelPolicy) === undefined ? {} : { worldModelProfileId: modelProfileIdFromPolicy(source.modelPolicy)! }),
   }
 }
 
@@ -71,7 +72,7 @@ function assertSuggestionOnlyDraft(input: Record<string, unknown>): void {
   const forbidden = new Set([
     'characterId', 'databaseId', 'revision', 'createdAt', 'internalPath',
     'skillGrants', 'permissionGrants', 'approvedPermissions', 'approvedPermission',
-    'providerId', 'modelProfileId', 'packageId',
+    'providerId', 'packageId',
   ])
   const visit = (value: unknown, path: string): void => {
     if (Array.isArray(value)) {
@@ -159,7 +160,15 @@ function roleFromValue(
     summary,
     persona,
     requestedSkillIds: stringArray(source.requestedSkillIds, source.requestedSkills, source.skillIds, source.skills) ?? draft.requestedSkillIds,
+    ...(modelProfileIdFromPolicy(source.modelPolicy) === undefined ? {} : { modelProfileId: modelProfileIdFromPolicy(source.modelPolicy)! }),
   }
+}
+
+function modelProfileIdFromPolicy(value: unknown): string | undefined {
+  const policy = record(value)
+  return policy?.mode === 'override' && typeof policy.modelProfileId === 'string' && policy.modelProfileId.trim()
+    ? policy.modelProfileId.trim()
+    : undefined
 }
 
 function chooseTemplate(value: unknown, templates: readonly WorldTemplateManifest[], fallback: string): string {

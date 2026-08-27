@@ -24,7 +24,7 @@ describe('CreativeWorkshopDraftService', () => {
     const service = new CreativeWorkshopDraftService(store)
     const saved = await service.save(workspace.id, {
       schemaVersion: 1,
-      world: { name: '夜航工作室', modelPolicy: { mode: 'inherit' } },
+      world: { name: '夜航工作室', description: '', purpose: '', modelPolicy: { mode: 'inherit' } },
       characters: [
         { tempId: 'draft-pm', name: '林夕', requestedSkills: ['product-planning'] },
         { tempId: 'draft-dev', name: '阿澈', modelPolicy: { mode: 'recommend', requiredCapabilities: ['text', 'tools'], reason: '负责开发' } },
@@ -32,9 +32,14 @@ describe('CreativeWorkshopDraftService', () => {
     })
     expect(saved.characters).toHaveLength(2)
     expect(store.listWorlds(workspace.id)).toHaveLength(0)
-    expect(await service.get(workspace.id)).toEqual(saved)
-    expect(await service.delete(workspace.id)).toBe(true)
-    expect(await service.get(workspace.id)).toBeUndefined()
+    store.close()
+    stores.splice(stores.indexOf(store), 1)
+    const reopened = await SqliteStore.open(join(root, 'data', 'dsh-cyber.sqlite'))
+    stores.push(reopened)
+    const restartedService = new CreativeWorkshopDraftService(reopened)
+    expect(await restartedService.get(workspace.id)).toEqual(saved)
+    expect(await restartedService.delete(workspace.id)).toBe(true)
+    expect(await restartedService.get(workspace.id)).toBeUndefined()
   })
 
   it('rejects grants, internal identities, control characters, and duplicate draft ids', async () => {

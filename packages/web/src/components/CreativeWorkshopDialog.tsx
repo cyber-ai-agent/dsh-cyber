@@ -1,6 +1,6 @@
 import { X } from '@phosphor-icons/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { CreativeWorkshopDraftV1, WorldTemplateManifest } from '@dsh-cyber/contracts'
+import type { CreativeWorkshopDraftV1, ModelProfile, WorldTemplateManifest } from '@dsh-cyber/contracts'
 import type {
   CharacterSkillDescriptor,
   EmbodimentPresetDescriptor,
@@ -37,6 +37,7 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
   const [templates, setTemplates] = useState<WorldTemplateManifest[]>([])
   const [skills, setSkills] = useState<CharacterSkillDescriptor[]>([])
   const [presets, setPresets] = useState<EmbodimentPresetDescriptor[]>([])
+  const [models, setModels] = useState<ModelProfile[]>([])
   const [draft, setDraft] = useState<WorkshopDraft>()
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -54,13 +55,15 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
       api<{ items: CharacterSkillDescriptor[] }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/skill-catalog`),
       api<{ items: WorkshopProject[] }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/workshop/projects`),
       api<{ draft?: CreativeWorkshopDraftV1 }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/workshop/draft`),
-    ]).then(([templateResult, presetResult, skillResult, projectResult, draftResult]) => {
+      api<{ items: ModelProfile[] }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/model-profiles`),
+    ]).then(([templateResult, presetResult, skillResult, projectResult, draftResult, modelResult]) => {
       if (cancelled) return
       setTemplates(templateResult.items)
       setPresets(presetResult.items)
       setSkills(skillResult.items)
       setProjects(projectResult.items)
       setSelectedProjectId(projectResult.items[0]?.id)
+      setModels(modelResult.items)
       if (draftResult.draft !== undefined && presetResult.items.length > 0) {
         const restored = analyzeWorkshopPrompt(JSON.stringify(draftResult.draft), templateResult.items, presetResult.items).draft
         setDraft(restored)
@@ -115,7 +118,12 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
   const analyzePrompt = async (input: string): Promise<void> => {
     if (draft === undefined) return
     try {
-      const result = analyzeWorkshopPrompt(input, templates, presets, draft)
+      const trimmed = input.trim()
+      const result = trimmed.startsWith('{') || trimmed.startsWith('```')
+        ? analyzeWorkshopPrompt(input, templates, presets, draft)
+        : analyzeWorkshopPrompt(JSON.stringify((await api<{ draft: CreativeWorkshopDraftV1 }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/workshop/draft/generate`, {
+            method: 'POST', body: JSON.stringify({ prompt: input }),
+          })).draft), templates, presets, draft)
       changeDraft(result.draft)
       setPromptReply(`草稿已生成：1 个世界、${result.draft.roles.length} 个独立角色。所有内容尚未创建，请逐项检查后再确认。`)
       setError(undefined)
@@ -146,6 +154,10 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
       setDraft(undefined)
       setPromptReply(undefined)
       latestDraft.current = undefined
+      if (draftSaveTimer.current !== undefined) {
+        window.clearTimeout(draftSaveTimer.current)
+        draftSaveTimer.current = undefined
+      }
       await api(`/api/workspaces/${encodeURIComponent(workspaceId)}/workshop/draft`, { method: 'DELETE' }).catch(() => undefined)
       onCreated(result.project)
     } catch (cause) {
@@ -176,6 +188,7 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
             templates={templates}
             presets={presets}
             skills={skills}
+            models={models}
             saving={saving}
             {...(error === undefined ? {} : { error })}
             {...(promptReply === undefined ? {} : { promptReply })}

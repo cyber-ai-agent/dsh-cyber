@@ -19,7 +19,7 @@ export class CreativeWorkshopDraftService {
   async get(workspaceId: string): Promise<CreativeWorkshopDraftV1 | undefined> {
     this.#requireWorkspace(workspaceId)
     try {
-      return parseCreativeWorkshopDraft(JSON.parse(await readFile(this.#path(workspaceId), 'utf8')))
+      return parseCreativeWorkshopDraft(JSON.parse(await readFile(this.#path(workspaceId), 'utf8')), { allowPartial: true })
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
       if (error instanceof ServiceError) throw error
@@ -29,7 +29,14 @@ export class CreativeWorkshopDraftService {
 
   async save(workspaceId: string, value: unknown): Promise<CreativeWorkshopDraftV1> {
     this.#requireWorkspace(workspaceId)
-    const draft = parseCreativeWorkshopDraft(value)
+    const draft = parseCreativeWorkshopDraft(value, { allowPartial: true })
+    for (const policy of [draft.world.modelPolicy, ...draft.characters.map((character) => character.modelPolicy)]) {
+      if (policy?.mode !== 'override' || policy.modelProfileId === undefined) continue
+      const profile = this.#store.getModelProfile(policy.modelProfileId)
+      if (profile === undefined || profile.workspaceId !== workspaceId) {
+        throw new ServiceError('invalid', 'workshop_model_profile_invalid', '草稿引用的模型配置不存在或不属于当前工作区。')
+      }
+    }
     await mkdir(this.#root, { recursive: true, mode: 0o700 })
     await atomicWrite(this.#path(workspaceId), `${JSON.stringify(draft, null, 2)}\n`)
     return draft
@@ -49,7 +56,7 @@ export class CreativeWorkshopDraftService {
   }
 }
 
-export function parseCreativeWorkshopDraft(value: unknown): CreativeWorkshopDraftV1 {
+export function parseCreativeWorkshopDraft(value: unknown, options: { allowPartial?: boolean } = {}): CreativeWorkshopDraftV1 {
   assertNoForbiddenDraftFields(value)
   const source = object(value, '草稿')
   if (source.schemaVersion !== 1) throw invalid('草稿版本不受支持。')
@@ -57,12 +64,12 @@ export function parseCreativeWorkshopDraft(value: unknown): CreativeWorkshopDraf
   const characterSources = array(source.characters, '角色草稿')
   if (characterSources.length < 1 || characterSources.length > 20) throw invalid('角色数量必须在 1 到 20 之间。')
   const world: CreativeWorkshopWorldDraft = {
-    name: text(worldSource.name, '世界名称', 80),
+    name: options.allowPartial === true ? partialText(worldSource.name, '世界名称', 80) : text(worldSource.name, '世界名称', 80),
     ...optionalTextFields(worldSource, [['description', 2_000], ['purpose', 8_000], ['themeHint', 120]] as const),
   }
   if (worldSource.modelPolicy !== undefined) world.modelPolicy = parseModelPolicy(worldSource.modelPolicy)
   const ids = new Set<string>()
-  const characters = characterSources.map((item, index) => parseCharacter(item, index, ids))
+  const characters = characterSources.map((item, index) => parseCharacter(item, index, ids, options.allowPartial === true))
   const draft: CreativeWorkshopDraftV1 = { schemaVersion: 1, world, characters }
   const metadata = objectOrUndefined(source.metadata)
   if (metadata !== undefined) {
@@ -84,14 +91,14 @@ function assertNoForbiddenDraftFields(value: unknown): void {
   visit(value)
 }
 
-function parseCharacter(value: unknown, index: number, ids: Set<string>): CreativeWorkshopCharacterDraft {
+function parseCharacter(value: unknown, index: number, ids: Set<string>, allowPartial: boolean): CreativeWorkshopCharacterDraft {
   const source = object(value, `角色 ${index + 1}`)
   const tempId = token(source.tempId, `角色 ${index + 1} 临时 ID`)
   if (ids.has(tempId)) throw invalid(`角色临时 ID 重复：${tempId}`)
   ids.add(tempId)
   const result: CreativeWorkshopCharacterDraft = {
     tempId,
-    name: text(source.name, `角色 ${index + 1} 名称`, 50),
+    name: allowPartial ? partialText(source.name, `角色 ${index + 1} 名称`, 50) : text(source.name, `角色 ${index + 1} 名称`, 50),
     ...optionalTextFields(source, [['role', 100], ['summary', 500]] as const),
   }
   if (source.requestedSkills !== undefined) result.requestedSkills = tokenArray(source.requestedSkills, '建议技能', 32)
@@ -122,12 +129,16 @@ function parseModelPolicy(value: unknown): NonNullable<CreativeWorkshopDraftV1['
 }
 
 function optionalTextFields<T extends readonly (readonly [string, number])[]>(source: Record<string, unknown>, fields: T): Record<string, string> {
-  return Object.fromEntries(fields.flatMap(([key, maximum]) => source[key] === undefined ? [] : [[key, text(source[key], key, maximum)]]))
+  return Object.fromEntries(fields.flatMap(([key, maximum]) => {
+    const value = source[key]
+    return value === undefined || typeof value === 'string' && value.trim() === '' ? [] : [[key, text(value, key, maximum)]]
+  }))
 }
 function object(value: unknown, label: string): Record<string, unknown> { if (value === null || typeof value !== 'object' || Array.isArray(value)) throw invalid(`${label}必须是对象。`); return value as Record<string, unknown> }
 function objectOrUndefined(value: unknown): Record<string, unknown> | undefined { return value === undefined ? undefined : object(value, '字段') }
 function array(value: unknown, label: string): unknown[] { if (!Array.isArray(value)) throw invalid(`${label}必须是数组。`); return value }
 function text(value: unknown, label: string, maximum: number): string { if (typeof value !== 'string') throw invalid(`${label}必须是文本。`); const result = value.normalize('NFC').trim(); if (!result || Array.from(result).length > maximum || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u.test(result)) throw invalid(`${label}无效。`); return result }
+function partialText(value: unknown, label: string, maximum: number): string { if (typeof value !== 'string') throw invalid(`${label}必须是文本。`); const result = value.normalize('NFC').trim(); if (Array.from(result).length > maximum || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u.test(result)) throw invalid(`${label}无效。`); return result }
 function token(value: unknown, label: string): string { const result = text(value, label, 160); if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(result)) throw invalid(`${label}格式无效。`); return result }
 function tokenArray(value: unknown, label: string, maximum: number): string[] { const values = array(value, label); if (values.length > maximum) throw invalid(`${label}数量过多。`); const result = values.map((item) => token(item, label)); if (new Set(result).size !== result.length) throw invalid(`${label}不能重复。`); return result }
 function textArray(value: unknown, label: string, maximum: number, itemMaximum: number): string[] { const values = array(value, label); if (values.length > maximum) throw invalid(`${label}数量过多。`); return values.map((item) => text(item, label, itemMaximum)) }

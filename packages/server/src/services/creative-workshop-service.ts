@@ -69,6 +69,13 @@ export class CreativeWorkshopService {
   async create(workspaceId: string, input: WorkshopCreateInput): Promise<WorkshopProject> {
     if (this.#store.getWorkspace(workspaceId) === undefined) throw new ServiceError('not-found', 'workspace_not_found', 'Workspace not found')
     const normalized = normalizeCreateInput(input)
+    for (const modelProfileId of [normalized.worldModelProfileId, ...normalized.roles.map((role) => role.modelProfileId)]) {
+      if (modelProfileId === undefined) continue
+      const profile = this.#store.getModelProfile(modelProfileId)
+      if (profile === undefined || profile.workspaceId !== workspaceId) {
+        throw new ServiceError('invalid', 'workshop_model_profile_invalid', '创意工坊引用的模型配置不存在或不属于当前工作区')
+      }
+    }
     if (worldTemplate(normalized.baseTemplateId) === undefined) {
       throw new ServiceError('invalid', 'workshop_template_unknown', '所选基础世界模板不存在')
     }
@@ -110,6 +117,9 @@ export class CreativeWorkshopService {
         actorId: 'owner',
       })
       createdWorldId = world.id
+      if (normalized.worldModelProfileId !== undefined) {
+        this.#store.saveModelAssignment({ workspaceId, scope: 'world', scopeId: world.id, modelProfileId: normalized.worldModelProfileId })
+      }
       await this.#worldRoots.ensure(world.id)
       for (const installation of reversibleInstalls) {
         await this.#worldPackages.instantiate({
@@ -130,7 +140,7 @@ export class CreativeWorkshopService {
         // Blueprint skill requests are deliberately not grants. This mirrors the
         // Harness/Codex capability boundary: construction declares intent; a later
         // owner approval revises the character's grants.
-        this.#store.recruitEmployee({
+        const employee = this.#store.recruitEmployee({
           workspaceId,
           worldId: world.id,
           blueprintId: blueprint.id,
@@ -139,6 +149,9 @@ export class CreativeWorkshopService {
           actorId: 'owner',
           reason: 'creative-workshop',
         })
+        if (role.modelProfileId !== undefined) {
+          this.#store.saveModelAssignment({ workspaceId, scope: 'employee', scopeId: employee.id, modelProfileId: role.modelProfileId })
+        }
       }
 
       const project: WorkshopProject = {
@@ -152,6 +165,7 @@ export class CreativeWorkshopService {
         scenario: normalized.scenario,
         roles: compiled.map((item) => item.role),
         generatedPackageIds: compiled.map((item) => item.manifest.id),
+        ...(normalized.worldModelProfileId === undefined ? {} : { worldModelProfileId: normalized.worldModelProfileId }),
         createdAt: now,
         updatedAt: now,
       }
@@ -267,7 +281,7 @@ async function materializeRolePackage(
   return manifest
 }
 
-function normalizeCreateInput(input: WorkshopCreateInput): Required<Omit<WorkshopCreateInput, 'roles'>> & { roles: WorkshopRoleDefinition[] } {
+function normalizeCreateInput(input: WorkshopCreateInput): { displayName: string; baseTemplateId: string; lore: string; scenario: string; worldModelProfileId?: string; roles: WorkshopRoleDefinition[] } {
   const displayName = text(input.displayName, '世界名称', 80)
   const baseTemplateId = token(input.baseTemplateId, '基础模板')
   if (!Array.isArray(input.roles) || input.roles.length < 1 || input.roles.length > MAX_ROLES) {
@@ -292,6 +306,7 @@ function normalizeCreateInput(input: WorkshopCreateInput): Required<Omit<Worksho
       persona: text(value.persona, `角色 ${index + 1} 设定`, 2_000),
       embodiment,
       requestedSkillIds: uniqueTokens(value.requestedSkillIds ?? [], `角色 ${index + 1} 技能`),
+      ...(value.modelProfileId === undefined ? {} : { modelProfileId: token(value.modelProfileId, `角色 ${index + 1} 模型配置`) }),
     }
   })
   return {
@@ -299,6 +314,7 @@ function normalizeCreateInput(input: WorkshopCreateInput): Required<Omit<Worksho
     baseTemplateId,
     lore: optionalText(input.lore, 20_000),
     scenario: optionalText(input.scenario, 8_000),
+    ...(input.worldModelProfileId === undefined ? {} : { worldModelProfileId: token(input.worldModelProfileId, '世界模型配置') }),
     roles,
   }
 }

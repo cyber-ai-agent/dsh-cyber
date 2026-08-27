@@ -14,6 +14,7 @@ export interface WorkshopRoleDraft {
   embodimentPresetId?: string
   embodiment: EmbodimentProfile
   requestedSkillIds: string[]
+  modelProfileId?: string
 }
 
 export interface WorkshopDraft {
@@ -21,6 +22,7 @@ export interface WorkshopDraft {
   baseTemplateId: string
   lore: string
   scenario: string
+  worldModelProfileId?: string
   roles: WorkshopRoleDraft[]
 }
 
@@ -70,7 +72,9 @@ export function projectToDraft(
         : { embodimentPresetId: findPresetId(role.embodiment, presets)! }),
       embodiment: structuredClone(role.embodiment),
       requestedSkillIds: [...role.requestedSkillIds],
+      ...(role.modelProfileId === undefined ? {} : { modelProfileId: role.modelProfileId }),
     })),
+    ...(project.worldModelProfileId === undefined ? {} : { worldModelProfileId: project.worldModelProfileId }),
   }
 }
 
@@ -80,6 +84,7 @@ export function draftToCreateInput(draft: WorkshopDraft): WorkshopCreateInput {
     baseTemplateId: draft.baseTemplateId,
     lore: draft.lore.trim(),
     scenario: draft.scenario.trim(),
+    ...(draft.worldModelProfileId === undefined ? {} : { worldModelProfileId: draft.worldModelProfileId }),
     roles: draft.roles.map((role, index) => ({
       id: `role-${index + 1}`,
       displayName: role.displayName.trim(),
@@ -88,6 +93,7 @@ export function draftToCreateInput(draft: WorkshopDraft): WorkshopCreateInput {
       persona: role.persona.trim() || '保持事实边界清晰，先确认目标再行动；未获得的信息不得虚构。',
       embodiment: structuredClone(role.embodiment),
       requestedSkillIds: [...role.requestedSkillIds],
+      ...(role.modelProfileId === undefined ? {} : { modelProfileId: role.modelProfileId }),
     })),
   }
 }
