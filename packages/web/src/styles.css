@@ -1248,8 +1248,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 
 /* 核心消息滚动与黄金列 */
-.message-scroll { position: relative; z-index: 2; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 16px 20px 32px; scroll-behavior: smooth; }
-.conversation-column { width: 100%; max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; position: relative; z-index: 2; }
+/* 核心消息滚动与黄金列 */
+.message-scroll { position: relative; z-index: 2; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 20px 32px 40px; scroll-behavior: smooth; }
+.conversation-column { width: 100%; max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; position: relative; z-index: 2; }
 
 .message-history-more { min-height: 36px; display: flex; align-items: center; justify-content: center; gap: 8px; width: min(100%, 520px); margin: 0 auto 16px; padding: 0 14px; border: 1px dashed var(--border-strong); border-radius: var(--radius-control); color: var(--text-muted); background: var(--surface-1); font-size: 13px; font-weight: 500; transition: all var(--duration-fast) var(--ease-smooth); }
 .message-history-more:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-strong); background: var(--accent-soft); }
@@ -1262,17 +1263,20 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* 消息流对齐 */
 .message { display: flex; align-items: flex-start; gap: 12px; padding: 6px 0; border-bottom: 0; width: 100%; }
 .message:not(.message--owner) { justify-content: flex-start; }
-.message:not(.message--owner) .message__body { width: auto; max-width: min(85%, 660px); }
+.message:not(.message--owner) .message__body { display: flex; flex-direction: column; align-items: flex-start; width: auto; max-width: min(85%, 680px); }
 .message--owner { justify-content: flex-end; }
-.message--owner .message__body { width: auto; max-width: min(82%, 640px); }
+.message--owner .message__body { display: flex; flex-direction: column; align-items: flex-end; width: auto; max-width: min(80%, 640px); }
 .avatar-button { width: 36px; height: 36px; padding: 0; border: 0; background: transparent; flex-shrink: 0; }
+.owner-avatar { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: color-mix(in srgb, var(--accent) 18%, var(--surface-2)); border: 1.5px solid color-mix(in srgb, var(--accent) 55%, transparent); color: var(--accent-strong); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4); flex-shrink: 0; }
 .message__body { min-width: 0; }
 .message__meta { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.message--owner .message__meta { justify-content: flex-end; margin-bottom: 4px; padding-right: 4px; }
+.message--owner .message__meta time { margin-left: 0; }
 .message__meta strong { font-size: 14px; font-weight: 650; }
 .message__meta span { color: var(--accent-strong); font-size: var(--text-xs); font-weight: 500; }
 .message__meta time { margin-left: auto; color: var(--text-muted); font: 11px var(--font-mono); }
-.message__content { padding: 12px 18px; border-radius: var(--radius-lg); border: 1px solid var(--bubble-assistant-border, var(--theme-panel-border, var(--border))); background: var(--bubble-assistant-bg, var(--theme-character-bubble, var(--surface-1))); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); color: var(--theme-text, var(--text)); font-size: var(--text-sm); line-height: 1.75; box-shadow: var(--shadow-sm); transition: all var(--duration-fast) var(--ease-smooth); }
-.message--owner .message__content { border-radius: var(--radius-lg) var(--radius-lg) 4px var(--radius-lg); border: 1px solid var(--bubble-owner-border, color-mix(in srgb, var(--theme-accent, var(--accent)) 50%, transparent)); background: var(--bubble-owner-bg, var(--theme-owner-bubble, var(--accent))); color: var(--bubble-owner-color, #ffffff); box-shadow: var(--bubble-owner-shadow, 0 4px 20px var(--theme-accent-soft, var(--accent-soft))); }
+.message__content { width: fit-content; max-width: 100%; padding: 12px 18px; border-radius: var(--radius-lg); border: 1px solid var(--bubble-assistant-border, var(--theme-panel-border, var(--border))); background: var(--bubble-assistant-bg, var(--theme-character-bubble, var(--surface-1))); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); color: var(--theme-text, var(--text)); font-size: var(--text-sm); line-height: 1.75; box-shadow: var(--shadow-sm); transition: all var(--duration-fast) var(--ease-smooth); word-break: break-word; }
+.message--owner .message__content { border-radius: 18px 18px 4px 18px; border: 1px solid var(--bubble-owner-border, color-mix(in srgb, var(--theme-accent, var(--accent)) 50%, transparent)); background: var(--bubble-owner-bg, var(--theme-owner-bubble, var(--accent))); color: var(--bubble-owner-color, #ffffff); box-shadow: var(--bubble-owner-shadow, 0 4px 20px var(--theme-accent-soft, var(--accent-soft))); padding: 11px 16px; }
 .message--owner .message__content p, .message--owner .message__content strong, .message--owner .message__content span { color: inherit; }
 .message__content p { margin: 0 0 8px; }
 .message__content p:last-child { margin-bottom: 0; }
@@ -3700,19 +3704,21 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   background: rgba(8, 14, 22, 0.92);
   border-bottom: 1px solid rgba(0, 229, 255, 0.3);
 }
-:root[data-skin='cyber-company'] .message--owner .message__body {
-  background: linear-gradient(135deg, #0c4a6e 0%, #0369a1 60%, #0284c7 100%);
-  border: 1px solid rgba(0, 229, 255, 0.6);
-  box-shadow: 0 4px 18px rgba(0, 229, 255, 0.25);
-  color: #ffffff;
+:root[data-skin='cyber-company'] .message--owner .message__content {
+  background: linear-gradient(135deg, #0c4a6e 0%, #0369a1 60%, #0284c7 100%) !important;
+  border: 1px solid rgba(0, 229, 255, 0.6) !important;
+  border-radius: 18px 18px 4px 18px !important;
+  box-shadow: 0 4px 18px rgba(0, 229, 255, 0.25) !important;
+  color: #ffffff !important;
 }
-:root[data-skin='cyber-company'] .message:not(.message--owner) .message__body {
-  background: rgba(10, 18, 28, 0.88);
-  border: 1px solid rgba(0, 229, 255, 0.25);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
-  color: #f1f5f9;
+:root[data-skin='cyber-company'] .message:not(.message--owner) .message__content {
+  background: rgba(10, 18, 28, 0.88) !important;
+  border: 1px solid rgba(0, 229, 255, 0.25) !important;
+  border-radius: 18px 18px 18px 4px !important;
+  backdrop-filter: blur(14px) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45) !important;
+  color: #f1f5f9 !important;
 }
 :root[data-skin='cyber-company'] .composer {
   background: rgba(10, 18, 28, 0.94);
@@ -3757,19 +3763,21 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   background: rgba(8, 16, 28, 0.92);
   border-bottom: 1px solid rgba(56, 189, 248, 0.35);
 }
-:root[data-skin='orca-link'] .message--owner .message__body {
-  background: linear-gradient(135deg, #0284c7 0%, #0369a1 60%, #075985 100%);
-  border: 1px solid rgba(56, 189, 248, 0.75);
-  box-shadow: 0 4px 20px rgba(2, 132, 199, 0.35);
-  color: #ffffff;
+:root[data-skin='orca-link'] .message--owner .message__content {
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 60%, #075985 100%) !important;
+  border: 1px solid rgba(56, 189, 248, 0.75) !important;
+  border-radius: 18px 18px 4px 18px !important;
+  box-shadow: 0 4px 20px rgba(2, 132, 199, 0.35) !important;
+  color: #ffffff !important;
 }
-:root[data-skin='orca-link'] .message:not(.message--owner) .message__body {
-  background: rgba(10, 20, 34, 0.88);
-  border: 1px solid rgba(56, 189, 248, 0.3);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
-  color: #f0f9ff;
+:root[data-skin='orca-link'] .message:not(.message--owner) .message__content {
+  background: rgba(10, 20, 34, 0.88) !important;
+  border: 1px solid rgba(56, 189, 248, 0.3) !important;
+  border-radius: 18px 18px 18px 4px !important;
+  backdrop-filter: blur(14px) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45) !important;
+  color: #f0f9ff !important;
 }
 :root[data-skin='orca-link'] .composer {
   background: rgba(10, 20, 34, 0.94);
@@ -3814,19 +3822,21 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   background: rgba(22, 16, 10, 0.92);
   border-bottom: 1px solid rgba(245, 158, 11, 0.35);
 }
-:root[data-skin='moonlit-tavern'] .message--owner .message__body {
-  background: linear-gradient(135deg, #b45309 0%, #92400e 60%, #78350f 100%);
-  border: 1px solid rgba(245, 158, 11, 0.7);
-  box-shadow: 0 4px 18px rgba(245, 158, 11, 0.3);
-  color: #fffbeb;
+:root[data-skin='moonlit-tavern'] .message--owner .message__content {
+  background: linear-gradient(135deg, #b45309 0%, #92400e 60%, #78350f 100%) !important;
+  border: 1px solid rgba(245, 158, 11, 0.7) !important;
+  border-radius: 18px 18px 4px 18px !important;
+  box-shadow: 0 4px 18px rgba(245, 158, 11, 0.3) !important;
+  color: #fffbeb !important;
 }
-:root[data-skin='moonlit-tavern'] .message:not(.message--owner) .message__body {
-  background: rgba(28, 19, 12, 0.88);
-  border: 1px solid rgba(245, 158, 11, 0.35);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-  color: #fef3c7;
+:root[data-skin='moonlit-tavern'] .message:not(.message--owner) .message__content {
+  background: rgba(28, 19, 12, 0.88) !important;
+  border: 1px solid rgba(245, 158, 11, 0.35) !important;
+  border-radius: 18px 18px 18px 4px !important;
+  backdrop-filter: blur(14px) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5) !important;
+  color: #fef3c7 !important;
 }
 :root[data-skin='moonlit-tavern'] .composer {
   background: rgba(28, 19, 12, 0.94);
