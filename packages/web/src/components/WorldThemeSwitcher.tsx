@@ -66,7 +66,7 @@ export function WorldThemeSwitcher({ activeWorld, onThemeChange }: WorldThemeSwi
           aria-haspopup="menu"
           aria-expanded={open}
           onClick={() => setOpen((prev) => !prev)}
-          title="切换当前世界的主题风格"
+          title="切换当前世界的皮肤风格"
         >
           <span
             className="world-theme-dot"
@@ -76,15 +76,15 @@ export function WorldThemeSwitcher({ activeWorld, onThemeChange }: WorldThemeSwi
             }}
           />
           <Palette size={13} aria-hidden="true" />
-          <span>主题: {currentTheme.displayName}</span>
+          <span>皮肤: {currentTheme.displayName}</span>
           <CaretDown size={11} className={open ? 'is-expanded' : ''} aria-hidden="true" />
         </button>
 
         {open && (
-          <div className="topbar-world-theme-menu" role="menu" aria-label="世界主题列表">
+          <div className="topbar-world-theme-menu" role="menu" aria-label="世界皮肤列表">
             <header className="topbar-world-theme-menu__header">
               <div>
-                <strong>世界专属主题</strong>
+                <strong>世界专属皮肤</strong>
                 <small>为【{activeWorld.name}】选择或定制空间风格</small>
               </div>
               {currentTheme.source === 'custom' ? (
@@ -92,7 +92,7 @@ export function WorldThemeSwitcher({ activeWorld, onThemeChange }: WorldThemeSwi
                   type="button"
                   className="theme-menu-action-btn"
                   onClick={() => openCustomizer(currentTheme.id)}
-                  title="编辑当前自定义主题"
+                  title="编辑当前自定义皮肤"
                 >
                   <PencilSimple size={13} />
                   <span>编辑</span>
@@ -103,6 +103,7 @@ export function WorldThemeSwitcher({ activeWorld, onThemeChange }: WorldThemeSwi
             <div className="topbar-world-theme-menu__items">
               {themes.map((theme) => {
                 const selected = theme.id === currentThemeId
+                const previewImage = theme.tokens.worldMapImage ?? theme.tokens.backdropImage
                 const sourceBadge =
                   theme.source === 'custom'
                     ? '自定义'
@@ -122,11 +123,13 @@ export function WorldThemeSwitcher({ activeWorld, onThemeChange }: WorldThemeSwi
                     <span
                       className="world-theme-swatch"
                       style={{
-                        background: `linear-gradient(135deg, ${theme.tokens.accentColor} 0%, ${theme.tokens.pageBackground} 100%)`,
+                        background: previewImage === undefined
+                          ? `linear-gradient(135deg, ${theme.tokens.accentColor} 0%, ${theme.tokens.pageBackground} 100%)`
+                          : `url("${previewImage}") center / cover`,
                         borderColor: theme.tokens.accentColor,
                       }}
                     >
-                      <i style={{ background: theme.tokens.accentColor, color: theme.tokens.accentColor }} />
+                      {previewImage === undefined ? <i style={{ background: theme.tokens.accentColor, color: theme.tokens.accentColor }} /> : null}
                     </span>
                     <div className="world-theme-info">
                       <div className="world-theme-name-row">
@@ -148,7 +151,7 @@ export function WorldThemeSwitcher({ activeWorld, onThemeChange }: WorldThemeSwi
                 onClick={() => openCustomizer(currentTheme.id)}
               >
                 <Plus size={14} />
-                <span>基于当前主题新建自定义...</span>
+                <span>基于当前皮肤新建自定义...</span>
               </button>
             </footer>
           </div>

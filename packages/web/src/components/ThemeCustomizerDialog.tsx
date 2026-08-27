@@ -142,7 +142,7 @@ export function ThemeCustomizerDialog({
           <div>
             <h2 id="theme-customizer-title">
               <Palette size={20} />
-              <span>{isCustom ? '编辑自定义主题' : '新建自定义世界主题'}</span>
+              <span>{isCustom ? '编辑自定义皮肤' : '新建自定义世界皮肤'}</span>
             </h2>
             <p>修改强调色、背景、气泡与素材，打造专属于【{world.name}】的独特空间风格。</p>
           </div>
@@ -157,7 +157,7 @@ export function ThemeCustomizerDialog({
             <legend>基础信息</legend>
             <div className="theme-customizer-row">
               <label>
-                <span>主题名称</span>
+                <span>皮肤名称</span>
                 <input
                   type="text"
                   value={displayName}
@@ -166,7 +166,7 @@ export function ThemeCustomizerDialog({
                 />
               </label>
               <label>
-                <span>主题说明</span>
+                <span>皮肤说明</span>
                 <input
                   type="text"
                   value={description}
@@ -306,7 +306,7 @@ export function ThemeCustomizerDialog({
                 color: tokens.textColor ?? '#fff',
               }}
             >
-              管家：主人，这里是当前主题的实时效果预览。
+              管家：主人，这里是当前皮肤的实时效果预览。
             </span>
             <span
               className="preview-bubble is-user"
@@ -325,7 +325,7 @@ export function ThemeCustomizerDialog({
           {isCustom ? (
             <button type="button" className="danger-button" onClick={handleDelete}>
               <Trash size={15} />
-              <span>删除此主题</span>
+              <span>删除此皮肤</span>
             </button>
           ) : <div />}
 

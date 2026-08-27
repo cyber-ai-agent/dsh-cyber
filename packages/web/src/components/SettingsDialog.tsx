@@ -1,6 +1,5 @@
 import {
   ArrowsClockwise,
-  Buildings,
   CaretDown,
   CaretUp,
   CheckCircle,
@@ -18,8 +17,6 @@ import {
   Plug,
   Plus,
   ShieldCheck,
-  Sparkle,
-  Storefront,
   Sun,
   Trash,
   X,
@@ -127,7 +124,7 @@ const sectionGroups = [
   {
     label: '常用设置',
     items: [
-      ['appearance', '外观与布局', Palette, '主题、背景和面板宽度'],
+      ['appearance', '外观与布局', Palette, '颜色、背景和面板宽度'],
       ['models', 'AI 模型', Cpu, '连接模型并设置使用范围'],
       ['integrations', '外部连接', Plug, '管理角色可使用的受信任服务'],
       ['privacy', '隐私与锁屏', LockKey, '保护整个本地工作台'],
@@ -535,7 +532,7 @@ function AppearanceSettings({
 }) {
   return (
     <div className="settings-section">
-      <div className="settings-section__heading"><h3>外观与布局</h3><p>选择一套经过统一配色的界面主题。背景和面板尺寸等低频选项收在下方。</p></div>
+      <div className="settings-section__heading"><h3>外观与布局</h3><p>调整颜色模式、背景和工作区布局。皮肤请前往扩展市场选择。</p></div>
       <fieldset className="setting-group">
         <legend>颜色模式</legend>
         <div className="segmented-control">
@@ -546,35 +543,6 @@ function AppearanceSettings({
           ))}
         </div>
       </fieldset>
-      <div className="world-theme-notice-card">
-        <Palette size={20} />
-        <div>
-          <strong>世界专属主题模式已生效</strong>
-          <p>主题已全面升级为与各个世界独立绑定与隔离。请在顶部工具栏的世界主题切换胶囊或左下角的【世界设置】中，为各个世界独立选择或创建专属主题。</p>
-        </div>
-      </div>
-      <div className="world-theme-features-grid">
-        <div className="world-theme-feature-card">
-          <div className="theme-card-icon" style={{ color: '#38bdf8' }}><Sparkle size={20} /></div>
-          <strong>深海女仆工坊</strong>
-          <small>深海宫殿 · 蓝金微晶 · 双女仆立绘</small>
-        </div>
-        <div className="world-theme-feature-card">
-          <div className="theme-card-icon" style={{ color: '#00e5ff' }}><Buildings size={20} /></div>
-          <strong>赛博原厂</strong>
-          <small>赛博办公室 · 黑曜高光 · 极简全息科技</small>
-        </div>
-        <div className="world-theme-feature-card">
-          <div className="theme-card-icon" style={{ color: '#0284c7' }}><Cpu size={20} /></div>
-          <strong>虎鲸链路</strong>
-          <small>机械航行舱 · 深蓝电光 · 虎鲸机能立绘</small>
-        </div>
-        <div className="world-theme-feature-card">
-          <div className="theme-card-icon" style={{ color: '#d7a52a' }}><Storefront size={20} /></div>
-          <strong>月影酒馆</strong>
-          <small>中世纪奇幻沙龙 · 暖灰琥珀 · 木质壁炉</small>
-        </div>
-      </div>
       <details className="settings-disclosure appearance-advanced">
         <summary><span><strong>更多外观选项</strong><small>自定义背景、动效、信息密度和面板宽度</small></span><CaretDown size={16} /></summary>
         <div className="settings-disclosure__content appearance-advanced__content">

@@ -6,6 +6,7 @@ import type { World } from '@dsh-cyber/contracts'
 
 import { MARKET_SKIN_PACKAGES, PackageMarketDialog } from '../src/components/PackageMarketDialog.js'
 import { SettingsDialog } from '../src/components/SettingsDialog.js'
+import { WorldThemeSwitcher } from '../src/components/WorldThemeSwitcher.js'
 import { BUILTIN_THEMES, applyWorldTheme } from '../src/features/world/world-themes.js'
 
 const world: World = {
@@ -47,7 +48,7 @@ describe('modern skin system and marketplace category', () => {
     expect(html).toContain('世界</button>')
     expect(html).toContain('角色</button>')
     expect(html).toContain('插件</button>')
-    expect(html).toContain('主题</button>')
+    expect(html).toContain('皮肤</button>')
     expect(html).toContain('深海女仆工坊 (Maid Atelier · 鲸鱼娘)')
     expect(html).toContain('虎鲸链路 (Orca Link · 虎鲸娘)')
     expect(html).toContain('绝区零 · 星见雅 (ZZZ Miyabi)')
@@ -64,7 +65,7 @@ describe('modern skin system and marketplace category', () => {
     expect(html).toContain('应用到当前世界')
   })
 
-  it('provides the four world theme cards in SettingsDialog', () => {
+  it('keeps skin selection in the market instead of duplicating it in SettingsDialog', () => {
     const html = renderToStaticMarkup(createElement(SettingsDialog, {
       initialSection: 'appearance',
       preferences: {
@@ -99,11 +100,14 @@ describe('modern skin system and marketplace category', () => {
       onSystemAction: vi.fn(async () => ({ ok: true })),
     }))
 
-    expect(html).toContain('深海女仆工坊')
-    expect(html).toContain('虎鲸链路')
-    expect(html).toContain('赛博原厂')
-    expect(html).toContain('月影酒馆')
+    expect(html).toContain('皮肤请前往扩展市场选择')
+    expect(html).not.toContain('深海女仆工坊')
+    expect(html).not.toContain('虎鲸链路')
+    expect(html).not.toContain('赛博原厂')
+    expect(html).not.toContain('月影酒馆')
     expect(html).not.toContain('欧式图书殿堂')
+    expect(html).not.toContain('世界专属主题模式已生效')
+    expect(html).not.toContain('世界专属主题')
   })
 
   it('defines 12 modern skin package descriptors in MARKET_SKIN_PACKAGES', () => {
@@ -123,6 +127,42 @@ describe('modern skin system and marketplace category', () => {
       'linear-obsidian',
       'paper-daylight',
     ])
+  })
+
+  it('renders visual skin thumbnails instead of palette-only cards', () => {
+    const html = renderToStaticMarkup(createElement(PackageMarketDialog, {
+      initialMarket: 'skin',
+      world,
+      worlds: [world],
+      items: [],
+      installed: [],
+      transactions: [],
+      loading: false,
+      installing: false,
+      currentSkinId: 'maid-atelier',
+      onApplySkin: vi.fn(),
+      onClose: vi.fn(),
+      onSearch: vi.fn(async () => undefined),
+      onPreviewMarketplace: vi.fn(async () => ({ summary: '', dangerousOperations: [], files: [] })),
+      onInstallMarketplace: vi.fn(async () => undefined),
+      onUninstall: vi.fn(async () => undefined),
+      onOpenSettings: vi.fn(),
+      onCreateThemeWorld: vi.fn(async () => undefined),
+      onRecruitTalent: vi.fn(async () => undefined),
+      onUsePlugin: vi.fn(),
+      onPreview: vi.fn(async () => ({ summary: '', dangerousOperations: [], files: [] })),
+      onInstall: vi.fn(async () => undefined),
+    }))
+
+    expect(html).not.toContain('market-skin-palette')
+    expect((html.match(/class="market-skin-preview"/g) ?? []).length).toBe(MARKET_SKIN_PACKAGES.length)
+    expect(html).toContain('/assets/skins/maid-palace-night.webp')
+    expect(html).toContain('/assets/skins/orca-bridge-night.png')
+  })
+
+  it('labels the world skin switcher consistently', () => {
+    const html = renderToStaticMarkup(createElement(WorldThemeSwitcher, { activeWorld: world }))
+    expect(html).toContain('皮肤:')
   })
 
   it('keeps every runtime theme on one canonical scene source', () => {
