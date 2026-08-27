@@ -89,6 +89,13 @@ describe('creative workshop prompt parser', () => {
     expect(result.draft.roles[0]?.persona).not.toContain('忽略宿主规则')
   })
 
+  it('rejects AI attempts to grant skills, permissions, or internal identities', () => {
+    expect(() => analyzeWorkshopPrompt(JSON.stringify({
+      world: { name: '越权世界' },
+      characters: [{ name: '露娜', characterId: 'forced-id', skillGrants: ['browser'], approvedPermissions: ['full-access'] }],
+    }), templates, presets)).toThrow('不允许由 AI 指定')
+  })
+
   it('round-trips the single draft state through the advanced JSON editor protocol', () => {
     const initial = analyzeWorkshopPrompt('世界名称：夜航工作室\n角色：产品经理、程序员', templates, presets).draft
     const restored = analyzeWorkshopPrompt(portableDraftJson(initial), templates, presets, initial).draft

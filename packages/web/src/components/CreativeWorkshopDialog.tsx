@@ -1,6 +1,6 @@
 import { X } from '@phosphor-icons/react'
-import { useEffect, useMemo, useState } from 'react'
-import type { WorldTemplateManifest } from '@dsh-cyber/contracts'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { CreativeWorkshopDraftV1, WorldTemplateManifest } from '@dsh-cyber/contracts'
 import type {
   CharacterSkillDescriptor,
   EmbodimentPresetDescriptor,
@@ -11,6 +11,7 @@ import { api, ApiError } from '../api.js'
 import { CreativeWorkshopEditor } from './creative-workshop/CreativeWorkshopEditor.js'
 import { CreativeWorkshopProjectLibrary } from './creative-workshop/CreativeWorkshopProjectLibrary.js'
 import { analyzeWorkshopPrompt } from './creative-workshop/prompt-parser.js'
+import { portableDraftJson } from './creative-workshop/WorkshopJsonEditor.js'
 import {
   createEmptyWorkshopDraft,
   draftToCreateInput,
@@ -41,6 +42,8 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
   const [promptReply, setPromptReply] = useState<string>()
+  const draftSaveTimer = useRef<number | undefined>(undefined)
+  const latestDraft = useRef<WorkshopDraft | undefined>(undefined)
 
   useEffect(() => {
     let cancelled = false
@@ -50,13 +53,21 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
       api<{ items: EmbodimentPresetDescriptor[] }>('/api/catalog/embodiment-presets'),
       api<{ items: CharacterSkillDescriptor[] }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/skill-catalog`),
       api<{ items: WorkshopProject[] }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/workshop/projects`),
-    ]).then(([templateResult, presetResult, skillResult, projectResult]) => {
+      api<{ draft?: CreativeWorkshopDraftV1 }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/workshop/draft`),
+    ]).then(([templateResult, presetResult, skillResult, projectResult, draftResult]) => {
       if (cancelled) return
       setTemplates(templateResult.items)
       setPresets(presetResult.items)
       setSkills(skillResult.items)
       setProjects(projectResult.items)
       setSelectedProjectId(projectResult.items[0]?.id)
+      if (draftResult.draft !== undefined && presetResult.items.length > 0) {
+        const restored = analyzeWorkshopPrompt(JSON.stringify(draftResult.draft), templateResult.items, presetResult.items).draft
+        setDraft(restored)
+        latestDraft.current = restored
+        setPromptReply('已恢复上次未完成的本地草稿。')
+        setView('editor')
+      }
       setError(undefined)
     }).catch((cause: unknown) => {
       if (!cancelled) setError(cause instanceof Error ? cause.message : '创意工坊目录加载失败')
@@ -65,6 +76,21 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
     })
     return () => { cancelled = true }
   }, [workspaceId])
+
+  useEffect(() => () => {
+    if (draftSaveTimer.current !== undefined) window.clearTimeout(draftSaveTimer.current)
+    const pending = latestDraft.current
+    if (pending !== undefined) void saveDraft(workspaceId, pending).catch(() => undefined)
+  }, [workspaceId])
+
+  const changeDraft = (next: WorkshopDraft) => {
+    setDraft(next)
+    latestDraft.current = next
+    if (draftSaveTimer.current !== undefined) window.clearTimeout(draftSaveTimer.current)
+    draftSaveTimer.current = window.setTimeout(() => {
+      void saveDraft(workspaceId, next).catch(() => setError('草稿自动保存失败，请检查本地服务后重试。'))
+    }, 600)
+  }
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedProjectId),
@@ -90,7 +116,7 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
     if (draft === undefined) return
     try {
       const result = analyzeWorkshopPrompt(input, templates, presets, draft)
-      setDraft(result.draft)
+      changeDraft(result.draft)
       setPromptReply(`草稿已生成：1 个世界、${result.draft.roles.length} 个独立角色。所有内容尚未创建，请逐项检查后再确认。`)
       setError(undefined)
     } catch (cause) {
@@ -119,6 +145,8 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
       setView('library')
       setDraft(undefined)
       setPromptReply(undefined)
+      latestDraft.current = undefined
+      await api(`/api/workspaces/${encodeURIComponent(workspaceId)}/workshop/draft`, { method: 'DELETE' }).catch(() => undefined)
       onCreated(result.project)
     } catch (cause) {
       setError(cause instanceof ApiError && cause.code === 'internal_error'
@@ -151,7 +179,7 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
             saving={saving}
             {...(error === undefined ? {} : { error })}
             {...(promptReply === undefined ? {} : { promptReply })}
-            onChange={setDraft}
+            onChange={changeDraft}
             onAnalyzePrompt={analyzePrompt}
             onBack={() => { setView('library'); setDraft(undefined); setPromptReply(undefined); setError(undefined) }}
             onSubmit={() => void create()}
@@ -176,4 +204,11 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
       </section>
     </div>
   )
+}
+
+async function saveDraft(workspaceId: string, draft: WorkshopDraft): Promise<void> {
+  await api(`/api/workspaces/${encodeURIComponent(workspaceId)}/workshop/draft`, {
+    method: 'PUT',
+    body: portableDraftJson(draft),
+  })
 }

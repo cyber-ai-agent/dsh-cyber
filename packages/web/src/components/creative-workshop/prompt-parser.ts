@@ -46,6 +46,7 @@ function draftFromRecord(
   presets: readonly EmbodimentPresetDescriptor[],
   currentDraft?: WorkshopDraft,
 ): WorkshopDraft {
+  assertSuggestionOnlyDraft(input)
   const nestedWorld = record(input.world) ?? record(input.worldDefinition) ?? {}
   const source = { ...input, ...nestedWorld }
   const fallback = currentDraft ?? createEmptyWorkshopDraft(templates[0]?.id ?? 'personal-world', presets[0]!)
@@ -64,6 +65,27 @@ function draftFromRecord(
     scenario: stringValue(source.scenario, source.goal, source.objective, source.purpose, source.description, source.prompt) ?? fallback.scenario,
     roles,
   }
+}
+
+function assertSuggestionOnlyDraft(input: Record<string, unknown>): void {
+  const forbidden = new Set([
+    'characterId', 'databaseId', 'revision', 'createdAt', 'internalPath',
+    'skillGrants', 'permissionGrants', 'approvedPermissions', 'approvedPermission',
+    'providerId', 'modelProfileId', 'packageId',
+  ])
+  const visit = (value: unknown, path: string): void => {
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => visit(item, `${path}[${index}]`))
+      return
+    }
+    const object = record(value)
+    if (object === undefined) return
+    for (const [key, child] of Object.entries(object)) {
+      if (forbidden.has(key)) throw new Error(`草稿包含不允许由 AI 指定的字段：${path}.${key}`)
+      visit(child, `${path}.${key}`)
+    }
+  }
+  visit(input, 'draft')
 }
 
 function draftFromText(
