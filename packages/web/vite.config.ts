@@ -12,6 +12,6 @@ export default defineConfig({
   },
   build: {
     target: 'es2022',
-    sourcemap: true,
+    sourcemap: process.env.DSH_CYBER_SOURCEMAP === 'true',
   },
 })
