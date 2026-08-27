@@ -1,16 +1,21 @@
 import { randomUUID } from 'node:crypto'
+import type { OwnerRuntimeAccessGrant } from '@dsh-cyber/contracts'
 
 /**
  * Full access is a conversation permission confirmed by the person at the
  * keyboard. It is scoped to the current world, conversation session and
  * selected characters, then remains valid for later messages in that session.
- * The grant lives in memory so a server restart clears the elevated mode.
+ * The local server persists the grant so refreshes, world/session switches
+ * and service restarts restore the same owner-approved authority. Embedders
+ * without a store retain the in-memory fallback used by focused unit tests.
  */
-export interface OwnerRuntimeSessionAccessGrant {
-  id: string
-  worldId: string
-  sessionId: string
-  employeeIds: readonly string[]
+export type OwnerRuntimeSessionAccessGrant = OwnerRuntimeAccessGrant
+
+export interface OwnerRuntimeAccessStore {
+  saveOwnerRuntimeAccessGrant(input: { id: string; worldId: string; sessionId: string; employeeIds: string[] }): OwnerRuntimeAccessGrant
+  getOwnerRuntimeAccessGrant(id: string): OwnerRuntimeAccessGrant | undefined
+  listOwnerRuntimeAccessGrants(worldId: string): OwnerRuntimeAccessGrant[]
+  deleteOwnerRuntimeAccessGrant(id: string): boolean
 }
 
 export interface IssueOwnerRuntimeSessionAccessInput {
@@ -32,6 +37,11 @@ export class OwnerRuntimeAccessDeniedError extends Error {
 
 export class OwnerRuntimeAccessService {
   readonly #sessionGrants = new Map<string, OwnerRuntimeSessionAccessGrant>()
+  readonly #store: OwnerRuntimeAccessStore | undefined
+
+  constructor(store?: OwnerRuntimeAccessStore) {
+    this.#store = store
+  }
 
   issueSession(input: IssueOwnerRuntimeSessionAccessInput): OwnerRuntimeSessionAccessGrant {
     if (input.confirmed !== true) {
@@ -41,11 +51,17 @@ export class OwnerRuntimeAccessService {
     if (employeeIds.length === 0) throw new OwnerRuntimeAccessDeniedError('当前会话完全访问必须指定角色')
     const sessionId = input.sessionId.trim()
     if (!sessionId) throw new OwnerRuntimeAccessDeniedError('当前会话完全访问必须绑定一个已有会话')
+    const now = new Date().toISOString()
     const grant: OwnerRuntimeSessionAccessGrant = {
       id: randomUUID(),
       worldId: input.worldId,
       sessionId,
       employeeIds,
+      createdAt: now,
+      updatedAt: now,
+    }
+    if (this.#store !== undefined) {
+      return this.#store.saveOwnerRuntimeAccessGrant(grant)
     }
     for (const [id, current] of this.#sessionGrants) {
       if (current.worldId === grant.worldId && current.sessionId === grant.sessionId) this.#sessionGrants.delete(id)
@@ -61,9 +77,23 @@ export class OwnerRuntimeAccessService {
     employeeIds: readonly string[]
   }): boolean {
     if (input.grantId === undefined || input.sessionId === undefined) return false
-    const grant = this.#sessionGrants.get(input.grantId)
+    const grant = this.#store?.getOwnerRuntimeAccessGrant(input.grantId) ?? this.#sessionGrants.get(input.grantId)
     if (grant === undefined) return false
     if (grant.worldId !== input.worldId || grant.sessionId !== input.sessionId) return false
     return input.employeeIds.every((employeeId) => grant.employeeIds.includes(employeeId))
+  }
+
+  listWorld(worldId: string): OwnerRuntimeSessionAccessGrant[] {
+    if (this.#store !== undefined) return this.#store.listOwnerRuntimeAccessGrants(worldId)
+    return [...this.#sessionGrants.values()].filter((grant) => grant.worldId === worldId)
+  }
+
+  revokeForEmployee(worldId: string, employeeId: string): string[] {
+    const revoked = this.listWorld(worldId).filter((grant) => grant.employeeIds.includes(employeeId))
+    for (const grant of revoked) {
+      if (this.#store !== undefined) this.#store.deleteOwnerRuntimeAccessGrant(grant.id)
+      else this.#sessionGrants.delete(grant.id)
+    }
+    return revoked.map((grant) => grant.sessionId)
   }
 }

@@ -1,10 +1,7 @@
 import { CheckCircle, Cpu, Palette, ShieldCheck, SlidersHorizontal, UserCircle, WarningCircle, X } from '@phosphor-icons/react'
 import { useEffect, useRef, useState } from 'react'
-import type { AgentPermissionMode, EmployeeInstance, ModelProfile, ReasoningEffort, World, WorldCharacterAuthority, WorldSettings } from '@dsh-cyber/contracts'
+import type { AgentPermissionMode, ModelProfile, ReasoningEffort, World, WorldSettings } from '@dsh-cyber/contracts'
 
-import type { CyberEmployee } from '../types.js'
-import { Avatar } from './Avatar.js'
-import { AuthorityBadge } from './AuthorityBadge.js'
 import { useDialogFocusTrap } from './useDialogFocusTrap.js'
 import { applyWorldTheme, DEFAULT_SKIN_ID, readWorldTheme, saveWorldTheme, themeRegistry } from '../features/world/world-themes.js'
 
@@ -12,17 +9,13 @@ interface WorldSettingsDialogProps {
   world: World
   value: WorldSettings
   models: ModelProfile[]
-  employees: EmployeeInstance[]
-  authorities?: WorldCharacterAuthority[]
   installedSkinIds?: readonly string[]
   saving: boolean
   onClose(): void
   onSave(value: WorldSettings): Promise<void>
-  onManageAdministrators?(): void
-  onManageEmployee?(employeeId: string): void
 }
 
-export function WorldSettingsDialog({ world, value, models, employees, authorities, installedSkinIds, saving, onClose, onSave, onManageAdministrators, onManageEmployee }: WorldSettingsDialogProps) {
+export function WorldSettingsDialog({ world, value, models, installedSkinIds, saving, onClose, onSave }: WorldSettingsDialogProps) {
   const [draft, setDraft] = useState(normalizeWorldSettings(value))
   const [notice, setNotice] = useState<string | undefined>()
   const [error, setError] = useState<string>()
@@ -54,12 +47,6 @@ export function WorldSettingsDialog({ world, value, models, employees, authoriti
     applyWorldPreview(draft)
   }, [draft])
 
-  const administratorIds = authorities === undefined
-    ? (world.administratorEmployeeId === undefined ? [] : [world.administratorEmployeeId])
-    : authorities.filter((authority) => authority.role === 'administrator').map((authority) => authority.employeeId)
-  const administrators = administratorIds
-    .map((employeeId) => employees.find((employee) => employee.id === employeeId))
-    .filter((employee): employee is EmployeeInstance => employee !== undefined && employee.status !== 'archived')
   const availableThemes = themeRegistry.listAvailable(installedSkinIds ?? [])
   const visibleSelectedThemeId = availableThemes.some((theme) => theme.id === selectedThemeId) ? selectedThemeId : DEFAULT_SKIN_ID
 
@@ -82,7 +69,7 @@ export function WorldSettingsDialog({ world, value, models, employees, authoriti
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && close()}>
       <section ref={dialogRef} className="world-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="world-settings-title">
         <header className="dialog-header">
-          <div><h2 id="world-settings-title">世界设置 · {world.name}</h2><p>设定、管理员和视觉只属于当前世界。修改视觉会立即预览，取消不会保存。</p></div>
+          <div><h2 id="world-settings-title">世界设置 · {world.name}</h2><p>世界设定、模型和视觉只属于当前世界。修改视觉会立即预览，取消不会保存。</p></div>
           <button data-dialog-initial-focus className="icon-button" onClick={close} aria-label="关闭"><X size={18}/></button>
         </header>
 

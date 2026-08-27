@@ -2,9 +2,10 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 import type { AgentRuntimePort, AgentTurnRequest, EmployeeInstance } from '../packages/contracts/lib/index.js'
 import { createCyberServer, type CyberServer } from '../packages/server/lib/index.js'
+import { attachAppConsoleRecorder } from './console-test-helpers.js'
 
 let server: CyberServer | undefined
 let origin = ''
@@ -30,7 +31,7 @@ test('routes task collaboration to matching roles while discussion keeps all rou
   await installFirecrawl(workspace.id, world.id)
   const employees = await recruitThree(world.id)
   const consoleIssues: string[] = []
-  attachConsoleRecorder(page, consoleIssues)
+  attachAppConsoleRecorder(page, consoleIssues)
 
   await page.goto(origin)
   await expect(page.locator('.workbench-shell')).toBeVisible()
@@ -130,11 +131,6 @@ async function postJson<T = unknown>(url: string, body: Record<string, unknown>)
 function requireServer(): CyberServer {
   if (server === undefined) throw new Error('群聊任务路由 E2E 服务尚未启动')
   return server
-}
-
-function attachConsoleRecorder(page: Page, issues: string[]): void {
-  page.on('console', (message) => { if (message.type() === 'error' || message.type() === 'warning') issues.push(`[console:${message.type()}] ${message.text()}`) })
-  page.on('pageerror', (error) => issues.push(`[pageerror] ${error.message}`))
 }
 
 class GroupTaskRuntime implements AgentRuntimePort {

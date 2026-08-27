@@ -23,6 +23,10 @@ test.beforeAll(async () => {
   stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-browser-permission-e2e-'))
   browserFactory = new RecordingBrowserFactory()
   runtime = new FactualBrowserRuntime()
+  await startServer()
+})
+
+async function startServer(): Promise<void> {
   server = await createCyberServer({
     stateRoot,
     workspacePath: process.cwd(),
@@ -34,14 +38,14 @@ test.beforeAll(async () => {
     browserPolicy: new BrowserPolicy({ resolveHostname: async () => ['93.184.216.34'] }),
   })
   origin = (await server.start()).origin
-})
+}
 
 test.afterAll(async () => {
   await server?.close()
   await rm(stateRoot, { recursive: true, force: true })
 })
 
-test('installs governed Browser read, exposes once-only action approval, and scopes host access to the current session', async ({ page }) => {
+test('installs governed Browser read, keeps action approval one-shot, and persists confirmed session host access', async ({ page }) => {
   test.setTimeout(90_000)
   const current = requireServer()
   const workspace = current.store.listWorkspaces()[0]!
@@ -153,6 +157,45 @@ test('installs governed Browser read, exposes once-only action approval, and sco
     () => runtime.permissionModes.filter((mode) => mode === 'danger-full-access').length,
     { timeout: 20_000 },
   ).toBe(2)
+
+  const secondWorld = await postJson<{ world: { id: string; name: string } }>(`${origin}/api/workspaces/${workspace.id}/worlds`, {
+    name: '授权切换验证世界',
+    templateId: 'personal-world',
+  })
+  expect(secondWorld.status).toBe(201)
+  const secondRecruit = await postJson(`${origin}/api/worlds/${secondWorld.body.world.id}/recruit`, {
+    blueprintId: 'core.butler',
+    blueprintVersion: 1,
+    displayName: '切换验证管家',
+  })
+  expect(secondRecruit.status).toBe(201)
+
+  await page.reload()
+  await expect(page.locator('.workbench-shell')).toBeVisible()
+  await expect(page.getByRole('button', { name: '当前消息权限' })).toContainText('完全访问')
+  await page.getByLabel(new RegExp(`切换世界，当前为${world.name}`)).click()
+  await page.getByRole('menuitemradio', { name: new RegExp(secondWorld.body.world.name) }).click()
+  await expect(page.getByLabel(new RegExp(`切换世界，当前为${secondWorld.body.world.name}`))).toBeVisible()
+  await page.getByLabel(new RegExp(`切换世界，当前为${secondWorld.body.world.name}`)).click()
+  await page.getByRole('menuitemradio', { name: new RegExp(world.name) }).click()
+  await expect(page.getByRole('button', { name: '当前消息权限' })).toContainText('完全访问')
+
+  await page.goto('about:blank')
+  await server?.close()
+  await startServer()
+  await page.goto(origin)
+  await expect(page.locator('.workbench-shell')).toBeVisible()
+  await expect(page.getByRole('button', { name: '当前消息权限' })).toContainText('完全访问')
+  const restartedComposer = page.getByRole('textbox', { name: /给当前世界的.+发送消息/ })
+  await restartedComposer.fill('重启后继续使用已持久化的完全访问')
+  const restartedRequestPromise = page.waitForRequest((request) => request.url().endsWith(`/api/worlds/${world.id}/chat`) && request.method() === 'POST')
+  await page.locator('.composer .send-button').click()
+  const restartedBody = (await restartedRequestPromise).postDataJSON() as Record<string, unknown>
+  expect(restartedBody).toMatchObject({ permissionMode: 'danger-full-access', runtimeAccessGrantId: grant.grant.id })
+  await expect.poll(
+    () => runtime.permissionModes.filter((mode) => mode === 'danger-full-access').length,
+    { timeout: 20_000 },
+  ).toBe(3)
   await writeFile(join(screenshotRoot, 'console.log'), consoleIssues.length === 0 ? 'No console errors or warnings.\n' : `${consoleIssues.join('\n')}\n`, 'utf8')
   expect(consoleIssues, consoleIssues.join('\n')).toEqual([])
 })

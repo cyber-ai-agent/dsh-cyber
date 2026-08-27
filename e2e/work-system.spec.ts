@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import type { AgentRuntimePort, AgentTurnRequest, EmployeeInstance } from '../packages/contracts/lib/index.js'
 import { createCyberServer, type CyberServer } from '../packages/server/lib/index.js'
+import { attachAppConsoleRecorder } from './console-test-helpers.js'
 
 let server: CyberServer | undefined
 let origin = ''
@@ -26,8 +27,7 @@ test('runs the task, immutable deliverable review, change request, and accepted 
   const coordinator = current.store.listEmployees(world.id)[0]!
   const engineer = await recruit(world.id)
   const issues: string[] = []
-  page.on('console', (message) => { if (message.type() === 'error' || message.type() === 'warning') issues.push(`${message.type()}:${message.text()}`) })
-  page.on('pageerror', (error) => issues.push(`pageerror:${error.message}`))
+  attachAppConsoleRecorder(page, issues)
 
   await page.goto(origin)
   await openTasks(page)

@@ -1772,6 +1772,32 @@ const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX growth_evidence_employee_idx ON growth_evidence(employee_id, created_at DESC, id);
     `,
   },
+  {
+    version: 32,
+    name: 'persistent-owner-runtime-access',
+    sql: `
+      CREATE TABLE owner_runtime_access_grants (
+        id TEXT PRIMARY KEY,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        session_id TEXT NOT NULL REFERENCES work_sessions(id) ON DELETE CASCADE,
+        employee_ids_json TEXT NOT NULL CHECK (json_valid(employee_ids_json)),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (world_id, session_id)
+      ) STRICT;
+      CREATE INDEX owner_runtime_access_grants_world_idx
+        ON owner_runtime_access_grants(world_id, updated_at DESC, id);
+    `,
+  },
+  {
+    version: 33,
+    name: 'employee-default-runtime-permission',
+    sql: `
+      ALTER TABLE employee_revisions
+        ADD COLUMN runtime_permission_mode TEXT NOT NULL DEFAULT 'read-only'
+        CHECK (runtime_permission_mode IN ('read-only','workspace-write','danger-full-access'));
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {

@@ -70,8 +70,9 @@ describe('SqliteStore', () => {
       skillGrants: ['coding', 'testing'],
     })
 
-    expect(store.getWorld(world.id)?.administratorEmployeeId).toBe(employee.id)
-    expect(store.isWorldAdministrator(world.id, employee.id)).toBe(true)
+    expect(store.getWorld(world.id)?.administratorEmployeeId).toBeUndefined()
+    expect(store.getWorldCharacterAuthority(world.id, employee.id)).toMatchObject({ role: 'member', permissionGrants: [] })
+    expect(revision.runtimePermissionMode).toBe('read-only')
     expect(revision.revision).toBe(2)
     expect(store.getEmployee(employee.id)?.currentRevision).toBe(2)
     expect(store.listEmployeeRevisions(employee.id)).toHaveLength(2)
@@ -129,6 +130,11 @@ describe('SqliteStore', () => {
     const otherWorldAdministrator = store.recruitEmployee({
       workspaceId: workspace.id, worldId: secondWorld.id, blueprintId: 'software-engineer', blueprintVersion: 1,
     })
+
+    // Legacy APIs remain readable for old databases, but new recruits no
+    // longer receive administrator identity implicitly.
+    store.setWorldAdministrator(firstWorld.id, firstAdministrator.id)
+    store.setWorldAdministrator(secondWorld.id, otherWorldAdministrator.id)
 
     expect(store.isWorldAdministrator(firstWorld.id, firstAdministrator.id)).toBe(true)
     expect(store.canManageEmployee(firstAdministrator.id, successor.id)).toBe(true)
@@ -763,6 +769,7 @@ describe('SqliteStore', () => {
       DROP TABLE skill_actions;
       DROP TABLE approval_requests;
       DROP TABLE world_package_instances;
+      DROP TABLE owner_runtime_access_grants;
       DROP TABLE growth_evidence;
       DROP TABLE reviews;
       DROP TABLE deliverables;
@@ -785,6 +792,7 @@ describe('SqliteStore', () => {
       ALTER TABLE employee_instances DROP COLUMN health_detail;
       ALTER TABLE employee_instances DROP COLUMN health_error_code;
       ALTER TABLE employee_instances DROP COLUMN health;
+      ALTER TABLE employee_revisions DROP COLUMN runtime_permission_mode;
       DELETE FROM schema_migrations WHERE version > 2;
       PRAGMA user_version = 2;
     `)

@@ -46,21 +46,21 @@ describe('creative workshop prompt parser', () => {
     expect(result.draft.roles[0]).toMatchObject({ displayName: '观测员', role: '研究员', requestedSkillIds: ['scientific-reasoning'] })
   })
 
-  it('fills a valid default administrator for a one-line world request', () => {
+  it('fills a valid default butler for a one-line world request', () => {
     const result = analyzeWorkshopPrompt('生成一个修仙世界', templates, presets)
     expect(result.draft.displayName).toBe('修仙世界')
     expect(result.draft.roles[0]).toMatchObject({
       displayName: '管家',
-      role: '世界管理员',
+      role: '世界管家',
     })
     expect(result.draft.roles[0]?.summary).toBeTruthy()
     expect(result.draft.roles[0]?.persona).toBeTruthy()
     expect(validateWorkshopDraft(result.draft)).toBeUndefined()
   })
 
-  it('fills a default administrator when a JSON prompt omits roles', () => {
+  it('fills a default butler when a JSON prompt omits roles', () => {
     const result = analyzeWorkshopPrompt(JSON.stringify({ name: '修仙世界', goal: '探索修行体系' }), templates, presets)
-    expect(result.draft.roles[0]).toMatchObject({ displayName: '管家', role: '世界管理员' })
+    expect(result.draft.roles[0]).toMatchObject({ displayName: '管家', role: '世界管家' })
     expect(validateWorkshopDraft(result.draft)).toBeUndefined()
   })
 

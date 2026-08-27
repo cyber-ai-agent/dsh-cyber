@@ -552,7 +552,7 @@ export function WorldPermissionRequests({
             </header>
             <p>{employee?.displayName ?? '当前角色'}想要{worldPermissionLabel(request.permission)}，仅用于这次工作回合。长期授权仍会记录在角色设置中。</p>
             {integrationMutation ? <p className="world-permission-request__blocked" role="note">连接管理权限暂不可在这里授予，需要通过连接管理流程单独安全审批。</p> : null}
-            {persistentNeedsAdministrator && !integrationMutation ? <p className="world-permission-request__blocked" role="note">管理权限只能长期授予世界管理员；你仍可仅批准本次动作，或先在角色设置中提升其身份。</p> : null}
+            {persistentNeedsAdministrator && !integrationMutation ? <p className="world-permission-request__blocked" role="note">这类世界管理动作只支持本次批准；角色的默认文件运行权限请在“角色设置 → 对话权限”中配置。</p> : null}
             <dl>
               {subjectOf(request) === undefined ? null : (
                 <>

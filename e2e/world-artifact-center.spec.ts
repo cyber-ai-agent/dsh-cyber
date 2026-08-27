@@ -2,10 +2,11 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 import type { AgentRuntimePort, AgentTurnRequest } from '../packages/contracts/lib/index.js'
 import { createCyberServer, type CyberServer } from '../packages/server/lib/index.js'
 import { openDockTab } from './dock-test-helpers.js'
+import { attachAppConsoleRecorder } from './console-test-helpers.js'
 
 const MARKDOWN_TITLE = '运行交付说明'
 const HTML_TITLE = '运行预览页面'
@@ -29,7 +30,7 @@ test.afterAll(async () => {
 
 test('publishes one BrowserRuntime run into the world artifact center and keeps it isolated', async ({ page }) => {
   const consoleIssues: string[] = []
-  attachConsoleRecorder(page, consoleIssues)
+  attachAppConsoleRecorder(page, consoleIssues)
   const screenshotRoot = join(process.cwd(), 'artifacts', 'world-artifact-center')
   await mkdir(screenshotRoot, { recursive: true })
 
@@ -145,7 +146,7 @@ test('publishes one BrowserRuntime run into the world artifact center and keeps 
   await currentServer.close()
   await startServer()
   const restartedPage = await page.context().newPage()
-  attachConsoleRecorder(restartedPage, consoleIssues)
+  attachAppConsoleRecorder(restartedPage, consoleIssues)
   await restartedPage.goto(origin)
   await expect(restartedPage.locator('.workbench-shell')).toBeVisible()
   const afterRestartList = await readJson<{ artifacts: Array<{ id: string; title: string }> }>(`${origin}/api/worlds/${world.id}/artifacts`)
@@ -200,13 +201,6 @@ async function startServer(): Promise<void> {
 function requireServer(): CyberServer {
   if (server === undefined) throw new Error('Artifact E2E server is not running')
   return server
-}
-
-function attachConsoleRecorder(page: Page, issues: string[]): void {
-  page.on('console', (message) => {
-    if (message.type() === 'error' || message.type() === 'warning') issues.push(`[console:${message.type()}] ${message.text()}`)
-  })
-  page.on('pageerror', (error) => issues.push(`[pageerror] ${error.message}`))
 }
 
 async function readJson<T>(url: string): Promise<T> {

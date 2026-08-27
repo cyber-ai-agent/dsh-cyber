@@ -29,28 +29,21 @@ export interface ResolveWorldRuntimePermissionInput {
 
 /**
  * Resolves the DSH conversation sandbox and the character's world workspace.
- * The conversation permission controls DSH tools. World authority controls
- * which workspace directory the character receives by default.
+ * The role's three-level conversation permission controls both the DSH tool
+ * sandbox and access to the current World's workspace. Legacy World authority
+ * inputs remain accepted by the constructor only for composition compatibility.
  */
 export class WorldRuntimePermissionResolver {
   readonly #roots: WorldRootService
-  readonly #authority: WorldAuthorityPort | undefined
 
   constructor(options: { roots: WorldRootService; authority?: WorldAuthorityPort; worldPermissions?: WorldPermissionRequestService }) {
     this.#roots = options.roots
-    this.#authority = options.authority
   }
 
   async resolve(input: ResolveWorldRuntimePermissionInput): Promise<WorldRuntimePermissionResolution> {
     const root = await this.#roots.ensure(input.worldId)
     const requested = input.requestedMode ?? 'read-only'
-    const canRead = this.#authority === undefined
-      ? false
-      : await this.#authority.hasPermission(input.worldId, input.employeeId, 'world.files.read')
-    const canWrite = this.#authority === undefined
-      ? false
-      : await this.#authority.hasPermission(input.worldId, input.employeeId, 'world.files.write')
-    const fileAccess: WorldFileAccess = canWrite ? 'write' : canRead ? 'read' : 'none'
+    const fileAccess: WorldFileAccess = requested === 'read-only' ? 'read' : 'write'
     const permissionMode: AgentPermissionMode = requested === 'danger-full-access'
       // Full host access is reachable only through an explicit current-session
       // owner grant. The grant itself is already bound to world, session and
@@ -58,18 +51,8 @@ export class WorldRuntimePermissionResolver {
       ? input.ownerHostAccess === true
         ? 'danger-full-access'
         : 'read-only'
-      // A role with read-only World authority receives the real World path,
-      // so the Harness must be capped to read-only there. A role with no file
-      // authority receives the isolated restricted workspace and may still
-      // use workspace-write safely inside that host-managed sandbox.
-      : requested === 'workspace-write' && canRead && !canWrite
-        ? 'read-only'
-        : requested
-    // Without world.files.read the runtime is anchored at an empty
-    // host-managed workspace instead of the world's real files. Handing both
-    // cases the same directory is what made the permission inert: a character
-    // that had never been granted it could still list, search and read.
-    const workspacePath = fileAccess === 'none' ? root.restrictedFilesPath : root.filesPath
+      : requested
+    const workspacePath = root.filesPath
     return { worldId: input.worldId, employeeId: input.employeeId, fileAccess, permissionMode, workspacePath }
   }
 

@@ -1,11 +1,13 @@
 import type { JsonObject } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
+import type { AgentPermissionMode } from '@dsh-cyber/contracts'
 import { assertCharacterBehaviorProfileAppearance } from '@dsh-cyber/world-simulation'
 
 import { HttpError } from '../http/errors.js'
 import type { Router } from '../http/router.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
 import type { WorldCharacterAuthorityService } from '../services/world-character-authority-service.js'
+import type { OwnerRuntimeAccessService } from '../services/owner-runtime-access-service.js'
 import {
   unavailableWorldSkillIds,
   type WorldSkillAvailabilityPort,
@@ -25,11 +27,12 @@ export interface EmployeeRoutesDependencies {
   store: SqliteStore
   worldAccess?: WorldAccessService
   authority?: WorldCharacterAuthorityService
+  ownerRuntimeAccess?: OwnerRuntimeAccessService
   skillAvailability: WorldSkillAvailabilityPort
 }
 
 export function registerEmployeeRoutes(router: Router, dependencies: EmployeeRoutesDependencies): void {
-  const { store, worldAccess, authority, skillAvailability } = dependencies
+  const { store, worldAccess, authority, ownerRuntimeAccess, skillAvailability } = dependencies
 
   const assertCharacterUnlocked = async (employeeId: string, request: Parameters<WorldAccessService['assertUnlocked']>[1]) => {
     const employee = store.getEmployee(employeeId)
@@ -47,6 +50,12 @@ export function registerEmployeeRoutes(router: Router, dependencies: EmployeeRou
     }
     const persona = optionalString(body.persona)
     if (persona !== undefined) reviseInput.persona = persona
+    if (body.runtimePermissionMode !== undefined) {
+      reviseInput.runtimePermissionMode = requiredEnum<AgentPermissionMode>(body, 'runtimePermissionMode', ['read-only', 'workspace-write', 'danger-full-access'])
+      if (reviseInput.runtimePermissionMode === 'danger-full-access' && body.confirmedFullAccess !== true) {
+        throw new HttpError(422, 'owner_runtime_access_denied', '角色选择完全访问时必须明确确认高风险权限')
+      }
+    }
     if (body.skillGrants !== undefined) {
       if (!Array.isArray(body.skillGrants) || body.skillGrants.some((item) => typeof item !== 'string' || item.trim() === '')) {
         throw new HttpError(422, 'invalid_skill_grants', 'skillGrants must be an array of non-empty strings')
@@ -77,7 +86,20 @@ export function registerEmployeeRoutes(router: Router, dependencies: EmployeeRou
     }
     const modelPolicy = record(body.modelPolicy)
     if (modelPolicy !== undefined) reviseInput.modelPolicy = modelPolicy as JsonObject
-    writeJson(response, 201, { revision: store.reviseEmployee(reviseInput) })
+    const revision = store.reviseEmployee(reviseInput)
+    const grants = (revision.runtimePermissionMode ?? 'read-only') === 'danger-full-access'
+      ? store.listSessions(employee.worldId)
+        .filter((session) => session.kind === 'direct' && session.status === 'open' && store.listParticipants(session.id).some((participant) => participant.kind === 'employee' && participant.participantId === employee.id))
+        .flatMap((session) => {
+          const participants = store.listParticipants(session.id).filter((participant) => participant.kind === 'employee').map((participant) => participant.participantId)
+          const grant = ownerRuntimeAccess?.issueSession({ worldId: employee.worldId, sessionId: session.id, employeeIds: participants, confirmed: true })
+          return grant === undefined ? [] : [grant]
+        })
+      : []
+    const revokedSessionIds = (revision.runtimePermissionMode ?? 'read-only') === 'danger-full-access'
+      ? []
+      : ownerRuntimeAccess?.revokeForEmployee(employee.worldId, employee.id) ?? []
+    writeJson(response, 201, { revision, grants, revokedSessionIds })
   })
 
   router.get(/^\/api\/employees\/([^/]+)\/dossier$/, async ({ request, response, params }) => {

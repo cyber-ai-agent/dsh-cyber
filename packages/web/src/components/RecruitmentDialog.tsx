@@ -1,6 +1,6 @@
 import { Briefcase, Check, IdentificationCard, ShieldCheck, Sparkle, X } from '@phosphor-icons/react'
 import { useEffect, useMemo, useState } from 'react'
-import type { EmployeeBlueprint, EmployeeInstance, World, WorldSnapshot } from '@dsh-cyber/contracts'
+import type { AgentPermissionMode, EmployeeBlueprint, EmployeeInstance, World, WorldSnapshot } from '@dsh-cyber/contracts'
 import { api } from '../api.js'
 import { worldExperience } from '../world-experience.js'
 import {
@@ -10,6 +10,7 @@ import {
   worldSkillCatalogPath,
   type SkillCatalogEntry,
 } from './skill-catalog.js'
+import { RuntimePermissionSelector } from './RuntimePermissionSelector.js'
 
 interface RecruitmentDialogProps {
   blueprints: EmployeeBlueprint[]
@@ -19,7 +20,7 @@ interface RecruitmentDialogProps {
   loading: boolean
   recruiting: boolean
   onClose(): void
-  onRecruit(blueprint: EmployeeBlueprint, displayName: string | undefined, skillGrants: string[], capabilityGrants: string[]): Promise<void>
+  onRecruit(blueprint: EmployeeBlueprint, displayName: string | undefined, skillGrants: string[], capabilityGrants: string[], runtimePermissionMode: AgentPermissionMode, confirmedFullAccess: boolean): Promise<void>
 }
 
 export function RecruitmentDialog({ blueprints, initialBlueprintId, employees, world, loading, recruiting, onClose, onRecruit }: RecruitmentDialogProps) {
@@ -38,6 +39,8 @@ export function RecruitmentDialog({ blueprints, initialBlueprintId, employees, w
   const [catalogLoaded, setCatalogLoaded] = useState(false)
   const [catalogError, setCatalogError] = useState<string>()
   const [skillDefaultsKey, setSkillDefaultsKey] = useState<string>()
+  const [runtimePermissionMode, setRuntimePermissionMode] = useState<AgentPermissionMode>('read-only')
+  const [confirmedFullAccess, setConfirmedFullAccess] = useState(false)
   const availableBlueprints = worldBlueprints
   const selected = useMemo(
     () => availableBlueprints.find((blueprint) => blueprintKey(blueprint) === selectedKey)
@@ -130,6 +133,8 @@ export function RecruitmentDialog({ blueprints, initialBlueprintId, employees, w
               <p className="blueprint-detail__summary">{selected.summary}</p>
               {selectedExisting.length > 0 ? <div className="permission-notice permission-notice--existing"><IdentificationCard size={18} /><p>当前世界已有 {selectedExisting.length} 名角色来自这份模板：{selectedExisting.map((employee) => employee.displayName).join('、')}。仍可创建新的独立角色实例，每个实例拥有自己的会话、档案和成长记录。</p></div> : null}
               <label className="dialog-field"><span>角色名字（可选）</span><input value={displayName} placeholder={selectedExisting.length > 0 ? `${selected.displayName} ${selectedExisting.length + 1}` : selected.displayName} onChange={(event) => setDisplayName(event.target.value)} />{duplicateName ? <small className="dialog-field__warning">当前世界已有同名角色，建议换一个名字以便区分。</small> : null}</label>
+              <RuntimePermissionSelector value={runtimePermissionMode} onChange={(mode) => { setRuntimePermissionMode(mode); if (mode !== 'danger-full-access') setConfirmedFullAccess(false) }} />
+              {runtimePermissionMode === 'danger-full-access' ? <label className="host-access-dialog__confirm"><input type="checkbox" checked={confirmedFullAccess} onChange={(event) => setConfirmedFullAccess(event.target.checked)} /><span><strong>我确认这个角色默认拥有完全访问</strong><small>首次确认会持久保存；刷新、切换和重启后继续生效，直到你把角色改为较低权限。</small></span></label> : null}
               <SkillApprovalGroup requested={selected.requestedSkills} descriptors={skillCatalog} selected={skillGrants} onChange={setSkillGrants} />
               <CapabilityApprovalGroup items={selected.requestedCapabilities} selected={capabilityGrants} onChange={setCapabilityGrants} />
               <div className="permission-notice"><ShieldCheck size={18} /><p>当前蓝图请求的安全工作方法默认勾选，可在创建前取消；需要外部连接或产生副作用的角色技能不会默认放行，执行时仍经过审批策略。底层能力继续按最小权限选择。</p></div>
@@ -137,7 +142,7 @@ export function RecruitmentDialog({ blueprints, initialBlueprintId, employees, w
           </div>
         </div>
 
-        <footer className="dialog-footer"><span>{selected === undefined ? '请选择一份角色模板' : `将在当前世界创建独立角色：${displayName.trim() || selected.displayName}`}</span><div><button className="text-button" type="button" onClick={onClose}>取消</button><button className="primary-button" type="button" disabled={selected === undefined || recruiting || !catalogLoaded} onClick={() => selected && void onRecruit(selected, displayName.trim() || undefined, skillGrants, capabilityGrants)}>{recruiting ? '正在创建角色…' : !catalogLoaded ? '正在读取目录…' : selectedExisting.length > 0 ? '再创建一名' : roleplay ? '邀请角色入场' : '确认新增'}</button></div></footer>
+        <footer className="dialog-footer"><span>{selected === undefined ? '请选择一份角色模板' : `将在当前世界创建独立角色：${displayName.trim() || selected.displayName}`}</span><div><button className="text-button" type="button" onClick={onClose}>取消</button><button className="primary-button" type="button" disabled={selected === undefined || recruiting || !catalogLoaded || (runtimePermissionMode === 'danger-full-access' && !confirmedFullAccess)} onClick={() => selected && void onRecruit(selected, displayName.trim() || undefined, skillGrants, capabilityGrants, runtimePermissionMode, confirmedFullAccess)}>{recruiting ? '正在创建角色…' : !catalogLoaded ? '正在读取目录…' : selectedExisting.length > 0 ? '再创建一名' : roleplay ? '邀请角色入场' : '确认新增'}</button></div></footer>
       </section>
     </div>
   )

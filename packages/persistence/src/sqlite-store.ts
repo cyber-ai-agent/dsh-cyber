@@ -45,6 +45,7 @@ import {
   type ModelInteractionLogStatus,
   type ModelProfile,
   type ModelProviderKind,
+  type OwnerRuntimeAccessGrant,
   type CyberPackageManifest,
   type InstalledPackage,
   type PackageInstallTransaction,
@@ -138,6 +139,7 @@ export interface RecruitEmployeeInput {
   skillGrants?: string[]
   capabilityGrants?: string[]
   modelPolicy?: JsonObject
+  runtimePermissionMode?: AgentPermissionMode
   reason?: string
   actorId?: string
 }
@@ -148,6 +150,7 @@ export interface ReviseEmployeeInput {
   skillGrants?: string[]
   capabilityGrants?: string[]
   modelPolicy?: JsonObject
+  runtimePermissionMode?: AgentPermissionMode
   reason: string
   actorId?: string
 }
@@ -587,6 +590,7 @@ const KNOWN_TABLES = [
   'model_assignments',
   'local_assets',
   'work_sessions',
+  'owner_runtime_access_grants',
   'conversation_queue_entries',
   'task_collaboration_plans',
   'task_collaboration_steps',
@@ -1840,6 +1844,7 @@ export class SqliteStore {
       skillGrants: initialSkillGrants,
       capabilityGrants: initialCapabilityGrants,
       modelPolicy: input.modelPolicy ?? {},
+      runtimePermissionMode: input.runtimePermissionMode ?? 'read-only',
       reason: input.reason ?? 'recruited',
       createdAt: now,
     }
@@ -1847,22 +1852,14 @@ export class SqliteStore {
     return this.#transaction(() => {
       this.#insertEmployee(employee)
       this.#insertRevision(revision)
-      const isFirstActiveCharacter = world.administratorEmployeeId === undefined
       this.#worldAuthorities.save({
         worldId: world.id,
         employeeId: employee.id,
-        role: isFirstActiveCharacter ? 'administrator' : 'member',
-        permissionGrants: isFirstActiveCharacter
-          ? recommendedAdminPermissions()
-          : ['world.files.read'],
+        role: 'member',
+        permissionGrants: [],
         createdAt: now,
         updatedAt: now,
       })
-      if (isFirstActiveCharacter) {
-        this.database.prepare(
-          'UPDATE worlds SET administrator_employee_id = ?, updated_at = ? WHERE id = ? AND administrator_employee_id IS NULL',
-        ).run(employee.id, now, world.id)
-      }
       this.database
         .prepare(
           `INSERT INTO employee_profile_revisions
@@ -1947,6 +1944,7 @@ export class SqliteStore {
       skillGrants: input.skillGrants ?? previous.skillGrants,
       capabilityGrants: input.capabilityGrants ?? previous.capabilityGrants,
       modelPolicy: input.modelPolicy ?? previous.modelPolicy,
+      runtimePermissionMode: input.runtimePermissionMode ?? previous.runtimePermissionMode ?? 'read-only',
       reason: input.reason,
       createdAt: now,
     }
@@ -3938,6 +3936,56 @@ export class SqliteStore {
       .map(mapParticipant)
   }
 
+  saveOwnerRuntimeAccessGrant(input: {
+    id: string
+    worldId: string
+    sessionId: string
+    employeeIds: string[]
+  }): OwnerRuntimeAccessGrant {
+    this.#assertWritable()
+    this.#requireWorld(input.worldId)
+    const session = this.#requireSession(input.sessionId)
+    if (session.worldId !== input.worldId) throw new PersistenceError('Runtime access grant session belongs to another world')
+    const employeeIds = [...new Set(input.employeeIds.map((value) => value.trim()).filter(Boolean))]
+    if (employeeIds.length === 0) throw new PersistenceError('Runtime access grant requires at least one employee')
+    const now = this.#clock()
+    const current = this.getOwnerRuntimeAccessGrantForSession(input.worldId, input.sessionId)
+    this.database.prepare(
+      `INSERT INTO owner_runtime_access_grants (
+        id, world_id, session_id, employee_ids_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(world_id, session_id) DO UPDATE SET
+        id = excluded.id,
+        employee_ids_json = excluded.employee_ids_json,
+        updated_at = excluded.updated_at`,
+    ).run(input.id, input.worldId, input.sessionId, JSON.stringify(employeeIds), current?.createdAt ?? now, now)
+    return this.getOwnerRuntimeAccessGrant(input.id)!
+  }
+
+  getOwnerRuntimeAccessGrant(id: string): OwnerRuntimeAccessGrant | undefined {
+    const row = this.database.prepare('SELECT * FROM owner_runtime_access_grants WHERE id = ?').get(id)
+    return row === undefined ? undefined : mapOwnerRuntimeAccessGrant(row)
+  }
+
+  getOwnerRuntimeAccessGrantForSession(worldId: string, sessionId: string): OwnerRuntimeAccessGrant | undefined {
+    const row = this.database
+      .prepare('SELECT * FROM owner_runtime_access_grants WHERE world_id = ? AND session_id = ?')
+      .get(worldId, sessionId)
+    return row === undefined ? undefined : mapOwnerRuntimeAccessGrant(row)
+  }
+
+  listOwnerRuntimeAccessGrants(worldId: string): OwnerRuntimeAccessGrant[] {
+    return this.database
+      .prepare('SELECT * FROM owner_runtime_access_grants WHERE world_id = ? ORDER BY updated_at DESC, id')
+      .all(worldId)
+      .map(mapOwnerRuntimeAccessGrant)
+  }
+
+  deleteOwnerRuntimeAccessGrant(id: string): boolean {
+    this.#assertWritable()
+    return this.database.prepare('DELETE FROM owner_runtime_access_grants WHERE id = ?').run(id).changes > 0
+  }
+
   appendMessage(input: AppendMessageInput): WorkMessage {
     this.#assertWritable()
     return this.#transaction(() => this.#appendMessage(input))
@@ -5347,8 +5395,8 @@ export class SqliteStore {
       .prepare(
         `INSERT INTO employee_revisions
          (employee_id, revision, persona, skill_grants_json, capability_grants_json,
-          model_policy_json, reason, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           model_policy_json, runtime_permission_mode, reason, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         revision.employeeId,
@@ -5357,6 +5405,7 @@ export class SqliteStore {
         stringifyJson(revision.skillGrants),
         stringifyJson(revision.capabilityGrants),
         stringifyJson(revision.modelPolicy),
+        revision.runtimePermissionMode ?? 'read-only',
         revision.reason,
         revision.createdAt,
       )
@@ -6004,6 +6053,7 @@ function mapRevision(row: object): EmployeeRevision {
     skillGrants: parseJson<string[]>(value.skill_grants_json),
     capabilityGrants: parseJson<string[]>(value.capability_grants_json),
     modelPolicy: parseJson<JsonObject>(value.model_policy_json),
+    runtimePermissionMode: (typeof value.runtime_permission_mode === 'string' ? value.runtime_permission_mode : 'read-only') as AgentPermissionMode,
     reason: String(value.reason),
     createdAt: String(value.created_at),
   }
@@ -6356,6 +6406,18 @@ function mapParticipant(row: object): WorkSessionParticipant {
     participantId: String(value.participant_id),
     kind: value.kind as ParticipantKind,
     joinedAt: String(value.joined_at),
+  }
+}
+
+function mapOwnerRuntimeAccessGrant(row: object): OwnerRuntimeAccessGrant {
+  const value = row as Record<string, unknown>
+  return {
+    id: String(value.id),
+    worldId: String(value.world_id),
+    sessionId: String(value.session_id),
+    employeeIds: parseJson<string[]>(value.employee_ids_json),
+    createdAt: String(value.created_at),
+    updatedAt: String(value.updated_at),
   }
 }
 

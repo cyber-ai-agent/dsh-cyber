@@ -235,7 +235,9 @@ export default function App() {
     : readConversationPermissionMode(activeWorld.id, activePermissionKey)
   const conversationPermissionMode = activePermissionKey === undefined
     ? undefined
-    : conversationPermissionModes[activePermissionKey] ?? persistedConversationPermissionMode
+    : conversationPermissionModes[activePermissionKey]
+      ?? persistedConversationPermissionMode
+      ?? defaultRolePermissionMode(activeParticipantIds, employees, dossiers)
   const setConversationPermissionMode = useCallback((mode: ConversationPermissionMode) => {
     if (activePermissionKey === undefined) return
     if (activeWorld !== undefined) persistConversationPermissionMode(activeWorld.id, activePermissionKey, mode)
@@ -360,7 +362,7 @@ export default function App() {
       ])
       if (!isCurrentRequest()) return
 
-      const [dossierResults, participantResults, scheduleResult] = await Promise.all([
+      const [dossierResults, participantResults, scheduleResult, runtimeAccessResult] = await Promise.all([
         Promise.all(snapshot.employees.map(async (employee) => {
           try {
             return await api<EmployeeDossier>(`/api/employees/${employee.id}/dossier`)
@@ -377,6 +379,7 @@ export default function App() {
           }
         })),
         api<{ items: TaskSchedule[] }>(`/api/worlds/${world.id}/schedules`),
+        api<{ items: PreparedSessionHostAccessGrant[] }>(`/api/worlds/${world.id}/runtime-access-grants`),
       ])
       if (!isCurrentRequest()) return
 
@@ -402,6 +405,11 @@ export default function App() {
       // instead of presenting an empty, non-sendable center pane after refresh.
       setActiveSessionId(snapshot.openSessions[0]?.id)
       setSessionParticipants(Object.fromEntries(participantResults))
+      const restoredGrants = Object.fromEntries(runtimeAccessResult.items.map((grant) => [grant.sessionId, grant]))
+      const restoredModes = Object.fromEntries(runtimeAccessResult.items.map((grant) => [`session:${grant.sessionId}`, 'danger-full-access' as const]))
+      setSessionHostAccessGrants(restoredGrants)
+      setConversationPermissionModes(restoredModes)
+      for (const grant of runtimeAccessResult.items) persistConversationPermissionMode(world.id, `session:${grant.sessionId}`, 'danger-full-access')
       setTaskSchedules(scheduleResult.items)
       rememberActiveWorld(world.workspaceId, world.id)
     } catch (cause) {
@@ -942,42 +950,6 @@ export default function App() {
     return result.authorities
   }, [authorities, demoMode])
 
-  const updateWorldAuthority = useCallback(async (employeeId: string, input: { role: WorldCharacterRole; permissionGrants: WorldCharacterPermission[]; reason: string }): Promise<void> => {
-    const world = activeWorldRef.current
-    if (world === undefined) return
-    setSavingEmployee(true)
-    setError(undefined)
-    try {
-      let authority: WorldCharacterAuthority
-      if (demoMode) {
-        const previous = authorities.find((item) => item.employeeId === employeeId)
-        const timestamp = new Date().toISOString()
-        authority = {
-          worldId: world.id,
-          employeeId,
-          role: input.role,
-          permissionGrants: input.permissionGrants,
-          createdAt: previous?.createdAt ?? timestamp,
-          updatedAt: timestamp,
-        }
-      } else {
-        const result = await api<{ authority: WorldCharacterAuthority }>(`/api/worlds/${encodeURIComponent(world.id)}/authorities/${encodeURIComponent(employeeId)}`, {
-          method: 'PUT',
-          body: JSON.stringify(input),
-        })
-        authority = result.authority
-      }
-      setAuthorities((current) => [...current.filter((item) => item.employeeId !== employeeId), authority])
-      setEmployees((current) => current.map((employee) => employee.id === employeeId ? applyAuthorityToEmployee(employee, authority) : employee))
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : '世界权限保存失败'
-      setError(message)
-      throw cause
-    } finally {
-      setSavingEmployee(false)
-    }
-  }, [authorities, demoMode])
-
   const loadPackages = useCallback(async () => {
     if (workspace === undefined || demoMode) return
     const result = await api<{ items: InstalledPackage[]; transactions: PackageInstallTransaction[] }>(`/api/workspaces/${workspace.id}/packages`)
@@ -1176,12 +1148,15 @@ export default function App() {
     displayName: string | undefined,
     skillGrants: string[],
     capabilityGrants: string[],
+    runtimePermissionMode: AgentPermissionMode,
+    confirmedFullAccess: boolean,
   ) => {
     if (activeWorld === undefined) return
     setRecruiting(true)
     setError(undefined)
     try {
       let employee: EmployeeInstance
+      let issuedGrant: PreparedSessionHostAccessGrant | undefined
       if (demoMode) {
         const timestamp = new Date().toISOString()
         employee = {
@@ -1200,17 +1175,20 @@ export default function App() {
           updatedAt: timestamp,
         }
       } else {
-        const result = await api<{ employee: EmployeeInstance }>(`/api/worlds/${activeWorld.id}/recruit`, {
+        const result = await api<{ employee: EmployeeInstance; grant?: PreparedSessionHostAccessGrant }>(`/api/worlds/${activeWorld.id}/recruit`, {
           method: 'POST',
           body: JSON.stringify({
             blueprintId: blueprint.id,
             blueprintVersion: blueprint.version,
             skillGrants,
             capabilityGrants,
+            runtimePermissionMode,
+            confirmedFullAccess,
             ...(displayName === undefined ? {} : { displayName }),
           }),
         })
         employee = result.employee
+        issuedGrant = result.grant
       }
       const mapped = toCyberEmployee(employee, employees.length)
       setEmployees((current) => [...current, mapped])
@@ -1222,6 +1200,8 @@ export default function App() {
         employeeIds: [employee.id],
         title: `与 ${employee.displayName} 对话`,
       })
+      setConversationPermissionModes((current) => ({ ...current, [`direct:${employee.id}`]: runtimePermissionMode }))
+      if (issuedGrant !== undefined) setSessionHostAccessGrants((current) => ({ ...current, [issuedGrant!.sessionId]: issuedGrant! }))
       setDraft('')
       setSelectedEmployeeId(employee.id)
       setAppMode('world')
@@ -1238,7 +1218,7 @@ export default function App() {
     }
   }, [activeWorld, employees.length])
 
-  const reviseEmployee = useCallback(async (input: { reason: string; persona?: string; skillGrants?: string[]; capabilityGrants?: string[]; modelPolicy: { modelProfileId?: string } }) => {
+  const reviseEmployee = useCallback(async (input: { reason: string; persona?: string; skillGrants?: string[]; capabilityGrants?: string[]; modelPolicy: { modelProfileId?: string }; runtimePermissionMode?: AgentPermissionMode; confirmedFullAccess?: boolean }) => {
     if (managingEmployee === undefined) return
     setSavingEmployee(true)
     setError(undefined)
@@ -1253,15 +1233,18 @@ export default function App() {
           skillGrants: input.skillGrants ?? previous?.skillGrants ?? [],
           capabilityGrants: input.capabilityGrants ?? previous?.capabilityGrants ?? [],
           modelPolicy: input.modelPolicy,
+          runtimePermissionMode: input.runtimePermissionMode ?? previous?.runtimePermissionMode ?? 'read-only',
           reason: input.reason,
           createdAt: new Date().toISOString(),
         }
       } else {
-        const result = await api<{ revision: EmployeeRevision }>(`/api/employees/${managingEmployee.id}/revisions`, {
+        const result = await api<{ revision: EmployeeRevision; grants?: PreparedSessionHostAccessGrant[]; revokedSessionIds?: string[] }>(`/api/employees/${managingEmployee.id}/revisions`, {
           method: 'POST',
           body: JSON.stringify(input),
         })
         revision = result.revision
+        if (result.grants !== undefined) setSessionHostAccessGrants((current) => ({ ...current, ...Object.fromEntries(result.grants!.map((grant) => [grant.sessionId, grant])) }))
+        if (result.revokedSessionIds !== undefined && result.revokedSessionIds.length > 0) setSessionHostAccessGrants((current) => Object.fromEntries(Object.entries(current).filter(([sessionId]) => !result.revokedSessionIds!.includes(sessionId))))
       }
       setEmployees((current) => current.map((employee) => employee.id === managingEmployee.id
         ? { ...employee, currentRevision: revision.revision, updatedAt: revision.createdAt }
@@ -1275,13 +1258,21 @@ export default function App() {
           return dossier === undefined ? current : { ...current, [managingEmployee.id]: { ...dossier, employee: { ...dossier.employee, currentRevision: revision.revision }, revisions: [...dossier.revisions, revision] } }
         })
       }
+      const matchingDirectSessions = sessions.filter((session) => session.kind === 'direct' && (sessionParticipants[session.id] ?? []).length === 1 && sessionParticipants[session.id]?.[0] === managingEmployee.id)
+      if (input.runtimePermissionMode !== undefined) {
+        setConversationPermissionModes((current) => ({
+          ...current,
+          ...Object.fromEntries(matchingDirectSessions.map((session) => [`session:${session.id}`, input.runtimePermissionMode!])),
+        }))
+        for (const session of matchingDirectSessions) persistConversationPermissionMode(managingEmployee.worldId, `session:${session.id}`, input.runtimePermissionMode)
+      }
       setManagingEmployeeId(undefined)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '角色设定保存失败')
     } finally {
       setSavingEmployee(false)
     }
-  }, [dossiers, managingEmployee])
+  }, [dossiers, managingEmployee, sessionParticipants, sessions])
 
   const updateEmployeeProfile = useCallback(async (input: {
     displayName: string
@@ -2066,8 +2057,6 @@ export default function App() {
     '--workspace-background-size': preferences?.backgroundFit === 'contain' ? 'contain' : preferences?.backgroundFit === 'tile' ? 'auto' : 'cover',
     '--workspace-background-repeat': preferences?.backgroundFit === 'tile' ? 'repeat' : 'no-repeat',
   } as CSSProperties, [backgroundImage, preferences?.backgroundFit, preferences?.backgroundOpacity])
-  const administratorCount = authorities.filter((authority) => authority.role === 'administrator').length
-
   if (loading) return <LoadingScreen />
   if (workspace === undefined || activeWorld === undefined || preferences === undefined) {
     return <Onboarding {...(error === undefined ? {} : { error })} onCreated={async () => window.location.reload()} />
@@ -2327,21 +2316,9 @@ export default function App() {
             world={activeWorld}
             value={worldSettings}
             models={models}
-            employees={employees}
-            authorities={authorities}
             installedSkinIds={installedSkinIds}
             saving={savingSettings}
             onClose={() => setWorldSettingsOpen(false)}
-            onManageAdministrators={() => {
-              setWorldSettingsOpen(false)
-              setDockCollapsed(false)
-              setDockTab('dossier')
-            }}
-            onManageEmployee={(employeeId) => {
-              setWorldSettingsOpen(false)
-              setManagingEmployeeSection('permissions')
-              setManagingEmployeeId(employeeId)
-            }}
             onSave={async (value) => {
               setSavingSettings(true)
               try {
@@ -2381,12 +2358,10 @@ export default function App() {
           {...(managingRevision === undefined ? {} : { currentRevision: managingRevision })}
           models={models}
           avatarIndex={managingEmployee.avatarIndex}
-          authority={authorities.find((authority) => authority.employeeId === managingEmployee.id)}
           initialSection={managingEmployeeSection}
           saving={savingEmployee}
           onClose={() => setManagingEmployeeId(undefined)}
           onRevise={reviseEmployee}
-          onAuthorityChange={(input) => updateWorldAuthority(managingEmployee.id, input)}
           onUpdateProfile={updateEmployeeProfile}
           onArchive={archiveEmployee}
         /></Suspense>
@@ -2680,6 +2655,26 @@ function conversationPermissionStorageKey(worldId: string, permissionKey: string
   return `dsh-cyber.conversation-permission:${worldId}:${permissionKey}`
 }
 
+function defaultRolePermissionMode(
+  employeeIds: string[],
+  employees: CyberEmployee[],
+  dossiers: Record<string, EmployeeDossier>,
+): ConversationPermissionMode {
+  const rank: Record<ConversationPermissionMode, number> = {
+    'read-only': 0,
+    'workspace-write': 1,
+    'danger-full-access': 2,
+  }
+  if (employeeIds.length === 0) return 'read-only'
+  return employeeIds.map((employeeId) => {
+    const employee = employees.find((item) => item.id === employeeId)
+    const revision = employee === undefined
+      ? undefined
+      : dossiers[employeeId]?.revisions.find((item) => item.revision === employee.currentRevision)
+    return revision?.runtimePermissionMode ?? 'read-only'
+  }).reduce<ConversationPermissionMode>((least, mode) => rank[mode] < rank[least] ? mode : least, 'danger-full-access')
+}
+
 function readConversationPermissionMode(worldId: string, permissionKey: string): ConversationPermissionMode | undefined {
   try {
     const value = window.localStorage.getItem(conversationPermissionStorageKey(worldId, permissionKey))
@@ -2693,8 +2688,9 @@ function persistConversationPermissionMode(worldId: string, permissionKey: strin
   try {
     const key = conversationPermissionStorageKey(worldId, permissionKey)
     // Remember the selector choice so a refresh does not silently change the
-    // user's workflow. A full-access grant is still held only in memory and
-    // is re-confirmed before the next action when the session grant is gone.
+    // user's workflow. Full-access truth is restored from the server's
+    // persisted world/session grant, so the label and executable authority
+    // remain aligned across refreshes and restarts.
     window.localStorage.setItem(key, mode)
   } catch {
     // localStorage may be unavailable; the in-memory mode still applies now.

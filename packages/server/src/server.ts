@@ -91,7 +91,6 @@ import { WorldMarketplaceService } from './services/world-marketplace-service.js
 import { WorldPackageInstanceService } from './services/world-package-instance-service.js'
 import { WorldCharacterAuthorityService } from './services/world-character-authority-service.js'
 import { WorldPermissionRequestService } from './services/world-permission-request-service.js'
-import { WorldAuthorityBackfillService } from './services/world-authority-backfill-service.js'
 import { OwnerRuntimeAccessService } from './services/owner-runtime-access-service.js'
 import { WorldRuntimePermissionResolver } from './services/world-runtime-permission-resolver.js'
 import { createBuiltinSkillRegistry } from './skills/builtin-skill-registry.js'
@@ -218,18 +217,6 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       }
     },
   })
-  const authorityBackfill = new WorldAuthorityBackfillService({
-    authority: {
-      get: authority.get.bind(authority),
-      hasPermission: authority.hasPermission.bind(authority),
-      updateAuthority: authority.updateAuthority.bind(authority),
-      listWorlds: (workspaceId) => store.listWorlds(workspaceId),
-      listEmployees: (worldId) => store.listEmployees(worldId),
-      listAuthorityChanges: (worldId, employeeId) => authority.listChanges(worldId, employeeId),
-    },
-    roots: worldRoots,
-  })
-  await authorityBackfill.run(store.listWorkspaces().map((workspace) => workspace.id))
   // The runtime service is constructed later, so the publisher is resolved
   // lazily. Decisions announce a change rather than the client polling a
   // snapshot that fires once per streamed token.
@@ -239,7 +226,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     authority,
     onDecisionChanged: (worldId, payload) => publishDecisionChanged?.(worldId, payload),
   })
-  const ownerRuntimeAccess = new OwnerRuntimeAccessService()
+  const ownerRuntimeAccess = new OwnerRuntimeAccessService(store)
   const worldRuntimePermissions = new WorldRuntimePermissionResolver({
     roots: worldRoots,
     authority,
@@ -455,7 +442,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     store,
     worldAccess,
     worldPackages,
-    authority,
+    ownerRuntimeAccess,
     skillAvailability,
   })
   registerWorldAuthorityRoutes(router, { store, worldAccess, authority, worldPermissions, skillRuntime, turnContinuations, toolApprovals, ownerRuntimeAccess })
@@ -485,6 +472,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     store,
     worldAccess,
     authority,
+    ownerRuntimeAccess,
     skillAvailability,
   })
 

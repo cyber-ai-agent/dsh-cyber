@@ -1,5 +1,5 @@
 import { BUILTIN_BLUEPRINTS, worldTemplate } from '@dsh-cyber/catalog'
-import { RECOMMENDED_ADMIN_PERMISSIONS, type EmployeeBlueprint } from '@dsh-cyber/contracts'
+import type { AgentPermissionMode, EmployeeBlueprint } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { HttpError } from '../http/errors.js'
@@ -7,7 +7,7 @@ import type { Router } from '../http/router.js'
 import { loadInstalledBlueprints } from '../installed-package-runtime.js'
 import { ConversationHubService } from '../services/conversation-hub-service.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
-import type { WorldCharacterAuthorityService } from '../services/world-character-authority-service.js'
+import type { OwnerRuntimeAccessService } from '../services/owner-runtime-access-service.js'
 import type { WorldPackageInstanceService } from '../services/world-package-instance-service.js'
 import {
   availableWorldSkillIds,
@@ -20,6 +20,7 @@ import {
   optionalString,
   optionalStringArray,
   readJson,
+  requiredEnum,
   requiredString,
 } from '../http/request.js'
 import { writeJson } from '../http/response.js'
@@ -28,12 +29,12 @@ export interface WorldRoutesDependencies {
   store: SqliteStore
   worldAccess?: WorldAccessService
   worldPackages?: WorldPackageInstanceService
-  authority?: WorldCharacterAuthorityService
+  ownerRuntimeAccess?: OwnerRuntimeAccessService
   skillAvailability: WorldSkillAvailabilityPort
 }
 
 export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDependencies): void {
-  const { store, worldAccess, worldPackages, authority, skillAvailability } = dependencies
+  const { store, worldAccess, worldPackages, ownerRuntimeAccess, skillAvailability } = dependencies
   const conversationHub = new ConversationHubService(store)
 
   router.get(/^\/api\/workspaces\/([^/]+)\/worlds$/, ({ response, params }) => {
@@ -58,29 +59,6 @@ export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDep
     await worldAccess?.assertUnlocked(params[0]!, request)
     await conversationHub.ensureDirectSessions(params[0]!)
     writeJson(response, 200, store.getWorldSnapshot(params[0]!))
-  })
-
-  router.put(/^\/api\/worlds\/([^/]+)\/administrator$/, async ({ request, response, params }) => {
-    const worldId = params[0]!
-    await worldAccess?.assertUnlocked(worldId, request)
-    const body = await readJson(request)
-    const employeeId = requiredString(body, 'employeeId')
-    if (authority === undefined) {
-      // Kept for embedders that still compose this route in isolation. The
-      // production server always supplies WorldCharacterAuthorityService, so
-      // normal legacy calls take the same audited promotion path as V1 APIs.
-      writeJson(response, 200, { world: store.setWorldAdministrator(worldId, employeeId, 'local-user') })
-      return
-    }
-    const value = authority.updateAuthority({
-      worldId,
-      targetEmployeeId: employeeId,
-      actor: { kind: 'owner', id: 'local-user' },
-      role: 'administrator',
-      permissionGrants: [...RECOMMENDED_ADMIN_PERMISSIONS],
-      reason: 'legacy administrator promotion',
-    })
-    writeJson(response, 200, { world: store.getWorld(worldId), authority: value })
   })
 
   router.get(/^\/api\/worlds\/([^/]+)\/events$/, async ({ request, response, params, url }) => {
@@ -143,6 +121,13 @@ export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDep
       blueprintId,
       blueprintVersion,
     }
+    const runtimePermissionMode = body.runtimePermissionMode === undefined
+      ? 'read-only'
+      : requiredEnum<AgentPermissionMode>(body, 'runtimePermissionMode', ['read-only', 'workspace-write', 'danger-full-access'])
+    if (runtimePermissionMode === 'danger-full-access' && body.confirmedFullAccess !== true) {
+      throw new HttpError(422, 'owner_runtime_access_denied', '新增角色选择完全访问时必须明确确认高风险权限')
+    }
+    recruitInput.runtimePermissionMode = runtimePermissionMode
     const displayName = optionalString(body.displayName)
     if (displayName !== undefined) recruitInput.displayName = displayName
     if (body.skillGrants !== undefined) {
@@ -189,7 +174,12 @@ export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDep
     }
     const employee = store.recruitEmployee(recruitInput)
     await conversationHub.ensureDirectSessions(world.id)
-    writeJson(response, 201, { employee })
+    const session = store.listSessions(world.id).find((item) => item.kind === 'direct'
+      && store.listParticipants(item.id).some((participant) => participant.kind === 'employee' && participant.participantId === employee.id))
+    const grant = runtimePermissionMode === 'danger-full-access' && session !== undefined
+      ? ownerRuntimeAccess?.issueSession({ worldId: world.id, sessionId: session.id, employeeIds: [employee.id], confirmed: true })
+      : undefined
+    writeJson(response, 201, { employee, ...(grant === undefined ? {} : { grant }) })
   })
 }
 

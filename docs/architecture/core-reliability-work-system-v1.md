@@ -285,4 +285,4 @@ Review 永不更新或删除旧 Deliverable；要求修改必须创建新 Plan/R
 
 ## 13. 兼容基线声明
 
-本阶段目标是宣布 **Creative Platform V1 Local Data Compatibility Baseline**。当前 schema 31、升级前 SQLite 备份、恢复完整性检查、v2 fixture 回放和 Work System Smoke 已实现；完整历史 fixture、全量 20 步 Smoke、Windows/macOS matrix 尚未完成，因此状态仍是“候选基线”，不能宣称稳定兼容。
+本阶段目标是宣布 **Creative Platform V1 Local Data Compatibility Baseline**。当前 schema 33、升级前 SQLite 备份、恢复完整性检查、v2 fixture 回放和 Work System Smoke 已实现；schema 32 持久化完全访问 grant，schema 33 持久化角色默认运行权限。完整历史 fixture、全量 20 步 Smoke、Windows/macOS matrix 尚未完成，因此状态仍是“候选基线”，不能宣称稳定兼容。

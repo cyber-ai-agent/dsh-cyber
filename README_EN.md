@@ -85,12 +85,13 @@ The SQLite-backed queue uses claim/lease recovery, post-answer work runs through
 - Explicit semantic `EmbodimentProfile` for custom roles.
 - World, Character and Skill are separate domains.
 
-### World-scoped administration
+### Role conversation permissions
 
-- Each World has one or more `World Administrator` characters. Their role and 18 fine-grained World Permissions are persisted by SQLite `WorldCharacterAuthority`, with an append-only audit ledger and a last-active-administrator invariant.
-- Authority is isolated to the current World. It is not an application-admin role, an Approval Reviewer role, or a Skill Grant. A World Administrator can receive current-World `workspace-write` access, but never automatic `danger-full-access`.
-- A missing World Permission can be requested from the active chat. The choice is one-time, persistent, or reject; approval resumes the original WorkTurn and does not replay the user's entire turn. External side effects still use the existing Approval Gate.
-- The trusted `builtin.world-management` adapter handles narrowly scoped World settings, character, package-instance, and model-assignment actions. `settings.json` uses revision checks, while SQLite remains authoritative for model assignments.
+- The product no longer assigns a `World Administrator` character role, badge, or administrator permission editor. The local owner manages World settings directly.
+- Every role has one default conversation mode matching the composer control: **Ask for approval**, **Auto-approve**, or **Full access**.
+- Recruitment records the selected default in the role revision. Direct chats use that default automatically; group chats use the least privileged default among their participants. A single message may still choose a safer mode.
+- Full access requires one explicit high-risk confirmation. Its grant is bound to the World, conversation session, and selected roles, persisted in local SQLite, and restored after refreshes, switches, and service restarts. Lowering the role default revokes the related grant.
+- A role, Skill, or plugin can never issue its own full-access grant. External side effects still pass through structured Skill Actions and the Approval Gate.
 
 ### Creative Workshop
 

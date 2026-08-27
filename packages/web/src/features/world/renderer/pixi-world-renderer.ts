@@ -169,7 +169,7 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
       actor.selection.visible = entity.id === this.#selectedEntityId
       actor.activity.visible = entity.id === this.#selectedEntityId
       actor.status.clear().circle(-43, -112, 4).fill({ color: statusColor(entity), alpha: 1 })
-      actor.root.label = entity.authorityRole === 'administrator' ? `${entity.displayName}，世界管理员` : entity.displayName
+      actor.root.label = entity.displayName
       this.#applyAnimation(actor)
     }
     for (const object of snapshot.objects) {
@@ -380,7 +380,7 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
     root.on('rightclick', (event: FederatedPointerEvent) => { event.stopPropagation(); this.#callbacks.onEntityContext?.(entity.id, { x: event.global.x, y: event.global.y }) })
     root.on('pointerover', () => { activity.visible = true })
     root.on('pointerout', () => { activity.visible = this.#selectedEntityId === entity.id })
-    root.label = entity.authorityRole === 'administrator' ? `${entity.displayName}，世界管理员` : entity.displayName
+    root.label = entity.displayName
     const actor: ActorView = { root, animation, selection, status, name, activity, state: entity, motion: undefined }
     this.#sceneRoot.addChild(root)
     this.#actors.set(entity.id, actor)

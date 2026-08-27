@@ -95,6 +95,16 @@ export function registerWorldAuthorityRoutes(
     writeJson(response, 200, { authority: value })
   })
 
+  router.get(/^\/api\/worlds\/([^/]+)\/runtime-access-grants$/, async ({ request, response, params }) => {
+    const world = requireWorld(store, params[0]!)
+    await worldAccess.assertUnlocked(world.id, request)
+    if (ownerRuntimeAccess === undefined) {
+      throw new HttpError(501, 'owner_runtime_access_unavailable', '完整访问授权服务不可用')
+    }
+    const items = ownerRuntimeAccess.listWorld(world.id).filter((grant) => store.getSession(grant.sessionId)?.status === 'open')
+    writeJson(response, 200, { items })
+  })
+
   router.post(/^\/api\/worlds\/([^/]+)\/runtime-access-grants$/, async ({ request, response, params }) => {
     const world = requireWorld(store, params[0]!)
     await worldAccess.assertUnlocked(world.id, request)

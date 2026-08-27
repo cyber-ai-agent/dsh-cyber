@@ -981,7 +981,7 @@ test('guides new users through world, role, permission, and review steps in Crea
   await expect(workshop.getByRole('heading', { name: '配置初始角色' })).toBeVisible()
   await expect(workshop.getByLabel('搜索角色 Skills')).toHaveCount(0)
   await workshop.getByLabel('角色名字').fill('向导管理员')
-  await workshop.getByLabel('岗位 / 身份').fill('世界管理员')
+  await workshop.getByLabel('岗位 / 身份').fill('世界管家')
   await workshop.getByLabel('职责摘要').fill('管理当前世界的角色设定和协作边界。')
   await workshop.getByLabel('工作原则与表达方式').fill('先核对当前世界身份和权限，再执行清晰、可审计的操作。')
   await workshop.getByRole('button', { name: /下一步/ }).click()
