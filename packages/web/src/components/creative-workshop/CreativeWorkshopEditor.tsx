@@ -1,9 +1,10 @@
-import { ArrowLeft, ArrowRight, ChatCircleDots, Check, FileArrowUp, MagnifyingGlass, Plus, Sparkle, Trash, UsersThree } from '@phosphor-icons/react'
+import { ArrowLeft, ArrowRight, BracketsCurly, ChatCircleDots, Check, FileArrowUp, MagnifyingGlass, Plus, Sparkle, Trash, UsersThree } from '@phosphor-icons/react'
 import { useEffect, useMemo, useState } from 'react'
 import type { WorldTemplateManifest } from '@dsh-cyber/contracts'
 import type { CharacterSkillDescriptor, EmbodimentPresetDescriptor } from '@dsh-cyber/contracts/creative-platform'
 
 import { createRoleDraft, type WorkshopDraft, type WorkshopRoleDraft } from './model.js'
+import { WorkshopJsonEditor } from './WorkshopJsonEditor.js'
 
 interface CreativeWorkshopEditorProps {
   draft: WorkshopDraft
@@ -33,6 +34,7 @@ export function CreativeWorkshopEditor({
   const [selectedRoleId, setSelectedRoleId] = useState(draft.roles[0]?.clientId)
   const [skillQuery, setSkillQuery] = useState('')
   const [localError, setLocalError] = useState<string>()
+  const [jsonOpen, setJsonOpen] = useState(false)
   const presetMap = useMemo(() => new Map(presets.map((preset) => [preset.id, preset])), [presets])
   const selected = draft.roles.find((role) => role.clientId === selectedRoleId) ?? draft.roles[0]
   const fallbackPreset = presets[0]
@@ -94,14 +96,16 @@ export function CreativeWorkshopEditor({
         </section> : null}
 
         {step === 1 ? <section className="creative-workshop-wizard__section" aria-labelledby="workshop-role-step">
-          <header><UsersThree size={22} /><div><h3 id="workshop-role-step">配置初始角色</h3><p>先选择一个角色，再完成他的职责和工作方式。你可以创建多个角色。</p></div></header>
+          <header><UsersThree size={22} /><div><h3 id="workshop-role-step">检查初始角色</h3><p>创建角色只需要名字；身份、职责和工作方式都可以现在补充，也可以创建后再完善。</p></div></header>
           <RolePicker draft={draft} selectedRoleId={selected?.clientId} presetMap={presetMap} onSelect={setSelectedRoleId} onAdd={addRole} onRemove={removeRole} canAdd={draft.roles.length < 16 && fallbackPreset !== undefined} />
           {selected === undefined ? null : <div className="creative-workshop-role-form">
             <label className="dialog-field"><span>角色名字</span><input value={selected.displayName} maxLength={50} placeholder="例如：阿策" onChange={(event) => updateSelected({ displayName: event.target.value })} /></label>
-            <label className="dialog-field"><span>岗位 / 身份</span><input value={selected.role} maxLength={100} placeholder="例如：内容增长负责人" onChange={(event) => updateSelected({ role: event.target.value })} /></label>
-            <label className="dialog-field"><span>职责摘要</span><textarea rows={3} value={selected.summary} maxLength={500} placeholder="负责什么、交付什么、对什么结果负责。" onChange={(event) => updateSelected({ summary: event.target.value })} /></label>
-            <label className="dialog-field"><span>工作原则与表达方式</span><textarea rows={5} value={selected.persona} maxLength={2000} placeholder="事实边界、协作方式、决策习惯和表达风格。" onChange={(event) => updateSelected({ persona: event.target.value })} /></label>
-            <fieldset className="creative-workshop-presets"><legend>在世界中的行为方式</legend><p>只选择语义角色，不包含坐标或主题实现。</p><div>{presets.map((preset) => <label key={preset.id} className={selected.embodimentPresetId === preset.id ? 'is-active' : ''}><input type="radio" name={`preset-${selected.clientId}`} checked={selected.embodimentPresetId === preset.id} onChange={() => applyPreset(preset)} /><strong>{preset.displayName}</strong><small>{preset.description}</small></label>)}</div></fieldset>
+            <details className="workshop-disclosure"><summary>推荐信息与高级设置（可稍后补充）</summary>
+              <label className="dialog-field"><span>岗位 / 身份（可选）</span><input value={selected.role} maxLength={100} placeholder="例如：内容增长负责人" onChange={(event) => updateSelected({ role: event.target.value })} /></label>
+              <label className="dialog-field"><span>职责摘要（可选）</span><textarea rows={3} value={selected.summary} maxLength={500} placeholder="负责什么、交付什么、对什么结果负责。" onChange={(event) => updateSelected({ summary: event.target.value })} /></label>
+              <label className="dialog-field"><span>工作原则与表达方式（可选）</span><textarea rows={5} value={selected.persona} maxLength={2000} placeholder="事实边界、协作方式、决策习惯和表达风格。" onChange={(event) => updateSelected({ persona: event.target.value })} /></label>
+              <fieldset className="creative-workshop-presets"><legend>在世界中的行为方式</legend><p>只选择语义角色，不包含坐标或主题实现。</p><div>{presets.map((preset) => <label key={preset.id} className={selected.embodimentPresetId === preset.id ? 'is-active' : ''}><input type="radio" name={`preset-${selected.clientId}`} checked={selected.embodimentPresetId === preset.id} onChange={() => applyPreset(preset)} /><strong>{preset.displayName}</strong><small>{preset.description}</small></label>)}</div></fieldset>
+            </details>
           </div>}
         </section> : null}
 
@@ -118,6 +122,7 @@ export function CreativeWorkshopEditor({
 
         {step === 3 ? <section className="creative-workshop-wizard__section" aria-labelledby="workshop-review-step">
           <header><Check size={22} /><div><h3 id="workshop-review-step">确认后创建本地世界</h3><p>项目源和生成包都会保存在本地，程序更新不会覆盖它们。</p></div></header>
+          <button type="button" className="secondary-button workshop-json-open" onClick={() => setJsonOpen(true)}><BracketsCurly size={16}/>查看和编辑 JSON</button>
           <dl className="creative-workshop-review"><div><dt>世界</dt><dd>{draft.displayName}</dd></div><div><dt>基础模板</dt><dd>{templates.find((item) => item.id === draft.baseTemplateId)?.displayName ?? draft.baseTemplateId}</dd></div><div><dt>当前目标</dt><dd>{draft.scenario || '未填写'}</dd></div><div><dt>初始角色</dt><dd>{draft.roles.length} 个</dd></div></dl>
           <div className="creative-workshop-review-roles">{draft.roles.map((role) => <article key={role.clientId}><header><strong>{role.displayName}</strong><span>{role.role}</span></header><p>{role.summary}</p><small>{role.requestedSkillIds.length === 0 ? '未请求额外 Skill' : `请求 ${role.requestedSkillIds.length} 个 Skill`}</small></article>)}</div>
         </section> : null}
@@ -125,6 +130,7 @@ export function CreativeWorkshopEditor({
 
       {localError ?? error ? <div className="creative-workshop-error" role="alert">{localError ?? error}</div> : null}
       <footer className="dialog-footer creative-workshop-editor-footer"><span>第 {step + 1} 步，共 {STEPS.length} 步</span><div>{step === 0 ? <button className="text-button" type="button" onClick={onBack}>取消</button> : <button className="text-button" type="button" onClick={() => { setLocalError(undefined); setStep((current) => Math.max(0, current - 1)) }}><ArrowLeft size={14} />上一步</button>}{step < STEPS.length - 1 ? <button className="primary-button" type="button" onClick={goNext}>下一步<ArrowRight size={14} /></button> : <button className="primary-button" type="button" disabled={saving} onClick={onSubmit}>{saving ? '正在构建世界…' : '创建世界'}</button>}</div></footer>
+      {jsonOpen ? <WorkshopJsonEditor draft={draft} templates={templates} presets={presets} onApply={(next) => { onChange(next); setLocalError(undefined) }} onClose={() => setJsonOpen(false)} /> : null}
     </div>
   )
 }
@@ -169,11 +175,11 @@ function WorkshopPromptAssistant({ reply, onAnalyze }: { reply: string | undefin
     <section className="creative-workshop-prompt-assistant" aria-labelledby="workshop-prompt-assistant-title">
       <header>
         <ChatCircleDots size={20} />
-        <div><strong id="workshop-prompt-assistant-title">创意助手</strong><small>输入描述后会直接生成世界，也可以粘贴完整 JSON 或导入提示词文件</small></div>
+        <div><strong id="workshop-prompt-assistant-title">AI 草稿助手</strong><small>输入描述后只填充可编辑草稿；不会创建世界，也不会自动授予任何权限</small></div>
       </header>
       <textarea value={value} rows={4} placeholder="例如：创建一个围绕短剧制作的内容工作室，包含编剧、剪辑和审校角色……" onChange={(event) => { setFileError(undefined); setValue(event.target.value) }} />
       <footer>
-        <button className="primary-button" type="button" disabled={reading || analyzing || value.trim().length === 0} onClick={() => void submit()}>{analyzing ? '正在生成世界…' : '生成世界'}</button>
+        <button className="primary-button" type="button" disabled={reading || analyzing || value.trim().length === 0} onClick={() => void submit()}>{analyzing ? '正在生成草稿…' : 'AI 生成草稿'}</button>
         <label className="creative-workshop-prompt-assistant__import"><FileArrowUp size={16} />导入提示词文件<input type="file" accept=".txt,.md,.json,application/json,text/plain,text/markdown" disabled={reading} onChange={(event) => { const file = event.target.files?.[0]; if (file) void importPrompt(file); event.target.value = '' }} /></label>
       </footer>
       {fileError === undefined ? null : <p className="creative-workshop-prompt-assistant__error" role="alert">{fileError}</p>}
@@ -192,8 +198,8 @@ function validateStep(step: number, draft: WorkshopDraft): string | undefined {
     if (!draft.baseTemplateId.trim()) return '请选择基础世界模板'
   }
   if (step === 1) {
-    const incomplete = draft.roles.find((role) => !role.displayName.trim() || !role.role.trim() || !role.summary.trim() || !role.persona.trim())
-    if (incomplete !== undefined) return `请补全角色“${incomplete.displayName || incomplete.role || '未命名角色'}”的名字、身份、职责和工作原则`
+    const incomplete = draft.roles.find((role) => !role.displayName.trim())
+    if (incomplete !== undefined) return '请为每个角色填写名字'
   }
   return undefined
 }

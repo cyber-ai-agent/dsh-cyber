@@ -86,47 +86,13 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
     setView('editor')
   }
 
-  const createProject = async (nextDraft: WorkshopDraft): Promise<boolean> => {
-    const validationError = validateWorkshopDraft(nextDraft)
-    if (validationError !== undefined) {
-      setPromptReply(undefined)
-      setError(validationError)
-      return false
-    }
-    setSaving(true)
-    setError(undefined)
-    try {
-      const input = draftToCreateInput(nextDraft)
-      const result = await api<{ project: WorkshopProject }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/workshop/projects`, {
-        method: 'POST',
-        body: JSON.stringify(input),
-      })
-      setProjects((current) => [result.project, ...current.filter((project) => project.id !== result.project.id)])
-      setSelectedProjectId(result.project.id)
-      setView('library')
-      setDraft(undefined)
-      setPromptReply(undefined)
-      onCreated(result.project)
-      return true
-    } catch (cause) {
-      setPromptReply(undefined)
-      setError(cause instanceof ApiError && cause.code === 'internal_error'
-        ? '创意工坊创建失败，服务没有完成这次操作。请重试；如果持续失败，请打开系统状态查看详情。'
-        : cause instanceof Error ? cause.message : '世界创建失败')
-      return false
-    } finally {
-      setSaving(false)
-    }
-  }
-
   const analyzePrompt = async (input: string): Promise<void> => {
     if (draft === undefined) return
     try {
       const result = analyzeWorkshopPrompt(input, templates, presets, draft)
       setDraft(result.draft)
-      setPromptReply('正在生成世界，请稍候…')
+      setPromptReply(`草稿已生成：1 个世界、${result.draft.roles.length} 个独立角色。所有内容尚未创建，请逐项检查后再确认。`)
       setError(undefined)
-      await createProject(result.draft)
     } catch (cause) {
       setPromptReply(undefined)
       setError(cause instanceof Error ? cause.message : '提示词无法转换为世界草稿')

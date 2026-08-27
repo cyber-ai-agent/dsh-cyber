@@ -83,9 +83,9 @@ export function draftToCreateInput(draft: WorkshopDraft): WorkshopCreateInput {
     roles: draft.roles.map((role, index) => ({
       id: `role-${index + 1}`,
       displayName: role.displayName.trim(),
-      role: role.role.trim(),
-      summary: role.summary.trim(),
-      persona: role.persona.trim(),
+      role: role.role.trim() || '成员',
+      summary: role.summary.trim() || `${role.displayName.trim()}的初始角色，可在创建后继续完善职责。`,
+      persona: role.persona.trim() || '保持事实边界清晰，先确认目标再行动；未获得的信息不得虚构。',
       embodiment: structuredClone(role.embodiment),
       requestedSkillIds: [...role.requestedSkillIds],
     })),
@@ -96,9 +96,7 @@ export function validateWorkshopDraft(draft: WorkshopDraft): string | undefined 
   if (!draft.displayName.trim()) return '请填写世界名称'
   if (!draft.baseTemplateId.trim()) return '请选择基础运行时模板'
   if (draft.roles.length < 1) return '至少需要一个初始角色'
-  const incomplete = draft.roles.find((role) =>
-    !role.displayName.trim() || !role.role.trim() || !role.summary.trim() || !role.persona.trim(),
-  )
+  const incomplete = draft.roles.find((role) => !role.displayName.trim())
   return incomplete === undefined
     ? undefined
     : `请补全角色“${incomplete.displayName || incomplete.role || '未命名角色'}”的资料`

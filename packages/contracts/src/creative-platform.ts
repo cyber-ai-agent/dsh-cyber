@@ -1,6 +1,8 @@
 import type { EmployeeBlueprint, IsoTimestamp, WorkSession } from './index.js'
 import type { EmbodimentProfile } from './embodiment.js'
 
+export * from './creative-workshop-draft.js'
+
 export type {
   EmbodimentPresetDescriptor,
   EmbodimentProfile,

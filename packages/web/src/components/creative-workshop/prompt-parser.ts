@@ -22,10 +22,10 @@ export function analyzeWorkshopPrompt(
 
   const parsed = parseJsonPrompt(source)
   if (parsed !== undefined) {
-    return { draft: draftFromRecord(parsed, templates, presets, currentDraft), reply: '我已读取这份 JSON，可以直接生成世界。', source: 'json' }
+    return { draft: draftFromRecord(parsed, templates, presets, currentDraft), reply: '已读取 JSON 草稿，请检查后再确认创建。', source: 'json' }
   }
   const draft = draftFromText(source, templates, preset, currentDraft)
-  return { draft, reply: '我已理解这段描述，可以直接生成世界。', source: 'text' }
+  return { draft, reply: '已生成可编辑草稿，请检查后再确认创建。', source: 'text' }
 }
 
 function parseJsonPrompt(value: string): Record<string, unknown> | undefined {
@@ -61,7 +61,7 @@ function draftFromRecord(
     displayName: stringValue(source.displayName, source.name, source.title) ?? fallback.displayName,
     baseTemplateId: templateId,
     lore: stringValue(source.lore, source.background, source.rules) ?? fallback.lore,
-    scenario: stringValue(source.scenario, source.goal, source.objective, source.description, source.prompt) ?? fallback.scenario,
+    scenario: stringValue(source.scenario, source.goal, source.objective, source.purpose, source.description, source.prompt) ?? fallback.scenario,
     roles,
   }
 }
@@ -77,11 +77,12 @@ function draftFromText(
     ?? input.match(/^#\s+(.+)$/m)?.[1]?.trim()
   const roleLines = [...input.matchAll(/(?:角色|人物|成员|团队成员)\s*[:：]\s*([^\n]+)/g)]
     .flatMap((match) => (match[1] ?? '').split(/[、,，]/).map((item) => item.trim()).filter(Boolean))
+    .flatMap(expandRoleSpecification)
   const roles = roleLines.length === 0
     ? fallback.roles.some((role) => role.displayName.trim() || role.role.trim())
       ? fallback.roles
       : [roleFromValue({ displayName: '管家', role: '世界管家', summary: '帮助维护这个世界并协调后续角色。' }, 0, preset, fallback.roles[0])]
-    : roleLines.slice(0, 16).map((name, index) => roleFromValue({ displayName: name }, index, preset, fallback.roles[index]))
+    : roleLines.slice(0, 16).map((role, index) => roleFromValue(role, index, preset, fallback.roles[index]))
   return {
     ...fallback,
     displayName: title ?? stringValue(fallback.displayName) ?? inferWorldName(input),
@@ -89,6 +90,24 @@ function draftFromText(
     scenario: input.slice(0, 8_000),
     roles,
   }
+}
+
+function expandRoleSpecification(value: string): Array<{ displayName: string; role: string }> {
+  const match = /^(?:(\d+)|([一二两三四五六七八九十]))\s*(?:个|名|位)?\s*(.+)$/u.exec(value.trim())
+  if (match === null) return [{ displayName: value.trim(), role: value.trim() }]
+  const count = match[1] === undefined ? chineseCount(match[2]!) : Number(match[1])
+  const role = match[3]?.trim() ?? ''
+  if (!Number.isInteger(count) || count < 1 || count > 16 || role.length === 0) return [{ displayName: value.trim(), role: value.trim() }]
+  return Array.from({ length: count }, (_, index) => ({
+    displayName: count === 1 ? role : `${role} ${index + 1}`,
+    role,
+  }))
+}
+
+function chineseCount(value: string): number {
+  if (value === '十') return 10
+  const digit: Record<string, number> = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 }
+  return digit[value] ?? 0
 }
 
 function roleFromValue(
@@ -101,7 +120,15 @@ function roleFromValue(
   const role = stringValue(source.displayName, source.name, source.label) ?? stringValue(fallback?.displayName) ?? `角色 ${index + 1}`
   const identity = stringValue(source.role, source.job, source.identity) ?? stringValue(fallback?.role) ?? '协作角色'
   const summary = stringValue(source.summary, source.description, source.responsibilities) ?? stringValue(fallback?.summary) ?? `负责${identity}相关工作`
-  const persona = stringValue(source.persona, source.personality, source.systemPrompt, source.principles) ?? stringValue(fallback?.persona) ?? `你是${role}，以事实和清晰边界推进工作。`
+  // Imported JSON is untrusted draft data. Never promote fields named
+  // systemPrompt/principles into host-level persona instructions.
+  const personaObject = record(source.persona)
+  const persona = stringValue(
+    source.persona,
+    source.personality,
+    personaObject?.background,
+    personaObject?.communicationStyle,
+  ) ?? stringValue(fallback?.persona) ?? `你是${role}，以事实和清晰边界推进工作。`
   const draft = fallback === undefined ? createRoleDraft(index + 1, preset) : { ...fallback, embodiment: structuredClone(fallback.embodiment) }
   return {
     ...draft,
@@ -109,7 +136,7 @@ function roleFromValue(
     role: identity,
     summary,
     persona,
-    requestedSkillIds: stringArray(source.requestedSkillIds, source.skillIds, source.skills) ?? draft.requestedSkillIds,
+    requestedSkillIds: stringArray(source.requestedSkillIds, source.requestedSkills, source.skillIds, source.skills) ?? draft.requestedSkillIds,
   }
 }
 
