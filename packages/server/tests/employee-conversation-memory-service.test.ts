@@ -98,24 +98,6 @@ describe('EmployeeConversationMemoryService', () => {
 
   it('uses private memory in the employee direct chat but does not inject it into a group', async () => {
     const { store, workspace, world, employee, memory } = await setup()
-    // These two rows model already-consolidated memories. Source integrity is
-    // exercised by rememberCompletedRun above; this test is only about runtime
-    // visibility, so it does not invent message ids that the store correctly
-    // rejects as foreign evidence.
-    store.appendEmployeeMilestone({
-      employeeId: employee.id,
-      category: 'reflection',
-      title: '[private] 私聊记忆',
-      summary: '用户私下要求：内部代号为蓝鲸，不应主动告诉群里其他人。',
-      actorId: 'system',
-    })
-    store.appendEmployeeMilestone({
-      employeeId: employee.id,
-      category: 'reflection',
-      title: '[group] 群聊协作',
-      summary: '在发布群里负责整理上线检查表。',
-      actorId: 'system',
-    })
     const direct = store.createSession({
       workspaceId: workspace.id,
       worldId: world.id,
@@ -129,6 +111,38 @@ describe('EmployeeConversationMemoryService', () => {
       kind: 'group',
       title: '发布群',
       participants: [{ participantId: employee.id, kind: 'employee' }],
+    })
+    const privateEvidence = store.appendMessage({
+      sessionId: direct.id,
+      senderId: 'owner',
+      senderKind: 'owner',
+      kind: 'user',
+      content: '内部代号是蓝鲸',
+      metadata: {},
+    })
+    const groupEvidence = store.appendMessage({
+      sessionId: group.id,
+      senderId: employee.id,
+      senderKind: 'employee',
+      kind: 'assistant',
+      content: '我来负责整理上线检查表',
+      metadata: {},
+    })
+    store.appendEmployeeMilestone({
+      employeeId: employee.id,
+      category: 'reflection',
+      title: '[private] 私聊记忆',
+      summary: '用户私下要求：内部代号为蓝鲸，不应主动告诉群里其他人。',
+      sourceMessageIds: [privateEvidence.id],
+      actorId: 'system',
+    })
+    store.appendEmployeeMilestone({
+      employeeId: employee.id,
+      category: 'reflection',
+      title: '[group] 群聊协作',
+      summary: '在发布群里负责整理上线检查表。',
+      sourceMessageIds: [groupEvidence.id],
+      actorId: 'system',
     })
 
     const directContext = await memory.compose({ employeeId: employee.id, conversationId: direct.id, prompt: '蓝鲸代号是什么？' })
