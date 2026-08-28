@@ -120,22 +120,17 @@ export function ModelPicker({
   const copy = COPY[locale]
   const [open, setOpen] = useState(initiallyOpen)
   const [query, setQuery] = useState('')
-  const [activeProviderId, setActiveProviderId] = useState<string>()
   const triggerRef = useRef<HTMLButtonElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
-  const providerRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const modelRefs = useRef<Record<string, HTMLButtonElement | null>>({})
 
-  const groups = useMemo(() => modelPickerGroups(models, locale), [locale, models])
-  const filteredGroups = useMemo(() => filterModelPickerGroups(groups, query), [groups, query])
-  const selectedModel = models.find((model) => model.id === value)
-  const selectedGroup = groups.find((group) => group.models.some((model) => model.id === value))
-  const providerId = activeProviderId ?? selectedGroup?.id ?? filteredGroups[0]?.id
-  const activeGroup = filteredGroups.find((group) => group.id === providerId) ?? filteredGroups[0]
+  const needle = query.trim().toLocaleLowerCase()
+  const filteredModels = useMemo(() => {
+    if (!needle) return [...models]
+    return models.filter((model) => modelSearchText(model).includes(needle))
+  }, [models, needle])
 
-  useEffect(() => {
-    if (activeProviderId !== undefined && !groups.some((group) => group.id === activeProviderId)) setActiveProviderId(undefined)
-  }, [activeProviderId, groups])
+  const selectedModel = models.find((model) => model.id === value)
 
   useEffect(() => {
     if (!open) {
@@ -155,7 +150,9 @@ export function ModelPicker({
   }
   const displayLabel = selectedModel === undefined
     ? inheritLabel ?? copy.inherit
-    : `${selectedModel.displayName} · ${selectedModel.modelId}`
+    : selectedModel.displayName && selectedModel.displayName !== selectedModel.modelId
+      ? `${selectedModel.displayName} · ${selectedModel.modelId}`
+      : selectedModel.modelId
 
   return (
     <div className={`model-picker${open ? ' is-open' : ''}${disabled ? ' is-disabled' : ''}`}>
@@ -188,68 +185,60 @@ export function ModelPicker({
                 if (event.key === 'Escape') { event.preventDefault(); close() }
                 if (event.key === 'ArrowDown') {
                   event.preventDefault()
-                  const firstProvider = filteredGroups[0]
-                  if (firstProvider) providerRefs.current[firstProvider.id]?.focus()
+                  const firstModel = filteredModels[0]
+                  if (firstModel) modelRefs.current[firstModel.id]?.focus()
                 }
               }}
             />
-            <button type="button" className="model-picker__clear" aria-label={copy.clear} onClick={() => selectModel(undefined)}>
-              <X size={14} aria-hidden="true" />
-            </button>
+            {query ? (
+              <button type="button" className="model-picker__clear" aria-label={copy.clear} onClick={() => setQuery('')}>
+                <X size={14} aria-hidden="true" />
+              </button>
+            ) : null}
           </div>
 
-          <div className="model-picker__columns">
-            <div className="model-picker__providers" role="listbox" aria-label={copy.chooseProvider}>
-              {filteredGroups.length === 0 ? <span className="model-picker__empty">{models.length === 0 ? copy.noModels : copy.noMatches}</span> : filteredGroups.map((group) => (
-                <button
-                  key={group.id}
-                  ref={(element) => { providerRefs.current[group.id] = element }}
-                  type="button"
-                  role="option"
-                  aria-selected={group.id === activeGroup?.id}
-                  className={group.id === activeGroup?.id ? 'is-active' : ''}
-                  onClick={() => setActiveProviderId(group.id)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'ArrowDown') {
-                      event.preventDefault()
-                      modelRefs.current[group.models[0]?.id ?? '']?.focus()
-                    }
-                    if (event.key === 'ArrowUp') { event.preventDefault(); searchRef.current?.focus() }
-                  }}
-                >
-                  <strong>{group.label}</strong>
-                  <small>{format(copy.providerCount, group.models.length)}</small>
-                </button>
-              ))}
-            </div>
+          <div className="model-picker__summary-row">
+            <span>{format(copy.providerCount, filteredModels.length)}</span>
+          </div>
 
-            <div className="model-picker__models" role="listbox" aria-label={format(copy.modelCount, activeGroup?.models.length ?? 0)}>
-              {activeGroup?.models.map((model) => {
+          <div className="model-picker__list" role="listbox" aria-label={format(copy.modelCount, filteredModels.length)}>
+            {filteredModels.length === 0 ? (
+              <span className="model-picker__empty">{models.length === 0 ? copy.noModels : copy.noMatches}</span>
+            ) : (
+              filteredModels.map((model) => {
                 const capabilities = modelCapabilities(model)
                 const contextWindow = modelSettingNumber(model, 'contextWindow')
                 const configured = modelConfigured(model)
+                const rawProvider = settingText(model, 'providerId') ?? model.providerKind
+                const pName = settingText(model, 'providerName') ?? providerLabel(rawProvider, locale)
+                const isSelected = model.id === value
+                const isDifferentId = Boolean(model.displayName && model.modelId && model.displayName.trim() !== model.modelId.trim())
                 return (
                   <button
                     key={model.id}
                     ref={(element) => { modelRefs.current[model.id] = element }}
                     type="button"
                     role="option"
-                    aria-selected={model.id === value}
-                    className={model.id === value ? 'is-selected' : ''}
+                    aria-selected={isSelected}
+                    title={configured ? copy.configured : copy.needsConfiguration}
+                    className={`model-picker__model-item${isSelected ? ' is-selected' : ''}`}
                     onClick={() => selectModel(model.id)}
                   >
-                    <span className="model-picker__model-heading"><strong>{model.displayName}</strong><Check size={14} aria-hidden="true" /></span>
-                    <span className="model-picker__model-id">{model.modelId}</span>
-                    <span className="model-picker__model-meta">
-                      <small className={configured ? 'is-configured' : 'is-needs-configuration'}>{configured ? copy.configured : copy.needsConfiguration}</small>
+                    <div className="model-picker__model-heading">
+                      <strong>{model.displayName || model.modelId}</strong>
+                      <Check size={14} aria-hidden="true" />
+                    </div>
+                    {isDifferentId ? <div className="model-picker__model-id">{model.modelId}</div> : null}
+                    <div className="model-picker__model-meta">
+                      {pName ? <small className="is-provider">{pName}</small> : null}
+                      {configured ? null : <small className="is-needs-configuration">{copy.needsConfiguration}</small>}
                       {contextWindow === undefined ? null : <small>{format(copy.context, formatNumber(contextWindow, locale))}</small>}
                       {capabilities === undefined ? null : <small>{format(copy.capabilities, capabilities.join(', '))}</small>}
-                    </span>
+                    </div>
                   </button>
                 )
-              })}
-              {activeGroup === undefined && filteredGroups.length > 0 ? <span className="model-picker__empty">{copy.noMatches}</span> : null}
-            </div>
+              })
+            )}
           </div>
 
           <button type="button" className="model-picker__inherit" onClick={() => selectModel(undefined)}>
@@ -300,6 +289,8 @@ function providerLabel(providerId: string, locale: UiLocale): string {
     groq: 'Groq',
     mistral: 'Mistral',
     xai: 'xAI',
+    'custom-remote': COPY[locale].remoteProvider,
+    'custom-local': COPY[locale].localProvider,
     'openai-compatible-local': COPY[locale].localProvider,
     'openai-compatible-remote': COPY[locale].remoteProvider,
   }

@@ -85,6 +85,12 @@ import type {
   SystemActionInput,
   SystemActionResult,
 } from './components/SettingsDialog.js'
+import {
+  buildUnifiedModelList,
+  loadDiscoveredModelsCache,
+  saveDiscoveredModelsToCache,
+  type CachedModelCatalog,
+} from './features/models/discovered-models-storage.js'
 import { demoData, demoTavernDossiers, demoTavernEmployees, demoTavernMessages, demoTavernSessions } from './demo-data.js'
 import type { ConversationIntent, CyberEmployee, DockTab, SessionParticipantMap } from './types.js'
 import type { EmployeeSettingsSection } from './components/EmployeeManagementDialog.js'
@@ -153,6 +159,29 @@ export default function App() {
   const [models, setModels] = useState<ModelProfile[]>(demoMode ? demoData.modelProfiles : [])
   const [modelAssignments, setModelAssignments] = useState<ModelAssignment[]>([])
   const [conversationModelProfiles, setConversationModelProfiles] = useState<Record<string, string>>({})
+  const [discoveredCatalog, setDiscoveredCatalog] = useState<Record<string, CachedModelCatalog>>(() => loadDiscoveredModelsCache())
+  const selectableModels = useMemo(() => {
+    const configuredBaseUrls = new Set(
+      models
+        .filter((m) => Boolean(m.credentialEnvName) || (m as ModelProfile & { credentialConfigured?: boolean }).credentialConfigured === true || m.providerKind === 'openai-compatible-local')
+        .map((m) => m.baseUrl),
+    )
+    const normalizedProfiles = models.map((m) => {
+      let updated: ModelProfile & { credentialConfigured?: boolean } = { ...m }
+      if (configuredBaseUrls.has(m.baseUrl)) {
+        updated.credentialConfigured = true
+      }
+      if (updated.settings?.contextWindow === 64000) {
+        const { contextWindow: _c, ...restSettings } = updated.settings
+        updated = {
+          ...updated,
+          settings: restSettings,
+        }
+      }
+      return updated
+    })
+    return buildUnifiedModelList(normalizedProfiles, discoveredCatalog)
+  }, [models, discoveredCatalog])
   const [dossiers, setDossiers] = useState<Record<string, EmployeeDossier>>(demoMode ? demoData.dossiers : {})
   const [authorities, setAuthorities] = useState<WorldCharacterAuthority[]>([])
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | undefined>()
@@ -1955,8 +1984,20 @@ export default function App() {
       method: 'POST',
       body: JSON.stringify(input),
     })
+    if (result.items.length > 0) {
+      const profile = input.profileId === undefined ? undefined : models.find((item) => item.id === input.profileId)
+      const entry: CachedModelCatalog = {
+        models: result.items,
+        baseUrl: input.baseUrl,
+        ...(profile === undefined ? {} : { providerKind: profile.providerKind, providerName: profile.displayName }),
+        updatedAt: Date.now(),
+      }
+      if (input.profileId !== undefined) saveDiscoveredModelsToCache(input.profileId, entry)
+      saveDiscoveredModelsToCache(input.baseUrl, entry)
+      setDiscoveredCatalog((current) => ({ ...current, ...(input.profileId === undefined ? {} : { [input.profileId]: entry }), [input.baseUrl]: entry }))
+    }
     return result.items
-  }, [demoMode, workspace])
+  }, [demoMode, models, workspace])
 
   const deleteModel = useCallback(async (modelProfileId: string): Promise<void> => {
     if (workspace === undefined) throw new Error('请先创建工作区')
@@ -2186,16 +2227,54 @@ export default function App() {
             messages={chatMessages}
             employees={employees}
             installedPlugins={installedPluginCommands}
-            models={models}
+            models={selectableModels}
+            modelAssignments={modelAssignments}
             {...(conversationModelProfileId === undefined ? {} : { modelProfileId: conversationModelProfileId })}
-            onChangeModelProfile={(modelProfileId) => {
+            onChangeModelProfile={async (modelProfileId) => {
               if (activeConversationKey === undefined) return
-              setConversationModelProfiles((current) => {
-                const next = { ...current }
-                if (modelProfileId === undefined) delete next[activeConversationKey]
-                else next[activeConversationKey] = modelProfileId
-                return next
-              })
+              if (modelProfileId === undefined) {
+                setConversationModelProfiles((current) => {
+                  const next = { ...current }
+                  delete next[activeConversationKey]
+                  return next
+                })
+                return
+              }
+              if (modelProfileId.startsWith('discovered:')) {
+                const parts = modelProfileId.split(':')
+                const baseProfileId = parts[1]
+                const rawModelId = parts.slice(2).join(':')
+                const baseProfile = models.find((m) => m.id === baseProfileId)
+                if (baseProfile && rawModelId) {
+                  try {
+                    const { contextWindow: _unusedContext, maxTokens: _unusedMaxTokens, ...cleanSettings } = baseProfile.settings
+                    const saved = await saveModel({
+                      displayName: rawModelId,
+                      modelId: rawModelId,
+                      providerKind: baseProfile.providerKind,
+                      baseUrl: baseProfile.baseUrl,
+                      api: baseProfile.api,
+                      isDefault: false,
+                      ...(baseProfile.credentialEnvName ? { credentialEnvName: baseProfile.credentialEnvName } : {}),
+                      settings: {
+                        ...cleanSettings,
+                        providerName: baseProfile.displayName,
+                      },
+                    })
+                    setConversationModelProfiles((current) => ({
+                      ...current,
+                      [activeConversationKey]: saved.id,
+                    }))
+                    return
+                  } catch (err) {
+                    console.error('Failed to auto-save discovered model:', err)
+                  }
+                }
+              }
+              setConversationModelProfiles((current) => ({
+                ...current,
+                [activeConversationKey]: modelProfileId,
+              }))
             }}
             pendingCount={activePendingCount}
             queuedCount={activeQueuedCount}
@@ -2388,18 +2467,52 @@ export default function App() {
         /></Suspense>
       ) : null}
       {worldSettingsOpen && activeWorld !== undefined && worldSettings !== undefined && worldAccess !== undefined ? (
-        <Suspense fallback={<div className="dialog-loading" role="status">正在打开世界设置…</div>}>
+        <Suspense fallback={<div className="dialog-loading" role="status">正在打开世界管理…</div>}>
           <WorldSettingsDialog
             world={activeWorld}
             value={worldSettings}
-            models={models}
+            models={selectableModels}
             installedSkinIds={installedSkinIds}
             saving={savingSettings}
             onClose={() => setWorldSettingsOpen(false)}
             onSave={async (value) => {
               setSavingSettings(true)
               try {
-                const body = worldSettingsRevision === undefined ? value : { ...value, expectedRevision: worldSettingsRevision }
+                let effectiveSettings = value
+                if (value.model.defaultModelProfileId?.startsWith('discovered:')) {
+                  const parts = value.model.defaultModelProfileId.split(':')
+                  const baseProfileId = parts[1]
+                  const rawModelId = parts.slice(2).join(':')
+                  const baseProfile = models.find((m) => m.id === baseProfileId)
+                  if (baseProfile && rawModelId) {
+                    try {
+                      const { contextWindow: _unusedContext, maxTokens: _unusedMaxTokens, ...cleanSettings } = baseProfile.settings
+                      const saved = await saveModel({
+                        displayName: rawModelId,
+                        modelId: rawModelId,
+                        providerKind: baseProfile.providerKind,
+                        baseUrl: baseProfile.baseUrl,
+                        api: baseProfile.api,
+                        isDefault: false,
+                        ...(baseProfile.credentialEnvName ? { credentialEnvName: baseProfile.credentialEnvName } : {}),
+                        settings: {
+                          ...cleanSettings,
+                          providerName: baseProfile.displayName,
+                        },
+                      })
+                      effectiveSettings = {
+                        ...value,
+                        model: {
+                          ...value.model,
+                          defaultModelProfileId: saved.id,
+                        },
+                      }
+                    } catch (err) {
+                      console.error('Failed to auto-save discovered model for world settings:', err)
+                    }
+                  }
+                }
+                const body = worldSettingsRevision === undefined ? effectiveSettings : { ...effectiveSettings, expectedRevision: worldSettingsRevision }
                 try {
                   const result = await api<{ settings: WorldSettings; revision?: number; settingsRevision?: number }>(`/api/worlds/${activeWorld.id}/settings`, {
                     method: 'PUT',
@@ -2418,7 +2531,7 @@ export default function App() {
                   } catch {
                     // Keep the editor open with its current draft if the conflict refresh fails.
                   }
-                  throw new Error('世界设置已被其他页面更新。已载入最新版本，请确认变更后再保存。')
+                  throw new Error('世界管理设定已被其他页面更新。已载入最新版本，请确认变更后再保存。')
                 }
               } finally {
                 setSavingSettings(false)

@@ -1,10 +1,23 @@
-import { CheckCircle, Cpu, Palette, ShieldCheck, SlidersHorizontal, UserCircle, WarningCircle, X } from '@phosphor-icons/react'
-import { useEffect, useRef, useState } from 'react'
+import {
+  CheckCircle,
+  Cpu,
+  Info,
+  MagnifyingGlass,
+  Palette,
+  ShieldCheck,
+  SlidersHorizontal,
+  Sparkle,
+  UserCircle,
+  WarningCircle,
+  X,
+} from '@phosphor-icons/react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentPermissionMode, ModelProfile, ReasoningEffort, World, WorldSettings } from '@dsh-cyber/contracts'
 
 import { useDialogFocusTrap } from './useDialogFocusTrap.js'
 import { ModelPicker } from '../features/models/ModelPicker.js'
 import { applyWorldTheme, DEFAULT_SKIN_ID, readWorldTheme, saveWorldTheme, themeRegistry } from '../features/world/world-themes.js'
+import { useI18n } from '../i18n/runtime.js'
 
 interface WorldSettingsDialogProps {
   world: World
@@ -16,7 +29,19 @@ interface WorldSettingsDialogProps {
   onSave(value: WorldSettings): Promise<void>
 }
 
-export function WorldSettingsDialog({ world, value, models, installedSkinIds, saving, onClose, onSave }: WorldSettingsDialogProps) {
+type WorldManagementTab = 'basic' | 'visual' | 'model' | 'permissions'
+
+export function WorldSettingsDialog({
+  world,
+  value,
+  models,
+  installedSkinIds,
+  saving,
+  onClose,
+  onSave,
+}: WorldSettingsDialogProps) {
+  const { t } = useI18n()
+  const [activeTab, setActiveTab] = useState<WorldManagementTab>('basic')
   const [draft, setDraft] = useState(normalizeWorldSettings(value))
   const [notice, setNotice] = useState<string | undefined>()
   const [error, setError] = useState<string>()
@@ -25,6 +50,26 @@ export function WorldSettingsDialog({ world, value, models, installedSkinIds, sa
 
   const [selectedThemeId, setSelectedThemeId] = useState<string>(() => readWorldTheme(world))
   const initialThemeIdRef = useRef<string>(readWorldTheme(world))
+  const [skinQuery, setSkinQuery] = useState('')
+
+  const defaultGlobalModel = useMemo(() => {
+    return models.find((m) => m.isDefault) ?? models[0]
+  }, [models])
+
+  const defaultGlobalModelLabel = useMemo(() => {
+    if (!defaultGlobalModel) return t('worldSettings.noModelConfigured', '未配置模型')
+    return defaultGlobalModel.modelId || defaultGlobalModel.displayName
+  }, [defaultGlobalModel, t])
+
+  const reasoningOptions: Array<[ReasoningEffort, string]> = useMemo(() => [
+    ['auto', t('worldSettings.reasoningAuto', '自动（Auto）')],
+    ['off', t('worldSettings.reasoningOff', '关闭推理')],
+    ['minimal', t('worldSettings.reasoningMinimal', '极低')],
+    ['low', t('worldSettings.reasoningLow', '低')],
+    ['medium', t('worldSettings.reasoningMedium', '中（默认）')],
+    ['high', t('worldSettings.reasoningHigh', '高')],
+    ['max', t('worldSettings.reasoningMax', '最大')],
+  ], [t])
 
   const close = () => {
     applyWorldPreview(value)
@@ -49,7 +94,21 @@ export function WorldSettingsDialog({ world, value, models, installedSkinIds, sa
   }, [draft])
 
   const availableThemes = themeRegistry.listAvailable(installedSkinIds ?? [])
-  const visibleSelectedThemeId = availableThemes.some((theme) => theme.id === selectedThemeId) ? selectedThemeId : DEFAULT_SKIN_ID
+  const visibleSelectedThemeId = availableThemes.some((theme) => theme.id === selectedThemeId)
+    ? selectedThemeId
+    : DEFAULT_SKIN_ID
+
+  const filteredThemes = useMemo(() => {
+    const q = skinQuery.trim().toLowerCase()
+    if (!q) return availableThemes
+    return availableThemes.filter(
+      (theme) =>
+        theme.displayName.toLowerCase().includes(q) ||
+        theme.description.toLowerCase().includes(q) ||
+        theme.id.toLowerCase().includes(q) ||
+        theme.author.toLowerCase().includes(q),
+    )
+  }, [availableThemes, skinQuery])
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -59,208 +118,484 @@ export function WorldSettingsDialog({ world, value, models, installedSkinIds, sa
       saveWorldTheme(world.id, visibleSelectedThemeId)
       await onSave(draft)
       savedRef.current = true
-      setNotice('世界设置已保存')
+      setNotice(t('worldSettings.savedNotice', '世界管理设定已保存'))
       window.setTimeout(onClose, 450)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '世界设置保存失败')
+      setError(cause instanceof Error ? cause.message : t('worldSettings.saveFailedNotice', '世界管理设定保存失败'))
     }
   }
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && close()}>
-      <section ref={dialogRef} className="world-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="world-settings-title">
+    <div
+      className="modal-backdrop"
+      role="presentation"
+      onMouseDown={(event) => event.target === event.currentTarget && close()}
+    >
+      <section
+        ref={dialogRef}
+        className="world-settings-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="world-settings-title"
+      >
         <header className="dialog-header">
-          <div><h2 id="world-settings-title">世界设置 · {world.name}</h2><p>世界设定、模型和视觉只属于当前世界。修改视觉会立即预览，取消不会保存。</p></div>
-          <button data-dialog-initial-focus className="icon-button" onClick={close} aria-label="关闭"><X size={18}/></button>
+          <div>
+            <h2 id="world-settings-title">{t('worldSettings.title', '世界管理')} · {world.name}</h2>
+            <p>{t('worldSettings.subtitle', '空间规则、视觉风格、运行模型与角色交互权限只属于当前世界。')}</p>
+          </div>
+          <button
+            data-dialog-initial-focus
+            className="icon-button"
+            onClick={close}
+            aria-label={t('worldSettings.close', '关闭')}
+          >
+            <X size={18} />
+          </button>
         </header>
 
-        {notice ? <div className="world-settings-feedback is-success" role="status"><CheckCircle size={16}/>{notice}</div> : null}
-        {error ? <div className="world-settings-feedback is-error" role="alert"><WarningCircle size={16}/>{error}</div> : null}
+        {notice ? (
+          <div className="world-settings-feedback is-success" role="status">
+            <CheckCircle size={16} />
+            {notice}
+          </div>
+        ) : null}
+        {error ? (
+          <div className="world-settings-feedback is-error" role="alert">
+            <WarningCircle size={16} />
+            {error}
+          </div>
+        ) : null}
 
+        {/* 顶部 Tab 导航栏 */}
+        <nav className="world-management-tabs" aria-label={t('worldSettings.tabNavigation', '世界管理分栏')}>
+          <button
+            type="button"
+            className={`world-tab-btn ${activeTab === 'basic' ? 'is-active' : ''}`}
+            onClick={() => setActiveTab('basic')}
+          >
+            <SlidersHorizontal size={16} />
+            <span>{t('worldSettings.tabBasic', '基础设定')}</span>
+          </button>
+          <button
+            type="button"
+            className={`world-tab-btn ${activeTab === 'visual' ? 'is-active' : ''}`}
+            onClick={() => setActiveTab('visual')}
+          >
+            <Palette size={16} />
+            <span>{t('worldSettings.tabVisual', '空间皮肤')}</span>
+          </button>
+          <button
+            type="button"
+            className={`world-tab-btn ${activeTab === 'model' ? 'is-active' : ''}`}
+            onClick={() => setActiveTab('model')}
+          >
+            <Cpu size={16} />
+            <span>{t('worldSettings.tabModel', '模型运行')}</span>
+          </button>
+          <button
+            type="button"
+            className={`world-tab-btn ${activeTab === 'permissions' ? 'is-active' : ''}`}
+            onClick={() => setActiveTab('permissions')}
+          >
+            <ShieldCheck size={16} />
+            <span>{t('worldSettings.tabPermissions', '技能权限')}</span>
+          </button>
+        </nav>
+
+        {/* Tab 页面主体：使用 hidden 保留输入状态和完整 DOM */}
         <div className="world-settings-grid">
-          <section className="world-settings-card">
-            <header className="world-settings-card__header">
-              <span className="card-icon"><SlidersHorizontal size={17}/></span>
-              <div>
-                <h4>世界观设定</h4>
-                <small>定义当前世界的背景故事、世界规则与当前沉浸场景</small>
-              </div>
-            </header>
-            <div className="world-settings-card__body">
-              <div className="dialog-field">
-                <span>世界设定背景</span>
-                <textarea rows={4} value={draft.lore} onChange={(event)=>setDraft({...draft,lore:event.target.value})} placeholder="例如：这是一个雨夜魔法学院。我是院长，角色都了解学院规则和自己的身份。"/>
-              </div>
-              <div className="dialog-field">
-                <span>当前场景</span>
-                <textarea rows={2} value={draft.scenario} onChange={(event)=>setDraft({...draft,scenario:event.target.value})} placeholder="例如：深夜的观测舱，舷窗外有微光航迹。"/>
-              </div>
-            </div>
-          </section>
-
-          <section className="world-settings-card">
-            <header className="world-settings-card__header">
-              <span className="card-icon"><UserCircle size={17}/></span>
-              <div>
-                <h4>你与角色身份</h4>
-                <small>设定你在当前世界的身份定位，以及角色对你的称呼</small>
-              </div>
-            </header>
-            <div className="world-settings-card__body">
-              <div className="dialog-field-grid">
+          {/* TAB 1: 基础设定 */}
+          <div className="world-tab-panel" hidden={activeTab !== 'basic'}>
+            <section className="world-settings-card">
+              <header className="world-settings-card__header">
+                <span className="card-icon">
+                  <SlidersHorizontal size={17} />
+                </span>
+                <div>
+                  <h4>{t('worldSettings.loreCardTitle', '世界观设定')}</h4>
+                  <small>{t('worldSettings.loreCardSubtitle', '定义当前世界的背景故事、世界规则与当前沉浸场景')}</small>
+                </div>
+              </header>
+              <div className="world-settings-card__body">
                 <div className="dialog-field">
-                  <span>你的名字</span>
-                  <input type="text" value={draft.userIdentity.displayName} onChange={(event)=>setDraft({...draft,userIdentity:{...draft.userIdentity,displayName:event.target.value}})} placeholder="例如：指挥官 / 玩家名"/>
+                  <span>{t('worldSettings.loreLabel', '世界设定背景')}</span>
+                  <textarea
+                    rows={4}
+                    value={draft.lore}
+                    onChange={(event) => setDraft({ ...draft, lore: event.target.value })}
+                    placeholder={t('worldSettings.lorePlaceholder', '例如：这是一个和风千年神殿。我是神主，巫女们熟悉神社规约与祭仪。')}
+                  />
                 </div>
                 <div className="dialog-field">
-                  <span>你在本世界的身份</span>
-                  <input type="text" value={draft.userIdentity.worldRole} onChange={(event)=>setDraft({...draft,userIdentity:{...draft.userIdentity,worldRole:event.target.value}})} placeholder="主人 / 院长 / 旅人 / 负责人"/>
+                  <span>{t('worldSettings.scenarioLabel', '当前沉浸场景')}</span>
+                  <textarea
+                    rows={2}
+                    value={draft.scenario}
+                    onChange={(event) => setDraft({ ...draft, scenario: event.target.value })}
+                    placeholder={t('worldSettings.scenarioPlaceholder', '例如：雨后落樱纷飞的古院回廊，阳光透落于石灯笼前。')}
+                  />
                 </div>
               </div>
-              <div className="dialog-field">
-                <span>角色默认如何称呼你</span>
-                <input type="text" value={draft.userIdentity.addressAs} onChange={(event)=>setDraft({...draft,userIdentity:{...draft.userIdentity,addressAs:event.target.value}})} placeholder="主人 / 院长 / 您的称谓"/>
-              </div>
-              <div className="setting-help">这里是世界默认值。某个角色有特殊关系时，应在该角色设置里单独覆盖。</div>
-            </div>
-          </section>
+            </section>
 
-          <section className="world-settings-card world-visual-settings">
-            <header className="world-settings-card__header">
-              <span className="card-icon"><Palette size={17}/></span>
-              <div>
-                <h4>世界专属皮肤</h4>
-                <small>为【{world.name}】选择空间视觉风格，世界之间完全独立隔离</small>
+            <section className="world-settings-card">
+              <header className="world-settings-card__header">
+                <span className="card-icon">
+                  <UserCircle size={17} />
+                </span>
+                <div>
+                  <h4>{t('worldSettings.identityCardTitle', '你与角色身份')}</h4>
+                  <small>{t('worldSettings.identityCardSubtitle', '设定你在当前世界的身份定位，以及角色对你的称呼')}</small>
+                </div>
+              </header>
+              <div className="world-settings-card__body">
+                <div className="dialog-field-grid">
+                  <div className="dialog-field">
+                    <span>{t('worldSettings.yourName', '你的名字')}</span>
+                    <input
+                      type="text"
+                      value={draft.userIdentity.displayName}
+                      onChange={(event) =>
+                        setDraft({
+                          ...draft,
+                          userIdentity: { ...draft.userIdentity, displayName: event.target.value },
+                        })
+                      }
+                      placeholder={t('worldSettings.yourNamePlaceholder', '例如：指挥官 / 玩家名 / 神主')}
+                    />
+                  </div>
+                  <div className="dialog-field">
+                    <span>{t('worldSettings.yourRole', '你在本世界的身份')}</span>
+                    <input
+                      type="text"
+                      value={draft.userIdentity.worldRole}
+                      onChange={(event) =>
+                        setDraft({
+                          ...draft,
+                          userIdentity: { ...draft.userIdentity, worldRole: event.target.value },
+                        })
+                      }
+                      placeholder={t('worldSettings.yourRolePlaceholder', '主人 / 院长 / 旅人 / 领航员')}
+                    />
+                  </div>
+                </div>
+                <div className="dialog-field">
+                  <span>{t('worldSettings.addressAs', '角色默认如何称呼你')}</span>
+                  <input
+                    type="text"
+                    value={draft.userIdentity.addressAs}
+                    onChange={(event) =>
+                      setDraft({
+                        ...draft,
+                        userIdentity: { ...draft.userIdentity, addressAs: event.target.value },
+                      })
+                    }
+                    placeholder={t('worldSettings.addressAsPlaceholder', '主人 / 院长 / 您的称谓')}
+                  />
+                </div>
+                <div className="setting-help">
+                  <Info size={15} />
+                  <span>{t('worldSettings.identityHint', '这里是世界默认值。某个角色有特殊羁绊时，可在该角色档案里单独覆盖。')}</span>
+                </div>
               </div>
-            </header>
-            <div className="world-settings-card__body">
-              <div className="world-theme-presets">
-                {availableThemes.map((theme) => {
-                  const active = visibleSelectedThemeId === theme.id
-                  const previewImage = theme.tokens.worldMapImage ?? theme.tokens.backdropImage
-                  return (
+            </section>
+
+            <section className="world-settings-card world-settings-advanced">
+              <header className="world-settings-card__header">
+                <span className="card-icon">
+                  <Sparkle size={17} />
+                </span>
+                <div>
+                  <h4>{t('worldSettings.advancedTitle', '高级术语定制')}</h4>
+                  <small>{t('worldSettings.advancedSubtitle', '自定义这个世界里的“角色 / 群聊 / 动作”等显示称谓')}</small>
+                </div>
+              </header>
+              <div className="world-settings-card__body">
+                <div className="dialog-field-grid">
+                  <div className="dialog-field">
+                    <span>{t('worldSettings.termCharSingular', '单个角色的类型名称')}</span>
+                    <input
+                      type="text"
+                      value={draft.terminology.characterSingular}
+                      onChange={(event) =>
+                        setDraft({
+                          ...draft,
+                          terminology: { ...draft.terminology, characterSingular: event.target.value },
+                        })
+                      }
+                      placeholder={t('worldSettings.termCharSingularPlaceholder', '角色 / 巫女 / 居民 / 使魔')}
+                    />
+                  </div>
+                  <div className="dialog-field">
+                    <span>{t('worldSettings.termCharPlural', '多个角色的类型名称')}</span>
+                    <input
+                      type="text"
+                      value={draft.terminology.characterPlural}
+                      onChange={(event) =>
+                        setDraft({
+                          ...draft,
+                          terminology: { ...draft.terminology, characterPlural: event.target.value },
+                        })
+                      }
+                    />
+                  </div>
+                </div>
+                <div className="dialog-field-grid">
+                  <div className="dialog-field">
+                    <span>{t('worldSettings.termAddVerb', '添加角色动作动词')}</span>
+                    <input
+                      type="text"
+                      value={draft.terminology.addCharacterVerb}
+                      onChange={(event) =>
+                        setDraft({
+                          ...draft,
+                          terminology: { ...draft.terminology, addCharacterVerb: event.target.value },
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="dialog-field">
+                    <span>{t('worldSettings.termGroupConv', '多人会话名称')}</span>
+                    <input
+                      type="text"
+                      value={draft.terminology.groupConversation}
+                      onChange={(event) =>
+                        setDraft({
+                          ...draft,
+                          terminology: { ...draft.terminology, groupConversation: event.target.value },
+                        })
+                      }
+                    />
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          {/* TAB 2: 空间皮肤 */}
+          <div className="world-tab-panel" hidden={activeTab !== 'visual'}>
+            <section className="world-settings-card world-visual-settings">
+              <header className="world-settings-card__header">
+                <span className="card-icon">
+                  <Palette size={17} />
+                </span>
+                <div>
+                  <h4>{t('worldSettings.visualCardTitle', '世界专属空间皮肤')}</h4>
+                  <small>{t('worldSettings.visualCardSubtitle', '为【{world}】选择空间视觉风格，世界之间完全独立隔离', { world: world.name })}</small>
+                </div>
+              </header>
+              <div className="world-settings-card__body">
+                {/* 皮肤搜索框 */}
+                <div className="world-skin-search-bar">
+                  <MagnifyingGlass size={16} />
+                  <input
+                    type="text"
+                    value={skinQuery}
+                    onChange={(e) => setSkinQuery(e.target.value)}
+                    placeholder={t('worldSettings.skinSearchPlaceholder', '搜索空间皮肤名称、风格或关键词（如：鲸鱼、魔女、樱、默认）…')}
+                  />
+                  {skinQuery ? (
                     <button
-                      key={theme.id}
                       type="button"
-                      className={active ? 'is-active' : ''}
-                      onClick={() => {
-                        setSelectedThemeId(theme.id)
-                        applyWorldTheme(theme.id)
-                      }}
+                      className="clear-search-btn"
+                      onClick={() => setSkinQuery('')}
+                      aria-label={t('worldSettings.close', '清空搜索')}
                     >
-                      <span style={{ background: previewImage === undefined ? theme.tokens.pageBackground : `url("${previewImage}") center / cover`, borderColor: theme.tokens.accentColor }}>
-                        {previewImage === undefined ? <i style={{ background: theme.tokens.accentColor }} /> : null}
-                      </span>
-                      <div>
-                        <strong>{theme.displayName}</strong>
-                        <small>{theme.description}</small>
-                      </div>
+                      <X size={14} />
                     </button>
-                  )
-                })}
-              </div>
-              <div className="world-chat-preview" aria-label="聊天视觉预览">
-                <span className="is-character">角色：欢迎来到这个世界。</span>
-                <span className="is-owner">你：这里的样式会跟着设置实时变化。</span>
-              </div>
-            </div>
-          </section>
+                  ) : null}
+                  <span className="skin-count-badge">{t('worldSettings.skinCount', '{count} 款皮肤', { count: filteredThemes.length })}</span>
+                </div>
 
-          <section className="world-settings-card">
-            <header className="world-settings-card__header">
-              <span className="card-icon"><Cpu size={17}/></span>
-              <div>
-                <h4>模型与运行</h4>
-                <small>配置当前世界的默认大语言模型及推理策略</small>
-              </div>
-            </header>
-            <div className="world-settings-card__body">
-              <div className="dialog-field">
-                <span>世界默认模型</span>
-                <ModelPicker
-                  models={models}
-                  value={draft.model.defaultModelProfileId}
-                  ariaLabel="世界默认模型"
-                  inheritLabel="继承全局或角色设置"
-                  onChange={(modelProfileId) => setDraft({
-                    ...draft,
-                    model: modelProfileId
-                      ? { ...draft.model, defaultModelProfileId: modelProfileId }
-                      : { reasoningEffort: draft.model.reasoningEffort, responseLanguage: draft.model.responseLanguage },
-                  })}
-                />
-              </div>
-              <div className="dialog-field-grid">
-                <div className="dialog-field">
-                  <span>默认推理强度</span>
-                  <select value={draft.model.reasoningEffort} onChange={(event)=>setDraft({...draft,model:{...draft.model,reasoningEffort:event.target.value as ReasoningEffort}})}>
-                    {reasoningOptions.map(([id,label])=><option key={id} value={id}>{label}</option>)}
-                  </select>
-                </div>
-                <div className="dialog-field">
-                  <span>回复偏好语言</span>
-                  <select value={draft.model.responseLanguage} onChange={(event)=>setDraft({...draft,model:{...draft.model,responseLanguage:event.target.value as WorldSettings['model']['responseLanguage']}})}>
-                    <option value="zh-CN">简体中文（默认）</option>
-                    <option value="auto">跟随用户消息</option>
-                    <option value="en-US">English</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          </section>
+                {/* 皮肤卡片画廊网格 */}
+                {filteredThemes.length === 0 ? (
+                  <div className="dialog-empty">{t('worldSettings.skinNoMatches', '未搜索到匹配的空间皮肤，请尝试修改关键词。')}</div>
+                ) : (
+                  <div className="world-theme-grid">
+                    {filteredThemes.map((theme) => {
+                      const active = visibleSelectedThemeId === theme.id
+                      const previewImage = theme.tokens.worldMapImage ?? theme.tokens.backdropImage
+                      return (
+                        <div
+                          key={theme.id}
+                          className={`world-theme-card ${active ? 'is-active' : ''}`}
+                          onClick={() => {
+                            setSelectedThemeId(theme.id)
+                            applyWorldTheme(theme.id)
+                          }}
+                        >
+                          <div
+                            className="world-theme-card__cover"
+                            style={{
+                              backgroundImage: previewImage ? `url("${previewImage}")` : undefined,
+                              backgroundColor: previewImage ? undefined : theme.tokens.pageBackground,
+                            }}
+                          >
+                            <div className="world-theme-card__overlay" />
+                            {active ? (
+                              <span className="theme-active-tag">
+                                <CheckCircle size={13} weight="fill" />
+                                {t('worldSettings.skinCurrentSelected', '当前选用')}
+                              </span>
+                            ) : null}
+                            <div
+                              className="theme-accent-indicator"
+                              style={{ backgroundColor: theme.tokens.accentColor }}
+                            />
+                          </div>
+                          <div className="world-theme-card__info">
+                            <div className="world-theme-card__title">
+                              <strong>{theme.displayName}</strong>
+                              <small>{theme.author}</small>
+                            </div>
+                            <p>{theme.description}</p>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
 
-          <section className="world-settings-card">
-            <header className="world-settings-card__header">
-              <span className="card-icon"><ShieldCheck size={17}/></span>
-              <div>
-                <h4>技能与权限</h4>
-                <small>管理当前世界中角色能够调用的外部工具与系统权限</small>
+                {/* 实时聊天气泡微晶效果预览 */}
+                <div className="world-chat-preview" aria-label="聊天视觉实时预览">
+                  <div className="world-chat-preview__header">
+                    <span>{t('worldSettings.chatPreviewTitle', '当前皮肤实时微晶预览')}</span>
+                    <small>{t('worldSettings.chatPreviewSubtitle', '气泡随选中皮肤实时变化')}</small>
+                  </div>
+                  <span className="is-character">{t('worldSettings.chatPreviewRole', '角色：欢迎来到这个世界。这里是专属空间。')}</span>
+                  <span className="is-owner">{t('worldSettings.chatPreviewUser', '你：对话气泡和整套空间视图已经实时衔接。')}</span>
+                </div>
               </div>
-            </header>
-            <div className="world-settings-card__body">
-              <div className="setting-help">浏览器、外部连接和命令属于角色能力，请在角色档案的“技能与工具”中管理。</div>
-            </div>
-          </section>
+            </section>
+          </div>
 
-          <section className="world-settings-card world-settings-advanced">
-            <header className="world-settings-card__header">
-              <span className="card-icon"><SlidersHorizontal size={17}/></span>
-              <div>
-                <h4>高级术语定制</h4>
-                <small>自定义这个世界里的“角色 / 群聊 / 任务”等显示称谓</small>
+          {/* TAB 3: 模型运行 */}
+          <div className="world-tab-panel" hidden={activeTab !== 'model'}>
+            <section className="world-settings-card">
+              <header className="world-settings-card__header">
+                <span className="card-icon">
+                  <Cpu size={17} />
+                </span>
+                <div>
+                  <h4>{t('worldSettings.modelCardTitle', '模型与运行策略')}</h4>
+                  <small>{t('worldSettings.modelCardSubtitle', '配置当前世界的默认大语言模型及推理策略')}</small>
+                </div>
+              </header>
+              <div className="world-settings-card__body">
+                <div className="dialog-field">
+                  <span>{t('worldSettings.modelLabel', '世界默认模型')}</span>
+                  <ModelPicker
+                    models={models}
+                    value={draft.model.defaultModelProfileId}
+                    ariaLabel={t('worldSettings.modelLabel', '世界默认模型')}
+                    inheritLabel={defaultGlobalModelLabel}
+                    onChange={(modelProfileId) =>
+                      setDraft({
+                        ...draft,
+                        model: modelProfileId
+                          ? { ...draft.model, defaultModelProfileId: modelProfileId }
+                          : {
+                              reasoningEffort: draft.model.reasoningEffort,
+                              responseLanguage: draft.model.responseLanguage,
+                            },
+                      })
+                    }
+                  />
+                </div>
+                <div className="dialog-field-grid">
+                  <div className="dialog-field">
+                    <span>{t('worldSettings.reasoningEffort', '默认推理强度')}</span>
+                    <select
+                      value={draft.model.reasoningEffort}
+                      onChange={(event) =>
+                        setDraft({
+                          ...draft,
+                          model: { ...draft.model, reasoningEffort: event.target.value as ReasoningEffort },
+                        })
+                      }
+                    >
+                      {reasoningOptions.map(([id, label]) => (
+                        <option key={id} value={id}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="dialog-field">
+                    <span>{t('worldSettings.preferredLanguage', '回复偏好语言')}</span>
+                    <select
+                      value={draft.model.responseLanguage}
+                      onChange={(event) =>
+                        setDraft({
+                          ...draft,
+                          model: {
+                            ...draft.model,
+                            responseLanguage: event.target.value as WorldSettings['model']['responseLanguage'],
+                          },
+                        })
+                      }
+                    >
+                      <option value="zh-CN">{t('worldSettings.langZhCN', '简体中文（默认）')}</option>
+                      <option value="auto">{t('worldSettings.langAuto', '跟随用户消息')}</option>
+                      <option value="en-US">{t('worldSettings.langEnUS', 'English')}</option>
+                    </select>
+                  </div>
+                </div>
               </div>
-            </header>
-            <div className="world-settings-card__body">
-              <div className="dialog-field-grid">
-                <div className="dialog-field">
-                  <span>单个角色的类型名称</span>
-                  <input type="text" value={draft.terminology.characterSingular} onChange={(event)=>setDraft({...draft,terminology:{...draft.terminology,characterSingular:event.target.value}})} placeholder="角色 / 宠物 / 居民 / 学生"/>
+            </section>
+          </div>
+
+          {/* TAB 4: 技能权限 */}
+          <div className="world-tab-panel" hidden={activeTab !== 'permissions'}>
+            <section className="world-settings-card">
+              <header className="world-settings-card__header">
+                <span className="card-icon">
+                  <ShieldCheck size={17} />
+                </span>
+                <div>
+                  <h4>{t('worldSettings.permissionsTitle', '技能与工具体系')}</h4>
+                  <small>{t('worldSettings.permissionsSubtitle', '管理当前世界中角色能够调用的外部工具与系统权限')}</small>
                 </div>
-                <div className="dialog-field">
-                  <span>多个角色的类型名称</span>
-                  <input type="text" value={draft.terminology.characterPlural} onChange={(event)=>setDraft({...draft,terminology:{...draft.terminology,characterPlural:event.target.value}})}/>
+              </header>
+              <div className="world-settings-card__body">
+                <div className="setting-help">
+                  <Info size={16} />
+                  <div>
+                    <strong>{t('worldSettings.permissionsHelpTitle', '技能与外部动作权限隔离设计：')}</strong>
+                    <p style={{ margin: '4px 0 0', lineHeight: 1.6 }}>
+                      {t('worldSettings.permissionsHelpDesc', '浏览器、外部网络连接、系统命令与第三方能力均属于角色的专属技能与工具。请在右侧「档案 → 技能与工具」中为具体角色单独授权与配置审批策略。')}
+                    </p>
+                  </div>
+                </div>
+                <div className="permission-matrix-hint">
+                  <div className="hint-badge">
+                    <strong>{t('worldSettings.dataScopeTitle', '当前世界数据范围')}</strong>
+                    <span>{t('worldSettings.dataScopeDesc', '仅限于本世界绑定的独立目录与 SQLite 事实表')}</span>
+                  </div>
+                  <div className="hint-badge">
+                    <strong>{t('worldSettings.auditTitle', '外部副作用审计')}</strong>
+                    <span>{t('worldSettings.auditDesc', '所有技能调用与外部访问均实时记录在世界轨迹中')}</span>
+                  </div>
                 </div>
               </div>
-              <div className="dialog-field-grid">
-                <div className="dialog-field">
-                  <span>添加角色动作动词</span>
-                  <input type="text" value={draft.terminology.addCharacterVerb} onChange={(event)=>setDraft({...draft,terminology:{...draft.terminology,addCharacterVerb:event.target.value}})}/>
-                </div>
-                <div className="dialog-field">
-                  <span>多人会话名称</span>
-                  <input type="text" value={draft.terminology.groupConversation} onChange={(event)=>setDraft({...draft,terminology:{...draft.terminology,groupConversation:event.target.value}})}/>
-                </div>
-              </div>
-            </div>
-          </section>
+            </section>
+          </div>
         </div>
 
+        {/* 底部操作栏 */}
         <footer className="world-settings-dialog__footer">
-          <small>{saving ? '正在保存…' : notice ?? '视觉修改正在实时预览，只有保存后才会持久化'}</small>
+          <small>{saving ? t('worldSettings.saving', '正在保存…') : notice ?? t('worldSettings.saveStatusNotice', '空间视觉修改实时生效，点击保存持久化所有配置')}</small>
           <div>
-            <button type="button" className="secondary-button" onClick={close}>取消</button>
-            <button type="button" className="primary-button" disabled={saving} onClick={(e)=>void submit(e)}>
-              {saving ? '正在保存…' : '保存世界设置'}
+            <button type="button" className="secondary-button" onClick={close}>
+              {t('worldSettings.cancel', '取消')}
+            </button>
+            <button
+              type="button"
+              className="primary-button"
+              disabled={saving}
+              onClick={(e) => void submit(e)}
+            >
+              {saving ? t('worldSettings.saving', '正在保存…') : t('worldSettings.save', '保存世界管理')}
             </button>
           </div>
         </footer>
@@ -268,20 +603,6 @@ export function WorldSettingsDialog({ world, value, models, installedSkinIds, sa
     </div>
   )
 }
-
-const WORLD_APPEARANCE_PRESETS = [
-  { id:'graphite', label:'石墨金', description:'深色中性表面与克制琥珀强调', appearance:{accentColor:'#d7a52a',pageBackground:'#080d10',panelBackground:'#0d1419',ownerBubbleColor:'#18283a',characterBubbleColor:'#141c22',textColor:'#edf2f4',mutedTextColor:'#84919a'}},
-  { id:'deep-ocean', label:'深海蓝', description:'冷灰背景与清晰蓝色状态提示', appearance:{accentColor:'#67a9c4',pageBackground:'#081017',panelBackground:'#101b22',ownerBubbleColor:'#18323d',characterBubbleColor:'#13232c',textColor:'#e7eef1',mutedTextColor:'#91a2ab'}},
-  { id:'warm-paper', label:'暖灰日光', description:'低眩光浅色表面与深色正文', appearance:{accentColor:'#806321',pageBackground:'#e7e7e2',panelBackground:'#f1f0eb',ownerBubbleColor:'#ded6bd',characterBubbleColor:'#f7f6f2',textColor:'#252a27',mutedTextColor:'#626b65'}},
-] as const
-
-function appearanceMatches(appearance: WorldSettings['appearance'], candidate: typeof WORLD_APPEARANCE_PRESETS[number]['appearance']): boolean {
-  return appearance.accentColor === candidate.accentColor && appearance.pageBackground === candidate.pageBackground && appearance.panelBackground === candidate.panelBackground
-}
-
-const reasoningOptions: Array<[ReasoningEffort, string]> = [
-  ['auto','自动'], ['off','关闭'], ['minimal','极低'], ['low','低'], ['medium','中'], ['high','高'], ['xhigh','极高'], ['max','最大'],
-]
 
 function normalizeWorldSettings(settings: WorldSettings): WorldSettings {
   return settings.runtime.permissionMode === 'danger-full-access'

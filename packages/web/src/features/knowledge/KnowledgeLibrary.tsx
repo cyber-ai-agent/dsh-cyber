@@ -22,6 +22,7 @@ import type { World } from '@dsh-cyber/contracts'
 
 import { api, jsonBody } from '../../api.js'
 import { formatDateTime } from '../../i18n/format.js'
+import { useI18n } from '../../i18n/runtime.js'
 
 import type {
   KnowledgeCollection,
@@ -50,30 +51,8 @@ interface KnowledgeConsolidationResponse {
   job?: unknown
 }
 
-const collectionOriginLabels: Record<KnowledgeCollection['origin'], string> = {
-  folder: '文件夹',
-  zip: '知识包',
-  manual: '手动整理',
-  web: '网页',
-  artifact: '产物',
-}
-
-const documentOriginLabels: Record<KnowledgeDocument['origin'], string> = {
-  upload: '文件导入',
-  paste: '粘贴内容',
-  web: '网页导入',
-  filesystem: '本地扫描',
-  artifact: '世界产物',
-}
-
-const statusLabels: Record<KnowledgeDocumentStatus, string> = {
-  pending: '待整理',
-  indexed: '已索引',
-  failed: '处理失败',
-  missing: '源文件缺失',
-}
-
 export function KnowledgeLibrary({ world, demoMode, state }: KnowledgeLibraryProps) {
+  const { t } = useI18n()
   const [dialog, setDialog] = useState<DialogKind>()
   const [importMenuOpen, setImportMenuOpen] = useState(false)
   const [queryInput, setQueryInput] = useState('')
@@ -132,51 +111,51 @@ export function KnowledgeLibrary({ world, demoMode, state }: KnowledgeLibraryPro
     }
   }
 
-  return <section className="knowledge-library" aria-label={`${world.name}知识库`} aria-busy={state.loading || state.busyAction !== undefined}>
+  return <section className="knowledge-library" aria-label={`${world.name} - ${t('knowledge.libraryTitle', '知识库')}`} aria-busy={state.loading || state.busyAction !== undefined}>
     <header className="knowledge-library__header">
       <div>
-        <span className="knowledge-eyebrow"><Books size={15} aria-hidden="true" />原始资料</span>
-        <h3>知识库</h3>
-        <p>把当前世界要长期参考的文件、网页和笔记放在一起。</p>
+        <span className="knowledge-eyebrow"><Books size={15} aria-hidden="true" />{t('knowledge.libraryEyebrow', '原始资料')}</span>
+        <h3>{t('knowledge.libraryTitle', '知识库')}</h3>
+        <p>{t('knowledge.librarySubtitle', '把当前世界要长期参考的文件、网页和笔记放在一起。')}</p>
       </div>
-      <div className="knowledge-library__actions" aria-label="知识库导入操作">
-        <input ref={fileInputRef} className="knowledge-visually-hidden" type="file" accept=".md,.markdown,.txt,.json,.pdf,text/markdown,text/plain,application/json,application/pdf" onChange={handleFileChange} disabled={actionsDisabled} aria-label="选择要导入的资料文件" />
-        <input ref={zipInputRef} className="knowledge-visually-hidden" type="file" accept=".zip,application/zip" onChange={handlePackChange} disabled={actionsDisabled} aria-label="选择 ZIP 知识包" />
-        <input ref={folderInputRef} className="knowledge-visually-hidden" type="file" accept=".md,.markdown,.txt,.json,.pdf" multiple onChange={handlePackChange} disabled={actionsDisabled} {...({ webkitdirectory: '' } as unknown as Record<string, string>)} aria-label="选择知识文件夹" />
+      <div className="knowledge-library__actions" aria-label={t('knowledge.libraryImportAction', '知识库导入操作')}>
+        <input ref={fileInputRef} className="knowledge-visually-hidden" type="file" accept=".md,.markdown,.txt,.json,.pdf,text/markdown,text/plain,application/json,application/pdf" onChange={handleFileChange} disabled={actionsDisabled} aria-label={t('knowledge.libraryImportFile', '选择要导入的资料文件')} />
+        <input ref={zipInputRef} className="knowledge-visually-hidden" type="file" accept=".zip,application/zip" onChange={handlePackChange} disabled={actionsDisabled} aria-label={t('knowledge.libraryImportZip', '选择 ZIP 知识包')} />
+        <input ref={folderInputRef} className="knowledge-visually-hidden" type="file" accept=".md,.markdown,.txt,.json,.pdf" multiple onChange={handlePackChange} disabled={actionsDisabled} {...({ webkitdirectory: '' } as unknown as Record<string, string>)} aria-label={t('knowledge.libraryImportFolder', '选择知识文件夹')} />
         <div className="knowledge-import-menu-wrap">
-          <button ref={importButtonRef} type="button" className="knowledge-action knowledge-action--primary" onClick={() => setImportMenuOpen((open) => !open)} disabled={actionsDisabled} aria-expanded={importMenuOpen} aria-controls="knowledge-import-menu" title={demoMode ? '演示世界未连接本地知识库' : '选择文件、ZIP 知识包或文件夹'}><FileArrowUp size={16} aria-hidden="true" />导入资料</button>
-          {importMenuOpen ? <div id="knowledge-import-menu" className="knowledge-import-menu" role="menu" aria-label="选择导入方式" onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setImportMenuOpen(false); importButtonRef.current?.focus() } }}>
-            <button type="button" role="menuitem" onClick={() => { setImportMenuOpen(false); fileInputRef.current?.click() }}><FileText size={16} aria-hidden="true" /><span><strong>导入文件</strong><small>Markdown、TXT、JSON、PDF</small></span></button>
-            <button type="button" role="menuitem" onClick={() => { setImportMenuOpen(false); zipInputRef.current?.click() }}><Package size={16} aria-hidden="true" /><span><strong>导入 ZIP 知识包</strong><small>保留压缩包内的目录</small></span></button>
-            <button type="button" role="menuitem" onClick={() => { setImportMenuOpen(false); folderInputRef.current?.click() }}><FolderOpen size={16} aria-hidden="true" /><span><strong>导入文件夹</strong><small>批量导入资料目录</small></span></button>
+          <button ref={importButtonRef} type="button" className="knowledge-action knowledge-action--primary" onClick={() => setImportMenuOpen((open) => !open)} disabled={actionsDisabled} aria-expanded={importMenuOpen} aria-controls="knowledge-import-menu" title={demoMode ? t('knowledge.libraryDemoNotice', '演示世界未连接本地知识库') : t('knowledge.libraryImportTitle', '选择文件、ZIP 知识包或文件夹')}><FileArrowUp size={16} aria-hidden="true" />{t('knowledge.libraryImportAction', '导入资料')}</button>
+          {importMenuOpen ? <div id="knowledge-import-menu" className="knowledge-import-menu" role="menu" aria-label={t('knowledge.libraryImportTitle', '选择导入方式')} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setImportMenuOpen(false); importButtonRef.current?.focus() } }}>
+            <button type="button" role="menuitem" onClick={() => { setImportMenuOpen(false); fileInputRef.current?.click() }}><FileText size={16} aria-hidden="true" /><span><strong>{t('knowledge.libraryImportFile', '导入文件')}</strong><small>{t('knowledge.libraryImportFileDesc', 'Markdown、TXT、JSON、PDF')}</small></span></button>
+            <button type="button" role="menuitem" onClick={() => { setImportMenuOpen(false); zipInputRef.current?.click() }}><Package size={16} aria-hidden="true" /><span><strong>{t('knowledge.libraryImportZip', '导入 ZIP 知识包')}</strong><small>{t('knowledge.libraryImportZipDesc', '保留压缩包内的目录')}</small></span></button>
+            <button type="button" role="menuitem" onClick={() => { setImportMenuOpen(false); folderInputRef.current?.click() }}><FolderOpen size={16} aria-hidden="true" /><span><strong>{t('knowledge.libraryImportFolder', '导入文件夹')}</strong><small>{t('knowledge.libraryImportFolderDesc', '批量导入资料目录')}</small></span></button>
           </div> : null}
         </div>
-        <button type="button" className="knowledge-action" onClick={() => setDialog('paste')} disabled={actionsDisabled} title={demoMode ? '演示世界未连接本地知识库' : '粘贴一段资料'}><ClipboardText size={16} aria-hidden="true" />粘贴内容</button>
-        <button type="button" className="knowledge-action" onClick={() => setDialog('web')} disabled={actionsDisabled} title={demoMode ? '演示世界未连接本地知识库' : '从公开网页导入文字'}><GlobeSimple size={16} aria-hidden="true" />从网页导入</button>
-        <button type="button" className="knowledge-action knowledge-action--quiet" onClick={() => void state.rescan().catch(() => undefined)} disabled={actionsDisabled} title={demoMode ? '演示世界未连接本地知识库' : '扫描知识库目录中的变化'}><ArrowsClockwise size={16} aria-hidden="true" />重新扫描</button>
+        <button type="button" className="knowledge-action" onClick={() => setDialog('paste')} disabled={actionsDisabled} title={demoMode ? t('knowledge.libraryDemoNotice', '演示世界未连接本地知识库') : t('knowledge.pasteTitle', '粘贴一段资料')}><ClipboardText size={16} aria-hidden="true" />{t('knowledge.libraryPasteAction', '粘贴内容')}</button>
+        <button type="button" className="knowledge-action" onClick={() => setDialog('web')} disabled={actionsDisabled} title={demoMode ? t('knowledge.libraryDemoNotice', '演示世界未连接本地知识库') : t('knowledge.webTitle', '从公开网页导入文字')}><GlobeSimple size={16} aria-hidden="true" />{t('knowledge.libraryWebAction', '从网页导入')}</button>
+        <button type="button" className="knowledge-action knowledge-action--quiet" onClick={() => void state.rescan().catch(() => undefined)} disabled={actionsDisabled} title={demoMode ? t('knowledge.libraryDemoNotice', '演示世界未连接本地知识库') : t('knowledge.libraryRescanTitle', '扫描知识库目录中的变化')}><ArrowsClockwise size={16} aria-hidden="true" />{t('knowledge.libraryRescanAction', '重新扫描')}</button>
       </div>
     </header>
 
-    {demoMode ? <div className="knowledge-notice knowledge-notice--disabled" role="status"><WarningCircle size={17} aria-hidden="true" /><span>演示世界未连接本地知识库，导入与扫描入口暂不可用。</span></div> : null}
-    {state.error === undefined ? null : <div className="knowledge-notice knowledge-notice--error" role="alert"><WarningCircle size={17} aria-hidden="true" /><span>{state.error}</span><button type="button" onClick={() => void state.reload()} disabled={state.loading}>重试</button></div>}
+    {demoMode ? <div className="knowledge-notice knowledge-notice--disabled" role="status"><WarningCircle size={17} aria-hidden="true" /><span>{t('knowledge.libraryDemoNotice', '演示世界未连接本地知识库，导入与扫描入口暂不可用。')}</span></div> : null}
+    {state.error === undefined ? null : <div className="knowledge-notice knowledge-notice--error" role="alert"><WarningCircle size={17} aria-hidden="true" /><span>{state.error}</span><button type="button" onClick={() => void state.reload()} disabled={state.loading}>{t('knowledge.libraryRetry', '重试')}</button></div>}
 
     <form className="knowledge-search" role="search" onSubmit={submitSearch}>
       <MagnifyingGlass size={17} aria-hidden="true" />
-      <label className="knowledge-visually-hidden" htmlFor="knowledge-library-search">搜索知识库</label>
-      <input id="knowledge-library-search" name="q" type="search" value={queryInput} onChange={(event) => setQueryInput(event.target.value)} placeholder="搜索资料、标题或网页来源" disabled={demoMode || state.searching} autoComplete="off" />
-      {hasSearch || queryInput.length > 0 ? <button type="button" className="knowledge-search__clear" onClick={clearSearch} aria-label="清除知识库搜索" title="清除搜索"><X size={16} aria-hidden="true" /></button> : null}
-      <button type="submit" className="knowledge-search__submit" disabled={demoMode || state.searching || queryInput.trim().length === 0} aria-label="搜索知识库" title="搜索知识库">{state.searching ? <SpinnerGap size={16} className="knowledge-spin" aria-hidden="true" /> : <span>搜索</span>}</button>
+      <label className="knowledge-visually-hidden" htmlFor="knowledge-library-search">{t('knowledge.librarySearchPlaceholder', '搜索知识库')}</label>
+      <input id="knowledge-library-search" name="q" type="search" value={queryInput} onChange={(event) => setQueryInput(event.target.value)} placeholder={t('knowledge.librarySearchPlaceholder', '搜索资料、标题或网页来源')} disabled={demoMode || state.searching} autoComplete="off" />
+      {hasSearch || queryInput.length > 0 ? <button type="button" className="knowledge-search__clear" onClick={clearSearch} aria-label={t('knowledge.librarySearchClear', '清除知识库搜索')} title={t('knowledge.librarySearchClear', '清除搜索')}><X size={16} aria-hidden="true" /></button> : null}
+      <button type="submit" className="knowledge-search__submit" disabled={demoMode || state.searching || queryInput.trim().length === 0} aria-label={t('knowledge.librarySearchSubmit', '搜索知识库')} title={t('knowledge.librarySearchSubmit', '搜索知识库')}>{state.searching ? <SpinnerGap size={16} className="knowledge-spin" aria-hidden="true" /> : <span>{t('knowledge.librarySearchSubmit', '搜索')}</span>}</button>
     </form>
 
     {state.searchError === undefined ? null : <div className="knowledge-notice knowledge-notice--error knowledge-notice--inline" role="alert"><WarningCircle size={16} aria-hidden="true" /><span>{state.searchError}</span></div>}
 
     <div className="knowledge-evidence" aria-label="知识库来源、索引和更新时间">
-      <span><strong>来源</strong><b>{state.documents.length}</b><small>份资料</small></span>
-      <span><strong>索引</strong><b>{indexedCount}/{state.documents.length}</b><small>已完成</small></span>
-      <span><strong>更新</strong><b>{formatDate(lastUpdated)}</b><small>最近变更</small></span>
+      <span><strong>{t('knowledge.libraryStatSources', '来源')}</strong><b>{state.documents.length}</b><small>{t('knowledge.libraryStatSourcesUnit', '份资料')}</small></span>
+      <span><strong>{t('knowledge.libraryStatIndexed', '索引')}</strong><b>{indexedCount}/{state.documents.length}</b><small>{t('knowledge.libraryStatIndexedUnit', '已完成')}</small></span>
+      <span><strong>{t('knowledge.libraryStatUpdated', '更新')}</strong><b>{formatDate(lastUpdated, t)}</b><small>{t('knowledge.libraryStatUpdatedUnit', '最近变更')}</small></span>
     </div>
 
-    {state.loading ? <div className="knowledge-state" role="status"><SpinnerGap size={22} className="knowledge-spin" aria-hidden="true" /><span>正在读取知识库…</span></div> : hasSearch ? <SearchResults results={state.searchResults} query={state.searchQuery} /> : <>
+    {state.loading ? <div className="knowledge-state" role="status"><SpinnerGap size={22} className="knowledge-spin" aria-hidden="true" /><span>{t('knowledge.libraryLoading', '正在读取知识库…')}</span></div> : hasSearch ? <SearchResults results={state.searchResults} query={state.searchQuery} /> : <>
       <CollectionSection collections={state.collections} documents={state.documents} />
       <DocumentSection documents={state.documents} consolidationByDocument={consolidationByDocument} demoMode={demoMode} onConsolidate={(document) => void consolidateDocument(document)} />
     </>}
@@ -187,49 +166,58 @@ export function KnowledgeLibrary({ world, demoMode, state }: KnowledgeLibraryPro
 }
 
 function CollectionSection({ collections, documents }: { collections: KnowledgeCollection[]; documents: KnowledgeDocument[] }) {
+  const { t } = useI18n()
   return <section className="knowledge-section" aria-labelledby="knowledge-collections-heading">
-    <header className="knowledge-section__heading"><div><h4 id="knowledge-collections-heading">知识包</h4><span>按来源整理的资料集合</span></div><b>{collections.length}</b></header>
-    {collections.length === 0 ? <div className="knowledge-empty knowledge-empty--compact"><FolderOpen size={20} aria-hidden="true" /><span>还没有知识包</span><small>导入文件夹或 ZIP 后，会在这里保留目录和来源。</small></div> : <ul className="knowledge-rows" aria-label="知识包列表">{collections.map((collection) => <CollectionRow key={collection.id} collection={collection} documents={documents} />)}</ul>}
+    <header className="knowledge-section__heading"><div><h4 id="knowledge-collections-heading">{t('knowledge.collectionSectionTitle', '知识包')}</h4><span>{t('knowledge.collectionSectionSubtitle', '按来源整理的资料集合')}</span></div><b>{collections.length}</b></header>
+    {collections.length === 0 ? <div className="knowledge-empty knowledge-empty--compact"><FolderOpen size={20} aria-hidden="true" /><span>{t('knowledge.collectionEmptyTitle', '还没有知识包')}</span><small>{t('knowledge.collectionEmptyDesc', '导入文件夹或 ZIP 后，会在这里保留目录和来源。')}</small></div> : <ul className="knowledge-rows" aria-label={t('knowledge.collectionSectionTitle', '知识包列表')}>{collections.map((collection) => <CollectionRow key={collection.id} collection={collection} documents={documents} />)}</ul>}
   </section>
 }
 
 function CollectionRow({ collection, documents }: { collection: KnowledgeCollection; documents: KnowledgeDocument[] }) {
+  const { t } = useI18n()
   const collectionDocuments = documents.filter((document) => document.collectionId === collection.id)
   const indexed = collectionDocuments.length > 0 ? collectionDocuments.filter((document) => document.status === 'indexed').length : collection.indexedDocumentCount ?? 0
+  const originKey = `knowledge.origin${collection.origin.charAt(0).toUpperCase() + collection.origin.slice(1)}`
   return <li className="knowledge-row knowledge-row--collection">
     <span className="knowledge-row__icon" aria-hidden="true"><Package size={18} /></span>
-    <span className="knowledge-row__body"><strong>{collection.name}</strong><small>{collectionOriginLabels[collection.origin]} · {collection.documentCount} 份资料</small></span>
-    <span className="knowledge-row__evidence"><span>来源 {collection.relativeRoot || '未指定目录'}</span><span>索引 {indexed}/{collection.documentCount}</span><span>更新 {formatDate(collection.updatedAt)}</span></span>
+    <span className="knowledge-row__body"><strong>{collection.name}</strong><small>{t(originKey, collection.origin)} · {t('knowledge.libraryStatSourcesUnit', '{count} 份资料', { count: collection.documentCount })}</small></span>
+    <span className="knowledge-row__evidence"><span>{t('knowledge.libraryStatSources', '来源')} {collection.relativeRoot || '未指定目录'}</span><span>{t('knowledge.libraryStatIndexed', '索引')} {indexed}/{collection.documentCount}</span><span>{t('knowledge.libraryStatUpdated', '更新')} {formatDate(collection.updatedAt, t)}</span></span>
   </li>
 }
 
 function DocumentSection({ documents, consolidationByDocument, demoMode, onConsolidate }: { documents: KnowledgeDocument[]; consolidationByDocument: Record<string, KnowledgeConsolidationEntry>; demoMode: boolean; onConsolidate(document: KnowledgeDocument): void }) {
+  const { t } = useI18n()
   return <section className="knowledge-section" aria-labelledby="knowledge-documents-heading">
-    <header className="knowledge-section__heading"><div><h4 id="knowledge-documents-heading">资料</h4><span>可检索的原始内容</span></div><b>{documents.length}</b></header>
-    {documents.length === 0 ? <div className="knowledge-empty"><FileText size={23} aria-hidden="true" /><strong>还没有资料</strong><span>导入 Markdown、TXT、JSON、PDF，或粘贴一段内容开始建立这个世界的参考资料。</span></div> : <ul className="knowledge-rows" aria-label="知识资料列表">{documents.map((document) => <DocumentRow key={document.id} document={document} consolidation={consolidationByDocument[document.id]} demoMode={demoMode} onConsolidate={onConsolidate} />)}</ul>}
+    <header className="knowledge-section__heading"><div><h4 id="knowledge-documents-heading">{t('knowledge.documentSectionTitle', '资料')}</h4><span>{t('knowledge.documentSectionSubtitle', '可检索的原始内容')}</span></div><b>{documents.length}</b></header>
+    {documents.length === 0 ? <div className="knowledge-empty"><FileText size={23} aria-hidden="true" /><strong>{t('knowledge.documentEmptyTitle', '还没有资料')}</strong><span>{t('knowledge.documentEmptyDesc', '导入 Markdown、TXT、JSON、PDF，或粘贴一段内容开始建立这个世界的参考资料。')}</span></div> : <ul className="knowledge-rows" aria-label={t('knowledge.documentSectionTitle', '知识资料列表')}>{documents.map((document) => <DocumentRow key={document.id} document={document} consolidation={consolidationByDocument[document.id]} demoMode={demoMode} onConsolidate={onConsolidate} />)}</ul>}
   </section>
 }
 
 function DocumentRow({ document, consolidation, demoMode, onConsolidate }: { document: KnowledgeDocument; consolidation?: KnowledgeConsolidationEntry | undefined; demoMode: boolean; onConsolidate(document: KnowledgeDocument): void }) {
+  const { t } = useI18n()
   const consolidationActive = consolidation?.state === 'pending' || consolidation?.state === 'queued' || consolidation?.state === 'success'
   const canConsolidate = document.status === 'indexed' && !demoMode && !consolidationActive
+  const originKey = `knowledge.origin${document.origin.charAt(0).toUpperCase() + document.origin.slice(1)}`
+  const statusKey = `knowledge.status${document.status.charAt(0).toUpperCase() + document.status.slice(1)}`
   return <li className="knowledge-row knowledge-row--document">
     <span className="knowledge-row__icon" aria-hidden="true"><FileText size={18} /></span>
-    <span className="knowledge-row__body"><strong>{document.title}</strong><small>{documentOriginLabels[document.origin]} · {document.relativePath || '来源路径未提供'}</small></span>
-    <span className="knowledge-row__status"><span className={`knowledge-status knowledge-status--${document.status}`}><StatusIcon status={document.status} aria-hidden="true" />{statusLabels[document.status]}</span><small>{document.chunkCount} 段 · {formatBytes(document.byteLength)}</small></span>
-    <span className="knowledge-row__evidence"><span>来源 {document.sourceUrl || document.relativePath || '本地资料'}</span><span>更新 {formatDate(document.updatedAt)}</span></span>
-    {document.status === 'indexed' ? <span className="knowledge-row__consolidation"><button type="button" className="knowledge-row__consolidation-button" onClick={() => onConsolidate(document)} disabled={!canConsolidate} aria-describedby={`knowledge-consolidation-${document.id}`} title={demoMode ? '演示世界暂不可整理知识' : consolidation?.state === 'error' ? '重新加入知识图谱' : '将这份资料吸收到知识图谱'}>{consolidation?.state === 'pending' ? '正在加入…' : consolidation?.state === 'queued' ? '已排队' : consolidation?.state === 'success' ? '已加入知识图谱' : '吸收到知识图谱'}</button>{consolidation === undefined ? null : <small id={`knowledge-consolidation-${document.id}`} className={`knowledge-row__consolidation-status knowledge-row__consolidation-status--${consolidation.state}`} role={consolidation.state === 'error' ? 'alert' : 'status'} aria-live="polite">{consolidation.message}</small>}</span> : null}
+    <span className="knowledge-row__body"><strong>{document.title}</strong><small>{t(originKey, document.origin)} · {document.relativePath || '来源路径未提供'}</small></span>
+    <span className="knowledge-row__status"><span className={`knowledge-status knowledge-status--${document.status}`}><StatusIcon status={document.status} aria-hidden="true" />{t(statusKey, document.status)}</span><small>{document.chunkCount} 段 · {formatBytes(document.byteLength)}</small></span>
+    <span className="knowledge-row__evidence"><span>{t('knowledge.libraryStatSources', '来源')} {document.sourceUrl || document.relativePath || '本地资料'}</span><span>{t('knowledge.libraryStatUpdated', '更新')} {formatDate(document.updatedAt, t)}</span></span>
+    {document.status === 'indexed' ? <span className="knowledge-row__consolidation"><button type="button" className="knowledge-row__consolidation-button" onClick={() => onConsolidate(document)} disabled={!canConsolidate} aria-describedby={`knowledge-consolidation-${document.id}`} title={demoMode ? t('knowledge.libraryDemoNotice', '演示世界暂不可整理知识') : consolidation?.state === 'error' ? t('knowledge.consolidateButton', '重新加入知识图谱') : t('knowledge.consolidateButton', '吸收到知识图谱')}>{consolidation?.state === 'pending' ? t('knowledge.consolidatePending', '正在加入…') : consolidation?.state === 'queued' ? t('knowledge.consolidateQueued', '已排队') : consolidation?.state === 'success' ? t('knowledge.consolidateSuccess', '已加入知识图谱') : t('knowledge.consolidateButton', '吸收到知识图谱')}</button>{consolidation === undefined ? null : <small id={`knowledge-consolidation-${document.id}`} className={`knowledge-row__consolidation-status knowledge-row__consolidation-status--${consolidation.state}`} role={consolidation.state === 'error' ? 'alert' : 'status'} aria-live="polite">{consolidation.message}</small>}</span> : null}
   </li>
 }
 
 function SearchResults({ results, query }: { results: KnowledgeSearchResult[]; query: string }) {
+  const { t } = useI18n()
   return <section className="knowledge-section knowledge-section--search" aria-labelledby="knowledge-search-results-heading" aria-live="polite">
-    <header className="knowledge-section__heading"><div><h4 id="knowledge-search-results-heading">搜索结果</h4><span>“{query}” 的资料片段</span></div><b>{results.length}</b></header>
-    {results.length === 0 ? <div className="knowledge-empty"><MagnifyingGlass size={22} aria-hidden="true" /><strong>没有找到匹配资料</strong><span>换一个关键词，或先导入一份资料。</span></div> : <ul className="knowledge-rows knowledge-search-results" aria-label="知识库搜索结果">{results.map((result) => <li key={result.id} className="knowledge-row knowledge-row--result"><span className="knowledge-row__icon" aria-hidden="true"><LinkSimple size={18} /></span><span className="knowledge-row__body"><strong>{result.title}</strong><small>{result.collectionName || '知识库'} · {result.relativePath || '来源路径未提供'}</small><span className="knowledge-result__snippet">{result.snippet || '该资料片段没有可显示的摘要。'}</span></span><span className="knowledge-row__evidence"><span>来源 {result.sourceUrl || result.relativePath || '本地资料'}</span><span>相关度 {formatScore(result.score)}</span><span>更新 {formatDate(result.updatedAt)}</span></span></li>)}</ul>}
+    <header className="knowledge-section__heading"><div><h4 id="knowledge-search-results-heading">{t('knowledge.librarySearchSubmit', '搜索结果')}</h4><span>“{query}”</span></div><b>{results.length}</b></header>
+    {results.length === 0 ? <div className="knowledge-empty"><MagnifyingGlass size={22} aria-hidden="true" /><strong>没有找到匹配资料</strong><span>换一个关键词，或先导入一份资料。</span></div> : <ul className="knowledge-rows knowledge-search-results" aria-label="知识库搜索结果">{results.map((result) => <li key={result.id} className="knowledge-row knowledge-row--result"><span className="knowledge-row__icon" aria-hidden="true"><LinkSimple size={18} /></span><span className="knowledge-row__body"><strong>{result.title}</strong><small>{result.collectionName || t('knowledge.libraryTitle', '知识库')} · {result.relativePath || '来源路径未提供'}</small><span className="knowledge-result__snippet">{result.snippet || '该资料片段没有可显示的摘要。'}</span></span><span className="knowledge-row__evidence"><span>{t('knowledge.libraryStatSources', '来源')} {result.sourceUrl || result.relativePath || '本地资料'}</span><span>相关度 {formatScore(result.score)}</span><span>{t('knowledge.libraryStatUpdated', '更新')} {formatDate(result.updatedAt, t)}</span></span></li>)}</ul>}
   </section>
 }
 
 function PasteDialog({ busy, onClose, onSubmit }: { busy: boolean; onClose(): void; onSubmit(input: { title: string; content: string }): Promise<void> }) {
+  const { t } = useI18n()
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [error, setError] = useState<string>()
@@ -239,20 +227,21 @@ function PasteDialog({ busy, onClose, onSubmit }: { busy: boolean; onClose(): vo
     setError(undefined)
     try { await onSubmit({ title: title.trim(), content }) } catch (cause) { setError(cause instanceof Error ? cause.message : '保存失败，请稍后重试。') }
   }
-  return <KnowledgeDialogShell title="粘贴内容" description="内容会保存为当前世界的一份本地 Markdown 资料。" busy={busy} onClose={onClose} labelledBy="knowledge-paste-title" describedBy="knowledge-paste-description">
+  return <KnowledgeDialogShell title={t('knowledge.pasteTitle', '粘贴内容')} description={t('knowledge.pasteDesc', '内容会保存为当前世界的一份本地 Markdown 资料。')} busy={busy} onClose={onClose} labelledBy="knowledge-paste-title" describedBy="knowledge-paste-description">
     <form className="knowledge-dialog__form" onSubmit={(event) => void submit(event)}>
-      <p id="knowledge-paste-description" className="knowledge-dialog__hint">外部文字只作为资料保存，不会改变角色权限或执行世界操作。</p>
-      <label htmlFor="knowledge-paste-name">资料标题</label>
-      <input id="knowledge-paste-name" data-dialog-autofocus name="title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="例如：产品定位笔记" autoComplete="off" disabled={busy} />
-      <label htmlFor="knowledge-paste-content">资料内容</label>
-      <textarea id="knowledge-paste-content" name="content" value={content} onChange={(event) => setContent(event.target.value)} placeholder="粘贴需要长期参考的内容" rows={9} disabled={busy} />
+      <p id="knowledge-paste-description" className="knowledge-dialog__hint">{t('knowledge.pasteHint', '外部文字只作为资料保存，不会改变角色权限或执行世界操作。')}</p>
+      <label htmlFor="knowledge-paste-name">{t('knowledge.pasteNameLabel', '资料标题')}</label>
+      <input id="knowledge-paste-name" data-dialog-autofocus name="title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder={t('knowledge.pasteNamePlaceholder', '例如：产品定位笔记')} autoComplete="off" disabled={busy} />
+      <label htmlFor="knowledge-paste-content">{t('knowledge.pasteContentLabel', '资料内容')}</label>
+      <textarea id="knowledge-paste-content" name="content" value={content} onChange={(event) => setContent(event.target.value)} placeholder={t('knowledge.pasteContentPlaceholder', '粘贴需要长期参考的内容')} rows={9} disabled={busy} />
       {error === undefined ? null : <p className="knowledge-dialog__error" role="alert">{error}</p>}
-      <footer><button type="button" className="knowledge-button" onClick={onClose} disabled={busy}>取消</button><button type="submit" className="knowledge-button knowledge-button--primary" disabled={busy}><UploadSimple size={16} aria-hidden="true" />{busy ? '正在保存…' : '保存到知识库'}</button></footer>
+      <footer><button type="button" className="knowledge-button" onClick={onClose} disabled={busy}>{t('knowledge.cancel', '取消')}</button><button type="submit" className="knowledge-button knowledge-button--primary" disabled={busy}><UploadSimple size={16} aria-hidden="true" />{busy ? t('knowledge.pasteSubmitting', '正在保存…') : t('knowledge.pasteSubmit', '保存到知识库')}</button></footer>
     </form>
   </KnowledgeDialogShell>
 }
 
 function WebImportDialog({ busy, onClose, onSubmit }: { busy: boolean; onClose(): void; onSubmit(input: { url: string; title?: string }): Promise<void> }) {
+  const { t } = useI18n()
   const [url, setUrl] = useState('')
   const [title, setTitle] = useState('')
   const [error, setError] = useState<string>()
@@ -263,13 +252,13 @@ function WebImportDialog({ busy, onClose, onSubmit }: { busy: boolean; onClose()
     setError(undefined)
     try { await onSubmit(value) } catch (cause) { setError(cause instanceof Error ? cause.message : '网页导入失败，请稍后重试。') }
   }
-  return <KnowledgeDialogShell title="从网页导入" description="网页会先转换为可检索的文字，原网址会保留在资料来源中。" busy={busy} onClose={onClose} labelledBy="knowledge-web-title" describedBy="knowledge-web-description">
+  return <KnowledgeDialogShell title={t('knowledge.webTitle', '从网页导入')} description={t('knowledge.webDesc', '网页会先转换为可检索的文字，原网址会保留在资料来源中。')} busy={busy} onClose={onClose} labelledBy="knowledge-web-title" describedBy="knowledge-web-description">
     <form className="knowledge-dialog__form" onSubmit={(event) => void submit(event)}>
-      <p id="knowledge-web-description" className="knowledge-dialog__hint">只导入你有权访问的公开内容。网页中的指令文字会被视为普通资料。</p>
-      <label htmlFor="knowledge-web-url">网页地址</label><input id="knowledge-web-url" data-dialog-autofocus name="url" type="url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com/article" autoComplete="url" disabled={busy} />
-      <label htmlFor="knowledge-web-title-input">资料标题（可选）</label><input id="knowledge-web-title-input" name="title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="留空则使用网页标题" autoComplete="off" disabled={busy} />
+      <p id="knowledge-web-description" className="knowledge-dialog__hint">{t('knowledge.webHint', '只导入你有权访问的公开内容。网页中的指令文字会被视为普通资料。')}</p>
+      <label htmlFor="knowledge-web-url">{t('knowledge.webUrlLabel', '网页地址')}</label><input id="knowledge-web-url" data-dialog-autofocus name="url" type="url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder={t('knowledge.webUrlPlaceholder', 'https://example.com/article')} autoComplete="url" disabled={busy} />
+      <label htmlFor="knowledge-web-title-input">{t('knowledge.webNameLabel', '资料标题（可选）')}</label><input id="knowledge-web-title-input" name="title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder={t('knowledge.webNamePlaceholder', '留空则使用网页标题')} autoComplete="off" disabled={busy} />
       {error === undefined ? null : <p className="knowledge-dialog__error" role="alert">{error}</p>}
-      <footer><button type="button" className="knowledge-button" onClick={onClose} disabled={busy}>取消</button><button type="submit" className="knowledge-button knowledge-button--primary" disabled={busy}><GlobeSimple size={16} aria-hidden="true" />{busy ? '正在导入…' : '保存到知识库'}</button></footer>
+      <footer><button type="button" className="knowledge-button" onClick={onClose} disabled={busy}>{t('knowledge.cancel', '取消')}</button><button type="submit" className="knowledge-button knowledge-button--primary" disabled={busy}><GlobeSimple size={16} aria-hidden="true" />{busy ? t('knowledge.webSubmitting', '正在导入…') : t('knowledge.webSubmit', '保存到知识库')}</button></footer>
     </form>
   </KnowledgeDialogShell>
 }
@@ -333,8 +322,8 @@ function latestUpdatedAt(items: Array<{ updatedAt: string }>): string {
   return items.map((item) => item.updatedAt).filter((value) => value.length > 0).sort().at(-1) ?? ''
 }
 
-function formatDate(value: string | undefined): string {
-  if (!value) return '尚未记录'
+function formatDate(value: string | undefined, t?: (key: string, fallback: string) => string): string {
+  if (!value) return t ? t('knowledge.libraryStatUpdatedNone', '尚未记录') : '尚未记录'
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : formatDateTime(date, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }

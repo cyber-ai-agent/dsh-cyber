@@ -33,7 +33,7 @@ export function ContextMenu({ label, position, items, onClose }: ContextMenuProp
       x: Math.max(margin, Math.min(position.x, window.innerWidth - menu.offsetWidth - margin)),
       y: Math.max(margin, Math.min(position.y, window.innerHeight - menu.offsetHeight - margin)),
     })
-    menu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
+    menu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({ preventScroll: true })
   }, [position])
 
   useEffect(() => {
@@ -45,7 +45,7 @@ export function ContextMenu({ label, position, items, onClose }: ContextMenuProp
       const buttons = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])]
       const index = buttons.indexOf(document.activeElement as HTMLButtonElement)
       const offset = event.key === 'ArrowDown' ? 1 : -1
-      buttons[(index + offset + buttons.length) % buttons.length]?.focus()
+      buttons[(index + offset + buttons.length) % buttons.length]?.focus({ preventScroll: true })
     }
     window.addEventListener('pointerdown', close)
     window.addEventListener('keydown', keyboard)

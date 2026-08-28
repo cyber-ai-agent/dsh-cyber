@@ -39,8 +39,8 @@ test('uses the recruited role default, persists full access, and exposes no admi
   await expect(page.locator('.workbench-shell')).toBeVisible()
   await expect(page.getByText('世界管理员')).toHaveCount(0)
 
-  await page.getByRole('button', { name: '世界设置' }).click()
-  const worldSettings = page.getByRole('dialog', { name: /世界设置/ })
+  await page.getByRole('button', { name: '世界管理' }).click()
+  const worldSettings = page.getByRole('dialog', { name: /世界管理|世界设置/ })
   await expect(worldSettings).not.toContainText('管理员')
   await worldSettings.getByRole('button', { name: '取消' }).click()
 

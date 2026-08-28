@@ -1,14 +1,17 @@
 .creative-workshop-dialog {
-  width: min(1180px, calc(100vw - 48px));
-  max-height: min(860px, calc(100vh - 48px));
+  width: min(1040px, 94vw);
+  height: min(720px, 86vh);
+  max-height: 740px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--border-subtle, rgba(255,255,255,.1));
-  border-radius: 20px;
-  background: var(--world-panel, #15181f);
-  color: var(--world-text, #f4f6fa);
-  box-shadow: 0 28px 80px rgba(0, 0, 0, .42);
+  border: 1px solid var(--dialog-border-strong, rgba(255, 255, 255, 0.2)) !important;
+  border-radius: 18px;
+  background: var(--dialog-bg, #0c1219) !important;
+  color: var(--dialog-text, #f4f6fa) !important;
+  box-shadow: 0 32px 100px rgba(0, 0, 0, 0.88), 0 0 0 1px var(--dialog-border, rgba(255, 255, 255, 0.1)) !important;
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
 }
 
 .creative-workshop-layout {
@@ -17,8 +20,9 @@
   grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
   flex: 1;
   overflow: hidden;
-  border-top: 1px solid var(--border-subtle, rgba(255,255,255,.08));
-  border-bottom: 1px solid var(--border-subtle, rgba(255,255,255,.08));
+  background: var(--dialog-bg, #0c1219) !important;
+  border-top: 1px solid var(--dialog-border, rgba(255, 255, 255, 0.1));
+  border-bottom: 1px solid var(--dialog-border, rgba(255, 255, 255, 0.1));
 }
 
 .creative-workshop-sidebar,
@@ -29,21 +33,22 @@
 
 .creative-workshop-sidebar {
   padding: 20px;
-  border-right: 1px solid var(--border-subtle, rgba(255,255,255,.08));
-  background: color-mix(in srgb, var(--world-panel, #15181f) 94%, black);
+  border-right: 1px solid var(--dialog-border, rgba(255, 255, 255, 0.1));
+  background: var(--dialog-nav-bg, rgba(0, 0, 0, 0.4)) !important;
 }
 
 .creative-workshop-role-editor {
   padding: 24px 28px 32px;
+  background: var(--dialog-bg, #0c1219) !important;
 }
 
 .creative-workshop-world-card,
 .creative-workshop-presets,
 .creative-workshop-skills {
   padding: 16px;
-  border: 1px solid var(--border-subtle, rgba(255,255,255,.09));
+  border: 1px solid var(--dialog-border, rgba(255, 255, 255, 0.1));
   border-radius: 14px;
-  background: rgba(255,255,255,.025);
+  background: var(--dialog-surface, rgba(255, 255, 255, 0.04)) !important;
 }
 
 .creative-workshop-section-title,
@@ -270,13 +275,13 @@
   font-size: 13px;
 }
 
-.creative-workshop-dialog { border-radius: var(--radius-dialog, 10px); background: var(--surface-0, #0c1115); color: var(--text, #f4f6fa); }
+.creative-workshop-dialog { border-radius: 20px; background: var(--dialog-bg, #0c1219) !important; color: var(--dialog-text, #f4f6fa) !important; }
 .creative-workshop-wizard { min-height: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto auto; flex: 1; overflow: hidden; }
-.creative-workshop-steps { margin: 0; padding: 14px 28px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); list-style: none; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--surface-1); }
+.creative-workshop-steps { margin: 0; padding: 14px 28px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); list-style: none; border-top: 1px solid var(--dialog-border); border-bottom: 1px solid var(--dialog-border); background: var(--dialog-nav-bg, rgba(0,0,0,0.35)) !important; }
 .creative-workshop-steps li { position: relative; min-width: 0; display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: center; gap: 9px; color: var(--text-muted); }
-.creative-workshop-steps li:not(:last-child)::after { content: ''; position: absolute; top: 15px; left: 42px; right: 12px; height: 1px; background: var(--border-strong); }
-.creative-workshop-steps li > span { position: relative; z-index: 1; width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid var(--border-strong); border-radius: 50%; background: var(--surface-1); font-size: 12px; }
-.creative-workshop-steps li > div { position: relative; z-index: 1; width: fit-content; display: grid; gap: 2px; padding-right: 8px; background: var(--surface-1); }
+.creative-workshop-steps li:not(:last-child)::after { content: ''; position: absolute; top: 15px; left: 42px; right: 12px; height: 1px; background: var(--dialog-border); }
+.creative-workshop-steps li > span { position: relative; z-index: 1; width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid var(--dialog-border-strong); border-radius: 50%; background: var(--dialog-surface); font-size: 12px; }
+.creative-workshop-steps li > div { position: relative; z-index: 1; width: fit-content; display: grid; gap: 2px; padding-right: 8px; background: transparent; }
 .creative-workshop-steps strong { font-size: 13px; }
 .creative-workshop-steps small { font-size: 12px; white-space: nowrap; }
 .creative-workshop-steps li.is-active { color: var(--text); }

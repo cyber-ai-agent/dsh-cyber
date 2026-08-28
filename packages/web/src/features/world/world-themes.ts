@@ -728,7 +728,7 @@ export const BUILTIN_THEMES: WorldThemeConfig[] = [
   {
     id: 'white-whale',
     displayName: '白鲸圣女',
-    description: '极地纯白 · 极光冰蓝 · 纯白丝袜与水下极光圣殿',
+    description: '极地纯白 · 极光冰蓝 · 纯白丝袜鲸鱼娘与水下极光圣殿',
     author: '官方内置',
     source: 'builtin',
     tokens: {
@@ -751,7 +751,7 @@ export const BUILTIN_THEMES: WorldThemeConfig[] = [
   {
     id: 'black-orca',
     displayName: '漆黑虎鲸',
-    description: '深渊机能 · 魅影黑丝 · 虎鲸电光与未来深潜舰桥',
+    description: '深渊机能 · 魅影黑丝 · 虎鲸娘电光与未来深潜舰桥（鲸鱼娘专属）',
     author: '官方内置',
     source: 'builtin',
     tokens: {
