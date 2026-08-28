@@ -61,7 +61,11 @@ export class WorldRuntimePermissionResolver {
     // A revoked read is the owner's own decision about this world's files, and
     // it is not overridden by a host-access grant: the way to undo it is to
     // grant the permission back, not to escalate around it.
-    const permissionMode: AgentPermissionMode = readDenied
+    // A write revocation is just as specific as a read revocation. Leaving a
+    // confirmed danger-full-access lane active here would let the runtime
+    // write the same world directory by absolute path, making the visible
+    // world.files.write revocation ineffective.
+    const permissionMode: AgentPermissionMode = readDenied || writeDenied
       ? 'read-only'
       : requested === 'danger-full-access'
         ? input.ownerHostAccess === true ? 'danger-full-access' : 'read-only'

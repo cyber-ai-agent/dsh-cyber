@@ -233,6 +233,38 @@ describe('the World file permissions the owner can see and toggle', () => {
     expect(runtime.turns.at(-1)!.permissionMode).toBe('read-only')
     expect(runtime.turns.at(-1)!.workspacePath).toContain('restricted-workspace')
   })
+
+  it('does not let a revoked write be escalated around with a host grant', async () => {
+    const { origin, server, runtime, world, characterId } = await start()
+    const session = server.store.createSession({
+      workspaceId: world.workspaceId,
+      worldId: world.id,
+      kind: 'direct',
+      title: '写权限越权测试',
+      participants: [{ participantId: 'owner', kind: 'owner' }, { participantId: characterId, kind: 'employee' }],
+    })
+    await setWorldPermissions(origin, world.id, characterId, ['world.files.read', 'world.files.write'])
+    await setWorldPermissions(origin, world.id, characterId, ['world.files.read'])
+    const issued = await json(origin, `/api/worlds/${world.id}/runtime-access-grants`, send('POST', {
+      scope: 'session',
+      sessionId: session.id,
+      employeeIds: [characterId],
+      confirmed: true,
+    }))
+    expect(issued.response.status).toBe(201)
+
+    await json(origin, `/api/worlds/${world.id}/chat`, send('POST', {
+      prompt: '尝试修改世界文件',
+      employeeIds: [characterId],
+      sessionId: session.id,
+      permissionMode: 'danger-full-access',
+      clientTurnId: 'turn-write-escalate',
+      runtimeAccessGrantId: issued.body.grant.id,
+    }))
+
+    expect(runtime.turns.at(-1)!.permissionMode).toBe('read-only')
+    expect(runtime.turns.at(-1)!.workspacePath).not.toContain('restricted-workspace')
+  })
 })
 
 describe('role runtime access', () => {
