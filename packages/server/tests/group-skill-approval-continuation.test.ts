@@ -204,7 +204,10 @@ async function postJson<T = unknown>(url: string, body: Record<string, unknown>)
 }
 
 async function waitFor(predicate: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 300; attempt += 1) {
+  // The full Vitest suite starts many isolated SQLite servers in parallel;
+  // allow the queue worker to acquire its first lease without weakening the
+  // predicate or delaying the fast path.
+  for (let attempt = 0; attempt < 1_000; attempt += 1) {
     if (predicate()) return
     await new Promise((resolve) => setTimeout(resolve, 10))
   }
