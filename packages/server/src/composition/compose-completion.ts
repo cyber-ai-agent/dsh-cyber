@@ -33,7 +33,7 @@ export function composeCompletionWorker(
           sessionId: job.sessionId,
           workTurnId: job.workTurnId,
           agentRunId: job.agentRunId,
-          artifactRefs: contribution.artifactRefs,
+          ...(contribution.artifactRefs === undefined ? {} : { artifactRefs: contribution.artifactRefs }),
         })
         return contribution
       },
