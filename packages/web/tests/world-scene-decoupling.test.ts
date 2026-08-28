@@ -26,7 +26,10 @@ describe('World Scene ownership guard', () => {
 
   it('renders the World dock as a full spatial scene instead of an actor-only shared Skin overlay', () => {
     const world = readFileSync(join(worldSourceRoot, 'WorldRuntimeDock.tsx'), 'utf8')
+    const canvas = readFileSync(join(worldSourceRoot, 'WorldCanvas.tsx'), 'utf8')
     expect(world).not.toContain('world-runtime-dock--shared-scene')
     expect(world).not.toMatch(/\bsharedScene\b/)
+    expect(canvas).not.toMatch(/\bsharedScene\b/)
+    expect(canvas).not.toContain('world-canvas-host--shared-scene')
   })
 })
