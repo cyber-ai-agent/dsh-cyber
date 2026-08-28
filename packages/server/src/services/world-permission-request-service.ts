@@ -43,6 +43,17 @@ export interface WorldAuthorityPort {
     employeeId: string,
     permission: WorldCharacterPermission,
   ): boolean | Promise<boolean>
+  /**
+   * Whether the owner ever revoked this permission from this character.
+   *
+   * Optional: a host without an authority ledger cannot tell "never granted"
+   * from "taken away", and callers must treat that as never revoked.
+   */
+  wasPermissionRevoked?(
+    worldId: string,
+    employeeId: string,
+    permission: WorldCharacterPermission,
+  ): boolean | Promise<boolean>
   updateAuthority?(input: {
     worldId: string
     targetEmployeeId: string
