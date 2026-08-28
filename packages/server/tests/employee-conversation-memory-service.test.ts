@@ -98,12 +98,15 @@ describe('EmployeeConversationMemoryService', () => {
 
   it('uses private memory in the employee direct chat but does not inject it into a group', async () => {
     const { store, workspace, world, employee, memory } = await setup()
+    // These two rows model already-consolidated memories. Source integrity is
+    // exercised by rememberCompletedRun above; this test is only about runtime
+    // visibility, so it does not invent message ids that the store correctly
+    // rejects as foreign evidence.
     store.appendEmployeeMilestone({
       employeeId: employee.id,
       category: 'reflection',
       title: '[private] 私聊记忆',
       summary: '用户私下要求：内部代号为蓝鲸，不应主动告诉群里其他人。',
-      sourceMessageIds: ['private-message'],
       actorId: 'system',
     })
     store.appendEmployeeMilestone({
@@ -111,7 +114,6 @@ describe('EmployeeConversationMemoryService', () => {
       category: 'reflection',
       title: '[group] 群聊协作',
       summary: '在发布群里负责整理上线检查表。',
-      sourceMessageIds: ['group-message'],
       actorId: 'system',
     })
     const direct = store.createSession({
