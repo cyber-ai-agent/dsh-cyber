@@ -27,7 +27,7 @@ export function WorldThemeSwitcher({ activeWorld, installedSkinIds, onThemeChang
   const [customizerThemeId, setCustomizerThemeId] = useState<string | undefined>()
   const menuRef = useRef<HTMLDivElement>(null)
 
-  // 当切换世界时，自动同步为该世界的主题
+  // 每个 World 可以保留自己的会话氛围偏好，但这份 Skin 不再驱动 World Runtime Scene。
   useEffect(() => {
     const persisted = readWorldTheme(activeWorld)
     const available = themeRegistry.listAvailable(installedSkinIds ?? [])
@@ -37,7 +37,6 @@ export function WorldThemeSwitcher({ activeWorld, installedSkinIds, onThemeChang
     applyWorldTheme(theme)
   }, [activeWorld, installedSkinIds])
 
-  // 点击外部关闭下拉菜单
   useEffect(() => {
     if (!open) return
     const handleClickOutside = (event: MouseEvent) => {
@@ -77,7 +76,7 @@ export function WorldThemeSwitcher({ activeWorld, installedSkinIds, onThemeChang
           aria-haspopup="menu"
           aria-expanded={open}
           onClick={() => setOpen((prev) => !prev)}
-          title={t('appearance.theme.switchTitle', '切换当前世界的皮肤风格')}
+          title={t('appearance.theme.switchTitle', '切换界面与会话皮肤，不改变当前世界场景')}
         >
           <span
             className="world-theme-dot"
@@ -93,11 +92,11 @@ export function WorldThemeSwitcher({ activeWorld, installedSkinIds, onThemeChang
         </button>
 
         {open && (
-          <div className="topbar-world-theme-menu" role="menu" aria-label={t('appearance.theme.listLabel', '世界皮肤列表')}>
+          <div className="topbar-world-theme-menu" role="menu" aria-label={t('appearance.theme.listLabel', '界面与会话皮肤列表')}>
             <header className="topbar-world-theme-menu__header">
               <div>
-                <strong>{t('appearance.theme.menuTitle', '世界专属皮肤')}</strong>
-                <small>{t('appearance.theme.menuDescription', '为【{world}】选择或定制空间风格', { world: activeWorld.name })}</small>
+                <strong>{t('appearance.theme.menuTitle', '界面 / 会话皮肤')}</strong>
+                <small>{t('appearance.theme.menuDescription', '改变【{world}】的聊天背景、气泡和界面氛围；右侧世界场景保持独立', { world: activeWorld.name })}</small>
               </div>
               {currentTheme.source === 'custom' ? (
                 <button
@@ -115,7 +114,7 @@ export function WorldThemeSwitcher({ activeWorld, installedSkinIds, onThemeChang
             <div className="topbar-world-theme-menu__items">
               {themes.map((theme) => {
                 const selected = theme.id === resolvedCurrentThemeId
-                const previewImage = theme.tokens.worldMapImage ?? theme.tokens.backdropImage
+                const previewImage = theme.tokens.backdropImage ?? theme.tokens.worldMapImage
                 const themeText = getLocalizedThemeText(theme, locale)
                 const sourceBadge =
                   theme.source === 'custom'
@@ -164,7 +163,7 @@ export function WorldThemeSwitcher({ activeWorld, installedSkinIds, onThemeChang
                 onClick={() => openCustomizer(currentTheme.id)}
               >
                 <Plus size={14} />
-                <span>{t('appearance.theme.create', '基于当前皮肤新建自定义…')}</span>
+                <span>{t('appearance.theme.create', '基于当前会话皮肤新建自定义…')}</span>
               </button>
             </footer>
           </div>
