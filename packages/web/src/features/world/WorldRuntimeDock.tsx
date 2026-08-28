@@ -2,6 +2,7 @@ import {
   ArrowsOut,
   Buildings,
   LightbulbFilament,
+  MapTrifold,
   Minus,
   Plus,
   PersonSimpleWalk,
@@ -15,6 +16,7 @@ import type { CyberEmployee } from '../../types.js'
 import { AmbientLifeDialog } from './AmbientLifeDialog.js'
 import { WorldCanvas } from './WorldCanvas.js'
 import { EmployeeInteractionMenu, ObjectInteractionMenu } from './WorldInteractionMenu.js'
+import { WorldSceneDialog } from './WorldSceneDialog.js'
 import { useWorldClient } from './world-client-store.js'
 import { createZoomCommand } from './zoom-command.js'
 
@@ -44,6 +46,7 @@ export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = tru
   const [activeEmployeeId, setActiveEmployeeId] = useState<string | undefined>(selectedEmployeeId)
   const [contextTarget, setContextTarget] = useState<WorldContextTarget>()
   const [ambientSettingsOpen, setAmbientSettingsOpen] = useState(false)
+  const [sceneSettingsOpen, setSceneSettingsOpen] = useState(false)
   const [peerInitiatorId, setPeerInitiatorId] = useState<string>()
   const [peerBusy, setPeerBusy] = useState(false)
   const [peerError, setPeerError] = useState<string>()
@@ -51,7 +54,7 @@ export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = tru
   useEffect(() => setActiveEmployeeId(selectedEmployeeId), [selectedEmployeeId])
 
   if (runtime.loading || runtime.snapshot === undefined) {
-    return <div className="world-runtime-dock world-runtime-dock--loading world-runtime-dock--shared-scene"><Buildings size={28} /><strong>正在恢复实时世界</strong><span>同步角色位置、任务状态和场景主题…</span></div>
+    return <div className="world-runtime-dock world-runtime-dock--loading world-runtime-dock--shared-scene"><Buildings size={28} /><strong>正在恢复实时世界</strong><span>同步角色位置、任务状态和世界场景…</span></div>
   }
 
   const renderedSnapshot = withCharacterVisuals(runtime.snapshot, employees)
@@ -170,11 +173,13 @@ export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = tru
             <button type="button" aria-label="缩小" onClick={() => setZoomCommand(createZoomCommand(-0.1))}><Minus size={15} /></button>
             <button type="button" aria-label="显示全景" title="适应窗口且不露出场景边界" onClick={() => setFitRequest((value) => value + 1)}><ArrowsOut size={15} /></button>
             <button type="button" aria-label="放大" onClick={() => setZoomCommand(createZoomCommand(0.1))}><Plus size={15} /></button>
+            <button type="button" aria-label="世界场景" title="选择只属于当前世界的独立场景" onClick={() => setSceneSettingsOpen(true)}><MapTrifold size={16} /></button>
             <button type="button" aria-label="世界活力设置" title="配置角色有岗位逻辑的日常行为" onClick={() => setAmbientSettingsOpen(true)}><PersonSimpleWalk size={16} /></button>
             <button type="button" className={runtime.snapshot.clock.lightsOn ? 'is-active' : ''} aria-label={runtime.snapshot.clock.lightsOn ? '关闭场景照明' : '打开场景照明'} onClick={() => void runtime.interact({ action: 'toggle-lights', actorId: 'owner' })}><LightbulbFilament size={16} /></button>
           </div>
 
           {ambientSettingsOpen ? <AmbientLifeDialog worldId={world.id} worldName={world.name} onClose={() => setAmbientSettingsOpen(false)} /> : null}
+          {sceneSettingsOpen ? <WorldSceneDialog world={world} currentManifest={runtime.manifest} onClose={() => setSceneSettingsOpen(false)} onApplied={runtime.reloadScene} /> : null}
 
           {employees.length === 0 ? <div className="world-runtime-dock__empty"><strong>这个世界还没有角色</strong><span>请到右侧「角色」新增角色。世界视图只负责展示和互动，不再承担角色管理。</span></div> : null}
         </div>
