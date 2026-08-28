@@ -193,7 +193,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
     // visible half of a real bug: the composer's pick used to flatten them all
     // onto it, and without a pick it reported a model most of them never used.
     if (modelProfileId === undefined && participantModels.length > 1) {
-      return t('workbench.modelPerCharacter', '按角色分配（{{count}} 个模型）').replace('{{count}}', String(participantModels.length))
+      return t('workbench.modelPerCharacter', '按角色分配（{count} 个模型）', { count: participantModels.length })
     }
     if (!effectiveDefaultModel) return '未配置模型'
     return effectiveDefaultModel.modelId || effectiveDefaultModel.displayName
