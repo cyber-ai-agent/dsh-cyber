@@ -63,35 +63,39 @@ export function useWorldClient({ demoMode, world, employees, liveEnabled = true 
 
   const applyLoadedRuntime = useCallback((loaded: WorldRuntimeLoadResult) => {
     const activeTheme = loaded.themes.items.find((item) => item.active)
-    setState((current) => ({
-      ...current,
-      snapshot: current.snapshot !== undefined && current.snapshot.worldId === loaded.snapshot.worldId && current.snapshot.sequence > loaded.snapshot.sequence
-        ? current.snapshot
-        : loaded.snapshot,
-      // The server-side World binding is authoritative. Never rewrite this
-      // manifest from document.dataset.skin or any conversation wallpaper.
-      manifest: loaded.manifest,
-      rendererIdentity: activeTheme?.source === 'installed'
-        ? rendererIdentity(activeTheme)
-        : builtInRendererIdentity(loaded.manifest),
-      loading: false,
-      connected: true,
-      error: undefined,
-    }))
+    setState((current) => {
+      const { error: _error, ...withoutError } = current
+      return {
+        ...withoutError,
+        snapshot: current.snapshot !== undefined && current.snapshot.worldId === loaded.snapshot.worldId && current.snapshot.sequence > loaded.snapshot.sequence
+          ? current.snapshot
+          : loaded.snapshot,
+        // The server-side World binding is authoritative. Never rewrite this
+        // manifest from document.dataset.skin or any conversation wallpaper.
+        manifest: loaded.manifest,
+        rendererIdentity: activeTheme?.source === 'installed'
+          ? rendererIdentity(activeTheme)
+          : builtInRendererIdentity(loaded.manifest),
+        loading: false,
+        connected: true,
+      }
+    })
   }, [])
 
   const reloadScene = useCallback(async () => {
     if (demoMode) {
       const manifest = resolveBuiltInWorldScene(world)
-      setState((current) => ({
-        ...current,
-        manifest,
-        rendererIdentity: builtInRendererIdentity(manifest),
-        snapshot: mergeDemoEmployees(current.snapshot, world, employees, manifest),
-        loading: false,
-        connected: true,
-        error: undefined,
-      }))
+      setState((current) => {
+        const { error: _error, ...withoutError } = current
+        return {
+          ...withoutError,
+          manifest,
+          rendererIdentity: builtInRendererIdentity(manifest),
+          snapshot: mergeDemoEmployees(current.snapshot, world, employees, manifest),
+          loading: false,
+          connected: true,
+        }
+      })
       return
     }
     applyLoadedRuntime(await loadRuntime())
