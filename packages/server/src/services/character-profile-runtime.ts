@@ -1,13 +1,24 @@
 import type {
   AgentPermissionMode,
+  AgentRuntimeEvent,
   AgentRuntimePort,
   AgentTurnRequest,
   EmployeeProfile,
+  JsonObject,
+  WorkMessage,
 } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 import type { CharacterSkillAdapterRegistry } from '../skills/skill-adapter.js'
 import type { WorldCharacterAuthority } from '@dsh-cyber/contracts/world-authority'
 import type { WorldAuthorityPort } from './world-permission-request-service.js'
+import {
+  EmployeeConversationMemoryService,
+  type CharacterMemoryContextPort,
+} from './employee-conversation-memory-service.js'
+import {
+  contextSnapshotSequence,
+  lastDurableObservation,
+} from './employee-observation-runtime.js'
 import {
   availableWorldSkillIds,
   type WorldSkillAvailabilityPort,
@@ -16,7 +27,13 @@ import {
 type CharacterRuntimeStore = Pick<
   SqliteStore,
   'getEmployee' | 'getEmployeeRevision' | 'getEmployeeProfile' | 'getWorld'
->
+> & Partial<Pick<
+  SqliteStore,
+  'getEmployeeDossier' | 'getSession' | 'getWorkTurn' | 'listMessages' | 'appendEmployeeMilestone'
+>>
+
+const OBSERVED_THROUGH_KEY = 'contextObservedThroughSequence'
+const OBSERVATION_VERSION_KEY = 'contextObservationVersion'
 
 export class CharacterProfileRuntime implements AgentRuntimePort {
   readonly #inner: AgentRuntimePort
@@ -24,6 +41,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
   readonly #skills: Pick<CharacterSkillAdapterRegistry, 'instructionsFor'> | undefined
   readonly #authority: Pick<WorldAuthorityPort, 'get'> | undefined
   readonly #skillAvailability: WorldSkillAvailabilityPort | undefined
+  readonly #memory: CharacterMemoryContextPort | undefined
 
   constructor(
     inner: AgentRuntimePort,
@@ -31,12 +49,14 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
     skills?: Pick<CharacterSkillAdapterRegistry, 'instructionsFor'>,
     authority?: Pick<WorldAuthorityPort, 'get'>,
     skillAvailability?: WorldSkillAvailabilityPort,
+    memory?: CharacterMemoryContextPort,
   ) {
     this.#inner = inner
     this.#store = store
     this.#skills = skills
     this.#authority = authority
     this.#skillAvailability = skillAvailability
+    this.#memory = memory ?? defaultMemoryForStore(store)
   }
 
   async runTurn(request: AgentTurnRequest) {
@@ -69,9 +89,37 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
         )
       : composeWorldAuthorityPersona(profiledPersona, currentAuthority)
     const runtimePersona = composeConversationPermissionPersona(persona, request.permissionMode ?? 'read-only')
-    return await this.#inner.runTurn({
+    const memoryContext = await this.#memory?.compose({
+      employeeId: agent.id,
+      conversationId: request.conversationId,
+      prompt: request.prompt,
+    })
+    const prompt = memoryContext === undefined
+      ? request.prompt
+      : `${memoryContext}\n\n[当前请求]\n${request.prompt}`
+
+    const durableMessages = this.#store.listMessages?.(request.conversationId)
+    const durableObserved = durableMessages === undefined
+      ? undefined
+      : lastDurableObservation(durableMessages, agent.id)
+    const snapshotSequence = durableMessages === undefined
+      ? undefined
+      : contextSnapshotSequence(durableMessages, request)
+    let sawAssistantMessage = false
+    const originalOnEvent = request.onEvent
+    const onEvent = originalOnEvent === undefined
+      ? undefined
+      : (event: AgentRuntimeEvent) => {
+          if (event.kind === 'assistant.message' && event.content?.trim()) sawAssistantMessage = true
+          originalOnEvent(snapshotSequence === undefined ? event : withObservation(event, snapshotSequence))
+        }
+
+    const result = await this.#inner.runTurn({
       ...request,
       agent,
+      prompt,
+      ...(durableObserved === undefined ? {} : { observedThroughSequence: durableObserved }),
+      ...(onEvent === undefined ? {} : { onEvent }),
       revision: {
         ...revision,
         // Keep historical unavailable grants durable, but do not expose them
@@ -80,6 +128,27 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
         persona: composeSkillRecipes(runtimePersona, recipeInstructions),
       },
     })
+
+    // Some providers return only finalResponse. Emit one assembled event so the
+    // orchestrator persists the observation cursor on the durable assistant
+    // message. This does not create an extra message when the provider already
+    // emitted assistant.message.
+    if (
+      snapshotSequence !== undefined
+      && !sawAssistantMessage
+      && result.finalResponse.trim()
+      && originalOnEvent !== undefined
+    ) {
+      originalOnEvent({
+        kind: 'assistant.message',
+        source: 'host-context-observation',
+        sourceSessionId: result.agentSessionId,
+        content: result.finalResponse,
+        metadata: observationMetadata({}, snapshotSequence),
+      })
+    }
+
+    return result
   }
 
   close(): Promise<void> {
@@ -148,6 +217,29 @@ export function composeCharacterPersona(basePersona: string, profile: EmployeePr
   const base = basePersona.trim()
   if (lines.length === 0) return base
   return `${base}${base ? '\n\n' : ''}[当前角色资料]\n${lines.join('\n')}`
+}
+
+function defaultMemoryForStore(store: CharacterRuntimeStore): CharacterMemoryContextPort | undefined {
+  if (
+    typeof store.getEmployeeDossier !== 'function'
+    || typeof store.getSession !== 'function'
+    || typeof store.getWorkTurn !== 'function'
+    || typeof store.listMessages !== 'function'
+    || typeof store.appendEmployeeMilestone !== 'function'
+  ) return undefined
+  return new EmployeeConversationMemoryService(store as SqliteStore)
+}
+
+function withObservation(event: AgentRuntimeEvent, sequence: number): AgentRuntimeEvent {
+  return { ...event, metadata: observationMetadata(event.metadata, sequence) }
+}
+
+function observationMetadata(metadata: JsonObject, sequence: number): JsonObject {
+  return {
+    ...metadata,
+    [OBSERVED_THROUGH_KEY]: sequence,
+    [OBSERVATION_VERSION_KEY]: 1,
+  }
 }
 
 function textValue(value: unknown): string {

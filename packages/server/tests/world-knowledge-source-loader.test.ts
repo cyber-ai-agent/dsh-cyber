@@ -57,12 +57,12 @@ describe('WorldKnowledgeSourceLoader', () => {
 })
 
 describe('WorldKnowledgeConsolidationScheduler', () => {
-  it('queues a balanced window without invoking extraction and preserves the durable cursor range', async () => {
+  it('queues a balanced shared-group window without invoking extraction and preserves the durable cursor range', async () => {
     const queued: Array<{ workspaceId: string; worldId: string; sessionId: string; fromCursor?: number; toCursor?: number }> = []
     const scheduler = new WorldKnowledgeConsolidationScheduler({
       repository: {
         listWorlds: () => [{ workspaceId: 'workspace-a', worldId: 'world-a' }],
-        listSessions: () => [{ id: 'session-a', workspaceId: 'workspace-a', worldId: 'world-a', kind: 'direct', title: '聊天', status: 'open', createdAt: '2026-08-26T00:00:00.000Z', updatedAt: '2026-08-26T00:00:00.000Z' }],
+        listSessions: () => [{ id: 'session-a', workspaceId: 'workspace-a', worldId: 'world-a', kind: 'group', collaborationMode: 'discussion', title: '共享群聊', status: 'open', createdAt: '2026-08-26T00:00:00.000Z', updatedAt: '2026-08-26T00:00:00.000Z' }],
         getKnowledgeConsolidationSettings: () => ({ worldId: 'world-a', retrievalEnabled: true, autoConsolidationMode: 'balanced', updatedAt: '2026-08-26T00:00:00.000Z' }),
         getKnowledgeConsolidationCursor: () => ({ workspaceId: 'workspace-a', worldId: 'world-a', sourceType: 'conversation', sourceId: 'session-a', processedThroughSequence: 0, updatedAt: '2026-08-26T00:00:00.000Z' }),
       },
@@ -75,5 +75,23 @@ describe('WorldKnowledgeConsolidationScheduler', () => {
     await expect(scheduler.scanOnce()).resolves.toEqual({ worlds: 1, sessions: 1, queued: 1 })
     expect(queued[0]).toMatchObject({ workspaceId: 'workspace-a', worldId: 'world-a', sessionId: 'session-a', fromCursor: 0, toCursor: 6 })
   })
-})
 
+  it('does not automatically promote a private direct conversation to world knowledge', async () => {
+    const queued: unknown[] = []
+    const scheduler = new WorldKnowledgeConsolidationScheduler({
+      repository: {
+        listWorlds: () => [{ workspaceId: 'workspace-a', worldId: 'world-a' }],
+        listSessions: () => [{ id: 'private-a', workspaceId: 'workspace-a', worldId: 'world-a', kind: 'direct', title: '私聊', status: 'open', createdAt: '2026-08-26T00:00:00.000Z', updatedAt: '2026-08-26T00:00:00.000Z' }],
+        getKnowledgeConsolidationSettings: () => ({ worldId: 'world-a', retrievalEnabled: true, autoConsolidationMode: 'balanced', updatedAt: '2026-08-26T00:00:00.000Z' }),
+      },
+      messages: {
+        listMessagesPage: () => ({ items: Array.from({ length: 8 }, (_, index) => ({ id: `p${index}`, sessionId: 'private-a', sequence: index + 1, senderId: 'owner', senderKind: 'owner' as const, kind: 'user' as const, content: '这是一段足够长但只属于当前员工的私聊事实。'.repeat(20), metadata: {}, createdAt: '2026-08-25T23:00:00.000Z' })) }),
+      },
+      service: { enqueueConversation: async (input) => { queued.push(input); return {} as never } },
+      clockMs: () => Date.parse('2026-08-26T00:00:00.000Z'),
+    })
+
+    await expect(scheduler.scanOnce()).resolves.toEqual({ worlds: 1, sessions: 0, queued: 0 })
+    expect(queued).toEqual([])
+  })
+})

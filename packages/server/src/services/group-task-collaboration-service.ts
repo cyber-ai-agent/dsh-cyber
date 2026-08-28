@@ -12,7 +12,11 @@ import type {
 } from '@dsh-cyber/orchestration'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
-import { GroupTaskRouter, type GroupTaskRouterEmployee } from './group-task-router.js'
+import {
+  GroupTaskRouter,
+  type GroupTaskRouterEmployee,
+  type GroupTaskRoutingResult,
+} from './group-task-router.js'
 import type { SkillCatalogService } from './skill-catalog-service.js'
 import type { WorldRuntimePromptComposer } from './world-runtime-context-composer.js'
 
@@ -43,6 +47,16 @@ export interface GroupTaskRunInput {
   title?: string
   coordinatorEmployeeId?: string
   existingWorkTurnId?: string
+  /** Host-validated ingress plan. Queue recovery may safely reuse it. */
+  preplannedRouting?: GroupTaskRoutingResult
+}
+
+export interface GroupTaskPlanInput {
+  workspaceId: string
+  worldId: string
+  employeeIds: string[]
+  prompt: string
+  coordinatorEmployeeId?: string
 }
 
 export interface GroupTaskAssignmentView {
@@ -68,8 +82,8 @@ export interface GroupTaskPlanView {
  * The Router only selects employees and declared skills. This service creates
  * real AgentRuns through the provider-neutral orchestrator; it does not call a
  * Skill Adapter or claim an external action happened. The conversation-control
- * lifecycle prepares at most one matching host Skill action before this
- * service runs and passes only its durable factual result in transformedPrompt.
+ * lifecycle prepares matching host Skill actions before this service runs and
+ * passes only their durable factual result in transformedPrompt.
  */
 export class GroupTaskCollaborationService {
   readonly #store: GroupTaskCollaborationServiceOptions['store']
@@ -85,33 +99,23 @@ export class GroupTaskCollaborationService {
     this.#runtimeContext = options.runtimeContext
   }
 
-  async run(input: GroupTaskRunInput): Promise<GroupTaskRunResult> {
-    const world = this.#store.getWorld(input.worldId)
-    if (world === undefined || world.workspaceId !== input.workspaceId || world.status === 'archived') {
-      throw new Error('World is unavailable')
-    }
-    const employeeIds = [...new Set(input.employeeIds.map((id) => id.trim()).filter(Boolean))]
-    const activeLoadByEmployee = new Map<string, number>()
-    for (const run of this.#store.listWorldAgentRuns(input.worldId)) {
-      if (run.status !== 'queued' && run.status !== 'running') continue
-      activeLoadByEmployee.set(run.employeeId, (activeLoadByEmployee.get(run.employeeId) ?? 0) + 1)
-    }
-    const employees: GroupTaskRouterEmployee[] = employeeIds.map((employeeId) => {
-      const employee = this.#store.getEmployee(employeeId)
-      if (employee === undefined || employee.workspaceId !== input.workspaceId || employee.worldId !== input.worldId || employee.status === 'archived') {
-        throw new Error(`Task participant is unavailable: ${employeeId}`)
-      }
-      const revision = this.#store.getEmployeeRevision(employee.id, employee.currentRevision)
-      if (revision === undefined) throw new Error(`Task participant revision is unavailable: ${employeeId}`)
-      return { employee, revision, activeLoad: activeLoadByEmployee.get(employee.id) ?? 0 }
-    })
-    const catalog = await this.#catalog.listWorld(input.worldId)
-    const routing = this.#router.route({
+  /**
+   * Cheap, provider-neutral ingress planning used before a durable queue entry
+   * reserves employee lanes. This is what separates "members of the room" from
+   * "people who actually need to work on this turn".
+   */
+  async plan(input: GroupTaskPlanInput): Promise<GroupTaskRoutingResult> {
+    const { employees, catalog } = await this.#routingContext(input)
+    return this.#router.route({
       prompt: input.prompt,
       employees,
       catalog,
       ...(input.coordinatorEmployeeId === undefined ? {} : { coordinatorEmployeeId: input.coordinatorEmployeeId }),
     })
+  }
+
+  async run(input: GroupTaskRunInput): Promise<GroupTaskRunResult> {
+    const routing = input.preplannedRouting ?? await this.plan(input)
     if (routing.steps.length === 0 || routing.coordinatorEmployeeId === '') {
       throw new Error('Task Router could not select an executor')
     }
@@ -119,7 +123,7 @@ export class GroupTaskCollaborationService {
     const result = await this.#orchestrator.task({
       workspaceId: input.workspaceId,
       worldId: input.worldId,
-      employeeIds,
+      employeeIds: input.employeeIds,
       coordinatorEmployeeId: routing.coordinatorEmployeeId,
       prompt: input.prompt,
       runtimePrompt,
@@ -170,5 +174,32 @@ export class GroupTaskCollaborationService {
       throw new Error('Session collaboration mode persistence is unavailable')
     }
     return this.#store.updateSessionCollaborationMode({ sessionId, collaborationMode: mode, actorId: 'owner' })
+  }
+
+  async #routingContext(input: GroupTaskPlanInput): Promise<{
+    employees: GroupTaskRouterEmployee[]
+    catalog: Awaited<ReturnType<SkillCatalogService['listWorld']>>
+  }> {
+    const world = this.#store.getWorld(input.worldId)
+    if (world === undefined || world.workspaceId !== input.workspaceId || world.status === 'archived') {
+      throw new Error('World is unavailable')
+    }
+    const employeeIds = [...new Set(input.employeeIds.map((id) => id.trim()).filter(Boolean))]
+    const activeLoadByEmployee = new Map<string, number>()
+    for (const run of this.#store.listWorldAgentRuns(input.worldId)) {
+      if (run.status !== 'queued' && run.status !== 'running') continue
+      activeLoadByEmployee.set(run.employeeId, (activeLoadByEmployee.get(run.employeeId) ?? 0) + 1)
+    }
+    const employees: GroupTaskRouterEmployee[] = employeeIds.map((employeeId) => {
+      const employee = this.#store.getEmployee(employeeId)
+      if (employee === undefined || employee.workspaceId !== input.workspaceId || employee.worldId !== input.worldId || employee.status === 'archived') {
+        throw new Error(`Task participant is unavailable: ${employeeId}`)
+      }
+      const revision = this.#store.getEmployeeRevision(employee.id, employee.currentRevision)
+      if (revision === undefined) throw new Error(`Task participant revision is unavailable: ${employeeId}`)
+      return { employee, revision, activeLoad: activeLoadByEmployee.get(employee.id) ?? 0 }
+    })
+    const catalog = await this.#catalog.listWorld(input.worldId)
+    return { employees, catalog }
   }
 }

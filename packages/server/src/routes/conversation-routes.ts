@@ -2,6 +2,8 @@ import type { AgentPermissionMode, ChatAttachment, JsonObject, ReasoningEffort, 
 import type {
   ConversationOrchestrator,
   DirectConversationInput,
+  GroupTurnCandidate,
+  GroupTurnPlan,
 } from '@dsh-cyber/orchestration'
 import {
   normalizeUserPrompt,
@@ -45,9 +47,13 @@ import type { TurnAwareApprovalContinuationService } from '../services/turn-awar
 import type { WorldRuntimePromptComposer } from '../services/world-runtime-context-composer.js'
 import { ServiceError } from '../services/service-error.js'
 import type { GroupTaskCollaborationService } from '../services/group-task-collaboration-service.js'
+import type { GroupTaskRoutingResult } from '../services/group-task-router.js'
+import type { PreparedGroupTurnPlanner } from '../services/prepared-group-turn-planner.js'
 import type { ConversationQueueService } from '../services/conversation-queue-service.js'
 import { listApprovalRequestViews } from '../services/approval-request-views.js'
 import type { HarnessToolApprovalService } from '../services/harness-tool-approval-service.js'
+
+const MAX_GROUP_PARTICIPANTS = 20
 
 export interface ConversationRoutesDependencies {
   store: SqliteStore
@@ -69,6 +75,7 @@ export interface ConversationRoutesDependencies {
   turnContinuations: TurnAwareApprovalContinuationService
   toolApprovals?: HarnessToolApprovalService
   groupTasks?: GroupTaskCollaborationService
+  groupTurnPlanner?: PreparedGroupTurnPlanner
   conversationQueue?: ConversationQueueService
 }
 
@@ -92,6 +99,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     turnContinuations,
     toolApprovals,
     groupTasks,
+    groupTurnPlanner,
     conversationQueue,
   } = dependencies
   const delegatedCollaboration = new DelegatedCollaborationService({
@@ -109,6 +117,9 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     const body = await readJson(request)
     const employeeIds = [...new Set(optionalStringArray(body.employeeIds))]
     if (employeeIds.length < 2) throw new HttpError(422, 'group_participants_required', '群聊至少需要两名角色')
+    if (employeeIds.length > MAX_GROUP_PARTICIPANTS) {
+      throw new HttpError(422, 'group_participants_limit', `群聊最多支持 ${MAX_GROUP_PARTICIPANTS} 名角色`)
+    }
     const employees = employeeIds.map((employeeId) => store.getEmployee(employeeId))
     if (employees.some((employee) => employee === undefined || employee.worldId !== world.id || employee.status === 'archived')) {
       throw new HttpError(422, 'group_participant_unavailable', '群聊成员必须来自当前世界且处于可用状态')
@@ -142,12 +153,13 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     const employeeIds = explicitIds.length > 0 ? explicitIds : mentionedEmployeeIds(prompt, store.listEmployees(world.id))
     const employees = employeeIds.map((employeeId) => store.getEmployee(employeeId))
     if (employeeIds.length === 0) throw new HttpError(422, 'agent_required', '至少需要一个角色')
+    if (employeeIds.length > MAX_GROUP_PARTICIPANTS) throw new HttpError(422, 'group_participants_limit', `单次会话最多支持 ${MAX_GROUP_PARTICIPANTS} 名角色`)
     if (employees.some((employee) => employee === undefined || employee.worldId !== world.id || employee.status === 'archived')) {
       throw new HttpError(422, 'character_unavailable', '所选角色不属于当前世界或已归档')
     }
 
-    // Settle an existing narrow approval phrase before tracing or beginning a
     const requestedSessionId = optionalString(body.sessionId)
+    // Settle an existing narrow approval phrase before tracing or beginning a
     // turn. The approval response may continue its original WorkTurn, but it
     // never creates a second one.
     if (employeeIds.length === 1) {
@@ -189,6 +201,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
         return
       }
     }
+
     const requestedCollaborationMode = body.collaborationMode === undefined
       ? undefined
       : requiredEnum<WorkSessionCollaborationMode>(body, 'collaborationMode', ['discussion', 'task'])
@@ -204,38 +217,96 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     if (employeeIds.length > 1 && requestedSessionId !== undefined && (requestedSession === undefined || requestedSession.worldId !== world.id)) {
       throw new HttpError(422, 'session_unavailable', '所选会话不属于当前世界')
     }
+    if (requestedSession !== undefined) {
+      const sessionMembers = new Set(store.listParticipants(requestedSession.id)
+        .filter((participant) => participant.kind === 'employee')
+        .map((participant) => participant.participantId))
+      const outsideMention = mentionedEmployeeIds(prompt, store.listEmployees(world.id))
+        .find((employeeId) => !sessionMembers.has(employeeId))
+      if (outsideMention !== undefined) {
+        throw new HttpError(422, 'mentioned_character_not_in_session', '被 @ 的角色不在当前群聊中，请先加入群聊')
+      }
+    }
     const persistedSessionMode = requestedSession?.collaborationMode ?? 'discussion'
     if (requestedSession !== undefined && requestedCollaborationMode !== undefined && requestedCollaborationMode !== persistedSessionMode) {
       throw new HttpError(409, 'session_mode_mismatch', '当前群聊已持久化为另一种协作模式，请先切换会话模式')
     }
+    const collaborationMode = employeeIds.length > 1
+      ? requestedSession === undefined
+        ? requestedCollaborationMode ?? (body.interactionKind === 'task' ? 'task' : 'discussion')
+        : persistedSessionMode
+      : undefined
+
     const attachments = await validatedChatAttachments(body.attachments, store, world.workspaceId, world.id, worldFiles)
     const attachmentPrompt = attachments.length === 0 ? prompt : attachmentAwarePrompt(prompt, attachments)
     const transformedPrompt = queueMode === undefined
       ? await applyInstalledPromptTransforms(await worldPackages.listRuntimePackages(world.id), attachmentPrompt)
       : attachmentPrompt
+    const clientTurnId = optionalString(body.clientTurnId)
+    if (clientTurnId !== undefined && clientTurnId.length > 128) {
+      throw new HttpError(422, 'invalid_client_turn_id', 'clientTurnId cannot exceed 128 characters')
+    }
+
+    // Plan before permissions and queue reservation. Room membership is social
+    // visibility; runtimeEmployeeIds is the minimum set that actually needs a
+    // model/tool lane for this turn.
+    let runtimeEmployeeIds = [...employeeIds]
+    let plannedGroupTurn: GroupTurnPlan | undefined
+    let plannedTaskRouting: GroupTaskRoutingResult | undefined
+    let coordinatorEmployeeId = optionalString(body.coordinatorEmployeeId)
+    if (employeeIds.length > 1 && collaborationMode === 'task') {
+      if (groupTasks === undefined) throw new HttpError(501, 'task_router_unavailable', '任务协作调度服务不可用')
+      plannedTaskRouting = await groupTasks.plan({
+        workspaceId: world.workspaceId,
+        worldId: world.id,
+        employeeIds,
+        prompt,
+        ...(coordinatorEmployeeId === undefined ? {} : { coordinatorEmployeeId }),
+      })
+      coordinatorEmployeeId = plannedTaskRouting.coordinatorEmployeeId
+      runtimeEmployeeIds = uniqueEmployeeIds([
+        ...plannedTaskRouting.steps.flatMap((step) => step.assignedEmployeeIds),
+        plannedTaskRouting.coordinatorEmployeeId,
+      ])
+    } else if (employeeIds.length > 1 && groupTurnPlanner !== undefined) {
+      const candidates = groupTurnCandidates(store, employeeIds)
+      plannedGroupTurn = await groupTurnPlanner.prepare({
+        workspaceId: world.workspaceId,
+        worldId: world.id,
+        sessionId: requestedSessionId ?? `pending:${clientTurnId ?? 'group'}`,
+        prompt,
+        candidates,
+        collaborationMode: 'discussion',
+      })
+      runtimeEmployeeIds = uniqueEmployeeIds(plannedGroupTurn.waves.flatMap((wave) => wave.speakers.map((speaker) => speaker.employeeId)))
+    }
+    if (runtimeEmployeeIds.length === 0) runtimeEmployeeIds = [...employeeIds]
+
     const worldSettingsValue = await worldSettings.get(world.id)
     const requestedReasoning = body.reasoningEffort === undefined
       ? worldSettingsValue.model.reasoningEffort
       : requiredEnum<ReasoningEffort>(body, 'reasoningEffort', ['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
     const requestedPermissionMode = body.permissionMode === undefined
-      ? defaultRuntimePermissionMode(store, employeeIds)
+      ? defaultRuntimePermissionMode(store, runtimeEmployeeIds)
       : requiredEnum<AgentPermissionMode>(body, 'permissionMode', ['read-only', 'workspace-write', 'danger-full-access'])
     // Full host access requires a current-session grant issued by the owner;
-    // nothing on the skill path can mint one.
+    // nothing on the skill path can mint one. A grant for the whole room also
+    // authorizes a planned subset, but an unrelated member no longer forces a
+    // narrower permission on the employees who actually execute this turn.
     const runtimeAccessGrantId = optionalString(body.runtimeAccessGrantId)
     const ownerHostAccess = requestedPermissionMode === 'danger-full-access'
       && ownerRuntimeAccess?.authorizeSession({
         grantId: runtimeAccessGrantId,
         worldId: world.id,
         sessionId: requestedSessionId,
-        employeeIds,
+        employeeIds: runtimeEmployeeIds,
       }) === true
     if (requestedPermissionMode === 'danger-full-access' && !ownerHostAccess) {
       throw new HttpError(403, 'owner_runtime_access_denied', '当前会话完全访问授权已失效，请重新确认')
     }
     const resolvedPermissions = worldRuntimePermissions === undefined
       ? undefined
-      : await Promise.all(employeeIds.map((employeeId) => worldRuntimePermissions.resolve({
+      : await Promise.all(runtimeEmployeeIds.map((employeeId) => worldRuntimePermissions.resolve({
           worldId: world.id,
           employeeId,
           requestedMode: requestedPermissionMode,
@@ -250,11 +321,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
         : resolvedPermissions.every((item) => item.permissionMode === 'workspace-write' || item.permissionMode === 'danger-full-access')
           ? 'workspace-write'
           : 'read-only'
-    if (employeeIds.length === 0) throw new HttpError(422, 'agent_required', '请选择或 @ 至少一个角色')
-    const clientTurnId = optionalString(body.clientTurnId)
-    if (clientTurnId !== undefined && clientTurnId.length > 128) {
-      throw new HttpError(422, 'invalid_client_turn_id', 'clientTurnId cannot exceed 128 characters')
-    }
+
     const modelProfileId = optionalString(body.modelProfileId)
     if (modelProfileId !== undefined) {
       const profile = store.getModelProfile(modelProfileId)
@@ -268,16 +335,16 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     const modelProfileIds = participantModelProfileIds(body.modelProfileIds, world.workspaceId, store, employeeIds)
     const metadata: JsonObject = {
       participantIds: employeeIds,
+      reservationEmployeeIds: runtimeEmployeeIds,
       permissionMode,
       interactionKind: body.interactionKind === 'task' || body.interactionKind === 'meeting' ? body.interactionKind : 'chat',
       ...(attachments.length === 0 ? {} : { attachments: attachments.map(chatAttachmentJson) }),
       ...(clientTurnId === undefined ? {} : { clientTurnId }),
       ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
       ...(modelProfileId === undefined ? {} : { modelProfileId }),
-      // Durable, because a queued turn is rebuilt from this message minutes
-      // later by a different code path. A routing decision that lives only in
-      // the request object is lost the moment the turn is enqueued.
       ...(modelProfileIds === undefined ? {} : { modelProfileIds }),
+      ...(plannedGroupTurn === undefined ? {} : { groupTurnPlan: groupTurnPlanJson(plannedGroupTurn) }),
+      ...(plannedTaskRouting === undefined ? {} : { taskRouting: taskRoutingJson(plannedTaskRouting) }),
     }
     if (requestedCollaborationMode !== undefined) metadata.collaborationMode = requestedCollaborationMode
     const title = optionalString(body.title)
@@ -344,11 +411,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
         }
       }
     } else {
-      const persistedMode = requestedSession?.collaborationMode ?? 'discussion'
-      const collaborationMode = requestedSession === undefined
-        ? requestedCollaborationMode ?? (body.interactionKind === 'task' ? 'task' : 'discussion')
-        : persistedMode
-      const coordinatorEmployeeId = optionalString(body.coordinatorEmployeeId)
+      const effectiveCollaborationMode = collaborationMode ?? 'discussion'
       // The persisted session mode is the authority for an existing group.
       // Keep the WorkTurn interaction kind aligned with it too: a stale
       // interactionKind=task from a client must not make a discussion turn
@@ -356,18 +419,20 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
       const collaborationMetadata: JsonObject = {
         ...metadata,
         ...(coordinatorEmployeeId === undefined ? {} : { coordinatorEmployeeId }),
-        interactionKind: collaborationMode === 'task'
+        interactionKind: effectiveCollaborationMode === 'task'
           ? 'task'
           : metadata.interactionKind === 'task' || metadata.interactionKind === 'meeting' ? 'meeting' : 'chat',
       }
-      if (collaborationMode === 'task' && groupTasks === undefined) throw new HttpError(501, 'task_router_unavailable', '任务协作调度服务不可用')
       const groupInput = {
         workspaceId: world.workspaceId,
         worldId: world.id,
+        // Queue ingress keeps the complete room membership so a newly-created
+        // session is correct. The queue row itself reads reservationEmployeeIds
+        // from metadata and execution resumes only those planned employees.
         employeeIds,
         prompt,
         metadata: collaborationMetadata,
-        collaborationMode,
+        collaborationMode: effectiveCollaborationMode,
         ...(modelProfileIds === undefined ? {} : { modelProfileIds }),
         ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
         permissionMode,
@@ -378,20 +443,32 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
         if (conversationQueue === undefined) throw new HttpError(501, 'conversation_queue_unavailable', '对话队列服务不可用')
         result = conversationQueue.enqueueGroup(groupInput, queueMode === 'next')
         responseStatus = 202
-      } else if (collaborationMode === 'task') {
-        result = await groupTasks!.run({
+      } else if (effectiveCollaborationMode === 'task') {
+        if (groupTasks === undefined) throw new HttpError(501, 'task_router_unavailable', '任务协作调度服务不可用')
+        // An existing room can execute just the planned subset. For an ad-hoc
+        // API call without a session we keep all members in the newly-created
+        // room while the preplanned routing still limits actual AgentRuns.
+        const immediateEmployeeIds = requestedSessionId === undefined ? employeeIds : runtimeEmployeeIds
+        result = await groupTasks.run({
           ...groupInput,
+          employeeIds: immediateEmployeeIds,
           transformedPrompt,
           ...(coordinatorEmployeeId === undefined ? {} : { coordinatorEmployeeId }),
+          ...(plannedTaskRouting === undefined ? {} : { preplannedRouting: plannedTaskRouting }),
         })
       } else {
+        const immediateEmployeeIds = requestedSessionId === undefined ? employeeIds : runtimeEmployeeIds
+        if (plannedGroupTurn !== undefined && requestedSessionId !== undefined && groupTurnPlanner !== undefined) {
+          groupTurnPlanner.seed({ workspaceId: world.workspaceId, worldId: world.id, sessionId: requestedSessionId, prompt }, plannedGroupTurn)
+        }
         result = await orchestrator.group({
           ...groupInput,
+          employeeIds: immediateEmployeeIds,
           runtimePrompt: await runtimeContext.composeGroupRuntimePrompt(world.id, transformedPrompt),
         })
       }
     }
-    for (const employeeId of employeeIds) employeeActivity.project(employeeId)
+    for (const employeeId of runtimeEmployeeIds) employeeActivity.project(employeeId)
     worldRuntime.publishCurrent(world.id)
     writeJson(response, responseStatus, result)
     } finally {
@@ -687,6 +764,53 @@ function participantModelProfileIds(
   return Object.keys(resolved).length === 0 ? undefined : resolved
 }
 
+function groupTurnCandidates(store: SqliteStore, employeeIds: readonly string[]): GroupTurnCandidate[] {
+  return employeeIds.flatMap((employeeId) => {
+    const employee = store.getEmployee(employeeId)
+    if (employee === undefined) return []
+    const revision = store.getEmployeeRevision(employee.id, employee.currentRevision)
+    return [{
+      employeeId: employee.id,
+      displayName: employee.displayName,
+      ...(employee.role.trim() ? { role: employee.role } : {}),
+      ...(revision === undefined || revision.skillGrants.length === 0 ? {} : { skillIds: revision.skillGrants }),
+    }]
+  })
+}
+
+function groupTurnPlanJson(plan: GroupTurnPlan): JsonObject {
+  return {
+    source: plan.source,
+    waves: plan.waves.map((wave) => ({
+      speakers: wave.speakers.map((speaker) => ({
+        employeeId: speaker.employeeId,
+        ...(speaker.brief === undefined ? {} : { brief: speaker.brief }),
+      })),
+    })),
+    ...(plan.rationale === undefined ? {} : { rationale: plan.rationale }),
+  }
+}
+
+function taskRoutingJson(routing: GroupTaskRoutingResult): JsonObject {
+  return {
+    coordinatorEmployeeId: routing.coordinatorEmployeeId,
+    requiredSkillIds: routing.requiredSkillIds,
+    steps: routing.steps.map((step) => ({
+      id: step.id,
+      ordinal: step.ordinal,
+      requiredSkills: step.requiredSkills,
+      assignedEmployeeIds: step.assignedEmployeeIds,
+      dependsOn: step.dependsOn,
+      executionMode: step.executionMode,
+      status: step.status,
+    })),
+  }
+}
+
+function uniqueEmployeeIds(values: readonly string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))]
+}
+
 function mentionedEmployeeIds(prompt: string, employees: Array<{ id: string; displayName: string }>): string[] {
   return employees
     .filter((employee) => prompt.includes(`@${employee.displayName}`))
@@ -709,7 +833,6 @@ function defaultRuntimePermissionMode(store: SqliteStore, employeeIds: string[])
     })
     .reduce<AgentPermissionMode>((least, mode) => rank[mode] < rank[least] ? mode : least, 'danger-full-access')
 }
-
 
 /**
  * Decides a chat-typed world permission answer without letting a legitimate

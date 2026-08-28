@@ -38,6 +38,13 @@ export interface WorldKnowledgeConsolidationSchedulerOptions {
  * durable queued job; the consolidation service owns model extraction in its
  * separate worker loop. This keeps chat and HTTP request latency independent
  * from the model provider.
+ *
+ * Direct conversations are employee-private continuity. They are deliberately
+ * excluded here: the employee memory projection owns them, and promoting them
+ * automatically to a world-wide graph would let an unrelated character search
+ * facts the owner only told one employee. Group/project visibility will move
+ * to an explicit visibility contract in Real Collaboration V2; this guard is
+ * the non-negotiable private-chat boundary for V1.
  */
 export class WorldKnowledgeConsolidationScheduler {
   readonly #repository: KnowledgeBalancedScanRepository
@@ -92,6 +99,10 @@ export class WorldKnowledgeConsolidationScheduler {
         for (const session of worldSessions) {
           if (queued >= this.#maxJobsPerScan) break
           if (session.workspaceId !== world.workspaceId || session.worldId !== world.worldId) continue
+          // Private employee memory is not world knowledge. A direct chat may
+          // still be promoted manually by the owner through the explicit
+          // knowledge flow, but balanced background scanning never does it.
+          if (session.kind === 'direct') continue
           sessions += 1
           const cursor = this.#repository.getKnowledgeConsolidationCursor === undefined
             ? undefined

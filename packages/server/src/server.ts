@@ -112,8 +112,10 @@ import { FirecrawlClient } from './integrations/firecrawl-client.js'
 import { OfficialMcpClientFactory, type McpClientFactory } from './integrations/mcp-client.js'
 import { MCP_INTEGRATION_ID } from './integrations/mcp-provider.js'
 import { McpSkillAdapter } from './skills/mcp-skill-adapter.js'
+
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_PORT = 43123
+
 export interface CyberServerOptions {
   stateRoot: string
   workspacePath: string
@@ -291,7 +293,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     resolveRoute(request) { return resolveHarnessRoute(store, request) },
   })
   const completionWorker = composeCompletionWorker(store, worldArtifacts)
-  const groupTurnPlanner = options.groupTurnPlanner ?? composeGroupTurnPlanner(store, credentials)
+  const groupTurnPlanner = composeGroupTurnPlanner(store, credentials, options.groupTurnPlanner)
   const orchestrator = new ConversationOrchestrator({
     store,
     runtime,
@@ -476,7 +478,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   })
   registerModelInteractionRoutes(router, { store, interactions })
   const conversationControl = composeConversationControl({ store, router, worldAccess, orchestrator, continuations: turnContinuations, employeeActivity, worldRuntime, worldTrace, runtimeStreamHub, groupTasks, worldPackages, runtimeContext: worldRuntimeContext, skillRuntime })
-  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, turnContinuations, toolApprovals, groupTasks, conversationQueue: conversationControl.queue, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, runtimeContext: worldRuntimeContext, worldTrace, employeeActivity, worldPackages, worldRuntimePermissions, ownerRuntimeAccess })
+  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, turnContinuations, toolApprovals, groupTasks, groupTurnPlanner, conversationQueue: conversationControl.queue, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, runtimeContext: worldRuntimeContext, worldTrace, employeeActivity, worldPackages, worldRuntimePermissions, ownerRuntimeAccess })
   registerGroupTaskRoutes(router, { store, worldAccess, groupTasks })
   registerEmployeeRoutes(router, {
     store,
@@ -531,7 +533,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
         void refreshMcpCatalog(mcpAdapter, skillRegistry)
       }
       void sweepOrphanedPackageStaging(store, worldPackages).catch((error: unknown) => {
-        console.warn('[dsh-cyber] 清理残留的包暂存目录失败：', errorText(error))
+        console.warn('[dsh-cyber] 清理残留的包暂存目录失败，已等待下一次启动：', errorText(error))
       })
       void turnContinuations.recover().catch((error: unknown) => {
         console.warn('[dsh-cyber] 恢复等待审批的回合失败，已跳过：', errorText(error))
