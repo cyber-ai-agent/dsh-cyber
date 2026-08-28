@@ -10,6 +10,9 @@ import { loadInstalledBlueprints, loadInstalledPromptTransformCommands } from '.
 import type { CharacterSkillRuntime } from '../services/character-skill-runtime.js'
 import type { SkillCatalogService } from '../services/skill-catalog-service.js'
 import { CreativeWorkshopService } from '../services/creative-workshop-service.js'
+import { CreativeWorkshopDraftService } from '../services/creative-workshop-draft-service.js'
+import { CreativeWorkshopDraftGenerator, type CreativeWorkshopDraftGeneratorPort } from '../services/creative-workshop-draft-generator.js'
+import type { ModelCredentialService } from '../services/model-credential-service.js'
 import type { WorldMarketplaceService } from '../services/world-marketplace-service.js'
 import type { WorldPackageInstanceService } from '../services/world-package-instance-service.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
@@ -23,11 +26,15 @@ export interface PackageRoutesDependencies {
   worldPackages: WorldPackageInstanceService
   worldAccess: WorldAccessService
   skillCatalog: SkillCatalogService
+  credentials: ModelCredentialService
+  workshopDraftGenerator?: CreativeWorkshopDraftGeneratorPort
 }
 
 export function registerPackageRoutes(router: Router, dependencies: PackageRoutesDependencies): void {
-  const { store, packageManager, packageCatalog, skillRuntime, worldMarketplace, worldPackages, worldAccess, skillCatalog } = dependencies
+  const { store, packageManager, packageCatalog, skillRuntime, worldMarketplace, worldPackages, worldAccess, skillCatalog, credentials } = dependencies
   const workshop = new CreativeWorkshopService(store, packageManager)
+  const workshopDrafts = new CreativeWorkshopDraftService(store)
+  const workshopDraftGenerator = dependencies.workshopDraftGenerator ?? new CreativeWorkshopDraftGenerator(store, credentials, workshopDrafts)
 
   router.get(/^\/api\/workspaces\/([^/]+)\/packages$/, ({ response, params }) => {
     const workspaceId = params[0]!
@@ -186,6 +193,24 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
 
   router.get(/^\/api\/workspaces\/([^/]+)\/workshop\/projects$/, async ({ response, params }) => {
     writeJson(response, 200, { items: await workshop.list(params[0]!) })
+  })
+
+  router.get(/^\/api\/workspaces\/([^/]+)\/workshop\/draft$/, async ({ response, params }) => {
+    writeJson(response, 200, { draft: await workshopDrafts.get(params[0]!) })
+  })
+
+  router.put(/^\/api\/workspaces\/([^/]+)\/workshop\/draft$/, async ({ request, response, params }) => {
+    writeJson(response, 200, { draft: await workshopDrafts.save(params[0]!, await readJson(request)) })
+  })
+
+  router.post(/^\/api\/workspaces\/([^/]+)\/workshop\/draft\/generate$/, async ({ request, response, params }) => {
+    const body = await readJson(request)
+    const generated = await workshopDraftGenerator.generate(params[0]!, body.prompt)
+    writeJson(response, 200, { draft: await workshopDrafts.save(params[0]!, generated) })
+  })
+
+  router.delete(/^\/api\/workspaces\/([^/]+)\/workshop\/draft$/, async ({ response, params }) => {
+    writeJson(response, 200, { removed: await workshopDrafts.delete(params[0]!) })
   })
 
   router.post(/^\/api\/workspaces\/([^/]+)\/workshop\/projects$/, async ({ request, response, params }) => {

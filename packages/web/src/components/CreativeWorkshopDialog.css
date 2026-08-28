@@ -390,3 +390,27 @@
   .creative-workshop-wizard__body { padding: 20px 16px; }
   .creative-workshop-presets > div { grid-template-columns: 1fr; }
 }
+.workshop-json-open { width: fit-content; display: inline-flex; align-items: center; gap: 7px; }
+.workshop-json-backdrop { position: absolute; z-index: 8; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(2, 6, 12, .72); backdrop-filter: blur(8px); }
+.workshop-json-editor { width: min(920px, 94vw); height: min(720px, 86vh); display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; overflow: hidden; border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--surface-0); box-shadow: var(--shadow-xl); }
+.workshop-json-editor > header, .workshop-json-editor > footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 18px; border-color: var(--border); background: var(--surface-1); }
+.workshop-json-editor > header { border-bottom: 1px solid var(--border); }
+.workshop-json-editor > header h3, .workshop-json-editor > header p { margin: 0; }
+.workshop-json-editor > header p { margin-top: 4px; color: var(--text-muted); font-size: 12px; }
+.workshop-json-editor > textarea { min-height: 0; resize: none; padding: 18px; border: 0; border-radius: 0; color: var(--text-strong); background: #070c12; font: 13px/1.65 var(--font-mono); tab-size: 2; }
+.workshop-json-editor > footer { flex-wrap: wrap; border-top: 1px solid var(--border); }
+.workshop-json-editor > footer > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.workshop-json-editor button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.workshop-json-editor .creative-workshop-error { margin: 0; border-radius: 0; }
+.workshop-model-review { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-1); }
+.workshop-model-review > label { min-width: 0; display: grid; grid-template-columns: minmax(180px, .7fr) minmax(260px, 1fr); align-items: center; gap: 14px; }
+.workshop-model-review > label > span { min-width: 0; display: grid; gap: 3px; }
+.workshop-model-review > label strong { color: var(--text-strong); font-size: 13px; }
+.workshop-model-review > label small { color: var(--text-muted); font-size: 12px; }
+
+@media (max-width: 720px) {
+  .workshop-json-backdrop { padding: 8px; }
+  .workshop-json-editor { width: 100%; height: 92vh; }
+  .workshop-json-editor > footer { align-items: stretch; }
+  .workshop-model-review > label { grid-template-columns: 1fr; }
+}

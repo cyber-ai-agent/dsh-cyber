@@ -19,6 +19,12 @@ import {
 } from '../services/model-credential-service.js'
 import type { ModelCatalogService } from '../services/model-catalog-service.js'
 import type { ModelInteractionService } from '../services/model-interaction-service.js'
+import {
+  assertModelBaseUrl,
+  inferModelProviderKind,
+  modelBaseUrlIdentity,
+  ModelUrlPolicyError,
+} from '../services/model-url-policy.js'
 import { ServiceError } from '../services/service-error.js'
 
 export interface ModelRoutesDependencies {
@@ -65,7 +71,7 @@ export function registerModelRoutes(router: Router, dependencies: ModelRoutesDep
       'openai-compatible-remote',
     ])
     const baseUrl = requiredString(body, 'baseUrl')
-    validateModelBaseUrl(baseUrl, providerKind)
+    validateSavedModelBaseUrl(baseUrl, providerKind)
     const modelId = requiredString(body, 'modelId')
     const api = requiredEnum(body, 'api', [
       'openai-completions',
@@ -116,9 +122,21 @@ export function registerModelRoutes(router: Router, dependencies: ModelRoutesDep
     const body = await readJson(request)
     const profileId = body.profileId === undefined ? undefined : requiredString(body, 'profileId')
     const profile = profileId === undefined ? undefined : store.getModelProfile(profileId)
+    if (profileId !== undefined && profile === undefined) {
+      throw new HttpError(404, 'model_profile_not_found', 'Model profile not found')
+    }
     if (profile !== undefined && profile.workspaceId !== params[0]) {
       throw new HttpError(404, 'model_profile_not_found', 'Model profile not found')
     }
+    const baseUrl = requiredString(body, 'baseUrl')
+    if (profile !== undefined) {
+      const submittedIdentity = modelBaseUrlIdentity(baseUrl)
+      const profileIdentity = modelBaseUrlIdentity(profile.baseUrl)
+      if (submittedIdentity === undefined || profileIdentity === undefined || submittedIdentity !== profileIdentity) {
+        throw new HttpError(409, 'model_profile_url_mismatch', '模型发现地址必须与已选模型配置一致。')
+      }
+    }
+    const providerKind = profile?.providerKind ?? inferModelProviderKind(baseUrl)
     const apiKey = body.apiKey === undefined ? undefined : requiredString(body, 'apiKey')
     const credentialEnvName = profile?.credentialEnvName
       ?? (body.credentialEnvName === undefined ? undefined : requiredString(body, 'credentialEnvName'))
@@ -130,11 +148,12 @@ export function registerModelRoutes(router: Router, dependencies: ModelRoutesDep
     const workspaceId = params[0]!
     const startedAt = Date.now()
     const modelId = profile?.modelId ?? '-'
-    const provider = profile?.displayName ?? requiredString(body, 'baseUrl')
+    const provider = profile?.displayName ?? baseUrl
     let items
     try {
       items = await modelCatalog.discover({
-        baseUrl: requiredString(body, 'baseUrl'),
+        baseUrl,
+        providerKind,
         api: requiredEnum(body, 'api', [
           'openai-completions',
           'openai-responses',
@@ -226,43 +245,18 @@ function validateWebSearchSettings(
   }
 }
 
-function validateModelBaseUrl(
+function validateSavedModelBaseUrl(
   value: string,
   providerKind: 'deepseek' | 'openai-compatible-local' | 'openai-compatible-remote',
 ): void {
-  let url: URL
   try {
-    url = new URL(value)
-  } catch {
-    throw new HttpError(422, 'model_base_url_invalid', '模型接口地址格式不正确。')
-  }
-  if (providerKind === 'openai-compatible-local') {
-    if (!['http:', 'https:'].includes(url.protocol) || !isPrivateModelHostname(url.hostname)) {
-      throw new HttpError(422, 'model_base_url_invalid', '本机或局域网模型必须使用回环地址或私有网络 HTTP(S) 地址。')
+    assertModelBaseUrl(value, providerKind)
+  } catch (error) {
+    if (error instanceof ModelUrlPolicyError) {
+      throw new HttpError(422, error.code, error.message)
     }
-    return
+    throw error
   }
-  if (url.protocol !== 'https:') {
-    throw new HttpError(422, 'model_base_url_insecure', '公网模型服务必须使用 HTTPS 地址。')
-  }
-}
-
-function isPrivateModelHostname(value: string): boolean {
-  const hostname = value.toLowerCase().replace(/^\[|\]$/g, '')
-  if (hostname === 'localhost' || hostname === '::1' || hostname === 'host.docker.internal'
-    || hostname === 'host.containers.internal' || hostname.endsWith('.local')) return true
-  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(hostname)
-  if (ipv4 !== null) {
-    const octets = ipv4.slice(1).map(Number)
-    if (octets.some((octet) => octet > 255)) return false
-    const [first, second] = octets
-    return first === 10 || first === 127
-      || (first === 172 && second !== undefined && second >= 16 && second <= 31)
-      || (first === 192 && second === 168)
-      || (first === 169 && second === 254)
-      || (first === 100 && second !== undefined && second >= 64 && second <= 127)
-  }
-  return hostname.includes(':') && (hostname.startsWith('fc') || hostname.startsWith('fd') || hostname.startsWith('fe80:'))
 }
 
 const SERVICE_ERROR_HTTP_STATUS: Record<ServiceError['kind'], number> = {

@@ -38,6 +38,8 @@ describe('ModelCredentialService', () => {
 })
 
 describe('ModelCatalogService', () => {
+  const publicResolver = { resolve: async () => ['93.184.216.34'] }
+
   it('uses a stored API key without exposing it and parses OpenAI-compatible models', async () => {
     const root = await temporaryRoot()
     const credentials = await ModelCredentialService.open(root)
@@ -55,8 +57,9 @@ describe('ModelCatalogService', () => {
           { id: 'a-model' },
         ] }), { status: 200, headers: { 'content-type': 'application/json' } })
       }) as typeof fetch,
+      resolveHostname: publicResolver,
     })
-    const models = await catalog.discover({ baseUrl: 'https://models.example.test/v1/', api: 'openai-completions', profileId: 'profile-1' })
+    const models = await catalog.discover({ baseUrl: 'https://models.example.test/v1/', providerKind: 'openai-compatible-remote', api: 'openai-completions', profileId: 'profile-1' })
     expect(requestUrl).toBe('https://models.example.test/v1/models')
     expect(authorized).toBe(true)
     expect(models).toEqual([{ id: 'a-model', displayName: '模型 A' }, { id: 'z-model' }])
@@ -66,13 +69,85 @@ describe('ModelCatalogService', () => {
     const root = await temporaryRoot()
     const credentials = await ModelCredentialService.open(root)
     services.push(credentials)
-    const catalog = new ModelCatalogService(credentials, { fetch: (async () => new Response('', { status: 401 })) as typeof fetch })
-    await expect(catalog.discover({ baseUrl: 'https://models.example.test/v1', api: 'openai-completions', apiKey: 'sk-invalid-test-key' }))
+    const catalog = new ModelCatalogService(credentials, {
+      fetch: (async () => new Response('', { status: 401 })) as typeof fetch,
+      resolveHostname: publicResolver,
+    })
+    await expect(catalog.discover({ baseUrl: 'https://models.example.test/v1', providerKind: 'openai-compatible-remote', api: 'openai-completions', apiKey: 'sk-invalid-test-key' }))
       .rejects.toMatchObject<ServiceError>({
         kind: 'forbidden',
         code: 'model_credential_rejected',
         message: 'API 密钥无效或没有访问权限，请检查后重试。',
       })
+  })
+
+  it('rejects a public hostname that resolves to a metadata or link-local address before sending credentials', async () => {
+    const root = await temporaryRoot()
+    const credentials = await ModelCredentialService.open(root)
+    services.push(credentials)
+    let fetchCalls = 0
+    const catalog = new ModelCatalogService(credentials, {
+      fetch: (async () => { fetchCalls += 1; return new Response('{}', { status: 200 }) }) as typeof fetch,
+      resolveHostname: { resolve: async () => ['169.254.169.254', '93.184.216.34'] },
+    })
+
+    await expect(catalog.discover({
+      baseUrl: 'https://public.example.test/v1',
+      providerKind: 'openai-compatible-remote',
+      api: 'openai-completions',
+      apiKey: 'must-not-leave-this-process',
+    })).rejects.toMatchObject<ServiceError>({ code: 'model_base_url_private_target' })
+    expect(fetchCalls).toBe(0)
+  })
+
+  it('rejects URL userinfo and public HTTP targets without invoking fetch', async () => {
+    const root = await temporaryRoot()
+    const credentials = await ModelCredentialService.open(root)
+    services.push(credentials)
+    let fetchCalls = 0
+    const catalog = new ModelCatalogService(credentials, {
+      fetch: (async () => { fetchCalls += 1; return new Response('{}', { status: 200 }) }) as typeof fetch,
+      resolveHostname: publicResolver,
+    })
+
+    await expect(catalog.discover({
+      baseUrl: 'https://user:password@models.example.test/v1',
+      providerKind: 'openai-compatible-remote',
+      api: 'openai-completions',
+      apiKey: 'must-not-leave-this-process',
+    })).rejects.toMatchObject<ServiceError>({ code: 'model_base_url_credentials' })
+    await expect(catalog.discover({
+      baseUrl: 'http://models.example.test/v1',
+      providerKind: 'openai-compatible-remote',
+      api: 'openai-completions',
+      apiKey: 'must-not-leave-this-process',
+    })).rejects.toMatchObject<ServiceError>({ code: 'model_base_url_insecure' })
+    expect(fetchCalls).toBe(0)
+  })
+
+  it('sets redirect mode to error so model credentials cannot follow an upstream redirect', async () => {
+    const root = await temporaryRoot()
+    const credentials = await ModelCredentialService.open(root)
+    services.push(credentials)
+    let redirect: RequestRedirect | undefined
+    let fetchCalls = 0
+    const catalog = new ModelCatalogService(credentials, {
+      fetch: (async (_input, init) => {
+        fetchCalls += 1
+        redirect = init?.redirect
+        return new Response('', { status: 302, headers: { location: 'https://evil.example.test/models' } })
+      }) as typeof fetch,
+      resolveHostname: publicResolver,
+    })
+
+    await expect(catalog.discover({
+      baseUrl: 'https://models.example.test/v1',
+      providerKind: 'openai-compatible-remote',
+      api: 'openai-completions',
+      apiKey: 'must-not-follow-redirect',
+    })).rejects.toMatchObject<ServiceError>({ code: 'model_catalog_rejected' })
+    expect(redirect).toBe('error')
+    expect(fetchCalls).toBe(1)
   })
 })
 

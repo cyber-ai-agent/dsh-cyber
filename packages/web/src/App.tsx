@@ -59,7 +59,7 @@ import {
 } from '@dsh-cyber/contracts'
 
 import { ApiError, api } from './api.js'
-import { setUiLocale, useI18n } from './i18n/runtime.js'
+import { resolveUiLocale, setUiLocale, useI18n } from './i18n/runtime.js'
 import { formatTime } from './i18n/format.js'
 import {
   ChatTurnQueue,
@@ -75,7 +75,7 @@ import { collaborationModeOf, type CollaborationMode } from './components/group-
 import { NavigationPane } from './components/NavigationPane.js'
 import { ResizableShell } from './components/ResizableShell.js'
 import { WorldThemeSwitcher } from './components/WorldThemeSwitcher.js'
-import { applyWorldTheme, readWorldTheme, saveWorldTheme } from './features/world/world-themes.js'
+import { applyWorldTheme, readWorldTheme, saveWorldTheme, themeRegistry } from './features/world/world-themes.js'
 import type {
   DiscoveredModel,
   ModelDiscoveryDraft,
@@ -152,6 +152,7 @@ export default function App() {
   const [preferences, setPreferences] = useState<WorkspacePreferences | undefined>(demoMode ? demoData.preferences : undefined)
   const [models, setModels] = useState<ModelProfile[]>(demoMode ? demoData.modelProfiles : [])
   const [modelAssignments, setModelAssignments] = useState<ModelAssignment[]>([])
+  const [conversationModelProfiles, setConversationModelProfiles] = useState<Record<string, string>>({})
   const [dossiers, setDossiers] = useState<Record<string, EmployeeDossier>>(demoMode ? demoData.dossiers : {})
   const [authorities, setAuthorities] = useState<WorldCharacterAuthority[]>([])
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | undefined>()
@@ -259,12 +260,19 @@ export default function App() {
     () => mergeChatTimeline(messages, activeOutboxMessages, activePendingTurns, activeStreamingReplies),
     [activeOutboxMessages, activePendingTurns, activeStreamingReplies, messages],
   )
-  const activePendingCount = activePendingTurns.filter((turn) => turn.status === 'queued' || turn.status === 'running').length
-  const activeQueuedCount = activePendingTurns.filter((turn) => turn.status === 'queued').length
+  const activePendingCount = activePendingTurns.filter((turn) => turn.status === 'queued' || turn.status === 'running' || turn.status === 'waiting-approval' || turn.status === 'stopping').length
+  const activeRunningCount = activePendingTurns.filter((turn) => turn.status === 'running' || turn.status === 'waiting-approval' || turn.status === 'stopping').length
+  const queuedInConversation = activePendingTurns.filter((turn) => turn.status === 'queued').length
+  const activeQueuedCount = Math.max(0, queuedInConversation - (activeRunningCount === 0 && queuedInConversation > 0 ? 1 : 0))
+  const conversationModelProfileId = activeConversationKey === undefined ? undefined : conversationModelProfiles[activeConversationKey]
   activeWorldRef.current = activeWorld
   activeSessionIdRef.current = activeSessionId
   activeConversationKeyRef.current = activeConversationKey
   pendingTurnsRef.current = pendingTurns
+
+  useEffect(() => {
+    if (preferences?.locale !== undefined) setUiLocale(resolveUiLocale(preferences.locale))
+  }, [preferences?.locale])
 
   const pendingDecisionFetchRef = useRef<string | undefined>(undefined)
 
@@ -526,19 +534,29 @@ export default function App() {
     if (turn === undefined) return
     const workTurnId = turn.workTurnId ?? reply?.workTurnId
     if (workTurnId === undefined) return
-    const paths = [`/api/turns/${encodeURIComponent(workTurnId)}/stop`, `/api/turns/${encodeURIComponent(workTurnId)}/abort`, `/api/work-turns/${encodeURIComponent(workTurnId)}/abort`]
-    let lastError: unknown
-    for (const path of paths) {
-      try {
-        await api(path, { method: 'POST', body: JSON.stringify({ reason: 'user-stop' }) })
+    const previousStatus = turn.status
+    patchPendingTurn(turnId, { status: 'stopping' })
+    try {
+      const result = await api<{
+        workTurn?: { status?: string }
+        control?: { status?: string; sessionId?: string; workTurnId?: string }
+      }>(`/api/turns/${encodeURIComponent(workTurnId)}/stop`, { method: 'POST', body: JSON.stringify({ reason: 'user-stop' }) })
+      const status = result.control?.status ?? result.workTurn?.status
+      if (status === 'interrupted') {
         patchPendingTurn(turnId, { status: 'interrupted' })
-        return
-      } catch (cause) {
-        lastError = cause
+        setStreamingReplies((current) => removeStreamingTurn(current, turnId))
+      } else if (status === 'completed' || status === 'failed') {
+        removePendingTurn(turnId)
+      } else {
+        patchPendingTurn(turnId, { status: previousStatus })
       }
+      const sessionId = result.control?.sessionId ?? turn.sessionId
+      if (sessionId !== undefined && activeSessionIdRef.current === sessionId) setTranscriptReload((value) => value + 1)
+    } catch (cause) {
+      patchPendingTurn(turnId, { status: previousStatus })
+      setError(cause instanceof Error ? cause.message : '停止请求失败')
     }
-    setError(lastError instanceof Error ? lastError.message : '停止请求失败')
-  }, [patchPendingTurn, streamingReplies])
+  }, [patchPendingTurn, removePendingTurn, streamingReplies])
 
   const bindConversationSession = useCallback((queueKey: string, session: WorkSession, employeeIds: string[]) => {
     sessionByQueueKeyRef.current.set(queueKey, session.id)
@@ -750,6 +768,34 @@ export default function App() {
     }
     return subscribeWorldLive(world.id, 'runtime', onRuntime)
   }, [activeWorld, bindConversationSession, patchPendingTurn, refreshConversationTranscript, removePendingTurn])
+
+  useEffect(() => {
+    if (demoMode || activeWorld === undefined) return
+    const world = activeWorld
+    const onControl = (raw: Event) => {
+      try {
+        const control = JSON.parse((raw as MessageEvent<string>).data) as {
+          worldId?: string
+          sessionId?: string
+          workTurnId?: string
+          status?: string
+        }
+        if (control.worldId !== world.id || control.status !== 'interrupted' || control.workTurnId === undefined) return
+        const pending = pendingTurnsRef.current.find((turn) => turn.workTurnId === control.workTurnId)
+        if (pending !== undefined) {
+          patchPendingTurn(pending.id, { status: 'interrupted' })
+          setStreamingReplies((current) => removeStreamingTurn(current, pending.id))
+        }
+        if (control.sessionId !== undefined) {
+          const queueKey = pending?.queueKey ?? queueKeyBySessionRef.current.get(control.sessionId)
+          if (queueKey !== undefined) void refreshConversationTranscript(control.sessionId, queueKey, world.id)
+        }
+      } catch {
+        // Durable transcript refresh and the Stop HTTP response remain authoritative.
+      }
+    }
+    return subscribeWorldLive(world.id, 'conversation-control', onControl)
+  }, [activeWorld, demoMode, patchPendingTurn, refreshConversationTranscript])
 
   useEffect(() => {
     if (demoMode || activeWorld === undefined || pendingTurns.length === 0) return
@@ -1507,6 +1553,7 @@ export default function App() {
         ? `与 ${employees.find((employee) => employee.id === targetIds[0])?.displayName ?? '角色'} 对话`
         : compactPrompt(prompt))
     const queueKey = activeConversationKey ?? targetConversationQueueKey(targetIds, title)
+    const capturedModelProfileId = conversationModelProfiles[queueKey]
     const sessionHostAccessGrant = activeSessionId === undefined ? undefined : sessionHostAccessGrants[activeSessionId]
     const preparedSessionHostAccess = sessionHostAccessGrant !== undefined
       && sessionHostAccessGrant.worldId === world.id
@@ -1634,6 +1681,7 @@ export default function App() {
             employeeIds: targetIds,
             ...(conversationIntent === undefined ? {} : { title }),
             ...(resolvedSessionId === undefined ? {} : { sessionId: resolvedSessionId }),
+            ...(capturedModelProfileId === undefined ? {} : { modelProfileId: capturedModelProfileId }),
           }),
         })
         if (result.workTurnId !== undefined || result.queueItem !== undefined) {
@@ -1695,6 +1743,7 @@ export default function App() {
     demoMode,
     employees,
     conversationPermissionMode,
+    conversationModelProfiles,
     patchPendingTurn,
     reasoningEffort,
     refreshConversationTranscript,
@@ -1919,6 +1968,7 @@ export default function App() {
         return remaining
       })
       setModelAssignments((current) => current.filter((item) => item.modelProfileId !== modelProfileId))
+      setConversationModelProfiles((current) => Object.fromEntries(Object.entries(current).filter(([, id]) => id !== modelProfileId)))
       return
     }
     const result = await api<{ removed: boolean; items: ModelProfile[]; assignments: ModelAssignment[] }>(`/api/workspaces/${workspace.id}/model-profiles/${encodeURIComponent(modelProfileId)}`, {
@@ -1927,6 +1977,7 @@ export default function App() {
     if (!result.removed) throw new Error('模型配置不存在或已被删除')
     setModels(result.items)
     setModelAssignments(result.assignments)
+    setConversationModelProfiles((current) => Object.fromEntries(Object.entries(current).filter(([, id]) => id !== modelProfileId)))
   }, [workspace])
 
   const assignModel = useCallback(async (input: { scope: ModelAssignment['scope']; scopeId: string; modelProfileId?: string }) => {
@@ -2057,6 +2108,11 @@ export default function App() {
   }, [])
 
   const backgroundImage = resolveBackground(preferences?.backgroundAssetRef)
+  const worldSceneImage = activeWorld === undefined
+    ? backgroundImage
+    : themeRegistry.get(readWorldTheme(activeWorld)).tokens.worldMapImage
+      ?? themeRegistry.get(readWorldTheme(activeWorld)).tokens.backdropImage
+      ?? backgroundImage
   const shellStyle = useMemo(() => backgroundImage === undefined ? undefined : {
     '--workspace-background-image': `url("${backgroundImage}")`,
     '--workspace-background-opacity': String(preferences?.backgroundOpacity ?? 0.2),
@@ -2084,6 +2140,10 @@ export default function App() {
           key={`${activeWorld.id}:${skinRevision}`}
           activeWorld={activeWorld}
           installedSkinIds={installedSkinIds}
+          onThemeChange={() => {
+            setSkinRevision((value) => value + 1)
+            setWorldRuntimeRevision((value) => value + 1)
+          }}
         />
         <nav aria-label="全局功能">
           <CreativeWorkshopLauncher workspaceId={workspace.id} onCreated={(project) => { void openWorkshopWorld(project.worldId).catch((cause) => setError(cause instanceof Error ? cause.message : '创意工坊世界已创建，但打开失败，请从世界列表重新进入。')) }} onOpenWorld={(worldId) => { void openWorkshopWorld(worldId).catch((cause) => setError(cause instanceof Error ? cause.message : '世界打开失败')) }} />
@@ -2126,6 +2186,17 @@ export default function App() {
             messages={chatMessages}
             employees={employees}
             installedPlugins={installedPluginCommands}
+            models={models}
+            {...(conversationModelProfileId === undefined ? {} : { modelProfileId: conversationModelProfileId })}
+            onChangeModelProfile={(modelProfileId) => {
+              if (activeConversationKey === undefined) return
+              setConversationModelProfiles((current) => {
+                const next = { ...current }
+                if (modelProfileId === undefined) delete next[activeConversationKey]
+                else next[activeConversationKey] = modelProfileId
+                return next
+              })
+            }}
             pendingCount={activePendingCount}
             queuedCount={activeQueuedCount}
             queueItems={activePendingTurns}
@@ -2165,7 +2236,7 @@ export default function App() {
             dossiers={dossiers}
             employees={employees}
             world={activeWorld}
-            {...(backgroundImage === undefined ? {} : { sceneImage: backgroundImage })}
+            {...(worldSceneImage === undefined ? {} : { sceneImage: worldSceneImage })}
             {...(supportsWorldRuntime ? {
               worldContent: (
                 <Suspense fallback={<div className="world-runtime world-runtime--loading"><strong>正在进入世界</strong><span>加载互动场景与角色状态</span></div>}>

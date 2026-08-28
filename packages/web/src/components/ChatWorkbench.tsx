@@ -12,7 +12,7 @@ import {
   X,
 } from '@phosphor-icons/react'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { WORLD_CHARACTER_MANAGEMENT_PERMISSIONS, type ChatAttachment, type CompletionJob, type InstalledPluginCommand, type JsonObject, type LocalAssetMimeType, type WorkMessage, type WorkSession, type World, type WorldCharacterPermission, type WorldPermissionDecisionScope, type WorldPermissionRequest } from '@dsh-cyber/contracts'
+import { WORLD_CHARACTER_MANAGEMENT_PERMISSIONS, type ChatAttachment, type CompletionJob, type InstalledPluginCommand, type JsonObject, type LocalAssetMimeType, type ModelProfile, type WorkMessage, type WorkSession, type World, type WorldCharacterPermission, type WorldPermissionDecisionScope, type WorldPermissionRequest } from '@dsh-cyber/contracts'
 
 import { api } from '../api.js'
 import { formatDateTime, formatTime } from '../i18n/format.js'
@@ -29,6 +29,7 @@ import { ContextMenu, type ContextMenuPosition } from './ContextMenu.js'
 import { collaborationModeOf } from './group-collaboration.js'
 import { ConversationPermissionControl, type ConversationPermissionMode } from './ConversationPermissionControl.js'
 import { TaskCollaborationSummary } from './TaskCollaborationSummary.js'
+import { ModelPicker } from '../features/models/ModelPicker.js'
 
 const MarkdownMessage = lazy(async () => ({ default: (await import('./MarkdownMessage.js')).MarkdownMessage }))
 const ArtifactReferenceCards = lazy(async () => ({ default: (await import('../features/artifacts/ArtifactCenter.js')).ArtifactReferenceCards }))
@@ -42,6 +43,9 @@ interface ChatWorkbenchProps {
   messages: WorkMessage[]
   employees: CyberEmployee[]
   installedPlugins?: InstalledPluginCommand[]
+  models?: ModelProfile[]
+  modelProfileId?: string
+  onChangeModelProfile?(modelProfileId: string | undefined): void
   sending?: boolean
   pendingCount?: number
   queuedCount?: number
@@ -75,7 +79,7 @@ interface ChatWorkbenchProps {
   onStopTurn?(turnId: string): Promise<void>
 }
 
-export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, installedPlugins = [], sending = false, pendingCount = 0, queuedCount = 0, queueItems = [], draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRetryCompletionJob, onCompletionJobSettled, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, permissionMode = 'read-only', onChangePermissionMode, onRequestFullAccess, onChangeCollaborationMode, onCancelQueuedTurn, onPromoteQueuedTurn, onStopTurn }: ChatWorkbenchProps) {
+export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, installedPlugins = [], models = [], modelProfileId, onChangeModelProfile, sending = false, pendingCount = 0, queuedCount = 0, queueItems = [], draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRetryCompletionJob, onCompletionJobSettled, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, permissionMode = 'read-only', onChangePermissionMode, onRequestFullAccess, onChangeCollaborationMode, onCancelQueuedTurn, onPromoteQueuedTurn, onStopTurn }: ChatWorkbenchProps) {
   const { t } = useI18n()
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -110,6 +114,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
   const saturatedWaiting = queueItems.some((turn) => turn.status === 'queued' && turn.employeeIds.some((employeeId) => (runningLaneCounts.get(employeeId) ?? 0) >= 2))
   const activeTurn = useMemo(() => queueItems.find((turn) => turn.status === 'running' || turn.status === 'waiting-approval'), [queueItems])
   const canStopCurrentTurn = activeTurn !== undefined && onStopTurn !== undefined
+  const hasRunningTurn = queueItems.some((turn) => turn.status === 'running' || turn.status === 'waiting-approval' || turn.status === 'stopping')
   const hasQueueActions = pendingCount > 0 || queuedCount > 0 || queueItems.some((turn) => turn.status === 'running' || turn.status === 'waiting-approval' || turn.status === 'queued')
 
   useEffect(() => {
@@ -275,7 +280,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
 
       <div className="message-scroll" ref={scrollRef} aria-live="polite" aria-busy={pendingCount > 0 || sending}>
         <div className="conversation-column">
-          {queueItems.length > 0 ? <div className="chat-turn-queue" aria-label="消息队列">{saturatedWaiting ? <p className="chat-turn-queue__lane-note" role="status">同一角色已有 2 条通道运行，第三条消息等待中</p> : null}{queueItems.map((turn) => <article key={turn.id} className={`chat-turn-queue__item chat-turn-queue__item--${turn.status}`}><div><strong>{turn.status === 'running' ? '正在回复中' : turn.status === 'waiting-approval' ? '等待批准' : turn.status === 'queued' ? '等待中' : turn.status === 'interrupted' ? '已停止' : turn.status === 'cancelled' ? '已撤销' : '发送失败'}</strong><small>{turn.title}</small></div><span>{(turn.status === 'running' || turn.status === 'waiting-approval') && onStopTurn !== undefined ? <button type="button" onClick={() => void onStopTurn(turn.id)}>■ 停止</button> : turn.status === 'queued' && onPromoteQueuedTurn !== undefined ? <button type="button" onClick={() => void onPromoteQueuedTurn(turn.id)}>插入</button> : null}{turn.status === 'queued' && onCancelQueuedTurn !== undefined ? <button type="button" onClick={() => void onCancelQueuedTurn(turn.id)}>撤销</button> : null}</span></article>)}</div> : null}
+          {queueItems.length > 0 ? <div className="chat-turn-queue" aria-label="消息队列">{saturatedWaiting ? <p className="chat-turn-queue__lane-note" role="status">同一角色已有 2 条通道运行，第三条消息等待中</p> : null}{queueItems.map((turn) => <article key={turn.id} className={`chat-turn-queue__item chat-turn-queue__item--${turn.status}`}><div><strong>{turn.status === 'running' ? '正在回复中' : turn.status === 'waiting-approval' ? '等待批准' : turn.status === 'stopping' ? '正在停止…' : turn.status === 'queued' ? '已接收，等待执行' : turn.status === 'interrupted' ? '已停止' : turn.status === 'cancelled' ? '已撤销' : '发送失败'}</strong><small>{turn.title}</small></div><span>{(turn.status === 'running' || turn.status === 'waiting-approval') && onStopTurn !== undefined ? <button type="button" onClick={() => void onStopTurn(turn.id)}>■ 停止</button> : turn.status === 'stopping' ? <button type="button" disabled>正在停止</button> : turn.status === 'queued' && onPromoteQueuedTurn !== undefined ? <button type="button" onClick={() => void onPromoteQueuedTurn(turn.id)}>插入</button> : null}{turn.status === 'queued' && onCancelQueuedTurn !== undefined ? <button type="button" onClick={() => void onCancelQueuedTurn(turn.id)}>撤销</button> : null}</span></article>)}</div> : null}
           {conversationKind === 'group' && collaborationMode === 'task' && session?.id !== undefined ? <TaskCollaborationSummary worldId={world.id} sessionId={session.id} employees={participantEmployees} demoMode={demoMode} /> : null}
           {hasOlderMessages && onLoadOlderMessages !== undefined ? <button className="message-history-more" type="button" disabled={loadingOlderMessages} onClick={onLoadOlderMessages}>{loadingOlderMessages ? <CircleNotch size={15} className="spin" /> : <ArrowUp size={15} />}<span>{loadingOlderMessages ? '正在加载更早消息…' : '加载更早消息'}</span></button> : null}
           {visibleMessages.length === 0 ? (
@@ -303,7 +308,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
               </article>
             )
           })}
-          {pendingCount > 0 ? <div className="stream-state" role="status"><CircleNotch size={16} className="spin" /><span>正在回复中，你可以继续补充，也可以切换到其他会话。</span>{queuedCount > 0 ? <strong>另有 {queuedCount} 条已排队</strong> : null}</div> : sending ? <div className="stream-state" role="status"><CircleNotch size={16} className="spin" /><span>正在回复中…</span></div> : null}
+          {pendingCount > 0 ? <div className="stream-state" role="status"><CircleNotch size={16} className="spin" /><span>{hasRunningTurn ? '正在回复中，你可以继续补充，也可以切换到其他会话。' : '消息已接收，正在等待角色处理。'}</span>{queuedCount > 0 ? <strong>另有 {queuedCount} 条等待执行</strong> : null}</div> : sending ? <div className="stream-state" role="status"><CircleNotch size={16} className="spin" /><span>正在回复中…</span></div> : null}
         </div>
       </div>
 
@@ -337,6 +342,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
         {attachmentError === undefined ? null : <p className="composer-error" role="alert">{attachmentError}</p>}
         <textarea ref={inputRef} value={draft} onChange={(event) => onDraftChange(event.target.value)} disabled={employees.length === 0} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit() } }} placeholder={employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? t('workbench.composer', '发送消息给 {name}', { name: participantEmployees.map((employee) => employee.displayName).join('、') }) : conversationKind === 'direct' ? t('workbench.composer', '发送消息给 {name}', { name: participantEmployees[0]?.displayName ?? experience.personLabel }) : '先从左侧选择会话，或输入 @角色名'} rows={2} aria-label={`给当前世界的${experience.peopleLabel}发送消息`} />
         <div className="composer__toolbar">{hasQueueActions ? <div className="composer__queue-mode" role="group" aria-label="队列操作"><button type="button" aria-label="排队发送" title="排队发送" className={queueMode === 'normal' ? 'is-active' : ''} aria-pressed={queueMode === 'normal'} onClick={() => setQueueMode('normal')}>排队</button><button type="button" aria-label="插入队列前方" title="插入队列前方" className={queueMode === 'next' ? 'is-active' : ''} aria-pressed={queueMode === 'next'} onClick={() => setQueueMode('next')}>插入</button></div> : null}<div>
+          {onChangeModelProfile === undefined ? null : <div className="composer-model-picker"><ModelPicker models={models} value={modelProfileId} inheritLabel={t('workbench.modelDefault', '恢复角色默认模型')} ariaLabel={t('workbench.modelLabel', '当前会话模型')} onChange={onChangeModelProfile} />{modelProfileId === undefined ? null : <small>{t('workbench.modelTemporary', '会话临时选择')}</small>}</div>}
           {onChangePermissionMode === undefined ? null : <ConversationPermissionControl value={permissionMode} onChange={onChangePermissionMode} {...(onRequestFullAccess === undefined ? {} : { onRequestFullAccess })} />}
           <input ref={fileInputRef} className="composer-file-input" type="file" accept=".png,.jpg,.jpeg,.webp,.txt,.md,.json,.pdf" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAttachment(file) }} />
           <button className="icon-button" type="button" aria-label={uploading ? '正在上传附件' : '添加附件'} disabled={uploading} onClick={() => fileInputRef.current?.click()}>{uploading ? <CircleNotch size={18} className="spin" /> : <Paperclip size={18} />}</button>

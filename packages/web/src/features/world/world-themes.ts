@@ -988,6 +988,21 @@ export function resolveThemeManifest(world: World, themeId: string, baseManifest
   if (theme.runtimeManifest) {
     return theme.runtimeManifest
   }
-  if (baseManifest) return baseManifest
-  return worldExperience(world).kind === 'tavern' ? moonlitTavernTheme : cyberCompanyTheme
+  const base = baseManifest ?? (worldExperience(world).kind === 'tavern' ? moonlitTavernTheme : cyberCompanyTheme)
+  const sceneImage = theme.tokens.worldMapImage ?? theme.tokens.backdropImage
+  if (sceneImage === undefined) return base
+  const assetId = `${theme.id}-shared-scene`
+  return {
+    ...base,
+    id: `${base.id}:${theme.id}`,
+    displayName: theme.displayName,
+    assets: [
+      { id: assetId, src: sceneImage, kind: 'image', preload: true, pixelArt: false },
+      ...base.assets.filter((asset) => asset.id !== assetId),
+    ],
+    scenes: base.scenes.map((scene) => ({
+      ...scene,
+      layers: scene.layers.map((layer, index) => index === 0 ? { ...layer, assetId } : layer),
+    })),
+  }
 }

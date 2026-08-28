@@ -885,6 +885,41 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   gap: 12px;
 }
 
+.theme-customizer-row--assets { align-items: stretch; }
+.theme-asset-upload {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: 14px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+}
+.theme-asset-upload__preview {
+  min-height: 92px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  background: var(--surface-0);
+}
+.theme-asset-upload__preview img { width: 100%; height: 100%; max-height: 118px; object-fit: cover; }
+.theme-asset-upload__copy { min-width: 0; display: grid; align-content: center; gap: 7px; }
+.theme-asset-upload__copy strong { color: var(--text-strong); font-size: 14px; }
+.theme-asset-upload__copy small, .theme-asset-help { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.theme-asset-upload__copy > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.theme-asset-upload__copy button { display: inline-flex; align-items: center; gap: 7px; }
+.theme-asset-upload__input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.theme-asset-error { margin: 0; color: var(--danger); font-size: 12px; }
+
+@media (max-width: 760px) {
+  .theme-asset-upload { grid-template-columns: 1fr; }
+  .theme-customizer-row--assets { grid-template-columns: 1fr; }
+}
+
 .theme-live-preview-box {
   display: flex;
   flex-direction: column;
@@ -1045,7 +1080,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .completion-job-status button { min-height: 32px; padding: 5px 9px; border: 1px solid currentColor; color: inherit; background: transparent; cursor: pointer; }
 .completion-job-status button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.chat-workbench { position: relative; height: 100%; display: grid; grid-template-rows: 56px minmax(0, 1fr) auto; background: transparent; overflow: hidden; }
+.chat-workbench { position: relative; min-width: 0; height: 100%; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 56px minmax(0, 1fr) auto; background: transparent; overflow: hidden; }
 
 /* 沉浸式皮肤全景舞台：宫殿背景 + 左右立绘角色 */
 .skin-stage { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 0; contain: strict; }
@@ -2301,6 +2336,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .settings-nav__label { padding: 0 12px 6px; color: var(--text-muted); font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
 .settings-nav button { width: 100%; min-height: 50px; display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: center; gap: 10px; padding: 8px 14px; border: 1px solid transparent; border-radius: var(--radius-control, 8px); background: transparent; color: var(--text-soft); text-align: left; cursor: pointer; transition: all var(--duration-fast) var(--ease-smooth); }
 .settings-nav button > svg { color: var(--text-muted); transition: color var(--duration-fast) var(--ease-smooth); }
+.settings-nav button > span { min-width: 0; display: grid; gap: 2px; }
 .settings-nav button strong { color: inherit; font-size: 13.5px; font-weight: 600; }
 .settings-nav button small { overflow: hidden; color: var(--text-muted); font-size: 11.5px; line-height: 1.4; white-space: nowrap; text-overflow: ellipsis; }
 .settings-nav button:hover { background: var(--surface-2); color: var(--text-strong); }

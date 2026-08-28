@@ -33,6 +33,7 @@ class FakeEventSource {
 const EVENT_NAMES = [
   'error',
   'ready',
+  'conversation-control',
   'runtime',
   'trace',
   'world-cue',

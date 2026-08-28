@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   World,
   WorldCue,
@@ -61,6 +61,8 @@ function resolveSkinManifest(world: World, baseManifest?: WorldThemeManifestV1, 
 
 export function useWorldClient({ demoMode, world, employees, liveEnabled = true }: UseWorldClientInput) {
   const currentSkin = useCurrentSkin()
+  const currentSkinRef = useRef(currentSkin)
+  currentSkinRef.current = currentSkin
   const manifest = resolveSkinManifest(world, undefined, currentSkin)
   const [state, setState] = useState<WorldClientState>(() => ({
     manifest,
@@ -145,7 +147,10 @@ export function useWorldClient({ demoMode, world, employees, liveEnabled = true 
     ]).then(([snapshot, nextManifest, themes]) => {
       if (cancelled) return
       const activeTheme = themes.items.find((item) => item.active)
-      const effectiveManifest = resolveSkinManifest(world, nextManifest, currentSkin)
+      // The HTTP response can arrive after the user has changed skins. Resolve
+      // against the latest document skin so an old server manifest cannot
+      // overwrite the newly selected shared scene.
+      const effectiveManifest = resolveSkinManifest(world, nextManifest, currentSkinRef.current)
       setState((current) => ({
         ...current,
         snapshot: current.snapshot !== undefined && current.snapshot.sequence > snapshot.sequence ? current.snapshot : snapshot,

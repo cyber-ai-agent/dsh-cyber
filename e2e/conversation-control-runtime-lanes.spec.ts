@@ -29,13 +29,14 @@ test('keeps durable queue controls, reload state and stop facts visible across r
   const workspace = current.store.listWorkspaces()[0]!
   const world = current.store.listWorlds(workspace.id)[0]!
   const employee = current.store.listEmployees(world.id)[0]!
+  const temporaryModel = current.store.saveModelProfile({ workspaceId: workspace.id, displayName: '会话临时模型', providerKind: 'openai-compatible-local', baseUrl: 'http://127.0.0.1:11434/v1', modelId: 'temporary-chat-model', api: 'openai-completions', settings: {} })
   const second = await recruit(world.id)
   const consoleIssues: string[] = []
   attachAppConsoleRecorder(page, consoleIssues)
 
   await page.goto(origin)
   await expect(page.locator('.workbench-shell')).toBeVisible()
-  const first = await postJson<{ session: { id: string } }>(`${origin}/api/worlds/${world.id}/chat`, { employeeIds: [employee.id], prompt: '第一条长任务', queueMode: 'normal', clientTurnId: 'lane-first' })
+  const first = await postJson<{ session: { id: string } }>(`${origin}/api/worlds/${world.id}/chat`, { employeeIds: [employee.id], prompt: '第一条长任务', queueMode: 'normal', clientTurnId: 'lane-first', modelProfileId: temporaryModel.id })
   const secondTurn = await postJson<{ session: { id: string } }>(`${origin}/api/worlds/${world.id}/chat`, { employeeIds: [employee.id], prompt: '第二条排队任务', queueMode: 'normal', clientTurnId: 'lane-second' })
   expect(first.status).toBe(202)
   expect(secondTurn.status).toBe(202)
@@ -44,6 +45,7 @@ test('keeps durable queue controls, reload state and stop facts visible across r
     const items = (await getJson<{ items: Array<{ status: string }> }>(`${origin}/api/worlds/${world.id}/chat-queue`)).items
     return items.map((item) => item.status).sort()
   }).toEqual(['queued', 'running'])
+  await expect.poll(() => runtime.calls.some((call) => call.modelProfileId === temporaryModel.id)).toBe(true)
   await page.reload()
   await expect(page.locator('.workbench-shell')).toBeVisible()
   await expect(page.getByText(/等待中|正在回复中/).first()).toBeVisible()

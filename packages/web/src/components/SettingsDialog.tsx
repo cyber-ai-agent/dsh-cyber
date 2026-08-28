@@ -43,6 +43,7 @@ import type {
 import { api } from '../api.js'
 import { setUiLocale, UI_LOCALES, useI18n } from '../i18n/runtime.js'
 import { formatDateTime, formatDuration as localeFormatDuration, formatNumber } from '../i18n/format.js'
+import { ModelPicker } from '../features/models/ModelPicker.js'
 import type { ApplicationAccessSummary } from './ApplicationLockGate.js'
 
 interface ApplicationAccessMutation extends ApplicationAccessSummary { recoveryCode?: string }
@@ -359,10 +360,10 @@ export function SettingsDialog({
           </div>
         </div>
         <footer className="settings-dialog__footer">
-          <span>{section === 'appearance' ? (saving ? t('settings.saving', '正在保存…') : changed ? t('settings.unsaved', '有未保存的外观更改') : t('settings.saved', '外观设置已保存')) : t(`settings.${section}Description`, '')}</span>
+          <span>{section === 'appearance' ? (saving ? t('appearance.status.saving', '正在保存…') : changed ? t('appearance.status.unsaved', '有未保存的外观更改') : t('appearance.status.saved', '外观设置已保存')) : t(`settings.${section}Description`, '')}</span>
           <div>
-            <button className="text-button" type="button" onClick={close}>{section === 'appearance' ? t('common.cancel', '取消') : t('common.close', '关闭')}</button>
-            {section === 'appearance' ? <button className="primary-button" type="button" disabled={!changed || saving} onClick={() => void onSavePreferences(draft)}>{t('settings.saveAppearance', '保存外观设置')}</button> : null}
+            <button className="text-button" type="button" onClick={close}>{section === 'appearance' ? t('appearance.action.cancel', '取消') : t('common.close', '关闭')}</button>
+            {section === 'appearance' ? <button className="primary-button" type="button" disabled={!changed || saving} onClick={() => void onSavePreferences(draft)}>{t('appearance.action.save', '保存外观设置')}</button> : null}
           </div>
         </footer>
       </section>
@@ -538,44 +539,44 @@ function AppearanceSettings({
   const { t } = useI18n()
   return (
     <div className="settings-section">
-      <div className="settings-section__heading"><h3>外观与布局</h3><p>调整颜色模式、背景和工作区布局。皮肤请前往扩展市场选择。</p></div>
+      <div className="settings-section__heading"><h3>{t('appearance.title', '外观与布局')}</h3><p>{t('appearance.description', '调整颜色模式、背景和工作区布局。皮肤请前往扩展市场选择。')}</p></div>
       <fieldset className="setting-group locale-setting">
-        <legend>{t('settings.language.title', '语言与地区')}</legend>
-        <p>{t('settings.language.description', '选择界面语言。更改会立即预览，并在保存后同步到当前工作区。')}</p>
-        <label><span>{t('settings.language.label', '界面语言')}</span><select value={value.locale} onChange={(event) => { const locale = event.target.value as WorkspacePreferences['locale']; setUiLocale(locale); onChange({ ...value, locale }) }}>{UI_LOCALES.map((locale) => <option key={locale.id} value={locale.id}>{locale.nativeName}</option>)}</select><small>{t('settings.language.hint', '日期、数字、状态和产品文案会使用同一语言；技术标识保持原样。')}</small></label>
+        <legend>{t('appearance.language.title', '语言与地区')}</legend>
+        <p>{t('appearance.language.description', '选择界面语言。更改会立即预览，并在保存后同步到当前工作区。')}</p>
+        <label><span>{t('appearance.language.label', '界面语言')}</span><select value={value.locale} onChange={(event) => { const locale = event.target.value as WorkspacePreferences['locale']; setUiLocale(locale); onChange({ ...value, locale }) }}>{UI_LOCALES.map((locale) => <option key={locale.id} value={locale.id}>{locale.nativeName}</option>)}</select><small>{t('appearance.language.hint', '日期、数字、状态和产品文案会使用同一语言；技术标识保持原样。')}</small></label>
       </fieldset>
       <fieldset className="setting-group">
-        <legend>颜色模式</legend>
+        <legend>{t('appearance.colorScheme.title', '颜色模式')}</legend>
         <div className="segmented-control">
-          {([['system', '跟随系统', Desktop], ['light', '白天', Sun], ['dark', '黑夜', Moon]] as const).map(([id, label, Icon]) => (
+          {([['system', 'appearance.colorScheme.system', '跟随系统', Desktop], ['light', 'appearance.colorScheme.light', '白天', Sun], ['dark', 'appearance.colorScheme.dark', '黑夜', Moon]] as const).map(([id, key, fallback, Icon]) => (
             <button key={id} type="button" className={value.colorScheme === id ? 'is-active' : ''} onClick={() => onChange({ ...value, colorScheme: id })}>
-              <Icon size={17} /><span>{label}</span>
+              <Icon size={17} /><span>{t(key, fallback)}</span>
             </button>
           ))}
         </div>
       </fieldset>
       <details className="settings-disclosure appearance-advanced">
-        <summary><span><strong>更多外观选项</strong><small>自定义背景、动效、信息密度和面板宽度</small></span><CaretDown size={16} /></summary>
+        <summary><span><strong>{t('appearance.more.title', '更多外观选项')}</strong><small>{t('appearance.more.description', '自定义背景、动效、信息密度和面板宽度')}</small></span><CaretDown size={16} /></summary>
         <div className="settings-disclosure__content appearance-advanced__content">
           <fieldset className="setting-group">
-            <legend>自定义背景</legend>
+            <legend>{t('appearance.background.title', '自定义背景')}</legend>
             <label className="background-upload">
               <ImageSquare size={24} />
-              <span><strong>{uploading ? '正在保存到本地…' : '上传 PNG、JPEG 或 WebP'}</strong><small>最大 5 MiB。文件只保存在本机，并作为当前世界的场景底图。</small></span>
+              <span><strong>{uploading ? t('appearance.background.uploading', '正在保存到本地…') : t('appearance.background.upload', '上传 PNG、JPEG 或 WebP')}</strong><small>{t('appearance.background.description', '最多 5 MiB。文件只保存在本机，并作为当前世界的场景底图。')}</small></span>
               <input type="file" accept="image/png,image/jpeg,image/webp" disabled={uploading} onChange={(event) => { const file = event.target.files?.[0]; if (file) void onUpload(file) }} />
             </label>
             <div className="setting-grid">
-              <label><span>适配方式</span><select value={value.backgroundFit} onChange={(event) => onChange({ ...value, backgroundFit: event.target.value as WorkspacePreferences['backgroundFit'] })}><option value="cover">铺满</option><option value="contain">完整显示</option><option value="tile">平铺</option></select></label>
-              <label><span>背景透明度</span><input type="range" min="0" max="0.6" step="0.02" value={value.backgroundOpacity} onChange={(event) => onChange({ ...value, backgroundOpacity: Number(event.target.value) })} /></label>
-              <label><span>动效</span><select value={value.motion} onChange={(event) => onChange({ ...value, motion: event.target.value as WorkspacePreferences['motion'] })}><option value="system">跟随系统</option><option value="reduced">减少</option><option value="full">完整</option></select></label>
+              <label><span>{t('appearance.background.fit', '适配方式')}</span><select value={value.backgroundFit} onChange={(event) => onChange({ ...value, backgroundFit: event.target.value as WorkspacePreferences['backgroundFit'] })}><option value="cover">{t('appearance.background.fit.cover', '铺满')}</option><option value="contain">{t('appearance.background.fit.contain', '完整显示')}</option><option value="tile">{t('appearance.background.fit.tile', '平铺')}</option></select></label>
+              <label><span>{t('appearance.background.opacity', '背景透明度')}</span><input type="range" min="0" max="0.6" step="0.02" value={value.backgroundOpacity} onChange={(event) => onChange({ ...value, backgroundOpacity: Number(event.target.value) })} /></label>
+              <label><span>{t('appearance.motion.title', '动效')}</span><select value={value.motion} onChange={(event) => onChange({ ...value, motion: event.target.value as WorkspacePreferences['motion'] })}><option value="system">{t('appearance.motion.system', '跟随系统')}</option><option value="reduced">{t('appearance.motion.reduced', '减少')}</option><option value="full">{t('appearance.motion.full', '完整')}</option></select></label>
             </div>
           </fieldset>
           <fieldset className="setting-group">
-            <legend>工作台布局</legend>
+            <legend>{t('appearance.layout.title', '工作台布局')}</legend>
             <div className="setting-grid">
-              <label><span>界面密度</span><select value={value.interfaceDensity} onChange={(event) => onChange({ ...value, interfaceDensity: event.target.value as WorkspacePreferences['interfaceDensity'] })}><option value="compact">紧凑</option><option value="comfortable">舒适</option></select></label>
-              <label><span>左栏 {value.leftPaneWidth}px</span><input type="range" min={WORKSPACE_PREFERENCES_LIMITS.leftPaneWidth.minimum} max={WORKSPACE_PREFERENCES_LIMITS.leftPaneWidth.maximum} value={value.leftPaneWidth} onChange={(event) => onChange({ ...value, leftPaneWidth: Number(event.target.value) })} /></label>
-              <label><span>右栏 {value.rightPaneWidth}px</span><input type="range" min={WORKSPACE_PREFERENCES_LIMITS.rightPaneWidth.minimum} max={WORKSPACE_PREFERENCES_LIMITS.rightPaneWidth.maximum} value={value.rightPaneWidth} onChange={(event) => onChange({ ...value, rightPaneWidth: Number(event.target.value) })} /></label>
+              <label><span>{t('appearance.layout.density', '界面密度')}</span><select value={value.interfaceDensity} onChange={(event) => onChange({ ...value, interfaceDensity: event.target.value as WorkspacePreferences['interfaceDensity'] })}><option value="compact">{t('appearance.layout.density.compact', '紧凑')}</option><option value="comfortable">{t('appearance.layout.density.comfortable', '舒适')}</option></select></label>
+              <label><span>{t('appearance.layout.leftPane', '左栏 {width}px', { width: value.leftPaneWidth })}</span><input type="range" min={WORKSPACE_PREFERENCES_LIMITS.leftPaneWidth.minimum} max={WORKSPACE_PREFERENCES_LIMITS.leftPaneWidth.maximum} value={value.leftPaneWidth} onChange={(event) => onChange({ ...value, leftPaneWidth: Number(event.target.value) })} /></label>
+              <label><span>{t('appearance.layout.rightPane', '右栏 {width}px', { width: value.rightPaneWidth })}</span><input type="range" min={WORKSPACE_PREFERENCES_LIMITS.rightPaneWidth.minimum} max={WORKSPACE_PREFERENCES_LIMITS.rightPaneWidth.maximum} value={value.rightPaneWidth} onChange={(event) => onChange({ ...value, rightPaneWidth: Number(event.target.value) })} /></label>
             </div>
           </fieldset>
         </div>
@@ -1043,7 +1044,7 @@ function validateModelConnection(draft: ModelDraft): string | undefined {
 }
 
 function ModelRouteRow({ label, detail, value, models, onChange }: { label: string; detail: string; value: string; models: ModelProfile[]; onChange(value: string): void }) {
-  return <label className="model-route-row"><span><strong>{label}</strong><small>{detail}</small></span><select value={value} disabled={models.length === 0} onChange={(event) => onChange(event.target.value)}><option value="">继承上级 / 默认模型</option>{models.map((model) => <option key={model.id} value={model.id}>{model.displayName} · {model.modelId}</option>)}</select></label>
+  return <label className="model-route-row"><span><strong>{label}</strong><small>{detail}</small></span><ModelPicker models={models} value={value || undefined} ariaLabel={`${label}模型`} inheritLabel="继承上级 / 默认模型" onChange={(modelId) => onChange(modelId ?? '')} /></label>
 }
 
 function providerLabel(model: ModelProfile): string {

@@ -1017,6 +1017,8 @@ export interface AgentTurnRequest {
   workspacePath: string
   reasoningEffort?: Exclude<ReasoningEffort, 'auto'>
   permissionMode?: AgentPermissionMode
+  /** One-turn model override. It never mutates world or character assignments. */
+  modelProfileId?: string
   onEvent?: (event: AgentRuntimeEvent) => void
 }
 
@@ -1116,6 +1118,8 @@ export * from './browser-skill.js'
 export * from './workspace-preferences.js'
 export * from './completion-job.js'
 export * from './work-system.js'
+export * from './prompt-safety.js'
+export * from './creative-workshop-draft.js'
 
 export type {
   CharacterSkillAction,

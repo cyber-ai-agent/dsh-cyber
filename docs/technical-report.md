@@ -549,3 +549,13 @@ The guiding engineering rule is simple:
 - CI strategy: [`development/ci-strategy.md`](./development/ci-strategy.md)
 - Local upgrade safety: [`operations/local-first-upgrades.md`](./operations/local-first-upgrades.md)
 - World Trace Center V1: [`architecture/world-trace-center-v1.md`](./architecture/world-trace-center-v1.md)
+
+# 2026-08-28 Creative Workshop V2 技术更新
+
+- 新增 `CreativeWorkshopDraftV1`、严格草稿校验、工作区草稿持久化和默认模型 AI 草稿生成器。
+- AI 返回内容在任何实体写入前完成 Schema、越权字段、角色数量和模型引用验证。
+- 新增统一两层 `ModelPicker`，世界和角色保存 ModelProfile 引用；对话支持临时回合覆盖。
+- 模型发现增加 DNS/SSRF、凭据转发与重定向防护。
+- 对话 Prompt 增加 Unicode 规范化、控制字符和长度边界；历史上下文使用结构化编码。
+- 修复单条消息“另有 1 条排队”、Stop SSE 反馈、语言状态分裂和世界皮肤场景不同步。
+- 自定义皮肤素材改为本机上传卡片，统一全景图同时驱动聊天和 2.5D 世界。

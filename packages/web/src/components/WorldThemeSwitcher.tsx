@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { CaretDown, Check, Palette, PencilSimple, Plus } from '@phosphor-icons/react'
 import type { World } from '@dsh-cyber/contracts'
+import { getLocalizedThemeText } from '../i18n/appearance-messages.js'
+import { useI18n } from '../i18n/runtime.js'
 import {
   applyWorldTheme,
   DEFAULT_SKIN_ID,
@@ -18,6 +20,7 @@ interface WorldThemeSwitcherProps {
 }
 
 export function WorldThemeSwitcher({ activeWorld, installedSkinIds, onThemeChange }: WorldThemeSwitcherProps) {
+  const { locale, t } = useI18n()
   const [currentThemeId, setCurrentThemeId] = useState<string>(() => readWorldTheme(activeWorld))
   const [open, setOpen] = useState(false)
   const [customizerOpen, setCustomizerOpen] = useState(false)
@@ -49,6 +52,8 @@ export function WorldThemeSwitcher({ activeWorld, installedSkinIds, onThemeChang
   const themes = themeRegistry.listAvailable(installedSkinIds ?? [])
   const resolvedCurrentThemeId = themes.some((theme) => theme.id === currentThemeId) ? currentThemeId : DEFAULT_SKIN_ID
   const currentTheme = themeRegistry.get(resolvedCurrentThemeId)
+  const currentThemeText = getLocalizedThemeText(currentTheme, locale)
+  const currentThemeIsContent = currentTheme.source === 'custom' || currentTheme.source === 'package'
 
   const handleSelect = (theme: WorldThemeConfig) => {
     setCurrentThemeId(theme.id)
@@ -72,7 +77,7 @@ export function WorldThemeSwitcher({ activeWorld, installedSkinIds, onThemeChang
           aria-haspopup="menu"
           aria-expanded={open}
           onClick={() => setOpen((prev) => !prev)}
-          title="切换当前世界的皮肤风格"
+          title={t('appearance.theme.switchTitle', '切换当前世界的皮肤风格')}
         >
           <span
             className="world-theme-dot"
@@ -82,26 +87,27 @@ export function WorldThemeSwitcher({ activeWorld, installedSkinIds, onThemeChang
             }}
           />
           <Palette size={13} aria-hidden="true" />
-          <span>皮肤: {currentTheme.displayName}</span>
+          <span>{t('appearance.theme.label', '皮肤')}: {currentThemeText.displayName}</span>
+          {currentThemeIsContent ? <span className="theme-source-badge">{t('appearance.theme.content', '内容')}</span> : null}
           <CaretDown size={11} className={open ? 'is-expanded' : ''} aria-hidden="true" />
         </button>
 
         {open && (
-          <div className="topbar-world-theme-menu" role="menu" aria-label="世界皮肤列表">
+          <div className="topbar-world-theme-menu" role="menu" aria-label={t('appearance.theme.listLabel', '世界皮肤列表')}>
             <header className="topbar-world-theme-menu__header">
               <div>
-                <strong>世界专属皮肤</strong>
-                <small>为【{activeWorld.name}】选择或定制空间风格</small>
+                <strong>{t('appearance.theme.menuTitle', '世界专属皮肤')}</strong>
+                <small>{t('appearance.theme.menuDescription', '为【{world}】选择或定制空间风格', { world: activeWorld.name })}</small>
               </div>
               {currentTheme.source === 'custom' ? (
                 <button
                   type="button"
                   className="theme-menu-action-btn"
                   onClick={() => openCustomizer(currentTheme.id)}
-                  title="编辑当前自定义皮肤"
+                  title={t('appearance.theme.editCurrent', '编辑当前自定义皮肤')}
                 >
                   <PencilSimple size={13} />
-                  <span>编辑</span>
+                  <span>{t('appearance.theme.edit', '编辑')}</span>
                 </button>
               ) : null}
             </header>
@@ -110,11 +116,12 @@ export function WorldThemeSwitcher({ activeWorld, installedSkinIds, onThemeChang
               {themes.map((theme) => {
                 const selected = theme.id === resolvedCurrentThemeId
                 const previewImage = theme.tokens.worldMapImage ?? theme.tokens.backdropImage
+                const themeText = getLocalizedThemeText(theme, locale)
                 const sourceBadge =
                   theme.source === 'custom'
-                    ? '自定义'
+                    ? `${t('appearance.theme.content', '内容')} · ${t('appearance.theme.source.custom', '自定义')}`
                     : theme.source === 'package'
-                    ? '插件包'
+                    ? `${t('appearance.theme.content', '内容')} · ${t('appearance.theme.source.package', '扩展包')}`
                     : undefined
 
                 return (
@@ -139,10 +146,10 @@ export function WorldThemeSwitcher({ activeWorld, installedSkinIds, onThemeChang
                     </span>
                     <div className="world-theme-info">
                       <div className="world-theme-name-row">
-                        <strong>{theme.displayName}</strong>
+                        <strong>{themeText.displayName}</strong>
                         {sourceBadge ? <span className="theme-source-badge">{sourceBadge}</span> : null}
                       </div>
-                      <small>{theme.description}</small>
+                      <small>{themeText.description}</small>
                     </div>
                     {selected && <Check size={14} className="world-theme-check" />}
                   </button>
@@ -157,7 +164,7 @@ export function WorldThemeSwitcher({ activeWorld, installedSkinIds, onThemeChang
                 onClick={() => openCustomizer(currentTheme.id)}
               >
                 <Plus size={14} />
-                <span>基于当前皮肤新建自定义...</span>
+                <span>{t('appearance.theme.create', '基于当前皮肤新建自定义…')}</span>
               </button>
             </footer>
           </div>

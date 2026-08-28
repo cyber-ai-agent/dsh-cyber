@@ -1,6 +1,7 @@
 const WORLD_LIVE_EVENT_NAMES = [
   'error',
   'ready',
+  'conversation-control',
   'runtime',
   'trace',
   'world-cue',

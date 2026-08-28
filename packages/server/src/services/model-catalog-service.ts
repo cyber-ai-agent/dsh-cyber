@@ -1,6 +1,13 @@
-import type { ModelApiKind } from '@dsh-cyber/contracts'
+import type { ModelApiKind, ModelProviderKind } from '@dsh-cyber/contracts'
 
 import type { ModelCredentialService } from './model-credential-service.js'
+import {
+  assertModelDiscoveryUrl,
+  inferModelProviderKind,
+  systemModelHostnameResolver,
+  type ModelHostnameResolver,
+  type ModelUrlPolicyError,
+} from './model-url-policy.js'
 import { ServiceError } from './service-error.js'
 
 const DEFAULT_TIMEOUT_MS = 12_000
@@ -8,6 +15,7 @@ const MAX_CATALOG_BYTES = 2 * 1024 * 1024
 
 export interface ModelCatalogDiscoveryInput {
   baseUrl: string
+  providerKind?: ModelProviderKind
   api: ModelApiKind
   apiKey?: string
   credentialEnvName?: string
@@ -15,21 +23,45 @@ export interface ModelCatalogDiscoveryInput {
 }
 
 export interface DiscoveredModel { id: string; displayName?: string }
-export interface ModelCatalogServiceOptions { fetch?: typeof fetch; timeoutMs?: number }
+export interface ModelCatalogServiceOptions {
+  fetch?: typeof fetch
+  timeoutMs?: number
+  resolveHostname?: ModelHostnameResolver
+  resolvePublicHosts?: boolean
+}
 
 export class ModelCatalogService {
   readonly #credentials: ModelCredentialService
   readonly #fetch: typeof fetch
   readonly #timeoutMs: number
+  readonly #resolveHostname: ModelHostnameResolver
+  readonly #resolvePublicHosts: boolean
 
   constructor(credentials: ModelCredentialService, options: ModelCatalogServiceOptions = {}) {
     this.#credentials = credentials
     this.#fetch = options.fetch ?? fetch
     this.#timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
+    this.#resolveHostname = options.resolveHostname ?? systemModelHostnameResolver
+    this.#resolvePublicHosts = options.resolvePublicHosts ?? true
   }
 
   async discover(input: ModelCatalogDiscoveryInput): Promise<DiscoveredModel[]> {
-    const endpoint = modelCatalogEndpoint(input.baseUrl)
+    const providerKind = input.providerKind ?? inferModelProviderKind(input.baseUrl)
+    let endpoint: URL
+    try {
+      endpoint = await assertModelDiscoveryUrl(input.baseUrl, providerKind, {
+        resolver: this.#resolveHostname,
+        resolvePublicHosts: this.#resolvePublicHosts,
+      })
+    } catch (error) {
+      if (isModelUrlPolicyError(error)) {
+        throw new ServiceError('invalid', error.code, error.message)
+      }
+      throw error
+    }
+    endpoint.pathname = `${endpoint.pathname.replace(/\/+$/, '')}/models`
+    endpoint.search = ''
+    endpoint.hash = ''
     const apiKey = input.apiKey?.trim()
       || (input.profileId ? this.#credentials.resolve(input.profileId) : undefined)
       || (input.credentialEnvName ? process.env[input.credentialEnvName] : undefined)
@@ -45,7 +77,7 @@ export class ModelCatalogService {
     const timeout = setTimeout(() => controller.abort(), this.#timeoutMs)
     let response: Response
     try {
-      response = await this.#fetch(endpoint, { method: 'GET', headers, signal: controller.signal })
+      response = await this.#fetch(endpoint, { method: 'GET', headers, signal: controller.signal, redirect: 'error' })
     } catch (error) {
       if (isAbortError(error)) {
         throw new ServiceError('unavailable', 'model_catalog_timeout', '模型服务响应超时，请检查地址或稍后重试。')
@@ -63,18 +95,8 @@ export class ModelCatalogService {
   }
 }
 
-function modelCatalogEndpoint(baseUrl: string): URL {
-  let endpoint: URL
-  try { endpoint = new URL(baseUrl) } catch {
-    throw new ServiceError('invalid', 'model_base_url_invalid', '接口地址格式不正确。')
-  }
-  if (!['http:', 'https:'].includes(endpoint.protocol)) {
-    throw new ServiceError('invalid', 'model_base_url_invalid', '模型接口只支持 HTTP 或 HTTPS。')
-  }
-  endpoint.pathname = `${endpoint.pathname.replace(/\/+$/, '')}/models`
-  endpoint.search = ''
-  endpoint.hash = ''
-  return endpoint
+function isModelUrlPolicyError(error: unknown): error is ModelUrlPolicyError {
+  return error !== null && typeof error === 'object' && error instanceof Error && error.name === 'ModelUrlPolicyError'
 }
 
 function upstreamCatalogError(status: number): ServiceError {
