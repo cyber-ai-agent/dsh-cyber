@@ -14,7 +14,7 @@ import {
   Warning,
   X,
 } from '@phosphor-icons/react'
-import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react'
 import type {
   CyberMarketKind,
   CyberMarketPackage,
@@ -25,6 +25,7 @@ import type {
   World,
 } from '@dsh-cyber/contracts'
 import { DEFAULT_SKIN_ID } from '../features/world/world-themes.js'
+import { useI18n } from '../i18n/runtime.js'
 
 // Official skin packages point at the same host-registered scene used by the
 // world switcher. The package catalog remains the source of truth for which
@@ -66,14 +67,15 @@ interface PackageMarketDialogProps {
   onInstall(input: { manifest: CyberPackageManifest; sourceDirectory: string; approvalToken: string }): Promise<void>
 }
 
-const MARKET_META: Record<CyberMarketKind, { label: string; description: string }> = {
-  theme: { label: '世界', description: '选择完整场景皮肤、空间设定和起始角色，创建彼此独立的新世界。' },
-  talent: { label: '角色', description: '安装不同世界观与专长的角色模板，再把角色招募到兼容世界。' },
-  plugin: { label: '插件', description: '先安装到本地包库，再为需要的世界单独启用；每次安装都可审阅、回滚。' },
-  skin: { label: '皮肤', description: '安装完整的场景皮肤；安装后才会出现在世界皮肤下拉，默认皮肤始终可用。' },
-}
-
 export function PackageMarketDialog(props: PackageMarketDialogProps) {
+  const { t } = useI18n()
+  const marketMeta: Record<CyberMarketKind, { label: string; description: string }> = useMemo(() => ({
+    theme: { label: t('workbench.marketTabTheme', '世界'), description: t('workbench.marketTabThemeDesc', '选择完整场景皮肤、空间设定和起始角色，创建彼此独立的新世界。') },
+    talent: { label: t('workbench.marketTabTalent', '角色'), description: t('workbench.marketTabTalentDesc', '安装不同世界观与专长的角色模板，再把角色招募到兼容世界。') },
+    plugin: { label: t('workbench.marketTabPlugin', '插件'), description: t('workbench.marketTabPluginDesc', '先安装到本地包库，再为需要的世界单独启用；每次安装都可审阅、回滚。') },
+    skin: { label: t('workbench.marketTabSkin', '皮肤'), description: t('workbench.marketTabSkinDesc', '安装完整的场景皮肤；安装后才会出现在世界皮肤下拉，默认皮肤始终可用。') },
+  }), [t])
+
   const [market, setMarket] = useState<CyberMarketKind>(props.initialMarket)
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<CyberMarketPackage>()
@@ -181,32 +183,32 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && props.onClose()}>
       <section className="package-market-dialog package-market-dialog--catalog" role="dialog" aria-modal="true" aria-labelledby="package-market-title">
         <header className="dialog-header package-market-header">
-          <div><h2 id="package-market-title">扩展市场</h2><p>先选择世界，再发现角色与插件。所有内容经过完整性校验和事务安装。</p></div>
-          <button className="icon-button" type="button" aria-label="关闭市场" onClick={props.onClose}><X size={18} /></button>
+          <div><h2 id="package-market-title">{t('workbench.marketTitle', '扩展市场')}</h2><p>{t('workbench.marketSubtitle', '先选择世界，再发现角色与插件。所有内容经过完整性校验和事务安装。')}</p></div>
+          <button className="icon-button" type="button" aria-label={t('workbench.cancel', '关闭市场')} onClick={props.onClose}><X size={18} /></button>
         </header>
         <nav className="market-tabs" aria-label="市场分类">
-          <MarketTab market="theme" active={market === 'theme'} onSelect={switchMarket} />
-          <MarketTab market="talent" active={market === 'talent'} onSelect={switchMarket} />
-          <MarketTab market="plugin" active={market === 'plugin'} onSelect={switchMarket} />
-          <MarketTab market="skin" active={market === 'skin'} onSelect={switchMarket} />
+          <MarketTab market="theme" label={marketMeta.theme.label} active={market === 'theme'} onSelect={switchMarket} />
+          <MarketTab market="talent" label={marketMeta.talent.label} active={market === 'talent'} onSelect={switchMarket} />
+          <MarketTab market="plugin" label={marketMeta.plugin.label} active={market === 'plugin'} onSelect={switchMarket} />
+          <MarketTab market="skin" label={marketMeta.skin.label} active={market === 'skin'} onSelect={switchMarket} />
         </nav>
         <div className="package-market-layout package-market-layout--catalog">
           <main className="market-catalog">
             <div className="market-intro">
               <div>
-                <strong>{MARKET_META[market].label}</strong>
-                <span>{MARKET_META[market].description}</span>
+                <strong>{marketMeta[market].label}</strong>
+                <span>{marketMeta[market].description}</span>
               </div>
-              <span>{props.items.length} 个扩展</span>
+              <span>{t('workbench.marketExtensionCount', '{count} 个扩展', { count: props.items.length })}</span>
             </div>
             <form className="market-search" onSubmit={search}>
               <MagnifyingGlass size={17} />
-              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`搜索${MARKET_META[market].label}、发布者或能力`} />
-              <button type="submit">搜索</button>
+              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('workbench.marketSearchPlaceholder', '搜索{category}、发布者或能力', { category: marketMeta[market].label })} />
+              <button type="submit">{t('workbench.marketSearchSubmit', '搜索')}</button>
             </form>
             {error === undefined ? null : <div className="package-error" role="alert"><Warning size={16} />{error}</div>}
-            {props.loading ? <div className="dialog-empty">正在校验本地市场目录…</div> : props.items.length === 0 ? (
-              <div className="market-empty"><Cube size={30} /><strong>没有匹配的扩展</strong><span>可以修改关键词，或使用下方“本地导入”安装自定义包。</span></div>
+            {props.loading ? <div className="dialog-empty">{t('workbench.marketCheckingLocal', '正在校验本地市场目录…')}</div> : props.items.length === 0 ? (
+              <div className="market-empty"><Cube size={30} /><strong>{t('workbench.marketEmpty', '没有匹配的扩展')}</strong><span>{t('workbench.marketEmptyDesc', '可以修改关键词，或使用下方“本地导入”安装自定义包。')}</span></div>
             ) : (
               <div className="market-card-grid">
                 {props.items.map((item) => {
@@ -233,7 +235,7 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
                 })}
               </div>
             )}
-            <button className="manual-install-toggle" type="button" onClick={() => setManualOpen((value) => !value)}><FolderOpen size={16} />{manualOpen ? '收起本地导入' : '本地导入自定义包'}</button>
+            <button className="manual-install-toggle" type="button" onClick={() => setManualOpen((value) => !value)}><FolderOpen size={16} />{manualOpen ? t('workbench.marketManualToggleOpen', '收起本地导入') : t('workbench.marketManualToggleClose', '本地导入自定义包')}</button>
             {manualOpen ? <ManualInstaller installing={props.installing} onPreview={props.onPreview} onInstall={props.onInstall} /> : null}
           </main>
           <aside className="market-review-panel">
@@ -255,8 +257,8 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
   )
 }
 
-function MarketTab({ market, active, onSelect }: { market: CyberMarketKind; active: boolean; onSelect(value: CyberMarketKind): void }) {
-  return <button className={active ? 'is-active' : ''} type="button" onClick={() => onSelect(market)}><MarketIcon market={market} />{MARKET_META[market].label}</button>
+function MarketTab({ market, label, active, onSelect }: { market: CyberMarketKind; label: string; active: boolean; onSelect(value: CyberMarketKind): void }) {
+  return <button className={active ? 'is-active' : ''} type="button" onClick={() => onSelect(market)}><MarketIcon market={market} />{label}</button>
 }
 
 function MarketIcon({ market }: { market: CyberMarketKind }) {

@@ -102,8 +102,8 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
     [projects, selectedProjectId],
   )
 
-  const startNew = (source?: WorkshopProject) => {
-    const templateId = source?.baseTemplateId ?? templates[0]?.id ?? 'personal-world'
+  const startNew = (source?: WorkshopProject, templateIdOverride?: string) => {
+    const templateId = templateIdOverride ?? source?.baseTemplateId ?? templates[0]?.id ?? 'personal-world'
     const preset = presets[0]
     if (source === undefined && preset === undefined) {
       setError(t('workshop.noPreset', '当前宿主没有可用的具身语义预设，无法创建新角色。'))
@@ -204,10 +204,11 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
             {error === undefined ? null : <div className="creative-workshop-error" role="alert">{error}</div>}
             <CreativeWorkshopProjectLibrary
               projects={projects}
+              templates={templates}
               {...(selectedProject === undefined ? {} : { selectedProject })}
               skills={skills}
               onSelect={(project) => setSelectedProjectId(project.id)}
-              onCreate={() => startNew()}
+              onCreate={(templateId) => startNew(undefined, templateId)}
               onDuplicate={startNew}
               onOpenWorld={(worldId) => {
                 if (onOpenWorld !== undefined) onOpenWorld(worldId)

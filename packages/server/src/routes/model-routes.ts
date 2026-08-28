@@ -89,6 +89,20 @@ export function registerModelRoutes(router: Router, dependencies: ModelRoutesDep
       credentialEnvName = nullableString(body.credentialEnvName) ?? undefined
     } else if (clearCredential) {
       credentialEnvName = undefined
+    } else if (credentialEnvName === undefined) {
+      const sameUrlProfile = store.listModelProfiles(params[0]!).find(
+        (p) => p.id !== profileId && p.baseUrl === baseUrl && p.credentialEnvName !== undefined
+      )
+      if (sameUrlProfile && sameUrlProfile.credentialEnvName) {
+        if (isManagedModelCredentialName(sameUrlProfile.credentialEnvName)) {
+          const secret = credentials.resolve(sameUrlProfile.id)
+          if (secret) {
+            credentialEnvName = await credentials.set(profileId, secret)
+          }
+        } else {
+          credentialEnvName = sameUrlProfile.credentialEnvName
+        }
+      }
     }
     let profile
     try {

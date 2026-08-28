@@ -17,8 +17,11 @@ import {
   Plug,
   Plus,
   ShieldCheck,
+  Sparkle,
+  Star,
   Sun,
   Trash,
+  WifiHigh,
   X,
 } from '@phosphor-icons/react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
@@ -44,7 +47,9 @@ import { api } from '../api.js'
 import { setUiLocale, UI_LOCALES, useI18n } from '../i18n/runtime.js'
 import { formatDateTime, formatDuration as localeFormatDuration, formatNumber } from '../i18n/format.js'
 import { ModelPicker } from '../features/models/ModelPicker.js'
+import { loadDiscoveredModelsCache, saveDiscoveredModelsToCache } from '../features/models/discovered-models-storage.js'
 import type { ApplicationAccessSummary } from './ApplicationLockGate.js'
+import './SettingsDialog.css'
 
 interface ApplicationAccessMutation extends ApplicationAccessSummary { recoveryCode?: string }
 
@@ -105,10 +110,18 @@ interface SettingsDialogProps {
   onClearModelLogs(): Promise<number>
 }
 
-export type ModelProfileSaveDraft = Omit<ModelProfile, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt'> & {
+export interface ModelProfileSaveDraft {
   id?: string
+  displayName: string
+  providerKind: ModelProviderKind
+  baseUrl: string
+  modelId: string
+  api: ModelApiKind
   apiKey?: string
+  credentialEnvName?: string
   clearCredential?: boolean
+  isDefault: boolean
+  settings: ModelProfile['settings']
 }
 
 export interface ModelDiscoveryDraft {
@@ -121,20 +134,22 @@ export interface ModelDiscoveryDraft {
 
 export interface DiscoveredModel {
   id: string
-  displayName?: string
+  displayName?: string | undefined
 }
 
-const sectionGroups = [
+const SETTINGS_GROUPS = [
   {
+    labelKey: 'settings.group.common',
     label: '常用设置',
     items: [
-      ['appearance', '外观与布局', Palette, '颜色、背景和面板宽度'],
+      ['appearance', '外观与布局', Palette, '颜色、背景和界面语言'],
       ['models', 'AI 模型', Cpu, '连接模型并设置使用范围'],
-      ['integrations', '外部连接', Plug, '管理角色可使用的受信任服务'],
+      ['integrations', '外部连接', Plug, '管理受信任的外部服务'],
       ['privacy', '隐私与锁屏', LockKey, '保护整个本地工作台'],
     ],
   },
   {
+    labelKey: 'settings.group.data',
     label: '数据与记录',
     items: [
       ['data', '数据与备份', Database, '备份或导出本机数据'],
@@ -142,6 +157,7 @@ const sectionGroups = [
     ],
   },
   {
+    labelKey: 'settings.group.advanced',
     label: '高级',
     items: [
       ['maintenance', '应用更新', ShieldCheck, '安全检查并安装新版本'],
@@ -159,9 +175,12 @@ interface ModelProviderPreset {
   credentialMode: ModelCredentialMode
   modelPlaceholder: string
   webSearchBaseUrl?: string
+  popularModels?: readonly string[]
+  badge?: string
 }
 
 type ModelCredentialMode = 'api-key' | 'environment' | 'none'
+type Translate = ReturnType<typeof useI18n>['t']
 
 interface ModelDraft {
   id?: string
@@ -184,24 +203,28 @@ interface ModelDraft {
 }
 
 const MODEL_PRESETS: readonly ModelProviderPreset[] = [
-  { id: 'deepseek', label: 'DeepSeek', providerKind: 'deepseek', api: 'openai-completions', baseUrl: 'https://api.deepseek.com/v1', credentialEnvName: 'DEEPSEEK_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'deepseek-chat', webSearchBaseUrl: 'https://api.deepseek.com/anthropic/v1' },
-  { id: 'openai', label: 'OpenAI', providerKind: 'openai-compatible-remote', api: 'openai-responses', baseUrl: 'https://api.openai.com/v1', credentialEnvName: 'OPENAI_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'gpt-5' },
-  { id: 'anthropic', label: 'Anthropic', providerKind: 'openai-compatible-remote', api: 'anthropic-messages', baseUrl: 'https://api.anthropic.com/v1', credentialEnvName: 'ANTHROPIC_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'claude-sonnet-4-5' },
-  { id: 'gemini', label: 'Google Gemini', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', credentialEnvName: 'GEMINI_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'gemini-2.5-pro' },
-  { id: 'openrouter', label: 'OpenRouter', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://openrouter.ai/api/v1', credentialEnvName: 'OPENROUTER_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'deepseek/deepseek-chat' },
-  { id: 'groq', label: 'Groq', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://api.groq.com/openai/v1', credentialEnvName: 'GROQ_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'llama-3.3-70b-versatile' },
-  { id: 'mistral', label: 'Mistral', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://api.mistral.ai/v1', credentialEnvName: 'MISTRAL_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'mistral-large-latest' },
-  { id: 'xai', label: 'xAI', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://api.x.ai/v1', credentialEnvName: 'XAI_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'grok-4' },
-  { id: 'ollama', label: 'Ollama（本地）', providerKind: 'openai-compatible-local', api: 'openai-completions', baseUrl: 'http://127.0.0.1:11434/v1', credentialEnvName: '', credentialMode: 'none', modelPlaceholder: 'qwen3:14b' },
-  { id: 'lm-studio', label: 'LM Studio（本地）', providerKind: 'openai-compatible-local', api: 'openai-completions', baseUrl: 'http://127.0.0.1:1234/v1', credentialEnvName: '', credentialMode: 'none', modelPlaceholder: 'local-model' },
-  { id: 'custom-local', label: '自定义（本机或局域网）', providerKind: 'openai-compatible-local', api: 'openai-completions', baseUrl: '', credentialEnvName: 'SUB2API_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'qwen3.5' },
-  { id: 'custom-remote', label: '自定义（HTTPS）', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: '', credentialEnvName: 'CUSTOM_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'model-id' },
+  { id: 'deepseek', label: 'DeepSeek', providerKind: 'deepseek', api: 'openai-completions', baseUrl: 'https://api.deepseek.com/v1', credentialEnvName: 'DEEPSEEK_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'deepseek-chat', webSearchBaseUrl: 'https://api.deepseek.com/anthropic/v1', popularModels: ['deepseek-chat', 'deepseek-reasoner'], badge: '官方' },
+  { id: 'siliconflow', label: 'SiliconFlow', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://api.siliconflow.cn/v1', credentialEnvName: 'SILICONFLOW_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'deepseek-ai/DeepSeek-V3', popularModels: ['deepseek-ai/DeepSeek-V3', 'deepseek-ai/DeepSeek-R1', 'Qwen/Qwen2.5-72B-Instruct'], badge: '聚合' },
+  { id: 'zhipu', label: 'Zhipu AI (GLM)', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', credentialEnvName: 'ZHIPU_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'glm-4-flash', popularModels: ['glm-4-flash', 'glm-4-plus', 'glm-4-air'], badge: '国内' },
+  { id: 'moonshot', label: 'Moonshot (Kimi)', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://api.moonshot.cn/v1', credentialEnvName: 'MOONSHOT_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'moonshot-v1-8k', popularModels: ['moonshot-v1-8k', 'moonshot-v1-32k'] },
+  { id: 'openai', label: 'OpenAI', providerKind: 'openai-compatible-remote', api: 'openai-responses', baseUrl: 'https://api.openai.com/v1', credentialEnvName: 'OPENAI_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'gpt-4o', popularModels: ['gpt-4o', 'gpt-4o-mini', 'o1-mini'] },
+  { id: 'anthropic', label: 'Anthropic (Claude)', providerKind: 'openai-compatible-remote', api: 'anthropic-messages', baseUrl: 'https://api.anthropic.com/v1', credentialEnvName: 'ANTHROPIC_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'claude-3-7-sonnet-latest', popularModels: ['claude-3-7-sonnet-latest', 'claude-3-5-haiku-latest'] },
+  { id: 'gemini', label: 'Google Gemini', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', credentialEnvName: 'GEMINI_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'gemini-2.5-pro', popularModels: ['gemini-2.5-pro', 'gemini-2.5-flash'] },
+  { id: 'openrouter', label: 'OpenRouter', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://openrouter.ai/api/v1', credentialEnvName: 'OPENROUTER_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'deepseek/deepseek-chat', popularModels: ['deepseek/deepseek-chat', 'anthropic/claude-3.5-sonnet'] },
+  { id: 'ollama', label: 'Ollama', providerKind: 'openai-compatible-local', api: 'openai-completions', baseUrl: 'http://127.0.0.1:11434/v1', credentialEnvName: '', credentialMode: 'none', modelPlaceholder: 'qwen2.5:7b', popularModels: ['qwen2.5:7b', 'deepseek-r1:8b', 'llama3.1:8b'], badge: '本地免密' },
+  { id: 'lm-studio', label: 'LM Studio', providerKind: 'openai-compatible-local', api: 'openai-completions', baseUrl: 'http://127.0.0.1:1234/v1', credentialEnvName: '', credentialMode: 'none', modelPlaceholder: 'local-model', badge: '本地免密' },
+  { id: 'custom-local', label: 'Custom (LAN/Sub2API)', providerKind: 'openai-compatible-local', api: 'openai-completions', baseUrl: '', credentialEnvName: 'SUB2API_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'qwen3.5' },
+  { id: 'custom-remote', label: 'Custom (HTTPS-compatible)', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: '', credentialEnvName: 'CUSTOM_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'model-id' },
 ] as const
 
-function modelDraftForPreset(preset: ModelProviderPreset, isDefault = false): ModelDraft {
+function providerPresetLabel(preset: ModelProviderPreset, t: Translate): string {
+  return t(`settings.model.providerName.${preset.id}`, preset.label)
+}
+
+function modelDraftForPreset(preset: ModelProviderPreset, isDefault = false, displayName = preset.label): ModelDraft {
   return {
     providerId: preset.id,
-    displayName: preset.label,
+    displayName,
     providerKind: preset.providerKind,
     baseUrl: preset.baseUrl,
     modelId: '',
@@ -304,58 +327,67 @@ export function SettingsDialog({
           <button className="icon-button" type="button" aria-label={t('settings.close', '关闭设置')} onClick={close}><X size={18} /></button>
         </header>
         <div className="settings-layout">
-          <nav className="settings-nav" aria-label="设置栏目">
-            {sectionGroups.map((group, groupIndex) => (
-              <div className="settings-nav__group" key={group.label}>
-                <span className="settings-nav__label">{t((['settings.group.common', 'settings.group.data', 'settings.group.advanced'] as const)[groupIndex]!, group.label)}</span>
+          <nav className="settings-nav" aria-label={t('settings.tabNavigation', '设置栏目')}>
+            {SETTINGS_GROUPS.map((group) => (
+              <div className="settings-nav__group" key={group.labelKey}>
+                <span className="settings-nav__label">{t(group.labelKey, group.label)}</span>
                 {group.items.map(([id, label, Icon, description]) => (
-                  <button key={id} type="button" className={section === id ? 'is-active' : ''} onClick={() => setSection(id)}>
-                    <Icon size={18} />
-                    <span><strong>{t(`settings.${id}`, label)}</strong><small>{t(`settings.${id}Description`, description)}</small></span>
+                  <button
+                    key={id}
+                    type="button"
+                    className={section === id ? 'is-active' : ''}
+                    aria-current={section === id ? 'page' : undefined}
+                    onClick={() => setSection(id)}
+                  >
+                    <Icon size={18} aria-hidden="true" />
+                    <span>
+                      <strong>{t(`settings.${id}`, label)}</strong>
+                      <small>{t(`settings.${id}Description`, description)}</small>
+                    </span>
                   </button>
                 ))}
               </div>
             ))}
           </nav>
           <div className="settings-content">
-            {section === 'appearance' ? (
-              <AppearanceSettings
-                value={draft}
-                uploading={uploading}
-                onChange={setDraft}
-                onUpload={async (file) => {
-                  setUploading(true)
-                  try {
-                    const assetRef = await onUploadBackground(file)
-                    setDraft((value) => ({ ...value, backgroundAssetRef: assetRef }))
-                  } finally {
-                    setUploading(false)
-                  }
-                }}
-              />
-            ) : null}
-            {section === 'models' ? (
-              <ModelSettings
-                models={models}
-                assignments={assignments}
-                workspace={workspace}
-                worlds={worlds}
-                employees={employees}
-                onAssign={onAssignModel}
-                onSave={onSaveModel}
-                onDiscover={onDiscoverModels}
-                onDelete={onDeleteModel}
-              />
-            ) : null}
-            {section === 'integrations' ? <IntegrationSettings workspaceId={workspace.id} /> : null}
-            {section === 'privacy' ? <PrivacySettings /> : null}
-            {section === 'logs' ? (
-              <ModelInteractionLogSettings
-                onLoad={onLoadModelLogs}
-                onClear={onClearModelLogs}
-              />
-            ) : null}
-            {section === 'data' ? <DataSettings pending={pendingAction} result={actionResult} error={actionError} onRun={runSystemAction} /> : null}
+          {section === 'appearance' ? (
+            <AppearanceSettings
+              value={draft}
+              uploading={uploading}
+              onChange={setDraft}
+              onUpload={async (file) => {
+                setUploading(true)
+                try {
+                  const assetRef = await onUploadBackground(file)
+                  setDraft((value) => ({ ...value, backgroundAssetRef: assetRef }))
+                } finally {
+                  setUploading(false)
+                }
+              }}
+            />
+          ) : null}
+          {section === 'models' ? (
+            <ModelSettings
+              models={models}
+              assignments={assignments}
+              workspace={workspace}
+              worlds={worlds}
+              employees={employees}
+              onAssign={onAssignModel}
+              onSave={onSaveModel}
+              onDiscover={onDiscoverModels}
+              onDelete={onDeleteModel}
+            />
+          ) : null}
+          {section === 'integrations' ? <IntegrationSettings workspaceId={workspace.id} /> : null}
+          {section === 'privacy' ? <PrivacySettings /> : null}
+          {section === 'logs' ? (
+            <ModelInteractionLogSettings
+              onLoad={onLoadModelLogs}
+              onClear={onClearModelLogs}
+            />
+          ) : null}
+          {section === 'data' ? <DataSettings pending={pendingAction} result={actionResult} error={actionError} onRun={runSystemAction} /> : null}
             {section === 'maintenance' ? <MaintenanceSettings pending={pendingAction} result={actionResult} error={actionError} onRun={runSystemAction} /> : null}
           </div>
         </div>
@@ -606,7 +638,13 @@ function ModelSettings({
   onDelete(modelProfileId: string): Promise<void>
   onAssign(input: { scope: ModelAssignment['scope']; scopeId: string; modelProfileId?: string }): Promise<void>
 }) {
-  const [draft, setDraft] = useState<ModelDraft>(() => models[0] ? modelDraftForProfile(models[0]) : modelDraftForPreset(MODEL_PRESETS.find((preset) => preset.id === 'custom-local')!, true))
+  const { t } = useI18n()
+  const [draft, setDraft] = useState<ModelDraft>(() => {
+    if (models[0]) return modelDraftForProfile(models[0])
+    const preset = MODEL_PRESETS.find((item) => item.id === 'deepseek') ?? MODEL_PRESETS[0]!
+    return modelDraftForPreset(preset, true, providerPresetLabel(preset, t))
+  })
+  const [editorOpen, setEditorOpen] = useState(models.length === 0)
   const [savingModel, setSavingModel] = useState(false)
   const [deletingModelId, setDeletingModelId] = useState<string>()
   const [modelError, setModelError] = useState<string>()
@@ -615,37 +653,98 @@ function ModelSettings({
   const [discoveringModels, setDiscoveringModels] = useState(false)
   const [discoveredModels, setDiscoveredModels] = useState<DiscoveredModel[]>([])
   const [manualModelId, setManualModelId] = useState(true)
+  const [testState, setTestState] = useState<{ status: 'idle' | 'testing' | 'success' | 'failed'; message?: string; count?: number; latencyMs?: number }>({ status: 'idle' })
+
+  const currentPreset = useMemo(() => MODEL_PRESETS.find((p) => p.id === draft.providerId), [draft.providerId])
+
   const assignmentValue = (scope: ModelAssignment['scope'], scopeId: string) =>
     assignments.find((item) => item.scope === scope && item.scopeId === scopeId)?.modelProfileId ?? ''
   const assign = (scope: ModelAssignment['scope'], scopeId: string, modelProfileId: string) =>
     onAssign({ scope, scopeId, ...(modelProfileId ? { modelProfileId } : {}) })
+
   const editModel = (profile: ModelProfile) => {
     setDraft(modelDraftForProfile(profile))
+    setEditorOpen(true)
     setShowApiKey(false)
-    setDiscoveredModels([])
-    setManualModelId(true)
+    setTestState({ status: 'idle' })
+    const cache = loadDiscoveredModelsCache()
+    const cached = cache[profile.id] ?? cache[profile.baseUrl.trim()]
+    if (cached && Array.isArray(cached.models) && cached.models.length > 0) {
+      setDiscoveredModels(cached.models)
+      setManualModelId(false)
+    } else {
+      setDiscoveredModels([])
+      setManualModelId(true)
+    }
     setModelError(undefined)
     setModelNotice(undefined)
   }
+
   const startNewModel = () => {
-    const custom = MODEL_PRESETS.find((preset) => preset.id === 'custom-local')!
-    setDraft(modelDraftForPreset(custom, models.length === 0))
+    const defaultPreset = MODEL_PRESETS.find((preset) => preset.id === 'deepseek') ?? MODEL_PRESETS[0]!
+    setDraft(modelDraftForPreset(defaultPreset, models.length === 0, providerPresetLabel(defaultPreset, t)))
+    setEditorOpen(true)
     setShowApiKey(false)
     setDiscoveredModels([])
     setManualModelId(true)
+    setTestState({ status: 'idle' })
     setModelError(undefined)
     setModelNotice(undefined)
   }
+
+  const selectProviderPreset = (preset: ModelProviderPreset) => {
+    const localizedPresetLabel = providerPresetLabel(preset, t)
+    const updated = modelDraftForPreset(preset, draft.isDefault, localizedPresetLabel)
+    setDraft({
+      ...updated,
+      ...(draft.id ? { id: draft.id } : {}),
+      displayName: draft.displayName.trim() && draft.displayName !== (currentPreset === undefined ? undefined : providerPresetLabel(currentPreset, t))
+        ? draft.displayName
+        : preset.label,
+    })
+    setDiscoveredModels([])
+    setManualModelId(true)
+    setTestState({ status: 'idle' })
+    setModelError(undefined)
+    setModelNotice(undefined)
+  }
+
+  const makeDefault = async (profile: ModelProfile) => {
+    try {
+      await onSave({
+        id: profile.id,
+        displayName: profile.displayName,
+        providerKind: profile.providerKind,
+        baseUrl: profile.baseUrl,
+        modelId: profile.modelId,
+        api: profile.api,
+        isDefault: true,
+        settings: profile.settings,
+      })
+      if (draft.id === profile.id) {
+        setDraft((current) => ({ ...current, isDefault: true }))
+      }
+      setModelNotice(t('settings.model.defaultSaved', '已将“{name}”设为工作区默认模型。', { name: profile.displayName }))
+      setModelError(undefined)
+    } catch (cause) {
+      setModelError(cause instanceof Error ? cause.message : t('settings.model.defaultError', '设置默认模型失败'))
+      setModelNotice(undefined)
+    }
+  }
+
   const discoverModels = async () => {
-    const validationError = validateModelConnection(draft)
+    const validationError = validateModelConnection(draft, t)
     if (validationError !== undefined) {
       setModelError(validationError)
       setModelNotice(undefined)
+      setTestState({ status: 'failed', message: validationError })
       return
     }
     setDiscoveringModels(true)
+    setTestState({ status: 'testing' })
     setModelError(undefined)
     setModelNotice(undefined)
+    const startTime = performance.now()
     try {
       const items = await onDiscover({
         baseUrl: draft.baseUrl.trim(),
@@ -654,7 +753,25 @@ function ModelSettings({
         ...(draft.credentialMode === 'api-key' && draft.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : {}),
         ...(draft.credentialMode === 'environment' ? { credentialEnvName: draft.credentialEnvName.trim() } : {}),
       })
+      const latencyMs = Math.round(performance.now() - startTime)
       setDiscoveredModels(items)
+      setTestState({
+        status: 'success',
+        latencyMs,
+        count: items.length,
+        message: t('settings.model.testSuccess', '连接成功，耗时 {latency}ms，获取到 {count} 个模型。', { latency: latencyMs, count: items.length }),
+      })
+      if (draft.id || draft.baseUrl.trim()) {
+        const cachePayload = {
+          models: items,
+          baseUrl: draft.baseUrl.trim(),
+          providerKind: draft.providerKind,
+          providerName: draft.displayName.trim() || undefined,
+          updatedAt: Date.now(),
+        }
+        if (draft.id) saveDiscoveredModelsToCache(draft.id, cachePayload)
+        if (draft.baseUrl.trim()) saveDiscoveredModelsToCache(draft.baseUrl.trim(), cachePayload)
+      }
       if (items[0]) {
         const selected = items.some((item) => item.id === draft.modelId.trim())
           ? draft.modelId.trim()
@@ -662,15 +779,18 @@ function ModelSettings({
         setDraft((current) => ({ ...current, modelId: selected }))
         setManualModelId(false)
       }
-      setModelNotice(`已获取 ${items.length} 个可用模型。`)
+      setModelNotice(t('settings.model.discoverSuccess', '已成功连接并获取 {count} 个模型。', { count: items.length }))
     } catch (cause) {
-      setModelError(cause instanceof Error ? cause.message : '模型列表获取失败，请检查接口配置。')
+      const msg = cause instanceof Error ? cause.message : t('settings.model.discoverError', '模型目录获取失败，请检查接口地址或 API 密钥。')
+      setTestState({ status: 'failed', message: msg })
+      setModelError(msg)
     } finally {
       setDiscoveringModels(false)
     }
   }
+
   const saveDraft = async () => {
-    const validationError = validateModelDraft(draft)
+    const validationError = validateModelDraft(draft, t)
     if (validationError !== undefined) {
       setModelError(validationError)
       setModelNotice(undefined)
@@ -706,100 +826,529 @@ function ModelSettings({
         },
       })
       setDraft(modelDraftForProfile(saved))
+      setEditorOpen(true)
       setShowApiKey(false)
-      setModelNotice(draft.id ? '模型连接已更新。' : '模型已连接并保存。')
+      setModelNotice(draft.id ? t('settings.model.updated', '模型连接已更新。') : t('settings.model.savedNotice', '模型连接已保存。'))
     } catch (cause) {
-      setModelError(cause instanceof Error ? cause.message : '模型配置保存失败')
+      setModelError(cause instanceof Error ? cause.message : t('settings.model.saveError', '模型配置保存失败'))
     } finally {
       setSavingModel(false)
     }
   }
+
   const deleteProfile = async (profile: ModelProfile) => {
-    if (!window.confirm(`确定删除“${profile.displayName}”吗？相关模型路由会自动恢复为继承上级。`)) return
+    if (!window.confirm(t('settings.model.deleteConfirm', '确定删除“{name}”吗？相关模型路由会自动恢复为继承上级。', { name: profile.displayName }))) return
     setDeletingModelId(profile.id)
     setModelError(undefined)
     setModelNotice(undefined)
     try {
       await onDelete(profile.id)
-      if (draft.id === profile.id) startNewModel()
-      setModelNotice('模型连接已删除。')
+      if (draft.id === profile.id) {
+        const remaining = models.filter((item) => item.id !== profile.id)
+        if (remaining[0]) setDraft(modelDraftForProfile(remaining[0]))
+        else {
+          const preset = MODEL_PRESETS.find((item) => item.id === 'deepseek') ?? MODEL_PRESETS[0]!
+          setDraft(modelDraftForPreset(preset, true, providerPresetLabel(preset, t)))
+        }
+        setEditorOpen(remaining.length === 0)
+      }
+      setModelNotice(t('settings.model.deleted', '模型连接已删除。'))
     } catch (cause) {
-      setModelError(cause instanceof Error ? cause.message : '模型配置删除失败')
+      setModelError(cause instanceof Error ? cause.message : t('settings.model.deleteError', '模型配置删除失败'))
     } finally {
       setDeletingModelId(undefined)
     }
   }
+
   return (
     <div className="settings-section settings-section--models">
-      <div className="settings-section__heading"><h3>AI 模型</h3><p>连接你使用的模型服务。保存后可设为默认，也可单独分配给某个世界或角色；API 密钥只加密保存在当前设备。</p></div>
+      <div className="settings-section__heading">
+        <h3>{t('settings.models', 'AI 模型')}</h3>
+        <p>{t('settings.modelsDescription', '连接模型并设置使用范围')}</p>
+      </div>
+
       <div className="model-config-layout">
-        <section className="model-profile-panel" aria-label="已保存的模型配置">
-          <header><div><h4>已连接的模型</h4><span>{models.length === 0 ? '还没有可用模型' : `共 ${models.length} 个`}</span></div><button className="secondary-button" type="button" onClick={startNewModel}><Plus size={16} />连接模型</button></header>
+        {/* 左侧：已连接模型列表面板 */}
+        <section className={`model-profile-panel${editorOpen ? ' is-collapsed' : ''}`} aria-label={t('settings.model.savedAria', '已保存的模型配置')}>
+          <header>
+            <div>
+              <h4>{t('settings.model.saved', '已连接模型')}</h4>
+              <span>{models.length === 0 ? t('settings.model.notConfigured', '尚未配置') : t('settings.model.count', '共 {count} 个连接', { count: models.length })}</span>
+            </div>
+            <button className="primary-button model-btn-add" type="button" onClick={startNewModel}>
+              <Plus size={14} />
+              {t('settings.model.add', '添加服务')}
+            </button>
+          </header>
+
           <div className="model-list">
-            {models.length === 0 ? <div className="model-list__empty"><Cpu size={22} /><strong>还没有连接模型</strong><span>连接云端服务、本机模型或局域网模型服务。</span><button className="secondary-button" type="button" onClick={startNewModel}>连接第一个模型</button></div> : null}
-            {models.map((model) => (
-              <article key={model.id} className={draft.id === model.id ? 'is-active' : ''}>
-                <Cpu size={22} />
-                <div><strong>{model.displayName}</strong><span>{model.modelId}</span><small>{providerLabel(model)} · {credentialSummary(model)} · {model.settings.webSearchEnabled === true ? '联网搜索已启用' : '未启用联网搜索'}</small></div>
-                <div className="model-profile-actions">
-                  {model.isDefault ? <span className="model-default-badge"><CheckCircle size={14} />默认</span> : null}
-                  <button type="button" aria-label={`编辑${model.displayName}`} onClick={() => editModel(model)}><PencilSimple size={15} />编辑</button>
-                  <button className="is-danger" type="button" aria-label={`删除${model.displayName}`} disabled={deletingModelId === model.id} onClick={() => void deleteProfile(model)}><Trash size={15} />{deletingModelId === model.id ? '删除中' : '删除'}</button>
-                </div>
-              </article>
-            ))}
+            {models.length === 0 ? (
+              <div className="model-list__empty">
+                <Cpu size={26} />
+                <strong>{t('settings.model.emptyTitle', '尚未添加模型连接')}</strong>
+                <span>{t('settings.model.emptyDescription', '连接常用云端服务、聚合网关或本地模型服务。')}</span>
+                <button className="secondary-button" type="button" onClick={startNewModel}>
+                  {t('settings.model.emptyAction', '连接第一个模型')}
+                </button>
+              </div>
+            ) : null}
+
+            {models.map((model) => {
+              const isSelected = editorOpen && draft.id === model.id
+              return (
+                <article
+                  key={model.id}
+                  className={`model-card-item${isSelected ? ' is-active' : ''}`}
+                >
+                  <button className="model-card-item__select" type="button" aria-pressed={isSelected} onClick={() => editModel(model)}>
+                    <div className="model-card-item__body">
+                    <div className="model-card-item__top">
+                      <strong>{model.displayName}</strong>
+                      {model.isDefault ? (
+                        <span className="model-default-tag">
+                          <Star size={11} weight="fill" />
+                          {t('settings.model.default', '默认')}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="model-card-item__model-id">
+                      <code>{model.modelId}</code>
+                    </div>
+                    <div className="model-card-item__meta">
+                      <span>{providerLabel(model, t)}</span>
+                      <span>·</span>
+                      <span>{credentialSummary(model, t)}</span>
+                    </div>
+                  </div>
+                  </button>
+
+                  <div className="model-card-item__actions">
+                    {!model.isDefault ? (
+                      <button
+                        type="button"
+                        className="model-action-btn model-action-btn--default"
+                        title={t('settings.model.makeDefault', '设为全局默认模型')}
+                        onClick={() => void makeDefault(model)}
+                      >
+                        <Star size={13} />
+                        {t('settings.model.makeDefaultShort', '设为默认')}
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="model-action-btn"
+                      aria-label={t('settings.model.editAria', '编辑 {name}', { name: model.displayName })}
+                      onClick={() => editModel(model)}
+                    >
+                      <PencilSimple size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      className="model-action-btn is-danger"
+                      aria-label={t('settings.model.deleteAria', '删除 {name}', { name: model.displayName })}
+                      disabled={deletingModelId === model.id}
+                      onClick={() => void deleteProfile(model)}
+                    >
+                      <Trash size={13} />
+                    </button>
+                  </div>
+                </article>
+              )
+            })}
           </div>
         </section>
-        <form className="model-editor-panel" aria-label="模型连接编辑器" onSubmit={(event) => { event.preventDefault(); void saveDraft() }}>
-          <header><div><h4>{draft.id ? '编辑模型连接' : '连接模型服务'}</h4><p>{draft.id ? '保存后直接更新这条连接，不会产生重复项。' : '选择服务商，填写地址和密钥，再选择要使用的模型。'}</p></div>{draft.id ? <button className="text-button" type="button" onClick={startNewModel}>退出编辑</button> : null}</header>
-          {modelError ? <p className="model-form-message model-form-message--error" role="alert">{modelError}</p> : null}
-          {modelNotice ? <p className="model-form-message model-form-message--success" role="status"><CheckCircle size={16} />{modelNotice}</p> : null}
-          <div className="setting-grid model-setting-grid">
-            <label><span>模型服务</span><select value={draft.providerId} onChange={(event) => { const preset = MODEL_PRESETS.find((item) => item.id === event.target.value); if (preset) { setDraft({ ...modelDraftForPreset(preset, draft.isDefault), ...(draft.id ? { id: draft.id } : {}) }); setDiscoveredModels([]); setManualModelId(true) } }}>{MODEL_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}</select></label>
-            <label><span>连接名称</span><input value={draft.displayName} placeholder="例如：公司的 AI 服务" onChange={(event) => setDraft({ ...draft, displayName: event.target.value })} /></label>
-            <label className="setting-grid__wide"><span>服务地址</span><input inputMode="url" value={draft.baseUrl} placeholder={draft.providerKind === 'openai-compatible-local' ? 'http://192.168.1.10:11434/v1' : 'https://api.example.com/v1'} onChange={(event) => { setDraft({ ...draft, baseUrl: event.target.value }); setDiscoveredModels([]); setManualModelId(true) }} /><small>本机或局域网服务可以使用 HTTP，公网服务必须使用 HTTPS。</small></label>
-            {draft.credentialMode === 'api-key' ? (
-              <label className="setting-grid__wide"><span>API 密钥</span><div className="model-secret-input"><input type={showApiKey ? 'text' : 'password'} autoComplete="new-password" spellCheck={false} value={draft.apiKey} placeholder={draft.hasStoredApiKey ? '已保存；留空保持原密钥' : '输入 sk-... 或服务商提供的密钥'} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} /><button type="button" aria-label={showApiKey ? '隐藏 API 密钥' : '显示 API 密钥'} onClick={() => setShowApiKey((current) => !current)}>{showApiKey ? <EyeSlash size={18} /> : <Eye size={18} />}</button></div><small>{draft.hasStoredApiKey && !draft.apiKey ? '密钥已加密保存。输入新密钥可替换，留空不会改变。' : '密钥仅发送到本机服务，并加密保存；保存后不再回显明文。'}</small></label>
-            ) : null}
-            <div className="model-field setting-grid__wide"><span>模型 ID</span><div className="model-catalog-input">{discoveredModels.length > 0 && !manualModelId ? <SearchableModelPicker models={discoveredModels} value={draft.modelId} onChange={(modelId) => setDraft({ ...draft, modelId })} /> : <input aria-label="模型 ID" value={draft.modelId} placeholder={MODEL_PRESETS.find((item) => item.id === draft.providerId)?.modelPlaceholder} onChange={(event) => setDraft({ ...draft, modelId: event.target.value })} />}<button type="button" disabled={discoveringModels} onClick={() => void discoverModels()}>{discoveringModels ? '正在获取…' : '获取可用模型'}</button></div>{discoveredModels.length > 0 ? <button className="model-catalog-mode" type="button" onClick={() => { if (manualModelId && discoveredModels[0]) setDraft((current) => ({ ...current, modelId: discoveredModels.some((item) => item.id === current.modelId) ? current.modelId : discoveredModels[0]!.id })); setManualModelId((current) => !current) }}>{manualModelId ? '从已获取列表选择' : '手动填写其他模型 ID'}</button> : null}<small>{discoveredModels.length > 0 ? `已获取 ${discoveredModels.length} 个模型，可按名称或 ID 搜索。` : draft.credentialMode === 'api-key' && !draft.apiKey.trim() && !draft.hasStoredApiKey ? '先填写 API 密钥，再获取模型列表。' : '获取服务提供的模型列表，或切换为手动填写。'}</small></div>
-            <details className="settings-disclosure setting-grid__wide">
-              <summary><span><strong>高级连接设置</strong><small>接口兼容方式、环境变量和模型容量</small></span><CaretDown size={16} /></summary>
-              <div className="setting-grid settings-disclosure__content">
-                <label><span>接口兼容方式</span><select value={draft.api} onChange={(event) => { setDraft({ ...draft, api: event.target.value as ModelApiKind }); setDiscoveredModels([]); setManualModelId(true) }}><option value="openai-completions">OpenAI 对话补全</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic-messages">Anthropic 消息</option></select></label>
-                <label><span>密钥来源</span><select value={draft.credentialMode} onChange={(event) => setDraft({ ...draft, credentialMode: event.target.value as ModelCredentialMode, apiKey: '' })}><option value="api-key">直接填写 API 密钥</option><option value="environment">从环境变量读取</option><option value="none">此服务无需密钥</option></select></label>
-                {draft.credentialMode === 'environment' ? (
-                  <label className="setting-grid__wide"><span>环境变量名称</span><input value={draft.credentialEnvName} placeholder="SUB2API_API_KEY" onChange={(event) => setDraft({ ...draft, credentialEnvName: event.target.value })} /><small>只保存变量名称；启动服务前需要自行设置对应环境变量。</small></label>
-                ) : null}
-                <label><span>上下文容量</span><input type="number" min="1024" step="1" value={draft.contextWindow} onChange={(event) => setDraft({ ...draft, contextWindow: Number(event.target.value) })} /><small>不确定时保持默认值。</small></label>
-                <label><span>单次最大输出</span><input type="number" min="256" step="256" value={draft.maxTokens} onChange={(event) => setDraft({ ...draft, maxTokens: Number(event.target.value) })} /><small>不确定时保持默认值。</small></label>
-              </div>
-            </details>
-          </div>
-          <label className="model-default-control">
-            <input type="checkbox" checked={draft.webSearchEnabled} onChange={(event) => setDraft({
-              ...draft,
-              webSearchEnabled: event.target.checked,
-              webSearchBaseUrl: event.target.checked && !draft.webSearchBaseUrl
-                ? (MODEL_PRESETS.find((preset) => preset.id === draft.providerId)?.webSearchBaseUrl ?? '')
-                : draft.webSearchBaseUrl,
-            })} />
-            <span><strong>启用联网搜索</strong><small>通过 DSH 的网页搜索工具查询实时信息。只有兼容 DeepSeek Anthropic 搜索协议的服务才能启用。</small></span>
-          </label>
-          {draft.webSearchEnabled ? (
-            <div className="setting-grid model-setting-grid model-web-search-settings">
-              <label className="setting-grid__wide"><span>搜索服务地址</span><input inputMode="url" value={draft.webSearchBaseUrl} placeholder="https://api.deepseek.com/anthropic/v1" onChange={(event) => setDraft({ ...draft, webSearchBaseUrl: event.target.value })} /><small>搜索会复用上方已加密保存的 API 密钥；自定义网关请填写其 Anthropic 兼容搜索端点，不会自动把密钥发送给其他服务。</small></label>
+
+        {/* 右侧：模型连接配置表单面板 */}
+        {editorOpen ? <form
+          className="model-editor-panel"
+          aria-label={t('settings.model.editorAria', '模型连接编辑器')}
+          onSubmit={(event) => {
+            event.preventDefault()
+            void saveDraft()
+          }}
+        >
+          <header className="model-editor-header">
+            <div>
+              <h4>{draft.id ? t('settings.model.editTitle', '编辑模型：{name}', { name: draft.displayName }) : t('settings.model.newTitle', '添加新模型服务')}</h4>
+              <p>{t('settings.model.editorDescription', '依次完成服务信息、连接测试和模型选择。')}</p>
             </div>
-          ) : null}
-          <label className="model-default-control"><input type="checkbox" checked={draft.isDefault || models.length === 0} disabled={models.length === 0} onChange={(event) => setDraft({ ...draft, isDefault: event.target.checked })} /><span><strong>设为全局默认模型</strong><small>未单独分配模型的世界和角色会使用此配置。</small></span></label>
-          <footer><span>{draft.id ? '正在编辑已保存配置' : '新配置保存后立即可用于路由'}</span><button className="primary-button" type="submit" disabled={savingModel}>{savingModel ? '正在保存…' : draft.id ? '保存修改' : '添加并保存'}</button></footer>
-        </form>
+            {draft.id ? (
+              <button className="text-button" type="button" onClick={startNewModel}>
+                + {t('settings.model.newService', '新建服务')}
+              </button>
+            ) : null}
+          </header>
+
+          {/* 表单可滚动内容区 */}
+          <div className="model-editor-scroll">
+            {/* 测试结果 / 状态徽章 */}
+            {testState.status === 'testing' ? (
+              <div className="model-test-badge model-test-badge--loading">
+                <WifiHigh size={16} className="is-spinning" />
+                <span>{t('settings.model.testing', '正在测试连接并拉取可用模型…')}</span>
+              </div>
+            ) : null}
+
+            {testState.status === 'success' ? (
+              <div className="model-test-badge model-test-badge--success">
+                <CheckCircle size={16} />
+                <span>{testState.message}</span>
+              </div>
+            ) : null}
+
+            {modelError ? (
+              <p className="model-form-message model-form-message--error" role="alert">
+                {modelError}
+              </p>
+            ) : null}
+
+            {modelNotice && testState.status !== 'success' ? (
+              <p className="model-form-message model-form-message--success" role="status">
+                <CheckCircle size={16} />
+                {modelNotice}
+              </p>
+            ) : null}
+
+            {/* 核心设置表单字段 */}
+            <div className="model-form-fields">
+              <div className="setting-grid model-setting-grid">
+                <label>
+                  <span>{t('settings.model.displayName', '连接显示名称')}</span>
+                  <input
+                    value={draft.displayName}
+                    placeholder={t('settings.model.displayNamePlaceholder', '例如：工作室 DeepSeek')}
+                    onChange={(event) => setDraft({ ...draft, displayName: event.target.value })}
+                  />
+                </label>
+
+                <label>
+                  <span>{t('settings.model.provider', '模型服务商')}</span>
+                  <select
+                    value={draft.providerId}
+                    onChange={(event) => {
+                      const preset = MODEL_PRESETS.find((item) => item.id === event.target.value)
+                      if (preset) selectProviderPreset(preset)
+                    }}
+                  >
+                    {MODEL_PRESETS.map((preset) => (
+                      <option key={preset.id} value={preset.id}>
+                        {providerPresetLabel(preset, t)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="setting-grid__wide">
+                  <span>{t('settings.model.baseUrl', '服务接口地址（Base URL）')}</span>
+                  <input
+                    inputMode="url"
+                    value={draft.baseUrl}
+                    placeholder={
+                      draft.providerKind === 'openai-compatible-local'
+                        ? 'http://127.0.0.1:11434/v1'
+                        : 'https://api.example.com/v1'
+                    }
+                    onChange={(event) => {
+                      setDraft({ ...draft, baseUrl: event.target.value })
+                      setDiscoveredModels([])
+                      setManualModelId(true)
+                      setTestState({ status: 'idle' })
+                    }}
+                  />
+                  <small>{t('settings.model.baseUrlHint', '公网接口须使用 HTTPS；本机和局域网服务可以使用 HTTP。')}</small>
+                </label>
+
+                {draft.credentialMode === 'api-key' ? (
+                  <label className="setting-grid__wide">
+                    <span>{t('settings.model.apiKey', 'API 密钥')}</span>
+                    <div className="model-secret-input">
+                      <input
+                        type={showApiKey ? 'text' : 'password'}
+                        autoComplete="new-password"
+                        spellCheck={false}
+                        value={draft.apiKey}
+                        placeholder={
+                          draft.hasStoredApiKey
+                            ? t('settings.model.apiKeyStoredPlaceholder', '已加密保存；留空保持原密钥')
+                            : t('settings.model.apiKeyPlaceholder', '输入服务商提供的密钥')
+                        }
+                        onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })}
+                      />
+                      <button
+                        type="button"
+                        aria-label={showApiKey ? t('settings.model.hideKey', '隐藏 API 密钥') : t('settings.model.showKey', '显示 API 密钥')}
+                        onClick={() => setShowApiKey((current) => !current)}
+                      >
+                        {showApiKey ? <EyeSlash size={18} /> : <Eye size={18} />}
+                      </button>
+                    </div>
+                    <small>
+                      {draft.hasStoredApiKey && !draft.apiKey
+                        ? t('settings.model.apiKeyStoredHint', '密钥已加密保存。输入新密钥才会替换，留空不会改变。')
+                        : t('settings.model.apiKeyHint', '密钥只写入本机凭据库，不进入模型配置、日志或对话。')}
+                    </small>
+                  </label>
+                ) : null}
+
+                {/* 测试连接快捷操作条 */}
+                <div className="model-test-action-bar setting-grid__wide">
+                  <button
+                    type="button"
+                    className="secondary-button model-btn-test-connect"
+                    disabled={discoveringModels}
+                    onClick={() => void discoverModels()}
+                  >
+                    <WifiHigh size={16} />
+                    {discoveringModels ? t('settings.model.testingShort', '正在测试连接…') : t('settings.model.test', '测试连接并获取模型')}
+                  </button>
+                  <span className="model-test-hint">
+                    {discoveredModels.length > 0
+                      ? t('settings.model.discoveredCount', '已获取 {count} 个模型', { count: discoveredModels.length })
+                      : t('settings.model.testHint', '验证端点后会显示服务端返回的真实模型目录。')}
+                  </span>
+                </div>
+
+                {/* 模型选择与常用模型药丸 */}
+                <div className="model-field setting-grid__wide">
+                  <div className="model-field-header">
+                    <span>{t('settings.model.modelId', '模型（Model ID）')}</span>
+                    {discoveredModels.length > 0 ? (
+                      <button
+                        className="model-catalog-mode-link"
+                        type="button"
+                        onClick={() => {
+                          if (manualModelId && discoveredModels[0]) {
+                            setDraft((current) => ({
+                              ...current,
+                              modelId: discoveredModels.some((item) => item.id === current.modelId)
+                                ? current.modelId
+                                : discoveredModels[0]!.id,
+                            }))
+                          }
+                          setManualModelId((current) => !current)
+                        }}
+                      >
+                        {manualModelId ? t('settings.model.chooseCatalog', '从已获取列表选择') : t('settings.model.manual', '切换为手动输入')}
+                      </button>
+                    ) : null}
+                  </div>
+
+                  <div className="model-catalog-input">
+                    {discoveredModels.length > 0 && !manualModelId ? (
+                      <SearchableModelPicker
+                        models={discoveredModels}
+                        value={draft.modelId}
+                        onChange={(modelId) => setDraft({ ...draft, modelId })}
+                      />
+                    ) : (
+                      <input
+                        aria-label={t('settings.model.modelIdAria', '模型 ID')}
+                        value={draft.modelId}
+                        placeholder={
+                          currentPreset?.modelPlaceholder ?? '输入模型 ID，例如：deepseek-chat'
+                        }
+                        onChange={(event) => setDraft({ ...draft, modelId: event.target.value })}
+                      />
+                    )}
+                  </div>
+                </div>
+
+                {/* 高级连接设置 */}
+                <details className="settings-disclosure setting-grid__wide">
+                  <summary>
+                    <span>
+                      <strong>{t('settings.model.advanced', '高级配置')}</strong>
+                      <small>{t('settings.model.advancedHint', '接口协议、上下文容量与密钥来源')}</small>
+                    </span>
+                    <CaretDown size={16} />
+                  </summary>
+                  <div className="setting-grid settings-disclosure__content">
+                    <label>
+                      <span>{t('settings.model.protocol', '接口协议')}</span>
+                      <select
+                        value={draft.api}
+                        onChange={(event) => {
+                          setDraft({ ...draft, api: event.target.value as ModelApiKind })
+                          setDiscoveredModels([])
+                          setManualModelId(true)
+                        }}
+                      >
+                        <option value="openai-completions">OpenAI 对话补全 (标准)</option>
+                        <option value="openai-responses">OpenAI Responses</option>
+                        <option value="anthropic-messages">Anthropic 消息协议</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>{t('settings.model.credentialMode', '密钥来源')}</span>
+                      <select
+                        value={draft.credentialMode}
+                        onChange={(event) =>
+                          setDraft({
+                            ...draft,
+                            credentialMode: event.target.value as ModelCredentialMode,
+                            apiKey: '',
+                          })
+                        }
+                      >
+                        <option value="api-key">{t('settings.model.credentialDirect', '直接输入 API 密钥')}</option>
+                        <option value="environment">{t('settings.model.credentialEnv', '从系统环境变量读取')}</option>
+                        <option value="none">{t('settings.model.credentialNone', '无需凭据')}</option>
+                      </select>
+                    </label>
+
+                    {draft.credentialMode === 'environment' ? (
+                      <label className="setting-grid__wide">
+                        <span>{t('settings.model.envName', '环境变量名称')}</span>
+                        <input
+                          value={draft.credentialEnvName}
+                          placeholder="例如：DEEPSEEK_API_KEY"
+                          onChange={(event) =>
+                            setDraft({ ...draft, credentialEnvName: event.target.value })
+                          }
+                        />
+                      </label>
+                    ) : null}
+
+                    <label>
+                      <span>{t('settings.model.contextWindow', '上下文窗口')}</span>
+                      <input
+                        type="number"
+                        min="1024"
+                        step="1024"
+                        value={draft.contextWindow}
+                        onChange={(event) =>
+                          setDraft({ ...draft, contextWindow: Number(event.target.value) })
+                        }
+                      />
+                    </label>
+
+                    <label>
+                      <span>{t('settings.model.maxTokens', '最大输出 Token')}</span>
+                      <input
+                        type="number"
+                        min="256"
+                        step="256"
+                        value={draft.maxTokens}
+                        onChange={(event) =>
+                          setDraft({ ...draft, maxTokens: Number(event.target.value) })
+                        }
+                      />
+                    </label>
+                  </div>
+                </details>
+              </div>
+
+              {/* 联网搜索与默认模型控制 */}
+              <div className="model-toggles-section">
+                <label className="model-default-control">
+                  <input
+                    type="checkbox"
+                    checked={draft.webSearchEnabled}
+                    onChange={(event) =>
+                      setDraft({
+                        ...draft,
+                        webSearchEnabled: event.target.checked,
+                        webSearchBaseUrl:
+                          event.target.checked && !draft.webSearchBaseUrl
+                            ? (currentPreset?.webSearchBaseUrl ?? '')
+                            : draft.webSearchBaseUrl,
+                      })
+                    }
+                  />
+                  <span>
+                    <strong>{t('settings.model.webSearch', '启用兼容联网搜索')}</strong>
+                    <small>
+                      {t('settings.model.webSearchHint', '仅对明确兼容 Anthropic 搜索端点的服务启用。')}
+                    </small>
+                  </span>
+                </label>
+
+                {draft.webSearchEnabled ? (
+                  <div className="setting-grid model-setting-grid model-web-search-settings">
+                    <label className="setting-grid__wide">
+                      <span>{t('settings.model.webSearchUrl', '搜索服务地址')}</span>
+                      <input
+                        inputMode="url"
+                        value={draft.webSearchBaseUrl}
+                        placeholder="https://api.deepseek.com/anthropic/v1"
+                        onChange={(event) =>
+                          setDraft({ ...draft, webSearchBaseUrl: event.target.value })
+                        }
+                      />
+                    </label>
+                  </div>
+                ) : null}
+
+                <label className="model-default-control">
+                  <input
+                    type="checkbox"
+                    checked={draft.isDefault || models.length === 0}
+                    disabled={models.length === 0}
+                    onChange={(event) => setDraft({ ...draft, isDefault: event.target.checked })}
+                  />
+                  <span>
+                    <strong>{t('settings.model.setDefault', '设为工作区默认模型')}</strong>
+                    <small>{t('settings.model.setDefaultHint', '未单独指派模型的世界和角色会继承此连接。')}</small>
+                  </span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          {/* 绝对吸底固定的 Footer 操作栏，绝不截断 */}
+          <footer className="model-editor-footer">
+            <div className="model-editor-footer__status">
+              <Sparkle size={15} />
+              <span>{draft.id ? t('settings.model.editingStatus', '正在编辑已保存连接') : t('settings.model.newStatus', '保存后立即可用于模型路由')}</span>
+            </div>
+            <div className="model-editor-footer__actions">
+              <button className="text-button" type="button" onClick={() => setEditorOpen(false)}>{t('common.cancel', '取消')}</button>
+              <button className="primary-button" type="submit" disabled={savingModel}>
+                {savingModel ? t('settings.model.saving', '正在保存…') : draft.id ? t('settings.model.saveChanges', '保存修改') : t('settings.model.saveConnection', '保存连接')}
+              </button>
+            </div>
+          </footer>
+        </form> : null}
       </div>
+
+      {/* 模型路由分配区 */}
       <details className="settings-disclosure settings-disclosure--routing">
-        <summary><span><strong>按世界或角色指定模型</strong><small>可选。默认情况下，所有世界和角色都会使用全局默认模型。</small></span><CaretDown size={16} /></summary>
+        <summary>
+          <span>
+            <strong>{t('settings.model.routing', '模型使用范围')}</strong>
+            <small>{t('settings.model.routingHint', '默认继承工作区模型，只在确有需要时覆盖世界或角色。')}</small>
+          </span>
+          <CaretDown size={16} />
+        </summary>
         <div className="model-routing-list settings-disclosure__content">
-          <ModelRouteRow label="全局默认" detail={workspace.name} value={assignmentValue('workspace', workspace.id)} models={models} onChange={(value) => void assign('workspace', workspace.id, value)} />
-          {worlds.map((world) => <ModelRouteRow key={world.id} label="世界" detail={world.name} value={assignmentValue('world', world.id)} models={models} onChange={(value) => void assign('world', world.id, value)} />)}
-          {employees.map((employee) => <ModelRouteRow key={employee.id} label="角色" detail={`${employee.displayName} · ${employee.role}`} value={assignmentValue('employee', employee.id)} models={models} onChange={(value) => void assign('employee', employee.id, value)} />)}
+          <ModelRouteRow
+            label={t('settings.model.workspaceDefault', '工作区默认')}
+            detail={workspace.name}
+            value={assignmentValue('workspace', workspace.id)}
+            models={models}
+            onChange={(value) => void assign('workspace', workspace.id, value)}
+          />
+          {worlds.map((world) => (
+            <ModelRouteRow
+              key={world.id}
+              label={t('settings.model.world', '世界')}
+              detail={world.name}
+              value={assignmentValue('world', world.id)}
+              models={models}
+              onChange={(value) => void assign('world', world.id, value)}
+            />
+          ))}
+          {employees.map((employee) => (
+            <ModelRouteRow
+              key={employee.id}
+              label={t('settings.model.role', '角色')}
+              detail={`${employee.displayName} · ${employee.role}`}
+              value={assignmentValue('employee', employee.id)}
+              models={models}
+              onChange={(value) => void assign('employee', employee.id, value)}
+            />
+          ))}
         </div>
       </details>
     </div>
@@ -807,6 +1356,7 @@ function ModelSettings({
 }
 
 function SearchableModelPicker({ models, value, onChange }: { models: DiscoveredModel[]; value: string; onChange(value: string): void }) {
+  const { t } = useI18n()
   const [query, setQuery] = useState(value)
   const [open, setOpen] = useState(false)
   const [activeIndex, setActiveIndex] = useState(0)
@@ -821,7 +1371,7 @@ function SearchableModelPicker({ models, value, onChange }: { models: Discovered
     <input
       type="search"
       role="combobox"
-      aria-label="搜索并选择可用模型"
+      aria-label={t('settings.model.searchAria', '搜索并选择可用模型')}
       aria-expanded={open}
       aria-controls="model-search-listbox"
       aria-autocomplete="list"
@@ -836,7 +1386,7 @@ function SearchableModelPicker({ models, value, onChange }: { models: Discovered
       }}
     />
     {open ? <div className="model-search-picker__list" id="model-search-listbox" role="listbox">
-      {filtered.length === 0 ? <span>没有匹配的模型</span> : filtered.map((model, index) => <button key={model.id} type="button" role="option" aria-selected={model.id === value} className={index === activeIndex ? 'is-active' : ''} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(model)}><strong>{model.displayName ?? model.id}</strong>{model.displayName && model.displayName !== model.id ? <small>{model.id}</small> : null}</button>)}
+      {filtered.length === 0 ? <span>{t('settings.model.noMatches', '没有匹配的模型')}</span> : filtered.map((model, index) => <button key={model.id} type="button" role="option" aria-selected={model.id === value} className={index === activeIndex ? 'is-active' : ''} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(model)}><strong>{model.displayName ?? model.id}</strong>{model.displayName && model.displayName !== model.id ? <small>{model.id}</small> : null}</button>)}
     </div> : null}
   </div>
 }
@@ -1011,51 +1561,53 @@ function tokensSummary(log: ModelInteractionLog): string {
   return `Token ${formatNumber(log.tokensTotal)}`
 }
 
-function validateModelDraft(draft: ModelDraft): string | undefined {
-  if (!draft.displayName.trim()) return '请输入模型配置名称。'
-  const connectionError = validateModelConnection(draft)
+function validateModelDraft(draft: ModelDraft, t: Translate): string | undefined {
+  if (!draft.displayName.trim()) return t('settings.model.validationName', '请输入模型配置名称。')
+  const connectionError = validateModelConnection(draft, t)
   if (connectionError !== undefined) return connectionError
-  if (!draft.modelId.trim()) return '请输入模型 ID。'
-  if (!Number.isInteger(draft.contextWindow) || draft.contextWindow < 1_024) return '上下文窗口必须是不小于 1024 的整数。'
-  if (!Number.isInteger(draft.maxTokens) || draft.maxTokens < 256) return '最大输出 Token 必须是不小于 256 的整数。'
+  if (!draft.modelId.trim()) return t('settings.model.validationModel', '请输入模型 ID。')
+  if (!Number.isInteger(draft.contextWindow) || draft.contextWindow < 1_024) return t('settings.model.validationContext', '上下文窗口必须是不小于 1024 的整数。')
+  if (!Number.isInteger(draft.maxTokens) || draft.maxTokens < 256) return t('settings.model.validationTokens', '最大输出 Token 必须是不小于 256 的整数。')
   if (draft.webSearchEnabled) {
-    if (!draft.webSearchBaseUrl.trim()) return '启用联网搜索后，请填写搜索服务地址。'
+    if (!draft.webSearchBaseUrl.trim()) return t('settings.model.validationSearchUrl', '启用联网搜索后，请填写搜索服务地址。')
     try {
       const searchUrl = new URL(draft.webSearchBaseUrl.trim())
-      if (searchUrl.protocol !== 'https:') return '联网搜索服务必须使用 HTTPS 地址。'
+      if (searchUrl.protocol !== 'https:') return t('settings.model.validationSearchHttps', '联网搜索服务必须使用 HTTPS 地址。')
     } catch {
-      return '联网搜索服务地址格式不正确。'
+      return t('settings.model.validationSearchFormat', '联网搜索服务地址格式不正确。')
     }
-    if (draft.credentialMode === 'none') return '联网搜索需要 API 密钥或凭据环境变量。'
+    if (draft.credentialMode === 'none') return t('settings.model.validationSearchCredential', '联网搜索需要 API 密钥或凭据环境变量。')
   }
   return undefined
 }
 
-function validateModelConnection(draft: ModelDraft): string | undefined {
-  if (!draft.baseUrl.trim()) return '请输入模型接口地址。'
+function validateModelConnection(draft: ModelDraft, t: Translate): string | undefined {
+  if (!draft.baseUrl.trim()) return t('settings.model.validationBaseUrl', '请输入模型接口地址。')
   try {
     new URL(draft.baseUrl.trim())
   } catch {
-    return '模型接口地址格式不正确。'
+    return t('settings.model.validationBaseUrlFormat', '模型接口地址格式不正确。')
   }
-  if (draft.credentialMode === 'api-key' && !draft.apiKey.trim() && !draft.hasStoredApiKey) return '请输入 API 密钥，或将凭据方式改为“无需凭据”。'
-  if (draft.credentialMode === 'environment' && !/^[A-Z_][A-Z0-9_]*$/.test(draft.credentialEnvName.trim())) return '凭据环境变量名只能使用大写字母、数字和下划线，且不能以数字开头。'
+  if (draft.credentialMode === 'api-key' && !draft.apiKey.trim() && !draft.hasStoredApiKey) return t('settings.model.validationApiKey', '请输入 API 密钥，或将凭据方式改为“无需凭据”。')
+  if (draft.credentialMode === 'environment' && !/^[A-Z_][A-Z0-9_]*$/.test(draft.credentialEnvName.trim())) return t('settings.model.validationEnv', '凭据环境变量名只能使用大写字母、数字和下划线，且不能以数字开头。')
   return undefined
 }
 
 function ModelRouteRow({ label, detail, value, models, onChange }: { label: string; detail: string; value: string; models: ModelProfile[]; onChange(value: string): void }) {
-  return <label className="model-route-row"><span><strong>{label}</strong><small>{detail}</small></span><ModelPicker models={models} value={value || undefined} ariaLabel={`${label}模型`} inheritLabel="继承上级 / 默认模型" onChange={(modelId) => onChange(modelId ?? '')} /></label>
+  const { t } = useI18n()
+  return <label className="model-route-row"><span><strong>{label}</strong><small>{detail}</small></span><ModelPicker models={models} value={value || undefined} ariaLabel={t('settings.model.routeAria', '{label}模型', { label })} inheritLabel={t('settings.model.inherit', '继承上级 / 默认模型')} onChange={(modelId) => onChange(modelId ?? '')} /></label>
 }
 
-function providerLabel(model: ModelProfile): string {
+function providerLabel(model: ModelProfile, t: Translate): string {
   const providerId = typeof model.settings.providerId === 'string' ? model.settings.providerId : model.providerKind
-  return MODEL_PRESETS.find((preset) => preset.id === providerId)?.label ?? providerId
+  const preset = MODEL_PRESETS.find((item) => item.id === providerId)
+  return preset === undefined ? providerId : providerPresetLabel(preset, t)
 }
 
-function credentialSummary(model: ModelProfile): string {
-  if (isManagedCredentialName(model.credentialEnvName)) return 'API 密钥已保存'
-  if (model.credentialEnvName) return `环境变量：${model.credentialEnvName}`
-  return '无需凭据'
+function credentialSummary(model: ModelProfile, t: Translate): string {
+  if (isManagedCredentialName(model.credentialEnvName)) return t('settings.model.credentialSaved', 'API 密钥已保存')
+  if (model.credentialEnvName) return t('settings.model.credentialEnvSummary', '环境变量：{name}', { name: model.credentialEnvName })
+  return t('settings.model.credentialNoneSummary', '无需凭据')
 }
 
 function isManagedCredentialName(value: string | undefined): boolean {

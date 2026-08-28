@@ -25,7 +25,7 @@ test('generates a five-character review draft and creates only after explicit co
   await page.goto(origin)
   const initialWorldCount = server!.store.listWorkspaces().flatMap((workspace) => server!.store.listWorlds(workspace.id)).length
   await page.getByRole('button', { name: '创意工坊' }).click()
-  await page.getByRole('button', { name: '创建第一个世界' }).click()
+  await page.getByRole('button', { name: '新建空白世界' }).click()
   await page.getByPlaceholder(/创建一个围绕短剧制作/).fill('创建一个 AI 游戏开发工作室，有 5 个角色：一个产品经理、两个程序员、一个视觉设计师和一个运营。')
   await page.getByRole('button', { name: 'AI 生成草稿' }).click()
   await expect(page.getByText(/草稿已生成：1 个世界、5 个独立角色/)).toBeVisible()

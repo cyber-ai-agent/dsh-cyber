@@ -5,6 +5,7 @@ import type { CyberEmployee } from '../types.js'
 import { Avatar } from './Avatar.js'
 import { AuthorityBadge } from './AuthorityBadge.js'
 import type { CollaborationMode } from './group-collaboration.js'
+import { useI18n } from '../i18n/runtime.js'
 
 interface GroupConversationDialogProps {
   employees: CyberEmployee[]
@@ -14,6 +15,7 @@ interface GroupConversationDialogProps {
 }
 
 export function GroupConversationDialog({ employees, creating = false, onClose, onCreate }: GroupConversationDialogProps) {
+  const { t } = useI18n()
   const searchRef = useRef<HTMLInputElement>(null)
   const [query, setQuery] = useState('')
   const [title, setTitle] = useState('')
@@ -53,36 +55,36 @@ export function GroupConversationDialog({ employees, creating = false, onClose, 
       <section className="group-dialog group-dialog--conversation" role="dialog" aria-modal="true" aria-labelledby="group-dialog-title">
         <header className="group-dialog__header">
           <div>
-            <span><UsersThree size={16} weight="fill" /> 当前世界</span>
-            <h2 id="group-dialog-title">创建群聊</h2>
-            <p>选择至少两名角色，创建后立即出现在左侧会话列表。</p>
+            <span><UsersThree size={16} weight="fill" /> {t('workbench.groupCurrentWorld', '当前世界')}</span>
+            <h2 id="group-dialog-title">{t('workbench.groupTitle', '创建群聊')}</h2>
+            <p>{t('workbench.groupSubtitle', '选择至少两名角色，创建后立即出现在左侧会话列表。')}</p>
           </div>
-          <button className="icon-button" type="button" aria-label="关闭创建群聊" disabled={creating} onClick={onClose}><X size={18} /></button>
+          <button className="icon-button" type="button" aria-label={t('workbench.cancel', '关闭')} disabled={creating} onClick={onClose}><X size={18} /></button>
         </header>
 
         <div className="group-dialog__body">
           <label className="group-dialog__search">
             <MagnifyingGlass size={17} />
-            <input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索角色或职责" aria-label="搜索群聊成员" />
+            <input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('workbench.groupSearch', '搜索角色或职责')} aria-label={t('workbench.groupSearch', '搜索群聊成员')} />
           </label>
           <label className="group-dialog__name">
-            <span>群聊名称</span>
-            <input value={title} maxLength={48} onChange={(event) => setTitle(event.target.value)} placeholder="可选，默认使用成员名称" />
+            <span>{t('workbench.groupName', '群聊名称')}</span>
+            <input value={title} maxLength={48} onChange={(event) => setTitle(event.target.value)} placeholder={t('workbench.groupNamePlaceholder', '可选，默认使用成员名称')} />
           </label>
 
           <fieldset className="group-dialog__mode">
-            <legend>协作模式</legend>
+            <legend>{t('workbench.groupMode', '协作模式')}</legend>
             <label className={collaborationMode === 'discussion' ? 'is-selected' : ''}>
               <input type="radio" name="group-collaboration-mode" value="discussion" checked={collaborationMode === 'discussion'} disabled={creating} onChange={() => setCollaborationMode('discussion')} />
-              <span><strong>讨论</strong><small>默认由所有成员参与多轮讨论。</small></span>
+              <span><strong>{t('workbench.groupModeDiscussion', '讨论')}</strong><small>{t('workbench.groupModeDiscussionDesc', '默认由所有成员参与多轮讨论。')}</small></span>
             </label>
             <label className={collaborationMode === 'task' ? 'is-selected' : ''}>
               <input type="radio" name="group-collaboration-mode" value="task" checked={collaborationMode === 'task'} disabled={creating} onChange={() => setCollaborationMode('task')} />
-              <span><strong>协作</strong><small>按角色和技能分配步骤，执行细节进入轨迹。</small></span>
+              <span><strong>{t('workbench.groupModeTask', '协作')}</strong><small>{t('workbench.groupModeTaskDesc', '按角色和技能分配步骤，执行细节进入轨迹。')}</small></span>
             </label>
           </fieldset>
 
-          <div className="group-dialog__list" role="group" aria-label="选择群聊成员">
+          <div className="group-dialog__list" role="group" aria-label={t('workbench.groupSearch', '选择群聊成员')}>
             {filteredEmployees.map((employee) => {
               const selected = selectedIds.includes(employee.id)
               return (
@@ -97,14 +99,14 @@ export function GroupConversationDialog({ employees, creating = false, onClose, 
         </div>
 
         <footer className="group-dialog__footer">
-          <span>已选择 {selectedIds.length} 人</span>
+          <span>{t('workbench.groupSelectedCount', '已选择 {count} 人', { count: selectedIds.length })}</span>
           <div>
-            <button className="secondary-button" type="button" disabled={creating} onClick={onClose}>取消</button>
+            <button className="secondary-button" type="button" disabled={creating} onClick={onClose}>{t('workbench.cancel', '取消')}</button>
             <button className="primary-button" type="button" disabled={creating || selectedIds.length < 2} onClick={() => void onCreate({
               title: title.trim() || selectedIds.map((id) => employees.find((employee) => employee.id === id)?.displayName).filter((name): name is string => name !== undefined).join('、'),
               employeeIds: selectedIds,
               collaborationMode,
-            })}>{creating ? '正在创建…' : '创建群聊'}</button>
+            })}>{creating ? t('workbench.groupCreating', '正在创建…') : t('workbench.groupCreateSubmit', '创建群聊')}</button>
           </div>
         </footer>
       </section>

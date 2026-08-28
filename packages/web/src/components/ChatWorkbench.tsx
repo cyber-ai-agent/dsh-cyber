@@ -12,7 +12,7 @@ import {
   X,
 } from '@phosphor-icons/react'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { WORLD_CHARACTER_MANAGEMENT_PERMISSIONS, type ChatAttachment, type CompletionJob, type InstalledPluginCommand, type JsonObject, type LocalAssetMimeType, type ModelProfile, type WorkMessage, type WorkSession, type World, type WorldCharacterPermission, type WorldPermissionDecisionScope, type WorldPermissionRequest } from '@dsh-cyber/contracts'
+import { WORLD_CHARACTER_MANAGEMENT_PERMISSIONS, type ChatAttachment, type CompletionJob, type InstalledPluginCommand, type JsonObject, type LocalAssetMimeType, type ModelAssignment, type ModelProfile, type WorkMessage, type WorkSession, type World, type WorldCharacterPermission, type WorldPermissionDecisionScope, type WorldPermissionRequest } from '@dsh-cyber/contracts'
 
 import { api } from '../api.js'
 import { formatDateTime, formatTime } from '../i18n/format.js'
@@ -44,6 +44,7 @@ interface ChatWorkbenchProps {
   employees: CyberEmployee[]
   installedPlugins?: InstalledPluginCommand[]
   models?: ModelProfile[]
+  modelAssignments?: readonly ModelAssignment[]
   modelProfileId?: string
   onChangeModelProfile?(modelProfileId: string | undefined): void
   sending?: boolean
@@ -79,7 +80,7 @@ interface ChatWorkbenchProps {
   onStopTurn?(turnId: string): Promise<void>
 }
 
-export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, installedPlugins = [], models = [], modelProfileId, onChangeModelProfile, sending = false, pendingCount = 0, queuedCount = 0, queueItems = [], draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRetryCompletionJob, onCompletionJobSettled, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, permissionMode = 'read-only', onChangePermissionMode, onRequestFullAccess, onChangeCollaborationMode, onCancelQueuedTurn, onPromoteQueuedTurn, onStopTurn }: ChatWorkbenchProps) {
+export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, installedPlugins = [], models = [], modelAssignments = [], modelProfileId, onChangeModelProfile, sending = false, pendingCount = 0, queuedCount = 0, queueItems = [], draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRetryCompletionJob, onCompletionJobSettled, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, permissionMode = 'read-only', onChangePermissionMode, onRequestFullAccess, onChangeCollaborationMode, onCancelQueuedTurn, onPromoteQueuedTurn, onStopTurn }: ChatWorkbenchProps) {
   const { t } = useI18n()
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -116,6 +117,44 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
   const canStopCurrentTurn = activeTurn !== undefined && onStopTurn !== undefined
   const hasRunningTurn = queueItems.some((turn) => turn.status === 'running' || turn.status === 'waiting-approval' || turn.status === 'stopping')
   const hasQueueActions = pendingCount > 0 || queuedCount > 0 || queueItems.some((turn) => turn.status === 'running' || turn.status === 'waiting-approval' || turn.status === 'queued')
+
+  const effectiveDefaultModel = useMemo(() => {
+    if (modelProfileId !== undefined) {
+      return models.find((m) => m.id === modelProfileId)
+    }
+    if (directEmployee?.id && modelAssignments.length > 0) {
+      const empAssign = modelAssignments.find((a) => a.scope === 'employee' && a.scopeId === directEmployee.id)
+      if (empAssign) {
+        const found = models.find((m) => m.id === empAssign.modelProfileId)
+        if (found) return found
+      }
+    }
+    if (modelAssignments.length > 0) {
+      const worldAssign = modelAssignments.find((a) => a.scope === 'world' && a.scopeId === world.id)
+      if (worldAssign) {
+        const found = models.find((m) => m.id === worldAssign.modelProfileId)
+        if (found) return found
+      }
+    }
+    const worldSettingsModelId = (world as unknown as { settings?: { model?: { defaultModelProfileId?: string } } }).settings?.model?.defaultModelProfileId
+    if (worldSettingsModelId) {
+      const found = models.find((m) => m.id === worldSettingsModelId)
+      if (found) return found
+    }
+    if (modelAssignments.length > 0) {
+      const wsAssign = modelAssignments.find((a) => a.scope === 'workspace')
+      if (wsAssign) {
+        const found = models.find((m) => m.id === wsAssign.modelProfileId)
+        if (found) return found
+      }
+    }
+    return models.find((m) => m.isDefault) ?? models[0]
+  }, [directEmployee?.id, modelAssignments, modelProfileId, models, world])
+
+  const resolvedModelLabel = useMemo(() => {
+    if (!effectiveDefaultModel) return '未配置模型'
+    return effectiveDefaultModel.modelId || effectiveDefaultModel.displayName
+  }, [effectiveDefaultModel])
 
   useEffect(() => {
     const container = scrollRef.current
@@ -341,13 +380,19 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
         {attachments.length > 0 ? <div className="composer-attachments" aria-label="待发送附件">{attachments.map((attachment) => <span key={attachment.assetId}><FileIcon size={15} /><span><strong>{attachment.name}</strong><small>{formatBytes(attachment.byteLength)}</small></span><button type="button" aria-label={`移除附件 ${attachment.name}`} onClick={() => setAttachments((current) => current.filter((item) => item.assetId !== attachment.assetId))}><X size={13} /></button></span>)}</div> : null}
         {attachmentError === undefined ? null : <p className="composer-error" role="alert">{attachmentError}</p>}
         <textarea ref={inputRef} value={draft} onChange={(event) => onDraftChange(event.target.value)} disabled={employees.length === 0} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit() } }} placeholder={employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? t('workbench.composer', '发送消息给 {name}', { name: participantEmployees.map((employee) => employee.displayName).join('、') }) : conversationKind === 'direct' ? t('workbench.composer', '发送消息给 {name}', { name: participantEmployees[0]?.displayName ?? experience.personLabel }) : '先从左侧选择会话，或输入 @角色名'} rows={2} aria-label={`给当前世界的${experience.peopleLabel}发送消息`} />
-        <div className="composer__toolbar">{hasQueueActions ? <div className="composer__queue-mode" role="group" aria-label="队列操作"><button type="button" aria-label="排队发送" title="排队发送" className={queueMode === 'normal' ? 'is-active' : ''} aria-pressed={queueMode === 'normal'} onClick={() => setQueueMode('normal')}>排队</button><button type="button" aria-label="插入队列前方" title="插入队列前方" className={queueMode === 'next' ? 'is-active' : ''} aria-pressed={queueMode === 'next'} onClick={() => setQueueMode('next')}>插入</button></div> : null}<div>
-          {onChangeModelProfile === undefined ? null : <div className="composer-model-picker"><ModelPicker models={models} value={modelProfileId} inheritLabel={t('workbench.modelDefault', '恢复角色默认模型')} ariaLabel={t('workbench.modelLabel', '当前会话模型')} onChange={onChangeModelProfile} />{modelProfileId === undefined ? null : <small>{t('workbench.modelTemporary', '会话临时选择')}</small>}</div>}
-          {onChangePermissionMode === undefined ? null : <ConversationPermissionControl value={permissionMode} onChange={onChangePermissionMode} {...(onRequestFullAccess === undefined ? {} : { onRequestFullAccess })} />}
-          <input ref={fileInputRef} className="composer-file-input" type="file" accept=".png,.jpg,.jpeg,.webp,.txt,.md,.json,.pdf" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAttachment(file) }} />
-          <button className="icon-button" type="button" aria-label={uploading ? '正在上传附件' : '添加附件'} disabled={uploading} onClick={() => fileInputRef.current?.click()}>{uploading ? <CircleNotch size={18} className="spin" /> : <Paperclip size={18} />}</button>
-          <CommandPicker commands={installedPlugins} draft={draft} onDraftChange={onDraftChange} {...(onOpenPluginMarket === undefined ? {} : { onOpenMarket: onOpenPluginMarket })} onFocus={() => inputRef.current?.focus()} />
-        </div><button className={`send-button${canStopCurrentTurn ? ' send-button--stop' : ''}`} type="button" aria-label={canStopCurrentTurn ? '停止当前回复' : sending ? '正在回复中，发送新消息' : queueMode === 'next' ? '插入并发送' : hasQueueActions ? '排队发送' : '发送'} title={canStopCurrentTurn ? '停止当前回复' : sending ? '继续发送消息' : queueMode === 'next' ? '插入并发送' : hasQueueActions ? '排队发送' : '发送'} disabled={canStopCurrentTurn ? false : uploading || employees.length === 0 || (!draft.trim() && attachments.length === 0)} onClick={() => { if (canStopCurrentTurn) void onStopTurn(activeTurn.id); else void submit() }}>{canStopCurrentTurn ? <Stop size={19} weight="bold" /> : sending ? <CircleNotch size={19} className="spin" /> : <PaperPlaneRight size={19} weight="fill" />}{canStopCurrentTurn ? null : queuedCount > 0 ? <span className="send-button__queue" aria-label={`${queuedCount} 条消息已排队`}>{queuedCount}</span> : null}</button></div>
+        <div className="composer__toolbar">
+          <div className="composer__actions-left">
+            <input ref={fileInputRef} className="composer-file-input" type="file" accept=".png,.jpg,.jpeg,.webp,.txt,.md,.json,.pdf" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAttachment(file) }} />
+            <button className="icon-button composer-attachment-button" type="button" aria-label={uploading ? '正在上传附件' : '添加附件'} title={uploading ? '正在上传附件' : '添加附件'} disabled={uploading} onClick={() => fileInputRef.current?.click()}>{uploading ? <CircleNotch size={18} className="spin" /> : <Paperclip size={18} />}</button>
+            {onChangePermissionMode === undefined ? null : <ConversationPermissionControl value={permissionMode} onChange={onChangePermissionMode} {...(onRequestFullAccess === undefined ? {} : { onRequestFullAccess })} />}
+            {onChangeModelProfile === undefined ? null : <div className="composer-model-picker"><ModelPicker models={models} value={modelProfileId} inheritLabel={resolvedModelLabel} ariaLabel={t('workbench.modelLabel', '当前会话模型')} onChange={onChangeModelProfile} /></div>}
+            <CommandPicker commands={installedPlugins} draft={draft} onDraftChange={onDraftChange} {...(onOpenPluginMarket === undefined ? {} : { onOpenMarket: onOpenPluginMarket })} onFocus={() => inputRef.current?.focus()} />
+            {hasQueueActions ? <div className="composer__queue-mode" role="group" aria-label="队列操作"><button type="button" aria-label="排队发送" title="排队发送" className={queueMode === 'normal' ? 'is-active' : ''} aria-pressed={queueMode === 'normal'} onClick={() => setQueueMode('normal')}>排队</button><button type="button" aria-label="插入队列前方" title="插入队列前方" className={queueMode === 'next' ? 'is-active' : ''} aria-pressed={queueMode === 'next'} onClick={() => setQueueMode('next')}>插入</button></div> : null}
+          </div>
+          <div className="composer__actions-right">
+            <button className={`send-button${canStopCurrentTurn ? ' send-button--stop' : ''}`} type="button" aria-label={canStopCurrentTurn ? '停止当前回复' : sending ? '正在回复中，发送新消息' : queueMode === 'next' ? '插入并发送' : hasQueueActions ? '排队发送' : '发送'} title={canStopCurrentTurn ? '停止当前回复' : sending ? '继续发送消息' : queueMode === 'next' ? '插入并发送' : hasQueueActions ? '排队发送' : '发送'} disabled={canStopCurrentTurn ? false : uploading || employees.length === 0 || (!draft.trim() && attachments.length === 0)} onClick={() => { if (canStopCurrentTurn) void onStopTurn(activeTurn.id); else void submit() }}>{canStopCurrentTurn ? <Stop size={19} weight="bold" /> : sending ? <CircleNotch size={19} className="spin" /> : <PaperPlaneRight size={19} weight="fill" />}{canStopCurrentTurn ? null : queuedCount > 0 ? <span className="send-button__queue" aria-label={`${queuedCount} 条消息已排队`}>{queuedCount}</span> : null}</button>
+          </div>
+        </div>
       </div></div>
     </section>
   )
@@ -486,21 +531,22 @@ function CompletionJobStatus({ metadata, onRetry, onSettled }: {
     return () => { cancelled = true; if (timer !== undefined) clearTimeout(timer) }
   }, [jobId, onSettled, status])
 
+  const { t } = useI18n()
   if (jobId === undefined || status === undefined) return null
   const label = status === 'completed'
-    ? '产物可用'
+    ? t('workbench.artifactReady', '产物可用')
     : status === 'failed'
-      ? '产物整理失败'
+      ? t('workbench.artifactFailed', '产物整理失败')
       : status === 'cancelled'
-        ? '产物整理已取消'
-        : '产物整理中'
+        ? t('workbench.artifactCancelled', '产物整理已取消')
+        : t('workbench.artifactPending', '产物整理中')
   return <div className={`completion-job-status completion-job-status--${status}`} role="status">
     {status === 'pending' || status === 'running' || status === 'retrying' ? <CircleNotch size={14} className="spin" aria-hidden="true" /> : null}
     <span>{label}</span>
     {status === 'failed' && onRetry !== undefined ? <button type="button" disabled={retrying} onClick={() => {
       setRetrying(true)
       void onRetry(jobId).then(() => setStatus('retrying')).finally(() => setRetrying(false))
-    }}>{retrying ? '正在重试…' : '重试'}</button> : null}
+    }}>{retrying ? t('workbench.retrying', '正在重试…') : t('workbench.retry', '重试')}</button> : null}
   </div>
 }
 

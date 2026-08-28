@@ -168,7 +168,7 @@ export function NavigationPane({
       </section>
 
       <footer className="world-settings-entry">
-        <button type="button" onClick={onWorldSettings}><GearSix size={17} /><span>{t('nav.worldSettings', '世界设置')}</span></button>
+        <button type="button" onClick={onWorldSettings}><GearSix size={17} /><span>{t('nav.worldSettings', '世界管理')}</span></button>
       </footer>
     </div>
   )
