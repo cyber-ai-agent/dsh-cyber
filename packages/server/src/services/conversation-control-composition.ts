@@ -21,7 +21,7 @@ import type { GroupTaskRoutingResult } from './group-task-router.js'
 import type { WorldPackageInstanceService } from './world-package-instance-service.js'
 import type { WorldRuntimePromptComposer } from './world-runtime-context-composer.js'
 import type { CharacterSkillRuntime } from './character-skill-runtime.js'
-import type { PreparedGroupTurnPlanner } from './prepared-group-turn-planner.js'
+import { preparedGroupTurnPlannerFor } from '../composition/compose-group-turn-planner.js'
 
 export function composeConversationControl(options: {
   store: SqliteStore
@@ -34,7 +34,6 @@ export function composeConversationControl(options: {
   worldTrace: WorldTraceService
   runtimeStreamHub: RuntimeStreamHub
   groupTasks: GroupTaskCollaborationService
-  groupTurnPlanner: PreparedGroupTurnPlanner
   worldPackages: WorldPackageInstanceService
   runtimeContext: Pick<WorldRuntimePromptComposer, 'composeGroupRuntimePrompt'>
   skillRuntime: Pick<CharacterSkillRuntime, 'prepare'>
@@ -81,7 +80,7 @@ export function composeConversationControl(options: {
 async function runQueuedGroup(
   entry: ConversationQueueEntry,
   options: Pick<Parameters<typeof composeConversationControl>[0],
-    'store' | 'orchestrator' | 'groupTasks' | 'groupTurnPlanner' | 'worldPackages' | 'runtimeContext' | 'skillRuntime'>,
+    'store' | 'orchestrator' | 'groupTasks' | 'worldPackages' | 'runtimeContext' | 'skillRuntime'>,
   preparedActions?: CharacterSkillAction[],
 ): Promise<{ waitingForApproval?: boolean; result?: ConversationResult }> {
   const turn = options.store.getWorkTurn(entry.workTurnId)
@@ -120,7 +119,7 @@ async function runQueuedGroup(
 
   const preparedPlan = groupTurnPlanFromMetadata(message.metadata)
   if (preparedPlan !== undefined) {
-    options.groupTurnPlanner.seed({
+    preparedGroupTurnPlannerFor(options.store)?.seed({
       workspaceId: entry.workspaceId,
       worldId: entry.worldId,
       sessionId: entry.sessionId,
