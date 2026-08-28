@@ -294,7 +294,11 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const completionWorker = composeCompletionWorker(store, worldArtifacts)
   const groupTurnPlanner = options.groupTurnPlanner ?? new ModelGroupTurnPlanner({
     store,
-    call: new ModelJsonCall({ credentials }),
+    // Routing runs before anyone speaks, so its timeout is the floor on how
+    // long a group turn can appear frozen. A short budget is the point: a
+    // slow or dead endpoint has to degrade to the deterministic roster
+    // quickly, not hold the room for the full model timeout.
+    call: new ModelJsonCall({ credentials, timeoutMs: 6_000, maxOutputTokens: 512 }),
   })
   const orchestrator = new ConversationOrchestrator({
     store,
