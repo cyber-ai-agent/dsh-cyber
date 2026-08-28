@@ -75,6 +75,11 @@ export type QueuedGroupServiceResult = QueuedDirectServiceResult
  * process from claiming the same entry twice. A restart therefore discovers
  * queued rows again and runs the original WorkTurn/user message rather than
  * constructing a replacement conversation.
+ *
+ * For groups, `employeeIds` on the queue row is the planned reservation set,
+ * not the whole room membership. The complete member list remains durable on
+ * WorkSession + the user message metadata. This means an idle observer in a
+ * ten-person room cannot block a turn that only needs one engineer.
  */
 export class ConversationQueueService implements AsyncDisposable {
   readonly #store: QueueStore
@@ -483,7 +488,7 @@ export class ConversationQueueService implements AsyncDisposable {
       worldId: input.worldId,
       sessionId: session.id,
       workTurnId,
-      employeeIds: [...new Set(input.employeeIds)],
+      employeeIds: queueReservationEmployeeIds(input.metadata, input.employeeIds),
       conversationKind: 'group' as const,
       collaborationMode: input.collaborationMode ?? session.collaborationMode ?? 'discussion',
       ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
@@ -542,9 +547,22 @@ export class ConversationQueueService implements AsyncDisposable {
 function queueEmployeeIds(metadata: Record<string, unknown> | undefined): string[] {
   const single = metadata?.queueEmployeeId
   if (typeof single === 'string' && single.trim()) return [single.trim()]
-  const multiple = metadata?.participantIds
-  if (!Array.isArray(multiple)) return []
-  return multiple.filter((value): value is string => typeof value === 'string' && value.trim().length > 0).map((value) => value.trim())
+  const reserved = stringArrayMetadata(metadata, 'reservationEmployeeIds')
+  if (reserved.length > 0) return reserved
+  return stringArrayMetadata(metadata, 'participantIds')
+}
+
+function queueReservationEmployeeIds(metadata: Record<string, unknown> | undefined, fallback: readonly string[]): string[] {
+  const reserved = stringArrayMetadata(metadata, 'reservationEmployeeIds')
+  return reserved.length > 0 ? reserved : [...new Set(fallback.map((value) => value.trim()).filter(Boolean))]
+}
+
+function stringArrayMetadata(metadata: Record<string, unknown> | undefined, key: string): string[] {
+  const value = metadata?.[key]
+  if (!Array.isArray(value)) return []
+  return [...new Set(value
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    .map((item) => item.trim()))]
 }
 
 function stringMetadata(metadata: Record<string, unknown> | undefined, key: string): string | undefined {
