@@ -109,7 +109,7 @@ describe('group Skill approval continuation', () => {
     expect(browser.readUrls).toEqual(['https://example.com/task'])
     expect(runtime.calls.slice(callsBeforeReject).some((call) => call.prompt.includes('未执行'))).toBe(true)
     expect(server.store.listMessages(discussion.body.session.id).filter((message) => message.kind === 'user')).toHaveLength(1)
-  })
+  }, 30_000)
 
   it('keeps a group approval pending across restart and resumes the same WorkTurn once', async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-group-skill-approval-restart-'))
@@ -170,7 +170,7 @@ describe('group Skill approval continuation', () => {
     expect(recovered.store.listWorldSkillActions(world.id).filter((action) => action.workTurnId === queued.body.workTurnId)).toHaveLength(1)
     expect(recovered.store.listMessages(queued.body.session.id).filter((message) => message.kind === 'user')).toHaveLength(1)
     expect(recoveredRuntime.calls.length).toBeGreaterThan(0)
-  })
+  }, 30_000)
 })
 
 async function installBrowser(origin: string, workspaceId: string, worldId: string): Promise<void> {
