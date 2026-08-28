@@ -6,6 +6,8 @@ import { ModelGroupTurnPlanner } from '../services/model-group-turn-planner.js'
 import { ModelJsonCall } from '../services/model-json-call.js'
 import { PreparedGroupTurnPlanner } from '../services/prepared-group-turn-planner.js'
 
+const PLANNERS = new WeakMap<object, PreparedGroupTurnPlanner>()
+
 /**
  * The roster decision for a group turn.
  *
@@ -23,9 +25,21 @@ export function composeGroupTurnPlanner(
   credentials: ModelCredentialService,
   override?: GroupTurnPlannerPort,
 ): PreparedGroupTurnPlanner {
-  const planner = override ?? new ModelGroupTurnPlanner({
+  const planner = new PreparedGroupTurnPlanner(override ?? new ModelGroupTurnPlanner({
     store,
     call: new ModelJsonCall({ credentials, timeoutMs: 6_000, maxOutputTokens: 512 }),
-  })
-  return new PreparedGroupTurnPlanner(planner)
+  }))
+  PLANNERS.set(store, planner)
+  return planner
+}
+
+/**
+ * Server routes and the queue composition are created after the planner. A
+ * store-scoped registry keeps their planning boundary explicit without making
+ * the top-level server composition file grow another cross-cutting argument.
+ * WeakMap keeps tests/multiple local servers isolated and does not retain a
+ * closed store.
+ */
+export function preparedGroupTurnPlannerFor(store: object): PreparedGroupTurnPlanner | undefined {
+  return PLANNERS.get(store)
 }
