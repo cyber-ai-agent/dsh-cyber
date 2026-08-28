@@ -355,6 +355,72 @@ describe('group turn execution', () => {
   })
 })
 
+describe('a room larger than one wave', () => {
+  it('gives every member the floor across several waves instead of dropping some', async () => {
+    const planner = new HeuristicGroupTurnPlanner()
+    const many = Array.from({ length: 11 }, (_item, index) => ({
+      employeeId: `e${index}`,
+      displayName: `角色${index}`,
+    }))
+
+    const plan = await planner.plan({ workspaceId: 'w', worldId: 'world', sessionId: 's', prompt: '大家都说说', candidates: many })
+
+    // Concurrency is bounded by making more waves, never by shortening the
+    // guest list: a member the user put in the room has to be heard.
+    const heard = plan.waves.flatMap((wave) => wave.speakers.map((speaker) => speaker.employeeId))
+    expect(heard).toEqual(many.map((item) => item.employeeId))
+    expect(plan.waves.length).toBeGreaterThan(1)
+    for (const wave of plan.waves) expect(wave.speakers.length).toBeLessThanOrEqual(6)
+  })
+
+  it('still bounds a plan somebody else authored', async () => {
+    const many = Array.from({ length: 11 }, (_item, index) => ({ employeeId: `e${index}`, displayName: `角色${index}` }))
+    const plan = normalizeGroupTurnPlan(
+      { waves: [{ speakers: many.map((item) => ({ employeeId: item.employeeId })) }], source: 'model' },
+      many,
+    )
+    // A model-authored roster is untrusted input and stays capped.
+    expect(plan.waves.reduce((total, wave) => total + wave.speakers.length, 0)).toBeLessThanOrEqual(8)
+  })
+})
+
+describe('a meeting where nobody could speak', () => {
+  it('records why it failed instead of flattening it to an unknown runtime error', async () => {
+    const { directory, store, workspace, world, employees } = await room([
+      ['a', '老王', '技术经理'],
+      ['b', '小刘', '软件工程师'],
+    ])
+    const runtime: AgentRuntimePort = {
+      async runTurn(request: AgentTurnRequest) {
+        request.onEvent?.({
+          kind: 'turn.failed',
+          source: 'test',
+          sourceSessionId: 'x',
+          content: '',
+          metadata: { message: 'model_not_found: unknown model' },
+        })
+        throw new Error('model_not_found: unknown model')
+      },
+      async close() {},
+    }
+    const orchestrator = new ConversationOrchestrator({ store, runtime, workspacePath: directory })
+    orchestrators.push(orchestrator)
+
+    await expect(orchestrator.group({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      employeeIds: employees.map((employee) => employee.id),
+      prompt: '评估上线风险',
+    })).rejects.toThrow()
+
+    const [session] = store.listSessions(world.id)
+    const [turn] = store.listSessionTurns(session!.id)
+    // Re-wrapping the failure lost its kind, so a misconfigured model was
+    // recorded as `runtime-unknown` and stopped being diagnosable.
+    expect(turn).toMatchObject({ status: 'failed', errorCode: 'runtime-model-not-found' })
+  })
+})
+
 describe('per-character models in a group', () => {
   it('sends each character its own model rather than one for the whole turn', async () => {
     const { directory, store, workspace, world, employees } = await room([

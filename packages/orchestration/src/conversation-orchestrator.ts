@@ -650,6 +650,10 @@ export class ConversationOrchestrator implements AsyncDisposable {
     const { prompt, employeeIds, employees, session, workTurn, recovered } = begun
     const clientTurnId = workTurn.clientTurnId
     const meetingRunId = workTurn.id
+    // Resolved once for the turn rather than re-scanned per character, and
+    // taken from the durable message so the queued and immediate paths agree.
+    const selection = this.#turnModelSelection(session.id, workTurn.id)
+    const modelProfileIds = { ...selection.perCharacter, ...input.modelProfileIds }
     const plan = await this.#planGroupTurn(input, employees, session)
     this.#store.appendDomainEvent({
       workspaceId: input.workspaceId,
@@ -672,6 +676,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
 
     const replies: AgentReply[] = []
     const failures: Array<{ employeeId: string; errorCode: string }> = []
+    let firstFailure: unknown
     let ordinal = 0
     try {
       for (const wave of plan.waves) {
@@ -684,7 +689,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
           const employee = employees.find((candidate) => candidate.id === speaker.employeeId)
           if (employee === undefined) return undefined
           ordinal += 1
-          const modelProfileId = input.modelProfileIds?.[employee.id]
+          const modelProfileId = modelProfileIds[employee.id] ?? input.modelProfileId ?? selection.scalar
           return {
             employeeId: employee.id,
             run: this.#runAgent({
@@ -716,16 +721,18 @@ export class ConversationOrchestrator implements AsyncDisposable {
           // One character failing used to silence everyone after it and throw
           // away the answers already produced. The others have already spoken;
           // their work is kept and the failure is reported alongside it.
+          if (failures.length === 0) firstFailure = result.reason
           failures.push({ employeeId: launched[index]!.employeeId, errorCode: lifecycleErrorCode(result.reason) })
         }
         if (this.#store.getWorkTurn(workTurn.id)?.status === 'interrupted') {
           throw new AgentTurnInterruptedError(launched[0]?.employeeId ?? '')
         }
       }
-      // Every speaker failing is a failed turn, not an empty meeting.
-      if (replies.length === 0 && failures.length > 0) {
-        throw new AgentTurnFailedError(failures[0]!.employeeId, 'unknown')
-      }
+      // Every speaker failing is a failed turn, not an empty meeting. The
+      // original error is rethrown rather than a fresh one: re-wrapping lost
+      // the failure kind, so a missing model or an exhausted quota was
+      // recorded as `runtime-unknown` and the turn stopped being diagnosable.
+      if (replies.length === 0 && failures.length > 0) throw firstFailure
       this.#store.appendDomainEvent({
         workspaceId: input.workspaceId,
         worldId: input.worldId,
@@ -769,9 +776,30 @@ export class ConversationOrchestrator implements AsyncDisposable {
 
   /** The turn-wide model override the composer sent, if any. */
   #turnModelProfileId(sessionId: string, workTurnId: string): string | undefined {
+    return this.#turnModelSelection(sessionId, workTurnId).scalar
+  }
+
+  /**
+   * What the composer asked for, read back from the turn's own user message.
+   *
+   * The durable message is the authority rather than the request object,
+   * because a queued turn is rebuilt minutes later by a different code path
+   * that never saw the original request. A selection that lived only in memory
+   * silently stopped applying the moment a turn was enqueued — which is every
+   * turn the web client sends.
+   */
+  #turnModelSelection(sessionId: string, workTurnId: string): { scalar?: string; perCharacter: Record<string, string> } {
     const turnMessage = this.#store.listMessages(sessionId)
       .find((message) => message.metadata.workTurnId === workTurnId && message.kind === 'user')
-    return typeof turnMessage?.metadata.modelProfileId === 'string' ? turnMessage.metadata.modelProfileId : undefined
+    const scalar = typeof turnMessage?.metadata.modelProfileId === 'string' ? turnMessage.metadata.modelProfileId : undefined
+    const raw = turnMessage?.metadata.modelProfileIds
+    const perCharacter: Record<string, string> = {}
+    if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
+      for (const [employeeId, profileId] of Object.entries(raw)) {
+        if (typeof profileId === 'string' && profileId !== '') perCharacter[employeeId] = profileId
+      }
+    }
+    return { ...(scalar === undefined ? {} : { scalar }), perCharacter }
   }
 
   /**
