@@ -174,7 +174,7 @@ describe('modern skin system and marketplace category', () => {
       tokens: {
         ...BUILTIN_THEMES[0]!.tokens,
         backdropImage: '/api/assets/conversation-wallpaper',
-        worldMapImage: undefined,
+        worldMapImage: '/api/assets/conversation-wallpaper',
       },
     })
     try {
