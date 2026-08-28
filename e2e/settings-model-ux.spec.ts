@@ -66,6 +66,18 @@ test('keeps model setup single-column, localized and responsive', async ({ page 
   expect(await editor.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
   await page.screenshot({ path: join(screenshotRoot, 'model-editor-1440x900.png') })
 
+  // Saving must use the current draft (not a stale provider/field snapshot),
+  // expose a durable success notice, and clear a validation error as soon as
+  // the user fixes the field.
+  await editor.getByRole('button', { name: '保存修改' }).click()
+  await expect(editor.getByRole('status')).toContainText('模型连接已更新')
+  const displayName = editor.getByLabel('连接显示名称')
+  await displayName.fill(' ')
+  await editor.getByRole('button', { name: '保存修改' }).click()
+  await expect(editor.getByRole('alert')).toContainText('请输入模型配置名称')
+  await displayName.fill('本地推理模型')
+  await expect(editor.getByRole('alert')).toHaveCount(0)
+
   await dialog.getByRole('button', { name: '外观与布局' }).click()
   await dialog.getByLabel('界面语言').selectOption('en-US')
   const englishDialog = page.getByRole('dialog', { name: 'Settings' })
