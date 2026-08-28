@@ -76,7 +76,7 @@ export function WorldThemeSwitcher({ activeWorld, installedSkinIds, onThemeChang
           aria-haspopup="menu"
           aria-expanded={open}
           onClick={() => setOpen((prev) => !prev)}
-          title={t('appearance.theme.switchTitle', '切换界面与会话皮肤，不改变当前世界场景')}
+          title={t('appearance.theme.switchConversationTitle', '切换界面与会话皮肤，不改变当前世界场景')}
         >
           <span
             className="world-theme-dot"
@@ -92,11 +92,11 @@ export function WorldThemeSwitcher({ activeWorld, installedSkinIds, onThemeChang
         </button>
 
         {open && (
-          <div className="topbar-world-theme-menu" role="menu" aria-label={t('appearance.theme.listLabel', '界面与会话皮肤列表')}>
+          <div className="topbar-world-theme-menu" role="menu" aria-label={t('appearance.theme.conversationListLabel', '界面与会话皮肤列表')}>
             <header className="topbar-world-theme-menu__header">
               <div>
-                <strong>{t('appearance.theme.menuTitle', '界面 / 会话皮肤')}</strong>
-                <small>{t('appearance.theme.menuDescription', '改变【{world}】的聊天背景、气泡和界面氛围；右侧世界场景保持独立', { world: activeWorld.name })}</small>
+                <strong>{t('appearance.theme.conversationMenuTitle', '界面 / 会话皮肤')}</strong>
+                <small>{t('appearance.theme.conversationMenuDescription', '改变【{world}】的聊天背景、气泡和界面氛围；右侧世界场景保持独立', { world: activeWorld.name })}</small>
               </div>
               {currentTheme.source === 'custom' ? (
                 <button
@@ -163,7 +163,7 @@ export function WorldThemeSwitcher({ activeWorld, installedSkinIds, onThemeChang
                 onClick={() => openCustomizer(currentTheme.id)}
               >
                 <Plus size={14} />
-                <span>{t('appearance.theme.create', '基于当前会话皮肤新建自定义…')}</span>
+                <span>{t('appearance.theme.createConversationSkin', '基于当前会话皮肤新建自定义…')}</span>
               </button>
             </footer>
           </div>
