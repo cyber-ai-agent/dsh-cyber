@@ -33,6 +33,13 @@ import {
   type ConversationHistoryBudget,
   type ConversationHistorySpeaker,
 } from './conversation-history.js'
+import {
+  HeuristicGroupTurnPlanner,
+  normalizeGroupTurnPlan,
+  type GroupTurnCandidate,
+  type GroupTurnPlan,
+  type GroupTurnPlannerPort,
+} from './group-turn-planner.js'
 export interface ConversationStorePort {
   getWorld(worldId: string): World | undefined
   getEmployee(employeeId: string): EmployeeInstance | undefined
@@ -199,6 +206,14 @@ export interface ConversationOrchestratorOptions {
   /** Durable outbox handler type. The host processes it after the answer commits. */
   completionJobType?: string
   onCompletionJobQueued?: () => void
+  /**
+   * Decides who speaks in a group turn and in what order.
+   *
+   * Defaults to {@link HeuristicGroupTurnPlanner}, which costs no model call.
+   * A host that wants a request routed by meaning rather than by `@` supplies
+   * a model-backed planner here.
+   */
+  groupTurnPlanner?: GroupTurnPlannerPort
 }
 
 export interface DirectConversationInput {
@@ -226,6 +241,20 @@ export interface GroupConversationInput {
   sessionId?: string
   title?: string
   collaborationMode?: WorkSessionCollaborationMode
+  /**
+   * Per-character model override for this turn, keyed by employee id.
+   *
+   * A group is the case where one model for the whole turn is wrong: the
+   * characters have their own assignments, and collapsing them silently makes
+   * every role answer as the same model. An entry here wins for that
+   * character; a character with no entry keeps its own assignment.
+   */
+  modelProfileIds?: Readonly<Record<string, string>>
+  /**
+   * Turn-wide model override, applied to every character without an entry in
+   * `modelProfileIds`. Retained for the single-model composer control.
+   */
+  modelProfileId?: string
   /** Internal durable-queue continuation. HTTP callers never supply this. */
   existingWorkTurnId?: string
 }
@@ -371,6 +400,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
   readonly #controlListeners = new Set<ConversationControlListener>()
   readonly #activeAgentRuns = new Map<string, { workTurnId: string; employeeId: string }>()
   readonly #abortedAgentRuns = new Set<string>()
+  readonly #groupTurnPlanner: GroupTurnPlannerPort
 
   constructor(options: ConversationOrchestratorOptions) {
     this.#store = options.store
@@ -380,6 +410,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
     this.#historyBudget = options.historyBudget ?? DEFAULT_CONVERSATION_HISTORY_BUDGET
     this.#completionJobType = options.completionJobType?.trim() || undefined
     this.#onCompletionJobQueued = options.onCompletionJobQueued
+    this.#groupTurnPlanner = options.groupTurnPlanner ?? new HeuristicGroupTurnPlanner()
     if (this.#workspacePath === undefined && this.#resolveWorldRoot === undefined) throw new Error('ConversationOrchestrator requires workspacePath or resolveWorldRoot')
   }
 
@@ -619,6 +650,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
     const { prompt, employeeIds, employees, session, workTurn, recovered } = begun
     const clientTurnId = workTurn.clientTurnId
     const meetingRunId = workTurn.id
+    const plan = await this.#planGroupTurn(input, employees, session)
     this.#store.appendDomainEvent({
       workspaceId: input.workspaceId,
       worldId: input.worldId,
@@ -627,26 +659,72 @@ export class ConversationOrchestrator implements AsyncDisposable {
       actorId: 'owner',
       actorKind: 'owner',
       correlationId: session.id,
-      payload: { participantIds: employeeIds, promptMessageSequence: 1, meetingRunId, workTurnId: workTurn.id },
+      payload: {
+        participantIds: employeeIds,
+        promptMessageSequence: 1,
+        meetingRunId,
+        workTurnId: workTurn.id,
+        // The roster is now a decision rather than the membership list, so it
+        // has to be inspectable after the fact.
+        plan: planEventPayload(plan),
+      },
     })
 
     const replies: AgentReply[] = []
+    const failures: Array<{ employeeId: string; errorCode: string }> = []
+    let ordinal = 0
     try {
-      for (const [index, employee] of employees.entries()) {
-        const collaborationPrompt = groupPrompt(input.runtimePrompt?.trim() || prompt, replies)
-        replies.push(await this.#runAgent({
-          session, workTurn, ordinal: index + 1,
-          employee,
-          prompt: collaborationPrompt,
-          history: recovered.history,
-          // Each character catches up from its own last statement. A character
-          // that spoke first in the previous round has not seen what the ones
-          // after it said, and its runtime session never will unless we replay.
-          observedThroughSequence: lastAuthoredSequence(recovered.messages, employee.id),
-          ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
-          ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
-          ...(clientTurnId === undefined ? {} : { clientTurnId }),
-        }))
+      for (const wave of plan.waves) {
+        // Statements are shared between waves, never inside one. Speakers of a
+        // wave are declared independent by the plan, so they start from the
+        // same context and run at the same time; the wall clock of a wave is
+        // its slowest speaker rather than the sum of all of them.
+        const peerStatements = [...replies]
+        const launched = wave.speakers.map((speaker) => {
+          const employee = employees.find((candidate) => candidate.id === speaker.employeeId)
+          if (employee === undefined) return undefined
+          ordinal += 1
+          const modelProfileId = input.modelProfileIds?.[employee.id]
+          return {
+            employeeId: employee.id,
+            run: this.#runAgent({
+              session, workTurn, ordinal,
+              employee,
+              prompt: groupPrompt(input.runtimePrompt?.trim() || prompt, peerStatements, speaker.brief),
+              history: recovered.history,
+              // Each character catches up from its own last statement. A character
+              // that spoke first in the previous round has not seen what the ones
+              // after it said, and its runtime session never will unless we replay.
+              observedThroughSequence: lastAuthoredSequence(recovered.messages, employee.id),
+              ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
+              ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
+              ...(clientTurnId === undefined ? {} : { clientTurnId }),
+              ...(modelProfileId === undefined ? {} : { modelProfileId }),
+            }),
+          }
+        }).filter((item): item is { employeeId: string; run: Promise<AgentReply> } => item !== undefined)
+
+        const settled = await Promise.allSettled(launched.map((item) => item.run))
+        for (const [index, result] of settled.entries()) {
+          if (result.status === 'fulfilled') {
+            replies.push(result.value)
+            continue
+          }
+          // A stop command ends the whole meeting; it is the owner's decision,
+          // not one character's failure.
+          if (result.reason instanceof AgentTurnInterruptedError) throw result.reason
+          // One character failing used to silence everyone after it and throw
+          // away the answers already produced. The others have already spoken;
+          // their work is kept and the failure is reported alongside it.
+          failures.push({ employeeId: launched[index]!.employeeId, errorCode: lifecycleErrorCode(result.reason) })
+        }
+        if (this.#store.getWorkTurn(workTurn.id)?.status === 'interrupted') {
+          throw new AgentTurnInterruptedError(launched[0]?.employeeId ?? '')
+        }
+      }
+      // Every speaker failing is a failed turn, not an empty meeting.
+      if (replies.length === 0 && failures.length > 0) {
+        throw new AgentTurnFailedError(failures[0]!.employeeId, 'unknown')
       }
       this.#store.appendDomainEvent({
         workspaceId: input.workspaceId,
@@ -656,7 +734,17 @@ export class ConversationOrchestrator implements AsyncDisposable {
         actorId: 'system',
         actorKind: 'system',
         correlationId: session.id,
-        payload: { participantIds: employeeIds, status: 'completed', replyCount: replies.length, meetingRunId, workTurnId: workTurn.id },
+        payload: {
+          participantIds: employeeIds,
+          status: 'completed',
+          replyCount: replies.length,
+          meetingRunId,
+          workTurnId: workTurn.id,
+          // A meeting that finished with a speaker down is completed, not
+          // clean. Saying so is the difference between a quiet character and a
+          // broken one.
+          ...(failures.length === 0 ? {} : { failedSpeakers: failures }),
+        },
       })
       this.#store.completeWorkTurn(workTurn.id)
       return { session, replies }
@@ -676,6 +764,52 @@ export class ConversationOrchestrator implements AsyncDisposable {
         this.#store.failWorkTurn(workTurn.id, lifecycleErrorCode(error))
       }
       throw error
+    }
+  }
+
+  /** The turn-wide model override the composer sent, if any. */
+  #turnModelProfileId(sessionId: string, workTurnId: string): string | undefined {
+    const turnMessage = this.#store.listMessages(sessionId)
+      .find((message) => message.metadata.workTurnId === workTurnId && message.kind === 'user')
+    return typeof turnMessage?.metadata.modelProfileId === 'string' ? turnMessage.metadata.modelProfileId : undefined
+  }
+
+  /**
+   * Decides the speaking roster for one group turn.
+   *
+   * A planner failure must not cost the user their turn: the meeting falls
+   * back to the whole room speaking concurrently, which is the same roster the
+   * old sequential loop used and strictly faster than it.
+   */
+  async #planGroupTurn(
+    input: GroupConversationInput,
+    employees: readonly EmployeeInstance[],
+    session: WorkSession,
+  ): Promise<GroupTurnPlan> {
+    const candidates: GroupTurnCandidate[] = employees.map((employee) => {
+      const revision = this.#store.getEmployeeRevision(employee.id, employee.currentRevision)
+      return {
+        employeeId: employee.id,
+        displayName: employee.displayName,
+        ...(employee.role === undefined ? {} : { role: employee.role }),
+        ...(revision === undefined ? {} : { skillIds: revision.skillGrants }),
+      }
+    })
+    const planInput = {
+      workspaceId: input.workspaceId,
+      worldId: input.worldId,
+      sessionId: session.id,
+      prompt: input.prompt,
+      candidates,
+      collaborationMode: (input.collaborationMode ?? session.collaborationMode ?? 'discussion') as 'discussion' | 'task',
+    }
+    try {
+      return normalizeGroupTurnPlan(await this.#groupTurnPlanner.plan(planInput), candidates)
+    } catch {
+      return normalizeGroupTurnPlan(
+        { waves: [{ speakers: candidates.map((candidate) => ({ employeeId: candidate.employeeId })) }], source: 'heuristic', rationale: '调度器不可用，全体并发发言' },
+        candidates,
+      )
     }
   }
 
@@ -1201,6 +1335,15 @@ export class ConversationOrchestrator implements AsyncDisposable {
     reasoningEffort?: Exclude<ReasoningEffort, 'auto'>
     permissionMode?: AgentPermissionMode
     clientTurnId?: string
+    /**
+     * Model for this character's run, overriding the turn-wide one.
+     *
+     * Without it the profile is read from the turn's own user message, which
+     * is one value for the whole turn — so a group collapsed every character
+     * onto whichever model the composer had selected, silently discarding
+     * their individual assignments.
+     */
+    modelProfileId?: string
   }): Promise<AgentReply> {
     const {
       session,
@@ -1237,8 +1380,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
       throw new AgentTurnInterruptedError(employee.id)
     }
     const traceTurnId = agentRun.id
-    const turnMessage = this.#store.listMessages(session.id).find((message) => message.metadata.workTurnId === workTurn.id && message.kind === 'user')
-    const modelProfileId = typeof turnMessage?.metadata.modelProfileId === 'string' ? turnMessage.metadata.modelProfileId : undefined
+    const modelProfileId = input.modelProfileId ?? this.#turnModelProfileId(session.id, workTurn.id)
     let responsePersisted = false
     const pendingAssistantMessages: PendingAssistantMessage[] = []
     let failedTurn = false
@@ -1574,15 +1716,16 @@ export class ConversationOrchestrator implements AsyncDisposable {
     ) {
       throw new ConversationOrchestrationError('Group session is unavailable')
     }
-    const existingIds = this.#store.listParticipants(session.id)
+    const existingIds = new Set(this.#store.listParticipants(session.id)
       .filter((participant) => participant.kind === 'employee')
-      .map((participant) => participant.participantId)
-      .sort()
-    const requestedIds = [...employeeIds].sort()
-    if (
-      existingIds.length !== requestedIds.length ||
-      existingIds.some((participantId, index) => participantId !== requestedIds[index])
-    ) {
+      .map((participant) => participant.participantId))
+    // A subset may speak. Requiring the request to name every member made
+    // participation a property of the membership list, so a five-character
+    // room had to run five characters for "@小刘 看下这个" — and no planner
+    // could ever narrow it, because the narrowed roster was rejected here.
+    // Naming someone who is not in the room stays an error.
+    const outsiders = employeeIds.filter((employeeId) => !existingIds.has(employeeId))
+    if (outsiders.length > 0) {
       throw new ConversationOrchestrationError('Group session participants do not match')
     }
     return session
@@ -1781,16 +1924,31 @@ function coordinatorPrompt(
   ].join('\n\n')
 }
 
-function groupPrompt(original: string, replies: readonly AgentReply[]): string {
+function groupPrompt(original: string, replies: readonly AgentReply[], brief?: string): string {
+  // Every sibling prompt builder caps a quoted statement; this one used to
+  // inline `reply.content` whole, so the last speaker of a large room carried
+  // the full text of everyone before it and the prompt grew quadratically
+  // across the turn.
   const context = replies.length
-    ? replies.map((reply) => `${reply.displayName}：${reply.content}`).join('\n\n')
+    ? replies.map((reply) => `${reply.displayName}：${compactPeerStatement(reply.content)}`).join('\n\n')
     : '尚无其他角色发言。'
   return [
     '你正在参加同一世界内的多角色协作会话。请只以你自己的身份和专业立场发言。',
     `用户请求：\n${original}`,
     `此前角色的真实发言：\n${context}`,
+    // A brief is the planner's words, not the user's. Marking it keeps a
+    // character from answering the routing note as if it were the request.
+    ...(brief === undefined || brief === '' ? [] : [`本轮请你重点负责（由调度给出，不是用户原话）：\n${brief}`]),
     '请回应请求以及此前发言中的具体观点；说明你补充、同意或反对什么。不要替其他角色总结成他们没有说过的话。',
   ].join('\n\n')
+}
+
+function planEventPayload(plan: GroupTurnPlan): JsonObject {
+  return {
+    source: plan.source,
+    ...(plan.rationale === undefined ? {} : { rationale: plan.rationale }),
+    waves: plan.waves.map((wave) => wave.speakers.map((speaker) => speaker.employeeId)),
+  }
 }
 
 function runtimeMetadata(event: AgentRuntimeEvent): JsonObject {
