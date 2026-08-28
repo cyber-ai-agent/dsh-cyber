@@ -1,4 +1,4 @@
-import { mkdtemp } from 'node:fs/promises'
+import { mkdtemp, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -104,6 +104,136 @@ async function chat(origin: string, worldId: string, employeeId: string, permiss
     ...(permissionMode === undefined ? {} : { permissionMode }),
   }))
 }
+
+/** Grants or revokes a World Permission the way the owner's UI does. */
+async function setWorldPermissions(
+  origin: string,
+  worldId: string,
+  employeeId: string,
+  permissions: string[],
+  role: 'member' | 'administrator' = 'member',
+) {
+  const result = await json(origin, `/api/worlds/${worldId}/authorities/${employeeId}`, send('PUT', {
+    role,
+    permissionGrants: permissions,
+    reason: 'file-permission-test',
+  }))
+  expect(result.response.status).toBe(200)
+}
+
+describe('the World file permissions the owner can see and toggle', () => {
+  it('lets the owner edit permissions in a world that has no administrator', async () => {
+    const { origin, world, characterId } = await start()
+    const result = await json(origin, `/api/worlds/${world.id}/authorities/${characterId}`, send('PUT', {
+      role: 'member',
+      permissionGrants: ['world.files.read', 'world.files.write'],
+      reason: 'no-administrator-world',
+    }))
+    // The bootstrapped world has no administrator, and the store refused every
+    // authority write in that state — as a generic 500. Only a write that
+    // removes the last administrator breaks the invariant.
+    expect(result.response.status).toBe(200)
+  })
+
+  it('anchors a character whose read permission the owner revoked', async () => {
+    const { origin, runtime, world, characterId } = await start()
+    await setWorldPermissions(origin, world.id, characterId, ['world.files.read', 'world.files.write'])
+    await setWorldPermissions(origin, world.id, characterId, [])
+    await chat(origin, world.id, characterId)
+
+    const turn = runtime.turns.at(-1)!
+    // The owner can revoke 读取当前世界文件 in the roster, or say "取消小读的读
+    // 文件权限" in chat. It was recorded, audited and reported as done while
+    // the runtime kept receiving the world's real files.
+    expect(turn.workspacePath).toContain('restricted-workspace')
+    expect(await readdir(turn.workspacePath)).toEqual([])
+  })
+
+  it('keeps a character whose write permission the owner revoked out of write mode', async () => {
+    const { origin, runtime, world, characterId } = await start()
+    await setDefaultPermission(origin, characterId, 'workspace-write')
+    await setWorldPermissions(origin, world.id, characterId, ['world.files.read', 'world.files.write'])
+    await setWorldPermissions(origin, world.id, characterId, ['world.files.read'])
+    await chat(origin, world.id, characterId)
+
+    const turn = runtime.turns.at(-1)!
+    expect(turn.workspacePath).not.toContain('restricted-workspace')
+    expect(turn.permissionMode).toBe('read-only')
+  })
+
+  it('restores access when the owner grants the permission back', async () => {
+    const { origin, runtime, world, characterId } = await start()
+    await setWorldPermissions(origin, world.id, characterId, ['world.files.read'])
+    await setWorldPermissions(origin, world.id, characterId, [])
+    await setWorldPermissions(origin, world.id, characterId, ['world.files.read'])
+    await chat(origin, world.id, characterId)
+
+    // The ledger still holds the removal. What decides is the current grant.
+    expect(runtime.turns.at(-1)!.workspacePath).not.toContain('restricted-workspace')
+  })
+
+  it('leaves a character nobody ever said anything about alone', async () => {
+    const { origin, server, runtime, world, characterId } = await start()
+    // Recruiting has always written an empty grant set, so absence is not a
+    // decision. Reading it as one would lock every existing character out of
+    // its own world on the first start after an upgrade.
+    // Recruiting derives the grants its runtime mode implies, and nothing has
+            // ever been taken away.
+    expect(server.store.wasWorldCharacterPermissionRevoked(world.id, characterId, 'world.files.read')).toBe(false)
+    await chat(origin, world.id, characterId)
+
+    expect(runtime.turns.at(-1)!.workspacePath).not.toContain('restricted-workspace')
+  })
+
+  it('takes effect on a session that is already running', async () => {
+    const { origin, runtime, world, characterId } = await start()
+    await setWorldPermissions(origin, world.id, characterId, ['world.files.read'])
+    await chat(origin, world.id, characterId)
+    expect(runtime.turns.at(-1)!.workspacePath).not.toContain('restricted-workspace')
+
+    await setWorldPermissions(origin, world.id, characterId, [])
+    await chat(origin, world.id, characterId)
+
+    // A revocation the owner has to restart the app to enforce is not a
+    // revocation. The runtime's cwd is fixed when its process starts, so the
+    // lane has to be recycled when the workspace changes underneath it.
+    expect(runtime.turns.at(-1)!.workspacePath).toContain('restricted-workspace')
+  })
+
+  it('does not let a revoked read be escalated around with a host grant', async () => {
+    const { origin, server, runtime, world, characterId } = await start()
+    const session = server.store.createSession({
+      workspaceId: world.workspaceId,
+      worldId: world.id,
+      kind: 'direct',
+      title: '越权测试',
+      participants: [{ participantId: 'owner', kind: 'owner' }, { participantId: characterId, kind: 'employee' }],
+    })
+    await setWorldPermissions(origin, world.id, characterId, ['world.files.read'])
+    await setWorldPermissions(origin, world.id, characterId, [])
+    const issued = await json(origin, `/api/worlds/${world.id}/runtime-access-grants`, send('POST', {
+      scope: 'session',
+      sessionId: session.id,
+      employeeIds: [characterId],
+      confirmed: true,
+    }))
+    expect(issued.response.status).toBe(201)
+
+    await json(origin, `/api/worlds/${world.id}/chat`, send('POST', {
+      prompt: '你好',
+      employeeIds: [characterId],
+      sessionId: session.id,
+      permissionMode: 'danger-full-access',
+      clientTurnId: 'turn-escalate',
+      runtimeAccessGrantId: issued.body.grant.id,
+    }))
+
+    // Two explicit owner decisions; the one about this world's files is the
+    // specific one. Undoing it means granting the permission back.
+    expect(runtime.turns.at(-1)!.permissionMode).toBe('read-only')
+    expect(runtime.turns.at(-1)!.workspacePath).toContain('restricted-workspace')
+  })
+})
 
 describe('role runtime access', () => {
   it('defaults a role to read-only in the real World workspace', async () => {

@@ -71,7 +71,11 @@ describe('SqliteStore', () => {
     })
 
     expect(store.getWorld(world.id)?.administratorEmployeeId).toBeUndefined()
-    expect(store.getWorldCharacterAuthority(world.id, employee.id)).toMatchObject({ role: 'member', permissionGrants: [] })
+    // A recruited character starts with the file grants its runtime permission
+    // mode implies. An empty set was what made world.files.* unenforceable:
+    // the owner could see and revoke a permission nothing was ever checking.
+    expect(store.getWorldCharacterAuthority(world.id, employee.id))
+      .toMatchObject({ role: 'member', permissionGrants: ['world.files.read'] })
     expect(revision.runtimePermissionMode).toBe('read-only')
     expect(revision.revision).toBe(2)
     expect(store.getEmployee(employee.id)?.currentRevision).toBe(2)

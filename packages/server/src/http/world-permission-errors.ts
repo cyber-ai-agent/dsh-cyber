@@ -27,6 +27,12 @@ export function mapPermissionDecisionError(error: unknown): Error {
   if (error instanceof WorldPermissionGrantRejectedError) {
     return new HttpError(409, 'world_permission_grant_rejected', error.message)
   }
+  // The store raises this one as a bare PersistenceError whose message is the
+  // code. Unmapped it reached the client as a generic 500, which tells the
+  // owner nothing about the one action that would unblock them.
+  if (error instanceof Error && error.message === 'last_world_administrator') {
+    return new HttpError(409, 'last_world_administrator', '当前世界至少需要保留一名管理员，请先将另一名角色设为管理员。')
+  }
   const code = error instanceof Error ? (error as Error & { code?: unknown }).code : undefined
   if (code === 'world_permission_request_expired') {
     return new HttpError(409, 'world_permission_request_expired', '世界权限请求已过期')

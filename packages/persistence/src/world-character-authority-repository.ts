@@ -120,6 +120,30 @@ export class WorldCharacterAuthorityRepository {
     return authority?.permissionGrants.includes(permission) === true
   }
 
+  /**
+   * Whether the owner ever took this permission away from this character.
+   *
+   * A missing grant is not a decision: characters have been recruited with an
+   * empty grant set all along, so absence only means nobody ever said
+   * anything. A removal is recorded in the append-only ledger, and that is a
+   * decision — the difference between "never mentioned" and "revoked".
+   *
+   * Re-granting is handled by the caller reading the current grant list: a
+   * permission that came back is present there, whatever the ledger holds.
+   */
+  wasPermissionRevoked(worldId: string, employeeId: string, permission: WorldCharacterPermission): boolean {
+    if (!isKnownPermission(permission)) return false
+    const row = this.#database
+      .prepare(
+        `SELECT 1 FROM world_authority_changes change,
+                json_each(change.removed_permissions_json) removed
+         WHERE change.world_id = ? AND change.employee_id = ? AND removed.value = ?
+         LIMIT 1`,
+      )
+      .get(worldId, employeeId, permission)
+    return row !== undefined
+  }
+
   save(input: SaveWorldCharacterAuthorityInput): WorldCharacterAuthority {
     assertRole(input.role)
     const employee = this.#assertEmployeeInWorld(input.worldId, input.employeeId)

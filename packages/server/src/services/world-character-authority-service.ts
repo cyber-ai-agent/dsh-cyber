@@ -44,6 +44,17 @@ export class WorldCharacterAuthorityService {
     return this.#store.listWorldCharacterAuthorities(worldId)
   }
 
+  /**
+   * Whether the owner ever revoked this permission from this character.
+   *
+   * A missing grant is not a decision — characters are recruited with grants
+   * nobody has spoken about yet. A removal in the append-only ledger is.
+   */
+  wasPermissionRevoked(worldId: string, employeeId: string, permission: WorldCharacterPermission): boolean {
+    if (!isKnownPermission(permission)) return false
+    return this.#store.wasWorldCharacterPermissionRevoked(worldId, employeeId, permission)
+  }
+
   hasPermission(worldId: string, employeeId: string, permission: WorldCharacterPermission): boolean {
     if (!isKnownPermission(permission)) return false
     const employee = this.#store.getEmployee(employeeId)
