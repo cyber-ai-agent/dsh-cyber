@@ -8,6 +8,7 @@ import type { SqliteStore } from '@dsh-cyber/persistence'
 import type { CharacterSkillAdapterRegistry } from '../skills/skill-adapter.js'
 import type { WorldCharacterAuthority } from '@dsh-cyber/contracts/world-authority'
 import type { WorldAuthorityPort } from './world-permission-request-service.js'
+import type { CharacterMemoryContextPort } from './employee-conversation-memory-service.js'
 import {
   availableWorldSkillIds,
   type WorldSkillAvailabilityPort,
@@ -24,6 +25,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
   readonly #skills: Pick<CharacterSkillAdapterRegistry, 'instructionsFor'> | undefined
   readonly #authority: Pick<WorldAuthorityPort, 'get'> | undefined
   readonly #skillAvailability: WorldSkillAvailabilityPort | undefined
+  readonly #memory: CharacterMemoryContextPort | undefined
 
   constructor(
     inner: AgentRuntimePort,
@@ -31,12 +33,14 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
     skills?: Pick<CharacterSkillAdapterRegistry, 'instructionsFor'>,
     authority?: Pick<WorldAuthorityPort, 'get'>,
     skillAvailability?: WorldSkillAvailabilityPort,
+    memory?: CharacterMemoryContextPort,
   ) {
     this.#inner = inner
     this.#store = store
     this.#skills = skills
     this.#authority = authority
     this.#skillAvailability = skillAvailability
+    this.#memory = memory
   }
 
   async runTurn(request: AgentTurnRequest) {
@@ -69,9 +73,19 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
         )
       : composeWorldAuthorityPersona(profiledPersona, currentAuthority)
     const runtimePersona = composeConversationPermissionPersona(persona, request.permissionMode ?? 'read-only')
+    const memoryContext = await this.#memory?.compose({
+      employeeId: agent.id,
+      conversationId: request.conversationId,
+      prompt: request.prompt,
+    })
+    const prompt = memoryContext === undefined
+      ? request.prompt
+      : `${memoryContext}\n\n[当前请求]\n${request.prompt}`
+
     return await this.#inner.runTurn({
       ...request,
       agent,
+      prompt,
       revision: {
         ...revision,
         // Keep historical unavailable grants durable, but do not expose them
