@@ -18,6 +18,7 @@ await Promise.all([
   import('./i18n/appearance-messages.js'),
   import('./i18n/workshop-messages.js'),
   import('./i18n/settings-model-messages.js'),
+  import('./i18n/group-turn-messages.js'),
   import('./i18n/world-settings-messages.js'),
   import('./i18n/knowledge-messages.js'),
 ])
