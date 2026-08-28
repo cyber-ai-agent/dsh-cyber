@@ -11,7 +11,7 @@ import {
   UserCircle,
   X,
 } from '@phosphor-icons/react'
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { WORLD_CHARACTER_MANAGEMENT_PERMISSIONS, type ChatAttachment, type CompletionJob, type InstalledPluginCommand, type JsonObject, type LocalAssetMimeType, type ModelAssignment, type ModelProfile, type WorkMessage, type WorkSession, type World, type WorldCharacterPermission, type WorldPermissionDecisionScope, type WorldPermissionRequest } from '@dsh-cyber/contracts'
 
 import { api } from '../api.js'
@@ -118,6 +118,43 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
   const hasRunningTurn = queueItems.some((turn) => turn.status === 'running' || turn.status === 'waiting-approval' || turn.status === 'stopping')
   const hasQueueActions = pendingCount > 0 || queuedCount > 0 || queueItems.some((turn) => turn.status === 'running' || turn.status === 'waiting-approval' || turn.status === 'queued')
 
+  /**
+   * The model a given character would actually run on.
+   *
+   * Mirrors the host's own resolution order (employee, then world, then
+   * workspace, then the default profile). The composer used to apply the
+   * employee step only to a private chat, so a group named one model while
+   * its characters each ran on their own.
+   */
+  const modelForEmployee = useCallback((employeeId: string | undefined) => {
+    if (employeeId !== undefined) {
+      const assigned = modelAssignments.find((item) => item.scope === 'employee' && item.scopeId === employeeId)
+      const found = assigned === undefined ? undefined : models.find((item) => item.id === assigned.modelProfileId)
+      if (found) return found
+    }
+    const worldAssigned = modelAssignments.find((item) => item.scope === 'world' && item.scopeId === world.id)
+    const world1 = worldAssigned === undefined ? undefined : models.find((item) => item.id === worldAssigned.modelProfileId)
+    if (world1) return world1
+    const worldSettingsModelId = (world as unknown as { settings?: { model?: { defaultModelProfileId?: string } } }).settings?.model?.defaultModelProfileId
+    const world2 = worldSettingsModelId === undefined ? undefined : models.find((item) => item.id === worldSettingsModelId)
+    if (world2) return world2
+    const workspaceAssigned = modelAssignments.find((item) => item.scope === 'workspace')
+    const workspace = workspaceAssigned === undefined ? undefined : models.find((item) => item.id === workspaceAssigned.modelProfileId)
+    if (workspace) return workspace
+    return models.find((item) => item.isDefault) ?? models[0]
+  }, [modelAssignments, models, world])
+
+  /** Distinct models the characters of this conversation would run on. */
+  const participantModels = useMemo(() => {
+    if (conversationKind !== 'group') return []
+    const seen = new Map<string, string>()
+    for (const employee of participantEmployees) {
+      const model = modelForEmployee(employee.id)
+      if (model !== undefined) seen.set(model.id, model.modelId || model.displayName)
+    }
+    return [...seen.values()]
+  }, [conversationKind, participantEmployees, modelForEmployee])
+
   const effectiveDefaultModel = useMemo(() => {
     if (modelProfileId !== undefined) {
       return models.find((m) => m.id === modelProfileId)
@@ -152,9 +189,15 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
   }, [directEmployee?.id, modelAssignments, modelProfileId, models, world])
 
   const resolvedModelLabel = useMemo(() => {
+    // Naming one model for a room whose characters run on several was the
+    // visible half of a real bug: the composer's pick used to flatten them all
+    // onto it, and without a pick it reported a model most of them never used.
+    if (modelProfileId === undefined && participantModels.length > 1) {
+      return t('workbench.modelPerCharacter', '按角色分配（{{count}} 个模型）').replace('{{count}}', String(participantModels.length))
+    }
     if (!effectiveDefaultModel) return '未配置模型'
     return effectiveDefaultModel.modelId || effectiveDefaultModel.displayName
-  }, [effectiveDefaultModel])
+  }, [effectiveDefaultModel, modelProfileId, participantModels, t])
 
   useEffect(() => {
     const container = scrollRef.current
