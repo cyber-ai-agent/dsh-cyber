@@ -23,4 +23,10 @@ describe('World Scene ownership guard', () => {
     expect(world).toContain('aria-label="世界场景"')
     expect(world).toContain('WorldSceneDialog')
   })
+
+  it('renders the World dock as a full spatial scene instead of an actor-only shared Skin overlay', () => {
+    const world = readFileSync(join(worldSourceRoot, 'WorldRuntimeDock.tsx'), 'utf8')
+    expect(world).not.toContain('world-runtime-dock--shared-scene')
+    expect(world).not.toMatch(/\bsharedScene\b/)
+  })
 })
