@@ -89,10 +89,17 @@ async function runQueuedGroup(
   if (turn === undefined || session === undefined || message === undefined || session.kind !== 'group') {
     throw new Error('Queued group conversation is unavailable')
   }
+  // WorkSession membership and runtime reservation are intentionally different
+  // concepts. The session continues to contain everyone in the room, while the
+  // queue row reserves lanes only for the employees selected by the persisted
+  // plan. Orchestrator validates the former and executes the latter through the
+  // seeded discussion plan / task assignments.
+  const participantIds = stringArray(message.metadata.participantIds)
+  const groupEmployeeIds = participantIds.length >= 2 ? participantIds : entry.employeeIds
   const prompt = message.content
   const executionPrompt = attachmentAwareQueuedPrompt(prompt, message.metadata)
   const transformedPrompt = await applyInstalledPromptTransforms(await options.worldPackages.listRuntimePackages(entry.worldId), executionPrompt)
-  const actions = preparedActions ?? await prepareGroupSkillActions(entry, executionPrompt, options.skillRuntime)
+  const actions = preparedActions ?? await prepareGroupSkillActions(entry, executionPrompt, options.skillRuntime, message.metadata)
   if (actions.some((action) => action.status === 'waiting-for-approval')) {
     options.store.waitWorkTurnForApproval(entry.workTurnId)
     return { waitingForApproval: true }
@@ -104,7 +111,7 @@ async function runQueuedGroup(
     return { result: await options.groupTasks.run({
       workspaceId: entry.workspaceId,
       worldId: entry.worldId,
-      employeeIds: entry.employeeIds,
+      employeeIds: groupEmployeeIds,
       prompt,
       transformedPrompt: factualPrompt,
       metadata: message.metadata,
@@ -129,7 +136,7 @@ async function runQueuedGroup(
   return { result: await options.orchestrator.group({
     workspaceId: entry.workspaceId,
     worldId: entry.worldId,
-    employeeIds: entry.employeeIds,
+    employeeIds: groupEmployeeIds,
     prompt,
     metadata: message.metadata,
     collaborationMode: 'discussion',
@@ -146,14 +153,23 @@ async function runQueuedGroup(
  * the first matching action in room order, which meant an unrelated first
  * member could perform the browser/audio/etc action for the employee who was
  * actually assigned the work. Total actions stay bounded for cost/safety.
+ *
+ * In task mode a coordinator may be reserved only so it can synthesize the
+ * final answer. It must not steal an external action from a step assignee, so
+ * persisted task routing narrows action preparation to actual step owners.
  */
 async function prepareGroupSkillActions(
   entry: ConversationQueueEntry,
   prompt: string,
   skillRuntime: Pick<CharacterSkillRuntime, 'prepare'>,
+  metadata: JsonObject,
 ): Promise<CharacterSkillAction[]> {
+  const taskRouting = taskRoutingFromMetadata(metadata, entry.employeeIds)
+  const actionEmployees = taskRouting === undefined
+    ? entry.employeeIds
+    : [...new Set(taskRouting.steps.flatMap((step) => step.assignedEmployeeIds))]
   const actions: CharacterSkillAction[] = []
-  for (const characterId of entry.employeeIds) {
+  for (const characterId of actionEmployees) {
     const prepared = await skillRuntime.prepare({
       workspaceId: entry.workspaceId,
       worldId: entry.worldId,
