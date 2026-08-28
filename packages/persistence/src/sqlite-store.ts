@@ -1553,12 +1553,19 @@ export class SqliteStore {
       if (!sameAuthority(current, input.expectedAuthority)) {
         throw new PersistenceError('World authority changed concurrently; reload before retrying')
       }
+      const adminsBefore = this.#worldAuthorities.listActive(input.authority.worldId)
+        .filter((authority) => authority.role === 'administrator').length
       const updated = this.#worldAuthorities.save(input.authority)
       const activeEmployees = this.listEmployees(input.authority.worldId)
         .filter((employee) => employee.status !== 'archived')
       const activeAdmins = this.#worldAuthorities.listActive(input.authority.worldId)
         .filter((authority) => authority.role === 'administrator')
-      if (activeEmployees.length > 0 && activeAdmins.length === 0) {
+      // Only a write that *removes* the last administrator breaks the
+      // invariant. Refusing every edit in a world that already had none
+      // punished the wrong write: a world with no administrator could not have
+      // a single permission changed, and the refusal surfaced as a generic
+      // server error rather than something the owner could act on.
+      if (adminsBefore > 0 && activeEmployees.length > 0 && activeAdmins.length === 0) {
         throw new PersistenceError('last_world_administrator')
       }
       this.#worldAuthorities.appendChange(input.audit)
@@ -1594,6 +1601,15 @@ export class SqliteStore {
     permission: import('@dsh-cyber/contracts').WorldCharacterPermission,
   ): boolean {
     return this.#worldAuthorities.hasPermission(worldId, employeeId, permission)
+  }
+
+  /** Whether the owner ever revoked this permission from this character. */
+  wasWorldCharacterPermissionRevoked(
+    worldId: string,
+    employeeId: string,
+    permission: import('@dsh-cyber/contracts').WorldCharacterPermission,
+  ): boolean {
+    return this.#worldAuthorities.wasPermissionRevoked(worldId, employeeId, permission)
   }
 
   createWorldPermissionRequest(
@@ -1869,7 +1885,14 @@ export class SqliteStore {
         worldId: world.id,
         employeeId: employee.id,
         role: 'member',
-        permissionGrants: [],
+        // Derived from the runtime mode the character was recruited with, the
+        // same rule the legacy backfill uses. Recruiting used to leave the row
+        // empty, which is what made these permissions unenforceable: turning
+        // them into a real gate would have locked every new character out of
+        // its own world's files on day one.
+        permissionGrants: revision.runtimePermissionMode === 'read-only'
+          ? ['world.files.read']
+          : ['world.files.read', 'world.files.write'],
         createdAt: now,
         updatedAt: now,
       })

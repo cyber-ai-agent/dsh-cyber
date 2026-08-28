@@ -83,6 +83,8 @@ interface EmployeeLane {
   id: string
   conversationId: string
   permissionMode: AgentPermissionMode | undefined
+  /** The directory this lane's runtime was started in. */
+  workspacePath: string | undefined
   runtime: HarnessRuntime | undefined
   agentSessionId: string | undefined
   current: LaneTask | undefined
@@ -196,7 +198,15 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     const profile = await this.#getProfile()
     assertLaneTaskActive(task)
     const permissionMode = request.permissionMode ?? 'read-only'
-    if (lane.permissionMode !== undefined && lane.permissionMode !== permissionMode) {
+    const workspacePath = resolve(request.workspacePath)
+    // The cwd is fixed when the runtime process starts, so a lane that keeps
+    // running after the owner revokes a file permission would keep the
+    // directory it was given. Both halves of the sandbox have to invalidate
+    // the lane, not just the permission mode.
+    if (
+      (lane.permissionMode !== undefined && lane.permissionMode !== permissionMode) ||
+      (lane.workspacePath !== undefined && lane.workspacePath !== workspacePath)
+    ) {
       // Permission is lane-local. Changing a private chat from read-only to
       // workspace-write must not tear down the same employee's group lane.
       await lane.runtime?.close()
@@ -210,7 +220,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
         employee: request.employee,
         revision: request.revision,
         profile,
-        workspacePath: resolve(request.workspacePath),
+        workspacePath,
         sessionsRoot: join(resolve(this.#options.stateRoot), 'harness-sessions', request.employee.id, 'lanes', lane.id),
         permissionMode,
         conversationId,
@@ -222,6 +232,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
         throw new Error('Employee runtime closed')
       }
       lane.permissionMode = permissionMode
+      lane.workspacePath = workspacePath
       lane.runtime = runtime
     }
     // DSH 0.1.1-rc.1 cannot resume a named session whose JSONL log was created
@@ -296,6 +307,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       id: randomUUID().replaceAll('-', ''),
       conversationId,
       permissionMode: undefined,
+      workspacePath: undefined,
       runtime: undefined,
       agentSessionId: undefined,
       current: undefined,
