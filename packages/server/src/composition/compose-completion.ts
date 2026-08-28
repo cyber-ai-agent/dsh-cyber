@@ -1,12 +1,12 @@
 import type { SqliteStore } from '@dsh-cyber/persistence'
 import { CompletionWorker } from '../services/completion-worker.js'
-import type { EmployeeConversationMemoryService } from '../services/employee-conversation-memory-service.js'
+import { EmployeeConversationMemoryService } from '../services/employee-conversation-memory-service.js'
 import type { WorldArtifactService } from '../services/world-artifact-service.js'
 
 export function composeCompletionWorker(
   store: SqliteStore,
   artifacts: WorldArtifactService,
-  memory?: EmployeeConversationMemoryService,
+  memory: EmployeeConversationMemoryService = new EmployeeConversationMemoryService(store),
 ): CompletionWorker {
   return new CompletionWorker({
     store,
@@ -28,7 +28,7 @@ export function composeCompletionWorker(
         // Memory is an employee-owned projection of already committed chat
         // facts. The source-message dedupe in the service makes this safe when
         // the durable completion job retries after a crash.
-        await memory?.rememberCompletedRun({
+        await memory.rememberCompletedRun({
           employeeId,
           sessionId: job.sessionId,
           workTurnId: job.workTurnId,
