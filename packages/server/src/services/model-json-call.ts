@@ -83,6 +83,11 @@ export class ModelJsonCall {
         headers,
         body: JSON.stringify(requestBody(profile, prompt, this.#maxOutputTokens)),
         signal: controller.signal,
+        // The base URL was checked against the SSRF policy; a followed
+        // redirect would not be, and fetch re-sends Authorization and
+        // x-api-key with it. A model endpoint has no legitimate reason to
+        // bounce a completion.
+        redirect: 'manual',
       })
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
@@ -91,6 +96,9 @@ export class ModelJsonCall {
       throw new ServiceError('unavailable', 'model_call_unreachable', '无法连接模型服务。')
     } finally {
       clearTimeout(timeout)
+    }
+    if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
+      throw new ServiceError('unavailable', 'model_call_redirected', '模型接口发生了重定向，已拒绝以避免凭证外泄。', response.status)
     }
     if (!response.ok) {
       throw new ServiceError('unavailable', 'model_call_upstream_error', '模型服务返回了错误。', response.status)

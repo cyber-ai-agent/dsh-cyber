@@ -60,8 +60,6 @@ import { EmployeeActivityProjectionService } from './services/employee-activity-
 import { harnessModelRoute } from './services/harness-model-route.js'
 import { ModelCatalogService } from './services/model-catalog-service.js'
 import { ModelCredentialService } from './services/model-credential-service.js'
-import { ModelGroupTurnPlanner } from './services/model-group-turn-planner.js'
-import { ModelJsonCall } from './services/model-json-call.js'
 import { ModelInteractionService, TurnInteractionLoggingRuntime } from './services/model-interaction-service.js'
 import { HarnessToolApprovalService } from './services/harness-tool-approval-service.js'
 import { PeerCollaborationService } from './services/peer-collaboration-service.js'
@@ -74,6 +72,7 @@ import { WorldAccessService } from './services/world-access-service.js'
 import type { WorkSystemService } from './services/work-system-service.js'
 import { composeWorkSystem } from './composition/compose-work-system.js'
 import { composeCompletionWorker } from './composition/compose-completion.js'
+import { composeGroupTurnPlanner } from './composition/compose-group-turn-planner.js'
 import { refreshMcpCatalog } from './composition/mcp-lifecycle.js'
 import { WorldArtifactService } from './services/world-artifact-service.js'
 import { WorldAmbientSlotResolver } from './services/world-ambient-slot-resolver.js'
@@ -292,14 +291,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     resolveRoute(request) { return resolveHarnessRoute(store, request) },
   })
   const completionWorker = composeCompletionWorker(store, worldArtifacts)
-  const groupTurnPlanner = options.groupTurnPlanner ?? new ModelGroupTurnPlanner({
-    store,
-    // Routing runs before anyone speaks, so its timeout is the floor on how
-    // long a group turn can appear frozen. A short budget is the point: a
-    // slow or dead endpoint has to degrade to the deterministic roster
-    // quickly, not hold the room for the full model timeout.
-    call: new ModelJsonCall({ credentials, timeoutMs: 6_000, maxOutputTokens: 512 }),
-  })
+  const groupTurnPlanner = options.groupTurnPlanner ?? composeGroupTurnPlanner(store, credentials)
   const orchestrator = new ConversationOrchestrator({
     store,
     runtime,

@@ -61,15 +61,27 @@ export interface GroupTurnPlannerPort {
 }
 
 /**
- * Total speaking slots in one turn.
+ * Total speaking slots an authored plan may ask for.
  *
  * A planner is allowed to let a character speak in more than one wave (opine,
  * then synthesise), but a turn still has to terminate and stay affordable, so
- * the total is capped rather than the per-character count.
+ * the total is capped rather than the per-character count. This bounds
+ * *authored* plans, which may come from a model; it is not applied to the
+ * room's own membership, where dropping a member would silence somebody the
+ * user put in the conversation.
  */
 const MAX_SPEAKING_SLOTS = 8
 const MAX_WAVES = 3
 const MAX_BRIEF_CHARS = 240
+
+/**
+ * Speakers started at once when the whole room has the floor.
+ *
+ * Concurrency still has to be bounded — a thirty-character room would open
+ * thirty runtimes — but the bound belongs on how many run together, not on how
+ * many are heard. A larger room becomes more waves, not a shorter guest list.
+ */
+const MAX_CONCURRENT_SPEAKERS = 6
 
 /**
  * Makes any plan safe to execute.
@@ -120,8 +132,15 @@ function everyoneAtOnce(
   source: GroupTurnPlanSource,
   rationale?: string,
 ): GroupTurnPlan {
+  const waves: GroupTurnWave[] = []
+  for (let index = 0; index < candidates.length; index += MAX_CONCURRENT_SPEAKERS) {
+    waves.push({
+      speakers: candidates.slice(index, index + MAX_CONCURRENT_SPEAKERS)
+        .map((candidate) => ({ employeeId: candidate.employeeId })),
+    })
+  }
   return {
-    waves: [{ speakers: candidates.slice(0, MAX_SPEAKING_SLOTS).map((candidate) => ({ employeeId: candidate.employeeId })) }],
+    waves: waves.length === 0 ? [{ speakers: [] }] : waves,
     source,
     ...(rationale === undefined ? {} : { rationale }),
   }
@@ -138,19 +157,14 @@ function everyoneAtOnce(
  */
 export class HeuristicGroupTurnPlanner implements GroupTurnPlannerPort {
   async plan(input: GroupTurnPlanInput): Promise<GroupTurnPlan> {
+    // Both rosters are built from `candidates` themselves, so they cannot name
+    // an unknown character and do not need the authored-plan slot cap — which
+    // would silently drop members of a large room.
     const addressed = mentionedCandidates(input.prompt, input.candidates)
     if (addressed.length > 0) {
-      return normalizeGroupTurnPlan({
-        waves: [{ speakers: addressed.map((candidate) => ({ employeeId: candidate.employeeId })) }],
-        source: 'heuristic',
-        rationale: `点名了 ${addressed.map((candidate) => candidate.displayName).join('、')}`,
-      }, input.candidates)
+      return everyoneAtOnce(addressed, 'heuristic', `点名了 ${addressed.map((candidate) => candidate.displayName).join('、')}`)
     }
-    return normalizeGroupTurnPlan({
-      waves: [{ speakers: input.candidates.map((candidate) => ({ employeeId: candidate.employeeId })) }],
-      source: 'heuristic',
-      rationale: '未点名，全体并发发言',
-    }, input.candidates)
+    return everyoneAtOnce(input.candidates, 'heuristic', '未点名，全体并发发言')
   }
 }
 

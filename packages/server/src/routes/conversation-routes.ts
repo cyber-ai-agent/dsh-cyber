@@ -274,6 +274,10 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
       ...(clientTurnId === undefined ? {} : { clientTurnId }),
       ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
       ...(modelProfileId === undefined ? {} : { modelProfileId }),
+      // Durable, because a queued turn is rebuilt from this message minutes
+      // later by a different code path. A routing decision that lives only in
+      // the request object is lost the moment the turn is enqueued.
+      ...(modelProfileIds === undefined ? {} : { modelProfileIds }),
     }
     if (requestedCollaborationMode !== undefined) metadata.collaborationMode = requestedCollaborationMode
     const title = optionalString(body.title)

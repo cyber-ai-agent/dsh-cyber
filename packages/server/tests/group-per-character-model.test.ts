@@ -144,6 +144,51 @@ describe('a group turn routes each character to its own model', () => {
     expect(routed.get(employees[1]!.id)).toBeUndefined()
   })
 
+  it('carries the map through the durable queue, which is the path the web client uses', async () => {
+    const { origin, runtime, world, employees, fast, deep } = await start()
+
+    const chat = await json(origin, `/api/worlds/${world.id}/chat`, send('POST', {
+      prompt: '一起看下这个方案',
+      employeeIds: employees.map((employee) => employee.id),
+      queueMode: 'normal',
+      modelProfileIds: {
+        [employees[0]!.id]: deep.id,
+        [employees[1]!.id]: fast.id,
+      },
+    }))
+    expect(chat.response.status).toBe(202)
+
+    const deadline = Date.now() + 10_000
+    while (runtime.turns.length < 2 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+
+    const routed = new Map(runtime.turns.map((turn) => [turn.agentId, turn.modelProfileId]))
+    // A queued turn is rebuilt from the durable message by a different code
+    // path minutes later. Holding the selection only in the request object
+    // meant it applied to immediate turns and silently vanished for queued
+    // ones — and the web client queues every group turn it sends.
+    expect(routed.get(employees[0]!.id)).toBe(deep.id)
+    expect(routed.get(employees[1]!.id)).toBe(fast.id)
+  })
+
+  it('lets a per-character entry win over a turn-wide selection', async () => {
+    const { origin, runtime, world, employees, fast, deep } = await start()
+
+    const chat = await json(origin, `/api/worlds/${world.id}/chat`, send('POST', {
+      prompt: '一起看下这个方案',
+      employeeIds: employees.map((employee) => employee.id),
+      modelProfileId: fast.id,
+      modelProfileIds: { [employees[0]!.id]: deep.id },
+    }))
+    expect(chat.response.status).toBe(200)
+
+    const routed = new Map(runtime.turns.map((turn) => [turn.agentId, turn.modelProfileId]))
+    expect(routed.get(employees[0]!.id)).toBe(deep.id)
+    // The scalar is the room's default, not an override of a named character.
+    expect(routed.get(employees[1]!.id)).toBe(fast.id)
+  })
+
   it('refuses a model that belongs to another workspace', async () => {
     const { origin, world, employees, server } = await start()
     const other = server.store.createWorkspace({ name: '另一个工作区' })
