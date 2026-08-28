@@ -280,10 +280,11 @@ describe('conversation memory authority', () => {
       '小刘：回归测试还没跑完。',
       '老王：我同意延后一天。',
     ])
-    // The second speaker of the new round sees the same prior history; the
-    // statements of the round in progress arrive through the group prompt.
+    // Both speakers of the new round start from the same prior transcript: the
+    // durable history is what carries one character's statement to another,
+    // and it carries all of them, attributed, rather than only those that
+    // happened to be produced earlier in the same round.
     expect(runtime.transcriptOf(3)).toEqual(runtime.transcriptOf(2))
-    expect(runtime.calls[3]!.prompt).toContain('回归测试还没跑完。')
   })
 
   it('keeps a direct chat and a group meeting of the same character separate', async () => {

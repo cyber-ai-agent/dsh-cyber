@@ -13,7 +13,7 @@ import {
   resolveCandidateDshBin,
   type HarnessModelRoute,
 } from '@dsh-cyber/harness-adapter'
-import { ConversationOrchestrator } from '@dsh-cyber/orchestration'
+import { ConversationOrchestrator, type GroupTurnPlannerPort } from '@dsh-cyber/orchestration'
 import { LocalPackageCatalog, LocalPackageRuntime, PackageManager, type PackageRuntimePort } from '@dsh-cyber/package-runtime'
 import { SqliteStore, WorldArtifactRepository, WorldKnowledgeRepository, WorldSimulationStore } from '@dsh-cyber/persistence'
 import { dispatchHttpRequest } from './http/context.js'
@@ -60,6 +60,8 @@ import { EmployeeActivityProjectionService } from './services/employee-activity-
 import { harnessModelRoute } from './services/harness-model-route.js'
 import { ModelCatalogService } from './services/model-catalog-service.js'
 import { ModelCredentialService } from './services/model-credential-service.js'
+import { ModelGroupTurnPlanner } from './services/model-group-turn-planner.js'
+import { ModelJsonCall } from './services/model-json-call.js'
 import { ModelInteractionService, TurnInteractionLoggingRuntime } from './services/model-interaction-service.js'
 import { HarnessToolApprovalService } from './services/harness-tool-approval-service.js'
 import { PeerCollaborationService } from './services/peer-collaboration-service.js'
@@ -132,6 +134,14 @@ export interface CyberServerOptions {
   /** Optional host-owned World Skill Availability provider for PR A+. */
   skillAvailability?: WorldSkillAvailabilityPort
   workshopDraftGenerator?: CreativeWorkshopDraftGeneratorPort
+  /**
+   * Decides the speaking roster of a group turn.
+   *
+   * Defaults to {@link ModelGroupTurnPlanner}, which only spends a model call
+   * when the room is large enough for the roster to be a real question and
+   * nobody was addressed by name.
+   */
+  groupTurnPlanner?: GroupTurnPlannerPort
 }
 
 export interface CyberServerAddress { host: string; port: number; origin: string }
@@ -282,17 +292,19 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     resolveRoute(request) { return resolveHarnessRoute(store, request) },
   })
   const completionWorker = composeCompletionWorker(store, worldArtifacts)
+  const groupTurnPlanner = options.groupTurnPlanner ?? new ModelGroupTurnPlanner({
+    store,
+    call: new ModelJsonCall({ credentials }),
+  })
   const orchestrator = new ConversationOrchestrator({
     store,
     runtime,
     workspacePath: workspaceRoot,
-    // Per character, not per world: a character without world.files.read runs
-    // in an empty host-managed workspace so the permission actually means
-    // something at runtime.
     resolveWorldRoot: async (worldId, employeeId) =>
       (await worldRuntimePermissions.resolve({ worldId, employeeId })).workspacePath,
     completionJobType: 'world-artifact-publication',
     onCompletionJobQueued: () => completionWorker.wake(),
+    groupTurnPlanner,
   })
   const peerCollaboration = new PeerCollaborationService({
     store,

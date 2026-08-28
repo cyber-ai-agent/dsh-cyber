@@ -360,9 +360,10 @@ describe('Cyber local server', () => {
     expect(chat.response.status).toBe(200)
     expect(chat.body.replies).toHaveLength(2)
     expect(firstRuntime.calls).toHaveLength(2)
-    expect(firstRuntime.calls[0]?.agent.id).toBe(engineer.id)
-    expect(firstRuntime.calls[1]?.agent.id).toBe(archivist.id)
-    expect(firstRuntime.calls[1]?.prompt).toContain('开发工程师：我先建立性能基线。')
+    // Both characters were addressed, so both are in the same wave and answer
+    // at once. Neither quotes the other within the round; the transcript
+    // carries their statements into the next one.
+    expect(firstRuntime.calls.map((call) => call.agent.id).sort()).toEqual([engineer.id, archivist.id].sort())
     const sessionId = chat.body.session.id as string
     const runtimeEvents = await stream.waitForCount(12)
     stream.close()
