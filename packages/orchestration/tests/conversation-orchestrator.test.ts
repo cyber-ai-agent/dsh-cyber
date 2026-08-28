@@ -243,7 +243,7 @@ describe('ConversationOrchestrator', () => {
     expect(store.listMessages(first.session.id).every((message) => message.metadata.workTurnId !== undefined)).toBe(true)
   })
 
-  it('runs two independent agents in sequence and gives the second the first real statement', async () => {
+  it('runs the addressed characters concurrently and keeps every speaker identifiable', async () => {
     const { directory, store, workspace, company } = await setup()
     store.saveBlueprint(blueprint('tech-lead', '老王', '技术经理'))
     store.saveBlueprint(blueprint('engineer', '小刘', '软件工程师'))
@@ -273,10 +273,13 @@ describe('ConversationOrchestrator', () => {
       prompt: '讨论登录性能优化方案',
     })
 
-    expect(result.replies.map((reply) => reply.employeeId)).toEqual([lead.id, engineer.id])
-    expect(runtime.calls[0]?.agent.id).toBe(lead.id)
-    expect(runtime.calls[1]?.agent.id).toBe(engineer.id)
-    expect(runtime.calls[1]?.prompt).toContain('老王：先建立监控基线，再决定改动范围。')
+    expect(result.replies.map((reply) => reply.employeeId).sort()).toEqual([lead.id, engineer.id].sort())
+    expect(runtime.calls.map((call) => call.agent.id).sort()).toEqual([lead.id, engineer.id].sort())
+    // Nobody was addressed, so the room answers as one concurrent wave: the
+    // meeting costs one model latency instead of two, and neither character
+    // sees the other's statement of this round. They meet in the next one,
+    // through the durable transcript.
+    expect(runtime.calls.every((call) => call.prompt.includes('尚无其他角色发言。'))).toBe(true)
     expect(store.listMessages(result.session.id).filter((message) => message.kind === 'assistant')).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ senderId: lead.id }),
@@ -430,17 +433,49 @@ describe('ConversationOrchestrator', () => {
     const orchestrator = new ConversationOrchestrator({ store, runtime, workspacePath: directory })
     orchestrators.push(orchestrator)
 
+    const result = await orchestrator.group({
+      workspaceId: workspace.id, worldId: company.id, employeeIds: [lead.id, engineer.id], prompt: '执行两步检查',
+    })
+
+    // One character being unreachable used to discard the answer the other had
+    // already produced and fail the whole meeting. The surviving statement is
+    // the user's, and throwing it away helps nobody.
+    expect(result.replies.map((reply) => reply.employeeId)).toEqual([lead.id])
+    const [session] = store.listSessions(company.id)
+    const [turn] = store.listSessionTurns(session!.id)
+    expect(turn).toMatchObject({ status: 'completed' })
+    expect(store.listTurnAgentRuns(turn!.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ employeeId: lead.id, status: 'completed' }),
+      expect.objectContaining({ employeeId: engineer.id, status: 'failed' }),
+    ]))
+    // Completed-with-a-casualty is not the same as clean, and the difference
+    // has to survive into the record.
+    const finished = store.listWorldDomainEvents(company.id).find((event) => event.type === 'meeting.finished')
+    expect(finished?.payload).toMatchObject({
+      status: 'completed',
+      failedSpeakers: [expect.objectContaining({ employeeId: engineer.id })],
+    })
+  })
+
+  it('fails the meeting only when no character managed to speak', async () => {
+    const { directory, store, workspace, company } = await setup()
+    store.saveBlueprint(blueprint('lead-down', '老王', '技术经理'))
+    store.saveBlueprint(blueprint('engineer-down', '小刘', '软件工程师'))
+    const lead = store.recruitEmployee({ workspaceId: workspace.id, worldId: company.id, blueprintId: 'lead-down', blueprintVersion: 1 })
+    const engineer = store.recruitEmployee({ workspaceId: workspace.id, worldId: company.id, blueprintId: 'engineer-down', blueprintVersion: 1 })
+    const runtime: AgentRuntimePort = {
+      async runTurn() { throw new Error('runtime unavailable') },
+      async close() {},
+    }
+    const orchestrator = new ConversationOrchestrator({ store, runtime, workspacePath: directory })
+    orchestrators.push(orchestrator)
+
     await expect(orchestrator.group({
       workspaceId: workspace.id, worldId: company.id, employeeIds: [lead.id, engineer.id], prompt: '执行两步检查',
     })).rejects.toThrow('Agent model turn failed')
-
     const [session] = store.listSessions(company.id)
     const [turn] = store.listSessionTurns(session!.id)
-    expect(turn).toMatchObject({ status: 'failed', errorCode: 'runtime-unknown' })
-    expect(store.listTurnAgentRuns(turn!.id)).toEqual([
-      expect.objectContaining({ employeeId: lead.id, status: 'completed', ordinal: 1 }),
-      expect.objectContaining({ employeeId: engineer.id, status: 'failed', ordinal: 2 }),
-    ])
+    expect(turn).toMatchObject({ status: 'failed' })
   })
 
   it('interrupts one live AgentRun as interrupted and publishes a durable stop notice', async () => {

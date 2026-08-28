@@ -262,6 +262,10 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
         throw new HttpError(422, 'conversation_model_unavailable', '所选临时会话模型不存在或不属于当前工作区')
       }
     }
+    // A group is where one model for the whole turn is the wrong shape: the
+    // characters have their own assignments, and a single scalar silently
+    // collapses all of them onto whatever the composer had selected.
+    const modelProfileIds = participantModelProfileIds(body.modelProfileIds, world.workspaceId, store, employeeIds)
     const metadata: JsonObject = {
       participantIds: employeeIds,
       permissionMode,
@@ -360,6 +364,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
         prompt,
         metadata: collaborationMetadata,
         collaborationMode,
+        ...(modelProfileIds === undefined ? {} : { modelProfileIds }),
         ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
         permissionMode,
         ...(requestedSessionId === undefined ? {} : { sessionId: requestedSessionId }),
@@ -642,6 +647,40 @@ function attachmentAwarePrompt(prompt: string, attachments: ChatAttachment[]): s
 
 function chatAttachmentJson(attachment: ChatAttachment): JsonObject {
   return { assetId: attachment.assetId, name: attachment.name, mimeType: attachment.mimeType, byteLength: attachment.byteLength, url: attachment.url }
+}
+
+/**
+ * Validates a per-character model map from the composer.
+ *
+ * Every profile has to exist in this workspace and every character has to be
+ * in this turn, because the map reaches the runtime as a routing instruction:
+ * an unchecked entry would let a request run a character on a model belonging
+ * to somebody else's workspace.
+ */
+function participantModelProfileIds(
+  value: unknown,
+  workspaceId: string,
+  store: SqliteStore,
+  employeeIds: readonly string[],
+): Record<string, string> | undefined {
+  const source = record(value)
+  if (source === undefined) return undefined
+  const participants = new Set(employeeIds)
+  const resolved: Record<string, string> = {}
+  for (const [employeeId, profileId] of Object.entries(source)) {
+    if (!participants.has(employeeId)) {
+      throw new HttpError(422, 'conversation_model_unavailable', '指定模型的角色不在本次会话中')
+    }
+    if (typeof profileId !== 'string' || profileId.trim() === '') {
+      throw new HttpError(422, 'conversation_model_unavailable', '角色模型配置无效')
+    }
+    const profile = store.getModelProfile(profileId)
+    if (profile === undefined || profile.workspaceId !== workspaceId) {
+      throw new HttpError(422, 'conversation_model_unavailable', '所选角色模型不存在或不属于当前工作区')
+    }
+    resolved[employeeId] = profileId
+  }
+  return Object.keys(resolved).length === 0 ? undefined : resolved
 }
 
 function mentionedEmployeeIds(prompt: string, employees: Array<{ id: string; displayName: string }>): string[] {
