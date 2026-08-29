@@ -25,6 +25,13 @@ export interface ModelJsonCallOptions {
   resolveHostname?: ModelHostnameResolver
   timeoutMs?: number
   maxOutputTokens?: number
+  /**
+   * `native` asks OpenAI-compatible chat endpoints for JSON mode explicitly.
+   * Some compatible gateways implement ordinary chat but reject
+   * `response_format`; callers that already enforce JSON in their system prompt
+   * can use `prompt-only` without weakening response parsing on the host.
+   */
+  jsonResponseMode?: 'native' | 'prompt-only'
 }
 
 export interface ModelJsonPrompt {
@@ -45,6 +52,7 @@ export class ModelJsonCall {
   readonly #resolver: ModelHostnameResolver
   readonly #timeoutMs: number
   readonly #maxOutputTokens: number
+  readonly #jsonResponseMode: 'native' | 'prompt-only'
 
   constructor(options: ModelJsonCallOptions) {
     this.#credentials = options.credentials
@@ -52,6 +60,7 @@ export class ModelJsonCall {
     this.#resolver = options.resolveHostname ?? systemModelHostnameResolver
     this.#timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
     this.#maxOutputTokens = options.maxOutputTokens ?? 1_024
+    this.#jsonResponseMode = options.jsonResponseMode ?? 'native'
   }
 
   /** Returns the model's raw text, which the caller parses. */
@@ -81,7 +90,7 @@ export class ModelJsonCall {
       response = await this.#fetch(url, {
         method: 'POST',
         headers,
-        body: JSON.stringify(requestBody(profile, prompt, this.#maxOutputTokens)),
+        body: JSON.stringify(requestBody(profile, prompt, this.#maxOutputTokens, this.#jsonResponseMode)),
         signal: controller.signal,
         // The base URL was checked against the SSRF policy; a followed
         // redirect would not be, and fetch re-sends Authorization and
@@ -107,7 +116,12 @@ export class ModelJsonCall {
   }
 }
 
-function requestBody(profile: ModelProfile, prompt: ModelJsonPrompt, maxOutputTokens: number): Record<string, unknown> {
+function requestBody(
+  profile: ModelProfile,
+  prompt: ModelJsonPrompt,
+  maxOutputTokens: number,
+  jsonResponseMode: 'native' | 'prompt-only',
+): Record<string, unknown> {
   if (profile.api === 'anthropic-messages') {
     return {
       model: profile.modelId,
@@ -130,7 +144,7 @@ function requestBody(profile: ModelProfile, prompt: ModelJsonPrompt, maxOutputTo
     model: profile.modelId,
     temperature: 0,
     max_tokens: maxOutputTokens,
-    response_format: { type: 'json_object' },
+    ...(jsonResponseMode === 'native' ? { response_format: { type: 'json_object' } } : {}),
     messages: [{ role: 'system', content: prompt.system }, { role: 'user', content: prompt.user }],
   }
 }
