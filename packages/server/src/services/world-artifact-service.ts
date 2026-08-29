@@ -228,11 +228,14 @@ export class WorldArtifactService {
   async publishAgentRun(context: AgentRunCompletionContext): Promise<AgentRunCompletionContribution> {
     const root = await this.#roots.ensure(context.worldId)
     const workspacePath = await resolveAgentWorkspace(root, context.workspacePath)
-    if (workspacePath === undefined) return {}
+    if (workspacePath === undefined) return noArtifactContribution()
     const manifestPath = this.#roots.publicationManifestPathAt(workspacePath, context.agentRunId)
-    const manifest = await readExactManifest(workspacePath, manifestPath)
+    const manifestRead = await readExactManifest(workspacePath, manifestPath)
+    const entries = manifestRead.found
+      ? manifestRead.manifest.artifacts
+      : await discoverRunArtifactEntries(workspacePath, context.runStartedAt, context.runCompletedAt)
     const artifactRefs: string[] = []
-    for (const entry of manifest.artifacts) {
+    for (const entry of entries) {
       const sourceRelativePath = normalizeRelativePath(entry.path, 'manifest path')
       const sourcePath = join(workspacePath, ...sourceRelativePath.split('/'))
       const worldRelativePath = toPosix(relative(root.filesPath, sourcePath))
@@ -264,9 +267,13 @@ export class WorldArtifactService {
       })
       artifactRefs.push(publication.artifact.id)
     }
-    return artifactRefs.length === 0 ? {} : {
+    return artifactRefs.length === 0 ? noArtifactContribution() : {
       artifactRefs: [...new Set(artifactRefs)],
-      messageMetadata: { artifactCount: artifactRefs.length },
+      messageMetadata: {
+        artifactCount: artifactRefs.length,
+        completionOutcome: 'artifacts-published',
+        artifactDiscovery: manifestRead.found ? 'manifest' : 'run-window',
+      },
     }
   }
 
@@ -474,13 +481,13 @@ export class ArtifactPublicationHook implements AgentRunCompletionHook {
   }
 }
 
-async function readExactManifest(workspacePath: string, path: string): Promise<WorldArtifactPublishManifest> {
+async function readExactManifest(workspacePath: string, path: string): Promise<{ found: boolean; manifest: WorldArtifactPublishManifest }> {
   let body: Buffer
   try {
     await assertSafeFile(workspacePath, path, WORLD_ARTIFACT_LIMITS.manifestBytes)
     body = await readFile(path)
   } catch (error) {
-    if (isMissingPath(error)) return { schemaVersion: 1, artifacts: [] }
+    if (isMissingPath(error)) return { found: false, manifest: { schemaVersion: 1, artifacts: [] } }
     throw error
   }
   if (body.byteLength > WORLD_ARTIFACT_LIMITS.manifestBytes) throw invalid('artifact_manifest_too_large', '产物 manifest 过大')
@@ -498,7 +505,47 @@ async function readExactManifest(workspacePath: string, path: string): Promise<W
     if (seenPaths.has(normalized)) throw invalid('artifact_manifest_duplicate', '产物 manifest 不得重复发布同一路径')
     seenPaths.add(normalized)
   }
-  return { schemaVersion: 1, artifacts }
+  return { found: true, manifest: { schemaVersion: 1, artifacts } }
+}
+
+function noArtifactContribution(): AgentRunCompletionContribution {
+  return { messageMetadata: { artifactCount: 0, completionOutcome: 'no-artifact' } }
+}
+
+const RUN_ARTIFACT_TIME_TOLERANCE_MS = 2_000
+
+async function discoverRunArtifactEntries(
+  workspacePath: string,
+  runStartedAt: string | undefined,
+  runCompletedAt: string | undefined,
+): Promise<WorldArtifactPublishManifestEntry[]> {
+  const startedAt = Date.parse(runStartedAt ?? '')
+  const completedAt = Date.parse(runCompletedAt ?? '')
+  if (!Number.isFinite(startedAt) || !Number.isFinite(completedAt) || completedAt < startedAt) return []
+  const files = (await collectProjectFiles(workspacePath, 0)).filter((file) =>
+    file.modifiedAtMs >= startedAt - RUN_ARTIFACT_TIME_TOLERANCE_MS &&
+    file.modifiedAtMs <= completedAt + RUN_ARTIFACT_TIME_TOLERANCE_MS,
+  )
+  if (files.length > WORLD_ARTIFACT_LIMITS.maxManifestEntries) {
+    throw invalid('artifact_auto_discovery_too_many', `本轮修改了超过 ${WORLD_ARTIFACT_LIMITS.maxManifestEntries} 个文件，请使用产物 manifest 明确发布范围`)
+  }
+  return files.map((file) => ({
+    path: file.relativePath,
+    title: basename(file.relativePath),
+    kind: artifactKindFromPath(file.relativePath),
+  }))
+}
+
+function artifactKindFromPath(path: string): WorldArtifactKind {
+  const extension = extname(path).toLocaleLowerCase('en-US')
+  if (extension === '.html' || extension === '.htm') return 'html'
+  if (extension === '.md' || extension === '.markdown') return 'markdown'
+  if (['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg'].includes(extension)) return 'image'
+  if (['.pdf', '.doc', '.docx', '.odt', '.rtf'].includes(extension)) return 'document'
+  if (['.json', '.csv', '.tsv', '.xlsx', '.xls'].includes(extension)) return 'data'
+  if (['.zip', '.tar', '.gz', '.7z'].includes(extension)) return 'archive'
+  if (['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py', '.go', '.rs', '.java', '.kt', '.swift', '.css', '.scss', '.sql', '.sh', '.ps1'].includes(extension)) return 'code'
+  return 'other'
 }
 
 function parseManifestEntry(value: unknown): WorldArtifactPublishManifestEntry {
@@ -616,7 +663,7 @@ async function copySourceAtomically(root: string, sourcePath: string, destinatio
   }
 }
 
-interface ProjectFile { absolutePath: string; relativePath: string; depth: number; byteLength: number }
+interface ProjectFile { absolutePath: string; relativePath: string; depth: number; byteLength: number; modifiedAtMs: number }
 
 async function collectProjectFiles(directory: string, depth: number): Promise<ProjectFile[]> {
   if (depth > WORLD_ARTIFACT_LIMITS.maxProjectDepth) throw invalid('artifact_depth_rejected', '项目目录层级超过限制')
@@ -633,7 +680,7 @@ async function collectProjectFiles(directory: string, depth: number): Promise<Pr
     } else if (entry.isFile()) {
       const info = await lstat(absolutePath)
       if (info.size > WORLD_ARTIFACT_LIMITS.maxFileBytes) throw invalid('artifact_size_rejected', '项目文件超过大小限制')
-      files.push({ absolutePath, relativePath: entry.name, depth, byteLength: info.size })
+      files.push({ absolutePath, relativePath: entry.name, depth, byteLength: info.size, modifiedAtMs: info.mtimeMs })
     }
     if (files.length > WORLD_ARTIFACT_LIMITS.maxProjectFiles) throw invalid('artifact_file_count_rejected', '项目文件数量超过限制')
   }

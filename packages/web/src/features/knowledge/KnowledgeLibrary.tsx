@@ -18,9 +18,8 @@ import {
 } from '@phosphor-icons/react'
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type MutableRefObject, type ReactNode, type RefObject } from 'react'
 
-import type { World } from '@dsh-cyber/contracts'
+import type { KnowledgeConsolidationJob, World } from '@dsh-cyber/contracts'
 
-import { api, jsonBody } from '../../api.js'
 import { formatDateTime } from '../../i18n/format.js'
 import { useI18n } from '../../i18n/runtime.js'
 
@@ -31,7 +30,6 @@ import type {
   KnowledgeSearchResult,
   UseWorldKnowledgeResult,
 } from './useWorldKnowledge.js'
-import { knowledgeConsolidatePath } from './knowledge-api.js'
 
 export interface KnowledgeLibraryProps {
   world: World
@@ -47,16 +45,11 @@ interface KnowledgeConsolidationEntry {
   message: string
 }
 
-interface KnowledgeConsolidationResponse {
-  job?: unknown
-}
-
 export function KnowledgeLibrary({ world, demoMode, state }: KnowledgeLibraryProps) {
   const { t } = useI18n()
   const [dialog, setDialog] = useState<DialogKind>()
   const [importMenuOpen, setImportMenuOpen] = useState(false)
   const [queryInput, setQueryInput] = useState('')
-  const [consolidationByDocument, setConsolidationByDocument] = useState<Record<string, KnowledgeConsolidationEntry>>({})
   const fileInputRef = useRef<HTMLInputElement>(null)
   const zipInputRef = useRef<HTMLInputElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
@@ -65,6 +58,8 @@ export function KnowledgeLibrary({ world, demoMode, state }: KnowledgeLibraryPro
   const hasSearch = state.searchQuery.length > 0
   const indexedCount = state.documents.filter((document) => document.status === 'indexed').length
   const lastUpdated = latestUpdatedAt([...state.collections, ...state.documents])
+  const consolidationJobs = state.consolidationJobs ?? []
+  const consolidationByDocument = consolidationEntriesBySource(consolidationJobs, 'document', t)
 
   const submitSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -92,23 +87,9 @@ export function KnowledgeLibrary({ world, demoMode, state }: KnowledgeLibraryPro
 
   const consolidateDocument = async (document: KnowledgeDocument) => {
     if (demoMode || document.status !== 'indexed') return
-    const current = consolidationByDocument[document.id]
-    if (current?.state === 'pending' || current?.state === 'queued' || current?.state === 'success') return
-    setConsolidationByDocument((entries) => ({ ...entries, [document.id]: { state: 'pending', message: '正在加入知识图谱…' } }))
-    try {
-      const response = await api<KnowledgeConsolidationResponse>(knowledgeConsolidatePath(world.id), {
-        ...jsonBody({ sourceType: 'document', sourceId: document.id }),
-      })
-      const queued = response.job !== undefined
-      setConsolidationByDocument((entries) => ({
-        ...entries,
-        [document.id]: queued
-          ? { state: 'queued', message: '已排队，后台整理中。' }
-          : { state: 'success', message: '已加入知识图谱。' },
-      }))
-    } catch (cause) {
-      setConsolidationByDocument((entries) => ({ ...entries, [document.id]: { state: 'error', message: toConsolidationError(cause) } }))
-    }
+    const latest = latestConsolidationJob(consolidationJobs, 'document', document.id)
+    if (latest?.status === 'failed') await state.retryConsolidation(latest.id)
+    else if (latest === undefined) await state.consolidate('document', document.id)
   }
 
   return <section className="knowledge-library" aria-label={`${world.name} - ${t('knowledge.libraryTitle', '知识库')}`} aria-busy={state.loading || state.busyAction !== undefined}>
@@ -138,6 +119,7 @@ export function KnowledgeLibrary({ world, demoMode, state }: KnowledgeLibraryPro
 
     {demoMode ? <div className="knowledge-notice knowledge-notice--disabled" role="status"><WarningCircle size={17} aria-hidden="true" /><span>{t('knowledge.libraryDemoNotice', '演示世界未连接本地知识库，导入与扫描入口暂不可用。')}</span></div> : null}
     {state.error === undefined ? null : <div className="knowledge-notice knowledge-notice--error" role="alert"><WarningCircle size={17} aria-hidden="true" /><span>{state.error}</span><button type="button" onClick={() => void state.reload()} disabled={state.loading}>{t('knowledge.libraryRetry', '重试')}</button></div>}
+    <KnowledgeConsolidationPanel state={state} />
 
     <form className="knowledge-search" role="search" onSubmit={submitSearch}>
       <MagnifyingGlass size={17} aria-hidden="true" />
@@ -163,6 +145,58 @@ export function KnowledgeLibrary({ world, demoMode, state }: KnowledgeLibraryPro
     {dialog === 'paste' ? <PasteDialog busy={state.busyAction === 'paste'} onClose={() => setDialog(undefined)} onSubmit={async (input) => { await state.createFromText(input); setDialog(undefined) }} /> : null}
     {dialog === 'web' ? <WebImportDialog busy={state.busyAction === 'web'} onClose={() => setDialog(undefined)} onSubmit={async (input) => { await state.importFromWeb(input); setDialog(undefined) }} /> : null}
   </section>
+}
+
+function KnowledgeConsolidationPanel({ state }: { state: UseWorldKnowledgeResult }) {
+  const { t, formatDateTime: localDateTime } = useI18n()
+  const jobs = state.consolidationJobs ?? []
+  const visible = jobs.filter((job) => job.status === 'failed' || job.status === 'queued' || job.status === 'running').slice(0, 8)
+  if (visible.length === 0 && state.consolidationError === undefined) return null
+  const failedCount = jobs.filter((job) => job.status === 'failed').length
+  const activeCount = jobs.filter((job) => job.status === 'queued' || job.status === 'running').length
+  return <section className="knowledge-consolidation" aria-label={t('knowledge.consolidationTitle', '知识整理任务')}>
+    <header><div><strong>{t('knowledge.consolidationTitle', '知识整理任务')}</strong><span>{failedCount > 0 ? t('knowledge.consolidationFailedSummary', '{count} 个任务失败', { count: failedCount }) : t('knowledge.consolidationActiveSummary', '{count} 个任务处理中', { count: activeCount })}</span></div>{activeCount > 0 ? <SpinnerGap size={16} className="knowledge-spin" aria-label={t('knowledge.consolidationActiveSummary', '知识整理处理中')} /> : <WarningCircle size={16} aria-hidden="true" />}</header>
+    {state.consolidationError === undefined ? null : <p className="knowledge-consolidation__error" role="alert">{state.consolidationError}</p>}
+    {visible.length === 0 ? null : <ul>{visible.map((job) => <li key={job.id} className={`knowledge-consolidation__job knowledge-consolidation__job--${job.status}`}>
+      <span><strong>{consolidationSourceLabel(job, t)}</strong><small>{friendlyConsolidationError(job.errorCode, t)} · {safeFormatJobTime(job.updatedAt, localDateTime)}</small></span>
+      {job.status === 'failed' ? <button type="button" disabled={state.retryingJobId !== undefined} onClick={() => void state.retryConsolidation(job.id).catch(() => undefined)}>{state.retryingJobId === job.id ? t('workbench.retrying', '正在重试…') : t('knowledge.libraryRetry', '重试')}</button> : <em>{job.status === 'running' ? t('knowledge.consolidatePending', '正在加入…') : t('knowledge.consolidateQueued', '已排队')}</em>}
+    </li>)}</ul>}
+  </section>
+}
+
+function consolidationEntriesBySource(jobs: KnowledgeConsolidationJob[], sourceType: KnowledgeConsolidationJob['sourceType'], t: (key: string, fallback: string) => string): Record<string, KnowledgeConsolidationEntry> {
+  const output: Record<string, KnowledgeConsolidationEntry> = {}
+  for (const job of jobs) {
+    if (job.sourceType !== sourceType || output[job.sourceId] !== undefined) continue
+    output[job.sourceId] = job.status === 'completed'
+      ? { state: 'success', message: t('knowledge.consolidateSuccess', '已加入知识图谱') }
+      : job.status === 'failed'
+        ? { state: 'error', message: t('knowledge.statusFailed', '处理失败') }
+        : { state: 'queued', message: job.status === 'running' ? t('knowledge.consolidatePending', '正在加入…') : t('knowledge.consolidateQueued', '已排队') }
+  }
+  return output
+}
+
+function latestConsolidationJob(jobs: KnowledgeConsolidationJob[], sourceType: KnowledgeConsolidationJob['sourceType'], sourceId: string): KnowledgeConsolidationJob | undefined {
+  return jobs.find((job) => job.sourceType === sourceType && job.sourceId === sourceId)
+}
+
+function consolidationSourceLabel(job: KnowledgeConsolidationJob, t: (key: string, fallback: string, variables?: Record<string, string | number>) => string): string {
+  if (job.sourceType === 'conversation') return t('knowledge.consolidationSourceConversation', '会话知识')
+  if (job.sourceType === 'artifact') return t('knowledge.originArtifact', '世界产物')
+  return t('knowledge.documentSectionTitle', '资料')
+}
+
+function friendlyConsolidationError(code: string | undefined, t: (key: string, fallback: string) => string): string {
+  if (code === undefined) return t('knowledge.consolidateQueued', '已排队')
+  if (/timeout/iu.test(code)) return t('knowledge.consolidationTimeout', '模型整理超时')
+  if (/response_invalid|text_invalid|schema|parse/iu.test(code)) return t('knowledge.consolidationInvalidResponse', '模型返回格式无效')
+  return t('knowledge.consolidationGenericFailure', '知识整理失败')
+}
+
+function safeFormatJobTime(value: string, formatter: (value: string | number | Date, options?: Intl.DateTimeFormatOptions) => string): string {
+  if (!value || Number.isNaN(Date.parse(value))) return value || '—'
+  return formatter(value, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
 function CollectionSection({ collections, documents }: { collections: KnowledgeCollection[]; documents: KnowledgeDocument[] }) {
@@ -336,9 +370,4 @@ function formatBytes(value: number): string {
 
 function formatScore(value: number | undefined): string {
   return value === undefined ? '—' : value.toFixed(2)
-}
-
-function toConsolidationError(cause: unknown): string {
-  if (cause instanceof Error && /[\u3400-\u9fff]/u.test(cause.message) && !cause.message.startsWith('Request failed:')) return cause.message
-  return '加入知识图谱失败，请稍后重试。'
 }

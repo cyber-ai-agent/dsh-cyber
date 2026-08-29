@@ -61,15 +61,19 @@ describe('Knowledge live refresh', () => {
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled())
     expect(FakeEventSource.instances).toHaveLength(1)
     expect(FakeEventSource.instances[0]?.url).toBe(`/api/worlds/${world.id}/live`)
-    const snapshotRequests = () => fetchMock.mock.calls.filter(([input]) => String(input).includes('/knowledge')).length
-    const beforeWorldState = snapshotRequests()
+    const libraryRequests = () => fetchMock.mock.calls.filter(([input]) => String(input).includes('/knowledge') && !String(input).includes('/knowledge/consolidation-jobs')).length
+    const jobRequests = () => fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/knowledge/consolidation-jobs')).length
+    const beforeWorldState = { library: libraryRequests(), jobs: jobRequests() }
 
     await act(async () => { FakeEventSource.instances[0]?.emit('world-state') })
     await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(snapshotRequests()).toBe(beforeWorldState)
+    expect({ library: libraryRequests(), jobs: jobRequests() }).toEqual(beforeWorldState)
 
     await act(async () => { FakeEventSource.instances[0]?.emit('world-knowledge') })
-    await vi.waitFor(() => expect(snapshotRequests()).toBe(beforeWorldState + 1))
+    await vi.waitFor(() => expect({ library: libraryRequests(), jobs: jobRequests() }).toEqual({
+      library: beforeWorldState.library + 1,
+      jobs: beforeWorldState.jobs + 1,
+    }))
 
     await act(async () => { root.unmount() })
     host.remove()

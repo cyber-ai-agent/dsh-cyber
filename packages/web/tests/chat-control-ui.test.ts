@@ -247,7 +247,7 @@ describe('Chat control UI', () => {
       messages: [{ id: 'pending', sessionId: 'session', sequence: 1, senderId: employee.id, senderKind: 'employee', kind: 'assistant', content: '主回答可见', metadata: { completionJobId: 'job-pending', completionStatus: 'pending' }, createdAt: new Date(0).toISOString() }],
     }))
     expect(pending).toContain('主回答可见')
-    expect(pending).toContain('产物整理中')
+    expect(pending).toContain('正在检查本轮产物')
 
     const failed = renderToStaticMarkup(createElement(ChatWorkbench, {
       ...common,
@@ -257,5 +257,17 @@ describe('Chat control UI', () => {
     expect(failed).toContain('主回答仍然成功')
     expect(failed).toContain('产物整理失败')
     expect(failed).toContain('重试')
+
+    const completedWithoutFacts = renderToStaticMarkup(createElement(ChatWorkbench, {
+      ...common,
+      messages: [{ id: 'completed-empty', sessionId: 'session', sequence: 1, senderId: employee.id, senderKind: 'employee', kind: 'assistant', content: '主回答完成，但没有登记文件', metadata: { completionJobId: 'job-empty', completionStatus: 'completed', completionOutcome: 'no-artifact', artifactCount: 0 }, createdAt: new Date(0).toISOString() }],
+    }))
+    expect(completedWithoutFacts).not.toContain('产物可用')
+
+    const completedWithFacts = renderToStaticMarkup(createElement(ChatWorkbench, {
+      ...common,
+      messages: [{ id: 'completed-artifact', sessionId: 'session', sequence: 1, senderId: employee.id, senderKind: 'employee', kind: 'assistant', content: '真实产物已登记', metadata: { completionJobId: 'job-artifact', completionStatus: 'completed', artifactRefs: ['artifact-1'], artifactCount: 1 }, createdAt: new Date(0).toISOString() }],
+    }))
+    expect(completedWithFacts).toContain('产物可用')
   })
 })

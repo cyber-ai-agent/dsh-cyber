@@ -605,13 +605,15 @@ function CompletionJobStatus({ metadata, onRetry, onSettled }: {
 
   const { t } = useI18n()
   if (jobId === undefined || status === undefined) return null
+  const artifactRefs = artifactRefsFromMetadata(metadata)
+  if (status === 'completed' && artifactRefs.length === 0) return null
   const label = status === 'completed'
     ? t('workbench.artifactReady', '产物可用')
     : status === 'failed'
       ? t('workbench.artifactFailed', '产物整理失败')
       : status === 'cancelled'
         ? t('workbench.artifactCancelled', '产物整理已取消')
-        : t('workbench.artifactPending', '产物整理中')
+        : t('workbench.artifactPending', '正在检查本轮产物…')
   return <div className={`completion-job-status completion-job-status--${status}`} role="status">
     {status === 'pending' || status === 'running' || status === 'retrying' ? <CircleNotch size={14} className="spin" aria-hidden="true" /> : null}
     <span>{label}</span>

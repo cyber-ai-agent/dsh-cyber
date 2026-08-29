@@ -167,4 +167,33 @@ describe('knowledge consolidation lifecycle', () => {
     expect(applied).toBe(1)
     expect(jobs[0]?.status).toBe('completed')
   })
+
+  it('lists failed jobs, requeues the exact world-scoped job, and completes it on retry', async () => {
+    const jobs: KnowledgeConsolidationJob[] = [{
+      id: 'job-retry', workspaceId: 'workspace-a', worldId: 'world-a', sourceType: 'conversation', sourceId: 'session-a',
+      fromCursor: 0, toCursor: 1, status: 'failed', attempt: 1, errorCode: 'knowledge_model_timeout',
+      createdAt: '2026-08-26T00:00:00.000Z', updatedAt: '2026-08-26T00:00:01.000Z',
+    }]
+    const base = graphRepository()
+    const repository = {
+      ...base,
+      listConsolidationJobs: ({ worldId, status }: { worldId?: string; status?: KnowledgeConsolidationJob['status']; limit: number }) => jobs.filter((job) => (worldId === undefined || job.worldId === worldId) && (status === undefined || job.status === status)),
+      getConsolidationJob: (worldId: string, jobId: string) => jobs.find((job) => job.worldId === worldId && job.id === jobId),
+      requeueConsolidationJob: (worldId: string, jobId: string) => { const job = jobs.find((item) => item.worldId === worldId && item.id === jobId)!; job.status = 'queued'; delete job.errorCode; return job },
+      createConsolidationJob: () => jobs[0]!,
+      claimConsolidationJob: (jobId: string) => { const job = jobs.find((item) => item.id === jobId); if (job?.status !== 'queued') return undefined; job.status = 'running'; job.attempt += 1; return job },
+      applyKnowledgeExtraction: () => undefined,
+      completeConsolidationJob: () => { jobs[0]!.status = 'completed'; return jobs[0]! },
+      failConsolidationJob: (_input: { jobId: string; errorCode: string }) => { jobs[0]!.status = 'failed'; return jobs[0]! },
+    } satisfies KnowledgeConsolidationRepository
+    const service = new WorldKnowledgeConsolidationService({
+      repository,
+      sources: { async load() { return { workspaceId: 'workspace-a', worldId: 'world-a', sourceType: 'conversation', sourceId: 'session-a', fromCursor: 0, toCursor: 1, items: [{ kind: 'user', text: '需要重试的世界事实。', evidence: { evidenceId: 'retry-evidence', sourceType: 'conversation', sourceId: 'session-a', excerpt: '需要重试的世界事实。', worldId: 'world-a', workspaceId: 'workspace-a', sessionId: 'session-a', messageId: 'message-retry', sequence: 1 } }] } } },
+      extractor: { async extract() { return { entities: [], claims: [], relations: [], evidenceRefs: [{ sourceType: 'conversation', sourceId: 'session-a', evidenceId: 'retry-evidence' }] } } },
+    })
+    expect(await service.listJobs('world-a', 'failed', 50)).toEqual([expect.objectContaining({ id: 'job-retry', errorCode: 'knowledge_model_timeout' })])
+    await expect(service.getJob('world-b', 'job-retry')).resolves.toBeUndefined()
+    await expect(service.retryJob('world-a', 'job-retry')).resolves.toMatchObject({ status: 'queued' })
+    await expect(service.runNext()).resolves.toMatchObject({ status: 'completed', attempt: 2 })
+  })
 })

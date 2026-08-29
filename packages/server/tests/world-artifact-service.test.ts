@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -111,7 +111,55 @@ describe('WorldArtifactService', () => {
       workTurnId: fixture.turn.id,
       agentRunId: run.id,
       workspacePath: root.restrictedFilesPath,
-    })).resolves.toEqual({})
+    })).resolves.toEqual({ messageMetadata: { artifactCount: 0, completionOutcome: 'no-artifact' } })
+  })
+
+  it('auto-registers only real world files changed inside the AgentRun window when no manifest exists', async () => {
+    const fixture = await createFixture()
+    const oldFile = join(fixture.root.filesPath, 'existing.md')
+    const generatedFile = join(fixture.root.filesPath, 'analysis.md')
+    await writeFile(oldFile, '# existing\n')
+    await utimes(oldFile, new Date('2026-08-20T00:00:00.000Z'), new Date('2026-08-20T00:00:00.000Z'))
+    await writeFile(generatedFile, '# generated analysis\n')
+    const contribution = await fixture.service.publishAgentRun({
+      workspaceId: fixture.workspace.id,
+      worldId: fixture.world.id,
+      employeeId: fixture.employee.id,
+      sessionId: fixture.session.id,
+      workTurnId: fixture.turn.id,
+      agentRunId: fixture.run.id,
+      workspacePath: fixture.root.filesPath,
+      runStartedAt: new Date(Date.now() - 5_000).toISOString(),
+      runCompletedAt: new Date(Date.now() + 5_000).toISOString(),
+    })
+    expect(contribution).toMatchObject({
+      artifactRefs: [expect.any(String)],
+      messageMetadata: { artifactCount: 1, completionOutcome: 'artifacts-published', artifactDiscovery: 'run-window' },
+    })
+    const artifacts = fixture.service.list(fixture.world.id)
+    expect(artifacts).toHaveLength(1)
+    expect(artifacts[0]).toMatchObject({ title: 'analysis.md', kind: 'markdown' })
+    expect(fixture.service.get(fixture.world.id, artifacts[0]!.id).versions[0]).toMatchObject({ sourceRelativePath: 'analysis.md', agentRunId: fixture.run.id })
+    expect((await fixture.service.preview(fixture.world.id, artifacts[0]!.id)).body.toString('utf8')).toContain('generated analysis')
+  })
+
+  it('honors an explicit empty manifest and reports an honest no-artifact outcome', async () => {
+    const fixture = await createFixture()
+    await writeFile(join(fixture.root.filesPath, 'temporary.md'), '# not published\n')
+    await writeFile(join(fixture.root.dshArtifactsPath, `${fixture.run.id}.json`), JSON.stringify({ schemaVersion: 1, artifacts: [] }))
+    const contribution = await fixture.service.publishAgentRun({
+      workspaceId: fixture.workspace.id,
+      worldId: fixture.world.id,
+      employeeId: fixture.employee.id,
+      sessionId: fixture.session.id,
+      workTurnId: fixture.turn.id,
+      agentRunId: fixture.run.id,
+      workspacePath: fixture.root.filesPath,
+      runStartedAt: new Date(Date.now() - 5_000).toISOString(),
+      runCompletedAt: new Date(Date.now() + 5_000).toISOString(),
+    })
+    expect(contribution).toEqual({ messageMetadata: { artifactCount: 0, completionOutcome: 'no-artifact' } })
+    expect(fixture.service.list(fixture.world.id)).toEqual([])
   })
 
   it('keeps the publication seam hidden from the normal workspace file list', async () => {

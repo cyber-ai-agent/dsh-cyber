@@ -75,18 +75,13 @@ afterEach(() => {
 })
 
 describe('Knowledge consolidation actions', () => {
-  it('queues an indexed document without refreshing chat or the library', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      expect(input).toBe('/api/worlds/world-consolidation-test/knowledge/consolidate')
-      expect(init?.method).toBe('POST')
-      expect(JSON.parse(String(init?.body))).toEqual({ sourceType: 'document', sourceId: document.id })
-      return new Response(JSON.stringify({ job: { id: 'job-document-1', status: 'queued' } }), { status: 202, headers: { 'Content-Type': 'application/json' } })
-    })
-    vi.stubGlobal('fetch', fetchMock)
+  it('queues an indexed document and projects the durable job state', async () => {
     const reload = vi.fn(async () => undefined)
+    const consolidate = vi.fn(async () => undefined)
     const state: UseWorldKnowledgeResult = {
       collections: [collection],
       documents: [document],
+      consolidationJobs: [],
       loading: false,
       searching: false,
       searchQuery: '',
@@ -99,6 +94,8 @@ describe('Knowledge consolidation actions', () => {
       createFromText: vi.fn(async () => undefined),
       importFromWeb: vi.fn(async () => undefined),
       rescan: vi.fn(async () => undefined),
+      consolidate,
+      retryConsolidation: vi.fn(async () => undefined),
     }
     const host = documentForTest()
     const root = createRoot(host)
@@ -106,9 +103,10 @@ describe('Knowledge consolidation actions', () => {
     const button = host.querySelector<HTMLButtonElement>('.knowledge-row__consolidation-button')
     expect(button?.textContent).toContain('吸收到知识图谱')
     await act(async () => { button?.click() })
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(host.textContent).toContain('已排队，后台整理中')
+    expect(consolidate).toHaveBeenCalledWith('document', document.id)
     expect(reload).not.toHaveBeenCalled()
+    await act(async () => { root.render(createElement(KnowledgeLibrary, { world, demoMode: false, state: { ...state, consolidationJobs: [{ id: 'job-document-1', workspaceId: world.workspaceId, worldId: world.id, sourceType: 'document', sourceId: document.id, fromCursor: 0, toCursor: 0, status: 'queued', attempt: 0, createdAt: world.createdAt, updatedAt: world.updatedAt }] } })) })
+    expect(host.textContent).toContain('已排队')
     await act(async () => { root.unmount() })
     host.remove()
   })
@@ -135,16 +133,62 @@ describe('Knowledge consolidation actions', () => {
     host.remove()
   })
 
-  it('shows success and failure without leaving the artifact detail', async () => {
-    const successFetch = vi.fn(async () => new Response(JSON.stringify({ result: { changed: true } }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
-    vi.stubGlobal('fetch', successFetch)
-    const successHost = documentForTest()
-    const successRoot = createRoot(successHost)
-    await act(async () => { successRoot.render(createElement(ArtifactDetail, { worldId: world.id, artifact, onBack: vi.fn(), onRename: vi.fn(async () => undefined), onArchive: vi.fn(async () => undefined) })) })
-    await act(async () => { findButton(successHost, '加入知识')?.click() })
-    expect(successHost.textContent).toContain('已加入知识图谱')
-    await act(async () => { successRoot.unmount() })
-    successHost.remove()
+  it('shows persisted knowledge failures and retries the exact job', async () => {
+    const retryConsolidation = vi.fn(async () => undefined)
+    const state: UseWorldKnowledgeResult = {
+      collections: [],
+      documents: [],
+      consolidationJobs: [{ id: 'job-timeout', workspaceId: world.workspaceId, worldId: world.id, sourceType: 'conversation', sourceId: 'session-timeout', fromCursor: 0, toCursor: 12, status: 'failed', attempt: 1, errorCode: 'knowledge_model_timeout', createdAt: world.createdAt, updatedAt: world.updatedAt }],
+      loading: false,
+      searching: false,
+      searchQuery: '',
+      searchResults: [],
+      reload: vi.fn(async () => undefined),
+      search: vi.fn(async () => []),
+      clearSearch: vi.fn(),
+      importFile: vi.fn(async () => undefined),
+      importPack: vi.fn(async () => undefined),
+      createFromText: vi.fn(async () => undefined),
+      importFromWeb: vi.fn(async () => undefined),
+      rescan: vi.fn(async () => undefined),
+      consolidate: vi.fn(async () => undefined),
+      retryConsolidation,
+    }
+    const host = documentForTest()
+    const root = createRoot(host)
+    await act(async () => { root.render(createElement(KnowledgeLibrary, { world, demoMode: false, state })) })
+    expect(host.textContent).toContain('知识整理任务')
+    expect(host.textContent).toContain('模型整理超时')
+    const retry = findButton(host, '重试')
+    expect(retry).not.toBeNull()
+    await act(async () => { retry?.click() })
+    expect(retryConsolidation).toHaveBeenCalledWith('job-timeout')
+    await act(async () => { root.unmount() })
+    host.remove()
+  })
+
+  it('only acknowledges a durable queued job and keeps failures in the artifact detail', async () => {
+    const queuedFetch = vi.fn(async () => new Response(JSON.stringify({ job: { id: 'job-artifact-1', status: 'queued' } }), { status: 202, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', queuedFetch)
+    const queuedHost = documentForTest()
+    const queuedRoot = createRoot(queuedHost)
+    await act(async () => { queuedRoot.render(createElement(ArtifactDetail, { worldId: world.id, artifact, onBack: vi.fn(), onRename: vi.fn(async () => undefined), onArchive: vi.fn(async () => undefined) })) })
+    await act(async () => { findButton(queuedHost, '加入知识')?.click() })
+    expect(queuedHost.textContent).toContain('已排队，后台整理中')
+    expect(queuedHost.textContent).not.toContain('已加入知识图谱')
+    await act(async () => { queuedRoot.unmount() })
+    queuedHost.remove()
+
+    const untrackedFetch = vi.fn(async () => new Response(JSON.stringify({ result: { changed: true } }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', untrackedFetch)
+    const untrackedHost = documentForTest()
+    const untrackedRoot = createRoot(untrackedHost)
+    await act(async () => { untrackedRoot.render(createElement(ArtifactDetail, { worldId: world.id, artifact, onBack: vi.fn(), onRename: vi.fn(async () => undefined), onArchive: vi.fn(async () => undefined) })) })
+    await act(async () => { findButton(untrackedHost, '加入知识')?.click() })
+    expect(untrackedHost.textContent).toContain('未返回可追踪的任务记录')
+    expect(untrackedHost.querySelector('[role="alert"]')).not.toBeNull()
+    await act(async () => { untrackedRoot.unmount() })
+    untrackedHost.remove()
 
     const failureFetch = vi.fn(async () => new Response(JSON.stringify({ error: { message: '知识整理服务暂时不可用' } }), { status: 503, headers: { 'Content-Type': 'application/json' } }))
     vi.stubGlobal('fetch', failureFetch)
