@@ -77,7 +77,7 @@ function ArtifactCard({ artifact, onOpen }: { artifact: ArtifactRecord; onOpen()
 }
 
 function ArtifactEmptyState({ onPublish }: { onPublish(): void }) {
-  return <div className="artifact-center__empty"><div className="artifact-center__empty-mark"><Package size={28} /></div><h3>这个世界还没有已发布产物</h3><p>工作目录中的临时文件不会自动出现在这里。完成一轮工作后，从工作目录明确发布，版本和来源才会被记录。</p><button type="button" className="artifact-button artifact-button--primary" onClick={onPublish}><FileArrowUp size={17} />发布第一个产物</button></div>
+  return <div className="artifact-center__empty"><div className="artifact-center__empty-mark"><Package size={28} /></div><h3>这个世界还没有已发布产物</h3><p>角色在当前世界工作目录中完成一轮运行后，真实新增或修改的文件会自动登记。桌面和世界目录外的文件仍需从工作目录手动发布。</p><button type="button" className="artifact-button artifact-button--primary" onClick={onPublish}><FileArrowUp size={17} />从工作目录发布</button></div>
 }
 
 function PublishArtifactDialog({ busy, onClose, onPublish }: { busy: boolean; onClose(): void; onPublish(input: Omit<ArtifactMutationInput, 'workspaceId'>): Promise<void> }) {

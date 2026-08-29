@@ -83,6 +83,8 @@
 .knowledge-consolidation__job button { min-height: 40px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-control); color: var(--text-soft); background: var(--surface-1); font: inherit; font-size: 12px; cursor: pointer; }
 .knowledge-consolidation__job button:hover:not(:disabled), .knowledge-consolidation__job button:focus-visible { border-color: var(--accent); color: var(--accent-strong); outline: none; }
 .knowledge-consolidation__job button:disabled { cursor: wait; opacity: .65; }
+.knowledge-consolidation__more { min-height: 40px; justify-self: stretch; border: 1px solid var(--border); border-radius: var(--radius-control); color: var(--text-muted); background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
+.knowledge-consolidation__more:hover, .knowledge-consolidation__more:focus-visible { border-color: var(--accent); color: var(--accent-strong); outline: none; }
 
 .knowledge-search { min-height: 42px; display: flex; align-items: center; gap: 8px; margin-bottom: 12px; padding: 0 9px 0 11px; border: 1px solid var(--border-strong); color: var(--text-muted); background: var(--surface-1); }
 .knowledge-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent); }

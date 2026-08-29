@@ -24,7 +24,7 @@ import {
   WifiHigh,
   X,
 } from '@phosphor-icons/react'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { WORKSPACE_PREFERENCES_LIMITS } from '@dsh-cyber/contracts'
 import type {
   EmployeeInstance,
@@ -49,6 +49,7 @@ import { formatDateTime, formatDuration as localeFormatDuration, formatNumber } 
 import { ModelPicker } from '../features/models/ModelPicker.js'
 import { loadDiscoveredModelsCache, saveDiscoveredModelsToCache } from '../features/models/discovered-models-storage.js'
 import type { ApplicationAccessSummary } from './ApplicationLockGate.js'
+import { useDialogFocusTrap } from './useDialogFocusTrap.js'
 import './SettingsDialog.css'
 
 interface ApplicationAccessMutation extends ApplicationAccessSummary { recoveryCode?: string }
@@ -304,8 +305,10 @@ export function SettingsDialog({
   const [pendingAction, setPendingAction] = useState<SystemAction>()
   const [actionResult, setActionResult] = useState<SystemActionResult>()
   const [actionError, setActionError] = useState<string>()
+  const dialogRef = useRef<HTMLElement>(null)
   const changed = useMemo(() => JSON.stringify(draft) !== JSON.stringify(preferences), [draft, preferences])
   const close = () => { setUiLocale(preferences.locale); onClose() }
+  useDialogFocusTrap(dialogRef, close)
   const runSystemAction = async (action: SystemAction, input?: SystemActionInput) => {
     setPendingAction(action)
     setActionResult(undefined)
@@ -321,10 +324,10 @@ export function SettingsDialog({
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && close()}>
-      <section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <section ref={dialogRef} className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <header className="settings-dialog__header">
           <div><h2 id="settings-title">{t('settings.title', '设置')}</h2><p>{t('settings.intro', '管理界面、AI 模型、数据备份与应用维护。')}</p></div>
-          <button className="icon-button" type="button" aria-label={t('settings.close', '关闭设置')} onClick={close}><X size={18} /></button>
+          <button className="icon-button" type="button" data-dialog-initial-focus aria-label={t('settings.close', '关闭设置')} onClick={close}><X size={18} /></button>
         </header>
         <div className="settings-layout">
           <nav className="settings-nav" aria-label={t('settings.tabNavigation', '设置栏目')}>

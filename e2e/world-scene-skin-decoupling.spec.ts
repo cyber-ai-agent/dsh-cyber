@@ -47,7 +47,7 @@ test('switching conversation Skin keeps the live World mounted and its manifest 
         panelBackground: '#171724',
         ownerBubbleColor: '#2d2852',
         characterBubbleColor: '#1d1b31',
-        backdropImage: '/assets/cyber-office-world.png',
+        backdropImage: '/assets/cyber-office-world.webp',
         backdropOpacity: 0.72,
       },
     }]))

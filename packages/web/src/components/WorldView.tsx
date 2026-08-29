@@ -104,7 +104,7 @@ function WorldScene({ kind, employees, lightsOn, zoom, onSelectEmployee }: {
   // This legacy renderer is only a fallback when the full World Runtime is
   // unavailable. Its scene still belongs to the World experience; never read
   // document.dataset.skin or a conversation wallpaper here.
-  const image = isTavern ? '/assets/moonlit-tavern-world.png' : '/assets/cyber-office-world.png'
+  const image = isTavern ? '/assets/moonlit-tavern-world.png' : '/assets/cyber-office-world.webp'
   const positions = isTavern ? tavernPositions : companyPositions
   const activeSpeaker = employees.find((employee) => employee.presence === 'working')
 

@@ -34,6 +34,10 @@ test.afterAll(async () => {
 })
 
 test('onboards, recruits from dossier, talks, browses dossiers and keeps file surfaces hidden', async ({ page }) => {
+  const worldLoadFanout: string[] = []
+  page.on('request', (request) => {
+    if (/\/api\/(?:employees\/[^/]+\/dossier|sessions\/[^/]+\/participants)$/.test(request.url())) worldLoadFanout.push(request.url())
+  })
   await page.goto(origin)
 
   await expect(page.getByRole('heading', { name: '创建第一个本地世界' })).toBeVisible()
@@ -43,6 +47,7 @@ test('onboards, recruits from dossier, talks, browses dossiers and keeps file su
   await expect(page.locator('.workbench-shell')).toBeVisible()
   await expect(page.locator('.world-runtime-canvas')).toBeVisible()
   await expect(page.getByRole('button', { name: '与管家私聊' })).toBeVisible()
+  expect(worldLoadFanout).toEqual([])
   const composer = page.getByRole('textbox', { name: '给当前世界的角色发送消息' })
   await expect(composer).toBeEnabled()
   await expect(composer).toHaveCount(1)

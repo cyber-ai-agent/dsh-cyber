@@ -8,6 +8,7 @@ export function useDialogFocusTrap(containerRef: RefObject<HTMLElement | null>, 
   useEffect(() => {
     const container = containerRef.current
     if (container === null) return
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : undefined
     const focusable = () => [...container.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex="-1"])')]
     ;(container.querySelector<HTMLElement>('[data-dialog-initial-focus]') ?? focusable()[0])?.focus()
     const onKeyDown = (event: KeyboardEvent) => {
@@ -23,6 +24,9 @@ export function useDialogFocusTrap(containerRef: RefObject<HTMLElement | null>, 
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
     }
     document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      if (previousFocus?.isConnected) previousFocus.focus()
+    }
   }, [containerRef])
 }

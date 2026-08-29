@@ -24,14 +24,14 @@ export const cyberCompanyTheme: WorldThemeManifestV1 = {
   assets: [
     {
       id: 'office-scene',
-      src: '/assets/cyber-office-world.png',
+      src: '/assets/cyber-office-world.webp',
       kind: 'image',
       preload: true,
       pixelArt: true,
     },
     {
       id: 'company-roster',
-      src: '/assets/employee-roster-transparent.png',
+      src: '/assets/employee-roster-transparent.webp',
       kind: 'spritesheet',
       preload: true,
       pixelArt: false,

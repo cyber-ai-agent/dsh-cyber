@@ -371,7 +371,7 @@
   background: transparent;
 }
 .world-context-menu > header > button:hover { color: #fff; background: rgba(255,255,255,.06); }
-.world-context-menu .avatar { background-image: url('/assets/employee-roster-sprite.png'); }
+.world-context-menu .avatar { background-image: url('/assets/employee-roster-sprite.webp'); }
 .world-context-menu__object-icon {
   width: 48px;
   height: 48px;

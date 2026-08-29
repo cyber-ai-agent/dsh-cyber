@@ -4739,15 +4739,19 @@ export class SqliteStore {
   getWorldSnapshot(worldId: string): WorldSnapshot {
     const world = this.#requireWorld(worldId)
     const workspace = this.#requireWorkspace(world.workspaceId)
+    const employees = this.listEmployees(worldId)
+    const openSessions = this.listSessions(worldId, 'open')
     const row = this.database
       .prepare('SELECT COALESCE(MAX(sequence), 0) AS last FROM domain_events WHERE world_id = ?')
       .get(worldId) as { last: number }
     return {
       workspace,
       world,
-      employees: this.listEmployees(worldId),
+      employees,
+      dossiers: employees.map((employee) => this.getEmployeeDossier(employee.id)),
       authorities: this.#worldAuthorities.list(worldId),
-      openSessions: this.listSessions(worldId, 'open'),
+      openSessions,
+      sessionParticipants: openSessions.flatMap((session) => this.listParticipants(session.id)),
       lastEventSequence: Number(row.last),
     }
   }

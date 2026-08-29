@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -35,11 +35,31 @@ test('auto-registers real files from one BrowserRuntime run and keeps them isola
   test.setTimeout(180_000)
   const consoleIssues: string[] = []
   attachAppConsoleRecorder(page, consoleIssues)
+  const initialRequests: Array<{ type: string; url: string }> = []
+  let measuringInitialLoad = true
+  page.on('request', (request) => {
+    if (measuringInitialLoad) initialRequests.push({ type: request.resourceType(), url: request.url() })
+  })
   const screenshotRoot = join(process.cwd(), 'artifacts', 'world-artifact-center')
   await mkdir(screenshotRoot, { recursive: true })
 
   await page.goto(origin)
   await expect(page.locator('.workbench-shell')).toBeVisible()
+  await page.waitForTimeout(300)
+  measuringInitialLoad = false
+  expect(initialRequests.filter((request) => request.type === 'script').length).toBeLessThanOrEqual(55)
+  expect(initialRequests.filter((request) => request.url.includes('/api/')).length).toBeLessThanOrEqual(22)
+  expect(initialRequests.filter((request) => /\/api\/(?:employees\/[^/]+\/dossier|sessions\/[^/]+\/participants)$/.test(request.url))).toEqual([])
+  const initialImageUrls = initialRequests.filter((request) => request.type === 'image').map((request) => request.url)
+  expect(initialImageUrls.some((url) => url.endsWith('/employee-roster-sprite.webp'))).toBe(true)
+  expect(initialImageUrls.some((url) => /employee-roster-(?:sprite|transparent)\.png|cyber-office-world\.png|sakura-shrine-world\.jpg/.test(url))).toBe(false)
+  const firstScreenImageBytes = await Promise.all([
+    'cyber-office-world.webp',
+    'employee-roster-transparent.webp',
+    'employee-roster-sprite.webp',
+    join('skins', 'sakura-shrine-world.webp'),
+  ].map(async (relativePath) => (await stat(join(process.cwd(), 'packages', 'web', 'public', 'assets', relativePath))).size))
+  expect(firstScreenImageBytes.reduce((sum, value) => sum + value, 0)).toBeLessThanOrEqual(4_300_000)
 
   const currentServer = requireServer()
   const workspace = currentServer.store.listWorkspaces()[0]!

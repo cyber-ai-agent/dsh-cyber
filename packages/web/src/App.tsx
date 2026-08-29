@@ -37,7 +37,6 @@ import type {
   TaskSchedule,
   WorkMessage,
   WorkSession,
-  WorkSessionParticipant,
   Workspace,
   WorkspacePreferences,
   WorkspaceSnapshot,
@@ -420,30 +419,16 @@ export default function App() {
       ])
       if (!isCurrentRequest()) return
 
-      const [dossierResults, participantResults, scheduleResult, runtimeAccessResult] = await Promise.all([
-        Promise.all(snapshot.employees.map(async (employee) => {
-          try {
-            return await api<EmployeeDossier>(`/api/employees/${employee.id}/dossier`)
-          } catch {
-            return undefined
-          }
-        })),
-        Promise.all(snapshot.openSessions.map(async (session) => {
-          try {
-            const result = await api<{ items: WorkSessionParticipant[] }>(`/api/sessions/${session.id}/participants`)
-            return [session.id, result.items.filter((participant) => participant.kind === 'employee').map((participant) => participant.participantId)] as const
-          } catch {
-            return [session.id, []] as const
-          }
-        })),
+      const [scheduleResult, runtimeAccessResult] = await Promise.all([
         api<{ items: TaskSchedule[] }>(`/api/worlds/${world.id}/schedules`),
         api<{ items: PreparedSessionHostAccessGrant[] }>(`/api/worlds/${world.id}/runtime-access-grants`),
       ])
       if (!isCurrentRequest()) return
 
-      const nextDossiers: Record<string, EmployeeDossier> = {}
-      for (const dossier of dossierResults) {
-        if (dossier !== undefined) nextDossiers[dossier.employee.id] = dossier
+      const nextDossiers = Object.fromEntries(snapshot.dossiers.map((dossier) => [dossier.employee.id, dossier]))
+      const nextSessionParticipants: Record<string, string[]> = Object.fromEntries(snapshot.openSessions.map((session) => [session.id, []]))
+      for (const participant of snapshot.sessionParticipants) {
+        if (participant.kind === 'employee') nextSessionParticipants[participant.sessionId]?.push(participant.participantId)
       }
       setWorldSettings(settingsResult.settings)
       setWorldSettingsRevision(settingsResult.revision ?? settingsResult.settingsRevision)
@@ -462,7 +447,7 @@ export default function App() {
       // This keeps the composer and history action attached to a real conversation
       // instead of presenting an empty, non-sendable center pane after refresh.
       setActiveSessionId(snapshot.openSessions[0]?.id)
-      setSessionParticipants(Object.fromEntries(participantResults))
+      setSessionParticipants(nextSessionParticipants)
       const restoredGrants = Object.fromEntries(runtimeAccessResult.items.map((grant) => [grant.sessionId, grant]))
       const restoredModes = Object.fromEntries(runtimeAccessResult.items.map((grant) => [`session:${grant.sessionId}`, 'danger-full-access' as const]))
       setSessionHostAccessGrants(restoredGrants)
