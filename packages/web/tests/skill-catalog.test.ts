@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import { act } from 'react'
-import { createRoot } from 'react-dom/client'
+import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { EmployeeBlueprint, EmployeeInstance, World } from '@dsh-cyber/contracts'
@@ -65,7 +65,7 @@ describe('world-scoped skill catalog UI', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
     const onChange = vi.fn()
-    const host = mount(createElement(SkillGrantEditor, { employee, value: ['core.notes', 'legacy.skill'], onChange }))
+    const { host, root } = await mount(createElement(SkillGrantEditor, { employee, value: ['core.notes', 'legacy.skill'], onChange }))
     await flush()
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual(expect.arrayContaining([
       '/api/catalog/blueprints?worldId=world-skill-catalog-test',
@@ -90,7 +90,7 @@ describe('world-scoped skill catalog UI', () => {
     expect(legacyCheckbox.disabled).toBe(false)
     await act(async () => { legacyCheckbox.click() })
     expect(onChange).toHaveBeenLastCalledWith(['core.notes'])
-    host.remove()
+    await unmount(root, host)
   })
 
   it('uses recommended defaults during recruitment and preserves an explicit empty selection', async () => {
@@ -102,7 +102,7 @@ describe('world-scoped skill catalog UI', () => {
       throw new Error(`unexpected request: ${path}`)
     })
     vi.stubGlobal('fetch', fetchMock)
-    const host = mount(createElement(RecruitmentDialog, {
+    const { host, root } = await mount(createElement(RecruitmentDialog, {
       blueprints: [],
       employees: [],
       world,
@@ -128,7 +128,7 @@ describe('world-scoped skill catalog UI', () => {
       '/api/catalog/blueprints?worldId=world-skill-catalog-test',
       '/api/worlds/world-skill-catalog-test/skill-catalog',
     ]))
-    host.remove()
+    await unmount(root, host)
   })
 })
 
@@ -155,12 +155,17 @@ function json(value: unknown): Response {
   return new Response(JSON.stringify(value), { status: 200, headers: { 'Content-Type': 'application/json' } })
 }
 
-function mount(element: ReturnType<typeof createElement>): HTMLDivElement {
+async function mount(element: ReturnType<typeof createElement>): Promise<{ host: HTMLDivElement; root: Root }> {
   const host = document.createElement('div')
   document.body.append(host)
   const root = createRoot(host)
-  root.render(element)
-  return host
+  await act(async () => { root.render(element) })
+  return { host, root }
+}
+
+async function unmount(root: Root, host: HTMLElement): Promise<void> {
+  await act(async () => { root.unmount() })
+  host.remove()
 }
 
 async function flush(): Promise<void> {
