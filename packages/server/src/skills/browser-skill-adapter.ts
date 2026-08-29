@@ -118,48 +118,45 @@ export class BrowserSkillAdapter implements CharacterSkillAdapter {
       return { ready: false, detail: '当前世界尚未安装浏览器能力包' }
     }
     try {
-      const parameters = action.parameters as unknown as Record<string, unknown>
-      this.#policy.validateUrl(typeof parameters.url === 'string' ? parameters.url : '')
+      parseActionParameters(action.skillId as BrowserSkillId, action.parameters, this.#policy)
     } catch (error) {
       return { ready: false, detail: error instanceof Error ? error.message : '浏览器参数无效' }
     }
     return { ready: true }
   }
 
-  async execute(action: CharacterSkillAction, context: CharacterSkillExecutionContext): Promise<CharacterSkillExecutionResult> {
+  async execute(action: CharacterSkillAction, _context: CharacterSkillExecutionContext): Promise<CharacterSkillExecutionResult> {
     const world = this.#store.getWorld(action.worldId)
-    if (world === undefined) return { status: 'failed', detail: '当前世界不可用' }
+    if (world === undefined) return { status: 'failed', detail: '当前世界不可用，未访问外部网页' }
     const skillId = action.skillId as BrowserSkillId
-    if (!BROWSER_SKILL_IDS.includes(skillId)) return { status: 'failed', detail: '浏览器能力不受支持' }
-    const installed = await this.#listWorldPackages(world.id)
-    if (!browserPackageProvides(installed, skillId)) {
-      return { status: 'waiting-for-integration', detail: '当前世界尚未安装浏览器能力包' }
+    if (!BROWSER_SKILL_IDS.includes(skillId)) return { status: 'failed', detail: '浏览器能力不受支持，未访问外部网页' }
+    if (!browserPackageProvides(await this.#listWorldPackages(world.id), skillId)) {
+      return { status: 'waiting-for-integration', detail: '当前世界尚未安装浏览器能力包，未访问外部网页' }
     }
-    let requestBoundaryCrossed = false
-    let client: Awaited<ReturnType<BrowserClientFactory['create']>> | undefined
+    if (skillId === BROWSER_SCREENSHOT_SKILL && this.#publishScreenshot === undefined) {
+      return { status: 'waiting-for-integration', detail: '浏览器截图产物服务不可用，未访问外部网页' }
+    }
+    let parameters: BrowserActionParameters
     try {
-      const parameters = parseActionParameters(skillId, action.parameters as unknown as Record<string, unknown>, this.#policy)
-      const target = await this.#policy.resolve(parameters.url)
+      parameters = parseActionParameters(skillId, action.parameters, this.#policy)
+    } catch (error) {
+      return { status: 'failed', detail: error instanceof Error ? error.message : '浏览器参数无效，未访问外部网页' }
+    }
+    let client
+    let requestBoundaryCrossed = false
+    try {
+      const target = await this.#policy.resolveTarget(parameters.url)
       client = await this.#clientFactory.create(this.#policy, target)
       requestBoundaryCrossed = true
-      if (skillId === BROWSER_OPEN_SKILL) {
-        const result = await client.open(parameters.url)
-        return { status: 'executed', detail: formatFactualResult(skillId, result) }
-      }
-      if (skillId === BROWSER_READ_SKILL) {
-        const result = await client.read(parameters.url)
-        return { status: 'executed', detail: formatFactualResult(skillId, result) }
-      }
+      if (skillId === BROWSER_OPEN_SKILL) return { status: 'executed', detail: formatFactualResult(skillId, await client.open(parameters.url)) }
+      if (skillId === BROWSER_READ_SKILL) return { status: 'executed', detail: formatFactualResult(skillId, await client.read(parameters.url)) }
       if (skillId === BROWSER_EXTRACT_SKILL) {
-        const result = await client.extract(parameters.url, parameters.selector ?? '')
-        return { status: 'executed', detail: formatFactualResult(skillId, result) }
+        return { status: 'executed', detail: formatFactualResult(skillId, await client.extract({ url: parameters.url, selector: parameters.selector! })) }
       }
-      if (this.#publishScreenshot === undefined) {
-        return { status: 'failed', detail: '网页截图产物回调不可用' }
-      }
-      const screenshot = await client.screenshot(parameters.url, {
-        width: parameters.width,
-        height: parameters.height,
+      const screenshot = await client.screenshot({
+        url: parameters.url,
+        ...(parameters.width === undefined ? {} : { width: parameters.width }),
+        ...(parameters.height === undefined ? {} : { height: parameters.height }),
       })
       const publication = await this.#publishScreenshot!({
         workspaceId: world.workspaceId,
