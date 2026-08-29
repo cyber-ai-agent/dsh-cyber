@@ -8,29 +8,15 @@ const shared = {
   exclude: ['**/node_modules/**', '**/dist/**', '**/lib/**'],
 }
 
-const approvalIntegrationPath = 'packages/server/tests/group-skill-approval-continuation.test.ts'
-
 export default defineConfig({
   test: {
     projects: [
       {
         test: {
           ...shared,
-          // This file exercises multiple durable queue / approval transitions,
-          // including continuation and restart recovery. Keep the normal Node
-          // suite strict; only let this integration file's own 30s diagnostic
-          // deadline fire first on a contended GitHub runner.
-          testTimeout: process.env.CI ? 35_000 : shared.testTimeout,
-          name: 'node-approval-integration',
-          include: [approvalIntegrationPath],
-        },
-      },
-      {
-        test: {
-          ...shared,
           name: 'node',
           include: ['packages/**/tests/**/*.test.ts'],
-          exclude: [...shared.exclude, 'packages/web/tests/**', approvalIntegrationPath],
+          exclude: [...shared.exclude, 'packages/web/tests/**'],
         },
       },
       {
