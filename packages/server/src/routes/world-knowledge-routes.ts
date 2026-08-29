@@ -16,6 +16,7 @@ import {
 } from '../services/world-knowledge-graph-service.js'
 import {
   WorldKnowledgeConsolidationService,
+  type KnowledgeConsolidationJobStatus,
 } from '../services/world-knowledge-consolidation-service.js'
 import type { WorldKnowledgeConsolidationScheduler } from '../services/world-knowledge-consolidation-scheduler.js'
 import { WorldKnowledgeLibraryService } from '../services/world-knowledge-library-service.js'
@@ -170,6 +171,25 @@ export function registerWorldKnowledgeRoutes(router: Router, dependencies: World
         ? await dependencies.consolidation.enqueueDocument({ workspaceId, worldId: world.id, documentId: sourceId })
         : await dependencies.consolidation.enqueueArtifact({ workspaceId, worldId: world.id, artifactId: sourceId })
     writeJson(response, 202, { job })
+  })
+
+  router.get(/^\/api\/worlds\/([^/]+)\/knowledge\/consolidation-jobs$/, async ({ request, response, params, url }) => {
+    const world = assertWorld(store, params[0]!)
+    await access?.assertUnlocked(world.id, request)
+    if (dependencies.consolidation === undefined) throw new HttpError(503, 'knowledge_consolidation_unavailable', '知识整理服务尚未配置')
+    const status = optionalConsolidationStatus(url.searchParams.get('status'))
+    const limit = parseBoundedNumber(url.searchParams.get('limit'), 1, 100) ?? 50
+    writeJson(response, 200, { items: await dependencies.consolidation.listJobs(world.id, status, limit) })
+  })
+
+  router.post(/^\/api\/worlds\/([^/]+)\/knowledge\/consolidation-jobs\/([^/]+)\/retry$/, async ({ request, response, params }) => {
+    const world = assertWorld(store, params[0]!)
+    await access?.assertUnlocked(world.id, request)
+    if (dependencies.consolidation === undefined) throw new HttpError(503, 'knowledge_consolidation_unavailable', '知识整理服务尚未配置')
+    const job = await dependencies.consolidation.getJob(world.id, params[1]!)
+    if (job === undefined) throw new HttpError(404, 'knowledge_consolidation_job_not_found', '知识整理任务不存在')
+    if (job.status !== 'failed') throw new HttpError(409, 'knowledge_consolidation_job_not_failed', '只有失败的知识整理任务可以重试')
+    writeJson(response, 202, { job: await dependencies.consolidation.retryJob(world.id, job.id) })
   })
 
   router.get(/^\/api\/worlds\/([^/]+)\/knowledge$/, async ({ request, response, params }) => {
@@ -360,6 +380,13 @@ function optionalDocumentStatus(value: string | null): 'pending' | 'indexed' | '
   if (status === undefined) return undefined
   if (status === 'pending' || status === 'indexed' || status === 'failed' || status === 'missing') return status
   throw new HttpError(422, 'knowledge_status_invalid', '知识文档状态无效')
+}
+
+function optionalConsolidationStatus(value: string | null): KnowledgeConsolidationJobStatus | undefined {
+  const status = optionalString(value)
+  if (status === undefined) return undefined
+  if (status === 'queued' || status === 'running' || status === 'completed' || status === 'failed') return status
+  throw new HttpError(422, 'knowledge_consolidation_status_invalid', '知识整理任务状态无效')
 }
 
 function parseLimit(value: string | null): number {

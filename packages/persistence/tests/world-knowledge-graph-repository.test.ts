@@ -111,6 +111,37 @@ describe('WorldKnowledgeGraphRepository', () => {
     expect(repository.listConsolidationJobs(world.id)).toHaveLength(1)
   })
 
+  it('requeues a failed consolidation job and clears terminal failure state', async () => {
+    const store = await database()
+    const workspace = store.createWorkspace({ name: '重试作业' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '重试世界', templateId: 'cyber-company' })
+    const session = store.createSession({ workspaceId: workspace.id, worldId: world.id, kind: 'direct', title: '知识重试' })
+    const repository = new WorldKnowledgeGraphRepository(store.database)
+    const job = repository.enqueueConsolidationJob({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      sourceType: 'conversation',
+      sourceId: session.id,
+      fromCursor: 0,
+      toCursor: 1,
+    })
+
+    expect(repository.claimConsolidationJob(job.id)).toMatchObject({ status: 'running', attempt: 1 })
+    expect(repository.failConsolidationJob(world.id, job.id, 'knowledge_model_timeout')).toMatchObject({
+      status: 'failed',
+      errorCode: 'knowledge_model_timeout',
+    })
+    const requeued = repository.requeueConsolidationJob(world.id, job.id)
+    expect(requeued).toMatchObject({
+      status: 'queued',
+      attempt: 1,
+    })
+    expect(requeued).not.toHaveProperty('errorCode')
+    expect(requeued).not.toHaveProperty('startedAt')
+    expect(requeued).not.toHaveProperty('completedAt')
+    expect(repository.claimConsolidationJob(job.id)).toMatchObject({ status: 'running', attempt: 2 })
+  })
+
   it('suppresses archived auto knowledge by semantic fingerprint and preserves it for audit', async () => {
     const store = await database()
     const workspace = store.createWorkspace({ name: '抑制测试' })

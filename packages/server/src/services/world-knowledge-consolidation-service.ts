@@ -84,6 +84,8 @@ export interface KnowledgeConsolidationRepository extends KnowledgeGraphReposito
   completeConsolidationJob(input: { jobId: string; toCursor?: number; completedAt?: string }): KnowledgeConsolidationJob | Promise<KnowledgeConsolidationJob>
   failConsolidationJob(input: { jobId: string; errorCode: string }): KnowledgeConsolidationJob | Promise<KnowledgeConsolidationJob>
   listConsolidationJobs?(input: { status?: KnowledgeConsolidationJobStatus; worldId?: string; limit: number }): readonly KnowledgeConsolidationJob[] | Promise<readonly KnowledgeConsolidationJob[]>
+  getConsolidationJob?(worldId: string, jobId: string): KnowledgeConsolidationJob | undefined | Promise<KnowledgeConsolidationJob | undefined>
+  requeueConsolidationJob?(worldId: string, jobId: string): KnowledgeConsolidationJob | Promise<KnowledgeConsolidationJob>
   applyKnowledgeExtraction(input: {
     jobId: string
     workspaceId: string
@@ -164,6 +166,28 @@ export class WorldKnowledgeConsolidationService {
   }
   enqueueArtifact(input: { workspaceId: string; worldId: string; artifactId: string; artifactVersion?: string }): Promise<KnowledgeConsolidationJob> {
     return this.enqueue({ ...input, sourceType: 'artifact', sourceId: input.artifactId })
+  }
+
+  async listJobs(worldId: string, status: KnowledgeConsolidationJobStatus | undefined, limit: number): Promise<readonly KnowledgeConsolidationJob[]> {
+    if (this.#repository.listConsolidationJobs === undefined) return []
+    return await this.#repository.listConsolidationJobs({ worldId, ...(status === undefined ? {} : { status }), limit })
+  }
+
+  async getJob(worldId: string, jobId: string): Promise<KnowledgeConsolidationJob | undefined> {
+    if (this.#repository.getConsolidationJob === undefined) return undefined
+    return await this.#repository.getConsolidationJob(worldId, jobId)
+  }
+
+  async retryJob(worldId: string, jobId: string): Promise<KnowledgeConsolidationJob> {
+    if (this.#repository.getConsolidationJob === undefined || this.#repository.requeueConsolidationJob === undefined) {
+      throw invalid('knowledge_consolidation_retry_unavailable', '知识整理重试暂不可用')
+    }
+    const current = await this.#repository.getConsolidationJob(worldId, jobId)
+    if (current === undefined) throw invalid('knowledge_consolidation_job_not_found', '知识整理任务不存在')
+    if (current.status !== 'failed') throw invalid('knowledge_consolidation_job_not_failed', '只有失败的知识整理任务可以重试')
+    const queued = await this.#repository.requeueConsolidationJob(worldId, jobId)
+    this.#onChanged?.(worldId, { type: 'knowledge.consolidation.changed', jobId, status: queued.status })
+    return queued
   }
   /**
    * Manual consolidation is an immediate, owner-triggered operation.  It is

@@ -39,7 +39,7 @@ export class AgentRunTraceAdapter implements WorldTraceAdapter<'agent-run'> {
     }
     if (reasoningSummary) entry.reasoningSummary = reasoningSummary
     if (tools.length > 0) entry.tools = tools
-    if (run.errorCode) entry.detail = friendlyRunError(run.errorCode)
+    if (run.errorCode || interaction?.status === 'failed') entry.detail = friendlyRunError(run.errorCode, interaction)
     if (interaction !== undefined) {
       entry.durationMs = interaction.durationMs
       entry.modelId = interaction.modelId
@@ -133,14 +133,32 @@ function traceSummary(status: AgentRunStatus, toolCount: number): string {
   return toolCount > 0 ? `正在处理，已调度 ${toolCount} 个工具` : '正在分析请求'
 }
 
-function friendlyRunError(code: string): string {
-  const labels: Record<string, string> = {
-    'service-restarted': '本地服务重启，本轮运行已安全结束。',
-    timeout: '模型或工具响应超时。',
-    authentication: '模型服务认证失败。',
-    'rate-limited': '模型服务请求过于频繁。',
-    'model-not-found': '当前模型不可用。',
-    interrupted: '本轮运行被中断。',
+function friendlyRunError(
+  code: string | undefined,
+  interaction: AgentRunTraceFact['interaction'],
+): string {
+  const signal = [code, interaction?.errorCode, interaction?.errorMessage, interaction?.httpStatus]
+    .filter((value) => value !== undefined)
+    .join(' ')
+    .toLocaleLowerCase('en-US')
+  if (/service[-_ ]?restarted/.test(signal)) return '本地服务重启，本轮运行已安全结束。'
+  if (interaction?.httpStatus === 429 || /rate[-_ ]?limit|too many requests|quota/.test(signal)) {
+    return /all available accounts/.test(signal)
+      ? '模型服务当前限流，上游暂无可用账户。请稍后重试或切换模型。'
+      : '模型服务当前限流。请稍后重试、检查服务商额度，或切换模型。'
   }
-  return labels[code] ?? '本轮运行未能完成，请在会话中重试。'
+  if (interaction?.httpStatus === 401 || interaction?.httpStatus === 403 || /auth|api[-_ ]?key|credential|forbidden/.test(signal)) {
+    return '模型服务认证失败。请在“设置 → AI 模型”检查密钥和接口权限。'
+  }
+  if (interaction?.httpStatus === 404 || /model[-_ ]?not[-_ ]?found|unknown[-_ ]?model/.test(signal)) {
+    return '当前模型不存在或无权访问。请重新获取模型列表并选择可用模型。'
+  }
+  if (interaction?.httpStatus === 408 || interaction?.httpStatus === 504 || /timeout|timed out|etimedout/.test(signal)) {
+    return '模型服务响应超时。请检查兼容接口状态后重试；长推理可切换到响应更稳定的模型。'
+  }
+  if (/econn|network|socket|connection|unreachable|bad gateway|service unavailable/.test(signal)) {
+    return '模型服务连接中断。请检查网络和兼容接口状态后重试。'
+  }
+  if (/interrupt|abort|user[-_ ]?stop/.test(signal)) return '本轮运行被中断。'
+  return '模型服务未能完成本轮请求。请查看模型交互日志后重试。'
 }

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import type { KnowledgeConsolidationJob } from '@dsh-cyber/contracts'
 import { ApiError, api, jsonBody } from '../../api.js'
 import { subscribeWorldLive } from '../../world-live-client.js'
+import { knowledgeConsolidatePath, knowledgeConsolidationJobsPath, knowledgeConsolidationRetryPath } from './knowledge-api.js'
 
 export type KnowledgeCollectionOrigin = 'folder' | 'zip' | 'manual' | 'web' | 'artifact'
 export type KnowledgeDocumentOrigin = 'upload' | 'paste' | 'web' | 'filesystem' | 'artifact'
@@ -85,6 +87,10 @@ export interface UseWorldKnowledgeResult extends KnowledgeLibrarySnapshot {
   searching: boolean
   busyAction?: KnowledgeMutation
   error?: string
+  consolidationError?: string
+  consolidationJobs: KnowledgeConsolidationJob[]
+  retryingJobId?: string
+  consolidatingSourceId?: string
   searchError?: string
   searchQuery: string
   searchResults: KnowledgeSearchResult[]
@@ -96,6 +102,8 @@ export interface UseWorldKnowledgeResult extends KnowledgeLibrarySnapshot {
   createFromText(input: { title: string; content: string }): Promise<void>
   importFromWeb(input: { url: string; title?: string }): Promise<void>
   rescan(): Promise<void>
+  consolidate(sourceType: 'conversation' | 'document' | 'artifact', sourceId: string): Promise<void>
+  retryConsolidation(jobId: string): Promise<void>
 }
 
 const collectionOrigins = new Set<KnowledgeCollectionOrigin>(['folder', 'zip', 'manual', 'web', 'artifact'])
@@ -217,6 +225,10 @@ export function useWorldKnowledge(options: UseWorldKnowledgeOptions): UseWorldKn
   const [busyAction, setBusyAction] = useState<KnowledgeMutation>()
   const [error, setError] = useState<string>()
   const [searchError, setSearchError] = useState<string>()
+  const [consolidationError, setConsolidationError] = useState<string>()
+  const [consolidationJobs, setConsolidationJobs] = useState<KnowledgeConsolidationJob[]>([])
+  const [retryingJobId, setRetryingJobId] = useState<string>()
+  const [consolidatingSourceId, setConsolidatingSourceId] = useState<string>()
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<KnowledgeSearchResult[]>([])
   const requestGeneration = useRef(0)
@@ -229,17 +241,25 @@ export function useWorldKnowledge(options: UseWorldKnowledgeOptions): UseWorldKn
     const generation = ++requestGeneration.current
     setLoading(true)
     setError(undefined)
-    try {
-      const response = await api<unknown>(knowledgeLibraryPath(worldId))
-      const snapshot = normalizeKnowledgeSnapshot(response, worldId)
-      if (generation !== requestGeneration.current) return
+    setConsolidationError(undefined)
+    const [libraryResult, jobsResult] = await Promise.allSettled([
+      api<unknown>(knowledgeLibraryPath(worldId)),
+      api<unknown>(knowledgeConsolidationJobsPath(worldId)),
+    ])
+    if (generation !== requestGeneration.current) return
+    if (libraryResult.status === 'fulfilled') {
+      const snapshot = normalizeKnowledgeSnapshot(libraryResult.value, worldId)
       setCollections(snapshot.collections)
       setDocuments(snapshot.documents)
-    } catch (cause) {
-      if (generation === requestGeneration.current) setError(toUserMessage(cause, '知识库暂时无法读取，请稍后重试。'))
-    } finally {
-      if (generation === requestGeneration.current) setLoading(false)
+    } else {
+      setError(toUserMessage(libraryResult.reason, '知识库暂时无法读取，请稍后重试。'))
     }
+    if (jobsResult.status === 'fulfilled') {
+      setConsolidationJobs(normalizeConsolidationJobs(jobsResult.value, worldId))
+    } else {
+      setConsolidationError(toUserMessage(jobsResult.reason, '知识整理状态暂时无法读取，请稍后重试。'))
+    }
+    setLoading(false)
   }, [enabled, worldId])
 
   useEffect(() => {
@@ -331,6 +351,38 @@ export function useWorldKnowledge(options: UseWorldKnowledgeOptions): UseWorldKn
     await runMutation('scan', () => api<unknown>(knowledgeLibraryPath(worldId, '/scan'), jsonBody({})))
   }, [runMutation, worldId])
 
+  const consolidate = useCallback(async (sourceType: 'conversation' | 'document' | 'artifact', sourceId: string) => {
+    if (!enabled || consolidatingSourceId !== undefined) return
+    setConsolidatingSourceId(sourceId)
+    setConsolidationError(undefined)
+    try {
+      await api<unknown>(knowledgeConsolidatePath(worldId), jsonBody({ sourceType, sourceId }))
+      await reload()
+    } catch (cause) {
+      const message = toUserMessage(cause, '知识整理任务创建失败，请稍后重试。')
+      setConsolidationError(message)
+      throw new Error(message)
+    } finally {
+      setConsolidatingSourceId(undefined)
+    }
+  }, [consolidatingSourceId, enabled, reload, worldId])
+
+  const retryConsolidation = useCallback(async (jobId: string) => {
+    if (!enabled || retryingJobId !== undefined) return
+    setRetryingJobId(jobId)
+    setConsolidationError(undefined)
+    try {
+      await api<unknown>(knowledgeConsolidationRetryPath(worldId, jobId), jsonBody({}))
+      await reload()
+    } catch (cause) {
+      const message = toUserMessage(cause, '知识整理重试失败，请稍后再试。')
+      setConsolidationError(message)
+      throw new Error(message)
+    } finally {
+      setRetryingJobId(undefined)
+    }
+  }, [enabled, reload, retryingJobId, worldId])
+
   return {
     collections,
     documents,
@@ -339,6 +391,10 @@ export function useWorldKnowledge(options: UseWorldKnowledgeOptions): UseWorldKn
     ...(busyAction === undefined ? {} : { busyAction }),
     ...(error === undefined ? {} : { error }),
     ...(searchError === undefined ? {} : { searchError }),
+    ...(consolidationError === undefined ? {} : { consolidationError }),
+    consolidationJobs,
+    ...(retryingJobId === undefined ? {} : { retryingJobId }),
+    ...(consolidatingSourceId === undefined ? {} : { consolidatingSourceId }),
     searchQuery,
     searchResults,
     reload,
@@ -349,7 +405,35 @@ export function useWorldKnowledge(options: UseWorldKnowledgeOptions): UseWorldKn
     createFromText,
     importFromWeb,
     rescan,
+    consolidate,
+    retryConsolidation,
   }
+}
+
+export function normalizeConsolidationJobs(value: unknown, worldId: string): KnowledgeConsolidationJob[] {
+  const source = isRecord(value) && Array.isArray(value.items) ? value.items : []
+  return source.flatMap((item) => {
+    if (!isRecord(item) || typeof item.id !== 'string' || item.worldId !== worldId) return []
+    if (item.sourceType !== 'conversation' && item.sourceType !== 'document' && item.sourceType !== 'artifact') return []
+    if (item.status !== 'queued' && item.status !== 'running' && item.status !== 'completed' && item.status !== 'failed') return []
+    if (typeof item.sourceId !== 'string' || typeof item.workspaceId !== 'string') return []
+    return [{
+      id: item.id,
+      workspaceId: item.workspaceId,
+      worldId,
+      sourceType: item.sourceType,
+      sourceId: item.sourceId,
+      fromCursor: asNumber(item.fromCursor),
+      toCursor: asNumber(item.toCursor),
+      status: item.status,
+      attempt: asNumber(item.attempt),
+      ...(typeof item.errorCode === 'string' ? { errorCode: item.errorCode } : {}),
+      createdAt: asString(item.createdAt),
+      updatedAt: asString(item.updatedAt),
+      ...(typeof item.startedAt === 'string' ? { startedAt: item.startedAt } : {}),
+      ...(typeof item.completedAt === 'string' ? { completedAt: item.completedAt } : {}),
+    }]
+  })
 }
 
 async function uploadKnowledgeFiles(worldId: string, files: File[], origin: 'upload' | 'folder' | 'zip', collectionName?: string): Promise<unknown> {

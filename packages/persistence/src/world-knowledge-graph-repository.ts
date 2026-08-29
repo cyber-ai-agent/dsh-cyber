@@ -817,7 +817,18 @@ export class WorldKnowledgeGraphRepository {
   }
 
   requeueConsolidationJob(worldId: string, jobId: string): KnowledgeConsolidationJob {
-    return this.updateJob(worldId, jobId, 'queued')
+    const current = this.getConsolidationJob(worldId, jobId)
+    if (current === undefined) throw new EntityNotFoundError(`Knowledge consolidation job not found: ${jobId}`)
+    if (current.status === 'queued') return current
+    if (current.status !== 'failed') throw new PersistenceError('Only failed knowledge consolidation jobs can be retried')
+    const updatedAt = this.#clock()
+    const result = this.#database.prepare(
+      `UPDATE knowledge_consolidation_jobs
+       SET status = 'queued', error_code = NULL, started_at = NULL, completed_at = NULL, updated_at = ?
+       WHERE world_id = ? AND id = ? AND status = 'failed'`,
+    ).run(updatedAt, worldId, jobId)
+    if (result.changes !== 1) throw new PersistenceError('Knowledge consolidation job changed concurrently')
+    return this.getConsolidationJob(worldId, jobId)!
   }
 
   /**

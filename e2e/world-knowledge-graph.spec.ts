@@ -13,9 +13,11 @@ import type {
 let server: CyberServer | undefined
 let origin = ''
 let stateRoot = ''
+let knowledgeExtractor: RecoveringKnowledgeExtractor
 
 test.beforeAll(async () => {
   stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-knowledge-graph-e2e-'))
+  knowledgeExtractor = new RecoveringKnowledgeExtractor()
   await startServer(true)
 })
 
@@ -24,7 +26,7 @@ test.afterAll(async () => {
   await rm(stateRoot, { recursive: true, force: true })
 })
 
-test('consolidates visible evidence, renders the Canvas graph, and survives restart', async ({ page }) => {
+test('shows a failed consolidation, retries it, renders the Canvas graph, and survives restart', async ({ page }) => {
   const current = requireServer()
   const workspace = current.store.listWorkspaces()[0]!
   const world = current.store.listWorlds(workspace.id)[0]!
@@ -54,7 +56,9 @@ test('consolidates visible evidence, renders the Canvas graph, and survives rest
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ sourceType: 'conversation', sourceId: session.id, fromCursor: Math.max(0, message.sequence - 1), toCursor: message.sequence }),
   })
-  expect(response.status, await response.text()).toBe(202)
+  const responseBody = await response.json() as { job: { id: string } }
+  expect(response.status, JSON.stringify(responseBody)).toBe(202)
+  const queuedJob = responseBody.job
 
   const unsupportedManualSource = await fetch(`${origin}/api/worlds/${world.id}/knowledge/consolidate`, {
     method: 'POST',
@@ -63,17 +67,37 @@ test('consolidates visible evidence, renders the Canvas graph, and survives rest
   })
   expect(unsupportedManualSource.status).toBe(422)
 
-  const graph = await expectGraph(world.id)
-  expect(graph.entities).toEqual(expect.arrayContaining([expect.objectContaining({ canonicalName: '北极星计划' }), expect.objectContaining({ canonicalName: 'SQLite' })]))
-  expect(graph.evidence).toEqual([expect.objectContaining({ messageId: message.id, sourceType: 'conversation' })])
-  expect(JSON.stringify(graph)).not.toContain('隐藏推理')
-  expect(current.store.listWorldSkillActions(world.id)).toHaveLength(0)
+  await expect.poll(async () => (await getConsolidationJobs(world.id)).find((job) => job.id === queuedJob.id)?.status).toBe('failed')
 
   const consoleIssues: string[] = []
   attachConsoleRecorder(page, consoleIssues)
   await page.goto(origin)
   await expect(page.locator('.workbench-shell')).toBeVisible()
   await openDockTab(page.getByRole('region', { name: '世界与角色侧边栏' }), '知识')
+  const failedPanel = page.getByRole('region', { name: '知识整理任务' })
+  await expect(failedPanel).toContainText('模型整理超时')
+  const screenshotRoot = join(process.cwd(), 'artifacts', 'world-knowledge-graph')
+  await mkdir(screenshotRoot, { recursive: true })
+  for (const viewport of [
+    { width: 1_440, height: 900, label: '1440x900' },
+    { width: 1_920, height: 1_080, label: '1920x1080' },
+    { width: 3_840, height: 2_160, label: '3840x2160' },
+  ]) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height })
+    await expect(failedPanel).toBeVisible()
+    expect(await failedPanel.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
+    await page.screenshot({ path: join(screenshotRoot, `knowledge-consolidation-failed-${viewport.label}.png`), fullPage: false })
+  }
+  knowledgeExtractor.recover()
+  await failedPanel.getByRole('button', { name: '重试' }).click()
+
+  const graph = await expectGraph(world.id)
+  expect(graph.entities).toEqual(expect.arrayContaining([expect.objectContaining({ canonicalName: '北极星计划' }), expect.objectContaining({ canonicalName: 'SQLite' })]))
+  expect(graph.evidence).toEqual([expect.objectContaining({ messageId: message.id, sourceType: 'conversation' })])
+  expect(JSON.stringify(graph)).not.toContain('隐藏推理')
+  expect(current.store.listWorldSkillActions(world.id)).toHaveLength(0)
+  await expect(failedPanel).toHaveCount(0)
+
   await page.getByRole('tab', { name: /知识图谱/ }).click()
   await expect(page.getByRole('heading', { name: '知识图谱' })).toBeVisible()
   const canvas = page.locator('canvas[aria-label*="知识图谱画布"]')
@@ -93,8 +117,6 @@ test('consolidates visible evidence, renders the Canvas graph, and survives rest
     return coloredPixels
   }), { message: 'Canvas 应绘制可见的实体节点，而不是空白画布' }).toBeGreaterThan(20)
 
-  const screenshotRoot = join(process.cwd(), 'artifacts', 'world-knowledge-graph')
-  await mkdir(screenshotRoot, { recursive: true })
   for (const viewport of [
     { width: 1_440, height: 900, label: '1440x900' },
     { width: 1_920, height: 1_080, label: '1920x1080' },
@@ -123,7 +145,7 @@ async function startServer(bootstrapDefaultWorld: boolean): Promise<void> {
     webRoot: join(process.cwd(), 'packages', 'web', 'dist'),
     port: 0,
     bootstrapDefaultWorld,
-    knowledgeExtractionPort: new DeterministicKnowledgeExtractor(),
+    knowledgeExtractionPort: knowledgeExtractor,
   })
   origin = (await server.start()).origin
 }
@@ -141,6 +163,12 @@ async function getGraph(worldId: string): Promise<GraphResponse> {
   const response = await fetch(`${origin}/api/worlds/${worldId}/knowledge/graph?limit=300`)
   if (!response.ok) throw new Error(`图谱接口返回 ${response.status}: ${await response.text()}`)
   return await response.json() as GraphResponse
+}
+
+async function getConsolidationJobs(worldId: string): Promise<Array<{ id: string; status: string }>> {
+  const response = await fetch(`${origin}/api/worlds/${worldId}/knowledge/consolidation-jobs`)
+  if (!response.ok) throw new Error(`知识整理任务接口返回 ${response.status}: ${await response.text()}`)
+  return (await response.json() as { items: Array<{ id: string; status: string }> }).items
 }
 
 function requireServer(): CyberServer {
@@ -162,8 +190,19 @@ interface GraphResponse {
   evidence: Array<{ id: string; messageId?: string; sourceType: string }>
 }
 
-class DeterministicKnowledgeExtractor implements KnowledgeExtractionPort {
+class RecoveringKnowledgeExtractor implements KnowledgeExtractionPort {
+  #failing = true
+
+  recover(): void {
+    this.#failing = false
+  }
+
   async extract(input: KnowledgeExtractionRequest) {
+    if (this.#failing) {
+      const error = new Error('model timeout') as Error & { code: string }
+      error.code = 'knowledge_model_timeout'
+      throw error
+    }
     const evidenceId = input.evidence[0]?.evidenceId
     if (evidenceId === undefined) return { payload: { entities: [], claims: [], relations: [], evidenceRefs: [] } }
     const evidenceRefs = [{ sourceType: input.sourceType, sourceId: input.sourceId, evidenceId }]

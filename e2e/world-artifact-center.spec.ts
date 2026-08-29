@@ -8,8 +8,8 @@ import { createCyberServer, type CyberServer } from '../packages/server/lib/inde
 import { openDockTab } from './dock-test-helpers.js'
 import { attachAppConsoleRecorder } from './console-test-helpers.js'
 
-const MARKDOWN_TITLE = '运行交付说明'
-const HTML_TITLE = '运行预览页面'
+const MARKDOWN_TITLE = 'brief.md'
+const HTML_TITLE = 'index.html'
 const MARKDOWN_PATH = 'run-output/brief.md'
 const HTML_PATH = 'run-output/index.html'
 
@@ -28,7 +28,7 @@ test.afterAll(async () => {
   await rm(stateRoot, { recursive: true, force: true })
 })
 
-test('publishes one BrowserRuntime run into the world artifact center and keeps it isolated', async ({ page }) => {
+test('auto-registers real files from one BrowserRuntime run and keeps them isolated', async ({ page }) => {
   // Three production-resolution screenshots plus a real server restart can
   // exceed Playwright's default on shared CI runners. Keep the assertions
   // strict while allowing the same visual/restart coverage to finish.
@@ -59,14 +59,7 @@ test('publishes one BrowserRuntime run into the world artifact center and keeps 
   expect(run?.workspacePath.toLowerCase()).toContain(join(stateRoot, 'worlds', encodeURIComponent(world.id), 'files').toLowerCase())
   const agentRunId = run!.agentRunId!
   const manifestPath = join(run!.workspacePath, '.dsh', 'artifacts', `${agentRunId}.json`)
-  const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as unknown
-  expect(manifest).toEqual({
-    schemaVersion: 1,
-    artifacts: [
-      { path: MARKDOWN_PATH, title: MARKDOWN_TITLE, kind: 'markdown', description: '本次运行生成的 Markdown 交付说明。' },
-      { path: HTML_PATH, title: HTML_TITLE, kind: 'html', description: '本次运行生成的隔离 HTML 预览。' },
-    ],
-  })
+  await expect(readFile(manifestPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
 
   const filesRoot = join(stateRoot, 'worlds', encodeURIComponent(world.id), 'files')
   await expect(readFile(join(filesRoot, MARKDOWN_PATH), 'utf8')).resolves.toContain('# 运行交付说明')
@@ -105,7 +98,7 @@ test('publishes one BrowserRuntime run into the world artifact center and keeps 
   const markdownDetail = page.getByRole('region', { name: `${MARKDOWN_TITLE}产物详情` })
   await expect(markdownDetail).toBeVisible()
   const markdownReader = markdownDetail.locator('.artifact-markdown-reader')
-  await expect(markdownReader.locator('h1')).toContainText(MARKDOWN_TITLE)
+  await expect(markdownReader.locator('h1')).toContainText('运行交付说明')
   await expect(markdownReader.locator('ul')).toContainText('一次真实角色运行回合')
   await expect(markdownReader.locator('table')).toContainText('已发布')
   await expect(markdownReader.locator('blockquote')).toContainText('阅读验证内容')
@@ -224,15 +217,6 @@ class ArtifactBrowserRuntime implements AgentRuntimePort {
     await mkdir(join(request.workspacePath, 'run-output'), { recursive: true })
     await writeFile(join(request.workspacePath, MARKDOWN_PATH), markdown, 'utf8')
     await writeFile(join(request.workspacePath, HTML_PATH), html, 'utf8')
-    await mkdir(join(request.workspacePath, '.dsh', 'artifacts'), { recursive: true })
-    await writeFile(join(request.workspacePath, '.dsh', 'artifacts', `${request.agentRunId!}.json`), JSON.stringify({
-      schemaVersion: 1,
-      artifacts: [
-        { path: MARKDOWN_PATH, title: MARKDOWN_TITLE, kind: 'markdown', description: '本次运行生成的 Markdown 交付说明。' },
-        { path: HTML_PATH, title: HTML_TITLE, kind: 'html', description: '本次运行生成的隔离 HTML 预览。' },
-      ],
-    }, null, 2) + '\n', 'utf8')
-
     request.onEvent?.({ kind: 'turn.started', source: 'artifact-browser-e2e', sourceSessionId: agentSessionId, sourceSequence: 1, metadata: {} })
     request.onEvent?.({ kind: 'tool.started', source: 'artifact-browser-e2e', sourceSessionId: agentSessionId, sourceSequence: 2, toolName: 'write_workspace', callId: `call-${request.agent.id}`, metadata: {} })
     request.onEvent?.({ kind: 'tool.completed', source: 'artifact-browser-e2e', sourceSessionId: agentSessionId, sourceSequence: 3, callId: `call-${request.agent.id}`, failed: false, metadata: {} })

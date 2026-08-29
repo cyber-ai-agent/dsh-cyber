@@ -13,6 +13,9 @@ export interface AgentRunCompletionContext {
   workTurnId: string
   agentRunId: string
   workspacePath: string
+  /** Durable run window used by host-owned file attribution. */
+  runStartedAt?: string
+  runCompletedAt?: string
 }
 
 /**
@@ -35,4 +38,3 @@ export const NOOP_AGENT_RUN_COMPLETION_HOOK: AgentRunCompletionHook = {
     return {}
   },
 }
-

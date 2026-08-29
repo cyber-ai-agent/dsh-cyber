@@ -17,7 +17,7 @@ interface ArtifactDetailProps {
   canAddToKnowledge?: boolean
 }
 
-type KnowledgeConsolidationState = 'idle' | 'pending' | 'queued' | 'success' | 'error'
+type KnowledgeConsolidationState = 'idle' | 'pending' | 'queued' | 'error'
 
 interface KnowledgeConsolidationResponse {
   job?: unknown
@@ -70,16 +70,16 @@ export function ArtifactDetail({ worldId, artifact, onBack, onRename, onArchive,
   }
 
   const addToKnowledge = async () => {
-    if (!knowledgeActionAllowed || busy || knowledgeState === 'pending' || knowledgeState === 'queued' || knowledgeState === 'success') return
+    if (!knowledgeActionAllowed || busy || knowledgeState === 'pending' || knowledgeState === 'queued') return
     setKnowledgeState('pending')
     setKnowledgeMessage('正在加入知识图谱…')
     try {
       const response = await api<KnowledgeConsolidationResponse>(knowledgeConsolidatePath(worldId), {
         ...jsonBody({ sourceType: 'artifact', sourceId: artifact.id }),
       })
-      const queued = response.job !== undefined
-      setKnowledgeState(queued ? 'queued' : 'success')
-      setKnowledgeMessage(queued ? '已排队，后台整理中。' : '已加入知识图谱。')
+      if (response.job === undefined) throw new Error('知识整理服务未返回可追踪的任务记录。')
+      setKnowledgeState('queued')
+      setKnowledgeMessage('已排队，后台整理中。')
     } catch (cause) {
       setKnowledgeState('error')
       setKnowledgeMessage(toKnowledgeConsolidationError(cause))
@@ -105,7 +105,7 @@ export function ArtifactDetail({ worldId, artifact, onBack, onRename, onArchive,
       <div className="artifact-detail__actions">
         <a className="artifact-button" href={artifactFileUrl(worldId, artifact.id, artifact.currentVersion)} target="_blank" rel="noreferrer"><LinkSimple size={16} />打开文件</a>
         <button type="button" className="artifact-button" disabled={busy || artifact.status === 'archived'} onClick={() => void archive()}><Archive size={16} />{artifact.status === 'archived' ? '已归档' : '归档'}</button>
-        <button type="button" className="artifact-button" disabled={!knowledgeActionAllowed || busy || knowledgeState === 'pending' || knowledgeState === 'queued' || knowledgeState === 'success'} title={knowledgeDisabledReason ?? '将这个产物吸收到知识图谱'} onClick={() => void addToKnowledge()}><PlusCircle size={16} />{knowledgeState === 'pending' ? '正在加入…' : knowledgeState === 'queued' ? '已排队' : knowledgeState === 'success' ? '已加入知识图谱' : '加入知识'}</button>
+        <button type="button" className="artifact-button" disabled={!knowledgeActionAllowed || busy || knowledgeState === 'pending' || knowledgeState === 'queued'} title={knowledgeDisabledReason ?? '将这个产物吸收到知识图谱'} onClick={() => void addToKnowledge()}><PlusCircle size={16} />{knowledgeState === 'pending' ? '正在加入…' : knowledgeState === 'queued' ? '已排队' : '加入知识'}</button>
       </div>
       {status === undefined ? null : <p className="artifact-detail__status" role="status">{status}</p>}
       {knowledgeMessage === undefined ? null : <p id="artifact-knowledge-status" className={`artifact-detail__knowledge-status artifact-detail__knowledge-status--${knowledgeState}`} role={knowledgeState === 'error' ? 'alert' : 'status'} aria-live="polite">{knowledgeMessage}</p>}

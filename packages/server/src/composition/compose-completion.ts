@@ -16,6 +16,8 @@ export function composeCompletionWorker(
         const employeeId = typeof job.payload.employeeId === 'string' ? job.payload.employeeId : undefined
         const workspacePath = typeof job.payload.workspacePath === 'string' ? job.payload.workspacePath : undefined
         if (employeeId === undefined || workspacePath === undefined) throw new Error('completion_job_payload_invalid')
+        const run = store.getAgentRun(job.agentRunId)
+        if (run === undefined) throw new Error('completion_agent_run_missing')
         const contribution = await artifacts.publishAgentRun({
           workspaceId: job.workspaceId,
           worldId: job.worldId,
@@ -24,6 +26,8 @@ export function composeCompletionWorker(
           workTurnId: job.workTurnId,
           agentRunId: job.agentRunId,
           workspacePath,
+          ...(run.startedAt === undefined ? {} : { runStartedAt: run.startedAt }),
+          ...(run.completedAt === undefined ? {} : { runCompletedAt: run.completedAt }),
         })
         // Memory is an employee-owned projection of already committed chat
         // facts. The source-message dedupe in the service makes this safe when
