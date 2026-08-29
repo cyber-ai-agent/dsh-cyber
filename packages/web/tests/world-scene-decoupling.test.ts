@@ -49,7 +49,16 @@ describe('World Scene ownership guard', () => {
     expect(switcher).not.toMatch(/\bonThemeChange\s*\?\./)
     expect(fallbackWorld).not.toContain('dataset.skin')
     expect(fallbackWorld).not.toContain('currentSkin')
-    expect(fallbackWorld).not.toMatch(/sceneImage\s*\?\?/) 
+    expect(fallbackWorld).not.toMatch(/sceneImage\s*\?\?/)
+  })
+
+  it('previews a conversation Skin without persisting it or generating World Scene data', () => {
+    const editor = stripComments(readFileSync(join(componentSourceRoot, 'ThemeCustomizerDialog.tsx'), 'utf8'))
+    expect(editor).toContain('applyPreviewSkin(id, tokens)')
+    expect(editor).not.toContain('saveCustomTheme(tempConfig)')
+    expect(editor).not.toContain("updateToken('worldMapImage'")
+    expect(editor).toContain('worldMapImage: legacyWorldMapImage')
+    expect(editor).toContain('skinEditor.assets.backdropDescription')
   })
 })
 
