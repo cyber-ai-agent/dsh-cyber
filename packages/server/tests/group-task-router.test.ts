@@ -48,6 +48,37 @@ describe('GroupTaskRouter', () => {
     expect(result.coordinatorEmployeeId).toBe('mentioned')
   })
 
+  it('routes explicit URL read requests through browser.read without relying on role names', () => {
+    const employees = [
+      candidate('observer', '观察角色', '协调员', []),
+      candidate('reader', '资料助手', '通用员工', ['browser.read']),
+    ]
+    const catalog = [skill('browser.read', '浏览器读取网页', [
+      '读取网页',
+      '网页正文',
+      '读取 http',
+      '读取http',
+      '阅读 http',
+      '阅读http',
+      '查看 http',
+      '查看http',
+      'browser read',
+      'read webpage',
+      'read http',
+    ])]
+
+    for (const prompt of [
+      '任务：请读取 https://example.com/task 并形成事实总结',
+      '请阅读https://example.com/report 后给出摘要',
+      'read https://example.com/docs and summarize the facts',
+    ]) {
+      const result = new GroupTaskRouter().route({ prompt, employees, catalog })
+      expect(result.requiredSkillIds).toEqual(['browser.read'])
+      expect(result.steps).toHaveLength(1)
+      expect(result.steps[0]?.assignedEmployeeIds).toEqual(['reader'])
+    }
+  })
+
   it('limits routed executors to three skills and keeps steps topologically neutral for the executor', () => {
     const employees = [
       candidate('a', '甲', '分析师', ['one']),

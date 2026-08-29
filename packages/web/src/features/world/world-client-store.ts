@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type {
   World,
   WorldCue,
@@ -11,13 +11,12 @@ import type {
   WorldThemeOption,
   WorldThemeSceneManifest,
 } from '@dsh-cyber/contracts'
-import { cyberCompanyTheme, findPath, getAnchor, getScene, maidPalaceTheme, moonlitTavernTheme } from '@dsh-cyber/world-runtime'
+import { findPath, getAnchor, getScene } from '@dsh-cyber/world-runtime'
 
 import { api } from '../../api.js'
 import type { CyberEmployee } from '../../types.js'
-import { worldExperience } from '../../world-experience.js'
 import { subscribeWorldLive } from '../../world-live-client.js'
-import { readWorldTheme, resolveThemeManifest } from './world-themes.js'
+import { resolveBuiltInWorldScene } from './world-scene.js'
 
 export interface WorldClientState {
   snapshot?: WorldRuntimeSnapshot
@@ -36,66 +35,97 @@ interface UseWorldClientInput {
   liveEnabled?: boolean
 }
 
-function useCurrentSkin(): string | undefined {
-  const [skin, setSkin] = useState<string | undefined>(() => {
-    return typeof document !== 'undefined' ? document.documentElement.dataset.skin : undefined
-  })
-
-  useEffect(() => {
-    if (typeof document === 'undefined') return
-    const observer = new MutationObserver(() => {
-      setSkin(document.documentElement.dataset.skin)
-    })
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-skin'] })
-    return () => observer.disconnect()
-  }, [])
-
-  return skin
-}
-
-
-function resolveSkinManifest(world: World, baseManifest?: WorldThemeManifestV1, currentSkin?: string): WorldThemeManifestV1 {
-  const themeId = currentSkin ?? readWorldTheme(world)
-  return resolveThemeManifest(world, themeId, baseManifest)
+interface WorldRuntimeLoadResult {
+  snapshot: WorldRuntimeSnapshot
+  manifest: WorldThemeManifestV1
+  themes: { activeThemeId: string; items: WorldThemeOption[] }
 }
 
 export function useWorldClient({ demoMode, world, employees, liveEnabled = true }: UseWorldClientInput) {
-  const currentSkin = useCurrentSkin()
-  const currentSkinRef = useRef(currentSkin)
-  currentSkinRef.current = currentSkin
-  const manifest = resolveSkinManifest(world, undefined, currentSkin)
+  const fallbackManifest = useMemo(() => resolveBuiltInWorldScene(world), [world.templateId])
   const [state, setState] = useState<WorldClientState>(() => ({
-    manifest,
-    rendererIdentity: builtInRendererIdentity(manifest),
+    manifest: fallbackManifest,
+    rendererIdentity: builtInRendererIdentity(fallbackManifest),
     cues: [],
     loading: !demoMode,
     connected: demoMode,
-    ...(demoMode ? { snapshot: demoSnapshot(world, employees, manifest) } : {}),
+    ...(demoMode ? { snapshot: demoSnapshot(world, employees, fallbackManifest) } : {}),
   }))
 
-  useEffect(() => {
-    const effective = resolveSkinManifest(world, undefined, currentSkin)
+  const loadRuntime = useCallback(async (): Promise<WorldRuntimeLoadResult> => {
+    const [snapshot, manifest, themes] = await Promise.all([
+      api<WorldRuntimeSnapshot>(`/api/worlds/${encodeURIComponent(world.id)}/runtime-snapshot`),
+      api<WorldThemeManifestV1>(`/api/worlds/${encodeURIComponent(world.id)}/theme-manifest`),
+      api<{ activeThemeId: string; items: WorldThemeOption[] }>(`/api/worlds/${encodeURIComponent(world.id)}/themes`),
+    ])
+    return { snapshot, manifest, themes }
+  }, [world.id])
+
+  const applyLoadedRuntime = useCallback((loaded: WorldRuntimeLoadResult) => {
+    const activeTheme = loaded.themes.items.find((item) => item.active)
     setState((current) => {
-      if (current.manifest.id === effective.id) return current
+      const { error: _error, ...withoutError } = current
       return {
-        ...current,
-        manifest: effective,
-        rendererIdentity: builtInRendererIdentity(effective),
+        ...withoutError,
+        snapshot: current.snapshot !== undefined && current.snapshot.worldId === loaded.snapshot.worldId && current.snapshot.sequence > loaded.snapshot.sequence
+          ? current.snapshot
+          : loaded.snapshot,
+        // The server-side World binding is authoritative. Never rewrite this
+        // manifest from document.dataset.skin or any conversation wallpaper.
+        manifest: loaded.manifest,
+        rendererIdentity: activeTheme?.source === 'installed'
+          ? rendererIdentity(activeTheme)
+          : builtInRendererIdentity(loaded.manifest),
+        loading: false,
+        connected: true,
       }
     })
-  }, [currentSkin, world])
+  }, [])
+
+  const reloadScene = useCallback(async () => {
+    if (demoMode) {
+      const manifest = resolveBuiltInWorldScene(world)
+      setState((current) => {
+        const { error: _error, ...withoutError } = current
+        return {
+          ...withoutError,
+          manifest,
+          rendererIdentity: builtInRendererIdentity(manifest),
+          snapshot: mergeDemoEmployees(current.snapshot, world, employees, manifest),
+          loading: false,
+          connected: true,
+        }
+      })
+      return
+    }
+    applyLoadedRuntime(await loadRuntime())
+  }, [applyLoadedRuntime, demoMode, employees, loadRuntime, world])
+
+  useEffect(() => {
+    setState((current) => {
+      if (current.snapshot?.worldId === world.id) return current
+      return {
+        manifest: fallbackManifest,
+        rendererIdentity: builtInRendererIdentity(fallbackManifest),
+        cues: [],
+        loading: !demoMode,
+        connected: demoMode,
+        ...(demoMode ? { snapshot: demoSnapshot(world, employees, fallbackManifest) } : {}),
+      }
+    })
+  }, [demoMode, employees, fallbackManifest, world])
 
   useEffect(() => {
     if (!demoMode) return
     setState((current) => ({
       ...current,
-      manifest,
-      rendererIdentity: builtInRendererIdentity(manifest),
-      snapshot: mergeDemoEmployees(current.snapshot, world, employees, manifest),
+      manifest: fallbackManifest,
+      rendererIdentity: builtInRendererIdentity(fallbackManifest),
+      snapshot: mergeDemoEmployees(current.snapshot, world, employees, fallbackManifest),
       loading: false,
       connected: true,
     }))
-  }, [demoMode, employees, manifest, world])
+  }, [demoMode, employees, fallbackManifest, world])
 
   useEffect(() => {
     if (demoMode || !liveEnabled) return
@@ -120,7 +150,7 @@ export function useWorldClient({ demoMode, world, employees, liveEnabled = true 
       setState((current) => ({ ...current, connected: false }))
       void api<WorldRuntimeSnapshot>(`/api/worlds/${encodeURIComponent(world.id)}/runtime-snapshot`)
         .then((snapshot) => {
-          if (!cancelled) setState((current) => current.snapshot !== undefined && current.snapshot.sequence > snapshot.sequence
+          if (!cancelled) setState((current) => current.snapshot !== undefined && current.snapshot.worldId === snapshot.worldId && current.snapshot.sequence > snapshot.sequence
             ? { ...current, connected: true }
             : { ...current, snapshot, cues: [], connected: true })
         })
@@ -140,27 +170,9 @@ export function useWorldClient({ demoMode, world, employees, liveEnabled = true 
     const unsubscribeRuntime = subscribeWorldLive(world.id, 'world-runtime', onRuntime)
     const unsubscribeReady = subscribeWorldLive(world.id, 'ready', onReady)
     const unsubscribeError = subscribeWorldLive(world.id, 'error', onError)
-    void Promise.all([
-      api<WorldRuntimeSnapshot>(`/api/worlds/${encodeURIComponent(world.id)}/runtime-snapshot`),
-      api<WorldThemeManifestV1>(`/api/worlds/${encodeURIComponent(world.id)}/theme-manifest`),
-      api<{ items: WorldThemeOption[] }>(`/api/worlds/${encodeURIComponent(world.id)}/themes`),
-    ]).then(([snapshot, nextManifest, themes]) => {
+    void loadRuntime().then((loaded) => {
       if (cancelled) return
-      const activeTheme = themes.items.find((item) => item.active)
-      // The HTTP response can arrive after the user has changed skins. Resolve
-      // against the latest document skin so an old server manifest cannot
-      // overwrite the newly selected shared scene.
-      const effectiveManifest = resolveSkinManifest(world, nextManifest, currentSkinRef.current)
-      setState((current) => ({
-        ...current,
-        snapshot: current.snapshot !== undefined && current.snapshot.sequence > snapshot.sequence ? current.snapshot : snapshot,
-        manifest: effectiveManifest,
-        rendererIdentity: activeTheme === undefined || effectiveManifest.id === maidPalaceTheme.id
-          ? builtInRendererIdentity(effectiveManifest)
-          : rendererIdentity(activeTheme),
-        loading: false,
-        connected: true,
-      }))
+      applyLoadedRuntime(loaded)
       initialized = true
     }).catch((cause: unknown) => {
       if (!cancelled) setState((current) => ({
@@ -178,7 +190,7 @@ export function useWorldClient({ demoMode, world, employees, liveEnabled = true 
       unsubscribeReady()
       unsubscribeError()
     }
-  }, [demoMode, liveEnabled, world.id])
+  }, [applyLoadedRuntime, demoMode, liveEnabled, loadRuntime, world.id])
 
   const interact = useCallback(async (request: WorldInteractionRequest) => {
     if (demoMode) {
@@ -197,7 +209,7 @@ export function useWorldClient({ demoMode, world, employees, liveEnabled = true 
     }))
   }, [demoMode, world.id])
 
-  return useMemo(() => ({ ...state, interact }), [interact, state])
+  return useMemo(() => ({ ...state, interact, reloadScene }), [interact, reloadScene, state])
 }
 
 function rendererIdentity(theme: WorldThemeOption): string {
@@ -294,7 +306,7 @@ function demoSnapshot(world: World, employees: CyberEmployee[], manifest: WorldT
     clock: { now, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai', lightsOn: true },
     entities: employees.map((employee, index) => {
       const placement = demoPlacement(scene, index)
-      return demoEntity(employee, placement.anchorId, placement.position, placement.facing, now)
+      return demoEntity(employee, placement.anchorId, placement.position, placement.facing, now, scene.id)
     }),
     objects: scene.interactables.map((object) => ({
       id: object.id,
@@ -317,7 +329,7 @@ function mergeDemoEmployees(
   employees: CyberEmployee[],
   manifest: WorldThemeManifestV1,
 ): WorldRuntimeSnapshot {
-  if (previous === undefined || previous.worldId !== world.id) return demoSnapshot(world, employees, manifest)
+  if (previous === undefined || previous.worldId !== world.id || previous.themeId !== manifest.id) return demoSnapshot(world, employees, manifest)
   const scene = getScene(manifest, previous.sceneId)
   const existing = new Map(previous.entities.map((entity) => [entity.id, entity]))
   return {
@@ -326,7 +338,7 @@ function mergeDemoEmployees(
       const current = existing.get(employee.id)
       if (current !== undefined) return { ...current, displayName: employee.displayName, role: employee.role, status: employee.status }
       const placement = demoPlacement(scene, index)
-      return demoEntity(employee, placement.anchorId, placement.position, placement.facing, new Date().toISOString())
+      return demoEntity(employee, placement.anchorId, placement.position, placement.facing, new Date().toISOString(), scene.id)
     }),
   }
 }
@@ -358,11 +370,12 @@ function demoEntity(
   position: { x: number; y: number },
   facing: WorldRuntimeEntityState['facing'],
   now: string,
+  sceneId: string,
 ): WorldRuntimeEntityState {
   return {
     id: employee.id,
     kind: 'agent',
-    sceneId: 'headquarters',
+    sceneId,
     sourceId: employee.id,
     displayName: employee.displayName,
     role: employee.role,

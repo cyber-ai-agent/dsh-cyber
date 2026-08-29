@@ -24,6 +24,7 @@ export default defineConfig({
           ...shared,
           name: 'web',
           include: ['packages/web/tests/**/*.test.ts'],
+          setupFiles: ['packages/web/tests/setup.ts'],
           // Web tests render into a real DOM so effects, subscriptions and
           // event listeners actually run. Without it every web test was a
           // static-markup snapshot: a client crash on first subscribe passed
