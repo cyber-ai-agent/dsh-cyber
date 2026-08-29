@@ -5100,11 +5100,11 @@ export class SqliteStore {
     const collaborationMode = validateSessionCollaborationMode(
       input.collaborationMode ?? session.collaborationMode ?? 'discussion',
     )
-    if (collaborationMode !== (session.collaborationMode ?? 'discussion')) {
-      throw new PersistenceError('Conversation queue collaboration mode does not match its session')
-    }
     if (collaborationMode === 'task' && session.kind !== 'group') {
       throw new PersistenceError('Task collaboration mode requires a group session')
+    }
+    if (session.kind === 'group' && (collaborationMode === 'task') !== (turn.interactionKind === 'task')) {
+      throw new PersistenceError('Conversation queue collaboration mode does not match its WorkTurn')
     }
     const employeeIds = normalizeQueueEmployeeIds(input.employeeIds)
     for (const employeeId of employeeIds) {
