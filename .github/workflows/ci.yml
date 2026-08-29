@@ -30,6 +30,8 @@ jobs:
         with:
           node-version: 22.19.0
           cache: pnpm
+      - name: Verify immutable workflow action pins
+        run: node scripts/check-workflow-action-pins.mjs
       - run: pnpm install --frozen-lockfile
       - name: Typecheck
         run: pnpm typecheck
