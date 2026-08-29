@@ -34,7 +34,8 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
   const { store, packageManager, packageCatalog, skillRuntime, worldMarketplace, worldPackages, worldAccess, skillCatalog, credentials } = dependencies
   const workshop = new CreativeWorkshopService(store, packageManager)
   const workshopDrafts = new CreativeWorkshopDraftService(store)
-  const workshopDraftGenerator = dependencies.workshopDraftGenerator ?? new CreativeWorkshopDraftGenerator(store, credentials, workshopDrafts)
+  const workshopDraftGenerator = dependencies.workshopDraftGenerator
+    ?? new CreativeWorkshopDraftGenerator(store, credentials, workshopDrafts, { skillCatalog })
 
   router.get(/^\/api\/workspaces\/([^/]+)\/packages$/, ({ response, params }) => {
     const workspaceId = params[0]!
@@ -206,7 +207,7 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
   router.post(/^\/api\/workspaces\/([^/]+)\/workshop\/draft\/generate$/, async ({ request, response, params }) => {
     const body = await readJson(request)
     const generated = await workshopDraftGenerator.generate(params[0]!, body.prompt)
-    writeJson(response, 200, { draft: await workshopDrafts.save(params[0]!, generated) })
+    writeJson(response, 200, { draft: generated })
   })
 
   router.delete(/^\/api\/workspaces\/([^/]+)\/workshop\/draft$/, async ({ response, params }) => {
