@@ -8,11 +8,12 @@ const worldSourceRoot = join(process.cwd(), 'packages', 'web', 'src', 'features'
 describe('World Scene ownership guard', () => {
   it('does not let the World Runtime client observe or resolve from the active Skin', () => {
     const source = readFileSync(join(worldSourceRoot, 'world-client-store.ts'), 'utf8')
-    expect(source).not.toContain('dataset.skin')
-    expect(source).not.toContain('MutationObserver')
-    expect(source).not.toContain('readWorldTheme')
-    expect(source).not.toContain('resolveThemeManifest')
-    expect(source).toContain('/theme-manifest')
+    const executableSource = stripComments(source)
+    expect(executableSource).not.toContain('dataset.skin')
+    expect(executableSource).not.toContain('MutationObserver')
+    expect(executableSource).not.toContain('readWorldTheme')
+    expect(executableSource).not.toContain('resolveThemeManifest')
+    expect(executableSource).toContain('/theme-manifest')
   })
 
   it('keeps Skin choice and World Scene choice in separate UI controls', () => {
@@ -33,3 +34,9 @@ describe('World Scene ownership guard', () => {
     expect(canvas).not.toContain('world-canvas-host--shared-scene')
   })
 })
+
+function stripComments(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '')
+}
