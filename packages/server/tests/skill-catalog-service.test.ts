@@ -22,7 +22,7 @@ afterEach(async () => {
 })
 
 describe('SkillCatalogService', () => {
-  it('separates installed plugin discovery from pinned World availability', async () => {
+  it('separates installed plugin discovery from pinned World availability and preserves package routing metadata', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-skill-catalog-'))
     roots.push(root)
     const workspace: Workspace = {
@@ -39,7 +39,11 @@ describe('SkillCatalogService', () => {
     }
     const installed = await skillPackage(root)
     const builtin = descriptor('coding', '软件实现', 'builtin.recipe', 'recipe')
-    const firecrawl = { ...descriptor('web.search.firecrawl', '联网搜索', 'builtin.firecrawl', 'integration'), packageId: installed.packageId }
+    const firecrawl = {
+      ...descriptor('web.search.firecrawl', '联网搜索', 'builtin.firecrawl', 'integration'),
+      packageId: installed.packageId,
+      routingHints: ['联网'],
+    }
     const installedPackages: InstalledPackage[] = []
     const registry = {
       list: (_workspaceId?: string): CharacterSkillDescriptor[] => [builtin, firecrawl],
@@ -70,10 +74,13 @@ describe('SkillCatalogService', () => {
     })
 
     const worldAItems = await service.listWorld(worldA.id)
-    expect(find(worldAItems, 'web.search.firecrawl')).toMatchObject({
+    const worldAFirecrawl = find(worldAItems, 'web.search.firecrawl')
+    expect(worldAFirecrawl).toMatchObject({
       source: 'plugin', scope: 'world', worldAvailable: true, availability: 'available',
       packageVersion: installed.version,
+      adapterId: 'builtin.firecrawl',
     })
+    expect(worldAFirecrawl.routingHints).toEqual(['联网', '搜索官网', 'firecrawl search'])
 
     const worldBItems = await service.listWorld(worldB.id)
     expect(find(worldBItems, 'web.search.firecrawl')).toMatchObject({
@@ -137,6 +144,7 @@ describe('SkillCatalogService', () => {
     expect(item).toMatchObject({
       source: 'plugin', globalKnown: true, worldAvailable: false, availability: 'unavailable', adapterId: 'unbound.package',
     })
+    expect(item?.routingHints).toEqual(['搜索官网', 'firecrawl search'])
   })
 })
 
@@ -159,6 +167,7 @@ async function skillPackage(root: string, packageId = 'official-firecrawl-search
     id: 'web.search.firecrawl',
     displayName: '联网搜索',
     summary: '通过受信任的网页搜索连接查找公开资料。',
+    routingHints: ['搜索官网', 'firecrawl search'],
     integrationId: 'builtin.firecrawl',
     dataEgress: ['搜索查询文本'],
     instructions: '只在用户明确要求联网搜索时使用。',
