@@ -4,14 +4,13 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CyberEmployee } from '../types.js'
 import { Avatar } from './Avatar.js'
 import { AuthorityBadge } from './AuthorityBadge.js'
-import type { CollaborationMode } from './group-collaboration.js'
 import { useI18n } from '../i18n/runtime.js'
 
 interface GroupConversationDialogProps {
   employees: CyberEmployee[]
   creating?: boolean
   onClose(): void
-  onCreate(input: { title: string; employeeIds: string[]; collaborationMode: CollaborationMode }): Promise<void>
+  onCreate(input: { title: string; employeeIds: string[] }): Promise<void>
 }
 
 export function GroupConversationDialog({ employees, creating = false, onClose, onCreate }: GroupConversationDialogProps) {
@@ -20,7 +19,6 @@ export function GroupConversationDialog({ employees, creating = false, onClose, 
   const [query, setQuery] = useState('')
   const [title, setTitle] = useState('')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
-  const [collaborationMode, setCollaborationMode] = useState<CollaborationMode>('discussion')
   const onCloseRef = useRef(onClose)
   const creatingRef = useRef(creating)
   onCloseRef.current = onClose
@@ -72,18 +70,6 @@ export function GroupConversationDialog({ employees, creating = false, onClose, 
             <input value={title} maxLength={48} onChange={(event) => setTitle(event.target.value)} placeholder={t('workbench.groupNamePlaceholder', '可选，默认使用成员名称')} />
           </label>
 
-          <fieldset className="group-dialog__mode">
-            <legend>{t('workbench.groupMode', '协作模式')}</legend>
-            <label className={collaborationMode === 'discussion' ? 'is-selected' : ''}>
-              <input type="radio" name="group-collaboration-mode" value="discussion" checked={collaborationMode === 'discussion'} disabled={creating} onChange={() => setCollaborationMode('discussion')} />
-              <span><strong>{t('workbench.groupModeDiscussion', '讨论')}</strong><small>{t('workbench.groupModeDiscussionDesc', '默认由所有成员参与多轮讨论。')}</small></span>
-            </label>
-            <label className={collaborationMode === 'task' ? 'is-selected' : ''}>
-              <input type="radio" name="group-collaboration-mode" value="task" checked={collaborationMode === 'task'} disabled={creating} onChange={() => setCollaborationMode('task')} />
-              <span><strong>{t('workbench.groupModeTask', '协作')}</strong><small>{t('workbench.groupModeTaskDesc', '按角色和技能分配步骤，执行细节进入轨迹。')}</small></span>
-            </label>
-          </fieldset>
-
           <div className="group-dialog__list" role="group" aria-label={t('workbench.groupSearch', '选择群聊成员')}>
             {filteredEmployees.map((employee) => {
               const selected = selectedIds.includes(employee.id)
@@ -105,7 +91,6 @@ export function GroupConversationDialog({ employees, creating = false, onClose, 
             <button className="primary-button" type="button" disabled={creating || selectedIds.length < 2} onClick={() => void onCreate({
               title: title.trim() || selectedIds.map((id) => employees.find((employee) => employee.id === id)?.displayName).filter((name): name is string => name !== undefined).join('、'),
               employeeIds: selectedIds,
-              collaborationMode,
             })}>{creating ? t('workbench.groupCreating', '正在创建…') : t('workbench.groupCreateSubmit', '创建群聊')}</button>
           </div>
         </footer>

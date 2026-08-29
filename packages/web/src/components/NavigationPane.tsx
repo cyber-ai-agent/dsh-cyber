@@ -174,7 +174,7 @@ export function NavigationPane({
   )
 }
 
-function SessionRow({
+export function SessionRow({
   item,
   employees,
   active,
@@ -200,7 +200,7 @@ function SessionRow({
     : undefined
   const subtitle = lastPrompt ?? (session.kind === 'group' || session.kind === 'meeting'
     ? t('nav.groupMembers', '群聊 · {count} 名成员', { count: participants.length || participantIds.length })
-    : participants[0]?.role ?? t('nav.directChat', '私聊'))
+    : t('nav.directChat', '私聊'))
   const openMenu = (position: ContextMenuPosition) => { if (onPin !== undefined && onDelete !== undefined) setMenuPosition(position) }
   return (
     <div className={`session-row-wrap${active ? ' is-active' : ''}${item.pinned ? ' is-pinned' : ''}`}>
@@ -212,8 +212,8 @@ function SessionRow({
               ? <GroupAvatar participants={participants} size="sm" />
               : <Avatar index={participants[0]!.avatarIndex} size="sm" label={participants[0]!.displayName} authorityRole={participants[0]!.authorityRole} />}
         </span>
-        <span className="session-row__copy"><strong>{directTitle(session, participants)}{session.kind === 'direct' ? <AuthorityBadge role={participants[0]?.authorityRole} /> : null}</strong><small>{subtitle}</small></span>
-        <time>{formatSessionTime(session.updatedAt)}</time>
+        <span className="session-row__copy"><strong className="session-row__title"><span className="session-row__name">{directTitle(session, participants)}{session.kind === 'direct' ? <AuthorityBadge role={participants[0]?.authorityRole} /> : null}</span>{session.kind === 'direct' && participants[0]?.role ? <span className="session-row__role">· {participants[0].role}</span> : null}</strong><small>{subtitle}</small></span>
+        <time dateTime={session.updatedAt}>{formatSessionTime(session.updatedAt)}</time>
       </button>
       {menuPosition === undefined || onPin === undefined || onDelete === undefined ? null : <ContextMenu label={`${directTitle(session, participants)}会话操作`} position={menuPosition} onClose={() => setMenuPosition(undefined)} items={[
         { id: 'pin', label: item.pinned ? '取消置顶' : '置顶会话', description: item.pinned ? '恢复按最近消息排序' : '固定在会话列表顶部', icon: item.pinned ? <PushPinSlash size={17} /> : <PushPin size={17} />, onSelect: onPin },

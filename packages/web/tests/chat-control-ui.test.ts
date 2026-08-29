@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { World } from '@dsh-cyber/contracts'
+import type { WorkMessage, WorkSession, World } from '@dsh-cyber/contracts'
 import { ChatWorkbench } from '../src/components/ChatWorkbench.js'
 import type { CyberEmployee } from '../src/types.js'
 
@@ -34,11 +34,11 @@ describe('Chat control UI', () => {
       onRecruit: vi.fn(),
     }))
     expect(html).toContain('消息已接收，正在等待角色处理')
-    expect(html).toContain('已接收，等待执行')
+    expect(html).toContain('等待插入')
     expect(html).not.toContain('另有 1 条')
   })
 
-  it('keeps input controls available while showing queue and stop actions', () => {
+  it('shows queued follow-ups above the composer and removes manual queue controls', () => {
     const employee = { id: 'employee-a', displayName: '甲角色', role: '分析', avatarIndex: 0, currentActivity: '正在工作' } as CyberEmployee
     const world = { id: 'world-chat-control', workspaceId: 'workspace-chat-control', name: '控制测试世界', templateId: 'personal-world', status: 'active', createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString() } as World
     const html = renderToStaticMarkup(createElement(ChatWorkbench, {
@@ -52,7 +52,7 @@ describe('Chat control UI', () => {
       queueItems: [
         { id: 'running', queueKey: 'direct:employee-a', worldId: world.id, employeeIds: [employee.id], title: '甲角色对话', status: 'running', createdAt: new Date().toISOString(), workTurnId: 'turn-running' },
         { id: 'approval', queueKey: 'direct:employee-a', worldId: world.id, employeeIds: [employee.id], title: '需要确认的操作', status: 'waiting-approval', createdAt: new Date().toISOString(), workTurnId: 'turn-approval' },
-        { id: 'queued', queueKey: 'direct:employee-a', worldId: world.id, employeeIds: [employee.id], title: '下一条消息', status: 'queued', createdAt: new Date().toISOString() },
+        { id: 'queued', queueKey: 'direct:employee-a', worldId: world.id, employeeIds: [employee.id], title: '甲角色对话', content: '下一条消息', status: 'queued', createdAt: new Date().toISOString() },
       ],
       draft: '继续补充条件',
       onDraftChange: vi.fn(),
@@ -62,18 +62,96 @@ describe('Chat control UI', () => {
       onOpenArtifact: vi.fn(),
       onRecruit: vi.fn(),
       onStopTurn: vi.fn(async () => undefined),
-      onPromoteQueuedTurn: vi.fn(async () => undefined),
       onCancelQueuedTurn: vi.fn(async () => undefined),
     }))
     expect(html).toContain('正在回复中')
-    expect(html).toContain('等待批准')
-    expect(html).toContain('send-button--stop')
-    expect(html).toContain('插入')
+    expect(html).toContain('插入对话')
+    expect(html).toContain('下一条消息')
+    expect(html).not.toContain('send-button--stop')
     expect(html).toContain('撤销')
-    expect(html).toContain('排队')
-    expect(html).toContain('停止当前回复')
+    expect(html).not.toContain('排队发送')
+    expect(html).not.toContain('队列操作')
+    expect(html).not.toContain('插入队列前方')
     expect(html).not.toContain('下一条执行')
     expect(html).not.toContain('打开命令选择器')
+  })
+
+  it('automatically inserts a typed follow-up after the active turn', async () => {
+    const employee = { id: 'employee-insert', displayName: '插入角色', role: '分析', avatarIndex: 0, currentActivity: '正在工作' } as CyberEmployee
+    const world = { id: 'world-insert', workspaceId: 'workspace-insert', name: '插入测试世界', templateId: 'personal-world', status: 'active', createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString() } as World
+    const host = document.createElement('div')
+    document.body.append(host)
+    const root = createRoot(host)
+    const onSend = vi.fn(async () => undefined)
+    await act(async () => { root.render(createElement(ChatWorkbench, {
+      demoMode: false,
+      world,
+      participantIds: [employee.id],
+      messages: [],
+      employees: [employee],
+      pendingCount: 1,
+      queueItems: [{ id: 'running', queueKey: 'direct:employee-insert', worldId: world.id, employeeIds: [employee.id], title: '当前工作', status: 'running', createdAt: new Date().toISOString(), workTurnId: 'turn-running' }],
+      draft: '补充验收条件',
+      onDraftChange: vi.fn(),
+      onSend,
+      onUploadAttachment: vi.fn(async () => { throw new Error('not used') }),
+      onOpenDossier: vi.fn(),
+      onOpenArtifact: vi.fn(),
+      onRecruit: vi.fn(),
+      onStopTurn: vi.fn(async () => undefined),
+    })) })
+
+    const sendButton = host.querySelector<HTMLButtonElement>('.send-button')
+    expect(sendButton?.getAttribute('aria-label')).toBe('插入对话')
+    await act(async () => { sendButton?.click() })
+    expect(onSend).toHaveBeenCalledWith('补充验收条件', [], 'next')
+    await act(async () => { root.unmount() })
+  })
+
+  it('stops following streamed output after the reader scrolls upward', async () => {
+    const now = new Date(0).toISOString()
+    const employee = { id: 'employee-scroll', displayName: '滚动角色', role: '分析', avatarIndex: 0, currentActivity: '正在工作' } as CyberEmployee
+    const world = { id: 'world-scroll', workspaceId: 'workspace-scroll', name: '滚动测试世界', templateId: 'personal-world', status: 'active', createdAt: now, updatedAt: now } as World
+    const session = { id: 'session-scroll', workspaceId: world.workspaceId, worldId: world.id, kind: 'direct', title: '滚动角色', status: 'open', createdAt: now, updatedAt: now } as WorkSession
+    const first = { id: 'message-first', sessionId: session.id, sequence: 1, senderId: employee.id, senderKind: 'employee', kind: 'assistant', content: '第一条回复', metadata: {}, createdAt: now } as WorkMessage
+    const second = { ...first, id: 'message-second', sequence: 2, content: '继续生成的内容', metadata: { streaming: true } } as WorkMessage
+    const host = document.createElement('div')
+    document.body.append(host)
+    const root = createRoot(host)
+    const common = {
+      demoMode: false,
+      world,
+      session,
+      participantIds: [employee.id],
+      employees: [employee],
+      draft: '',
+      onDraftChange: vi.fn(),
+      onSend: vi.fn(async () => undefined),
+      onUploadAttachment: vi.fn(async () => { throw new Error('not used') }),
+      onOpenDossier: vi.fn(),
+      onOpenArtifact: vi.fn(),
+      onRecruit: vi.fn(),
+    }
+    await act(async () => {
+      root.render(createElement(ChatWorkbench, { ...common, messages: [first] }))
+      await new Promise((resolve) => requestAnimationFrame(resolve))
+    })
+    const scroll = host.querySelector<HTMLDivElement>('.message-scroll')!
+    Object.defineProperty(scroll, 'scrollHeight', { configurable: true, value: 1_000 })
+    Object.defineProperty(scroll, 'clientHeight', { configurable: true, value: 300 })
+    scroll.scrollTop = 120
+    const scrollTo = vi.fn()
+    Object.defineProperty(scroll, 'scrollTo', { configurable: true, value: scrollTo })
+    await act(async () => { scroll.dispatchEvent(new Event('scroll', { bubbles: true })) })
+    expect(host.textContent).toContain('回到最新消息')
+
+    await act(async () => {
+      root.render(createElement(ChatWorkbench, { ...common, messages: [first, second], pendingCount: 1, sending: true }))
+      await new Promise((resolve) => requestAnimationFrame(resolve))
+    })
+    expect(scrollTo).not.toHaveBeenCalled()
+    expect(scroll.scrollTop).toBe(120)
+    await act(async () => { root.unmount() })
   })
 
   it('executes the topic command locally and keeps the transcript intact', async () => {

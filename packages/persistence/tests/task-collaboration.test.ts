@@ -29,36 +29,36 @@ describe('TaskCollaborationPlan persistence', () => {
     expect(store.updateSessionCollaborationMode({ sessionId: discussion.id, collaborationMode: 'discussion' }).collaborationMode).toBe('discussion')
     expect(() => store.setSessionCollaborationMode(direct.id, 'task')).toThrow('Only group sessions')
     expect(() => store.setSessionCollaborationMode(taskKind.id, 'discussion')).toThrow('Only group sessions')
-    const discussionTurn = store.createWorkTurn({ workspaceId: workspace.id, worldId: world.id, sessionId: discussion.id, interactionKind: 'task' })
+    const discussionTurn = store.createWorkTurn({ workspaceId: workspace.id, worldId: world.id, sessionId: discussion.id, interactionKind: 'meeting' })
     expect(() => store.createTaskCollaborationPlan({
       taskId: 'discussion-is-not-task', workspaceId: workspace.id, worldId: world.id,
       sessionId: discussion.id, workTurnId: discussionTurn.id,
       steps: [{ requiredSkills: [], assignedEmployeeIds: [employee.id], dependsOn: [], executionMode: 'parallel' }],
-    })).toThrow('requires a task group session')
-    const turn = store.createWorkTurn({ workspaceId: workspace.id, worldId: world.id, sessionId: task.id, interactionKind: 'task' })
+    })).toThrow('requires a task work turn')
+    const turn = store.createWorkTurn({ workspaceId: workspace.id, worldId: world.id, sessionId: discussion.id, interactionKind: 'task' })
     const plan = store.createTaskCollaborationPlan({
       taskId: 'task-website-analysis', workspaceId: workspace.id, worldId: world.id,
-      sessionId: task.id, workTurnId: turn.id,
+      sessionId: discussion.id, workTurnId: turn.id,
       steps: [
         { id: 'search', requiredSkills: ['web.search'], assignedEmployeeIds: [employee.id], dependsOn: [], executionMode: 'parallel', status: 'ready' },
         { id: 'build', requiredSkills: ['frontend.build'], assignedEmployeeIds: [employee.id], dependsOn: ['search'], executionMode: 'sequential' },
       ],
     })
     expect(plan).toMatchObject({
-      taskId: 'task-website-analysis', worldId: world.id, sessionId: task.id, workTurnId: turn.id,
+      taskId: 'task-website-analysis', worldId: world.id, sessionId: discussion.id, workTurnId: turn.id,
       revision: 1, status: 'planned', steps: [
         expect.objectContaining({ id: 'search', ordinal: 1, status: 'ready' }),
         expect.objectContaining({ id: 'build', ordinal: 2, dependsOn: ['search'], executionMode: 'sequential' }),
       ],
     })
-    expect(store.getLatestTaskCollaborationPlanForSession(task.id)).toEqual(plan)
-    expect(store.getLatestTaskCollaborationPlanForSession(discussion.id)).toBeUndefined()
+    expect(store.getLatestTaskCollaborationPlanForSession(discussion.id)).toEqual(plan)
+    expect(store.getLatestTaskCollaborationPlanForSession(task.id)).toBeUndefined()
     expect(store.getTaskCollaborationPlanByTurn(world.id, turn.id)).toEqual(plan)
     expect(() => store.getLatestTaskCollaborationPlanForSession('other-world', task.id))
       .toThrow('does not match its world')
     expect(store.createTaskCollaborationPlan({
       taskId: 'task-website-analysis', workspaceId: workspace.id, worldId: world.id,
-      sessionId: task.id, workTurnId: turn.id, steps: plan.steps.map(stepInput),
+      sessionId: discussion.id, workTurnId: turn.id, steps: plan.steps.map(stepInput),
     }).id).toBe(plan.id)
 
     const updated = store.updateTaskCollaborationPlan({ planId: plan.id, expectedRevision: 1, status: 'running' })

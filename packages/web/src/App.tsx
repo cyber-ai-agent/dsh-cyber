@@ -71,7 +71,6 @@ import {
 import { ChatWorkbench, isChatMessage } from './components/ChatWorkbench.js'
 import type { ConversationPermissionMode } from './components/ConversationPermissionControl.js'
 import { CreativeWorkshopLauncher } from './components/CreativeWorkshopLauncher.js'
-import { collaborationModeOf, type CollaborationMode } from './components/group-collaboration.js'
 import { NavigationPane } from './components/NavigationPane.js'
 import { ResizableShell } from './components/ResizableShell.js'
 import { WorldThemeSwitcher } from './components/WorldThemeSwitcher.js'
@@ -564,19 +563,6 @@ export default function App() {
     }
   }, [patchPendingTurn])
 
-  const promoteQueuedTurn = useCallback(async (turnId: string): Promise<void> => {
-    const turn = pendingTurnsRef.current.find((item) => item.id === turnId)
-    const worldId = activeWorldRef.current?.id
-    if (turn?.status !== 'queued' || worldId === undefined) return
-    try {
-      await api(`/api/worlds/${encodeURIComponent(worldId)}/chat-queue/${encodeURIComponent(turn.serverQueueId ?? turn.id)}`, { method: 'PATCH', body: JSON.stringify({ queueMode: 'next' }) })
-      turnQueueRef.current.promote(turn.queueKey, turnId)
-      patchPendingTurn(turnId, { createdAt: new Date(0).toISOString() })
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '提前执行消息失败')
-    }
-  }, [patchPendingTurn])
-
   const stopTurn = useCallback(async (turnId: string): Promise<void> => {
     const reply = Object.values(streamingReplies).find((item) => item.clientTurnId === turnId)
     const turn = pendingTurnsRef.current.find((item) => item.id === turnId)
@@ -963,7 +949,7 @@ export default function App() {
     setSelectedEmployeeId(employee.id)
   }, [activeSessionId, messages.length, sessionParticipants, sessions])
 
-  const createGroupSession = useCallback(async (input: { title: string; employeeIds: string[]; collaborationMode: CollaborationMode }) => {
+  const createGroupSession = useCallback(async (input: { title: string; employeeIds: string[] }) => {
     const world = activeWorld
     const selected = employees.filter((employee) => input.employeeIds.includes(employee.id))
     if (world === undefined || selected.length < 2 || groupCreating) return
@@ -974,13 +960,13 @@ export default function App() {
       let session: WorkSession
       let participantIds = selected.map((employee) => employee.id)
       if (demoMode) {
-        session = { ...makeDemoSession(world, title, 'group', title), collaborationMode: input.collaborationMode } as WorkSession
+        session = makeDemoSession(world, title, 'group', title)
       } else {
         const result = await api<{ session: WorkSession; participantIds: string[] }>(`/api/worlds/${encodeURIComponent(world.id)}/group-sessions`, {
           method: 'POST',
-          body: JSON.stringify({ title, employeeIds: participantIds, collaborationMode: input.collaborationMode }),
+          body: JSON.stringify({ title, employeeIds: participantIds }),
         })
-        session = { ...result.session, collaborationMode: collaborationModeOf(result.session) === 'task' ? 'task' : input.collaborationMode } as WorkSession
+        session = result.session
         participantIds = result.participantIds
       }
       setSessions((current) => [session, ...current.filter((item) => item.id !== session.id)])
@@ -1001,26 +987,6 @@ export default function App() {
       setGroupCreating(false)
     }
   }, [activeWorld, demoMode, employees, groupCreating])
-
-  const changeCollaborationMode = useCallback(async (mode: CollaborationMode) => {
-    const session = activeSession
-    if (session === undefined || session.kind !== 'group') return
-    try {
-      if (demoMode) {
-        setSessions((current) => current.map((item) => item.id === session.id ? { ...item, collaborationMode: mode } as WorkSession : item))
-        return
-      }
-      const result = await api<unknown>(`/api/sessions/${encodeURIComponent(session.id)}/collaboration-mode`, {
-        method: 'PATCH',
-        body: JSON.stringify({ collaborationMode: mode }),
-      })
-      const next = result !== null && typeof result === 'object' && 'session' in result ? (result as { session?: unknown }).session : result
-      const resolvedMode = next !== null && typeof next === 'object' && (next as { collaborationMode?: unknown }).collaborationMode === 'task' ? 'task' : mode
-      setSessions((current) => current.map((item) => item.id === session.id ? { ...item, collaborationMode: resolvedMode } as WorkSession : item))
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '协作模式保存失败')
-    }
-  }, [activeSession, demoMode])
 
   const openRecruitment = useCallback(async (preferredId?: string) => {
     if (activeWorld === undefined) return
@@ -1620,10 +1586,8 @@ export default function App() {
     const createdAt = new Date().toISOString()
     const capturedSessionId = activeSessionId
     const capturedPermissionKey = activePermissionKey
-    const collaborationMode = conversationIntent?.collaborationMode
-      ?? (activeSession === undefined ? 'discussion' : collaborationModeOf(activeSession))
     const interactionKind = targetIds.length > 1
-      ? collaborationMode === 'task' ? 'task' : 'meeting'
+      ? 'chat'
       : /(?:^|\s)任务[：:]/.test(prompt) ? 'task' : 'chat'
     if (capturedSessionId !== undefined) {
       sessionByQueueKeyRef.current.set(queueKey, capturedSessionId)
@@ -1636,6 +1600,7 @@ export default function App() {
       worldId: world.id,
       employeeIds: targetIds,
       title,
+      content: prompt,
       status: 'queued',
       createdAt,
       ...(capturedSessionId === undefined ? {} : { sessionId: capturedSessionId }),
@@ -1726,7 +1691,6 @@ export default function App() {
             ...(preparedSessionHostAccess === undefined ? {} : { runtimeAccessGrantId: preparedSessionHostAccess.id }),
             interactionKind,
             queueMode,
-            ...(targetIds.length > 1 ? { collaborationMode } : {}),
             ...(attachments.length === 0 ? {} : { attachments }),
             employeeIds: targetIds,
             ...(conversationIntent === undefined ? {} : { title }),
@@ -2315,9 +2279,7 @@ export default function App() {
             onRecruit={() => { setSelectedEmployeeId(undefined); setDockCollapsed(false); setDockTab('dossier') }}
             onOpenPluginMarket={() => void openPackageMarket('plugin')}
             onOpenHistory={openMessageHistory}
-            onChangeCollaborationMode={changeCollaborationMode}
             onCancelQueuedTurn={cancelQueuedTurn}
-            onPromoteQueuedTurn={promoteQueuedTurn}
             onStopTurn={stopTurn}
             hasOlderMessages={messagePage.hasMore}
             loadingOlderMessages={messagePage.loading}
@@ -2371,7 +2333,7 @@ export default function App() {
             setDockTab('world')
             return
           }
-          void createGroupSession({ employeeIds: selected.map((employee) => employee.id), title: selected.map((employee) => employee.displayName).join('、'), collaborationMode: 'discussion' })
+          void createGroupSession({ employeeIds: selected.map((employee) => employee.id), title: selected.map((employee) => employee.displayName).join('、') })
         }}
                   />
                 </Suspense>

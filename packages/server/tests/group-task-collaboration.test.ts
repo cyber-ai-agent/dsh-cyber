@@ -129,8 +129,8 @@ describe('Group Task Collaboration server flow', () => {
     expect(emptyPlan.body.plan).toBeNull()
   })
 
-  it('treats the persisted session mode as authoritative over chat hints', async () => {
-    const { origin, world, runtime } = await start()
+  it('routes each group turn from the message intent instead of persisted or client-selected modes', async () => {
+    const { origin, world } = await start()
     const snapshot = await json(origin, `/api/worlds/${world.id}/snapshot`)
     const firstId = snapshot.body.employees[0].id as string
     const recruited = await json(origin, `/api/worlds/${world.id}/recruit`, post({ blueprintId: 'cyber-company.secretary', blueprintVersion: 1 }))
@@ -142,43 +142,29 @@ describe('Group Task Collaboration server flow', () => {
     }))
     expect(discussion.response.status).toBe(201)
 
-    const mismatchedTask = await json(origin, `/api/worlds/${world.id}/chat`, post({
+    const routedTask = await json(origin, `/api/worlds/${world.id}/chat`, post({
       employeeIds: participantIds,
       sessionId: discussion.body.session.id,
-      collaborationMode: 'task',
-      interactionKind: 'task',
-      prompt: '不要改变会话模式',
+      collaborationMode: 'discussion',
+      interactionKind: 'chat',
+      prompt: '请完成并提交一份登录检查报告',
     }))
-    expect(mismatchedTask.response.status).toBe(409)
-    expect(mismatchedTask.body.error.code).toBe('session_mode_mismatch')
-    expect(runtime.calls).toHaveLength(0)
+    expect(routedTask.response.status).toBe(200)
+    expect(routedTask.body.collaborationMode).toBe('task')
 
-    // interactionKind alone cannot bypass the persisted discussion mode.
+    // A client task hint cannot turn an open-ended question into an execution.
     const discussionTurn = await json(origin, `/api/worlds/${world.id}/chat`, post({
       employeeIds: participantIds,
       sessionId: discussion.body.session.id,
       interactionKind: 'task',
-      prompt: '仍然按讨论模式执行',
+      collaborationMode: 'task',
+      prompt: '大家怎么看这个方案？',
     }))
     expect(discussionTurn.response.status).toBe(200)
     expect(discussionTurn.body.collaborationMode).toBeUndefined()
     const turns = await json(origin, `/api/sessions/${discussion.body.session.id}/turns`)
     expect(turns.response.status).toBe(200)
-    expect(turns.body.items.at(-1).interactionKind).toBe('meeting')
+    expect(turns.body.items.map((turn: { interactionKind: string }) => turn.interactionKind)).toEqual(expect.arrayContaining(['task', 'meeting']))
 
-    const task = await json(origin, `/api/worlds/${world.id}/group-sessions`, post({
-      employeeIds: participantIds,
-      collaborationMode: 'task',
-    }))
-    expect(task.response.status).toBe(201)
-    const mismatchedDiscussion = await json(origin, `/api/worlds/${world.id}/chat`, post({
-      employeeIds: participantIds,
-      sessionId: task.body.session.id,
-      collaborationMode: 'discussion',
-      interactionKind: 'meeting',
-      prompt: '不能临时切回讨论',
-    }))
-    expect(mismatchedDiscussion.response.status).toBe(409)
-    expect(mismatchedDiscussion.body.error.code).toBe('session_mode_mismatch')
   })
 })
