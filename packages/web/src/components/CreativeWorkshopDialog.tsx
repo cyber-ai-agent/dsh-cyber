@@ -119,8 +119,13 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
 
   const analyzePrompt = async (input: string): Promise<void> => {
     if (draft === undefined) return
+    const trimmed = input.trim()
+    if (!trimmed) {
+      setPromptReply(undefined)
+      setError(t('workshop.promptRequired', '请先描述你想创建的世界。'))
+      return
+    }
     try {
-      const trimmed = input.trim()
       const result = trimmed.startsWith('{') || trimmed.startsWith('```')
         ? analyzeWorkshopPrompt(input, templates, presets, draft)
         : analyzeWorkshopPrompt(JSON.stringify((await api<{ draft: CreativeWorkshopDraftV1 }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/workshop/draft/generate`, {
@@ -129,9 +134,16 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
       changeDraft(result.draft)
       setPromptReply(t('workshop.promptGenerated', '草稿已生成：1 个世界、{roles} 个独立角色。所有内容尚未创建，请逐项检查后再确认。', { roles: result.draft.roles.length }))
       setError(undefined)
-    } catch {
+    } catch (cause) {
       setPromptReply(undefined)
-      setError(t('workshop.promptConversionError', '提示词无法转换为世界草稿'))
+      const fallback = t('workshop.promptConversionError', '提示词无法转换为世界草稿')
+      if (cause instanceof ApiError && cause.message.trim()) {
+        setError(`${fallback}：${cause.message.trim()}`)
+      } else if (cause instanceof Error && cause.message.trim()) {
+        setError(`${fallback}：${cause.message.trim()}`)
+      } else {
+        setError(fallback)
+      }
     }
   }
 
