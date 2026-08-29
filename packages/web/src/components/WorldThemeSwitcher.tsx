@@ -16,10 +16,16 @@ import { ThemeCustomizerDialog } from './ThemeCustomizerDialog.js'
 interface WorldThemeSwitcherProps {
   activeWorld: World
   installedSkinIds?: readonly string[]
+  /**
+   * @deprecated Skin changes are intentionally local to the shell/conversation
+   * surface. The legacy callback is retained temporarily so older callers keep
+   * compiling, but firing it would remount the World Runtime and couple the two
+   * visual domains again.
+   */
   onThemeChange?(themeId: string): void
 }
 
-export function WorldThemeSwitcher({ activeWorld, installedSkinIds, onThemeChange }: WorldThemeSwitcherProps) {
+export function WorldThemeSwitcher({ activeWorld, installedSkinIds }: WorldThemeSwitcherProps) {
   const { locale, t } = useI18n()
   const [currentThemeId, setCurrentThemeId] = useState<string>(() => readWorldTheme(activeWorld))
   const [open, setOpen] = useState(false)
@@ -58,7 +64,9 @@ export function WorldThemeSwitcher({ activeWorld, installedSkinIds, onThemeChang
     setCurrentThemeId(theme.id)
     saveWorldTheme(activeWorld.id, theme.id)
     setOpen(false)
-    onThemeChange?.(theme.id)
+    // Do not notify the application runtime. saveWorldTheme already applies the
+    // shell CSS locally; notifying App used to increment worldRuntimeRevision
+    // and remount the live World for a purely cosmetic conversation change.
   }
 
   const openCustomizer = (themeId?: string) => {
@@ -114,6 +122,8 @@ export function WorldThemeSwitcher({ activeWorld, installedSkinIds, onThemeChang
             <div className="topbar-world-theme-menu__items">
               {themes.map((theme) => {
                 const selected = theme.id === resolvedCurrentThemeId
+                // Legacy packages may still only provide worldMapImage. It may
+                // be used as a menu thumbnail, never as World Runtime state.
                 const previewImage = theme.tokens.backdropImage ?? theme.tokens.worldMapImage
                 const themeText = getLocalizedThemeText(theme, locale)
                 const sourceBadge =
@@ -177,7 +187,8 @@ export function WorldThemeSwitcher({ activeWorld, installedSkinIds, onThemeChang
           onClose={() => setCustomizerOpen(false)}
           onSaved={(newThemeId) => {
             setCurrentThemeId(newThemeId)
-            onThemeChange?.(newThemeId)
+            // ThemeCustomizerDialog already persists and applies the Skin.
+            // Keep the World Runtime mounted and untouched.
           }}
         />
       )}
