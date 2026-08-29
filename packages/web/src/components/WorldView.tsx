@@ -19,6 +19,7 @@ import { AuthorityBadge } from './AuthorityBadge.js'
 interface WorldViewProps {
   world: World
   employees: CyberEmployee[]
+  /** @deprecated World imagery is owned by the World, not by the conversation Skin. */
   sceneImage?: string
   onSelectEmployee(employeeId: string): void
 }
@@ -31,7 +32,7 @@ const tavernPositions = [
   [23, 56], [43, 45], [64, 49], [79, 62], [57, 71], [35, 72], [17, 76], [84, 36],
 ] as const
 
-export function WorldView({ world, employees, sceneImage, onSelectEmployee }: WorldViewProps) {
+export function WorldView({ world, employees, onSelectEmployee }: WorldViewProps) {
   const [lightsOn, setLightsOn] = useState(true)
   const [zoom, setZoom] = useState(1)
   const [expanded, setExpanded] = useState(false)
@@ -41,12 +42,11 @@ export function WorldView({ world, employees, sceneImage, onSelectEmployee }: Wo
     <WorldScene
       kind={experience.kind}
       employees={employees}
-      {...(sceneImage === undefined ? {} : { sceneImage })}
       lightsOn={lightsOn}
       zoom={zoom}
       onSelectEmployee={onSelectEmployee}
     />
-  ), [employees, experience.kind, lightsOn, onSelectEmployee, sceneImage, zoom])
+  ), [employees, experience.kind, lightsOn, onSelectEmployee, zoom])
 
   return (
     <div className={`world-view world-view--${experience.kind}`}>
@@ -93,19 +93,19 @@ function WorldControls({ lightsOn, zoom, setLightsOn, setZoom }: {
   )
 }
 
-function WorldScene({ kind, employees, sceneImage, lightsOn, zoom, onSelectEmployee }: {
+function WorldScene({ kind, employees, lightsOn, zoom, onSelectEmployee }: {
   kind: 'personal' | 'company' | 'tavern' | 'studio' | 'observatory'
   employees: CyberEmployee[]
-  sceneImage?: string
   lightsOn: boolean
   zoom: number
   onSelectEmployee(employeeId: string): void
 }) {
   const isTavern = kind === 'tavern'
-  const currentSkin = typeof document !== 'undefined' ? document.documentElement.dataset.skin : undefined
-  const defaultScene = currentSkin === 'maid-atelier' ? '/assets/skins/maid-palace-night.webp' : (isTavern ? '/assets/moonlit-tavern-world.png' : '/assets/cyber-office-world.png')
+  // This legacy renderer is only a fallback when the full World Runtime is
+  // unavailable. Its scene still belongs to the World experience; never read
+  // document.dataset.skin or a conversation wallpaper here.
+  const image = isTavern ? '/assets/moonlit-tavern-world.png' : '/assets/cyber-office-world.png'
   const positions = isTavern ? tavernPositions : companyPositions
-  const image = sceneImage ?? defaultScene
   const activeSpeaker = employees.find((employee) => employee.presence === 'working')
 
   return (

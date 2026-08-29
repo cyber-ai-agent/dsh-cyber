@@ -7,7 +7,8 @@ import type { CyberMarketPackage, World } from '@dsh-cyber/contracts'
 import { PackageMarketDialog } from '../src/components/PackageMarketDialog.js'
 import { SettingsDialog } from '../src/components/SettingsDialog.js'
 import { WorldThemeSwitcher } from '../src/components/WorldThemeSwitcher.js'
-import { BUILTIN_THEMES, applyWorldTheme, resolveThemeManifest, themeRegistry } from '../src/features/world/world-themes.js'
+import { resolveBuiltInWorldScene } from '../src/features/world/world-scene.js'
+import { BUILTIN_THEMES, applyWorldTheme, themeRegistry } from '../src/features/world/world-themes.js'
 import { setUiLocale } from '../src/i18n/runtime.js'
 
 const world: World = {
@@ -147,37 +148,41 @@ describe('modern skin system and marketplace category', () => {
     expect(available).not.toContain('orca-link')
   })
 
-  it('keeps every runtime theme on one canonical scene source', () => {
+  it('treats a skin image as conversation appearance without owning the World Runtime scene', () => {
+    const worldScene = resolveBuiltInWorldScene(world)
+
     for (const theme of BUILTIN_THEMES) {
-      const sceneImage = theme.tokens.worldMapImage ?? theme.tokens.backdropImage
-      expect(sceneImage, `${theme.id} must declare a scene image`).toBeDefined()
-      expect(theme.tokens.backdropImage).toBe(sceneImage)
-      if (theme.runtimeManifest !== undefined) {
-        expect(theme.runtimeManifest.assets.find((asset) => asset.kind === 'image')?.src).toBe(sceneImage)
-      }
+      const wallpaper = theme.tokens.worldMapImage ?? theme.tokens.backdropImage
+      expect(wallpaper, `${theme.id} must provide a conversation wallpaper`).toBeDefined()
+
       applyWorldTheme(theme.id)
-      expect(document.documentElement.style.getPropertyValue('--theme-backdrop-image')).toContain(sceneImage!)
+      expect(document.documentElement.style.getPropertyValue('--theme-backdrop-image')).toContain(wallpaper!)
+      expect(resolveBuiltInWorldScene(world).id).toBe(worldScene.id)
+      expect(resolveBuiltInWorldScene(world).scenes[0]?.id).toBe(worldScene.scenes[0]?.id)
     }
   })
 
-  it('compiles an uploaded custom panorama into the same runtime scene', () => {
-    const customId = 'custom-uploaded-scene-test'
+  it('keeps an uploaded custom Skin panorama on the conversation surface only', () => {
+    const customId = 'custom-uploaded-skin-test'
+    const originalScene = resolveBuiltInWorldScene(world)
     themeRegistry.saveCustomTheme({
       id: customId,
-      displayName: '上传场景',
+      displayName: '上传会话背景',
       description: '测试',
       author: '测试',
       source: 'custom',
       tokens: {
         ...BUILTIN_THEMES[0]!.tokens,
-        backdropImage: '/api/assets/scene-asset',
-        worldMapImage: '/api/assets/scene-asset',
+        backdropImage: '/api/assets/conversation-wallpaper',
+        worldMapImage: '/api/assets/conversation-wallpaper',
       },
     })
     try {
-      const manifest = resolveThemeManifest(world, customId)
-      expect(manifest.assets[0]?.src).toBe('/api/assets/scene-asset')
-      expect(manifest.scenes[0]?.layers[0]?.assetId).toBe(`${customId}-shared-scene`)
+      applyWorldTheme(customId)
+      expect(document.documentElement.style.getPropertyValue('--theme-backdrop-image')).toContain('/api/assets/conversation-wallpaper')
+      const resolvedScene = resolveBuiltInWorldScene(world)
+      expect(resolvedScene.id).toBe(originalScene.id)
+      expect(resolvedScene.assets).toEqual(originalScene.assets)
     } finally {
       themeRegistry.deleteCustomTheme(customId)
     }

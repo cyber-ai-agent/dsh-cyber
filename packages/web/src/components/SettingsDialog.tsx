@@ -655,6 +655,20 @@ function ModelSettings({
   const [manualModelId, setManualModelId] = useState(true)
   const [testState, setTestState] = useState<{ status: 'idle' | 'testing' | 'success' | 'failed'; message?: string; count?: number; latencyMs?: number }>({ status: 'idle' })
 
+  const updateDraft = (
+    updater: (current: ModelDraft) => ModelDraft,
+    options?: { resetConnection?: boolean },
+  ) => {
+    setDraft(updater)
+    setModelError(undefined)
+    setModelNotice(undefined)
+    if (options?.resetConnection) {
+      setDiscoveredModels([])
+      setManualModelId(true)
+      setTestState({ status: 'idle' })
+    }
+  }
+
   const currentPreset = useMemo(() => MODEL_PRESETS.find((p) => p.id === draft.providerId), [draft.providerId])
 
   const assignmentValue = (scope: ModelAssignment['scope'], scopeId: string) =>
@@ -694,13 +708,16 @@ function ModelSettings({
 
   const selectProviderPreset = (preset: ModelProviderPreset) => {
     const localizedPresetLabel = providerPresetLabel(preset, t)
-    const updated = modelDraftForPreset(preset, draft.isDefault, localizedPresetLabel)
-    setDraft({
-      ...updated,
-      ...(draft.id ? { id: draft.id } : {}),
-      displayName: draft.displayName.trim() && draft.displayName !== (currentPreset === undefined ? undefined : providerPresetLabel(currentPreset, t))
-        ? draft.displayName
-        : preset.label,
+    setDraft((current) => {
+      const currentPreset = MODEL_PRESETS.find((item) => item.id === current.providerId)
+      const updated = modelDraftForPreset(preset, current.isDefault, localizedPresetLabel)
+      return {
+        ...updated,
+        ...(current.id ? { id: current.id } : {}),
+        displayName: current.displayName.trim() && current.displayName !== (currentPreset === undefined ? undefined : providerPresetLabel(currentPreset, t))
+          ? current.displayName
+          : localizedPresetLabel,
+      }
     })
     setDiscoveredModels([])
     setManualModelId(true)
@@ -794,6 +811,7 @@ function ModelSettings({
     if (validationError !== undefined) {
       setModelError(validationError)
       setModelNotice(undefined)
+      setTestState({ status: 'idle' })
       return
     }
     setSavingModel(true)
@@ -828,9 +846,15 @@ function ModelSettings({
       setDraft(modelDraftForProfile(saved))
       setEditorOpen(true)
       setShowApiKey(false)
+      setDiscoveredModels([])
+      setManualModelId(true)
+      setTestState({ status: 'idle' })
+      setModelError(undefined)
       setModelNotice(draft.id ? t('settings.model.updated', '模型连接已更新。') : t('settings.model.savedNotice', '模型连接已保存。'))
     } catch (cause) {
-      setModelError(cause instanceof Error ? cause.message : t('settings.model.saveError', '模型配置保存失败'))
+      const msg = cause instanceof Error ? cause.message : t('settings.model.saveError', '模型配置保存失败')
+      setTestState({ status: 'failed', message: msg })
+      setModelError(msg)
     } finally {
       setSavingModel(false)
     }
@@ -1017,7 +1041,7 @@ function ModelSettings({
                   <input
                     value={draft.displayName}
                     placeholder={t('settings.model.displayNamePlaceholder', '例如：工作室 DeepSeek')}
-                    onChange={(event) => setDraft({ ...draft, displayName: event.target.value })}
+                    onChange={(event) => updateDraft((current) => ({ ...current, displayName: event.target.value }))}
                   />
                 </label>
 
@@ -1049,10 +1073,7 @@ function ModelSettings({
                         : 'https://api.example.com/v1'
                     }
                     onChange={(event) => {
-                      setDraft({ ...draft, baseUrl: event.target.value })
-                      setDiscoveredModels([])
-                      setManualModelId(true)
-                      setTestState({ status: 'idle' })
+                      updateDraft((current) => ({ ...current, baseUrl: event.target.value }), { resetConnection: true })
                     }}
                   />
                   <small>{t('settings.model.baseUrlHint', '公网接口须使用 HTTPS；本机和局域网服务可以使用 HTTP。')}</small>
@@ -1072,7 +1093,7 @@ function ModelSettings({
                             ? t('settings.model.apiKeyStoredPlaceholder', '已加密保存；留空保持原密钥')
                             : t('settings.model.apiKeyPlaceholder', '输入服务商提供的密钥')
                         }
-                        onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })}
+                        onChange={(event) => updateDraft((current) => ({ ...current, apiKey: event.target.value }), { resetConnection: true })}
                       />
                       <button
                         type="button"
@@ -1138,7 +1159,7 @@ function ModelSettings({
                       <SearchableModelPicker
                         models={discoveredModels}
                         value={draft.modelId}
-                        onChange={(modelId) => setDraft({ ...draft, modelId })}
+                        onChange={(modelId) => updateDraft((current) => ({ ...current, modelId }))}
                       />
                     ) : (
                       <input
@@ -1147,7 +1168,7 @@ function ModelSettings({
                         placeholder={
                           currentPreset?.modelPlaceholder ?? '输入模型 ID，例如：deepseek-chat'
                         }
-                        onChange={(event) => setDraft({ ...draft, modelId: event.target.value })}
+                        onChange={(event) => updateDraft((current) => ({ ...current, modelId: event.target.value }))}
                       />
                     )}
                   </div>
@@ -1168,9 +1189,7 @@ function ModelSettings({
                       <select
                         value={draft.api}
                         onChange={(event) => {
-                          setDraft({ ...draft, api: event.target.value as ModelApiKind })
-                          setDiscoveredModels([])
-                          setManualModelId(true)
+                          updateDraft((current) => ({ ...current, api: event.target.value as ModelApiKind }), { resetConnection: true })
                         }}
                       >
                         <option value="openai-completions">OpenAI 对话补全 (标准)</option>
@@ -1184,11 +1203,11 @@ function ModelSettings({
                       <select
                         value={draft.credentialMode}
                         onChange={(event) =>
-                          setDraft({
-                            ...draft,
+                          updateDraft((current) => ({
+                            ...current,
                             credentialMode: event.target.value as ModelCredentialMode,
                             apiKey: '',
-                          })
+                          }), { resetConnection: true })
                         }
                       >
                         <option value="api-key">{t('settings.model.credentialDirect', '直接输入 API 密钥')}</option>
@@ -1203,9 +1222,7 @@ function ModelSettings({
                         <input
                           value={draft.credentialEnvName}
                           placeholder="例如：DEEPSEEK_API_KEY"
-                          onChange={(event) =>
-                            setDraft({ ...draft, credentialEnvName: event.target.value })
-                          }
+                          onChange={(event) => updateDraft((current) => ({ ...current, credentialEnvName: event.target.value }), { resetConnection: true })}
                         />
                       </label>
                     ) : null}
@@ -1217,9 +1234,7 @@ function ModelSettings({
                         min="1024"
                         step="1024"
                         value={draft.contextWindow}
-                        onChange={(event) =>
-                          setDraft({ ...draft, contextWindow: Number(event.target.value) })
-                        }
+                        onChange={(event) => updateDraft((current) => ({ ...current, contextWindow: Number(event.target.value) }))}
                       />
                     </label>
 
@@ -1230,9 +1245,7 @@ function ModelSettings({
                         min="256"
                         step="256"
                         value={draft.maxTokens}
-                        onChange={(event) =>
-                          setDraft({ ...draft, maxTokens: Number(event.target.value) })
-                        }
+                        onChange={(event) => updateDraft((current) => ({ ...current, maxTokens: Number(event.target.value) }))}
                       />
                     </label>
                   </div>
@@ -1246,14 +1259,14 @@ function ModelSettings({
                     type="checkbox"
                     checked={draft.webSearchEnabled}
                     onChange={(event) =>
-                      setDraft({
-                        ...draft,
+                      updateDraft((current) => ({
+                        ...current,
                         webSearchEnabled: event.target.checked,
                         webSearchBaseUrl:
-                          event.target.checked && !draft.webSearchBaseUrl
-                            ? (currentPreset?.webSearchBaseUrl ?? '')
-                            : draft.webSearchBaseUrl,
-                      })
+                          event.target.checked && !current.webSearchBaseUrl
+                            ? (MODEL_PRESETS.find((item) => item.id === current.providerId)?.webSearchBaseUrl ?? '')
+                            : current.webSearchBaseUrl,
+                      }))
                     }
                   />
                   <span>
@@ -1272,9 +1285,7 @@ function ModelSettings({
                         inputMode="url"
                         value={draft.webSearchBaseUrl}
                         placeholder="https://api.deepseek.com/anthropic/v1"
-                        onChange={(event) =>
-                          setDraft({ ...draft, webSearchBaseUrl: event.target.value })
-                        }
+                        onChange={(event) => updateDraft((current) => ({ ...current, webSearchBaseUrl: event.target.value }))}
                       />
                     </label>
                   </div>
@@ -1285,7 +1296,7 @@ function ModelSettings({
                     type="checkbox"
                     checked={draft.isDefault || models.length === 0}
                     disabled={models.length === 0}
-                    onChange={(event) => setDraft({ ...draft, isDefault: event.target.checked })}
+                    onChange={(event) => updateDraft((current) => ({ ...current, isDefault: event.target.checked }))}
                   />
                   <span>
                     <strong>{t('settings.model.setDefault', '设为工作区默认模型')}</strong>
@@ -1304,7 +1315,19 @@ function ModelSettings({
             </div>
             <div className="model-editor-footer__actions">
               <button className="text-button" type="button" onClick={() => setEditorOpen(false)}>{t('common.cancel', '取消')}</button>
-              <button className="primary-button" type="submit" disabled={savingModel}>
+              <button
+                className="primary-button"
+                type="submit"
+                disabled={savingModel}
+                onClick={(event) => {
+                  // Keep an explicit click path for embedded webviews that do
+                  // not reliably dispatch a native form submit event. The
+                  // preventDefault guard prevents a second save in browsers
+                  // that dispatch both click and submit.
+                  event.preventDefault()
+                  void saveDraft()
+                }}
+              >
                 {savingModel ? t('settings.model.saving', '正在保存…') : draft.id ? t('settings.model.saveChanges', '保存修改') : t('settings.model.saveConnection', '保存连接')}
               </button>
             </div>

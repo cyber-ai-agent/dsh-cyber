@@ -141,7 +141,7 @@ export function WorldSettingsDialog({
         <header className="dialog-header">
           <div>
             <h2 id="world-settings-title">{t('worldSettings.title', '世界管理')} · {world.name}</h2>
-            <p>{t('worldSettings.subtitle', '空间规则、视觉风格、运行模型与角色交互权限只属于当前世界。')}</p>
+            <p>{t('worldSettings.subtitleSceneV2', '世界规则、会话视觉、运行模型与角色交互权限只属于当前世界。')}</p>
           </div>
           <button
             data-dialog-initial-focus
@@ -166,7 +166,6 @@ export function WorldSettingsDialog({
           </div>
         ) : null}
 
-        {/* 顶部 Tab 导航栏 */}
         <nav className="world-management-tabs" aria-label={t('worldSettings.tabNavigation', '世界管理分栏')}>
           <button
             type="button"
@@ -182,7 +181,7 @@ export function WorldSettingsDialog({
             onClick={() => setActiveTab('visual')}
           >
             <Palette size={16} />
-            <span>{t('worldSettings.tabVisual', '空间皮肤')}</span>
+            <span>{t('worldSettings.tabConversationSkin', '会话皮肤')}</span>
           </button>
           <button
             type="button"
@@ -202,9 +201,7 @@ export function WorldSettingsDialog({
           </button>
         </nav>
 
-        {/* Tab 页面主体：使用 hidden 保留输入状态和完整 DOM */}
         <div className="world-settings-grid">
-          {/* TAB 1: 基础设定 */}
           <div className="world-tab-panel" hidden={activeTab !== 'basic'}>
             <section className="world-settings-card">
               <header className="world-settings-card__header">
@@ -372,7 +369,6 @@ export function WorldSettingsDialog({
             </section>
           </div>
 
-          {/* TAB 2: 空间皮肤 */}
           <div className="world-tab-panel" hidden={activeTab !== 'visual'}>
             <section className="world-settings-card world-visual-settings">
               <header className="world-settings-card__header">
@@ -380,19 +376,22 @@ export function WorldSettingsDialog({
                   <Palette size={17} />
                 </span>
                 <div>
-                  <h4>{t('worldSettings.visualCardTitle', '世界专属空间皮肤')}</h4>
-                  <small>{t('worldSettings.visualCardSubtitle', '为【{world}】选择空间视觉风格，世界之间完全独立隔离', { world: world.name })}</small>
+                  <h4>{t('worldSettings.conversationSkinCardTitle', '界面 / 会话皮肤')}</h4>
+                  <small>{t('worldSettings.conversationSkinCardSubtitle', '为【{world}】选择聊天背景、气泡和界面氛围；不会覆盖右侧世界场景', { world: world.name })}</small>
                 </div>
               </header>
               <div className="world-settings-card__body">
-                {/* 皮肤搜索框 */}
+                <div className="setting-help">
+                  <Info size={15} />
+                  <span>{t('worldSettings.skinSceneSeparationHint', '皮肤只影响界面与会话背景。世界场景属于 World 本身，请在右侧世界视图的「世界场景」按钮中单独选择。')}</span>
+                </div>
                 <div className="world-skin-search-bar">
                   <MagnifyingGlass size={16} />
                   <input
                     type="text"
                     value={skinQuery}
                     onChange={(e) => setSkinQuery(e.target.value)}
-                    placeholder={t('worldSettings.skinSearchPlaceholder', '搜索空间皮肤名称、风格或关键词（如：鲸鱼、魔女、樱、默认）…')}
+                    placeholder={t('worldSettings.conversationSkinSearchPlaceholder', '搜索会话皮肤名称、风格或关键词（如：鲸鱼、魔女、樱、默认）…')}
                   />
                   {skinQuery ? (
                     <button
@@ -407,14 +406,13 @@ export function WorldSettingsDialog({
                   <span className="skin-count-badge">{t('worldSettings.skinCount', '{count} 款皮肤', { count: filteredThemes.length })}</span>
                 </div>
 
-                {/* 皮肤卡片画廊网格 */}
                 {filteredThemes.length === 0 ? (
-                  <div className="dialog-empty">{t('worldSettings.skinNoMatches', '未搜索到匹配的空间皮肤，请尝试修改关键词。')}</div>
+                  <div className="dialog-empty">{t('worldSettings.conversationSkinNoMatches', '未搜索到匹配的会话皮肤，请尝试修改关键词。')}</div>
                 ) : (
                   <div className="world-theme-grid">
                     {filteredThemes.map((theme) => {
                       const active = visibleSelectedThemeId === theme.id
-                      const previewImage = theme.tokens.worldMapImage ?? theme.tokens.backdropImage
+                      const previewImage = theme.tokens.backdropImage ?? theme.tokens.worldMapImage
                       return (
                         <div
                           key={theme.id}
@@ -456,20 +454,18 @@ export function WorldSettingsDialog({
                   </div>
                 )}
 
-                {/* 实时聊天气泡微晶效果预览 */}
                 <div className="world-chat-preview" aria-label="聊天视觉实时预览">
                   <div className="world-chat-preview__header">
-                    <span>{t('worldSettings.chatPreviewTitle', '当前皮肤实时微晶预览')}</span>
-                    <small>{t('worldSettings.chatPreviewSubtitle', '气泡随选中皮肤实时变化')}</small>
+                    <span>{t('worldSettings.conversationSkinPreviewTitle', '当前会话皮肤实时预览')}</span>
+                    <small>{t('worldSettings.conversationSkinPreviewSubtitle', '聊天背景和气泡随皮肤变化，World Scene 保持不变')}</small>
                   </div>
-                  <span className="is-character">{t('worldSettings.chatPreviewRole', '角色：欢迎来到这个世界。这里是专属空间。')}</span>
-                  <span className="is-owner">{t('worldSettings.chatPreviewUser', '你：对话气泡和整套空间视图已经实时衔接。')}</span>
+                  <span className="is-character">{t('worldSettings.conversationSkinPreviewRole', '角色：欢迎回来，聊天氛围已经切换。')}</span>
+                  <span className="is-owner">{t('worldSettings.conversationSkinPreviewUser', '你：右侧世界场景仍保持当前世界自己的空间。')}</span>
                 </div>
               </div>
             </section>
           </div>
 
-          {/* TAB 3: 模型运行 */}
           <div className="world-tab-panel" hidden={activeTab !== 'model'}>
             <section className="world-settings-card">
               <header className="world-settings-card__header">
@@ -545,7 +541,6 @@ export function WorldSettingsDialog({
             </section>
           </div>
 
-          {/* TAB 4: 技能权限 */}
           <div className="world-tab-panel" hidden={activeTab !== 'permissions'}>
             <section className="world-settings-card">
               <header className="world-settings-card__header">
@@ -582,9 +577,8 @@ export function WorldSettingsDialog({
           </div>
         </div>
 
-        {/* 底部操作栏 */}
         <footer className="world-settings-dialog__footer">
-          <small>{saving ? t('worldSettings.saving', '正在保存…') : notice ?? t('worldSettings.saveStatusNotice', '空间视觉修改实时生效，点击保存持久化所有配置')}</small>
+          <small>{saving ? t('worldSettings.saving', '正在保存…') : notice ?? t('worldSettings.saveStatusSceneV2', '会话视觉修改实时生效，点击保存持久化当前世界配置')}</small>
           <div>
             <button type="button" className="secondary-button" onClick={close}>
               {t('worldSettings.cancel', '取消')}

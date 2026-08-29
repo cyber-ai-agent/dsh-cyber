@@ -173,8 +173,10 @@ function mergeCatalog(input: {
     const scope = catalogScope({ source, worldScoped: input.worldScoped, packageBound })
     const base = descriptor ?? unboundPackageDescriptor(packageRecord)
     if (base === undefined) continue
+    const routingHints = mergeRoutingHints(descriptor?.routingHints, packageRecord?.manifest.routingHints)
     const entry: SkillCatalogEntry = {
       ...cloneDescriptor(base),
+      ...(routingHints === undefined ? {} : { routingHints }),
       source,
       scope,
       globalKnown,
@@ -251,8 +253,28 @@ function unboundPackageDescriptor(record: PackageSkillRecord | undefined): Chara
   }
 }
 
+/**
+ * Execution authority belongs to the trusted host descriptor. Installed
+ * package manifests may only enrich discovery/routing metadata here; they
+ * cannot replace adapter identity, risk, authorization, or execution policy.
+ */
+function mergeRoutingHints(
+  descriptorHints: readonly string[] | undefined,
+  packageHints: readonly string[] | undefined,
+): string[] | undefined {
+  const merged = [...(descriptorHints ?? []), ...(packageHints ?? [])]
+    .map((hint) => hint.trim())
+    .filter((hint) => hint.length > 0)
+  if (merged.length === 0) return undefined
+  return [...new Set(merged)]
+}
+
 function cloneDescriptor(descriptor: CharacterSkillDescriptor): CharacterSkillDescriptor {
-  return { ...descriptor, risks: [...descriptor.risks] }
+  return {
+    ...descriptor,
+    risks: [...descriptor.risks],
+    ...(descriptor.routingHints === undefined ? {} : { routingHints: [...descriptor.routingHints] }),
+  }
 }
 
 function compareInstalledPackages(left: InstalledPackage, right: InstalledPackage): number {

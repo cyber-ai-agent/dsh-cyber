@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "official-browser",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "kind": "skill",
   "displayName": "只读网页浏览",
   "summary": "为当前世界声明只读网页浏览能力；执行仍由宿主受信任浏览器适配器完成。",
@@ -16,7 +16,7 @@
     },
     {
       "path": "skill-read.json",
-      "sha256": "a5333dafdca212aaa89f18769c2cc0f1c4d036745cc33fa2699cd8084f29ee60"
+      "sha256": "960deba16c002c293042bfecdb4d0a3da7078bc8667f3e43b0e00594848d774e"
     },
     {
       "path": "skill-extract.json",

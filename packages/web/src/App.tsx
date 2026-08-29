@@ -199,6 +199,7 @@ export default function App() {
   const pendingTurnsRef = useRef<PendingChatTurn[]>([])
   const worldLoadRequestRef = useRef(0)
   const transcriptLoadRequestRef = useRef(0)
+  const modelMutationRevisionRef = useRef(0)
   const activeWorldRef = useRef<World | undefined>(undefined)
   const activeSessionIdRef = useRef<string | undefined>(undefined)
   const activeConversationKeyRef = useRef<string | undefined>(undefined)
@@ -225,6 +226,7 @@ export default function App() {
   const [savingEmployee, setSavingEmployee] = useState(false)
   const [loading, setLoading] = useState(!demoMode)
   const [error, setError] = useState<string | undefined>()
+  const runtimeErrorTimerRef = useRef<number | undefined>(undefined)
   const [appMode, setAppMode] = useState<AppMode>(worldRuntimeV2Enabled ? 'world' : 'workbench')
   const [worldRuntimeAvailable, setWorldRuntimeAvailable] = useState(demoMode)
   const [worldRuntimeRevision, setWorldRuntimeRevision] = useState(0)
@@ -298,6 +300,23 @@ export default function App() {
   activeSessionIdRef.current = activeSessionId
   activeConversationKeyRef.current = activeConversationKey
   pendingTurnsRef.current = pendingTurns
+
+  const clearError = useCallback(() => {
+    if (runtimeErrorTimerRef.current !== undefined) {
+      window.clearTimeout(runtimeErrorTimerRef.current)
+      runtimeErrorTimerRef.current = undefined
+    }
+    setError(undefined)
+  }, [])
+
+  const showRuntimeError = useCallback((message: string) => {
+    if (runtimeErrorTimerRef.current !== undefined) window.clearTimeout(runtimeErrorTimerRef.current)
+    setError(message)
+    runtimeErrorTimerRef.current = window.setTimeout(() => {
+      setError((current) => current === message ? undefined : current)
+      runtimeErrorTimerRef.current = undefined
+    }, 8_000)
+  }, [])
 
   useEffect(() => {
     if (preferences?.locale !== undefined) setUiLocale(resolveUiLocale(preferences.locale))
@@ -482,6 +501,7 @@ export default function App() {
   useEffect(() => {
     if (demoMode) return
     let cancelled = false
+    const modelMutationRevision = modelMutationRevisionRef.current
     void (async () => {
       try {
         const result = await api<{ items: Workspace[] }>('/api/workspaces')
@@ -498,7 +518,7 @@ export default function App() {
         setWorlds(snapshot.worlds)
         setPreferences(preferenceResult.preferences)
         setUiLocale(preferenceResult.preferences.locale)
-        setModels(modelResult.items)
+        if (modelMutationRevisionRef.current === modelMutationRevision) setModels(modelResult.items)
         setModelAssignments(modelResult.assignments)
         setInstalledPackages(packageResult.items)
         setPackageTransactions(packageResult.transactions)
@@ -766,7 +786,7 @@ export default function App() {
           } else if (envelope.event.kind === 'turn.failed') {
             const failure = runtimeFailureMessage(envelope.event)
             patchPendingTurn(effectiveClientTurnId, { status: 'failed', error: failure })
-            if (activeWorldRef.current?.id === world.id && activeConversationKeyRef.current === queueKey) setError(failure)
+            if (activeWorldRef.current?.id === world.id && activeConversationKeyRef.current === queueKey) showRuntimeError(failure)
           }
           const refreshTerminalTranscript = async () => {
             // Runtime completion is emitted before the orchestrator appends the
@@ -796,7 +816,7 @@ export default function App() {
       }
     }
     return subscribeWorldLive(world.id, 'runtime', onRuntime)
-  }, [activeWorld, bindConversationSession, patchPendingTurn, refreshConversationTranscript, removePendingTurn])
+  }, [activeWorld, bindConversationSession, patchPendingTurn, refreshConversationTranscript, removePendingTurn, showRuntimeError])
 
   useEffect(() => {
     if (demoMode || activeWorld === undefined) return
@@ -1218,9 +1238,10 @@ export default function App() {
 
   const openIntegrationSettings = useCallback(() => {
     setPackageMarketOpen(false)
+    clearError()
     setSettingsSection('integrations')
     setSettingsOpen(true)
-  }, [])
+  }, [clearError])
 
   const recruitEmployee = useCallback(async (
     blueprint: EmployeeBlueprint,
@@ -1936,6 +1957,7 @@ export default function App() {
 
   const saveModel = useCallback(async (profile: ModelProfileSaveDraft): Promise<ModelProfile> => {
     if (workspace === undefined) throw new Error('请先创建工作区')
+    modelMutationRevisionRef.current += 1
     if (demoMode) {
       const timestamp = new Date().toISOString()
       const currentProfile = profile.id ? models.find((item) => item.id === profile.id) : undefined
@@ -1955,6 +1977,7 @@ export default function App() {
           .map((item) => saved.isDefault ? { ...item, isDefault: false } : item),
         saved,
       ])
+      clearError()
       return saved
     }
     const result = await api<{ profile: ModelProfile }>(`/api/workspaces/${workspace.id}/model-profiles`, {
@@ -1967,8 +1990,9 @@ export default function App() {
         .map((item) => result.profile.isDefault ? { ...item, isDefault: false } : item),
       result.profile,
     ])
+    clearError()
     return result.profile
-  }, [models, workspace])
+  }, [clearError, demoMode, models, workspace])
 
   const discoverModels = useCallback(async (input: ModelDiscoveryDraft): Promise<DiscoveredModel[]> => {
     if (workspace === undefined) throw new Error('请先创建工作区')
@@ -2189,11 +2213,11 @@ export default function App() {
         <nav aria-label="全局功能">
           <CreativeWorkshopLauncher workspaceId={workspace.id} onCreated={(project) => { void openWorkshopWorld(project.worldId).catch((cause) => setError(cause instanceof Error ? cause.message : '创意工坊世界已创建，但打开失败，请从世界列表重新进入。')) }} onOpenWorld={(worldId) => { void openWorkshopWorld(worldId).catch((cause) => setError(cause instanceof Error ? cause.message : '世界打开失败')) }} />
           <button type="button" onClick={() => void openPackageMarket('theme')}><Storefront size={16} />{t('app.market', '市场')}</button>
-          <button type="button" onClick={() => { setSettingsSection('maintenance'); setSettingsOpen(true) }}><Pulse size={16} /><span>{t('app.systemStatus', '系统状态')}</span><i className="health-indicator" />{t('app.healthy', '良好')}</button>
-          <button type="button" onClick={() => { setSettingsSection('appearance'); setSettingsOpen(true) }}><GearSix size={17} />{t('app.settings', '设置')}</button>
+          <button type="button" onClick={() => { clearError(); setSettingsSection('maintenance'); setSettingsOpen(true) }}><Pulse size={16} /><span>{t('app.systemStatus', '系统状态')}</span><i className="health-indicator" />{t('app.healthy', '良好')}</button>
+          <button type="button" onClick={() => { clearError(); setSettingsSection('appearance'); setSettingsOpen(true) }}><GearSix size={17} />{t('app.settings', '设置')}</button>
         </nav>
       </header>
-      {error === undefined ? null : <div className="error-banner" role="alert">{error}<button type="button" onClick={() => setError(undefined)}>关闭</button></div>}
+      {error === undefined ? null : <div className="error-banner" role="alert">{error}<button type="button" onClick={clearError}>关闭</button></div>}
       <ResizableShell
         leftWidth={preferences.leftPaneWidth}
         rightWidth={preferences.rightPaneWidth}

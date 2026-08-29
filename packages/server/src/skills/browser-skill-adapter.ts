@@ -245,7 +245,10 @@ function parseBrowserCommand(prompt: string): ParsedBrowserCommand | undefined {
 }
 
 function parseNaturalBrowserCommand(prompt: string): RegExpExecArray | undefined {
-  const match = /(?:^|[\s，。！？:：])(?:请|帮我|帮忙|麻烦|现在|立即|立刻)?\s*(打开|读取|阅读|浏览|查看|看一下|看看|访问|总结|提取|截图|网页截图)\s+(https?:\/\/\S+?)(?:\s+([^\n]+))?(?=$|[\s。！？!?，,；;])/iu.exec(prompt)
+  // Chinese requests commonly attach the URL directly to the verb (for
+  // example “请阅读https://…”). The action vocabulary is bounded here, so
+  // optional whitespace does not turn arbitrary text into a browser command.
+  const match = /(?:^|[\s，。！？:：])(?:请|帮我|帮忙|麻烦|现在|立即|立刻)?\s*(打开|读取|阅读|浏览|查看|看一下|看看|访问|总结|提取|截图|网页截图)\s*(https?:\/\/\S+?)(?:\s+([^\n]+))?(?=$|[\s。！？!?，,；;])/iu.exec(prompt)
   const actionOffset = match === null ? -1 : match[0].indexOf(match[1]!)
   if (match === null || actionOffset < 0 || isNegatedBrowserRequest(prompt, (match.index ?? 0) + actionOffset)) return undefined
   const action = match[1]!.toLowerCase()
