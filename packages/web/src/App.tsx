@@ -2298,8 +2298,6 @@ export default function App() {
                   employees={employees}
                   liveEnabled={!historyOpen}
                   conversationEmployeeIds={activeParticipantIds}
-                  messageCount={messages.filter((message) => message.kind === 'user' || message.kind === 'assistant').length}
-                  registeredArtifactCount={artifactReferenceCount(messages)}
                   {...(latestUtterance === undefined ? {} : { latestUtterance })}
                   {...(selectedEmployeeId === undefined ? {} : { selectedEmployeeId })}
                   onSelectEmployee={(employeeId) => {
@@ -2308,7 +2306,6 @@ export default function App() {
                   }}
                   onOpenDossier={(employeeId) => void openDossier(employeeId)}
                   onOpenTrace={() => { setAppMode('workbench'); setDockCollapsed(false); setDockTab('trace') }}
-                  onOpenArtifacts={() => { setAppMode('workbench'); setDockCollapsed(false); setDockTab('artifacts') }}
           onStartGroup={(employeeIds, session) => {
           const selected = employees.filter((employee) => employeeIds.includes(employee.id))
           if (selected.length < 2) return
@@ -2906,22 +2903,6 @@ function participantIdsFromMessages(messages: WorkMessage[]): string[] {
     if (message.senderKind === 'employee' && !ids.includes(message.senderId)) ids.push(message.senderId)
   }
   return ids
-}
-
-function artifactReferenceCount(messages: WorkMessage[]): number {
-  const references = new Set<string>()
-  for (const message of messages) {
-    const value = message.metadata.artifactRefs
-    if (!Array.isArray(value)) continue
-    for (const candidate of value) {
-      if (typeof candidate === 'string' && candidate.trim()) references.add(candidate.trim())
-      else if (candidate !== null && typeof candidate === 'object' && !Array.isArray(candidate)) {
-        const id = candidate['id']
-        if (typeof id === 'string' && id.trim()) references.add(id.trim())
-      }
-    }
-  }
-  return references.size
 }
 
 function latestEmployeeUtterance(messages: WorkMessage[], preferredEmployeeId?: string): { messageId: string; employeeId: string; text: string } | undefined {

@@ -1,16 +1,15 @@
 import {
   Brain,
-  CheckCircle,
+  CaretLeft,
+  CaretRight,
   Circle,
   GitBranch,
   Hourglass,
-  Package,
   Play,
   SpeakerHigh,
   SpeakerSlash,
   UserFocus,
   WarningCircle,
-  Wrench,
   XCircle,
 } from '@phosphor-icons/react'
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
@@ -27,6 +26,8 @@ interface DigitalHumanUtterance {
   text: string
 }
 
+type DigitalHumanVoiceMode = 'off' | 'manual' | 'auto'
+
 interface DigitalHumanModeProps {
   world: World
   employees: CyberEmployee[]
@@ -35,13 +36,11 @@ interface DigitalHumanModeProps {
   staticMode: boolean
   activeEmployeeId?: string
   conversationEmployeeIds: string[]
-  messageCount: number
-  registeredArtifactCount: number
   latestUtterance?: DigitalHumanUtterance
   onSelectEmployee(employeeId: string): void
   onOpenDossier(employeeId: string): void
   onOpenTrace(): void
-  onOpenArtifacts(): void
+  onStaticModeChange(value: boolean): void
 }
 
 const STATUS_ITEMS = [
@@ -61,16 +60,19 @@ export function DigitalHumanMode({
   staticMode,
   activeEmployeeId,
   conversationEmployeeIds,
-  messageCount,
-  registeredArtifactCount,
   latestUtterance,
   onSelectEmployee,
   onOpenDossier,
   onOpenTrace,
-  onOpenArtifacts,
+  onStaticModeChange,
 }: DigitalHumanModeProps) {
   const [speaking, setSpeaking] = useState(false)
   const utteranceRef = useRef<SpeechSynthesisUtterance | undefined>(undefined)
+  const [voiceMode, setVoiceMode] = useState<DigitalHumanVoiceMode>(() => readVoiceMode(world.id))
+  const [voiceId, setVoiceId] = useState(() => readVoiceId(world.id))
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([])
+  const [statusCollapsed, setStatusCollapsed] = useState(() => readStatusCollapsed(world.id))
+  const lastAutoSpokenRef = useRef(readLastAutoSpokenMessage(world.id))
   const entities = useMemo(() => snapshot.entities.filter((entity) => entity.kind === 'agent'), [snapshot.entities])
   const selectedEntity = selectActiveEntity(entities, activeEmployeeId, latestUtterance?.employeeId, conversationEmployeeIds)
   const activeEntity = speaking && latestUtterance !== undefined
@@ -83,33 +85,22 @@ export function DigitalHumanMode({
   const spokenText = latestUtterance === undefined ? '' : speechTextFromMessage(latestUtterance.text)
   const canSpeak = speechSupported && spokenText.length > 0
   const voiceHint = !speechSupported ? '当前浏览器不支持本机语音' : canSpeak ? '本机语音，不上传内容' : '等待角色最终回复'
+  const voiceModeLabel = voiceMode === 'auto' ? '自动播报' : voiceMode === 'manual' ? '手动播报' : '语音已关闭'
   const collaborators = conversationEmployeeIds
     .filter((employeeId) => employeeId !== activeEmployee?.id)
     .map((employeeId) => employees.find((employee) => employee.id === employeeId))
     .filter((employee): employee is CyberEmployee => employee !== undefined)
     .slice(0, 2)
-  const hasExecutionFact = entities.some((entity) => entity.activityRef !== undefined && entity.activity !== 'idle')
-  const sequence = [
-    { id: 'intent', label: '用户意图', detail: messageCount > 0 ? '已确立' : '等待消息', confirmed: messageCount > 0, Icon: CheckCircle, onClick: onOpenTrace },
-    { id: 'dispatch', label: '角色分发', detail: conversationEmployeeIds.length > 0 ? `${conversationEmployeeIds.length} 名角色` : '尚未分发', confirmed: conversationEmployeeIds.length > 0, Icon: GitBranch, onClick: onOpenTrace },
-    { id: 'tools', label: '工具执行', detail: hasExecutionFact ? '已建立事实' : '等待事实', confirmed: hasExecutionFact, Icon: Wrench, onClick: onOpenTrace },
-    { id: 'artifacts', label: '产物登记', detail: registeredArtifactCount > 0 ? `${registeredArtifactCount} 个引用` : '等待事实', confirmed: registeredArtifactCount > 0, Icon: Package, onClick: onOpenArtifacts },
-  ]
-
-  const toggleSpeech = useCallback(() => {
+  const startSpeech = useCallback(() => {
     if (!canSpeak || latestUtterance === undefined) return
-    if (speaking) {
-      window.speechSynthesis.cancel()
-      setSpeaking(false)
-      return
-    }
     try {
       const utterance = new SpeechSynthesisUtterance(spokenText)
       utterance.lang = 'zh-CN'
       utterance.rate = 0.96
       utterance.pitch = 1
-      const chineseVoice = window.speechSynthesis.getVoices().find((voice) => /^zh(?:-|_)/iu.test(voice.lang))
-      if (chineseVoice !== undefined) utterance.voice = chineseVoice
+      const selectedVoice = voices.find((voice) => voice.voiceURI === voiceId)
+        ?? voices.find((voice) => /^zh(?:-|_)/iu.test(voice.lang))
+      if (selectedVoice !== undefined) utterance.voice = selectedVoice
       utterance.onstart = () => setSpeaking(true)
       utterance.onend = () => { utteranceRef.current = undefined; setSpeaking(false) }
       utterance.onerror = () => { utteranceRef.current = undefined; setSpeaking(false) }
@@ -120,7 +111,49 @@ export function DigitalHumanMode({
       utteranceRef.current = undefined
       setSpeaking(false)
     }
-  }, [canSpeak, latestUtterance, speaking, spokenText])
+  }, [canSpeak, latestUtterance, spokenText, voiceId, voices])
+
+  const toggleSpeech = useCallback(() => {
+    if (speaking) {
+      window.speechSynthesis.cancel()
+      setSpeaking(false)
+      return
+    }
+    startSpeech()
+  }, [speaking, startSpeech])
+
+  const changeVoiceMode = useCallback((mode: DigitalHumanVoiceMode) => {
+    if (mode === 'off' && speaking && speechSupported) window.speechSynthesis.cancel()
+    if (mode === 'auto' && latestUtterance !== undefined) {
+      lastAutoSpokenRef.current = latestUtterance.messageId
+      persistLastAutoSpokenMessage(world.id, latestUtterance.messageId)
+    }
+    setVoiceMode(mode)
+  }, [latestUtterance, speaking, speechSupported, world.id])
+
+  useEffect(() => {
+    if (!speechSupported) return
+    const updateVoices = () => setVoices([...window.speechSynthesis.getVoices()].sort(compareVoices))
+    updateVoices()
+    window.speechSynthesis.addEventListener('voiceschanged', updateVoices)
+    return () => window.speechSynthesis.removeEventListener('voiceschanged', updateVoices)
+  }, [speechSupported])
+
+  useEffect(() => {
+    persistVoicePreferences(world.id, voiceMode, voiceId)
+  }, [voiceId, voiceMode, world.id])
+
+  useEffect(() => {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(`dsh-cyber-digital-status-collapsed:${world.id}`, statusCollapsed ? 'true' : 'false')
+  }, [statusCollapsed, world.id])
+
+  useEffect(() => {
+    if (voiceMode !== 'auto' || !canSpeak || latestUtterance === undefined || speaking) return
+    if (lastAutoSpokenRef.current === latestUtterance.messageId) return
+    lastAutoSpokenRef.current = latestUtterance.messageId
+    persistLastAutoSpokenMessage(world.id, latestUtterance.messageId)
+    startSpeech()
+  }, [canSpeak, latestUtterance, speaking, startSpeech, voiceMode, world.id])
 
   useEffect(() => () => {
     if (utteranceRef.current !== undefined && typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.cancel()
@@ -128,15 +161,6 @@ export function DigitalHumanMode({
 
   return <section className={`digital-human${staticMode ? ' digital-human--static' : ''}${connected ? '' : ' digital-human--offline'}`} data-state={activeState} data-expression={motionCue.expression} data-gesture={motionCue.gesture} data-speaking={speaking ? 'true' : 'false'} aria-label={`${world.name}数字人行动舱`}>
     <div className="digital-human__bay" aria-hidden="true" />
-    <nav className="digital-human__sequence" aria-label="当前会话耐久事实">
-      <span className="digital-human__sequence-title">当前会话耐久事实</span>
-      <ol>{sequence.map(({ id, label, detail, confirmed, Icon, onClick }) => <li key={id} className={confirmed ? 'is-confirmed' : 'is-pending'}>
-        <button type="button" onClick={onClick} aria-label={`${label}：${detail}`}>
-          <Icon size={17} weight={confirmed ? 'fill' : 'regular'} aria-hidden="true" />
-          <span><strong>{label}</strong><small>{detail}</small></span>
-        </button>
-      </li>)}</ol>
-    </nav>
 
     <div className="digital-human__stage">
       {collaborators.map((employee, index) => <button key={employee.id} type="button" className={`digital-human__collaborator digital-human__collaborator--${index + 1}`} onClick={() => onSelectEmployee(employee.id)} aria-label={`聚焦${employee.displayName}对话`}>
@@ -154,22 +178,70 @@ export function DigitalHumanMode({
       </>}
     </div>
 
-    <aside className="digital-human__states" aria-label="数字人状态脊柱">
-      <header><strong>状态脊柱</strong><small>由真实运行事实驱动</small></header>
-      <ol>{STATUS_ITEMS.map(({ id, label, description, Icon }) => <li key={id} className={id === activeState ? 'is-active' : ''}>
+    <aside className={`digital-human__states${statusCollapsed ? ' is-collapsed' : ''}`} aria-label="数字人状态">
+      <header><button type="button" aria-expanded={!statusCollapsed} aria-label={statusCollapsed ? '展开数字人状态' : '收起数字人状态'} onClick={() => setStatusCollapsed((current) => !current)}>{statusCollapsed ? <CaretLeft size={18} aria-hidden="true" /> : <><strong>状态</strong><CaretRight size={16} aria-hidden="true" /></>}</button></header>
+      {statusCollapsed ? null : <ol>{STATUS_ITEMS.map(({ id, label, description, Icon }) => <li key={id} className={id === activeState ? 'is-active' : ''}>
         <Icon size={18} weight={id === activeState ? 'fill' : 'regular'} aria-hidden="true" />
         <span><strong>{label}</strong><small>{description}</small></span>
-      </li>)}</ol>
+      </li>)}</ol>}
     </aside>
 
     <footer className="digital-human__actions">
       <button type="button" disabled={activeEmployee === undefined} onClick={() => activeEmployee && onOpenDossier(activeEmployee.id)}><UserFocus size={17} aria-hidden="true" /><span><strong>数字人档案</strong><small>查看身份与职责</small></span></button>
-      <button type="button" disabled={!canSpeak} aria-pressed={speaking} onClick={toggleSpeech}>{speaking ? <SpeakerSlash size={17} aria-hidden="true" /> : <SpeakerHigh size={17} aria-hidden="true" />}<span><strong>{speaking ? '停止播报' : '播报回复'}</strong><small>{voiceHint}</small></span></button>
+      <details className="digital-human__voice-menu">
+        <summary role="button" aria-label="语音回复设置"><SpeakerHigh size={17} aria-hidden="true" /><span><strong>语音回复</strong><small>{voiceModeLabel}</small></span></summary>
+        <div className="digital-human__voice-panel">
+          <strong>语音回复</strong>
+          <label><span>播报模式</span><select aria-label="语音播报模式" value={voiceMode} onChange={(event) => changeVoiceMode(event.target.value as DigitalHumanVoiceMode)}><option value="off">关闭语音</option><option value="manual">手动播报</option><option value="auto">自动播报新回复</option></select></label>
+          <label><span>声音</span><select aria-label="数字人语音选择" value={voiceId} onChange={(event) => setVoiceId(event.target.value)} disabled={!speechSupported}><option value="">系统默认中文声音</option>{voices.map((voice) => <option key={voice.voiceURI} value={voice.voiceURI}>{voice.name} · {voice.lang}{voice.localService ? ' · 本机' : ''}</option>)}</select></label>
+          <label className="digital-human__motion-toggle"><input type="checkbox" checked={!staticMode} onChange={(event) => onStaticModeChange(!event.target.checked)} /><span>启用角色动效</span></label>
+          <button type="button" disabled={voiceMode === 'off' || !canSpeak} aria-pressed={speaking} onClick={toggleSpeech}>{speaking ? <SpeakerSlash size={16} aria-hidden="true" /> : <SpeakerHigh size={16} aria-hidden="true" />}{speaking ? '停止播报' : '播放当前回复'}</button>
+          <small>{voiceHint}。自动模式只播报之后产生的新回复。</small>
+        </div>
+      </details>
       <button type="button" onClick={onOpenTrace}><GitBranch size={17} aria-hidden="true" /><span><strong>序列追溯</strong><small>查看耐久事实</small></span></button>
       <button type="button" disabled={collaborators[0] === undefined} onClick={() => collaborators[0] && onSelectEmployee(collaborators[0].id)}><UserFocus size={17} aria-hidden="true" /><span><strong>聚焦协作者</strong><small>{collaborators[0]?.displayName ?? '当前没有协作者'}</small></span></button>
     </footer>
     {connected ? null : <div className="digital-human__connection" role="status"><WarningCircle size={16} aria-hidden="true" />实时世界正在重连，画面已冻结</div>}
   </section>
+}
+
+function compareVoices(left: SpeechSynthesisVoice, right: SpeechSynthesisVoice): number {
+  const leftChinese = /^zh(?:-|_)/iu.test(left.lang) ? 0 : 1
+  const rightChinese = /^zh(?:-|_)/iu.test(right.lang) ? 0 : 1
+  return leftChinese - rightChinese || left.lang.localeCompare(right.lang) || left.name.localeCompare(right.name)
+}
+
+function readVoiceMode(worldId: string): DigitalHumanVoiceMode {
+  if (typeof localStorage === 'undefined') return 'manual'
+  const value = localStorage.getItem(`dsh-cyber-digital-voice-mode:${worldId}`)
+  return value === 'off' || value === 'auto' || value === 'manual' ? value : 'manual'
+}
+
+function readVoiceId(worldId: string): string {
+  if (typeof localStorage === 'undefined') return ''
+  return localStorage.getItem(`dsh-cyber-digital-voice-id:${worldId}`) ?? ''
+}
+
+function readLastAutoSpokenMessage(worldId: string): string | undefined {
+  if (typeof localStorage === 'undefined') return undefined
+  return localStorage.getItem(`dsh-cyber-digital-last-spoken:${worldId}`) ?? undefined
+}
+
+function readStatusCollapsed(worldId: string): boolean {
+  if (typeof localStorage === 'undefined') return false
+  return localStorage.getItem(`dsh-cyber-digital-status-collapsed:${worldId}`) === 'true'
+}
+
+function persistVoicePreferences(worldId: string, mode: DigitalHumanVoiceMode, voiceId: string): void {
+  if (typeof localStorage === 'undefined') return
+  localStorage.setItem(`dsh-cyber-digital-voice-mode:${worldId}`, mode)
+  localStorage.setItem(`dsh-cyber-digital-voice-id:${worldId}`, voiceId)
+}
+
+function persistLastAutoSpokenMessage(worldId: string, messageId: string): void {
+  if (typeof localStorage === 'undefined') return
+  localStorage.setItem(`dsh-cyber-digital-last-spoken:${worldId}`, messageId)
 }
 
 function selectActiveEntity(entities: WorldRuntimeEntityState[], activeEmployeeId: string | undefined, latestSpeakerId: string | undefined, conversationEmployeeIds: string[]): WorldRuntimeEntityState | undefined {
@@ -190,10 +262,17 @@ function digitalHumanState(entity: WorldRuntimeEntityState | undefined, connecte
 
 function digitalHumanAtlasStyle(index: number): CSSProperties {
   const normalized = Math.max(0, Math.min(7, Math.floor(index)))
-  const column = normalized % 4
-  const row = Math.floor(normalized / 4)
+  const firstFrameByAvatar = [2, 0, 4, 6, 10, 8, 12, 14]
+  const closedFrame = firstFrameByAvatar[normalized] ?? 0
+  const openFrame = closedFrame + 1
+  const closedColumn = closedFrame % 4
+  const closedRow = Math.floor(closedFrame / 4)
+  const openColumn = openFrame % 4
+  const openRow = Math.floor(openFrame / 4)
   return {
-    '--digital-human-x': `${column * 33.3333}%`,
-    '--digital-human-y': `${row * 100}%`,
+    '--digital-human-closed-x': `${closedColumn * 33.3333}%`,
+    '--digital-human-closed-y': `${closedRow * 33.3333}%`,
+    '--digital-human-open-x': `${openColumn * 33.3333}%`,
+    '--digital-human-open-y': `${openRow * 33.3333}%`,
   } as CSSProperties
 }

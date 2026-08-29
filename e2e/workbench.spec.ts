@@ -103,7 +103,9 @@ test('opens low-frequency dock surfaces from More as closable restored tabs', as
   page.on('pageerror', (error) => consoleIssues.push(`[pageerror] ${error.message}`))
   await page.goto(origin)
   const onboarding = page.getByRole('heading', { name: '创建第一个本地世界' })
+  await expect(onboarding.or(page.locator('.workbench-shell'))).toBeVisible()
   if (await onboarding.isVisible()) await page.getByRole('button', { name: '创建我的世界' }).click()
+  await expect(page.locator('.workbench-shell')).toBeVisible()
   const dock = page.getByRole('region', { name: '世界与角色侧边栏' })
   const more = dock.getByRole('button', { name: '更多', exact: true })
 
@@ -118,7 +120,9 @@ test('opens low-frequency dock surfaces from More as closable restored tabs', as
   await expect(dock.getByRole('tab', { name: '知识', exact: true })).toBeVisible()
   await openDockTab(dock, '日程')
   await expect(dock.getByRole('tab', { name: '日程', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await expect(dock.getByRole('tab', { name: '知识', exact: true })).toHaveCount(0)
 
+  await openDockTab(dock, '知识')
   await dock.getByRole('button', { name: '关闭知识页签' }).click()
   await expect(dock.getByRole('tab', { name: '知识', exact: true })).toHaveCount(0)
   await openDockTab(dock, '角色')
@@ -128,11 +132,15 @@ test('opens low-frequency dock surfaces from More as closable restored tabs', as
 
   await page.reload()
   const restoredDock = page.getByRole('region', { name: '世界与角色侧边栏' })
-  await expect(restoredDock.getByRole('tab', { name: '日程', exact: true })).toBeVisible()
+  await expect(restoredDock.getByRole('tab', { name: '日程', exact: true })).toHaveCount(0)
   await expect(restoredDock.getByRole('tab', { name: '知识', exact: true })).toHaveCount(0)
   await expect(restoredDock.getByRole('tab', { name: '角色', exact: true })).toHaveCount(0)
 
   const restoredMore = restoredDock.getByRole('button', { name: '更多', exact: true })
+  await restoredMore.click()
+  await expect(restoredDock.getByRole('menuitemcheckbox', { name: '日程', exact: true })).toHaveAttribute('aria-checked', 'true')
+  await restoredDock.getByRole('menuitemcheckbox', { name: '日程', exact: true }).click()
+  await expect(restoredDock.getByRole('tab', { name: '日程', exact: true })).toBeVisible()
   await restoredMore.click()
   await restoredMore.press('Escape')
   await expect(restoredMore).toBeFocused()

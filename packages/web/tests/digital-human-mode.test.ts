@@ -54,12 +54,10 @@ function render(activity: WorldRuntimeSnapshot['entities'][number]['activity'], 
     staticMode: false,
     activeEmployeeId: employees[0]!.id,
     conversationEmployeeIds: employees.map((employee) => employee.id),
-    messageCount: 4,
-    registeredArtifactCount: 0,
     onSelectEmployee: vi.fn(),
     onOpenDossier: vi.fn(),
     onOpenTrace: vi.fn(),
-    onOpenArtifacts: vi.fn(),
+    onStaticModeChange: vi.fn(),
   }))
 }
 
@@ -67,11 +65,9 @@ describe('DigitalHumanMode', () => {
   it('projects real conversation and execution facts without claiming an artifact', () => {
     const html = render('thinking', '正在理解用户意图')
     expect(html).toContain('data-state="thinking"')
-    expect(html).toContain('当前会话耐久事实')
-    expect(html).toContain('用户意图：已确立')
-    expect(html).toContain('角色分发：2 名角色')
-    expect(html).toContain('工具执行：已建立事实')
-    expect(html).toContain('产物登记：等待事实')
+    expect(html).not.toContain('当前会话耐久事实')
+    expect(html).toContain('aria-label="数字人状态"')
+    expect(html).toContain('收起数字人状态')
     expect(html).toContain('陈明远 · 首席分析师')
     expect(html).toContain('聚焦林思琪对话')
   })
@@ -91,15 +87,13 @@ describe('DigitalHumanMode', () => {
       connected: true,
       staticMode: true,
       conversationEmployeeIds: [employees[0]!.id],
-      messageCount: 1,
-      registeredArtifactCount: 1,
       onSelectEmployee: vi.fn(),
       onOpenDossier: vi.fn(),
       onOpenTrace: vi.fn(),
-      onOpenArtifacts: vi.fn(),
+      onStaticModeChange: vi.fn(),
     }))
     expect(html).toContain('data-state="approval"')
     expect(html).toContain('digital-human--static')
-    expect(html).toContain('产物登记：1 个引用')
+    expect(html).toContain('启用角色动效')
   })
 })

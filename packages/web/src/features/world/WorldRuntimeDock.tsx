@@ -4,7 +4,6 @@ import {
   LightbulbFilament,
   MapTrifold,
   Minus,
-  Pause,
   Plus,
   PersonSimpleWalk,
   UserFocus,
@@ -37,17 +36,14 @@ interface WorldRuntimeDockProps {
   liveEnabled?: boolean
   selectedEmployeeId?: string
   conversationEmployeeIds: string[]
-  messageCount: number
-  registeredArtifactCount: number
   latestUtterance?: { messageId: string; employeeId: string; text: string }
   onSelectEmployee(employeeId: string): void
   onOpenDossier(employeeId: string): void
   onOpenTrace(): void
-  onOpenArtifacts(): void
   onStartGroup(employeeIds: string[], session?: WorkSession): void
 }
 
-export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = true, selectedEmployeeId, conversationEmployeeIds, messageCount, registeredArtifactCount, latestUtterance, onSelectEmployee, onOpenDossier, onOpenTrace, onOpenArtifacts, onStartGroup }: WorldRuntimeDockProps) {
+export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = true, selectedEmployeeId, conversationEmployeeIds, latestUtterance, onSelectEmployee, onOpenDossier, onOpenTrace, onStartGroup }: WorldRuntimeDockProps) {
   const runtime = useWorldClient({ demoMode, world, employees, liveEnabled })
   const [fitRequest, setFitRequest] = useState(0)
   const [zoomCommand, setZoomCommand] = useState<WorldZoomCommand>()
@@ -165,9 +161,7 @@ export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = tru
       <section className="world-runtime-dock" aria-label={`${world.name}实时世界`}>
         <div className="world-runtime-dock__canvas">
           <div className="world-runtime-dock__view-switch" aria-label="世界显示方式">
-            <button type="button" className={visualMode === 'digital-human' ? 'is-active' : ''} aria-pressed={visualMode === 'digital-human'} onClick={() => setVisualMode('digital-human')}><UserFocus size={15} aria-hidden="true" />数字人</button>
-            <button type="button" className={visualMode === 'map' ? 'is-active' : ''} aria-pressed={visualMode === 'map'} onClick={() => setVisualMode('map')}><MapTrifold size={15} aria-hidden="true" />地图</button>
-            <button type="button" className={staticMode ? 'is-active' : ''} aria-pressed={staticMode} onClick={() => setStaticMode((current) => !current)}><Pause size={15} aria-hidden="true" />静态模式</button>
+            <button type="button" aria-label={visualMode === 'digital-human' ? '切换到地图' : '切换到数字人'} title={visualMode === 'digital-human' ? '切换到地图' : '切换到数字人'} onClick={() => setVisualMode((current) => current === 'digital-human' ? 'map' : 'digital-human')}>{visualMode === 'digital-human' ? <UserFocus size={15} aria-hidden="true" /> : <MapTrifold size={15} aria-hidden="true" />}<span>{visualMode === 'digital-human' ? '数字人' : '地图'}</span></button>
           </div>
           {visualMode === 'map' ? <WorldCanvas
             manifest={runtime.manifest}
@@ -191,13 +185,11 @@ export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = tru
             staticMode={staticMode}
             {...(activeEmployeeId === undefined ? {} : { activeEmployeeId })}
             conversationEmployeeIds={conversationEmployeeIds}
-            messageCount={messageCount}
-            registeredArtifactCount={registeredArtifactCount}
             {...(latestUtterance === undefined ? {} : { latestUtterance })}
             onSelectEmployee={onSelectEmployee}
             onOpenDossier={onOpenDossier}
             onOpenTrace={onOpenTrace}
-            onOpenArtifacts={onOpenArtifacts}
+            onStaticModeChange={setStaticMode}
           />}
 
           {visualMode !== 'map' || focusedNames.length === 0 ? null : <div className="world-runtime-dock__focus" aria-label="当前会话成员"><span>当前会话</span><strong>{focusedNames.join('、')}</strong></div>}

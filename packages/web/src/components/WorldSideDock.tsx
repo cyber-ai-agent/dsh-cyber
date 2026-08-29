@@ -131,7 +131,9 @@ export function WorldSideDock({
 
   const localizedFixedTabs = FIXED_TABS.map((tab) => ({ ...tab, label: t(`dock.${tab.id}`, tab.label) }))
   const localizedSecondaryTabs = SECONDARY_TABS.map((tab) => ({ ...tab, label: t(`dock.${tab.id === 'dossier' ? 'roles' : tab.id}`, tab.label) }))
-  const visibleSecondaryTabs = localizedSecondaryTabs.filter((tab) => openTabs.includes(tab.id))
+  // Keep the header calm: secondary surfaces remain remembered in More, but
+  // only the one the user is actively viewing is promoted into the tab row.
+  const visibleSecondaryTabs = localizedSecondaryTabs.filter((tab) => tab.id === activeTab)
   const visibleTabs = [...localizedFixedTabs, ...visibleSecondaryTabs]
 
   const selectTab = (tab: DockTab) => {

@@ -67,7 +67,12 @@ test('switches between map and a persistent accessible digital-human world', asy
     Object.defineProperty(window, 'speechSynthesis', {
       configurable: true,
       value: {
-        getVoices: () => [],
+        getVoices: () => [
+          { voiceURI: 'voice-zh-a', name: '中文女声', lang: 'zh-CN', localService: true, default: true },
+          { voiceURI: 'voice-zh-b', name: '中文男声', lang: 'zh-CN', localService: true, default: false },
+        ],
+        addEventListener: (_event: string, listener: () => void) => listener(),
+        removeEventListener: () => undefined,
         speak: (utterance: typeof activeUtterance) => { activeUtterance = utterance; utterance?.onstart?.() },
         cancel: () => { const utterance = activeUtterance; activeUtterance = undefined; utterance?.onend?.() },
       },
@@ -78,16 +83,19 @@ test('switches between map and a persistent accessible digital-human world', asy
   await page.goto(origin)
   await expect(page.locator('.workbench-shell')).toBeVisible()
   const world = server.store.listWorlds(server.store.listWorkspaces()[0]!.id)[0]!
-  const digitalButton = page.getByRole('button', { name: '数字人', exact: true })
-  await expect(digitalButton).toBeVisible()
-  await digitalButton.click()
+  const modeToggle = page.getByRole('button', { name: '切换到数字人' })
+  await expect(modeToggle).toBeVisible()
+  await modeToggle.click()
 
   const actionBay = page.getByRole('region', { name: `${world.name}数字人行动舱` })
   await expect(actionBay).toBeVisible()
   await expect(actionBay).toHaveAttribute('data-state', 'idle')
-  await expect(actionBay.getByText('当前会话耐久事实')).toBeVisible()
-  await expect(actionBay.getByText('产物登记', { exact: true })).toBeVisible()
+  await expect(actionBay.getByText('当前会话耐久事实')).toHaveCount(0)
   await expect(actionBay.getByRole('button', { name: /打开.*档案/ })).toBeVisible()
+  const statusPanel = actionBay.getByRole('complementary', { name: '数字人状态' })
+  await statusPanel.getByRole('button', { name: '收起数字人状态' }).click()
+  await expect(statusPanel).toHaveClass(/is-collapsed/)
+  await statusPanel.getByRole('button', { name: '展开数字人状态' }).click()
   await expect(actionBay.locator('.digital-human__collaborator')).toHaveCount(2)
   const figure = actionBay.locator('.digital-human__figure')
   await expect.poll(() => figure.evaluate((element) => getComputedStyle(element).animationName)).toContain('digital-human-breathe')
@@ -119,29 +127,55 @@ test('switches between map and a persistent accessible digital-human world', asy
     await page.screenshot({ path: join(screenshotRoot, `digital-human-${viewport.label}.png`), fullPage: false })
   }
 
-  const staticMode = page.getByRole('button', { name: '静态模式', exact: true })
-  await staticMode.click()
-  await expect(staticMode).toHaveAttribute('aria-pressed', 'true')
-  await expect.poll(() => figure.evaluate((element) => getComputedStyle(element).animationName)).toBe('none')
+  await page.setViewportSize({ width: 1_440, height: 900 })
   runtime.release()
   expect((await runningTurn).status).toBe(200)
   await page.reload()
   await expect(actionBay).toBeVisible()
-  const speakButton = actionBay.getByRole('button', { name: /播报回复/ })
+  await actionBay.getByRole('button', { name: '语音回复设置' }).click()
+  const voiceMode = actionBay.getByLabel('语音播报模式')
+  const voiceSelect = actionBay.getByLabel('数字人语音选择')
+  await expect(voiceSelect.locator('option')).toHaveCount(3)
+  await voiceSelect.selectOption('voice-zh-b')
+  const speakButton = actionBay.getByRole('button', { name: /播放当前回复/ })
   await expect(speakButton).toBeEnabled()
   await speakButton.click()
   await expect(actionBay).toHaveAttribute('data-state', 'speaking')
   await expect(actionBay).toHaveAttribute('data-expression', 'speaking')
+  const mouthClosed = await figure.evaluate((element) => getComputedStyle(element).backgroundPosition)
+  await page.waitForTimeout(300)
+  const mouthOpen = await figure.evaluate((element) => getComputedStyle(element).backgroundPosition)
+  expect(mouthOpen).not.toBe(mouthClosed)
+  await page.screenshot({ path: join(screenshotRoot, 'digital-human-speaking-1440x900.png'), fullPage: false })
   await actionBay.getByRole('button', { name: /停止播报/ }).click()
   await expect(actionBay).not.toHaveAttribute('data-speaking', 'true')
 
-  await page.getByRole('button', { name: '地图', exact: true }).click()
+  const motionToggle = actionBay.getByLabel('启用角色动效')
+  await motionToggle.uncheck()
+  await expect.poll(() => figure.evaluate((element) => getComputedStyle(element).animationName)).toBe('none')
+
+  await voiceMode.selectOption('auto')
+  const autoTurn = await postJson(`${origin}/api/worlds/${world.id}/chat`, {
+    sessionId: groupSessionId,
+    employeeIds: employees.map((employee) => employee.id),
+    prompt: '请生成一条新的自动语音回复',
+  })
+  expect(autoTurn.status).toBe(200)
+  await page.reload()
+  await expect(actionBay).toHaveAttribute('data-state', 'speaking')
+  await actionBay.getByRole('button', { name: '语音回复设置' }).click()
+  await expect(actionBay.getByLabel('语音播报模式')).toHaveValue('auto')
+  await expect(actionBay.getByLabel('数字人语音选择')).toHaveValue('voice-zh-b')
+  await actionBay.getByRole('button', { name: /停止播报/ }).click()
+
+  await page.getByRole('button', { name: '切换到地图' }).click()
   await expect(page.locator('.world-runtime-canvas')).toBeVisible()
-  await digitalButton.click()
+  await page.getByRole('button', { name: '切换到数字人' }).click()
   await expect(actionBay).toBeVisible()
   await page.reload()
   await expect(page.getByRole('region', { name: `${world.name}数字人行动舱` })).toBeVisible()
-  await expect(page.getByRole('button', { name: '静态模式', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await actionBay.getByRole('button', { name: '语音回复设置' }).click()
+  await expect(actionBay.getByLabel('启用角色动效')).not.toBeChecked()
 
   await writeFile(join(screenshotRoot, 'console.log'), consoleIssues.length === 0 ? 'No console errors or warnings.\n' : `${consoleIssues.join('\n')}\n`, 'utf8')
   expect(consoleIssues, consoleIssues.join('\n')).toEqual([])
