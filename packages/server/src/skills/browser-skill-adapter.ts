@@ -118,45 +118,48 @@ export class BrowserSkillAdapter implements CharacterSkillAdapter {
       return { ready: false, detail: '当前世界尚未安装浏览器能力包' }
     }
     try {
-      parseActionParameters(action.skillId as BrowserSkillId, action.parameters, this.#policy)
+      const parameters = action.parameters as unknown as Record<string, unknown>
+      this.#policy.validateUrl(typeof parameters.url === 'string' ? parameters.url : '')
     } catch (error) {
       return { ready: false, detail: error instanceof Error ? error.message : '浏览器参数无效' }
     }
     return { ready: true }
   }
 
-  async execute(action: CharacterSkillAction, _context: CharacterSkillExecutionContext): Promise<CharacterSkillExecutionResult> {
+  async execute(action: CharacterSkillAction, context: CharacterSkillExecutionContext): Promise<CharacterSkillExecutionResult> {
     const world = this.#store.getWorld(action.worldId)
-    if (world === undefined) return { status: 'failed', detail: '当前世界不可用，未访问外部网页' }
+    if (world === undefined) return { status: 'failed', detail: '当前世界不可用' }
     const skillId = action.skillId as BrowserSkillId
-    if (!BROWSER_SKILL_IDS.includes(skillId)) return { status: 'failed', detail: '浏览器能力不受支持，未访问外部网页' }
-    if (!browserPackageProvides(await this.#listWorldPackages(world.id), skillId)) {
-      return { status: 'waiting-for-integration', detail: '当前世界尚未安装浏览器能力包，未访问外部网页' }
+    if (!BROWSER_SKILL_IDS.includes(skillId)) return { status: 'failed', detail: '浏览器能力不受支持' }
+    const installed = await this.#listWorldPackages(world.id)
+    if (!browserPackageProvides(installed, skillId)) {
+      return { status: 'waiting-for-integration', detail: '当前世界尚未安装浏览器能力包' }
     }
-    if (skillId === BROWSER_SCREENSHOT_SKILL && this.#publishScreenshot === undefined) {
-      return { status: 'waiting-for-integration', detail: '浏览器截图产物服务不可用，未访问外部网页' }
-    }
-    let parameters: BrowserActionParameters
-    try {
-      parameters = parseActionParameters(skillId, action.parameters, this.#policy)
-    } catch (error) {
-      return { status: 'failed', detail: error instanceof Error ? error.message : '浏览器参数无效，未访问外部网页' }
-    }
-    let client
     let requestBoundaryCrossed = false
+    let client: Awaited<ReturnType<BrowserClientFactory['create']>> | undefined
     try {
-      const target = await this.#policy.resolveTarget(parameters.url)
+      const parameters = parseActionParameters(skillId, action.parameters as unknown as Record<string, unknown>, this.#policy)
+      const target = await this.#policy.resolve(parameters.url)
       client = await this.#clientFactory.create(this.#policy, target)
       requestBoundaryCrossed = true
-      if (skillId === BROWSER_OPEN_SKILL) return { status: 'executed', detail: formatFactualResult(skillId, await client.open(parameters.url)) }
-      if (skillId === BROWSER_READ_SKILL) return { status: 'executed', detail: formatFactualResult(skillId, await client.read(parameters.url)) }
-      if (skillId === BROWSER_EXTRACT_SKILL) {
-        return { status: 'executed', detail: formatFactualResult(skillId, await client.extract({ url: parameters.url, selector: parameters.selector! })) }
+      if (skillId === BROWSER_OPEN_SKILL) {
+        const result = await client.open(parameters.url)
+        return { status: 'executed', detail: formatFactualResult(skillId, result) }
       }
-      const screenshot = await client.screenshot({
-        url: parameters.url,
-        ...(parameters.width === undefined ? {} : { width: parameters.width }),
-        ...(parameters.height === undefined ? {} : { height: parameters.height }),
+      if (skillId === BROWSER_READ_SKILL) {
+        const result = await client.read(parameters.url)
+        return { status: 'executed', detail: formatFactualResult(skillId, result) }
+      }
+      if (skillId === BROWSER_EXTRACT_SKILL) {
+        const result = await client.extract(parameters.url, parameters.selector ?? '')
+        return { status: 'executed', detail: formatFactualResult(skillId, result) }
+      }
+      if (this.#publishScreenshot === undefined) {
+        return { status: 'failed', detail: '网页截图产物回调不可用' }
+      }
+      const screenshot = await client.screenshot(parameters.url, {
+        width: parameters.width,
+        height: parameters.height,
       })
       const publication = await this.#publishScreenshot!({
         workspaceId: world.workspaceId,
@@ -245,7 +248,10 @@ function parseBrowserCommand(prompt: string): ParsedBrowserCommand | undefined {
 }
 
 function parseNaturalBrowserCommand(prompt: string): RegExpExecArray | undefined {
-  const match = /(?:^|[\s，。！？:：])(?:请|帮我|帮忙|麻烦|现在|立即|立刻)?\s*(打开|读取|阅读|浏览|查看|看一下|看看|访问|总结|提取|截图|网页截图)\s+(https?:\/\/\S+?)(?:\s+([^\n]+))?(?=$|[\s。！？!?，,；;])/iu.exec(prompt)
+  // Chinese requests commonly attach the URL directly to the verb (for
+  // example “请阅读https://…”). The action vocabulary is bounded here, so
+  // optional whitespace does not turn arbitrary text into a browser command.
+  const match = /(?:^|[\s，。！？:：])(?:请|帮我|帮忙|麻烦|现在|立即|立刻)?\s*(打开|读取|阅读|浏览|查看|看一下|看看|访问|总结|提取|截图|网页截图)\s*(https?:\/\/\S+?)(?:\s+([^\n]+))?(?=$|[\s。！？!?，,；;])/iu.exec(prompt)
   const actionOffset = match === null ? -1 : match[0].indexOf(match[1]!)
   if (match === null || actionOffset < 0 || isNegatedBrowserRequest(prompt, (match.index ?? 0) + actionOffset)) return undefined
   const action = match[1]!.toLowerCase()
