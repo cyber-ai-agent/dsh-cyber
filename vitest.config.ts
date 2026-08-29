@@ -14,6 +14,11 @@ export default defineConfig({
       {
         test: {
           ...shared,
+          // A few Node integration tests intentionally wait on durable queue / approval
+          // transitions. GitHub's shared runner can starve those background workers while
+          // the full repository runs in parallel. Keep local feedback strict, but let CI's
+          // test-owned 30s diagnostic deadline fire before Vitest kills the test at 15s.
+          testTimeout: process.env.CI ? 45_000 : shared.testTimeout,
           name: 'node',
           include: ['packages/**/tests/**/*.test.ts'],
           exclude: [...shared.exclude, 'packages/web/tests/**'],
