@@ -17,6 +17,8 @@ import type { WorldMarketplaceService } from '../services/world-marketplace-serv
 import type { WorldPackageInstanceService } from '../services/world-package-instance-service.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
 
+const CREATIVE_WORKSHOP_MODEL_TIMEOUT_MS = 240_000
+
 export interface PackageRoutesDependencies {
   store: SqliteStore
   packageManager: PackageManager
@@ -35,7 +37,13 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
   const workshop = new CreativeWorkshopService(store, packageManager)
   const workshopDrafts = new CreativeWorkshopDraftService(store)
   const workshopDraftGenerator = dependencies.workshopDraftGenerator
-    ?? new CreativeWorkshopDraftGenerator(store, credentials, workshopDrafts, { skillCatalog })
+    ?? new CreativeWorkshopDraftGenerator(store, credentials, workshopDrafts, {
+      skillCatalog,
+      // A complete structured world + role draft is a much heavier request than
+      // host-side routing/classification. Keep ModelJsonCall's fast 20s default
+      // for planners while giving Creative Workshop a dedicated four-minute budget.
+      timeoutMs: CREATIVE_WORKSHOP_MODEL_TIMEOUT_MS,
+    })
 
   router.get(/^\/api\/workspaces\/([^/]+)\/packages$/, ({ response, params }) => {
     const workspaceId = params[0]!
