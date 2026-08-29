@@ -116,19 +116,25 @@ describe('Chat control UI', () => {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
 
     try {
-      await act(async () => { root.render(createElement(ChatWorkbench, {
-        demoMode: false,
-        world,
-        messages: [{ id: 'assistant-copy', sessionId: 'session-copy', sequence: 1, senderId: employee.id, senderKind: 'employee', kind: 'assistant', content: '助手回复内容', metadata: {}, createdAt: new Date(0).toISOString() }],
-        employees: [employee],
-        draft: '',
-        onDraftChange: vi.fn(),
-        onSend: vi.fn(async () => undefined),
-        onUploadAttachment: vi.fn(async () => { throw new Error('not used') }),
-        onOpenDossier: vi.fn(),
-        onOpenArtifact: vi.fn(),
-        onRecruit: vi.fn(),
-      })) })
+      await act(async () => {
+        root.render(createElement(ChatWorkbench, {
+          demoMode: false,
+          world,
+          messages: [{ id: 'assistant-copy', sessionId: 'session-copy', sequence: 1, senderId: employee.id, senderKind: 'employee', kind: 'assistant', content: '助手回复内容', metadata: {}, createdAt: new Date(0).toISOString() }],
+          employees: [employee],
+          draft: '',
+          onDraftChange: vi.fn(),
+          onSend: vi.fn(async () => undefined),
+          onUploadAttachment: vi.fn(async () => { throw new Error('not used') }),
+          onOpenDossier: vi.fn(),
+          onOpenArtifact: vi.fn(),
+          onRecruit: vi.fn(),
+        }))
+        // Keep the act scope open until ChatWorkbench's lazy Markdown module
+        // has resolved so Suspense does not ping the root after the test exits.
+        await import('../src/components/MarkdownMessage.js')
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      })
 
       const message = host.querySelector<HTMLElement>('.message')
       expect(message).toBeDefined()
