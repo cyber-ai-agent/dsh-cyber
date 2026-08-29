@@ -62,9 +62,18 @@ export function ThemeCustomizerDialog({
     (isCustom ? baseTheme.description : baseThemeText.description) || t('appearance.editor.defaultDescription', '用户自定义主题')
   )
 
-  const [tokens, setTokens] = useState<WorldThemeTokens>(() => ({
-    ...baseTheme.tokens,
-  }))
+  // Migrate legacy Skin data that used worldMapImage as a shared scene. New
+  // custom Skins only retain a conversation backdrop; World Scene is managed
+  // by the durable World binding.
+  const [tokens, setTokens] = useState<WorldThemeTokens>(() => {
+    const { worldMapImage: legacyWorldMapImage, ...skinTokens } = baseTheme.tokens
+    return {
+      ...skinTokens,
+      ...(skinTokens.backdropImage === undefined && legacyWorldMapImage !== undefined
+        ? { backdropImage: legacyWorldMapImage }
+        : {}),
+    }
+  })
 
   const [previewActive, setPreviewActive] = useState(false)
   const [uploadingAsset, setUploadingAsset] = useState<string>()
@@ -72,7 +81,8 @@ export function ThemeCustomizerDialog({
   const dialogRef = useRef<HTMLElement>(null)
 
   const close = () => {
-    // 恢复之前应用的主题
+    // Preview is intentionally ephemeral. Restore the persisted Skin without
+    // writing anything when the user cancels the editor.
     if (previewActive) {
       applyWorldTheme(initialThemeId ?? DEFAULT_SKIN_ID)
     }
@@ -84,32 +94,16 @@ export function ThemeCustomizerDialog({
   const updateToken = <K extends keyof WorldThemeTokens>(key: K, value: WorldThemeTokens[K]) => {
     setTokens((prev) => {
       const next = { ...prev, [key]: value }
-      if (previewActive) {
-        // 动态实时预览当前编辑的变量
-        const root = document.documentElement
-        if (key === 'accentColor') root.style.setProperty('--theme-accent', String(value))
-        if (key === 'pageBackground') root.style.setProperty('--theme-bg', String(value))
-        if (key === 'panelBackground') root.style.setProperty('--theme-panel', String(value))
-        if (key === 'ownerBubbleColor') root.style.setProperty('--theme-owner-bubble', String(value))
-        if (key === 'characterBubbleColor') root.style.setProperty('--theme-character-bubble', String(value))
-      }
+      if (previewActive) applyPreviewSkin(id, next)
       return next
     })
   }
 
   const togglePreview = () => {
     if (!previewActive) {
-      // 开启实时预览
-      const tempConfig: WorldThemeConfig = {
-        id,
-        displayName,
-        description,
-        author: t('appearance.editor.author.editing', '当前正在编辑'),
-        source: 'custom',
-        tokens,
-      }
-      themeRegistry.saveCustomTheme(tempConfig)
-      applyWorldTheme(id)
+      // Do not register or persist a temporary theme. Previewing must never be
+      // equivalent to saving.
+      applyPreviewSkin(id, tokens)
       setPreviewActive(true)
     } else {
       applyWorldTheme(initialThemeId ?? DEFAULT_SKIN_ID)
@@ -144,7 +138,7 @@ export function ThemeCustomizerDialog({
     }
   }
 
-  const uploadAsset = async (key: 'scene' | 'characterLeftImage' | 'characterRightImage', file: File) => {
+  const uploadAsset = async (key: 'backdrop' | 'characterLeftImage' | 'characterRightImage', file: File) => {
     setAssetError(undefined)
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
       setAssetError(t('appearance.editor.error.fileType', '仅支持 PNG、JPEG 或 WebP 图片。'))
@@ -161,12 +155,8 @@ export function ThemeCustomizerDialog({
         body: JSON.stringify({ mimeType: file.type, dataBase64: await fileToBase64(file) }),
       })
       const url = `/api/assets/${encodeURIComponent(result.asset.id)}`
-      if (key === 'scene') {
-        updateToken('backdropImage', url)
-        updateToken('worldMapImage', url)
-      } else {
-        updateToken(key, url)
-      }
+      if (key === 'backdrop') updateToken('backdropImage', url)
+      else updateToken(key, url)
     } catch (cause) {
       setAssetError(cause instanceof Error && cause.message !== 'theme_asset_read_failed'
         ? cause.message
@@ -176,13 +166,9 @@ export function ThemeCustomizerDialog({
     }
   }
 
-  const removeAsset = (key: 'scene' | 'characterLeftImage' | 'characterRightImage') => {
-    if (key === 'scene') {
-      updateToken('backdropImage', undefined)
-      updateToken('worldMapImage', undefined)
-    } else {
-      updateToken(key, undefined)
-    }
+  const removeAsset = (key: 'backdrop' | 'characterLeftImage' | 'characterRightImage') => {
+    if (key === 'backdrop') updateToken('backdropImage', undefined)
+    else updateToken(key, undefined)
   }
 
   return (
@@ -192,9 +178,9 @@ export function ThemeCustomizerDialog({
           <div>
             <h2 id="theme-customizer-title">
               <Palette size={20} />
-              <span>{isCustom ? t('appearance.editor.title.edit', '编辑自定义皮肤') : t('appearance.editor.title.create', '新建自定义世界皮肤')}</span>
+              <span>{isCustom ? t('appearance.editor.title.edit', '编辑自定义皮肤') : t('skinEditor.title.create', '新建自定义会话皮肤')}</span>
             </h2>
-            <p>{t('appearance.editor.description', '修改强调色、背景、气泡与素材，打造专属于【{world}】的独特空间风格。', { world: world.name })}</p>
+            <p>{t('skinEditor.description', '修改强调色、聊天背景、气泡与陪伴立绘，打造【{world}】的会话氛围；右侧世界场景单独配置。', { world: world.name })}</p>
           </div>
           <button type="button" className="icon-button" onClick={close} aria-label={t('appearance.editor.close', '关闭')}>
             <X size={18} />
@@ -293,17 +279,17 @@ export function ThemeCustomizerDialog({
             </div>
           </fieldset>
 
-          {/* 本机上传的统一场景与立绘素材 */}
+          {/* 本机上传的会话背景与陪伴立绘素材 */}
           <fieldset className="theme-customizer-section">
-            <legend>{t('appearance.editor.assets.title', '场景与立绘素材（可选）')}</legend>
+            <legend>{t('skinEditor.assets.title', '会话背景与立绘素材（可选）')}</legend>
             <div className="theme-customizer-assets">
               <ThemeAssetUpload
-                label={t('appearance.editor.assets.scene', '统一全景场景')}
-                description={t('appearance.editor.assets.sceneDescription', '同一张图片用于聊天背景与 2.5D 世界，避免两个区域显示不同房间。')}
-                value={tokens.worldMapImage ?? tokens.backdropImage}
-                uploading={uploadingAsset === 'scene'}
-                onUpload={(file) => void uploadAsset('scene', file)}
-                onRemove={() => removeAsset('scene')}
+                label={t('skinEditor.assets.backdrop', '会话背景')}
+                description={t('skinEditor.assets.backdropDescription', '仅用于聊天与界面氛围。世界空间、角色站位和互动区域请在右侧「世界场景」单独配置。')}
+                value={tokens.backdropImage}
+                uploading={uploadingAsset === 'backdrop'}
+                onUpload={(file) => void uploadAsset('backdrop', file)}
+                onRemove={() => removeAsset('backdrop')}
               />
               <div className="theme-customizer-row theme-customizer-row--assets">
                 <ThemeAssetUpload label={t('appearance.editor.assets.left', '左侧陪伴立绘')} description={t('appearance.editor.assets.companionDescription', '建议上传透明背景 PNG 或 WebP。')} value={tokens.characterLeftImage} uploading={uploadingAsset === 'characterLeftImage'} onUpload={(file) => void uploadAsset('characterLeftImage', file)} onRemove={() => removeAsset('characterLeftImage')} />
@@ -340,7 +326,7 @@ export function ThemeCustomizerDialog({
                 color: tokens.textColor ?? '#fff',
               }}
             >
-              {t('appearance.editor.preview.user', '你：配色很和谐，保存后将在当前世界永久生效！')}
+              {t('skinEditor.preview.user', '你：保存后只会更新会话皮肤，世界场景保持不变。')}
             </span>
           </div>
         </div>
@@ -367,7 +353,7 @@ export function ThemeCustomizerDialog({
             </button>
             <button type="button" className="primary-button" onClick={handleSave}>
               <FloppyDisk size={16} />
-              <span>{t('appearance.editor.save', '保存并应用到当前世界')}</span>
+              <span>{t('skinEditor.save', '保存并应用会话皮肤')}</span>
             </button>
           </div>
         </footer>
@@ -415,6 +401,36 @@ function ThemeAssetUpload({
       }} />
     </article>
   )
+}
+
+function applyPreviewSkin(themeId: string, tokens: WorldThemeTokens): void {
+  const root = document.documentElement
+  root.style.setProperty('--theme-accent', tokens.accentColor)
+  root.style.setProperty('--theme-accent-soft', tokens.accentSoft ?? `color-mix(in srgb, ${tokens.accentColor} 18%, transparent)`)
+  root.style.setProperty('--theme-accent-strong', tokens.accentStrong ?? tokens.accentColor)
+  root.style.setProperty('--theme-bg', tokens.pageBackground)
+  root.style.setProperty('--theme-panel', tokens.panelBackground)
+  root.style.setProperty('--theme-panel-border', tokens.panelBorder ?? `color-mix(in srgb, ${tokens.accentColor} 30%, transparent)`)
+  root.style.setProperty('--theme-text', tokens.textColor ?? '#f8f6f0')
+  root.style.setProperty('--theme-muted', tokens.mutedTextColor ?? 'color-mix(in srgb, var(--theme-text) 60%, transparent)')
+  root.style.setProperty('--theme-owner-bubble', tokens.ownerBubbleColor)
+  root.style.setProperty('--theme-character-bubble', tokens.characterBubbleColor)
+
+  if (tokens.backdropImage) {
+    root.style.setProperty('--theme-backdrop-image', `url('${tokens.backdropImage}')`)
+    root.style.setProperty('--skin-backdrop', `url('${tokens.backdropImage}')`)
+    root.style.setProperty('--theme-backdrop-opacity', String(tokens.backdropOpacity ?? 0.95))
+  } else {
+    root.style.removeProperty('--theme-backdrop-image')
+    root.style.removeProperty('--skin-backdrop')
+    root.style.removeProperty('--theme-backdrop-opacity')
+  }
+
+  root.style.setProperty('--theme-character-left', tokens.characterLeftImage ? `url('${tokens.characterLeftImage}')` : 'none')
+  root.style.setProperty('--skin-character-left', tokens.characterLeftImage ? `url('${tokens.characterLeftImage}')` : 'none')
+  root.style.setProperty('--theme-character-right', tokens.characterRightImage ? `url('${tokens.characterRightImage}')` : 'none')
+  root.style.setProperty('--skin-character-right', tokens.characterRightImage ? `url('${tokens.characterRightImage}')` : 'none')
+  root.dataset.skin = themeId
 }
 
 function fileToBase64(file: File): Promise<string> {
