@@ -14,7 +14,7 @@ afterEach(() => {
 })
 
 describe('WorldSideDock dynamic tabs', () => {
-  it('promotes More items, closes to recent history, and restores tabs per World', async () => {
+  it('shows only the active More item while remembering recent surfaces per World', async () => {
     const host = document.createElement('div')
     document.body.append(host)
     let root = createRoot(host)
@@ -27,15 +27,18 @@ describe('WorldSideDock dynamic tabs', () => {
     expect(tabLabels(host)).toEqual(['世界', '轨迹', '角色'])
     await click(host, '更多')
     await click(host, '日程')
-    expect(tabLabels(host)).toEqual(['世界', '轨迹', '角色', '日程'])
+    expect(tabLabels(host)).toEqual(['世界', '轨迹', '日程'])
     await click(host, '关闭日程页签')
     expect(host.querySelector('[role="tab"][aria-selected="true"]')?.getAttribute('aria-label')).toBe('角色')
+    expect(tabLabels(host)).toEqual(['世界', '轨迹', '角色'])
     expect(JSON.parse(window.localStorage.getItem('dsh-cyber:world-dock-tabs:world-a') ?? '[]')).toEqual(['dossier'])
 
     await act(async () => { root.unmount() })
     root = createRoot(host)
     await act(async () => { root.render(createElement(Harness, { world: world('world-a') })) })
-    expect(tabLabels(host)).toEqual(['世界', '轨迹', '角色'])
+    expect(tabLabels(host)).toEqual(['世界', '轨迹'])
+    await click(host, '更多')
+    expect(host.querySelector('[role="menuitemcheckbox"][aria-checked="true"]')?.textContent).toContain('角色')
 
     await act(async () => { root.render(createElement(Harness, { key: 'world-b', world: world('world-b') })) })
     expect(tabLabels(host)).toEqual(['世界', '轨迹'])

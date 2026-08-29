@@ -139,4 +139,11 @@ describe('Durable artifact UI seams', () => {
     expect(html).toContain('从工作目录发布')
     expect(html).not.toContain('v0.3.0-架构设计')
   })
+
+  it('explains automatic run registration without implying desktop files are scanned', () => {
+    const html = renderToStaticMarkup(createElement(ArtifactCenter, { world, demoMode: true, initialArtifacts: [] }))
+    expect(html).toContain('真实新增或修改的文件会自动登记')
+    expect(html).toContain('桌面和世界目录外的文件')
+    expect(html).not.toContain('临时文件不会自动出现在这里')
+  })
 })

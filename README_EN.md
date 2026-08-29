@@ -185,7 +185,7 @@ Program code, the Harness runtime and user data have separate lifecycles.
 <table>
 <tr>
 <td width="50%">
-<img src="./packages/web/public/assets/cyber-office-world.png" alt="Cyber Office World" />
+<img src="./packages/web/public/assets/cyber-office-world.webp" alt="Cyber Office World" />
 <br/><b>Cyber Office</b><br/>Work, collaboration, meetings and runtime state can be projected into the world.
 </td>
 <td width="50%">

@@ -138,7 +138,7 @@ describe('Knowledge consolidation actions', () => {
     const state: UseWorldKnowledgeResult = {
       collections: [],
       documents: [],
-      consolidationJobs: [{ id: 'job-timeout', workspaceId: world.workspaceId, worldId: world.id, sourceType: 'conversation', sourceId: 'session-timeout', fromCursor: 0, toCursor: 12, status: 'failed', attempt: 1, errorCode: 'knowledge_model_timeout', createdAt: world.createdAt, updatedAt: world.updatedAt }],
+      consolidationJobs: Array.from({ length: 9 }, (_, index) => ({ id: `job-timeout-${index}`, workspaceId: world.workspaceId, worldId: world.id, sourceType: 'conversation' as const, sourceId: `session-timeout-${index}`, fromCursor: index * 10, toCursor: index * 10 + 9, status: 'failed' as const, attempt: index + 1, errorCode: 'knowledge_model_timeout', createdAt: world.createdAt, updatedAt: world.updatedAt })),
       loading: false,
       searching: false,
       searchQuery: '',
@@ -159,10 +159,17 @@ describe('Knowledge consolidation actions', () => {
     await act(async () => { root.render(createElement(KnowledgeLibrary, { world, demoMode: false, state })) })
     expect(host.textContent).toContain('知识整理任务')
     expect(host.textContent).toContain('模型整理超时')
+    expect(host.textContent).toContain('消息 0–9')
+    expect(host.textContent).toContain('第 1 次尝试')
+    expect(Array.from(host.querySelectorAll('button')).filter((button) => button.textContent === '重试')).toHaveLength(4)
+    const showAll = findButton(host, '查看全部 9 个任务')
+    expect(showAll).not.toBeNull()
+    await act(async () => { showAll?.click() })
+    expect(Array.from(host.querySelectorAll('button')).filter((button) => button.textContent === '重试')).toHaveLength(9)
     const retry = findButton(host, '重试')
     expect(retry).not.toBeNull()
     await act(async () => { retry?.click() })
-    expect(retryConsolidation).toHaveBeenCalledWith('job-timeout')
+    expect(retryConsolidation).toHaveBeenCalledWith('job-timeout-0')
     await act(async () => { root.unmount() })
     host.remove()
   })

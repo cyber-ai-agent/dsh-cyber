@@ -13,5 +13,13 @@ export default defineConfig({
   build: {
     target: 'es2022',
     sourcemap: process.env.DSH_CYBER_SOURCEMAP === 'true',
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('@phosphor-icons')) return 'phosphor-icons'
+          return undefined
+        },
+      },
+    },
   },
 })

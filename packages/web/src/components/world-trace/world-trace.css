@@ -2,7 +2,7 @@
   --trace-control-height: 44px;
   --trace-pad: 16px;
   --trace-gap: 10px;
-  height: 100%; min-height: 0; display: flex; flex-direction: column; color: var(--text);
+  height: 100%; min-height: 0; display: flex; flex-direction: column; overflow-x: hidden; container: world-trace / inline-size; color: var(--text);
   background: linear-gradient(180deg, color-mix(in srgb, var(--surface-1) 92%, var(--accent) 8%), var(--surface-0));
 }
 .world-trace-panel__header { min-height: 72px; display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--border); }
@@ -42,3 +42,5 @@
 .world-trace-error { margin: 10px 16px 0; padding: 10px 12px; color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 55%, transparent); background: color-mix(in srgb, var(--danger) 8%, transparent); font-size: 13px; }
 @media (max-width: 1100px) { .world-trace-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }.world-trace-filters__search { grid-column: 1 / -1; } }
 @media (max-width: 620px) { .world-trace-panel { --trace-pad: 12px; }.world-trace-filters { grid-template-columns: 1fr; }.world-trace-filters__search { grid-column: auto; }.world-trace-item__expandable summary { grid-template-columns: 1fr; }.world-trace-item__expand-label { min-height: 30px; justify-self: start; } }
+@container world-trace (max-width: 900px) { .world-trace-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }.world-trace-filters__search { grid-column: 1 / -1; } }
+@container world-trace (max-width: 520px) { .world-trace-panel { --trace-pad: 12px; }.world-trace-filters { grid-template-columns: 1fr; }.world-trace-filters__search { grid-column: auto; }.world-trace-item__expandable summary { grid-template-columns: 1fr; }.world-trace-item__expand-label { min-height: 30px; justify-self: start; } }

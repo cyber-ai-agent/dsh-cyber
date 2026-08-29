@@ -6,6 +6,7 @@ import {
   Minus,
   Plus,
   PersonSimpleWalk,
+  UserFocus,
 } from '@phosphor-icons/react'
 import { useEffect, useState } from 'react'
 import type { WorkSession, World, WorldInteractionAction, WorldRuntimeSnapshot, WorldZoomCommand } from '@dsh-cyber/contracts'
@@ -14,6 +15,7 @@ import { api } from '../../api.js'
 import { PeerCollaborationDialog, type PeerCollaborationDraft } from '../../components/PeerCollaborationDialog.js'
 import type { CyberEmployee } from '../../types.js'
 import { AmbientLifeDialog } from './AmbientLifeDialog.js'
+import { DigitalHumanMode } from './DigitalHumanMode.js'
 import { WorldCanvas } from './WorldCanvas.js'
 import { EmployeeInteractionMenu, ObjectInteractionMenu } from './WorldInteractionMenu.js'
 import { WorldSceneDialog } from './WorldSceneDialog.js'
@@ -34,11 +36,14 @@ interface WorldRuntimeDockProps {
   liveEnabled?: boolean
   selectedEmployeeId?: string
   conversationEmployeeIds: string[]
+  latestUtterance?: { messageId: string; employeeId: string; text: string }
   onSelectEmployee(employeeId: string): void
+  onOpenDossier(employeeId: string): void
+  onOpenTrace(): void
   onStartGroup(employeeIds: string[], session?: WorkSession): void
 }
 
-export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = true, selectedEmployeeId, conversationEmployeeIds, onSelectEmployee, onStartGroup }: WorldRuntimeDockProps) {
+export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = true, selectedEmployeeId, conversationEmployeeIds, latestUtterance, onSelectEmployee, onOpenDossier, onOpenTrace, onStartGroup }: WorldRuntimeDockProps) {
   const runtime = useWorldClient({ demoMode, world, employees, liveEnabled })
   const [fitRequest, setFitRequest] = useState(0)
   const [zoomCommand, setZoomCommand] = useState<WorldZoomCommand>()
@@ -50,8 +55,16 @@ export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = tru
   const [peerInitiatorId, setPeerInitiatorId] = useState<string>()
   const [peerBusy, setPeerBusy] = useState(false)
   const [peerError, setPeerError] = useState<string>()
+  const [visualMode, setVisualMode] = useState<'map' | 'digital-human'>(() => readVisualMode(world.id))
+  const [staticMode, setStaticMode] = useState(() => readStaticMode(world.id))
 
   useEffect(() => setActiveEmployeeId(selectedEmployeeId), [selectedEmployeeId])
+  useEffect(() => {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(`dsh-cyber-world-visual:${world.id}`, visualMode)
+  }, [visualMode, world.id])
+  useEffect(() => {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(`dsh-cyber-digital-static:${world.id}`, staticMode ? 'true' : 'false')
+  }, [staticMode, world.id])
 
   if (runtime.loading || runtime.snapshot === undefined) {
     return <div className="world-runtime-dock world-runtime-dock--loading"><Buildings size={28} /><strong>正在恢复实时世界</strong><span>同步角色位置、任务状态和世界场景…</span></div>
@@ -147,7 +160,10 @@ export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = tru
     <>
       <section className="world-runtime-dock" aria-label={`${world.name}实时世界`}>
         <div className="world-runtime-dock__canvas">
-          <WorldCanvas
+          <div className="world-runtime-dock__view-switch" aria-label="世界显示方式">
+            <button type="button" aria-label={visualMode === 'digital-human' ? '切换到地图' : '切换到数字人'} title={visualMode === 'digital-human' ? '切换到地图' : '切换到数字人'} onClick={() => setVisualMode((current) => current === 'digital-human' ? 'map' : 'digital-human')}>{visualMode === 'digital-human' ? <UserFocus size={15} aria-hidden="true" /> : <MapTrifold size={15} aria-hidden="true" />}<span>{visualMode === 'digital-human' ? '数字人' : '地图'}</span></button>
+          </div>
+          {visualMode === 'map' ? <WorldCanvas
             manifest={runtime.manifest}
             rendererIdentity={runtime.rendererIdentity}
             snapshot={renderedSnapshot}
@@ -161,21 +177,34 @@ export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = tru
             onEntityContext={(employeeId, position) => { setActiveEmployeeId(employeeId); setSelectedObjectId(undefined); setContextTarget({ kind: 'employee', id: employeeId, position }) }}
             onObjectContext={(objectId, position) => { setSelectedObjectId(objectId); setContextTarget({ kind: 'object', id: objectId, position }) }}
             onReady={() => undefined}
-          />
+          /> : <DigitalHumanMode
+            world={world}
+            employees={employees}
+            snapshot={renderedSnapshot}
+            connected={runtime.connected}
+            staticMode={staticMode}
+            {...(activeEmployeeId === undefined ? {} : { activeEmployeeId })}
+            conversationEmployeeIds={conversationEmployeeIds}
+            {...(latestUtterance === undefined ? {} : { latestUtterance })}
+            onSelectEmployee={onSelectEmployee}
+            onOpenDossier={onOpenDossier}
+            onOpenTrace={onOpenTrace}
+            onStaticModeChange={setStaticMode}
+          />}
 
-          {focusedNames.length === 0 ? null : <div className="world-runtime-dock__focus" aria-label="当前会话成员"><span>当前会话</span><strong>{focusedNames.join('、')}</strong></div>}
+          {visualMode !== 'map' || focusedNames.length === 0 ? null : <div className="world-runtime-dock__focus" aria-label="当前会话成员"><span>当前会话</span><strong>{focusedNames.join('、')}</strong></div>}
 
-          {selectedEmployee === undefined || contextTarget?.kind !== 'employee' || contextTarget.id !== selectedEmployee.id ? null : <EmployeeInteractionMenu employee={selectedEmployee} position={contextTarget.position} onClose={() => setContextTarget(undefined)} onTalk={() => void interactWithEmployee('talk')} onAssignTask={() => void interactWithEmployee('assign-task')} onMeeting={() => void interactWithEmployee('start-meeting')} onPeerCollaboration={() => { setPeerError(undefined); setPeerInitiatorId(selectedEmployee.id) }} />}
-          {selectedObject === undefined || selectedObjectManifest === undefined || contextTarget?.kind !== 'object' || contextTarget.id !== selectedObject.id ? null : <ObjectInteractionMenu object={selectedObject} manifest={selectedObjectManifest} position={contextTarget.position} {...(selectedEmployee === undefined ? {} : { selectedEmployee })} onClose={() => setContextTarget(undefined)} onAction={(action) => void actOnObject(action)} />}
+          {visualMode !== 'map' || selectedEmployee === undefined || contextTarget?.kind !== 'employee' || contextTarget.id !== selectedEmployee.id ? null : <EmployeeInteractionMenu employee={selectedEmployee} position={contextTarget.position} onClose={() => setContextTarget(undefined)} onTalk={() => void interactWithEmployee('talk')} onAssignTask={() => void interactWithEmployee('assign-task')} onMeeting={() => void interactWithEmployee('start-meeting')} onPeerCollaboration={() => { setPeerError(undefined); setPeerInitiatorId(selectedEmployee.id) }} />}
+          {visualMode !== 'map' || selectedObject === undefined || selectedObjectManifest === undefined || contextTarget?.kind !== 'object' || contextTarget.id !== selectedObject.id ? null : <ObjectInteractionMenu object={selectedObject} manifest={selectedObjectManifest} position={contextTarget.position} {...(selectedEmployee === undefined ? {} : { selectedEmployee })} onClose={() => setContextTarget(undefined)} onAction={(action) => void actOnObject(action)} />}
 
-          <div className="world-runtime-dock__controls" aria-label="世界视图控制">
+          {visualMode === 'map' ? <div className="world-runtime-dock__controls" aria-label="世界视图控制">
             <button type="button" aria-label="缩小" onClick={() => setZoomCommand(createZoomCommand(-0.1))}><Minus size={15} /></button>
             <button type="button" aria-label="显示全景" title="适应窗口且不露出场景边界" onClick={() => setFitRequest((value) => value + 1)}><ArrowsOut size={15} /></button>
             <button type="button" aria-label="放大" onClick={() => setZoomCommand(createZoomCommand(0.1))}><Plus size={15} /></button>
             <button type="button" aria-label="世界场景" title="选择只属于当前世界的独立场景" onClick={() => setSceneSettingsOpen(true)}><MapTrifold size={16} /></button>
             <button type="button" aria-label="世界活力设置" title="配置角色有岗位逻辑的日常行为" onClick={() => setAmbientSettingsOpen(true)}><PersonSimpleWalk size={16} /></button>
             <button type="button" className={runtime.snapshot.clock.lightsOn ? 'is-active' : ''} aria-label={runtime.snapshot.clock.lightsOn ? '关闭场景照明' : '打开场景照明'} onClick={() => void runtime.interact({ action: 'toggle-lights', actorId: 'owner' })}><LightbulbFilament size={16} /></button>
-          </div>
+          </div> : null}
 
           {ambientSettingsOpen ? <AmbientLifeDialog worldId={world.id} worldName={world.name} onClose={() => setAmbientSettingsOpen(false)} /> : null}
           {sceneSettingsOpen ? <WorldSceneDialog world={world} currentManifest={runtime.manifest} onClose={() => setSceneSettingsOpen(false)} onApplied={runtime.reloadScene} /> : null}
@@ -195,6 +224,19 @@ export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = tru
       )}
     </>
   )
+}
+
+function readVisualMode(worldId: string): 'map' | 'digital-human' {
+  if (typeof localStorage === 'undefined') return 'map'
+  return localStorage.getItem(`dsh-cyber-world-visual:${worldId}`) === 'digital-human' ? 'digital-human' : 'map'
+}
+
+function readStaticMode(worldId: string): boolean {
+  if (typeof localStorage !== 'undefined') {
+    const saved = localStorage.getItem(`dsh-cyber-digital-static:${worldId}`)
+    if (saved !== null) return saved === 'true'
+  }
+  return typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
 }
 
 function withCharacterVisuals(snapshot: WorldRuntimeSnapshot, employees: CyberEmployee[]): WorldRuntimeSnapshot {

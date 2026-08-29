@@ -935,9 +935,13 @@ export interface WorldSnapshot {
   workspace: Workspace
   world: World
   employees: EmployeeInstance[]
+  /** Dossiers are bundled so a world load does not issue one request per role. */
+  dossiers: EmployeeDossier[]
   /** World-scoped role/permission projection; populated in one world load. */
   authorities: WorldCharacterAuthority[]
   openSessions: WorkSession[]
+  /** Participants for open sessions, bundled to avoid one request per conversation. */
+  sessionParticipants: WorkSessionParticipant[]
   lastEventSequence: number
 }
 

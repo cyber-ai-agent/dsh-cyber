@@ -10,6 +10,7 @@ import type { CyberEmployee } from '../src/types.js'
 
 afterEach(() => {
   document.body.replaceChildren()
+  vi.unstubAllGlobals()
 })
 
 describe('Chat control UI', () => {
@@ -225,6 +226,41 @@ describe('Chat control UI', () => {
       await act(async () => { root.unmount() })
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: originalClipboard })
     }
+  })
+
+  it('reports a message as submitted for consolidation instead of claiming durable knowledge', async () => {
+    const employee = { id: 'employee-knowledge', displayName: '知识角色', role: '分析', avatarIndex: 0, currentActivity: '正在工作' } as CyberEmployee
+    const world = { id: 'world-knowledge', workspaceId: 'workspace-knowledge', name: '知识测试世界', templateId: 'personal-world', status: 'active', createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString() } as World
+    const session = { id: 'session-knowledge', workspaceId: world.workspaceId, worldId: world.id, kind: 'direct', title: employee.displayName, status: 'open', createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString() } as WorkSession
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ job: { id: 'job-knowledge', status: 'queued' } }), { status: 202, headers: { 'content-type': 'application/json' } })))
+    const host = document.createElement('div')
+    document.body.append(host)
+    const root = createRoot(host)
+    await act(async () => {
+      root.render(createElement(ChatWorkbench, {
+        demoMode: false,
+        world,
+        session,
+        messages: [{ id: 'assistant-knowledge', sessionId: session.id, sequence: 1, senderId: employee.id, senderKind: 'employee', kind: 'assistant', content: '可整理的事实', metadata: {}, createdAt: new Date(0).toISOString() }],
+        employees: [employee],
+        draft: '',
+        onDraftChange: vi.fn(),
+        onSend: vi.fn(async () => undefined),
+        onUploadAttachment: vi.fn(async () => { throw new Error('not used') }),
+        onOpenDossier: vi.fn(),
+        onOpenArtifact: vi.fn(),
+        onRecruit: vi.fn(),
+      }))
+      await import('../src/components/MarkdownMessage.js')
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    const message = host.querySelector<HTMLElement>('.message')
+    await act(async () => { message?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 20, clientY: 20 })) })
+    const item = Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find((candidate) => candidate.textContent?.includes('加入长期知识'))
+    await act(async () => { item?.click(); await new Promise((resolve) => setTimeout(resolve, 0)) })
+    expect(host.textContent).toContain('已提交整理')
+    expect(host.textContent).not.toContain('已加入长期知识')
+    await act(async () => { root.unmount() })
   })
 
   it('shows completion outbox progress and a retry action without changing the main answer', () => {

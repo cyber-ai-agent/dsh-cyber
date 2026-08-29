@@ -149,18 +149,21 @@ export function KnowledgeLibrary({ world, demoMode, state }: KnowledgeLibraryPro
 
 function KnowledgeConsolidationPanel({ state }: { state: UseWorldKnowledgeResult }) {
   const { t, formatDateTime: localDateTime } = useI18n()
+  const [expanded, setExpanded] = useState(false)
   const jobs = state.consolidationJobs ?? []
-  const visible = jobs.filter((job) => job.status === 'failed' || job.status === 'queued' || job.status === 'running').slice(0, 8)
-  if (visible.length === 0 && state.consolidationError === undefined) return null
+  const actionable = jobs.filter((job) => job.status === 'failed' || job.status === 'queued' || job.status === 'running')
+  const visible = expanded ? actionable : actionable.slice(0, 4)
+  if (actionable.length === 0 && state.consolidationError === undefined) return null
   const failedCount = jobs.filter((job) => job.status === 'failed').length
   const activeCount = jobs.filter((job) => job.status === 'queued' || job.status === 'running').length
   return <section className="knowledge-consolidation" aria-label={t('knowledge.consolidationTitle', '知识整理任务')}>
     <header><div><strong>{t('knowledge.consolidationTitle', '知识整理任务')}</strong><span>{failedCount > 0 ? t('knowledge.consolidationFailedSummary', '{count} 个任务失败', { count: failedCount }) : t('knowledge.consolidationActiveSummary', '{count} 个任务处理中', { count: activeCount })}</span></div>{activeCount > 0 ? <SpinnerGap size={16} className="knowledge-spin" aria-label={t('knowledge.consolidationActiveSummary', '知识整理处理中')} /> : <WarningCircle size={16} aria-hidden="true" />}</header>
     {state.consolidationError === undefined ? null : <p className="knowledge-consolidation__error" role="alert">{state.consolidationError}</p>}
     {visible.length === 0 ? null : <ul>{visible.map((job) => <li key={job.id} className={`knowledge-consolidation__job knowledge-consolidation__job--${job.status}`}>
-      <span><strong>{consolidationSourceLabel(job, t)}</strong><small>{friendlyConsolidationError(job.errorCode, t)} · {safeFormatJobTime(job.updatedAt, localDateTime)}</small></span>
+      <span><strong>{consolidationSourceLabel(job, t)}</strong><small>{friendlyConsolidationError(job.errorCode, t)} · {consolidationJobContext(job, t)} · {safeFormatJobTime(job.updatedAt, localDateTime)}</small></span>
       {job.status === 'failed' ? <button type="button" disabled={state.retryingJobId !== undefined} onClick={() => void state.retryConsolidation(job.id).catch(() => undefined)}>{state.retryingJobId === job.id ? t('workbench.retrying', '正在重试…') : t('knowledge.libraryRetry', '重试')}</button> : <em>{job.status === 'running' ? t('knowledge.consolidatePending', '正在加入…') : t('knowledge.consolidateQueued', '已排队')}</em>}
     </li>)}</ul>}
+    {actionable.length <= 4 ? null : <button type="button" className="knowledge-consolidation__more" aria-expanded={expanded} onClick={() => setExpanded((current) => !current)}>{expanded ? t('knowledge.consolidationCollapse', '收起任务') : t('knowledge.consolidationMore', '查看全部 {count} 个任务', { count: actionable.length })}</button>}
   </section>
 }
 
@@ -192,6 +195,12 @@ function friendlyConsolidationError(code: string | undefined, t: (key: string, f
   if (/timeout/iu.test(code)) return t('knowledge.consolidationTimeout', '模型整理超时')
   if (/response_invalid|text_invalid|schema|parse/iu.test(code)) return t('knowledge.consolidationInvalidResponse', '模型返回格式无效')
   return t('knowledge.consolidationGenericFailure', '知识整理失败')
+}
+
+function consolidationJobContext(job: KnowledgeConsolidationJob, t: (key: string, fallback: string, variables?: Record<string, string | number>) => string): string {
+  const attempt = t('knowledge.consolidationAttempt', '第 {count} 次尝试', { count: job.attempt })
+  if (job.sourceType !== 'conversation') return attempt
+  return `${t('knowledge.consolidationRange', '消息 {from}–{to}', { from: job.fromCursor, to: job.toCursor })} · ${attempt}`
 }
 
 function safeFormatJobTime(value: string, formatter: (value: string | number | Date, options?: Intl.DateTimeFormatOptions) => string): string {

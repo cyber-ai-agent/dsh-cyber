@@ -69,6 +69,13 @@ describe('SqliteStore', () => {
       reason: '完成首轮能力评估',
       skillGrants: ['coding', 'testing'],
     })
+    const session = store.createSession({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      kind: 'direct',
+      title: '工程师私聊',
+      participants: [{ participantId: 'owner', kind: 'owner' }, { participantId: employee.id, kind: 'employee' }],
+    })
 
     expect(store.getWorld(world.id)?.administratorEmployeeId).toBeUndefined()
     // A recruited character starts with the file grants its runtime permission
@@ -81,7 +88,11 @@ describe('SqliteStore', () => {
     expect(store.getEmployee(employee.id)?.currentRevision).toBe(2)
     expect(store.listEmployeeRevisions(employee.id)).toHaveLength(2)
     expect(store.getWorkspaceSnapshot(workspace.id).worlds).toHaveLength(1)
-    expect(store.getWorldSnapshot(world.id).employees).toHaveLength(1)
+    expect(store.getWorldSnapshot(world.id)).toMatchObject({
+      employees: [expect.objectContaining({ id: employee.id })],
+      dossiers: [expect.objectContaining({ employee: expect.objectContaining({ id: employee.id }) })],
+      sessionParticipants: expect.arrayContaining([expect.objectContaining({ sessionId: session.id, participantId: employee.id, kind: 'employee' })]),
+    })
   })
 
   it('keeps actionable employee health separate from derived presence', async () => {

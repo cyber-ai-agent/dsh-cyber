@@ -1055,7 +1055,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .employee-row__identity span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-muted); font-size: var(--text-xs); }
 .employee-row__activity { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-muted); font-size: var(--text-xs); }
 
-.avatar { position: relative; display: inline-block; flex: none; width: 36px; height: 36px; border: 1px solid var(--border-strong); border-radius: var(--radius-control); background-image: url('/assets/employee-roster-sprite.png'); background-size: 400% 200%; background-position: var(--avatar-x) var(--avatar-y); image-rendering: auto; overflow: visible; box-shadow: var(--shadow-xs); }
+.avatar { position: relative; display: inline-block; flex: none; width: 36px; height: 36px; border: 1px solid var(--border-strong); border-radius: var(--radius-control); background-image: url('/assets/employee-roster-sprite.webp'); background-size: 400% 200%; background-position: var(--avatar-x) var(--avatar-y); image-rendering: auto; overflow: visible; box-shadow: var(--shadow-xs); }
 .avatar--sm { width: 28px; height: 28px; border-radius: 4px; }
 .avatar--lg { width: 58px; height: 58px; border-radius: var(--radius-md); }
 .avatar--world { width: clamp(54px, 5.4vw, 72px); height: clamp(54px, 5.4vw, 72px); border: 0; filter: drop-shadow(0 8px 12px rgba(0,0,0,.6)); }

@@ -88,7 +88,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
   const [attachmentError, setAttachmentError] = useState<string>()
   const [messageMenu, setMessageMenu] = useState<{ message: WorkMessage; position: ContextMenuPosition }>()
   const [rememberingMessageId, setRememberingMessageId] = useState<string>()
-  const [rememberedMessageIds, setRememberedMessageIds] = useState<Set<string>>(() => new Set())
+  const [submittedKnowledgeMessageIds, setSubmittedKnowledgeMessageIds] = useState<Set<string>>(() => new Set())
   const [knowledgeError, setKnowledgeError] = useState<string>()
   const [copiedMessageId, setCopiedMessageId] = useState<string>()
   const [copyError, setCopyError] = useState<string>()
@@ -329,7 +329,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
   }
 
   const rememberMessage = async (message: WorkMessage) => {
-    if (session === undefined || rememberingMessageId !== undefined || rememberedMessageIds.has(message.id)) return
+    if (session === undefined || rememberingMessageId !== undefined || submittedKnowledgeMessageIds.has(message.id)) return
     setMessageMenu(undefined)
     setKnowledgeError(undefined)
     setRememberingMessageId(message.id)
@@ -344,9 +344,10 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
           toCursor: message.sequence,
         }),
       })
-      const result = await response.json() as { error?: { message?: string } }
+      const result = await response.json() as { job?: { id?: unknown }; error?: { message?: string } }
       if (!response.ok) throw new Error(result.error?.message ?? '这条消息暂时无法加入长期知识')
-      setRememberedMessageIds((current) => new Set(current).add(message.id))
+      if (typeof result.job?.id !== 'string') throw new Error('知识整理服务未返回可追踪的任务记录')
+      setSubmittedKnowledgeMessageIds((current) => new Set(current).add(message.id))
     } catch (cause) {
       setKnowledgeError(cause instanceof Error ? cause.message : '这条消息暂时无法加入长期知识')
     } finally {
@@ -404,7 +405,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
               <article key={message.id} className={`message${owner ? ' message--owner' : ''}${streaming ? ' message--streaming' : ''}`} onContextMenu={(event) => { if (streaming) return; event.preventDefault(); setMessageMenu({ message, position: { x: event.clientX, y: event.clientY } }) }} onKeyDown={(event) => { if (streaming || (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10'))) return; event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); setMessageMenu({ message, position: { x: rect.left + Math.min(rect.width, 220), y: rect.top + 28 } }) }} tabIndex={streaming ? undefined : 0}>
                 {owner ? null : <button className="avatar-button" type="button" onClick={() => employee && onOpenDossier(employee.id)} aria-label={`打开${employee?.displayName ?? experience.personLabel}角色`}><Avatar index={employee?.avatarIndex ?? 7} label={employee?.displayName ?? '角色'} authorityRole={employee?.authorityRole} /></button>}
                 <div className="message__body">
-                  <header className="message__meta">{owner ? <span className="sr-only">我的消息</span> : <><strong>{employee?.displayName ?? experience.personLabel}<AuthorityBadge role={employee?.authorityRole} /></strong><span>{employee?.role}</span></>}<time>{displayTime(message)}</time>{copiedMessageId === message.id ? <span role="status">已复制</span> : rememberingMessageId === message.id ? <span role="status">正在整理…</span> : rememberedMessageIds.has(message.id) ? <span role="status">已加入长期知识</span> : null}</header>
+                  <header className="message__meta">{owner ? <span className="sr-only">我的消息</span> : <><strong>{employee?.displayName ?? experience.personLabel}<AuthorityBadge role={employee?.authorityRole} /></strong><span>{employee?.role}</span></>}<time>{displayTime(message)}</time>{copiedMessageId === message.id ? <span role="status">已复制</span> : rememberingMessageId === message.id ? <span role="status">正在提交整理…</span> : submittedKnowledgeMessageIds.has(message.id) ? <span role="status">已提交整理</span> : null}</header>
                   <div className="message__content">{streaming && message.content.length === 0 ? <span className="stream-placeholder">正在回复中…</span> : <RichText value={message.content} worldId={world.id} />}{streaming ? <span className="stream-cursor" aria-hidden="true" /> : null}</div>
                   <MessageAttachments attachments={messageAttachments(message.metadata)} />
                   <CompletionJobStatus metadata={message.metadata} {...(onRetryCompletionJob === undefined ? {} : { onRetry: onRetryCompletionJob })} {...(onCompletionJobSettled === undefined ? {} : { onSettled: onCompletionJobSettled })} />
@@ -430,10 +431,10 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
         }] : []),
         {
           id: 'remember-message',
-          label: rememberedMessageIds.has(messageMenu.message.id) ? '已加入长期知识' : '加入长期知识',
+          label: submittedKnowledgeMessageIds.has(messageMenu.message.id) ? '已提交整理' : '加入长期知识',
           description: '引用这条消息作为证据，在后台整理为可追溯知识',
           icon: <ClockCounterClockwise size={17} />,
-          disabled: rememberingMessageId !== undefined || rememberedMessageIds.has(messageMenu.message.id),
+          disabled: rememberingMessageId !== undefined || submittedKnowledgeMessageIds.has(messageMenu.message.id),
           onSelect: () => { void rememberMessage(messageMenu.message) },
         },
       ]} />}
