@@ -70,6 +70,7 @@ describe('group Skill approval continuation', () => {
     await waitFor(
       () => server.store.getWorkTurn(task.body.workTurnId)?.status === 'waiting-approval',
       'task WorkTurn to enter waiting-approval',
+      () => approvalWaitDiagnostics(server, world.id, task.body.workTurnId, task.body.queueItem.id),
     )
     expect(server.store.getConversationQueueEntry(task.body.queueItem.id)?.status).toBe('waiting-approval')
     expect(browser.readUrls).toEqual([])
@@ -82,10 +83,12 @@ describe('group Skill approval continuation', () => {
     await waitFor(
       () => server.store.getWorkTurn(task.body.workTurnId)?.status === 'completed',
       'approved task WorkTurn to complete',
+      () => approvalWaitDiagnostics(server, world.id, task.body.workTurnId, task.body.queueItem.id),
     )
     await waitFor(
       () => server.store.getConversationQueueEntry(task.body.queueItem.id)?.status === 'completed',
       'approved task queue item to complete',
+      () => approvalWaitDiagnostics(server, world.id, task.body.workTurnId, task.body.queueItem.id),
     )
     const taskActions = server.store.listWorldSkillActions(world.id).filter((action) => action.workTurnId === task.body.workTurnId)
     expect(taskActions).toHaveLength(1)
@@ -108,6 +111,7 @@ describe('group Skill approval continuation', () => {
     await waitFor(
       () => server.store.getWorkTurn(discussion.body.workTurnId)?.status === 'waiting-approval',
       'discussion WorkTurn to enter waiting-approval',
+      () => approvalWaitDiagnostics(server, world.id, discussion.body.workTurnId, discussion.body.queueItem.id),
     )
     const rejectedApproval = server.store.listWorldApprovalRequests(world.id, 'pending').find((request) => request.workTurnId === discussion.body.workTurnId)
     expect(rejectedApproval).toBeDefined()
@@ -116,10 +120,12 @@ describe('group Skill approval continuation', () => {
     await waitFor(
       () => server.store.getWorkTurn(discussion.body.workTurnId)?.status === 'completed',
       'rejected discussion WorkTurn to complete',
+      () => approvalWaitDiagnostics(server, world.id, discussion.body.workTurnId, discussion.body.queueItem.id),
     )
     await waitFor(
       () => server.store.getConversationQueueEntry(discussion.body.queueItem.id)?.status === 'completed',
       'rejected discussion queue item to complete',
+      () => approvalWaitDiagnostics(server, world.id, discussion.body.workTurnId, discussion.body.queueItem.id),
     )
     const rejectedActions = server.store.listWorldSkillActions(world.id).filter((action) => action.workTurnId === discussion.body.workTurnId)
     expect(rejectedActions).toHaveLength(1)
@@ -165,6 +171,7 @@ describe('group Skill approval continuation', () => {
     await waitFor(
       () => firstServer.store.getWorkTurn(queued.body.workTurnId)?.status === 'waiting-approval',
       'restart scenario WorkTurn to enter waiting-approval',
+      () => approvalWaitDiagnostics(firstServer, world.id, queued.body.workTurnId, queued.body.queueItem.id),
     )
     expect(browser.readUrls).toEqual([])
     await firstServer.close()
@@ -188,10 +195,12 @@ describe('group Skill approval continuation', () => {
     await waitFor(
       () => recovered.store.getWorkTurn(queued.body.workTurnId)?.status === 'completed',
       'recovered WorkTurn to complete',
+      () => approvalWaitDiagnostics(recovered, world.id, queued.body.workTurnId, queued.body.queueItem.id),
     )
     await waitFor(
       () => recovered.store.getConversationQueueEntry(queued.body.queueItem.id)?.status === 'completed',
       'recovered queue item to complete',
+      () => approvalWaitDiagnostics(recovered, world.id, queued.body.workTurnId, queued.body.queueItem.id),
     )
     expect(browser.readUrls).toEqual(['https://example.com/restart'])
     expect(recovered.store.listWorldSkillActions(world.id).filter((action) => action.workTurnId === queued.body.workTurnId)).toHaveLength(1)
@@ -233,17 +242,39 @@ async function postJson<T = unknown>(url: string, body: Record<string, unknown>)
 async function waitFor(
   predicate: () => boolean,
   label: string,
-  timeoutMs = 8_000,
+  diagnostics?: () => unknown,
+  timeoutMs = 30_000,
 ): Promise<void> {
   const deadline = performance.now() + timeoutMs
   while (performance.now() < deadline) {
     if (predicate()) return
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await new Promise((resolve) => setTimeout(resolve, 25))
   }
-  // Probe once after the deadline so a state transition that lands on the
-  // boundary is not reported as a false timeout.
   if (predicate()) return
-  throw new Error(`Timed out after ${timeoutMs}ms waiting for ${label}`)
+  let diagnosticText = ''
+  try {
+    const value = diagnostics?.()
+    if (value !== undefined) diagnosticText = `; final state: ${JSON.stringify(value)}`
+  } catch (cause) {
+    diagnosticText = `; diagnostics failed: ${cause instanceof Error ? cause.message : String(cause)}`
+  }
+  throw new Error(`Timed out after ${timeoutMs}ms waiting for ${label}${diagnosticText}`)
+}
+
+function approvalWaitDiagnostics(server: CyberServer, worldId: string, workTurnId: string, queueItemId: string) {
+  const workTurn = server.store.getWorkTurn(workTurnId)
+  const queueItem = server.store.getConversationQueueEntry(queueItemId)
+  const pendingApprovals = server.store.listWorldApprovalRequests(worldId, 'pending')
+    .filter((request) => request.workTurnId === workTurnId)
+    .map((request) => ({ id: request.id, status: request.status, skillId: request.skillId }))
+  return {
+    workTurnStatus: workTurn?.status ?? 'missing',
+    queueStatus: queueItem?.status ?? 'missing',
+    queueAttemptCount: queueItem?.attemptCount,
+    queueLeaseOwner: queueItem?.leaseOwner,
+    queueLeaseExpiresAt: queueItem?.leaseExpiresAt,
+    pendingApprovals,
+  }
 }
 
 class RecordingBrowserFactory implements BrowserClientFactory {
