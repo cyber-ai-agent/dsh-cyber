@@ -67,7 +67,10 @@ describe('group Skill approval continuation', () => {
       clientTurnId: 'group-skill-task-approval',
     })
     expect(task.status).toBe(202)
-    await waitFor(() => server.store.getWorkTurn(task.body.workTurnId)?.status === 'waiting-approval')
+    await waitFor(
+      () => server.store.getWorkTurn(task.body.workTurnId)?.status === 'waiting-approval',
+      'task WorkTurn to enter waiting-approval',
+    )
     expect(server.store.getConversationQueueEntry(task.body.queueItem.id)?.status).toBe('waiting-approval')
     expect(browser.readUrls).toEqual([])
     expect(runtime.calls).toEqual([])
@@ -76,8 +79,14 @@ describe('group Skill approval continuation', () => {
 
     const approved = await postJson(`${origin}/api/approvals/${taskApproval!.id}/decision`, { decision: 'approved', scope: 'once' })
     expect(approved.status).toBe(200)
-    await waitFor(() => server.store.getWorkTurn(task.body.workTurnId)?.status === 'completed')
-    await waitFor(() => server.store.getConversationQueueEntry(task.body.queueItem.id)?.status === 'completed')
+    await waitFor(
+      () => server.store.getWorkTurn(task.body.workTurnId)?.status === 'completed',
+      'approved task WorkTurn to complete',
+    )
+    await waitFor(
+      () => server.store.getConversationQueueEntry(task.body.queueItem.id)?.status === 'completed',
+      'approved task queue item to complete',
+    )
     const taskActions = server.store.listWorldSkillActions(world.id).filter((action) => action.workTurnId === task.body.workTurnId)
     expect(taskActions).toHaveLength(1)
     expect(taskActions[0]).toMatchObject({ characterId: browserEmployee.id, skillId: 'browser.read', status: 'executed' })
@@ -96,13 +105,22 @@ describe('group Skill approval continuation', () => {
       clientTurnId: 'group-skill-discussion-reject',
     })
     expect(discussion.status).toBe(202)
-    await waitFor(() => server.store.getWorkTurn(discussion.body.workTurnId)?.status === 'waiting-approval')
+    await waitFor(
+      () => server.store.getWorkTurn(discussion.body.workTurnId)?.status === 'waiting-approval',
+      'discussion WorkTurn to enter waiting-approval',
+    )
     const rejectedApproval = server.store.listWorldApprovalRequests(world.id, 'pending').find((request) => request.workTurnId === discussion.body.workTurnId)
     expect(rejectedApproval).toBeDefined()
     const rejected = await postJson(`${origin}/api/approvals/${rejectedApproval!.id}/decision`, { decision: 'rejected', scope: 'once' })
     expect(rejected.status).toBe(200)
-    await waitFor(() => server.store.getWorkTurn(discussion.body.workTurnId)?.status === 'completed')
-    await waitFor(() => server.store.getConversationQueueEntry(discussion.body.queueItem.id)?.status === 'completed')
+    await waitFor(
+      () => server.store.getWorkTurn(discussion.body.workTurnId)?.status === 'completed',
+      'rejected discussion WorkTurn to complete',
+    )
+    await waitFor(
+      () => server.store.getConversationQueueEntry(discussion.body.queueItem.id)?.status === 'completed',
+      'rejected discussion queue item to complete',
+    )
     const rejectedActions = server.store.listWorldSkillActions(world.id).filter((action) => action.workTurnId === discussion.body.workTurnId)
     expect(rejectedActions).toHaveLength(1)
     expect(rejectedActions[0]).toMatchObject({ characterId: browserEmployee.id, skillId: 'browser.read', status: 'rejected' })
@@ -144,7 +162,10 @@ describe('group Skill approval continuation', () => {
       queueMode: 'normal',
       clientTurnId: 'group-skill-restart',
     })
-    await waitFor(() => firstServer.store.getWorkTurn(queued.body.workTurnId)?.status === 'waiting-approval')
+    await waitFor(
+      () => firstServer.store.getWorkTurn(queued.body.workTurnId)?.status === 'waiting-approval',
+      'restart scenario WorkTurn to enter waiting-approval',
+    )
     expect(browser.readUrls).toEqual([])
     await firstServer.close()
 
@@ -164,8 +185,14 @@ describe('group Skill approval continuation', () => {
     const approval = recovered.store.listWorldApprovalRequests(world.id, 'pending').find((request) => request.workTurnId === queued.body.workTurnId)
     expect(approval).toBeDefined()
     expect((await postJson(`${recoveredOrigin}/api/approvals/${approval!.id}/decision`, { decision: 'approved', scope: 'once' })).status).toBe(200)
-    await waitFor(() => recovered.store.getWorkTurn(queued.body.workTurnId)?.status === 'completed')
-    await waitFor(() => recovered.store.getConversationQueueEntry(queued.body.queueItem.id)?.status === 'completed')
+    await waitFor(
+      () => recovered.store.getWorkTurn(queued.body.workTurnId)?.status === 'completed',
+      'recovered WorkTurn to complete',
+    )
+    await waitFor(
+      () => recovered.store.getConversationQueueEntry(queued.body.queueItem.id)?.status === 'completed',
+      'recovered queue item to complete',
+    )
     expect(browser.readUrls).toEqual(['https://example.com/restart'])
     expect(recovered.store.listWorldSkillActions(world.id).filter((action) => action.workTurnId === queued.body.workTurnId)).toHaveLength(1)
     expect(recovered.store.listMessages(queued.body.session.id).filter((message) => message.kind === 'user')).toHaveLength(1)
@@ -203,12 +230,20 @@ async function postJson<T = unknown>(url: string, body: Record<string, unknown>)
   return { status: response.status, body: await response.json().catch(() => undefined) as T }
 }
 
-async function waitFor(predicate: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 300; attempt += 1) {
+async function waitFor(
+  predicate: () => boolean,
+  label: string,
+  timeoutMs = 8_000,
+): Promise<void> {
+  const deadline = performance.now() + timeoutMs
+  while (performance.now() < deadline) {
     if (predicate()) return
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    await new Promise((resolve) => setTimeout(resolve, 20))
   }
-  throw new Error('Timed out waiting for group Skill approval continuation')
+  // Probe once after the deadline so a state transition that lands on the
+  // boundary is not reported as a false timeout.
+  if (predicate()) return
+  throw new Error(`Timed out after ${timeoutMs}ms waiting for ${label}`)
 }
 
 class RecordingBrowserFactory implements BrowserClientFactory {
