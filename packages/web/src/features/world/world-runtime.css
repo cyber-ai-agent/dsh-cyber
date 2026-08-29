@@ -147,6 +147,10 @@
 .world-runtime-dock__status i.is-online { background: #55c68a; box-shadow: 0 0 9px rgba(85,198,138,.6); }
 .world-runtime-dock__status i.is-offline { background: #e16e70; }
 .world-runtime-dock__canvas { position: relative; flex: 1; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; isolation: isolate; }
+.world-runtime-dock__view-switch { position: absolute; z-index: 28; top: 10px; left: 50%; translate: -50% 0; min-height: 44px; display: flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--border-strong); border-radius: var(--radius-panel); background: color-mix(in srgb, var(--surface-0) 93%, transparent); box-shadow: var(--shadow-sm); }
+.world-runtime-dock__view-switch button { min-height: 36px; display: inline-flex; align-items: center; gap: 5px; padding: 0 10px; border: 1px solid transparent; border-radius: var(--radius-control); color: var(--text-muted); background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
+.world-runtime-dock__view-switch button:hover, .world-runtime-dock__view-switch button:focus-visible { color: var(--text); border-color: var(--border-strong); outline: none; }
+.world-runtime-dock__view-switch button.is-active { color: var(--accent-strong); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); background: color-mix(in srgb, var(--accent) 9%, transparent); }
 .world-runtime-dock__focus { position: absolute; z-index: 10; left: 12px; top: 12px; max-width: min(320px, calc(100% - 120px)); display: grid; gap: 2px; padding: 8px 10px; border: 1px solid rgba(117,137,149,.3); border-radius: 4px; background: rgba(7,13,17,.84); backdrop-filter: blur(10px); pointer-events: none; }
 .world-runtime-dock__focus span { color: #7f8e96; font-size: 10px; }
 .world-runtime-dock__focus strong { overflow: hidden; color: #dbe4e8; font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
