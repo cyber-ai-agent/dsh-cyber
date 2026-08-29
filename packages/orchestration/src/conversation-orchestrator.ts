@@ -849,7 +849,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
   async task(input: TaskConversationInput): Promise<TaskConversationResult> {
     const prompt = requiredText(input.prompt, 'Prompt')
     const employeeIds = [...new Set(input.employeeIds.map((id) => id.trim()).filter(Boolean))]
-    if (employeeIds.length < 2) throw new ConversationOrchestrationError('A task group requires at least two agents')
+    if (employeeIds.length < 1) throw new ConversationOrchestrationError('A task group requires at least one executor')
     if (!employeeIds.includes(input.coordinatorEmployeeId)) {
       throw new ConversationOrchestrationError('Task coordinator must be a group participant')
     }
@@ -881,9 +881,9 @@ export class ConversationOrchestrator implements AsyncDisposable {
             ...employees.map((employee) => ({ participantId: employee.id, kind: 'employee' as const })),
           ],
         })
-    if (session.collaborationMode !== undefined && session.collaborationMode !== 'task') {
-      throw new ConversationOrchestrationError('Task execution requires a task collaboration session')
-    }
+    // Collaboration mode is a per-turn routing decision. A group's persisted
+    // legacy mode may describe an older turn, but it must not prevent the host
+    // intent core from routing the current message into task execution.
     if (input.sessionId !== undefined && input.sessionId !== session.id) throw new ConversationOrchestrationError('Queued task session does not match')
 
     const recovered = queuedTurn === undefined

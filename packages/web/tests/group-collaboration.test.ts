@@ -9,8 +9,8 @@ import { collaborationModeOf, normalizeTaskCollaborationPlan } from '../src/comp
 
 const employees: CyberEmployee[] = [employee('employee-a', '甲角色'), employee('employee-b', '乙角色'), employee('employee-c', '丙角色')]
 
-describe('GroupConversationDialog collaboration modes', () => {
-  it('focuses search once, keeps title focus on rerender, and submits task mode', async () => {
+describe('GroupConversationDialog', () => {
+  it('focuses search once, keeps title focus on rerender, and leaves intent routing to the group core', async () => {
     const onCreate = vi.fn(async () => undefined)
     const onClose = vi.fn()
     const host = document.createElement('div')
@@ -25,16 +25,16 @@ describe('GroupConversationDialog collaboration modes', () => {
     expect(document.activeElement).toBe(title)
     await act(async () => { root.render(createElement(GroupConversationDialog, { employees, onCreate, onClose, creating: false })) })
 
-    const taskMode = host.querySelector<HTMLInputElement>('input[value="task"]')
     const memberChecks = Array.from(host.querySelectorAll<HTMLInputElement>('.group-dialog__list input[type="checkbox"]'))
     await act(async () => {
-      taskMode?.click()
       memberChecks[0]?.click()
       memberChecks[1]?.click()
     })
     const createButton = Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find((button) => button.textContent === '创建群聊')
     await act(async () => { createButton?.click() })
-    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ collaborationMode: 'task', employeeIds: ['employee-a', 'employee-b'] }))
+    expect(host.querySelector('input[value="task"]')).toBeNull()
+    expect(host.textContent).not.toContain('协作模式')
+    expect(onCreate).toHaveBeenCalledWith({ title: '甲角色、乙角色', employeeIds: ['employee-a', 'employee-b'] })
     await act(async () => { root.unmount() })
     host.remove()
   })

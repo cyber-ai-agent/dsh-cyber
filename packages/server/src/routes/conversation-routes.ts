@@ -50,6 +50,7 @@ import type { GroupTaskCollaborationService } from '../services/group-task-colla
 import type { GroupTaskRoutingResult } from '../services/group-task-router.js'
 import type { PreparedGroupTurnPlanner } from '../services/prepared-group-turn-planner.js'
 import type { ConversationQueueService } from '../services/conversation-queue-service.js'
+import { GroupIntentRouter } from '../services/group-intent-router.js'
 import { listApprovalRequestViews } from '../services/approval-request-views.js'
 import type { HarnessToolApprovalService } from '../services/harness-tool-approval-service.js'
 
@@ -109,6 +110,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     worldSettings: runtimeContext,
   })
   const conversationHub = new ConversationHubService(store)
+  const groupIntentRouter = new GroupIntentRouter()
 
   router.post(/^\/api\/worlds\/([^/]+)\/group-sessions$/, async ({ request, response, params }) => {
     const world = store.getWorld(params[0]!)
@@ -202,9 +204,9 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
       }
     }
 
-    const requestedCollaborationMode = body.collaborationMode === undefined
-      ? undefined
-      : requiredEnum<WorkSessionCollaborationMode>(body, 'collaborationMode', ['discussion', 'task'])
+    if (body.collaborationMode !== undefined) {
+      requiredEnum<WorkSessionCollaborationMode>(body, 'collaborationMode', ['discussion', 'task'])
+    }
     const queueMode = body.queueMode === undefined
       ? undefined
       : requiredEnum<'normal' | 'next'>(body, 'queueMode', ['normal', 'next'])
@@ -227,15 +229,8 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
         throw new HttpError(422, 'mentioned_character_not_in_session', '被 @ 的角色不在当前群聊中，请先加入群聊')
       }
     }
-    const persistedSessionMode = requestedSession?.collaborationMode ?? 'discussion'
-    if (requestedSession !== undefined && requestedCollaborationMode !== undefined && requestedCollaborationMode !== persistedSessionMode) {
-      throw new HttpError(409, 'session_mode_mismatch', '当前群聊已持久化为另一种协作模式，请先切换会话模式')
-    }
-    const collaborationMode = employeeIds.length > 1
-      ? requestedSession === undefined
-        ? requestedCollaborationMode ?? (body.interactionKind === 'task' ? 'task' : 'discussion')
-        : persistedSessionMode
-      : undefined
+    const groupIntent = employeeIds.length > 1 ? groupIntentRouter.route({ prompt }) : undefined
+    const collaborationMode = groupIntent?.collaborationMode
 
     const attachments = await validatedChatAttachments(body.attachments, store, world.workspaceId, world.id, worldFiles)
     const attachmentPrompt = attachments.length === 0 ? prompt : attachmentAwarePrompt(prompt, attachments)
@@ -346,7 +341,10 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
       ...(plannedGroupTurn === undefined ? {} : { groupTurnPlan: groupTurnPlanJson(plannedGroupTurn) }),
       ...(plannedTaskRouting === undefined ? {} : { taskRouting: taskRoutingJson(plannedTaskRouting) }),
     }
-    if (requestedCollaborationMode !== undefined) metadata.collaborationMode = requestedCollaborationMode
+    if (groupIntent !== undefined) {
+      metadata.collaborationMode = groupIntent.collaborationMode
+      metadata.groupIntent = { source: 'core', reason: groupIntent.reason }
+    }
     const title = optionalString(body.title)
     const traceCheckpoint = await createTraceCheckpoint(world.id, worldTrace)
     try {
@@ -412,10 +410,9 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
       }
     } else {
       const effectiveCollaborationMode = collaborationMode ?? 'discussion'
-      // The persisted session mode is the authority for an existing group.
-      // Keep the WorkTurn interaction kind aligned with it too: a stale
-      // interactionKind=task from a client must not make a discussion turn
-      // look like a task turn (or vice versa) in durable history.
+      // The host intent core is authoritative for this turn. Client hints and
+      // a legacy session mode cannot make a discussion look like a task (or
+      // vice versa) in durable history.
       const collaborationMetadata: JsonObject = {
         ...metadata,
         ...(coordinatorEmployeeId === undefined ? {} : { coordinatorEmployeeId }),

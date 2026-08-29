@@ -65,7 +65,7 @@ describe('ChatTurnQueue', () => {
 })
 
 describe('mergeChatTimeline', () => {
-  it('keeps the streaming reply before a queued follow-up', () => {
+  it('keeps queued follow-ups out of the transcript until they start', () => {
     const first = ownerMessage('turn-1', '先分析问题', 1)
     const followUp = ownerMessage('turn-2', '补充一个约束', 2)
     const pending: PendingChatTurn[] = [
@@ -89,9 +89,15 @@ describe('mergeChatTimeline', () => {
     expect(timeline.map((message) => message.content)).toEqual([
       '先分析问题',
       '正在流式返回的答案',
-      '补充一个约束',
     ])
     expect(timeline[1]?.metadata.streaming).toBe(true)
+
+    const running = mergeChatTimeline([first, followUp], [], pending.map((turn) => turn.id === 'turn-2' ? { ...turn, status: 'running' } : turn), streaming)
+    expect(running.map((message) => message.content)).toEqual([
+      '先分析问题',
+      '正在流式返回的答案',
+      '补充一个约束',
+    ])
   })
 
   it('prefers a durable assistant reply over its transient stream', () => {

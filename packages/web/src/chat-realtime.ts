@@ -10,6 +10,7 @@ export interface PendingChatTurn {
   worldId: string
   employeeIds: string[]
   title: string
+  content?: string
   status: PendingChatTurnStatus
   createdAt: string
   sessionId?: string
@@ -112,14 +113,18 @@ export function mergeChatTimeline(
   pendingTurns: PendingChatTurn[],
   streamingReplies: StreamingChatReply[],
 ): WorkMessage[] {
-  const timeline = [...durableMessages]
+  const queuedTurnIds = new Set(pendingTurns.filter((turn) => turn.status === 'queued').map((turn) => turn.id))
+  const timeline = durableMessages.filter((message) => {
+    const clientTurnId = messageClientTurnId(message)
+    return message.senderKind !== 'owner' || clientTurnId === undefined || !queuedTurnIds.has(clientTurnId)
+  })
   const orderedTurns = [...pendingTurns].sort((left, right) => left.createdAt.localeCompare(right.createdAt))
 
   for (const turn of orderedTurns) {
     let ownerIndex = timeline.findIndex((message) =>
       message.senderKind === 'owner' && messageClientTurnId(message) === turn.id,
     )
-    if (ownerIndex < 0) {
+    if (ownerIndex < 0 && turn.status !== 'queued') {
       const optimistic = outboxMessages.find((message) => messageClientTurnId(message) === turn.id)
       if (optimistic !== undefined) {
         timeline.push(optimistic)
@@ -164,6 +169,7 @@ export function mergeChatTimeline(
 
   for (const optimistic of outboxMessages) {
     const clientTurnId = messageClientTurnId(optimistic)
+    if (clientTurnId !== undefined && queuedTurnIds.has(clientTurnId)) continue
     const represented = clientTurnId !== undefined && timeline.some((message) =>
       message.senderKind === 'owner' && messageClientTurnId(message) === clientTurnId,
     )

@@ -104,6 +104,7 @@ export function registerConversationQueueRoutes(router: Router, dependencies: Co
           ? `direct:${item.employeeIds[0]}`
           : `session:${item.sessionId}`,
         title: session?.title ?? '对话任务',
+        ...(userMessage?.content === undefined ? {} : { content: userMessage.content }),
         createdAt: item.enqueuedAt,
         ...(item.errorCode === undefined ? {} : { error: item.errorCode }),
       }

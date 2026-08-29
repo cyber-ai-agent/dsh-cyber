@@ -2726,13 +2726,12 @@ export class SqliteStore {
     if (session.workspaceId !== workspace.id || session.worldId !== world.id) {
       throw new PersistenceError('Task collaboration plan session does not match its world')
     }
-    if (session.kind !== 'group' || session.collaborationMode !== 'task') {
-      throw new PersistenceError('Task collaboration plan requires a task group session')
-    }
+    if (session.kind !== 'group') throw new PersistenceError('Task collaboration plan requires a group session')
     const turn = this.getWorkTurn(input.workTurnId)
     if (turn === undefined || turn.workspaceId !== workspace.id || turn.worldId !== world.id || turn.sessionId !== session.id) {
       throw new PersistenceError('Task collaboration plan work turn does not match its session')
     }
+    if (turn.interactionKind !== 'task') throw new PersistenceError('Task collaboration plan requires a task work turn')
     const taskId = normalizeRequiredToken(input.taskId, 'Task collaboration task id', 160)
     const status = validateTaskPlanStatus(input.status ?? 'planned')
     const steps = normalizeTaskSteps(input.steps, this.#idFactory)
@@ -5101,11 +5100,11 @@ export class SqliteStore {
     const collaborationMode = validateSessionCollaborationMode(
       input.collaborationMode ?? session.collaborationMode ?? 'discussion',
     )
-    if (collaborationMode !== (session.collaborationMode ?? 'discussion')) {
-      throw new PersistenceError('Conversation queue collaboration mode does not match its session')
-    }
     if (collaborationMode === 'task' && session.kind !== 'group') {
       throw new PersistenceError('Task collaboration mode requires a group session')
+    }
+    if (session.kind === 'group' && (collaborationMode === 'task') !== (turn.interactionKind === 'task')) {
+      throw new PersistenceError('Conversation queue collaboration mode does not match its WorkTurn')
     }
     const employeeIds = normalizeQueueEmployeeIds(input.employeeIds)
     for (const employeeId of employeeIds) {

@@ -24,7 +24,7 @@ test.afterAll(async () => {
   await rm(stateRoot, { recursive: true, force: true })
 })
 
-test('keeps durable queue controls, reload state and stop facts visible across runtime lanes', async ({ page }) => {
+test('keeps durable inserted follow-ups, reload state and stop facts visible across runtime lanes', async ({ page }) => {
   const current = requireServer()
   const workspace = current.store.listWorkspaces()[0]!
   const world = current.store.listWorlds(workspace.id)[0]!
@@ -49,6 +49,23 @@ test('keeps durable queue controls, reload state and stop facts visible across r
   await page.reload()
   await expect(page.locator('.workbench-shell')).toBeVisible()
   await expect(page.getByText(/等待中|正在回复中/).first()).toBeVisible()
+  const insertedRegion = page.getByRole('region', { name: '插入对话' })
+  await expect(insertedRegion).toContainText('第二条排队任务')
+  await expect(page.getByRole('group', { name: '队列操作' })).toHaveCount(0)
+
+  const queue = await getJson<{ items: Array<{ id: string; serverQueueId?: string; status: string; workTurnId?: string }> }>(`${origin}/api/worlds/${world.id}/chat-queue`)
+  const queued = queue.items.find((item) => item.status === 'queued')
+  expect(queued).toBeDefined()
+  await insertedRegion.getByRole('button', { name: /撤销插入/ }).click()
+  await expect(insertedRegion).toBeHidden()
+  await expect.poll(async () => (await getJson<{ items: Array<{ status: string }> }>(`${origin}/api/worlds/${world.id}/chat-queue`)).items.some((item) => item.status === 'queued')).toBe(false)
+
+  const running = queue.items.find((item) => item.status === 'running' && item.workTurnId !== undefined)
+  expect(running?.workTurnId).toBeDefined()
+  const stopped = await postJson(`${origin}/api/turns/${running!.workTurnId}/abort`, { reason: 'user-stop' })
+  expect(stopped.status).toBe(200)
+  await expect.poll(async () => (await getJson<{ turn: { status: string } }>(`${origin}/api/turns/${running!.workTurnId}`)).turn.status).toBe('interrupted')
+  await expect(page.getByText('已停止').last()).toBeVisible()
 
   const screenshotRoot = join(process.cwd(), 'artifacts', 'conversation-control-runtime-lanes')
   await mkdir(screenshotRoot, { recursive: true })
@@ -58,21 +75,6 @@ test('keeps durable queue controls, reload state and stop facts visible across r
     await page.screenshot({ path: join(screenshotRoot, `conversation-control-${viewport.label}.png`) })
   }
 
-  const queue = await getJson<{ items: Array<{ id: string; serverQueueId?: string; status: string; workTurnId?: string }> }>(`${origin}/api/worlds/${world.id}/chat-queue`)
-  const queued = queue.items.find((item) => item.status === 'queued')
-  expect(queued).toBeDefined()
-  const queueEntryId = queued!.serverQueueId ?? queued!.id
-  const promoted = await patchJson(`${origin}/api/worlds/${world.id}/chat-queue/${queueEntryId}`, { queueMode: 'next' })
-  expect(promoted.status).toBe(200)
-  const removed = await fetch(`${origin}/api/worlds/${world.id}/chat-queue/${queueEntryId}`, { method: 'DELETE', headers: { 'content-type': 'application/json' } })
-  expect(removed.status).toBe(200)
-
-  const running = queue.items.find((item) => item.status === 'running' && item.workTurnId !== undefined)
-  if (running?.workTurnId !== undefined) {
-    const stopped = await postJson(`${origin}/api/turns/${running.workTurnId}/abort`, { reason: 'user-stop' })
-    expect(stopped.status).toBe(200)
-    await expect.poll(async () => (await getJson<{ turn: { status: string } }>(`${origin}/api/turns/${running.workTurnId}`)).turn.status).toBe('interrupted')
-  }
   expect(current.store.getEmployee(employee.id)).toBeDefined()
   expect(current.store.getEmployee(second.id)).toBeDefined()
   await writeFile(join(screenshotRoot, 'console.log'), consoleIssues.length === 0 ? 'No console errors or warnings.\n' : `${consoleIssues.join('\n')}\n`, 'utf8')
@@ -137,11 +139,6 @@ async function getJson<T>(url: string): Promise<T> {
 async function postJson<T = unknown>(url: string, body: Record<string, unknown>): Promise<{ status: number; body: T }> {
   const response = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
   return { status: response.status, body: await response.json().catch(() => undefined) as T }
-}
-
-async function patchJson(url: string, body: Record<string, unknown>): Promise<{ status: number; body: unknown }> {
-  const response = await fetch(url, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
-  return { status: response.status, body: await response.json().catch(() => undefined) }
 }
 
 function requireServer(): CyberServer {
