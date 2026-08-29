@@ -33,6 +33,14 @@ describe('World Scene ownership guard', () => {
     expect(canvas).not.toMatch(/\bsharedScene\b/)
     expect(canvas).not.toContain('world-canvas-host--shared-scene')
   })
+
+  it('keeps durable scene saves distinct from live renderer refresh failures', () => {
+    const dialog = readFileSync(join(worldSourceRoot, 'WorldSceneDialog.tsx'), 'utf8')
+    expect(dialog).toContain('markApplied(item)')
+    expect(dialog).toContain('场景已经保存，但实时画面刷新失败')
+    expect(dialog).toContain('disabled={applyingId !== undefined || selected}')
+    expect(dialog.indexOf('markApplied(item)')).toBeLessThan(dialog.indexOf('await onApplied()'))
+  })
 })
 
 function stripComments(source: string): string {
