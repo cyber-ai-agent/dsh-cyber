@@ -11,6 +11,7 @@ import { appendKokoroSpeech, KOKORO_CHINESE_VOICES, playKokoroSpeech, stopKokoro
 import { normalizeSpeechVoices, resolveSpeechVoice } from '../speech/speech-voice-catalog.js'
 import { SpriteRuntimeRenderer } from '../sprite/SpriteRuntimeRenderer.js'
 import { VoiceConversationControl } from '../../../voice/VoiceConversationControl.js'
+import { VoiceModelPackPicker } from '../../../voice/VoiceModelPackPicker.js'
 import { StreamingSentenceChunker } from '../../../voice/StreamingSentenceChunker.js'
 import { subscribeStreamingSpeech } from '../../../voice/streaming-speech-bus.js'
 import { resolveEmployeeVoiceProfile } from '../../../voice/employee-voice-profile.js'
@@ -205,6 +206,18 @@ export function EmployeeFocusMode({ world, employee, profile, entity, collaborat
     setVoiceMode(mode)
   }, [employee.id, stopSpeech, utterance, world.id])
 
+  const activateVoiceProvider = useCallback((provider: Exclude<EmployeeVoiceProfile['provider'], 'auto'>) => {
+    let nextVoiceId = voiceId
+    if (provider === 'kokoro' && !voiceId.startsWith('kokoro:')) nextVoiceId = compatibleKokoroVoices[0]!.id
+    if (provider === 'system' && !voiceId.startsWith('system:')) {
+      const systemVoice = chineseSystemVoices[0]
+      if (systemVoice === undefined) { setVoiceNotice('当前系统没有可用的中文声音'); return }
+      nextVoiceId = `system:${systemVoice.voiceURI}`
+    }
+    setVoiceId(nextVoiceId)
+    void persistVoiceProfile({ provider, voiceId: nextVoiceId, speed: voiceSpeed, pitch: profile?.voiceProfile.pitch ?? 1 })
+  }, [chineseSystemVoices, compatibleKokoroVoices, persistVoiceProfile, profile?.voiceProfile.pitch, voiceId, voiceSpeed])
+
   const enqueueStreamChunk = useCallback((content: string) => {
     const text = speechTextFromMessage(content)
     if (!text || !voiceId.startsWith('kokoro:')) return
@@ -288,6 +301,7 @@ export function EmployeeFocusMode({ world, employee, profile, entity, collaborat
         <span className={`employee-focus__status is-${state}`}><i aria-hidden="true" />{stateLabel(state)}</span>
         <div className="employee-focus__voice"><button type="button" className="employee-focus__voice-trigger" aria-label="语音设置" aria-expanded={voiceSettingsOpen} onClick={() => { setVoiceSettingsOpen((current) => { const next = !current; if (!next) flushVoiceProfile(); return next }) }}>{speaking ? <SpeakerSlash size={17} aria-hidden="true" /> : <SpeakerHigh size={17} aria-hidden="true" />}语音</button>{voiceSettingsOpen ? <div>
           <header><span><strong>{employee.displayName}的语音</strong><small>{KOKORO_CHINESE_VOICES.length} 个中文声音{chineseSystemVoices.length > 0 ? ` · ${chineseSystemVoices.length} 个系统中文声音` : ''}</small></span><button type="button" aria-label="刷新系统声音" onClick={refreshVoices}><ArrowsClockwise size={16} aria-hidden="true" /></button></header>
+          <VoiceModelPackPicker value={profile?.voiceProfile.provider ?? 'auto'} onActivate={activateVoiceProvider} />
           <label><span>播报模式</span><select aria-label="播报模式" value={voiceMode} onChange={(event) => changeVoiceMode(event.target.value as VoiceMode)}><option value="off">关闭</option><option value="manual">手动</option><option value="auto">自动播报新回复</option></select></label>
           <label><span>角色声音</span><select aria-label="角色声音" value={voiceId} onChange={(event) => { const nextVoiceId = event.target.value; setVoiceId(nextVoiceId); setVoiceNotice(undefined); scheduleVoiceProfile({ provider: nextVoiceId.startsWith('system:') ? 'system' : 'kokoro', voiceId: nextVoiceId, speed: voiceSpeed, pitch: profile?.voiceProfile.pitch ?? 1 }) }}>{selectedVoiceMissing ? <option value={voiceId}>原声音当前不可用</option> : null}{profile?.gender === 'male' ? null : <optgroup label="中文女声">{compatibleKokoroVoices.filter((voice) => voice.gender === '女声').map((voice) => <option key={voice.id} value={voice.id}>{voice.label}</option>)}</optgroup>}{profile?.gender === 'female' ? null : <optgroup label="中文男声">{compatibleKokoroVoices.filter((voice) => voice.gender === '男声').map((voice) => <option key={voice.id} value={voice.id}>{voice.label}</option>)}</optgroup>}{chineseSystemVoices.length === 0 ? null : <optgroup label="Windows / 浏览器中文声音">{chineseSystemVoices.map((voice) => <option key={`${voice.voiceURI}:${voice.lang}`} value={`system:${voice.voiceURI}`}>{voice.name} · {voice.lang}{voice.localService ? ' · 本机' : ''}</option>)}</optgroup>}</select></label>
           <label className="employee-focus__voice-speed"><span>语速 <output>{voiceSpeed.toFixed(2)}×</output></span><input aria-label="语速" type="range" min="0.8" max="1.3" step="0.05" value={voiceSpeed} onChange={(event) => { const speed = Number(event.target.value); setVoiceSpeed(speed); scheduleVoiceProfile({ provider: voiceId.startsWith('system:') ? 'system' : 'kokoro', voiceId, speed, pitch: profile?.voiceProfile.pitch ?? 1 }) }} /></label>

@@ -6204,7 +6204,7 @@ function normalizeCharacterGender(value: unknown): CharacterGender {
 
 function normalizeEmployeeVoiceProfile(value: EmployeeVoiceProfile | undefined): EmployeeVoiceProfile {
   if (value === undefined) return defaultEmployeeVoiceProfile()
-  const provider = ['auto', 'system', 'kokoro', 'cosyvoice'].includes(value.provider)
+  const provider = ['auto', 'system', 'kokoro', 'moss', 'qwen-tts', 'dots-tts', 'cosyvoice'].includes(value.provider)
     ? value.provider
     : 'auto'
   const voiceId = typeof value.voiceId === 'string' && value.voiceId.length <= 240 ? value.voiceId : ''

@@ -141,7 +141,7 @@ export function registerEmployeeRoutes(router: Router, dependencies: EmployeeRou
         ? {}
         : {
             voiceProfile: {
-              provider: requiredEnum(voiceProfileInput, 'provider', ['auto', 'system', 'kokoro', 'cosyvoice']),
+              provider: requiredEnum(voiceProfileInput, 'provider', ['auto', 'system', 'kokoro', 'moss', 'qwen-tts', 'dots-tts', 'cosyvoice']),
               voiceId: typeof voiceProfileInput.voiceId === 'string' ? voiceProfileInput.voiceId : '',
               speed: requiredNumber(voiceProfileInput, 'speed'),
               pitch: requiredNumber(voiceProfileInput, 'pitch'),

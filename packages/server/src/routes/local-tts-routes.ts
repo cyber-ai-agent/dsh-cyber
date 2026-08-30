@@ -6,6 +6,10 @@ import { once } from 'node:events'
 
 export function registerLocalTtsRoutes(router: Router, service: LocalTtsAssetService): void {
   router.get('/api/local-tts/status', async ({ response }) => writeJson(response, 200, await service.status()))
+  router.get('/api/local-tts/models', async ({ response }) => writeJson(response, 200, { models: await service.models() }))
+  router.post(/^\/api\/local-tts\/models\/([^/]+)\/install$/, async ({ response, params }) => writeJson(response, 202, { model: await service.installModel(params[0]!) }))
+  router.post(/^\/api\/local-tts\/models\/([^/]+)\/cancel$/, async ({ response, params }) => { await service.cancelModelInstall(params[0]!); writeJson(response, 200, { cancelled: true }) })
+  router.delete(/^\/api\/local-tts\/models\/([^/]+)$/, async ({ response, params }) => { await service.removeModel(params[0]!); writeJson(response, 200, { removed: true }) })
   router.post('/api/local-tts/synthesize', async ({ request, response }) => {
     const body = await readJson(request, 16 * 1024)
     const audio = await service.synthesize({

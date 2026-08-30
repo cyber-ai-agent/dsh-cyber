@@ -35,6 +35,12 @@ describe('LocalTtsAssetService', () => {
 
     const service = new LocalTtsAssetService(stateRoot)
     await expect(service.status()).resolves.toMatchObject({ installed: true, engine: 'sherpa-onnx', voiceCount: 100, byteLength: 5 })
+    await expect(service.models()).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'moss-tts-nano-100m-onnx', provider: 'moss', tier: 'default', recommended: true, state: 'not-installed' }),
+      expect.objectContaining({ id: 'kokoro-int8-multi-lang-v1_1', provider: 'kokoro', tier: 'fast', state: 'ready' }),
+      expect.objectContaining({ id: 'qwen3-tts-12hz-0.6b', provider: 'qwen-tts', tier: 'advanced', state: 'unavailable' }),
+      expect.objectContaining({ id: 'dots-tts-soar-2b', provider: 'dots-tts', tier: 'advanced', state: 'unavailable' }),
+    ]))
   })
 
   it('fails closed for an unpinned or incomplete voice runtime', async () => {
