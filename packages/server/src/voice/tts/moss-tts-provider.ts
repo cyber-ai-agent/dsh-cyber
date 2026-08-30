@@ -5,15 +5,21 @@ import { join } from 'node:path'
 import { createInterface, type Interface } from 'node:readline'
 
 import type { AudioChunk, TextToSpeechCapabilities, TextToSpeechProvider, TtsRequest, VoiceRuntimeState } from '@dsh-cyber/contracts'
+import { AsyncQueue } from '../async-queue.js'
 
-type PendingRequest = { resolve(value: MossAudio): void; reject(error: unknown): void; timeout: ReturnType<typeof setTimeout> }
-type MossAudio = { sampleRate: number; pcm: Float32Array; voice: string }
+type PendingRequest = {
+  queue: AsyncQueue<AudioChunk>
+  timeout: ReturnType<typeof setTimeout>
+  detachAbort(): void
+  sampleRate: number
+  nextSequence: number
+}
 type MossTtsProviderOptions = { executable?: string; sidecar?: string; requestTimeoutMs?: number; startupTimeoutMs?: number }
 
 export class MossTtsProvider implements TextToSpeechProvider {
   readonly id = 'moss-tts-nano-local'
   readonly kind = 'moss' as const
-  readonly capabilities: TextToSpeechCapabilities = { streaming: false, pcm: true, viseme: false, voiceClone: false }
+  readonly capabilities: TextToSpeechCapabilities = { streaming: true, pcm: true, viseme: false, voiceClone: false }
   #state: VoiceRuntimeState = 'cold'
   #process: ChildProcessWithoutNullStreams | undefined
   #readline: Interface | undefined
@@ -35,35 +41,34 @@ export class MossTtsProvider implements TextToSpeechProvider {
     await this.#ensureProcess()
     if (request.signal?.aborted === true) throw abortError('MOSS 语音生成已取消')
     this.#state = 'busy'
-    const audio = await new Promise<MossAudio>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.#pending.delete(request.requestId)
-        this.#terminate(abortError('MOSS 语音生成超时'))
-        reject(abortError('MOSS 语音生成超时'))
-      }, this.options.requestTimeoutMs ?? 60_000)
-      this.#pending.set(request.requestId, { resolve, reject, timeout })
-      const abort = () => this.cancel(request.requestId)
-      request.signal?.addEventListener('abort', abort, { once: true })
-      const voice = request.voiceId.startsWith('moss:') ? request.voiceId.slice('moss:'.length) : this.#voices[0] ?? 'Junhao'
-      this.#process!.stdin.write(`${JSON.stringify({ id: request.requestId, text: request.text, voice })}\n`, (error) => {
-        if (error !== null && error !== undefined) reject(error)
-      })
+    const queue = new AsyncQueue<AudioChunk>()
+    const abort = () => this.cancel(request.requestId)
+    request.signal?.addEventListener('abort', abort, { once: true })
+    const timeout = setTimeout(() => this.#terminate(abortError('MOSS 语音生成超时')), this.options.requestTimeoutMs ?? 60_000)
+    this.#pending.set(request.requestId, {
+      queue,
+      timeout,
+      detachAbort: () => request.signal?.removeEventListener('abort', abort),
+      sampleRate: 48_000,
+      nextSequence: 0,
     })
-    this.#state = 'ready'
-    yield { sequence: 0, pcm: audio.pcm, sampleRate: audio.sampleRate, durationMs: audio.pcm.length / audio.sampleRate * 1000, final: true }
+    const voice = request.voiceId.startsWith('moss:') ? request.voiceId.slice('moss:'.length) : this.#voices[0] ?? 'Junhao'
+    this.#process!.stdin.write(`${JSON.stringify({ id: request.requestId, text: request.text, voice })}\n`, (error) => {
+      if (error !== null && error !== undefined) this.#terminate(error)
+    })
+    try {
+      for await (const chunk of queue) yield chunk
+    } finally {
+      if (this.#pending.has(request.requestId)) this.cancel(request.requestId)
+      else this.#finishRequest(request.requestId)
+    }
   }
 
   cancel(requestId?: string): void {
     const error = abortError('MOSS 语音生成已取消')
-    if (requestId !== undefined) {
-      const pending = this.#pending.get(requestId)
-      if (pending === undefined) return
-      clearTimeout(pending.timeout); this.#pending.delete(requestId); pending.reject(error)
-    } else {
-      for (const pending of this.#pending.values()) { clearTimeout(pending.timeout); pending.reject(error) }
-      this.#pending.clear()
-    }
+    if (requestId !== undefined && !this.#pending.has(requestId)) return
     this.#terminate(error)
+    if (requestId !== undefined) void this.prepare().catch(() => undefined)
   }
 
   async dispose(): Promise<void> {
@@ -118,13 +123,39 @@ export class MossTtsProvider implements TextToSpeechProvider {
     if (id === undefined) return
     const pending = this.#pending.get(id)
     if (pending === undefined) return
-    clearTimeout(pending.timeout)
-    this.#pending.delete(id)
-    if (message.type === 'error') { pending.reject(new Error(typeof message.message === 'string' ? message.message : 'MOSS 语音生成失败')); return }
-    if (message.type !== 'audio' || typeof message.pcmBase64 !== 'string' || typeof message.sampleRate !== 'number') { pending.reject(new Error('MOSS 语音运行时返回无效数据')); return }
+    if (message.type === 'error') {
+      pending.queue.fail(new Error(typeof message.message === 'string' ? message.message : 'MOSS 语音生成失败'))
+      this.#finishRequest(id)
+      return
+    }
+    if (message.type === 'done') {
+      const sequence = Number.isInteger(message.sequence) ? message.sequence as number : pending.nextSequence
+      pending.queue.push({ sequence, pcm: new Float32Array(0), sampleRate: pending.sampleRate, durationMs: 0, final: true })
+      pending.queue.close()
+      this.#finishRequest(id)
+      return
+    }
+    if (message.type !== 'audio' || typeof message.pcmBase64 !== 'string' || typeof message.sampleRate !== 'number') {
+      pending.queue.fail(new Error('MOSS 语音运行时返回无效数据'))
+      this.#finishRequest(id)
+      return
+    }
     const buffer = Buffer.from(message.pcmBase64, 'base64')
     const view = new Float32Array(buffer.buffer, buffer.byteOffset, Math.floor(buffer.byteLength / 4))
-    pending.resolve({ sampleRate: message.sampleRate, pcm: new Float32Array(view), voice: typeof message.voice === 'string' ? message.voice : '' })
+    const sequence = Number.isInteger(message.sequence) ? message.sequence as number : pending.nextSequence
+    const pcm = new Float32Array(view)
+    pending.sampleRate = message.sampleRate
+    pending.nextSequence = sequence + 1
+    pending.queue.push({ sequence, pcm, sampleRate: message.sampleRate, durationMs: pcm.length / message.sampleRate * 1000, final: false })
+  }
+
+  #finishRequest(id: string): void {
+    const pending = this.#pending.get(id)
+    if (pending === undefined) return
+    clearTimeout(pending.timeout)
+    pending.detachAbort()
+    this.#pending.delete(id)
+    if (this.#process !== undefined && this.#pending.size === 0) this.#state = 'ready'
   }
 
   #terminate(error: unknown): void {
@@ -132,7 +163,11 @@ export class MossTtsProvider implements TextToSpeechProvider {
     this.#process?.kill(); this.#process = undefined
     this.#ready = undefined
     this.#state = 'cold'
-    for (const pending of this.#pending.values()) { clearTimeout(pending.timeout); pending.reject(error) }
+    for (const pending of this.#pending.values()) {
+      clearTimeout(pending.timeout)
+      pending.detachAbort()
+      pending.queue.fail(error)
+    }
     this.#pending.clear()
   }
 }

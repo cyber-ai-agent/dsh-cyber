@@ -6,7 +6,7 @@ DSH Cyber 的数字人不应绑定某一个 TTS、头像生成或 3D 供应商�
 
 当前实现已经落地本地 Voice Conversation、`expression + gesture` 动作合同、VRM 1.0 运行时和本地形象版本管理。中文 TTS 使用 sherpa-onnx Node Runtime + Kokoro 82M int8，提供 55 个女声与 45 个男声；STT 使用 Streaming Paraformer int8，Silero VAD 负责可靠分段，独立快速能量门负责 150ms 内 Barge-in。模型按需加载到 Worker Thread，不进入浏览器包或阻塞 Node 主循环。用户可选择关闭、手动或自动播报，配置按角色持久化；自动模式消费 `text.delta`，经 SentenceChunker 尽早生成首句。麦克风音频和回复内容默认不落盘、不上传。
 
-世界概览与数字人不再是两个 Tab。地图角色是入口：用户在 Overview 点击角色，地图镜头先聚焦，随后进入同一世界内的 Employee Focus；退出 Focus 时销毁 Three 资源并恢复地图。Focus 继承当前世界主题底图、角色、运行状态和最终回复，不创建默认“行动舱”或另一套事实源。
+世界概览与数字人属于同一世界右栏，通过紧凑的“地图 / 2D / 3D”视图控件切换，不提升为重复的全局页签。进入 2D/3D 后，选择私聊会直接切换对应角色；群聊将最新发言者放在中心并展示其他参与者。Focus 继承当前世界主题底图、角色、运行状态和最终回复，不创建默认“行动舱”或另一套事实源。
 
 ## 开源方案调研
 
@@ -63,7 +63,7 @@ WebGL/Canvas/Video presentation
 
 - 角色设置已经新增形象管理：支持本地 PNG/JPEG/WebP、自包含 VRM 1.0 和普通 GLB 预览；普通 GLB 缺少 `VRMC_vrm`、Humanoid 或身份元数据时不能发布为交互数字人。
 - 上传只生成预览，显式发布才创建新的角色 Profile revision；恢复旧形象同样创建新 revision，历史不可改写。
-- Overview 点击地图角色进入 Employee Focus；Focus 使用当前世界主题，不再提供地图/数字人模式 Tab。
+- 世界右栏提供“地图 / 2D / 3D”视图控件；会话切换直接更新 Employee Focus，选择保持在当前世界本地偏好中。
 - Renderer Registry 已提供 `sprite-2d`、`vrm-3d` 和供应商无关的 `LiveAvatarRendererPort`。核心没有绑定 HeyGen 或其他云供应商。
 - `three`、`@pixiv/three-vrm`、`@pixiv/three-vrm-animation` 位于独立懒加载 chunk，首屏 HTML 不预加载。
 - VRM Runtime 已拆分 Motion、Expression、LookAt、Blink、Speech、Animation、Performance 和 Resource Controller；状态来自 `WorldRuntimeSnapshot`，不是 UI 自行推断成功。
@@ -89,5 +89,5 @@ WebGL/Canvas/Video presentation
 - 主入口 JavaScript 约 299 kB，主 CSS 约 275 kB；相对引入 VRM 前只增加少量编排代码。
 - VRM Runtime 为约 916 kB 的独立懒加载 chunk（gzip 约 232 kB），只在硬件 WebGL 的 VRM Focus 或显式 3D 预览中下载。
 - 构建门禁会解析 `index.html`，若首屏预加载 Three/VRM 或懒加载 chunk 超过 950 kB 则失败。
-- 浏览器端移除了约 25 MB ONNX WASM 和 Transformers/Kokoro JS。当前实测：TTS 冷加载约 1.92s，短中文首音频约 0.77–0.86s，RTF P50 约 1.15；Streaming Paraformer 冷加载约 1.49s，测试音频首个 partial 计算约 53ms、Final 约 387ms；稳定语音到 Barge-in 事件约 64ms。
+- 浏览器端移除了约 25 MB ONNX WASM 和 Transformers/Kokoro JS。当前实测：MOSS-TTS-Nano CPU Sidecar 冷加载约 4.24s，Warm 首音频 P50 约 0.50s/P95 约 0.54s，RTF P50 约 0.56；Kokoro 继续作为快速降级。Streaming Paraformer 冷加载约 1.49s，测试音频首个 partial 计算约 53ms、Final 约 387ms；稳定语音到 Barge-in 事件约 64ms。
 - Playwright 覆盖 Overview → Focus、执行/说话状态、退出/重入、三种视口、减少动态效果和软件 WebGL 降级；Vitest 使用 `three-vrm` 的真实 `VRMLoaderPlugin` 解析发布合同夹具并驱动各 Controller。

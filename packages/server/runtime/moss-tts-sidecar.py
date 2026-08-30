@@ -4,9 +4,13 @@ import argparse
 import base64
 import json
 import sys
-import tempfile
 import types
 from pathlib import Path
+
+import numpy as np
+
+
+STREAM_DECODE_FRAME_BATCH = 8
 
 
 def install_lightweight_import_stubs(output_root: Path) -> None:
@@ -46,6 +50,75 @@ def install_lightweight_import_stubs(output_root: Path) -> None:
     sys.modules.setdefault("text_normalization_pipeline", normalization)
 
 
+def emit_audio(request_id: str, sequence: int, waveform: np.ndarray, sample_rate: int) -> None:
+    pcm = np.asarray(waveform, dtype=np.float32).reshape(-1).tobytes()
+    print(json.dumps({
+        "type": "audio",
+        "id": request_id,
+        "sequence": sequence,
+        "sampleRate": sample_rate,
+        "pcmBase64": base64.b64encode(pcm).decode("ascii"),
+    }), flush=True)
+
+
+def stream_synthesize(runtime, request_id: str, text: str, voice: str) -> int:
+    runtime.manifest["generation_defaults"]["max_new_frames"] = min(240, max(32, len(text) * 5))
+    prepared = runtime.prepare_synthesis_text(
+        text=text,
+        voice=voice,
+        enable_wetext=False,
+        enable_normalize_tts_text=False,
+    )
+    prepared_text = str(prepared["text"])
+    prompt_audio_codes = runtime.resolve_prompt_audio_codes(voice=voice, prompt_audio_path=None)
+    text_chunks = runtime.split_voice_clone_text(prepared_text, max_tokens=75)
+    sample_rate = int(runtime.codec_meta["codec_config"]["sample_rate"])
+    sequence = 0
+
+    for chunk_index, chunk_text in enumerate(text_chunks):
+        text_token_ids = runtime.encode_text(chunk_text)
+        request_rows = runtime.build_voice_clone_request_rows(prompt_audio_codes, text_token_ids)
+        pending_frames: list[list[int]] = []
+        runtime.codec_streaming_session.reset()
+
+        def decode_pending(force: bool) -> None:
+            nonlocal sequence
+            while pending_frames and (force or len(pending_frames) >= STREAM_DECODE_FRAME_BATCH):
+                frame_count = len(pending_frames) if force else STREAM_DECODE_FRAME_BATCH
+                frame_chunk = pending_frames[:frame_count]
+                del pending_frames[:frame_count]
+                decoded = runtime.codec_streaming_session.run_frames(frame_chunk)
+                if decoded is None:
+                    continue
+                audio, audio_length = decoded
+                if audio_length <= 0:
+                    continue
+                waveform = np.asarray(audio[0, :, :audio_length], dtype=np.float32).mean(axis=0)
+                emit_audio(request_id, sequence, waveform, sample_rate)
+                sequence += 1
+
+        def on_frame(_generated_frames: list[list[int]], _step_index: int, frame: list[int]) -> None:
+            pending_frames.append(list(frame))
+            decode_pending(False)
+
+        try:
+            runtime.generate_audio_frames(request_rows, on_frame=on_frame)
+            decode_pending(True)
+        finally:
+            runtime.codec_streaming_session.reset()
+
+        if chunk_index < len(text_chunks) - 1:
+            pause_seconds = runtime.estimate_voice_clone_inter_chunk_pause_seconds(chunk_text)
+            pause_samples = max(0, int(round(sample_rate * pause_seconds)))
+            if pause_samples > 0:
+                emit_audio(request_id, sequence, np.zeros((pause_samples,), dtype=np.float32), sample_rate)
+                sequence += 1
+
+    if sequence == 0:
+        raise RuntimeError("MOSS 语音没有生成音频")
+    return sequence
+
+
 def main() -> None:
     sys.stdin.reconfigure(encoding="utf-8", errors="strict")
     sys.stdout.reconfigure(encoding="utf-8", errors="strict")
@@ -76,28 +149,8 @@ def main() -> None:
             voice = str(request.get("voice") or (voices[0] if voices else "Junhao"))
             if not text:
                 raise ValueError("播报文字不能为空")
-            with tempfile.NamedTemporaryFile(suffix=".wav", dir=output_root, delete=False) as temporary:
-                output_path = Path(temporary.name)
-            try:
-                result = runtime.synthesize(
-                    text=text,
-                    voice=voice,
-                    output_audio_path=output_path,
-                    streaming=True,
-                    enable_wetext=False,
-                    enable_normalize_tts_text=False,
-                    max_new_frames=min(240, max(32, len(text) * 5)),
-                )
-                waveform = result["waveform"]
-                if getattr(waveform, "ndim", 1) == 2:
-                    waveform = waveform.mean(axis=1)
-                pcm = waveform.astype("float32", copy=False).tobytes()
-                print(json.dumps({
-                    "type": "audio", "id": request_id, "sampleRate": int(result["sample_rate"]),
-                    "pcmBase64": base64.b64encode(pcm).decode("ascii"), "voice": voice,
-                }), flush=True)
-            finally:
-                output_path.unlink(missing_ok=True)
+            sequence = stream_synthesize(runtime, request_id, text, voice)
+            print(json.dumps({"type": "done", "id": request_id, "sequence": sequence, "voice": voice}), flush=True)
         except Exception as error:
             print(json.dumps({"type": "error", "id": locals().get("request_id", "unknown"), "message": str(error)}, ensure_ascii=False), flush=True)
 

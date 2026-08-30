@@ -161,6 +161,7 @@ export function EmployeeFocusMode({ world, employee, profile, entity, collaborat
     utteranceRef.current = undefined
     setSpeaking(false)
     setVoiceBusy(false)
+    setVoiceNotice(undefined)
   }, [speechSupported])
 
   const speak = useCallback(async (text: string) => {
@@ -176,7 +177,7 @@ export function EmployeeFocusMode({ world, employee, profile, entity, collaborat
           speed: voiceSpeed,
           onStatus: setVoiceNotice,
           onStart: () => { setVoiceBusy(false); setSpeaking(true) },
-          onEnd: () => { setVoiceBusy(false); setSpeaking(false) },
+          onEnd: () => { setVoiceBusy(false); setSpeaking(false); setVoiceNotice(undefined) },
         })
       } catch (cause) {
         setVoiceBusy(false)
@@ -186,7 +187,7 @@ export function EmployeeFocusMode({ world, employee, profile, entity, collaborat
           const fallbackVoiceId = compatibleKokoroVoices[0]!.id
           setVoiceNotice('自然语音暂不可用，已切换快速语音')
           try {
-            await playKokoroSpeech({ text, voiceId: fallbackVoiceId, speed: voiceSpeed, onStatus: setVoiceNotice, onStart: () => setSpeaking(true), onEnd: () => setSpeaking(false) })
+            await playKokoroSpeech({ text, voiceId: fallbackVoiceId, speed: voiceSpeed, onStatus: setVoiceNotice, onStart: () => setSpeaking(true), onEnd: () => { setSpeaking(false); setVoiceNotice(undefined) } })
             return
           } catch (fallbackError) {
             cause = fallbackError
@@ -256,7 +257,7 @@ export function EmployeeFocusMode({ world, employee, profile, entity, collaborat
       onStart: () => { setVoiceBusy(false); setSpeaking(true) },
       onEnd: () => {
         streamPendingRef.current = Math.max(0, streamPendingRef.current - 1)
-        if (streamCompleteRef.current && streamPendingRef.current === 0) setSpeaking(false)
+        if (streamCompleteRef.current && streamPendingRef.current === 0) { setSpeaking(false); setVoiceNotice(undefined) }
       },
       })
     }).catch((cause: unknown) => {
