@@ -2,6 +2,7 @@ import { createRequire } from 'node:module'
 import { join } from 'node:path'
 
 import type { AudioChunk, TextToSpeechCapabilities, TextToSpeechProvider, TtsRequest, VoiceRuntimeState } from '@dsh-cyber/contracts'
+import { AsyncQueue } from '../async-queue.js'
 
 interface SherpaModule {
   OfflineTts: { createAsync(config: unknown): Promise<SherpaTts> }
@@ -143,46 +144,6 @@ export class SherpaKokoroTtsProvider implements TextToSpeechProvider {
 
 function chunk(sequence: number, pcm: Float32Array, sampleRate: number, final: boolean): AudioChunk {
   return { sequence, pcm, sampleRate, durationMs: pcm.length / sampleRate * 1000, final }
-}
-
-class AsyncQueue<T> implements AsyncIterable<T> {
-  #items: T[] = []
-  #waiting: Array<{ resolve(value: IteratorResult<T>): void; reject(error: unknown): void }> = []
-  #closed = false
-  #error: unknown
-
-  push(value: T): void {
-    if (this.#closed) return
-    const waiter = this.#waiting.shift()
-    if (waiter !== undefined) waiter.resolve({ value, done: false })
-    else this.#items.push(value)
-  }
-
-  close(): void {
-    if (this.#closed) return
-    this.#closed = true
-    for (const waiter of this.#waiting.splice(0)) waiter.resolve({ value: undefined, done: true })
-  }
-
-  fail(error: unknown): void {
-    if (this.#closed) return
-    this.#items = []
-    this.#error = error
-    this.#closed = true
-    for (const waiter of this.#waiting.splice(0)) waiter.reject(error)
-  }
-
-  [Symbol.asyncIterator](): AsyncIterator<T> {
-    return {
-      next: async () => {
-        const value = this.#items.shift()
-        if (value !== undefined) return { value, done: false }
-        if (this.#error !== undefined) throw this.#error
-        if (this.#closed) return { value: undefined, done: true }
-        return new Promise<IteratorResult<T>>((resolve, reject) => this.#waiting.push({ resolve, reject }))
-      },
-    }
-  }
 }
 
 function abortError(message: string): Error {

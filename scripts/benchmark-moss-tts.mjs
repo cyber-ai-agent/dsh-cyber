@@ -29,12 +29,23 @@ for (const sample of samples) {
     const startedAt = performance.now()
     let firstAudioMs
     let durationMs = 0
+    let audioChunks = 0
+    let lastArrivalMs
+    let previousChunkDurationMs = 0
+    let maxPotentialStarvationMs = 0
     for await (const chunk of provider.synthesize({ requestId: crypto.randomUUID(), text: sample.text, voiceId: 'moss:Junhao', speed: 1 })) {
-      firstAudioMs ??= performance.now() - startedAt
+      if ((chunk.pcm?.length ?? 0) > 0) {
+        const arrivalMs = performance.now() - startedAt
+        firstAudioMs ??= arrivalMs
+        if (lastArrivalMs !== undefined) maxPotentialStarvationMs = Math.max(maxPotentialStarvationMs, arrivalMs - lastArrivalMs - previousChunkDurationMs)
+        lastArrivalMs = arrivalMs
+        previousChunkDurationMs = chunk.durationMs
+        audioChunks += 1
+      }
       durationMs += chunk.durationMs
     }
     const elapsedMs = performance.now() - startedAt
-    results.push({ kind: sample.kind, iteration, firstAudioMs: firstAudioMs ?? elapsedMs, elapsedMs, audioDurationMs: durationMs, realtimeFactor: elapsedMs / durationMs })
+    results.push({ kind: sample.kind, iteration, audioChunks, maxPotentialStarvationMs, firstAudioMs: firstAudioMs ?? elapsedMs, elapsedMs, audioDurationMs: durationMs, realtimeFactor: elapsedMs / durationMs })
   }
 }
 const memoryMb = await childMemoryMb(provider.processId)
@@ -43,16 +54,26 @@ const measurementElapsedMs = performance.now() - measurementStartedAt
 const cpuTimeMs = cpuStartedMs === undefined || cpuFinishedMs === undefined ? undefined : Math.max(0, cpuFinishedMs - cpuStartedMs)
 const logicalCpuCount = availableParallelism()
 const cpuPercent = cpuTimeMs === undefined ? undefined : cpuTimeMs / measurementElapsedMs * 100
+const firstAudioMs = distribution(results.map((item) => item.firstAudioMs))
+const maxPotentialStarvationMs = distribution(results.map((item) => item.maxPotentialStarvationMs))
+const realtimeFactor = distribution(results.map((item) => item.realtimeFactor))
+const gates = {
+  firstAudioP95Under800Ms: firstAudioMs.p95 < 800,
+  realtimeFactorP95UnderOne: realtimeFactor.p95 < 1,
+  streamedEveryRequest: results.every((item) => item.audioChunks > 1),
+  starvationP95Under80Ms: maxPotentialStarvationMs.p95 < 80,
+  memoryUnder2048Mb: memoryMb === undefined ? undefined : memoryMb < 2_048,
+}
 const output = {
   provider: 'moss-tts-nano-100m-onnx', device: `${process.platform}-${process.arch}-cpu`, coldStartMs,
-  firstAudioMs: distribution(results.map((item) => item.firstAudioMs)),
-  realtimeFactor: distribution(results.map((item) => item.realtimeFactor)),
+  firstAudioMs, maxPotentialStarvationMs, realtimeFactor,
   memoryMb, cpuTimeMs, cpuPercent, logicalCpuCount,
   cpuMachinePercent: cpuPercent === undefined ? undefined : cpuPercent / logicalCpuCount,
-  blocksMainThread: false, results,
+  blocksMainThread: false, gates, results,
 }
 await provider.dispose()
 process.stdout.write(`${JSON.stringify(output, null, 2)}\n`)
+if (Object.values(gates).some((value) => value === false)) process.exitCode = 1
 
 function distribution(values) { return { p50: percentile(values, 0.5), p95: percentile(values, 0.95) } }
 function percentile(values, ratio) { const ordered = [...values].sort((a, b) => a - b); return ordered[Math.min(ordered.length - 1, Math.ceil(ordered.length * ratio) - 1)] }
