@@ -24,6 +24,7 @@
     "stt:install": "node scripts/install-local-stt.mjs",
     "voice:install": "pnpm tts:install && pnpm stt:install",
     "voice:benchmark": "node scripts/benchmark-voice.mjs",
+    "voice:benchmark:moss": "node scripts/benchmark-moss-tts.mjs",
     "voice:verify-loop": "node scripts/verify-local-voice-loop.mjs",
     "voice:verify-websocket": "node scripts/verify-voice-websocket.mjs",
     "dsh-cyber": "node packages/cli/lib/bin.js"

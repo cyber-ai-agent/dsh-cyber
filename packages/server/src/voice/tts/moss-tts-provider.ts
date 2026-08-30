@@ -25,6 +25,7 @@ export class MossTtsProvider implements TextToSpeechProvider {
 
   get state(): VoiceRuntimeState { return this.#state }
   get voices(): readonly string[] { return this.#voices }
+  get processId(): number | undefined { return this.#process?.pid }
 
   async prepare(): Promise<void> {
     await this.#ensureProcess()
