@@ -54,16 +54,40 @@ export async function playKokoroSpeech(input: {
   }
 }
 
-export async function appendKokoroSpeech(input: {
+export async function playMossSpeech(input: {
   text: string
-  voiceId: string
+  voiceId?: string
   speed?: number
   onStatus(message: string): void
   onStart(): void
   onEnd(): void
 }): Promise<void> {
+  stopKokoroSpeech()
+  const chunks = splitKokoroSpeechText(input.text)
+  if (chunks.length === 0) throw new Error('没有可播报的文字内容')
+  for (let index = 0; index < chunks.length; index += 1) {
+    await appendKokoroSpeech({
+      ...input,
+      text: chunks[index]!,
+      voiceId: input.voiceId ?? 'moss:Junhao',
+      provider: 'moss',
+      onEnd: index === chunks.length - 1 ? input.onEnd : () => undefined,
+    })
+  }
+}
+
+export async function appendKokoroSpeech(input: {
+  text: string
+  voiceId: string
+  provider?: 'kokoro' | 'moss'
+  speed?: number
+  onStatus(message: string): void
+  onStart(): void
+  onEnd(): void
+}): Promise<void> {
+  const provider = input.provider ?? 'kokoro'
   const option = KOKORO_CHINESE_VOICES.find((voice) => voice.id === input.voiceId)
-  if (option === undefined) throw new Error('所选本地中文声音不存在')
+  if (provider === 'kokoro' && option === undefined) throw new Error('所选本地中文声音不存在')
   const context = getAudioContext()
   const resumePromise = context.state === 'suspended' ? context.resume() : Promise.resolve()
   const requestGeneration = generation
@@ -76,7 +100,7 @@ export async function appendKokoroSpeech(input: {
     const response = await fetch('/api/local-tts/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: input.text, speakerId: option.speakerId, speed: normalizeSpeed(input.speed) }),
+      body: JSON.stringify({ text: input.text, speakerId: option?.speakerId ?? 58, speed: normalizeSpeed(input.speed), provider, voiceId: input.voiceId }),
       signal: controller.signal,
     })
     if (!response.ok) {
@@ -96,11 +120,13 @@ export async function appendKokoroSpeech(input: {
       buffer.getChannelData(0).set(frame.pcm)
       const source = context.createBufferSource()
       source.buffer = buffer
+      const playbackRate = provider === 'moss' ? normalizeSpeed(input.speed) : 1
+      source.playbackRate.value = playbackRate
       source.connect(getAnalyser(context))
       const startAt = Math.max(context.currentTime + 0.02, nextStartAt)
-      nextStartAt = startAt + buffer.duration
+      nextStartAt = startAt + buffer.duration / playbackRate
       playbackCursor = nextStartAt
-      totalDuration += buffer.duration
+      totalDuration += buffer.duration / playbackRate
       activeSources.add(source)
       source.onended = () => {
         activeSources.delete(source)

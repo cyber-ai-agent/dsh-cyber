@@ -1,7 +1,7 @@
 export type VoiceRuntimeState = 'cold' | 'warming' | 'ready' | 'busy' | 'failed'
 export type VoicePerformanceProfile = 'fast' | 'balanced' | 'quality'
 export type VoicePrewarmPolicy = 'off' | 'on-demand' | 'smart'
-export type VoiceProviderKind = 'system' | 'kokoro' | 'cosyvoice' | 'paraformer' | 'sensevoice' | 'fun-asr'
+export type VoiceProviderKind = 'system' | 'kokoro' | 'moss' | 'qwen-tts' | 'dots-tts' | 'cosyvoice' | 'paraformer' | 'sensevoice' | 'fun-asr'
 
 export interface TranscriptEvent {
   sessionId: string
@@ -98,7 +98,14 @@ export interface VoiceModelDescriptor {
   version: string
   license: string
   byteLength: number
-  state: 'not-installed' | 'downloading' | 'installed' | 'loading' | 'ready' | 'error'
+  state: 'not-installed' | 'downloading' | 'verifying' | 'installed' | 'loading' | 'ready' | 'error' | 'unavailable'
+  tier?: 'default' | 'fast' | 'advanced'
+  summary?: string
+  recommended?: boolean
+  runtime?: 'system' | 'onnx-cpu' | 'python-cuda' | 'external'
+  languages?: string[]
+  progress?: { phase: 'downloading' | 'verifying' | 'installing'; completedBytes: number; totalBytes: number }
+  requirements?: string[]
   installedPath?: string
   sha256?: string
   error?: string
@@ -118,7 +125,7 @@ export interface VoicePerformanceMetrics {
 }
 
 export interface EmployeeVoiceProfile {
-  provider: 'auto' | 'system' | 'kokoro' | 'cosyvoice'
+  provider: 'auto' | 'system' | 'kokoro' | 'moss' | 'qwen-tts' | 'dots-tts' | 'cosyvoice'
   voiceId: string
   speed: number
   pitch: number

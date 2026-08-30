@@ -9,7 +9,7 @@ export function resolveEmployeeVoiceProfile(
   gender: CharacterGender = 'neutral',
   profile?: EmployeeVoiceProfile,
 ): EmployeeVoiceProfile {
-  const voiceId = profile?.voiceId && (profile.voiceId.startsWith('system:') || KOKORO_CHINESE_VOICES.some((voice) => voice.id === profile.voiceId)) && voiceMatchesGender(profile.voiceId, gender)
+  const voiceId = profile?.voiceId && (profile.voiceId.startsWith('system:') || profile.voiceId.startsWith('moss:') || KOKORO_CHINESE_VOICES.some((voice) => voice.id === profile.voiceId)) && voiceMatchesGender(profile.voiceId, gender)
     ? profile.voiceId
     : stableVoiceId(employeeId, gender)
   return {

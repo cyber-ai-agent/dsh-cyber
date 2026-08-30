@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -35,6 +35,12 @@ describe('LocalTtsAssetService', () => {
 
     const service = new LocalTtsAssetService(stateRoot)
     await expect(service.status()).resolves.toMatchObject({ installed: true, engine: 'sherpa-onnx', voiceCount: 100, byteLength: 5 })
+    await expect(service.models()).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'moss-tts-nano-100m-onnx', provider: 'moss', tier: 'default', recommended: true, state: 'not-installed' }),
+      expect.objectContaining({ id: 'kokoro-int8-multi-lang-v1_1', provider: 'kokoro', tier: 'fast', state: 'ready' }),
+      expect.objectContaining({ id: 'qwen3-tts-12hz-0.6b', provider: 'qwen-tts', tier: 'advanced', state: 'unavailable' }),
+      expect.objectContaining({ id: 'dots-tts-soar-2b', provider: 'dots-tts', tier: 'advanced', state: 'unavailable' }),
+    ]))
   })
 
   it('fails closed for an unpinned or incomplete voice runtime', async () => {
@@ -59,5 +65,17 @@ describe('LocalTtsAssetService', () => {
     const service = new LocalTtsAssetService(await mkdtemp(join(tmpdir(), 'dsh-cyber-local-tts-input-')))
     await expect(service.synthesize({ text: '', speakerId: 58, speed: 1 })).rejects.toMatchObject({ code: 'local_tts_text_invalid' })
     await expect(service.synthesize({ text: '你好', speakerId: 2, speed: 1 })).rejects.toMatchObject({ code: 'local_tts_voice_invalid' })
+  })
+
+  it('removes both installed MOSS files and the verified download cache', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-moss-remove-'))
+    const installed = join(stateRoot, 'tts', 'sherpa', 'models', 'moss-tts-nano-100m-onnx')
+    const cached = join(stateRoot, 'tts', 'sherpa', 'models', '.downloads', 'moss-tts-nano-100m-onnx')
+    await mkdir(installed, { recursive: true }); await mkdir(cached, { recursive: true })
+    await writeFile(join(installed, 'manifest.json'), '{}'); await writeFile(join(cached, 'cached.bin'), 'cached')
+    const service = new LocalTtsAssetService(stateRoot)
+    await service.removeModel('moss-tts-nano-100m-onnx')
+    await expect(stat(installed)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(cached)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
