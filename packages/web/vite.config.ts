@@ -17,6 +17,7 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (id.includes('@phosphor-icons')) return 'phosphor-icons'
+          if (id.includes('/three/') || id.includes('three.module') || id.includes('@pixiv/three-vrm')) return 'vrm-runtime'
           return undefined
         },
       },

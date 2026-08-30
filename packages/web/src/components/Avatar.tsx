@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react'
-import type { WorldCharacterRole } from '@dsh-cyber/contracts'
+import type { CharacterAvatarRendererKind, WorldCharacterRole } from '@dsh-cyber/contracts'
 
 interface AvatarProps {
   index: number
@@ -7,6 +7,8 @@ interface AvatarProps {
   label: string
   status?: string
   authorityRole?: WorldCharacterRole | undefined
+  assetUrl?: string | undefined
+  rendererKind?: CharacterAvatarRendererKind | undefined
 }
 
 export interface GroupAvatarParticipant {
@@ -14,9 +16,11 @@ export interface GroupAvatarParticipant {
   avatarIndex: number
   displayName: string
   authorityRole?: WorldCharacterRole | undefined
+  avatarAssetUrl?: string | undefined
+  avatarProfile?: { rendererKind: CharacterAvatarRendererKind } | undefined
 }
 
-export function Avatar({ index, size = 'md', label, status, authorityRole }: AvatarProps) {
+export function Avatar({ index, size = 'md', label, status, authorityRole, assetUrl, rendererKind }: AvatarProps) {
   const column = index % 4
   const row = Math.floor(index / 4)
   const style = {
@@ -24,8 +28,10 @@ export function Avatar({ index, size = 'md', label, status, authorityRole }: Ava
     '--avatar-y': `${row * 100}%`,
   } as CSSProperties
   void authorityRole
+  const customImage = rendererKind === 'image-2d' && assetUrl !== undefined
   return (
-    <span className={`avatar avatar--${size}`} style={style} aria-label={label} role="img">
+    <span className={`avatar avatar--${size}${customImage ? ' avatar--custom' : ''}`} style={style} aria-label={label} role="img">
+      {customImage ? <img src={assetUrl} alt="" aria-hidden="true" /> : null}
       {status === undefined ? null : <span className={`avatar__status status--${status}`} />}
     </span>
   )
@@ -42,7 +48,7 @@ export function GroupAvatar({ participants, size = 'sm' }: { participants: Group
     <span className={`group-avatar group-avatar--${size} ${countClass}`} role="img" aria-label={`群聊头像：${names}`}>
       {tiles.map((participant) => participant === undefined
         ? <span key="more" className="group-avatar__more" aria-hidden="true">+{overflowCount}</span>
-        : <span key={participant.id} className="group-avatar__tile" aria-hidden="true"><Avatar index={participant.avatarIndex} size="sm" label={participant.displayName} authorityRole={participant.authorityRole} /></span>)}
+        : <span key={participant.id} className="group-avatar__tile" aria-hidden="true"><Avatar index={participant.avatarIndex} size="sm" label={participant.displayName} authorityRole={participant.authorityRole} assetUrl={participant.avatarAssetUrl} rendererKind={participant.avatarProfile?.rendererKind} /></span>)}
     </span>
   )
 }

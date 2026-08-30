@@ -16,17 +16,20 @@ import type {
   ApprovalRequestView,
   ApprovalScope,
   ChatAttachment,
+  CharacterAvatarAsset,
   CyberMarketKind,
   CyberMarketPackage,
   CyberPackageManifest,
   EmployeeBlueprint,
   EmployeeDossier,
   EmployeeInstance,
+  EmployeeProfile,
   EmployeeRevision,
   InstalledPackage,
   InstalledPluginCommand,
   JsonObject,
   LocalAssetMimeType,
+  LocalAsset,
   ModelAssignment,
   ModelInteractionLog,
   ModelInteractionLogFilter,
@@ -94,6 +97,7 @@ import type { ConversationIntent, CyberEmployee, DockTab, SessionParticipantMap 
 import type { EmployeeSettingsSection } from './components/EmployeeManagementDialog.js'
 import { ConversationHostAccessDialog, type ConversationHostAccessRequest } from './components/ConversationHostAccessDialog.js'
 import { worldExperience } from './world-experience.js'
+import { characterAvatarUrl, readCharacterAvatarProfile } from './features/world/character-avatar-profile.js'
 import { subscribeWorldLive } from './world-live-client.js'
 
 const SettingsDialog = lazy(async () => ({ default: (await import('./components/SettingsDialog.js')).SettingsDialog }))
@@ -135,6 +139,12 @@ interface RuntimeEnvelope {
   workTurnId: string
   agentRunId: string
   event: AgentRuntimeEvent
+}
+
+interface AvatarUploadResult {
+  asset: LocalAsset
+  avatarAsset: CharacterAvatarAsset
+  url: string
 }
 
 export default function App() {
@@ -1392,6 +1402,80 @@ export default function App() {
     }
   }, [dossiers, managingEmployee])
 
+  const applyAvatarProfileResult = useCallback((employeeId: string, profile: EmployeeProfile, persistedEmployee?: EmployeeInstance) => {
+    setDossiers((current) => {
+      const dossier = current[employeeId]
+      if (dossier === undefined) return current
+      const employee = persistedEmployee ?? dossier.employee
+      return {
+        ...current,
+        [employeeId]: {
+          ...dossier,
+          employee,
+          profile,
+          profileHistory: [profile, ...(dossier.profileHistory ?? []).filter((item) => item.revision !== profile.revision)].sort((left, right) => right.revision - left.revision),
+        },
+      }
+    })
+    setEmployees((current) => current.map((employee) => employee.id === employeeId ? employeeWithProfile(employee, profile, persistedEmployee) : employee))
+    setWorldRuntimeRevision((value) => value + 1)
+  }, [])
+
+  const uploadEmployeeAvatar = useCallback(async (file: File): Promise<AvatarUploadResult> => {
+    if (managingEmployee === undefined) throw new Error('请先选择角色')
+    if (demoMode) throw new Error('交互演示不会写入本地形象，请在真实工作区中使用')
+    const mimeType = avatarAssetMimeType(file)
+    return api<AvatarUploadResult>(`/api/employees/${encodeURIComponent(managingEmployee.id)}/avatar-assets`, {
+      method: 'POST',
+      body: JSON.stringify({ name: file.name, mimeType, dataBase64: await fileToBase64(file) }),
+    })
+  }, [managingEmployee])
+
+  const publishEmployeeAvatar = useCallback(async (assetId: string, fallbackAvatarIndex: number, expectedProfileRevision: number) => {
+    if (managingEmployee === undefined) return
+    setSavingEmployee(true)
+    setError(undefined)
+    try {
+      const result = await api<{ profile: EmployeeProfile; employee: EmployeeInstance }>(`/api/employees/${encodeURIComponent(managingEmployee.id)}/avatar-assets/${encodeURIComponent(assetId)}/publish`, {
+        method: 'POST', body: JSON.stringify({ fallbackAvatarIndex, expectedProfileRevision }),
+      })
+      applyAvatarProfileResult(managingEmployee.id, result.profile, result.employee)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '角色形象发布失败')
+      throw cause
+    } finally { setSavingEmployee(false) }
+  }, [applyAvatarProfileResult, managingEmployee])
+
+  const rollbackEmployeeAvatar = useCallback(async (targetRevision: number, expectedProfileRevision: number) => {
+    if (managingEmployee === undefined) return
+    setSavingEmployee(true)
+    setError(undefined)
+    try {
+      const result = await api<{ profile: EmployeeProfile; employee: EmployeeInstance }>(`/api/employees/${encodeURIComponent(managingEmployee.id)}/avatar-profile/rollback`, {
+        method: 'POST', body: JSON.stringify({ targetRevision, expectedProfileRevision }),
+      })
+      applyAvatarProfileResult(managingEmployee.id, result.profile, result.employee)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '角色形象恢复失败')
+      throw cause
+    } finally { setSavingEmployee(false) }
+  }, [applyAvatarProfileResult, managingEmployee])
+
+  const resetEmployeeAvatar = useCallback(async (fallbackAvatarIndex: number, expectedProfileRevision: number) => {
+    if (managingEmployee === undefined) return
+    setSavingEmployee(true)
+    setError(undefined)
+    try {
+      const result = await api<{ profile: EmployeeProfile; employee: EmployeeInstance }>(`/api/employees/${encodeURIComponent(managingEmployee.id)}/avatar-profile/reset`, {
+        method: 'POST', body: JSON.stringify({ fallbackAvatarIndex, expectedProfileRevision }),
+      })
+      applyAvatarProfileResult(managingEmployee.id, result.profile, result.employee)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '内置形象恢复失败')
+      throw cause
+    } finally { setSavingEmployee(false) }
+  }, [applyAvatarProfileResult, managingEmployee])
+
   const archiveEmployee = useCallback(async () => {
     if (managingEmployee === undefined) return
     setSavingEmployee(true)
@@ -2520,6 +2604,7 @@ export default function App() {
         <Suspense fallback={<div className="dialog-loading" role="status">正在打开角色设置…</div>}><EmployeeManagementDialog
           employee={managingEmployee}
           {...(managingDossier?.profile === undefined ? {} : { profile: managingDossier.profile })}
+          profileHistory={managingDossier?.profileHistory ?? []}
           {...(managingRevision === undefined ? {} : { currentRevision: managingRevision })}
           models={models}
           avatarIndex={managingEmployee.avatarIndex}
@@ -2528,6 +2613,10 @@ export default function App() {
           onClose={() => setManagingEmployeeId(undefined)}
           onRevise={reviseEmployee}
           onUpdateProfile={updateEmployeeProfile}
+          onUploadAvatar={uploadEmployeeAvatar}
+          onPublishAvatar={publishEmployeeAvatar}
+          onRollbackAvatar={rollbackEmployeeAvatar}
+          onResetAvatar={resetEmployeeAvatar}
           onArchive={archiveEmployee}
         /></Suspense>
       ) : null}
@@ -2742,9 +2831,11 @@ function toCyberEmployee(
   dossier?: EmployeeDossier,
   authority?: WorldCharacterAuthority,
 ): CyberEmployee {
+  const avatarProfile = readCharacterAvatarProfile(dossier?.profile?.appearance.digitalHumanAvatar)
   return {
     ...employee,
     avatarIndex: profileAvatarIndex(dossier) ?? stableAvatar(employee.id, index),
+    ...(avatarProfile === undefined ? {} : { avatarProfile, avatarAssetUrl: characterAvatarUrl(avatarProfile)! }),
     summary: `${employee.role}独立 Agent，拥有自己的会话、记忆与成长记录。`,
     currentActivity: statusActivity(employee),
     ...(authority === undefined ? {} : {
@@ -2799,6 +2890,22 @@ function isWorldCharacterAuthority(value: unknown): value is WorldCharacterAutho
 function profileAvatarIndex(dossier?: EmployeeDossier): number | undefined {
   const value = dossier?.profile?.appearance.avatarIndex
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value < 8 ? value : undefined
+}
+
+function employeeWithProfile(employee: CyberEmployee, profile: EmployeeProfile, persistedEmployee?: EmployeeInstance): CyberEmployee {
+  const avatarIndex = typeof profile.appearance.avatarIndex === 'number' && Number.isInteger(profile.appearance.avatarIndex)
+    ? Math.max(0, Math.min(7, profile.appearance.avatarIndex))
+    : employee.avatarIndex
+  const avatarProfile = readCharacterAvatarProfile(profile.appearance.digitalHumanAvatar)
+  const next: CyberEmployee = { ...employee, ...(persistedEmployee ?? {}), avatarIndex }
+  if (avatarProfile === undefined) {
+    delete next.avatarProfile
+    delete next.avatarAssetUrl
+  } else {
+    next.avatarProfile = avatarProfile
+    next.avatarAssetUrl = characterAvatarUrl(avatarProfile)!
+  }
+  return next
 }
 
 function stableAvatar(id: string, fallback: number): number {
@@ -2981,6 +3088,17 @@ function attachmentMimeType(file: File): LocalAssetMimeType {
   const inferred = extension === undefined ? undefined : byExtension[extension]
   if (inferred === undefined) throw new Error('仅支持 PNG、JPEG、WebP、TXT、Markdown、JSON 和 PDF 附件。')
   return inferred
+}
+
+function avatarAssetMimeType(file: File): Extract<LocalAssetMimeType, 'image/png' | 'image/jpeg' | 'image/webp' | 'model/gltf-binary'> {
+  const type = file.type.toLowerCase()
+  if (type === 'image/png' || type === 'image/jpeg' || type === 'image/webp' || type === 'model/gltf-binary') return type
+  const extension = file.name.toLowerCase().split('.').pop()
+  if (extension === 'vrm' || extension === 'glb') return 'model/gltf-binary'
+  if (extension === 'png') return 'image/png'
+  if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg'
+  if (extension === 'webp') return 'image/webp'
+  throw new Error('仅支持 PNG、JPEG、WebP 图片或自包含 VRM/GLB 文件')
 }
 
 function serializableAttachments(attachments: ChatAttachment[]): JsonObject[] {

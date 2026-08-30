@@ -28,6 +28,15 @@ export function motionCueForState(state: DigitalHumanVisualState): DigitalHumanM
   return { expression: 'neutral', gesture: 'breathe' }
 }
 
+export function visualStateForEntity(entity: import('@dsh-cyber/contracts').WorldRuntimeEntityState | undefined, connected: boolean, speaking = false): DigitalHumanVisualState {
+  if (!connected || entity?.activity === 'blocked' || entity?.status === 'blocked') return 'failed'
+  if (speaking) return 'speaking'
+  if (/审批|approval|等待确认/iu.test(entity?.activityLabel ?? '')) return 'approval'
+  if (entity?.activity === 'thinking' || entity?.activity === 'talking') return 'thinking'
+  if (entity?.activity === 'working' || entity?.activity === 'walking' || entity?.activity === 'meeting') return 'executing'
+  return 'idle'
+}
+
 /** Keep local TTS useful by removing markup, code blocks and machine URLs. */
 export function speechTextFromMessage(content: string, limit = 800): string {
   const normalized = content

@@ -1,7 +1,7 @@
 import type { WorldCharacterAuthority } from './world-authority.js'
 import type { UiLocale } from './locales.js'
 
-export const CYBER_SCHEMA_VERSION = 34 as const
+export const CYBER_SCHEMA_VERSION = 35 as const
 
 export * from './runtime-access.js'
 export * from './locales.js'
@@ -600,6 +600,8 @@ export interface EmployeeRelationship {
 export interface EmployeeDossier {
   employee: EmployeeInstance
   profile?: EmployeeProfile
+  /** Newest first; used for explicit profile/avatar rollback. */
+  profileHistory?: EmployeeProfile[]
   revisions: EmployeeRevision[]
   skills: EmployeeSkill[]
   evidence: SkillEvidence[]
@@ -742,11 +744,12 @@ export interface ModelAssignment {
   updatedAt: IsoTimestamp
 }
 
-export type LocalAssetKind = 'background' | 'attachment'
+export type LocalAssetKind = 'background' | 'attachment' | 'avatar'
 export type LocalAssetMimeType =
   | 'image/png'
   | 'image/jpeg'
   | 'image/webp'
+  | 'model/gltf-binary'
   | 'text/plain'
   | 'text/markdown'
   | 'application/json'
@@ -761,6 +764,35 @@ export interface LocalAsset {
   relativePath: string
   byteLength: number
   createdAt: IsoTimestamp
+}
+
+export type CharacterAvatarRendererKind = 'image-2d' | 'vrm-3d'
+export type CharacterAvatarAssetRendererKind = CharacterAvatarRendererKind | 'mesh-preview'
+
+export interface CharacterAvatarAsset {
+  assetId: string
+  workspaceId: string
+  worldId: string
+  employeeId: string
+  rendererKind: CharacterAvatarAssetRendererKind
+  originalName: string
+  validation: JsonObject
+  createdAt: IsoTimestamp
+}
+
+export interface CharacterAvatarProfile {
+  schemaVersion: 1
+  /** Stable identity shared by portrait, map sprite and focus renderer. */
+  identityId: string
+  rendererKind: CharacterAvatarRendererKind
+  assetId: string
+  portraitAssetId?: string
+  mapThumbnailAssetId?: string
+  halfBodyThumbnailAssetId?: string
+  sourceName: string
+  fallbackAvatarIndex: number
+  capabilities: Array<'portrait' | 'full-body' | 'expression' | 'viseme' | 'gesture' | 'look-at'>
+  publishedAt: IsoTimestamp
 }
 
 export interface ChatAttachment {

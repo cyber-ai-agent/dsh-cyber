@@ -155,7 +155,7 @@ export function MessageHistoryDialog({ demoMode, session, employees, demoMessage
                   const employee = employees.find((item) => item.id === message.senderId)
                   const owner = message.senderKind === 'owner'
                   return <li key={message.id} className={owner ? 'message-history-item message-history-item--owner' : 'message-history-item'}>
-                    {owner ? <span className="message-history-item__avatar message-history-item__avatar--owner" aria-label="我的头像"><UserCircle size={24} weight="fill" /></span> : <Avatar index={employee?.avatarIndex ?? 7} size="sm" label={employee?.displayName ?? '角色'} authorityRole={employee?.authorityRole} />}
+                    {owner ? <span className="message-history-item__avatar message-history-item__avatar--owner" aria-label="我的头像"><UserCircle size={24} weight="fill" /></span> : <Avatar index={employee?.avatarIndex ?? 7} size="sm" label={employee?.displayName ?? '角色'} authorityRole={employee?.authorityRole} assetUrl={employee?.avatarAssetUrl} rendererKind={employee?.avatarProfile?.rendererKind} />}
                     <div className="message-history-item__content"><div><strong>{owner ? '我' : employee?.displayName ?? '角色'}{owner ? null : <AuthorityBadge role={employee?.authorityRole} />}</strong><time>{formatTime(message.createdAt)}</time></div><p>{highlightMessage(message.content, search)}</p></div>
                   </li>
                 })}

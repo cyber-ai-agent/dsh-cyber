@@ -1,4 +1,5 @@
 import type {
+  CharacterAvatarProfile,
   EmployeeDossier,
   EmployeeInstance,
   ModelProfile,
@@ -24,6 +25,8 @@ export type SessionParticipantMap = Record<string, string[]>
 
 export interface CyberEmployee extends EmployeeInstance {
   avatarIndex: number
+  avatarProfile?: CharacterAvatarProfile | undefined
+  avatarAssetUrl?: string | undefined
   summary: string
   currentActivity: string
   /** Compact world-scoped authority projection used by every visual surface. */

@@ -46,6 +46,7 @@ export function EmployeeDossier({ dossier, employees, avatarIndex, world, onDire
   const identityLabel = experience.personLabel === '角色' ? '角色' : `独立${experience.personLabel}`
   const verified = dossier.skills.filter((skill) => skill.status === 'verified').length
   const profile = dossier.profile
+  const visualEmployee = employees.find((employee) => employee.id === dossier.employee.id)
 
   return (
     <div className="dossier">
@@ -55,7 +56,7 @@ export function EmployeeDossier({ dossier, employees, avatarIndex, world, onDire
       </div>
       <header className="dossier-hero">
         <button className="avatar-edit-button" type="button" aria-label={`修改${dossier.employee.displayName}的名字和头像`} onClick={onManage}>
-          <Avatar index={avatarIndex} size="lg" label={dossier.employee.displayName} status={dossier.employee.status} authorityRole={employees.find((employee) => employee.id === dossier.employee.id)?.authorityRole} />
+          <Avatar index={avatarIndex} size="lg" label={dossier.employee.displayName} status={dossier.employee.status} authorityRole={visualEmployee?.authorityRole} assetUrl={visualEmployee?.avatarAssetUrl} rendererKind={visualEmployee?.avatarProfile?.rendererKind} />
         </button>
         <div className="dossier-hero__identity">
           <h2>{dossier.employee.displayName}<AuthorityBadge role={employees.find((employee) => employee.id === dossier.employee.id)?.authorityRole} size="md" /></h2>
@@ -172,7 +173,7 @@ export function EmployeeDossier({ dossier, employees, avatarIndex, world, onDire
               const colleague = employees.find((employee) => employee.id === relationship.colleagueId)
               return (
                 <article key={relationship.colleagueId}>
-                  <Avatar index={colleague?.avatarIndex ?? 7} label={colleague?.displayName ?? '关联角色'} size="sm" authorityRole={colleague?.authorityRole} />
+                  <Avatar index={colleague?.avatarIndex ?? 7} label={colleague?.displayName ?? '关联角色'} size="sm" authorityRole={colleague?.authorityRole} assetUrl={colleague?.avatarAssetUrl} rendererKind={colleague?.avatarProfile?.rendererKind} />
                   <div><strong>{colleague?.displayName ?? relationship.colleagueId}<AuthorityBadge role={colleague?.authorityRole} /></strong><span>{colleague?.role ?? '关联角色'}</span></div>
                   <dl>
                     <div><dt>{roleplay ? '互动' : '协作'}</dt><dd>{relationship.collaborationCount}</dd></div>
