@@ -1,6 +1,7 @@
 import type { VRM } from '@pixiv/three-vrm'
 
 import { sampleSpeechActivity, type VisemeTimeline } from '../motion/VisemeTimeline.js'
+import { currentSpeechAmplitude } from '../speech/speech-playback-state.js'
 
 export class VrmSpeechController {
   readonly #vrm: VRM
@@ -22,6 +23,6 @@ export class VrmSpeechController {
       if (frame !== undefined && frame.viseme !== 'neutral') manager.setValue(frame.viseme, frame.weight)
       return
     }
-    manager.setValue('aa', sampleSpeechActivity(time, speaking))
+    manager.setValue('aa', sampleSpeechActivity(time, speaking, currentSpeechAmplitude()))
   }
 }

@@ -13,6 +13,8 @@ describe('digital human renderer registry', () => {
     const profile: CharacterAvatarProfile = { schemaVersion: 1, identityId: 'employee-1', rendererKind: 'vrm-3d', assetId: 'avatar-vrm', sourceName: 'employee.vrm', fallbackAvatarIndex: 2, capabilities: ['full-body'], publishedAt: '2026-08-30T00:00:00.000Z' }
     const employee = { id: 'employee-1', avatarIndex: 2, avatarProfile: profile, avatarAssetUrl: '/api/assets/avatar-vrm' } as CyberEmployee
     expect(selectRenderer(employee, 'balanced').kind).toBe('vrm-3d')
+    expect(selectRenderer(employee, 'balanced', 'sprite-2d').kind).toBe('sprite-2d')
+    expect(selectRenderer(employee, 'balanced', 'vrm-3d').kind).toBe('vrm-3d')
     expect(selectRenderer(employee, 'static').kind).toBe('sprite-2d')
     expect(selectRenderer({ ...employee, avatarAssetUrl: undefined }, 'high').kind).toBe('sprite-2d')
     expect(registeredRendererIds()).toEqual(['dsh.vrm-3d', 'dsh.sprite-2d'])

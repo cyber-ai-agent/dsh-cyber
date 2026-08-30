@@ -368,9 +368,12 @@ DSH Cyber 再在上层加入：**世界、具身角色、长期记忆、关系�
 git clone https://github.com/cyber-ai-agent/dsh-cyber.git
 cd dsh-cyber
 pnpm install
+pnpm voice:install
 pnpm build
 pnpm dsh-cyber web
 ```
+
+`pnpm voice:install` 会安装固定版本的 sherpa-onnx Voice Runtime：Kokoro 82M int8（100 个中文音色）、Streaming Paraformer int8 与 Silero VAD。模型保存在本机 `stateRoot`，由 Node Worker Thread 按需加载；麦克风 PCM、识别文本和回复文本不会发送给语音云服务。正式桌面安装包应在安装阶段执行同一安装器。模型属于可重新安装的运行时依赖，不进入普通用户数据备份。
 
 默认监听：
 

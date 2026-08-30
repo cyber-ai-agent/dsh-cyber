@@ -4,7 +4,7 @@
 
 DSH Cyber 的数字人不应绑定某一个 TTS、头像生成或 3D 供应商。核心只输出角色身份、真实运行状态、回复文本与一组标准化动作意图；2D 精灵、动态肖像、VRM 3D 和未来的供应商通过 Renderer/Generator Adapter 消费这些事实。
 
-当前实现已经落地本机语音播报、`expression + gesture` 动作合同、VRM 1.0 运行时和本地形象版本管理。用户可选择关闭、手动或自动播报，并从系统语音列表选择声音；自动模式只读取设置后新产生的最终回复，代码块和 URL 不会被朗读，内容不上传。2D Renderer 使用闭嘴/开口真实帧提供基础口部动作；VRM Renderer 在没有时间轴时使用语音活动度驱动 `aa`，并保留 `VisemeTimeline` 适配边界。
+当前实现已经落地本地 Voice Conversation、`expression + gesture` 动作合同、VRM 1.0 运行时和本地形象版本管理。中文 TTS 使用 sherpa-onnx Node Runtime + Kokoro 82M int8，提供 55 个女声与 45 个男声；STT 使用 Streaming Paraformer int8，Silero VAD 负责可靠分段，独立快速能量门负责 150ms 内 Barge-in。模型按需加载到 Worker Thread，不进入浏览器包或阻塞 Node 主循环。用户可选择关闭、手动或自动播报，配置按角色持久化；自动模式消费 `text.delta`，经 SentenceChunker 尽早生成首句。麦克风音频和回复内容默认不落盘、不上传。
 
 世界概览与数字人不再是两个 Tab。地图角色是入口：用户在 Overview 点击角色，地图镜头先聚焦，随后进入同一世界内的 Employee Focus；退出 Focus 时销毁 Three 资源并恢复地图。Focus 继承当前世界主题底图、角色、运行状态和最终回复，不创建默认“行动舱”或另一套事实源。
 
@@ -14,6 +14,7 @@ DSH Cyber 的数字人不应绑定某一个 TTS、头像生成或 3D 供应商�
 | --- | --- | --- | --- |
 | [pixiv/three-vrm](https://github.com/pixiv/three-vrm) + [VRM 1.0](https://github.com/vrm-c/vrm-specification/tree/master/specification/VRMC_vrm-1.0) | 浏览器 Three.js VRM 加载、Humanoid、LookAt、SpringBone、表情、口型和动画规范 | MIT；模型资产仍需逐个核对授权 | 作为首选 3D Renderer；按需加载，不进入世界核心 |
 | [TalkingHead](https://github.com/met4citizen/TalkingHead) | 浏览器实时 TTS、viseme 口型、表情、全身动作和 Mixamo 动画 | MIT；自定义模型必须具备兼容骨骼及 ARKit/Oculus 口型 blend shapes | 借鉴语音/viseme/动作队列，不直接把其云 TTS 写进核心 |
+| [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) + Kokoro v1.1 | Node 原生多线程、PCM 流、100 个中文音色、同一运行时可承载 STT/VAD | Apache-2.0；模型安装固定 revision 与 SHA-256 | 默认 Local Voice Runtime；浏览器只负责 AudioWorklet/Web Audio，不承载模型推理 |
 | [LivePortrait](https://github.com/KlingAIResearch/LivePortrait) | 单张肖像的姿态、眨眼、表情和视频驱动 | 主代码 MIT，但仓库明确说明自带 InsightFace 检测模型仅限非商业研究 | 只作为可选本地动态肖像 Adapter；商业构建必须替换检测器 |
 | [MediaPipe Face Landmarker](https://developers.google.com/edge/mediapipe/solutions/vision/face_landmarker/web_js) | 478 个面部点、52 个 blendshape、面部变换矩阵 | 示例代码 Apache-2.0；同步检测会阻塞主线程 | 用 Web Worker 运行，可用于用户主动开启的表情捕捉/驱动 |
 | [TripoSR](https://github.com/VAST-AI-Research/TripoSR) | 单图快速生成纹理网格 | 代码与权重 MIT；输出是通用 Mesh，不自动提供可靠的人形拓扑、骨骼、眼球和口型 blend shapes | 可做实验性 Mesh Generator，不能宣传为“一键可说话 3D 数字人” |
@@ -53,7 +54,8 @@ WebGL/Canvas/Video presentation
 ### V1（当前）
 
 - 真实状态驱动的呼吸、扫描、执行、审批、失败和说话动作。
-- 本机 TTS 支持关闭、手动与自动模式、多声音选择和按世界持久化；不上传回复、不朗读代码或 URL。
+- 本机 TTS 支持关闭、手动与自动模式、100 个内置中文音色、可用的系统中文声音和按角色持久化；不上传回复、不朗读代码或 URL。
+- 模型安装器固定模型 revision、文件大小与 SHA-256，保存到 `stateRoot/tts`；本地服务只暴露清单声明的模型文件。模型是可重装运行时依赖，不进入 Backup Bundle。
 - 透明双帧图集提供基础嘴部动作，并保证静态模式/减弱动态效果可停止动画。
 - Renderer-neutral 的表达与动作合同，为后续 2D/3D 复用。
 
@@ -77,6 +79,7 @@ WebGL/Canvas/Video presentation
 ## 性能门禁
 
 - 数字人模式的 3D/AI 依赖不得进入主首屏 chunk。
+- sherpa-onnx、Kokoro、Paraformer 与 Silero 模型只存在于本地 Node Voice Runtime；Web 首屏不得包含其 WASM、模型或预加载引用。Worker 只在 prepare/start 后创建。
 - 右侧 Dock 只允许一个重型 WebGL Renderer；进入 VRM Focus 前释放 Overview 的 Pixi Renderer，并用当前主题底图保持视觉连续，退出 Focus 时销毁 Three 的 RAF、Observer、Mixer、材质、纹理和上下文后恢复地图。
 - 目标为普通桌面 30 FPS、交互帧 P95 小于 50ms；低性能或不可见页面自动降到 15 FPS 或静态模式。
 - VRM/GLB 激活前检查压缩、纹理尺寸和顶点/材质预算；生成任务不得占用会话执行通道。
@@ -86,4 +89,5 @@ WebGL/Canvas/Video presentation
 - 主入口 JavaScript 约 299 kB，主 CSS 约 275 kB；相对引入 VRM 前只增加少量编排代码。
 - VRM Runtime 为约 916 kB 的独立懒加载 chunk（gzip 约 232 kB），只在硬件 WebGL 的 VRM Focus 或显式 3D 预览中下载。
 - 构建门禁会解析 `index.html`，若首屏预加载 Three/VRM 或懒加载 chunk 超过 950 kB 则失败。
+- 浏览器端移除了约 25 MB ONNX WASM 和 Transformers/Kokoro JS。当前实测：TTS 冷加载约 1.92s，短中文首音频约 0.77–0.86s，RTF P50 约 1.15；Streaming Paraformer 冷加载约 1.49s，测试音频首个 partial 计算约 53ms、Final 约 387ms；稳定语音到 Barge-in 事件约 64ms。
 - Playwright 覆盖 Overview → Focus、执行/说话状态、退出/重入、三种视口、减少动态效果和软件 WebGL 降级；Vitest 使用 `three-vrm` 的真实 `VRMLoaderPlugin` 解析发布合同夹具并驱动各 Controller。

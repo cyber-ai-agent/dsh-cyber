@@ -5,6 +5,7 @@ export const CYBER_SCHEMA_VERSION = 35 as const
 
 export * from './runtime-access.js'
 export * from './locales.js'
+export * from './voice.js'
 
 export type IsoTimestamp = string
 export type JsonPrimitive = boolean | number | string | null

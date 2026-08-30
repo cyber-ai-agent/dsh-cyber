@@ -20,14 +20,24 @@
     "test:watch": "vitest",
     "typecheck": "tsc -b --pretty false && pnpm --filter @dsh-cyber/web typecheck",
     "verify": "pnpm run typecheck && pnpm run test",
+    "tts:install": "node scripts/install-local-tts.mjs",
+    "stt:install": "node scripts/install-local-stt.mjs",
+    "voice:install": "pnpm tts:install && pnpm stt:install",
+    "voice:benchmark": "node scripts/benchmark-voice.mjs",
+    "voice:verify-loop": "node scripts/verify-local-voice-loop.mjs",
+    "voice:verify-websocket": "node scripts/verify-voice-websocket.mjs",
     "dsh-cyber": "node packages/cli/lib/bin.js"
   },
   "devDependencies": {
     "@playwright/test": "1.55.0",
     "@types/node": "22.20.0",
+    "@types/ws": "8.18.1",
     "happy-dom": "^20.11.6",
+    "tar-stream": "3.1.7",
     "tsx": "4.22.4",
     "typescript": "6.0.3",
+    "unbzip2-stream": "1.4.3",
+    "undici": "7.16.0",
     "vitest": "4.1.8"
   }
 }

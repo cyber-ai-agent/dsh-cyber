@@ -19,12 +19,13 @@ const vrmAdapter: DigitalHumanRendererAdapter = {
 
 const adapters = [vrmAdapter, spriteAdapter]
 
-export function selectRenderer(employee: DigitalHumanRendererProps['employee'], quality: RenderingQuality): DigitalHumanRendererAdapter {
+export function selectRenderer(employee: DigitalHumanRendererProps['employee'], quality: RenderingQuality, preferredKind?: 'sprite-2d' | 'vrm-3d'): DigitalHumanRendererAdapter {
+  if (preferredKind === 'sprite-2d') return spriteAdapter
   return adapters.find((adapter) => adapter.supports(employee, quality)) ?? spriteAdapter
 }
 
-export function RegisteredDigitalHumanRenderer(props: DigitalHumanRendererProps) {
-  const adapter = selectRenderer(props.employee, props.quality)
+export function RegisteredDigitalHumanRenderer(props: DigitalHumanRendererProps & { preferredKind?: 'sprite-2d' | 'vrm-3d' }) {
+  const adapter = selectRenderer(props.employee, props.quality, props.preferredKind)
   const Component = adapter.Component
   return <div className="focus-avatar-renderer" data-renderer-kind={adapter.kind} data-renderer-id={adapter.id}><Component {...props} /></div>
 }

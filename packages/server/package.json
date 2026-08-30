@@ -29,6 +29,8 @@
     "@dsh-cyber/world-simulation": "workspace:*",
     "@modelcontextprotocol/client": "^2.0.0",
     "pdfjs-dist": "^5.4.149",
-    "playwright": "1.55.0"
+    "playwright": "1.55.0",
+    "sherpa-onnx-node": "1.13.6",
+    "ws": "8.18.3"
   }
 }

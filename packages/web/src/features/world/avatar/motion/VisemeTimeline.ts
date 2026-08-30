@@ -12,6 +12,8 @@ export interface VisemeTimeline {
 }
 
 /** Provider-neutral fallback until a TTS adapter supplies timed visemes. */
-export function sampleSpeechActivity(time: number, speaking: boolean): number {
-  return speaking ? 0.12 + Math.abs(Math.sin(time / 92) * 0.72) : 0
+export function sampleSpeechActivity(time: number, speaking: boolean, pcmAmplitude?: number): number {
+  if (!speaking) return 0
+  if (pcmAmplitude !== undefined) return Math.max(0, Math.min(1, pcmAmplitude * 3.6))
+  return 0.12 + Math.abs(Math.sin(time / 92) * 0.72)
 }

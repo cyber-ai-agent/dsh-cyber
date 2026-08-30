@@ -22,5 +22,6 @@ for (const budget of budgets) {
 if (files.some((file) => file.endsWith('.map'))) errors.push('release build contains public source maps')
 const entryHtml = await readFile(join(process.cwd(), 'packages', 'web', 'dist', 'index.html'), 'utf8')
 if (/(?:three|vrm)(?:[-.])/iu.test(entryHtml)) errors.push('Three/VRM runtime is referenced by the first-screen HTML instead of remaining lazy')
+if (files.some((file) => /(?:kokoro|transformers|ort-wasm|onnxruntime)(?:[-.])/iu.test(file))) errors.push('Local TTS inference dependencies must stay in the Node voice runtime, not the browser build')
 if (errors.length > 0) throw new Error(`Build budget failed:\n${errors.join('\n')}`)
 console.log('Build budget passed:', budgets.map((item) => item.label).join(', '))
