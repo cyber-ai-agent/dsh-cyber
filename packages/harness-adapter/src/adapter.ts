@@ -33,6 +33,7 @@ export interface EmployeeTurnRequest {
   history: ConversationHistoryEntry[]
   /** Sequence of this employee's own last statement in the conversation, or 0. */
   observedThroughSequence: number
+  contextBudget?: AgentTurnRequest['contextBudget']
   /** Durable AgentRun used to target one runtime lane for interruption. */
   agentRunId?: string
   prompt: string
@@ -136,6 +137,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       conversationId: request.conversationId,
       history: request.history,
       observedThroughSequence: request.observedThroughSequence,
+      ...(request.contextBudget === undefined ? {} : { contextBudget: request.contextBudget }),
       ...(request.agentRunId === undefined ? {} : { agentRunId: request.agentRunId }),
       prompt: request.prompt,
       workspacePath: request.workspacePath,
@@ -261,6 +263,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     const prompt = formatRecoveredHistoryPrompt(
       unseenHistory(request.history, request.observedThroughSequence, existingSessionId === undefined),
       request.prompt,
+      request.contextBudget === undefined ? {} : { maxTokens: request.contextBudget.historyTokens },
     )
 
     let observedNotification = false
@@ -289,7 +292,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       // in this process.
       const result = await lane.runtime!.run(
         recoveredSessionId,
-        formatRecoveredHistoryPrompt(unseenHistory(request.history, 0, true), request.prompt),
+        formatRecoveredHistoryPrompt(unseenHistory(request.history, 0, true), request.prompt, request.contextBudget === undefined ? {} : { maxTokens: request.contextBudget.historyTokens }),
         request.onNotification,
       )
       return { agentSessionId: recoveredSessionId, ...result }

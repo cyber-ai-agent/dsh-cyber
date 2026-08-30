@@ -1058,6 +1058,8 @@ export interface AgentTurnRequest {
   permissionMode?: AgentPermissionMode
   /** One-turn model override. It never mutates world or character assignments. */
   modelProfileId?: string
+  /** Provider-neutral input/output allocation resolved for this turn. */
+  contextBudget?: import('./context-budget.js').ContextBudgetPlan
   onEvent?: (event: AgentRuntimeEvent) => void
 }
 
@@ -1159,6 +1161,7 @@ export * from './completion-job.js'
 export * from './work-system.js'
 export * from './prompt-safety.js'
 export * from './creative-workshop-draft.js'
+export * from './context-budget.js'
 
 export type {
   CharacterSkillAction,
