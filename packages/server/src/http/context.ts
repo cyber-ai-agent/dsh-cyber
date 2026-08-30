@@ -26,8 +26,9 @@ export async function dispatchHttpRequest(
 ): Promise<void> {
   assertLocalRequest(request)
   const url = new URL(request.url ?? '/', 'http://127.0.0.1')
-  if ((request.method ?? 'GET') === 'GET' && !url.pathname.startsWith('/api/')) {
-    if (await serveWebAsset(response, webRoot, url.pathname)) return
+  const method = request.method ?? 'GET'
+  if ((method === 'GET' || method === 'HEAD') && !url.pathname.startsWith('/api/')) {
+    if (await serveWebAsset(response, webRoot, url.pathname, method === 'HEAD')) return
   }
   if (await router.dispatch(request, response)) return
   throw new HttpError(404, 'not_found', 'Route not found')

@@ -8,6 +8,7 @@ export async function serveWebAsset(
   response: ServerResponse,
   webRoot: string,
   pathname: string,
+  headOnly = false,
 ): Promise<boolean> {
   let relativePath: string
   try {
@@ -40,6 +41,8 @@ export async function serveWebAsset(
   const contentType = ({
     '.html': 'text/html; charset=utf-8',
     '.js': 'text/javascript; charset=utf-8',
+    '.mjs': 'text/javascript; charset=utf-8',
+    '.wasm': 'application/wasm',
     '.css': 'text/css; charset=utf-8',
     '.json': 'application/json; charset=utf-8',
     '.png': 'image/png',
@@ -57,6 +60,7 @@ export async function serveWebAsset(
     'Content-Security-Policy': [
       "default-src 'self'",
       "script-src 'self'",
+      "worker-src 'self' blob:",
       "style-src 'self'",
       "img-src 'self' data: blob:",
       "connect-src 'self'",
@@ -69,7 +73,7 @@ export async function serveWebAsset(
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
   })
-  response.end(bytes)
+  response.end(headOnly ? undefined : bytes)
   return true
 }
 

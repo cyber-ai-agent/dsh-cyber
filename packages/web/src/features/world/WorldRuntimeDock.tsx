@@ -1,12 +1,13 @@
 import {
   ArrowsOut,
   Buildings,
+  Cube,
+  ImageSquare,
   LightbulbFilament,
   MapTrifold,
   Minus,
   Plus,
   PersonSimpleWalk,
-  UserFocus,
 } from '@phosphor-icons/react'
 import { useEffect, useRef, useState } from 'react'
 import type { WorkSession, World, WorldInteractionAction, WorldRuntimeSnapshot, WorldZoomCommand } from '@dsh-cyber/contracts'
@@ -34,16 +35,17 @@ interface WorldRuntimeDockProps {
   world: World
   employees: CyberEmployee[]
   liveEnabled?: boolean
+  sessionId?: string
+  sessionKind?: WorkSession['kind']
   selectedEmployeeId?: string
   conversationEmployeeIds: string[]
-  latestUtterance?: { messageId: string; employeeId: string; text: string }
+  latestUtterances: Array<{ messageId: string; employeeId: string; text: string }>
   onSelectEmployee(employeeId: string): void
-  onOpenDossier(employeeId: string): void
-  onOpenTrace(): void
   onStartGroup(employeeIds: string[], session?: WorkSession): void
+  onVoiceFinal(text: string): Promise<void>
 }
 
-export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = true, selectedEmployeeId, conversationEmployeeIds, latestUtterance, onSelectEmployee, onOpenDossier, onOpenTrace, onStartGroup }: WorldRuntimeDockProps) {
+export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = true, sessionId, sessionKind, selectedEmployeeId, conversationEmployeeIds, latestUtterances, onSelectEmployee, onStartGroup, onVoiceFinal }: WorldRuntimeDockProps) {
   const runtime = useWorldClient({ demoMode, world, employees, liveEnabled })
   const [fitRequest, setFitRequest] = useState(0)
   const [zoomCommand, setZoomCommand] = useState<WorldZoomCommand>()
@@ -55,16 +57,27 @@ export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = tru
   const [peerInitiatorId, setPeerInitiatorId] = useState<string>()
   const [peerBusy, setPeerBusy] = useState(false)
   const [peerError, setPeerError] = useState<string>()
-  const [focusEmployeeId, setFocusEmployeeId] = useState<string>()
   const [focusCameraId, setFocusCameraId] = useState<string>()
   const focusTimerRef = useRef<number | undefined>(undefined)
   const [staticMode, setStaticMode] = useState(() => readStaticMode(world.id))
+  const [viewMode, setViewMode] = useState<WorldViewMode>(() => readWorldViewMode(world.id))
 
-  useEffect(() => setActiveEmployeeId(selectedEmployeeId), [selectedEmployeeId])
+  useEffect(() => {
+    const latestSpeakerId = latestUtterances[0]?.employeeId
+    const nextEmployeeId = sessionKind === 'direct'
+      ? selectedEmployeeId ?? conversationEmployeeIds[0]
+      : latestSpeakerId !== undefined && conversationEmployeeIds.includes(latestSpeakerId)
+        ? latestSpeakerId
+        : selectedEmployeeId ?? conversationEmployeeIds[0]
+    setActiveEmployeeId(nextEmployeeId)
+  }, [conversationEmployeeIds, latestUtterances, selectedEmployeeId, sessionId, sessionKind])
   useEffect(() => () => { if (focusTimerRef.current !== undefined) window.clearTimeout(focusTimerRef.current) }, [])
   useEffect(() => {
     if (typeof localStorage !== 'undefined') localStorage.setItem(`dsh-cyber-digital-static:${world.id}`, staticMode ? 'true' : 'false')
   }, [staticMode, world.id])
+  useEffect(() => {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(`dsh-cyber-world-view:${world.id}`, viewMode)
+  }, [viewMode, world.id])
 
   if (runtime.loading || runtime.snapshot === undefined) {
     return <div className="world-runtime-dock world-runtime-dock--loading"><Buildings size={28} /><strong>正在恢复实时世界</strong><span>同步角色位置、任务状态和世界场景…</span></div>
@@ -78,8 +91,13 @@ export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = tru
   const conversationEmployees = conversationEmployeeIds
     .map((employeeId) => employees.find((employee) => employee.id === employeeId))
     .filter((employee): employee is CyberEmployee => employee !== undefined)
-  const focusedEmployee = employees.find((employee) => employee.id === focusEmployeeId)
-  const focusedEntity = renderedSnapshot.entities.find((entity) => entity.id === focusEmployeeId)
+  const focusedEmployee = employees.find((employee) => employee.id === activeEmployeeId)
+  const focusedEntity = renderedSnapshot.entities.find((entity) => entity.id === activeEmployeeId)
+  const focusedUtterance = latestUtterances.find((utterance) => utterance.employeeId === activeEmployeeId)
+  const collaborators = conversationEmployees
+    .filter((employee) => employee.id !== activeEmployeeId)
+    .map((employee) => ({ employee, entity: renderedSnapshot.entities.find((entity) => entity.id === employee.id) }))
+  const showCharacterView = viewMode !== 'map' && focusedEmployee !== undefined
 
   const enterEmployeeFocus = (employeeId: string) => {
     if (focusTimerRef.current !== undefined) window.clearTimeout(focusTimerRef.current)
@@ -88,17 +106,10 @@ export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = tru
     setContextTarget(undefined)
     setFocusCameraId(employeeId)
     focusTimerRef.current = window.setTimeout(() => {
-      setFocusEmployeeId(employeeId)
+      setViewMode('2d')
+      setFocusCameraId(undefined)
       focusTimerRef.current = undefined
     }, 190)
-  }
-
-  const leaveEmployeeFocus = () => {
-    if (focusTimerRef.current !== undefined) window.clearTimeout(focusTimerRef.current)
-    focusTimerRef.current = undefined
-    setFocusEmployeeId(undefined)
-    setFocusCameraId(undefined)
-    setFitRequest((value) => value + 1)
   }
 
   const interactWithEmployee = async (action: 'talk' | 'assign-task' | 'start-meeting') => {
@@ -184,8 +195,13 @@ export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = tru
     <>
       <section className="world-runtime-dock" aria-label={`${world.name}实时世界`}>
         <div className="world-runtime-dock__canvas">
-          <div className={`world-runtime-dock__overview${focusEmployeeId !== undefined ? ' is-focused' : focusCameraId !== undefined ? ' is-focusing' : ''}`}>
-          {focusEmployeeId === undefined ? <WorldCanvas
+          <div className="world-runtime-dock__display-switch" role="tablist" aria-label="世界显示方式">
+            <button type="button" role="tab" aria-selected={viewMode === 'map'} className={viewMode === 'map' ? 'is-active' : ''} onClick={() => setViewMode('map')}><MapTrifold size={15} aria-hidden="true" />地图</button>
+            <button type="button" role="tab" aria-selected={viewMode === '2d'} className={viewMode === '2d' ? 'is-active' : ''} onClick={() => setViewMode('2d')}><ImageSquare size={15} aria-hidden="true" />2D</button>
+            <button type="button" role="tab" aria-selected={viewMode === '3d'} className={viewMode === '3d' ? 'is-active' : ''} title={focusedEmployee?.avatarProfile?.rendererKind === 'vrm-3d' ? '使用已发布的 VRM 形象' : '当前角色未发布 VRM，将显示 2D 备用形象'} onClick={() => setViewMode('3d')}><Cube size={15} aria-hidden="true" />3D</button>
+          </div>
+          <div className={`world-runtime-dock__overview${showCharacterView ? ' is-focused' : focusCameraId !== undefined ? ' is-focusing' : ''}`}>
+          {!showCharacterView ? <WorldCanvas
             manifest={runtime.manifest}
             rendererIdentity={runtime.rendererIdentity}
             snapshot={renderedSnapshot}
@@ -202,33 +218,12 @@ export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = tru
             onReady={() => undefined}
           /> : <div className="world-runtime-dock__focus-background" aria-hidden="true" />}
           </div>
-          {focusedEmployee === undefined ? null : <EmployeeFocusMode world={world} employee={focusedEmployee} {...(focusedEntity === undefined ? {} : { entity: focusedEntity })} connected={runtime.connected} staticMode={staticMode} {...(latestUtterance === undefined ? {} : { latestUtterance })} onStaticModeChange={setStaticMode} onBack={leaveEmployeeFocus} onOpenDossier={() => onOpenDossier(focusedEmployee.id)} onOpenTrace={onOpenTrace} onOpenConversation={() => onSelectEmployee(focusedEmployee.id)} />}
+          {!showCharacterView ? null : <EmployeeFocusMode key={focusedEmployee.id} world={world} employee={focusedEmployee} {...(focusedEntity === undefined ? {} : { entity: focusedEntity })} collaborators={collaborators} connected={runtime.connected} staticMode={staticMode} rendererMode={viewMode} {...(focusedUtterance === undefined ? {} : { latestUtterance: focusedUtterance })} onFocusEmployee={setActiveEmployeeId} onStaticModeChange={setStaticMode} onVoiceFinal={onVoiceFinal} />}
 
-          {focusEmployeeId !== undefined || conversationEmployees.length === 0 ? null : (
-            <div className="world-runtime-dock__focus" aria-label="当前会话成员">
-              <span>当前会话 · 点击角色进入数字人</span>
-              <div className="world-runtime-dock__focus-list">
-                {conversationEmployees.map((employee) => (
-                  <button
-                    key={employee.id}
-                    type="button"
-                    aria-label={`进入${employee.displayName}员工聚焦`}
-                    title={`${employee.displayName} · ${employee.role}`}
-                    onClick={() => enterEmployeeFocus(employee.id)}
-                  >
-                    <UserFocus size={14} aria-hidden="true" />
-                    <strong>{employee.displayName}</strong>
-                    <small>· {employee.role}</small>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+          {showCharacterView || selectedEmployee === undefined || contextTarget?.kind !== 'employee' || contextTarget.id !== selectedEmployee.id ? null : <EmployeeInteractionMenu employee={selectedEmployee} position={contextTarget.position} onClose={() => setContextTarget(undefined)} onTalk={() => void interactWithEmployee('talk')} onAssignTask={() => void interactWithEmployee('assign-task')} onMeeting={() => void interactWithEmployee('start-meeting')} onPeerCollaboration={() => { setPeerError(undefined); setPeerInitiatorId(selectedEmployee.id) }} />}
+          {showCharacterView || selectedObject === undefined || selectedObjectManifest === undefined || contextTarget?.kind !== 'object' || contextTarget.id !== selectedObject.id ? null : <ObjectInteractionMenu object={selectedObject} manifest={selectedObjectManifest} position={contextTarget.position} {...(selectedEmployee === undefined ? {} : { selectedEmployee })} onClose={() => setContextTarget(undefined)} onAction={(action) => void actOnObject(action)} />}
 
-          {focusEmployeeId !== undefined || selectedEmployee === undefined || contextTarget?.kind !== 'employee' || contextTarget.id !== selectedEmployee.id ? null : <EmployeeInteractionMenu employee={selectedEmployee} position={contextTarget.position} onClose={() => setContextTarget(undefined)} onTalk={() => void interactWithEmployee('talk')} onAssignTask={() => void interactWithEmployee('assign-task')} onMeeting={() => void interactWithEmployee('start-meeting')} onPeerCollaboration={() => { setPeerError(undefined); setPeerInitiatorId(selectedEmployee.id) }} />}
-          {focusEmployeeId !== undefined || selectedObject === undefined || selectedObjectManifest === undefined || contextTarget?.kind !== 'object' || contextTarget.id !== selectedObject.id ? null : <ObjectInteractionMenu object={selectedObject} manifest={selectedObjectManifest} position={contextTarget.position} {...(selectedEmployee === undefined ? {} : { selectedEmployee })} onClose={() => setContextTarget(undefined)} onAction={(action) => void actOnObject(action)} />}
-
-          {focusEmployeeId === undefined ? <div className="world-runtime-dock__controls" aria-label="世界视图控制">
+          {!showCharacterView ? <div className="world-runtime-dock__controls" aria-label="世界视图控制">
             <button type="button" aria-label="缩小" onClick={() => setZoomCommand(createZoomCommand(-0.1))}><Minus size={15} /></button>
             <button type="button" aria-label="显示全景" title="适应窗口且不露出场景边界" onClick={() => setFitRequest((value) => value + 1)}><ArrowsOut size={15} /></button>
             <button type="button" aria-label="放大" onClick={() => setZoomCommand(createZoomCommand(0.1))}><Plus size={15} /></button>
@@ -263,6 +258,15 @@ function readStaticMode(worldId: string): boolean {
     if (saved !== null) return saved === 'true'
   }
   return typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
+}
+
+type WorldViewMode = 'map' | '2d' | '3d'
+
+function readWorldViewMode(worldId: string): WorldViewMode {
+  if (typeof localStorage === 'undefined') return '2d'
+  const value = localStorage.getItem(`dsh-cyber-world-view:${worldId}`)
+  if (value === 'map' || value === '2d' || value === '3d') return value
+  return localStorage.getItem(`dsh-cyber-world-visual:${worldId}`) === 'map' ? 'map' : '2d'
 }
 
 function withCharacterVisuals(snapshot: WorldRuntimeSnapshot, employees: CyberEmployee[]): WorldRuntimeSnapshot {

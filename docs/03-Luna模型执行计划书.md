@@ -49,3 +49,20 @@ pnpm exec playwright test e2e/digital-human-world.spec.ts
 - 世界 HUD 的“当前会话”现在直接展示可点击的角色与岗位，点击后进入对应 Employee Focus；地图人物点击继续作为空间快捷方式。
 - E2E 必须对真实入口执行 `visible + enabled + 普通 click`，并验证 Focus 和返回路径；禁止 `force`、隐藏镜像和 `evaluate().click()`。
 - 已在本地真实股票分析团队数据页面完成点击验证，控制台 error/warn 为 0。
+
+### 中文本地语音与连续角色视图
+
+- 世界右侧只保留一个 `地图 / 2D / 3D` 显示方式；用户选择 2D 或 3D 后，切换私聊会直接跟随到对应角色，群聊按最新回复者居中并展示其他参与角色。
+- 中文语音不再依赖操作系统是否安装中文声音。默认安装 sherpa-onnx + Kokoro 82M int8，提供 100 个中文音色；系统语音仅作为零模型 fallback。
+- Streaming Paraformer、Silero VAD、AudioWorklet、WebSocket Binary PCM、Partial/Final、Conversation/WorkTurn 复用和 Barge-in 已形成同一本地 Voice Runtime；没有第二套 Agent Runtime。
+- 语音模式和音色按角色保存。回复 `text.delta` 经 SentenceChunker 与 TTS Queue 提前播报；Web Audio Analyser 的真实 PCM RMS 驱动 VRM 口型。
+- 安装器固定 revision、大小和 SHA-256；模型不进普通备份或 Web 首屏。Worker Thread 首次 prepare 才创建，未启用语音时不申请麦克风、不创建 AudioContext。
+
+验证命令：
+
+```bash
+pnpm tts:install
+pnpm typecheck
+pnpm test
+pnpm exec playwright test e2e/digital-human-world.spec.ts
+```

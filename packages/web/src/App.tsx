@@ -99,6 +99,7 @@ import { ConversationHostAccessDialog, type ConversationHostAccessRequest } from
 import { worldExperience } from './world-experience.js'
 import { characterAvatarUrl, readCharacterAvatarProfile } from './features/world/character-avatar-profile.js'
 import { subscribeWorldLive } from './world-live-client.js'
+import { publishStreamingSpeech } from './features/voice/streaming-speech-bus.js'
 
 const SettingsDialog = lazy(async () => ({ default: (await import('./components/SettingsDialog.js')).SettingsDialog }))
 const WorldSideDock = lazy(async () => ({ default: (await import('./components/WorldSideDock.js')).WorldSideDock }))
@@ -754,14 +755,19 @@ export default function App() {
           })
         }
 
-        if (envelope.event.kind === 'turn.started') upsertStream('', true)
+        if (envelope.event.kind === 'turn.started') {
+          upsertStream('', true)
+          publishStreamingSpeech({ kind: 'start', employeeId: envelope.agentId, turnId: traceTurnId })
+        }
         if (envelope.event.kind === 'text.delta' && envelope.event.content !== undefined) {
           upsertStream(envelope.event.content, false)
+          publishStreamingSpeech({ kind: 'delta', employeeId: envelope.agentId, turnId: traceTurnId, content: envelope.event.content })
         }
         if (envelope.event.kind === 'assistant.message' && envelope.event.content?.trim()) {
           upsertStream(envelope.event.content, true)
         }
         if (envelope.event.kind === 'turn.completed' || envelope.event.kind === 'turn.failed') {
+          publishStreamingSpeech({ kind: envelope.event.kind === 'turn.completed' ? 'complete' : 'cancel', employeeId: envelope.agentId, turnId: traceTurnId })
           if (envelope.event.kind === 'turn.failed' && envelope.event.metadata.interrupted === true) {
             patchPendingTurn(effectiveClientTurnId, { status: 'interrupted' })
           } else if (envelope.event.kind === 'turn.failed') {
@@ -2217,7 +2223,7 @@ export default function App() {
     '--workspace-background-size': preferences?.backgroundFit === 'contain' ? 'contain' : preferences?.backgroundFit === 'tile' ? 'auto' : 'cover',
     '--workspace-background-repeat': preferences?.backgroundFit === 'tile' ? 'repeat' : 'no-repeat',
   } as CSSProperties, [backgroundImage, preferences?.backgroundFit, preferences?.backgroundOpacity])
-  const latestUtterance = useMemo(() => latestEmployeeUtterance(messages, selectedEmployeeId), [messages, selectedEmployeeId])
+  const latestUtterances = useMemo(() => latestEmployeeUtterances(messages), [messages])
   if (loading) return <LoadingScreen />
   if (workspace === undefined || activeWorld === undefined || preferences === undefined) {
     return <Onboarding {...(error === undefined ? {} : { error })} onCreated={async () => window.location.reload()} />
@@ -2381,15 +2387,15 @@ export default function App() {
                   world={activeWorld}
                   employees={employees}
                   liveEnabled={!historyOpen}
+                  {...(activeSession === undefined ? {} : { sessionId: activeSession.id, sessionKind: activeSession.kind })}
                   conversationEmployeeIds={activeParticipantIds}
-                  {...(latestUtterance === undefined ? {} : { latestUtterance })}
+                  latestUtterances={latestUtterances}
                   {...(selectedEmployeeId === undefined ? {} : { selectedEmployeeId })}
                   onSelectEmployee={(employeeId) => {
                     const employee = employees.find((item) => item.id === employeeId)
                     if (employee !== undefined) directEmployee(employee)
                   }}
-                  onOpenDossier={(employeeId) => void openDossier(employeeId)}
-                  onOpenTrace={() => { setAppMode('workbench'); setDockCollapsed(false); setDockTab('trace') }}
+                  onVoiceFinal={(text) => send(text, [])}
           onStartGroup={(employeeIds, session) => {
           const selected = employees.filter((employee) => employeeIds.includes(employee.id))
           if (selected.length < 2) return
@@ -3012,11 +3018,16 @@ function participantIdsFromMessages(messages: WorkMessage[]): string[] {
   return ids
 }
 
-function latestEmployeeUtterance(messages: WorkMessage[], preferredEmployeeId?: string): { messageId: string; employeeId: string; text: string } | undefined {
-  const assistants = messages.filter((message) => message.kind === 'assistant' && message.senderKind === 'employee' && message.content.trim())
-  const preferred = preferredEmployeeId === undefined ? undefined : assistants.findLast((message) => message.senderId === preferredEmployeeId)
-  const message = preferred ?? assistants.at(-1)
-  return message === undefined ? undefined : { messageId: message.id, employeeId: message.senderId, text: message.content }
+function latestEmployeeUtterances(messages: WorkMessage[]): Array<{ messageId: string; employeeId: string; text: string }> {
+  const seen = new Set<string>()
+  const result: Array<{ messageId: string; employeeId: string; text: string }> = []
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message === undefined || message.kind !== 'assistant' || message.senderKind !== 'employee' || !message.content.trim() || seen.has(message.senderId)) continue
+    seen.add(message.senderId)
+    result.push({ messageId: message.id, employeeId: message.senderId, text: message.content })
+  }
+  return result
 }
 
 function inferDemoSessionParticipants(

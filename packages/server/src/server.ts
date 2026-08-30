@@ -2,7 +2,6 @@ import { createServer } from 'node:http'
 import { mkdir, realpath } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-
 import { BUILTIN_BLUEPRINTS } from '@dsh-cyber/catalog'
 import type { JsonObject, AgentRuntimePort, AgentTurnRequest } from '@dsh-cyber/contracts'
 import {
@@ -25,6 +24,7 @@ import { closeServer, listenBrowserSafe } from './http/server-lifecycle.js'
 import { registerAmbientLifeRoutes } from './routes/ambient-life-routes.js'
 import { registerApplicationAccessRoutes } from './routes/application-access-routes.js'
 import { registerAssetRoutes } from './routes/asset-routes.js'
+import { registerLocalTtsRoutes } from './routes/local-tts-routes.js'
 import { registerCatalogRoutes } from './routes/catalog-routes.js'
 import { registerConversationRoutes } from './routes/conversation-routes.js'
 import { registerCompletionJobRoutes } from './routes/completion-job-routes.js'
@@ -50,6 +50,7 @@ import { AmbientLifeRuntime } from './services/ambient-life-runtime.js'
 import { AmbientLifeScheduler } from './services/ambient-life-scheduler.js'
 import { AmbientLifeSettingsService } from './services/ambient-life-settings-service.js'
 import { AssetService } from './services/asset-service.js'
+import { LocalTtsAssetService } from './services/local-tts-asset-service.js'
 import { ApplicationAccessService } from './services/application-access-service.js'
 import { CharacterProfileRuntime } from './services/character-profile-runtime.js'
 import { CharacterSkillRuntime } from './services/character-skill-runtime.js'
@@ -88,6 +89,7 @@ import type { KnowledgeExtractionPort } from './services/knowledge-extraction.js
 import { createWorldKnowledgeGraphRuntime } from './services/world-knowledge-graph-runtime.js'
 import { WorldKnowledgeRuntimeContextContributor, WorldRuntimeContextComposer } from './services/world-runtime-context-composer.js'
 import { WorldTraceService } from './services/world-trace-service.js'
+import { attachVoiceWebSocket } from './voice/voice-websocket-server.js'
 import { WorldMarketplaceService } from './services/world-marketplace-service.js'
 import { WorldPackageInstanceService } from './services/world-package-instance-service.js'
 import { WorldCharacterAuthorityService } from './services/world-character-authority-service.js'
@@ -431,6 +433,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const applicationUpdates = new ApplicationUpdateService(store, stateRoot, workspaceRoot)
   const applicationAccess = new ApplicationAccessService(stateRoot)
   const assets = new AssetService(store, stateRoot)
+  const localTtsAssets = new LocalTtsAssetService(stateRoot)
   const worldFiles = new WorldFileService(worldRoots)
 
   const router = new Router()
@@ -450,6 +453,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   })
   registerAmbientLifeRoutes(router, { store, settings: ambientLifeSettings, access: worldAccess })
   registerAssetRoutes(router, { store, assets, access: worldAccess })
+  registerLocalTtsRoutes(router, localTtsAssets)
   registerWorldRoutes(router, {
     store,
     worldAccess,
@@ -497,7 +501,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   httpServer.requestTimeout = 0
   httpServer.headersTimeout = 10_000
   httpServer.keepAliveTimeout = 5_000
-
+  const voiceSocket = attachVoiceWebSocket({ server: httpServer, stateRoot, applicationAccess })
   const unsubscribe = orchestrator.subscribe((event) => {
     toolApprovals.capture(event)
     runtimeStreamHub.publish(event)
@@ -551,6 +555,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
       unsubscribe(); unsubscribeControl(); toolApprovals.close(); await conversationControl.close()
       runtimeStreamHub.close()
       worldStreamHub.close()
+      await voiceSocket.close()
       if (httpServer.listening) await closeServer(httpServer)
       await orchestrator.close()
       await completionWorker.close()
@@ -572,9 +577,7 @@ async function sweepOrphanedPackageStaging(store: SqliteStore, worldPackages: Wo
   if (removed > 0) console.warn(`[dsh-cyber] 已清理 ${removed} 个残留的包暂存目录。`)
 }
 
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
+function errorText(error: unknown): string { return error instanceof Error ? error.message : String(error) }
 
 async function resolveActiveRuntime(store: SqliteStore, runtimeStateRoot: string, stateRoot: string): Promise<string | undefined> {
   const activeRuntime = await readActiveHarnessRuntime(runtimeStateRoot)
