@@ -1,4 +1,4 @@
-import { readdir, stat } from 'node:fs/promises'
+import { readFile, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 
 const assets = join(process.cwd(), 'packages', 'web', 'dist', 'assets')
@@ -10,6 +10,7 @@ const budgets = [
   { label: 'main CSS', pattern: /^index-.*\.css$/, maximum: 280 * 1024 },
   { label: 'Task Workspace JavaScript', pattern: /^TaskWorkspace-.*\.js$/, maximum: 25 * 1024 },
   { label: 'Task Workspace CSS', pattern: /^TaskWorkspace-.*\.css$/, maximum: 10 * 1024 },
+  { label: 'lazy VRM runtime JavaScript', pattern: /^vrm-runtime-.*\.js$/, maximum: 950 * 1024 },
 ]
 
 const errors = []
@@ -19,5 +20,7 @@ for (const budget of budgets) {
   else if (match[1] > budget.maximum) errors.push(`${budget.label}: ${match[1]} > ${budget.maximum} bytes`)
 }
 if (files.some((file) => file.endsWith('.map'))) errors.push('release build contains public source maps')
+const entryHtml = await readFile(join(process.cwd(), 'packages', 'web', 'dist', 'index.html'), 'utf8')
+if (/(?:three|vrm)(?:[-.])/iu.test(entryHtml)) errors.push('Three/VRM runtime is referenced by the first-screen HTML instead of remaining lazy')
 if (errors.length > 0) throw new Error(`Build budget failed:\n${errors.join('\n')}`)
 console.log('Build budget passed:', budgets.map((item) => item.label).join(', '))

@@ -97,6 +97,7 @@
 - 触发：Web 对私聊和群聊统一发送 `queueMode`，但服务端只在 direct 分支消费。现象：群聊“排队发送/下一条执行”仍立即运行，且因为 queueMode 存在而跳过 prompt transform。固定处理：私聊、群聊讨论和任务协作都先创建唯一的 queued WorkTurn 与用户消息，再由类型明确的 runner 继续原 WorkTurn；禁止 runner 调用会再次创建 WorkTurn 的入口。等待审批释放 employee lane，但必须继续占用 session 顺序锁。验证：群聊 queue 返回 202，discussion/task 各只保留一个 WorkTurn 和一条用户消息；重启后继续；同 session 后续仍 queued，另一 session 可运行。
 - 触发：Harness 淘汰 idle lane 时先从 Map 删除，再异步等待 runtime.close。现象：关闭 Promise 未完成期间的两个新会话分别创建 lane，短暂突破每角色最多两条通道。固定处理：EmployeeWorker 记录 closing lane reservation，任何创建都以 `lanes.size + closingLanes` 校验容量；close 回调恢复后再次校验，worker 关闭后不得复活 lane。验证：用 deferred close 制造两个并发新会话，断言存活 runtime 峰值不超过 2，所有任务仍能完成或明确中止。
 - 触发：Pixi 画布挂载后左右面板宽度变化，但浏览器窗口尺寸没有变化。现象：renderer 仍使用旧容器宽度，世界视图右侧出现黑边或裁切，切换 Dock 后更明显。固定处理：用 `ResizeObserver` 监听实际画布宿主，显式调用 renderer resize，更新 stage hit area，再按新视口重新计算 cover camera；不能只依赖 Pixi 的 `resizeTo: window`。验证：单元测试改变宿主宽度后断言 renderer 尺寸和 cover scale 更新；浏览器在 1440×900、1920×1080、3840×2160 截图中检查画布铺满且无黑边。
+- 触发：世界 Overview 的 Pixi WebGL 尚未释放时，Employee Focus 在 React render 或同一帧内探测/创建 Three WebGL；或能力探测主动调用 `WEBGL_lose_context`。现象：SwiftShader、软件渲染器和部分低配 Windows 驱动会整页黑屏或主线程冻结，VRM 无法进入也无法自动降级。固定处理：Focus 首帧先使用静态 Sprite，Overview 完成聚焦后卸载 Pixi 并以当前主题底图保持连续；至少延后一帧再探测硬件 WebGL，探测不得主动丢失上下文；Headless、SwiftShader、llvmpipe、减弱动态效果直接使用静态模式。退出 Focus 必须销毁 Three RAF、Observer、Mixer、材质、纹理和上下文后再恢复地图。验证：Playwright 的软件 WebGL/减少动态效果场景不下载 VRM chunk 且不冻结；硬件浏览器验证 VRM 按需加载、退出后 Canvas 为 0、再次进入仅 1 个 Canvas。
 
 ## 市场安装与启用闭环
 

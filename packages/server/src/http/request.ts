@@ -6,13 +6,13 @@ import { HttpError } from './errors.js'
 
 export const MAX_BODY_BYTES = 8 * 1024 * 1024
 
-export async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
+export async function readJson(request: IncomingMessage, maximumBytes = MAX_BODY_BYTES): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = []
   let bytes = 0
   for await (const value of request) {
     const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value)
     bytes += chunk.length
-    if (bytes > MAX_BODY_BYTES) throw new HttpError(413, 'body_too_large', 'Request body too large')
+    if (bytes > maximumBytes) throw new HttpError(413, 'body_too_large', 'Request body too large')
     chunks.push(chunk)
   }
   try {

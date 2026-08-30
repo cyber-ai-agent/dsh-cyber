@@ -1807,6 +1807,55 @@ const MIGRATIONS: readonly Migration[] = [
         CHECK (locale IN ('zh-CN','zh-TW','en-US','ja-JP','ko-KR','es-ES','fr-FR','de-DE','pt-BR','ru-RU','ar-SA','hi-IN'));
     `,
   },
+  {
+    version: 35,
+    name: 'character-avatar-assets',
+    foreignKeysOff: true,
+    sql: `
+      DROP TABLE IF EXISTS character_avatar_assets;
+      DROP INDEX local_assets_workspace_idx;
+      ALTER TABLE local_assets RENAME TO local_assets_v34;
+
+      CREATE TABLE local_assets (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK (kind IN ('background', 'attachment', 'avatar')),
+        mime_type TEXT NOT NULL CHECK (
+          mime_type IN (
+            'image/png', 'image/jpeg', 'image/webp', 'model/gltf-binary',
+            'text/plain', 'text/markdown', 'application/json', 'application/pdf'
+          )
+        ),
+        sha256 TEXT NOT NULL,
+        relative_path TEXT NOT NULL UNIQUE,
+        byte_length INTEGER NOT NULL CHECK (byte_length > 0),
+        created_at TEXT NOT NULL
+      ) STRICT;
+
+      INSERT INTO local_assets (
+        id, workspace_id, kind, mime_type, sha256, relative_path, byte_length, created_at
+      )
+      SELECT id, workspace_id, kind, mime_type, sha256, relative_path, byte_length, created_at
+      FROM local_assets_v34;
+
+      DROP TABLE local_assets_v34;
+      CREATE INDEX local_assets_workspace_idx
+        ON local_assets(workspace_id, kind, created_at DESC);
+
+      CREATE TABLE character_avatar_assets (
+        asset_id TEXT PRIMARY KEY REFERENCES local_assets(id) ON DELETE CASCADE,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        employee_id TEXT NOT NULL REFERENCES employee_instances(id) ON DELETE CASCADE,
+        renderer_kind TEXT NOT NULL CHECK (renderer_kind IN ('image-2d', 'vrm-3d', 'mesh-preview')),
+        original_name TEXT NOT NULL,
+        validation_json TEXT NOT NULL CHECK (json_valid(validation_json)),
+        created_at TEXT NOT NULL
+      ) STRICT;
+      CREATE INDEX character_avatar_assets_employee_idx
+        ON character_avatar_assets(employee_id, created_at DESC, asset_id);
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {

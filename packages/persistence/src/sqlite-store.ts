@@ -13,6 +13,8 @@ import {
   type ConversationQueueEntryStatus,
   type CompletionJob,
   type CompletionJobDraft,
+  type CharacterAvatarAsset,
+  type CharacterAvatarAssetRendererKind,
   isWorldCharacterPermission,
   isDomainEventType,
   type DatabaseDoctorReport,
@@ -272,6 +274,16 @@ export interface SaveLocalAssetInput {
   relativePath: string
   byteLength: number
   actorId?: string
+}
+
+export interface SaveCharacterAvatarAssetInput {
+  assetId: string
+  workspaceId: string
+  worldId: string
+  employeeId: string
+  rendererKind: CharacterAvatarAssetRendererKind
+  originalName: string
+  validation: JsonObject
 }
 
 export interface CreateSessionInput {
@@ -591,6 +603,7 @@ const KNOWN_TABLES = [
   'model_profiles',
   'model_assignments',
   'local_assets',
+  'character_avatar_assets',
   'work_sessions',
   'owner_runtime_access_grants',
   'conversation_queue_entries',
@@ -1438,6 +1451,56 @@ export class SqliteStore {
           )
           .all(workspaceId, kind)
     return rows.map(mapLocalAsset)
+  }
+
+  deleteLocalAsset(assetId: string): boolean {
+    this.#assertWritable()
+    return Number(this.database.prepare('DELETE FROM local_assets WHERE id = ?').run(assetId).changes) === 1
+  }
+
+  saveCharacterAvatarAsset(input: SaveCharacterAvatarAssetInput): CharacterAvatarAsset {
+    this.#assertWritable()
+    const employee = this.#requireEmployee(input.employeeId)
+    const world = this.#requireWorld(input.worldId)
+    const asset = this.getLocalAsset(input.assetId)
+    if (asset === undefined || asset.kind !== 'avatar') throw new PersistenceError('Character avatar asset is missing')
+    if (employee.workspaceId !== input.workspaceId || employee.worldId !== world.id || world.workspaceId !== input.workspaceId || asset.workspaceId !== input.workspaceId) {
+      throw new PersistenceError('Character avatar asset scope does not match its character')
+    }
+    if ((input.rendererKind === 'image-2d') === (asset.mimeType === 'model/gltf-binary')) {
+      throw new PersistenceError('Character avatar renderer does not match its asset MIME type')
+    }
+    const originalName = normalizeRequiredToken(input.originalName, 'Character avatar source name', 180)
+    assertSecretFree(input.validation)
+    const record: CharacterAvatarAsset = {
+      assetId: asset.id,
+      workspaceId: input.workspaceId,
+      worldId: world.id,
+      employeeId: employee.id,
+      rendererKind: input.rendererKind,
+      originalName,
+      validation: structuredClone(input.validation),
+      createdAt: asset.createdAt,
+    }
+    this.database.prepare(
+      `INSERT INTO character_avatar_assets
+       (asset_id, workspace_id, world_id, employee_id, renderer_kind, original_name, validation_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(record.assetId, record.workspaceId, record.worldId, record.employeeId, record.rendererKind, record.originalName, stringifyJson(record.validation), record.createdAt)
+    return record
+  }
+
+  getCharacterAvatarAsset(assetId: string): CharacterAvatarAsset | undefined {
+    const row = this.database.prepare('SELECT * FROM character_avatar_assets WHERE asset_id = ?').get(assetId)
+    return row === undefined ? undefined : mapCharacterAvatarAsset(row)
+  }
+
+  listCharacterAvatarAssets(employeeId: string): CharacterAvatarAsset[] {
+    this.#requireEmployee(employeeId)
+    return this.database.prepare(
+      `SELECT * FROM character_avatar_assets
+       WHERE employee_id = ? ORDER BY created_at DESC, asset_id DESC`,
+    ).all(employeeId).map(mapCharacterAvatarAsset)
   }
 
   /**
@@ -2603,6 +2666,7 @@ export class SqliteStore {
     }
     const profile = this.getEmployeeProfile(employee.id)
     if (profile !== undefined) dossier.profile = profile
+    dossier.profileHistory = this.listEmployeeProfiles(employee.id).sort((left, right) => right.revision - left.revision)
     return dossier
   }
 
@@ -6252,6 +6316,20 @@ function mapLocalAsset(row: object): LocalAsset {
     sha256: String(value.sha256),
     relativePath: String(value.relative_path),
     byteLength: Number(value.byte_length),
+    createdAt: String(value.created_at),
+  }
+}
+
+function mapCharacterAvatarAsset(row: object): CharacterAvatarAsset {
+  const value = row as Record<string, unknown>
+  return {
+    assetId: String(value.asset_id),
+    workspaceId: String(value.workspace_id),
+    worldId: String(value.world_id),
+    employeeId: String(value.employee_id),
+    rendererKind: value.renderer_kind as CharacterAvatarAssetRendererKind,
+    originalName: String(value.original_name),
+    validation: parseJson<JsonObject>(value.validation_json),
     createdAt: String(value.created_at),
   }
 }

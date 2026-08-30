@@ -2,7 +2,7 @@ import { Archive, IdentificationCard, PuzzlePiece, ShieldCheck, ShieldWarning, S
 import { useRef, useState } from 'react'
 import type { AgentPermissionMode, EmployeeInstance, EmployeeProfile, EmployeeRevision, ModelProfile } from '@dsh-cyber/contracts'
 
-import { Avatar } from './Avatar.js'
+import { CharacterAvatarManager, type UploadedAvatarDraft } from './CharacterAvatarManager.js'
 import { SkillGrantEditor } from './SkillGrantEditor.js'
 import { RuntimePermissionSelector } from './RuntimePermissionSelector.js'
 import { useDialogFocusTrap } from './useDialogFocusTrap.js'
@@ -12,6 +12,7 @@ export type EmployeeSettingsSection = 'profile' | 'behavior' | 'abilities' | 'pe
 interface EmployeeManagementDialogProps {
   employee: EmployeeInstance
   profile?: EmployeeProfile
+  profileHistory?: EmployeeProfile[]
   currentRevision?: EmployeeRevision
   models: ModelProfile[]
   avatarIndex: number
@@ -29,6 +30,10 @@ interface EmployeeManagementDialogProps {
     addressUserAs: string
     selfReference: string
   }): Promise<void>
+  onUploadAvatar(file: File): Promise<UploadedAvatarDraft>
+  onPublishAvatar(assetId: string, fallbackAvatarIndex: number, expectedProfileRevision: number): Promise<void>
+  onRollbackAvatar(targetRevision: number, expectedProfileRevision: number): Promise<void>
+  onResetAvatar(fallbackAvatarIndex: number, expectedProfileRevision: number): Promise<void>
   onArchive(): Promise<void>
 }
 
@@ -45,7 +50,7 @@ interface CharacterRuntimeProfile {
 const PROFILE_START = '[角色关系与背景]'
 const PROFILE_END = '[/角色关系与背景]'
 
-export function EmployeeManagementDialog({ employee, profile, currentRevision, models, avatarIndex, saving, initialSection = 'profile', onClose, onRevise, onUpdateProfile, onArchive }: EmployeeManagementDialogProps) {
+export function EmployeeManagementDialog({ employee, profile, profileHistory = [], currentRevision, models, avatarIndex, saving, initialSection = 'profile', onClose, onRevise, onUpdateProfile, onUploadAvatar, onPublishAvatar, onRollbackAvatar, onResetAvatar, onArchive }: EmployeeManagementDialogProps) {
   const parsed = parseCharacterRuntimeProfile(currentRevision?.persona ?? '', profile, employee.role)
   const [displayName, setDisplayName] = useState(employee.displayName)
   const [role, setRole] = useState(parsed.identityLabel)
@@ -132,7 +137,7 @@ export function EmployeeManagementDialog({ employee, profile, currentRevision, m
               <label className="dialog-field"><span>角色名字</span><input maxLength={48} value={displayName} onChange={(event) => setDisplayName(event.target.value)} /></label>
               <label className="dialog-field"><span>当前身份或形态</span><input maxLength={100} value={role} onChange={(event) => setRole(event.target.value)} placeholder="例如：开发工程师、酒馆老板、陪伴机器人" /><small>用于角色资料、会话标题和世界中的身份说明。</small></label>
             </div>
-            <div><span className="field-label">角色形象</span><div className="avatar-picker" role="radiogroup" aria-label="选择角色形象">{Array.from({ length: 8 }, (_, index) => <button key={index} type="button" role="radio" aria-label={`形象 ${index + 1}`} aria-checked={selectedAvatar === index} className={selectedAvatar === index ? 'is-active' : ''} onClick={() => setSelectedAvatar(index)}><Avatar index={index} size="md" label={`形象 ${index + 1}`} /></button>)}</div></div>
+            <CharacterAvatarManager employeeName={displayName || employee.displayName} profile={profile} profileHistory={profileHistory} fallbackAvatarIndex={selectedAvatar} busy={saving} onFallbackAvatarChange={setSelectedAvatar} onUpload={onUploadAvatar} onPublish={onPublishAvatar} onRollback={onRollbackAvatar} onReset={onResetAvatar} />
             <div className="character-profile-grid">
               <label className="dialog-field"><span>与我的关系</span><input value={relationshipToUser} onChange={(event)=>setRelationshipToUser(event.target.value)} placeholder="管家、伙伴、顾问或同事"/></label>
               <label className="dialog-field"><span>如何称呼我</span><input value={addressUserAs} onChange={(event)=>setAddressUserAs(event.target.value)} placeholder="留空则跟随世界默认称呼"/></label>

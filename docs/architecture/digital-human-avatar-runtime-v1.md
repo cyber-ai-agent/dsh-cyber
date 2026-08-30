@@ -4,7 +4,9 @@
 
 DSH Cyber 的数字人不应绑定某一个 TTS、头像生成或 3D 供应商。核心只输出角色身份、真实运行状态、回复文本与一组标准化动作意图；2D 精灵、动态肖像、VRM 3D 和未来的供应商通过 Renderer/Generator Adapter 消费这些事实。
 
-第一阶段已经落地本机语音播报与 `expression + gesture` 动作合同。用户可选择关闭、手动或自动播报，并从系统语音列表选择声音；自动模式只读取设置后新产生的最终回复，代码块和 URL 不会被朗读，内容不上传。2D Renderer 使用闭嘴/开口真实帧提供基础口部动作；精确音素口型仍由未来 viseme Adapter 提供。
+当前实现已经落地本机语音播报、`expression + gesture` 动作合同、VRM 1.0 运行时和本地形象版本管理。用户可选择关闭、手动或自动播报，并从系统语音列表选择声音；自动模式只读取设置后新产生的最终回复，代码块和 URL 不会被朗读，内容不上传。2D Renderer 使用闭嘴/开口真实帧提供基础口部动作；VRM Renderer 在没有时间轴时使用语音活动度驱动 `aa`，并保留 `VisemeTimeline` 适配边界。
+
+世界概览与数字人不再是两个 Tab。地图角色是入口：用户在 Overview 点击角色，地图镜头先聚焦，随后进入同一世界内的 Employee Focus；退出 Focus 时销毁 Three 资源并恢复地图。Focus 继承当前世界主题底图、角色、运行状态和最终回复，不创建默认“行动舱”或另一套事实源。
 
 ## 开源方案调研
 
@@ -57,9 +59,14 @@ WebGL/Canvas/Video presentation
 
 ### V1.1
 
-- 角色档案新增形象管理，支持本地图片和 VRM 导入、预览、版本化发布与回滚。
-- `@pixiv/three-vrm` 独立懒加载 chunk；VRM 不可用或 WebGL 压力过高时回退到 2D。
-- TTS Adapter 输出标准 viseme；VRM 表情管理器负责眨眼、视线和口型混合。
+- 角色设置已经新增形象管理：支持本地 PNG/JPEG/WebP、自包含 VRM 1.0 和普通 GLB 预览；普通 GLB 缺少 `VRMC_vrm`、Humanoid 或身份元数据时不能发布为交互数字人。
+- 上传只生成预览，显式发布才创建新的角色 Profile revision；恢复旧形象同样创建新 revision，历史不可改写。
+- Overview 点击地图角色进入 Employee Focus；Focus 使用当前世界主题，不再提供地图/数字人模式 Tab。
+- Renderer Registry 已提供 `sprite-2d`、`vrm-3d` 和供应商无关的 `LiveAvatarRendererPort`。核心没有绑定 HeyGen 或其他云供应商。
+- `three`、`@pixiv/three-vrm`、`@pixiv/three-vrm-animation` 位于独立懒加载 chunk，首屏 HTML 不预加载。
+- VRM Runtime 已拆分 Motion、Expression、LookAt、Blink、Speech、Animation、Performance 和 Resource Controller；状态来自 `WorldRuntimeSnapshot`，不是 UI 自行推断成功。
+- TTS 语音活动驱动基础口型，`VisemeTimeline` 可由未来 TTS Adapter 提供精确时间序列。
+- `high / balanced / low / static` 四级质量策略已落地；减弱动态效果、Headless、SwiftShader/软件 WebGL、持续低帧率或初始化失败都会安全回退 2D。
 
 ### V1.2（实验功能）
 
@@ -70,6 +77,13 @@ WebGL/Canvas/Video presentation
 ## 性能门禁
 
 - 数字人模式的 3D/AI 依赖不得进入主首屏 chunk。
-- 右侧 Dock 只允许一个活跃 Renderer；切回地图必须暂停渲染循环、语音和媒体轨道。
+- 右侧 Dock 只允许一个重型 WebGL Renderer；进入 VRM Focus 前释放 Overview 的 Pixi Renderer，并用当前主题底图保持视觉连续，退出 Focus 时销毁 Three 的 RAF、Observer、Mixer、材质、纹理和上下文后恢复地图。
 - 目标为普通桌面 30 FPS、交互帧 P95 小于 50ms；低性能或不可见页面自动降到 15 FPS 或静态模式。
 - VRM/GLB 激活前检查压缩、纹理尺寸和顶点/材质预算；生成任务不得占用会话执行通道。
+
+## 当前构建证据
+
+- 主入口 JavaScript 约 299 kB，主 CSS 约 275 kB；相对引入 VRM 前只增加少量编排代码。
+- VRM Runtime 为约 916 kB 的独立懒加载 chunk（gzip 约 232 kB），只在硬件 WebGL 的 VRM Focus 或显式 3D 预览中下载。
+- 构建门禁会解析 `index.html`，若首屏预加载 Three/VRM 或懒加载 chunk 超过 950 kB 则失败。
+- Playwright 覆盖 Overview → Focus、执行/说话状态、退出/重入、三种视口、减少动态效果和软件 WebGL 降级；Vitest 使用 `three-vrm` 的真实 `VRMLoaderPlugin` 解析发布合同夹具并驱动各 Controller。

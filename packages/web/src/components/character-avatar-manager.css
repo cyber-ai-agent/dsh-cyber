@@ -1,0 +1,44 @@
+.character-avatar-manager { display: grid; gap: 16px; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-panel); background: color-mix(in srgb, var(--surface-1) 86%, transparent); }
+.character-avatar-manager > header { display: flex; align-items: flex-start; gap: 12px; }
+.character-avatar-manager > header > div { min-width: 0; flex: 1; }
+.character-avatar-manager h4 { margin: 0; color: var(--text); font-size: 14px; }
+.character-avatar-manager p { margin: 4px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.character-avatar-manager > header > button { min-height: 40px; display: inline-flex; align-items: center; gap: 7px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-control); color: var(--text-soft); background: var(--surface-2); cursor: pointer; }
+.character-avatar-manager > header > button:hover:not(:disabled), .character-avatar-manager > header > button:focus-visible { color: var(--accent-strong); border-color: var(--accent); outline: 2px solid color-mix(in srgb, var(--accent) 24%, transparent); outline-offset: 1px; }
+.character-avatar-manager__preview { min-width: 0; display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 12px 16px; align-items: center; }
+.character-avatar-manager__stage { width: 180px; height: 220px; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--border-strong); border-radius: var(--radius-panel); background: var(--surface-0); box-shadow: inset 0 1px 0 color-mix(in srgb, white 6%, transparent); }
+.character-avatar-manager__stage > img { width: 100%; height: 100%; object-fit: contain; outline: 1px solid rgb(255 255 255 / 10%); outline-offset: -1px; }
+.character-avatar-manager__stage .avatar--lg { transform: scale(1.8); }
+.character-avatar-manager__stage .vrm-avatar-preview { width: 100%; height: 100%; }
+.vrm-avatar-preview { position: relative; display: grid; place-items: center; min-height: 160px; }
+.vrm-avatar-preview > canvas { width: 100%; height: 100%; }
+.vrm-avatar-preview > span { position: absolute; inset: auto 10px 10px; color: var(--text-muted); font-size: 12px; text-align: center; }
+.character-avatar-manager__summary { min-width: 0; display: flex; align-items: center; gap: 10px; }
+.character-avatar-manager__summary > span { width: 36px; height: 36px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: var(--radius-control); color: var(--accent-strong); background: var(--accent-soft); }
+.character-avatar-manager__summary > div { min-width: 0; display: grid; gap: 3px; }
+.character-avatar-manager__summary strong { overflow: hidden; color: var(--text); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.character-avatar-manager__summary small { color: var(--text-muted); font-size: 12px; line-height: 1.45; }
+.character-avatar-manager__draft { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border)); border-radius: var(--radius-control); background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.character-avatar-manager__draft > strong { color: var(--accent-strong); font-size: 12px; }
+.character-avatar-manager__draft > span { min-width: 0; flex: 1; color: var(--text-muted); font-size: 12px; }
+.character-avatar-manager__draft > button { min-height: 36px; }
+.character-avatar-manager__error { grid-column: 1 / -1; display: flex; align-items: center; gap: 7px; color: var(--danger); font-size: 12px; }
+.character-avatar-manager__fallback { display: grid; gap: 10px; }
+.character-avatar-manager__fallback > div:first-child { display: grid; gap: 3px; }
+.character-avatar-manager__fallback strong { color: var(--text-soft); font-size: 13px; }
+.character-avatar-manager__fallback small { color: var(--text-muted); font-size: 12px; line-height: 1.45; }
+.character-avatar-manager__fallback .avatar-picker { grid-template-columns: repeat(8, minmax(42px, 1fr)); }
+.character-avatar-manager__fallback > .text-button { justify-self: start; }
+.character-avatar-manager__history { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+.character-avatar-manager__history > div { display: flex; align-items: center; gap: 8px; }
+.character-avatar-manager__history > div > span { display: grid; gap: 2px; }
+.character-avatar-manager__history ol { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.character-avatar-manager__history li { min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-control); }
+.character-avatar-manager__history li > span { min-width: 0; flex: 1; display: grid; gap: 2px; }
+.character-avatar-manager__history li button { min-height: 32px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-control); color: var(--text-soft); background: var(--surface-2); cursor: pointer; }
+@media (max-width: 720px) {
+  .character-avatar-manager__preview { grid-template-columns: 1fr; }
+  .character-avatar-manager__stage { width: 100%; height: 260px; }
+  .character-avatar-manager__draft { align-items: stretch; flex-direction: column; }
+  .character-avatar-manager__fallback .avatar-picker { grid-template-columns: repeat(4, minmax(42px, 1fr)); }
+}

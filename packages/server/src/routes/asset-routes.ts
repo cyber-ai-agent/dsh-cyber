@@ -47,10 +47,30 @@ export function registerAssetRoutes(router: Router, dependencies: AssetRoutesDep
     writeJson(response, 201, uploaded)
   })
 
+  router.post(/^\/api\/employees\/([^/]+)\/avatar-assets$/, async ({ request, response, params }) => {
+    const employee = store.getEmployee(params[0]!)
+    if (employee === undefined || employee.status === 'archived') {
+      throw new HttpError(404, 'character_not_found', 'Character not found')
+    }
+    await access.assertUnlocked(employee.worldId, request)
+    const body = await readJson(request, 28 * 1024 * 1024)
+    const uploaded = await assets.uploadCharacterAvatar({
+      employeeId: employee.id,
+      name: requiredString(body, 'name'),
+      mimeType: requiredString(body, 'mimeType'),
+      dataBase64: requiredString(body, 'dataBase64'),
+    })
+    writeJson(response, 201, uploaded)
+  })
+
   router.get(/^\/api\/assets\/([^/]+)$/, async ({ request, response, params }) => {
     const assetId = params[0]!
     const metadata = store.getLocalAsset(assetId)
-    if (metadata?.kind === 'attachment') {
+    if (metadata?.kind === 'avatar') {
+      const avatar = store.getCharacterAvatarAsset(assetId)
+      if (avatar === undefined) throw new HttpError(404, 'avatar_asset_not_found', 'Character avatar asset not found')
+      await access.assertUnlocked(avatar.worldId, request)
+    } else if (metadata?.kind === 'attachment') {
       const worldId = legacyAttachmentWorldId(store, assetId)
       if (worldId !== undefined) await access.assertUnlocked(worldId, request)
     }

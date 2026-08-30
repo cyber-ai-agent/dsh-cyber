@@ -210,7 +210,7 @@ export function SessionRow({
             ? session.kind === 'group' || session.kind === 'meeting' ? <UsersThree size={16} /> : <ChatCircleDots size={16} />
             : session.kind === 'group' || session.kind === 'meeting'
               ? <GroupAvatar participants={participants} size="sm" />
-              : <Avatar index={participants[0]!.avatarIndex} size="sm" label={participants[0]!.displayName} authorityRole={participants[0]!.authorityRole} />}
+              : <Avatar index={participants[0]!.avatarIndex} size="sm" label={participants[0]!.displayName} authorityRole={participants[0]!.authorityRole} assetUrl={participants[0]!.avatarAssetUrl} rendererKind={participants[0]!.avatarProfile?.rendererKind} />}
         </span>
         <span className="session-row__copy"><strong className="session-row__title"><span className="session-row__name">{directTitle(session, participants)}{session.kind === 'direct' ? <AuthorityBadge role={participants[0]?.authorityRole} /> : null}</span>{session.kind === 'direct' && participants[0]?.role ? <span className="session-row__role">· {participants[0].role}</span> : null}</strong><small>{subtitle}</small></span>
         <time dateTime={session.updatedAt}>{formatSessionTime(session.updatedAt)}</time>

@@ -16,6 +16,7 @@ interface WorldCanvasProps {
   cues: WorldCue[]
   selectedEntityId?: string
   selectedObjectId?: string
+  focusEntityId?: string
   fitRequest: number
   zoomCommand?: WorldZoomCommand
   onEntitySelect(entityId: string): void
@@ -32,6 +33,7 @@ export function WorldCanvas({
   cues,
   selectedEntityId,
   selectedObjectId,
+  focusEntityId,
   fitRequest,
   zoomCommand,
   onEntitySelect,
@@ -76,6 +78,7 @@ export function WorldCanvas({
 
   useEffect(() => rendererRef.current?.selectEntity(selectedEntityId), [selectedEntityId])
   useEffect(() => rendererRef.current?.selectObject(selectedObjectId), [selectedObjectId])
+  useEffect(() => { if (focusEntityId !== undefined) rendererRef.current?.focusEntity(focusEntityId) }, [focusEntityId])
   useEffect(() => { if (fitRequest > 0) rendererRef.current?.fitScene() }, [fitRequest])
   useEffect(() => {
     if (zoomCommand !== undefined) rendererRef.current?.zoomBy(zoomCommand.delta)

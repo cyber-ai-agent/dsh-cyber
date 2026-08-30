@@ -1,4 +1,4 @@
-import type { JsonObject } from '@dsh-cyber/contracts'
+import type { CharacterAvatarProfile, JsonObject } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 import type { AgentPermissionMode } from '@dsh-cyber/contracts'
 import { assertCharacterBehaviorProfileAppearance } from '@dsh-cyber/world-simulation'
@@ -19,6 +19,7 @@ import {
   readJson,
   record,
   requiredEnum,
+  requiredNumber,
   requiredString,
 } from '../http/request.js'
 import { writeJson } from '../http/response.js'
@@ -121,6 +122,14 @@ export function registerEmployeeRoutes(router: Router, dependencies: EmployeeRou
           error instanceof Error ? error.message : 'Invalid character behavior profile',
         )
       }
+      if (appearance.digitalHumanAvatar !== undefined) {
+        const descriptor = avatarProfile(appearance.digitalHumanAvatar)
+        if (descriptor === undefined) throw new HttpError(422, 'invalid_avatar_profile', '角色形象资料格式无效')
+        const avatarAsset = store.getCharacterAvatarAsset(descriptor.assetId)
+        if (avatarAsset === undefined || avatarAsset.employeeId !== params[0]) {
+          throw new HttpError(422, 'avatar_asset_scope_mismatch', '角色形象资产不属于当前角色')
+        }
+      }
     }
     const profile = store.reviseEmployeeProfile({
       employeeId: params[0]!,
@@ -135,6 +144,93 @@ export function registerEmployeeRoutes(router: Router, dependencies: EmployeeRou
       reason: requiredString(body, 'reason'),
     })
     writeJson(response, 201, { profile, employee: store.getEmployee(params[0]!) })
+  })
+
+  router.post(/^\/api\/employees\/([^/]+)\/avatar-assets\/([^/]+)\/publish$/, async ({ request, response, params }) => {
+    const employee = await assertCharacterUnlocked(params[0]!, request)
+    const body = await readJson(request)
+    const current = store.getEmployeeProfile(employee.id)
+    const expectedProfileRevision = requiredInteger(body, 'expectedProfileRevision', 0)
+    if ((current?.revision ?? 0) !== expectedProfileRevision) {
+      throw new HttpError(409, 'profile_revision_conflict', '角色资料已在其他页面更新，请刷新后重试')
+    }
+    const avatarAsset = store.getCharacterAvatarAsset(params[1]!)
+    if (avatarAsset === undefined || avatarAsset.employeeId !== employee.id || avatarAsset.worldId !== employee.worldId) {
+      throw new HttpError(404, 'avatar_asset_not_found', '角色形象资产不存在')
+    }
+    if (avatarAsset.rendererKind === 'mesh-preview') {
+      throw new HttpError(422, 'avatar_vrm_required', '普通 GLB 只能预览，不能发布为交互式 VRM 数字人')
+    }
+    const fallbackAvatarIndex = requiredInteger(body, 'fallbackAvatarIndex', 0, 7)
+    const capabilities: CharacterAvatarProfile['capabilities'] = avatarAsset.rendererKind === 'vrm-3d'
+      ? ['full-body', 'expression', 'gesture', 'look-at', ...(avatarAsset.validation.visemeReady === true ? ['viseme' as const] : [])]
+      : ['portrait']
+    const descriptor: CharacterAvatarProfile = {
+      schemaVersion: 1,
+      identityId: employee.id,
+      rendererKind: avatarAsset.rendererKind,
+      assetId: avatarAsset.assetId,
+      ...(avatarAsset.rendererKind === 'image-2d' ? { portraitAssetId: avatarAsset.assetId } : {}),
+      sourceName: avatarAsset.originalName,
+      fallbackAvatarIndex,
+      capabilities,
+      publishedAt: new Date().toISOString(),
+    }
+    const appearance: JsonObject = {
+      ...(current?.appearance ?? {}),
+      avatarIndex: fallbackAvatarIndex,
+      worldSkinIndex: fallbackAvatarIndex,
+      digitalHumanAvatar: descriptor as unknown as JsonObject,
+    }
+    const profile = store.reviseEmployeeProfile({
+      employeeId: employee.id,
+      appearance,
+      reason: `发布角色形象：${avatarAsset.originalName}`,
+    })
+    writeJson(response, 201, { profile, employee: store.getEmployee(employee.id), avatarAsset })
+  })
+
+  router.post(/^\/api\/employees\/([^/]+)\/avatar-profile\/rollback$/, async ({ request, response, params }) => {
+    const employee = await assertCharacterUnlocked(params[0]!, request)
+    const body = await readJson(request)
+    const current = store.getEmployeeProfile(employee.id)
+    const expectedProfileRevision = requiredInteger(body, 'expectedProfileRevision', 1)
+    if (current?.revision !== expectedProfileRevision) {
+      throw new HttpError(409, 'profile_revision_conflict', '角色资料已在其他页面更新，请刷新后重试')
+    }
+    const targetRevision = requiredInteger(body, 'targetRevision', 1)
+    const target = store.listEmployeeProfiles(employee.id).find((profile) => profile.revision === targetRevision)
+    if (target === undefined || target.revision >= current.revision) {
+      throw new HttpError(422, 'invalid_profile_revision', '只能恢复到更早的角色资料版本')
+    }
+    const descriptor = avatarProfile(target.appearance.digitalHumanAvatar)
+    if (descriptor !== undefined) {
+      const avatarAsset = store.getCharacterAvatarAsset(descriptor.assetId)
+      if (avatarAsset === undefined || avatarAsset.employeeId !== employee.id) {
+        throw new HttpError(409, 'avatar_asset_missing', '该历史版本引用的形象资产已经缺失，无法恢复')
+      }
+    }
+    const profile = store.reviseEmployeeProfile({
+      employeeId: employee.id,
+      appearance: target.appearance,
+      reason: `恢复角色形象版本 ${target.revision}`,
+    })
+    writeJson(response, 201, { profile, employee: store.getEmployee(employee.id), restoredFromRevision: target.revision })
+  })
+
+  router.post(/^\/api\/employees\/([^/]+)\/avatar-profile\/reset$/, async ({ request, response, params }) => {
+    const employee = await assertCharacterUnlocked(params[0]!, request)
+    const body = await readJson(request)
+    const current = store.getEmployeeProfile(employee.id)
+    const expectedProfileRevision = requiredInteger(body, 'expectedProfileRevision', 0)
+    if ((current?.revision ?? 0) !== expectedProfileRevision) {
+      throw new HttpError(409, 'profile_revision_conflict', '角色资料已在其他页面更新，请刷新后重试')
+    }
+    const fallbackAvatarIndex = requiredInteger(body, 'fallbackAvatarIndex', 0, 7)
+    const appearance: JsonObject = { ...(current?.appearance ?? {}), avatarIndex: fallbackAvatarIndex, worldSkinIndex: fallbackAvatarIndex }
+    delete appearance.digitalHumanAvatar
+    const profile = store.reviseEmployeeProfile({ employeeId: employee.id, appearance, reason: '恢复内置角色形象' })
+    writeJson(response, 201, { profile, employee: store.getEmployee(employee.id) })
   })
 
   router.post(/^\/api\/employees\/([^/]+)\/skill-evidence$/, async ({ request, response, params }) => {
@@ -206,4 +302,19 @@ export function registerEmployeeRoutes(router: Router, dependencies: EmployeeRou
       : authority.archiveEmployee(employee.worldId, employee.id, { kind: 'owner', id: 'local-user' })
     writeJson(response, 200, { employee: archived })
   })
+}
+
+function requiredInteger(body: Record<string, unknown>, key: string, minimum: number, maximum = Number.MAX_SAFE_INTEGER): number {
+  const value = requiredNumber(body, key)
+  if (!Number.isInteger(value) || value < minimum || value > maximum) {
+    throw new HttpError(422, 'invalid_integer', `${key} must be an integer between ${minimum} and ${maximum}`)
+  }
+  return value
+}
+
+function avatarProfile(value: unknown): CharacterAvatarProfile | undefined {
+  const input = record(value)
+  if (input === undefined || input.schemaVersion !== 1) return undefined
+  if ((input.rendererKind !== 'image-2d' && input.rendererKind !== 'vrm-3d') || typeof input.assetId !== 'string') return undefined
+  return input as unknown as CharacterAvatarProfile
 }

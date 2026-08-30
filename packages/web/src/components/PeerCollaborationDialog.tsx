@@ -72,7 +72,7 @@ export function PeerCollaborationDialog({ initiator, employees, busy, error, onC
           <div className="group-dialog__name">
             <span>发起角色</span>
             <div className="group-member is-selected">
-              <Avatar index={initiator.avatarIndex} label={initiator.displayName} status={initiator.status} authorityRole={initiator.authorityRole} />
+              <Avatar index={initiator.avatarIndex} label={initiator.displayName} status={initiator.status} authorityRole={initiator.authorityRole} assetUrl={initiator.avatarAssetUrl} rendererKind={initiator.avatarProfile?.rendererKind} />
               <span><strong>{initiator.displayName}<AuthorityBadge role={initiator.authorityRole} /></strong><small>{initiator.role} · 将在每轮最后归纳</small></span>
             </div>
           </div>
@@ -105,7 +105,7 @@ export function PeerCollaborationDialog({ initiator, employees, busy, error, onC
               return (
                 <label key={employee.id} className={`group-member${selected ? ' is-selected' : ''}`}>
                   <input type="checkbox" checked={selected} disabled={busy} onChange={() => toggle(employee.id)} />
-                  <Avatar index={employee.avatarIndex} label={employee.displayName} status={employee.status} authorityRole={employee.authorityRole} />
+                  <Avatar index={employee.avatarIndex} label={employee.displayName} status={employee.status} authorityRole={employee.authorityRole} assetUrl={employee.avatarAssetUrl} rendererKind={employee.avatarProfile?.rendererKind} />
                   <span><strong>{employee.displayName}<AuthorityBadge role={employee.authorityRole} /></strong><small>{employee.role} · {employee.currentActivity}</small></span>
                 </label>
               )

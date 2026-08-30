@@ -62,7 +62,7 @@ export function EmployeeDossierDirectory({ employees, dossiers, world, onOpen, o
             <article key={employee.id} className="dossier-card">
               <header>
                 <button className="avatar-edit-button" type="button" aria-label={`修改${employee.displayName}的名字和头像`} onClick={() => onManage(employee)}>
-                  <Avatar index={employee.avatarIndex} size="md" label={employee.displayName} status={employee.status} authorityRole={employee.authorityRole} />
+                  <Avatar index={employee.avatarIndex} size="md" label={employee.displayName} status={employee.status} authorityRole={employee.authorityRole} assetUrl={employee.avatarAssetUrl} rendererKind={employee.avatarProfile?.rendererKind} />
                 </button>
                 <div><strong>{employee.displayName}<AuthorityBadge role={employee.authorityRole} /></strong><span>{employee.role}</span></div>
                 <div className="employee-runtime-status">
