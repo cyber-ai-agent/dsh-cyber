@@ -1,6 +1,6 @@
 import { createReadStream, createWriteStream } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { Readable, Transform } from 'node:stream'
@@ -245,8 +245,10 @@ export class LocalTtsAssetService {
       for (const file of MOSS_FILES) {
         if (operation.controller.signal.aborted) throw abortError()
         const directory = join(staging, modelPackDirectory(file.directory))
+        const cacheDirectory = join(modelsRoot, '.downloads', MOSS_MODEL_ID, modelPackDirectory(file.directory))
         await mkdir(directory, { recursive: true })
-        await downloadPinnedFile(file, join(directory, file.path), operation)
+        await mkdir(cacheDirectory, { recursive: true })
+        await materializePinnedFile(file, join(cacheDirectory, file.path), join(directory, file.path), operation)
       }
       operation.state = 'verifying'
       operation.phase = 'installing'
@@ -298,14 +300,21 @@ function modelPackDirectory(directory: ModelPackFile['directory']): string {
   return 'runtime'
 }
 
-async function downloadPinnedFile(file: ModelPackFile, destination: string, operation: ModelInstallOperation): Promise<void> {
+async function materializePinnedFile(file: ModelPackFile, cachePath: string, destination: string, operation: ModelInstallOperation): Promise<void> {
+  if (await hasValidCachedFile(file, cachePath)) {
+    operation.completedBytes += file.size
+    await copyFile(cachePath, destination)
+    return
+  }
+  const partialPath = `${cachePath}.partial`
+  await rm(partialPath, { force: true })
   const url = file.source === 'github'
     ? `https://raw.githubusercontent.com/${file.repository}/${file.revision}/${encodeURIComponent(file.path)}`
     : `https://huggingface.co/${file.repository}/resolve/${file.revision}/${encodeURIComponent(file.path)}`
   const response = await proxyAwareFetch(url, { redirect: 'follow', signal: operation.controller.signal, dispatcher: voiceDownloadDispatcher })
   if (!response.ok || response.body === null) throw new Error(`下载 ${file.path} 失败：HTTP ${response.status}`)
   const declared = Number(response.headers.get('content-length'))
-  if (Number.isFinite(declared) && declared !== file.size) throw new Error(`${file.path} 下载大小与固定清单不一致`)
+  if (file.checksum.algorithm === 'sha256' && Number.isFinite(declared) && declared !== file.size) throw new Error(`${file.path} 下载大小与固定清单不一致`)
   let received = 0
   const progress = new Transform({
     transform(chunk, _encoding, callback) {
@@ -314,14 +323,24 @@ async function downloadPinnedFile(file: ModelPackFile, destination: string, oper
       callback(null, chunk)
     },
   })
-  await pipeline(Readable.fromWeb(response.body), progress, createWriteStream(destination, { flags: 'wx', mode: 0o600 }))
+  await pipeline(Readable.fromWeb(response.body), progress, createWriteStream(partialPath, { flags: 'wx', mode: 0o600 }))
   if (received !== file.size) throw new Error(`${file.path} 下载不完整`)
   operation.state = 'verifying'
   operation.phase = 'verifying'
-  const checksum = await fileChecksum(destination, file.checksum.algorithm, file.size)
+  const checksum = await fileChecksum(partialPath, file.checksum.algorithm, file.size)
   if (checksum !== file.checksum.value) throw new Error(`${file.path} 完整性校验失败`)
+  await rm(cachePath, { force: true })
+  await rename(partialPath, cachePath)
+  await copyFile(cachePath, destination)
   operation.state = 'downloading'
   operation.phase = 'downloading'
+}
+
+async function hasValidCachedFile(file: ModelPackFile, path: string): Promise<boolean> {
+  try {
+    if ((await stat(path)).size !== file.size) return false
+    return await fileChecksum(path, file.checksum.algorithm, file.size) === file.checksum.value
+  } catch { return false }
 }
 
 async function fileChecksum(path: string, algorithm: 'sha256' | 'git-sha1', size: number): Promise<string> {
