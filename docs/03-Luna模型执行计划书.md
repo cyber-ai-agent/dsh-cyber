@@ -42,3 +42,10 @@ pnpm exec playwright test e2e/digital-human-world.spec.ts
 ```
 
 视觉验收继续覆盖 1440×900、1920×1080、3840×2160；构建门禁要求主入口不引用 Three/VRM，VRM 懒加载 chunk 不超过 950 kB。
+
+### Employee Focus 可见入口修正
+
+- 原数字人 E2E 使用隐藏按钮脚本触发，不能证明真实用户可以进入；该验收方式已废止。
+- 世界 HUD 的“当前会话”现在直接展示可点击的角色与岗位，点击后进入对应 Employee Focus；地图人物点击继续作为空间快捷方式。
+- E2E 必须对真实入口执行 `visible + enabled + 普通 click`，并验证 Focus 和返回路径；禁止 `force`、隐藏镜像和 `evaluate().click()`。
+- 已在本地真实股票分析团队数据页面完成点击验证，控制台 error/warn 为 0。
