@@ -93,6 +93,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       employeeId: agent.id,
       conversationId: request.conversationId,
       prompt: request.prompt,
+      ...(request.contextBudget === undefined ? {} : { budgetTokens: request.contextBudget.memoryTokens }),
     })
     const prompt = memoryContext === undefined
       ? request.prompt

@@ -181,4 +181,39 @@ describe('EmployeeConversationMemoryService', () => {
     expect(store.getEmployeeDossier(employee.id).milestones.some((item) => item.title === '[group] 群聊协作')).toBe(true)
     expect(store.getEmployeeDossier(silent.id).milestones.some((item) => item.title === '[group] 群聊协作')).toBe(false)
   })
+
+  it('reuses a bounded query cache and invalidates it when milestone revision changes', async () => {
+    const { store, workspace, world, employee } = await setup()
+    const session = store.createSession({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      kind: 'direct',
+      title: '缓存私聊',
+      participants: [{ participantId: employee.id, kind: 'employee' }],
+    })
+    const evidence = store.appendMessage({ sessionId: session.id, senderId: 'owner', senderKind: 'owner', kind: 'user', content: '偏好简洁回答', metadata: {} })
+    store.appendEmployeeMilestone({ employeeId: employee.id, category: 'reflection', title: '[private] 私聊记忆', summary: '用户偏好简洁回答。', sourceMessageIds: [evidence.id], actorId: 'system' })
+    let dossierReads = 0
+    const memory = new EmployeeConversationMemoryService({
+      getEmployee: store.getEmployee.bind(store),
+      getEmployeeDossier: (employeeId) => { dossierReads += 1; return store.getEmployeeDossier(employeeId) },
+      getEmployeeMilestoneRevision: store.getEmployeeMilestoneRevision.bind(store),
+      getSession: store.getSession.bind(store),
+      getWorkTurn: store.getWorkTurn.bind(store),
+      listMessages: store.listMessages.bind(store),
+      appendEmployeeMilestone: store.appendEmployeeMilestone.bind(store),
+    })
+
+    const first = await memory.compose({ employeeId: employee.id, conversationId: session.id, prompt: '我的回答偏好是什么？', budgetTokens: 256 })
+    const second = await memory.compose({ employeeId: employee.id, conversationId: session.id, prompt: '我的回答偏好是什么？', budgetTokens: 256 })
+
+    expect(second).toBe(first)
+    expect(dossierReads).toBe(1)
+
+    store.appendEmployeeMilestone({ employeeId: employee.id, category: 'reflection', title: '[private] 私聊记忆', summary: '用户新增偏好：重要结论先说。', sourceMessageIds: [evidence.id], actorId: 'system' })
+    const refreshed = await memory.compose({ employeeId: employee.id, conversationId: session.id, prompt: '我的回答偏好是什么？', budgetTokens: 256 })
+
+    expect(dossierReads).toBe(2)
+    expect(refreshed).toContain('重要结论先说')
+  })
 })

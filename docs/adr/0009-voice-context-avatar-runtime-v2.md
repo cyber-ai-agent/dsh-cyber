@@ -103,6 +103,8 @@ VRM 1.0 继续作为首选 3D 角色格式，因为其规范直接覆盖 humanoi
 - memory/knowledge retrieval cache 与 revision 失效；
 - 长会话性能与隐私隔离 E2E。
 
+第一批实现先覆盖最危险的恢复路径：模型路由按 `contextWindow/maxTokens` 生成 Provider-neutral 预算；新 Harness lane 只保留最近历史原文，旧历史形成 data-only checkpoint；角色情景记忆按 token budget 注入，并使用里程碑 revision 自动失效的 LRU 热缓存。世界知识的 token 化预算、持久化语义摘要和诊断面板留在后续独立 PR，避免把 SQLite migration、检索策略和恢复协议混成一次不可审查的改动。
+
 ### Phase C：Avatar Entry V2
 
 - 3D 能力状态与“添加 3D 形象”原位入口；

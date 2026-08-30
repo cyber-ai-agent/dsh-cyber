@@ -2493,6 +2493,14 @@ export class SqliteStore {
       .map(mapEmployeeMilestone)
   }
 
+  getEmployeeMilestoneRevision(employeeId: string): string {
+    const row = this.database.prepare(
+      `SELECT COUNT(*) AS count, COALESCE(MAX(created_at), '') AS latest
+       FROM employee_milestones WHERE employee_id = ?`,
+    ).get(employeeId) as { count: number; latest: string }
+    return `${Number(row.count)}:${row.latest}`
+  }
+
   removeLegacyConversationMilestones(employeeId: string): number {
     this.#assertWritable()
     this.#requireEmployee(employeeId)

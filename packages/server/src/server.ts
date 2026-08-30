@@ -53,6 +53,7 @@ import { AssetService } from './services/asset-service.js'
 import { LocalTtsAssetService } from './services/local-tts-asset-service.js'
 import { ApplicationAccessService } from './services/application-access-service.js'
 import { CharacterProfileRuntime } from './services/character-profile-runtime.js'
+import { ContextPlanningRuntime, contextModelLimits } from './services/context-planning-runtime.js'
 import { CharacterSkillRuntime } from './services/character-skill-runtime.js'
 import { composeConversationControl } from './services/conversation-control-composition.js'
 import { SkillCatalogService } from './services/skill-catalog-service.js'
@@ -289,8 +290,9 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     resolveRoute(request) { return resolveHarnessRoute(store, request) },
   })
   const profileRuntime = new CharacterProfileRuntime(baseRuntime, store, skillRegistry, authority, skillAvailability)
+  const contextRuntime = new ContextPlanningRuntime(profileRuntime, (request) => contextModelLimits(resolveHarnessRoute(store, request)))
   const runtime = new TurnInteractionLoggingRuntime({
-    inner: profileRuntime,
+    inner: contextRuntime,
     service: interactions,
     resolveRoute(request) { return resolveHarnessRoute(store, request) },
   })
@@ -511,7 +513,6 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const unsubscribeControl = orchestrator.subscribeControl((event) => runtimeStreamHub.publishControl(event))
   let startedAddress: CyberServerAddress | undefined
   let closed = false
-
   return {
     store,
     orchestrator,
@@ -565,7 +566,6 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     },
   }
 }
-
 /** Crash residue from `instantiate`; safe to remove because nothing reads it. */
 async function sweepOrphanedPackageStaging(store: SqliteStore, worldPackages: WorldPackageInstanceService): Promise<void> {
   let removed = 0

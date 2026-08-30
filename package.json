@@ -27,6 +27,7 @@
     "voice:benchmark:moss": "node scripts/benchmark-moss-tts.mjs",
     "voice:verify-loop": "node scripts/verify-local-voice-loop.mjs",
     "voice:verify-websocket": "node scripts/verify-voice-websocket.mjs",
+    "context:benchmark": "node scripts/benchmark-context.mjs",
     "dsh-cyber": "node packages/cli/lib/bin.js"
   },
   "devDependencies": {
