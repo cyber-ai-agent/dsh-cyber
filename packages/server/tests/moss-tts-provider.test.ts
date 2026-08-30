@@ -12,6 +12,7 @@ describe('MossTtsProvider sidecar protocol', () => {
     const sidecar = join(root, 'fake-sidecar.mjs')
     await writeFile(sidecar, `
       import { createInterface } from 'node:readline';
+      if (process.env.PYTHONIOENCODING !== 'utf-8' || process.env.PYTHONUTF8 !== '1') process.exit(2);
       process.stdout.write(JSON.stringify({ type: 'ready', voices: ['Junhao'] }) + '\\n');
       const lines = createInterface({ input: process.stdin });
       lines.on('line', (line) => {

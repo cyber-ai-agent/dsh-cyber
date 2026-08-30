@@ -47,6 +47,8 @@ def install_lightweight_import_stubs(output_root: Path) -> None:
 
 
 def main() -> None:
+    sys.stdin.reconfigure(encoding="utf-8", errors="strict")
+    sys.stdout.reconfigure(encoding="utf-8", errors="strict")
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-root", required=True)
     parser.add_argument("--runtime-root", required=True)

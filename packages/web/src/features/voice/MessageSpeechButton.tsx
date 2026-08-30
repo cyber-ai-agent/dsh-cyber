@@ -63,15 +63,19 @@ export function MessageSpeechButton({ employeeId, employeeName, profile, text }:
         }
       }
       if (effectiveProvider === 'moss') {
-        await playMossSpeech({
-          text: spokenText,
-          voiceId: voice.voiceId.startsWith('moss:') ? voice.voiceId : 'moss:Junhao',
-          speed: voice.speed,
-          onStatus: () => undefined,
-          onStart: () => { setBusy(false); setPlaying(true) },
-          onEnd: () => { setBusy(false); setPlaying(false) },
-        })
-        return
+        try {
+          await playMossSpeech({
+            text: spokenText,
+            voiceId: voice.voiceId.startsWith('moss:') ? voice.voiceId : 'moss:Junhao',
+            speed: voice.speed,
+            onStatus: () => undefined,
+            onStart: () => { setBusy(false); setPlaying(true) },
+            onEnd: () => { setBusy(false); setPlaying(false) },
+          })
+          return
+        } catch {
+          effectiveProvider = 'kokoro'
+        }
       }
       const localVoice = voice.voiceId.startsWith('kokoro:')
         ? voice

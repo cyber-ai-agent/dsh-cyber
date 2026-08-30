@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { homedir } from 'node:os'
+import { availableParallelism, homedir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 
@@ -19,9 +19,13 @@ const samples = [
 const coldStartedAt = performance.now()
 await provider.prepare()
 const coldStartMs = performance.now() - coldStartedAt
+process.stderr.write(`[moss-benchmark] ready pid=${provider.processId ?? 'unknown'} cold=${coldStartMs.toFixed(0)}ms\n`)
+const measurementStartedAt = performance.now()
+const cpuStartedMs = await processTreeCpuMs(provider.processId)
 const results = []
 for (const sample of samples) {
   for (let iteration = 0; iteration < 3; iteration += 1) {
+    process.stderr.write(`[moss-benchmark] ${sample.kind} ${iteration + 1}/3\n`)
     const startedAt = performance.now()
     let firstAudioMs
     let durationMs = 0
@@ -34,11 +38,18 @@ for (const sample of samples) {
   }
 }
 const memoryMb = await childMemoryMb(provider.processId)
+const cpuFinishedMs = await processTreeCpuMs(provider.processId)
+const measurementElapsedMs = performance.now() - measurementStartedAt
+const cpuTimeMs = cpuStartedMs === undefined || cpuFinishedMs === undefined ? undefined : Math.max(0, cpuFinishedMs - cpuStartedMs)
+const logicalCpuCount = availableParallelism()
+const cpuPercent = cpuTimeMs === undefined ? undefined : cpuTimeMs / measurementElapsedMs * 100
 const output = {
   provider: 'moss-tts-nano-100m-onnx', device: `${process.platform}-${process.arch}-cpu`, coldStartMs,
   firstAudioMs: distribution(results.map((item) => item.firstAudioMs)),
   realtimeFactor: distribution(results.map((item) => item.realtimeFactor)),
-  memoryMb, blocksMainThread: false, results,
+  memoryMb, cpuTimeMs, cpuPercent, logicalCpuCount,
+  cpuMachinePercent: cpuPercent === undefined ? undefined : cpuPercent / logicalCpuCount,
+  blocksMainThread: false, results,
 }
 await provider.dispose()
 process.stdout.write(`${JSON.stringify(output, null, 2)}\n`)
@@ -48,8 +59,26 @@ function percentile(values, ratio) { const ordered = [...values].sort((a, b) => 
 async function childMemoryMb(pid) {
   if (pid === undefined || process.platform !== 'win32') return undefined
   try {
-    const { stdout } = await execFileAsync('wmic', ['process', 'where', `processid=${pid}`, 'get', 'WorkingSetSize', '/value'], { windowsHide: true })
-    const bytes = Number(/WorkingSetSize=(\d+)/u.exec(stdout)?.[1])
-    return Number.isFinite(bytes) ? bytes / 1024 / 1024 : undefined
+    const bytes = await processTreeMetric(pid, 'WorkingSetSize')
+    return bytes / 1024 / 1024
   } catch { return undefined }
+}
+
+async function processTreeCpuMs(pid) {
+  if (pid === undefined || process.platform !== 'win32') return undefined
+  try {
+    const user = await processTreeMetric(pid, 'UserModeTime')
+    const kernel = await processTreeMetric(pid, 'KernelModeTime')
+    return (user + kernel) / 10_000
+  } catch { return undefined }
+}
+
+async function processTreeMetric(pid, field) {
+  const queries = [`ProcessId=${pid}`, `ParentProcessId=${pid}`]
+  let total = 0
+  for (const query of queries) {
+    const { stdout } = await execFileAsync('wmic', ['process', 'where', query, 'get', field, '/value'], { windowsHide: true })
+    for (const match of stdout.matchAll(new RegExp(`${field}=(\\d+)`, 'gu'))) total += Number(match[1])
+  }
+  return total
 }

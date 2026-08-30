@@ -81,7 +81,11 @@ export class MossTtsProvider implements TextToSpeechProvider {
     const runtimeRoot = join(this.modelRoot, 'runtime')
     const loading = (async () => {
       await stat(runtimePython)
-      const child = spawn(runtimePython, [sidecar, '--model-root', this.modelRoot, '--runtime-root', runtimeRoot], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
+      const child = spawn(runtimePython, [sidecar, '--model-root', this.modelRoot, '--runtime-root', runtimeRoot], {
+        windowsHide: true,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' },
+      })
       this.#process = child
       this.#readline = createInterface({ input: child.stdout })
       await new Promise<void>((resolve, reject) => {

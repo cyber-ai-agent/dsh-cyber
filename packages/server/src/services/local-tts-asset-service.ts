@@ -70,8 +70,8 @@ const MOSS_FILES: readonly ModelPackFile[] = [
   mossFile('codec', 'moss_audio_tokenizer_encode.data', 44_507_136, 'sha256', 'aa751265b2bab2887eac224484546b194875aa7494b607115439b3dc6b228a2c'),
   mossFile('codec', 'moss_audio_tokenizer_encode.onnx', 815_775, 'sha256', 'eadea4a645abdcf98714c7aead122ee2ce7da6e080f9f80b977cd1ca8e19473a'),
   mossFile('codec', 'codec_browser_onnx_meta.json', 17_036, 'git-sha1', '886953a56489516b847b7c1c953bde063eb78faa'),
-  mossRuntimeFile('ort_cpu_runtime.py', 41_502, '0b9e5d2c95b0e20d7044123b2e4515f1a76f96a6'),
-  mossRuntimeFile('onnx_tts_runtime.py', 29_764, 'c6b1d70cbcaa52cf51de138612ac2d0c6bec3435'),
+  mossRuntimeFile('ort_cpu_runtime.py', 40_665, '0b9e5d2c95b0e20d7044123b2e4515f1a76f96a6'),
+  mossRuntimeFile('onnx_tts_runtime.py', 29_099, 'c6b1d70cbcaa52cf51de138612ac2d0c6bec3435'),
 ]
 const MOSS_DOWNLOAD_BYTES = MOSS_FILES.reduce((total, file) => total + file.size, 0)
 
@@ -117,8 +117,8 @@ export class LocalTtsAssetService {
         id: 'moss-tts-nano-100m-onnx', provider: 'moss', displayName: 'MOSS-TTS-Nano', version: '100M-ONNX',
         license: 'Apache-2.0', byteLength: MOSS_DOWNLOAD_BYTES, state: mossInstalled && mossState === 'installed' ? 'ready' : mossState,
         tier: 'default', recommended: true, runtime: 'onnx-cpu', languages: ['zh-CN', 'en-US'],
-        summary: '默认自然语音包。支持本地流式生成和参考音色，首次使用时按需安装。',
-        requirements: ['约 1 GB 磁盘空间', '建议 4 GB 可用内存'],
+        summary: '默认自然语音包。中文自然度更高，首次使用时按需安装。',
+        requirements: ['约 1 GB 磁盘空间', '运行约占 1.7 GB 内存', '建议 4 GB 可用内存'],
         ...(mossInstalled ? { installedPath: mossRoot } : {}),
         ...(mossOperation === undefined ? {} : {
           progress: { phase: mossOperation.phase, completedBytes: mossOperation.completedBytes, totalBytes: mossOperation.totalBytes },

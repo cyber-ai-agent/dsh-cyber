@@ -120,11 +120,13 @@ export async function appendKokoroSpeech(input: {
       buffer.getChannelData(0).set(frame.pcm)
       const source = context.createBufferSource()
       source.buffer = buffer
+      const playbackRate = provider === 'moss' ? normalizeSpeed(input.speed) : 1
+      source.playbackRate.value = playbackRate
       source.connect(getAnalyser(context))
       const startAt = Math.max(context.currentTime + 0.02, nextStartAt)
-      nextStartAt = startAt + buffer.duration
+      nextStartAt = startAt + buffer.duration / playbackRate
       playbackCursor = nextStartAt
-      totalDuration += buffer.duration
+      totalDuration += buffer.duration / playbackRate
       activeSources.add(source)
       source.onended = () => {
         activeSources.delete(source)
