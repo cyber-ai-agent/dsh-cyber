@@ -1,6 +1,6 @@
 import { ArrowsClockwise, SpeakerHigh, SpeakerSlash } from '@phosphor-icons/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { EmployeeProfile, EmployeeVoiceProfile, World, WorldRuntimeEntityState } from '@dsh-cyber/contracts'
+import type { EmployeeProfile, EmployeeVoiceProfile, VoiceModelDescriptor, World, WorldRuntimeEntityState } from '@dsh-cyber/contracts'
 
 import { api } from '../../../../api.js'
 import type { CyberEmployee } from '../../../../types.js'
@@ -55,6 +55,7 @@ export function EmployeeFocusMode({ world, employee, profile, entity, collaborat
   const [voiceNotice, setVoiceNotice] = useState<string>()
   const [voiceBusy, setVoiceBusy] = useState(false)
   const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false)
+  const [mossReady, setMossReady] = useState(false)
   const streamChunkerRef = useRef(new StreamingSentenceChunker())
   const streamTurnRef = useRef<string | undefined>(undefined)
   const streamChainRef = useRef<Promise<void>>(Promise.resolve())
@@ -82,7 +83,11 @@ export function EmployeeFocusMode({ world, employee, profile, entity, collaborat
   const selectedSystemVoice = resolveSpeechVoice(chineseSystemVoices, systemVoiceId)
   const selectedKokoroVoice = KOKORO_CHINESE_VOICES.find((voice) => voice.id === voiceId)
   const selectedVoiceMissing = selectedKokoroVoice === undefined && selectedSystemVoice === undefined
-  const activeVoiceProvider = profile?.voiceProfile.provider ?? 'auto'
+  const configuredVoiceProvider = profile?.voiceProfile.provider ?? 'auto'
+  const activeVoiceProvider = configuredVoiceProvider === 'auto' ? (mossReady ? 'moss' : 'kokoro') : configuredVoiceProvider
+  const updateVoiceModels = useCallback((models: VoiceModelDescriptor[]) => {
+    setMossReady(models.some((model) => model.provider === 'moss' && model.state === 'ready'))
+  }, [])
 
   useEffect(() => { setRendererReady(false); setRendererNotice(undefined) }, [employee.id, employee.avatarProfile?.assetId, quality, rendererMode])
   useEffect(() => {
@@ -315,7 +320,7 @@ export function EmployeeFocusMode({ world, employee, profile, entity, collaborat
         <span className={`employee-focus__status is-${state}`}><i aria-hidden="true" />{stateLabel(state)}</span>
         <div className="employee-focus__voice"><button type="button" className="employee-focus__voice-trigger" aria-label="语音设置" aria-expanded={voiceSettingsOpen} onClick={() => { setVoiceSettingsOpen((current) => { const next = !current; if (!next) flushVoiceProfile(); return next }) }}>{speaking ? <SpeakerSlash size={17} aria-hidden="true" /> : <SpeakerHigh size={17} aria-hidden="true" />}语音</button>{voiceSettingsOpen ? <div>
           <header><span><strong>{employee.displayName}的语音</strong><small>{KOKORO_CHINESE_VOICES.length} 个中文声音{chineseSystemVoices.length > 0 ? ` · ${chineseSystemVoices.length} 个系统中文声音` : ''}</small></span><button type="button" aria-label="刷新系统声音" onClick={refreshVoices}><ArrowsClockwise size={16} aria-hidden="true" /></button></header>
-          <VoiceModelPackPicker value={profile?.voiceProfile.provider ?? 'auto'} onActivate={activateVoiceProvider} />
+          <VoiceModelPackPicker value={configuredVoiceProvider} onActivate={activateVoiceProvider} onModelsChange={updateVoiceModels} />
           <label><span>播报模式</span><select aria-label="播报模式" value={voiceMode} onChange={(event) => changeVoiceMode(event.target.value as VoiceMode)}><option value="off">关闭</option><option value="manual">手动</option><option value="auto">自动播报新回复</option></select></label>
           {activeVoiceProvider === 'moss' ? <label><span>角色声音</span><select aria-label="角色声音" value={voiceId.startsWith('moss:') ? voiceId : 'moss:Junhao'} onChange={(event) => { const nextVoiceId = event.target.value; setVoiceId(nextVoiceId); scheduleVoiceProfile({ provider: 'moss', voiceId: nextVoiceId, speed: voiceSpeed, pitch: profile?.voiceProfile.pitch ?? 1 }) }}><option value="moss:Junhao">君豪 · 自然男声</option></select></label> : <label><span>角色声音</span><select aria-label="角色声音" value={voiceId} onChange={(event) => { const nextVoiceId = event.target.value; setVoiceId(nextVoiceId); setVoiceNotice(undefined); scheduleVoiceProfile({ provider: nextVoiceId.startsWith('system:') ? 'system' : 'kokoro', voiceId: nextVoiceId, speed: voiceSpeed, pitch: profile?.voiceProfile.pitch ?? 1 }) }}>{selectedVoiceMissing ? <option value={voiceId}>原声音当前不可用</option> : null}{profile?.gender === 'male' ? null : <optgroup label="中文女声">{compatibleKokoroVoices.filter((voice) => voice.gender === '女声').map((voice) => <option key={voice.id} value={voice.id}>{voice.label}</option>)}</optgroup>}{profile?.gender === 'female' ? null : <optgroup label="中文男声">{compatibleKokoroVoices.filter((voice) => voice.gender === '男声').map((voice) => <option key={voice.id} value={voice.id}>{voice.label}</option>)}</optgroup>}{chineseSystemVoices.length === 0 ? null : <optgroup label="Windows / 浏览器中文声音">{chineseSystemVoices.map((voice) => <option key={`${voice.voiceURI}:${voice.lang}`} value={`system:${voice.voiceURI}`}>{voice.name} · {voice.lang}{voice.localService ? ' · 本机' : ''}</option>)}</optgroup>}</select></label>}
           <label className="employee-focus__voice-speed"><span>语速 <output>{voiceSpeed.toFixed(2)}×</output></span><input aria-label="语速" type="range" min="0.8" max="1.3" step="0.05" value={voiceSpeed} onChange={(event) => { const speed = Number(event.target.value); setVoiceSpeed(speed); scheduleVoiceProfile({ provider: voiceId.startsWith('system:') ? 'system' : 'kokoro', voiceId, speed, pitch: profile?.voiceProfile.pitch ?? 1 }) }} /></label>

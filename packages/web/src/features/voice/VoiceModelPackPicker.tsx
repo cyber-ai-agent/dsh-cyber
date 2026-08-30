@@ -7,9 +7,10 @@ import { api } from '../../api.js'
 interface VoiceModelPackPickerProps {
   value: EmployeeVoiceProfile['provider']
   onActivate(provider: Exclude<EmployeeVoiceProfile['provider'], 'auto'>): void
+  onModelsChange?(models: VoiceModelDescriptor[]): void
 }
 
-export function VoiceModelPackPicker({ value, onActivate }: VoiceModelPackPickerProps) {
+export function VoiceModelPackPicker({ value, onActivate, onModelsChange }: VoiceModelPackPickerProps) {
   const [models, setModels] = useState<VoiceModelDescriptor[]>([])
   const [selectedId, setSelectedId] = useState('moss-tts-nano-100m-onnx')
   const [error, setError] = useState<string>()
@@ -19,11 +20,12 @@ export function VoiceModelPackPicker({ value, onActivate }: VoiceModelPackPicker
     try {
       const result = await api<{ models: VoiceModelDescriptor[] }>('/api/local-tts/models')
       setModels(result.models)
+      onModelsChange?.(result.models)
       setError(undefined)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '语音模型目录加载失败')
     }
-  }, [])
+  }, [onModelsChange])
 
   useEffect(() => { void refresh() }, [refresh])
   useEffect(() => {

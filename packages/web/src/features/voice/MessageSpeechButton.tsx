@@ -1,7 +1,8 @@
 import { SpeakerHigh, Stop } from '@phosphor-icons/react'
 import { useEffect, useState } from 'react'
-import type { EmployeeProfile } from '@dsh-cyber/contracts'
+import type { EmployeeProfile, VoiceModelDescriptor } from '@dsh-cyber/contracts'
 
+import { api } from '../../api.js'
 import { playKokoroSpeech, playMossSpeech, stopKokoroSpeech } from '../world/avatar/speech/KokoroSpeechAdapter.js'
 import { speechTextFromMessage } from '../world/digital-human-motion.js'
 import { resolveEmployeeVoiceProfile } from './employee-voice-profile.js'
@@ -34,6 +35,13 @@ export function MessageSpeechButton({ employeeId, employeeName, profile, text }:
     const spokenText = speechTextFromMessage(text)
     if (spokenText.length === 0) { setError('这条回复没有可播报的文字'); return }
     const voice = resolveEmployeeVoiceProfile(employeeId, profile?.gender, profile?.voiceProfile)
+    let effectiveProvider = voice.provider
+    if (effectiveProvider === 'auto') {
+      try {
+        const catalog = await api<{ models: VoiceModelDescriptor[] }>('/api/local-tts/models')
+        effectiveProvider = catalog.models.some((model) => model.provider === 'moss' && model.state === 'ready') ? 'moss' : 'kokoro'
+      } catch { effectiveProvider = 'kokoro' }
+    }
     setError(undefined)
     setBusy(true)
     try {
@@ -54,7 +62,7 @@ export function MessageSpeechButton({ employeeId, employeeName, profile, text }:
           return
         }
       }
-      if (voice.provider === 'moss') {
+      if (effectiveProvider === 'moss') {
         await playMossSpeech({
           text: spokenText,
           voiceId: voice.voiceId.startsWith('moss:') ? voice.voiceId : 'moss:Junhao',

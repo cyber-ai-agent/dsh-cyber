@@ -183,7 +183,10 @@ export class LocalTtsAssetService {
     if (modelId !== MOSS_MODEL_ID) throw new ServiceError('invalid', 'voice_model_not_removable', '该语音模型不能在这里删除')
     this.#modelOperations.get(modelId)?.controller.abort()
     this.#modelOperations.delete(modelId)
+    await this.#mossProvider?.dispose()
+    this.#mossProvider = undefined
     await rm(join(this.#root, 'models', modelId), { recursive: true, force: true })
+    await rm(join(this.#root, 'models', '.downloads', modelId), { recursive: true, force: true })
   }
 
   async synthesize(input: { text: string; speakerId: number; speed: number; signal?: AbortSignal }): Promise<LocalTtsAudio> {
