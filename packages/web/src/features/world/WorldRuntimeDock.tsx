@@ -6,6 +6,7 @@ import {
   Minus,
   Plus,
   PersonSimpleWalk,
+  UserFocus,
 } from '@phosphor-icons/react'
 import { useEffect, useRef, useState } from 'react'
 import type { WorkSession, World, WorldInteractionAction, WorldRuntimeSnapshot, WorldZoomCommand } from '@dsh-cyber/contracts'
@@ -74,7 +75,9 @@ export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = tru
   const peerInitiator = employees.find((employee) => employee.id === peerInitiatorId)
   const selectedObject = renderedSnapshot.objects.find((object) => object.id === selectedObjectId)
   const selectedObjectManifest = runtime.manifest.scenes.find((scene) => scene.id === renderedSnapshot.sceneId)?.interactables.find((object) => object.id === selectedObjectId)
-  const focusedNames = conversationEmployeeIds.map((employeeId) => employees.find((employee) => employee.id === employeeId)?.displayName).filter((name): name is string => name !== undefined)
+  const conversationEmployees = conversationEmployeeIds
+    .map((employeeId) => employees.find((employee) => employee.id === employeeId))
+    .filter((employee): employee is CyberEmployee => employee !== undefined)
   const focusedEmployee = employees.find((employee) => employee.id === focusEmployeeId)
   const focusedEntity = renderedSnapshot.entities.find((entity) => entity.id === focusEmployeeId)
 
@@ -201,7 +204,26 @@ export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = tru
           </div>
           {focusedEmployee === undefined ? null : <EmployeeFocusMode world={world} employee={focusedEmployee} {...(focusedEntity === undefined ? {} : { entity: focusedEntity })} connected={runtime.connected} staticMode={staticMode} {...(latestUtterance === undefined ? {} : { latestUtterance })} onStaticModeChange={setStaticMode} onBack={leaveEmployeeFocus} onOpenDossier={() => onOpenDossier(focusedEmployee.id)} onOpenTrace={onOpenTrace} onOpenConversation={() => onSelectEmployee(focusedEmployee.id)} />}
 
-          {focusEmployeeId !== undefined || focusedNames.length === 0 ? null : <div className="world-runtime-dock__focus" aria-label="当前会话成员"><span>当前会话</span><strong>{focusedNames.join('、')}</strong></div>}
+          {focusEmployeeId !== undefined || conversationEmployees.length === 0 ? null : (
+            <div className="world-runtime-dock__focus" aria-label="当前会话成员">
+              <span>当前会话 · 点击角色进入数字人</span>
+              <div className="world-runtime-dock__focus-list">
+                {conversationEmployees.map((employee) => (
+                  <button
+                    key={employee.id}
+                    type="button"
+                    aria-label={`进入${employee.displayName}员工聚焦`}
+                    title={`${employee.displayName} · ${employee.role}`}
+                    onClick={() => enterEmployeeFocus(employee.id)}
+                  >
+                    <UserFocus size={14} aria-hidden="true" />
+                    <strong>{employee.displayName}</strong>
+                    <small>· {employee.role}</small>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {focusEmployeeId !== undefined || selectedEmployee === undefined || contextTarget?.kind !== 'employee' || contextTarget.id !== selectedEmployee.id ? null : <EmployeeInteractionMenu employee={selectedEmployee} position={contextTarget.position} onClose={() => setContextTarget(undefined)} onTalk={() => void interactWithEmployee('talk')} onAssignTask={() => void interactWithEmployee('assign-task')} onMeeting={() => void interactWithEmployee('start-meeting')} onPeerCollaboration={() => { setPeerError(undefined); setPeerInitiatorId(selectedEmployee.id) }} />}
           {focusEmployeeId !== undefined || selectedObject === undefined || selectedObjectManifest === undefined || contextTarget?.kind !== 'object' || contextTarget.id !== selectedObject.id ? null : <ObjectInteractionMenu object={selectedObject} manifest={selectedObjectManifest} position={contextTarget.position} {...(selectedEmployee === undefined ? {} : { selectedEmployee })} onClose={() => setContextTarget(undefined)} onAction={(action) => void actOnObject(action)} />}

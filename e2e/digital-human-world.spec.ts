@@ -83,7 +83,20 @@ test('keeps overview and employee focus continuous while loading and disposing V
 
   const screenshotRoot = join(process.cwd(), 'artifacts', 'employee-focus')
   await mkdir(screenshotRoot, { recursive: true })
-  await page.screenshot({ path: join(screenshotRoot, 'overview-1440x900.png'), fullPage: false })
+  for (const viewport of [
+    { width: 1_440, height: 900, label: '1440x900' },
+    { width: 1_920, height: 1_080, label: '1920x1080' },
+    { width: 3_840, height: 2_160, label: '3840x2160' },
+  ]) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height })
+    const entry = page.getByRole('button', { name: `进入${employeeName}员工聚焦`, exact: true })
+    await expect(entry).toBeVisible()
+    await expect(entry).toBeEnabled()
+    const entryPanel = page.locator('.world-runtime-dock__focus')
+    expect(await entryPanel.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
+    await page.screenshot({ path: join(screenshotRoot, `focus-entry-${viewport.label}.png`), fullPage: false })
+  }
+  await page.setViewportSize({ width: 1_440, height: 900 })
   await enterFocus(page)
   const focus = page.getByRole('region', { name: `${employeeName}员工聚焦` })
   await expect(focus).toBeVisible()
@@ -180,7 +193,10 @@ test('previews an uploaded portrait, publishes a new avatar revision, and restor
 })
 
 async function enterFocus(page: Page): Promise<void> {
-  await page.getByRole('button', { name: `${employeeName}世界角色` }).evaluate((element) => (element as HTMLButtonElement).click())
+  const entry = page.getByRole('button', { name: `进入${employeeName}员工聚焦`, exact: true })
+  await expect(entry).toBeVisible()
+  await expect(entry).toBeEnabled()
+  await entry.click()
   await expect(page.getByRole('region', { name: `${employeeName}员工聚焦` })).toBeVisible()
 }
 

@@ -154,9 +154,15 @@
 .world-runtime-dock__view-switch { position: absolute; z-index: 28; top: 12px; left: 50%; translate: -50% 0; min-height: 36px; display: flex; align-items: center; padding: 2px; border: 1px solid var(--border-strong); border-radius: 999px; background: color-mix(in srgb, var(--surface-0) 94%, transparent); box-shadow: var(--shadow-sm); }
 .world-runtime-dock__view-switch button { min-height: 30px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border: 0; border-radius: 999px; color: var(--accent-strong); background: color-mix(in srgb, var(--accent) 8%, transparent); font: inherit; font-size: 12px; cursor: pointer; }
 .world-runtime-dock__view-switch button:hover, .world-runtime-dock__view-switch button:focus-visible { color: var(--text); background: color-mix(in srgb, var(--accent) 14%, transparent); outline: 2px solid color-mix(in srgb, var(--accent) 28%, transparent); outline-offset: 1px; }
-.world-runtime-dock__focus { position: absolute; z-index: 10; left: 12px; top: 12px; max-width: min(320px, calc(100% - 120px)); display: grid; gap: 2px; padding: 8px 10px; border: 1px solid rgba(117,137,149,.3); border-radius: 4px; background: rgba(7,13,17,.84); backdrop-filter: blur(10px); pointer-events: none; }
+.world-runtime-dock__focus { position: absolute; z-index: 10; left: 12px; top: 12px; max-width: min(540px, calc(100% - 120px)); display: grid; gap: 6px; padding: 8px 10px; border: 1px solid rgba(117,137,149,.3); border-radius: 4px; background: rgba(7,13,17,.9); }
 .world-runtime-dock__focus span { color: #7f8e96; font-size: 12px; }
-.world-runtime-dock__focus strong { overflow: hidden; color: #dbe4e8; font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
+.world-runtime-dock__focus-list { display: flex; flex-wrap: wrap; gap: 4px; }
+.world-runtime-dock__focus-list button { min-width: 0; min-height: 40px; display: flex; align-items: center; gap: 4px; padding: 0 8px; border: 1px solid rgba(117,137,149,.24); border-radius: 4px; color: #dbe4e8; background: rgba(18,25,30,.88); cursor: pointer; transition: color 120ms var(--ease-smooth), border-color 120ms var(--ease-smooth), background-color 120ms var(--ease-smooth); }
+.world-runtime-dock__focus-list button:hover { color: var(--accent-strong); border-color: color-mix(in srgb, var(--accent) 58%, var(--border)); background: color-mix(in srgb, var(--accent) 10%, var(--surface-1)); }
+.world-runtime-dock__focus-list button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.world-runtime-dock__focus-list button svg { flex: none; color: var(--accent); }
+.world-runtime-dock__focus-list strong, .world-runtime-dock__focus-list small { overflow: hidden; max-width: 170px; font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
+.world-runtime-dock__focus-list small { color: #8e9ba3; }
 .world-runtime-dock__controls { position: absolute; z-index: 10; right: 12px; bottom: 12px; display: flex; border: 1px solid rgba(117,137,149,.34); border-radius: 4px; background: rgba(7,13,17,.88); backdrop-filter: blur(10px); overflow: hidden; }
 .world-runtime-dock__controls button { width: 38px; height: 36px; display: grid; place-items: center; padding: 0; border: 0; border-right: 1px solid rgba(117,137,149,.22); color: #9ba9b1; background: transparent; }
 .world-runtime-dock__controls button:last-child { border-right: 0; }
