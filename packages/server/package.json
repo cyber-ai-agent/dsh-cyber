@@ -12,7 +12,8 @@
     }
   },
   "files": [
-    "lib"
+    "lib",
+    "runtime"
   ],
   "scripts": {
     "build": "tsc -b",
@@ -31,6 +32,7 @@
     "pdfjs-dist": "^5.4.149",
     "playwright": "1.55.0",
     "sherpa-onnx-node": "1.13.6",
+    "undici": "7.16.0",
     "ws": "8.18.3"
   }
 }

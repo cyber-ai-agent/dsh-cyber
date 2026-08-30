@@ -9,6 +9,8 @@ coverage/
 *.tsbuildinfo
 *.log
 .DS_Store
+__pycache__/
+*.py[cod]
 
 # Local runtime state
 .dsh-cyber/

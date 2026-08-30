@@ -34,6 +34,7 @@ export function registerLocalTtsRoutes(router: Router, service: LocalTtsAssetSer
       text: requiredString(body, 'text'),
       speakerId: requiredNumber(body, 'speakerId'),
       speed: requiredNumber(body, 'speed'),
+      ...(body.provider === 'moss' ? { provider: 'moss' as const, voiceId: typeof body.voiceId === 'string' ? body.voiceId : 'moss:Junhao' } : {}),
     }
     const controller = new AbortController()
     response.once('close', () => { if (!response.writableEnded) controller.abort() })

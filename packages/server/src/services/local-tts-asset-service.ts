@@ -2,11 +2,14 @@ import { createReadStream, createWriteStream } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { spawn } from 'node:child_process'
 import { Readable, Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
+import { EnvHttpProxyAgent, fetch as proxyAwareFetch } from 'undici'
 
 import { ServiceError } from './service-error.js'
 import { SherpaKokoroTtsProvider } from '../voice/tts/sherpa-kokoro-tts-provider.js'
+import { MossTtsProvider } from '../voice/tts/moss-tts-provider.js'
 import type { AudioChunk, VoiceModelDescriptor } from '@dsh-cyber/contracts'
 
 interface SherpaManifest {
@@ -26,6 +29,7 @@ export interface LocalTtsAudio {
 }
 
 const MODEL_DIR = 'kokoro-int8-multi-lang-v1_1'
+const voiceDownloadDispatcher = new EnvHttpProxyAgent()
 const MOSS_MODEL_ID = 'moss-tts-nano-100m-onnx'
 const MOSS_TTS_REVISION = 'f52645cb467506d8e18e746ddd59482685b74e58'
 const MOSS_CODEC_REVISION = 'ceff0d0749bfb3fa2d61149794ec6feef0d1e1ae'
@@ -40,7 +44,8 @@ type ModelInstallOperation = {
 }
 
 type ModelPackFile = {
-  directory: 'tts' | 'codec'
+  directory: 'tts' | 'codec' | 'runtime'
+  source?: 'huggingface' | 'github'
   repository: string
   revision: string
   path: string
@@ -65,6 +70,8 @@ const MOSS_FILES: readonly ModelPackFile[] = [
   mossFile('codec', 'moss_audio_tokenizer_encode.data', 44_507_136, 'sha256', 'aa751265b2bab2887eac224484546b194875aa7494b607115439b3dc6b228a2c'),
   mossFile('codec', 'moss_audio_tokenizer_encode.onnx', 815_775, 'sha256', 'eadea4a645abdcf98714c7aead122ee2ce7da6e080f9f80b977cd1ca8e19473a'),
   mossFile('codec', 'codec_browser_onnx_meta.json', 17_036, 'git-sha1', '886953a56489516b847b7c1c953bde063eb78faa'),
+  mossRuntimeFile('ort_cpu_runtime.py', 41_502, '0b9e5d2c95b0e20d7044123b2e4515f1a76f96a6'),
+  mossRuntimeFile('onnx_tts_runtime.py', 29_764, 'c6b1d70cbcaa52cf51de138612ac2d0c6bec3435'),
 ]
 const MOSS_DOWNLOAD_BYTES = MOSS_FILES.reduce((total, file) => total + file.size, 0)
 
@@ -73,6 +80,7 @@ export class LocalTtsAssetService {
   readonly #modelRoot: string
   readonly #manifestPath: string
   readonly #provider: SherpaKokoroTtsProvider
+  #mossProvider: MossTtsProvider | undefined
   #generationTail: Promise<void> = Promise.resolve()
   #modelOperations = new Map<string, ModelInstallOperation>()
 
@@ -107,7 +115,7 @@ export class LocalTtsAssetService {
     return [
       {
         id: 'moss-tts-nano-100m-onnx', provider: 'moss', displayName: 'MOSS-TTS-Nano', version: '100M-ONNX',
-        license: 'Apache-2.0', byteLength: MOSS_DOWNLOAD_BYTES, state: mossState,
+        license: 'Apache-2.0', byteLength: MOSS_DOWNLOAD_BYTES, state: mossInstalled && mossState === 'installed' ? 'ready' : mossState,
         tier: 'default', recommended: true, runtime: 'onnx-cpu', languages: ['zh-CN', 'en-US'],
         summary: '默认自然语音包。支持本地流式生成和参考音色，首次使用时按需安装。',
         requirements: ['约 1 GB 磁盘空间', '建议 4 GB 可用内存'],
@@ -194,7 +202,7 @@ export class LocalTtsAssetService {
     return { wav: pcm16Wav(samples, sampleRate, peak), duration: samples.length / sampleRate, sampleRate, peak }
   }
 
-  async *stream(input: { text: string; speakerId: number; speed: number; signal?: AbortSignal }): AsyncIterable<AudioChunk> {
+  async *stream(input: { text: string; speakerId: number; speed: number; provider?: 'kokoro' | 'moss'; voiceId?: string; signal?: AbortSignal }): AsyncIterable<AudioChunk> {
     const text = normalizeTtsText(input.text)
     if (text.length === 0 || text.length > 1_000) throw new ServiceError('invalid', 'local_tts_text_invalid', '播报内容长度必须在 1 到 1000 个字符之间')
     if (!Number.isInteger(input.speakerId) || input.speakerId < 3 || input.speakerId > 102) throw new ServiceError('invalid', 'local_tts_voice_invalid', '请选择有效的中文声音')
@@ -206,8 +214,11 @@ export class LocalTtsAssetService {
     await previous
     try {
       if ((await this.status()).installed !== true) throw new ServiceError('not-found', 'local_tts_not_installed', '本地中文语音包未安装，请运行 pnpm tts:install')
-      for await (const chunk of this.#provider.synthesize({
-        requestId: crypto.randomUUID(), text, voiceId: String(input.speakerId), speed: input.speed,
+      const provider = input.provider === 'moss'
+        ? (this.#mossProvider ??= new MossTtsProvider(join(this.#root, 'models', MOSS_MODEL_ID)))
+        : this.#provider
+      for await (const chunk of provider.synthesize({
+        requestId: crypto.randomUUID(), text, voiceId: input.provider === 'moss' ? input.voiceId ?? 'moss:Junhao' : String(input.speakerId), speed: input.speed,
         ...(input.signal === undefined ? {} : { signal: input.signal }),
       })) {
         yield chunk
@@ -233,12 +244,13 @@ export class LocalTtsAssetService {
     try {
       for (const file of MOSS_FILES) {
         if (operation.controller.signal.aborted) throw abortError()
-        const directory = join(staging, file.directory)
+        const directory = join(staging, modelPackDirectory(file.directory))
         await mkdir(directory, { recursive: true })
         await downloadPinnedFile(file, join(directory, file.path), operation)
       }
       operation.state = 'verifying'
       operation.phase = 'installing'
+      await installMossPythonRuntime(staging, operation.controller.signal)
       await writeFile(join(staging, 'manifest.json'), `${JSON.stringify({
         schemaVersion: 1, id: MOSS_MODEL_ID, provider: 'moss', version: '100M-ONNX', installedAt: new Date().toISOString(),
         files: MOSS_FILES.map((file) => ({ directory: file.directory, path: file.path, size: file.size, checksum: file.checksum })),
@@ -273,9 +285,24 @@ function mossFile(
   }
 }
 
+function mossRuntimeFile(path: string, size: number, gitSha1: string): ModelPackFile {
+  return {
+    directory: 'runtime', source: 'github', repository: 'OpenMOSS/MOSS-TTS-Nano', revision: '7f75b9eb8818f929560459ce8669909dece85975',
+    path, size, checksum: { algorithm: 'git-sha1', value: gitSha1 },
+  }
+}
+
+function modelPackDirectory(directory: ModelPackFile['directory']): string {
+  if (directory === 'tts') return 'MOSS-TTS-Nano-100M-ONNX'
+  if (directory === 'codec') return 'MOSS-Audio-Tokenizer-Nano-ONNX'
+  return 'runtime'
+}
+
 async function downloadPinnedFile(file: ModelPackFile, destination: string, operation: ModelInstallOperation): Promise<void> {
-  const url = `https://huggingface.co/${file.repository}/resolve/${file.revision}/${encodeURIComponent(file.path)}`
-  const response = await fetch(url, { redirect: 'follow', signal: operation.controller.signal })
+  const url = file.source === 'github'
+    ? `https://raw.githubusercontent.com/${file.repository}/${file.revision}/${encodeURIComponent(file.path)}`
+    : `https://huggingface.co/${file.repository}/resolve/${file.revision}/${encodeURIComponent(file.path)}`
+  const response = await proxyAwareFetch(url, { redirect: 'follow', signal: operation.controller.signal, dispatcher: voiceDownloadDispatcher })
   if (!response.ok || response.body === null) throw new Error(`下载 ${file.path} 失败：HTTP ${response.status}`)
   const declared = Number(response.headers.get('content-length'))
   if (Number.isFinite(declared) && declared !== file.size) throw new Error(`${file.path} 下载大小与固定清单不一致`)
@@ -308,6 +335,36 @@ function abortError(): Error {
   const error = new Error('下载已取消')
   error.name = 'AbortError'
   return error
+}
+
+async function installMossPythonRuntime(root: string, signal: AbortSignal): Promise<void> {
+  const venvRoot = join(root, 'runtime', '.venv')
+  const python = process.env.DSH_CYBER_PYTHON?.trim() || 'python'
+  await runProcess(python, ['-m', 'venv', venvRoot], signal)
+  const runtimePython = process.platform === 'win32' ? join(venvRoot, 'Scripts', 'python.exe') : join(venvRoot, 'bin', 'python')
+  await runProcess(runtimePython, [
+    '-m', 'pip', 'install', '--disable-pip-version-check', '--no-input',
+    'numpy==2.2.1', 'onnxruntime==1.23.2', 'sentencepiece==0.2.1',
+  ], signal)
+}
+
+function runProcess(command: string, args: string[], signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) { reject(abortError()); return }
+    const child = spawn(command, args, { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] })
+    let stderr = ''
+    child.stderr.setEncoding('utf8')
+    child.stderr.on('data', (chunk: string) => { stderr = `${stderr}${chunk}`.slice(-4_000) })
+    const abort = () => child.kill()
+    signal.addEventListener('abort', abort, { once: true })
+    child.once('error', (error) => { signal.removeEventListener('abort', abort); reject(error) })
+    child.once('exit', (code) => {
+      signal.removeEventListener('abort', abort)
+      if (signal.aborted) reject(abortError())
+      else if (code === 0) resolve()
+      else reject(new Error(`语音运行时安装失败（exit ${code ?? 'unknown'}）：${stderr.trim() || '没有错误输出'}`))
+    })
+  })
 }
 
 export function normalizeTtsText(value: string): string {
