@@ -180,6 +180,8 @@ function dossier(employee: CyberEmployee, index: number, roster: CyberEmployee[]
     profile: {
       employeeId: employee.id,
       revision: 2,
+      gender: 'neutral',
+      voiceProfile: { provider: 'auto', voiceId: '', speed: 1.1, pitch: 1 },
       birthday: index === 0 ? '05-24' : `0${(index % 8) + 1}-1${index}`,
       background: isTavern ? `${employee.role}，在月影酒馆拥有自己的来历、秘密、关系与长期记忆。` : `${employee.role}，关注可验证交付、清晰沟通与持续改进。`,
       personalityTraits: index % 2 === 0 ? ['严谨', '主动', '务实'] : ['沉稳', '好奇', '可靠'],

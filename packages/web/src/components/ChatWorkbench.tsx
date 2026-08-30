@@ -13,7 +13,7 @@ import {
   X,
 } from '@phosphor-icons/react'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { WORLD_CHARACTER_MANAGEMENT_PERMISSIONS, type ChatAttachment, type CompletionJob, type InstalledPluginCommand, type JsonObject, type LocalAssetMimeType, type ModelAssignment, type ModelProfile, type WorkMessage, type WorkSession, type World, type WorldCharacterPermission, type WorldPermissionDecisionScope, type WorldPermissionRequest } from '@dsh-cyber/contracts'
+import { WORLD_CHARACTER_MANAGEMENT_PERMISSIONS, type ChatAttachment, type CompletionJob, type EmployeeDossier, type InstalledPluginCommand, type JsonObject, type LocalAssetMimeType, type ModelAssignment, type ModelProfile, type WorkMessage, type WorkSession, type World, type WorldCharacterPermission, type WorldPermissionDecisionScope, type WorldPermissionRequest } from '@dsh-cyber/contracts'
 
 import { api } from '../api.js'
 import { formatDateTime, formatTime } from '../i18n/format.js'
@@ -28,6 +28,8 @@ import { CommandPicker } from './CommandPicker.js'
 import { ContextMenu, type ContextMenuPosition } from './ContextMenu.js'
 import { ConversationPermissionControl, type ConversationPermissionMode } from './ConversationPermissionControl.js'
 import { ModelPicker } from '../features/models/ModelPicker.js'
+import { MessageSpeechButton } from '../features/voice/MessageSpeechButton.js'
+import { VoiceConversationControl } from '../features/voice/VoiceConversationControl.js'
 
 const MarkdownMessage = lazy(async () => ({ default: (await import('./MarkdownMessage.js')).MarkdownMessage }))
 const ArtifactReferenceCards = lazy(async () => ({ default: (await import('../features/artifacts/ArtifactCenter.js')).ArtifactReferenceCards }))
@@ -40,6 +42,7 @@ interface ChatWorkbenchProps {
   participantIds?: string[]
   messages: WorkMessage[]
   employees: CyberEmployee[]
+  dossiers?: Record<string, EmployeeDossier>
   installedPlugins?: InstalledPluginCommand[]
   models?: ModelProfile[]
   modelAssignments?: readonly ModelAssignment[]
@@ -76,7 +79,7 @@ interface ChatWorkbenchProps {
   onStopTurn?(turnId: string): Promise<void>
 }
 
-export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, installedPlugins = [], models = [], modelAssignments = [], modelProfileId, onChangeModelProfile, sending = false, pendingCount = 0, queuedCount = 0, queueItems = [], draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRetryCompletionJob, onCompletionJobSettled, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, permissionMode = 'read-only', onChangePermissionMode, onRequestFullAccess, onCancelQueuedTurn, onStopTurn }: ChatWorkbenchProps) {
+export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, dossiers = {}, installedPlugins = [], models = [], modelAssignments = [], modelProfileId, onChangeModelProfile, sending = false, pendingCount = 0, queuedCount = 0, queueItems = [], draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRetryCompletionJob, onCompletionJobSettled, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, permissionMode = 'read-only', onChangePermissionMode, onRequestFullAccess, onCancelQueuedTurn, onStopTurn }: ChatWorkbenchProps) {
   const { t } = useI18n()
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -405,7 +408,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
               <article key={message.id} className={`message${owner ? ' message--owner' : ''}${streaming ? ' message--streaming' : ''}`} onContextMenu={(event) => { if (streaming) return; event.preventDefault(); setMessageMenu({ message, position: { x: event.clientX, y: event.clientY } }) }} onKeyDown={(event) => { if (streaming || (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10'))) return; event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); setMessageMenu({ message, position: { x: rect.left + Math.min(rect.width, 220), y: rect.top + 28 } }) }} tabIndex={streaming ? undefined : 0}>
                 {owner ? null : <button className="avatar-button" type="button" onClick={() => employee && onOpenDossier(employee.id)} aria-label={`打开${employee?.displayName ?? experience.personLabel}角色`}><Avatar index={employee?.avatarIndex ?? 7} label={employee?.displayName ?? '角色'} authorityRole={employee?.authorityRole} assetUrl={employee?.avatarAssetUrl} rendererKind={employee?.avatarProfile?.rendererKind} /></button>}
                 <div className="message__body">
-                  <header className="message__meta">{owner ? <span className="sr-only">我的消息</span> : <><strong>{employee?.displayName ?? experience.personLabel}<AuthorityBadge role={employee?.authorityRole} /></strong><span>{employee?.role}</span></>}<time>{displayTime(message)}</time>{copiedMessageId === message.id ? <span role="status">已复制</span> : rememberingMessageId === message.id ? <span role="status">正在提交整理…</span> : submittedKnowledgeMessageIds.has(message.id) ? <span role="status">已提交整理</span> : null}</header>
+                  <header className="message__meta">{owner ? <span className="sr-only">我的消息</span> : <><strong>{employee?.displayName ?? experience.personLabel}<AuthorityBadge role={employee?.authorityRole} /></strong><span>{employee?.role}</span></>}{owner || employee === undefined ? null : <MessageSpeechButton employeeId={employee.id} employeeName={employee.displayName} {...(dossiers[employee.id]?.profile === undefined ? {} : { profile: dossiers[employee.id]!.profile })} text={message.content} />}<time>{displayTime(message)}</time>{copiedMessageId === message.id ? <span role="status">已复制</span> : rememberingMessageId === message.id ? <span role="status">正在提交整理…</span> : submittedKnowledgeMessageIds.has(message.id) ? <span role="status">已提交整理</span> : null}</header>
                   <div className="message__content">{streaming && message.content.length === 0 ? <span className="stream-placeholder">正在回复中…</span> : <RichText value={message.content} worldId={world.id} />}{streaming ? <span className="stream-cursor" aria-hidden="true" /> : null}</div>
                   <MessageAttachments attachments={messageAttachments(message.metadata)} />
                   <CompletionJobStatus metadata={message.metadata} {...(onRetryCompletionJob === undefined ? {} : { onRetry: onRetryCompletionJob })} {...(onCompletionJobSettled === undefined ? {} : { onSettled: onCompletionJobSettled })} />
@@ -463,6 +466,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
             <CommandPicker commands={installedPlugins} draft={draft} onDraftChange={onDraftChange} {...(onOpenPluginMarket === undefined ? {} : { onOpenMarket: onOpenPluginMarket })} onFocus={() => inputRef.current?.focus()} />
           </div>
           <div className="composer__actions-right">
+            <VoiceConversationControl variant="compact" employeeName={directEmployee?.displayName ?? '当前会话角色'} disabled={employees.length === 0} onFinal={(text) => onSend(text, [], nextQueueMode)} />
             <button className={`send-button${showStopButton ? ' send-button--stop' : ''}`} type="button" aria-label={showStopButton ? '停止当前回复' : insertsNext ? '插入对话' : sending ? '正在回复中，发送新消息' : '发送'} title={showStopButton ? '停止当前回复' : insertsNext ? '插入对话' : '发送'} disabled={showStopButton ? false : uploading || employees.length === 0 || (!draft.trim() && attachments.length === 0)} onClick={() => { if (showStopButton && activeTurn !== undefined && onStopTurn !== undefined) void onStopTurn(activeTurn.id); else void submit() }}>{showStopButton ? <Stop size={19} weight="bold" /> : sending && !insertsNext ? <CircleNotch size={19} className="spin" /> : <PaperPlaneRight size={19} weight="fill" />}{showStopButton || queuedCount === 0 ? null : <span className="send-button__queue" aria-label={`${queuedCount} 条插入对话`}>{queuedCount}</span>}</button>
           </div>
         </div>

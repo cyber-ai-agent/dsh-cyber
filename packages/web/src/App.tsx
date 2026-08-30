@@ -100,6 +100,7 @@ import { worldExperience } from './world-experience.js'
 import { characterAvatarUrl, readCharacterAvatarProfile } from './features/world/character-avatar-profile.js'
 import { subscribeWorldLive } from './world-live-client.js'
 import { publishStreamingSpeech } from './features/voice/streaming-speech-bus.js'
+import { resolveEmployeeVoiceProfile } from './features/voice/employee-voice-profile.js'
 
 const SettingsDialog = lazy(async () => ({ default: (await import('./components/SettingsDialog.js')).SettingsDialog }))
 const WorldSideDock = lazy(async () => ({ default: (await import('./components/WorldSideDock.js')).WorldSideDock }))
@@ -1344,6 +1345,7 @@ export default function App() {
   const updateEmployeeProfile = useCallback(async (input: {
     displayName: string
     role: string
+    gender: import('@dsh-cyber/contracts').CharacterGender
     avatarIndex: number
     background: string
     personalityTraits: string[]
@@ -1364,11 +1366,14 @@ export default function App() {
         addressUserAs: input.addressUserAs,
         selfReference: input.selfReference,
       }
+      const voiceProfile = resolveEmployeeVoiceProfile(managingEmployee.id, input.gender, previous?.voiceProfile)
       let profile = previous
       if (demoMode) {
         profile = {
           employeeId: managingEmployee.id,
           revision: (previous?.revision ?? 0) + 1,
+          gender: input.gender,
+          voiceProfile,
           background: input.background,
           personalityTraits: input.personalityTraits,
           appearance,
@@ -1382,6 +1387,8 @@ export default function App() {
           body: JSON.stringify({
             displayName: input.displayName,
             role: input.role,
+            gender: input.gender,
+            voiceProfile,
             background: input.background,
             personalityTraits: input.personalityTraits,
             appearance,
@@ -2290,6 +2297,7 @@ export default function App() {
             participantIds={activeParticipantIds}
             messages={chatMessages}
             employees={employees}
+            dossiers={dossiers}
             installedPlugins={installedPluginCommands}
             models={selectableModels}
             modelAssignments={modelAssignments}
@@ -2386,6 +2394,7 @@ export default function App() {
                   demoMode={demoMode}
                   world={activeWorld}
                   employees={employees}
+                  dossiers={dossiers}
                   liveEnabled={!historyOpen}
                   {...(activeSession === undefined ? {} : { sessionId: activeSession.id, sessionKind: activeSession.kind })}
                   conversationEmployeeIds={activeParticipantIds}

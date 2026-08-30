@@ -123,3 +123,5 @@ export interface EmployeeVoiceProfile {
   speed: number
   pitch: number
 }
+
+export type CharacterGender = 'female' | 'male' | 'neutral'

@@ -246,8 +246,9 @@ export function WorldMode({
           demoMode={demoMode}
           world={world}
           {...(session === undefined ? {} : { session })}
-          messages={messages}
-          employees={employees}
+      messages={messages}
+      employees={employees}
+      dossiers={{}}
           sending={sending}
           draft={draft}
           onDraftChange={onDraftChange}
