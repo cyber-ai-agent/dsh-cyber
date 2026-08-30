@@ -14,6 +14,44 @@ afterEach(() => {
 })
 
 describe('Chat control UI', () => {
+  it('uploads an image pasted into the composer and shows it as an attachment', async () => {
+    const employee = { id: 'employee-paste', displayName: '粘贴角色', role: '分析', avatarIndex: 0, currentActivity: '等待处理' } as CyberEmployee
+    const world = { id: 'world-paste', workspaceId: 'workspace-paste', name: '粘贴测试世界', templateId: 'personal-world', status: 'active', createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString() } as World
+    const host = document.createElement('div')
+    document.body.append(host)
+    const root = createRoot(host)
+    const onUploadAttachment = vi.fn(async (file: File) => ({ assetId: 'pasted-image', name: file.name, mimeType: 'image/png' as const, byteLength: file.size, url: '/api/assets/pasted-image' }))
+    await act(async () => { root.render(createElement(ChatWorkbench, {
+      demoMode: true,
+      world,
+      participantIds: [employee.id],
+      messages: [],
+      employees: [employee],
+      draft: '',
+      onDraftChange: vi.fn(),
+      onSend: vi.fn(async () => undefined),
+      onUploadAttachment,
+      onOpenDossier: vi.fn(),
+      onOpenArtifact: vi.fn(),
+      onRecruit: vi.fn(),
+    })) })
+
+    const image = new File([new Uint8Array([1, 2, 3])], 'image.png', { type: 'image/png' })
+    const paste = new Event('paste', { bubbles: true, cancelable: true })
+    Object.defineProperty(paste, 'clipboardData', { value: { items: [{ kind: 'file', type: 'image/png', getAsFile: () => image }] } })
+    await act(async () => {
+      host.querySelector<HTMLTextAreaElement>('textarea')?.dispatchEvent(paste)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    expect(paste.defaultPrevented).toBe(true)
+    expect(onUploadAttachment).toHaveBeenCalledOnce()
+    expect(onUploadAttachment.mock.calls[0]?.[0].name).toMatch(/^粘贴图片-/u)
+    expect(host.textContent).toContain('粘贴图片-')
+    expect(host.querySelector('img[alt$="预览"]')).not.toBeNull()
+    await act(async () => { root.unmount() })
+  })
+
   it('treats the first accepted message as current work, not an extra queued message', () => {
     const employee = { id: 'employee-one', displayName: '单条角色', role: '分析', avatarIndex: 0, currentActivity: '等待处理' } as CyberEmployee
     const world = { id: 'world-one', workspaceId: 'workspace-one', name: '单条测试世界', templateId: 'personal-world', status: 'active', createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString() } as World

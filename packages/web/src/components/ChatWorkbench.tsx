@@ -12,7 +12,7 @@ import {
   UserCircle,
   X,
 } from '@phosphor-icons/react'
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent } from 'react'
 import { WORLD_CHARACTER_MANAGEMENT_PERMISSIONS, type ChatAttachment, type CompletionJob, type EmployeeDossier, type InstalledPluginCommand, type JsonObject, type LocalAssetMimeType, type ModelAssignment, type ModelProfile, type WorkMessage, type WorkSession, type World, type WorldCharacterPermission, type WorldPermissionDecisionScope, type WorldPermissionRequest } from '@dsh-cyber/contracts'
 
 import { api } from '../api.js'
@@ -309,20 +309,42 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
     setAttachments([])
   }
 
-  const uploadAttachment = async (file: File) => {
+  const uploadAttachments = async (files: File[]) => {
     setAttachmentError(undefined)
-    if (file.size < 1 || file.size > 5 * 1024 * 1024) { setAttachmentError('附件大小需在 1 byte 到 5 MiB 之间。'); return }
-    if (attachments.length >= 8) { setAttachmentError('每条消息最多附加 8 个文件。'); return }
+    if (uploading) { setAttachmentError('正在处理上一批附件，请稍候。'); return }
+    const available = 8 - attachments.length
+    if (available <= 0) { setAttachmentError('每条消息最多附加 8 个文件。'); return }
+    const candidates = files.slice(0, available)
+    if (candidates.length === 0) return
     setUploading(true)
     try {
-      const attachment = demoMode ? await onUploadAttachment(file) : await uploadWorldAttachment(world.id, file)
-      setAttachments((current) => [...current, attachment])
+      const uploaded: ChatAttachment[] = []
+      for (const file of candidates) {
+        if (file.size < 1 || file.size > 5 * 1024 * 1024) throw new Error('附件大小需在 1 byte 到 5 MiB 之间。')
+        uploaded.push(demoMode ? await onUploadAttachment(file) : await uploadWorldAttachment(world.id, file))
+      }
+      setAttachments((current) => [...current, ...uploaded].slice(0, 8))
+      if (files.length > candidates.length) setAttachmentError(`已粘贴 ${candidates.length} 张图片；每条消息最多附加 8 个文件。`)
     } catch (cause) {
       setAttachmentError(cause instanceof Error ? cause.message : '附件上传失败')
     } finally {
       setUploading(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
+  }
+
+  const uploadAttachment = async (file: File) => uploadAttachments([file])
+
+  const pasteImages = (event: ReactClipboardEvent<HTMLTextAreaElement>) => {
+    const images = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+      .flatMap((item, index) => {
+        const file = item.getAsFile()
+        return file === null ? [] : [namedClipboardImage(file, index)]
+      })
+    if (images.length === 0) return
+    event.preventDefault()
+    void uploadAttachments(images)
   }
 
   const insertMention = (employee: CyberEmployee) => {
@@ -454,9 +476,9 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
         </section> : null}
         <div className="composer">
         {suggestions.length === 0 ? null : <div className="mention-menu" role="listbox" aria-label="当前世界角色">{suggestions.map((employee) => <button key={employee.id} type="button" onClick={() => insertMention(employee)}><Avatar index={employee.avatarIndex} size="sm" label={employee.displayName} authorityRole={employee.authorityRole} assetUrl={employee.avatarAssetUrl} rendererKind={employee.avatarProfile?.rendererKind} /><span><strong>{employee.displayName}<AuthorityBadge role={employee.authorityRole} /></strong><small>{employee.role} · 独立角色</small></span></button>)}</div>}
-        {attachments.length > 0 ? <div className="composer-attachments" aria-label="待发送附件">{attachments.map((attachment) => <span key={attachment.assetId}><FileIcon size={15} /><span><strong>{attachment.name}</strong><small>{formatBytes(attachment.byteLength)}</small></span><button type="button" aria-label={`移除附件 ${attachment.name}`} onClick={() => setAttachments((current) => current.filter((item) => item.assetId !== attachment.assetId))}><X size={13} /></button></span>)}</div> : null}
+        {attachments.length > 0 ? <div className="composer-attachments" aria-label="待发送附件">{attachments.map((attachment) => <span key={attachment.assetId} className={attachment.mimeType.startsWith('image/') ? 'is-image' : undefined}>{attachment.mimeType.startsWith('image/') ? <img className="composer-attachments__preview" src={attachment.url} alt={`${attachment.name}预览`} /> : <FileIcon size={15} />}<span><strong>{attachment.name}</strong><small>{formatBytes(attachment.byteLength)}</small></span><button type="button" aria-label={`移除附件 ${attachment.name}`} onClick={() => setAttachments((current) => current.filter((item) => item.assetId !== attachment.assetId))}><X size={13} /></button></span>)}</div> : null}
         {attachmentError === undefined ? null : <p className="composer-error" role="alert">{attachmentError}</p>}
-        <textarea ref={inputRef} value={draft} onChange={(event) => onDraftChange(event.target.value)} disabled={employees.length === 0} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit() } }} placeholder={employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? t('workbench.composer', '发送消息给 {name}', { name: participantEmployees.map((employee) => employee.displayName).join('、') }) : conversationKind === 'direct' ? t('workbench.composer', '发送消息给 {name}', { name: participantEmployees[0]?.displayName ?? experience.personLabel }) : '先从左侧选择会话，或输入 @角色名'} rows={2} aria-label={`给当前世界的${experience.peopleLabel}发送消息`} />
+        <textarea ref={inputRef} value={draft} onChange={(event) => onDraftChange(event.target.value)} onPaste={pasteImages} disabled={employees.length === 0} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit() } }} placeholder={employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? t('workbench.composer', '发送消息给 {name}', { name: participantEmployees.map((employee) => employee.displayName).join('、') }) : conversationKind === 'direct' ? t('workbench.composer', '发送消息给 {name}', { name: participantEmployees[0]?.displayName ?? experience.personLabel }) : '先从左侧选择会话，或输入 @角色名'} rows={2} aria-label={`给当前世界的${experience.peopleLabel}发送消息`} />
         <div className="composer__toolbar">
           <div className="composer__actions-left">
             <input ref={fileInputRef} className="composer-file-input" type="file" accept=".png,.jpg,.jpeg,.webp,.txt,.md,.json,.pdf" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAttachment(file) }} />
@@ -540,6 +562,12 @@ function attachmentMimeType(file: File): LocalAssetMimeType {
   const inferred = extension === undefined ? undefined : byExtension[extension]
   if (inferred === undefined) throw new Error('仅支持 PNG、JPEG、WebP、TXT、Markdown、JSON 和 PDF 附件。')
   return inferred
+}
+
+function namedClipboardImage(file: File, index: number): File {
+  if (file.name.trim().length > 0 && !/^(?:image|clipboard)(?:\.[a-z0-9]+)?$/iu.test(file.name)) return file
+  const extension = ({ 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/png': 'png' } as Record<string, string>)[file.type] ?? 'png'
+  return new File([file], `粘贴图片-${Date.now()}-${index + 1}.${extension}`, { type: file.type || 'image/png', lastModified: file.lastModified })
 }
 
 function MessageAttachments({ attachments }: { attachments: ChatAttachment[] }) {

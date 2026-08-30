@@ -171,6 +171,7 @@ export function EmployeeFocusMode({ world, employee, profile, entity, collaborat
       } catch (cause) {
         setVoiceBusy(false)
         setSpeaking(false)
+        if (cause instanceof Error && cause.name === 'AbortError') { setVoiceNotice(undefined); return }
         console.error('Local Kokoro speech failed', cause)
         setVoiceNotice(cause instanceof Error && !/fetch|network/iu.test(cause.message)
           ? `本地中文语音失败：${cause.message}`
@@ -292,7 +293,7 @@ export function EmployeeFocusMode({ world, employee, profile, entity, collaborat
           <label className="employee-focus__voice-speed"><span>语速 <output>{voiceSpeed.toFixed(2)}×</output></span><input aria-label="语速" type="range" min="0.8" max="1.3" step="0.05" value={voiceSpeed} onChange={(event) => { const speed = Number(event.target.value); setVoiceSpeed(speed); scheduleVoiceProfile({ provider: voiceId.startsWith('system:') ? 'system' : 'kokoro', voiceId, speed, pitch: profile?.voiceProfile.pitch ?? 1 }) }} /></label>
           <div className="employee-focus__voice-preview"><span><strong>当前播报</strong><small>{spokenText.length === 0 ? `当前会话里还没有 ${employee.displayName} 的最终回复` : `${employee.displayName}：${spokenText.slice(0, 72)}${spokenText.length > 72 ? '…' : ''}`}</small></span></div>
           <label className="employee-focus__motion"><input type="checkbox" checked={!staticMode} onChange={(event) => onStaticModeChange(!event.target.checked)} />启用角色动效</label>
-          <div className="employee-focus__voice-buttons"><button type="button" disabled={voiceBusy} onClick={() => void speak(`你好，我是${employee.displayName}。这是当前声音的试听。`)}>{voiceBusy ? '正在准备…' : '试听声音'}</button><button type="button" disabled={voiceBusy || spokenText.length === 0 || voiceMode === 'off'} onClick={speaking ? stopSpeech : () => void speak(spokenText)}>{voiceBusy ? '正在生成…' : speaking ? '停止播报' : `播放${employee.displayName}的回复`}</button></div>
+          <div className="employee-focus__voice-buttons"><button type="button" disabled={voiceBusy} onClick={() => void speak(`你好，我是${employee.displayName}。这是当前声音的试听。`)}>{voiceBusy ? '正在准备…' : '试听声音'}</button><button type="button" disabled={!voiceBusy && !speaking && (spokenText.length === 0 || voiceMode === 'off')} onClick={voiceBusy || speaking ? stopSpeech : () => void speak(spokenText)}>{voiceBusy ? '取消生成' : speaking ? '停止播报' : `播放${employee.displayName}的回复`}</button></div>
           {voiceNotice === undefined ? null : <small className="employee-focus__voice-notice" role="status">{voiceNotice}</small>}
         </div> : null}</div>
       </div>
