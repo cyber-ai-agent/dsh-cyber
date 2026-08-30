@@ -112,6 +112,7 @@ export function registerEmployeeRoutes(router: Router, dependencies: EmployeeRou
     await assertCharacterUnlocked(params[0]!, request)
     const body = await readJson(request)
     const appearance = record(body.appearance) as JsonObject | undefined
+    const voiceProfileInput = record(body.voiceProfile)
     if (appearance !== undefined) {
       try {
         assertCharacterBehaviorProfileAppearance(appearance)
@@ -135,6 +136,17 @@ export function registerEmployeeRoutes(router: Router, dependencies: EmployeeRou
       employeeId: params[0]!,
       ...(body.displayName === undefined ? {} : { displayName: requiredString(body, 'displayName') }),
       ...(body.role === undefined ? {} : { role: requiredString(body, 'role') }),
+      ...(body.gender === undefined ? {} : { gender: requiredEnum(body, 'gender', ['female', 'male', 'neutral']) }),
+      ...(voiceProfileInput === undefined
+        ? {}
+        : {
+            voiceProfile: {
+              provider: requiredEnum(voiceProfileInput, 'provider', ['auto', 'system', 'kokoro', 'cosyvoice']),
+              voiceId: typeof voiceProfileInput.voiceId === 'string' ? voiceProfileInput.voiceId : '',
+              speed: requiredNumber(voiceProfileInput, 'speed'),
+              pitch: requiredNumber(voiceProfileInput, 'pitch'),
+            },
+          }),
       ...(body.birthday === undefined ? {} : { birthday: nullableString(body.birthday) }),
       ...(body.background === undefined ? {} : { background: requiredString(body, 'background') }),
       ...(body.personalityTraits === undefined

@@ -1856,6 +1856,19 @@ const MIGRATIONS: readonly Migration[] = [
         ON character_avatar_assets(employee_id, created_at DESC, asset_id);
     `,
   },
+  {
+    version: 36,
+    name: 'character-gender-and-voice-profile',
+    sql: `
+      ALTER TABLE employee_profile_revisions
+        ADD COLUMN gender TEXT NOT NULL DEFAULT 'neutral'
+        CHECK (gender IN ('female','male','neutral'));
+      ALTER TABLE employee_profile_revisions
+        ADD COLUMN voice_profile_json TEXT NOT NULL
+        DEFAULT '{"provider":"auto","voiceId":"","speed":1.1,"pitch":1}'
+        CHECK (json_valid(voice_profile_json));
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {

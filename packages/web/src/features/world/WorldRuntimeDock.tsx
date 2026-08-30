@@ -10,7 +10,7 @@ import {
   PersonSimpleWalk,
 } from '@phosphor-icons/react'
 import { useEffect, useRef, useState } from 'react'
-import type { WorkSession, World, WorldInteractionAction, WorldRuntimeSnapshot, WorldZoomCommand } from '@dsh-cyber/contracts'
+import type { EmployeeDossier, WorkSession, World, WorldInteractionAction, WorldRuntimeSnapshot, WorldZoomCommand } from '@dsh-cyber/contracts'
 
 import { api } from '../../api.js'
 import { PeerCollaborationDialog, type PeerCollaborationDraft } from '../../components/PeerCollaborationDialog.js'
@@ -34,6 +34,7 @@ interface WorldRuntimeDockProps {
   demoMode: boolean
   world: World
   employees: CyberEmployee[]
+  dossiers: Record<string, EmployeeDossier>
   liveEnabled?: boolean
   sessionId?: string
   sessionKind?: WorkSession['kind']
@@ -45,7 +46,7 @@ interface WorldRuntimeDockProps {
   onVoiceFinal(text: string): Promise<void>
 }
 
-export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = true, sessionId, sessionKind, selectedEmployeeId, conversationEmployeeIds, latestUtterances, onSelectEmployee, onStartGroup, onVoiceFinal }: WorldRuntimeDockProps) {
+export function WorldRuntimeDock({ demoMode, world, employees, dossiers, liveEnabled = true, sessionId, sessionKind, selectedEmployeeId, conversationEmployeeIds, latestUtterances, onSelectEmployee, onStartGroup, onVoiceFinal }: WorldRuntimeDockProps) {
   const runtime = useWorldClient({ demoMode, world, employees, liveEnabled })
   const [fitRequest, setFitRequest] = useState(0)
   const [zoomCommand, setZoomCommand] = useState<WorldZoomCommand>()
@@ -218,7 +219,7 @@ export function WorldRuntimeDock({ demoMode, world, employees, liveEnabled = tru
             onReady={() => undefined}
           /> : <div className="world-runtime-dock__focus-background" aria-hidden="true" />}
           </div>
-          {!showCharacterView ? null : <EmployeeFocusMode key={focusedEmployee.id} world={world} employee={focusedEmployee} {...(focusedEntity === undefined ? {} : { entity: focusedEntity })} collaborators={collaborators} connected={runtime.connected} staticMode={staticMode} rendererMode={viewMode} {...(focusedUtterance === undefined ? {} : { latestUtterance: focusedUtterance })} onFocusEmployee={setActiveEmployeeId} onStaticModeChange={setStaticMode} onVoiceFinal={onVoiceFinal} />}
+          {!showCharacterView ? null : <EmployeeFocusMode key={focusedEmployee.id} world={world} employee={focusedEmployee} {...(dossiers[focusedEmployee.id]?.profile === undefined ? {} : { profile: dossiers[focusedEmployee.id]!.profile })} {...(focusedEntity === undefined ? {} : { entity: focusedEntity })} collaborators={collaborators} connected={runtime.connected} staticMode={staticMode} rendererMode={viewMode} {...(focusedUtterance === undefined ? {} : { latestUtterance: focusedUtterance })} onFocusEmployee={setActiveEmployeeId} onStaticModeChange={setStaticMode} onVoiceFinal={onVoiceFinal} />}
 
           {showCharacterView || selectedEmployee === undefined || contextTarget?.kind !== 'employee' || contextTarget.id !== selectedEmployee.id ? null : <EmployeeInteractionMenu employee={selectedEmployee} position={contextTarget.position} onClose={() => setContextTarget(undefined)} onTalk={() => void interactWithEmployee('talk')} onAssignTask={() => void interactWithEmployee('assign-task')} onMeeting={() => void interactWithEmployee('start-meeting')} onPeerCollaboration={() => { setPeerError(undefined); setPeerInitiatorId(selectedEmployee.id) }} />}
           {showCharacterView || selectedObject === undefined || selectedObjectManifest === undefined || contextTarget?.kind !== 'object' || contextTarget.id !== selectedObject.id ? null : <ObjectInteractionMenu object={selectedObject} manifest={selectedObjectManifest} position={contextTarget.position} {...(selectedEmployee === undefined ? {} : { selectedEmployee })} onClose={() => setContextTarget(undefined)} onAction={(action) => void actOnObject(action)} />}

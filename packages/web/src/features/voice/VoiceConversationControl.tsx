@@ -9,11 +9,12 @@ type VoiceUiState = 'cold' | 'warming' | 'ready' | 'listening' | 'speech' | 'fin
 interface VoiceConversationControlProps {
   employeeName: string
   disabled?: boolean
+  variant?: 'focus' | 'compact'
   onFinal(text: string): Promise<void>
   onBargeIn?(): void
 }
 
-export function VoiceConversationControl({ employeeName, disabled = false, onFinal, onBargeIn }: VoiceConversationControlProps) {
+export function VoiceConversationControl({ employeeName, disabled = false, variant = 'focus', onFinal, onBargeIn }: VoiceConversationControlProps) {
   const [state, setState] = useState<VoiceUiState>('cold')
   const [partial, setPartial] = useState('')
   const [error, setError] = useState<string>()
@@ -22,6 +23,7 @@ export function VoiceConversationControl({ employeeName, disabled = false, onFin
   const streamRef = useRef<MediaStream | undefined>(undefined)
   const sourceRef = useRef<MediaStreamAudioSourceNode | undefined>(undefined)
   const workletRef = useRef<AudioWorkletNode | undefined>(undefined)
+  const ownerIdRef = useRef(crypto.randomUUID())
 
   const prepare = useCallback(() => {
     if (disabled || socketRef.current !== undefined || !('WebSocket' in window)) return
@@ -54,6 +56,7 @@ export function VoiceConversationControl({ employeeName, disabled = false, onFin
   }, [disabled, onBargeIn, onFinal])
 
   const start = useCallback(async () => {
+    window.dispatchEvent(new CustomEvent('dsh:voice-exclusive', { detail: ownerIdRef.current }))
     prepare()
     const socket = socketRef.current
     if (socket === undefined) return
@@ -95,16 +98,24 @@ export function VoiceConversationControl({ employeeName, disabled = false, onFin
     void contextRef.current?.close(); socketRef.current?.close()
   }, [])
 
+  useEffect(() => {
+    const releaseOtherCapture = (event: Event) => {
+      if ((event as CustomEvent<string>).detail !== ownerIdRef.current && (streamRef.current !== undefined || contextRef.current !== undefined)) stop()
+    }
+    window.addEventListener('dsh:voice-exclusive', releaseOtherCapture)
+    return () => window.removeEventListener('dsh:voice-exclusive', releaseOtherCapture)
+  }, [stop])
+
   const active = state === 'listening' || state === 'speech' || state === 'finalizing'
   const startSafely = () => void start().catch((cause: unknown) => { setError(cause instanceof Error ? cause.message : '无法启动语音对话'); setState('failed') })
-  return <div className={`voice-conversation is-${state}`} onMouseEnter={prepare}>
+  return <div className={`voice-conversation voice-conversation--${variant} is-${state}`} onMouseEnter={prepare}>
     <button type="button" className="voice-conversation__button" disabled={disabled || state === 'warming'} aria-label={active ? '结束语音对话' : '开始语音对话'} onClick={active ? stop : startSafely}>
       {active ? <StopCircle size={20} weight="fill" /> : <Microphone size={20} weight="fill" />}
     </button>
-    <span className="voice-conversation__content">
+    {variant === 'compact' && !active && error === undefined ? null : <span className="voice-conversation__content">
       <strong>{voiceLabel(state, employeeName)}</strong>
-      <small>{partial || error || (state === 'ready' ? '点击后直接说话，停顿后自动发送' : '本地处理，不保存麦克风音频')}</small>
-    </span>
+      <small>{partial || error || (state === 'ready' ? '点击后直接说话，停顿后自动发送' : '本地处理 · 不保存音频')}</small>
+    </span>}
     {state === 'speech' ? <Waveform className="voice-conversation__wave" size={28} aria-hidden="true" /> : null}
   </div>
 }

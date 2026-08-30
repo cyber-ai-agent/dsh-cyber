@@ -5,17 +5,21 @@ export interface KokoroVoiceOption {
   gender: '女声' | '男声'
 }
 
+const FEMALE_VOICE_STYLES = ['清澈知性', '温柔叙事', '明亮活力', '沉静专业', '轻柔陪伴', '干练播报', '元气轻快', '优雅从容', '亲切自然', '理性克制', '温暖成熟'] as const
+const MALE_VOICE_STYLES = ['沉稳低音', '温和讲述', '清朗青年', '理性专业', '成熟磁性', '干练播报', '亲切自然', '冷静克制', '温暖陪伴'] as const
+const VOICE_TONES = ['自然', '轻柔', '清亮', '沉稳', '灵动'] as const
+
 export const KOKORO_CHINESE_VOICES: readonly KokoroVoiceOption[] = [
   ...Array.from({ length: 55 }, (_, index): KokoroVoiceOption => ({
     id: `kokoro:${index + 3}`,
     speakerId: index + 3,
-    label: `中文女声 ${String(index + 1).padStart(2, '0')}`,
+    label: `${FEMALE_VOICE_STYLES[Math.floor(index / VOICE_TONES.length)]} · ${VOICE_TONES[index % VOICE_TONES.length]}`,
     gender: '女声',
   })),
   ...Array.from({ length: 45 }, (_, index): KokoroVoiceOption => ({
     id: `kokoro:${index + 58}`,
     speakerId: index + 58,
-    label: `中文男声 ${String(index + 1).padStart(2, '0')}`,
+    label: `${MALE_VOICE_STYLES[Math.floor(index / VOICE_TONES.length)]} · ${VOICE_TONES[index % VOICE_TONES.length]}`,
     gender: '男声',
   })),
 ]
@@ -31,6 +35,7 @@ let generation = 0
 export async function playKokoroSpeech(input: {
   text: string
   voiceId: string
+  speed?: number
   onStatus(message: string): void
   onStart(): void
   onEnd(): void
@@ -44,6 +49,7 @@ export async function playKokoroSpeech(input: {
 export async function appendKokoroSpeech(input: {
   text: string
   voiceId: string
+  speed?: number
   onStatus(message: string): void
   onStart(): void
   onEnd(): void
@@ -55,11 +61,11 @@ export async function appendKokoroSpeech(input: {
   const requestGeneration = generation
   const controller = new AbortController()
   activeRequests.add(controller)
-  input.onStatus('正在由本地 sherpa-onnx 生成中文语音…')
+  input.onStatus('正在生成中文语音…')
   const response = await fetch('/api/local-tts/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text: input.text, speakerId: option.speakerId, speed: 0.96 }),
+    body: JSON.stringify({ text: input.text, speakerId: option.speakerId, speed: normalizeSpeed(input.speed) }),
     signal: controller.signal,
   })
   if (!response.ok) {
@@ -96,13 +102,17 @@ export async function appendKokoroSpeech(input: {
       started = true
       startAmplitudeMonitor(context)
       input.onStart()
-      input.onStatus('正在播放本地流式中文语音，回复内容不会上传。')
+      input.onStatus('正在播放中文语音')
     } else {
-      input.onStatus(`正在播放本地流式中文语音（已排队 ${totalDuration.toFixed(1)} 秒）。`)
+      input.onStatus(`正在播放中文语音（已排队 ${totalDuration.toFixed(1)} 秒）`)
     }
   }
   activeRequests.delete(controller)
   if (!started) throw new Error('本地语音服务没有生成可播放音频')
+}
+
+function normalizeSpeed(value: number | undefined): number {
+  return Math.max(0.8, Math.min(1.3, value ?? 1.1))
 }
 
 export function stopKokoroSpeech(): void {

@@ -1,7 +1,8 @@
 import { ArrowsClockwise, SpeakerHigh, SpeakerSlash } from '@phosphor-icons/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { World, WorldRuntimeEntityState } from '@dsh-cyber/contracts'
+import type { EmployeeProfile, EmployeeVoiceProfile, World, WorldRuntimeEntityState } from '@dsh-cyber/contracts'
 
+import { api } from '../../../../api.js'
 import type { CyberEmployee } from '../../../../types.js'
 import { motionCueForState, speechTextFromMessage, visualStateForEntity } from '../../digital-human-motion.js'
 import { RegisteredDigitalHumanRenderer, selectRenderer } from '../renderer/RendererRegistry.js'
@@ -12,6 +13,7 @@ import { SpriteRuntimeRenderer } from '../sprite/SpriteRuntimeRenderer.js'
 import { VoiceConversationControl } from '../../../voice/VoiceConversationControl.js'
 import { StreamingSentenceChunker } from '../../../voice/StreamingSentenceChunker.js'
 import { subscribeStreamingSpeech } from '../../../voice/streaming-speech-bus.js'
+import { resolveEmployeeVoiceProfile } from '../../../voice/employee-voice-profile.js'
 import './employee-focus-mode.css'
 
 type VoiceMode = 'off' | 'manual' | 'auto'
@@ -25,6 +27,7 @@ interface FocusCollaborator {
 interface EmployeeFocusModeProps {
   world: World
   employee: CyberEmployee
+  profile?: EmployeeProfile
   entity?: WorldRuntimeEntityState
   collaborators: FocusCollaborator[]
   connected: boolean
@@ -36,7 +39,7 @@ interface EmployeeFocusModeProps {
   onVoiceFinal(text: string): Promise<void>
 }
 
-export function EmployeeFocusMode({ world, employee, entity, collaborators, connected, staticMode, rendererMode, latestUtterance, onFocusEmployee, onStaticModeChange, onVoiceFinal }: EmployeeFocusModeProps) {
+export function EmployeeFocusMode({ world, employee, profile, entity, collaborators, connected, staticMode, rendererMode, latestUtterance, onFocusEmployee, onStaticModeChange, onVoiceFinal }: EmployeeFocusModeProps) {
   const [rendererReady, setRendererReady] = useState(false)
   const [rendererArmed, setRendererArmed] = useState(false)
   const [rendererNotice, setRendererNotice] = useState<string>()
@@ -44,10 +47,13 @@ export function EmployeeFocusMode({ world, employee, entity, collaborators, conn
   const [speaking, setSpeaking] = useState(false)
   const utteranceRef = useRef<SpeechSynthesisUtterance | undefined>(undefined)
   const [voiceMode, setVoiceMode] = useState<VoiceMode>(() => readVoiceMode(world.id, employee.id))
-  const [voiceId, setVoiceId] = useState(() => readVoiceId(world.id, employee.id))
+  const initialVoiceProfile = resolveEmployeeVoiceProfile(employee.id, profile?.gender, profile?.voiceProfile)
+  const [voiceId, setVoiceId] = useState(() => readCachedVoiceId(world.id, employee.id, initialVoiceProfile.voiceId))
+  const [voiceSpeed, setVoiceSpeed] = useState(() => readCachedVoiceSpeed(world.id, employee.id, initialVoiceProfile.speed))
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([])
   const [voiceNotice, setVoiceNotice] = useState<string>()
   const [voiceBusy, setVoiceBusy] = useState(false)
+  const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false)
   const streamChunkerRef = useRef(new StreamingSentenceChunker())
   const streamTurnRef = useRef<string | undefined>(undefined)
   const streamChainRef = useRef<Promise<void>>(Promise.resolve())
@@ -55,6 +61,7 @@ export function EmployeeFocusMode({ world, employee, entity, collaborators, conn
   const streamCompleteRef = useRef(false)
   const streamedSpeechRef = useRef(false)
   const streamGenerationRef = useRef(0)
+  const pendingVoiceProfileRef = useRef<EmployeeVoiceProfile | undefined>(undefined)
   const speechSupported = typeof window !== 'undefined' && 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window
   const utterance = latestUtterance?.employeeId === employee.id ? latestUtterance : undefined
   const spokenText = utterance === undefined ? '' : speechTextFromMessage(utterance.text)
@@ -65,6 +72,11 @@ export function EmployeeFocusMode({ world, employee, entity, collaborators, conn
   const selectedRenderer = selectRenderer(employee, quality, preferredRenderer)
   const usesVrm = selectedRenderer.kind === 'vrm-3d'
   const chineseSystemVoices = voices.filter((voice) => /^zh(?:-|_)/iu.test(voice.lang))
+  const compatibleKokoroVoices = profile?.gender === 'female'
+    ? KOKORO_CHINESE_VOICES.filter((voice) => voice.gender === '女声')
+    : profile?.gender === 'male'
+      ? KOKORO_CHINESE_VOICES.filter((voice) => voice.gender === '男声')
+      : KOKORO_CHINESE_VOICES
   const systemVoiceId = voiceId.startsWith('system:') ? voiceId.slice('system:'.length) : ''
   const selectedSystemVoice = resolveSpeechVoice(chineseSystemVoices, systemVoiceId)
   const selectedKokoroVoice = KOKORO_CHINESE_VOICES.find((voice) => voice.id === voiceId)
@@ -106,8 +118,33 @@ export function EmployeeFocusMode({ world, employee, entity, collaborators, conn
     try {
       localStorage.setItem(voiceModeKey(world.id, employee.id), voiceMode)
       localStorage.setItem(voiceIdKey(world.id, employee.id), voiceId)
+      localStorage.setItem(voiceSpeedKey(world.id, employee.id), String(voiceSpeed))
     } catch { /* localStorage is optional */ }
-  }, [employee.id, voiceId, voiceMode, world.id])
+  }, [employee.id, voiceId, voiceMode, voiceSpeed, world.id])
+
+  const persistVoiceProfile = useCallback(async (next: EmployeeVoiceProfile) => {
+    if (profile === undefined) return
+    try {
+      await api<{ profile: EmployeeProfile }>(`/api/employees/${encodeURIComponent(employee.id)}/profile`, {
+        method: 'PUT',
+        body: JSON.stringify({ gender: profile.gender, voiceProfile: next, reason: '更新角色语音档案' }),
+      })
+      setVoiceNotice('已保存到角色档案')
+    } catch (cause) {
+      setVoiceNotice(cause instanceof Error ? cause.message : '角色语音档案保存失败')
+    }
+  }, [employee.id, profile])
+
+  const scheduleVoiceProfile = useCallback((next: EmployeeVoiceProfile) => {
+    pendingVoiceProfileRef.current = next
+  }, [])
+
+  const flushVoiceProfile = useCallback(() => {
+    const next = pendingVoiceProfileRef.current
+    if (next === undefined) return
+    pendingVoiceProfileRef.current = undefined
+    void persistVoiceProfile(next)
+  }, [persistVoiceProfile])
 
   const stopSpeech = useCallback(() => {
     stopKokoroSpeech()
@@ -126,6 +163,7 @@ export function EmployeeFocusMode({ world, employee, entity, collaborators, conn
         await playKokoroSpeech({
           text,
           voiceId,
+          speed: voiceSpeed,
           onStatus: setVoiceNotice,
           onStart: () => { setVoiceBusy(false); setSpeaking(true) },
           onEnd: () => { setVoiceBusy(false); setSpeaking(false) },
@@ -145,7 +183,7 @@ export function EmployeeFocusMode({ world, employee, entity, collaborators, conn
     if (exactVoice === undefined) { setVoiceNotice('所选系统中文声音当前不可用，请刷新或改用本地 AI 中文声音。'); return }
     const value = new SpeechSynthesisUtterance(text)
     value.lang = exactVoice.lang
-    value.rate = 0.96
+    value.rate = voiceSpeed
     value.pitch = 1
     value.voice = exactVoice
     setVoiceNotice(undefined)
@@ -155,7 +193,7 @@ export function EmployeeFocusMode({ world, employee, entity, collaborators, conn
     utteranceRef.current = value
     setSpeaking(true)
     window.speechSynthesis.speak(value)
-  }, [chineseSystemVoices, speechSupported, stopSpeech, systemVoiceId, voiceId])
+  }, [chineseSystemVoices, speechSupported, stopSpeech, systemVoiceId, voiceId, voiceSpeed])
 
   const changeVoiceMode = useCallback((mode: VoiceMode) => {
     if (mode === 'off') stopSpeech()
@@ -178,6 +216,7 @@ export function EmployeeFocusMode({ world, employee, entity, collaborators, conn
       return appendKokoroSpeech({
       text,
       voiceId,
+      speed: voiceSpeed,
       onStatus: setVoiceNotice,
       onStart: () => { setVoiceBusy(false); setSpeaking(true) },
       onEnd: () => {
@@ -191,7 +230,7 @@ export function EmployeeFocusMode({ world, employee, entity, collaborators, conn
       if (!(cause instanceof DOMException && cause.name === 'AbortError')) setVoiceNotice(cause instanceof Error ? `本地流式语音失败：${cause.message}` : '本地流式语音失败')
     })
     streamChainRef.current = run
-  }, [voiceId])
+  }, [voiceId, voiceSpeed])
 
   useEffect(() => {
     if (voiceMode !== 'auto' || !voiceId.startsWith('kokoro:')) return
@@ -222,7 +261,9 @@ export function EmployeeFocusMode({ world, employee, entity, collaborators, conn
     if (streamedSpeechRef.current) return
     void speak(spokenText)
   }, [employee.id, speak, spokenText, utterance, voiceMode, world.id])
-  useEffect(() => () => stopSpeech(), [stopSpeech])
+  useEffect(() => () => {
+    stopSpeech()
+  }, [stopSpeech])
 
   const fallback = useCallback((reason: string) => {
     setRendererReady(false)
@@ -244,15 +285,16 @@ export function EmployeeFocusMode({ world, employee, entity, collaborators, conn
       <div className="employee-focus__identity"><strong>{employee.displayName}</strong><span>{employee.role}</span></div>
       <div className="employee-focus__header-actions">
         <span className={`employee-focus__status is-${state}`}><i aria-hidden="true" />{stateLabel(state)}</span>
-        <details className="employee-focus__voice"><summary role="button" aria-label="语音设置">{speaking ? <SpeakerSlash size={17} aria-hidden="true" /> : <SpeakerHigh size={17} aria-hidden="true" />}语音</summary><div>
-          <header><span><strong>{employee.displayName}的语音</strong><small>{KOKORO_CHINESE_VOICES.length} 个本地 AI 中文声音{chineseSystemVoices.length > 0 ? ` · ${chineseSystemVoices.length} 个系统中文声音` : ''}</small></span><button type="button" aria-label="刷新系统声音" onClick={refreshVoices}><ArrowsClockwise size={16} aria-hidden="true" /></button></header>
+        <div className="employee-focus__voice"><button type="button" className="employee-focus__voice-trigger" aria-label="语音设置" aria-expanded={voiceSettingsOpen} onClick={() => { setVoiceSettingsOpen((current) => { const next = !current; if (!next) flushVoiceProfile(); return next }) }}>{speaking ? <SpeakerSlash size={17} aria-hidden="true" /> : <SpeakerHigh size={17} aria-hidden="true" />}语音</button>{voiceSettingsOpen ? <div>
+          <header><span><strong>{employee.displayName}的语音</strong><small>{KOKORO_CHINESE_VOICES.length} 个中文声音{chineseSystemVoices.length > 0 ? ` · ${chineseSystemVoices.length} 个系统中文声音` : ''}</small></span><button type="button" aria-label="刷新系统声音" onClick={refreshVoices}><ArrowsClockwise size={16} aria-hidden="true" /></button></header>
           <label><span>播报模式</span><select aria-label="播报模式" value={voiceMode} onChange={(event) => changeVoiceMode(event.target.value as VoiceMode)}><option value="off">关闭</option><option value="manual">手动</option><option value="auto">自动播报新回复</option></select></label>
-          <label><span>角色声音</span><select aria-label="角色声音" value={voiceId} onChange={(event) => { setVoiceId(event.target.value); setVoiceNotice(undefined) }}>{selectedVoiceMissing ? <option value={voiceId}>原声音当前不可用</option> : null}<optgroup label="本地 AI 中文女声">{KOKORO_CHINESE_VOICES.filter((voice) => voice.gender === '女声').map((voice) => <option key={voice.id} value={voice.id}>{voice.label}</option>)}</optgroup><optgroup label="本地 AI 中文男声">{KOKORO_CHINESE_VOICES.filter((voice) => voice.gender === '男声').map((voice) => <option key={voice.id} value={voice.id}>{voice.label}</option>)}</optgroup>{chineseSystemVoices.length === 0 ? null : <optgroup label="Windows / 浏览器中文声音">{chineseSystemVoices.map((voice) => <option key={`${voice.voiceURI}:${voice.lang}`} value={`system:${voice.voiceURI}`}>{voice.name} · {voice.lang}{voice.localService ? ' · 本机' : ''}</option>)}</optgroup>}</select></label>
+          <label><span>角色声音</span><select aria-label="角色声音" value={voiceId} onChange={(event) => { const nextVoiceId = event.target.value; setVoiceId(nextVoiceId); setVoiceNotice(undefined); scheduleVoiceProfile({ provider: nextVoiceId.startsWith('system:') ? 'system' : 'kokoro', voiceId: nextVoiceId, speed: voiceSpeed, pitch: profile?.voiceProfile.pitch ?? 1 }) }}>{selectedVoiceMissing ? <option value={voiceId}>原声音当前不可用</option> : null}{profile?.gender === 'male' ? null : <optgroup label="中文女声">{compatibleKokoroVoices.filter((voice) => voice.gender === '女声').map((voice) => <option key={voice.id} value={voice.id}>{voice.label}</option>)}</optgroup>}{profile?.gender === 'female' ? null : <optgroup label="中文男声">{compatibleKokoroVoices.filter((voice) => voice.gender === '男声').map((voice) => <option key={voice.id} value={voice.id}>{voice.label}</option>)}</optgroup>}{chineseSystemVoices.length === 0 ? null : <optgroup label="Windows / 浏览器中文声音">{chineseSystemVoices.map((voice) => <option key={`${voice.voiceURI}:${voice.lang}`} value={`system:${voice.voiceURI}`}>{voice.name} · {voice.lang}{voice.localService ? ' · 本机' : ''}</option>)}</optgroup>}</select></label>
+          <label className="employee-focus__voice-speed"><span>语速 <output>{voiceSpeed.toFixed(2)}×</output></span><input aria-label="语速" type="range" min="0.8" max="1.3" step="0.05" value={voiceSpeed} onChange={(event) => { const speed = Number(event.target.value); setVoiceSpeed(speed); scheduleVoiceProfile({ provider: voiceId.startsWith('system:') ? 'system' : 'kokoro', voiceId, speed, pitch: profile?.voiceProfile.pitch ?? 1 }) }} /></label>
           <div className="employee-focus__voice-preview"><span><strong>当前播报</strong><small>{spokenText.length === 0 ? `当前会话里还没有 ${employee.displayName} 的最终回复` : `${employee.displayName}：${spokenText.slice(0, 72)}${spokenText.length > 72 ? '…' : ''}`}</small></span></div>
           <label className="employee-focus__motion"><input type="checkbox" checked={!staticMode} onChange={(event) => onStaticModeChange(!event.target.checked)} />启用角色动效</label>
           <div className="employee-focus__voice-buttons"><button type="button" disabled={voiceBusy} onClick={() => void speak(`你好，我是${employee.displayName}。这是当前声音的试听。`)}>{voiceBusy ? '正在准备…' : '试听声音'}</button><button type="button" disabled={voiceBusy || spokenText.length === 0 || voiceMode === 'off'} onClick={speaking ? stopSpeech : () => void speak(spokenText)}>{voiceBusy ? '正在生成…' : speaking ? '停止播报' : `播放${employee.displayName}的回复`}</button></div>
           {voiceNotice === undefined ? null : <small className="employee-focus__voice-notice" role="status">{voiceNotice}</small>}
-        </div></details>
+        </div> : null}</div>
       </div>
     </header>
     <div className="employee-focus__activity" aria-live="polite"><strong>{stateLabel(state)}</strong><span>{connected ? entity?.activityLabel ?? '等待事件触发' : '实时连接中断，正在重连'}</span></div>
@@ -282,9 +324,10 @@ function stateLabel(state: ReturnType<typeof visualStateForEntity>): string {
 
 function voiceModeKey(worldId: string, employeeId: string): string { return `dsh-cyber-digital-voice-mode:${worldId}:${employeeId}` }
 function voiceIdKey(worldId: string, employeeId: string): string { return `dsh-cyber-digital-voice-id:${worldId}:${employeeId}` }
+function voiceSpeedKey(worldId: string, employeeId: string): string { return `dsh-cyber-digital-voice-speed:${worldId}:${employeeId}` }
 function lastSpokenKey(worldId: string, employeeId: string): string { return `dsh-cyber-digital-last-spoken:${worldId}:${employeeId}` }
 function readVoiceMode(worldId: string, employeeId: string): VoiceMode { try { const value = localStorage.getItem(voiceModeKey(worldId, employeeId)) ?? localStorage.getItem(`dsh-cyber-digital-voice-mode:${worldId}`); return value === 'off' || value === 'auto' ? value : 'manual' } catch { return 'manual' } }
-function readVoiceId(worldId: string, employeeId: string): string { try { const saved = localStorage.getItem(voiceIdKey(worldId, employeeId)); return saved?.startsWith('system:') || KOKORO_CHINESE_VOICES.some((voice) => voice.id === saved) ? saved! : defaultVoiceId(employeeId) } catch { return defaultVoiceId(employeeId) } }
-function defaultVoiceId(employeeId: string): string { let hash = 0; for (const character of employeeId) hash = (hash * 31 + character.charCodeAt(0)) >>> 0; return KOKORO_CHINESE_VOICES[hash % KOKORO_CHINESE_VOICES.length]!.id }
+function readCachedVoiceId(worldId: string, employeeId: string, fallback: string): string { try { const saved = localStorage.getItem(voiceIdKey(worldId, employeeId)); return saved?.startsWith('system:') || KOKORO_CHINESE_VOICES.some((voice) => voice.id === saved) ? saved! : fallback } catch { return fallback } }
+function readCachedVoiceSpeed(worldId: string, employeeId: string, fallback: number): number { try { const value = Number(localStorage.getItem(voiceSpeedKey(worldId, employeeId))); return Number.isFinite(value) && value >= 0.8 && value <= 1.3 ? Math.round(value * 20) / 20 : fallback } catch { return fallback } }
 function readLastSpoken(worldId: string, employeeId: string): string | undefined { try { return localStorage.getItem(lastSpokenKey(worldId, employeeId)) ?? undefined } catch { return undefined } }
 function persistLastSpoken(worldId: string, employeeId: string, messageId: string): void { try { localStorage.setItem(lastSpokenKey(worldId, employeeId), messageId) } catch { /* localStorage is optional */ } }

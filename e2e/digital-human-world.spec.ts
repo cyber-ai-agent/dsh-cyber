@@ -223,6 +223,20 @@ test('keeps the chosen 2D view across conversations and centers the latest group
   await focus.getByRole('button', { name: '语音设置' }).click()
   await expect(focus.getByLabel('角色声音', { exact: true }).locator('option')).toHaveCount(103)
   await focus.getByLabel('角色声音', { exact: true }).selectOption('system:voice-zh-a')
+  await expect(focus.getByRole('slider', { name: '语速' })).toHaveValue('1.1')
+  await focus.getByRole('slider', { name: '语速' }).fill('1.25')
+  await expect(focus.getByText('1.25×', { exact: true })).toBeVisible()
+  await focus.getByRole('button', { name: '试听声音' }).click()
+  await expect.poll(() => lastSpokenRate(page)).toBe(1.25)
+  await focus.getByRole('button', { name: '停止播报' }).click()
+  const firstVoiceSaved = page.waitForResponse((response) => response.request().method() === 'PUT' && response.url().includes(`/api/employees/${employeeId}/profile`) && response.status() === 201)
+  await focus.getByRole('button', { name: '语音设置' }).click()
+  await firstVoiceSaved
+  await expect.poll(async () => page.evaluate(async (id) => {
+    const response = await fetch(`/api/employees/${encodeURIComponent(id)}/dossier`)
+    const dossier = await response.json() as { profile?: { voiceProfile?: { voiceId?: string; speed?: number } } }
+    return dossier.profile?.voiceProfile
+  }, employeeId)).toMatchObject({ voiceId: 'system:voice-zh-a', speed: 1.25 })
 
   await page.getByRole('button', { name: `与${secondEmployeeName}私聊`, exact: true }).click()
   focus = page.getByRole('region', { name: `${secondEmployeeName}员工聚焦` })
@@ -231,12 +245,18 @@ test('keeps the chosen 2D view across conversations and centers the latest group
   await focus.getByRole('button', { name: '语音设置' }).click()
   await expect(focus.getByLabel('角色声音', { exact: true }).locator('option')).toHaveCount(103)
   await focus.getByLabel('角色声音', { exact: true }).selectOption('system:voice-zh-b')
+  await expect(focus.getByRole('slider', { name: '语速' })).toHaveValue('1.1')
+  await focus.getByRole('slider', { name: '语速' }).fill('0.9')
+  const secondVoiceSaved = page.waitForResponse((response) => response.request().method() === 'PUT' && response.url().includes('/api/employees/') && response.url().endsWith('/profile') && response.status() === 201)
+  await focus.getByRole('button', { name: '语音设置' }).click()
+  await secondVoiceSaved
 
   await page.getByRole('button', { name: `与${employeeName}私聊`, exact: true }).click()
   focus = page.getByRole('region', { name: `${employeeName}员工聚焦` })
   await expect(focus).toBeVisible()
   await focus.getByRole('button', { name: '语音设置' }).click()
   await expect(focus.getByLabel('角色声音', { exact: true })).toHaveValue('system:voice-zh-a')
+  await expect(focus.getByRole('slider', { name: '语速' })).toHaveValue('1.25')
 
   await page.getByRole('button', { name: groupSessionTitle, exact: true }).click()
   focus = page.getByRole('region', { name: `${thirdEmployeeName}员工聚焦` })
@@ -319,10 +339,10 @@ async function installSpeechMock(page: Page): Promise<void> {
       getVoices: () => loaded ? fullVoices : initialVoices,
       addEventListener: (event: string, listener: () => void) => { if (event === 'voiceschanged') listeners.add(listener) },
       removeEventListener: (event: string, listener: () => void) => { if (event === 'voiceschanged') listeners.delete(listener) },
-      speak: (utterance: typeof active & { text?: string; voice?: { voiceURI?: string } | null }) => {
+      speak: (utterance: typeof active & { text?: string; voice?: { voiceURI?: string } | null; rate?: number }) => {
         active = utterance
-        ;(window as typeof window & { __dshSpeechLog?: Array<{ text: string; voiceURI: string | null }> }).__dshSpeechLog ??= []
-        ;(window as typeof window & { __dshSpeechLog: Array<{ text: string; voiceURI: string | null }> }).__dshSpeechLog.push({ text: utterance?.text ?? '', voiceURI: utterance?.voice?.voiceURI ?? null })
+        ;(window as typeof window & { __dshSpeechLog?: Array<{ text: string; voiceURI: string | null; rate: number }> }).__dshSpeechLog ??= []
+        ;(window as typeof window & { __dshSpeechLog: Array<{ text: string; voiceURI: string | null; rate: number }> }).__dshSpeechLog.push({ text: utterance?.text ?? '', voiceURI: utterance?.voice?.voiceURI ?? null, rate: utterance?.rate ?? 1 })
         utterance?.onstart?.()
       },
       cancel: () => { const utterance = active; active = undefined; utterance?.onend?.() },
@@ -392,6 +412,10 @@ async function lastSpokenVoice(page: Page): Promise<string> {
 
 async function lastSpokenText(page: Page): Promise<string> {
   return page.evaluate(() => (window as typeof window & { __dshSpeechLog?: Array<{ text: string }> }).__dshSpeechLog?.at(-1)?.text ?? '')
+}
+
+async function lastSpokenRate(page: Page): Promise<number> {
+  return page.evaluate(() => (window as typeof window & { __dshSpeechLog?: Array<{ rate: number }> }).__dshSpeechLog?.at(-1)?.rate ?? 0)
 }
 
 function isVrmRuntimeRequest(url: string): boolean {

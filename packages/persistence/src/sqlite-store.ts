@@ -28,6 +28,8 @@ import {
   type EmployeeMilestone,
   type EmployeeMilestoneCategory,
   type EmployeeProfile,
+  type EmployeeVoiceProfile,
+  type CharacterGender,
   type EmployeeRelationship,
   type EmployeeRevision,
   type EmployeeSkill,
@@ -138,6 +140,7 @@ export interface RecruitEmployeeInput {
   blueprintVersion: number
   displayName?: string
   role?: string
+  gender?: CharacterGender
   persona?: string
   skillGrants?: string[]
   capabilityGrants?: string[]
@@ -162,6 +165,8 @@ export interface ReviseEmployeeProfileInput {
   employeeId: string
   displayName?: string
   role?: string
+  gender?: CharacterGender
+  voiceProfile?: EmployeeVoiceProfile
   birthday?: string | null
   background?: string
   personalityTraits?: string[]
@@ -1962,11 +1967,11 @@ export class SqliteStore {
       this.database
         .prepare(
           `INSERT INTO employee_profile_revisions
-           (employee_id, revision, birthday, background, personality_traits_json,
+           (employee_id, revision, gender, voice_profile_json, birthday, background, personality_traits_json,
             appearance_json, reason, created_at)
-           VALUES (?, 1, NULL, ?, '[]', '{}', 'recruited', ?)`,
+           VALUES (?, 1, ?, ?, NULL, ?, '[]', '{}', 'recruited', ?)`,
         )
-        .run(employee.id, blueprint.summary, now)
+        .run(employee.id, normalizeCharacterGender(input.gender), stringifyJson(defaultEmployeeVoiceProfile() as unknown as JsonObject), blueprint.summary, now)
       const recruitedEvent = this.#appendEvent({
         workspaceId: workspace.id,
         worldId: world.id,
@@ -2213,6 +2218,8 @@ export class SqliteStore {
     const birthday = input.birthday === undefined ? previous?.birthday : input.birthday ?? undefined
     const displayName = (input.displayName ?? employee.displayName).trim()
     const role = (input.role ?? employee.role).trim()
+    const gender = normalizeCharacterGender(input.gender ?? previous?.gender)
+    const voiceProfile = normalizeEmployeeVoiceProfile(input.voiceProfile ?? previous?.voiceProfile)
     if (birthday !== undefined) assertBirthday(birthday)
     if (!displayName) throw new PersistenceError('Employee display name cannot be empty')
     if (displayName.length > 48) throw new PersistenceError('Employee display name is too long')
@@ -2221,6 +2228,8 @@ export class SqliteStore {
     const profile: EmployeeProfile = {
       employeeId: employee.id,
       revision: (previous?.revision ?? 0) + 1,
+      gender,
+      voiceProfile,
       background: (input.background ?? previous?.background ?? '').trim(),
       personalityTraits: uniqueStrings(input.personalityTraits ?? previous?.personalityTraits ?? []),
       appearance: input.appearance ?? previous?.appearance ?? {},
@@ -2241,13 +2250,15 @@ export class SqliteStore {
       this.database
         .prepare(
           `INSERT INTO employee_profile_revisions
-           (employee_id, revision, birthday, background, personality_traits_json,
+           (employee_id, revision, gender, voice_profile_json, birthday, background, personality_traits_json,
             appearance_json, reason, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           profile.employeeId,
           profile.revision,
+          profile.gender,
+          stringifyJson(profile.voiceProfile as unknown as JsonObject),
           profile.birthday ?? null,
           profile.background,
           stringifyJson(profile.personalityTraits),
@@ -6167,6 +6178,12 @@ function mapEmployeeProfile(row: object): EmployeeProfile {
   const profile: EmployeeProfile = {
     employeeId: String(value.employee_id),
     revision: Number(value.revision),
+    gender: normalizeCharacterGender(value.gender),
+    voiceProfile: normalizeEmployeeVoiceProfile(
+      typeof value.voice_profile_json === 'string'
+        ? parseJson<EmployeeVoiceProfile>(value.voice_profile_json)
+        : undefined,
+    ),
     background: String(value.background),
     personalityTraits: parseJson<string[]>(value.personality_traits_json),
     appearance: parseJson<JsonObject>(value.appearance_json),
@@ -6175,6 +6192,25 @@ function mapEmployeeProfile(row: object): EmployeeProfile {
   }
   if (typeof value.birthday === 'string') profile.birthday = value.birthday
   return profile
+}
+
+function defaultEmployeeVoiceProfile(): EmployeeVoiceProfile {
+  return { provider: 'auto', voiceId: '', speed: 1.1, pitch: 1 }
+}
+
+function normalizeCharacterGender(value: unknown): CharacterGender {
+  return value === 'female' || value === 'male' ? value : 'neutral'
+}
+
+function normalizeEmployeeVoiceProfile(value: EmployeeVoiceProfile | undefined): EmployeeVoiceProfile {
+  if (value === undefined) return defaultEmployeeVoiceProfile()
+  const provider = ['auto', 'system', 'kokoro', 'cosyvoice'].includes(value.provider)
+    ? value.provider
+    : 'auto'
+  const voiceId = typeof value.voiceId === 'string' && value.voiceId.length <= 240 ? value.voiceId : ''
+  const speed = Number.isFinite(value.speed) ? Math.min(1.3, Math.max(0.8, Math.round(value.speed * 20) / 20)) : 1.1
+  const pitch = Number.isFinite(value.pitch) ? Math.min(1.2, Math.max(0.8, Math.round(value.pitch * 20) / 20)) : 1
+  return { provider, voiceId, speed, pitch }
 }
 
 function mapSkillEvidence(row: object): SkillEvidence {
