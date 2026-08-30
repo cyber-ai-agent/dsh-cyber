@@ -8,6 +8,7 @@ import type { AudioChunk, TextToSpeechCapabilities, TextToSpeechProvider, TtsReq
 
 type PendingRequest = { resolve(value: MossAudio): void; reject(error: unknown): void; timeout: ReturnType<typeof setTimeout> }
 type MossAudio = { sampleRate: number; pcm: Float32Array; voice: string }
+type MossTtsProviderOptions = { executable?: string; sidecar?: string; requestTimeoutMs?: number; startupTimeoutMs?: number }
 
 export class MossTtsProvider implements TextToSpeechProvider {
   readonly id = 'moss-tts-nano-local'
@@ -20,7 +21,7 @@ export class MossTtsProvider implements TextToSpeechProvider {
   #pending = new Map<string, PendingRequest>()
   #voices: string[] = []
 
-  constructor(private readonly modelRoot: string) {}
+  constructor(private readonly modelRoot: string, private readonly options: MossTtsProviderOptions = {}) {}
 
   get state(): VoiceRuntimeState { return this.#state }
   get voices(): readonly string[] { return this.#voices }
@@ -38,7 +39,7 @@ export class MossTtsProvider implements TextToSpeechProvider {
         this.#pending.delete(request.requestId)
         this.#terminate(abortError('MOSS 语音生成超时'))
         reject(abortError('MOSS 语音生成超时'))
-      }, 60_000)
+      }, this.options.requestTimeoutMs ?? 60_000)
       this.#pending.set(request.requestId, { resolve, reject, timeout })
       const abort = () => this.cancel(request.requestId)
       request.signal?.addEventListener('abort', abort, { once: true })
@@ -72,10 +73,10 @@ export class MossTtsProvider implements TextToSpeechProvider {
   async #ensureProcess(): Promise<void> {
     if (this.#ready !== undefined) return this.#ready
     this.#state = 'warming'
-    const runtimePython = process.platform === 'win32'
+    const runtimePython = this.options.executable ?? (process.platform === 'win32'
       ? join(this.modelRoot, 'runtime', '.venv', 'Scripts', 'python.exe')
-      : join(this.modelRoot, 'runtime', '.venv', 'bin', 'python')
-    const sidecar = fileURLToPath(new URL('../../../runtime/moss-tts-sidecar.py', import.meta.url))
+      : join(this.modelRoot, 'runtime', '.venv', 'bin', 'python'))
+    const sidecar = this.options.sidecar ?? fileURLToPath(new URL('../../../runtime/moss-tts-sidecar.py', import.meta.url))
     const runtimeRoot = join(this.modelRoot, 'runtime')
     const loading = (async () => {
       await stat(runtimePython)
@@ -83,7 +84,7 @@ export class MossTtsProvider implements TextToSpeechProvider {
       this.#process = child
       this.#readline = createInterface({ input: child.stdout })
       await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('MOSS 语音运行时启动超时')), 60_000)
+        const timeout = setTimeout(() => reject(new Error('MOSS 语音运行时启动超时')), this.options.startupTimeoutMs ?? 60_000)
         const onLine = (line: string) => {
           let message: Record<string, unknown>
           try { message = JSON.parse(line) as Record<string, unknown> } catch { return }

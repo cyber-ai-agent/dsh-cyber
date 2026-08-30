@@ -175,6 +175,16 @@ export function EmployeeFocusMode({ world, employee, profile, entity, collaborat
         setVoiceBusy(false)
         setSpeaking(false)
         if (cause instanceof Error && cause.name === 'AbortError') { setVoiceNotice(undefined); return }
+        if (activeVoiceProvider === 'moss') {
+          const fallbackVoiceId = compatibleKokoroVoices[0]!.id
+          setVoiceNotice('自然语音暂不可用，已切换快速语音')
+          try {
+            await playKokoroSpeech({ text, voiceId: fallbackVoiceId, speed: voiceSpeed, onStatus: setVoiceNotice, onStart: () => setSpeaking(true), onEnd: () => setSpeaking(false) })
+            return
+          } catch (fallbackError) {
+            cause = fallbackError
+          }
+        }
         console.error('Local Kokoro speech failed', cause)
         setVoiceNotice(cause instanceof Error && !/fetch|network/iu.test(cause.message)
           ? `本地中文语音失败：${cause.message}`
@@ -197,7 +207,7 @@ export function EmployeeFocusMode({ world, employee, profile, entity, collaborat
     utteranceRef.current = value
     setSpeaking(true)
     window.speechSynthesis.speak(value)
-  }, [activeVoiceProvider, chineseSystemVoices, speechSupported, stopSpeech, systemVoiceId, voiceId, voiceSpeed])
+  }, [activeVoiceProvider, chineseSystemVoices, compatibleKokoroVoices, speechSupported, stopSpeech, systemVoiceId, voiceId, voiceSpeed])
 
   const changeVoiceMode = useCallback((mode: VoiceMode) => {
     if (mode === 'off') stopSpeech()

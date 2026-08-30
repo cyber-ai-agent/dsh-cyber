@@ -2,7 +2,7 @@ import { SpeakerHigh, Stop } from '@phosphor-icons/react'
 import { useEffect, useState } from 'react'
 import type { EmployeeProfile } from '@dsh-cyber/contracts'
 
-import { playKokoroSpeech, stopKokoroSpeech } from '../world/avatar/speech/KokoroSpeechAdapter.js'
+import { playKokoroSpeech, playMossSpeech, stopKokoroSpeech } from '../world/avatar/speech/KokoroSpeechAdapter.js'
 import { speechTextFromMessage } from '../world/digital-human-motion.js'
 import { resolveEmployeeVoiceProfile } from './employee-voice-profile.js'
 
@@ -53,6 +53,17 @@ export function MessageSpeechButton({ employeeId, employeeName, profile, text }:
           window.speechSynthesis.speak(utterance)
           return
         }
+      }
+      if (voice.provider === 'moss') {
+        await playMossSpeech({
+          text: spokenText,
+          voiceId: voice.voiceId.startsWith('moss:') ? voice.voiceId : 'moss:Junhao',
+          speed: voice.speed,
+          onStatus: () => undefined,
+          onStart: () => { setBusy(false); setPlaying(true) },
+          onEnd: () => { setBusy(false); setPlaying(false) },
+        })
+        return
       }
       const localVoice = voice.voiceId.startsWith('kokoro:')
         ? voice
