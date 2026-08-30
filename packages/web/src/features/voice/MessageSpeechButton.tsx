@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import type { EmployeeProfile } from '@dsh-cyber/contracts'
 
 import { playKokoroSpeech, stopKokoroSpeech } from '../world/avatar/speech/KokoroSpeechAdapter.js'
+import { speechTextFromMessage } from '../world/digital-human-motion.js'
 import { resolveEmployeeVoiceProfile } from './employee-voice-profile.js'
 
 interface MessageSpeechButtonProps {
@@ -30,6 +31,8 @@ export function MessageSpeechButton({ employeeId, employeeName, profile, text }:
   }
 
   const play = async () => {
+    const spokenText = speechTextFromMessage(text)
+    if (spokenText.length === 0) { setError('这条回复没有可播报的文字'); return }
     const voice = resolveEmployeeVoiceProfile(employeeId, profile?.gender, profile?.voiceProfile)
     setError(undefined)
     setBusy(true)
@@ -38,7 +41,7 @@ export function MessageSpeechButton({ employeeId, employeeName, profile, text }:
         const voiceUri = voice.voiceId.slice('system:'.length)
         const systemVoice = window.speechSynthesis.getVoices().find((item) => item.voiceURI === voiceUri && /^zh(?:-|_)/iu.test(item.lang))
         if (systemVoice !== undefined) {
-          const utterance = new SpeechSynthesisUtterance(text)
+          const utterance = new SpeechSynthesisUtterance(spokenText)
           utterance.voice = systemVoice
           utterance.lang = systemVoice.lang
           utterance.rate = voice.speed
@@ -55,7 +58,7 @@ export function MessageSpeechButton({ employeeId, employeeName, profile, text }:
         ? voice
         : resolveEmployeeVoiceProfile(employeeId, profile?.gender, { ...voice, provider: 'kokoro', voiceId: '' })
       await playKokoroSpeech({
-        text,
+        text: spokenText,
         voiceId: localVoice.voiceId,
         speed: localVoice.speed,
         onStatus: () => undefined,

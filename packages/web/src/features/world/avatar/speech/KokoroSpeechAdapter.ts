@@ -43,7 +43,15 @@ export async function playKokoroSpeech(input: {
   const option = KOKORO_CHINESE_VOICES.find((voice) => voice.id === input.voiceId)
   if (option === undefined) throw new Error('所选本地中文声音不存在')
   stopKokoroSpeech()
-  return appendKokoroSpeech(input)
+  const chunks = splitKokoroSpeechText(input.text)
+  if (chunks.length === 0) throw new Error('没有可播报的文字内容')
+  for (let index = 0; index < chunks.length; index += 1) {
+    await appendKokoroSpeech({
+      ...input,
+      text: chunks[index]!,
+      onEnd: index === chunks.length - 1 ? input.onEnd : () => undefined,
+    })
+  }
 }
 
 export async function appendKokoroSpeech(input: {
@@ -61,54 +69,88 @@ export async function appendKokoroSpeech(input: {
   const requestGeneration = generation
   const controller = new AbortController()
   activeRequests.add(controller)
-  input.onStatus('正在生成中文语音…')
-  const response = await fetch('/api/local-tts/stream', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text: input.text, speakerId: option.speakerId, speed: normalizeSpeed(input.speed) }),
-    signal: controller.signal,
-  })
-  if (!response.ok) {
-    const payload = await response.json().catch(() => undefined) as { error?: { message?: string } } | undefined
-    throw new Error(payload?.error?.message ?? '本地语音服务生成失败')
-  }
-  await resumePromise
-  if (requestGeneration !== generation) return
-  if (context.state !== 'running') throw new Error('浏览器暂停了音频输出，请再次点击播放')
-  if (response.body === null) throw new Error('本地语音服务没有返回音频流')
-  let nextStartAt = Math.max(context.currentTime + 0.03, playbackCursor)
-  let totalDuration = 0
-  let started = false
-  for await (const frame of readPcmFrames(response.body)) {
+  let timedOut = false
+  const timeout = window.setTimeout(() => { timedOut = true; controller.abort() }, 28_000)
+  try {
+    input.onStatus('正在生成中文语音…')
+    const response = await fetch('/api/local-tts/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: input.text, speakerId: option.speakerId, speed: normalizeSpeed(input.speed) }),
+      signal: controller.signal,
+    })
+    if (!response.ok) {
+      const payload = await response.json().catch(() => undefined) as { error?: { message?: string } } | undefined
+      throw new Error(payload?.error?.message ?? '本地语音服务生成失败')
+    }
+    await resumePromise
     if (requestGeneration !== generation) return
-    const buffer = context.createBuffer(1, frame.pcm.length, frame.sampleRate)
-    buffer.getChannelData(0).set(frame.pcm)
-    const source = context.createBufferSource()
-    source.buffer = buffer
-    source.connect(getAnalyser(context))
-    const startAt = Math.max(context.currentTime + 0.02, nextStartAt)
-    nextStartAt = startAt + buffer.duration
-    playbackCursor = nextStartAt
-    totalDuration += buffer.duration
-    activeSources.add(source)
-    source.onended = () => {
-      activeSources.delete(source)
-      source.disconnect()
-      if (frame.final && requestGeneration === generation) input.onEnd()
-      if (activeSources.size === 0) stopAmplitudeMonitor()
+    if (context.state !== 'running') throw new Error('浏览器暂停了音频输出，请再次点击播放')
+    if (response.body === null) throw new Error('本地语音服务没有返回音频流')
+    let nextStartAt = Math.max(context.currentTime + 0.03, playbackCursor)
+    let totalDuration = 0
+    let started = false
+    for await (const frame of readPcmFrames(response.body)) {
+      if (requestGeneration !== generation) return
+      const buffer = context.createBuffer(1, frame.pcm.length, frame.sampleRate)
+      buffer.getChannelData(0).set(frame.pcm)
+      const source = context.createBufferSource()
+      source.buffer = buffer
+      source.connect(getAnalyser(context))
+      const startAt = Math.max(context.currentTime + 0.02, nextStartAt)
+      nextStartAt = startAt + buffer.duration
+      playbackCursor = nextStartAt
+      totalDuration += buffer.duration
+      activeSources.add(source)
+      source.onended = () => {
+        activeSources.delete(source)
+        source.disconnect()
+        if (frame.final && requestGeneration === generation) input.onEnd()
+        if (activeSources.size === 0) stopAmplitudeMonitor()
+      }
+      source.start(startAt)
+      if (!started) {
+        started = true
+        startAmplitudeMonitor(context)
+        input.onStart()
+        input.onStatus('正在播放中文语音')
+      } else {
+        input.onStatus(`正在播放中文语音（已排队 ${totalDuration.toFixed(1)} 秒）`)
+      }
     }
-    source.start(startAt)
-    if (!started) {
-      started = true
-      startAmplitudeMonitor(context)
-      input.onStart()
-      input.onStatus('正在播放中文语音')
-    } else {
-      input.onStatus(`正在播放中文语音（已排队 ${totalDuration.toFixed(1)} 秒）`)
-    }
+    if (!started) throw new Error('本地语音服务没有生成可播放音频')
+  } catch (cause) {
+    if (timedOut) throw new Error('本地语音生成超时，已自动停止，请重试或缩短播报内容')
+    throw cause
+  } finally {
+    window.clearTimeout(timeout)
+    activeRequests.delete(controller)
   }
-  activeRequests.delete(controller)
-  if (!started) throw new Error('本地语音服务没有生成可播放音频')
+}
+
+export function splitKokoroSpeechText(value: string, maximumLength = 120): string[] {
+  const text = value
+    .normalize('NFKC')
+    .replace(/[\u{1F000}-\u{1FAFF}\u2600-\u27BF\uFE0F]/gu, ' ')
+    .replace(/\p{C}/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .replace(/\s+([。！？!?；;，,、])/gu, '$1')
+    .trim()
+  if (text.length === 0) return []
+  const sentences = text.match(/[^。！？!?；;]+[。！？!?；;]?/gu) ?? [text]
+  const chunks: string[] = []
+  for (const sentence of sentences) {
+    let remaining = sentence.trim()
+    while (remaining.length > maximumLength) {
+      const candidate = remaining.slice(0, maximumLength)
+      const separator = Math.max(candidate.lastIndexOf('，'), candidate.lastIndexOf(','), candidate.lastIndexOf('、'), candidate.lastIndexOf(' '))
+      const boundary = separator >= Math.floor(maximumLength * 0.45) ? separator + 1 : maximumLength
+      chunks.push(remaining.slice(0, boundary).trim())
+      remaining = remaining.slice(boundary).trim()
+    }
+    if (remaining.length > 0) chunks.push(remaining)
+  }
+  return chunks
 }
 
 function normalizeSpeed(value: number | undefined): number {

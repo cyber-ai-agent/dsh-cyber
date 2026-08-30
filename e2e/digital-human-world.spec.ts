@@ -211,6 +211,27 @@ test('uses the static sprite renderer for reduced motion without loading the VRM
   expect(vrmRequests, '减少动态效果时不得下载 VRM runtime').toEqual([])
 })
 
+test('pastes a clipboard image into the existing composer attachment flow', async ({ page }) => {
+  const consoleIssues: string[] = []
+  attachAppConsoleRecorder(page, consoleIssues)
+  await page.goto(origin)
+  await page.getByRole('button', { name: `与${employeeName}私聊`, exact: true }).click()
+  const composer = page.getByRole('textbox', { name: '给当前世界的角色发送消息' })
+  await composer.evaluate((element, pngBase64) => {
+    const bytes = Uint8Array.from(atob(pngBase64), (character) => character.charCodeAt(0))
+    const file = new File([bytes], 'clipboard.png', { type: 'image/png' })
+    const event = new Event('paste', { bubbles: true, cancelable: true })
+    Object.defineProperty(event, 'clipboardData', { value: { items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }] } })
+    element.dispatchEvent(event)
+  }, ONE_PIXEL_PNG)
+
+  const preview = page.locator('.composer-attachments__preview')
+  await expect(preview).toBeVisible()
+  await expect(preview).toHaveAttribute('alt', /粘贴图片-.+预览/u)
+  await expect(page.getByRole('button', { name: '发送', exact: true })).toBeEnabled()
+  expect(consoleIssues, consoleIssues.join('\n')).toEqual([])
+})
+
 test('keeps the chosen 2D view across conversations and centers the latest group speaker', async ({ page }) => {
   await installSpeechMock(page)
   await page.goto(origin)

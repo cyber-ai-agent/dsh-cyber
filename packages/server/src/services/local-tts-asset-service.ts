@@ -69,7 +69,7 @@ export class LocalTtsAssetService {
   }
 
   async *stream(input: { text: string; speakerId: number; speed: number; signal?: AbortSignal }): AsyncIterable<AudioChunk> {
-    const text = input.text.trim()
+    const text = normalizeTtsText(input.text)
     if (text.length === 0 || text.length > 1_000) throw new ServiceError('invalid', 'local_tts_text_invalid', '播报内容长度必须在 1 到 1000 个字符之间')
     if (!Number.isInteger(input.speakerId) || input.speakerId < 3 || input.speakerId > 102) throw new ServiceError('invalid', 'local_tts_voice_invalid', '请选择有效的中文声音')
     if (!Number.isFinite(input.speed) || input.speed < 0.7 || input.speed > 1.3) throw new ServiceError('invalid', 'local_tts_speed_invalid', '语速必须在 0.7 到 1.3 之间')
@@ -97,6 +97,16 @@ export class LocalTtsAssetService {
     if (!isManifest(value)) throw new ServiceError('conflict', 'local_tts_manifest_invalid', '本地中文语音包清单无效')
     return value
   }
+}
+
+export function normalizeTtsText(value: string): string {
+  return value
+    .normalize('NFKC')
+    .replace(/[\u{1F000}-\u{1FAFF}\u2600-\u27BF\uFE0F]/gu, ' ')
+    .replace(/\p{C}/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .replace(/\s+([。！？!?；;，,、])/gu, '$1')
+    .trim()
 }
 
 function concatenate(chunks: Float32Array[]): Float32Array {

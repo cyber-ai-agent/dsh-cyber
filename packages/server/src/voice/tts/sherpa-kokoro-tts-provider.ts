@@ -17,6 +17,9 @@ interface SherpaTts {
   }): Promise<{ samples: Float32Array; sampleRate: number }>
 }
 
+type SherpaEngine = { module: SherpaModule; tts: SherpaTts }
+type SherpaEngineLoader = () => Promise<SherpaEngine>
+
 const require = createRequire(import.meta.url)
 
 export class SherpaKokoroTtsProvider implements TextToSpeechProvider {
@@ -24,10 +27,14 @@ export class SherpaKokoroTtsProvider implements TextToSpeechProvider {
   readonly kind = 'kokoro' as const
   readonly capabilities: TextToSpeechCapabilities = { streaming: true, pcm: true, viseme: false, voiceClone: false }
   #state: VoiceRuntimeState = 'cold'
-  #enginePromise: Promise<{ module: SherpaModule; tts: SherpaTts }> | undefined
+  #enginePromise: Promise<SherpaEngine> | undefined
   #active = new Map<string, AbortController>()
 
-  constructor(private readonly modelRoot: string) {}
+  constructor(
+    private readonly modelRoot: string,
+    private readonly engineLoader?: SherpaEngineLoader,
+    private readonly generationTimeoutMs = 30_000,
+  ) {}
 
   get state(): VoiceRuntimeState { return this.#state }
 
@@ -42,9 +49,17 @@ export class SherpaKokoroTtsProvider implements TextToSpeechProvider {
     const controller = new AbortController()
     const abort = () => controller.abort()
     request.signal?.addEventListener('abort', abort, { once: true })
+    if (request.signal?.aborted === true) controller.abort()
     this.#active.set(request.requestId, controller)
     this.#state = 'busy'
     const queue = new AsyncQueue<Float32Array>()
+    let timedOut = false
+    const failForAbort = () => queue.fail(abortError(timedOut
+      ? '本地语音生成超时，请缩短播报内容或稍后重试'
+      : '本地语音生成已取消'))
+    controller.signal.addEventListener('abort', failForAbort, { once: true })
+    if (controller.signal.aborted) failForAbort()
+    const timeout = setTimeout(() => { timedOut = true; controller.abort() }, this.generationTimeoutMs)
     let sampleRate = 24_000
     let progressSamples = 0
     const generation = tts.generateAsync({
@@ -75,6 +90,8 @@ export class SherpaKokoroTtsProvider implements TextToSpeechProvider {
       await generation
       if (pending !== undefined) yield chunk(sequence, pending, sampleRate, true)
     } finally {
+      clearTimeout(timeout)
+      controller.signal.removeEventListener('abort', failForAbort)
       request.signal?.removeEventListener('abort', abort)
       this.#active.delete(request.requestId)
       this.#state = this.#enginePromise === undefined ? 'cold' : 'ready'
@@ -92,28 +109,31 @@ export class SherpaKokoroTtsProvider implements TextToSpeechProvider {
     this.#state = 'cold'
   }
 
-  async #engine(): Promise<{ module: SherpaModule; tts: SherpaTts }> {
+  async #engine(): Promise<SherpaEngine> {
     if (this.#enginePromise !== undefined) return this.#enginePromise
     this.#state = 'warming'
     const loading = (async () => {
-      const module = require('sherpa-onnx-node') as SherpaModule
-      const tts = await module.OfflineTts.createAsync({
-        model: {
-          kokoro: {
-            model: join(this.modelRoot, 'model.int8.onnx'),
-            voices: join(this.modelRoot, 'voices.bin'),
-            tokens: join(this.modelRoot, 'tokens.txt'),
-            dataDir: join(this.modelRoot, 'espeak-ng-data'),
-            lexicon: `${join(this.modelRoot, 'lexicon-us-en.txt')},${join(this.modelRoot, 'lexicon-zh.txt')}`,
+      const engine = this.engineLoader === undefined ? await (async () => {
+        const module = require('sherpa-onnx-node') as SherpaModule
+        const tts = await module.OfflineTts.createAsync({
+          model: {
+            kokoro: {
+              model: join(this.modelRoot, 'model.int8.onnx'),
+              voices: join(this.modelRoot, 'voices.bin'),
+              tokens: join(this.modelRoot, 'tokens.txt'),
+              dataDir: join(this.modelRoot, 'espeak-ng-data'),
+              lexicon: `${join(this.modelRoot, 'lexicon-us-en.txt')},${join(this.modelRoot, 'lexicon-zh.txt')}`,
+            },
+            debug: false,
+            numThreads: 2,
+            provider: 'cpu',
           },
-          debug: false,
-          numThreads: 2,
-          provider: 'cpu',
-        },
-        maxNumSentences: 1,
-      })
+          maxNumSentences: 1,
+        })
+        return { module, tts }
+      })() : await this.engineLoader()
       this.#state = 'ready'
-      return { module, tts }
+      return engine
     })()
     this.#enginePromise = loading
     void loading.catch(() => { if (this.#enginePromise === loading) this.#enginePromise = undefined; this.#state = 'failed' })
@@ -132,17 +152,21 @@ class AsyncQueue<T> implements AsyncIterable<T> {
   #error: unknown
 
   push(value: T): void {
+    if (this.#closed) return
     const waiter = this.#waiting.shift()
     if (waiter !== undefined) waiter.resolve({ value, done: false })
     else this.#items.push(value)
   }
 
   close(): void {
+    if (this.#closed) return
     this.#closed = true
     for (const waiter of this.#waiting.splice(0)) waiter.resolve({ value: undefined, done: true })
   }
 
   fail(error: unknown): void {
+    if (this.#closed) return
+    this.#items = []
     this.#error = error
     this.#closed = true
     for (const waiter of this.#waiting.splice(0)) waiter.reject(error)
@@ -159,4 +183,10 @@ class AsyncQueue<T> implements AsyncIterable<T> {
       },
     }
   }
+}
+
+function abortError(message: string): Error {
+  const error = new Error(message)
+  error.name = 'AbortError'
+  return error
 }

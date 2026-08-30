@@ -4,12 +4,16 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { LocalTtsAssetService } from '../src/services/local-tts-asset-service.js'
+import { LocalTtsAssetService, normalizeTtsText } from '../src/services/local-tts-asset-service.js'
 
 const MODEL_DIR = 'kokoro-int8-multi-lang-v1_1'
 const SHA = '0'.repeat(64)
 
 describe('LocalTtsAssetService', () => {
+  it('removes emoji and control characters before native synthesis', () => {
+    expect(normalizeTtsText('你好🙂\u0000\n世界')).toBe('你好 世界')
+  })
+
   it('reports only a pinned, complete sherpa-onnx voice runtime', async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-local-tts-'))
     const root = join(stateRoot, 'tts', 'sherpa')

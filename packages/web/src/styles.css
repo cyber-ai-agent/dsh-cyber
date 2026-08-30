@@ -1391,6 +1391,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .composer-file-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .composer-attachments { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 12px 0; }
 .composer-attachments > span { min-width: 0; max-width: 260px; display: grid; grid-template-columns: 18px minmax(0, 1fr) 20px; align-items: center; gap: 7px; padding: 7px 9px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+.composer-attachments > span.is-image { grid-template-columns: 46px minmax(0, 1fr) 20px; }
+.composer-attachments__preview { width: 46px; height: 46px; display: block; border-radius: 4px; object-fit: cover; background: var(--surface-3); }
 .composer-attachments > span > span { min-width: 0; display: grid; gap: 1px; }
 .composer-attachments strong { overflow: hidden; color: var(--text-soft); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .composer-attachments small { color: var(--text-muted); font: 9px var(--font-mono); }
@@ -1467,6 +1469,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .composer-file-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .composer-attachments { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 9px 0; }
 .composer-attachments > span { min-width: 0; max-width: 260px; display: grid; grid-template-columns: 16px minmax(0, 1fr) 20px; align-items: center; gap: 6px; padding: 6px 7px; border: 1px solid var(--border); background: var(--surface-2); }
+.composer-attachments > span.is-image { grid-template-columns: 42px minmax(0, 1fr) 20px; }
+.composer-attachments__preview { width: 42px; height: 42px; }
 .composer-attachments > span > span { min-width: 0; display: grid; gap: 1px; }
 .composer-attachments strong { overflow: hidden; color: var(--text-soft); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .composer-attachments small { color: var(--text-muted); font: 8px var(--font-mono); }
