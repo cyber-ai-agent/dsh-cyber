@@ -57,12 +57,27 @@ async function readDeclaredSourceFile(
   if (declared === undefined) throw new Error(`Avatar Base Pack 文件未声明：${relativePath}`)
 
   const root = resolve(sourceDirectory)
-  const target = resolve(root, ...relativePath.split('/'))
-  if (target !== root && !target.startsWith(`${root}${sep}`)) throw new Error(`Avatar Base Pack 文件越界：${relativePath}`)
-  const metadata = await lstat(target)
+  const rootMetadata = await lstat(root)
+  if (!rootMetadata.isDirectory() || rootMetadata.isSymbolicLink()) {
+    throw new Error('Avatar Base Pack 源目录必须是普通目录')
+  }
+
+  let current = root
+  for (const segment of relativePath.split('/')) {
+    current = resolve(current, segment)
+    if (current !== root && !current.startsWith(`${root}${sep}`)) {
+      throw new Error(`Avatar Base Pack 文件越界：${relativePath}`)
+    }
+    const segmentMetadata = await lstat(current)
+    if (segmentMetadata.isSymbolicLink()) {
+      throw new Error(`Avatar Base Pack 路径不允许符号链接：${relativePath}`)
+    }
+  }
+
+  const metadata = await lstat(current)
   if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error(`Avatar Base Pack 文件不是普通文件：${relativePath}`)
 
-  const body = await readFile(target)
+  const body = await readFile(current)
   const digest = createHash('sha256').update(body).digest('hex')
   if (digest !== declared.sha256) throw new Error(`Avatar Base Pack 文件哈希不匹配：${relativePath}`)
   return body
