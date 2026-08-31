@@ -20,7 +20,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc -b --pretty false && pnpm --filter @dsh-cyber/web typecheck",
     "verify": "pnpm run typecheck && pnpm run test",
-    "avatar:build-official": "node scripts/build-official-avatar-base-pack.mjs",
+    "avatar:build-official": "node scripts/build-official-avatar-base-pack-resolved.mjs",
     "avatar:verify-official": "node scripts/verify-official-avatar-base-pack-runtime.mjs",
     "tts:install": "node scripts/install-local-tts.mjs",
     "stt:install": "node scripts/install-local-stt.mjs",
