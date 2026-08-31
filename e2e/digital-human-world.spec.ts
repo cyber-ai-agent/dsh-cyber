@@ -407,11 +407,17 @@ async function selectCharacterView(page: Page, mode: '2D' | '3D', expectedEmploy
  */
 async function expectCharacterVisible(page: Page, employeeName: string): Promise<void> {
   const focus = page.getByRole('region', { name: `${employeeName}员工聚焦` })
-  const stage = focus.locator('.focus-avatar--sprite')
-  // Either place is correct; which one depends on the renderer that actually
-  // ran, and a device that cannot afford 3D is degraded to the 2D world
-  // without being told to download 3D first.
-  await expect(stage.or(page.locator('.world-canvas-host'))).toBeVisible()
+  // Which place is correct depends on the renderer that actually ran, so ask
+  // the canvas rather than accepting either. `.or(world-canvas-host)` passed
+  // unconditionally — the world canvas is always mounted now — and so proved
+  // nothing about the character at all.
+  const host = page.locator('.world-canvas-host')
+  await expect(host).toBeVisible()
+  if (await host.getAttribute('data-renderer-kind') === 'three-3d') {
+    await expect(host).toHaveAttribute('data-renderer-kind', 'three-3d')
+  } else {
+    await expect(focus.locator('.focus-avatar--sprite')).toBeVisible()
+  }
 }
 
 async function installSpeechMock(page: Page): Promise<void> {

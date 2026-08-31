@@ -4,7 +4,7 @@ import type { WorldFacing, WorldPoint, WorldRect } from '@dsh-cyber/contracts'
  * The one mapping between the world's coordinates and a 3D scene.
  *
  * World positions are scene pixels in the theme's 2D image space — the shipped
- * company floor is 1792 x 1120 — and there is no third axis anywhere in the
+ * scenes are 1792 wide by 1008 or 1120 deep — and there is no third axis in the
  * runtime contract. Rather than invent a second set of positions for 3D, every
  * 3D placement is derived from the same `WorldPoint` the 2D renderer draws, so
  * a character standing at a desk in one renderer stands at that desk in the
@@ -21,8 +21,8 @@ import type { WorldFacing, WorldPoint, WorldRect } from '@dsh-cyber/contracts'
  * Anchored to the one real measurement the world has: `spreadPosition` in the
  * simulation lays workstation slots on an 86px grid, and desks in an open
  * office sit about 1.6m apart. Everything else follows from that, which puts
- * the company floor at roughly 33m x 21m — a plausible floor plate rather than
- * a number chosen to make a demo look right.
+ * the shipped floors at roughly 33m by 19-21m — a plausible floor plate rather
+ * than a number chosen to make a demo look right.
  */
 export const WORLD_SLOT_GAP_PIXELS = 86
 export const WORLD_SLOT_GAP_METRES = 1.6

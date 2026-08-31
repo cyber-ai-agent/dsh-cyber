@@ -13,9 +13,15 @@ import {
  *
  * A theme describes itself in 2D: a floor size, anchors where characters
  * stand, interactables with pixel bounds, and a navigation grid marking what
- * cannot be walked through. That is enough to build a room. Nothing here is
- * authored separately for 3D, so a desk is in the same place in both renderers
- * because it is the same desk, not because two descriptions were kept in sync.
+ * cannot be walked through. That is enough to build a room, and nothing here
+ * is authored separately for 3D.
+ *
+ * Two different things come out of that, and the difference matters. An
+ * interactable is the same object in both renderers — same id, same bounds, so
+ * clicking it means the same thing. A desk is not: the 2D scene paints its
+ * furniture into a background image, so a 3D desk is inferred from the anchor
+ * a character works at. It stands where that character stands, which is the
+ * property that matters, but it is not the same desk.
  *
  * Themes may later carry an explicit 3D description; until one does, this is
  * the layout, not a placeholder for it.
@@ -161,12 +167,15 @@ export function planWorldLayout(scene: WorldThemeSceneManifest): SceneLayout {
 }
 
 /**
- * Zones, inferred the way the simulation already infers them.
+ * Zones, inferred from the same signals the simulation reads.
  *
  * A theme cannot declare a zone: `compileWorldSemantics` sniffs anchor ids and
- * tags to decide what part of the office an anchor belongs to. Reading the same
- * signals here keeps the 3D floor divided the way the runtime believes it is,
- * instead of introducing a second, disagreeing opinion.
+ * tags to decide what part of the office an anchor belongs to, and this reads
+ * the same fields for the same purpose. The two vocabularies are close but not
+ * identical — the simulation's zone kinds serve scheduling, these serve floor
+ * colour — so this is a deliberate parallel, not a shared implementation, and
+ * a disagreement between them would show up as a character meeting somewhere
+ * the floor calls a desk.
  */
 function planZones(scene: WorldThemeSceneManifest, floorRect: WorldRect): SceneZone[] {
   const grouped = new Map<SceneZoneKind, WorldPoint[]>()

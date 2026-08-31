@@ -74,6 +74,13 @@ export interface ThreeWorldRendererOptions {
    * sent back to a loading screen.
    */
   resolveAvatarUrl?: (entityId: string) => string | undefined
+  /**
+   * Motion assets for the characters of this world.
+   *
+   * A theme or avatar pack supplies them; without one the built-in table
+   * applies, which declares no assets and leaves the procedural layer alone.
+   */
+  motionLibrary?: Parameters<VrmActor['loadDeclaredMotion']>[0]
 }
 
 export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
@@ -432,7 +439,7 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
           actor.dispose()
           return
         }
-        await actor.loadDeclaredMotion()
+        await actor.loadDeclaredMotion(this.#options.motionLibrary)
         view.vrm?.dispose()
         view.vrm = actor
         if (this.#options.shadows !== false) {
@@ -483,6 +490,10 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
     this.#locomotion.advance(deltaMs)
 
     const floor = this.#floorRect()
+    // Everybody looks at whoever is talking; the character the user is focused
+    // on looks back at the user. A room where everyone stares straight ahead
+    // reads as people ignoring each other.
+    const speaker = [...this.#actors.values()].find((item) => item.entity.activity === 'talking')
     for (const view of this.#actors.values()) {
       const live = this.#locomotion.stateOf(view.entity.id)
       const previous = view.root.position.clone()
@@ -518,6 +529,13 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
           view.vrm.root.visible = next !== 'billboard'
         }
       }
+      const focusedOnViewer = this.#cameraMode !== 'overview'
+        && (this.#cameraSubjectId ?? this.#selectedEntityId) === view.entity.id
+      const lookAt = focusedOnViewer
+        ? { x: camera.position.x, y: camera.position.y, z: camera.position.z }
+        : speaker === undefined || speaker === view
+          ? undefined
+          : { x: speaker.root.position.x, y: 1.5, z: speaker.root.position.z }
       view.sinceUpdate += deltaMs
       const interval = updateIntervalMs(view.lod)
       if (view.sinceUpdate >= interval) {
@@ -535,6 +553,7 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
             speaking,
             animated: true,
             detail: capabilitiesFor(view.lod),
+            ...(lookAt === undefined ? {} : { lookAt }),
           })
         }
         view.sinceUpdate = 0
@@ -561,12 +580,17 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
     const subjectId = this.#cameraSubjectId ?? this.#selectedEntityId
     const view = subjectId === undefined ? undefined : this.#actors.get(subjectId)
     if (view === undefined) return poseFor({ mode: 'overview', overview: framing })
+    // Zoom has to mean something in every camera, not only the overview. On a
+    // character it is how close you stand: the buttons were inert the moment
+    // somebody was focused, which is most of the time.
+    const base = this.#cameraMode === 'follow' ? 4.4 : 2.6
     return poseFor({
       mode: this.#cameraMode,
       overview: framing,
       subject: {
         position: { x: view.root.position.x, y: 0, z: view.root.position.z },
         heading: view.root.rotation.y,
+        distance: base / this.#zoom,
       },
     })
   }

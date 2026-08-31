@@ -15,9 +15,17 @@ describe('avatar view mode', () => {
     expect(characterModeAfterMap('2d')).toBe('2d')
   })
 
-  it('turns missing 3D into an explicit setup action', () => {
-    expect(threeDimensionalControl(employee())).toMatchObject({ available: false, label: '创建 3D', title: '为测试角色创建 3D 形象' })
-    expect(threeDimensionalControl(employee({ avatarAssetUrl: '/api/assets/vrm', avatarProfile: vrmProfile() }))).toMatchObject({ available: true, label: '3D' })
+  it('offers 3D whether or not the character has an avatar', () => {
+    // The control switches renderers; it stopped opening the avatar editor
+    // once the world learned to draw a character that has none. Labelling it
+    // "创建 3D" promised an action it no longer performs.
+    const without = threeDimensionalControl(employee())
+    expect(without.label).toBe('3D')
+    expect(without.title).toContain('还没有 3D 形象')
+    expect(without.title).toContain('默认形象')
+
+    const with3d = threeDimensionalControl(employee({ avatarAssetUrl: '/api/assets/vrm', avatarProfile: vrmProfile() }))
+    expect(with3d).toMatchObject({ available: true, label: '3D' })
   })
 })
 

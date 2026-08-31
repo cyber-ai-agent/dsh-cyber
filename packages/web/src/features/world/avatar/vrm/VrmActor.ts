@@ -8,7 +8,7 @@ import { VrmExpressionController } from './VrmExpressionController.js'
 import { VrmLookAtController } from './VrmLookAtController.js'
 import { VrmMotionController } from './VrmMotionController.js'
 import { VrmSpeechController } from './VrmSpeechController.js'
-import { disposeVrmScene } from './VrmResourceManager.js'
+import { ResourceCache, disposeVrmScene } from './VrmResourceManager.js'
 import { declaredMotionSources, loadMotionClips } from '../motion/load-motion-clips.js'
 
 /**
@@ -27,9 +27,29 @@ import { declaredMotionSources, loadMotionClips } from '../motion/load-motion-cl
 
 export interface VrmActorLoadOptions {
   assetUrl: string
-  /** Named so a cache can share one download between characters. */
+  /**
+   * What to share this download under. Defaults to the URL.
+   *
+   * The bytes are shared, not the model: a VRM carries a humanoid and an
+   * expression manager bound to its own bones, so two characters cannot pose
+   * the same instance. Parsing twice is cheap next to downloading twice.
+   */
   cacheKey?: string
   signal?: AbortSignal
+}
+
+/**
+ * Downloaded avatar files, by key.
+ *
+ * Module-scoped on purpose: a world and an avatar preview open at the same
+ * time are looking at the same file, and the second one should not fetch it
+ * again.
+ */
+const avatarBytes = new ResourceCache<ArrayBuffer>()
+
+/** For tests and diagnostics: how many characters share a downloaded file. */
+export function avatarShareCount(cacheKey: string): number {
+  return avatarBytes.users(cacheKey)
 }
 
 export interface VrmActorUpdateInput {
@@ -55,6 +75,13 @@ export interface VrmActorUpdateInput {
    * either way.
    */
   amplitude?: number
+  /**
+   * Something in the world worth looking at — the speaker, or the viewer.
+   *
+   * Omitted, the character drifts. In a meeting that reads as everybody
+   * ignoring each other, which is why the world supplies one.
+   */
+  lookAt?: { x: number; y: number; z: number }
 }
 
 export class VrmActor {
@@ -99,32 +126,53 @@ export class VrmActor {
     ])
     const loader = new loaderModule.GLTFLoader()
     loader.register((parser) => new vrmModule.VRMLoaderPlugin(parser))
-    const gltf = await loader.loadAsync(options.assetUrl)
+    const key = options.cacheKey ?? options.assetUrl
+    const bytes = await avatarBytes.acquire(key, async () => {
+      const response = await fetch(options.assetUrl)
+      if (!response.ok) throw new Error(`形象文件下载失败（${response.status}）`)
+      return await response.arrayBuffer()
+    }, () => undefined)
+    let released = false
+    const releaseBytes = () => { if (!released) { released = true; avatarBytes.release(key) } }
+    const gltf = await loader.parseAsync(bytes.slice(0), baseUrlOf(options.assetUrl)).catch((error: unknown) => {
+      releaseBytes()
+      throw error
+    })
     const vrm = gltf.userData.vrm as VRM | undefined
     if (vrm === undefined) {
       disposeVrmScene(gltf.scene)
+      releaseBytes()
       throw new Error('已发布文件不包含 VRM 1.0 角色')
     }
     if (options.signal?.aborted === true) {
       disposeVrmScene(gltf.scene)
+      releaseBytes()
       throw new Error('VRM 加载已取消')
     }
     // VRM 0.x models face the opposite way; without this a character walks
     // backwards through its own office.
     vrmModule.VRMUtils.rotateVRM0(vrm)
     void THREE
-    return new VrmActor(vrm)
+    // This character's own meshes are freed with it; the shared bytes are
+    // given back so the last character out frees the download too.
+    return new VrmActor(vrm, () => {
+      disposeVrmScene(vrm.scene)
+      releaseBytes()
+    })
   }
 
   /**
    * Registers whatever motion assets the library declares.
    *
-   * Silent and harmless when nothing is declared, which is today: the
-   * repository ships no animation assets, so the character keeps its
-   * procedural layer rather than being given invented keyframes.
+   * Takes the library so a theme or avatar pack can supply its own; without
+   * one the built-in table applies. Silent and harmless when nothing is
+   * declared, which is today: the repository ships no animation assets, so the
+   * character keeps its procedural layer rather than invented keyframes.
    */
-  async loadDeclaredMotion(): Promise<{ registered: number; failures: number }> {
-    const sources = declaredMotionSources()
+  async loadDeclaredMotion(
+    library?: Parameters<typeof declaredMotionSources>[0],
+  ): Promise<{ registered: number; failures: number }> {
+    const sources = declaredMotionSources(library)
     if (sources.length === 0) return { registered: 0, failures: 0 }
     const result = await loadMotionClips(this.vrm, sources)
     if (this.#disposed) return { registered: 0, failures: result.failures.length }
@@ -144,6 +192,9 @@ export class VrmActor {
    * character still turns its head toward whoever is speaking, still blinks,
    * and still moves its mouth. A controller that overwrote the others would
    * make the character look like it could only do one thing at a time.
+   *
+   * `lookAt` is what makes the head claim true rather than decorative — with
+   * no target the neck only wanders on a sine and aims at nobody.
    */
   update(deltaMs: number, input: VrmActorUpdateInput): void {
     if (this.#disposed) return
@@ -161,6 +212,7 @@ export class VrmActor {
     }
     if (face) {
       this.#expression.update(input.motionCue.expression, delta)
+      this.#lookAt.setLookAt(input.lookAt)
       this.#lookAt.update(input.state, this.#elapsed, delta, input.animated)
       this.#blink.update(this.#elapsed, input.animated)
       this.#speech.update(this.#elapsed, input.speaking, input.amplitude)
@@ -180,4 +232,10 @@ export class VrmActor {
     if (this.#onDispose !== undefined) this.#onDispose()
     else disposeVrmScene(this.root)
   }
+}
+
+/** Where a glTF's relative references resolve against. */
+function baseUrlOf(assetUrl: string): string {
+  const index = assetUrl.lastIndexOf('/')
+  return index < 0 ? '' : assetUrl.slice(0, index + 1)
 }
