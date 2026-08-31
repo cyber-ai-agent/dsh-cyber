@@ -11,19 +11,19 @@ import { disposeVrmScene } from './VrmResourceManager.js'
 import { VrmSpeechController } from './VrmSpeechController.js'
 
 export function VrmRuntimeRenderer(props: DigitalHumanRendererProps) {
-  const hostRef = useRef<HTMLDivElement>(null)
+  const viewportRef = useRef<HTMLDivElement>(null)
   const latestRef = useRef(props)
   const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading')
   useEffect(() => { latestRef.current = props }, [props])
 
   useEffect(() => {
-    const host = hostRef.current
+    const host = viewportRef.current
     const assetUrl = props.employee.avatarAssetUrl
     if (host === null || assetUrl === undefined) { props.onFallback('VRM 资产地址缺失'); return }
     let disposed = false
     let frame = 0
     let resizeObserver: ResizeObserver | undefined
-    let cleanup = () => undefined
+    let cleanup: () => void = () => undefined
     setStatus('loading')
 
     void (async () => {
@@ -40,6 +40,13 @@ export function VrmRuntimeRenderer(props: DigitalHumanRendererProps) {
         renderer.domElement.setAttribute('aria-label', `${current.employee.displayName} VRM 数字人`)
         renderer.domElement.setAttribute('role', 'img')
         host.replaceChildren(renderer.domElement)
+        const disposeRenderer = () => {
+          renderer.renderLists.dispose()
+          renderer.dispose()
+          renderer.forceContextLoss()
+          renderer.domElement.remove()
+        }
+        cleanup = disposeRenderer
 
         const scene = new THREE.Scene()
         const camera = new THREE.PerspectiveCamera(28, 1, 0.01, 100)
@@ -54,7 +61,7 @@ export function VrmRuntimeRenderer(props: DigitalHumanRendererProps) {
         const loader = new loaderModule.GLTFLoader()
         loader.register((parser) => new vrmModule.VRMLoaderPlugin(parser))
         const gltf = await loader.loadAsync(assetUrl)
-        if (disposed) { disposeVrmScene(gltf.scene); renderer.dispose(); return }
+        if (disposed) { disposeVrmScene(gltf.scene); disposeRenderer(); cleanup = () => undefined; return }
         const vrm = gltf.userData.vrm as import('@pixiv/three-vrm').VRM | undefined
         if (vrm === undefined) throw new Error('已发布文件不包含 VRM 1.0 角色')
         vrmModule.VRMUtils.rotateVRM0(vrm)
@@ -68,7 +75,8 @@ export function VrmRuntimeRenderer(props: DigitalHumanRendererProps) {
         const speech = new VrmSpeechController(vrm)
         const animation = new VrmAnimationController(vrm.scene)
         const performanceController = new VrmPerformanceController(current.quality)
-        const clock = new THREE.Clock()
+        const timer = new THREE.Timer()
+        timer.connect(document)
         let lastRender = 0
         let lowQualitySpringFrame = 0
 
@@ -88,7 +96,8 @@ export function VrmRuntimeRenderer(props: DigitalHumanRendererProps) {
           frame = window.requestAnimationFrame(render)
           if (document.visibilityState !== 'visible' || time - lastRender < performanceController.targetInterval()) return
           lastRender = time
-          const delta = Math.min(clock.getDelta(), 0.05)
+          timer.update(time)
+          const delta = Math.min(timer.getDelta(), 0.05)
           const latest = latestRef.current
           const enabled = !latest.staticMode && latest.state !== 'failed'
           motion.setGesture(latest.motionCue.gesture)
@@ -107,17 +116,17 @@ export function VrmRuntimeRenderer(props: DigitalHumanRendererProps) {
         cleanup = () => {
           window.cancelAnimationFrame(frame)
           resizeObserver?.disconnect()
+          timer.dispose()
           animation.dispose()
           expression.dispose()
           disposeVrmScene(vrm.scene)
-          renderer.renderLists.dispose()
-          renderer.dispose()
-          renderer.forceContextLoss()
-          renderer.domElement.remove()
+          disposeRenderer()
         }
         setStatus('ready')
         latestRef.current.onReady()
       } catch (error) {
+        cleanup()
+        cleanup = () => undefined
         if (disposed) return
         setStatus('failed')
         latestRef.current.onFallback(error instanceof Error ? error.message : 'VRM Runtime 初始化失败')
@@ -127,7 +136,8 @@ export function VrmRuntimeRenderer(props: DigitalHumanRendererProps) {
     return () => { disposed = true; window.cancelAnimationFrame(frame); resizeObserver?.disconnect(); cleanup() }
   }, [props.employee.avatarAssetUrl])
 
-  return <div ref={hostRef} className="focus-avatar focus-avatar--vrm" data-status={status} aria-busy={status === 'loading'}>
+  return <div className="focus-avatar focus-avatar--vrm" data-status={status} aria-busy={status === 'loading'}>
+    <div ref={viewportRef} className="focus-avatar__vrm-viewport" />
     {status === 'loading' ? <span className="focus-avatar__loading" role="status">正在进入 3D Focus…</span> : null}
   </div>
 }

@@ -234,7 +234,10 @@ test('pastes a clipboard image into the existing composer attachment flow', asyn
 
 test('keeps the chosen 2D view across conversations and centers the latest group speaker', async ({ page }) => {
   await installSpeechMock(page)
+  const avatarCreationRequests: string[] = []
+  page.on('request', (request) => { if (/avatar-creation-provider|procedural-vrm\.worker/iu.test(request.url())) avatarCreationRequests.push(request.url()) })
   await page.goto(origin)
+  expect(avatarCreationRequests, '普通 2D 会话不得预加载 3D 创建代码').toEqual([])
   const twoDimensionalTab = page.getByRole('tab', { name: '2D', exact: true })
   await expect(twoDimensionalTab).toHaveAttribute('aria-selected', 'true')
 
@@ -270,6 +273,32 @@ test('keeps the chosen 2D view across conversations and centers the latest group
   await page.getByRole('button', { name: `与${secondEmployeeName}私聊`, exact: true }).click()
   focus = page.getByRole('region', { name: `${secondEmployeeName}员工聚焦` })
   await expect(focus).toBeVisible()
+  await expect(twoDimensionalTab).toHaveAttribute('aria-selected', 'true')
+  const configureThreeDimensional = page.getByRole('tab', { name: `为${secondEmployeeName}创建 3D 形象`, exact: true })
+  await expect(configureThreeDimensional).toBeVisible()
+  await configureThreeDimensional.click()
+  const avatarDialog = page.getByRole('dialog', { name: `角色设置 · ${secondEmployeeName}` })
+  await expect(avatarDialog).toBeVisible()
+  const createThreeDimensional = avatarDialog.getByRole('button', { name: '创建 3D 形象', exact: true })
+  await expect(createThreeDimensional).toBeFocused()
+  await createThreeDimensional.click()
+  await expect(avatarDialog.getByText(`创建 ${secondEmployeeName} 的 3D 形象`, { exact: true })).toBeVisible()
+  expect(avatarCreationRequests, '只展开创建器时仍不应加载 Provider 或 Worker').toEqual([])
+  await avatarDialog.getByRole('radio', { name: /未来/u }).check()
+  await avatarDialog.getByRole('radio', { name: '强健', exact: true }).check()
+  await avatarDialog.getByRole('radio', { name: '深色', exact: true }).check()
+  const generated = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().includes(`/api/employees/${secondEmployeeId}/avatar-assets`) && response.status() === 201)
+  await avatarDialog.getByRole('button', { name: '生成 3D 预览', exact: true }).click()
+  await generated
+  expect(avatarCreationRequests.some((url) => /procedural-vrm\.worker/iu.test(url)), '确认生成后才加载独立 3D Worker').toBe(true)
+  await expect(avatarDialog.getByText('尚未发布')).toBeVisible()
+  await expect(avatarDialog.getByText(/自包含 VRM 1.0/u)).toBeVisible()
+  const publishedAvatar = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().includes(`/api/employees/${secondEmployeeId}/avatar-assets/`) && response.url().endsWith('/publish') && response.status() === 201)
+  await avatarDialog.getByRole('button', { name: '发布到角色', exact: true }).click()
+  await publishedAvatar
+  await avatarDialog.getByRole('button', { name: '关闭角色设置' }).click()
+  await expect(page.getByRole('tab', { name: '3D', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await twoDimensionalTab.click()
   await expect(twoDimensionalTab).toHaveAttribute('aria-selected', 'true')
   await focus.getByRole('button', { name: '语音设置' }).click()
   await expect(focus.getByLabel('角色声音', { exact: true }).locator('option')).toHaveCount(103)

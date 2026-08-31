@@ -13,7 +13,7 @@ interface VrmAvatarPreviewProps {
 }
 
 export function VrmAvatarPreview({ assetUrl, label, state = 'idle', staticMode = false, className, allowGenericGlb = false, onFallback }: VrmAvatarPreviewProps) {
-  const hostRef = useRef<HTMLDivElement>(null)
+  const viewportRef = useRef<HTMLDivElement>(null)
   const stateRef = useRef(state)
   const staticModeRef = useRef(staticMode)
   const onFallbackRef = useRef(onFallback)
@@ -24,7 +24,7 @@ export function VrmAvatarPreview({ assetUrl, label, state = 'idle', staticMode =
   useEffect(() => { onFallbackRef.current = onFallback }, [onFallback])
 
   useEffect(() => {
-    const host = hostRef.current
+    const host = viewportRef.current
     if (host === null) return
     if (/HeadlessChrome/iu.test(navigator.userAgent)) {
       setStatus('failed')
@@ -34,7 +34,7 @@ export function VrmAvatarPreview({ assetUrl, label, state = 'idle', staticMode =
     let disposed = false
     let frame = 0
     let resizeObserver: ResizeObserver | undefined
-    let cleanup = () => undefined
+    let cleanup: () => void = () => undefined
     setStatus('loading')
 
     void (async () => {
@@ -52,6 +52,13 @@ export function VrmAvatarPreview({ assetUrl, label, state = 'idle', staticMode =
         renderer.domElement.setAttribute('aria-label', label)
         renderer.domElement.setAttribute('role', 'img')
         host.replaceChildren(renderer.domElement)
+        const disposeRenderer = () => {
+          renderer.renderLists.dispose()
+          renderer.dispose()
+          renderer.forceContextLoss()
+          renderer.domElement.remove()
+        }
+        cleanup = disposeRenderer
 
         const scene = new THREE.Scene()
         const camera = new THREE.PerspectiveCamera(30, 1, 0.01, 100)
@@ -64,7 +71,8 @@ export function VrmAvatarPreview({ assetUrl, label, state = 'idle', staticMode =
         const gltf = await loader.loadAsync(assetUrl)
         if (disposed) {
           disposeScene(gltf.scene)
-          renderer.dispose()
+          disposeRenderer()
+          cleanup = () => undefined
           return
         }
         const vrm = gltf.userData.vrm as import('@pixiv/three-vrm').VRM | undefined
@@ -84,7 +92,8 @@ export function VrmAvatarPreview({ assetUrl, label, state = 'idle', staticMode =
         resizeObserver = new ResizeObserver(resize)
         resizeObserver.observe(host)
         resize()
-        const clock = new THREE.Clock()
+        const timer = new THREE.Timer()
+        timer.connect(document)
         let lastRender = 0
         const render = (time: number) => {
           if (disposed) return
@@ -92,7 +101,8 @@ export function VrmAvatarPreview({ assetUrl, label, state = 'idle', staticMode =
           const interval = lowPowerDevice() ? 1000 / 15 : 1000 / 30
           if (document.hidden || time - lastRender < interval) return
           lastRender = time
-          const delta = Math.min(clock.getDelta(), 0.05)
+          timer.update(time)
+          const delta = Math.min(timer.getDelta(), 0.05)
           if (vrm !== undefined) {
             applyVrmMotion(vrm, stateRef.current, staticModeRef.current, time)
             vrm.update(delta)
@@ -103,12 +113,14 @@ export function VrmAvatarPreview({ assetUrl, label, state = 'idle', staticMode =
         cleanup = () => {
           window.cancelAnimationFrame(frame)
           resizeObserver?.disconnect()
+          timer.dispose()
           disposeScene(avatarScene)
-          renderer.dispose()
-          renderer.domElement.remove()
+          disposeRenderer()
         }
         setStatus('ready')
       } catch (error) {
+        cleanup()
+        cleanup = () => undefined
         if (disposed) return
         const reason = error instanceof Error ? error.message : 'VRM 预览初始化失败'
         setStatus('failed')
@@ -124,7 +136,8 @@ export function VrmAvatarPreview({ assetUrl, label, state = 'idle', staticMode =
     }
   }, [allowGenericGlb, assetUrl, label])
 
-  return <div ref={hostRef} className={`vrm-avatar-preview${className ? ` ${className}` : ''}`} data-status={status} aria-busy={status === 'loading'}>
+  return <div className={`vrm-avatar-preview${className ? ` ${className}` : ''}`} data-status={status} aria-busy={status === 'loading'}>
+    <div ref={viewportRef} className="vrm-avatar-preview__viewport" />
     {status === 'loading' ? <span role="status">正在载入 VRM 预览…</span> : null}
     {status === 'failed' ? <span role="status">VRM 无法渲染，已使用内置形象</span> : null}
   </div>

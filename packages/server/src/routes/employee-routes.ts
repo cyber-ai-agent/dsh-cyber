@@ -175,7 +175,13 @@ export function registerEmployeeRoutes(router: Router, dependencies: EmployeeRou
     }
     const fallbackAvatarIndex = requiredInteger(body, 'fallbackAvatarIndex', 0, 7)
     const capabilities: CharacterAvatarProfile['capabilities'] = avatarAsset.rendererKind === 'vrm-3d'
-      ? ['full-body', 'expression', 'gesture', 'look-at', ...(avatarAsset.validation.visemeReady === true ? ['viseme' as const] : [])]
+      ? [
+          'full-body',
+          'gesture',
+          ...(typeof avatarAsset.validation.expressionCount === 'number' && avatarAsset.validation.expressionCount > 0 ? ['expression' as const] : []),
+          ...(avatarAsset.validation.hasLookAt === true ? ['look-at' as const] : []),
+          ...(avatarAsset.validation.visemeReady === true ? ['viseme' as const] : []),
+        ]
       : ['portrait']
     const descriptor: CharacterAvatarProfile = {
       schemaVersion: 1,

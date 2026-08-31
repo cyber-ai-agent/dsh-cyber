@@ -36,11 +36,12 @@ interface EmployeeFocusModeProps {
   rendererMode: CharacterRendererMode
   latestUtterance?: { messageId: string; employeeId: string; text: string }
   onFocusEmployee(employeeId: string): void
+  onManageAvatar(): void
   onStaticModeChange(value: boolean): void
   onVoiceFinal(text: string): Promise<void>
 }
 
-export function EmployeeFocusMode({ world, employee, profile, entity, collaborators, connected, staticMode, rendererMode, latestUtterance, onFocusEmployee, onStaticModeChange, onVoiceFinal }: EmployeeFocusModeProps) {
+export function EmployeeFocusMode({ world, employee, profile, entity, collaborators, connected, staticMode, rendererMode, latestUtterance, onFocusEmployee, onManageAvatar, onStaticModeChange, onVoiceFinal }: EmployeeFocusModeProps) {
   const [rendererReady, setRendererReady] = useState(false)
   const [rendererArmed, setRendererArmed] = useState(false)
   const [rendererNotice, setRendererNotice] = useState<string>()
@@ -309,11 +310,10 @@ export function EmployeeFocusMode({ world, employee, profile, entity, collaborat
 
   const visibleCollaborators = collaborators.slice(0, 2)
   const remainingCollaborators = Math.max(0, collaborators.length - visibleCollaborators.length)
-  const requestedVrmFallback = rendererMode !== '3d' || usesVrm
-    ? undefined
-    : employee.avatarProfile?.rendererKind !== 'vrm-3d'
-      ? '当前角色未发布可用 VRM，正在显示 2D 备用形象。'
-      : '当前设备或动态效果设置不适合 3D，正在显示 2D 备用形象。'
+  const requestedVrmFallback = rendererMode === '3d' && employee.avatarProfile?.rendererKind !== 'vrm-3d'
+    ? `${employee.displayName}还没有 3D 形象，当前继续使用 2D 备用形象。`
+    : undefined
+  const focusNotice = rendererNotice ?? requestedVrmFallback
 
   return <section className="employee-focus" aria-label={`${employee.displayName}员工聚焦`} data-state={state} data-renderer={selectedRenderer.kind} data-view-mode={rendererMode} data-quality={quality}>
     <div className="employee-focus__scrim" aria-hidden="true" />
@@ -351,7 +351,7 @@ export function EmployeeFocusMode({ world, employee, profile, entity, collaborat
     <VoiceConversationControl employeeName={employee.displayName} onFinal={onVoiceFinal} onBargeIn={() => {
       streamGenerationRef.current += 1; streamPendingRef.current = 0; streamCompleteRef.current = true; streamChunkerRef.current.reset(); stopSpeech()
     }} />
-    {(rendererNotice ?? requestedVrmFallback) === undefined ? null : <div className="employee-focus__notice" role="status">{rendererNotice ?? requestedVrmFallback}</div>}
+    {focusNotice === undefined ? null : <div className="employee-focus__notice" role="status"><span>{focusNotice}</span>{requestedVrmFallback === undefined || rendererNotice !== undefined ? null : <button type="button" onClick={onManageAvatar}>创建 3D 形象</button>}</div>}
   </section>
 }
 

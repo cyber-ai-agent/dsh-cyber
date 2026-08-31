@@ -232,6 +232,7 @@ export default function App() {
   const [catalogLoading, setCatalogLoading] = useState(false)
   const [recruiting, setRecruiting] = useState(false)
   const [managingEmployeeId, setManagingEmployeeId] = useState<string>()
+  const [managingEmployeeAvatarFocus, setManagingEmployeeAvatarFocus] = useState(false)
   const [managingEmployeeSection, setManagingEmployeeSection] = useState<EmployeeSettingsSection>('profile')
   const [savingEmployee, setSavingEmployee] = useState(false)
   const [loading, setLoading] = useState(!demoMode)
@@ -1434,13 +1435,16 @@ export default function App() {
     setWorldRuntimeRevision((value) => value + 1)
   }, [])
 
-  const uploadEmployeeAvatar = useCallback(async (file: File): Promise<AvatarUploadResult> => {
+  const uploadEmployeeAvatar = useCallback(async (file: File, signal?: AbortSignal): Promise<AvatarUploadResult> => {
     if (managingEmployee === undefined) throw new Error('请先选择角色')
     if (demoMode) throw new Error('交互演示不会写入本地形象，请在真实工作区中使用')
     const mimeType = avatarAssetMimeType(file)
+    const dataBase64 = await fileToBase64(file)
+    if (signal?.aborted === true) throw new DOMException('已取消 3D 形象创建', 'AbortError')
     return api<AvatarUploadResult>(`/api/employees/${encodeURIComponent(managingEmployee.id)}/avatar-assets`, {
       method: 'POST',
-      body: JSON.stringify({ name: file.name, mimeType, dataBase64: await fileToBase64(file) }),
+      body: JSON.stringify({ name: file.name, mimeType, dataBase64 }),
+      ...(signal === undefined ? {} : { signal }),
     })
   }, [managingEmployee])
 
@@ -2404,6 +2408,7 @@ export default function App() {
                     const employee = employees.find((item) => item.id === employeeId)
                     if (employee !== undefined) directEmployee(employee)
                   }}
+                  onManageAvatar={(employeeId) => { setManagingEmployeeSection('profile'); setManagingEmployeeAvatarFocus(true); setManagingEmployeeId(employeeId) }}
                   onVoiceFinal={(text) => send(text, [])}
           onStartGroup={(employeeIds, session) => {
           const selected = employees.filter((employee) => employeeIds.includes(employee.id))
@@ -2435,7 +2440,7 @@ export default function App() {
             onCollapse={() => setDockCollapsed(true)}
             onSelectEmployee={(employeeId) => void openDossier(employeeId)}
             onDirectEmployee={directEmployee}
-            onManageEmployee={(employee) => { setManagingEmployeeSection('profile'); setManagingEmployeeId(employee.id) }}
+            onManageEmployee={(employee) => { setManagingEmployeeSection('profile'); setManagingEmployeeAvatarFocus(false); setManagingEmployeeId(employee.id) }}
             onShowAllDossiers={() => setSelectedEmployeeId(undefined)}
             onInvite={() => void openRecruitment()}
           /></Suspense>
@@ -2624,8 +2629,9 @@ export default function App() {
           models={models}
           avatarIndex={managingEmployee.avatarIndex}
           initialSection={managingEmployeeSection}
+          focusAvatar={managingEmployeeAvatarFocus}
           saving={savingEmployee}
-          onClose={() => setManagingEmployeeId(undefined)}
+          onClose={() => { setManagingEmployeeAvatarFocus(false); setManagingEmployeeId(undefined) }}
           onRevise={reviseEmployee}
           onUpdateProfile={updateEmployeeProfile}
           onUploadAvatar={uploadEmployeeAvatar}

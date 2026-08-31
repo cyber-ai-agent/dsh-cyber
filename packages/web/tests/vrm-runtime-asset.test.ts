@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { Box3, Vector3 } from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { VRMLoaderPlugin } from '@pixiv/three-vrm'
 
@@ -9,6 +10,7 @@ import { VrmLookAtController } from '../src/features/world/avatar/vrm/VrmLookAtC
 import { VrmMotionController } from '../src/features/world/avatar/vrm/VrmMotionController.js'
 import { disposeVrmScene } from '../src/features/world/avatar/vrm/VrmResourceManager.js'
 import { VrmSpeechController } from '../src/features/world/avatar/vrm/VrmSpeechController.js'
+import { createProceduralVrm } from '../src/features/world/avatar/procedural-vrm.js'
 
 describe('VRM runtime asset contract', () => {
   it('loads the accepted VRM 1 fixture and drives its runtime controllers', async () => {
@@ -37,6 +39,27 @@ describe('VRM runtime asset contract', () => {
 
     expect(vrm!.scene.position.y).not.toBeNaN()
     expression.dispose()
+    disposeVrmScene(vrm!.scene)
+  })
+
+  it('loads a locally created avatar as a visible humanoid without external resources', async () => {
+    Object.defineProperty(globalThis, 'self', { configurable: true, value: globalThis })
+    const buffer = createProceduralVrm('本机角色', { style: 'future', build: 'sturdy', tone: 'deep' })
+    const loader = new GLTFLoader()
+    loader.register((parser) => new VRMLoaderPlugin(parser))
+    const gltf = await new Promise<Awaited<ReturnType<typeof loader.parseAsync>>>((resolve, reject) => loader.parse(buffer, '', resolve, reject))
+    const vrm = gltf.userData.vrm as import('@pixiv/three-vrm').VRM | undefined
+    let meshCount = 0
+    gltf.scene.traverse((object) => { if ('isMesh' in object && object.isMesh === true) meshCount += 1 })
+    const size = new Box3().setFromObject(gltf.scene).getSize(new Vector3())
+
+    expect(vrm).toBeDefined()
+    expect(vrm?.humanoid?.getNormalizedBoneNode('hips')).toBeDefined()
+    expect(vrm?.humanoid?.getNormalizedBoneNode('head')).toBeDefined()
+    expect(meshCount).toBeGreaterThan(10)
+    expect(size.y).toBeGreaterThan(1.5)
+    expect(size.y / size.x).toBeGreaterThan(1.4)
+    expect(size.y / size.x).toBeLessThan(4)
     disposeVrmScene(vrm!.scene)
   })
 })
