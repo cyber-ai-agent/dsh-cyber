@@ -2,27 +2,22 @@ import type { VRM } from '@pixiv/three-vrm'
 import type { Object3D } from 'three'
 
 import type { DigitalHumanMotionCue, DigitalHumanVisualState } from '../../digital-human-motion.js'
+import type { AvatarAssemblyPlan, AvatarBasePackManifest } from '../avatar-base-pack.js'
+import { declaredMotionSources, loadMotionClips } from '../motion/load-motion-clips.js'
+import { applyAvatarAssembly } from './apply-avatar-assembly.js'
 import { VrmAnimationController } from './VrmAnimationController.js'
 import { VrmBlinkController } from './VrmBlinkController.js'
 import { VrmExpressionController } from './VrmExpressionController.js'
 import { VrmLookAtController } from './VrmLookAtController.js'
 import { VrmMotionController } from './VrmMotionController.js'
-import { VrmSpeechController } from './VrmSpeechController.js'
 import { ResourceCache, disposeVrmScene } from './VrmResourceManager.js'
-import { declaredMotionSources, loadMotionClips } from '../motion/load-motion-clips.js'
+import { VrmSpeechController } from './VrmSpeechController.js'
 
 /**
  * One VRM character, with no opinion about whose scene it is in.
  *
- * `VrmRuntimeRenderer` built a WebGLRenderer, a Scene, a Camera, three lights
- * and its own animation loop around a single avatar. That is why the digital
- * human could only ever be a page of its own: an actor that owns a renderer
- * cannot stand in somebody else's office, and a browser will not give you one
- * context per character anyway.
- *
- * So this owns an `Object3D` and the character's own behaviour, and nothing
- * else. The world scene adds it, positions it, and ticks it; a preview panel
- * can do the same with a scene of its own.
+ * It owns an Object3D and character behaviour, never a renderer/camera/context.
+ * That is what allows many employees to inhabit the one Three world.
  */
 
 export interface VrmActorLoadOptions {
@@ -30,21 +25,17 @@ export interface VrmActorLoadOptions {
   /**
    * What to share this download under. Defaults to the URL.
    *
-   * The bytes are shared, not the model: a VRM carries a humanoid and an
-   * expression manager bound to its own bones, so two characters cannot pose
-   * the same instance. Parsing twice is cheap next to downloading twice.
+   * The bytes are shared, not the humanoid instance: expressions and bones are
+   * stateful, so each employee parses its own VRM while avoiding duplicate
+   * network downloads for a shared Base Pack.
    */
   cacheKey?: string
+  /** Optional cheap identity layer applied after a shared Base VRM is parsed. */
+  assembly?: { pack: AvatarBasePackManifest; plan: AvatarAssemblyPlan }
   signal?: AbortSignal
 }
 
-/**
- * Downloaded avatar files, by key.
- *
- * Module-scoped on purpose: a world and an avatar preview open at the same
- * time are looking at the same file, and the second one should not fetch it
- * again.
- */
+/** Downloaded avatar files, shared across world and preview surfaces. */
 const avatarBytes = new ResourceCache<ArrayBuffer>()
 
 /** For tests and diagnostics: how many characters share a downloaded file. */
@@ -58,29 +49,11 @@ export interface VrmActorUpdateInput {
   speaking: boolean
   /** False freezes secondary motion without tearing the character down. */
   animated: boolean
-  /**
-   * How much of the character to run.
-   *
-   * A distant character keeps its pose and its place but stops paying for a
-   * face nobody can see. Set from the LOD policy rather than guessed here.
-   */
+  /** How much of the character to run at this LOD. */
   detail?: { face: boolean; secondaryMotion: boolean }
-  /**
-   * Speech loudness, 0..1, for lip sync.
-   *
-   * Optional, and the module-level playback amplitude is the fallback. It
-   * exists because a shared scene can have two characters speaking at once —
-   * a meeting hand-off, an interruption — and one global figure cannot be the
-   * loudness of both. A character that is not speaking has a closed mouth
-   * either way.
-   */
+  /** Per-character speech loudness, 0..1. */
   amplitude?: number
-  /**
-   * Something in the world worth looking at — the speaker, or the viewer.
-   *
-   * Omitted, the character drifts. In a meeting that reads as everybody
-   * ignoring each other, which is why the world supplies one.
-   */
+  /** Something in the world worth looking at — a speaker or the viewer. */
   lookAt?: { x: number; y: number; z: number }
 }
 
@@ -96,6 +69,7 @@ export class VrmActor {
   readonly #animation: VrmAnimationController
   readonly #onDispose: (() => void) | undefined
 
+  #motionRelease: (() => void) | undefined
   #elapsed = 0
   #springFrame = 0
   #disposed = false
@@ -113,10 +87,8 @@ export class VrmActor {
   }
 
   /**
-   * Loads a character.
-   *
-   * Three, the glTF loader and three-vrm are imported here so a world that
-   * nobody has asked for a VRM in never pays for them.
+   * Loads a character. Three, GLTFLoader and three-vrm remain behind this async
+   * boundary so a 2D-only session never pays for the 3D runtime.
    */
   static async load(options: VrmActorLoadOptions): Promise<VrmActor> {
     if (isSignalAborted(options.signal)) throw cancellationError()
@@ -154,12 +126,12 @@ export class VrmActor {
       releaseBytes()
       throw cancellationError()
     }
-    // VRM 0.x models face the opposite way; without this a character walks
-    // backwards through its own office.
+    // VRM 0.x models face the opposite direction.
     vrmModule.VRMUtils.rotateVRM0(vrm)
+    if (options.assembly !== undefined) {
+      applyAvatarAssembly(vrm.scene, options.assembly.pack, options.assembly.plan)
+    }
     void THREE
-    // This character's own meshes are freed with it; the shared bytes are
-    // given back so the last character out frees the download too.
     return new VrmActor(vrm, () => {
       disposeVrmScene(vrm.scene)
       releaseBytes()
@@ -167,12 +139,10 @@ export class VrmActor {
   }
 
   /**
-   * Registers whatever motion assets the library declares.
-   *
-   * Takes the library so a theme or avatar pack can supply its own; without
-   * one the built-in table applies. Silent and harmless when nothing is
-   * declared, which is today: the repository ships no animation assets, so the
-   * character keeps its procedural layer rather than invented keyframes.
+   * Registers declared authored motion. A real VRMA is retargeted by
+   * three-vrm-animation; the bundled offline pack uses semantic Humanoid bone
+   * tracks and is retargeted by our loader. Procedural bones remain only the
+   * fallback for a gesture a pack genuinely does not provide.
    */
   async loadDeclaredMotion(
     library?: Parameters<typeof declaredMotionSources>[0],
@@ -180,26 +150,27 @@ export class VrmActor {
     const sources = declaredMotionSources(library)
     if (sources.length === 0) return { registered: 0, failures: 0 }
     const result = await loadMotionClips(this.vrm, sources)
-    if (this.#disposed) return { registered: 0, failures: result.failures.length }
+    if (this.#disposed) {
+      result.release()
+      return { registered: 0, failures: result.failures.length }
+    }
+    this.#motionRelease?.()
+    this.#motionRelease = undefined
     for (const { gesture, clip } of result.clips) this.#animation.register(gesture, clip)
+    if (result.clips.length > 0) this.#motionRelease = result.release
+    else result.release()
     return { registered: result.clips.length, failures: result.failures.length }
   }
 
-  /** Wraps an already-loaded VRM, for a cache that hands out shared instances. */
+  /** Wraps an already-loaded VRM, useful for tests and specialized caches. */
   static fromLoaded(vrm: VRM, onDispose?: () => void): VrmActor {
     return new VrmActor(vrm, onDispose)
   }
 
   /**
-   * Advances the character by one frame.
-   *
-   * The layers are deliberately additive rather than exclusive: a walking
-   * character still turns its head toward whoever is speaking, still blinks,
-   * and still moves its mouth. A controller that overwrote the others would
-   * make the character look like it could only do one thing at a time.
-   *
-   * `lookAt` is what makes the head claim true rather than decorative — with
-   * no target the neck only wanders on a sine and aims at nobody.
+   * Advances all additive layers by one frame. Authored animation owns the
+   * primary pose; look-at, blink, expression, lip sync and springs remain
+   * additive. Procedural primary bone motion runs only when a clip is missing.
    */
   update(deltaMs: number, input: VrmActorUpdateInput): void {
     if (this.#disposed) return
@@ -211,9 +182,6 @@ export class VrmActor {
     this.#animation.setGesture(input.motionCue.gesture)
     this.#animation.update(delta)
 
-    // Once an authored clip exists it owns the primary pose. The procedural
-    // controller remains only as the honest fallback for packs that omit a
-    // gesture; breathing, look-at, blink and speech stay additive layers.
     if (secondary && input.animated && !this.#animation.hasGesture(input.motionCue.gesture)) {
       this.#motion.setGesture(input.motionCue.gesture)
       this.#motion.update(this.#elapsed, delta, true)
@@ -225,8 +193,6 @@ export class VrmActor {
       this.#blink.update(this.#elapsed, input.animated)
       this.#speech.update(this.#elapsed, input.speaking, input.amplitude)
     }
-    // Spring bones are the most expensive part of a VRM and the least missed
-    // at a distance; halving their cadence is cheaper than dropping the model.
     if (secondary || this.#springFrame % 2 === 0) this.vrm.update(delta)
     this.#springFrame += 1
   }
@@ -236,6 +202,8 @@ export class VrmActor {
     this.#disposed = true
     this.root.removeFromParent()
     this.#animation.dispose()
+    this.#motionRelease?.()
+    this.#motionRelease = undefined
     this.#expression.dispose()
     if (this.#onDispose !== undefined) this.#onDispose()
     else disposeVrmScene(this.root)

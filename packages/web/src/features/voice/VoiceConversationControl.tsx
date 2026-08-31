@@ -28,6 +28,11 @@ export function VoiceConversationControl({ employeeName, disabled = false, varia
   const ownerIdRef = useRef(crypto.randomUUID())
   const echoBaselineRef = useRef(0)
   const bargeThresholdRef = useRef<number | undefined>(undefined)
+  // Every capture gets a generation. Stop/unmount invalidates it synchronously,
+  // so a late onFinal()/speech-end from the previous capture cannot put the UI
+  // back into `listening` after the user explicitly ended the conversation.
+  const captureGenerationRef = useRef(0)
+  const captureActiveRef = useRef(false)
 
   const prepare = useCallback(() => {
     if (disabled || !('WebSocket' in window)) return
@@ -48,31 +53,60 @@ export function VoiceConversationControl({ employeeName, disabled = false, varia
       if (typeof message.data !== 'string') return
       const event = JSON.parse(message.data) as { type: string; text?: string; message?: string }
       if (event.type === 'prepared') setState((current) => current === 'listening' || current === 'speech' || current === 'finalizing' ? current : 'ready')
-      else if (event.type === 'listening') setState('listening')
+      else if (event.type === 'listening') setState(captureActiveRef.current ? 'listening' : 'ready')
       else if (event.type === 'speech-start') {
+        if (!captureActiveRef.current) return
         stopKokoroSpeech(); window.speechSynthesis?.cancel(); onBargeIn?.(); echoBaselineRef.current = 0; bargeThresholdRef.current = undefined; setState('speech')
       } else if (event.type === 'partial') {
+        if (!captureActiveRef.current) return
         setPartial(event.text ?? ''); setState('speech')
       } else if (event.type === 'final' && event.text?.trim()) {
+        if (!captureActiveRef.current) return
+        const generation = captureGenerationRef.current
         const text = event.text.trim(); setPartial(text); setState('finalizing')
-        void onFinal(text).then(() => { setPartial(''); setState('listening') }).catch((cause: unknown) => {
+        void onFinal(text).then(() => {
+          setPartial('')
+          setState(captureActiveRef.current && captureGenerationRef.current === generation ? 'listening' : 'ready')
+        }).catch((cause: unknown) => {
+          // An explicitly stopped/replaced capture owns no UI any more. Its
+          // message promise may still settle, but it must not resurrect a
+          // failed/listening state for the next capture.
+          if (!captureActiveRef.current || captureGenerationRef.current !== generation) {
+            setPartial('')
+            setState('ready')
+            return
+          }
           setError(cause instanceof Error ? cause.message : '语音消息发送失败'); setState('failed')
         })
       } else if (event.type === 'error') {
+        if (!captureActiveRef.current) return
         setError(event.message ?? '本地语音识别失败'); setState('failed')
       } else if (event.type === 'speech-end') {
-        setState((current) => current === 'finalizing' ? current : 'listening')
+        setState((current) => current === 'finalizing' ? current : captureActiveRef.current ? 'listening' : 'ready')
       } else if (event.type === 'stopped' || event.type === 'cancelled') {
         // Without these the UI kept saying it was listening after the server
         // had stopped, and the only way out was to press the button twice.
-        setPartial(''); setState((current) => current === 'failed' ? current : 'ready')
+        setPartial(''); setState(captureActiveRef.current ? 'listening' : 'ready')
       }
     }
     socket.onerror = () => { setError('无法连接本地语音服务'); setState('failed') }
-    socket.onclose = () => { socketRef.current = undefined; setState((current) => current === 'failed' ? current : 'cold') }
+    socket.onclose = () => {
+      socketRef.current = undefined
+      captureActiveRef.current = false
+      captureGenerationRef.current += 1
+      workletRef.current?.disconnect(); sourceRef.current?.disconnect()
+      for (const track of streamRef.current?.getTracks() ?? []) track.stop()
+      void contextRef.current?.close()
+      workletRef.current = undefined; sourceRef.current = undefined; streamRef.current = undefined; contextRef.current = undefined
+      echoBaselineRef.current = 0; bargeThresholdRef.current = undefined
+      setPartial('')
+      setState((current) => current === 'failed' ? current : 'cold')
+    }
   }, [disabled, onBargeIn, onFinal])
 
   const start = useCallback(async () => {
+    const generation = captureGenerationRef.current + 1
+    captureGenerationRef.current = generation
     window.dispatchEvent(new CustomEvent('dsh:voice-exclusive', { detail: ownerIdRef.current }))
     // A socket left over from a failed attempt cannot be reused: the server
     // has already given up on that session, so retrying through it looks like
@@ -87,15 +121,27 @@ export function VoiceConversationControl({ employeeName, disabled = false, varia
       const timer = window.setTimeout(() => reject(new Error('本地语音服务连接超时')), 8_000)
       socket.addEventListener('open', () => { window.clearTimeout(timer); resolve() }, { once: true })
     })
+    // Another voice control can claim the microphone while this one is still
+    // warming. Do not finish opening a superseded generation afterwards.
+    if (captureGenerationRef.current !== generation) return
     const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false })
+    if (captureGenerationRef.current !== generation) {
+      for (const track of stream.getTracks()) track.stop()
+      return
+    }
     const context = new AudioContext()
     await context.audioWorklet.addModule('/voice-capture-worklet.js')
+    if (captureGenerationRef.current !== generation) {
+      for (const track of stream.getTracks()) track.stop()
+      await context.close().catch(() => undefined)
+      return
+    }
     const source = context.createMediaStreamSource(stream)
     const worklet = new AudioWorkletNode(context, 'dsh-voice-capture')
     const muted = context.createGain(); muted.gain.value = 0
     source.connect(worklet); worklet.connect(muted); muted.connect(context.destination)
     worklet.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
-      if (socket.readyState !== WebSocket.OPEN) return
+      if (captureGenerationRef.current !== generation || !captureActiveRef.current || socket.readyState !== WebSocket.OPEN) return
       // While the character is talking, its own voice comes back through the
       // speakers and trips the recogniser, so it interrupts itself and the
       // conversation collapses into a loop. Echo cancellation helps and does
@@ -116,21 +162,29 @@ export function VoiceConversationControl({ employeeName, disabled = false, varia
     }
     streamRef.current = stream; contextRef.current = context; sourceRef.current = source; workletRef.current = worklet
     echoBaselineRef.current = 0; bargeThresholdRef.current = undefined
+    captureActiveRef.current = true
     socket.send(JSON.stringify({ type: 'start', endpointSilenceMs: 650 }))
     setState('listening'); setError(undefined)
   }, [prepare])
 
   const stop = useCallback(() => {
+    // Invalidate async work before touching transport/resources. A final event
+    // may already have called onFinal(); its promise is allowed to finish the
+    // message send, but no longer owns this control's state.
+    captureActiveRef.current = false
+    captureGenerationRef.current += 1
     socketRef.current?.send(JSON.stringify({ type: 'stop' }))
     workletRef.current?.disconnect(); sourceRef.current?.disconnect()
     for (const track of streamRef.current?.getTracks() ?? []) track.stop()
     void contextRef.current?.close()
     workletRef.current = undefined; sourceRef.current = undefined; streamRef.current = undefined; contextRef.current = undefined
     echoBaselineRef.current = 0; bargeThresholdRef.current = undefined
-    setPartial(''); setState('ready')
+    setPartial(''); setError(undefined); setState('ready')
   }, [])
 
   useEffect(() => () => {
+    captureActiveRef.current = false
+    captureGenerationRef.current += 1
     workletRef.current?.disconnect(); sourceRef.current?.disconnect()
     for (const track of streamRef.current?.getTracks() ?? []) track.stop()
     void contextRef.current?.close(); socketRef.current?.close()
@@ -145,7 +199,11 @@ export function VoiceConversationControl({ employeeName, disabled = false, varia
   }, [stop])
 
   const active = state === 'listening' || state === 'speech' || state === 'finalizing'
-  const startSafely = () => void start().catch((cause: unknown) => { setError(cause instanceof Error ? cause.message : '无法启动语音对话'); setState('failed') })
+  const startSafely = () => void start().catch((cause: unknown) => {
+    captureActiveRef.current = false
+    captureGenerationRef.current += 1
+    setError(cause instanceof Error ? cause.message : '无法启动语音对话'); setState('failed')
+  })
   return <div className={`voice-conversation voice-conversation--${variant} is-${state}`} onMouseEnter={prepare}>
     <button type="button" className="voice-conversation__button" disabled={disabled || state === 'warming'} aria-label={active ? '结束语音对话' : '开始语音对话'} onClick={active ? stop : startSafely}>
       {active ? <StopCircle size={20} weight="fill" /> : <Microphone size={20} weight="fill" />}
