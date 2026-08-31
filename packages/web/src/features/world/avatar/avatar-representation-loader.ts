@@ -28,7 +28,10 @@ export async function loadRendererAvatar(
   const packed = parsePackRendererUrl(rendererUrl)
   if (packed === undefined) {
     const { VrmActor } = await import('./vrm/VrmActor.js')
-    return VrmActor.load({ assetUrl: rendererUrl, signal })
+    return VrmActor.load({
+      assetUrl: rendererUrl,
+      ...(signal === undefined ? {} : { signal }),
+    })
   }
   const current = resolve(packed.employeeId)
   if (current === undefined || current.source !== 'base-pack' || current.key !== packed.key || current.assembly === undefined) {
@@ -39,7 +42,7 @@ export async function loadRendererAvatar(
     assetUrl: current.assetUrl,
     ...(current.cacheKey === undefined ? {} : { cacheKey: current.cacheKey }),
     assembly: current.assembly,
-    signal,
+    ...(signal === undefined ? {} : { signal }),
   })
 }
 
