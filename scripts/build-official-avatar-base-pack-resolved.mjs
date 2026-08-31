@@ -47,6 +47,7 @@ export async function buildOfficialAvatarBasePackResolved(options = {}) {
   const outfitMeshNames = markBaseAsCasualAvatar(base.document)
   const humanBones = inferHumanoidBones(base.document.nodes ?? [])
   injectVrm1Extension(base.document, humanBones)
+  normalizeVrm1LicenseMetadata(base.document)
 
   const hairVariants = [SOURCE_FILES.hairLong, SOURCE_FILES.hairSidePart, SOURCE_FILES.hairTechCrop]
   const hairParts = []
@@ -121,6 +122,21 @@ export async function buildOfficialAvatarBasePackResolved(options = {}) {
     vrmBytes: vrmBytes.byteLength,
     sourceCommit: SOURCE_COMMIT,
   }
+}
+
+/**
+ * VRM 1.0 reserves meta.licenseUrl for the VRM license schema itself. The
+ * original asset license belongs in otherLicenseUrl/thirdPartyLicenses. Keeping
+ * those two concepts separate is required by @pixiv/three-vrm's production
+ * loader and preserves the CC0 provenance without abusing the VRM field.
+ */
+export function normalizeVrm1LicenseMetadata(document) {
+  const meta = document?.extensions?.VRMC_vrm?.meta
+  if (meta === undefined || meta === null || typeof meta !== 'object') {
+    throw new Error('Generated VRM metadata is missing')
+  }
+  meta.licenseUrl = 'https://vrm.dev/licenses/1.0/'
+  meta.otherLicenseUrl = 'https://creativecommons.org/publicdomain/zero/1.0/'
 }
 
 export async function normalizeSourceGlbWithProductionLoader(body) {
