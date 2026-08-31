@@ -13,6 +13,8 @@ import { createWorldRendererRegistry } from './renderer/renderer-registry.js'
 import { WorldLocomotion, WorldLocomotionClock } from './runtime/world-locomotion.js'
 import { browserSpatialCapabilityProvider, type SpatialCapabilityProvider } from './avatar/renderer/RenderingQuality.js'
 import type { WorldCameraMode } from './runtime/world-view-mode.js'
+import { loadWorldAvatarBasePacks } from './avatar/avatar-base-pack-client.js'
+import type { AvatarBasePackManifest } from './avatar/avatar-base-pack.js'
 import { resolveCharacterAvatarRepresentation, type ResolvedAvatarRepresentation } from './avatar/avatar-representation.js'
 import { loadRendererAvatar, rendererAvatarUrl } from './avatar/avatar-representation-loader.js'
 
@@ -109,6 +111,10 @@ export function WorldCanvas({
   latestSelection.current = { entityId: selectedEntityId, objectId: selectedObjectId, focusEntityId }
   const latestSnapshot = useRef(snapshot)
   latestSnapshot.current = snapshot
+  // World package instances are authority-scoped, so this cache is local to
+  // the mounted world. It is cleared before every world/3D catalog load and is
+  // never shared through the module-level fallback registry.
+  const avatarBasePacksRef = useRef<AvatarBasePackManifest[]>([])
   // Held in refs, not closed over at mount: the renderer is built once and
   // asks again on every snapshot, so a published avatar or installed pack can
   // hot-swap while the world stays mounted.
@@ -144,6 +150,25 @@ export function WorldCanvas({
   // walks that had already finished.
   useEffect(() => { appliedCueIds.current.clear() }, [worldKey])
   useEffect(() => { onRendererResolved?.(activeKind) }, [activeKind])
+
+  // Package metadata is not first-screen data. Only a real 3D renderer asks
+  // for the current world's verified local catalog. Arriving packs trigger the
+  // existing snapshot hot-swap path; the canvas/camera/world stay mounted.
+  useEffect(() => {
+    avatarBasePacksRef.current = []
+    if (activeKind !== 'three-3d' || resolveAvatarRepresentation !== undefined) return
+    let cancelled = false
+    void loadWorldAvatarBasePacks(snapshot.worldId).then((packs) => {
+      if (cancelled || latestSnapshot.current.worldId !== snapshot.worldId) return
+      avatarBasePacksRef.current = packs
+      rendererRef.current?.updateSnapshot(latestSnapshot.current)
+    }).catch(() => {
+      // An unavailable/corrupt optional pack catalog must never take down the
+      // world. The identity-preserving 2.5D representation remains visible.
+      if (!cancelled) avatarBasePacksRef.current = []
+    })
+    return () => { cancelled = true }
+  }, [activeKind, resolveAvatarRepresentation, snapshot.worldId])
 
   // The simulation clock belongs to the world, not to a renderer. It keeps
   // advancing while the 3D chunk is loading or a canvas is being replaced, so
@@ -184,7 +209,7 @@ export function WorldCanvas({
         employeeId: entityId,
         ...(typeof rosterIndex === 'number' && Number.isFinite(rosterIndex) ? { fallbackAvatarIndex: Math.max(0, Math.floor(rosterIndex)) } : {}),
         ...(publishedAvatarUrl === undefined ? {} : { publishedAvatarUrl }),
-      })
+      }, avatarBasePacksRef.current)
     }
     const registry = rendererRegistry ?? createWorldRendererRegistry({
       locomotion: sharedLocomotion,
