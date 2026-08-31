@@ -98,8 +98,6 @@ export async function buildOfficialAvatarBasePack(options = {}) {
   }
 
   const vrmBytes = writeGlb(base.document, base.binary)
-  // Validate the output with the same product assumptions without importing
-  // TypeScript server code into the standalone authoring command.
   assertBuiltVrm(vrmBytes)
 
   await rm(outputRoot, { recursive: true, force: true })
@@ -120,8 +118,6 @@ export async function buildOfficialAvatarBasePack(options = {}) {
       ...hairParts,
       { id: 'casual', kind: 'outfit', meshNames: outfitMeshNames },
     ],
-    // Hair is the only material slot this conversion can prove and control
-    // without recolouring skin/eyes/clothing that share source materials.
     materialSlots: [{ id: 'hair', materialNames: ['DSH_Hair'] }],
   }
   const packManifestBytes = Buffer.from(`${JSON.stringify(packManifest, null, 2)}\n`, 'utf8')
@@ -192,6 +188,15 @@ export function assertGitBlob(body, expected, label) {
   if (actual !== expected) throw new Error(`Avatar source blob mismatch: ${label}; expected ${expected}, got ${actual}`)
 }
 
+/**
+ * Parse and normalize a self-contained GLB into one binary buffer.
+ *
+ * Some authoring exporters preserve several glTF buffer declarations even
+ * though the transport is one GLB. Runtime VRM wants a conventional single
+ * embedded buffer, so conversion happens here before any mesh/skin mutation.
+ * External buffer URIs are never followed: an official source must be pinned
+ * explicitly rather than smuggling new network dependencies through glTF.
+ */
 export function parseGlb(body) {
   const buffer = Buffer.from(body)
   if (buffer.byteLength < 20 || buffer.readUInt32LE(0) !== 0x46546c67 || buffer.readUInt32LE(4) !== 2 || buffer.readUInt32LE(8) !== buffer.byteLength) {
@@ -199,7 +204,7 @@ export function parseGlb(body) {
   }
   let cursor = 12
   let document
-  let binary = Buffer.alloc(0)
+  const binaryChunks = []
   while (cursor + 8 <= buffer.byteLength) {
     const length = buffer.readUInt32LE(cursor)
     const type = buffer.readUInt32LE(cursor + 4)
@@ -207,12 +212,104 @@ export function parseGlb(body) {
     const end = start + length
     if (end > buffer.byteLength) throw new Error('Source avatar GLB chunk exceeds file')
     if (type === 0x4e4f534a) document = JSON.parse(buffer.subarray(start, end).toString('utf8').trim())
-    else if (type === 0x004e4942) binary = Buffer.from(buffer.subarray(start, end))
+    else if (type === 0x004e4942) binaryChunks.push(Buffer.from(buffer.subarray(start, end)))
     cursor = end
   }
   if (document === undefined) throw new Error('Source avatar GLB has no JSON chunk')
-  if (!Array.isArray(document.buffers) || document.buffers.length !== 1) throw new Error('Official avatar builder requires one-buffer GLB source')
-  return { document, binary }
+  return normalizeGlbBuffers(document, binaryChunks)
+}
+
+export function normalizeGlbBuffers(documentValue, binaryChunksValue) {
+  const document = structuredClone(documentValue)
+  const binaryChunks = binaryChunksValue.map((chunk) => Buffer.from(chunk))
+  const declarations = Array.isArray(document.buffers) && document.buffers.length > 0
+    ? document.buffers
+    : [{ byteLength: binaryChunks[0]?.byteLength ?? 0 }]
+
+  const noUriIndexes = declarations
+    .map((entry, index) => ({ entry, index }))
+    .filter(({ entry }) => entry?.uri === undefined)
+    .map(({ index }) => index)
+  const embeddedByIndex = new Map()
+
+  if (noUriIndexes.length > 0) {
+    if (binaryChunks.length === noUriIndexes.length) {
+      noUriIndexes.forEach((bufferIndex, ordinal) => embeddedByIndex.set(bufferIndex, binaryChunks[ordinal]))
+    } else if (binaryChunks.length === 1) {
+      // Several logical buffers may be packed sequentially in one BIN chunk.
+      // Boundaries come from each declared byteLength and are 4-byte aligned.
+      let offset = 0
+      const chunk = binaryChunks[0]
+      for (const bufferIndex of noUriIndexes) {
+        const declaredLength = declarations[bufferIndex]?.byteLength
+        if (!Number.isSafeInteger(declaredLength) || declaredLength < 0) throw new Error(`Source avatar buffer ${bufferIndex} has invalid byteLength`)
+        if (offset + declaredLength > chunk.byteLength) {
+          throw new Error(`Source avatar embedded buffers exceed BIN chunk at buffer ${bufferIndex}`)
+        }
+        embeddedByIndex.set(bufferIndex, Buffer.from(chunk.subarray(offset, offset + declaredLength)))
+        offset = align4(offset + declaredLength)
+      }
+      if (offset > align4(chunk.byteLength)) throw new Error('Source avatar embedded buffer alignment exceeds BIN chunk')
+    } else {
+      throw new Error(`Source avatar cannot map ${noUriIndexes.length} embedded buffers to ${binaryChunks.length} BIN chunks`)
+    }
+  } else if (binaryChunks.length > 0) {
+    throw new Error('Source avatar contains an unclaimed BIN chunk')
+  }
+
+  const physicalBuffers = declarations.map((declaration, index) => {
+    const uri = declaration?.uri
+    let bytes
+    if (typeof uri === 'string') {
+      bytes = decodeDataUri(uri, index)
+    } else {
+      bytes = embeddedByIndex.get(index)
+      if (bytes === undefined) throw new Error(`Source avatar buffer ${index} has no embedded bytes`)
+    }
+    const declaredLength = declaration?.byteLength
+    if (!Number.isSafeInteger(declaredLength) || declaredLength < 0) throw new Error(`Source avatar buffer ${index} has invalid byteLength`)
+    if (bytes.byteLength < declaredLength) throw new Error(`Source avatar buffer ${index} is shorter than declared`)
+    return Buffer.from(bytes.subarray(0, declaredLength))
+  })
+
+  const baseOffsets = []
+  const pieces = []
+  let total = 0
+  for (const bytes of physicalBuffers) {
+    const aligned = align4(total)
+    if (aligned > total) pieces.push(Buffer.alloc(aligned - total))
+    total = aligned
+    baseOffsets.push(total)
+    pieces.push(bytes)
+    total += bytes.byteLength
+  }
+  const normalizedBinary = Buffer.concat(pieces)
+
+  for (const [index, view] of (document.bufferViews ?? []).entries()) {
+    const sourceBuffer = Number.isInteger(view?.buffer) ? view.buffer : 0
+    const baseOffset = baseOffsets[sourceBuffer]
+    const sourceBytes = physicalBuffers[sourceBuffer]
+    if (baseOffset === undefined || sourceBytes === undefined) throw new Error(`Source avatar bufferView ${index} references missing buffer ${sourceBuffer}`)
+    const relativeOffset = view.byteOffset ?? 0
+    const byteLength = view.byteLength
+    if (!Number.isSafeInteger(relativeOffset) || relativeOffset < 0 || !Number.isSafeInteger(byteLength) || byteLength < 0 || relativeOffset + byteLength > sourceBytes.byteLength) {
+      throw new Error(`Source avatar bufferView ${index} exceeds buffer ${sourceBuffer}`)
+    }
+    view.buffer = 0
+    view.byteOffset = baseOffset + relativeOffset
+  }
+  document.buffers = [{ byteLength: normalizedBinary.byteLength }]
+  return { document, binary: normalizedBinary }
+}
+
+function decodeDataUri(uri, bufferIndex) {
+  if (!uri.startsWith('data:')) throw new Error(`Source avatar buffer ${bufferIndex} has forbidden external URI: ${uri}`)
+  const comma = uri.indexOf(',')
+  if (comma < 0) throw new Error(`Source avatar buffer ${bufferIndex} has malformed data URI`)
+  const metadata = uri.slice(5, comma)
+  const payload = uri.slice(comma + 1)
+  if (metadata.endsWith(';base64')) return Buffer.from(payload, 'base64')
+  return Buffer.from(decodeURIComponent(payload), 'utf8')
 }
 
 export function writeGlb(documentValue, binaryValue) {
@@ -295,9 +392,6 @@ export function markBaseAsCasualAvatar(document) {
   let ordinal = 0
   for (const node of nodes) {
     if (!Number.isInteger(node?.mesh)) continue
-    // Base scene meshes are kept together as one honest `casual` silhouette.
-    // We do not call this professional/analyst until real office clothing is
-    // authored. Hair added later is the only additional managed geometry.
     const name = `Outfit_Casual_${ordinal++}`
     node.name = name
     names.push(name)
@@ -366,6 +460,7 @@ export function mergeRiggedHair(baseValue, hairDocumentValue, hairBinaryValue, v
   }
 
   const skinIndexMap = new Map()
+  document.skins ??= []
   for (const [sourceSkinIndex, sourceSkin] of (hair.skins ?? []).entries()) {
     const skin = structuredClone(sourceSkin)
     skin.joints = (sourceSkin.joints ?? []).map((sourceJoint) => {
@@ -420,8 +515,8 @@ export function assertBuiltVrm(body) {
   for (const image of document.images ?? []) {
     if (typeof image.uri === 'string' && !image.uri.startsWith('data:')) throw new Error('Built avatar contains an external image')
   }
-  for (const buffer of document.buffers ?? []) {
-    if (typeof buffer.uri === 'string' && !buffer.uri.startsWith('data:')) throw new Error('Built avatar contains an external buffer')
+  for (const declaredBuffer of document.buffers ?? []) {
+    if (typeof declaredBuffer.uri === 'string' && !declaredBuffer.uri.startsWith('data:')) throw new Error('Built avatar contains an external buffer')
   }
 }
 
