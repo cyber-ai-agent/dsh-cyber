@@ -60,3 +60,5 @@
 .employee-focus__avatar-invite { position: absolute; z-index: 9; top: 116px; left: 12px; display: inline-flex; align-items: center; gap: 10px; padding: 6px 10px; border: 1px dashed color-mix(in srgb, var(--accent) 52%, var(--border)); border-radius: var(--radius-control); color: var(--text-muted); background: color-mix(in srgb, var(--surface-0) 88%, transparent); font-size: 12px; }
 .employee-focus__avatar-invite button { min-height: 26px; padding: 0 10px; border: 0; border-radius: var(--radius-control); color: var(--accent-strong); background: var(--accent-soft); font: inherit; font-size: 12px; cursor: pointer; }
 .employee-focus__avatar-invite button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.voice-model-picker__failure { display: grid; gap: 6px; }
+.voice-model-picker__failure small { color: var(--danger, #d9534f); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }

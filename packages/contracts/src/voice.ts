@@ -91,6 +91,26 @@ export interface TextToSpeechProvider {
   dispose(): Promise<void>
 }
 
+/** One selectable voice inside a model pack. */
+export interface VoiceModelVoice {
+  id: string
+  label: string
+  gender?: 'female' | 'male' | 'neutral'
+  lang?: string
+}
+
+/**
+ * Canonical external representation for an MOSS speaker.
+ *
+ * The UI and persisted profile use `moss:Name`; the Python sidecar uses only
+ * `Name`. Accepting both forms at boundaries prevents `moss:moss:Name` from
+ * leaking into either representation.
+ */
+export function normalizeMossVoiceId(value: string): string {
+  const name = value.trim().replace(/^(?:moss:)+/iu, '').trim()
+  return `moss:${name || 'Junhao'}`
+}
+
 export interface VoiceModelDescriptor {
   id: string
   provider: VoiceProviderKind
@@ -109,6 +129,14 @@ export interface VoiceModelDescriptor {
   installedPath?: string
   sha256?: string
   error?: string
+  /**
+   * The voices this pack can actually speak with.
+   *
+   * Reported by the running provider rather than hardcoded in the UI: a pack
+   * ships whatever speakers it ships, and the settings panel offering exactly
+   * one of them made a multi-voice model look like a single-voice one.
+   */
+  voices?: VoiceModelVoice[]
 }
 
 export interface VoicePerformanceMetrics {

@@ -43,6 +43,31 @@ describe('LocalTtsAssetService', () => {
     ]))
   })
 
+  it('normalizes MOSS manifest voices and supplies a safe default when empty', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-moss-voices-'))
+    const mossRoot = join(stateRoot, 'tts', 'sherpa', 'models', 'moss-tts-nano-100m-onnx')
+    await mkdir(mossRoot, { recursive: true })
+    await writeFile(join(mossRoot, 'manifest.json'), JSON.stringify({ voices: [
+      'Junhao',
+      'moss:Junhao',
+      { id: 'moss:Lin', label: '林 · 自然女声', gender: 'female' },
+      { id: 'Lin', name: '重复项' },
+    ] }))
+    const service = new LocalTtsAssetService(stateRoot)
+    const model = (await service.models()).find((item) => item.provider === 'moss')
+    expect(model?.state).toBe('ready')
+    expect(model?.voices).toEqual([
+      { id: 'moss:Junhao', label: 'Junhao' },
+      { id: 'moss:Lin', label: '林 · 自然女声', gender: 'female' },
+    ])
+
+    // The service's public model id remains stable; an installed pack with no
+    // declared voices still receives one selectable default.
+    await writeFile(join(mossRoot, 'manifest.json'), JSON.stringify({ voices: [] }))
+    const emptyModel = (await service.models()).find((item) => item.provider === 'moss')
+    expect(emptyModel?.voices).toEqual([{ id: 'moss:Junhao', label: '君豪 · 自然男声', gender: 'male' }])
+  })
+
   it('fails closed for an unpinned or incomplete voice runtime', async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-local-tts-invalid-'))
     const root = join(stateRoot, 'tts', 'sherpa')

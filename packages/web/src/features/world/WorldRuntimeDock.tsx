@@ -53,7 +53,7 @@ interface WorldRuntimeDockProps {
   sessionKind?: WorkSession['kind']
   selectedEmployeeId?: string
   conversationEmployeeIds: string[]
-  latestUtterances: Array<{ messageId: string; employeeId: string; text: string }>
+  latestUtterances: Array<{ messageId: string; employeeId: string; text: string; clientTurnId?: string }>
   onSelectEmployee(employeeId: string): void
   onStartGroup(employeeIds: string[], session?: WorkSession): void
   onManageAvatar(employeeId: string): void

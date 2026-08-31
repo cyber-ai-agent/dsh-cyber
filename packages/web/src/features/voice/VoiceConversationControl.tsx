@@ -2,6 +2,8 @@ import { Microphone, StopCircle, Waveform } from '@phosphor-icons/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { stopKokoroSpeech } from '../world/avatar/speech/KokoroSpeechAdapter.js'
+import { currentSpeechAmplitude } from '../world/avatar/speech/speech-playback-state.js'
+import { calculateBargeInThreshold, isBargeInFrame, pcmRms, updateEchoBaseline } from './barge-in-threshold.js'
 import './voice-conversation-control.css'
 
 type VoiceUiState = 'cold' | 'warming' | 'ready' | 'listening' | 'speech' | 'finalizing' | 'failed'
@@ -24,10 +26,19 @@ export function VoiceConversationControl({ employeeName, disabled = false, varia
   const sourceRef = useRef<MediaStreamAudioSourceNode | undefined>(undefined)
   const workletRef = useRef<AudioWorkletNode | undefined>(undefined)
   const ownerIdRef = useRef(crypto.randomUUID())
+  const echoBaselineRef = useRef(0)
+  const bargeThresholdRef = useRef<number | undefined>(undefined)
 
   const prepare = useCallback(() => {
-    if (disabled || socketRef.current !== undefined || !('WebSocket' in window)) return
-    setState('warming'); setError(undefined)
+    if (disabled || !('WebSocket' in window)) return
+    // A previous failure must not outlive the attempt that caused it. The
+    // guard used to return before clearing the error, so once anything went
+    // wrong the notice stayed on screen for the rest of the session — and in
+    // the composer it is an absolutely positioned panel, so it sat over the
+    // send button until reload.
+    setError(undefined)
+    if (socketRef.current !== undefined) return
+    setState('warming')
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
     const socket = new WebSocket(`${protocol}//${location.host}/api/voice/session`)
     socket.binaryType = 'arraybuffer'
@@ -39,7 +50,7 @@ export function VoiceConversationControl({ employeeName, disabled = false, varia
       if (event.type === 'prepared') setState((current) => current === 'listening' || current === 'speech' || current === 'finalizing' ? current : 'ready')
       else if (event.type === 'listening') setState('listening')
       else if (event.type === 'speech-start') {
-        stopKokoroSpeech(); window.speechSynthesis?.cancel(); onBargeIn?.(); setState('speech')
+        stopKokoroSpeech(); window.speechSynthesis?.cancel(); onBargeIn?.(); echoBaselineRef.current = 0; bargeThresholdRef.current = undefined; setState('speech')
       } else if (event.type === 'partial') {
         setPartial(event.text ?? ''); setState('speech')
       } else if (event.type === 'final' && event.text?.trim()) {
@@ -49,6 +60,12 @@ export function VoiceConversationControl({ employeeName, disabled = false, varia
         })
       } else if (event.type === 'error') {
         setError(event.message ?? '本地语音识别失败'); setState('failed')
+      } else if (event.type === 'speech-end') {
+        setState((current) => current === 'finalizing' ? current : 'listening')
+      } else if (event.type === 'stopped' || event.type === 'cancelled') {
+        // Without these the UI kept saying it was listening after the server
+        // had stopped, and the only way out was to press the button twice.
+        setPartial(''); setState((current) => current === 'failed' ? current : 'ready')
       }
     }
     socket.onerror = () => { setError('无法连接本地语音服务'); setState('failed') }
@@ -57,6 +74,12 @@ export function VoiceConversationControl({ employeeName, disabled = false, varia
 
   const start = useCallback(async () => {
     window.dispatchEvent(new CustomEvent('dsh:voice-exclusive', { detail: ownerIdRef.current }))
+    // A socket left over from a failed attempt cannot be reused: the server
+    // has already given up on that session, so retrying through it looks like
+    // the retry did nothing.
+    if (socketRef.current !== undefined && socketRef.current.readyState > WebSocket.OPEN) {
+      socketRef.current = undefined
+    }
     prepare()
     const socket = socketRef.current
     if (socket === undefined) return
@@ -73,12 +96,26 @@ export function VoiceConversationControl({ employeeName, disabled = false, varia
     source.connect(worklet); worklet.connect(muted); muted.connect(context.destination)
     worklet.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
       if (socket.readyState !== WebSocket.OPEN) return
+      // While the character is talking, its own voice comes back through the
+      // speakers and trips the recogniser, so it interrupts itself and the
+      // conversation collapses into a loop. Echo cancellation helps and does
+      // not finish the job on external speakers.
+      //
+      // Half-duplex would kill barge-in, which is the point of a microphone
+      // during a reply, so the bar is raised rather than closed: speak louder
+      // than the speaker and you get through.
+      const playbackAmplitude = currentSpeechAmplitude()
+      const frameRms = pcmRms(event.data)
+      echoBaselineRef.current = updateEchoBaseline(echoBaselineRef.current, frameRms, playbackAmplitude)
+      bargeThresholdRef.current = calculateBargeInThreshold(playbackAmplitude, echoBaselineRef.current, bargeThresholdRef.current)
+      if (!isBargeInFrame(event.data, playbackAmplitude, echoBaselineRef.current, bargeThresholdRef.current)) return
       const packet = new ArrayBuffer(8 + event.data.byteLength)
       new DataView(packet).setFloat64(0, performance.now(), true)
       new Uint8Array(packet, 8).set(new Uint8Array(event.data))
       socket.send(packet)
     }
     streamRef.current = stream; contextRef.current = context; sourceRef.current = source; workletRef.current = worklet
+    echoBaselineRef.current = 0; bargeThresholdRef.current = undefined
     socket.send(JSON.stringify({ type: 'start', endpointSilenceMs: 650 }))
     setState('listening'); setError(undefined)
   }, [prepare])
@@ -89,6 +126,7 @@ export function VoiceConversationControl({ employeeName, disabled = false, varia
     for (const track of streamRef.current?.getTracks() ?? []) track.stop()
     void contextRef.current?.close()
     workletRef.current = undefined; sourceRef.current = undefined; streamRef.current = undefined; contextRef.current = undefined
+    echoBaselineRef.current = 0; bargeThresholdRef.current = undefined
     setPartial(''); setState('ready')
   }, [])
 
