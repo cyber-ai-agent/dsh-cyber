@@ -1,12 +1,12 @@
 import { readFile } from 'node:fs/promises'
-import { dirname, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-import { VRMLoaderPlugin } from '@pixiv/three-vrm'
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { createRequire } from 'node:module'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const VRM_PATH = resolve(ROOT, 'marketplace', 'plugins', 'official-avatar-base-v1', 'models', 'neutral.vrm')
+const WEB_PACKAGE = pathToFileURL(join(ROOT, 'packages', 'web', 'package.json'))
+const webRequire = createRequire(WEB_PACKAGE)
 const REQUIRED_BONES = [
   'hips', 'spine', 'head',
   'leftUpperArm', 'rightUpperArm',
@@ -15,6 +15,13 @@ const REQUIRED_BONES = [
 const REQUIRED_VARIANT_NODES = ['Hair_Long', 'Hair_SidePart', 'Hair_TechCrop']
 
 async function main() {
+  // Resolve from @dsh-cyber/web, where production actually declares these
+  // dependencies. Root scripts must not accidentally rely on pnpm hoisting.
+  const [{ VRMLoaderPlugin }, { GLTFLoader }] = await Promise.all([
+    import(pathToFileURL(webRequire.resolve('@pixiv/three-vrm')).href),
+    import(pathToFileURL(webRequire.resolve('three/addons/loaders/GLTFLoader.js')).href),
+  ])
+
   const body = await readFile(VRM_PATH)
   const loader = new GLTFLoader()
   loader.register((parser) => new VRMLoaderPlugin(parser))
