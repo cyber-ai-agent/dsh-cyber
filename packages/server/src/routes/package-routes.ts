@@ -7,7 +7,7 @@ import type { Router } from '../http/router.js'
 import { optionalString, packageManifest, readJson, requiredString } from '../http/request.js'
 import { writeJson } from '../http/response.js'
 import { loadInstalledBlueprints, loadInstalledPromptTransformCommands } from '../installed-package-runtime.js'
-import { AvatarBasePackService } from '../services/avatar-base-pack-service.js'
+import { AvatarBasePackService, OFFICIAL_AVATAR_BASE_PACK_ID } from '../services/avatar-base-pack-service.js'
 import { validateAvatarBasePackSource } from '../services/avatar-base-pack-source-validator.js'
 import type { CharacterSkillRuntime } from '../services/character-skill-runtime.js'
 import type { SkillCatalogService } from '../services/skill-catalog-service.js'
@@ -46,7 +46,10 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
       // for planners while giving Creative Workshop a dedicated four-minute budget.
       timeoutMs: CREATIVE_WORKSHOP_MODEL_TIMEOUT_MS,
     })
-  const avatarBasePacks = new AvatarBasePackService(worldPackages)
+  const avatarBasePacks = new AvatarBasePackService(worldPackages, {
+    catalog: packageCatalog,
+    builtInPackageIds: [OFFICIAL_AVATAR_BASE_PACK_ID],
+  })
 
   router.get(/^\/api\/workspaces\/([^/]+)\/packages$/, ({ response, params }) => {
     const workspaceId = params[0]!

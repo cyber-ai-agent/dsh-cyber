@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "id": "official-avatar-base-v1",
+  "version": "1.0.0",
+  "displayName": "DSH Cyber · Quaternius CC0 Base V1",
+  "license": "CC0-1.0",
+  "publisher": "DSH Cyber (conversion) / Quaternius (original assets)",
+  "quality": "production",
+  "bases": [
+    {
+      "baseModel": "neutral-a",
+      "assetPath": "models/neutral.vrm"
+    }
+  ],
+  "parts": [
+    {
+      "id": "long-layered",
+      "kind": "hair",
+      "meshNames": [
+        "Hair_Long"
+      ]
+    },
+    {
+      "id": "side-part",
+      "kind": "hair",
+      "meshNames": [
+        "Hair_SidePart"
+      ]
+    },
+    {
+      "id": "tech-crop",
+      "kind": "hair",
+      "meshNames": [
+        "Hair_TechCrop"
+      ]
+    },
+    {
+      "id": "casual",
+      "kind": "outfit",
+      "meshNames": [
+        "Outfit_Casual_0"
+      ]
+    }
+  ],
+  "materialSlots": [
+    {
+      "id": "hair",
+      "materialNames": [
+        "DSH_Hair"
+      ]
+    }
+  ]
+}

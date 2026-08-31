@@ -25,17 +25,6 @@ const SOURCE_COMMIT = '23e87108a281ac827e2ea23691aa7bf4b544146e'
 const PACK_ID = 'official-avatar-base-v1'
 const PACK_VERSION = '1.0.0'
 
-/**
- * Builds the official pack from the exact pinned CC0 source while delegating
- * source-GLB semantics to the same Three GLTFLoader used by the product.
- *
- * The source is Meshopt-compressed and contains authoring-time logical buffers
- * that are not useful to the final character. Rather than copying that transport
- * layout, the authoring pipeline asks GLTFLoader for every bufferView actually
- * referenced by accessors/images, which also performs Meshopt decoding. Those
- * resolved views are then packed into one conventional embedded GLB buffer.
- * The generated VRM therefore has no external buffer and no Meshopt dependency.
- */
 export async function buildOfficialAvatarBasePackResolved(options = {}) {
   const outputRoot = resolve(options.outputRoot ?? OUTPUT_ROOT)
   const cacheRoot = resolve(options.cacheRoot ?? CACHE_ROOT)
@@ -85,12 +74,12 @@ export async function buildOfficialAvatarBasePackResolved(options = {}) {
   await writeFile(join(outputRoot, 'avatar-base-pack.json'), packManifestBytes)
 
   const provenanceBytes = Buffer.from(provenanceText(), 'utf8')
-  await writeFile(join(outputRoot, 'PROVENANCE.md'), provenanceBytes)
+  await writeFile(join(outputRoot, 'provenance.md'), provenanceBytes)
 
   const files = [
     { path: 'avatar-base-pack.json', sha256: sha256(packManifestBytes) },
     { path: 'models/neutral.vrm', sha256: sha256(vrmBytes) },
-    { path: 'PROVENANCE.md', sha256: sha256(provenanceBytes) },
+    { path: 'provenance.md', sha256: sha256(provenanceBytes) },
   ]
   const unsignedPackage = {
     schemaVersion: 1,
@@ -124,17 +113,9 @@ export async function buildOfficialAvatarBasePackResolved(options = {}) {
   }
 }
 
-/**
- * VRM 1.0 reserves meta.licenseUrl for the VRM license schema itself. The
- * original asset license belongs in otherLicenseUrl/thirdPartyLicenses. Keeping
- * those two concepts separate is required by @pixiv/three-vrm's production
- * loader and preserves the CC0 provenance without abusing the VRM field.
- */
 export function normalizeVrm1LicenseMetadata(document) {
   const meta = document?.extensions?.VRMC_vrm?.meta
-  if (meta === undefined || meta === null || typeof meta !== 'object') {
-    throw new Error('Generated VRM metadata is missing')
-  }
+  if (meta === undefined || meta === null || typeof meta !== 'object') throw new Error('Generated VRM metadata is missing')
   meta.licenseUrl = 'https://vrm.dev/licenses/1.0/'
   meta.otherLicenseUrl = 'https://creativecommons.org/publicdomain/zero/1.0/'
 }
@@ -159,18 +140,15 @@ export async function normalizeSourceGlbWithProductionLoader(body) {
   const normalizedViews = []
   const pieces = []
   let total = 0
-
   for (const sourceIndex of referenced) {
     const dependency = await parser.getDependency('bufferView', sourceIndex)
     if (!(dependency instanceof ArrayBuffer)) throw new Error(`GLTFLoader did not resolve source bufferView ${sourceIndex}`)
     const bytes = Buffer.from(dependency)
     const sourceView = sourceBufferViews[sourceIndex]
     if (sourceView === undefined) throw new Error(`Source references missing bufferView ${sourceIndex}`)
-
     const aligned = align4(total)
     if (aligned > total) pieces.push(Buffer.alloc(aligned - total))
     total = aligned
-
     const nextView = structuredClone(sourceView)
     nextView.buffer = 0
     nextView.byteOffset = total
@@ -195,11 +173,7 @@ export async function normalizeSourceGlbWithProductionLoader(body) {
 
 function collectReferencedBufferViews(document) {
   const indexes = new Set()
-  const add = (value) => {
-    if (!Number.isInteger(value) || value < 0) return
-    indexes.add(value)
-  }
-
+  const add = (value) => { if (Number.isInteger(value) && value >= 0) indexes.add(value) }
   for (const accessor of document.accessors ?? []) {
     add(accessor?.bufferView)
     add(accessor?.sparse?.indices?.bufferView)
@@ -207,9 +181,7 @@ function collectReferencedBufferViews(document) {
   }
   for (const image of document.images ?? []) add(image?.bufferView)
   for (const mesh of document.meshes ?? []) {
-    for (const primitive of mesh?.primitives ?? []) {
-      add(primitive?.extensions?.KHR_draco_mesh_compression?.bufferView)
-    }
+    for (const primitive of mesh?.primitives ?? []) add(primitive?.extensions?.KHR_draco_mesh_compression?.bufferView)
   }
   return [...indexes].sort((left, right) => left - right)
 }
@@ -221,15 +193,10 @@ function remapBufferViewReferences(document, indexMap) {
     if (mapped === undefined) throw new Error(`${label} references unresolved bufferView ${value}`)
     return mapped
   }
-
   for (const [accessorIndex, accessor] of (document.accessors ?? []).entries()) {
     if (Number.isInteger(accessor?.bufferView)) accessor.bufferView = remap(accessor.bufferView, `accessor ${accessorIndex}`)
-    if (Number.isInteger(accessor?.sparse?.indices?.bufferView)) {
-      accessor.sparse.indices.bufferView = remap(accessor.sparse.indices.bufferView, `accessor ${accessorIndex} sparse indices`)
-    }
-    if (Number.isInteger(accessor?.sparse?.values?.bufferView)) {
-      accessor.sparse.values.bufferView = remap(accessor.sparse.values.bufferView, `accessor ${accessorIndex} sparse values`)
-    }
+    if (Number.isInteger(accessor?.sparse?.indices?.bufferView)) accessor.sparse.indices.bufferView = remap(accessor.sparse.indices.bufferView, `accessor ${accessorIndex} sparse indices`)
+    if (Number.isInteger(accessor?.sparse?.values?.bufferView)) accessor.sparse.values.bufferView = remap(accessor.sparse.values.bufferView, `accessor ${accessorIndex} sparse values`)
   }
   for (const [imageIndex, image] of (document.images ?? []).entries()) {
     if (Number.isInteger(image?.bufferView)) image.bufferView = remap(image.bufferView, `image ${imageIndex}`)
@@ -237,9 +204,7 @@ function remapBufferViewReferences(document, indexMap) {
   for (const [meshIndex, mesh] of (document.meshes ?? []).entries()) {
     for (const [primitiveIndex, primitive] of (mesh?.primitives ?? []).entries()) {
       const draco = primitive?.extensions?.KHR_draco_mesh_compression
-      if (Number.isInteger(draco?.bufferView)) {
-        draco.bufferView = remap(draco.bufferView, `mesh ${meshIndex} primitive ${primitiveIndex} Draco`)
-      }
+      if (Number.isInteger(draco?.bufferView)) draco.bufferView = remap(draco.bufferView, `mesh ${meshIndex} primitive ${primitiveIndex} Draco`)
     }
   }
 }
@@ -251,7 +216,6 @@ function removeMeshoptExtension(bufferView) {
   if (Object.keys(extensions).length === 0) delete bufferView.extensions
   else bufferView.extensions = extensions
 }
-
 function withoutExtension(values, extension) {
   if (!Array.isArray(values)) return undefined
   return [...new Set(values.filter((value) => value !== extension))]
@@ -292,9 +256,4 @@ async function main() {
 }
 
 const executedDirectly = process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
-if (executedDirectly) {
-  main().catch((error) => {
-    console.error(error instanceof Error ? error.stack ?? error.message : error)
-    process.exitCode = 1
-  })
-}
+if (executedDirectly) main().catch((error) => { console.error(error instanceof Error ? error.stack ?? error.message : error); process.exitCode = 1 })
