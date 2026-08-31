@@ -1,10 +1,11 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { Object3D } from 'three'
+import { Group, Object3D } from 'three'
 import { describe, expect, it } from 'vitest'
 
 import { DEFAULT_MOTION_LIBRARY, DSH_BASIC_MOTION_PACK } from '../src/features/world/avatar/motion/MotionLibrary.js'
 import { declaredMotionSources, loadMotionClips, motionShareCount } from '../src/features/world/avatar/motion/load-motion-clips.js'
+import { VrmAnimationController } from '../src/features/world/avatar/vrm/VrmAnimationController.js'
 
 describe('bundled motion pack contract', () => {
   it('declares the authored humanoid V2 motions with an explicit redistributable license', () => {
@@ -69,6 +70,31 @@ describe('bundled motion pack contract', () => {
       expect(tracks.some((track) => track.name.startsWith(target.nodes.rightUpperLeg.uuid))).toBe(true)
       expect(tracks.some((track) => track.name.startsWith(target.nodes.leftUpperArm.uuid))).toBe(true)
     } finally {
+      result.release()
+    }
+  })
+
+  it('binds a retargeted walk clip in AnimationMixer and actually rotates the target leg', async () => {
+    const source = readFileSync(motionPath(), 'utf8')
+    const target = targetVrm()
+    const root = new Group()
+    for (const node of Object.values(target.nodes)) root.add(node)
+    const result = await loadMotionClips(target.vrm, [{
+      gesture: 'walk',
+      url: `data:model/gltf+json,${encodeURIComponent(source)}`,
+      animationName: 'walk',
+    }])
+    const controller = new VrmAnimationController(root)
+    try {
+      const clip = result.clips[0]?.clip
+      expect(clip).toBeDefined()
+      controller.register('walk', clip!)
+      controller.setGesture('walk')
+      controller.update(0.25)
+      expect(Math.abs(target.nodes.leftUpperLeg.quaternion.x)).toBeGreaterThan(0.01)
+      expect(Math.abs(target.nodes.rightUpperLeg.quaternion.x)).toBeGreaterThan(0.01)
+    } finally {
+      controller.dispose()
       result.release()
     }
   })
