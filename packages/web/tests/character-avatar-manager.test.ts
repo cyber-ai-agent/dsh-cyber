@@ -76,10 +76,10 @@ describe('CharacterAvatarManager', () => {
       }))
     })
     await act(async () => { button(host, '创建 3D 形象').click() })
-    await act(async () => { button(host, '生成 3D 预览').click(); await Promise.resolve() })
+    await act(async () => { button(host, '生成匹配 3D 预览').click(); await Promise.resolve() })
     await act(async () => { button(host, '取消生成').click() })
     await act(async () => { button(host, '创建 3D 形象').click() })
-    await act(async () => { button(host, '生成 3D 预览').click(); await Promise.resolve() })
+    await act(async () => { button(host, '生成匹配 3D 预览').click(); await Promise.resolve() })
 
     await act(async () => {
       first.resolve({ file: new File(['first'], 'first.vrm'), providerId: 'local', source: 'local' })
