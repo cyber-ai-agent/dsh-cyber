@@ -89,13 +89,18 @@ export function VoiceConversationControl({ employeeName, disabled = false, varia
         setPartial(''); setState(captureActiveRef.current ? 'listening' : 'ready')
       }
     }
-    socket.onerror = () => {
-      if (!captureActiveRef.current && streamRef.current === undefined) return
-      setError('无法连接本地语音服务'); setState('failed')
-    }
+    socket.onerror = () => { setError('无法连接本地语音服务'); setState('failed') }
     socket.onclose = () => {
       socketRef.current = undefined
-      setState((current) => current === 'failed' ? current : captureActiveRef.current ? 'listening' : 'cold')
+      captureActiveRef.current = false
+      captureGenerationRef.current += 1
+      workletRef.current?.disconnect(); sourceRef.current?.disconnect()
+      for (const track of streamRef.current?.getTracks() ?? []) track.stop()
+      void contextRef.current?.close()
+      workletRef.current = undefined; sourceRef.current = undefined; streamRef.current = undefined; contextRef.current = undefined
+      echoBaselineRef.current = 0; bargeThresholdRef.current = undefined
+      setPartial('')
+      setState((current) => current === 'failed' ? current : 'cold')
     }
   }, [disabled, onBargeIn, onFinal])
 
