@@ -53,7 +53,9 @@ export class MossTtsProvider implements TextToSpeechProvider {
       nextSequence: 0,
     })
     const voice = request.voiceId.startsWith('moss:') ? request.voiceId.slice('moss:'.length) : this.#voices[0] ?? 'Junhao'
-    this.#process!.stdin.write(`${JSON.stringify({ id: request.requestId, text: request.text, voice })}\n`, (error) => {
+    // Speed was dropped here, so the slider moved and nothing changed: the
+    // sidecar resamples the result when it is given one.
+    this.#process!.stdin.write(`${JSON.stringify({ id: request.requestId, text: request.text, voice, speed: request.speed })}\n`, (error) => {
       if (error !== null && error !== undefined) this.#terminate(error)
     })
     try {

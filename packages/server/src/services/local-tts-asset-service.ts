@@ -10,7 +10,7 @@ import { EnvHttpProxyAgent, fetch as proxyAwareFetch } from 'undici'
 import { ServiceError } from './service-error.js'
 import { SherpaKokoroTtsProvider } from '../voice/tts/sherpa-kokoro-tts-provider.js'
 import { MossTtsProvider } from '../voice/tts/moss-tts-provider.js'
-import type { AudioChunk, VoiceModelDescriptor } from '@dsh-cyber/contracts'
+import type { AudioChunk, VoiceModelDescriptor, VoiceModelVoice } from '@dsh-cyber/contracts'
 
 interface SherpaManifest {
   schemaVersion: 2
@@ -31,6 +31,7 @@ export interface LocalTtsAudio {
 const MODEL_DIR = 'kokoro-int8-multi-lang-v1_1'
 const voiceDownloadDispatcher = new EnvHttpProxyAgent()
 const MOSS_MODEL_ID = 'moss-tts-nano-100m-onnx'
+const MOSS_DEFAULT_VOICE: VoiceModelVoice = { id: 'moss:Junhao', label: '君豪 · 自然男声', gender: 'male' }
 const MOSS_TTS_REVISION = 'f52645cb467506d8e18e746ddd59482685b74e58'
 const MOSS_CODEC_REVISION = 'ceff0d0749bfb3fa2d61149794ec6feef0d1e1ae'
 
@@ -112,6 +113,7 @@ export class LocalTtsAssetService {
     const mossInstalled = await fileExists(join(mossRoot, 'manifest.json'))
     const mossOperation = this.#modelOperations.get(MOSS_MODEL_ID)
     const mossState = mossOperation?.state ?? (mossInstalled ? 'installed' : 'not-installed')
+    const mossVoices = mossInstalled ? await this.#readMossVoices(mossRoot) : []
     return [
       {
         id: 'moss-tts-nano-100m-onnx', provider: 'moss', displayName: 'MOSS-TTS-Nano', version: '100M-ONNX',
@@ -120,6 +122,10 @@ export class LocalTtsAssetService {
         summary: '默认自然语音包。中文自然度更高，首次使用时按需安装。',
         requirements: ['约 1 GB 磁盘空间', '运行约占 1.7 GB 内存', '建议 4 GB 可用内存'],
         ...(mossInstalled ? { installedPath: mossRoot } : {}),
+        // Whatever the installed pack actually ships. The settings panel used
+        // to offer exactly one hardcoded name, so a multi-speaker model looked
+        // like a single-voice one.
+        ...(mossVoices.length === 0 ? {} : { voices: mossVoices }),
         ...(mossOperation === undefined ? {} : {
           progress: { phase: mossOperation.phase, completedBytes: mossOperation.completedBytes, totalBytes: mossOperation.totalBytes },
           ...(mossOperation.error === undefined ? {} : { error: mossOperation.error }),
@@ -158,7 +164,24 @@ export class LocalTtsAssetService {
   }
 
   async installModel(modelId: string): Promise<VoiceModelDescriptor> {
-    if (modelId !== MOSS_MODEL_ID) throw new ServiceError('invalid', 'voice_model_not_installable', '当前高级语音模型尚未提供本机安装包')
+    // Every refusal used to say the same thing, including for Kokoro — which
+    // is installable, just from the command line. Telling a user that a pack
+    // "尚未提供本机安装包" when the real answer is one command is worse than
+    // saying nothing.
+    if (modelId === MODEL_DIR) {
+      throw new ServiceError(
+        'invalid',
+        'voice_model_cli_install',
+        'Kokoro 语音包目前通过命令行安装：在项目目录运行 pnpm tts:install，完成后回到这里刷新。',
+      )
+    }
+    if (modelId !== MOSS_MODEL_ID) {
+      throw new ServiceError(
+        'invalid',
+        'voice_model_not_installable',
+        '这个引擎需要独立的高级运行环境，当前版本还不能在本机安装。',
+      )
+    }
     const existing = this.#modelOperations.get(modelId)
     if (existing === undefined || existing.state === 'error') {
       const operation: ModelInstallOperation = {
@@ -209,14 +232,26 @@ export class LocalTtsAssetService {
     const text = normalizeTtsText(input.text)
     if (text.length === 0 || text.length > 1_000) throw new ServiceError('invalid', 'local_tts_text_invalid', '播报内容长度必须在 1 到 1000 个字符之间')
     if (!Number.isInteger(input.speakerId) || input.speakerId < 3 || input.speakerId > 102) throw new ServiceError('invalid', 'local_tts_voice_invalid', '请选择有效的中文声音')
-    if (!Number.isFinite(input.speed) || input.speed < 0.7 || input.speed > 1.3) throw new ServiceError('invalid', 'local_tts_speed_invalid', '语速必须在 0.7 到 1.3 之间')
+    // The ceiling was 1.3 in four independent places. Raising the slider alone
+    // would have turned "too slow" into a rejected request.
+    if (!Number.isFinite(input.speed) || input.speed < 0.7 || input.speed > 2) throw new ServiceError('invalid', 'local_tts_speed_invalid', '语速必须在 0.7 到 2 之间')
 
     let release!: () => void
     const previous = this.#generationTail
     this.#generationTail = new Promise<void>((resolve) => { release = resolve })
     await previous
     try {
-      if ((await this.status()).installed !== true) throw new ServiceError('not-found', 'local_tts_not_installed', '本地中文语音包未安装，请运行 pnpm tts:install')
+      // Ask about the pack the caller actually chose. Gating every request on
+      // the Kokoro install meant a user who installed only MOSS from the
+      // settings panel had a working pack the server refused to use, and was
+      // then told to install a different one they had never asked for.
+      if (input.provider === 'moss') {
+        if (!(await fileExists(join(this.#root, 'models', MOSS_MODEL_ID, 'manifest.json')))) {
+          throw new ServiceError('not-found', 'local_tts_not_installed', '自然语音包未安装，请在语音设置中下载 MOSS-TTS-Nano')
+        }
+      } else if ((await this.status()).installed !== true) {
+        throw new ServiceError('not-found', 'local_tts_not_installed', '本地中文语音包未安装，请运行 pnpm tts:install')
+      }
       const provider = input.provider === 'moss'
         ? (this.#mossProvider ??= new MossTtsProvider(join(this.#root, 'models', MOSS_MODEL_ID)))
         : this.#provider
@@ -267,6 +302,38 @@ export class LocalTtsAssetService {
       await rm(staging, { recursive: true, force: true })
     }
   }
+
+  /**
+   * The speakers an installed MOSS pack offers.
+   *
+   * Read from the pack's own manifest rather than from a list in the UI: a
+   * newer pack with more speakers should simply show more of them, and a pack
+   * that names its speakers should show those names. The settings panel used
+   * to hardcode exactly one, so a multi-speaker model looked like a
+   * single-voice one.
+   */
+  async #readMossVoices(root: string): Promise<VoiceModelVoice[]> {
+    try {
+      const manifest = JSON.parse(await readFile(join(root, 'manifest.json'), 'utf8')) as {
+        voices?: Array<string | { id?: unknown; label?: unknown; name?: unknown; gender?: unknown }>
+      }
+      const raw = Array.isArray(manifest.voices) ? manifest.voices : []
+      const voices = raw.flatMap((entry): VoiceModelVoice[] => {
+        if (typeof entry === 'string') return entry.trim() === '' ? [] : [{ id: `moss:${entry}`, label: entry }]
+        const id = typeof entry.id === 'string' ? entry.id : undefined
+        if (id === undefined || id.trim() === '') return []
+        const label = typeof entry.label === 'string' ? entry.label : typeof entry.name === 'string' ? entry.name : id
+        const gender = entry.gender === 'female' || entry.gender === 'male' ? entry.gender : undefined
+        return [{ id: `moss:${id}`, label, ...(gender === undefined ? {} : { gender }) }]
+      })
+      // A pack that names no speakers still has one; without this an installed,
+      // working engine would offer nothing at all.
+      return voices.length > 0 ? voices : [MOSS_DEFAULT_VOICE]
+    } catch {
+      return [MOSS_DEFAULT_VOICE]
+    }
+  }
+
 }
 
 async function fileExists(path: string): Promise<boolean> {
@@ -359,9 +426,37 @@ function abortError(): Error {
   return error
 }
 
+/**
+ * An interpreter that exists on this machine.
+ *
+ * The install used the bare name `python`, which macOS has not shipped since
+ * 12.3 — so the final step of a one-gigabyte download failed with a spawn
+ * error and the pack was never written. On Windows the opposite is true:
+ * `python3` is a Store stub that opens the app store instead of running.
+ */
+async function resolvePython(signal: AbortSignal): Promise<string> {
+  const configured = process.env.DSH_CYBER_PYTHON?.trim()
+  const candidates = configured !== undefined && configured !== ''
+    ? [configured]
+    : process.platform === 'win32' ? ['python', 'python3'] : ['python3', 'python']
+  for (const candidate of candidates) {
+    try {
+      await runProcess(candidate, ['--version'], signal)
+      return candidate
+    } catch {
+      // Try the next name.
+    }
+  }
+  throw new ServiceError(
+    'not-found',
+    'local_tts_python_missing',
+    `未找到可用的 Python（已尝试 ${candidates.join('、')}）。请安装 Python 3，或用 DSH_CYBER_PYTHON 指定解释器路径。`,
+  )
+}
+
 async function installMossPythonRuntime(root: string, signal: AbortSignal): Promise<void> {
   const venvRoot = join(root, 'runtime', '.venv')
-  const python = process.env.DSH_CYBER_PYTHON?.trim() || 'python'
+  const python = await resolvePython(signal)
   await runProcess(python, ['-m', 'venv', venvRoot], signal)
   const runtimePython = process.platform === 'win32' ? join(venvRoot, 'Scripts', 'python.exe') : join(venvRoot, 'bin', 'python')
   await runProcess(runtimePython, [

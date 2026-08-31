@@ -12,6 +12,9 @@ const FEMALE_VOICE_STYLES = ['清澈知性', '温柔叙事', '明亮活力', '�
 const MALE_VOICE_STYLES = ['沉稳低音', '温和讲述', '清朗青年', '理性专业', '成熟磁性', '干练播报', '亲切自然', '冷静克制', '温暖陪伴'] as const
 const VOICE_TONES = ['自然', '轻柔', '清亮', '沉稳', '灵动'] as const
 
+// Bounds live with the voice profile, not with each player.
+import { normalizeVoiceSpeed } from '../../../voice/employee-voice-profile.js'
+
 export const KOKORO_CHINESE_VOICES: readonly KokoroVoiceOption[] = [
   ...Array.from({ length: 55 }, (_, index): KokoroVoiceOption => ({
     id: `kokoro:${index + 3}`,
@@ -186,8 +189,15 @@ export function splitKokoroSpeechText(value: string, maximumLength = 120): strin
   return chunks
 }
 
+/**
+ * The one clamp for playback speed.
+ *
+ * There were four of these at 1.3, in four files, so raising the slider alone
+ * would have left the request rejected or the audio unchanged. They now agree
+ * with `normalizeVoiceSpeed`, which is where the bounds are stated.
+ */
 function normalizeSpeed(value: number | undefined): number {
-  return Math.max(0.8, Math.min(1.3, value ?? 1.1))
+  return normalizeVoiceSpeed(value)
 }
 
 export function stopKokoroSpeech(): void {

@@ -26,8 +26,15 @@ export function VoiceConversationControl({ employeeName, disabled = false, varia
   const ownerIdRef = useRef(crypto.randomUUID())
 
   const prepare = useCallback(() => {
-    if (disabled || socketRef.current !== undefined || !('WebSocket' in window)) return
-    setState('warming'); setError(undefined)
+    if (disabled || !('WebSocket' in window)) return
+    // A previous failure must not outlive the attempt that caused it. The
+    // guard used to return before clearing the error, so once anything went
+    // wrong the notice stayed on screen for the rest of the session — and in
+    // the composer it is an absolutely positioned panel, so it sat over the
+    // send button until reload.
+    setError(undefined)
+    if (socketRef.current !== undefined) return
+    setState('warming')
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
     const socket = new WebSocket(`${protocol}//${location.host}/api/voice/session`)
     socket.binaryType = 'arraybuffer'
@@ -49,6 +56,12 @@ export function VoiceConversationControl({ employeeName, disabled = false, varia
         })
       } else if (event.type === 'error') {
         setError(event.message ?? '本地语音识别失败'); setState('failed')
+      } else if (event.type === 'speech-end') {
+        setState((current) => current === 'finalizing' ? current : 'listening')
+      } else if (event.type === 'stopped' || event.type === 'cancelled') {
+        // Without these the UI kept saying it was listening after the server
+        // had stopped, and the only way out was to press the button twice.
+        setPartial(''); setState((current) => current === 'failed' ? current : 'ready')
       }
     }
     socket.onerror = () => { setError('无法连接本地语音服务'); setState('failed') }
@@ -57,6 +70,12 @@ export function VoiceConversationControl({ employeeName, disabled = false, varia
 
   const start = useCallback(async () => {
     window.dispatchEvent(new CustomEvent('dsh:voice-exclusive', { detail: ownerIdRef.current }))
+    // A socket left over from a failed attempt cannot be reused: the server
+    // has already given up on that session, so retrying through it looks like
+    // the retry did nothing.
+    if (socketRef.current !== undefined && socketRef.current.readyState > WebSocket.OPEN) {
+      socketRef.current = undefined
+    }
     prepare()
     const socket = socketRef.current
     if (socket === undefined) return

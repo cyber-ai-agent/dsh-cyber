@@ -23,9 +23,19 @@ describe('VoiceModelPackPicker', () => {
 
     expect(host.querySelector('select')?.value).toBe('moss-tts-nano-100m-onnx')
     expect(host.textContent).toContain('下载并安装')
+    // Every engine says what it is. Marking only the working ones left a pack
+    // that needs downloading, and one that cannot run here at all, looking
+    // exactly like one that speaks — so choosing it and getting silence was
+    // the only way to find out.
+    expect(host.textContent).toContain('需要下载')
+    expect(host.textContent).toContain('本机暂不支持')
+
     const select = host.querySelector('select')!
     await act(async () => { select.value = 'dots-tts-soar-2b'; select.dispatchEvent(new Event('change', { bubbles: true })) })
-    expect(host.textContent).toContain('高级模型')
+    // "高级模型" read as a premium tier. The truth is narrower and more useful:
+    // this one cannot run on this machine in this version.
+    expect(host.textContent).toContain('本机暂不支持')
+    expect(host.textContent).toContain('还不能在本机启用')
     expect(host.textContent).toContain('高显存 GPU')
     expect(host.textContent).not.toContain('下载并安装')
     await act(async () => root.unmount())

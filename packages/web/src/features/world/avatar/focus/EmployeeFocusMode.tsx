@@ -1,6 +1,6 @@
 import { ArrowsClockwise, SpeakerHigh, SpeakerSlash } from '@phosphor-icons/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { EmployeeProfile, EmployeeVoiceProfile, VoiceModelDescriptor, World, WorldRuntimeEntityState } from '@dsh-cyber/contracts'
+import type { EmployeeProfile, EmployeeVoiceProfile, VoiceModelDescriptor, World, WorldRuntimeEntityState, VoiceModelVoice } from '@dsh-cyber/contracts'
 
 import { api } from '../../../../api.js'
 import type { CyberEmployee } from '../../../../types.js'
@@ -14,7 +14,7 @@ import { VoiceConversationControl } from '../../../voice/VoiceConversationContro
 import { VoiceModelPackPicker } from '../../../voice/VoiceModelPackPicker.js'
 import { StreamingSentenceChunker } from '../../../voice/StreamingSentenceChunker.js'
 import { subscribeStreamingSpeech } from '../../../voice/streaming-speech-bus.js'
-import { resolveEmployeeVoiceProfile } from '../../../voice/employee-voice-profile.js'
+import { MAX_VOICE_SPEED, MIN_VOICE_SPEED, normalizeVoiceSpeed, resolveEmployeeVoiceProfile } from '../../../voice/employee-voice-profile.js'
 import './employee-focus-mode.css'
 
 type VoiceMode = 'off' | 'manual' | 'auto'
@@ -67,6 +67,8 @@ export function EmployeeFocusMode({ world, employee, profile, entity, collaborat
   const [voiceBusy, setVoiceBusy] = useState(false)
   const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false)
   const [mossReady, setMossReady] = useState(false)
+  const [mossVoices, setMossVoices] = useState<VoiceModelVoice[]>([])
+  const voiceSaveTimerRef = useRef<number | undefined>(undefined)
   const streamChunkerRef = useRef(new StreamingSentenceChunker())
   const streamTurnRef = useRef<string | undefined>(undefined)
   const streamChainRef = useRef<Promise<void>>(Promise.resolve())
@@ -95,8 +97,13 @@ export function EmployeeFocusMode({ world, employee, profile, entity, collaborat
   const selectedKokoroVoice = KOKORO_CHINESE_VOICES.find((voice) => voice.id === voiceId)
   const selectedVoiceMissing = selectedKokoroVoice === undefined && selectedSystemVoice === undefined
   const activeVoiceProvider = configuredVoiceProvider === 'auto' ? (mossReady ? 'moss' : 'kokoro') : configuredVoiceProvider
+  const mossVoiceCount = mossVoices.length
   const updateVoiceModels = useCallback((models: VoiceModelDescriptor[]) => {
-    setMossReady(models.some((model) => model.provider === 'moss' && model.state === 'ready'))
+    const moss = models.find((model) => model.provider === 'moss')
+    setMossReady(moss?.state === 'ready')
+    // Whatever the installed pack ships. Hardcoding one option here made a
+    // multi-speaker model look like a single-voice one.
+    setMossVoices(moss?.voices ?? [])
   }, [])
 
   useEffect(() => { setRendererReady(false); setRendererNotice(undefined) }, [employee.id, employee.avatarProfile?.assetId, quality, rendererMode])
@@ -154,16 +161,40 @@ export function EmployeeFocusMode({ world, employee, profile, entity, collaborat
     }
   }, [employee.id, profile])
 
+  /**
+   * Saves a voice change shortly after the user stops making them.
+   *
+   * It used to only park the change and wait for the settings panel to be
+   * collapsed through its own button — so choosing a voice and then switching
+   * character, or closing the panel any other way, silently threw the choice
+   * away. Debounced rather than immediate because dragging the speed slider
+   * would otherwise be one request per pixel.
+   */
   const scheduleVoiceProfile = useCallback((next: EmployeeVoiceProfile) => {
     pendingVoiceProfileRef.current = next
-  }, [])
+    if (voiceSaveTimerRef.current !== undefined) window.clearTimeout(voiceSaveTimerRef.current)
+    voiceSaveTimerRef.current = window.setTimeout(() => {
+      voiceSaveTimerRef.current = undefined
+      const pending = pendingVoiceProfileRef.current
+      if (pending === undefined) return
+      pendingVoiceProfileRef.current = undefined
+      void persistVoiceProfile(pending)
+    }, 600)
+  }, [persistVoiceProfile])
 
   const flushVoiceProfile = useCallback(() => {
+    if (voiceSaveTimerRef.current !== undefined) {
+      window.clearTimeout(voiceSaveTimerRef.current)
+      voiceSaveTimerRef.current = undefined
+    }
     const next = pendingVoiceProfileRef.current
     if (next === undefined) return
     pendingVoiceProfileRef.current = undefined
     void persistVoiceProfile(next)
   }, [persistVoiceProfile])
+
+  // Leaving the character, or the panel, must not be a way to lose a choice.
+  useEffect(() => flushVoiceProfile, [flushVoiceProfile, employee.id])
 
   const stopSpeech = useCallback(() => {
     stopKokoroSpeech()
@@ -331,11 +362,11 @@ export function EmployeeFocusMode({ world, employee, profile, entity, collaborat
       <div className="employee-focus__header-actions">
         <span className={`employee-focus__status is-${state}`}><i aria-hidden="true" />{stateLabel(state)}</span>
         <div className="employee-focus__voice"><button type="button" className="employee-focus__voice-trigger" aria-label="语音设置" aria-expanded={voiceSettingsOpen} onClick={() => { setVoiceSettingsOpen((current) => { const next = !current; if (!next) flushVoiceProfile(); return next }) }}>{speaking ? <SpeakerSlash size={17} aria-hidden="true" /> : <SpeakerHigh size={17} aria-hidden="true" />}语音</button>{voiceSettingsOpen ? <div>
-          <header><span><strong>{employee.displayName}的语音</strong><small>{activeVoiceProvider === 'moss' ? '自然语音 · 本地运行' : `${KOKORO_CHINESE_VOICES.length} 个中文声音${chineseSystemVoices.length > 0 ? ` · ${chineseSystemVoices.length} 个系统中文声音` : ''}`}</small></span><button type="button" aria-label="刷新系统声音" onClick={refreshVoices}><ArrowsClockwise size={16} aria-hidden="true" /></button></header>
+          <header><span><strong>{employee.displayName}的语音</strong><small>{activeVoiceProvider === 'moss' ? `自然语音 · 本地运行${mossVoiceCount > 0 ? ` · ${mossVoiceCount} 个声音` : ''}` : `${KOKORO_CHINESE_VOICES.length} 个中文声音${chineseSystemVoices.length > 0 ? ` · ${chineseSystemVoices.length} 个系统中文声音` : ''}`}</small></span><button type="button" aria-label="刷新系统声音" onClick={refreshVoices}><ArrowsClockwise size={16} aria-hidden="true" /></button></header>
           <VoiceModelPackPicker value={configuredVoiceProvider} onActivate={activateVoiceProvider} onModelsChange={updateVoiceModels} />
           <label><span>播报模式</span><select aria-label="播报模式" value={voiceMode} onChange={(event) => changeVoiceMode(event.target.value as VoiceMode)}><option value="off">关闭</option><option value="manual">手动</option><option value="auto">自动播报新回复</option></select></label>
-          {activeVoiceProvider === 'moss' ? <label><span>角色声音</span><select aria-label="角色声音" value={voiceId.startsWith('moss:') ? voiceId : 'moss:Junhao'} onChange={(event) => { const nextVoiceId = event.target.value; setVoiceId(nextVoiceId); scheduleVoiceProfile({ provider: 'moss', voiceId: nextVoiceId, speed: voiceSpeed, pitch: profile?.voiceProfile.pitch ?? 1 }) }}><option value="moss:Junhao">君豪 · 自然男声</option></select></label> : <label><span>角色声音</span><select aria-label="角色声音" value={voiceId} onChange={(event) => { const nextVoiceId = event.target.value; setVoiceId(nextVoiceId); setVoiceNotice(undefined); scheduleVoiceProfile({ provider: nextVoiceId.startsWith('system:') ? 'system' : 'kokoro', voiceId: nextVoiceId, speed: voiceSpeed, pitch: profile?.voiceProfile.pitch ?? 1 }) }}>{selectedVoiceMissing ? <option value={voiceId}>原声音当前不可用</option> : null}{profile?.gender === 'male' ? null : <optgroup label="中文女声">{compatibleKokoroVoices.filter((voice) => voice.gender === '女声').map((voice) => <option key={voice.id} value={voice.id}>{voice.label}</option>)}</optgroup>}{profile?.gender === 'female' ? null : <optgroup label="中文男声">{compatibleKokoroVoices.filter((voice) => voice.gender === '男声').map((voice) => <option key={voice.id} value={voice.id}>{voice.label}</option>)}</optgroup>}{chineseSystemVoices.length === 0 ? null : <optgroup label="Windows / 浏览器中文声音">{chineseSystemVoices.map((voice) => <option key={`${voice.voiceURI}:${voice.lang}`} value={`system:${voice.voiceURI}`}>{voice.name} · {voice.lang}{voice.localService ? ' · 本机' : ''}</option>)}</optgroup>}</select></label>}
-          <label className="employee-focus__voice-speed"><span>语速 <output>{voiceSpeed.toFixed(2)}×</output></span><input aria-label="语速" type="range" min="0.8" max="1.3" step="0.05" value={voiceSpeed} onChange={(event) => { const speed = Number(event.target.value); setVoiceSpeed(speed); scheduleVoiceProfile({ provider: configuredVoiceProvider, voiceId, speed, pitch: profile?.voiceProfile.pitch ?? 1 }) }} /></label>
+          {activeVoiceProvider === 'moss' ? <label><span>角色声音</span><select aria-label="角色声音" value={mossVoices.some((voice) => voice.id === voiceId) ? voiceId : mossVoices[0]?.id ?? 'moss:Junhao'} onChange={(event) => { const nextVoiceId = event.target.value; setVoiceId(nextVoiceId); scheduleVoiceProfile({ provider: 'moss', voiceId: nextVoiceId, speed: voiceSpeed, pitch: profile?.voiceProfile.pitch ?? 1 }) }}>{mossVoices.map((voice) => <option key={voice.id} value={voice.id}>{voice.label}</option>)}</select></label> : <label><span>角色声音</span><select aria-label="角色声音" value={voiceId} onChange={(event) => { const nextVoiceId = event.target.value; setVoiceId(nextVoiceId); setVoiceNotice(undefined); scheduleVoiceProfile({ provider: nextVoiceId.startsWith('system:') ? 'system' : 'kokoro', voiceId: nextVoiceId, speed: voiceSpeed, pitch: profile?.voiceProfile.pitch ?? 1 }) }}>{selectedVoiceMissing ? <option value={voiceId}>原声音当前不可用</option> : null}{profile?.gender === 'male' ? null : <optgroup label="中文女声">{compatibleKokoroVoices.filter((voice) => voice.gender === '女声').map((voice) => <option key={voice.id} value={voice.id}>{voice.label}</option>)}</optgroup>}{profile?.gender === 'female' ? null : <optgroup label="中文男声">{compatibleKokoroVoices.filter((voice) => voice.gender === '男声').map((voice) => <option key={voice.id} value={voice.id}>{voice.label}</option>)}</optgroup>}{chineseSystemVoices.length === 0 ? null : <optgroup label="Windows / 浏览器中文声音">{chineseSystemVoices.map((voice) => <option key={`${voice.voiceURI}:${voice.lang}`} value={`system:${voice.voiceURI}`}>{voice.name} · {voice.lang}{voice.localService ? ' · 本机' : ''}</option>)}</optgroup>}</select></label>}
+          <label className="employee-focus__voice-speed"><span>语速 <output>{voiceSpeed.toFixed(2)}×</output></span><input aria-label="语速" type="range" min={MIN_VOICE_SPEED} max={MAX_VOICE_SPEED} step="0.05" value={voiceSpeed} onChange={(event) => { const speed = Number(event.target.value); setVoiceSpeed(speed); scheduleVoiceProfile({ provider: configuredVoiceProvider, voiceId, speed, pitch: profile?.voiceProfile.pitch ?? 1 }) }} /></label>
           <div className="employee-focus__voice-preview"><span><strong>当前播报</strong><small>{spokenText.length === 0 ? `当前会话里还没有 ${employee.displayName} 的最终回复` : `${employee.displayName}：${spokenText.slice(0, 72)}${spokenText.length > 72 ? '…' : ''}`}</small></span></div>
           <label className="employee-focus__motion"><input type="checkbox" checked={!staticMode} onChange={(event) => onStaticModeChange(!event.target.checked)} />启用角色动效</label>
           <div className="employee-focus__voice-buttons"><button type="button" disabled={voiceBusy} onClick={() => void speak(`你好，我是${employee.displayName}。这是当前声音的试听。`)}>{voiceBusy ? '正在准备…' : '试听声音'}</button><button type="button" disabled={!voiceBusy && !speaking && (spokenText.length === 0 || voiceMode === 'off')} onClick={voiceBusy || speaking ? stopSpeech : () => void speak(spokenText)}>{voiceBusy ? '取消生成' : speaking ? '停止播报' : `播放${employee.displayName}的回复`}</button></div>
@@ -377,8 +408,19 @@ function voiceModeKey(worldId: string, employeeId: string): string { return `dsh
 function voiceIdKey(worldId: string, employeeId: string): string { return `dsh-cyber-digital-voice-id:${worldId}:${employeeId}` }
 function voiceSpeedKey(worldId: string, employeeId: string): string { return `dsh-cyber-digital-voice-speed:${worldId}:${employeeId}` }
 function lastSpokenKey(worldId: string, employeeId: string): string { return `dsh-cyber-digital-last-spoken:${worldId}:${employeeId}` }
-function readVoiceMode(worldId: string, employeeId: string): VoiceMode { try { const value = localStorage.getItem(voiceModeKey(worldId, employeeId)) ?? localStorage.getItem(`dsh-cyber-digital-voice-mode:${worldId}`); return value === 'off' || value === 'auto' ? value : 'manual' } catch { return 'manual' } }
+/**
+ * Whether a character speaks its replies aloud.
+ *
+ * Defaults to speaking. Someone who has opened a character's panel and can
+ * press a microphone is having a conversation, and a conversation where the
+ * other side answers only when you press a second button is not one — the
+ * streaming subscription bails unless this is `auto`, so the old default made
+ * the whole voice path silent until the user found this setting.
+ */
+function readVoiceMode(worldId: string, employeeId: string): VoiceMode { try { const value = localStorage.getItem(voiceModeKey(worldId, employeeId)) ?? localStorage.getItem(`dsh-cyber-digital-voice-mode:${worldId}`); return value === 'off' || value === 'manual' ? value : 'auto' } catch { return 'auto' } }
 function readCachedVoiceId(worldId: string, employeeId: string, fallback: string): string { try { const saved = localStorage.getItem(voiceIdKey(worldId, employeeId)); return saved?.startsWith('system:') || saved?.startsWith('moss:') || KOKORO_CHINESE_VOICES.some((voice) => voice.id === saved) ? saved! : fallback } catch { return fallback } }
-function readCachedVoiceSpeed(worldId: string, employeeId: string, fallback: number): number { try { const value = Number(localStorage.getItem(voiceSpeedKey(worldId, employeeId))); return Number.isFinite(value) && value >= 0.8 && value <= 1.3 ? Math.round(value * 20) / 20 : fallback } catch { return fallback } }
+// The fourth copy of the 0.8–1.3 bound: a saved faster speed was read back and
+// silently discarded. Bounds are stated once, in normalizeVoiceSpeed.
+function readCachedVoiceSpeed(worldId: string, employeeId: string, fallback: number): number { try { const raw = localStorage.getItem(voiceSpeedKey(worldId, employeeId)); return raw === null ? fallback : normalizeVoiceSpeed(Number(raw)) } catch { return fallback } }
 function readLastSpoken(worldId: string, employeeId: string): string | undefined { try { return localStorage.getItem(lastSpokenKey(worldId, employeeId)) ?? undefined } catch { return undefined } }
 function persistLastSpoken(worldId: string, employeeId: string, messageId: string): void { try { localStorage.setItem(lastSpokenKey(worldId, employeeId), messageId) } catch { /* localStorage is optional */ } }

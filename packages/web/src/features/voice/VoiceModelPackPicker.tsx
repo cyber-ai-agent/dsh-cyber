@@ -12,6 +12,8 @@ interface VoiceModelPackPickerProps {
 
 export function VoiceModelPackPicker({ value, onActivate, onModelsChange }: VoiceModelPackPickerProps) {
   const [models, setModels] = useState<VoiceModelDescriptor[]>([])
+  // Chosen once the catalog arrives, from what can actually speak. Defaulting
+  // to a fixed id showed a pack that may never have been installed.
   const [selectedId, setSelectedId] = useState('moss-tts-nano-100m-onnx')
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
@@ -30,7 +32,11 @@ export function VoiceModelPackPicker({ value, onActivate, onModelsChange }: Voic
   useEffect(() => { void refresh() }, [refresh])
   useEffect(() => {
     const active = models.find((model) => model.provider === (value === 'auto' ? 'moss' : value))
-    if (active !== undefined) setSelectedId(active.id)
+    if (active !== undefined) { setSelectedId(active.id); return }
+    // Nothing configured yet: land on something that can speak rather than on
+    // a pack the user would have to download before anything happens.
+    const usable = models.find((model) => model.state === 'ready') ?? models[0]
+    if (usable !== undefined) setSelectedId(usable.id)
   }, [models, value])
   const hasActiveOperation = models.some((model) => model.state === 'downloading' || model.state === 'verifying')
   useEffect(() => {
@@ -60,7 +66,7 @@ export function VoiceModelPackPicker({ value, onActivate, onModelsChange }: Voic
   return <section className="voice-model-picker" aria-label="语音模型包">
     <label><span>语音引擎</span><select aria-label="语音引擎" value={selectedId} onChange={(event) => {
       setSelectedId(event.target.value)
-    }}>{models.map((model) => <option key={model.id} value={model.id}>{model.displayName}{model.recommended ? ' · 推荐' : ''}{model.state === 'ready' ? ' · 可用' : model.state === 'installed' ? ' · 已安装' : ''}</option>)}</select></label>
+    }}>{models.map((model) => <option key={model.id} value={model.id}>{model.displayName}{model.recommended ? ' · 推荐' : ''}{stateSuffix(model.state)}</option>)}</select></label>
     {selected === undefined ? <div className="voice-model-picker__loading" role="status">正在读取语音模型…</div> : <div className="voice-model-picker__detail" data-state={selected.state}>
       <span><strong>{selected.displayName}</strong><small>{selected.summary}</small></span>
       <dl><div><dt>模型大小</dt><dd>{selected.byteLength > 0 ? formatBytes(selected.byteLength) : '由高级运行环境决定'}</dd></div><div><dt>运行方式</dt><dd>{runtimeLabel(selected.runtime)}</dd></div></dl>
@@ -68,11 +74,37 @@ export function VoiceModelPackPicker({ value, onActivate, onModelsChange }: Voic
       {selected.state === 'downloading' || selected.state === 'verifying' ? <div className="voice-model-picker__progress" role="status" aria-live="polite"><progress max={selected.progress?.totalBytes ?? selected.byteLength} value={selected.progress?.completedBytes ?? 0} /><span><strong>{selected.state === 'verifying' ? '正在校验' : '正在下载'}</strong><small>{formatBytes(selected.progress?.completedBytes ?? 0)} / {formatBytes(selected.progress?.totalBytes ?? selected.byteLength)}</small></span><button type="button" aria-label="取消语音模型下载" onClick={() => void cancel()}><X size={15} /></button></div> : null}
       {selected.state === 'installed' ? <button type="button" className="voice-model-picker__activate" disabled>已安装，正在接入运行时</button> : null}
       {selected.state === 'ready' && selectedTtsProvider !== undefined ? <button type="button" className="voice-model-picker__activate" onClick={() => onActivate(selectedTtsProvider)}>使用这个引擎</button> : null}
-      {selected.state === 'unavailable' ? <div className="voice-model-picker__unavailable"><span>高级模型</span><small>{selected.requirements?.join(' · ') ?? '需要独立运行环境'}</small></div> : null}
-      {selected.state === 'error' ? <button type="button" className="voice-model-picker__retry" onClick={() => void install()}><ArrowClockwise size={15} />重试安装</button> : null}
+      {selected.state === 'unavailable' ? <div className="voice-model-picker__unavailable"><span>本机暂不支持</span><small>这个引擎需要独立的高级运行环境，当前版本还不能在本机启用：{selected.requirements?.join(' · ') ?? '需要独立运行环境'}</small></div> : null}
+      {selected.state === 'error' ? <div className="voice-model-picker__failure">
+        {/* The descriptor has carried the reason all along and nothing showed
+            it, so every install failure looked identical and unexplained. */}
+        {selected.error === undefined ? null : <small role="alert">{selected.error}</small>}
+        <button type="button" className="voice-model-picker__retry" onClick={() => void install()}><ArrowClockwise size={15} />重试安装</button>
+      </div> : null}
     </div>}
     {error === undefined ? null : <small className="voice-model-picker__error" role="alert">{error}</small>}
   </section>
+}
+
+/**
+ * What the engine list says about each entry.
+ *
+ * Every state needs a word. Marking only "可用" and "已安装" left the engines
+ * that need downloading — and the ones that cannot run here at all — looking
+ * exactly like the ones that work, so choosing one and getting silence was the
+ * only way to find out.
+ */
+function stateSuffix(state: VoiceModelDescriptor['state']): string {
+  switch (state) {
+    case 'ready': return ' · 可用'
+    case 'installed': return ' · 已安装'
+    case 'not-installed': return ' · 需要下载'
+    case 'downloading': return ' · 正在下载'
+    case 'verifying': return ' · 正在校验'
+    case 'loading': return ' · 正在载入'
+    case 'error': return ' · 安装失败'
+    case 'unavailable': return ' · 本机暂不支持'
+  }
 }
 
 function isTtsProvider(value: VoiceModelDescriptor['provider']): value is Exclude<EmployeeVoiceProfile['provider'], 'auto'> {

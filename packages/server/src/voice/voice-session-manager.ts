@@ -111,9 +111,21 @@ export class VoiceSessionManager {
     this.#events.emit('event', event)
   }
 
+  /**
+   * Tells everybody who was listening that the recogniser has gone.
+   *
+   * The failure used to be emitted once with no session id, and the websocket
+   * forwards only events that name a session — so a worker crash reached
+   * nobody and the browser sat on "正在听…" until the page was reloaded. A
+   * failure the user cannot see is worse than one they can.
+   */
   #failAll(error: Error): void {
     for (const pending of this.#pending.values()) { clearTimeout(pending.timer); pending.reject(error) }
     this.#pending.clear()
-    this.#events.emit('event', { type: 'error', message: error.message } satisfies VoiceSessionEvent)
+    for (const sessionId of this.#activeSessions) {
+      this.#events.emit('event', { type: 'error', sessionId, message: error.message } satisfies VoiceSessionEvent)
+    }
+    this.#activeSessions.clear()
+    this.#fastSpeech.clear()
   }
 }
