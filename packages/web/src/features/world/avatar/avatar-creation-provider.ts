@@ -93,27 +93,31 @@ async function generateVrm(request: AvatarCreationRequest, signal?: AbortSignal)
     }
     const worker = new Worker(new URL('./procedural-vrm.worker.ts', import.meta.url), { type: 'module', name: 'dsh-avatar-creator' })
     const requestId = crypto.randomUUID()
-    const timeout = setTimeout(() => {
+    let settled = false
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    let abortListener: (() => void) | undefined
+    const finish = (): boolean => {
+      if (settled) return false
+      settled = true
+      if (timeout !== undefined) clearTimeout(timeout)
+      if (abortListener !== undefined) signal?.removeEventListener('abort', abortListener)
       worker.terminate()
-      reject(new Error('3D 形象生成超时，请重试'))
-    }, 20_000)
-    const finish = () => {
-      clearTimeout(timeout)
-      signal?.removeEventListener('abort', abort)
-      worker.terminate()
+      return true
     }
-    const abort = () => {
-      finish()
-      reject(abortError())
+    const fail = (error: Error) => {
+      if (!finish()) return
+      reject(error)
     }
-    signal?.addEventListener('abort', abort, { once: true })
-    worker.onerror = () => {
-      finish()
-      reject(new Error('3D 形象生成器启动失败'))
+    abortListener = () => fail(abortError())
+    signal?.addEventListener('abort', abortListener, { once: true })
+    timeout = setTimeout(() => fail(new Error('3D 形象生成超时，请重试')), 20_000)
+    worker.onerror = (event) => {
+      event.preventDefault()
+      fail(new Error('3D 形象生成器启动失败'))
     }
     worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
       if (event.data.requestId !== requestId) return
-      finish()
+      if (!finish()) return
       if (event.data.ok) resolve(event.data.buffer)
       else reject(new Error(event.data.error))
     }

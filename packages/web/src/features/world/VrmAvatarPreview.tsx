@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import type { DigitalHumanVisualState } from './digital-human-motion.js'
+import { disposeVrmScene } from './avatar/vrm/VrmResourceManager.js'
 
 interface VrmAvatarPreviewProps {
   assetUrl: string
@@ -70,11 +71,16 @@ export function VrmAvatarPreview({ assetUrl, label, state = 'idle', staticMode =
         loader.register((parser) => new vrmModule.VRMLoaderPlugin(parser))
         const gltf = await loader.loadAsync(assetUrl)
         if (disposed) {
-          disposeScene(gltf.scene)
+          disposeVrmScene(gltf.scene)
           disposeRenderer()
           cleanup = () => undefined
           return
         }
+        const disposeAvatar = () => {
+          disposeVrmScene(gltf.scene)
+          disposeRenderer()
+        }
+        cleanup = disposeAvatar
         const vrm = gltf.userData.vrm as import('@pixiv/three-vrm').VRM | undefined
         if (vrm === undefined && !allowGenericGlb) throw new Error('文件未包含可渲染的 VRM 角色')
         if (vrm !== undefined) vrmModule.VRMUtils.rotateVRM0(vrm)
@@ -92,6 +98,10 @@ export function VrmAvatarPreview({ assetUrl, label, state = 'idle', staticMode =
         resizeObserver = new ResizeObserver(resize)
         resizeObserver.observe(host)
         resize()
+        cleanup = () => {
+          resizeObserver?.disconnect()
+          disposeAvatar()
+        }
         const timer = new THREE.Timer()
         timer.connect(document)
         let lastRender = 0
@@ -114,8 +124,7 @@ export function VrmAvatarPreview({ assetUrl, label, state = 'idle', staticMode =
           window.cancelAnimationFrame(frame)
           resizeObserver?.disconnect()
           timer.dispose()
-          disposeScene(avatarScene)
-          disposeRenderer()
+          disposeAvatar()
         }
         setStatus('ready')
       } catch (error) {
@@ -168,20 +177,4 @@ function applyVrmMotion(vrm: import('@pixiv/three-vrm').VRM, state: DigitalHuman
     manager.setValue('sad', state === 'failed' ? 0.22 : 0)
   }
   if (!staticMode) vrm.scene.position.y = Math.sin(time / 850) * 0.006
-}
-
-function disposeScene(scene: import('three').Object3D): void {
-  scene.traverse((object) => {
-    const mesh = object as import('three').Mesh
-    if (mesh.geometry !== undefined) mesh.geometry.dispose()
-    const materials = Array.isArray(mesh.material) ? mesh.material : mesh.material === undefined ? [] : [mesh.material]
-    for (const material of materials) {
-      for (const value of Object.values(material)) {
-        if (value !== null && typeof value === 'object' && 'isTexture' in value && (value as import('three').Texture).isTexture) {
-          ;(value as import('three').Texture).dispose()
-        }
-      }
-      material.dispose()
-    }
-  })
 }

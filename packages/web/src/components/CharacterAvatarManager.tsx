@@ -52,6 +52,7 @@ export function CharacterAvatarManager({ employeeName, profile, profileHistory, 
   const sectionRef = useRef<HTMLElement>(null)
   const createButtonRef = useRef<HTMLButtonElement>(null)
   const publishButtonRef = useRef<HTMLButtonElement>(null)
+  const errorRef = useRef<HTMLDivElement>(null)
   const creationAbortRef = useRef<AbortController | undefined>(undefined)
   const [draft, setDraft] = useState<UploadedAvatarDraft>()
   const [uploading, setUploading] = useState(false)
@@ -81,7 +82,16 @@ export function CharacterAvatarManager({ employeeName, profile, profileHistory, 
     const frame = requestAnimationFrame(() => publishButtonRef.current?.focus())
     return () => cancelAnimationFrame(frame)
   }, [draft?.asset.id])
-  useEffect(() => () => creationAbortRef.current?.abort(), [])
+  useEffect(() => {
+    if (error === undefined) return
+    const frame = requestAnimationFrame(() => errorRef.current?.focus())
+    return () => cancelAnimationFrame(frame)
+  }, [error])
+  useEffect(() => () => {
+    const controller = creationAbortRef.current
+    creationAbortRef.current = undefined
+    controller?.abort()
+  }, [])
 
   const upload = async (file: File | undefined) => {
     if (file === undefined || uploading || busy) return
@@ -108,24 +118,60 @@ export function CharacterAvatarManager({ employeeName, profile, profileHistory, 
       const { avatarCreationProviders, LOCAL_PROCEDURAL_AVATAR_PROVIDER_ID } = await import('../features/world/avatar/avatar-creation-provider.js')
       const provider = avatarCreationProviders.require(LOCAL_PROCEDURAL_AVATAR_PROVIDER_ID)
       const created = await provider.create({ displayName: employeeName, design: { style, build, tone } }, { onPhase: setCreationPhase, signal: controller.signal })
+      if (creationAbortRef.current !== controller) return
       setCreationPhase('validating')
-      setDraft(await onUpload(created.file, controller.signal))
+      const uploaded = await onUpload(created.file, controller.signal)
+      if (creationAbortRef.current !== controller) return
+      setDraft(uploaded)
       setCreatorOpen(false)
     } catch (cause) {
+      if (creationAbortRef.current !== controller) return
       if (cause instanceof DOMException && cause.name === 'AbortError') return
       setDraft(undefined)
       setError(cause instanceof Error ? cause.message : '3D 形象创建失败')
     } finally {
-      if (creationAbortRef.current === controller) creationAbortRef.current = undefined
-      setCreationPhase(undefined)
+      if (creationAbortRef.current === controller) {
+        creationAbortRef.current = undefined
+        setCreationPhase(undefined)
+      }
     }
   }
 
   const closeCreator = () => {
-    creationAbortRef.current?.abort()
+    const controller = creationAbortRef.current
+    creationAbortRef.current = undefined
+    controller?.abort()
     setCreatorOpen(false)
     setCreationPhase(undefined)
     requestAnimationFrame(() => createButtonRef.current?.focus())
+  }
+
+  const publishDraft = async (assetId: string) => {
+    setError(undefined)
+    try {
+      await onPublish(assetId, fallbackAvatarIndex, profile?.revision ?? 0)
+      setDraft(undefined)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '角色形象发布失败')
+    }
+  }
+
+  const rollbackAvatar = async (targetRevision: number) => {
+    setError(undefined)
+    try {
+      await onRollback(targetRevision, profile?.revision ?? 0)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '角色形象恢复失败')
+    }
+  }
+
+  const resetAvatar = async () => {
+    setError(undefined)
+    try {
+      await onReset(fallbackAvatarIndex, profile?.revision ?? 0)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '内置形象恢复失败')
+    }
   }
 
   return <section ref={sectionRef} className="character-avatar-manager" aria-labelledby="character-avatar-manager-title">
@@ -160,8 +206,8 @@ export function CharacterAvatarManager({ employeeName, profile, profileHistory, 
         <span>{previewKind === 'vrm-3d' || previewKind === 'mesh-preview' ? <Cube size={17} aria-hidden="true" /> : <ImageSquare size={17} aria-hidden="true" />}</span>
         <div><strong>{draft?.avatarAsset.originalName ?? currentAvatar?.sourceName ?? '内置形象'}</strong><small>{previewKind === 'vrm-3d' ? 'VRM 3D · 按需加载，失败自动回退' : previewKind === 'mesh-preview' ? '普通 GLB · 仅可预览，不能发布为数字人' : previewKind === 'image-2d' ? '本地图片 · 不上传到云端' : 'DSH Cyber 内置形象'}</small></div>
       </div>
-      {draft === undefined ? null : <div className="character-avatar-manager__draft" role="status"><strong>尚未发布</strong><span>{validationSummary(draft.avatarAsset)}</span><button ref={publishButtonRef} type="button" className="primary-button" disabled={busy || draft.avatarAsset.rendererKind === 'mesh-preview'} onClick={() => void onPublish(draft.avatarAsset.assetId, fallbackAvatarIndex, profile?.revision ?? 0).then(() => setDraft(undefined))}>{draft.avatarAsset.rendererKind === 'mesh-preview' ? '需要 VRM 1.0' : '发布到角色'}</button><button type="button" disabled={busy} onClick={() => setDraft(undefined)}>放弃预览</button></div>}
-      {error === undefined ? null : <div className="character-avatar-manager__error" role="alert"><WarningCircle size={16} aria-hidden="true" />{error}</div>}
+      {draft === undefined ? null : <div className="character-avatar-manager__draft" role="status"><strong>尚未发布</strong><span>{validationSummary(draft.avatarAsset)}</span><button ref={publishButtonRef} type="button" className="primary-button" disabled={busy || draft.avatarAsset.rendererKind === 'mesh-preview'} onClick={() => void publishDraft(draft.avatarAsset.assetId)}>{draft.avatarAsset.rendererKind === 'mesh-preview' ? '需要 VRM 1.0' : '发布到角色'}</button><button type="button" disabled={busy} onClick={() => setDraft(undefined)}>放弃预览</button></div>}
+      {error === undefined ? null : <div ref={errorRef} className="character-avatar-manager__error" role="alert" tabIndex={-1}><WarningCircle size={16} aria-hidden="true" />{error}</div>}
     </div>
 
     <details className="character-avatar-manager__import">
@@ -173,14 +219,14 @@ export function CharacterAvatarManager({ employeeName, profile, profileHistory, 
     <div className="character-avatar-manager__fallback">
       <div><strong>备用形象</strong><small>图片或 VRM 无法渲染、低性能降级和会话小头像使用这里的内置形象。</small></div>
       <div className="avatar-picker" role="radiogroup" aria-label="选择备用角色形象">{Array.from({ length: 8 }, (_, index) => <button key={index} type="button" role="radio" aria-label={`备用形象 ${index + 1}`} aria-checked={fallbackAvatarIndex === index} className={fallbackAvatarIndex === index ? 'is-active' : ''} onClick={() => onFallbackAvatarChange(index)}><Avatar index={index} size="md" label={`备用形象 ${index + 1}`} /></button>)}</div>
-      {currentAvatar === undefined ? null : <button type="button" className="text-button" disabled={busy} onClick={() => void onReset(fallbackAvatarIndex, profile?.revision ?? 0)}>恢复为内置形象</button>}
+      {currentAvatar === undefined ? null : <button type="button" className="text-button" disabled={busy} onClick={() => void resetAvatar()}>恢复为内置形象</button>}
     </div>
 
     {historicalProfiles.length === 0 ? null : <div className="character-avatar-manager__history">
       <div><ClockCounterClockwise size={17} aria-hidden="true" /><span><strong>形象版本</strong><small>恢复会创建新版本，不会改写历史。</small></span></div>
       <ol>{historicalProfiles.map((item) => {
         const avatar = readCharacterAvatarProfile(item.appearance.digitalHumanAvatar)
-        return <li key={item.revision}><span><strong>版本 {item.revision} · {avatar?.sourceName ?? '内置形象'}</strong><small>{formatDateTime(item.createdAt)}</small></span><button type="button" disabled={busy} onClick={() => void onRollback(item.revision, profile?.revision ?? 0)}>恢复</button></li>
+        return <li key={item.revision}><span><strong>版本 {item.revision} · {avatar?.sourceName ?? '内置形象'}</strong><small>{formatDateTime(item.createdAt)}</small></span><button type="button" disabled={busy} onClick={() => void rollbackAvatar(item.revision)}>恢复</button></li>
       })}</ol>
     </div>}
   </section>

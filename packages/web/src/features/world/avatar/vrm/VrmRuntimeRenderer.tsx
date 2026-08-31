@@ -62,6 +62,11 @@ export function VrmRuntimeRenderer(props: DigitalHumanRendererProps) {
         loader.register((parser) => new vrmModule.VRMLoaderPlugin(parser))
         const gltf = await loader.loadAsync(assetUrl)
         if (disposed) { disposeVrmScene(gltf.scene); disposeRenderer(); cleanup = () => undefined; return }
+        const disposeAvatar = () => {
+          disposeVrmScene(gltf.scene)
+          disposeRenderer()
+        }
+        cleanup = disposeAvatar
         const vrm = gltf.userData.vrm as import('@pixiv/three-vrm').VRM | undefined
         if (vrm === undefined) throw new Error('已发布文件不包含 VRM 1.0 角色')
         vrmModule.VRMUtils.rotateVRM0(vrm)
@@ -74,6 +79,12 @@ export function VrmRuntimeRenderer(props: DigitalHumanRendererProps) {
         const blink = new VrmBlinkController(vrm)
         const speech = new VrmSpeechController(vrm)
         const animation = new VrmAnimationController(vrm.scene)
+        const disposeControllers = () => {
+          animation.dispose()
+          expression.dispose()
+          disposeAvatar()
+        }
+        cleanup = disposeControllers
         const performanceController = new VrmPerformanceController(current.quality)
         const timer = new THREE.Timer()
         timer.connect(document)
@@ -90,6 +101,10 @@ export function VrmRuntimeRenderer(props: DigitalHumanRendererProps) {
         resizeObserver = new ResizeObserver(resize)
         resizeObserver.observe(host)
         resize()
+        cleanup = () => {
+          resizeObserver?.disconnect()
+          disposeControllers()
+        }
 
         const render = (time: number) => {
           if (disposed) return
@@ -117,10 +132,7 @@ export function VrmRuntimeRenderer(props: DigitalHumanRendererProps) {
           window.cancelAnimationFrame(frame)
           resizeObserver?.disconnect()
           timer.dispose()
-          animation.dispose()
-          expression.dispose()
-          disposeVrmScene(vrm.scene)
-          disposeRenderer()
+          disposeControllers()
         }
         setStatus('ready')
         latestRef.current.onReady()

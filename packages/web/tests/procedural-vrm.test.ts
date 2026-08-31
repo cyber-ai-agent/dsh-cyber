@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { CharacterAvatarCreationProviderRegistry, localProceduralAvatarProvider } from '../src/features/world/avatar/avatar-creation-provider.js'
 import { createProceduralVrm } from '../src/features/world/avatar/procedural-vrm.js'
@@ -10,6 +10,14 @@ const REQUIRED_BONES = [
   'leftUpperArm', 'leftLowerArm', 'leftHand',
   'rightUpperArm', 'rightLowerArm', 'rightHand',
 ] as const
+const originalWorker = globalThis.Worker
+
+afterEach(() => {
+  vi.useRealTimers()
+  if (originalWorker === undefined) Reflect.deleteProperty(globalThis, 'Worker')
+  else Object.defineProperty(globalThis, 'Worker', { configurable: true, value: originalWorker })
+  SilentWorker.instances.length = 0
+})
 
 describe('procedural VRM creator', () => {
   it('creates a self-contained VRM 1.0 humanoid that the avatar service can validate', () => {
@@ -72,7 +80,57 @@ describe('procedural VRM creator', () => {
       design: { style: 'professional', build: 'balanced', tone: 'neutral' },
     }, { signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' })
   })
+
+  it('terminates an active Worker once and removes its abort listener', async () => {
+    Object.defineProperty(globalThis, 'Worker', { configurable: true, value: SilentWorker })
+    const controller = new AbortController()
+    const removeListener = vi.spyOn(controller.signal, 'removeEventListener')
+    const creation = localProceduralAvatarProvider.create({
+      displayName: '中止角色',
+      design: { style: 'future', build: 'balanced', tone: 'neutral' },
+    }, { signal: controller.signal })
+
+    controller.abort()
+
+    await expect(creation).rejects.toMatchObject({ name: 'AbortError' })
+    expect(SilentWorker.instances).toHaveLength(1)
+    expect(SilentWorker.instances[0]!.terminateCount).toBe(1)
+    expect(removeListener).toHaveBeenCalledWith('abort', expect.any(Function))
+  })
+
+  it('terminates and rejects a Worker that exceeds the generation deadline', async () => {
+    vi.useFakeTimers()
+    Object.defineProperty(globalThis, 'Worker', { configurable: true, value: SilentWorker })
+    const creation = localProceduralAvatarProvider.create({
+      displayName: '超时角色',
+      design: { style: 'professional', build: 'sturdy', tone: 'deep' },
+    })
+    const rejection = expect(creation).rejects.toThrow('3D 形象生成超时，请重试')
+
+    await vi.advanceTimersByTimeAsync(20_000)
+
+    await rejection
+    expect(SilentWorker.instances).toHaveLength(1)
+    expect(SilentWorker.instances[0]!.terminateCount).toBe(1)
+  })
 })
+
+class SilentWorker {
+  static readonly instances: SilentWorker[] = []
+  onerror: ((event: ErrorEvent) => unknown) | null = null
+  onmessage: ((event: MessageEvent) => unknown) | null = null
+  terminateCount = 0
+
+  constructor(_url: string | URL, _options?: WorkerOptions) {
+    SilentWorker.instances.push(this)
+  }
+
+  postMessage(_message: unknown): void {}
+
+  terminate(): void {
+    this.terminateCount += 1
+  }
+}
 
 function readDocument(buffer: ArrayBuffer): any {
   const view = new DataView(buffer)

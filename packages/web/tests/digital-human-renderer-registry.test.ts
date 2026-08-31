@@ -35,7 +35,7 @@ describe('digital human renderer registry', () => {
     const materialDispose = vi.spyOn(material, 'dispose')
     const textureDispose = vi.spyOn(texture, 'dispose')
     const root = new Object3D()
-    root.add(new Mesh(geometry, material))
+    root.add(new Mesh(geometry, material), new Mesh(geometry, material))
     disposeVrmScene(root)
     expect(geometryDispose).toHaveBeenCalledOnce()
     expect(materialDispose).toHaveBeenCalledOnce()
