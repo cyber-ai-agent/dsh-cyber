@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "official-avatar-base-v1",
+  "version": "1.0.0",
+  "kind": "asset",
+  "displayName": "Official Avatar Base · CC0 V1",
+  "summary": "本地共享的 CC0 Humanoid Base + 3 个严格匹配的发型变体；未匹配角色继续保留 2.5D 身份。",
+  "license": "CC0-1.0",
+  "publisher": "DSH Cyber",
+  "capabilities": [
+    "avatar:base-pack"
+  ],
+  "dataEgress": [],
+  "files": [
+    {
+      "path": "avatar-base-pack.json",
+      "sha256": "c272ea483e1771f8b8987b6c4e3f8293930817683f745685056f64a977b690fb"
+    },
+    {
+      "path": "models/neutral.vrm",
+      "sha256": "5847bb34174256c212447fab9fe71c64c2d24488a566be19b981af90049a791d"
+    },
+    {
+      "path": "PROVENANCE.md",
+      "sha256": "16321831eebadf2ef06f22af4b36b9de55de5a82e393dc926584b45619da96df"
+    }
+  ],
+  "certification": {
+    "authority": "DSH Cyber",
+    "level": "official",
+    "contentSha256": "b699ec4acffea6a14ab22b3a05edafbe9861704c7acba541ef7b819e6718bee2"
+  }
+}
