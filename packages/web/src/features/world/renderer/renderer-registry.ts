@@ -7,6 +7,7 @@ import type {
 } from '@dsh-cyber/contracts'
 
 import { PixiWorldRenderer } from './pixi-world-renderer.js'
+import type { WorldLocomotion } from '../runtime/world-locomotion.js'
 
 export class DefaultRendererRegistry implements RendererRegistry<HTMLElement> {
   readonly #factories = new Map<RendererKind, WorldRendererFactory<HTMLElement>>()
@@ -26,8 +27,20 @@ export class DefaultRendererRegistry implements RendererRegistry<HTMLElement> {
   }
 }
 
-export function createWorldRendererRegistry(): RendererRegistry<HTMLElement> {
+export interface WorldRendererRegistryOptions {
+  /**
+   * Where characters actually are while they walk.
+   *
+   * Shared across renderers on purpose: the store outlives any one of them, so
+   * swapping 2D for 3D mid-stride redraws the world rather than restarting it.
+   */
+  locomotion?: WorldLocomotion
+}
+
+export function createWorldRendererRegistry(
+  options: WorldRendererRegistryOptions = {},
+): RendererRegistry<HTMLElement> {
   const registry = new DefaultRendererRegistry()
-  registry.register('pixi-2d', (callbacks) => new PixiWorldRenderer(callbacks))
+  registry.register('pixi-2d', (callbacks) => new PixiWorldRenderer(callbacks, options.locomotion))
   return registry
 }

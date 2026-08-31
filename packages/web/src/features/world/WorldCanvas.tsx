@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type {
+  RendererKind,
   WorldCue,
   WorldRenderer,
   WorldRuntimeSnapshot,
@@ -8,9 +9,21 @@ import type {
 } from '@dsh-cyber/contracts'
 
 import { createWorldRendererRegistry } from './renderer/renderer-registry.js'
+import { WorldLocomotion } from './runtime/world-locomotion.js'
 
 interface WorldCanvasProps {
   manifest: WorldThemeManifestV1
+  /**
+   * How to draw this world.
+   *
+   * The theme still declares the renderer it was authored for, but drawing is
+   * a property of the view rather than of the world: the same company can be
+   * looked at in 2D or 3D without becoming a different place. Defaults to the
+   * manifest so a caller that has no opinion keeps the old behaviour.
+   */
+  rendererKind?: RendererKind
+  /** Shared so a renderer swap does not restart everybody's walk. */
+  locomotion?: WorldLocomotion
   rendererIdentity: string
   snapshot: WorldRuntimeSnapshot
   cues: WorldCue[]
@@ -28,6 +41,8 @@ interface WorldCanvasProps {
 
 export function WorldCanvas({
   manifest,
+  rendererKind,
+  locomotion,
   rendererIdentity,
   snapshot,
   cues,
@@ -45,24 +60,47 @@ export function WorldCanvas({
   const hostRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<WorldRenderer<HTMLElement> | undefined>(undefined)
   const appliedCueIds = useRef(new Set<string>())
-  const mountedKey = `${rendererIdentity}:${manifest.id}:${snapshot.sceneId}`
+  const fallbackLocomotion = useRef<WorldLocomotion | undefined>(undefined)
+  // Zoom lives inside the renderer, so it is the one piece of camera state that
+  // a swap would otherwise lose. Selection is held above this component and is
+  // simply re-applied.
+  const retainedZoom = useRef<number | undefined>(undefined)
+  const activeKind = rendererKind ?? manifest.renderer
+  const worldKey = `${manifest.id}:${snapshot.sceneId}`
+  const mountedKey = `${rendererIdentity}:${activeKind}:${worldKey}`
+
+  // Cue de-duplication belongs to the world, not to whoever is drawing it.
+  // Clearing it on a renderer swap replayed every retained cue, restarting
+  // walks that had already finished.
+  useEffect(() => { appliedCueIds.current.clear() }, [worldKey])
 
   useEffect(() => {
     const host = hostRef.current
     if (host === null) return
-    const registry = createWorldRendererRegistry()
+    fallbackLocomotion.current ??= new WorldLocomotion()
+    const registry = createWorldRendererRegistry({ locomotion: locomotion ?? fallbackLocomotion.current })
     const toViewport = (position: { x: number; y: number }) => { const rect = host.getBoundingClientRect(); return { x: rect.left + position.x, y: rect.top + position.y } }
-    const renderer = registry.create(manifest.renderer, { onEntitySelect, onObjectSelect, onReady, ...(onEntityContext === undefined ? {} : { onEntityContext: (id, position) => onEntityContext(id, toViewport(position)) }), ...(onObjectContext === undefined ? {} : { onObjectContext: (id, position) => onObjectContext(id, toViewport(position)) }) })
+    const renderer = registry.create(activeKind, { onEntitySelect, onObjectSelect, onReady, ...(onEntityContext === undefined ? {} : { onEntityContext: (id, position) => onEntityContext(id, toViewport(position)) }), ...(onObjectContext === undefined ? {} : { onObjectContext: (id, position) => onObjectContext(id, toViewport(position)) }) })
     rendererRef.current = renderer
     let cancelled = false
-    void renderer.mount(host, manifest, snapshot).catch((cause: unknown) => {
+    void renderer.mount(host, manifest, snapshot).then(() => {
+      if (cancelled) return
+      // The world the user was looking at has to still be the world they are
+      // looking at: a swap that lost the selection and the zoom would read as
+      // having been thrown out of the room and back in.
+      renderer.selectEntity(selectedEntityId)
+      renderer.selectObject(selectedObjectId)
+      const zoom = retainedZoom.current
+      if (zoom !== undefined && zoom !== renderer.getZoom()) renderer.zoomBy(zoom - renderer.getZoom())
+      if (focusEntityId !== undefined) renderer.focusEntity(focusEntityId)
+    }).catch((cause: unknown) => {
       if (!cancelled) host.dataset.error = cause instanceof Error ? cause.message : '世界画布初始化失败'
     })
     return () => {
       cancelled = true
+      retainedZoom.current = renderer.getZoom()
       renderer.destroy()
       rendererRef.current = undefined
-      appliedCueIds.current.clear()
     }
   }, [mountedKey])
 
@@ -85,7 +123,7 @@ export function WorldCanvas({
   }, [zoomCommand?.id])
 
   const keyboardPosition = () => { const rect = hostRef.current?.getBoundingClientRect(); return rect === undefined ? { x: 24, y: 24 } : { x: rect.left + 48, y: rect.top + 48 } }
-  return <><div ref={hostRef} className="world-canvas-host" data-theme-id={manifest.id} data-scene-id={snapshot.sceneId} aria-label="互动世界画布" onContextMenu={(event) => event.preventDefault()} />
+  return <><div ref={hostRef} className="world-canvas-host" data-theme-id={manifest.id} data-scene-id={snapshot.sceneId} data-renderer-kind={activeKind} aria-label="互动世界画布" onContextMenu={(event) => event.preventDefault()} />
     <div className="sr-only" aria-label="世界角色与设施快捷操作">
       {snapshot.entities.filter((entity) => entity.kind === 'agent').map((entity) => <button key={entity.id} type="button" aria-label={`${entity.displayName}世界角色`} onClick={() => onEntitySelect(entity.id)} onContextMenu={(event) => { event.preventDefault(); onEntityContext?.(entity.id, { x: event.clientX, y: event.clientY }) }} onKeyDown={(event) => { if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return; event.preventDefault(); onEntityContext?.(entity.id, keyboardPosition()) }}>{entity.displayName}</button>)}
       {snapshot.objects.map((object) => <button key={object.id} type="button" aria-label={`${object.displayName}世界设施`} onClick={() => onObjectSelect(object.id)} onContextMenu={(event) => { event.preventDefault(); onObjectContext?.(object.id, { x: event.clientX, y: event.clientY }) }} onKeyDown={(event) => { if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return; event.preventDefault(); onObjectContext?.(object.id, keyboardPosition()) }}>{object.displayName}</button>)}
