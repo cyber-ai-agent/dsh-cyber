@@ -1,8 +1,9 @@
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
 
+import { LOCAL_IDENTITY_RECIPE_AVATAR_AUTHOR, LOCAL_PROCEDURAL_AVATAR_AUTHOR } from '../src/features/world/avatar/avatar-origin.js'
 import { LowPolyActor } from '../src/features/world/renderer/spatial/low-poly-actor.js'
-import { applyActorRepresentation } from '../src/features/world/renderer/spatial/three-world-renderer.js'
+import { applyActorRepresentation, shouldPreferIdentityPortrait } from '../src/features/world/renderer/spatial/three-world-renderer.js'
 
 describe('three-world actor representation state machine', () => {
   it.each([
@@ -64,5 +65,11 @@ describe('three-world actor representation state machine', () => {
     expect(standIn.representationVisible).toBe(false)
     expect(Number(root.visible) + Number(standIn.representationVisible)).toBe(1)
     standIn.dispose()
+  })
+
+  it('keeps 2D identity for generic local drafts but accepts an identity-recipe local VRM', () => {
+    expect(shouldPreferIdentityPortrait(true, { meta: { authors: [LOCAL_PROCEDURAL_AVATAR_AUTHOR] } })).toBe(true)
+    expect(shouldPreferIdentityPortrait(true, { meta: { authors: [LOCAL_IDENTITY_RECIPE_AVATAR_AUTHOR] } })).toBe(false)
+    expect(shouldPreferIdentityPortrait(false, { meta: { authors: [LOCAL_PROCEDURAL_AVATAR_AUTHOR] } })).toBe(false)
   })
 })
