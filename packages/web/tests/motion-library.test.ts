@@ -90,10 +90,14 @@ describe('bundled motion pack contract', () => {
       expect(clip).toBeDefined()
       controller.register('walk', clip!)
       controller.setGesture('walk')
-      controller.update(0.25)
+      // The authored gait returns through the neutral pose at 0.25s. Sample
+      // halfway to that keyframe so this verifies real binding, not a neutral
+      // transition frame where both animated legs are intentionally identity.
+      controller.update(0.125)
       const identity = new Quaternion()
       expect(target.nodes.leftUpperLeg.quaternion.angleTo(identity)).toBeGreaterThan(0.01)
       expect(target.nodes.rightUpperLeg.quaternion.angleTo(identity)).toBeGreaterThan(0.01)
+      expect(target.nodes.leftUpperLeg.quaternion.angleTo(target.nodes.rightUpperLeg.quaternion)).toBeGreaterThan(0.01)
     } finally {
       controller.dispose()
       result.release()
