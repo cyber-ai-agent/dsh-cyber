@@ -21,28 +21,28 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const OUTPUT_ROOT = join(ROOT, 'marketplace', 'plugins', 'official-avatar-base-v1')
 const CACHE_ROOT = join(ROOT, '.private', 'avatar-source-cache', 'official-avatar-base-v1')
 const SOURCE_REPOSITORY = 'fastrouter/experiments-costa-vista'
-const SOURCE_COMMIT = '23e87108a66876917951904e0fc85488fd581d0c'
+const SOURCE_COMMIT = '23e87108a281ac827e2ea23691aa7bf4b544146e'
 const SOURCE_BASE = `https://raw.githubusercontent.com/${SOURCE_REPOSITORY}/${SOURCE_COMMIT}/public/assets`
 
 export const SOURCE_FILES = {
   base: {
     path: 'characters.glb',
-    gitBlobSha1: '32a957a273245823155991191a632fc3633fc51c',
+    gitBlobSha1: '32a957a2ee414151b97955f1a9e981f8e45b84c5',
   },
   hairLong: {
-    gltf: { path: 'toon/hair/Hair_Long.gltf', gitBlobSha1: 'b7d6ed3a49804437b9111dd4fd31ac0ef816679e' },
-    bin: { path: 'toon/hair/Hair_Long.bin', gitBlobSha1: '6dd35d5741fac2f743bec96d3efc909da7c865f0' },
+    gltf: { path: 'toon/hair/Hair_Long.gltf', gitBlobSha1: 'b7d6ed1f1b1ca23e7224dab7fd1254dc7e95f22c' },
+    bin: { path: 'toon/hair/Hair_Long.bin', gitBlobSha1: '6dd35df4eb7157b51dff4f537a0e2191e778b0ab' },
     recipeId: 'long-layered',
     nodeName: 'Hair_Long',
   },
   hairSidePart: {
-    gltf: { path: 'toon/hair/Hair_SimpleParted.gltf', gitBlobSha1: 'dd838dfaa02acb1bbf8f2ce99028a1f8e594696e' },
-    bin: { path: 'toon/hair/Hair_SimpleParted.bin', gitBlobSha1: '7acd44b83de1d7533c0c6f2b27c2633887c9137e' },
+    gltf: { path: 'toon/hair/Hair_SimpleParted.gltf', gitBlobSha1: 'dd838da6d47e65dc103a0d10eebd49dce18f3acd' },
+    bin: { path: 'toon/hair/Hair_SimpleParted.bin', gitBlobSha1: '7acd443dbed9640224dda0d9a11dfa4b55bb5c2d' },
     recipeId: 'side-part',
     nodeName: 'Hair_SidePart',
   },
   hairTechCrop: {
-    gltf: { path: 'toon/hair/Hair_Buzzed.gltf', gitBlobSha1: '09c045b529d89b50625d8676c60fccf3122a3372' },
+    gltf: { path: 'toon/hair/Hair_Buzzed.gltf', gitBlobSha1: '09c045225934591807176e39e960eddce260ace9' },
     bin: { path: 'toon/hair/Hair_Buzzed.bin', gitBlobSha1: '9d617b82901bb41fdbfc47f1ecdd69876c6aef93' },
     recipeId: 'tech-crop',
     nodeName: 'Hair_TechCrop',
@@ -177,7 +177,6 @@ export async function loadPinnedSource(source, cacheRoot, fetchImpl = fetch) {
   } catch (cause) {
     if (cause?.code !== 'ENOENT' && !String(cause?.message ?? '').includes('source blob mismatch')) throw cause
   }
-
   const response = await fetchImpl(`${SOURCE_BASE}/${source.path}`, { redirect: 'follow' })
   if (!response.ok) throw new Error(`Avatar source download failed ${response.status}: ${source.path}`)
   const body = Buffer.from(await response.arrayBuffer())
@@ -366,7 +365,6 @@ export function mergeRiggedHair(baseValue, hairDocumentValue, hairBinaryValue, v
     document.meshes.push(mesh)
   }
 
-  const baseSkinCount = (document.skins ??= []).length
   const skinIndexMap = new Map()
   for (const [sourceSkinIndex, sourceSkin] of (hair.skins ?? []).entries()) {
     const skin = structuredClone(sourceSkin)
