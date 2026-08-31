@@ -46,9 +46,10 @@ jobs:
       # Build the real pinned CC0 source after smoke so the generated Marketplace
       # package cannot change normal unit/E2E discovery. This is intentionally a
       # networked authoring check, not a runtime dependency: the command verifies
-      # exact Git blob ids and produces a local package consumed offline later.
+      # exact Git blob ids, emits a local package, then parses that exact VRM with
+      # the same Three/VRMLoaderPlugin path used by the product.
       - name: Verify official CC0 avatar pack build
-        run: pnpm avatar:build-official
+        run: pnpm avatar:build-official && pnpm avatar:verify-official
       # The status can only be written to a commit inside this repository.
       # For fork pull requests the head sha lives in the contributor's fork,
       # where GITHUB_TOKEN has no write access (403), so skip instead of failing.
