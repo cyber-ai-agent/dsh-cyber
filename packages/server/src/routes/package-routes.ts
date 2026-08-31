@@ -7,6 +7,7 @@ import type { Router } from '../http/router.js'
 import { optionalString, packageManifest, readJson, requiredString } from '../http/request.js'
 import { writeJson } from '../http/response.js'
 import { loadInstalledBlueprints, loadInstalledPromptTransformCommands } from '../installed-package-runtime.js'
+import { AvatarBasePackService } from '../services/avatar-base-pack-service.js'
 import type { CharacterSkillRuntime } from '../services/character-skill-runtime.js'
 import type { SkillCatalogService } from '../services/skill-catalog-service.js'
 import { CreativeWorkshopService } from '../services/creative-workshop-service.js'
@@ -16,6 +17,7 @@ import type { ModelCredentialService } from '../services/model-credential-servic
 import type { WorldMarketplaceService } from '../services/world-marketplace-service.js'
 import type { WorldPackageInstanceService } from '../services/world-package-instance-service.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
+import { registerAvatarBasePackRoutes } from './avatar-base-pack-routes.js'
 
 const CREATIVE_WORKSHOP_MODEL_TIMEOUT_MS = 240_000
 
@@ -44,6 +46,7 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
       // for planners while giving Creative Workshop a dedicated four-minute budget.
       timeoutMs: CREATIVE_WORKSHOP_MODEL_TIMEOUT_MS,
     })
+  registerAvatarBasePackRoutes(router, { packs: new AvatarBasePackService(worldPackages), access: worldAccess })
 
   router.get(/^\/api\/workspaces\/([^/]+)\/packages$/, ({ response, params }) => {
     const workspaceId = params[0]!
