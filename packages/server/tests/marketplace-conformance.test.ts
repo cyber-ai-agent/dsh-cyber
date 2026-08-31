@@ -12,6 +12,12 @@ import type {
 import { LocalPackageCatalog } from '@dsh-cyber/package-runtime'
 
 import {
+  AVATAR_BASE_PACK_CAPABILITY,
+  AVATAR_BASE_PACK_MANIFEST_PATH,
+  assertAvatarBaseVrmEnvelope,
+  parseInstalledAvatarBasePackManifest,
+} from '../src/avatar-base-pack-manifest.js'
+import {
   applyInstalledPromptTransforms,
   loadInstalledBlueprints,
   loadInstalledSkins,
@@ -71,6 +77,7 @@ describe('community marketplace contract', () => {
       else if (item.market === 'skin') await expectSkin(item)
       else if (item.manifest.kind === 'skill') await expectSkill(item)
       else if (item.market === 'talent') await expectBlueprint(item)
+      else if (item.manifest.kind === 'asset' && item.manifest.capabilities.includes(AVATAR_BASE_PACK_CAPABILITY)) await expectAvatarBasePack(item)
       else await expectPlugin(item)
     }
   })
@@ -81,6 +88,36 @@ async function packageDirectoryCount(): Promise<number> {
     (await readdir(fileURLToPath(new URL(`../../../marketplace/${market}/`, import.meta.url)), { withFileTypes: true }))
       .filter((entry) => entry.isDirectory()).length))
   return directories.reduce((total, count) => total + count, 0)
+}
+
+async function expectAvatarBasePack(item: CyberMarketPackage): Promise<void> {
+  expect(item.market).toBe('plugin')
+  expect(item.manifest.kind).toBe('asset')
+  expect(item.manifest.capabilities).toEqual([AVATAR_BASE_PACK_CAPABILITY])
+  expect(item.manifest.dataEgress).toEqual([])
+  expect(item.manifest.entrypoints ?? []).toEqual([])
+  expect(item.verified).toBe(true)
+  expect(item.manifest.certification).toMatchObject({
+    authority: 'DSH Cyber',
+    level: 'official',
+  })
+
+  const manifestFile = item.manifest.files.find((file) => file.path === AVATAR_BASE_PACK_MANIFEST_PATH)
+  expect(manifestFile).toBeDefined()
+  const raw = JSON.parse(await readFile(join(item.sourceDirectory, AVATAR_BASE_PACK_MANIFEST_PATH), 'utf8')) as unknown
+  const pack = parseInstalledAvatarBasePackManifest(raw, {
+    packageId: item.manifest.id,
+    version: item.manifest.version,
+    manifest: item.manifest,
+  })
+  expect(pack.quality).toBe('production')
+  expect(pack.bases.length).toBeGreaterThan(0)
+
+  for (const base of pack.bases) {
+    expect(item.manifest.files.some((file) => file.path === base.assetPath)).toBe(true)
+    const bytes = await readFile(join(item.sourceDirectory, ...base.assetPath.split('/')))
+    expect(() => assertAvatarBaseVrmEnvelope(bytes, `${item.manifest.id}/${base.assetPath}`)).not.toThrow()
+  }
 }
 
 async function expectSkin(item: CyberMarketPackage): Promise<void> {
