@@ -34,6 +34,8 @@ interface WorldCanvasProps {
    */
   cameraMode?: WorldCameraMode
   cameraSubjectId?: string
+  /** This character's published avatar, so the world can adopt it in place. */
+  resolveAvatarUrl?: (entityId: string) => string | undefined
   rendererIdentity: string
   snapshot: WorldRuntimeSnapshot
   cues: WorldCue[]
@@ -55,6 +57,7 @@ export function WorldCanvas({
   locomotion,
   cameraMode,
   cameraSubjectId,
+  resolveAvatarUrl,
   rendererIdentity,
   snapshot,
   cues,
@@ -96,7 +99,17 @@ export function WorldCanvas({
     const host = hostRef.current
     if (host === null) return
     fallbackLocomotion.current ??= new WorldLocomotion()
-    const registry = createWorldRendererRegistry({ locomotion: locomotion ?? fallbackLocomotion.current })
+    // The device tier decides how much of a character the world may run, and
+    // whether it may afford shadows at all. Deciding it here keeps the policy
+    // in one place rather than inside the renderer.
+    const quality = detectRenderingQuality(false)
+    const registry = createWorldRendererRegistry({
+      locomotion: locomotion ?? fallbackLocomotion.current,
+      lodCeiling: quality === 'high' ? 'full' : quality === 'balanced' ? 'reduced' : 'billboard',
+      shadows: quality === 'high',
+      pixelRatio: quality === 'high' ? 2 : quality === 'balanced' ? 1.5 : 1,
+      ...(resolveAvatarUrl === undefined ? {} : { resolveAvatarUrl }),
+    })
     const toViewport = (position: { x: number; y: number }) => { const rect = host.getBoundingClientRect(); return { x: rect.left + position.x, y: rect.top + position.y } }
     const renderer = registry.create(activeKind, { onEntitySelect, onObjectSelect, onReady, ...(onEntityContext === undefined ? {} : { onEntityContext: (id, position) => onEntityContext(id, toViewport(position)) }), ...(onObjectContext === undefined ? {} : { onObjectContext: (id, position) => onObjectContext(id, toViewport(position)) }) })
     rendererRef.current = renderer

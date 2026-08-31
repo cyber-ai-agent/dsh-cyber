@@ -26,6 +26,8 @@ import {
 import { planWorldLayout, type SceneLayout, type ScenePlacement, type SceneZone } from './three-world-layout.js'
 import { capabilitiesFor, lodFor, stableLod, updateIntervalMs, type AvatarLod } from './three-world-lod.js'
 import { LowPolyActor } from './low-poly-actor.js'
+import type { VrmActor } from '../../avatar/vrm/VrmActor.js'
+import { motionCueForState, visualStateForEntity } from '../../digital-human-motion.js'
 
 /**
  * The world, in three dimensions, from the same runtime the 2D world uses.
@@ -48,6 +50,10 @@ const FOV = 45
 interface ActorView {
   root: THREE.Group
   actor: LowPolyActor
+  /** Present once this character's own avatar has arrived and replaced the stand-in. */
+  vrm: VrmActor | undefined
+  /** Guards against starting the same download twice. */
+  avatarUrl: string | undefined
   lod: AvatarLod
   sinceUpdate: number
   entity: WorldRuntimeEntityState
@@ -60,6 +66,14 @@ export interface ThreeWorldRendererOptions {
   /** Shadows cost real time on integrated GPUs. */
   shadows?: boolean
   pixelRatio?: number
+  /**
+   * This character's published avatar, if it has one.
+   *
+   * Called as characters appear and as they publish new ones, so a user who
+   * creates a 3D form sees their character change in place rather than being
+   * sent back to a loading screen.
+   */
+  resolveAvatarUrl?: (entityId: string) => string | undefined
 }
 
 export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
@@ -176,6 +190,7 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
       }
       existing.entity = entity
       existing.actor.setLabel(entity.displayName, entity.activityLabel)
+      this.#adoptAvatar(existing)
     }
     for (const [id, view] of this.#actors) {
       if (present.has(id)) continue
@@ -268,7 +283,7 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
     this.#resizeObserver = undefined
     this.#host?.removeEventListener('pointerdown', this.#onPointerDown)
     this.#host?.removeEventListener('contextmenu', this.#onContextMenu)
-    for (const [, view] of this.#actors) view.actor.dispose()
+    for (const [, view] of this.#actors) { view.vrm?.dispose(); view.actor.dispose() }
     this.#actors.clear()
     this.#objectMeshes.clear()
     this.#pickables.length = 0
@@ -380,14 +395,52 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
     actor.root.userData.entityId = entity.id
     scene.add(actor.root)
     this.#pickables.push(actor.picker)
-    this.#actors.set(entity.id, { root: actor.root, actor, lod: 'full', sinceUpdate: 0, entity })
-    this.#placeActor(this.#actors.get(entity.id)!, entity)
+    this.#actors.set(entity.id, { root: actor.root, actor, vrm: undefined, avatarUrl: undefined, lod: 'full', sinceUpdate: 0, entity })
+    const view = this.#actors.get(entity.id)!
+    this.#placeActor(view, entity)
+    this.#adoptAvatar(view)
+  }
+
+  /**
+   * Replaces the stand-in with the character's own avatar, in place.
+   *
+   * Publishing an avatar while the world is open should change the character,
+   * not the page: no reload, no leaving the office, and no second canvas. The
+   * stand-in stays visible until the model is actually ready, so a slow
+   * download is a character that has not changed yet rather than a hole in the
+   * room.
+   */
+  #adoptAvatar(view: ActorView): void {
+    const url = this.#options.resolveAvatarUrl?.(view.entity.id)
+    if (url === undefined || url === view.avatarUrl) return
+    view.avatarUrl = url
+    void (async () => {
+      try {
+        const { VrmActor } = await import('../../avatar/vrm/VrmActor.js')
+        const actor = await VrmActor.load({ assetUrl: url })
+        if (this.#destroyed || this.#actors.get(view.entity.id) !== view || view.avatarUrl !== url) {
+          actor.dispose()
+          return
+        }
+        await actor.loadDeclaredMotion()
+        view.vrm?.dispose()
+        view.vrm = actor
+        view.root.add(actor.root)
+        view.actor.setDetail({ face: false, secondaryMotion: false, skinned: false, shadow: false })
+        view.actor.hideStandIn()
+      } catch {
+        // An avatar that will not load leaves the character standing there.
+        // Emptying its desk would be a worse answer than a plain figure.
+        view.avatarUrl = undefined
+      }
+    })()
   }
 
   #removeActor(scene: THREE.Scene, id: string, view: ActorView): void {
     scene.remove(view.root)
     const index = this.#pickables.indexOf(view.actor.picker)
     if (index >= 0) this.#pickables.splice(index, 1)
+    view.vrm?.dispose()
     view.actor.dispose()
     this.#actors.delete(id)
   }
@@ -444,6 +497,16 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
       if (view.sinceUpdate >= interval) {
         const activity = this.#locomotion.isWalking(view.entity.id) ? 'walking' : view.entity.activity
         view.actor.update(view.sinceUpdate, activity)
+        if (view.vrm !== undefined) {
+          const state = visualStateForEntity(view.entity, true, false)
+          view.vrm.update(view.sinceUpdate, {
+            state,
+            motionCue: motionCueForState(state),
+            speaking: view.entity.activity === 'talking',
+            animated: true,
+            detail: capabilitiesFor(view.lod),
+          })
+        }
         view.sinceUpdate = 0
       }
     }

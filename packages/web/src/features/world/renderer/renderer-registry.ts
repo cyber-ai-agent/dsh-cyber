@@ -41,6 +41,7 @@ export interface WorldRendererRegistryOptions {
   lodCeiling?: AvatarLod
   shadows?: boolean
   pixelRatio?: number
+  resolveAvatarUrl?: (entityId: string) => string | undefined
 }
 
 export function createWorldRendererRegistry(
@@ -56,6 +57,7 @@ export function createWorldRendererRegistry(
     ...(options.lodCeiling === undefined ? {} : { lodCeiling: options.lodCeiling }),
     ...(options.shadows === undefined ? {} : { shadows: options.shadows }),
     ...(options.pixelRatio === undefined ? {} : { pixelRatio: options.pixelRatio }),
+    ...(options.resolveAvatarUrl === undefined ? {} : { resolveAvatarUrl: options.resolveAvatarUrl }),
   }))
   return registry
 }

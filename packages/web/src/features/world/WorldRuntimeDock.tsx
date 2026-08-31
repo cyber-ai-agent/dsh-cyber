@@ -283,6 +283,7 @@ export function WorldRuntimeDock({ demoMode, world, employees, dossiers, liveEna
             rendererKind={rendererKindFor(view.renderer)}
             locomotion={locomotionRef.current}
             cameraMode={view.camera}
+            resolveAvatarUrl={(entityId) => employees.find((employee) => employee.id === entityId)?.avatarAssetUrl}
             {...(activeEmployeeId === undefined ? {} : { cameraSubjectId: activeEmployeeId })}
             rendererIdentity={runtime.rendererIdentity}
             snapshot={renderedSnapshot}

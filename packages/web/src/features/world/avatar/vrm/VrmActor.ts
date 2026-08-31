@@ -9,6 +9,7 @@ import { VrmLookAtController } from './VrmLookAtController.js'
 import { VrmMotionController } from './VrmMotionController.js'
 import { VrmSpeechController } from './VrmSpeechController.js'
 import { disposeVrmScene } from './VrmResourceManager.js'
+import { declaredMotionSources, loadMotionClips } from '../motion/load-motion-clips.js'
 
 /**
  * One VRM character, with no opinion about whose scene it is in.
@@ -111,6 +112,22 @@ export class VrmActor {
     vrmModule.VRMUtils.rotateVRM0(vrm)
     void THREE
     return new VrmActor(vrm)
+  }
+
+  /**
+   * Registers whatever motion assets the library declares.
+   *
+   * Silent and harmless when nothing is declared, which is today: the
+   * repository ships no animation assets, so the character keeps its
+   * procedural layer rather than being given invented keyframes.
+   */
+  async loadDeclaredMotion(): Promise<{ registered: number; failures: number }> {
+    const sources = declaredMotionSources()
+    if (sources.length === 0) return { registered: 0, failures: 0 }
+    const result = await loadMotionClips(this.vrm, sources)
+    if (this.#disposed) return { registered: 0, failures: result.failures.length }
+    for (const { gesture, clip } of result.clips) this.#animation.register(gesture, clip)
+    return { registered: result.clips.length, failures: result.failures.length }
   }
 
   /** Wraps an already-loaded VRM, for a cache that hands out shared instances. */

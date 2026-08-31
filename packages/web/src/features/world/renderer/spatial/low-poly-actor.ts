@@ -144,6 +144,18 @@ export class LowPolyActor {
     }
   }
 
+  /**
+   * Steps aside for the character's own avatar.
+   *
+   * Kept rather than destroyed: the label stays, and a VRM that later fails to
+   * reload has something to fall back to.
+   */
+  hideStandIn(): void {
+    this.#body.visible = false
+    this.#head.visible = false
+    this.#billboard?.removeFromParent()
+  }
+
   dispose(): void {
     this.root.removeFromParent()
     const material = this.#label.material as THREE.SpriteMaterial
