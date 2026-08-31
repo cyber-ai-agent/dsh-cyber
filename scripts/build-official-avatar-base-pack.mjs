@@ -225,31 +225,61 @@ export function normalizeGlbBuffers(documentValue, binaryChunksValue) {
   const declarations = Array.isArray(document.buffers) && document.buffers.length > 0
     ? document.buffers
     : [{ byteLength: binaryChunks[0]?.byteLength ?? 0 }]
+  const bufferViews = Array.isArray(document.bufferViews) ? document.bufferViews : []
 
   const noUriIndexes = declarations
     .map((entry, index) => ({ entry, index }))
     .filter(({ entry }) => entry?.uri === undefined)
     .map(({ index }) => index)
   const embeddedByIndex = new Map()
+  const sharedPhysicalKeys = new Map()
 
   if (noUriIndexes.length > 0) {
     if (binaryChunks.length === noUriIndexes.length) {
       noUriIndexes.forEach((bufferIndex, ordinal) => embeddedByIndex.set(bufferIndex, binaryChunks[ordinal]))
     } else if (binaryChunks.length === 1) {
-      // Several logical buffers may be packed sequentially in one BIN chunk.
-      // Boundaries come from each declared byteLength and are 4-byte aligned.
-      let offset = 0
       const chunk = binaryChunks[0]
+      const sequential = new Map()
+      let offset = 0
+      let sequentialFits = true
       for (const bufferIndex of noUriIndexes) {
         const declaredLength = declarations[bufferIndex]?.byteLength
         if (!Number.isSafeInteger(declaredLength) || declaredLength < 0) throw new Error(`Source avatar buffer ${bufferIndex} has invalid byteLength`)
         if (offset + declaredLength > chunk.byteLength) {
-          throw new Error(`Source avatar embedded buffers exceed BIN chunk at buffer ${bufferIndex}`)
+          sequentialFits = false
+          break
         }
-        embeddedByIndex.set(bufferIndex, Buffer.from(chunk.subarray(offset, offset + declaredLength)))
+        sequential.set(bufferIndex, Buffer.from(chunk.subarray(offset, offset + declaredLength)))
         offset = align4(offset + declaredLength)
       }
-      if (offset > align4(chunk.byteLength)) throw new Error('Source avatar embedded buffer alignment exceeds BIN chunk')
+
+      if (sequentialFits) {
+        for (const [bufferIndex, bytes] of sequential) embeddedByIndex.set(bufferIndex, bytes)
+      } else {
+        // Some GLB exporters preserve several logical buffer declarations even
+        // though every one points into the same physical BIN chunk. Accept that
+        // shape only when every declared range and every bufferView is provably
+        // contained in that one chunk. This is not a generic malformed-GLB
+        // escape hatch: anything that cannot be proven in-bounds still fails.
+        for (const bufferIndex of noUriIndexes) {
+          const declaredLength = declarations[bufferIndex]?.byteLength
+          if (!Number.isSafeInteger(declaredLength) || declaredLength < 0 || declaredLength > chunk.byteLength) {
+            throw new Error(`Source avatar embedded buffers exceed BIN chunk at buffer ${bufferIndex}`)
+          }
+          for (const [viewIndex, view] of bufferViews.entries()) {
+            const sourceBuffer = Number.isInteger(view?.buffer) ? view.buffer : 0
+            if (sourceBuffer !== bufferIndex) continue
+            const relativeOffset = view?.byteOffset ?? 0
+            const byteLength = view?.byteLength
+            if (!Number.isSafeInteger(relativeOffset) || relativeOffset < 0 || !Number.isSafeInteger(byteLength) || byteLength < 0
+              || relativeOffset + byteLength > declaredLength || relativeOffset + byteLength > chunk.byteLength) {
+              throw new Error(`Source avatar aliased bufferView ${viewIndex} exceeds buffer ${bufferIndex}`)
+            }
+          }
+          embeddedByIndex.set(bufferIndex, chunk)
+          sharedPhysicalKeys.set(bufferIndex, 'glb-bin-0')
+        }
+      }
     } else {
       throw new Error(`Source avatar cannot map ${noUriIndexes.length} embedded buffers to ${binaryChunks.length} BIN chunks`)
     }
@@ -257,42 +287,52 @@ export function normalizeGlbBuffers(documentValue, binaryChunksValue) {
     throw new Error('Source avatar contains an unclaimed BIN chunk')
   }
 
-  const physicalBuffers = declarations.map((declaration, index) => {
+  const logicalBuffers = declarations.map((declaration, index) => {
     const uri = declaration?.uri
     let bytes
+    let physicalKey
     if (typeof uri === 'string') {
       bytes = decodeDataUri(uri, index)
+      physicalKey = `data:${index}`
     } else {
       bytes = embeddedByIndex.get(index)
+      physicalKey = sharedPhysicalKeys.get(index) ?? `embedded:${index}`
       if (bytes === undefined) throw new Error(`Source avatar buffer ${index} has no embedded bytes`)
     }
     const declaredLength = declaration?.byteLength
     if (!Number.isSafeInteger(declaredLength) || declaredLength < 0) throw new Error(`Source avatar buffer ${index} has invalid byteLength`)
     if (bytes.byteLength < declaredLength) throw new Error(`Source avatar buffer ${index} is shorter than declared`)
-    return Buffer.from(bytes.subarray(0, declaredLength))
+    return { bytes: Buffer.from(bytes), declaredLength, physicalKey }
   })
 
-  const baseOffsets = []
+  const physicalOffsets = new Map()
+  const logicalBaseOffsets = []
   const pieces = []
   let total = 0
-  for (const bytes of physicalBuffers) {
-    const aligned = align4(total)
-    if (aligned > total) pieces.push(Buffer.alloc(aligned - total))
-    total = aligned
-    baseOffsets.push(total)
-    pieces.push(bytes)
-    total += bytes.byteLength
+  for (const logical of logicalBuffers) {
+    let baseOffset = physicalOffsets.get(logical.physicalKey)
+    if (baseOffset === undefined) {
+      const aligned = align4(total)
+      if (aligned > total) pieces.push(Buffer.alloc(aligned - total))
+      total = aligned
+      baseOffset = total
+      physicalOffsets.set(logical.physicalKey, baseOffset)
+      pieces.push(logical.bytes)
+      total += logical.bytes.byteLength
+    }
+    logicalBaseOffsets.push(baseOffset)
   }
   const normalizedBinary = Buffer.concat(pieces)
 
-  for (const [index, view] of (document.bufferViews ?? []).entries()) {
+  for (const [index, view] of bufferViews.entries()) {
     const sourceBuffer = Number.isInteger(view?.buffer) ? view.buffer : 0
-    const baseOffset = baseOffsets[sourceBuffer]
-    const sourceBytes = physicalBuffers[sourceBuffer]
-    if (baseOffset === undefined || sourceBytes === undefined) throw new Error(`Source avatar bufferView ${index} references missing buffer ${sourceBuffer}`)
+    const baseOffset = logicalBaseOffsets[sourceBuffer]
+    const source = logicalBuffers[sourceBuffer]
+    if (baseOffset === undefined || source === undefined) throw new Error(`Source avatar bufferView ${index} references missing buffer ${sourceBuffer}`)
     const relativeOffset = view.byteOffset ?? 0
     const byteLength = view.byteLength
-    if (!Number.isSafeInteger(relativeOffset) || relativeOffset < 0 || !Number.isSafeInteger(byteLength) || byteLength < 0 || relativeOffset + byteLength > sourceBytes.byteLength) {
+    if (!Number.isSafeInteger(relativeOffset) || relativeOffset < 0 || !Number.isSafeInteger(byteLength) || byteLength < 0
+      || relativeOffset + byteLength > source.declaredLength || relativeOffset + byteLength > source.bytes.byteLength) {
       throw new Error(`Source avatar bufferView ${index} exceeds buffer ${sourceBuffer}`)
     }
     view.buffer = 0
