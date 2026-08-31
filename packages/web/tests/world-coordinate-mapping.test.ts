@@ -64,6 +64,26 @@ describe('world to scene coordinates', () => {
 })
 
 describe('facing and heading', () => {
+  it('actually points a model the way the facing says', () => {
+    // The previous tests only checked the two functions agreed with each
+    // other, which they did — while both pointing east and west the wrong way.
+    // A glTF model faces -z at rotation 0, so rotating it must land its
+    // forward vector on the axis the facing names.
+    const forward = (rotation: number) => ({
+      x: -Math.sin(rotation),
+      z: -Math.cos(rotation),
+    })
+    expect(forward(facingToSceneRotation('north')).z).toBeCloseTo(-1, 6)
+    expect(forward(facingToSceneRotation('south')).z).toBeCloseTo(1, 6)
+    expect(forward(facingToSceneRotation('east')).x).toBeCloseTo(1, 6)
+    expect(forward(facingToSceneRotation('west')).x).toBeCloseTo(-1, 6)
+
+    // And walking that way has to produce the same heading.
+    expect(forward(headingBetween({ x: 0, y: 0 }, { x: 10, y: 0 })).x).toBeCloseTo(1, 6)
+    expect(forward(headingBetween({ x: 0, y: 0 }, { x: -10, y: 0 })).x).toBeCloseTo(-1, 6)
+    expect(forward(headingBetween({ x: 0, y: 0 }, { x: 0, y: 10 })).z).toBeCloseTo(1, 6)
+  })
+
   it('turns the cardinal facings into distinct headings', () => {
     const headings = (['north', 'east', 'south', 'west'] as const).map(facingToSceneRotation)
     expect(new Set(headings).size).toBe(4)
@@ -77,8 +97,14 @@ describe('facing and heading', () => {
   })
 
   it('derives a heading from a walk', () => {
-    expect(headingBetween({ x: 0, y: 0 }, { x: 0, y: 10 })).toBeCloseTo(facingToSceneRotation('south'), 6)
-    expect(headingBetween({ x: 0, y: 0 }, { x: 10, y: 0 })).toBeCloseTo(facingToSceneRotation('east'), 6)
+    // Compared as directions, not as numbers: a half turn is equally +pi and
+    // -pi, and a test that cannot tell them apart fails on a correct result.
+    const sameDirection = (left: number, right: number) =>
+      expect(Math.abs(normalizeAngle(left - right))).toBeCloseTo(0, 6)
+    sameDirection(headingBetween({ x: 0, y: 0 }, { x: 0, y: 10 }), facingToSceneRotation('south'))
+    sameDirection(headingBetween({ x: 0, y: 0 }, { x: 10, y: 0 }), facingToSceneRotation('east'))
+    sameDirection(headingBetween({ x: 0, y: 0 }, { x: -10, y: 0 }), facingToSceneRotation('west'))
+    sameDirection(headingBetween({ x: 0, y: 0 }, { x: 0, y: -10 }), facingToSceneRotation('north'))
   })
 
   it('turns the short way round', () => {

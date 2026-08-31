@@ -10,7 +10,7 @@ import {
   PersonSimpleWalk,
 } from '@phosphor-icons/react'
 import { useEffect, useRef, useState } from 'react'
-import type { EmployeeDossier, WorkSession, World, WorldInteractionAction, WorldRuntimeSnapshot, WorldZoomCommand } from '@dsh-cyber/contracts'
+import type { EmployeeDossier, RendererKind, WorkSession, World, WorldInteractionAction, WorldRuntimeSnapshot, WorldZoomCommand } from '@dsh-cyber/contracts'
 
 import { api } from '../../api.js'
 import { PeerCollaborationDialog, type PeerCollaborationDraft } from '../../components/PeerCollaborationDialog.js'
@@ -79,6 +79,7 @@ export function WorldRuntimeDock({ demoMode, world, employees, dossiers, liveEna
   // Whether the character HUD is open is a different question from where the
   // camera points. Tying them meant a user who pulled back to the whole
   // company also lost the chat panel they were talking through.
+  const [activeRendererKind, setActiveRendererKind] = useState<RendererKind>('pixi-2d')
   const [panelOpen, setPanelOpen] = useState(() => readWorldView(world.id).camera !== 'overview')
   // One store for the whole dock: the walk has to outlive whichever renderer
   // is mounted, or switching 2D to 3D restarts everybody's journey.
@@ -153,7 +154,10 @@ export function WorldRuntimeDock({ demoMode, world, employees, dossiers, liveEna
   // already in the scene and the camera moves to them; in 2D the existing
   // character panel sits over a world that is still running underneath.
   const showCharacterPanel = focused && focusedEmployee !== undefined
-  const embeddedPanel = view.renderer === '3d'
+  // What actually rendered, which is not always what was asked for: a device
+  // without a GPU is degraded to 2D. The panel keeps its own avatar stage
+  // unless the world is really drawing the character in 3D.
+  const embeddedPanel = activeRendererKind === 'three-3d'
 
   const enterEmployeeFocus = (employeeId: string) => {
     if (focusTimerRef.current !== undefined) window.clearTimeout(focusTimerRef.current)
@@ -298,9 +302,10 @@ export function WorldRuntimeDock({ demoMode, world, employees, dossiers, liveEna
             onEntityContext={(employeeId, position) => { setActiveEmployeeId(employeeId); setSelectedObjectId(undefined); setContextTarget({ kind: 'employee', id: employeeId, position }) }}
             onObjectContext={(objectId, position) => { setSelectedObjectId(objectId); setContextTarget({ kind: 'object', id: objectId, position }) }}
             onReady={() => undefined}
+            onRendererResolved={setActiveRendererKind}
           />
           </div>
-          {!showCharacterPanel ? null : <EmployeeFocusMode key={focusedEmployee.id} world={world} employee={focusedEmployee} {...(dossiers[focusedEmployee.id]?.profile === undefined ? {} : { profile: dossiers[focusedEmployee.id]!.profile })} {...(focusedEntity === undefined ? {} : { entity: focusedEntity })} collaborators={collaborators} connected={runtime.connected} staticMode={staticMode} rendererMode={view.renderer} embedded={embeddedPanel} {...(focusedUtterance === undefined ? {} : { latestUtterance: focusedUtterance })} onFocusEmployee={setActiveEmployeeId} onManageAvatar={() => onManageAvatar(focusedEmployee.id)} onStaticModeChange={setStaticMode} onVoiceFinal={onVoiceFinal} />}
+          {!showCharacterPanel ? null : <EmployeeFocusMode key={focusedEmployee.id} world={world} employee={focusedEmployee} {...(dossiers[focusedEmployee.id]?.profile === undefined ? {} : { profile: dossiers[focusedEmployee.id]!.profile })} {...(focusedEntity === undefined ? {} : { entity: focusedEntity })} collaborators={collaborators} connected={runtime.connected} staticMode={staticMode} rendererMode={activeRendererKind === 'three-3d' ? '3d' : '2d'} embedded={embeddedPanel} {...(focusedUtterance === undefined ? {} : { latestUtterance: focusedUtterance })} onFocusEmployee={setActiveEmployeeId} onManageAvatar={() => onManageAvatar(focusedEmployee.id)} onStaticModeChange={setStaticMode} onVoiceFinal={onVoiceFinal} />}
 
           {selectedEmployee === undefined || contextTarget?.kind !== 'employee' || contextTarget.id !== selectedEmployee.id ? null : <EmployeeInteractionMenu employee={selectedEmployee} position={contextTarget.position} onClose={() => setContextTarget(undefined)} onTalk={() => void interactWithEmployee('talk')} onAssignTask={() => void interactWithEmployee('assign-task')} onMeeting={() => void interactWithEmployee('start-meeting')} onPeerCollaboration={() => { setPeerError(undefined); setPeerInitiatorId(selectedEmployee.id) }} />}
           {selectedObject === undefined || selectedObjectManifest === undefined || contextTarget?.kind !== 'object' || contextTarget.id !== selectedObject.id ? null : <ObjectInteractionMenu object={selectedObject} manifest={selectedObjectManifest} position={contextTarget.position} {...(selectedEmployee === undefined ? {} : { selectedEmployee })} onClose={() => setContextTarget(undefined)} onAction={(action) => void actOnObject(action)} />}

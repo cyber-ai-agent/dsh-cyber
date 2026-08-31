@@ -92,9 +92,13 @@ export function worldRectToSceneFootprint(rect: WorldRect, floor?: WorldRect): {
 export function facingToSceneRotation(facing: WorldFacing): number {
   switch (facing) {
     case 'north': return 0
-    case 'east': return Math.PI / 2
+    // A positive rotation about +y turns -z toward -x, so east — which is +x
+    // in the scene — is a negative quarter turn. Getting this backwards makes
+    // a character slide east while facing west: the moonwalk that
+    // `rotateVRM0` exists to prevent, reintroduced for two directions.
+    case 'east': return -Math.PI / 2
     case 'south': return Math.PI
-    case 'west': return -Math.PI / 2
+    case 'west': return Math.PI / 2
   }
 }
 
@@ -109,7 +113,7 @@ export function headingBetween(from: WorldPoint, to: WorldPoint): number {
   const dx = to.x - from.x
   const dz = to.y - from.y
   if (dx === 0 && dz === 0) return Math.PI
-  return Math.atan2(dx, -dz)
+  return Math.atan2(-dx, -dz)
 }
 
 /** Turns toward a target heading the short way round, never the long way. */

@@ -12,7 +12,15 @@ export class VrmSpeechController {
 
   setTimeline(timeline: VisemeTimeline | undefined, startedAt = performance.now()): void { this.#timeline = timeline; this.#startedAt = startedAt }
 
-  update(time: number, speaking: boolean): void {
+  /**
+   * Drives the mouth.
+   *
+   * `amplitude` is optional because loudness belongs to whoever is talking,
+   * and a shared scene can have two characters talking at once. The module
+   * global stays the fallback: for a single-character view there is nobody
+   * else it could be confused with.
+   */
+  update(time: number, speaking: boolean, amplitude?: number): void {
     const manager = this.#vrm.expressionManager
     if (manager === null || manager === undefined) return
     for (const name of ['aa', 'ih', 'ou', 'ee', 'oh']) manager.setValue(name, 0)
@@ -23,6 +31,6 @@ export class VrmSpeechController {
       if (frame !== undefined && frame.viseme !== 'neutral') manager.setValue(frame.viseme, frame.weight)
       return
     }
-    manager.setValue('aa', sampleSpeechActivity(time, speaking, currentSpeechAmplitude()))
+    manager.setValue('aa', sampleSpeechActivity(time, speaking, amplitude ?? currentSpeechAmplitude()))
   }
 }

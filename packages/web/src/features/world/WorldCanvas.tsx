@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import type {
   RendererKind,
   WorldCue,
@@ -10,7 +10,7 @@ import type {
 
 import { createWorldRendererRegistry } from './renderer/renderer-registry.js'
 import { WorldLocomotion } from './runtime/world-locomotion.js'
-import { detectRenderingQuality } from './avatar/renderer/RenderingQuality.js'
+import { detectRenderingQuality, supportsSpatialRendering } from './avatar/renderer/RenderingQuality.js'
 import type { WorldCameraMode } from './runtime/world-view-mode.js'
 
 interface WorldCanvasProps {
@@ -49,6 +49,15 @@ interface WorldCanvasProps {
   onEntityContext?(entityId: string, position: { x: number; y: number }): void
   onObjectContext?(objectId: string, position: { x: number; y: number }): void
   onReady(metrics: { initializationMs: number; assetBytesEstimate: number }): void
+  /**
+   * The renderer that actually ran.
+   *
+   * Not always the one that was asked for: a device without a GPU is degraded
+   * to the 2D world. Callers that change their own layout for 3D have to know
+   * which one they got, or a degraded world ends up with a panel that dropped
+   * its avatar stage for a 3D scene that never appeared.
+   */
+  onRendererResolved?(kind: RendererKind): void
 }
 
 export function WorldCanvas({
@@ -71,11 +80,18 @@ export function WorldCanvas({
   onEntityContext,
   onObjectContext,
   onReady,
+  onRendererResolved,
 }: WorldCanvasProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<WorldRenderer<HTMLElement> | undefined>(undefined)
   const appliedCueIds = useRef(new Set<string>())
   const fallbackLocomotion = useRef<WorldLocomotion | undefined>(undefined)
+  // Held in a ref, not closed over at mount: the renderer is built once and
+  // asks again on every snapshot, so a resolver captured at mount would keep
+  // answering with the character list from the moment the world opened — and
+  // an avatar published while the world is open would never be adopted.
+  const resolveAvatarUrlRef = useRef(resolveAvatarUrl)
+  resolveAvatarUrlRef.current = resolveAvatarUrl
   // Zoom lives inside the renderer, so it is the one piece of camera state that
   // a swap would otherwise lose. Selection is held above this component and is
   // simply re-applied.
@@ -83,10 +99,17 @@ export function WorldCanvas({
   // A device that cannot run 3D must not download it to find that out. The
   // degradation ladder ends at the 2D world, and the last rung has to be
   // reachable without fetching the chunk it is meant to avoid.
+  //
+  // Probed once: reading the GPU string means creating a WebGL context, and
+  // doing that in the render body made one per render. `prefers-reduced-motion`
+  // is deliberately not a veto here — wanting less movement is not the same as
+  // having no GPU, and it reaches the renderer as the lowest tier instead.
+  const capability = useMemo(() => ({
+    spatial: supportsSpatialRendering(),
+    quality: detectRenderingQuality(false),
+  }), [])
   const requestedKind = rendererKind ?? manifest.renderer
-  const activeKind = requestedKind === 'three-3d' && detectRenderingQuality(false) === 'static'
-    ? 'pixi-2d'
-    : requestedKind
+  const activeKind = requestedKind === 'three-3d' && !capability.spatial ? 'pixi-2d' : requestedKind
   const worldKey = `${manifest.id}:${snapshot.sceneId}`
   const mountedKey = `${rendererIdentity}:${activeKind}:${worldKey}`
 
@@ -94,6 +117,7 @@ export function WorldCanvas({
   // Clearing it on a renderer swap replayed every retained cue, restarting
   // walks that had already finished.
   useEffect(() => { appliedCueIds.current.clear() }, [worldKey])
+  useEffect(() => { onRendererResolved?.(activeKind) }, [activeKind])
 
   useEffect(() => {
     const host = hostRef.current
@@ -102,13 +126,15 @@ export function WorldCanvas({
     // The device tier decides how much of a character the world may run, and
     // whether it may afford shadows at all. Deciding it here keeps the policy
     // in one place rather than inside the renderer.
-    const quality = detectRenderingQuality(false)
+    // Reduced motion still reaches the renderer — as the lowest tier, which
+    // strips shadows and secondary motion — rather than as a refusal to draw.
+    const quality = capability.quality
     const registry = createWorldRendererRegistry({
       locomotion: locomotion ?? fallbackLocomotion.current,
       lodCeiling: quality === 'high' ? 'full' : quality === 'balanced' ? 'reduced' : 'billboard',
       shadows: quality === 'high',
       pixelRatio: quality === 'high' ? 2 : quality === 'balanced' ? 1.5 : 1,
-      ...(resolveAvatarUrl === undefined ? {} : { resolveAvatarUrl }),
+      resolveAvatarUrl: (entityId: string) => resolveAvatarUrlRef.current?.(entityId),
     })
     const toViewport = (position: { x: number; y: number }) => { const rect = host.getBoundingClientRect(); return { x: rect.left + position.x, y: rect.top + position.y } }
     const renderer = registry.create(activeKind, { onEntitySelect, onObjectSelect, onReady, ...(onEntityContext === undefined ? {} : { onEntityContext: (id, position) => onEntityContext(id, toViewport(position)) }), ...(onObjectContext === undefined ? {} : { onObjectContext: (id, position) => onObjectContext(id, toViewport(position)) }) })

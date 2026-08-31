@@ -41,6 +41,8 @@ export class LowPolyActor {
   #billboard: THREE.Mesh | undefined
   #phase = 0
   #bubbleUntil = 0
+  #displayName = ''
+  #activityLabel = ''
 
   constructor(options: LowPolyActorOptions = {}) {
     this.#shadows = options.shadows !== false
@@ -77,18 +79,33 @@ export class LowPolyActor {
   }
 
   setLabel(displayName: string, activityLabel: string): void {
-    const texture = labelTexture(displayName, activityLabel)
+    this.#displayName = displayName
+    this.#activityLabel = activityLabel
+    this.#draw(displayName, activityLabel)
+  }
+
+  #draw(displayName: string, secondLine: string): void {
+    const texture = labelTexture(displayName, secondLine)
     const material = this.#label.material as THREE.SpriteMaterial
     material.map?.dispose()
     material.map = texture
     material.needsUpdate = true
   }
 
-  /** A short-lived line above the character, for an `entity.speech` cue. */
+  /**
+   * Shows what the character just said.
+   *
+   * Stretching the name plate and showing the same two words was the old
+   * behaviour and told nobody anything: the 2D world puts the utterance on
+   * screen, and the 3D world was silent. Truncated the way the 2D bubble is —
+   * a name plate is not a transcript.
+   */
   say(text: string): void {
-    if (text.trim() === '') return
+    const line = text.replaceAll(/\s+/g, ' ').trim()
+    if (line === '') return
     this.#bubbleUntil = performance.now() + 4_000
-    this.#label.scale.set(2.1, 0.5, 1)
+    this.#label.scale.set(2.4, 0.6, 1)
+    this.#draw(this.#displayName, line.length <= 38 ? line : `${line.slice(0, 37)}…`)
   }
 
   /**
@@ -141,6 +158,7 @@ export class LowPolyActor {
     if (this.#bubbleUntil > 0 && performance.now() > this.#bubbleUntil) {
       this.#bubbleUntil = 0
       this.#label.scale.set(1.5, 0.38, 1)
+      this.#draw(this.#displayName, this.#activityLabel)
     }
   }
 

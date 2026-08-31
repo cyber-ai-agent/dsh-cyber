@@ -38,15 +38,77 @@ const OVERVIEW_MARGIN = 1.18
  * bigger office pulls the camera back instead of overflowing the view.
  */
 export function overviewPose(framing: OverviewFraming): CameraPose {
-  const halfHeight = framing.depth / 2
-  const halfWidth = framing.width / 2
-  const verticalDistance = halfHeight / Math.tan(framing.fov / 2)
-  const horizontalDistance = halfWidth / Math.tan(horizontalFov(framing.fov, framing.aspect) / 2)
-  const distance = Math.max(verticalDistance, horizontalDistance) * OVERVIEW_MARGIN
+  const distance = overviewDistance(framing)
   return {
     position: { x: 0, y: Math.sin(OVERVIEW_PITCH) * distance, z: Math.cos(OVERVIEW_PITCH) * distance },
     target: { x: 0, y: 0, z: 0 },
   }
+}
+
+/**
+ * How far back the camera has to stand for the whole floor to be in shot.
+ *
+ * Solved against the four corners rather than against the floor's width and
+ * depth. Seen from 45 degrees the near corners sit closer to the camera than
+ * the centre does, so they subtend a wider angle: framing the floor as if it
+ * were face-on is the calculation that cropped them.
+ *
+ * The angle every corner subtends shrinks monotonically with distance, so
+ * doubling until it fits and then bisecting converges quickly and exactly,
+ * without a closed form that would have to be re-derived for a different pitch.
+ */
+function overviewDistance(framing: OverviewFraming): number {
+  const halfVertical = framing.fov / 2
+  const halfHorizontal = horizontalFov(framing.fov, framing.aspect) / 2
+  const corners = [
+    { x: -framing.width / 2, z: -framing.depth / 2 },
+    { x: framing.width / 2, z: -framing.depth / 2 },
+    { x: -framing.width / 2, z: framing.depth / 2 },
+    { x: framing.width / 2, z: framing.depth / 2 },
+  ]
+
+  const fits = (distance: number): boolean => {
+    const eye = { x: 0, y: Math.sin(OVERVIEW_PITCH) * distance, z: Math.cos(OVERVIEW_PITCH) * distance }
+    // The camera's own axes, from it looking at the origin.
+    const forward = normalize({ x: -eye.x, y: -eye.y, z: -eye.z })
+    const right = normalize(cross({ x: 0, y: 1, z: 0 }, forward))
+    const up = cross(forward, right)
+    return corners.every((corner) => {
+      const toCorner = { x: corner.x - eye.x, y: -eye.y, z: corner.z - eye.z }
+      const depth = dot(toCorner, forward)
+      if (depth <= 0) return false
+      return Math.abs(Math.atan2(dot(toCorner, right), depth)) <= halfHorizontal
+        && Math.abs(Math.atan2(dot(toCorner, up), depth)) <= halfVertical
+    })
+  }
+
+  const extent = Math.max(framing.width, framing.depth)
+  let far = Math.max(extent, 1)
+  for (let attempt = 0; attempt < 24 && !fits(far); attempt += 1) far *= 2
+  let near = 0
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const middle = (near + far) / 2
+    if (fits(middle)) far = middle
+    else near = middle
+  }
+  return far * OVERVIEW_MARGIN
+}
+
+function normalize(vector: ScenePoint): ScenePoint {
+  const length = Math.hypot(vector.x, vector.y, vector.z) || 1
+  return { x: vector.x / length, y: vector.y / length, z: vector.z / length }
+}
+
+function cross(left: ScenePoint, right: ScenePoint): ScenePoint {
+  return {
+    x: left.y * right.z - left.z * right.y,
+    y: left.z * right.x - left.x * right.z,
+    z: left.x * right.y - left.y * right.x,
+  }
+}
+
+function dot(left: ScenePoint, right: ScenePoint): number {
+  return left.x * right.x + left.y * right.y + left.z * right.z
 }
 
 /** Eye level for an adult, in metres. Framing reads wrong from the floor. */

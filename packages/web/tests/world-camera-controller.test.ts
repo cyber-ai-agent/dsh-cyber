@@ -12,6 +12,25 @@ import {
 
 const FRAMING = { width: 33, depth: 21, aspect: 16 / 9, fov: Math.PI / 4 }
 
+interface Vector { x: number; y: number; z: number }
+
+function normalize(vector: Vector): Vector {
+  const length = Math.hypot(vector.x, vector.y, vector.z) || 1
+  return { x: vector.x / length, y: vector.y / length, z: vector.z / length }
+}
+
+function cross(left: Vector, right: Vector): Vector {
+  return {
+    x: left.y * right.z - left.z * right.y,
+    y: left.z * right.x - left.x * right.z,
+    z: left.x * right.y - left.y * right.x,
+  }
+}
+
+function dot(left: Vector, right: Vector): number {
+  return left.x * right.x + left.y * right.y + left.z * right.z
+}
+
 describe('overview', () => {
   it('looks down at the floor from an angle, not from straight above', () => {
     const pose = overviewPose(FRAMING)
@@ -36,11 +55,34 @@ describe('overview', () => {
     expect(narrow.position.y).toBeGreaterThan(wide.position.y)
   })
 
-  it('contains the floor it was asked to frame', () => {
+  it('contains the floor it was asked to frame, corners included', () => {
     const pose = overviewPose(FRAMING)
-    const distance = Math.hypot(pose.position.y, pose.position.z)
-    const halfVisible = Math.tan(FRAMING.fov / 2) * distance
-    expect(halfVisible).toBeGreaterThan(FRAMING.depth / 2)
+    // Checked per axis, the way a rectangular frustum actually clips. A single
+    // 3D angle to the corner is a stricter test than the frustum applies — the
+    // diagonal is allowed to exceed the vertical half-angle — and asserting it
+    // would demand a camera further back than correctness requires.
+    const forward = normalize({
+      x: pose.target.x - pose.position.x,
+      y: pose.target.y - pose.position.y,
+      z: pose.target.z - pose.position.z,
+    })
+    const right = normalize(cross({ x: 0, y: 1, z: 0 }, forward))
+    const up = cross(forward, right)
+    const halfVertical = FRAMING.fov / 2
+    const halfHorizontal = Math.atan(Math.tan(halfVertical) * FRAMING.aspect)
+
+    for (const corner of [
+      { x: -FRAMING.width / 2, z: -FRAMING.depth / 2 },
+      { x: FRAMING.width / 2, z: -FRAMING.depth / 2 },
+      { x: -FRAMING.width / 2, z: FRAMING.depth / 2 },
+      { x: FRAMING.width / 2, z: FRAMING.depth / 2 },
+    ]) {
+      const toCorner = { x: corner.x - pose.position.x, y: -pose.position.y, z: corner.z - pose.position.z }
+      const depth = dot(toCorner, forward)
+      expect(depth).toBeGreaterThan(0)
+      expect(Math.abs(Math.atan2(dot(toCorner, right), depth))).toBeLessThanOrEqual(halfHorizontal)
+      expect(Math.abs(Math.atan2(dot(toCorner, up), depth))).toBeLessThanOrEqual(halfVertical)
+    }
   })
 })
 

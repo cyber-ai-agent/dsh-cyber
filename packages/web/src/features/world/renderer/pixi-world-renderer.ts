@@ -633,7 +633,9 @@ function cuePoints(cue: WorldCue): WorldPoint[] {
 }
 
 function cueText(cue: WorldCue): string {
-  const value = cue.payload['text'] ?? cue.payload['label']
+  // `excerpt` is the key the projector writes; without it every speech bubble
+  // silently degraded to the character's activity label.
+  const value = cue.payload['text'] ?? cue.payload['excerpt'] ?? cue.payload['label']
   return typeof value === 'string' ? value : ''
 }
 

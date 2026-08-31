@@ -79,8 +79,19 @@ export function capabilitiesFor(lod: AvatarLod): LodCapabilities {
  * Changing level costs a rebuild; a character pacing across the reduced
  * threshold would rebuild every few frames without this.
  */
-export function stableLod(previous: AvatarLod | undefined, next: AvatarLod, distance: number): AvatarLod {
+export function stableLod(
+  previous: AvatarLod | undefined,
+  next: AvatarLod,
+  distance: number,
+  /** Set when the level was chosen for a reason distance cannot override. */
+  pinned = false,
+): AvatarLod {
   if (previous === undefined || previous === next) return next
+  // Hysteresis exists to stop a character pacing a boundary from rebuilding
+  // itself. It must not delay giving a speaking or selected character its face
+  // back — that upgrade was decided by what the character is doing, not by how
+  // far away it stands.
+  if (pinned) return next
   const margin = 1.5
   if (previous === 'full' && next === 'reduced' && distance < REDUCED_BEYOND + margin) return 'full'
   if (previous === 'reduced' && next === 'billboard' && distance < BILLBOARD_BEYOND + margin) return 'reduced'

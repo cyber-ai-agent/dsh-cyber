@@ -91,6 +91,18 @@ describe('stableLod', () => {
     expect(stableLod('reduced', 'full', 6)).toBe('full')
   })
 
+  it('gives a speaking character its face back without waiting', () => {
+    // Hysteresis is about distance. Upgrading because somebody started talking
+    // is a decision distance does not get to delay, or a character speaks for
+    // a second before its mouth is allowed to move.
+    expect(stableLod('billboard', 'full', 40, true)).toBe('full')
+    expect(stableLod('reduced', 'full', 21, true)).toBe('full')
+  })
+
+  it('still damps a purely distance-driven change', () => {
+    expect(stableLod('reduced', 'full', 8.5, false)).toBe('reduced')
+  })
+
   it('accepts any level for a character it has not seen before', () => {
     expect(stableLod(undefined, 'billboard', 9.2)).toBe('billboard')
   })

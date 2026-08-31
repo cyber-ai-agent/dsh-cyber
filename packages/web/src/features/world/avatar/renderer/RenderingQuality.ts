@@ -1,5 +1,18 @@
 export type RenderingQuality = 'high' | 'balanced' | 'low' | 'static'
 
+/**
+ * Whether this device can draw a 3D world at all.
+ *
+ * Deliberately separate from {@link detectRenderingQuality}, which also folds
+ * in `prefers-reduced-motion`. Wanting less motion is not the same as having
+ * no GPU: the 3D world answers it by damping its camera and dropping secondary
+ * motion, and refusing to draw the world would take away a mode the user never
+ * asked to lose.
+ */
+export function supportsSpatialRendering(): boolean {
+  return typeof window !== 'undefined' && supportsWebGl()
+}
+
 export function detectRenderingQuality(staticMode: boolean): RenderingQuality {
   if (staticMode || typeof window === 'undefined' || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return 'static'
   if (!supportsWebGl()) return 'static'

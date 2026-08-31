@@ -48,9 +48,11 @@ export interface VrmActorUpdateInput {
   /**
    * Speech loudness, 0..1, for lip sync.
    *
-   * Passed in rather than read from a global: a shared scene has several
-   * characters, and a module-level singleton would make all of their mouths
-   * move whenever any one of them spoke.
+   * Optional, and the module-level playback amplitude is the fallback. It
+   * exists because a shared scene can have two characters speaking at once —
+   * a meeting hand-off, an interruption — and one global figure cannot be the
+   * loudness of both. A character that is not speaking has a closed mouth
+   * either way.
    */
   amplitude?: number
 }
@@ -161,7 +163,7 @@ export class VrmActor {
       this.#expression.update(input.motionCue.expression, delta)
       this.#lookAt.update(input.state, this.#elapsed, delta, input.animated)
       this.#blink.update(this.#elapsed, input.animated)
-      this.#speech.update(this.#elapsed, input.speaking)
+      this.#speech.update(this.#elapsed, input.speaking, input.amplitude)
     }
     // Spring bones are the most expensive part of a VRM and the least missed
     // at a distance; halving their cadence is cheaper than dropping the model.

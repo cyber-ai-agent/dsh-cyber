@@ -100,7 +100,9 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
   readonly #pickables: THREE.Object3D[] = []
   readonly #disposables: Array<{ dispose(): void }> = []
   readonly #appliedCueIds = new Set<string>()
+  readonly #failedAvatarUrls = new Set<string>()
 
+  #connected = true
   #selectedEntityId: string | undefined
   #selectedObjectId: string | undefined
   #cameraMode: WorldCameraMode = 'overview'
@@ -144,10 +146,13 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
     scene.background = new THREE.Color(CLEAR_COLOUR)
     // Fog keeps the far wall from reading as a hard edge without pretending
     // the office is outdoors.
-    scene.fog = new THREE.Fog(CLEAR_COLOUR, this.#layout.floor.depth * 0.9, this.#layout.floor.depth * 2.4)
+    // Zooming out moves the camera back, so a fog wall fixed to the floor size
+    // swallows the whole office at the far end of the zoom range.
+    const reach = Math.max(this.#layout.floor.width, this.#layout.floor.depth)
+    scene.fog = new THREE.Fog(CLEAR_COLOUR, reach * 1.2, reach * 4.5)
     this.#scene = scene
 
-    const camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 400)
+    const camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, Math.max(400, reach * 6))
     this.#camera = camera
 
     this.#buildLighting(scene)
@@ -220,7 +225,10 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
       }
       if (cue.kind === 'entity.focus' && cue.entityId !== undefined) this.focusEntity(cue.entityId)
       if (cue.kind === 'entity.speech' && cue.entityId !== undefined) {
-        this.#actors.get(cue.entityId)?.actor.say(cueText(cue))
+        const view = this.#actors.get(cue.entityId)
+        // Falling back to the activity label rather than to nothing: an empty
+        // cue should read as "still working", not make the character silent.
+        if (view !== undefined) view.actor.say(cueText(cue) || view.entity.activityLabel)
       }
     }
     if (this.#appliedCueIds.size > 512) {
@@ -390,7 +398,9 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
   }
 
   #createActor(scene: THREE.Scene, entity: WorldRuntimeEntityState): void {
-    const actor = new LowPolyActor({ shadows: this.#options.shadows !== false })
+    // A room of identically coloured stand-ins is unreadable; the hue is
+    // derived from the id so it is stable across reloads and renderers.
+    const actor = new LowPolyActor({ shadows: this.#options.shadows !== false, hue: hueFor(entity.id) })
     actor.setLabel(entity.displayName, entity.activityLabel)
     actor.root.userData.entityId = entity.id
     scene.add(actor.root)
@@ -412,7 +422,7 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
    */
   #adoptAvatar(view: ActorView): void {
     const url = this.#options.resolveAvatarUrl?.(view.entity.id)
-    if (url === undefined || url === view.avatarUrl) return
+    if (url === undefined || url === view.avatarUrl || this.#failedAvatarUrls.has(url)) return
     view.avatarUrl = url
     void (async () => {
       try {
@@ -425,13 +435,21 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
         await actor.loadDeclaredMotion()
         view.vrm?.dispose()
         view.vrm = actor
+        if (this.#options.shadows !== false) {
+          actor.root.traverse((node) => {
+            const mesh = node as THREE.Mesh
+            if (mesh.isMesh === true) { mesh.castShadow = true; mesh.receiveShadow = true }
+          })
+        }
         view.root.add(actor.root)
         view.actor.setDetail({ face: false, secondaryMotion: false, skinned: false, shadow: false })
         view.actor.hideStandIn()
       } catch {
-        // An avatar that will not load leaves the character standing there.
-        // Emptying its desk would be a worse answer than a plain figure.
-        view.avatarUrl = undefined
+        // An avatar that will not load leaves the character standing there —
+        // emptying its desk would be worse than a plain figure. The url stays
+        // recorded so the failure is not retried on every snapshot, which for
+        // a streamed turn is several times a second.
+        this.#failedAvatarUrls.add(url)
       }
     })()
   }
@@ -482,15 +500,23 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
         }
       }
       const distance = camera.position.distanceTo(view.root.position)
+      const pinned = view.entity.id === this.#selectedEntityId || view.entity.activity === 'talking'
       const next = stableLod(view.lod, lodFor({
         distance,
         selected: view.entity.id === this.#selectedEntityId,
         speaking: view.entity.activity === 'talking',
         ...(this.#options.lodCeiling === undefined ? {} : { ceiling: this.#options.lodCeiling }),
-      }), distance)
+      }), distance, pinned)
       if (next !== view.lod) {
         view.lod = next
-        view.actor.setDetail(capabilitiesFor(next))
+        // A character that has its own avatar must not have the stand-in drawn
+        // back through it: setDetail's job is to decide what the stand-in is
+        // made of, and once it has stepped aside that answer is "nothing".
+        if (view.vrm === undefined) view.actor.setDetail(capabilitiesFor(next))
+        else {
+          view.actor.hideStandIn()
+          view.vrm.root.visible = next !== 'billboard'
+        }
       }
       view.sinceUpdate += deltaMs
       const interval = updateIntervalMs(view.lod)
@@ -498,11 +524,15 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
         const activity = this.#locomotion.isWalking(view.entity.id) ? 'walking' : view.entity.activity
         view.actor.update(view.sinceUpdate, activity)
         if (view.vrm !== undefined) {
-          const state = visualStateForEntity(view.entity, true, false)
+          // The same fact has to reach both the state and the mouth. Deriving
+          // the state with speaking hardcoded false gave a talking character
+          // the listening gesture while its lips moved.
+          const speaking = view.entity.activity === 'talking'
+          const state = visualStateForEntity(view.entity, this.#connected, speaking)
           view.vrm.update(view.sinceUpdate, {
             state,
             motionCue: motionCueForState(state),
-            speaking: view.entity.activity === 'talking',
+            speaking,
             animated: true,
             detail: capabilitiesFor(view.lod),
           })
@@ -643,6 +673,13 @@ const PROP_COLOURS: Partial<Record<ScenePlacement['kind'], number>> = {
   rug: 0x202832,
 }
 
+/** A stable per-character hue, so a room of stand-ins is still legible. */
+function hueFor(entityId: string): number {
+  let hash = 0
+  for (const character of entityId) hash = (hash * 31 + character.charCodeAt(0)) >>> 0
+  return (hash % 360) / 360
+}
+
 function findUserData(object: THREE.Object3D, key: string): string | undefined {
   let current: THREE.Object3D | null = object
   while (current !== null) {
@@ -664,7 +701,10 @@ function cuePoints(cue: WorldCue): Array<{ x: number; y: number }> {
 }
 
 function cueText(cue: WorldCue): string {
-  const value = cue.payload['text'] ?? cue.payload['label']
+  // `excerpt` is what the projector actually writes for a speech cue; reading
+  // only text/label meant the 2D world fell through to its activity label and
+  // the 3D world showed nothing at all.
+  const value = cue.payload['text'] ?? cue.payload['excerpt'] ?? cue.payload['label']
   return typeof value === 'string' ? value : ''
 }
 
