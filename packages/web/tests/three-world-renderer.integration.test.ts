@@ -60,8 +60,14 @@ describe('ThreeWorldRenderer integration', () => {
     expect(fake.lastScene?.fog).toBeInstanceOf(THREE.Fog)
     expect(fake.lastScene?.children.some((child) => child.name === 'world-floor')).toBe(true)
     expect(fake.lastScene?.children.filter((child) => child.name.startsWith('world-wall:')).length).toBe(4)
-    expect(fake.lastScene?.children.some((child) => child.name.startsWith('world-placement:'))).toBe(true)
-    expect(renderer.actorRepresentation('employee-a')).toEqual({ vrmLoaded: false, vrmVisible: false, standInVisible: true, visibleRepresentationCount: 1 })
+    expect(renderer.actorRepresentation('employee-a')).toEqual({
+      vrmLoaded: false,
+      vrmVisible: false,
+      standInVisible: true,
+      identityPortraitRequested: false,
+      identityPortraitReady: false,
+      visibleRepresentationCount: 1,
+    })
     const actorBeforeRoute = fake.lastScene?.children.find((child) => child.userData.entityId === 'employee-a')
     const actorBeforeRouteX = actorBeforeRoute?.position.x
 

@@ -105,10 +105,12 @@ export function WorldCanvas({
   // an avatar published while the world is open would never be adopted.
   const resolveAvatarUrlRef = useRef(resolveAvatarUrl)
   resolveAvatarUrlRef.current = resolveAvatarUrl
-  // Zoom lives inside the renderer, so it is the one piece of camera state that
-  // a swap would otherwise lose. Selection is held above this component and is
-  // simply re-applied.
-  const retainedZoom = useRef<number | undefined>(undefined)
+  // Zoom is renderer-local state. A Pixi stage scale of 1.8 and a Three camera
+  // zoom of 1.8 are not the same semantic value: replaying one into the other
+  // is what made a 3D follow camera jump almost inside a character after a 2D
+  // zoom. Remember each renderer's zoom independently and restore it only when
+  // returning to that renderer.
+  const retainedZoomByKind = useRef<Partial<Record<RendererKind, number>>>({})
   // A device that cannot run 3D must not download it to find that out. The
   // degradation ladder ends at the 2D world, and the last rung has to be
   // reachable without fetching the chunk it is meant to avoid.
@@ -173,12 +175,12 @@ export function WorldCanvas({
       if (cancelled) return
       rendererMounted.current = true
       // The world the user was looking at has to still be the world they are
-      // looking at: a swap that lost the selection and the zoom would read as
-      // having been thrown out of the room and back in.
+      // looking at: a swap that lost the selection and the renderer's own zoom
+      // would read as having been thrown out of the room and back in.
       const latestSelectionState = latestSelection.current
       renderer.selectEntity(latestSelectionState.entityId)
       renderer.selectObject(latestSelectionState.objectId)
-      const zoom = retainedZoom.current
+      const zoom = retainedZoomByKind.current[activeKind]
       if (zoom !== undefined && zoom !== renderer.getZoom()) renderer.zoomBy(zoom - renderer.getZoom())
       if (latestSelectionState.focusEntityId !== undefined) renderer.focusEntity(latestSelectionState.focusEntityId)
       const spatial = renderer as { setCameraMode?: (mode: WorldCameraMode, subjectId?: string) => void }
@@ -190,7 +192,7 @@ export function WorldCanvas({
     return () => {
       cancelled = true
       rendererMounted.current = false
-      retainedZoom.current = renderer.getZoom()
+      retainedZoomByKind.current[activeKind] = renderer.getZoom()
       renderer.destroy()
       rendererRef.current = undefined
     }
