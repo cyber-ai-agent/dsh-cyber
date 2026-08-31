@@ -1,3 +1,4 @@
+import type { AvatarRecipe } from './avatar-recipe.js'
 import type { ProceduralAvatarDesign } from './procedural-vrm.js'
 
 export type AvatarCreationPhase = 'generating' | 'packaging' | 'validating'
@@ -5,6 +6,11 @@ export type AvatarCreationPhase = 'generating' | 'packaging' | 'validating'
 export interface AvatarCreationRequest {
   displayName: string
   design: ProceduralAvatarDesign
+  /**
+   * Stable character identity derived from profile + built-in portrait.
+   * Omit this only for an intentionally generic scratch avatar.
+   */
+  identityRecipe?: AvatarRecipe
 }
 
 export interface CreatedAvatarFile {
@@ -30,6 +36,7 @@ interface WorkerRequest {
   requestId: string
   displayName: string
   design: ProceduralAvatarDesign
+  identityRecipe?: AvatarRecipe
 }
 
 type WorkerResponse =
@@ -59,8 +66,8 @@ export class CharacterAvatarCreationProviderRegistry {
 
 export const localProceduralAvatarProvider: CharacterAvatarCreationProvider = {
   id: LOCAL_PROCEDURAL_AVATAR_PROVIDER_ID,
-  displayName: '本机 3D 草稿',
-  description: '在设备上生成低面数、自包含的 VRM 1.0 草稿，不发送角色资料。实时世界会优先保留角色原有 2D 身份，直到发布匹配的正式 3D 形象。',
+  displayName: '本机身份 3D 草稿',
+  description: '在设备上根据当前角色身份配方生成低面数、自包含 VRM 1.0。发型、主色和体型会沿用角色身份，不发送角色资料。',
   source: 'local',
   async create(request, context = {}) {
     throwIfAborted(context.signal)
@@ -82,9 +89,11 @@ avatarCreationProviders.register(localProceduralAvatarProvider)
 
 async function generateVrm(request: AvatarCreationRequest, signal?: AbortSignal): Promise<ArrayBuffer> {
   if (typeof Worker === 'undefined') {
-    const { createProceduralVrm } = await import('./procedural-vrm.js')
+    const { createIdentityProceduralVrm, createProceduralVrm } = await import('./procedural-vrm.js')
     throwIfAborted(signal)
-    return createProceduralVrm(request.displayName, request.design)
+    return request.identityRecipe === undefined
+      ? createProceduralVrm(request.displayName, request.design)
+      : createIdentityProceduralVrm(request.displayName, request.identityRecipe, request.design)
   }
   return new Promise<ArrayBuffer>((resolve, reject) => {
     if (signal?.aborted === true) {
@@ -121,7 +130,12 @@ async function generateVrm(request: AvatarCreationRequest, signal?: AbortSignal)
       if (event.data.ok) resolve(event.data.buffer)
       else reject(new Error(event.data.error))
     }
-    const message: WorkerRequest = { requestId, displayName: request.displayName, design: request.design }
+    const message: WorkerRequest = {
+      requestId,
+      displayName: request.displayName,
+      design: request.design,
+      ...(request.identityRecipe === undefined ? {} : { identityRecipe: request.identityRecipe }),
+    }
     worker.postMessage(message)
   })
 }
