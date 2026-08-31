@@ -16,14 +16,17 @@ const REQUIRED_VARIANT_NODES = ['Hair_Long', 'Hair_SidePart', 'Hair_TechCrop']
 
 async function main() {
   // Resolve from @dsh-cyber/web, where production actually declares these
-  // dependencies. Root scripts must not accidentally rely on pnpm hoisting.
-  const [{ VRMLoaderPlugin }, { GLTFLoader }] = await Promise.all([
+  // dependencies. The decoder is deliberately the same Three addon VrmActor
+  // enables at runtime, so a CI pass proves the shipped compressed transport.
+  const [{ VRMLoaderPlugin }, { GLTFLoader }, { MeshoptDecoder }] = await Promise.all([
     import(pathToFileURL(webRequire.resolve('@pixiv/three-vrm')).href),
     import(pathToFileURL(webRequire.resolve('three/addons/loaders/GLTFLoader.js')).href),
+    import(pathToFileURL(webRequire.resolve('three/addons/libs/meshopt_decoder.module.js')).href),
   ])
 
   const body = await readFile(VRM_PATH)
   const loader = new GLTFLoader()
+  loader.setMeshoptDecoder(MeshoptDecoder)
   loader.register((parser) => new VRMLoaderPlugin(parser))
   const arrayBuffer = body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength)
   const gltf = await loader.parseAsync(arrayBuffer, '')
