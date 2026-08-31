@@ -278,9 +278,13 @@ test('keeps the chosen 2D view across conversations and centers the latest group
   focus = page.getByRole('region', { name: `${secondEmployeeName}员工聚焦` })
   await expect(focus).toBeVisible()
   await expect(twoDimensionalTab).toHaveAttribute('aria-selected', 'true')
+  // The 3D control still says what it will do for a character with no avatar,
+  // but choosing 3D no longer forces the editor open: the character is in the
+  // world either way, as a stand-in until its own avatar exists. Creating one
+  // is offered where the character is, in its panel.
   const configureThreeDimensional = page.getByRole('tab', { name: `为${secondEmployeeName}创建 3D 形象`, exact: true })
   await expect(configureThreeDimensional).toBeVisible()
-  await configureThreeDimensional.click()
+  await focus.getByRole('button', { name: '创建 3D 形象' }).click()
   const avatarDialog = page.getByRole('dialog', { name: `角色设置 · ${secondEmployeeName}` })
   await expect(avatarDialog).toBeVisible()
   const createThreeDimensional = avatarDialog.getByRole('button', { name: '创建 3D 形象', exact: true })
@@ -301,7 +305,11 @@ test('keeps the chosen 2D view across conversations and centers the latest group
   await avatarDialog.getByRole('button', { name: '发布到角色', exact: true }).click()
   await publishedAvatar
   await avatarDialog.getByRole('button', { name: '关闭角色设置' }).click()
-  await expect(page.getByRole('tab', { name: '3D', exact: true })).toHaveAttribute('aria-selected', 'true')
+  // Publishing an avatar does not move the user: the world was never left, and
+  // the 3D control stops offering to create one because the character now has
+  // one. Switching to 3D remains the user's choice, not a side effect.
+  await expect(page.locator('.world-canvas-host')).toBeVisible()
+  await expect(page.getByRole('tablist', { name: '世界显示方式' }).getByRole('tab').nth(1)).toHaveText('3D')
   await twoDimensionalTab.click()
   await expect(twoDimensionalTab).toHaveAttribute('aria-selected', 'true')
   await focus.getByRole('button', { name: '语音设置' }).click()
@@ -375,7 +383,11 @@ test('previews an uploaded portrait, publishes a new avatar revision, and restor
  * means answering both.
  */
 async function selectCharacterView(page: Page, mode: '2D' | '3D', expectedEmployeeName: string): Promise<void> {
-  const tab = page.getByRole('tab', { name: mode, exact: true })
+  // The 3D control names itself after what it will do — "3D" once the
+  // character has an avatar, "创建 3D" before that — so the renderer tabs are
+  // addressed by position rather than by a label that moves.
+  const display = page.getByRole('tablist', { name: '世界显示方式' })
+  const tab = display.getByRole('tab').nth(mode === '2D' ? 0 : 1)
   await expect(tab).toBeVisible()
   await tab.click()
   await expect(tab).toHaveAttribute('aria-selected', 'true')

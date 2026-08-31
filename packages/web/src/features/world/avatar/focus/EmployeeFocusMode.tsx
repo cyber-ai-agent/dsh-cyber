@@ -343,6 +343,11 @@ export function EmployeeFocusMode({ world, employee, profile, entity, collaborat
         </div> : null}</div>
       </div>
     </header>
+    {employee.avatarProfile?.rendererKind === 'vrm-3d' ? null : <div className="employee-focus__avatar-invite">
+      <span>还没有 3D 形象，世界里先用默认形象出场。</span>
+      <button type="button" onClick={onManageAvatar}>创建 3D 形象</button>
+    </div>}
+
     <div className="employee-focus__activity" aria-live="polite"><strong>{stateLabel(state)}</strong><span>{connected ? entity?.activityLabel ?? '等待事件触发' : '实时连接中断，正在重连'}</span></div>
 
     {embedded ? null : <div className="employee-focus__avatar-stage">
