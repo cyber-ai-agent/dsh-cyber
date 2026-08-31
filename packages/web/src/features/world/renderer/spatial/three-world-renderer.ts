@@ -25,7 +25,7 @@ import {
 } from '../../camera/world-camera-controller.js'
 import { planWorldLayout, type SceneLayout, type ScenePlacement, type SceneZone } from './three-world-layout.js'
 import { capabilitiesFor, lodFor, stableLod, updateIntervalMs, type AvatarLod } from './three-world-lod.js'
-import { LowPolyActor } from './low-poly-actor.js'
+import { LowPolyActor, type IdentityPortraitSource } from './low-poly-actor.js'
 import type { VrmActor } from '../../avatar/vrm/VrmActor.js'
 import { motionCueForState, visualStateForEntity } from '../../digital-human-motion.js'
 
@@ -46,11 +46,19 @@ import { motionCueForState, visualStateForEntity } from '../../digital-human-mot
 const CLEAR_COLOUR = 0x0d1017
 const FLOOR_COLOUR = 0x1b212b
 const FOV = 45
+const LOCAL_PROCEDURAL_AVATAR_AUTHOR = 'DSH Cyber 本机创建器'
+
+interface IdentityPortraitTemplate {
+  src: string
+  frameWidth: number
+  frameHeight: number
+  framesPerActor?: number
+}
 
 interface ActorView {
   root: THREE.Group
   actor: LowPolyActor
-  /** Present once this character's own avatar has arrived and replaced the stand-in. */
+  /** Present once this character's own authored avatar has arrived and replaced the stand-in. */
   vrm: VrmActor | undefined
   /** Guards against starting the same download twice. */
   avatarUrl: string | undefined
@@ -105,6 +113,7 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
   #camera: THREE.PerspectiveCamera | undefined
   #layout: SceneLayout | undefined
   #sceneManifest: WorldThemeSceneManifest | undefined
+  #identityPortraitTemplate: IdentityPortraitTemplate | undefined
   #snapshot: WorldRuntimeSnapshot | undefined
   #resizeObserver: ResizeObserver | undefined
   #frame = 0
@@ -140,6 +149,7 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
     const sceneManifest = manifest.scenes.find((item) => item.id === snapshot.sceneId) ?? manifest.scenes[0]
     if (sceneManifest === undefined) throw new Error('世界主题没有可用场景')
     this.#sceneManifest = sceneManifest
+    this.#identityPortraitTemplate = resolveIdentityPortraitTemplate(manifest)
     this.#layout = planWorldLayout(sceneManifest)
 
     const renderer = this.#options.createRenderer?.({ antialias: this.#options.shadows !== false, alpha: false })
@@ -214,6 +224,7 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
       }
       existing.entity = entity
       existing.actor.setLabel(entity.displayName, entity.activityLabel)
+      existing.actor.setIdentityPortrait(this.#identityPortraitFor(entity))
       this.#adoptAvatar(existing)
     }
     for (const [id, view] of this.#actors) {
@@ -325,6 +336,7 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
     this.#disposables.length = 0
     this.#scene?.clear()
     this.#scene = undefined
+    this.#identityPortraitTemplate = undefined
     const renderer = this.#renderer
     if (renderer !== undefined) {
       renderer.domElement.remove()
@@ -451,10 +463,26 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
     this.#disposables.push(material)
   }
 
+  #identityPortraitFor(entity: WorldRuntimeEntityState): IdentityPortraitSource | undefined {
+    const template = this.#identityPortraitTemplate
+    const rosterIndex = entity.visualState['rosterIndex']
+    if (template === undefined || typeof rosterIndex !== 'number' || !Number.isFinite(rosterIndex)) return undefined
+    return {
+      ...template,
+      rosterIndex: Math.max(0, Math.floor(rosterIndex)),
+    }
+  }
+
   #createActor(scene: THREE.Scene, entity: WorldRuntimeEntityState): void {
-    // A room of identically coloured stand-ins is unreadable; the hue is
-    // derived from the id so it is stable across reloads and renderers.
-    const actor = new LowPolyActor({ shadows: this.#options.shadows !== false, hue: hueFor(entity.id) })
+    // Identity comes from the same actor atlas and roster index the Pixi world
+    // uses. The primitive hue is now only the final fallback if a theme does not
+    // provide that artwork or its image fails to load.
+    const identityPortrait = this.#identityPortraitFor(entity)
+    const actor = new LowPolyActor({
+      shadows: this.#options.shadows !== false,
+      hue: hueFor(entity.id),
+      ...(identityPortrait === undefined ? {} : { identityPortrait }),
+    })
     actor.setLabel(entity.displayName, entity.activityLabel)
     actor.root.userData.entityId = entity.id
     scene.add(actor.root)
@@ -466,13 +494,13 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
   }
 
   /**
-   * Replaces the stand-in with the character's own avatar, in place.
+   * Replaces the identity stand-in with a character's authored avatar, in place.
    *
-   * Publishing an avatar while the world is open should change the character,
-   * not the page: no reload, no leaving the office, and no second canvas. The
-   * stand-in stays visible until the model is actually ready, so a slow
-   * download is a character that has not changed yet rather than a hole in the
-   * room.
+   * The local procedural creator deliberately produces a generic low-poly draft.
+   * It is useful in its editor and for validating the VRM pipeline, but it must
+   * not overwrite a recognisable 2D identity in the live world. An authored or
+   * imported VRM is still adopted immediately and hot-swapped without leaving
+   * the office.
    */
   #adoptAvatar(view: ActorView): void {
     const url = this.#options.resolveAvatarUrl?.(view.entity.id)
@@ -480,6 +508,11 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
       view.avatarLoadController?.abort()
       view.avatarLoadController = undefined
       view.avatarUrl = undefined
+      if (view.vrm !== undefined) {
+        view.vrm.dispose()
+        view.vrm = undefined
+        applyActorRepresentation(view, view.lod)
+      }
       return
     }
     if (url === view.avatarUrl || this.#failedAvatarUrls.has(url)) return
@@ -495,6 +528,18 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
           : await this.#options.loadAvatar(url, controller.signal)
         if (this.#destroyed || this.#actors.get(view.entity.id) !== view || view.avatarUrl !== url) {
           actor.dispose()
+          return
+        }
+        if (shouldPreferIdentityPortrait(view.actor.identityPortraitRequested, actor.vrm)) {
+          // Record the URL as observed, then keep the exact 2D character. This
+          // avoids re-downloading the generic draft on every streamed snapshot.
+          actor.dispose()
+          view.avatarLoadController = undefined
+          if (view.vrm !== undefined) {
+            view.vrm.dispose()
+            view.vrm = undefined
+          }
+          applyActorRepresentation(view, view.lod)
           return
         }
         await actor.loadDeclaredMotion(this.#options.motionLibrary)
@@ -517,9 +562,8 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
         if (actor !== undefined && view.vrm !== actor) actor.dispose()
         if (isAbortError(cause)) return
         // An avatar that will not load leaves the character standing there —
-        // emptying its desk would be worse than a plain figure. The url stays
-        // recorded so the failure is not retried on every snapshot, which for
-        // a streamed turn is several times a second.
+        // emptying its desk would be worse than a recognisable portrait. The
+        // url stays recorded so the failure is not retried on every snapshot.
         this.#failedAvatarUrls.add(url)
       }
     })()
@@ -689,12 +733,19 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
    * state machine that the frame loop uses, rather than only checking LOD
    * policy output.
    */
-  actorRepresentation(entityId: string): { vrmLoaded: boolean; vrmVisible: boolean; standInVisible: boolean; visibleRepresentationCount: number } | undefined {
+  actorRepresentation(entityId: string): { vrmLoaded: boolean; vrmVisible: boolean; standInVisible: boolean; identityPortraitRequested: boolean; identityPortraitReady: boolean; visibleRepresentationCount: number } | undefined {
     const view = this.#actors.get(entityId)
     if (view === undefined) return undefined
     const vrmVisible = view.vrm?.root.visible === true
     const standInVisible = view.actor.representationVisible
-    return { vrmLoaded: view.vrm !== undefined, vrmVisible, standInVisible, visibleRepresentationCount: Number(vrmVisible) + Number(standInVisible) }
+    return {
+      vrmLoaded: view.vrm !== undefined,
+      vrmVisible,
+      standInVisible,
+      identityPortraitRequested: view.actor.identityPortraitRequested,
+      identityPortraitReady: view.actor.identityPortraitReady,
+      visibleRepresentationCount: Number(vrmVisible) + Number(standInVisible),
+    }
   }
 
   #resize(): void {
@@ -782,6 +833,39 @@ export function applyActorRepresentation(view: ActorRepresentationView, lod: Ava
   view.vrm.root.visible = true
 }
 
+/** A generic local mesh is a draft, not a replacement for an established identity. */
+export function isGenericProceduralVrm(vrm: { meta?: { authors?: readonly string[] } }): boolean {
+  return vrm.meta?.authors?.includes(LOCAL_PROCEDURAL_AVATAR_AUTHOR) === true
+}
+
+/**
+ * Identity continuity outranks dimensionality until an authored/imported VRM
+ * actually represents the character. This is deliberately a pure decision so
+ * tests can guard the product rule without loading Three or a real model.
+ */
+export function shouldPreferIdentityPortrait(
+  identityPortraitRequested: boolean,
+  vrm: { meta?: { authors?: readonly string[] } },
+): boolean {
+  return identityPortraitRequested && isGenericProceduralVrm(vrm)
+}
+
+function resolveIdentityPortraitTemplate(manifest: WorldThemeManifestV1): IdentityPortraitTemplate | undefined {
+  const actorSet = manifest.actorSets[0]
+  if (actorSet === undefined) return undefined
+  const asset = manifest.assets.find((item) => item.id === actorSet.assetId)
+    ?? (actorSet.fallbackAssetId === undefined
+      ? undefined
+      : manifest.assets.find((item) => item.id === actorSet.fallbackAssetId))
+  if (asset === undefined) return undefined
+  return {
+    src: asset.src,
+    frameWidth: actorSet.frameWidth,
+    frameHeight: actorSet.frameHeight,
+    ...(actorSet.framesPerActor === undefined ? {} : { framesPerActor: actorSet.framesPerActor }),
+  }
+}
+
 const ZONE_COLOURS: Record<SceneZone['kind'], number> = {
   work: 0x1f2a37,
   meeting: 0x24303f,
@@ -802,7 +886,7 @@ const PROP_COLOURS: Partial<Record<ScenePlacement['kind'], number>> = {
   rug: 0x202832,
 }
 
-/** A stable per-character hue, so a room of stand-ins is still legible. */
+/** A stable per-character hue, so a room of primitive fallbacks is still legible. */
 function hueFor(entityId: string): number {
   let hash = 0
   for (const character of entityId) hash = (hash * 31 + character.charCodeAt(0)) >>> 0
