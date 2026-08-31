@@ -260,6 +260,7 @@ test('keeps the chosen 2D view across conversations and centers the latest group
   await expect(voiceModels.getByText('本机暂不支持', { exact: true })).toBeVisible()
   await voiceEngine.selectOption('kokoro-int8-multi-lang-v1_1')
   await expect(focus.getByLabel('角色声音', { exact: true }).locator('option')).toHaveCount(103)
+  const firstVoiceSaved = page.waitForResponse((response) => response.request().method() === 'PUT' && response.url().includes(`/api/employees/${employeeId}/profile`) && response.status() === 201)
   await focus.getByLabel('角色声音', { exact: true }).selectOption('system:voice-zh-a')
   await expect(focus.getByRole('slider', { name: '语速' })).toHaveValue('1.1')
   await focus.getByRole('slider', { name: '语速' }).fill('1.25')
@@ -267,7 +268,6 @@ test('keeps the chosen 2D view across conversations and centers the latest group
   await focus.getByRole('button', { name: '试听声音' }).click()
   await expect.poll(() => lastSpokenRate(page)).toBe(1.25)
   await focus.getByRole('button', { name: '停止播报' }).click()
-  const firstVoiceSaved = page.waitForResponse((response) => response.request().method() === 'PUT' && response.url().includes(`/api/employees/${employeeId}/profile`) && response.status() === 201)
   await focus.getByRole('button', { name: '语音设置' }).click()
   await firstVoiceSaved
   await expect.poll(async () => page.evaluate(async (id) => {
@@ -316,10 +316,10 @@ test('keeps the chosen 2D view across conversations and centers the latest group
   await expect(twoDimensionalTab).toHaveAttribute('aria-selected', 'true')
   await focus.getByRole('button', { name: '语音设置' }).click()
   await expect(focus.getByLabel('角色声音', { exact: true }).locator('option')).toHaveCount(103)
+  const secondVoiceSaved = page.waitForResponse((response) => response.request().method() === 'PUT' && response.url().includes('/api/employees/') && response.url().endsWith('/profile') && response.status() === 201)
   await focus.getByLabel('角色声音', { exact: true }).selectOption('system:voice-zh-b')
   await expect(focus.getByRole('slider', { name: '语速' })).toHaveValue('1.1')
   await focus.getByRole('slider', { name: '语速' }).fill('0.9')
-  const secondVoiceSaved = page.waitForResponse((response) => response.request().method() === 'PUT' && response.url().includes('/api/employees/') && response.url().endsWith('/profile') && response.status() === 201)
   await focus.getByRole('button', { name: '语音设置' }).click()
   await secondVoiceSaved
 
