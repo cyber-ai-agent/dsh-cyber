@@ -1,0 +1,33 @@
+{
+  "asset": { "version": "2.0", "generator": "DSH Cyber Basic Motion Pack" },
+  "scene": 0,
+  "scenes": [{ "nodes": [0] }],
+  "nodes": [{ "name": "dsh-motion-root" }],
+  "buffers": [{ "byteLength": 300, "uri": "data:application/octet-stream;base64,AAAAAAAAgD8AAABAAAAAAAAAAAAAAAAAAACAPwAAAAAK16M8AAAAAOXyfz8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAACamRk+AAAAAHEbfT8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAACtejPUkufz8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwrXo7wAAAAAAAAAAOXyfz8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwrXIz0AAAAAAAAAAJLLfz8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAACuR+E9AAAAAMl2fj8AAAAAAAAAAAAAAAAAAIA/" }],
+  "bufferViews": [
+    { "buffer": 0, "byteOffset": 0, "byteLength": 12 },
+    { "buffer": 0, "byteOffset": 12, "byteLength": 48 },
+    { "buffer": 0, "byteOffset": 60, "byteLength": 48 },
+    { "buffer": 0, "byteOffset": 108, "byteLength": 48 },
+    { "buffer": 0, "byteOffset": 156, "byteLength": 48 },
+    { "buffer": 0, "byteOffset": 204, "byteLength": 48 },
+    { "buffer": 0, "byteOffset": 252, "byteLength": 48 }
+  ],
+  "accessors": [
+    { "bufferView": 0, "componentType": 5126, "count": 3, "type": "SCALAR", "min": [0], "max": [2] },
+    { "bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC4" },
+    { "bufferView": 2, "componentType": 5126, "count": 3, "type": "VEC4" },
+    { "bufferView": 3, "componentType": 5126, "count": 3, "type": "VEC4" },
+    { "bufferView": 4, "componentType": 5126, "count": 3, "type": "VEC4" },
+    { "bufferView": 5, "componentType": 5126, "count": 3, "type": "VEC4" },
+    { "bufferView": 6, "componentType": 5126, "count": 3, "type": "VEC4" }
+  ],
+  "animations": [
+    { "name": "idle", "samplers": [{ "input": 0, "output": 1, "interpolation": "LINEAR" }], "channels": [{ "sampler": 0, "target": { "node": 0, "path": "rotation" } }] },
+    { "name": "walk", "samplers": [{ "input": 0, "output": 2, "interpolation": "LINEAR" }], "channels": [{ "sampler": 0, "target": { "node": 0, "path": "rotation" } }] },
+    { "name": "talk", "samplers": [{ "input": 0, "output": 3, "interpolation": "LINEAR" }], "channels": [{ "sampler": 0, "target": { "node": 0, "path": "rotation" } }] },
+    { "name": "listen", "samplers": [{ "input": 0, "output": 4, "interpolation": "LINEAR" }], "channels": [{ "sampler": 0, "target": { "node": 0, "path": "rotation" } }] },
+    { "name": "thinking", "samplers": [{ "input": 0, "output": 5, "interpolation": "LINEAR" }], "channels": [{ "sampler": 0, "target": { "node": 0, "path": "rotation" } }] },
+    { "name": "typing", "samplers": [{ "input": 0, "output": 6, "interpolation": "LINEAR" }], "channels": [{ "sampler": 0, "target": { "node": 0, "path": "rotation" } }] }
+  ]
+}

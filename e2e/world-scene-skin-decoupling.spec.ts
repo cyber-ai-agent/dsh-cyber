@@ -77,7 +77,7 @@ test('switching conversation Skin keeps the live World mounted and its manifest 
   expect(afterResponse.ok()).toBe(true)
   expect(await afterResponse.json()).toEqual(beforeManifest)
 
-  await page.getByRole('tab', { name: '地图', exact: true }).click()
+  await page.getByRole('tab', { name: '全景', exact: true }).click()
   await page.getByRole('button', { name: '世界场景' }).click()
   const sceneDialog = page.getByRole('dialog', { name: /世界场景/ })
   await expect(sceneDialog).toBeVisible()

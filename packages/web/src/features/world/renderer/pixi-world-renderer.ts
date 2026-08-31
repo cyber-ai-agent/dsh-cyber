@@ -21,6 +21,7 @@ import type {
 } from '@dsh-cyber/contracts'
 
 import { ActorAnimationController } from './actor-animation-controller.js'
+import { WorldLocomotion, facingBetween } from '../runtime/world-locomotion.js'
 
 interface ActorView {
   root: Container
@@ -30,19 +31,11 @@ interface ActorView {
   name: Text
   activity: Text
   state: WorldRuntimeEntityState
-  motion: ActorMotion | undefined
 }
 
 interface GrowthMarkerView {
   root: Container
   count: Text
-}
-
-interface ActorMotion {
-  route: WorldPoint[]
-  segment: number
-  elapsed: number
-  segmentDuration: number
 }
 
 const WORLD_MIN_ZOOM = 0.55
@@ -81,8 +74,20 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
   #sharedScene = false
   #wheelListener: ((event: WheelEvent) => void) | undefined
 
-  constructor(callbacks: WorldRendererCallbacks) {
+  readonly #locomotion: WorldLocomotion
+
+  /**
+   * The walk lives outside the renderer.
+   *
+   * A character's on-screen position during a walk is not in the snapshot —
+   * the server leaves `entity.position` at the origin until a later event
+   * settles it — so whoever owns the interpolation owns the truth. Sharing one
+   * store with the other renderer is what lets the world survive being redrawn
+   * by a different one mid-stride.
+   */
+  constructor(callbacks: WorldRendererCallbacks, locomotion?: WorldLocomotion) {
     this.#callbacks = callbacks
+    this.#locomotion = locomotion ?? new WorldLocomotion()
   }
 
   async mount(host: HTMLElement, manifest: WorldThemeManifestV1, snapshot: WorldRuntimeSnapshot): Promise<void> {
@@ -136,6 +141,7 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
   updateSnapshot(snapshot: WorldRuntimeSnapshot): void {
     if (this.#snapshot !== undefined && snapshot.sequence < this.#snapshot.sequence) return
     this.#snapshot = snapshot
+    this.#locomotion.syncSnapshot(snapshot)
     if (!this.#scene || !this.#manifest) return
     const actorAssetId = this.#manifest.actorSets[0]?.assetId
     if (actorAssetId === undefined || !this.#assetTextures.has(actorAssetId)) return
@@ -152,7 +158,7 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
       const actor = this.#actors.get(entity.id) ?? this.#createActor(entity)
       const previousRosterIndex = actor.state.visualState['rosterIndex']
       const nextRosterIndex = entity.visualState['rosterIndex']
-      if (previousRosterIndex !== nextRosterIndex && actor.motion === undefined) {
+      if (previousRosterIndex !== nextRosterIndex && !this.#locomotion.isWalking(entity.id)) {
         actor.animation.destroy()
         actor.root.destroy({ children: true })
         this.#actors.delete(entity.id)
@@ -162,7 +168,16 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
         continue
       }
       actor.state = entity
-      if (actor.motion === undefined) actor.root.position.set(entity.position.x, entity.position.y)
+      // A character mid-walk is drawn where the shared store says it is: the
+      // snapshot still reports the place the walk started from, and adopting
+      // that on every streamed token would drag it backwards.
+      const live = this.#locomotion.stateOf(entity.id)
+      if (live !== undefined) {
+        actor.root.position.set(live.position.x, live.position.y)
+        if (live.walking) actor.state = { ...entity, facing: live.facing, activity: 'walking' }
+      } else {
+        actor.root.position.set(entity.position.x, entity.position.y)
+      }
       actor.root.zIndex = 600 + actor.root.y
       actor.name.text = entity.authorityRole === 'administrator' ? `${entity.displayName}  ♛` : entity.displayName
       actor.activity.text = entity.activityLabel
@@ -193,7 +208,7 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
         const semanticRoute = cuePoints(cue)
         const route = semanticRoute.length < 2 ? semanticRoute : [{ x: actor.root.x, y: actor.root.y }, ...semanticRoute.slice(1)]
         if (route.length > 1) {
-          actor.motion = { route, segment: 0, elapsed: 0, segmentDuration: segmentDuration(route[0]!, route[1]!) }
+          this.#locomotion.beginRoute(actor.state.id, route)
           actor.state = { ...actor.state, activity: 'walking', facing: facingBetween(route[0]!, route[1]!) }
           this.#applyAnimation(actor)
         }
@@ -381,7 +396,7 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
     root.on('pointerover', () => { activity.visible = true })
     root.on('pointerout', () => { activity.visible = this.#selectedEntityId === entity.id })
     root.label = entity.displayName
-    const actor: ActorView = { root, animation, selection, status, name, activity, state: entity, motion: undefined }
+    const actor: ActorView = { root, animation, selection, status, name, activity, state: entity }
     this.#sceneRoot.addChild(root)
     this.#actors.set(entity.id, actor)
     return actor
@@ -389,44 +404,22 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
 
   #tick(deltaMs: number): void {
     for (const actor of this.#actors.values()) {
-      if (actor.motion !== undefined) this.#advanceMotion(actor, deltaMs)
+      const live = this.#locomotion.stateOf(actor.state.id)
+      if (live !== undefined) {
+        actor.root.position.set(live.position.x, live.position.y)
+        const settled = this.#snapshot?.entities.find((entity) => entity.id === actor.state.id)
+        actor.state = live.walking
+          ? { ...actor.state, facing: live.facing, activity: 'walking' }
+          : { ...(settled ?? actor.state), facing: live.facing }
+        this.#applyAnimation(actor)
+      }
       actor.animation.tick(deltaMs)
       actor.root.zIndex = 600 + actor.root.y
     }
   }
 
-  #advanceMotion(actor: ActorView, deltaMs: number): void {
-    const motion = actor.motion
-    if (motion === undefined) return
-    const from = motion.route[motion.segment]
-    const to = motion.route[motion.segment + 1]
-    if (from === undefined || to === undefined) {
-      actor.motion = undefined
-      actor.state = { ...actor.state, activity: this.#snapshot?.entities.find((entity) => entity.id === actor.state.id)?.activity ?? 'idle' }
-      this.#applyAnimation(actor)
-      return
-    }
-    motion.elapsed += deltaMs
-    const progress = clamp(motion.elapsed / motion.segmentDuration, 0, 1)
-    actor.root.position.set(lerp(from.x, to.x, progress), lerp(from.y, to.y, progress))
-    actor.state = { ...actor.state, facing: facingBetween(from, to), activity: 'walking' }
-    this.#applyAnimation(actor)
-    if (progress < 1) return
-    motion.segment += 1
-    motion.elapsed = 0
-    const next = motion.route[motion.segment + 1]
-    if (next === undefined) {
-      actor.motion = undefined
-      const recovered = this.#snapshot?.entities.find((entity) => entity.id === actor.state.id)
-      if (recovered !== undefined) actor.state = recovered
-      this.#applyAnimation(actor)
-      return
-    }
-    motion.segmentDuration = segmentDuration(to, next)
-  }
-
   #applyAnimation(actor: ActorView): void {
-    actor.animation.setState(actor.motion === undefined ? actor.state.activity : 'walking', actor.state.facing)
+    actor.animation.setState(this.#locomotion.isWalking(actor.state.id) ? 'walking' : actor.state.activity, actor.state.facing)
   }
 
   #updateGrowth(snapshot: WorldRuntimeSnapshot): void {
@@ -639,19 +632,13 @@ function cuePoints(cue: WorldCue): WorldPoint[] {
 }
 
 function cueText(cue: WorldCue): string {
-  const value = cue.payload['text'] ?? cue.payload['label']
+  // `excerpt` is the key the projector writes; without it every speech bubble
+  // silently degraded to the character's activity label.
+  const value = cue.payload['text'] ?? cue.payload['excerpt'] ?? cue.payload['label']
   return typeof value === 'string' ? value : ''
 }
 
-function segmentDuration(from: WorldPoint, to: WorldPoint): number {
-  return Math.max(90, Math.hypot(to.x - from.x, to.y - from.y) / 230 * 1_000)
-}
 
-function facingBetween(from: WorldPoint, to: WorldPoint): WorldRuntimeEntityState['facing'] {
-  const dx = to.x - from.x
-  const dy = to.y - from.y
-  return Math.abs(dx) > Math.abs(dy) ? (dx >= 0 ? 'east' : 'west') : (dy >= 0 ? 'south' : 'north')
-}
 
 function lerp(from: number, to: number, progress: number): number {
   return from + (to - from) * progress
