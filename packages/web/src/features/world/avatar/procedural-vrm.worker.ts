@@ -1,9 +1,11 @@
-import { createProceduralVrm, type ProceduralAvatarDesign } from './procedural-vrm.js'
+import type { AvatarRecipe } from './avatar-recipe.js'
+import { createIdentityProceduralVrm, createProceduralVrm, type ProceduralAvatarDesign } from './procedural-vrm.js'
 
 interface WorkerRequest {
   requestId: string
   displayName: string
   design: ProceduralAvatarDesign
+  identityRecipe?: AvatarRecipe
 }
 
 type WorkerResponse =
@@ -18,9 +20,11 @@ interface AvatarWorkerScope {
 const scope = self as unknown as AvatarWorkerScope
 
 scope.onmessage = (event) => {
-  const { requestId, displayName, design } = event.data
+  const { requestId, displayName, design, identityRecipe } = event.data
   try {
-    const buffer = createProceduralVrm(displayName, design)
+    const buffer = identityRecipe === undefined
+      ? createProceduralVrm(displayName, design)
+      : createIdentityProceduralVrm(displayName, identityRecipe, design)
     scope.postMessage({ requestId, ok: true, buffer }, [buffer])
   } catch (cause) {
     scope.postMessage({
