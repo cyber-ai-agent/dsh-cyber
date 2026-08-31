@@ -1,6 +1,6 @@
 export type DigitalHumanVisualState = 'idle' | 'thinking' | 'executing' | 'speaking' | 'approval' | 'failed'
 export type DigitalHumanExpression = 'neutral' | 'focused' | 'confident' | 'speaking' | 'concerned' | 'exhausted'
-export type DigitalHumanGesture = 'breathe' | 'listen' | 'explain' | 'present' | 'hold' | 'freeze'
+export type DigitalHumanGesture = 'breathe' | 'walk' | 'listen' | 'explain' | 'present' | 'hold' | 'freeze'
 export type DigitalHumanRendererKind = 'sprite-2d' | 'live-portrait' | 'vrm-3d'
 export type DigitalHumanCapability = 'speech' | 'viseme' | 'expression' | 'gesture' | 'look-at'
 

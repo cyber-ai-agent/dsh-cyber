@@ -31,10 +31,23 @@ describe('lodFor', () => {
   })
 
   it('obeys a device ceiling even for the selected character', () => {
-    // A machine that cannot afford a rigged avatar cannot afford one for the
-    // selected character either; the ceiling is the whole point of a tier.
-    expect(lodFor({ distance: 1, selected: true, ceiling: 'reduced' })).toBe('reduced')
-    expect(lodFor({ distance: 1, speaking: true, ceiling: 'billboard' })).toBe('billboard')
+    // The ceiling applies to background actors. A focused/speaking character
+    // is the explicit quality request and remains legible even on a low tier.
+    expect(lodFor({ distance: 1, ceiling: 'reduced' })).toBe('reduced')
+    expect(lodFor({ distance: 1, ceiling: 'billboard' })).toBe('billboard')
+  })
+
+  it('upgrades a selected actor when the device ceiling permits it', () => {
+    expect(lodFor({ distance: 60, selected: true })).toBe('full')
+  })
+
+  it('upgrades a speaking actor when the device ceiling permits it', () => {
+    expect(lodFor({ distance: 60, speaking: true })).toBe('full')
+  })
+
+  it('prioritizes the selected and speaking actor over a billboard ceiling', () => {
+    expect(lodFor({ distance: 60, selected: true, ceiling: 'billboard' })).toBe('full')
+    expect(lodFor({ distance: 60, speaking: true, ceiling: 'billboard' })).toBe('full')
   })
 
   it('does not raise a distant character to meet a generous ceiling', () => {

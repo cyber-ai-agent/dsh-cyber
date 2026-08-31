@@ -37,6 +37,7 @@ export class LazyThreeWorldRenderer implements WorldRenderer<HTMLElement> {
   readonly #callbacks: WorldRendererCallbacks
   readonly #options: ThreeWorldRendererOptions
   readonly #pending: Pending[] = []
+  readonly #pendingLatest = new Map<string, Pending>()
   #inner: WorldRenderer<HTMLElement> | undefined
   #destroyed = false
   #zoom = 1
@@ -60,6 +61,8 @@ export class LazyThreeWorldRenderer implements WorldRenderer<HTMLElement> {
       return
     }
     for (const apply of this.#pending.splice(0)) apply(renderer)
+    for (const apply of this.#pendingLatest.values()) apply(renderer)
+    this.#pendingLatest.clear()
   }
 
   updateSnapshot(snapshot: WorldRuntimeSnapshot): void {
@@ -71,19 +74,19 @@ export class LazyThreeWorldRenderer implements WorldRenderer<HTMLElement> {
   }
 
   selectEntity(entityId?: string): void {
-    this.#defer((renderer) => renderer.selectEntity(entityId))
+    this.#deferLatest('selected-entity', (renderer) => renderer.selectEntity(entityId))
   }
 
   selectObject(objectId?: string): void {
-    this.#defer((renderer) => renderer.selectObject(objectId))
+    this.#deferLatest('selected-object', (renderer) => renderer.selectObject(objectId))
   }
 
   focusEntity(entityId: string): void {
-    this.#defer((renderer) => renderer.focusEntity(entityId))
+    this.#deferLatest('focus-entity', (renderer) => renderer.focusEntity(entityId))
   }
 
   setCameraMode(mode: WorldCameraMode, subjectId?: string): void {
-    this.#defer((renderer) => {
+    this.#deferLatest('camera', (renderer) => {
       const target = renderer as { setCameraMode?: (mode: WorldCameraMode, subjectId?: string) => void }
       target.setCameraMode?.(mode, subjectId)
     })
@@ -106,6 +109,7 @@ export class LazyThreeWorldRenderer implements WorldRenderer<HTMLElement> {
   destroy(): void {
     this.#destroyed = true
     this.#pending.length = 0
+    this.#pendingLatest.clear()
     this.#inner?.destroy()
     this.#inner = undefined
   }
@@ -114,6 +118,13 @@ export class LazyThreeWorldRenderer implements WorldRenderer<HTMLElement> {
     if (this.#destroyed) return
     const renderer = this.#inner
     if (renderer === undefined) this.#pending.push(apply)
+    else apply(renderer)
+  }
+
+  #deferLatest(key: string, apply: Pending): void {
+    if (this.#destroyed) return
+    const renderer = this.#inner
+    if (renderer === undefined) this.#pendingLatest.set(key, apply)
     else apply(renderer)
   }
 }

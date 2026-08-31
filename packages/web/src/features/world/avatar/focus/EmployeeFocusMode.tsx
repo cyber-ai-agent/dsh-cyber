@@ -320,7 +320,7 @@ export function EmployeeFocusMode({ world, employee, profile, entity, collaborat
   const visibleCollaborators = collaborators.slice(0, 2)
   const remainingCollaborators = Math.max(0, collaborators.length - visibleCollaborators.length)
   const requestedVrmFallback = rendererMode === '3d' && employee.avatarProfile?.rendererKind !== 'vrm-3d'
-    ? `${employee.displayName}还没有 3D 形象，当前继续使用 2D 备用形象。`
+    ? `${employee.displayName}还没有 3D 形象，世界里先使用默认形象出场。`
     : undefined
   const focusNotice = rendererNotice ?? requestedVrmFallback
 

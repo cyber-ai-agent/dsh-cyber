@@ -59,7 +59,7 @@ export interface ScenePlacement {
   objectId?: string
 }
 
-export type SceneZoneKind = 'work' | 'meeting' | 'rest' | 'growth' | 'reception'
+export type SceneZoneKind = 'work' | 'meeting' | 'rest' | 'growth' | 'reception' | 'creative' | 'research' | 'server'
 
 export interface SceneZone {
   id: string
@@ -218,6 +218,9 @@ export function zoneKindFor(anchorId: string, tags: readonly string[]): SceneZon
   const haystack = `${anchorId} ${tags.join(' ')}`.toLowerCase()
   if (/meeting|bridge|会议|round/.test(haystack)) return 'meeting'
   if (/rest|lounge|cafe|休息|sofa/.test(haystack)) return 'rest'
+  if (/creative|studio|design|创意|设计/.test(haystack)) return 'creative'
+  if (/research|lab|science|研究|实验/.test(haystack)) return 'research'
+  if (/server|tool|ops|infra|服务器|工具|运维/.test(haystack)) return 'server'
   if (/growth|skill|milestone|成长/.test(haystack)) return 'growth'
   if (/reception|lobby|entry|前台|door/.test(haystack)) return 'reception'
   return 'work'

@@ -54,6 +54,7 @@ interface ActorView {
   vrm: VrmActor | undefined
   /** Guards against starting the same download twice. */
   avatarUrl: string | undefined
+  avatarLoadController: AbortController | undefined
   lod: AvatarLod
   sinceUpdate: number
   entity: WorldRuntimeEntityState
@@ -81,6 +82,14 @@ export interface ThreeWorldRendererOptions {
    * applies, which declares no assets and leaves the procedural layer alone.
    */
   motionLibrary?: Parameters<VrmActor['loadDeclaredMotion']>[0]
+  /**
+   * Test seam for the actual renderer. Production uses Three's WebGL renderer;
+   * integration tests can provide a deterministic canvas without changing
+   * the production capability policy.
+   */
+  createRenderer?: (parameters: THREE.WebGLRendererParameters) => THREE.WebGLRenderer
+  /** Injectable avatar loader for exercising VRM/fallback swaps without a network. */
+  loadAvatar?: (assetUrl: string, signal?: AbortSignal) => Promise<VrmActor>
 }
 
 export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
@@ -133,7 +142,8 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
     this.#sceneManifest = sceneManifest
     this.#layout = planWorldLayout(sceneManifest)
 
-    const renderer = new THREE.WebGLRenderer({ antialias: this.#options.shadows !== false, alpha: false })
+    const renderer = this.#options.createRenderer?.({ antialias: this.#options.shadows !== false, alpha: false })
+      ?? new THREE.WebGLRenderer({ antialias: this.#options.shadows !== false, alpha: false })
     renderer.setPixelRatio(Math.min(this.#options.pixelRatio ?? globalThis.devicePixelRatio ?? 1, 2))
     renderer.setClearColor(CLEAR_COLOUR, 1)
     renderer.outputColorSpace = THREE.SRGBColorSpace
@@ -166,8 +176,10 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
     this.#buildRoom(scene, this.#layout)
 
     this.#resize()
-    this.#resizeObserver = new ResizeObserver(() => this.#resize())
-    this.#resizeObserver.observe(host)
+    if (typeof ResizeObserver !== 'undefined') {
+      this.#resizeObserver = new ResizeObserver(() => this.#resize())
+      this.#resizeObserver.observe(host)
+    }
     host.addEventListener('pointerdown', this.#onPointerDown)
     host.addEventListener('contextmenu', this.#onContextMenu)
 
@@ -272,8 +284,15 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
   /** Camera modes are this renderer's own vocabulary, beyond the shared interface. */
   setCameraMode(mode: WorldCameraMode, subjectId?: string): void {
     this.#cameraMode = mode
-    if (subjectId !== undefined) this.#cameraSubjectId = subjectId
-    if (mode === 'overview') this.#cameraSubjectId = undefined
+    // Non-overview updates are authoritative too. Retaining the previous
+    // subject when a caller intentionally passes `undefined` leaves the camera
+    // following a character that is no longer selected.
+    this.#cameraSubjectId = mode === 'overview' ? undefined : subjectId
+  }
+
+  /** Current camera intent, useful to reconcile a lazy renderer's state. */
+  cameraState(): { mode: WorldCameraMode; subjectId: string | undefined } {
+    return { mode: this.#cameraMode, subjectId: this.#cameraSubjectId }
   }
 
   fitScene(): void {
@@ -298,7 +317,7 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
     this.#resizeObserver = undefined
     this.#host?.removeEventListener('pointerdown', this.#onPointerDown)
     this.#host?.removeEventListener('contextmenu', this.#onContextMenu)
-    for (const [, view] of this.#actors) { view.vrm?.dispose(); view.actor.dispose() }
+    for (const [, view] of this.#actors) { view.avatarLoadController?.abort(); view.vrm?.dispose(); view.actor.dispose() }
     this.#actors.clear()
     this.#objectMeshes.clear()
     this.#pickables.length = 0
@@ -346,11 +365,13 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
     const floorGeometry = new THREE.PlaneGeometry(layout.floor.width, layout.floor.depth)
     const floorMaterial = new THREE.MeshStandardMaterial({ color: FLOOR_COLOUR, roughness: 0.94, metalness: 0.02 })
     const floor = new THREE.Mesh(floorGeometry, floorMaterial)
+    floor.name = 'world-floor'
     floor.rotation.x = -Math.PI / 2
     floor.receiveShadow = this.#options.shadows !== false
     scene.add(floor)
     this.#disposables.push(floorGeometry, floorMaterial)
 
+    this.#buildArchitecture(scene, layout)
     for (const zone of layout.zones) this.#buildZone(scene, zone)
     for (const placement of layout.placements) this.#buildPlacement(scene, placement)
 
@@ -374,6 +395,7 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
       opacity: 0.34,
     })
     const mesh = new THREE.Mesh(geometry, material)
+    mesh.name = `world-zone:${zone.id}`
     mesh.rotation.x = -Math.PI / 2
     mesh.position.set(zone.centre.x, 0.004, zone.centre.z)
     mesh.receiveShadow = false
@@ -391,6 +413,7 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
       emissiveIntensity: 0.08,
     })
     const mesh = new THREE.Mesh(geometry, material)
+    mesh.name = `world-placement:${placement.id}`
     mesh.position.set(placement.centre.x, placement.height / 2, placement.centre.z)
     mesh.rotation.y = placement.rotation
     mesh.castShadow = this.#options.shadows !== false && placement.kind !== 'rug'
@@ -404,6 +427,30 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
     }
   }
 
+  /** Low, architectural walls make the office read as a place, not a grid. */
+  #buildArchitecture(scene: THREE.Scene, layout: SceneLayout): void {
+    const height = 2.8
+    const thickness = 0.16
+    const material = new THREE.MeshStandardMaterial({ color: 0x28313d, roughness: 0.82, metalness: 0.12 })
+    const walls = [
+      { name: 'north', width: layout.floor.width, depth: thickness, x: 0, z: -layout.floor.depth / 2 },
+      { name: 'south', width: layout.floor.width, depth: thickness, x: 0, z: layout.floor.depth / 2 },
+      { name: 'west', width: thickness, depth: layout.floor.depth - thickness * 2, x: -layout.floor.width / 2, z: 0 },
+      { name: 'east', width: thickness, depth: layout.floor.depth - thickness * 2, x: layout.floor.width / 2, z: 0 },
+    ]
+    for (const wall of walls) {
+      const geometry = new THREE.BoxGeometry(wall.width, height, wall.depth)
+      const mesh = new THREE.Mesh(geometry, material)
+      mesh.name = `world-wall:${wall.name}`
+      mesh.position.set(wall.x, height / 2, wall.z)
+      mesh.castShadow = this.#options.shadows !== false
+      mesh.receiveShadow = this.#options.shadows !== false
+      scene.add(mesh)
+      this.#disposables.push(geometry)
+    }
+    this.#disposables.push(material)
+  }
+
   #createActor(scene: THREE.Scene, entity: WorldRuntimeEntityState): void {
     // A room of identically coloured stand-ins is unreadable; the hue is
     // derived from the id so it is stable across reloads and renderers.
@@ -412,7 +459,7 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
     actor.root.userData.entityId = entity.id
     scene.add(actor.root)
     this.#pickables.push(actor.picker)
-    this.#actors.set(entity.id, { root: actor.root, actor, vrm: undefined, avatarUrl: undefined, lod: 'full', sinceUpdate: 0, entity })
+    this.#actors.set(entity.id, { root: actor.root, actor, vrm: undefined, avatarUrl: undefined, avatarLoadController: undefined, lod: 'full', sinceUpdate: 0, entity })
     const view = this.#actors.get(entity.id)!
     this.#placeActor(view, entity)
     this.#adoptAvatar(view)
@@ -429,17 +476,32 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
    */
   #adoptAvatar(view: ActorView): void {
     const url = this.#options.resolveAvatarUrl?.(view.entity.id)
-    if (url === undefined || url === view.avatarUrl || this.#failedAvatarUrls.has(url)) return
+    if (url === undefined) {
+      view.avatarLoadController?.abort()
+      view.avatarLoadController = undefined
+      view.avatarUrl = undefined
+      return
+    }
+    if (url === view.avatarUrl || this.#failedAvatarUrls.has(url)) return
+    view.avatarLoadController?.abort()
     view.avatarUrl = url
+    const controller = new AbortController()
+    view.avatarLoadController = controller
     void (async () => {
+      let actor: VrmActor | undefined
       try {
-        const { VrmActor } = await import('../../avatar/vrm/VrmActor.js')
-        const actor = await VrmActor.load({ assetUrl: url })
+        actor = this.#options.loadAvatar === undefined
+          ? await (await import('../../avatar/vrm/VrmActor.js')).VrmActor.load({ assetUrl: url, signal: controller.signal })
+          : await this.#options.loadAvatar(url, controller.signal)
         if (this.#destroyed || this.#actors.get(view.entity.id) !== view || view.avatarUrl !== url) {
           actor.dispose()
           return
         }
         await actor.loadDeclaredMotion(this.#options.motionLibrary)
+        if (this.#destroyed || controller.signal.aborted || this.#actors.get(view.entity.id) !== view || view.avatarUrl !== url) {
+          actor.dispose()
+          return
+        }
         view.vrm?.dispose()
         view.vrm = actor
         if (this.#options.shadows !== false) {
@@ -449,9 +511,11 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
           })
         }
         view.root.add(actor.root)
-        view.actor.setDetail({ face: false, secondaryMotion: false, skinned: false, shadow: false })
-        view.actor.hideStandIn()
-      } catch {
+        applyActorRepresentation(view, view.lod)
+        view.avatarLoadController = undefined
+      } catch (cause) {
+        if (actor !== undefined && view.vrm !== actor) actor.dispose()
+        if (isAbortError(cause)) return
         // An avatar that will not load leaves the character standing there —
         // emptying its desk would be worse than a plain figure. The url stays
         // recorded so the failure is not retried on every snapshot, which for
@@ -465,6 +529,7 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
     scene.remove(view.root)
     const index = this.#pickables.indexOf(view.actor.picker)
     if (index >= 0) this.#pickables.splice(index, 1)
+    view.avatarLoadController?.abort()
     view.vrm?.dispose()
     view.actor.dispose()
     this.#actors.delete(id)
@@ -486,8 +551,6 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
     const deltaMs = Math.min(now - this.#lastFrameAt, 250)
     this.#lastFrameAt = now
     this.#frame += 1
-
-    this.#locomotion.advance(deltaMs)
 
     const floor = this.#floorRect()
     // Everybody looks at whoever is talking; the character the user is focused
@@ -523,11 +586,7 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
         // A character that has its own avatar must not have the stand-in drawn
         // back through it: setDetail's job is to decide what the stand-in is
         // made of, and once it has stepped aside that answer is "nothing".
-        if (view.vrm === undefined) view.actor.setDetail(capabilitiesFor(next))
-        else {
-          view.actor.hideStandIn()
-          view.vrm.root.visible = next !== 'billboard'
-        }
+        applyActorRepresentation(view, next)
       }
       const focusedOnViewer = this.#cameraMode !== 'overview'
         && (this.#cameraSubjectId ?? this.#selectedEntityId) === view.entity.id
@@ -547,9 +606,12 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
           // the listening gesture while its lips moved.
           const speaking = view.entity.activity === 'talking'
           const state = visualStateForEntity(view.entity, this.#connected, speaking)
+          const motionCue = activity === 'walking'
+            ? { expression: 'focused' as const, gesture: 'walk' as const }
+            : motionCueForState(state)
           view.vrm.update(view.sinceUpdate, {
             state,
-            motionCue: motionCueForState(state),
+            motionCue,
             speaking,
             animated: true,
             detail: capabilitiesFor(view.lod),
@@ -621,6 +683,20 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
       : { x: 0, y: 0, width: scene.size.width, height: scene.size.height }
   }
 
+  /**
+   * Reports the representation that is actually drawable for an actor.
+   * Keeping this on the renderer makes integration tests observe the same
+   * state machine that the frame loop uses, rather than only checking LOD
+   * policy output.
+   */
+  actorRepresentation(entityId: string): { vrmLoaded: boolean; vrmVisible: boolean; standInVisible: boolean; visibleRepresentationCount: number } | undefined {
+    const view = this.#actors.get(entityId)
+    if (view === undefined) return undefined
+    const vrmVisible = view.vrm?.root.visible === true
+    const standInVisible = view.actor.representationVisible
+    return { vrmLoaded: view.vrm !== undefined, vrmVisible, standInVisible, visibleRepresentationCount: Number(vrmVisible) + Number(standInVisible) }
+  }
+
   #resize(): void {
     const host = this.#host
     const renderer = this.#renderer
@@ -680,12 +756,41 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
   }
 }
 
+export interface ActorRepresentationView {
+  actor: LowPolyActor
+  vrm: Pick<VrmActor, 'root'> | undefined
+}
+
+/**
+ * Applies the representation state machine shared by every LOD transition.
+ * A VRM at billboard distance must yield to the stand-in billboard; hiding
+ * both leaves only a label/picker and makes the character disappear.
+ */
+export function applyActorRepresentation(view: ActorRepresentationView, lod: AvatarLod): void {
+  if (view.vrm === undefined) {
+    view.actor.setDetail(capabilitiesFor(lod))
+    return
+  }
+
+  if (lod === 'billboard') {
+    view.vrm.root.visible = false
+    view.actor.setDetail(capabilitiesFor('billboard'))
+    return
+  }
+
+  view.actor.hideStandIn()
+  view.vrm.root.visible = true
+}
+
 const ZONE_COLOURS: Record<SceneZone['kind'], number> = {
   work: 0x1f2a37,
   meeting: 0x24303f,
   rest: 0x232b33,
   growth: 0x27303d,
   reception: 0x222c38,
+  creative: 0x2d3540,
+  research: 0x293640,
+  server: 0x26313d,
 }
 
 const PROP_COLOURS: Partial<Record<ScenePlacement['kind'], number>> = {
@@ -734,4 +839,8 @@ function cueText(cue: WorldCue): string {
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value))
+}
+
+function isAbortError(cause: unknown): boolean {
+  return cause instanceof Error && cause.name === 'AbortError'
 }

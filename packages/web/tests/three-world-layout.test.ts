@@ -136,4 +136,10 @@ describe('zoneKindFor', () => {
   it('falls back to work rather than to nothing', () => {
     expect(zoneKindFor('unknown-anchor', [])).toBe('work')
   })
+
+  it('recognizes the creative, research, and server/tool office zones', () => {
+    expect(zoneKindFor('creative-studio', [])).toBe('creative')
+    expect(zoneKindFor('research-lab', [])).toBe('research')
+    expect(zoneKindFor('server-ops', [])).toBe('server')
+  })
 })

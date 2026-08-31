@@ -21,7 +21,7 @@ export function threeDimensionalControl(employee: CyberEmployee | undefined): {
   // The control switches renderers; it stopped opening the avatar editor when
   // the world learned to draw a character that has no avatar yet. What it says
   // has to match: it is always available, and it never promises creation.
-  if (employee === undefined) return { available: false, label: '3D', title: '用三维方式观看这个世界' }
+  if (employee === undefined) return { available: true, label: '3D', title: '用三维方式观看这个世界' }
   if (hasInteractiveVrm(employee)) return { available: true, label: '3D', title: `在三维世界中查看${employee.displayName}` }
-  return { available: false, label: '3D', title: `用三维方式观看这个世界（${employee.displayName}还没有 3D 形象，将以默认形象出场）` }
+  return { available: true, label: '3D', title: `用三维方式观看这个世界（${employee.displayName}还没有 3D 形象，将以默认形象出场）` }
 }

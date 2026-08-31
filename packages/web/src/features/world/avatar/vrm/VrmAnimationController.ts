@@ -12,6 +12,10 @@ export class VrmAnimationController {
 
   register(gesture: DigitalHumanGesture, clip: AnimationClip): void { this.#actions.set(gesture, this.#mixer.clipAction(clip)) }
 
+  hasGesture(gesture: DigitalHumanGesture): boolean {
+    return this.#actions.has(gesture)
+  }
+
   setGesture(gesture: DigitalHumanGesture): void {
     const next = this.#actions.get(gesture)
     if (next === undefined || next === this.#current) return

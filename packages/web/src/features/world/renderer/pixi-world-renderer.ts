@@ -403,7 +403,6 @@ export class PixiWorldRenderer implements WorldRenderer<HTMLElement> {
   }
 
   #tick(deltaMs: number): void {
-    this.#locomotion.advance(deltaMs)
     for (const actor of this.#actors.values()) {
       const live = this.#locomotion.stateOf(actor.state.id)
       if (live !== undefined) {

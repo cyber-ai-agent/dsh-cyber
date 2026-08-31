@@ -28,12 +28,17 @@ const BILLBOARD_BEYOND = 22
 const RANK: Record<AvatarLod, number> = { billboard: 0, reduced: 1, full: 2 }
 
 export function lodFor(input: LodInput): AvatarLod {
-  const natural = input.selected === true || input.speaking === true
+  const priority = input.selected === true || input.speaking === true
+  const natural = priority
     ? 'full'
     : input.distance <= REDUCED_BEYOND
       ? 'full'
       : input.distance <= BILLBOARD_BEYOND ? 'reduced' : 'billboard'
-  return lowerOf(natural, input.ceiling ?? 'full')
+  // A deliberate user focus or an active speaker is a quality request, not a
+  // distance heuristic. Even a billboard device must keep the one character
+  // the user is looking at (or listening to) legible; all other actors obey the
+  // device ceiling.
+  return priority ? natural : lowerOf(natural, input.ceiling ?? 'full')
 }
 
 export function lowerOf(left: AvatarLod, right: AvatarLod): AvatarLod {

@@ -1,6 +1,16 @@
 export type RenderingQuality = 'high' | 'balanced' | 'low' | 'static'
 
 /**
+ * The policy boundary between browser capability detection and world UI.
+ * Tests can provide deterministic spatial capability without weakening the
+ * production rule that refuses software WebGL.
+ */
+export interface SpatialCapabilityProvider {
+  supportsSpatialRendering(): boolean
+  quality(staticMode: boolean): RenderingQuality
+}
+
+/**
  * Whether this device can draw a 3D world at all.
  *
  * Deliberately separate from {@link detectRenderingQuality}, which also folds
@@ -9,13 +19,49 @@ export type RenderingQuality = 'high' | 'balanced' | 'low' | 'static'
  * motion, and refusing to draw the world would take away a mode the user never
  * asked to lose.
  */
-export function supportsSpatialRendering(): boolean {
-  return typeof window !== 'undefined' && supportsWebGl()
+export class BrowserSpatialCapabilityProvider implements SpatialCapabilityProvider {
+  readonly #spatial = typeof window !== 'undefined' && supportsWebGl()
+
+  supportsSpatialRendering(): boolean {
+    return this.#spatial
+  }
+
+  quality(staticMode: boolean): RenderingQuality {
+    return detectRenderingQuality(staticMode, this)
+  }
 }
 
-export function detectRenderingQuality(staticMode: boolean): RenderingQuality {
+/** Deterministic provider for renderer integration and browser contract tests. */
+export class TestSpatialCapabilityProvider implements SpatialCapabilityProvider {
+  readonly #supported: boolean
+  readonly #quality: RenderingQuality
+
+  constructor(options: { supported?: boolean; quality?: RenderingQuality } = {}) {
+    this.#supported = options.supported ?? true
+    this.#quality = options.quality ?? 'high'
+  }
+
+  supportsSpatialRendering(): boolean {
+    return this.#supported
+  }
+
+  quality(staticMode: boolean): RenderingQuality {
+    return staticMode ? 'static' : this.#quality
+  }
+}
+
+export const browserSpatialCapabilityProvider = new BrowserSpatialCapabilityProvider()
+
+export function supportsSpatialRendering(provider: SpatialCapabilityProvider = browserSpatialCapabilityProvider): boolean {
+  return provider.supportsSpatialRendering()
+}
+
+export function detectRenderingQuality(
+  staticMode: boolean,
+  provider: SpatialCapabilityProvider = browserSpatialCapabilityProvider,
+): RenderingQuality {
   if (staticMode || typeof window === 'undefined' || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return 'static'
-  if (!supportsWebGl()) return 'static'
+  if (!provider.supportsSpatialRendering()) return 'static'
   const device = navigator as Navigator & { deviceMemory?: number }
   const memory = device.deviceMemory
   const cores = navigator.hardwareConcurrency

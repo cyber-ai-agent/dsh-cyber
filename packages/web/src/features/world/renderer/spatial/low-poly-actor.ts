@@ -139,6 +139,11 @@ export class LowPolyActor {
     this.root.add(this.#billboard)
   }
 
+  /** Whether this stand-in currently contributes a visible representation. */
+  get representationVisible(): boolean {
+    return this.#body.visible || this.#head.visible || this.#billboard?.parent === this.root
+  }
+
   /**
    * Advances the character's own motion.
    *

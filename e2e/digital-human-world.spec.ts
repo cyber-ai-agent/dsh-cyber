@@ -282,7 +282,7 @@ test('keeps the chosen 2D view across conversations and centers the latest group
   // but choosing 3D no longer forces the editor open: the character is in the
   // world either way, as a stand-in until its own avatar exists. Creating one
   // is offered where the character is, in its panel.
-  const configureThreeDimensional = page.getByRole('tab', { name: `为${secondEmployeeName}创建 3D 形象`, exact: true })
+  const configureThreeDimensional = page.getByRole('tab', { name: '3D', exact: true })
   await expect(configureThreeDimensional).toBeVisible()
   await focus.getByRole('button', { name: '创建 3D 形象' }).click()
   const avatarDialog = page.getByRole('dialog', { name: `角色设置 · ${secondEmployeeName}` })
@@ -384,8 +384,8 @@ test('previews an uploaded portrait, publishes a new avatar revision, and restor
  */
 async function selectCharacterView(page: Page, mode: '2D' | '3D', expectedEmployeeName: string): Promise<void> {
   // The 3D control names itself after what it will do — "3D" once the
-  // character has an avatar, "创建 3D" before that — so the renderer tabs are
-  // addressed by position rather than by a label that moves.
+  // The renderer tabs always describe how the world is drawn. Avatar creation
+  // is offered by the character panel, not by changing the renderer tab label.
   const display = page.getByRole('tablist', { name: '世界显示方式' })
   const tab = display.getByRole('tab').nth(mode === '2D' ? 0 : 1)
   await expect(tab).toBeVisible()

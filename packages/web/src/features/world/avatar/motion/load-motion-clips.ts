@@ -1,7 +1,7 @@
 import type { AnimationClip } from 'three'
 
 import type { DigitalHumanGesture } from '../../digital-human-motion.js'
-import { DEFAULT_MOTION_LIBRARY, type MotionLibraryEntry } from './MotionLibrary.js'
+import { DEFAULT_MOTION_LIBRARY, type MotionLibraryEntry, type MotionPackMotionName } from './MotionLibrary.js'
 
 /**
  * Turns declared motion assets into clips the animation controller can play.
@@ -22,6 +22,7 @@ import { DEFAULT_MOTION_LIBRARY, type MotionLibraryEntry } from './MotionLibrary
 export interface MotionClipSource {
   gesture: DigitalHumanGesture
   url: string
+  animationName?: MotionPackMotionName
 }
 
 export interface LoadMotionClipsResult {
@@ -37,7 +38,7 @@ export function declaredMotionSources(
   return Object.values(library).flatMap((entry) =>
     entry.vrmaAssetUrl === undefined || entry.vrmaAssetUrl.trim() === ''
       ? []
-      : [{ gesture: entry.gesture, url: entry.vrmaAssetUrl }])
+      : [{ gesture: entry.gesture, url: entry.vrmaAssetUrl, ...(entry.animationName === undefined ? {} : { animationName: entry.animationName }) }])
 }
 
 /**
@@ -60,20 +61,30 @@ export async function loadMotionClips(
   ])
   const loader = new loaderModule.GLTFLoader()
   loader.register((parser) => new animationModule.VRMAnimationLoaderPlugin(parser))
+  const documents = new Map<string, Awaited<ReturnType<typeof loader.loadAsync>>>()
 
   for (const source of sources) {
     try {
-      const gltf = await loader.loadAsync(source.url)
+      let gltf = documents.get(source.url)
+      if (gltf === undefined) {
+        gltf = await loader.loadAsync(source.url)
+        documents.set(source.url, gltf)
+      }
       const animations = (gltf.userData as { vrmAnimations?: unknown[] }).vrmAnimations ?? []
-      const animation = animations[0]
-      if (animation === undefined) {
+      const animation = source.animationName === undefined
+        ? animations[0]
+        : animations.find((item) => typeof item === 'object' && item !== null && (item as { name?: unknown }).name === source.animationName)
+          ?? animations[0]
+      const clip = animation !== undefined
+        ? animationModule.createVRMAnimationClip(
+          animation as Parameters<typeof animationModule.createVRMAnimationClip>[0],
+          vrm as Parameters<typeof animationModule.createVRMAnimationClip>[1],
+        )
+        : selectSelfAuthoredClip(gltf.animations, source.animationName)
+      if (clip === undefined) {
         result.failures.push({ ...source, reason: '文件不包含 VRM 动画' })
         continue
       }
-      const clip = animationModule.createVRMAnimationClip(
-        animation as Parameters<typeof animationModule.createVRMAnimationClip>[0],
-        vrm as Parameters<typeof animationModule.createVRMAnimationClip>[1],
-      )
       result.clips.push({ gesture: source.gesture, clip })
     } catch (error) {
       result.failures.push({
@@ -83,4 +94,18 @@ export async function loadMotionClips(
     }
   }
   return result
+}
+
+/**
+ * The bundled starter pack is plain glTF rather than a third-party VRMA. Its
+ * clips target one neutral root node; retargeting that node to the actor root
+ * keeps the pack useful for every VRM while preserving AnimationMixer
+ * cross-fades. A supplied VRMA always takes the stronger humanoid path above.
+ */
+function selectSelfAuthoredClip(animations: readonly AnimationClip[], name: MotionPackMotionName | undefined): AnimationClip | undefined {
+  const source = name === undefined ? animations[0] : animations.find((clip) => clip.name === name) ?? animations[0]
+  if (source === undefined) return undefined
+  const clip = source.clone()
+  for (const track of clip.tracks) track.name = track.name.replace(/^dsh-motion-root\./u, '.')
+  return clip
 }

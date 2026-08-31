@@ -147,6 +147,37 @@ export class WorldLocomotion {
   }
 }
 
+/**
+ * Renderer-independent world clock.
+ *
+ * A renderer can be destroyed while a lazy replacement loads. Keeping the
+ * timestamp and advancing the shared locomotion store here means elapsed wall
+ * time still belongs to the world during that gap, with exactly one owner for
+ * each interval.
+ */
+export class WorldLocomotionClock {
+  readonly #locomotion: WorldLocomotion
+  #lastAt: number | undefined
+
+  constructor(locomotion: WorldLocomotion) {
+    this.#locomotion = locomotion
+  }
+
+  tick(timestamp: number): void {
+    if (this.#lastAt === undefined) {
+      this.#lastAt = timestamp
+      return
+    }
+    const delta = Math.max(0, timestamp - this.#lastAt)
+    this.#lastAt = timestamp
+    this.#locomotion.advance(delta)
+  }
+
+  reset(timestamp?: number): void {
+    this.#lastAt = timestamp
+  }
+}
+
 export function segmentDuration(from: WorldPoint, to: WorldPoint): number {
   return Math.max(MIN_SEGMENT_MS, Math.hypot(to.x - from.x, to.y - from.y) / WORLD_WALK_SPEED * 1_000)
 }

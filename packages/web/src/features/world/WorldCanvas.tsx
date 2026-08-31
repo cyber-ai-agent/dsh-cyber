@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react'
 import type {
+  RendererRegistry,
   RendererKind,
   WorldCue,
   WorldRenderer,
@@ -9,8 +10,8 @@ import type {
 } from '@dsh-cyber/contracts'
 
 import { createWorldRendererRegistry } from './renderer/renderer-registry.js'
-import { WorldLocomotion } from './runtime/world-locomotion.js'
-import { detectRenderingQuality, supportsSpatialRendering } from './avatar/renderer/RenderingQuality.js'
+import { WorldLocomotion, WorldLocomotionClock } from './runtime/world-locomotion.js'
+import { browserSpatialCapabilityProvider, type SpatialCapabilityProvider } from './avatar/renderer/RenderingQuality.js'
 import type { WorldCameraMode } from './runtime/world-view-mode.js'
 
 interface WorldCanvasProps {
@@ -36,6 +37,10 @@ interface WorldCanvasProps {
   cameraSubjectId?: string
   /** This character's published avatar, so the world can adopt it in place. */
   resolveAvatarUrl?: (entityId: string) => string | undefined
+  /** Injectable renderer registry for real renderer integration tests. */
+  rendererRegistry?: RendererRegistry<HTMLElement>
+  /** Injectable capability policy; production defaults to browser detection. */
+  spatialCapabilityProvider?: SpatialCapabilityProvider
   rendererIdentity: string
   snapshot: WorldRuntimeSnapshot
   cues: WorldCue[]
@@ -81,11 +86,19 @@ export function WorldCanvas({
   onObjectContext,
   onReady,
   onRendererResolved,
+  rendererRegistry,
+  spatialCapabilityProvider = browserSpatialCapabilityProvider,
 }: WorldCanvasProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<WorldRenderer<HTMLElement> | undefined>(undefined)
+  const rendererMounted = useRef(false)
   const appliedCueIds = useRef(new Set<string>())
   const fallbackLocomotion = useRef<WorldLocomotion | undefined>(undefined)
+  const sharedLocomotion = locomotion ?? (fallbackLocomotion.current ??= new WorldLocomotion())
+  const latestCameraState = useRef<{ mode: WorldCameraMode | undefined; subjectId: string | undefined }>({ mode: cameraMode, subjectId: cameraSubjectId })
+  latestCameraState.current = { mode: cameraMode, subjectId: cameraSubjectId }
+  const latestSelection = useRef<{ entityId: string | undefined; objectId: string | undefined; focusEntityId: string | undefined }>({ entityId: selectedEntityId, objectId: selectedObjectId, focusEntityId })
+  latestSelection.current = { entityId: selectedEntityId, objectId: selectedObjectId, focusEntityId }
   // Held in a ref, not closed over at mount: the renderer is built once and
   // asks again on every snapshot, so a resolver captured at mount would keep
   // answering with the character list from the moment the world opened — and
@@ -105,9 +118,9 @@ export function WorldCanvas({
   // is deliberately not a veto here — wanting less movement is not the same as
   // having no GPU, and it reaches the renderer as the lowest tier instead.
   const capability = useMemo(() => ({
-    spatial: supportsSpatialRendering(),
-    quality: detectRenderingQuality(false),
-  }), [])
+    spatial: spatialCapabilityProvider.supportsSpatialRendering(),
+    quality: spatialCapabilityProvider.quality(false),
+  }), [spatialCapabilityProvider])
   const requestedKind = rendererKind ?? manifest.renderer
   const activeKind = requestedKind === 'three-3d' && !capability.spatial ? 'pixi-2d' : requestedKind
   const worldKey = `${manifest.id}:${snapshot.sceneId}`
@@ -119,18 +132,33 @@ export function WorldCanvas({
   useEffect(() => { appliedCueIds.current.clear() }, [worldKey])
   useEffect(() => { onRendererResolved?.(activeKind) }, [activeKind])
 
+  // The simulation clock belongs to the world, not to a renderer. It keeps
+  // advancing while the 3D chunk is loading or a canvas is being replaced, so
+  // renderer swaps cannot freeze an in-flight walk. A wall-clock delta also
+  // catches up after a hidden tab resumes without double-advancing frames.
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') return
+    const clock = new WorldLocomotionClock(sharedLocomotion)
+    let frame = 0
+    const tick = (now: number) => {
+      clock.tick(now)
+      frame = window.requestAnimationFrame(tick)
+    }
+    frame = window.requestAnimationFrame(tick)
+    return () => window.cancelAnimationFrame(frame)
+  }, [sharedLocomotion])
+
   useEffect(() => {
     const host = hostRef.current
     if (host === null) return
-    fallbackLocomotion.current ??= new WorldLocomotion()
     // The device tier decides how much of a character the world may run, and
     // whether it may afford shadows at all. Deciding it here keeps the policy
     // in one place rather than inside the renderer.
     // Reduced motion still reaches the renderer — as the lowest tier, which
     // strips shadows and secondary motion — rather than as a refusal to draw.
     const quality = capability.quality
-    const registry = createWorldRendererRegistry({
-      locomotion: locomotion ?? fallbackLocomotion.current,
+    const registry = rendererRegistry ?? createWorldRendererRegistry({
+      locomotion: sharedLocomotion,
       lodCeiling: quality === 'high' ? 'full' : quality === 'balanced' ? 'reduced' : 'billboard',
       shadows: quality === 'high',
       pixelRatio: quality === 'high' ? 2 : quality === 'balanced' ? 1.5 : 1,
@@ -139,29 +167,34 @@ export function WorldCanvas({
     const toViewport = (position: { x: number; y: number }) => { const rect = host.getBoundingClientRect(); return { x: rect.left + position.x, y: rect.top + position.y } }
     const renderer = registry.create(activeKind, { onEntitySelect, onObjectSelect, onReady, ...(onEntityContext === undefined ? {} : { onEntityContext: (id, position) => onEntityContext(id, toViewport(position)) }), ...(onObjectContext === undefined ? {} : { onObjectContext: (id, position) => onObjectContext(id, toViewport(position)) }) })
     rendererRef.current = renderer
+    rendererMounted.current = false
     let cancelled = false
     void renderer.mount(host, manifest, snapshot).then(() => {
       if (cancelled) return
+      rendererMounted.current = true
       // The world the user was looking at has to still be the world they are
       // looking at: a swap that lost the selection and the zoom would read as
       // having been thrown out of the room and back in.
-      renderer.selectEntity(selectedEntityId)
-      renderer.selectObject(selectedObjectId)
+      const latestSelectionState = latestSelection.current
+      renderer.selectEntity(latestSelectionState.entityId)
+      renderer.selectObject(latestSelectionState.objectId)
       const zoom = retainedZoom.current
       if (zoom !== undefined && zoom !== renderer.getZoom()) renderer.zoomBy(zoom - renderer.getZoom())
-      if (focusEntityId !== undefined) renderer.focusEntity(focusEntityId)
+      if (latestSelectionState.focusEntityId !== undefined) renderer.focusEntity(latestSelectionState.focusEntityId)
       const spatial = renderer as { setCameraMode?: (mode: WorldCameraMode, subjectId?: string) => void }
-      if (cameraMode !== undefined) spatial.setCameraMode?.(cameraMode, cameraSubjectId)
+      const latestCamera = latestCameraState.current
+      if (latestCamera.mode !== undefined) spatial.setCameraMode?.(latestCamera.mode, latestCamera.subjectId)
     }).catch((cause: unknown) => {
       if (!cancelled) host.dataset.error = cause instanceof Error ? cause.message : '世界画布初始化失败'
     })
     return () => {
       cancelled = true
+      rendererMounted.current = false
       retainedZoom.current = renderer.getZoom()
       renderer.destroy()
       rendererRef.current = undefined
     }
-  }, [mountedKey])
+  }, [mountedKey, rendererRegistry, sharedLocomotion])
 
   useEffect(() => {
     rendererRef.current?.updateSnapshot(snapshot)
@@ -181,7 +214,12 @@ export function WorldCanvas({
 
   useEffect(() => rendererRef.current?.selectEntity(selectedEntityId), [selectedEntityId])
   useEffect(() => rendererRef.current?.selectObject(selectedObjectId), [selectedObjectId])
-  useEffect(() => { if (focusEntityId !== undefined) rendererRef.current?.focusEntity(focusEntityId) }, [focusEntityId])
+  useEffect(() => {
+    // `focusEntityId` is a one-shot command. Do not queue an old command in a
+    // lazy renderer: if the user leaves focus before the chunk resolves, the
+    // stale command must not replay after the current camera state wins.
+    if (focusEntityId !== undefined && rendererMounted.current) rendererRef.current?.focusEntity(focusEntityId)
+  }, [focusEntityId])
   useEffect(() => { if (fitRequest > 0) rendererRef.current?.fitScene() }, [fitRequest])
   useEffect(() => {
     if (zoomCommand !== undefined) rendererRef.current?.zoomBy(zoomCommand.delta)

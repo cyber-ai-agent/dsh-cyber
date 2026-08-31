@@ -90,4 +90,46 @@ describe('ResourceCache', () => {
     expect(release).toHaveBeenCalledTimes(2)
     expect(cache.size).toBe(0)
   })
+
+  it('cancels one consumer without cancelling a shared download', async () => {
+    let resolve: ((value: string) => void) | undefined
+    let requestSignal: AbortSignal | undefined
+    const cache = new ResourceCache<string>()
+    const release = vi.fn()
+    const firstController = new AbortController()
+    const secondController = new AbortController()
+    const load = vi.fn((signal?: AbortSignal) => new Promise<string>((settle) => { requestSignal = signal; resolve = settle }))
+    const first = cache.acquireLease('shared', load, release, firstController.signal)
+    const second = cache.acquireLease('shared', load, release, secondController.signal)
+
+    firstController.abort()
+    await expect(first.promise).rejects.toMatchObject({ name: 'AbortError' })
+    expect(requestSignal?.aborted).toBe(false)
+    resolve?.('model')
+    await expect(second.promise).resolves.toBe('model')
+    expect(cache.users('shared')).toBe(1)
+    second.release()
+    await Promise.resolve()
+    expect(release).toHaveBeenCalledTimes(1)
+  })
+
+  it('aborts the underlying request when the last consumer leaves', async () => {
+    let requestSignal: AbortSignal | undefined
+    const cache = new ResourceCache<string>()
+    const load = vi.fn((signal?: AbortSignal) => {
+      requestSignal = signal
+      return new Promise<string>(() => {})
+    })
+    const firstController = new AbortController()
+    const secondController = new AbortController()
+    const first = cache.acquireLease('shared', load, () => {}, firstController.signal)
+    const second = cache.acquireLease('shared', load, () => {}, secondController.signal)
+    firstController.abort()
+    secondController.abort()
+    await expect(first.promise).rejects.toMatchObject({ name: 'AbortError' })
+    await expect(second.promise).rejects.toMatchObject({ name: 'AbortError' })
+    expect(requestSignal?.aborted).toBe(true)
+    expect(cache.users('shared')).toBe(0)
+    expect(cache.size).toBe(0)
+  })
 })

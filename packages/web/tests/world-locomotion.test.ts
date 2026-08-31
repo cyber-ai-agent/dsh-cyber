@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { WorldRuntimeSnapshot } from '@dsh-cyber/contracts'
 
-import { WorldLocomotion, segmentDuration } from '../src/features/world/runtime/world-locomotion.js'
+import { WorldLocomotion, WorldLocomotionClock, segmentDuration } from '../src/features/world/runtime/world-locomotion.js'
 
 function snapshot(entities: Array<{ id: string; x: number; y: number }>): WorldRuntimeSnapshot {
   return {
@@ -120,6 +120,20 @@ describe('WorldLocomotion', () => {
 
     locomotion.advance(3_000)
     expect(locomotion.stateOf('a')).toMatchObject({ position: { x: 690, y: 0 }, walking: false })
+  })
+
+  it('keeps advancing through an 800ms renderer swap gap', () => {
+    const locomotion = new WorldLocomotion()
+    const clock = new WorldLocomotionClock(locomotion)
+    locomotion.syncSnapshot(snapshot([{ id: 'a', x: 0, y: 0 }]))
+    locomotion.beginRoute('a', [{ x: 0, y: 0 }, { x: 690, y: 0 }])
+    clock.tick(10_000)
+    clock.tick(10_800)
+
+    // The old renderer may be gone for the whole interval; the world clock is
+    // still authoritative, so the new renderer takes over mid-stride.
+    expect(locomotion.stateOf('a')!.position.x).toBeCloseTo(184, 0)
+    expect(locomotion.stateOf('a')!.walking).toBe(true)
   })
 
   it('forgets characters a snapshot no longer contains', () => {

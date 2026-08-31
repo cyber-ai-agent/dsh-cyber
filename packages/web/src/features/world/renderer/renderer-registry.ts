@@ -9,6 +9,7 @@ import type {
 import { PixiWorldRenderer } from './pixi-world-renderer.js'
 import { LazyThreeWorldRenderer } from './lazy-three-world-renderer.js'
 import type { AvatarLod } from './spatial/three-world-lod.js'
+import type { ThreeWorldRendererOptions } from './spatial/three-world-renderer.js'
 import type { WorldLocomotion } from '../runtime/world-locomotion.js'
 
 export class DefaultRendererRegistry implements RendererRegistry<HTMLElement> {
@@ -42,6 +43,9 @@ export interface WorldRendererRegistryOptions {
   shadows?: boolean
   pixelRatio?: number
   resolveAvatarUrl?: (entityId: string) => string | undefined
+  /** Injectable Three renderer seam used by deterministic integration tests. */
+  createRenderer?: ThreeWorldRendererOptions['createRenderer']
+  loadAvatar?: ThreeWorldRendererOptions['loadAvatar']
 }
 
 export function createWorldRendererRegistry(
@@ -58,6 +62,8 @@ export function createWorldRendererRegistry(
     ...(options.shadows === undefined ? {} : { shadows: options.shadows }),
     ...(options.pixelRatio === undefined ? {} : { pixelRatio: options.pixelRatio }),
     ...(options.resolveAvatarUrl === undefined ? {} : { resolveAvatarUrl: options.resolveAvatarUrl }),
+    ...(options.createRenderer === undefined ? {} : { createRenderer: options.createRenderer }),
+    ...(options.loadAvatar === undefined ? {} : { loadAvatar: options.loadAvatar }),
   }))
   return registry
 }

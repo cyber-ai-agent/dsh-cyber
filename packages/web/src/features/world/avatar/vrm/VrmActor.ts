@@ -119,6 +119,7 @@ export class VrmActor {
    * nobody has asked for a VRM in never pays for them.
    */
   static async load(options: VrmActorLoadOptions): Promise<VrmActor> {
+    if (isSignalAborted(options.signal)) throw cancellationError()
     const [THREE, loaderModule, vrmModule] = await Promise.all([
       import('three'),
       import('three/addons/loaders/GLTFLoader.js'),
@@ -127,13 +128,17 @@ export class VrmActor {
     const loader = new loaderModule.GLTFLoader()
     loader.register((parser) => new vrmModule.VRMLoaderPlugin(parser))
     const key = options.cacheKey ?? options.assetUrl
-    const bytes = await avatarBytes.acquire(key, async () => {
-      const response = await fetch(options.assetUrl)
+    const lease = avatarBytes.acquireLease(key, async (signal) => {
+      const response = await fetch(options.assetUrl, signal === undefined ? {} : { signal })
       if (!response.ok) throw new Error(`形象文件下载失败（${response.status}）`)
       return await response.arrayBuffer()
-    }, () => undefined)
-    let released = false
-    const releaseBytes = () => { if (!released) { released = true; avatarBytes.release(key) } }
+    }, () => undefined, options.signal)
+    const releaseBytes = () => lease.release()
+    const bytes = await lease.promise
+    if (isSignalAborted(options.signal)) {
+      releaseBytes()
+      throw cancellationError()
+    }
     const gltf = await loader.parseAsync(bytes.slice(0), baseUrlOf(options.assetUrl)).catch((error: unknown) => {
       releaseBytes()
       throw error
@@ -144,10 +149,10 @@ export class VrmActor {
       releaseBytes()
       throw new Error('已发布文件不包含 VRM 1.0 角色')
     }
-    if (options.signal?.aborted === true) {
+    if (isSignalAborted(options.signal)) {
       disposeVrmScene(gltf.scene)
       releaseBytes()
-      throw new Error('VRM 加载已取消')
+      throw cancellationError()
     }
     // VRM 0.x models face the opposite way; without this a character walks
     // backwards through its own office.
@@ -206,7 +211,10 @@ export class VrmActor {
     this.#animation.setGesture(input.motionCue.gesture)
     this.#animation.update(delta)
 
-    if (secondary && input.animated) {
+    // Once an authored clip exists it owns the primary pose. The procedural
+    // controller remains only as the honest fallback for packs that omit a
+    // gesture; breathing, look-at, blink and speech stay additive layers.
+    if (secondary && input.animated && !this.#animation.hasGesture(input.motionCue.gesture)) {
       this.#motion.setGesture(input.motionCue.gesture)
       this.#motion.update(this.#elapsed, delta, true)
     }
@@ -232,6 +240,17 @@ export class VrmActor {
     if (this.#onDispose !== undefined) this.#onDispose()
     else disposeVrmScene(this.root)
   }
+}
+
+function cancellationError(): Error {
+  if (typeof DOMException !== 'undefined') return new DOMException('VRM 加载已取消', 'AbortError')
+  const error = new Error('VRM 加载已取消')
+  error.name = 'AbortError'
+  return error
+}
+
+function isSignalAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true
 }
 
 /** Where a glTF's relative references resolve against. */
