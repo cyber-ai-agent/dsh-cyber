@@ -35,10 +35,10 @@ export interface AvatarRecipe {
 
 export interface CharacterAvatarIdentity {
   employeeId: string
-  role?: string
-  gender?: CharacterGender
-  fallbackAvatarIndex?: number
-  appearance?: JsonObject
+  role?: string | undefined
+  gender?: CharacterGender | undefined
+  fallbackAvatarIndex?: number | undefined
+  appearance?: JsonObject | undefined
 }
 
 export const DEFAULT_AVATAR_RECIPE: AvatarRecipe = {
