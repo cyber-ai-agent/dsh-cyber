@@ -10,6 +10,9 @@ const budgets = [
   { label: 'main CSS', pattern: /^index-.*\.css$/, maximum: 280 * 1024 },
   { label: 'Task Workspace JavaScript', pattern: /^TaskWorkspace-.*\.js$/, maximum: 25 * 1024 },
   { label: 'Task Workspace CSS', pattern: /^TaskWorkspace-.*\.css$/, maximum: 10 * 1024 },
+  { label: 'avatar creation provider JavaScript', pattern: /^avatar-creation-provider-.*\.js$/, maximum: 4 * 1024 },
+  { label: 'procedural avatar worker JavaScript', pattern: /^procedural-vrm\.worker-.*\.js$/, maximum: 16 * 1024 },
+  { label: 'procedural avatar fallback JavaScript', pattern: /^procedural-vrm-(?!runtime).*\.js$/, maximum: 16 * 1024 },
   { label: 'lazy VRM runtime JavaScript', pattern: /^vrm-runtime-.*\.js$/, maximum: 950 * 1024 },
 ]
 
@@ -22,6 +25,7 @@ for (const budget of budgets) {
 if (files.some((file) => file.endsWith('.map'))) errors.push('release build contains public source maps')
 const entryHtml = await readFile(join(process.cwd(), 'packages', 'web', 'dist', 'index.html'), 'utf8')
 if (/(?:three|vrm)(?:[-.])/iu.test(entryHtml)) errors.push('Three/VRM runtime is referenced by the first-screen HTML instead of remaining lazy')
+if (/(?:avatar-creation-provider|procedural-vrm)(?:[-.])/iu.test(entryHtml)) errors.push('Avatar creation code is referenced by the first-screen HTML instead of remaining action-lazy')
 if (files.some((file) => /(?:kokoro|transformers|ort-wasm|onnxruntime)(?:[-.])/iu.test(file))) errors.push('Local TTS inference dependencies must stay in the Node voice runtime, not the browser build')
 if (errors.length > 0) throw new Error(`Build budget failed:\n${errors.join('\n')}`)
 console.log('Build budget passed:', budgets.map((item) => item.label).join(', '))

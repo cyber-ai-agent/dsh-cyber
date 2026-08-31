@@ -50,7 +50,7 @@ describe('character avatar assets', () => {
       fallbackAvatarIndex: 4, expectedProfileRevision: initialProfileRevision + 1,
     })
     expect(publishedVrm.status).toBe(201)
-    expect(publishedVrm.body.profile.appearance.digitalHumanAvatar).toMatchObject({ rendererKind: 'vrm-3d', assetId: vrm.body.asset.id })
+    expect(publishedVrm.body.profile.appearance.digitalHumanAvatar).toMatchObject({ rendererKind: 'vrm-3d', assetId: vrm.body.asset.id, capabilities: ['full-body', 'gesture', 'expression', 'look-at', 'viseme'] })
 
     const generic = await postJson<{ asset: { id: string }; avatarAsset: { rendererKind: string } }>(`${origin}/api/employees/${employee.id}/avatar-assets`, {
       name: 'mesh.glb', mimeType: 'model/gltf-binary', dataBase64: validGlb(false).toString('base64'),

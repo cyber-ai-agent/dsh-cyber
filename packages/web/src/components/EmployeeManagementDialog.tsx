@@ -18,6 +18,7 @@ interface EmployeeManagementDialogProps {
   avatarIndex: number
   saving: boolean
   initialSection?: EmployeeSettingsSection
+  focusAvatar?: boolean
   onClose(): void
   onRevise(input: { reason: string; persona?: string; skillGrants?: string[]; capabilityGrants?: string[]; modelPolicy: { modelProfileId?: string }; runtimePermissionMode?: AgentPermissionMode; confirmedFullAccess?: boolean }): Promise<void>
   onUpdateProfile(input: {
@@ -31,7 +32,7 @@ interface EmployeeManagementDialogProps {
     addressUserAs: string
     selfReference: string
   }): Promise<void>
-  onUploadAvatar(file: File): Promise<UploadedAvatarDraft>
+  onUploadAvatar(file: File, signal?: AbortSignal): Promise<UploadedAvatarDraft>
   onPublishAvatar(assetId: string, fallbackAvatarIndex: number, expectedProfileRevision: number): Promise<void>
   onRollbackAvatar(targetRevision: number, expectedProfileRevision: number): Promise<void>
   onResetAvatar(fallbackAvatarIndex: number, expectedProfileRevision: number): Promise<void>
@@ -51,7 +52,7 @@ interface CharacterRuntimeProfile {
 const PROFILE_START = '[角色关系与背景]'
 const PROFILE_END = '[/角色关系与背景]'
 
-export function EmployeeManagementDialog({ employee, profile, profileHistory = [], currentRevision, models, avatarIndex, saving, initialSection = 'profile', onClose, onRevise, onUpdateProfile, onUploadAvatar, onPublishAvatar, onRollbackAvatar, onResetAvatar, onArchive }: EmployeeManagementDialogProps) {
+export function EmployeeManagementDialog({ employee, profile, profileHistory = [], currentRevision, models, avatarIndex, saving, initialSection = 'profile', focusAvatar = false, onClose, onRevise, onUpdateProfile, onUploadAvatar, onPublishAvatar, onRollbackAvatar, onResetAvatar, onArchive }: EmployeeManagementDialogProps) {
   const parsed = parseCharacterRuntimeProfile(currentRevision?.persona ?? '', profile, employee.role)
   const [displayName, setDisplayName] = useState(employee.displayName)
   const [role, setRole] = useState(parsed.identityLabel)
@@ -141,7 +142,7 @@ export function EmployeeManagementDialog({ employee, profile, profileHistory = [
               <label className="dialog-field"><span>当前身份或形态</span><input maxLength={100} value={role} onChange={(event) => setRole(event.target.value)} placeholder="例如：开发工程师、酒馆老板、陪伴机器人" /><small>用于角色资料、会话标题和世界中的身份说明。</small></label>
               <label className="dialog-field"><span>角色性别</span><select aria-label="角色性别" value={gender} onChange={(event) => setGender(event.target.value as CharacterGender)}><option value="female">女</option><option value="male">男</option><option value="neutral">中性 / 不指定</option></select><small>用于自动匹配合适的角色音色，仍可在语音设置中手动更换。</small></label>
             </div>
-            <CharacterAvatarManager employeeName={displayName || employee.displayName} profile={profile} profileHistory={profileHistory} fallbackAvatarIndex={selectedAvatar} busy={saving} onFallbackAvatarChange={setSelectedAvatar} onUpload={onUploadAvatar} onPublish={onPublishAvatar} onRollback={onRollbackAvatar} onReset={onResetAvatar} />
+            <CharacterAvatarManager employeeName={displayName || employee.displayName} profile={profile} profileHistory={profileHistory} fallbackAvatarIndex={selectedAvatar} busy={saving} focusOnMount={focusAvatar} onFallbackAvatarChange={setSelectedAvatar} onUpload={onUploadAvatar} onPublish={onPublishAvatar} onRollback={onRollbackAvatar} onReset={onResetAvatar} />
             <div className="character-profile-grid">
               <label className="dialog-field"><span>与我的关系</span><input value={relationshipToUser} onChange={(event)=>setRelationshipToUser(event.target.value)} placeholder="管家、伙伴、顾问或同事"/></label>
               <label className="dialog-field"><span>如何称呼我</span><input value={addressUserAs} onChange={(event)=>setAddressUserAs(event.target.value)} placeholder="留空则跟随世界默认称呼"/></label>
