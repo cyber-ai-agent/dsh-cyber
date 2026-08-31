@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -30,6 +30,45 @@ describe('avatar base pack source validation', () => {
     const fixture = await packageFixture()
     fixture.manifest.files = fixture.manifest.files.filter((file) => file.path !== 'avatar-base-pack.json')
     await expect(validateAvatarBasePackSource(fixture.manifest, fixture.root)).rejects.toThrow('avatar-base-pack.json')
+  })
+
+  it('rejects a Base VRM reached through a symlinked parent directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-avatar-pack-symlink-'))
+    const outside = await mkdtemp(join(tmpdir(), 'dsh-avatar-pack-outside-'))
+    const vrm = glb(vrmDocument())
+    await writeFile(join(outside, 'base.vrm'), vrm)
+    await mkdir(join(root, 'assets'))
+    await symlink(outside, join(root, 'assets', 'linked'), process.platform === 'win32' ? 'junction' : 'dir')
+    const pack = Buffer.from(`${JSON.stringify({
+      schemaVersion: 1,
+      id: 'test-avatar-symlink',
+      version: '1.0.0',
+      displayName: 'Test Avatar Symlink',
+      license: 'CC0-1.0',
+      publisher: 'test',
+      quality: 'production',
+      bases: [{ baseModel: 'neutral-a', assetPath: 'assets/linked/base.vrm' }],
+      parts: [],
+      materialSlots: [],
+    })}\n`, 'utf8')
+    await writeFile(join(root, 'avatar-base-pack.json'), pack)
+    const manifest: CyberPackageManifest = {
+      schemaVersion: 1,
+      id: 'test-avatar-symlink',
+      version: '1.0.0',
+      kind: 'asset',
+      displayName: 'Test Avatar Symlink',
+      summary: 'Reject parent symlink',
+      license: 'CC0-1.0',
+      publisher: 'test',
+      capabilities: ['avatar:base-pack'],
+      dataEgress: [],
+      files: [
+        { path: 'avatar-base-pack.json', sha256: sha(pack) },
+        { path: 'assets/linked/base.vrm', sha256: sha(vrm) },
+      ],
+    }
+    await expect(validateAvatarBasePackSource(manifest, root)).rejects.toThrow('符号链接')
   })
 
   it('is a no-op for unrelated asset packages', async () => {
