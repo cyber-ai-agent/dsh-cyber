@@ -17,7 +17,19 @@ import { PeerCollaborationDialog, type PeerCollaborationDraft } from '../../comp
 import type { CyberEmployee } from '../../types.js'
 import { AmbientLifeDialog } from './AmbientLifeDialog.js'
 import { EmployeeFocusMode } from './avatar/focus/EmployeeFocusMode.js'
-import { characterModeAfterMap, threeDimensionalControl, type CharacterViewMode, type WorldViewMode } from './avatar/avatar-view-mode.js'
+import { threeDimensionalControl, type CharacterViewMode } from './avatar/avatar-view-mode.js'
+import {
+  cameraModesFor,
+  readWorldView,
+  reconcileView,
+  rendererKindFor,
+  viewForFocus,
+  writeWorldView,
+  type WorldCameraMode,
+  type WorldRendererMode,
+  type WorldViewState,
+} from './runtime/world-view-mode.js'
+import { WorldLocomotion } from './runtime/world-locomotion.js'
 import { WorldCanvas } from './WorldCanvas.js'
 import { EmployeeInteractionMenu, ObjectInteractionMenu } from './WorldInteractionMenu.js'
 import { WorldSceneDialog } from './WorldSceneDialog.js'
@@ -63,7 +75,10 @@ export function WorldRuntimeDock({ demoMode, world, employees, dossiers, liveEna
   const [focusCameraId, setFocusCameraId] = useState<string>()
   const focusTimerRef = useRef<number | undefined>(undefined)
   const [staticMode, setStaticMode] = useState(() => readStaticMode(world.id))
-  const [viewMode, setViewMode] = useState<WorldViewMode>(() => readWorldViewMode(world.id))
+  const [view, setView] = useState<WorldViewState>(() => readWorldView(world.id))
+  // One store for the whole dock: the walk has to outlive whichever renderer
+  // is mounted, or switching 2D to 3D restarts everybody's journey.
+  const locomotionRef = useRef(new WorldLocomotion())
   const [characterViewMode, setCharacterViewMode] = useState<CharacterViewMode>(() => readCharacterViewMode(world.id))
 
   useEffect(() => {
@@ -80,8 +95,8 @@ export function WorldRuntimeDock({ demoMode, world, employees, dossiers, liveEna
     if (typeof localStorage !== 'undefined') localStorage.setItem(`dsh-cyber-digital-static:${world.id}`, staticMode ? 'true' : 'false')
   }, [staticMode, world.id])
   useEffect(() => {
-    if (typeof localStorage !== 'undefined') localStorage.setItem(`dsh-cyber-world-view:${world.id}`, viewMode)
-  }, [viewMode, world.id])
+    writeWorldView(world.id, view)
+  }, [view, world.id])
   useEffect(() => {
     if (typeof localStorage !== 'undefined') localStorage.setItem(`dsh-cyber-character-view:${world.id}`, characterViewMode)
   }, [characterViewMode, world.id])
@@ -105,7 +120,12 @@ export function WorldRuntimeDock({ demoMode, world, employees, dossiers, liveEna
   const collaborators = conversationEmployees
     .filter((employee) => employee.id !== activeEmployeeId)
     .map((employee) => ({ employee, entity: renderedSnapshot.entities.find((entity) => entity.id === employee.id) }))
-  const showCharacterView = viewMode !== 'map' && focusedEmployee !== undefined
+  const focused = view.camera !== 'overview' && focusedEmployee !== undefined
+  // The world is never torn down to look at somebody. In 3D the character is
+  // already in the scene and the camera moves to them; in 2D the existing
+  // character panel sits over a world that is still running underneath.
+  const showCharacterPanel = focused && focusedEmployee !== undefined
+  const embeddedPanel = view.renderer === '3d'
 
   const enterEmployeeFocus = (employeeId: string) => {
     if (focusTimerRef.current !== undefined) window.clearTimeout(focusTimerRef.current)
@@ -114,17 +134,19 @@ export function WorldRuntimeDock({ demoMode, world, employees, dossiers, liveEna
     setContextTarget(undefined)
     setFocusCameraId(employeeId)
     focusTimerRef.current = window.setTimeout(() => {
-      setViewMode(characterModeAfterMap(characterViewMode))
+      setView((current) => viewForFocus({ ...current, camera: 'focus' }, employeeId))
       setFocusCameraId(undefined)
       focusTimerRef.current = undefined
     }, 190)
   }
 
-  const selectViewMode = (mode: WorldViewMode) => {
-    setViewMode(mode)
-    if (mode === 'map') return
-    setCharacterViewMode(mode)
-    if (mode === '3d' && focusedEmployee !== undefined && !threeDimensional.available) onManageAvatar(focusedEmployee.id)
+  const selectRendererMode = (renderer: WorldRendererMode) => {
+    setView((current) => reconcileView({ ...current, renderer }))
+    if (renderer === '2d' || renderer === '3d') setCharacterViewMode(renderer)
+  }
+
+  const selectCameraMode = (camera: WorldCameraMode) => {
+    setView((current) => viewForFocus(reconcileView({ ...current, camera }), activeEmployeeId))
   }
 
   const interactWithEmployee = async (action: 'talk' | 'assign-task' | 'start-meeting') => {
@@ -211,13 +233,19 @@ export function WorldRuntimeDock({ demoMode, world, employees, dossiers, liveEna
       <section className="world-runtime-dock" aria-label={`${world.name}实时世界`}>
         <div className="world-runtime-dock__canvas">
           <div className="world-runtime-dock__display-switch" role="tablist" aria-label="世界显示方式">
-            <button type="button" role="tab" aria-selected={viewMode === 'map'} className={viewMode === 'map' ? 'is-active' : ''} onClick={() => selectViewMode('map')}><MapTrifold size={15} aria-hidden="true" />地图</button>
-            <button type="button" role="tab" aria-selected={viewMode === '2d'} className={viewMode === '2d' ? 'is-active' : ''} onClick={() => selectViewMode('2d')}><ImageSquare size={15} aria-hidden="true" />2D</button>
-            <button type="button" role="tab" {...(threeDimensional.available ? {} : { 'aria-label': threeDimensional.title })} aria-selected={viewMode === '3d'} className={`${viewMode === '3d' ? 'is-active' : ''}${threeDimensional.available ? '' : ' is-setup'}`} title={threeDimensional.title} disabled={focusedEmployee === undefined} onClick={() => selectViewMode('3d')}><Cube size={15} aria-hidden="true" />{threeDimensional.label}</button>
+            <button type="button" role="tab" aria-selected={view.renderer === '2d'} className={view.renderer === '2d' ? 'is-active' : ''} onClick={() => selectRendererMode('2d')}><ImageSquare size={15} aria-hidden="true" />2D</button>
+            <button type="button" role="tab" aria-selected={view.renderer === '3d'} className={view.renderer === '3d' ? 'is-active' : ''} title="在同一个世界里用三维方式观看" onClick={() => selectRendererMode('3d')}><Cube size={15} aria-hidden="true" />3D</button>
           </div>
-          <div className={`world-runtime-dock__overview${showCharacterView ? ' is-focused' : focusCameraId !== undefined ? ' is-focusing' : ''}`}>
-          {!showCharacterView ? <WorldCanvas
+          <div className="world-runtime-dock__camera-switch" role="tablist" aria-label="世界镜头">
+            {cameraModesFor(view.renderer).map((mode) => <button key={mode} type="button" role="tab" aria-selected={view.camera === mode} className={view.camera === mode ? 'is-active' : ''} disabled={mode !== 'overview' && activeEmployeeId === undefined} onClick={() => selectCameraMode(mode)}>{CAMERA_LABELS[mode]}</button>)}
+          </div>
+          <div className={`world-runtime-dock__overview${showCharacterPanel && !embeddedPanel ? ' is-focused' : focusCameraId !== undefined ? ' is-focusing' : ''}`}>
+          <WorldCanvas
             manifest={runtime.manifest}
+            rendererKind={rendererKindFor(view.renderer)}
+            locomotion={locomotionRef.current}
+            cameraMode={view.camera}
+            {...(activeEmployeeId === undefined ? {} : { cameraSubjectId: activeEmployeeId })}
             rendererIdentity={runtime.rendererIdentity}
             snapshot={renderedSnapshot}
             cues={runtime.cues}
@@ -231,21 +259,21 @@ export function WorldRuntimeDock({ demoMode, world, employees, dossiers, liveEna
             onEntityContext={(employeeId, position) => { setActiveEmployeeId(employeeId); setSelectedObjectId(undefined); setContextTarget({ kind: 'employee', id: employeeId, position }) }}
             onObjectContext={(objectId, position) => { setSelectedObjectId(objectId); setContextTarget({ kind: 'object', id: objectId, position }) }}
             onReady={() => undefined}
-          /> : <div className="world-runtime-dock__focus-background" aria-hidden="true" />}
+          />
           </div>
-          {!showCharacterView ? null : <EmployeeFocusMode key={focusedEmployee.id} world={world} employee={focusedEmployee} {...(dossiers[focusedEmployee.id]?.profile === undefined ? {} : { profile: dossiers[focusedEmployee.id]!.profile })} {...(focusedEntity === undefined ? {} : { entity: focusedEntity })} collaborators={collaborators} connected={runtime.connected} staticMode={staticMode} rendererMode={viewMode} {...(focusedUtterance === undefined ? {} : { latestUtterance: focusedUtterance })} onFocusEmployee={setActiveEmployeeId} onManageAvatar={() => onManageAvatar(focusedEmployee.id)} onStaticModeChange={setStaticMode} onVoiceFinal={onVoiceFinal} />}
+          {!showCharacterPanel ? null : <EmployeeFocusMode key={focusedEmployee.id} world={world} employee={focusedEmployee} {...(dossiers[focusedEmployee.id]?.profile === undefined ? {} : { profile: dossiers[focusedEmployee.id]!.profile })} {...(focusedEntity === undefined ? {} : { entity: focusedEntity })} collaborators={collaborators} connected={runtime.connected} staticMode={staticMode} rendererMode={characterViewMode} embedded={embeddedPanel} {...(focusedUtterance === undefined ? {} : { latestUtterance: focusedUtterance })} onFocusEmployee={setActiveEmployeeId} onManageAvatar={() => onManageAvatar(focusedEmployee.id)} onStaticModeChange={setStaticMode} onVoiceFinal={onVoiceFinal} />}
 
-          {showCharacterView || selectedEmployee === undefined || contextTarget?.kind !== 'employee' || contextTarget.id !== selectedEmployee.id ? null : <EmployeeInteractionMenu employee={selectedEmployee} position={contextTarget.position} onClose={() => setContextTarget(undefined)} onTalk={() => void interactWithEmployee('talk')} onAssignTask={() => void interactWithEmployee('assign-task')} onMeeting={() => void interactWithEmployee('start-meeting')} onPeerCollaboration={() => { setPeerError(undefined); setPeerInitiatorId(selectedEmployee.id) }} />}
-          {showCharacterView || selectedObject === undefined || selectedObjectManifest === undefined || contextTarget?.kind !== 'object' || contextTarget.id !== selectedObject.id ? null : <ObjectInteractionMenu object={selectedObject} manifest={selectedObjectManifest} position={contextTarget.position} {...(selectedEmployee === undefined ? {} : { selectedEmployee })} onClose={() => setContextTarget(undefined)} onAction={(action) => void actOnObject(action)} />}
+          {showCharacterPanel || selectedEmployee === undefined || contextTarget?.kind !== 'employee' || contextTarget.id !== selectedEmployee.id ? null : <EmployeeInteractionMenu employee={selectedEmployee} position={contextTarget.position} onClose={() => setContextTarget(undefined)} onTalk={() => void interactWithEmployee('talk')} onAssignTask={() => void interactWithEmployee('assign-task')} onMeeting={() => void interactWithEmployee('start-meeting')} onPeerCollaboration={() => { setPeerError(undefined); setPeerInitiatorId(selectedEmployee.id) }} />}
+          {showCharacterPanel || selectedObject === undefined || selectedObjectManifest === undefined || contextTarget?.kind !== 'object' || contextTarget.id !== selectedObject.id ? null : <ObjectInteractionMenu object={selectedObject} manifest={selectedObjectManifest} position={contextTarget.position} {...(selectedEmployee === undefined ? {} : { selectedEmployee })} onClose={() => setContextTarget(undefined)} onAction={(action) => void actOnObject(action)} />}
 
-          {!showCharacterView ? <div className="world-runtime-dock__controls" aria-label="世界视图控制">
+          {showCharacterPanel && !embeddedPanel ? null : <div className="world-runtime-dock__controls" aria-label="世界视图控制">
             <button type="button" aria-label="缩小" onClick={() => setZoomCommand(createZoomCommand(-0.1))}><Minus size={15} /></button>
             <button type="button" aria-label="显示全景" title="适应窗口且不露出场景边界" onClick={() => setFitRequest((value) => value + 1)}><ArrowsOut size={15} /></button>
             <button type="button" aria-label="放大" onClick={() => setZoomCommand(createZoomCommand(0.1))}><Plus size={15} /></button>
             <button type="button" aria-label="世界场景" title="选择只属于当前世界的独立场景" onClick={() => setSceneSettingsOpen(true)}><MapTrifold size={16} /></button>
             <button type="button" aria-label="世界活力设置" title="配置角色有岗位逻辑的日常行为" onClick={() => setAmbientSettingsOpen(true)}><PersonSimpleWalk size={16} /></button>
             <button type="button" className={runtime.snapshot.clock.lightsOn ? 'is-active' : ''} aria-label={runtime.snapshot.clock.lightsOn ? '关闭场景照明' : '打开场景照明'} onClick={() => void runtime.interact({ action: 'toggle-lights', actorId: 'owner' })}><LightbulbFilament size={16} /></button>
-          </div> : null}
+          </div>}
 
           {ambientSettingsOpen ? <AmbientLifeDialog worldId={world.id} worldName={world.name} onClose={() => setAmbientSettingsOpen(false)} /> : null}
           {sceneSettingsOpen ? <WorldSceneDialog world={world} currentManifest={runtime.manifest} onClose={() => setSceneSettingsOpen(false)} onApplied={runtime.reloadScene} /> : null}
@@ -275,12 +303,6 @@ function readStaticMode(worldId: string): boolean {
   return typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
 }
 
-function readWorldViewMode(worldId: string): WorldViewMode {
-  if (typeof localStorage === 'undefined') return '2d'
-  const value = localStorage.getItem(`dsh-cyber-world-view:${worldId}`)
-  if (value === 'map' || value === '2d' || value === '3d') return value
-  return localStorage.getItem(`dsh-cyber-world-visual:${worldId}`) === 'map' ? 'map' : '2d'
-}
 
 function readCharacterViewMode(worldId: string): CharacterViewMode {
   if (typeof localStorage === 'undefined') return '2d'
@@ -315,4 +337,10 @@ function withEntityVisuals(
   if (role === undefined) delete next.authorityRole
   else next.authorityRole = role
   return next
+}
+
+const CAMERA_LABELS: Record<WorldCameraMode, string> = {
+  overview: '全景',
+  focus: '聚焦',
+  follow: '跟随',
 }

@@ -34,6 +34,15 @@ interface EmployeeFocusModeProps {
   connected: boolean
   staticMode: boolean
   rendererMode: CharacterRendererMode
+  /**
+   * The character is already in the world behind this panel.
+   *
+   * The 3D world draws the character itself, so building a second avatar
+   * stage here would open a second WebGL context for the same person — the
+   * thing that made the map and the digital human feel like two products.
+   * The panel keeps its name, status, chat and voice; only the stage goes.
+   */
+  embedded?: boolean
   latestUtterance?: { messageId: string; employeeId: string; text: string }
   onFocusEmployee(employeeId: string): void
   onManageAvatar(): void
@@ -41,7 +50,7 @@ interface EmployeeFocusModeProps {
   onVoiceFinal(text: string): Promise<void>
 }
 
-export function EmployeeFocusMode({ world, employee, profile, entity, collaborators, connected, staticMode, rendererMode, latestUtterance, onFocusEmployee, onManageAvatar, onStaticModeChange, onVoiceFinal }: EmployeeFocusModeProps) {
+export function EmployeeFocusMode({ world, employee, profile, entity, collaborators, connected, staticMode, rendererMode, embedded = false, latestUtterance, onFocusEmployee, onManageAvatar, onStaticModeChange, onVoiceFinal }: EmployeeFocusModeProps) {
   const [rendererReady, setRendererReady] = useState(false)
   const [rendererArmed, setRendererArmed] = useState(false)
   const [rendererNotice, setRendererNotice] = useState<string>()
@@ -336,7 +345,7 @@ export function EmployeeFocusMode({ world, employee, profile, entity, collaborat
     </header>
     <div className="employee-focus__activity" aria-live="polite"><strong>{stateLabel(state)}</strong><span>{connected ? entity?.activityLabel ?? '等待事件触发' : '实时连接中断，正在重连'}</span></div>
 
-    <div className="employee-focus__avatar-stage">
+    {embedded ? null : <div className="employee-focus__avatar-stage">
       {visibleCollaborators.map(({ employee: collaborator, entity: collaboratorEntity }, index) => {
         const collaboratorState = visualStateForEntity(collaboratorEntity, connected, false)
         return <button key={collaborator.id} type="button" className={`employee-focus__participant employee-focus__participant--${index === 0 ? 'left' : 'right'}`} aria-label={`聚焦${collaborator.displayName}数字人`} onClick={() => onFocusEmployee(collaborator.id)}>
@@ -347,7 +356,7 @@ export function EmployeeFocusMode({ world, employee, profile, entity, collaborat
       {remainingCollaborators === 0 ? null : <span className="employee-focus__participant-more">另有 {remainingCollaborators} 名角色</span>}
       {usesVrm ? <div className={`employee-focus__sprite-bridge${rendererReady ? ' is-hidden' : ''}`}><SpriteRuntimeRenderer employee={employee} entity={entity} state={state} motionCue={motionCue} speaking={speaking} staticMode={staticMode} quality="static" onReady={() => undefined} onFallback={() => undefined} /></div> : null}
       {rendererArmed ? <RegisteredDigitalHumanRenderer key={`${selectedRenderer.id}:${quality}:${employee.avatarProfile?.assetId ?? employee.avatarIndex}`} employee={employee} entity={entity} state={state} motionCue={motionCue} speaking={speaking} staticMode={staticMode} quality={quality} preferredKind={preferredRenderer} onReady={() => setRendererReady(true)} onFallback={fallback} /> : <div className="focus-avatar__loading" role="status">正在切换 3D 渲染器…</div>}
-    </div>
+    </div>}
     <VoiceConversationControl employeeName={employee.displayName} onFinal={onVoiceFinal} onBargeIn={() => {
       streamGenerationRef.current += 1; streamPendingRef.current = 0; streamCompleteRef.current = true; streamChunkerRef.current.reset(); stopSpeech()
     }} />

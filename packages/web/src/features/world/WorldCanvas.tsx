@@ -10,6 +10,7 @@ import type {
 
 import { createWorldRendererRegistry } from './renderer/renderer-registry.js'
 import { WorldLocomotion } from './runtime/world-locomotion.js'
+import type { WorldCameraMode } from './runtime/world-view-mode.js'
 
 interface WorldCanvasProps {
   manifest: WorldThemeManifestV1
@@ -24,6 +25,14 @@ interface WorldCanvasProps {
   rendererKind?: RendererKind
   /** Shared so a renderer swap does not restart everybody's walk. */
   locomotion?: WorldLocomotion
+  /**
+   * Where the camera looks. Renderers that only draw the whole world ignore it.
+   *
+   * Focusing a character is a camera move, not a different screen, so it
+   * arrives here rather than replacing this component with another one.
+   */
+  cameraMode?: WorldCameraMode
+  cameraSubjectId?: string
   rendererIdentity: string
   snapshot: WorldRuntimeSnapshot
   cues: WorldCue[]
@@ -43,6 +52,8 @@ export function WorldCanvas({
   manifest,
   rendererKind,
   locomotion,
+  cameraMode,
+  cameraSubjectId,
   rendererIdentity,
   snapshot,
   cues,
@@ -93,6 +104,8 @@ export function WorldCanvas({
       const zoom = retainedZoom.current
       if (zoom !== undefined && zoom !== renderer.getZoom()) renderer.zoomBy(zoom - renderer.getZoom())
       if (focusEntityId !== undefined) renderer.focusEntity(focusEntityId)
+      const spatial = renderer as { setCameraMode?: (mode: WorldCameraMode, subjectId?: string) => void }
+      if (cameraMode !== undefined) spatial.setCameraMode?.(cameraMode, cameraSubjectId)
     }).catch((cause: unknown) => {
       if (!cancelled) host.dataset.error = cause instanceof Error ? cause.message : '世界画布初始化失败'
     })
@@ -113,6 +126,12 @@ export function WorldCanvas({
     for (const cue of fresh) appliedCueIds.current.add(cue.id)
     if (fresh.length > 0) rendererRef.current?.applyCues(fresh)
   }, [cues])
+
+  useEffect(() => {
+    if (cameraMode === undefined) return
+    const renderer = rendererRef.current as { setCameraMode?: (mode: WorldCameraMode, subjectId?: string) => void } | undefined
+    renderer?.setCameraMode?.(cameraMode, cameraSubjectId)
+  }, [cameraMode, cameraSubjectId, mountedKey])
 
   useEffect(() => rendererRef.current?.selectEntity(selectedEntityId), [selectedEntityId])
   useEffect(() => rendererRef.current?.selectObject(selectedObjectId), [selectedObjectId])
