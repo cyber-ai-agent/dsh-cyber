@@ -1,5 +1,5 @@
-import { createServer, get, type ServerResponse } from 'node:http'
-import type { AddressInfo } from 'node:net'
+import { createServer, get } from 'node:http'
+import type { AddressInfo, Socket } from 'node:net'
 
 import { describe, expect, it } from 'vitest'
 
@@ -15,16 +15,16 @@ describe('HTTP server lifecycle', () => {
   })
 
   it('bounds shutdown when a browser-style streaming response never ends', async () => {
-    let streamResponse: ServerResponse | undefined
+    let connection: Socket | undefined
     const streamStarted = deferred<void>()
     const server = createServer((_request, response) => {
-      streamResponse = response
       response.writeHead(200, { 'content-type': 'text/event-stream' })
       response.write('event: ready\ndata: {}\n\n')
       streamStarted.resolve(undefined)
       // Intentionally never end: this reproduces a stale SSE/iframe-style
       // connection that used to keep CyberServer.close() alive indefinitely.
     })
+    server.on('connection', (socket) => { connection = socket })
     const address = await listen(server)
     const request = get(`http://127.0.0.1:${address.port}/stream`)
     request.on('error', () => undefined)
@@ -37,7 +37,7 @@ describe('HTTP server lifecycle', () => {
 
     expect(outcome).toBe('closed')
     expect(server.listening).toBe(false)
-    expect(streamResponse?.destroyed).toBe(true)
+    expect(connection?.destroyed).toBe(true)
     request.destroy()
   })
 
