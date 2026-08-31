@@ -43,23 +43,15 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
       - name: Required smoke E2E
         run: pnpm test:smoke
-      # Build the real pinned CC0 source after smoke so the generated Marketplace
-      # package cannot change normal unit/E2E discovery. This is intentionally a
-      # networked authoring check, not a runtime dependency: the command verifies
-      # exact Git blob ids, emits a local package, then parses that exact VRM with
-      # the same Three/VRMLoaderPlugin path used by the product.
-      - name: Verify official CC0 avatar pack build
-        run: pnpm avatar:build-official && pnpm avatar:verify-official
-      # Short-lived delivery evidence. The follow-up delivery change will either
-      # embed this exact verified package in release/source artifacts or remove
-      # this temporary handoff once the binary is committed reproducibly.
-      - name: Upload verified official avatar pack
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: official-avatar-base-v1
-          path: marketplace/plugins/official-avatar-base-v1
-          if-no-files-found: error
-          retention-days: 1
+      # The binary Marketplace package is checked in for offline delivery, but
+      # remains reproducible from the pinned CC0 source. Rebuild it in-place,
+      # parse it through the production VRM loader, then require a byte-for-byte
+      # clean worktree so source, provenance and delivered binary cannot drift.
+      - name: Verify official CC0 avatar pack delivery
+        run: |
+          pnpm avatar:build-official
+          pnpm avatar:verify-official
+          git diff --exit-code -- marketplace/plugins/official-avatar-base-v1
       # The status can only be written to a commit inside this repository.
       # For fork pull requests the head sha lives in the contributor's fork,
       # where GITHUB_TOKEN has no write access (403), so skip instead of failing.
