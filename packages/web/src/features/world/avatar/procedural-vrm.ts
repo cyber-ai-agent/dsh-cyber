@@ -1,5 +1,17 @@
+import {
+  parseAvatarRecipe,
+  type AvatarBaseModel,
+  type AvatarBuild,
+  type AvatarRecipe,
+} from './avatar-recipe.js'
+import {
+  LOCAL_IDENTITY_RECIPE_AVATAR_AUTHOR,
+  LOCAL_IDENTITY_RECIPE_REFERENCE,
+  LOCAL_PROCEDURAL_AVATAR_AUTHOR,
+} from './avatar-origin.js'
+
 export type ProceduralAvatarStyle = 'professional' | 'casual' | 'future'
-export type ProceduralAvatarBuild = 'slender' | 'balanced' | 'sturdy'
+export type ProceduralAvatarBuild = AvatarBuild
 export type ProceduralAvatarTone = 'warm' | 'neutral' | 'deep'
 
 export interface ProceduralAvatarDesign {
@@ -36,43 +48,78 @@ interface BuildMetrics {
   limb: number
 }
 
-const BUILD_METRICS: Record<ProceduralAvatarBuild, BuildMetrics> = {
+const BUILD_METRICS: Record<AvatarBuild, BuildMetrics> = {
   slender: { shoulder: 0.92, torso: 0.88, hips: 0.9, limb: 0.86 },
   balanced: { shoulder: 1, torso: 1, hips: 1, limb: 1 },
   sturdy: { shoulder: 1.1, torso: 1.12, hips: 1.08, limb: 1.14 },
 }
 
-const STYLE_COLORS: Record<ProceduralAvatarStyle, { outfit: number[]; accent: number[]; trousers: number[] }> = {
-  professional: {
-    outfit: [0.055, 0.11, 0.19, 1],
-    accent: [0.08, 0.62, 0.72, 1],
-    trousers: [0.035, 0.055, 0.09, 1],
-  },
-  casual: {
-    outfit: [0.11, 0.26, 0.2, 1],
-    accent: [0.78, 0.47, 0.12, 1],
-    trousers: [0.08, 0.12, 0.16, 1],
-  },
-  future: {
-    outfit: [0.11, 0.085, 0.2, 1],
-    accent: [0.26, 0.7, 0.82, 1],
-    trousers: [0.045, 0.035, 0.09, 1],
-  },
+const BASE_METRICS: Record<AvatarBaseModel, BuildMetrics> = {
+  'male-a': { shoulder: 1.08, torso: 1.04, hips: 0.96, limb: 1.02 },
+  'female-a': { shoulder: 0.96, torso: 0.98, hips: 1.07, limb: 0.96 },
+  'neutral-a': { shoulder: 1, torso: 1, hips: 1, limb: 1 },
+  'robot-a': { shoulder: 1.08, torso: 1.08, hips: 1.02, limb: 1.06 },
 }
 
-const SKIN_COLORS: Record<ProceduralAvatarTone, number[]> = {
-  warm: [0.78, 0.53, 0.38, 1],
-  neutral: [0.58, 0.34, 0.22, 1],
-  deep: [0.28, 0.14, 0.085, 1],
+const STYLE_DEFAULTS: Record<ProceduralAvatarStyle, { hair: string; hairColor: string; outfitColor: string; accentColor: string }> = {
+  professional: { hair: 'side-part', hairColor: '#111827', outfitColor: '#1e3a5f', accentColor: '#22b8cf' },
+  casual: { hair: 'soft-volume', hairColor: '#552b16', outfitColor: '#1c573f', accentColor: '#d97706' },
+  future: { hair: 'tech-crop', hairColor: '#6b7280', outfitColor: '#352b67', accentColor: '#43c5dd' },
 }
 
-const HAIR_COLORS: Record<ProceduralAvatarStyle, number[]> = {
-  professional: [0.035, 0.045, 0.06, 1],
-  casual: [0.16, 0.075, 0.035, 1],
-  future: [0.42, 0.46, 0.52, 1],
+const TONE_COLOURS: Record<ProceduralAvatarTone, string> = {
+  warm: '#d7a17d',
+  neutral: '#b97f60',
+  deep: '#70462f',
 }
 
+/**
+ * Legacy generic draft path. It intentionally remains generic so the 3D world
+ * can keep preferring a recognisable 2D portrait over an unrelated local mesh.
+ */
 export function createProceduralVrm(name: string, design: ProceduralAvatarDesign): ArrayBuffer {
+  const style = STYLE_DEFAULTS[design.style]
+  return createRecipeVrm(name, parseAvatarRecipe({
+    baseModel: 'neutral-a',
+    build: design.build,
+    hair: style.hair,
+    hairColor: style.hairColor,
+    skinTone: TONE_COLOURS[design.tone],
+    outfit: design.style,
+    outfitColor: style.outfitColor,
+    accentColor: style.accentColor,
+  }), false)
+}
+
+/**
+ * The matching local path. Identity fields survive while the user's creator
+ * choices adjust body, skin and outfit family. This lets the inexpensive local
+ * generator participate in the real character pipeline instead of producing a
+ * disconnected demo model.
+ */
+export function createIdentityProceduralVrm(
+  name: string,
+  identityRecipe: AvatarRecipe,
+  design: ProceduralAvatarDesign,
+): ArrayBuffer {
+  return createRecipeVrm(name, applyProceduralDesignToRecipe(identityRecipe, design), true)
+}
+
+export function applyProceduralDesignToRecipe(recipe: AvatarRecipe, design: ProceduralAvatarDesign): AvatarRecipe {
+  const style = STYLE_DEFAULTS[design.style]
+  return parseAvatarRecipe({
+    ...recipe,
+    build: design.build,
+    skinTone: TONE_COLOURS[design.tone],
+    outfit: design.style,
+    hair: recipe.hair ?? style.hair,
+    hairColor: recipe.hairColor ?? style.hairColor,
+    outfitColor: recipe.outfitColor ?? style.outfitColor,
+    accentColor: recipe.accentColor ?? style.accentColor,
+  })
+}
+
+function createRecipeVrm(name: string, recipe: AvatarRecipe, identityMatched: boolean): ArrayBuffer {
   const binary: number[] = []
   const bufferViews: Array<Record<string, unknown>> = []
   const accessors: Array<Record<string, unknown>> = []
@@ -119,14 +166,17 @@ export function createProceduralVrm(name: string, design: ProceduralAvatarDesign
   const box = addGeometry(boxGeometry())
   const cylinder = addGeometry(cylinderGeometry(14))
   const sphere = addGeometry(sphereGeometry(16, 10))
-  const style = STYLE_COLORS[design.style]
-  const build = BUILD_METRICS[design.build]
+  const build = multiplyMetrics(BUILD_METRICS[recipe.build ?? 'balanced'], BASE_METRICS[recipe.baseModel])
+  const outfitColour = colourFactor(recipe.outfitColor, '#1e3a5f')
+  const accentColour = colourFactor(recipe.accentColor, '#22b8cf')
+  const hairColour = colourFactor(recipe.hairColor, '#111827')
+  const skinColour = colourFactor(recipe.skinTone, '#b97f60')
   const materials = [
-    material('肤色', SKIN_COLORS[design.tone], 0.82, 0),
-    material('服装', style.outfit, 0.72, 0.05),
-    material('装饰', style.accent, 0.48, 0.16),
-    material('下装', style.trousers, 0.78, 0.04),
-    material('头发', HAIR_COLORS[design.style], 0.76, 0.02),
+    material('肤色', skinColour, 0.82, recipe.baseModel === 'robot-a' ? 0.2 : 0),
+    material('服装', outfitColour, 0.72, recipe.baseModel === 'robot-a' ? 0.24 : 0.05),
+    material('装饰', accentColour, 0.48, 0.16),
+    material('下装', darken(outfitColour, 0.52), 0.78, 0.04),
+    material('头发', hairColour, 0.76, 0.02),
     material('深色细节', [0.018, 0.024, 0.035, 1], 0.68, 0.06),
   ]
   const meshes: Array<Record<string, unknown>> = []
@@ -147,7 +197,8 @@ export function createProceduralVrm(name: string, design: ProceduralAvatarDesign
   const outfitSphere = mesh('服装关节', sphere, 1)
   const accentBox = mesh('服装装饰', box, 2)
   const trouserCylinder = mesh('下装肢体', cylinder, 3)
-  const hairSphere = mesh('头发', sphere, 4)
+  const hairSphere = mesh('头发球体', sphere, 4)
+  const hairBox = mesh('头发片层', box, 4)
   const detailSphere = mesh('面部细节', sphere, 5)
   const detailBox = mesh('鞋与细节', box, 5)
 
@@ -160,8 +211,8 @@ export function createProceduralVrm(name: string, design: ProceduralAvatarDesign
     }
     return index
   }
-  const addVisual = (parent: number, name: string, meshIndex: number, scale: number[], translation?: number[]): number => addNode({
-    name,
+  const addVisual = (parent: number, nodeName: string, meshIndex: number, scale: number[], translation?: number[]): number => addNode({
+    name: nodeName,
     mesh: meshIndex,
     scale,
     ...(translation === undefined ? {} : { translation }),
@@ -178,12 +229,13 @@ export function createProceduralVrm(name: string, design: ProceduralAvatarDesign
   const neck = addNode({ name: 'neck', translation: [0, 0.16, 0] }, upperChest)
   addVisual(neck, 'neckVisual', skinCylinder, [0.075, 0.1, 0.075])
   const head = addNode({ name: 'head', translation: [0, 0.12, 0] }, neck)
-  addVisual(head, 'headVisual', skinSphere, [0.18, 0.22, 0.18])
-  addNode({ name: 'hair', mesh: hairSphere, translation: [0, 0.115, -0.012], scale: [0.185, 0.11, 0.185] }, head)
+  addVisual(head, 'headVisual', recipe.baseModel === 'robot-a' ? detailBox : skinSphere, recipe.baseModel === 'robot-a' ? [0.31, 0.36, 0.28] : [0.18, 0.22, 0.18])
+  addHair(nodes, addNode, head, recipe.hair ?? 'side-part', hairSphere, hairBox)
   addNode({ name: 'leftEye', mesh: detailSphere, translation: [-0.068, 0.03, 0.17], scale: [0.022, 0.031, 0.016] }, head)
   addNode({ name: 'rightEye', mesh: detailSphere, translation: [0.068, 0.03, 0.17], scale: [0.022, 0.031, 0.016] }, head)
   addNode({ name: 'mouth', mesh: detailBox, translation: [0, -0.06, 0.173], scale: [0.055, 0.011, 0.01] }, head)
-  addNode({ name: 'chestAccent', mesh: accentBox, translation: [0, 0.02, 0.255], scale: [0.2, 0.16, 0.018] }, chest)
+  addOutfitDetail(addNode, chest, recipe.outfit ?? 'professional', accentBox)
+  addAccessories(addNode, head, chest, recipe.accessoryIds ?? [], detailBox, accentBox)
 
   const leftUpperLeg = addNode({ name: 'leftUpperLeg', translation: [-0.16 * build.hips, -0.06, 0] }, hips)
   addVisual(leftUpperLeg, 'leftUpperLegVisual', trouserCylinder, [0.105 * build.limb, 0.47, 0.105 * build.limb])
@@ -227,8 +279,9 @@ export function createProceduralVrm(name: string, design: ProceduralAvatarDesign
   const nodeIndex = new Map(nodes.map((node, index) => [node.name, index]))
   const humanBones = Object.fromEntries(boneNames.map((boneName) => [boneName, { node: nodeIndex.get(boneName)! }]))
   const safeName = name.trim().slice(0, 80) || '本地角色'
+  const author = identityMatched ? LOCAL_IDENTITY_RECIPE_AVATAR_AUTHOR : LOCAL_PROCEDURAL_AVATAR_AUTHOR
   const document = {
-    asset: { version: '2.0', generator: 'DSH Cyber 本机 3D 形象创建器' },
+    asset: { version: '2.0', generator: identityMatched ? 'DSH Cyber 身份配方 3D 形象创建器' : 'DSH Cyber 本机 3D 形象创建器' },
     scene: 0,
     scenes: [{ name: `${safeName} 3D 形象`, nodes: [root] }],
     nodes,
@@ -244,10 +297,10 @@ export function createProceduralVrm(name: string, design: ProceduralAvatarDesign
         meta: {
           name: `${safeName} 3D 形象`,
           version: '1',
-          authors: ['DSH Cyber 本机创建器'],
+          authors: [author],
           copyrightInformation: '由用户在本机创建',
           contactInformation: '',
-          references: [],
+          references: identityMatched ? [LOCAL_IDENTITY_RECIPE_REFERENCE] : [],
           thirdPartyLicenses: '',
           avatarPermission: 'onlyAuthor',
           allowExcessivelyViolentUsage: false,
@@ -266,6 +319,107 @@ export function createProceduralVrm(name: string, design: ProceduralAvatarDesign
     },
   }
   return encodeGlb(document, new Uint8Array(binary))
+}
+
+function addHair(
+  _nodes: GltfNode[],
+  addNode: (node: GltfNode, parent?: number) => number,
+  head: number,
+  style: string,
+  sphere: number,
+  box: number,
+): void {
+  const cap = (scale: number[], translation: number[] = [0, 0.115, -0.012]) => addNode({ name: 'hair', mesh: sphere, translation, scale }, head)
+  switch (style) {
+    case 'bob':
+      cap([0.19, 0.12, 0.19])
+      addNode({ name: 'hairBack', mesh: sphere, translation: [0, -0.055, -0.055], scale: [0.19, 0.2, 0.16] }, head)
+      break
+    case 'long-layered':
+      cap([0.2, 0.12, 0.2])
+      addNode({ name: 'hairLeftLayer', mesh: box, translation: [-0.15, -0.2, -0.06], scale: [0.08, 0.3, 0.08] }, head)
+      addNode({ name: 'hairRightLayer', mesh: box, translation: [0.15, -0.2, -0.06], scale: [0.08, 0.3, 0.08] }, head)
+      break
+    case 'ponytail':
+      cap([0.19, 0.11, 0.19])
+      addNode({ name: 'hairPonytail', mesh: sphere, translation: [0, -0.08, -0.2], scale: [0.09, 0.2, 0.09] }, head)
+      break
+    case 'soft-volume':
+      cap([0.205, 0.145, 0.2], [0, 0.13, -0.018])
+      break
+    case 'tech-crop':
+      cap([0.185, 0.075, 0.185], [0, 0.14, -0.018])
+      break
+    case 'side-part':
+    default:
+      cap([0.19, 0.105, 0.19])
+      addNode({ name: 'hairSidePart', mesh: sphere, translation: [-0.075, 0.09, 0.02], scale: [0.115, 0.09, 0.17] }, head)
+      break
+  }
+}
+
+function addOutfitDetail(
+  addNode: (node: GltfNode, parent?: number) => number,
+  chest: number,
+  outfit: string,
+  accentBox: number,
+): void {
+  if (outfit === 'future' || outfit === 'engineer') {
+    addNode({ name: 'chestTechPanel', mesh: accentBox, translation: [0, 0.02, 0.255], scale: [0.24, 0.075, 0.018] }, chest)
+    addNode({ name: 'chestTechLine', mesh: accentBox, translation: [0, -0.085, 0.257], scale: [0.13, 0.025, 0.018] }, chest)
+    return
+  }
+  if (outfit === 'casual') {
+    addNode({ name: 'chestCasualStripe', mesh: accentBox, translation: [0, 0.015, 0.255], scale: [0.31, 0.055, 0.018] }, chest)
+    return
+  }
+  if (outfit === 'analyst') {
+    addNode({ name: 'chestAnalystBadge', mesh: accentBox, translation: [0.15, 0.08, 0.257], scale: [0.055, 0.075, 0.018] }, chest)
+    addNode({ name: 'chestAnalystLine', mesh: accentBox, translation: [0, -0.06, 0.257], scale: [0.22, 0.025, 0.018] }, chest)
+    return
+  }
+  addNode({ name: 'chestProfessionalAccent', mesh: accentBox, translation: [0, 0.02, 0.255], scale: [0.075, 0.17, 0.018] }, chest)
+}
+
+function addAccessories(
+  addNode: (node: GltfNode, parent?: number) => number,
+  head: number,
+  chest: number,
+  accessoryIds: readonly string[],
+  detailBox: number,
+  accentBox: number,
+): void {
+  if (accessoryIds.includes('glasses')) {
+    addNode({ name: 'glassesLeft', mesh: detailBox, translation: [-0.068, 0.035, 0.184], scale: [0.065, 0.045, 0.008] }, head)
+    addNode({ name: 'glassesRight', mesh: detailBox, translation: [0.068, 0.035, 0.184], scale: [0.065, 0.045, 0.008] }, head)
+    addNode({ name: 'glassesBridge', mesh: detailBox, translation: [0, 0.035, 0.185], scale: [0.035, 0.008, 0.008] }, head)
+  }
+  if (accessoryIds.includes('badge')) {
+    addNode({ name: 'identityBadge', mesh: accentBox, translation: [0.16, 0.085, 0.259], scale: [0.05, 0.065, 0.018] }, chest)
+  }
+}
+
+function multiplyMetrics(left: BuildMetrics, right: BuildMetrics): BuildMetrics {
+  return {
+    shoulder: left.shoulder * right.shoulder,
+    torso: left.torso * right.torso,
+    hips: left.hips * right.hips,
+    limb: left.limb * right.limb,
+  }
+}
+
+function colourFactor(value: string | undefined, fallback: string): number[] {
+  const source = /^#[0-9a-f]{6}$/iu.test(value ?? '') ? value! : fallback
+  return [
+    Number.parseInt(source.slice(1, 3), 16) / 255,
+    Number.parseInt(source.slice(3, 5), 16) / 255,
+    Number.parseInt(source.slice(5, 7), 16) / 255,
+    1,
+  ]
+}
+
+function darken(colour: number[], factor: number): number[] {
+  return [colour[0]! * factor, colour[1]! * factor, colour[2]! * factor, colour[3] ?? 1]
 }
 
 function material(name: string, baseColorFactor: number[], roughnessFactor: number, metallicFactor: number): Record<string, unknown> {
