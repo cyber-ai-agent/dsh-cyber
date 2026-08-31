@@ -8,6 +8,7 @@ import { optionalString, packageManifest, readJson, requiredString } from '../ht
 import { writeJson } from '../http/response.js'
 import { loadInstalledBlueprints, loadInstalledPromptTransformCommands } from '../installed-package-runtime.js'
 import { AvatarBasePackService } from '../services/avatar-base-pack-service.js'
+import { validateAvatarBasePackSource } from '../services/avatar-base-pack-source-validator.js'
 import type { CharacterSkillRuntime } from '../services/character-skill-runtime.js'
 import type { SkillCatalogService } from '../services/skill-catalog-service.js'
 import { CreativeWorkshopService } from '../services/creative-workshop-service.js'
@@ -170,10 +171,13 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
     const body = await readJson(request)
     const worldId = optionalString(body.worldId)
     if (worldId !== undefined) await assertTargetWorld(store, worldAccess, request, workspaceId, worldId)
+    const manifest = packageManifest(body.manifest)
+    const sourceDirectory = requiredString(body, 'sourceDirectory')
+    await assertAvatarBasePackInstallSource(manifest, sourceDirectory)
     const installed = await packageManager.install({
       workspaceId,
-      manifest: packageManifest(body.manifest),
-      sourceDirectory: requiredString(body, 'sourceDirectory'),
+      manifest,
+      sourceDirectory,
       approvalToken: requiredString(body, 'approvalToken'),
       actorId: 'owner',
     })
@@ -203,6 +207,7 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
     if (worldId !== undefined) await assertTargetWorld(store, worldAccess, request, workspaceId, worldId)
     const item = await packageCatalog.find(requiredString(body, 'packageId'), optionalString(body.version))
     if (item === undefined) throw new HttpError(404, 'market_package_not_found', 'Marketplace package not found')
+    await assertAvatarBasePackInstallSource(item.manifest, item.sourceDirectory)
     const installed = await packageManager.install({
       workspaceId,
       manifest: item.manifest,
@@ -260,6 +265,21 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
   router.get(/^\/api\/workspaces\/([^/]+)\/workshop\/projects\/([^/]+)$/, async ({ response, params }) => {
     writeJson(response, 200, { project: await workshop.readProject(params[0]!, params[1]!) })
   })
+}
+
+async function assertAvatarBasePackInstallSource(
+  manifest: Parameters<typeof validateAvatarBasePackSource>[0],
+  sourceDirectory: string,
+): Promise<void> {
+  try {
+    await validateAvatarBasePackSource(manifest, sourceDirectory)
+  } catch (cause) {
+    throw new HttpError(
+      400,
+      'avatar_base_pack_invalid',
+      cause instanceof Error ? cause.message : '3D 角色基础包校验失败',
+    )
+  }
 }
 
 async function assertTargetWorld(
