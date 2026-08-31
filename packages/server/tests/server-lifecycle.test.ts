@@ -21,7 +21,7 @@ describe('HTTP server lifecycle', () => {
       streamResponse = response
       response.writeHead(200, { 'content-type': 'text/event-stream' })
       response.write('event: ready\ndata: {}\n\n')
-      streamStarted.resolve()
+      streamStarted.resolve(undefined)
       // Intentionally never end: this reproduces a stale SSE/iframe-style
       // connection that used to keep CyberServer.close() alive indefinitely.
     })
