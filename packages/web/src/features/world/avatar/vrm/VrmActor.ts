@@ -87,17 +87,20 @@ export class VrmActor {
   }
 
   /**
-   * Loads a character. Three, GLTFLoader and three-vrm remain behind this async
-   * boundary so a 2D-only session never pays for the 3D runtime.
+   * Loads a character. Three, GLTFLoader, Meshopt and three-vrm remain behind
+   * this async boundary so a 2D-only session never pays for the 3D runtime.
+   * Meshopt is part of the accepted VRM transport surface because production
+   * Base Packs use it to keep shared avatar downloads small.
    */
   static async load(options: VrmActorLoadOptions): Promise<VrmActor> {
     if (isSignalAborted(options.signal)) throw cancellationError()
-    const [THREE, loaderModule, vrmModule] = await Promise.all([
-      import('three'),
+    const [loaderModule, meshoptModule, vrmModule] = await Promise.all([
       import('three/addons/loaders/GLTFLoader.js'),
+      import('three/addons/libs/meshopt_decoder.module.js'),
       import('@pixiv/three-vrm'),
     ])
     const loader = new loaderModule.GLTFLoader()
+    loader.setMeshoptDecoder(meshoptModule.MeshoptDecoder)
     loader.register((parser) => new vrmModule.VRMLoaderPlugin(parser))
     const key = options.cacheKey ?? options.assetUrl
     const lease = avatarBytes.acquireLease(key, async (signal) => {
@@ -131,7 +134,6 @@ export class VrmActor {
     if (options.assembly !== undefined) {
       applyAvatarAssembly(vrm.scene, options.assembly.pack, options.assembly.plan)
     }
-    void THREE
     return new VrmActor(vrm, () => {
       disposeVrmScene(vrm.scene)
       releaseBytes()
