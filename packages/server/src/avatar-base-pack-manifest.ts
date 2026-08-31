@@ -2,7 +2,7 @@ import { extname } from 'node:path'
 
 import type { InstalledPackage } from '@dsh-cyber/contracts'
 
-export const AVATAR_BASE_PACK_CAPABILITY = 'avatar-base-pack'
+export const AVATAR_BASE_PACK_CAPABILITY = 'avatar:base-pack'
 export const AVATAR_BASE_PACK_MANIFEST_PATH = 'avatar-base-pack.json'
 
 export type AvatarBaseModel = 'male-a' | 'female-a' | 'neutral-a' | 'robot-a'
