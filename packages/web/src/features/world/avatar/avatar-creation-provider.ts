@@ -59,8 +59,8 @@ export class CharacterAvatarCreationProviderRegistry {
 
 export const localProceduralAvatarProvider: CharacterAvatarCreationProvider = {
   id: LOCAL_PROCEDURAL_AVATAR_PROVIDER_ID,
-  displayName: '本机基础 3D',
-  description: '在设备上生成低面数、自包含的 VRM 1.0，不发送角色资料。',
+  displayName: '本机 3D 草稿',
+  description: '在设备上生成低面数、自包含的 VRM 1.0 草稿，不发送角色资料。实时世界会优先保留角色原有 2D 身份，直到发布匹配的正式 3D 形象。',
   source: 'local',
   async create(request, context = {}) {
     throwIfAborted(context.signal)
