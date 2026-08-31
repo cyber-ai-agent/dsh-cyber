@@ -29,15 +29,11 @@ const PACK_VERSION = '1.0.0'
  * Builds the official pack from the exact pinned CC0 source while delegating
  * source-GLB semantics to the same Three GLTFLoader used by the product.
  *
- * The mirror's `characters.glb` was preprocessed/merged for a browser game and
- * retains extra logical buffer declarations that are harmless to GLTFLoader but
- * do not obey the simplistic "N declarations = N concatenated BIN regions"
- * assumption of a hand-written container parser. We therefore let GLTFLoader
- * resolve only buffers actually referenced by bufferViews, then normalize those
- * resolved bytes into a conventional single-buffer GLB before any VRM mutation.
- * External network dependencies still cannot enter the generated pack: the
- * pinned source itself is fetched once by loadPinnedSource and final VRM
- * verification rejects external buffers/images.
+ * The source is Meshopt-compressed. We keep that compression intact and rewrite
+ * both ordinary bufferView locations and EXT_meshopt_compression locations into
+ * one self-contained output buffer. The same decoder is enabled in VrmActor and
+ * in the final production-loader verifier, so build-time and runtime capability
+ * stay identical.
  */
 export async function buildOfficialAvatarBasePackResolved(options = {}) {
   const outputRoot = resolve(options.outputRoot ?? OUTPUT_ROOT)
@@ -127,15 +123,25 @@ export async function buildOfficialAvatarBasePackResolved(options = {}) {
 }
 
 export async function normalizeSourceGlbWithProductionLoader(body) {
-  const { GLTFLoader } = await import(pathToFileURL(webRequire.resolve('three/addons/loaders/GLTFLoader.js')).href)
+  const [{ GLTFLoader }, { MeshoptDecoder }] = await Promise.all([
+    import(pathToFileURL(webRequire.resolve('three/addons/loaders/GLTFLoader.js')).href),
+    import(pathToFileURL(webRequire.resolve('three/addons/libs/meshopt_decoder.module.js')).href),
+  ])
   const loader = new GLTFLoader()
+  loader.setMeshoptDecoder(MeshoptDecoder)
   const source = Buffer.from(body)
   const arrayBuffer = source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength)
   const gltf = await loader.parseAsync(arrayBuffer, '')
   const parser = gltf.parser
   const document = structuredClone(parser.json)
   const bufferViews = Array.isArray(document.bufferViews) ? document.bufferViews : []
-  const referenced = [...new Set(bufferViews.map((view) => Number.isInteger(view?.buffer) ? view.buffer : 0))].sort((a, b) => a - b)
+  const referencedSet = new Set()
+  for (const view of bufferViews) {
+    referencedSet.add(Number.isInteger(view?.buffer) ? view.buffer : 0)
+    const meshopt = view?.extensions?.EXT_meshopt_compression
+    if (meshopt !== undefined) referencedSet.add(Number.isInteger(meshopt.buffer) ? meshopt.buffer : 0)
+  }
+  const referenced = [...referencedSet].sort((a, b) => a - b)
   if (referenced.length === 0) throw new Error('CC0 base does not reference any renderable buffer')
 
   const resolved = new Map()
@@ -160,21 +166,27 @@ export async function normalizeSourceGlbWithProductionLoader(body) {
   const binary = Buffer.concat(pieces)
 
   for (const [viewIndex, view] of bufferViews.entries()) {
-    const sourceBuffer = Number.isInteger(view?.buffer) ? view.buffer : 0
-    const bytes = resolved.get(sourceBuffer)
-    const baseOffset = offsets.get(sourceBuffer)
-    if (bytes === undefined || baseOffset === undefined) throw new Error(`Source bufferView ${viewIndex} references unresolved buffer ${sourceBuffer}`)
-    const relativeOffset = view.byteOffset ?? 0
-    const byteLength = view.byteLength
-    if (!Number.isSafeInteger(relativeOffset) || relativeOffset < 0 || !Number.isSafeInteger(byteLength) || byteLength < 0 || relativeOffset + byteLength > bytes.byteLength) {
-      throw new Error(`Source bufferView ${viewIndex} exceeds GLTFLoader-resolved buffer ${sourceBuffer}`)
-    }
-    view.buffer = 0
-    view.byteOffset = baseOffset + relativeOffset
+    rewriteRange(view, viewIndex, 'bufferView', resolved, offsets)
+    const meshopt = view?.extensions?.EXT_meshopt_compression
+    if (meshopt !== undefined) rewriteRange(meshopt, viewIndex, 'Meshopt bufferView', resolved, offsets)
   }
 
   document.buffers = [{ byteLength: binary.byteLength }]
   return { document, binary }
+}
+
+function rewriteRange(range, viewIndex, label, resolved, offsets) {
+  const sourceBuffer = Number.isInteger(range?.buffer) ? range.buffer : 0
+  const bytes = resolved.get(sourceBuffer)
+  const baseOffset = offsets.get(sourceBuffer)
+  if (bytes === undefined || baseOffset === undefined) throw new Error(`${label} ${viewIndex} references unresolved buffer ${sourceBuffer}`)
+  const relativeOffset = range.byteOffset ?? 0
+  const byteLength = range.byteLength
+  if (!Number.isSafeInteger(relativeOffset) || relativeOffset < 0 || !Number.isSafeInteger(byteLength) || byteLength < 0 || relativeOffset + byteLength > bytes.byteLength) {
+    throw new Error(`${label} ${viewIndex} exceeds GLTFLoader-resolved buffer ${sourceBuffer}`)
+  }
+  range.buffer = 0
+  range.byteOffset = baseOffset + relativeOffset
 }
 
 function provenanceText() {
@@ -187,7 +199,7 @@ function provenanceText() {
     `Only those explicitly attributed files are consumed; project-authored/commercial-tool character files are excluded.\n\n` +
     `Pinned transport snapshot: https://github.com/${SOURCE_REPOSITORY}/commit/${SOURCE_COMMIT}\n\n` +
     `## DSH Cyber conversion\n\n` +
-    `- Resolves the preprocessed source with production Three GLTFLoader, then emits one self-contained GLB buffer.\n` +
+    `- Resolves the Meshopt-compressed source with the production Three GLTFLoader and keeps the compression self-contained.\n` +
     `- Adds VRM 1.0 Humanoid metadata without replacing the source rig.\n` +
     `- Rebinds three CC0 hairstyle skins to the same Base skeleton by exact bone name.\n` +
     `- Declares only long-layered, side-part and tech-crop hair mappings; unsupported hairstyles remain on the 2.5D identity fallback.\n` +
