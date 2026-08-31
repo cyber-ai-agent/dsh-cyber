@@ -13,7 +13,7 @@ import { createWorldRendererRegistry } from './renderer/renderer-registry.js'
 import { WorldLocomotion, WorldLocomotionClock } from './runtime/world-locomotion.js'
 import { browserSpatialCapabilityProvider, type SpatialCapabilityProvider } from './avatar/renderer/RenderingQuality.js'
 import type { WorldCameraMode } from './runtime/world-view-mode.js'
-import type { ResolvedAvatarRepresentation } from './avatar/avatar-representation.js'
+import { resolveCharacterAvatarRepresentation, type ResolvedAvatarRepresentation } from './avatar/avatar-representation.js'
 import { loadRendererAvatar, rendererAvatarUrl } from './avatar/avatar-representation-loader.js'
 
 interface WorldCanvasProps {
@@ -107,6 +107,8 @@ export function WorldCanvas({
   latestCameraState.current = { mode: cameraMode, subjectId: cameraSubjectId }
   const latestSelection = useRef<{ entityId: string | undefined; objectId: string | undefined; focusEntityId: string | undefined }>({ entityId: selectedEntityId, objectId: selectedObjectId, focusEntityId })
   latestSelection.current = { entityId: selectedEntityId, objectId: selectedObjectId, focusEntityId }
+  const latestSnapshot = useRef(snapshot)
+  latestSnapshot.current = snapshot
   // Held in refs, not closed over at mount: the renderer is built once and
   // asks again on every snapshot, so a published avatar or installed pack can
   // hot-swap while the world stays mounted.
@@ -168,7 +170,22 @@ export function WorldCanvas({
     // Reduced motion still reaches the renderer — as the lowest tier, which
     // strips shadows and secondary motion — rather than as a refusal to draw.
     const quality = capability.quality
-    const representationResolver = (entityId: string) => resolveAvatarRepresentationRef.current?.(entityId)
+    const representationResolver = (entityId: string): ResolvedAvatarRepresentation | undefined => {
+      const supplied = resolveAvatarRepresentationRef.current?.(entityId)
+      if (supplied !== undefined) return supplied
+      const entity = latestSnapshot.current.entities.find((candidate) => candidate.id === entityId)
+      const rosterIndex = entity?.visualState['rosterIndex']
+      const publishedAvatarUrl = resolveAvatarUrlRef.current?.(entityId)
+      // This baseline is intentionally conservative: the snapshot knows the
+      // same built-in portrait index as Pixi, which is enough to protect hair,
+      // outfit and palette identity. A richer Profile resolver may override it.
+      if (entity === undefined && publishedAvatarUrl === undefined) return undefined
+      return resolveCharacterAvatarRepresentation({
+        employeeId: entityId,
+        ...(typeof rosterIndex === 'number' && Number.isFinite(rosterIndex) ? { fallbackAvatarIndex: Math.max(0, Math.floor(rosterIndex)) } : {}),
+        ...(publishedAvatarUrl === undefined ? {} : { publishedAvatarUrl }),
+      })
+    }
     const registry = rendererRegistry ?? createWorldRendererRegistry({
       locomotion: sharedLocomotion,
       lodCeiling: quality === 'high' ? 'full' : quality === 'balanced' ? 'reduced' : 'billboard',
@@ -180,11 +197,10 @@ export function WorldCanvas({
           ? resolveAvatarUrlRef.current?.(entityId)
           : rendererAvatarUrl(entityId, representation)
       },
-      ...(resolveAvatarRepresentation === undefined
-        ? {}
-        : {
-            loadAvatar: (rendererUrl, signal) => loadRendererAvatar(rendererUrl, representationResolver, signal),
-          }),
+      // The loader stays lazy. Published URLs follow the old path, while an
+      // internal pack key resolves to Base VRM bytes + an assembly plan only
+      // after ThreeWorldRenderer actually asks for that actor.
+      loadAvatar: (rendererUrl, signal) => loadRendererAvatar(rendererUrl, representationResolver, signal),
     })
     const toViewport = (position: { x: number; y: number }) => { const rect = host.getBoundingClientRect(); return { x: rect.left + position.x, y: rect.top + position.y } }
     const renderer = registry.create(activeKind, { onEntitySelect, onObjectSelect, onReady, ...(onEntityContext === undefined ? {} : { onEntityContext: (id, position) => onEntityContext(id, toViewport(position)) }), ...(onObjectContext === undefined ? {} : { onObjectContext: (id, position) => onObjectContext(id, toViewport(position)) }) })
