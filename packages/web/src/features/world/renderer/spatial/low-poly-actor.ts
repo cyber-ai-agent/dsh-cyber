@@ -5,6 +5,61 @@ import type { WorldActivityKind } from '@dsh-cyber/contracts'
 import type { LodCapabilities } from './three-world-lod.js'
 
 /**
+ * One frame in the same actor atlas the Pixi world uses.
+ *
+ * A 3D stand-in should preserve identity before it preserves dimensionality:
+ * seeing the exact purple-haired analyst from 2D inside a 3D office is less
+ * jarring than replacing her with an unrelated capsule person merely because
+ * that person is technically geometry.
+ */
+export interface IdentityPortraitSource {
+  src: string
+  frameWidth: number
+  frameHeight: number
+  framesPerActor?: number
+  rosterIndex: number
+}
+
+export interface IdentityPortraitFrame {
+  repeatX: number
+  repeatY: number
+  offsetX: number
+  offsetY: number
+  aspect: number
+}
+
+/** Pure atlas arithmetic, exported so identity continuity is testable without WebGL. */
+export function identityPortraitFrame(
+  imageWidth: number,
+  imageHeight: number,
+  source: IdentityPortraitSource,
+): IdentityPortraitFrame | undefined {
+  if (
+    !Number.isFinite(imageWidth) || !Number.isFinite(imageHeight) ||
+    imageWidth <= 0 || imageHeight <= 0 ||
+    source.frameWidth <= 0 || source.frameHeight <= 0
+  ) return undefined
+  const columns = Math.max(1, Math.floor(imageWidth / source.frameWidth))
+  const rows = Math.max(1, Math.floor(imageHeight / source.frameHeight))
+  const framesPerActor = Math.max(1, Math.floor(source.framesPerActor ?? 1))
+  const actorCount = Math.max(1, Math.floor((columns * rows) / framesPerActor))
+  const actorIndex = ((Math.floor(source.rosterIndex) % actorCount) + actorCount) % actorCount
+  const frameIndex = actorIndex * framesPerActor
+  const column = frameIndex % columns
+  const row = Math.floor(frameIndex / columns)
+  const repeatX = source.frameWidth / imageWidth
+  const repeatY = source.frameHeight / imageHeight
+  return {
+    repeatX,
+    repeatY,
+    offsetX: column * repeatX,
+    // Texture UVs start at the bottom; the roster is authored top-to-bottom.
+    offsetY: 1 - ((row + 1) * repeatY),
+    aspect: source.frameWidth / source.frameHeight,
+  }
+}
+
+/**
  * A character in the world before, or instead of, a VRM.
  *
  * Every character is in the world from the moment it exists, whether or not
@@ -12,9 +67,9 @@ import type { LodCapabilities } from './three-world-lod.js'
  * office of empty desks, and pushing the user out to an avatar editor before
  * they can see their company is the wrong order.
  *
- * So this is a real inhabitant, not a placeholder box: it stands, walks, sits
- * at the right height, turns, and carries its name. When a VRM arrives it is
- * swapped out; until then nothing about the world is missing.
+ * When the theme has a 2D actor atlas, that exact portrait is the preferred
+ * stand-in. The primitive body remains only as a last fallback for themes that
+ * do not ship identity artwork or when the image cannot be loaded.
  */
 
 const BODY_HEIGHT = 1.05
@@ -23,8 +78,10 @@ const TOTAL_HEIGHT = 1.72
 
 export interface LowPolyActorOptions {
   shadows?: boolean
-  /** Stable per-character tint, so a room of stand-ins is still legible. */
+  /** Stable per-character tint, so a room of primitive fallbacks is still legible. */
   hue?: number
+  /** Exact 2D identity to preserve while a matching authored VRM is unavailable. */
+  identityPortrait?: IdentityPortraitSource
 }
 
 export class LowPolyActor {
@@ -39,6 +96,12 @@ export class LowPolyActor {
   readonly #shadows: boolean
 
   #billboard: THREE.Mesh | undefined
+  #identityPortrait: THREE.Sprite | undefined
+  #identityPortraitKey: string | undefined
+  #identityLoadToken = 0
+  #standInHidden = false
+  #disposed = false
+  #detail: LodCapabilities = { face: true, secondaryMotion: true, skinned: true, shadow: true }
   #phase = 0
   #bubbleUntil = 0
   #displayName = ''
@@ -76,6 +139,7 @@ export class LowPolyActor {
     this.root.add(this.#label)
 
     this.#disposables.push(bodyGeometry, bodyMaterial, headGeometry, headMaterial, pickerGeometry, pickerMaterial)
+    if (options.identityPortrait !== undefined) this.setIdentityPortrait(options.identityPortrait)
   }
 
   setLabel(displayName: string, activityLabel: string): void {
@@ -90,6 +154,81 @@ export class LowPolyActor {
     material.map?.dispose()
     material.map = texture
     material.needsUpdate = true
+  }
+
+  /**
+   * Asynchronously adopts the exact frame used by the 2D renderer.
+   *
+   * `THREE.Sprite` is deliberate: it always faces the camera, so focus/follow
+   * cameras cannot turn a 2.5D character edge-on. The actor still owns the
+   * world position, picker, label and activity state.
+   */
+  setIdentityPortrait(source: IdentityPortraitSource | undefined): void {
+    const key = source === undefined
+      ? undefined
+      : `${source.src}:${source.frameWidth}x${source.frameHeight}:${source.framesPerActor ?? 1}:${source.rosterIndex}`
+    if (key === this.#identityPortraitKey) return
+    this.#identityPortraitKey = key
+    const token = ++this.#identityLoadToken
+    this.#disposeIdentityPortrait()
+    if (source === undefined || this.#disposed) {
+      this.#applyDetail()
+      return
+    }
+    const loader = new THREE.TextureLoader()
+    loader.load(
+      source.src,
+      (atlas) => {
+        if (this.#disposed || token !== this.#identityLoadToken) {
+          atlas.dispose()
+          return
+        }
+        const image = atlas.image as { width?: number; height?: number } | undefined
+        const frame = identityPortraitFrame(image?.width ?? 0, image?.height ?? 0, source)
+        if (frame === undefined) {
+          atlas.dispose()
+          this.#applyDetail()
+          return
+        }
+        atlas.colorSpace = THREE.SRGBColorSpace
+        const texture = atlas.clone()
+        texture.colorSpace = THREE.SRGBColorSpace
+        texture.wrapS = THREE.ClampToEdgeWrapping
+        texture.wrapT = THREE.ClampToEdgeWrapping
+        texture.repeat.set(frame.repeatX, frame.repeatY)
+        texture.offset.set(frame.offsetX, frame.offsetY)
+        texture.needsUpdate = true
+        atlas.dispose()
+        const material = new THREE.SpriteMaterial({
+          map: texture,
+          transparent: true,
+          alphaTest: 0.02,
+          depthWrite: false,
+          toneMapped: false,
+        })
+        const portrait = new THREE.Sprite(material)
+        portrait.name = 'identity-portrait'
+        portrait.position.y = TOTAL_HEIGHT / 2
+        portrait.scale.set(TOTAL_HEIGHT * frame.aspect, TOTAL_HEIGHT, 1)
+        this.#identityPortrait = portrait
+        this.root.add(portrait)
+        this.#applyDetail()
+      },
+      undefined,
+      () => {
+        if (token === this.#identityLoadToken) this.#applyDetail()
+      },
+    )
+  }
+
+  /** A requested portrait is enough to prefer identity over a generic VRM draft. */
+  get identityPortraitRequested(): boolean {
+    return this.#identityPortraitKey !== undefined
+  }
+
+  /** Whether the exact 2D identity has finished loading into the scene. */
+  get identityPortraitReady(): boolean {
+    return this.#identityPortrait !== undefined
   }
 
   /**
@@ -109,17 +248,38 @@ export class LowPolyActor {
   }
 
   /**
-   * Trades detail for time.
+   * Trades detail for time while keeping identity stable.
    *
-   * A billboard keeps the character visible and clickable at a fraction of the
-   * cost; the point of dropping detail is that nobody can see it from there.
+   * If an exact portrait exists it remains the stand-in at every LOD; the
+   * primitive capsule or blue plane is only a last resort for themes without
+   * an actor atlas.
    */
   setDetail(capabilities: LodCapabilities): void {
-    const skinned = capabilities.skinned
+    this.#detail = capabilities
+    this.#standInHidden = false
+    this.#applyDetail()
+  }
+
+  #applyDetail(): void {
+    if (this.#standInHidden) {
+      this.#body.visible = false
+      this.#head.visible = false
+      this.#billboard?.removeFromParent()
+      if (this.#identityPortrait !== undefined) this.#identityPortrait.visible = false
+      return
+    }
+    if (this.#identityPortrait !== undefined) {
+      this.#body.visible = false
+      this.#head.visible = false
+      this.#billboard?.removeFromParent()
+      this.#identityPortrait.visible = true
+      return
+    }
+    const skinned = this.#detail.skinned
     this.#body.visible = skinned
     this.#head.visible = skinned
-    this.#body.castShadow = capabilities.shadow
-    this.#head.castShadow = capabilities.shadow
+    this.#body.castShadow = this.#detail.shadow
+    this.#head.castShadow = this.#detail.shadow
     if (skinned) {
       this.#billboard?.removeFromParent()
       return
@@ -141,15 +301,18 @@ export class LowPolyActor {
 
   /** Whether this stand-in currently contributes a visible representation. */
   get representationVisible(): boolean {
-    return this.#body.visible || this.#head.visible || this.#billboard?.parent === this.root
+    return this.#body.visible
+      || this.#head.visible
+      || this.#billboard?.parent === this.root
+      || (this.#identityPortrait?.parent === this.root && this.#identityPortrait.visible)
   }
 
   /**
    * Advances the character's own motion.
    *
    * Procedural and small on purpose: a bob while walking, a settle while
-   * standing. It is what a stand-in can honestly do, and it stays out of the
-   * way of the real animation a VRM brings.
+   * standing. It is what a primitive stand-in can honestly do; the exact
+   * identity portrait stays visually stable instead of wobbling like a card.
    */
   update(deltaMs: number, activity: WorldActivityKind): void {
     this.#phase += deltaMs / 1_000
@@ -168,19 +331,32 @@ export class LowPolyActor {
   }
 
   /**
-   * Steps aside for the character's own avatar.
+   * Steps aside for a matching authored avatar.
    *
-   * Kept rather than destroyed: the label stays, and a VRM that later fails to
-   * reload has something to fall back to.
+   * Kept rather than destroyed: the exact portrait stays cached on the actor,
+   * and a VRM that later fails or drops to billboard LOD has the same character
+   * to fall back to instead of an unrelated body.
    */
   hideStandIn(): void {
-    this.#body.visible = false
-    this.#head.visible = false
-    this.#billboard?.removeFromParent()
+    this.#standInHidden = true
+    this.#applyDetail()
+  }
+
+  #disposeIdentityPortrait(): void {
+    const portrait = this.#identityPortrait
+    if (portrait === undefined) return
+    portrait.removeFromParent()
+    const material = portrait.material as THREE.SpriteMaterial
+    material.map?.dispose()
+    material.dispose()
+    this.#identityPortrait = undefined
   }
 
   dispose(): void {
+    this.#disposed = true
+    this.#identityLoadToken += 1
     this.root.removeFromParent()
+    this.#disposeIdentityPortrait()
     const material = this.#label.material as THREE.SpriteMaterial
     material.map?.dispose()
     material.dispose()
