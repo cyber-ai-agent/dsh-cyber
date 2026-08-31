@@ -2,6 +2,7 @@ import { Microphone, StopCircle, Waveform } from '@phosphor-icons/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { stopKokoroSpeech } from '../world/avatar/speech/KokoroSpeechAdapter.js'
+import { currentSpeechAmplitude } from '../world/avatar/speech/speech-playback-state.js'
 import './voice-conversation-control.css'
 
 type VoiceUiState = 'cold' | 'warming' | 'ready' | 'listening' | 'speech' | 'finalizing' | 'failed'
@@ -92,6 +93,15 @@ export function VoiceConversationControl({ employeeName, disabled = false, varia
     source.connect(worklet); worklet.connect(muted); muted.connect(context.destination)
     worklet.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
       if (socket.readyState !== WebSocket.OPEN) return
+      // While the character is talking, its own voice comes back through the
+      // speakers and trips the recogniser, so it interrupts itself and the
+      // conversation collapses into a loop. Echo cancellation helps and does
+      // not finish the job on external speakers.
+      //
+      // Half-duplex would kill barge-in, which is the point of a microphone
+      // during a reply, so the bar is raised rather than closed: speak louder
+      // than the speaker and you get through.
+      if (!carriesSpeechOver(event.data, currentSpeechAmplitude())) return
       const packet = new ArrayBuffer(8 + event.data.byteLength)
       new DataView(packet).setFloat64(0, performance.now(), true)
       new Uint8Array(packet, 8).set(new Uint8Array(event.data))
@@ -137,6 +147,23 @@ export function VoiceConversationControl({ employeeName, disabled = false, varia
     </span>}
     {state === 'speech' ? <Waveform className="voice-conversation__wave" size={28} aria-hidden="true" /> : null}
   </div>
+}
+
+/**
+ * Whether a captured frame is the user rather than the character's own reply.
+ *
+ * With nothing playing every frame passes: the recogniser's own silence
+ * detection is better at deciding what is speech. While a reply is audible the
+ * frame has to be clearly louder than it, which is what a person does when
+ * they interrupt somebody.
+ */
+function carriesSpeechOver(frame: ArrayBuffer, playbackAmplitude: number | undefined): boolean {
+  if (playbackAmplitude === undefined || playbackAmplitude <= 0.01) return true
+  const samples = new Int16Array(frame)
+  let sum = 0
+  for (const sample of samples) sum += sample * sample
+  const rms = Math.sqrt(sum / Math.max(samples.length, 1)) / 32_768
+  return rms > playbackAmplitude * 1.8 + 0.02
 }
 
 function voiceLabel(state: VoiceUiState, employeeName: string): string {

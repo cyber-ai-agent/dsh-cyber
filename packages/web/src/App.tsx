@@ -1829,9 +1829,11 @@ export default function App() {
       }
     }
 
-    if (demoMode) void turnQueueRef.current.enqueue(queueKey, runTurn, clientTurnId)
-    else void runTurn()
-    return Promise.resolve()
+    // Returned rather than discarded: the voice control awaits this to decide
+    // whether the message got through, and resolving immediately told it every
+    // attempt had succeeded — so a failed send looked exactly like a delivered
+    // one and the microphone went straight back to listening.
+    return demoMode ? turnQueueRef.current.enqueue(queueKey, runTurn, clientTurnId) : runTurn()
   }, [
     activeConversationKey,
     activePermissionKey,

@@ -29,6 +29,7 @@ import { ContextMenu, type ContextMenuPosition } from './ContextMenu.js'
 import { ConversationPermissionControl, type ConversationPermissionMode } from './ConversationPermissionControl.js'
 import { ModelPicker } from '../features/models/ModelPicker.js'
 import { MessageSpeechButton } from '../features/voice/MessageSpeechButton.js'
+import { ComposerReplySpeaker } from '../features/voice/ComposerReplySpeaker.js'
 import { VoiceConversationControl } from '../features/voice/VoiceConversationControl.js'
 
 const MarkdownMessage = lazy(async () => ({ default: (await import('./MarkdownMessage.js')).MarkdownMessage }))
@@ -93,6 +94,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
   const [rememberingMessageId, setRememberingMessageId] = useState<string>()
   const [submittedKnowledgeMessageIds, setSubmittedKnowledgeMessageIds] = useState<Set<string>>(() => new Set())
   const [knowledgeError, setKnowledgeError] = useState<string>()
+  const [spokeAloud, setSpokeAloud] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string>()
   const [copyError, setCopyError] = useState<string>()
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
@@ -488,7 +490,11 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
             <CommandPicker commands={installedPlugins} draft={draft} onDraftChange={onDraftChange} {...(onOpenPluginMarket === undefined ? {} : { onOpenMarket: onOpenPluginMarket })} onFocus={() => inputRef.current?.focus()} />
           </div>
           <div className="composer__actions-right">
-            <VoiceConversationControl variant="compact" employeeName={directEmployee?.displayName ?? '当前会话角色'} disabled={employees.length === 0} onFinal={(text) => onSend(text, [], nextQueueMode)} />
+            {/* Armed by speaking, not by typing: a user who has just talked
+                expects to be answered out loud, and one who is typing does
+                not want the room to start making noise. */}
+            <ComposerReplySpeaker {...(directEmployee === undefined ? { employeeId: undefined } : { employeeId: directEmployee.id })} dossiers={dossiers} enabled={spokeAloud} />
+            <VoiceConversationControl variant="compact" employeeName={directEmployee?.displayName ?? '当前会话角色'} disabled={employees.length === 0} onFinal={async (text) => { setSpokeAloud(true); await onSend(text, [], nextQueueMode) }} />
             <button className={`send-button${showStopButton ? ' send-button--stop' : ''}`} type="button" aria-label={showStopButton ? '停止当前回复' : insertsNext ? '插入对话' : sending ? '正在回复中，发送新消息' : '发送'} title={showStopButton ? '停止当前回复' : insertsNext ? '插入对话' : '发送'} disabled={showStopButton ? false : uploading || employees.length === 0 || (!draft.trim() && attachments.length === 0)} onClick={() => { if (showStopButton && activeTurn !== undefined && onStopTurn !== undefined) void onStopTurn(activeTurn.id); else void submit() }}>{showStopButton ? <Stop size={19} weight="bold" /> : sending && !insertsNext ? <CircleNotch size={19} className="spin" /> : <PaperPlaneRight size={19} weight="fill" />}{showStopButton || queuedCount === 0 ? null : <span className="send-button__queue" aria-label={`${queuedCount} 条插入对话`}>{queuedCount}</span>}</button>
           </div>
         </div>

@@ -53,9 +53,11 @@ export class MossTtsProvider implements TextToSpeechProvider {
       nextSequence: 0,
     })
     const voice = request.voiceId.startsWith('moss:') ? request.voiceId.slice('moss:'.length) : this.#voices[0] ?? 'Junhao'
-    // Speed was dropped here, so the slider moved and nothing changed: the
-    // sidecar resamples the result when it is given one.
-    this.#process!.stdin.write(`${JSON.stringify({ id: request.requestId, text: request.text, voice, speed: request.speed })}\n`, (error) => {
+    // Speed is deliberately absent: the sidecar synthesises at its own rate
+    // and has no parameter for it, so playback rate is where MOSS speed is
+    // applied (see KokoroSpeechAdapter). Sending it here would look like it
+    // did something.
+    this.#process!.stdin.write(`${JSON.stringify({ id: request.requestId, text: request.text, voice })}\n`, (error) => {
       if (error !== null && error !== undefined) this.#terminate(error)
     })
     try {
@@ -66,11 +68,29 @@ export class MossTtsProvider implements TextToSpeechProvider {
     }
   }
 
+  /**
+   * Stops caring about one request, or shuts everything down.
+   *
+   * Cancelling one used to kill the Python runtime and start it again, so
+   * every barge-in cost a full model reload before the character could answer
+   * — which is most of what made a spoken conversation impossible. The sidecar
+   * has no cancellation protocol and cannot be interrupted mid-utterance, so
+   * the request is abandoned instead: it finishes into nothing, which costs a
+   * second of CPU rather than a restart, and the next reply starts straight
+   * away.
+   */
   cancel(requestId?: string): void {
     const error = abortError('MOSS 语音生成已取消')
-    if (requestId !== undefined && !this.#pending.has(requestId)) return
-    this.#terminate(error)
-    if (requestId !== undefined) void this.prepare().catch(() => undefined)
+    if (requestId === undefined) {
+      this.#terminate(error)
+      return
+    }
+    const pending = this.#pending.get(requestId)
+    if (pending === undefined) return
+    // The consumer is told; the sidecar is left to finish into nothing, since
+    // it has no way to be interrupted mid-utterance.
+    pending.queue.fail(error)
+    this.#finishRequest(requestId)
   }
 
   async dispose(): Promise<void> {
