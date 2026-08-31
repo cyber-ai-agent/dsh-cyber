@@ -8,15 +8,15 @@ import type {
 
 import type { WorldLocomotion } from '../runtime/world-locomotion.js'
 import type { WorldCameraMode } from '../runtime/world-view-mode.js'
-import type { ThreeWorldRendererOptions } from './three/three-world-renderer.js'
+import type { ThreeWorldRendererOptions } from './spatial/three-world-renderer.js'
 
 /**
  * The 3D world, fetched only when somebody asks to see it.
  *
- * Deliberately outside the `three/` directory: the build assigns everything
- * whose path contains `/three/` to the vrm-runtime chunk, so a shell living
- * there would drag that whole chunk into the first screen the moment the
- * registry referenced it — which is exactly what the build budget caught.
+ * The 3D modules live under `spatial/`, not `three/`: the build assigns every
+ * path containing `/three/` to the vrm-runtime chunk, so a directory named
+ * that way pulled the whole chunk into anything importing it — the first
+ * screen included. Only the real three library belongs in that chunk.
  *
  * `WorldRendererFactory` is synchronous, and three plus three-vrm are a large
  * chunk that must stay out of the first screen — a build budget enforces it,
@@ -47,7 +47,7 @@ export class LazyThreeWorldRenderer implements WorldRenderer<HTMLElement> {
   }
 
   async mount(host: HTMLElement, manifest: WorldThemeManifestV1, snapshot: WorldRuntimeSnapshot): Promise<void> {
-    const { ThreeWorldRenderer } = await import('./three/three-world-renderer.js')
+    const { ThreeWorldRenderer } = await import('./spatial/three-world-renderer.js')
     // The view can be abandoned while the chunk is in flight; mounting into a
     // host React has already thrown away would leak a WebGL context.
     if (this.#destroyed) return

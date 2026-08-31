@@ -6,7 +6,7 @@ import {
   lowerOf,
   stableLod,
   updateIntervalMs,
-} from '../src/features/world/renderer/three/three-world-lod.js'
+} from '../src/features/world/renderer/spatial/three-world-lod.js'
 
 describe('lodFor', () => {
   it('runs a nearby character in full', () => {

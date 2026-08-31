@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { WorldThemeSceneManifest } from '@dsh-cyber/contracts'
 
-import { planWorldLayout, zoneKindFor } from '../src/features/world/renderer/three/three-world-layout.js'
+import { planWorldLayout, zoneKindFor } from '../src/features/world/renderer/spatial/three-world-layout.js'
 import { WORLD_SCALE } from '../src/features/world/coordinates/world-to-three.js'
 
 function scene(overrides: Partial<WorldThemeSceneManifest> = {}): WorldThemeSceneManifest {

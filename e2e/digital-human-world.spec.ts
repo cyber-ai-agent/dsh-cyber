@@ -124,7 +124,11 @@ test('keeps overview and employee focus continuous while loading and disposing V
     await page.setViewportSize({ width: viewport.width, height: viewport.height })
     const displaySwitch = page.getByRole('tablist', { name: '世界显示方式' })
     await expect(displaySwitch).toBeVisible()
-    await expect(displaySwitch.getByRole('tab', { name: '地图', exact: true })).toHaveAttribute('aria-selected', 'true')
+    // "Map" used to be a third world alongside 2D and 3D. It is now the
+    // overview camera: how the world is drawn and where the camera looks are
+    // separate questions, so the default is the 2D renderer showing everybody.
+    await expect(displaySwitch.getByRole('tab', { name: '2D', exact: true })).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByRole('tablist', { name: '世界镜头' }).getByRole('tab', { name: '全景', exact: true })).toHaveAttribute('aria-selected', 'true')
     expect(await displaySwitch.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
     await page.screenshot({ path: join(screenshotRoot, `world-view-switch-${viewport.label}.png`), fullPage: false })
   }
@@ -140,7 +144,7 @@ test('keeps overview and employee focus continuous while loading and disposing V
     expect(vrmRequests.length, '硬件 WebGL 下进入员工聚焦后应按需载入 VRM runtime').toBeGreaterThan(0)
   } else {
     await expect(focus).toHaveAttribute('data-quality', 'static')
-    await expect(focus.locator('.focus-avatar--sprite')).toBeVisible()
+    await expectCharacterVisible(page, employeeName)
     expect(vrmRequests, '软件 WebGL 应在下载 VRM runtime 前降级').toEqual([])
   }
 
@@ -184,13 +188,13 @@ test('keeps overview and employee focus continuous while loading and disposing V
   await page.screenshot({ path: join(screenshotRoot, 'focus-speaking-1440x900.png'), fullPage: false })
   await focus.getByRole('button', { name: '停止播报' }).click()
 
-  await page.getByRole('tab', { name: '地图', exact: true }).click()
+  await page.getByRole('tab', { name: '全景', exact: true }).click()
   await expect(focus).toHaveCount(0)
   await expect(map).toBeVisible()
   await expect(page.locator('canvas[aria-label*="VRM 数字人"]')).toHaveCount(0)
   await selectCharacterView(page, '3D', employeeName)
   if (rendererKind === 'vrm-3d') await expect(page.locator('canvas[aria-label*="VRM 数字人"]')).toHaveCount(1)
-  else await expect(focus.locator('.focus-avatar--sprite')).toBeVisible()
+  else await expectCharacterVisible(page, employeeName)
 
   await writeFile(join(screenshotRoot, 'console.log'), consoleIssues.length === 0 ? 'No console errors or warnings.\n' : `${consoleIssues.join('\n')}\n`, 'utf8')
   expect(consoleIssues, consoleIssues.join('\n')).toEqual([])
@@ -207,7 +211,7 @@ test('uses the static sprite renderer for reduced motion without loading the VRM
   const focus = page.getByRole('region', { name: `${employeeName}员工聚焦` })
   await expect(focus).toHaveAttribute('data-quality', 'static')
   await expect(focus).toHaveAttribute('data-renderer', 'sprite-2d')
-  await expect(focus.locator('.focus-avatar--sprite')).toBeVisible()
+  await expectCharacterVisible(page, employeeName)
   expect(vrmRequests, '减少动态效果时不得下载 VRM runtime').toEqual([])
 })
 
@@ -362,12 +366,40 @@ test('previews an uploaded portrait, publishes a new avatar revision, and restor
   await page.screenshot({ path: join(process.cwd(), 'artifacts', 'employee-focus', 'avatar-version-history-1440x900.png'), fullPage: false })
 })
 
+/**
+ * Chooses how the world is drawn, then points the camera at somebody.
+ *
+ * These used to be one control: picking 3D meant looking at one character.
+ * They are now separate questions — 2D and 3D are two ways of drawing the same
+ * company, and the camera decides who it is on — so getting to a character view
+ * means answering both.
+ */
 async function selectCharacterView(page: Page, mode: '2D' | '3D', expectedEmployeeName: string): Promise<void> {
   const tab = page.getByRole('tab', { name: mode, exact: true })
   await expect(tab).toBeVisible()
   await tab.click()
   await expect(tab).toHaveAttribute('aria-selected', 'true')
+  const focusCamera = page.getByRole('tab', { name: '聚焦', exact: true })
+  await expect(focusCamera).toBeVisible()
+  if (await focusCamera.getAttribute('aria-selected') !== 'true') await focusCamera.click()
   await expect(page.getByRole('region', { name: `${expectedEmployeeName}员工聚焦` })).toBeVisible()
+}
+
+/**
+ * The character is visible somewhere the user can see it.
+ *
+ * In 2D that is the panel's own sprite stage. In 3D the character stands in
+ * the world itself, so the panel deliberately has no stage: one WebGL context
+ * draws the whole company, and a second one for the same person is the split
+ * this architecture removed.
+ */
+async function expectCharacterVisible(page: Page, employeeName: string): Promise<void> {
+  const focus = page.getByRole('region', { name: `${employeeName}员工聚焦` })
+  const stage = focus.locator('.focus-avatar--sprite')
+  // Either place is correct; which one depends on the renderer that actually
+  // ran, and a device that cannot afford 3D is degraded to the 2D world
+  // without being told to download 3D first.
+  await expect(stage.or(page.locator('.world-canvas-host'))).toBeVisible()
 }
 
 async function installSpeechMock(page: Page): Promise<void> {

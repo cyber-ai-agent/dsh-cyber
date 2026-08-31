@@ -10,6 +10,7 @@ import type {
 
 import { createWorldRendererRegistry } from './renderer/renderer-registry.js'
 import { WorldLocomotion } from './runtime/world-locomotion.js'
+import { detectRenderingQuality } from './avatar/renderer/RenderingQuality.js'
 import type { WorldCameraMode } from './runtime/world-view-mode.js'
 
 interface WorldCanvasProps {
@@ -76,7 +77,13 @@ export function WorldCanvas({
   // a swap would otherwise lose. Selection is held above this component and is
   // simply re-applied.
   const retainedZoom = useRef<number | undefined>(undefined)
-  const activeKind = rendererKind ?? manifest.renderer
+  // A device that cannot run 3D must not download it to find that out. The
+  // degradation ladder ends at the 2D world, and the last rung has to be
+  // reachable without fetching the chunk it is meant to avoid.
+  const requestedKind = rendererKind ?? manifest.renderer
+  const activeKind = requestedKind === 'three-3d' && detectRenderingQuality(false) === 'static'
+    ? 'pixi-2d'
+    : requestedKind
   const worldKey = `${manifest.id}:${snapshot.sceneId}`
   const mountedKey = `${rendererIdentity}:${activeKind}:${worldKey}`
 

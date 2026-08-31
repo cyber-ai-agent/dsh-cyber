@@ -25,7 +25,16 @@ export interface WorldViewState {
   camera: WorldCameraMode
 }
 
-export const DEFAULT_WORLD_VIEW: WorldViewState = { renderer: '2d', camera: 'overview' }
+/**
+ * What a world opens on.
+ *
+ * Focus rather than overview, because that is what the single view mode
+ * defaulted to before it was split: a user arriving with a character selected
+ * was shown that character. `viewForFocus` sends this back to the whole
+ * company when there is nobody to look at, so an empty world still opens on
+ * the office.
+ */
+export const DEFAULT_WORLD_VIEW: WorldViewState = { renderer: '2d', camera: 'focus' }
 
 const RENDERER_KINDS: Record<WorldRendererMode, RendererKind> = {
   '2d': 'pixi-2d',

@@ -8,7 +8,7 @@ import type {
 
 import { PixiWorldRenderer } from './pixi-world-renderer.js'
 import { LazyThreeWorldRenderer } from './lazy-three-world-renderer.js'
-import type { AvatarLod } from './three/three-world-lod.js'
+import type { AvatarLod } from './spatial/three-world-lod.js'
 import type { WorldLocomotion } from '../runtime/world-locomotion.js'
 
 export class DefaultRendererRegistry implements RendererRegistry<HTMLElement> {

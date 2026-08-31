@@ -87,6 +87,13 @@ describe('stored views', () => {
     expect(readWorldView('world-1')).toEqual(DEFAULT_WORLD_VIEW)
   })
 
+  it('opens on the character, the way the single view mode used to', () => {
+    // The old default was '2d', which meant a character view. Opening on the
+    // whole company instead would silently change what every existing user
+    // sees when they arrive.
+    expect(DEFAULT_WORLD_VIEW).toEqual({ renderer: '2d', camera: 'focus' })
+  })
+
   it('keeps one world out of another world view', () => {
     writeWorldView('world-1', { renderer: '3d', camera: 'focus' })
     expect(readWorldView('world-2')).toEqual(DEFAULT_WORLD_VIEW)
