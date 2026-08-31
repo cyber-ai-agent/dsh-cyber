@@ -530,7 +530,11 @@ export class ThreeWorldRenderer implements WorldRenderer<HTMLElement> {
           actor.dispose()
           return
         }
-        if (shouldPreferIdentityPortrait(view.actor.identityPortraitRequested, actor.vrm)) {
+        // `VRM.meta` is a VRM0 | VRM1 union. The local procedural generator is
+        // VRM1, so narrow only the metadata fields this product rule reads and
+        // leave legacy VRM0 models accepted as ordinary imported avatars.
+        const draftMetadata = actor.vrm as unknown as { meta?: { authors?: readonly string[] } }
+        if (shouldPreferIdentityPortrait(view.actor.identityPortraitRequested, draftMetadata)) {
           // Record the URL as observed, then keep the exact 2D character. This
           // avoids re-downloading the generic draft on every streamed snapshot.
           actor.dispose()
