@@ -17,7 +17,6 @@ import type { ModelCredentialService } from '../services/model-credential-servic
 import type { WorldMarketplaceService } from '../services/world-marketplace-service.js'
 import type { WorldPackageInstanceService } from '../services/world-package-instance-service.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
-import { registerAvatarBasePackRoutes } from './avatar-base-pack-routes.js'
 
 const CREATIVE_WORKSHOP_MODEL_TIMEOUT_MS = 240_000
 
@@ -46,7 +45,7 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
       // for planners while giving Creative Workshop a dedicated four-minute budget.
       timeoutMs: CREATIVE_WORKSHOP_MODEL_TIMEOUT_MS,
     })
-  registerAvatarBasePackRoutes(router, { packs: new AvatarBasePackService(worldPackages), access: worldAccess })
+  const avatarBasePacks = new AvatarBasePackService(worldPackages)
 
   router.get(/^\/api\/workspaces\/([^/]+)\/packages$/, ({ response, params }) => {
     const workspaceId = params[0]!
@@ -99,6 +98,33 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
     await worldAccess.assertUnlocked(worldId, request)
     const items = await loadInstalledPromptTransformCommands(await worldPackages.listRuntimePackages(worldId))
     writeJson(response, 200, { items })
+  })
+
+  // Avatar Base Pack endpoints intentionally live with the package route
+  // boundary. Route modules in this repository are leaves and must not import
+  // one another; the service owns parsing/verification while this file only
+  // translates the already-verified world-scoped result to HTTP.
+  router.get(/^\/api\/worlds\/([^/]+)\/avatar-base-packs$/, async ({ request, response, params }) => {
+    const worldId = params[0]!
+    if (store.getWorld(worldId) === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
+    await worldAccess.assertUnlocked(worldId, request)
+    writeJson(response, 200, { items: await avatarBasePacks.list(worldId) })
+  })
+
+  router.get(/^\/api\/worlds\/([^/]+)\/avatar-base-packs\/([^/]+)\/([^/]+)\/assets\/(.+)$/, async ({ request, response, params }) => {
+    const worldId = params[0]!
+    if (store.getWorld(worldId) === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
+    await worldAccess.assertUnlocked(worldId, request)
+    const asset = await avatarBasePacks.readBaseAsset(worldId, params[1]!, params[2]!, params[3]!)
+    response.writeHead(200, {
+      'content-type': asset.contentType,
+      'content-length': asset.body.byteLength,
+      // Installed versions are immutable and URL-versioned, so the expensive
+      // shared Base VRM can be reused by many employees without refetching it.
+      'cache-control': 'private, max-age=31536000, immutable',
+      'x-content-type-options': 'nosniff',
+    })
+    response.end(asset.body)
   })
 
   router.post(/^\/api\/worlds\/([^/]+)\/packages\/instantiate$/, async ({ request, response, params }) => {
