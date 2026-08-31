@@ -90,9 +90,41 @@ export function parseInstalledAvatarBasePackManifest(
   return { schemaVersion: 1, id, version, displayName, license, publisher, quality, bases, parts, materialSlots }
 }
 
+/**
+ * Production Base Packs are stricter than generic GLB previews: the file must
+ * be a self-contained VRM 1.0 Humanoid. This keeps a package from passing the
+ * catalog check and only failing much later inside Three/VRMLoaderPlugin.
+ */
 export function assertAvatarBaseVrmEnvelope(body: Buffer, label: string): void {
   if (body.byteLength < 20 || body.readUInt32LE(0) !== 0x46546c67 || body.readUInt32LE(4) !== 2 || body.readUInt32LE(8) !== body.byteLength) {
     throw new Error(`Avatar Base Pack VRM 不是有效的 GLB 2.0：${label}`)
+  }
+  const jsonLength = body.readUInt32LE(12)
+  const jsonType = body.readUInt32LE(16)
+  if (jsonType !== 0x4e4f534a || jsonLength <= 0 || 20 + jsonLength > body.byteLength) {
+    throw new Error(`Avatar Base Pack VRM 缺少有效 JSON chunk：${label}`)
+  }
+  let document: Record<string, unknown>
+  try {
+    document = JSON.parse(body.subarray(20, 20 + jsonLength).toString('utf8').trim()) as Record<string, unknown>
+  } catch {
+    throw new Error(`Avatar Base Pack VRM JSON 无法解析：${label}`)
+  }
+  const extensions = record(document.extensions)
+  const vrm = record(extensions?.VRMC_vrm)
+  if (vrm?.specVersion !== '1.0') throw new Error(`Avatar Base Pack 必须是 VRM 1.0：${label}`)
+  const humanoid = record(vrm.humanoid)
+  const humanBones = record(humanoid?.humanBones)
+  for (const bone of ['hips', 'spine', 'head', 'leftUpperArm', 'rightUpperArm', 'leftUpperLeg', 'rightUpperLeg']) {
+    if (record(humanBones?.[bone]) === undefined) throw new Error(`Avatar Base Pack VRM 缺少 Humanoid 骨骼 ${bone}：${label}`)
+  }
+  for (const buffer of arrayOrEmpty(document.buffers)) {
+    const uri = record(buffer)?.uri
+    if (typeof uri === 'string' && !uri.startsWith('data:')) throw new Error(`Avatar Base Pack VRM 不允许外链 buffer：${label}`)
+  }
+  for (const image of arrayOrEmpty(document.images)) {
+    const uri = record(image)?.uri
+    if (typeof uri === 'string' && !uri.startsWith('data:')) throw new Error(`Avatar Base Pack VRM 不允许外链纹理：${label}`)
   }
 }
 
@@ -100,10 +132,14 @@ function object(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error(`${label} 必须为对象`)
   return value as Record<string, unknown>
 }
+function record(value: unknown): Record<string, any> | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, any> : undefined
+}
 function array(value: unknown, label: string): unknown[] {
   if (!Array.isArray(value)) throw new Error(`${label} 必须为数组`)
   return value
 }
+function arrayOrEmpty(value: unknown): unknown[] { return Array.isArray(value) ? value : [] }
 function token(value: unknown, label: string): string {
   if (typeof value !== 'string') throw new Error(`${label} 必须为字符串`)
   const trimmed = value.trim()
