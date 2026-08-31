@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { stopKokoroSpeech } from '../world/avatar/speech/KokoroSpeechAdapter.js'
 import { currentSpeechAmplitude } from '../world/avatar/speech/speech-playback-state.js'
+import { calculateBargeInThreshold, isBargeInFrame, pcmRms, updateEchoBaseline } from './barge-in-threshold.js'
 import './voice-conversation-control.css'
 
 type VoiceUiState = 'cold' | 'warming' | 'ready' | 'listening' | 'speech' | 'finalizing' | 'failed'
@@ -25,6 +26,8 @@ export function VoiceConversationControl({ employeeName, disabled = false, varia
   const sourceRef = useRef<MediaStreamAudioSourceNode | undefined>(undefined)
   const workletRef = useRef<AudioWorkletNode | undefined>(undefined)
   const ownerIdRef = useRef(crypto.randomUUID())
+  const echoBaselineRef = useRef(0)
+  const bargeThresholdRef = useRef<number | undefined>(undefined)
 
   const prepare = useCallback(() => {
     if (disabled || !('WebSocket' in window)) return
@@ -47,7 +50,7 @@ export function VoiceConversationControl({ employeeName, disabled = false, varia
       if (event.type === 'prepared') setState((current) => current === 'listening' || current === 'speech' || current === 'finalizing' ? current : 'ready')
       else if (event.type === 'listening') setState('listening')
       else if (event.type === 'speech-start') {
-        stopKokoroSpeech(); window.speechSynthesis?.cancel(); onBargeIn?.(); setState('speech')
+        stopKokoroSpeech(); window.speechSynthesis?.cancel(); onBargeIn?.(); echoBaselineRef.current = 0; bargeThresholdRef.current = undefined; setState('speech')
       } else if (event.type === 'partial') {
         setPartial(event.text ?? ''); setState('speech')
       } else if (event.type === 'final' && event.text?.trim()) {
@@ -101,13 +104,18 @@ export function VoiceConversationControl({ employeeName, disabled = false, varia
       // Half-duplex would kill barge-in, which is the point of a microphone
       // during a reply, so the bar is raised rather than closed: speak louder
       // than the speaker and you get through.
-      if (!carriesSpeechOver(event.data, currentSpeechAmplitude())) return
+      const playbackAmplitude = currentSpeechAmplitude()
+      const frameRms = pcmRms(event.data)
+      echoBaselineRef.current = updateEchoBaseline(echoBaselineRef.current, frameRms, playbackAmplitude)
+      bargeThresholdRef.current = calculateBargeInThreshold(playbackAmplitude, echoBaselineRef.current, bargeThresholdRef.current)
+      if (!isBargeInFrame(event.data, playbackAmplitude, echoBaselineRef.current, bargeThresholdRef.current)) return
       const packet = new ArrayBuffer(8 + event.data.byteLength)
       new DataView(packet).setFloat64(0, performance.now(), true)
       new Uint8Array(packet, 8).set(new Uint8Array(event.data))
       socket.send(packet)
     }
     streamRef.current = stream; contextRef.current = context; sourceRef.current = source; workletRef.current = worklet
+    echoBaselineRef.current = 0; bargeThresholdRef.current = undefined
     socket.send(JSON.stringify({ type: 'start', endpointSilenceMs: 650 }))
     setState('listening'); setError(undefined)
   }, [prepare])
@@ -118,6 +126,7 @@ export function VoiceConversationControl({ employeeName, disabled = false, varia
     for (const track of streamRef.current?.getTracks() ?? []) track.stop()
     void contextRef.current?.close()
     workletRef.current = undefined; sourceRef.current = undefined; streamRef.current = undefined; contextRef.current = undefined
+    echoBaselineRef.current = 0; bargeThresholdRef.current = undefined
     setPartial(''); setState('ready')
   }, [])
 
@@ -147,23 +156,6 @@ export function VoiceConversationControl({ employeeName, disabled = false, varia
     </span>}
     {state === 'speech' ? <Waveform className="voice-conversation__wave" size={28} aria-hidden="true" /> : null}
   </div>
-}
-
-/**
- * Whether a captured frame is the user rather than the character's own reply.
- *
- * With nothing playing every frame passes: the recogniser's own silence
- * detection is better at deciding what is speech. While a reply is audible the
- * frame has to be clearly louder than it, which is what a person does when
- * they interrupt somebody.
- */
-function carriesSpeechOver(frame: ArrayBuffer, playbackAmplitude: number | undefined): boolean {
-  if (playbackAmplitude === undefined || playbackAmplitude <= 0.01) return true
-  const samples = new Int16Array(frame)
-  let sum = 0
-  for (const sample of samples) sum += sample * sample
-  const rms = Math.sqrt(sum / Math.max(samples.length, 1)) / 32_768
-  return rms > playbackAmplitude * 1.8 + 0.02
 }
 
 function voiceLabel(state: VoiceUiState, employeeName: string): string {

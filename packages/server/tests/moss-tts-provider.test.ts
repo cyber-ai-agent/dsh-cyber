@@ -29,6 +29,8 @@ describe('MossTtsProvider sidecar protocol', () => {
     await provider.prepare()
     expect(provider.state).toBe('ready')
     expect(provider.voices).toEqual(['Junhao'])
+    const warmPid = provider.processId
+    expect(warmPid).toEqual(expect.any(Number))
     const chunks = []
     for await (const chunk of provider.synthesize({ requestId: 'moss-test', text: '你好', voiceId: 'moss:Junhao', speed: 1 })) chunks.push(chunk)
     expect(chunks).toHaveLength(3)
@@ -47,6 +49,45 @@ describe('MossTtsProvider sidecar protocol', () => {
     controller.abort()
     await expect(interrupted).rejects.toMatchObject({ name: 'AbortError' })
     await vi.waitFor(() => expect(provider.state).toBe('ready'), { timeout: 2_000 })
+    expect(provider.processId).toBe(warmPid)
+
+    const nextChunks = []
+    for await (const chunk of provider.synthesize({ requestId: 'moss-next', text: '你好', voiceId: 'moss:Junhao', speed: 1 })) nextChunks.push(chunk)
+    expect(nextChunks.length).toBeGreaterThan(0)
+    expect(provider.processId).toBe(warmPid)
+    await provider.dispose()
+    expect(provider.processId).toBeUndefined()
+  })
+
+  it('terminates and recovers the runtime after a request timeout', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-moss-timeout-'))
+    const sidecar = join(root, 'timeout-sidecar.mjs')
+    await writeFile(sidecar, `
+      import { createInterface } from 'node:readline';
+      process.stdout.write(JSON.stringify({ type: 'ready', voices: ['Junhao'] }) + '\\n');
+      const lines = createInterface({ input: process.stdin });
+      lines.on('line', (line) => {
+        const request = JSON.parse(line);
+        if (request.text === 'timeout') return;
+        process.stdout.write(JSON.stringify({ type: 'audio', id: request.id, sequence: 0, sampleRate: 24000, pcmBase64: Buffer.from(new Float32Array([0.2]).buffer).toString('base64') }) + '\\n');
+        process.stdout.write(JSON.stringify({ type: 'done', id: request.id, sequence: 1 }) + '\\n');
+      });
+    `, 'utf8')
+    const provider = new MossTtsProvider(root, { executable: process.execPath, sidecar, startupTimeoutMs: 2_000, requestTimeoutMs: 30 })
+    await provider.prepare()
+    const firstPid = provider.processId
+    const timedOut = (async () => {
+      for await (const _chunk of provider.synthesize({ requestId: 'moss-timeout', text: 'timeout', voiceId: 'moss:Junhao', speed: 1 })) { /* consume */ }
+    })()
+    await expect(timedOut).rejects.toMatchObject({ name: 'AbortError' })
+    expect(provider.processId).toBeUndefined()
+
+    await provider.prepare()
+    expect(provider.processId).toEqual(expect.any(Number))
+    expect(provider.processId).not.toBe(firstPid)
+    const recovered = []
+    for await (const chunk of provider.synthesize({ requestId: 'moss-recovered', text: '恢复', voiceId: 'moss:Junhao', speed: 1 })) recovered.push(chunk)
+    expect(recovered.some((chunk) => chunk.final)).toBe(true)
     await provider.dispose()
   })
 })

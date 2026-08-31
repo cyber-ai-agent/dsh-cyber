@@ -1,4 +1,5 @@
 import { readPcmFrames } from '../../../voice/PcmFrameStream.js'
+import { normalizeMossVoiceId } from '@dsh-cyber/contracts'
 import { setSpeechAmplitude } from './speech-playback-state.js'
 
 export interface KokoroVoiceOption {
@@ -75,7 +76,7 @@ export async function playMossSpeech(input: {
     await appendKokoroSpeech({
       ...input,
       text: chunks[index]!,
-      voiceId: input.voiceId ?? 'moss:Junhao',
+      voiceId: normalizeMossVoiceId(input.voiceId ?? 'moss:Junhao'),
       provider: 'moss',
       onEnd: index === chunks.length - 1 ? input.onEnd : () => undefined,
     })
@@ -106,7 +107,7 @@ export async function appendKokoroSpeech(input: {
     const response = await fetch('/api/local-tts/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: input.text, speakerId: option?.speakerId ?? 58, speed: normalizeSpeed(input.speed), provider, voiceId: input.voiceId }),
+      body: JSON.stringify({ text: input.text, speakerId: option?.speakerId ?? 58, speed: normalizeSpeed(input.speed), provider, voiceId: provider === 'moss' ? normalizeMossVoiceId(input.voiceId) : input.voiceId }),
       signal: controller.signal,
     })
     if (!response.ok) {

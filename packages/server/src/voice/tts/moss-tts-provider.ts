@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import { createInterface, type Interface } from 'node:readline'
 
-import type { AudioChunk, TextToSpeechCapabilities, TextToSpeechProvider, TtsRequest, VoiceRuntimeState } from '@dsh-cyber/contracts'
+import { normalizeMossVoiceId, type AudioChunk, type TextToSpeechCapabilities, type TextToSpeechProvider, type TtsRequest, type VoiceRuntimeState } from '@dsh-cyber/contracts'
 import { AsyncQueue } from '../async-queue.js'
 
 type PendingRequest = {
@@ -52,7 +52,9 @@ export class MossTtsProvider implements TextToSpeechProvider {
       sampleRate: 48_000,
       nextSequence: 0,
     })
-    const voice = request.voiceId.startsWith('moss:') ? request.voiceId.slice('moss:'.length) : this.#voices[0] ?? 'Junhao'
+    const voice = request.voiceId.trim() === ''
+      ? this.#voices[0] ?? 'Junhao'
+      : normalizeMossVoiceId(request.voiceId).slice('moss:'.length)
     // Speed is deliberately absent: the sidecar synthesises at its own rate
     // and has no parameter for it, so playback rate is where MOSS speed is
     // applied (see KokoroSpeechAdapter). Sending it here would look like it

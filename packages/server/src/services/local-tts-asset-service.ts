@@ -10,7 +10,7 @@ import { EnvHttpProxyAgent, fetch as proxyAwareFetch } from 'undici'
 import { ServiceError } from './service-error.js'
 import { SherpaKokoroTtsProvider } from '../voice/tts/sherpa-kokoro-tts-provider.js'
 import { MossTtsProvider } from '../voice/tts/moss-tts-provider.js'
-import type { AudioChunk, VoiceModelDescriptor, VoiceModelVoice } from '@dsh-cyber/contracts'
+import { normalizeMossVoiceId, type AudioChunk, type VoiceModelDescriptor, type VoiceModelVoice } from '@dsh-cyber/contracts'
 
 interface SherpaManifest {
   schemaVersion: 2
@@ -318,13 +318,16 @@ export class LocalTtsAssetService {
         voices?: Array<string | { id?: unknown; label?: unknown; name?: unknown; gender?: unknown }>
       }
       const raw = Array.isArray(manifest.voices) ? manifest.voices : []
+      const seen = new Set<string>()
       const voices = raw.flatMap((entry): VoiceModelVoice[] => {
-        if (typeof entry === 'string') return entry.trim() === '' ? [] : [{ id: `moss:${entry}`, label: entry }]
-        const id = typeof entry.id === 'string' ? entry.id : undefined
-        if (id === undefined || id.trim() === '') return []
-        const label = typeof entry.label === 'string' ? entry.label : typeof entry.name === 'string' ? entry.name : id
-        const gender = entry.gender === 'female' || entry.gender === 'male' ? entry.gender : undefined
-        return [{ id: `moss:${id}`, label, ...(gender === undefined ? {} : { gender }) }]
+        const rawId = typeof entry === 'string' ? entry : typeof entry.id === 'string' ? entry.id : undefined
+        if (rawId === undefined || rawId.trim() === '') return []
+        const id = normalizeMossVoiceId(rawId)
+        if (seen.has(id)) return []
+        seen.add(id)
+        const label = typeof entry === 'string' ? entry.trim() : typeof entry.label === 'string' && entry.label.trim() !== '' ? entry.label.trim() : typeof entry.name === 'string' && entry.name.trim() !== '' ? entry.name.trim() : id.slice('moss:'.length)
+        const gender = typeof entry === 'string' ? undefined : entry.gender === 'female' || entry.gender === 'male' ? entry.gender : undefined
+        return [{ id, label, ...(gender === undefined ? {} : { gender }) }]
       })
       // A pack that names no speakers still has one; without this an installed,
       // working engine would offer nothing at all.

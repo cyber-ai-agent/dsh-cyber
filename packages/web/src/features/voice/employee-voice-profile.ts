@@ -1,4 +1,4 @@
-import type { CharacterGender, EmployeeVoiceProfile } from '@dsh-cyber/contracts'
+import { normalizeMossVoiceId, type CharacterGender, type EmployeeVoiceProfile } from '@dsh-cyber/contracts'
 
 import { KOKORO_CHINESE_VOICES } from '../world/avatar/speech/KokoroSpeechAdapter.js'
 
@@ -25,7 +25,7 @@ export function resolveEmployeeVoiceProfile(
     : stableVoiceId(employeeId, gender)
   return {
     provider: profile?.provider ?? 'auto',
-    voiceId,
+    voiceId: voiceId.startsWith('moss:') ? normalizeMossVoiceId(voiceId) : voiceId,
     speed: normalizeVoiceSpeed(profile?.speed),
     pitch: normalizeVoicePitch(profile?.pitch),
   }

@@ -30,6 +30,7 @@ import { ConversationPermissionControl, type ConversationPermissionMode } from '
 import { ModelPicker } from '../features/models/ModelPicker.js'
 import { MessageSpeechButton } from '../features/voice/MessageSpeechButton.js'
 import { ComposerReplySpeaker } from '../features/voice/ComposerReplySpeaker.js'
+import type { SpeechInputSurface } from '../features/voice/SpeechCoordinator.js'
 import { VoiceConversationControl } from '../features/voice/VoiceConversationControl.js'
 
 const MarkdownMessage = lazy(async () => ({ default: (await import('./MarkdownMessage.js')).MarkdownMessage }))
@@ -56,7 +57,7 @@ interface ChatWorkbenchProps {
   draft: string
   focusRequest?: number
   onDraftChange(value: string): void
-  onSend(prompt: string, attachments: ChatAttachment[], queueMode?: 'normal' | 'next'): Promise<void>
+  onSend(prompt: string, attachments: ChatAttachment[], queueMode?: 'normal' | 'next', speechSurface?: SpeechInputSurface): Promise<void>
   onUploadAttachment(file: File): Promise<ChatAttachment>
   onOpenDossier(employeeId: string): void
   onOpenArtifact(artifactId?: string): void
@@ -78,9 +79,11 @@ interface ChatWorkbenchProps {
   onRequestFullAccess?(): void
   onCancelQueuedTurn?(turnId: string): Promise<void>
   onStopTurn?(turnId: string): Promise<void>
+  /** Stable queue identity used to reject late speech from another session. */
+  speechConversationKey?: string
 }
 
-export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, dossiers = {}, installedPlugins = [], models = [], modelAssignments = [], modelProfileId, onChangeModelProfile, sending = false, pendingCount = 0, queuedCount = 0, queueItems = [], draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRetryCompletionJob, onCompletionJobSettled, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, permissionMode = 'read-only', onChangePermissionMode, onRequestFullAccess, onCancelQueuedTurn, onStopTurn }: ChatWorkbenchProps) {
+export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, dossiers = {}, installedPlugins = [], models = [], modelAssignments = [], modelProfileId, onChangeModelProfile, sending = false, pendingCount = 0, queuedCount = 0, queueItems = [], draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRetryCompletionJob, onCompletionJobSettled, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, permissionMode = 'read-only', onChangePermissionMode, onRequestFullAccess, onCancelQueuedTurn, onStopTurn, speechConversationKey }: ChatWorkbenchProps) {
   const { t } = useI18n()
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -94,7 +97,6 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
   const [rememberingMessageId, setRememberingMessageId] = useState<string>()
   const [submittedKnowledgeMessageIds, setSubmittedKnowledgeMessageIds] = useState<Set<string>>(() => new Set())
   const [knowledgeError, setKnowledgeError] = useState<string>()
-  const [spokeAloud, setSpokeAloud] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string>()
   const [copyError, setCopyError] = useState<string>()
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
@@ -490,11 +492,8 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
             <CommandPicker commands={installedPlugins} draft={draft} onDraftChange={onDraftChange} {...(onOpenPluginMarket === undefined ? {} : { onOpenMarket: onOpenPluginMarket })} onFocus={() => inputRef.current?.focus()} />
           </div>
           <div className="composer__actions-right">
-            {/* Armed by speaking, not by typing: a user who has just talked
-                expects to be answered out loud, and one who is typing does
-                not want the room to start making noise. */}
-            <ComposerReplySpeaker {...(directEmployee === undefined ? { employeeId: undefined } : { employeeId: directEmployee.id })} dossiers={dossiers} enabled={spokeAloud} />
-            <VoiceConversationControl variant="compact" employeeName={directEmployee?.displayName ?? '当前会话角色'} disabled={employees.length === 0} onFinal={async (text) => { setSpokeAloud(true); await onSend(text, [], nextQueueMode) }} />
+            <ComposerReplySpeaker {...(directEmployee === undefined ? { employeeId: undefined } : { employeeId: directEmployee.id })} {...(session?.id === undefined ? {} : { sessionId: session.id })} {...(speechConversationKey === undefined ? {} : { conversationKey: speechConversationKey })} dossiers={dossiers} />
+            <VoiceConversationControl variant="compact" employeeName={directEmployee?.displayName ?? '当前会话角色'} disabled={employees.length === 0} onFinal={async (text) => { await onSend(text, [], nextQueueMode, 'composer') }} />
             <button className={`send-button${showStopButton ? ' send-button--stop' : ''}`} type="button" aria-label={showStopButton ? '停止当前回复' : insertsNext ? '插入对话' : sending ? '正在回复中，发送新消息' : '发送'} title={showStopButton ? '停止当前回复' : insertsNext ? '插入对话' : '发送'} disabled={showStopButton ? false : uploading || employees.length === 0 || (!draft.trim() && attachments.length === 0)} onClick={() => { if (showStopButton && activeTurn !== undefined && onStopTurn !== undefined) void onStopTurn(activeTurn.id); else void submit() }}>{showStopButton ? <Stop size={19} weight="bold" /> : sending && !insertsNext ? <CircleNotch size={19} className="spin" /> : <PaperPlaneRight size={19} weight="fill" />}{showStopButton || queuedCount === 0 ? null : <span className="send-button__queue" aria-label={`${queuedCount} 条插入对话`}>{queuedCount}</span>}</button>
           </div>
         </div>

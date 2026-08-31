@@ -1,4 +1,4 @@
-import type { EmployeeProfile, VoiceModelDescriptor } from '@dsh-cyber/contracts'
+import { normalizeMossVoiceId, type EmployeeProfile, type VoiceModelDescriptor } from '@dsh-cyber/contracts'
 
 import { api } from '../../api.js'
 import { playKokoroSpeech, playMossSpeech, stopKokoroSpeech } from '../world/avatar/speech/KokoroSpeechAdapter.js'
@@ -68,7 +68,7 @@ export async function speakAsCharacter(input: SpeakAsCharacterInput): Promise<vo
     try {
       await playMossSpeech({
         text: spokenText,
-        voiceId: voice.voiceId.startsWith('moss:') ? voice.voiceId : 'moss:Junhao',
+        voiceId: normalizeMossVoiceId(voice.voiceId),
         speed: voice.speed,
         onStatus: () => undefined,
         onStart: () => input.onStart?.(),

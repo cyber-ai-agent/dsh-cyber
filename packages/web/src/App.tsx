@@ -101,6 +101,7 @@ import { characterAvatarUrl, readCharacterAvatarProfile } from './features/world
 import { subscribeWorldLive } from './world-live-client.js'
 import { publishStreamingSpeech } from './features/voice/streaming-speech-bus.js'
 import { resolveEmployeeVoiceProfile } from './features/voice/employee-voice-profile.js'
+import { forgetVoiceTurn, registerVoiceTurn, speechContextForTurn, type SpeechInputSurface } from './features/voice/SpeechCoordinator.js'
 
 const SettingsDialog = lazy(async () => ({ default: (await import('./components/SettingsDialog.js')).SettingsDialog }))
 const WorldSideDock = lazy(async () => ({ default: (await import('./components/WorldSideDock.js')).WorldSideDock }))
@@ -207,6 +208,7 @@ export default function App() {
   const sessionByQueueKeyRef = useRef(new Map<string, string>())
   const queueKeyBySessionRef = useRef(new Map<string, string>())
   const pendingTurnsRef = useRef<PendingChatTurn[]>([])
+  const speechContentByTurnRef = useRef(new Map<string, string>())
   const worldLoadRequestRef = useRef(0)
   const transcriptLoadRequestRef = useRef(0)
   const modelMutationRevisionRef = useRef(0)
@@ -734,6 +736,15 @@ export default function App() {
         }
 
         const streamId = `stream-${traceTurnId}`
+        const speechContext = speechContextForTurn(effectiveClientTurnId)
+        const publishSpeech = (kind: 'start' | 'delta' | 'complete' | 'cancel', content?: string) => publishStreamingSpeech({
+          kind,
+          employeeId: envelope.agentId,
+          turnId: traceTurnId,
+          sessionId: envelope.sessionId,
+          ...(content === undefined ? {} : { content }),
+          ...(speechContext === undefined ? {} : speechContext),
+        })
         const upsertStream = (content: string, replaceContent: boolean) => {
           setStreamingReplies((current) => {
             const previous = current[streamId]
@@ -759,17 +770,29 @@ export default function App() {
 
         if (envelope.event.kind === 'turn.started') {
           upsertStream('', true)
-          publishStreamingSpeech({ kind: 'start', employeeId: envelope.agentId, turnId: traceTurnId })
+          speechContentByTurnRef.current.set(traceTurnId, '')
+          publishSpeech('start')
         }
         if (envelope.event.kind === 'text.delta' && envelope.event.content !== undefined) {
           upsertStream(envelope.event.content, false)
-          publishStreamingSpeech({ kind: 'delta', employeeId: envelope.agentId, turnId: traceTurnId, content: envelope.event.content })
+          speechContentByTurnRef.current.set(traceTurnId, `${speechContentByTurnRef.current.get(traceTurnId) ?? ''}${envelope.event.content}`)
+          publishSpeech('delta', envelope.event.content)
         }
         if (envelope.event.kind === 'assistant.message' && envelope.event.content?.trim()) {
           upsertStream(envelope.event.content, true)
+          // Some runtimes only emit the assembled assistant.message. Keep the
+          // speech bus useful for those providers without changing the chat
+          // stream contract: the final event is still emitted at turn end,
+          // while this delta gives consumers the text they need to speak.
+          if ((speechContentByTurnRef.current.get(traceTurnId) ?? '').length === 0) {
+            speechContentByTurnRef.current.set(traceTurnId, envelope.event.content)
+            publishSpeech('delta', envelope.event.content)
+          }
         }
         if (envelope.event.kind === 'turn.completed' || envelope.event.kind === 'turn.failed') {
-          publishStreamingSpeech({ kind: envelope.event.kind === 'turn.completed' ? 'complete' : 'cancel', employeeId: envelope.agentId, turnId: traceTurnId })
+          publishSpeech(envelope.event.kind === 'turn.completed' ? 'complete' : 'cancel')
+          speechContentByTurnRef.current.delete(traceTurnId)
+          forgetVoiceTurn(effectiveClientTurnId)
           if (envelope.event.kind === 'turn.failed' && envelope.event.metadata.interrupted === true) {
             patchPendingTurn(effectiveClientTurnId, { status: 'interrupted' })
           } else if (envelope.event.kind === 'turn.failed') {
@@ -1637,7 +1660,7 @@ export default function App() {
     return () => clearInterval(timer)
   }, [activeWorld, demoMode, refreshPendingDecisions])
 
-  const send = useCallback((prompt: string, attachments: ChatAttachment[], queueMode: 'normal' | 'next' = 'normal'): Promise<void> => {
+  const send = useCallback((prompt: string, attachments: ChatAttachment[], queueMode: 'normal' | 'next' = 'normal', speechSurface?: SpeechInputSurface): Promise<void> => {
     const world = activeWorld
     if (world === undefined) return Promise.resolve()
     const explicitEmployeeIds = conversationIntent?.employeeIds
@@ -1679,6 +1702,12 @@ export default function App() {
       sessionByQueueKeyRef.current.set(queueKey, capturedSessionId)
       queueKeyBySessionRef.current.set(capturedSessionId, queueKey)
     }
+    if (speechSurface !== undefined) registerVoiceTurn({
+      clientTurnId,
+      worldId: world.id,
+      conversationKey: queueKey,
+      surface: speechSurface,
+    })
 
     const pendingTurn: PendingChatTurn = {
       id: clientTurnId,
@@ -2304,6 +2333,7 @@ export default function App() {
             messages={chatMessages}
             employees={employees}
             dossiers={dossiers}
+            {...(activeConversationKey === undefined ? {} : { speechConversationKey: activeConversationKey })}
             installedPlugins={installedPluginCommands}
             models={selectableModels}
             modelAssignments={modelAssignments}
@@ -2411,7 +2441,7 @@ export default function App() {
                     if (employee !== undefined) directEmployee(employee)
                   }}
                   onManageAvatar={(employeeId) => { setManagingEmployeeSection('profile'); setManagingEmployeeAvatarFocus(true); setManagingEmployeeId(employeeId) }}
-                  onVoiceFinal={(text) => send(text, [])}
+                  onVoiceFinal={(text) => send(text, [], 'normal', 'focus')}
           onStartGroup={(employeeIds, session) => {
           const selected = employees.filter((employee) => employeeIds.includes(employee.id))
           if (selected.length < 2) return
@@ -3035,14 +3065,15 @@ function participantIdsFromMessages(messages: WorkMessage[]): string[] {
   return ids
 }
 
-function latestEmployeeUtterances(messages: WorkMessage[]): Array<{ messageId: string; employeeId: string; text: string }> {
+function latestEmployeeUtterances(messages: WorkMessage[]): Array<{ messageId: string; employeeId: string; text: string; clientTurnId?: string }> {
   const seen = new Set<string>()
-  const result: Array<{ messageId: string; employeeId: string; text: string }> = []
+  const result: Array<{ messageId: string; employeeId: string; text: string; clientTurnId?: string }> = []
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]
     if (message === undefined || message.kind !== 'assistant' || message.senderKind !== 'employee' || !message.content.trim() || seen.has(message.senderId)) continue
     seen.add(message.senderId)
-    result.push({ messageId: message.id, employeeId: message.senderId, text: message.content })
+    const clientTurnId = metadataText(message.metadata.clientTurnId)
+    result.push({ messageId: message.id, employeeId: message.senderId, text: message.content, ...(clientTurnId === undefined ? {} : { clientTurnId }) })
   }
   return result
 }

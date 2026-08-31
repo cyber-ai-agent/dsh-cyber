@@ -6,6 +6,7 @@ import {
   MIN_VOICE_SPEED,
   normalizeVoiceSpeed,
 } from '../src/features/voice/employee-voice-profile.js'
+import { normalizeMossVoiceId } from '@dsh-cyber/contracts'
 
 describe('voice speed', () => {
   it('reaches a speed worth having', () => {
@@ -33,5 +34,9 @@ describe('voice speed', () => {
 
   it('rounds to the step the slider offers', () => {
     expect(normalizeVoiceSpeed(1.234)).toBeCloseTo(1.25, 6)
+  })
+
+  it.each(['Junhao', 'moss:Junhao', 'moss:moss:Junhao'])('normalizes MOSS voice ids from %s', (value) => {
+    expect(normalizeMossVoiceId(value)).toBe('moss:Junhao')
   })
 })

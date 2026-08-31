@@ -99,6 +99,18 @@ export interface VoiceModelVoice {
   lang?: string
 }
 
+/**
+ * Canonical external representation for an MOSS speaker.
+ *
+ * The UI and persisted profile use `moss:Name`; the Python sidecar uses only
+ * `Name`. Accepting both forms at boundaries prevents `moss:moss:Name` from
+ * leaking into either representation.
+ */
+export function normalizeMossVoiceId(value: string): string {
+  const name = value.trim().replace(/^(?:moss:)+/iu, '').trim()
+  return `moss:${name || 'Junhao'}`
+}
+
 export interface VoiceModelDescriptor {
   id: string
   provider: VoiceProviderKind

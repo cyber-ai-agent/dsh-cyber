@@ -356,6 +356,63 @@ test('turns streaming voice partials into the existing conversation message flow
   await expect(focus.getByRole('button', { name: '开始语音对话' })).toBeVisible()
 })
 
+test('speaks a composer voice turn once in both renderer modes and leaves typed replies silent', async ({ page }) => {
+  test.setTimeout(120_000)
+  await installVoiceConversationMock(page, '语音模式联合回归')
+  const streamRequests: Array<{ text?: string; provider?: string }> = []
+  await page.route('**/api/local-tts/models', async (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ models: [
+      { id: 'moss-tts-nano-100m-onnx', provider: 'moss', displayName: 'MOSS-TTS-Nano', version: '100M', license: 'Apache-2.0', byteLength: 1, state: 'not-installed', tier: 'default', recommended: true, runtime: 'onnx-cpu', summary: '测试语音包。' },
+      { id: 'kokoro-int8-multi-lang-v1_1', provider: 'kokoro', displayName: 'Kokoro 快速语音', version: '1.1', license: 'Apache-2.0', byteLength: 1, state: 'ready', tier: 'fast', runtime: 'onnx-cpu', summary: '测试备用语音。' },
+    ] }),
+  }))
+  await page.route('**/api/local-tts/stream', async (route) => {
+    try { streamRequests.push(JSON.parse(route.request().postData() ?? '{}') as { text?: string; provider?: string }) } catch { streamRequests.push({}) }
+    // The focus and composer owners both reach this boundary if ownership is
+    // broken. A fast failure is enough to count requests without requiring a
+    // real local model or pretending that a microphone/device was verified.
+    await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { message: '测试环境未安装本地语音包' } }) })
+  })
+  await page.goto(origin)
+  runtime.release()
+  await page.getByRole('button', { name: `与${employeeName}私聊`, exact: true }).click()
+  const focus = page.getByRole('region', { name: `${employeeName}员工聚焦` })
+  await expect(focus).toBeVisible()
+  await focus.getByRole('button', { name: '语音设置' }).click()
+  await focus.getByLabel('播报模式').selectOption('auto')
+  await focus.getByRole('button', { name: '语音设置' }).click()
+
+  const composer = page.locator('.composer-zone')
+  const expectedReplyText = `${employeeName} 已完成员工聚焦交互验证。`
+  for (const [index, mode] of (['2D', '3D'] as const).entries()) {
+    await selectCharacterView(page, mode, employeeName)
+    const microphone = composer.getByRole('button', { name: '开始语音对话' })
+    await expect(microphone).toBeVisible()
+    await microphone.click()
+    await expect(composer.getByRole('button', { name: '结束语音对话' })).toBeVisible()
+    await expect(page.getByText('语音模式联合回归', { exact: true }).first()).toBeVisible({ timeout: 10_000 })
+    await expect.poll(() => streamRequests.filter((request) => request.text === expectedReplyText).length).toBe(index + 1)
+    await composer.getByRole('button', { name: '结束语音对话' }).click()
+    await expect(composer.getByRole('button', { name: '开始语音对话' })).toBeVisible()
+  }
+
+  // Turn off the focused panel's independent auto mode so this assertion is
+  // specifically about the composer origin. A typed turn must not inherit the
+  // preceding voice turn's ownership or generate another TTS request.
+  await focus.getByRole('button', { name: '语音设置' }).click()
+  await focus.getByLabel('播报模式').selectOption('off')
+  await focus.getByRole('button', { name: '语音设置' }).click()
+  const beforeTyped = streamRequests.length
+  const composerInput = page.getByRole('textbox', { name: '给当前世界的角色发送消息' })
+  await composerInput.fill('这是键盘输入，不应自动播报')
+  await composer.getByRole('button', { name: '发送', exact: true }).click()
+  await expect.poll(() => runtime.requests.length).toBeGreaterThan(2)
+  await page.waitForTimeout(250)
+  expect(streamRequests.length, `键盘 turn 不得继承 voice turn 的播报所有权：${JSON.stringify(streamRequests)}`).toBe(beforeTyped)
+})
+
 test('previews an uploaded portrait, publishes a new avatar revision, and restores VRM history', async ({ page }) => {
   await page.goto(origin)
   const dock = page.getByRole('region', { name: '世界与角色侧边栏' })
@@ -461,8 +518,8 @@ async function installSpeechMock(page: Page): Promise<void> {
   })
 }
 
-async function installVoiceConversationMock(page: Page): Promise<void> {
-  await page.addInitScript(() => {
+async function installVoiceConversationMock(page: Page, finalText = '帮我检查昨天的服务日志'): Promise<void> {
+  await page.addInitScript((spokenText) => {
     class MockWebSocket {
       static OPEN = 1
       readyState = 1
@@ -484,9 +541,9 @@ async function installVoiceConversationMock(page: Page): Promise<void> {
           this.emit({ type: 'session-started', sessionId: 'voice-test' })
           this.emit({ type: 'listening', sessionId: 'voice-test' })
           window.setTimeout(() => this.emit({ type: 'speech-start', sessionId: 'voice-test', utteranceId: 'voice-test:0' }), 100)
-          window.setTimeout(() => this.emit({ type: 'partial', sessionId: 'voice-test', utteranceId: 'voice-test:0', text: '帮我检查昨天' }), 250)
-          window.setTimeout(() => this.emit({ type: 'partial', sessionId: 'voice-test', utteranceId: 'voice-test:0', text: '帮我检查昨天的服务日志' }), 500)
-          window.setTimeout(() => this.emit({ type: 'final', sessionId: 'voice-test', utteranceId: 'voice-test:0', text: '帮我检查昨天的服务日志' }), 1_300)
+          window.setTimeout(() => this.emit({ type: 'partial', sessionId: 'voice-test', utteranceId: 'voice-test:0', text: spokenText.slice(0, Math.max(1, Math.floor(spokenText.length / 2))) }), 250)
+          window.setTimeout(() => this.emit({ type: 'partial', sessionId: 'voice-test', utteranceId: 'voice-test:0', text: spokenText }), 500)
+          window.setTimeout(() => this.emit({ type: 'final', sessionId: 'voice-test', utteranceId: 'voice-test:0', text: spokenText }), 1_300)
         }
       }
       close() { this.readyState = 3; this.onclose?.() }
@@ -510,7 +567,7 @@ async function installVoiceConversationMock(page: Page): Promise<void> {
     Object.defineProperty(window, 'AudioWorkletNode', { configurable: true, value: MockAudioWorkletNode })
     Object.defineProperty(window, 'AudioContext', { configurable: true, value: MockAudioContext })
     Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: async () => fakeStream } })
-  })
+  }, finalText)
 }
 
 async function lastSpokenVoice(page: Page): Promise<string> {

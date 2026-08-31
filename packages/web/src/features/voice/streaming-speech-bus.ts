@@ -1,8 +1,16 @@
+import type { SpeechInputSurface } from './SpeechCoordinator.js'
+
 export interface StreamingSpeechEvent {
   kind: 'start' | 'delta' | 'complete' | 'cancel'
   employeeId: string
   turnId: string
   content?: string
+  source?: 'voice'
+  surface?: SpeechInputSurface
+  clientTurnId?: string
+  worldId?: string
+  sessionId?: string
+  conversationKey?: string
 }
 
 const listeners = new Set<(event: StreamingSpeechEvent) => void>()
