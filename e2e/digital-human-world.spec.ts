@@ -255,7 +255,9 @@ test('keeps the chosen 2D view across conversations and centers the latest group
   await voiceEngine.selectOption('moss-tts-nano-100m-onnx')
   await expect(voiceModels.getByRole('button', { name: '下载并安装' })).toBeVisible()
   await voiceEngine.selectOption('dots-tts-soar-2b')
-  await expect(voiceModels.getByText('高级模型', { exact: true })).toBeVisible()
+  // "高级模型" read as a premium tier. The truth is narrower and more useful:
+  // this engine cannot run on this machine in this version.
+  await expect(voiceModels.getByText('本机暂不支持', { exact: true })).toBeVisible()
   await voiceEngine.selectOption('kokoro-int8-multi-lang-v1_1')
   await expect(focus.getByLabel('角色声音', { exact: true }).locator('option')).toHaveCount(103)
   await focus.getByLabel('角色声音', { exact: true }).selectOption('system:voice-zh-a')

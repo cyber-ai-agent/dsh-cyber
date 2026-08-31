@@ -234,10 +234,17 @@ export function EmployeeFocusMode({ world, employee, profile, entity, collaborat
             cause = fallbackError
           }
         }
-        console.error('Local Kokoro speech failed', cause)
-        setVoiceNotice(cause instanceof Error && !/fetch|network/iu.test(cause.message)
-          ? `本地中文语音失败：${cause.message}`
-          : '无法连接本地语音服务，请确认服务已启动。')
+        // A voice pack that is not installed is a configuration the user has
+        // not finished, not a fault: now that replies are spoken by default,
+        // logging it would put an error in the console for every reply on
+        // every machine without one. The panel says what to do instead.
+        const missing = cause instanceof Error && /未安装|没有生成可播放音频|not_installed/iu.test(cause.message)
+        if (!missing) console.error('Local Kokoro speech failed', cause)
+        setVoiceNotice(missing
+          ? '还没有可用的本地语音包，先在上面的语音引擎里安装一个。'
+          : cause instanceof Error && !/fetch|network/iu.test(cause.message)
+            ? `本地中文语音失败：${cause.message}`
+            : '无法连接本地语音服务，请确认服务已启动。')
       }
       return
     }
