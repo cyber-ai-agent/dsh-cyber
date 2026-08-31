@@ -21,13 +21,13 @@
       "sha256": "5847bb34174256c212447fab9fe71c64c2d24488a566be19b981af90049a791d"
     },
     {
-      "path": "PROVENANCE.md",
+      "path": "provenance.md",
       "sha256": "16321831eebadf2ef06f22af4b36b9de55de5a82e393dc926584b45619da96df"
     }
   ],
   "certification": {
     "authority": "DSH Cyber",
     "level": "official",
-    "contentSha256": "b699ec4acffea6a14ab22b3a05edafbe9861704c7acba541ef7b819e6718bee2"
+    "contentSha256": "d758dbf7d2a0b14ee46317db778ed9c1b39be558b44d136bea29854cc01eec38"
   }
 }
