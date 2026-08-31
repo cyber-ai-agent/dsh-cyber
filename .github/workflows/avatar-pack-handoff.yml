@@ -11,15 +11,18 @@ on:
       - 'pnpm-lock.yaml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
+    if: >-
+      ${{ github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/official-avatar-pack-delivery' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.pull_request.head.ref }}
           persist-credentials: false
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
@@ -39,3 +42,18 @@ jobs:
           path: marketplace/plugins/official-avatar-base-v1
           if-no-files-found: error
           retention-days: 1
+      - name: Commit verified pack to delivery branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          git add marketplace/plugins/official-avatar-base-v1
+          if git diff --cached --quiet; then
+            echo 'Verified avatar pack already matches the branch.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat: embed verified official avatar base pack'
+          AUTH_HEADER="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_HEADER}" push origin "HEAD:${HEAD_REF}"
