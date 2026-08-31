@@ -128,8 +128,6 @@ export class AvatarBasePackService {
       throw new Error(`Avatar Base Pack manifest is not valid JSON: ${installed.packageId}`)
     }
     const manifest = parseInstalledAvatarBasePackManifest(raw, installed)
-    // Force every Base VRM through verification now rather than discovering a
-    // missing/tampered asset only when the user switches to 3D later.
     for (const base of manifest.bases) {
       const bytes = await this.#verification.readFile(installed, base.assetPath)
       assertAvatarBaseVrmEnvelope(bytes, `${installed.packageId}/${base.assetPath}`)
@@ -156,7 +154,6 @@ export class AvatarBasePackService {
     const loaded: BuiltInLoadedPack[] = []
     for (const packageId of this.#builtInPackageIds) {
       const item = await this.#catalog.find(packageId)
-      // Embedders may intentionally ship without the optional visual asset.
       if (item === undefined) continue
       assertTrustedBuiltIn(item, packageId)
       const body = await this.#catalog.readDeclaredFile(item, AVATAR_BASE_PACK_MANIFEST_PATH)
@@ -192,7 +189,7 @@ function assertTrustedBuiltIn(item: CyberMarketPackage, expectedId: string): voi
     || manifest.capabilities.some((capability) => capability !== AVATAR_BASE_PACK_CAPABILITY)
     || manifest.dataEgress.length !== 0
     || manifest.certification?.authority !== 'DSH Cyber'
-    || manifest.certification.level !== 'official') {
+    || manifest.certification?.level !== 'official') {
     throw new Error(`Built-in Avatar Base Pack failed official verification: ${expectedId}`)
   }
 }
