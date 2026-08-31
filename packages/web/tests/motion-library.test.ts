@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { Group, Object3D } from 'three'
+import { Group, Object3D, Quaternion } from 'three'
 import { describe, expect, it } from 'vitest'
 
 import { DEFAULT_MOTION_LIBRARY, DSH_BASIC_MOTION_PACK } from '../src/features/world/avatar/motion/MotionLibrary.js'
@@ -74,7 +74,7 @@ describe('bundled motion pack contract', () => {
     }
   })
 
-  it('binds a retargeted walk clip in AnimationMixer and actually rotates the target leg', async () => {
+  it('binds a retargeted walk clip in AnimationMixer and actually rotates the target legs', async () => {
     const source = readFileSync(motionPath(), 'utf8')
     const target = targetVrm()
     const root = new Group()
@@ -91,8 +91,9 @@ describe('bundled motion pack contract', () => {
       controller.register('walk', clip!)
       controller.setGesture('walk')
       controller.update(0.25)
-      expect(Math.abs(target.nodes.leftUpperLeg.quaternion.x)).toBeGreaterThan(0.01)
-      expect(Math.abs(target.nodes.rightUpperLeg.quaternion.x)).toBeGreaterThan(0.01)
+      const identity = new Quaternion()
+      expect(target.nodes.leftUpperLeg.quaternion.angleTo(identity)).toBeGreaterThan(0.01)
+      expect(target.nodes.rightUpperLeg.quaternion.angleTo(identity)).toBeGreaterThan(0.01)
     } finally {
       controller.dispose()
       result.release()
