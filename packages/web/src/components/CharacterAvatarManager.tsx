@@ -1,10 +1,11 @@
 import { ClockCounterClockwise, Cube, ImageSquare, Sparkle, UploadSimple, WarningCircle } from '@phosphor-icons/react'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import type { CharacterAvatarAsset, EmployeeProfile, LocalAsset } from '@dsh-cyber/contracts'
+import type { CharacterAvatarAsset, CharacterGender, EmployeeProfile, LocalAsset } from '@dsh-cyber/contracts'
 
 import { formatDateTime } from '../i18n/format.js'
 import { characterAvatarUrl, readCharacterAvatarProfile } from '../features/world/character-avatar-profile.js'
 import type { AvatarCreationPhase } from '../features/world/avatar/avatar-creation-provider.js'
+import { avatarRecipeForCharacter } from '../features/world/avatar/avatar-recipe.js'
 import type { ProceduralAvatarBuild, ProceduralAvatarStyle, ProceduralAvatarTone } from '../features/world/avatar/procedural-vrm.js'
 import { Avatar } from './Avatar.js'
 import './character-avatar-manager.css'
@@ -12,9 +13,9 @@ import './character-avatar-manager.css'
 const VrmAvatarPreview = lazy(async () => ({ default: (await import('../features/world/VrmAvatarPreview.js')).VrmAvatarPreview }))
 
 const STYLE_OPTIONS: Array<{ value: ProceduralAvatarStyle; label: string; description: string }> = [
-  { value: 'professional', label: '职业', description: '克制的深色正装与清晰轮廓' },
-  { value: 'casual', label: '日常', description: '自然配色，适合陪伴与轻协作' },
-  { value: 'future', label: '未来', description: '轻量科技装束与冷色细节' },
+  { value: 'professional', label: '职业', description: '保留角色主色，换成清晰职业轮廓' },
+  { value: 'casual', label: '日常', description: '保留角色主色，使用更轻松的服装结构' },
+  { value: 'future', label: '未来', description: '保留角色主色，增加轻量科技细节' },
 ]
 const BUILD_OPTIONS: Array<{ value: ProceduralAvatarBuild; label: string }> = [
   { value: 'slender', label: '轻盈' },
@@ -35,6 +36,10 @@ export interface UploadedAvatarDraft {
 
 interface CharacterAvatarManagerProps {
   employeeName: string
+  /** Current identity fields; optional for compatibility with isolated tests/legacy callers. */
+  employeeId?: string
+  employeeRole?: string
+  employeeGender?: CharacterGender
   profile?: EmployeeProfile | undefined
   profileHistory: EmployeeProfile[]
   fallbackAvatarIndex: number
@@ -47,7 +52,7 @@ interface CharacterAvatarManagerProps {
   onReset(fallbackAvatarIndex: number, expectedProfileRevision: number): Promise<void>
 }
 
-export function CharacterAvatarManager({ employeeName, profile, profileHistory, fallbackAvatarIndex, busy, focusOnMount = false, onFallbackAvatarChange, onUpload, onPublish, onRollback, onReset }: CharacterAvatarManagerProps) {
+export function CharacterAvatarManager({ employeeName, employeeId, employeeRole, employeeGender, profile, profileHistory, fallbackAvatarIndex, busy, focusOnMount = false, onFallbackAvatarChange, onUpload, onPublish, onRollback, onReset }: CharacterAvatarManagerProps) {
   const fileRef = useRef<HTMLInputElement>(null)
   const sectionRef = useRef<HTMLElement>(null)
   const createButtonRef = useRef<HTMLButtonElement>(null)
@@ -69,6 +74,14 @@ export function CharacterAvatarManager({ employeeName, profile, profileHistory, 
   const historicalProfiles = useMemo(() => profileHistory
     .filter((item) => item.revision < (profile?.revision ?? 0))
     .slice(0, 6), [profile?.revision, profileHistory])
+  const identityRecipe = useMemo(() => avatarRecipeForCharacter({
+    employeeId: employeeId ?? profile?.employeeId ?? 'local-character',
+    role: employeeRole,
+    gender: employeeGender ?? profile?.gender,
+    fallbackAvatarIndex,
+    appearance: profile?.appearance,
+  }), [employeeGender, employeeId, employeeRole, fallbackAvatarIndex, profile?.appearance, profile?.employeeId, profile?.gender])
+
   useEffect(() => {
     if (!focusOnMount) return
     const frame = requestAnimationFrame(() => {
@@ -117,7 +130,11 @@ export function CharacterAvatarManager({ employeeName, profile, profileHistory, 
     try {
       const { avatarCreationProviders, LOCAL_PROCEDURAL_AVATAR_PROVIDER_ID } = await import('../features/world/avatar/avatar-creation-provider.js')
       const provider = avatarCreationProviders.require(LOCAL_PROCEDURAL_AVATAR_PROVIDER_ID)
-      const created = await provider.create({ displayName: employeeName, design: { style, build, tone } }, { onPhase: setCreationPhase, signal: controller.signal })
+      const created = await provider.create({
+        displayName: employeeName,
+        design: { style, build, tone },
+        identityRecipe,
+      }, { onPhase: setCreationPhase, signal: controller.signal })
       if (creationAbortRef.current !== controller) return
       setCreationPhase('validating')
       const uploaded = await onUpload(created.file, controller.signal)
@@ -176,12 +193,12 @@ export function CharacterAvatarManager({ employeeName, profile, profileHistory, 
 
   return <section ref={sectionRef} className="character-avatar-manager" aria-labelledby="character-avatar-manager-title">
     <header>
-      <div><h4 id="character-avatar-manager-title">数字人形象</h4><p>选择外观即可在本机创建 3D 形象。生成后先预览，确认发布才会替换当前角色版本。</p></div>
+      <div><h4 id="character-avatar-manager-title">数字人形象</h4><p>本机 3D 会沿用当前角色的身份配方；生成后先预览，确认发布才会替换当前版本。</p></div>
       <button ref={createButtonRef} type="button" aria-expanded={creatorOpen} aria-controls="character-avatar-creator" disabled={creating || uploading || busy} onClick={() => setCreatorOpen((value) => !value)}><Sparkle size={16} aria-hidden="true" />{currentAvatar?.rendererKind === 'vrm-3d' ? '重新创建 3D' : '创建 3D 形象'}</button>
     </header>
 
     {creatorOpen ? <div id="character-avatar-creator" className="character-avatar-manager__creator" aria-labelledby="character-avatar-creator-title" aria-busy={creating}>
-      <div className="character-avatar-manager__creator-heading"><span><Sparkle size={17} aria-hidden="true" /></span><div><strong id="character-avatar-creator-title">创建 {employeeName} 的 3D 形象</strong><small>几秒即可完成 · 本机基础模型 · 不发送角色资料</small></div></div>
+      <div className="character-avatar-manager__creator-heading"><span><Sparkle size={17} aria-hidden="true" /></span><div><strong id="character-avatar-creator-title">创建 {employeeName} 的 3D 形象</strong><small>沿用角色发型与主色 · 本机生成 · 不发送角色资料</small></div></div>
       <fieldset className="character-avatar-manager__style-options">
         <legend>外观风格</legend>
         <div>{STYLE_OPTIONS.map((option) => <label key={option.value} className={style === option.value ? 'is-selected' : ''}><input type="radio" name="procedural-avatar-style" value={option.value} checked={style === option.value} onChange={() => setStyle(option.value)} /><span className="character-avatar-manager__style-swatch" data-style={option.value} aria-hidden="true" /><span><strong>{option.label}</strong><small>{option.description}</small></span></label>)}</div>
@@ -190,8 +207,8 @@ export function CharacterAvatarManager({ employeeName, profile, profileHistory, 
         <fieldset><legend>体型</legend><div>{BUILD_OPTIONS.map((option) => <label key={option.value} className={build === option.value ? 'is-selected' : ''}><input type="radio" name="procedural-avatar-build" value={option.value} checked={build === option.value} onChange={() => setBuild(option.value)} /><span>{option.label}</span></label>)}</div></fieldset>
         <fieldset><legend>肤色</legend><div>{TONE_OPTIONS.map((option) => <label key={option.value} className={tone === option.value ? 'is-selected' : ''}><input type="radio" name="procedural-avatar-tone" value={option.value} checked={tone === option.value} onChange={() => setTone(option.value)} /><span className="character-avatar-manager__tone-swatch" data-tone={option.value} aria-hidden="true" /><span>{option.label}</span></label>)}</div></fieldset>
       </div>
-      <div className="character-avatar-manager__creator-actions"><button type="button" className="primary-button" disabled={creating || uploading || busy} onClick={() => void createAvatar()}><Cube size={16} aria-hidden="true" />{creationPhase === 'validating' ? '正在校验预览…' : creating ? '正在本机生成…' : '生成 3D 预览'}</button><button type="button" onClick={closeCreator}>{creating ? '取消生成' : '取消'}</button><small>这一步只创建待确认预览，不会直接修改角色。</small></div>
-      {creationPhase === undefined ? null : <span className="character-avatar-manager__creation-status" role="status" aria-live="polite">{creationPhase === 'generating' ? '正在后台生成低面数模型，不会阻塞聊天和世界操作。' : creationPhase === 'packaging' ? '模型已生成，正在整理为自包含 VRM。' : '正在校验骨骼、资源完整性和发布能力。'}</span>}
+      <div className="character-avatar-manager__creator-actions"><button type="button" className="primary-button" disabled={creating || uploading || busy} onClick={() => void createAvatar()}><Cube size={16} aria-hidden="true" />{creationPhase === 'validating' ? '正在校验预览…' : creating ? '正在本机生成…' : '生成 3D 预览'}</button><button type="button" onClick={closeCreator}>{creating ? '取消生成' : '取消'}</button><small>身份配方只描述外观，不会修改角色记忆、设定或能力。</small></div>
+      {creationPhase === undefined ? null : <span className="character-avatar-manager__creation-status" role="status" aria-live="polite">{creationPhase === 'generating' ? '正在按角色身份配方生成低面数模型，不会阻塞聊天和世界操作。' : creationPhase === 'packaging' ? '模型已生成，正在整理为自包含 VRM。' : '正在校验骨骼、资源完整性和发布能力。'}</span>}
     </div> : null}
 
     <div className="character-avatar-manager__preview">
@@ -217,7 +234,7 @@ export function CharacterAvatarManager({ employeeName, profile, profileHistory, 
     </details>
 
     <div className="character-avatar-manager__fallback">
-      <div><strong>备用形象</strong><small>图片或 VRM 无法渲染、低性能降级和会话小头像使用这里的内置形象。</small></div>
+      <div><strong>备用形象</strong><small>这个内置形象同时作为本机 3D 的身份种子；切换后，新生成的 3D 会同步发型与主色。</small></div>
       <div className="avatar-picker" role="radiogroup" aria-label="选择备用角色形象">{Array.from({ length: 8 }, (_, index) => <button key={index} type="button" role="radio" aria-label={`备用形象 ${index + 1}`} aria-checked={fallbackAvatarIndex === index} className={fallbackAvatarIndex === index ? 'is-active' : ''} onClick={() => onFallbackAvatarChange(index)}><Avatar index={index} size="md" label={`备用形象 ${index + 1}`} /></button>)}</div>
       {currentAvatar === undefined ? null : <button type="button" className="text-button" disabled={busy} onClick={() => void resetAvatar()}>恢复为内置形象</button>}
     </div>

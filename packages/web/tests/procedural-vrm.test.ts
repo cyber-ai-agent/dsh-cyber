@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { CharacterAvatarCreationProviderRegistry, localProceduralAvatarProvider } from '../src/features/world/avatar/avatar-creation-provider.js'
-import { createProceduralVrm } from '../src/features/world/avatar/procedural-vrm.js'
+import { avatarRecipeForCharacter } from '../src/features/world/avatar/avatar-recipe.js'
+import { LOCAL_IDENTITY_RECIPE_AVATAR_AUTHOR, LOCAL_IDENTITY_RECIPE_REFERENCE } from '../src/features/world/avatar/avatar-origin.js'
+import { createIdentityProceduralVrm, createProceduralVrm } from '../src/features/world/avatar/procedural-vrm.js'
 
 const REQUIRED_BONES = [
   'hips', 'spine', 'head',
@@ -17,6 +19,7 @@ afterEach(() => {
   if (originalWorker === undefined) Reflect.deleteProperty(globalThis, 'Worker')
   else Object.defineProperty(globalThis, 'Worker', { configurable: true, value: originalWorker })
   SilentWorker.instances.length = 0
+  CapturingWorker.instances.length = 0
 })
 
 describe('procedural VRM creator', () => {
@@ -47,7 +50,39 @@ describe('procedural VRM creator', () => {
 
     expect(professional.materials[0].pbrMetallicRoughness.baseColorFactor).not.toEqual(future.materials[0].pbrMetallicRoughness.baseColorFactor)
     expect(professional.materials[1].pbrMetallicRoughness.baseColorFactor).not.toEqual(future.materials[1].pbrMetallicRoughness.baseColorFactor)
-    expect(professional.nodes.find((node) => node.name === 'chestVisual')?.scale).not.toEqual(future.nodes.find((node) => node.name === 'chestVisual')?.scale)
+    expect(professional.nodes.find((node: any) => node.name === 'chestVisual')?.scale).not.toEqual(future.nodes.find((node: any) => node.name === 'chestVisual')?.scale)
+  })
+
+  it('turns the 2D identity seed into visibly distinct matching 3D drafts', () => {
+    const violetRecipe = avatarRecipeForCharacter({ employeeId: 'violet', gender: 'female', fallbackAvatarIndex: 0 })
+    const cyanRecipe = avatarRecipeForCharacter({ employeeId: 'cyan', gender: 'male', fallbackAvatarIndex: 5 })
+    const violet = readDocument(createIdentityProceduralVrm('紫色角色', violetRecipe, { style: 'professional', build: 'slender', tone: 'warm' }))
+    const cyan = readDocument(createIdentityProceduralVrm('青色角色', cyanRecipe, { style: 'future', build: 'sturdy', tone: 'deep' }))
+
+    expect(violet.asset.generator).toBe('DSH Cyber 身份配方 3D 形象创建器')
+    expect(violet.extensions.VRMC_vrm.meta.authors).toEqual([LOCAL_IDENTITY_RECIPE_AVATAR_AUTHOR])
+    expect(violet.extensions.VRMC_vrm.meta.references).toContain(LOCAL_IDENTITY_RECIPE_REFERENCE)
+    expect(violet.materials[1].pbrMetallicRoughness.baseColorFactor).not.toEqual(cyan.materials[1].pbrMetallicRoughness.baseColorFactor)
+    expect(violet.materials[4].pbrMetallicRoughness.baseColorFactor).not.toEqual(cyan.materials[4].pbrMetallicRoughness.baseColorFactor)
+    expect(violet.nodes.some((node: any) => node.name === 'hairLeftLayer')).toBe(true)
+    expect(cyan.nodes.some((node: any) => node.name === 'hairLeftLayer')).toBe(false)
+    expect(violet.nodes.find((node: any) => node.name === 'chestVisual')?.scale).not.toEqual(cyan.nodes.find((node: any) => node.name === 'chestVisual')?.scale)
+  })
+
+  it('adds recipe accessories as geometry rather than silently ignoring identity trim', () => {
+    const document = readDocument(createIdentityProceduralVrm('眼镜角色', {
+      schemaVersion: 1,
+      baseModel: 'female-a',
+      build: 'balanced',
+      hair: 'bob',
+      hairColor: '#334455',
+      outfitColor: '#556677',
+      accentColor: '#778899',
+      accessoryIds: ['glasses', 'badge'],
+    }, { style: 'professional', build: 'balanced', tone: 'neutral' }))
+
+    expect(document.nodes.some((node: any) => node.name === 'glassesLeft')).toBe(true)
+    expect(document.nodes.some((node: any) => node.name === 'identityBadge')).toBe(true)
   })
 
   it('keeps generation behind a provider contract and reports deterministic phases', async () => {
@@ -63,6 +98,32 @@ describe('procedural VRM creator', () => {
     expect(result.file.type).toBe('model/gltf-binary')
     expect(result.file.size).toBeGreaterThan(1_000)
     expect(phases).toEqual(['generating', 'packaging'])
+  })
+
+  it('uses identity metadata when the provider is given a character recipe', async () => {
+    const recipe = avatarRecipeForCharacter({ employeeId: 'employee-a', gender: 'female', fallbackAvatarIndex: 0 })
+    const result = await localProceduralAvatarProvider.create({
+      displayName: '身份角色',
+      design: { style: 'professional', build: 'balanced', tone: 'warm' },
+      identityRecipe: recipe,
+    })
+    const document = readDocument(await result.file.arrayBuffer())
+    expect(document.extensions.VRMC_vrm.meta.authors).toEqual([LOCAL_IDENTITY_RECIPE_AVATAR_AUTHOR])
+  })
+
+  it('forwards the identity recipe through the Worker message', async () => {
+    Object.defineProperty(globalThis, 'Worker', { configurable: true, value: CapturingWorker })
+    const recipe = avatarRecipeForCharacter({ employeeId: 'employee-worker', fallbackAvatarIndex: 3 })
+    const creation = localProceduralAvatarProvider.create({
+      displayName: 'Worker 角色',
+      design: { style: 'casual', build: 'balanced', tone: 'neutral' },
+      identityRecipe: recipe,
+    })
+    await Promise.resolve()
+    const worker = CapturingWorker.instances[0]!
+    expect(worker.lastMessage).toMatchObject({ displayName: 'Worker 角色', identityRecipe: recipe })
+    worker.respondWith(new ArrayBuffer(1_024))
+    await expect(creation).resolves.toMatchObject({ source: 'local' })
   })
 
   it('rejects duplicate provider registrations instead of silently replacing behavior', () => {
@@ -130,6 +191,27 @@ class SilentWorker {
   terminate(): void {
     this.terminateCount += 1
   }
+}
+
+class CapturingWorker {
+  static readonly instances: CapturingWorker[] = []
+  onerror: ((event: ErrorEvent) => unknown) | null = null
+  onmessage: ((event: MessageEvent<any>) => unknown) | null = null
+  lastMessage: any
+
+  constructor(_url: string | URL, _options?: WorkerOptions) {
+    CapturingWorker.instances.push(this)
+  }
+
+  postMessage(message: unknown): void {
+    this.lastMessage = message
+  }
+
+  respondWith(buffer: ArrayBuffer): void {
+    this.onmessage?.({ data: { requestId: this.lastMessage.requestId, ok: true, buffer } } as MessageEvent)
+  }
+
+  terminate(): void {}
 }
 
 function readDocument(buffer: ArrayBuffer): any {
