@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { AgentRuntimePort } from '@dsh-cyber/contracts'
 import { LocalPackageCatalog } from '@dsh-cyber/package-runtime'
 import { createCyberServer, type CyberServer } from '../src/index.js'
+import { characterGeneratorMarketplaceRoot } from '../src/services/character-generator-marketplace.js'
 
 type AnyRecord = Record<string, any>
 
@@ -141,7 +142,9 @@ async function publishInstallAndReadBlueprint(
   expect(published.status, JSON.stringify(published.body)).toBe(201)
   const packageId = (published.body.item as AnyRecord).manifest.id as string
 
-  const generatedRoot = join(server.root, 'workshop', 'character-generator', 'marketplace')
+  // Generated talent is workspace-scoped on disk; ask the service for the root
+  // rather than restating the layout here.
+  const generatedRoot = characterGeneratorMarketplaceRoot(server.root, workspaceId)
   const generated = (await new LocalPackageCatalog(generatedRoot).list({ market: 'talent' }))
     .find((item) => item.manifest.id === packageId)!
   expect(generated).toBeDefined()
