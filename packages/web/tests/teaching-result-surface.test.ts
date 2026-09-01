@@ -3,8 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 
 import type { World, WorldArtifactVersion } from '@dsh-cyber/contracts'
-import { knowledgeGardenTheme } from '@dsh-cyber/world-runtime'
-import { newsCenterTheme } from '@dsh-cyber/world-runtime'
+import { knowledgeGardenTheme, newsCenterTheme } from '@dsh-cyber/world-runtime'
 
 import type { ArtifactRecord } from '../src/features/artifacts/useWorldArtifacts.js'
 import { TeachingResultSurface } from '../src/features/world/teaching/TeachingResultSurface.js'

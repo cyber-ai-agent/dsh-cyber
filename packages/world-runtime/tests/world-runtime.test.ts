@@ -116,6 +116,9 @@ describe('world theme manifest', () => {
       'garden-result-showcase',
       'excerpt-board',
       'reading-tables',
+    ])
+  })
+
   it('validates the built-in news center theme and its newsroom scene', () => {
     expect(validateWorldThemeManifest(newsCenterTheme)).toEqual({ valid: true, errors: [] })
     const scene = newsCenterTheme.scenes[0]!

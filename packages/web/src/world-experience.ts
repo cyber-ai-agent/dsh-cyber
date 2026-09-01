@@ -1,7 +1,6 @@
 import type { World } from '@dsh-cyber/contracts'
 
-export type WorldKind = 'personal' | 'company' | 'tavern' | 'studio' | 'observatory' | 'academy' | 'hub' | 'garden'
-export type WorldKind = 'personal' | 'company' | 'tavern' | 'studio' | 'observatory' | 'academy' | 'news'
+export type WorldKind = 'personal' | 'company' | 'tavern' | 'studio' | 'observatory' | 'academy' | 'hub' | 'garden' | 'news'
 
 export interface WorldExperience {
   kind: WorldKind
@@ -113,6 +112,7 @@ const experiences: Record<WorldKind, WorldExperience> = {
     composerPlaceholder: '@整理角色 采集来源、归档资料、提炼条目、核验引用或复看知识图谱…',
     sceneTitle: '藏书庭院',
     sceneSubtitle: '采集来源 → 归档资料 → 提炼条目 → 核验引用 → 连接知识图谱 → 复看维护',
+  },
   news: {
     kind: 'news',
     peopleLabel: '编辑部角色',

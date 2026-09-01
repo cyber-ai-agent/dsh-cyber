@@ -1,6 +1,5 @@
 import type { World, WorldThemeManifestV1 } from '@dsh-cyber/contracts'
-import { aiAcademyTheme, cyberCompanyTheme, jarvisCoreTheme, knowledgeGardenTheme, maidPalaceTheme, moonlitTavernTheme } from '@dsh-cyber/world-runtime'
-import { aiAcademyTheme, cyberCompanyTheme, maidPalaceTheme, moonlitTavernTheme, newsCenterTheme } from '@dsh-cyber/world-runtime'
+import { aiAcademyTheme, cyberCompanyTheme, jarvisCoreTheme, knowledgeGardenTheme, maidPalaceTheme, moonlitTavernTheme, newsCenterTheme } from '@dsh-cyber/world-runtime'
 
 /**
  * Resolve the built-in scene owned by a World.
