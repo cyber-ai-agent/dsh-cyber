@@ -12,9 +12,10 @@ const HISTORY_INSTRUCTION = [
 /**
  * Renders recovered conversation history in front of the live prompt.
  *
- * DSH 0.1.1-rc.1 cannot resume a named session whose JSONL log belongs to an
- * earlier worker process, so every conversation gets a fresh random session id
- * per process. Continuity is therefore restored from the local store, not from
+ * The DSH 0.1.2-alpha.3 SDK server creates named sessions through
+ * `ctx.agents.create`; that path does not resume a JSONL log owned by an earlier
+ * worker process. Every conversation therefore gets a fresh random runtime
+ * session id per process. Continuity is restored from the local store, not from
  * the DSH log.
  *
  * The block is framed as recovered context rather than as instructions: it must

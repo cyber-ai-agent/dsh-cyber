@@ -58,7 +58,6 @@ export interface HarnessModelRouterOptions {
   resolveRoute(request: AgentTurnRequest): HarnessModelRoute | undefined
   adapterFactory?: (options: HarnessAdapterOptions) => AgentRuntimePort
   inheritedEnvironment?: NodeJS.ProcessEnv
-  nodeExecutable?: string
   dshBinPath?: string
 }
 
@@ -213,8 +212,12 @@ export class HarnessModelRouter implements AgentRuntimePort, AsyncDisposable {
   async #resetFailedRun(entry: AdapterEntry, request: AgentTurnRequest): Promise<void> {
     if (request.agentRunId !== undefined && entry.adapter.abortRun !== undefined) {
       await entry.adapter.abortRun(request.agentRunId)
-      return
     }
+    // A rejected turn has normally left the adapter's active-run table before
+    // the router observes the failure, so abortRun alone can be a no-op. Close
+    // this employee's cached lanes as the definitive reset boundary; the next
+    // attempt then creates a fresh worker without disturbing other employees or
+    // provider adapters.
     await entry.adapter.closeAgent?.(request.agent.id)
   }
 
@@ -249,9 +252,6 @@ export class HarnessModelRouter implements AgentRuntimePort, AsyncDisposable {
       ...(this.#options.inheritedEnvironment === undefined
         ? {}
         : { inheritedEnvironment: this.#options.inheritedEnvironment }),
-      ...(this.#options.nodeExecutable === undefined
-        ? {}
-        : { nodeExecutable: this.#options.nodeExecutable }),
       ...(this.#options.dshBinPath === undefined
         ? {}
         : { dshBinPath: this.#options.dshBinPath }),

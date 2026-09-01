@@ -2158,7 +2158,7 @@ export default function App() {
         }
       }
       if (action === 'check-application-update' || action === 'apply-application-update') return { ok: true, applicationUpdate: { supported: true, channel: 'main', currentRevision: '1234567890abcdef', targetRevision: action === 'check-application-update' ? 'abcdef1234567890' : 'abcdef1234567890', commitsBehind: action === 'check-application-update' ? 3 : 0, updateAvailable: action === 'check-application-update' }, restartRequired: action === 'apply-application-update' }
-      return { ok: true, checkedAt: new Date().toISOString(), compatibility: { expectedVersion: '0.1.1-rc.1', errors: [] }, database: { schemaVersion: 5, integrity: ['ok'], errors: [] } }
+      return { ok: true, checkedAt: new Date().toISOString(), compatibility: { expectedVersion: '0.1.2-alpha.3', errors: [] }, database: { schemaVersion: 5, integrity: ['ok'], errors: [] } }
     }
     if (action === 'status') return api<SystemActionResult>('/api/system/status')
     if (action === 'doctor') return api<SystemActionResult>('/api/system/doctor', { method: 'POST', body: '{}' })
