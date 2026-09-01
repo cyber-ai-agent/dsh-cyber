@@ -802,6 +802,8 @@ describe('SqliteStore', () => {
       DROP TABLE runtime_update_transactions;
       DROP TABLE employee_relationships;
       DROP TABLE employee_daily_journals;
+      DROP TABLE IF EXISTS employee_memory_index_fts;
+      DROP TABLE employee_memory_index;
       DROP TABLE employee_milestones;
       DROP TABLE employee_skill_revisions;
       DROP TABLE skill_evidence;
@@ -878,6 +880,91 @@ describe('SqliteStore', () => {
         modelInteractionLogs: 0,
       },
     })
+  })
+
+  it('backfills the employee memory index when an existing database is migrated forward', async () => {
+    const { directory, path, store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: '记忆迁移工作区' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '记忆世界', templateId: 'personal-world' })
+    store.saveBlueprint(blueprint({ id: 'memory.worker', worldTemplateId: 'personal-world' }))
+    const employee = store.recruitEmployee({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      blueprintId: 'memory.worker',
+      blueprintVersion: 1,
+    })
+    const session = store.createSession({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      kind: 'direct',
+      title: '私聊',
+      participants: [
+        { participantId: 'owner', kind: 'owner' },
+        { participantId: employee.id, kind: 'employee' },
+      ],
+    })
+    const evidence = store.appendMessage({
+      sessionId: session.id,
+      senderId: 'owner',
+      senderKind: 'owner',
+      kind: 'user',
+      content: '我不喜欢长篇大论。',
+      metadata: {},
+    })
+    const privateMilestone = store.appendEmployeeMilestone({
+      employeeId: employee.id,
+      category: 'reflection',
+      title: '[private] 私聊记忆',
+      summary: '用户偏好简洁回答。',
+      sourceMessageIds: [evidence.id],
+      actorId: 'system',
+    })
+    const taskMilestone = store.appendEmployeeMilestone({
+      employeeId: employee.id,
+      category: 'task',
+      title: '[task] 任务经历',
+      summary: '交付了结算脚本的重试修复。',
+      sourceMessageIds: [evidence.id],
+      actorId: 'system',
+    })
+    const joinedMilestoneId = store.listEmployeeMilestones(employee.id)
+      .find((milestone) => milestone.category === 'joined')?.id
+    expect(joinedMilestoneId).toBeDefined()
+    store.close()
+
+    // Rewind the file to the schema shipped before the memory index existed,
+    // keeping every milestone that database already held.
+    const legacy = new DatabaseSync(path)
+    legacy.exec(`
+      DROP TABLE IF EXISTS employee_memory_index_fts;
+      DROP TABLE employee_memory_index;
+      DELETE FROM schema_migrations WHERE version > 36;
+      PRAGMA user_version = 36;
+    `)
+    legacy.close()
+
+    const migrated = await SqliteStore.open(path)
+    stores.push(migrated)
+    expect((await readdir(directory)).some((file) => file.startsWith('cyber.sqlite.pre-migration-v36-'))).toBe(true)
+    expect(migrated.database.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+    expect(migrated.doctor()).toMatchObject({ ok: true, schemaVersion: CYBER_SCHEMA_VERSION })
+
+    // Every pre-existing milestone is indexed, and the private one keeps its
+    // isolation scope instead of quietly becoming group-visible.
+    expect(migrated.getEmployeeMemoryIndexEntry(privateMilestone.id)).toMatchObject({
+      scope: 'private',
+      summary: '用户偏好简洁回答。',
+      sourceMessageIds: [evidence.id],
+    })
+    expect(migrated.getEmployeeMemoryIndexEntry(taskMilestone.id)?.scope).toBe('task')
+    expect(migrated.getEmployeeMemoryIndexEntry(joinedMilestoneId!)?.scope).toBe('group')
+    expect(migrated.listEmployeeMemoryIndex(employee.id, ['group', 'task']).map((entry) => entry.memoryId))
+      .not.toContain(privateMilestone.id)
+    expect(migrated.searchEmployeeMemoryIndex({
+      employeeId: employee.id,
+      query: '简洁回答',
+      scopes: ['group', 'task'],
+    }).map((hit) => hit.entry.memoryId)).not.toContain(privateMilestone.id)
   })
 
   it('persists audited runtime update transitions and rejects skipped stages', async () => {

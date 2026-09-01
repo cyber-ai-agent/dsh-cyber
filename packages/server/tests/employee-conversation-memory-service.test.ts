@@ -96,6 +96,77 @@ describe('EmployeeConversationMemoryService', () => {
     expect(store.getEmployeeDossier(employee.id).milestones.filter((item) => item.title === '[private] 私聊记忆')).toHaveLength(1)
   })
 
+  it('indexes a remembered run with its isolation scope and keeps the milestone the source of truth', async () => {
+    const { store, workspace, world, employee, memory } = await setup()
+    const direct = store.createSession({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      kind: 'direct',
+      title: '私聊',
+      participants: [
+        { participantId: 'owner', kind: 'owner' },
+        { participantId: employee.id, kind: 'employee' },
+      ],
+    })
+    const turn = store.createWorkTurn({ workspaceId: workspace.id, worldId: world.id, sessionId: direct.id, interactionKind: 'chat' })
+    store.appendMessage({
+      sessionId: direct.id,
+      senderId: 'owner',
+      senderKind: 'owner',
+      kind: 'user',
+      content: '内部代号是蓝鲸，先别外传',
+      metadata: { workTurnId: turn.id },
+    })
+    const assistant = store.appendMessage({
+      sessionId: direct.id,
+      senderId: employee.id,
+      senderKind: 'employee',
+      kind: 'assistant',
+      content: '明白，蓝鲸这个代号我只在私聊里用。',
+      metadata: { workTurnId: turn.id, agentRunId: 'run-index-1' },
+    })
+
+    const milestone = await memory.rememberCompletedRun({
+      employeeId: employee.id,
+      sessionId: direct.id,
+      workTurnId: turn.id,
+      agentRunId: 'run-index-1',
+      artifactRefs: ['artifact:blue-whale-brief'],
+    })
+
+    const entry = store.getEmployeeMemoryIndexEntry(milestone!.id)
+    expect(entry).toMatchObject({ memoryId: milestone!.id, scope: 'private' })
+    expect(entry?.keywords.length).toBeGreaterThan(0)
+    expect(entry?.sourceMessageIds).toContain(assistant.id)
+    expect(entry?.artifactRefs).toEqual(['artifact:blue-whale-brief'])
+    expect(entry?.summary).toBe(milestone!.summary)
+
+    const group = store.createSession({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      kind: 'group',
+      title: '发布群',
+      participants: [
+        { participantId: 'owner', kind: 'owner' },
+        { participantId: employee.id, kind: 'employee' },
+      ],
+    })
+    expect(memory.retrieveIndexed({ employeeId: employee.id, conversationId: group.id, prompt: '蓝鲸代号' }))
+      .toEqual([])
+    const directHits = memory.retrieveIndexed({ employeeId: employee.id, conversationId: direct.id, prompt: '蓝鲸代号' })
+    expect(directHits.map((hit) => hit.entry.memoryId)).toContain(milestone!.id)
+
+    const layers = memory.memoryContextLayers({ employeeId: employee.id, conversationId: direct.id, prompt: '蓝鲸代号' })
+    expect(layers?.memoryIndex.kind).toBe('memory-index')
+    expect(layers?.retrievedMemories.sourceRefs).toEqual(expect.arrayContaining([
+      { kind: 'memory', id: milestone!.id, revision: entry!.updatedAt },
+      { kind: 'message', id: assistant.id },
+      { kind: 'artifact', id: 'artifact:blue-whale-brief' },
+    ]))
+    expect(memory.memoryContextLayers({ employeeId: employee.id, conversationId: group.id, prompt: '蓝鲸代号' }))
+      .toBeUndefined()
+  })
+
   it('uses private memory in the employee direct chat but does not inject it into a group', async () => {
     const { store, workspace, world, employee, memory } = await setup()
     const direct = store.createSession({

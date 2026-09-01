@@ -1,11 +1,16 @@
 import type {
+  ContextLayer,
+  ContextSourceRef,
   EmployeeDossier,
+  EmployeeMemoryIndexHit,
+  EmployeeMemoryScope,
   EmployeeMilestone,
   EmployeeMilestoneCategory,
   WorkMessage,
   WorkSession,
 } from '@dsh-cyber/contracts'
-import { estimateTextTokens } from '@dsh-cyber/contracts'
+import { composeContextLayer, estimateTextTokens } from '@dsh-cyber/contracts'
+import { memoryIndexTerms } from '@dsh-cyber/persistence'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 export interface CharacterMemoryContextPort {
@@ -27,6 +32,9 @@ type MemoryStore = Pick<
   | 'listMessages'
   | 'appendEmployeeMilestone'
 >
+// The retrieval index is optional so a narrow embedder or an older store can
+// still remember an episode; it only loses ranked recall, never a durable fact.
+& Partial<Pick<SqliteStore, 'indexEmployeeMemory' | 'searchEmployeeMemoryIndex'>>
 
 const PRIVATE_TITLE = '[private] 私聊记忆'
 const GROUP_TITLE = '[group] 群聊协作'
@@ -95,6 +103,7 @@ export class EmployeeConversationMemoryService implements CharacterMemoryContext
     ].filter((value): value is string => value !== undefined).join('\n'), MAX_MEMORY_SUMMARY_CHARS)
     if (!summary) return undefined
 
+    const artifactRefs = unique(input.artifactRefs ?? [])
     const milestone = this.#store.appendEmployeeMilestone({
       employeeId: employee.id,
       category: kind.category,
@@ -104,12 +113,91 @@ export class EmployeeConversationMemoryService implements CharacterMemoryContext
         ...(userMessage === undefined ? [] : [userMessage.id]),
         ...sourceMessageIds,
       ],
-      artifactRefs: unique(input.artifactRefs ?? []),
+      artifactRefs,
       occurredAt: assistantMessages[assistantMessages.length - 1]!.createdAt,
       actorId: 'system',
     })
+    // The index is derived from the milestone that was just committed, so a
+    // failure here can never lose the fact - only its ranked recall.
+    this.#store.indexEmployeeMemory?.({
+      memoryId: milestone.id,
+      scope: kind.scope,
+      keywords: memoryIndexTerms(summary),
+      entities: memoryEntities(summary, artifactRefs),
+      importance: memoryImportance(kind.scope, artifactRefs.length),
+    })
     this.#invalidateEmployee(employee.id)
     return milestone
+  }
+
+  /**
+   * Ranked recall for one conversation.
+   *
+   * The visible scopes come from the session, never from the caller: a group
+   * or task conversation can never reach a private memory.
+   */
+  retrieveIndexed(input: {
+    employeeId: string
+    conversationId: string
+    prompt: string
+    limit?: number
+  }): EmployeeMemoryIndexHit[] {
+    const search = this.#store.searchEmployeeMemoryIndex
+    if (search === undefined) return []
+    const employee = this.#store.getEmployee(input.employeeId)
+    const session = this.#store.getSession(input.conversationId)
+    if (employee === undefined || session === undefined || employee.worldId !== session.worldId) return []
+    return search.call(this.#store, {
+      employeeId: employee.id,
+      query: input.prompt,
+      scopes: visibleMemoryScopes(session),
+      ...(input.limit === undefined ? {} : { limit: input.limit }),
+    })
+  }
+
+  /**
+   * The `memoryIndex` and `retrievedMemories` layers of the context envelope.
+   *
+   * The index layer lists what the employee could recall; the retrieved layer
+   * carries the summaries themselves. Both keep source refs, so the reader can
+   * always relocate the original messages and artifacts instead of trusting a
+   * summary. Composing these into a prompt is a later slice.
+   */
+  memoryContextLayers(input: {
+    employeeId: string
+    conversationId: string
+    prompt: string
+    limit?: number
+  }): { memoryIndex: ContextLayer; retrievedMemories: ContextLayer } | undefined {
+    const hits = this.retrieveIndexed(input)
+    if (hits.length === 0) return undefined
+    const indexRefs = hits.map((hit): ContextSourceRef => ({
+      kind: 'memory',
+      id: hit.entry.memoryId,
+      revision: hit.entry.updatedAt,
+    }))
+    return {
+      memoryIndex: composeContextLayer({
+        id: `memory-index:${input.employeeId}`,
+        kind: 'memory-index',
+        text: hits
+          .map((hit) => `- ${hit.entry.memoryId} · ${hit.entry.occurredAt.slice(0, 10)} · ${displayMemoryScope(hit.entry.scope)}`)
+          .join('\n'),
+        sourceRefs: indexRefs,
+      }),
+      retrievedMemories: composeContextLayer({
+        id: `retrieved-memories:${input.employeeId}`,
+        kind: 'retrieved-memories',
+        text: hits
+          .map((hit) => `- ${hit.entry.occurredAt.slice(0, 10)} · ${displayMemoryScope(hit.entry.scope)}：${concise(hit.entry.summary, 700)}`)
+          .join('\n'),
+        sourceRefs: [
+          ...indexRefs,
+          ...hits.flatMap((hit) => hit.entry.sourceMessageIds.map((id): ContextSourceRef => ({ kind: 'message', id }))),
+          ...hits.flatMap((hit) => hit.entry.artifactRefs.map((id): ContextSourceRef => ({ kind: 'artifact', id }))),
+        ],
+      }),
+    }
   }
 
   async compose(input: {
@@ -171,12 +259,41 @@ export class EmployeeConversationMemoryService implements CharacterMemoryContext
 function memoryKind(
   session: WorkSession,
   interactionKind: string,
-): { title: string; category: EmployeeMilestoneCategory } {
+): { title: string; category: EmployeeMilestoneCategory; scope: EmployeeMemoryScope } {
   if (interactionKind === 'task' || session.collaborationMode === 'task') {
-    return { title: TASK_TITLE, category: 'task' }
+    return { title: TASK_TITLE, category: 'task', scope: 'task' }
   }
-  if (session.kind === 'direct') return { title: PRIVATE_TITLE, category: 'reflection' }
-  return { title: GROUP_TITLE, category: 'reflection' }
+  if (session.kind === 'direct') return { title: PRIVATE_TITLE, category: 'reflection', scope: 'private' }
+  return { title: GROUP_TITLE, category: 'reflection', scope: 'group' }
+}
+
+/**
+ * The memory scopes a conversation is allowed to see.
+ *
+ * A direct conversation with the employee is the only place a private memory
+ * may surface. Everything else sees the shared group/task history only, so a
+ * private episode cannot leak through a group query.
+ */
+export function visibleMemoryScopes(session: WorkSession): EmployeeMemoryScope[] {
+  return session.kind === 'direct' ? ['private', 'group', 'task'] : ['group', 'task']
+}
+
+/** Deterministic V1 entity extraction: mentions, identifiers and artifact refs. */
+export function memoryEntities(summary: string, artifactRefs: readonly string[]): string[] {
+  const mentions = summary.match(/@[\p{L}\p{N}_.-]{1,32}/gu) ?? []
+  const identifiers = summary.match(/\b[A-Z][A-Za-z0-9_.-]{1,31}\b/g) ?? []
+  return unique([...mentions.map((value) => value.slice(1)), ...identifiers, ...artifactRefs])
+}
+
+function memoryImportance(scope: EmployeeMemoryScope, artifactCount: number): number {
+  // An episode that produced a durable artifact is worth more than chatter;
+  // a task episode is worth more than an incidental group reply.
+  const base = scope === 'task' ? 0.6 : scope === 'private' ? 0.5 : 0.4
+  return Math.min(1, base + Math.min(0.3, artifactCount * 0.1))
+}
+
+function displayMemoryScope(scope: EmployeeMemoryScope): string {
+  return scope === 'private' ? '私聊' : scope === 'task' ? '任务' : '群聊'
 }
 
 function alreadyRemembered(dossier: EmployeeDossier, messageIds: readonly string[]): boolean {

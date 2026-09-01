@@ -1,7 +1,7 @@
 import type { WorldCharacterAuthority } from './world-authority.js'
 import type { UiLocale } from './locales.js'
 
-export const CYBER_SCHEMA_VERSION = 36 as const
+export const CYBER_SCHEMA_VERSION = 37 as const
 
 export * from './runtime-access.js'
 export * from './locales.js'
@@ -579,6 +579,46 @@ export interface EmployeeMilestone {
   createdAt: IsoTimestamp
 }
 
+/**
+ * Isolation scope of one remembered episode.
+ *
+ * `private` is a hard boundary: a private memory stays durable on the employee
+ * that lived it, but it must never be reachable from a group or task query.
+ */
+export type EmployeeMemoryScope = 'private' | 'group' | 'task'
+
+/**
+ * The retrieval index over a durable milestone.
+ *
+ * This row is a derived projection, never the only copy of the fact: the
+ * `memoryId` is the milestone id, so `sourceMessageIds` / `artifactRefs` can
+ * always relocate the original messages and artifacts. Dropping and rebuilding
+ * the whole index must not lose anything.
+ */
+export interface EmployeeMemoryIndexEntry {
+  memoryId: string
+  workspaceId: string
+  worldId: string
+  employeeId: string
+  scope: EmployeeMemoryScope
+  summary: string
+  keywords: string[]
+  entities: string[]
+  sourceMessageIds: string[]
+  artifactRefs: string[]
+  /** Retrieval prior in [0, 1]; ranking never uses it as the only signal. */
+  importance: number
+  occurredAt: IsoTimestamp
+  updatedAt: IsoTimestamp
+}
+
+export interface EmployeeMemoryIndexHit {
+  entry: EmployeeMemoryIndexEntry
+  score: number
+  matchedKeywords: string[]
+  matchedEntities: string[]
+}
+
 export interface EmployeeDailyJournal {
   employeeId: string
   localDate: string
@@ -1096,6 +1136,7 @@ export interface DatabaseDoctorReport {
     skillEvidence: number
     employeeSkills: number
     employeeMilestones: number
+    employeeMemoryIndexEntries: number
     employeeJournals: number
     employeeRelationships: number
     workspacePreferences: number
@@ -1162,6 +1203,7 @@ export * from './work-system.js'
 export * from './prompt-safety.js'
 export * from './creative-workshop-draft.js'
 export * from './context-budget.js'
+export * from './context-envelope.js'
 
 export type {
   CharacterSkillAction,
