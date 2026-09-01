@@ -2497,7 +2497,7 @@ export default function App() {
             } : {})}
             knowledgeContent={undefined}
             artifactContent={<Suspense fallback={<div className="world-runtime world-runtime--loading"><strong>正在加载产物</strong></div>}><ArtifactCenter world={activeWorld} demoMode={demoMode} {...(selectedArtifactId === undefined ? {} : { focusArtifactId: selectedArtifactId })} onFocusArtifact={setSelectedArtifactId} /></Suspense>}
-            traceContent={<Suspense fallback={<div className="world-runtime world-runtime--loading"><strong>正在加载轨迹</strong></div>}><WorldTracePanel key={activeWorld.id} world={activeWorld} employees={employees} demoMode={demoMode} {...(activeSessionId === undefined ? {} : { conversationId: activeSessionId })} /></Suspense>}
+            traceContent={<Suspense fallback={<div className="world-runtime world-runtime--loading"><strong>正在加载轨迹</strong></div>}><WorldTracePanel key={activeWorld.id} world={activeWorld} employees={employees} demoMode={demoMode} {...(activeSessionId === undefined ? {} : { conversationId: activeSessionId })} onOpenArtifact={(artifactId) => { setSelectedArtifactId(artifactId); setAppMode('workbench'); setDockCollapsed(false); setDockTab('artifacts') }} /></Suspense>}
             scheduleContent={<Suspense fallback={<div className="world-runtime world-runtime--loading"><strong>正在加载日程</strong></div>}><TaskSchedulePanel employees={employees} items={taskSchedules} busy={scheduleBusy} onCreate={createTaskSchedule} onStatus={updateTaskScheduleStatus} onRun={runTaskSchedule} onDelete={deleteTaskSchedule} /></Suspense>}
             onTabChange={(tab) => { setDockTab(tab); setAppMode(tab === 'world' ? 'world' : 'workbench') }}
             onCollapse={() => setDockCollapsed(true)}

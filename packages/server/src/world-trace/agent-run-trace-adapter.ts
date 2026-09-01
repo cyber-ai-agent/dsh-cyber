@@ -32,13 +32,19 @@ export class AgentRunTraceAdapter implements WorldTraceAdapter<'agent-run'> {
       sessionId: run.sessionId,
       taskId: `turn:${run.turnId}`,
       workTurnId: run.turnId,
+      // The durable AgentRun id. Without it nothing downstream — an Artifact
+      // link, the Context view — can get from a trace card back to the run.
+      runId: run.id,
       sourceKind: 'agent-run',
       sourceId: run.id,
       createdAt,
       updatedAt,
     }
+    // Absent reasoning stays absent. A run whose runtime published no public
+    // summary must render as having none, never as invented narrative.
     if (reasoningSummary) entry.reasoningSummary = reasoningSummary
     if (tools.length > 0) entry.tools = tools
+    if (value.artifacts !== undefined && value.artifacts.length > 0) entry.artifacts = value.artifacts
     if (run.errorCode || interaction?.status === 'failed') entry.detail = friendlyRunError(run.errorCode, interaction)
     if (interaction !== undefined) {
       entry.durationMs = interaction.durationMs

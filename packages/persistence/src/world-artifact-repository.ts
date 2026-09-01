@@ -7,6 +7,7 @@ import type {
   WorldArtifactKind,
   WorldArtifactPublication,
   WorldArtifactPublishInput,
+  WorldArtifactRunProvenance,
   WorldArtifactStatus,
   WorldArtifactVersion,
   WorldArtifactVersionInput,
@@ -128,6 +129,31 @@ export class WorldArtifactRepository {
       )
       .all(worldId, artifactId)
       .map(mapVersion)
+  }
+
+  /**
+   * Every version in this world that names the run or turn that produced it.
+   *
+   * Versions with no provenance at all (an owner upload, say) are skipped:
+   * nothing could link them to a run, and the trace must not guess one.
+   */
+  listRunProvenance(worldId: string): WorldArtifactRunProvenance[] {
+    assertNonEmpty(worldId, 'World id')
+    return this.#database
+      .prepare(
+        `SELECT version.artifact_id, version.version, version.created_at,
+                version.employee_id, version.session_id, version.work_turn_id, version.agent_run_id,
+                artifact.title, artifact.kind
+         FROM world_artifact_versions version
+         INNER JOIN world_artifacts artifact
+           ON artifact.id = version.artifact_id
+          AND artifact.world_id = version.world_id
+         WHERE version.world_id = ?
+           AND (version.agent_run_id IS NOT NULL OR version.work_turn_id IS NOT NULL)
+         ORDER BY version.created_at ASC, version.artifact_id ASC, version.version ASC`,
+      )
+      .all(worldId)
+      .map(mapRunProvenance)
   }
 
   getVersionByIdempotencyKey(worldId: string, idempotencyKey: string): WorldArtifactVersion | undefined {
@@ -596,6 +622,24 @@ function mapVersion(row: unknown): WorldArtifactVersion {
   return version
 }
 
+function mapRunProvenance(row: unknown): WorldArtifactRunProvenance {
+  const value = record(row, 'artifact run provenance')
+  const kind = stringColumn(value, 'kind')
+  assertKind(kind)
+  const provenance: WorldArtifactRunProvenance = {
+    artifactId: stringColumn(value, 'artifact_id'),
+    title: stringColumn(value, 'title'),
+    kind,
+    version: integerColumn(value, 'version'),
+    createdAt: stringColumn(value, 'created_at'),
+  }
+  addOptionalString(value, 'employee_id', provenance, 'employeeId')
+  addOptionalString(value, 'session_id', provenance, 'sessionId')
+  addOptionalString(value, 'work_turn_id', provenance, 'workTurnId')
+  addOptionalString(value, 'agent_run_id', provenance, 'agentRunId')
+  return provenance
+}
+
 function assertKind(value: string): asserts value is WorldArtifactKind {
   if (!['image', 'html', 'markdown', 'document', 'code', 'data', 'archive', 'project', 'other'].includes(value)) {
     throw new PersistenceError(`Unknown World artifact kind: ${value}`)
@@ -663,10 +707,10 @@ function integerColumn(value: Record<string, unknown>, key: string): number {
   return entry
 }
 
-function addOptionalString<K extends keyof WorldArtifactVersion>(
+function addOptionalString<T extends object, K extends keyof T>(
   value: Record<string, unknown>,
   databaseKey: string,
-  target: WorldArtifactVersion,
+  target: T,
   outputKey: K,
 ): void {
   if (typeof value[databaseKey] === 'string') {

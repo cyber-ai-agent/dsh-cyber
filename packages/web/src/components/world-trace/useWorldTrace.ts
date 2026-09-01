@@ -127,7 +127,8 @@ function matchesQuery(entry: WorldTraceEntry, query: WorldTraceQuery): boolean {
   if (query.search) {
     const search = query.search.toLocaleLowerCase('zh-CN')
     const text = [entry.summary, entry.detail, entry.reasoningSummary, entry.modelId, entry.provider,
-      ...(entry.tools ?? []).flatMap((tool) => [tool.label, tool.name])]
+      ...(entry.tools ?? []).flatMap((tool) => [tool.label, tool.name]),
+      ...(entry.artifacts ?? []).map((artifact) => artifact.title)]
       .filter((value): value is string => typeof value === 'string').join('\n').toLocaleLowerCase('zh-CN')
     if (!text.includes(search)) return false
   }

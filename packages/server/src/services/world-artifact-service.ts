@@ -10,6 +10,7 @@ import type {
   WorldArtifactPublishManifest,
   WorldArtifactPublishManifestEntry,
   WorldArtifactPublication,
+  WorldArtifactRunProvenance,
   WorldArtifactVersion,
 } from '@dsh-cyber/contracts'
 import { WorldArtifactRepository } from '@dsh-cyber/persistence'
@@ -111,6 +112,17 @@ export class WorldArtifactService {
 
   list(worldId: string, filter: WorldArtifactFilter = {}): WorldArtifact[] {
     return this.#repository.list(worldId, filter)
+  }
+
+  /**
+   * Registry-only provenance read for the World Trace.
+   *
+   * It never touches the filesystem, so a trace projection cannot reach
+   * artifact content through this service — only the rows naming which run
+   * published what.
+   */
+  listRunProvenance(worldId: string): WorldArtifactRunProvenance[] {
+    return this.#repository.listRunProvenance(worldId)
   }
 
   get(worldId: string, artifactId: string): WorldArtifactView {

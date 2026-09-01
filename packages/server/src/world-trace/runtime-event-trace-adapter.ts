@@ -9,7 +9,11 @@ export class RuntimeEventTraceAdapter implements WorldTraceAdapter<'runtime-even
   adapt({ value }: { kind: 'runtime-event'; value: RuntimeTraceFact }): WorldTraceEntry[] {
     const event = value.event
     if (event.kind === 'reasoning.delta' || event.kind === 'text.delta') return []
-    const runId = value.agentRunId ?? stringMetadata(event, 'agentRunId')
+    // The durable run id, when the envelope actually carried one. The
+    // fallbacks below only key the visual card; they are not an AgentRun id and
+    // must never be published as one.
+    const durableRunId = value.agentRunId ?? stringMetadata(event, 'agentRunId')
+    const runId = durableRunId
       ?? stringMetadata(event, 'traceTurnId') ?? `${event.source}:${event.sourceSessionId}`
     const presentation = runtimePresentation(event)
     const entry: WorldTraceEntry = {
@@ -21,6 +25,7 @@ export class RuntimeEventTraceAdapter implements WorldTraceAdapter<'runtime-even
       actorId: value.actorId,
       sessionId: value.sessionId,
       ...(value.workTurnId === undefined ? {} : { taskId: `turn:${value.workTurnId}`, workTurnId: value.workTurnId }),
+      ...(durableRunId === undefined ? {} : { runId: durableRunId }),
       sourceKind: 'agent-run',
       sourceId: runId,
       ...(event.sourceSequence === undefined ? {} : { sourceSequence: event.sourceSequence }),
