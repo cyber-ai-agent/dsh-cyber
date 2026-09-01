@@ -1,5 +1,6 @@
 import type { World, WorldThemeManifestV1 } from '@dsh-cyber/contracts'
 import { aiAcademyTheme, cyberCompanyTheme, jarvisCoreTheme, knowledgeGardenTheme, maidPalaceTheme, moonlitTavernTheme } from '@dsh-cyber/world-runtime'
+import { aiAcademyTheme, cyberCompanyTheme, maidPalaceTheme, moonlitTavernTheme, newsCenterTheme } from '@dsh-cyber/world-runtime'
 
 /**
  * Resolve the built-in scene owned by a World.
@@ -30,6 +31,7 @@ export function resolveBuiltInWorldScene(world: Pick<World, 'templateId'>): Worl
   if (world.templateId === 'ai-academy' || world.templateId === 'academy') return aiAcademyTheme
   if (world.templateId === 'jarvis-core' || world.templateId === 'jarvis') return jarvisCoreTheme
   if (world.templateId === 'knowledge-garden' || world.templateId === 'garden') return knowledgeGardenTheme
+  if (world.templateId === 'news-center' || world.templateId === 'news') return newsCenterTheme
   return cyberCompanyTheme
 }
 

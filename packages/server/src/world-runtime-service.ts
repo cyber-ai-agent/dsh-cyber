@@ -20,6 +20,7 @@ import {
   knowledgeGardenTheme,
   maidPalaceTheme,
   moonlitTavernTheme,
+  newsCenterTheme,
   projectWorldRuntime,
   validateWorldThemeManifest,
 } from '@dsh-cyber/world-runtime'
@@ -529,6 +530,7 @@ export class WorldRuntimeService {
     if (templateId === 'ai-academy' || templateId === 'academy') return aiAcademyTheme
     if (templateId === 'jarvis-core' || templateId === 'jarvis') return jarvisCoreTheme
     if (templateId === 'knowledge-garden' || templateId === 'garden') return knowledgeGardenTheme
+    if (templateId === 'news-center' || templateId === 'news') return newsCenterTheme
     return undefined
   }
 

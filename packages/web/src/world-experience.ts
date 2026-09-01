@@ -1,6 +1,7 @@
 import type { World } from '@dsh-cyber/contracts'
 
 export type WorldKind = 'personal' | 'company' | 'tavern' | 'studio' | 'observatory' | 'academy' | 'hub' | 'garden'
+export type WorldKind = 'personal' | 'company' | 'tavern' | 'studio' | 'observatory' | 'academy' | 'news'
 
 export interface WorldExperience {
   kind: WorldKind
@@ -112,6 +113,17 @@ const experiences: Record<WorldKind, WorldExperience> = {
     composerPlaceholder: '@整理角色 采集来源、归档资料、提炼条目、核验引用或复看知识图谱…',
     sceneTitle: '藏书庭院',
     sceneSubtitle: '采集来源 → 归档资料 → 提炼条目 → 核验引用 → 连接知识图谱 → 复看维护',
+  news: {
+    kind: 'news',
+    peopleLabel: '编辑部角色',
+    personLabel: '编辑部角色',
+    marketLabel: '聘入编辑部',
+    actionLabel: '追踪',
+    emptyTitle: '新闻中心还没有编辑部角色',
+    emptyCopy: '从右侧「角色」聘入科技新闻分析师、财经观察员或行业研究员；更多情报角色可从顶部市场安装。',
+    composerPlaceholder: '@编辑部角色 建立追踪线、采集一轮、交叉核实或发布带日期的简报…',
+    sceneTitle: '编辑部',
+    sceneSubtitle: '建立追踪线 → 按节奏采集 → 交叉核实 → 更新时间线 → 发布带日期的简报 → 复盘并调整节奏',
   },
 }
 
@@ -124,5 +136,6 @@ export function worldExperience(world: Pick<World, 'templateId'>): WorldExperien
   if (template === 'academy' || template === 'ai-academy') return experiences.academy
   if (template === 'jarvis-core' || template === 'jarvis') return experiences.hub
   if (template === 'garden' || template === 'knowledge-garden') return experiences.garden
+  if (template === 'news' || template === 'news-center') return experiences.news
   return experiences.company
 }
