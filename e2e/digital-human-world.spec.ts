@@ -6,6 +6,7 @@ import { expect, test, type Page } from '@playwright/test'
 import type { AgentRuntimePort, AgentTurnRequest } from '../packages/contracts/lib/index.js'
 import { createCyberServer, type CyberServer } from '../packages/server/lib/index.js'
 import { attachAppConsoleRecorder } from './console-test-helpers.js'
+import { openDockTab } from './dock-test-helpers.js'
 import { interactiveVrmFixture } from './vrm-test-fixture.js'
 
 let server: CyberServer
@@ -226,6 +227,116 @@ test('turns streaming voice partials into the core 2D conversation flow', async 
   await expect(focus.getByRole('button', { name: '开始语音对话' })).toBeVisible()
 })
 
+/**
+ * Regression guard for `fix:voice-conversation-ownership` (5ea7bde).
+ *
+ * A reply used to be able to play twice — the focused character panel and the
+ * composer fallback both saw the same streamed turn — and a typed reply could
+ * inherit the previous voice turn's ownership and speak on its own. Both
+ * surfaces are core 2D concerns; the renderer is not part of the bug.
+ */
+test('speaks a composer voice turn exactly once and leaves typed replies silent', async ({ page }) => {
+  test.setTimeout(120_000)
+  await installVoiceConversationMock(page, '语音模式联合回归')
+  const streamRequests: Array<{ text?: string; provider?: string }> = []
+  await recordLocalTtsRequests(page, streamRequests)
+  await page.goto(origin)
+  runtime.release()
+  await page.getByRole('button', { name: `与${employeeName}私聊`, exact: true }).click()
+  const focus = await selectCore2dView(page, employeeName)
+
+  // The focused panel broadcasts new replies on its own. That is the second
+  // owner the composer fallback has to lose to, so turn it on explicitly.
+  await focus.getByRole('button', { name: '语音设置' }).click()
+  await focus.getByLabel('播报模式').selectOption('auto')
+  await focus.getByRole('button', { name: '语音设置' }).click()
+
+  const composer = page.locator('.composer-zone')
+  const expectedReplyText = `${employeeName} 已完成员工聚焦交互验证。`
+  for (const turn of [1, 2]) {
+    const microphone = composer.getByRole('button', { name: '开始语音对话' })
+    await expect(microphone).toBeVisible()
+    await microphone.click()
+    await expect(composer.getByRole('button', { name: '结束语音对话' })).toBeVisible()
+    await expect(page.getByText('语音模式联合回归', { exact: true }).first()).toBeVisible({ timeout: 10_000 })
+    await expect.poll(() => streamRequests.filter((request) => request.text === expectedReplyText).length).toBe(turn)
+    // Poll succeeds on the way up, so give a duplicate owner time to appear.
+    await page.waitForTimeout(400)
+    expect(streamRequests.filter((request) => request.text === expectedReplyText).length,
+      `第 ${turn} 个语音 turn 只能播报一次：${JSON.stringify(streamRequests)}`).toBe(turn)
+    await composer.getByRole('button', { name: '结束语音对话' }).click()
+    await expect(composer.getByRole('button', { name: '开始语音对话' })).toBeVisible()
+  }
+
+  // Nothing may be spoken in another character's name.
+  expect(streamRequests.map((request) => request.text ?? ''),
+    `播报内容必须属于当前聚焦角色：${JSON.stringify(streamRequests)}`)
+    .toEqual(streamRequests.map(() => expectedReplyText))
+
+  // Turn off the focused panel's independent auto mode so the next assertion is
+  // specifically about the composer origin. A typed turn must not inherit the
+  // preceding voice turn's ownership or generate another TTS request.
+  await focus.getByRole('button', { name: '语音设置' }).click()
+  await focus.getByLabel('播报模式').selectOption('off')
+  await focus.getByRole('button', { name: '语音设置' }).click()
+  const beforeTyped = streamRequests.length
+  const runtimeTurnsBeforeTyped = runtime.requests.length
+  await page.getByRole('textbox', { name: '给当前世界的角色发送消息' }).fill('这是键盘输入，不应自动播报')
+  await composer.getByRole('button', { name: '发送', exact: true }).click()
+  await expect.poll(() => runtime.requests.length).toBeGreaterThan(runtimeTurnsBeforeTyped)
+  await expect(page.getByText('这是键盘输入，不应自动播报', { exact: true }).first()).toBeVisible()
+  await page.waitForTimeout(500)
+  expect(streamRequests.length, `键盘 turn 不得继承 voice turn 的播报所有权：${JSON.stringify(streamRequests)}`).toBe(beforeTyped)
+})
+
+/**
+ * Regression guard for the 2D image avatar path.
+ *
+ * Upload, publish, immutable revision and rollback are core product behaviour
+ * for `image-2d` portraits and are unrelated to the optional 3D extension, so
+ * this deliberately uses a character with no VRM published.
+ */
+test('publishes an uploaded 2D portrait and rolls back to an earlier revision', async ({ page }) => {
+  const spatialRequests: string[] = []
+  recordOptional3dRequests(page, spatialRequests)
+  await page.goto(origin)
+  const dock = page.getByRole('region', { name: '世界与角色侧边栏' })
+  await openDockTab(dock, '角色')
+  await page.getByRole('button', { name: `修改${secondEmployeeName}的名字和头像`, exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: `角色设置 · ${secondEmployeeName}` })
+  await expect(dialog).toBeVisible()
+  const stage = dialog.locator('.character-avatar-manager__stage')
+  const summary = dialog.locator('.character-avatar-manager__summary')
+  const fileInput = dialog.locator('input[type="file"][accept*=".vrm"]')
+
+  await fileInput.setInputFiles({ name: 'portrait-a.png', mimeType: 'image/png', buffer: Buffer.from(PORTRAIT_A_PNG, 'base64') })
+  await expect(dialog.getByText('尚未发布')).toBeVisible()
+  await expect(dialog.getByText('图片签名已校验，可发布为 2D 角色形象。')).toBeVisible()
+  await expect(stage).toHaveAttribute('data-kind', 'image-2d')
+  await dialog.getByRole('button', { name: '发布到角色' }).click()
+  await expect(dialog.getByText('尚未发布')).toHaveCount(0)
+  await expect(stage.getByRole('img', { name: `${secondEmployeeName}形象预览` })).toBeVisible()
+  await expect(summary.getByText('portrait-a.png', { exact: true })).toBeVisible()
+
+  await fileInput.setInputFiles({ name: 'portrait-b.png', mimeType: 'image/png', buffer: Buffer.from(PORTRAIT_B_PNG, 'base64') })
+  await dialog.getByRole('button', { name: '发布到角色' }).click()
+  await expect(summary.getByText('portrait-b.png', { exact: true })).toBeVisible()
+
+  // Publishing keeps every earlier revision readable, so the first portrait is
+  // still offered as history rather than having been overwritten.
+  const history = dialog.locator('.character-avatar-manager__history li').filter({ hasText: 'portrait-a.png' })
+  await expect(history).toHaveCount(1)
+  await history.getByRole('button', { name: '恢复', exact: true }).click()
+
+  await expect(summary.getByText('portrait-a.png', { exact: true })).toBeVisible()
+  await expect(stage).toHaveAttribute('data-kind', 'image-2d')
+  await expect(stage.getByRole('img', { name: `${secondEmployeeName}形象预览` })).toBeVisible()
+  // Rollback creates a new revision instead of rewriting history: the portrait
+  // it replaced is now itself an entry that can be restored.
+  await expect(dialog.locator('.character-avatar-manager__history li').filter({ hasText: 'portrait-b.png' })).toHaveCount(1)
+  expect(spatialRequests, '2D 形象发布与回滚不得加载 3D 扩展').toEqual([])
+})
+
 async function selectCore2dView(page: Page, employee: string) {
   const display = page.getByRole('tablist', { name: '世界显示方式' })
   const tab = display.getByRole('tab', { name: '2D', exact: true })
@@ -244,8 +355,8 @@ function recordOptional3dRequests(page: Page, target: string[]): void {
   })
 }
 
-async function installVoiceConversationMock(page: Page): Promise<void> {
-  await page.addInitScript(() => {
+async function installVoiceConversationMock(page: Page, finalText = '帮我检查昨天的服务日志'): Promise<void> {
+  await page.addInitScript((spokenText) => {
     class MockWebSocket {
       static OPEN = 1
       readyState = 1
@@ -267,9 +378,9 @@ async function installVoiceConversationMock(page: Page): Promise<void> {
           this.emit({ type: 'session-started', sessionId: 'voice-test' })
           this.emit({ type: 'listening', sessionId: 'voice-test' })
           window.setTimeout(() => this.emit({ type: 'speech-start', sessionId: 'voice-test', utteranceId: 'voice-test:0' }), 100)
-          window.setTimeout(() => this.emit({ type: 'partial', sessionId: 'voice-test', utteranceId: 'voice-test:0', text: '帮我检查' }), 250)
-          window.setTimeout(() => this.emit({ type: 'partial', sessionId: 'voice-test', utteranceId: 'voice-test:0', text: '帮我检查昨天的服务日志' }), 500)
-          window.setTimeout(() => this.emit({ type: 'final', sessionId: 'voice-test', utteranceId: 'voice-test:0', text: '帮我检查昨天的服务日志' }), 1_300)
+          window.setTimeout(() => this.emit({ type: 'partial', sessionId: 'voice-test', utteranceId: 'voice-test:0', text: spokenText.slice(0, Math.max(1, Math.floor(spokenText.length / 2))) }), 250)
+          window.setTimeout(() => this.emit({ type: 'partial', sessionId: 'voice-test', utteranceId: 'voice-test:0', text: spokenText }), 500)
+          window.setTimeout(() => this.emit({ type: 'final', sessionId: 'voice-test', utteranceId: 'voice-test:0', text: spokenText }), 1_300)
         }
       }
       close() { this.readyState = 3; this.onclose?.() }
@@ -293,6 +404,28 @@ async function installVoiceConversationMock(page: Page): Promise<void> {
     Object.defineProperty(window, 'AudioWorkletNode', { configurable: true, value: MockAudioWorkletNode })
     Object.defineProperty(window, 'AudioContext', { configurable: true, value: MockAudioContext })
     Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: async () => fakeStream } })
+  }, finalText)
+}
+
+/**
+ * Answers every local TTS request with a fast failure and records what was asked for.
+ *
+ * Counting requests is the whole point: playback ownership is what is under
+ * test, not audio. A 503 keeps the assertion honest without pretending a local
+ * voice pack or a microphone device was really installed.
+ */
+async function recordLocalTtsRequests(page: Page, target: Array<{ text?: string; provider?: string }>): Promise<void> {
+  await page.route('**/api/local-tts/models', async (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ models: [
+      { id: 'moss-tts-nano-100m-onnx', provider: 'moss', displayName: 'MOSS-TTS-Nano', version: '100M', license: 'Apache-2.0', byteLength: 1, state: 'not-installed', tier: 'default', recommended: true, runtime: 'onnx-cpu', summary: '测试语音包。' },
+      { id: 'kokoro-int8-multi-lang-v1_1', provider: 'kokoro', displayName: 'Kokoro 快速语音', version: '1.1', license: 'Apache-2.0', byteLength: 1, state: 'ready', tier: 'fast', runtime: 'onnx-cpu', summary: '测试备用语音。' },
+    ] }),
+  }))
+  await page.route('**/api/local-tts/stream', async (route) => {
+    try { target.push(JSON.parse(route.request().postData() ?? '{}') as { text?: string; provider?: string }) } catch { target.push({}) }
+    await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { message: '测试环境未安装本地语音包' } }) })
   })
 }
 
@@ -328,3 +461,6 @@ class FocusRuntime implements AgentRuntimePort {
 }
 
 const ONE_PIXEL_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII='
+// Two distinct 2x2 PNGs so the published revisions differ by content, not only by name.
+const PORTRAIT_A_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGM4oaFxQkODAUIBACEuBGGeECA5AAAAAElFTkSuQmCC'
+const PORTRAIT_B_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGPQCDihEXCCAUIBACCOBQEyq3EUAAAAAElFTkSuQmCC'
