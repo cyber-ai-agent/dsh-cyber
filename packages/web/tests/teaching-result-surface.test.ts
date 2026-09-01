@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { World, WorldArtifactVersion } from '@dsh-cyber/contracts'
 import { knowledgeGardenTheme } from '@dsh-cyber/world-runtime'
+import { newsCenterTheme } from '@dsh-cyber/world-runtime'
 
 import type { ArtifactRecord } from '../src/features/artifacts/useWorldArtifacts.js'
 import { TeachingResultSurface } from '../src/features/world/teaching/TeachingResultSurface.js'
@@ -146,6 +147,16 @@ describe('theme vocabulary opt-in', () => {
     expect(teachingSurfaceVocabulary({ scenes: [{ interactables: [{ kind: 'workstation' }] }] }).mode).toBe('generic')
     // An explicit terminology declaration still wins over the scene guess.
     expect(teachingSurfaceVocabulary({ terminology: { resultSurface: 'generic' }, scenes }).mode).toBe('generic')
+  })
+
+  it('dresses the shipped surface in the News Center vocabulary without a second surface', () => {
+    const vocabulary = teachingSurfaceVocabulary(newsCenterTheme)
+    expect(vocabulary.mode).toBe('generic')
+    expect(vocabulary.surfaceLabel).toBe('情报结果')
+    expect(vocabulary.laneLabels.blackboard).toBe('简报板')
+    expect(vocabulary.laneLabels['knowledge-graph']).toBe('线索图')
+    expect(vocabulary.laneLabels['lesson-cards']).toBe('情报卡片')
+    expect(vocabulary.laneLabels.media).toBe('图表 · 影像')
   })
 
   it('lets a theme rename single lanes and ignores non-string declarations', () => {

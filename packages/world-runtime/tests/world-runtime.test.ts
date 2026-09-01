@@ -8,6 +8,7 @@ import {
   knowledgeGardenTheme,
   findPath,
   jarvisCoreTheme,
+  newsCenterTheme,
   projectWorldRuntime,
   validateWorldThemeManifest,
 } from '../src/index.js'
@@ -115,6 +116,19 @@ describe('world theme manifest', () => {
       'garden-result-showcase',
       'excerpt-board',
       'reading-tables',
+  it('validates the built-in news center theme and its newsroom scene', () => {
+    expect(validateWorldThemeManifest(newsCenterTheme)).toEqual({ valid: true, errors: [] })
+    const scene = newsCenterTheme.scenes[0]!
+    expect(scene.id).toBe('newsroom-floor')
+    expect(scene.interactables.map((item) => item.id)).toEqual([
+      'source-collection-desk',
+      'beat-board',
+      'chart-workbench',
+      'verification-desk',
+      'timeline-wall',
+      'brief-archive',
+      'newsroom-wallboard',
+      'editorial-table',
     ])
   })
 
