@@ -70,7 +70,7 @@ export function WorldCanvas({
   latestCameraState.current = { mode: cameraMode, subjectId: cameraSubjectId }
   const latestSelection = useRef<{ entityId: string | undefined; objectId: string | undefined; focusEntityId: string | undefined }>({ entityId: selectedEntityId, objectId: selectedObjectId, focusEntityId })
   latestSelection.current = { entityId: selectedEntityId, objectId: selectedObjectId, focusEntityId }
-  const retainedZoom = useRef<number>()
+  const retainedZoom = useRef<number | undefined>(undefined)
   const worldKey = `${manifest.id}:${snapshot.sceneId}`
   const mountedKey = `${rendererIdentity}:pixi-2d:${worldKey}`
 
