@@ -196,6 +196,58 @@ describe('Trace dock and live merge', () => {
   })
 })
 
+describe('Trace honesty and run outcome', () => {
+  it('renders no 判断摘要 at all when the runtime published no reasoning summary', () => {
+    const silent = {
+      ...trace('silent-run', 'success', '2026-08-23T00:01:00.000Z'),
+      category: 'tool' as const,
+      summary: '完成处理，调度了 1 个工具',
+      tools: [{ callId: 'write-1', name: 'write_file', label: '写入文件', status: 'success' as const }],
+    }
+    const html = renderToStaticMarkup(createElement('ol', {}, createElement(WorldTraceItem, { entry: silent, employees: [] })))
+
+    // The card still opens on its real tool facts, and says nothing where the
+    // runtime said nothing. No heading, no placeholder, no invented narrative.
+    expect(html).toContain('工具调度')
+    expect(html).toContain('写入文件')
+    expect(html).not.toContain('判断摘要')
+    expect(html).not.toContain('暂无')
+    expect(html).not.toContain('未提供判断')
+    expect(html).not.toContain('思考')
+  })
+
+  it('names the artifacts a run produced and hands their id back to the host', () => {
+    const opened: string[] = []
+    const produced = {
+      ...trace('produced', 'success', '2026-08-23T00:03:00.000Z'),
+      category: 'tool' as const,
+      summary: '完成处理，调度了 1 个工具',
+      artifacts: [{ artifactId: 'artifact-7', title: '周度分析报告', kind: 'markdown' as const, version: 2, createdAt: '2026-08-23T00:03:00.000Z' }],
+    }
+    const html = renderToStaticMarkup(createElement('ol', {}, createElement(WorldTraceItem, {
+      entry: produced,
+      employees: [],
+      onOpenArtifact: (artifactId: string) => { opened.push(artifactId) },
+    })))
+    expect(html).toContain('产出结果')
+    expect(html).toContain('周度分析报告')
+    expect(html).toContain('Markdown · v2')
+    expect(html).toContain('1 个产物')
+    expect(html).toContain('aria-label="打开产物 周度分析报告 · Markdown · v2"')
+    expect(opened).toEqual([])
+  })
+
+  it('says nothing about products when the run published none', () => {
+    const html = renderToStaticMarkup(createElement('ol', {}, createElement(WorldTraceItem, {
+      entry: { ...trace('no-output', 'success', '2026-08-23T00:04:00.000Z'), category: 'agent' as const },
+      employees: [],
+      onOpenArtifact: () => undefined,
+    })))
+    expect(html).not.toContain('产出结果')
+    expect(html).not.toContain('个产物')
+  })
+})
+
 function trace(id: string, status: WorldTraceEntry['status'], updatedAt: string): WorldTraceEntry {
   return {
     id,

@@ -11,7 +11,13 @@ import './world-trace.css'
 
 const EMPTY_FILTERS: TraceFilters = { category: '', status: '', actorId: '', date: '', search: '' }
 
-export function WorldTracePanel({ world, employees, demoMode }: { world: World; employees: CyberEmployee[]; demoMode: boolean }) {
+export function WorldTracePanel({ world, employees, demoMode, onOpenArtifact }: {
+  world: World
+  employees: CyberEmployee[]
+  demoMode: boolean
+  /** Hands an artifact id back to the host so the Artifact Center opens it. */
+  onOpenArtifact?: (artifactId: string) => void
+}) {
   const { locale, t } = useI18n()
   const [filters, setFilters] = useState<TraceFilters>(EMPTY_FILTERS)
   const deferredSearch = useDeferredValue(filters.search.trim())
@@ -40,7 +46,7 @@ export function WorldTracePanel({ world, employees, demoMode }: { world: World; 
     {tokenByActor.length === 0 ? null : <div className="world-trace-token-strip" aria-label={t('workbench.traceActorStats', '按角色统计 Token')}>
       {tokenByActor.map(([actorId, total]) => <button key={actorId} type="button" className={filters.actorId === actorId ? 'is-active' : ''} onClick={() => setFilters((current) => ({ ...current, actorId: current.actorId === actorId ? '' : actorId }))}><span>{employees.find((employee) => employee.id === actorId)?.displayName ?? t('workbench.traceUnknownActor', '未知角色')}</span><strong>{formatTokenCount(total, locale)}</strong></button>)}
     </div>}
-    <WorldTraceTimeline entries={trace.entries} employees={employees} />
+    <WorldTraceTimeline entries={trace.entries} employees={employees} {...(onOpenArtifact === undefined ? {} : { onOpenArtifact })} />
     {trace.nextCursor === undefined ? null : <footer className="world-trace-panel__footer"><button type="button" disabled={trace.loadingMore} onClick={() => void trace.loadMore()}>{trace.loadingMore ? t('workbench.traceLoading', '正在加载…') : t('workbench.traceLoadMore', '加载更早轨迹')}</button></footer>}
   </section>
 }
