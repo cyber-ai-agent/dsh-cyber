@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { createCyberServer, type CyberServer } from '../src/index.js'
+import { characterGeneratorMarketplaceRoot } from '../src/services/character-generator-marketplace.js'
 
 const servers: CyberServer[] = []
 const roots: string[] = []
@@ -109,11 +110,17 @@ describe('Character Generator avatar upload boundary', () => {
   it('refuses to publish when the talent directory itself is a symlink out of the root', async () => {
     const outside = await mkdtemp(join(tmpdir(), 'dsh-character-generator-outside-'))
     roots.push(outside)
-    const server = await startServer(async (root) => {
-      const marketplaceRoot = join(root, 'workshop', 'character-generator', 'marketplace')
-      await mkdir(marketplaceRoot, { recursive: true })
-      await symlink(outside, join(marketplaceRoot, 'talent'), 'dir')
-    })
+    const server = await startServer()
+    // Generated talents are workspace-scoped, so the hostile link has to be
+    // planted on the path the publish actually walks. The workspace id only
+    // exists after boot, and the root is derived from the same helper the
+    // product writes through so this can never drift back onto a path the
+    // guard is not asked about.
+    const workspaceId = server.store.listWorkspaces()[0]!.id
+    const marketplaceRoot = characterGeneratorMarketplaceRoot(server.root, workspaceId)
+    await mkdir(marketplaceRoot, { recursive: true })
+    await symlink(outside, join(marketplaceRoot, 'talent'), 'dir')
+
     const response = await publish(server, { avatar: upload('image/png', pngBytes()) })
     expect(response.status, JSON.stringify(response.body)).toBe(422)
     expect(await readdir(outside)).toEqual([])
