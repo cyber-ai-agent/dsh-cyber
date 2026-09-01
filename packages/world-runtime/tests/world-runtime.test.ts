@@ -6,6 +6,7 @@ import {
   aiAcademyTheme,
   cyberCompanyTheme,
   findPath,
+  jarvisCoreTheme,
   projectWorldRuntime,
   validateWorldThemeManifest,
 } from '../src/index.js'
@@ -81,6 +82,22 @@ describe('world theme manifest', () => {
       'course-result-showcase',
       'lecture-blackboard',
       'cohort-seating',
+    ])
+  })
+
+  it('validates the built-in Jarvis Core theme and its personal hub scene', () => {
+    expect(validateWorldThemeManifest(jarvisCoreTheme)).toEqual({ valid: true, errors: [] })
+    const scene = jarvisCoreTheme.scenes[0]!
+    expect(scene.id).toBe('personal-hub-studio')
+    expect(scene.interactables.map((item) => item.id)).toEqual([
+      'request-intake-table',
+      'ownership-routing-board',
+      'delegation-board',
+      'research-carrel-desk',
+      'schedule-console-desk',
+      'filing-organiser-bench',
+      'information-index-wall',
+      'summary-report-stand',
     ])
   })
 
