@@ -1230,6 +1230,7 @@ export * from './context-budget.js'
 export * from './context-envelope.js'
 export * from './prompt-cache.js'
 export * from './context-snapshot.js'
+export * from './context-inspection.js'
 
 export type {
   CharacterSkillAction,

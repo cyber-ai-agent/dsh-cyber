@@ -139,6 +139,14 @@ export interface ComposedTurnContext {
   prompt: string
   /** Turns the lane may replay raw. Always a suffix of the durable history. */
   recentHistory: ConversationHistoryEntry[]
+  /**
+   * The ranked memories that actually survived the budget and were rendered.
+   *
+   * The composer already holds them; handing them back is what lets an
+   * observer explain *why* a memory is in this turn without re-running
+   * retrieval and getting a different answer than the turn did.
+   */
+  memoryHits: EmployeeMemoryIndexHit[]
   coverage: ContextCoverage
 }
 
@@ -287,6 +295,7 @@ export class ConversationContextComposer {
       envelope,
       prompt,
       recentHistory,
+      memoryHits: composedMemory?.hits ?? [],
       coverage: {
         lane,
         memoryScopes,
