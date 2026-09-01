@@ -17,10 +17,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Inspect pinned modular Quaternius Business Man transport
+      - name: Inspect pinned original modular Quaternius Business Man transport
         env:
-          SOURCE_URL: https://media.githubusercontent.com/media/bbgott/mesh-mates/a9218da3a46bd0869a177f7378568bf947a8039c/packages/client/public/models/Business%20Man.glb
-          EXPECTED_SHA256: c100d710169c2e7bcc7215cd5b3f8b4e649ebe76d651255c863d638a798ee6b3
+          SOURCE_URL: https://raw.githubusercontent.com/FloodZHubGit/break-the-silence-vr/c86cee866df76efb1c09041e1e5ad89702ae0f3e/public/models/Business_Man.glb
+          EXPECTED_GIT_BLOB: 3e97aa2cdfc272d88e30d325dfe90a97f90699b6
         run: |
           node --input-type=module <<'NODE'
           import { createHash } from 'node:crypto'
@@ -43,8 +43,8 @@ jobs:
           const response = await fetch(process.env.SOURCE_URL)
           if (!response.ok) throw new Error(`download ${response.status}`)
           const sourceBytes = Buffer.from(await response.arrayBuffer())
-          const sha256 = createHash('sha256').update(sourceBytes).digest('hex')
-          if (sha256 !== process.env.EXPECTED_SHA256) throw new Error(`sha256 mismatch ${sha256}`)
+          const gitBlob = createHash('sha1').update(Buffer.from(`blob ${sourceBytes.length}\0`)).update(sourceBytes).digest('hex')
+          if (gitBlob !== process.env.EXPECTED_GIT_BLOB) throw new Error(`blob mismatch ${gitBlob}`)
           const source = parseGlb(sourceBytes)
           const base = parseGlb(await readFile('marketplace/plugins/official-avatar-base-v1/models/neutral.vrm'))
           const nodeName = (doc, index) => doc.nodes?.[index]?.name ?? `<node:${index}>`
@@ -52,18 +52,16 @@ jobs:
           const baseNames = new Set((base.nodes ?? []).map((node) => node?.name).filter(Boolean))
           const meshNodes = (source.nodes ?? []).filter((node) => Number.isInteger(node?.mesh)).map((node) => ({ name: node.name, mesh: node.mesh, skin: node.skin, translation: node.translation, rotation: node.rotation, scale: node.scale }))
           const materialNames = (source.materials ?? []).map((material, index) => material?.name ?? `<material:${index}>`)
-          const exactJointMatches = sourceJointNames.filter((name) => baseNames.has(name))
-          const missingJointNames = sourceJointNames.filter((name) => !baseNames.has(name))
 
           console.log(`bytes=${sourceBytes.length}`)
-          console.log(`sha256=${sha256}`)
+          console.log(`gitBlob=${gitBlob}`)
+          console.log(`extensionsUsed=${JSON.stringify(source.extensionsUsed ?? [])}`)
           console.log(`nodes=${source.nodes?.length ?? 0} meshes=${source.meshes?.length ?? 0} skins=${source.skins?.length ?? 0} animations=${source.animations?.length ?? 0}`)
           console.log('meshNodes=' + JSON.stringify(meshNodes))
           console.log('materials=' + JSON.stringify(materialNames))
           console.log('sourceJointNames=' + JSON.stringify(sourceJointNames))
-          console.log(`exactJointMatches=${exactJointMatches.length}/${sourceJointNames.length}: ` + JSON.stringify(exactJointMatches))
-          console.log('missingJointNames=' + JSON.stringify(missingJointNames))
-          console.log('baseRelevantNames=' + JSON.stringify([...baseNames].filter((name) => /root|hip|pelvis|spine|chest|neck|head|clav|arm|hand|index|thumb|middle|ring|pinky|thigh|leg|calf|foot|toe/i.test(name))))
+          console.log(`exactJointMatches=${sourceJointNames.filter((name) => baseNames.has(name)).length}/${sourceJointNames.length}`)
+          console.log('baseRelevantNames=' + JSON.stringify([...baseNames].filter((name) => /root|hip|pelvis|spine|chest|neck|head|clav|arm|hand|index|thumb|middle|ring|pinky|thigh|leg|calf|foot|toe|ball/i.test(name))))
           console.log('skins=' + JSON.stringify((source.skins ?? []).map((skin) => ({ skeleton: nodeName(source, skin.skeleton), joints: (skin.joints ?? []).map((index) => nodeName(source, index)), inverseBindMatrices: skin.inverseBindMatrices }))))
           console.log('images=' + JSON.stringify((source.images ?? []).map((image) => ({ uri: image.uri, mimeType: image.mimeType, bufferView: image.bufferView }))))
           console.log('textures=' + JSON.stringify(source.textures ?? []))
