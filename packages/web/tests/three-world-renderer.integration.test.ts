@@ -3,8 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { WorldRendererCallbacks, WorldRuntimeSnapshot, WorldThemeManifestV1 } from '@dsh-cyber/contracts'
 
+import { createSpatialRendererRegistry } from '../src/features/world/extensions/spatial-3d/spatial-renderer-registry.js'
 import { ThreeWorldRenderer } from '../src/features/world/renderer/spatial/three-world-renderer.js'
-import { createWorldRendererRegistry } from '../src/features/world/renderer/renderer-registry.js'
 import { WorldLocomotion } from '../src/features/world/runtime/world-locomotion.js'
 import { VrmActor } from '../src/features/world/avatar/vrm/VrmActor.js'
 
@@ -32,7 +32,7 @@ class FakeWebGLRenderer {
 const renderers: FakeWebGLRenderer[] = []
 afterEach(() => { renderers.length = 0 })
 
-describe('ThreeWorldRenderer integration', () => {
+describe('ThreeWorldRenderer optional extension integration', () => {
   it('mounts a real office scene, routes picks, moves a shared actor and disposes cleanly', async () => {
     const selectedEntities: string[] = []
     const selectedObjects: string[] = []
@@ -48,10 +48,7 @@ describe('ThreeWorldRenderer integration', () => {
       shadows: false,
       createRenderer: () => fake as unknown as THREE.WebGLRenderer,
     })
-    const host = document.createElement('div')
-    Object.defineProperty(host, 'clientWidth', { configurable: true, value: 640 })
-    Object.defineProperty(host, 'clientHeight', { configurable: true, value: 360 })
-    host.getBoundingClientRect = () => ({ left: 0, top: 0, width: 640, height: 360, right: 640, bottom: 360, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect
+    const host = hostElement()
 
     await renderer.mount(host, manifest(), snapshot())
     expect(host.querySelector('canvas')).toBe(fake.domElement)
@@ -71,8 +68,6 @@ describe('ThreeWorldRenderer integration', () => {
     const actorBeforeRoute = fake.lastScene?.children.find((child) => child.userData.entityId === 'employee-a')
     const actorBeforeRouteX = actorBeforeRoute?.position.x
 
-    // The click path uses the renderer's own raycast and runtime ids. Stub only
-    // the geometric intersection so this test remains deterministic in DOM CI.
     const raycast = vi.spyOn(THREE.Raycaster.prototype, 'intersectObjects')
     raycast.mockReturnValueOnce([{ object: { userData: { entityId: 'employee-a' }, parent: null } }] as never)
     host.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 12, clientY: 12 }))
@@ -81,8 +76,6 @@ describe('ThreeWorldRenderer integration', () => {
     host.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 12, clientY: 12 }))
     expect(selectedObjects).toEqual(['meeting-table'])
 
-    // Camera modes are exercised on the mounted renderer, not just on the
-    // pure pose helpers; each mode produces a real camera pose on the next draw.
     const camera = fake.lastCamera!
     renderer.setCameraMode('overview')
     fake.animationLoop?.()
@@ -96,15 +89,11 @@ describe('ThreeWorldRenderer integration', () => {
     expect(focus.distanceTo(overview)).toBeGreaterThan(0)
     expect(follow.distanceTo(focus)).toBeGreaterThan(0)
 
-    // An omitted subject is authoritative. It must not leave the previous
-    // employee attached to a non-overview camera.
     renderer.setCameraMode('overview')
     fake.animationLoop?.()
     renderer.setCameraMode('focus', undefined)
     expect(renderer.cameraState()).toEqual({ mode: 'focus', subjectId: undefined })
 
-    // A route is consumed by the same locomotion store that the other renderer
-    // receives, and the mounted Three renderer reflects its live position.
     renderer.applyCues([{ id: 'route-1', kind: 'entity.route', entityId: 'employee-a', payload: { route: [{ x: 100, y: 100 }, { x: 700, y: 100 }] } } as never])
     locomotion.advance(1_000)
     fake.animationLoop?.()
@@ -135,18 +124,13 @@ describe('ThreeWorldRenderer integration', () => {
       loadAvatar,
       motionLibrary: noMotionLibrary(),
     })
-    const host = document.createElement('div')
-    Object.defineProperty(host, 'clientWidth', { configurable: true, value: 640 })
-    Object.defineProperty(host, 'clientHeight', { configurable: true, value: 360 })
-    host.getBoundingClientRect = () => ({ left: 0, top: 0, width: 640, height: 360, right: 640, bottom: 360, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect
+    const host = hostElement()
 
     await renderer.mount(host, manifest(), snapshot())
     fakeRenderer.animationLoop?.()
     await vi.waitFor(() => expect(loadAvatar).toHaveBeenCalledTimes(1))
     await vi.waitFor(() => expect(renderer.actorRepresentation('employee-a')?.vrmLoaded).toBe(true))
 
-    // Overview makes the VRM yield to the billboard. Focusing the same actor
-    // upgrades it back to the real mesh and hides the stand-in.
     expect(renderer.actorRepresentation('employee-a')).toMatchObject({ vrmVisible: false, standInVisible: true })
     renderer.selectEntity('employee-a')
     renderer.setCameraMode('focus', 'employee-a')
@@ -155,14 +139,16 @@ describe('ThreeWorldRenderer integration', () => {
     renderer.destroy()
   })
 
-  it('mounts the real ThreeWorldRenderer through the lazy registry seam', async () => {
+  it('mounts the real ThreeWorldRenderer only through the optional spatial registry seam', async () => {
     const fake = new FakeWebGLRenderer()
     renderers.push(fake)
-    const registry = createWorldRendererRegistry({ shadows: false, createRenderer: () => fake as unknown as THREE.WebGLRenderer })
+    const registry = createSpatialRendererRegistry({
+      locomotion: new WorldLocomotion(),
+      shadows: false,
+      createRenderer: () => fake as unknown as THREE.WebGLRenderer,
+    })
     const renderer = registry.create('three-3d', { onEntitySelect: () => {}, onObjectSelect: () => {} })
-    const host = document.createElement('div')
-    Object.defineProperty(host, 'clientWidth', { configurable: true, value: 640 })
-    Object.defineProperty(host, 'clientHeight', { configurable: true, value: 360 })
+    const host = hostElement()
     await renderer.mount(host, manifest(), snapshot())
     fake.animationLoop?.()
     expect(renderer.kind).toBe('three-3d')
@@ -172,6 +158,14 @@ describe('ThreeWorldRenderer integration', () => {
     renderer.destroy()
   })
 })
+
+function hostElement(): HTMLDivElement {
+  const host = document.createElement('div')
+  Object.defineProperty(host, 'clientWidth', { configurable: true, value: 640 })
+  Object.defineProperty(host, 'clientHeight', { configurable: true, value: 360 })
+  host.getBoundingClientRect = () => ({ left: 0, top: 0, width: 640, height: 360, right: 640, bottom: 360, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect
+  return host
+}
 
 function manifest(): WorldThemeManifestV1 {
   return {
