@@ -160,6 +160,8 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       } catch {
         // A missing context record must never cost the owner a reply.
       }
+    }
+
     // Recorded before the turn runs, so a run that fails or is aborted still
     // leaves behind the context it was given - that is exactly the turn a user
     // most wants to look at afterwards.
