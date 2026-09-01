@@ -1,0 +1,63 @@
+.spatial-world-extension-backdrop {
+  z-index: 100;
+  padding: 18px;
+  background: rgb(5 8 13 / 82%);
+}
+
+.spatial-world-extension {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(1500px, calc(100vw - 36px));
+  height: min(920px, calc(100vh - 36px));
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 22px;
+  background: #0d1118;
+  box-shadow: 0 30px 100px rgb(0 0 0 / 55%);
+}
+
+.spatial-world-extension__header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 16px;
+  align-items: center;
+  padding: 15px 18px;
+  border-bottom: 1px solid rgb(255 255 255 / 8%);
+  background: #111721;
+}
+
+.spatial-world-extension__identity { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.spatial-world-extension__identity > span { display: grid; place-items: center; width: 38px; height: 38px; flex: 0 0 auto; border-radius: 12px; background: rgb(115 133 255 / 14%); color: #aab5ff; }
+.spatial-world-extension__identity h2 { margin: 0; font-size: 16px; }
+.spatial-world-extension__identity p { margin: 4px 0 0; color: #8e99aa; font-size: 12px; }
+
+.spatial-world-extension__camera { display: flex; gap: 4px; padding: 4px; border-radius: 11px; background: rgb(255 255 255 / 5%); }
+.spatial-world-extension__camera button { min-height: 32px; padding: 0 11px; border-radius: 8px; }
+.spatial-world-extension__camera button.is-active { background: rgb(122 139 255 / 17%); color: #c8d0ff; }
+
+.spatial-world-extension__stage { position: relative; min-height: 0; background: #090d13; }
+.spatial-world-extension__canvas { width: 100%; height: 100%; min-height: 420px; }
+.spatial-world-extension__unavailable { display: grid; place-content: center; gap: 8px; width: 100%; height: 100%; min-height: 420px; text-align: center; color: #98a2b3; }
+.spatial-world-extension__unavailable strong { color: #e6e9ef; }
+
+.spatial-world-extension__controls {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  gap: 5px;
+  padding: 5px;
+  border: 1px solid rgb(255 255 255 / 9%);
+  border-radius: 12px;
+  background: rgb(13 18 27 / 84%);
+  backdrop-filter: blur(14px);
+}
+.spatial-world-extension__controls button { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 8px; }
+
+@media (max-width: 760px) {
+  .spatial-world-extension-backdrop { padding: 0; }
+  .spatial-world-extension { width: 100vw; height: 100vh; border-radius: 0; }
+  .spatial-world-extension__header { grid-template-columns: minmax(0, 1fr) auto; }
+  .spatial-world-extension__camera { grid-column: 1 / -1; grid-row: 2; justify-self: start; }
+  .spatial-world-extension__identity p { display: none; }
+}
