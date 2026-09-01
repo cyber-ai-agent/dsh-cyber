@@ -52,6 +52,24 @@ export interface WorldArtifactVersion {
   createdAt: IsoTimestamp
 }
 
+/**
+ * One published version plus the run identity that produced it.
+ *
+ * This is the join the World Trace needs to answer "产出了什么结果" without
+ * loading the registry twice or copying artifact state into the trace.
+ */
+export interface WorldArtifactRunProvenance {
+  artifactId: string
+  title: string
+  kind: WorldArtifactKind
+  version: number
+  createdAt: IsoTimestamp
+  employeeId?: string
+  sessionId?: string
+  workTurnId?: string
+  agentRunId?: string
+}
+
 /** World-scoped registry query. Unknown fields are intentionally not accepted. */
 export interface WorldArtifactFilter {
   query?: string
