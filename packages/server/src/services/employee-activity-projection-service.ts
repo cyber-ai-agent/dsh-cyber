@@ -44,6 +44,7 @@ export class EmployeeActivityProjectionService {
       if (presentation.milestone !== undefined && !projectedMilestoneEvents.has(event.id)) {
         this.#store.appendEmployeeMilestone({
           employeeId: employee.id,
+          origin: 'activity-projection',
           category: 'task',
           title: presentation.milestone.title,
           summary: presentation.summary,

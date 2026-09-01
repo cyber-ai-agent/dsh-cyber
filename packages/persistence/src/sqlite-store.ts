@@ -27,6 +27,8 @@ import {
   type EmployeeInstance,
   type EmployeeMilestone,
   type EmployeeMilestoneCategory,
+  type EmployeeMilestoneOrigin,
+  type WritableEmployeeMilestoneOrigin,
   type EmployeeMemoryIndexEntry,
   type EmployeeMemoryIndexHit,
   type EmployeeMemoryScope,
@@ -235,6 +237,8 @@ export interface AppendEmployeeMilestoneInput {
   artifactRefs?: string[]
   occurredAt?: string
   actorId?: string
+  /** Structural provenance; defaults to `authored`. */
+  origin?: WritableEmployeeMilestoneOrigin
 }
 
 export interface WriteEmployeeJournalInput {
@@ -2146,10 +2150,10 @@ export class SqliteStore {
       this.database
         .prepare(
           `INSERT INTO employee_milestones
-           (id, workspace_id, world_id, employee_id, category, title, summary,
+           (id, workspace_id, world_id, employee_id, origin, category, title, summary,
             source_event_ids_json, source_message_ids_json, artifact_refs_json,
             occurred_at, created_at)
-           VALUES (?, ?, ?, ?, 'joined', ?, ?, ?, '[]', '[]', ?, ?)`,
+           VALUES (?, ?, ?, ?, 'authored', 'joined', ?, ?, ?, '[]', '[]', ?, ?)`,
         )
         .run(
           joinedMilestoneId,
@@ -2588,6 +2592,7 @@ export class SqliteStore {
       if (skill.status === 'verified') {
         this.#insertMilestone(employee, {
           category: 'skill',
+          origin: 'authored',
           title: `掌握技能：${skill.skillId}`,
           summary: skill.reason,
           sourceEventIds: [skillEvent.id],
@@ -2634,6 +2639,7 @@ export class SqliteStore {
         artifactRefs: uniqueStrings(input.artifactRefs ?? []),
         occurredAt: input.occurredAt ?? this.#clock(),
         actorId: input.actorId ?? 'owner',
+        origin: input.origin ?? 'authored',
       }),
     )
   }
@@ -2699,10 +2705,13 @@ export class SqliteStore {
   removeLegacyConversationMilestones(employeeId: string): number {
     this.#assertWritable()
     this.#requireEmployee(employeeId)
+    // Only rows stamped as the retired per-turn generator's output are removed.
+    // Milestone titles are display copy: an owner-authored milestone that happens
+    // to reuse a legacy title is durable user data and must survive.
     return Number(this.database.prepare(
       `DELETE FROM employee_milestones
        WHERE employee_id = ?
-         AND title IN ('完成一次真实对话', '完成一次有工具证据的任务')`,
+         AND origin = 'legacy-conversation-projection'`,
     ).run(employeeId).changes)
   }
 
@@ -5856,6 +5865,7 @@ export class SqliteStore {
       artifactRefs: string[]
       occurredAt: string
       actorId: string
+      origin: WritableEmployeeMilestoneOrigin
     },
   ): EmployeeMilestone {
     const milestone: EmployeeMilestone = {
@@ -5863,6 +5873,7 @@ export class SqliteStore {
       workspaceId: employee.workspaceId,
       worldId: employee.worldId,
       employeeId: employee.id,
+      origin: input.origin,
       category: input.category,
       title: input.title.trim(),
       summary: input.summary.trim(),
@@ -5878,16 +5889,17 @@ export class SqliteStore {
     this.database
       .prepare(
         `INSERT INTO employee_milestones
-         (id, workspace_id, world_id, employee_id, category, title, summary,
+         (id, workspace_id, world_id, employee_id, origin, category, title, summary,
           source_event_ids_json, source_message_ids_json, artifact_refs_json,
           occurred_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         milestone.id,
         milestone.workspaceId,
         milestone.worldId,
         milestone.employeeId,
+        milestone.origin,
         milestone.category,
         milestone.title,
         milestone.summary,
@@ -6475,6 +6487,7 @@ function mapEmployeeMilestone(row: object): EmployeeMilestone {
     workspaceId: String(value.workspace_id),
     worldId: String(value.world_id),
     employeeId: String(value.employee_id),
+    origin: value.origin as EmployeeMilestoneOrigin,
     category: value.category as EmployeeMilestoneCategory,
     title: String(value.title),
     summary: String(value.summary),

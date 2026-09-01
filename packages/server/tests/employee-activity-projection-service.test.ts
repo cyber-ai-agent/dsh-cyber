@@ -95,11 +95,42 @@ describe('EmployeeActivityProjectionService', () => {
     expect(projected[0]).toMatchObject({
       title: '完成任务：任务：整理天气来源并写成交付说明',
       sourceMessageIds: [taskPrompt.id, taskReply.id],
+      origin: 'activity-projection',
     })
     expect(dossier.journals).toHaveLength(1)
     expect(dossier.journals[0]?.sourceEventIds).toContain(completed.id)
     expect(dossier.journals[0]?.sourceEventIds).toContain(taskCompleted.id)
     expect(dossier.journals[0]?.summary).toContain('当日参与 2 轮')
     expect(dossier.journals[0]?.highlights[0]).toContain('查询明天的天气')
+  })
+  it('keeps an owner-authored milestone whose title collides with the retired per-turn generator', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-cyber-employee-activity-legacy-'))
+    const store = await SqliteStore.open(join(directory, 'cyber.sqlite'))
+    stores.push(store)
+    for (const blueprint of BUILTIN_BLUEPRINTS) store.saveBlueprint(blueprint)
+    const workspace = store.createWorkspace({ name: '档案清理测试' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '赛博公司', templateId: 'cyber-company' })
+    const blueprint = BUILTIN_BLUEPRINTS.find((item) => item.id === 'core.butler') ?? BUILTIN_BLUEPRINTS[0]!
+    const employee = store.recruitEmployee({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      blueprintId: blueprint.id,
+      blueprintVersion: blueprint.version,
+    })
+    const recruitedEvent = store.listWorldDomainEvents(world.id)
+      .find((event) => event.type === 'employee.recruited')!
+    const authored = store.appendEmployeeMilestone({
+      employeeId: employee.id,
+      category: 'task',
+      title: '完成一次有工具证据的任务',
+      summary: '老板亲手写下的事迹，标题恰好与旧投影文案相同。',
+      sourceEventIds: [recruitedEvent.id],
+    })
+
+    new EmployeeActivityProjectionService(store).project(employee.id)
+
+    const milestones = store.listEmployeeMilestones(employee.id)
+    expect(milestones.map((item) => item.id)).toContain(authored.id)
+    expect(milestones.find((item) => item.id === authored.id)).toMatchObject({ origin: 'authored' })
   })
 })
