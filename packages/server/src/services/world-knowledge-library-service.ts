@@ -18,6 +18,7 @@ import { ServiceError } from './service-error.js'
 import { KNOWLEDGE_DOCUMENT_LIMITS, KnowledgeParseError, parseKnowledgeDocument, type ParsedKnowledgeDocument } from './knowledge-document-parser.js'
 import type { KnowledgeSearchPort, KnowledgeSearchResult } from './knowledge-search-port.js'
 import { isPathWithin, type WorldRoot, type WorldRootService } from './world-root-service.js'
+import { resolveCanonicalPathWithoutSymlinkHops, SymlinkHopError } from './canonical-path.js'
 
 export const WORLD_KNOWLEDGE_LIMITS = {
   maxFileBytes: KNOWLEDGE_DOCUMENT_LIMITS.maxSourceBytes,
@@ -444,9 +445,34 @@ async function safeExternalDirectory(value: string): Promise<string> {
   const candidate = resolve(value)
   const info = await lstat(candidate)
   if (info.isSymbolicLink() || !info.isDirectory()) throw invalid('knowledge_source_path_invalid', '源目录必须是实际目录')
+  const walked = await assertUnredirectedPath(candidate)
   const resolved = await realpath(candidate)
-  if (!isPathWithin(resolve(candidate), resolved)) throw conflict('knowledge_source_path_invalid', '源目录真实路径越界')
+  if (!isSamePath(walked, resolved)) throw conflict('knowledge_source_path_invalid', '源目录真实路径越界')
   return resolved
+}
+
+/**
+ * 源目录不允许被符号链接改写位置。不能简单地对两侧都做 realpath 再比较：
+ * 那样等式恒成立，任何中间段指向别处的符号链接都会被放行。
+ *
+ * 语义见 {@link resolveCanonicalPathWithoutSymlinkHops}：逐段解析路径，每一段的
+ * 真实路径必须仍然等于「父段真实路径 + 该段名」。外部源目录不属于任何受管目录树，
+ * 因此不传 boundary——唯一的放宽是文件系统根下的第一段。macOS 的
+ * `/var -> private/var`、`/tmp -> private/tmp` 这类平台别名让 `os.tmpdir()`
+ * 天然带一次重定向，而根级链接只有 root 能创建，且仍必须落在同一个文件系统根内。
+ * 因此「合法的临时目录被接受」与「越界符号链接被拒绝」同时成立。
+ */
+async function assertUnredirectedPath(candidate: string): Promise<string> {
+  try {
+    return await resolveCanonicalPathWithoutSymlinkHops(candidate)
+  } catch (error) {
+    if (error instanceof SymlinkHopError) throw conflict('knowledge_source_path_invalid', '源目录真实路径越界')
+    throw error
+  }
+}
+
+function isSamePath(left: string, right: string): boolean {
+  return isPathWithin(left, right) && isPathWithin(right, left)
 }
 
 async function assertNoSymlinkSegments(root: string, candidate: string): Promise<void> {

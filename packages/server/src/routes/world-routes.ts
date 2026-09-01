@@ -6,9 +6,13 @@ import { HttpError } from '../http/errors.js'
 import type { Router } from '../http/router.js'
 import { loadInstalledBlueprints } from '../installed-package-runtime.js'
 import { ConversationHubService } from '../services/conversation-hub-service.js'
+import { adoptBlueprintAvatar, initialCharacterAppearance } from '../services/recruited-character-avatar.js'
+import type { AssetService } from '../services/asset-service.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
 import type { OwnerRuntimeAccessService } from '../services/owner-runtime-access-service.js'
+import type { WorldLifecycleService } from '../services/world-lifecycle-service.js'
 import type { WorldPackageInstanceService } from '../services/world-package-instance-service.js'
+import { requireWorldAcceptingWork } from '../services/world-work-guard.js'
 import {
   availableWorldSkillIds,
   unavailableWorldSkillIds,
@@ -31,14 +35,42 @@ export interface WorldRoutesDependencies {
   worldPackages?: WorldPackageInstanceService
   ownerRuntimeAccess?: OwnerRuntimeAccessService
   skillAvailability: WorldSkillAvailabilityPort
+  lifecycle?: WorldLifecycleService
+  assets?: Pick<AssetService, 'uploadCharacterAvatar'>
 }
 
 export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDependencies): void {
-  const { store, worldAccess, worldPackages, ownerRuntimeAccess, skillAvailability } = dependencies
+  const { store, worldAccess, worldPackages, ownerRuntimeAccess, skillAvailability, lifecycle, assets } = dependencies
   const conversationHub = new ConversationHubService(store)
 
-  router.get(/^\/api\/workspaces\/([^/]+)\/worlds$/, ({ response, params }) => {
-    writeJson(response, 200, { items: store.listWorlds(params[0]!) })
+  // The default world list shows active worlds only. Archived worlds are a
+  // deliberate second view, never mixed into the main list.
+  router.get(/^\/api\/workspaces\/([^/]+)\/worlds$/, ({ response, params, url }) => {
+    const requested = url.searchParams.get('status') ?? 'active'
+    if (!['active', 'archived', 'all'].includes(requested)) {
+      throw new HttpError(422, 'invalid_world_status_filter', 'status 只能是 active、archived 或 all')
+    }
+    const scope = requested as 'active' | 'archived' | 'all'
+    const items = store.listWorlds(params[0]!, true)
+      .filter((world) => scope === 'all'
+        || (scope === 'archived' ? world.status === 'archived' : world.status === 'active'))
+    writeJson(response, 200, { items })
+  })
+
+  router.post(/^\/api\/worlds\/([^/]+)\/archive$/, ({ response, params }) => {
+    writeJson(response, 200, { world: requireLifecycle(lifecycle).archive(params[0]!) })
+  })
+
+  router.post(/^\/api\/worlds\/([^/]+)\/restore$/, ({ response, params }) => {
+    writeJson(response, 200, { world: requireLifecycle(lifecycle).restore(params[0]!) })
+  })
+
+  // Permanent deletion. The owner must re-type the world name in `confirmName`
+  // and the world must have no work in flight; both refusals are fail-closed.
+  router.delete(/^\/api\/worlds\/([^/]+)$/, async ({ request, response, params }) => {
+    const body = await readJson(request)
+    const result = await requireLifecycle(lifecycle).delete(params[0]!, requiredString(body, 'confirmName'))
+    writeJson(response, 200, { deleted: true, worldId: result.world.id, filesRemoved: result.filesRemoved })
   })
 
   router.post(/^\/api\/workspaces\/([^/]+)\/worlds$/, async ({ request, response, params }) => {
@@ -97,8 +129,7 @@ export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDep
   })
 
   router.post(/^\/api\/worlds\/([^/]+)\/recruit$/, async ({ request, response, params }) => {
-    const world = store.getWorld(params[0]!)
-    if (world === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
+    const world = requireWorldAcceptingWork(store, params[0]!)
     await worldAccess?.assertUnlocked(world.id, request)
     const body = await readJson(request)
     const blueprintId = requiredString(body, 'blueprintId')
@@ -172,15 +203,42 @@ export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDep
       if (denied !== undefined) throw new HttpError(422, 'capability_not_requested', `Capability was not requested by the blueprint: ${denied}`)
       recruitInput.capabilityGrants = capabilityGrants
     }
+    // The character's look is decided with the character, not left for each
+    // reader to guess: the built-in slot is durable from the first profile
+    // revision, and an owner-supplied image is adopted as the character's own.
+    const appearance = initialCharacterAppearance(liveBlueprint)
+    if (Object.keys(appearance).length > 0) recruitInput.appearance = appearance
     const employee = store.recruitEmployee(recruitInput)
+    if (assets !== undefined) {
+      await adoptBlueprintAvatar({
+        store,
+        assets,
+        employee,
+        blueprint: liveBlueprint,
+        packages: worldPackages === undefined ? [] : await worldPackages.listRuntimePackages(world.id),
+      }).catch(() => undefined)
+    }
     await conversationHub.ensureDirectSessions(world.id)
     const session = store.listSessions(world.id).find((item) => item.kind === 'direct'
       && store.listParticipants(item.id).some((participant) => participant.kind === 'employee' && participant.participantId === employee.id))
     const grant = runtimePermissionMode === 'danger-full-access' && session !== undefined
       ? ownerRuntimeAccess?.issueSession({ worldId: world.id, sessionId: session.id, employeeIds: [employee.id], confirmed: true })
       : undefined
-    writeJson(response, 201, { employee, ...(grant === undefined ? {} : { grant }) })
+    // The profile travels with the response so the caller paints the character
+    // it will still see after a reload, instead of a placeholder avatar that
+    // changes the first time the dossier loads.
+    const profile = store.getEmployeeProfile(employee.id)
+    writeJson(response, 201, {
+      employee,
+      ...(profile === undefined ? {} : { profile }),
+      ...(grant === undefined ? {} : { grant }),
+    })
   })
+}
+
+function requireLifecycle(lifecycle: WorldLifecycleService | undefined): WorldLifecycleService {
+  if (lifecycle === undefined) throw new HttpError(503, 'world_lifecycle_unavailable', '世界生命周期服务不可用')
+  return lifecycle
 }
 
 async function findLiveBlueprint(

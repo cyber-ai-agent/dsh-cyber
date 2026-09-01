@@ -1,9 +1,11 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 import type { AgentRuntimePort, AgentTurnRequest } from '@dsh-cyber/contracts'
+
+import { writeActiveHarnessRuntime } from '@dsh-cyber/harness-adapter'
 
 import { createCyberServer, type CyberServer } from '../src/index.js'
 
@@ -71,6 +73,43 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 describe('Harness compatibility server contracts', () => {
+  it('refuses to boot on an activated runtime the current adapter cannot launch, and names the required version', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-harness-stale-runtime-'))
+    roots.push(stateRoot)
+    const candidateRoot = join(stateRoot, 'candidate')
+    await mkdir(candidateRoot, { recursive: true })
+    await writeFile(join(candidateRoot, 'package.json'), '{"private":true}\n', 'utf8')
+    for (const packageName of [
+      '@deepseek-ai/dsh',
+      '@deepseek-ai/dsh-sdk-client',
+      '@deepseek-ai/dsh-sdk-jsonrpc-server',
+    ]) {
+      const packageDirectory = join(candidateRoot, 'node_modules', ...packageName.split('/'))
+      await mkdir(join(packageDirectory, 'lib'), { recursive: true })
+      await writeFile(
+        join(packageDirectory, 'package.json'),
+        `${JSON.stringify({ name: packageName, version: '0.1.1-rc.1', main: 'lib/bin.js' })}\n`,
+        'utf8',
+      )
+      await writeFile(join(packageDirectory, 'lib', 'bin.js'), '', 'utf8')
+    }
+    await writeActiveHarnessRuntime(join(stateRoot, 'runtime'), {
+      schemaVersion: 1,
+      transactionId: 'stale-runtime-transaction',
+      candidateRoot,
+      version: '0.1.1-rc.1',
+      activatedAt: new Date().toISOString(),
+    })
+
+    await expect(createCyberServer({
+      stateRoot,
+      workspacePath: stateRoot,
+      port: 0,
+      runtime: new RecordingRuntime(),
+      bootstrapDefaultWorld: true,
+    })).rejects.toThrow(/0\.1\.2-alpha\.3/)
+  })
+
   it('keeps a verified image attachment in direct and queued turns without sending raw bytes to the runtime', async () => {
     const { origin, server, runtime, world, employee } = await start()
     const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='

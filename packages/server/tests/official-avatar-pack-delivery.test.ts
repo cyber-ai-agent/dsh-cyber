@@ -1,4 +1,5 @@
 import { resolve } from 'node:path'
+import type { Readable } from 'node:stream'
 
 import { describe, expect, it, vi } from 'vitest'
 
@@ -51,8 +52,10 @@ describe('official avatar base pack delivery', () => {
       OFFICIAL_BASE_PATH,
     )
     expect(asset.contentType).toBe('model/gltf-binary')
-    expect(asset.body.byteLength).toBeGreaterThan(6 * 1024 * 1024)
-    expect(() => assertAvatarBaseVrmEnvelope(asset.body, 'official delivery fixture')).not.toThrow()
+    expect(asset.byteLength).toBeGreaterThan(6 * 1024 * 1024)
+    const streamed = await collect(asset.body)
+    expect(streamed.byteLength).toBe(asset.byteLength)
+    expect(() => assertAvatarBaseVrmEnvelope(streamed, 'official delivery fixture')).not.toThrow()
   })
 
   it('does not expose an arbitrary Marketplace asset through the built-in allow-list', async () => {
@@ -65,3 +68,9 @@ describe('official avatar base pack delivery', () => {
     await expect(service.list('world-clean')).rejects.toThrow(/official verification/u)
   })
 })
+
+async function collect(body: Readable): Promise<Buffer> {
+  const chunks: Buffer[] = []
+  for await (const chunk of body) chunks.push(chunk as Buffer)
+  return Buffer.concat(chunks)
+}

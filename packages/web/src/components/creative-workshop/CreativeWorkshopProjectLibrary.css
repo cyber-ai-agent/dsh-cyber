@@ -607,3 +607,79 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Project archive views and the project/world decoupling notices. */
+.creative-workshop-project-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.creative-workshop-project-tabs > button {
+  flex: 1;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border-subtle, rgba(255,255,255,.08));
+  border-radius: var(--radius-control, 8px);
+  background: transparent;
+  color: var(--world-muted, #9ca3b2);
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.creative-workshop-project-tabs > button.is-active {
+  color: var(--world-text, #eef1f6);
+  background: color-mix(in srgb, var(--accent, #6c8cff) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent, #6c8cff) 45%, transparent);
+}
+
+.creative-workshop-project-empty {
+  margin: 8px 2px;
+  color: var(--world-muted, #9ca3b2);
+  font-size: 12px;
+}
+
+.creative-workshop-project-badge {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle, rgba(255,255,255,.12));
+  font-size: 11px;
+  font-style: normal;
+}
+
+.creative-workshop-project-notice {
+  margin: 0 0 14px;
+  padding: 9px 12px;
+  border-radius: var(--radius-control, 8px);
+  background: color-mix(in srgb, var(--accent, #6c8cff) 12%, transparent);
+  font-size: 12px;
+}
+
+.creative-workshop-project-detached {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 11px 13px;
+  border: 1px solid color-mix(in srgb, var(--danger, #f2606a) 45%, transparent);
+  border-radius: var(--radius-control, 8px);
+  background: color-mix(in srgb, var(--danger, #f2606a) 10%, transparent);
+}
+
+.creative-workshop-project-detached strong { font-size: 13px; }
+.creative-workshop-project-detached p { margin: 3px 0 0; font-size: 12px; color: var(--world-muted, #9ca3b2); }
+
+.creative-workshop-project-delete-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 16px;
+  padding: 11px 13px;
+  border: 1px solid color-mix(in srgb, var(--danger, #f2606a) 45%, transparent);
+  border-radius: var(--radius-control, 8px);
+}
+
+.creative-workshop-project-delete-confirm p { margin: 0; font-size: 13px; }
+.creative-workshop-project-delete-confirm > div { display: flex; flex: none; gap: 8px; }
