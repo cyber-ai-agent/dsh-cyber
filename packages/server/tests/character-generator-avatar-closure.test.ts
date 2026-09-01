@@ -20,6 +20,12 @@ const roots: string[] = []
 const UPLOADED_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 
+// The fourth built-in avatar, chosen precisely because it is not the default
+// first slot: a stage that re-derives the pick instead of carrying it answers
+// 0, and that would pass unnoticed against the default.
+const BUILTIN_AVATAR_ID = 'official-tavern-storyweaver'
+const BUILTIN_AVATAR_INDEX = 3
+
 afterEach(async () => {
   for (const server of servers.splice(0)) await server.close()
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
@@ -31,7 +37,7 @@ describe('Character Generator 2D avatar closure', () => {
     const workspace = server.store.listWorkspaces()[0]!
     const world = server.store.listWorlds(workspace.id)[0]!
 
-    const blueprint = await publishInstallAndReadBlueprint(server, workspace.id, world.id, {
+    const { published, blueprint } = await publishInstallAndReadBlueprint(server, workspace.id, world.id, {
       displayName: '上传头像角色',
       avatar: {
         kind: 'upload',
@@ -40,6 +46,12 @@ describe('Character Generator 2D avatar closure', () => {
         dataBase64: UPLOADED_PNG_BASE64,
       },
     })
+
+    // An owner upload is the character's own image, so the blueprint has to
+    // name it. The stored extension is derived from the bytes the server
+    // sniffed, never from the declared media type or the uploaded file name.
+    expect(published.avatarPreviewPath, `published blueprint was ${JSON.stringify(published)}`).toBe('preview.png')
+    expect(blueprint.avatarPreviewPath, 'install dropped the owner image').toBe('preview.png')
 
     const recruited = await postJson(server.origin, `/api/worlds/${world.id}/recruit`, {
       blueprintId: blueprint.id,
@@ -77,14 +89,22 @@ describe('Character Generator 2D avatar closure', () => {
     const workspace = server.store.listWorkspaces()[0]!
     const world = server.store.listWorlds(workspace.id)[0]!
 
-    const blueprint = await publishInstallAndReadBlueprint(server, workspace.id, world.id, {
+    // A deliberately non-default slot: were the index re-derived at any later
+    // hop it would fall back to 0, which the default pick would have hidden.
+    const { published, blueprint } = await publishInstallAndReadBlueprint(server, workspace.id, world.id, {
       displayName: '默认头像角色',
+      avatar: { kind: 'builtin', id: BUILTIN_AVATAR_ID },
     })
 
     // The choice is made once, when the talent package is compiled.
+    expect(published.fallbackAvatarIndex, `published blueprint was ${JSON.stringify(published)}`).toBe(BUILTIN_AVATAR_INDEX)
     expect(Number.isInteger(blueprint.fallbackAvatarIndex), `blueprint was ${JSON.stringify(blueprint)}`).toBe(true)
-    expect(blueprint.fallbackAvatarIndex).toBeGreaterThanOrEqual(0)
-    expect(blueprint.fallbackAvatarIndex).toBeLessThanOrEqual(7)
+    expect(blueprint.fallbackAvatarIndex, 'install re-rolled the built-in slot').toBe(BUILTIN_AVATAR_INDEX)
+
+    // A built-in pick stays a marketplace preview: it must not be promoted
+    // into an owner image the recruit step would copy onto the character.
+    expect(published.avatarPreviewPath).toBeUndefined()
+    expect(blueprint.avatarPreviewPath).toBeUndefined()
 
     const recruited = await postJson(server.origin, `/api/worlds/${world.id}/recruit`, {
       blueprintId: blueprint.id,
@@ -117,15 +137,27 @@ describe('Character Generator 2D avatar closure', () => {
     expect(second.status).toBe(201)
     expect(server.store.getEmployeeProfile((second.body.employee as AnyRecord).id as string)!.appearance.avatarIndex)
       .toBe(blueprint.fallbackAvatarIndex)
+
+    // And re-reading the catalog reports the same slot rather than deriving a
+    // fresh one per query.
+    const reread = await getJson(server.origin, `/api/catalog/blueprints?worldId=${encodeURIComponent(world.id)}`)
+    expect(reread.status).toBe(200)
+    expect((reread.body.items as AnyRecord[]).find((item) => item.id === blueprint.id)!.fallbackAvatarIndex)
+      .toBe(BUILTIN_AVATAR_INDEX)
   })
 })
 
+/**
+ * Runs Publish -> Install -> catalog read and hands back the blueprint as it
+ * looked at each stage, so a test can prove the avatar decision survives the
+ * hops rather than only checking where it ends up.
+ */
 async function publishInstallAndReadBlueprint(
   server: Awaited<ReturnType<typeof startServer>>,
   workspaceId: string,
   worldId: string,
   input: { displayName: string; avatar?: AnyRecord },
-): Promise<AnyRecord> {
+): Promise<{ published: AnyRecord; blueprint: AnyRecord }> {
   const source = { kind: 'paste' as const, text: `${input.displayName} 是一名负责端到端交付的工程角色。` }
   const analyzed = await postJson(server.origin, `/api/workspaces/${workspaceId}/character-generator/analyze`, {
     source,
@@ -141,6 +173,7 @@ async function publishInstallAndReadBlueprint(
   })
   expect(published.status, JSON.stringify(published.body)).toBe(201)
   const packageId = (published.body.item as AnyRecord).manifest.id as string
+  const publishedBlueprint = published.body.blueprint as AnyRecord
 
   // Generated talent is workspace-scoped on disk; ask the service for the root
   // rather than restating the layout here.
@@ -162,7 +195,7 @@ async function publishInstallAndReadBlueprint(
   expect(catalog.status).toBe(200)
   const blueprint = (catalog.body.items as AnyRecord[]).find((item) => item.id === packageId)
   expect(blueprint, `installed blueprint ${packageId} is not in the world catalog`).toBeDefined()
-  return blueprint!
+  return { published: publishedBlueprint, blueprint: blueprint! }
 }
 
 async function startServer() {
