@@ -1,11 +1,12 @@
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
   characterGeneratorMarketplaceRoot,
+  characterGeneratorWorkspaceContainer,
   legacyCharacterGeneratorMarketplaceRoot,
   migrateLegacyCharacterGeneratorMarketplace,
   workspaceDirectorySegment,
@@ -34,9 +35,12 @@ describe('workspaceDirectorySegment', () => {
   })
 
   it('keeps the generated root inside its container', () => {
-    const root = characterGeneratorMarketplaceRoot('/state', '../../escape')
-    expect(root.startsWith('/state/workshop/character-generator/workspaces/')).toBe(true)
-    expect(root).not.toContain('..')
+    const stateRoot = resolve('state')
+    const container = characterGeneratorWorkspaceContainer(stateRoot)
+    const root = characterGeneratorMarketplaceRoot(stateRoot, '../../escape')
+    const relativeRoot = relative(container, root)
+    expect(isAbsolute(relativeRoot)).toBe(false)
+    expect(relativeRoot.split(sep)).not.toContain('..')
   })
 })
 
