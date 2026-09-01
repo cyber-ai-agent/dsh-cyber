@@ -7,6 +7,9 @@ import type { CyberPackageManifest, EmployeeBlueprint, PackagePermissionPreview 
 import type {
   WorkshopCreateInput,
   WorkshopProject,
+  WorkshopProjectDeletion,
+  WorkshopProjectStatus,
+  WorkshopProjectView,
   WorkshopRoleDefinition,
 } from '@dsh-cyber/contracts/creative-platform'
 import type { PackageManager, ReversiblePackageInstallation } from '@dsh-cyber/package-runtime'
@@ -48,17 +51,19 @@ export class CreativeWorkshopService {
     this.#worldPackages = new WorldPackageInstanceService(store, this.#worldRoots)
   }
 
-  async list(workspaceId: string): Promise<WorkshopProject[]> {
+  async list(workspaceId: string, status: WorkshopProjectStatus | 'all' = 'all'): Promise<WorkshopProjectView[]> {
     if (this.#store.getWorkspace(workspaceId) === undefined) throw new ServiceError('not-found', 'workspace_not_found', 'Workspace not found')
     await mkdir(this.#projectRoot, { recursive: true, mode: 0o700 })
-    const projects: WorkshopProject[] = []
+    const projects: WorkshopProjectView[] = []
     for (const name of await readdir(this.#projectRoot)) {
       const directory = safeChild(this.#projectRoot, name)
       try {
         const info = await lstat(directory)
         if (info.isSymbolicLink() || !info.isDirectory()) continue
         const project = parseStoredProject(JSON.parse(await readFile(join(directory, 'project.json'), 'utf8')))
-        if (project.workspaceId === workspaceId) projects.push(project)
+        if (project.workspaceId !== workspaceId) continue
+        if (status !== 'all' && project.status !== status) continue
+        projects.push(this.#view(project))
       } catch {
         // A broken local project does not prevent the rest of the workshop from loading.
       }
@@ -66,7 +71,7 @@ export class CreativeWorkshopService {
     return projects.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id))
   }
 
-  async create(workspaceId: string, input: WorkshopCreateInput): Promise<WorkshopProject> {
+  async create(workspaceId: string, input: WorkshopCreateInput): Promise<WorkshopProjectView> {
     if (this.#store.getWorkspace(workspaceId) === undefined) throw new ServiceError('not-found', 'workspace_not_found', 'Workspace not found')
     const normalized = normalizeCreateInput(input)
     for (const modelProfileId of [normalized.worldModelProfileId, ...normalized.roles.map((role) => role.modelProfileId)]) {
@@ -156,6 +161,7 @@ export class CreativeWorkshopService {
 
       const project: WorkshopProject = {
         schemaVersion: PROJECT_VERSION,
+        status: 'active',
         id: projectId,
         workspaceId,
         worldId: world.id,
@@ -170,7 +176,7 @@ export class CreativeWorkshopService {
         updatedAt: now,
       }
       await atomicWrite(join(projectDirectory, 'project.json'), `${JSON.stringify(project, null, 2)}\n`)
-      return project
+      return this.#view(project)
     } catch (error) {
       const compensationFailures: unknown[] = []
       if (createdWorldId !== undefined) {
@@ -211,11 +217,70 @@ export class CreativeWorkshopService {
     }
   }
 
-  async readProject(workspaceId: string, projectId: string): Promise<WorkshopProject> {
+  async readProject(workspaceId: string, projectId: string): Promise<WorkshopProjectView> {
+    return this.#view(await this.#readStored(workspaceId, projectId))
+  }
+
+  /** Moves a project into the archive. The linked world is left untouched. */
+  async archive(workspaceId: string, projectId: string): Promise<WorkshopProjectView> {
+    const project = await this.#readStored(workspaceId, projectId)
+    if (project.status === 'archived') return this.#view(project)
+    const now = new Date().toISOString()
+    return this.#view(await this.#writeProject({ ...project, status: 'archived', archivedAt: now, updatedAt: now }))
+  }
+
+  /** Restores an archived project. A detached project restores just the same. */
+  async restore(workspaceId: string, projectId: string): Promise<WorkshopProjectView> {
+    const project = await this.#readStored(workspaceId, projectId)
+    if (project.status === 'active') return this.#view(project)
+    const { archivedAt: _cleared, ...rest } = project
+    return this.#view(await this.#writeProject({ ...rest, status: 'active', updatedAt: new Date().toISOString() }))
+  }
+
+  /**
+   * Permanently removes the local project directory. It deliberately does not
+   * cascade into the world, its characters or its installed packages: project
+   * and world lifecycles are independent, so the world survives the deletion.
+   */
+  async delete(workspaceId: string, projectId: string): Promise<WorkshopProjectDeletion> {
+    const project = await this.#readStored(workspaceId, projectId)
+    await rm(safeChild(this.#projectRoot, projectId), { recursive: true, force: true })
+    return { projectId: project.id, worldId: project.worldId, worldRetained: true }
+  }
+
+  async #readStored(workspaceId: string, projectId: string): Promise<WorkshopProject> {
     const path = join(safeChild(this.#projectRoot, projectId), 'project.json')
-    const project = parseStoredProject(JSON.parse(await readFile(path, 'utf8')))
+    let raw: string
+    try {
+      raw = await readFile(path, 'utf8')
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new ServiceError('not-found', 'workshop_project_not_found', '创意工坊项目不存在')
+      }
+      throw cause
+    }
+    const project = parseStoredProject(JSON.parse(raw))
     if (project.workspaceId !== workspaceId) throw new ServiceError('forbidden', 'workshop_project_forbidden', '项目不属于当前本地实例')
     return project
+  }
+
+  async #writeProject(project: WorkshopProject): Promise<WorkshopProject> {
+    await atomicWrite(join(safeChild(this.#projectRoot, project.id), 'project.json'), `${JSON.stringify(project, null, 2)}\n`)
+    return project
+  }
+
+  /**
+   * Resolves the world link at read time. A world id that no longer resolves is
+   * a normal detached state, so a failed world lookup never fails the read.
+   */
+  #view(project: WorkshopProject): WorkshopProjectView {
+    let worldLinked = false
+    try {
+      worldLinked = this.#store.getWorld(project.worldId) !== undefined
+    } catch {
+      worldLinked = false
+    }
+    return { ...project, worldLinked }
   }
 
   async #compileRoles(
@@ -324,9 +389,19 @@ type LegacyWorkshopRoleDefinition = Omit<WorkshopRoleDefinition, 'requestedSkill
   skillIds?: string[]
 }
 
+/**
+ * Projects are on-disk JSON, so a file written by an older build must still
+ * load. Lifecycle fields are migrated forward on read: a project with no
+ * recorded status is active, and a missing updatedAt falls back to createdAt.
+ * The normalized shape is persisted the next time the project is written.
+ */
 function parseStoredProject(value: unknown): WorkshopProject {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid workshop project')
-  const project = value as Omit<WorkshopProject, 'roles'> & { roles?: LegacyWorkshopRoleDefinition[] }
+  const project = value as Omit<WorkshopProject, 'roles' | 'status' | 'archivedAt'> & {
+    roles?: LegacyWorkshopRoleDefinition[]
+    status?: unknown
+    archivedAt?: unknown
+  }
   if (project.schemaVersion !== 1 || !project.id || !project.workspaceId || !project.worldId || !Array.isArray(project.roles)) {
     throw new Error('Invalid workshop project')
   }
@@ -339,7 +414,19 @@ function parseStoredProject(value: unknown): WorkshopProject {
         : Array.isArray(legacySkillIds) ? [...legacySkillIds] : [],
     } satisfies WorkshopRoleDefinition
   })
-  return { ...project, roles } as WorkshopProject
+  const { status: storedStatus, archivedAt: storedArchivedAt, ...rest } = project
+  const status: WorkshopProjectStatus = storedStatus === 'archived' ? 'archived' : 'active'
+  const createdAt = typeof rest.createdAt === 'string' ? rest.createdAt : new Date(0).toISOString()
+  const updatedAt = typeof rest.updatedAt === 'string' ? rest.updatedAt : createdAt
+  const archivedAt = status === 'archived' && typeof storedArchivedAt === 'string' ? storedArchivedAt : undefined
+  return {
+    ...rest,
+    roles,
+    status,
+    createdAt,
+    updatedAt,
+    ...(archivedAt === undefined ? {} : { archivedAt }),
+  } as WorkshopProject
 }
 
 function text(value: unknown, label: string, max: number): string {
