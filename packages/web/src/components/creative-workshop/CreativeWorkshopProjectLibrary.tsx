@@ -1,9 +1,10 @@
 import { Archive, ArrowCounterClockwise, ArrowRight, Copy, Cube, Plus, ShieldCheck, SlidersHorizontal, Sparkle, Trash, UsersThree, WarningCircle } from '@phosphor-icons/react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { WorldTemplateManifest } from '@dsh-cyber/contracts'
 import type { CharacterSkillDescriptor, WorkshopProjectStatus, WorkshopProjectView } from '@dsh-cyber/contracts/creative-platform'
 
 import { useI18n } from '../../i18n/runtime.js'
+import { useDialogFocusTrap } from '../useDialogFocusTrap.js'
 import './CreativeWorkshopProjectLibrary.css'
 
 interface CreativeWorkshopProjectLibraryProps {
@@ -258,21 +259,10 @@ export function CreativeWorkshopProjectLibrary({
             )}
 
             {pendingDeleteId === selectedProject.id ? (
-              <div className="creative-workshop-project-delete-confirm" role="alertdialog" aria-label={t('workshop.library.delete', '永久删除')}>
-                <p>{t('workshop.library.deleteConfirm', '永久删除这个项目？关联的世界仍然存在。')}</p>
-                <div>
-                  <button type="button" className="secondary-button" onClick={() => setPendingDeleteId(undefined)}>
-                    {t('workshop.cancel', '取消')}
-                  </button>
-                  <button
-                    type="button"
-                    className="danger-button"
-                    onClick={() => { setPendingDeleteId(undefined); onDelete(selectedProject) }}
-                  >
-                    {t('workshop.library.deleteConfirmAction', '确认永久删除')}
-                  </button>
-                </div>
-              </div>
+              <WorkshopProjectDeleteConfirm
+                onCancel={() => setPendingDeleteId(undefined)}
+                onConfirm={() => { setPendingDeleteId(undefined); onDelete(selectedProject) }}
+              />
             ) : null}
 
             <div className="creative-workshop-project-facts">
@@ -320,6 +310,51 @@ export function CreativeWorkshopProjectLibrary({
           </>
         )}
       </main>
+    </div>
+  )
+}
+
+interface WorkshopProjectDeleteConfirmProps {
+  onCancel(): void
+  onConfirm(): void
+}
+
+/**
+ * Permanent-delete gate for a workshop project.
+ *
+ * It asks exactly what it always asked — nothing is typed, the two buttons are
+ * the whole decision. What it adds is the focus contract every other dialog in
+ * this app already honours via `useDialogFocusTrap`: focus lands inside on
+ * open, Escape cancels, Tab cannot walk out into the library behind it, and the
+ * trigger gets focus back on close. It mounts only while the confirmation is
+ * open so the hook's setup/teardown lines up with the dialog's own lifetime,
+ * and it carries `aria-modal` so the hook's topmost check ranks it above the
+ * creative workshop dialog it is nested in.
+ */
+function WorkshopProjectDeleteConfirm({ onCancel, onConfirm }: WorkshopProjectDeleteConfirmProps) {
+  const { t } = useI18n()
+  const dialogRef = useRef<HTMLDivElement>(null)
+
+  useDialogFocusTrap(dialogRef, onCancel)
+
+  return (
+    <div
+      ref={dialogRef}
+      className="creative-workshop-project-delete-confirm"
+      role="alertdialog"
+      aria-modal="true"
+      aria-label={t('workshop.library.delete', '永久删除')}
+    >
+      <p>{t('workshop.library.deleteConfirm', '永久删除这个项目？关联的世界仍然存在。')}</p>
+      <div>
+        {/* Cancel takes the opening focus: the destructive button is never one stray Enter away. */}
+        <button data-dialog-initial-focus type="button" className="secondary-button" onClick={onCancel}>
+          {t('workshop.cancel', '取消')}
+        </button>
+        <button type="button" className="danger-button" onClick={onConfirm}>
+          {t('workshop.library.deleteConfirmAction', '确认永久删除')}
+        </button>
+      </div>
     </div>
   )
 }
