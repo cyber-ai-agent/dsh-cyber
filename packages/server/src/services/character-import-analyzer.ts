@@ -19,6 +19,17 @@ import { ServiceError } from './service-error.js'
 
 export const CHARACTER_SOURCE_MAX_BYTES = 128 * 1024
 export const CHARACTER_PERSONA_MAX_CHARACTERS = 2_000
+/**
+ * Host-owned Character Generator safe capability catalog.
+ *
+ * These three ids are the entire V1 allowlist. They are declared by the host,
+ * never discovered from a package and never invented by a model: an id outside
+ * this set is filtered out of an analyzed draft and rejected outright at
+ * publish. Extending the set is a deliberate host change that also has to move
+ * the `CharacterGeneratorCapabilityId` union in @dsh-cyber/contracts, the
+ * display catalog in character-generator-routes.ts and the compiler gate in
+ * employee-blueprint-package-compiler.ts.
+ */
 export const CHARACTER_GENERATOR_CAPABILITIES: readonly CharacterGeneratorCapabilityId[] = [
   'workspace:read',
   'knowledge:read',
@@ -204,11 +215,31 @@ export function normalizeCharacterBlueprintDraft(
   const role = requiredText(input.role, MAX_ROLE, 'role')
   const summary = requiredText(input.summary, MAX_SUMMARY, 'summary')
   const persona = requiredText(input.persona, CHARACTER_PERSONA_MAX_CHARACTERS, 'persona')
-  if (context.originalText !== undefined && sourceEchoesPersona(persona, context.originalText)) {
+  const originalText = context.originalText
+  if (originalText !== undefined && echoesImportSource(persona, originalText)) {
     throw new ServiceError('invalid', 'character_draft_source_echo', '角色 Persona 不能包含原始资料全文。')
   }
-  const background = text(input.background, MAX_BACKGROUND) ?? ''
-  const personalityTraits = textArray(input.personalityTraits, MAX_TRAITS, MAX_TRAIT)
+  // background and personalityTraits belong to EmployeeProfile, which the
+  // runtime composes into the live persona. They are reviewed content, so the
+  // same source-echo guard applies: publish rejects an echo, analyze drops it.
+  const proposedBackground = text(input.background, MAX_BACKGROUND) ?? ''
+  const backgroundEchoesSource = originalText !== undefined
+    && proposedBackground !== ''
+    && echoesImportSource(proposedBackground, originalText)
+  if (backgroundEchoesSource && context.rejectUnknown === true) {
+    throw new ServiceError('invalid', 'character_draft_source_echo', '角色背景不能直接复制原始资料段落。')
+  }
+  const background = backgroundEchoesSource ? '' : proposedBackground
+  const proposedTraits = textArray(input.personalityTraits, MAX_TRAITS, MAX_TRAIT)
+  const echoingTrait = originalText === undefined
+    ? undefined
+    : proposedTraits.find((trait) => echoesImportSource(trait, originalText))
+  if (echoingTrait !== undefined && context.rejectUnknown === true) {
+    throw new ServiceError('invalid', 'character_draft_source_echo', '角色性格特征不能直接复制原始资料段落。')
+  }
+  const personalityTraits = originalText === undefined
+    ? proposedTraits
+    : proposedTraits.filter((trait) => !echoesImportSource(trait, originalText))
   const requestedSkills = stringArray(input.requestedSkillIds)
   const unknownSkill = requestedSkills.find((skillId) => !context.allowedSkillIds.has(skillId))
   if (unknownSkill !== undefined && context.rejectUnknown === true) throw new ServiceError('invalid', 'character_draft_skill_unknown', `角色草稿包含未知 Skill：${unknownSkill}`)
@@ -287,11 +318,13 @@ function normalizeDraft(
   const role = text(first(value.role, value.identity, value.job), MAX_ROLE) ?? '协作角色'
   const summary = text(first(value.summary, value.description, value.responsibilities), MAX_SUMMARY) ?? `负责${role}相关工作。`
   const proposedPersona = text(first(value.persona, value.communicationStyle, value.principles), CHARACTER_PERSONA_MAX_CHARACTERS) ?? `你是${displayName}，以事实和清晰边界推进工作。`
-  const persona = sourceEchoesPersona(proposedPersona, source.text)
+  const persona = echoesImportSource(proposedPersona, source.text)
     ? `你是${displayName}，以事实和清晰边界推进工作。`
     : proposedPersona
   const personalityTraits = textArray(firstArray(value.personalityTraits, value.traits), MAX_TRAITS, MAX_TRAIT)
-  const background = text(first(value.background, value.history, value.origin), MAX_BACKGROUND) ?? ''
+    .filter((trait) => !echoesImportSource(trait, source.text))
+  const proposedBackground = text(first(value.background, value.history, value.origin), MAX_BACKGROUND) ?? ''
+  const background = echoesImportSource(proposedBackground, source.text) ? '' : proposedBackground
   const requestedSkillIds = stringArray(value.requestedSkillIds, value.requestedSkills, value.skills)
     .filter((skillId) => allowedSkills.has(skillId))
     .slice(0, 32)
@@ -318,11 +351,41 @@ function normalizeDraft(
   }
 }
 
-function sourceEchoesPersona(persona: string, source: string): boolean {
-  const normalizedSource = source.trim()
-  if (normalizedSource.length === 0) return false
-  if (persona === normalizedSource || normalizedSource.startsWith(persona) || persona.startsWith(normalizedSource)) return true
-  return persona.length >= 128 && normalizedSource.includes(persona.slice(0, 128))
+/**
+ * Longest verbatim run a reviewed field may share with the untrusted import
+ * source. A run of `WINDOW + STRIDE - 1` normalized characters is guaranteed to
+ * be caught, which is a slab of source rather than an incidental phrase.
+ */
+const SOURCE_ECHO_WINDOW = 48
+const SOURCE_ECHO_STRIDE = 8
+
+function normalizeForSourceEcho(value: string): string {
+  return value.normalize('NFKC').toLowerCase().replace(/\s+/gu, ' ').trim()
+}
+
+/**
+ * True when `segment` reproduces the import source rather than summarizing it.
+ *
+ * The old check only compared prefixes, so a model could return a safe-looking
+ * opening and paste a slab from the middle of the source behind it. Whitespace
+ * and case are normalized first so re-indented or re-cased code blocks and
+ * Markdown paragraphs cannot slip past by reformatting.
+ */
+export function echoesImportSource(segment: string, source: string): boolean {
+  const candidate = normalizeForSourceEcho(segment)
+  const original = normalizeForSourceEcho(source)
+  if (candidate.length === 0 || original.length === 0) return false
+  // The whole source inside one field is an echo at any length.
+  if (candidate === original || candidate.includes(original)) return true
+  if (candidate.length < SOURCE_ECHO_WINDOW) return original.startsWith(candidate)
+  const shingles = new Set<string>()
+  for (let index = 0; index + SOURCE_ECHO_WINDOW <= original.length; index += SOURCE_ECHO_STRIDE) {
+    shingles.add(original.slice(index, index + SOURCE_ECHO_WINDOW))
+  }
+  for (let index = 0; index + SOURCE_ECHO_WINDOW <= candidate.length; index += 1) {
+    if (shingles.has(candidate.slice(index, index + SOURCE_ECHO_WINDOW))) return true
+  }
+  return false
 }
 
 function normalizeEmbodiment(value: unknown): EmbodimentProfile | undefined {

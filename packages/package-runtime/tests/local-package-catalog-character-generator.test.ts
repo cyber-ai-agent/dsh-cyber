@@ -45,6 +45,59 @@ describe('LocalPackageCatalog Character Generator roots', () => {
     expect(item?.manifest.publisher).toBe('Local Character Generator')
   })
 
+  it('shows a workspace-scoped package only to the workspace that owns it', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-character-generator-catalog-scoped-'))
+    roots.push(root)
+    const container = join(root, 'generated', 'workspaces')
+    const alphaRoot = join(container, 'alpha', 'marketplace')
+    const betaRoot = join(container, 'beta', 'marketplace')
+    await writeTalentPackage(alphaRoot, { packageId: 'workshop.alpha-role', withCertification: false })
+    await writeTalentPackage(betaRoot, { packageId: 'workshop.beta-role', withCertification: false })
+    const catalog = new LocalPackageCatalog(root, {
+      workspaceRoots: {
+        container,
+        resolve: (workspaceId) => [join(container, workspaceId, 'marketplace')],
+      },
+    })
+
+    const alpha = await catalog.list({ market: 'talent', workspaceId: 'alpha' })
+    expect(alpha.map((item) => item.manifest.id)).toEqual(['workshop.alpha-role'])
+    const beta = await catalog.list({ market: 'talent', workspaceId: 'beta' })
+    expect(beta.map((item) => item.manifest.id)).toEqual(['workshop.beta-role'])
+    // A query with no workspace fails closed rather than showing everything.
+    await expect(catalog.list({ market: 'talent' })).resolves.toEqual([])
+
+    await expect(catalog.find('workshop.alpha-role', undefined, { workspaceId: 'beta' })).resolves.toBeUndefined()
+    await expect(catalog.find('workshop.alpha-role', undefined, { workspaceId: 'alpha' })).resolves.toBeDefined()
+
+    // Reading a declared file is scoped too, so holding an item from another
+    // workspace is not enough to read its bytes.
+    const alphaItem = alpha[0]!
+    await expect(catalog.readDeclaredFile(alphaItem, 'blueprint.json', { workspaceId: 'alpha' })).resolves.toBeInstanceOf(Buffer)
+    await expect(catalog.readDeclaredFile(alphaItem, 'blueprint.json', { workspaceId: 'beta' })).rejects.toThrow('escaped the catalog root')
+  })
+
+  it('refuses an install source directory owned by another workspace', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-character-generator-catalog-install-'))
+    roots.push(root)
+    const container = join(root, 'generated', 'workspaces')
+    const alphaPackage = await writeTalentPackage(join(container, 'alpha', 'marketplace'), { packageId: 'workshop.alpha-role', withCertification: false })
+    const catalog = new LocalPackageCatalog(root, {
+      workspaceRoots: {
+        container,
+        resolve: (workspaceId) => [join(container, workspaceId, 'marketplace')],
+      },
+    })
+
+    expect(() => catalog.assertInstallSource('alpha', alphaPackage)).not.toThrow()
+    expect(() => catalog.assertInstallSource('beta', alphaPackage)).toThrow('another workspace')
+    expect(() => catalog.assertInstallSource(undefined, alphaPackage)).toThrow('another workspace')
+    // Traversal back out of the caller's own root is still someone else's data.
+    expect(() => catalog.assertInstallSource('beta', join(container, 'beta', 'marketplace', '..', '..', 'alpha', 'marketplace', 'talent', 'workshop.alpha-role'))).toThrow('another workspace')
+    // Directories outside the workspace container keep their existing behaviour.
+    expect(() => catalog.assertInstallSource('beta', join(root, 'talent', 'anything'))).not.toThrow()
+  })
+
   it('omits a package after declared content is tampered and rejects reads outside the package root', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-character-generator-catalog-integrity-'))
     roots.push(root)

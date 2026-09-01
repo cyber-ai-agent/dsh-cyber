@@ -8,8 +8,12 @@
   min-height: 0;
   width: min(1080px, 100%);
   margin: 0 auto;
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  /* The catalog banner and the back link are both conditional, so a fixed
+     grid track list would hand the scrolling body — and the back link — the
+     wrong row whenever one of them is absent. A flex column sizes by role
+     rather than by child index. */
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   color: var(--dialog-text, var(--text-strong));
   background: var(--dialog-bg, var(--surface-0));
@@ -17,6 +21,7 @@
 }
 
 .character-generator__steps {
+  flex: 0 0 auto;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
@@ -66,6 +71,7 @@
 }
 
 .character-generator-catalog-status {
+  flex: 0 0 auto;
   min-height: 42px;
   display: flex;
   align-items: center;
@@ -91,6 +97,7 @@
 }
 
 .character-generator__body {
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   padding: 24px;
@@ -238,6 +245,10 @@
 }
 
 .character-generator-file-picker {
+  /* Contains the visually hidden input below; without it the input is
+     positioned against the whole generator and focusing it by keyboard yanks
+     the step body back to the top. */
+  position: relative;
   min-height: 110px;
   display: grid;
   place-items: center;
@@ -252,10 +263,17 @@
   text-align: center;
 }
 
-.character-generator-file-picker:hover,
+.character-generator-file-picker:hover {
+  border-color: var(--character-accent);
+  color: var(--dialog-text, var(--text-strong));
+}
+
+/* The input itself is clipped to 1px, so the label carries its focus ring. */
 .character-generator-file-picker:focus-within {
   border-color: var(--character-accent);
   color: var(--dialog-text, var(--text-strong));
+  outline: 2px solid color-mix(in srgb, var(--character-accent) 65%, transparent);
+  outline-offset: 2px;
 }
 
 .character-generator-file-picker input {
@@ -474,6 +492,7 @@
 }
 
 .character-generator-upload-button {
+  position: relative;
   min-height: 40px;
   display: inline-flex;
   align-items: center;
@@ -487,10 +506,16 @@
   cursor: pointer;
 }
 
-.character-generator-upload-button:hover,
+.character-generator-upload-button:hover {
+  border-color: var(--character-accent);
+  color: var(--character-accent);
+}
+
 .character-generator-upload-button:focus-within {
   border-color: var(--character-accent);
   color: var(--character-accent);
+  outline: 2px solid color-mix(in srgb, var(--character-accent) 65%, transparent);
+  outline-offset: 2px;
 }
 
 .character-generator-upload-button input {
@@ -791,11 +816,12 @@
 }
 
 .character-generator__back-link {
+  flex: 0 0 auto;
   min-height: 40px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  justify-self: start;
+  align-self: flex-start;
   margin: 0 24px 16px;
   border: 0;
   color: var(--dialog-text-muted, var(--text-muted));
@@ -901,8 +927,15 @@
 }
 
 @media (min-width: 2560px) {
+  /* The catalog dialog widens to 2400px for the browse grid. The generator is
+     a single 1080px reading column, so at 4K that left 1380px of dead gutter
+     on each side. Keep the shell close to the column it actually holds. */
+  .package-market-dialog--catalog.is-character-generator {
+    width: min(1320px, 92vw);
+  }
+
   .character-generator {
-    max-width: 1080px;
+    width: min(1200px, 100%);
   }
 }
 

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { AgentRuntimePort } from '@dsh-cyber/contracts'
 import { LocalPackageCatalog } from '@dsh-cyber/package-runtime'
 import { createCyberServer, type CyberServer } from '../src/index.js'
+import { characterGeneratorMarketplaceRoot } from '../src/services/character-generator-marketplace.js'
 
 const fixturePath = join(process.cwd(), 'tests', 'fixtures', 'character-generator', 'engineering-ai-engineer.md')
 const servers: CyberServer[] = []
@@ -66,7 +67,9 @@ describe('Character Generator publish and runtime integration', () => {
     expect(packageInfo.packageId).toBeTruthy()
     expect(server.store.listInstalledPackages(workspace.id).map((item) => `${item.packageId}@${item.version}`)).toEqual(beforeInstalled)
 
-    const generatedRoot = join(server.root, 'workshop', 'character-generator', 'marketplace')
+    // Generated packages are workspace-private, so the on-disk root carries the
+    // owning workspace rather than sitting in one global directory.
+    const generatedRoot = characterGeneratorMarketplaceRoot(server.root, workspace.id)
     const generatedCatalog = new LocalPackageCatalog(generatedRoot)
     const discovered = await generatedCatalog.list({ market: 'talent' })
     const generated = discovered.find((item) => item.manifest.id === packageInfo.packageId)
