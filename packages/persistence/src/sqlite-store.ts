@@ -27,6 +27,9 @@ import {
   type EmployeeInstance,
   type EmployeeMilestone,
   type EmployeeMilestoneCategory,
+  type EmployeeMemoryIndexEntry,
+  type EmployeeMemoryIndexHit,
+  type EmployeeMemoryScope,
   type EmployeeProfile,
   type EmployeeVoiceProfile,
   type CharacterGender,
@@ -97,6 +100,12 @@ import type { CharacterSkillAction } from '@dsh-cyber/contracts/skill-runtime'
 
 import { DatabaseCorruptError, EntityNotFoundError, PersistenceError } from './errors.js'
 import { CompletionJobRepository } from './completion-job-repository.js'
+import {
+  EmployeeMemoryIndexRepository,
+  type MemoryIndexSearchCapability,
+  type SearchEmployeeMemoryIndexInput,
+  type UpsertEmployeeMemoryIndexEntryInput,
+} from './employee-memory-index-repository.js'
 import { migrate, readUserVersion } from './migrations.js'
 import { assertSecretFree } from './secrets.js'
 import {
@@ -622,6 +631,7 @@ const KNOWN_TABLES = [
   'skill_evidence',
   'employee_skill_revisions',
   'employee_milestones',
+  'employee_memory_index',
   'employee_daily_journals',
   'employee_relationships',
   'workspace_preferences',
@@ -680,6 +690,7 @@ export class SqliteStore {
   readonly #idFactory: () => string
   readonly #worldAuthorities: WorldCharacterAuthorityRepository
   readonly #completionJobs: CompletionJobRepository
+  #memoryIndexRepository: EmployeeMemoryIndexRepository | undefined
   #closed = false
 
   private constructor(databasePath: string, database: DatabaseSync, options: StoreOptions) {
@@ -2643,6 +2654,46 @@ export class SqliteStore {
        FROM employee_milestones WHERE employee_id = ?`,
     ).get(employeeId) as { count: number; latest: string }
     return `${Number(row.count)}:${row.latest}`
+  }
+
+  /**
+   * The employee memory retrieval index.
+   *
+   * It is created lazily because the repository touches its own tables, and
+   * migrations only run after the store instance exists.
+   */
+  get memoryIndex(): EmployeeMemoryIndexRepository {
+    this.#memoryIndexRepository ??= new EmployeeMemoryIndexRepository(this.database, {
+      clock: this.#clock,
+      readOnly: this.readOnly,
+    })
+    return this.#memoryIndexRepository
+  }
+
+  get memoryIndexSearchCapability(): MemoryIndexSearchCapability {
+    return this.memoryIndex.searchCapability
+  }
+
+  /** Indexes a durable milestone. The milestone stays the source of truth. */
+  indexEmployeeMemory(input: UpsertEmployeeMemoryIndexEntryInput): EmployeeMemoryIndexEntry {
+    this.#assertWritable()
+    return this.#transaction(() => this.memoryIndex.upsert(input))
+  }
+
+  getEmployeeMemoryIndexEntry(memoryId: string): EmployeeMemoryIndexEntry | undefined {
+    return this.memoryIndex.get(memoryId)
+  }
+
+  listEmployeeMemoryIndex(
+    employeeId: string,
+    scopes: readonly EmployeeMemoryScope[],
+    limit?: number,
+  ): EmployeeMemoryIndexEntry[] {
+    return this.memoryIndex.list(employeeId, scopes, limit)
+  }
+
+  searchEmployeeMemoryIndex(input: SearchEmployeeMemoryIndexInput): EmployeeMemoryIndexHit[] {
+    return this.memoryIndex.search(input)
   }
 
   removeLegacyConversationMilestones(employeeId: string): number {
@@ -5243,6 +5294,7 @@ export class SqliteStore {
         skillEvidence: countRows(this.database, 'skill_evidence'),
         employeeSkills: countRows(this.database, 'employee_skill_revisions'),
         employeeMilestones: countRows(this.database, 'employee_milestones'),
+        employeeMemoryIndexEntries: countRows(this.database, 'employee_memory_index'),
         employeeJournals: countRows(this.database, 'employee_daily_journals'),
         employeeRelationships: countRows(this.database, 'employee_relationships'),
         workspacePreferences: countRows(this.database, 'workspace_preferences'),

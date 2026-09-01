@@ -1869,6 +1869,51 @@ const MIGRATIONS: readonly Migration[] = [
         CHECK (json_valid(voice_profile_json));
     `,
   },
+  {
+    version: 37,
+    name: 'employee-memory-index',
+    sql: `
+      CREATE TABLE employee_memory_index (
+        memory_id TEXT PRIMARY KEY
+          REFERENCES employee_milestones(id) ON DELETE CASCADE,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        employee_id TEXT NOT NULL REFERENCES employee_instances(id) ON DELETE CASCADE,
+        scope TEXT NOT NULL CHECK (scope IN ('private', 'group', 'task')),
+        summary TEXT NOT NULL,
+        keywords_json TEXT NOT NULL CHECK (json_valid(keywords_json)),
+        entities_json TEXT NOT NULL CHECK (json_valid(entities_json)),
+        source_message_ids_json TEXT NOT NULL CHECK (json_valid(source_message_ids_json)),
+        artifact_refs_json TEXT NOT NULL CHECK (json_valid(artifact_refs_json)),
+        importance REAL NOT NULL CHECK (importance >= 0 AND importance <= 1),
+        occurred_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      ) STRICT;
+
+      CREATE INDEX employee_memory_index_employee_idx
+        ON employee_memory_index(employee_id, scope, occurred_at DESC, memory_id);
+
+      -- Forward-safe backfill: every existing milestone becomes an index row so
+      -- retrieval never silently loses history recorded before this migration.
+      -- The three automatic conversation titles are the ones that carry an
+      -- isolation scope; anything else is an employee-owned public milestone.
+      INSERT INTO employee_memory_index (
+        memory_id, workspace_id, world_id, employee_id, scope, summary,
+        keywords_json, entities_json, source_message_ids_json, artifact_refs_json,
+        importance, occurred_at, updated_at
+      )
+      SELECT
+        id, workspace_id, world_id, employee_id,
+        CASE title
+          WHEN '[private] 私聊记忆' THEN 'private'
+          WHEN '[task] 任务经历' THEN 'task'
+          ELSE 'group'
+        END,
+        summary, '[]', '[]', source_message_ids_json, artifact_refs_json,
+        0.5, occurred_at, created_at
+      FROM employee_milestones;
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {
