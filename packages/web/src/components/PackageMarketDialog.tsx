@@ -517,6 +517,9 @@ function roleWorldLabel(templateId: string | undefined): string {
     'creator-studio': '云端创作工坊',
     'orbital-observatory': '远星观测站',
     'ai-academy': 'AI 学院',
+    'jarvis-core': 'Jarvis Core · 个人中枢',
+    'knowledge-garden': '知识花园',
+    'news-center': '新闻中心',
     'cyber-company': '赛博公司与通用工作区',
     'personal-world': '个人世界',
   } as Record<string, string>)[templateId ?? ''] ?? '兼容世界'

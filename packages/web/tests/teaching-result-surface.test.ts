@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 
 import type { World, WorldArtifactVersion } from '@dsh-cyber/contracts'
+import { knowledgeGardenTheme, newsCenterTheme } from '@dsh-cyber/world-runtime'
 
 import type { ArtifactRecord } from '../src/features/artifacts/useWorldArtifacts.js'
 import { TeachingResultSurface } from '../src/features/world/teaching/TeachingResultSurface.js'
@@ -147,6 +148,16 @@ describe('theme vocabulary opt-in', () => {
     expect(teachingSurfaceVocabulary({ terminology: { resultSurface: 'generic' }, scenes }).mode).toBe('generic')
   })
 
+  it('dresses the shipped surface in the News Center vocabulary without a second surface', () => {
+    const vocabulary = teachingSurfaceVocabulary(newsCenterTheme)
+    expect(vocabulary.mode).toBe('generic')
+    expect(vocabulary.surfaceLabel).toBe('情报结果')
+    expect(vocabulary.laneLabels.blackboard).toBe('简报板')
+    expect(vocabulary.laneLabels['knowledge-graph']).toBe('线索图')
+    expect(vocabulary.laneLabels['lesson-cards']).toBe('情报卡片')
+    expect(vocabulary.laneLabels.media).toBe('图表 · 影像')
+  })
+
   it('lets a theme rename single lanes and ignores non-string declarations', () => {
     const vocabulary = teachingSurfaceVocabulary({
       terminology: { resultSurface: 'teaching', resultSurfaceLabel: '课堂成果', blackboard: '黑板', lessonCards: 42, resultMedia: '' },
@@ -155,6 +166,20 @@ describe('theme vocabulary opt-in', () => {
     expect(vocabulary.laneLabels.blackboard).toBe('黑板')
     expect(vocabulary.laneLabels['lesson-cards']).toBe('课程卡片')
     expect(vocabulary.laneLabels.media).toBe('动画 · 影像')
+  })
+
+  it('lets the shipped knowledge garden theme reuse this surface in its own words', () => {
+    const vocabulary = teachingSurfaceVocabulary(knowledgeGardenTheme)
+    // The garden declares three teaching-ish scene kinds; its explicit
+    // `generic` declaration is what keeps the empty-state copy neutral.
+    expect(vocabulary.mode).toBe('generic')
+    expect(vocabulary.surfaceLabel).toBe('花园成果')
+    expect(vocabulary.laneLabels).toEqual({
+      blackboard: '摘录板',
+      'knowledge-graph': '知识图谱',
+      'lesson-cards': '笔记卡片',
+      media: '影像资料',
+    })
   })
 })
 

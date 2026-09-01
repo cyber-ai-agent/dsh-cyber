@@ -1,0 +1,300 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1536 1024" width="1536" height="1024" role="img" aria-label="知识花园 · 藏书庭院">
+  <title>知识花园 · 藏书庭院</title>
+  <desc>程序化绘制的 2D 藏书庭院场景：资料集书架、摘录板、知识图谱墙、整理台、采集台、来源核验台、笔记卡片架、成果展台与阅读长桌。</desc>
+  <defs>
+    <linearGradient id="kg-wall" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#eef1e6"/>
+      <stop offset="1" stop-color="#d9dfcd"/>
+    </linearGradient>
+    <linearGradient id="kg-floor" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a89a7c"/>
+      <stop offset="1" stop-color="#7d7157"/>
+    </linearGradient>
+    <linearGradient id="kg-glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#dcecdf"/>
+      <stop offset="1" stop-color="#b3d3c4"/>
+    </linearGradient>
+    <linearGradient id="kg-wood" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b98f5c"/>
+      <stop offset="1" stop-color="#8f6a3c"/>
+    </linearGradient>
+    <linearGradient id="kg-paper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#faf6ea"/>
+      <stop offset="1" stop-color="#e8e1cd"/>
+    </linearGradient>
+    <linearGradient id="kg-ink" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#26383a"/>
+      <stop offset="1" stop-color="#182629"/>
+    </linearGradient>
+  </defs>
+
+  <!-- room shell -->
+  <rect x="0" y="0" width="1536" height="500" fill="url(#kg-wall)"/>
+  <rect x="0" y="500" width="1536" height="524" fill="url(#kg-floor)"/>
+  <rect x="0" y="492" width="1536" height="16" fill="#6f6449"/>
+  <g stroke="#6f6449" stroke-opacity="0.26" stroke-width="3" fill="none">
+    <path d="M0 592H1536M0 694H1536M0 806H1536M0 924H1536"/>
+    <path d="M110 508 -60 1024M420 508 340 1024M768 508 768 1024M1116 508 1196 1024M1426 508 1596 1024"/>
+  </g>
+
+  <!-- glazed courtyard roof -->
+  <g>
+    <rect x="60" y="20" width="1416" height="66" rx="8" fill="url(#kg-glass)"/>
+    <g fill="none" stroke="#eef1e6" stroke-width="8">
+      <path d="M60 20h1416v66H60z"/>
+      <path d="M296 20v66M532 20v66M768 20v66M1004 20v66M1240 20v66"/>
+    </g>
+    <g fill="#7fae8b" fill-opacity="0.5">
+      <path d="M120 86c34-22 62-10 74 12-30 8-58 4-74-12z"/>
+      <path d="M1380 86c-34-22-62-10-74 12 30 8 58 4 74-12z"/>
+    </g>
+  </g>
+
+  <!-- collection shelf: the world's source collections -->
+  <g>
+    <rect x="90" y="118" width="300" height="212" rx="10" fill="#7a5a34"/>
+    <rect x="104" y="132" width="272" height="184" rx="6" fill="#4a3823"/>
+    <g fill="#6f5334">
+      <rect x="104" y="188" width="272" height="10"/>
+      <rect x="104" y="248" width="272" height="10"/>
+    </g>
+    <g fill="#cbb489">
+      <rect x="118" y="142" width="16" height="46" rx="3"/>
+      <rect x="138" y="148" width="14" height="40" rx="3"/>
+      <rect x="156" y="140" width="20" height="48" rx="3"/>
+      <rect x="182" y="150" width="12" height="38" rx="3"/>
+      <rect x="200" y="144" width="18" height="44" rx="3"/>
+      <rect x="118" y="204" width="14" height="44" rx="3"/>
+      <rect x="136" y="210" width="18" height="38" rx="3"/>
+      <rect x="160" y="202" width="12" height="46" rx="3"/>
+      <rect x="178" y="208" width="20" height="40" rx="3"/>
+      <rect x="118" y="264" width="20" height="46" rx="3"/>
+      <rect x="144" y="270" width="14" height="40" rx="3"/>
+      <rect x="164" y="262" width="16" height="48" rx="3"/>
+    </g>
+    <g fill="#7fae8b">
+      <rect x="226" y="150" width="18" height="38" rx="3"/>
+      <rect x="206" y="212" width="14" height="36" rx="3"/>
+      <rect x="188" y="268" width="18" height="42" rx="3"/>
+    </g>
+    <!-- collection labels -->
+    <g fill="#f0e6cc" fill-opacity="0.9">
+      <rect x="268" y="152" width="92" height="12" rx="6"/>
+      <rect x="268" y="212" width="72" height="12" rx="6"/>
+      <rect x="268" y="272" width="84" height="12" rx="6"/>
+    </g>
+  </g>
+
+  <!-- excerpt board: pinned excerpts, each with a citation slip -->
+  <g>
+    <rect x="456" y="84" width="624" height="264" rx="12" fill="#6d5335"/>
+    <rect x="472" y="100" width="592" height="216" rx="6" fill="url(#kg-ink)"/>
+    <g fill="url(#kg-paper)">
+      <rect x="500" y="126" width="152" height="94" rx="4"/>
+      <rect x="676" y="140" width="152" height="94" rx="4"/>
+      <rect x="852" y="122" width="152" height="94" rx="4"/>
+    </g>
+    <g fill="#7c7154">
+      <rect x="514" y="144" width="96" height="7" rx="3"/>
+      <rect x="514" y="162" width="120" height="6" rx="3"/>
+      <rect x="514" y="178" width="102" height="6" rx="3"/>
+      <rect x="690" y="158" width="88" height="7" rx="3"/>
+      <rect x="690" y="176" width="118" height="6" rx="3"/>
+      <rect x="690" y="192" width="94" height="6" rx="3"/>
+      <rect x="866" y="140" width="104" height="7" rx="3"/>
+      <rect x="866" y="158" width="118" height="6" rx="3"/>
+      <rect x="866" y="174" width="86" height="6" rx="3"/>
+    </g>
+    <!-- citation slips: every excerpt names where it came from -->
+    <g fill="#d9a441">
+      <rect x="514" y="198" width="72" height="12" rx="6"/>
+      <rect x="690" y="212" width="72" height="12" rx="6"/>
+      <rect x="866" y="194" width="72" height="12" rx="6"/>
+    </g>
+    <g stroke="#7fae8b" stroke-width="3" stroke-opacity="0.75" fill="none">
+      <path d="M652 176h24M828 190h24"/>
+    </g>
+    <g fill="#b8452f">
+      <circle cx="576" cy="126" r="6"/>
+      <circle cx="752" cy="140" r="6"/>
+      <circle cx="928" cy="122" r="6"/>
+    </g>
+    <rect x="472" y="322" width="592" height="18" rx="6" fill="#7a5a34"/>
+  </g>
+
+  <!-- knowledge graph wall -->
+  <g>
+    <rect x="1146" y="118" width="300" height="212" rx="10" fill="#3a4a44"/>
+    <rect x="1160" y="132" width="272" height="184" rx="6" fill="#16211f"/>
+    <g stroke="#5fb0a4" stroke-width="3" fill="none" stroke-opacity="0.85">
+      <path d="M1222 178 1296 214 1372 174M1296 214 1266 276M1296 214 1362 268M1222 178 1206 250M1372 174 1394 236"/>
+    </g>
+    <!-- a dashed edge: a link that has no source yet -->
+    <g stroke="#d9a441" stroke-width="3" stroke-dasharray="7 7" fill="none" stroke-opacity="0.8">
+      <path d="M1266 276 1362 268"/>
+    </g>
+    <g fill="#d9a441">
+      <circle cx="1296" cy="214" r="13"/>
+    </g>
+    <g fill="#7fd0c2">
+      <circle cx="1222" cy="178" r="9"/>
+      <circle cx="1372" cy="174" r="9"/>
+      <circle cx="1266" cy="276" r="9"/>
+      <circle cx="1362" cy="268" r="9"/>
+      <circle cx="1206" cy="250" r="9"/>
+      <circle cx="1394" cy="236" r="7"/>
+    </g>
+  </g>
+
+  <!-- curation desk: the knowledge steward's own table -->
+  <g>
+    <path d="M684 380h168l-14 96H698z" fill="url(#kg-wood)"/>
+    <rect x="676" y="366" width="184" height="24" rx="8" fill="#a97f47"/>
+    <g fill="url(#kg-paper)">
+      <rect x="704" y="394" width="60" height="20" rx="3"/>
+      <rect x="772" y="398" width="56" height="16" rx="3"/>
+    </g>
+    <g fill="#7fae8b">
+      <path d="M846 356c14-16 30-14 34-2-10 12-26 14-34 2z"/>
+      <rect x="856" y="356" width="6" height="24" rx="3"/>
+    </g>
+    <rect x="748" y="476" width="36" height="26" rx="6" fill="#6f5334"/>
+  </g>
+
+  <!-- window bench -->
+  <g>
+    <rect x="396" y="462" width="140" height="24" rx="10" fill="#a97f47"/>
+    <rect x="404" y="486" width="16" height="52" rx="6" fill="#7a5a34"/>
+    <rect x="512" y="486" width="16" height="52" rx="6" fill="#7a5a34"/>
+    <g fill="#7fae8b" fill-opacity="0.85">
+      <path d="M556 470c20-26 44-22 50-4-16 18-40 20-50 4z"/>
+      <rect x="576" y="470" width="8" height="40" rx="4" fill="#6d8f5f"/>
+    </g>
+  </g>
+
+  <!-- intake desk: new sources arrive here -->
+  <g>
+    <rect x="110" y="560" width="280" height="140" rx="12" fill="url(#kg-wood)"/>
+    <rect x="124" y="574" width="252" height="88" rx="8" fill="#e6e0cc"/>
+    <g fill="#8a9c7d">
+      <rect x="144" y="592" width="72" height="52" rx="5"/>
+      <rect x="226" y="598" width="66" height="46" rx="5"/>
+    </g>
+    <g fill="#d9a441">
+      <rect x="302" y="592" width="56" height="12" rx="6"/>
+      <rect x="302" y="612" width="42" height="12" rx="6"/>
+      <rect x="302" y="632" width="50" height="12" rx="6"/>
+    </g>
+    <g stroke="#6f5334" stroke-width="4" fill="none">
+      <path d="M216 618h10M292 620h10"/>
+    </g>
+    <rect x="130" y="700" width="20" height="52" rx="6" fill="#6f5334"/>
+    <rect x="350" y="700" width="20" height="52" rx="6" fill="#6f5334"/>
+  </g>
+
+  <!-- citation bench: claims checked against their sources -->
+  <g>
+    <rect x="1146" y="560" width="280" height="140" rx="12" fill="url(#kg-wood)"/>
+    <rect x="1160" y="574" width="252" height="88" rx="8" fill="#1c2724"/>
+    <g fill="url(#kg-paper)">
+      <rect x="1176" y="588" width="82" height="60" rx="4"/>
+    </g>
+    <g fill="#7c7154">
+      <rect x="1186" y="600" width="56" height="6" rx="3"/>
+      <rect x="1186" y="614" width="62" height="6" rx="3"/>
+      <rect x="1186" y="628" width="44" height="6" rx="3"/>
+    </g>
+    <g stroke="#5fb0a4" stroke-width="4" fill="none" stroke-linecap="round">
+      <path d="M1274 618h34"/>
+      <path d="M1330 606l12 14 22-26"/>
+    </g>
+    <g fill="#b8452f">
+      <rect x="1330" y="634" width="46" height="10" rx="5"/>
+    </g>
+    <rect x="1166" y="700" width="20" height="52" rx="6" fill="#6f5334"/>
+    <rect x="1386" y="700" width="20" height="52" rx="6" fill="#6f5334"/>
+  </g>
+
+  <!-- reading tables -->
+  <g>
+    <g>
+      <rect x="540" y="600" width="460" height="52" rx="10" fill="url(#kg-wood)"/>
+      <rect x="556" y="652" width="18" height="46" rx="6" fill="#6f5334"/>
+      <rect x="966" y="652" width="18" height="46" rx="6" fill="#6f5334"/>
+      <g fill="#faf6ea" fill-opacity="0.85">
+        <rect x="586" y="614" width="72" height="24" rx="4"/>
+        <rect x="732" y="614" width="72" height="24" rx="4"/>
+        <rect x="878" y="614" width="72" height="24" rx="4"/>
+      </g>
+    </g>
+    <g>
+      <rect x="512" y="760" width="516" height="58" rx="10" fill="url(#kg-wood)"/>
+      <rect x="530" y="818" width="20" height="52" rx="6" fill="#6f5334"/>
+      <rect x="990" y="818" width="20" height="52" rx="6" fill="#6f5334"/>
+      <g fill="#faf6ea" fill-opacity="0.85">
+        <rect x="560" y="776" width="80" height="26" rx="4"/>
+        <rect x="728" y="776" width="80" height="26" rx="4"/>
+        <rect x="896" y="776" width="80" height="26" rx="4"/>
+      </g>
+      <g fill="#7fae8b">
+        <path d="M778 742c18-24 40-20 46-4-16 18-38 20-46 4z"/>
+        <rect x="796" y="742" width="7" height="34" rx="3" fill="#6d8f5f"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- note card shelf -->
+  <g>
+    <rect x="90" y="800" width="270" height="150" rx="14" fill="#7a5a34"/>
+    <rect x="106" y="816" width="238" height="94" rx="8" fill="#e6e0cc"/>
+    <g fill="url(#kg-paper)" stroke="#b6a985" stroke-width="2">
+      <rect x="122" y="830" width="64" height="66" rx="4"/>
+      <rect x="198" y="836" width="64" height="60" rx="4"/>
+      <rect x="274" y="830" width="56" height="66" rx="4"/>
+    </g>
+    <g fill="#8a9c7d">
+      <rect x="132" y="842" width="42" height="6" rx="3"/>
+      <rect x="208" y="848" width="42" height="6" rx="3"/>
+      <rect x="284" y="842" width="36" height="6" rx="3"/>
+    </g>
+    <g fill="#d9a441">
+      <rect x="132" y="880" width="30" height="8" rx="4"/>
+      <rect x="208" y="880" width="30" height="8" rx="4"/>
+      <rect x="284" y="880" width="30" height="8" rx="4"/>
+    </g>
+    <rect x="108" y="950" width="22" height="50" rx="6" fill="#6f5334"/>
+    <rect x="320" y="950" width="22" height="50" rx="6" fill="#6f5334"/>
+  </g>
+
+  <!-- garden result showcase -->
+  <g>
+    <rect x="1176" y="800" width="270" height="150" rx="14" fill="#3a4a44"/>
+    <rect x="1192" y="816" width="238" height="94" rx="8" fill="#faf6ea"/>
+    <g fill="#8a9c7d">
+      <rect x="1212" y="836" width="64" height="56" rx="6"/>
+      <rect x="1288" y="836" width="64" height="56" rx="6"/>
+      <rect x="1364" y="836" width="48" height="56" rx="6"/>
+    </g>
+    <g fill="#d9a441">
+      <rect x="1212" y="836" width="64" height="12" rx="6"/>
+      <rect x="1288" y="836" width="64" height="12" rx="6"/>
+      <rect x="1364" y="836" width="48" height="12" rx="6"/>
+    </g>
+    <rect x="1194" y="950" width="22" height="50" rx="6" fill="#2b3733"/>
+    <rect x="1406" y="950" width="22" height="50" rx="6" fill="#2b3733"/>
+  </g>
+
+  <!-- courtyard planters -->
+  <g>
+    <rect x="418" y="928" width="86" height="52" rx="8" fill="#8a6a44"/>
+    <g fill="#6d8f5f">
+      <path d="M446 928c-8-30 6-52 20-56 12 16 10 42-4 56z"/>
+      <path d="M470 928c10-24 28-30 40-24-2 16-16 28-30 24z"/>
+    </g>
+    <rect x="1036" y="928" width="86" height="52" rx="8" fill="#8a6a44"/>
+    <g fill="#6d8f5f">
+      <path d="M1064 928c-8-30 6-52 20-56 12 16 10 42-4 56z"/>
+      <path d="M1088 928c10-24 28-30 40-24-2 16-16 28-30 24z"/>
+    </g>
+  </g>
+</svg>

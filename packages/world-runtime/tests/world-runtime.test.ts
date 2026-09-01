@@ -5,7 +5,10 @@ import type { DomainEvent, EmployeeInstance, World } from '@dsh-cyber/contracts'
 import {
   aiAcademyTheme,
   cyberCompanyTheme,
+  knowledgeGardenTheme,
   findPath,
+  jarvisCoreTheme,
+  newsCenterTheme,
   projectWorldRuntime,
   validateWorldThemeManifest,
 } from '../src/index.js'
@@ -81,6 +84,54 @@ describe('world theme manifest', () => {
       'course-result-showcase',
       'lecture-blackboard',
       'cohort-seating',
+    ])
+  })
+
+  it('validates the built-in Jarvis Core theme and its personal hub scene', () => {
+    expect(validateWorldThemeManifest(jarvisCoreTheme)).toEqual({ valid: true, errors: [] })
+    const scene = jarvisCoreTheme.scenes[0]!
+    expect(scene.id).toBe('personal-hub-studio')
+    expect(scene.interactables.map((item) => item.id)).toEqual([
+      'request-intake-table',
+      'ownership-routing-board',
+      'delegation-board',
+      'research-carrel-desk',
+      'schedule-console-desk',
+      'filing-organiser-bench',
+      'information-index-wall',
+      'summary-report-stand',
+    ])
+  })
+
+  it('validates the built-in knowledge garden theme and its courtyard scene', () => {
+    expect(validateWorldThemeManifest(knowledgeGardenTheme)).toEqual({ valid: true, errors: [] })
+    const scene = knowledgeGardenTheme.scenes[0]!
+    expect(scene.id).toBe('reading-courtyard')
+    expect(scene.interactables.map((item) => item.id)).toEqual([
+      'source-intake-desk',
+      'collection-bookshelf',
+      'citation-check-bench',
+      'note-card-shelf',
+      'knowledge-graph-wall',
+      'garden-result-showcase',
+      'excerpt-board',
+      'reading-tables',
+    ])
+  })
+
+  it('validates the built-in news center theme and its newsroom scene', () => {
+    expect(validateWorldThemeManifest(newsCenterTheme)).toEqual({ valid: true, errors: [] })
+    const scene = newsCenterTheme.scenes[0]!
+    expect(scene.id).toBe('newsroom-floor')
+    expect(scene.interactables.map((item) => item.id)).toEqual([
+      'source-collection-desk',
+      'beat-board',
+      'chart-workbench',
+      'verification-desk',
+      'timeline-wall',
+      'brief-archive',
+      'newsroom-wallboard',
+      'editorial-table',
     ])
   })
 
