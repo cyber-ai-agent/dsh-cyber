@@ -14,6 +14,7 @@ import type {
 import type { WorldCharacterAuthority } from '@dsh-cyber/contracts/world-authority'
 import type { SqliteStore, WorldSimulationStore } from '@dsh-cyber/persistence'
 import {
+  aiAcademyTheme,
   cyberCompanyTheme,
   maidPalaceTheme,
   moonlitTavernTheme,
@@ -523,6 +524,7 @@ export class WorldRuntimeService {
     if (templateId === 'company' || templateId === 'cyber-company') return cyberCompanyTheme
     if (templateId === 'tavern' || templateId === 'moonlit-tavern') return moonlitTavernTheme
     if (templateId === 'maid-atelier' || templateId === 'maid-palace') return maidPalaceTheme
+    if (templateId === 'ai-academy' || templateId === 'academy') return aiAcademyTheme
     return undefined
   }
 
