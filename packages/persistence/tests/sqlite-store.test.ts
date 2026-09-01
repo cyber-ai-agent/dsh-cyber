@@ -1256,7 +1256,7 @@ describe('SqliteStore', () => {
     expect(reopened.getAgentRun(queuedRun.id)).toMatchObject({ status: 'queued' })
     expect(reopened.recoverConversationRuntimeAfterRestart()).toEqual({ turnsFailed: 0, runsFailed: 0 })
   })
-  it('removes retired projection milestones by origin and keeps an owner milestone that reuses the same title', async () => {
+  it('never guesses historical milestone origin from title and removes only an explicitly stamped legacy row', async () => {
     const { path, store } = await testDatabase()
     const workspace = store.createWorkspace({ name: '事迹工作区' })
     const world = store.createWorld({ workspaceId: workspace.id, name: '赛博公司', templateId: 'cyber-company' })
@@ -1269,7 +1269,8 @@ describe('SqliteStore', () => {
     })
     const recruitedEvent = store.listWorldDomainEvents(world.id)
       .find((event) => event.type === 'employee.recruited')!
-    // A legacy row as the retired per-turn generator wrote it: same title, no origin column.
+    // Before migration this row is indistinguishable from user-authored data:
+    // same title/category/evidence shape and no origin column.
     const legacy = store.appendEmployeeMilestone({
       employeeId: employee.id,
       category: 'task',
@@ -1296,7 +1297,7 @@ describe('SqliteStore', () => {
     expect(migrated.doctor()).toMatchObject({ ok: true, schemaVersion: CYBER_SCHEMA_VERSION })
     expect(migrated.getEmployeeMemoryIndexEntry(legacy.id)).toBeDefined()
     expect(migrated.listEmployeeMilestones(employee.id).find((item) => item.id === legacy.id))
-      .toMatchObject({ origin: 'legacy-conversation-projection' })
+      .toMatchObject({ origin: 'authored' })
 
     // Durable user data that collides with the retired generator's display copy.
     const authored = migrated.appendEmployeeMilestone({
@@ -1309,6 +1310,8 @@ describe('SqliteStore', () => {
     const joined = migrated.listEmployeeMilestones(employee.id).find((item) => item.category === 'joined')
     expect(joined).toMatchObject({ origin: 'authored' })
 
+    // Once provenance is explicit, cleanup uses only that structural identity.
+    migrated.database.prepare("UPDATE employee_milestones SET origin = 'legacy-conversation-projection' WHERE id = ?").run(legacy.id)
     expect(migrated.removeLegacyConversationMilestones(employee.id)).toBe(1)
     const remaining = migrated.listEmployeeMilestones(employee.id)
     expect(remaining.map((item) => item.id)).toContain(authored.id)
