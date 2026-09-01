@@ -1,0 +1,57 @@
+.world-extensions-dialog-backdrop { z-index: 90; }
+
+.world-extensions-dialog {
+  width: min(760px, calc(100vw - 32px));
+  max-height: min(720px, calc(100vh - 48px));
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--border-color, #344054) 78%, transparent);
+  border-radius: 22px;
+  background: var(--surface-elevated, #111722);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 42%);
+}
+
+.world-extensions-dialog__header {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 14px;
+  align-items: start;
+  padding: 22px 22px 18px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color, #344054) 62%, transparent);
+}
+
+.world-extensions-dialog__header h2 { margin: 0; font-size: 18px; }
+.world-extensions-dialog__header p { margin: 6px 0 0; color: var(--text-secondary, #98a2b3); line-height: 1.5; }
+.world-extensions-dialog__icon,
+.world-extensions-dialog__card-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent-color, #7c8cff) 14%, transparent);
+  color: var(--accent-color, #9aa8ff);
+}
+
+.world-extensions-dialog__list { padding: 18px 22px 22px; }
+.world-extensions-dialog__card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: start;
+  padding: 18px;
+  border: 1px solid color-mix(in srgb, var(--border-color, #344054) 72%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--surface-muted, #171e2b) 88%, transparent);
+}
+.world-extensions-dialog__card.is-enabled { border-color: color-mix(in srgb, var(--accent-color, #7c8cff) 42%, var(--border-color, #344054)); }
+.world-extensions-dialog__card-copy p { margin: 8px 0 5px; color: var(--text-secondary, #98a2b3); line-height: 1.55; }
+.world-extensions-dialog__card-copy small { color: var(--text-tertiary, #667085); }
+.world-extensions-dialog__card-title { display: flex; align-items: center; gap: 9px; }
+.world-extensions-dialog__card-title strong { font-size: 15px; }
+.world-extensions-dialog__card-title span { padding: 2px 8px; border-radius: 999px; background: rgb(124 140 255 / 12%); color: var(--accent-color, #9aa8ff); font-size: 11px; }
+.world-extensions-dialog__actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+
+@media (max-width: 680px) {
+  .world-extensions-dialog__card { grid-template-columns: auto 1fr; }
+  .world-extensions-dialog__actions { grid-column: 1 / -1; justify-content: flex-start; }
+}

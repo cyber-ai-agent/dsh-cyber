@@ -77,7 +77,11 @@ test('switching conversation Skin keeps the live World mounted and its manifest 
   expect(afterResponse.ok()).toBe(true)
   expect(await afterResponse.json()).toEqual(beforeManifest)
 
-  await page.getByRole('tab', { name: '全景', exact: true }).click()
+  // World Scene belongs to the lightweight core map; changing Skin must not
+  // require or open the optional spatial extension.
+  const display = page.getByRole('tablist', { name: '世界显示方式' })
+  const mapTab = display.getByRole('tab', { name: '平面', exact: true })
+  if (await mapTab.getAttribute('aria-selected') !== 'true') await mapTab.click()
   await page.getByRole('button', { name: '世界场景' }).click()
   const sceneDialog = page.getByRole('dialog', { name: /世界场景/ })
   await expect(sceneDialog).toBeVisible()
