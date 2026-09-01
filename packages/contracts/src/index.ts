@@ -1,7 +1,7 @@
 import type { WorldCharacterAuthority } from './world-authority.js'
 import type { UiLocale } from './locales.js'
 
-export const CYBER_SCHEMA_VERSION = 37 as const
+export const CYBER_SCHEMA_VERSION = 39 as const
 
 export * from './runtime-access.js'
 export * from './locales.js'
@@ -1229,6 +1229,7 @@ export * from './creative-workshop-draft.js'
 export * from './context-budget.js'
 export * from './context-envelope.js'
 export * from './prompt-cache.js'
+export * from './context-snapshot.js'
 
 export type {
   CharacterSkillAction,

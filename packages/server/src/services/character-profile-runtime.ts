@@ -25,6 +25,10 @@ import {
   lastDurableObservation,
 } from './employee-observation-runtime.js'
 import {
+  defaultContextSnapshotService,
+  type ContextSnapshotService,
+} from './context-snapshot-service.js'
+import {
   availableWorldSkillIds,
   type WorldSkillAvailabilityPort,
 } from './world-skill-availability.js'
@@ -39,6 +43,9 @@ type CharacterRuntimeStore = Pick<
   // Read back the raw messages behind a retrieved memory, and decide which of
   // the older turns an indexed memory can still bring back.
   | 'getMessages' | 'listEmployeeMemoryIndex'
+  // Record what this run actually ran with: structure and pointers, no text.
+  | 'getAgentRun' | 'saveAgentRunContextSnapshot' | 'getAgentRunContextSnapshot'
+  | 'getEmployeeMemoryIndexEntry'
 >>
 
 const OBSERVED_THROUGH_KEY = 'contextObservedThroughSequence'
@@ -52,6 +59,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
   readonly #skillAvailability: WorldSkillAvailabilityPort | undefined
   readonly #memory: CharacterMemoryContextPort | undefined
   readonly #context: ConversationContextComposer | undefined
+  readonly #snapshots: ContextSnapshotService | undefined
 
   constructor(
     inner: AgentRuntimePort,
@@ -71,6 +79,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       store as Record<string, unknown>,
       this.#memory as ConversationMemoryLayersPort | undefined,
     )
+    this.#snapshots = defaultContextSnapshotService(store as Record<string, unknown>)
   }
 
   async runTurn(request: AgentTurnRequest) {
@@ -129,6 +138,17 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       ...(request.workTurnId === undefined ? {} : { workTurnId: request.workTurnId }),
       ...(request.contextBudget === undefined ? {} : { memoryBudgetTokens: request.contextBudget.memoryTokens }),
     })
+    // The context record is written before the turn runs, so a run that fails
+    // or is interrupted still explains what it was given. It is observability:
+    // it never fails the turn, and it stores no prompt text.
+    if (composed !== undefined && request.agentRunId !== undefined) {
+      try {
+        this.#snapshots?.save({ agentRunId: request.agentRunId, envelope: composed.envelope })
+      } catch {
+        // A missing context record must never cost the owner a reply.
+      }
+    }
+
     const memoryContext = composed !== undefined
       ? undefined
       : await this.#memory?.compose({

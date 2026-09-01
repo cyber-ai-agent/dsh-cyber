@@ -4,11 +4,15 @@ import { dirname, resolve } from 'node:path'
 import { DatabaseSync, backup } from 'node:sqlite'
 
 import {
+  CONTEXT_SNAPSHOT_VERSION,
   CYBER_SCHEMA_VERSION,
   RECOMMENDED_ADMIN_PERMISSIONS,
   WORKSPACE_PREFERENCES_LIMITS,
   parseWorkspacePaneWidth,
   type AgentPermissionMode,
+  type ContextSnapshot,
+  type ContextSnapshotCacheStats,
+  type ContextSnapshotLayer,
   type ConversationQueueEntry,
   type ConversationQueueEntryStatus,
   type CompletionJob,
@@ -106,7 +110,7 @@ import {
   type SearchEmployeeMemoryIndexInput,
   type UpsertEmployeeMemoryIndexEntryInput,
 } from './employee-memory-index-repository.js'
-import { migrate, readUserVersion } from './migrations.js'
+import { migrate, readUserVersion, MIGRATION_COUNT } from './migrations.js'
 import { assertSecretFree } from './secrets.js'
 import {
   WorldCharacterAuthorityRepository,
@@ -439,6 +443,19 @@ export interface CreateAgentRunInput {
   ordinal: number
 }
 
+export interface SaveAgentRunContextSnapshotInput {
+  agentRunId: string
+  /**
+   * The projection produced by `composeContextSnapshot`.
+   *
+   * It carries no layer text by construction, and the store re-checks that on
+   * the way in: an extra field on a layer object is dropped rather than
+   * serialized, so a future `ContextLayer` field cannot reach the database
+   * without someone editing this file on purpose.
+   */
+  snapshot: ContextSnapshot
+}
+
 export interface ConversationRuntimeRecoveryReport {
   turnsFailed: number
   runsFailed: number
@@ -629,6 +646,7 @@ const KNOWN_TABLES = [
   'task_collaboration_steps',
   'work_turns',
   'agent_runs',
+  'agent_run_context_snapshots',
   'skill_actions',
   'approval_requests',
   'approval_policies',
@@ -3589,6 +3607,80 @@ export class SqliteStore {
       .map(mapAgentRun)
   }
 
+  /**
+   * Records what context an AgentRun ran with, as structure and pointers.
+   *
+   * Writing is idempotent per run: a retried compose overwrites the row rather
+   * than accumulating near-duplicates. `prefixReused` is resolved here, from
+   * the previous snapshot of the same character in the same conversation,
+   * because that is a durable fact about the pair and not something a caller
+   * should be trusted to remember across process restarts.
+   *
+   * The row is a child of `agent_runs`, so it disappears with its run — a
+   * retention sweep or a deleted work turn prunes snapshots by cascade and
+   * cannot leave an orphaned context record behind.
+   */
+  saveAgentRunContextSnapshot(input: SaveAgentRunContextSnapshotInput): ContextSnapshot {
+    this.#assertWritable()
+    const run = this.getAgentRun(input.agentRunId)
+    if (run === undefined) throw new EntityNotFoundError(`Agent run not found: ${input.agentRunId}`)
+    const layers = input.snapshot.layers.map(sanitizeSnapshotLayer)
+    const previous = input.snapshot.cache.previousStablePrefixHash
+      ?? this.#previousStablePrefixHash(run)
+    const cache: ContextSnapshotCacheStats = {
+      stablePrefixTokens: nonNegativeInteger(input.snapshot.cache.stablePrefixTokens),
+      volatileTokens: nonNegativeInteger(input.snapshot.cache.volatileTokens),
+      ...(previous === undefined ? {} : { previousStablePrefixHash: previous }),
+      prefixReused: previous !== undefined && previous === input.snapshot.stablePrefixHash,
+    }
+    const snapshot: ContextSnapshot = { ...input.snapshot, layers, cache }
+
+    this.database.prepare(
+      `INSERT INTO agent_run_context_snapshots
+       (agent_run_id, workspace_id, world_id, session_id, employee_id, snapshot_version,
+        envelope_version, stable_prefix_hash, structure_hash, total_token_estimate,
+        layers_json, cache_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(agent_run_id) DO UPDATE SET
+         snapshot_version = excluded.snapshot_version,
+         envelope_version = excluded.envelope_version,
+         stable_prefix_hash = excluded.stable_prefix_hash,
+         structure_hash = excluded.structure_hash,
+         total_token_estimate = excluded.total_token_estimate,
+         layers_json = excluded.layers_json,
+         cache_json = excluded.cache_json,
+         created_at = excluded.created_at`,
+    ).run(
+      run.id, run.workspaceId, run.worldId, run.sessionId, run.employeeId,
+      snapshot.snapshotVersion, snapshot.envelopeVersion, snapshot.stablePrefixHash,
+      snapshot.structureHash, nonNegativeInteger(snapshot.totalTokenEstimate),
+      JSON.stringify(layers), JSON.stringify(cache), this.#clock(),
+    )
+    return snapshot
+  }
+
+  getAgentRunContextSnapshot(agentRunId: string): ContextSnapshot | undefined {
+    const row = this.database
+      .prepare('SELECT * FROM agent_run_context_snapshots WHERE agent_run_id = ?')
+      .get(agentRunId) as Record<string, unknown> | undefined
+    return row === undefined ? undefined : mapContextSnapshot(row)
+  }
+
+  /** The prefix hash of the previous run of this character in this conversation. */
+  #previousStablePrefixHash(run: AgentRun): string | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT stable_prefix_hash FROM agent_run_context_snapshots
+         WHERE session_id = ? AND employee_id = ? AND agent_run_id <> ?
+         -- rowid, not the run id, breaks a same-millisecond tie: run ids are
+         -- random UUIDs, so ordering by them would pick an arbitrary earlier
+         -- turn and report cache churn that never happened.
+         ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+      )
+      .get(run.sessionId, run.employeeId, run.id) as { stable_prefix_hash?: string } | undefined
+    return row?.stable_prefix_hash
+  }
+
   startAgentRun(runId: string): AgentRun {
     return this.#transitionAgentRun(runId, ['queued'], 'running')
   }
@@ -5158,7 +5250,10 @@ export class SqliteStore {
       errors.push(`Expected schema ${CYBER_SCHEMA_VERSION}, found ${schemaVersion}`)
     }
     const migrationHistory = this.database.prepare('SELECT COUNT(*) AS count, MAX(version) AS maximum FROM schema_migrations').get() as { count: number; maximum: number | null }
-    if (Number(migrationHistory.count) !== CYBER_SCHEMA_VERSION || Number(migrationHistory.maximum) !== CYBER_SCHEMA_VERSION) {
+    // Counted against the migrations this build ships, not against the schema
+    // version: version numbers are claimed per branch and one of them (38) is
+    // not on this one, so a healthy database holds fewer rows than its version.
+    if (Number(migrationHistory.count) !== MIGRATION_COUNT || Number(migrationHistory.maximum) !== CYBER_SCHEMA_VERSION) {
       errors.push(`Migration history is incomplete: ${migrationHistory.count} entries, latest ${migrationHistory.maximum ?? 'none'}`)
     }
 
@@ -6570,6 +6665,52 @@ function mapAgentRun(row: object): AgentRun {
   if (typeof value.started_at === 'string') run.startedAt = value.started_at
   if (typeof value.completed_at === 'string') run.completedAt = value.completed_at
   return run
+}
+
+function mapContextSnapshot(row: Record<string, unknown>): ContextSnapshot {
+  const cache = JSON.parse(String(row.cache_json)) as ContextSnapshotCacheStats
+  const previous = typeof cache.previousStablePrefixHash === 'string' ? cache.previousStablePrefixHash : undefined
+  return {
+    snapshotVersion: CONTEXT_SNAPSHOT_VERSION,
+    envelopeVersion: Number(row.envelope_version),
+    stablePrefixHash: String(row.stable_prefix_hash),
+    structureHash: String(row.structure_hash),
+    layers: (JSON.parse(String(row.layers_json)) as ContextSnapshotLayer[]).map(sanitizeSnapshotLayer),
+    totalTokenEstimate: Number(row.total_token_estimate),
+    cache: {
+      stablePrefixTokens: nonNegativeInteger(cache.stablePrefixTokens),
+      volatileTokens: nonNegativeInteger(cache.volatileTokens),
+      ...(previous === undefined ? {} : { previousStablePrefixHash: previous }),
+      prefixReused: cache.prefixReused === true,
+    },
+  }
+}
+
+/**
+ * Rebuilds a snapshot layer field by field.
+ *
+ * This is the write barrier that keeps prompt text out of the database. The
+ * layer objects arrive from a caller that also holds the rendered
+ * `ContextLayer`, so copying the object wholesale is exactly the mistake that
+ * would turn every AgentRun into a prompt log.
+ */
+function sanitizeSnapshotLayer(layer: ContextSnapshotLayer): ContextSnapshotLayer {
+  return {
+    id: String(layer.id),
+    kind: layer.kind,
+    revision: String(layer.revision),
+    contentHash: String(layer.contentHash),
+    tokenEstimate: nonNegativeInteger(layer.tokenEstimate),
+    sourceRefs: (layer.sourceRefs ?? []).map((ref) => ({
+      kind: ref.kind,
+      id: String(ref.id),
+      ...(ref.revision === undefined ? {} : { revision: String(ref.revision) }),
+    })),
+  }
+}
+
+function nonNegativeInteger(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0
 }
 
 function mapSkillAction(row: object): CharacterSkillAction {
