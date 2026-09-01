@@ -70,6 +70,8 @@ export function SpatialWorldCanvas({
   const retainedZoom = useRef<number | undefined>(undefined)
   const employeesRef = useRef(employees)
   employeesRef.current = employees
+  const callbacksRef = useRef({ onEntitySelect, onObjectSelect })
+  callbacksRef.current = { onEntitySelect, onObjectSelect }
 
   const capability = useMemo(() => ({
     spatial: browserSpatialCapabilityProvider.supportsSpatialRendering(),
@@ -120,7 +122,10 @@ export function SpatialWorldCanvas({
       },
       loadAvatar: (rendererUrl, signal) => loadRendererAvatar(rendererUrl, representationResolver, signal),
     })
-    const renderer = registry.create('three-3d', { onEntitySelect, onObjectSelect })
+    const renderer = registry.create('three-3d', {
+      onEntitySelect: (entityId) => callbacksRef.current.onEntitySelect(entityId),
+      onObjectSelect: (objectId) => callbacksRef.current.onObjectSelect(objectId),
+    })
     rendererRef.current = renderer
     let cancelled = false
     void renderer.mount(host, manifest, snapshot).then(() => {
@@ -142,7 +147,7 @@ export function SpatialWorldCanvas({
       renderer.destroy()
       rendererRef.current = undefined
     }
-  }, [capability.quality, capability.spatial, locomotion, mountedKey, onEntitySelect, onObjectSelect])
+  }, [capability.quality, capability.spatial, locomotion, manifest, mountedKey, snapshot])
 
   useEffect(() => { rendererRef.current?.updateSnapshot(snapshot) }, [snapshot])
   useEffect(() => {
