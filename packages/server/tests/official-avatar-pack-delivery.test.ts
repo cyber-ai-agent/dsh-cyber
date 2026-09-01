@@ -12,6 +12,7 @@ import {
 import type { WorldPackageInstanceService } from '../src/services/world-package-instance-service.js'
 
 const OFFICIAL_BASE_PATH = 'models/neutral.vrm'
+const OFFICIAL_VERSION = '1.1.0'
 
 describe('official avatar base pack delivery', () => {
   it('discovers the committed production pack from a clean checkout without copying it into the world', async () => {
@@ -27,25 +28,30 @@ describe('official avatar base pack delivery', () => {
 
     expect(official).toMatchObject({
       id: OFFICIAL_AVATAR_BASE_PACK_ID,
-      version: '1.0.0',
+      version: OFFICIAL_VERSION,
       quality: 'production',
       license: 'CC0-1.0',
       bases: [{
         baseModel: 'neutral-a',
-        cacheKey: `builtin-avatar-pack:${OFFICIAL_AVATAR_BASE_PACK_ID}@1.0.0:neutral-a`,
+        cacheKey: `builtin-avatar-pack:${OFFICIAL_AVATAR_BASE_PACK_ID}@${OFFICIAL_VERSION}:neutral-a`,
       }],
     })
-    expect(official?.bases[0]?.assetUrl).toContain(`/avatar-base-packs/${OFFICIAL_AVATAR_BASE_PACK_ID}/1.0.0/assets/${OFFICIAL_BASE_PATH}`)
+    expect(official?.parts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'professional', kind: 'outfit' }),
+      expect.objectContaining({ id: 'analyst', kind: 'outfit' }),
+    ]))
+    expect(official?.parts.some((part) => part.id === 'engineer' && part.kind === 'outfit')).toBe(false)
+    expect(official?.bases[0]?.assetUrl).toContain(`/avatar-base-packs/${OFFICIAL_AVATAR_BASE_PACK_ID}/${OFFICIAL_VERSION}/assets/${OFFICIAL_BASE_PATH}`)
     expect(listRuntimePackages).toHaveBeenCalledWith('world-clean')
 
     const asset = await service.readBaseAsset(
       'world-clean',
       OFFICIAL_AVATAR_BASE_PACK_ID,
-      '1.0.0',
+      OFFICIAL_VERSION,
       OFFICIAL_BASE_PATH,
     )
     expect(asset.contentType).toBe('model/gltf-binary')
-    expect(asset.body.byteLength).toBeGreaterThan(5 * 1024 * 1024)
+    expect(asset.body.byteLength).toBeGreaterThan(6 * 1024 * 1024)
     expect(() => assertAvatarBaseVrmEnvelope(asset.body, 'official delivery fixture')).not.toThrow()
   })
 
