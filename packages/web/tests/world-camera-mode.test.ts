@@ -11,73 +11,67 @@ import {
   writeWorldView,
 } from '../src/features/world/runtime/world-view-mode.js'
 
-beforeEach(() => {
-  localStorage.clear()
-})
+beforeEach(() => localStorage.clear())
+afterEach(() => localStorage.clear())
 
-afterEach(() => {
-  localStorage.clear()
-})
-
-describe('renderer and camera are separate questions', () => {
-  it('maps each renderer mode to a registered renderer kind', () => {
+describe('core world view modes', () => {
+  it('keeps both core modes on the lightweight Pixi renderer', () => {
+    expect(rendererKindFor('map')).toBe('pixi-2d')
     expect(rendererKindFor('2d')).toBe('pixi-2d')
-    expect(rendererKindFor('3d')).toBe('three-3d')
   })
 
-  it('offers follow only where a camera can trail somebody', () => {
-    expect(cameraModesFor('3d')).toContain('follow')
-    expect(cameraModesFor('2d')).not.toContain('follow')
+  it('exposes no spatial camera modes in core', () => {
+    expect(cameraModesFor('map')).toEqual(['overview'])
+    expect(cameraModesFor('2d')).toEqual(['focus'])
+    expect(supportsCameraMode('map', 'follow')).toBe(false)
     expect(supportsCameraMode('2d', 'follow')).toBe(false)
     expect(supportsCameraMode('2d', 'focus')).toBe(true)
   })
 
-  it('keeps focus when a renderer change makes follow illegal', () => {
-    // Dropping to the whole company would throw away the thing the user was
-    // actually looking at; staying on the character is nearer the request.
+  it('normalizes map and focused 2d views', () => {
+    expect(reconcileView({ renderer: 'map', camera: 'follow' })).toEqual({ renderer: 'map', camera: 'overview' })
     expect(reconcileView({ renderer: '2d', camera: 'follow' })).toEqual({ renderer: '2d', camera: 'focus' })
   })
 
-  it('leaves a legal view alone', () => {
-    const view = { renderer: '3d', camera: 'follow' } as const
-    expect(reconcileView(view)).toBe(view)
+  it('falls back to the map when 2d has nobody to focus', () => {
+    expect(viewForFocus({ renderer: '2d', camera: 'focus' }, undefined)).toEqual({ renderer: 'map', camera: 'overview' })
   })
 
-  it('falls back to the whole company when there is nobody to point at', () => {
-    expect(viewForFocus({ renderer: '3d', camera: 'focus' }, undefined))
-      .toEqual({ renderer: '3d', camera: 'overview' })
-    expect(viewForFocus({ renderer: '3d', camera: 'follow' }, undefined))
-      .toEqual({ renderer: '3d', camera: 'overview' })
-  })
-
-  it('keeps pointing at a character that exists', () => {
-    const view = { renderer: '3d', camera: 'focus' } as const
-    expect(viewForFocus(view, 'employee-1')).toBe(view)
+  it('keeps a focused character in 2d', () => {
+    expect(viewForFocus({ renderer: '2d', camera: 'focus' }, 'employee-1')).toEqual({ renderer: '2d', camera: 'focus' })
   })
 })
 
-describe('stored views', () => {
-  it('round-trips', () => {
-    writeWorldView('world-1', { renderer: '3d', camera: 'follow' })
-    expect(readWorldView('world-1')).toEqual({ renderer: '3d', camera: 'follow' })
+describe('stored core views', () => {
+  it('round-trips map and 2d only', () => {
+    writeWorldView('world-1', { renderer: 'map', camera: 'overview' })
+    expect(readWorldView('world-1')).toEqual({ renderer: 'map', camera: 'overview' })
+    writeWorldView('world-1', { renderer: '2d', camera: 'focus' })
+    expect(readWorldView('world-1')).toEqual({ renderer: '2d', camera: 'focus' })
   })
 
-  it('migrates the three values earlier versions wrote', () => {
-    // 'map' meant the whole company in 2D; '2d' and '3d' meant one character.
-    // Both halves of the old value survive rather than resetting the user.
+  it('migrates old direct renderer values without reopening 3d', () => {
     localStorage.setItem('dsh-cyber-world-view:world-1', 'map')
-    expect(readWorldView('world-1')).toEqual({ renderer: '2d', camera: 'overview' })
+    expect(readWorldView('world-1')).toEqual({ renderer: 'map', camera: 'overview' })
 
     localStorage.setItem('dsh-cyber-world-view:world-1', '2d')
     expect(readWorldView('world-1')).toEqual({ renderer: '2d', camera: 'focus' })
 
     localStorage.setItem('dsh-cyber-world-view:world-1', '3d')
-    expect(readWorldView('world-1')).toEqual({ renderer: '3d', camera: 'focus' })
+    expect(readWorldView('world-1')).toEqual({ renderer: '2d', camera: 'focus' })
+
+    localStorage.setItem('dsh-cyber-world-view:world-1', '3d/overview')
+    expect(readWorldView('world-1')).toEqual({ renderer: 'map', camera: 'overview' })
+
+    localStorage.setItem('dsh-cyber-world-view:world-1', '3d/follow')
+    expect(readWorldView('world-1')).toEqual({ renderer: '2d', camera: 'focus' })
   })
 
-  it('reconciles an illegal stored combination', () => {
+  it('reconciles illegal combinations', () => {
     localStorage.setItem('dsh-cyber-world-view:world-1', '2d/follow')
     expect(readWorldView('world-1')).toEqual({ renderer: '2d', camera: 'focus' })
+    localStorage.setItem('dsh-cyber-world-view:world-1', '2d/overview')
+    expect(readWorldView('world-1')).toEqual({ renderer: 'map', camera: 'overview' })
   })
 
   it('falls back on anything it cannot read', () => {
@@ -87,15 +81,12 @@ describe('stored views', () => {
     expect(readWorldView('world-1')).toEqual(DEFAULT_WORLD_VIEW)
   })
 
-  it('opens on the character, the way the single view mode used to', () => {
-    // The old default was '2d', which meant a character view. Opening on the
-    // whole company instead would silently change what every existing user
-    // sees when they arrive.
-    expect(DEFAULT_WORLD_VIEW).toEqual({ renderer: '2d', camera: 'focus' })
+  it('opens on the lightweight company map by default', () => {
+    expect(DEFAULT_WORLD_VIEW).toEqual({ renderer: 'map', camera: 'overview' })
   })
 
   it('keeps one world out of another world view', () => {
-    writeWorldView('world-1', { renderer: '3d', camera: 'focus' })
+    writeWorldView('world-1', { renderer: '2d', camera: 'focus' })
     expect(readWorldView('world-2')).toEqual(DEFAULT_WORLD_VIEW)
   })
 })
