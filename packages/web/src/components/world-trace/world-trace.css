@@ -44,3 +44,8 @@
 @media (max-width: 620px) { .world-trace-panel { --trace-pad: 12px; }.world-trace-filters { grid-template-columns: 1fr; }.world-trace-filters__search { grid-column: auto; }.world-trace-item__expandable summary { grid-template-columns: 1fr; }.world-trace-item__expand-label { min-height: 30px; justify-self: start; } }
 @container world-trace (max-width: 900px) { .world-trace-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }.world-trace-filters__search { grid-column: 1 / -1; } }
 @container world-trace (max-width: 520px) { .world-trace-panel { --trace-pad: 12px; }.world-trace-filters { grid-template-columns: 1fr; }.world-trace-filters__search { grid-column: auto; }.world-trace-item__expandable summary { grid-template-columns: 1fr; }.world-trace-item__expand-label { min-height: 30px; justify-self: start; } }
+.world-trace-views { display: flex; gap: 8px; padding: 10px var(--trace-pad); border-bottom: 1px solid var(--border); }
+.world-trace-views button { min-height: 40px; flex: 0 0 auto; padding: 0 16px; color: var(--text-muted); border: 1px solid var(--border); background: var(--surface-1); font: inherit; font-size: 13px; cursor: pointer; }
+.world-trace-views button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.world-trace-views button.is-active { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.world-trace-panel > .context-inspector { min-height: 0; flex: 1; }
