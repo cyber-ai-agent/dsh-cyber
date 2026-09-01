@@ -10,7 +10,13 @@ import type {
   WorkMessage,
   WorkSession,
 } from '@dsh-cyber/contracts'
-import { composeContextEnvelope, composeContextLayer, estimateTextTokens } from '@dsh-cyber/contracts'
+import {
+  composeContextEnvelope,
+  composeContextLayer,
+  derivePromptCachePolicy,
+  estimateTextTokens,
+  stableContextHash,
+} from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import {
@@ -226,20 +232,38 @@ export class ConversationContextComposer {
       ? input.prompt
       : `${sections.join('\n\n')}\n\n[当前请求]\n${input.prompt}`
 
+    // The cacheable prefix is exactly the identity layer: persona, world stable
+    // rules and stable skill instructions, already folded into one deterministic
+    // string upstream. Everything the envelope adds after it is dynamic by
+    // construction, which is what makes the prefix worth a cache key at all.
+    const stableIdentity = composeContextLayer({
+      id: `identity:${input.employee.id}`,
+      kind: 'stable-identity',
+      text: input.persona,
+      ...(input.personaRevision === undefined ? {} : { revision: String(input.personaRevision) }),
+      sourceRefs: [
+        { kind: 'employee', id: input.employee.id },
+        {
+          kind: 'employee-revision',
+          id: input.employee.id,
+          revision: String(input.personaRevision ?? input.employee.currentRevision),
+        },
+      ],
+    })
+
     const envelope = composeContextEnvelope({
-      stableIdentity: composeContextLayer({
-        id: `identity:${input.employee.id}`,
-        kind: 'stable-identity',
-        text: input.persona,
-        ...(input.personaRevision === undefined ? {} : { revision: String(input.personaRevision) }),
-        sourceRefs: [
-          { kind: 'employee', id: input.employee.id },
-          {
-            kind: 'employee-revision',
-            id: input.employee.id,
-            revision: String(input.personaRevision ?? input.employee.currentRevision),
-          },
-        ],
+      stableIdentity,
+      promptCache: derivePromptCachePolicy({
+        stablePrefixHash: stableContextHash(stableIdentity),
+        // Partitioned down to the character. Two characters whose prefixes are
+        // byte-identical still never share one, because a cache partition is a
+        // boundary and boundaries are not an optimisation.
+        namespace: `${input.employee.worldId}/${input.employee.id}`,
+        scope: 'employee',
+        stablePrefixTokens: stableIdentity.tokenEstimate,
+        // A direct lane is the same character answering again tomorrow; a group
+        // or task lane is assembled per collaboration and rarely reruns.
+        retentionHint: lane === 'direct' ? 'long' : 'short',
       }),
       ...(taskContext === undefined ? {} : { taskContext }),
       ...(composedMemory === undefined

@@ -155,6 +155,11 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       ...request,
       agent,
       prompt,
+      // The composer owns the cache decision because it owns the layer order
+      // that makes the prefix cacheable. The provider adapter only maps it.
+      ...(composed?.envelope.promptCache === undefined
+        ? {}
+        : { promptCache: composed.envelope.promptCache }),
       ...(composed === undefined ? {} : { history: composed.recentHistory }),
       ...(durableObserved === undefined ? {} : { observedThroughSequence: durableObserved }),
       ...(onEvent === undefined ? {} : { onEvent }),
