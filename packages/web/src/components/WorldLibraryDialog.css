@@ -1,0 +1,178 @@
+/* World library: the active list, the archive view and the delete gate. */
+
+.world-library-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(720px, 100%);
+  max-height: min(78vh, 720px);
+  overflow: hidden;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius-panel, 14px);
+  background: var(--surface-0, #0d1117);
+  color: var(--text-strong, #eef1f6);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+}
+
+.world-library-tabs {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  padding: 12px 20px 0;
+}
+
+.world-library-tabs > button {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius-control, 8px);
+  background: transparent;
+  color: var(--text-muted, #9ca3b2);
+  font-size: 13px;
+  font-weight: 550;
+  white-space: nowrap;
+}
+
+.world-library-tabs > button.is-active {
+  color: var(--text-strong, #eef1f6);
+  border-color: color-mix(in srgb, var(--accent, #6c8cff) 55%, transparent);
+  background: color-mix(in srgb, var(--accent, #6c8cff) 16%, transparent);
+}
+
+.world-library-feedback {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 12px 20px 0;
+  padding: 9px 12px;
+  border-radius: var(--radius-control, 8px);
+  font-size: 12.5px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.world-library-feedback.is-success {
+  color: var(--text-soft, #c8cedb);
+  background: color-mix(in srgb, var(--accent, #6c8cff) 14%, transparent);
+}
+
+.world-library-feedback.is-error {
+  color: var(--danger, #f2606a);
+  background: color-mix(in srgb, var(--danger, #f2606a) 12%, transparent);
+}
+
+.world-library-list {
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+  padding: 14px 20px 20px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.world-library-empty {
+  margin: 0;
+  padding: 18px 2px;
+  color: var(--text-muted, #9ca3b2);
+  font-size: 13px;
+}
+
+.world-library-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 14px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius-control, 8px);
+  background: color-mix(in srgb, var(--surface-1, #151b24) 70%, transparent);
+}
+
+.world-library-item__identity {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  flex: 1 1 220px;
+}
+
+.world-library-item__identity strong {
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.world-library-item__identity small {
+  color: var(--text-muted, #9ca3b2);
+  font-size: 12px;
+}
+
+.world-library-badge {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent, #6c8cff) 45%, transparent);
+  border-radius: 999px;
+  color: var(--accent, #6c8cff);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 550;
+  white-space: nowrap;
+}
+
+.world-library-item__actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.world-library-item__actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+/* The delete gate stacks above the library and owns keyboard focus while open. */
+.world-library-confirm-backdrop { z-index: 60; }
+
+.world-delete-dialog {
+  width: min(460px, 100%);
+  border: 1px solid color-mix(in srgb, var(--danger, #f2606a) 45%, transparent);
+  border-radius: var(--radius-panel, 14px);
+  background: var(--surface-0, #0d1117);
+  color: var(--text-strong, #eef1f6);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+}
+
+.world-delete-dialog form { display: grid; gap: 12px; padding: 20px; }
+.world-delete-dialog h2 { margin: 0; font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
+
+.world-delete-dialog__warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  color: var(--danger, #f2606a);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.world-delete-dialog__warning svg { flex: none; margin-top: 1px; }
+
+.world-delete-dialog__hint {
+  margin: -4px 0 0;
+  color: var(--text-muted, #9ca3b2);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.world-delete-dialog .world-library-feedback { margin: 0; }
+
+.world-delete-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
