@@ -5,6 +5,7 @@ import type { DomainEvent, EmployeeInstance, World } from '@dsh-cyber/contracts'
 import {
   aiAcademyTheme,
   cyberCompanyTheme,
+  knowledgeGardenTheme,
   findPath,
   jarvisCoreTheme,
   projectWorldRuntime,
@@ -98,6 +99,19 @@ describe('world theme manifest', () => {
       'filing-organiser-bench',
       'information-index-wall',
       'summary-report-stand',
+  it('validates the built-in knowledge garden theme and its courtyard scene', () => {
+    expect(validateWorldThemeManifest(knowledgeGardenTheme)).toEqual({ valid: true, errors: [] })
+    const scene = knowledgeGardenTheme.scenes[0]!
+    expect(scene.id).toBe('reading-courtyard')
+    expect(scene.interactables.map((item) => item.id)).toEqual([
+      'source-intake-desk',
+      'collection-bookshelf',
+      'citation-check-bench',
+      'note-card-shelf',
+      'knowledge-graph-wall',
+      'garden-result-showcase',
+      'excerpt-board',
+      'reading-tables',
     ])
   })
 
