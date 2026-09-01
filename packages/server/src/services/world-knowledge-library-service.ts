@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from 'node:fs/promises'
-import { dirname, extname, join, relative, resolve, sep } from 'node:path'
+import { dirname, extname, join, parse as parsePath, relative, resolve, sep } from 'node:path'
 import { inflateRawSync } from 'node:zlib'
 
 import type {
@@ -444,9 +444,41 @@ async function safeExternalDirectory(value: string): Promise<string> {
   const candidate = resolve(value)
   const info = await lstat(candidate)
   if (info.isSymbolicLink() || !info.isDirectory()) throw invalid('knowledge_source_path_invalid', '源目录必须是实际目录')
+  const walked = await assertUnredirectedPath(candidate)
   const resolved = await realpath(candidate)
-  if (!isPathWithin(resolve(candidate), resolved)) throw conflict('knowledge_source_path_invalid', '源目录真实路径越界')
+  if (!isSamePath(walked, resolved)) throw conflict('knowledge_source_path_invalid', '源目录真实路径越界')
   return resolved
+}
+
+/**
+ * 源目录不允许被符号链接改写位置。不能简单地对两侧都做 realpath 再比较：
+ * 那样等式恒成立，任何中间段指向别处的符号链接都会被放行。
+ *
+ * 语义：逐段解析路径，每一段的真实路径必须仍然等于「父段真实路径 + 该段名」。
+ * 唯一的放宽是文件系统根下的第一段——macOS 的 `/var -> private/var`、
+ * `/tmp -> private/tmp` 这类平台别名让 `os.tmpdir()` 天然带一次重定向，
+ * 而根级链接只有 root 能创建，且仍必须落在同一个文件系统根内。
+ * 因此「合法的临时目录被接受」与「越界符号链接被拒绝」同时成立。
+ */
+async function assertUnredirectedPath(candidate: string): Promise<string> {
+  const { root } = parsePath(candidate)
+  const segments = relative(root, candidate).split(sep).filter((segment) => segment.length > 0)
+  let lexical = root
+  let real = await realpath(root)
+  for (const [index, segment] of segments.entries()) {
+    lexical = join(lexical, segment)
+    const stepReal = await realpath(lexical)
+    if (!isSamePath(join(real, segment), stepReal)) {
+      const platformRootAlias = index === 0 && isPathWithin(real, stepReal)
+      if (!platformRootAlias) throw conflict('knowledge_source_path_invalid', '源目录真实路径越界')
+    }
+    real = stepReal
+  }
+  return real
+}
+
+function isSamePath(left: string, right: string): boolean {
+  return isPathWithin(left, right) && isPathWithin(right, left)
 }
 
 async function assertNoSymlinkSegments(root: string, candidate: string): Promise<void> {
