@@ -7,6 +7,7 @@ import { writeJson } from '../http/response.js'
 import type { Router } from '../http/router.js'
 import type { TaskScheduleService } from '../services/task-schedule-service.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
+import { requireWorldAcceptingWork } from '../services/world-work-guard.js'
 
 export function registerTaskScheduleRoutes(router: Router, dependencies: { store: SqliteStore; schedules: TaskScheduleService; access: WorldAccessService }): void {
   const { store, schedules, access } = dependencies
@@ -18,7 +19,7 @@ export function registerTaskScheduleRoutes(router: Router, dependencies: { store
   })
 
   router.post(/^\/api\/worlds\/([^/]+)\/schedules$/, async ({ request, response, params }) => {
-    const worldId = requireWorld(store, params[0]!)
+    const worldId = requireWorldAcceptingWork(store, params[0]!).id
     await access.assertUnlocked(worldId, request)
     const body = await readJson(request)
     try {
@@ -59,7 +60,7 @@ export function registerTaskScheduleRoutes(router: Router, dependencies: { store
   })
 
   router.post(/^\/api\/worlds\/([^/]+)\/schedules\/([^/]+)\/run$/, async ({ request, response, params }) => {
-    const worldId = requireWorld(store, params[0]!)
+    const worldId = requireWorldAcceptingWork(store, params[0]!).id
     await access.assertUnlocked(worldId, request)
     try { writeJson(response, 200, { run: await schedules.runNow(worldId, params[1]!) }) }
     catch (cause) { throw scheduleError(cause) }

@@ -14,14 +14,38 @@ const BLUEPRINT_KEYS = new Set([
   'requestedSkills',
   'requestedCapabilities',
   'embodiment',
+  'fallbackAvatarIndex',
+  'avatarPreviewPath',
   'createdAt',
 ])
 const ID = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/
 const TOKEN = /^[a-z][a-z0-9._-]*(?::[a-z][a-z0-9._-]*)?$/
+/**
+ * Package content is untrusted. Rather than sanitizing an arbitrary path, only
+ * the compiler's own fixed preview file names are admitted, so a blueprint can
+ * never point the avatar reader at another file inside or outside its package.
+ */
+const AVATAR_PREVIEW_PATH = /^preview\.(?:png|jpg|webp)$/
+
+/**
+ * The V1 host-owned allowlist of capabilities an EmployeeBlueprint may REQUEST.
+ *
+ * This is a fixed, hardcoded safe set owned by the host. It is never derived
+ * from a package manifest, never proposed by a model, and deliberately not a
+ * dynamic registry. A request is not a grant: the user approves the actual
+ * employee grants in recruitment, and persistence keeps every grant a subset
+ * of this request.
+ */
+export const EMPLOYEE_REQUESTABLE_CAPABILITIES: readonly string[] = [
+  'workspace:read',
+  'knowledge:read',
+  'artifact:read',
+] as const
+
+const REQUESTABLE_CAPABILITY_SET = new Set<string>(EMPLOYEE_REQUESTABLE_CAPABILITIES)
 
 export interface EmployeeBlueprintParseContext {
   packageId: string
-  packageCapabilities: string[]
 }
 
 export function parseEmployeeBlueprintManifest(
@@ -45,10 +69,13 @@ export function parseEmployeeBlueprintManifest(
   const persona = text(input.persona, 'persona', 2_000)
   const requestedSkills = stringSet(input.requestedSkills, 'requestedSkills', 64, TOKEN)
   const requestedCapabilities = stringSet(input.requestedCapabilities, 'requestedCapabilities', 64, /^[a-z][a-z0-9._-]*:[a-z][a-z0-9._-]*$/)
-  const packageCapabilities = new Set(context.packageCapabilities)
+  // A blueprint's requested capabilities are bounded by the host allowlist, not
+  // by what the package declared for its own installation. CyberPackageManifest
+  // .capabilities is what installing THIS PACKAGE needs; an employee's request
+  // is a separate layer the user approves per employee during recruitment.
   for (const capability of requestedCapabilities) {
-    if (!packageCapabilities.has(capability)) {
-      throw new Error(`Employee blueprint capability is not declared by its package: ${capability}`)
+    if (!REQUESTABLE_CAPABILITY_SET.has(capability)) {
+      throw new Error(`Employee blueprint capability is not host-allowed: ${capability}`)
     }
   }
   const createdAt = text(input.createdAt, 'createdAt', 64)
@@ -70,6 +97,20 @@ export function parseEmployeeBlueprintManifest(
     createdAt,
   }
   if (input.embodiment !== undefined) blueprint.embodiment = parseEmbodimentProfile(input.embodiment)
+  if (input.fallbackAvatarIndex !== undefined) {
+    const index = input.fallbackAvatarIndex
+    if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index > 7) {
+      throw new Error('Employee blueprint fallbackAvatarIndex must be an integer between 0 and 7')
+    }
+    blueprint.fallbackAvatarIndex = index
+  }
+  if (input.avatarPreviewPath !== undefined) {
+    const path = input.avatarPreviewPath
+    if (typeof path !== 'string' || !AVATAR_PREVIEW_PATH.test(path)) {
+      throw new Error('Employee blueprint avatarPreviewPath must name a declared preview image')
+    }
+    blueprint.avatarPreviewPath = path
+  }
   return blueprint
 }
 

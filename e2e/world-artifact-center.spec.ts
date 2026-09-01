@@ -47,7 +47,14 @@ test('auto-registers real files from one BrowserRuntime run and keeps them isola
   await expect(page.locator('.workbench-shell')).toBeVisible()
   await page.waitForTimeout(300)
   measuringInitialLoad = false
-  expect(initialRequests.filter((request) => request.type === 'script').length).toBeLessThanOrEqual(55)
+  const initialScripts = initialRequests.filter((request) => request.type === 'script').map((request) => request.url)
+  // Code splitting may add one small request while reducing bytes, so keep a
+  // narrow count ceiling and separately assert the real product boundary: no
+  // optional spatial/Three/VRM runtime may enter the first screen.
+  expect(initialScripts.length).toBeLessThanOrEqual(56)
+  // Pixi's core 2D renderer also emits a `WebGLRenderer-*` chunk; only the
+  // explicitly named spatial/Three/VRM chunks belong to the optional feature.
+  expect(initialScripts.filter((url) => /spatial-renderer-registry|three-world-renderer|vrm-runtime|three\.module/u.test(url))).toEqual([])
   expect(initialRequests.filter((request) => request.url.includes('/api/')).length).toBeLessThanOrEqual(22)
   expect(initialRequests.filter((request) => /\/api\/(?:employees\/[^/]+\/dossier|sessions\/[^/]+\/participants)$/.test(request.url))).toEqual([])
   const initialImageUrls = initialRequests.filter((request) => request.type === 'image').map((request) => request.url)
