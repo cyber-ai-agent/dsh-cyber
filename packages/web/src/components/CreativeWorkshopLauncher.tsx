@@ -1,7 +1,7 @@
 import { Sparkle } from '@phosphor-icons/react'
 import { lazy, Suspense, useState } from 'react'
 import { createPortal } from 'react-dom'
-import type { WorkshopProject } from '@dsh-cyber/contracts/creative-platform'
+import type { WorkshopProjectView } from '@dsh-cyber/contracts/creative-platform'
 import { useI18n } from '../i18n/runtime.js'
 
 const CreativeWorkshopDialog = lazy(async () => {
@@ -11,7 +11,7 @@ const CreativeWorkshopDialog = lazy(async () => {
 
 interface CreativeWorkshopLauncherProps {
   workspaceId: string
-  onCreated?(project: WorkshopProject): void
+  onCreated?(project: WorkshopProjectView): void
   onOpenWorld?(worldId: string): void
 }
 

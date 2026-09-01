@@ -4,11 +4,15 @@ import { dirname, resolve } from 'node:path'
 import { DatabaseSync, backup } from 'node:sqlite'
 
 import {
+  CONTEXT_SNAPSHOT_VERSION,
   CYBER_SCHEMA_VERSION,
   RECOMMENDED_ADMIN_PERMISSIONS,
   WORKSPACE_PREFERENCES_LIMITS,
   parseWorkspacePaneWidth,
   type AgentPermissionMode,
+  type ContextSnapshot,
+  type ContextSnapshotCacheStats,
+  type ContextSnapshotLayer,
   type ConversationQueueEntry,
   type ConversationQueueEntryStatus,
   type CompletionJob,
@@ -27,6 +31,11 @@ import {
   type EmployeeInstance,
   type EmployeeMilestone,
   type EmployeeMilestoneCategory,
+  type EmployeeMilestoneOrigin,
+  type WritableEmployeeMilestoneOrigin,
+  type EmployeeMemoryIndexEntry,
+  type EmployeeMemoryIndexHit,
+  type EmployeeMemoryScope,
   type EmployeeProfile,
   type EmployeeVoiceProfile,
   type CharacterGender,
@@ -97,7 +106,13 @@ import type { CharacterSkillAction } from '@dsh-cyber/contracts/skill-runtime'
 
 import { DatabaseCorruptError, EntityNotFoundError, PersistenceError } from './errors.js'
 import { CompletionJobRepository } from './completion-job-repository.js'
-import { migrate, readUserVersion } from './migrations.js'
+import {
+  EmployeeMemoryIndexRepository,
+  type MemoryIndexSearchCapability,
+  type SearchEmployeeMemoryIndexInput,
+  type UpsertEmployeeMemoryIndexEntryInput,
+} from './employee-memory-index-repository.js'
+import { migrate, readUserVersion, MIGRATION_COUNT } from './migrations.js'
 import { assertSecretFree } from './secrets.js'
 import {
   WorldCharacterAuthorityRepository,
@@ -133,6 +148,24 @@ export interface CreateWorldInput {
   actorId?: string
 }
 
+export interface WorldLifecycleInput {
+  worldId: string
+  actorId?: string
+  actorKind?: ParticipantKind
+}
+
+export interface DeleteWorldInput extends WorldLifecycleInput {
+  /** The world name the owner re-typed. Must match the stored name exactly. */
+  confirmationName: string
+}
+
+/** One unfinished unit of work that blocks a permanent world deletion. */
+export interface ActiveWorldWork {
+  kind: 'work-turn' | 'agent-run'
+  id: string
+  status: string
+}
+
 export interface RecruitEmployeeInput {
   workspaceId: string
   worldId: string
@@ -146,6 +179,8 @@ export interface RecruitEmployeeInput {
   capabilityGrants?: string[]
   modelPolicy?: JsonObject
   runtimePermissionMode?: AgentPermissionMode
+  /** Initial appearance for the character's first profile revision. */
+  appearance?: JsonObject
   reason?: string
   actorId?: string
 }
@@ -206,6 +241,8 @@ export interface AppendEmployeeMilestoneInput {
   artifactRefs?: string[]
   occurredAt?: string
   actorId?: string
+  /** Structural provenance; defaults to `authored`. */
+  origin?: WritableEmployeeMilestoneOrigin
 }
 
 export interface WriteEmployeeJournalInput {
@@ -430,6 +467,19 @@ export interface CreateAgentRunInput {
   ordinal: number
 }
 
+export interface SaveAgentRunContextSnapshotInput {
+  agentRunId: string
+  /**
+   * The projection produced by `composeContextSnapshot`.
+   *
+   * It carries no layer text by construction, and the store re-checks that on
+   * the way in: an extra field on a layer object is dropped rather than
+   * serialized, so a future `ContextLayer` field cannot reach the database
+   * without someone editing this file on purpose.
+   */
+  snapshot: ContextSnapshot
+}
+
 export interface ConversationRuntimeRecoveryReport {
   turnsFailed: number
   runsFailed: number
@@ -591,6 +641,9 @@ export interface RecoveryExportReport {
   errors: string[]
 }
 
+/** Hard cap on one batched message relocation, so hydration stays bounded. */
+const MAX_MESSAGE_ID_LOOKUP = 64
+
 const KNOWN_TABLES = [
   'schema_migrations',
   'workspaces',
@@ -602,6 +655,7 @@ const KNOWN_TABLES = [
   'skill_evidence',
   'employee_skill_revisions',
   'employee_milestones',
+  'employee_memory_index',
   'employee_daily_journals',
   'employee_relationships',
   'workspace_preferences',
@@ -616,6 +670,7 @@ const KNOWN_TABLES = [
   'task_collaboration_steps',
   'work_turns',
   'agent_runs',
+  'agent_run_context_snapshots',
   'skill_actions',
   'approval_requests',
   'approval_policies',
@@ -660,6 +715,7 @@ export class SqliteStore {
   readonly #idFactory: () => string
   readonly #worldAuthorities: WorldCharacterAuthorityRepository
   readonly #completionJobs: CompletionJobRepository
+  #memoryIndexRepository: EmployeeMemoryIndexRepository | undefined
   #closed = false
 
   private constructor(databasePath: string, database: DatabaseSync, options: StoreOptions) {
@@ -1805,6 +1861,125 @@ export class SqliteStore {
     return this.database.prepare(sql).all(workspaceId).map(mapWorld)
   }
 
+  /**
+   * Archives a world without destroying anything it owns.
+   *
+   * Archiving is a status transition and nothing else: conversations,
+   * characters, dossiers, knowledge and artifacts stay exactly where they are
+   * and come back untouched on restore. What changes is that the world stops
+   * accepting new work — see `#assertWorldAcceptsWork`.
+   */
+  archiveWorld(input: WorldLifecycleInput): World {
+    this.#assertWritable()
+    const world = this.#requireWorld(input.worldId)
+    if (world.status === 'archived') throw new PersistenceError('World is already archived')
+    const now = this.#clock()
+    return this.#transaction(() => {
+      this.database
+        .prepare("UPDATE worlds SET status = 'archived', updated_at = ? WHERE id = ?")
+        .run(now, world.id)
+      this.#appendEvent({
+        workspaceId: world.workspaceId,
+        worldId: world.id,
+        type: 'world.archived',
+        actorId: input.actorId ?? 'owner',
+        actorKind: input.actorKind ?? 'owner',
+        payload: { worldId: world.id, name: world.name },
+      })
+      return { ...world, status: 'archived', updatedAt: now }
+    })
+  }
+
+  restoreWorld(input: WorldLifecycleInput): World {
+    this.#assertWritable()
+    const world = this.#requireWorld(input.worldId)
+    if (world.status === 'active') throw new PersistenceError('World is not archived')
+    const now = this.#clock()
+    return this.#transaction(() => {
+      this.database
+        .prepare("UPDATE worlds SET status = 'active', updated_at = ? WHERE id = ?")
+        .run(now, world.id)
+      this.#appendEvent({
+        workspaceId: world.workspaceId,
+        worldId: world.id,
+        type: 'world.restored',
+        actorId: input.actorId ?? 'owner',
+        actorKind: input.actorKind ?? 'owner',
+        payload: { worldId: world.id, name: world.name },
+      })
+      return { ...world, status: 'active', updatedAt: now }
+    })
+  }
+
+  /**
+   * Work that is still in flight in this world.
+   *
+   * Permanent deletion consults this so directories are never removed out from
+   * under a running agent.
+   */
+  listActiveWorldWork(worldId: string): ActiveWorldWork[] {
+    const turns = this.database.prepare(
+      `SELECT id, status FROM work_turns
+       WHERE world_id = ? AND status IN ('queued', 'running', 'waiting-approval')
+       ORDER BY created_at, id`,
+    ).all(worldId) as { id: string; status: string }[]
+    const runs = this.database.prepare(
+      `SELECT id, status FROM agent_runs
+       WHERE world_id = ? AND status IN ('queued', 'running')
+       ORDER BY created_at, id`,
+    ).all(worldId) as { id: string; status: string }[]
+    return [
+      ...turns.map((row) => ({ kind: 'work-turn' as const, id: String(row.id), status: String(row.status) })),
+      ...runs.map((row) => ({ kind: 'agent-run' as const, id: String(row.id), status: String(row.status) })),
+    ]
+  }
+
+  hasActiveWorldWork(worldId: string): boolean {
+    return this.listActiveWorldWork(worldId).length > 0
+  }
+
+  /**
+   * Permanently deletes every durable record this world owns.
+   *
+   * Everything world-scoped hangs off `worlds(id)` with ON DELETE CASCADE —
+   * sessions, messages, turns, runs, characters and their revision chains,
+   * knowledge, artifacts, simulation state, schedules and world package
+   * instances. The workspace-global package library (`installed_packages`)
+   * points *into* world instances rather than the other way round, so it is
+   * deliberately left untouched: it is a workspace asset, not this world's
+   * private property.
+   *
+   * Files on disk are not this method's business; the caller removes the
+   * WorldRoot after this transaction commits.
+   */
+  deleteWorld(input: DeleteWorldInput): World {
+    this.#assertWritable()
+    const world = this.#requireWorld(input.worldId)
+    if (input.confirmationName.trim() !== world.name) {
+      throw new PersistenceError('World name confirmation does not match')
+    }
+    const blocking = this.listActiveWorldWork(world.id)
+    if (blocking.length > 0) {
+      throw new PersistenceError(
+        `World still has work in flight: ${blocking.map((item) => `${item.kind}:${item.id}(${item.status})`).join(', ')}`,
+      )
+    }
+    return this.#transaction(() => {
+      this.database.prepare('DELETE FROM worlds WHERE id = ?').run(world.id)
+      // The event is recorded at workspace scope on purpose: domain_events
+      // cascades on world_id, so a world-scoped record of this deletion would
+      // delete itself.
+      this.#appendEvent({
+        workspaceId: world.workspaceId,
+        type: 'world.deleted',
+        actorId: input.actorId ?? 'owner',
+        actorKind: input.actorKind ?? 'owner',
+        payload: { worldId: world.id, name: world.name, templateId: world.templateId },
+      })
+      return world
+    })
+  }
+
   rollbackWorldCreation(worldId: string, reason: string, actorId = 'system'): void {
     this.#assertWritable()
     const world = this.#requireWorld(worldId)
@@ -1918,6 +2093,11 @@ export class SqliteStore {
     // persistence only owns the durable shape and uniqueness boundary.
     assertUnique(initialSkillGrants, 'skill grant')
     assertSubset(initialCapabilityGrants, blueprint.requestedCapabilities, 'capability grant')
+    // Appearance chosen for the character before it exists — the built-in
+    // avatar slot in particular — is durable from revision 1, so no reader
+    // has to invent one and then disagree with the next reader.
+    const initialAppearance = structuredClone(input.appearance ?? {})
+    assertSecretFree(initialAppearance)
     const now = this.#clock()
     const employee: EmployeeInstance = {
       id: this.#idFactory(),
@@ -1969,9 +2149,9 @@ export class SqliteStore {
           `INSERT INTO employee_profile_revisions
            (employee_id, revision, gender, voice_profile_json, birthday, background, personality_traits_json,
             appearance_json, reason, created_at)
-           VALUES (?, 1, ?, ?, NULL, ?, '[]', '{}', 'recruited', ?)`,
+           VALUES (?, 1, ?, ?, NULL, ?, '[]', ?, 'recruited', ?)`,
         )
-        .run(employee.id, normalizeCharacterGender(input.gender), stringifyJson(defaultEmployeeVoiceProfile() as unknown as JsonObject), blueprint.summary, now)
+        .run(employee.id, normalizeCharacterGender(input.gender), stringifyJson(defaultEmployeeVoiceProfile() as unknown as JsonObject), blueprint.summary, stringifyJson(initialAppearance), now)
       const recruitedEvent = this.#appendEvent({
         workspaceId: workspace.id,
         worldId: world.id,
@@ -1991,10 +2171,10 @@ export class SqliteStore {
       this.database
         .prepare(
           `INSERT INTO employee_milestones
-           (id, workspace_id, world_id, employee_id, category, title, summary,
+           (id, workspace_id, world_id, employee_id, origin, category, title, summary,
             source_event_ids_json, source_message_ids_json, artifact_refs_json,
             occurred_at, created_at)
-           VALUES (?, ?, ?, ?, 'joined', ?, ?, ?, '[]', '[]', ?, ?)`,
+           VALUES (?, ?, ?, ?, 'authored', 'joined', ?, ?, ?, '[]', '[]', ?, ?)`,
         )
         .run(
           joinedMilestoneId,
@@ -2433,6 +2613,7 @@ export class SqliteStore {
       if (skill.status === 'verified') {
         this.#insertMilestone(employee, {
           category: 'skill',
+          origin: 'authored',
           title: `掌握技能：${skill.skillId}`,
           summary: skill.reason,
           sourceEventIds: [skillEvent.id],
@@ -2479,6 +2660,7 @@ export class SqliteStore {
         artifactRefs: uniqueStrings(input.artifactRefs ?? []),
         occurredAt: input.occurredAt ?? this.#clock(),
         actorId: input.actorId ?? 'owner',
+        origin: input.origin ?? 'authored',
       }),
     )
   }
@@ -2501,13 +2683,56 @@ export class SqliteStore {
     return `${Number(row.count)}:${row.latest}`
   }
 
+  /**
+   * The employee memory retrieval index.
+   *
+   * It is created lazily because the repository touches its own tables, and
+   * migrations only run after the store instance exists.
+   */
+  get memoryIndex(): EmployeeMemoryIndexRepository {
+    this.#memoryIndexRepository ??= new EmployeeMemoryIndexRepository(this.database, {
+      clock: this.#clock,
+      readOnly: this.readOnly,
+    })
+    return this.#memoryIndexRepository
+  }
+
+  get memoryIndexSearchCapability(): MemoryIndexSearchCapability {
+    return this.memoryIndex.searchCapability
+  }
+
+  /** Indexes a durable milestone. The milestone stays the source of truth. */
+  indexEmployeeMemory(input: UpsertEmployeeMemoryIndexEntryInput): EmployeeMemoryIndexEntry {
+    this.#assertWritable()
+    return this.#transaction(() => this.memoryIndex.upsert(input))
+  }
+
+  getEmployeeMemoryIndexEntry(memoryId: string): EmployeeMemoryIndexEntry | undefined {
+    return this.memoryIndex.get(memoryId)
+  }
+
+  listEmployeeMemoryIndex(
+    employeeId: string,
+    scopes: readonly EmployeeMemoryScope[],
+    limit?: number,
+  ): EmployeeMemoryIndexEntry[] {
+    return this.memoryIndex.list(employeeId, scopes, limit)
+  }
+
+  searchEmployeeMemoryIndex(input: SearchEmployeeMemoryIndexInput): EmployeeMemoryIndexHit[] {
+    return this.memoryIndex.search(input)
+  }
+
   removeLegacyConversationMilestones(employeeId: string): number {
     this.#assertWritable()
     this.#requireEmployee(employeeId)
+    // Only rows stamped as the retired per-turn generator's output are removed.
+    // Milestone titles are display copy: an owner-authored milestone that happens
+    // to reuse a legacy title is durable user data and must survive.
     return Number(this.database.prepare(
       `DELETE FROM employee_milestones
        WHERE employee_id = ?
-         AND title IN ('完成一次真实对话', '完成一次有工具证据的任务')`,
+         AND origin = 'legacy-conversation-projection'`,
     ).run(employeeId).changes)
   }
 
@@ -2994,6 +3219,7 @@ export class SqliteStore {
 
   createWorkTurn(input: CreateWorkTurnInput): WorkTurn {
     this.#assertWritable()
+    this.#assertWorldAcceptsWork(input.worldId)
     const session = this.#requireSession(input.sessionId)
     if (session.workspaceId !== input.workspaceId || session.worldId !== input.worldId) {
       throw new PersistenceError('Work turn scope does not match session')
@@ -3496,6 +3722,7 @@ export class SqliteStore {
 
   createAgentRun(input: CreateAgentRunInput): AgentRun {
     this.#assertWritable()
+    this.#assertWorldAcceptsWork(input.worldId)
     const turn = this.getWorkTurn(input.turnId)
     const employee = this.#requireEmployee(input.employeeId)
     if (turn === undefined || turn.workspaceId !== input.workspaceId || turn.worldId !== input.worldId ||
@@ -3533,6 +3760,80 @@ export class SqliteStore {
       .prepare('SELECT * FROM agent_runs WHERE world_id = ? ORDER BY created_at DESC, id DESC')
       .all(worldId)
       .map(mapAgentRun)
+  }
+
+  /**
+   * Records what context an AgentRun ran with, as structure and pointers.
+   *
+   * Writing is idempotent per run: a retried compose overwrites the row rather
+   * than accumulating near-duplicates. `prefixReused` is resolved here, from
+   * the previous snapshot of the same character in the same conversation,
+   * because that is a durable fact about the pair and not something a caller
+   * should be trusted to remember across process restarts.
+   *
+   * The row is a child of `agent_runs`, so it disappears with its run — a
+   * retention sweep or a deleted work turn prunes snapshots by cascade and
+   * cannot leave an orphaned context record behind.
+   */
+  saveAgentRunContextSnapshot(input: SaveAgentRunContextSnapshotInput): ContextSnapshot {
+    this.#assertWritable()
+    const run = this.getAgentRun(input.agentRunId)
+    if (run === undefined) throw new EntityNotFoundError(`Agent run not found: ${input.agentRunId}`)
+    const layers = input.snapshot.layers.map(sanitizeSnapshotLayer)
+    const previous = input.snapshot.cache.previousStablePrefixHash
+      ?? this.#previousStablePrefixHash(run)
+    const cache: ContextSnapshotCacheStats = {
+      stablePrefixTokens: nonNegativeInteger(input.snapshot.cache.stablePrefixTokens),
+      volatileTokens: nonNegativeInteger(input.snapshot.cache.volatileTokens),
+      ...(previous === undefined ? {} : { previousStablePrefixHash: previous }),
+      prefixReused: previous !== undefined && previous === input.snapshot.stablePrefixHash,
+    }
+    const snapshot: ContextSnapshot = { ...input.snapshot, layers, cache }
+
+    this.database.prepare(
+      `INSERT INTO agent_run_context_snapshots
+       (agent_run_id, workspace_id, world_id, session_id, employee_id, snapshot_version,
+        envelope_version, stable_prefix_hash, structure_hash, total_token_estimate,
+        layers_json, cache_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(agent_run_id) DO UPDATE SET
+         snapshot_version = excluded.snapshot_version,
+         envelope_version = excluded.envelope_version,
+         stable_prefix_hash = excluded.stable_prefix_hash,
+         structure_hash = excluded.structure_hash,
+         total_token_estimate = excluded.total_token_estimate,
+         layers_json = excluded.layers_json,
+         cache_json = excluded.cache_json,
+         created_at = excluded.created_at`,
+    ).run(
+      run.id, run.workspaceId, run.worldId, run.sessionId, run.employeeId,
+      snapshot.snapshotVersion, snapshot.envelopeVersion, snapshot.stablePrefixHash,
+      snapshot.structureHash, nonNegativeInteger(snapshot.totalTokenEstimate),
+      JSON.stringify(layers), JSON.stringify(cache), this.#clock(),
+    )
+    return snapshot
+  }
+
+  getAgentRunContextSnapshot(agentRunId: string): ContextSnapshot | undefined {
+    const row = this.database
+      .prepare('SELECT * FROM agent_run_context_snapshots WHERE agent_run_id = ?')
+      .get(agentRunId) as Record<string, unknown> | undefined
+    return row === undefined ? undefined : mapContextSnapshot(row)
+  }
+
+  /** The prefix hash of the previous run of this character in this conversation. */
+  #previousStablePrefixHash(run: AgentRun): string | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT stable_prefix_hash FROM agent_run_context_snapshots
+         WHERE session_id = ? AND employee_id = ? AND agent_run_id <> ?
+         -- rowid, not the run id, breaks a same-millisecond tie: run ids are
+         -- random UUIDs, so ordering by them would pick an arbitrary earlier
+         -- turn and report cache churn that never happened.
+         ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+      )
+      .get(run.sessionId, run.employeeId, run.id) as { stable_prefix_hash?: string } | undefined
+    return row?.stable_prefix_hash
   }
 
   startAgentRun(runId: string): AgentRun {
@@ -4115,6 +4416,31 @@ export class SqliteStore {
         'SELECT * FROM messages WHERE session_id = ? AND sequence > ? ORDER BY sequence',
       )
       .all(sessionId, afterSequence)
+      .map(mapMessage)
+  }
+
+  /**
+   * Relocates durable messages by id, across sessions.
+   *
+   * A memory index entry keeps the ids of the messages it was derived from, so
+   * a retrieved memory can bring back what was actually said instead of only a
+   * rendered summary. That read is by id, not by conversation, which is why it
+   * cannot go through `listMessages`. It is deliberately batched and capped: a
+   * hydration path must never turn one retrieval into an unbounded scan.
+   *
+   * This is a pure relocation. It applies no scope rule of its own, so every
+   * caller has to decide for itself whether the conversation it is composing
+   * is allowed to see the message it just read back.
+   */
+  getMessages(ids: readonly string[]): WorkMessage[] {
+    const wanted = [...new Set(ids.map((value) => value.trim()).filter(Boolean))].slice(0, MAX_MESSAGE_ID_LOOKUP)
+    if (wanted.length === 0) return []
+    return this.database
+      .prepare(
+        `SELECT * FROM messages WHERE id IN (${wanted.map(() => '?').join(', ')})
+         ORDER BY session_id, sequence`,
+      )
+      .all(...wanted)
       .map(mapMessage)
   }
 
@@ -5079,7 +5405,10 @@ export class SqliteStore {
       errors.push(`Expected schema ${CYBER_SCHEMA_VERSION}, found ${schemaVersion}`)
     }
     const migrationHistory = this.database.prepare('SELECT COUNT(*) AS count, MAX(version) AS maximum FROM schema_migrations').get() as { count: number; maximum: number | null }
-    if (Number(migrationHistory.count) !== CYBER_SCHEMA_VERSION || Number(migrationHistory.maximum) !== CYBER_SCHEMA_VERSION) {
+    // Counted against the migrations this build ships, not against the schema
+    // version: version numbers are claimed per branch and one of them (38) is
+    // not on this one, so a healthy database holds fewer rows than its version.
+    if (Number(migrationHistory.count) !== MIGRATION_COUNT || Number(migrationHistory.maximum) !== CYBER_SCHEMA_VERSION) {
       errors.push(`Migration history is incomplete: ${migrationHistory.count} entries, latest ${migrationHistory.maximum ?? 'none'}`)
     }
 
@@ -5097,6 +5426,7 @@ export class SqliteStore {
         skillEvidence: countRows(this.database, 'skill_evidence'),
         employeeSkills: countRows(this.database, 'employee_skill_revisions'),
         employeeMilestones: countRows(this.database, 'employee_milestones'),
+        employeeMemoryIndexEntries: countRows(this.database, 'employee_memory_index'),
         employeeJournals: countRows(this.database, 'employee_daily_journals'),
         employeeRelationships: countRows(this.database, 'employee_relationships'),
         workspacePreferences: countRows(this.database, 'workspace_preferences'),
@@ -5168,8 +5498,8 @@ export class SqliteStore {
   #enqueueConversationTurn(input: EnqueueConversationTurnInput, priority: number): ConversationQueueEntry {
     this.#assertWritable()
     const workspace = this.#requireWorkspace(input.workspaceId)
-    const world = this.#requireWorld(input.worldId)
-    if (world.workspaceId !== workspace.id || world.status === 'archived') {
+    const world = this.#assertWorldAcceptsWork(input.worldId)
+    if (world.workspaceId !== workspace.id) {
       throw new PersistenceError('Conversation queue world does not belong to workspace')
     }
     const session = this.#requireSession(input.sessionId)
@@ -5658,6 +5988,7 @@ export class SqliteStore {
       artifactRefs: string[]
       occurredAt: string
       actorId: string
+      origin: WritableEmployeeMilestoneOrigin
     },
   ): EmployeeMilestone {
     const milestone: EmployeeMilestone = {
@@ -5665,6 +5996,7 @@ export class SqliteStore {
       workspaceId: employee.workspaceId,
       worldId: employee.worldId,
       employeeId: employee.id,
+      origin: input.origin,
       category: input.category,
       title: input.title.trim(),
       summary: input.summary.trim(),
@@ -5680,16 +6012,17 @@ export class SqliteStore {
     this.database
       .prepare(
         `INSERT INTO employee_milestones
-         (id, workspace_id, world_id, employee_id, category, title, summary,
+         (id, workspace_id, world_id, employee_id, origin, category, title, summary,
           source_event_ids_json, source_message_ids_json, artifact_refs_json,
           occurred_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         milestone.id,
         milestone.workspaceId,
         milestone.worldId,
         milestone.employeeId,
+        milestone.origin,
         milestone.category,
         milestone.title,
         milestone.summary,
@@ -5785,6 +6118,24 @@ export class SqliteStore {
   #requireWorld(worldId: string): World {
     const world = this.getWorld(worldId)
     if (!world) throw new EntityNotFoundError(`World not found: ${worldId}`)
+    return world
+  }
+
+  /**
+   * The single fail-closed gate for starting work in a world.
+   *
+   * Every entry point that can begin agent work funnels through one of
+   * `createWorkTurn`, `createAgentRun` or the conversation queue, so guarding
+   * here means an archived world cannot be driven by a route, a skill, the
+   * scheduler or ambient life — including code written after this change.
+   */
+  #assertWorldAcceptsWork(worldId: string): World {
+    const world = this.#requireWorld(worldId)
+    if (world.status === 'archived') {
+      throw new PersistenceError(
+        `World is archived and accepts no new work: ${world.name}. Restore it before starting work.`,
+      )
+    }
     return world
   }
 
@@ -6259,6 +6610,7 @@ function mapEmployeeMilestone(row: object): EmployeeMilestone {
     workspaceId: String(value.workspace_id),
     worldId: String(value.world_id),
     employeeId: String(value.employee_id),
+    origin: value.origin as EmployeeMilestoneOrigin,
     category: value.category as EmployeeMilestoneCategory,
     title: String(value.title),
     summary: String(value.summary),
@@ -6490,6 +6842,52 @@ function mapAgentRun(row: object): AgentRun {
   if (typeof value.started_at === 'string') run.startedAt = value.started_at
   if (typeof value.completed_at === 'string') run.completedAt = value.completed_at
   return run
+}
+
+function mapContextSnapshot(row: Record<string, unknown>): ContextSnapshot {
+  const cache = JSON.parse(String(row.cache_json)) as ContextSnapshotCacheStats
+  const previous = typeof cache.previousStablePrefixHash === 'string' ? cache.previousStablePrefixHash : undefined
+  return {
+    snapshotVersion: CONTEXT_SNAPSHOT_VERSION,
+    envelopeVersion: Number(row.envelope_version),
+    stablePrefixHash: String(row.stable_prefix_hash),
+    structureHash: String(row.structure_hash),
+    layers: (JSON.parse(String(row.layers_json)) as ContextSnapshotLayer[]).map(sanitizeSnapshotLayer),
+    totalTokenEstimate: Number(row.total_token_estimate),
+    cache: {
+      stablePrefixTokens: nonNegativeInteger(cache.stablePrefixTokens),
+      volatileTokens: nonNegativeInteger(cache.volatileTokens),
+      ...(previous === undefined ? {} : { previousStablePrefixHash: previous }),
+      prefixReused: cache.prefixReused === true,
+    },
+  }
+}
+
+/**
+ * Rebuilds a snapshot layer field by field.
+ *
+ * This is the write barrier that keeps prompt text out of the database. The
+ * layer objects arrive from a caller that also holds the rendered
+ * `ContextLayer`, so copying the object wholesale is exactly the mistake that
+ * would turn every AgentRun into a prompt log.
+ */
+function sanitizeSnapshotLayer(layer: ContextSnapshotLayer): ContextSnapshotLayer {
+  return {
+    id: String(layer.id),
+    kind: layer.kind,
+    revision: String(layer.revision),
+    contentHash: String(layer.contentHash),
+    tokenEstimate: nonNegativeInteger(layer.tokenEstimate),
+    sourceRefs: (layer.sourceRefs ?? []).map((ref) => ({
+      kind: ref.kind,
+      id: String(ref.id),
+      ...(ref.revision === undefined ? {} : { revision: String(ref.revision) }),
+    })),
+  }
+}
+
+function nonNegativeInteger(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0
 }
 
 function mapSkillAction(row: object): CharacterSkillAction {

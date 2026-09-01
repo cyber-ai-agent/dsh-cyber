@@ -16,6 +16,7 @@ import type {
 } from '@dsh-cyber/contracts'
 
 import { formatRecoveredHistoryPrompt, unseenHistory } from './history-prompt.js'
+import { resolveHarnessPromptCache } from './prompt-cache.js'
 import {
   ensureHarnessProfile,
   WORKER_PROFILE_NAME,
@@ -150,11 +151,13 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     }
     const result = await this.runEmployeeTurn(employeeRequest)
     const tokenUsage = extractHarnessTokenUsage(result.notifications)
+    const promptCache = resolveHarnessPromptCache(request.promptCache, this.#options.providerProfile?.api)
     return {
       agentSessionId: result.agentSessionId,
       finalResponse: result.finalResponse,
       eventCount: result.notifications.length,
       ...(tokenUsage === undefined ? {} : { tokenUsage }),
+      ...(promptCache === undefined ? {} : { promptCache }),
     }
   }
 
@@ -708,20 +711,72 @@ function extractTokenUsageFromValue(root: unknown): ModelTokenUsage | undefined 
       return
     }
     const item = value as Record<string, unknown>
-    const prompt = tokenCount(item, ['prompt_tokens', 'input_tokens', 'promptTokens', 'inputTokens'])
-    const completion = tokenCount(item, ['completion_tokens', 'output_tokens', 'completionTokens', 'outputTokens'])
-    const declaredTotal = tokenCount(item, ['total_tokens', 'totalTokens'])
-    if (prompt !== undefined && completion !== undefined) {
-      latest = {
-        prompt,
-        completion,
-        total: declaredTotal ?? prompt + completion,
-      }
-    }
+    const usage = readTokenUsage(item)
+    if (usage !== undefined) latest = usage
     for (const nested of Object.values(item)) visit(nested, depth + 1)
   }
   visit(root, 0)
   return latest
+}
+
+/**
+ * Reads one usage record, cache buckets included, without ever guessing a count.
+ *
+ * The two live conventions disagree on what the prompt field means, so they are
+ * told apart by which cache keys travel with it rather than by name alone:
+ *
+ * - DISJOINT (DSH `TokenUsage`, Anthropic messages): the prompt field excludes
+ *   cached tokens, and `cacheReadTokens` / `cacheWriteTokens` sit beside it.
+ *   Billed prompt is the sum of the three.
+ * - INCLUSIVE (DeepSeek and OpenAI-compatible wire usage): `prompt_tokens`
+ *   already contains the hits, reported again as `prompt_cache_hit_tokens` or
+ *   `*_tokens_details.cached_tokens`. Adding them would double-count.
+ *
+ * Cache *writes* land in `uncachedPrompt`: the model read those tokens this
+ * call, it only also stored them. When a provider reports no cache accounting
+ * at all, both derived fields stay absent — a fabricated zero would claim the
+ * prefix missed, which is a different and unproven fact.
+ */
+function readTokenUsage(item: Record<string, unknown>): ModelTokenUsage | undefined {
+  const promptField = tokenCount(item, ['prompt_tokens', 'promptTokens', 'input_tokens', 'inputTokens'])
+  const completion = tokenCount(item, ['completion_tokens', 'output_tokens', 'completionTokens', 'outputTokens'])
+  if (promptField === undefined || completion === undefined) return undefined
+
+  const disjointRead = tokenCount(item, ['cacheReadTokens', 'cache_read_input_tokens'])
+  const disjointWrite = tokenCount(item, ['cacheWriteTokens', 'cache_creation_input_tokens'])
+  const inclusiveCached = tokenCount(item, ['prompt_cache_hit_tokens'])
+    ?? nestedTokenCount(item, 'prompt_tokens_details', 'cached_tokens')
+    ?? nestedTokenCount(item, 'input_tokens_details', 'cached_tokens')
+
+  let prompt = promptField
+  let cachedPrompt: number | undefined
+  let uncachedPrompt: number | undefined
+  if (disjointRead !== undefined || disjointWrite !== undefined) {
+    prompt = promptField + (disjointRead ?? 0) + (disjointWrite ?? 0)
+    cachedPrompt = disjointRead ?? 0
+    uncachedPrompt = promptField + (disjointWrite ?? 0)
+  } else if (inclusiveCached !== undefined && inclusiveCached <= promptField) {
+    cachedPrompt = inclusiveCached
+    uncachedPrompt = promptField - inclusiveCached
+  }
+
+  const declaredTotal = tokenCount(item, ['total_tokens', 'totalTokens'])
+  return {
+    prompt,
+    completion,
+    total: declaredTotal ?? prompt + completion,
+    ...(cachedPrompt === undefined ? {} : { cachedPrompt }),
+    ...(uncachedPrompt === undefined ? {} : { uncachedPrompt }),
+  }
+}
+
+function nestedTokenCount(
+  recordValue: Record<string, unknown>,
+  container: string,
+  key: string,
+): number | undefined {
+  const nested = record(recordValue[container])
+  return nested === undefined ? undefined : tokenCount(nested, [key])
 }
 
 function tokenCount(recordValue: Record<string, unknown>, keys: readonly string[]): number | undefined {

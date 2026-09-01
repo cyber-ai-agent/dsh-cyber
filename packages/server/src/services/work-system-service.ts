@@ -30,6 +30,9 @@ export class WorkSystemService {
 
   async execute(taskId: string, input: { employeeIds: string[]; coordinatorEmployeeId?: string }): Promise<WorkTaskDetail> {
     let task = this.#repository.requireTask(taskId)
+    const world = this.#store.getWorld(task.worldId)
+    if (world === undefined) throw new Error('任务世界不可用')
+    if (world.status === 'archived') throw new Error(`世界「${world.name}」已归档，无法执行任务。请先恢复该世界。`)
     const employeeIds = [...new Set(input.employeeIds.map((id) => id.trim()).filter(Boolean))]
     if (employeeIds.length < 2) throw new Error('真实任务协作至少需要两名角色')
     for (const employeeId of employeeIds) this.#requireEmployee(task.worldId, employeeId)
