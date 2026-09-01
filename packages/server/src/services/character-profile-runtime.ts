@@ -16,6 +16,11 @@ import {
   type CharacterMemoryContextPort,
 } from './employee-conversation-memory-service.js'
 import {
+  defaultConversationContextComposer,
+  type ConversationContextComposer,
+  type ConversationMemoryLayersPort,
+} from './conversation-context-composer.js'
+import {
   contextSnapshotSequence,
   lastDurableObservation,
 } from './employee-observation-runtime.js'
@@ -30,6 +35,7 @@ type CharacterRuntimeStore = Pick<
 > & Partial<Pick<
   SqliteStore,
   'getEmployeeDossier' | 'getSession' | 'getWorkTurn' | 'listMessages' | 'appendEmployeeMilestone'
+  | 'getLatestTaskCollaborationPlanForSession'
 >>
 
 const OBSERVED_THROUGH_KEY = 'contextObservedThroughSequence'
@@ -42,6 +48,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
   readonly #authority: Pick<WorldAuthorityPort, 'get'> | undefined
   readonly #skillAvailability: WorldSkillAvailabilityPort | undefined
   readonly #memory: CharacterMemoryContextPort | undefined
+  readonly #context: ConversationContextComposer | undefined
 
   constructor(
     inner: AgentRuntimePort,
@@ -57,6 +64,10 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
     this.#authority = authority
     this.#skillAvailability = skillAvailability
     this.#memory = memory ?? defaultMemoryForStore(store)
+    this.#context = defaultConversationContextComposer(
+      store as Record<string, unknown>,
+      this.#memory as ConversationMemoryLayersPort | undefined,
+    )
   }
 
   async runTurn(request: AgentTurnRequest) {
@@ -89,15 +100,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
         )
       : composeWorldAuthorityPersona(profiledPersona, currentAuthority)
     const runtimePersona = composeConversationPermissionPersona(persona, request.permissionMode ?? 'read-only')
-    const memoryContext = await this.#memory?.compose({
-      employeeId: agent.id,
-      conversationId: request.conversationId,
-      prompt: request.prompt,
-      ...(request.contextBudget === undefined ? {} : { budgetTokens: request.contextBudget.memoryTokens }),
-    })
-    const prompt = memoryContext === undefined
-      ? request.prompt
-      : `${memoryContext}\n\n[当前请求]\n${request.prompt}`
+    const effectivePersona = composeSkillRecipes(runtimePersona, recipeInstructions)
 
     const durableMessages = this.#store.listMessages?.(request.conversationId)
     const durableObserved = durableMessages === undefined
@@ -106,6 +109,36 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
     const snapshotSequence = durableMessages === undefined
       ? undefined
       : contextSnapshotSequence(durableMessages, request)
+
+    // One composer decides the whole turn context. It owns the memory, task and
+    // recent-conversation layers; the runtime lane below only renders the part
+    // of the recent window its live Agent session has not observed yet. It is
+    // given the same observation cursor the lane will use, so the window can
+    // never start after an entry the lane still has to replay.
+    const composed = await this.#context?.compose({
+      employee: agent,
+      persona: effectivePersona,
+      personaRevision: revision.revision,
+      conversationId: request.conversationId,
+      prompt: request.prompt,
+      history: request.history ?? [],
+      observedThroughSequence: durableObserved ?? request.observedThroughSequence ?? 0,
+      ...(request.workTurnId === undefined ? {} : { workTurnId: request.workTurnId }),
+      ...(request.contextBudget === undefined ? {} : { memoryBudgetTokens: request.contextBudget.memoryTokens }),
+    })
+    const memoryContext = composed !== undefined
+      ? undefined
+      : await this.#memory?.compose({
+          employeeId: agent.id,
+          conversationId: request.conversationId,
+          prompt: request.prompt,
+          ...(request.contextBudget === undefined ? {} : { budgetTokens: request.contextBudget.memoryTokens }),
+        })
+    const prompt = composed?.prompt
+      ?? (memoryContext === undefined
+        ? request.prompt
+        : `${memoryContext}\n\n[当前请求]\n${request.prompt}`)
+
     let sawAssistantMessage = false
     const originalOnEvent = request.onEvent
     const onEvent = originalOnEvent === undefined
@@ -119,6 +152,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       ...request,
       agent,
       prompt,
+      ...(composed === undefined ? {} : { history: composed.recentHistory }),
       ...(durableObserved === undefined ? {} : { observedThroughSequence: durableObserved }),
       ...(onEvent === undefined ? {} : { onEvent }),
       revision: {
@@ -126,7 +160,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
         // Keep historical unavailable grants durable, but do not expose them
         // to the model prompt or downstream Harness runtime for this turn.
         skillGrants: grantedSkillIds,
-        persona: composeSkillRecipes(runtimePersona, recipeInstructions),
+        persona: effectivePersona,
       },
     })
 
