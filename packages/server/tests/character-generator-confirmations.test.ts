@@ -244,6 +244,85 @@ describe('B-FIX-6 source retention is provenance only', () => {
         .toThrow(/Unknown employee blueprint field/u)
     }
   })
+
+  /**
+   * The retention decision itself, pinned so it is not re-litigated.
+   *
+   * `parseSource` keeps the RAW request text for `source/original.*` rather than
+   * the NFC-normalized, trimmed form the rest of the pipeline runs on. That is
+   * deliberate: this file is the reviewer's answer to "what did the human
+   * actually hand us", and provenance that has been silently rewritten cannot
+   * be diffed against the operator's own copy. The normalization exists to make
+   * the DERIVED draft stable, not to sanitize the archive.
+   *
+   * It is safe because the archive is inert (the case above) and because the
+   * raw form is independently bounded (the case below). If either of those two
+   * stops holding, retain `source.text` instead — not before.
+   */
+  it('retains the raw request bytes verbatim rather than the normalized form', async () => {
+    const server = await startServer({ analyzer: stubAnalyzer(validDraft()) })
+    const workspace = server.store.listWorkspaces()[0]!
+
+    // Differs from the validated form in exactly the two ways
+    // normalizeCharacterSource rewrites text: NFD composition and a trailing
+    // newline that trim() eats.
+    const raw = '---\nname: 组合字符检查\n---\n\né decomposed acute.\n'
+    expect(raw.normalize('NFC').trim()).not.toBe(raw)
+
+    const published = await postJson(server.origin, `/api/workspaces/${workspace.id}/character-generator/publish`, {
+      draft: validDraft(),
+      source: { kind: 'file', text: raw, fileName: 'decomposed.md' },
+      targetWorldTemplateId: 'personal-world',
+    })
+    expect(published.status, JSON.stringify(published.body)).toBe(201)
+    const manifest = published.body.item.manifest as CyberPackageManifest
+    const retained = await readFile(join(talentRoot(server.root, workspace.id), manifest.id, 'source', 'original.md'), 'utf8')
+    expect(retained).toBe(raw)
+    expect(retained).not.toBe(raw.normalize('NFC').trim())
+  })
+
+  it('bounds the raw retained bytes at 128 KiB even when the normalized form fits', async () => {
+    const server = await startServer({ analyzer: stubAnalyzer(validDraft()) })
+    const workspace = server.store.listWorkspaces()[0]!
+
+    // UTF-8 NFD runs up to 3x the size of NFC, so the source boundary's 128 KiB
+    // check on the NORMALIZED text is not a bound on what gets retained. The
+    // compiler re-checks the raw bytes; without that, this body would land on
+    // disk at 192 KiB.
+    const raw = 'é'.repeat(64 * 1024)
+    expect(Buffer.byteLength(raw.normalize('NFC'), 'utf8')).toBeLessThanOrEqual(128 * 1024)
+    expect(Buffer.byteLength(raw, 'utf8')).toBe(192 * 1024)
+
+    const published = await postJson(server.origin, `/api/workspaces/${workspace.id}/character-generator/publish`, {
+      draft: validDraft(),
+      source: { kind: 'file', text: raw, fileName: 'oversized.md' },
+      targetWorldTemplateId: 'personal-world',
+    })
+    expect(published.status, JSON.stringify(published.body)).toBe(422)
+    expect(await talentPackageDirectories(server.root, workspace.id)).toEqual([])
+  })
+
+  it('keeps every escape-capable control character out of the archive in any position', async () => {
+    const server = await startServer({ analyzer: stubAnalyzer(validDraft()) })
+    const workspace = server.store.listWorkspaces()[0]!
+
+    // trim() strips only VT and FF from the edges, so those two are the entire
+    // gap between the raw archive and the validated text. NUL and ESC are not
+    // whitespace, so they survive trim() and are refused wherever they appear —
+    // no terminal escape sequence can reach source/original.*.
+    for (const control of [String.fromCharCode(0), String.fromCharCode(0x1b)]) {
+      for (const raw of [`${control}角色`, `角色${control}`, `角${control}色`]) {
+        const published = await postJson(server.origin, `/api/workspaces/${workspace.id}/character-generator/publish`, {
+          draft: validDraft(),
+          source: { kind: 'file', text: raw, fileName: 'control.md' },
+          targetWorldTemplateId: 'personal-world',
+        })
+        expect(published.status, JSON.stringify(published.body)).toBe(422)
+        expect(published.body.error.code).toBe('character_source_control_character')
+      }
+    }
+    expect(await talentPackageDirectories(server.root, workspace.id)).toEqual([])
+  })
 })
 
 describe('B-FIX-9 community fixture and offline analyzer contract', () => {

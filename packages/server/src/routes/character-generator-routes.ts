@@ -232,10 +232,50 @@ function optionalWorldTemplateId(value: string | null): string | undefined {
 }
 
 interface ParsedCharacterSource {
+  /** Normalized and validated. Everything derived from the source uses this. */
   source: CharacterSourceInput
+  /**
+   * The raw request text, retained UNCHANGED as the package's
+   * `source/original.*` provenance file. This is deliberate, not an oversight;
+   * see parseSource.
+   */
   originalText: string
 }
 
+/**
+ * Split the source into the validated form the pipeline runs on and the raw
+ * form the package archives.
+ *
+ * `originalText` is kept RAW on purpose. `source/original.*` answers one
+ * question — what did the human actually hand us — and provenance that has been
+ * silently rewritten cannot be diffed against the operator's own file. The NFC
+ * pass and the trim in normalizeCharacterSource exist so the DERIVED draft is
+ * stable, not to sanitize the archive; applying them here would drop a trailing
+ * newline and recompose combining marks in a file whose whole value is being
+ * byte-exact.
+ *
+ * Two properties make that safe, and both are pinned in
+ * character-generator-confirmations.test.ts (B-FIX-6):
+ *
+ *  1. The archive is inert. Nothing in the product reads `source/original.*`:
+ *     it is not an entrypoint, the marketplace preview route selects only
+ *     image extensions out of manifest.files, and the sole code that touches
+ *     the bytes is the SHA-256 integrity check. It never reaches a persona, a
+ *     blueprint field, a dossier or a runtime turn request.
+ *  2. The raw form is separately bounded. normalizeCharacterSource applies its
+ *     128 KiB check to the NFC form, which UTF-8 NFD can exceed by up to 3x, so
+ *     that check alone is not a bound on what gets written; the compiler
+ *     re-checks the raw originalText against the same 128 KiB before it stages
+ *     anything.
+ *
+ * The residual gap between the two forms is exactly VT (U+000B) and FF (U+000C)
+ * in leading or trailing position — the only rejected control characters that
+ * `trim()` removes. NUL and ESC are not whitespace, so they are refused in every
+ * position and no escape sequence can reach the archive.
+ *
+ * If either property above stops holding — something starts reading the file,
+ * or the compiler's byte bound goes away — retain `source.text` here instead.
+ */
 function parseSource(value: unknown): ParsedCharacterSource {
   const source = record(value)
   if (source === undefined) throw new HttpError(422, 'character_source_invalid', '角色来源必须是对象。')
