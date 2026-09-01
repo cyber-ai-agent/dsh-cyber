@@ -1,7 +1,8 @@
 import type { UiLocale } from '@dsh-cyber/contracts'
+import { defineLocaleCatalogs } from './catalog-parity.js'
 import { registerMessages } from './runtime.js'
 
-const catalogs: Record<UiLocale, Record<string, string>> = {
+const catalogs = defineLocaleCatalogs({
   'zh-CN': {
     title: '世界管理',
     subtitle: '空间规则、视觉风格、运行模型与角色交互权限只属于当前世界。',
@@ -382,7 +383,7 @@ const catalogs: Record<UiLocale, Record<string, string>> = {
     permissionsTitle: 'अनुमतियाँ', permissionsSubtitle: 'उपकरण', permissionsHelpTitle: 'अलगाव:', permissionsHelpDesc: 'दस्तावेज़ में।', dataScopeTitle: 'डेटा दायरा', dataScopeDesc: 'केवल यह दुनिया', auditTitle: 'ऑडिट', auditDesc: 'ट्रैक में',
     saveStatusNotice: 'तुरंत प्रभावी।', savedNotice: 'सहेजा गया', saveFailedNotice: 'विफल', cancel: 'रद्द करें', save: 'सहेजें', saving: 'सहेज रहे हैं…',
   },
-} as const
+})
 
 for (const [locale, messages] of Object.entries(catalogs) as Array<[UiLocale, Record<string, string>]>) {
   registerMessages(locale, Object.fromEntries(Object.entries(messages).map(([key, value]) => [`worldSettings.${key}`, value])))
