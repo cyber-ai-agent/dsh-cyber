@@ -436,7 +436,10 @@ export class ConversationQueueService implements AsyncDisposable {
   #listQueuedEntries(): ConversationQueueEntry[] {
     const result: ConversationQueueEntry[] = []
     for (const workspace of this.#store.listWorkspaces()) {
-      for (const world of this.#store.listWorlds(workspace.id, true)) {
+      // Active worlds only: a world archived while turns were still queued
+      // must stop being driven. The entries stay queued and resume untouched
+      // when the world is restored.
+      for (const world of this.#store.listWorlds(workspace.id)) {
         result.push(...this.#store.listConversationQueue(world.id, undefined, 'queued'))
       }
     }

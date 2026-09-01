@@ -1,4 +1,5 @@
 import { estimateTextTokens } from './context-budget.js'
+import type { PromptCachePolicy } from './prompt-cache.js'
 
 /**
  * Provider-neutral context model (Magic Context V1, slice D1).
@@ -89,6 +90,14 @@ export interface ContextEnvelope {
   currentRequest: ContextLayer
   /** Cache identity of the prefix that must not move between turns. */
   stableContextHash: string
+  /**
+   * Prompt cache policy declared for this turn, when the composer declared one.
+   *
+   * It lives on the envelope rather than inside a provider adapter so the same
+   * decision is visible to the Inspector, to telemetry and to whichever adapter
+   * ends up running the turn.
+   */
+  promptCache?: PromptCachePolicy
   totalTokenEstimate: number
 }
 
@@ -236,6 +245,7 @@ export interface ComposeContextEnvelopeInput {
   memoryIndex?: ContextLayer
   retrievedMemories?: ContextLayer
   recentConversation?: ContextLayer
+  promptCache?: PromptCachePolicy
 }
 
 export function composeContextEnvelope(input: ComposeContextEnvelopeInput): ContextEnvelope {
@@ -249,6 +259,7 @@ export function composeContextEnvelope(input: ComposeContextEnvelopeInput): Cont
     ...(input.recentConversation === undefined ? {} : { recentConversation: input.recentConversation }),
     currentRequest: input.currentRequest,
     stableContextHash: stableContextHash(input.stableIdentity),
+    ...(input.promptCache === undefined ? {} : { promptCache: input.promptCache }),
     totalTokenEstimate: 0,
   }
   return { ...envelope, totalTokenEstimate: contextEnvelopeLayers(envelope).reduce((total, layer) => total + layer.tokenEstimate, 0) }

@@ -1,3 +1,7 @@
+import { createHash } from 'node:crypto'
+import { resolve } from 'node:path'
+import type { Readable } from 'node:stream'
+
 import type { CyberMarketPackage, InstalledPackage } from '@dsh-cyber/contracts'
 
 import {
@@ -31,6 +35,14 @@ export interface BrowserAvatarBasePackManifest {
 export interface AvatarBasePackCatalogPort {
   find(packageId: string, version?: string): Promise<CyberMarketPackage | undefined>
   readDeclaredFile(item: CyberMarketPackage, relativePath: string): Promise<Buffer>
+  openDeclaredFile(item: CyberMarketPackage, relativePath: string): Promise<{ byteLength: number; body: Readable }>
+}
+
+/** A Base VRM handed to HTTP as a stream, so a 6+ MiB body is never buffered. */
+export interface AvatarBaseAsset {
+  body: Readable
+  byteLength: number
+  contentType: 'model/gltf-binary'
 }
 
 interface InstalledLoadedPack {
@@ -63,6 +75,19 @@ export class AvatarBasePackService {
   readonly #verification = new InstalledPackageVerificationCache()
   readonly #catalog: AvatarBasePackCatalogPort | undefined
   readonly #builtInPackageIds: readonly string[]
+  /**
+   * Built-in package id -> the parsed pack manifest and the exact catalog
+   * content it was parsed and VRM-validated from.
+   *
+   * Parsing the pack manifest and asserting each Base VRM envelope costs a full
+   * read of a 6+ MiB file, and both routes did it on every request. Reusing the
+   * result is safe because the identity below pins the catalog entry's declared
+   * inventory — every path with its SHA-256 — and the catalog only returns a
+   * package whose files still hash to those exact digests. Different bytes on
+   * disk therefore mean either a different identity here or no package at all;
+   * the memo can never describe content the catalog did not verify.
+   */
+  readonly #builtIns = new Map<string, { identity: string; manifest: InstalledAvatarBasePackManifest }>()
 
   constructor(
     readonly worldPackages: WorldPackageInstanceService,
@@ -106,15 +131,15 @@ export class AvatarBasePackService {
     packageId: string,
     version: string,
     relativePath: string,
-  ): Promise<{ body: Buffer; contentType: 'model/gltf-binary' }> {
+  ): Promise<AvatarBaseAsset> {
     const loaded = (await this.#load(worldId)).find((pack) => packageIdOf(pack) === packageId && versionOf(pack) === version)
     if (loaded === undefined) throw new ServiceError('not-found', 'avatar_base_pack_not_found', '3D 角色基础包不存在或未启用')
     const base = loaded.manifest.bases.find((candidate) => candidate.assetPath === relativePath)
     if (base === undefined) throw new ServiceError('not-found', 'avatar_base_asset_not_found', '3D 角色基础模型不存在')
-    const body = loaded.source === 'builtin'
-      ? await this.#catalog!.readDeclaredFile(loaded.item, base.assetPath)
-      : await this.#verification.readFile(loaded.installed, base.assetPath)
-    return { body, contentType: 'model/gltf-binary' }
+    const opened = loaded.source === 'builtin'
+      ? await this.#catalog!.openDeclaredFile(loaded.item, base.assetPath)
+      : await this.#verification.openFile(loaded.installed, base.assetPath)
+    return { ...opened, contentType: 'model/gltf-binary' }
   }
 
   async validateInstalled(installed: InstalledPackage): Promise<InstalledAvatarBasePackManifest | undefined> {
@@ -155,7 +180,15 @@ export class AvatarBasePackService {
     for (const packageId of this.#builtInPackageIds) {
       const item = await this.#catalog.find(packageId)
       if (item === undefined) continue
+      // Cheap, pure and re-run on every request: the allow-list gate never
+      // depends on the memo below.
       assertTrustedBuiltIn(item, packageId)
+      const identity = builtInIdentity(item)
+      const memo = this.#builtIns.get(packageId)
+      if (memo?.identity === identity) {
+        loaded.push({ source: 'builtin', item, manifest: memo.manifest })
+        continue
+      }
       const body = await this.#catalog.readDeclaredFile(item, AVATAR_BASE_PACK_MANIFEST_PATH)
       let raw: unknown
       try {
@@ -172,6 +205,7 @@ export class AvatarBasePackService {
         const bytes = await this.#catalog.readDeclaredFile(item, base.assetPath)
         assertAvatarBaseVrmEnvelope(bytes, `${item.manifest.id}/${base.assetPath}`)
       }
+      this.#builtIns.set(packageId, { identity, manifest })
       loaded.push({ source: 'builtin', item, manifest })
     }
     return loaded
@@ -192,6 +226,15 @@ function assertTrustedBuiltIn(item: CyberMarketPackage, expectedId: string): voi
     || manifest.certification?.level !== 'official') {
     throw new Error(`Built-in Avatar Base Pack failed official verification: ${expectedId}`)
   }
+}
+
+function builtInIdentity(item: CyberMarketPackage): string {
+  const inventory = [...item.manifest.files]
+    .sort((left, right) => left.path.localeCompare(right.path))
+    .map((file) => `${file.path}:${file.sha256}`)
+    .join('\n')
+  const digest = createHash('sha256').update(inventory).digest('hex')
+  return `${item.manifest.id}@${item.manifest.version}:${resolve(item.sourceDirectory)}:${item.verified}:${digest}`
 }
 
 function packageIdOf(pack: LoadedPack): string {

@@ -1,7 +1,8 @@
 import type { UiLocale } from '@dsh-cyber/contracts'
+import { defineLocaleCatalogs } from './catalog-parity.js'
 import { registerMessages } from './runtime.js'
 
-export const KNOWLEDGE_MESSAGES: Record<UiLocale, Record<string, string>> = {
+export const KNOWLEDGE_MESSAGES = defineLocaleCatalogs({
   'zh-CN': {
     knowledgeKicker: '世界知识',
     knowledgeTitle: '知识',
@@ -541,13 +542,13 @@ export const KNOWLEDGE_MESSAGES: Record<UiLocale, Record<string, string>> = {
     pasteTitle: 'सामग्री चिपकाएँ', pasteDesc: 'स्थानीय Markdown फ़ाइल के रूप में सहेजा जाएगा।', pasteHint: 'बाहरी पाठ केवल संदर्भ के लिए संग्रहीत होता है।', pasteNameLabel: 'शीर्षक', pasteNamePlaceholder: 'उदा: उत्पाद नोट', pasteContentLabel: 'सामग्री', pasteContentPlaceholder: 'यहाँ पाठ चिपकाएँ', pasteSubmit: 'सहेजें', pasteSubmitting: 'सहेजा जा रहा है…',
     webTitle: 'वेब से आयात करें', webDesc: 'वेब पेजों को खोजने योग्य पाठ में बदलता है।', webHint: 'केवल सार्वजनिक रूप से उपलब्ध सामग्री ही आयात करें।', webUrlLabel: 'वेब पता', webUrlPlaceholder: 'https://example.com/article', webNameLabel: 'शीर्षक (वैकल्पिक)', webNamePlaceholder: 'पेज शीर्षक का उपयोग करने के लिए खाली छोड़ें', webSubmit: 'सहेजें', webSubmitting: 'आयात किया जा रहा है…', cancel: 'रद्द करें',
   },
-} as const
+})
 
 for (const [locale, messages] of Object.entries(KNOWLEDGE_MESSAGES) as Array<[UiLocale, Record<string, string>]>) {
   registerMessages(locale, Object.fromEntries(Object.entries(messages).map(([key, value]) => [`knowledge.${key}`, value])))
 }
 
-const CONSOLIDATION_MESSAGES: Record<UiLocale, Record<string, string>> = {
+const CONSOLIDATION_MESSAGES = defineLocaleCatalogs({
   'zh-CN': { consolidationTitle: '知识整理任务', consolidationFailedSummary: '{count} 个任务失败', consolidationActiveSummary: '{count} 个任务处理中', consolidationSourceConversation: '会话知识', consolidationTimeout: '模型整理超时', consolidationInvalidResponse: '模型返回格式无效', consolidationGenericFailure: '知识整理失败', consolidationMore: '查看全部 {count} 个任务', consolidationCollapse: '收起任务', consolidationRange: '消息 {from}–{to}', consolidationAttempt: '第 {count} 次尝试' },
   'zh-TW': { consolidationTitle: '知識整理任務', consolidationFailedSummary: '{count} 個任務失敗', consolidationActiveSummary: '{count} 個任務處理中', consolidationSourceConversation: '會話知識', consolidationTimeout: '模型整理逾時', consolidationInvalidResponse: '模型回傳格式無效', consolidationGenericFailure: '知識整理失敗', consolidationMore: '查看全部 {count} 個任務', consolidationCollapse: '收起任務', consolidationRange: '訊息 {from}–{to}', consolidationAttempt: '第 {count} 次嘗試' },
   'en-US': { consolidationTitle: 'Knowledge processing jobs', consolidationFailedSummary: '{count} jobs failed', consolidationActiveSummary: '{count} jobs processing', consolidationSourceConversation: 'Conversation knowledge', consolidationTimeout: 'Model processing timed out', consolidationInvalidResponse: 'Model returned an invalid format', consolidationGenericFailure: 'Knowledge processing failed', consolidationMore: 'View all {count} jobs', consolidationCollapse: 'Collapse jobs', consolidationRange: 'Messages {from}–{to}', consolidationAttempt: 'Attempt {count}' },
@@ -560,7 +561,7 @@ const CONSOLIDATION_MESSAGES: Record<UiLocale, Record<string, string>> = {
   'ru-RU': { consolidationTitle: 'Задачи знаний', consolidationFailedSummary: 'Ошибок: {count}', consolidationActiveSummary: 'В обработке: {count}', consolidationSourceConversation: 'Знания из разговора', consolidationTimeout: 'Тайм-аут модели', consolidationInvalidResponse: 'Неверный формат ответа модели', consolidationGenericFailure: 'Ошибка обработки знаний', consolidationMore: 'Показать все задачи: {count}', consolidationCollapse: 'Свернуть задачи', consolidationRange: 'Сообщения {from}–{to}', consolidationAttempt: 'Попытка {count}' },
   'ar-SA': { consolidationTitle: 'مهام تنظيم المعرفة', consolidationFailedSummary: 'فشل {count} من المهام', consolidationActiveSummary: '{count} من المهام قيد المعالجة', consolidationSourceConversation: 'معرفة المحادثة', consolidationTimeout: 'انتهت مهلة النموذج', consolidationInvalidResponse: 'تنسيق استجابة النموذج غير صالح', consolidationGenericFailure: 'فشل تنظيم المعرفة', consolidationMore: 'عرض جميع المهام وعددها {count}', consolidationCollapse: 'طي المهام', consolidationRange: 'الرسائل {from}–{to}', consolidationAttempt: 'المحاولة {count}' },
   'hi-IN': { consolidationTitle: 'ज्ञान प्रसंस्करण कार्य', consolidationFailedSummary: '{count} कार्य विफल', consolidationActiveSummary: '{count} कार्य चल रहे हैं', consolidationSourceConversation: 'वार्तालाप ज्ञान', consolidationTimeout: 'मॉडल समय सीमा समाप्त', consolidationInvalidResponse: 'मॉडल प्रतिक्रिया प्रारूप अमान्य', consolidationGenericFailure: 'ज्ञान प्रसंस्करण विफल', consolidationMore: 'सभी {count} कार्य देखें', consolidationCollapse: 'कार्य समेटें', consolidationRange: 'संदेश {from}–{to}', consolidationAttempt: 'प्रयास {count}' },
-}
+})
 
 for (const [locale, messages] of Object.entries(CONSOLIDATION_MESSAGES) as Array<[UiLocale, Record<string, string>]>) {
   registerMessages(locale, Object.fromEntries(Object.entries(messages).map(([key, value]) => [`knowledge.${key}`, value])))

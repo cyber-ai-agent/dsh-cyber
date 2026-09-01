@@ -1,6 +1,6 @@
 import type { World } from '@dsh-cyber/contracts'
 
-export type WorldKind = 'personal' | 'company' | 'tavern' | 'studio' | 'observatory'
+export type WorldKind = 'personal' | 'company' | 'tavern' | 'studio' | 'observatory' | 'academy' | 'hub' | 'garden' | 'news'
 
 export interface WorldExperience {
   kind: WorldKind
@@ -77,6 +77,54 @@ const experiences: Record<WorldKind, WorldExperience> = {
     sceneTitle: '蓝环轨道观测层',
     sceneSubtitle: '观测记录、样本与研究会话只属于当前观测站',
   },
+  academy: {
+    kind: 'academy',
+    peopleLabel: '教研角色',
+    personLabel: '教研角色',
+    marketLabel: '聘入学院',
+    actionLabel: '教学',
+    emptyTitle: '学院还没有教研角色',
+    emptyCopy: '从右侧「角色」聘入教授、助教、课程设计师或知识动画设计师；更多教研角色可从顶部市场安装。',
+    composerPlaceholder: '@教研角色 拆解知识点、排课程计划、做教学材料或开始答疑…',
+    sceneTitle: '大学教室',
+    sceneSubtitle: '知识拆解 → 课程计划 → 教学材料 → 答疑 → 知识图 → 课程结果',
+  },
+  hub: {
+    kind: 'hub',
+    peopleLabel: '助理角色',
+    personLabel: '助理角色',
+    marketLabel: '接入中枢',
+    actionLabel: '委派',
+    emptyTitle: '中枢还没有助理角色',
+    emptyCopy: '从右侧「角色」接入中枢管家、调研员、日程管家或信息整理员；更多助理角色可从顶部市场安装。',
+    composerPlaceholder: '说一件要办的事，中枢会判断归属再委派…',
+    sceneTitle: '个人中枢工作室',
+    sceneSubtitle: '接收请求 → 判断归属 → 委派 → 汇总回报',
+  },
+  garden: {
+    kind: 'garden',
+    peopleLabel: '整理角色',
+    personLabel: '整理角色',
+    marketLabel: '请入花园',
+    actionLabel: '整理',
+    emptyTitle: '花园还没有整理角色',
+    emptyCopy: '从右侧「角色」请入知识管家、资料采集员、来源核验员或知识制图员；更多整理角色可从顶部市场安装。',
+    composerPlaceholder: '@整理角色 采集来源、归档资料、提炼条目、核验引用或复看知识图谱…',
+    sceneTitle: '藏书庭院',
+    sceneSubtitle: '采集来源 → 归档资料 → 提炼条目 → 核验引用 → 连接知识图谱 → 复看维护',
+  },
+  news: {
+    kind: 'news',
+    peopleLabel: '编辑部角色',
+    personLabel: '编辑部角色',
+    marketLabel: '聘入编辑部',
+    actionLabel: '追踪',
+    emptyTitle: '新闻中心还没有编辑部角色',
+    emptyCopy: '从右侧「角色」聘入科技新闻分析师、财经观察员或行业研究员；更多情报角色可从顶部市场安装。',
+    composerPlaceholder: '@编辑部角色 建立追踪线、采集一轮、交叉核实或发布带日期的简报…',
+    sceneTitle: '编辑部',
+    sceneSubtitle: '建立追踪线 → 按节奏采集 → 交叉核实 → 更新时间线 → 发布带日期的简报 → 复盘并调整节奏',
+  },
 }
 
 export function worldExperience(world: Pick<World, 'templateId'>): WorldExperience {
@@ -85,5 +133,9 @@ export function worldExperience(world: Pick<World, 'templateId'>): WorldExperien
   if (template === 'tavern' || template === 'moonlit-tavern') return experiences.tavern
   if (template === 'studio' || template === 'creator-studio') return experiences.studio
   if (template === 'observatory' || template === 'orbital-observatory') return experiences.observatory
+  if (template === 'academy' || template === 'ai-academy') return experiences.academy
+  if (template === 'jarvis-core' || template === 'jarvis') return experiences.hub
+  if (template === 'garden' || template === 'knowledge-garden') return experiences.garden
+  if (template === 'news' || template === 'news-center') return experiences.news
   return experiences.company
 }

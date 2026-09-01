@@ -47,7 +47,17 @@ test('auto-registers real files from one BrowserRuntime run and keeps them isola
   await expect(page.locator('.workbench-shell')).toBeVisible()
   await page.waitForTimeout(300)
   measuringInitialLoad = false
-  expect(initialRequests.filter((request) => request.type === 'script').length).toBeLessThanOrEqual(55)
+  const initialScripts = initialRequests.filter((request) => request.type === 'script').map((request) => request.url)
+  // Request count grows when a large chunk is split into smaller cacheable
+  // modules, even when first-screen bytes decrease. Budget the actual loaded
+  // JavaScript instead, and separately assert the optional-3D boundary below.
+  const initialScriptPaths = [...new Set(initialScripts.map((url) => new URL(url).pathname))]
+  const initialScriptBytes = await Promise.all(initialScriptPaths.map(async (path) =>
+    (await stat(join(process.cwd(), 'packages', 'web', 'dist', ...path.split('/').filter(Boolean)))).size))
+  expect(initialScriptBytes.reduce((sum, value) => sum + value, 0)).toBeLessThanOrEqual(2_100_000)
+  // Pixi's core 2D renderer also emits a `WebGLRenderer-*` chunk; only the
+  // explicitly named spatial/Three/VRM chunks belong to the optional feature.
+  expect(initialScripts.filter((url) => /spatial-renderer-registry|three-world-renderer|vrm-runtime|three\.module/u.test(url))).toEqual([])
   expect(initialRequests.filter((request) => request.url.includes('/api/')).length).toBeLessThanOrEqual(22)
   expect(initialRequests.filter((request) => /\/api\/(?:employees\/[^/]+\/dossier|sessions\/[^/]+\/participants)$/.test(request.url))).toEqual([])
   const initialImageUrls = initialRequests.filter((request) => request.type === 'image').map((request) => request.url)

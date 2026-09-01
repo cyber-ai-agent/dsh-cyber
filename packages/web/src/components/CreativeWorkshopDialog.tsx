@@ -4,7 +4,7 @@ import type { CreativeWorkshopDraftV1, ModelProfile, WorldTemplateManifest } fro
 import type {
   CharacterSkillDescriptor,
   EmbodimentPresetDescriptor,
-  WorkshopProject,
+  WorkshopProjectView,
 } from '@dsh-cyber/contracts/creative-platform'
 
 import { api, ApiError } from '../api.js'
@@ -25,7 +25,7 @@ import './CreativeWorkshopDialog.css'
 interface CreativeWorkshopDialogProps {
   workspaceId: string
   onClose(): void
-  onCreated(project: WorkshopProject): void
+  onCreated(project: WorkshopProjectView): void
   onOpenWorld?(worldId: string): void
 }
 
@@ -34,7 +34,7 @@ type WorkshopView = 'library' | 'editor'
 export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpenWorld }: CreativeWorkshopDialogProps) {
   const { t } = useI18n()
   const [view, setView] = useState<WorkshopView>('library')
-  const [projects, setProjects] = useState<WorkshopProject[]>([])
+  const [projects, setProjects] = useState<WorkshopProjectView[]>([])
   const [selectedProjectId, setSelectedProjectId] = useState<string>()
   const [templates, setTemplates] = useState<WorldTemplateManifest[]>([])
   const [skills, setSkills] = useState<CharacterSkillDescriptor[]>([])
@@ -45,6 +45,7 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
   const [promptReply, setPromptReply] = useState<string>()
+  const [notice, setNotice] = useState<string>()
   const draftSaveTimer = useRef<number | undefined>(undefined)
   const latestDraft = useRef<WorkshopDraft | undefined>(undefined)
 
@@ -55,7 +56,7 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
       api<{ items: WorldTemplateManifest[] }>('/api/catalog/world-templates'),
       api<{ items: EmbodimentPresetDescriptor[] }>('/api/catalog/embodiment-presets'),
       api<{ items: CharacterSkillDescriptor[] }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/skill-catalog`),
-      api<{ items: WorkshopProject[] }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/workshop/projects`),
+      api<{ items: WorkshopProjectView[] }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/workshop/projects`),
       api<{ draft?: CreativeWorkshopDraftV1 }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/workshop/draft`),
       api<{ items: ModelProfile[] }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/model-profiles`),
     ]).then(([templateResult, presetResult, skillResult, projectResult, draftResult, modelResult]) => {
@@ -64,7 +65,7 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
       setPresets(presetResult.items)
       setSkills(skillResult.items)
       setProjects(projectResult.items)
-      setSelectedProjectId(projectResult.items[0]?.id)
+      setSelectedProjectId((projectResult.items.find((project) => project.status === 'active') ?? projectResult.items[0])?.id)
       setModels(modelResult.items)
       if (draftResult.draft !== undefined && presetResult.items.length > 0) {
         const restored = analyzeWorkshopPrompt(JSON.stringify(draftResult.draft), templateResult.items, presetResult.items).draft
@@ -102,7 +103,36 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
     [projects, selectedProjectId],
   )
 
-  const startNew = (source?: WorkshopProject, templateIdOverride?: string) => {
+  const projectPath = (projectId: string): string =>
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/workshop/projects/${encodeURIComponent(projectId)}`
+
+  const changeLifecycle = async (project: WorkshopProjectView, action: 'archive' | 'restore'): Promise<void> => {
+    try {
+      const result = await api<{ project: WorkshopProjectView }>(`${projectPath(project.id)}/${action}`, { method: 'POST' })
+      setProjects((current) => current.map((item) => (item.id === result.project.id ? result.project : item)))
+      setSelectedProjectId(result.project.id)
+      setNotice(undefined)
+      setError(undefined)
+    } catch {
+      setError(t('workshop.library.actionError', '操作失败，请稍后重试。'))
+    }
+  }
+
+  // Permanent delete removes the local project only. The world it references is
+  // a separate lifecycle and is deliberately left in place.
+  const removeProject = async (project: WorkshopProjectView): Promise<void> => {
+    try {
+      await api(projectPath(project.id), { method: 'DELETE' })
+      setProjects((current) => current.filter((item) => item.id !== project.id))
+      setSelectedProjectId((current) => (current === project.id ? undefined : current))
+      setError(undefined)
+      setNotice(t('workshop.library.deleted', '项目已永久删除。关联的世界仍然存在。'))
+    } catch {
+      setError(t('workshop.library.actionError', '操作失败，请稍后重试。'))
+    }
+  }
+
+  const startNew = (source?: WorkshopProjectView, templateIdOverride?: string) => {
     const templateId = templateIdOverride ?? source?.baseTemplateId ?? templates[0]?.id ?? 'personal-world'
     const preset = presets[0]
     if (source === undefined && preset === undefined) {
@@ -158,7 +188,7 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
     setError(undefined)
     try {
       const input = draftToCreateInput(draft)
-      const result = await api<{ project: WorkshopProject }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/workshop/projects`, {
+      const result = await api<{ project: WorkshopProjectView }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/workshop/projects`, {
         method: 'POST',
         body: JSON.stringify(input),
       })
@@ -167,6 +197,7 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
       setView('library')
       setDraft(undefined)
       setPromptReply(undefined)
+      setNotice(undefined)
       latestDraft.current = undefined
       if (draftSaveTimer.current !== undefined) {
         window.clearTimeout(draftSaveTimer.current)
@@ -219,9 +250,13 @@ export function CreativeWorkshopDialog({ workspaceId, onClose, onCreated, onOpen
               templates={templates}
               {...(selectedProject === undefined ? {} : { selectedProject })}
               skills={skills}
+              {...(notice === undefined ? {} : { notice })}
               onSelect={(project) => setSelectedProjectId(project.id)}
               onCreate={(templateId) => startNew(undefined, templateId)}
               onDuplicate={startNew}
+              onArchive={(project) => void changeLifecycle(project, 'archive')}
+              onRestore={(project) => void changeLifecycle(project, 'restore')}
+              onDelete={(project) => void removeProject(project)}
               onOpenWorld={(worldId) => {
                 if (onOpenWorld !== undefined) onOpenWorld(worldId)
                 else onClose()

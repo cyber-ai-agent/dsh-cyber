@@ -2,6 +2,7 @@ import type { AgentPermissionMode, JsonObject, ReasoningEffort } from '@dsh-cybe
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { HttpError } from '../http/errors.js'
+import { requireWorldAcceptingWork } from '../services/world-work-guard.js'
 import { optionalString, readJson, requiredString } from '../http/request.js'
 import type { Router } from '../http/router.js'
 import { writeJson } from '../http/response.js'
@@ -18,8 +19,7 @@ export function registerConversationQueueRoutes(router: Router, dependencies: Co
   const { store, worldAccess, queue } = dependencies
 
   router.post(/^\/api\/worlds\/([^/]+)\/(?:chat\/(?:queue|queued)|chat-queue)$/, async ({ request, response, params }) => {
-    const world = store.getWorld(params[0]!)
-    if (world === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
+    const world = requireWorldAcceptingWork(store, params[0]!)
     await worldAccess.assertUnlocked(world.id, request)
     const body = await readJson(request)
     const prompt = requiredString(body, 'prompt')

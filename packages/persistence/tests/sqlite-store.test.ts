@@ -802,6 +802,7 @@ describe('SqliteStore', () => {
       DROP TABLE runtime_update_transactions;
       DROP TABLE employee_relationships;
       DROP TABLE employee_daily_journals;
+      DROP TABLE agent_run_context_snapshots;
       DROP TABLE IF EXISTS employee_memory_index_fts;
       DROP TABLE employee_memory_index;
       DROP TABLE employee_milestones;
@@ -936,8 +937,10 @@ describe('SqliteStore', () => {
     // keeping every milestone that database already held.
     const legacy = new DatabaseSync(path)
     legacy.exec(`
+      DROP TABLE agent_run_context_snapshots;
       DROP TABLE IF EXISTS employee_memory_index_fts;
       DROP TABLE employee_memory_index;
+      ALTER TABLE employee_milestones DROP COLUMN origin;
       DELETE FROM schema_migrations WHERE version > 36;
       PRAGMA user_version = 36;
     `)
@@ -965,6 +968,99 @@ describe('SqliteStore', () => {
       query: '简洁回答',
       scopes: ['group', 'task'],
     }).map((hit) => hit.entry.memoryId)).not.toContain(privateMilestone.id)
+  })
+
+  it('adds the agent run context snapshot table forward-safely, touching nothing that already existed', async () => {
+    const { directory, path, store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: '快照迁移工作区' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '快照世界', templateId: 'cyber-company' })
+    store.saveBlueprint(blueprint({ id: 'snapshot.worker', worldTemplateId: 'cyber-company' }))
+    const employee = store.recruitEmployee({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      blueprintId: 'snapshot.worker',
+      blueprintVersion: 1,
+    })
+    const session = store.createSession({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      kind: 'direct',
+      title: '私聊',
+      participants: [
+        { participantId: 'owner', kind: 'owner' },
+        { participantId: employee.id, kind: 'employee' },
+      ],
+    })
+    const turn = store.createWorkTurn({
+      workspaceId: workspace.id, worldId: world.id, sessionId: session.id, interactionKind: 'chat',
+    })
+    const run = store.createAgentRun({
+      workspaceId: workspace.id, worldId: world.id, turnId: turn.id,
+      sessionId: session.id, employeeId: employee.id, ordinal: 1,
+    })
+    const message = store.appendMessage({
+      sessionId: session.id,
+      senderId: 'owner',
+      senderKind: 'owner',
+      kind: 'user',
+      content: '迁移前就存在的消息。',
+      metadata: {},
+    })
+    store.close()
+
+    // Rewind the file to the schema shipped before context snapshots existed,
+    // keeping every row that database already held.
+    const legacy = new DatabaseSync(path)
+    legacy.exec(`
+      DROP TABLE agent_run_context_snapshots;
+      DELETE FROM schema_migrations WHERE version > 38;
+      PRAGMA user_version = 38;
+    `)
+    legacy.close()
+
+    const migrated = await SqliteStore.open(path)
+    stores.push(migrated)
+    expect((await readdir(directory)).some((file) => file.startsWith('cyber.sqlite.pre-migration-v38-'))).toBe(true)
+    expect(migrated.database.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+    expect(migrated.doctor()).toMatchObject({ ok: true, schemaVersion: CYBER_SCHEMA_VERSION })
+
+    // Additive only: nothing that predated the migration was rewritten, and the
+    // new table starts empty rather than backfilling invented context records.
+    expect(migrated.getAgentRun(run.id)).toMatchObject({ id: run.id, status: 'queued' })
+    expect(migrated.listMessages(session.id).map((row) => row.content)).toEqual(['迁移前就存在的消息。'])
+    expect(migrated.getAgentRunContextSnapshot(run.id)).toBeUndefined()
+    expect(
+      migrated.database.prepare('SELECT COUNT(*) AS count FROM agent_run_context_snapshots').get(),
+    ).toMatchObject({ count: 0 })
+
+    // And a run recorded after the migration is readable and prunes with its run.
+    migrated.saveAgentRunContextSnapshot({
+      agentRunId: run.id,
+      snapshot: {
+        snapshotVersion: 1,
+        envelopeVersion: 1,
+        stablePrefixHash: 'prefix-hash',
+        structureHash: 'structure-hash',
+        totalTokenEstimate: 11,
+        layers: [{
+          id: `identity:${employee.id}`,
+          kind: 'stable-identity',
+          revision: '1',
+          contentHash: 'c1',
+          tokenEstimate: 11,
+          sourceRefs: [{ kind: 'message', id: message.id }],
+        }],
+        cache: { stablePrefixTokens: 11, volatileTokens: 0, prefixReused: false },
+      },
+    })
+    expect(migrated.getAgentRunContextSnapshot(run.id)).toMatchObject({ stablePrefixHash: 'prefix-hash' })
+
+    // Snapshots are a child of the run, so retention prunes them by cascade and
+    // cannot leave an orphaned context record behind.
+    migrated.completeAgentRun(migrated.startAgentRun(run.id).id)
+    migrated.pruneHistory({ before: '2999-01-01T00:00:00.000Z' })
+    expect(migrated.getAgentRunContextSnapshot(run.id)).toBeUndefined()
+    expect(migrated.database.prepare('PRAGMA foreign_key_check').all()).toEqual([])
   })
 
   it('persists audited runtime update transitions and rejects skipped stages', async () => {
@@ -1254,5 +1350,71 @@ describe('SqliteStore', () => {
     expect(reopened.getWorkTurn(queuedTurn.id)).toMatchObject({ status: 'queued' })
     expect(reopened.getAgentRun(queuedRun.id)).toMatchObject({ status: 'queued' })
     expect(reopened.recoverConversationRuntimeAfterRestart()).toEqual({ turnsFailed: 0, runsFailed: 0 })
+  })
+  it('never guesses historical milestone origin from title and removes only an explicitly stamped legacy row', async () => {
+    const { path, store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: '事迹工作区' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '赛博公司', templateId: 'cyber-company' })
+    store.saveBlueprint(blueprint())
+    const employee = store.recruitEmployee({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      blueprintId: 'software-engineer',
+      blueprintVersion: 1,
+    })
+    const recruitedEvent = store.listWorldDomainEvents(world.id)
+      .find((event) => event.type === 'employee.recruited')!
+    // Before migration this row is indistinguishable from user-authored data:
+    // same title/category/evidence shape and no origin column.
+    const legacy = store.appendEmployeeMilestone({
+      employeeId: employee.id,
+      category: 'task',
+      title: '完成一次真实对话',
+      summary: '旧投影按每一轮对话写入的事迹。',
+      sourceEventIds: [recruitedEvent.id],
+    })
+    store.close()
+    stores.splice(stores.indexOf(store), 1)
+
+    // Rewind past both 37 (memory index) and 38 (origin) so the upgrade replays
+    // the whole stack the way a 36 database in the field would.
+    const downgraded = new DatabaseSync(path)
+    downgraded.exec(`
+      DROP TABLE agent_run_context_snapshots;
+      ALTER TABLE employee_milestones DROP COLUMN origin;
+      DROP TABLE employee_memory_index;
+      DELETE FROM schema_migrations WHERE version > 36;
+      PRAGMA user_version = 36;
+    `)
+    downgraded.close()
+
+    const migrated = await SqliteStore.open(path)
+    stores.push(migrated)
+    expect(migrated.doctor()).toMatchObject({ ok: true, schemaVersion: CYBER_SCHEMA_VERSION })
+    expect(migrated.getEmployeeMemoryIndexEntry(legacy.id)).toBeDefined()
+    expect(migrated.listEmployeeMilestones(employee.id).find((item) => item.id === legacy.id))
+      .toMatchObject({ origin: 'authored' })
+
+    // Durable user data that collides with the retired generator's display copy.
+    const authored = migrated.appendEmployeeMilestone({
+      employeeId: employee.id,
+      category: 'task',
+      title: '完成一次真实对话',
+      summary: '老板亲手记下的里程碑，不能被清理删掉。',
+      sourceEventIds: [recruitedEvent.id],
+    })
+    const joined = migrated.listEmployeeMilestones(employee.id).find((item) => item.category === 'joined')
+    expect(joined).toMatchObject({ origin: 'authored' })
+
+    // Once provenance is explicit, cleanup uses only that structural identity.
+    migrated.database.prepare("UPDATE employee_milestones SET origin = 'legacy-conversation-projection' WHERE id = ?").run(legacy.id)
+    expect(migrated.removeLegacyConversationMilestones(employee.id)).toBe(1)
+    const remaining = migrated.listEmployeeMilestones(employee.id)
+    expect(remaining.map((item) => item.id)).toContain(authored.id)
+    expect(remaining.map((item) => item.id)).not.toContain(legacy.id)
+    // The retrieval index is a projection of the milestone, never a second copy
+    // that outlives it.
+    expect(migrated.getEmployeeMemoryIndexEntry(legacy.id)).toBeUndefined()
+    expect(migrated.removeLegacyConversationMilestones(employee.id)).toBe(0)
   })
 })

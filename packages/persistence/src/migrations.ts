@@ -1914,7 +1914,62 @@ const MIGRATIONS: readonly Migration[] = [
       FROM employee_milestones;
     `,
   },
+  {
+    version: 38,
+    name: 'employee-milestone-origin',
+    sql: `
+      ALTER TABLE employee_milestones
+        ADD COLUMN origin TEXT NOT NULL DEFAULT 'authored'
+        CHECK (origin IN ('authored', 'activity-projection', 'legacy-conversation-projection'));
+
+      -- Historical rows do not carry enough evidence to distinguish the retired
+      -- projection from an owner-authored milestone with the same title. Keep
+      -- every pre-migration row as authored: under-labelling leaves harmless
+      -- legacy clutter, while guessing from display copy can destroy user data.
+    `,
+  },
+  {
+    version: 39,
+    name: 'agent-run-context-snapshot',
+    sql: `
+      CREATE TABLE agent_run_context_snapshots (
+        agent_run_id TEXT PRIMARY KEY REFERENCES agent_runs(id) ON DELETE CASCADE,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        session_id TEXT NOT NULL REFERENCES work_sessions(id) ON DELETE CASCADE,
+        employee_id TEXT NOT NULL REFERENCES employee_instances(id) ON DELETE CASCADE,
+        snapshot_version INTEGER NOT NULL CHECK (snapshot_version > 0),
+        envelope_version INTEGER NOT NULL CHECK (envelope_version > 0),
+        stable_prefix_hash TEXT NOT NULL,
+        structure_hash TEXT NOT NULL,
+        total_token_estimate INTEGER NOT NULL CHECK (total_token_estimate >= 0),
+        -- Structure and pointers only. There is deliberately no column a
+        -- rendered prompt could be written into: a snapshot that stored text
+        -- would be a second copy of user data with its own retention and its
+        -- own leak surface, outliving the scope checks that produced it.
+        layers_json TEXT NOT NULL CHECK (json_valid(layers_json)),
+        cache_json TEXT NOT NULL CHECK (json_valid(cache_json)),
+        created_at TEXT NOT NULL
+      ) STRICT;
+
+      CREATE INDEX agent_run_context_snapshots_session_idx
+        ON agent_run_context_snapshots(session_id, employee_id, created_at DESC, agent_run_id);
+      CREATE INDEX agent_run_context_snapshots_prefix_idx
+        ON agent_run_context_snapshots(stable_prefix_hash, created_at DESC);
+    `,
+  },
 ]
+
+/**
+ * How many migrations this build actually ships.
+ *
+ * It is not the same as `CYBER_SCHEMA_VERSION`, because version numbers are
+ * claimed by whichever branch opens a PR first and one of them (38) is not on
+ * this branch. A fully migrated database therefore holds `MIGRATION_COUNT`
+ * rows in `schema_migrations` while `PRAGMA user_version` reads the highest
+ * version. Health checks must compare against this, not against the version.
+ */
+export const MIGRATION_COUNT = MIGRATIONS.length
 
 export function migrate(database: DatabaseSync, now: () => string): void {
   const userVersion = readUserVersion(database)

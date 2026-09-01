@@ -89,6 +89,25 @@ function runWithTools(context: Fixture, options: { reasoning?: string } = {}) {
   return { run, turn }
 }
 
+function twoRunsOneTurn(context: Fixture) {
+  const { store, workspace, world, session, employee } = context
+  const turn = store.createWorkTurn({
+    workspaceId: workspace.id, worldId: world.id, sessionId: session.id, interactionKind: 'task',
+  })
+  store.startWorkTurn(turn.id)
+  const runs = [1, 2].map((ordinal) => {
+    const run = store.createAgentRun({
+      workspaceId: workspace.id, worldId: world.id, sessionId: session.id,
+      turnId: turn.id, employeeId: employee.id, ordinal,
+    })
+    store.startAgentRun(run.id)
+    store.completeAgentRun(run.id, `runtime-${run.id}`)
+    return run
+  })
+  store.completeWorkTurn(turn.id)
+  return { runs, turn }
+}
+
 function publishReport(context: Fixture, options: {
   title: string
   path: string
@@ -148,9 +167,9 @@ describe('World Trace run outcome', () => {
     expect(quietEntry).not.toHaveProperty('artifacts')
   })
 
-  it('claims a version recorded against the work turn when no run id was captured', async () => {
+  it('does not guess a run for an artifact recorded only against a multi-run work turn', async () => {
     const context = await fixture()
-    const { run, turn } = runWithTools(context)
+    const { runs, turn } = twoRunsOneTurn(context)
     publishReport(context, {
       title: '仅按回合登记的产物',
       path: 'reports/turn-only.md',
@@ -160,8 +179,9 @@ describe('World Trace run outcome', () => {
 
     const service = new WorldTraceService({ store: context.store, actions: new MemoryActions(), artifacts: context.artifacts })
     const page = await service.list(context.world.id, { limit: 200 })
-    const entry = page.items.find((item) => item.runId === run.id)
-    expect(entry?.artifacts?.map((artifact) => artifact.title)).toEqual(['仅按回合登记的产物'])
+    const entries = page.items.filter((item) => runs.some((run) => run.id === item.runId))
+    expect(entries).toHaveLength(2)
+    expect(entries.every((entry) => entry.artifacts === undefined)).toBe(true)
   })
 
   it('finds a run by the title of what it produced', async () => {

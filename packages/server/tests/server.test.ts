@@ -159,6 +159,10 @@ describe('Cyber local server', () => {
       'tavern',
       'creator-studio',
       'orbital-observatory',
+      'ai-academy',
+      'jarvis-core',
+      'knowledge-garden',
+      'news-center',
     ])
     const { workspace, world } = await createWorld(origin)
     const snapshot = await json(origin, `/api/worlds/${world.id}/snapshot`)

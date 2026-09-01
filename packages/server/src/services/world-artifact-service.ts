@@ -18,6 +18,11 @@ import type { AgentRunCompletionContext, AgentRunCompletionContribution, AgentRu
 
 import { ServiceError } from './service-error.js'
 import { isPathWithin, type WorldRoot, WorldRootService } from './world-root-service.js'
+import { resolveCanonicalPathWithoutSymlinkHops, SymlinkHopError } from './canonical-path.js'
+
+// The segment walk is shared with the knowledge library importer; both are
+// re-exported here so existing callers keep importing them from this module.
+export { resolveCanonicalPathWithoutSymlinkHops, SymlinkHopError } from './canonical-path.js'
 
 /** Per-file and per-manifest caps keep publication bounded and predictable. */
 export const WORLD_ARTIFACT_LIMITS = {
@@ -467,9 +472,20 @@ export class WorldArtifactService {
   async #resolveImportedPath(root: WorldRoot, sourcePath: string): Promise<{ sourcePath: string; sourceRelativePath: string }> {
     if (sourcePath.trim() === '') throw invalid('source_path_required', '必须提供 sourcePath')
     const normalized = sourcePath.replaceAll('\\', '/')
-    const candidate = isAbsoluteLike(normalized)
+    const lexical = isAbsoluteLike(normalized)
       ? resolve(normalized)
       : resolve(root.rootPath, ...normalizeRelativePath(normalized, 'source path').split('/'))
+    // The caller may name the world root through a symlink the operator
+    // configured (a state root below `/var` on macOS). Canonicalise segment by
+    // segment so that alias stays usable while a symlink hop below the world
+    // root is still refused instead of silently followed.
+    let candidate: string
+    try {
+      candidate = await resolveCanonicalPathWithoutSymlinkHops(lexical, root.rootPath)
+    } catch (error) {
+      if (error instanceof SymlinkHopError) throw conflict('artifact_symlink_rejected', '导入路径包含符号链接')
+      throw error
+    }
     await assertSafeFile(root.rootPath, candidate, WORLD_ARTIFACT_LIMITS.maxProjectBytes)
     const sourceRelativePath = toPosix(relative(root.rootPath, candidate))
     if (!sourceRelativePath || sourceRelativePath.startsWith('..')) throw conflict('artifact_path_invalid', '导入路径越界')
@@ -613,7 +629,18 @@ async function inspectSource(root: string, sourcePath: string): Promise<SourceIn
 }
 
 async function resolveAgentWorkspace(root: WorldRoot, workspacePath: string): Promise<string | undefined> {
-  const candidate = resolve(workspacePath)
+  // The runtime hands back the workspace path it was launched with, which may
+  // still carry the operator's own symlink (a state root below `/var`). A
+  // lexical path can never be compared against the canonical world root, so
+  // canonicalise it here; the walk keeps refusing a symlink hop below `files`.
+  let candidate: string
+  try {
+    candidate = await resolveCanonicalPathWithoutSymlinkHops(workspacePath, root.filesPath)
+  } catch (error) {
+    if (error instanceof SymlinkHopError) throw conflict('artifact_workspace_invalid', 'AgentRun 工作区真实路径越界')
+    if (isMissingPath(error)) throw notFound('artifact_workspace_missing', 'AgentRun 工作区不存在')
+    throw error
+  }
   const restricted = await realpath(root.restrictedFilesPath)
   if (candidate.toLowerCase() === restricted.toLowerCase()) return undefined
   if (!isPathWithin(root.filesPath, candidate)) throw conflict('artifact_workspace_invalid', 'AgentRun 工作区不属于当前世界 files')
@@ -625,12 +652,10 @@ async function resolveAgentWorkspace(root: WorldRoot, workspacePath: string): Pr
     throw error
   }
   if (info.isSymbolicLink() || !info.isDirectory()) throw conflict('artifact_workspace_invalid', 'AgentRun 工作区必须是实际目录')
-  const resolved = await realpath(candidate)
-  if (!isPathWithin(root.filesPath, resolved)) throw conflict('artifact_workspace_invalid', 'AgentRun 工作区真实路径越界')
-  const relativePath = toPosix(relative(root.filesPath, resolved))
+  const relativePath = toPosix(relative(root.filesPath, candidate))
   if (relativePath.split('/')[0]?.toLowerCase() === '.dsh') throw conflict('artifact_workspace_invalid', 'AgentRun 工作区不能位于 .dsh 控制目录')
-  await assertNoSymlinkSegments(root.filesPath, resolved)
-  return resolved
+  await assertNoSymlinkSegments(root.filesPath, candidate)
+  return candidate
 }
 
 async function existingPath(path: string): Promise<boolean> {

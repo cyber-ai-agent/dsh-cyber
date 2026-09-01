@@ -1,7 +1,7 @@
 import type { WorldCharacterAuthority } from './world-authority.js'
 import type { UiLocale } from './locales.js'
 
-export const CYBER_SCHEMA_VERSION = 37 as const
+export const CYBER_SCHEMA_VERSION = 39 as const
 
 export * from './runtime-access.js'
 export * from './locales.js'
@@ -459,6 +459,18 @@ export interface EmployeeBlueprint {
   requestedSkills: string[]
   requestedCapabilities: string[]
   embodiment?: import('./embodiment.js').EmbodimentProfile
+  /**
+   * Built-in 2D avatar slot (0-7) decided once when the talent draft is
+   * created. Recruiting seeds it as initial appearance data so the choice
+   * never re-rolls on a later render or page reload.
+   */
+  fallbackAvatarIndex?: number
+  /**
+   * Package-relative image that becomes the recruited character's own 2D
+   * avatar, not merely a marketplace preview. Package content is untrusted:
+   * readers must accept only a declared file from a fixed allow-list.
+   */
+  avatarPreviewPath?: string
   createdAt: IsoTimestamp
 }
 
@@ -564,11 +576,28 @@ export type EmployeeMilestoneCategory =
   | 'birthday'
   | 'reflection'
 
+/**
+ * Which generator produced a milestone row. Structural provenance so cleanup of
+ * retired generators never has to match on display copy.
+ * - `authored`: recorded explicitly through the milestone append path.
+ * - `activity-projection`: derived by the dossier activity projection.
+ * - `legacy-conversation-projection`: the retired per-turn generator; these rows
+ *   are removed by the projection and can never be written again.
+ */
+export type EmployeeMilestoneOrigin =
+  | 'authored'
+  | 'activity-projection'
+  | 'legacy-conversation-projection'
+
+/** Origins the milestone append path may write. */
+export type WritableEmployeeMilestoneOrigin = Exclude<EmployeeMilestoneOrigin, 'legacy-conversation-projection'>
+
 export interface EmployeeMilestone {
   id: string
   workspaceId: string
   worldId: string
   employeeId: string
+  origin: EmployeeMilestoneOrigin
   category: EmployeeMilestoneCategory
   title: string
   summary: string
@@ -680,9 +709,25 @@ export type ModelInteractionLogStatus = 'success' | 'failed'
 export type ModelInteractionLogSource = 'turn' | 'discovery' | 'knowledge'
 
 export interface ModelTokenUsage {
+  /** Every prompt token the call was billed for, cached ones included. */
   prompt: number
   completion: number
   total: number
+  /**
+   * Prompt tokens the provider served from its cache.
+   *
+   * Absent — never zero — when the runtime reported no cache accounting at all.
+   * Zero means the runtime did report it and the prefix genuinely missed, which
+   * is a different fact and the one that tells a cold cache from a blind one.
+   */
+  cachedPrompt?: number
+  /**
+   * Prompt tokens the model actually had to process this call.
+   *
+   * Cache *writes* count here: the model read those tokens, it merely also
+   * stored them. Absent whenever `cachedPrompt` is.
+   */
+  uncachedPrompt?: number
 }
 
 /**
@@ -933,6 +978,9 @@ export const DOMAIN_EVENT_TYPES = [
   'world.administrator.changed',
   'world.character.authority.changed',
   'world.creation.rolled-back',
+  'world.archived',
+  'world.restored',
+  'world.deleted',
   'world.entered',
   'employee.recruited',
   'employee.revised',
@@ -1100,6 +1148,12 @@ export interface AgentTurnRequest {
   modelProfileId?: string
   /** Provider-neutral input/output allocation resolved for this turn. */
   contextBudget?: import('./context-budget.js').ContextBudgetPlan
+  /**
+   * Prompt cache policy the context composer declared for this turn. It names
+   * the cacheable prefix; each provider adapter maps it to its own API, or
+   * degrades to sending the prompt unchanged.
+   */
+  promptCache?: import('./prompt-cache.js').PromptCachePolicy
   onEvent?: (event: AgentRuntimeEvent) => void
 }
 
@@ -1108,6 +1162,8 @@ export interface AgentTurnResult {
   finalResponse: string
   eventCount: number
   tokenUsage?: ModelTokenUsage
+  /** What the provider adapter did with the declared prompt cache policy. */
+  promptCache?: import('./prompt-cache.js').PromptCacheOutcome
 }
 
 export interface AgentRuntimePort {
@@ -1202,8 +1258,12 @@ export * from './completion-job.js'
 export * from './work-system.js'
 export * from './prompt-safety.js'
 export * from './creative-workshop-draft.js'
+export * from './character-generator.js'
 export * from './context-budget.js'
 export * from './context-envelope.js'
+export * from './prompt-cache.js'
+export * from './context-snapshot.js'
+export * from './context-inspection.js'
 
 export type {
   CharacterSkillAction,

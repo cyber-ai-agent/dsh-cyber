@@ -1,0 +1,214 @@
+/*
+ * The world scene area as a result surface. Everything here is 2D: HTML, CSS
+ * and the existing Canvas knowledge graph. No 3D renderer is involved, and no
+ * raster art is shipped for it.
+ */
+.teaching-surface {
+  position: absolute;
+  inset: 0;
+  z-index: 36;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--surface-0) 96%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.teaching-surface:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.teaching-surface__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.teaching-surface__identity { min-width: 0; display: grid; gap: 3px; }
+.teaching-surface__kicker { color: var(--text-soft); font-size: 11px; letter-spacing: .04em; }
+.teaching-surface__header h2 { margin: 0; color: var(--text); font-size: 15px; }
+.teaching-surface__header p { margin: 0; color: var(--text-muted); font-size: 12px; }
+
+.teaching-surface__close {
+  flex: none;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+.teaching-surface__close:hover { color: var(--text); background: var(--surface-2); }
+.teaching-surface__close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.teaching-surface__lanes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.teaching-surface__lanes button {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--text-muted);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.teaching-surface__lanes button small { color: var(--text-soft); font-size: 11px; }
+.teaching-surface__lanes button:hover { color: var(--text); background: var(--surface-2); }
+.teaching-surface__lanes button.is-active { color: var(--accent-strong); border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); background: var(--accent-soft); }
+.teaching-surface__lanes button.is-active small { color: var(--accent-strong); }
+.teaching-surface__lanes button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.teaching-surface__panel { min-width: 0; min-height: 0; overflow: auto; padding: 14px 16px; }
+.teaching-surface__panel:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.teaching-surface__state {
+  min-height: 100%;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 8px;
+  max-width: 520px;
+  margin: 0 auto;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.teaching-surface__state strong { color: var(--text); font-size: 14px; }
+.teaching-surface__state p { margin: 0; }
+.teaching-surface__state--error strong { color: var(--danger, #e16e70); }
+
+.teaching-surface__action {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  background: var(--surface-1);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.teaching-surface__action:hover { background: var(--surface-2); }
+.teaching-surface__action:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.teaching-surface__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 16px;
+  border-top: 1px solid var(--border);
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.teaching-lane { min-width: 0; display: grid; gap: 12px; }
+.teaching-lane--board,
+.teaching-lane--lesson,
+.teaching-lane--media { grid-template-columns: minmax(0, 1fr); }
+
+@media (min-width: 900px) {
+  .teaching-lane--board:has(.teaching-rail),
+  .teaching-lane--lesson:has(.teaching-rail),
+  .teaching-lane--media:has(.teaching-rail) { grid-template-columns: minmax(180px, 232px) minmax(0, 1fr); align-items: start; }
+}
+
+.teaching-rail { min-width: 0; display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.teaching-rail button {
+  width: 100%;
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--text-muted);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.teaching-rail button strong { color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
+.teaching-rail button small { font-size: 11px; }
+.teaching-rail button:hover { background: var(--surface-2); }
+.teaching-rail button.is-active { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); background: var(--accent-soft); }
+.teaching-rail button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.teaching-board {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--border-strong) 80%, transparent);
+  border-radius: var(--radius-panel);
+  /* A board look drawn with gradients only: no raster chalkboard asset. */
+  background:
+    radial-gradient(120% 90% at 22% 12%, rgba(255, 255, 255, .06), transparent 62%),
+    linear-gradient(160deg, #14231f 0%, #101b18 58%, #0d1614 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .04);
+}
+.teaching-board__header { display: grid; gap: 3px; padding-bottom: 8px; border-bottom: 1px dashed rgba(226, 236, 231, .22); }
+.teaching-board__header h3 { margin: 0; color: #eaf3ee; font-size: 14px; overflow-wrap: anywhere; }
+.teaching-board__header span { color: rgba(198, 216, 206, .78); font-size: 11px; }
+.teaching-board__surface { min-width: 0; overflow-x: auto; color: #eaf3ee; }
+.teaching-board__surface :is(h1, h2, h3, h4, strong, td, th, li, p, code) { color: #eaf3ee; }
+.teaching-board__surface pre { max-width: 100%; overflow-x: auto; }
+.teaching-board__chalk-rail { margin: 0; color: rgba(198, 216, 206, .7); font-size: 11px; }
+
+.teaching-lesson { min-width: 0; display: grid; gap: 10px; }
+.teaching-lesson__header { display: grid; gap: 3px; }
+.teaching-lesson__header h3 { margin: 0; color: var(--text); font-size: 14px; overflow-wrap: anywhere; }
+.teaching-lesson__header span { color: var(--text-soft); font-size: 11px; }
+.teaching-lesson__note { margin: 0; color: var(--text-muted); font-size: 11px; }
+.teaching-lesson__fallback { min-width: 0; display: grid; gap: 8px; overflow-x: auto; }
+.teaching-lesson__cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.teaching-card {
+  display: grid;
+  gap: 6px;
+  height: 100%;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface-1);
+}
+.teaching-card h4 { margin: 0; color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
+.teaching-card p { margin: 0; color: var(--text-muted); font-size: 12px; }
+.teaching-card ul { margin: 0; padding-left: 18px; color: var(--text-muted); font-size: 12px; display: grid; gap: 3px; }
+
+.teaching-media { min-width: 0; display: grid; gap: 10px; }
+.teaching-media__header { display: grid; gap: 3px; }
+.teaching-media__header h3 { margin: 0; color: var(--text); font-size: 14px; overflow-wrap: anywhere; }
+.teaching-media__header span { color: var(--text-soft); font-size: 11px; }
+.teaching-media__stage { min-width: 0; overflow-x: auto; }
+.teaching-media__video { display: block; width: 100%; max-width: 100%; max-height: 62vh; border-radius: var(--radius-panel); background: #05090c; }
+
+.teaching-lane--graph { min-height: 100%; }
+.teaching-lane--graph .knowledge-graph { min-height: 0; }

@@ -3,8 +3,12 @@ import { describe, expect, it } from 'vitest'
 import type { DomainEvent, EmployeeInstance, World } from '@dsh-cyber/contracts'
 
 import {
+  aiAcademyTheme,
   cyberCompanyTheme,
+  knowledgeGardenTheme,
   findPath,
+  jarvisCoreTheme,
+  newsCenterTheme,
   projectWorldRuntime,
   validateWorldThemeManifest,
 } from '../src/index.js'
@@ -65,6 +69,70 @@ function event(sequence: number, type: DomainEvent['type'], payload: DomainEvent
 describe('world theme manifest', () => {
   it('validates the built-in company theme', () => {
     expect(validateWorldThemeManifest(cyberCompanyTheme)).toEqual({ valid: true, errors: [] })
+  })
+
+  it('validates the built-in AI academy theme and its classroom scene', () => {
+    expect(validateWorldThemeManifest(aiAcademyTheme)).toEqual({ valid: true, errors: [] })
+    const scene = aiAcademyTheme.scenes[0]!
+    expect(scene.id).toBe('university-classroom')
+    expect(scene.interactables.map((item) => item.id)).toEqual([
+      'knowledge-breakdown-desk',
+      'syllabus-board',
+      'teaching-material-bench',
+      'question-desk',
+      'knowledge-graph-wall',
+      'course-result-showcase',
+      'lecture-blackboard',
+      'cohort-seating',
+    ])
+  })
+
+  it('validates the built-in Jarvis Core theme and its personal hub scene', () => {
+    expect(validateWorldThemeManifest(jarvisCoreTheme)).toEqual({ valid: true, errors: [] })
+    const scene = jarvisCoreTheme.scenes[0]!
+    expect(scene.id).toBe('personal-hub-studio')
+    expect(scene.interactables.map((item) => item.id)).toEqual([
+      'request-intake-table',
+      'ownership-routing-board',
+      'delegation-board',
+      'research-carrel-desk',
+      'schedule-console-desk',
+      'filing-organiser-bench',
+      'information-index-wall',
+      'summary-report-stand',
+    ])
+  })
+
+  it('validates the built-in knowledge garden theme and its courtyard scene', () => {
+    expect(validateWorldThemeManifest(knowledgeGardenTheme)).toEqual({ valid: true, errors: [] })
+    const scene = knowledgeGardenTheme.scenes[0]!
+    expect(scene.id).toBe('reading-courtyard')
+    expect(scene.interactables.map((item) => item.id)).toEqual([
+      'source-intake-desk',
+      'collection-bookshelf',
+      'citation-check-bench',
+      'note-card-shelf',
+      'knowledge-graph-wall',
+      'garden-result-showcase',
+      'excerpt-board',
+      'reading-tables',
+    ])
+  })
+
+  it('validates the built-in news center theme and its newsroom scene', () => {
+    expect(validateWorldThemeManifest(newsCenterTheme)).toEqual({ valid: true, errors: [] })
+    const scene = newsCenterTheme.scenes[0]!
+    expect(scene.id).toBe('newsroom-floor')
+    expect(scene.interactables.map((item) => item.id)).toEqual([
+      'source-collection-desk',
+      'beat-board',
+      'chart-workbench',
+      'verification-desk',
+      'timeline-wall',
+      'brief-archive',
+      'newsroom-wallboard',
+      'editorial-table',
+    ])
   })
 
   it('rejects missing asset and anchor references', () => {

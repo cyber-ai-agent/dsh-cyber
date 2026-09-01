@@ -153,7 +153,7 @@ export class WorldTraceService {
     const artifactsByRun = groupArtifactsByRun(this.#artifacts?.listRunProvenance(worldId) ?? [])
     const facts: WorldTraceFact[] = [
       ...this.#store.listWorldAgentRuns(worldId).map((run) => {
-        const artifacts = artifactsByRun.get(run.id) ?? artifactsByRun.get(`turn:${run.turnId}`)
+        const artifacts = artifactsByRun.get(run.id)
         return {
           kind: 'agent-run' as const,
           value: {
@@ -199,16 +199,16 @@ export function groupMessagesByRun(messages: readonly WorkMessage[]): Map<string
 /**
  * Indexes published artifact versions by the run that produced them.
  *
- * A version keyed only by its work turn is filed under `turn:<id>` so the run
- * that owns that turn can still claim it. A version with neither key never
- * reaches this function, so no artifact is ever attached to a guessed run.
+ * Only a durable AgentRun id is precise enough for an AgentRun trace card. One
+ * WorkTurn may contain several runs, so a version carrying only workTurnId is
+ * deliberately omitted here rather than being duplicated onto every sibling.
  */
 export function groupArtifactsByRun(
   provenance: readonly WorldArtifactRunProvenance[],
 ): Map<string, WorldTraceArtifactRef[]> {
   const grouped = new Map<string, WorldTraceArtifactRef[]>()
   for (const version of provenance) {
-    const key = version.agentRunId ?? (version.workTurnId === undefined ? undefined : `turn:${version.workTurnId}`)
+    const key = version.agentRunId
     if (key === undefined) continue
     const reference: WorldTraceArtifactRef = {
       artifactId: version.artifactId,

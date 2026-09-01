@@ -14,9 +14,13 @@ import type {
 import type { WorldCharacterAuthority } from '@dsh-cyber/contracts/world-authority'
 import type { SqliteStore, WorldSimulationStore } from '@dsh-cyber/persistence'
 import {
+  aiAcademyTheme,
   cyberCompanyTheme,
+  jarvisCoreTheme,
+  knowledgeGardenTheme,
   maidPalaceTheme,
   moonlitTavernTheme,
+  newsCenterTheme,
   projectWorldRuntime,
   validateWorldThemeManifest,
 } from '@dsh-cyber/world-runtime'
@@ -523,6 +527,10 @@ export class WorldRuntimeService {
     if (templateId === 'company' || templateId === 'cyber-company') return cyberCompanyTheme
     if (templateId === 'tavern' || templateId === 'moonlit-tavern') return moonlitTavernTheme
     if (templateId === 'maid-atelier' || templateId === 'maid-palace') return maidPalaceTheme
+    if (templateId === 'ai-academy' || templateId === 'academy') return aiAcademyTheme
+    if (templateId === 'jarvis-core' || templateId === 'jarvis') return jarvisCoreTheme
+    if (templateId === 'knowledge-garden' || templateId === 'garden') return knowledgeGardenTheme
+    if (templateId === 'news-center' || templateId === 'news') return newsCenterTheme
     return undefined
   }
 
