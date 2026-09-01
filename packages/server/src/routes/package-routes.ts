@@ -1,3 +1,5 @@
+import { pipeline } from 'node:stream/promises'
+
 import type { WorkshopCreateInput } from '@dsh-cyber/contracts/creative-platform'
 import type { LocalPackageCatalog, PackageManager } from '@dsh-cyber/package-runtime'
 import type { SqliteStore } from '@dsh-cyber/persistence'
@@ -122,13 +124,16 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
     const asset = await avatarBasePacks.readBaseAsset(worldId, params[1]!, params[2]!, params[3]!)
     response.writeHead(200, {
       'content-type': asset.contentType,
-      'content-length': asset.body.byteLength,
+      'content-length': asset.byteLength,
       // Installed versions are immutable and URL-versioned, so the expensive
       // shared Base VRM can be reused by many employees without refetching it.
       'cache-control': 'private, max-age=31536000, immutable',
       'x-content-type-options': 'nosniff',
     })
-    response.end(asset.body)
+    // Stream rather than buffer: concurrent fetches of the same 6+ MiB Base VRM
+    // otherwise each hold a full copy in memory. pipeline also tears the file
+    // handle down when the client disconnects mid-download.
+    await pipeline(asset.body, response)
   })
 
   router.post(/^\/api\/worlds\/([^/]+)\/packages\/instantiate$/, async ({ request, response, params }) => {
