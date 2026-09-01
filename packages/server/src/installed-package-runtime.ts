@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto'
-import { lstat, readFile } from 'node:fs/promises'
+import { lstat, open, readFile } from 'node:fs/promises'
 import { extname, resolve, sep } from 'node:path'
+import { Readable } from 'node:stream'
 
 import type { CyberSkinManifestV1, EmployeeBlueprint, InstalledPackage, WorldThemeManifestV1 } from '@dsh-cyber/contracts'
-import type { StagedPackage } from '@dsh-cyber/package-runtime'
+import { fileStamp, sameFileStamp, type FileStamp, type StagedPackage } from '@dsh-cyber/package-runtime'
 import { validateWorldThemeManifest } from '@dsh-cyber/world-runtime'
 
 import { parseEmployeeBlueprintManifest } from './employee-blueprint-manifest.js'
@@ -54,8 +55,16 @@ export interface InstalledSkinManifest {
   manifest: CyberSkinManifestV1
 }
 
+/** An installed package file opened for streaming instead of buffering. */
+export interface InstalledFileStream {
+  byteLength: number
+  body: Readable
+}
+
 export class InstalledPackageVerificationCache {
   readonly #verifiedPackages = new Set<string>()
+  /** Package identity -> declared path -> stamp taken while its hash matched. */
+  readonly #verifiedFiles = new Map<string, Map<string, FileStamp>>()
   #fullVerificationPasses = 0
 
   get fullVerificationPasses(): number {
@@ -65,14 +74,43 @@ export class InstalledPackageVerificationCache {
   async verifyPackage(installed: InstalledPackage): Promise<void> {
     const identity = installedIdentity(installed)
     if (this.#verifiedPackages.has(identity)) return
-    for (const file of installed.manifest.files) await readVerifiedPackageFile(installed, file.path)
+    const stamps = new Map<string, FileStamp>()
+    for (const file of installed.manifest.files) {
+      stamps.set(file.path, (await readVerifiedPackageFile(installed, file.path)).stamp)
+    }
+    this.#verifiedFiles.set(identity, stamps)
     this.#verifiedPackages.add(identity)
     this.#fullVerificationPasses += 1
   }
 
   async readFile(installed: InstalledPackage, relativePath: string): Promise<Buffer> {
     await this.verifyPackage(installed)
-    return readVerifiedPackageFile(installed, relativePath)
+    return (await readVerifiedPackageFile(installed, relativePath)).body
+  }
+
+  /**
+   * Stream a verified package file instead of buffering it.
+   *
+   * The handle is opened first and fstat'ed through itself, so the stamp check
+   * describes the inode the stream reads. A match means this is byte-for-byte
+   * the file whose SHA-256 was verified; anything else falls back to the full
+   * verifying read, which re-hashes before a byte is returned.
+   */
+  async openFile(installed: InstalledPackage, relativePath: string): Promise<InstalledFileStream> {
+    await this.verifyPackage(installed)
+    const stamp = this.#verifiedFiles.get(installedIdentity(installed))?.get(relativePath)
+    if (stamp !== undefined) {
+      const path = await securePackageFile(installed, relativePath)
+      const handle = await open(path, 'r')
+      if (sameFileStamp(await handle.stat(), stamp)) {
+        const body = handle.createReadStream()
+        body.once('close', () => { void handle.close().catch(() => undefined) })
+        return { byteLength: stamp.size, body }
+      }
+      await handle.close()
+    }
+    const body = await this.readFile(installed, relativePath)
+    return { byteLength: body.byteLength, body: Readable.from([body]) }
   }
 }
 
@@ -328,14 +366,23 @@ async function readEntrypoint<T>(
   return JSON.parse(body.toString('utf8')) as T
 }
 
-async function readVerifiedPackageFile(installed: InstalledPackage, relativePath: string): Promise<Buffer> {
+async function readVerifiedPackageFile(
+  installed: InstalledPackage,
+  relativePath: string,
+): Promise<{ body: Buffer; stamp: FileStamp }> {
   const declared = installed.manifest.files.find((file) => file.path === relativePath)
   if (declared === undefined) throw new Error(`Installed package file is not declared: ${installed.packageId}/${relativePath}`)
   const path = await securePackageFile(installed, relativePath)
-  const body = await readFile(path)
-  const digest = createHash('sha256').update(body).digest('hex')
-  if (digest !== declared.sha256) throw new Error(`Installed package hash mismatch: ${installed.packageId}/${relativePath}`)
-  return body
+  const handle = await open(path, 'r')
+  try {
+    const metadata = await handle.stat()
+    const body = await handle.readFile()
+    const digest = createHash('sha256').update(body).digest('hex')
+    if (digest !== declared.sha256) throw new Error(`Installed package hash mismatch: ${installed.packageId}/${relativePath}`)
+    return { body, stamp: fileStamp(metadata) }
+  } finally {
+    await handle.close()
+  }
 }
 
 function installedIdentity(installed: InstalledPackage): string {
