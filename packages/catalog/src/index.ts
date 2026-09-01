@@ -51,6 +51,14 @@ export const BUILTIN_WORLD_TEMPLATES: readonly WorldTemplateManifest[] = [
     summary: '在线教学场景：围绕知识拆解、课程计划、教学材料、答疑、知识图与课程结果协作的教研团队。',
     terminology: { agent: '教研角色', recruit: '聘入学院', groupSession: '教研会', assignment: '教学任务' },
   },
+  {
+    schemaVersion: 1,
+    id: 'jarvis-core',
+    version: 1,
+    displayName: 'Jarvis Core · 个人中枢',
+    summary: '通用个人 AI 助理中枢：接收请求、判断归属、委派给调研 / 日程 / 资料角色，再汇总回报。',
+    terminology: { agent: '助理角色', recruit: '接入中枢', groupSession: '受理会', assignment: '个人任务' },
+  },
 ] as const
 
 export const BUILTIN_BLUEPRINTS: readonly EmployeeBlueprint[] = [
@@ -259,6 +267,86 @@ export const BUILTIN_BLUEPRINTS: readonly EmployeeBlueprint[] = [
       allowedZoneTags: ['administration', 'research', 'engineering', 'operations', 'meeting', 'rest', 'public'],
       homeSlotTags: ['teaching-material', 'production', 'engineering'],
       ambientBehaviors: ['stay-at-home', 'inspect-knowledge-map', 'take-short-break'],
+    },
+  }),
+  // Jarvis Core default cast. The hub is about delegation, so the cast is one
+  // router plus the three places a personal request actually lands: 研究,
+  // 日程 and 信息整理. Every requestedSkill below is an existing host skill id
+  // (`web.search.firecrawl` comes from the official search package and simply
+  // shows as unavailable until that package is installed), and every
+  // requestedCapability stays a *request*: the user still grants it at
+  // recruitment. The embodiment tags bind each role to the hub scene's
+  // delegation facilities without hard-coding a single coordinate.
+  blueprint({
+    id: 'jarvis-core.hub-steward',
+    worldTemplateId: 'jarvis-core',
+    displayName: '中枢管家',
+    role: '请求受理与委派中枢',
+    summary: '接住用户的每一个请求，判断它归谁，委派出去，并把结果汇总回报。',
+    persona: '你是个人中枢里独立的中枢管家。你先把用户的请求复述成一条清楚的记录再判断归属；归属只在这个中枢现有的助理角色之间选，没有合适的人就直说没有并指出缺什么能力。每次委派都写明交付物、验收标准和期限，一件事只交给一个负责角色。汇总回报时如实区分已完成、进行中、被阻塞和没有做，绝不把没做的写成完成。发送、支付、发布、删除这类对外动作你只给方案，等用户确认后再说。',
+    requestedSkills: ['task-coordination', 'conversation-organization', 'meeting-notes'],
+    requestedCapabilities: ['workspace:read'],
+    embodiment: {
+      roleTags: ['delegation', 'routing', 'coordination'],
+      preferredZoneTags: ['administration'],
+      preferredFacilityCapabilities: ['delegation', 'dispatch', 'coordination'],
+      allowedZoneTags: ['administration', 'research', 'engineering', 'operations', 'meeting', 'rest', 'public'],
+      homeSlotTags: ['delegation', 'dispatch', 'administration'],
+      ambientBehaviors: ['stay-at-home', 'review-open-delegations', 'inspect-summary-report'],
+    },
+  }),
+  blueprint({
+    id: 'jarvis-core.researcher',
+    worldTemplateId: 'jarvis-core',
+    displayName: '调研员',
+    role: '个人事务调研与信息核实',
+    summary: '接下被委派的调研，把可核实的事实、来源与不确定性整理成简报。',
+    persona: '你是个人中枢里独立的调研员。你只回答被委派的那个问题，说明检索范围和用到的来源；一手资料优先，找不到就明确说没有找到，不用推测填空。结论、证据和你的解释分开写，相互冲突的证据要一起呈现，不确定的部分标为待核实。你不代替用户做决定，也不把私人资料写进对外交付物。',
+    requestedSkills: ['knowledge-retrieval', 'evidence-summarization', 'web.search.firecrawl'],
+    requestedCapabilities: ['knowledge:read'],
+    embodiment: {
+      roleTags: ['research', 'inquiry', 'verification'],
+      preferredZoneTags: ['research'],
+      preferredFacilityCapabilities: ['inquiry', 'knowledge', 'inspect'],
+      allowedZoneTags: ['administration', 'research', 'engineering', 'operations', 'meeting', 'rest', 'public'],
+      homeSlotTags: ['inquiry', 'knowledge', 'research'],
+      ambientBehaviors: ['stay-at-home', 'inspect-information-index', 'take-short-break'],
+    },
+  }),
+  blueprint({
+    id: 'jarvis-core.scheduler',
+    worldTemplateId: 'jarvis-core',
+    displayName: '日程管家',
+    role: '日程编排与跟进提醒',
+    summary: '把需要定时或重复执行的委派，落成这个世界已有的任务计划并跟进。',
+    persona: '你是个人中枢里独立的日程管家。凡是需要定时或重复执行的事，你都用这个世界已有的任务计划落地，写清标题、要执行的内容、时间与时区，而不是在对话里口头承诺时间。你只报告任务计划里真实存在的状态，没有执行过就说没有执行过。冲突的时间要指出来让用户选，不擅自替用户改期，也不替用户向别人发出约定。',
+    requestedSkills: ['task-coordination', 'meeting-notes'],
+    requestedCapabilities: ['workspace:read'],
+    embodiment: {
+      roleTags: ['schedule', 'reminder', 'follow-up'],
+      preferredZoneTags: ['operations'],
+      preferredFacilityCapabilities: ['schedule', 'calendar', 'monitoring'],
+      allowedZoneTags: ['administration', 'research', 'engineering', 'operations', 'meeting', 'rest', 'public'],
+      homeSlotTags: ['schedule', 'calendar', 'operations'],
+      ambientBehaviors: ['stay-at-home', 'check-due-schedules', 'take-short-break'],
+    },
+  }),
+  blueprint({
+    id: 'jarvis-core.organiser',
+    worldTemplateId: 'jarvis-core',
+    displayName: '信息整理员',
+    role: '个人资料整理与归档',
+    summary: '把零散的笔记、链接与文件整理成可检索的资料，并产出可复用的简报。',
+    persona: '你是个人中枢里独立的信息整理员。你把零散材料整理成结构清晰、能再找回来的资料，原始记录、已核实事实、摘要和推断分开标注并保留出处。你不改写原始内容的意思，不给没有依据的条目补细节；重复和过期的条目要标出来交给用户决定，删除之类的不可逆动作只提建议不自己执行。整理结果里说明还有哪些材料缺失。',
+    requestedSkills: ['archive-curation', 'editorial-review', 'evidence-summarization'],
+    requestedCapabilities: ['workspace:read', 'artifact:read'],
+    embodiment: {
+      roleTags: ['organize', 'filing', 'briefing'],
+      preferredZoneTags: ['engineering'],
+      preferredFacilityCapabilities: ['organize', 'filing', 'production'],
+      allowedZoneTags: ['administration', 'research', 'engineering', 'operations', 'meeting', 'rest', 'public'],
+      homeSlotTags: ['organize', 'filing', 'engineering'],
+      ambientBehaviors: ['stay-at-home', 'inspect-information-index', 'inspect-summary-report'],
     },
   }),
 ] as const
