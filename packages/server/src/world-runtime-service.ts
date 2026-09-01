@@ -17,6 +17,7 @@ import {
   aiAcademyTheme,
   cyberCompanyTheme,
   jarvisCoreTheme,
+  knowledgeGardenTheme,
   maidPalaceTheme,
   moonlitTavernTheme,
   projectWorldRuntime,
@@ -527,6 +528,7 @@ export class WorldRuntimeService {
     if (templateId === 'maid-atelier' || templateId === 'maid-palace') return maidPalaceTheme
     if (templateId === 'ai-academy' || templateId === 'academy') return aiAcademyTheme
     if (templateId === 'jarvis-core' || templateId === 'jarvis') return jarvisCoreTheme
+    if (templateId === 'knowledge-garden' || templateId === 'garden') return knowledgeGardenTheme
     return undefined
   }
 

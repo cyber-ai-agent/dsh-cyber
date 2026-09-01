@@ -177,6 +177,7 @@ function chooseTemplate(value: unknown, templates: readonly WorldTemplateManifes
   if (direct !== undefined) return direct.id
   const hints: Array<[string, string[]]> = [
     ['tavern', ['酒馆', '冒险', '剧情', '角色扮演']],
+    ['knowledge-garden', ['第二大脑', '知识库', '笔记', '资料', '整理', '归档', '引用', '来源', '知识图谱']],
     ['ai-academy', ['教学', '课程', '教案', '讲课', '培训', '学院', '答疑']],
     ['jarvis-core', ['助理', '中枢', '委派', '日程', '待办', '个人事务', '管家']],
     ['orbital-observatory', ['观测', '深空', '轨道', '科学']],

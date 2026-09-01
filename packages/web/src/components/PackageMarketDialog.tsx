@@ -431,6 +431,7 @@ function roleWorldLabel(templateId: string | undefined): string {
     'orbital-observatory': '远星观测站',
     'ai-academy': 'AI 学院',
     'jarvis-core': 'Jarvis Core · 个人中枢',
+    'knowledge-garden': '知识花园',
     'cyber-company': '赛博公司与通用工作区',
     'personal-world': '个人世界',
   } as Record<string, string>)[templateId ?? ''] ?? '兼容世界'
