@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "id": "official-avatar-base-v1",
-  "version": "1.0.0",
-  "displayName": "DSH Cyber · Quaternius CC0 Base V1",
+  "version": "1.1.0",
+  "displayName": "DSH Cyber · Quaternius CC0 Base V1.1",
   "license": "CC0-1.0",
   "publisher": "DSH Cyber (conversion) / Quaternius (original assets)",
   "quality": "production",
@@ -40,6 +40,26 @@
       "meshNames": [
         "Outfit_Casual_0"
       ]
+    },
+    {
+      "id": "professional",
+      "kind": "outfit",
+      "meshNames": [
+        "Outfit_Casual_0",
+        "Outfit_Professional_Legs",
+        "Outfit_Professional_Feet",
+        "Outfit_Professional_Body"
+      ]
+    },
+    {
+      "id": "analyst",
+      "kind": "outfit",
+      "meshNames": [
+        "Outfit_Casual_0",
+        "Outfit_Professional_Legs",
+        "Outfit_Professional_Feet",
+        "Outfit_Professional_Body"
+      ]
     }
   ],
   "materialSlots": [
@@ -47,6 +67,18 @@
       "id": "hair",
       "materialNames": [
         "DSH_Hair"
+      ]
+    },
+    {
+      "id": "outfit",
+      "materialNames": [
+        "DSH_Office_Outfit"
+      ]
+    },
+    {
+      "id": "accent",
+      "materialNames": [
+        "DSH_Office_Accent"
       ]
     }
   ]
