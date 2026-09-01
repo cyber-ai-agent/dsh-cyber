@@ -26,6 +26,10 @@
       "types": "./lib/creative-platform.d.ts",
       "default": "./lib/creative-platform.js"
     },
+    "./character-generator": {
+      "types": "./lib/character-generator.d.ts",
+      "default": "./lib/character-generator.js"
+    },
     "./world-trace": {
       "types": "./lib/world-trace.d.ts",
       "default": "./lib/world-trace.js"

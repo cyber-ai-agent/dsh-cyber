@@ -12,6 +12,7 @@ import { readJson } from '../http/request.js'
 import { writeJson } from '../http/response.js'
 import type { WorkSystemService } from '../services/work-system-service.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
+import { requireWorldAcceptingWork } from '../services/world-work-guard.js'
 
 const TASK_STATUSES: readonly WorkTaskStatus[] = ['draft','planning','ready','running','waiting-approval','waiting-review','changes-requested','completed','failed','cancelled','recovery-required']
 
@@ -30,8 +31,7 @@ export function registerWorkSystemRoutes(router: Router, dependencies: { store: 
 
   router.post(/^\/api\/worlds\/([^/]+)\/tasks$/, async ({ request, response, params }) => {
     const worldId = params[0]!
-    const world = store.getWorld(worldId)
-    if (world === undefined) throw new HttpError(404, 'world_not_found', '世界不存在')
+    const world = requireWorldAcceptingWork(store, worldId)
     await access.assertUnlocked(worldId, request)
     const body = await readJson(request)
     const input = contract(() => parseCreateWorkTask(body))
@@ -46,6 +46,7 @@ export function registerWorkSystemRoutes(router: Router, dependencies: { store: 
 
   router.post(/^\/api\/tasks\/([^/]+)\/execute$/, async ({ request, response, params }) => {
     const detail = safeDetail(work, params[0]!)
+    requireWorldAcceptingWork(store, detail.task.worldId)
     await access.assertUnlocked(detail.task.worldId, request)
     const body = await readJson(request)
     const employeeIds = stringArray(body.employeeIds, '任务角色')

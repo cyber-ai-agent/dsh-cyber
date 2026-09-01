@@ -211,10 +211,7 @@ export async function loadInstalledBlueprints(packages: InstalledPackage[]): Pro
     assertEmployeeBlueprintPackage(installed, entrypoints.length)
     for (const entrypoint of entrypoints) {
       const value = await readEntrypoint<unknown>(installed, entrypoint.path)
-      blueprints.push(parseEmployeeBlueprintManifest(value, {
-        packageId: installed.packageId,
-        packageCapabilities: installed.manifest.capabilities,
-      }))
+      blueprints.push(parseEmployeeBlueprintManifest(value, { packageId: installed.packageId }))
     }
   }
   return blueprints
