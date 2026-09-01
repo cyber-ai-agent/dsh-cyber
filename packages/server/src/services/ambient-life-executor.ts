@@ -38,6 +38,7 @@ export class AmbientLifeExecutor {
   }
 
   start(result: AmbientLifeTickResult): string[] {
+    this.#assertWorldAcceptsWork(result.worldId)
     const now = new Date(this.#clock()).toISOString()
     const eventIds: string[] = []
     for (const [index, plan] of result.plans.entries()) {
@@ -132,6 +133,15 @@ export class AmbientLifeExecutor {
       eventIds.push(event.id)
     }
     return eventIds
+  }
+
+  /** Ambient life is world work: an archived world must not generate any. */
+  #assertWorldAcceptsWork(worldId: string): void {
+    const world = this.#store.getWorld(worldId)
+    if (world === undefined) throw new Error(`Ambient world is unavailable: ${worldId}`)
+    if (world.status === 'archived') {
+      throw new Error(`世界「${world.name}」已归档，环境生活不会继续运行。请先恢复该世界。`)
+    }
   }
 
   #requireCharacter(worldId: string, characterId: string): EmployeeInstance {

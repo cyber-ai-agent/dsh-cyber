@@ -240,8 +240,12 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
     writeJson(response, 201, result)
   })
 
-  router.get(/^\/api\/workspaces\/([^/]+)\/workshop\/projects$/, async ({ response, params }) => {
-    writeJson(response, 200, { items: await workshop.list(params[0]!) })
+  router.get(/^\/api\/workspaces\/([^/]+)\/workshop\/projects$/, async ({ response, params, url }) => {
+    const requested = url.searchParams.get('status')
+    if (requested !== null && requested !== 'active' && requested !== 'archived' && requested !== 'all') {
+      throw new HttpError(422, 'workshop_status_invalid', '项目状态筛选只支持 active、archived 或 all')
+    }
+    writeJson(response, 200, { items: await workshop.list(params[0]!, requested ?? 'all') })
   })
 
   router.get(/^\/api\/workspaces\/([^/]+)\/workshop\/draft$/, async ({ response, params }) => {
@@ -270,6 +274,20 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
 
   router.get(/^\/api\/workspaces\/([^/]+)\/workshop\/projects\/([^/]+)$/, async ({ response, params }) => {
     writeJson(response, 200, { project: await workshop.readProject(params[0]!, params[1]!) })
+  })
+
+  router.post(/^\/api\/workspaces\/([^/]+)\/workshop\/projects\/([^/]+)\/archive$/, async ({ response, params }) => {
+    writeJson(response, 200, { project: await workshop.archive(params[0]!, params[1]!) })
+  })
+
+  router.post(/^\/api\/workspaces\/([^/]+)\/workshop\/projects\/([^/]+)\/restore$/, async ({ response, params }) => {
+    writeJson(response, 200, { project: await workshop.restore(params[0]!, params[1]!) })
+  })
+
+  // Deleting a project never deletes its world. The response reports the world
+  // that was kept so the caller can say so instead of guessing.
+  router.delete(/^\/api\/workspaces\/([^/]+)\/workshop\/projects\/([^/]+)$/, async ({ response, params }) => {
+    writeJson(response, 200, { removed: true, deletion: await workshop.delete(params[0]!, params[1]!) })
   })
 }
 

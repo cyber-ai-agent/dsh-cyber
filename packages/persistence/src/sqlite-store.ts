@@ -133,6 +133,24 @@ export interface CreateWorldInput {
   actorId?: string
 }
 
+export interface WorldLifecycleInput {
+  worldId: string
+  actorId?: string
+  actorKind?: ParticipantKind
+}
+
+export interface DeleteWorldInput extends WorldLifecycleInput {
+  /** The world name the owner re-typed. Must match the stored name exactly. */
+  confirmationName: string
+}
+
+/** One unfinished unit of work that blocks a permanent world deletion. */
+export interface ActiveWorldWork {
+  kind: 'work-turn' | 'agent-run'
+  id: string
+  status: string
+}
+
 export interface RecruitEmployeeInput {
   workspaceId: string
   worldId: string
@@ -1807,6 +1825,125 @@ export class SqliteStore {
     return this.database.prepare(sql).all(workspaceId).map(mapWorld)
   }
 
+  /**
+   * Archives a world without destroying anything it owns.
+   *
+   * Archiving is a status transition and nothing else: conversations,
+   * characters, dossiers, knowledge and artifacts stay exactly where they are
+   * and come back untouched on restore. What changes is that the world stops
+   * accepting new work — see `#assertWorldAcceptsWork`.
+   */
+  archiveWorld(input: WorldLifecycleInput): World {
+    this.#assertWritable()
+    const world = this.#requireWorld(input.worldId)
+    if (world.status === 'archived') throw new PersistenceError('World is already archived')
+    const now = this.#clock()
+    return this.#transaction(() => {
+      this.database
+        .prepare("UPDATE worlds SET status = 'archived', updated_at = ? WHERE id = ?")
+        .run(now, world.id)
+      this.#appendEvent({
+        workspaceId: world.workspaceId,
+        worldId: world.id,
+        type: 'world.archived',
+        actorId: input.actorId ?? 'owner',
+        actorKind: input.actorKind ?? 'owner',
+        payload: { worldId: world.id, name: world.name },
+      })
+      return { ...world, status: 'archived', updatedAt: now }
+    })
+  }
+
+  restoreWorld(input: WorldLifecycleInput): World {
+    this.#assertWritable()
+    const world = this.#requireWorld(input.worldId)
+    if (world.status === 'active') throw new PersistenceError('World is not archived')
+    const now = this.#clock()
+    return this.#transaction(() => {
+      this.database
+        .prepare("UPDATE worlds SET status = 'active', updated_at = ? WHERE id = ?")
+        .run(now, world.id)
+      this.#appendEvent({
+        workspaceId: world.workspaceId,
+        worldId: world.id,
+        type: 'world.restored',
+        actorId: input.actorId ?? 'owner',
+        actorKind: input.actorKind ?? 'owner',
+        payload: { worldId: world.id, name: world.name },
+      })
+      return { ...world, status: 'active', updatedAt: now }
+    })
+  }
+
+  /**
+   * Work that is still in flight in this world.
+   *
+   * Permanent deletion consults this so directories are never removed out from
+   * under a running agent.
+   */
+  listActiveWorldWork(worldId: string): ActiveWorldWork[] {
+    const turns = this.database.prepare(
+      `SELECT id, status FROM work_turns
+       WHERE world_id = ? AND status IN ('queued', 'running', 'waiting-approval')
+       ORDER BY created_at, id`,
+    ).all(worldId) as { id: string; status: string }[]
+    const runs = this.database.prepare(
+      `SELECT id, status FROM agent_runs
+       WHERE world_id = ? AND status IN ('queued', 'running')
+       ORDER BY created_at, id`,
+    ).all(worldId) as { id: string; status: string }[]
+    return [
+      ...turns.map((row) => ({ kind: 'work-turn' as const, id: String(row.id), status: String(row.status) })),
+      ...runs.map((row) => ({ kind: 'agent-run' as const, id: String(row.id), status: String(row.status) })),
+    ]
+  }
+
+  hasActiveWorldWork(worldId: string): boolean {
+    return this.listActiveWorldWork(worldId).length > 0
+  }
+
+  /**
+   * Permanently deletes every durable record this world owns.
+   *
+   * Everything world-scoped hangs off `worlds(id)` with ON DELETE CASCADE —
+   * sessions, messages, turns, runs, characters and their revision chains,
+   * knowledge, artifacts, simulation state, schedules and world package
+   * instances. The workspace-global package library (`installed_packages`)
+   * points *into* world instances rather than the other way round, so it is
+   * deliberately left untouched: it is a workspace asset, not this world's
+   * private property.
+   *
+   * Files on disk are not this method's business; the caller removes the
+   * WorldRoot after this transaction commits.
+   */
+  deleteWorld(input: DeleteWorldInput): World {
+    this.#assertWritable()
+    const world = this.#requireWorld(input.worldId)
+    if (input.confirmationName.trim() !== world.name) {
+      throw new PersistenceError('World name confirmation does not match')
+    }
+    const blocking = this.listActiveWorldWork(world.id)
+    if (blocking.length > 0) {
+      throw new PersistenceError(
+        `World still has work in flight: ${blocking.map((item) => `${item.kind}:${item.id}(${item.status})`).join(', ')}`,
+      )
+    }
+    return this.#transaction(() => {
+      this.database.prepare('DELETE FROM worlds WHERE id = ?').run(world.id)
+      // The event is recorded at workspace scope on purpose: domain_events
+      // cascades on world_id, so a world-scoped record of this deletion would
+      // delete itself.
+      this.#appendEvent({
+        workspaceId: world.workspaceId,
+        type: 'world.deleted',
+        actorId: input.actorId ?? 'owner',
+        actorKind: input.actorKind ?? 'owner',
+        payload: { worldId: world.id, name: world.name, templateId: world.templateId },
+      })
+      return world
+    })
+  }
+
   rollbackWorldCreation(worldId: string, reason: string, actorId = 'system'): void {
     this.#assertWritable()
     const world = this.#requireWorld(worldId)
@@ -3001,6 +3138,7 @@ export class SqliteStore {
 
   createWorkTurn(input: CreateWorkTurnInput): WorkTurn {
     this.#assertWritable()
+    this.#assertWorldAcceptsWork(input.worldId)
     const session = this.#requireSession(input.sessionId)
     if (session.workspaceId !== input.workspaceId || session.worldId !== input.worldId) {
       throw new PersistenceError('Work turn scope does not match session')
@@ -3503,6 +3641,7 @@ export class SqliteStore {
 
   createAgentRun(input: CreateAgentRunInput): AgentRun {
     this.#assertWritable()
+    this.#assertWorldAcceptsWork(input.worldId)
     const turn = this.getWorkTurn(input.turnId)
     const employee = this.#requireEmployee(input.employeeId)
     if (turn === undefined || turn.workspaceId !== input.workspaceId || turn.worldId !== input.worldId ||
@@ -5175,8 +5314,8 @@ export class SqliteStore {
   #enqueueConversationTurn(input: EnqueueConversationTurnInput, priority: number): ConversationQueueEntry {
     this.#assertWritable()
     const workspace = this.#requireWorkspace(input.workspaceId)
-    const world = this.#requireWorld(input.worldId)
-    if (world.workspaceId !== workspace.id || world.status === 'archived') {
+    const world = this.#assertWorldAcceptsWork(input.worldId)
+    if (world.workspaceId !== workspace.id) {
       throw new PersistenceError('Conversation queue world does not belong to workspace')
     }
     const session = this.#requireSession(input.sessionId)
@@ -5792,6 +5931,24 @@ export class SqliteStore {
   #requireWorld(worldId: string): World {
     const world = this.getWorld(worldId)
     if (!world) throw new EntityNotFoundError(`World not found: ${worldId}`)
+    return world
+  }
+
+  /**
+   * The single fail-closed gate for starting work in a world.
+   *
+   * Every entry point that can begin agent work funnels through one of
+   * `createWorkTurn`, `createAgentRun` or the conversation queue, so guarding
+   * here means an archived world cannot be driven by a route, a skill, the
+   * scheduler or ambient life — including code written after this change.
+   */
+  #assertWorldAcceptsWork(worldId: string): World {
+    const world = this.#requireWorld(worldId)
+    if (world.status === 'archived') {
+      throw new PersistenceError(
+        `World is archived and accepts no new work: ${world.name}. Restore it before starting work.`,
+      )
+    }
     return world
   }
 
