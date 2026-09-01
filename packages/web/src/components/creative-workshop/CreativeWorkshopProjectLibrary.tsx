@@ -1,19 +1,25 @@
-import { ArrowRight, Copy, Cube, Plus, ShieldCheck, SlidersHorizontal, Sparkle, UsersThree } from '@phosphor-icons/react'
+import { Archive, ArrowCounterClockwise, ArrowRight, Copy, Cube, Plus, ShieldCheck, SlidersHorizontal, Sparkle, Trash, UsersThree, WarningCircle } from '@phosphor-icons/react'
+import { useRef, useState } from 'react'
 import type { WorldTemplateManifest } from '@dsh-cyber/contracts'
-import type { CharacterSkillDescriptor, WorkshopProject } from '@dsh-cyber/contracts/creative-platform'
+import type { CharacterSkillDescriptor, WorkshopProjectStatus, WorkshopProjectView } from '@dsh-cyber/contracts/creative-platform'
 
 import { useI18n } from '../../i18n/runtime.js'
+import { useDialogFocusTrap } from '../useDialogFocusTrap.js'
 import './CreativeWorkshopProjectLibrary.css'
 
 interface CreativeWorkshopProjectLibraryProps {
-  projects: WorkshopProject[]
+  projects: WorkshopProjectView[]
   templates?: WorldTemplateManifest[]
-  selectedProject?: WorkshopProject
+  selectedProject?: WorkshopProjectView
   skills: CharacterSkillDescriptor[]
-  onSelect(project: WorkshopProject): void
+  notice?: string
+  onSelect(project: WorkshopProjectView): void
   onCreate(templateId?: string): void
-  onDuplicate(project: WorkshopProject): void
+  onDuplicate(project: WorkshopProjectView): void
   onOpenWorld(worldId: string): void
+  onArchive(project: WorkshopProjectView): void
+  onRestore(project: WorkshopProjectView): void
+  onDelete(project: WorkshopProjectView): void
 }
 
 export function CreativeWorkshopProjectLibrary({
@@ -21,13 +27,20 @@ export function CreativeWorkshopProjectLibrary({
   templates = [],
   selectedProject,
   skills,
+  notice,
   onSelect,
   onCreate,
   onDuplicate,
   onOpenWorld,
+  onArchive,
+  onRestore,
+  onDelete,
 }: CreativeWorkshopProjectLibraryProps) {
   const { locale, t } = useI18n()
+  const [tab, setTab] = useState<WorkshopProjectStatus>('active')
+  const [pendingDeleteId, setPendingDeleteId] = useState<string>()
   const skillNames = new Map(skills.map((skill) => [skill.id, skill.displayName]))
+  const visibleProjects = projects.filter((project) => project.status === tab)
 
   // 1. 当没有项目时：呈现一体化、饱满充实、高审美的创作起航大厅 (Creative Workshop Hub)
   // 彻底消灭“两个新建按钮”和“右侧大片死黑空白”！
@@ -132,7 +145,7 @@ export function CreativeWorkshopProjectLibrary({
         <header>
           <div>
             <strong>{t('workshop.library.title', '我的本地项目')}</strong>
-            <small>{t('workshop.library.count', '{count} 个世界项目', { count: projects.length })}</small>
+            <small>{t('workshop.library.count', '{count} 个世界项目', { count: visibleProjects.length })}</small>
           </div>
           <button type="button" className="primary-button" onClick={() => onCreate()}>
             <Plus size={14} />
@@ -140,8 +153,32 @@ export function CreativeWorkshopProjectLibrary({
           </button>
         </header>
 
+        <div className="creative-workshop-project-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'active'}
+            className={tab === 'active' ? 'is-active' : ''}
+            onClick={() => { setTab('active'); setPendingDeleteId(undefined) }}
+          >
+            {t('workshop.library.tabActive', '我的项目')}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'archived'}
+            className={tab === 'archived' ? 'is-active' : ''}
+            onClick={() => { setTab('archived'); setPendingDeleteId(undefined) }}
+          >
+            {t('workshop.library.tabArchived', '归档项目')}
+          </button>
+        </div>
+
         <div className="creative-workshop-project-items">
-          {projects.map((project) => (
+          {visibleProjects.length === 0 && tab === 'archived' ? (
+            <p className="creative-workshop-project-empty">{t('workshop.library.emptyArchived', '归档里还没有项目。')}</p>
+          ) : null}
+          {visibleProjects.map((project) => (
             <button
               key={project.id}
               type="button"
@@ -159,7 +196,8 @@ export function CreativeWorkshopProjectLibrary({
       </aside>
 
       <main className="creative-workshop-project-detail">
-        {selectedProject === undefined ? (
+        {notice === undefined ? null : <p className="creative-workshop-project-notice" role="status">{notice}</p>}
+        {selectedProject === undefined || selectedProject.status !== tab ? (
           <div className="creative-workshop-project-placeholder">
             <Cube size={34} />
             <strong>{t('workshop.library.select', '选择一个项目查看详情')}</strong>
@@ -169,7 +207,12 @@ export function CreativeWorkshopProjectLibrary({
           <>
             <header className="creative-workshop-project-detail__header">
               <div>
-                <span>{t('workshop.library.localProject', '本地世界项目')}</span>
+                <span>
+                  {t('workshop.library.localProject', '本地世界项目')}
+                  {selectedProject.status === 'archived'
+                    ? <em className="creative-workshop-project-badge">{t('workshop.library.archivedBadge', '已归档')}</em>
+                    : null}
+                </span>
                 <h3>{selectedProject.displayName}</h3>
                 <p>{selectedProject.scenario || selectedProject.lore || t('workshop.library.scenarioEmpty', '尚未填写世界说明。')}</p>
               </div>
@@ -178,12 +221,49 @@ export function CreativeWorkshopProjectLibrary({
                   <Copy size={14} />
                   {t('workshop.library.duplicate', '基于此项目创建副本')}
                 </button>
-                <button type="button" className="primary-button" onClick={() => onOpenWorld(selectedProject.worldId)}>
-                  {t('workshop.library.enterWorld', '进入世界')}
-                  <ArrowRight size={14} />
-                </button>
+                {selectedProject.status === 'active' ? (
+                  <button type="button" className="secondary-button" onClick={() => onArchive(selectedProject)}>
+                    <Archive size={14} />
+                    {t('workshop.library.archive', '归档')}
+                  </button>
+                ) : (
+                  <>
+                    <button type="button" className="secondary-button" onClick={() => onRestore(selectedProject)}>
+                      <ArrowCounterClockwise size={14} />
+                      {t('workshop.library.restore', '恢复')}
+                    </button>
+                    <button type="button" className="secondary-button" onClick={() => setPendingDeleteId(selectedProject.id)}>
+                      <Trash size={14} />
+                      {t('workshop.library.delete', '永久删除')}
+                    </button>
+                  </>
+                )}
+                {/* A project whose world was deleted stays usable; only entering the world is gone. */}
+                {selectedProject.worldLinked ? (
+                  <button type="button" className="primary-button" onClick={() => onOpenWorld(selectedProject.worldId)}>
+                    {t('workshop.library.enterWorld', '进入世界')}
+                    <ArrowRight size={14} />
+                  </button>
+                ) : null}
               </div>
             </header>
+
+            {selectedProject.worldLinked ? null : (
+              <div className="creative-workshop-project-detached" role="note">
+                <WarningCircle size={16} />
+                <div>
+                  <strong>{t('workshop.library.detached', '关联世界已删除')}</strong>
+                  <p>{t('workshop.library.detachedHint', '项目仍然保留，可基于它创建一个新的世界。')}</p>
+                </div>
+              </div>
+            )}
+
+            {pendingDeleteId === selectedProject.id ? (
+              <WorkshopProjectDeleteConfirm
+                onCancel={() => setPendingDeleteId(undefined)}
+                onConfirm={() => { setPendingDeleteId(undefined); onDelete(selectedProject) }}
+              />
+            ) : null}
 
             <div className="creative-workshop-project-facts">
               <div><span>{t('workshop.library.template', '基础模板')}</span><strong>{selectedProject.baseTemplateId}</strong></div>
@@ -230,6 +310,51 @@ export function CreativeWorkshopProjectLibrary({
           </>
         )}
       </main>
+    </div>
+  )
+}
+
+interface WorkshopProjectDeleteConfirmProps {
+  onCancel(): void
+  onConfirm(): void
+}
+
+/**
+ * Permanent-delete gate for a workshop project.
+ *
+ * It asks exactly what it always asked — nothing is typed, the two buttons are
+ * the whole decision. What it adds is the focus contract every other dialog in
+ * this app already honours via `useDialogFocusTrap`: focus lands inside on
+ * open, Escape cancels, Tab cannot walk out into the library behind it, and the
+ * trigger gets focus back on close. It mounts only while the confirmation is
+ * open so the hook's setup/teardown lines up with the dialog's own lifetime,
+ * and it carries `aria-modal` so the hook's topmost check ranks it above the
+ * creative workshop dialog it is nested in.
+ */
+function WorkshopProjectDeleteConfirm({ onCancel, onConfirm }: WorkshopProjectDeleteConfirmProps) {
+  const { t } = useI18n()
+  const dialogRef = useRef<HTMLDivElement>(null)
+
+  useDialogFocusTrap(dialogRef, onCancel)
+
+  return (
+    <div
+      ref={dialogRef}
+      className="creative-workshop-project-delete-confirm"
+      role="alertdialog"
+      aria-modal="true"
+      aria-label={t('workshop.library.delete', '永久删除')}
+    >
+      <p>{t('workshop.library.deleteConfirm', '永久删除这个项目？关联的世界仍然存在。')}</p>
+      <div>
+        {/* Cancel takes the opening focus: the destructive button is never one stray Enter away. */}
+        <button data-dialog-initial-focus type="button" className="secondary-button" onClick={onCancel}>
+          {t('workshop.cancel', '取消')}
+        </button>
+        <button type="button" className="danger-button" onClick={onConfirm}>
+          {t('workshop.library.deleteConfirmAction', '确认永久删除')}
+        </button>
+      </div>
     </div>
   )
 }

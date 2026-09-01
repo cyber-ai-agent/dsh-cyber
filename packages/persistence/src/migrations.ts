@@ -1914,10 +1914,20 @@ const MIGRATIONS: readonly Migration[] = [
       FROM employee_milestones;
     `,
   },
-  // 38 is reserved by `employee-milestone-origin`, which is still an open PR on
-  // another branch. This slice deliberately takes 39 instead of renumbering
-  // anything that already exists; see MIGRATION_COUNT below for why the gap is
-  // tolerated rather than papered over.
+  {
+    version: 38,
+    name: 'employee-milestone-origin',
+    sql: `
+      ALTER TABLE employee_milestones
+        ADD COLUMN origin TEXT NOT NULL DEFAULT 'authored'
+        CHECK (origin IN ('authored', 'activity-projection', 'legacy-conversation-projection'));
+
+      -- Historical rows do not carry enough evidence to distinguish the retired
+      -- projection from an owner-authored milestone with the same title. Keep
+      -- every pre-migration row as authored: under-labelling leaves harmless
+      -- legacy clutter, while guessing from display copy can destroy user data.
+    `,
+  },
   {
     version: 39,
     name: 'agent-run-context-snapshot',

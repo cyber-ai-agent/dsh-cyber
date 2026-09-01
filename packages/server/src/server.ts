@@ -6,14 +6,11 @@ import { BUILTIN_BLUEPRINTS } from '@dsh-cyber/catalog'
 import type { JsonObject, AgentRuntimePort, AgentTurnRequest } from '@dsh-cyber/contracts'
 import {
   HarnessModelRouter,
-  inspectHarnessCandidate,
   inspectHarnessCompatibility,
-  readActiveHarnessRuntime,
-  resolveCandidateDshBin,
   type HarnessModelRoute,
 } from '@dsh-cyber/harness-adapter'
 import { ConversationOrchestrator, type GroupTurnPlannerPort } from '@dsh-cyber/orchestration'
-import { LocalPackageCatalog, LocalPackageRuntime, PackageManager, type PackageRuntimePort } from '@dsh-cyber/package-runtime'
+import type { PackageManager, PackageRuntimePort } from '@dsh-cyber/package-runtime'
 import { SqliteStore, WorldArtifactRepository, WorldKnowledgeRepository, WorldSimulationStore } from '@dsh-cyber/persistence'
 import { dispatchHttpRequest } from './http/context.js'
 import { assertApplicationAccess } from './http/application-access-guard.js'
@@ -34,6 +31,7 @@ import { registerIntegrationRoutes } from './routes/integration-routes.js'
 import { registerModelInteractionRoutes } from './routes/model-interaction-routes.js'
 import { registerModelRoutes } from './routes/model-routes.js'
 import { registerPackageRoutes } from './routes/package-routes.js'
+import { registerCharacterGeneratorRoutes } from './routes/character-generator-routes.js'
 import { registerSystemRoutes } from './routes/system-routes.js'
 import { registerTaskScheduleRoutes } from './routes/task-schedule-routes.js'
 import { registerWorkspaceFileRoutes } from './routes/workspace-file-routes.js'
@@ -75,11 +73,14 @@ import type { WorkSystemService } from './services/work-system-service.js'
 import { composeWorkSystem } from './composition/compose-work-system.js'
 import { composeCompletionWorker } from './composition/compose-completion.js'
 import { composeGroupTurnPlanner } from './composition/compose-group-turn-planner.js'
+import { composePackageSystem } from './composition/compose-package-system.js'
 import { refreshMcpCatalog } from './composition/mcp-lifecycle.js'
+import { resolveActiveRuntime } from './composition/active-harness-runtime.js'
 import { WorldArtifactService } from './services/world-artifact-service.js'
 import { WorldAmbientSlotResolver } from './services/world-ambient-slot-resolver.js'
 import { WorldAmbientStateProvider } from './services/world-ambient-state-provider.js'
 import { WorldFileService } from './services/world-file-service.js'
+import { WorldLifecycleService } from './services/world-lifecycle-service.js'
 import { WorldRootService } from './services/world-root-service.js'
 import { WorldSettingsService } from './services/world-settings-service.js'
 import { createKnowledgeSearchPort } from './services/knowledge-search-port.js'
@@ -104,10 +105,11 @@ import type { CharacterSkillActionRepository } from './skills/skill-action-repos
 import type { CharacterSkillAdapterRegistry } from './skills/skill-adapter.js'
 import type { WorldSkillAvailabilityPort } from './services/world-skill-availability.js'
 import type { CreativeWorkshopDraftGeneratorPort } from './services/creative-workshop-draft-generator.js'
+import { CharacterImportAnalyzer, type CharacterImportAnalyzerPort } from './services/character-import-analyzer.js'
+import { composeCharacterGeneratorMarketplace } from './services/character-generator-marketplace.js'
 import { createWorldManagementHost } from './skills/world-management-host.js'
 import { RuntimeStreamHub } from './streams/runtime-stream-hub.js'
 import { WorldStreamHub } from './streams/world-stream-hub.js'
-import { validateStagedPackageEntrypoints } from './installed-package-runtime.js'
 import { WorldRuntimeService } from './world-runtime-service.js'
 import { createBuiltinIntegrationRegistry } from './integrations/builtin-integration-registry.js'
 import { IntegrationService } from './integrations/integration-service.js'
@@ -138,6 +140,7 @@ export interface CyberServerOptions {
   /** Optional host-owned World Skill Availability provider for PR A+. */
   skillAvailability?: WorldSkillAvailabilityPort
   workshopDraftGenerator?: CreativeWorkshopDraftGeneratorPort
+  characterImportAnalyzer?: CharacterImportAnalyzerPort
   /**
    * Decides the speaking roster of a group turn.
    *
@@ -194,6 +197,9 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const worldSimulation = new WorldSimulationStore(store)
 
   const worldRoots = new WorldRootService(stateRoot)
+  const worldLifecycle = new WorldLifecycleService({ store, roots: worldRoots })
+  // Finish a delete interrupted between the SQLite commit and the file removal.
+  await worldLifecycle.sweepInterrupted()
   await Promise.all(store.listWorkspaces().flatMap((workspace) => store.listWorlds(workspace.id, true).map((world) => worldRoots.ensure(world.id))))
   const worldSettings = new WorldSettingsService(worldRoots)
   const ambientLifeSettings = new AmbientLifeSettingsService(store)
@@ -272,6 +278,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   // Production uses the derived World Catalog by default. Tests and legacy
   // embedders may still inject a narrower availability port explicitly.
   const skillAvailability = options.skillAvailability ?? skillCatalog
+  const characterImportAnalyzer = options.characterImportAnalyzer ?? new CharacterImportAnalyzer(store, credentials, skillCatalog)
 
   const activeDshBinPath = await resolveActiveRuntime(store, runtimeStateRoot, stateRoot)
   const interactions = new ModelInteractionService(store)
@@ -313,16 +320,9 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     simulationStore: worldSimulation,
     orchestrator,
   })
-  const packageRuntime = options.packageRuntime ?? new LocalPackageRuntime(join(stateRoot, 'packages'))
-  await packageRuntime.recover?.(
-    store.listWorkspaces().flatMap((workspace) => store.listInstalledPackages(workspace.id)),
-  )
-  const packageManager = new PackageManager({
-    store,
-    runtime: packageRuntime,
-    validateStaged: validateStagedPackageEntrypoints,
-  })
-  const packageCatalog = new LocalPackageCatalog(options.marketplaceRoot ?? fileURLToPath(new URL('../../../marketplace', import.meta.url)))
+  const generatedMarketplace = await composeCharacterGeneratorMarketplace(stateRoot, store)
+  const { packageManager, packageCatalog } = await composePackageSystem({ store, stateRoot, ...(options.packageRuntime === undefined ? {} : { packageRuntime: options.packageRuntime }),
+    marketplaceRoot: options.marketplaceRoot ?? fileURLToPath(new URL('../../../marketplace', import.meta.url)), workspaceMarketplaceRoots: generatedMarketplace.workspaceRoots })
   const runtimeStreamHub = new RuntimeStreamHub()
   const worldStreamHub = new WorldStreamHub()
   const worldRuntime = new WorldRuntimeService({
@@ -444,6 +444,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerSystemRoutes(router, { store, stateRoot, runtimeUpdates, applicationUpdates })
   registerWorkspaceFileRoutes(router, { worldFiles, access: worldAccess })
   registerCatalogRoutes(router, { store, packageCatalog, worldPackages })
+  registerCharacterGeneratorRoutes(router, { store, packageCatalog, skillCatalog, analyzer: characterImportAnalyzer, resolveMarketplaceRoot: generatedMarketplace.resolveMarketplaceRoot, containmentRoot: generatedMarketplace.containmentRoot })
   registerWorkspaceRoutes(router, { store })
   registerModelRoutes(router, { store, credentials, modelCatalog, interactions })
   registerIntegrationRoutes(router, {
@@ -456,13 +457,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerAmbientLifeRoutes(router, { store, settings: ambientLifeSettings, access: worldAccess })
   registerAssetRoutes(router, { store, assets, access: worldAccess })
   registerLocalTtsRoutes(router, localTtsAssets)
-  registerWorldRoutes(router, {
-    store,
-    worldAccess,
-    worldPackages,
-    ownerRuntimeAccess,
-    skillAvailability,
-  })
+  registerWorldRoutes(router, { store, worldAccess, worldPackages, ownerRuntimeAccess, skillAvailability, lifecycle: worldLifecycle, assets })
   registerWorldAuthorityRoutes(router, { store, worldAccess, authority, worldPermissions, skillRuntime, turnContinuations, toolApprovals, ownerRuntimeAccess })
   registerWorldSettingsRoutes(router, { store, settings: worldSettings, access: worldAccess })
   registerTaskScheduleRoutes(router, { store, schedules: taskSchedules, access: worldAccess })
@@ -578,17 +573,6 @@ async function sweepOrphanedPackageStaging(store: SqliteStore, worldPackages: Wo
 }
 
 function errorText(error: unknown): string { return error instanceof Error ? error.message : String(error) }
-
-async function resolveActiveRuntime(store: SqliteStore, runtimeStateRoot: string, stateRoot: string): Promise<string | undefined> {
-  const activeRuntime = await readActiveHarnessRuntime(runtimeStateRoot)
-  if (activeRuntime === undefined) return undefined
-  const activeReport = await inspectHarnessCandidate({ candidateRoot: activeRuntime.candidateRoot, stateRoot: runtimeStateRoot })
-  if (!activeReport.ok || activeReport.version !== activeRuntime.version) {
-    store.close()
-    throw new Error(`Activated Harness runtime is unavailable or incompatible. Run "dsh-cyber runtime-rollback --data-dir ${stateRoot}" to recover.`)
-  }
-  return resolveCandidateDshBin(activeRuntime.candidateRoot)
-}
 
 function resolveHarnessRoute(store: SqliteStore, request: AgentTurnRequest): HarnessModelRoute | undefined {
   const temporary = request.modelProfileId === undefined ? undefined : store.getModelProfile(request.modelProfileId)

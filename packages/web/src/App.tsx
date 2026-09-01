@@ -1,4 +1,5 @@
 import {
+  Archive,
   Buildings,
   CaretDown,
   Check,
@@ -112,6 +113,7 @@ const MessageHistoryDialog = lazy(async () => ({ default: (await import('./compo
 const PackageMarketDialog = lazy(async () => ({ default: (await import('./components/PackageMarketDialog.js')).PackageMarketDialog }))
 const RecruitmentDialog = lazy(async () => ({ default: (await import('./components/RecruitmentDialog.js')).RecruitmentDialog }))
 const WorldSettingsDialog = lazy(async () => ({ default: (await import('./components/WorldSettingsDialog.js')).WorldSettingsDialog }))
+const WorldLibraryDialog = lazy(async () => ({ default: (await import('./components/WorldLibraryDialog.js')).WorldLibraryDialog }))
 const WorldRuntimeDock = lazy(async () => ({ default: (await import('./features/world/WorldRuntimeDock.js')).WorldRuntimeDock }))
 const WorldTracePanel = lazy(async () => ({ default: (await import('./components/world-trace/WorldTracePanel.js')).WorldTracePanel }))
 const TaskSchedulePanel = lazy(async () => ({ default: (await import('./components/TaskSchedulePanel.js')).TaskSchedulePanel }))
@@ -219,6 +221,7 @@ export default function App() {
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('appearance')
   const [savingSettings, setSavingSettings] = useState(false)
   const [recruitmentOpen, setRecruitmentOpen] = useState(false)
+  const [worldLibraryOpen, setWorldLibraryOpen] = useState(false)
   const [groupDialogOpen, setGroupDialogOpen] = useState(false)
   const [groupCreating, setGroupCreating] = useState(false)
   const [packageMarketOpen, setPackageMarketOpen] = useState(false)
@@ -482,6 +485,20 @@ export default function App() {
     const target = snapshot.worlds.find((world) => world.id === worldId)
     if (target === undefined) throw new Error('创意工坊对应的世界不存在或已归档')
     await loadWorld(target)
+  }, [loadWorld, workspace])
+
+  // The workspace snapshot lists active worlds only, so archiving or deleting a
+  // world removes it from the shell here. When it was the world on screen, move
+  // to another active one rather than leaving a world that no longer accepts work.
+  const refreshWorldList = useCallback(async () => {
+    if (workspace === undefined || demoMode) return
+    const snapshot = await api<WorkspaceSnapshot>(`/api/workspaces/${workspace.id}/snapshot`)
+    setWorlds(snapshot.worlds)
+    const current = activeWorldRef.current
+    if (current !== undefined && !snapshot.worlds.some((world) => world.id === current.id)) {
+      const next = snapshot.worlds[0]
+      if (next !== undefined) await loadWorld(next)
+    }
   }, [loadWorld, workspace])
 
   const createWorldFromTheme = useCallback(async (item: CyberMarketPackage, name: string) => {
@@ -1248,6 +1265,7 @@ export default function App() {
     setError(undefined)
     try {
       let employee: EmployeeInstance
+      let recruitedProfile: EmployeeProfile | undefined
       let issuedGrant: PreparedSessionHostAccessGrant | undefined
       if (demoMode) {
         const timestamp = new Date().toISOString()
@@ -1267,7 +1285,7 @@ export default function App() {
           updatedAt: timestamp,
         }
       } else {
-        const result = await api<{ employee: EmployeeInstance; grant?: PreparedSessionHostAccessGrant }>(`/api/worlds/${activeWorld.id}/recruit`, {
+        const result = await api<{ employee: EmployeeInstance; profile?: EmployeeProfile; grant?: PreparedSessionHostAccessGrant }>(`/api/worlds/${activeWorld.id}/recruit`, {
           method: 'POST',
           body: JSON.stringify({
             blueprintId: blueprint.id,
@@ -1280,9 +1298,14 @@ export default function App() {
           }),
         })
         employee = result.employee
+        recruitedProfile = result.profile
         issuedGrant = result.grant
       }
-      const mapped = toCyberEmployee(employee, employees.length)
+      // The recruited character already owns its appearance. Painting it from
+      // that profile keeps the avatar identical before and after the next
+      // reload, instead of showing a placeholder that changes underneath.
+      const base = toCyberEmployee(employee, employees.length)
+      const mapped = recruitedProfile === undefined ? base : employeeWithProfile(base, recruitedProfile)
       setEmployees((current) => [...current, mapped])
       setRecruitmentOpen(false)
       setPreferredBlueprintId(undefined)
@@ -1302,6 +1325,12 @@ export default function App() {
       if (!demoMode) {
         const dossier = await api<EmployeeDossier>(`/api/employees/${employee.id}/dossier`)
         setDossiers((current) => ({ ...current, [employee.id]: dossier }))
+        const dossierProfile = dossier.profile
+        if (dossierProfile !== undefined) {
+          setEmployees((current) => current.map((item) => item.id === employee.id
+            ? employeeWithProfile(item, dossierProfile)
+            : item))
+        }
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '招聘失败')
@@ -2282,6 +2311,7 @@ export default function App() {
           activeWorld={activeWorld}
           onSelect={(world) => void loadWorld(world)}
           onExplore={() => void openPackageMarket('theme')}
+          onManage={() => { clearError(); setWorldLibraryOpen(true) }}
         />
         <WorldThemeSwitcher
           key={`${activeWorld.id}:${skinRevision}`}
@@ -2518,6 +2548,14 @@ export default function App() {
           onClearModelLogs={clearModelLogs}
         /></Suspense>
       ) : null}
+      {worldLibraryOpen ? (
+        <Suspense fallback={<div className="dialog-loading" role="status">{t('worldLibrary.loading', '正在读取世界列表…')}</div>}><WorldLibraryDialog
+          workspaceId={workspace.id}
+          activeWorldId={activeWorld.id}
+          onClose={() => setWorldLibraryOpen(false)}
+          onChanged={refreshWorldList}
+        /></Suspense>
+      ) : null}
       {recruitmentOpen ? (
         <Suspense fallback={<div className="dialog-loading" role="status">正在打开角色档案…</div>}><RecruitmentDialog
           blueprints={blueprints}
@@ -2532,6 +2570,7 @@ export default function App() {
       ) : null}
       {packageMarketOpen ? (
         <Suspense fallback={<div className="dialog-loading" role="status">正在打开市场…</div>}><PackageMarketDialog
+          workspaceId={workspace.id}
           initialMarket={packageMarketKind}
           world={activeWorld}
           worlds={worlds}
@@ -2569,6 +2608,9 @@ export default function App() {
             if (activation === undefined) throw new Error('这份角色模板没有可用的招募入口')
             setPackageMarketOpen(false)
             await openRecruitment(activation.blueprintId)
+          }}
+          onCharacterPublished={async () => {
+            await Promise.all([loadPackages(), searchMarketplace('talent')])
           }}
           onUsePlugin={(command) => {
             setPackageMarketOpen(false)
@@ -2783,11 +2825,13 @@ function WorldSwitcher({
   activeWorld,
   onSelect,
   onExplore,
+  onManage,
 }: {
   worlds: World[]
   activeWorld: World
   onSelect(world: World): void
   onExplore(): void
+  onManage(): void
 }) {
   const detailsRef = useRef<HTMLDetailsElement>(null)
   const { t } = useI18n()
@@ -2829,6 +2873,24 @@ function WorldSwitcher({
             </button>
           ))}
         </div>
+        {/* Collapse the menu and park focus on the switcher before the library
+            mounts, so closing the library returns focus somewhere reachable
+            rather than to a menu item the menu no longer shows. */}
+        <button
+          className="topbar-world-switcher__explore"
+          type="button"
+          onClick={() => {
+            close()
+            detailsRef.current?.querySelector('summary')?.focus()
+            onManage()
+          }}
+        >
+          <Archive size={18} />
+          <span>
+            <strong>{t('worldLibrary.open', '管理世界')}</strong>
+            <small>{t('worldLibrary.openHint', '归档、恢复或永久删除世界')}</small>
+          </span>
+        </button>
         <button className="topbar-world-switcher__explore" type="button" onClick={() => { onExplore(); close() }}>
           <Compass size={18} />
           <span><strong>探索更多世界</strong><small>前往主题市场搜索并安装</small></span>

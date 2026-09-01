@@ -940,6 +940,7 @@ describe('SqliteStore', () => {
       DROP TABLE agent_run_context_snapshots;
       DROP TABLE IF EXISTS employee_memory_index_fts;
       DROP TABLE employee_memory_index;
+      ALTER TABLE employee_milestones DROP COLUMN origin;
       DELETE FROM schema_migrations WHERE version > 36;
       PRAGMA user_version = 36;
     `)
@@ -1012,14 +1013,14 @@ describe('SqliteStore', () => {
     const legacy = new DatabaseSync(path)
     legacy.exec(`
       DROP TABLE agent_run_context_snapshots;
-      DELETE FROM schema_migrations WHERE version > 37;
-      PRAGMA user_version = 37;
+      DELETE FROM schema_migrations WHERE version > 38;
+      PRAGMA user_version = 38;
     `)
     legacy.close()
 
     const migrated = await SqliteStore.open(path)
     stores.push(migrated)
-    expect((await readdir(directory)).some((file) => file.startsWith('cyber.sqlite.pre-migration-v37-'))).toBe(true)
+    expect((await readdir(directory)).some((file) => file.startsWith('cyber.sqlite.pre-migration-v38-'))).toBe(true)
     expect(migrated.database.prepare('PRAGMA foreign_key_check').all()).toEqual([])
     expect(migrated.doctor()).toMatchObject({ ok: true, schemaVersion: CYBER_SCHEMA_VERSION })
 
@@ -1349,5 +1350,71 @@ describe('SqliteStore', () => {
     expect(reopened.getWorkTurn(queuedTurn.id)).toMatchObject({ status: 'queued' })
     expect(reopened.getAgentRun(queuedRun.id)).toMatchObject({ status: 'queued' })
     expect(reopened.recoverConversationRuntimeAfterRestart()).toEqual({ turnsFailed: 0, runsFailed: 0 })
+  })
+  it('never guesses historical milestone origin from title and removes only an explicitly stamped legacy row', async () => {
+    const { path, store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: '事迹工作区' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '赛博公司', templateId: 'cyber-company' })
+    store.saveBlueprint(blueprint())
+    const employee = store.recruitEmployee({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      blueprintId: 'software-engineer',
+      blueprintVersion: 1,
+    })
+    const recruitedEvent = store.listWorldDomainEvents(world.id)
+      .find((event) => event.type === 'employee.recruited')!
+    // Before migration this row is indistinguishable from user-authored data:
+    // same title/category/evidence shape and no origin column.
+    const legacy = store.appendEmployeeMilestone({
+      employeeId: employee.id,
+      category: 'task',
+      title: '完成一次真实对话',
+      summary: '旧投影按每一轮对话写入的事迹。',
+      sourceEventIds: [recruitedEvent.id],
+    })
+    store.close()
+    stores.splice(stores.indexOf(store), 1)
+
+    // Rewind past both 37 (memory index) and 38 (origin) so the upgrade replays
+    // the whole stack the way a 36 database in the field would.
+    const downgraded = new DatabaseSync(path)
+    downgraded.exec(`
+      DROP TABLE agent_run_context_snapshots;
+      ALTER TABLE employee_milestones DROP COLUMN origin;
+      DROP TABLE employee_memory_index;
+      DELETE FROM schema_migrations WHERE version > 36;
+      PRAGMA user_version = 36;
+    `)
+    downgraded.close()
+
+    const migrated = await SqliteStore.open(path)
+    stores.push(migrated)
+    expect(migrated.doctor()).toMatchObject({ ok: true, schemaVersion: CYBER_SCHEMA_VERSION })
+    expect(migrated.getEmployeeMemoryIndexEntry(legacy.id)).toBeDefined()
+    expect(migrated.listEmployeeMilestones(employee.id).find((item) => item.id === legacy.id))
+      .toMatchObject({ origin: 'authored' })
+
+    // Durable user data that collides with the retired generator's display copy.
+    const authored = migrated.appendEmployeeMilestone({
+      employeeId: employee.id,
+      category: 'task',
+      title: '完成一次真实对话',
+      summary: '老板亲手记下的里程碑，不能被清理删掉。',
+      sourceEventIds: [recruitedEvent.id],
+    })
+    const joined = migrated.listEmployeeMilestones(employee.id).find((item) => item.category === 'joined')
+    expect(joined).toMatchObject({ origin: 'authored' })
+
+    // Once provenance is explicit, cleanup uses only that structural identity.
+    migrated.database.prepare("UPDATE employee_milestones SET origin = 'legacy-conversation-projection' WHERE id = ?").run(legacy.id)
+    expect(migrated.removeLegacyConversationMilestones(employee.id)).toBe(1)
+    const remaining = migrated.listEmployeeMilestones(employee.id)
+    expect(remaining.map((item) => item.id)).toContain(authored.id)
+    expect(remaining.map((item) => item.id)).not.toContain(legacy.id)
+    // The retrieval index is a projection of the milestone, never a second copy
+    // that outlives it.
+    expect(migrated.getEmployeeMemoryIndexEntry(legacy.id)).toBeUndefined()
+    expect(migrated.removeLegacyConversationMilestones(employee.id)).toBe(0)
   })
 })

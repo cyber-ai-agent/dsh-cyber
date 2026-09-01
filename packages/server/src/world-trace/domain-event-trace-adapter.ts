@@ -82,6 +82,8 @@ export const TRACE_INVISIBLE_EVENT_TYPES: readonly DomainEventType[] = [
   'world.runtime.snapshot.saved',
   'world.package.instantiated',
   'world.package.disabled',
+  // A permanently deleted world has no world scope left to render into.
+  'world.deleted',
 ]
 
 export class DomainEventTraceAdapter implements WorldTraceAdapter<'domain-event'> {
@@ -133,6 +135,8 @@ function presentDomainEvent(type: DomainEventType, payload: Record<string, unkno
     case 'world.renamed': return { category: 'world', status: 'success', summary: worldRenameSummary(payload) }
     case 'world.character.authority.changed': return { category: 'world', status: 'success', summary: '角色世界职权已更新' }
     case 'world.creation.rolled-back': return { category: 'world', status: 'failed', summary: '世界创建已回滚' }
+    case 'world.archived': return { category: 'world', status: 'cancelled', summary: '世界已归档' }
+    case 'world.restored': return { category: 'world', status: 'success', summary: '世界已恢复' }
     case 'world.entered': return { category: 'world', status: 'info', summary: '已进入世界' }
     case 'employee.recruited': return { category: 'world', status: 'success', summary: '新角色已加入世界' }
     case 'employee.revised':

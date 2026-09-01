@@ -68,8 +68,10 @@ export function createWorldKnowledgeGraphRuntime(options: WorldKnowledgeGraphRun
   })
   const scheduler = new WorldKnowledgeConsolidationScheduler({
     repository: {
+      // Consolidation is background world work; an archived world stays
+      // dormant and its knowledge is left exactly as the owner archived it.
       listWorlds: () => options.store.listWorkspaces().flatMap((workspace) =>
-        options.store.listWorlds(workspace.id, true).map((world) => ({ workspaceId: workspace.id, worldId: world.id }))),
+        options.store.listWorlds(workspace.id).map((world) => ({ workspaceId: workspace.id, worldId: world.id }))),
       listSessions: (worldId) => options.store.listSessions(worldId),
       getKnowledgeConsolidationSettings: (worldId) => repository.getKnowledgeConsolidationSettings(worldId),
       getKnowledgeConsolidationCursor: (input) => repository.getKnowledgeConsolidationCursor(input),

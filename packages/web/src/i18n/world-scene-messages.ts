@@ -1,8 +1,9 @@
 import type { UiLocale } from '@dsh-cyber/contracts'
 
+import { defineLocaleCatalogs } from './catalog-parity.js'
 import { registerMessages } from './runtime.js'
 
-const catalogs: Record<UiLocale, Record<string, string>> = {
+const catalogs = defineLocaleCatalogs({
   'zh-CN': {
     'appearance.theme.switchConversationTitle': '切换界面与会话皮肤，不改变当前世界场景',
     'appearance.theme.conversationListLabel': '界面与会话皮肤列表',
@@ -231,6 +232,6 @@ const catalogs: Record<UiLocale, Record<string, string>> = {
     'worldSettings.conversationSkinPreviewUser': 'आप: दाईं ओर का वर्ल्ड सीन इसी वर्ल्ड का स्थान बना रहता है।',
     'worldSettings.saveStatusSceneV2': 'बातचीत के दृश्य बदलाव तुरंत लागू होते हैं। इन्हें रखने के लिए सेव करें।',
   },
-}
+})
 
 for (const locale of Object.keys(catalogs) as UiLocale[]) registerMessages(locale, catalogs[locale])
