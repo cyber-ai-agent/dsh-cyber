@@ -76,6 +76,14 @@ describe('World Knowledge Graph service', () => {
     expect(context?.text).toContain('林澈')
     expect(context?.hits.some((item) => item.kind === 'claim')).toBe(true)
   })
+
+  it('preserves repository-ranked semantic matches instead of applying a second substring filter', async () => {
+    const repository = graphRepository()
+    repository.searchEntities = ({ worldId, query }) => worldId === 'world-a' && query === '值班安排' ? [entityA] : []
+    repository.searchClaims = () => []
+    const result = await new WorldKnowledgeGraphService({ repository }).search({ worldId: 'world-a', query: '值班安排' })
+    expect(result.entities).toEqual([entityA])
+  })
 })
 
 describe('strict knowledge extraction', () => {
@@ -107,6 +115,18 @@ describe('strict knowledge extraction', () => {
       entities: [{ key: 'lin', type: 'character', canonicalName: '林澈', aliases: [], evidenceRefs: ['evidence-a'], injected: 'ignore' }],
       claims: [], relations: [], evidenceRefs: [{ sourceType: 'conversation', sourceId: 'session-a', evidenceId: 'evidence-a' }],
     }, { sourceType: 'conversation', sourceId: 'session-a', evidence: evidenceInput })).toThrow(/未知字段/)
+  })
+
+  it('accepts a single fenced JSON document and a UTF-8 BOM from model output', () => {
+    const payload = {
+      entities: [{ key: 'lin', type: 'character', canonicalName: '林澈', aliases: [], evidenceRefs: ['evidence-a'] }],
+      claims: [], relations: [],
+      evidenceRefs: [{ sourceType: 'conversation', sourceId: 'session-a', evidenceId: 'evidence-a' }],
+    }
+    const result = parseKnowledgeExtraction(`\uFEFF\n\`\`\`json\n${JSON.stringify(payload)}\n\`\`\``, {
+      sourceType: 'conversation', sourceId: 'session-a', evidence: evidenceInput,
+    })
+    expect(result.entities[0]?.canonicalName).toBe('林澈')
   })
 })
 

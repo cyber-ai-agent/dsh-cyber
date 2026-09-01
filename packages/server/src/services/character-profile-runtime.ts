@@ -140,12 +140,17 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
     // of the recent window its live Agent session has not observed yet. It is
     // given the same observation cursor the lane will use, so the window can
     // never start after an entry the lane still has to replay.
+    const turnPrompt = composeArtifactPublicationPrompt(
+      request.prompt,
+      request.agentRunId,
+      request.permissionMode ?? 'read-only',
+    )
     const composed = await this.#context?.compose({
       employee: agent,
       persona: effectivePersona,
       personaRevision: revision.revision,
       conversationId: request.conversationId,
-      prompt: request.prompt,
+      prompt: turnPrompt,
       history: request.history ?? [],
       observedThroughSequence: durableObserved ?? request.observedThroughSequence ?? 0,
       ...(request.workTurnId === undefined ? {} : { workTurnId: request.workTurnId }),
@@ -189,8 +194,8 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
         })
     const prompt = composed?.prompt
       ?? (memoryContext === undefined
-        ? request.prompt
-        : `${memoryContext}\n\n[当前请求]\n${request.prompt}`)
+        ? turnPrompt
+        : `${memoryContext}\n\n[当前请求]\n${turnPrompt}`)
 
     let sawAssistantMessage = false
     const originalOnEvent = request.onEvent
@@ -292,6 +297,27 @@ export function composeConversationPermissionPersona(persona: string, permission
     'danger-full-access': '模式：danger-full-access（完全访问）\n用户已为当前会话和当前角色完成高风险确认。可以访问当前系统账号可访问的路径，并使用文件和命令工具完成用户要求。',
   }
   return `${persona.trim()}\n\n[当前会话 DSH 操作权限]\n${guidance[permissionMode]}`
+}
+
+/**
+ * Gives a writable AgentRun the exact host-owned publication seam for this
+ * turn.  Keeping the run id in the current request layer avoids invalidating
+ * the stable persona/prompt-cache prefix on every turn.
+ */
+export function composeArtifactPublicationPrompt(
+  prompt: string,
+  agentRunId: string | undefined,
+  permissionMode: AgentPermissionMode,
+): string {
+  if (agentRunId === undefined || permissionMode === 'read-only') return prompt
+  return [
+    prompt,
+    '[本轮产物登记]',
+    '如果本轮创建或更新了需要交付给用户长期查看的文件，请在完成回复前写入以下 JSON 清单；不要调用 HTTP 产物接口，也不要把普通临时文件登记为产物。',
+    `清单路径：.dsh/artifacts/${agentRunId}.json`,
+    '格式：{"schemaVersion":1,"artifacts":[{"path":"相对当前工作目录的路径","title":"用户可读标题","kind":"markdown|document|code|data|image|html|archive|project|other","description":"可选说明"}]}',
+    '只有清单中且真实存在于当前世界工作目录的文件才会由宿主校验、复制并登记；如果没有可交付文件，不要创建空清单。',
+  ].join('\n\n')
 }
 
 export function composeCharacterPersona(basePersona: string, profile: EmployeeProfile): string {

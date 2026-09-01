@@ -56,8 +56,8 @@ export interface KnowledgeGraphRepositoryPort {
   getEntity(input: { worldId: string; entityId: string }): KnowledgeGraphEntity | undefined | Promise<KnowledgeGraphEntity | undefined>
   listEvidence(input: { worldId: string; claimIds?: readonly string[]; relationIds?: readonly string[]; entityIds?: readonly string[]; limit: number; sourceType?: KnowledgeEvidenceSourceType }):
     readonly KnowledgeGraphEvidence[] | Promise<readonly KnowledgeGraphEvidence[]>
-  searchClaims?(input: { worldId: string; query: string; limit: number }): readonly KnowledgeGraphClaim[] | Promise<readonly KnowledgeGraphClaim[]>
-  searchEntities?(input: { worldId: string; query: string; limit: number }): readonly KnowledgeGraphEntity[] | Promise<readonly KnowledgeGraphEntity[]>
+  searchClaims(input: { worldId: string; query: string; limit: number }): readonly KnowledgeGraphClaim[] | Promise<readonly KnowledgeGraphClaim[]>
+  searchEntities(input: { worldId: string; query: string; limit: number }): readonly KnowledgeGraphEntity[] | Promise<readonly KnowledgeGraphEntity[]>
 }
 
 export interface KnowledgeGraphAdminPort {
@@ -78,6 +78,8 @@ export interface PositionalKnowledgeGraphRepository {
   listClaims(worldId: string, filter?: { entityId?: string; entityIds?: readonly string[]; includeArchived?: boolean; limit?: number; sourceType?: KnowledgeEvidenceSourceType }): readonly KnowledgeGraphClaim[]
   listRelations(worldId: string, filter?: { entityId?: string; entityIds?: readonly string[]; includeArchived?: boolean; limit?: number; sourceType?: KnowledgeEvidenceSourceType }): readonly KnowledgeGraphRelation[]
   listEvidence(worldId: string, filter?: { entityId?: string; claimId?: string; relationId?: string; claimIds?: readonly string[]; relationIds?: readonly string[]; entityIds?: readonly string[]; limit?: number; sourceType?: KnowledgeEvidenceSourceType }): readonly KnowledgeGraphEvidence[]
+  searchEntities(worldId: string, query: string, limit: number): readonly KnowledgeGraphEntity[]
+  searchClaims(worldId: string, query: string, limit: number): readonly KnowledgeGraphClaim[]
 }
 
 /**
@@ -167,8 +169,8 @@ export function createKnowledgeGraphRepositoryPort(repository: PositionalKnowled
       }
       return all.slice(0, limit)
     },
-    searchEntities: ({ worldId, query, limit }) => repository.listEntities(worldId, { query, limit, includeArchived: false }),
-    searchClaims: ({ worldId, query, limit }) => repository.listClaims(worldId, { limit: 500, includeArchived: false }).filter((claim) => (claim.predicate + ' ' + (claim.objectText ?? '')).toLocaleLowerCase().includes(query.toLocaleLowerCase())).slice(0, limit),
+    searchEntities: ({ worldId, query, limit }) => repository.searchEntities(worldId, query, limit),
+    searchClaims: ({ worldId, query, limit }) => repository.searchClaims(worldId, query, limit),
   }
 }
 
@@ -272,10 +274,9 @@ export class WorldKnowledgeGraphService {
     const query = nonEmpty(input.query, 'query').slice(0, 500)
     const limit = clamp(input.limit, 20, 1, 100)
     const [entities, claims] = await Promise.all([
-      this.#repository.searchEntities === undefined ? this.#repository.listEntities({ worldId, limit }) : this.#repository.searchEntities({ worldId, query, limit }),
-      this.#repository.searchClaims === undefined ? this.#repository.listClaims({ worldId, limit }) : this.#repository.searchClaims({ worldId, query, limit }),
+      this.#repository.searchEntities({ worldId, query, limit }),
+      this.#repository.searchClaims({ worldId, query, limit }),
     ])
-    const normalized = query.toLocaleLowerCase()
     const entityById = new Map<string, KnowledgeGraphEntity>()
     for (const entity of entities) if (entity.worldId === worldId) entityById.set(entity.id, entity)
     for (const claim of claims) {
@@ -287,8 +288,8 @@ export class WorldKnowledgeGraphService {
       }
     }
     return {
-      entities: [...entityById.values()].filter((entity) => includesEntity(entity, normalized) || claims.some((claim) => claim.worldId === worldId && (claim.subjectEntityId === entity.id || claim.objectEntityId === entity.id))).slice(0, limit).map(copyEntity),
-      claims: claims.filter((claim) => claim.worldId === worldId && includesClaim(claim, normalized)).slice(0, limit).map(copyClaim),
+      entities: [...entityById.values()].slice(0, limit).map(copyEntity),
+      claims: claims.filter((claim) => claim.worldId === worldId).slice(0, limit).map(copyClaim),
     }
   }
 }
@@ -376,8 +377,6 @@ function safeInternal(value: string, sanitizer: TraceSanitizer, limit: number): 
   return sanitizer.text(value.replaceAll('[当前世界长期知识]', '［已移除的边界标记］').replaceAll('[当前世界长期知识结束]', '［已移除的边界标记］'), Math.max(0, limit))
 }
 function referencesAnyEntity(claim: KnowledgeGraphClaim, ids: readonly string[]): boolean { return ids.includes(claim.subjectEntityId) || (claim.objectEntityId !== undefined && ids.includes(claim.objectEntityId)) }
-function includesEntity(entity: KnowledgeGraphEntity, query: string): boolean { return [entity.canonicalName, ...entity.aliases, entity.summary ?? ''].some((value) => value.toLocaleLowerCase().includes(query)) }
-function includesClaim(claim: KnowledgeGraphClaim, query: string): boolean { return [claim.predicate, claim.objectText ?? ''].some((value) => value.toLocaleLowerCase().includes(query)) }
 function copyEntity(value: KnowledgeGraphEntity): KnowledgeGraphEntity { return { ...value, aliases: [...value.aliases] } }
 function copyClaim(value: KnowledgeGraphClaim): KnowledgeGraphClaim { return { ...value } }
 function copyRelation(value: KnowledgeGraphRelation): KnowledgeGraphRelation { return { ...value } }

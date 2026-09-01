@@ -268,7 +268,12 @@ function refKeys(value: unknown, refs: readonly KnowledgeExtractionEvidenceRef[]
 
 function parseJson(value: string): unknown {
   if (value.length > KNOWLEDGE_EXTRACTION_LIMITS.maxOutputChars) throw invalid('extraction_output_too_large', '知识抽取结果过大')
-  try { return JSON.parse(value) as unknown } catch { throw invalid('extraction_json_invalid', '知识抽取结果不是有效 JSON') }
+  const cleaned = value
+    .replace(/^\uFEFF/, '')
+    .trim()
+    .replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i, '$1')
+    .trim()
+  try { return JSON.parse(cleaned) as unknown } catch { throw invalid('extraction_json_invalid', '知识抽取结果不是有效 JSON') }
 }
 function strictRecord(value: unknown, label: string): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw invalid('extraction_shape_invalid', label + '必须是对象')

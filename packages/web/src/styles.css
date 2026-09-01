@@ -3357,6 +3357,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .model-editor-panel { align-content: start; }
 .model-editor-panel > header .text-button { flex: 0 0 auto; }
 .model-setting-grid { padding: 2px 16px 14px; }
+.model-provider-guide { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-0); }
+.model-provider-guide > span { min-width: 0; display: grid; gap: 3px; }
+.model-provider-guide strong { color: var(--text); font-size: 13px; }
+.model-provider-guide small { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.model-provider-guide > a { min-height: 40px; flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-control); color: var(--accent-strong); background: var(--surface-1); font-size: 12px; font-weight: 600; text-decoration: none; }
+.model-provider-guide > a:hover { border-color: var(--accent); color: var(--text); background: var(--surface-2); }
+.model-provider-guide > a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .model-secret-input { display: grid; grid-template-columns: minmax(0, 1fr) 42px; }
 .model-secret-input input { min-width: 0; border-right: 0 !important; font-family: var(--font-mono); }
 .model-secret-input button { width: 42px; height: 40px; display: grid; place-items: center; border: 1px solid var(--border); color: var(--text-soft); background: var(--surface-2); }
