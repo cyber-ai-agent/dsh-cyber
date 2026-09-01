@@ -1,5 +1,6 @@
 import {
   ArrowsClockwise,
+  ArrowSquareOut,
   CaretDown,
   CaretUp,
   CheckCircle,
@@ -178,6 +179,8 @@ interface ModelProviderPreset {
   webSearchBaseUrl?: string
   popularModels?: readonly string[]
   badge?: string
+  description: string
+  helpUrl?: string
 }
 
 type ModelCredentialMode = 'api-key' | 'environment' | 'none'
@@ -203,23 +206,34 @@ interface ModelDraft {
   settings: ModelProfile['settings']
 }
 
-const MODEL_PRESETS: readonly ModelProviderPreset[] = [
-  { id: 'deepseek', label: 'DeepSeek', providerKind: 'deepseek', api: 'openai-completions', baseUrl: 'https://api.deepseek.com/v1', credentialEnvName: 'DEEPSEEK_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'deepseek-chat', webSearchBaseUrl: 'https://api.deepseek.com/anthropic/v1', popularModels: ['deepseek-chat', 'deepseek-reasoner'], badge: '官方' },
-  { id: 'siliconflow', label: 'SiliconFlow', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://api.siliconflow.cn/v1', credentialEnvName: 'SILICONFLOW_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'deepseek-ai/DeepSeek-V3', popularModels: ['deepseek-ai/DeepSeek-V3', 'deepseek-ai/DeepSeek-R1', 'Qwen/Qwen2.5-72B-Instruct'], badge: '聚合' },
-  { id: 'zhipu', label: 'Zhipu AI (GLM)', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', credentialEnvName: 'ZHIPU_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'glm-4-flash', popularModels: ['glm-4-flash', 'glm-4-plus', 'glm-4-air'], badge: '国内' },
-  { id: 'moonshot', label: 'Moonshot (Kimi)', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://api.moonshot.cn/v1', credentialEnvName: 'MOONSHOT_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'moonshot-v1-8k', popularModels: ['moonshot-v1-8k', 'moonshot-v1-32k'] },
-  { id: 'openai', label: 'OpenAI', providerKind: 'openai-compatible-remote', api: 'openai-responses', baseUrl: 'https://api.openai.com/v1', credentialEnvName: 'OPENAI_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'gpt-4o', popularModels: ['gpt-4o', 'gpt-4o-mini', 'o1-mini'] },
-  { id: 'anthropic', label: 'Anthropic (Claude)', providerKind: 'openai-compatible-remote', api: 'anthropic-messages', baseUrl: 'https://api.anthropic.com/v1', credentialEnvName: 'ANTHROPIC_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'claude-3-7-sonnet-latest', popularModels: ['claude-3-7-sonnet-latest', 'claude-3-5-haiku-latest'] },
-  { id: 'gemini', label: 'Google Gemini', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', credentialEnvName: 'GEMINI_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'gemini-2.5-pro', popularModels: ['gemini-2.5-pro', 'gemini-2.5-flash'] },
-  { id: 'openrouter', label: 'OpenRouter', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://openrouter.ai/api/v1', credentialEnvName: 'OPENROUTER_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'deepseek/deepseek-chat', popularModels: ['deepseek/deepseek-chat', 'anthropic/claude-3.5-sonnet'] },
-  { id: 'ollama', label: 'Ollama', providerKind: 'openai-compatible-local', api: 'openai-completions', baseUrl: 'http://127.0.0.1:11434/v1', credentialEnvName: '', credentialMode: 'none', modelPlaceholder: 'qwen2.5:7b', popularModels: ['qwen2.5:7b', 'deepseek-r1:8b', 'llama3.1:8b'], badge: '本地免密' },
-  { id: 'lm-studio', label: 'LM Studio', providerKind: 'openai-compatible-local', api: 'openai-completions', baseUrl: 'http://127.0.0.1:1234/v1', credentialEnvName: '', credentialMode: 'none', modelPlaceholder: 'local-model', badge: '本地免密' },
-  { id: 'custom-local', label: 'Custom (LAN/Sub2API)', providerKind: 'openai-compatible-local', api: 'openai-completions', baseUrl: '', credentialEnvName: 'SUB2API_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'qwen3.5' },
-  { id: 'custom-remote', label: 'Custom (HTTPS-compatible)', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: '', credentialEnvName: 'CUSTOM_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'model-id' },
+export const MODEL_PRESETS: readonly ModelProviderPreset[] = [
+  { id: 'deepseek', label: 'DeepSeek', providerKind: 'deepseek', api: 'openai-completions', baseUrl: 'https://api.deepseek.com/v1', credentialEnvName: 'DEEPSEEK_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'deepseek-chat', webSearchBaseUrl: 'https://api.deepseek.com/anthropic/v1', popularModels: ['deepseek-chat', 'deepseek-reasoner'], badge: '官方', description: 'DeepSeek 官方文本与推理模型服务。', helpUrl: 'https://platform.deepseek.com/' },
+  { id: 'agnes', label: 'Agnes AI', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://apihub.agnes-ai.com/v1', credentialEnvName: 'AGNES_AI_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'Agnes-2.5-Pro-Beta', popularModels: ['Agnes-2.5-Pro-Beta'], badge: '多模态', description: '兼容 OpenAI 接口的文本、图像、视频与多模态模型服务。', helpUrl: 'https://beta.agnes-ai.com/' },
+  { id: 'siliconflow', label: 'SiliconFlow', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://api.siliconflow.cn/v1', credentialEnvName: 'SILICONFLOW_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'deepseek-ai/DeepSeek-V3', popularModels: ['deepseek-ai/DeepSeek-V3', 'deepseek-ai/DeepSeek-R1', 'Qwen/Qwen2.5-72B-Instruct'], badge: '聚合', description: '聚合多家开源模型，提供 OpenAI 兼容接口。', helpUrl: 'https://cloud.siliconflow.cn/account/ak' },
+  { id: 'zhipu', label: 'Zhipu AI (GLM)', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', credentialEnvName: 'ZHIPU_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'glm-4-flash', popularModels: ['glm-4-flash', 'glm-4-plus', 'glm-4-air'], badge: '国内', description: '智谱官方 GLM 系列模型服务。', helpUrl: 'https://open.bigmodel.cn/usercenter/apikeys' },
+  { id: 'moonshot', label: 'Moonshot (Kimi)', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://api.moonshot.cn/v1', credentialEnvName: 'MOONSHOT_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'moonshot-v1-8k', popularModels: ['moonshot-v1-8k', 'moonshot-v1-32k'], description: 'Moonshot 官方 Kimi 长上下文模型服务。', helpUrl: 'https://platform.moonshot.cn/console/api-keys' },
+  { id: 'openai', label: 'OpenAI', providerKind: 'openai-compatible-remote', api: 'openai-responses', baseUrl: 'https://api.openai.com/v1', credentialEnvName: 'OPENAI_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'gpt-4o', popularModels: ['gpt-4o', 'gpt-4o-mini', 'o1-mini'], description: 'OpenAI 官方 GPT 与推理模型服务。', helpUrl: 'https://platform.openai.com/api-keys' },
+  { id: 'anthropic', label: 'Anthropic (Claude)', providerKind: 'openai-compatible-remote', api: 'anthropic-messages', baseUrl: 'https://api.anthropic.com/v1', credentialEnvName: 'ANTHROPIC_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'claude-3-7-sonnet-latest', popularModels: ['claude-3-7-sonnet-latest', 'claude-3-5-haiku-latest'], description: 'Anthropic 官方 Claude 模型服务。', helpUrl: 'https://console.anthropic.com/settings/keys' },
+  { id: 'gemini', label: 'Google Gemini', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', credentialEnvName: 'GEMINI_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'gemini-2.5-pro', popularModels: ['gemini-2.5-pro', 'gemini-2.5-flash'], description: 'Google Gemini 多模态模型的 OpenAI 兼容接口。', helpUrl: 'https://aistudio.google.com/apikey' },
+  { id: 'openrouter', label: 'OpenRouter', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: 'https://openrouter.ai/api/v1', credentialEnvName: 'OPENROUTER_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'deepseek/deepseek-chat', popularModels: ['deepseek/deepseek-chat', 'anthropic/claude-3.5-sonnet'], description: '通过一个 OpenAI 兼容接口访问多家模型供应商。', helpUrl: 'https://openrouter.ai/settings/keys' },
+  { id: 'ollama', label: 'Ollama', providerKind: 'openai-compatible-local', api: 'openai-completions', baseUrl: 'http://127.0.0.1:11434/v1', credentialEnvName: '', credentialMode: 'none', modelPlaceholder: 'qwen2.5:7b', popularModels: ['qwen2.5:7b', 'deepseek-r1:8b', 'llama3.1:8b'], badge: '本地免密', description: '在本机运行开源模型，无需账号和 API 密钥。', helpUrl: 'https://ollama.com/download' },
+  { id: 'lm-studio', label: 'LM Studio', providerKind: 'openai-compatible-local', api: 'openai-completions', baseUrl: 'http://127.0.0.1:1234/v1', credentialEnvName: '', credentialMode: 'none', modelPlaceholder: 'local-model', badge: '本地免密', description: '桌面端本地模型运行器，可启动 OpenAI 兼容服务。', helpUrl: 'https://lmstudio.ai/download' },
+  { id: 'custom-local', label: 'Custom (LAN/Sub2API)', providerKind: 'openai-compatible-local', api: 'openai-completions', baseUrl: '', credentialEnvName: 'SUB2API_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'qwen3.5', description: '连接本机或局域网中的自建 OpenAI 兼容网关。' },
+  { id: 'custom-remote', label: 'Custom (HTTPS-compatible)', providerKind: 'openai-compatible-remote', api: 'openai-completions', baseUrl: '', credentialEnvName: 'CUSTOM_API_KEY', credentialMode: 'api-key', modelPlaceholder: 'model-id', description: '连接其他可信的 HTTPS OpenAI 兼容服务。' },
 ] as const
 
 function providerPresetLabel(preset: ModelProviderPreset, t: Translate): string {
   return t(`settings.model.providerName.${preset.id}`, preset.label)
+}
+
+function providerPresetDescription(preset: ModelProviderPreset, t: Translate): string {
+  const name = providerPresetLabel(preset, t)
+  if (preset.id === 'agnes' || preset.id === 'gemini') return t('settings.model.providerDescription.multimodal', '{name} 通过兼容接口提供文本与多模态模型。', { name })
+  if (preset.id === 'siliconflow' || preset.id === 'openrouter') return t('settings.model.providerDescription.aggregator', '{name} 通过一个兼容接口提供多家模型。', { name })
+  if (preset.id === 'ollama' || preset.id === 'lm-studio') return t('settings.model.providerDescription.local', '{name} 在本机运行模型，无需 API 密钥。', { name })
+  if (preset.id === 'custom-local') return t('settings.model.providerDescription.customLocal', '连接可信的本机或局域网 OpenAI 兼容网关。')
+  if (preset.id === 'custom-remote') return t('settings.model.providerDescription.customRemote', '连接其他可信的 HTTPS OpenAI 兼容服务。')
+  return t('settings.model.providerDescription.official', '{name} 官方模型服务。', { name })
 }
 
 function modelDraftForPreset(preset: ModelProviderPreset, isDefault = false, displayName = preset.label): ModelDraft {
@@ -1052,6 +1066,7 @@ function ModelSettings({
                   <span>{t('settings.model.provider', '模型服务商')}</span>
                   <select
                     value={draft.providerId}
+                    aria-describedby={currentPreset ? 'model-provider-guide' : undefined}
                     onChange={(event) => {
                       const preset = MODEL_PRESETS.find((item) => item.id === event.target.value)
                       if (preset) selectProviderPreset(preset)
@@ -1064,6 +1079,25 @@ function ModelSettings({
                     ))}
                   </select>
                 </label>
+
+                {currentPreset ? (
+                  <div id="model-provider-guide" className="model-provider-guide setting-grid__wide">
+                    <span>
+                      <strong>{providerPresetLabel(currentPreset, t)}</strong>
+                      <small>{providerPresetDescription(currentPreset, t)}</small>
+                    </span>
+                    {currentPreset.helpUrl ? (
+                      <a href={currentPreset.helpUrl} target="_blank" rel="noreferrer">
+                        {currentPreset.credentialMode === 'none'
+                          ? t('settings.model.providerDownload', '下载与安装')
+                          : t('settings.model.providerRegister', '注册 / 获取密钥')}
+                        <ArrowSquareOut size={16} aria-hidden="true" />
+                      </a>
+                    ) : (
+                      <small>{t('settings.model.providerOwnGuide', '请向你的服务提供方获取接口地址、模型 ID 和密钥。')}</small>
+                    )}
+                  </div>
+                ) : null}
 
                 <label className="setting-grid__wide">
                   <span>{t('settings.model.baseUrl', '服务接口地址（Base URL）')}</span>

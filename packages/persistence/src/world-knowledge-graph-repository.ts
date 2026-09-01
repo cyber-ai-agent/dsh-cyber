@@ -218,6 +218,28 @@ export class WorldKnowledgeGraphRepository {
     return entities.filter((entity) => this.#entityHasEvidenceSource(worldId, entity.id, sourceType)).slice(0, limit)
   }
 
+  searchEntities(worldId: string, query: string, limit: number): KnowledgeEntity[]
+  searchEntities(input: { worldId: string; query: string; limit: number }): KnowledgeEntity[]
+  searchEntities(worldOrInput: string | { worldId: string; query: string; limit: number }, query?: string, limit?: number): KnowledgeEntity[] {
+    const worldId = typeof worldOrInput === 'string' ? worldOrInput : worldOrInput.worldId
+    const resolvedQuery = typeof worldOrInput === 'string' ? query : worldOrInput.query
+    const resolvedLimit = typeof worldOrInput === 'string' ? limit : worldOrInput.limit
+    assertNonEmpty(worldId, 'World id')
+    const normalized = resolvedQuery?.trim() ?? ''
+    if (!normalized) return []
+    const contains = `%${escapeLike(normalized)}%`
+    const prefix = `${escapeLike(normalized)}%`
+    return this.#database.prepare(
+      `SELECT * FROM knowledge_entities
+       WHERE world_id = ? AND status = 'active'
+         AND (canonical_name LIKE ? ESCAPE '\\' OR aliases_json LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\')
+       ORDER BY canonical_name = ? COLLATE NOCASE DESC,
+                canonical_name LIKE ? ESCAPE '\\' COLLATE NOCASE DESC,
+                updated_at DESC, id DESC
+       LIMIT ?`,
+    ).all(worldId, contains, contains, contains, normalized, prefix, clampLimit(resolvedLimit ?? 20)).map(mapEntity)
+  }
+
   upsertEntity(input: KnowledgeEntityInput): KnowledgeEntity {
     return this.#withTransaction(() => {
       const world = this.#assertWorld(input.workspaceId, input.worldId)
@@ -317,6 +339,31 @@ export class WorldKnowledgeGraphRepository {
     if (sourceType === undefined || sourceType === 'all') return claims
     assertEvidenceSourceType(sourceType)
     return claims.filter((claim) => claim.evidenceIds.some((id) => this.getEvidence(worldId, id)?.sourceType === sourceType)).slice(0, limit)
+  }
+
+  searchClaims(worldId: string, query: string, limit: number): KnowledgeClaim[]
+  searchClaims(input: { worldId: string; query: string; limit: number }): KnowledgeClaim[]
+  searchClaims(worldOrInput: string | { worldId: string; query: string; limit: number }, query?: string, limit?: number): KnowledgeClaim[] {
+    const worldId = typeof worldOrInput === 'string' ? worldOrInput : worldOrInput.worldId
+    const resolvedQuery = typeof worldOrInput === 'string' ? query : worldOrInput.query
+    const resolvedLimit = typeof worldOrInput === 'string' ? limit : worldOrInput.limit
+    assertNonEmpty(worldId, 'World id')
+    const normalized = resolvedQuery?.trim() ?? ''
+    if (!normalized) return []
+    const contains = `%${escapeLike(normalized)}%`
+    const prefix = `${escapeLike(normalized)}%`
+    return this.#database.prepare(
+      `SELECT claim.* FROM knowledge_claims AS claim
+       INNER JOIN knowledge_entities AS subject ON subject.world_id = claim.world_id AND subject.id = claim.subject_entity_id
+       LEFT JOIN knowledge_entities AS object ON object.world_id = claim.world_id AND object.id = claim.object_entity_id
+       WHERE claim.world_id = ? AND claim.status = 'active'
+         AND (claim.predicate LIKE ? ESCAPE '\\' OR claim.object_text LIKE ? ESCAPE '\\'
+           OR subject.canonical_name LIKE ? ESCAPE '\\' OR object.canonical_name LIKE ? ESCAPE '\\')
+       ORDER BY claim.predicate = ? COLLATE NOCASE DESC,
+                claim.predicate LIKE ? ESCAPE '\\' COLLATE NOCASE DESC,
+                claim.confidence DESC, claim.updated_at DESC, claim.id DESC
+       LIMIT ?`,
+    ).all(worldId, contains, contains, contains, contains, normalized, prefix, clampLimit(resolvedLimit ?? 20)).map(mapClaim)
   }
 
   upsertClaim(input: KnowledgeClaimInput): KnowledgeClaim {

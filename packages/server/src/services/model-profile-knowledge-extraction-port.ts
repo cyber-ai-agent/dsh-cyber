@@ -135,7 +135,7 @@ function modelRequest(profile: ModelProfile, apiKey: string | undefined, prompt:
   return {
     url: endpoint(profile.baseUrl, 'chat/completions'),
     headers,
-    body: { model: profile.modelId, temperature: 0, max_tokens: 4_096, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: prompt.system }, { role: 'user', content: prompt.user }] },
+    body: { model: profile.modelId, temperature: 0, max_tokens: 4_096, stream: false, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: prompt.system }, { role: 'user', content: prompt.user }] },
   }
 }
 
@@ -167,7 +167,9 @@ async function readBoundedJson(response: Response): Promise<unknown> {
     }
     chunks.push(result.value)
   }
-  try { return JSON.parse(Buffer.concat(chunks.map((item) => Buffer.from(item))).toString('utf8')) as unknown } catch {
+  const body = Buffer.concat(chunks.map((item) => Buffer.from(item))).toString('utf8')
+  const cleaned = body.replace(/^\uFEFF/, '').trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i, '$1').trim()
+  try { return JSON.parse(cleaned) as unknown } catch {
     throw extractionError('knowledge_model_response_invalid', '知识整理模型返回了无法识别的响应。')
   }
 }

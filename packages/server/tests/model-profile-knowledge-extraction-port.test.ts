@@ -23,7 +23,8 @@ describe('ModelProfileKnowledgeExtractionPort', () => {
     const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
       expect(String(url)).toBe('http://127.0.0.1:11434/v1/chat/completions')
       expect(init?.headers).toMatchObject({ Authorization: 'Bearer local-secret' })
-      const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> }
+      const body = JSON.parse(String(init?.body)) as { stream: boolean; messages: Array<{ content: string }> }
+      expect(body.stream).toBe(false)
       expect(body.messages[1]?.content).toContain('evidence-1')
       return new Response(JSON.stringify({
         model: 'model-1',
@@ -62,6 +63,22 @@ describe('ModelProfileKnowledgeExtractionPort', () => {
     })
     expect(result).toMatchObject({ usage: { model: 'model-1', inputTokens: 21, outputTokens: 8 } })
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('accepts a BOM and one fenced JSON provider envelope', async () => {
+    const port = new ModelProfileKnowledgeExtractionPort({
+      store: {
+        getModelAssignment: () => undefined,
+        getModelProfile: () => profile,
+        listModelProfiles: () => [profile],
+      },
+      credentials: { resolve: () => 'local-secret' } as never,
+      fetch: vi.fn(async () => new Response(`\uFEFF\n\`\`\`json\n${JSON.stringify({ choices: [{ message: { content: '{"entities":[],"claims":[],"relations":[],"evidenceRefs":[]}' } }] })}\n\`\`\``)),
+    })
+    await expect(port.extract({
+      workspaceId: 'workspace-1', worldId: 'world-1', sourceType: 'manual', sourceId: 'note-1',
+      inputChars: 2, visibleText: '事实', evidence: [],
+    })).resolves.toMatchObject({ payload: expect.stringContaining('"entities"') })
   })
 
   it('does not use an explicit profile from another workspace', async () => {

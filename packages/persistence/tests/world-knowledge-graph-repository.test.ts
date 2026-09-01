@@ -173,6 +173,23 @@ describe('WorldKnowledgeGraphRepository', () => {
     expect(repository.listClaims(world.id)).toHaveLength(1)
   })
 
+  it('searches entities and claims in SQLite with world scope and relevance ordering', async () => {
+    const store = await database()
+    const workspace = store.createWorkspace({ name: '搜索测试' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '搜索世界', templateId: 'cyber-company' })
+    const otherWorld = store.createWorld({ workspaceId: workspace.id, name: '另一个世界', templateId: 'cyber-company' })
+    const repository = new WorldKnowledgeGraphRepository(store.database)
+    const exact = repository.upsertEntity({ workspaceId: workspace.id, worldId: world.id, type: 'project', canonicalName: '星图', summary: '值班安排' })
+    const prefix = repository.upsertEntity({ workspaceId: workspace.id, worldId: world.id, type: 'project', canonicalName: '星图计划' })
+    repository.upsertEntity({ workspaceId: workspace.id, worldId: otherWorld.id, type: 'project', canonicalName: '星图' })
+    const evidence = repository.createEvidence({ workspaceId: workspace.id, worldId: world.id, sourceType: 'manual', createdBy: 'owner', excerpt: '星图负责夜间值班' })
+    const claim = repository.upsertClaim({ workspaceId: workspace.id, worldId: world.id, type: 'fact', subjectEntityId: exact.id, predicate: '负责', objectText: '夜间值班', evidenceIds: [evidence.id], confidence: 0.9 })
+
+    expect(repository.searchEntities(world.id, '星图', 10).map((item) => item.id)).toEqual([exact.id, prefix.id])
+    expect(repository.searchClaims(world.id, '夜间', 10).map((item) => item.id)).toEqual([claim.id])
+    expect(repository.searchEntities(otherWorld.id, '值班', 10)).toEqual([])
+  })
+
   it('applies an extraction batch atomically and is idempotent after restart', async () => {
     const store = await database()
     const workspace = store.createWorkspace({ name: '整理批次' })
