@@ -2442,6 +2442,7 @@ export default function App() {
                   }}
                   onManageAvatar={(employeeId) => { setManagingEmployeeSection('profile'); setManagingEmployeeAvatarFocus(true); setManagingEmployeeId(employeeId) }}
                   onVoiceFinal={(text) => send(text, [], 'normal', 'focus')}
+                  onOpenDockTab={(tab) => { setDockTab(tab); setAppMode('workbench') }}
           onStartGroup={(employeeIds, session) => {
           const selected = employees.filter((employee) => employeeIds.includes(employee.id))
           if (selected.length < 2) return
