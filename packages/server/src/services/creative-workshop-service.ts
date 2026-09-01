@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { dirname, join, resolve, sep } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { lstat, mkdir, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 
 import { worldTemplate } from '@dsh-cyber/catalog'
@@ -13,6 +13,7 @@ import type { PackageManager, ReversiblePackageInstallation } from '@dsh-cyber/p
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { parseEmbodimentProfile } from '../embodiment-profile.js'
+import { KeyedMutex } from './keyed-mutex.js'
 import { ServiceError } from './service-error.js'
 import { WorldRootService } from './world-root-service.js'
 import { WorldSettingsService } from './world-settings-service.js'
@@ -20,6 +21,10 @@ import { WorldPackageInstanceService } from './world-package-instance-service.js
 
 const PROJECT_VERSION = 1 as const
 const MAX_ROLES = 16
+
+// Keyed by the absolute project directory, so every writer of one project file
+// is ordered even when several service instances share a state root.
+const projectWrites = new KeyedMutex()
 
 interface CompiledRolePackage {
   role: WorkshopRoleDefinition
@@ -53,8 +58,8 @@ export class CreativeWorkshopService {
     await mkdir(this.#projectRoot, { recursive: true, mode: 0o700 })
     const projects: WorkshopProject[] = []
     for (const name of await readdir(this.#projectRoot)) {
-      const directory = safeChild(this.#projectRoot, name)
       try {
+        const directory = safeChild(this.#projectRoot, name)
         const info = await lstat(directory)
         if (info.isSymbolicLink() || !info.isDirectory()) continue
         const project = parseStoredProject(JSON.parse(await readFile(join(directory, 'project.json'), 'utf8')))
@@ -169,7 +174,7 @@ export class CreativeWorkshopService {
         createdAt: now,
         updatedAt: now,
       }
-      await atomicWrite(join(projectDirectory, 'project.json'), `${JSON.stringify(project, null, 2)}\n`)
+      await projectWrites.run(projectDirectory, () => writeProjectFile(projectDirectory, project))
       return project
     } catch (error) {
       const compensationFailures: unknown[] = []
@@ -218,6 +223,26 @@ export class CreativeWorkshopService {
     return project
   }
 
+  /**
+   * Read-modify-write of one stored project, serialized per project.
+   *
+   * atomicWrite still gives each individual write its crash atomicity; the lock
+   * only adds ordering, so two overlapping mutations (archive / restore /
+   * delete) cannot read the same snapshot and lose one of the two updates.
+   */
+  async mutateProject(
+    workspaceId: string,
+    projectId: string,
+    mutate: (project: WorkshopProject) => WorkshopProject | Promise<WorkshopProject>,
+  ): Promise<WorkshopProject> {
+    const directory = safeChild(this.#projectRoot, projectId)
+    return projectWrites.run(directory, async () => {
+      const next = await mutate(await this.readProject(workspaceId, projectId))
+      await writeProjectFile(directory, next)
+      return next
+    })
+  }
+
   async #compileRoles(
     projectId: string,
     projectDirectory: string,
@@ -249,6 +274,10 @@ export class CreativeWorkshopService {
     }
     return compiled
   }
+}
+
+async function writeProjectFile(directory: string, project: WorkshopProject): Promise<void> {
+  await atomicWrite(join(directory, 'project.json'), `${JSON.stringify(project, null, 2)}\n`)
 }
 
 async function materializeRolePackage(
@@ -374,10 +403,25 @@ function stateRootFromStore(store: SqliteStore): string {
   return dirname(dirname(store.databasePath))
 }
 
+// Workshop ids are generated as ASCII slugs (`workshop.<slug>.<uuid8>` and
+// `<projectId>.<roleSlug>`). Containment must not depend on that generator
+// staying honest, so the segment is validated here and the resolved path is
+// then proven to be a direct child of the managed directory.
+const SAFE_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+const MAX_SEGMENT_LENGTH = 255
+
 function safeChild(parent: string, child: string): string {
+  if (typeof child !== 'string' || child.length === 0 || child.length > MAX_SEGMENT_LENGTH || !SAFE_SEGMENT.test(child)) {
+    throw new Error('Workshop path segment is not a safe file name')
+  }
   const base = resolve(parent)
-  const target = resolve(parent, encodeURIComponent(child))
-  if (target !== base && !target.startsWith(`${base}${sep}`)) throw new Error('Workshop path escaped managed directory')
+  // encodeURIComponent is the identity function on a validated segment, so the
+  // on-disk layout of every existing project directory is unchanged.
+  const target = resolve(base, encodeURIComponent(child))
+  const inside = relative(base, target)
+  if (inside.length === 0 || inside.startsWith('..') || isAbsolute(inside) || inside.includes(sep)) {
+    throw new Error('Workshop path escaped managed directory')
+  }
   return target
 }
 
