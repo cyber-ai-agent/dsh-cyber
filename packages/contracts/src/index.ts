@@ -459,6 +459,18 @@ export interface EmployeeBlueprint {
   requestedSkills: string[]
   requestedCapabilities: string[]
   embodiment?: import('./embodiment.js').EmbodimentProfile
+  /**
+   * Built-in 2D avatar slot (0-7) decided once when the talent draft is
+   * created. Recruiting seeds it as initial appearance data so the choice
+   * never re-rolls on a later render or page reload.
+   */
+  fallbackAvatarIndex?: number
+  /**
+   * Package-relative image that becomes the recruited character's own 2D
+   * avatar, not merely a marketplace preview. Package content is untrusted:
+   * readers must accept only a declared file from a fixed allow-list.
+   */
+  avatarPreviewPath?: string
   createdAt: IsoTimestamp
 }
 
@@ -1161,6 +1173,7 @@ export * from './completion-job.js'
 export * from './work-system.js'
 export * from './prompt-safety.js'
 export * from './creative-workshop-draft.js'
+export * from './character-generator.js'
 export * from './context-budget.js'
 
 export type {
