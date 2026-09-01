@@ -715,7 +715,7 @@ describe('Harness profile and adapter', () => {
       await mkdir(packageDirectory, { recursive: true })
       await writeFile(
         join(packageDirectory, 'package.json'),
-        `${JSON.stringify({ name: packageName, version: '0.1.0-rc.7' })}\n`,
+        `${JSON.stringify({ name: packageName, version: '0.1.2-alpha.3' })}\n`,
         'utf8',
       )
     }
@@ -727,7 +727,7 @@ describe('Harness profile and adapter', () => {
     expect(report).toMatchObject({
       ok: true,
       supported: true,
-      version: '0.1.0-rc.7',
+      version: '0.1.2-alpha.3',
       contractId: 'dsh-session-events-v1',
       checks: {
         packageVersions: true,
@@ -736,7 +736,7 @@ describe('Harness profile and adapter', () => {
       },
     })
     expect(report.profile?.profileDir).toContain('candidates')
-    expect(report.profile?.profileDir).toContain('dsh-cyber-candidate-0-1-0-rc-7')
+    expect(report.profile?.profileDir).toContain('dsh-cyber-candidate-0-1-2-alpha-3')
 
     const mismatchedManifest = join(
       candidateRoot,
@@ -747,7 +747,7 @@ describe('Harness profile and adapter', () => {
     )
     await writeFile(
       mismatchedManifest,
-      '{"name":"@deepseek-ai/dsh-sdk-client","version":"0.1.0-rc.8"}\n',
+      '{"name":"@deepseek-ai/dsh-sdk-client","version":"0.1.2-alpha.2"}\n',
       'utf8',
     )
     const rejected = await inspectHarnessCandidate({ candidateRoot })

@@ -92,9 +92,19 @@ export class AmbientLifeSettingsService {
     return next
   }
 
+  /**
+   * Worlds the ambient scheduler may drive.
+   *
+   * An archived world is excluded here rather than failing inside the tick:
+   * the scheduler must simply not visit it. `AmbientLifeExecutor` still fails
+   * closed for any other caller.
+   */
   listEnabled(): WorldAmbientLifeSettings[] {
     return (this.#database
-      .prepare('SELECT * FROM world_ambient_life_settings WHERE enabled = 1 ORDER BY world_id')
+      .prepare(`SELECT settings.* FROM world_ambient_life_settings AS settings
+                JOIN worlds ON worlds.id = settings.world_id
+                WHERE settings.enabled = 1 AND worlds.status = 'active'
+                ORDER BY settings.world_id`)
       .all() as Record<string, unknown>[]).map(mapSettings)
   }
 

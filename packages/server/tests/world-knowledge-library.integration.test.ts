@@ -160,6 +160,50 @@ describe('WorldKnowledgeLibraryService end-to-end source boundaries', () => {
     }
   })
 
+  it('accepts a source directory whose temp root is itself a platform symlink', async () => {
+    const { workspace, worldA, library } = await fixture()
+    // macOS 的 os.tmpdir() 是 /var/folders/...，realpath 展开为 /private/var/folders/...；
+    // 根级平台别名不得被当作越界。Linux 上 tmpdir 通常不是链接，这条用例退化为普通导入。
+    const source = await mkdtemp(join(tmpdir(), 'dsh-cyber-knowledge-platform-alias-'))
+    roots.push(source)
+    await writeFile(join(source, 'alias.md'), '# 平台别名目录\n\nPlatform alias import', 'utf8')
+    const report = await library.importDirectory({
+      workspaceId: workspace.id,
+      worldId: worldA.id,
+      sourcePath: source,
+    })
+    expect(report.documents).toHaveLength(1)
+    expect(report.documents[0]).toMatchObject({ status: 'indexed', origin: 'filesystem' })
+  })
+
+  it('refuses a source directory reached through a symlink below the filesystem root', async () => {
+    const { root, workspace, worldA, library } = await fixture()
+    const outside = join(root, 'outside-tree')
+    await mkdir(join(outside, 'payload'), { recursive: true })
+    await writeFile(join(outside, 'payload', 'secret.md'), '# 越界资料\n\nEscaped payload', 'utf8')
+
+    // 末段是真实目录，lstat 检查放行；只有逐段真实路径校验能拦住中间段的重定向。
+    const escaping = join(root, 'inner', 'hop')
+    await mkdir(join(root, 'inner'), { recursive: true })
+    await symlink(outside, escaping, 'junction')
+    await expect(library.importDirectory({
+      workspaceId: workspace.id,
+      worldId: worldA.id,
+      sourcePath: join(escaping, 'payload'),
+    })).rejects.toMatchObject({ code: 'knowledge_source_path_invalid' })
+
+    // 即使链接指回自己所在的目录树，根级以下的重定向同样保持拒绝。
+    await mkdir(join(root, 'sibling', 'payload'), { recursive: true })
+    await writeFile(join(root, 'sibling', 'payload', 'inside.md'), '# 同树资料', 'utf8')
+    const sameTree = join(root, 'sibling-link')
+    await symlink(join(root, 'sibling'), sameTree, 'junction')
+    await expect(library.importDirectory({
+      workspaceId: workspace.id,
+      worldId: worldA.id,
+      sourcePath: join(sameTree, 'payload'),
+    })).rejects.toMatchObject({ code: 'knowledge_source_path_invalid' })
+  })
+
   it('rejects ZIP checksum corruption, duplicate targets, and ZIP64 sentinels', () => {
     const body = Buffer.from('integrity-boundary', 'utf8')
     const valid = makeZip([['safe.md', body]])

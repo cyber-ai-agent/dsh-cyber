@@ -1,3 +1,4 @@
+import type { ContextInspectionResponse } from '@dsh-cyber/contracts'
 import {
   WORLD_TRACE_CATEGORIES,
   WORLD_TRACE_STATUSES,
@@ -11,16 +12,23 @@ import { HttpError } from '../http/errors.js'
 import type { Router } from '../http/router.js'
 import { writeJson } from '../http/response.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
+import type { ContextInspectionService } from '../services/context-inspection-service.js'
 import { InvalidWorldTraceCursorError, type WorldTraceService } from '../services/world-trace-service.js'
 
 export interface WorldTraceRoutesDependencies {
   store: SqliteStore
   trace: WorldTraceService
   access: WorldAccessService
+  /**
+   * The Context Inspector's record, mounted alongside the trace because that
+   * is where the product surfaces it: 运行轨迹 → 上下文. Optional so a narrower
+   * embedder can register the trace without it.
+   */
+  contextInspection?: Pick<ContextInspectionService, 'latest'>
 }
 
 export function registerWorldTraceRoutes(router: Router, dependencies: WorldTraceRoutesDependencies): void {
-  const { store, trace, access } = dependencies
+  const { store, trace, access, contextInspection } = dependencies
   router.get(/^\/api\/worlds\/([^/]+)\/trace$/, async ({ request, response, params, url }) => {
     const worldId = params[0]!
     if (store.getWorld(worldId) === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
@@ -35,6 +43,25 @@ export function registerWorldTraceRoutes(router: Router, dependencies: WorldTrac
       throw error
     }
   })
+
+  /**
+   * The context structure the conversation's last turn was actually given.
+   *
+   * It is mounted with the trace because that is where the product surfaces
+   * it (运行轨迹 → 上下文), and it is read-only by construction: the record is
+   * process-local, so an empty answer is a normal answer rather than an error.
+   */
+  if (contextInspection !== undefined) {
+    router.get(/^\/api\/sessions\/([^/]+)\/context-inspection$/, async ({ request, response, params }) => {
+      const session = store.getSession(params[0]!)
+      if (session === undefined) throw new HttpError(404, 'session_not_found', 'Session not found')
+      // Readable only by someone who may open the world it belongs to.
+      await access.assertUnlocked(session.worldId, request)
+      const latest = contextInspection.latest(session.id)
+      const body: ContextInspectionResponse = latest === undefined ? {} : { inspection: latest }
+      writeJson(response, 200, body)
+    })
+  }
 }
 
 function traceQuery(search: URLSearchParams): WorldTraceQuery {

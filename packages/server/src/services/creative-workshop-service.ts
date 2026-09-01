@@ -1,25 +1,34 @@
-import { createHash, randomUUID } from 'node:crypto'
-import { dirname, join, resolve, sep } from 'node:path'
-import { lstat, mkdir, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { lstat, mkdir, open, readFile, readdir, rename, rm } from 'node:fs/promises'
 
 import { worldTemplate } from '@dsh-cyber/catalog'
 import type { CyberPackageManifest, EmployeeBlueprint, PackagePermissionPreview } from '@dsh-cyber/contracts'
 import type {
   WorkshopCreateInput,
   WorkshopProject,
+  WorkshopProjectDeletion,
+  WorkshopProjectStatus,
+  WorkshopProjectView,
   WorkshopRoleDefinition,
 } from '@dsh-cyber/contracts/creative-platform'
 import type { PackageManager, ReversiblePackageInstallation } from '@dsh-cyber/package-runtime'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { parseEmbodimentProfile } from '../embodiment-profile.js'
+import { KeyedMutex } from './keyed-mutex.js'
 import { ServiceError } from './service-error.js'
 import { WorldRootService } from './world-root-service.js'
 import { WorldSettingsService } from './world-settings-service.js'
 import { WorldPackageInstanceService } from './world-package-instance-service.js'
+import { compileEmployeeBlueprintPackage } from './employee-blueprint-package-compiler.js'
 
 const PROJECT_VERSION = 1 as const
 const MAX_ROLES = 16
+
+// Keyed by the absolute project directory, so every writer of one project file
+// is ordered even when several service instances share a state root.
+const projectWrites = new KeyedMutex()
 
 interface CompiledRolePackage {
   role: WorkshopRoleDefinition
@@ -48,17 +57,19 @@ export class CreativeWorkshopService {
     this.#worldPackages = new WorldPackageInstanceService(store, this.#worldRoots)
   }
 
-  async list(workspaceId: string): Promise<WorkshopProject[]> {
+  async list(workspaceId: string, status: WorkshopProjectStatus | 'all' = 'all'): Promise<WorkshopProjectView[]> {
     if (this.#store.getWorkspace(workspaceId) === undefined) throw new ServiceError('not-found', 'workspace_not_found', 'Workspace not found')
     await mkdir(this.#projectRoot, { recursive: true, mode: 0o700 })
-    const projects: WorkshopProject[] = []
+    const projects: WorkshopProjectView[] = []
     for (const name of await readdir(this.#projectRoot)) {
-      const directory = safeChild(this.#projectRoot, name)
       try {
+        const directory = safeChild(this.#projectRoot, name)
         const info = await lstat(directory)
         if (info.isSymbolicLink() || !info.isDirectory()) continue
         const project = parseStoredProject(JSON.parse(await readFile(join(directory, 'project.json'), 'utf8')))
-        if (project.workspaceId === workspaceId) projects.push(project)
+        if (project.workspaceId !== workspaceId) continue
+        if (status !== 'all' && project.status !== status) continue
+        projects.push(this.#view(project))
       } catch {
         // A broken local project does not prevent the rest of the workshop from loading.
       }
@@ -66,7 +77,7 @@ export class CreativeWorkshopService {
     return projects.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id))
   }
 
-  async create(workspaceId: string, input: WorkshopCreateInput): Promise<WorkshopProject> {
+  async create(workspaceId: string, input: WorkshopCreateInput): Promise<WorkshopProjectView> {
     if (this.#store.getWorkspace(workspaceId) === undefined) throw new ServiceError('not-found', 'workspace_not_found', 'Workspace not found')
     const normalized = normalizeCreateInput(input)
     for (const modelProfileId of [normalized.worldModelProfileId, ...normalized.roles.map((role) => role.modelProfileId)]) {
@@ -156,6 +167,7 @@ export class CreativeWorkshopService {
 
       const project: WorkshopProject = {
         schemaVersion: PROJECT_VERSION,
+        status: 'active',
         id: projectId,
         workspaceId,
         worldId: world.id,
@@ -169,8 +181,8 @@ export class CreativeWorkshopService {
         createdAt: now,
         updatedAt: now,
       }
-      await atomicWrite(join(projectDirectory, 'project.json'), `${JSON.stringify(project, null, 2)}\n`)
-      return project
+      await projectWrites.run(projectDirectory, () => writeProjectFile(projectDirectory, project))
+      return this.#view(project)
     } catch (error) {
       const compensationFailures: unknown[] = []
       if (createdWorldId !== undefined) {
@@ -211,11 +223,90 @@ export class CreativeWorkshopService {
     }
   }
 
-  async readProject(workspaceId: string, projectId: string): Promise<WorkshopProject> {
+  async readProject(workspaceId: string, projectId: string): Promise<WorkshopProjectView> {
+    return this.#view(await this.#readStored(workspaceId, projectId))
+  }
+
+  /** Moves a project into the archive. The linked world is left untouched. */
+  async archive(workspaceId: string, projectId: string): Promise<WorkshopProjectView> {
+    return this.#view(await this.mutateProject(workspaceId, projectId, (project) => {
+      if (project.status === 'archived') return project
+      const now = new Date().toISOString()
+      return { ...project, status: 'archived', archivedAt: now, updatedAt: now }
+    }))
+  }
+
+  /** Restores an archived project. A detached project restores just the same. */
+  async restore(workspaceId: string, projectId: string): Promise<WorkshopProjectView> {
+    return this.#view(await this.mutateProject(workspaceId, projectId, (project) => {
+      if (project.status === 'active') return project
+      const { archivedAt: _cleared, ...rest } = project
+      return { ...rest, status: 'active', updatedAt: new Date().toISOString() }
+    }))
+  }
+
+  /**
+   * Permanently removes the local project directory. It deliberately does not
+   * cascade into the world, its characters or its installed packages: project
+   * and world lifecycles are independent, so the world survives the deletion.
+   */
+  async delete(workspaceId: string, projectId: string): Promise<WorkshopProjectDeletion> {
+    const directory = safeChild(this.#projectRoot, projectId)
+    return projectWrites.run(directory, async () => {
+      const project = await this.#readStored(workspaceId, projectId)
+      await rm(directory, { recursive: true, force: true })
+      return { projectId: project.id, worldId: project.worldId, worldRetained: true }
+    })
+  }
+
+  async #readStored(workspaceId: string, projectId: string): Promise<WorkshopProject> {
     const path = join(safeChild(this.#projectRoot, projectId), 'project.json')
-    const project = parseStoredProject(JSON.parse(await readFile(path, 'utf8')))
+    let raw: string
+    try {
+      raw = await readFile(path, 'utf8')
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new ServiceError('not-found', 'workshop_project_not_found', '创意工坊项目不存在')
+      }
+      throw cause
+    }
+    const project = parseStoredProject(JSON.parse(raw))
     if (project.workspaceId !== workspaceId) throw new ServiceError('forbidden', 'workshop_project_forbidden', '项目不属于当前本地实例')
     return project
+  }
+
+  /**
+   * Read-modify-write of one stored project, serialized per project.
+   *
+   * atomicWrite still gives each individual write its crash atomicity; the lock
+   * only adds ordering, so two overlapping mutations (archive / restore /
+   * delete) cannot read the same snapshot and lose one of the two updates.
+   */
+  async mutateProject(
+    workspaceId: string,
+    projectId: string,
+    mutate: (project: WorkshopProject) => WorkshopProject | Promise<WorkshopProject>,
+  ): Promise<WorkshopProject> {
+    const directory = safeChild(this.#projectRoot, projectId)
+    return projectWrites.run(directory, async () => {
+      const next = await mutate(await this.#readStored(workspaceId, projectId))
+      await writeProjectFile(directory, next)
+      return next
+    })
+  }
+
+  /**
+   * Resolves the world link at read time. A world id that no longer resolves is
+   * a normal detached state, so a failed world lookup never fails the read.
+   */
+  #view(project: WorkshopProject): WorkshopProjectView {
+    let worldLinked = false
+    try {
+      worldLinked = this.#store.getWorld(project.worldId) !== undefined
+    } catch {
+      worldLinked = false
+    }
+    return { ...project, worldLinked }
   }
 
   async #compileRoles(
@@ -244,43 +335,31 @@ export class CreativeWorkshopService {
         createdAt,
       }
       const directory = safeChild(join(projectDirectory, 'generated', 'roles'), packageId)
-      const manifest = await materializeRolePackage(directory, blueprint)
+      const compiledPackage = await compileEmployeeBlueprintPackage({
+        sourceDirectory: directory,
+        packageId,
+        blueprintVersion: blueprint.version,
+        packageVersion: '1.0.0',
+        worldTemplateId: blueprint.worldTemplateId,
+        displayName: blueprint.displayName,
+        role: blueprint.role,
+        summary: blueprint.summary,
+        persona: blueprint.persona,
+        requestedSkills: blueprint.requestedSkills,
+        requestedCapabilities: blueprint.requestedCapabilities,
+        ...(blueprint.embodiment === undefined ? {} : { embodiment: blueprint.embodiment }),
+        createdAt: blueprint.createdAt,
+      })
+      const manifest = compiledPackage.manifest
       compiled.push({ role, blueprint, directory, manifest })
     }
     return compiled
   }
 }
 
-async function materializeRolePackage(
-  directory: string,
-  blueprint: EmployeeBlueprint,
-): Promise<CyberPackageManifest> {
-  await mkdir(directory, { recursive: true, mode: 0o700 })
-  const blueprintPath = 'blueprint.json'
-  const content = `${JSON.stringify(blueprint, null, 2)}\n`
-  await writeFile(join(directory, blueprintPath), content, { encoding: 'utf8', mode: 0o600 })
-  const manifest: CyberPackageManifest = {
-    schemaVersion: 1,
-    id: blueprint.id,
-    version: '1.0.0',
-    kind: 'employee-blueprint',
-    displayName: blueprint.displayName,
-    summary: blueprint.summary,
-    license: 'LicenseRef-DSH-Cyber-Local',
-    publisher: 'Local Creative Workshop',
-    capabilities: ['employee:blueprint'],
-    dataEgress: [],
-    files: [{ path: blueprintPath, sha256: createHash('sha256').update(content).digest('hex') }],
-    entrypoints: [{ id: 'role-blueprint', kind: 'employee-blueprint', path: blueprintPath }],
-  }
-  await writeFile(
-    join(directory, 'dsh-cyber.package.json'),
-    `${JSON.stringify(manifest, null, 2)}\n`,
-    { encoding: 'utf8', mode: 0o600 },
-  )
-  return manifest
+async function writeProjectFile(directory: string, project: WorkshopProject): Promise<void> {
+  await atomicWrite(join(directory, 'project.json'), `${JSON.stringify(project, null, 2)}\n`)
 }
-
 function normalizeCreateInput(input: WorkshopCreateInput): { displayName: string; baseTemplateId: string; lore: string; scenario: string; worldModelProfileId?: string; roles: WorkshopRoleDefinition[] } {
   const displayName = text(input.displayName, '世界名称', 80)
   const baseTemplateId = token(input.baseTemplateId, '基础模板')
@@ -324,9 +403,19 @@ type LegacyWorkshopRoleDefinition = Omit<WorkshopRoleDefinition, 'requestedSkill
   skillIds?: string[]
 }
 
+/**
+ * Projects are on-disk JSON, so a file written by an older build must still
+ * load. Lifecycle fields are migrated forward on read: a project with no
+ * recorded status is active, and a missing updatedAt falls back to createdAt.
+ * The normalized shape is persisted the next time the project is written.
+ */
 function parseStoredProject(value: unknown): WorkshopProject {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid workshop project')
-  const project = value as Omit<WorkshopProject, 'roles'> & { roles?: LegacyWorkshopRoleDefinition[] }
+  const project = value as Omit<WorkshopProject, 'roles' | 'status' | 'archivedAt'> & {
+    roles?: LegacyWorkshopRoleDefinition[]
+    status?: unknown
+    archivedAt?: unknown
+  }
   if (project.schemaVersion !== 1 || !project.id || !project.workspaceId || !project.worldId || !Array.isArray(project.roles)) {
     throw new Error('Invalid workshop project')
   }
@@ -339,7 +428,19 @@ function parseStoredProject(value: unknown): WorkshopProject {
         : Array.isArray(legacySkillIds) ? [...legacySkillIds] : [],
     } satisfies WorkshopRoleDefinition
   })
-  return { ...project, roles } as WorkshopProject
+  const { status: storedStatus, archivedAt: storedArchivedAt, ...rest } = project
+  const status: WorkshopProjectStatus = storedStatus === 'archived' ? 'archived' : 'active'
+  const createdAt = typeof rest.createdAt === 'string' ? rest.createdAt : new Date(0).toISOString()
+  const updatedAt = typeof rest.updatedAt === 'string' ? rest.updatedAt : createdAt
+  const archivedAt = status === 'archived' && typeof storedArchivedAt === 'string' ? storedArchivedAt : undefined
+  return {
+    ...rest,
+    roles,
+    status,
+    createdAt,
+    updatedAt,
+    ...(archivedAt === undefined ? {} : { archivedAt }),
+  } as WorkshopProject
 }
 
 function text(value: unknown, label: string, max: number): string {
@@ -374,10 +475,25 @@ function stateRootFromStore(store: SqliteStore): string {
   return dirname(dirname(store.databasePath))
 }
 
+// Workshop ids are generated as ASCII slugs (`workshop.<slug>.<uuid8>` and
+// `<projectId>.<roleSlug>`). Containment must not depend on that generator
+// staying honest, so the segment is validated here and the resolved path is
+// then proven to be a direct child of the managed directory.
+const SAFE_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+const MAX_SEGMENT_LENGTH = 255
+
 function safeChild(parent: string, child: string): string {
+  if (typeof child !== 'string' || child.length === 0 || child.length > MAX_SEGMENT_LENGTH || !SAFE_SEGMENT.test(child)) {
+    throw new Error('Workshop path segment is not a safe file name')
+  }
   const base = resolve(parent)
-  const target = resolve(parent, encodeURIComponent(child))
-  if (target !== base && !target.startsWith(`${base}${sep}`)) throw new Error('Workshop path escaped managed directory')
+  // encodeURIComponent is the identity function on a validated segment, so the
+  // on-disk layout of every existing project directory is unchanged.
+  const target = resolve(base, encodeURIComponent(child))
+  const inside = relative(base, target)
+  if (inside.length === 0 || inside.startsWith('..') || isAbsolute(inside) || inside.includes(sep)) {
+    throw new Error('Workshop path escaped managed directory')
+  }
   return target
 }
 
