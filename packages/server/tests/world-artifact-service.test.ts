@@ -270,6 +270,23 @@ describe('WorldArtifactService', () => {
     })).rejects.toMatchObject<ServiceError>({ code: 'artifact_workspace_invalid' })
   })
 
+  it('refuses a symlink below files that jumps back to the managed boundary root', async () => {
+    const fixture = await createFixture()
+    await mkdir(join(fixture.root.filesPath, 'payload'), { recursive: true })
+    await mkdir(join(fixture.root.filesPath, 'inner'), { recursive: true })
+    await symlink(fixture.root.filesPath, join(fixture.root.filesPath, 'inner', 'hop'), 'dir')
+
+    await expect(fixture.service.publishAgentRun({
+      workspaceId: fixture.workspace.id,
+      worldId: fixture.world.id,
+      employeeId: fixture.employee.id,
+      sessionId: fixture.session.id,
+      workTurnId: fixture.turn.id,
+      agentRunId: fixture.run.id,
+      workspacePath: join(fixture.root.filesPath, 'inner', 'hop', 'payload'),
+    })).rejects.toMatchObject<ServiceError>({ code: 'artifact_workspace_invalid' })
+  })
+
   it('imports a world file whose state root is only reachable through a symlink', async () => {
     const fixture = await createAliasedFixture()
     await writeFile(join(fixture.root.filesPath, 'report.md'), '# imported\n')

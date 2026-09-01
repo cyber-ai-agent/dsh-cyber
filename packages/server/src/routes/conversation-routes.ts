@@ -12,6 +12,7 @@ import {
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { HttpError } from '../http/errors.js'
+import { requireWorldAcceptingWork } from '../services/world-work-guard.js'
 import { mapPermissionDecisionError } from '../http/world-permission-errors.js'
 import type { Router } from '../http/router.js'
 import {
@@ -113,8 +114,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
   const groupIntentRouter = new GroupIntentRouter()
 
   router.post(/^\/api\/worlds\/([^/]+)\/group-sessions$/, async ({ request, response, params }) => {
-    const world = store.getWorld(params[0]!)
-    if (world === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
+    const world = requireWorldAcceptingWork(store, params[0]!)
     await worldAccess.assertUnlocked(world.id, request)
     const body = await readJson(request)
     const employeeIds = [...new Set(optionalStringArray(body.employeeIds))]
@@ -146,8 +146,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
   })
 
   router.post(/^\/api\/worlds\/([^/]+)\/chat$/, async ({ request, response, params }) => {
-    const world = store.getWorld(params[0]!)
-    if (world === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
+    const world = requireWorldAcceptingWork(store, params[0]!)
     await worldAccess.assertUnlocked(world.id, request)
     const body = await readJson(request)
     const prompt = requiredChatPrompt(body.prompt)
@@ -502,6 +501,9 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
   router.post(/^\/api\/approvals\/([^/]+)\/decision$/, async ({ request, response, params }) => {
     const approval = store.getApprovalRequest(params[0]!)
     if (approval === undefined) throw new HttpError(404, 'approval_not_found', '审批请求不存在')
+    // Approving resumes the paused turn, which starts a new AgentRun. An
+    // archived world must refuse that as clearly as it refuses a new chat.
+    requireWorldAcceptingWork(store, approval.worldId)
     await worldAccess.assertUnlocked(approval.worldId, request)
     if (approval.status !== 'pending') throw new HttpError(409, 'approval_already_decided', '审批请求已经处理')
     const body = await readJson(request)
@@ -533,8 +535,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
   })
 
   router.post(/^\/api\/worlds\/([^/]+)\/peer-conversations$/, async ({ request, response, params }) => {
-    const world = store.getWorld(params[0]!)
-    if (world === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
+    const world = requireWorldAcceptingWork(store, params[0]!)
     await worldAccess.assertUnlocked(world.id, request)
     const body = await readJson(request)
     const initiatorId = requiredString(body, 'initiatorId')

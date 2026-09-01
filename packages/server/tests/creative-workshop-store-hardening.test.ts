@@ -45,7 +45,8 @@ describe('workshop project path containment', () => {
 
     const projectFile = join(root, 'workshop', 'projects', project.id, 'project.json')
     expect((await stat(projectFile)).isFile()).toBe(true)
-    expect(JSON.parse(await readFile(projectFile, 'utf8'))).toEqual(project)
+    const { worldLinked: _derived, ...storedProject } = project
+    expect(JSON.parse(await readFile(projectFile, 'utf8'))).toEqual(storedProject)
     expect(await workshop.readProject(workspaceId, project.id)).toEqual(project)
   })
 
@@ -87,7 +88,8 @@ describe('workshop project write serialization', () => {
     ])
 
     const stored = await workshop.readProject(workspaceId, project.id)
-    expect(JSON.parse(await readFile(projectFile, 'utf8'))).toEqual(stored)
+    const { worldLinked: _derived, ...storedProject } = stored
+    expect(JSON.parse(await readFile(projectFile, 'utf8'))).toEqual(storedProject)
     // Neither update was lost: the second flow read what the first one wrote.
     expect(stored.lore).toContain('[archived]')
     expect(stored.scenario).toContain('[restored]')

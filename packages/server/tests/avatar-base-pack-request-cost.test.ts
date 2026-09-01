@@ -52,7 +52,7 @@ describe('avatar base pack request cost', () => {
 
     await service.list('world-1')
     const warm = reads.length
-    expect(reads.filter((path) => path.endsWith(BASE_PATH)).length).toBeGreaterThan(0)
+    expect(reads.filter((path) => path.replaceAll('\\', '/').endsWith(BASE_PATH)).length).toBeGreaterThan(0)
 
     // Two more consecutive requests against the same unchanged marketplace.
     await service.list('world-1')
@@ -71,7 +71,8 @@ describe('avatar base pack request cost', () => {
   it('serves replaced marketplace content instead of the memoized copy', async () => {
     await writeMarketplace(root, glb(vrmDocument()))
     const service = buildService(root)
-    await service.readBaseAsset('world-1', PACKAGE_ID, '1.0.0', BASE_PATH)
+    const initial = await service.readBaseAsset('world-1', PACKAGE_ID, '1.0.0', BASE_PATH)
+    await collect(initial.body)
 
     const replaced = await writeMarketplace(root, glb(vrmDocument({ scenes: [{ nodes: [0] }] })))
     const asset = await service.readBaseAsset('world-1', PACKAGE_ID, '1.0.0', BASE_PATH)

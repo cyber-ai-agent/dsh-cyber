@@ -66,8 +66,18 @@ export async function resolveCanonicalPathWithoutSymlinkHops(candidate: string, 
       canonicalPrefix = actual
       continue
     }
-    const platformRootAlias = index === 0 && isPathWithin(canonicalFilesystemRoot, actual)
-    const stillAboveBoundary = canonicalBoundary !== undefined && isPathWithin(actual, canonicalBoundary)
+    // POSIX root aliases such as macOS `/var -> /private/var` are privileged
+    // platform structure. A Windows drive root can be writable by the current
+    // user, so treating any first-level junction there as trusted would let an
+    // external import bypass the no-symlink contract.
+    const platformRootAlias = process.platform !== 'win32'
+      && index === 0
+      && isPathWithin(canonicalFilesystemRoot, actual)
+    // The ancestor relaxation ends as soon as the walk has entered the managed
+    // boundary. Otherwise a junction below `files` that points back to the
+    // boundary root would be accepted because the target is its ancestor.
+    const beforeBoundary = canonicalBoundary !== undefined && !isPathWithin(canonicalBoundary, canonicalPrefix)
+    const stillAboveBoundary = beforeBoundary && isPathWithin(actual, canonicalBoundary!)
     if (platformRootAlias || stillAboveBoundary) {
       canonicalPrefix = actual
       continue
