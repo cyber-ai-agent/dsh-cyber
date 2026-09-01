@@ -624,6 +624,9 @@ export interface RecoveryExportReport {
   errors: string[]
 }
 
+/** Hard cap on one batched message relocation, so hydration stays bounded. */
+const MAX_MESSAGE_ID_LOOKUP = 64
+
 const KNOWN_TABLES = [
   'schema_migrations',
   'workspaces',
@@ -4321,6 +4324,31 @@ export class SqliteStore {
         'SELECT * FROM messages WHERE session_id = ? AND sequence > ? ORDER BY sequence',
       )
       .all(sessionId, afterSequence)
+      .map(mapMessage)
+  }
+
+  /**
+   * Relocates durable messages by id, across sessions.
+   *
+   * A memory index entry keeps the ids of the messages it was derived from, so
+   * a retrieved memory can bring back what was actually said instead of only a
+   * rendered summary. That read is by id, not by conversation, which is why it
+   * cannot go through `listMessages`. It is deliberately batched and capped: a
+   * hydration path must never turn one retrieval into an unbounded scan.
+   *
+   * This is a pure relocation. It applies no scope rule of its own, so every
+   * caller has to decide for itself whether the conversation it is composing
+   * is allowed to see the message it just read back.
+   */
+  getMessages(ids: readonly string[]): WorkMessage[] {
+    const wanted = [...new Set(ids.map((value) => value.trim()).filter(Boolean))].slice(0, MAX_MESSAGE_ID_LOOKUP)
+    if (wanted.length === 0) return []
+    return this.database
+      .prepare(
+        `SELECT * FROM messages WHERE id IN (${wanted.map(() => '?').join(', ')})
+         ORDER BY session_id, sequence`,
+      )
+      .all(...wanted)
       .map(mapMessage)
   }
 

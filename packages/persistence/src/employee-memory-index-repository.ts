@@ -49,7 +49,14 @@ const FTS_TABLE_SQL = (tokenizer: 'trigram' | 'unicode61'): string =>
    )`
 
 const MAX_SEARCH_LIMIT = 50
-const MAX_QUERY_CHARS = 500
+/**
+ * Hard upper bound on a retrieval query.
+ *
+ * A caller turning a model prompt into a query has to respect it: a runtime
+ * prompt can legitimately grow past it (a skill continuation carries an action
+ * report), and the repository rejects rather than silently truncating.
+ */
+export const MAX_MEMORY_INDEX_QUERY_CHARS = 500
 const MAX_TERMS = 24
 
 /**
@@ -174,7 +181,7 @@ export class EmployeeMemoryIndexRepository {
     if (visible.length === 0) return []
     const query = input.query.trim()
     if (!query) return []
-    if (query.length > MAX_QUERY_CHARS) throw new PersistenceError('Memory index query is too long')
+    if (query.length > MAX_MEMORY_INDEX_QUERY_CHARS) throw new PersistenceError('Memory index query is too long')
     const terms = searchTerms(query)
     const limit = Math.max(1, Math.min(input.limit ?? 8, MAX_SEARCH_LIMIT))
 
