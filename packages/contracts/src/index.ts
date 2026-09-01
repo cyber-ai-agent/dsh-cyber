@@ -1,7 +1,7 @@
 import type { WorldCharacterAuthority } from './world-authority.js'
 import type { UiLocale } from './locales.js'
 
-export const CYBER_SCHEMA_VERSION = 37 as const
+export const CYBER_SCHEMA_VERSION = 38 as const
 
 export * from './runtime-access.js'
 export * from './locales.js'
@@ -459,6 +459,18 @@ export interface EmployeeBlueprint {
   requestedSkills: string[]
   requestedCapabilities: string[]
   embodiment?: import('./embodiment.js').EmbodimentProfile
+  /**
+   * Built-in 2D avatar slot (0-7) decided once when the talent draft is
+   * created. Recruiting seeds it as initial appearance data so the choice
+   * never re-rolls on a later render or page reload.
+   */
+  fallbackAvatarIndex?: number
+  /**
+   * Package-relative image that becomes the recruited character's own 2D
+   * avatar, not merely a marketplace preview. Package content is untrusted:
+   * readers must accept only a declared file from a fixed allow-list.
+   */
+  avatarPreviewPath?: string
   createdAt: IsoTimestamp
 }
 
@@ -564,11 +576,28 @@ export type EmployeeMilestoneCategory =
   | 'birthday'
   | 'reflection'
 
+/**
+ * Which generator produced a milestone row. Structural provenance so cleanup of
+ * retired generators never has to match on display copy.
+ * - `authored`: recorded explicitly through the milestone append path.
+ * - `activity-projection`: derived by the dossier activity projection.
+ * - `legacy-conversation-projection`: the retired per-turn generator; these rows
+ *   are removed by the projection and can never be written again.
+ */
+export type EmployeeMilestoneOrigin =
+  | 'authored'
+  | 'activity-projection'
+  | 'legacy-conversation-projection'
+
+/** Origins the milestone append path may write. */
+export type WritableEmployeeMilestoneOrigin = Exclude<EmployeeMilestoneOrigin, 'legacy-conversation-projection'>
+
 export interface EmployeeMilestone {
   id: string
   workspaceId: string
   worldId: string
   employeeId: string
+  origin: EmployeeMilestoneOrigin
   category: EmployeeMilestoneCategory
   title: string
   summary: string
@@ -933,6 +962,9 @@ export const DOMAIN_EVENT_TYPES = [
   'world.administrator.changed',
   'world.character.authority.changed',
   'world.creation.rolled-back',
+  'world.archived',
+  'world.restored',
+  'world.deleted',
   'world.entered',
   'employee.recruited',
   'employee.revised',
@@ -1202,6 +1234,7 @@ export * from './completion-job.js'
 export * from './work-system.js'
 export * from './prompt-safety.js'
 export * from './creative-workshop-draft.js'
+export * from './character-generator.js'
 export * from './context-budget.js'
 export * from './context-envelope.js'
 

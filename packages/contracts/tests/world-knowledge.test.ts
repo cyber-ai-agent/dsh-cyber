@@ -49,6 +49,6 @@ describe('World knowledge contracts', () => {
       document: { workspaceId: 'workspace-1', chunkCount: 0 },
       chunk: { worldId: 'world-1', documentId: 'document-1' },
     })
-    expect(CYBER_SCHEMA_VERSION).toBe(37)
+    expect(CYBER_SCHEMA_VERSION).toBe(38)
   })
 })

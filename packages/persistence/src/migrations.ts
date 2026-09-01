@@ -1914,6 +1914,20 @@ const MIGRATIONS: readonly Migration[] = [
       FROM employee_milestones;
     `,
   },
+  {
+    version: 38,
+    name: 'employee-milestone-origin',
+    sql: `
+      ALTER TABLE employee_milestones
+        ADD COLUMN origin TEXT NOT NULL DEFAULT 'authored'
+        CHECK (origin IN ('authored', 'activity-projection', 'legacy-conversation-projection'));
+
+      -- Historical rows do not carry enough evidence to distinguish the retired
+      -- projection from an owner-authored milestone with the same title. Keep
+      -- every pre-migration row as authored: under-labelling leaves harmless
+      -- legacy clutter, while guessing from display copy can destroy user data.
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {

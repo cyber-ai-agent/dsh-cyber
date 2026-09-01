@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -208,11 +208,127 @@ describe('WorldArtifactService', () => {
     await expect(readFile(publishedPath, 'utf8')).rejects.toThrow()
     await expect(readFile(join(fixture.root.filesPath, 'report.md'), 'utf8')).resolves.toContain('# source')
   })
+
+  it('publishes an AgentRun workspace whose state root is only reachable through a symlink', async () => {
+    const fixture = await createAliasedFixture()
+    await writeFile(join(fixture.root.filesPath, 'notes.md'), '# notes\n')
+    await writeFile(join(fixture.root.dshArtifactsPath, `${fixture.run.id}.json`), JSON.stringify({
+      schemaVersion: 1,
+      artifacts: [{ path: 'notes.md', title: '笔记', kind: 'markdown' }],
+    }))
+
+    const contribution = await fixture.service.publishAgentRun({
+      workspaceId: fixture.workspace.id,
+      worldId: fixture.world.id,
+      employeeId: fixture.employee.id,
+      sessionId: fixture.session.id,
+      workTurnId: fixture.turn.id,
+      agentRunId: fixture.run.id,
+      workspacePath: fixture.aliasedFilesPath,
+    })
+
+    expect(contribution.artifactRefs).toHaveLength(1)
+    expect(fixture.service.list(fixture.world.id)).toHaveLength(1)
+  })
+
+  it('still refuses an AgentRun workspace reached through an intermediate symlink that escapes files', async () => {
+    const fixture = await createFixture()
+    const outside = await mkdtemp(join(tmpdir(), 'dsh-artifact-escape-'))
+    rootsToRemove.push(outside)
+    await mkdir(join(outside, 'payload'), { recursive: true })
+    await mkdir(join(fixture.root.filesPath, 'inner'), { recursive: true })
+    // The last segment is a real directory, so an lstat() check alone accepts it.
+    await symlink(outside, join(fixture.root.filesPath, 'inner', 'hop'), 'dir')
+
+    await expect(fixture.service.publishAgentRun({
+      workspaceId: fixture.workspace.id,
+      worldId: fixture.world.id,
+      employeeId: fixture.employee.id,
+      sessionId: fixture.session.id,
+      workTurnId: fixture.turn.id,
+      agentRunId: fixture.run.id,
+      workspacePath: join(fixture.root.filesPath, 'inner', 'hop', 'payload'),
+    })).rejects.toMatchObject<ServiceError>({ code: 'artifact_workspace_invalid' })
+  })
+
+  it('refuses an AgentRun workspace reached through an intermediate symlink even when the hop lands back inside files', async () => {
+    const fixture = await createFixture()
+    await mkdir(join(fixture.root.filesPath, 'elsewhere', 'payload'), { recursive: true })
+    await mkdir(join(fixture.root.filesPath, 'inner'), { recursive: true })
+    // Resolving both sides of the comparison would make the guard a tautology:
+    // the hop stays inside `files`, so only a segment walk can catch it.
+    await symlink(join(fixture.root.filesPath, 'elsewhere'), join(fixture.root.filesPath, 'inner', 'hop'), 'dir')
+
+    await expect(fixture.service.publishAgentRun({
+      workspaceId: fixture.workspace.id,
+      worldId: fixture.world.id,
+      employeeId: fixture.employee.id,
+      sessionId: fixture.session.id,
+      workTurnId: fixture.turn.id,
+      agentRunId: fixture.run.id,
+      workspacePath: join(fixture.root.filesPath, 'inner', 'hop', 'payload'),
+    })).rejects.toMatchObject<ServiceError>({ code: 'artifact_workspace_invalid' })
+  })
+
+  it('refuses a symlink below files that jumps back to the managed boundary root', async () => {
+    const fixture = await createFixture()
+    await mkdir(join(fixture.root.filesPath, 'payload'), { recursive: true })
+    await mkdir(join(fixture.root.filesPath, 'inner'), { recursive: true })
+    await symlink(fixture.root.filesPath, join(fixture.root.filesPath, 'inner', 'hop'), 'dir')
+
+    await expect(fixture.service.publishAgentRun({
+      workspaceId: fixture.workspace.id,
+      worldId: fixture.world.id,
+      employeeId: fixture.employee.id,
+      sessionId: fixture.session.id,
+      workTurnId: fixture.turn.id,
+      agentRunId: fixture.run.id,
+      workspacePath: join(fixture.root.filesPath, 'inner', 'hop', 'payload'),
+    })).rejects.toMatchObject<ServiceError>({ code: 'artifact_workspace_invalid' })
+  })
+
+  it('imports a world file whose state root is only reachable through a symlink', async () => {
+    const fixture = await createAliasedFixture()
+    await writeFile(join(fixture.root.filesPath, 'report.md'), '# imported\n')
+
+    const publication = await fixture.service.publishImportedFile({
+      workspaceId: fixture.workspace.id,
+      worldId: fixture.world.id,
+      sourcePath: join(fixture.aliasedFilesPath, 'report.md'),
+      title: '导入报告',
+      kind: 'markdown',
+      createdByKind: 'owner',
+      createdById: 'local-user',
+    })
+
+    expect(publication.created).toBe(true)
+    expect(publication.version.sourceRelativePath).toBe('files/report.md')
+    expect((await fixture.service.preview(fixture.world.id, publication.artifact.id)).body.toString('utf8')).toContain('# imported')
+  })
+
+  it('still refuses an imported source reached through an intermediate symlink that escapes the world root', async () => {
+    const fixture = await createFixture()
+    const outside = await mkdtemp(join(tmpdir(), 'dsh-artifact-import-escape-'))
+    rootsToRemove.push(outside)
+    await writeFile(join(outside, 'payload.md'), '# outside\n')
+    await mkdir(join(fixture.root.filesPath, 'inner'), { recursive: true })
+    await symlink(outside, join(fixture.root.filesPath, 'inner', 'hop'), 'dir')
+
+    await expect(fixture.service.publishImportedFile({
+      workspaceId: fixture.workspace.id,
+      worldId: fixture.world.id,
+      sourcePath: join(fixture.root.filesPath, 'inner', 'hop', 'payload.md'),
+      title: '越界导入',
+      kind: 'markdown',
+      createdByKind: 'owner',
+      createdById: 'local-user',
+    })).rejects.toMatchObject<ServiceError>({ code: 'artifact_symlink_rejected' })
+  })
 })
 
-async function createFixture() {
-  const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-artifact-service-'))
-  rootsToRemove.push(stateRoot)
+async function createFixture(providedStateRoot?: string) {
+  const stateRoot = providedStateRoot ?? await mkdtemp(join(tmpdir(), 'dsh-artifact-service-'))
+  if (providedStateRoot === undefined) rootsToRemove.push(stateRoot)
   const { SqliteStore } = await import('@dsh-cyber/persistence')
   const store = await SqliteStore.open(join(stateRoot, 'data.sqlite'))
   stores.push(store)
@@ -241,4 +357,20 @@ async function createFixture() {
   const root = await roots.ensure(world.id)
   const service = new WorldArtifactService({ repository: new WorldArtifactRepository(store.database), roots })
   return { stateRoot, store, workspace, world, employee, session, turn, run, roots, root, service }
+}
+
+/**
+ * A state root the operator can only name through a symlink — the shape macOS
+ * hands every process through `/var -> private/var`, reproduced explicitly so
+ * the test means the same thing on Linux.
+ */
+async function createAliasedFixture() {
+  const base = await mkdtemp(join(tmpdir(), 'dsh-artifact-alias-'))
+  rootsToRemove.push(base)
+  const realStateRoot = join(base, 'real-state')
+  const aliasedStateRoot = join(base, 'link')
+  await mkdir(realStateRoot, { recursive: true })
+  await symlink(realStateRoot, aliasedStateRoot, 'dir')
+  const fixture = await createFixture(aliasedStateRoot)
+  return { ...fixture, aliasedFilesPath: join(aliasedStateRoot, 'worlds', encodeURIComponent(fixture.world.id), 'files') }
 }

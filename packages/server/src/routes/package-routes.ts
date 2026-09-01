@@ -1,3 +1,5 @@
+import { pipeline } from 'node:stream/promises'
+
 import type { WorkshopCreateInput } from '@dsh-cyber/contracts/creative-platform'
 import type { LocalPackageCatalog, PackageManager } from '@dsh-cyber/package-runtime'
 import type { SqliteStore } from '@dsh-cyber/persistence'
@@ -122,13 +124,16 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
     const asset = await avatarBasePacks.readBaseAsset(worldId, params[1]!, params[2]!, params[3]!)
     response.writeHead(200, {
       'content-type': asset.contentType,
-      'content-length': asset.body.byteLength,
+      'content-length': asset.byteLength,
       // Installed versions are immutable and URL-versioned, so the expensive
       // shared Base VRM can be reused by many employees without refetching it.
       'cache-control': 'private, max-age=31536000, immutable',
       'x-content-type-options': 'nosniff',
     })
-    response.end(asset.body)
+    // Stream rather than buffer: concurrent fetches of the same 6+ MiB Base VRM
+    // otherwise each hold a full copy in memory. pipeline also tears the file
+    // handle down when the client disconnects mid-download.
+    await pipeline(asset.body, response)
   })
 
   router.post(/^\/api\/worlds\/([^/]+)\/packages\/instantiate$/, async ({ request, response, params }) => {
@@ -176,6 +181,7 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
     if (worldId !== undefined) await assertTargetWorld(store, worldAccess, request, workspaceId, worldId)
     const manifest = packageManifest(body.manifest)
     const sourceDirectory = requiredString(body, 'sourceDirectory')
+    assertWorkspaceInstallSource(packageCatalog, workspaceId, sourceDirectory)
     await assertAvatarBasePackInstallSource(manifest, sourceDirectory)
     const installed = await packageManager.install({
       workspaceId,
@@ -195,11 +201,12 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
 
   router.post(/^\/api\/workspaces\/([^/]+)\/marketplace\/preview$/, async ({ request, response, params }) => {
     const body = await readJson(request)
-    const item = await packageCatalog.find(requiredString(body, 'packageId'), optionalString(body.version))
+    const workspaceId = params[0]!
+    const item = await packageCatalog.find(requiredString(body, 'packageId'), optionalString(body.version), { workspaceId })
     if (item === undefined) throw new HttpError(404, 'market_package_not_found', 'Marketplace package not found')
     writeJson(response, 200, {
       item,
-      preview: packageManager.preview(params[0]!, item.manifest),
+      preview: packageManager.preview(workspaceId, item.manifest),
     })
   })
 
@@ -208,8 +215,9 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
     const workspaceId = params[0]!
     const worldId = optionalString(body.worldId)
     if (worldId !== undefined) await assertTargetWorld(store, worldAccess, request, workspaceId, worldId)
-    const item = await packageCatalog.find(requiredString(body, 'packageId'), optionalString(body.version))
+    const item = await packageCatalog.find(requiredString(body, 'packageId'), optionalString(body.version), { workspaceId })
     if (item === undefined) throw new HttpError(404, 'market_package_not_found', 'Marketplace package not found')
+    assertWorkspaceInstallSource(packageCatalog, workspaceId, item.sourceDirectory)
     await assertAvatarBasePackInstallSource(item.manifest, item.sourceDirectory)
     const installed = await packageManager.install({
       workspaceId,
@@ -237,8 +245,12 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
     writeJson(response, 201, result)
   })
 
-  router.get(/^\/api\/workspaces\/([^/]+)\/workshop\/projects$/, async ({ response, params }) => {
-    writeJson(response, 200, { items: await workshop.list(params[0]!) })
+  router.get(/^\/api\/workspaces\/([^/]+)\/workshop\/projects$/, async ({ response, params, url }) => {
+    const requested = url.searchParams.get('status')
+    if (requested !== null && requested !== 'active' && requested !== 'archived' && requested !== 'all') {
+      throw new HttpError(422, 'workshop_status_invalid', '项目状态筛选只支持 active、archived 或 all')
+    }
+    writeJson(response, 200, { items: await workshop.list(params[0]!, requested ?? 'all') })
   })
 
   router.get(/^\/api\/workspaces\/([^/]+)\/workshop\/draft$/, async ({ response, params }) => {
@@ -268,6 +280,40 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
   router.get(/^\/api\/workspaces\/([^/]+)\/workshop\/projects\/([^/]+)$/, async ({ response, params }) => {
     writeJson(response, 200, { project: await workshop.readProject(params[0]!, params[1]!) })
   })
+
+  router.post(/^\/api\/workspaces\/([^/]+)\/workshop\/projects\/([^/]+)\/archive$/, async ({ response, params }) => {
+    writeJson(response, 200, { project: await workshop.archive(params[0]!, params[1]!) })
+  })
+
+  router.post(/^\/api\/workspaces\/([^/]+)\/workshop\/projects\/([^/]+)\/restore$/, async ({ response, params }) => {
+    writeJson(response, 200, { project: await workshop.restore(params[0]!, params[1]!) })
+  })
+
+  // Deleting a project never deletes its world. The response reports the world
+  // that was kept so the caller can say so instead of guessing.
+  router.delete(/^\/api\/workspaces\/([^/]+)\/workshop\/projects\/([^/]+)$/, async ({ response, params }) => {
+    writeJson(response, 200, { removed: true, deletion: await workshop.delete(params[0]!, params[1]!) })
+  })
+}
+
+/**
+ * Refuses a source directory owned by a different workspace.
+ *
+ * `/packages/install` takes the directory straight from the request body, so
+ * scoping the catalog lookup is not enough on its own: without this check a
+ * workspace could name another workspace's generated talent directory and
+ * install a character it is not allowed to see.
+ */
+function assertWorkspaceInstallSource(
+  catalog: LocalPackageCatalog,
+  workspaceId: string,
+  sourceDirectory: string,
+): void {
+  try {
+    catalog.assertInstallSource(workspaceId, sourceDirectory)
+  } catch {
+    throw new HttpError(404, 'market_package_not_found', 'Marketplace package not found')
+  }
 }
 
 async function assertAvatarBasePackInstallSource(

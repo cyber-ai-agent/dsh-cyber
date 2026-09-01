@@ -71,6 +71,7 @@ export class TaskScheduleService {
     const world = this.#store.getWorld(input.worldId)
     const employee = this.#store.getEmployee(input.employeeId)
     if (world === undefined) throw new Error('世界不存在')
+    if (world.status === 'archived') throw new Error(`世界「${world.name}」已归档，无法创建计划任务。请先恢复该世界。`)
     if (employee === undefined || employee.worldId !== world.id) throw new Error('所选角色不属于当前世界')
     const title = input.title.trim().slice(0, 120)
     const prompt = input.prompt.trim().slice(0, 8_000)
@@ -128,6 +129,9 @@ export class TaskScheduleService {
   }
 
   async runNow(worldId: string, scheduleId: string): Promise<TaskScheduleRun> {
+    const world = this.#store.getWorld(worldId)
+    if (world === undefined) throw new Error('计划所属世界不存在')
+    if (world.status === 'archived') throw new Error(`世界「${world.name}」已归档，计划任务不会运行。请先恢复该世界。`)
     return this.#run(this.#require(worldId, scheduleId), new Date().toISOString(), true)
   }
 
@@ -136,10 +140,16 @@ export class TaskScheduleService {
     this.#running = true
     try {
       const now = new Date().toISOString()
+      // An archived world is never driven by the scheduler. The join keeps
+      // its schedules on the shelf instead of failing once per tick.
       const due = this.#store.database.prepare(
-        `SELECT * FROM task_schedules
-         WHERE status = 'active' AND next_run_at IS NOT NULL AND next_run_at <= ?
-         ORDER BY next_run_at, id LIMIT 20`,
+        `SELECT task_schedules.* FROM task_schedules
+         JOIN worlds ON worlds.id = task_schedules.world_id
+         WHERE task_schedules.status = 'active'
+           AND worlds.status = 'active'
+           AND task_schedules.next_run_at IS NOT NULL
+           AND task_schedules.next_run_at <= ?
+         ORDER BY task_schedules.next_run_at, task_schedules.id LIMIT 20`,
       ).all(now).map(mapSchedule)
       for (const schedule of due) await this.#run(schedule, schedule.nextRunAt!, false)
     } finally {
