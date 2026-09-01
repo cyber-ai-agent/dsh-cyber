@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { copyFile, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, extname, join, parse, relative, resolve, sep } from 'node:path'
 
 import type {
   JsonObject,
@@ -455,9 +455,20 @@ export class WorldArtifactService {
   async #resolveImportedPath(root: WorldRoot, sourcePath: string): Promise<{ sourcePath: string; sourceRelativePath: string }> {
     if (sourcePath.trim() === '') throw invalid('source_path_required', '必须提供 sourcePath')
     const normalized = sourcePath.replaceAll('\\', '/')
-    const candidate = isAbsoluteLike(normalized)
+    const lexical = isAbsoluteLike(normalized)
       ? resolve(normalized)
       : resolve(root.rootPath, ...normalizeRelativePath(normalized, 'source path').split('/'))
+    // The caller may name the world root through a symlink the operator
+    // configured (a state root below `/var` on macOS). Canonicalise segment by
+    // segment so that alias stays usable while a symlink hop below the world
+    // root is still refused instead of silently followed.
+    let candidate: string
+    try {
+      candidate = await resolveCanonicalPathWithoutSymlinkHops(lexical, root.rootPath)
+    } catch (error) {
+      if (error instanceof SymlinkHopError) throw conflict('artifact_symlink_rejected', '导入路径包含符号链接')
+      throw error
+    }
     await assertSafeFile(root.rootPath, candidate, WORLD_ARTIFACT_LIMITS.maxProjectBytes)
     const sourceRelativePath = toPosix(relative(root.rootPath, candidate))
     if (!sourceRelativePath || sourceRelativePath.startsWith('..')) throw conflict('artifact_path_invalid', '导入路径越界')
@@ -601,7 +612,18 @@ async function inspectSource(root: string, sourcePath: string): Promise<SourceIn
 }
 
 async function resolveAgentWorkspace(root: WorldRoot, workspacePath: string): Promise<string | undefined> {
-  const candidate = resolve(workspacePath)
+  // The runtime hands back the workspace path it was launched with, which may
+  // still carry the operator's own symlink (a state root below `/var`). A
+  // lexical path can never be compared against the canonical world root, so
+  // canonicalise it here; the walk keeps refusing a symlink hop below `files`.
+  let candidate: string
+  try {
+    candidate = await resolveCanonicalPathWithoutSymlinkHops(workspacePath, root.filesPath)
+  } catch (error) {
+    if (error instanceof SymlinkHopError) throw conflict('artifact_workspace_invalid', 'AgentRun 工作区真实路径越界')
+    if (isMissingPath(error)) throw notFound('artifact_workspace_missing', 'AgentRun 工作区不存在')
+    throw error
+  }
   const restricted = await realpath(root.restrictedFilesPath)
   if (candidate.toLowerCase() === restricted.toLowerCase()) return undefined
   if (!isPathWithin(root.filesPath, candidate)) throw conflict('artifact_workspace_invalid', 'AgentRun 工作区不属于当前世界 files')
@@ -613,12 +635,10 @@ async function resolveAgentWorkspace(root: WorldRoot, workspacePath: string): Pr
     throw error
   }
   if (info.isSymbolicLink() || !info.isDirectory()) throw conflict('artifact_workspace_invalid', 'AgentRun 工作区必须是实际目录')
-  const resolved = await realpath(candidate)
-  if (!isPathWithin(root.filesPath, resolved)) throw conflict('artifact_workspace_invalid', 'AgentRun 工作区真实路径越界')
-  const relativePath = toPosix(relative(root.filesPath, resolved))
+  const relativePath = toPosix(relative(root.filesPath, candidate))
   if (relativePath.split('/')[0]?.toLowerCase() === '.dsh') throw conflict('artifact_workspace_invalid', 'AgentRun 工作区不能位于 .dsh 控制目录')
-  await assertNoSymlinkSegments(root.filesPath, resolved)
-  return resolved
+  await assertNoSymlinkSegments(root.filesPath, candidate)
+  return candidate
 }
 
 async function existingPath(path: string): Promise<boolean> {
@@ -685,6 +705,73 @@ async function collectProjectFiles(directory: string, depth: number): Promise<Pr
     if (files.length > WORLD_ARTIFACT_LIMITS.maxProjectFiles) throw invalid('artifact_file_count_rejected', '项目文件数量超过限制')
   }
   return files.sort((left, right) => left.relativePath.localeCompare(right.relativePath))
+}
+
+/**
+ * A path segment resolved through a symbolic link the caller never named.
+ *
+ * Thrown by {@link resolveCanonicalPathWithoutSymlinkHops} so every call site
+ * keeps its own public error code instead of leaking a shared one.
+ */
+export class SymlinkHopError extends Error {
+  readonly path: string
+
+  constructor(path: string) {
+    super(`Path segment resolves through a symbolic link: ${path}`)
+    this.name = 'SymlinkHopError'
+    this.path = path
+  }
+}
+
+/**
+ * Canonicalise an absolute path one segment at a time.
+ *
+ * Comparing a lexical `resolve(candidate)` with a canonical `realpath()`
+ * refuses every legitimate path whose root is reached through a symlink — on
+ * macOS `/var -> private/var` guarantees it, and on Linux any symlinked
+ * ancestor does the same. Resolving both sides is not the fix either: it makes
+ * the comparison a tautology, so `base/inner/hop/payload` with
+ * `hop -> base/../outside` passes the `lstat()` check on its final segment and
+ * would be accepted, reading a tree the caller never named.
+ *
+ * Walking keeps both properties. Each step must canonicalise to exactly the
+ * canonical prefix plus that literal segment, with two deliberate relaxations:
+ *
+ * - the first segment below the filesystem root may be a platform alias;
+ * - while the resolved prefix is still an ancestor of `boundary`, the
+ *   divergence sits above the caller's namespace — the operator's own state
+ *   root is allowed to live behind a symlink — and is carried forward.
+ *
+ * Below `boundary` no hop is accepted, so an intermediate symlink is refused
+ * rather than silently followed. The returned path is canonical; containment
+ * against the boundary is still the caller's check. A missing segment surfaces
+ * the underlying `ENOENT` unchanged.
+ */
+export async function resolveCanonicalPathWithoutSymlinkHops(candidate: string, boundary?: string): Promise<string> {
+  const lexical = resolve(candidate)
+  const filesystemRoot = parse(lexical).root
+  const canonicalBoundary = boundary === undefined ? undefined : await realpath(boundary)
+  let lexicalPrefix = filesystemRoot
+  let canonicalPrefix = await realpath(filesystemRoot)
+  const segments = lexical.slice(filesystemRoot.length).split(sep).filter((segment) => segment !== '')
+  for (const [index, segment] of segments.entries()) {
+    lexicalPrefix = join(lexicalPrefix, segment)
+    const expected = join(canonicalPrefix, segment)
+    const actual = await realpath(lexicalPrefix)
+    // Case-insensitive so a case-preserving filesystem reporting the on-disk
+    // spelling is not mistaken for a hop; the canonical spelling is carried on.
+    if (actual.toLowerCase() === expected.toLowerCase()) {
+      canonicalPrefix = actual
+      continue
+    }
+    const stillAboveBoundary = canonicalBoundary !== undefined && isPathWithin(actual, canonicalBoundary)
+    if (index === 0 || stillAboveBoundary) {
+      canonicalPrefix = actual
+      continue
+    }
+    throw new SymlinkHopError(lexicalPrefix)
+  }
+  return canonicalPrefix
 }
 
 async function assertSafeFile(root: string, candidate: string, maxBytes: number): Promise<void> {
