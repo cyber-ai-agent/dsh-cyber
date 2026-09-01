@@ -307,7 +307,10 @@ test('publishes an uploaded 2D portrait and rolls back to an earlier revision', 
   await expect(dialog).toBeVisible()
   const stage = dialog.locator('.character-avatar-manager__stage')
   const summary = dialog.locator('.character-avatar-manager__summary')
-  const fileInput = dialog.locator('input[type="file"][accept*=".vrm"]')
+  // Located by the import section rather than by its accept list: the accept
+  // list narrows to images when the optional 3D extension is off, which is
+  // correct product behaviour and must not decide whether this test can run.
+  const fileInput = dialog.locator('.character-avatar-manager__import input[type="file"]')
 
   await fileInput.setInputFiles({ name: 'portrait-a.png', mimeType: 'image/png', buffer: Buffer.from(PORTRAIT_A_PNG, 'base64') })
   await expect(dialog.getByText('尚未发布')).toBeVisible()
