@@ -1914,6 +1914,27 @@ const MIGRATIONS: readonly Migration[] = [
       FROM employee_milestones;
     `,
   },
+  {
+    version: 38,
+    name: 'employee-milestone-origin',
+    sql: `
+      ALTER TABLE employee_milestones
+        ADD COLUMN origin TEXT NOT NULL DEFAULT 'authored'
+        CHECK (origin IN ('authored', 'activity-projection', 'legacy-conversation-projection'));
+
+      -- One last textual pass: rows written by the retired per-turn conversation
+      -- generator are stamped structurally here so nothing after this migration
+      -- has to recognise durable user data by its display copy. The predicate is
+      -- deliberately no wider than the cleanup it replaces. Every other existing
+      -- row keeps the 'authored' default, including milestones the current
+      -- activity projection already wrote: under-labelling only costs provenance
+      -- detail, while over-labelling would delete durable user data.
+      UPDATE employee_milestones
+        SET origin = 'legacy-conversation-projection'
+        WHERE category = 'task'
+          AND title IN ('完成一次真实对话', '完成一次有工具证据的任务');
+    `,
+  },
 ]
 
 export function migrate(database: DatabaseSync, now: () => string): void {

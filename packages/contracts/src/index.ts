@@ -1,7 +1,7 @@
 import type { WorldCharacterAuthority } from './world-authority.js'
 import type { UiLocale } from './locales.js'
 
-export const CYBER_SCHEMA_VERSION = 37 as const
+export const CYBER_SCHEMA_VERSION = 38 as const
 
 export * from './runtime-access.js'
 export * from './locales.js'
@@ -564,11 +564,28 @@ export type EmployeeMilestoneCategory =
   | 'birthday'
   | 'reflection'
 
+/**
+ * Which generator produced a milestone row. Structural provenance so cleanup of
+ * retired generators never has to match on display copy.
+ * - `authored`: recorded explicitly through the milestone append path.
+ * - `activity-projection`: derived by the dossier activity projection.
+ * - `legacy-conversation-projection`: the retired per-turn generator; these rows
+ *   are removed by the projection and can never be written again.
+ */
+export type EmployeeMilestoneOrigin =
+  | 'authored'
+  | 'activity-projection'
+  | 'legacy-conversation-projection'
+
+/** Origins the milestone append path may write. */
+export type WritableEmployeeMilestoneOrigin = Exclude<EmployeeMilestoneOrigin, 'legacy-conversation-projection'>
+
 export interface EmployeeMilestone {
   id: string
   workspaceId: string
   worldId: string
   employeeId: string
+  origin: EmployeeMilestoneOrigin
   category: EmployeeMilestoneCategory
   title: string
   summary: string

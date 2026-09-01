@@ -228,6 +228,7 @@ function dossier(employee: CyberEmployee, index: number, roster: CyberEmployee[]
       workspaceId,
       worldId: employee.worldId,
       employeeId: employee.id,
+      origin: 'authored' as const,
       category,
       title: [isTavern ? '进入月影酒馆' : '加入赛博公司', isTavern ? '完成首段角色演绎' : '完成首个可验收交付', `掌握技能：${skill}`, isTavern ? '建立关键角色关系' : '通过跨角色评审'][milestoneIndex]!,
       summary: ['建立独立身份、记忆与会话。', isTavern ? '角色表现与设定保持一致。' : '交付结果通过老板验收。', '有消息、事件和结果作为技能证据。', isTavern ? '通过真实剧情互动更新关系。' : '与同事完成评审并沉淀改进项。'][milestoneIndex]!,
