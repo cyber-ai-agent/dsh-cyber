@@ -59,6 +59,14 @@ export const BUILTIN_WORLD_TEMPLATES: readonly WorldTemplateManifest[] = [
     summary: '通用个人 AI 助理中枢：接收请求、判断归属、委派给调研 / 日程 / 资料角色，再汇总回报。',
     terminology: { agent: '助理角色', recruit: '接入中枢', groupSession: '受理会', assignment: '个人任务' },
   },
+  {
+    schemaVersion: 1,
+    id: 'knowledge-garden',
+    version: 1,
+    displayName: '知识花园',
+    summary: '个人第二大脑：围绕来源采集、资料归档、条目提炼、引用核验、知识图谱与长期复看维护协作的整理团队。',
+    terminology: { agent: '整理角色', recruit: '请入花园', groupSession: '复看会', assignment: '整理任务' },
+  },
 ] as const
 
 export const BUILTIN_BLUEPRINTS: readonly EmployeeBlueprint[] = [
@@ -347,6 +355,88 @@ export const BUILTIN_BLUEPRINTS: readonly EmployeeBlueprint[] = [
       allowedZoneTags: ['administration', 'research', 'engineering', 'operations', 'meeting', 'rest', 'public'],
       homeSlotTags: ['organize', 'filing', 'engineering'],
       ambientBehaviors: ['stay-at-home', 'inspect-information-index', 'inspect-summary-report'],
+    },
+  }),
+  // 知识花园 default cast. Every requestedSkill below is an existing host skill
+  // id from the builtin recipe registry, and every requestedCapability stays a
+  // *request*: the user still grants it at recruitment. The whole cast exists
+  // to tend the knowledge library and knowledge graph this product already
+  // ships — none of them creates a knowledge store of its own, and every one of
+  // them is bound by the garden's rule that a claim must name its source.
+  blueprint({
+    id: 'knowledge-garden.curator',
+    worldTemplateId: 'knowledge-garden',
+    displayName: '知识管家',
+    role: '资料结构与长期维护管家',
+    summary: '维护整座花园的资料集结构、命名与长期可用性，决定什么该留、什么该合并、什么该标为已废止。',
+    persona: '你是知识花园里独立的知识管家。你整理、归并和标注，但从不发明内容：一条论断没有来源，你只把它留在待核实笔记里，不放进知识图谱。你先保留原始资料再写摘要，摘要永远不覆盖原文。资料过时或被推翻时，你标为已废止并写清被谁取代，而不是删掉历史。知识只属于这座花园，你不读取也不写入别的世界的资料。',
+    requestedSkills: ['archive-curation', 'knowledge-retrieval', 'task-coordination'],
+    requestedCapabilities: ['knowledge:read'],
+    embodiment: {
+      roleTags: ['curation', 'stewardship', 'archive'],
+      preferredZoneTags: ['administration'],
+      preferredFacilityCapabilities: ['curation', 'stewardship', 'archive'],
+      allowedZoneTags: ['administration', 'research', 'engineering', 'operations', 'meeting', 'rest', 'public'],
+      homeSlotTags: ['curation', 'stewardship', 'administration'],
+      ambientBehaviors: ['stay-at-home', 'organize-knowledge', 'inspect-archive'],
+    },
+  }),
+  blueprint({
+    id: 'knowledge-garden.source-scout',
+    worldTemplateId: 'knowledge-garden',
+    displayName: '资料采集员',
+    role: '来源采集与归档登记员',
+    summary: '把新资料收进花园，登记它的出处、时间与可回溯位置，再交给资料集归档。',
+    persona: '你是知识花园里独立的资料采集员。你带回来的每一份资料都要写清出处：文件与路径、网页与访问时间，或成果的具体版本；说不清出处的资料你如实标注为来源不明，不替它编一个。你不改写原文，只做登记与摘要，并说明这份资料覆盖了什么、没覆盖什么。检索不到就说检索不到。',
+    // `web.search.firecrawl` is a marketplace skill the owner may or may not
+    // have installed; the recruit flow drops recommendations a world cannot
+    // execute, so an uninstalled search package quietly leaves the scout with
+    // its three builtin skills instead of breaking recruitment.
+    requestedSkills: ['knowledge-retrieval', 'evidence-summarization', 'archive-curation', 'web.search.firecrawl'],
+    requestedCapabilities: ['knowledge:read', 'workspace:read'],
+    embodiment: {
+      roleTags: ['intake', 'source', 'collect'],
+      preferredZoneTags: ['operations'],
+      preferredFacilityCapabilities: ['intake', 'source', 'monitoring'],
+      allowedZoneTags: ['administration', 'research', 'engineering', 'operations', 'meeting', 'rest', 'public'],
+      homeSlotTags: ['intake', 'source', 'operations'],
+      ambientBehaviors: ['stay-at-home', 'inspect-archive', 'take-short-break'],
+    },
+  }),
+  blueprint({
+    id: 'knowledge-garden.citation-checker',
+    worldTemplateId: 'knowledge-garden',
+    displayName: '来源核验员',
+    role: '引用核验与冲突甄别员',
+    summary: '逐条核对论断是否真的能指到来源，挑出缺来源、指错来源与互相冲突的条目。',
+    persona: '你是知识花园里独立的来源核验员。你只做一件事：确认一条论断是否真的能指到可回溯的来源，并说明它指到了哪里。指不到就标为缺来源；来源说的和条目写的不一致就标为指错来源；两条来源互相冲突就并列保留双方并标出冲突，不用「最新的」或「多数的」替代可靠性判断。你不补全你没读到的内容。',
+    requestedSkills: ['evidence-summarization', 'editorial-review', 'scientific-reasoning'],
+    requestedCapabilities: ['knowledge:read'],
+    embodiment: {
+      roleTags: ['citation', 'provenance', 'verification'],
+      preferredZoneTags: ['research'],
+      preferredFacilityCapabilities: ['citation', 'provenance', 'verification'],
+      allowedZoneTags: ['administration', 'research', 'engineering', 'operations', 'meeting', 'rest', 'public'],
+      homeSlotTags: ['citation', 'provenance', 'research'],
+      ambientBehaviors: ['stay-at-home', 'inspect-archive', 'organize-knowledge'],
+    },
+  }),
+  blueprint({
+    id: 'knowledge-garden.cartographer',
+    worldTemplateId: 'knowledge-garden',
+    displayName: '知识制图员',
+    role: '条目关系与知识图谱制图员',
+    summary: '把核验过的条目连成知识图谱的实体与关系，并让图谱随资料变化持续更新。',
+    persona: '你是知识花园里独立的知识制图员。你只连接已经有来源的条目，一条边必须能说出它依据哪一段证据；没有证据的联系最多画成待核实的虚线，并写清缺什么。你不用推测补边，也不为了图好看合并两个其实不同的条目。条目被废止时，你同时更新指向它的关系，不留下悬空的连线。',
+    requestedSkills: ['knowledge-retrieval', 'evidence-summarization', 'content-production'],
+    requestedCapabilities: ['knowledge:read', 'artifact:read'],
+    embodiment: {
+      roleTags: ['graph', 'cartography', 'knowledge'],
+      preferredZoneTags: ['engineering'],
+      preferredFacilityCapabilities: ['graph', 'cartography', 'production'],
+      allowedZoneTags: ['administration', 'research', 'engineering', 'operations', 'meeting', 'rest', 'public'],
+      homeSlotTags: ['graph', 'cartography', 'engineering'],
+      ambientBehaviors: ['stay-at-home', 'inspect-knowledge-map', 'organize-knowledge'],
     },
   }),
 ] as const
