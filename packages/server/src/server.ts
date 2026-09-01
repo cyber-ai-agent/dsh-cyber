@@ -459,15 +459,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerAmbientLifeRoutes(router, { store, settings: ambientLifeSettings, access: worldAccess })
   registerAssetRoutes(router, { store, assets, access: worldAccess })
   registerLocalTtsRoutes(router, localTtsAssets)
-  registerWorldRoutes(router, {
-    store,
-    worldAccess,
-    worldPackages,
-    ownerRuntimeAccess,
-    skillAvailability,
-    lifecycle: worldLifecycle,
-    assets,
-  })
+  registerWorldRoutes(router, { store, worldAccess, worldPackages, ownerRuntimeAccess, skillAvailability, lifecycle: worldLifecycle, assets })
   registerWorldAuthorityRoutes(router, { store, worldAccess, authority, worldPermissions, skillRuntime, turnContinuations, toolApprovals, ownerRuntimeAccess })
   registerWorldSettingsRoutes(router, { store, settings: worldSettings, access: worldAccess })
   registerTaskScheduleRoutes(router, { store, schedules: taskSchedules, access: worldAccess })
