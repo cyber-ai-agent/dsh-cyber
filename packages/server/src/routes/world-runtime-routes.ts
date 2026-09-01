@@ -17,6 +17,7 @@ import {
 } from '../http/request.js'
 import { writeBinary, writeJson } from '../http/response.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
+import { requireWorldAcceptingWork } from '../services/world-work-guard.js'
 import type { WorldStreamHub } from '../streams/world-stream-hub.js'
 import type { WorldRuntimeService } from '../world-runtime-service.js'
 
@@ -80,7 +81,7 @@ export function registerWorldRuntimeRoutes(
   })
 
   router.post(/^\/api\/worlds\/([^/]+)\/interactions$/, async ({ request, response, params }) => {
-    const worldId = params[0]!
+    const worldId = requireWorldAcceptingWork(store, params[0]!).id
     await worldAccess.assertUnlocked(worldId, request)
     const body = await readJson(request)
     const action = requiredEnum<WorldInteractionAction>(body, 'action', [

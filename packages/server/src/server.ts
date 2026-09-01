@@ -80,6 +80,7 @@ import { WorldArtifactService } from './services/world-artifact-service.js'
 import { WorldAmbientSlotResolver } from './services/world-ambient-slot-resolver.js'
 import { WorldAmbientStateProvider } from './services/world-ambient-state-provider.js'
 import { WorldFileService } from './services/world-file-service.js'
+import { WorldLifecycleService } from './services/world-lifecycle-service.js'
 import { WorldRootService } from './services/world-root-service.js'
 import { WorldSettingsService } from './services/world-settings-service.js'
 import { createKnowledgeSearchPort } from './services/knowledge-search-port.js'
@@ -194,6 +195,9 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const worldSimulation = new WorldSimulationStore(store)
 
   const worldRoots = new WorldRootService(stateRoot)
+  const worldLifecycle = new WorldLifecycleService({ store, roots: worldRoots })
+  // Finish a delete interrupted between the SQLite commit and the file removal.
+  await worldLifecycle.sweepInterrupted()
   await Promise.all(store.listWorkspaces().flatMap((workspace) => store.listWorlds(workspace.id, true).map((world) => worldRoots.ensure(world.id))))
   const worldSettings = new WorldSettingsService(worldRoots)
   const ambientLifeSettings = new AmbientLifeSettingsService(store)
@@ -456,13 +460,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerAmbientLifeRoutes(router, { store, settings: ambientLifeSettings, access: worldAccess })
   registerAssetRoutes(router, { store, assets, access: worldAccess })
   registerLocalTtsRoutes(router, localTtsAssets)
-  registerWorldRoutes(router, {
-    store,
-    worldAccess,
-    worldPackages,
-    ownerRuntimeAccess,
-    skillAvailability,
-  })
+  registerWorldRoutes(router, { store, worldAccess, worldPackages, ownerRuntimeAccess, skillAvailability, lifecycle: worldLifecycle })
   registerWorldAuthorityRoutes(router, { store, worldAccess, authority, worldPermissions, skillRuntime, turnContinuations, toolApprovals, ownerRuntimeAccess })
   registerWorldSettingsRoutes(router, { store, settings: worldSettings, access: worldAccess })
   registerTaskScheduleRoutes(router, { store, schedules: taskSchedules, access: worldAccess })

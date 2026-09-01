@@ -8,7 +8,9 @@ import { loadInstalledBlueprints } from '../installed-package-runtime.js'
 import { ConversationHubService } from '../services/conversation-hub-service.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
 import type { OwnerRuntimeAccessService } from '../services/owner-runtime-access-service.js'
+import type { WorldLifecycleService } from '../services/world-lifecycle-service.js'
 import type { WorldPackageInstanceService } from '../services/world-package-instance-service.js'
+import { requireWorldAcceptingWork } from '../services/world-work-guard.js'
 import {
   availableWorldSkillIds,
   unavailableWorldSkillIds,
@@ -31,14 +33,41 @@ export interface WorldRoutesDependencies {
   worldPackages?: WorldPackageInstanceService
   ownerRuntimeAccess?: OwnerRuntimeAccessService
   skillAvailability: WorldSkillAvailabilityPort
+  lifecycle?: WorldLifecycleService
 }
 
 export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDependencies): void {
-  const { store, worldAccess, worldPackages, ownerRuntimeAccess, skillAvailability } = dependencies
+  const { store, worldAccess, worldPackages, ownerRuntimeAccess, skillAvailability, lifecycle } = dependencies
   const conversationHub = new ConversationHubService(store)
 
-  router.get(/^\/api\/workspaces\/([^/]+)\/worlds$/, ({ response, params }) => {
-    writeJson(response, 200, { items: store.listWorlds(params[0]!) })
+  // The default world list shows active worlds only. Archived worlds are a
+  // deliberate second view, never mixed into the main list.
+  router.get(/^\/api\/workspaces\/([^/]+)\/worlds$/, ({ response, params, url }) => {
+    const requested = url.searchParams.get('status') ?? 'active'
+    if (!['active', 'archived', 'all'].includes(requested)) {
+      throw new HttpError(422, 'invalid_world_status_filter', 'status 只能是 active、archived 或 all')
+    }
+    const scope = requested as 'active' | 'archived' | 'all'
+    const items = store.listWorlds(params[0]!, true)
+      .filter((world) => scope === 'all'
+        || (scope === 'archived' ? world.status === 'archived' : world.status === 'active'))
+    writeJson(response, 200, { items })
+  })
+
+  router.post(/^\/api\/worlds\/([^/]+)\/archive$/, ({ response, params }) => {
+    writeJson(response, 200, { world: requireLifecycle(lifecycle).archive(params[0]!) })
+  })
+
+  router.post(/^\/api\/worlds\/([^/]+)\/restore$/, ({ response, params }) => {
+    writeJson(response, 200, { world: requireLifecycle(lifecycle).restore(params[0]!) })
+  })
+
+  // Permanent deletion. The owner must re-type the world name in `confirmName`
+  // and the world must have no work in flight; both refusals are fail-closed.
+  router.delete(/^\/api\/worlds\/([^/]+)$/, async ({ request, response, params }) => {
+    const body = await readJson(request)
+    const result = await requireLifecycle(lifecycle).delete(params[0]!, requiredString(body, 'confirmName'))
+    writeJson(response, 200, { deleted: true, worldId: result.world.id, filesRemoved: result.filesRemoved })
   })
 
   router.post(/^\/api\/workspaces\/([^/]+)\/worlds$/, async ({ request, response, params }) => {
@@ -97,8 +126,7 @@ export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDep
   })
 
   router.post(/^\/api\/worlds\/([^/]+)\/recruit$/, async ({ request, response, params }) => {
-    const world = store.getWorld(params[0]!)
-    if (world === undefined) throw new HttpError(404, 'world_not_found', 'World not found')
+    const world = requireWorldAcceptingWork(store, params[0]!)
     await worldAccess?.assertUnlocked(world.id, request)
     const body = await readJson(request)
     const blueprintId = requiredString(body, 'blueprintId')
@@ -181,6 +209,11 @@ export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDep
       : undefined
     writeJson(response, 201, { employee, ...(grant === undefined ? {} : { grant }) })
   })
+}
+
+function requireLifecycle(lifecycle: WorldLifecycleService | undefined): WorldLifecycleService {
+  if (lifecycle === undefined) throw new HttpError(503, 'world_lifecycle_unavailable', '世界生命周期服务不可用')
+  return lifecycle
 }
 
 async function findLiveBlueprint(

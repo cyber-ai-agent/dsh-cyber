@@ -1,5 +1,13 @@
-import { lstat, mkdir, realpath, rm } from 'node:fs/promises'
+import { lstat, mkdir, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
+
+/**
+ * Marker written into a WorldRoot immediately before its database records are
+ * deleted. Its only job is to make a crash mid-delete recoverable: a directory
+ * carrying this marker whose world no longer exists in SQLite is unreachable
+ * garbage and may be swept, while an unmarked directory is never touched.
+ */
+const PENDING_DELETE_MARKER = '.pending-delete'
 
 export interface WorldRoot {
   worldId: string
@@ -116,6 +124,44 @@ export class WorldRootService {
     }
     await rejectSymlink(rootPath)
     await rm(rootPath, { recursive: true, force: true })
+  }
+
+  /** Records the intent to delete this world root before SQLite is touched. */
+  async markPendingDelete(worldId: string): Promise<void> {
+    const root = await this.ensure(worldId)
+    await writeFile(join(root.rootPath, PENDING_DELETE_MARKER), `${new Date().toISOString()}\n`, 'utf8')
+  }
+
+  /** Withdraws the deletion intent when the delete failed before committing. */
+  async clearPendingDelete(worldId: string): Promise<void> {
+    const managedRoot = await realpath(this.#root).catch(() => undefined)
+    if (managedRoot === undefined) return
+    await rm(join(this.#safeWorldRoot(worldId, managedRoot), PENDING_DELETE_MARKER), { force: true })
+  }
+
+  /**
+   * Finishes deletions that were interrupted between the database commit and
+   * the directory removal.
+   *
+   * Only a root that was explicitly marked *and* has no surviving world record
+   * is removed. An unmarked orphan is left alone on purpose: a state directory
+   * paired with a fresh or restored database must never be silently emptied.
+   */
+  async sweepPendingDeletes(survivingWorldIds: Iterable<string>): Promise<string[]> {
+    const survivors = new Set(survivingWorldIds)
+    const entries = await readdir(this.#root, { withFileTypes: true }).catch(() => [])
+    const swept: string[] = []
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const worldId = decodeURIComponent(entry.name)
+      if (survivors.has(worldId)) continue
+      const marker = join(this.#root, entry.name, PENDING_DELETE_MARKER)
+      if (await lstat(marker).then((info) => info.isFile(), () => false)) {
+        await this.remove(worldId)
+        swept.push(worldId)
+      }
+    }
+    return swept
   }
 
   #safeWorldRoot(worldId: string, baseRoot = this.#root): string {
