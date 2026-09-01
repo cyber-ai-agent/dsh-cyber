@@ -1,0 +1,204 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1536 1024" width="1536" height="1024" role="img" aria-label="AI 学院 · 大学教室">
+  <title>AI 学院 · 大学教室</title>
+  <desc>程序化绘制的 2D 大学教室场景：黑板、讲台、学员席、知识拆解台、教材工作台、答疑席、知识图谱墙与课程成果展台。</desc>
+  <defs>
+    <linearGradient id="wall" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#efe9dc"/>
+      <stop offset="1" stop-color="#ddd3c1"/>
+    </linearGradient>
+    <linearGradient id="floor" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b79a74"/>
+      <stop offset="1" stop-color="#8d7150"/>
+    </linearGradient>
+    <linearGradient id="slate" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2c4a42"/>
+      <stop offset="1" stop-color="#1e352f"/>
+    </linearGradient>
+    <linearGradient id="daylight" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#cfe4ef"/>
+      <stop offset="1" stop-color="#a9c9dc"/>
+    </linearGradient>
+    <linearGradient id="wood" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c39456"/>
+      <stop offset="1" stop-color="#9d7038"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f7f3e9"/>
+      <stop offset="1" stop-color="#e5dcca"/>
+    </linearGradient>
+  </defs>
+
+  <!-- room shell -->
+  <rect x="0" y="0" width="1536" height="500" fill="url(#wall)"/>
+  <rect x="0" y="500" width="1536" height="524" fill="url(#floor)"/>
+  <rect x="0" y="492" width="1536" height="16" fill="#7d6242"/>
+  <g stroke="#7d6242" stroke-opacity="0.28" stroke-width="3" fill="none">
+    <path d="M0 590H1536M0 690H1536M0 800H1536M0 920H1536"/>
+    <path d="M110 508 -60 1024M420 508 340 1024M768 508 768 1024M1116 508 1196 1024M1426 508 1596 1024"/>
+  </g>
+
+  <!-- clerestory windows -->
+  <g>
+    <rect x="60" y="24" width="1416" height="62" rx="8" fill="url(#daylight)"/>
+    <g fill="none" stroke="#efe9dc" stroke-width="8">
+      <path d="M60 24h1416v62H60z"/>
+      <path d="M296 24v62M532 24v62M768 24v62M1004 24v62M1240 24v62"/>
+    </g>
+  </g>
+
+  <!-- syllabus board on the back wall (course plan) -->
+  <g>
+    <rect x="90" y="118" width="300" height="212" rx="10" fill="#8a6234"/>
+    <rect x="104" y="132" width="272" height="184" rx="6" fill="url(#panel)"/>
+    <g fill="#8d7150">
+      <rect x="124" y="156" width="140" height="12" rx="6"/>
+      <rect x="124" y="188" width="232" height="8" rx="4"/>
+      <rect x="124" y="212" width="196" height="8" rx="4"/>
+      <rect x="124" y="236" width="214" height="8" rx="4"/>
+      <rect x="124" y="260" width="168" height="8" rx="4"/>
+    </g>
+    <g fill="#d7a52a">
+      <circle cx="112" cy="160" r="0"/>
+      <rect x="288" y="152" width="68" height="20" rx="10"/>
+    </g>
+  </g>
+
+  <!-- blackboard -->
+  <g>
+    <rect x="456" y="84" width="624" height="264" rx="12" fill="#6b4f33"/>
+    <rect x="472" y="100" width="592" height="216" rx="6" fill="url(#slate)"/>
+    <g stroke="#e9f2ee" stroke-opacity="0.72" stroke-width="5" stroke-linecap="round" fill="none">
+      <path d="M504 140h236M504 176h318M504 212h188"/>
+      <path d="M836 152h68v68h-68zM944 152h68v68h-68z"/>
+      <path d="M904 186h40"/>
+      <path d="M504 252c40-26 78 22 118-4s76 20 116-6"/>
+    </g>
+    <rect x="472" y="322" width="592" height="18" rx="6" fill="#8a6234"/>
+    <g fill="#f2f4ef">
+      <rect x="512" y="326" width="46" height="10" rx="5"/>
+      <rect x="572" y="326" width="30" height="10" rx="5"/>
+    </g>
+  </g>
+
+  <!-- knowledge graph wall (right back wall) -->
+  <g>
+    <rect x="1146" y="118" width="300" height="212" rx="10" fill="#3b4a52"/>
+    <rect x="1160" y="132" width="272" height="184" rx="6" fill="#182228"/>
+    <g stroke="#5fb0a4" stroke-width="3" fill="none" stroke-opacity="0.85">
+      <path d="M1220 178 1296 214 1370 172M1296 214 1268 274M1296 214 1360 268M1220 178 1206 250"/>
+    </g>
+    <g fill="#d7a52a">
+      <circle cx="1296" cy="214" r="13"/>
+    </g>
+    <g fill="#7fd0c2">
+      <circle cx="1220" cy="178" r="9"/>
+      <circle cx="1370" cy="172" r="9"/>
+      <circle cx="1268" cy="274" r="9"/>
+      <circle cx="1360" cy="268" r="9"/>
+      <circle cx="1206" cy="250" r="9"/>
+    </g>
+  </g>
+
+  <!-- lectern -->
+  <g>
+    <path d="M690 380h156l-14 96H704z" fill="url(#wood)"/>
+    <rect x="682" y="366" width="172" height="24" rx="8" fill="#b0803e"/>
+    <rect x="716" y="396" width="104" height="14" rx="7" fill="#f7f3e9" fill-opacity="0.85"/>
+    <rect x="750" y="476" width="36" height="26" rx="6" fill="#7d5c2e"/>
+  </g>
+
+  <!-- window bench (rest) -->
+  <g>
+    <rect x="396" y="462" width="140" height="24" rx="10" fill="#b0803e"/>
+    <rect x="404" y="486" width="16" height="52" rx="6" fill="#8a6234"/>
+    <rect x="512" y="486" width="16" height="52" rx="6" fill="#8a6234"/>
+  </g>
+
+  <!-- knowledge breakdown desk (left) -->
+  <g>
+    <rect x="110" y="560" width="280" height="140" rx="12" fill="url(#wood)"/>
+    <rect x="124" y="574" width="252" height="88" rx="8" fill="#e9dfc9"/>
+    <g fill="#5f7f79">
+      <rect x="146" y="596" width="60" height="44" rx="6"/>
+      <rect x="220" y="596" width="60" height="44" rx="6"/>
+      <rect x="294" y="596" width="60" height="44" rx="6"/>
+    </g>
+    <g stroke="#8d7150" stroke-width="4" fill="none">
+      <path d="M206 618h14M280 618h14"/>
+    </g>
+    <rect x="130" y="700" width="20" height="52" rx="6" fill="#7d5c2e"/>
+    <rect x="350" y="700" width="20" height="52" rx="6" fill="#7d5c2e"/>
+  </g>
+
+  <!-- teaching material bench (right) -->
+  <g>
+    <rect x="1146" y="560" width="280" height="140" rx="12" fill="url(#wood)"/>
+    <rect x="1160" y="574" width="252" height="88" rx="8" fill="#1f2a30"/>
+    <g fill="#d7a52a" fill-opacity="0.85">
+      <rect x="1180" y="594" width="96" height="10" rx="5"/>
+      <rect x="1180" y="614" width="140" height="10" rx="5"/>
+      <rect x="1180" y="634" width="72" height="10" rx="5"/>
+    </g>
+    <g fill="#5fb0a4">
+      <rect x="1332" y="594" width="60" height="50" rx="8"/>
+    </g>
+    <rect x="1166" y="700" width="20" height="52" rx="6" fill="#7d5c2e"/>
+    <rect x="1386" y="700" width="20" height="52" rx="6" fill="#7d5c2e"/>
+  </g>
+
+  <!-- cohort seating -->
+  <g>
+    <g>
+      <rect x="540" y="600" width="460" height="52" rx="10" fill="url(#wood)"/>
+      <rect x="556" y="652" width="18" height="46" rx="6" fill="#7d5c2e"/>
+      <rect x="966" y="652" width="18" height="46" rx="6" fill="#7d5c2e"/>
+      <g fill="#f7f3e9" fill-opacity="0.8">
+        <rect x="586" y="614" width="72" height="24" rx="4"/>
+        <rect x="732" y="614" width="72" height="24" rx="4"/>
+        <rect x="878" y="614" width="72" height="24" rx="4"/>
+      </g>
+    </g>
+    <g>
+      <rect x="512" y="760" width="516" height="58" rx="10" fill="url(#wood)"/>
+      <rect x="530" y="818" width="20" height="52" rx="6" fill="#7d5c2e"/>
+      <rect x="990" y="818" width="20" height="52" rx="6" fill="#7d5c2e"/>
+      <g fill="#f7f3e9" fill-opacity="0.8">
+        <rect x="560" y="776" width="80" height="26" rx="4"/>
+        <rect x="728" y="776" width="80" height="26" rx="4"/>
+        <rect x="896" y="776" width="80" height="26" rx="4"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- question desk (Q&A corner) -->
+  <g>
+    <rect x="90" y="800" width="270" height="150" rx="14" fill="url(#wood)"/>
+    <rect x="106" y="816" width="238" height="94" rx="8" fill="#e9dfc9"/>
+    <g fill="#5f7f79">
+      <path d="M136 840h120v46h-58l-24 22v-22h-38z"/>
+    </g>
+    <g fill="#d7a52a">
+      <path d="M276 844h52v40h-24l-16 16v-16h-12z"/>
+    </g>
+    <rect x="108" y="950" width="22" height="50" rx="6" fill="#7d5c2e"/>
+    <rect x="320" y="950" width="22" height="50" rx="6" fill="#7d5c2e"/>
+  </g>
+
+  <!-- course result showcase -->
+  <g>
+    <rect x="1176" y="800" width="270" height="150" rx="14" fill="#3b4a52"/>
+    <rect x="1192" y="816" width="238" height="94" rx="8" fill="#f7f3e9"/>
+    <g fill="#8d7150">
+      <rect x="1212" y="836" width="64" height="56" rx="6"/>
+      <rect x="1288" y="836" width="64" height="56" rx="6"/>
+      <rect x="1364" y="836" width="48" height="56" rx="6"/>
+    </g>
+    <g fill="#d7a52a">
+      <rect x="1212" y="836" width="64" height="12" rx="6"/>
+      <rect x="1288" y="836" width="64" height="12" rx="6"/>
+      <rect x="1364" y="836" width="48" height="12" rx="6"/>
+    </g>
+    <rect x="1194" y="950" width="22" height="50" rx="6" fill="#2b363c"/>
+    <rect x="1406" y="950" width="22" height="50" rx="6" fill="#2b363c"/>
+  </g>
+</svg>
