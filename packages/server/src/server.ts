@@ -443,7 +443,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerSystemRoutes(router, { store, stateRoot, runtimeUpdates, applicationUpdates })
   registerWorkspaceFileRoutes(router, { worldFiles, access: worldAccess })
   registerCatalogRoutes(router, { store, packageCatalog, worldPackages })
-  registerCharacterGeneratorRoutes(router, { store, packageCatalog, skillCatalog, analyzer: characterImportAnalyzer, resolveMarketplaceRoot: generatedMarketplace.resolveMarketplaceRoot })
+  registerCharacterGeneratorRoutes(router, { store, packageCatalog, skillCatalog, analyzer: characterImportAnalyzer, containmentRoot: stateRoot, resolveMarketplaceRoot: generatedMarketplace.resolveMarketplaceRoot })
   registerWorkspaceRoutes(router, { store })
   registerModelRoutes(router, { store, credentials, modelCatalog, interactions })
   registerIntegrationRoutes(router, {

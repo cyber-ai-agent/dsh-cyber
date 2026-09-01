@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { lstat, mkdir, rename, rm } from 'node:fs/promises'
-import { extname, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 import { worldTemplate } from '@dsh-cyber/catalog'
 import type {
@@ -22,6 +22,14 @@ import type { Router } from '../http/router.js'
 import { readJson, record, requiredString } from '../http/request.js'
 import { writeJson } from '../http/response.js'
 import {
+  AvatarImageError,
+  assertAvatarImage,
+  assertDeclaredAvatarMediaType,
+  decodeAvatarBase64,
+  normalizeAvatarFileName,
+  type AvatarMediaType,
+} from '../services/avatar-image-guard.js'
+import {
   normalizeCharacterBlueprintDraft,
   normalizeCharacterSource,
   type CharacterBlueprintDraftValidationContext,
@@ -42,8 +50,6 @@ const CAPABILITY_CATALOG: CharacterGeneratorCapabilityCatalogItem[] = [
   { id: 'artifact:read', displayName: '读取产物', summary: '允许角色读取当前世界已发布的产物。' },
 ]
 const DEFAULT_AVATAR_PACKAGE_ID = 'official-archivist'
-const MAX_PREVIEW_BYTES = 5 * 1024 * 1024
-const MAX_UPLOAD_FILE_NAME = 180
 
 export interface CharacterGeneratorRoutesDependencies {
   store: SqliteStore
@@ -55,6 +61,14 @@ export interface CharacterGeneratorRoutesDependencies {
    * request instead of being fixed once at registration.
    */
   resolveMarketplaceRoot(workspaceId: string): string
+  /**
+   * Host owned boundary the generated marketplace must stay inside. Every path
+   * component between it and a written file is checked for symlinks, so a
+   * planted link cannot redirect a publish outside the host's state. Defaults
+   * to the requesting workspace's own marketplace root when the caller has no
+   * wider boundary to enforce.
+   */
+  containmentRoot?: string
 }
 
 export function registerCharacterGeneratorRoutes(
@@ -62,6 +76,9 @@ export function registerCharacterGeneratorRoutes(
   dependencies: CharacterGeneratorRoutesDependencies,
 ): void {
   const { store, packageCatalog, skillCatalog, analyzer } = dependencies
+  const declaredContainmentRoot = dependencies.containmentRoot === undefined
+    ? undefined
+    : resolve(dependencies.containmentRoot)
 
   router.get(/^\/api\/workspaces\/([^/]+)\/character-generator\/catalog$/, async ({ response, params, url }) => {
     const workspaceId = params[0]!
@@ -119,12 +136,11 @@ export function registerCharacterGeneratorRoutes(
     const avatar = await loadPreview(packageCatalog, parseAvatarSelection(body.avatar))
     const marketplaceRoot = resolve(dependencies.resolveMarketplaceRoot(workspaceId))
     const talentRoot = join(marketplaceRoot, 'talent')
+    // Generated roots are per workspace, so the containment boundary falls back
+    // to this workspace's own root rather than to a shared one.
+    const containmentRoot = declaredContainmentRoot ?? marketplaceRoot
     const packageId = `generated.character.${randomUUID().replaceAll('-', '')}`
     const packageVersion = '1.0.0'
-    await mkdir(marketplaceRoot, { recursive: true, mode: 0o700 })
-    await assertDirectory(marketplaceRoot)
-    await mkdir(talentRoot, { recursive: true, mode: 0o700 })
-    await assertDirectory(talentRoot)
     const stagingDirectory = join(talentRoot, `.${packageId}.staging-${randomUUID().replaceAll('-', '')}`)
     const installedDirectory = join(talentRoot, packageId)
     const analysis = draftAnalysis(draft)
@@ -132,6 +148,12 @@ export function registerCharacterGeneratorRoutes(
     let staged = false
     let published = false
     try {
+      // Create and verify the target tree inside the try so a hostile or broken
+      // layout answers with a publish failure instead of an internal error.
+      await mkdirContained(containmentRoot, marketplaceRoot)
+      await mkdirContained(containmentRoot, talentRoot)
+      assertDirectChild(talentRoot, stagingDirectory)
+      assertDirectChild(talentRoot, installedDirectory)
       await rejectExisting(installedDirectory)
       const compiled = await compileEmployeeBlueprintPackage({
         sourceDirectory: stagingDirectory,
@@ -161,6 +183,12 @@ export function registerCharacterGeneratorRoutes(
         },
       })
       staged = true
+      // Re-verify immediately before the rename: compiling the package widened
+      // the window in which the tree could have been swapped underneath us, and
+      // rename would otherwise follow a link or replace a path outside the root.
+      await assertContainedDirectory(containmentRoot, stagingDirectory)
+      await assertContainedDirectory(containmentRoot, talentRoot)
+      await rejectExisting(installedDirectory)
       await rename(stagingDirectory, installedDirectory)
       staged = false
       published = true
@@ -254,9 +282,11 @@ async function listBuiltinAvatars(packageCatalog: LocalPackageCatalog): Promise<
     if (item === undefined || item.market !== 'talent' || !item.verified || item.manifest.kind !== 'employee-blueprint') continue
     const preview = item.manifest.files.find((file) => /\.(?:png|jpe?g|webp)$/iu.test(file.path))
     if (preview === undefined) continue
-    const mimeType = previewMimeType(preview.path)
+    // The declared path only narrows the candidates; the stored bytes decide
+    // the media type advertised to the client.
+    let mimeType: AvatarMediaType
     try {
-      assertPreview(await packageCatalog.readDeclaredFile(item, preview.path), mimeType)
+      mimeType = assertAvatarImage(await packageCatalog.readDeclaredFile(item, preview.path))
     } catch {
       continue
     }
@@ -278,37 +308,35 @@ async function listBuiltinAvatars(packageCatalog: LocalPackageCatalog): Promise<
 async function loadPreview(
   packageCatalog: LocalPackageCatalog,
   selection: CharacterGeneratorAvatarSelection | undefined,
-): Promise<{ bytes: Buffer; mimeType: 'image/png' | 'image/jpeg' | 'image/webp' }> {
+): Promise<{ bytes: Buffer; mimeType: AvatarMediaType }> {
   const chosen = selection ?? { kind: 'builtin' as const, id: DEFAULT_AVATAR_PACKAGE_ID }
-  if (chosen.kind === 'builtin') {
-    if (!(BUILTIN_AVATAR_PACKAGE_IDS as readonly string[]).includes(chosen.id)) {
-      throw new HttpError(422, 'character_avatar_not_allowed', '只能使用指定的官方角色预览。')
+  try {
+    if (chosen.kind === 'builtin') {
+      if (!(BUILTIN_AVATAR_PACKAGE_IDS as readonly string[]).includes(chosen.id)) {
+        throw new HttpError(422, 'character_avatar_not_allowed', '只能使用指定的官方角色预览。')
+      }
+      const item = await packageCatalog.find(chosen.id)
+      if (item === undefined || item.market !== 'talent' || !item.verified || item.manifest.kind !== 'employee-blueprint') {
+        throw new HttpError(422, 'character_avatar_not_found', '官方角色预览不可用。')
+      }
+      const preview = item.manifest.files.find((file) => /\.(?:png|jpe?g|webp)$/iu.test(file.path))
+      if (preview === undefined) throw new HttpError(422, 'character_avatar_missing', '官方角色预览缺失。')
+      const bytes = await packageCatalog.readDeclaredFile(item, preview.path)
+      return { bytes, mimeType: assertAvatarImage(bytes) }
     }
-    const item = await packageCatalog.find(chosen.id)
-    if (item === undefined || item.market !== 'talent' || !item.verified || item.manifest.kind !== 'employee-blueprint') {
-      throw new HttpError(422, 'character_avatar_not_found', '官方角色预览不可用。')
-    }
-    const preview = item.manifest.files.find((file) => /\.(?:png|jpe?g|webp)$/iu.test(file.path))
-    if (preview === undefined) throw new HttpError(422, 'character_avatar_missing', '官方角色预览缺失。')
-    const mimeType = previewMimeType(preview.path)
-    const bytes = await packageCatalog.readDeclaredFile(item, preview.path)
-    assertPreview(bytes, mimeType)
+    // Nothing the client declared is trusted here. The file name is validated
+    // but never used to build a path, the encoded payload is bounded before it
+    // is decoded, and the media type comes from the bytes — the declaration is
+    // only cross-checked so a mislabelled upload is refused rather than stored.
+    normalizeAvatarFileName(chosen.fileName)
+    const bytes = decodeAvatarBase64(chosen.dataBase64)
+    const mimeType = assertAvatarImage(bytes)
+    assertDeclaredAvatarMediaType(chosen.mimeType, mimeType)
     return { bytes, mimeType }
+  } catch (error) {
+    if (error instanceof AvatarImageError) throw new HttpError(422, error.code, error.message)
+    throw error
   }
-  normalizeUploadFileName(chosen.fileName)
-  const mimeType = chosen.mimeType
-  if (mimeType !== 'image/png' && mimeType !== 'image/jpeg' && mimeType !== 'image/webp') {
-    throw new HttpError(422, 'character_avatar_mime_invalid', '角色预览图片格式不受支持。')
-  }
-  if (typeof chosen.dataBase64 !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/u.test(chosen.dataBase64)) {
-    throw new HttpError(422, 'character_avatar_data_invalid', '角色预览图片数据无效。')
-  }
-  const bytes = Buffer.from(chosen.dataBase64, 'base64')
-  if (bytes.byteLength < 1 || bytes.byteLength > MAX_PREVIEW_BYTES) {
-    throw new HttpError(422, 'character_avatar_size_invalid', '角色预览图片不能超过 5 MiB。')
-  }
-  assertPreview(bytes, mimeType)
-  return { bytes, mimeType }
 }
 
 function parseAvatarSelection(value: unknown): CharacterGeneratorAvatarSelection | undefined {
@@ -339,24 +367,6 @@ function parseAvatarSelection(value: unknown): CharacterGeneratorAvatarSelection
   }
 }
 
-function normalizeUploadFileName(value: string): string {
-  const normalized = value.normalize('NFC').replace(/[\\/]/gu, '_').replace(/[\u0000-\u001f\u007f]/gu, '').trim()
-  if (!normalized || normalized.length > MAX_UPLOAD_FILE_NAME) throw new HttpError(422, 'character_avatar_filename_invalid', '上传的角色预览文件名无效。')
-  return normalized
-}
-
-function previewMimeType(path: string): 'image/png' | 'image/jpeg' | 'image/webp' {
-  const extension = extname(path).toLowerCase()
-  return extension === '.png' ? 'image/png' : extension === '.webp' ? 'image/webp' : 'image/jpeg'
-}
-
-function assertPreview(bytes: Buffer, mimeType: 'image/png' | 'image/jpeg' | 'image/webp'): void {
-  if (bytes.byteLength < 1 || bytes.byteLength > MAX_PREVIEW_BYTES) throw new HttpError(422, 'character_avatar_size_invalid', '角色预览图片不能超过 5 MiB。')
-  if (mimeType === 'image/png' && !bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw new HttpError(422, 'character_avatar_signature_invalid', 'PNG 图片签名无效。')
-  if (mimeType === 'image/jpeg' && !(bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)) throw new HttpError(422, 'character_avatar_signature_invalid', 'JPEG 图片签名无效。')
-  if (mimeType === 'image/webp' && !(bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP')) throw new HttpError(422, 'character_avatar_signature_invalid', 'WebP 图片签名无效。')
-}
-
 function draftAnalysis(draft: ReturnType<typeof normalizeCharacterBlueprintDraft>): JsonObject {
   return {
     schemaVersion: draft.schemaVersion,
@@ -375,9 +385,71 @@ function draftAnalysis(draft: ReturnType<typeof normalizeCharacterBlueprintDraft
   }
 }
 
-async function assertDirectory(path: string): Promise<void> {
+/**
+ * Assert that `target` is a real directory reachable from `root` without
+ * crossing a symlink. Every component below the root is `lstat`ed in turn, so a
+ * link planted at any depth — the target itself included — fails instead of
+ * silently redirecting the write.
+ */
+async function assertContainedDirectory(root: string, target: string): Promise<void> {
+  for (const path of containedPathChain(root, target)) await assertRealDirectory(path)
+}
+
+/**
+ * Create `target` below `root`, verifying each level before descending into it.
+ *
+ * `mkdir -p` follows a symlinked component and would materialize the tree at
+ * the link's destination before any check could object, so each segment is
+ * inspected first and a link anywhere on the way aborts before anything outside
+ * the root is created.
+ */
+async function mkdirContained(root: string, target: string): Promise<void> {
+  await assertRealDirectory(resolve(root))
+  for (const path of containedPathChain(root, target)) {
+    const existing = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined
+      throw error
+    })
+    if (existing === undefined) await mkdir(path, { recursive: true, mode: 0o700 })
+    // Re-check after creating: the segment may have been raced into a link.
+    await assertRealDirectory(path)
+  }
+}
+
+/**
+ * Every path from `root` down to `target`, exclusive of the root itself.
+ *
+ * Components at or above the root are never inspected: the root is host
+ * configuration, and platforms whose state paths are themselves symlinks
+ * (`/var` on macOS) would otherwise never pass.
+ */
+function containedPathChain(root: string, target: string): string[] {
+  const resolvedRoot = resolve(root)
+  const relativePath = relative(resolvedRoot, resolve(target))
+  if (relativePath.startsWith('..') || isAbsolute(relativePath)) {
+    throw new Error('Character generator marketplace path escaped its root')
+  }
+  const chain: string[] = []
+  let current = resolvedRoot
+  for (const segment of relativePath === '' ? [] : relativePath.split(sep)) {
+    current = join(current, segment)
+    chain.push(current)
+  }
+  return chain
+}
+
+async function assertRealDirectory(path: string): Promise<void> {
   const info = await lstat(path)
-  if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('Character generator marketplace root is invalid')
+  if (info.isSymbolicLink() || !info.isDirectory()) {
+    throw new Error('Character generator marketplace path crosses a symlink')
+  }
+}
+
+/** Guard the package directory names against ever gaining a path segment. */
+function assertDirectChild(parent: string, child: string): void {
+  if (dirname(resolve(child)) !== resolve(parent)) {
+    throw new Error('Generated character package path is not a direct child of the talent root')
+  }
 }
 
 async function rejectExisting(path: string): Promise<void> {

@@ -10,12 +10,17 @@ import type {
 } from '@dsh-cyber/contracts'
 
 import { EMPLOYEE_REQUESTABLE_CAPABILITIES } from '../employee-blueprint-manifest.js'
+import {
+  assertAvatarImage,
+  assertDeclaredAvatarMediaType,
+  avatarFileExtension,
+  type AvatarMediaType,
+} from './avatar-image-guard.js'
 
 const PACKAGE_ID = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/
 const PACKAGE_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/
 const TOKEN = /^[a-z][a-z0-9._-]*(?::[a-z][a-z0-9._-]*)?$/
 const MAX_SOURCE_BYTES = 128 * 1024
-const MAX_PREVIEW_BYTES = 5 * 1024 * 1024
 export const EMPLOYEE_PERSONA_MAX_CHARACTERS = 2_000
 
 export interface EmployeeBlueprintPackageSource {
@@ -24,7 +29,12 @@ export interface EmployeeBlueprintPackageSource {
   analysis: JsonObject
   preview: {
     bytes: Buffer
-    mimeType: 'image/png' | 'image/jpeg' | 'image/webp'
+    /**
+     * Advisory only. The compiler re-sniffs the bytes and stores the preview
+     * under the type it actually is, so a caller cannot pick the stored
+     * extension by declaring one.
+     */
+    mimeType: AvatarMediaType
   }
 }
 
@@ -103,7 +113,7 @@ export async function compileEmployeeBlueprintPackage(
     files.push(
       { path: `source/original.${extension}`, bytes: Buffer.from(input.source.originalText, 'utf8') },
       { path: 'source/analysis.json', bytes: jsonBytes(input.source.analysis) },
-      { path: `preview.${previewExtension(input.source.preview.mimeType)}`, bytes: input.source.preview.bytes },
+      { path: `preview.${avatarFileExtension(assertAvatarImage(input.source.preview.bytes))}`, bytes: input.source.preview.bytes },
     )
   }
 
@@ -173,10 +183,9 @@ function validateInput(input: EmployeeBlueprintPackageCompilerInput): void {
   if (input.source === undefined) return
   if (Buffer.byteLength(input.source.originalText, 'utf8') > MAX_SOURCE_BYTES) throw new Error('Character source exceeds 128 KiB')
   if (input.source.originalFormat !== 'md' && input.source.originalFormat !== 'txt') throw new Error('Invalid character source format')
-  if (input.source.preview.bytes.byteLength < 1 || input.source.preview.bytes.byteLength > MAX_PREVIEW_BYTES) {
-    throw new Error('Character preview must be between 1 byte and 5 MiB')
-  }
-  assertPreviewSignature(input.source.preview.bytes, input.source.preview.mimeType)
+  // The bytes are the authority: budget, container and canvas are all re-checked
+  // here so no caller can hand the compiler a preview it has not verified.
+  assertDeclaredAvatarMediaType(input.source.preview.mimeType, assertAvatarImage(input.source.preview.bytes))
 }
 
 function uniqueText(values: readonly string[], field: string): string[] {
@@ -189,22 +198,6 @@ function uniqueText(values: readonly string[], field: string): string[] {
   })
   if (new Set(output).size !== output.length) throw new Error(`Duplicate employee blueprint ${field}`)
   return output
-}
-
-function assertPreviewSignature(bytes: Buffer, mimeType: EmployeeBlueprintPackageSource['preview']['mimeType']): void {
-  if (mimeType === 'image/png' && !bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
-    throw new Error('Character preview PNG signature is invalid')
-  }
-  if (mimeType === 'image/jpeg' && !(bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)) {
-    throw new Error('Character preview JPEG signature is invalid')
-  }
-  if (mimeType === 'image/webp' && !(bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP')) {
-    throw new Error('Character preview WebP signature is invalid')
-  }
-}
-
-function previewExtension(mimeType: EmployeeBlueprintPackageSource['preview']['mimeType']): 'png' | 'jpg' | 'webp' {
-  return mimeType === 'image/png' ? 'png' : mimeType === 'image/jpeg' ? 'jpg' : 'webp'
 }
 
 function jsonBytes(value: unknown): Buffer {
