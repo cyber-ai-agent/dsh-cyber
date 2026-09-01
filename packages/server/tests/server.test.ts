@@ -1199,7 +1199,7 @@ it('searches verified market packages and activates installed plugin and talent 
     expect(verified.response.status).toBe(201)
     expect(verified.body).toMatchObject({
       ok: true,
-      version: '0.1.1-rc.1',
+      version: '0.1.2-alpha.3',
       transaction: { status: 'verified' },
     })
     const transactionId = verified.body.transaction.id as string
@@ -1245,7 +1245,7 @@ it('searches verified market packages and activates installed plugin and talent 
     })
 
     const updates = await json(origin, '/api/system/updates')
-    expect(updates.body.activeRuntime).toMatchObject({ transactionId, version: '0.1.1-rc.1' })
+    expect(updates.body.activeRuntime).toMatchObject({ transactionId, version: '0.1.2-alpha.3' })
     expect(updates.body.items[0]).toMatchObject({ id: transactionId, status: 'activated' })
 
     const rolledBack = await json(origin, `/api/system/update/${transactionId}/rollback`, {

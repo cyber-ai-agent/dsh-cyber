@@ -102,7 +102,6 @@ export async function runHarnessCandidateCanary(options: {
   workspacePath: string
   route: HarnessModelRoute
   inheritedEnvironment?: NodeJS.ProcessEnv
-  nodeExecutable?: string
 }): Promise<HarnessCanaryReport> {
   const candidate = await inspectHarnessCandidate({
     candidateRoot: options.candidateRoot,
@@ -147,7 +146,6 @@ export async function runHarnessCandidateCanary(options: {
     model: options.route.modelId,
     provider: providerRoute,
     ...(options.inheritedEnvironment === undefined ? {} : { inheritedEnvironment: options.inheritedEnvironment }),
-    ...(options.nodeExecutable === undefined ? {} : { nodeExecutable: options.nodeExecutable }),
     providerProfile: {
       route: providerRoute,
       displayName: options.route.displayName,

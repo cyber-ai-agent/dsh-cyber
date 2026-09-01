@@ -18,7 +18,6 @@ import type {
 import { formatRecoveredHistoryPrompt, unseenHistory } from './history-prompt.js'
 import {
   ensureHarnessProfile,
-  resolveDshBin,
   WORKER_PROFILE_NAME,
   type HarnessProviderProfile,
   type HarnessProfilePaths,
@@ -112,7 +111,6 @@ export interface HarnessAdapterOptions {
   stateRoot: string
   runtimeFactory?: HarnessRuntimeFactory
   inheritedEnvironment?: NodeJS.ProcessEnv
-  nodeExecutable?: string
   provider?: string
   model?: string
   providerProfile?: HarnessProviderProfile
@@ -237,10 +235,11 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       lane.workspacePath = workspacePath
       lane.runtime = runtime
     }
-    // DSH 0.1.1-rc.1 cannot resume a named session whose JSONL log was created
-    // by an earlier worker process, and it creates the named session lazily on
-    // first append. Every conversation therefore gets a brand-new random id the
-    // first time it runs inside this process:
+    // The 0.1.2-alpha.3 SDK server creates its session through
+    // ctx.agents.create. SessionStore.prepare rejects a live collision but does
+    // not restore a JSONL log created by an earlier worker process. Every
+    // conversation therefore gets a brand-new random id the first time it runs
+    // inside this process:
     //
     // - rotating away from any durable id is mandatory (that log belongs to
     //   some other process), and
@@ -279,10 +278,10 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       return { agentSessionId, ...result }
     } catch (error) {
       if (task.aborted) throw error
-      // DSH 0.1.1-rc.1's JSON-RPC server creates a named session on every
-      // process start instead of resuming its persisted log. Reusing an id can
-      // therefore fail before the prompt is queued. Only that exact,
-      // side-effect-free failure is safe to retry.
+      // The SDK server's session-create path does not resume a persisted log
+      // from an earlier worker process. Reusing an id can therefore fail before
+      // the prompt is queued. Only that exact, side-effect-free failure is safe
+      // to retry.
       if (observedNotification || !isPersistedSessionCollision(error)) throw error
       const recoveredSessionId = freshAgentSessionId(request.employee.id)
       if (task.aborted) throw error
@@ -524,12 +523,13 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       ].filter((value): value is string => value !== undefined))],
     )
     const harness = new DeepSeekHarness({
-      launch: {
-        command: this.#options.nodeExecutable ?? process.execPath,
-        args: [resolve(this.#options.dshBinPath ?? resolveDshBin()), '--profile', WORKER_PROFILE_NAME],
-        cwd: spec.workspacePath,
-        env: environment,
-      },
+      ...(this.#options.dshBinPath === undefined
+        ? {}
+        : { dshBin: resolve(this.#options.dshBinPath) }),
+      profile: WORKER_PROFILE_NAME,
+      dshHome: spec.profile.homeDir,
+      processCwd: spec.workspacePath,
+      env: environment,
       cwd: spec.workspacePath,
       provider: this.#options.provider ?? 'deepseek-official',
       model: this.#options.model ?? 'deepseek-v4-flash',
