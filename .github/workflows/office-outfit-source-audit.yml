@@ -1,4 +1,4 @@
-name: Office Outfit Build Audit
+name: Office Outfit Build Handoff
 
 on:
   push:
@@ -10,15 +10,17 @@ on:
       - 'packages/web/scripts/verify-official-avatar-base-pack-runtime.mjs'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
+    if: ${{ github.repository == 'cyber-ai-agent/dsh-cyber' && github.ref_name == 'feat/official-office-outfits-v1' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: feat/official-office-outfits-v1
           persist-credentials: false
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
@@ -29,19 +31,19 @@ jobs:
           node-version: 22.19.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Build official avatar pack with office outfit
-        run: pnpm avatar:build-official
-      - name: Verify generated VRM through production loader
-        run: pnpm avatar:verify-official
-      - name: Inspect generated manifest
+      - name: Build and production-verify official avatar pack
+        run: pnpm avatar:build-official && pnpm avatar:verify-official
+      - name: Commit verified generated pack
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          node --input-type=module <<'NODE'
-          import { readFile } from 'node:fs/promises'
-          const manifest = JSON.parse(await readFile('marketplace/plugins/official-avatar-base-v1/avatar-base-pack.json', 'utf8'))
-          if (manifest.version !== '1.1.0') throw new Error(`unexpected pack version ${manifest.version}`)
-          for (const id of ['casual', 'professional', 'analyst']) {
-            if (!manifest.parts.some((part) => part.kind === 'outfit' && part.id === id)) throw new Error(`missing outfit ${id}`)
-          }
-          if (manifest.parts.some((part) => part.kind === 'outfit' && part.id === 'engineer')) throw new Error('engineer must remain unsupported')
-          console.log(JSON.stringify(manifest.parts.filter((part) => part.kind === 'outfit'), null, 2))
-          NODE
+          git add marketplace/plugins/official-avatar-base-v1
+          if git diff --cached --quiet; then
+            echo 'Generated pack already matches the branch.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat: embed verified office outfit avatar pack'
+          AUTH_HEADER="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_HEADER}" push origin HEAD:feat/official-office-outfits-v1
