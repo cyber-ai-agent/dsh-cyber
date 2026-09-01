@@ -61,6 +61,8 @@ export function SpatialWorldCanvas({
   const rendererRef = useRef<WorldRenderer<HTMLElement> | undefined>(undefined)
   const appliedCueIds = useRef(new Set<string>())
   const avatarBasePacksRef = useRef<AvatarBasePackManifest[]>([])
+  const latestManifest = useRef(manifest)
+  latestManifest.current = manifest
   const latestSnapshot = useRef(snapshot)
   latestSnapshot.current = snapshot
   const latestCamera = useRef({ mode: cameraMode, subjectId: cameraSubjectId })
@@ -128,7 +130,9 @@ export function SpatialWorldCanvas({
     })
     rendererRef.current = renderer
     let cancelled = false
-    void renderer.mount(host, manifest, snapshot).then(() => {
+    const mountedManifest = latestManifest.current
+    const mountedSnapshot = latestSnapshot.current
+    void renderer.mount(host, mountedManifest, mountedSnapshot).then(() => {
       if (cancelled) return
       const selection = latestSelection.current
       renderer.selectEntity(selection.entityId)
@@ -138,6 +142,8 @@ export function SpatialWorldCanvas({
       }
       const spatial = renderer as { setCameraMode?: (mode: WorldCameraMode, subjectId?: string) => void }
       spatial.setCameraMode?.(latestCamera.current.mode, latestCamera.current.subjectId)
+      // Snapshot may have advanced during the lazy Three chunk load.
+      if (latestSnapshot.current.sequence !== mountedSnapshot.sequence) renderer.updateSnapshot(latestSnapshot.current)
     }).catch((cause: unknown) => {
       if (!cancelled) host.dataset.error = cause instanceof Error ? cause.message : '3D 扩展初始化失败'
     })
@@ -147,7 +153,7 @@ export function SpatialWorldCanvas({
       renderer.destroy()
       rendererRef.current = undefined
     }
-  }, [capability.quality, capability.spatial, locomotion, manifest, mountedKey, snapshot])
+  }, [capability.quality, capability.spatial, locomotion, mountedKey])
 
   useEffect(() => { rendererRef.current?.updateSnapshot(snapshot) }, [snapshot])
   useEffect(() => {
