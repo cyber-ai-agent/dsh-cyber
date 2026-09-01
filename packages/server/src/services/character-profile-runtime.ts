@@ -36,6 +36,9 @@ type CharacterRuntimeStore = Pick<
   SqliteStore,
   'getEmployeeDossier' | 'getSession' | 'getWorkTurn' | 'listMessages' | 'appendEmployeeMilestone'
   | 'getLatestTaskCollaborationPlanForSession'
+  // Read back the raw messages behind a retrieved memory, and decide which of
+  // the older turns an indexed memory can still bring back.
+  | 'getMessages' | 'listEmployeeMemoryIndex'
 >>
 
 const OBSERVED_THROUGH_KEY = 'contextObservedThroughSequence'

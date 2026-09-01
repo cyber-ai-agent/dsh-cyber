@@ -4,18 +4,23 @@ import type {
   ContextSourceRef,
   ConversationHistoryEntry,
   EmployeeInstance,
+  EmployeeMemoryIndexHit,
   EmployeeMemoryScope,
   TaskCollaborationPlan,
+  WorkMessage,
   WorkSession,
 } from '@dsh-cyber/contracts'
 import { composeContextEnvelope, composeContextLayer, estimateTextTokens } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import {
+  composeMemoryLayers,
   MEMORY_CONTEXT_FOOTER,
   MEMORY_CONTEXT_HEADER,
   visibleMemoryScopes,
   type CharacterMemoryContextPort,
+  type MemoryContextLayers,
+  type MemorySourceHydration,
 } from './employee-conversation-memory-service.js'
 
 /**
@@ -48,6 +53,13 @@ export const RAW_TURN_WINDOW = 6
 
 const MAX_RETRIEVED_MEMORIES = 8
 const DEFAULT_MEMORY_BUDGET_TOKENS = 2_000
+/**
+ * How many of this character's index entries are consulted when deciding which
+ * of the older turns are recoverable. It matches the repository's own listing
+ * cap; running past it can only make the composer keep *more* raw history, so
+ * the bound fails towards replay, never towards a dropped turn.
+ */
+const MAX_COVERAGE_MEMORIES = 500
 
 export type ContextConversationLane = 'direct' | 'group' | 'task' | 'unknown'
 
@@ -57,11 +69,21 @@ export interface ConversationMemoryLayersPort extends CharacterMemoryContextPort
     conversationId: string
     prompt: string
     limit?: number
-  }): { memoryIndex: ContextLayer; retrievedMemories: ContextLayer } | undefined
+  }): MemoryContextLayers | undefined
+  hydrateMemorySources?(input: {
+    employeeId: string
+    conversationId: string
+    hits: readonly EmployeeMemoryIndexHit[]
+    budgetTokens: number
+    excludeMessageIds?: readonly string[]
+  }): MemorySourceHydration | undefined
 }
 
 type ContextComposerStore = Pick<SqliteStore, 'getSession'>
-  & Partial<Pick<SqliteStore, 'getLatestTaskCollaborationPlanForSession'>>
+  & Partial<Pick<
+    SqliteStore,
+    'getLatestTaskCollaborationPlanForSession' | 'listMessages' | 'listEmployeeMemoryIndex'
+  >>
 
 export interface ComposeTurnContextInput {
   employee: EmployeeInstance
@@ -92,6 +114,14 @@ export interface ContextCoverage {
   rawEntryCount: number
   /** Entries older than the raw window that were not replayed this turn. */
   droppedOlderEntryCount: number
+  /**
+   * Entries the bounded window would have dropped but had to keep raw, because
+   * nothing ever indexed them and retrieval could therefore never bring them back.
+   */
+  unrememberedRawEntryCount: number
+  /** Retrieved memories whose raw source messages were put back in front of the model. */
+  hydratedMemoryCount: number
+  hydratedSourceMessageCount: number
   /** True once this lane is on the bounded window instead of full replay. */
   rawWindowApplied: boolean
   fullReplayFallback: boolean
@@ -131,35 +161,63 @@ export class ConversationContextComposer {
           prompt: input.prompt,
           limit: MAX_RETRIEVED_MEMORIES,
         })
-    const trimmed = memoryLayers === undefined ? undefined : withinBudget(memoryLayers, budgetTokens)
+    const trimmed = memoryLayers === undefined
+      ? undefined
+      : withinBudget(input.employee.id, memoryLayers, budgetTokens)
     const retrievedMemoryCount = trimmed === undefined ? 0 : countMemoryRefs(trimmed.memoryIndex)
 
-    // Retrieval is not lossless. When it produced nothing the old full replay
-    // is still the only thing that can answer a question about an older turn,
-    // so the composer keeps it rather than shipping a silent regression.
-    const memoryText = trimmed === undefined
-      ? await this.#memory?.compose({
-          employeeId: input.employee.id,
-          conversationId: input.conversationId,
-          prompt: input.prompt,
-          budgetTokens,
-        })
-      : renderMemory(trimmed)
-
-    const plan = session === undefined
+    // The durable messages are read once and serve both questions that need
+    // them: which older turns an indexed memory can still bring back, and which
+    // rows the raw window is about to replay verbatim anyway.
+    const durableMessages = trimmed === undefined || session === undefined
       ? undefined
-      : this.#store.getLatestTaskCollaborationPlanForSession?.(session.id)
-    const taskContext = plan === undefined || session === undefined
-      ? undefined
-      : composeTaskContextLayer(session, plan, input.employee.id, trimmed?.retrievedMemories)
+      : this.#store.listMessages?.(session.id)
 
     const window = rawWindow({
       lane,
       history: input.history,
       observedThroughSequence: input.observedThroughSequence,
       retrievedMemoryCount,
+      ...(session === undefined || lane !== 'direct' || retrievedMemoryCount === 0
+        ? {}
+        : { rememberedSequences: this.#rememberedSequences(input.employee.id, session, durableMessages) }),
     })
     const recentHistory = input.history.slice(window.startIndex)
+
+    // Hydration is funded out of the memory budget the summaries already had,
+    // never on top of it, and it never re-fetches what the raw window is about
+    // to replay verbatim anyway.
+    const hydration = trimmed === undefined
+      ? undefined
+      : this.#memory?.hydrateMemorySources?.({
+          employeeId: input.employee.id,
+          conversationId: input.conversationId,
+          hits: trimmed.hits,
+          budgetTokens: budgetTokens - estimateTextTokens(renderMemory(trimmed)),
+          excludeMessageIds: rawWindowMessageIds(durableMessages, recentHistory),
+        })
+    const composedMemory = trimmed === undefined || hydration === undefined
+      ? trimmed
+      : withHydratedSources(trimmed, hydration)
+
+    // Retrieval is not lossless. When it produced nothing the old full replay
+    // is still the only thing that can answer a question about an older turn,
+    // so the composer keeps it rather than shipping a silent regression.
+    const memoryText = composedMemory === undefined
+      ? await this.#memory?.compose({
+          employeeId: input.employee.id,
+          conversationId: input.conversationId,
+          prompt: input.prompt,
+          budgetTokens,
+        })
+      : renderMemory(composedMemory)
+
+    const plan = session === undefined
+      ? undefined
+      : this.#store.getLatestTaskCollaborationPlanForSession?.(session.id)
+    const taskContext = plan === undefined || session === undefined
+      ? undefined
+      : composeTaskContextLayer(session, plan, input.employee.id, composedMemory?.retrievedMemories)
 
     const sections: string[] = []
     if (taskContext !== undefined) sections.push(taskContext.text)
@@ -184,7 +242,9 @@ export class ConversationContextComposer {
         ],
       }),
       ...(taskContext === undefined ? {} : { taskContext }),
-      ...(trimmed === undefined ? {} : { memoryIndex: trimmed.memoryIndex, retrievedMemories: trimmed.retrievedMemories }),
+      ...(composedMemory === undefined
+        ? {}
+        : { memoryIndex: composedMemory.memoryIndex, retrievedMemories: composedMemory.retrievedMemories }),
       ...(recentHistory.length === 0
         ? {}
         : { recentConversation: composeRecentConversationLayer(input.conversationId, recentHistory) }),
@@ -209,11 +269,49 @@ export class ConversationContextComposer {
         retrievedMemoryCount,
         rawEntryCount: recentHistory.length,
         droppedOlderEntryCount: window.startIndex,
+        unrememberedRawEntryCount: window.unrememberedRawEntryCount,
+        hydratedMemoryCount: hydration?.memoryCount ?? 0,
+        hydratedSourceMessageCount: hydration?.messageCount ?? 0,
         rawWindowApplied: window.rawWindowApplied,
         fullReplayFallback: window.fullReplayFallback,
       },
     }
   }
+
+  /**
+   * The sequences in this conversation that an indexed memory can bring back.
+   *
+   * `undefined` means the store cannot answer the question at all, and the
+   * window then treats every older entry as unrecoverable rather than guessing.
+   */
+  #rememberedSequences(
+    employeeId: string,
+    session: WorkSession,
+    durableMessages: readonly WorkMessage[] | undefined,
+  ): Set<number> | undefined {
+    const listIndex = this.#store.listEmployeeMemoryIndex
+    if (durableMessages === undefined || listIndex === undefined) return undefined
+    const indexed = new Set(
+      listIndex
+        .call(this.#store, employeeId, visibleMemoryScopes(session), MAX_COVERAGE_MEMORIES)
+        .flatMap((entry) => entry.sourceMessageIds),
+    )
+    const sequences = new Set<number>()
+    for (const message of durableMessages) {
+      if (indexed.has(message.id)) sequences.add(message.sequence)
+    }
+    return sequences
+  }
+}
+
+/** Durable message ids behind the entries this turn is already replaying raw. */
+function rawWindowMessageIds(
+  durableMessages: readonly WorkMessage[] | undefined,
+  recentHistory: readonly ConversationHistoryEntry[],
+): string[] {
+  if (durableMessages === undefined || recentHistory.length === 0) return []
+  const sequences = new Set(recentHistory.map((entry) => entry.sequence))
+  return durableMessages.filter((message) => sequences.has(message.sequence)).map((message) => message.id)
 }
 
 /**
@@ -250,12 +348,23 @@ function rawWindow(input: {
   history: readonly ConversationHistoryEntry[]
   observedThroughSequence: number
   retrievedMemoryCount: number
-}): { startIndex: number; rawWindowApplied: boolean; fullReplayFallback: boolean } {
+  /** Sequences an indexed memory can bring back; `undefined` when unknown. */
+  rememberedSequences?: Set<number> | undefined
+}): {
+  startIndex: number
+  unrememberedRawEntryCount: number
+  rawWindowApplied: boolean
+  fullReplayFallback: boolean
+} {
   // Not migrated yet, not a fallback: these lanes still replay in full by design.
-  if (input.lane !== 'direct') return { startIndex: 0, rawWindowApplied: false, fullReplayFallback: false }
+  if (input.lane !== 'direct') {
+    return { startIndex: 0, unrememberedRawEntryCount: 0, rawWindowApplied: false, fullReplayFallback: false }
+  }
   // Retrieval covered nothing, so full replay is the only thing that can still
   // answer a question about an older turn.
-  if (input.retrievedMemoryCount === 0) return { startIndex: 0, rawWindowApplied: false, fullReplayFallback: true }
+  if (input.retrievedMemoryCount === 0) {
+    return { startIndex: 0, unrememberedRawEntryCount: 0, rawWindowApplied: false, fullReplayFallback: true }
+  }
 
   let start = 0
   let userTurns = 0
@@ -267,7 +376,29 @@ function rawWindow(input: {
       break
     }
   }
-  if (start === 0) return { startIndex: 0, rawWindowApplied: true, fullReplayFallback: false }
+  if (start === 0) {
+    return { startIndex: 0, unrememberedRawEntryCount: 0, rawWindowApplied: true, fullReplayFallback: false }
+  }
+
+  // A turn that produced no completed AgentRun - it failed, it was interrupted
+  // or aborted, or the owner spoke and never got a reply - is never written to
+  // `employee_milestones` and therefore never indexed. Retrieval can bring back
+  // an indexed episode; it can never bring back one that does not exist. So an
+  // entry nothing remembers must not be dropped, or it becomes permanently
+  // invisible, which full replay never was.
+  //
+  // The window is widened to the earliest such entry rather than splicing the
+  // survivors together: a conversation with holes in it reads as a different
+  // conversation. In the worst case that degenerates to exactly today's full
+  // replay, which is the honest floor - the rule can lose compaction, never a turn.
+  let unrememberedRawEntryCount = 0
+  let earliestUnremembered = -1
+  for (let index = 0; index < start; index += 1) {
+    if (input.rememberedSequences?.has(input.history[index]!.sequence) === true) continue
+    if (earliestUnremembered < 0) earliestUnremembered = index
+    unrememberedRawEntryCount += 1
+  }
+  if (earliestUnremembered >= 0) start = earliestUnremembered
 
   // A positive cursor means this character already holds a durable position in
   // the conversation, and everything after it is genuinely new to it. That set
@@ -278,7 +409,7 @@ function rawWindow(input: {
     const firstUnobserved = input.history.findIndex((entry) => entry.sequence > input.observedThroughSequence)
     if (firstUnobserved >= 0) start = Math.min(start, firstUnobserved)
   }
-  return { startIndex: start, rawWindowApplied: true, fullReplayFallback: false }
+  return { startIndex: start, unrememberedRawEntryCount, rawWindowApplied: true, fullReplayFallback: false }
 }
 
 function composeRecentConversationLayer(
@@ -363,32 +494,48 @@ function renderMemory(layers: { memoryIndex: ContextLayer; retrievedMemories: Co
  * Drops the lowest-ranked retrieved memories until the rendered block fits the
  * memory budget. Ranking already put the most relevant hit first, so trimming
  * from the tail loses the least.
+ *
+ * Trimming re-renders the surviving hits instead of slicing rendered lines.
+ * Slicing looked equivalent and was not: the retrieved layer's source refs are
+ * one memory ref per hit followed by its message and artifact refs, so cutting
+ * the ref list to the number of surviving lines threw away every pointer back
+ * to the durable rows - the very thing that lets a memory be relocated.
  */
 function withinBudget(
-  layers: { memoryIndex: ContextLayer; retrievedMemories: ContextLayer },
+  employeeId: string,
+  layers: MemoryContextLayers,
   budgetTokens: number,
-): { memoryIndex: ContextLayer; retrievedMemories: ContextLayer } | undefined {
-  const indexLines = layers.memoryIndex.text.split('\n').filter((line) => line.trim())
-  const memoryLines = layers.retrievedMemories.text.split('\n').filter((line) => line.trim())
-  if (memoryLines.length === 0) return undefined
-  for (let kept = memoryLines.length; kept >= 1; kept -= 1) {
-    const candidate = {
-      memoryIndex: composeContextLayer({
-        id: layers.memoryIndex.id,
-        kind: 'memory-index',
-        text: indexLines.slice(0, kept).join('\n'),
-        sourceRefs: layers.memoryIndex.sourceRefs.slice(0, kept),
-      }),
-      retrievedMemories: composeContextLayer({
-        id: layers.retrievedMemories.id,
-        kind: 'retrieved-memories',
-        text: memoryLines.slice(0, kept).join('\n'),
-        sourceRefs: layers.retrievedMemories.sourceRefs.slice(0, kept),
-      }),
-    }
+): MemoryContextLayers | undefined {
+  if (layers.hits.length === 0) return undefined
+  for (let kept = layers.hits.length; kept >= 1; kept -= 1) {
+    const hits = layers.hits.slice(0, kept)
+    const candidate: MemoryContextLayers = { ...composeMemoryLayers(employeeId, hits), hits }
     if (estimateTextTokens(renderMemory(candidate)) <= budgetTokens) return candidate
   }
   return undefined
+}
+
+/**
+ * Folds recovered source messages into the retrieved-memory layer.
+ *
+ * Hydration is not a new layer: it is the same retrieved memories, described
+ * more faithfully. Keeping it inside `retrieved-memories` means it travels
+ * with the same budget, the same ordering and the same source refs.
+ */
+function withHydratedSources(
+  layers: MemoryContextLayers,
+  hydration: MemorySourceHydration,
+): MemoryContextLayers {
+  return {
+    memoryIndex: layers.memoryIndex,
+    hits: layers.hits,
+    retrievedMemories: composeContextLayer({
+      id: layers.retrievedMemories.id,
+      kind: 'retrieved-memories',
+      text: `${layers.retrievedMemories.text}\n${hydration.text}`,
+      sourceRefs: [...layers.retrievedMemories.sourceRefs, ...hydration.sourceRefs],
+    }),
+  }
 }
 
 function countMemoryRefs(layer: ContextLayer): number {
