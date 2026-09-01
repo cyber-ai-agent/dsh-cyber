@@ -14,6 +14,11 @@ import {
   mergeRiggedHair,
   writeGlb,
 } from './build-official-avatar-base-pack.mjs'
+import {
+  OFFICE_OUTFIT_SOURCE,
+  loadPinnedOfficeOutfit,
+  mergeOfficeOutfit,
+} from './official-avatar-office-outfit.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const OUTPUT_ROOT = join(ROOT, 'marketplace', 'plugins', 'official-avatar-base-v1')
@@ -23,7 +28,7 @@ const webRequire = createRequire(WEB_PACKAGE)
 const SOURCE_REPOSITORY = 'fastrouter/experiments-costa-vista'
 const SOURCE_COMMIT = '23e87108a281ac827e2ea23691aa7bf4b544146e'
 const PACK_ID = 'official-avatar-base-v1'
-const PACK_VERSION = '1.0.0'
+const PACK_VERSION = '1.1.0'
 
 export async function buildOfficialAvatarBasePackResolved(options = {}) {
   const outputRoot = resolve(options.outputRoot ?? OUTPUT_ROOT)
@@ -33,10 +38,11 @@ export async function buildOfficialAvatarBasePackResolved(options = {}) {
 
   const baseBytes = await loadPinnedSource(SOURCE_FILES.base, cacheRoot, fetchImpl)
   let base = await normalizeSourceGlbWithProductionLoader(baseBytes)
-  const outfitMeshNames = markBaseAsCasualAvatar(base.document)
+  const casualMeshNames = markBaseAsCasualAvatar(base.document)
   const humanBones = inferHumanoidBones(base.document.nodes ?? [])
   injectVrm1Extension(base.document, humanBones)
   normalizeVrm1LicenseMetadata(base.document)
+  base.document.extensions.VRMC_vrm.meta.version = PACK_VERSION
 
   const hairVariants = [SOURCE_FILES.hairLong, SOURCE_FILES.hairSidePart, SOURCE_FILES.hairTechCrop]
   const hairParts = []
@@ -47,6 +53,11 @@ export async function buildOfficialAvatarBasePackResolved(options = {}) {
     base = mergeRiggedHair(base, hairDocument, binBytes, variant.nodeName)
     hairParts.push({ id: variant.recipeId, kind: 'hair', meshNames: [variant.nodeName] })
   }
+
+  const officeSource = await loadPinnedOfficeOutfit(cacheRoot, fetchImpl)
+  const office = await mergeOfficeOutfit(base, officeSource)
+  base = { document: office.document, binary: office.binary }
+  const formalMeshNames = [...casualMeshNames, ...office.meshNames]
 
   const vrmBytes = writeGlb(base.document, base.binary)
   assertBuiltVrm(vrmBytes)
@@ -59,16 +70,22 @@ export async function buildOfficialAvatarBasePackResolved(options = {}) {
     schemaVersion: 1,
     id: PACK_ID,
     version: PACK_VERSION,
-    displayName: 'DSH Cyber · Quaternius CC0 Base V1',
+    displayName: 'DSH Cyber · Quaternius CC0 Base V1.1',
     license: 'CC0-1.0',
     publisher: 'DSH Cyber (conversion) / Quaternius (original assets)',
     quality: 'production',
     bases: [{ baseModel: 'neutral-a', assetPath: 'models/neutral.vrm' }],
     parts: [
       ...hairParts,
-      { id: 'casual', kind: 'outfit', meshNames: outfitMeshNames },
+      { id: 'casual', kind: 'outfit', meshNames: casualMeshNames },
+      { id: 'professional', kind: 'outfit', meshNames: formalMeshNames },
+      { id: 'analyst', kind: 'outfit', meshNames: formalMeshNames },
     ],
-    materialSlots: [{ id: 'hair', materialNames: ['DSH_Hair'] }],
+    materialSlots: [
+      { id: 'hair', materialNames: ['DSH_Hair'] },
+      { id: 'outfit', materialNames: ['DSH_Office_Outfit'] },
+      { id: 'accent', materialNames: ['DSH_Office_Accent'] },
+    ],
   }
   const packManifestBytes = Buffer.from(`${JSON.stringify(packManifest, null, 2)}\n`, 'utf8')
   await writeFile(join(outputRoot, 'avatar-base-pack.json'), packManifestBytes)
@@ -86,8 +103,8 @@ export async function buildOfficialAvatarBasePackResolved(options = {}) {
     id: PACK_ID,
     version: PACK_VERSION,
     kind: 'asset',
-    displayName: 'Official Avatar Base · CC0 V1',
-    summary: '本地共享的 CC0 Humanoid Base + 3 个严格匹配的发型变体；未匹配角色继续保留 2.5D 身份。',
+    displayName: 'Official Avatar Base · CC0 V1.1',
+    summary: '本地共享的 CC0 Humanoid Base、真实动作、3 个发型和可复用的 professional / analyst 办公西装；未匹配身份继续保留 2.5D。',
     license: 'CC0-1.0',
     publisher: 'DSH Cyber',
     capabilities: ['avatar:base-pack'],
@@ -110,6 +127,7 @@ export async function buildOfficialAvatarBasePackResolved(options = {}) {
     packManifest,
     vrmBytes: vrmBytes.byteLength,
     sourceCommit: SOURCE_COMMIT,
+    officeOutfitSourceCommit: OFFICE_OUTFIT_SOURCE.commit,
   }
 }
 
@@ -222,20 +240,26 @@ function withoutExtension(values, extension) {
 }
 
 function provenanceText() {
-  return `# Official Avatar Base · CC0 V1\n\n` +
+  return `# Official Avatar Base · CC0 V1.1\n\n` +
     `This package is generated, not hand-edited. Run \`pnpm avatar:build-official\` to reproduce it.\n\n` +
     `## Original assets\n\n` +
     `- Quaternius, **Universal Base Characters**, CC0 1.0: https://quaternius.com/packs/universalbasecharacters.html\n` +
-    `- Quaternius, **Universal Animation Library**, CC0 1.0: https://quaternius.com/packs/universalanimationlibrary.html\n\n` +
-    `The deterministic transport mirror records those source families as Quaternius CC0 assets in its pinned ATTRIBUTION.md. ` +
+    `- Quaternius, **Universal Animation Library**, CC0 1.0: https://quaternius.com/packs/universalanimationlibrary.html\n` +
+    `- Quaternius, **Ultimate Modular Men Pack**, CC0 1.0: ${OFFICE_OUTFIT_SOURCE.originalPackUrl}\n` +
+    `- Quaternius, **Business Man** model listing, Public Domain / CC0: ${OFFICE_OUTFIT_SOURCE.originalModelUrl}\n\n` +
+    `The Base/animation deterministic transport mirror records those source families as Quaternius CC0 assets in its pinned ATTRIBUTION.md. ` +
     `Only those explicitly attributed files are consumed; project-authored/commercial-tool character files are excluded.\n\n` +
-    `Pinned transport snapshot: https://github.com/${SOURCE_REPOSITORY}/commit/${SOURCE_COMMIT}\n\n` +
+    `Pinned Base transport snapshot: https://github.com/${SOURCE_REPOSITORY}/commit/${SOURCE_COMMIT}\n` +
+    `Pinned Business Man transport: https://github.com/${OFFICE_OUTFIT_SOURCE.repository}/blob/${OFFICE_OUTFIT_SOURCE.commit}/${OFFICE_OUTFIT_SOURCE.path}\n` +
+    `Pinned Business Man Git blob: ${OFFICE_OUTFIT_SOURCE.gitBlobSha1}\n\n` +
     `## DSH Cyber conversion\n\n` +
-    `- Decodes the source Meshopt bufferViews through the production Three GLTFLoader, then emits one conventional self-contained GLB buffer.\n` +
-    `- Adds VRM 1.0 Humanoid metadata without replacing the source rig.\n` +
+    `- Decodes the Base Meshopt bufferViews through the production Three GLTFLoader, then emits one conventional self-contained GLB buffer.\n` +
+    `- Adds VRM 1.0 Humanoid metadata without replacing the source Base rig.\n` +
     `- Rebinds three CC0 hairstyle skins to the same Base skeleton by exact bone name.\n` +
     `- Declares only long-layered, side-part and tech-crop hair mappings; unsupported hairstyles remain on the 2.5D identity fallback.\n` +
-    `- Declares the source body only as casual. It is intentionally not labelled professional/analyst/engineer.\n\n` +
+    `- Imports only Business Man Suit_Legs, Suit_Feet and the clothing primitives of Suit_Body; Suit_Head and the source Skin primitive are deliberately excluded so an employee keeps the existing Base head, hands and hairstyle.\n` +
+    `- Rebinds the older modular-character suit rig semantically onto the Base skeleton and regenerates inverse-bind matrices against that target rig; source game skeleton nodes are not copied.\n` +
+    `- The same honest formal suit is exposed as professional and analyst. Engineer/future outfits are intentionally not claimed until a matching CC0 mesh is available.\n\n` +
     `License for original source assets and this generated package: CC0-1.0.\n`
 }
 
@@ -252,7 +276,8 @@ async function main() {
   console.log(`Built ${result.packageManifest.id}@${result.packageManifest.version}`)
   console.log(`Output: ${result.outputRoot}`)
   console.log(`VRM: ${(result.vrmBytes / 1024 / 1024).toFixed(2)} MiB`)
-  console.log(`Pinned source commit: ${result.sourceCommit}`)
+  console.log(`Pinned Base source commit: ${result.sourceCommit}`)
+  console.log(`Pinned office-outfit source commit: ${result.officeOutfitSourceCommit}`)
 }
 
 const executedDirectly = process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
