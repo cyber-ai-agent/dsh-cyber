@@ -67,7 +67,7 @@ export function SpatialWorldCanvas({
   latestCamera.current = { mode: cameraMode, subjectId: cameraSubjectId }
   const latestSelection = useRef({ entityId: selectedEntityId, objectId: selectedObjectId })
   latestSelection.current = { entityId: selectedEntityId, objectId: selectedObjectId }
-  const retainedZoom = useRef<number>()
+  const retainedZoom = useRef<number | undefined>(undefined)
   const employeesRef = useRef(employees)
   employeesRef.current = employees
 
