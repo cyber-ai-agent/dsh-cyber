@@ -1,53 +1,47 @@
-name: Office Outfit Source Audit
+name: Office Outfit Build Audit
 
 on:
   push:
     branches: [feat/official-office-outfits-v1]
     paths:
       - '.github/workflows/office-outfit-source-audit.yml'
+      - 'scripts/official-avatar-office-outfit.mjs'
+      - 'scripts/build-official-avatar-base-pack-resolved.mjs'
+      - 'packages/web/scripts/verify-official-avatar-base-pack-runtime.mjs'
 
 permissions:
   contents: read
 
 jobs:
-  inspect:
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Inspect current official Base body partition
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: 11.7.0
+          run_install: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.19.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build official avatar pack with office outfit
+        run: pnpm avatar:build-official
+      - name: Verify generated VRM through production loader
+        run: pnpm avatar:verify-official
+      - name: Inspect generated manifest
         run: |
           node --input-type=module <<'NODE'
           import { readFile } from 'node:fs/promises'
-
-          function parseGlb(body) {
-            const buffer = Buffer.from(body)
-            let cursor = 12
-            while (cursor + 8 <= buffer.length) {
-              const len = buffer.readUInt32LE(cursor)
-              const type = buffer.readUInt32LE(cursor + 4)
-              const start = cursor + 8
-              if (type === 0x4e4f534a) return JSON.parse(buffer.subarray(start, start + len).toString('utf8').trim())
-              cursor = start + len
-            }
-            throw new Error('no JSON chunk')
+          const manifest = JSON.parse(await readFile('marketplace/plugins/official-avatar-base-v1/avatar-base-pack.json', 'utf8'))
+          if (manifest.version !== '1.1.0') throw new Error(`unexpected pack version ${manifest.version}`)
+          for (const id of ['casual', 'professional', 'analyst']) {
+            if (!manifest.parts.some((part) => part.kind === 'outfit' && part.id === id)) throw new Error(`missing outfit ${id}`)
           }
-
-          const base = parseGlb(await readFile('marketplace/plugins/official-avatar-base-v1/models/neutral.vrm'))
-          const materials = (base.materials ?? []).map((material, index) => ({ index, name: material?.name, baseColorFactor: material?.pbrMetallicRoughness?.baseColorFactor }))
-          const meshNodes = (base.nodes ?? []).filter((node) => Number.isInteger(node?.mesh)).map((node) => ({
-            name: node.name,
-            mesh: node.mesh,
-            skin: node.skin,
-            primitives: (base.meshes?.[node.mesh]?.primitives ?? []).map((primitive) => ({
-              material: primitive.material,
-              materialName: Number.isInteger(primitive.material) ? base.materials?.[primitive.material]?.name : undefined,
-              attributes: Object.keys(primitive.attributes ?? {}),
-            })),
-          }))
-          console.log('materials=' + JSON.stringify(materials))
-          console.log('meshNodes=' + JSON.stringify(meshNodes))
-          console.log('scenes=' + JSON.stringify(base.scenes ?? []))
+          if (manifest.parts.some((part) => part.kind === 'outfit' && part.id === 'engineer')) throw new Error('engineer must remain unsupported')
+          console.log(JSON.stringify(manifest.parts.filter((part) => part.kind === 'outfit'), null, 2))
           NODE
