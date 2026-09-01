@@ -1,6 +1,6 @@
 import type { World } from '@dsh-cyber/contracts'
 
-export type WorldKind = 'personal' | 'company' | 'tavern' | 'studio' | 'observatory'
+export type WorldKind = 'personal' | 'company' | 'tavern' | 'studio' | 'observatory' | 'academy'
 
 export interface WorldExperience {
   kind: WorldKind
@@ -77,6 +77,18 @@ const experiences: Record<WorldKind, WorldExperience> = {
     sceneTitle: '蓝环轨道观测层',
     sceneSubtitle: '观测记录、样本与研究会话只属于当前观测站',
   },
+  academy: {
+    kind: 'academy',
+    peopleLabel: '教研角色',
+    personLabel: '教研角色',
+    marketLabel: '聘入学院',
+    actionLabel: '教学',
+    emptyTitle: '学院还没有教研角色',
+    emptyCopy: '从右侧「角色」聘入教授、助教、课程设计师或知识动画设计师；更多教研角色可从顶部市场安装。',
+    composerPlaceholder: '@教研角色 拆解知识点、排课程计划、做教学材料或开始答疑…',
+    sceneTitle: '大学教室',
+    sceneSubtitle: '知识拆解 → 课程计划 → 教学材料 → 答疑 → 知识图 → 课程结果',
+  },
 }
 
 export function worldExperience(world: Pick<World, 'templateId'>): WorldExperience {
@@ -85,5 +97,6 @@ export function worldExperience(world: Pick<World, 'templateId'>): WorldExperien
   if (template === 'tavern' || template === 'moonlit-tavern') return experiences.tavern
   if (template === 'studio' || template === 'creator-studio') return experiences.studio
   if (template === 'observatory' || template === 'orbital-observatory') return experiences.observatory
+  if (template === 'academy' || template === 'ai-academy') return experiences.academy
   return experiences.company
 }

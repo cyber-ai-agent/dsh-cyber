@@ -12,7 +12,7 @@ import { useMemo, useState, type CSSProperties } from 'react'
 import type { World } from '@dsh-cyber/contracts'
 
 import type { CyberEmployee } from '../types.js'
-import { worldExperience } from '../world-experience.js'
+import { type WorldKind, worldExperience } from '../world-experience.js'
 import { Avatar } from './Avatar.js'
 import { AuthorityBadge } from './AuthorityBadge.js'
 
@@ -94,7 +94,7 @@ function WorldControls({ lightsOn, zoom, setLightsOn, setZoom }: {
 }
 
 function WorldScene({ kind, employees, lightsOn, zoom, onSelectEmployee }: {
-  kind: 'personal' | 'company' | 'tavern' | 'studio' | 'observatory'
+  kind: WorldKind
   employees: CyberEmployee[]
   lightsOn: boolean
   zoom: number

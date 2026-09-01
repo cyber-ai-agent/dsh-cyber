@@ -1,6 +1,7 @@
 import {
   ArrowsOut,
   Buildings,
+  Chalkboard,
   ImageSquare,
   LightbulbFilament,
   MapTrifold,
@@ -9,7 +10,7 @@ import {
   PuzzlePiece,
   PersonSimpleWalk,
 } from '@phosphor-icons/react'
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import type { EmployeeDossier, WorkSession, World, WorldInteractionAction, WorldRuntimeSnapshot, WorldZoomCommand } from '@dsh-cyber/contracts'
 
 import { api } from '../../api.js'
@@ -27,6 +28,7 @@ import {
   type WorldViewState,
 } from './runtime/world-view-mode.js'
 import { WorldLocomotion } from './runtime/world-locomotion.js'
+import { teachingSurfaceVocabulary } from './teaching/teaching-result-surface.js'
 import { WorldCanvas } from './WorldCanvas.js'
 import { EmployeeInteractionMenu, ObjectInteractionMenu } from './WorldInteractionMenu.js'
 import { WorldSceneDialog } from './WorldSceneDialog.js'
@@ -35,6 +37,11 @@ import { createZoomCommand } from './zoom-command.js'
 
 const SpatialWorldExtensionDialog = lazy(async () => ({
   default: (await import('./extensions/spatial-3d/SpatialWorldExtensionDialog.js')).SpatialWorldExtensionDialog,
+}))
+
+/** The result surface stays out of the first screen until the owner opens it. */
+const TeachingResultSurface = lazy(async () => ({
+  default: (await import('./teaching/TeachingResultSurface.js')).TeachingResultSurface,
 }))
 
 type WorldContextTarget = { kind: 'employee' | 'object'; id: string; position: { x: number; y: number } }
@@ -59,9 +66,11 @@ interface WorldRuntimeDockProps {
   onStartGroup(employeeIds: string[], session?: WorkSession): void
   onManageAvatar(employeeId: string): void
   onVoiceFinal(text: string): Promise<void>
+  /** Lets the result surface hand the owner over to the durable dock views. */
+  onOpenDockTab?(tab: 'knowledge' | 'artifacts'): void
 }
 
-export function WorldRuntimeDock({ demoMode, world, employees, dossiers, liveEnabled = true, sessionId, sessionKind, selectedEmployeeId, conversationEmployeeIds, latestUtterances, onSelectEmployee, onStartGroup, onManageAvatar, onVoiceFinal }: WorldRuntimeDockProps) {
+export function WorldRuntimeDock({ demoMode, world, employees, dossiers, liveEnabled = true, sessionId, sessionKind, selectedEmployeeId, conversationEmployeeIds, latestUtterances, onSelectEmployee, onStartGroup, onManageAvatar, onVoiceFinal, onOpenDockTab }: WorldRuntimeDockProps) {
   const runtime = useWorldClient({ demoMode, world, employees, liveEnabled })
   const [fitRequest, setFitRequest] = useState(0)
   const [zoomCommand, setZoomCommand] = useState<WorldZoomCommand>()
@@ -78,6 +87,8 @@ export function WorldRuntimeDock({ demoMode, world, employees, dossiers, liveEna
   const [peerError, setPeerError] = useState<string>()
   const [focusCameraId, setFocusCameraId] = useState<string>()
   const focusTimerRef = useRef<number | undefined>(undefined)
+  const [resultSurfaceOpen, setResultSurfaceOpen] = useState(false)
+  const resultToggleRef = useRef<HTMLButtonElement>(null)
   const [staticMode, setStaticMode] = useState(() => readStaticMode(world.id))
   const [view, setView] = useState<WorldViewState>(() => readWorldView(world.id))
   const [panelOpen, setPanelOpen] = useState(() => readWorldView(world.id).renderer === '2d')
@@ -107,6 +118,8 @@ export function WorldRuntimeDock({ demoMode, world, employees, dossiers, liveEna
     if (typeof localStorage !== 'undefined') localStorage.setItem(`dsh-cyber-digital-static:${world.id}`, staticMode ? 'true' : 'false')
   }, [staticMode, world.id])
   useEffect(() => { writeWorldView(world.id, view) }, [view, world.id])
+  useEffect(() => { setResultSurfaceOpen(false) }, [world.id])
+  const resultVocabulary = useMemo(() => teachingSurfaceVocabulary(runtime.manifest), [runtime.manifest])
 
   if (runtime.loading || runtime.snapshot === undefined) {
     return <div className="world-runtime-dock world-runtime-dock--loading"><Buildings size={28} /><strong>正在恢复实时世界</strong><span>同步角色位置、任务状态和世界场景…</span></div>
@@ -292,6 +305,15 @@ export function WorldRuntimeDock({ demoMode, world, employees, dossiers, liveEna
             <button type="button" aria-label="显示全景" title="适应窗口且不露出场景边界" onClick={() => { setView({ renderer: 'map', camera: 'overview' }); setPanelOpen(false); setFitRequest((value) => value + 1) }}><ArrowsOut size={15} /></button>
             <button type="button" aria-label="放大" onClick={() => setZoomCommand(createZoomCommand(0.1))}><Plus size={15} /></button>
             <button type="button" aria-label="世界场景" title="选择只属于当前世界的独立场景" onClick={() => setSceneSettingsOpen(true)}><MapTrifold size={16} /></button>
+            <button
+              ref={resultToggleRef}
+              type="button"
+              className={resultSurfaceOpen ? 'is-active' : ''}
+              aria-pressed={resultSurfaceOpen}
+              aria-label={resultVocabulary.surfaceLabel}
+              title={`在场景区域展示这个世界已经产生的结果（${resultVocabulary.laneLabels.blackboard}、${resultVocabulary.laneLabels['knowledge-graph']}、${resultVocabulary.laneLabels['lesson-cards']}、${resultVocabulary.laneLabels.media}）`}
+              onClick={() => setResultSurfaceOpen((open) => !open)}
+            ><Chalkboard size={16} /></button>
             <button type="button" aria-label="世界活力设置" title="配置角色有岗位逻辑的日常行为" onClick={() => setAmbientSettingsOpen(true)}><PersonSimpleWalk size={16} /></button>
             <button type="button" className={spatialExtensionEnabled ? 'is-active' : ''} aria-label="世界扩展" title="管理可选扩展；3D 不属于核心世界" onClick={() => setExtensionsOpen(true)}><PuzzlePiece size={16} /></button>
             <button type="button" className={runtime.snapshot.clock.lightsOn ? 'is-active' : ''} aria-label={runtime.snapshot.clock.lightsOn ? '关闭场景照明' : '打开场景照明'} onClick={() => void runtime.interact({ action: 'toggle-lights', actorId: 'owner' })}><LightbulbFilament size={16} /></button>
@@ -302,6 +324,17 @@ export function WorldRuntimeDock({ demoMode, world, employees, dossiers, liveEna
           {extensionsOpen ? <WorldExtensionsDialog worldName={world.name} spatialEnabled={spatialExtensionEnabled} onSpatialEnabledChange={setSpatialExtension} onOpenSpatial={() => { setExtensionsOpen(false); setSpatialOpen(true) }} onClose={() => setExtensionsOpen(false)} /> : null}
 
           {employees.length === 0 ? <div className="world-runtime-dock__empty"><strong>这个世界还没有角色</strong><span>请到右侧「角色」新增角色。世界视图只负责展示和互动，不再承担角色管理。</span></div> : null}
+
+          {resultSurfaceOpen ? <Suspense fallback={<div className="world-runtime-dock__result-loading" role="status"><strong>正在打开{resultVocabulary.surfaceLabel}</strong><span>读取世界产物与知识图…</span></div>}>
+            <TeachingResultSurface
+              key={world.id}
+              world={world}
+              demoMode={demoMode}
+              vocabulary={resultVocabulary}
+              onClose={() => { setResultSurfaceOpen(false); resultToggleRef.current?.focus() }}
+              {...(onOpenDockTab === undefined ? {} : { onOpenDockTab })}
+            />
+          </Suspense> : null}
         </div>
       </section>
 
