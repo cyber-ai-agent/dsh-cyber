@@ -178,6 +178,64 @@ test('the shared console recorder ignores only the known GPU driver noise', asyn
   expect(issues.some((issue) => issue.includes('GPU stall due to ReadPixels'))).toBe(false)
 })
 
+
+test('keeps the generator inside the dialog at every desktop width and confirms before discarding a draft', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(origin)
+  await page.getByRole('button', { name: '市场', exact: true }).click()
+  const market = page.locator('.package-market-dialog')
+  await market.getByRole('button', { name: '角色', exact: true }).click()
+  const customRoleButton = market.getByRole('button', { name: '自定义角色', exact: true })
+  await customRoleButton.click()
+
+  const generator = market.locator('.character-generator')
+  await expect(generator).toBeVisible()
+  await generator.locator('.character-generator-field--source textarea').fill('一名沉着的技术负责人。')
+  await generator.getByRole('button', { name: '开始分析', exact: true }).click()
+  await expect(generator.getByText('分析完成。请继续检查并编辑草稿')).toBeVisible()
+  await generator.getByRole('button', { name: '检查角色草稿', exact: true }).click()
+  await expect(generator.getByLabel('角色名字')).toBeVisible()
+
+  // The back link and the step actions must stay inside the dialog, and the
+  // page must never scroll sideways, whatever the desktop width.
+  for (const size of [{ width: 1440, height: 900 }, { width: 1920, height: 1080 }, { width: 3840, height: 2160 }]) {
+    await page.setViewportSize(size)
+    const backLink = generator.locator('.character-generator__back-link')
+    await expect(backLink).toBeVisible()
+    const dialogBox = (await market.boundingBox())!
+    const backBox = (await backLink.boundingBox())!
+    expect(backBox.height, `back link collapsed at ${size.width}`).toBeGreaterThan(20)
+    expect(backBox.y + backBox.height, `back link clipped at ${size.width}`).toBeLessThanOrEqual(dialogBox.y + dialogBox.height + 1)
+    const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+    expect(horizontalOverflow, `horizontal overflow at ${size.width}`).toBeLessThanOrEqual(1)
+    // The primary action is reachable by scrolling the step body.
+    await generator.locator('.character-generator__body').evaluate((node) => { node.scrollTop = node.scrollHeight })
+    await expect(generator.getByRole('button', { name: '下一步', exact: true })).toBeInViewport()
+  }
+
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.keyboard.press('Escape')
+  const confirmation = generator.getByRole('alertdialog')
+  await expect(confirmation).toBeVisible()
+  await expect(confirmation).toContainText('放弃未保存的角色草稿？')
+  await expect(confirmation.getByRole('button', { name: '继续编辑', exact: true })).toBeFocused()
+  await expect(generator).toBeVisible()
+
+  // Escape inside the confirmation means keep editing, not discard.
+  await page.keyboard.press('Escape')
+  await expect(confirmation).toBeHidden()
+  await expect(generator).toBeVisible()
+
+  await confirmationDiscard(page, generator)
+  await expect(generator).toBeHidden()
+  await expect(customRoleButton).toBeFocused()
+})
+
+async function confirmationDiscard(page: import('@playwright/test').Page, generator: import('@playwright/test').Locator) {
+  await page.keyboard.press('Escape')
+  await generator.getByRole('alertdialog').getByRole('button', { name: '放弃草稿', exact: true }).click()
+}
+
 class CharacterGeneratorRuntime implements AgentRuntimePort {
   readonly requests: Array<{ agent: { id: string }; prompt: string }> = []
 

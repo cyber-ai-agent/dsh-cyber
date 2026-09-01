@@ -35,10 +35,18 @@ export function SourceStep({ sourceMode, source, sourceFileName, error, analyzin
       </fieldset>
       {sourceMode === 'file' ? (
         <label className="character-generator-file-picker">
-          <input type="file" accept="text/markdown,text/plain,.md,.txt" onChange={(event) => handleFileChange(event, onFile)} />
+          {/* Explicitly named so the control keeps announcing what it does
+              after a file is picked, and described by the size limit. */}
+          <input
+            type="file"
+            accept="text/markdown,text/plain,.md,.txt"
+            aria-label={t('characterGenerator.chooseFile', '选择 .md 或 .txt 文件')}
+            aria-describedby="character-generator-file-limit"
+            onChange={(event) => handleFileChange(event, onFile)}
+          />
           <FileText size={22} aria-hidden="true" />
-          <strong>{sourceFileName === undefined ? t('characterGenerator.chooseFile', '选择 .md 或 .txt 文件') : t('characterGenerator.fileSelected', '已选择：{name}', { name: sourceFileName })}</strong>
-          <span>{t('characterGenerator.fileLimit', '文件大小上限 128 KiB。')}</span>
+          <strong role="status">{sourceFileName === undefined ? t('characterGenerator.chooseFile', '选择 .md 或 .txt 文件') : t('characterGenerator.fileSelected', '已选择：{name}', { name: sourceFileName })}</strong>
+          <span id="character-generator-file-limit">{t('characterGenerator.fileLimit', '文件大小上限 128 KiB。')}</span>
         </label>
       ) : null}
       <label className="character-generator-field character-generator-field--source">
@@ -57,7 +65,6 @@ export function SourceStep({ sourceMode, source, sourceFileName, error, analyzin
       </label>
       {error === undefined ? null : <div className="character-generator-error" role="alert"><Info size={17} aria-hidden="true" />{error}</div>}
       <div className="character-generator-step__actions">
-        <span className="character-generator-step__note">{t('characterGenerator.sourceHint', '支持 Markdown 或纯文本。导入内容会作为数据分析，不会获得系统指令或权限。')}</span>
         <button className="primary-button" type="button" disabled={analyzing || source.trim().length === 0} onClick={onAnalyze}><Sparkle size={17} aria-hidden="true" />{t('characterGenerator.analyze', '开始分析')}<ArrowRight size={16} aria-hidden="true" /></button>
       </div>
     </div>
@@ -157,7 +164,7 @@ export function PreviewStep({ draft, catalog, avatar, avatarError, validationErr
           <TextField id="character-generator-summary" label={t('characterGenerator.summary', '简介')} value={draft.summary} maxLength={500} multiline rows={3} error={validationError !== undefined && draft.summary.trim().length === 0} onChange={(value) => onDraftChange({ summary: value })} />
           <TextField id="character-generator-persona" label={t('characterGenerator.persona', 'Persona 与行为方式')} value={draft.persona} maxLength={2_000} multiline rows={5} error={validationError !== undefined && draft.persona.trim().length === 0} onChange={(value) => onDraftChange({ persona: value })} />
           <TextField id="character-generator-background" label={t('characterGenerator.background', '背景')} value={draft.background} maxLength={4_000} multiline rows={3} onChange={(value) => onDraftChange({ background: value })} />
-          <fieldset className="character-generator-fieldset"><legend>{t('characterGenerator.traits', '性格特点')}</legend><div className="character-generator-trait-input"><input value={traitDraft} placeholder={t('characterGenerator.traitPlaceholder', '输入特点后按回车添加')} onChange={updateTraitDraft} onKeyDown={onTraitKeyDown} /><button className="secondary-button" type="button" onClick={addTrait} disabled={traitDraft.trim().length === 0}><Plus size={16} aria-hidden="true" />{t('characterGenerator.addTrait', '添加')}</button></div><div className="character-generator-traits">{draft.personalityTraits.map((trait) => <span key={trait}>{trait}<button type="button" aria-label={`${t('characterGenerator.removeTrait', '移除')} ${trait}`} onClick={() => onDraftChange({ personalityTraits: draft.personalityTraits.filter((item) => item !== trait) })}><X size={14} aria-hidden="true" /></button></span>)}</div></fieldset>
+          <fieldset className="character-generator-fieldset"><legend>{t('characterGenerator.traits', '性格特点')}</legend><div className="character-generator-trait-input"><input id="character-generator-trait" aria-label={t('characterGenerator.traits', '性格特点')} value={traitDraft} placeholder={t('characterGenerator.traitPlaceholder', '输入特点后按回车添加')} onChange={updateTraitDraft} onKeyDown={onTraitKeyDown} /><button className="secondary-button" type="button" onClick={addTrait} disabled={traitDraft.trim().length === 0}><Plus size={16} aria-hidden="true" />{t('characterGenerator.addTrait', '添加')}</button></div><div className="character-generator-traits">{draft.personalityTraits.map((trait) => <span key={trait}>{trait}<button type="button" aria-label={`${t('characterGenerator.removeTrait', '移除')} ${trait}`} onClick={() => onDraftChange({ personalityTraits: draft.personalityTraits.filter((item) => item !== trait) })}><X size={14} aria-hidden="true" /></button></span>)}</div></fieldset>
           <CatalogChoices title={t('characterGenerator.skills', '请求的角色技能')} helper={t('characterGenerator.requestedOnly', '仅表示角色希望使用，招募时仍需单独审阅。')} empty={t('characterGenerator.noSkills', '当前世界没有可请求的角色技能。')} values={catalog.skills.map((skill) => ({ id: skill.id, label: skill.displayName, summary: skill.summary, selected: draft.requestedSkillIds.includes(skill.id) }))} onToggle={(id) => toggle('requestedSkillIds', id)} />
           <CatalogChoices title={t('characterGenerator.capabilities', '请求的底层能力')} helper={t('characterGenerator.requestedOnly', '仅表示角色希望使用，招募时仍需单独审阅。')} empty={t('characterGenerator.noCapabilities', '当前世界没有可请求的底层能力。')} values={catalog.capabilities.map((capability) => ({ id: capability.id, label: capability.displayName, summary: capability.summary, selected: draft.requestedCapabilities.includes(capability.id) }))} onToggle={(id) => toggle('requestedCapabilities', id)} />
           <section className="character-generator-world-note"><strong>{t('characterGenerator.compatibleWorld', '适用世界')}</strong><span>{t('characterGenerator.worldHint', '发布后仍需在兼容世界中安装并通过招募确认。')}</span></section>

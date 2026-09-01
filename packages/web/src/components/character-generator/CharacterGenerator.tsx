@@ -1,5 +1,5 @@
 import { ArrowLeft, Info } from '@phosphor-icons/react'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CharacterBlueprintDraft, CharacterGeneratorAvatarCatalogItem, CharacterGeneratorAvatarSelection, CharacterGeneratorCatalog, CharacterSourceInput } from '@dsh-cyber/contracts'
 import { useI18n } from '../../i18n/runtime.js'
 import { analyzeCharacterSource, loadCharacterGeneratorCatalog, publishCharacterDraft, readUploadedAvatar } from './api.js'
@@ -19,6 +19,8 @@ import './CharacterGenerator.css'
 export function CharacterGenerator({ workspaceId, targetWorld, onClose, onPublished, closeRequest = 0 }: CharacterGeneratorProps) {
   const { t } = useI18n()
   const viewRef = useRef<HTMLDivElement>(null)
+  const discardRef = useRef<HTMLDivElement>(null)
+  const discardReturnFocusRef = useRef<HTMLElement | undefined>(undefined)
   const activeRequestRef = useRef<AbortController | undefined>(undefined)
   const lastCloseRequestRef = useRef(closeRequest)
   const [step, setStep] = useState<CharacterGeneratorStep>('source')
@@ -76,6 +78,7 @@ export function CharacterGenerator({ workspaceId, targetWorld, onClose, onPublis
 
   const requestClose = () => {
     if (dirty) {
+      if (!discardPrompt) discardReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : undefined
       setDiscardPrompt(true)
       return
     }
@@ -83,11 +86,48 @@ export function CharacterGenerator({ workspaceId, targetWorld, onClose, onPublis
     onClose()
   }
 
+  const keepEditing = useCallback(() => {
+    setDiscardPrompt(false)
+    const restore = discardReturnFocusRef.current
+    discardReturnFocusRef.current = undefined
+    if (restore?.isConnected === true) restore.focus()
+  }, [])
+
   const discard = () => {
     activeRequestRef.current?.abort()
+    discardReturnFocusRef.current = undefined
     setDiscardPrompt(false)
     onClose()
   }
+
+  // The confirmation is a modal alert dialog in its own right: focus starts on
+  // the non-destructive option, Tab cannot wander back into the form behind
+  // it, and Escape means "keep editing" rather than "discard again".
+  useEffect(() => {
+    if (!discardPrompt) return
+    const container = discardRef.current
+    if (container === null) return
+    const focusable = () => [...container.querySelectorAll<HTMLElement>('button:not([disabled])')]
+    focusable()[0]?.focus()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        keepEditing()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const items = focusable()
+      if (items.length === 0) return
+      const first = items[0]!
+      const last = items.at(-1)!
+      if (!container.contains(document.activeElement)) { event.preventDefault(); first.focus() }
+      else if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+    }
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => document.removeEventListener('keydown', onKeyDown, true)
+  }, [discardPrompt, keepEditing])
 
   const handleSource = (value: string) => {
     setSource((current) => current.kind === 'file' && current.fileName !== undefined
@@ -243,7 +283,23 @@ export function CharacterGenerator({ workspaceId, targetWorld, onClose, onPublis
       <main className="character-generator__body">
         {step === 'source' ? <SourceStep sourceMode={source.kind} source={source.text} {...(source.fileName === undefined ? {} : { sourceFileName: source.fileName })} {...(sourceError === undefined ? {} : { error: sourceError })} analyzing={analyzing} onSourceMode={(kind) => setSource((current) => kind === 'file' ? { kind, text: current.text, ...(current.fileName === undefined ? {} : { fileName: current.fileName }) } : { kind, text: current.text })} onSource={handleSource} onFile={(file) => void handleSourceFile(file)} onAnalyze={analyze} /> : step === 'analysis' ? <AnalysisStep source={source.text} {...(draft === undefined ? {} : { draft })} analyzing={analyzing} {...(analysisError === undefined ? {} : { error: analysisError })} onCancel={cancelAnalysis} onRetry={analyze} onContinue={() => { if (draft !== undefined) { setStep('preview'); setValidationError(undefined) } }} /> : step === 'preview' && draft !== undefined ? <PreviewStep draft={draft} catalog={catalog} {...(avatar === undefined ? {} : { avatar })} {...(avatarError === undefined ? {} : { avatarError })} {...(validationError === undefined ? {} : { validationError })} onDraftChange={updateDraft} onAvatarSelect={selectAvatar} onAvatarUpload={uploadAvatar} onBack={() => { setStep('analysis'); setValidationError(undefined) }} onContinue={continueToPublish} /> : <PublishStep draft={draft ?? initialCharacterDraft(targetWorld.templateId)} source={source.text} {...(avatar === undefined ? {} : { avatar })} catalog={catalog} publishing={publishing} {...(publishError === undefined ? {} : { error: publishError })} published={publishedResult !== undefined} onBack={() => { setStep('preview'); setPublishError(undefined) }} onPublish={publish} onViewInstall={viewInstall} />}
       </main>
-      {discardPrompt ? <aside className="character-generator-discard" role="alert"><strong>{t('characterGenerator.discardTitle', '放弃未保存的角色草稿？')}</strong><span>{t('characterGenerator.discardDescription', '返回市场会丢弃当前来源和编辑内容。')}</span><div><button className="secondary-button" type="button" onClick={() => setDiscardPrompt(false)}>{t('characterGenerator.keepEditing', '继续编辑')}</button><button className="danger-button" type="button" onClick={discard}>{t('characterGenerator.discard', '放弃草稿')}</button></div></aside> : null}
+      {discardPrompt ? (
+        <div
+          ref={discardRef}
+          className="character-generator-discard"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="character-generator-discard-title"
+          aria-describedby="character-generator-discard-description"
+        >
+          <strong id="character-generator-discard-title">{t('characterGenerator.discardTitle', '放弃未保存的角色草稿？')}</strong>
+          <span id="character-generator-discard-description">{t('characterGenerator.discardDescription', '返回市场会丢弃当前来源和编辑内容。')}</span>
+          <div>
+            <button className="secondary-button" type="button" onClick={keepEditing}>{t('characterGenerator.keepEditing', '继续编辑')}</button>
+            <button className="danger-button" type="button" onClick={discard}>{t('characterGenerator.discard', '放弃草稿')}</button>
+          </div>
+        </div>
+      ) : null}
       {step !== 'source' && publishedResult === undefined ? <button className="character-generator__back-link" type="button" onClick={requestClose}><ArrowLeft size={15} aria-hidden="true" />{t('characterGenerator.back', '返回角色市场')}</button> : null}
     </div>
   )

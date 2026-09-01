@@ -78,6 +78,8 @@ interface PackageMarketDialogProps {
 export function PackageMarketDialog(props: PackageMarketDialogProps) {
   const { t } = useI18n()
   const dialogRef = useRef<HTMLElement | null>(null)
+  const customRoleButtonRef = useRef<HTMLButtonElement | null>(null)
+  const restoreCustomRoleFocusRef = useRef(false)
   const marketMeta: Record<CyberMarketKind, { label: string; description: string }> = useMemo(() => ({
     theme: { label: t('workbench.marketTabTheme', '世界'), description: t('workbench.marketTabThemeDesc', '选择完整场景皮肤、空间设定和起始角色，创建彼此独立的新世界。') },
     talent: { label: t('workbench.marketTabTalent', '角色'), description: t('workbench.marketTabTalentDesc', '安装不同世界观与专长的角色模板，再把角色招募到兼容世界。') },
@@ -149,6 +151,20 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
     setGeneratorCloseRequest(0)
     setCustomRoleOpen(true)
   }
+
+  const closeCustomRoleGenerator = () => {
+    setCustomRoleOpen(false)
+    setGeneratorCloseRequest(0)
+    // The trigger is unmounted while the generator is open, so remember to put
+    // focus back on it once the market catalog returns.
+    restoreCustomRoleFocusRef.current = true
+  }
+
+  useEffect(() => {
+    if (customRoleOpen || !restoreCustomRoleFocusRef.current) return
+    restoreCustomRoleFocusRef.current = false
+    customRoleButtonRef.current?.focus()
+  }, [customRoleOpen, market])
 
   const completeCustomRolePublish = async (result: CharacterGeneratorPublishResult) => {
     if (props.onCharacterPublished !== undefined) await props.onCharacterPublished(result)
@@ -239,12 +255,12 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
           <button className="icon-button" type="button" data-dialog-initial-focus aria-label={customRoleOpen ? t('characterGenerator.close', '关闭自定义角色') : t('workbench.cancel', '关闭市场')} onClick={closeDialog}><X size={18} aria-hidden="true" /></button>
         </header>
         {customRoleOpen ? (
-          <Suspense fallback={<div className="dialog-loading" role="status">{t('characterGenerator.analyzeProgress', '正在打开角色创建器…')}</div>}>
+          <Suspense fallback={<div className="dialog-loading" role="status">{t('characterGenerator.opening', '正在打开角色创建器…')}</div>}>
             <CharacterGenerator
               workspaceId={props.workspaceId}
               targetWorld={props.world}
               closeRequest={generatorCloseRequest}
-              onClose={() => { setCustomRoleOpen(false); setGeneratorCloseRequest(0) }}
+              onClose={closeCustomRoleGenerator}
               onPublished={completeCustomRolePublish}
             />
           </Suspense>
@@ -271,7 +287,7 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
                 <input id="market-search-input" aria-label={t('workbench.marketSearchSubmit', '搜索')} value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('workbench.marketSearchPlaceholder', '搜索{category}、发布者或能力', { category: marketMeta[market].label })} />
                 <button type="submit">{t('workbench.marketSearchSubmit', '搜索')}</button>
               </form>
-              {market === 'talent' ? <button className="market-custom-role-button" type="button" onClick={openCustomRoleGenerator}><UserPlus size={17} aria-hidden="true" />{t('characterGenerator.title', '自定义角色')}</button> : null}
+              {market === 'talent' ? <button ref={customRoleButtonRef} className="market-custom-role-button" type="button" onClick={openCustomRoleGenerator}><UserPlus size={17} aria-hidden="true" />{t('characterGenerator.title', '自定义角色')}</button> : null}
             </div>
             {error === undefined ? null : <div className="package-error" role="alert"><Warning size={16} />{error}</div>}
             {props.loading ? <div className="dialog-empty">{t('workbench.marketCheckingLocal', '正在校验本地市场目录…')}</div> : props.items.length === 0 ? (
