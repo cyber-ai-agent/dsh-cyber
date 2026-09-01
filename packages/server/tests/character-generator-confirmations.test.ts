@@ -5,7 +5,8 @@ import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 
 import type { AgentRuntimePort, CyberPackageManifest } from '@dsh-cyber/contracts'
-import { parseEmployeeBlueprintManifest } from '../src/employee-blueprint-manifest.js'
+import { EMPLOYEE_REQUESTABLE_CAPABILITIES, parseEmployeeBlueprintManifest } from '../src/employee-blueprint-manifest.js'
+import { characterGeneratorMarketplaceRoot } from '../src/services/character-generator-marketplace.js'
 import { CHARACTER_GENERATOR_CAPABILITIES, CharacterImportAnalyzer } from '../src/services/character-import-analyzer.js'
 import { compileEmployeeBlueprintPackage } from '../src/services/employee-blueprint-package-compiler.js'
 import { createCyberServer, type CyberServer } from '../src/index.js'
@@ -22,7 +23,6 @@ import { createCyberServer, type CyberServer } from '../src/index.js'
 const fixturePath = join(process.cwd(), 'tests', 'fixtures', 'character-generator', 'engineering-ai-engineer.md')
 /** Appears only inside the vendored Markdown body, never in a draft field. */
 const SOURCE_ONLY_MARKER = 'from dataclasses import dataclass'
-const PNG_BYTES = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13])
 
 const servers: CyberServer[] = []
 const roots: string[] = []
@@ -80,10 +80,17 @@ describe('B-FIX-5 host-owned capability catalog', () => {
     })
     expect(published.status, JSON.stringify(published.body)).toBe(422)
     expect(published.body.error.code).toBe('character_draft_capability_unknown')
-    expect(await talentPackageDirectories(server.root)).toEqual([])
+    expect(await talentPackageDirectories(server.root, workspace.id)).toEqual([])
   })
 
   it('keeps the compiler gate identical to the host catalog', async () => {
+    // The compiler owns no capability list of its own: it gates on the host
+    // allowlist in employee-blueprint-manifest.ts. Asserting the two host-owned
+    // constants agree is what keeps the gate and the generator catalog from
+    // drifting apart, and it replaces the duplicated copy the compiler used to
+    // carry — a second literal list here would reintroduce exactly that drift.
+    expect([...EMPLOYEE_REQUESTABLE_CAPABILITIES]).toEqual([...CHARACTER_GENERATOR_CAPABILITIES])
+
     const root = await mkdtemp(join(tmpdir(), 'dsh-character-generator-compiler-'))
     roots.push(root)
 
@@ -97,7 +104,10 @@ describe('B-FIX-5 host-owned capability catalog', () => {
       ...compilerInput(join(root, 'allowed')),
       requestedCapabilities: [...CHARACTER_GENERATOR_CAPABILITIES],
     })
-    expect(compiled.manifest.capabilities).toEqual(['employee:blueprint', ...CHARACTER_GENERATOR_CAPABILITIES])
+    // Installing a talent package needs exactly one capability. What the
+    // employee REQUESTS is a separate layer, approved per employee at
+    // recruitment, and must never be folded into the package's own permissions.
+    expect(compiled.manifest.capabilities).toEqual(['employee:blueprint'])
     expect(compiled.blueprint.requestedCapabilities).toEqual([...CHARACTER_GENERATOR_CAPABILITIES])
   })
 })
@@ -159,7 +169,7 @@ describe('B-FIX-6 source retention is provenance only', () => {
     })
     expect(published.status, JSON.stringify(published.body)).toBe(201)
     const manifest = published.body.item.manifest as CyberPackageManifest
-    const packageDirectory = join(server.root, 'workshop', 'character-generator', 'marketplace', 'talent', manifest.id)
+    const packageDirectory = join(talentRoot(server.root, workspace.id), manifest.id)
 
     // Provenance is retained verbatim.
     expect(await readFile(join(packageDirectory, 'source', 'original.md'), 'utf8')).toBe(source)
@@ -367,9 +377,27 @@ function compilerInput(sourceDirectory: string) {
       originalText: '# 角色',
       originalFormat: 'md' as const,
       analysis: { schemaVersion: 1 },
-      preview: { bytes: PNG_BYTES, mimeType: 'image/png' as const },
+      preview: { bytes: pngBytes(), mimeType: 'image/png' as const },
     },
   }
+}
+
+/**
+ * A real PNG container: signature plus a complete IHDR. The server is the
+ * authority on avatar bytes, so a truncated placeholder is refused as a
+ * signature failure long before the capability gate is reached — a fixture that
+ * never was a valid image is not a way to test the gate.
+ */
+function pngBytes(width = 64, height = 64): Buffer {
+  const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+  const ihdr = Buffer.alloc(25)
+  ihdr.writeUInt32BE(13, 0)
+  ihdr.write('IHDR', 4, 'latin1')
+  ihdr.writeUInt32BE(width, 8)
+  ihdr.writeUInt32BE(height, 12)
+  ihdr[16] = 8
+  ihdr[17] = 6
+  return Buffer.concat([signature, ihdr, Buffer.alloc(64)])
 }
 
 function stubAnalyzer(result: AnyRecord): unknown {
@@ -394,10 +422,18 @@ async function startServer(options: { analyzer?: unknown; runtime?: AgentRuntime
   return Object.assign(server, { origin: address.origin, root })
 }
 
-async function talentPackageDirectories(stateRoot: string): Promise<string[]> {
+/**
+ * Generated talents are workspace-scoped on disk. The layout is derived from the
+ * same helper the product writes through, so this suite cannot drift back onto
+ * the pre-isolation global path and silently assert about an empty directory.
+ */
+function talentRoot(stateRoot: string, workspaceId: string): string {
+  return join(characterGeneratorMarketplaceRoot(stateRoot, workspaceId), 'talent')
+}
+
+async function talentPackageDirectories(stateRoot: string, workspaceId: string): Promise<string[]> {
   try {
-    const entries = await readdir(join(stateRoot, 'workshop', 'character-generator', 'marketplace', 'talent'))
-    return entries
+    return await readdir(talentRoot(stateRoot, workspaceId))
   } catch {
     return []
   }
