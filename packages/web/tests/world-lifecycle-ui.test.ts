@@ -248,3 +248,111 @@ describe('workshop project library', () => {
     await act(async () => { root.unmount() })
   })
 })
+
+/** Header actions only, so the confirmation's own 确认永久删除 never stands in for the trigger. */
+function detailAction(host: ParentNode, label: string): HTMLButtonElement | undefined {
+  return [...host.querySelectorAll<HTMLButtonElement>('.creative-workshop-project-detail__header button')]
+    .find((button) => button.textContent?.trim() === label)
+}
+
+async function pressKey(key: string, init: KeyboardEventInit = {}): Promise<void> {
+  await act(async () => {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init }))
+  })
+}
+
+describe('workshop project permanent-delete confirmation focus contract', () => {
+  const archivedProject = () => makeProject({ id: 'project-archived', displayName: '停用的短剧项目', status: 'archived' })
+
+  async function openConfirm(onDelete = vi.fn()) {
+    const project = archivedProject()
+    const { host, root } = await mount(createElement(CreativeWorkshopProjectLibrary, {
+      projects: [project],
+      selectedProject: project,
+      skills: [],
+      onSelect: () => undefined,
+      onCreate: () => undefined,
+      onDuplicate: () => undefined,
+      onOpenWorld: () => undefined,
+      onArchive: () => undefined,
+      onRestore: () => undefined,
+      onDelete,
+    }))
+    // The archive tab is the only place permanent delete exists.
+    await act(async () => { buttonNamed(host, '归档项目')!.click() })
+    const trigger = detailAction(host, '永久删除')!
+    trigger.focus()
+    await act(async () => { trigger.click() })
+    const confirm = host.querySelector<HTMLElement>('[role="alertdialog"]')!
+    return { host, root, trigger, confirm, onDelete }
+  }
+
+  it('moves focus into the confirmation when it opens', async () => {
+    const { root, confirm } = await openConfirm()
+    expect(confirm).toBeDefined()
+    expect(confirm.contains(document.activeElement)).toBe(true)
+    await act(async () => { root.unmount() })
+  })
+
+  it('closes on Escape without deleting, and gives focus back to the control that opened it', async () => {
+    const { host, root, trigger, onDelete } = await openConfirm()
+
+    await pressKey('Escape')
+
+    expect(host.querySelector('[role="alertdialog"]')).toBeNull()
+    expect(onDelete).not.toHaveBeenCalled()
+    expect(document.activeElement).toBe(trigger)
+    await act(async () => { root.unmount() })
+  })
+
+  it('cycles Tab inside the confirmation instead of leaking into the page behind it', async () => {
+    const { root, confirm } = await openConfirm()
+    const items = [...confirm.querySelectorAll<HTMLButtonElement>('button')]
+    expect(items.length).toBeGreaterThan(1)
+
+    items.at(-1)!.focus()
+    await pressKey('Tab')
+    expect(document.activeElement).toBe(items[0])
+
+    await pressKey('Tab', { shiftKey: true })
+    expect(document.activeElement).toBe(items.at(-1))
+
+    await act(async () => { root.unmount() })
+  })
+
+  it('is the topmost modal while the workshop dialog around it is still open', async () => {
+    // The library always renders inside the creative workshop dialog, so the
+    // confirmation has to win the topmost check against that outer modal.
+    const project = archivedProject()
+    const onDelete = vi.fn()
+    const { host, root } = await mount(createElement(
+      'section',
+      { role: 'dialog', 'aria-modal': 'true' },
+      createElement(CreativeWorkshopProjectLibrary, {
+        projects: [project],
+        selectedProject: project,
+        skills: [],
+        onSelect: () => undefined,
+        onCreate: () => undefined,
+        onDuplicate: () => undefined,
+        onOpenWorld: () => undefined,
+        onArchive: () => undefined,
+        onRestore: () => undefined,
+        onDelete,
+      }),
+    ))
+    await act(async () => { buttonNamed(host, '归档项目')!.click() })
+    const trigger = detailAction(host, '永久删除')!
+    trigger.focus()
+    await act(async () => { trigger.click() })
+
+    const confirm = host.querySelector<HTMLElement>('[role="alertdialog"]')!
+    expect([...document.querySelectorAll('[aria-modal="true"]')].at(-1)).toBe(confirm)
+
+    await pressKey('Escape')
+    expect(host.querySelector('[role="alertdialog"]')).toBeNull()
+    expect(onDelete).not.toHaveBeenCalled()
+
+    await act(async () => { root.unmount() })
+  })
+})
