@@ -1,8 +1,9 @@
 import type { VRM } from '@pixiv/three-vrm'
-import type { Object3D } from 'three'
+import type { AnimationClip, Object3D } from 'three'
 
 import type { DigitalHumanMotionCue, DigitalHumanVisualState } from '../../digital-human-motion.js'
 import type { AvatarAssemblyPlan, AvatarBasePackManifest } from '../avatar-base-pack.js'
+import { selectEmbeddedMotionClips } from '../motion/embedded-motion-clips.js'
 import { declaredMotionSources, loadMotionClips } from '../motion/load-motion-clips.js'
 import { applyAvatarAssembly } from './apply-avatar-assembly.js'
 import { VrmAnimationController } from './VrmAnimationController.js'
@@ -74,7 +75,11 @@ export class VrmActor {
   #springFrame = 0
   #disposed = false
 
-  private constructor(vrm: VRM, onDispose?: () => void) {
+  private constructor(
+    vrm: VRM,
+    onDispose?: () => void,
+    embeddedAnimations: readonly AnimationClip[] = [],
+  ) {
     this.vrm = vrm
     this.root = vrm.scene
     this.#motion = new VrmMotionController(vrm)
@@ -83,6 +88,9 @@ export class VrmActor {
     this.#blink = new VrmBlinkController(vrm)
     this.#speech = new VrmSpeechController(vrm)
     this.#animation = new VrmAnimationController(vrm.scene)
+    for (const { gesture, clip } of selectEmbeddedMotionClips(embeddedAnimations)) {
+      this.#animation.register(gesture, clip)
+    }
     this.#onDispose = onDispose
   }
 
@@ -137,7 +145,7 @@ export class VrmActor {
     return new VrmActor(vrm, () => {
       disposeVrmScene(vrm.scene)
       releaseBytes()
-    })
+    }, gltf.animations)
   }
 
   /**
@@ -145,11 +153,17 @@ export class VrmActor {
    * three-vrm-animation; the bundled offline pack uses semantic Humanoid bone
    * tracks and is retargeted by our loader. Procedural bones remain only the
    * fallback for a gesture a pack genuinely does not provide.
+   *
+   * Embedded clips belong to the avatar itself, so they win over the generic
+   * default motion pack. An explicitly supplied world/theme motion library is
+   * still authoritative and may intentionally replace them.
    */
   async loadDeclaredMotion(
     library?: Parameters<typeof declaredMotionSources>[0],
   ): Promise<{ registered: number; failures: number }> {
-    const sources = declaredMotionSources(library)
+    const explicitLibrary = library !== undefined
+    const sources = declaredMotionSources(library).filter((source) =>
+      explicitLibrary || !this.#animation.hasGesture(source.gesture))
     if (sources.length === 0) return { registered: 0, failures: 0 }
     const result = await loadMotionClips(this.vrm, sources)
     if (this.#disposed) {
@@ -165,8 +179,12 @@ export class VrmActor {
   }
 
   /** Wraps an already-loaded VRM, useful for tests and specialized caches. */
-  static fromLoaded(vrm: VRM, onDispose?: () => void): VrmActor {
-    return new VrmActor(vrm, onDispose)
+  static fromLoaded(
+    vrm: VRM,
+    onDispose?: () => void,
+    embeddedAnimations: readonly AnimationClip[] = [],
+  ): VrmActor {
+    return new VrmActor(vrm, onDispose, embeddedAnimations)
   }
 
   /**

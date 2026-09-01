@@ -14,6 +14,7 @@ const REQUIRED_BONES = [
   'leftUpperLeg', 'rightUpperLeg',
 ]
 const REQUIRED_VARIANT_NODES = ['Hair_Long', 'Hair_SidePart', 'Hair_TechCrop']
+const REQUIRED_EMBEDDED_MOTIONS = ['Idle_Loop', 'Walk_Loop', 'Idle_Talking_Loop', 'Interact']
 
 async function main() {
   const body = await readFile(VRM_PATH)
@@ -42,11 +43,18 @@ async function main() {
     throw new Error('Generated official avatar is missing the managed casual Base mesh')
   }
 
-  const animations = gltf.animations.map((clip) => clip.name).filter(Boolean)
+  const animationByName = new Map(gltf.animations.filter((clip) => clip.name).map((clip) => [clip.name, clip]))
+  for (const name of REQUIRED_EMBEDDED_MOTIONS) {
+    const clip = animationByName.get(name)
+    if (clip === undefined || clip.tracks.length === 0) {
+      throw new Error(`Generated official avatar is missing required embedded motion: ${name}`)
+    }
+  }
+  const animations = [...animationByName.keys()]
   console.log(`Production Web VRM loader accepted ${VRM_PATH}`)
   console.log(`Scene objects: ${names.size}`)
   console.log(`Embedded animation clips: ${animations.length}`)
-  if (animations.length > 0) console.log(`Animation names: ${animations.slice(0, 24).join(', ')}`)
+  if (animations.length > 0) console.log(`Animation names: ${animations.join(', ')}`)
 }
 
 main().catch((error) => {
