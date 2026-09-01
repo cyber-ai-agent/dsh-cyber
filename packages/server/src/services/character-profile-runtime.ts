@@ -24,6 +24,7 @@ import {
   contextSnapshotSequence,
   lastDurableObservation,
 } from './employee-observation-runtime.js'
+import { ContextInspectionService } from './context-inspection-service.js'
 import {
   defaultContextSnapshotService,
   type ContextSnapshotService,
@@ -60,6 +61,16 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
   readonly #memory: CharacterMemoryContextPort | undefined
   readonly #context: ConversationContextComposer | undefined
   readonly #snapshots: ContextSnapshotService | undefined
+  /**
+   * What the Context Inspector reads back.
+   *
+   * The record is taken here rather than rebuilt later from durable rows: a
+   * rebuild would disagree with the real turn about the persona, the permission
+   * mode and the retrieval ranking, and the Inspector's whole value is that it
+   * does not. It is process-local and owns no durable fact, so the runtime that
+   * composed the context is also the natural place to keep the note of it.
+   */
+  readonly contextInspection: ContextInspectionService
 
   constructor(
     inner: AgentRuntimePort,
@@ -68,12 +79,14 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
     authority?: Pick<WorldAuthorityPort, 'get'>,
     skillAvailability?: WorldSkillAvailabilityPort,
     memory?: CharacterMemoryContextPort,
+    inspection?: ContextInspectionService,
   ) {
     this.#inner = inner
     this.#store = store
     this.#skills = skills
     this.#authority = authority
     this.#skillAvailability = skillAvailability
+    this.contextInspection = inspection ?? new ContextInspectionService()
     this.#memory = memory ?? defaultMemoryForStore(store)
     this.#context = defaultConversationContextComposer(
       store as Record<string, unknown>,
@@ -147,6 +160,21 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       } catch {
         // A missing context record must never cost the owner a reply.
       }
+    // Recorded before the turn runs, so a run that fails or is aborted still
+    // leaves behind the context it was given - that is exactly the turn a user
+    // most wants to look at afterwards.
+    if (composed !== undefined) {
+      this.contextInspection.record({
+        conversationId: request.conversationId,
+        employeeId: agent.id,
+        employeeName: agent.displayName,
+        lane: composed.coverage.lane,
+        ...(request.workTurnId === undefined ? {} : { workTurnId: request.workTurnId }),
+        envelope: composed.envelope,
+        memoryHits: composed.memoryHits,
+        coverage: composed.coverage,
+        ...(request.contextBudget === undefined ? {} : { budget: request.contextBudget }),
+      })
     }
 
     const memoryContext = composed !== undefined
