@@ -9,16 +9,14 @@ import type {
   JsonObject,
 } from '@dsh-cyber/contracts'
 
+import { EMPLOYEE_REQUESTABLE_CAPABILITIES } from '../employee-blueprint-manifest.js'
+
 const PACKAGE_ID = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/
 const PACKAGE_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/
 const TOKEN = /^[a-z][a-z0-9._-]*(?::[a-z][a-z0-9._-]*)?$/
 const MAX_SOURCE_BYTES = 128 * 1024
 const MAX_PREVIEW_BYTES = 5 * 1024 * 1024
 export const EMPLOYEE_PERSONA_MAX_CHARACTERS = 2_000
-const MAX_PERSONALITY_TRAITS = 20
-const MAX_PERSONALITY_TRAIT_CHARACTERS = 80
-const MAX_BACKGROUND_CHARACTERS = 4_000
-const CHARACTER_CAPABILITIES = new Set(['workspace:read', 'knowledge:read', 'artifact:read'])
 
 export interface EmployeeBlueprintPackageSource {
   originalText: string
@@ -43,8 +41,6 @@ export interface EmployeeBlueprintPackageCompilerInput {
   persona: string
   publisher?: string
   license?: string
-  personalityTraits?: string[]
-  background?: string
   requestedSkills?: string[]
   requestedCapabilities?: string[]
   embodiment?: EmbodimentProfile
@@ -73,10 +69,10 @@ export async function compileEmployeeBlueprintPackage(
   const blueprintVersion = input.blueprintVersion ?? 1
   const requestedSkills = uniqueText(input.requestedSkills ?? [], 'requestedSkills')
   const requestedCapabilities = uniqueText(input.requestedCapabilities ?? [], 'requestedCapabilities')
-  const personalityTraits = normalizePersonalityTraits(input.personalityTraits)
-  const background = normalizeBackground(input.background)
   for (const capability of requestedCapabilities) {
-    if (!CHARACTER_CAPABILITIES.has(capability)) throw new Error(`Unsupported character capability: ${capability}`)
+    if (!EMPLOYEE_REQUESTABLE_CAPABILITIES.includes(capability)) {
+      throw new Error(`Unsupported character capability: ${capability}`)
+    }
   }
 
   const blueprint: EmployeeBlueprint = {
@@ -87,7 +83,12 @@ export async function compileEmployeeBlueprintPackage(
     displayName: input.displayName,
     role: input.role,
     summary: input.summary,
-    persona: composeEmployeePersona({ ...input, personalityTraits, background }),
+    // Only the reviewed persona reaches the runtime prompt. background and
+    // personalityTraits belong to EmployeeProfile, which the runtime composes
+    // separately; composing them here baked unreviewed draft text — including
+    // raw slabs of the untrusted import source — permanently into the
+    // blueprint, behind the persona-only source-echo guard.
+    persona: input.persona.trim(),
     requestedSkills,
     requestedCapabilities,
     ...(input.embodiment === undefined ? {} : { embodiment: structuredClone(input.embodiment) }),
@@ -127,7 +128,12 @@ export async function compileEmployeeBlueprintPackage(
       summary: input.summary,
       license: input.license ?? 'LicenseRef-DSH-Cyber-Local',
       publisher: input.publisher ?? 'Local Creative Workshop',
-      capabilities: ['employee:blueprint', ...requestedCapabilities],
+      // What installing THIS PACKAGE needs. A talent package is declaration
+      // only, so that is exactly one capability. The blueprint's
+      // requestedCapabilities are a different permission layer: what a future
+      // Employee would like, approved per employee in recruitment. Installing a
+      // talent package must never hand out an employee's requested permissions.
+      capabilities: ['employee:blueprint'],
       dataEgress: [],
       files: files.map((file) => ({ path: file.path, sha256: sha256(file.bytes) })),
       entrypoints: [{ id: input.entrypointId ?? 'role-blueprint', kind: 'employee-blueprint', path: 'blueprint.json' }],
@@ -146,47 +152,6 @@ export class EmployeeBlueprintPackageCompiler {
   }
 }
 
-/** Keep reviewed persona content first while making the other draft fields effective. */
-export function composeEmployeePersona(input: Pick<EmployeeBlueprintPackageCompilerInput, 'persona' | 'personalityTraits' | 'background'>): string {
-  const base = input.persona.trim()
-  let result = base
-  if ((input.personalityTraits?.length ?? 0) > 0) {
-    result = appendPersonaSection(result, `性格特征：${input.personalityTraits!.join('、')}`)
-  }
-  if (input.background?.trim()) result = appendPersonaSection(result, `背景：${input.background.trim()}`)
-  return Array.from(result).slice(0, EMPLOYEE_PERSONA_MAX_CHARACTERS).join('')
-}
-
-function appendPersonaSection(current: string, section: string): string {
-  // EmployeeBlueprint text fields deliberately reject control characters,
-  // including newlines. Keep the structured additions readable in one safe
-  // runtime string instead of producing a package that cannot be installed.
-  const separator = current.length === 0 ? '' : '；'
-  const remaining = EMPLOYEE_PERSONA_MAX_CHARACTERS - Array.from(current).length - Array.from(separator).length
-  if (remaining <= 0) return current
-  return `${current}${separator}${Array.from(section).slice(0, remaining).join('')}`
-}
-
-function normalizePersonalityTraits(values: readonly string[] | undefined): string[] {
-  if (values === undefined) return []
-  if (!Array.isArray(values) || values.length > MAX_PERSONALITY_TRAITS) throw new Error('Too many personality traits')
-  const result = values.map((value) => {
-    if (typeof value !== 'string') throw new Error('Invalid personality trait')
-    const normalized = value.trim()
-    if (!normalized || Array.from(normalized).length > MAX_PERSONALITY_TRAIT_CHARACTERS || /[\u0000-\u001f\u007f-\u009f]/u.test(normalized)) throw new Error('Invalid personality trait')
-    return normalized
-  })
-  if (new Set(result).size !== result.length) throw new Error('Duplicate personality traits')
-  return result
-}
-
-function normalizeBackground(value: string | undefined): string {
-  if (value === undefined) return ''
-  const normalized = value.trim()
-  if (Array.from(normalized).length > MAX_BACKGROUND_CHARACTERS || /[\u0000-\u001f\u007f-\u009f]/u.test(normalized)) throw new Error('Invalid employee background')
-  return normalized
-}
-
 function validateInput(input: EmployeeBlueprintPackageCompilerInput): void {
   if (!PACKAGE_ID.test(input.packageId)) throw new Error('Invalid employee blueprint package id')
   if (!PACKAGE_VERSION.test(input.packageVersion ?? '1.0.0')) throw new Error('Invalid employee blueprint package version')
@@ -198,7 +163,7 @@ function validateInput(input: EmployeeBlueprintPackageCompilerInput): void {
     ['displayName', input.displayName, 100],
     ['role', input.role, 100],
     ['summary', input.summary, 500],
-    ['persona', input.persona, 2_000],
+    ['persona', input.persona, EMPLOYEE_PERSONA_MAX_CHARACTERS],
     ['createdAt', input.createdAt, 64],
   ] as const) {
     if (typeof value !== 'string' || !value.trim() || value.length > maximum || /[\u0000-\u001f\u007f]/.test(value)) {

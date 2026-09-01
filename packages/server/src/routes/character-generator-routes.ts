@@ -145,8 +145,10 @@ export function registerCharacterGeneratorRoutes(
         summary: draft.summary,
         persona: draft.persona,
         publisher: 'DSH Cyber Character Generator',
-        personalityTraits: draft.personalityTraits,
-        background: draft.background,
+        // draft.background and draft.personalityTraits are deliberately NOT
+        // passed to the blueprint: they are EmployeeProfile content, not
+        // persona content, and the package keeps them in source/analysis.json
+        // as reviewed reference material only.
         requestedSkills: draft.requestedSkillIds,
         requestedCapabilities: draft.requestedCapabilities,
         ...(draft.embodiment === undefined ? {} : { embodiment: draft.embodiment }),

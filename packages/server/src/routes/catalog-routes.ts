@@ -143,7 +143,7 @@ async function marketActivation(
       if (entrypoint === undefined) return {}
       const blueprint = parseEmployeeBlueprintManifest(
         JSON.parse((await packageCatalog.readDeclaredFile(item, entrypoint.path, scope)).toString('utf8')),
-        { packageId: item.manifest.id, packageCapabilities: item.manifest.capabilities },
+        { packageId: item.manifest.id },
       )
       return {
         activation: {
