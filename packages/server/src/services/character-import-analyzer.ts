@@ -19,6 +19,17 @@ import { ServiceError } from './service-error.js'
 
 export const CHARACTER_SOURCE_MAX_BYTES = 128 * 1024
 export const CHARACTER_PERSONA_MAX_CHARACTERS = 2_000
+/**
+ * Host-owned Character Generator safe capability catalog.
+ *
+ * These three ids are the entire V1 allowlist. They are declared by the host,
+ * never discovered from a package and never invented by a model: an id outside
+ * this set is filtered out of an analyzed draft and rejected outright at
+ * publish. Extending the set is a deliberate host change that also has to move
+ * the `CharacterGeneratorCapabilityId` union in @dsh-cyber/contracts, the
+ * display catalog in character-generator-routes.ts and the compiler gate in
+ * employee-blueprint-package-compiler.ts.
+ */
 export const CHARACTER_GENERATOR_CAPABILITIES: readonly CharacterGeneratorCapabilityId[] = [
   'workspace:read',
   'knowledge:read',

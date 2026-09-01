@@ -44,6 +44,12 @@ const BUILTIN_AVATAR_PACKAGE_IDS = [
   'official-studio-visual-director',
   'official-tavern-storyweaver',
 ] as const
+/**
+ * Display metadata for the host-owned Character Generator safe capability
+ * catalog. It only labels the ids that CHARACTER_GENERATOR_CAPABILITIES already
+ * allows; the `CharacterGeneratorCapabilityId` type keeps this list from
+ * introducing an id of its own.
+ */
 const CAPABILITY_CATALOG: CharacterGeneratorCapabilityCatalogItem[] = [
   { id: 'workspace:read', displayName: '读取工作区', summary: '允许角色读取当前工作区内已授权的文件。' },
   { id: 'knowledge:read', displayName: '读取知识', summary: '允许角色读取当前世界已授权的知识资料。' },
