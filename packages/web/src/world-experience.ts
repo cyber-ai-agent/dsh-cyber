@@ -1,7 +1,6 @@
 import type { World } from '@dsh-cyber/contracts'
 
-export type WorldKind = 'personal' | 'company' | 'tavern' | 'studio' | 'observatory' | 'academy' | 'hub'
-export type WorldKind = 'personal' | 'company' | 'tavern' | 'studio' | 'observatory' | 'academy' | 'garden'
+export type WorldKind = 'personal' | 'company' | 'tavern' | 'studio' | 'observatory' | 'academy' | 'hub' | 'garden'
 
 export interface WorldExperience {
   kind: WorldKind
@@ -101,6 +100,7 @@ const experiences: Record<WorldKind, WorldExperience> = {
     composerPlaceholder: '说一件要办的事，中枢会判断归属再委派…',
     sceneTitle: '个人中枢工作室',
     sceneSubtitle: '接收请求 → 判断归属 → 委派 → 汇总回报',
+  },
   garden: {
     kind: 'garden',
     peopleLabel: '整理角色',

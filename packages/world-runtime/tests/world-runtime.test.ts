@@ -99,6 +99,9 @@ describe('world theme manifest', () => {
       'filing-organiser-bench',
       'information-index-wall',
       'summary-report-stand',
+    ])
+  })
+
   it('validates the built-in knowledge garden theme and its courtyard scene', () => {
     expect(validateWorldThemeManifest(knowledgeGardenTheme)).toEqual({ valid: true, errors: [] })
     const scene = knowledgeGardenTheme.scenes[0]!
