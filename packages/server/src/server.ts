@@ -6,10 +6,7 @@ import { BUILTIN_BLUEPRINTS } from '@dsh-cyber/catalog'
 import type { JsonObject, AgentRuntimePort, AgentTurnRequest } from '@dsh-cyber/contracts'
 import {
   HarnessModelRouter,
-  inspectHarnessCandidate,
   inspectHarnessCompatibility,
-  readActiveHarnessRuntime,
-  resolveCandidateDshBin, SUPPORTED_HARNESS_VERSION,
   type HarnessModelRoute,
 } from '@dsh-cyber/harness-adapter'
 import { ConversationOrchestrator, type GroupTurnPlannerPort } from '@dsh-cyber/orchestration'
@@ -76,6 +73,7 @@ import { composeWorkSystem } from './composition/compose-work-system.js'
 import { composeCompletionWorker } from './composition/compose-completion.js'
 import { composeGroupTurnPlanner } from './composition/compose-group-turn-planner.js'
 import { refreshMcpCatalog } from './composition/mcp-lifecycle.js'
+import { resolveActiveRuntime } from './composition/active-harness-runtime.js'
 import { WorldArtifactService } from './services/world-artifact-service.js'
 import { WorldAmbientSlotResolver } from './services/world-ambient-slot-resolver.js'
 import { WorldAmbientStateProvider } from './services/world-ambient-state-provider.js'
@@ -578,17 +576,6 @@ async function sweepOrphanedPackageStaging(store: SqliteStore, worldPackages: Wo
 }
 
 function errorText(error: unknown): string { return error instanceof Error ? error.message : String(error) }
-
-async function resolveActiveRuntime(store: SqliteStore, runtimeStateRoot: string, stateRoot: string): Promise<string | undefined> {
-  const activeRuntime = await readActiveHarnessRuntime(runtimeStateRoot)
-  if (activeRuntime === undefined) return undefined
-  const activeReport = await inspectHarnessCandidate({ candidateRoot: activeRuntime.candidateRoot, stateRoot: runtimeStateRoot })
-  if (!activeReport.ok || activeReport.version !== activeRuntime.version || activeReport.version !== SUPPORTED_HARNESS_VERSION) {
-    store.close()
-    throw new Error(`Activated Harness runtime ${activeRuntime.version} is unavailable or incompatible; DSH Cyber requires DeepSeek Harness ${SUPPORTED_HARNESS_VERSION}. Run "dsh-cyber runtime-rollback --data-dir ${stateRoot}" to return to the bundled runtime.`)
-  }
-  return resolveCandidateDshBin(activeRuntime.candidateRoot)
-}
 
 function resolveHarnessRoute(store: SqliteStore, request: AgentTurnRequest): HarnessModelRoute | undefined {
   const temporary = request.modelProfileId === undefined ? undefined : store.getModelProfile(request.modelProfileId)
