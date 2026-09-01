@@ -9,7 +9,7 @@ import {
   inspectHarnessCandidate,
   inspectHarnessCompatibility,
   readActiveHarnessRuntime,
-  resolveCandidateDshBin,
+  resolveCandidateDshBin, SUPPORTED_HARNESS_VERSION,
   type HarnessModelRoute,
 } from '@dsh-cyber/harness-adapter'
 import { ConversationOrchestrator, type GroupTurnPlannerPort } from '@dsh-cyber/orchestration'
@@ -583,9 +583,9 @@ async function resolveActiveRuntime(store: SqliteStore, runtimeStateRoot: string
   const activeRuntime = await readActiveHarnessRuntime(runtimeStateRoot)
   if (activeRuntime === undefined) return undefined
   const activeReport = await inspectHarnessCandidate({ candidateRoot: activeRuntime.candidateRoot, stateRoot: runtimeStateRoot })
-  if (!activeReport.ok || activeReport.version !== activeRuntime.version) {
+  if (!activeReport.ok || activeReport.version !== activeRuntime.version || activeReport.version !== SUPPORTED_HARNESS_VERSION) {
     store.close()
-    throw new Error(`Activated Harness runtime is unavailable or incompatible. Run "dsh-cyber runtime-rollback --data-dir ${stateRoot}" to recover.`)
+    throw new Error(`Activated Harness runtime ${activeRuntime.version} is unavailable or incompatible; DSH Cyber requires DeepSeek Harness ${SUPPORTED_HARNESS_VERSION}. Run "dsh-cyber runtime-rollback --data-dir ${stateRoot}" to return to the bundled runtime.`)
   }
   return resolveCandidateDshBin(activeRuntime.candidateRoot)
 }
