@@ -1,5 +1,7 @@
 import type {
   WorkMessage,
+  WorldArtifactRunProvenance,
+  WorldTraceArtifactRef,
   WorldTraceEntry,
   WorldTracePage,
   WorldTraceQuery,
@@ -33,9 +35,21 @@ export class InvalidWorldTraceCursorError extends Error {
   }
 }
 
+/**
+ * The only thing the trace needs from the Artifact registry.
+ *
+ * Narrow on purpose: the trace links to artifacts, it does not own them, and
+ * it must never gain the ability to read or write artifact files.
+ */
+export interface WorldTraceArtifactProvenancePort {
+  listRunProvenance(worldId: string): readonly WorldArtifactRunProvenance[]
+}
+
 export interface WorldTraceServiceOptions {
   store: SqliteStore
   actions: CharacterSkillActionRepository
+  /** Optional: without it a run simply reports no artifacts, never a guessed one. */
+  artifacts?: WorldTraceArtifactProvenancePort
   registry?: WorldTraceAdapterRegistry
   sanitizer?: TraceSanitizer
   clock?: () => string
@@ -46,6 +60,7 @@ export type WorldTraceCheckpoint = ReadonlyMap<string, string>
 export class WorldTraceService {
   readonly #store: SqliteStore
   readonly #actions: CharacterSkillActionRepository
+  readonly #artifacts: WorldTraceArtifactProvenancePort | undefined
   readonly #registry: WorldTraceAdapterRegistry
   readonly #sanitizer: TraceSanitizer
   readonly #clock: () => string
@@ -54,6 +69,7 @@ export class WorldTraceService {
   constructor(options: WorldTraceServiceOptions) {
     this.#store = options.store
     this.#actions = options.actions
+    this.#artifacts = options.artifacts
     this.#registry = options.registry ?? createWorldTraceRegistry()
     this.#sanitizer = options.sanitizer ?? new TraceSanitizer()
     this.#clock = options.clock ?? (() => new Date().toISOString())
@@ -134,16 +150,21 @@ export class WorldTraceService {
     const interactions = new Map(this.#store.listWorldModelInteractions(worldId)
       .filter((interaction) => interaction.agentRunId !== undefined)
       .map((interaction) => [interaction.agentRunId!, interaction]))
+    const artifactsByRun = groupArtifactsByRun(this.#artifacts?.listRunProvenance(worldId) ?? [])
     const facts: WorldTraceFact[] = [
-      ...this.#store.listWorldAgentRuns(worldId).map((run) => ({
-        kind: 'agent-run' as const,
-        value: {
-          worldId,
-          run,
-          messages: messagesByRun.get(run.id) ?? [],
-          ...(interactions.get(run.id) === undefined ? {} : { interaction: interactions.get(run.id)! }),
-        },
-      })),
+      ...this.#store.listWorldAgentRuns(worldId).map((run) => {
+        const artifacts = artifactsByRun.get(run.id) ?? artifactsByRun.get(`turn:${run.turnId}`)
+        return {
+          kind: 'agent-run' as const,
+          value: {
+            worldId,
+            run,
+            messages: messagesByRun.get(run.id) ?? [],
+            ...(interactions.get(run.id) === undefined ? {} : { interaction: interactions.get(run.id)! }),
+            ...(artifacts === undefined ? {} : { artifacts }),
+          },
+        }
+      }),
       ...this.#store.listWorldTraceDomainEvents(worldId, TRACE_INVISIBLE_EVENT_TYPES).map((value) => ({ kind: 'domain-event' as const, value })),
       ...(await this.#actions.listByWorld(worldId)).map((value) => ({ kind: 'skill-action' as const, value })),
     ]
@@ -171,6 +192,34 @@ export function groupMessagesByRun(messages: readonly WorkMessage[]): Map<string
   for (const message of messages) {
     add(message.metadata.agentRunId, message)
     add(message.metadata.traceTurnId, message)
+  }
+  return grouped
+}
+
+/**
+ * Indexes published artifact versions by the run that produced them.
+ *
+ * A version keyed only by its work turn is filed under `turn:<id>` so the run
+ * that owns that turn can still claim it. A version with neither key never
+ * reaches this function, so no artifact is ever attached to a guessed run.
+ */
+export function groupArtifactsByRun(
+  provenance: readonly WorldArtifactRunProvenance[],
+): Map<string, WorldTraceArtifactRef[]> {
+  const grouped = new Map<string, WorldTraceArtifactRef[]>()
+  for (const version of provenance) {
+    const key = version.agentRunId ?? (version.workTurnId === undefined ? undefined : `turn:${version.workTurnId}`)
+    if (key === undefined) continue
+    const reference: WorldTraceArtifactRef = {
+      artifactId: version.artifactId,
+      title: version.title,
+      kind: version.kind,
+      version: version.version,
+      createdAt: version.createdAt,
+    }
+    const bucket = grouped.get(key)
+    if (bucket === undefined) grouped.set(key, [reference])
+    else bucket.push(reference)
   }
   return grouped
 }
@@ -239,6 +288,7 @@ function traceSearchText(entry: WorldTraceEntry, actorNames: ReadonlyMap<string,
     entry.modelId,
     entry.provider,
     ...((entry.tools ?? []).flatMap((tool) => [tool.label, tool.name])),
+    ...((entry.artifacts ?? []).map((artifact) => artifact.title)),
   ].filter((value): value is string => typeof value === 'string')
     .join('\n')
     .toLocaleLowerCase('zh-CN')

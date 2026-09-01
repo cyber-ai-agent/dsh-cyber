@@ -8,6 +8,7 @@ import type {
   ScheduledRunTraceFact,
   WorkMessage,
   WorkSession,
+  WorldTraceArtifactRef,
   WorldTraceEntry,
   WorldTraceSourceKind,
 } from '@dsh-cyber/contracts'
@@ -30,6 +31,8 @@ export interface AgentRunTraceFact {
   run: AgentRun
   messages: WorkMessage[]
   interaction?: ModelInteractionLog
+  /** Artifact versions the registry recorded against this run. */
+  artifacts?: WorldTraceArtifactRef[]
 }
 
 export type WorldTraceFact =

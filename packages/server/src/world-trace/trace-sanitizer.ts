@@ -32,13 +32,27 @@ export class TraceSanitizer {
       label: this.text(tool.label, 200),
       ...(tool.description === undefined ? {} : { description: this.text(tool.description, 300) }),
     }))
-    const { detail: _originalDetail, reasoningSummary: _originalReasoning, tools: _originalTools, ...rest } = entry
+    // Artifact titles are author-supplied text and reach the trace verbatim, so
+    // they pass through the same redaction as every other displayed string.
+    const artifacts = entry.artifacts?.map((artifact) => ({
+      ...artifact,
+      artifactId: this.text(artifact.artifactId, 160),
+      title: this.text(artifact.title, 200) || '未命名产物',
+    }))
+    const {
+      detail: _originalDetail,
+      reasoningSummary: _originalReasoning,
+      tools: _originalTools,
+      artifacts: _originalArtifacts,
+      ...rest
+    } = entry
     return {
       ...rest,
       summary: summary || '世界活动已更新',
       ...(detail === undefined || detail.length === 0 ? {} : { detail }),
       ...(reasoningSummary === undefined || reasoningSummary.length === 0 ? {} : { reasoningSummary }),
       ...(tools === undefined ? {} : { tools }),
+      ...(artifacts === undefined ? {} : { artifacts }),
     }
   }
 

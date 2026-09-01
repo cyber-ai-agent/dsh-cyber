@@ -427,7 +427,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     worldPackages,
     worldPermissions,
   })
-  const worldTrace = new WorldTraceService({ store, actions: skillActions })
+  const worldTrace = new WorldTraceService({ store, actions: skillActions, artifacts: worldArtifacts })
   const employeeActivity = new EmployeeActivityProjectionService(store)
   employeeActivity.projectAll()
   const taskSchedules = new TaskScheduleService({ store, orchestrator, settings: worldRuntimeContext, employeeActivity })
