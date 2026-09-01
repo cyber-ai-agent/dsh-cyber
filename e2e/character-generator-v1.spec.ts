@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import type { AgentRuntimePort, CharacterImportAnalyzeResult } from '../packages/contracts/lib/index.js'
 import { createCyberServer, type CyberServer } from '../packages/server/lib/index.js'
+import { attachAppConsoleRecorder } from './console-test-helpers.js'
 
 let server: (CyberServer & { origin: string; root: string }) | undefined
 let origin = ''
@@ -56,10 +57,7 @@ test.afterAll(async () => {
 
 test('imports the real AI engineer Markdown, publishes only after review, installs, recruits and chats', async ({ page }) => {
   const consoleIssues: string[] = []
-  page.on('console', (message) => {
-    if (message.type() === 'error' || message.type() === 'warning') consoleIssues.push(`[console:${message.type()}] ${message.text()}`)
-  })
-  page.on('pageerror', (error) => consoleIssues.push(`[pageerror] ${error.message}`))
+  attachAppConsoleRecorder(page, consoleIssues)
 
   const current = requireServer()
   const workspace = current.store.listWorkspaces()[0]!
@@ -70,6 +68,13 @@ test('imports the real AI engineer Markdown, publishes only after review, instal
   const initialInstalled = current.store.listInstalledPackages(workspace.id).map((item) => `${item.packageId}@${item.version}`)
 
   await page.goto(origin)
+  // Chromium's ANGLE backend emits this performance diagnostic whenever a WebGL
+  // canvas is read back on a headless GPU. It comes from the browser driver, not
+  // from page code, so it must never fail the smoke run. Emitting it here keeps
+  // the guarantee deterministic instead of depending on the CI GPU backend.
+  await page.evaluate(() => {
+    console.warn('GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels')
+  })
   await page.getByRole('button', { name: '市场', exact: true }).click()
   const market = page.locator('.package-market-dialog')
   await expect(market).toHaveCount(1)
@@ -145,6 +150,32 @@ test('imports the real AI engineer Markdown, publishes only after review, instal
   expect(current.store.listSessions(world.id).some((session) => session.kind === 'direct' && current.store.listParticipants(session.id).some((participant) => participant.participantId === employee.id))).toBe(true)
   expect(e2eRuntime?.requests.some((request) => request.agent.id === employee.id)).toBe(true)
   expect(consoleIssues, consoleIssues.join('\n')).toEqual([])
+})
+
+test('the shared console recorder ignores only the known GPU driver noise', async ({ page }) => {
+  const issues: string[] = []
+  attachAppConsoleRecorder(page, issues)
+  await page.goto('about:blank')
+
+  await page.evaluate(() => {
+    // Browser-driver noise: the one and only thing the recorder may drop.
+    console.warn('GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels')
+    // Everything below is application signal and must still fail the E2E.
+    console.error('boom')
+    console.error('Warning: Each child in a list should have a unique "key" prop.')
+    console.warn('角色草稿自动保存失败')
+    setTimeout(() => { throw new Error('unhandled render failure') })
+  })
+
+  // console and pageerror arrive on separate channels, so compare as a set.
+  await expect.poll(() => issues.length).toBe(4)
+  expect([...issues].sort()).toEqual([
+    '[console:error] Warning: Each child in a list should have a unique "key" prop.',
+    '[console:error] boom',
+    '[console:warning] 角色草稿自动保存失败',
+    '[pageerror] unhandled render failure',
+  ].sort())
+  expect(issues.some((issue) => issue.includes('GPU stall due to ReadPixels'))).toBe(false)
 })
 
 class CharacterGeneratorRuntime implements AgentRuntimePort {
