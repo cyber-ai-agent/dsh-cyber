@@ -318,7 +318,6 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     simulationStore: worldSimulation,
     orchestrator,
   })
-  // Character Generator output is workspace-private; the catalog resolves the owning root per query.
   const generatedMarketplace = await composeCharacterGeneratorMarketplace(stateRoot, store)
   const { packageManager, packageCatalog } = await composePackageSystem({ store, stateRoot, ...(options.packageRuntime === undefined ? {} : { packageRuntime: options.packageRuntime }),
     marketplaceRoot: options.marketplaceRoot ?? fileURLToPath(new URL('../../../marketplace', import.meta.url)), workspaceMarketplaceRoots: generatedMarketplace.workspaceRoots })
@@ -443,7 +442,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerSystemRoutes(router, { store, stateRoot, runtimeUpdates, applicationUpdates })
   registerWorkspaceFileRoutes(router, { worldFiles, access: worldAccess })
   registerCatalogRoutes(router, { store, packageCatalog, worldPackages })
-  registerCharacterGeneratorRoutes(router, { store, packageCatalog, skillCatalog, analyzer: characterImportAnalyzer, containmentRoot: stateRoot, resolveMarketplaceRoot: generatedMarketplace.resolveMarketplaceRoot })
+  registerCharacterGeneratorRoutes(router, { store, packageCatalog, skillCatalog, analyzer: characterImportAnalyzer, resolveMarketplaceRoot: generatedMarketplace.resolveMarketplaceRoot, containmentRoot: generatedMarketplace.containmentRoot })
   registerWorkspaceRoutes(router, { store })
   registerModelRoutes(router, { store, credentials, modelCatalog, interactions })
   registerIntegrationRoutes(router, {

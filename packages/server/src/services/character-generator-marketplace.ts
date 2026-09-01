@@ -144,6 +144,8 @@ export interface CharacterGeneratorMarketplace {
   workspaceRoots: WorkspaceScopedCatalogRoots
   /** Where the generator writes a workspace's newly published characters. */
   resolveMarketplaceRoot(workspaceId: string): string
+  /** Host boundary every generated write must stay inside. */
+  containmentRoot: string
 }
 
 /**
@@ -162,5 +164,6 @@ export async function composeCharacterGeneratorMarketplace(
       resolve: (workspaceId) => [characterGeneratorMarketplaceRoot(stateRoot, workspaceId)],
     },
     resolveMarketplaceRoot: (workspaceId) => characterGeneratorMarketplaceRoot(stateRoot, workspaceId),
+    containmentRoot: stateRoot,
   }
 }
