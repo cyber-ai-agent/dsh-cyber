@@ -463,7 +463,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerTaskScheduleRoutes(router, { store, schedules: taskSchedules, access: worldAccess })
   registerPackageRoutes(router, { store, packageManager, packageCatalog, skillRuntime, worldMarketplace, worldPackages, worldAccess, skillCatalog, credentials, ...(options.workshopDraftGenerator === undefined ? {} : { workshopDraftGenerator: options.workshopDraftGenerator }) })
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
-  registerWorldTraceRoutes(router, { store, trace: worldTrace, access: worldAccess })
+  registerWorldTraceRoutes(router, { store, trace: worldTrace, access: worldAccess, contextInspection: profileRuntime.contextInspection })
   registerCompletionJobRoutes(router, { store, access: worldAccess, wake: () => completionWorker.wake() })
   registerWorldArtifactRoutes(router, { store, artifacts: worldArtifacts, access: worldAccess, authority })
   registerWorldKnowledgeRoutes(router, {

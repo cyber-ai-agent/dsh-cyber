@@ -24,6 +24,11 @@ import {
   contextSnapshotSequence,
   lastDurableObservation,
 } from './employee-observation-runtime.js'
+import { ContextInspectionService } from './context-inspection-service.js'
+import {
+  defaultContextSnapshotService,
+  type ContextSnapshotService,
+} from './context-snapshot-service.js'
 import {
   availableWorldSkillIds,
   type WorldSkillAvailabilityPort,
@@ -39,6 +44,9 @@ type CharacterRuntimeStore = Pick<
   // Read back the raw messages behind a retrieved memory, and decide which of
   // the older turns an indexed memory can still bring back.
   | 'getMessages' | 'listEmployeeMemoryIndex'
+  // Record what this run actually ran with: structure and pointers, no text.
+  | 'getAgentRun' | 'saveAgentRunContextSnapshot' | 'getAgentRunContextSnapshot'
+  | 'getEmployeeMemoryIndexEntry'
 >>
 
 const OBSERVED_THROUGH_KEY = 'contextObservedThroughSequence'
@@ -52,6 +60,17 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
   readonly #skillAvailability: WorldSkillAvailabilityPort | undefined
   readonly #memory: CharacterMemoryContextPort | undefined
   readonly #context: ConversationContextComposer | undefined
+  readonly #snapshots: ContextSnapshotService | undefined
+  /**
+   * What the Context Inspector reads back.
+   *
+   * The record is taken here rather than rebuilt later from durable rows: a
+   * rebuild would disagree with the real turn about the persona, the permission
+   * mode and the retrieval ranking, and the Inspector's whole value is that it
+   * does not. It is process-local and owns no durable fact, so the runtime that
+   * composed the context is also the natural place to keep the note of it.
+   */
+  readonly contextInspection: ContextInspectionService
 
   constructor(
     inner: AgentRuntimePort,
@@ -60,17 +79,20 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
     authority?: Pick<WorldAuthorityPort, 'get'>,
     skillAvailability?: WorldSkillAvailabilityPort,
     memory?: CharacterMemoryContextPort,
+    inspection?: ContextInspectionService,
   ) {
     this.#inner = inner
     this.#store = store
     this.#skills = skills
     this.#authority = authority
     this.#skillAvailability = skillAvailability
+    this.contextInspection = inspection ?? new ContextInspectionService()
     this.#memory = memory ?? defaultMemoryForStore(store)
     this.#context = defaultConversationContextComposer(
       store as Record<string, unknown>,
       this.#memory as ConversationMemoryLayersPort | undefined,
     )
+    this.#snapshots = defaultContextSnapshotService(store as Record<string, unknown>)
   }
 
   async runTurn(request: AgentTurnRequest) {
@@ -129,6 +151,34 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       ...(request.workTurnId === undefined ? {} : { workTurnId: request.workTurnId }),
       ...(request.contextBudget === undefined ? {} : { memoryBudgetTokens: request.contextBudget.memoryTokens }),
     })
+    // The context record is written before the turn runs, so a run that fails
+    // or is interrupted still explains what it was given. It is observability:
+    // it never fails the turn, and it stores no prompt text.
+    if (composed !== undefined && request.agentRunId !== undefined) {
+      try {
+        this.#snapshots?.save({ agentRunId: request.agentRunId, envelope: composed.envelope })
+      } catch {
+        // A missing context record must never cost the owner a reply.
+      }
+    }
+
+    // Recorded before the turn runs, so a run that fails or is aborted still
+    // leaves behind the context it was given - that is exactly the turn a user
+    // most wants to look at afterwards.
+    if (composed !== undefined) {
+      this.contextInspection.record({
+        conversationId: request.conversationId,
+        employeeId: agent.id,
+        employeeName: agent.displayName,
+        lane: composed.coverage.lane,
+        ...(request.workTurnId === undefined ? {} : { workTurnId: request.workTurnId }),
+        envelope: composed.envelope,
+        memoryHits: composed.memoryHits,
+        coverage: composed.coverage,
+        ...(request.contextBudget === undefined ? {} : { budget: request.contextBudget }),
+      })
+    }
+
     const memoryContext = composed !== undefined
       ? undefined
       : await this.#memory?.compose({
@@ -155,6 +205,11 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       ...request,
       agent,
       prompt,
+      // The composer owns the cache decision because it owns the layer order
+      // that makes the prefix cacheable. The provider adapter only maps it.
+      ...(composed?.envelope.promptCache === undefined
+        ? {}
+        : { promptCache: composed.envelope.promptCache }),
       ...(composed === undefined ? {} : { history: composed.recentHistory }),
       ...(durableObserved === undefined ? {} : { observedThroughSequence: durableObserved }),
       ...(onEvent === undefined ? {} : { onEvent }),
