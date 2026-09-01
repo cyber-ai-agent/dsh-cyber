@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { DomainEvent, EmployeeInstance, World } from '@dsh-cyber/contracts'
 
 import {
+  aiAcademyTheme,
   cyberCompanyTheme,
   findPath,
   projectWorldRuntime,
@@ -65,6 +66,22 @@ function event(sequence: number, type: DomainEvent['type'], payload: DomainEvent
 describe('world theme manifest', () => {
   it('validates the built-in company theme', () => {
     expect(validateWorldThemeManifest(cyberCompanyTheme)).toEqual({ valid: true, errors: [] })
+  })
+
+  it('validates the built-in AI academy theme and its classroom scene', () => {
+    expect(validateWorldThemeManifest(aiAcademyTheme)).toEqual({ valid: true, errors: [] })
+    const scene = aiAcademyTheme.scenes[0]!
+    expect(scene.id).toBe('university-classroom')
+    expect(scene.interactables.map((item) => item.id)).toEqual([
+      'knowledge-breakdown-desk',
+      'syllabus-board',
+      'teaching-material-bench',
+      'question-desk',
+      'knowledge-graph-wall',
+      'course-result-showcase',
+      'lecture-blackboard',
+      'cohort-seating',
+    ])
   })
 
   it('rejects missing asset and anchor references', () => {
