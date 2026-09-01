@@ -2,7 +2,7 @@ import { BUILTIN_BLUEPRINTS, BUILTIN_WORLD_TEMPLATES } from '@dsh-cyber/catalog'
 import { BUILTIN_EMBODIMENT_PRESETS } from '@dsh-cyber/catalog/creative'
 import type { CyberMarketActivation, CyberMarketKind, CyberMarketPackage } from '@dsh-cyber/contracts'
 import type { WorldThemeManifestV1 } from '@dsh-cyber/contracts'
-import type { LocalPackageCatalog } from '@dsh-cyber/package-runtime'
+import type { LocalPackageCatalog, PackageCatalogScope } from '@dsh-cyber/package-runtime'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 import { validateWorldThemeManifest } from '@dsh-cyber/world-runtime'
 
@@ -56,29 +56,34 @@ export function registerCatalogRoutes(router: Router, dependencies: CatalogRoute
     const installed = workspaceId === null ? [] : store.listInstalledPackages(workspaceId)
     const worldId = url.searchParams.get('worldId')
     const worldInstances = worldId === null ? [] : store.listWorldPackageInstances(worldId, 'active')
+    // Workspace-private packages (Character Generator output) only enter the
+    // listing when the caller names the workspace that owns them.
+    const scope = catalogScope(store, workspaceId)
     const catalogItems = await packageCatalog.list({
       ...(market === null ? {} : { market: market as CyberMarketKind }),
       ...(url.searchParams.get('q') === null ? {} : { query: url.searchParams.get('q')! }),
       installed,
+      ...scope,
     })
     const items = await Promise.all(catalogItems.map(async (item) => ({
       ...item,
       ...(worldInstances.find((instance) => instance.packageId === item.manifest.id) === undefined
         ? {}
         : { worldVersion: worldInstances.find((instance) => instance.packageId === item.manifest.id)!.packageVersion }),
-      ...await marketActivation(packageCatalog, item),
+      ...await marketActivation(packageCatalog, item, scope),
     })))
     writeJson(response, 200, { items })
   })
 
-  router.get(/^\/api\/marketplace\/packages\/([^/]+)\/([^/]+)\/preview$/, async ({ response, params }) => {
-    const item = await packageCatalog.find(params[0]!, params[1]!)
+  router.get(/^\/api\/marketplace\/packages\/([^/]+)\/([^/]+)\/preview$/, async ({ response, params, url }) => {
+    const scope = catalogScope(store, url.searchParams.get('workspaceId'))
+    const item = await packageCatalog.find(params[0]!, params[1]!, scope)
     if (item === undefined) throw new HttpError(404, 'market_package_not_found', 'Marketplace package not found')
     let previewPath: string | undefined
     if (item.market === 'theme') {
       const entrypoint = item.manifest.entrypoints?.find((candidate) => candidate.kind === 'world-theme')
       if (entrypoint === undefined) throw new HttpError(422, 'theme_entrypoint_missing', 'World theme entrypoint is missing')
-      const rawManifest = JSON.parse((await packageCatalog.readDeclaredFile(item, entrypoint.path)).toString('utf8')) as unknown
+      const rawManifest = JSON.parse((await packageCatalog.readDeclaredFile(item, entrypoint.path, scope)).toString('utf8')) as unknown
       const validation = validateWorldThemeManifest(rawManifest)
       if (!validation.valid) throw new HttpError(422, 'invalid_world_theme', 'World theme manifest is invalid')
       const manifest = rawManifest as WorldThemeManifestV1
@@ -90,13 +95,13 @@ export function registerCatalogRoutes(router: Router, dependencies: CatalogRoute
       // Packages can optionally ship a declared preview image.
       const entrypoint = item.manifest.entrypoints?.find((candidate) => candidate.kind === 'skin')
       if (entrypoint !== undefined) {
-        const raw = JSON.parse((await packageCatalog.readDeclaredFile(item, entrypoint.path)).toString('utf8')) as Record<string, unknown>
+        const raw = JSON.parse((await packageCatalog.readDeclaredFile(item, entrypoint.path, scope)).toString('utf8')) as Record<string, unknown>
         const skin = parseSkinManifest(raw, { packageId: item.manifest.id, packageVersion: item.manifest.version })
         if (skin.previewAsset !== undefined && item.manifest.files.some((file) => file.path === skin.previewAsset)) previewPath = skin.previewAsset
       }
     }
     if (previewPath === undefined) throw new HttpError(404, 'market_preview_missing', 'Marketplace preview is missing')
-    const body = await packageCatalog.readDeclaredFile(item, previewPath)
+    const body = await packageCatalog.readDeclaredFile(item, previewPath, scope)
     const contentType = previewPath.endsWith('.webp') ? 'image/webp' : previewPath.endsWith('.jpg') || previewPath.endsWith('.jpeg') ? 'image/jpeg' : 'image/png'
     writeBinary(response, 200, body, contentType)
   })
@@ -105,12 +110,13 @@ export function registerCatalogRoutes(router: Router, dependencies: CatalogRoute
 async function marketActivation(
   packageCatalog: LocalPackageCatalog,
   item: CyberMarketPackage,
+  scope: PackageCatalogScope,
 ): Promise<{ activation?: CyberMarketActivation }> {
   try {
     if (item.market === 'theme' && item.manifest.kind === 'world-theme') {
       const entrypoint = item.manifest.entrypoints?.find((candidate) => candidate.kind === 'world-theme')
       if (entrypoint === undefined) return {}
-      const rawManifest = JSON.parse((await packageCatalog.readDeclaredFile(item, entrypoint.path)).toString('utf8')) as unknown
+      const rawManifest = JSON.parse((await packageCatalog.readDeclaredFile(item, entrypoint.path, scope)).toString('utf8')) as unknown
       const validation = validateWorldThemeManifest(rawManifest)
       if (!validation.valid) return {}
       const manifest = rawManifest as WorldThemeManifestV1
@@ -126,7 +132,7 @@ async function marketActivation(
     if (item.market === 'plugin') {
       const entrypoint = item.manifest.entrypoints?.find((candidate) => candidate.kind === 'prompt-transform')
       if (entrypoint === undefined) return {}
-      const definition = parsePromptTransformDefinition(JSON.parse((await packageCatalog.readDeclaredFile(item, entrypoint.path)).toString('utf8')))
+      const definition = parsePromptTransformDefinition(JSON.parse((await packageCatalog.readDeclaredFile(item, entrypoint.path, scope)).toString('utf8')))
       const commands = definition.transforms
         .filter((transform) => transform.trigger !== 'always')
         .map((transform) => ({ trigger: transform.trigger, description: transform.description }))
@@ -136,7 +142,7 @@ async function marketActivation(
       const entrypoint = item.manifest.entrypoints?.find((candidate) => candidate.kind === 'employee-blueprint')
       if (entrypoint === undefined) return {}
       const blueprint = parseEmployeeBlueprintManifest(
-        JSON.parse((await packageCatalog.readDeclaredFile(item, entrypoint.path)).toString('utf8')),
+        JSON.parse((await packageCatalog.readDeclaredFile(item, entrypoint.path, scope)).toString('utf8')),
         { packageId: item.manifest.id, packageCapabilities: item.manifest.capabilities },
       )
       return {
@@ -152,7 +158,7 @@ async function marketActivation(
       const entrypoint = item.manifest.entrypoints?.find((candidate) => candidate.kind === 'skin')
       if (entrypoint === undefined) return {}
       const skin = parseSkinManifest(
-        JSON.parse((await packageCatalog.readDeclaredFile(item, entrypoint.path)).toString('utf8')),
+        JSON.parse((await packageCatalog.readDeclaredFile(item, entrypoint.path, scope)).toString('utf8')),
         { packageId: item.manifest.id, packageVersion: item.manifest.version },
       )
       return {
@@ -169,4 +175,14 @@ async function marketActivation(
     // the strict preview/install path will still reject their entrypoint content.
   }
   return {}
+}
+
+/**
+ * Narrows a catalog read to one workspace. An unknown or absent workspace id
+ * yields an empty scope, so workspace-private packages stay invisible rather
+ * than falling back to a shared view.
+ */
+function catalogScope(store: Pick<SqliteStore, 'getWorkspace'>, workspaceId: string | null): PackageCatalogScope {
+  if (workspaceId === null || workspaceId === '') return {}
+  return store.getWorkspace(workspaceId) === undefined ? {} : { workspaceId }
 }

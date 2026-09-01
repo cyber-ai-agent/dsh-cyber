@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 
-import { LocalPackageCatalog, LocalPackageRuntime, PackageManager, type PackageRuntimePort } from '@dsh-cyber/package-runtime'
+import { LocalPackageCatalog, LocalPackageRuntime, PackageManager, type PackageRuntimePort, type WorkspaceScopedCatalogRoots } from '@dsh-cyber/package-runtime'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { validateStagedPackageEntrypoints } from '../installed-package-runtime.js'
@@ -10,6 +10,8 @@ export interface PackageSystemCompositionInput {
   stateRoot: string
   marketplaceRoot: string
   additionalMarketplaceRoots?: string[]
+  /** Generated-package roots that belong to a single workspace. */
+  workspaceMarketplaceRoots?: WorkspaceScopedCatalogRoots
   packageRuntime?: PackageRuntimePort
 }
 
@@ -25,6 +27,7 @@ export async function composePackageSystem(input: PackageSystemCompositionInput)
   })
   const packageCatalog = new LocalPackageCatalog(input.marketplaceRoot, {
     additionalRoots: input.additionalMarketplaceRoots ?? [],
+    ...(input.workspaceMarketplaceRoots === undefined ? {} : { workspaceRoots: input.workspaceMarketplaceRoots }),
   })
   return { packageManager, packageCatalog }
 }

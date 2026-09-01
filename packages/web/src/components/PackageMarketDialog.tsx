@@ -283,8 +283,8 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
                   const selectedClass = selected?.manifest.id === item.manifest.id ? ' is-selected' : ''
                   return (
                     <article key={`${item.manifest.id}-${item.manifest.version}`} className={`is-${state}${selectedClass}`}>
-                      {item.market === 'theme' ? <img className="market-world-cover" src={marketplacePreviewUrl(item)} alt={`${item.manifest.displayName}世界预览`} /> : null}
-                      {item.market === 'talent' ? <img className="market-role-cover" src={marketplacePreviewUrl(item)} alt={`${item.manifest.displayName}角色风格预览`} /> : null}
+                      {item.market === 'theme' ? <img className="market-world-cover" src={marketplacePreviewUrl(item, props.workspaceId)} alt={`${item.manifest.displayName}世界预览`} /> : null}
+                      {item.market === 'talent' ? <img className="market-role-cover" src={marketplacePreviewUrl(item, props.workspaceId)} alt={`${item.manifest.displayName}角色风格预览`} /> : null}
                       {item.market === 'skin' ? <SkinPreview item={item} /> : null}
                       <header><MarketIcon market={item.market} /><div><strong>{item.manifest.displayName}</strong><span>{item.manifest.publisher} · v{item.manifest.version}</span></div>{item.verified ? <em><ShieldCheck size={14} />官方校验</em> : <em className="is-community">社区包</em>}</header>
                       <p>{item.manifest.summary}</p>
@@ -307,13 +307,13 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
           </main>
           <aside className="market-review-panel">
             {creatingWorldFor !== undefined
-              ? <WorldCreationReview item={creatingWorldFor} name={worldName} creating={creatingWorld} onName={setWorldName} onCreate={() => void createWorld()} />
+              ? <WorldCreationReview item={creatingWorldFor} workspaceId={props.workspaceId} name={worldName} creating={creatingWorld} onName={setWorldName} onCreate={() => void createWorld()} />
               : selectedCurrent !== undefined && preview !== undefined
                 ? <PermissionReview manifest={selectedCurrent.manifest} preview={preview} approved={approved} installing={props.installing} onApproved={setApproved} onInstall={() => void install()} />
                 : selectedCurrent?.market === 'skin' && (selectedInstalled !== undefined || selectedCurrent.manifest.id === 'default-skin')
                   ? <SkinActivationReview item={selectedCurrent} currentSkinId={props.currentSkinId} installedPackage={selectedInstalledPackage} installing={props.installing} confirmingUninstall={confirmingUninstall} onConfirmUninstall={setConfirmingUninstall} onUninstall={props.onUninstall} onApplySkin={props.onApplySkin} />
                   : selectedInstalled?.market === 'talent'
-                  ? <TalentActivationReview item={selectedInstalled} world={props.world} installedPackage={selectedInstalledPackage} installing={props.installing} confirmingUninstall={confirmingUninstall} onConfirmUninstall={setConfirmingUninstall} onUninstall={props.onUninstall} onRecruit={() => props.onRecruitTalent(selectedInstalled)} />
+                  ? <TalentActivationReview item={selectedInstalled} workspaceId={props.workspaceId} world={props.world} installedPackage={selectedInstalledPackage} installing={props.installing} confirmingUninstall={confirmingUninstall} onConfirmUninstall={setConfirmingUninstall} onUninstall={props.onUninstall} onRecruit={() => props.onRecruitTalent(selectedInstalled)} />
                   : selectedInstalled?.market === 'plugin'
                     ? <PluginActivationReview item={selectedInstalled} installedPackage={selectedInstalledPackage} installing={props.installing} confirmingUninstall={confirmingUninstall} onConfirmUninstall={setConfirmingUninstall} onUninstall={props.onUninstall} onOpenSettings={props.onOpenSettings} onUse={props.onUsePlugin} />
                     : <InstalledOverview installed={props.installed} transactions={props.transactions} installing={props.installing} confirmingUninstall={confirmingUninstall} onConfirmUninstall={setConfirmingUninstall} onUninstall={props.onUninstall} />}
@@ -349,9 +349,9 @@ function PermissionReview({ manifest, preview, approved, installing, onApproved,
   return <section className="permission-review permission-review--market"><header><div><span>{packageKindLabel(manifest.kind)}</span><h4>{manifest.displayName} <small>v{manifest.version}</small></h4><p>{manifest.publisher} · {manifest.license}</p></div><CheckCircle size={24} /></header><p>{manifest.summary}</p><PermissionGroup title="新增能力" values={preview.addedCapabilities.map(capabilityLabel)} empty="没有新增能力" tone="warning" /><PermissionGroup title="数据外发" values={preview.dataEgress} empty={manifest.kind === 'skill' ? '发布者声明不外发数据（Skill 的外发声明由发布者负责，运行时不强制）' : '不外发数据'} tone={preview.dataEgress.length > 0 ? 'danger' : manifest.kind === 'skill' ? 'warning' : 'safe'} /><div className="package-file-summary">激活前将再次校验 {manifest.files.length} 个文件与入口定义；失败不会覆盖当前版本。</div><label className="approval-check"><input type="checkbox" checked={approved} onChange={(event) => onApproved(event.target.checked)} /><span>我已审阅发布者、许可证、文件与运行能力。</span></label><button className="primary-button" type="button" disabled={!approved || installing} onClick={onInstall}>{installing ? '正在安装并激活…' : preview.previousVersion ? `批准升级至 v${preview.version}` : `批准安装 v${preview.version}`}</button></section>
 }
 
-function WorldCreationReview({ item, name, creating, onName, onCreate }: { item: CyberMarketPackage; name: string; creating: boolean; onName(value: string): void; onCreate(): void }) {
+function WorldCreationReview({ item, workspaceId, name, creating, onName, onCreate }: { item: CyberMarketPackage; workspaceId: string; name: string; creating: boolean; onName(value: string): void; onCreate(): void }) {
   return <section className="world-creation-review">
-    <img src={marketplacePreviewUrl(item)} alt={`${item.manifest.displayName}世界预览`} />
+    <img src={marketplacePreviewUrl(item, workspaceId)} alt={`${item.manifest.displayName}世界预览`} />
     <div><span>已安装的世界皮肤</span><h3>{item.manifest.displayName}</h3><p>{item.manifest.summary}</p></div>
     <ul><li>创建独立世界，不覆盖当前世界</li><li>自动加入三名对应设定的起始角色</li><li>会话、档案、任务和运行状态彼此隔离</li></ul>
     <label className="dialog-field"><span>新世界名称</span><input value={name} maxLength={60} autoFocus onChange={(event) => onName(event.target.value)} placeholder="为这个世界命名" /></label>
@@ -359,11 +359,11 @@ function WorldCreationReview({ item, name, creating, onName, onCreate }: { item:
   </section>
 }
 
-function TalentActivationReview({ item, world, installedPackage, installing, confirmingUninstall, onConfirmUninstall, onUninstall, onRecruit }: { item: CyberMarketPackage; world: World; installedPackage?: InstalledPackage | undefined; installing: boolean; confirmingUninstall?: string | undefined; onConfirmUninstall(packageId?: string): void; onUninstall(item: InstalledPackage): Promise<void>; onRecruit(): Promise<void> }) {
+function TalentActivationReview({ item, workspaceId, world, installedPackage, installing, confirmingUninstall, onConfirmUninstall, onUninstall, onRecruit }: { item: CyberMarketPackage; workspaceId: string; world: World; installedPackage?: InstalledPackage | undefined; installing: boolean; confirmingUninstall?: string | undefined; onConfirmUninstall(packageId?: string): void; onUninstall(item: InstalledPackage): Promise<void>; onRecruit(): Promise<void> }) {
   const activation = item.activation?.kind === 'employee-blueprint' ? item.activation : undefined
   const compatible = activation !== undefined && (world.templateId === 'personal-world' || activation.worldTemplateId === world.templateId)
   return <section className="market-activation-review">
-    <img src={marketplacePreviewUrl(item)} alt={`${item.manifest.displayName}角色风格预览`} />
+    <img src={marketplacePreviewUrl(item, workspaceId)} alt={`${item.manifest.displayName}角色风格预览`} />
     <header><span className="market-activation-review__mark"><UserPlus size={20} /></span><div><span>角色模板已安装</span><h3>{item.manifest.displayName}</h3><p>{item.manifest.summary}</p></div></header>
     <dl><div><dt>目标世界</dt><dd>{world.name}</dd></div><div><dt>适用设定</dt><dd>{roleWorldLabel(activation?.worldTemplateId)}</dd></div></dl>
     {activation === undefined ? <p className="market-activation-review__notice is-warning">模板入口缺少可用的角色定义，请重新安装或检查软件包。</p> : compatible ? <p className="market-activation-review__notice"><CheckCircle size={16} />与当前世界兼容。下一步可确认名字和最小权限，完成后会直接打开私聊。</p> : <p className="market-activation-review__notice is-warning"><Warning size={16} />这名角色属于“{roleWorldLabel(activation.worldTemplateId)}”，请先切换到对应世界再招募。</p>}
@@ -489,8 +489,10 @@ function SkinActivationReview({
   )
 }
 
-function marketplacePreviewUrl(item: CyberMarketPackage): string {
-  return `/api/marketplace/packages/${encodeURIComponent(item.manifest.id)}/${encodeURIComponent(item.manifest.version)}/preview`
+// Generated characters live in a workspace-private catalog root, so the preview
+// endpoint only resolves them when the request names the owning workspace.
+function marketplacePreviewUrl(item: CyberMarketPackage, workspaceId: string): string {
+  return `/api/marketplace/packages/${encodeURIComponent(item.manifest.id)}/${encodeURIComponent(item.manifest.version)}/preview?workspaceId=${encodeURIComponent(workspaceId)}`
 }
 
 function roleWorldLabel(templateId: string | undefined): string {

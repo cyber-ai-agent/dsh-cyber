@@ -107,6 +107,7 @@ import type { CharacterSkillAdapterRegistry } from './skills/skill-adapter.js'
 import type { WorldSkillAvailabilityPort } from './services/world-skill-availability.js'
 import type { CreativeWorkshopDraftGeneratorPort } from './services/creative-workshop-draft-generator.js'
 import { CharacterImportAnalyzer, type CharacterImportAnalyzerPort } from './services/character-import-analyzer.js'
+import { composeCharacterGeneratorMarketplace } from './services/character-generator-marketplace.js'
 import { createWorldManagementHost } from './skills/world-management-host.js'
 import { RuntimeStreamHub } from './streams/runtime-stream-hub.js'
 import { WorldStreamHub } from './streams/world-stream-hub.js'
@@ -317,8 +318,10 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     simulationStore: worldSimulation,
     orchestrator,
   })
+  // Character Generator output is workspace-private; the catalog resolves the owning root per query.
+  const generatedMarketplace = await composeCharacterGeneratorMarketplace(stateRoot, store)
   const { packageManager, packageCatalog } = await composePackageSystem({ store, stateRoot, ...(options.packageRuntime === undefined ? {} : { packageRuntime: options.packageRuntime }),
-    marketplaceRoot: options.marketplaceRoot ?? fileURLToPath(new URL('../../../marketplace', import.meta.url)), additionalMarketplaceRoots: [join(stateRoot, 'workshop', 'character-generator', 'marketplace')] })
+    marketplaceRoot: options.marketplaceRoot ?? fileURLToPath(new URL('../../../marketplace', import.meta.url)), workspaceMarketplaceRoots: generatedMarketplace.workspaceRoots })
   const runtimeStreamHub = new RuntimeStreamHub()
   const worldStreamHub = new WorldStreamHub()
   const worldRuntime = new WorldRuntimeService({
@@ -440,7 +443,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerSystemRoutes(router, { store, stateRoot, runtimeUpdates, applicationUpdates })
   registerWorkspaceFileRoutes(router, { worldFiles, access: worldAccess })
   registerCatalogRoutes(router, { store, packageCatalog, worldPackages })
-  registerCharacterGeneratorRoutes(router, { store, packageCatalog, skillCatalog, analyzer: characterImportAnalyzer, marketplaceRoot: join(stateRoot, 'workshop', 'character-generator', 'marketplace') })
+  registerCharacterGeneratorRoutes(router, { store, packageCatalog, skillCatalog, analyzer: characterImportAnalyzer, resolveMarketplaceRoot: generatedMarketplace.resolveMarketplaceRoot })
   registerWorkspaceRoutes(router, { store })
   registerModelRoutes(router, { store, credentials, modelCatalog, interactions })
   registerIntegrationRoutes(router, {

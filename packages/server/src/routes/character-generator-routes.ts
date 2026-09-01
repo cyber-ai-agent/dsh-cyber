@@ -50,7 +50,11 @@ export interface CharacterGeneratorRoutesDependencies {
   packageCatalog: LocalPackageCatalog
   skillCatalog: Pick<SkillCatalogService, 'listWorkspace'>
   analyzer: CharacterImportAnalyzerPort
-  marketplaceRoot: string
+  /**
+   * Generated packages are workspace-private, so the root is resolved per
+   * request instead of being fixed once at registration.
+   */
+  resolveMarketplaceRoot(workspaceId: string): string
 }
 
 export function registerCharacterGeneratorRoutes(
@@ -58,8 +62,6 @@ export function registerCharacterGeneratorRoutes(
   dependencies: CharacterGeneratorRoutesDependencies,
 ): void {
   const { store, packageCatalog, skillCatalog, analyzer } = dependencies
-  const marketplaceRoot = resolve(dependencies.marketplaceRoot)
-  const talentRoot = join(marketplaceRoot, 'talent')
 
   router.get(/^\/api\/workspaces\/([^/]+)\/character-generator\/catalog$/, async ({ response, params, url }) => {
     const workspaceId = params[0]!
@@ -115,6 +117,8 @@ export function registerCharacterGeneratorRoutes(
       rejectUnknown: true,
     })
     const avatar = await loadPreview(packageCatalog, parseAvatarSelection(body.avatar))
+    const marketplaceRoot = resolve(dependencies.resolveMarketplaceRoot(workspaceId))
+    const talentRoot = join(marketplaceRoot, 'talent')
     const packageId = `generated.character.${randomUUID().replaceAll('-', '')}`
     const packageVersion = '1.0.0'
     await mkdir(marketplaceRoot, { recursive: true, mode: 0o700 })
@@ -158,7 +162,7 @@ export function registerCharacterGeneratorRoutes(
       await rename(stagingDirectory, installedDirectory)
       staged = false
       published = true
-      const item = await packageCatalog.find(packageId, packageVersion)
+      const item = await packageCatalog.find(packageId, packageVersion, { workspaceId })
       if (item === undefined || item.verified) throw new Error('Generated character package failed catalog verification')
       const output: CharacterImportPublishResult = { item, blueprint: compiled.blueprint }
       writeJson(response, 201, output satisfies CharacterImportPublishResult)

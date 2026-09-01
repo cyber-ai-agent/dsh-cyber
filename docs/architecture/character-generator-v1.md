@@ -34,10 +34,30 @@ The published package keeps the original input and the structured analysis snaps
 Generated marketplace source lives below:
 
 ```text
-stateRoot/workshop/character-generator/marketplace/talent/<package-id>/
+stateRoot/workshop/character-generator/workspaces/<workspace-segment>/marketplace/talent/<package-id>/
 ```
 
 This remains physically separate from the application checkout and is already covered by the Backup Bundle's `workshop/` boundary. Installation copies a verified immutable version into the existing `stateRoot/packages` library.
+
+## Workspace isolation
+
+A generated character belongs to the workspace that created it, and the path above is the ownership record.
+
+`<workspace-segment>` is derived from the workspace ID as a readable slug plus a SHA-256 suffix. The suffix — not the slug — carries the identity, so two workspace IDs never share a directory even on a case-insensitive filesystem, and no ID can produce a separator or a `..` segment.
+
+Isolation is enforced by the server's catalog authority, not by the UI:
+
+- `LocalPackageCatalog` resolves the owning root per query. A `list`, `find` or `readDeclaredFile` call that names no workspace sees no generated package at all, so a caller that forgets to pass a workspace fails closed rather than seeing everyone's.
+- `/api/marketplace`, the marketplace preview and both install routes pass the caller's workspace, so another workspace's generated talent is a 404 rather than a hidden card.
+- `/api/workspaces/:id/packages/install` takes a caller-supplied `sourceDirectory`, so it additionally calls `assertInstallSource`, which refuses a directory that lies inside the workspace container but outside the caller's own root. Naming the real path of another workspace's character is refused.
+
+Because ownership lives in the path, it survives a backup/restore round trip and a manual copy of the state root.
+
+### Migrating V1 data
+
+Character Generator V1 wrote every generated package to a single global `character-generator/marketplace/talent/`, with no workspace segment — the leak this layout closes. On startup, anything still there is moved into the oldest workspace and the legacy directory is retired.
+
+V1 recorded no workspace on those packages, so their true origin is unknowable. Adopting them into one workspace keeps the user's work — nothing is deleted, and a package whose ID already exists in the target is left alone — while restoring the boundary. Leaving them globally readable would have preserved the defect. A user with several workspaces may therefore find a pre-upgrade generated character under their oldest workspace rather than the one that created it; it can be reinstalled from there.
 
 ## UI contract
 
