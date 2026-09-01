@@ -43,10 +43,7 @@ async function main() {
       names.add(object.name)
       objects.set(object.name, object)
     }
-    if ('material' in object) {
-      const list = Array.isArray(object.material) ? object.material : [object.material]
-      for (const material of list) if (material?.name) materials.add(material.name)
-    }
+    for (const material of materialsOf(object)) if (material?.name) materials.add(material.name)
   })
   for (const name of REQUIRED_VARIANT_NODES) {
     if (!names.has(name)) throw new Error(`Generated official avatar is missing managed variant node: ${name}`)
@@ -57,12 +54,14 @@ async function main() {
   if (names.has('Suit_Head')) throw new Error('Generated official avatar accidentally imported the source identity head')
   for (const name of REQUIRED_OFFICE_NODES) {
     const object = objects.get(name)
-    if (object === undefined || object.isSkinnedMesh !== true) {
-      throw new Error(`Generated official avatar is missing skinned office outfit node: ${name}`)
-    }
-    for (const bone of object.skeleton.bones) {
-      if (FORBIDDEN_SOURCE_BONES.has(bone.name)) {
-        throw new Error(`Office outfit still depends on copied source skeleton bone: ${bone.name}`)
+    if (object === undefined) throw new Error(`Generated official avatar is missing office outfit node: ${name}`)
+    const skinnedMeshes = skinnedDescendants(object)
+    if (skinnedMeshes.length === 0) throw new Error(`Generated official avatar office outfit node has no skinned mesh: ${name}`)
+    for (const mesh of skinnedMeshes) {
+      for (const bone of mesh.skeleton.bones) {
+        if (FORBIDDEN_SOURCE_BONES.has(bone.name)) {
+          throw new Error(`Office outfit still depends on copied source skeleton bone: ${bone.name}`)
+        }
       }
     }
   }
@@ -84,6 +83,17 @@ async function main() {
   console.log(`Managed office materials: ${REQUIRED_OFFICE_MATERIALS.join(', ')}`)
   console.log(`Embedded animation clips: ${animations.length}`)
   if (animations.length > 0) console.log(`Animation names: ${animations.join(', ')}`)
+}
+
+function skinnedDescendants(root) {
+  const items = []
+  root.traverse((object) => { if (object.isSkinnedMesh === true) items.push(object) })
+  return items
+}
+
+function materialsOf(object) {
+  if (!('material' in object) || object.material === undefined) return []
+  return Array.isArray(object.material) ? object.material : [object.material]
 }
 
 main().catch((error) => {
