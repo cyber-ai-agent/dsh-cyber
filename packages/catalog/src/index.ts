@@ -43,6 +43,14 @@ export const BUILTIN_WORLD_TEMPLATES: readonly WorldTemplateManifest[] = [
     summary: '围绕深空观测、样本分析与联合研究协作的轨道世界。',
     terminology: { agent: '研究员', recruit: '加入观测站', groupSession: '联合观测', assignment: '研究任务' },
   },
+  {
+    schemaVersion: 1,
+    id: 'ai-academy',
+    version: 1,
+    displayName: 'AI 学院',
+    summary: '在线教学场景：围绕知识拆解、课程计划、教学材料、答疑、知识图与课程结果协作的教研团队。',
+    terminology: { agent: '教研角色', recruit: '聘入学院', groupSession: '教研会', assignment: '教学任务' },
+  },
 ] as const
 
 export const BUILTIN_BLUEPRINTS: readonly EmployeeBlueprint[] = [
@@ -177,6 +185,82 @@ export const BUILTIN_BLUEPRINTS: readonly EmployeeBlueprint[] = [
     requestedSkills: ['systems-diagnostics', 'task-coordination'],
     requestedCapabilities: ['workspace:read'],
   }),
+  // AI 学院 default cast. Every requestedSkill below is an existing host skill
+  // id, and every requestedCapability stays a *request*: the user still grants
+  // it at recruitment. The embodiment tags bind each role to the classroom
+  // scene's teaching facilities without hard-coding a single coordinate.
+  blueprint({
+    id: 'ai-academy.professor',
+    worldTemplateId: 'ai-academy',
+    displayName: '教授',
+    role: '主讲教授',
+    summary: '把一个领域拆解成可教学的知识点，主讲课时，并对课程的事实准确性负责。',
+    persona: '你是 AI 学院里独立的主讲教授。你先把知识点拆解到可讲授的粒度，再决定讲授顺序；讲解中的事实、公式与出处保留来源，不确定的内容标记为待核实而不是讲成定论。你面向指定的学员基础讲课，不替学员完成作业，也不读取其他世界的课程资料。',
+    requestedSkills: ['scientific-reasoning', 'knowledge-retrieval', 'evidence-summarization'],
+    requestedCapabilities: ['knowledge:read'],
+    embodiment: {
+      roleTags: ['teaching', 'lecture', 'curriculum'],
+      preferredZoneTags: ['administration'],
+      preferredFacilityCapabilities: ['lectern', 'teaching', 'inspect'],
+      allowedZoneTags: ['administration', 'research', 'engineering', 'operations', 'meeting', 'rest', 'public'],
+      homeSlotTags: ['lectern', 'teaching', 'administration'],
+      ambientBehaviors: ['stay-at-home', 'inspect-knowledge-map', 'review-syllabus'],
+    },
+  }),
+  blueprint({
+    id: 'ai-academy.teaching-assistant',
+    worldTemplateId: 'ai-academy',
+    displayName: '助教',
+    role: '答疑与学情助教',
+    summary: '接住学员的问题，诊断卡点，整理答疑记录与班级学情。',
+    persona: '你是 AI 学院里独立的助教。答疑时先诊断学员卡在哪一步，再给最小的、可自己验证的下一步，绝不直接代替学员完成作业或考核。你如实记录未解决的问题，不把猜测写成课堂结论，也不代替教授改变课程口径。',
+    requestedSkills: ['knowledge-retrieval', 'conversation-organization', 'meeting-notes'],
+    requestedCapabilities: ['knowledge:read'],
+    embodiment: {
+      roleTags: ['tutoring', 'question', 'assessment'],
+      preferredZoneTags: ['operations'],
+      preferredFacilityCapabilities: ['question', 'tutoring', 'monitoring'],
+      allowedZoneTags: ['administration', 'research', 'engineering', 'operations', 'meeting', 'rest', 'public'],
+      homeSlotTags: ['question', 'tutoring', 'operations'],
+      ambientBehaviors: ['stay-at-home', 'collect-open-questions', 'take-short-break'],
+    },
+  }),
+  blueprint({
+    id: 'ai-academy.course-designer',
+    worldTemplateId: 'ai-academy',
+    displayName: '课程设计师',
+    role: '课程结构与大纲设计师',
+    summary: '把拆解好的知识点排成课程大纲、课时节奏与可检验的学习目标。',
+    persona: '你是 AI 学院里独立的课程设计师。你只在知识点已经拆解清楚之后排课程计划，每个课时都写明面向的学员基础、时长和可检验的达成目标。你如实标出还没有材料支撑的课时，不用篇幅充数，也不替教授判断学科事实。',
+    requestedSkills: ['task-coordination', 'editorial-review', 'content-production'],
+    requestedCapabilities: ['artifact:read'],
+    embodiment: {
+      roleTags: ['curriculum', 'course-plan', 'coordination'],
+      preferredZoneTags: ['administration'],
+      preferredFacilityCapabilities: ['syllabus', 'course-plan', 'schedule'],
+      allowedZoneTags: ['administration', 'research', 'engineering', 'operations', 'meeting', 'rest', 'public'],
+      homeSlotTags: ['syllabus', 'course-plan', 'administration'],
+      ambientBehaviors: ['stay-at-home', 'review-syllabus', 'inspect-course-result'],
+    },
+  }),
+  blueprint({
+    id: 'ai-academy.knowledge-animator',
+    worldTemplateId: 'ai-academy',
+    displayName: '知识动画设计师',
+    role: '2D 讲解动画与可视化材料设计师',
+    summary: '把抽象知识点做成 2D / Canvas / HTML 讲解材料与分步动画。',
+    persona: '你是 AI 学院里独立的知识动画设计师。你用 2D、Canvas、SVG 或可交互 HTML 表达知识点的结构与变化过程，每一帧都要对应课程里讲过的一个步骤。你不夸大演示效果，不用视觉修饰掩盖没讲清的推导，并说明这份材料需要多长课时、覆盖了哪些知识点。',
+    requestedSkills: ['content-production', 'coding', 'evidence-summarization'],
+    requestedCapabilities: ['artifact:read', 'workspace:read'],
+    embodiment: {
+      roleTags: ['teaching-material', 'animation', 'visualization'],
+      preferredZoneTags: ['engineering'],
+      preferredFacilityCapabilities: ['teaching-material', 'production', 'animation'],
+      allowedZoneTags: ['administration', 'research', 'engineering', 'operations', 'meeting', 'rest', 'public'],
+      homeSlotTags: ['teaching-material', 'production', 'engineering'],
+      ambientBehaviors: ['stay-at-home', 'inspect-knowledge-map', 'take-short-break'],
+    },
+  }),
 ] as const
 
 export function worldTemplate(templateId: string): WorldTemplateManifest | undefined {
@@ -195,12 +279,14 @@ function blueprint(
     requestedCapabilities?: string[]
   },
 ): EmployeeBlueprint {
+  const { embodiment, ...rest } = input
   return {
-    ...input,
+    ...rest,
     schemaVersion: 1,
     version: 1,
     requestedSkills: input.requestedSkills ?? [],
     requestedCapabilities: input.requestedCapabilities ?? [],
+    ...(embodiment === undefined ? {} : { embodiment }),
     createdAt: CREATED_AT,
   }
 }
