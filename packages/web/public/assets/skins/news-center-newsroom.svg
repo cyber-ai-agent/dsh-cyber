@@ -1,0 +1,260 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1536 1024" width="1536" height="1024" role="img" aria-label="新闻中心 · 编辑部">
+  <title>新闻中心 · 编辑部</title>
+  <desc>程序化绘制的 2D 新闻编辑部场景：编辑部大屏、播报主台、追踪线板、信息源采集台、事实核实台、图表工作台、时间线墙、简报归档架与编前会桌。</desc>
+  <defs>
+    <linearGradient id="nc-wall" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#232c38"/>
+      <stop offset="1" stop-color="#18202a"/>
+    </linearGradient>
+    <linearGradient id="nc-floor" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b3440"/>
+      <stop offset="1" stop-color="#1b222b"/>
+    </linearGradient>
+    <linearGradient id="nc-screen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0e2b33"/>
+      <stop offset="1" stop-color="#08171d"/>
+    </linearGradient>
+    <linearGradient id="nc-desk" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4a5666"/>
+      <stop offset="1" stop-color="#333d4a"/>
+    </linearGradient>
+    <linearGradient id="nc-panel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f3f1e6"/>
+      <stop offset="1" stop-color="#ddd9c8"/>
+    </linearGradient>
+    <linearGradient id="nc-glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2f4a58"/>
+      <stop offset="1" stop-color="#1d2f3a"/>
+    </linearGradient>
+  </defs>
+
+  <!-- room shell -->
+  <rect x="0" y="0" width="1536" height="500" fill="url(#nc-wall)"/>
+  <rect x="0" y="500" width="1536" height="524" fill="url(#nc-floor)"/>
+  <rect x="0" y="492" width="1536" height="16" fill="#0f151c"/>
+  <g stroke="#7fd0c2" stroke-opacity="0.10" stroke-width="3" fill="none">
+    <path d="M0 596H1536M0 700H1536M0 812H1536M0 930H1536"/>
+    <path d="M110 508 -60 1024M420 508 340 1024M768 508 768 1024M1116 508 1196 1024M1426 508 1596 1024"/>
+  </g>
+
+  <!-- world clocks strip: the newsroom's constant reminder that intelligence is dated -->
+  <g>
+    <rect x="60" y="24" width="1416" height="62" rx="8" fill="#131a22"/>
+    <g stroke="#3d4a58" stroke-width="4" fill="none"><path d="M60 24h1416v62H60z"/></g>
+    <g>
+      <g fill="#0b1016" stroke="#5fb0a4" stroke-width="3">
+        <circle cx="236" cy="55" r="21"/><circle cx="530" cy="55" r="21"/>
+        <circle cx="824" cy="55" r="21"/><circle cx="1118" cy="55" r="21"/>
+      </g>
+      <g stroke="#d7a52a" stroke-width="3" stroke-linecap="round">
+        <path d="M236 55v-12M236 55l9 6"/>
+        <path d="M530 55v-13M530 55l-10 4"/>
+        <path d="M824 55v-11M824 55l11 3"/>
+        <path d="M1118 55v-12M1118 55l7 8"/>
+      </g>
+      <g fill="#5f7f8c">
+        <rect x="284" y="50" width="80" height="10" rx="5"/>
+        <rect x="578" y="50" width="80" height="10" rx="5"/>
+        <rect x="872" y="50" width="80" height="10" rx="5"/>
+        <rect x="1166" y="50" width="80" height="10" rx="5"/>
+        <rect x="1300" y="44" width="120" height="8" rx="4"/>
+        <rect x="1300" y="60" width="86" height="8" rx="4"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- beat board on the left back wall: tracked beats and their refresh cadence -->
+  <g>
+    <rect x="90" y="118" width="300" height="212" rx="10" fill="#38424f"/>
+    <rect x="104" y="132" width="272" height="184" rx="6" fill="url(#nc-panel)"/>
+    <g fill="#6b7887">
+      <rect x="124" y="156" width="128" height="12" rx="6"/>
+      <rect x="124" y="190" width="180" height="8" rx="4"/>
+      <rect x="124" y="216" width="204" height="8" rx="4"/>
+      <rect x="124" y="242" width="164" height="8" rx="4"/>
+      <rect x="124" y="268" width="192" height="8" rx="4"/>
+    </g>
+    <g fill="#d7a52a">
+      <rect x="318" y="186" width="38" height="14" rx="7"/>
+      <rect x="318" y="212" width="38" height="14" rx="7"/>
+    </g>
+    <g fill="#5fb0a4">
+      <rect x="318" y="238" width="38" height="14" rx="7"/>
+      <rect x="318" y="264" width="38" height="14" rx="7"/>
+      <rect x="288" y="152" width="68" height="20" rx="10"/>
+    </g>
+  </g>
+
+  <!-- newsroom wallboard: the running briefing, always stamped with an as-of time -->
+  <g>
+    <rect x="456" y="84" width="624" height="264" rx="12" fill="#0d141b"/>
+    <rect x="472" y="100" width="592" height="216" rx="6" fill="url(#nc-screen)"/>
+    <g fill="#5fb0a4" fill-opacity="0.9">
+      <rect x="504" y="128" width="196" height="14" rx="7"/>
+      <rect x="504" y="160" width="330" height="9" rx="4"/>
+      <rect x="504" y="182" width="278" height="9" rx="4"/>
+      <rect x="504" y="204" width="312" height="9" rx="4"/>
+    </g>
+    <g fill="#d7a52a">
+      <rect x="856" y="124" width="164" height="18" rx="9"/>
+      <rect x="856" y="154" width="112" height="9" rx="4"/>
+    </g>
+    <g stroke="#7fd0c2" stroke-width="4" fill="none" stroke-linecap="round">
+      <path d="M504 268h520"/>
+      <path d="M856 186l38 40 40-64 42 52 44-30"/>
+    </g>
+    <g fill="#e8564f">
+      <rect x="504" y="284" width="10" height="10" rx="5"/>
+      <rect x="528" y="285" width="150" height="8" rx="4"/>
+    </g>
+    <rect x="472" y="322" width="592" height="18" rx="6" fill="#38424f"/>
+  </g>
+
+  <!-- timeline wall on the right back wall -->
+  <g>
+    <rect x="1146" y="118" width="300" height="212" rx="10" fill="#38424f"/>
+    <rect x="1160" y="132" width="272" height="184" rx="6" fill="#101820"/>
+    <g stroke="#5f7f8c" stroke-width="4" fill="none">
+      <path d="M1186 296V166"/>
+    </g>
+    <g fill="#7fd0c2">
+      <circle cx="1186" cy="184" r="8"/>
+      <circle cx="1186" cy="222" r="8"/>
+      <circle cx="1186" cy="260" r="8"/>
+    </g>
+    <g fill="#d7a52a"><circle cx="1186" cy="292" r="9"/></g>
+    <g fill="#5f7f8c">
+      <rect x="1212" y="178" width="176" height="9" rx="4"/>
+      <rect x="1212" y="196" width="112" height="7" rx="3"/>
+      <rect x="1212" y="216" width="160" height="9" rx="4"/>
+      <rect x="1212" y="234" width="96" height="7" rx="3"/>
+      <rect x="1212" y="254" width="184" height="9" rx="4"/>
+      <rect x="1212" y="272" width="124" height="7" rx="3"/>
+    </g>
+    <g fill="#d7a52a">
+      <rect x="1212" y="288" width="150" height="9" rx="4"/>
+    </g>
+  </g>
+
+  <!-- anchor desk (central briefing station) -->
+  <g>
+    <path d="M676 382h184l-16 96H692z" fill="url(#nc-desk)"/>
+    <rect x="668" y="366" width="200" height="24" rx="8" fill="#5b6878"/>
+    <rect x="706" y="398" width="124" height="16" rx="8" fill="#7fd0c2" fill-opacity="0.7"/>
+    <g fill="#e8564f"><rect x="842" y="398" width="16" height="16" rx="8"/></g>
+    <rect x="750" y="478" width="36" height="26" rx="6" fill="#2a323d"/>
+  </g>
+
+  <!-- coffee corner (rest) -->
+  <g>
+    <rect x="396" y="462" width="140" height="24" rx="10" fill="#5b6878"/>
+    <rect x="404" y="486" width="16" height="52" rx="6" fill="#3b4552"/>
+    <rect x="512" y="486" width="16" height="52" rx="6" fill="#3b4552"/>
+    <g fill="#d7a52a"><rect x="440" y="444" width="20" height="18" rx="4"/><rect x="474" y="446" width="16" height="16" rx="4"/></g>
+  </g>
+
+  <!-- source collection desk (left) -->
+  <g>
+    <rect x="110" y="560" width="280" height="140" rx="12" fill="url(#nc-desk)"/>
+    <rect x="124" y="574" width="252" height="88" rx="8" fill="#101820"/>
+    <g fill="#5fb0a4" fill-opacity="0.85">
+      <rect x="144" y="592" width="88" height="9" rx="4"/>
+      <rect x="144" y="610" width="132" height="9" rx="4"/>
+      <rect x="144" y="628" width="104" height="9" rx="4"/>
+      <rect x="144" y="646" width="150" height="9" rx="4"/>
+    </g>
+    <g fill="#d7a52a">
+      <rect x="300" y="592" width="56" height="12" rx="6"/>
+      <rect x="300" y="614" width="56" height="12" rx="6"/>
+      <rect x="300" y="636" width="36" height="12" rx="6"/>
+    </g>
+    <rect x="130" y="700" width="20" height="52" rx="6" fill="#2a323d"/>
+    <rect x="350" y="700" width="20" height="52" rx="6" fill="#2a323d"/>
+  </g>
+
+  <!-- chart workbench (right) -->
+  <g>
+    <rect x="1146" y="560" width="280" height="140" rx="12" fill="url(#nc-desk)"/>
+    <rect x="1160" y="574" width="252" height="88" rx="8" fill="#101820"/>
+    <g fill="#7fd0c2">
+      <rect x="1180" y="622" width="18" height="26" rx="3"/>
+      <rect x="1206" y="606" width="18" height="42" rx="3"/>
+      <rect x="1232" y="596" width="18" height="52" rx="3"/>
+      <rect x="1258" y="614" width="18" height="34" rx="3"/>
+      <rect x="1284" y="588" width="18" height="60" rx="3"/>
+    </g>
+    <g stroke="#d7a52a" stroke-width="4" fill="none" stroke-linecap="round">
+      <path d="M1324 640l22-24 24 12 26-38"/>
+    </g>
+    <rect x="1166" y="700" width="20" height="52" rx="6" fill="#2a323d"/>
+    <rect x="1386" y="700" width="20" height="52" rx="6" fill="#2a323d"/>
+  </g>
+
+  <!-- editorial meeting table -->
+  <g>
+    <g>
+      <rect x="540" y="600" width="460" height="52" rx="10" fill="url(#nc-desk)"/>
+      <rect x="556" y="652" width="18" height="46" rx="6" fill="#2a323d"/>
+      <rect x="966" y="652" width="18" height="46" rx="6" fill="#2a323d"/>
+      <g fill="#7fd0c2" fill-opacity="0.55">
+        <rect x="586" y="614" width="72" height="24" rx="4"/>
+        <rect x="732" y="614" width="72" height="24" rx="4"/>
+        <rect x="878" y="614" width="72" height="24" rx="4"/>
+      </g>
+    </g>
+    <g>
+      <rect x="512" y="760" width="516" height="58" rx="10" fill="url(#nc-glass)"/>
+      <rect x="530" y="818" width="20" height="52" rx="6" fill="#2a323d"/>
+      <rect x="990" y="818" width="20" height="52" rx="6" fill="#2a323d"/>
+      <g fill="#f3f1e6" fill-opacity="0.72">
+        <rect x="560" y="776" width="80" height="26" rx="4"/>
+        <rect x="728" y="776" width="80" height="26" rx="4"/>
+        <rect x="896" y="776" width="80" height="26" rx="4"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- verification desk (fact-check / market watch corner) -->
+  <g>
+    <rect x="90" y="800" width="270" height="150" rx="14" fill="url(#nc-desk)"/>
+    <rect x="106" y="816" width="238" height="94" rx="8" fill="#101820"/>
+    <g stroke="#e8564f" stroke-width="4" fill="none" stroke-linecap="round">
+      <path d="M132 884l26-30 24 16 28-44 26 26 24-34"/>
+    </g>
+    <g fill="#5fb0a4">
+      <rect x="132" y="832" width="72" height="9" rx="4"/>
+      <rect x="212" y="832" width="44" height="9" rx="4"/>
+    </g>
+    <g fill="none" stroke="#d7a52a" stroke-width="5">
+      <circle cx="300" cy="856" r="20"/>
+      <path d="M314 870l16 16"/>
+    </g>
+    <rect x="108" y="950" width="22" height="50" rx="6" fill="#2a323d"/>
+    <rect x="320" y="950" width="22" height="50" rx="6" fill="#2a323d"/>
+  </g>
+
+  <!-- brief archive rack (dated briefings, newest first) -->
+  <g>
+    <rect x="1176" y="800" width="270" height="150" rx="14" fill="#38424f"/>
+    <rect x="1192" y="816" width="238" height="94" rx="8" fill="url(#nc-panel)"/>
+    <g fill="#6b7887">
+      <rect x="1212" y="836" width="64" height="56" rx="6"/>
+      <rect x="1288" y="836" width="64" height="56" rx="6"/>
+      <rect x="1364" y="836" width="48" height="56" rx="6"/>
+    </g>
+    <g fill="#d7a52a">
+      <rect x="1212" y="836" width="64" height="14" rx="6"/>
+    </g>
+    <g fill="#5f7f8c">
+      <rect x="1288" y="836" width="64" height="14" rx="6"/>
+      <rect x="1364" y="836" width="48" height="14" rx="6"/>
+    </g>
+    <g fill="#38424f">
+      <rect x="1222" y="862" width="44" height="6" rx="3"/>
+      <rect x="1298" y="862" width="44" height="6" rx="3"/>
+      <rect x="1374" y="862" width="28" height="6" rx="3"/>
+    </g>
+    <rect x="1194" y="950" width="22" height="50" rx="6" fill="#242c36"/>
+    <rect x="1406" y="950" width="22" height="50" rx="6" fill="#242c36"/>
+  </g>
+</svg>
