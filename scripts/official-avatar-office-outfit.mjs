@@ -87,7 +87,6 @@ export async function mergeOfficeOutfit(base, sourceBytes) {
 
   const targetWorld = worldMatrices(document)
   const sourceWorld = worldMatrices(source.document)
-  const sourceParent = parentIndexes(source.document)
   const accessorIds = new Set()
   const materialIds = new Set()
   const selectedMeshPrimitives = new Map()
@@ -324,8 +323,9 @@ function parentIndexes(document) {
 }
 
 function worldMatrices(document) {
+  const length = document.nodes?.length ?? 0
   const parents = parentIndexes(document)
-  const cache = new Array(document.nodes?.length ?? 0)
+  const cache = new Array(length)
   const resolveWorld = (index) => {
     if (cache[index] !== undefined) return cache[index]
     const node = document.nodes[index] ?? {}
@@ -335,7 +335,7 @@ function worldMatrices(document) {
     cache[index] = world
     return world
   }
-  return cache.map((_unused, index) => resolveWorld(index))
+  return Array.from({ length }, (_unused, index) => resolveWorld(index))
 }
 
 function localMatrix(node) {
