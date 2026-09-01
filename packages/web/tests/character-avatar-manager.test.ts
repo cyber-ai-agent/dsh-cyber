@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { CharacterAvatarAsset, LocalAsset } from '@dsh-cyber/contracts'
 import { CharacterAvatarManager, type UploadedAvatarDraft } from '../src/components/CharacterAvatarManager.js'
+import { writeWorldExtensionEnabled } from '../src/features/world/extensions/world-extension-preference.js'
 
 const providerCreate = vi.hoisted(() => vi.fn())
 
@@ -15,6 +16,7 @@ vi.mock('../src/features/world/avatar/avatar-creation-provider.js', () => ({
 afterEach(() => {
   document.body.replaceChildren()
   providerCreate.mockReset()
+  localStorage.clear()
 })
 
 describe('CharacterAvatarManager', () => {
@@ -61,6 +63,8 @@ describe('CharacterAvatarManager', () => {
   })
 
   it('does not let a cancelled generation clear the state of a newer run', async () => {
+    // The 3D creator only exists while the optional spatial 3D extension is on.
+    writeWorldExtensionEnabled('spatial-3d', true)
     const first = deferred<{ file: File; providerId: string; source: 'local' }>()
     const second = deferred<{ file: File; providerId: string; source: 'local' }>()
     providerCreate.mockImplementationOnce(() => first.promise).mockImplementationOnce(() => second.promise)

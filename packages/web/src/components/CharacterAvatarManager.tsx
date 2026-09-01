@@ -7,6 +7,7 @@ import { characterAvatarUrl, readCharacterAvatarProfile } from '../features/worl
 import type { AvatarCreationPhase } from '../features/world/avatar/avatar-creation-provider.js'
 import { avatarRecipeForCharacter } from '../features/world/avatar/avatar-recipe.js'
 import type { ProceduralAvatarBuild, ProceduralAvatarStyle, ProceduralAvatarTone } from '../features/world/avatar/procedural-vrm.js'
+import { readWorldExtensionEnabled } from '../features/world/extensions/world-extension-preference.js'
 import { Avatar } from './Avatar.js'
 import './character-avatar-manager.css'
 
@@ -67,6 +68,14 @@ export function CharacterAvatarManager({ employeeName, employeeId, employeeRole,
   const [build, setBuild] = useState<ProceduralAvatarBuild>('balanced')
   const [tone, setTone] = useState<ProceduralAvatarTone>('neutral')
   const [error, setError] = useState<string>()
+  /**
+   * A published VRM is only ever drawn by the optional spatial 3D extension —
+   * the core 2D world and the focus panel always use the sprite renderer. So
+   * while the extension is off, offering to generate one would hand the user a
+   * receipt for a change nothing can show. Read once on mount: this dialog is
+   * opened fresh each time, and the preference lives outside React state.
+   */
+  const [spatial3dEnabled] = useState(() => readWorldExtensionEnabled('spatial-3d'))
   const currentAvatar = readCharacterAvatarProfile(profile?.appearance.digitalHumanAvatar)
   const previewKind = draft?.avatarAsset.rendererKind ?? currentAvatar?.rendererKind
   const previewUrl = draft?.url ?? characterAvatarUrl(currentAvatar)
@@ -193,11 +202,11 @@ export function CharacterAvatarManager({ employeeName, employeeId, employeeRole,
 
   return <section ref={sectionRef} className="character-avatar-manager" aria-labelledby="character-avatar-manager-title">
     <header>
-      <div><h4 id="character-avatar-manager-title">数字人形象</h4><p>本机 3D 会沿用当前角色的身份配方；生成后先预览，确认发布才会替换当前版本。</p></div>
-      <button ref={createButtonRef} type="button" aria-expanded={creatorOpen} aria-controls="character-avatar-creator" disabled={creating || uploading || busy} onClick={() => setCreatorOpen((value) => !value)}><Sparkle size={16} aria-hidden="true" />{currentAvatar?.rendererKind === 'vrm-3d' ? '重新创建 3D' : '创建 3D 形象'}</button>
+      <div><h4 id="character-avatar-manager-title">数字人形象</h4><p>{spatial3dEnabled ? '本机 3D 会沿用当前角色的身份配方；生成后先预览，确认发布才会替换当前版本。' : '上传本地图片即可替换角色形象；先预览，确认发布才会替换当前版本。'}</p></div>
+      {!spatial3dEnabled ? null : <button ref={createButtonRef} type="button" aria-expanded={creatorOpen} aria-controls="character-avatar-creator" disabled={creating || uploading || busy} onClick={() => setCreatorOpen((value) => !value)}><Sparkle size={16} aria-hidden="true" />{currentAvatar?.rendererKind === 'vrm-3d' ? '重新创建 3D' : '创建 3D 形象'}</button>}
     </header>
 
-    {creatorOpen ? <div id="character-avatar-creator" className="character-avatar-manager__creator" aria-labelledby="character-avatar-creator-title" aria-busy={creating}>
+    {creatorOpen && spatial3dEnabled ? <div id="character-avatar-creator" className="character-avatar-manager__creator" aria-labelledby="character-avatar-creator-title" aria-busy={creating}>
       <div className="character-avatar-manager__creator-heading"><span><Sparkle size={17} aria-hidden="true" /></span><div><strong id="character-avatar-creator-title">创建 {employeeName} 的 3D 形象</strong><small>沿用角色发型与主色 · 本机生成 · 不发送角色资料</small></div></div>
       <fieldset className="character-avatar-manager__style-options">
         <legend>外观风格</legend>
@@ -221,7 +230,7 @@ export function CharacterAvatarManager({ employeeName, employeeId, employeeRole,
       </div>
       <div className="character-avatar-manager__summary">
         <span>{previewKind === 'vrm-3d' || previewKind === 'mesh-preview' ? <Cube size={17} aria-hidden="true" /> : <ImageSquare size={17} aria-hidden="true" />}</span>
-        <div><strong>{draft?.avatarAsset.originalName ?? currentAvatar?.sourceName ?? '内置形象'}</strong><small>{previewKind === 'vrm-3d' ? 'VRM 3D · 按需加载，失败自动回退' : previewKind === 'mesh-preview' ? '普通 GLB · 仅可预览，不能发布为数字人' : previewKind === 'image-2d' ? '本地图片 · 不上传到云端' : 'DSH Cyber 内置形象'}</small></div>
+        <div><strong>{draft?.avatarAsset.originalName ?? currentAvatar?.sourceName ?? '内置形象'}</strong><small>{previewKind === 'vrm-3d' ? (spatial3dEnabled ? 'VRM 3D · 按需加载，失败自动回退' : 'VRM 3D · 空间 3D 扩展已关闭，角色在世界里仍使用内置形象') : previewKind === 'mesh-preview' ? '普通 GLB · 仅可预览，不能发布为数字人' : previewKind === 'image-2d' ? '本地图片 · 不上传到云端' : 'DSH Cyber 内置形象'}</small></div>
       </div>
       {draft === undefined ? null : <div className="character-avatar-manager__draft" role="status"><strong>尚未发布</strong><span>{validationSummary(draft.avatarAsset)}</span><button ref={publishButtonRef} type="button" className="primary-button" disabled={busy || draft.avatarAsset.rendererKind === 'mesh-preview'} onClick={() => void publishDraft(draft.avatarAsset.assetId)}>{draft.avatarAsset.rendererKind === 'mesh-preview' ? '需要 VRM 1.0' : '发布到角色'}</button><button type="button" disabled={busy} onClick={() => setDraft(undefined)}>放弃预览</button></div>}
       {error === undefined ? null : <div ref={errorRef} className="character-avatar-manager__error" role="alert" tabIndex={-1}><WarningCircle size={16} aria-hidden="true" />{error}</div>}
@@ -229,12 +238,12 @@ export function CharacterAvatarManager({ employeeName, employeeId, employeeRole,
 
     <details className="character-avatar-manager__import">
       <summary>高级方式：导入现有形象</summary>
-      <div><p>已有图片、VRM 1.0 或 GLB 时可在这里导入。普通用户无需使用此入口。</p><button type="button" disabled={uploading || creating || busy} onClick={() => fileRef.current?.click()}><UploadSimple size={16} aria-hidden="true" />{uploading ? '正在校验…' : '选择本地文件'}</button></div>
-      <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,.vrm,.glb,model/gltf-binary" hidden onChange={(event) => void upload(event.target.files?.[0])} />
+      <div><p>{spatial3dEnabled ? '已有图片、VRM 1.0 或 GLB 时可在这里导入。普通用户无需使用此入口。' : '已有图片时可在这里导入。普通用户无需使用此入口。'}</p><button type="button" disabled={uploading || creating || busy} onClick={() => fileRef.current?.click()}><UploadSimple size={16} aria-hidden="true" />{uploading ? '正在校验…' : '选择本地文件'}</button></div>
+      <input ref={fileRef} type="file" accept={spatial3dEnabled ? 'image/png,image/jpeg,image/webp,.vrm,.glb,model/gltf-binary' : 'image/png,image/jpeg,image/webp'} hidden onChange={(event) => void upload(event.target.files?.[0])} />
     </details>
 
     <div className="character-avatar-manager__fallback">
-      <div><strong>备用形象</strong><small>这个内置形象同时作为本机 3D 的身份种子；切换后，新生成的 3D 会同步发型与主色。</small></div>
+      <div><strong>备用形象</strong><small>{spatial3dEnabled ? '这个内置形象同时作为本机 3D 的身份种子；切换后，新生成的 3D 会同步发型与主色。' : '没有上传形象时，角色在聊天与世界里都使用这个内置形象。'}</small></div>
       <div className="avatar-picker" role="radiogroup" aria-label="选择备用角色形象">{Array.from({ length: 8 }, (_, index) => <button key={index} type="button" role="radio" aria-label={`备用形象 ${index + 1}`} aria-checked={fallbackAvatarIndex === index} className={fallbackAvatarIndex === index ? 'is-active' : ''} onClick={() => onFallbackAvatarChange(index)}><Avatar index={index} size="md" label={`备用形象 ${index + 1}`} /></button>)}</div>
       {currentAvatar === undefined ? null : <button type="button" className="text-button" disabled={busy} onClick={() => void resetAvatar()}>恢复为内置形象</button>}
     </div>

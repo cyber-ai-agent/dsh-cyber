@@ -45,6 +45,14 @@ interface EmployeeFocusModeProps {
    * The panel keeps its name, status, chat and voice; only the stage goes.
    */
   embedded?: boolean
+  /**
+   * Whether the optional spatial 3D extension is switched on.
+   *
+   * This panel always draws the sprite renderer, so a VRM published while the
+   * extension is off changes nothing anyone can see. Off by default, and while
+   * it is off the panel must not invite anyone to build a 3D avatar.
+   */
+  spatial3dEnabled?: boolean
   latestUtterance?: { messageId: string; employeeId: string; text: string; clientTurnId?: string }
   onFocusEmployee(employeeId: string): void
   onManageAvatar(): void
@@ -52,7 +60,7 @@ interface EmployeeFocusModeProps {
   onVoiceFinal(text: string): Promise<void>
 }
 
-export function EmployeeFocusMode({ world, employee, profile, entity, collaborators, connected, staticMode, rendererMode, embedded = false, latestUtterance, onFocusEmployee, onManageAvatar, onStaticModeChange, onVoiceFinal }: EmployeeFocusModeProps) {
+export function EmployeeFocusMode({ world, employee, profile, entity, collaborators, connected, staticMode, rendererMode, embedded = false, spatial3dEnabled = false, latestUtterance, onFocusEmployee, onManageAvatar, onStaticModeChange, onVoiceFinal }: EmployeeFocusModeProps) {
   const [rendererReady, setRendererReady] = useState(false)
   const [rendererArmed, setRendererArmed] = useState(false)
   const [rendererNotice, setRendererNotice] = useState<string>()
@@ -403,13 +411,16 @@ export function EmployeeFocusMode({ world, employee, profile, entity, collaborat
 
   const fallback = useCallback((reason: string) => {
     setRendererReady(false)
-    setRendererNotice(reason.includes('FPS') ? reason : `3D 形象暂时不可用，已切回 2D：${reason}`)
+    // The sprite renderer is the fallback, so on the default 2D path there is
+    // no 3D to "switch back" from — saying so promises a feature this panel
+    // never had.
+    setRendererNotice(reason.includes('FPS') ? reason : usesVrm ? `3D 形象暂时不可用，已切回 2D：${reason}` : `角色形象暂时不可用：${reason}`)
     setQuality((current) => reason.includes('FPS') ? nextLowerQuality(current) : 'static')
-  }, [])
+  }, [usesVrm])
 
   const visibleCollaborators = collaborators.slice(0, 2)
   const remainingCollaborators = Math.max(0, collaborators.length - visibleCollaborators.length)
-  const requestedVrmFallback = rendererMode === '3d' && employee.avatarProfile?.rendererKind !== 'vrm-3d'
+  const requestedVrmFallback = spatial3dEnabled && rendererMode === '3d' && employee.avatarProfile?.rendererKind !== 'vrm-3d'
     ? `${employee.displayName}还没有 3D 形象，世界里先使用默认形象出场。`
     : undefined
   const focusNotice = rendererNotice ?? requestedVrmFallback
@@ -433,7 +444,7 @@ export function EmployeeFocusMode({ world, employee, profile, entity, collaborat
         </div> : null}</div>
       </div>
     </header>
-    {employee.avatarProfile?.rendererKind === 'vrm-3d' ? null : <div className="employee-focus__avatar-invite">
+    {!spatial3dEnabled || employee.avatarProfile?.rendererKind === 'vrm-3d' ? null : <div className="employee-focus__avatar-invite">
       <span>还没有 3D 形象，世界里先用默认形象出场。</span>
       <button type="button" onClick={onManageAvatar}>创建 3D 形象</button>
     </div>}
@@ -450,7 +461,7 @@ export function EmployeeFocusMode({ world, employee, profile, entity, collaborat
       })}
       {remainingCollaborators === 0 ? null : <span className="employee-focus__participant-more">另有 {remainingCollaborators} 名角色</span>}
       {usesVrm ? <div className={`employee-focus__sprite-bridge${rendererReady ? ' is-hidden' : ''}`}><SpriteRuntimeRenderer employee={employee} entity={entity} state={state} motionCue={motionCue} speaking={speaking} staticMode={staticMode} quality="static" onReady={() => undefined} onFallback={() => undefined} /></div> : null}
-      {rendererArmed ? <RegisteredDigitalHumanRenderer key={`${selectedRenderer.id}:${quality}:${employee.avatarProfile?.assetId ?? employee.avatarIndex}`} employee={employee} entity={entity} state={state} motionCue={motionCue} speaking={speaking} staticMode={staticMode} quality={quality} preferredKind={preferredRenderer} onReady={() => setRendererReady(true)} onFallback={fallback} /> : <div className="focus-avatar__loading" role="status">正在切换 3D 渲染器…</div>}
+      {rendererArmed ? <RegisteredDigitalHumanRenderer key={`${selectedRenderer.id}:${quality}:${employee.avatarProfile?.assetId ?? employee.avatarIndex}`} employee={employee} entity={entity} state={state} motionCue={motionCue} speaking={speaking} staticMode={staticMode} quality={quality} preferredKind={preferredRenderer} onReady={() => setRendererReady(true)} onFallback={fallback} /> : <div className="focus-avatar__loading" role="status">{usesVrm ? '正在切换 3D 渲染器…' : '正在准备角色形象…'}</div>}
     </div>}
     <VoiceConversationControl employeeName={employee.displayName} onFinal={onVoiceFinal} onBargeIn={() => {
       streamGenerationRef.current += 1; streamPendingRef.current = 0; streamCompleteRef.current = true; streamChunkerRef.current.reset(); stopSpeech()

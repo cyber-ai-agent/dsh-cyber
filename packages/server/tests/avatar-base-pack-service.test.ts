@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import type { Readable } from 'node:stream'
 
 import { describe, expect, it } from 'vitest'
 
@@ -31,7 +32,8 @@ describe('AvatarBasePackService', () => {
     })])
     const asset = await service.readBaseAsset('world-1', 'official-avatar-studio', '1.0.0', 'models/female.vrm')
     expect(asset.contentType).toBe('model/gltf-binary')
-    expect(asset.body.equals(fixture.vrm)).toBe(true)
+    expect(asset.byteLength).toBe(fixture.vrm.byteLength)
+    expect((await collect(asset.body)).equals(fixture.vrm)).toBe(true)
   })
 
   it('does not turn an arbitrary declared package file into a downloadable avatar asset', async () => {
@@ -142,6 +144,12 @@ async function packFixture(): Promise<{
 
 function fakeWorldPackages(items: InstalledPackage[]): WorldPackageInstanceService {
   return { listRuntimePackages: async (_worldId: string) => items } as unknown as WorldPackageInstanceService
+}
+
+async function collect(body: Readable): Promise<Buffer> {
+  const chunks: Buffer[] = []
+  for await (const chunk of body) chunks.push(chunk as Buffer)
+  return Buffer.concat(chunks)
 }
 
 function sha(body: Buffer): string {

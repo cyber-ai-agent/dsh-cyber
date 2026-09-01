@@ -2,69 +2,23 @@ import { createRequire } from 'node:module'
 import { readFile, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
-import { ensureHarnessProfile, type HarnessProfilePaths } from './profile.js'
+import { ensureHarnessProfile, SUPPORTED_HARNESS_VERSION, type HarnessProfilePaths } from './profile.js'
 
 export const HARNESS_PROTOCOL_CONTRACT = 'dsh-session-events-v1' as const
 
+/**
+ * Runtimes DSH Cyber can actually drive. The launch API and profile layout were
+ * rewritten for 0.1.2-alpha.3, so every older DSH release is unreachable: the
+ * matrix must never advertise a version the adapter cannot start.
+ */
 export const HARNESS_COMPATIBILITY_MATRIX = [
   {
-    dshVersion: '0.1.2-alpha.3',
+    dshVersion: SUPPORTED_HARNESS_VERSION,
     contractId: HARNESS_PROTOCOL_CONTRACT,
     packages: {
-      '@deepseek-ai/dsh': '0.1.2-alpha.3',
-      '@deepseek-ai/dsh-sdk-client': '0.1.2-alpha.3',
-      '@deepseek-ai/dsh-sdk-jsonrpc-server': '0.1.2-alpha.3',
-    },
-    requiredEvents: [
-      'turn/start',
-      'assistant/chunk',
-      'assistant/message',
-      'tool/call',
-      'tool/result',
-      'turn/end',
-    ],
-  },
-  {
-    dshVersion: '0.1.1-rc.1',
-    contractId: HARNESS_PROTOCOL_CONTRACT,
-    packages: {
-      '@deepseek-ai/dsh': '0.1.1-rc.1',
-      '@deepseek-ai/dsh-sdk-client': '0.1.1-rc.1',
-      '@deepseek-ai/dsh-sdk-jsonrpc-server': '0.1.1-rc.1',
-    },
-    requiredEvents: [
-      'turn/start',
-      'assistant/chunk',
-      'assistant/message',
-      'tool/call',
-      'tool/result',
-      'turn/end',
-    ],
-  },
-  {
-    dshVersion: '0.1.0-rc.8',
-    contractId: HARNESS_PROTOCOL_CONTRACT,
-    packages: {
-      '@deepseek-ai/dsh': '0.1.0-rc.8',
-      '@deepseek-ai/dsh-sdk-client': '0.1.0-rc.8',
-      '@deepseek-ai/dsh-sdk-jsonrpc-server': '0.1.0-rc.8',
-    },
-    requiredEvents: [
-      'turn/start',
-      'assistant/chunk',
-      'assistant/message',
-      'tool/call',
-      'tool/result',
-      'turn/end',
-    ],
-  },
-  {
-    dshVersion: '0.1.0-rc.7',
-    contractId: HARNESS_PROTOCOL_CONTRACT,
-    packages: {
-      '@deepseek-ai/dsh': '0.1.0-rc.7',
-      '@deepseek-ai/dsh-sdk-client': '0.1.0-rc.7',
-      '@deepseek-ai/dsh-sdk-jsonrpc-server': '0.1.0-rc.7',
+      '@deepseek-ai/dsh': SUPPORTED_HARNESS_VERSION,
+      '@deepseek-ai/dsh-sdk-client': SUPPORTED_HARNESS_VERSION,
+      '@deepseek-ai/dsh-sdk-jsonrpc-server': SUPPORTED_HARNESS_VERSION,
     },
     requiredEvents: [
       'turn/start',
@@ -78,6 +32,17 @@ export const HARNESS_COMPATIBILITY_MATRIX = [
 ] as const
 
 export type HarnessCompatibilityEntry = (typeof HARNESS_COMPATIBILITY_MATRIX)[number]
+
+/** Every DSH release the current adapter can launch, newest first. */
+export function supportedHarnessVersions(): string[] {
+  return HARNESS_COMPATIBILITY_MATRIX.map((entry) => entry.dshVersion)
+}
+
+/** Names the required version so an operator on an old runtime knows what to install. */
+export function unsupportedHarnessVersionMessage(version: string): string {
+  const required = supportedHarnessVersions().join(' or ')
+  return `DeepSeek Harness ${version} is not supported. DSH Cyber requires ${required}; install that exact version in the candidate runtime and re-run the runtime check.`
+}
 
 export interface HarnessCandidateReport {
   ok: boolean
@@ -152,7 +117,7 @@ export async function inspectHarnessCandidate(options: {
       const entry = harnessCompatibilityEntry(version)
       report.supported = entry !== undefined
       if (entry === undefined) {
-        report.errors.push(`Harness ${version} is not in the compatibility matrix`)
+        report.errors.push(unsupportedHarnessVersionMessage(version))
       } else {
         report.contractId = entry.contractId
         for (const [packageName, expectedVersion] of Object.entries(entry.packages)) {

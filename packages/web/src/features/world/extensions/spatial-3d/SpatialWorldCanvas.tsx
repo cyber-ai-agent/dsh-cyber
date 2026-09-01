@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type {
   WorldCue,
   WorldRenderer,
@@ -15,7 +15,12 @@ import { loadRendererAvatar, rendererAvatarUrl } from '../../avatar/avatar-repre
 import { browserSpatialCapabilityProvider } from '../../avatar/renderer/RenderingQuality.js'
 import type { WorldCameraMode } from '../../runtime/world-view-mode.js'
 import type { WorldLocomotion } from '../../runtime/world-locomotion.js'
-import { createSpatialRendererRegistry } from './spatial-renderer-registry.js'
+
+/**
+ * Type-only view of the registry module. `typeof import(...)` is erased, so it
+ * describes the shape without creating a static edge to the 3D renderer.
+ */
+type SpatialRendererRegistryModule = typeof import('./spatial-renderer-registry.js')
 
 interface SpatialWorldCanvasProps {
   manifest: WorldThemeManifestV1
@@ -79,10 +84,27 @@ export function SpatialWorldCanvas({
     spatial: browserSpatialCapabilityProvider.supportsSpatialRendering(),
     quality: browserSpatialCapabilityProvider.quality(false),
   }), [])
+  const [registryModule, setRegistryModule] = useState<SpatialRendererRegistryModule>()
   const worldKey = `${manifest.id}:${snapshot.sceneId}`
   const mountedKey = `${rendererIdentity}:spatial-extension:${worldKey}`
 
   useEffect(() => { appliedCueIds.current.clear() }, [worldKey])
+
+  useEffect(() => {
+    // The registry statically reaches the lazy Three shell, so a device that
+    // can never construct a 3D renderer must not fetch it just by opening this
+    // dialog. The real three/three-vrm chunk stays behind `mount`, as before.
+    if (!capability.spatial) return
+    let cancelled = false
+    void import('./spatial-renderer-registry.js').then((module) => {
+      if (!cancelled) setRegistryModule(module)
+    }).catch((cause: unknown) => {
+      if (cancelled) return
+      const host = hostRef.current
+      if (host !== null) host.dataset.error = cause instanceof Error ? cause.message : '3D 扩展初始化失败'
+    })
+    return () => { cancelled = true }
+  }, [capability.spatial])
 
   useEffect(() => {
     avatarBasePacksRef.current = []
@@ -99,7 +121,7 @@ export function SpatialWorldCanvas({
   }, [capability.spatial, snapshot.worldId])
 
   useEffect(() => {
-    if (!capability.spatial) return
+    if (!capability.spatial || registryModule === undefined) return
     const host = hostRef.current
     if (host === null) return
     const quality = capability.quality
@@ -113,7 +135,7 @@ export function SpatialWorldCanvas({
         ...(employee?.avatarAssetUrl === undefined ? {} : { publishedAvatarUrl: employee.avatarAssetUrl }),
       }, avatarBasePacksRef.current)
     }
-    const registry = createSpatialRendererRegistry({
+    const registry = registryModule.createSpatialRendererRegistry({
       locomotion,
       lodCeiling: quality === 'high' ? 'full' : quality === 'balanced' ? 'reduced' : 'billboard',
       shadows: quality === 'high',
@@ -153,24 +175,30 @@ export function SpatialWorldCanvas({
       renderer.destroy()
       rendererRef.current = undefined
     }
-  }, [capability.quality, capability.spatial, locomotion, mountedKey])
+  }, [capability.quality, capability.spatial, locomotion, mountedKey, registryModule])
 
   useEffect(() => { rendererRef.current?.updateSnapshot(snapshot) }, [snapshot])
   useEffect(() => {
     // Core Pixi renderer already applied route cues to the shared locomotion
     // store. Replaying them here would restart characters when opening 3D.
+    // Nothing is marked applied before the renderer exists, so cues that arrive
+    // while the registry chunk is still loading are delivered, not dropped.
+    const renderer = rendererRef.current
+    if (renderer === undefined) return
     const fresh = cues.filter((cue) => cue.kind !== 'entity.route' && !appliedCueIds.current.has(cue.id))
     for (const cue of fresh) appliedCueIds.current.add(cue.id)
-    if (fresh.length > 0) rendererRef.current?.applyCues(fresh)
-  }, [cues])
+    if (fresh.length > 0) renderer.applyCues(fresh)
+  }, [cues, registryModule])
   useEffect(() => {
     const renderer = rendererRef.current as { setCameraMode?: (mode: WorldCameraMode, subjectId?: string) => void } | undefined
     renderer?.setCameraMode?.(cameraMode, cameraSubjectId)
   }, [cameraMode, cameraSubjectId, mountedKey])
   useEffect(() => rendererRef.current?.selectEntity(selectedEntityId), [selectedEntityId])
   useEffect(() => rendererRef.current?.selectObject(selectedObjectId), [selectedObjectId])
-  useEffect(() => { if (fitRequest > 0) rendererRef.current?.fitScene() }, [fitRequest])
-  useEffect(() => { if (zoomCommand !== undefined) rendererRef.current?.zoomBy(zoomCommand.delta) }, [zoomCommand?.id])
+  // Camera controls pressed while the registry chunk is in flight stay live:
+  // the lazy renderer used to buffer them, so replay once it exists.
+  useEffect(() => { if (fitRequest > 0) rendererRef.current?.fitScene() }, [fitRequest, registryModule])
+  useEffect(() => { if (zoomCommand !== undefined) rendererRef.current?.zoomBy(zoomCommand.delta) }, [zoomCommand?.id, registryModule])
 
   if (!capability.spatial) {
     return <div className="spatial-world-extension__unavailable" role="status"><strong>当前设备未启用 3D 空间</strong><span>核心平面地图和 2D 视图不受影响。</span></div>
