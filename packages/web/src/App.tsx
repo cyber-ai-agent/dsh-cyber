@@ -2532,6 +2532,7 @@ export default function App() {
       ) : null}
       {packageMarketOpen ? (
         <Suspense fallback={<div className="dialog-loading" role="status">正在打开市场…</div>}><PackageMarketDialog
+          workspaceId={workspace.id}
           initialMarket={packageMarketKind}
           world={activeWorld}
           worlds={worlds}
@@ -2569,6 +2570,9 @@ export default function App() {
             if (activation === undefined) throw new Error('这份角色模板没有可用的招募入口')
             setPackageMarketOpen(false)
             await openRecruitment(activation.blueprintId)
+          }}
+          onCharacterPublished={async () => {
+            await Promise.all([loadPackages(), searchMarketplace('talent')])
           }}
           onUsePlugin={(command) => {
             setPackageMarketOpen(false)

@@ -14,10 +14,11 @@ import {
   Warning,
   X,
 } from '@phosphor-icons/react'
-import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import type {
   CyberMarketKind,
   CyberMarketPackage,
+  CharacterGeneratorPublishResult,
   CyberPackageManifest,
   InstalledPackage,
   PackageInstallTransaction,
@@ -26,6 +27,11 @@ import type {
 } from '@dsh-cyber/contracts'
 import { DEFAULT_SKIN_ID } from '../features/world/world-themes.js'
 import { useI18n } from '../i18n/runtime.js'
+import { useDialogFocusTrap } from './useDialogFocusTrap.js'
+
+const CharacterGenerator = lazy(async () => ({
+  default: (await import('./character-generator/CharacterGenerator.js')).CharacterGenerator,
+}))
 
 // Official skin packages point at the same host-registered scene used by the
 // world switcher. The package catalog remains the source of truth for which
@@ -44,6 +50,7 @@ const MARKET_SKIN_PREVIEW_IMAGES: Record<string, string> = {
 }
 
 interface PackageMarketDialogProps {
+  workspaceId: string
   initialMarket: CyberMarketKind
   world: World
   worlds: World[]
@@ -62,6 +69,7 @@ interface PackageMarketDialogProps {
   onOpenSettings(): void
   onCreateThemeWorld(item: CyberMarketPackage, name: string): Promise<void>
   onRecruitTalent(item: CyberMarketPackage): Promise<void>
+  onCharacterPublished?(result: CharacterGeneratorPublishResult): Promise<void> | void
   onUsePlugin(command: string): void
   onPreview(manifest: CyberPackageManifest): Promise<PackagePermissionPreview>
   onInstall(input: { manifest: CyberPackageManifest; sourceDirectory: string; approvalToken: string }): Promise<void>
@@ -69,6 +77,7 @@ interface PackageMarketDialogProps {
 
 export function PackageMarketDialog(props: PackageMarketDialogProps) {
   const { t } = useI18n()
+  const dialogRef = useRef<HTMLElement | null>(null)
   const marketMeta: Record<CyberMarketKind, { label: string; description: string }> = useMemo(() => ({
     theme: { label: t('workbench.marketTabTheme', '世界'), description: t('workbench.marketTabThemeDesc', '选择完整场景皮肤、空间设定和起始角色，创建彼此独立的新世界。') },
     talent: { label: t('workbench.marketTabTalent', '角色'), description: t('workbench.marketTabTalentDesc', '安装不同世界观与专长的角色模板，再把角色招募到兼容世界。') },
@@ -87,11 +96,23 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
   const [worldName, setWorldName] = useState('')
   const [creatingWorld, setCreatingWorld] = useState(false)
   const [confirmingUninstall, setConfirmingUninstall] = useState<string>()
+  const [customRoleOpen, setCustomRoleOpen] = useState(false)
+  const [generatorCloseRequest, setGeneratorCloseRequest] = useState(0)
   const selectedCurrent = selected === undefined
     ? undefined
     : props.items.find((item) => item.manifest.id === selected.manifest.id && item.manifest.version === selected.manifest.version) ?? selected
   const selectedInstalled = selectedCurrent?.installedVersion === selectedCurrent?.manifest.version ? selectedCurrent : undefined
   const selectedInstalledPackage = selectedCurrent === undefined ? undefined : props.installed.find((item) => item.packageId === selectedCurrent.manifest.id && item.status === 'active')
+
+  const closeDialog = () => {
+    if (customRoleOpen) {
+      setGeneratorCloseRequest((value) => value + 1)
+      return
+    }
+    props.onClose()
+  }
+
+  useDialogFocusTrap(dialogRef, closeDialog)
 
   useEffect(() => {
     setMarket(props.initialMarket)
@@ -100,6 +121,8 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
     setPreview(undefined)
     setApproved(false)
     setCreatingWorldFor(undefined)
+    setCustomRoleOpen(false)
+    setGeneratorCloseRequest(0)
   }, [props.initialMarket])
 
   const switchMarket = (next: CyberMarketKind) => {
@@ -109,6 +132,8 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
     setApproved(false)
     setError(undefined)
     setCreatingWorldFor(undefined)
+    setCustomRoleOpen(false)
+    setGeneratorCloseRequest(0)
     void props.onSearch(next, '')
   }
 
@@ -117,6 +142,23 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
     setSelected(undefined)
     setPreview(undefined)
     void props.onSearch(market, query)
+  }
+
+  const openCustomRoleGenerator = () => {
+    setError(undefined)
+    setGeneratorCloseRequest(0)
+    setCustomRoleOpen(true)
+  }
+
+  const completeCustomRolePublish = async (result: CharacterGeneratorPublishResult) => {
+    if (props.onCharacterPublished !== undefined) await props.onCharacterPublished(result)
+    else await props.onSearch('talent', query)
+    setMarket('talent')
+    setSelected(undefined)
+    setPreview(undefined)
+    setApproved(false)
+    setCustomRoleOpen(false)
+    setGeneratorCloseRequest(0)
   }
 
   const inspect = async (item: CyberMarketPackage) => {
@@ -166,6 +208,16 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
     }
   }
 
+  const activateMarketItem = (item: CyberMarketPackage) => {
+    if (item.market === 'talent') {
+      void props.onRecruitTalent(item).catch((cause: unknown) => {
+        setError(cause instanceof Error ? cause.message : '角色招募入口不可用')
+      })
+      return
+    }
+    activate(item)
+  }
+
   const createWorld = async () => {
     if (creatingWorldFor === undefined || worldName.trim().length === 0) return
     setError(undefined)
@@ -180,12 +232,24 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
   }
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && props.onClose()}>
-      <section className="package-market-dialog package-market-dialog--catalog" role="dialog" aria-modal="true" aria-labelledby="package-market-title">
+    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && closeDialog()}>
+      <section ref={dialogRef} className={`package-market-dialog package-market-dialog--catalog${customRoleOpen ? ' is-character-generator' : ''}`} role="dialog" aria-modal="true" aria-labelledby="package-market-title" aria-describedby="package-market-subtitle">
         <header className="dialog-header package-market-header">
-          <div><h2 id="package-market-title">{t('workbench.marketTitle', '扩展市场')}</h2><p>{t('workbench.marketSubtitle', '先选择世界，再发现角色与插件。所有内容经过完整性校验和事务安装。')}</p></div>
-          <button className="icon-button" type="button" aria-label={t('workbench.cancel', '关闭市场')} onClick={props.onClose}><X size={18} /></button>
+          <div><h2 id="package-market-title">{customRoleOpen ? t('characterGenerator.title', '自定义角色') : t('workbench.marketTitle', '扩展市场')}</h2><p id="package-market-subtitle">{customRoleOpen ? t('characterGenerator.subtitle', '把一段角色描述整理成可审阅、可安装的角色模板。') : t('workbench.marketSubtitle', '先选择世界，再发现角色与插件。所有内容经过完整性校验和事务安装。')}</p></div>
+          <button className="icon-button" type="button" data-dialog-initial-focus aria-label={customRoleOpen ? t('characterGenerator.close', '关闭自定义角色') : t('workbench.cancel', '关闭市场')} onClick={closeDialog}><X size={18} aria-hidden="true" /></button>
         </header>
+        {customRoleOpen ? (
+          <Suspense fallback={<div className="dialog-loading" role="status">{t('characterGenerator.analyzeProgress', '正在打开角色创建器…')}</div>}>
+            <CharacterGenerator
+              workspaceId={props.workspaceId}
+              targetWorld={props.world}
+              closeRequest={generatorCloseRequest}
+              onClose={() => { setCustomRoleOpen(false); setGeneratorCloseRequest(0) }}
+              onPublished={completeCustomRolePublish}
+            />
+          </Suspense>
+        ) : (
+          <>
         <nav className="market-tabs" aria-label="市场分类">
           <MarketTab market="theme" label={marketMeta.theme.label} active={market === 'theme'} onSelect={switchMarket} />
           <MarketTab market="talent" label={marketMeta.talent.label} active={market === 'talent'} onSelect={switchMarket} />
@@ -201,11 +265,14 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
               </div>
               <span>{t('workbench.marketExtensionCount', '{count} 个扩展', { count: props.items.length })}</span>
             </div>
-            <form className="market-search" onSubmit={search}>
-              <MagnifyingGlass size={17} />
-              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('workbench.marketSearchPlaceholder', '搜索{category}、发布者或能力', { category: marketMeta[market].label })} />
-              <button type="submit">{t('workbench.marketSearchSubmit', '搜索')}</button>
-            </form>
+            <div className="market-search-row">
+              <form className="market-search" onSubmit={search}>
+                <MagnifyingGlass size={17} aria-hidden="true" />
+                <input id="market-search-input" aria-label={t('workbench.marketSearchSubmit', '搜索')} value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('workbench.marketSearchPlaceholder', '搜索{category}、发布者或能力', { category: marketMeta[market].label })} />
+                <button type="submit">{t('workbench.marketSearchSubmit', '搜索')}</button>
+              </form>
+              {market === 'talent' ? <button className="market-custom-role-button" type="button" onClick={openCustomRoleGenerator}><UserPlus size={17} aria-hidden="true" />{t('characterGenerator.title', '自定义角色')}</button> : null}
+            </div>
             {error === undefined ? null : <div className="package-error" role="alert"><Warning size={16} />{error}</div>}
             {props.loading ? <div className="dialog-empty">{t('workbench.marketCheckingLocal', '正在校验本地市场目录…')}</div> : props.items.length === 0 ? (
               <div className="market-empty"><Cube size={30} /><strong>{t('workbench.marketEmpty', '没有匹配的扩展')}</strong><span>{t('workbench.marketEmptyDesc', '可以修改关键词，或使用下方“本地导入”安装自定义包。')}</span></div>
@@ -228,7 +295,7 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
                       <div className="market-capabilities">{item.manifest.capabilities.slice(0, 4).map((capability) => <code key={capability}>{capabilityLabel(capability)}</code>)}</div>
                       <footer>
                         <span>{packageStateLabel(item, state)}</span>
-                        {marketAction(item, state, () => prepareWorld(item), () => void inspect(item), () => activate(item))}
+                        {marketAction(item, state, () => prepareWorld(item), () => void inspect(item), () => activateMarketItem(item))}
                       </footer>
                     </article>
                   )
@@ -252,6 +319,8 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
                     : <InstalledOverview installed={props.installed} transactions={props.transactions} installing={props.installing} confirmingUninstall={confirmingUninstall} onConfirmUninstall={setConfirmingUninstall} onUninstall={props.onUninstall} />}
           </aside>
         </div>
+          </>
+        )}
       </section>
     </div>
   )

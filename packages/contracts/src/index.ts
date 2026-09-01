@@ -1161,6 +1161,7 @@ export * from './completion-job.js'
 export * from './work-system.js'
 export * from './prompt-safety.js'
 export * from './creative-workshop-draft.js'
+export * from './character-generator.js'
 export * from './context-budget.js'
 
 export type {

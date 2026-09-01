@@ -21,6 +21,8 @@ const MARKET_DIRECTORIES: Record<CyberMarketKind, string> = {
 
 export interface LocalPackageCatalogOptions {
   trustedAuthorities?: string[]
+  /** Additional host-owned catalog roots. These are never treated as verified. */
+  additionalRoots?: string[]
 }
 
 export interface PackageCatalogQuery {
@@ -30,11 +32,17 @@ export interface PackageCatalogQuery {
 }
 
 export class LocalPackageCatalog {
-  readonly #root: string
+  readonly #roots: readonly ManagedCatalogRoot[]
   readonly #trustedAuthorities: Set<string>
 
   constructor(root: string, options: LocalPackageCatalogOptions = {}) {
-    this.#root = resolve(root)
+    const primaryRoot = resolve(root)
+    const additionalRoots = [...new Set((options.additionalRoots ?? []).map((item) => resolve(item)))]
+      .filter((item) => item !== primaryRoot)
+    this.#roots = [
+      { path: primaryRoot, primary: true },
+      ...additionalRoots.map((path) => ({ path, primary: false })),
+    ]
     this.#trustedAuthorities = new Set(options.trustedAuthorities ?? ['DSH Cyber'])
   }
 
@@ -42,7 +50,7 @@ export class LocalPackageCatalog {
     const markets: CyberMarketKind[] = input.market === undefined
       ? ['theme', 'plugin', 'talent', 'skin']
       : [input.market]
-    const packages = (await Promise.all(markets.map((market) => this.#scanMarket(market)))).flat()
+    const packages = (await Promise.all(markets.flatMap((market) => this.#roots.map((root) => this.#scanMarket(market, root))))).flat()
     const installed = new Map<string, string>()
     for (const item of input.installed ?? []) {
       if (item.status === 'active' && !installed.has(item.packageId)) installed.set(item.packageId, item.version)
@@ -70,7 +78,7 @@ export class LocalPackageCatalog {
       throw new Error(`Marketplace file is not declared: ${relativePath}`)
     }
     const packageRoot = resolve(item.sourceDirectory)
-    if (packageRoot !== this.#root && !packageRoot.startsWith(`${this.#root}${sep}`)) {
+    if (!this.#roots.some((root) => isPathWithin(root.path, packageRoot))) {
       throw new Error('Marketplace package escaped the catalog root')
     }
     const absolutePath = resolve(packageRoot, ...relativePath.split('/'))
@@ -83,8 +91,8 @@ export class LocalPackageCatalog {
     return body
   }
 
-  async #scanMarket(market: CyberMarketKind): Promise<CyberMarketPackage[]> {
-    const marketRoot = join(this.#root, MARKET_DIRECTORIES[market])
+  async #scanMarket(market: CyberMarketKind, catalogRoot: ManagedCatalogRoot): Promise<CyberMarketPackage[]> {
+    const marketRoot = join(catalogRoot.path, MARKET_DIRECTORIES[market])
     let directories
     try {
       directories = await readdir(marketRoot, { withFileTypes: true })
@@ -94,11 +102,11 @@ export class LocalPackageCatalog {
     }
     const results = await Promise.all(directories
       .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink())
-      .map(async (entry) => this.#readPackage(market, join(marketRoot, entry.name))))
+      .map(async (entry) => this.#readPackage(market, join(marketRoot, entry.name), catalogRoot.primary)))
     return results.filter((item): item is CyberMarketPackage => item !== undefined)
   }
 
-  async #readPackage(market: CyberMarketKind, sourceDirectory: string): Promise<CyberMarketPackage | undefined> {
+  async #readPackage(market: CyberMarketKind, sourceDirectory: string, primary: boolean): Promise<CyberMarketPackage | undefined> {
     const manifestPath = join(sourceDirectory, 'dsh-cyber.package.json')
     try {
       const metadata = await lstat(manifestPath)
@@ -115,7 +123,7 @@ export class LocalPackageCatalog {
         if (digest !== file.sha256) return undefined
       }
       const certification = manifest.certification
-      const verified = certification !== undefined &&
+      const verified = primary && certification !== undefined &&
         certification.level === 'official' &&
         this.#trustedAuthorities.has(certification.authority) &&
         certification.contentSha256 === packageContentDigest(manifest)
@@ -125,6 +133,11 @@ export class LocalPackageCatalog {
       return undefined
     }
   }
+}
+
+interface ManagedCatalogRoot {
+  path: string
+  primary: boolean
 }
 
 function searchableText(manifest: CyberPackageManifest): string {
@@ -147,4 +160,21 @@ function safeRelativePath(value: string): boolean {
 
 function isMissingFile(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT'
+}
+
+function isPathWithin(root: string, candidate: string): boolean {
+  const normalize = (value: string): string => {
+    const resolved = resolve(value)
+    // Preserve filesystem roots (`/` and `C:\`) so the containment prefix
+    // retains its separator.
+    if (resolved === sep || /^[A-Za-z]:[\\/]$/u.test(resolved)) return resolved
+    return resolved.endsWith(sep) ? resolved.slice(0, -1) : resolved
+  }
+  const caseInsensitive = process.platform === 'win32'
+  const base = normalize(root)
+  const target = normalize(candidate)
+  const comparableBase = caseInsensitive ? base.toLowerCase() : base
+  const comparableTarget = caseInsensitive ? target.toLowerCase() : target
+  const prefix = comparableBase.endsWith(sep) ? comparableBase : `${comparableBase}${sep}`
+  return comparableTarget === comparableBase || comparableTarget.startsWith(prefix)
 }
