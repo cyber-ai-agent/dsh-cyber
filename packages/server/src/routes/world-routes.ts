@@ -6,6 +6,8 @@ import { HttpError } from '../http/errors.js'
 import type { Router } from '../http/router.js'
 import { loadInstalledBlueprints } from '../installed-package-runtime.js'
 import { ConversationHubService } from '../services/conversation-hub-service.js'
+import { adoptBlueprintAvatar, initialCharacterAppearance } from '../services/recruited-character-avatar.js'
+import type { AssetService } from '../services/asset-service.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
 import type { OwnerRuntimeAccessService } from '../services/owner-runtime-access-service.js'
 import type { WorldLifecycleService } from '../services/world-lifecycle-service.js'
@@ -34,10 +36,11 @@ export interface WorldRoutesDependencies {
   ownerRuntimeAccess?: OwnerRuntimeAccessService
   skillAvailability: WorldSkillAvailabilityPort
   lifecycle?: WorldLifecycleService
+  assets?: Pick<AssetService, 'uploadCharacterAvatar'>
 }
 
 export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDependencies): void {
-  const { store, worldAccess, worldPackages, ownerRuntimeAccess, skillAvailability, lifecycle } = dependencies
+  const { store, worldAccess, worldPackages, ownerRuntimeAccess, skillAvailability, lifecycle, assets } = dependencies
   const conversationHub = new ConversationHubService(store)
 
   // The default world list shows active worlds only. Archived worlds are a
@@ -200,14 +203,36 @@ export function registerWorldRoutes(router: Router, dependencies: WorldRoutesDep
       if (denied !== undefined) throw new HttpError(422, 'capability_not_requested', `Capability was not requested by the blueprint: ${denied}`)
       recruitInput.capabilityGrants = capabilityGrants
     }
+    // The character's look is decided with the character, not left for each
+    // reader to guess: the built-in slot is durable from the first profile
+    // revision, and an owner-supplied image is adopted as the character's own.
+    const appearance = initialCharacterAppearance(liveBlueprint)
+    if (Object.keys(appearance).length > 0) recruitInput.appearance = appearance
     const employee = store.recruitEmployee(recruitInput)
+    if (assets !== undefined) {
+      await adoptBlueprintAvatar({
+        store,
+        assets,
+        employee,
+        blueprint: liveBlueprint,
+        packages: worldPackages === undefined ? [] : await worldPackages.listRuntimePackages(world.id),
+      }).catch(() => undefined)
+    }
     await conversationHub.ensureDirectSessions(world.id)
     const session = store.listSessions(world.id).find((item) => item.kind === 'direct'
       && store.listParticipants(item.id).some((participant) => participant.kind === 'employee' && participant.participantId === employee.id))
     const grant = runtimePermissionMode === 'danger-full-access' && session !== undefined
       ? ownerRuntimeAccess?.issueSession({ worldId: world.id, sessionId: session.id, employeeIds: [employee.id], confirmed: true })
       : undefined
-    writeJson(response, 201, { employee, ...(grant === undefined ? {} : { grant }) })
+    // The profile travels with the response so the caller paints the character
+    // it will still see after a reload, instead of a placeholder avatar that
+    // changes the first time the dossier loads.
+    const profile = store.getEmployeeProfile(employee.id)
+    writeJson(response, 201, {
+      employee,
+      ...(profile === undefined ? {} : { profile }),
+      ...(grant === undefined ? {} : { grant }),
+    })
   })
 }
 

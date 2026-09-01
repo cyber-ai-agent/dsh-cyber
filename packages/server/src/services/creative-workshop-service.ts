@@ -1,6 +1,6 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { dirname, join, resolve, sep } from 'node:path'
-import { lstat, mkdir, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, open, readFile, readdir, rename, rm } from 'node:fs/promises'
 
 import { worldTemplate } from '@dsh-cyber/catalog'
 import type { CyberPackageManifest, EmployeeBlueprint, PackagePermissionPreview } from '@dsh-cyber/contracts'
@@ -20,6 +20,7 @@ import { ServiceError } from './service-error.js'
 import { WorldRootService } from './world-root-service.js'
 import { WorldSettingsService } from './world-settings-service.js'
 import { WorldPackageInstanceService } from './world-package-instance-service.js'
+import { compileEmployeeBlueprintPackage } from './employee-blueprint-package-compiler.js'
 
 const PROJECT_VERSION = 1 as const
 const MAX_ROLES = 16
@@ -309,41 +310,26 @@ export class CreativeWorkshopService {
         createdAt,
       }
       const directory = safeChild(join(projectDirectory, 'generated', 'roles'), packageId)
-      const manifest = await materializeRolePackage(directory, blueprint)
+      const compiledPackage = await compileEmployeeBlueprintPackage({
+        sourceDirectory: directory,
+        packageId,
+        blueprintVersion: blueprint.version,
+        packageVersion: '1.0.0',
+        worldTemplateId: blueprint.worldTemplateId,
+        displayName: blueprint.displayName,
+        role: blueprint.role,
+        summary: blueprint.summary,
+        persona: blueprint.persona,
+        requestedSkills: blueprint.requestedSkills,
+        requestedCapabilities: blueprint.requestedCapabilities,
+        ...(blueprint.embodiment === undefined ? {} : { embodiment: blueprint.embodiment }),
+        createdAt: blueprint.createdAt,
+      })
+      const manifest = compiledPackage.manifest
       compiled.push({ role, blueprint, directory, manifest })
     }
     return compiled
   }
-}
-
-async function materializeRolePackage(
-  directory: string,
-  blueprint: EmployeeBlueprint,
-): Promise<CyberPackageManifest> {
-  await mkdir(directory, { recursive: true, mode: 0o700 })
-  const blueprintPath = 'blueprint.json'
-  const content = `${JSON.stringify(blueprint, null, 2)}\n`
-  await writeFile(join(directory, blueprintPath), content, { encoding: 'utf8', mode: 0o600 })
-  const manifest: CyberPackageManifest = {
-    schemaVersion: 1,
-    id: blueprint.id,
-    version: '1.0.0',
-    kind: 'employee-blueprint',
-    displayName: blueprint.displayName,
-    summary: blueprint.summary,
-    license: 'LicenseRef-DSH-Cyber-Local',
-    publisher: 'Local Creative Workshop',
-    capabilities: ['employee:blueprint'],
-    dataEgress: [],
-    files: [{ path: blueprintPath, sha256: createHash('sha256').update(content).digest('hex') }],
-    entrypoints: [{ id: 'role-blueprint', kind: 'employee-blueprint', path: blueprintPath }],
-  }
-  await writeFile(
-    join(directory, 'dsh-cyber.package.json'),
-    `${JSON.stringify(manifest, null, 2)}\n`,
-    { encoding: 'utf8', mode: 0o600 },
-  )
-  return manifest
 }
 
 function normalizeCreateInput(input: WorkshopCreateInput): { displayName: string; baseTemplateId: string; lore: string; scenario: string; worldModelProfileId?: string; roles: WorkshopRoleDefinition[] } {

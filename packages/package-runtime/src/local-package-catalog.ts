@@ -19,30 +19,67 @@ const MARKET_DIRECTORIES: Record<CyberMarketKind, string> = {
   skin: 'skins',
 }
 
-export interface LocalPackageCatalogOptions {
-  trustedAuthorities?: string[]
+/**
+ * Host-owned catalog roots that belong to a single workspace.
+ *
+ * These roots hold locally produced packages (today: Character Generator
+ * output). They are catalog authority, not presentation: a package underneath
+ * `container` is only visible to — and only installable by — the workspace that
+ * `resolve` maps to its directory. Queries that carry no workspace see none of
+ * them, so a caller that forgets to pass a workspace fails closed.
+ */
+export interface WorkspaceScopedCatalogRoots {
+  /** Directory containing every workspace-scoped root. */
+  container: string
+  /** Resolves the roots owned by one workspace. */
+  resolve(workspaceId: string): readonly string[]
 }
 
-export interface PackageCatalogQuery {
+export interface LocalPackageCatalogOptions {
+  trustedAuthorities?: string[]
+  /** Additional host-owned catalog roots shared by every workspace. Never treated as verified. */
+  additionalRoots?: string[]
+  /** Host-owned catalog roots private to one workspace. Never treated as verified. */
+  workspaceRoots?: WorkspaceScopedCatalogRoots
+}
+
+/** Identifies the workspace a catalog operation is performed on behalf of. */
+export interface PackageCatalogScope {
+  /** Omitted means "no workspace": workspace-scoped roots stay invisible. */
+  workspaceId?: string
+}
+
+export interface PackageCatalogQuery extends PackageCatalogScope {
   market?: CyberMarketKind
   query?: string
   installed?: InstalledPackage[]
 }
 
 export class LocalPackageCatalog {
-  readonly #root: string
+  readonly #roots: readonly ManagedCatalogRoot[]
   readonly #trustedAuthorities: Set<string>
+  readonly #workspaceRoots: WorkspaceScopedCatalogRoots | undefined
+  readonly #workspaceContainer: string | undefined
 
   constructor(root: string, options: LocalPackageCatalogOptions = {}) {
-    this.#root = resolve(root)
+    const primaryRoot = resolve(root)
+    const additionalRoots = [...new Set((options.additionalRoots ?? []).map((item) => resolve(item)))]
+      .filter((item) => item !== primaryRoot)
+    this.#roots = [
+      { path: primaryRoot, primary: true },
+      ...additionalRoots.map((path) => ({ path, primary: false })),
+    ]
     this.#trustedAuthorities = new Set(options.trustedAuthorities ?? ['DSH Cyber'])
+    this.#workspaceRoots = options.workspaceRoots
+    this.#workspaceContainer = options.workspaceRoots === undefined ? undefined : resolve(options.workspaceRoots.container)
   }
 
   async list(input: PackageCatalogQuery = {}): Promise<CyberMarketPackage[]> {
     const markets: CyberMarketKind[] = input.market === undefined
       ? ['theme', 'plugin', 'talent', 'skin']
       : [input.market]
-    const packages = (await Promise.all(markets.map((market) => this.#scanMarket(market)))).flat()
+    const roots = this.#rootsFor(input.workspaceId)
+    const packages = (await Promise.all(markets.flatMap((market) => roots.map((root) => this.#scanMarket(market, root))))).flat()
     const installed = new Map<string, string>()
     for (const item of input.installed ?? []) {
       if (item.status === 'active' && !installed.has(item.packageId)) installed.set(item.packageId, item.version)
@@ -59,18 +96,35 @@ export class LocalPackageCatalog {
       .sort((left, right) => Number(right.verified) - Number(left.verified) || left.manifest.displayName.localeCompare(right.manifest.displayName))
   }
 
-  async find(packageId: string, version?: string): Promise<CyberMarketPackage | undefined> {
-    const items = await this.list()
+  async find(packageId: string, version?: string, scope: PackageCatalogScope = {}): Promise<CyberMarketPackage | undefined> {
+    const items = await this.list(scope)
     return items.find((item) => item.manifest.id === packageId && (version === undefined || item.manifest.version === version))
   }
 
-  async readDeclaredFile(item: CyberMarketPackage, relativePath: string): Promise<Buffer> {
+  /**
+   * Throws when `sourceDirectory` sits in a workspace-scoped catalog root that
+   * `workspaceId` does not own. Callers that accept a caller-supplied source
+   * directory must run this before staging: `find` scoping alone only covers
+   * the paths the catalog itself handed out.
+   */
+  assertInstallSource(workspaceId: string | undefined, sourceDirectory: string): void {
+    if (!this.#ownedByOtherWorkspace(workspaceId, sourceDirectory)) return
+    throw new Error('Package source directory belongs to another workspace')
+  }
+
+  async readDeclaredFile(item: CyberMarketPackage, relativePath: string, scope: PackageCatalogScope = {}): Promise<Buffer> {
     const declared = item.manifest.files.find((file) => file.path === relativePath)
     if (declared === undefined || !safeRelativePath(relativePath)) {
       throw new Error(`Marketplace file is not declared: ${relativePath}`)
     }
     const packageRoot = resolve(item.sourceDirectory)
-    if (packageRoot !== this.#root && !packageRoot.startsWith(`${this.#root}${sep}`)) {
+    // Workspace ownership is checked first and on its own. A deployment whose
+    // primary root happens to contain the state root would otherwise satisfy
+    // the containment test below and hand one workspace another's bytes.
+    if (this.#ownedByOtherWorkspace(scope.workspaceId, packageRoot)) {
+      throw new Error('Marketplace package escaped the catalog root')
+    }
+    if (!this.#rootsFor(scope.workspaceId).some((root) => isPathWithin(root.path, packageRoot))) {
       throw new Error('Marketplace package escaped the catalog root')
     }
     const absolutePath = resolve(packageRoot, ...relativePath.split('/'))
@@ -83,8 +137,38 @@ export class LocalPackageCatalog {
     return body
   }
 
-  async #scanMarket(market: CyberMarketKind): Promise<CyberMarketPackage[]> {
-    const marketRoot = join(this.#root, MARKET_DIRECTORIES[market])
+  /**
+   * True when `path` lives under the workspace-scoped container but outside the
+   * roots `workspaceId` owns — i.e. it is another workspace's private data.
+   */
+  #ownedByOtherWorkspace(workspaceId: string | undefined, path: string): boolean {
+    const container = this.#workspaceContainer
+    if (container === undefined) return false
+    const candidate = resolve(path)
+    if (!isPathWithin(container, candidate)) return false
+    return !this.#workspaceScopedRoots(workspaceId).some((root) => isPathWithin(root.path, candidate))
+  }
+
+  /** Shared roots plus, when a workspace is named, the roots that workspace owns. */
+  #rootsFor(workspaceId: string | undefined): readonly ManagedCatalogRoot[] {
+    const scoped = this.#workspaceScopedRoots(workspaceId)
+    return scoped.length === 0 ? this.#roots : [...this.#roots, ...scoped]
+  }
+
+  #workspaceScopedRoots(workspaceId: string | undefined): readonly ManagedCatalogRoot[] {
+    const container = this.#workspaceContainer
+    if (this.#workspaceRoots === undefined || container === undefined) return []
+    if (workspaceId === undefined || workspaceId === '') return []
+    const resolved = [...new Set(this.#workspaceRoots.resolve(workspaceId).map((item) => resolve(item)))]
+    // A resolver that escapes its own container would silently re-open the leak
+    // this scoping exists to close, so refuse the root instead of trusting it.
+    return resolved
+      .filter((path) => isPathWithin(container, path) && path !== container)
+      .map((path) => ({ path, primary: false }))
+  }
+
+  async #scanMarket(market: CyberMarketKind, catalogRoot: ManagedCatalogRoot): Promise<CyberMarketPackage[]> {
+    const marketRoot = join(catalogRoot.path, MARKET_DIRECTORIES[market])
     let directories
     try {
       directories = await readdir(marketRoot, { withFileTypes: true })
@@ -94,11 +178,11 @@ export class LocalPackageCatalog {
     }
     const results = await Promise.all(directories
       .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink())
-      .map(async (entry) => this.#readPackage(market, join(marketRoot, entry.name))))
+      .map(async (entry) => this.#readPackage(market, join(marketRoot, entry.name), catalogRoot.primary)))
     return results.filter((item): item is CyberMarketPackage => item !== undefined)
   }
 
-  async #readPackage(market: CyberMarketKind, sourceDirectory: string): Promise<CyberMarketPackage | undefined> {
+  async #readPackage(market: CyberMarketKind, sourceDirectory: string, primary: boolean): Promise<CyberMarketPackage | undefined> {
     const manifestPath = join(sourceDirectory, 'dsh-cyber.package.json')
     try {
       const metadata = await lstat(manifestPath)
@@ -115,7 +199,7 @@ export class LocalPackageCatalog {
         if (digest !== file.sha256) return undefined
       }
       const certification = manifest.certification
-      const verified = certification !== undefined &&
+      const verified = primary && certification !== undefined &&
         certification.level === 'official' &&
         this.#trustedAuthorities.has(certification.authority) &&
         certification.contentSha256 === packageContentDigest(manifest)
@@ -125,6 +209,11 @@ export class LocalPackageCatalog {
       return undefined
     }
   }
+}
+
+interface ManagedCatalogRoot {
+  path: string
+  primary: boolean
 }
 
 function searchableText(manifest: CyberPackageManifest): string {
@@ -147,4 +236,21 @@ function safeRelativePath(value: string): boolean {
 
 function isMissingFile(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT'
+}
+
+function isPathWithin(root: string, candidate: string): boolean {
+  const normalize = (value: string): string => {
+    const resolved = resolve(value)
+    // Preserve filesystem roots (`/` and `C:\`) so the containment prefix
+    // retains its separator.
+    if (resolved === sep || /^[A-Za-z]:[\\/]$/u.test(resolved)) return resolved
+    return resolved.endsWith(sep) ? resolved.slice(0, -1) : resolved
+  }
+  const caseInsensitive = process.platform === 'win32'
+  const base = normalize(root)
+  const target = normalize(candidate)
+  const comparableBase = caseInsensitive ? base.toLowerCase() : base
+  const comparableTarget = caseInsensitive ? target.toLowerCase() : target
+  const prefix = comparableBase.endsWith(sep) ? comparableBase : `${comparableBase}${sep}`
+  return comparableTarget === comparableBase || comparableTarget.startsWith(prefix)
 }

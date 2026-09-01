@@ -176,6 +176,7 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
     if (worldId !== undefined) await assertTargetWorld(store, worldAccess, request, workspaceId, worldId)
     const manifest = packageManifest(body.manifest)
     const sourceDirectory = requiredString(body, 'sourceDirectory')
+    assertWorkspaceInstallSource(packageCatalog, workspaceId, sourceDirectory)
     await assertAvatarBasePackInstallSource(manifest, sourceDirectory)
     const installed = await packageManager.install({
       workspaceId,
@@ -195,11 +196,12 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
 
   router.post(/^\/api\/workspaces\/([^/]+)\/marketplace\/preview$/, async ({ request, response, params }) => {
     const body = await readJson(request)
-    const item = await packageCatalog.find(requiredString(body, 'packageId'), optionalString(body.version))
+    const workspaceId = params[0]!
+    const item = await packageCatalog.find(requiredString(body, 'packageId'), optionalString(body.version), { workspaceId })
     if (item === undefined) throw new HttpError(404, 'market_package_not_found', 'Marketplace package not found')
     writeJson(response, 200, {
       item,
-      preview: packageManager.preview(params[0]!, item.manifest),
+      preview: packageManager.preview(workspaceId, item.manifest),
     })
   })
 
@@ -208,8 +210,9 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
     const workspaceId = params[0]!
     const worldId = optionalString(body.worldId)
     if (worldId !== undefined) await assertTargetWorld(store, worldAccess, request, workspaceId, worldId)
-    const item = await packageCatalog.find(requiredString(body, 'packageId'), optionalString(body.version))
+    const item = await packageCatalog.find(requiredString(body, 'packageId'), optionalString(body.version), { workspaceId })
     if (item === undefined) throw new HttpError(404, 'market_package_not_found', 'Marketplace package not found')
+    assertWorkspaceInstallSource(packageCatalog, workspaceId, item.sourceDirectory)
     await assertAvatarBasePackInstallSource(item.manifest, item.sourceDirectory)
     const installed = await packageManager.install({
       workspaceId,
@@ -286,6 +289,26 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
   router.delete(/^\/api\/workspaces\/([^/]+)\/workshop\/projects\/([^/]+)$/, async ({ response, params }) => {
     writeJson(response, 200, { removed: true, deletion: await workshop.delete(params[0]!, params[1]!) })
   })
+}
+
+/**
+ * Refuses a source directory owned by a different workspace.
+ *
+ * `/packages/install` takes the directory straight from the request body, so
+ * scoping the catalog lookup is not enough on its own: without this check a
+ * workspace could name another workspace's generated talent directory and
+ * install a character it is not allowed to see.
+ */
+function assertWorkspaceInstallSource(
+  catalog: LocalPackageCatalog,
+  workspaceId: string,
+  sourceDirectory: string,
+): void {
+  try {
+    catalog.assertInstallSource(workspaceId, sourceDirectory)
+  } catch {
+    throw new HttpError(404, 'market_package_not_found', 'Marketplace package not found')
+  }
 }
 
 async function assertAvatarBasePackInstallSource(

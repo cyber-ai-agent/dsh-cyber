@@ -164,6 +164,8 @@ export interface RecruitEmployeeInput {
   capabilityGrants?: string[]
   modelPolicy?: JsonObject
   runtimePermissionMode?: AgentPermissionMode
+  /** Initial appearance for the character's first profile revision. */
+  appearance?: JsonObject
   reason?: string
   actorId?: string
 }
@@ -2055,6 +2057,11 @@ export class SqliteStore {
     // persistence only owns the durable shape and uniqueness boundary.
     assertUnique(initialSkillGrants, 'skill grant')
     assertSubset(initialCapabilityGrants, blueprint.requestedCapabilities, 'capability grant')
+    // Appearance chosen for the character before it exists — the built-in
+    // avatar slot in particular — is durable from revision 1, so no reader
+    // has to invent one and then disagree with the next reader.
+    const initialAppearance = structuredClone(input.appearance ?? {})
+    assertSecretFree(initialAppearance)
     const now = this.#clock()
     const employee: EmployeeInstance = {
       id: this.#idFactory(),
@@ -2106,9 +2113,9 @@ export class SqliteStore {
           `INSERT INTO employee_profile_revisions
            (employee_id, revision, gender, voice_profile_json, birthday, background, personality_traits_json,
             appearance_json, reason, created_at)
-           VALUES (?, 1, ?, ?, NULL, ?, '[]', '{}', 'recruited', ?)`,
+           VALUES (?, 1, ?, ?, NULL, ?, '[]', ?, 'recruited', ?)`,
         )
-        .run(employee.id, normalizeCharacterGender(input.gender), stringifyJson(defaultEmployeeVoiceProfile() as unknown as JsonObject), blueprint.summary, now)
+        .run(employee.id, normalizeCharacterGender(input.gender), stringifyJson(defaultEmployeeVoiceProfile() as unknown as JsonObject), blueprint.summary, stringifyJson(initialAppearance), now)
       const recruitedEvent = this.#appendEvent({
         workspaceId: workspace.id,
         worldId: world.id,

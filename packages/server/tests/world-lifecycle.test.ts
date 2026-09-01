@@ -437,6 +437,24 @@ describe('permanent world deletion over HTTP', () => {
     expect(store.getWorld(survivor.id)).toBeDefined()
   })
 
+  it('ignores malformed and non-canonical local directories during delete recovery', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-world-lifecycle-stray-'))
+    const worldsRoot = join(stateRoot, 'worlds')
+    const canonical = join(worldsRoot, 'world')
+    const ambiguous = join(worldsRoot, '%77orld')
+    const malformed = join(worldsRoot, '%')
+    await mkdir(canonical, { recursive: true })
+    await mkdir(ambiguous, { recursive: true })
+    await mkdir(malformed, { recursive: true })
+    await writeFile(join(ambiguous, '.pending-delete'), 'stray\n', 'utf8')
+
+    const roots = new WorldRootService(stateRoot)
+    await expect(roots.sweepPendingDeletes([])).resolves.toEqual([])
+    await expect(access(canonical)).resolves.toBeUndefined()
+    await expect(access(ambiguous)).resolves.toBeUndefined()
+    await expect(access(malformed)).resolves.toBeUndefined()
+  })
+
   it('leaves the world fully usable when the delete is refused after the marker is written', async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-world-lifecycle-refused-'))
     const store = await SqliteStore.open(join(stateRoot, 'cyber.sqlite'))

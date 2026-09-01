@@ -153,7 +153,18 @@ export class WorldRootService {
     const swept: string[] = []
     for (const entry of entries) {
       if (!entry.isDirectory()) continue
-      const worldId = decodeURIComponent(entry.name)
+      let worldId: string
+      try {
+        worldId = decodeURIComponent(entry.name)
+      } catch {
+        // Local state may contain unrelated or partially written directories;
+        // one malformed percent escape must never prevent server startup.
+        continue
+      }
+      // Only act on the exact encoding WorldRootService itself creates. Without
+      // this round trip, a marked `%77orld` entry would decode to `world` and
+      // `remove(worldId)` could delete the different, unmarked `world` root.
+      if (encodeURIComponent(worldId) !== entry.name) continue
       if (survivors.has(worldId)) continue
       const marker = join(this.#root, entry.name, PENDING_DELETE_MARKER)
       if (await lstat(marker).then((info) => info.isFile(), () => false)) {
