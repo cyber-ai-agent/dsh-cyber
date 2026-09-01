@@ -14,6 +14,10 @@ const budgets = [
   { label: 'procedural avatar worker JavaScript', pattern: /^procedural-vrm\.worker-.*\.js$/, maximum: 16 * 1024 },
   { label: 'procedural avatar fallback JavaScript', pattern: /^procedural-vrm-(?!runtime).*\.js$/, maximum: 16 * 1024 },
   { label: 'lazy VRM runtime JavaScript', pattern: /^vrm-runtime-.*\.js$/, maximum: 950 * 1024 },
+  // Optional 3D extension: opened on demand, so it never touches the first
+  // screen, but nothing stopped it growing. Same ceiling as the other ~12 KB
+  // action-lazy surfaces, which leaves roughly 40% headroom over today's chunk.
+  { label: '3D extension dialog JavaScript', pattern: /^SpatialWorldExtensionDialog-.*\.js$/, maximum: 16 * 1024 },
 ]
 
 const errors = []
