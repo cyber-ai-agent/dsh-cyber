@@ -462,6 +462,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     worldPackages,
     ownerRuntimeAccess,
     skillAvailability,
+    assets,
   })
   registerWorldAuthorityRoutes(router, { store, worldAccess, authority, worldPermissions, skillRuntime, turnContinuations, toolApprovals, ownerRuntimeAccess })
   registerWorldSettingsRoutes(router, { store, settings: worldSettings, access: worldAccess })

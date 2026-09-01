@@ -1248,6 +1248,7 @@ export default function App() {
     setError(undefined)
     try {
       let employee: EmployeeInstance
+      let recruitedProfile: EmployeeProfile | undefined
       let issuedGrant: PreparedSessionHostAccessGrant | undefined
       if (demoMode) {
         const timestamp = new Date().toISOString()
@@ -1267,7 +1268,7 @@ export default function App() {
           updatedAt: timestamp,
         }
       } else {
-        const result = await api<{ employee: EmployeeInstance; grant?: PreparedSessionHostAccessGrant }>(`/api/worlds/${activeWorld.id}/recruit`, {
+        const result = await api<{ employee: EmployeeInstance; profile?: EmployeeProfile; grant?: PreparedSessionHostAccessGrant }>(`/api/worlds/${activeWorld.id}/recruit`, {
           method: 'POST',
           body: JSON.stringify({
             blueprintId: blueprint.id,
@@ -1280,9 +1281,14 @@ export default function App() {
           }),
         })
         employee = result.employee
+        recruitedProfile = result.profile
         issuedGrant = result.grant
       }
-      const mapped = toCyberEmployee(employee, employees.length)
+      // The recruited character already owns its appearance. Painting it from
+      // that profile keeps the avatar identical before and after the next
+      // reload, instead of showing a placeholder that changes underneath.
+      const base = toCyberEmployee(employee, employees.length)
+      const mapped = recruitedProfile === undefined ? base : employeeWithProfile(base, recruitedProfile)
       setEmployees((current) => [...current, mapped])
       setRecruitmentOpen(false)
       setPreferredBlueprintId(undefined)
@@ -1302,6 +1308,12 @@ export default function App() {
       if (!demoMode) {
         const dossier = await api<EmployeeDossier>(`/api/employees/${employee.id}/dossier`)
         setDossiers((current) => ({ ...current, [employee.id]: dossier }))
+        const dossierProfile = dossier.profile
+        if (dossierProfile !== undefined) {
+          setEmployees((current) => current.map((item) => item.id === employee.id
+            ? employeeWithProfile(item, dossierProfile)
+            : item))
+        }
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '招聘失败')

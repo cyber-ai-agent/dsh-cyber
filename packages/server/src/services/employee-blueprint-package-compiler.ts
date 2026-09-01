@@ -35,6 +35,12 @@ export interface EmployeeBlueprintPackageSource {
      * extension by declaring one.
      */
     mimeType: AvatarMediaType
+    /**
+     * True when the preview is the owner's own upload. Only then does the
+     * preview double as the recruited character's avatar; a built-in
+     * selection is carried by fallbackAvatarIndex alone.
+     */
+    ownedByCharacter?: boolean
   }
 }
 
@@ -54,6 +60,8 @@ export interface EmployeeBlueprintPackageCompilerInput {
   requestedSkills?: string[]
   requestedCapabilities?: string[]
   embodiment?: EmbodimentProfile
+  /** Built-in 2D avatar slot (0-7) chosen once for this talent. */
+  fallbackAvatarIndex?: number
   createdAt: string
   source?: EmployeeBlueprintPackageSource
 }
@@ -85,6 +93,15 @@ export async function compileEmployeeBlueprintPackage(
     }
   }
 
+  // The stored extension comes from what the bytes ACTUALLY are, never from the
+  // declared media type, so a caller cannot pick the stored extension by lying.
+  const previewPath = input.source === undefined
+    ? undefined
+    : `preview.${avatarFileExtension(assertAvatarImage(input.source.preview.bytes))}`
+  // Only an owner-supplied image becomes the character's own avatar. A
+  // built-in pick stays a marketplace preview and rides on the index.
+  const avatarPreviewPath = input.source?.preview.ownedByCharacter === true ? previewPath : undefined
+
   const blueprint: EmployeeBlueprint = {
     schemaVersion: 1,
     id: input.packageId,
@@ -102,6 +119,8 @@ export async function compileEmployeeBlueprintPackage(
     requestedSkills,
     requestedCapabilities,
     ...(input.embodiment === undefined ? {} : { embodiment: structuredClone(input.embodiment) }),
+    ...(input.fallbackAvatarIndex === undefined ? {} : { fallbackAvatarIndex: input.fallbackAvatarIndex }),
+    ...(avatarPreviewPath === undefined ? {} : { avatarPreviewPath }),
     createdAt: input.createdAt,
   }
 
@@ -113,7 +132,7 @@ export async function compileEmployeeBlueprintPackage(
     files.push(
       { path: `source/original.${extension}`, bytes: Buffer.from(input.source.originalText, 'utf8') },
       { path: 'source/analysis.json', bytes: jsonBytes(input.source.analysis) },
-      { path: `preview.${avatarFileExtension(assertAvatarImage(input.source.preview.bytes))}`, bytes: input.source.preview.bytes },
+      { path: previewPath!, bytes: input.source.preview.bytes },
     )
   }
 
@@ -167,6 +186,10 @@ function validateInput(input: EmployeeBlueprintPackageCompilerInput): void {
   if (!PACKAGE_VERSION.test(input.packageVersion ?? '1.0.0')) throw new Error('Invalid employee blueprint package version')
   if (!Number.isSafeInteger(input.blueprintVersion ?? 1) || (input.blueprintVersion ?? 1) < 1) {
     throw new Error('Employee blueprint version must be a positive integer')
+  }
+  if (input.fallbackAvatarIndex !== undefined
+    && (!Number.isInteger(input.fallbackAvatarIndex) || input.fallbackAvatarIndex < 0 || input.fallbackAvatarIndex > 7)) {
+    throw new Error('Employee blueprint fallbackAvatarIndex must be an integer between 0 and 7')
   }
   for (const [key, value, maximum] of [
     ['worldTemplateId', input.worldTemplateId, 128],

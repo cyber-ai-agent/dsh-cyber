@@ -14,10 +14,18 @@ const BLUEPRINT_KEYS = new Set([
   'requestedSkills',
   'requestedCapabilities',
   'embodiment',
+  'fallbackAvatarIndex',
+  'avatarPreviewPath',
   'createdAt',
 ])
 const ID = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/
 const TOKEN = /^[a-z][a-z0-9._-]*(?::[a-z][a-z0-9._-]*)?$/
+/**
+ * Package content is untrusted. Rather than sanitizing an arbitrary path, only
+ * the compiler's own fixed preview file names are admitted, so a blueprint can
+ * never point the avatar reader at another file inside or outside its package.
+ */
+const AVATAR_PREVIEW_PATH = /^preview\.(?:png|jpg|webp)$/
 
 /**
  * The V1 host-owned allowlist of capabilities an EmployeeBlueprint may REQUEST.
@@ -89,6 +97,20 @@ export function parseEmployeeBlueprintManifest(
     createdAt,
   }
   if (input.embodiment !== undefined) blueprint.embodiment = parseEmbodimentProfile(input.embodiment)
+  if (input.fallbackAvatarIndex !== undefined) {
+    const index = input.fallbackAvatarIndex
+    if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index > 7) {
+      throw new Error('Employee blueprint fallbackAvatarIndex must be an integer between 0 and 7')
+    }
+    blueprint.fallbackAvatarIndex = index
+  }
+  if (input.avatarPreviewPath !== undefined) {
+    const path = input.avatarPreviewPath
+    if (typeof path !== 'string' || !AVATAR_PREVIEW_PATH.test(path)) {
+      throw new Error('Employee blueprint avatarPreviewPath must name a declared preview image')
+    }
+    blueprint.avatarPreviewPath = path
+  }
   return blueprint
 }
 

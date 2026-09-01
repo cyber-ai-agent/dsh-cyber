@@ -139,7 +139,8 @@ export function registerCharacterGeneratorRoutes(
       originalText: source.text,
       rejectUnknown: true,
     })
-    const avatar = await loadPreview(packageCatalog, parseAvatarSelection(body.avatar))
+    const selection = parseAvatarSelection(body.avatar)
+    const avatar = await loadPreview(packageCatalog, selection)
     const marketplaceRoot = resolve(dependencies.resolveMarketplaceRoot(workspaceId))
     const talentRoot = join(marketplaceRoot, 'talent')
     // Generated roots are per workspace, so the containment boundary falls back
@@ -181,11 +182,12 @@ export function registerCharacterGeneratorRoutes(
         requestedCapabilities: draft.requestedCapabilities,
         ...(draft.embodiment === undefined ? {} : { embodiment: draft.embodiment }),
         createdAt: new Date().toISOString(),
+        fallbackAvatarIndex: fallbackAvatarIndex(selection, packageId),
         source: {
           originalText: parsedSource.originalText,
           originalFormat,
           analysis,
-          preview: avatar,
+          preview: { ...avatar, ownedByCharacter: selection?.kind === 'upload' },
         },
       })
       staged = true
@@ -343,6 +345,29 @@ async function loadPreview(
     if (error instanceof AvatarImageError) throw new HttpError(422, error.code, error.message)
     throw error
   }
+}
+
+/**
+ * Freezes the built-in 2D avatar slot into the published talent.
+ *
+ * The picker already decided this when the draft was reviewed, so a built-in
+ * selection is simply recorded. An upload still needs a slot for the case
+ * where the image cannot be rendered; deriving it from the immutable package
+ * id keeps that answer identical on every later read instead of re-rolling it
+ * per render or per page load.
+ */
+function fallbackAvatarIndex(
+  selection: CharacterGeneratorAvatarSelection | undefined,
+  packageId: string,
+): number {
+  if (selection === undefined || selection.kind === 'builtin') {
+    const id = selection?.id ?? DEFAULT_AVATAR_PACKAGE_ID
+    const position = (BUILTIN_AVATAR_PACKAGE_IDS as readonly string[]).indexOf(id)
+    return position < 0 ? 0 : position
+  }
+  let total = 0
+  for (const character of packageId) total = (total * 31 + character.charCodeAt(0)) % 8
+  return total
 }
 
 function parseAvatarSelection(value: unknown): CharacterGeneratorAvatarSelection | undefined {

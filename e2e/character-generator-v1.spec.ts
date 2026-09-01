@@ -2,7 +2,7 @@ import { readFile, rm, mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import type { AgentRuntimePort, CharacterImportAnalyzeResult } from '../packages/contracts/lib/index.js'
 import { createCyberServer, type CyberServer } from '../packages/server/lib/index.js'
 import { attachAppConsoleRecorder } from './console-test-helpers.js'
@@ -254,4 +254,131 @@ class CharacterGeneratorRuntime implements AgentRuntimePort {
 function requireServer(): CyberServer & { origin: string; root: string } {
   if (server === undefined) throw new Error('Character Generator E2E server is not started')
   return server
+}
+
+// A 1x1 opaque PNG. Small enough to inline, real enough to pass the signature
+// checks on the publish and avatar-asset boundaries.
+const UPLOADED_AVATAR_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+)
+
+test('recruits a character that renders the uploaded avatar, not a built-in one', async ({ page }) => {
+  await page.goto(origin)
+  await generateTalent(page, {
+    displayName: '头像上传角色',
+    employeeName: '头像上传角色实例',
+    upload: UPLOADED_AVATAR_PNG,
+  })
+
+  // Assert the avatar the browser actually paints for the recruited
+  // character, on a real character surface -- not the marketplace card.
+  const conversationRow = page.getByRole('button', { name: '与头像上传角色实例私聊', exact: true })
+  await expect(conversationRow).toBeVisible()
+  const listAvatar = conversationRow.locator('.avatar--custom img')
+  await expect(listAvatar).toHaveCount(1)
+  const source = await listAvatar.getAttribute('src')
+  expect(source, 'recruited character fell back to a built-in avatar').toMatch(/^\/api\/assets\//)
+
+  // The rendered source must resolve to the uploaded bytes.
+  const served = await page.request.get(`${origin}${source!}`)
+  expect(served.status()).toBe(200)
+  expect(Buffer.from(await served.body()).equals(UPLOADED_AVATAR_PNG)).toBe(true)
+
+  // The same image is still there after a reload.
+  await page.reload()
+  const reloaded = page.getByRole('button', { name: '与头像上传角色实例私聊', exact: true })
+  await expect(reloaded).toBeVisible()
+  await expect(reloaded.locator('.avatar--custom img')).toHaveAttribute('src', source!)
+})
+
+test('keeps one stable built-in avatar when no image is uploaded', async ({ page }) => {
+  const current = requireServer()
+  const world = current.store.listWorlds(current.store.listWorkspaces()[0]!.id)[0]!
+
+  await page.goto(origin)
+  await generateTalent(page, { displayName: '默认头像角色', employeeName: '默认头像角色实例' })
+
+  const conversationRow = page.getByRole('button', { name: '与默认头像角色实例私聊', exact: true })
+  await expect(conversationRow).toBeVisible()
+  // No upload means the built-in sprite, whose slot is encoded in the
+  // rendered background offsets.
+  await expect(conversationRow.locator('.avatar--custom img')).toHaveCount(0)
+  const slot = await conversationRow.locator('.avatar').first().getAttribute('style')
+  expect(slot, 'built-in avatar renders no sprite slot').toBeTruthy()
+
+  // The choice has to belong to the character. While it is only derived at
+  // render time it silently depends on where the character happens to sit in
+  // the world roster, which is what makes it drift.
+  const employee = current.store.listEmployees(world.id).find((item) => item.displayName === '默认头像角色实例')!
+  const appearance = current.store.getEmployeeProfile(employee.id)?.appearance ?? {}
+  expect(appearance.avatarIndex, `character stores no avatar slot: ${JSON.stringify(appearance)}`)
+    .toEqual(expect.any(Number))
+  expect(slot).toBe(spriteSlotStyle(appearance.avatarIndex as number))
+
+  // Archiving an earlier colleague moves this character up the roster. A
+  // position-derived avatar re-rolls here; a stored one does not.
+  const earlier = current.store.listEmployees(world.id).find((item) => item.id !== employee.id)!
+  current.store.archiveEmployee(earlier.id)
+
+  await page.reload()
+  const reloaded = page.getByRole('button', { name: '与默认头像角色实例私聊', exact: true })
+  await expect(reloaded).toBeVisible()
+  await expect(reloaded.locator('.avatar').first()).toHaveAttribute('style', slot!)
+})
+
+/** Mirrors how Avatar turns a built-in slot into sprite-sheet offsets. */
+function spriteSlotStyle(index: number): string {
+  return `--avatar-x: ${(index % 4) * 33.3333}%; --avatar-y: ${Math.floor(index / 4) * 100}%;`
+}
+
+/** Runs the whole generator flow: analyze, review, publish, install, recruit. */
+async function generateTalent(
+  page: Page,
+  input: { displayName: string; employeeName: string; upload?: Buffer },
+): Promise<void> {
+  await page.getByRole('button', { name: '市场', exact: true }).click()
+  const market = page.locator('.package-market-dialog')
+  await expect(market).toBeVisible()
+  await market.getByRole('button', { name: '角色', exact: true }).click()
+  await market.getByRole('button', { name: '自定义角色', exact: true }).click()
+
+  const generator = market.locator('.character-generator')
+  await expect(generator).toBeVisible()
+  await generator.locator('textarea').first().fill(`${input.displayName} 负责端到端交付，擅长把复杂问题拆成可执行步骤。`)
+  await generator.getByRole('button', { name: '开始分析', exact: true }).click()
+  await expect(generator.getByText('分析完成。请继续检查并编辑草稿')).toBeVisible()
+  await generator.getByRole('button', { name: '检查角色草稿', exact: true }).click()
+
+  await expect(generator.getByLabel('角色名字')).toBeVisible()
+  await generator.getByLabel('角色名字').fill(input.displayName)
+  if (input.upload !== undefined) {
+    await generator.locator('.character-generator-avatar input[type="file"]').setInputFiles({
+      name: 'portrait.png',
+      mimeType: 'image/png',
+      buffer: input.upload,
+    })
+    await expect(generator.getByText(/已选择图片：portrait\.png/).first()).toBeVisible()
+  }
+  await generator.getByRole('button', { name: '下一步', exact: true }).click()
+  await expect(generator.getByRole('heading', { name: '确认发布角色模板' })).toBeVisible()
+  await generator.getByRole('button', { name: '发布到角色市场', exact: true }).click()
+  await expect(generator.getByText('角色模板已发布')).toBeVisible()
+  await generator.getByRole('button', { name: '查看并安装', exact: true }).click()
+
+  const card = page.locator('.market-card-grid article').filter({ hasText: input.displayName })
+  await expect(card).toBeVisible()
+  await card.getByRole('button', { name: '查看并安装', exact: true }).click()
+  const permission = page.locator('.permission-review--market')
+  await expect(permission).toBeVisible()
+  await permission.getByRole('checkbox', { name: /我已审阅/ }).check()
+  const installed = page.waitForResponse((response) => response.url().includes('/marketplace/install'))
+  await permission.getByRole('button', { name: /批准安装/ }).click()
+  expect((await installed).ok()).toBe(true)
+
+  await card.getByRole('button', { name: '招募到世界', exact: true }).click()
+  const recruitment = page.locator('.recruitment-dialog')
+  await expect(recruitment).toBeVisible()
+  await recruitment.getByLabel('角色名字（可选）').fill(input.employeeName)
+  await recruitment.getByRole('button', { name: '确认新增', exact: true }).click()
 }
