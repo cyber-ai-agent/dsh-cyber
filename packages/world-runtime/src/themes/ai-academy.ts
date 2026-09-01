@@ -15,10 +15,10 @@ import { cyberCompanyTheme } from './cyber-company.js'
  *   知识拆解 → 课程计划 → 教学材料 → 答疑 → 知识图 → 课程结果. Their tags are the
  *   semantic surface `compileWorldSemantics` turns into zones, facilities and
  *   slots, and the same tags are what a Character Blueprint Embodiment binds to.
- * - the interactable `kind` values (`blackboard`, `knowledge-graph-wall`,
- *   `milestone-wall`, `lesson-card-shelf`) are this theme's declaration of the
- *   result surfaces it prefers in the scene area. Declaration only — rendering
- *   those surfaces is not this theme's job.
+ * - the interactable `kind` values (`blackboard`, `syllabus-board`,
+ *   `question-desk`, `knowledge-graph-wall`, `milestone-wall`) are this theme's
+ *   declaration of the result surfaces it prefers in the scene area.
+ *   Declaration only — rendering those surfaces is not this theme's job.
  *
  * The default scene is a 2D university classroom drawn from a small vector
  * asset. No 3D, no VRM, no generated art.
