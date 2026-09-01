@@ -9,6 +9,7 @@ import { LocalPackageCatalog, LocalPackageRuntime, PackageManager } from '@dsh-c
 import { SqliteStore } from '@dsh-cyber/persistence'
 
 import { createCyberServer, type CyberServer } from '../src/index.js'
+import { characterGeneratorMarketplaceRoot } from '../src/services/character-generator-marketplace.js'
 import { compileEmployeeBlueprintPackage } from '../src/services/employee-blueprint-package-compiler.js'
 import { normalizeCharacterBlueprintDraft } from '../src/services/character-import-analyzer.js'
 import { CreativeWorkshopService } from '../src/services/creative-workshop-service.js'
@@ -88,7 +89,7 @@ describe('B-FIX-3 the runtime persona never carries a raw import-source echo', (
       expectNoSourceEcho(blueprint.persona as string, source, paragraph)
 
       // The same must hold for what the install -> recruit path actually runs.
-      const generatedRoot = join(server.root, 'workshop', 'character-generator', 'marketplace')
+      const generatedRoot = characterGeneratorMarketplaceRoot(server.root, workspace.id)
       const generated = (await new LocalPackageCatalog(generatedRoot).list({ market: 'talent' }))
         .find((item) => item.manifest.id === blueprint.id)!
       expect(generated).toBeDefined()
@@ -267,9 +268,12 @@ describe('B-FIX-4 package capabilities are not employee requested capabilities',
     const manifest = (published.body.item as AnyRecord).manifest as AnyRecord
     expect(manifest.capabilities).toEqual(['employee:blueprint'])
 
-    const generatedRoot = join(server.root, 'workshop', 'character-generator', 'marketplace')
+    // Workspace-scoped on disk: the catalog root has to be resolved through the
+    // product helper, not rebuilt from the pre-isolation global layout.
+    const generatedRoot = characterGeneratorMarketplaceRoot(server.root, workspace.id)
     const generated = (await new LocalPackageCatalog(generatedRoot).list({ market: 'talent' }))
       .find((item) => item.manifest.id === manifest.id)!
+    expect(generated, `no generated talent under ${generatedRoot}`).toBeDefined()
     const preview = server.packageManager.preview(workspace.id, generated.manifest)
     expect(preview.capabilities).toEqual(['employee:blueprint'])
     const installed = await postJson(server.origin, `/api/workspaces/${workspace.id}/packages/install`, {
