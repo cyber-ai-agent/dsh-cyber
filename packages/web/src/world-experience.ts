@@ -1,6 +1,6 @@
 import type { World } from '@dsh-cyber/contracts'
 
-export type WorldKind = 'personal' | 'company' | 'tavern' | 'studio' | 'observatory' | 'academy'
+export type WorldKind = 'personal' | 'company' | 'tavern' | 'studio' | 'observatory' | 'academy' | 'hub'
 
 export interface WorldExperience {
   kind: WorldKind
@@ -89,6 +89,18 @@ const experiences: Record<WorldKind, WorldExperience> = {
     sceneTitle: '大学教室',
     sceneSubtitle: '知识拆解 → 课程计划 → 教学材料 → 答疑 → 知识图 → 课程结果',
   },
+  hub: {
+    kind: 'hub',
+    peopleLabel: '助理角色',
+    personLabel: '助理角色',
+    marketLabel: '接入中枢',
+    actionLabel: '委派',
+    emptyTitle: '中枢还没有助理角色',
+    emptyCopy: '从右侧「角色」接入中枢管家、调研员、日程管家或信息整理员；更多助理角色可从顶部市场安装。',
+    composerPlaceholder: '说一件要办的事，中枢会判断归属再委派…',
+    sceneTitle: '个人中枢工作室',
+    sceneSubtitle: '接收请求 → 判断归属 → 委派 → 汇总回报',
+  },
 }
 
 export function worldExperience(world: Pick<World, 'templateId'>): WorldExperience {
@@ -98,5 +110,6 @@ export function worldExperience(world: Pick<World, 'templateId'>): WorldExperien
   if (template === 'studio' || template === 'creator-studio') return experiences.studio
   if (template === 'observatory' || template === 'orbital-observatory') return experiences.observatory
   if (template === 'academy' || template === 'ai-academy') return experiences.academy
+  if (template === 'jarvis-core' || template === 'jarvis') return experiences.hub
   return experiences.company
 }

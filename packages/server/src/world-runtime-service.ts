@@ -16,6 +16,7 @@ import type { SqliteStore, WorldSimulationStore } from '@dsh-cyber/persistence'
 import {
   aiAcademyTheme,
   cyberCompanyTheme,
+  jarvisCoreTheme,
   maidPalaceTheme,
   moonlitTavernTheme,
   projectWorldRuntime,
@@ -525,6 +526,7 @@ export class WorldRuntimeService {
     if (templateId === 'tavern' || templateId === 'moonlit-tavern') return moonlitTavernTheme
     if (templateId === 'maid-atelier' || templateId === 'maid-palace') return maidPalaceTheme
     if (templateId === 'ai-academy' || templateId === 'academy') return aiAcademyTheme
+    if (templateId === 'jarvis-core' || templateId === 'jarvis') return jarvisCoreTheme
     return undefined
   }
 

@@ -178,6 +178,7 @@ function chooseTemplate(value: unknown, templates: readonly WorldTemplateManifes
   const hints: Array<[string, string[]]> = [
     ['tavern', ['酒馆', '冒险', '剧情', '角色扮演']],
     ['ai-academy', ['教学', '课程', '教案', '讲课', '培训', '学院', '答疑']],
+    ['jarvis-core', ['助理', '中枢', '委派', '日程', '待办', '个人事务', '管家']],
     ['orbital-observatory', ['观测', '深空', '轨道', '科学']],
     ['creator-studio', ['内容', '短剧', '自媒体', '视频', '创作']],
     ['cyber-company', ['公司', '团队', '项目', '协作', '运营']],
