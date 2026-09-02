@@ -4651,9 +4651,10 @@ export class SqliteStore {
    * whole world history on every read stopped being cheap. This aggregates a
    * count-plus-timestamp fingerprint per source the projector touches, so an
    * unchanged world can reuse the previous projection without reading a single
-   * fact row. Status moves surface through the rows they always write (run and
-   * turn progress appends events and messages; approvals stamp decided_at;
-   * skill actions and employee profiles carry updated_at).
+   * fact row. Status moves surface through the rows they always write (runs
+   * carry started/completed timestamps; tasks and skill actions carry
+   * updated_at; task runs and context snapshots are append/terminal facts;
+   * approvals stamp decided_at; knowledge jobs carry updated_at).
    */
   worldTraceWatermark(worldId: string): string {
     const row = this.database
