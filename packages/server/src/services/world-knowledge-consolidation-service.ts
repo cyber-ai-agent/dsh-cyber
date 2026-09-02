@@ -208,12 +208,10 @@ export class WorldKnowledgeConsolidationService {
         sourceType: 'manual',
         sourceId: input.sourceId,
       })
-      const visibleText = batch.items.slice(0, KNOWLEDGE_CONSOLIDATION_THRESHOLDS.maxMessages)
-        .map((item) => item.kind + ': ' + item.text.trim())
-        .join('\n')
-        .slice(0, KNOWLEDGE_CONSOLIDATION_THRESHOLDS.maxCharacters)
+      const fit = fitBatchToBudget(batch.items)
+      const visibleText = fit.visibleText
       if (!visibleText) return { worldId: input.worldId, sourceId: input.sourceId, changed: false }
-      const evidence = batch.items.slice(0, KNOWLEDGE_CONSOLIDATION_THRESHOLDS.maxMessages).map((item) => item.evidence)
+      const evidence = fit.evidence
       const settings = this.#repository.getKnowledgeConsolidationSettings === undefined
         ? undefined
         : await this.#repository.getKnowledgeConsolidationSettings(input.worldId)
@@ -308,14 +306,12 @@ export class WorldKnowledgeConsolidationService {
         ...(claimed.toCursor === undefined ? {} : { toCursor: claimed.toCursor }),
       })
       validateBatch(batch, claimed)
-      const visibleText = batch.items.slice(0, KNOWLEDGE_CONSOLIDATION_THRESHOLDS.maxMessages)
-        .map((item) => item.kind + '：' + item.text.trim())
-        .join('\n')
-        .slice(0, KNOWLEDGE_CONSOLIDATION_THRESHOLDS.maxCharacters)
+      const fit = fitBatchToBudget(batch.items)
+      const visibleText = fit.visibleText
       if (!visibleText) {
         return await this.#repository.completeConsolidationJob({ jobId: claimed.id, ...(batch.toCursor === undefined ? {} : { toCursor: batch.toCursor }), completedAt: this.#clock() })
       }
-      const evidence = batch.items.slice(0, KNOWLEDGE_CONSOLIDATION_THRESHOLDS.maxMessages).map((item) => item.evidence)
+      const evidence = fit.evidence
       const settings = this.#repository.getKnowledgeConsolidationSettings === undefined
         ? undefined
         : await this.#repository.getKnowledgeConsolidationSettings(claimed.worldId)
@@ -353,7 +349,11 @@ export class WorldKnowledgeConsolidationService {
         ...(result.usage?.inputTokens === undefined ? {} : { inputTokens: result.usage.inputTokens }),
         ...(result.usage?.outputTokens === undefined ? {} : { outputTokens: result.usage.outputTokens }),
       })
-      const completed = await this.#repository.completeConsolidationJob({ jobId: claimed.id, ...(batch.toCursor === undefined ? {} : { toCursor: batch.toCursor }), completedAt: this.#clock() })
+      // Only advance the cursor to the last item actually sent to the model.
+      // The old behaviour jumped to the whole batch's end, so anything beyond
+      // the character budget was silently skipped forever.
+      const effectiveCursor = fit.consumedThrough ?? batch.toCursor
+      const completed = await this.#repository.completeConsolidationJob({ jobId: claimed.id, ...(effectiveCursor === undefined ? {} : { toCursor: effectiveCursor }), completedAt: this.#clock() })
       this.#onChanged?.(claimed.worldId, { type: 'knowledge.graph.changed', jobId: claimed.id })
       this.#onChanged?.(claimed.worldId, { type: 'knowledge.consolidation.changed', jobId: claimed.id, status: completed.status })
       return completed
@@ -403,11 +403,21 @@ function isRetryableExtractionFailure(error: unknown): boolean {
   return error.code.startsWith('extraction_') || error.code === 'knowledge_model_response_invalid'
 }
 
+/**
+ * Balanced trigger. The old rule was `messages || characters || idle`, so a
+ * single message sitting idle for 60 seconds opened a model call — a storm of
+ * one-message jobs against a slow gateway. New rule: consolidate when the
+ * session is quiet AND carries substance, or when a hard backlog has built
+ * up regardless of quietness.
+ */
 export function shouldConsolidate(input: { visibleMessages: number; characters: number; idleMs: number; mode: 'off' | 'balanced' }): boolean {
   if (input.mode === 'off') return false
-  return input.visibleMessages >= KNOWLEDGE_CONSOLIDATION_THRESHOLDS.visibleMessages ||
-    input.characters >= KNOWLEDGE_CONSOLIDATION_THRESHOLDS.characters ||
-    input.idleMs >= KNOWLEDGE_CONSOLIDATION_THRESHOLDS.idleMs
+  const quiet = input.idleMs >= KNOWLEDGE_CONSOLIDATION_THRESHOLDS.idleMs
+  const substantial = input.visibleMessages >= KNOWLEDGE_CONSOLIDATION_THRESHOLDS.visibleMessages
+    || input.characters >= KNOWLEDGE_CONSOLIDATION_THRESHOLDS.characters
+  const backlog = input.visibleMessages >= KNOWLEDGE_CONSOLIDATION_THRESHOLDS.maxMessages
+    || input.characters >= KNOWLEDGE_CONSOLIDATION_THRESHOLDS.maxCharacters
+  return (quiet && substantial) || backlog
 }
 
 function validateBatch(batch: KnowledgeSourceBatch, job: Pick<KnowledgeConsolidationJob, 'workspaceId' | 'worldId' | 'sourceId'> & { sourceType: KnowledgeEvidenceSourceType }): void {
@@ -423,6 +433,30 @@ function validateBatch(batch: KnowledgeSourceBatch, job: Pick<KnowledgeConsolida
     if (seenEvidence.has(evidence.evidenceId)) throw invalid('knowledge_evidence_duplicate', '知识证据重复')
     seenEvidence.add(evidence.evidenceId)
   }
+}
+
+/**
+ * Pack source items into the model request without ever letting the cursor
+ * run ahead of the content actually sent: the budget is measured as items are
+ * added, so text, evidence and the completion cursor stay consistent and the
+ * tail of a dense conversation is picked up by the next job instead of being
+ * silently skipped forever.
+ */
+function fitBatchToBudget(items: readonly KnowledgeVisibleSourceItem[]): { visibleText: string; evidence: KnowledgeExtractionEvidence[]; consumedThrough: number | undefined } {
+  const lines: string[] = []
+  const evidence: KnowledgeExtractionEvidence[] = []
+  let consumedThrough: number | undefined
+  let chars = 0
+  for (const item of items.slice(0, KNOWLEDGE_CONSOLIDATION_THRESHOLDS.maxMessages)) {
+    const line = item.kind + '：' + item.text.trim()
+    const cost = Array.from(line).length + (lines.length > 0 ? 1 : 0)
+    if (lines.length > 0 && chars + cost > KNOWLEDGE_CONSOLIDATION_THRESHOLDS.maxCharacters) break
+    lines.push(line)
+    evidence.push(item.evidence)
+    chars += cost
+    if (item.evidence.sequence !== undefined) consumedThrough = item.evidence.sequence
+  }
+  return { visibleText: lines.join('\n'), evidence, consumedThrough }
 }
 
 function normalizePortResult(value: unknown | KnowledgeExtractionPortResult): KnowledgeExtractionPortResult {

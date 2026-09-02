@@ -176,7 +176,7 @@ describe('strict knowledge extraction', () => {
 
 describe('knowledge consolidation lifecycle', () => {
   it('uses the background boundary and never sends hidden/tool content to extraction', async () => {
-    expect(shouldConsolidate({ visibleMessages: 6, characters: 1, idleMs: 0, mode: 'balanced' })).toBe(true)
+    expect(shouldConsolidate({ visibleMessages: 6, characters: 1, idleMs: 60_000, mode: 'balanced' })).toBe(true)
     expect(shouldConsolidate({ visibleMessages: 1, characters: 1, idleMs: 1, mode: 'off' })).toBe(false)
 
     const jobs: KnowledgeConsolidationJob[] = [{
@@ -323,6 +323,49 @@ describe('knowledge consolidation lifecycle', () => {
     await service.runNext()
     expect(calls).toBe(2)
     expect(jobs[0]?.status).toBe('completed')
+  })
+
+  it('advances the cursor only to the items actually sent, keeping the tail for the next job', async () => {
+    // 25 messages of ~900 chars each: the 16k budget can only carry part of
+    // them. The old code still completed at the batch's last sequence, which
+    // silently skipped every message past the character cut — forever.
+    const perItem = '話。'.repeat(450) // 900 chars
+    const jobs: KnowledgeConsolidationJob[] = [{
+      id: 'job-tail', workspaceId: 'workspace-a', worldId: 'world-a', sourceType: 'conversation', sourceId: 'session-a',
+      fromCursor: 0, toCursor: 25, status: 'queued', attempt: 0,
+      createdAt: '2026-08-26T00:00:00.000Z', updatedAt: '2026-08-26T00:00:00.000Z',
+    }]
+    let completedCursor: number | undefined
+    const base = graphRepository()
+    const repository = {
+      ...base,
+      listConsolidationJobs: () => jobs.filter((job) => job.status === 'queued'),
+      claimConsolidationJob: (jobId: string) => { const job = jobs.find((item) => item.id === jobId); if (job === undefined || job.status !== 'queued') return undefined; job.status = 'running'; job.attempt += 1; return job },
+      applyKnowledgeExtraction: () => undefined,
+      completeConsolidationJob: (input: { jobId: string; toCursor?: number }) => { completedCursor = input.toCursor; jobs[0]!.status = 'completed'; return jobs[0]! },
+      failConsolidationJob: () => { jobs[0]!.status = 'failed'; return jobs[0]! },
+    } satisfies KnowledgeConsolidationRepository
+    const service = new WorldKnowledgeConsolidationService({
+      repository,
+      sources: { async load() {
+        return {
+          workspaceId: 'workspace-a', worldId: 'world-a', sourceType: 'conversation', sourceId: 'session-a', fromCursor: 0, toCursor: 25,
+          items: Array.from({ length: 25 }, (_, index) => ({
+            kind: 'user' as const, text: perItem,
+            evidence: { evidenceId: `evidence-${index + 1}`, sourceType: 'conversation' as const, sourceId: 'session-a', excerpt: perItem.slice(0, 100), worldId: 'world-a', workspaceId: 'workspace-a', sessionId: 'session-a', messageId: `message-${index + 1}`, sequence: index + 1 },
+          })),
+        }
+      } },
+      extractor: {
+        async extract(request) {
+          return { entities: [], claims: [], relations: [], evidenceRefs: request.evidence.map((item) => ({ sourceType: 'conversation' as const, sourceId: 'session-a', evidenceId: item.evidenceId })) }
+        },
+      },
+    })
+    await service.runNext()
+    expect(jobs[0]?.status).toBe('completed')
+    expect(completedCursor).toBeLessThan(25)
+    expect(completedCursor! * 900).toBeLessThanOrEqual(16_000 + 900)
   })
 
   it('never retries a transport failure into a second model call', async () => {
