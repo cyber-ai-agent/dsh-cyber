@@ -88,16 +88,58 @@ function completedTurn(context: Fixture, target: WorkSession, employeeIds: strin
   return { turn, runs }
 }
 
-/** Records the turn against a real WorkTask the way WorkSystemService does. */
-function recordTask(context: Fixture, title: string, target: WorkSession, turnId: string, runs: AgentRun[]) {
+/** A WorkTask in `running`, the state WorkSystemService puts it in before the turn starts. */
+function createTask(context: Fixture, title: string, worldId = context.world.id) {
   const repository = new WorkSystemRepository(context.store.database)
   let task = repository.createTask({
-    workspaceId: context.workspace.id, worldId: context.world.id, title,
+    workspaceId: context.workspace.id, worldId, title,
     description: '把任务目标真正挂到轨迹上', priority: 'normal', createdBy: 'owner',
   })
   task = repository.transitionTask(task.id, ['draft'], 'planning')
   task = repository.transitionTask(task.id, ['planning'], 'ready')
   task = repository.transitionTask(task.id, ['ready'], 'running')
+  return { task, repository }
+}
+
+/**
+ * A turn whose runs have started and not finished, seeded the way the
+ * orchestrator seeds a task turn: one owner message carrying the host-written
+ * `workTaskId` next to the turn id. Nothing in `task_runs` yet.
+ */
+function liveTurn(context: Fixture, target: WorkSession, employeeIds: string[], seed: Record<string, string>) {
+  const { store } = context
+  const turn = store.createWorkTurn({
+    workspaceId: context.workspace.id, worldId: context.world.id, sessionId: target.id, interactionKind: 'task',
+  })
+  store.appendMessage({
+    sessionId: target.id, senderId: 'owner', senderKind: 'owner', kind: 'user',
+    content: '开始任务', metadata: { ...seed, workTurnId: turn.id, interactionKind: 'task' },
+  })
+  store.startWorkTurn(turn.id)
+  const runs = employeeIds.map((employeeId, index) => {
+    const run = store.createAgentRun({
+      workspaceId: context.workspace.id, worldId: context.world.id, sessionId: target.id,
+      turnId: turn.id, employeeId, ordinal: index + 1,
+    })
+    return store.startAgentRun(run.id)
+  })
+  return { turn, runs }
+}
+
+function finishTurn(context: Fixture, live: ReturnType<typeof liveTurn>) {
+  const runs = live.runs.map((run) => context.store.completeAgentRun(run.id, `runtime-${run.id}`))
+  context.store.completeWorkTurn(live.turn.id)
+  return { turn: live.turn, runs }
+}
+
+/** Records the turn against a real WorkTask the way WorkSystemService does. */
+function recordTask(context: Fixture, title: string, target: WorkSession, turnId: string, runs: AgentRun[]) {
+  const { task, repository } = createTask(context, title)
+  recordExecution(context, repository, task.id, target, turnId, runs)
+  return { task, repository }
+}
+
+function recordExecution(context: Fixture, repository: WorkSystemRepository, taskId: string, target: WorkSession, turnId: string, runs: AgentRun[]) {
   const plan = context.store.createTaskCollaborationPlan({
     taskId: `task-${turnId}`,
     workspaceId: context.workspace.id,
@@ -107,8 +149,7 @@ function recordTask(context: Fixture, title: string, target: WorkSession, turnId
     status: 'completed',
     steps: [{ requiredSkills: [], assignedEmployeeIds: runs.map((run) => run.employeeId), dependsOn: [], executionMode: 'parallel', status: 'completed' }],
   })
-  repository.recordExecution({ taskId: task.id, plan, agentRuns: runs, coordinatorEmployeeId: runs[0]!.employeeId, latency: 10 })
-  return { task, repository }
+  repository.recordExecution({ taskId, plan, agentRuns: runs, coordinatorEmployeeId: runs[0]!.employeeId, latency: 10 })
 }
 
 function snapshot(input: { memoryIds: string[]; identityTokens: number; requestTokens: number }): ContextSnapshot {
@@ -202,6 +243,118 @@ describe('World Trace: 任务目标', () => {
     expect(grouped.byTurn.get('turn-1')).toEqual({ id: 'task-live', title: '在册任务' })
     expect(grouped.byRun.has('run-2')).toBe(false)
     expect(grouped.byTurn.has('turn-2')).toBe(false)
+  })
+})
+
+describe('World Trace: 任务目标 — 运行中的窗口', () => {
+  /**
+   * `task_runs` is written only after the whole task turn completes, so the
+   * durable link cannot exist while a run is live — exactly when the card is
+   * being watched. In that window the trace trusts the host-written
+   * `workTaskId` on the turn's seed message, but only once it resolves to a
+   * `work_tasks` row of the same world.
+   */
+  it('names the task from the seed message while the run is live, and the durable link agrees once task_runs lands', async () => {
+    const context = await fixture()
+    const group = session(context, 'group', [context.alice.id, context.bob.id])
+    const { task, repository } = createTask(context, '整理季度复盘')
+    const live = liveTurn(context, group, [context.alice.id, context.bob.id], { workTaskId: task.id })
+    const trace = service(context)
+
+    const before = await trace.list(context.world.id, { limit: 200 })
+    for (const run of live.runs) {
+      const entry = before.items.find((item) => item.runId === run.id)
+      expect(entry, run.id).toMatchObject({ status: 'running', taskId: task.id, taskTitle: '整理季度复盘' })
+    }
+    const filtered = await trace.list(context.world.id, { taskId: task.id })
+    expect(filtered.items.map((item) => item.runId).sort()).toEqual(live.runs.map((run) => run.id).sort())
+
+    const finished = finishTurn(context, live)
+    recordExecution(context, repository, task.id, group, finished.turn.id, finished.runs)
+    const after = await trace.list(context.world.id, { limit: 200 })
+    for (const run of finished.runs) {
+      const entry = after.items.find((item) => item.runId === run.id)
+      expect(entry, run.id).toMatchObject({ status: 'success', taskId: task.id, taskTitle: '整理季度复盘' })
+    }
+  })
+
+  it('treats a workTaskId that does not resolve, or resolves to another world, as no task', async () => {
+    const context = await fixture()
+    const elsewhere = context.store.createWorld({ workspaceId: context.workspace.id, name: '另一个世界', templateId: 'personal-world' })
+    const foreign = createTask(context, '别处的任务', elsewhere.id).task
+    const group = session(context, 'group', [context.alice.id, context.bob.id])
+    const forged = liveTurn(context, group, [context.alice.id], { workTaskId: 'task-forged-0000' })
+    const crossWorld = liveTurn(context, group, [context.bob.id], { workTaskId: foreign.id })
+
+    const trace = service(context)
+    const page = await trace.list(context.world.id, { limit: 200 })
+    for (const run of [...forged.runs, ...crossWorld.runs]) {
+      const entry = page.items.find((item) => item.runId === run.id)!
+      expect(entry.status, run.id).toBe('running')
+      expect(entry, run.id).not.toHaveProperty('taskId')
+      expect(entry, run.id).not.toHaveProperty('taskTitle')
+    }
+    const serialized = JSON.stringify(page)
+    expect(serialized).not.toContain('task-forged-0000')
+    expect(serialized).not.toContain(foreign.id)
+    expect(serialized).not.toContain('别处的任务')
+    expect((await trace.list(context.world.id, { taskId: foreign.id })).items).toEqual([])
+    // The other world does not inherit the run either: a hint never crosses worlds in either direction.
+    expect((await trace.list(elsewhere.id, { limit: 200 })).items.filter((item) => item.sourceKind === 'agent-run')).toEqual([])
+  })
+
+  it('lets the durable task_runs link outrank a seed hint that disagrees with it', async () => {
+    const context = await fixture()
+    const group = session(context, 'group', [context.alice.id, context.bob.id])
+    const recorded = createTask(context, '真正记录的任务')
+    const hinted = createTask(context, '种子里写的任务').task
+    const live = liveTurn(context, group, [context.alice.id, context.bob.id], { workTaskId: hinted.id })
+    const trace = service(context)
+    expect((await trace.list(context.world.id, { taskId: hinted.id })).items.length).toBe(live.runs.length)
+
+    const finished = finishTurn(context, live)
+    recordExecution(context, recorded.repository, recorded.task.id, group, finished.turn.id, finished.runs)
+    const page = await trace.list(context.world.id, { limit: 200 })
+    for (const run of finished.runs) {
+      expect(page.items.find((item) => item.runId === run.id), run.id).toMatchObject({ taskId: recorded.task.id, taskTitle: '真正记录的任务' })
+    }
+    expect((await trace.list(context.world.id, { taskId: hinted.id })).items).toEqual([])
+  })
+
+  it('carries the verified task on the live card a runtime event produces, and nothing on a chat run or a forged seed', async () => {
+    const context = await fixture()
+    const group = session(context, 'group', [context.alice.id, context.bob.id])
+    const { task } = createTask(context, '轮换密钥 sk-1234567890123456 后同步')
+    const tasked = liveTurn(context, group, [context.alice.id], { workTaskId: task.id })
+    const forged = liveTurn(context, group, [context.bob.id], { workTaskId: 'task-forged-0000' })
+    const direct = session(context, 'direct', [context.alice.id])
+    const chat = liveTurn(context, direct, [context.alice.id], {})
+    const trace = service(context)
+    const started = (turnId: string, run: AgentRun, sequence: number) => trace.adaptRuntime({
+      workspaceId: context.workspace.id, worldId: context.world.id, sessionId: run.sessionId, agentId: run.employeeId,
+      workTurnId: turnId, agentRunId: run.id,
+      event: { kind: 'turn.started', source: 'trace-test', sourceSessionId: `runtime-${run.id}`, sourceSequence: sequence, metadata: {} },
+    })
+
+    const [liveTasked] = started(tasked.turn.id, tasked.runs[0]!, 1)
+    expect(liveTasked).toMatchObject({ status: 'running', runId: tasked.runs[0]!.id, taskId: task.id })
+    expect(liveTasked?.taskTitle).toContain('轮换密钥')
+    expect(JSON.stringify(liveTasked)).not.toContain('sk-1234567890123456')
+    // A later event on the same run keeps the link without being re-resolved.
+    const [again] = trace.adaptRuntime({
+      workspaceId: context.workspace.id, worldId: context.world.id, sessionId: tasked.runs[0]!.sessionId, agentId: context.alice.id,
+      workTurnId: tasked.turn.id, agentRunId: tasked.runs[0]!.id,
+      event: { kind: 'assistant.reasoning', source: 'trace-test', sourceSessionId: `runtime-${tasked.runs[0]!.id}`, sourceSequence: 2, content: '先看数据', metadata: {} },
+    })
+    expect(again).toMatchObject({ taskId: task.id })
+
+    for (const [turnId, run] of [[forged.turn.id, forged.runs[0]!], [chat.turn.id, chat.runs[0]!]] as const) {
+      const [entry] = started(turnId, run, 1)
+      expect(entry, run.id).toMatchObject({ status: 'running', runId: run.id })
+      expect(entry, run.id).not.toHaveProperty('taskId')
+      expect(entry, run.id).not.toHaveProperty('taskTitle')
+    }
+    expect(JSON.stringify(await trace.list(context.world.id, { limit: 200 }))).not.toContain('task-forged-0000')
   })
 })
 
