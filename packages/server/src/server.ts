@@ -11,7 +11,7 @@ import {
 } from '@dsh-cyber/harness-adapter'
 import { ConversationOrchestrator, type GroupTurnPlannerPort } from '@dsh-cyber/orchestration'
 import type { PackageManager, PackageRuntimePort } from '@dsh-cyber/package-runtime'
-import { SqliteStore, WorkSystemRepository, WorldArtifactRepository, WorldKnowledgeRepository, WorldSimulationStore } from '@dsh-cyber/persistence'
+import { SqliteStore, WorldArtifactRepository, WorldKnowledgeRepository, WorldSimulationStore } from '@dsh-cyber/persistence'
 import { dispatchHttpRequest } from './http/context.js'
 import { assertApplicationAccess } from './http/application-access-guard.js'
 import { writeError } from './http/errors.js'
@@ -52,7 +52,6 @@ import { LocalTtsAssetService } from './services/local-tts-asset-service.js'
 import { ApplicationAccessService } from './services/application-access-service.js'
 import { CharacterProfileRuntime } from './services/character-profile-runtime.js'
 import { ContextPlanningRuntime, contextModelLimits } from './services/context-planning-runtime.js'
-import { ContextSnapshotService } from './services/context-snapshot-service.js'
 import { CharacterSkillRuntime } from './services/character-skill-runtime.js'
 import { composeConversationControl } from './services/conversation-control-composition.js'
 import { SkillCatalogService } from './services/skill-catalog-service.js'
@@ -72,6 +71,7 @@ import { TurnAwareApprovalContinuationService } from './services/turn-aware-appr
 import { WorldAccessService } from './services/world-access-service.js'
 import type { WorkSystemService } from './services/work-system-service.js'
 import { composeWorkSystem } from './composition/compose-work-system.js'
+import { composeWorldTrace } from './composition/compose-world-trace.js'
 import { composeCompletionWorker } from './composition/compose-completion.js'
 import { composeGroupTurnPlanner } from './composition/compose-group-turn-planner.js'
 import { composePackageSystem } from './composition/compose-package-system.js'
@@ -91,7 +91,6 @@ import { WorldKnowledgeRetrievalService } from './services/world-knowledge-retri
 import type { KnowledgeExtractionPort } from './services/knowledge-extraction.js'
 import { createWorldKnowledgeGraphRuntime } from './services/world-knowledge-graph-runtime.js'
 import { WorldKnowledgeRuntimeContextContributor, WorldRuntimeContextComposer } from './services/world-runtime-context-composer.js'
-import { WorldTraceService } from './services/world-trace-service.js'
 import { attachVoiceWebSocket } from './voice/voice-websocket-server.js'
 import { WorldMarketplaceService } from './services/world-marketplace-service.js'
 import { WorldPackageInstanceService } from './services/world-package-instance-service.js'
@@ -428,16 +427,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     worldPackages,
     worldPermissions,
   })
-  // The trace reads task links and context numbers through their own owners:
-  // the Work System's repository for `task_runs`, the D4 service for snapshots.
-  const contextSnapshots = new ContextSnapshotService(store)
-  const worldTrace = new WorldTraceService({
-    store,
-    actions: skillActions,
-    artifacts: worldArtifacts,
-    tasks: new WorkSystemRepository(store.database),
-    contexts: contextSnapshots,
-  })
+  const { worldTrace, contextSnapshots } = composeWorldTrace({ store, actions: skillActions, artifacts: worldArtifacts })
   const employeeActivity = new EmployeeActivityProjectionService(store)
   employeeActivity.projectAll()
   const taskSchedules = new TaskScheduleService({ store, orchestrator, settings: worldRuntimeContext, employeeActivity })
