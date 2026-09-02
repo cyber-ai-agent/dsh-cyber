@@ -50,7 +50,7 @@ const MARKET_SKIN_PREVIEW_IMAGES: Record<string, string> = {
   'orca-link': '/assets/skins/orca-bridge-night.png',
   'cyber-company': '/assets/cyber-office-world-clean.png',
   'moonlit-tavern': '/assets/moonlit-tavern-world.png',
-  'sakura-shrine': '/assets/skins/sakura-shrine-world.jpg',
+  'sakura-shrine': '/assets/skins/sakura-shrine-world.webp',
   'starlit-witch': '/assets/skins/starlit-witch-world.jpg',
   'neon-cyber': '/assets/skins/neon-cyber-world.jpg',
   'white-whale': '/assets/skins/white-whale-maiden.jpg',

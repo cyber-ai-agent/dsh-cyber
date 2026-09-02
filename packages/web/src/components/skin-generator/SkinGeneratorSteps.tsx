@@ -110,7 +110,7 @@ function ColorField({ id, label, value, error, onChange }: { id: string; label: 
   return (
     <div className="skin-generator-color">
       <span id={`${id}-label`}>{label}</span>
-      <input type="color" aria-labelledby={`${id}-label`} value={parsed ?? '#000000'} onChange={(event) => onChange(event.target.value)} />
+      <input type="color" aria-label={`${label} · 取色`} value={parsed ?? '#000000'} onChange={(event) => onChange(event.target.value)} />
       <input id={id} type="text" aria-label={label} value={value} maxLength={7} spellCheck={false} placeholder="#rrggbb" aria-invalid={error} onChange={(event) => onChange(event.target.value)} />
     </div>
   )
