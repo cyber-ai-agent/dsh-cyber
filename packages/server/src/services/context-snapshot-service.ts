@@ -2,12 +2,13 @@ import type {
   ContextEnvelope,
   ContextSnapshot,
   ContextSnapshotLayer,
+  ContextSnapshotSummary,
   ContextSourceRef,
   EmployeeMemoryIndexEntry,
   EmployeeMemoryScope,
   WorkMessage,
 } from '@dsh-cyber/contracts'
-import { composeContextSnapshot } from '@dsh-cyber/contracts'
+import { composeContextSnapshot, summarizeContextSnapshot } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { sessionMemoryScope, visibleMemoryScopes } from './employee-conversation-memory-service.js'
@@ -39,7 +40,10 @@ import { sessionMemoryScope, visibleMemoryScopes } from './employee-conversation
 type SnapshotStore = Pick<SqliteStore, 'getAgentRun' | 'getSession' | 'getMessages'>
   & Partial<Pick<
     SqliteStore,
-    'saveAgentRunContextSnapshot' | 'getAgentRunContextSnapshot' | 'getEmployeeMemoryIndexEntry'
+    | 'saveAgentRunContextSnapshot'
+    | 'getAgentRunContextSnapshot'
+    | 'listWorldAgentRunContextSnapshots'
+    | 'getEmployeeMemoryIndexEntry'
   >>
 
 /** One layer, rebuilt from the rows its pointers still resolve to. */
@@ -101,6 +105,31 @@ export class ContextSnapshotService {
       agentRunId: input.agentRunId,
       snapshot: composeContextSnapshot({ envelope: input.envelope }),
     })
+  }
+
+  /**
+   * The numbers of one run's snapshot, or `undefined` when it has none.
+   *
+   * A summary has no pointers, so handing it to a surface outside the
+   * Inspector gives that surface nothing to dereference: the trace can show
+   * how big each layer was without ever being able to read what was in it.
+   */
+  summarize(agentRunId: string): ContextSnapshotSummary | undefined {
+    const read = this.#store.getAgentRunContextSnapshot
+    if (read === undefined) return undefined
+    const snapshot = read.call(this.#store, agentRunId)
+    return snapshot === undefined ? undefined : summarizeContextSnapshot(snapshot)
+  }
+
+  /** Summaries for every run of a world that has a snapshot, keyed by run id. */
+  summarizeWorld(worldId: string): Map<string, ContextSnapshotSummary> {
+    const list = this.#store.listWorldAgentRunContextSnapshots
+    const summaries = new Map<string, ContextSnapshotSummary>()
+    if (list === undefined) return summaries
+    for (const { agentRunId, snapshot } of list.call(this.#store, worldId)) {
+      summaries.set(agentRunId, summarizeContextSnapshot(snapshot))
+    }
+    return summaries
   }
 
   /**

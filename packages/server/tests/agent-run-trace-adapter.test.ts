@@ -40,6 +40,50 @@ function interaction(input: Partial<ModelInteractionLog>): ModelInteractionLog {
   }
 }
 
+describe('AgentRunTraceAdapter task and context links', () => {
+  const completed: AgentRun = { ...run, id: 'run-linked', status: 'completed', errorCode: undefined as never }
+
+  it('carries the real task id and title when the run was recorded against a task', () => {
+    const [entry] = new AgentRunTraceAdapter().adapt({
+      kind: 'agent-run',
+      value: { worldId: run.worldId, run: completed, messages: [], task: { id: 'task-77', title: '整理季度复盘' } },
+    })
+    expect(entry).toMatchObject({ runId: 'run-linked', workTurnId: 'turn-1', taskId: 'task-77', taskTitle: '整理季度复盘' })
+  })
+
+  it('carries no task at all for a plain chat run — never a turn id in disguise', () => {
+    const [entry] = new AgentRunTraceAdapter().adapt({
+      kind: 'agent-run',
+      value: { worldId: run.worldId, run: completed, messages: [] },
+    })
+    expect(entry).not.toHaveProperty('taskId')
+    expect(entry).not.toHaveProperty('taskTitle')
+    expect(JSON.stringify(entry)).not.toContain('turn:')
+    expect(entry?.workTurnId).toBe('turn-1')
+  })
+
+  it('passes the snapshot numbers through untouched and omits them when there is no snapshot', () => {
+    const context = {
+      totalTokenEstimate: 450,
+      layers: [{ kind: 'stable-identity' as const, tokenEstimate: 320 }, { kind: 'current-request' as const, tokenEstimate: 130 }],
+      memoryHitCount: 2,
+      stablePrefixTokens: 320,
+      volatileTokens: 130,
+      prefixReused: true,
+    }
+    const [withContext] = new AgentRunTraceAdapter().adapt({
+      kind: 'agent-run',
+      value: { worldId: run.worldId, run: completed, messages: [], context },
+    })
+    expect(withContext?.context).toEqual(context)
+    const [without] = new AgentRunTraceAdapter().adapt({
+      kind: 'agent-run',
+      value: { worldId: run.worldId, run: completed, messages: [] },
+    })
+    expect(without).not.toHaveProperty('context')
+  })
+})
+
 describe('AgentRunTraceAdapter failure details', () => {
   it('does not present a delayed 429 response as a local timeout', () => {
     const [entry] = new AgentRunTraceAdapter().adapt({

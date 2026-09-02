@@ -24,6 +24,9 @@ export function WorldTracePanel({ world, employees, demoMode, conversationId, on
 }) {
   const { locale, t } = useI18n()
   const [view, setView] = useState<TraceView>('trace')
+  // The run whose context the 上下文 view is focused on. Set from a trace
+  // card; cleared when the reader picks the tab directly or steps back.
+  const [contextRunId, setContextRunId] = useState<string>()
   const [filters, setFilters] = useState<TraceFilters>(EMPTY_FILTERS)
   const deferredSearch = useDeferredValue(filters.search.trim())
   const query = useMemo<WorldTraceQuery>(() => ({
@@ -47,10 +50,10 @@ export function WorldTracePanel({ world, employees, demoMode, conversationId, on
     <header className="world-trace-panel__header"><span className="world-trace-panel__mark"><Path size={20} /></span><span><strong>{t('workbench.traceTitle', '世界轨迹')}</strong><small>{t('workbench.traceSubtitle', '可读的判断摘要、工具调度与实际用量')}</small></span>{view === 'trace' ? <button type="button" className="icon-button" aria-label={t('workbench.traceRefresh', '刷新世界轨迹')} disabled={trace.loading} onClick={() => void trace.refresh()}><ArrowClockwise size={17} className={trace.loading ? 'spin' : ''} /></button> : null}</header>
     <div className="world-trace-views" role="group" aria-label={t('workbench.traceViews', '轨迹视图')}>
       <button type="button" aria-pressed={view === 'trace'} className={view === 'trace' ? 'is-active' : ''} onClick={() => setView('trace')}>{t('workbench.traceViewTrace', '轨迹')}</button>
-      <button type="button" aria-pressed={view === 'context'} className={view === 'context' ? 'is-active' : ''} onClick={() => setView('context')}>{t('workbench.traceViewContext', '上下文')}</button>
+      <button type="button" aria-pressed={view === 'context'} className={view === 'context' ? 'is-active' : ''} onClick={() => { setContextRunId(undefined); setView('context') }}>{t('workbench.traceViewContext', '上下文')}</button>
     </div>
     {view === 'context'
-      ? <ContextInspectorPanel demoMode={demoMode} {...(conversationId === undefined ? {} : { conversationId })} />
+      ? <ContextInspectorPanel demoMode={demoMode} {...(conversationId === undefined ? {} : { conversationId })} {...(contextRunId === undefined ? {} : { agentRunId: contextRunId, onClearRun: () => setContextRunId(undefined) })} />
       : <>
         <WorldTraceFilters value={filters} employees={employees} onChange={setFilters} />
         {trace.error === undefined ? null : <div className="world-trace-error" role="alert">{trace.error}</div>}
@@ -58,7 +61,7 @@ export function WorldTracePanel({ world, employees, demoMode, conversationId, on
         {tokenByActor.length === 0 ? null : <div className="world-trace-token-strip" aria-label={t('workbench.traceActorStats', '按角色统计 Token')}>
           {tokenByActor.map(([actorId, total]) => <button key={actorId} type="button" className={filters.actorId === actorId ? 'is-active' : ''} onClick={() => setFilters((current) => ({ ...current, actorId: current.actorId === actorId ? '' : actorId }))}><span>{employees.find((employee) => employee.id === actorId)?.displayName ?? t('workbench.traceUnknownActor', '未知角色')}</span><strong>{formatTokenCount(total, locale)}</strong></button>)}
         </div>}
-        <WorldTraceTimeline entries={trace.entries} employees={employees} {...(onOpenArtifact === undefined ? {} : { onOpenArtifact })} />
+        <WorldTraceTimeline entries={trace.entries} employees={employees} {...(onOpenArtifact === undefined ? {} : { onOpenArtifact })} onOpenContext={(agentRunId) => { setContextRunId(agentRunId); setView('context') }} />
         {trace.nextCursor === undefined ? null : <footer className="world-trace-panel__footer"><button type="button" disabled={trace.loadingMore} onClick={() => void trace.loadMore()}>{trace.loadingMore ? t('workbench.traceLoading', '正在加载…') : t('workbench.traceLoadMore', '加载更早轨迹')}</button></footer>}
       </>}
   </section>

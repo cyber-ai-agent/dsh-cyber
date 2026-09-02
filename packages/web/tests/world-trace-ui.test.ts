@@ -237,6 +237,59 @@ describe('Trace honesty and run outcome', () => {
     expect(opened).toEqual([])
   })
 
+  it('names the real task a run belonged to, and no task for a plain run', () => {
+    const fromTask = { ...trace('from-task', 'success', '2026-08-23T00:05:00.000Z'), category: 'agent' as const, sourceKind: 'agent-run' as const, runId: 'run-task', taskId: 'task-77', taskTitle: '整理季度复盘' }
+    const plain = { ...trace('plain', 'success', '2026-08-23T00:05:00.000Z'), category: 'agent' as const, sourceKind: 'agent-run' as const, runId: 'run-plain' }
+    const taskHtml = renderToStaticMarkup(createElement('ol', {}, createElement(WorldTraceItem, { entry: fromTask, employees: [] })))
+    expect(taskHtml).toContain('任务：整理季度复盘')
+    expect(taskHtml).toContain('title="task-77"')
+    const plainHtml = renderToStaticMarkup(createElement('ol', {}, createElement(WorldTraceItem, { entry: plain, employees: [] })))
+    expect(plainHtml).not.toContain('任务：')
+  })
+
+  it('shows the snapshot’s per-layer tokens and memory hits inline and links to the run’s context', () => {
+    const opened: string[] = []
+    const withContext = {
+      ...trace('with-context', 'success', '2026-08-23T00:06:00.000Z'),
+      category: 'agent' as const,
+      sourceKind: 'agent-run' as const,
+      runId: 'run-ctx',
+      context: {
+        totalTokenEstimate: 450,
+        layers: [{ kind: 'stable-identity' as const, tokenEstimate: 320 }, { kind: 'retrieved-memories' as const, tokenEstimate: 90 }, { kind: 'current-request' as const, tokenEstimate: 40 }],
+        memoryHitCount: 2,
+        stablePrefixTokens: 320,
+        volatileTokens: 130,
+        prefixReused: false,
+      },
+    }
+    const html = renderToStaticMarkup(createElement('ol', {}, createElement(WorldTraceItem, {
+      entry: withContext,
+      employees: [],
+      onOpenContext: (agentRunId: string) => { opened.push(agentRunId) },
+    })))
+    expect(html).toContain('用了什么上下文')
+    expect(html).toContain('稳定身份')
+    expect(html).toContain('召回的记忆')
+    expect(html).toContain('本次请求')
+    expect(html).toContain('命中 2 条')
+    expect(html).toContain('上下文 450 Token')
+    expect(html).toContain('aria-label="查看运行 run-ctx 的上下文"')
+    expect(opened).toEqual([])
+  })
+
+  it('offers the context link for a run without a snapshot but draws no numbers for it', () => {
+    const noSnapshot = { ...trace('no-snapshot', 'success', '2026-08-23T00:07:00.000Z'), category: 'agent' as const, sourceKind: 'agent-run' as const, runId: 'run-old' }
+    const html = renderToStaticMarkup(createElement('ol', {}, createElement(WorldTraceItem, { entry: noSnapshot, employees: [], onOpenContext: () => undefined })))
+    expect(html).toContain('查看上下文记录')
+    expect(html).not.toContain('命中')
+    expect(html).not.toContain('Token（本地估算）')
+    // An entry that is not a run gets no context section at all.
+    const event = trace('event', 'success', '2026-08-23T00:08:00.000Z')
+    const eventHtml = renderToStaticMarkup(createElement('ol', {}, createElement(WorldTraceItem, { entry: event, employees: [], onOpenContext: () => undefined })))
+    expect(eventHtml).not.toContain('用了什么上下文')
+  })
+
   it('says nothing about products when the run published none', () => {
     const html = renderToStaticMarkup(createElement('ol', {}, createElement(WorldTraceItem, {
       entry: { ...trace('no-output', 'success', '2026-08-23T00:04:00.000Z'), category: 'agent' as const },

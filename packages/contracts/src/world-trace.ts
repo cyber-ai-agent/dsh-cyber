@@ -1,3 +1,4 @@
+import type { ContextSnapshotSummary } from './context-snapshot.js'
 import type { IsoTimestamp, ModelTokenUsage } from './index.js'
 import type { WorldArtifactKind } from './world-artifact.js'
 
@@ -75,7 +76,16 @@ export interface WorldTraceEntry {
   detail?: string
   actorId?: string
   sessionId?: string
+  /**
+   * The durable WorkTask this entry belongs to, when it belongs to one.
+   *
+   * Only a real `work_tasks` row id goes here. A run that was not started
+   * from a task carries no task at all — never a turn id, a skill action id or
+   * any other stand-in — so filtering by task returns exactly the task's runs.
+   */
   taskId?: string
+  /** The task's title at read time, so a card can name the goal without a second request. */
+  taskTitle?: string
   skillId?: string
   scheduleId?: string
   runId?: string
@@ -91,6 +101,14 @@ export interface WorldTraceEntry {
   tools?: WorldTraceToolStep[]
   /** Artifacts this entry's run published. Absent when it published none. */
   artifacts?: WorldTraceArtifactRef[]
+  /**
+   * The numbers of the durable context snapshot this run was given (D4).
+   *
+   * Absent means no snapshot exists for the run — a run older than the
+   * snapshot table, or a runtime that composed no envelope — and a renderer
+   * must say so rather than show zeros. Never carries pointers or text.
+   */
+  context?: ContextSnapshotSummary
   tokenUsage?: ModelTokenUsage
   durationMs?: number
   modelId?: string
@@ -108,6 +126,8 @@ export interface WorldTraceQuery {
   category?: WorldTraceCategory
   status?: WorldTraceStatus
   actorId?: string
+  /** Only entries that belong to this WorkTask. */
+  taskId?: string
   date?: string
   search?: string
 }

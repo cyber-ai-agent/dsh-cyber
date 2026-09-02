@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import type {
   AgentRuntimeEvent,
   AgentRun,
+  ContextSnapshotSummary,
   DomainEvent,
   ModelInteractionLog,
   ScheduledRunTraceFact,
@@ -33,6 +34,15 @@ export interface AgentRunTraceFact {
   interaction?: ModelInteractionLog
   /** Artifact versions the registry recorded against this run. */
   artifacts?: WorldTraceArtifactRef[]
+  /**
+   * The WorkTask this run was recorded against, resolved from `task_runs`.
+   *
+   * Absent for a plain conversation run. The adapter publishes no task at all
+   * in that case; it never derives one from the turn.
+   */
+  task?: { id: string; title: string }
+  /** The run's durable context snapshot, reduced to its numbers. Absent when none exists. */
+  context?: ContextSnapshotSummary
 }
 
 export type WorldTraceFact =

@@ -208,6 +208,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
         employeeName: agent.displayName,
         lane: composed.coverage.lane,
         ...(request.workTurnId === undefined ? {} : { workTurnId: request.workTurnId }),
+        ...(request.agentRunId === undefined ? {} : { agentRunId: request.agentRunId }),
         envelope: composed.envelope,
         memoryHits: composed.memoryHits,
         coverage: composed.coverage,

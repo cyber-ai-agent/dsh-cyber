@@ -71,6 +71,7 @@ import { TurnAwareApprovalContinuationService } from './services/turn-aware-appr
 import { WorldAccessService } from './services/world-access-service.js'
 import type { WorkSystemService } from './services/work-system-service.js'
 import { composeWorkSystem } from './composition/compose-work-system.js'
+import { composeWorldTrace } from './composition/compose-world-trace.js'
 import { composeCompletionWorker } from './composition/compose-completion.js'
 import { composeGroupTurnPlanner } from './composition/compose-group-turn-planner.js'
 import { composePackageSystem } from './composition/compose-package-system.js'
@@ -90,7 +91,6 @@ import { WorldKnowledgeRetrievalService } from './services/world-knowledge-retri
 import type { KnowledgeExtractionPort } from './services/knowledge-extraction.js'
 import { createWorldKnowledgeGraphRuntime } from './services/world-knowledge-graph-runtime.js'
 import { WorldKnowledgeRuntimeContextContributor, WorldRuntimeContextComposer } from './services/world-runtime-context-composer.js'
-import { WorldTraceService } from './services/world-trace-service.js'
 import { attachVoiceWebSocket } from './voice/voice-websocket-server.js'
 import { WorldMarketplaceService } from './services/world-marketplace-service.js'
 import { WorldPackageInstanceService } from './services/world-package-instance-service.js'
@@ -429,7 +429,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     worldPackages,
     worldPermissions,
   })
-  const worldTrace = new WorldTraceService({ store, actions: skillActions, artifacts: worldArtifacts })
+  const { worldTrace, contextSnapshots } = composeWorldTrace({ store, actions: skillActions, artifacts: worldArtifacts })
   const employeeActivity = new EmployeeActivityProjectionService(store)
   employeeActivity.projectAll()
   const taskSchedules = new TaskScheduleService({ store, orchestrator, settings: worldRuntimeContext, employeeActivity })
@@ -465,7 +465,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerTaskScheduleRoutes(router, { store, schedules: taskSchedules, access: worldAccess })
   registerPackageRoutes(router, { store, packageManager, packageCatalog, skillRuntime, worldMarketplace, worldPackages, worldAccess, skillCatalog, credentials, ...(options.workshopDraftGenerator === undefined ? {} : { workshopDraftGenerator: options.workshopDraftGenerator }) })
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
-  registerWorldTraceRoutes(router, { store, trace: worldTrace, access: worldAccess, contextInspection: profileRuntime.contextInspection })
+  registerWorldTraceRoutes(router, { store, trace: worldTrace, access: worldAccess, contextInspection: profileRuntime.contextInspection, contextSnapshots })
   registerCompletionJobRoutes(router, { store, access: worldAccess, wake: () => completionWorker.wake() })
   registerWorldArtifactRoutes(router, { store, artifacts: worldArtifacts, access: worldAccess, authority })
   registerWorldKnowledgeRoutes(router, {
