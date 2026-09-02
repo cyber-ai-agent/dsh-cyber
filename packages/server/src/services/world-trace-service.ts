@@ -79,6 +79,15 @@ export interface WorldTraceServiceOptions {
 
 export type WorldTraceCheckpoint = ReadonlyMap<string, string>
 
+/** Bump whenever adapters/sanitizing change, so cached projections rebuild. */
+const TRACE_PROJECTION_VERSION = 1
+const MAX_CACHED_PROJECTIONS = 8
+
+interface CachedTraceProjection {
+  key: string
+  entries: WorldTraceEntry[]
+}
+
 export class WorldTraceService {
   readonly #store: SqliteStore
   readonly #actions: CharacterSkillActionRepository
@@ -89,6 +98,7 @@ export class WorldTraceService {
   readonly #sanitizer: TraceSanitizer
   readonly #clock: () => string
   readonly #liveRuns = new Map<string, WorldTraceEntry>()
+  readonly #projections = new Map<string, CachedTraceProjection>()
 
   constructor(options: WorldTraceServiceOptions) {
     this.#store = options.store
@@ -168,6 +178,27 @@ export class WorldTraceService {
   }
 
   async #materialize(worldId: string): Promise<WorldTraceEntry[]> {
+    const persisted = await this.#persistedProjection(worldId)
+    const live = [...this.#liveRuns.values()].filter((entry) => entry.worldId === worldId)
+    return live.length === 0 ? persisted : deduplicate([...persisted, ...live])
+  }
+
+  /**
+   * The persisted projection is deterministic for a data state: while the
+   * cheap watermark holds, reuse it instead of re-adapting the world's whole
+   * history — a single chat turn used to trigger several full materializations
+   * through list, checkpoint and changesSince. Callers only ever filter or
+   * copy the returned array.
+   */
+  async #persistedProjection(worldId: string): Promise<WorldTraceEntry[]> {
+    const watermark = this.#store.worldTraceWatermark(worldId)
+    const key = `${TRACE_PROJECTION_VERSION}:${watermark}`
+    const cached = this.#projections.get(worldId)
+    if (cached !== undefined && cached.key === key) {
+      this.#projections.delete(worldId)
+      this.#projections.set(worldId, cached)
+      return cached.entries
+    }
     const context = this.#context(worldId)
     // Each run only ever reads its own messages. Handing the whole world's
     // transcript to every run made this quadratic: at 6,400 runs / 38,400
@@ -204,8 +235,12 @@ export class WorldTraceService {
       ...(await this.#actions.listByWorld(worldId)).map((value) => ({ kind: 'skill-action' as const, value })),
     ]
     const persisted = deduplicate(facts.flatMap((fact) => this.#registry.adapt(fact, context)))
-    const live = [...this.#liveRuns.values()].filter((entry) => entry.worldId === worldId)
-    return deduplicate([...persisted, ...live])
+    if (this.#projections.size >= MAX_CACHED_PROJECTIONS) {
+      const oldest = this.#projections.keys().next()
+      if (!oldest.done) this.#projections.delete(oldest.value)
+    }
+    this.#projections.set(worldId, { key, entries: persisted })
+    return persisted
   }
 }
 

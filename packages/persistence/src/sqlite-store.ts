@@ -4614,6 +4614,36 @@ export class SqliteStore {
       .map(mapDomainEvent)
   }
 
+  /**
+   * Cheap change watermark for the world trace read model.
+   *
+   * The trace is a projection, not a second fact table — but recomputing a
+   * whole world history on every read stopped being cheap. This aggregates a
+   * count-plus-timestamp fingerprint per source the projector touches, so an
+   * unchanged world can reuse the previous projection without reading a single
+   * fact row. Status moves surface through the rows they always write (run and
+   * turn progress appends events and messages; approvals stamp decided_at;
+   * skill actions and employee profiles carry updated_at).
+   */
+  worldTraceWatermark(worldId: string): string {
+    const row = this.database
+      .prepare(
+        `SELECT
+           (SELECT COUNT(1) || '@' || COALESCE(MAX(created_at), '') FROM agent_runs WHERE world_id = ?) AS runs,
+           (SELECT COUNT(1) || '@' || COALESCE(MAX(created_at), '') FROM domain_events WHERE world_id = ?) AS events,
+           (SELECT COUNT(1) || '@' || COALESCE(MAX(created_at), '') FROM messages WHERE session_id IN (SELECT id FROM work_sessions WHERE world_id = ?)) AS messages,
+           (SELECT COUNT(1) || '@' || COALESCE(MAX(updated_at), '') FROM skill_actions WHERE world_id = ?) AS actions,
+           (SELECT COUNT(1) || '@' || COALESCE(MAX(created_at), '') FROM model_interaction_logs WHERE world_id = ?) AS interactions,
+           (SELECT COUNT(1) || '@' || COALESCE(MAX(created_at), '') FROM world_artifact_versions WHERE world_id = ?) AS artifacts,
+           (SELECT COUNT(1) || '@' || COALESCE(MAX(COALESCE(decided_at, created_at)), '') FROM approval_requests WHERE world_id = ?) AS approvals,
+           (SELECT COUNT(1) || '@' || COALESCE(MAX(updated_at), '') FROM employee_instances WHERE world_id = ?) AS employees`,
+      )
+      .get(worldId, worldId, worldId, worldId, worldId, worldId, worldId, worldId) as Record<string, string | null>
+    return ['runs', 'events', 'messages', 'actions', 'interactions', 'artifacts', 'approvals', 'employees']
+      .map((key) => String(row[key] ?? ''))
+      .join('|')
+  }
+
   getActivePackage(workspaceId: string, packageId: string): InstalledPackage | undefined {
     const row = this.database
       .prepare(

@@ -256,6 +256,25 @@ describe('World Trace projection', () => {
       expect.objectContaining({ status: 'success', reasoningSummary: '先核对事实，再执行工具。' }),
     ])
   })
+
+  it('reuses the cached projection while the watermark holds and rebuilds after facts change', async () => {
+    const context = await fixture()
+    const { store, world } = context
+    const service = new WorldTraceService({ store, actions: new MemoryActions() })
+    const realMessages = store.listWorldTraceMessages.bind(store)
+    let reads = 0
+    store.listWorldTraceMessages = (worldId: string) => { reads += 1; return realMessages(worldId) }
+    await service.list(world.id)
+    await service.list(world.id)
+    await service.checkpoint(world.id)
+    // Several reads of an unchanged world must cost one projection, not one
+    // per list/checkpoint/changesSince round trip.
+    expect(reads).toBe(1)
+    completeAgentRun(store, context)
+    const page = await service.list(world.id)
+    expect(reads).toBe(2)
+    expect(page.items.some((entry) => entry.sourceKind === 'agent-run')).toBe(true)
+  })
 })
 
 describe('TraceSanitizer and adapter boundary', () => {
