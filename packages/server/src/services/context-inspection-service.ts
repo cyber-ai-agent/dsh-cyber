@@ -67,6 +67,8 @@ export interface ContextInspectionCapture {
   employeeName: string
   lane: ContextConversationLane
   workTurnId?: string
+  /** The AgentRun this context was composed for, when the turn had one. */
+  agentRunId?: string
   envelope: ContextEnvelope
   memoryHits: readonly EmployeeMemoryIndexHit[]
   coverage: ContextCoverage
@@ -86,6 +88,14 @@ export interface ContextInspectionCapture {
 
 export class ContextInspectionService {
   readonly #byConversation = new Map<string, ContextInspection>()
+  /**
+   * The same records, addressable by run.
+   *
+   * The trace links a run card to its context, and a conversation's latest
+   * record is the wrong answer for any run but the newest. Bounded like the
+   * conversation map, so a busy world cannot grow it without limit.
+   */
+  readonly #byRun = new Map<string, ContextInspection>()
   readonly #sanitizer = new TraceSanitizer()
   readonly #limit: number
 
@@ -108,11 +118,25 @@ export class ContextInspectionService {
       if (oldest.done === true) break
       this.#byConversation.delete(oldest.value)
     }
+    const agentRunId = capture.agentRunId?.trim()
+    if (agentRunId === undefined || agentRunId === '') return
+    this.#byRun.delete(agentRunId)
+    this.#byRun.set(agentRunId, inspection)
+    while (this.#byRun.size > this.#limit) {
+      const oldest = this.#byRun.keys().next()
+      if (oldest.done === true) break
+      this.#byRun.delete(oldest.value)
+    }
   }
 
   /** The most recent composed context, or `undefined` when none was recorded. */
   latest(conversationId: string): ContextInspection | undefined {
     return this.#byConversation.get(conversationId.trim())
+  }
+
+  /** The context composed for one run, or `undefined` when this process never recorded it. */
+  forRun(agentRunId: string): ContextInspection | undefined {
+    return this.#byRun.get(agentRunId.trim())
   }
 
   #project(conversationId: string, capture: ContextInspectionCapture): ContextInspection {
@@ -124,6 +148,7 @@ export class ContextInspectionService {
       capturedAt: capture.capturedAt ?? new Date().toISOString(),
       lane: capture.lane,
       ...(capture.workTurnId === undefined ? {} : { workTurnId: capture.workTurnId }),
+      ...(capture.agentRunId === undefined ? {} : { agentRunId: capture.agentRunId }),
       usedTokens: capture.envelope.totalTokenEstimate,
       budget: capture.budget === undefined ? {} : {
         contextWindow: capture.budget.contextWindow,

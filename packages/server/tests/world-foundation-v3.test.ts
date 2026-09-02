@@ -2,6 +2,7 @@ import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import type { EmployeeInstance } from '@dsh-cyber/contracts'
 import { WorldRootService } from '../src/services/world-root-service.js'
 import { WorldSettingsService } from '../src/services/world-settings-service.js'
 
@@ -26,6 +27,9 @@ describe('world foundation v3', () => {
     expect(fullAccess.runtime.permissionMode).toBe('danger-full-access')
     const english = await settings.save('world-a', { model: { reasoningEffort: 'auto', responseLanguage: 'en-US' } })
     expect(english.model.responseLanguage).toBe('en-US')
-    expect(await settings.composeGroupRuntimePrompt('world-a', '检查状态')).toContain('Use English for the final response, visible reasoning summaries')
+    const character = { id: 'character-a', worldId: 'world-a', displayName: '洛' } as EmployeeInstance
+    const worldContext = await settings.composeWorldContext({ worldId: 'world-a', character, lane: 'group' })
+    expect(worldContext.text).toContain('Use English for the final response, visible reasoning summaries')
+    expect(worldContext.revision).toBe(3)
   })
 })

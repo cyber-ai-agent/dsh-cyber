@@ -511,6 +511,41 @@ describe('ContextInspectionService', () => {
     expect(view!.layers.find((layer) => layer.kind === 'current-request')?.preview).toContain('今天先做什么')
   })
 
+  it('answers for the exact run the trace asks about, not just the conversation’s latest turn', async () => {
+    const { store, workspace, world, employee } = await setup()
+    const session = store.createSession({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      kind: 'direct',
+      title: '私聊',
+      participants: [
+        { participantId: 'owner', kind: 'owner' },
+        { participantId: employee.id, kind: 'employee' },
+      ],
+    })
+    const runtime = new CharacterProfileRuntime(new CaptureRuntime(), store)
+    const base = {
+      agent: employee,
+      revision: store.getEmployeeRevision(employee.id, employee.currentRevision)!,
+      conversationId: session.id,
+      history: [],
+      observedThroughSequence: 0,
+      workspacePath: '/tmp/world',
+    }
+    await runtime.runTurn({ ...base, prompt: '第一轮', agentRunId: 'run-first' })
+    await runtime.runTurn({ ...base, prompt: '第二轮', agentRunId: 'run-second' })
+
+    const first = runtime.contextInspection.forRun('run-first')
+    const second = runtime.contextInspection.forRun('run-second')
+    expect(first?.agentRunId).toBe('run-first')
+    expect(second?.agentRunId).toBe('run-second')
+    expect(first?.layers.find((layer) => layer.kind === 'current-request')?.preview).toContain('第一轮')
+    expect(second?.layers.find((layer) => layer.kind === 'current-request')?.preview).toContain('第二轮')
+    // The conversation view still answers with the latest turn only.
+    expect(runtime.contextInspection.latest(session.id)?.agentRunId).toBe('run-second')
+    expect(runtime.contextInspection.forRun('run-never')).toBeUndefined()
+  })
+
   it('answers nothing for a conversation that has not run a turn', async () => {
     const { inspection } = await setup()
     expect(inspection.latest('session-never-run')).toBeUndefined()

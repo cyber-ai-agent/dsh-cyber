@@ -1,5 +1,6 @@
 import type { EmployeeMemoryScope, IsoTimestamp } from './index.js'
 import type { ContextLayerKind } from './context-envelope.js'
+import type { ContextSnapshotSummary } from './context-snapshot.js'
 
 /**
  * The Context Inspector projection (Magic Context V1, slice D3).
@@ -98,6 +99,8 @@ export interface ContextInspection {
   capturedAt: IsoTimestamp
   lane: 'direct' | 'group' | 'task' | 'unknown'
   workTurnId?: string
+  /** The AgentRun this context was composed for, when the turn had one. */
+  agentRunId?: string
   /** Sum of the layer estimates; the composer's own arithmetic, not the provider's. */
   usedTokens: number
   budget: ContextBudgetInspection
@@ -110,4 +113,17 @@ export interface ContextInspection {
 export interface ContextInspectionResponse {
   /** `undefined` when no turn has been composed for this conversation yet. */
   inspection?: ContextInspection
+}
+
+/**
+ * The context of one AgentRun, as much of it as still exists.
+ *
+ * `inspection` is the Inspector's own process-local record of that run and is
+ * the full view; it is gone after a restart. `snapshot` is the durable D4
+ * record's numbers and outlives the process, but holds no content. Both absent
+ * means the run predates context snapshots, and the page must say exactly that.
+ */
+export interface AgentRunContextInspectionResponse {
+  inspection?: ContextInspection
+  snapshot?: ContextSnapshotSummary
 }

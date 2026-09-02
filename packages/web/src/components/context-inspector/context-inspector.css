@@ -5,6 +5,13 @@
 .context-inspector__header > span { display: grid; gap: 4px; min-width: 0; flex: 1; }
 .context-inspector__header strong { font-size: 15px; }
 .context-inspector__header small { color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.context-inspector__focus { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; padding: 8px 18px; color: var(--text-soft); border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 6%, transparent); font-size: 12px; }
+.context-inspector__focus > span { min-width: 0; display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.context-inspector__focus code { font-size: 11px; overflow-wrap: anywhere; }
+.context-inspector__focus button { min-height: 32px; display: inline-flex; align-items: center; gap: 4px; padding: 0 10px; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border)); background: var(--surface-1); font: inherit; font-size: 12px; cursor: pointer; }
+.context-inspector__focus button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.context-inspector__layer-row { min-height: 56px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 9px 11px; }
+.context-inspector__bar--flush { margin: 0 11px 10px; }
 .context-inspector__error { margin: 10px 16px 0; padding: 10px 12px; color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 55%, transparent); background: color-mix(in srgb, var(--danger) 8%, transparent); font-size: 13px; }
 .context-inspector__body { min-height: 0; flex: 1; display: grid; align-content: start; gap: 12px; padding: 14px 16px 28px; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .context-inspector__empty { min-height: 240px; display: grid; place-content: center; gap: 8px; padding: 28px; text-align: center; }

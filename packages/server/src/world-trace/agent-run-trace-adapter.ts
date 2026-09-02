@@ -30,7 +30,9 @@ export class AgentRunTraceAdapter implements WorldTraceAdapter<'agent-run'> {
       summary: traceSummary(run.status, tools.length),
       actorId: run.employeeId,
       sessionId: run.sessionId,
-      taskId: `turn:${run.turnId}`,
+      // Only a real WorkTask reaches the card. A run outside any task carries
+      // no task field, so a task filter can never match it by accident.
+      ...(value.task === undefined ? {} : { taskId: value.task.id, taskTitle: value.task.title }),
       workTurnId: run.turnId,
       // The durable AgentRun id. Without it nothing downstream — an Artifact
       // link, the Context view — can get from a trace card back to the run.
@@ -45,6 +47,9 @@ export class AgentRunTraceAdapter implements WorldTraceAdapter<'agent-run'> {
     if (reasoningSummary) entry.reasoningSummary = reasoningSummary
     if (tools.length > 0) entry.tools = tools
     if (value.artifacts !== undefined && value.artifacts.length > 0) entry.artifacts = value.artifacts
+    // Numbers only. A run without a snapshot has no context field, and the
+    // renderer says so; it must not draw an empty layer chart.
+    if (value.context !== undefined) entry.context = value.context
     if (run.errorCode || interaction?.status === 'failed') entry.detail = friendlyRunError(run.errorCode, interaction)
     if (interaction !== undefined) {
       entry.durationMs = interaction.durationMs

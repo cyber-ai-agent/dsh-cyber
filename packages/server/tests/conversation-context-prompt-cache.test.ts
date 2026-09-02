@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ConversationHistoryEntry, EmployeeBlueprint, EmployeeInstance } from '@dsh-cyber/contracts'
-import { CONTEXT_LAYER_ORDER, contextEnvelopeLayers, promptCacheKey } from '@dsh-cyber/contracts'
+import { CONTEXT_LAYER_ORDER, composeContextLayer, contextEnvelopeLayers, promptCacheKey } from '@dsh-cyber/contracts'
 import { SqliteStore } from '@dsh-cyber/persistence'
 
 import { ConversationContextComposer } from '../src/services/conversation-context-composer.js'
@@ -194,5 +194,46 @@ describe('conversation context prompt cache', () => {
     expect(composed.envelope.promptCache?.retentionHint).toBe('short')
     // The partition is the character, never the conversation's participants.
     expect(composed.envelope.promptCache?.namespace).toBe(`${employee.worldId}/${employee.id}`)
+  })
+
+  it('places the world rules in the prefix and hashes them there, so only a settings edit moves the key', async () => {
+    const { employee, session, composer } = await setup()
+    const rules = (revision: string, extra = '') => composeContextLayer({
+      id: `world-context:${employee.worldId}`,
+      kind: 'world-context',
+      revision,
+      text: [
+        '[当前世界设定]',
+        '世界观：雨夜学院的每一条结论都要附上出处。',
+        '当前世界与其他世界的数据、文件、记忆相互隔离。',
+        extra,
+      ].filter(Boolean).join('\n'),
+      sourceRefs: [{ kind: 'world', id: employee.worldId, revision }],
+    })
+    const base = { employee, persona: PERSONA, personaRevision: 1, conversationId: session.id, observedThroughSequence: 0 }
+
+    const first = await composer.compose({ ...base, worldContext: rules('1'), prompt: '第一轮请求', history: turnHistory(employee, 1) })
+    const second = await composer.compose({ ...base, worldContext: rules('1'), prompt: '完全不同的第二轮请求', history: turnHistory(employee, 4) })
+    const edited = await composer.compose({ ...base, worldContext: rules('2', '新增：讲解引用的事实保留来源。'), prompt: '第一轮请求', history: turnHistory(employee, 1) })
+    const bare = await composer.compose({ ...base, prompt: '第一轮请求', history: turnHistory(employee, 1) })
+
+    // The rules are the second layer, directly behind the identity, and the
+    // dynamic prompt body the lane renders never carries them.
+    const kinds = contextEnvelopeLayers(second.envelope).map((layer) => layer.kind)
+    expect(kinds.slice(0, 2)).toEqual(['stable-identity', 'world-context'])
+    expect(kinds).toEqual(CONTEXT_LAYER_ORDER.filter((kind) => kinds.includes(kind)))
+    expect(second.prompt).not.toContain('[当前世界设定]')
+
+    // Dynamic layers moved; the prefix did not.
+    expect(second.envelope.currentRequest.contentHash).not.toBe(first.envelope.currentRequest.contentHash)
+    expect(second.envelope.promptCache?.stablePrefixHash).toBe(first.envelope.promptCache?.stablePrefixHash)
+    expect(second.envelope.promptCache?.stablePrefixHash).toBe(second.envelope.stableContextHash)
+    expect(promptCacheKey(second.envelope.promptCache!)).toBe(promptCacheKey(first.envelope.promptCache!))
+
+    // The rules are part of the hashed prefix: editing them, or dropping them,
+    // is a different cache identity.
+    expect(edited.envelope.promptCache?.stablePrefixHash).not.toBe(first.envelope.promptCache?.stablePrefixHash)
+    expect(bare.envelope.promptCache?.stablePrefixHash).not.toBe(first.envelope.promptCache?.stablePrefixHash)
+    expect(bare.envelope.worldContext).toBeUndefined()
   })
 })

@@ -32,6 +32,7 @@ import { registerModelInteractionRoutes } from './routes/model-interaction-route
 import { registerModelRoutes } from './routes/model-routes.js'
 import { registerPackageRoutes } from './routes/package-routes.js'
 import { registerCharacterGeneratorRoutes } from './routes/character-generator-routes.js'
+import { registerWorldGeneratorRoutes } from './routes/world-generator-routes.js'
 import { registerSystemRoutes } from './routes/system-routes.js'
 import { registerTaskScheduleRoutes } from './routes/task-schedule-routes.js'
 import { registerWorkspaceFileRoutes } from './routes/workspace-file-routes.js'
@@ -71,6 +72,7 @@ import { TurnAwareApprovalContinuationService } from './services/turn-aware-appr
 import { WorldAccessService } from './services/world-access-service.js'
 import type { WorkSystemService } from './services/work-system-service.js'
 import { composeWorkSystem } from './composition/compose-work-system.js'
+import { composeWorldTrace } from './composition/compose-world-trace.js'
 import { composeCompletionWorker } from './composition/compose-completion.js'
 import { composeGroupTurnPlanner } from './composition/compose-group-turn-planner.js'
 import { composePackageSystem } from './composition/compose-package-system.js'
@@ -90,7 +92,6 @@ import { WorldKnowledgeRetrievalService } from './services/world-knowledge-retri
 import type { KnowledgeExtractionPort } from './services/knowledge-extraction.js'
 import { createWorldKnowledgeGraphRuntime } from './services/world-knowledge-graph-runtime.js'
 import { WorldKnowledgeRuntimeContextContributor, WorldRuntimeContextComposer } from './services/world-runtime-context-composer.js'
-import { WorldTraceService } from './services/world-trace-service.js'
 import { attachVoiceWebSocket } from './voice/voice-websocket-server.js'
 import { WorldMarketplaceService } from './services/world-marketplace-service.js'
 import { WorldPackageInstanceService } from './services/world-package-instance-service.js'
@@ -106,6 +107,7 @@ import type { CharacterSkillAdapterRegistry } from './skills/skill-adapter.js'
 import type { WorldSkillAvailabilityPort } from './services/world-skill-availability.js'
 import type { CreativeWorkshopDraftGeneratorPort } from './services/creative-workshop-draft-generator.js'
 import { CharacterImportAnalyzer, type CharacterImportAnalyzerPort } from './services/character-import-analyzer.js'
+import { WorldImportAnalyzer, type WorldImportAnalyzerPort } from './services/world-import-analyzer.js'
 import { composeCharacterGeneratorMarketplace } from './services/character-generator-marketplace.js'
 import { createWorldManagementHost } from './skills/world-management-host.js'
 import { RuntimeStreamHub } from './streams/runtime-stream-hub.js'
@@ -141,6 +143,8 @@ export interface CyberServerOptions {
   skillAvailability?: WorldSkillAvailabilityPort
   workshopDraftGenerator?: CreativeWorkshopDraftGeneratorPort
   characterImportAnalyzer?: CharacterImportAnalyzerPort
+  /** World Generator analyzer; tests and CI pass a deterministic stub. */
+  worldImportAnalyzer?: WorldImportAnalyzerPort
   /**
    * Decides the speaking roster of a group turn.
    *
@@ -279,6 +283,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   // embedders may still inject a narrower availability port explicitly.
   const skillAvailability = options.skillAvailability ?? skillCatalog
   const characterImportAnalyzer = options.characterImportAnalyzer ?? new CharacterImportAnalyzer(store, credentials, skillCatalog)
+  const worldImportAnalyzer = options.worldImportAnalyzer ?? new WorldImportAnalyzer(store, credentials, skillCatalog)
 
   const activeDshBinPath = await resolveActiveRuntime(store, runtimeStateRoot, stateRoot)
   const interactions = new ModelInteractionService(store)
@@ -296,7 +301,10 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     ...(activeDshBinPath === undefined ? {} : { dshBinPath: activeDshBinPath }),
     resolveRoute(request) { return resolveHarnessRoute(store, request) },
   })
-  const profileRuntime = new CharacterProfileRuntime(baseRuntime, store, skillRegistry, authority, skillAvailability)
+  // World settings are the source of the envelope's `world-context` layer: the
+  // runtime renders them into the cacheable prefix, so the request composers
+  // below no longer repeat them behind the retrieved memories.
+  const profileRuntime = new CharacterProfileRuntime(baseRuntime, store, skillRegistry, authority, skillAvailability, undefined, undefined, worldSettings)
   const contextRuntime = new ContextPlanningRuntime(profileRuntime, (request) => contextModelLimits(resolveHarnessRoute(store, request)))
   const runtime = new TurnInteractionLoggingRuntime({
     inner: contextRuntime,
@@ -339,7 +347,6 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   publishDecisionChanged = (worldId, payload) => worldRuntime.publishDecisionChanged(worldId, payload)
   const toolApprovals = new HarnessToolApprovalService({ store, runtime, onChanged: (worldId, payload) => publishDecisionChanged?.(worldId, payload) })
   const worldRuntimeContext = new WorldRuntimeContextComposer({
-    settings: worldSettings,
     contributors: [knowledgeGraphRuntime.contributor, new WorldKnowledgeRuntimeContextContributor(
       new WorldKnowledgeRetrievalService({ search: worldKnowledgeSearch }),
       (input, context) => {
@@ -427,7 +434,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     worldPackages,
     worldPermissions,
   })
-  const worldTrace = new WorldTraceService({ store, actions: skillActions, artifacts: worldArtifacts })
+  const { worldTrace, contextSnapshots } = composeWorldTrace({ store, actions: skillActions, artifacts: worldArtifacts })
   const employeeActivity = new EmployeeActivityProjectionService(store)
   employeeActivity.projectAll()
   const taskSchedules = new TaskScheduleService({ store, orchestrator, settings: worldRuntimeContext, employeeActivity })
@@ -445,6 +452,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerWorkspaceFileRoutes(router, { worldFiles, access: worldAccess })
   registerCatalogRoutes(router, { store, packageCatalog, worldPackages })
   registerCharacterGeneratorRoutes(router, { store, packageCatalog, skillCatalog, analyzer: characterImportAnalyzer, resolveMarketplaceRoot: generatedMarketplace.resolveMarketplaceRoot, containmentRoot: generatedMarketplace.containmentRoot })
+  registerWorldGeneratorRoutes(router, { store, packageCatalog, skillCatalog, analyzer: worldImportAnalyzer, resolveMarketplaceRoot: generatedMarketplace.resolveMarketplaceRoot, containmentRoot: generatedMarketplace.containmentRoot })
   registerWorkspaceRoutes(router, { store })
   registerModelRoutes(router, { store, credentials, modelCatalog, interactions })
   registerIntegrationRoutes(router, {
@@ -463,7 +471,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerTaskScheduleRoutes(router, { store, schedules: taskSchedules, access: worldAccess })
   registerPackageRoutes(router, { store, packageManager, packageCatalog, skillRuntime, worldMarketplace, worldPackages, worldAccess, skillCatalog, credentials, ...(options.workshopDraftGenerator === undefined ? {} : { workshopDraftGenerator: options.workshopDraftGenerator }) })
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
-  registerWorldTraceRoutes(router, { store, trace: worldTrace, access: worldAccess, contextInspection: profileRuntime.contextInspection })
+  registerWorldTraceRoutes(router, { store, trace: worldTrace, access: worldAccess, contextInspection: profileRuntime.contextInspection, contextSnapshots })
   registerCompletionJobRoutes(router, { store, access: worldAccess, wake: () => completionWorker.wake() })
   registerWorldArtifactRoutes(router, { store, artifacts: worldArtifacts, access: worldAccess, authority })
   registerWorldKnowledgeRoutes(router, {

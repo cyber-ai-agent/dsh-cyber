@@ -9,6 +9,11 @@ import type { SqliteStore } from '@dsh-cyber/persistence'
  * On-disk layout for Character Generator output.
  *
  *   <stateRoot>/workshop/character-generator/workspaces/<segment>/marketplace/talent/<packageId>
+ *   <stateRoot>/workshop/character-generator/workspaces/<segment>/marketplace/themes/<packageId>
+ *
+ * The `themes/` sibling is World Generator output (a generated world is a
+ * theme package plus a cast of talent packages); it shares this root so the
+ * same workspace ownership, containment and backup rules apply unchanged.
  *
  * The `<segment>` is derived from the workspace id and is the ownership record:
  * the catalog only exposes a generated package to the workspace whose segment

@@ -72,17 +72,24 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-async function renderPanel(body: unknown): Promise<HTMLElement> {
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(body), {
+async function renderPanel(body: unknown, agentRunId?: string): Promise<HTMLElement> {
+  const fetchMock = vi.fn(async () => new Response(JSON.stringify(body), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
-  })))
+  }))
+  vi.stubGlobal('fetch', fetchMock)
   const host = document.createElement('div')
   document.body.append(host)
   const root = createRoot(host)
   await act(async () => {
-    root.render(createElement(ContextInspectorPanel, { conversationId: 'session-1', demoMode: false }))
+    root.render(createElement(ContextInspectorPanel, {
+      conversationId: 'session-1',
+      demoMode: false,
+      ...(agentRunId === undefined ? {} : { agentRunId, onClearRun: () => undefined }),
+    }))
   })
+  const requested = String((fetchMock.mock.calls[0] as unknown[] | undefined)?.[0] ?? '')
+  host.dataset.requested = requested
   return host
 }
 
@@ -126,5 +133,50 @@ describe('ContextInspectorPanel', () => {
   it('explains an empty record rather than showing a blank panel', async () => {
     const host = await renderPanel({})
     expect(host.textContent ?? '').toContain('发送一条消息后')
+  })
+
+  it('asks for the run the trace linked and shows that run’s own record', async () => {
+    const host = await renderPanel({ inspection: { ...inspection, agentRunId: 'run-42' } }, 'run-42')
+    expect(host.dataset.requested).toContain('/api/agent-runs/run-42/context-inspection')
+    const text = host.textContent ?? ''
+    expect(text).toContain('正在查看某一次运行的上下文')
+    expect(text).toContain('run-42')
+    expect(text).toContain('返回会话最新一轮')
+    expect(text).toContain('本轮上下文')
+    expect(text).toContain('稳定身份')
+  })
+
+  it('falls back to the durable snapshot’s numbers and says the full record is gone', async () => {
+    const host = await renderPanel({
+      snapshot: {
+        totalTokenEstimate: 450,
+        layers: [{ kind: 'stable-identity', tokenEstimate: 320 }, { kind: 'retrieved-memories', tokenEstimate: 90 }, { kind: 'current-request', tokenEstimate: 40 }],
+        memoryHitCount: 2,
+        stablePrefixTokens: 320,
+        volatileTokens: 130,
+        prefixReused: true,
+      },
+    }, 'run-old')
+    const text = host.textContent ?? ''
+    expect(text).toContain('持久化快照（仅结构）')
+    expect(text).toContain('现已不可用')
+    expect(text).toContain('不含任何内容')
+    expect(text).toContain('450')
+    expect(text).toContain('稳定身份')
+    expect(text).toContain('召回的记忆')
+    expect(text).toContain('2 条')
+    // Nothing the snapshot cannot know is drawn: no preview, no budget, no coverage.
+    expect(text).not.toContain('本轮上下文')
+    expect(text).not.toContain('这一轮是怎么取舍的')
+    expect(host.querySelector('.context-inspector__preview')).toBeNull()
+  })
+
+  it('says a run predates snapshots instead of drawing an empty chart', async () => {
+    const host = await renderPanel({}, 'run-ancient')
+    const text = host.textContent ?? ''
+    expect(text).toContain('这次运行没有上下文记录')
+    expect(text).toContain('迁移 39')
+    expect(text).not.toContain('发送一条消息后')
+    expect(host.querySelector('.context-inspector__layers')).toBeNull()
   })
 })

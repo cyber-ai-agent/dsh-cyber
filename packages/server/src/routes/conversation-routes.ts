@@ -45,7 +45,7 @@ import type { WorldPackageInstanceService } from '../services/world-package-inst
 import type { OwnerRuntimeAccessService } from '../services/owner-runtime-access-service.js'
 import type { WorldRuntimePermissionResolver } from '../services/world-runtime-permission-resolver.js'
 import type { TurnAwareApprovalContinuationService } from '../services/turn-aware-approval-continuation-service.js'
-import type { WorldRuntimePromptComposer } from '../services/world-runtime-context-composer.js'
+import { WorldRuntimeContextComposer, type WorldRuntimePromptComposer } from '../services/world-runtime-context-composer.js'
 import { ServiceError } from '../services/service-error.js'
 import type { GroupTaskCollaborationService } from '../services/group-task-collaboration-service.js'
 import type { GroupTaskRoutingResult } from '../services/group-task-router.js'
@@ -92,7 +92,10 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     worldAccess,
     worldFiles,
     worldSettings,
-    runtimeContext = worldSettings,
+    // The world's stable rules no longer travel in the request: the runtime
+    // renders them into the cacheable prefix, so a caller without contributors
+    // gets the bare request composer rather than the settings service.
+    runtimeContext = new WorldRuntimeContextComposer(),
     worldTrace,
     employeeActivity,
     worldPackages,
