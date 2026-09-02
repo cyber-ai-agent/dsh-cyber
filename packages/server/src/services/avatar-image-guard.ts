@@ -65,12 +65,17 @@ export interface SniffedAvatarImage {
 /**
  * Decode a base64 avatar payload, refusing anything past the byte budget before
  * the buffer is allocated rather than after.
+ *
+ * `maxBytes` lets a caller with a tighter budget than an avatar (a world theme
+ * background is bounded by the theme installer's own image limit) refuse at
+ * the same point; it can only narrow the default, never widen it.
  */
-export function decodeAvatarBase64(value: unknown): Buffer {
+export function decodeAvatarBase64(value: unknown, maxBytes: number = AVATAR_MAX_BYTES): Buffer {
+  const budget = Math.min(maxBytes, AVATAR_MAX_BYTES)
   if (typeof value !== 'string' || value.length === 0) {
     throw new AvatarImageError('character_avatar_data_invalid', '角色预览图片数据无效。')
   }
-  if (value.length > AVATAR_MAX_BASE64_CHARACTERS) {
+  if (value.length > Math.ceil(budget / 3) * 4) {
     throw new AvatarImageError('character_avatar_size_invalid', '角色预览图片不能超过 5 MiB。')
   }
   // Canonical base64 only: no whitespace, no URL-safe alphabet, no stray
@@ -80,12 +85,12 @@ export function decodeAvatarBase64(value: unknown): Buffer {
     throw new AvatarImageError('character_avatar_data_invalid', '角色预览图片数据无效。')
   }
   const bytes = Buffer.from(value, 'base64')
-  assertAvatarByteBudget(bytes)
+  assertAvatarByteBudget(bytes, budget)
   return bytes
 }
 
-export function assertAvatarByteBudget(bytes: Buffer): void {
-  if (bytes.byteLength < AVATAR_MIN_BYTES || bytes.byteLength > AVATAR_MAX_BYTES) {
+export function assertAvatarByteBudget(bytes: Buffer, maxBytes: number = AVATAR_MAX_BYTES): void {
+  if (bytes.byteLength < AVATAR_MIN_BYTES || bytes.byteLength > Math.min(maxBytes, AVATAR_MAX_BYTES)) {
     throw new AvatarImageError('character_avatar_size_invalid', '角色预览图片不能超过 5 MiB。')
   }
 }
@@ -103,8 +108,8 @@ export function sniffAvatarImage(bytes: Buffer): SniffedAvatarImage | undefined 
  * and a sane canvas. Returns the sniffed media type, which is the only type the
  * caller may use for the stored extension or the served content type.
  */
-export function assertAvatarImage(bytes: Buffer): AvatarMediaType {
-  assertAvatarByteBudget(bytes)
+export function assertAvatarImage(bytes: Buffer, maxBytes: number = AVATAR_MAX_BYTES): AvatarMediaType {
+  assertAvatarByteBudget(bytes, maxBytes)
   const sniffed = sniffAvatarImage(bytes)
   if (sniffed === undefined) {
     throw new AvatarImageError('character_avatar_signature_invalid', '角色预览必须是 PNG、JPEG 或 WebP 图片。')

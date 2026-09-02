@@ -12,7 +12,7 @@ import { validateWorldThemeManifest } from '@dsh-cyber/world-runtime'
 import { compileWorldSemantics } from '@dsh-cyber/world-simulation'
 
 import { validateWorldThemePackageAssets } from '../world-theme-package.js'
-import type { AvatarMediaType } from './avatar-image-guard.js'
+import { assertAvatarImage, avatarFileExtension, type AvatarMediaType } from './avatar-image-guard.js'
 import { CHARACTER_GENERATOR_CAPABILITIES } from './character-import-analyzer.js'
 import {
   compileEmployeeBlueprintPackage,
@@ -23,6 +23,14 @@ const PACKAGE_ID = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/
 const PACKAGE_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/
 const MAX_SOURCE_BYTES = 128 * 1024
 const CAPABILITY_SET = new Set<string>(CHARACTER_GENERATOR_CAPABILITIES)
+/**
+ * Byte budget for an uploaded scene background. This is the theme installer's
+ * own limit for an `image` asset (MAX_IMAGE_BYTES in world-theme-package.ts),
+ * restated here so an upload is refused before it is decoded rather than
+ * after it has been staged. It is tighter than the 5 MiB avatar budget; the
+ * shared guard only ever narrows, never widens.
+ */
+export const WORLD_BACKGROUND_MAX_BYTES = 4 * 1024 * 1024
 
 /**
  * The official scene a generated theme clones: its renderer, assets, actor
@@ -60,6 +68,13 @@ export interface WorldThemePackageCompilerInput {
   publisher?: string
   license?: string
   base: WorldThemeSceneBase
+  /**
+   * A user-supplied raster that replaces the base scene's background image.
+   * Only the background asset changes: every anchor, navigation cell and
+   * interactable still comes from `base`. `mimeType` must be what the bytes
+   * sniff as; the compiler re-checks and refuses a disagreement.
+   */
+  background?: { bytes: Buffer; mimeType: AvatarMediaType }
   cast: WorldThemeCastCompileInput[]
   /** The real host skill catalog. A cast member naming anything else is refused. */
   allowedSkillIds: ReadonlySet<string>
@@ -105,13 +120,14 @@ export async function compileWorldThemePackage(input: WorldThemePackageCompilerI
     scenes: structuredClone(input.base.scenes),
     activityMapping: structuredClone(input.base.activityMapping),
   }
+  const uploaded = input.background === undefined ? undefined : applyUploadedBackground(theme, input.background)
   const validation = validateWorldThemeManifest(theme)
   if (!validation.valid) throw new Error(`Generated world theme is invalid: ${validation.errors.join('; ')}`)
   // Semantics must compile for the runtime to seat characters at all.
   compileWorldSemantics(theme)
 
   const assetFiles = theme.assets.map((asset) => {
-    const bytes = input.base.assetBytes.get(asset.src)
+    const bytes = uploaded?.src === asset.src ? uploaded.bytes : input.base.assetBytes.get(asset.src)
     if (bytes === undefined) throw new Error(`Generated world theme asset has no bytes: ${asset.src}`)
     return { path: asset.src, bytes }
   })
@@ -198,6 +214,54 @@ export async function compileWorldThemePackage(input: WorldThemePackageCompilerI
     for (const compiled of compiledCast) await rm(compiled.sourceDirectory, { recursive: true, force: true }).catch(() => undefined)
     throw error
   }
+}
+
+/**
+ * Point the base scene's background asset at the uploaded raster.
+ *
+ * The background is the asset every scene paints first: the layer with the
+ * lowest z-index, backed by an `image` asset. The asset keeps its id, so every
+ * layer that referenced it still does; only its `src` (extension from the
+ * sniffed bytes), its `pixelArt` flag (an upload is not pixel art) and its
+ * bytes change. A `source` rect on a background layer described the official
+ * canvas, so it is dropped: the destination rect still stretches the upload
+ * over the scene. Anything more ambiguous (no layers, scenes disagreeing on
+ * the background, an actor set sharing the asset) is refused, not guessed at.
+ */
+function applyUploadedBackground(
+  theme: WorldThemeManifestV1,
+  background: { bytes: Buffer; mimeType: AvatarMediaType },
+): { src: string; bytes: Buffer } {
+  const sniffed = assertAvatarImage(background.bytes, WORLD_BACKGROUND_MAX_BYTES)
+  if (sniffed !== background.mimeType) throw new Error('World background media type does not match its bytes')
+  const backgroundIds = new Set<string>()
+  for (const scene of theme.scenes) {
+    const lowest = scene.layers.reduce<WorldThemeManifestV1['scenes'][number]['layers'][number] | undefined>(
+      (current, layer) => current === undefined || layer.zIndex < current.zIndex ? layer : current,
+      undefined,
+    )
+    if (lowest === undefined) throw new Error(`Official scene has no background layer to replace: ${scene.id}`)
+    backgroundIds.add(lowest.assetId)
+  }
+  if (backgroundIds.size !== 1) throw new Error('Official scenes do not share one background asset')
+  const assetId = [...backgroundIds][0]!
+  const asset = theme.assets.find((candidate) => candidate.id === assetId)
+  if (asset === undefined || asset.kind !== 'image') throw new Error('Official scene background is not an image asset')
+  if (theme.actorSets.some((set) => set.assetId === assetId || set.fallbackAssetId === assetId)) {
+    throw new Error('Official scene background is shared with an actor set')
+  }
+  const src = `assets/background.${avatarFileExtension(sniffed)}`
+  if (theme.assets.some((candidate) => candidate.id !== assetId && candidate.src === src)) {
+    throw new Error('Official scene already declares the uploaded background path')
+  }
+  asset.src = src
+  asset.pixelArt = false
+  for (const scene of theme.scenes) {
+    for (const layer of scene.layers) {
+      if (layer.assetId === assetId) delete layer.source
+    }
+  }
+  return { src, bytes: background.bytes }
 }
 
 function validateInput(input: WorldThemePackageCompilerInput): void {
