@@ -16,9 +16,11 @@ const statusLabel: Record<WorldTraceEntry['status'], string> = {
   pending: '待处理', running: '进行中', waiting: '等待中', success: '已完成', failed: '失败', cancelled: '已取消', info: '记录',
 }
 
-export function WorldTraceItem({ entry, employees, onOpenArtifact, onOpenContext }: {
+export function WorldTraceItem({ entry, employees, open, onToggle, onOpenArtifact, onOpenContext }: {
   entry: WorldTraceEntry
   employees: CyberEmployee[]
+  open: boolean
+  onToggle: (open: boolean) => void
   onOpenArtifact?: (artifactId: string) => void
   /** Hands a run id back to the host so the Context Inspector opens on that run. */
   onOpenContext?: (agentRunId: string) => void
@@ -39,9 +41,9 @@ export function WorldTraceItem({ entry, employees, onOpenArtifact, onOpenContext
   return <li className={`world-trace-item world-trace-item--${entry.status}`}>
     <span className="world-trace-item__rail" aria-hidden="true" />
     <span className="world-trace-item__icon" aria-hidden="true"><Icon size={17} /></span>
-    {!hasDetails ? <article>{content}</article> : <article className="world-trace-item__expandable"><details><summary><div className="world-trace-item__summary">{content}</div><span className="world-trace-item__expand-label">查看过程<CaretDown size={14} /></span></summary><div className="world-trace-item__detail">
+    {!hasDetails ? <article>{content}</article> : <article className="world-trace-item__expandable"><details open={open} onToggle={(event) => onToggle(event.currentTarget.open)}><summary><div className="world-trace-item__summary">{content}</div><span className="world-trace-item__expand-label">查看过程<CaretDown size={14} /></span></summary><div className="world-trace-item__detail">
       {entry.reasoningSummary ? <section><strong>判断摘要</strong><p>{entry.reasoningSummary}</p></section> : null}
-      {entry.tools?.length ? <section><strong>工具调度</strong><ol className="world-trace-tools">{entry.tools.map((tool) => <li key={tool.callId} className={`is-${tool.status}`}>{tool.status === 'running' ? <CircleNotch size={14} className="spin" /> : tool.status === 'failed' ? <WarningCircle size={14} /> : <CheckCircle size={14} weight="fill" />}<span><strong>{tool.label}</strong>{tool.description ? <small>{tool.description}</small> : null}{tool.name ? <code>{tool.name}</code> : null}</span><small>{tool.status === 'running' ? '执行中' : tool.status === 'failed' ? '失败' : '完成'}</small></li>)}</ol></section> : null}
+      {entry.tools?.length ? <section><strong>工具调度</strong><ol className="world-trace-tools">{entry.tools.map((tool) => <li key={tool.callId} className={`is-${tool.status}`}>{tool.status === 'running' ? <CircleNotch size={14} className="spin" /> : tool.status === 'failed' ? <WarningCircle size={14} /> : <CheckCircle size={14} weight="fill" />}<span><strong>{tool.label}</strong>{tool.description ? <small>{tool.description}</small> : null}{tool.name ? <code>{tool.name}</code> : null}</span><small>{tool.status === 'running' ? '执行中' : tool.status === 'failed' ? '失败' : '完成'}{tool.durationMs === undefined ? '' : ` · ${formatDuration(tool.durationMs)}`}</small></li>)}</ol></section> : null}
       {artifacts.length === 0 ? null : <section><strong>产出结果</strong><ul className="world-trace-artifacts">{artifacts.map((artifact) => {
         const label = `${artifact.title} · ${artifactKindLabel(artifact.kind)} · v${artifact.version}`
         return <li key={`${artifact.artifactId}:${artifact.version}`}>{onOpenArtifact === undefined

@@ -65,3 +65,40 @@
 .world-trace-views button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .world-trace-views button.is-active { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .world-trace-panel > .context-inspector { min-height: 0; flex: 1; }
+.world-trace-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 9px var(--trace-pad); border-bottom: 1px solid var(--border); }
+.world-trace-toolbar__right { display: flex; gap: 8px; margin-left: auto; }
+.world-trace-presets { display: flex; gap: 6px; flex-wrap: wrap; }
+.world-trace-presets button, .world-trace-toggle { min-height: 34px; display: inline-flex; align-items: center; gap: 5px; padding: 0 11px; color: var(--text-muted); border: 1px solid var(--border); background: var(--surface-1); font: inherit; font-size: 12px; cursor: pointer; }
+.world-trace-presets button:hover, .world-trace-toggle:hover { color: var(--text); border-color: var(--border-strong); }
+.world-trace-presets button:focus-visible, .world-trace-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.world-trace-presets button.is-active, .world-trace-toggle[aria-pressed='true'], .world-trace-toggle[aria-expanded='true'] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.world-trace-toggle svg { transition: transform 150ms ease; }.world-trace-toggle svg.is-open { transform: rotate(180deg); }
+.world-trace-scroll-host { position: relative; display: flex; min-height: 0; flex: 1; }
+.world-trace-scroll-host .world-trace-timeline-wrap { min-height: 0; flex: 1; }
+.world-trace-skeleton { display: grid; gap: 14px; padding: 18px; }
+.world-trace-skeleton__row { height: 86px; border: 1px solid var(--border); background: linear-gradient(100deg, var(--surface-1) 60%, color-mix(in srgb, var(--surface-2) 70%, var(--accent) 4%) 50%, var(--surface-1) 40%) 0 0 / 220% 100%; animation: world-trace-shimmer 1.4s linear infinite; }
+@keyframes world-trace-shimmer { to { background-position: -220% 0; } }
+@media (prefers-reduced-motion: reduce) { .world-trace-skeleton__row { animation: none; } }
+.world-trace-new-pill { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 5; min-height: 38px; display: inline-flex; align-items: center; gap: 8px; padding: 0 15px; color: var(--text); border: 1px solid color-mix(in srgb, var(--accent) 60%, var(--border-strong)); border-radius: 19px; background: color-mix(in srgb, var(--surface-1) 92%, var(--accent) 8%); box-shadow: 0 8px 22px rgba(0, 0, 0, .38); font: inherit; font-size: 13px; cursor: pointer; }
+.world-trace-new-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.world-trace-new-pill__dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 9px color-mix(in srgb, var(--accent) 75%, transparent); }
+.world-trace-turn { list-style: none; margin-bottom: 14px; content-visibility: auto; contain-intrinsic-size: 150px; }
+.world-trace-turn > details { border: 1px solid var(--border-strong); background: color-mix(in srgb, var(--surface-1) 70%, transparent); }
+.world-trace-turn > details > summary { padding: 12px 14px; cursor: pointer; list-style: none; }
+.world-trace-turn > details > summary::-webkit-details-marker { display: none; }
+.world-trace-turn > details > summary:hover { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.world-trace-turn > details > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.world-trace-turn__head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.world-trace-turn__icon { display: grid; place-items: center; color: var(--text-muted); }
+.trace-status--failed .world-trace-turn__icon { color: var(--danger); }
+.trace-status--running .world-trace-turn__icon, .trace-status--pending .world-trace-turn__icon { color: var(--accent); }
+.trace-status--success .world-trace-turn__icon { color: var(--success); }
+.world-trace-turn__main { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.world-trace-turn__main strong { color: var(--text); font-size: 14px; line-height: 1.4; overflow-wrap: anywhere; }
+.world-trace-turn__main small { color: var(--text-muted); font-size: 12px; }
+.world-trace-turn__time { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+.world-trace-turn__caret { display: grid; place-items: center; color: var(--text-muted); transition: transform 150ms ease; }
+.world-trace-turn > details[open] .world-trace-turn__caret { transform: rotate(180deg); }
+.world-trace-turn__body { margin: 0; padding: 4px 14px 14px 20px; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--surface-0) 55%, transparent); }
+.world-trace-turn__body .world-trace-item { padding-bottom: 12px; }
+.world-trace-turn__body .world-trace-item > article { background: var(--surface-1); }
