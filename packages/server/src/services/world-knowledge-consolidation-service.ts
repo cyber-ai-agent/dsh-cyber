@@ -226,9 +226,8 @@ export class WorldKnowledgeConsolidationService {
         evidence,
         ...(modelProfileId === undefined ? {} : { modelProfileId }),
       }
-      const rawResult = await this.#extractor.extract(request)
-      const result = normalizePortResult(rawResult)
-      const extraction = parseKnowledgeExtraction(result.payload, { sourceType: 'manual', sourceId: input.sourceId, evidence })
+      const rawResult = await this.#extractParse(request, { sourceType: 'manual', sourceId: input.sourceId, evidence })
+      const { result, extraction } = rawResult
       await this.#repository.applyManualKnowledgeExtraction({ workspaceId: input.workspaceId, worldId: input.worldId, extraction, evidence, sourceId: input.sourceId, now: this.#clock() })
       this.#onModelInteraction?.({
         workspaceId: input.workspaceId,
@@ -331,9 +330,8 @@ export class WorldKnowledgeConsolidationService {
         evidence,
         ...(modelProfileId === undefined ? {} : { modelProfileId }),
       }
-      const rawResult = await this.#extractor.extract(request)
-      const result = normalizePortResult(rawResult)
-      const extraction = parseKnowledgeExtraction(result.payload, { sourceType: claimed.sourceType, sourceId: claimed.sourceId, evidence })
+      const rawResult = await this.#extractParse(request, { sourceType: claimed.sourceType, sourceId: claimed.sourceId, evidence })
+      const { result, extraction } = rawResult
       await this.#repository.applyKnowledgeExtraction({
         jobId: claimed.id,
         workspaceId: claimed.workspaceId,
@@ -375,6 +373,34 @@ export class WorldKnowledgeConsolidationService {
       return failed
     }
   }
+
+  /**
+   * One model answer, then exactly one corrective retry when the answer came
+   * back but was unusable: unparseable content, invented shapes, or a gateway
+   * that returned HTTP 200 with empty text. Transport failures (timeout,
+   * unreachable) are never retried here so a slow or dead gateway cannot
+   * double the latency of every task.
+   */
+  async #extractParse(
+    request: KnowledgeExtractionRequest,
+    context: { sourceType: KnowledgeEvidenceSourceType; sourceId: string; evidence: readonly KnowledgeExtractionEvidence[] },
+  ): Promise<{ result: KnowledgeExtractionPortResult; extraction: KnowledgeExtraction }> {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        const result = normalizePortResult(await this.#extractor.extract(attempt === 1 ? request : { ...request, attemptHint: true }))
+        return { result, extraction: parseKnowledgeExtraction(result.payload, context) }
+      } catch (error) {
+        if (attempt >= 2 || !isRetryableExtractionFailure(error)) throw error
+      }
+    }
+  }
+}
+
+function isRetryableExtractionFailure(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error) || typeof error.code !== 'string') return false
+  // Parse-level refusals and the empty-200 answer some gateways return;
+  // never the timeout/unreachable class.
+  return error.code.startsWith('extraction_') || error.code === 'knowledge_model_response_invalid'
 }
 
 export function shouldConsolidate(input: { visibleMessages: number; characters: number; idleMs: number; mode: 'off' | 'balanced' }): boolean {

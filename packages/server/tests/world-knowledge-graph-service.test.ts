@@ -99,7 +99,7 @@ describe('strict knowledge extraction', () => {
     sequence: 1,
   }]
 
-  it('accepts only current-batch evidence and rejects unknown fields', () => {
+  it('accepts only current-batch evidence and ignores unknown fields', () => {
     const result = parseKnowledgeExtraction({
       entities: [{ key: 'lin', type: 'character', canonicalName: '林澈', aliases: [], evidenceRefs: ['evidence-a'] }],
       claims: [{ key: 'claim', type: 'fact', subjectKey: 'lin', predicate: '负责', objectText: '远星观测站', confidence: 0.9, evidenceRefs: ['evidence-a'] }],
@@ -111,10 +111,12 @@ describe('strict knowledge extraction', () => {
       entities: [{ key: 'lin', type: 'character', canonicalName: '林澈', aliases: [], evidenceRefs: ['foreign'] }],
       claims: [], relations: [], evidenceRefs: [{ sourceType: 'document', sourceId: 'other-world-doc', evidenceId: 'foreign' }],
     }, { sourceType: 'conversation', sourceId: 'session-a', evidence: evidenceInput })).toThrowError(KnowledgeExtractionError)
-    expect(() => parseKnowledgeExtraction({
+    // Provider tolerance: an invented field no longer discards a valid batch.
+    const tolerant = parseKnowledgeExtraction({
       entities: [{ key: 'lin', type: 'character', canonicalName: '林澈', aliases: [], evidenceRefs: ['evidence-a'], injected: 'ignore' }],
       claims: [], relations: [], evidenceRefs: [{ sourceType: 'conversation', sourceId: 'session-a', evidenceId: 'evidence-a' }],
-    }, { sourceType: 'conversation', sourceId: 'session-a', evidence: evidenceInput })).toThrow(/未知字段/)
+    }, { sourceType: 'conversation', sourceId: 'session-a', evidence: evidenceInput })
+    expect(tolerant.entities[0]?.canonicalName).toBe('林澈')
   })
 
   it('accepts a single fenced JSON document and a UTF-8 BOM from model output', () => {
@@ -127,6 +129,48 @@ describe('strict knowledge extraction', () => {
       sourceType: 'conversation', sourceId: 'session-a', evidence: evidenceInput,
     })
     expect(result.entities[0]?.canonicalName).toBe('林澈')
+  })
+
+  it('reads the JSON object out of an answer wrapped in sentences', () => {
+    const payload = {
+      entities: [{ key: 'lin', type: 'character', canonicalName: '林澈', aliases: [], evidenceRefs: ['evidence-a'] }],
+      claims: [], relations: [],
+      evidenceRefs: [{ sourceType: 'conversation', sourceId: 'session-a', evidenceId: 'evidence-a' }],
+    }
+    const result = parseKnowledgeExtraction('好的，以下是抽取结果：\n```json\n' + JSON.stringify(payload) + '\n```\n希望对你有帮助。', {
+      sourceType: 'conversation', sourceId: 'session-a', evidence: evidenceInput,
+    })
+    expect(result.entities[0]?.canonicalName).toBe('林澈')
+  })
+
+  it('degrades an unknown entity type to other and drops only the claim with an unknown type', () => {
+    const parsed = parseKnowledgeExtraction({
+      entities: [{ key: 'lin', type: '神秘生物', canonicalName: '林澈', aliases: [], evidenceRefs: ['evidence-a'] }],
+      claims: [
+        { key: 'good', type: 'fact', subjectKey: 'lin', predicate: '负责', objectText: '观测站', confidence: 0.9, evidenceRefs: ['evidence-a'] },
+        { key: 'bad', type: '预言', subjectKey: 'lin', predicate: '预测', objectText: '未来', confidence: 0.5, evidenceRefs: ['evidence-a'] },
+      ],
+      relations: [],
+      evidenceRefs: [{ sourceType: 'conversation', sourceId: 'session-a', evidenceId: 'evidence-a' }],
+    }, { sourceType: 'conversation', sourceId: 'session-a', evidence: evidenceInput })
+    expect(parsed.entities[0]?.type).toBe('other')
+    expect(parsed.claims.map((claim) => claim.key)).toEqual(['good'])
+  })
+
+  it('demotes a dangling objectKey to text and prefers the entity pointer over prose', () => {
+    const claimContext = { sourceType: 'conversation' as const, sourceId: 'session-a', evidence: evidenceInput }
+    const shape = (extra: Record<string, unknown>) => ({
+      entities: [{ key: 'lin', type: 'character', canonicalName: '林澈', aliases: [], evidenceRefs: ['evidence-a'] }],
+      claims: [{ key: 'claim', type: 'fact', subjectKey: 'lin', predicate: '负责', confidence: 0.8, evidenceRefs: ['evidence-a'], ...extra }],
+      relations: [],
+      evidenceRefs: [{ sourceType: 'conversation', sourceId: 'session-a', evidenceId: 'evidence-a' }],
+    })
+    const dangling = parseKnowledgeExtraction(shape({ objectKey: '不存在的实体' }), claimContext)
+    expect(dangling.claims[0]?.objectKey).toBeUndefined()
+    expect(dangling.claims[0]?.objectText).toBe('不存在的实体')
+    const both = parseKnowledgeExtraction(shape({ objectKey: 'lin', objectText: '多余文字' }), claimContext)
+    expect(both.claims[0]?.objectKey).toBe('lin')
+    expect(both.claims[0]?.objectText).toBeUndefined()
   })
 })
 
@@ -215,5 +259,99 @@ describe('knowledge consolidation lifecycle', () => {
     await expect(service.getJob('world-b', 'job-retry')).resolves.toBeUndefined()
     await expect(service.retryJob('world-a', 'job-retry')).resolves.toMatchObject({ status: 'queued' })
     await expect(service.runNext()).resolves.toMatchObject({ status: 'completed', attempt: 2 })
+  })
+
+  it('retries an unparseable answer once with the corrective hint', async () => {
+    const jobs: KnowledgeConsolidationJob[] = [{
+      id: 'job-reparse', workspaceId: 'workspace-a', worldId: 'world-a', sourceType: 'conversation', sourceId: 'session-a',
+      fromCursor: 0, toCursor: 1, status: 'queued', attempt: 0,
+      createdAt: '2026-08-26T00:00:00.000Z', updatedAt: '2026-08-26T00:00:00.000Z',
+    }]
+    const base = graphRepository()
+    const repository = {
+      ...base,
+      listConsolidationJobs: () => jobs.filter((job) => job.status === 'queued'),
+      claimConsolidationJob: (jobId: string) => { const job = jobs.find((item) => item.id === jobId); if (job === undefined || job.status !== 'queued') return undefined; job.status = 'running'; job.attempt += 1; return job },
+      applyKnowledgeExtraction: () => undefined,
+      completeConsolidationJob: () => { jobs[0]!.status = 'completed'; return jobs[0]! },
+      failConsolidationJob: () => { jobs[0]!.status = 'failed'; return jobs[0]! },
+    } satisfies KnowledgeConsolidationRepository
+    const hints: Array<boolean | undefined> = []
+    const service = new WorldKnowledgeConsolidationService({
+      repository,
+      sources: { async load() { return { workspaceId: 'workspace-a', worldId: 'world-a', sourceType: 'conversation', sourceId: 'session-a', fromCursor: 0, toCursor: 1, items: [{ kind: 'user', text: '林澈负责远星观测站。', evidence: { evidenceId: 'evidence-a', sourceType: 'conversation', sourceId: 'session-a', excerpt: '林澈负责远星观测站。', worldId: 'world-a', workspaceId: 'workspace-a', sessionId: 'session-a', messageId: 'message-a', sequence: 1 } }] } } },
+      extractor: {
+        async extract(request) {
+          hints.push(request.attemptHint)
+          if (hints.length === 1) return { payload: '抱歉，我现在无法输出结构化结果。' }
+          return { entities: [{ key: 'lin', type: 'character', canonicalName: '林澈', aliases: [], evidenceRefs: ['evidence-a'] }], claims: [], relations: [], evidenceRefs: [{ sourceType: 'conversation', sourceId: 'session-a', evidenceId: 'evidence-a' }] }
+        },
+      },
+    })
+    await service.runNext()
+    expect(hints).toEqual([undefined, true])
+    expect(jobs[0]?.status).toBe('completed')
+  })
+
+  it('retries once when the gateway answers HTTP-OK with empty content', async () => {
+    const jobs: KnowledgeConsolidationJob[] = [{
+      id: 'job-empty', workspaceId: 'workspace-a', worldId: 'world-a', sourceType: 'conversation', sourceId: 'session-a',
+      fromCursor: 0, toCursor: 1, status: 'queued', attempt: 0,
+      createdAt: '2026-08-26T00:00:00.000Z', updatedAt: '2026-08-26T00:00:00.000Z',
+    }]
+    const base = graphRepository()
+    const repository = {
+      ...base,
+      listConsolidationJobs: () => jobs.filter((job) => job.status === 'queued'),
+      claimConsolidationJob: (jobId: string) => { const job = jobs.find((item) => item.id === jobId); if (job === undefined || job.status !== 'queued') return undefined; job.status = 'running'; job.attempt += 1; return job },
+      applyKnowledgeExtraction: () => undefined,
+      completeConsolidationJob: () => { jobs[0]!.status = 'completed'; return jobs[0]! },
+      failConsolidationJob: () => { jobs[0]!.status = 'failed'; return jobs[0]! },
+    } satisfies KnowledgeConsolidationRepository
+    let calls = 0
+    const service = new WorldKnowledgeConsolidationService({
+      repository,
+      sources: { async load() { return { workspaceId: 'workspace-a', worldId: 'world-a', sourceType: 'conversation', sourceId: 'session-a', fromCursor: 0, toCursor: 1, items: [{ kind: 'user', text: '事实。', evidence: { evidenceId: 'evidence-a', sourceType: 'conversation', sourceId: 'session-a', excerpt: '事实。', worldId: 'world-a', workspaceId: 'workspace-a', sessionId: 'session-a', messageId: 'message-a', sequence: 1 } }] } } },
+      extractor: {
+        async extract() {
+          calls += 1
+          if (calls === 1) throw Object.assign(new Error('知识整理模型没有返回 JSON 内容。'), { code: 'knowledge_model_response_invalid' })
+          return { payload: JSON.stringify({ entities: [], claims: [], relations: [], evidenceRefs: [{ sourceType: 'conversation', sourceId: 'session-a', evidenceId: 'evidence-a' }] }) }
+        },
+      },
+    })
+    await service.runNext()
+    expect(calls).toBe(2)
+    expect(jobs[0]?.status).toBe('completed')
+  })
+
+  it('never retries a transport failure into a second model call', async () => {
+    const jobs: KnowledgeConsolidationJob[] = [{
+      id: 'job-transport', workspaceId: 'workspace-a', worldId: 'world-a', sourceType: 'conversation', sourceId: 'session-a',
+      fromCursor: 0, toCursor: 1, status: 'queued', attempt: 0,
+      createdAt: '2026-08-26T00:00:00.000Z', updatedAt: '2026-08-26T00:00:00.000Z',
+    }]
+    const base = graphRepository()
+    const repository = {
+      ...base,
+      listConsolidationJobs: () => jobs.filter((job) => job.status === 'queued'),
+      claimConsolidationJob: (jobId: string) => { const job = jobs.find((item) => item.id === jobId); if (job === undefined || job.status !== 'queued') return undefined; job.status = 'running'; job.attempt += 1; return job },
+      completeConsolidationJob: () => { jobs[0]!.status = 'completed'; return jobs[0]! },
+      failConsolidationJob: () => { jobs[0]!.status = 'failed'; return jobs[0]! },
+    } satisfies KnowledgeConsolidationRepository
+    let calls = 0
+    const service = new WorldKnowledgeConsolidationService({
+      repository,
+      sources: { async load() { return { workspaceId: 'workspace-a', worldId: 'world-a', sourceType: 'conversation', sourceId: 'session-a', fromCursor: 0, toCursor: 1, items: [{ kind: 'user', text: '事实。', evidence: { evidenceId: 'evidence-a', sourceType: 'conversation', sourceId: 'session-a', excerpt: '事实。', worldId: 'world-a', workspaceId: 'workspace-a', sessionId: 'session-a', messageId: 'message-a', sequence: 1 } }] } } },
+      extractor: {
+        async extract() {
+          calls += 1
+          throw Object.assign(new Error('知识整理模型响应超时，请稍后重试。'), { code: 'knowledge_model_timeout' })
+        },
+      },
+    })
+    await service.runNext()
+    expect(calls).toBe(1)
+    expect(jobs[0]?.status).toBe('failed')
   })
 })
