@@ -256,6 +256,69 @@ describe('World Trace projection', () => {
       expect.objectContaining({ status: 'success', reasoningSummary: '先核对事实，再执行工具。' }),
     ])
   })
+
+  it('projects a failed knowledge consolidation job into the world trace', async () => {
+    const { store, workspace, world } = await fixture()
+    store.database.prepare(
+      `INSERT INTO knowledge_consolidation_jobs
+       (id, workspace_id, world_id, source_type, source_id, from_cursor, to_cursor, status, attempt, error_code, created_at, updated_at)
+       VALUES ('job-x', ?, ?, 'conversation', 'session-x', 0, 5, 'failed', 2, 'knowledge_model_timeout', ?, ?)`,
+    ).run(workspace.id, world.id, '2026-09-01T00:00:00.000Z', '2026-09-01T00:01:00.000Z')
+    const service = new WorldTraceService({ store, actions: new MemoryActions() })
+    const page = await service.list(world.id)
+    expect(page.items).toContainEqual(expect.objectContaining({
+      category: 'system',
+      status: 'failed',
+      sourceKind: 'consolidation',
+      sourceId: 'job-x',
+      summary: '知识整理失败：模型响应超时',
+    }))
+  })
+
+  it('reuses the cached projection while the watermark holds and rebuilds after facts change', async () => {
+    const context = await fixture()
+    const { store, world } = context
+    const service = new WorldTraceService({ store, actions: new MemoryActions() })
+    const realMessages = store.listWorldTraceMessages.bind(store)
+    let reads = 0
+    store.listWorldTraceMessages = (worldId: string) => { reads += 1; return realMessages(worldId) }
+    await service.list(world.id)
+    await service.list(world.id)
+    await service.checkpoint(world.id)
+    // Several reads of an unchanged world must cost one projection, not one
+    // per list/checkpoint/changesSince round trip.
+    expect(reads).toBe(1)
+    completeAgentRun(store, context)
+    const page = await service.list(world.id)
+    expect(reads).toBe(2)
+    expect(page.items.some((entry) => entry.sourceKind === 'agent-run')).toBe(true)
+  })
+
+  it('rebuilds the cached projection when a run changes status without adding messages', async () => {
+    const context = await fixture()
+    const { store, world, session, employee } = context
+    const turn = store.createWorkTurn({
+      workspaceId: context.workspace.id,
+      worldId: world.id,
+      sessionId: session.id,
+      interactionKind: 'chat',
+    })
+    store.startWorkTurn(turn.id)
+    const run = store.createAgentRun({
+      workspaceId: context.workspace.id,
+      worldId: world.id,
+      sessionId: session.id,
+      turnId: turn.id,
+      employeeId: employee.id,
+      ordinal: 1,
+    })
+    store.startAgentRun(run.id)
+    const service = new WorldTraceService({ store, actions: new MemoryActions() })
+
+    expect((await service.list(world.id)).items).toContainEqual(expect.objectContaining({ runId: run.id, status: 'running' }))
+    store.failAgentRun(run.id, 'model-timeout')
+    expect((await service.list(world.id)).items).toContainEqual(expect.objectContaining({ runId: run.id, status: 'failed' }))
+  })
 })
 
 describe('TraceSanitizer and adapter boundary', () => {

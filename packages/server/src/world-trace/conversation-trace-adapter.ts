@@ -9,10 +9,14 @@ export class ConversationTraceAdapter implements WorldTraceAdapter<'conversation
     const { message, session, worldId } = value
     if (message.kind === 'tool-call' || message.kind === 'tool-result') return []
     const metadata = message.metadata as JsonObject & Record<string, unknown>
+    // Carry the WorkTurn identity through conversation entries too, so the
+    // trace can fold a turn's request, runs and tools into one card.
+    const workTurnId = stringField(metadata, 'workTurnId')
     const base = {
       worldId,
       actorId: message.senderId,
       sessionId: session.id,
+      ...(workTurnId === undefined ? {} : { workTurnId }),
       sourceKind: 'conversation' as const,
       sourceId: message.id,
       sourceSequence: message.sequence,

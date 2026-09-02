@@ -11,11 +11,14 @@ export interface UseWorldTraceResult {
   loadingMore: boolean
   nextCursor?: string
   error?: string
+  /** Live entries that arrived while the list was scrolled away from the top. */
+  pendingNew: number
   refresh(): Promise<void>
   loadMore(): Promise<void>
+  markSeen(): void
 }
 
-export function useWorldTrace(worldId: string, demoMode: boolean, query: WorldTraceQuery = {}): UseWorldTraceResult {
+export function useWorldTrace(worldId: string, demoMode: boolean, query: WorldTraceQuery = {}, atTop?: { current: boolean }): UseWorldTraceResult {
   const queryKey = useMemo(() => JSON.stringify(query), [query])
   const activeQuery = useMemo(() => JSON.parse(queryKey) as WorldTraceQuery, [queryKey])
   const [entries, setEntries] = useState<WorldTraceEntry[]>(() => demoMode ? demoTrace(worldId) : [])
@@ -23,7 +26,11 @@ export function useWorldTrace(worldId: string, demoMode: boolean, query: WorldTr
   const [loadingMore, setLoadingMore] = useState(false)
   const [nextCursor, setNextCursor] = useState<string>()
   const [error, setError] = useState<string>()
+  const [pendingNew, setPendingNew] = useState(0)
   const requestGeneration = useRef(0)
+  const newestSeen = useRef('')
+  const listRef = useRef<WorldTraceEntry[]>([])
+  const applyEntries = (next: WorldTraceEntry[]): WorldTraceEntry[] => { listRef.current = next; return next }
 
   const fetchPage = useCallback(async (after?: string) => {
     const params = new URLSearchParams({ limit: '50' })
@@ -46,7 +53,7 @@ export function useWorldTrace(worldId: string, demoMode: boolean, query: WorldTr
     try {
       const result = await fetchPage()
       if (generation !== requestGeneration.current) return
-      setEntries((current) => mergeTraceEntries(current, result.items))
+      setEntries((current) => { const merged = applyEntries(mergeTraceEntries(current, result.items)); newestSeen.current = merged[0]?.createdAt ?? ''; return merged })
       setNextCursor(result.nextCursor)
     } catch (cause) {
       if (generation === requestGeneration.current) setError(cause instanceof Error ? cause.message : '世界轨迹加载失败')
@@ -84,7 +91,11 @@ export function useWorldTrace(worldId: string, demoMode: boolean, query: WorldTr
       try {
         const entry = JSON.parse((raw as MessageEvent<string>).data) as WorldTraceEntry
         if (entry.worldId !== worldId || !matchesQuery(entry, activeQuery)) return
-        setEntries((current) => mergeTraceEntries(current, [entry]))
+        if (entry.createdAt > newestSeen.current) {
+          if (atTop?.current === false) setPendingNew((count) => count + 1)
+          else newestSeen.current = entry.createdAt
+        }
+        setEntries((current) => applyEntries(mergeTraceEntries(current, [entry])))
       } catch {
         // History refresh is authoritative after malformed or interrupted transient data.
       }
@@ -98,7 +109,12 @@ export function useWorldTrace(worldId: string, demoMode: boolean, query: WorldTr
     }
   }, [activeQuery, demoMode, refresh, worldId])
 
-  return { entries, loading, loadingMore, ...(nextCursor === undefined ? {} : { nextCursor }), ...(error === undefined ? {} : { error }), refresh, loadMore }
+  const markSeen = useCallback(() => {
+    newestSeen.current = listRef.current[0]?.createdAt ?? newestSeen.current
+    setPendingNew(0)
+  }, [])
+
+  return { entries, loading, loadingMore, ...(nextCursor === undefined ? {} : { nextCursor }), ...(error === undefined ? {} : { error }), pendingNew, refresh, loadMore, markSeen }
 }
 
 export function mergeTraceEntries(current: WorldTraceEntry[], incoming: WorldTraceEntry[]): WorldTraceEntry[] {

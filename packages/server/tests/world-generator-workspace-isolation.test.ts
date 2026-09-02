@@ -80,13 +80,50 @@ describe('World Generator workspace isolation', () => {
     expect(alphaWorld.status, JSON.stringify(alphaWorld.body)).toBe(201)
     expect(alphaWorld.body.world.workspaceId).toBe(alpha.id)
   })
+
+  it('keeps an uploaded background private to the workspace that uploaded it', async () => {
+    const server = await startServer()
+    const alpha = server.store.listWorkspaces()[0]!
+    const beta = server.store.createWorkspace({ name: '工作区 B' })
+    const bytes = pngBytes(1536, 1024)
+    const generated = await publishWorld(server.origin, alpha.id, { kind: 'upload', id: 'official-moonlit-tavern', fileName: 'backdrop.png', mimeType: 'image/png', dataBase64: bytes.toString('base64') })
+
+    expect(await listMarket(server.origin, 'theme', beta.id)).not.toContain(generated.packageId)
+    const previewPath = `/api/marketplace/packages/${encodeURIComponent(generated.packageId)}/${generated.version}/preview`
+    const betaPreview = await fetch(`${server.origin}${previewPath}?workspaceId=${encodeURIComponent(beta.id)}`)
+    expect(betaPreview.status).toBe(404)
+    const unscopedPreview = await fetch(`${server.origin}${previewPath}`)
+    expect(unscopedPreview.status).toBe(404)
+    // The owning workspace sees exactly the bytes it uploaded.
+    const alphaPreview = await fetch(`${server.origin}${previewPath}?workspaceId=${encodeURIComponent(alpha.id)}`)
+    expect(alphaPreview.status).toBe(200)
+    expect(Buffer.from(await alphaPreview.arrayBuffer()).equals(bytes)).toBe(true)
+
+    // B cannot bind the theme to a world of its own, so the world asset route
+    // never has a B world to serve the background through.
+    const betaWorld = await postJson(server.origin, `/api/workspaces/${beta.id}/marketplace/worlds`, { packageId: generated.packageId, name: '偷来的背景' })
+    expect(betaWorld.status).not.toBe(201)
+    expect(server.store.listWorlds(beta.id).some((world) => world.name === '偷来的背景')).toBe(false)
+  })
 })
 
-async function publishWorld(origin: string, workspaceId: string): Promise<{ packageId: string; version: string; castPackageId: string }> {
+function pngBytes(width: number, height: number): Buffer {
+  const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+  const ihdr = Buffer.alloc(25)
+  ihdr.writeUInt32BE(13, 0)
+  ihdr.write('IHDR', 4, 'latin1')
+  ihdr.writeUInt32BE(width, 8)
+  ihdr.writeUInt32BE(height, 12)
+  ihdr[16] = 8
+  ihdr[17] = 6
+  return Buffer.concat([signature, ihdr, Buffer.alloc(64)])
+}
+
+async function publishWorld(origin: string, workspaceId: string, scene?: AnyRecord): Promise<{ packageId: string; version: string; castPackageId: string }> {
   const source = { kind: 'paste' as const, text: '一家社区法律援助诊所，律师、助理和志愿者分工推进来访者的问题梳理。'.repeat(4) }
   const analyzed = await postJson(origin, `/api/workspaces/${workspaceId}/world-generator/analyze`, { source })
   expect(analyzed.status, JSON.stringify(analyzed.body)).toBe(200)
-  const published = await postJson(origin, `/api/workspaces/${workspaceId}/world-generator/publish`, { source, draft: analyzed.body.draft })
+  const published = await postJson(origin, `/api/workspaces/${workspaceId}/world-generator/publish`, { source, draft: analyzed.body.draft, ...(scene === undefined ? {} : { scene }) })
   expect(published.status, JSON.stringify(published.body)).toBe(201)
   return {
     packageId: published.body.item.manifest.id as string,

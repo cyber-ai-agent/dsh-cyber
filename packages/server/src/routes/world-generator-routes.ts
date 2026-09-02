@@ -3,6 +3,7 @@ import { rm } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 import type {
+  CharacterGeneratorAvatarMimeType,
   CharacterGeneratorCapabilityCatalogItem,
   CharacterSourceInput,
   CyberMarketPackage,
@@ -23,7 +24,14 @@ import { HttpError } from '../http/errors.js'
 import type { Router } from '../http/router.js'
 import { readJson, record } from '../http/request.js'
 import { writeJson } from '../http/response.js'
-import { AvatarImageError } from '../services/avatar-image-guard.js'
+import {
+  AvatarImageError,
+  assertAvatarImage,
+  assertDeclaredAvatarMediaType,
+  decodeAvatarBase64,
+  normalizeAvatarFileName,
+  type AvatarMediaType,
+} from '../services/avatar-image-guard.js'
 import {
   BUILTIN_AVATAR_PACKAGE_IDS,
   commitGeneratedPackage,
@@ -42,6 +50,7 @@ import {
   type WorldImportAnalyzerPort,
 } from '../services/world-import-analyzer.js'
 import {
+  WORLD_BACKGROUND_MAX_BYTES,
   compileWorldThemePackage,
   type WorldThemeCastCompileInput,
   type WorldThemeSceneBase,
@@ -54,6 +63,21 @@ const CAPABILITY_CATALOG: CharacterGeneratorCapabilityCatalogItem[] = [
   { id: 'artifact:read', displayName: '读取产物', summary: '允许角色读取当前世界已发布的产物。' },
 ]
 const PUBLISHER = 'DSH Cyber World Generator'
+/**
+ * The shared image guard speaks about avatars. A background upload walks the
+ * same checks and surfaces the same failure codes under the world's own
+ * prefix and wording, so a client never has to translate an avatar error
+ * into a background one.
+ */
+const BACKGROUND_ERROR_MESSAGES: Record<string, string> = {
+  world_background_data_invalid: '世界背景图片数据无效。',
+  world_background_size_invalid: '世界背景图片不能超过 4 MiB。',
+  world_background_signature_invalid: '世界背景必须是 PNG、JPEG 或 WebP 图片。',
+  world_background_dimensions_invalid: '世界背景图片尺寸超出允许范围。',
+  world_background_mime_invalid: '世界背景图片格式不受支持。',
+  world_background_mime_mismatch: '世界背景图片的声明格式与实际内容不一致。',
+  world_background_filename_invalid: '上传的世界背景文件名无效。',
+}
 
 export interface WorldGeneratorRoutesDependencies {
   store: SqliteStore
@@ -117,6 +141,10 @@ export function registerWorldGeneratorRoutes(router: Router, dependencies: World
       rejectUnknown: true,
     })
     const selection = parseSceneSelection(body.scene)
+    // The upload is checked before anything is staged: the file name is
+    // validated but never used to build a path, the payload is bounded before
+    // it is decoded, and the media type comes from the bytes alone.
+    const background = selection.kind === 'upload' ? loadUploadedBackground(selection) : undefined
     const base = await loadSceneBase(packageCatalog, selection.id)
     const marketplaceRoot = resolve(dependencies.resolveMarketplaceRoot(workspaceId))
     const containmentRoot = declaredContainmentRoot ?? marketplaceRoot
@@ -150,6 +178,7 @@ export function registerWorldGeneratorRoutes(router: Router, dependencies: World
         terminology: themeTerminology(draft),
         publisher: PUBLISHER,
         base,
+        ...(background === undefined ? {} : { background }),
         cast,
         allowedSkillIds,
         createdAt: new Date().toISOString(),
@@ -179,7 +208,7 @@ export function registerWorldGeneratorRoutes(router: Router, dependencies: World
       for (const paths of staged) await rm(paths.stagingDirectory, { recursive: true, force: true }).catch(() => undefined)
       for (const paths of published) await rm(paths.installedDirectory, { recursive: true, force: true }).catch(() => undefined)
       if (error instanceof HttpError) throw error
-      if (error instanceof AvatarImageError) throw new HttpError(422, error.code, error.message)
+      if (error instanceof AvatarImageError) throw background === undefined ? new HttpError(422, error.code, error.message) : backgroundHttpError(error)
       throw new HttpError(422, 'world_publish_failed', error instanceof Error ? error.message : '世界包发布失败')
     }
   })
@@ -230,14 +259,46 @@ async function workspaceSkillIds(skillCatalog: Pick<SkillCatalogService, 'listWo
 function parseSceneSelection(value: unknown): WorldGeneratorSceneSelection {
   if (value === undefined || value === null) return { kind: 'official', id: DEFAULT_WORLD_GENERATOR_SCENE_ID }
   const input = record(value)
-  if (input === undefined || input.kind !== 'official' || typeof input.id !== 'string') {
+  if (input === undefined || (input.kind !== 'official' && input.kind !== 'upload') || typeof input.id !== 'string') {
     throw new HttpError(422, 'world_scene_invalid', '世界场景来源无效。')
   }
+  // An upload still names an official scene: that is where its layout comes from.
   const id = input.id.trim()
   if (!(WORLD_GENERATOR_SCENE_PACKAGE_IDS as readonly string[]).includes(id)) {
     throw new HttpError(422, 'world_scene_not_allowed', '只能使用指定的官方世界场景。')
   }
-  return { kind: 'official', id }
+  if (input.kind === 'official') return { kind: 'official', id }
+  const { fileName, mimeType, dataBase64 } = input
+  if (typeof fileName !== 'string' || typeof mimeType !== 'string' || typeof dataBase64 !== 'string') {
+    throw new HttpError(422, 'world_scene_invalid', '上传的世界背景字段不完整。')
+  }
+  return { kind: 'upload', id, fileName, mimeType: mimeType as CharacterGeneratorAvatarMimeType, dataBase64 }
+}
+
+/**
+ * The avatar upload boundary, applied to a scene background. Nothing the
+ * client declared is trusted: the file name is validated but never joined
+ * into a path (the stored file is always `assets/background.<sniffed ext>`),
+ * the encoded payload is bounded before it is decoded, and the media type
+ * comes from the bytes; the declaration is only cross-checked so a
+ * mislabelled upload is refused rather than stored under the client's label.
+ */
+function loadUploadedBackground(selection: Extract<WorldGeneratorSceneSelection, { kind: 'upload' }>): { bytes: Buffer; mimeType: AvatarMediaType } {
+  try {
+    normalizeAvatarFileName(selection.fileName)
+    const bytes = decodeAvatarBase64(selection.dataBase64, WORLD_BACKGROUND_MAX_BYTES)
+    const mimeType = assertAvatarImage(bytes, WORLD_BACKGROUND_MAX_BYTES)
+    assertDeclaredAvatarMediaType(selection.mimeType, mimeType)
+    return { bytes, mimeType }
+  } catch (error) {
+    if (error instanceof AvatarImageError) throw backgroundHttpError(error)
+    throw error
+  }
+}
+
+function backgroundHttpError(error: AvatarImageError): HttpError {
+  const code = error.code.replace(/^character_avatar_/u, 'world_background_')
+  return new HttpError(422, code, BACKGROUND_ERROR_MESSAGES[code] ?? error.message)
 }
 
 /** Read one official theme package, validated, with its assets' bytes. */

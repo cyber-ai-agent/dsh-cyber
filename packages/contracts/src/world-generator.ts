@@ -1,6 +1,7 @@
 import type { CyberMarketPackage } from './index.js'
 import type {
   CharacterBlueprintDraft,
+  CharacterGeneratorAvatarMimeType,
   CharacterGeneratorCapabilityCatalogItem,
   CharacterSourceInput,
 } from './character-generator.js'
@@ -81,7 +82,24 @@ export interface WorldImportAnalyzeResult {
   suggestedSceneId?: string
 }
 
-export type WorldGeneratorSceneSelection = { kind: 'official'; id: string }
+/**
+ * The scene answer, mirroring the Character Generator's avatar answer:
+ * an official pick, or a user upload. An upload replaces the background
+ * raster ONLY — `id` still names the official scene whose anchors,
+ * navigation and interactables the generated theme keeps. The wire shape and
+ * the server boundary (magic-byte sniff, byte budget, file name validation)
+ * are the avatar upload's.
+ */
+export type WorldGeneratorSceneSelection =
+  | { kind: 'official'; id: string }
+  | {
+      kind: 'upload'
+      /** Official scene lending its layout; must be in the host allowlist. */
+      id: string
+      fileName: string
+      mimeType: CharacterGeneratorAvatarMimeType
+      dataBase64: string
+    }
 
 export interface WorldImportPublishInput {
   workspaceId: string
