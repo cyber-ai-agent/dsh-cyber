@@ -11,7 +11,7 @@ import {
 } from '@dsh-cyber/harness-adapter'
 import { ConversationOrchestrator, type GroupTurnPlannerPort } from '@dsh-cyber/orchestration'
 import type { PackageManager, PackageRuntimePort } from '@dsh-cyber/package-runtime'
-import { SqliteStore, WorldArtifactRepository, WorldKnowledgeRepository, WorldSimulationStore } from '@dsh-cyber/persistence'
+import { SqliteStore, WorkSystemRepository, WorldArtifactRepository, WorldKnowledgeRepository, WorldSimulationStore } from '@dsh-cyber/persistence'
 import { dispatchHttpRequest } from './http/context.js'
 import { assertApplicationAccess } from './http/application-access-guard.js'
 import { writeError } from './http/errors.js'
@@ -52,6 +52,7 @@ import { LocalTtsAssetService } from './services/local-tts-asset-service.js'
 import { ApplicationAccessService } from './services/application-access-service.js'
 import { CharacterProfileRuntime } from './services/character-profile-runtime.js'
 import { ContextPlanningRuntime, contextModelLimits } from './services/context-planning-runtime.js'
+import { ContextSnapshotService } from './services/context-snapshot-service.js'
 import { CharacterSkillRuntime } from './services/character-skill-runtime.js'
 import { composeConversationControl } from './services/conversation-control-composition.js'
 import { SkillCatalogService } from './services/skill-catalog-service.js'
@@ -427,7 +428,16 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     worldPackages,
     worldPermissions,
   })
-  const worldTrace = new WorldTraceService({ store, actions: skillActions, artifacts: worldArtifacts })
+  // The trace reads task links and context numbers through their own owners:
+  // the Work System's repository for `task_runs`, the D4 service for snapshots.
+  const contextSnapshots = new ContextSnapshotService(store)
+  const worldTrace = new WorldTraceService({
+    store,
+    actions: skillActions,
+    artifacts: worldArtifacts,
+    tasks: new WorkSystemRepository(store.database),
+    contexts: contextSnapshots,
+  })
   const employeeActivity = new EmployeeActivityProjectionService(store)
   employeeActivity.projectAll()
   const taskSchedules = new TaskScheduleService({ store, orchestrator, settings: worldRuntimeContext, employeeActivity })
@@ -463,7 +473,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerTaskScheduleRoutes(router, { store, schedules: taskSchedules, access: worldAccess })
   registerPackageRoutes(router, { store, packageManager, packageCatalog, skillRuntime, worldMarketplace, worldPackages, worldAccess, skillCatalog, credentials, ...(options.workshopDraftGenerator === undefined ? {} : { workshopDraftGenerator: options.workshopDraftGenerator }) })
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
-  registerWorldTraceRoutes(router, { store, trace: worldTrace, access: worldAccess, contextInspection: profileRuntime.contextInspection })
+  registerWorldTraceRoutes(router, { store, trace: worldTrace, access: worldAccess, contextInspection: profileRuntime.contextInspection, contextSnapshots })
   registerCompletionJobRoutes(router, { store, access: worldAccess, wake: () => completionWorker.wake() })
   registerWorldArtifactRoutes(router, { store, artifacts: worldArtifacts, access: worldAccess, authority })
   registerWorldKnowledgeRoutes(router, {

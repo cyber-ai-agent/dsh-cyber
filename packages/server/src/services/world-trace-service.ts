@@ -1,5 +1,7 @@
 import type {
+  TaskRun,
   WorkMessage,
+  WorkTask,
   WorldArtifactRunProvenance,
   WorldTraceArtifactRef,
   WorldTraceEntry,
@@ -10,6 +12,7 @@ import type { ConversationRealtimeEnvelope } from '@dsh-cyber/orchestration'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import type { CharacterSkillActionRepository } from '../skills/skill-action-repository.js'
+import type { ContextSnapshotService } from './context-snapshot-service.js'
 import {
   AgentRunTraceAdapter,
   ConversationTraceAdapter,
@@ -45,11 +48,30 @@ export interface WorldTraceArtifactProvenancePort {
   listRunProvenance(worldId: string): readonly WorldArtifactRunProvenance[]
 }
 
+/**
+ * The only thing the trace needs from the Work System: which runs each task
+ * recorded, and what the task is called. Read-only, and only durable rows.
+ */
+export interface WorldTraceTaskPort {
+  listTasks(worldId: string): readonly Pick<WorkTask, 'id' | 'title'>[]
+  listWorldTaskRuns(worldId: string): readonly Pick<TaskRun, 'taskId' | 'workTurnId' | 'agentRunIds'>[]
+}
+
+/** A trace's reference to a real task: the id to filter by, the title to read. */
+export interface WorldTraceTaskRef {
+  id: string
+  title: string
+}
+
 export interface WorldTraceServiceOptions {
   store: SqliteStore
   actions: CharacterSkillActionRepository
   /** Optional: without it a run simply reports no artifacts, never a guessed one. */
   artifacts?: WorldTraceArtifactProvenancePort
+  /** Optional: without it no run carries a task, never a placeholder for one. */
+  tasks?: WorldTraceTaskPort
+  /** Optional: without it no run carries context numbers, never zeros. */
+  contexts?: Pick<ContextSnapshotService, 'summarizeWorld'>
   registry?: WorldTraceAdapterRegistry
   sanitizer?: TraceSanitizer
   clock?: () => string
@@ -61,6 +83,8 @@ export class WorldTraceService {
   readonly #store: SqliteStore
   readonly #actions: CharacterSkillActionRepository
   readonly #artifacts: WorldTraceArtifactProvenancePort | undefined
+  readonly #tasks: WorldTraceTaskPort | undefined
+  readonly #contexts: Pick<ContextSnapshotService, 'summarizeWorld'> | undefined
   readonly #registry: WorldTraceAdapterRegistry
   readonly #sanitizer: TraceSanitizer
   readonly #clock: () => string
@@ -70,6 +94,8 @@ export class WorldTraceService {
     this.#store = options.store
     this.#actions = options.actions
     this.#artifacts = options.artifacts
+    this.#tasks = options.tasks
+    this.#contexts = options.contexts
     this.#registry = options.registry ?? createWorldTraceRegistry()
     this.#sanitizer = options.sanitizer ?? new TraceSanitizer()
     this.#clock = options.clock ?? (() => new Date().toISOString())
@@ -84,6 +110,7 @@ export class WorldTraceService {
       .filter((entry) => query.category === undefined || entry.category === query.category)
       .filter((entry) => query.status === undefined || entry.status === query.status)
       .filter((entry) => query.actorId === undefined || entry.actorId === query.actorId)
+      .filter((entry) => query.taskId === undefined || entry.taskId === query.taskId)
       .filter((entry) => query.date === undefined || localCalendarDate(entry.createdAt) === query.date)
       .filter((entry) => search === undefined || search.length === 0 || traceSearchText(entry, actorNames).includes(search))
       .sort(compareTraceEntries)
@@ -151,9 +178,15 @@ export class WorldTraceService {
       .filter((interaction) => interaction.agentRunId !== undefined)
       .map((interaction) => [interaction.agentRunId!, interaction]))
     const artifactsByRun = groupArtifactsByRun(this.#artifacts?.listRunProvenance(worldId) ?? [])
+    const tasks = this.#tasks === undefined
+      ? { byRun: new Map<string, WorldTraceTaskRef>(), byTurn: new Map<string, WorldTraceTaskRef>() }
+      : groupTasksByRun(this.#tasks.listTasks(worldId), this.#tasks.listWorldTaskRuns(worldId))
+    const contextsByRun = this.#contexts?.summarizeWorld(worldId) ?? new Map()
     const facts: WorldTraceFact[] = [
       ...this.#store.listWorldAgentRuns(worldId).map((run) => {
         const artifacts = artifactsByRun.get(run.id)
+        const task = tasks.byRun.get(run.id) ?? tasks.byTurn.get(run.turnId)
+        const context = contextsByRun.get(run.id)
         return {
           kind: 'agent-run' as const,
           value: {
@@ -162,6 +195,8 @@ export class WorldTraceService {
             messages: messagesByRun.get(run.id) ?? [],
             ...(interactions.get(run.id) === undefined ? {} : { interaction: interactions.get(run.id)! }),
             ...(artifacts === undefined ? {} : { artifacts }),
+            ...(task === undefined ? {} : { task }),
+            ...(context === undefined ? {} : { context }),
           },
         }
       }),
@@ -224,6 +259,32 @@ export function groupArtifactsByRun(
   return grouped
 }
 
+/**
+ * Indexes the tasks of a world by the runs that worked on them.
+ *
+ * `task_runs` is the one durable statement that a run belonged to a task. It
+ * names the runs directly (`agentRunIds`) and the turn they ran in; both keys
+ * are kept because a run recorded before the id list was complete is still
+ * reachable through its turn. A task row that no longer exists yields no
+ * link — the trace never names a task it cannot show.
+ */
+export function groupTasksByRun(
+  tasks: readonly Pick<WorkTask, 'id' | 'title'>[],
+  runs: readonly Pick<TaskRun, 'taskId' | 'workTurnId' | 'agentRunIds'>[],
+): { byRun: Map<string, WorldTraceTaskRef>; byTurn: Map<string, WorldTraceTaskRef> } {
+  const titles = new Map(tasks.map((task) => [task.id, task.title]))
+  const byRun = new Map<string, WorldTraceTaskRef>()
+  const byTurn = new Map<string, WorldTraceTaskRef>()
+  for (const run of runs) {
+    const title = titles.get(run.taskId)
+    if (title === undefined) continue
+    const reference: WorldTraceTaskRef = { id: run.taskId, title }
+    byTurn.set(run.workTurnId, reference)
+    for (const agentRunId of run.agentRunIds) byRun.set(agentRunId, reference)
+  }
+  return { byRun, byTurn }
+}
+
 export function createWorldTraceRegistry(): WorldTraceAdapterRegistry {
   const registry = new WorldTraceAdapterRegistry()
   registry.register(new AgentRunTraceAdapter())
@@ -284,6 +345,7 @@ function traceSearchText(entry: WorldTraceEntry, actorNames: ReadonlyMap<string,
     entry.summary,
     entry.detail,
     entry.reasoningSummary,
+    entry.taskTitle,
     entry.actorId === undefined ? undefined : actorNames.get(entry.actorId),
     entry.modelId,
     entry.provider,

@@ -24,7 +24,9 @@ export class RuntimeEventTraceAdapter implements WorldTraceAdapter<'runtime-even
       summary: presentation.summary,
       actorId: value.actorId,
       sessionId: value.sessionId,
-      ...(value.workTurnId === undefined ? {} : { taskId: `turn:${value.workTurnId}`, workTurnId: value.workTurnId }),
+      // A live envelope knows its turn, not its task. The durable projection
+      // adds the task once `task_runs` records the run; nothing is guessed here.
+      ...(value.workTurnId === undefined ? {} : { workTurnId: value.workTurnId }),
       ...(durableRunId === undefined ? {} : { runId: durableRunId }),
       sourceKind: 'agent-run',
       sourceId: runId,

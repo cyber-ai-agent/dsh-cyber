@@ -3821,6 +3821,19 @@ export class SqliteStore {
     return row === undefined ? undefined : mapContextSnapshot(row)
   }
 
+  /**
+   * Every run snapshot of a world, keyed by run.
+   *
+   * One read for a read model that walks all of a world's runs at once (the
+   * trace); asking per run would put thousands of statements on the chat path.
+   */
+  listWorldAgentRunContextSnapshots(worldId: string): Array<{ agentRunId: string; snapshot: ContextSnapshot }> {
+    const rows = this.database
+      .prepare('SELECT * FROM agent_run_context_snapshots WHERE world_id = ? ORDER BY created_at, rowid')
+      .all(worldId) as Array<Record<string, unknown>>
+    return rows.map((row) => ({ agentRunId: String(row.agent_run_id), snapshot: mapContextSnapshot(row) }))
+  }
+
   /** The prefix hash of the previous run of this character in this conversation. */
   #previousStablePrefixHash(run: AgentRun): string | undefined {
     const row = this.database

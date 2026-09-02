@@ -16,7 +16,6 @@ export class SkillActionTraceAdapter implements WorldTraceAdapter<'skill-action'
       ...(value.detail.trim() ? { detail: value.detail } : {}),
       actorId: value.characterId,
       skillId: value.skillId,
-      taskId: value.id,
       sourceKind: 'skill-action',
       sourceId: value.id,
       createdAt: value.createdAt,

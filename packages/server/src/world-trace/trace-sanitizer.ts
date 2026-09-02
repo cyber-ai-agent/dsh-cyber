@@ -39,11 +39,15 @@ export class TraceSanitizer {
       artifactId: this.text(artifact.artifactId, 160),
       title: this.text(artifact.title, 200) || '未命名产物',
     }))
+    // A task title is owner-typed and reaches the card verbatim, like an
+    // artifact title. The id stays untouched: it is what a filter matches on.
+    const taskTitle = entry.taskTitle === undefined ? undefined : this.text(entry.taskTitle, 160)
     const {
       detail: _originalDetail,
       reasoningSummary: _originalReasoning,
       tools: _originalTools,
       artifacts: _originalArtifacts,
+      taskTitle: _originalTaskTitle,
       ...rest
     } = entry
     return {
@@ -53,6 +57,7 @@ export class TraceSanitizer {
       ...(reasoningSummary === undefined || reasoningSummary.length === 0 ? {} : { reasoningSummary }),
       ...(tools === undefined ? {} : { tools }),
       ...(artifacts === undefined ? {} : { artifacts }),
+      ...(taskTitle === undefined || taskTitle.length === 0 ? {} : { taskTitle }),
     }
   }
 
