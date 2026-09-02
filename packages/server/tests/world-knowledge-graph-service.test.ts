@@ -158,6 +158,24 @@ describe('strict knowledge extraction', () => {
     expect(parsed.claims.map((claim) => claim.key)).toEqual(['good'])
   })
 
+  it('rejects a root that declares no evidence instead of a false empty success', () => {
+    expect(() => parseKnowledgeExtraction({}, { sourceType: 'conversation', sourceId: 'session-a', evidence: evidenceInput }))
+      .toThrowError(KnowledgeExtractionError)
+  })
+
+  it('fails the batch for a malformed relation but still drops only a dangling edge', () => {
+    const context = { sourceType: 'conversation' as const, sourceId: 'session-a', evidence: evidenceInput }
+    const base = {
+      entities: [{ key: 'lin', type: 'character', canonicalName: '林澈', aliases: [], evidenceRefs: ['evidence-a'] }],
+      claims: [],
+      evidenceRefs: [{ sourceType: 'conversation', sourceId: 'session-a', evidenceId: 'evidence-a' }],
+    }
+    expect(() => parseKnowledgeExtraction({ ...base, relations: [{ key: 'r1', fromKey: 'lin', toKey: 'lin', predicate: '关联', confidence: '很高', evidenceRefs: ['evidence-a'] }] }, context))
+      .toThrowError(KnowledgeExtractionError)
+    const dangling = parseKnowledgeExtraction({ ...base, relations: [{ key: 'r1', fromKey: 'lin', toKey: 'ghost', predicate: '关联', confidence: 0.5, evidenceRefs: ['evidence-a'] }] }, context)
+    expect(dangling.relations).toEqual([])
+  })
+
   it('demotes a dangling objectKey to text and prefers the entity pointer over prose', () => {
     const claimContext = { sourceType: 'conversation' as const, sourceId: 'session-a', evidence: evidenceInput }
     const shape = (extra: Record<string, unknown>) => ({
@@ -435,6 +453,68 @@ describe('knowledge consolidation lifecycle', () => {
     await service.runNext()
     expect(calls).toBe(1)
     expect(jobs[0]?.status).toBe('failed')
+  })
+})
+
+describe('consolidation false-success guards', () => {
+  it('fails the job when the model answers a root with no evidence, rather than completing empty', async () => {
+    const jobs: KnowledgeConsolidationJob[] = [{
+      id: 'job-empty-root', workspaceId: 'workspace-a', worldId: 'world-a', sourceType: 'conversation', sourceId: 'session-a',
+      fromCursor: 0, toCursor: 1, status: 'queued', attempt: 0,
+      createdAt: '2026-08-26T00:00:00.000Z', updatedAt: '2026-08-26T00:00:00.000Z',
+    }]
+    const base = graphRepository()
+    const repository = {
+      ...base,
+      listConsolidationJobs: () => jobs.filter((job) => job.status === 'queued'),
+      claimConsolidationJob: (jobId: string) => { const job = jobs.find((item) => item.id === jobId); if (job === undefined || job.status !== 'queued') return undefined; job.status = 'running'; job.attempt += 1; return job },
+      applyKnowledgeExtraction: () => undefined,
+      completeConsolidationJob: () => { jobs[0]!.status = 'completed'; return jobs[0]! },
+      failConsolidationJob: (input: { jobId: string; errorCode: string }) => { const job = jobs.find((item) => item.id === input.jobId)!; job.status = 'failed'; job.errorCode = input.errorCode; return job },
+    } satisfies KnowledgeConsolidationRepository
+    let calls = 0
+    const service = new WorldKnowledgeConsolidationService({
+      repository,
+      sources: { async load() { return { workspaceId: 'workspace-a', worldId: 'world-a', sourceType: 'conversation', sourceId: 'session-a', fromCursor: 0, toCursor: 1, items: [{ kind: 'user', text: '事实。', evidence: { evidenceId: 'evidence-a', sourceType: 'conversation', sourceId: 'session-a', excerpt: '事实。', worldId: 'world-a', workspaceId: 'workspace-a', sessionId: 'session-a', messageId: 'message-a', sequence: 1 } }] } } },
+      extractor: { async extract() { calls += 1; return { payload: '{}' } } },
+    })
+    await service.runNext()
+    expect(calls).toBe(2) // one corrective retry, still unusable
+    expect(jobs[0]?.status).toBe('failed')
+    expect(jobs[0]?.errorCode).toBe('extraction_field_required')
+  })
+
+  it('clips an oversized first item into the declared request budget', async () => {
+    const jobs: KnowledgeConsolidationJob[] = [{
+      id: 'job-oversize', workspaceId: 'workspace-a', worldId: 'world-a', sourceType: 'conversation', sourceId: 'session-a',
+      fromCursor: 0, toCursor: 1, status: 'queued', attempt: 0,
+      createdAt: '2026-08-26T00:00:00.000Z', updatedAt: '2026-08-26T00:00:00.000Z',
+    }]
+    const base = graphRepository()
+    let completedCursor: number | undefined
+    const repository = {
+      ...base,
+      listConsolidationJobs: () => jobs.filter((job) => job.status === 'queued'),
+      claimConsolidationJob: (jobId: string) => { const job = jobs.find((item) => item.id === jobId); if (job === undefined || job.status !== 'queued') return undefined; job.status = 'running'; return job },
+      applyKnowledgeExtraction: () => undefined,
+      completeConsolidationJob: (input: { jobId: string; toCursor?: number }) => { completedCursor = input.toCursor; jobs[0]!.status = 'completed'; return jobs[0]! },
+      failConsolidationJob: () => { jobs[0]!.status = 'failed'; return jobs[0]! },
+    } satisfies KnowledgeConsolidationRepository
+    let sentText = ''
+    const service = new WorldKnowledgeConsolidationService({
+      repository,
+      sources: { async load() { return { workspaceId: 'workspace-a', worldId: 'world-a', sourceType: 'conversation', sourceId: 'session-a', fromCursor: 0, toCursor: 1, items: [{ kind: 'user', text: '話'.repeat(16_000), evidence: { evidenceId: 'evidence-a', sourceType: 'conversation', sourceId: 'session-a', excerpt: '話', worldId: 'world-a', workspaceId: 'workspace-a', sessionId: 'session-a', messageId: 'message-a', sequence: 1 } }] } } },
+      extractor: {
+        async extract(request) {
+          sentText = request.visibleText
+          return { entities: [], claims: [], relations: [], evidenceRefs: [{ sourceType: 'conversation' as const, sourceId: 'session-a', evidenceId: 'evidence-a' }] }
+        },
+      },
+    })
+    await service.runNext()
+    expect(Array.from(sentText).length).toBeLessThanOrEqual(16_000)
+    expect(jobs[0]?.status).toBe('completed')
+    expect(completedCursor).toBe(1)
   })
 })
 

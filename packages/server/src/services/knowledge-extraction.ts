@@ -149,8 +149,12 @@ export function parseKnowledgeExtraction(
 ): KnowledgeExtraction {
   const payload = typeof value === 'string' ? parseJson(value) : value
   const root = strictRecord(payload, '根对象')
-  // A model that found nothing in a category tends to omit the key entirely;
-  // absent collections read as empty rather than failing the batch.
+  // Explicit root contract. A response that declares no evidenceRefs is not a
+  // legitimate empty result but an unusable answer: without this check, `{}`
+  // would parse as zero facts and the job would complete as a false success.
+  // Omitting entities/claims/relations when a category is genuinely empty is
+  // still tolerated.
+  if (!('evidenceRefs' in root)) throw invalid('extraction_field_required', '抽取结果缺少 evidenceRefs')
   const allowedEvidence = new Map<string, KnowledgeExtractionEvidenceRef>()
   for (const evidence of context.evidence) {
     if (evidence.worldId.trim() === '' || evidence.workspaceId.trim() === '') throw invalid('evidence_scope_invalid', '证据缺少世界或工作区边界')
@@ -269,27 +273,23 @@ function buildClaim(item: unknown, entityKeys: Set<string>, refs: readonly Knowl
 function parseRelations(value: unknown, entityKeys: Set<string>, refs: readonly KnowledgeExtractionEvidenceRef[]): KnowledgeExtractionRelation[] {
   const items = strictArray(value ?? [], 'relations', KNOWLEDGE_EXTRACTION_LIMITS.maxRelations)
   const output = items.flatMap((item) => {
-    try {
-      const record = strictRecord(item, '关系')
-      const keyShape = 'fromKey' in record
-      exactKeys(record, keyShape ? ['key', 'fromKey', 'toKey', 'predicate', 'confidence', 'evidenceRefs'] : ['from', 'to', 'predicate', 'confidence', 'evidenceRefs'], '关系')
-      const fromKey = text(keyShape ? record.fromKey : record.from, keyShape ? 'fromKey' : 'from', 120)
-      const toKey = text(keyShape ? record.toKey : record.to, keyShape ? 'toKey' : 'to', 120)
-      // A relation across entities the batch never declared is unusable; drop
-      // the single edge rather than the batch.
-      if (!entityKeys.has(fromKey) || !entityKeys.has(toKey)) return []
-      return [{
-        key: text(keyShape ? record.key : fromKey + ':' + text(record.predicate, 'predicate', KNOWLEDGE_EXTRACTION_LIMITS.maxPredicateChars) + ':' + toKey, 'key', 120),
-        fromKey,
-        toKey,
-        predicate: text(record.predicate, 'predicate', KNOWLEDGE_EXTRACTION_LIMITS.maxPredicateChars),
-        confidence: confidence(record.confidence),
-        evidenceRefs: refKeys(record.evidenceRefs, refs),
-      }]
-    } catch (error) {
-      if (error instanceof KnowledgeExtractionError) return []
-      throw error
-    }
+    const record = strictRecord(item, '关系')
+    const keyShape = 'fromKey' in record
+    exactKeys(record, keyShape ? ['key', 'fromKey', 'toKey', 'predicate', 'confidence', 'evidenceRefs'] : ['from', 'to', 'predicate', 'confidence', 'evidenceRefs'], '关系')
+    const fromKey = text(keyShape ? record.fromKey : record.from, keyShape ? 'fromKey' : 'from', 120)
+    const toKey = text(keyShape ? record.toKey : record.to, keyShape ? 'toKey' : 'to', 120)
+    // The only designed skip: an edge across entities the batch never
+    // declared. Shape, confidence and evidence problems still fail the batch
+    // visibly, so a malformed relation cannot hide as a completed job.
+    if (!entityKeys.has(fromKey) || !entityKeys.has(toKey)) return []
+    return [{
+      key: text(keyShape ? record.key : fromKey + ':' + text(record.predicate, 'predicate', KNOWLEDGE_EXTRACTION_LIMITS.maxPredicateChars) + ':' + toKey, 'key', 120),
+      fromKey,
+      toKey,
+      predicate: text(record.predicate, 'predicate', KNOWLEDGE_EXTRACTION_LIMITS.maxPredicateChars),
+      confidence: confidence(record.confidence),
+      evidenceRefs: refKeys(record.evidenceRefs, refs),
+    }]
   })
   unique(output.map((item) => item.key), '关系 key')
   return output

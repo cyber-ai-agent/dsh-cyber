@@ -467,12 +467,16 @@ function fitBatchToBudget(items: readonly KnowledgeVisibleSourceItem[]): { visib
   let consumedThrough: number | undefined
   let chars = 0
   for (const item of items.slice(0, KNOWLEDGE_CONSOLIDATION_THRESHOLDS.maxMessages)) {
-    const line = item.kind + '：' + item.text.trim()
+    let line = item.kind + '：' + item.text.trim()
     const cost = Array.from(line).length + (lines.length > 0 ? 1 : 0)
     if (lines.length > 0 && chars + cost > KNOWLEDGE_CONSOLIDATION_THRESHOLDS.maxCharacters) break
+    // Explicit policy for an oversized first item: the request must never
+    // exceed the declared budget, so the very first line is clipped to it.
+    // Every other item is deferred whole and re-offered by the next job.
+    if (lines.length === 0) line = Array.from(line).slice(0, KNOWLEDGE_CONSOLIDATION_THRESHOLDS.maxCharacters).join('')
     lines.push(line)
     evidence.push(item.evidence)
-    chars += cost
+    chars += Math.min(cost, KNOWLEDGE_CONSOLIDATION_THRESHOLDS.maxCharacters)
     if (item.evidence.sequence !== undefined) consumedThrough = item.evidence.sequence
   }
   return { visibleText: lines.join('\n'), evidence, consumedThrough }
