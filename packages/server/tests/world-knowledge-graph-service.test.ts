@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   WorldKnowledgeGraphRetrievalService,
   WorldKnowledgeGraphService,
+  knowledgeRetrievalQueries,
   type KnowledgeGraphClaim,
   type KnowledgeGraphEntity,
   type KnowledgeGraphEvidence,
@@ -368,6 +369,44 @@ describe('knowledge consolidation lifecycle', () => {
     expect(completedCursor! * 900).toBeLessThanOrEqual(16_000 + 900)
   })
 
+  it('runs one pass across distinct worlds in parallel but keeps a world serial', async () => {
+    const jobs: KnowledgeConsolidationJob[] = [
+      { id: 'job-w1a', workspaceId: 'workspace-a', worldId: 'world-a', sourceType: 'conversation', sourceId: 'session-a', fromCursor: 0, toCursor: 1, status: 'queued', attempt: 0, createdAt: '2026-08-26T00:00:00.000Z', updatedAt: '2026-08-26T00:00:00.000Z' },
+      { id: 'job-w2', workspaceId: 'workspace-a', worldId: 'world-b', sourceType: 'conversation', sourceId: 'session-b', fromCursor: 0, toCursor: 1, status: 'queued', attempt: 0, createdAt: '2026-08-26T00:00:00.000Z', updatedAt: '2026-08-26T00:00:00.000Z' },
+      { id: 'job-w1b', workspaceId: 'workspace-a', worldId: 'world-a', sourceType: 'conversation', sourceId: 'session-a2', fromCursor: 0, toCursor: 1, status: 'queued', attempt: 0, createdAt: '2026-08-26T00:00:00.000Z', updatedAt: '2026-08-26T00:00:00.000Z' },
+    ]
+    const base = graphRepository()
+    const repository = {
+      ...base,
+      listConsolidationJobs: () => jobs.filter((job) => job.status === 'queued'),
+      claimConsolidationJob: (jobId: string) => { const job = jobs.find((item) => item.id === jobId); if (job === undefined || job.status !== 'queued') return undefined; job.status = 'running'; return job },
+      applyKnowledgeExtraction: () => undefined,
+      completeConsolidationJob: ({ jobId }: { jobId: string }) => { const job = jobs.find((item) => item.id === jobId)!; job.status = 'completed'; return job },
+      failConsolidationJob: ({ jobId }: { jobId: string }) => { const job = jobs.find((item) => item.id === jobId)!; job.status = 'failed'; return job },
+    } satisfies KnowledgeConsolidationRepository
+    const service = new WorldKnowledgeConsolidationService({
+      repository,
+      sources: { async load(input) {
+        const worldId = input.worldId
+        const sessionId = input.sourceId
+        return { workspaceId: 'workspace-a', worldId, sourceType: 'conversation', sourceId: sessionId, fromCursor: 0, toCursor: 1, items: [{ kind: 'user', text: '事实。', evidence: { evidenceId: 'evidence-x', sourceType: 'conversation', sourceId: sessionId, excerpt: '事实。', worldId, workspaceId: 'workspace-a', sessionId, messageId: 'message-x', sequence: 1 } }] }
+      } },
+      extractor: {
+        async extract(request) {
+          return { entities: [], claims: [], relations: [], evidenceRefs: request.evidence.map((item) => ({ sourceType: 'conversation' as const, sourceId: request.sourceId, evidenceId: 'evidence-x' })) }
+        },
+      },
+    })
+    await service.runNext()
+    // world-a and world-b advanced together; the second world-a job waits for
+    // the next pass so one world never runs two model calls at once.
+    expect(jobs[0]?.status).toBe('completed')
+    expect(jobs[1]?.status).toBe('completed')
+    expect(jobs[2]?.status).toBe('queued')
+    await service.runNext()
+    expect(jobs[2]?.status).toBe('completed')
+  })
+
   it('never retries a transport failure into a second model call', async () => {
     const jobs: KnowledgeConsolidationJob[] = [{
       id: 'job-transport', workspaceId: 'workspace-a', worldId: 'world-a', sourceType: 'conversation', sourceId: 'session-a',
@@ -396,5 +435,21 @@ describe('knowledge consolidation lifecycle', () => {
     await service.runNext()
     expect(calls).toBe(1)
     expect(jobs[0]?.status).toBe('failed')
+  })
+})
+
+describe('knowledge retrieval queries', () => {
+  it('keeps the phrase and adds ASCII words and CJK terms', () => {
+    const terms = knowledgeRetrievalQueries('请分析 NVDA 与英伟达在2026年的供货合同，包括 TSMC 的产能')
+    expect(terms[0]).toContain('请分析')
+    expect(terms).toContain('NVDA')
+    expect(terms).toContain('TSMC')
+    expect(terms.some((term) => term.length >= 2 && '英伟达'.includes(term))).toBe(true)
+    expect(terms.length).toBeLessThanOrEqual(9)
+  })
+
+  it('keeps a short query as a single phrase match', () => {
+    expect(knowledgeRetrievalQueries('林澈')).toEqual(['林澈'])
+    expect(knowledgeRetrievalQueries('')).toEqual([])
   })
 })

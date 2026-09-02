@@ -116,6 +116,8 @@ export interface KnowledgeConsolidationServiceOptions {
   sources: KnowledgeSourceLoader
   clock?: () => string
   idFactory?: () => string
+  /** Concurrent jobs per pass across distinct worlds (1-4, default 2). */
+  maxParallel?: number
   onChanged?: (worldId: string, payload: Record<string, unknown>) => void
   onModelInteraction?: (interaction: KnowledgeModelInteraction) => void
 }
@@ -126,6 +128,7 @@ export class WorldKnowledgeConsolidationService {
   readonly #sources: KnowledgeSourceLoader
   readonly #clock: () => string
   readonly #idFactory: () => string
+  readonly #maxParallel: number
   readonly #onChanged?: KnowledgeConsolidationServiceOptions['onChanged']
   readonly #onModelInteraction?: KnowledgeConsolidationServiceOptions['onModelInteraction']
   #timer: ReturnType<typeof setInterval> | undefined
@@ -137,6 +140,9 @@ export class WorldKnowledgeConsolidationService {
     this.#sources = options.sources
     this.#clock = options.clock ?? (() => new Date().toISOString())
     this.#idFactory = options.idFactory ?? randomUUID
+    this.#maxParallel = options.maxParallel === undefined || !Number.isFinite(options.maxParallel)
+      ? 2
+      : Math.min(4, Math.max(1, Math.floor(options.maxParallel)))
     this.#onChanged = options.onChanged
     this.#onModelInteraction = options.onModelInteraction
   }
@@ -255,9 +261,37 @@ export class WorldKnowledgeConsolidationService {
   }
 
   /**
-   * A scheduler calls this method from the background. The HTTP request only
-   * creates a queued row and never waits for model extraction.
+  /**
+   * A scheduler calls this from the background. The HTTP request only creates
+   * a queued row and never waits for model extraction.
+   *
+   * Each pass runs up to `maxParallel` jobs concurrently, at most one per
+   * world: one slow gateway may no longer stall every other world, while a
+   * single world keeps its cursor order.
    */
+  async runNext(): Promise<KnowledgeConsolidationJob | undefined> {
+    if (this.#running) return undefined
+    this.#running = true
+    try {
+      const queued = this.#repository.listConsolidationJobs === undefined
+        ? []
+        : await this.#repository.listConsolidationJobs({ status: 'queued', limit: 16 })
+      const picked: string[] = []
+      const worlds = new Set<string>()
+      for (const job of queued) {
+        if (picked.length >= this.#maxParallel) break
+        if (worlds.has(job.worldId)) continue
+        worlds.add(job.worldId)
+        picked.push(job.id)
+      }
+      if (picked.length === 0) return undefined
+      const results = await Promise.all(picked.map((jobId) => this.runJob(jobId)))
+      return results[0]
+    } finally {
+      this.#running = false
+    }
+  }
+
   start(intervalMs = 1_000): void {
     if (this.#timer !== undefined) return
     this.#timer = setInterval(() => { void this.runNext() }, Math.max(250, intervalMs))
@@ -274,21 +308,6 @@ export class WorldKnowledgeConsolidationService {
     return this.#repository.recoverRunningConsolidationJobs === undefined
       ? 0
       : await this.#repository.recoverRunningConsolidationJobs()
-  }
-
-  async runNext(): Promise<KnowledgeConsolidationJob | undefined> {
-    if (this.#running) return undefined
-    this.#running = true
-    try {
-      const jobs = this.#repository.listConsolidationJobs === undefined
-        ? []
-        : await this.#repository.listConsolidationJobs({ status: 'queued', limit: 1 })
-      const first = jobs[0]
-      if (first === undefined) return undefined
-      return await this.runJob(first.id)
-    } finally {
-      this.#running = false
-    }
   }
 
   async runJob(jobId: string): Promise<KnowledgeConsolidationJob | undefined> {
