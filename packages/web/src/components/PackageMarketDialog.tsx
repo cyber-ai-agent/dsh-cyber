@@ -20,6 +20,7 @@ import type {
   CyberMarketPackage,
   CharacterGeneratorPublishResult,
   WorldGeneratorPublishResult,
+  SkinGeneratorPublishResult,
   CyberPackageManifest,
   InstalledPackage,
   PackageInstallTransaction,
@@ -36,6 +37,9 @@ const CharacterGenerator = lazy(async () => ({
 const WorldGenerator = lazy(async () => ({
   default: (await import('./world-generator/WorldGenerator.js')).WorldGenerator,
 }))
+const SkinGenerator = lazy(async () => ({
+  default: (await import('./skin-generator/SkinGenerator.js')).SkinGenerator,
+}))
 
 // Official skin packages point at the same host-registered scene used by the
 // world switcher. The package catalog remains the source of truth for which
@@ -46,7 +50,7 @@ const MARKET_SKIN_PREVIEW_IMAGES: Record<string, string> = {
   'orca-link': '/assets/skins/orca-bridge-night.png',
   'cyber-company': '/assets/cyber-office-world-clean.png',
   'moonlit-tavern': '/assets/moonlit-tavern-world.png',
-  'sakura-shrine': '/assets/skins/sakura-shrine-world.jpg',
+  'sakura-shrine': '/assets/skins/sakura-shrine-world.webp',
   'starlit-witch': '/assets/skins/starlit-witch-world.jpg',
   'neon-cyber': '/assets/skins/neon-cyber-world.jpg',
   'white-whale': '/assets/skins/white-whale-maiden.jpg',
@@ -75,6 +79,7 @@ interface PackageMarketDialogProps {
   onRecruitTalent(item: CyberMarketPackage): Promise<void>
   onCharacterPublished?(result: CharacterGeneratorPublishResult): Promise<void> | void
   onWorldPublished?(result: WorldGeneratorPublishResult): Promise<void> | void
+  onSkinPublished?(result: SkinGeneratorPublishResult): Promise<void> | void
   onUsePlugin(command: string): void
   onPreview(manifest: CyberPackageManifest): Promise<PackagePermissionPreview>
   onInstall(input: { manifest: CyberPackageManifest; sourceDirectory: string; approvalToken: string }): Promise<void>
@@ -87,6 +92,8 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
   const restoreCustomRoleFocusRef = useRef(false)
   const customWorldButtonRef = useRef<HTMLButtonElement | null>(null)
   const restoreCustomWorldFocusRef = useRef(false)
+  const customSkinButtonRef = useRef<HTMLButtonElement | null>(null)
+  const restoreCustomSkinFocusRef = useRef(false)
   const marketMeta: Record<CyberMarketKind, { label: string; description: string }> = useMemo(() => ({
     theme: { label: t('workbench.marketTabTheme', '世界'), description: t('workbench.marketTabThemeDesc', '选择完整场景皮肤、空间设定和起始角色，创建彼此独立的新世界。') },
     talent: { label: t('workbench.marketTabTalent', '角色'), description: t('workbench.marketTabTalentDesc', '安装不同世界观与专长的角色模板，再把角色招募到兼容世界。') },
@@ -107,8 +114,9 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
   const [confirmingUninstall, setConfirmingUninstall] = useState<string>()
   const [customRoleOpen, setCustomRoleOpen] = useState(false)
   const [customWorldOpen, setCustomWorldOpen] = useState(false)
+  const [customSkinOpen, setCustomSkinOpen] = useState(false)
   const [generatorCloseRequest, setGeneratorCloseRequest] = useState(0)
-  const generatorOpen = customRoleOpen || customWorldOpen
+  const generatorOpen = customRoleOpen || customWorldOpen || customSkinOpen
   const selectedCurrent = selected === undefined
     ? undefined
     : props.items.find((item) => item.manifest.id === selected.manifest.id && item.manifest.version === selected.manifest.version) ?? selected
@@ -134,6 +142,7 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
     setCreatingWorldFor(undefined)
     setCustomRoleOpen(false)
     setCustomWorldOpen(false)
+    setCustomSkinOpen(false)
     setGeneratorCloseRequest(0)
   }, [props.initialMarket])
 
@@ -146,6 +155,7 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
     setCreatingWorldFor(undefined)
     setCustomRoleOpen(false)
     setCustomWorldOpen(false)
+    setCustomSkinOpen(false)
     setGeneratorCloseRequest(0)
     void props.onSearch(next, '')
   }
@@ -204,6 +214,36 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
     setPreview(undefined)
     setApproved(false)
     setCustomWorldOpen(false)
+    setGeneratorCloseRequest(0)
+  }
+
+  // 皮肤 → 自定义皮肤: the third generator, same open/close contract.
+  const openCustomSkinGenerator = () => {
+    setError(undefined)
+    setGeneratorCloseRequest(0)
+    setCustomSkinOpen(true)
+  }
+
+  const closeCustomSkinGenerator = () => {
+    setCustomSkinOpen(false)
+    setGeneratorCloseRequest(0)
+    restoreCustomSkinFocusRef.current = true
+  }
+
+  useEffect(() => {
+    if (customSkinOpen || !restoreCustomSkinFocusRef.current) return
+    restoreCustomSkinFocusRef.current = false
+    customSkinButtonRef.current?.focus()
+  }, [customSkinOpen, market])
+
+  const completeCustomSkinPublish = async (result: SkinGeneratorPublishResult) => {
+    if (props.onSkinPublished !== undefined) await props.onSkinPublished(result)
+    else await props.onSearch('skin', query)
+    setMarket('skin')
+    setSelected(undefined)
+    setPreview(undefined)
+    setApproved(false)
+    setCustomSkinOpen(false)
     setGeneratorCloseRequest(0)
   }
 
@@ -292,8 +332,8 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && closeDialog()}>
       <section ref={dialogRef} className={`package-market-dialog package-market-dialog--catalog${generatorOpen ? ' is-character-generator' : ''}`} role="dialog" aria-modal="true" aria-labelledby="package-market-title" aria-describedby="package-market-subtitle">
         <header className="dialog-header package-market-header">
-          <div><h2 id="package-market-title">{customRoleOpen ? t('characterGenerator.title', '自定义角色') : customWorldOpen ? t('worldGenerator.title', '自定义世界') : t('workbench.marketTitle', '扩展市场')}</h2><p id="package-market-subtitle">{customRoleOpen ? t('characterGenerator.subtitle', '把一段角色描述整理成可审阅、可安装的角色模板。') : customWorldOpen ? t('worldGenerator.subtitle', '把一段场景描述整理成可审阅、可安装的世界主题包。') : t('workbench.marketSubtitle', '先选择世界，再发现角色与插件。所有内容经过完整性校验和事务安装。')}</p></div>
-          <button className="icon-button" type="button" data-dialog-initial-focus aria-label={customRoleOpen ? t('characterGenerator.close', '关闭自定义角色') : customWorldOpen ? t('worldGenerator.close', '关闭自定义世界') : t('workbench.cancel', '关闭市场')} onClick={closeDialog}><X size={18} aria-hidden="true" /></button>
+          <div><h2 id="package-market-title">{customRoleOpen ? t('characterGenerator.title', '自定义角色') : customWorldOpen ? t('worldGenerator.title', '自定义世界') : customSkinOpen ? t('skinGenerator.title', '自定义皮肤') : t('workbench.marketTitle', '扩展市场')}</h2><p id="package-market-subtitle">{customRoleOpen ? t('characterGenerator.subtitle', '把一段角色描述整理成可审阅、可安装的角色模板。') : customWorldOpen ? t('worldGenerator.subtitle', '把一段场景描述整理成可审阅、可安装的世界主题包。') : customSkinOpen ? t('skinGenerator.subtitle', '把一段风格描述整理成可审阅、可安装的皮肤包。') : t('workbench.marketSubtitle', '先选择世界，再发现角色与插件。所有内容经过完整性校验和事务安装。')}</p></div>
+          <button className="icon-button" type="button" data-dialog-initial-focus aria-label={customRoleOpen ? t('characterGenerator.close', '关闭自定义角色') : customWorldOpen ? t('worldGenerator.close', '关闭自定义世界') : customSkinOpen ? t('skinGenerator.close', '关闭自定义皮肤') : t('workbench.cancel', '关闭市场')} onClick={closeDialog}><X size={18} aria-hidden="true" /></button>
         </header>
         {customRoleOpen ? (
           <Suspense fallback={<div className="dialog-loading" role="status">{t('characterGenerator.opening', '正在打开角色创建器…')}</div>}>
@@ -312,6 +352,15 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
               closeRequest={generatorCloseRequest}
               onClose={closeCustomWorldGenerator}
               onPublished={completeCustomWorldPublish}
+            />
+          </Suspense>
+        ) : customSkinOpen ? (
+          <Suspense fallback={<div className="dialog-loading" role="status">{t('skinGenerator.opening', '正在打开皮肤创建器…')}</div>}>
+            <SkinGenerator
+              workspaceId={props.workspaceId}
+              closeRequest={generatorCloseRequest}
+              onClose={closeCustomSkinGenerator}
+              onPublished={completeCustomSkinPublish}
             />
           </Suspense>
         ) : (
@@ -339,6 +388,7 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
               </form>
               {market === 'talent' ? <button ref={customRoleButtonRef} className="market-custom-role-button" type="button" onClick={openCustomRoleGenerator}><UserPlus size={17} aria-hidden="true" />{t('characterGenerator.title', '自定义角色')}</button> : null}
               {market === 'theme' ? <button ref={customWorldButtonRef} className="market-custom-role-button" type="button" onClick={openCustomWorldGenerator}><Buildings size={17} aria-hidden="true" />{t('worldGenerator.title', '自定义世界')}</button> : null}
+              {market === 'skin' ? <button ref={customSkinButtonRef} className="market-custom-role-button" type="button" onClick={openCustomSkinGenerator}><Palette size={17} aria-hidden="true" />{t('skinGenerator.title', '自定义皮肤')}</button> : null}
             </div>
             {error === undefined ? null : <div className="package-error" role="alert"><Warning size={16} />{error}</div>}
             {props.loading ? <div className="dialog-empty">{t('workbench.marketCheckingLocal', '正在校验本地市场目录…')}</div> : props.items.length === 0 ? (

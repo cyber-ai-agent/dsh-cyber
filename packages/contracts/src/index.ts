@@ -248,6 +248,24 @@ export interface CyberPackageManifest {
   }
 }
 
+/**
+ * Declaration-only colour palette a skin package may carry.
+ *
+ * Six `#rrggbb` colours and one bounded opacity. The host derives every other
+ * visual token from these; a package cannot name a CSS function, a URL, an
+ * image or a stylesheet here, so a skin never carries executable state.
+ */
+export interface CyberSkinPaletteV1 {
+  accentColor: string
+  pageBackground: string
+  panelBackground: string
+  textColor: string
+  ownerBubbleColor: string
+  characterBubbleColor: string
+  /** Conversation backdrop opacity, 0.2–1. */
+  backdropOpacity: number
+}
+
 /** Declaration-only metadata for an installable workspace skin. */
 export interface CyberSkinManifestV1 {
   schemaVersion: 1
@@ -258,6 +276,17 @@ export interface CyberSkinManifestV1 {
   summary: string
   /** Optional package-local preview image, relative to the package root. */
   previewAsset?: string
+  /**
+   * Optional declared palette. Official skins bind a host-registered theme by
+   * `themeId` alone; a generated skin declares its palette and the host
+   * registers the theme from it on install.
+   */
+  palette?: CyberSkinPaletteV1
+  /**
+   * Optional official skin whose bundled scene is reused as the conversation
+   * backdrop. A host-resolved id from a closed list, never a path or URL.
+   */
+  backdropSkinId?: string
 }
 
 export type CyberMarketKind = 'theme' | 'talent' | 'plugin' | 'skin'
@@ -1260,6 +1289,7 @@ export * from './prompt-safety.js'
 export * from './creative-workshop-draft.js'
 export * from './character-generator.js'
 export * from './world-generator.js'
+export * from './skin-generator.js'
 export * from './context-budget.js'
 export * from './context-envelope.js'
 export * from './prompt-cache.js'
