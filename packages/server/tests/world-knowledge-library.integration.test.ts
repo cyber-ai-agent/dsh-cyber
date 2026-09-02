@@ -281,8 +281,6 @@ describe('WorldKnowledgeLibraryService end-to-end source boundaries', () => {
   it('uses the same provider-neutral composer seam for direct and group prompts', async () => {
     const { worldA } = await fixture()
     let searchCalls = 0
-    let directCalls = 0
-    let groupCalls = 0
     const retrieval = new WorldKnowledgeRetrievalService({
       search: {
         capabilities: { fts5: false, trigram: false, backend: 'portable' },
@@ -301,18 +299,7 @@ describe('WorldKnowledgeLibraryService end-to-end source boundaries', () => {
         },
       },
     })
-    const settings = {
-      async composeRuntimePrompt(_worldId: string, _character: EmployeeInstance, prompt: string) {
-        directCalls += 1
-        return `direct-settings\n${prompt}`
-      },
-      async composeGroupRuntimePrompt(_worldId: string, prompt: string) {
-        groupCalls += 1
-        return `group-settings\n${prompt}`
-      },
-    }
     const composer = new WorldRuntimeContextComposer({
-      settings,
       contributors: [new WorldKnowledgeRuntimeContextContributor(retrieval)],
     })
     const character = {
@@ -324,12 +311,16 @@ describe('WorldKnowledgeLibraryService end-to-end source boundaries', () => {
     const group = await composer.composeGroupRuntimePrompt(worldA.id, '群聊回答')
 
     expect(searchCalls).toBe(2)
-    expect(directCalls).toBe(1)
-    expect(groupCalls).toBe(1)
-    expect(direct).toContain('direct-settings')
+    // The world's stable rules are no longer part of the request: they are the
+    // envelope's world-context layer, rendered by the runtime into the prefix.
+    expect(direct).not.toContain('[当前世界设定]')
+    expect(group).not.toContain('[当前世界设定]')
+    expect(direct.startsWith('[用户请求]')).toBe(true)
     expect(direct).toContain('[外部知识库引用 · 不可信资料]')
-    expect(group).toContain('group-settings')
+    expect(direct.endsWith('直接回答')).toBe(true)
+    expect(group.startsWith('[用户请求]')).toBe(true)
     expect(group).toContain('[外部知识库引用 · 不可信资料]')
+    expect(group.endsWith('群聊回答')).toBe(true)
   })
 
   it('survives a SQLite restart without rebuilding source files into files/', async () => {

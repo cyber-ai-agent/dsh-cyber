@@ -701,6 +701,31 @@ describe('Harness profile and adapter', () => {
     expect(closes).toBe(3)
   })
 
+  it('restarts an employee runtime when the persona it was started with changes', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-persona-'))
+    const personas: string[] = []
+    let closes = 0
+    const adapter = new HarnessCompatibilityAdapter({
+      stateRoot,
+      runtimeFactory(spec) {
+        personas.push(spec.revision.persona)
+        return { run: async () => ({ finalResponse: 'ok', notifications: [] }), close: async () => { closes += 1 } }
+      },
+    })
+    const edited = { ...revision(), persona: `${revision().persona}\n\n[当前世界设定]\n世界观：雨夜学院，结论必须附出处。` }
+    const base = { employee: employee(), conversationId: 'conversation-direct', history: [], observedThroughSequence: 0, workspacePath: stateRoot, permissionMode: 'read-only' as const }
+    await adapter.runEmployeeTurn({ ...base, revision: revision(), prompt: '第一轮' })
+    await adapter.runEmployeeTurn({ ...base, revision: revision(), prompt: '第二轮' })
+    // The persona is the system prompt of the lane's process, bound when it
+    // starts: a lane that kept running after the world rules or the persona
+    // changed would keep answering under the old ones.
+    await adapter.runEmployeeTurn({ ...base, revision: edited, prompt: '第三轮' })
+    expect(personas).toEqual([revision().persona, edited.persona])
+    expect(closes).toBe(1)
+    await adapter.close()
+    expect(closes).toBe(2)
+  })
+
   it('checks candidate Harness packages in an isolated profile without switching the active runtime', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-cyber-candidate-'))
     const candidateRoot = join(directory, 'candidate')
