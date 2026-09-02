@@ -4636,12 +4636,44 @@ export class SqliteStore {
            (SELECT COUNT(1) || '@' || COALESCE(MAX(created_at), '') FROM model_interaction_logs WHERE world_id = ?) AS interactions,
            (SELECT COUNT(1) || '@' || COALESCE(MAX(created_at), '') FROM world_artifact_versions WHERE world_id = ?) AS artifacts,
            (SELECT COUNT(1) || '@' || COALESCE(MAX(COALESCE(decided_at, created_at)), '') FROM approval_requests WHERE world_id = ?) AS approvals,
+           (SELECT COUNT(1) || '@' || COALESCE(MAX(updated_at), '') FROM knowledge_consolidation_jobs WHERE world_id = ?) AS consolidations,
            (SELECT COUNT(1) || '@' || COALESCE(MAX(updated_at), '') FROM employee_instances WHERE world_id = ?) AS employees`,
       )
-      .get(worldId, worldId, worldId, worldId, worldId, worldId, worldId, worldId) as Record<string, string | null>
-    return ['runs', 'events', 'messages', 'actions', 'interactions', 'artifacts', 'approvals', 'employees']
+      .get(worldId, worldId, worldId, worldId, worldId, worldId, worldId, worldId, worldId) as Record<string, string | null>
+    return ['runs', 'events', 'messages', 'actions', 'interactions', 'artifacts', 'approvals', 'consolidations', 'employees']
       .map((key) => String(row[key] ?? ''))
       .join('|')
+  }
+
+  /** Recent failed knowledge consolidation jobs, newest first (world trace source). */
+  listWorldConsolidationFailures(worldId: string, limit = 10): Array<{
+    id: string
+    sourceType: string
+    sourceId: string
+    errorCode?: string
+    attempt: number
+    updatedAt: string
+  }> {
+    return this.database
+      .prepare(
+        `SELECT id, source_type, source_id, error_code, attempt, updated_at
+         FROM knowledge_consolidation_jobs
+         WHERE world_id = ? AND status = 'failed'
+         ORDER BY updated_at DESC, id DESC
+         LIMIT ?`,
+      )
+      .all(worldId, limit)
+      .map((raw) => {
+        const row = raw as Record<string, string | number | null>
+        return {
+          id: String(row.id),
+          sourceType: String(row.source_type),
+          sourceId: String(row.source_id),
+          ...(typeof row.error_code === 'string' && row.error_code.length > 0 ? { errorCode: row.error_code } : {}),
+          attempt: Number(row.attempt ?? 0),
+          updatedAt: String(row.updated_at),
+        }
+      })
   }
 
   getActivePackage(workspaceId: string, packageId: string): InstalledPackage | undefined {

@@ -45,6 +45,16 @@ export interface AgentRunTraceFact {
   context?: ContextSnapshotSummary
 }
 
+export interface ConsolidationTraceFact {
+  worldId: string
+  jobId: string
+  sourceType: string
+  sourceId: string
+  errorCode?: string
+  attempt: number
+  updatedAt: string
+}
+
 export type WorldTraceFact =
   | { kind: 'agent-run'; value: AgentRunTraceFact }
   | { kind: 'domain-event'; value: DomainEvent }
@@ -52,6 +62,7 @@ export type WorldTraceFact =
   | { kind: 'skill-action'; value: CharacterSkillAction }
   | { kind: 'conversation'; value: { worldId: string; session: WorkSession; message: WorkMessage } }
   | { kind: 'scheduled-run'; value: ScheduledRunTraceFact }
+  | { kind: 'consolidation'; value: ConsolidationTraceFact }
 
 export interface WorldTraceAdapterContext {
   sanitizer: TraceSanitizer

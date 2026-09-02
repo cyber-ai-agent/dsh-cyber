@@ -82,6 +82,8 @@ function buildToolSteps(messages: readonly WorkMessage[]): WorldTraceToolStep[] 
     if (message.kind === 'tool-call') {
       const name = stringMetadata(message, 'toolName') ?? (message.content.trim() || undefined)
       const presentation = toolPresentation(name)
+      const finishedAt = current?.completedAt
+      const durationMs = finishedAt === undefined ? undefined : Math.max(0, Date.parse(finishedAt) - Date.parse(message.createdAt))
       steps.set(callId, {
         callId,
         ...(name === undefined ? {} : { name }),
@@ -89,10 +91,13 @@ function buildToolSteps(messages: readonly WorkMessage[]): WorldTraceToolStep[] 
         status: current?.status ?? 'running',
         createdAt: message.createdAt,
         ...(current?.completedAt === undefined ? {} : { completedAt: current.completedAt }),
+        ...(durationMs === undefined ? {} : { durationMs }),
       })
       continue
     }
     const failed = message.metadata.failed === true
+    const startedAt = current?.createdAt
+    const durationMs = startedAt === undefined ? undefined : Math.max(0, Date.parse(message.createdAt) - Date.parse(startedAt))
     steps.set(callId, {
       callId,
       ...(current?.name === undefined ? {} : { name: current.name }),
@@ -100,6 +105,7 @@ function buildToolSteps(messages: readonly WorkMessage[]): WorldTraceToolStep[] 
       status: failed ? 'failed' : 'success',
       ...(current?.createdAt === undefined ? {} : { createdAt: current.createdAt }),
       completedAt: message.createdAt,
+      ...(durationMs === undefined ? {} : { durationMs }),
     })
   }
   return [...steps.values()]

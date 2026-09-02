@@ -7,6 +7,7 @@ import type {
   WorldTraceEntry,
   WorldTracePage,
   WorldTraceQuery,
+  WorldTraceToolStep,
 } from '@dsh-cyber/contracts'
 import type { ConversationRealtimeEnvelope } from '@dsh-cyber/orchestration'
 import type { SqliteStore } from '@dsh-cyber/persistence'
@@ -15,6 +16,7 @@ import type { CharacterSkillActionRepository } from '../skills/skill-action-repo
 import type { ContextSnapshotService } from './context-snapshot-service.js'
 import {
   AgentRunTraceAdapter,
+  ConsolidationTraceAdapter,
   ConversationTraceAdapter,
   DomainEventTraceAdapter,
   TRACE_INVISIBLE_EVENT_TYPES,
@@ -80,7 +82,7 @@ export interface WorldTraceServiceOptions {
 export type WorldTraceCheckpoint = ReadonlyMap<string, string>
 
 /** Bump whenever adapters/sanitizing change, so cached projections rebuild. */
-const TRACE_PROJECTION_VERSION = 1
+const TRACE_PROJECTION_VERSION = 2
 const MAX_CACHED_PROJECTIONS = 8
 
 interface CachedTraceProjection {
@@ -233,6 +235,7 @@ export class WorldTraceService {
       }),
       ...this.#store.listWorldTraceDomainEvents(worldId, TRACE_INVISIBLE_EVENT_TYPES).map((value) => ({ kind: 'domain-event' as const, value })),
       ...(await this.#actions.listByWorld(worldId)).map((value) => ({ kind: 'skill-action' as const, value })),
+      ...this.#store.listWorldConsolidationFailures(worldId).map(({ id, ...job }) => ({ kind: 'consolidation' as const, value: { worldId, jobId: id, ...job } })),
     ]
     const persisted = deduplicate(facts.flatMap((fact) => this.#registry.adapt(fact, context)))
     if (this.#projections.size >= MAX_CACHED_PROJECTIONS) {
@@ -328,6 +331,7 @@ export function createWorldTraceRegistry(): WorldTraceAdapterRegistry {
   registry.register(new SkillActionTraceAdapter())
   registry.register(new ConversationTraceAdapter())
   registry.register(new ScheduleTraceAdapter())
+  registry.register(new ConsolidationTraceAdapter())
   return registry
 }
 
@@ -406,11 +410,16 @@ function mergeTraceEntry(current: WorldTraceEntry | undefined, next: WorldTraceE
   for (const tool of next.tools ?? []) {
     const previous = tools.get(tool.callId)
     const completedWithoutIdentity = previous?.name !== undefined && tool.name === undefined
-    tools.set(tool.callId, {
+    const merged: WorldTraceToolStep = {
       ...previous,
       ...tool,
       ...(completedWithoutIdentity ? { name: previous.name, label: previous.label, description: previous.description } : {}),
-    })
+    }
+    if (merged.durationMs === undefined && merged.createdAt !== undefined && merged.completedAt !== undefined) {
+      const span = Date.parse(merged.completedAt) - Date.parse(merged.createdAt)
+      if (Number.isFinite(span) && span >= 0) merged.durationMs = span
+    }
+    tools.set(tool.callId, merged)
   }
   const reasoning = [current.reasoningSummary, next.reasoningSummary]
     .filter((value, index, values): value is string => Boolean(value) && values.indexOf(value) === index)

@@ -257,6 +257,24 @@ describe('World Trace projection', () => {
     ])
   })
 
+  it('projects a failed knowledge consolidation job into the world trace', async () => {
+    const { store, workspace, world } = await fixture()
+    store.database.prepare(
+      `INSERT INTO knowledge_consolidation_jobs
+       (id, workspace_id, world_id, source_type, source_id, from_cursor, to_cursor, status, attempt, error_code, created_at, updated_at)
+       VALUES ('job-x', ?, ?, 'conversation', 'session-x', 0, 5, 'failed', 2, 'knowledge_model_timeout', ?, ?)`,
+    ).run(workspace.id, world.id, '2026-09-01T00:00:00.000Z', '2026-09-01T00:01:00.000Z')
+    const service = new WorldTraceService({ store, actions: new MemoryActions() })
+    const page = await service.list(world.id)
+    expect(page.items).toContainEqual(expect.objectContaining({
+      category: 'system',
+      status: 'failed',
+      sourceKind: 'consolidation',
+      sourceId: 'job-x',
+      summary: '知识整理失败：模型响应超时',
+    }))
+  })
+
   it('reuses the cached projection while the watermark holds and rebuilds after facts change', async () => {
     const context = await fixture()
     const { store, world } = context
