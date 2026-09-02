@@ -1,0 +1,27 @@
+/*
+ * World Generator additions. The four-step chrome, fields, fieldsets, errors
+ * and the media/fields preview layout come from CharacterGenerator.css; only
+ * the controls the world flow adds (scene picker, ordered lists, cast cards)
+ * live here.
+ */
+.world-generator-term-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
+.world-generator-scene__preview > img { width: 100%; max-width: 280px; aspect-ratio: 3 / 2; height: auto; border-radius: var(--radius-md, 10px); object-fit: cover; }
+.world-generator-scene__options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.world-generator-scene__options button { padding: 0; border: 2px solid var(--border); border-radius: var(--radius-md, 10px); background: var(--surface-2); overflow: hidden; cursor: pointer; aspect-ratio: 3 / 2; }
+.world-generator-scene__options button img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.world-generator-scene__options button.is-selected, .world-generator-scene__options button:focus-visible { border-color: var(--accent); outline: none; box-shadow: 0 0 0 2px var(--accent-soft); }
+.world-generator-list__items { margin: 8px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.world-generator-list__items li { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-md, 10px); background: var(--surface-2); font-size: 13px; }
+.world-generator-list__items li > span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.world-generator-list__items li > button { flex: 0 0 auto; display: inline-flex; padding: 2px; border: 0; background: transparent; color: var(--text-muted); cursor: pointer; }
+ol.world-generator-list__items { counter-reset: world-step; }
+ol.world-generator-list__items li::before { counter-increment: world-step; content: counter(world-step); flex: 0 0 auto; min-width: 20px; text-align: center; font-weight: 650; color: var(--accent); }
+.world-generator-cast { display: grid; gap: 10px; }
+.world-generator-cast__member { border: 1px solid var(--border); border-radius: var(--radius-md, 10px); background: var(--surface-1); }
+.world-generator-cast__member > summary { display: flex; align-items: baseline; gap: 10px; padding: 10px 12px; cursor: pointer; }
+.world-generator-cast__member > summary span { color: var(--text-muted); font-size: 13px; }
+.world-generator-cast__fields { display: grid; gap: 10px; padding: 0 12px 12px; }
+.world-generator-cast__remove { justify-self: start; }
+@media (max-width: 720px) {
+  .world-generator-term-grid, .world-generator-scene__options { grid-template-columns: 1fr; }
+}

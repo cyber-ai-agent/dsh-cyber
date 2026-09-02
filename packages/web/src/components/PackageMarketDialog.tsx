@@ -19,6 +19,7 @@ import type {
   CyberMarketKind,
   CyberMarketPackage,
   CharacterGeneratorPublishResult,
+  WorldGeneratorPublishResult,
   CyberPackageManifest,
   InstalledPackage,
   PackageInstallTransaction,
@@ -31,6 +32,9 @@ import { useDialogFocusTrap } from './useDialogFocusTrap.js'
 
 const CharacterGenerator = lazy(async () => ({
   default: (await import('./character-generator/CharacterGenerator.js')).CharacterGenerator,
+}))
+const WorldGenerator = lazy(async () => ({
+  default: (await import('./world-generator/WorldGenerator.js')).WorldGenerator,
 }))
 
 // Official skin packages point at the same host-registered scene used by the
@@ -70,6 +74,7 @@ interface PackageMarketDialogProps {
   onCreateThemeWorld(item: CyberMarketPackage, name: string): Promise<void>
   onRecruitTalent(item: CyberMarketPackage): Promise<void>
   onCharacterPublished?(result: CharacterGeneratorPublishResult): Promise<void> | void
+  onWorldPublished?(result: WorldGeneratorPublishResult): Promise<void> | void
   onUsePlugin(command: string): void
   onPreview(manifest: CyberPackageManifest): Promise<PackagePermissionPreview>
   onInstall(input: { manifest: CyberPackageManifest; sourceDirectory: string; approvalToken: string }): Promise<void>
@@ -80,6 +85,8 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
   const dialogRef = useRef<HTMLElement | null>(null)
   const customRoleButtonRef = useRef<HTMLButtonElement | null>(null)
   const restoreCustomRoleFocusRef = useRef(false)
+  const customWorldButtonRef = useRef<HTMLButtonElement | null>(null)
+  const restoreCustomWorldFocusRef = useRef(false)
   const marketMeta: Record<CyberMarketKind, { label: string; description: string }> = useMemo(() => ({
     theme: { label: t('workbench.marketTabTheme', '世界'), description: t('workbench.marketTabThemeDesc', '选择完整场景皮肤、空间设定和起始角色，创建彼此独立的新世界。') },
     talent: { label: t('workbench.marketTabTalent', '角色'), description: t('workbench.marketTabTalentDesc', '安装不同世界观与专长的角色模板，再把角色招募到兼容世界。') },
@@ -99,7 +106,9 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
   const [creatingWorld, setCreatingWorld] = useState(false)
   const [confirmingUninstall, setConfirmingUninstall] = useState<string>()
   const [customRoleOpen, setCustomRoleOpen] = useState(false)
+  const [customWorldOpen, setCustomWorldOpen] = useState(false)
   const [generatorCloseRequest, setGeneratorCloseRequest] = useState(0)
+  const generatorOpen = customRoleOpen || customWorldOpen
   const selectedCurrent = selected === undefined
     ? undefined
     : props.items.find((item) => item.manifest.id === selected.manifest.id && item.manifest.version === selected.manifest.version) ?? selected
@@ -107,7 +116,7 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
   const selectedInstalledPackage = selectedCurrent === undefined ? undefined : props.installed.find((item) => item.packageId === selectedCurrent.manifest.id && item.status === 'active')
 
   const closeDialog = () => {
-    if (customRoleOpen) {
+    if (generatorOpen) {
       setGeneratorCloseRequest((value) => value + 1)
       return
     }
@@ -124,6 +133,7 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
     setApproved(false)
     setCreatingWorldFor(undefined)
     setCustomRoleOpen(false)
+    setCustomWorldOpen(false)
     setGeneratorCloseRequest(0)
   }, [props.initialMarket])
 
@@ -135,6 +145,7 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
     setError(undefined)
     setCreatingWorldFor(undefined)
     setCustomRoleOpen(false)
+    setCustomWorldOpen(false)
     setGeneratorCloseRequest(0)
     void props.onSearch(next, '')
   }
@@ -165,6 +176,36 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
     restoreCustomRoleFocusRef.current = false
     customRoleButtonRef.current?.focus()
   }, [customRoleOpen, market])
+
+  // 世界 → 自定义世界: the second generator, same open/close contract.
+  const openCustomWorldGenerator = () => {
+    setError(undefined)
+    setGeneratorCloseRequest(0)
+    setCustomWorldOpen(true)
+  }
+
+  const closeCustomWorldGenerator = () => {
+    setCustomWorldOpen(false)
+    setGeneratorCloseRequest(0)
+    restoreCustomWorldFocusRef.current = true
+  }
+
+  useEffect(() => {
+    if (customWorldOpen || !restoreCustomWorldFocusRef.current) return
+    restoreCustomWorldFocusRef.current = false
+    customWorldButtonRef.current?.focus()
+  }, [customWorldOpen, market])
+
+  const completeCustomWorldPublish = async (result: WorldGeneratorPublishResult) => {
+    if (props.onWorldPublished !== undefined) await props.onWorldPublished(result)
+    else await props.onSearch('theme', query)
+    setMarket('theme')
+    setSelected(undefined)
+    setPreview(undefined)
+    setApproved(false)
+    setCustomWorldOpen(false)
+    setGeneratorCloseRequest(0)
+  }
 
   const completeCustomRolePublish = async (result: CharacterGeneratorPublishResult) => {
     if (props.onCharacterPublished !== undefined) await props.onCharacterPublished(result)
@@ -249,10 +290,10 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && closeDialog()}>
-      <section ref={dialogRef} className={`package-market-dialog package-market-dialog--catalog${customRoleOpen ? ' is-character-generator' : ''}`} role="dialog" aria-modal="true" aria-labelledby="package-market-title" aria-describedby="package-market-subtitle">
+      <section ref={dialogRef} className={`package-market-dialog package-market-dialog--catalog${generatorOpen ? ' is-character-generator' : ''}`} role="dialog" aria-modal="true" aria-labelledby="package-market-title" aria-describedby="package-market-subtitle">
         <header className="dialog-header package-market-header">
-          <div><h2 id="package-market-title">{customRoleOpen ? t('characterGenerator.title', '自定义角色') : t('workbench.marketTitle', '扩展市场')}</h2><p id="package-market-subtitle">{customRoleOpen ? t('characterGenerator.subtitle', '把一段角色描述整理成可审阅、可安装的角色模板。') : t('workbench.marketSubtitle', '先选择世界，再发现角色与插件。所有内容经过完整性校验和事务安装。')}</p></div>
-          <button className="icon-button" type="button" data-dialog-initial-focus aria-label={customRoleOpen ? t('characterGenerator.close', '关闭自定义角色') : t('workbench.cancel', '关闭市场')} onClick={closeDialog}><X size={18} aria-hidden="true" /></button>
+          <div><h2 id="package-market-title">{customRoleOpen ? t('characterGenerator.title', '自定义角色') : customWorldOpen ? t('worldGenerator.title', '自定义世界') : t('workbench.marketTitle', '扩展市场')}</h2><p id="package-market-subtitle">{customRoleOpen ? t('characterGenerator.subtitle', '把一段角色描述整理成可审阅、可安装的角色模板。') : customWorldOpen ? t('worldGenerator.subtitle', '把一段场景描述整理成可审阅、可安装的世界主题包。') : t('workbench.marketSubtitle', '先选择世界，再发现角色与插件。所有内容经过完整性校验和事务安装。')}</p></div>
+          <button className="icon-button" type="button" data-dialog-initial-focus aria-label={customRoleOpen ? t('characterGenerator.close', '关闭自定义角色') : customWorldOpen ? t('worldGenerator.close', '关闭自定义世界') : t('workbench.cancel', '关闭市场')} onClick={closeDialog}><X size={18} aria-hidden="true" /></button>
         </header>
         {customRoleOpen ? (
           <Suspense fallback={<div className="dialog-loading" role="status">{t('characterGenerator.opening', '正在打开角色创建器…')}</div>}>
@@ -262,6 +303,15 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
               closeRequest={generatorCloseRequest}
               onClose={closeCustomRoleGenerator}
               onPublished={completeCustomRolePublish}
+            />
+          </Suspense>
+        ) : customWorldOpen ? (
+          <Suspense fallback={<div className="dialog-loading" role="status">{t('worldGenerator.opening', '正在打开世界创建器…')}</div>}>
+            <WorldGenerator
+              workspaceId={props.workspaceId}
+              closeRequest={generatorCloseRequest}
+              onClose={closeCustomWorldGenerator}
+              onPublished={completeCustomWorldPublish}
             />
           </Suspense>
         ) : (
@@ -288,6 +338,7 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
                 <button type="submit">{t('workbench.marketSearchSubmit', '搜索')}</button>
               </form>
               {market === 'talent' ? <button ref={customRoleButtonRef} className="market-custom-role-button" type="button" onClick={openCustomRoleGenerator}><UserPlus size={17} aria-hidden="true" />{t('characterGenerator.title', '自定义角色')}</button> : null}
+              {market === 'theme' ? <button ref={customWorldButtonRef} className="market-custom-role-button" type="button" onClick={openCustomWorldGenerator}><Buildings size={17} aria-hidden="true" />{t('worldGenerator.title', '自定义世界')}</button> : null}
             </div>
             {error === undefined ? null : <div className="package-error" role="alert"><Warning size={16} />{error}</div>}
             {props.loading ? <div className="dialog-empty">{t('workbench.marketCheckingLocal', '正在校验本地市场目录…')}</div> : props.items.length === 0 ? (
@@ -405,7 +456,13 @@ type PackageCardState = 'uninstalled' | 'included' | 'upgrade' | 'available' | '
 
 function packageCardState(item: CyberMarketPackage, worlds: World[]): PackageCardState {
   const activation = item.activation
-  const hasCreatedWorld = item.market === 'theme' && activation?.kind === 'world-theme' && worlds.some((world) => world.templateId === activation.templateId)
+  // A world only records its template, not the theme it was created from, so
+  // the "created" and "included" heuristics below infer the theme from the
+  // template. That inference is only sound for the verified official themes:
+  // a generated theme reuses a built-in template id and must never look
+  // created or built in before it has been installed.
+  const templateInfersTheme = item.verified
+  const hasCreatedWorld = templateInfersTheme && item.market === 'theme' && activation?.kind === 'world-theme' && worlds.some((world) => world.templateId === activation.templateId)
   if (item.market === 'skin' && item.manifest.id === 'default-skin') return 'included'
   if (item.installedVersion === item.manifest.version) {
     if (hasCreatedWorld) return 'created'
@@ -414,7 +471,7 @@ function packageCardState(item: CyberMarketPackage, worlds: World[]): PackageCar
     return 'installed'
   }
   if (item.installedVersion !== undefined) return 'upgrade'
-  if (activation?.kind === 'world-theme' && worlds.some((world) => builtInThemeMatches(world.templateId, activation.templateId))) {
+  if (templateInfersTheme && activation?.kind === 'world-theme' && worlds.some((world) => builtInThemeMatches(world.templateId, activation.templateId))) {
     return 'included'
   }
   return 'uninstalled'
