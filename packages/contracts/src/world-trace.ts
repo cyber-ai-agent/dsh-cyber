@@ -34,6 +34,7 @@ export type WorldTraceSourceKind =
   | 'conversation'
   | 'scheduled-run'
   | 'agent-run'
+  | 'consolidation'
 
 export interface WorldTraceToolStep {
   callId: string
@@ -43,6 +44,8 @@ export interface WorldTraceToolStep {
   status: 'running' | 'success' | 'failed'
   createdAt?: IsoTimestamp
   completedAt?: IsoTimestamp
+  /** Wall-clock span of the call, once both ends are known. */
+  durationMs?: number
 }
 
 /**

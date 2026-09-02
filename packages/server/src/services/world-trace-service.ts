@@ -8,6 +8,7 @@ import type {
   WorldTraceEntry,
   WorldTracePage,
   WorldTraceQuery,
+  WorldTraceToolStep,
 } from '@dsh-cyber/contracts'
 import type { ConversationRealtimeEnvelope } from '@dsh-cyber/orchestration'
 import type { SqliteStore } from '@dsh-cyber/persistence'
@@ -16,6 +17,7 @@ import type { CharacterSkillActionRepository } from '../skills/skill-action-repo
 import type { ContextSnapshotService } from './context-snapshot-service.js'
 import {
   AgentRunTraceAdapter,
+  ConsolidationTraceAdapter,
   ConversationTraceAdapter,
   DomainEventTraceAdapter,
   TRACE_INVISIBLE_EVENT_TYPES,
@@ -80,6 +82,15 @@ export interface WorldTraceServiceOptions {
 
 export type WorldTraceCheckpoint = ReadonlyMap<string, string>
 
+/** Bump whenever adapters/sanitizing change, so cached projections rebuild. */
+const TRACE_PROJECTION_VERSION = 2
+const MAX_CACHED_PROJECTIONS = 8
+
+interface CachedTraceProjection {
+  key: string
+  entries: WorldTraceEntry[]
+}
+
 export class WorldTraceService {
   readonly #store: SqliteStore
   readonly #actions: CharacterSkillActionRepository
@@ -90,6 +101,7 @@ export class WorldTraceService {
   readonly #sanitizer: TraceSanitizer
   readonly #clock: () => string
   readonly #liveRuns = new Map<string, WorldTraceEntry>()
+  readonly #projections = new Map<string, CachedTraceProjection>()
 
   constructor(options: WorldTraceServiceOptions) {
     this.#store = options.store
@@ -192,6 +204,32 @@ export class WorldTraceService {
   }
 
   async #materialize(worldId: string): Promise<WorldTraceEntry[]> {
+    const persisted = await this.#persistedProjection(worldId)
+    // The persisted projection has already resolved durable task links. Strip
+    // only the live card's hinted task fields before merging so a transient
+    // seed hint cannot outrank a task_runs link that has landed meanwhile.
+    const live = [...this.#liveRuns.values()]
+      .filter((entry) => entry.worldId === worldId)
+      .map(({ taskId: _hintedTaskId, taskTitle: _hintedTaskTitle, ...entry }) => entry)
+    return live.length === 0 ? persisted : deduplicate([...persisted, ...live])
+  }
+
+  /**
+   * The persisted projection is deterministic for a data state: while the
+   * cheap watermark holds, reuse it instead of re-adapting the world's whole
+   * history — a single chat turn used to trigger several full materializations
+   * through list, checkpoint and changesSince. Callers only ever filter or
+   * copy the returned array.
+   */
+  async #persistedProjection(worldId: string): Promise<WorldTraceEntry[]> {
+    const watermark = this.#store.worldTraceWatermark(worldId)
+    const key = `${TRACE_PROJECTION_VERSION}:${watermark}`
+    const cached = this.#projections.get(worldId)
+    if (cached !== undefined && cached.key === key) {
+      this.#projections.delete(worldId)
+      this.#projections.set(worldId, cached)
+      return cached.entries
+    }
     const context = this.#context(worldId)
     // Each run only ever reads its own messages. Handing the whole world's
     // transcript to every run made this quadratic: at 6,400 runs / 38,400
@@ -230,15 +268,15 @@ export class WorldTraceService {
       }),
       ...this.#store.listWorldTraceDomainEvents(worldId, TRACE_INVISIBLE_EVENT_TYPES).map((value) => ({ kind: 'domain-event' as const, value })),
       ...(await this.#actions.listByWorld(worldId)).map((value) => ({ kind: 'skill-action' as const, value })),
+      ...this.#store.listWorldConsolidationFailures(worldId).map(({ id, ...job }) => ({ kind: 'consolidation' as const, value: { worldId, jobId: id, ...job } })),
     ]
     const persisted = deduplicate(facts.flatMap((fact) => this.#registry.adapt(fact, context)))
-    // The durable projection above has already decided every run's task —
-    // `task_runs` first, the seed hint only while live. A live card's own hint
-    // must not outrank that decision when the two are merged.
-    const live = [...this.#liveRuns.values()]
-      .filter((entry) => entry.worldId === worldId)
-      .map(({ taskId: _hintedTaskId, taskTitle: _hintedTaskTitle, ...entry }) => entry)
-    return deduplicate([...persisted, ...live])
+    if (this.#projections.size >= MAX_CACHED_PROJECTIONS) {
+      const oldest = this.#projections.keys().next()
+      if (!oldest.done) this.#projections.delete(oldest.value)
+    }
+    this.#projections.set(worldId, { key, entries: persisted })
+    return persisted
   }
 }
 
@@ -343,6 +381,7 @@ export function createWorldTraceRegistry(): WorldTraceAdapterRegistry {
   registry.register(new SkillActionTraceAdapter())
   registry.register(new ConversationTraceAdapter())
   registry.register(new ScheduleTraceAdapter())
+  registry.register(new ConsolidationTraceAdapter())
   return registry
 }
 
@@ -421,11 +460,16 @@ function mergeTraceEntry(current: WorldTraceEntry | undefined, next: WorldTraceE
   for (const tool of next.tools ?? []) {
     const previous = tools.get(tool.callId)
     const completedWithoutIdentity = previous?.name !== undefined && tool.name === undefined
-    tools.set(tool.callId, {
+    const merged: WorldTraceToolStep = {
       ...previous,
       ...tool,
       ...(completedWithoutIdentity ? { name: previous.name, label: previous.label, description: previous.description } : {}),
-    })
+    }
+    if (merged.durationMs === undefined && merged.createdAt !== undefined && merged.completedAt !== undefined) {
+      const span = Date.parse(merged.completedAt) - Date.parse(merged.createdAt)
+      if (Number.isFinite(span) && span >= 0) merged.durationMs = span
+    }
+    tools.set(tool.callId, merged)
   }
   const reasoning = [current.reasoningSummary, next.reasoningSummary]
     .filter((value, index, values): value is string => Boolean(value) && values.indexOf(value) === index)

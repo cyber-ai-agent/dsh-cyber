@@ -1,8 +1,25 @@
 import { describe, expect, it } from 'vitest'
 
-import type { AgentRun, ModelInteractionLog } from '@dsh-cyber/contracts'
+import type { AgentRun, ModelInteractionLog, WorkMessage } from '@dsh-cyber/contracts'
 
 import { AgentRunTraceAdapter } from '../src/world-trace/agent-run-trace-adapter.js'
+
+describe('AgentRunTraceAdapter tool steps', () => {
+  it('measures a tool step from call to result timestamps', () => {
+    const [entry] = new AgentRunTraceAdapter().adapt({
+      kind: 'agent-run',
+      value: {
+        worldId: 'world-1',
+        run: { id: 'run-tools', workspaceId: 'workspace-1', worldId: 'world-1', turnId: 'turn-1', sessionId: 'session-1', employeeId: 'employee-1', ordinal: 1, status: 'completed', createdAt: '2026-08-29T12:20:01.000Z' } as AgentRun,
+        messages: [
+          { id: 'm-call', kind: 'tool-call', content: 'read_file', metadata: { agentRunId: 'run-tools', callId: 'c1', toolName: 'read_file' }, createdAt: '2026-08-29T12:20:02.000Z' },
+          { id: 'm-result', kind: 'tool-result', content: 'ok', metadata: { agentRunId: 'run-tools', callId: 'c1', failed: false }, createdAt: '2026-08-29T12:20:06.500Z' },
+        ] as unknown as WorkMessage[],
+      },
+    })
+    expect(entry?.tools?.[0]).toMatchObject({ callId: 'c1', status: 'success', durationMs: 4_500 })
+  })
+})
 
 const run: AgentRun = {
   id: 'run-timeout-detail',
