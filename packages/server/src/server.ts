@@ -296,7 +296,10 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     ...(activeDshBinPath === undefined ? {} : { dshBinPath: activeDshBinPath }),
     resolveRoute(request) { return resolveHarnessRoute(store, request) },
   })
-  const profileRuntime = new CharacterProfileRuntime(baseRuntime, store, skillRegistry, authority, skillAvailability)
+  // World settings are the source of the envelope's `world-context` layer: the
+  // runtime renders them into the cacheable prefix, so the request composers
+  // below no longer repeat them behind the retrieved memories.
+  const profileRuntime = new CharacterProfileRuntime(baseRuntime, store, skillRegistry, authority, skillAvailability, undefined, undefined, worldSettings)
   const contextRuntime = new ContextPlanningRuntime(profileRuntime, (request) => contextModelLimits(resolveHarnessRoute(store, request)))
   const runtime = new TurnInteractionLoggingRuntime({
     inner: contextRuntime,
@@ -339,7 +342,6 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   publishDecisionChanged = (worldId, payload) => worldRuntime.publishDecisionChanged(worldId, payload)
   const toolApprovals = new HarnessToolApprovalService({ store, runtime, onChanged: (worldId, payload) => publishDecisionChanged?.(worldId, payload) })
   const worldRuntimeContext = new WorldRuntimeContextComposer({
-    settings: worldSettings,
     contributors: [knowledgeGraphRuntime.contributor, new WorldKnowledgeRuntimeContextContributor(
       new WorldKnowledgeRetrievalService({ search: worldKnowledgeSearch }),
       (input, context) => {

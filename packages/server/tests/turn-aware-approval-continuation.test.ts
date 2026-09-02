@@ -13,7 +13,7 @@ import { CharacterSkillRuntime } from '../src/services/character-skill-runtime.j
 import { TurnAwareApprovalContinuationService } from '../src/services/turn-aware-approval-continuation-service.js'
 import { WorldPackageInstanceService } from '../src/services/world-package-instance-service.js'
 import { WorldRootService } from '../src/services/world-root-service.js'
-import { WorldSettingsService } from '../src/services/world-settings-service.js'
+import { WorldRuntimeContextComposer } from '../src/services/world-runtime-context-composer.js'
 import { SqliteSkillActionRepository } from '../src/skills/sqlite-skill-action-repository.js'
 import { CharacterSkillAdapterRegistry, type CharacterSkillAdapter, type CharacterSkillMatchContext } from '../src/skills/skill-adapter.js'
 
@@ -174,7 +174,7 @@ async function setup() {
   const orchestrator = new ConversationOrchestrator({ store, runtime: agent, workspacePath: root })
   const worldRoots = new WorldRootService(root)
   const continuations = new TurnAwareApprovalContinuationService({
-    store, orchestrator, skills, settings: new WorldSettingsService(worldRoots),
+    store, orchestrator, skills, settings: new WorldRuntimeContextComposer(),
     worldPackages: new WorldPackageInstanceService(store, worldRoots),
   })
   return { store, workspaceId: workspace.id, worldId: world.id, employeeId: employee.id, adapter, agent, continuations }
