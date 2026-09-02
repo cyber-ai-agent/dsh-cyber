@@ -22,6 +22,8 @@ export interface WorldGeneratorProps {
 export const WORLD_THEME_MAX_CAST = 8
 export const WORLD_THEME_MAX_WORKFLOW_STEPS = 12
 export const WORLD_THEME_MAX_RULES = 12
+/** The theme installer's image limit; the server refuses anything larger before decoding it. */
+export const WORLD_BACKGROUND_MAX_BYTES = 4 * 1024 * 1024
 const MAX_TERM = 40
 
 export const EMPTY_WORLD_CATALOG: WorldGeneratorCatalog = {

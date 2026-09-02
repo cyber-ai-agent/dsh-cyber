@@ -55,7 +55,7 @@ describe('World Generator render contracts', () => {
     const analysisHtml = renderToStaticMarkup(createElement(WorldAnalysisStep, { source: '一家诊所', draft, analyzing: false, onCancel: vi.fn(), onRetry: vi.fn(), onContinue: vi.fn() }))
     const previewHtml = renderToStaticMarkup(createElement(WorldPreviewStep, {
       draft, catalog, scene: { kind: 'official', id: 'official-moonlit-tavern' },
-      onDraftChange: vi.fn(), onSceneSelect: vi.fn(), onCastChange: vi.fn(), onCastAdd: vi.fn(), onCastRemove: vi.fn(), onBack: vi.fn(), onContinue: vi.fn(),
+      onDraftChange: vi.fn(), onSceneSelect: vi.fn(), onSceneUpload: vi.fn(), onSceneUseOfficial: vi.fn(), onCastChange: vi.fn(), onCastAdd: vi.fn(), onCastRemove: vi.fn(), onBack: vi.fn(), onContinue: vi.fn(),
     }))
     const publishHtml = renderToStaticMarkup(createElement(WorldPublishStep, {
       draft, source: '一家诊所', scene: catalog.scenes[0]!, publishing: false, published: false, onBack: vi.fn(), onPublish: vi.fn(), onViewInstall: vi.fn(),
@@ -75,12 +75,34 @@ describe('World Generator render contracts', () => {
     expect(previewHtml).toContain('值班律师')
     expect(previewHtml).toContain('软件实现')
     expect(previewHtml).toContain('仅表示角色希望使用')
-    // No upload control: a custom background is the stated follow-up.
-    expect(previewHtml).not.toContain('type="file"')
+    // The upload half: a background upload sits next to the official picks,
+    // and the copy says the official pick still owns the layout.
+    expect(previewHtml).toContain('type="file"')
+    expect(previewHtml).toContain('accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"')
+    expect(previewHtml).toContain('上传背景图片')
+    expect(previewHtml).toContain('只替换背景')
     expect(publishHtml).toContain('04')
     expect(publishHtml).toContain('确认发布世界主题')
     expect(publishHtml).toContain('发布到世界市场')
     expect(publishHtml).toContain('发布不会自动安装、创建世界或招募角色')
+  })
+
+  it('shows an uploaded background as the preview while the official pick keeps the layout', () => {
+    const uploaded = { kind: 'upload' as const, id: 'official-moonlit-tavern', fileName: 'backdrop.png', mimeType: 'image/png' as const, dataBase64: 'iVBORw0KGgo=' }
+    const previewHtml = renderToStaticMarkup(createElement(WorldPreviewStep, {
+      draft, catalog, scene: uploaded,
+      onDraftChange: vi.fn(), onSceneSelect: vi.fn(), onSceneUpload: vi.fn(), onSceneUseOfficial: vi.fn(), onCastChange: vi.fn(), onCastAdd: vi.fn(), onCastRemove: vi.fn(), onBack: vi.fn(), onContinue: vi.fn(),
+    }))
+    expect(previewHtml).toContain('data:image/png;base64,iVBORw0KGgo=')
+    expect(previewHtml).toContain('已选择背景图片：backdrop.png')
+    // The official scene that lends its layout stays marked as the pick.
+    expect(previewHtml).toMatch(/aria-label="月影酒馆 · 雨夜大厅"[^>]*aria-pressed="true"/u)
+    expect(previewHtml).toContain('使用官方背景')
+    const publishHtml = renderToStaticMarkup(createElement(WorldPublishStep, {
+      draft, source: '一家诊所', scene: catalog.scenes[0]!, background: uploaded, publishing: false, published: false, onBack: vi.fn(), onPublish: vi.fn(), onViewInstall: vi.fn(),
+    }))
+    expect(publishHtml).toContain('backdrop.png')
+    expect(publishHtml).toContain('月影酒馆')
   })
 
   it('keeps a visible custom-world entry in the world market next to the search box', () => {

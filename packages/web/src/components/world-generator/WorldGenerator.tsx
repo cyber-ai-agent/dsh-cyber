@@ -4,10 +4,11 @@ import type { CharacterBlueprintDraft, CharacterSourceInput, WorldGeneratorCatal
 import { useI18n } from '../../i18n/runtime.js'
 import { SourceStep } from '../character-generator/CharacterGeneratorSteps.js'
 import { CHARACTER_SOURCE_MAX_BYTES } from '../character-generator/model.js'
-import { analyzeWorldSource, loadWorldGeneratorCatalog, publishWorldDraft } from './api.js'
+import { analyzeWorldSource, loadWorldGeneratorCatalog, publishWorldDraft, readUploadedBackground } from './api.js'
 import { WorldAnalysisStep, WorldPreviewStep, WorldPublishStep } from './WorldGeneratorSteps.js'
 import {
   EMPTY_WORLD_CATALOG,
+  WORLD_BACKGROUND_MAX_BYTES,
   defaultSceneSelection,
   emptyCastMember,
   initialWorldDraft,
@@ -42,6 +43,7 @@ export function WorldGenerator({ workspaceId, onClose, onPublished, closeRequest
   const [catalogRetry, setCatalogRetry] = useState(0)
   const [draft, setDraft] = useState<WorldThemeDraft>()
   const [scene, setScene] = useState<WorldGeneratorSceneSelection>()
+  const [sceneError, setSceneError] = useState<string>()
   const [suggestedScene, setSuggestedScene] = useState<string>()
   const [analysisError, setAnalysisError] = useState<string>()
   const [analyzing, setAnalyzing] = useState(false)
@@ -50,7 +52,7 @@ export function WorldGenerator({ workspaceId, onClose, onPublished, closeRequest
   const [publishError, setPublishError] = useState<string>()
   const [publishedResult, setPublishedResult] = useState<Parameters<WorldGeneratorProps['onPublished']>[0]>()
   const [discardPrompt, setDiscardPrompt] = useState(false)
-  const dirty = publishedResult === undefined && (source.text.trim().length > 0 || draft !== undefined)
+  const dirty = publishedResult === undefined && (source.text.trim().length > 0 || draft !== undefined || scene?.kind === 'upload')
 
   useEffect(() => {
     if (scene !== undefined && catalog.scenes.some((option) => option.id === scene.id)) return
@@ -219,7 +221,33 @@ export function WorldGenerator({ workspaceId, onClose, onPublished, closeRequest
 
   const addCast = () => updateDraft({ cast: [...(draft?.cast ?? []), emptyCastMember(catalog.targetWorldTemplateId)] })
   const removeCast = (index: number) => updateDraft({ cast: (draft?.cast ?? []).filter((_, position) => position !== index) })
-  const selectScene = (option: WorldGeneratorSceneCatalogItem) => setScene({ kind: 'official', id: option.id })
+  // An official pick is the layout. With an upload in place it only changes
+  // which scene lends that layout; the background stays the user's.
+  const selectScene = (option: WorldGeneratorSceneCatalogItem) => {
+    setScene((current) => current?.kind === 'upload' ? { ...current, id: option.id } : { kind: 'official', id: option.id })
+    setSceneError(undefined)
+  }
+
+  const uploadScene = (file: File) => {
+    const baseSceneId = scene?.id
+    if (baseSceneId === undefined) {
+      setSceneError(t('worldGenerator.backgroundNeedsScene', '请先选择一个官方场景，再上传背景图片。'))
+      return
+    }
+    if (file.size > WORLD_BACKGROUND_MAX_BYTES) {
+      setSceneError(t('worldGenerator.backgroundTooLarge', '背景图片不能超过 4 MiB。'))
+      return
+    }
+    setSceneError(undefined)
+    void readUploadedBackground(file, baseSceneId)
+      .then((selection) => { setScene(selection); setPublishError(undefined) })
+      .catch(() => setSceneError(t('worldGenerator.backgroundUploadError', '背景上传失败。请换一张 PNG、JPEG 或 WebP 图片。')))
+  }
+
+  const useOfficialScene = () => {
+    setScene((current) => current === undefined ? current : { kind: 'official', id: current.id })
+    setSceneError(undefined)
+  }
 
   const continueToPublish = () => {
     if (draft === undefined) return
@@ -294,7 +322,7 @@ export function WorldGenerator({ workspaceId, onClose, onPublished, closeRequest
       </ol>
       {catalogLoading ? <div className="character-generator-catalog-status" role="status">{t('worldGenerator.catalogLoading', '正在读取官方场景与可用目录…')}</div> : catalogError === undefined ? null : <div className="character-generator-catalog-status is-error" role="alert"><Info size={16} aria-hidden="true" /><span>{catalogError}</span><button className="text-button" type="button" onClick={() => setCatalogRetry((value) => value + 1)}>{t('characterGenerator.retryCatalog', '重试读取目录')}</button></div>}
       <main className="character-generator__body">
-        {step === 'source' ? <SourceStep sourceMode={source.kind} source={source.text} {...(source.fileName === undefined ? {} : { sourceFileName: source.fileName })} {...(sourceError === undefined ? {} : { error: sourceError })} analyzing={analyzing} copy={sourceCopy} onSourceMode={(kind) => setSource((current) => kind === 'file' ? { kind, text: current.text, ...(current.fileName === undefined ? {} : { fileName: current.fileName }) } : { kind, text: current.text })} onSource={handleSource} onFile={(file) => void handleSourceFile(file)} onAnalyze={analyze} /> : step === 'analysis' ? <WorldAnalysisStep source={source.text} {...(draft === undefined ? {} : { draft })} analyzing={analyzing} {...(analysisError === undefined ? {} : { error: analysisError })} onCancel={cancelAnalysis} onRetry={analyze} onContinue={() => { if (draft !== undefined) { setStep('preview'); setValidationError(undefined) } }} /> : step === 'preview' && draft !== undefined ? <WorldPreviewStep draft={draft} catalog={catalog} {...(scene === undefined ? {} : { scene })} {...(validationError === undefined ? {} : { validationError })} onDraftChange={updateDraft} onSceneSelect={selectScene} onCastChange={updateCast} onCastAdd={addCast} onCastRemove={removeCast} onBack={() => { setStep('analysis'); setValidationError(undefined) }} onContinue={continueToPublish} /> : <WorldPublishStep draft={draft ?? initialWorldDraft(catalog.targetWorldTemplateId)} source={source.text} {...(selectedScene === undefined ? {} : { scene: selectedScene })} publishing={publishing} {...(publishError === undefined ? {} : { error: publishError })} published={publishedResult !== undefined} onBack={() => { setStep('preview'); setPublishError(undefined) }} onPublish={publish} onViewInstall={viewInstall} />}
+        {step === 'source' ? <SourceStep sourceMode={source.kind} source={source.text} {...(source.fileName === undefined ? {} : { sourceFileName: source.fileName })} {...(sourceError === undefined ? {} : { error: sourceError })} analyzing={analyzing} copy={sourceCopy} onSourceMode={(kind) => setSource((current) => kind === 'file' ? { kind, text: current.text, ...(current.fileName === undefined ? {} : { fileName: current.fileName }) } : { kind, text: current.text })} onSource={handleSource} onFile={(file) => void handleSourceFile(file)} onAnalyze={analyze} /> : step === 'analysis' ? <WorldAnalysisStep source={source.text} {...(draft === undefined ? {} : { draft })} analyzing={analyzing} {...(analysisError === undefined ? {} : { error: analysisError })} onCancel={cancelAnalysis} onRetry={analyze} onContinue={() => { if (draft !== undefined) { setStep('preview'); setValidationError(undefined) } }} /> : step === 'preview' && draft !== undefined ? <WorldPreviewStep draft={draft} catalog={catalog} {...(scene === undefined ? {} : { scene })} {...(sceneError === undefined ? {} : { sceneError })} {...(validationError === undefined ? {} : { validationError })} onDraftChange={updateDraft} onSceneSelect={selectScene} onSceneUpload={uploadScene} onSceneUseOfficial={useOfficialScene} onCastChange={updateCast} onCastAdd={addCast} onCastRemove={removeCast} onBack={() => { setStep('analysis'); setValidationError(undefined) }} onContinue={continueToPublish} /> : <WorldPublishStep draft={draft ?? initialWorldDraft(catalog.targetWorldTemplateId)} source={source.text} {...(selectedScene === undefined ? {} : { scene: selectedScene })} {...(scene === undefined ? {} : { background: scene })} publishing={publishing} {...(publishError === undefined ? {} : { error: publishError })} published={publishedResult !== undefined} onBack={() => { setStep('preview'); setPublishError(undefined) }} onPublish={publish} onViewInstall={viewInstall} />}
       </main>
       {discardPrompt ? (
         <div ref={discardRef} className="character-generator-discard" role="alertdialog" aria-modal="true" aria-labelledby="world-generator-discard-title" aria-describedby="world-generator-discard-description">

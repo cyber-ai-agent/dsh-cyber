@@ -7,6 +7,7 @@ import type {
   WorldGeneratorSceneSelection,
   WorldThemeDraft,
 } from '@dsh-cyber/contracts'
+import { readUploadedAvatar } from '../character-generator/api.js'
 import { normalizeWorldCatalog, normalizeWorldDraft } from './model.js'
 
 export async function loadWorldGeneratorCatalog(workspaceId: string, signal?: AbortSignal): Promise<WorldGeneratorCatalog> {
@@ -58,4 +59,16 @@ export async function publishWorldDraft(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
+}
+
+/**
+ * Read a background file with the avatar upload reader (one reader, one wire
+ * shape) and bind it to the official scene whose layout it will sit under.
+ * The server sniffs the bytes itself; the type inferred here is only the
+ * declaration it cross-checks.
+ */
+export async function readUploadedBackground(file: File, baseSceneId: string): Promise<WorldGeneratorSceneSelection> {
+  const avatar = await readUploadedAvatar(file)
+  if (avatar.kind !== 'upload') throw new Error('背景图片读取失败。')
+  return { kind: 'upload', id: baseSceneId, fileName: avatar.fileName, mimeType: avatar.mimeType, dataBase64: avatar.dataBase64 }
 }
