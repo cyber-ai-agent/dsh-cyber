@@ -127,6 +127,7 @@ export function packageManifest(value: unknown): CyberPackageManifest {
     'world-theme',
     'asset',
     'model-provider',
+    'skin',
   ]
   if (kind === undefined || !validKinds.includes(kind as CyberPackageKind)) {
     throw new HttpError(422, 'invalid_package_kind', 'Invalid package kind')
@@ -152,7 +153,7 @@ export function packageManifest(value: unknown): CyberPackageManifest {
           assertExactObjectKeys(entrypoint, ['id', 'kind', 'path'], 'package entrypoint')
           return {
             id: requiredString(entrypoint, 'id'),
-            kind: requiredEnum(entrypoint, 'kind', ['prompt-transform', 'employee-blueprint', 'world-theme', 'skill']),
+            kind: requiredEnum(entrypoint, 'kind', ['prompt-transform', 'employee-blueprint', 'world-theme', 'skill', 'skin']),
             path: requiredString(entrypoint, 'path'),
           }
         })
