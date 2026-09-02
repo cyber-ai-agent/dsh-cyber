@@ -10,7 +10,8 @@ import {
   PuzzlePiece,
   PersonSimpleWalk,
 } from '@phosphor-icons/react'
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import type { EmployeeDossier, WorkSession, World, WorldInteractionAction, WorldRuntimeSnapshot, WorldZoomCommand } from '@dsh-cyber/contracts'
 
 import { api } from '../../api.js'
@@ -319,9 +320,9 @@ export function WorldRuntimeDock({ demoMode, world, employees, dossiers, liveEna
             <button type="button" className={runtime.snapshot.clock.lightsOn ? 'is-active' : ''} aria-label={runtime.snapshot.clock.lightsOn ? '关闭场景照明' : '打开场景照明'} onClick={() => void runtime.interact({ action: 'toggle-lights', actorId: 'owner' })}><LightbulbFilament size={16} /></button>
           </div>
 
-          {ambientSettingsOpen ? <AmbientLifeDialog worldId={world.id} worldName={world.name} onClose={() => setAmbientSettingsOpen(false)} /> : null}
-          {sceneSettingsOpen ? <WorldSceneDialog world={world} currentManifest={runtime.manifest} onClose={() => setSceneSettingsOpen(false)} onApplied={runtime.reloadScene} /> : null}
-          {extensionsOpen ? <WorldExtensionsDialog worldName={world.name} spatialEnabled={spatialExtensionEnabled} onSpatialEnabledChange={setSpatialExtension} onOpenSpatial={() => { setExtensionsOpen(false); setSpatialOpen(true) }} onClose={() => setExtensionsOpen(false)} /> : null}
+          {ambientSettingsOpen ? renderWorldOverlay(<AmbientLifeDialog worldId={world.id} worldName={world.name} onClose={() => setAmbientSettingsOpen(false)} />) : null}
+          {sceneSettingsOpen ? renderWorldOverlay(<WorldSceneDialog world={world} currentManifest={runtime.manifest} onClose={() => setSceneSettingsOpen(false)} onApplied={runtime.reloadScene} />) : null}
+          {extensionsOpen ? renderWorldOverlay(<WorldExtensionsDialog worldName={world.name} spatialEnabled={spatialExtensionEnabled} onSpatialEnabledChange={setSpatialExtension} onOpenSpatial={() => { setExtensionsOpen(false); setSpatialOpen(true) }} onClose={() => setExtensionsOpen(false)} />) : null}
 
           {employees.length === 0 ? <div className="world-runtime-dock__empty"><strong>这个世界还没有角色</strong><span>请到右侧「角色」新增角色。世界视图只负责展示和互动，不再承担角色管理。</span></div> : null}
 
@@ -338,7 +339,7 @@ export function WorldRuntimeDock({ demoMode, world, employees, dossiers, liveEna
         </div>
       </section>
 
-      {spatialOpen && spatialExtensionEnabled ? <Suspense fallback={<div className="modal-backdrop" role="status"><div className="world-runtime-dock world-runtime-dock--loading"><Buildings size={28} /><strong>正在加载 3D 扩展</strong><span>核心世界保持运行，Three.js 与 VRM 仅在此时加载…</span></div></div>}>
+      {spatialOpen && spatialExtensionEnabled ? renderWorldOverlay(<Suspense fallback={<div className="modal-backdrop" role="status"><div className="world-runtime-dock world-runtime-dock--loading"><Buildings size={28} /><strong>正在加载 3D 扩展</strong><span>核心世界保持运行，Three.js 与 VRM 仅在此时加载…</span></div></div>}>
         <SpatialWorldExtensionDialog
           worldName={world.name}
           manifest={runtime.manifest}
@@ -353,9 +354,9 @@ export function WorldRuntimeDock({ demoMode, world, employees, dossiers, liveEna
           onSelectObject={(objectId) => setSelectedObjectId(objectId)}
           onClose={() => setSpatialOpen(false)}
         />
-      </Suspense> : null}
+      </Suspense>) : null}
 
-      {peerInitiator === undefined ? null : (
+      {peerInitiator === undefined ? null : renderWorldOverlay(
         <PeerCollaborationDialog
           initiator={peerInitiator}
           employees={employees}
@@ -367,6 +368,11 @@ export function WorldRuntimeDock({ demoMode, world, employees, dossiers, liveEna
       )}
     </>
   )
+}
+
+/** Keep fixed World dialogs outside the Dock's filtered/clipped stacking context. */
+function renderWorldOverlay(overlay: ReactNode): ReactNode {
+  return typeof document === 'undefined' ? overlay : createPortal(overlay, document.body)
 }
 
 function readStaticMode(worldId: string): boolean {
