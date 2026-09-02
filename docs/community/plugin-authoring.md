@@ -66,3 +66,15 @@ instruction 会进入真实 Agent 运行 prompt，因此仍应视为高影响内
 以 `marketplace/plugins/official-meeting-notes` 为当前格式参考。插件 PR MUST 覆盖：命令精确匹配、`always`、空格/换行参数、普通消息不触发、三种 mode、优先级与多插件确定性、安装前权限展示、清单或入口篡改拒绝，以及真实 conversation route 中的 prompt 变换。
 
 当前仓库没有 `dsh-cyber package pack|verify|test|publish` 或 publisher CLI，也没有插件监控页面和 `system.prompt.append` 审计事件。上述能力只能作为 ROADMAP 提案，不能写入当前使用说明。
+
+## 扩展市场生成的插件（插件 → 自定义插件）
+
+扩展市场「插件 → 自定义插件」生成的插件包就是上面这种形状，没有更轻的“生成插件”格式：`kind: "plugin"`、`capabilities` 恰好为 `["prompt:transform"]`、`dataEgress` 为空、一个指向 `transforms.json` 的 `prompt-transform` 入口，入口内容由同一个 prompt-transform parser 校验后才写盘。分析器只提议 `displayName`、`summary` 和 `transforms`（trigger、description、instruction、mode、priority）；包 ID（`generated.plugin.<hex>`）、版本、`files` 与哈希、入口和认证状态都由宿主分配，草稿里任何 capability、egress、kind、文件、路径或包 ID 都会被丢弃。
+
+在 parser 规则之上，生成的插件还必须满足：
+
+- `trigger` 只能是 `/` 开头的显式命令，不能是 `always`，在包内不能重复；
+- `trigger` 不能与共享市场目录（当前即官方插件）中已声明的触发词相同，发布时会以 `plugin_trigger_reserved` 拒绝；同一工作区内多个生成插件若使用相同触发词，运行时按 `priority` 降序、再按包 ID 顺序叠加应用，与其他插件之间的规则相同；
+- `instruction` 与 `description` 是纯文本：代码围栏、`import`/`def` 等代码写法、shell 命令、网址、密钥或令牌形状的文本，以及直接复制原始资料的段落，分析时会被丢弃，发布时会被拒绝。
+
+生成的插件只对发布它的工作区可见，安装与启用走与官方插件相同的市场审阅路径；安装到某个世界后，在该世界的会话中输入触发词即可使用。

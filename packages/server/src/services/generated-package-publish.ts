@@ -9,7 +9,7 @@ import { assertAvatarImage, type AvatarMediaType } from './avatar-image-guard.js
 /**
  * Host boundary every generator publish walks.
  *
- * The Character, World and Skin Generators all write packages into a
+ * The Character, World, Skin and Plugin Generators all write packages into a
  * workspace-scoped generated marketplace root. The functions here are the
  * shared containment rules for that write: every path component below the
  * host root is `lstat`ed so a planted symlink cannot redirect a publish, a
@@ -38,7 +38,7 @@ export interface GeneratedPackagePaths {
 export async function prepareGeneratedPackagePaths(
   containmentRoot: string,
   marketplaceRoot: string,
-  marketSegment: 'talent' | 'themes' | 'skins',
+  marketSegment: 'talent' | 'themes' | 'skins' | 'plugins',
   packageId: string,
   stagingToken: string,
 ): Promise<GeneratedPackagePaths> {
