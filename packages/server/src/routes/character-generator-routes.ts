@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { lstat, mkdir, rename, rm } from 'node:fs/promises'
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { rm } from 'node:fs/promises'
+import { resolve } from 'node:path'
 
 import { worldTemplate } from '@dsh-cyber/catalog'
 import type {
@@ -36,14 +36,15 @@ import {
   type CharacterImportAnalyzerPort,
 } from '../services/character-import-analyzer.js'
 import { compileEmployeeBlueprintPackage } from '../services/employee-blueprint-package-compiler.js'
+import {
+  BUILTIN_AVATAR_PACKAGE_IDS,
+  DEFAULT_AVATAR_PACKAGE_ID,
+  commitGeneratedPackage,
+  loadBuiltinAvatarPreview,
+  prepareGeneratedPackagePaths,
+} from '../services/generated-package-publish.js'
 import type { SkillCatalogService } from '../services/skill-catalog-service.js'
 
-const BUILTIN_AVATAR_PACKAGE_IDS = [
-  'official-archivist',
-  'official-observatory-xenobiologist',
-  'official-studio-visual-director',
-  'official-tavern-storyweaver',
-] as const
 /**
  * Display metadata for the host-owned Character Generator safe capability
  * catalog. It only labels the ids that CHARACTER_GENERATOR_CAPABILITIES already
@@ -55,7 +56,6 @@ const CAPABILITY_CATALOG: CharacterGeneratorCapabilityCatalogItem[] = [
   { id: 'knowledge:read', displayName: '读取知识', summary: '允许角色读取当前世界已授权的知识资料。' },
   { id: 'artifact:read', displayName: '读取产物', summary: '允许角色读取当前世界已发布的产物。' },
 ]
-const DEFAULT_AVATAR_PACKAGE_ID = 'official-archivist'
 
 export interface CharacterGeneratorRoutesDependencies {
   store: SqliteStore
@@ -142,26 +142,23 @@ export function registerCharacterGeneratorRoutes(
     const selection = parseAvatarSelection(body.avatar)
     const avatar = await loadPreview(packageCatalog, selection)
     const marketplaceRoot = resolve(dependencies.resolveMarketplaceRoot(workspaceId))
-    const talentRoot = join(marketplaceRoot, 'talent')
     // Generated roots are per workspace, so the containment boundary falls back
     // to this workspace's own root rather than to a shared one.
     const containmentRoot = declaredContainmentRoot ?? marketplaceRoot
     const packageId = `generated.character.${randomUUID().replaceAll('-', '')}`
     const packageVersion = '1.0.0'
-    const stagingDirectory = join(talentRoot, `.${packageId}.staging-${randomUUID().replaceAll('-', '')}`)
-    const installedDirectory = join(talentRoot, packageId)
     const analysis = draftAnalysis(draft)
     const originalFormat = source.kind === 'file' && source.fileName?.toLowerCase().endsWith('.md') === true ? 'md' : 'txt'
+    let stagingDirectory: string | undefined
+    let installedDirectory: string | undefined
     let staged = false
     let published = false
     try {
       // Create and verify the target tree inside the try so a hostile or broken
       // layout answers with a publish failure instead of an internal error.
-      await mkdirContained(containmentRoot, marketplaceRoot)
-      await mkdirContained(containmentRoot, talentRoot)
-      assertDirectChild(talentRoot, stagingDirectory)
-      assertDirectChild(talentRoot, installedDirectory)
-      await rejectExisting(installedDirectory)
+      const paths = await prepareGeneratedPackagePaths(containmentRoot, marketplaceRoot, 'talent', packageId, randomUUID().replaceAll('-', ''))
+      stagingDirectory = paths.stagingDirectory
+      installedDirectory = paths.installedDirectory
       const compiled = await compileEmployeeBlueprintPackage({
         sourceDirectory: stagingDirectory,
         packageId,
@@ -191,13 +188,7 @@ export function registerCharacterGeneratorRoutes(
         },
       })
       staged = true
-      // Re-verify immediately before the rename: compiling the package widened
-      // the window in which the tree could have been swapped underneath us, and
-      // rename would otherwise follow a link or replace a path outside the root.
-      await assertContainedDirectory(containmentRoot, stagingDirectory)
-      await assertContainedDirectory(containmentRoot, talentRoot)
-      await rejectExisting(installedDirectory)
-      await rename(stagingDirectory, installedDirectory)
+      await commitGeneratedPackage(containmentRoot, paths)
       staged = false
       published = true
       const item = await packageCatalog.find(packageId, packageVersion, { workspaceId })
@@ -205,8 +196,8 @@ export function registerCharacterGeneratorRoutes(
       const output: CharacterImportPublishResult = { item, blueprint: compiled.blueprint }
       writeJson(response, 201, output satisfies CharacterImportPublishResult)
     } catch (error) {
-      if (staged) await rm(stagingDirectory, { recursive: true, force: true }).catch(() => undefined)
-      if (published) await rm(installedDirectory, { recursive: true, force: true }).catch(() => undefined)
+      if (staged && stagingDirectory !== undefined) await rm(stagingDirectory, { recursive: true, force: true }).catch(() => undefined)
+      if (published && installedDirectory !== undefined) await rm(installedDirectory, { recursive: true, force: true }).catch(() => undefined)
       if (error instanceof HttpError) throw error
       throw new HttpError(422, 'character_publish_failed', error instanceof Error ? error.message : '角色包发布失败')
     }
@@ -359,19 +350,7 @@ async function loadPreview(
 ): Promise<{ bytes: Buffer; mimeType: AvatarMediaType }> {
   const chosen = selection ?? { kind: 'builtin' as const, id: DEFAULT_AVATAR_PACKAGE_ID }
   try {
-    if (chosen.kind === 'builtin') {
-      if (!(BUILTIN_AVATAR_PACKAGE_IDS as readonly string[]).includes(chosen.id)) {
-        throw new HttpError(422, 'character_avatar_not_allowed', '只能使用指定的官方角色预览。')
-      }
-      const item = await packageCatalog.find(chosen.id)
-      if (item === undefined || item.market !== 'talent' || !item.verified || item.manifest.kind !== 'employee-blueprint') {
-        throw new HttpError(422, 'character_avatar_not_found', '官方角色预览不可用。')
-      }
-      const preview = item.manifest.files.find((file) => /\.(?:png|jpe?g|webp)$/iu.test(file.path))
-      if (preview === undefined) throw new HttpError(422, 'character_avatar_missing', '官方角色预览缺失。')
-      const bytes = await packageCatalog.readDeclaredFile(item, preview.path)
-      return { bytes, mimeType: assertAvatarImage(bytes) }
-    }
+    if (chosen.kind === 'builtin') return await loadBuiltinAvatarPreview(packageCatalog, chosen.id)
     // Nothing the client declared is trusted here. The file name is validated
     // but never used to build a path, the encoded payload is bounded before it
     // is decoded, and the media type comes from the bytes — the declaration is
@@ -453,81 +432,5 @@ function draftAnalysis(draft: ReturnType<typeof normalizeCharacterBlueprintDraft
     sourceSummary: draft.sourceSummary,
     sourceRefs: [...draft.sourceRefs],
     ...(draft.embodiment === undefined ? {} : { embodiment: structuredClone(draft.embodiment) as unknown as JsonObject }),
-  }
-}
-
-/**
- * Assert that `target` is a real directory reachable from `root` without
- * crossing a symlink. Every component below the root is `lstat`ed in turn, so a
- * link planted at any depth — the target itself included — fails instead of
- * silently redirecting the write.
- */
-async function assertContainedDirectory(root: string, target: string): Promise<void> {
-  for (const path of containedPathChain(root, target)) await assertRealDirectory(path)
-}
-
-/**
- * Create `target` below `root`, verifying each level before descending into it.
- *
- * `mkdir -p` follows a symlinked component and would materialize the tree at
- * the link's destination before any check could object, so each segment is
- * inspected first and a link anywhere on the way aborts before anything outside
- * the root is created.
- */
-async function mkdirContained(root: string, target: string): Promise<void> {
-  await assertRealDirectory(resolve(root))
-  for (const path of containedPathChain(root, target)) {
-    const existing = await lstat(path).catch((error: NodeJS.ErrnoException) => {
-      if (error.code === 'ENOENT') return undefined
-      throw error
-    })
-    if (existing === undefined) await mkdir(path, { recursive: true, mode: 0o700 })
-    // Re-check after creating: the segment may have been raced into a link.
-    await assertRealDirectory(path)
-  }
-}
-
-/**
- * Every path from `root` down to `target`, exclusive of the root itself.
- *
- * Components at or above the root are never inspected: the root is host
- * configuration, and platforms whose state paths are themselves symlinks
- * (`/var` on macOS) would otherwise never pass.
- */
-function containedPathChain(root: string, target: string): string[] {
-  const resolvedRoot = resolve(root)
-  const relativePath = relative(resolvedRoot, resolve(target))
-  if (relativePath.startsWith('..') || isAbsolute(relativePath)) {
-    throw new Error('Character generator marketplace path escaped its root')
-  }
-  const chain: string[] = []
-  let current = resolvedRoot
-  for (const segment of relativePath === '' ? [] : relativePath.split(sep)) {
-    current = join(current, segment)
-    chain.push(current)
-  }
-  return chain
-}
-
-async function assertRealDirectory(path: string): Promise<void> {
-  const info = await lstat(path)
-  if (info.isSymbolicLink() || !info.isDirectory()) {
-    throw new Error('Character generator marketplace path crosses a symlink')
-  }
-}
-
-/** Guard the package directory names against ever gaining a path segment. */
-function assertDirectChild(parent: string, child: string): void {
-  if (dirname(resolve(child)) !== resolve(parent)) {
-    throw new Error('Generated character package path is not a direct child of the talent root')
-  }
-}
-
-async function rejectExisting(path: string): Promise<void> {
-  try {
-    await lstat(path)
-    throw new Error('Generated character package path already exists')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
   }
 }
