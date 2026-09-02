@@ -1,0 +1,25 @@
+/*
+ * Plugin Generator additions. The four-step chrome, fields, fieldsets, errors
+ * and the publish card come from CharacterGenerator.css; only the transform
+ * editor cards and the inline effect preview live here.
+ */
+.plugin-generator-transforms { display: grid; gap: 12px; }
+.plugin-generator-transform { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-md, 10px); background: var(--surface-2); }
+.plugin-generator-transform__header { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.plugin-generator-transform__header code { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 13px; overflow-wrap: anywhere; }
+.plugin-generator-transform__header .icon-button { margin-left: auto; }
+.plugin-generator-mode { padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.plugin-generator-transform__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
+.plugin-generator-transform input[type='text'], .plugin-generator-transform input:not([type]) { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); }
+.plugin-generator-transform textarea { font-family: inherit; }
+.plugin-generator-transform select, .plugin-generator-transform input[type='number'] { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-md, 10px); background: var(--surface-1, var(--surface-2)); color: var(--text); font: inherit; }
+.plugin-generator-transform .is-reserved { color: var(--warning, #e6b940); }
+/* The effect preview is a self-contained rendering of the runtime prompt for one sample message. */
+.plugin-generator-effect { display: grid; gap: 6px; font-size: 12px; color: var(--text-muted); }
+.plugin-generator-effect code { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); color: var(--text); }
+.plugin-generator-effect pre { margin: 0; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; border: 1px dashed var(--border); border-radius: 8px; background: var(--surface-1, transparent); color: var(--text); font: inherit; font-size: 12px; line-height: 1.5; }
+.plugin-generator-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.plugin-generator-chips code { padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; }
+@media (max-width: 720px) {
+  .plugin-generator-transform__grid { grid-template-columns: 1fr; }
+}

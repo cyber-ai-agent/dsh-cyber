@@ -12,6 +12,7 @@ import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import {
   CHARACTER_GENERATOR_CAPABILITIES,
+  REVIEWED_PROSE_CODE_LIKE,
   WORLD_SOURCE_SUBJECT,
   echoesImportSource,
   normalizeAnalyzedCharacterDraft,
@@ -60,12 +61,8 @@ const MAX_RULE = 200
 const MAX_SOURCE_SUMMARY = 500
 const MAX_SOURCE_REFS = 16
 const SCENE_ID_SET = new Set<string>(WORLD_GENERATOR_SCENE_PACKAGE_IDS)
-/**
- * Reviewed world text is prose. Markup, code fences, braces and shell markers
- * have no place in a rule or a workflow step, and are the shapes prompt
- * injection and pasted code take when a model copies them through.
- */
-const CODE_LIKE = /[`{}<>|]|#!|\$[\w{(]|=>|;\s*$|\b(?:function|import|export|require|eval|exec|sudo|curl|wget|chmod|rm\s+-)\b/u
+/** Reviewed world text is prose; the guard is the one every generator's prose shares. */
+const CODE_LIKE = REVIEWED_PROSE_CODE_LIKE
 
 export interface WorldImportAnalyzerPort {
   analyze(input: WorldImportAnalyzeInput): Promise<WorldImportAnalyzeResult>

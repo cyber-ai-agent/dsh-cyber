@@ -168,8 +168,8 @@ export class CharacterImportAnalyzer implements CharacterImportAnalyzerPort {
  * noun in the message differ; the validation is the same trust boundary.
  */
 export interface ImportSourceSubject {
-  /** Error code prefix: `character`, `world` or `skin`. */
-  code: 'character' | 'world' | 'skin'
+  /** Error code prefix: `character`, `world`, `skin` or `plugin`. */
+  code: 'character' | 'world' | 'skin' | 'plugin'
   /** Noun used in user-facing messages. */
   noun: string
 }
@@ -177,6 +177,16 @@ export interface ImportSourceSubject {
 const CHARACTER_SOURCE_SUBJECT: ImportSourceSubject = { code: 'character', noun: '角色' }
 export const WORLD_SOURCE_SUBJECT: ImportSourceSubject = { code: 'world', noun: '世界' }
 export const SKIN_SOURCE_SUBJECT: ImportSourceSubject = { code: 'skin', noun: '皮肤' }
+export const PLUGIN_SOURCE_SUBJECT: ImportSourceSubject = { code: 'plugin', noun: '插件' }
+
+/**
+ * Reviewed generator text is prose. Markup, code fences, braces and shell
+ * markers have no place in a world rule, a workflow step or a plugin
+ * instruction, and are the shapes prompt injection and pasted code take when
+ * a model copies them through. Shared by the World and Plugin Generators; the
+ * Skin Generator keeps a stricter CSS-oriented variant of its own.
+ */
+export const REVIEWED_PROSE_CODE_LIKE = /[`{}<>|]|#!|\$[\w{(]|=>|;\s*$|\b(?:function|import|export|require|eval|exec|sudo|curl|wget|chmod|rm\s+-)\b/u
 
 /** Normalize and validate the source envelope before model dispatch. */
 export function normalizeCharacterSource(input: CharacterSourceInput): CharacterSourceInput {

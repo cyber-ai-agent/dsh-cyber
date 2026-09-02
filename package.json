@@ -14,7 +14,7 @@
     "clean": "tsc -b --clean",
     "test": "pnpm run build && vitest run",
     "test:e2e": "pnpm run build && playwright test",
-    "test:smoke": "playwright test e2e/conversation-control-runtime-lanes.spec.ts e2e/group-task-router.spec.ts e2e/work-system.spec.ts e2e/world-artifact-center.spec.ts e2e/world-knowledge-graph.spec.ts e2e/digital-human-world.spec.ts e2e/role-runtime-permission.spec.ts e2e/i18n-locale.spec.ts e2e/creative-workshop-v2.spec.ts e2e/character-generator-v1.spec.ts e2e/world-generator-v1.spec.ts e2e/skin-generator-v1.spec.ts e2e/settings-model-ux.spec.ts e2e/world-scene-skin-decoupling.spec.ts e2e/world-lifecycle.spec.ts e2e/world-teaching-result-surface.spec.ts",
+    "test:smoke": "playwright test e2e/conversation-control-runtime-lanes.spec.ts e2e/group-task-router.spec.ts e2e/work-system.spec.ts e2e/world-artifact-center.spec.ts e2e/world-knowledge-graph.spec.ts e2e/digital-human-world.spec.ts e2e/role-runtime-permission.spec.ts e2e/i18n-locale.spec.ts e2e/creative-workshop-v2.spec.ts e2e/character-generator-v1.spec.ts e2e/world-generator-v1.spec.ts e2e/skin-generator-v1.spec.ts e2e/plugin-generator-v1.spec.ts e2e/settings-model-ux.spec.ts e2e/world-scene-skin-decoupling.spec.ts e2e/world-lifecycle.spec.ts e2e/world-teaching-result-surface.spec.ts",
     "test:migration": "vitest run packages/persistence/tests/sqlite-store.test.ts packages/persistence/tests/conversation-queue-lease.test.ts packages/persistence/tests/completion-job-repository.test.ts packages/server/tests/local-backup-restore.test.ts",
     "test:schema": "vitest run packages/contracts/tests",
     "test:watch": "vitest",

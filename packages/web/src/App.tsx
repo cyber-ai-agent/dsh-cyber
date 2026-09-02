@@ -2627,6 +2627,9 @@ export default function App() {
           onSkinPublished={async () => {
             await Promise.all([loadPackages(), searchMarketplace('skin')])
           }}
+          onPluginPublished={async () => {
+            await Promise.all([loadPackages(), searchMarketplace('plugin')])
+          }}
           onUsePlugin={(command) => {
             setPackageMarketOpen(false)
             setDraft(`${command} `)

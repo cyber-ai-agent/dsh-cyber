@@ -104,7 +104,7 @@ import type { CharacterSkillActionRepository } from './skills/skill-action-repos
 import type { CharacterSkillAdapterRegistry } from './skills/skill-adapter.js'
 import type { WorldSkillAvailabilityPort } from './services/world-skill-availability.js'
 import type { CreativeWorkshopDraftGeneratorPort } from './services/creative-workshop-draft-generator.js'
-import { composeGenerators, type CharacterImportAnalyzerPort, type SkinImportAnalyzerPort, type WorldImportAnalyzerPort } from './composition/compose-generators.js'
+import { composeGenerators, type CharacterImportAnalyzerPort, type PluginImportAnalyzerPort, type SkinImportAnalyzerPort, type WorldImportAnalyzerPort } from './composition/compose-generators.js'
 import { composeCharacterGeneratorMarketplace } from './services/character-generator-marketplace.js'
 import { createWorldManagementHost } from './skills/world-management-host.js'
 import { RuntimeStreamHub } from './streams/runtime-stream-hub.js'
@@ -144,6 +144,8 @@ export interface CyberServerOptions {
   worldImportAnalyzer?: WorldImportAnalyzerPort
   /** Skin Generator analyzer; tests and CI pass a deterministic stub. */
   skinImportAnalyzer?: SkinImportAnalyzerPort
+  /** Plugin Generator analyzer; tests and CI pass a deterministic stub. */
+  pluginImportAnalyzer?: PluginImportAnalyzerPort
   /**
    * Decides the speaking roster of a group turn.
    *
