@@ -141,3 +141,65 @@ describe('prompt cache policy', () => {
     expect(promptCacheKey(policy)).toBeUndefined()
   })
 })
+
+describe('world context in the cacheable prefix', () => {
+  const WORLD_RULES = [
+    '[当前世界设定]',
+    '世界观：雨夜学院的每一条结论都要附上出处。',
+    '当前世界与其他世界的数据、文件、记忆相互隔离。',
+  ].join('\n')
+
+  function worldContext(text: string, revision: string): ContextLayer {
+    return composeContextLayer({
+      id: 'world-context:world-1',
+      kind: 'world-context',
+      revision,
+      text,
+      sourceRefs: [{ kind: 'world', id: 'world-1', revision }],
+    })
+  }
+
+  it('folds the world rules into the prefix hash, so a settings edit moves the cache identity', () => {
+    const stableIdentity = identity()
+    const before = composeContextEnvelope({
+      stableIdentity,
+      worldContext: worldContext(WORLD_RULES, '1'),
+      currentRequest: composeContextLayer({ id: 'request:1', kind: 'current-request', text: '第一轮' }),
+    })
+    const after = composeContextEnvelope({
+      stableIdentity,
+      worldContext: worldContext(`${WORLD_RULES}\n新增：讲解引用的事实保留来源。`, '2'),
+      currentRequest: composeContextLayer({ id: 'request:2', kind: 'current-request', text: '第二轮' }),
+    })
+    const none = composeContextEnvelope({
+      stableIdentity,
+      currentRequest: composeContextLayer({ id: 'request:3', kind: 'current-request', text: '第三轮' }),
+    })
+
+    expect(before.stableContextHash).toBe(stableContextHash(stableIdentity, before.worldContext))
+    expect(after.stableContextHash).not.toBe(before.stableContextHash)
+    expect(none.stableContextHash).not.toBe(before.stableContextHash)
+    // An envelope without world context hashes exactly as it did before the layer existed.
+    expect(none.stableContextHash).toBe(stableContextHash(stableIdentity))
+  })
+
+  it('keeps the prefix hash fixed across turns that only move dynamic layers', () => {
+    const stableIdentity = identity()
+    const turn = (index: number) => composeContextEnvelope({
+      stableIdentity,
+      worldContext: worldContext(WORLD_RULES, '1'),
+      recentConversation: composeContextLayer({
+        id: 'recent-conversation:session-1',
+        kind: 'recent-conversation',
+        text: `${index} · 用户：第 ${index} 轮请求`,
+      }),
+      currentRequest: composeContextLayer({ id: `request:${index}`, kind: 'current-request', text: `第 ${index} 轮` }),
+    })
+    const first = turn(1)
+    const second = turn(2)
+    expect(second.currentRequest.contentHash).not.toBe(first.currentRequest.contentHash)
+    expect(second.stableContextHash).toBe(first.stableContextHash)
+    expect(contextEnvelopeLayers(second).map((layer) => layer.kind).slice(0, 2))
+      .toEqual(['stable-identity', 'world-context'])
+  })
+})

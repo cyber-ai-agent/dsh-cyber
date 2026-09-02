@@ -119,7 +119,8 @@ export class DomainEventTraceAdapter implements WorldTraceAdapter<'domain-event'
       ...(presentation.detail === undefined ? {} : { detail: presentation.detail }),
       actorId: value.actorId,
       ...(value.sessionId === undefined ? {} : { sessionId: value.sessionId }),
-      ...(presentation.lifecycle === 'task' ? { taskId: traceTurnId ?? `${value.sessionId ?? value.correlationId ?? value.id}:${value.actorId}` } : {}),
+      // `task.*` lifecycle events carry a run and a turn, never a WorkTask id,
+      // so the entry carries no task: `taskId` is reserved for real tasks.
       sourceKind: 'domain-event',
       sourceId: value.id,
       sourceSequence: value.sequence,

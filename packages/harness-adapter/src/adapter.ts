@@ -86,6 +86,8 @@ interface EmployeeLane {
   permissionMode: AgentPermissionMode | undefined
   /** The directory this lane's runtime was started in. */
   workspacePath: string | undefined
+  /** The persona this lane's runtime was started with; it is the process's system prompt. */
+  persona: string | undefined
   runtime: HarnessRuntime | undefined
   agentSessionId: string | undefined
   current: LaneTask | undefined
@@ -206,9 +208,15 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     // running after the owner revokes a file permission would keep the
     // directory it was given. Both halves of the sandbox have to invalidate
     // the lane, not just the permission mode.
+    //
+    // The persona is fixed the same way: it is bound as the process's system
+    // prompt, and it now carries the world's stable rules. A lane that kept
+    // running after the owner edited those rules (or the persona itself)
+    // would keep answering under the old ones.
     if (
       (lane.permissionMode !== undefined && lane.permissionMode !== permissionMode) ||
-      (lane.workspacePath !== undefined && lane.workspacePath !== workspacePath)
+      (lane.workspacePath !== undefined && lane.workspacePath !== workspacePath) ||
+      (lane.persona !== undefined && lane.persona !== request.revision.persona)
     ) {
       // Permission is lane-local. Changing a private chat from read-only to
       // workspace-write must not tear down the same employee's group lane.
@@ -236,6 +244,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       }
       lane.permissionMode = permissionMode
       lane.workspacePath = workspacePath
+      lane.persona = request.revision.persona
       lane.runtime = runtime
     }
     // The 0.1.2-alpha.3 SDK server creates its session through
@@ -313,6 +322,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       conversationId,
       permissionMode: undefined,
       workspacePath: undefined,
+      persona: undefined,
       runtime: undefined,
       agentSessionId: undefined,
       current: undefined,

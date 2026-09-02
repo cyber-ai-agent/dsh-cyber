@@ -23,6 +23,17 @@ export interface RuntimeContextContributor {
   contribute(input: RuntimeContextInput): Promise<RuntimeContextSection | undefined> | RuntimeContextSection | undefined
 }
 
+/**
+ * Composes the per-turn request a runtime lane receives.
+ *
+ * The world's stable rules are deliberately *not* part of this output any
+ * more. They are rendered once per character and world as the envelope's
+ * `world-context` layer by `CharacterProfileRuntime`, so they sit in the
+ * cacheable prefix in front of the retrieved memories instead of being
+ * re-sent behind them on every turn. What is left here is what genuinely
+ * changes per request: the knowledge retrieved for this prompt and the
+ * prompt itself.
+ */
 export interface WorldRuntimePromptComposer {
   composeRuntimePrompt(worldId: string, character: EmployeeInstance, prompt: string): Promise<string>
   composeGroupRuntimePrompt(worldId: string, prompt: string): Promise<string>
@@ -33,29 +44,22 @@ export interface ComposedRuntimeContext {
   sections: RuntimeContextSection[]
 }
 
-/** Provider-neutral seam for world settings, identity, knowledge and facts. */
-export class WorldRuntimeContextComposer {
+/** Provider-neutral seam for per-request knowledge and facts. */
+export class WorldRuntimeContextComposer implements WorldRuntimePromptComposer {
   readonly #contributors: readonly RuntimeContextContributor[]
-  readonly #settings: WorldRuntimePromptComposer | undefined
 
   constructor(options: readonly RuntimeContextContributor[] | {
     contributors?: readonly RuntimeContextContributor[]
-    settings?: WorldRuntimePromptComposer
   } = []) {
-    const configured = Array.isArray(options)
-      ? undefined
-      : options as {
-          contributors?: readonly RuntimeContextContributor[]
-          settings?: WorldRuntimePromptComposer
-        }
-    const contributors = configured?.contributors ?? options as readonly RuntimeContextContributor[]
+    const contributors = Array.isArray(options)
+      ? options as readonly RuntimeContextContributor[]
+      : (options as { contributors?: readonly RuntimeContextContributor[] }).contributors ?? []
     const ids = new Set<string>()
     for (const contributor of contributors) {
       if (!contributor.id.trim() || ids.has(contributor.id)) throw new Error(`Duplicate runtime context contributor: ${contributor.id}`)
       ids.add(contributor.id)
     }
     this.#contributors = [...contributors]
-    this.#settings = configured?.settings
   }
 
   async compose(input: RuntimeContextInput): Promise<ComposedRuntimeContext> {
@@ -79,18 +83,12 @@ export class WorldRuntimeContextComposer {
 
   async composeRuntimePrompt(worldId: string, character: EmployeeInstance, prompt: string): Promise<string> {
     const contributed = await this.#contributedText({ worldId, characterId: character.id, prompt, group: false })
-    const request = [contributed, prompt.trim()].filter(Boolean).join('\n\n')
-    return this.#settings === undefined
-      ? ['[用户请求]', request].join('\n')
-      : this.#settings.composeRuntimePrompt(worldId, character, request)
+    return ['[用户请求]', [contributed, prompt.trim()].filter(Boolean).join('\n\n')].join('\n')
   }
 
   async composeGroupRuntimePrompt(worldId: string, prompt: string): Promise<string> {
     const contributed = await this.#contributedText({ worldId, prompt, group: true })
-    const request = [contributed, prompt.trim()].filter(Boolean).join('\n\n')
-    return this.#settings === undefined
-      ? ['[用户请求]', request].join('\n')
-      : this.#settings.composeGroupRuntimePrompt(worldId, request)
+    return ['[用户请求]', [contributed, prompt.trim()].filter(Boolean).join('\n\n')].join('\n')
   }
 
   async #contributedText(input: RuntimeContextInput): Promise<string> {

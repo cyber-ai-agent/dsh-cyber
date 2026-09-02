@@ -3,6 +3,7 @@ import { open, readFile, rename } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import type { AgentPermissionMode, EmployeeInstance, ReasoningEffort, WorldSettings } from '@dsh-cyber/contracts'
+import type { ContextConversationLane } from './conversation-context-composer.js'
 import type { WorldRootService } from './world-root-service.js'
 
 const reasoning = new Set<ReasoningEffort>(['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
@@ -102,16 +103,37 @@ export class WorldSettingsService {
     return { settings: next, revision }
   }
 
-  async composeRuntimePrompt(worldId: string, character: EmployeeInstance, prompt: string): Promise<string> {
-    const settings = await this.get(worldId)
-    return `${worldHeader(settings)}\n${characterIdentity(character)}\n\n[用户请求]\n${prompt}`
-  }
-
-  async composeGroupRuntimePrompt(worldId: string, prompt: string): Promise<string> {
-    const settings = await this.get(worldId)
-    return `${worldHeader(settings)}\n多人会话中的每个角色都必须保持自己的当前身份、知识边界和立场，不替其他角色发言。角色的最新 Persona / Identity 优先于创建时模板中的旧岗位。\n\n[用户请求]\n${prompt}`
+  /**
+   * The world's stable rules for one character's turn: lore, scenario, the
+   * user's identity, the isolation rule and the response language, followed by
+   * the identity note for the lane the turn runs in.
+   *
+   * This is the `world-context` layer of the envelope, not a request. It reads
+   * nothing that moves per turn - no clock, no counter, no retrieval - so two
+   * turns of the same character in the same world render byte-identical text
+   * until the settings revision changes. That is what lets it sit in the
+   * cacheable prefix instead of behind the retrieved memories.
+   */
+  async composeWorldContext(input: {
+    worldId: string
+    character: EmployeeInstance
+    lane: ContextConversationLane
+  }): Promise<WorldContextText> {
+    const snapshot = await this.getSnapshot(input.worldId)
+    const identity = input.lane === 'direct' || input.lane === 'unknown'
+      ? characterIdentity(input.character)
+      : GROUP_IDENTITY_NOTE
+    return { text: `${worldHeader(snapshot.settings)}\n${identity}`, revision: snapshot.revision }
   }
 }
+
+export interface WorldContextText {
+  text: string
+  /** The world settings revision the text was rendered from. */
+  revision: number
+}
+
+const GROUP_IDENTITY_NOTE = '多人会话中的每个角色都必须保持自己的当前身份、知识边界和立场，不替其他角色发言。角色的最新 Persona / Identity 优先于创建时模板中的旧岗位。'
 
 /**
  * One in-flight settings write per world, shared by every service instance.

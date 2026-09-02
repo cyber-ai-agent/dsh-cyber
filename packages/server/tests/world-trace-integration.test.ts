@@ -78,6 +78,21 @@ describe('World Trace HTTP and live recovery', () => {
     const durableTurn = history.items.find((entry) => entry.sourceKind === 'agent-run')
     expect(durableTurn?.tokenUsage).toEqual({ prompt: 120, completion: 30, total: 150 })
     expect(durableTurn?.actorId).toBe(employee.id)
+    // A chat run belongs to no task, and its card says so by carrying none.
+    expect(durableTurn).not.toHaveProperty('taskId')
+    // The D4 snapshot was written before the turn ran, so the card carries
+    // its numbers, and the run's own context page answers with the same run.
+    expect(durableTurn?.context?.layers.length).toBeGreaterThan(0)
+    expect(durableTurn?.context?.totalTokenEstimate).toBeGreaterThan(0)
+    const runContext = await json(first.origin, `/api/agent-runs/${durableTurn!.runId}/context-inspection`)
+    expect(runContext.response.status).toBe(200)
+    expect(runContext.body.inspection?.agentRunId).toBe(durableTurn!.runId)
+    expect(runContext.body.snapshot?.totalTokenEstimate).toBe(durableTurn?.context?.totalTokenEstimate)
+    // The snapshot half is numbers only; the Inspector half keeps its own
+    // redaction (a runtime secret never reaches it either way).
+    expect(JSON.stringify(runContext.body.snapshot)).not.toContain('完整用户提示')
+    expect(JSON.stringify(runContext.body)).not.toContain('sk-1234567890123456')
+    expect((await json(first.origin, '/api/agent-runs/no-such-run/context-inspection')).response.status).toBe(404)
     expect(liveTurn?.id).toBe(durableTurn?.id)
     expect(history.items.filter((entry) => entry.id === durableTurn?.id)).toHaveLength(1)
     const filtered = await json(first.origin, `/api/worlds/${world.id}/trace?category=tool&status=success&actorId=${employee.id}&limit=10`)
@@ -90,6 +105,12 @@ describe('World Trace HTTP and live recovery', () => {
     const restarted = await start(stateRoot)
     const restored = (await json(restarted.origin, `/api/worlds/${world.id}/trace?limit=200`)).body as WorldTracePage
     expect(restored.items.map((entry) => entry.id)).toContain(durableTurn?.id)
+    // After a restart the Inspector's record is gone but the durable snapshot
+    // still answers — with numbers, and honestly without the full view.
+    const afterRestart = await json(restarted.origin, `/api/agent-runs/${durableTurn!.runId}/context-inspection`)
+    expect(afterRestart.response.status).toBe(200)
+    expect(afterRestart.body.inspection).toBeUndefined()
+    expect(afterRestart.body.snapshot?.totalTokenEstimate).toBe(durableTurn?.context?.totalTokenEstimate)
   })
 })
 

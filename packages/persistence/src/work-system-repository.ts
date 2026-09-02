@@ -55,6 +55,20 @@ export class WorkSystemRepository {
     return rows.map(mapTask)
   }
 
+  /**
+   * Every recorded execution of every task in a world.
+   *
+   * This is the durable link from a task to the AgentRuns that worked on it
+   * (`agentRunIds` and `workTurnId`); a read model that wants to say "this run
+   * belonged to that task" reads it from here and nowhere else.
+   */
+  listWorldTaskRuns(worldId: string): TaskRun[] {
+    return this.#database.prepare(
+      `SELECT run.* FROM task_runs run JOIN work_tasks task ON task.id = run.task_id
+       WHERE task.world_id = ? ORDER BY run.started_at, run.id`,
+    ).all(worldId).map(mapRun)
+  }
+
   transitionTask(taskId: string, from: WorkTaskStatus[], to: WorkTaskStatus): WorkTask {
     const task = this.requireTask(taskId)
     if (!from.includes(task.status)) throw new PersistenceError(`Illegal Work Task transition: ${task.status} -> ${to}`)

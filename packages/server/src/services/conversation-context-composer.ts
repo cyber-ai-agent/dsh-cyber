@@ -45,8 +45,10 @@ import {
  *
  * Two responsibilities stay outside on purpose:
  *
- * - World context is still contributed by `WorldRuntimeContextComposer` before
- *   the runtime sees the prompt, so this composer leaves that layer empty.
+ * - The world's stable rules are rendered by the caller (`CharacterProfileRuntime`
+ *   reads them from the world settings) and handed in as the `worldContext`
+ *   layer. The composer places that layer directly behind the identity and
+ *   folds it into the cacheable prefix; it never invents world facts itself.
  * - The *rendering* of the recent-conversation layer stays with the runtime
  *   lane, because only the lane knows what its live Agent session has already
  *   observed. The composer decides which turns are eligible; the lane may send
@@ -96,6 +98,12 @@ export interface ComposeTurnContextInput {
   /** The persona this turn will actually run with, already fully composed. */
   persona: string
   personaRevision?: number
+  /**
+   * The world's stable rules for this character, already rendered as a layer.
+   * Stable per world and character: it joins the cacheable prefix, so nothing
+   * that moves per turn may be put in it.
+   */
+  worldContext?: ContextLayer
   conversationId: string
   prompt: string
   history: readonly ConversationHistoryEntry[]
@@ -240,10 +248,11 @@ export class ConversationContextComposer {
       ? input.prompt
       : `${sections.join('\n\n')}\n\n[当前请求]\n${input.prompt}`
 
-    // The cacheable prefix is exactly the identity layer: persona, world stable
-    // rules and stable skill instructions, already folded into one deterministic
-    // string upstream. Everything the envelope adds after it is dynamic by
-    // construction, which is what makes the prefix worth a cache key at all.
+    // The cacheable prefix is the identity layer - persona, authority, permission
+    // guidance and stable skill instructions, already folded into one
+    // deterministic string upstream - followed by the world's stable rules.
+    // Everything the envelope adds after them is dynamic by construction,
+    // which is what makes the prefix worth a cache key at all.
     const stableIdentity = composeContextLayer({
       id: `identity:${input.employee.id}`,
       kind: 'stable-identity',
@@ -259,16 +268,18 @@ export class ConversationContextComposer {
       ],
     })
 
+    const worldContext = input.worldContext
     const envelope = composeContextEnvelope({
       stableIdentity,
+      ...(worldContext === undefined ? {} : { worldContext }),
       promptCache: derivePromptCachePolicy({
-        stablePrefixHash: stableContextHash(stableIdentity),
+        stablePrefixHash: stableContextHash(stableIdentity, worldContext),
         // Partitioned down to the character. Two characters whose prefixes are
         // byte-identical still never share one, because a cache partition is a
         // boundary and boundaries are not an optimisation.
         namespace: `${input.employee.worldId}/${input.employee.id}`,
         scope: 'employee',
-        stablePrefixTokens: stableIdentity.tokenEstimate,
+        stablePrefixTokens: stableIdentity.tokenEstimate + (worldContext?.tokenEstimate ?? 0),
         // A direct lane is the same character answering again tomorrow; a group
         // or task lane is assembled per collaboration and rarely reruns.
         retentionHint: lane === 'direct' ? 'long' : 'short',

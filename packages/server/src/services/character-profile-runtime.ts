@@ -3,10 +3,13 @@ import type {
   AgentRuntimeEvent,
   AgentRuntimePort,
   AgentTurnRequest,
+  ContextLayer,
+  EmployeeInstance,
   EmployeeProfile,
   JsonObject,
   WorkMessage,
 } from '@dsh-cyber/contracts'
+import { composeContextLayer } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 import type { CharacterSkillAdapterRegistry } from '../skills/skill-adapter.js'
 import type { WorldCharacterAuthority } from '@dsh-cyber/contracts/world-authority'
@@ -16,7 +19,9 @@ import {
   type CharacterMemoryContextPort,
 } from './employee-conversation-memory-service.js'
 import {
+  conversationLane,
   defaultConversationContextComposer,
+  type ContextConversationLane,
   type ConversationContextComposer,
   type ConversationMemoryLayersPort,
 } from './conversation-context-composer.js'
@@ -52,6 +57,23 @@ type CharacterRuntimeStore = Pick<
 const OBSERVED_THROUGH_KEY = 'contextObservedThroughSequence'
 const OBSERVATION_VERSION_KEY = 'contextObservationVersion'
 
+/**
+ * Where the world's stable rules come from.
+ *
+ * The text must be a function of durable world facts and the lane alone -
+ * `WorldSettingsService` renders lore, scenario, user identity, isolation and
+ * response language from `settings.json` - because it is placed in the
+ * cacheable prefix and hashed there. A source that read a clock or a counter
+ * would silently defeat the cache on every turn.
+ */
+export interface WorldContextPort {
+  composeWorldContext(input: {
+    worldId: string
+    character: EmployeeInstance
+    lane: ContextConversationLane
+  }): Promise<{ text: string; revision: number }>
+}
+
 export class CharacterProfileRuntime implements AgentRuntimePort {
   readonly #inner: AgentRuntimePort
   readonly #store: CharacterRuntimeStore
@@ -61,6 +83,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
   readonly #memory: CharacterMemoryContextPort | undefined
   readonly #context: ConversationContextComposer | undefined
   readonly #snapshots: ContextSnapshotService | undefined
+  readonly #worldContext: WorldContextPort | undefined
   /**
    * What the Context Inspector reads back.
    *
@@ -80,12 +103,14 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
     skillAvailability?: WorldSkillAvailabilityPort,
     memory?: CharacterMemoryContextPort,
     inspection?: ContextInspectionService,
+    worldContext?: WorldContextPort,
   ) {
     this.#inner = inner
     this.#store = store
     this.#skills = skills
     this.#authority = authority
     this.#skillAvailability = skillAvailability
+    this.#worldContext = worldContext
     this.contextInspection = inspection ?? new ContextInspectionService()
     this.#memory = memory ?? defaultMemoryForStore(store)
     this.#context = defaultConversationContextComposer(
@@ -145,10 +170,16 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       request.agentRunId,
       request.permissionMode ?? 'read-only',
     )
+    // The world's stable rules are a property of the world and the lane, not
+    // of the turn, so they are rendered once here and placed directly behind
+    // the identity: in the cacheable prefix, in front of every retrieved
+    // memory, instead of being re-sent behind them on every request.
+    const worldContext = await this.#composeWorldContext(agent, request.conversationId)
     const composed = await this.#context?.compose({
       employee: agent,
       persona: effectivePersona,
       personaRevision: revision.revision,
+      ...(worldContext === undefined ? {} : { worldContext }),
       conversationId: request.conversationId,
       prompt: turnPrompt,
       history: request.history ?? [],
@@ -177,6 +208,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
         employeeName: agent.displayName,
         lane: composed.coverage.lane,
         ...(request.workTurnId === undefined ? {} : { workTurnId: request.workTurnId }),
+        ...(request.agentRunId === undefined ? {} : { agentRunId: request.agentRunId }),
         envelope: composed.envelope,
         memoryHits: composed.memoryHits,
         coverage: composed.coverage,
@@ -223,7 +255,12 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
         // Keep historical unavailable grants durable, but do not expose them
         // to the model prompt or downstream Harness runtime for this turn.
         skillGrants: grantedSkillIds,
-        persona: effectivePersona,
+        // The persona is what a provider adapter treats as the prefix (the
+        // Harness binds it as the system prompt), so the world context is
+        // rendered here, after the identity and before anything per-turn.
+        persona: worldContext === undefined
+          ? effectivePersona
+          : `${effectivePersona.trim()}\n\n${worldContext.text}`,
       },
     })
 
@@ -247,6 +284,32 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
     }
 
     return result
+  }
+
+  /**
+   * The `world-context` layer for this turn, or nothing when no world context
+   * source is composed (legacy embedders and unit tests keep their prompt).
+   *
+   * The lane is read from the durable session, never from the caller: a group
+   * turn gets the group identity note because its `WorkSession` is a group
+   * session, not because an entry point said so.
+   */
+  async #composeWorldContext(agent: EmployeeInstance, conversationId: string): Promise<ContextLayer | undefined> {
+    if (this.#worldContext === undefined) return undefined
+    const lane = conversationLane(this.#store.getSession?.(conversationId))
+    const rendered = await this.#worldContext.composeWorldContext({ worldId: agent.worldId, character: agent, lane })
+    if (!rendered.text.trim()) return undefined
+    const revision = String(rendered.revision)
+    return composeContextLayer({
+      id: `world-context:${agent.worldId}`,
+      kind: 'world-context',
+      revision,
+      text: rendered.text,
+      sourceRefs: [
+        { kind: 'world', id: agent.worldId, revision },
+        { kind: 'employee', id: agent.id },
+      ],
+    })
   }
 
   close(): Promise<void> {

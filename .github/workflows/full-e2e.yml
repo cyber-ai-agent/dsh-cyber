@@ -6,6 +6,10 @@ on:
     - cron: '0 18 * * *'
   push:
     branches: [main]
+  # Draft PRs stay fast by default. Add the `run-full-e2e` label when a PR
+  # needs an opt-in browser run before it is merged.
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
 
 permissions:
   contents: read
@@ -17,6 +21,8 @@ concurrency:
 jobs:
   chromium:
     name: chromium
+    if: >-
+      ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-full-e2e') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -34,3 +40,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e
+      # The binary Marketplace package is checked in for offline delivery, but
+      # remains reproducible from the pinned CC0 source. Keep this verification
+      # with the browser/release-oriented workflow instead of blocking every PR.
+      - name: Verify official CC0 avatar pack delivery
+        run: |
+          pnpm avatar:build-official
+          pnpm avatar:verify-official
+          git diff --exit-code -- marketplace/plugins/official-avatar-base-v1

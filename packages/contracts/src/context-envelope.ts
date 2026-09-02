@@ -258,7 +258,7 @@ export function composeContextEnvelope(input: ComposeContextEnvelopeInput): Cont
     ...(input.retrievedMemories === undefined ? {} : { retrievedMemories: input.retrievedMemories }),
     ...(input.recentConversation === undefined ? {} : { recentConversation: input.recentConversation }),
     currentRequest: input.currentRequest,
-    stableContextHash: stableContextHash(input.stableIdentity),
+    stableContextHash: stableContextHash(input.stableIdentity, input.worldContext),
     ...(input.promptCache === undefined ? {} : { promptCache: input.promptCache }),
     totalTokenEstimate: 0,
   }
@@ -282,8 +282,21 @@ export function contextEnvelopeLayers(envelope: ContextEnvelope): ContextLayer[]
   })
 }
 
-export function stableContextHash(identity: ContextLayer): string {
-  return contextContentHash([identity.kind, identity.id, identity.contentHash])
+/**
+ * Cache identity of the prefix: the identity layer plus, when present, the
+ * world context. Both are properties of the character and its world, not of
+ * the turn, which is what lets them sit in front of every dynamic layer.
+ *
+ * An envelope without world context hashes exactly as it did before the layer
+ * joined the prefix, so nothing that recorded a hash earlier is invalidated.
+ */
+export function stableContextHash(identity: ContextLayer, worldContext?: ContextLayer): string {
+  return contextContentHash([
+    identity.kind,
+    identity.id,
+    identity.contentHash,
+    ...(worldContext === undefined ? [] : [worldContext.kind, worldContext.id, worldContext.contentHash]),
+  ])
 }
 
 function normalizeSkillInstructions(

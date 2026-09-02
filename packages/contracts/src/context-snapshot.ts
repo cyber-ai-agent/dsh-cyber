@@ -135,6 +135,44 @@ function snapshotLayer(layer: ContextLayer): ContextSnapshotLayer {
   }
 }
 
+/**
+ * The numbers of a snapshot, with the pointers left out.
+ *
+ * This is what a surface outside the Inspector (the trace card, a run list)
+ * may show inline: how many tokens each layer cost and how many durable memory
+ * rows the run was given. It carries no source refs at all, so a caller that
+ * holds a summary cannot dereference anything — reading the rows a run pointed
+ * at stays behind `ContextSnapshotService.reconstruct` and its scope checks.
+ */
+export interface ContextSnapshotLayerSummary {
+  kind: ContextLayerKind
+  tokenEstimate: number
+}
+
+export interface ContextSnapshotSummary {
+  totalTokenEstimate: number
+  /** Layers in envelope order, each with its own token estimate. */
+  layers: ContextSnapshotLayerSummary[]
+  /** Distinct durable memory rows the run was given, across every layer. */
+  memoryHitCount: number
+  stablePrefixTokens: number
+  volatileTokens: number
+  /** True when the previous run of the same pair carried the same stable prefix. */
+  prefixReused: boolean
+}
+
+/** Projects a snapshot to its inline numbers. Pure and pointer-free by construction. */
+export function summarizeContextSnapshot(snapshot: ContextSnapshot): ContextSnapshotSummary {
+  return {
+    totalTokenEstimate: snapshot.totalTokenEstimate,
+    layers: snapshot.layers.map((layer) => ({ kind: layer.kind, tokenEstimate: layer.tokenEstimate })),
+    memoryHitCount: contextSnapshotRefs(snapshot, 'memory').length,
+    stablePrefixTokens: snapshot.cache.stablePrefixTokens,
+    volatileTokens: snapshot.cache.volatileTokens,
+    prefixReused: snapshot.cache.prefixReused,
+  }
+}
+
 /** All source refs of one kind across a snapshot, de-duplicated, order kept. */
 export function contextSnapshotRefs(
   snapshot: ContextSnapshot,

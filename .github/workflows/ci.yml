@@ -17,7 +17,9 @@ jobs:
   verify:
     name: required
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # Keep the protected PR gate short enough for rapid pre-alpha iteration.
+    # Browser and delivery-pack checks run in the non-blocking Full E2E workflow.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -39,19 +41,6 @@ jobs:
         run: pnpm test
       - name: Migration replay and schema contracts
         run: pnpm test:migration && pnpm test:schema
-      - name: Install Chromium for required smoke
-        run: pnpm exec playwright install --with-deps chromium
-      - name: Required smoke E2E
-        run: pnpm test:smoke
-      # The binary Marketplace package is checked in for offline delivery, but
-      # remains reproducible from the pinned CC0 source. Rebuild it in-place,
-      # parse it through the production VRM loader, then require a byte-for-byte
-      # clean worktree so source, provenance and delivered binary cannot drift.
-      - name: Verify official CC0 avatar pack delivery
-        run: |
-          pnpm avatar:build-official
-          pnpm avatar:verify-official
-          git diff --exit-code -- marketplace/plugins/official-avatar-base-v1
       # The status can only be written to a commit inside this repository.
       # For fork pull requests the head sha lives in the contributor's fork,
       # where GITHUB_TOKEN has no write access (403), so skip instead of failing.
@@ -68,4 +57,4 @@ jobs:
             --header "Accept: application/vnd.github+json" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${TARGET_SHA}" \
-            --data '{"state":"success","context":"CI / required","description":"typecheck and unit/integration tests passed"}'
+            --data '{"state":"success","context":"CI / required","description":"fast typecheck, unit/integration, migration and schema checks passed"}'
