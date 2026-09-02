@@ -78,6 +78,7 @@ import { NavigationPane } from './components/NavigationPane.js'
 import { ResizableShell } from './components/ResizableShell.js'
 import { WorldThemeSwitcher } from './components/WorldThemeSwitcher.js'
 import { applyWorldTheme, readWorldTheme, saveWorldTheme, themeRegistry } from './features/world/world-themes.js'
+import { syncInstalledSkinThemes, type InstalledSkinDeclaration } from './features/world/installed-skin-themes.js'
 import type {
   DiscoveredModel,
   ModelDiscoveryDraft,
@@ -528,6 +529,10 @@ export default function App() {
           api<{ preferences: WorkspacePreferences }>(`/api/workspaces/${first.id}/preferences`),
           api<{ items: ModelProfile[]; assignments: ModelAssignment[] }>(`/api/workspaces/${first.id}/model-profiles`),
           api<{ items: InstalledPackage[]; transactions: PackageInstallTransaction[] }>(`/api/workspaces/${first.id}/packages`),
+          // Declared skin palettes are registered before the installed list
+          // renders, so the skin switcher never sees an installed skin it
+          // cannot resolve and resets the world's choice to default.
+          syncWorkspaceSkinThemes(first.id),
         ])
         if (cancelled) return
         setWorkspace(first)
@@ -1060,7 +1065,10 @@ export default function App() {
 
   const loadPackages = useCallback(async () => {
     if (workspace === undefined || demoMode) return
-    const result = await api<{ items: InstalledPackage[]; transactions: PackageInstallTransaction[] }>(`/api/workspaces/${workspace.id}/packages`)
+    const [result] = await Promise.all([
+      api<{ items: InstalledPackage[]; transactions: PackageInstallTransaction[] }>(`/api/workspaces/${workspace.id}/packages`),
+      syncWorkspaceSkinThemes(workspace.id),
+    ])
     setInstalledPackages(result.items)
     setPackageTransactions(result.transactions)
   }, [demoMode, workspace])
@@ -2616,6 +2624,9 @@ export default function App() {
           onWorldPublished={async () => {
             await Promise.all([loadPackages(), searchMarketplace('theme')])
           }}
+          onSkinPublished={async () => {
+            await Promise.all([loadPackages(), searchMarketplace('skin')])
+          }}
           onUsePlugin={(command) => {
             setPackageMarketOpen(false)
             setDraft(`${command} `)
@@ -3252,6 +3263,20 @@ function runtimeActivity(event: AgentRuntimeEvent, role: string): string {
   if (event.kind === 'turn.started') return `正在处理${role}任务`
   if (event.kind === 'turn.failed') return '执行失败，等待推进'
   return '可接新任务'
+}
+
+/**
+ * Register the installed skins' declared palettes as package themes. An
+ * unreadable listing leaves the registry as it was: built-in skins keep
+ * working and a generated skin simply is not selectable until the next load.
+ */
+async function syncWorkspaceSkinThemes(workspaceId: string): Promise<void> {
+  try {
+    const result = await api<{ items: InstalledSkinDeclaration[] }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/skins`)
+    syncInstalledSkinThemes(Array.isArray(result.items) ? result.items : [])
+  } catch {
+    // Leave the registry untouched.
+  }
 }
 
 function demoSkinPackages(): CyberMarketPackage[] {
