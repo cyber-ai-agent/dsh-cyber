@@ -4,7 +4,7 @@ DSH Cyber 当前处于 Pre-Alpha / 架构快速演进期。CI 的目标是尽早
 
 ## 分层原则
 
-### L1 — Required PR CI
+### L1 — Required PR CI（快速门禁）
 
 每个 Pull Request 和 `main` push 都运行：
 
@@ -14,7 +14,6 @@ pnpm typecheck
 pnpm test
 pnpm test:migration
 pnpm test:schema
-pnpm test:smoke
 ```
 
 这层是当前唯一 Required Gate，保护：
@@ -28,9 +27,17 @@ pnpm test:smoke
 - Workshop service；
 - migration / backup 等核心逻辑。
 
-### L2 — Required Smoke E2E
+### L2 — Opt-in Chromium Smoke / Full E2E
 
-Core Reliability & Work System V1 起进入 Required，覆盖：
+浏览器验证不再阻塞每一个开发 PR。`full-e2e.yml` 默认运行于：
+
+- `main` push；
+- nightly schedule；
+- GitHub Actions 手动触发。
+
+对需要在合并前检查浏览器回归的 PR，添加 `run-full-e2e` label 即可启动同一 workflow；未添加 label 的 Draft/开发 PR 会被快速跳过。
+
+它覆盖：
 
 - 首次启动；
 - 创建世界；
@@ -41,17 +48,11 @@ Core Reliability & Work System V1 起进入 Required，覆盖：
 - Task → 多角色执行 → Deliverable → Review → 新版本；
 - Package/Artifact 核心闭环。
 
-目标运行时间不超过数分钟，并在进入 Alpha 后升级为 Required。
+官方 CC0 avatar base pack 的重建、运行时解析和 byte-for-byte 工作树校验也在这一层执行。
 
-### L3 — Full Chromium E2E
+Pre-Alpha Draft PR 不要求 Full E2E 每次提交都通过。准备把大型重构 PR 标记为 Ready for review 或准备合并 `main` 时，应添加 label 或手动运行完整 E2E 并处理仍然有效的回归。
 
-完整 Playwright 回归目前运行于：
-
-- `main` push；
-- GitHub Actions 手动触发；
-- nightly schedule。
-
-Pre-Alpha Draft PR 不要求 Full E2E 每次提交都通过。准备把大型重构 PR 标记为 Ready for review 或准备合并 `main` 时，应手动运行完整 E2E 并处理仍然有效的回归。
+进入 Alpha 后可把核心 Smoke E2E 提升为 Required；完整 Chromium 回归仍保留在更慢的非阻塞层。
 
 ### L4 — Release Validation
 
@@ -87,8 +88,8 @@ E2E 应验证：
 
 | 阶段 | Required Gate |
 | --- | --- |
-| Pre-Alpha（当前） | Typecheck + Unit/Integration + Migration/Schema + Smoke E2E |
-| Alpha | + 完整 Work System / Backup Restore smoke |
+| Pre-Alpha（当前） | Typecheck + Unit/Integration + Migration/Schema |
+| Alpha | + 核心 Smoke E2E |
 | Beta | + Full E2E |
 | Stable | + Migration + Backup/Restore + OS matrix |
 | Release | + Real Harness Canary + package/release validation |
