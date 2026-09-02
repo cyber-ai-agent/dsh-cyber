@@ -1,7 +1,8 @@
-import { ArrowClockwise } from '@phosphor-icons/react'
-import type { ContextInspection, ContextLayerKind } from '@dsh-cyber/contracts'
+import { ArrowClockwise, ArrowLeft } from '@phosphor-icons/react'
+import type { ContextInspection, ContextSnapshotSummary } from '@dsh-cyber/contracts'
 
 import { useI18n } from '../../i18n/runtime.js'
+import { CONTEXT_LAYER_LABELS } from './layer-labels.js'
 import { useContextInspection } from './useContextInspection.js'
 import './context-inspector.css'
 
@@ -16,44 +17,6 @@ import './context-inspector.css'
  * where a vague label turns into a false claim.
  */
 
-const LAYER_LABELS: Record<ContextLayerKind, { key: string; label: string; hint: string }> = {
-  'stable-identity': {
-    key: 'context.layerIdentity',
-    label: '稳定身份',
-    hint: '人设、角色资料与已授予的权限，每轮不变，因此可以被缓存。',
-  },
-  'world-context': {
-    key: 'context.layerWorld',
-    label: '世界规则',
-    hint: '当前世界的设定与运行规则。',
-  },
-  'task-context': {
-    key: 'context.layerTask',
-    label: '任务上下文',
-    hint: '本次协作的目标、计划步骤与依赖。',
-  },
-  'memory-index': {
-    key: 'context.layerMemoryIndex',
-    label: '记忆索引',
-    hint: '这一轮里角色“能想起哪些事”的目录。',
-  },
-  'retrieved-memories': {
-    key: 'context.layerRetrieved',
-    label: '召回的记忆',
-    hint: '真正取回并放进这一轮的历史片段。',
-  },
-  'recent-conversation': {
-    key: 'context.layerRecent',
-    label: '最近对话',
-    hint: '保留原文重放的最近几轮对话；实时会话可能只重放其中较新的一段。',
-  },
-  'current-request': {
-    key: 'context.layerRequest',
-    label: '本次请求',
-    hint: '你这一次真正发出的内容。',
-  },
-}
-
 const LANE_LABELS: Record<ContextInspection['lane'], { key: string; label: string }> = {
   direct: { key: 'context.laneDirect', label: '私聊' },
   group: { key: 'context.laneGroup', label: '群聊' },
@@ -64,12 +27,21 @@ const LANE_LABELS: Record<ContextInspection['lane'], { key: string; label: strin
 export function ContextInspectorPanel({
   conversationId,
   demoMode,
+  agentRunId,
+  onClearRun,
 }: {
   conversationId?: string
   demoMode: boolean
+  /**
+   * Focus one AgentRun instead of the conversation's latest turn. Set by the
+   * trace card's 上下文 link; the run's own record wins over the snapshot.
+   */
+  agentRunId?: string
+  /** Leaves run focus and returns to the conversation's latest turn. */
+  onClearRun?: () => void
 }) {
   const { t, formatNumber, formatDateTime } = useI18n()
-  const { inspection, loading, error, refresh } = useContextInspection(conversationId, demoMode)
+  const { inspection, snapshot, loading, error, refresh } = useContextInspection(conversationId, demoMode, agentRunId)
 
   return <section className="context-inspector" aria-label={t('context.title', '上下文检查器')}>
     <header className="context-inspector__header">
@@ -89,17 +61,80 @@ export function ContextInspectorPanel({
       ><ArrowClockwise size={17} className={loading ? 'spin' : ''} /></button>
     </header>
 
+    {agentRunId === undefined ? null : <div className="context-inspector__focus" role="status">
+      <span>{t('context.runFocus', '正在查看某一次运行的上下文')}<code>{agentRunId}</code></span>
+      {onClearRun === undefined ? null : <button type="button" onClick={onClearRun}><ArrowLeft size={14} />{t('context.runFocusClear', '返回会话最新一轮')}</button>}
+    </div>}
+
     {error === undefined ? null : <div className="context-inspector__error" role="alert">{error}</div>}
 
-    {inspection === undefined
-      ? <EmptyState demoMode={demoMode} loading={loading} {...(conversationId === undefined ? {} : { conversationId })} />
-      : <div className="context-inspector__body">
+    {inspection !== undefined
+      ? <div className="context-inspector__body">
         <Summary inspection={inspection} formatNumber={formatNumber} formatDateTime={formatDateTime} />
         <Layers inspection={inspection} formatNumber={formatNumber} />
         <MemoryHits inspection={inspection} formatNumber={formatNumber} />
         <Cache inspection={inspection} formatNumber={formatNumber} />
         <Coverage inspection={inspection} formatNumber={formatNumber} />
-      </div>}
+      </div>
+      : snapshot !== undefined
+        ? <div className="context-inspector__body"><SnapshotOnly snapshot={snapshot} formatNumber={formatNumber} /></div>
+        : <EmptyState demoMode={demoMode} loading={loading} {...(conversationId === undefined ? {} : { conversationId })} {...(agentRunId === undefined ? {} : { agentRunId })} />}
+  </section>
+}
+
+/**
+ * What a run can still say after the Inspector's process-local record is gone.
+ *
+ * The durable snapshot stores structure and pointers, never prompt text, so
+ * this card shows sizes and counts only. It says so in its own words rather
+ * than rendering the full layout with blank previews, because a blank preview
+ * reads as "the layer was empty" — which is not what happened.
+ */
+function SnapshotOnly({
+  snapshot,
+  formatNumber,
+}: {
+  snapshot: ContextSnapshotSummary
+  formatNumber(value: number): string
+}) {
+  const { t } = useI18n()
+  const largest = snapshot.layers.reduce((total, layer) => Math.max(total, layer.tokenEstimate), 1)
+  return <section className="context-inspector__card">
+    <h3>{t('context.snapshotTitle', '持久化快照（仅结构）')}</h3>
+    <p className="context-inspector__note">{t(
+      'context.snapshotOnly',
+      '这次运行的完整上下文记录随服务进程保存，现已不可用。以下来自持久化快照：只有分层结构与 Token 估算，不含任何内容。',
+    )}</p>
+    <p className="context-inspector__tokens">
+      <strong>{formatNumber(snapshot.totalTokenEstimate)}</strong>
+      <span>{t('context.usedTokens', 'Token（按本地估算，非模型账单）')}</span>
+    </p>
+    <ol className="context-inspector__layers">
+      {snapshot.layers.map((layer, index) => {
+        const meta = CONTEXT_LAYER_LABELS[layer.kind]
+        return <li key={`${layer.kind}:${index}`}>
+          <div className="context-inspector__layer-row">
+            <span className="context-inspector__layer-head">
+              <strong>{t(meta.key, meta.label)}</strong>
+              <small>{t(`${meta.key}Hint`, meta.hint)}</small>
+            </span>
+            <span className="context-inspector__layer-size">
+              <strong>{formatNumber(layer.tokenEstimate)}</strong>
+              <small>Token</small>
+            </span>
+          </div>
+          <div className="context-inspector__bar context-inspector__bar--flush" aria-hidden="true">
+            <i style={{ inlineSize: `${Math.max(2, Math.round((layer.tokenEstimate / largest) * 100))}%` }} />
+          </div>
+        </li>
+      })}
+    </ol>
+    <dl className="context-inspector__facts">
+      <div><dt>{t('context.snapshotMemoryHits', '给到本轮的记忆')}</dt><dd>{t('context.snapshotMemoryHitCount', '{count} 条', { count: formatNumber(snapshot.memoryHitCount) })}</dd></div>
+      <div><dt>{t('context.snapshotStablePrefix', '可缓存前缀')}</dt><dd>{formatNumber(snapshot.stablePrefixTokens)} Token</dd></div>
+      <div><dt>{t('context.snapshotVolatile', '每轮变化部分')}</dt><dd>{formatNumber(snapshot.volatileTokens)} Token</dd></div>
+      <div><dt>{t('context.snapshotPrefixReused', '前缀与上一轮相同')}</dt><dd>{snapshot.prefixReused ? t('context.snapshotYes', '是') : t('context.snapshotNo', '否')}</dd></div>
+    </dl>
   </section>
 }
 
@@ -107,15 +142,25 @@ function EmptyState({
   conversationId,
   demoMode,
   loading,
+  agentRunId,
 }: {
   conversationId?: string
   demoMode: boolean
   loading: boolean
+  agentRunId?: string
 }) {
   const { t } = useI18n()
   if (loading) {
     return <div className="context-inspector__empty" role="status">
       <strong>{t('context.loading', '正在读取上下文…')}</strong>
+    </div>
+  }
+  if (agentRunId !== undefined && !demoMode) {
+    // The run exists but nothing was recorded for it: it ran before context
+    // snapshots (schema migration 39). Say that; do not show an empty chart.
+    return <div className="context-inspector__empty">
+      <strong>{t('context.emptyRunTitle', '这次运行没有上下文记录')}</strong>
+      <span>{t('context.emptyRunNoSnapshot', '该运行早于上下文快照功能（数据库迁移 39），没有留下任何可展示的上下文。')}</span>
     </div>
   }
   return <div className="context-inspector__empty">
@@ -186,7 +231,7 @@ function Layers({
     <h3>{t('context.layersTitle', '分层内容')}</h3>
     <ol className="context-inspector__layers">
       {inspection.layers.map((layer) => {
-        const meta = LAYER_LABELS[layer.kind]
+        const meta = CONTEXT_LAYER_LABELS[layer.kind]
         return <li key={layer.id}>
           <details>
             <summary>
