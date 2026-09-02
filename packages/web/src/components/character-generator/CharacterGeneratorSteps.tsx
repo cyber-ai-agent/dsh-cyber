@@ -5,25 +5,45 @@ import { useI18n } from '../../i18n/runtime.js'
 import { AvatarPicker2D } from './AvatarPicker2D.js'
 import { CHARACTER_SOURCE_MAX_BYTES } from './model.js'
 
+/**
+ * Copy the source step shows. The Character Generator uses the defaults; the
+ * World Generator passes its own so the same step reads as a world source.
+ */
+export interface SourceStepCopy {
+  intro: string
+  hint: string
+  label: string
+  placeholder: string
+  safety: string
+}
+
 interface SourceStepProps {
   sourceMode: 'description' | 'paste' | 'file'
   source: string
   sourceFileName?: string
   error?: string
   analyzing: boolean
+  copy?: Partial<SourceStepCopy>
   onSourceMode(mode: SourceStepProps['sourceMode']): void
   onSource(value: string): void
   onFile(file: File): void
   onAnalyze(): void
 }
 
-export function SourceStep({ sourceMode, source, sourceFileName, error, analyzing, onSourceMode, onSource, onFile, onAnalyze }: SourceStepProps) {
+export function SourceStep({ sourceMode, source, sourceFileName, error, analyzing, copy, onSourceMode, onSource, onFile, onAnalyze }: SourceStepProps) {
   const { t } = useI18n()
+  const text: SourceStepCopy = {
+    intro: copy?.intro ?? t('characterGenerator.sourceIntro', '从一段描述开始'),
+    hint: copy?.hint ?? t('characterGenerator.sourceHint', '支持 Markdown 或纯文本。导入内容会作为数据分析，不会获得系统指令或权限。'),
+    label: copy?.label ?? t('characterGenerator.sourceLabel', '角色描述'),
+    placeholder: copy?.placeholder ?? t('characterGenerator.sourcePlaceholder', '例如：创建一名沉着的技术负责人，擅长把复杂问题拆成可执行步骤。'),
+    safety: copy?.safety ?? t('characterGenerator.sourceSafety', '来源内容是不可信数据。分析结果需要你逐项检查后才会生成角色模板。'),
+  }
   return (
     <div className="character-generator-step character-generator-step--source">
       <div className="character-generator-step__heading">
         <span className="character-generator-step__eyebrow">01</span>
-        <div><h3>{t('characterGenerator.sourceIntro', '从一段描述开始')}</h3><p>{t('characterGenerator.sourceHint', '支持 Markdown 或纯文本。导入内容会作为数据分析，不会获得系统指令或权限。')}</p></div>
+        <div><h3>{text.intro}</h3><p>{text.hint}</p></div>
       </div>
       <fieldset className="character-generator-source-types">
         <legend>{t('characterGenerator.sourceType', '输入方式')}</legend>
@@ -50,18 +70,18 @@ export function SourceStep({ sourceMode, source, sourceFileName, error, analyzin
         </label>
       ) : null}
       <label className="character-generator-field character-generator-field--source">
-        <span>{t('characterGenerator.sourceLabel', '角色描述')}</span>
+        <span>{text.label}</span>
         <textarea
           value={source}
           rows={9}
           maxLength={CHARACTER_SOURCE_MAX_BYTES}
-          placeholder={t('characterGenerator.sourcePlaceholder', '例如：创建一名沉着的技术负责人，擅长把复杂问题拆成可执行步骤。')}
+          placeholder={text.placeholder}
           data-generator-initial-focus
           aria-describedby="character-generator-source-help"
           aria-invalid={error !== undefined}
           onChange={(event) => onSource(event.target.value)}
         />
-        <small id="character-generator-source-help">{t('characterGenerator.sourceSafety', '来源内容是不可信数据。分析结果需要你逐项检查后才会生成角色模板。')}</small>
+        <small id="character-generator-source-help">{text.safety}</small>
       </label>
       {error === undefined ? null : <div className="character-generator-error" role="alert"><Info size={17} aria-hidden="true" />{error}</div>}
       <div className="character-generator-step__actions">
@@ -176,11 +196,11 @@ export function PreviewStep({ draft, catalog, avatar, avatarError, validationErr
   )
 }
 
-function TextField({ id, label, value, maxLength, multiline = false, rows = 2, error = false, initialFocus = false, onChange }: { id: string; label: string; value: string; maxLength: number; multiline?: boolean; rows?: number; error?: boolean; initialFocus?: boolean; onChange(value: string): void }) {
+export function TextField({ id, label, value, maxLength, multiline = false, rows = 2, error = false, initialFocus = false, onChange }: { id: string; label: string; value: string; maxLength: number; multiline?: boolean; rows?: number; error?: boolean; initialFocus?: boolean; onChange(value: string): void }) {
   return <label className="character-generator-field" htmlFor={id}><span>{label}</span>{multiline ? <textarea id={id} value={value} rows={rows} maxLength={maxLength} aria-invalid={error} {...(initialFocus ? { 'data-generator-initial-focus': true } : {})} onChange={(event) => onChange(event.target.value)} /> : <input id={id} value={value} maxLength={maxLength} aria-invalid={error} {...(initialFocus ? { 'data-generator-initial-focus': true } : {})} onChange={(event) => onChange(event.target.value)} />}</label>
 }
 
-function CatalogChoices({ title, helper, empty, values, onToggle }: { title: string; helper: string; empty: string; values: Array<{ id: string; label: string; summary: string; selected: boolean }>; onToggle(id: string): void }) {
+export function CatalogChoices({ title, helper, empty, values, onToggle }: { title: string; helper: string; empty: string; values: Array<{ id: string; label: string; summary: string; selected: boolean }>; onToggle(id: string): void }) {
   return <fieldset className="character-generator-fieldset"><legend>{title}</legend><p className="character-generator-helper">{helper}</p>{values.length === 0 ? <span className="character-generator-empty">{empty}</span> : <div className="character-generator-choice-list">{values.map((value) => <label key={value.id} className={value.selected ? 'is-selected' : ''}><input type="checkbox" checked={value.selected} onChange={() => onToggle(value.id)} /><span><strong>{value.label}</strong><small>{value.summary}</small></span></label>)}</div>}</fieldset>
 }
 

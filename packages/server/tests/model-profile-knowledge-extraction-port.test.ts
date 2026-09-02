@@ -23,8 +23,15 @@ describe('ModelProfileKnowledgeExtractionPort', () => {
     const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
       expect(String(url)).toBe('http://127.0.0.1:11434/v1/chat/completions')
       expect(init?.headers).toMatchObject({ Authorization: 'Bearer local-secret' })
-      const body = JSON.parse(String(init?.body)) as { stream: boolean; messages: Array<{ content: string }> }
+      const body = JSON.parse(String(init?.body)) as { stream: boolean; response_format?: unknown; max_tokens?: number; messages: Array<{ content: string }> }
       expect(body.stream).toBe(false)
+      // Prompt-only: gateways that ignore or reject response_format were the
+      // direct cause of empty-content failures.
+      expect(body.response_format).toBeUndefined()
+      expect(body.max_tokens).toBe(8192)
+      // The prompt must declare the type vocabularies, or models invent them.
+      expect(body.messages[0]?.content).toContain('character, person')
+      expect(body.messages[0]?.content).toContain('fact, decision')
       expect(body.messages[1]?.content).toContain('evidence-1')
       return new Response(JSON.stringify({
         model: 'model-1',
@@ -79,6 +86,25 @@ describe('ModelProfileKnowledgeExtractionPort', () => {
       workspaceId: 'workspace-1', worldId: 'world-1', sourceType: 'manual', sourceId: 'note-1',
       inputChars: 2, visibleText: '事实', evidence: [],
     })).resolves.toMatchObject({ payload: expect.stringContaining('"entities"') })
+  })
+
+  it('appends the corrective line only on a hinted retry', async () => {
+    let system = ''
+    const port = new ModelProfileKnowledgeExtractionPort({
+      store: {
+        getModelAssignment: () => undefined,
+        getModelProfile: () => profile,
+        listModelProfiles: () => [profile],
+      },
+      credentials: { resolve: () => 'local-secret' } as never,
+      fetch: vi.fn(async (_url, init) => {
+        const body = JSON.parse(String(init?.body)) as { messages: Array<{ role: string; content: string }> }
+        system = body.messages[0]?.content ?? ''
+        return new Response(JSON.stringify({ choices: [{ message: { content: '{"entities":[],"claims":[],"relations":[],"evidenceRefs":[]}' } }] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }),
+    })
+    await port.extract({ workspaceId: 'workspace-1', worldId: 'world-1', sourceType: 'conversation', sourceId: 'session-1', inputChars: 2, visibleText: '事实', evidence: [], attemptHint: true })
+    expect(system).toContain('上一次回答未能解析')
   })
 
   it('does not use an explicit profile from another workspace', async () => {
