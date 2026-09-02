@@ -28,7 +28,7 @@ Magic Context 的目标不是“压缩提示词”，而是把上下文变成一
 | 层 | 内容 | 变动频率 |
 | --- | --- | --- |
 | `stableIdentity` | 人格、角色资料、世界职权、会话权限、已授权工作方法 | 只随 revision 变 |
-| `worldContext` | 世界稳定规则：世界观、场景、用户身份、隔离规则、回复语言、本 lane 的身份说明（由 `WorldSettingsService.composeWorldContext` 渲染，`CharacterProfileRuntime` 放进前缀并计入 `stablePrefixHash`；每次请求真正变化的知识检索仍由 `WorldRuntimeContextComposer` 放在请求里） | 只随世界设置 revision 变 |
+| `worldContext` | 世界稳定规则：世界观、场景、用户身份、隔离规则、回复语言、世界主题的 `terminology.rules`（`[世界规则]` 块，最多 12 条、每条 ≤ 200 字，来自世界的持久主题绑定）、本 lane 的身份说明（由 `WorldSettingsService.composeWorldContext` 渲染，`CharacterProfileRuntime` 放进前缀并计入 `stablePrefixHash`；每次请求真正变化的知识检索仍由 `WorldRuntimeContextComposer` 放在请求里） | 只随世界设置 revision 或主题绑定变 |
 | `taskContext` | 路由后的 `TaskCollaborationPlan`：目标、步骤、依赖、已完成步骤、相关产物 | 随计划版本 |
 | `memoryIndex` | 本回合“能想起什么”的清单：memoryId、日期、scope | 每回合 |
 | `retrievedMemories` | 命中记忆的摘要，必要时附带 `[记忆原文]` 水合块 | 每回合 |
