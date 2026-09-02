@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { open, readFile, rename } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import type { AgentPermissionMode, EmployeeInstance, ReasoningEffort, WorldSettings } from '@dsh-cyber/contracts'
+import type { AgentPermissionMode, EmployeeInstance, ReasoningEffort, WorldSettings, WorldThemeManifestV1 } from '@dsh-cyber/contracts'
+import { UnsupportedWorldRuntimeError, type WorldRuntimeService } from '../world-runtime-service.js'
 import type { ContextConversationLane } from './conversation-context-composer.js'
 import type { WorldRootService } from './world-root-service.js'
 
@@ -31,8 +32,18 @@ export class WorldSettingsConflictError extends Error {
 
 export class WorldSettingsService {
   readonly #roots: WorldRootService
+  readonly #themes: Pick<WorldRuntimeService, 'getThemeManifest'> | undefined
 
-  constructor(roots: WorldRootService) { this.#roots = roots }
+  /**
+   * `themes` resolves the world's durable theme binding - the theme the world
+   * was created with, or the package instance the owner bound since - whose
+   * `terminology.rules` render into the world context. Without it the context
+   * is the settings header alone, exactly as before the rules joined it.
+   */
+  constructor(roots: WorldRootService, themes?: Pick<WorldRuntimeService, 'getThemeManifest'>) {
+    this.#roots = roots
+    this.#themes = themes
+  }
 
   async get(worldId: string): Promise<WorldSettings> {
     return (await this.getSnapshot(worldId)).settings
@@ -105,14 +116,16 @@ export class WorldSettingsService {
 
   /**
    * The world's stable rules for one character's turn: lore, scenario, the
-   * user's identity, the isolation rule and the response language, followed by
-   * the identity note for the lane the turn runs in.
+   * user's identity, the isolation rule and the response language, then the
+   * rules of the world's theme, followed by the identity note for the lane
+   * the turn runs in.
    *
    * This is the `world-context` layer of the envelope, not a request. It reads
    * nothing that moves per turn - no clock, no counter, no retrieval - so two
    * turns of the same character in the same world render byte-identical text
-   * until the settings revision changes. That is what lets it sit in the
-   * cacheable prefix instead of behind the retrieved memories.
+   * until the settings revision or the theme binding changes. That is what
+   * lets it sit in the cacheable prefix instead of behind the retrieved
+   * memories.
    */
   async composeWorldContext(input: {
     worldId: string
@@ -120,10 +133,29 @@ export class WorldSettingsService {
     lane: ContextConversationLane
   }): Promise<WorldContextText> {
     const snapshot = await this.getSnapshot(input.worldId)
+    const theme = this.#themeManifest(input.worldId)
     const identity = input.lane === 'direct' || input.lane === 'unknown'
       ? characterIdentity(input.character)
       : GROUP_IDENTITY_NOTE
-    return { text: `${worldHeader(snapshot.settings)}\n${identity}`, revision: snapshot.revision }
+    return {
+      text: [worldHeader(snapshot.settings), theme === undefined ? '' : themeRules(theme), identity].filter(Boolean).join('\n'),
+      revision: snapshot.revision,
+    }
+  }
+
+  /**
+   * The manifest of the world's durable theme binding, read from SQLite the
+   * same way the scene reads it. A world whose template has no theme (or no
+   * theme source at all) simply contributes no rules.
+   */
+  #themeManifest(worldId: string): WorldThemeManifestV1 | undefined {
+    if (this.#themes === undefined) return undefined
+    try {
+      return this.#themes.getThemeManifest(worldId)
+    } catch (error) {
+      if (error instanceof UnsupportedWorldRuntimeError) return undefined
+      throw error
+    }
   }
 }
 
@@ -165,6 +197,47 @@ function worldHeader(settings: WorldSettings): string {
     '当前世界与其他世界的数据、文件、记忆相互隔离。',
     responseLanguageInstruction(settings.model.responseLanguage),
   ].filter(Boolean).join('\n')
+}
+
+/**
+ * How much theme rule text may enter the prefix: at most 12 rules of at most
+ * 200 characters each, 2,400 characters of prose in all.
+ *
+ * The figures are the World Generator analyzer's publish contract (12 rules,
+ * 200 characters, one line of prose each), so a theme that passed it always
+ * fits whole; the official themes carry 6-9 rules of under 60 characters.
+ * 2,400 characters is about an eighth of the lore budget and a few hundred
+ * tokens more than a persona - a theme with 200 rules costs the prefix no
+ * more than the first twelve. The bound is a shape, not a sanitizer: the
+ * content gate for model-written rules is the analyzer, before publish.
+ */
+const MAX_THEME_RULES = 12
+const MAX_THEME_RULE_LENGTH = 200
+
+/**
+ * The theme's rules as a block the model can see is the world's, not the
+ * character's: a `[世界规则]` header naming the theme, then the numbered
+ * rules. Empty when the theme declares none, so a world without theme rules
+ * renders byte-identically to before the block existed.
+ */
+function themeRules(theme: WorldThemeManifestV1): string {
+  const declared = theme.terminology.rules
+  if (!Array.isArray(declared)) return ''
+  const rules: string[] = []
+  for (const item of declared) {
+    if (rules.length >= MAX_THEME_RULES) break
+    if (typeof item !== 'string') continue
+    const rule = item.replaceAll('\0', '').trim()
+    if (!rule || rule.length > MAX_THEME_RULE_LENGTH || /[\r\n]/.test(rule)) continue
+    rules.push(rule)
+  }
+  if (rules.length === 0) return ''
+  const source = theme.displayName.replaceAll(/\s+/g, ' ').trim()
+  return [
+    '[世界规则]',
+    `以下规则来自世界主题“${source}”，对这个世界里的每个角色都生效；它们是世界的规则，不是角色 Persona 的一部分：`,
+    ...rules.map((rule, index) => `${index + 1}. ${rule}`),
+  ].join('\n')
 }
 
 function responseLanguageInstruction(language: WorldSettings['model']['responseLanguage']): string {

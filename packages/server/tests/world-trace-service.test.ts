@@ -293,6 +293,32 @@ describe('World Trace projection', () => {
     expect(reads).toBe(2)
     expect(page.items.some((entry) => entry.sourceKind === 'agent-run')).toBe(true)
   })
+
+  it('rebuilds the cached projection when a run changes status without adding messages', async () => {
+    const context = await fixture()
+    const { store, world, session, employee } = context
+    const turn = store.createWorkTurn({
+      workspaceId: context.workspace.id,
+      worldId: world.id,
+      sessionId: session.id,
+      interactionKind: 'chat',
+    })
+    store.startWorkTurn(turn.id)
+    const run = store.createAgentRun({
+      workspaceId: context.workspace.id,
+      worldId: world.id,
+      sessionId: session.id,
+      turnId: turn.id,
+      employeeId: employee.id,
+      ordinal: 1,
+    })
+    store.startAgentRun(run.id)
+    const service = new WorldTraceService({ store, actions: new MemoryActions() })
+
+    expect((await service.list(world.id)).items).toContainEqual(expect.objectContaining({ runId: run.id, status: 'running' }))
+    store.failAgentRun(run.id, 'model-timeout')
+    expect((await service.list(world.id)).items).toContainEqual(expect.objectContaining({ runId: run.id, status: 'failed' }))
+  })
 })
 
 describe('TraceSanitizer and adapter boundary', () => {

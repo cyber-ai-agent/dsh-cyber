@@ -1,4 +1,4 @@
-import { ArrowClockwise, ArrowLeft, ArrowRight, Check, ImageSquare, Info, Plus, Trash, X } from '@phosphor-icons/react'
+import { ArrowClockwise, ArrowLeft, ArrowRight, Check, ImageSquare, Info, Plus, Trash, UploadSimple, X } from '@phosphor-icons/react'
 import type { CharacterBlueprintDraft, WorldGeneratorCatalog, WorldGeneratorSceneCatalogItem, WorldGeneratorSceneSelection, WorldThemeDraft } from '@dsh-cyber/contracts'
 import { useState, type KeyboardEvent } from 'react'
 import { useI18n } from '../../i18n/runtime.js'
@@ -46,9 +46,12 @@ interface WorldPreviewStepProps {
   draft: WorldThemeDraft
   catalog: WorldGeneratorCatalog
   scene?: WorldGeneratorSceneSelection
+  sceneError?: string
   validationError?: string
   onDraftChange(patch: Partial<WorldThemeDraft>): void
   onSceneSelect(option: WorldGeneratorSceneCatalogItem): void
+  onSceneUpload(file: File): void
+  onSceneUseOfficial(): void
   onCastChange(index: number, patch: Partial<CharacterBlueprintDraft>): void
   onCastAdd(): void
   onCastRemove(index: number): void
@@ -56,7 +59,7 @@ interface WorldPreviewStepProps {
   onContinue(): void
 }
 
-export function WorldPreviewStep({ draft, catalog, scene, validationError, onDraftChange, onSceneSelect, onCastChange, onCastAdd, onCastRemove, onBack, onContinue }: WorldPreviewStepProps) {
+export function WorldPreviewStep({ draft, catalog, scene, sceneError, validationError, onDraftChange, onSceneSelect, onSceneUpload, onSceneUseOfficial, onCastChange, onCastAdd, onCastRemove, onBack, onContinue }: WorldPreviewStepProps) {
   const { t } = useI18n()
   const invalid = validationError !== undefined
   const term = (key: keyof WorldThemeDraft['terminology'], label: string) => (
@@ -69,7 +72,7 @@ export function WorldPreviewStep({ draft, catalog, scene, validationError, onDra
         <div><h3>{t('worldGenerator.previewTitle', '检查世界草稿')}</h3><p>{t('worldGenerator.previewDescription', '所有字段都可以修改。默认角色的技能和能力只是请求，招募时仍需单独审阅。')}</p></div>
       </div>
       <div className="character-generator-preview-layout">
-        <div className="character-generator-preview-media"><ScenePicker2D options={catalog.scenes} selection={scene} onSelect={onSceneSelect} /></div>
+        <div className="character-generator-preview-media"><ScenePicker2D options={catalog.scenes} selection={scene} onSelect={onSceneSelect} onUpload={onSceneUpload} onUseOfficial={onSceneUseOfficial} error={sceneError} /></div>
         <div className="character-generator-preview-fields">
           <TextField id="world-generator-name" initialFocus label={t('worldGenerator.displayName', '世界名称')} value={draft.displayName} maxLength={100} error={invalid && draft.displayName.trim().length === 0} onChange={(value) => onDraftChange({ displayName: value })} />
           <TextField id="world-generator-summary" label={t('worldGenerator.summary', '世界简介')} value={draft.summary} maxLength={500} multiline rows={3} error={invalid && draft.summary.trim().length === 0} onChange={(value) => onDraftChange({ summary: value })} />
@@ -109,31 +112,57 @@ interface ScenePicker2DProps {
   options: WorldGeneratorSceneCatalogItem[]
   selection: WorldGeneratorSceneSelection | undefined
   onSelect(option: WorldGeneratorSceneCatalogItem): void
+  onUpload(file: File): void
+  onUseOfficial(): void
+  error?: string | undefined
 }
 
 /**
- * Official 2D scenes only. Mirrors AvatarPicker2D without the upload half:
- * a user-supplied background is the stated follow-up, not this slice.
+ * The scene answer, mirroring AvatarPicker2D: official picks or an upload.
+ * An upload replaces the background raster only; the pressed official scene
+ * still lends its anchors, navigation and interactables, and stays pressed.
  */
-export function ScenePicker2D({ options, selection, onSelect }: ScenePicker2DProps) {
+export function ScenePicker2D({ options, selection, onSelect, onUpload, onUseOfficial, error }: ScenePicker2DProps) {
   const { t } = useI18n()
   const selected = selection === undefined ? undefined : options.find((option) => option.id === selection.id)
+  const uploaded = selection?.kind === 'upload' ? selection : undefined
   return (
     <fieldset className="character-generator-avatar world-generator-scene">
       <legend>{t('worldGenerator.sceneTitle', '默认 2D 场景')}</legend>
       <div className="character-generator-avatar__preview world-generator-scene__preview">
-        {selected === undefined ? <ImageSquare size={48} aria-hidden="true" /> : <img src={scenePreviewUrl(selected)} alt={selected.displayName} />}
+        {uploaded !== undefined
+          ? <img src={`data:${uploaded.mimeType};base64,${uploaded.dataBase64}`} alt={t('worldGenerator.backgroundSelected', '已选择背景图片：{name}', { name: uploaded.fileName })} />
+          : selected === undefined ? <ImageSquare size={48} aria-hidden="true" /> : <img src={scenePreviewUrl(selected)} alt={selected.displayName} />}
         <div>
-          <strong>{selected?.displayName ?? t('worldGenerator.sceneNone', '尚未选择场景')}</strong>
-          <span>{t('worldGenerator.sceneHint', '从官方场景中挑选一个作为世界的默认布局；上传自定义背景将在后续版本提供。')}</span>
+          <strong>{uploaded?.fileName ?? selected?.displayName ?? t('worldGenerator.sceneNone', '尚未选择场景')}</strong>
+          <span>{t('worldGenerator.sceneHint', '从官方场景中挑选一个作为世界的默认布局，或上传自己的背景图片。')}</span>
         </div>
       </div>
+      <div className="character-generator-avatar__actions">
+        <label className="character-generator-upload-button">
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+            onChange={(event) => {
+              const file = event.currentTarget.files?.[0]
+              event.currentTarget.value = ''
+              if (file !== undefined) onUpload(file)
+            }}
+          />
+          <UploadSimple size={17} aria-hidden="true" />
+          {t('worldGenerator.backgroundUpload', '上传背景图片')}
+        </label>
+        {uploaded === undefined ? null : <span className="character-generator-avatar__file" role="status">{t('worldGenerator.backgroundSelected', '已选择背景图片：{name}', { name: uploaded.fileName })}</span>}
+        {uploaded === undefined ? null : <button className="text-button" type="button" onClick={onUseOfficial}>{t('worldGenerator.backgroundUseOfficial', '使用官方背景')}</button>}
+      </div>
+      <p className="character-generator-helper">{t('worldGenerator.backgroundUploadHint', '支持 PNG、JPEG、WebP，最大 4 MiB。上传的图片只替换背景；站位、导航与交互点仍来自所选的官方场景。')}</p>
       <div className="character-generator-avatar__options world-generator-scene__options" role="group" aria-label={t('worldGenerator.scenePick', '选择一个官方场景')}>
         {options.length === 0 ? <span className="character-generator-empty">{t('worldGenerator.sceneEmpty', '官方场景目录为空。')}</span> : options.map((option) => {
           const active = selection?.id === option.id
           return <button key={option.id} className={active ? 'is-selected' : ''} type="button" aria-label={option.displayName} aria-pressed={active} onClick={() => onSelect(option)}><img src={scenePreviewUrl(option)} alt="" aria-hidden="true" /></button>
         })}
       </div>
+      {error === undefined ? null : <span className="character-generator-field-error" role="alert"><ImageSquare size={16} aria-hidden="true" />{error}</span>}
     </fieldset>
   )
 }
@@ -184,6 +213,8 @@ interface WorldPublishStepProps {
   draft: WorldThemeDraft
   source: string
   scene?: WorldGeneratorSceneCatalogItem
+  /** The scene answer as sent; an upload is summarized with the scene lending its layout. */
+  background?: WorldGeneratorSceneSelection
   publishing: boolean
   error?: string
   published: boolean
@@ -192,15 +223,20 @@ interface WorldPublishStepProps {
   onViewInstall(): void
 }
 
-export function WorldPublishStep({ draft, source, scene, publishing, error, published, onBack, onPublish, onViewInstall }: WorldPublishStepProps) {
+export function WorldPublishStep({ draft, source, scene, background, publishing, error, published, onBack, onPublish, onViewInstall }: WorldPublishStepProps) {
   const { t } = useI18n()
+  const sceneSummary = scene === undefined
+    ? t('worldGenerator.sceneNone', '尚未选择场景')
+    : background?.kind === 'upload'
+      ? t('worldGenerator.backgroundSummary', '上传背景 {name}（布局来自 {scene}）', { name: background.fileName, scene: scene.displayName })
+      : scene.displayName
   if (published) {
     return <div className="character-generator-step character-generator-step--published"><div className="character-generator-published-mark"><Check size={26} aria-hidden="true" /></div><h3>{t('worldGenerator.published', '世界主题已发布')}</h3><p>{t('worldGenerator.publishDescription', '发布会生成一个本地世界主题包和对应的角色模板包，并出现在世界市场与角色市场中。')}</p><button className="primary-button" type="button" data-generator-initial-focus onClick={onViewInstall}>{t('characterGenerator.viewInstall', '查看并安装')}<ArrowRight size={16} aria-hidden="true" /></button></div>
   }
   return (
     <div className="character-generator-step character-generator-step--publish">
       <div className="character-generator-step__heading"><span className="character-generator-step__eyebrow">04</span><div><h3>{t('worldGenerator.publishTitle', '确认发布世界主题')}</h3><p>{t('worldGenerator.publishDescription', '发布会生成一个本地世界主题包和对应的角色模板包，并出现在世界市场与角色市场中。')}</p></div></div>
-      <section className="character-generator-publish-card"><div className="character-generator-publish-card__identity"><strong>{draft.displayName}</strong><span>{draft.terminology.world} · {draft.terminology.participant} · {draft.terminology.session} · {draft.terminology.milestone}</span><p>{draft.summary}</p></div><dl><div><dt>{t('worldGenerator.sceneTitle', '默认 2D 场景')}</dt><dd>{scene?.displayName ?? t('worldGenerator.sceneNone', '尚未选择场景')}</dd></div><div><dt>{t('worldGenerator.workflow', '工作流程')}</dt><dd>{draft.workflow.length === 0 ? t('worldGenerator.none', '无') : draft.workflow.join(' → ')}</dd></div><div><dt>{t('worldGenerator.rules', '世界规则')}</dt><dd>{t('worldGenerator.countRules', '{count} 条', { count: draft.rules.length })}</dd></div><div><dt>{t('worldGenerator.cast', '默认角色')}</dt><dd>{draft.cast.length === 0 ? t('worldGenerator.none', '无') : draft.cast.map((member) => member.displayName).join('、')}</dd></div><div><dt>{t('characterGenerator.publishSource', '来源摘要')}</dt><dd>{draft.sourceSummary || source.slice(0, 180)}</dd></div></dl></section>
+      <section className="character-generator-publish-card"><div className="character-generator-publish-card__identity"><strong>{draft.displayName}</strong><span>{draft.terminology.world} · {draft.terminology.participant} · {draft.terminology.session} · {draft.terminology.milestone}</span><p>{draft.summary}</p></div><dl><div><dt>{t('worldGenerator.sceneTitle', '默认 2D 场景')}</dt><dd>{sceneSummary}</dd></div><div><dt>{t('worldGenerator.workflow', '工作流程')}</dt><dd>{draft.workflow.length === 0 ? t('worldGenerator.none', '无') : draft.workflow.join(' → ')}</dd></div><div><dt>{t('worldGenerator.rules', '世界规则')}</dt><dd>{t('worldGenerator.countRules', '{count} 条', { count: draft.rules.length })}</dd></div><div><dt>{t('worldGenerator.cast', '默认角色')}</dt><dd>{draft.cast.length === 0 ? t('worldGenerator.none', '无') : draft.cast.map((member) => member.displayName).join('、')}</dd></div><div><dt>{t('characterGenerator.publishSource', '来源摘要')}</dt><dd>{draft.sourceSummary || source.slice(0, 180)}</dd></div></dl></section>
       <div className="character-generator-publish-notice"><Info size={17} aria-hidden="true" /><span>{t('worldGenerator.publishPackageHint', '发布不会自动安装、创建世界或招募角色。')}</span></div>
       {error === undefined ? null : <div className="character-generator-error" role="alert"><Info size={17} aria-hidden="true" />{error}</div>}
       <div className="character-generator-step__actions"><button className="secondary-button" type="button" disabled={publishing} onClick={onBack}><ArrowLeft size={16} aria-hidden="true" />{t('characterGenerator.previous', '上一步')}</button><button className="primary-button" type="button" data-generator-initial-focus disabled={publishing} onClick={onPublish}>{publishing ? t('characterGenerator.publishing', '正在发布…') : t('worldGenerator.publishButton', '发布到世界市场')}<Check size={16} aria-hidden="true" /></button></div>

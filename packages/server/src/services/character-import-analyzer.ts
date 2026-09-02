@@ -168,14 +168,15 @@ export class CharacterImportAnalyzer implements CharacterImportAnalyzerPort {
  * noun in the message differ; the validation is the same trust boundary.
  */
 export interface ImportSourceSubject {
-  /** Error code prefix: `character` or `world`. */
-  code: 'character' | 'world'
+  /** Error code prefix: `character`, `world` or `skin`. */
+  code: 'character' | 'world' | 'skin'
   /** Noun used in user-facing messages. */
   noun: string
 }
 
 const CHARACTER_SOURCE_SUBJECT: ImportSourceSubject = { code: 'character', noun: '角色' }
 export const WORLD_SOURCE_SUBJECT: ImportSourceSubject = { code: 'world', noun: '世界' }
+export const SKIN_SOURCE_SUBJECT: ImportSourceSubject = { code: 'skin', noun: '皮肤' }
 
 /** Normalize and validate the source envelope before model dispatch. */
 export function normalizeCharacterSource(input: CharacterSourceInput): CharacterSourceInput {

@@ -27,6 +27,7 @@ await Promise.all([
   import('./i18n/context-inspector-messages.js'),
   import('./i18n/character-generator-messages.js'),
   import('./i18n/world-generator-messages.js'),
+  import('./i18n/skin-generator-messages.js'),
 ])
 
 const root = document.getElementById('root')

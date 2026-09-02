@@ -8,7 +8,7 @@ import { HttpError } from '../http/errors.js'
 import type { Router } from '../http/router.js'
 import { optionalString, packageManifest, readJson, requiredString } from '../http/request.js'
 import { writeJson } from '../http/response.js'
-import { loadInstalledBlueprints, loadInstalledPromptTransformCommands } from '../installed-package-runtime.js'
+import { loadInstalledBlueprints, loadInstalledPromptTransformCommands, loadInstalledSkins, type InstalledSkinManifest } from '../installed-package-runtime.js'
 import { AvatarBasePackService, OFFICIAL_AVATAR_BASE_PACK_ID } from '../services/avatar-base-pack-service.js'
 import { validateAvatarBasePackSource } from '../services/avatar-base-pack-source-validator.js'
 import type { CharacterSkillRuntime } from '../services/character-skill-runtime.js'
@@ -60,6 +60,25 @@ export function registerPackageRoutes(router: Router, dependencies: PackageRoute
       items: store.listInstalledPackages(workspaceId),
       transactions: store.listPackageInstallTransactions(workspaceId),
     })
+  })
+
+  // The installed skin declarations, palette included, so the web host can
+  // register a declared palette as a theme. Verified per package: a skin whose
+  // bytes or declaration fail the installer's own checks is left out rather
+  // than failing the whole listing.
+  router.get(/^\/api\/workspaces\/([^/]+)\/skins$/, async ({ response, params }) => {
+    const workspaceId = params[0]!
+    if (store.getWorkspace(workspaceId) === undefined) throw new HttpError(404, 'workspace_not_found', 'Workspace not found')
+    const items: InstalledSkinManifest[] = []
+    for (const installed of store.listInstalledPackages(workspaceId)) {
+      if (installed.status !== 'active' || installed.kind !== 'skin') continue
+      try {
+        items.push(...await loadInstalledSkins([installed]))
+      } catch {
+        // Fail closed for this package only.
+      }
+    }
+    writeJson(response, 200, { items })
   })
 
   router.get(/^\/api\/workspaces\/([^/]+)\/plugins$/, async ({ response, params }) => {

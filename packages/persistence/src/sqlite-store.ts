@@ -4471,6 +4471,36 @@ export class SqliteStore {
       .map(mapMessage)
   }
 
+  /**
+   * The task each turn in this world was started from, as the host wrote it
+   * on the turn's seed message (`metadata.workTaskId`) — the only statement
+   * that exists before `task_runs` records the turn.
+   *
+   * A hint, not a link: the id is read back from message metadata, so it is
+   * no more trustworthy than that message. The caller resolves it against the
+   * world's own `work_tasks` before showing it and drops what does not resolve.
+   */
+  listWorldTurnTaskHints(worldId: string): Array<{ workTurnId: string; workTaskId: string }> {
+    this.#requireWorld(worldId)
+    return this.database
+      .prepare(
+        `SELECT json_extract(messages.metadata_json, '$.workTurnId') AS work_turn_id,
+                json_extract(messages.metadata_json, '$.workTaskId') AS work_task_id
+         FROM messages
+         INNER JOIN work_sessions ON work_sessions.id = messages.session_id
+         WHERE work_sessions.world_id = ?
+           AND messages.kind = 'user'
+           AND json_type(messages.metadata_json, '$.workTurnId') = 'text'
+           AND json_type(messages.metadata_json, '$.workTaskId') = 'text'
+         ORDER BY messages.created_at, messages.id`,
+      )
+      .all(worldId)
+      .map((row) => {
+        const value = row as Record<string, unknown>
+        return { workTurnId: String(value.work_turn_id), workTaskId: String(value.work_task_id) }
+      })
+  }
+
   listMessagesPage(sessionId: string, input: ListMessagesPageInput = {}): MessagePage {
     this.#requireSession(sessionId)
     const pageSize = clampMessagePageSize(input.limit)
@@ -4629,7 +4659,7 @@ export class SqliteStore {
     const row = this.database
       .prepare(
         `SELECT
-           (SELECT COUNT(1) || '@' || COALESCE(MAX(created_at), '') FROM agent_runs WHERE world_id = ?) AS runs,
+           (SELECT COUNT(1) || '@' || COALESCE(MAX(COALESCE(completed_at, started_at, created_at)), '') FROM agent_runs WHERE world_id = ?) AS runs,
            (SELECT COUNT(1) || '@' || COALESCE(MAX(created_at), '') FROM domain_events WHERE world_id = ?) AS events,
            (SELECT COUNT(1) || '@' || COALESCE(MAX(created_at), '') FROM messages WHERE session_id IN (SELECT id FROM work_sessions WHERE world_id = ?)) AS messages,
            (SELECT COUNT(1) || '@' || COALESCE(MAX(updated_at), '') FROM skill_actions WHERE world_id = ?) AS actions,
@@ -4637,10 +4667,14 @@ export class SqliteStore {
            (SELECT COUNT(1) || '@' || COALESCE(MAX(created_at), '') FROM world_artifact_versions WHERE world_id = ?) AS artifacts,
            (SELECT COUNT(1) || '@' || COALESCE(MAX(COALESCE(decided_at, created_at)), '') FROM approval_requests WHERE world_id = ?) AS approvals,
            (SELECT COUNT(1) || '@' || COALESCE(MAX(updated_at), '') FROM knowledge_consolidation_jobs WHERE world_id = ?) AS consolidations,
-           (SELECT COUNT(1) || '@' || COALESCE(MAX(updated_at), '') FROM employee_instances WHERE world_id = ?) AS employees`,
+           (SELECT COUNT(1) || '@' || COALESCE(MAX(updated_at), '') FROM employee_instances WHERE world_id = ?) AS employees,
+           (SELECT COUNT(1) || '@' || COALESCE(MAX(updated_at), '') FROM work_tasks WHERE world_id = ?) AS tasks,
+           (SELECT COUNT(1) || '@' || COALESCE(MAX(COALESCE(completed_at, started_at)), '') FROM task_runs
+             WHERE task_id IN (SELECT id FROM work_tasks WHERE world_id = ?)) AS task_runs,
+           (SELECT COUNT(1) || '@' || COALESCE(MAX(created_at), '') FROM agent_run_context_snapshots WHERE world_id = ?) AS contexts`,
       )
-      .get(worldId, worldId, worldId, worldId, worldId, worldId, worldId, worldId, worldId) as Record<string, string | null>
-    return ['runs', 'events', 'messages', 'actions', 'interactions', 'artifacts', 'approvals', 'consolidations', 'employees']
+      .get(worldId, worldId, worldId, worldId, worldId, worldId, worldId, worldId, worldId, worldId, worldId, worldId) as Record<string, string | null>
+    return ['runs', 'events', 'messages', 'actions', 'interactions', 'artifacts', 'approvals', 'consolidations', 'employees', 'tasks', 'task_runs', 'contexts']
       .map((key) => String(row[key] ?? ''))
       .join('|')
   }
