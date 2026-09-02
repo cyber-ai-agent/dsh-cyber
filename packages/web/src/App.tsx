@@ -2613,6 +2613,9 @@ export default function App() {
           onCharacterPublished={async () => {
             await Promise.all([loadPackages(), searchMarketplace('talent')])
           }}
+          onWorldPublished={async () => {
+            await Promise.all([loadPackages(), searchMarketplace('theme')])
+          }}
           onUsePlugin={(command) => {
             setPackageMarketOpen(false)
             setDraft(`${command} `)

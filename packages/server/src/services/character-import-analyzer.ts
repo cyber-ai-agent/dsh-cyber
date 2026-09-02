@@ -163,32 +163,56 @@ export class CharacterImportAnalyzer implements CharacterImportAnalyzerPort {
   }
 }
 
+/**
+ * Which generator a source envelope belongs to. Only the error codes and the
+ * noun in the message differ; the validation is the same trust boundary.
+ */
+export interface ImportSourceSubject {
+  /** Error code prefix: `character` or `world`. */
+  code: 'character' | 'world'
+  /** Noun used in user-facing messages. */
+  noun: string
+}
+
+const CHARACTER_SOURCE_SUBJECT: ImportSourceSubject = { code: 'character', noun: '角色' }
+export const WORLD_SOURCE_SUBJECT: ImportSourceSubject = { code: 'world', noun: '世界' }
+
 /** Normalize and validate the source envelope before model dispatch. */
 export function normalizeCharacterSource(input: CharacterSourceInput): CharacterSourceInput {
-  if (input === null || typeof input !== 'object') throw new ServiceError('invalid', 'character_source_invalid', '角色来源必须是对象。')
+  return normalizeImportSource(input, CHARACTER_SOURCE_SUBJECT)
+}
+
+/**
+ * Shared source boundary for every generator. Kind, byte budget, control
+ * characters, frontmatter shape and file name are validated identically; the
+ * subject only decides how a rejection is reported.
+ */
+export function normalizeImportSource(input: CharacterSourceInput, subject: ImportSourceSubject): CharacterSourceInput {
+  const { code, noun } = subject
+  if (input === null || typeof input !== 'object') throw new ServiceError('invalid', `${code}_source_invalid`, `${noun}来源必须是对象。`)
   if (input.kind !== 'description' && input.kind !== 'file' && input.kind !== 'paste') {
-    throw new ServiceError('invalid', 'character_source_kind_invalid', '角色来源类型不受支持。')
+    throw new ServiceError('invalid', `${code}_source_kind_invalid`, `${noun}来源类型不受支持。`)
   }
   if (typeof input.text !== 'string' || input.text.trim().length === 0) {
-    throw new ServiceError('invalid', 'character_source_empty', '角色来源内容不能为空。')
+    throw new ServiceError('invalid', `${code}_source_empty`, `${noun}来源内容不能为空。`)
   }
   const normalizedInput = input.text.normalize('NFC')
   if (Buffer.byteLength(normalizedInput, 'utf8') > CHARACTER_SOURCE_MAX_BYTES) {
-    throw new ServiceError('too-large', 'character_source_too_large', '角色来源不能超过 128 KiB。')
+    throw new ServiceError('too-large', `${code}_source_too_large`, `${noun}来源不能超过 128 KiB。`)
   }
   const text = normalizedInput.trim()
   if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u.test(text)) {
-    throw new ServiceError('invalid', 'character_source_control_character', '角色来源包含不允许的控制字符。')
+    throw new ServiceError('invalid', `${code}_source_control_character`, `${noun}来源包含不允许的控制字符。`)
   }
   // Validate frontmatter at the source boundary as well as before model
   // dispatch so publish cannot persist an unsafe YAML-like envelope.
   parseScalarFrontmatter(text)
-  const fileName = input.fileName === undefined ? undefined : normalizeFileName(input.fileName)
+  const fileName = input.fileName === undefined ? undefined : normalizeFileName(input.fileName, subject)
   if (input.kind === 'file') {
-    if (fileName === undefined) throw new ServiceError('invalid', 'character_source_filename_required', '文件来源必须包含文件名。')
-    if (!/\.(?:md|txt)$/iu.test(fileName)) throw new ServiceError('invalid', 'character_source_filename_invalid', '文件来源只支持 Markdown 或纯文本。')
+    if (fileName === undefined) throw new ServiceError('invalid', `${code}_source_filename_required`, '文件来源必须包含文件名。')
+    if (!/\.(?:md|txt)$/iu.test(fileName)) throw new ServiceError('invalid', `${code}_source_filename_invalid`, '文件来源只支持 Markdown 或纯文本。')
   } else if (fileName !== undefined) {
-    throw new ServiceError('invalid', 'character_source_filename_invalid', '描述或粘贴来源不能包含文件名。')
+    throw new ServiceError('invalid', `${code}_source_filename_invalid`, '描述或粘贴来源不能包含文件名。')
   }
   return { kind: input.kind, text, ...(fileName === undefined ? {} : { fileName }) }
 }
@@ -307,6 +331,23 @@ function analyzerSystemPrompt(allowedSkills: AllowedSkillCatalog): string {
   ].join('\n')
 }
 
+/**
+ * Analyze-time normalizer: every field is rebuilt from the model object with a
+ * safe fallback, unknown Skill and capability ids are dropped rather than
+ * rejected, and any field that echoes the untrusted source is replaced.
+ *
+ * Exported so the World Generator can rebuild each proposed cast member
+ * through exactly this path instead of a second parser.
+ */
+export function normalizeAnalyzedCharacterDraft(
+  raw: Record<string, unknown>,
+  targetWorldTemplateId: string,
+  source: CharacterSourceInput,
+  allowedSkills: ReadonlySet<string>,
+): CharacterBlueprintDraft {
+  return normalizeDraft(raw, targetWorldTemplateId, source, allowedSkills)
+}
+
 function normalizeDraft(
   raw: Record<string, unknown>,
   targetWorldTemplateId: string,
@@ -397,10 +438,10 @@ function normalizeEmbodiment(value: unknown): EmbodimentProfile | undefined {
   try { return parseEmbodimentProfile(candidate) } catch { return undefined }
 }
 
-function normalizeFileName(value: unknown): string {
-  if (typeof value !== 'string') throw new ServiceError('invalid', 'character_source_filename_invalid', '角色来源文件名无效。')
+function normalizeFileName(value: unknown, subject: ImportSourceSubject): string {
+  if (typeof value !== 'string') throw new ServiceError('invalid', `${subject.code}_source_filename_invalid`, `${subject.noun}来源文件名无效。`)
   const normalized = value.normalize('NFC').replace(/[\\/]/gu, '_').replace(/[\u0000-\u001f\u007f]/gu, '').trim()
-  if (!normalized || normalized.length > MAX_SOURCE_FILE_NAME) throw new ServiceError('invalid', 'character_source_filename_invalid', '角色来源文件名无效。')
+  if (!normalized || normalized.length > MAX_SOURCE_FILE_NAME) throw new ServiceError('invalid', `${subject.code}_source_filename_invalid`, `${subject.noun}来源文件名无效。`)
   return normalized
 }
 
