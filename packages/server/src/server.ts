@@ -33,6 +33,7 @@ import { registerModelRoutes } from './routes/model-routes.js'
 import { registerPackageRoutes } from './routes/package-routes.js'
 import { registerCharacterGeneratorRoutes } from './routes/character-generator-routes.js'
 import { registerWorldGeneratorRoutes } from './routes/world-generator-routes.js'
+import { registerSkinGeneratorRoutes } from './routes/skin-generator-routes.js'
 import { registerSystemRoutes } from './routes/system-routes.js'
 import { registerTaskScheduleRoutes } from './routes/task-schedule-routes.js'
 import { registerWorkspaceFileRoutes } from './routes/workspace-file-routes.js'
@@ -108,6 +109,7 @@ import type { WorldSkillAvailabilityPort } from './services/world-skill-availabi
 import type { CreativeWorkshopDraftGeneratorPort } from './services/creative-workshop-draft-generator.js'
 import { CharacterImportAnalyzer, type CharacterImportAnalyzerPort } from './services/character-import-analyzer.js'
 import { WorldImportAnalyzer, type WorldImportAnalyzerPort } from './services/world-import-analyzer.js'
+import { SkinImportAnalyzer, type SkinImportAnalyzerPort } from './services/skin-import-analyzer.js'
 import { composeCharacterGeneratorMarketplace } from './services/character-generator-marketplace.js'
 import { createWorldManagementHost } from './skills/world-management-host.js'
 import { RuntimeStreamHub } from './streams/runtime-stream-hub.js'
@@ -145,6 +147,8 @@ export interface CyberServerOptions {
   characterImportAnalyzer?: CharacterImportAnalyzerPort
   /** World Generator analyzer; tests and CI pass a deterministic stub. */
   worldImportAnalyzer?: WorldImportAnalyzerPort
+  /** Skin Generator analyzer; tests and CI pass a deterministic stub. */
+  skinImportAnalyzer?: SkinImportAnalyzerPort
   /**
    * Decides the speaking roster of a group turn.
    *
@@ -284,6 +288,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const skillAvailability = options.skillAvailability ?? skillCatalog
   const characterImportAnalyzer = options.characterImportAnalyzer ?? new CharacterImportAnalyzer(store, credentials, skillCatalog)
   const worldImportAnalyzer = options.worldImportAnalyzer ?? new WorldImportAnalyzer(store, credentials, skillCatalog)
+  const skinImportAnalyzer = options.skinImportAnalyzer ?? new SkinImportAnalyzer(store, credentials)
 
   const activeDshBinPath = await resolveActiveRuntime(store, runtimeStateRoot, stateRoot)
   const interactions = new ModelInteractionService(store)
@@ -453,6 +458,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerCatalogRoutes(router, { store, packageCatalog, worldPackages })
   registerCharacterGeneratorRoutes(router, { store, packageCatalog, skillCatalog, analyzer: characterImportAnalyzer, resolveMarketplaceRoot: generatedMarketplace.resolveMarketplaceRoot, containmentRoot: generatedMarketplace.containmentRoot })
   registerWorldGeneratorRoutes(router, { store, packageCatalog, skillCatalog, analyzer: worldImportAnalyzer, resolveMarketplaceRoot: generatedMarketplace.resolveMarketplaceRoot, containmentRoot: generatedMarketplace.containmentRoot })
+  registerSkinGeneratorRoutes(router, { store, packageCatalog, analyzer: skinImportAnalyzer, resolveMarketplaceRoot: generatedMarketplace.resolveMarketplaceRoot, containmentRoot: generatedMarketplace.containmentRoot })
   registerWorkspaceRoutes(router, { store })
   registerModelRoutes(router, { store, credentials, modelCatalog, interactions })
   registerIntegrationRoutes(router, {
