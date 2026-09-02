@@ -1,4 +1,5 @@
 import type {
+  AgentRun,
   TaskRun,
   WorkMessage,
   WorkTask,
@@ -152,11 +153,34 @@ export class WorldTraceService {
       },
     }, this.#context(envelope.worldId))
     return updates.map((update) => {
-      const merged = mergeTraceEntry(this.#liveRuns.get(update.id), update)
+      const previous = this.#liveRuns.get(update.id)
+      // A live envelope knows its turn, not its task, and `task_runs` cannot
+      // exist yet. The first event of a run resolves the turn's seed hint once;
+      // later events inherit the link through the merge and never re-read it.
+      const merged = previous === undefined
+        ? this.#withLiveTask(mergeTraceEntry(previous, update))
+        : mergeTraceEntry(previous, update)
       this.#liveRuns.set(update.id, merged)
       if (merged.status !== 'running') setTimeout(() => this.#liveRuns.delete(merged.id), 30_000).unref?.()
       return merged
     })
+  }
+
+  #withLiveTask(entry: WorldTraceEntry): WorldTraceEntry {
+    if (entry.status !== 'running' || entry.taskId !== undefined || entry.workTurnId === undefined) return entry
+    const task = this.#liveTasksByTurn(entry.worldId).get(entry.workTurnId)
+    if (task === undefined) return entry
+    return this.#sanitizer.entry({ ...entry, taskId: task.id, taskTitle: task.title })
+  }
+
+  /**
+   * The verified seed hints of a world: only ids that resolve to a task the
+   * Work System lists for this same world. Without a task port there is no
+   * verification, so there is no hint either.
+   */
+  #liveTasksByTurn(worldId: string): ReadonlyMap<string, WorldTraceTaskRef> {
+    if (this.#tasks === undefined) return new Map()
+    return groupTasksByRun(this.#tasks.listTasks(worldId), [], this.#store.listWorldTurnTaskHints(worldId)).hintedByTurn
   }
 
   #context(worldId: string) {
@@ -179,13 +203,17 @@ export class WorldTraceService {
       .map((interaction) => [interaction.agentRunId!, interaction]))
     const artifactsByRun = groupArtifactsByRun(this.#artifacts?.listRunProvenance(worldId) ?? [])
     const tasks = this.#tasks === undefined
-      ? { byRun: new Map<string, WorldTraceTaskRef>(), byTurn: new Map<string, WorldTraceTaskRef>() }
-      : groupTasksByRun(this.#tasks.listTasks(worldId), this.#tasks.listWorldTaskRuns(worldId))
+      ? groupTasksByRun([], [])
+      : groupTasksByRun(this.#tasks.listTasks(worldId), this.#tasks.listWorldTaskRuns(worldId), this.#store.listWorldTurnTaskHints(worldId))
     const contextsByRun = this.#contexts?.summarizeWorld(worldId) ?? new Map()
     const facts: WorldTraceFact[] = [
       ...this.#store.listWorldAgentRuns(worldId).map((run) => {
         const artifacts = artifactsByRun.get(run.id)
+        // The durable `task_runs` link first. It cannot exist while the run is
+        // live, so only in that window does the verified seed hint stand in;
+        // once the run has ended, an unrecorded run carries no task.
         const task = tasks.byRun.get(run.id) ?? tasks.byTurn.get(run.turnId)
+          ?? (isLiveRun(run) ? tasks.hintedByTurn.get(run.turnId) : undefined)
         const context = contextsByRun.get(run.id)
         return {
           kind: 'agent-run' as const,
@@ -204,7 +232,12 @@ export class WorldTraceService {
       ...(await this.#actions.listByWorld(worldId)).map((value) => ({ kind: 'skill-action' as const, value })),
     ]
     const persisted = deduplicate(facts.flatMap((fact) => this.#registry.adapt(fact, context)))
-    const live = [...this.#liveRuns.values()].filter((entry) => entry.worldId === worldId)
+    // The durable projection above has already decided every run's task —
+    // `task_runs` first, the seed hint only while live. A live card's own hint
+    // must not outrank that decision when the two are merged.
+    const live = [...this.#liveRuns.values()]
+      .filter((entry) => entry.worldId === worldId)
+      .map(({ taskId: _hintedTaskId, taskTitle: _hintedTaskTitle, ...entry }) => entry)
     return deduplicate([...persisted, ...live])
   }
 }
@@ -267,14 +300,21 @@ export function groupArtifactsByRun(
  * are kept because a run recorded before the id list was complete is still
  * reachable through its turn. A task row that no longer exists yields no
  * link — the trace never names a task it cannot show.
+ *
+ * `hints` are the seed messages' `workTaskId`s, kept apart in `hintedByTurn`:
+ * they are host-written but read back from message metadata, so one counts
+ * only when it names a task in `tasks` — the same world's list — and the
+ * caller decides in which window (a live run) a hint may stand in.
  */
 export function groupTasksByRun(
   tasks: readonly Pick<WorkTask, 'id' | 'title'>[],
   runs: readonly Pick<TaskRun, 'taskId' | 'workTurnId' | 'agentRunIds'>[],
-): { byRun: Map<string, WorldTraceTaskRef>; byTurn: Map<string, WorldTraceTaskRef> } {
+  hints: readonly { workTurnId: string; workTaskId: string }[] = [],
+): { byRun: Map<string, WorldTraceTaskRef>; byTurn: Map<string, WorldTraceTaskRef>; hintedByTurn: Map<string, WorldTraceTaskRef> } {
   const titles = new Map(tasks.map((task) => [task.id, task.title]))
   const byRun = new Map<string, WorldTraceTaskRef>()
   const byTurn = new Map<string, WorldTraceTaskRef>()
+  const hintedByTurn = new Map<string, WorldTraceTaskRef>()
   for (const run of runs) {
     const title = titles.get(run.taskId)
     if (title === undefined) continue
@@ -282,7 +322,17 @@ export function groupTasksByRun(
     byTurn.set(run.workTurnId, reference)
     for (const agentRunId of run.agentRunIds) byRun.set(agentRunId, reference)
   }
-  return { byRun, byTurn }
+  for (const hint of hints) {
+    const title = titles.get(hint.workTaskId)
+    if (title === undefined) continue
+    hintedByTurn.set(hint.workTurnId, { id: hint.workTaskId, title })
+  }
+  return { byRun, byTurn, hintedByTurn }
+}
+
+/** A run `task_runs` cannot know yet: the Work System records a turn only after every run in it has ended. */
+function isLiveRun(run: Pick<AgentRun, 'status'>): boolean {
+  return run.status === 'queued' || run.status === 'running'
 }
 
 export function createWorldTraceRegistry(): WorldTraceAdapterRegistry {

@@ -116,6 +116,11 @@ test('imports a scenario file, publishes only after review, installs the theme a
   await expect(generator.getByRole('button', { name: /月影酒馆/ })).toHaveAttribute('aria-pressed', 'true')
   await generator.getByRole('button', { name: /远星观测站/ }).click()
   await expect(generator.getByRole('button', { name: /远星观测站/ })).toHaveAttribute('aria-pressed', 'true')
+  // Upload a background: it replaces the scene image only, the official pick
+  // above keeps the layout and stays pressed.
+  await generator.locator('.world-generator-scene input[type="file"]').setInputFiles({ name: 'backdrop.png', mimeType: 'image/png', buffer: UPLOADED_BACKGROUND_PNG })
+  await expect(generator.getByText(/已选择背景图片：backdrop\.png/).first()).toBeVisible()
+  await expect(generator.getByRole('button', { name: /远星观测站/ })).toHaveAttribute('aria-pressed', 'true')
   await generator.getByLabel('世界名称').fill('社区法律援助诊所 · E2E')
   await generator.getByRole('button', { name: '下一步', exact: true }).click()
   await expect(generator.getByRole('heading', { name: '确认发布世界主题' })).toBeVisible()
@@ -157,6 +162,12 @@ test('imports a scenario file, publishes only after review, installs the theme a
   expect(binding?.themeId).toMatch(/^generated\.world\./u)
   expect(binding?.manifest.terminology).toMatchObject({ world: '诊所', session: '案情会' })
   expect(binding?.manifest.scenes[0]?.id).toBe('blue-ring-deck')
+  // The uploaded raster is the theme's background asset; the official scene's own image is gone.
+  expect(binding?.manifest.assets.map((asset) => asset.src)).toContain('assets/background.png')
+  expect(binding?.manifest.assets.map((asset) => asset.src)).not.toContain('assets/orbital-observatory-world.png')
+  const previewResponse = await page.request.get(`${origin}/api/marketplace/packages/${encodeURIComponent(binding!.packageId)}/${binding!.packageVersion}/preview?workspaceId=${encodeURIComponent(workspace.id)}`)
+  expect(previewResponse.ok()).toBe(true)
+  expect(Buffer.from(await previewResponse.body()).equals(UPLOADED_BACKGROUND_PNG)).toBe(true)
 
   // The cast was published as ordinary talent packages, installed by nobody yet.
   const talent = await page.request.get(`${origin}/api/marketplace?market=talent&workspaceId=${encodeURIComponent(workspace.id)}`)
@@ -165,6 +176,12 @@ test('imports a scenario file, publishes only after review, installs the theme a
   expect(current.store.listInstalledPackages(workspace.id).filter((item) => item.packageId.startsWith('generated.character.'))).toHaveLength(0)
   expect(consoleIssues, consoleIssues.join('\n')).toEqual([])
 })
+
+// A 1x1 opaque PNG: small enough to inline, a real container for the sniffer.
+const UPLOADED_BACKGROUND_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+)
 
 function requireServer(): CyberServer & { origin: string; root: string } {
   if (server === undefined) throw new Error('World Generator E2E server is not started')

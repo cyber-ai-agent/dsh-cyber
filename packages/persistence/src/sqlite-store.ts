@@ -4471,6 +4471,36 @@ export class SqliteStore {
       .map(mapMessage)
   }
 
+  /**
+   * The task each turn in this world was started from, as the host wrote it
+   * on the turn's seed message (`metadata.workTaskId`) — the only statement
+   * that exists before `task_runs` records the turn.
+   *
+   * A hint, not a link: the id is read back from message metadata, so it is
+   * no more trustworthy than that message. The caller resolves it against the
+   * world's own `work_tasks` before showing it and drops what does not resolve.
+   */
+  listWorldTurnTaskHints(worldId: string): Array<{ workTurnId: string; workTaskId: string }> {
+    this.#requireWorld(worldId)
+    return this.database
+      .prepare(
+        `SELECT json_extract(messages.metadata_json, '$.workTurnId') AS work_turn_id,
+                json_extract(messages.metadata_json, '$.workTaskId') AS work_task_id
+         FROM messages
+         INNER JOIN work_sessions ON work_sessions.id = messages.session_id
+         WHERE work_sessions.world_id = ?
+           AND messages.kind = 'user'
+           AND json_type(messages.metadata_json, '$.workTurnId') = 'text'
+           AND json_type(messages.metadata_json, '$.workTaskId') = 'text'
+         ORDER BY messages.created_at, messages.id`,
+      )
+      .all(worldId)
+      .map((row) => {
+        const value = row as Record<string, unknown>
+        return { workTurnId: String(value.work_turn_id), workTaskId: String(value.work_task_id) }
+      })
+  }
+
   listMessagesPage(sessionId: string, input: ListMessagesPageInput = {}): MessagePage {
     this.#requireSession(sessionId)
     const pageSize = clampMessagePageSize(input.limit)

@@ -204,7 +204,10 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   // Finish a delete interrupted between the SQLite commit and the file removal.
   await worldLifecycle.sweepInterrupted()
   await Promise.all(store.listWorkspaces().flatMap((workspace) => store.listWorlds(workspace.id, true).map((world) => worldRoots.ensure(world.id))))
-  const worldSettings = new WorldSettingsService(worldRoots)
+  // The theme's rules render into the world context from the world's durable
+  // theme binding. `worldRuntime` is composed further down; the settings
+  // service only reads it per turn, long after both exist.
+  const worldSettings = new WorldSettingsService(worldRoots, { getThemeManifest: (worldId) => worldRuntime.getThemeManifest(worldId) })
   const ambientLifeSettings = new AmbientLifeSettingsService(store)
   const worldAccess = new WorldAccessService(worldRoots)
   const credentials = await ModelCredentialService.open(stateRoot)
