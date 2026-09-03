@@ -333,12 +333,53 @@ function parseJson(value: string): unknown {
   const start = cleaned.indexOf('{')
   const end = cleaned.lastIndexOf('}')
   if (start >= 0 && end > start) candidates.push(cleaned.slice(start, end + 1))
+  // A compatible gateway that caps completion mid-stream yields truncated JSON.
+  // Salvaging every whole member beats discarding the whole batch — and the
+  // next job's cursor already stops at the messages actually sent.
+  const repaired = start >= 0 ? repairTruncatedJson(cleaned.slice(start)) : undefined
+  if (repaired !== undefined) candidates.push(repaired)
   for (const candidate of candidates) {
     try { return JSON.parse(candidate) as unknown } catch {
       // Try the next shape.
     }
   }
   throw invalid('extraction_json_invalid', '知识抽取结果不是有效 JSON')
+}
+
+/**
+ * Close a JSON object the model never finished: keep everything up to the last
+ * complete element at ANY depth and close the open containers around it, so a
+ * completion capped mid-array still yields the entities and claims it finished.
+ * Returns undefined when the answer is too incomplete to salvage.
+ */
+export function repairTruncatedJson(text: string): string | undefined {
+  const stack: string[] = []
+  let inString = false
+  let escaped = false
+  let cutEnd = -1
+  let cutClosers = ''
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]
+    if (inString) {
+      if (escaped) escaped = false
+      else if (char === '\\') escaped = true
+      else if (char === '"') inString = false
+      continue
+    }
+    if (char === '"') { inString = true; continue }
+    if (char === '{' || char === '[') { stack.push(char); continue }
+    if (char === '}' || char === ']') {
+      stack.pop()
+      if (stack.length === 0) return undefined // already balanced — not truncated
+      // Any closed element is a safe cut: whatever remains open gets mirrored.
+      cutEnd = index
+      cutClosers = stack.map((open) => (open === '{' ? '}' : ']')).reverse().join('')
+    }
+  }
+  if (stack.length === 0 || cutEnd < 0) return undefined
+  const head = text.slice(0, cutEnd + 1).replace(/,\s*$/, '')
+  const candidate = `${head}${cutClosers}`
+  try { JSON.parse(candidate) as unknown; return candidate } catch { return undefined }
 }
 function strictRecord(value: unknown, label: string): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw invalid('extraction_shape_invalid', label + '必须是对象')

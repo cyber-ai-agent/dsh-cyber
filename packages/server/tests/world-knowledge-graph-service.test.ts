@@ -144,6 +144,20 @@ describe('strict knowledge extraction', () => {
     expect(result.entities[0]?.canonicalName).toBe('林澈')
   })
 
+  it('salvages whole members from an answer truncated mid-stream by the gateway', () => {
+    // max_tokens capped the completion: evidenceRefs and entities closed, the
+    // second claim died mid-key. Salvaging what completed beats losing it all.
+    const truncated = '{"evidenceRefs":[{"sourceType":"conversation","sourceId":"session-a","evidenceId":"evidence-a"}],"entities":[{"key":"lin","type":"character","canonicalName":"林澈","aliases":[],"evidenceRefs":["evidence-a"]}],"claims":[{"key":"c1","type":"fact","subjectKey":"lin","predicate":"负责","objectText":"观测站","confidence":0.9,"evidenceRefs":["evidence-a"]},{"key":"c2","type":"fact","subject'
+    const result = parseKnowledgeExtraction(truncated, { sourceType: 'conversation', sourceId: 'session-a', evidence: evidenceInput })
+    expect(result.entities.map((entity) => entity.canonicalName)).toEqual(['林澈'])
+    expect(result.claims.map((claim) => claim.key)).toEqual(['c1'])
+  })
+
+  it('fails cleanly when truncation dropped the required evidence root', () => {
+    const truncated = '{"entities":[{"key":"lin","type":"character","canonicalName":"林澈","aliases":[],"evidenceRefs":["evidence-a"]},{"key":"pa'
+    expect(() => parseKnowledgeExtraction(truncated, { sourceType: 'conversation', sourceId: 'session-a', evidence: evidenceInput })).toThrowError(KnowledgeExtractionError)
+  })
+
   it('degrades an unknown entity type to other and drops only the claim with an unknown type', () => {
     const parsed = parseKnowledgeExtraction({
       entities: [{ key: 'lin', type: '神秘生物', canonicalName: '林澈', aliases: [], evidenceRefs: ['evidence-a'] }],
