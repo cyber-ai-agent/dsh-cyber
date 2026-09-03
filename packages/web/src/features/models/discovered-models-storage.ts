@@ -3,6 +3,7 @@ import type { ModelProfile } from '@dsh-cyber/contracts'
 export interface CachedDiscoveredModel {
   id: string
   displayName?: string | undefined
+  contextLength?: number | undefined
 }
 
 export interface CachedModelCatalog {
@@ -71,6 +72,7 @@ export function buildUnifiedModelList(
         ...(profile.credentialEnvName !== undefined ? { credentialEnvName: profile.credentialEnvName } : {}),
         settings: {
           ...baseSettings,
+          ...(typeof item.contextLength === 'number' && item.contextLength >= 1_024 ? { contextWindow: item.contextLength } : {}),
           ...(profile.settings?.providerId !== undefined ? { providerId: profile.settings.providerId } : {}),
           providerName: profile.displayName || (typeof profile.settings?.providerName === 'string' ? profile.settings.providerName : undefined),
           isDiscovered: true,

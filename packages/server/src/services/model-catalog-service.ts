@@ -22,13 +22,25 @@ export interface ModelCatalogDiscoveryInput {
   profileId?: string
 }
 
-export interface DiscoveredModel { id: string; displayName?: string }
+export interface DiscoveredModel { id: string; displayName?: string; contextLength?: number }
 export interface ModelCatalogServiceOptions {
   fetch?: typeof fetch
   timeoutMs?: number
   resolveHostname?: ModelHostnameResolver
   resolvePublicHosts?: boolean
 }
+
+/**
+ * Local inference servers rarely publish the context window through the
+ * OpenAI-compatible /v1/models list, but most of them expose it on a native
+ * endpoint: llama.cpp answers n_ctx from /props, and LM Studio reports a
+ * per-model max_context_length on /api/v0/models. Probing these turns "the
+ * profile claims 64000 while the server enforces 2048" from a runtime 400
+ * into a pre-filled, correct form. Only private/loopback endpoints are
+ * probed — remote providers get metadata through their own catalog fields.
+ */
+const PROBE_TIMEOUT_MS = 2_500
+const MAX_PROBE_BYTES = 512 * 1024
 
 export class ModelCatalogService {
   readonly #credentials: ModelCredentialService
@@ -91,7 +103,44 @@ export class ModelCatalogService {
     if (models.length === 0) {
       throw new ServiceError('invalid', 'model_catalog_empty', '服务已连接，但没有返回可用模型。你仍可手动填写模型 ID。')
     }
+    if (providerKind === 'openai-compatible-local' && models.some((model) => model.contextLength === undefined)) {
+      await this.#probeLocalContext(models, endpoint, headers)
+    }
     return models
+  }
+
+  /** Fill missing context windows from local server metadata; failures stay silent. */
+  async #probeLocalContext(models: DiscoveredModel[], endpoint: URL, headers: Record<string, string>): Promise<void> {
+    const missing = () => models.some((model) => model.contextLength === undefined)
+    if (!missing()) return
+    const origin = `${endpoint.protocol}//${endpoint.host}`
+    // llama.cpp (and many thin OpenAI wrappers) expose one global n_ctx.
+    for (const path of ['/props', '/general/get_run_options']) {
+      const value = await readProbeNumber(this.#fetch, origin + path, headers, (payload) => {
+        const record = isRecord(payload) ? payload : undefined
+        if (!record) return undefined
+        const direct = record.n_ctx
+        const nested = isRecord(record.default_generation_settings) ? record.default_generation_settings.n_ctx : undefined
+        return typeof direct === 'number' ? direct : typeof nested === 'number' ? nested : undefined
+      })
+      if (value !== undefined) {
+        for (const model of models) if (model.contextLength === undefined) model.contextLength = value
+        return
+      }
+    }
+    if (!missing()) return
+    // LM Studio reports a per-model context in its native catalog.
+    const catalog = await readProbeJson(this.#fetch, origin + '/api/v0/models', headers)
+    if (catalog === undefined || !isRecord(catalog) || !Array.isArray(catalog.data)) return
+    for (const model of models) {
+      if (model.contextLength !== undefined) continue
+      const entry = catalog.data.find((item) => isRecord(item) && item.id === model.id)
+      if (!isRecord(entry)) continue
+      const loaded = isRecord(entry.loaded_config) ? entry.loaded_config.max_context_length : undefined
+      const meta = isRecord(entry.meta) ? entry.meta.context_length : undefined
+      const value = typeof loaded === 'number' ? loaded : typeof meta === 'number' ? meta : undefined
+      if (value !== undefined && value > 0) model.contextLength = value
+    }
   }
 }
 
@@ -149,14 +198,55 @@ function parseModels(value: unknown): DiscoveredModel[] {
     const displayName = typeof candidate.display_name === 'string'
       ? candidate.display_name.trim()
       : typeof candidate.displayName === 'string' ? candidate.displayName.trim() : undefined
+    const contextLength = positiveNumber(candidate.context_length)
+      ?? positiveNumber(candidate.max_context_length)
+      ?? positiveNumber(candidate.max_model_len)
+      ?? positiveNumber(candidate.effective_context_length)
+      ?? (isRecord(candidate.metadata) ? positiveNumber(candidate.metadata.context_length) : undefined)
     const existing = discovered.get(id)
-    discovered.set(id, { id, ...(displayName ? { displayName } : existing?.displayName ? { displayName: existing.displayName } : {}) })
+    discovered.set(id, {
+      id,
+      ...(displayName ? { displayName } : existing?.displayName ? { displayName: existing.displayName } : {}),
+      ...(contextLength !== undefined ? { contextLength } : existing?.contextLength ? { contextLength: existing.contextLength } : {}),
+    })
   }
   return [...discovered.values()].sort((left, right) => left.id.localeCompare(right.id))
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function positiveNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined
+}
+
+async function readProbeJson(fetchImpl: typeof fetch, url: string, headers: Record<string, string>): Promise<unknown | undefined> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS)
+  try {
+    const response = await fetchImpl(url, { method: 'GET', headers: { ...headers, Accept: 'application/json' }, signal: controller.signal, redirect: 'error' })
+    if (!response.ok) return undefined
+    const declared = Number(response.headers.get('content-length'))
+    if (Number.isFinite(declared) && declared > MAX_PROBE_BYTES) return undefined
+    const text = await response.text()
+    if (text.length > MAX_PROBE_BYTES) return undefined
+    return JSON.parse(text) as unknown
+  } catch {
+    return undefined
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+async function readProbeNumber(
+  fetchImpl: typeof fetch,
+  url: string,
+  headers: Record<string, string>,
+  pick: (payload: unknown) => number | undefined,
+): Promise<number | undefined> {
+  const value = positiveNumber(pick(await readProbeJson(fetchImpl, url, headers)))
+  return value !== undefined && value >= 1024 ? value : undefined
 }
 
 function isAbortError(error: unknown): boolean { return error instanceof Error && error.name === 'AbortError' }

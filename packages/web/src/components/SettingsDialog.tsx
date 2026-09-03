@@ -137,6 +137,8 @@ export interface ModelDiscoveryDraft {
 export interface DiscoveredModel {
   id: string
   displayName?: string | undefined
+  /** Context window reported by the server's own metadata, when known. */
+  contextLength?: number | undefined
 }
 
 const SETTINGS_GROUPS = [
@@ -807,10 +809,15 @@ function ModelSettings({
         if (draft.baseUrl.trim()) saveDiscoveredModelsToCache(draft.baseUrl.trim(), cachePayload)
       }
       if (items[0]) {
-        const selected = items.some((item) => item.id === draft.modelId.trim())
+        const selectedId = items.some((item) => item.id === draft.modelId.trim())
           ? draft.modelId.trim()
           : items[0].id
-        setDraft((current) => ({ ...current, modelId: selected }))
+        const selected = items.find((item) => item.id === selectedId)
+        setDraft((current) => ({
+          ...current,
+          modelId: selectedId,
+          ...(selected?.contextLength !== undefined && selected.contextLength >= 1_024 ? { contextWindow: selected.contextLength } : {}),
+        }))
         setManualModelId(false)
       }
       setModelNotice(t('settings.model.discoverSuccess', '已成功连接并获取 {count} 个模型。', { count: items.length }))
@@ -1196,7 +1203,11 @@ function ModelSettings({
                       <SearchableModelPicker
                         models={discoveredModels}
                         value={draft.modelId}
-                        onChange={(modelId) => updateDraft((current) => ({ ...current, modelId }))}
+                        onChange={(model) => updateDraft((current) => ({
+                          ...current,
+                          modelId: model.id,
+                          ...(model.contextLength !== undefined && model.contextLength >= 1_024 ? { contextWindow: model.contextLength } : {}),
+                        }))}
                       />
                     ) : (
                       <input
@@ -1415,7 +1426,7 @@ function ModelSettings({
   )
 }
 
-function SearchableModelPicker({ models, value, onChange }: { models: DiscoveredModel[]; value: string; onChange(value: string): void }) {
+function SearchableModelPicker({ models, value, onChange }: { models: DiscoveredModel[]; value: string; onChange(model: DiscoveredModel): void }) {
   const { t } = useI18n()
   const [query, setQuery] = useState(value)
   const [open, setOpen] = useState(false)
@@ -1426,7 +1437,7 @@ function SearchableModelPicker({ models, value, onChange }: { models: Discovered
   }, [models, query])
   useEffect(() => { setQuery(value) }, [value])
   useEffect(() => { setActiveIndex(0) }, [query])
-  const choose = (model: DiscoveredModel) => { onChange(model.id); setQuery(model.displayName && model.displayName !== model.id ? `${model.displayName}（${model.id}）` : model.id); setOpen(false) }
+  const choose = (model: DiscoveredModel) => { onChange(model); setQuery(model.displayName && model.displayName !== model.id ? `${model.displayName}（${model.id}）` : model.id); setOpen(false) }
   return <div className="model-search-picker" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false) }}>
     <input
       type="search"
@@ -1446,7 +1457,7 @@ function SearchableModelPicker({ models, value, onChange }: { models: Discovered
       }}
     />
     {open ? <div className="model-search-picker__list" id="model-search-listbox" role="listbox">
-      {filtered.length === 0 ? <span>{t('settings.model.noMatches', '没有匹配的模型')}</span> : filtered.map((model, index) => <button key={model.id} type="button" role="option" aria-selected={model.id === value} className={index === activeIndex ? 'is-active' : ''} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(model)}><strong>{model.displayName ?? model.id}</strong>{model.displayName && model.displayName !== model.id ? <small>{model.id}</small> : null}</button>)}
+      {filtered.length === 0 ? <span>{t('settings.model.noMatches', '没有匹配的模型')}</span> : filtered.map((model, index) => <button key={model.id} type="button" role="option" aria-selected={model.id === value} className={index === activeIndex ? 'is-active' : ''} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(model)}><strong>{model.displayName ?? model.id}</strong>{model.displayName && model.displayName !== model.id ? <small>{model.id}</small> : null}{model.contextLength === undefined ? null : <small>{t('settings.model.contextBadge', '上下文 {tokens}', { tokens: model.contextLength.toLocaleString() })}</small>}</button>)}
     </div> : null}
   </div>
 }
