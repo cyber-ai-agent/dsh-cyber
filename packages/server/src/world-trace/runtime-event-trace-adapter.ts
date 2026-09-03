@@ -38,10 +38,16 @@ export class RuntimeEventTraceAdapter implements WorldTraceAdapter<'runtime-even
     if (event.kind === 'tool.started' || event.kind === 'tool.completed') {
       const callId = event.callId ?? `event-${event.sourceSequence ?? value.createdAt}`
       const presentation = toolPresentation(event.toolName)
+      const summary = stringMetadata(event, 'toolSummary')
+      const detail = stringMetadata(event, 'toolDetail')
       entry.tools = [{
         callId,
         ...(event.toolName === undefined ? {} : { name: event.toolName }),
-        ...presentation,
+        label: presentation.label,
+        // Only the start carries the arguments; a completion keeps the slot
+        // empty so the merge keeps the started call's concrete summary.
+        ...(event.kind === 'tool.started' ? { description: summary ?? presentation.description } : {}),
+        ...(detail === undefined ? {} : { input: detail }),
         status: event.kind === 'tool.started' ? 'running' : event.failed ? 'failed' : 'success',
         ...(event.kind === 'tool.started' ? { createdAt: value.createdAt } : { completedAt: value.createdAt }),
       }]

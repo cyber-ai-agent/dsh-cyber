@@ -82,12 +82,17 @@ function buildToolSteps(messages: readonly WorkMessage[]): WorldTraceToolStep[] 
     if (message.kind === 'tool-call') {
       const name = stringMetadata(message, 'toolName') ?? (message.content.trim() || undefined)
       const presentation = toolPresentation(name)
+      const summary = stringMetadata(message, 'toolSummary')
+      const detail = stringMetadata(message, 'toolDetail')
       const finishedAt = current?.completedAt
       const durationMs = finishedAt === undefined ? undefined : Math.max(0, Date.parse(finishedAt) - Date.parse(message.createdAt))
+      const description = summary ?? presentation.description
       steps.set(callId, {
         callId,
         ...(name === undefined ? {} : { name }),
-        ...presentation,
+        label: presentation.label,
+        ...(description === undefined ? {} : { description }),
+        ...(detail === undefined ? {} : { input: detail }),
         status: current?.status ?? 'running',
         createdAt: message.createdAt,
         ...(current?.completedAt === undefined ? {} : { completedAt: current.completedAt }),
@@ -102,6 +107,8 @@ function buildToolSteps(messages: readonly WorkMessage[]): WorldTraceToolStep[] 
       callId,
       ...(current?.name === undefined ? {} : { name: current.name }),
       label: current?.label ?? '执行工具',
+      ...(current?.description === undefined ? {} : { description: current.description }),
+      ...(current?.input === undefined ? {} : { input: current.input }),
       status: failed ? 'failed' : 'success',
       ...(current?.createdAt === undefined ? {} : { createdAt: current.createdAt }),
       completedAt: message.createdAt,
@@ -128,7 +135,7 @@ export function toolPresentation(name: string | undefined): Pick<WorldTraceToolS
   if (/apply[_-]?patch|patch|edit|replace|update[_-]?file/.test(normalized)) return { label: '修改文件内容', description: '按任务要求更新已有文件中的指定内容' }
   if (/write|create[_-]?file|save/.test(normalized)) return { label: '写入文件', description: '创建文件或保存新的文件内容' }
   if (/read[_-]?file|open[_-]?file|view[_-]?file/.test(normalized)) return { label: '读取文件', description: '读取文件内容用于分析或处理' }
-  if (/shell|command|terminal|exec/.test(normalized)) return { label: '执行本地命令', description: '在当前权限范围内运行命令或开发工具' }
+  if (/shell|bash|pwsh|\bcmd\b|command|terminal|exec/.test(normalized)) return { label: '执行本地命令', description: '在当前权限范围内运行命令或开发工具' }
   if (/browser|click|navigate|screenshot/.test(normalized)) return { label: '操作浏览器', description: '打开、检查或操作网页界面' }
   if (/glob|list[_-]?(file|dir)|directory|file/.test(normalized)) return { label: '检查文件', description: '查看目录或文件列表，确认工作区内容' }
   if (/read|open|view|get|fetch/.test(normalized)) return { label: '读取信息', description: '读取当前任务所需的信息' }

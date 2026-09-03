@@ -31,6 +31,9 @@ export class TraceSanitizer {
       ...(tool.name === undefined ? {} : { name: this.text(tool.name, 160) }),
       label: this.text(tool.label, 200),
       ...(tool.description === undefined ? {} : { description: this.text(tool.description, 300) }),
+      // Second redaction layer for the call target produced at the adapter
+      // boundary; the trace exit must never trust an upstream string.
+      ...(tool.input === undefined ? {} : { input: this.text(tool.input, 400) }),
     }))
     // Artifact titles are author-supplied text and reach the trace verbatim, so
     // they pass through the same redaction as every other displayed string.

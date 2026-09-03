@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { join, resolve } from 'node:path'
 
 import { DeepSeekHarness, type HarnessNotification } from '@deepseek-ai/dsh-sdk-client'
+import { summarizeToolCall } from './tool-summary.js'
 import type {
   AgentRuntimeEvent,
   AgentPermissionMode,
@@ -657,11 +658,19 @@ export function normalizeHarnessNotification(
     case 'tool/call': {
       const toolName = stringValue(data.name) ?? 'unknown-tool'
       const callId = stringValue(data.callId) ?? 'unknown-call'
+      const metadata: JsonObject = { turn: numberValue(data.turn) ?? 0, step: numberValue(data.step) ?? 0 }
+      // The raw argument blob never travels; only its redacted allow-listed
+      // subject does, so the trace can say what a call operated on.
+      const summary = summarizeToolCall(data.arguments)
+      if (summary !== undefined) {
+        metadata.toolSummary = summary.summary
+        metadata.toolDetail = summary.detail
+      }
       return [
         make('tool.started', {
           toolName,
           callId,
-          metadata: { turn: numberValue(data.turn) ?? 0, step: numberValue(data.step) ?? 0 },
+          metadata,
         }),
       ]
     }

@@ -46,6 +46,15 @@ export interface WorldTraceToolStep {
   completedAt?: IsoTimestamp
   /** Wall-clock span of the call, once both ends are known. */
   durationMs?: number
+  /**
+   * The redacted call target — the command or file the tool worked on.
+   *
+   * Allow-listed argument fields only, home-directory prefixes stripped and
+   * secret shapes masked at the adapter boundary and again by the trace
+   * sanitizer. Present only when the runtime reported usable arguments;
+   * unknown or sensitive keys are never rendered.
+   */
+  input?: string
 }
 
 /**
