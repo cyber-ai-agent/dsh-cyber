@@ -107,6 +107,34 @@ describe('Harness profile and adapter', () => {
     expect(JSON.stringify(events)).not.toContain('apiKey')
   })
 
+  it('carries the redacted call target of an allow-listed argument into tool.started', () => {
+    const events = normalizeHarnessNotification({
+      method: 'session.event',
+      params: {
+        sessionId: 'employee-1',
+        event: {
+          type: 'tool/call',
+          seq: 8,
+          time: 1_700_000_001_000,
+          data: {
+            turn: 1,
+            step: 3,
+            callId: 'call-2',
+            name: 'bash',
+            arguments: '{"command":"git commit -m msg"}',
+          },
+        },
+      },
+    })
+    expect(events[0]).toMatchObject({
+      kind: 'tool.started',
+      toolName: 'bash',
+      metadata: { toolSummary: 'git commit', toolDetail: 'git commit' },
+    })
+    // The raw argument key survives only as its redacted subject.
+    expect(JSON.stringify(events)).not.toContain('"arguments"')
+  })
+
   it('turns a native DSH approval question into a host decision event', () => {
     const events = normalizeHarnessNotification({
       method: 'session.event',

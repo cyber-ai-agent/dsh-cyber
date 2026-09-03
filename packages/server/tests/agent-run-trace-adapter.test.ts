@@ -19,6 +19,43 @@ describe('AgentRunTraceAdapter tool steps', () => {
     })
     expect(entry?.tools?.[0]).toMatchObject({ callId: 'c1', status: 'success', durationMs: 4_500 })
   })
+
+  it('uses the redacted call summary as the description and keeps the detail as input', () => {
+    const [entry] = new AgentRunTraceAdapter().adapt({
+      kind: 'agent-run',
+      value: {
+        worldId: 'world-1',
+        run: { id: 'run-tools', workspaceId: 'workspace-1', worldId: 'world-1', turnId: 'turn-1', sessionId: 'session-1', employeeId: 'employee-1', ordinal: 1, status: 'completed', createdAt: '2026-08-29T12:20:01.000Z' } as AgentRun,
+        messages: [
+          { id: 'm-call', kind: 'tool-call', content: 'bash', metadata: { agentRunId: 'run-tools', callId: 'c1', toolName: 'bash', toolSummary: 'git status', toolDetail: 'git status' }, createdAt: '2026-08-29T12:20:02.000Z' },
+          { id: 'm-result', kind: 'tool-result', content: 'ok', metadata: { agentRunId: 'run-tools', callId: 'c1', failed: false }, createdAt: '2026-08-29T12:20:04.000Z' },
+        ] as unknown as WorkMessage[],
+      },
+    })
+    expect(entry?.tools?.[0]).toMatchObject({
+      callId: 'c1',
+      name: 'bash',
+      label: '执行本地命令',
+      description: 'git status',
+      input: 'git status',
+      status: 'success',
+    })
+  })
+
+  it('falls back to the generic presentation when no summary was recorded', () => {
+    const [entry] = new AgentRunTraceAdapter().adapt({
+      kind: 'agent-run',
+      value: {
+        worldId: 'world-1',
+        run: { id: 'run-tools', workspaceId: 'workspace-1', worldId: 'world-1', turnId: 'turn-1', sessionId: 'session-1', employeeId: 'employee-1', ordinal: 1, status: 'completed', createdAt: '2026-08-29T12:20:01.000Z' } as AgentRun,
+        messages: [
+          { id: 'm-call', kind: 'tool-call', content: 'read_file', metadata: { agentRunId: 'run-tools', callId: 'c1', toolName: 'read_file' }, createdAt: '2026-08-29T12:20:02.000Z' },
+        ] as unknown as WorkMessage[],
+      },
+    })
+    expect(entry?.tools?.[0]).toMatchObject({ description: '读取文件内容用于分析或处理' })
+    expect(entry?.tools?.[0]).not.toHaveProperty('input')
+  })
 })
 
 const run: AgentRun = {

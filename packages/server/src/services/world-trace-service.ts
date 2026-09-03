@@ -83,7 +83,7 @@ export interface WorldTraceServiceOptions {
 export type WorldTraceCheckpoint = ReadonlyMap<string, string>
 
 /** Bump whenever adapters/sanitizing change, so cached projections rebuild. */
-const TRACE_PROJECTION_VERSION = 2
+const TRACE_PROJECTION_VERSION = 3
 const MAX_CACHED_PROJECTIONS = 8
 
 interface CachedTraceProjection {
