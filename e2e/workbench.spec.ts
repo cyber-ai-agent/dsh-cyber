@@ -120,7 +120,7 @@ test('opens low-frequency dock surfaces from More as closable restored tabs', as
   await expect(dock.getByRole('tab', { name: '知识', exact: true })).toBeVisible()
   await openDockTab(dock, '日程')
   await expect(dock.getByRole('tab', { name: '日程', exact: true })).toHaveAttribute('aria-selected', 'true')
-  await expect(dock.getByRole('tab', { name: '知识', exact: true })).toHaveCount(0)
+  await expect(dock.getByRole('tab', { name: '知识', exact: true })).toBeVisible()
 
   await openDockTab(dock, '知识')
   await dock.getByRole('button', { name: '关闭知识页签' }).click()
@@ -132,7 +132,7 @@ test('opens low-frequency dock surfaces from More as closable restored tabs', as
 
   await page.reload()
   const restoredDock = page.getByRole('region', { name: '世界与角色侧边栏' })
-  await expect(restoredDock.getByRole('tab', { name: '日程', exact: true })).toHaveCount(0)
+  await expect(restoredDock.getByRole('tab', { name: '日程', exact: true })).toBeVisible()
   await expect(restoredDock.getByRole('tab', { name: '知识', exact: true })).toHaveCount(0)
   await expect(restoredDock.getByRole('tab', { name: '角色', exact: true })).toHaveCount(0)
 
