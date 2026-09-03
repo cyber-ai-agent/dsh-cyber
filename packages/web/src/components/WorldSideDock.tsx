@@ -131,9 +131,12 @@ export function WorldSideDock({
 
   const localizedFixedTabs = FIXED_TABS.map((tab) => ({ ...tab, label: t(`dock.${tab.id}`, tab.label) }))
   const localizedSecondaryTabs = SECONDARY_TABS.map((tab) => ({ ...tab, label: t(`dock.${tab.id === 'dossier' ? 'roles' : tab.id}`, tab.label) }))
-  // Keep the header calm: secondary surfaces remain remembered in More, but
-  // only the one the user is actively viewing is promoted into the tab row.
-  const visibleSecondaryTabs = localizedSecondaryTabs.filter((tab) => tab.id === activeTab)
+  // The product rule promotes every pinned surface into its own closable tab,
+  // in the order this world opened them; the tab strip scrolls when narrow.
+  const visibleSecondaryTabs = openTabs.flatMap((id) => {
+    const tab = localizedSecondaryTabs.find((item) => item.id === id)
+    return tab === undefined ? [] : [tab]
+  })
   const visibleTabs = [...localizedFixedTabs, ...visibleSecondaryTabs]
 
   const selectTab = (tab: DockTab) => {
