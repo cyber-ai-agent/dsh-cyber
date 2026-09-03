@@ -34,8 +34,43 @@ describe('summarizeToolCall', () => {
 
   it('masks high-entropy first arguments on command lines', () => {
     const summary = summarizeToolCall('{"command":"auth hx9Kq2Lm4Pq7Rt0WvYzBe3Nn5Ma8Cs1Df"}')
-    expect(summary?.summary).toBe('auth [已隐藏]')
+    expect(summary?.summary).toBe('auth [参数已隐藏]')
     expect(JSON.stringify(summary)).not.toContain('hx9Kq2Lm')
+  })
+
+  it('hides short positional arguments that are neither subcommands nor paths', () => {
+    const summary = summarizeToolCall('{"command":"auth abc123shortsecret"}')
+    expect(summary?.summary).toBe('auth [参数已隐藏]')
+    expect(JSON.stringify(summary)).not.toContain('abc123shortsecret')
+  })
+
+  it('keeps real subcommands and path-shaped arguments', () => {
+    expect(summarizeToolCall('{"command":"git commit -m msg"}')?.summary).toBe('git commit')
+    expect(summarizeToolCall('{"command":"python scripts/build.py"}')?.summary).toBe('python scripts/build.py')
+    expect(summarizeToolCall('{"command":"docker compose up"}')?.summary).toBe('docker compose')
+  })
+
+  it('masks webhook-shaped URL segments while keeping the safe skeleton', () => {
+    const summary = summarizeToolCall('{"url":"https://hooks.slack.com/services/T02ABCDx/B03EFGH1y/XXXXXXXXXXXXXXXXXXXXxy9"}')
+    expect(summary?.summary).toBe('https://hooks.slack.com/services/[已隐藏]/[已隐藏]/[已隐藏]')
+    expect(JSON.stringify(summary)).not.toContain('XXXXXXXXXXXXXXXXXXXXxy9')
+    const docs = summarizeToolCall('{"url":"https://code.example.com/guide/intro"}')
+    expect(docs?.summary).toBe('https://code.example.com/guide/intro')
+  })
+
+  it('masks credential-shaped file path segments', () => {
+    const summary = summarizeToolCall('{"file_path":"C:\\\\Users\\\\bob\\\\.config\\\\gh_hosts_token.yml"}')
+    expect(summary?.summary).toContain('[已隐藏]')
+    expect(JSON.stringify(summary)).not.toContain('gh_hosts_token')
+    const safe = summarizeToolCall('{"file_path":"/home/bob/notes/meeting.md"}')
+    expect(safe?.summary).toBe('~/notes/meeting.md')
+  })
+
+  it('applies the detail cap rather than the summary cap to the detail line', () => {
+    const longPath = 'notes/' + 'folder/'.repeat(30) + 'todo.md'
+    const summary = summarizeToolCall(JSON.stringify({ path: longPath }))
+    expect((summary?.detail.length ?? 0)).toBeGreaterThan(120)
+    expect((summary?.detail.length ?? 0)).toBeLessThanOrEqual(480)
   })
 
   it('never surfaces tokens that live in the dropped tail of a command', () => {
