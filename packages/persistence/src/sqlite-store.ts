@@ -4680,7 +4680,12 @@ export class SqliteStore {
       .join('|')
   }
 
-  /** Recent failed knowledge consolidation jobs, newest first (world trace source). */
+  /**
+   * Recent failed knowledge consolidation jobs, newest first (world trace
+   * source). A failure a later completed job on the same source has overtaken
+   * is history, not a live problem — projecting it would keep stale red
+   * entries on the trace after the pipeline already recovered.
+   */
   listWorldConsolidationFailures(worldId: string, limit = 10): Array<{
     id: string
     sourceType: string
@@ -4691,10 +4696,15 @@ export class SqliteStore {
   }> {
     return this.database
       .prepare(
-        `SELECT id, source_type, source_id, error_code, attempt, updated_at
-         FROM knowledge_consolidation_jobs
-         WHERE world_id = ? AND status = 'failed'
-         ORDER BY updated_at DESC, id DESC
+        `SELECT f.id, f.source_type, f.source_id, f.error_code, f.attempt, f.updated_at
+         FROM knowledge_consolidation_jobs f
+         WHERE f.world_id = ? AND f.status = 'failed'
+           AND NOT EXISTS (
+             SELECT 1 FROM knowledge_consolidation_jobs c
+             WHERE c.world_id = f.world_id AND c.source_type = f.source_type AND c.source_id = f.source_id
+               AND c.status = 'completed' AND c.updated_at > f.updated_at
+           )
+         ORDER BY f.updated_at DESC, f.id DESC
          LIMIT ?`,
       )
       .all(worldId, limit)
