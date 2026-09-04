@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-import type { JsonObject, ModelApiKind, ModelProviderKind } from '@dsh-cyber/contracts'
+import type { JsonObject, ModelApiKind, ModelProviderConnection, ModelProviderKind } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import type { Router } from '../http/router.js'
@@ -35,6 +35,28 @@ export function registerModelHubRoutes(router: Router, dependencies: ModelHubRou
     credentials.resolve(providerId)
     ?? (credentialEnvName !== undefined && credentialEnvName.length > 0 ? process.env[credentialEnvName] : undefined)
 
+  // The last four characters, for record management only. This is deliberately
+  // not the plaintext key — the response must never carry a usable secret —
+  // but a stable tail lets an owner tell two saved keys apart without echoing
+  // the whole value the way a password field must not.
+  const credentialTail = (providerId: string, credentialEnvName: string | undefined): string | undefined => {
+    const key = resolveProviderKey(providerId, credentialEnvName)
+    if (key === undefined) return undefined
+    const trimmed = key.trim()
+    return trimmed.length >= 8 ? trimmed.slice(-4) : undefined
+  }
+
+  // A remote provider without a key cannot answer anything meaningful; say so
+  // in the hub's own words instead of forwarding a confusing upstream 403
+  // that reads like a broken key when it is simply absent.
+  const requireProviderKey = (provider: ModelProviderConnection): string | undefined => {
+    const key = resolveProviderKey(provider.id, provider.credentialEnvName)
+    if (key === undefined && provider.providerKind !== 'openai-compatible-local') {
+      throw new HttpError(422, 'provider_credential_missing', '该服务商尚未配置 API 密钥，点击“编辑”填入密钥后再试。')
+    }
+    return key
+  }
+
   router.get(/^\/api\/model-provider-catalog$/, async ({ response }) => {
     writeJson(response, 200, await providerCatalog.state())
   })
@@ -49,6 +71,7 @@ export function registerModelHubRoutes(router: Router, dependencies: ModelHubRou
     const items = store.listModelProviders(workspaceId).map((provider) => {
       const profiles = store.listProviderProfiles(provider.id)
       const entry = catalog.providers.find((candidate) => candidate.id === provider.catalogRef)
+      const tail = credentialTail(provider.id, provider.credentialEnvName)
       return {
         ...provider,
         modelCount: profiles.length,
@@ -63,6 +86,7 @@ export function registerModelHubRoutes(router: Router, dependencies: ModelHubRou
           .some((assignment) => assignment.modelProfileId === profile.id)).length,
         balanceSupported: balance.supports(entry?.balance),
         ...(entry === undefined ? {} : { signup: entry.signup, balanceKind: entry.balance }),
+        ...(tail === undefined ? {} : { credentialTail: tail }),
       }
     })
     writeJson(response, 200, { items })
@@ -127,7 +151,7 @@ export function registerModelHubRoutes(router: Router, dependencies: ModelHubRou
 
   router.post(/^\/api\/workspaces\/([^/]+)\/model-providers\/([^/]+)\/test$/, async ({ response, params }) => {
     const provider = requireProvider(store, params[0]!, params[1]!)
-    const key = resolveProviderKey(provider.id, provider.credentialEnvName)
+    const key = requireProviderKey(provider)
     const items = await modelCatalog.discover({
       baseUrl: provider.baseUrl,
       providerKind: provider.providerKind,
@@ -188,7 +212,7 @@ export function registerModelHubRoutes(router: Router, dependencies: ModelHubRou
 
   router.post(/^\/api\/workspaces\/([^/]+)\/model-providers\/([^/]+)\/sync$/, async ({ response, params }) => {
     const provider = requireProvider(store, params[0]!, params[1]!)
-    const key = resolveProviderKey(provider.id, provider.credentialEnvName)
+    const key = requireProviderKey(provider)
     const items = await modelCatalog.discover({
       baseUrl: provider.baseUrl,
       providerKind: provider.providerKind,
@@ -219,7 +243,7 @@ export function registerModelHubRoutes(router: Router, dependencies: ModelHubRou
     if (entry?.balance === undefined) {
       throw new HttpError(422, 'balance_unsupported', '该服务商暂不支持余额查询。')
     }
-    const result = await balance.fetchBalance(provider, entry.balance, resolveProviderKey(provider.id, provider.credentialEnvName))
+    const result = await balance.fetchBalance(provider, entry.balance, requireProviderKey(provider))
     writeJson(response, 200, result)
   })
 
