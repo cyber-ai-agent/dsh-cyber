@@ -104,6 +104,8 @@ interface SettingsDialogProps {
   onSystemAction(action: SystemAction, input?: SystemActionInput): Promise<SystemActionResult>
   onLoadModelLogs(filter: ModelInteractionLogFilter): Promise<ModelInteractionLogPage>
   onClearModelLogs(): Promise<number>
+  /** Fires when the model hub opened from here closes, so the shell can re-pull profiles. */
+  onHubClosed?(): void
 }
 
 export interface ModelProfileSaveDraft {
@@ -168,6 +170,7 @@ export function SettingsDialog({
   onSystemAction,
   onLoadModelLogs,
   onClearModelLogs,
+  onHubClosed,
 }: SettingsDialogProps) {
   const { t } = useI18n()
   const [section, setSection] = useState<SettingsSection>(initialSection)
@@ -269,7 +272,7 @@ export function SettingsDialog({
             {section === 'appearance' ? <button className="primary-button" type="button" disabled={!changed || saving} onClick={() => void onSavePreferences(draft)}>{t('appearance.action.save', '保存外观设置')}</button> : null}
           </div>
         </footer>
-        {hubOpen ? <Suspense fallback={null}><ModelHubDialog workspaceId={workspace.id} worlds={worlds} employees={employees} onClose={() => setHubOpen(false)} /></Suspense> : null}
+        {hubOpen ? <Suspense fallback={null}><ModelHubDialog workspaceId={workspace.id} worlds={worlds} employees={employees} onClose={() => { setHubOpen(false); onHubClosed?.() }} /></Suspense> : null}
       </section>
     </div>
   )

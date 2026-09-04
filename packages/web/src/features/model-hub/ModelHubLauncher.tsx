@@ -13,11 +13,12 @@ const ModelHubDialog = lazy(async () => ({ default: (await import('./ModelHubDia
  * Worlds and employees are passed through for the assignment tab rather than
  * re-fetched: the shell already holds them.
  */
-export function ModelHubLauncher({ workspaceId, worlds, employees }: { workspaceId: string; worlds: World[]; employees: EmployeeInstance[] }) {
+export function ModelHubLauncher({ workspaceId, worlds, employees, onClosed }: { workspaceId: string; worlds: World[]; employees: EmployeeInstance[]; onClosed?(): void }) {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
+  const close = (): void => { setOpen(false); onClosed?.() }
   return <>
     <button type="button" aria-haspopup="dialog" onClick={() => setOpen(true)}><Stack size={16} />{t('app.modelHub', '模型中心')}</button>
-    {open ? <Suspense fallback={null}><ModelHubDialog workspaceId={workspaceId} worlds={worlds} employees={employees} onClose={() => setOpen(false)} /></Suspense> : null}
+    {open ? <Suspense fallback={null}><ModelHubDialog workspaceId={workspaceId} worlds={worlds} employees={employees} onClose={close} /></Suspense> : null}
   </>
 }

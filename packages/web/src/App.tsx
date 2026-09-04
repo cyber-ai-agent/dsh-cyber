@@ -2087,6 +2087,22 @@ export default function App() {
     return `assets/${result.asset.id}`
   }, [workspace])
 
+  // The model hub writes providers/pool/assignments through its own routes;
+  // when it closes, the shell re-pulls the profile list and the assignments so
+  // the composer's picker and every inheritance label see the new reality
+  // without a page reload.
+  const refreshModelProfiles = useCallback(async (): Promise<void> => {
+    if (workspace === undefined || demoMode) return
+    try {
+      const result = await api<{ items: ModelProfile[]; assignments: ModelAssignment[] }>(`/api/workspaces/${workspace.id}/model-profiles`)
+      setModels(result.items)
+      setModelAssignments(result.assignments)
+    } catch {
+      // A failed refresh leaves the previous list standing; the hub itself
+      // already surfaced any write error to the user.
+    }
+  }, [demoMode, workspace])
+
   const assignEmployeeModel = useCallback(async (employeeId: string, modelProfileId: string | undefined): Promise<void> => {
     if (workspace === undefined) throw new Error('请先创建工作区')
     const endpoint = `/api/workspaces/${workspace.id}/model-assignments/employee/${encodeURIComponent(employeeId)}`
@@ -2289,7 +2305,7 @@ export default function App() {
         <nav aria-label="全局功能">
           <CreativeWorkshopLauncher workspaceId={workspace.id} onCreated={(project) => { void openWorkshopWorld(project.worldId).catch((cause) => setError(cause instanceof Error ? cause.message : '创意工坊世界已创建，但打开失败，请从世界列表重新进入。')) }} onOpenWorld={(worldId) => { void openWorkshopWorld(worldId).catch((cause) => setError(cause instanceof Error ? cause.message : '世界打开失败')) }} />
           <button type="button" onClick={() => void openPackageMarket('theme')}><Storefront size={16} />{t('app.market', '市场')}</button>
-          <ModelHubLauncher workspaceId={workspace.id} worlds={worlds} employees={employees} />
+          <ModelHubLauncher workspaceId={workspace.id} worlds={worlds} employees={employees} onClosed={() => void refreshModelProfiles()} />
           <button type="button" onClick={() => { clearError(); setSettingsSection('maintenance'); setSettingsOpen(true) }}><Pulse size={16} /><span>{t('app.systemStatus', '系统状态')}</span><i className="health-indicator" />{t('app.healthy', '良好')}</button>
           <button type="button" onClick={() => { clearError(); setSettingsSection('appearance'); setSettingsOpen(true) }}><GearSix size={17} />{t('app.settings', '设置')}</button>
         </nav>
@@ -2512,6 +2528,7 @@ export default function App() {
           onSystemAction={runSystemAction}
           onLoadModelLogs={loadModelLogs}
           onClearModelLogs={clearModelLogs}
+          onHubClosed={() => void refreshModelProfiles()}
         /></Suspense>
       ) : null}
       {worldLibraryOpen ? (
