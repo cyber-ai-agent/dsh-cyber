@@ -181,10 +181,14 @@ export function registerModelHubRoutes(router: Router, dependencies: ModelHubRou
       const inputTypes = Array.isArray(value.inputTypes)
         ? value.inputTypes.filter((item): item is string => item === 'text' || item === 'image' || item === 'video' || item === 'audio').slice(0, 4)
         : undefined
+      const outputTypes = Array.isArray(value.outputTypes)
+        ? value.outputTypes.filter((item): item is string => item === 'text' || item === 'image' || item === 'video' || item === 'audio').slice(0, 4)
+        : undefined
       const reasoning = typeof value.reasoning === 'boolean' ? value.reasoning : undefined
       const settings: JsonObject = {}
       if (contextLength !== undefined) settings.contextWindow = contextLength
       if (inputTypes !== undefined && inputTypes.length > 0) settings.inputTypes = inputTypes
+      if (outputTypes !== undefined && outputTypes.length > 0) settings.outputTypes = outputTypes
       if (reasoning !== undefined) settings.reasoning = reasoning
       const prior = existing.find((profile) => profile.modelId === modelId)
       // The connection owns the key; a profile re-imported before the provider
