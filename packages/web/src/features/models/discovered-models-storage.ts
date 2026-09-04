@@ -66,6 +66,11 @@ export function buildUnifiedModelList(
         modelId: item.id,
         api: profile.api,
         isDefault: false,
+        // Inherit the base profile's provider connection so the synthetic
+        // model groups under the same named provider in the picker, instead
+        // of floating into an anonymous bucket.
+        ...(profile.providerId !== undefined ? { providerId: profile.providerId } : {}),
+        ...(profile.providerName !== undefined ? { providerName: profile.providerName } : {}),
         ...((profile as ModelProfile & { credentialConfigured?: boolean }).credentialConfigured !== undefined
           ? { credentialConfigured: (profile as ModelProfile & { credentialConfigured?: boolean }).credentialConfigured }
           : { credentialConfigured: true }),
@@ -73,8 +78,13 @@ export function buildUnifiedModelList(
         settings: {
           ...baseSettings,
           ...(typeof item.contextLength === 'number' && item.contextLength >= 1_024 ? { contextWindow: item.contextLength } : {}),
-          ...(profile.settings?.providerId !== undefined ? { providerId: profile.settings.providerId } : {}),
-          providerName: profile.displayName || (typeof profile.settings?.providerName === 'string' ? profile.settings.providerName : undefined),
+          ...(profile.providerId !== undefined ? { providerId: profile.providerId } : profile.settings?.providerId !== undefined ? { providerId: profile.settings.providerId } : {}),
+          // The provider label must be a provider's name. Falling back to the
+          // base profile's displayName let a MODEL name become a provider
+          // group in the picker - exactly what owners saw and distrusted.
+          ...((profile.providerName ?? (typeof profile.settings?.providerName === 'string' ? profile.settings.providerName : undefined)) !== undefined
+            ? { providerName: profile.providerName ?? (profile.settings?.providerName as string) }
+            : {}),
           isDiscovered: true,
           baseProfileId: profile.id,
         },

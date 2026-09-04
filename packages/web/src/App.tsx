@@ -2368,9 +2368,15 @@ export default function App() {
                       api: baseProfile.api,
                       isDefault: false,
                       ...(baseProfile.credentialEnvName ? { credentialEnvName: baseProfile.credentialEnvName } : {}),
+                      ...(baseProfile.providerId !== undefined ? { providerId: baseProfile.providerId } : {}),
                       settings: {
                         ...cleanSettings,
-                        providerName: baseProfile.displayName,
+                        ...(baseProfile.providerId !== undefined ? { providerId: baseProfile.providerId } : {}),
+                        // Label by the provider connection, never by the base
+                        // profile's display name - that name is a model name.
+                        ...((baseProfile.providerName ?? (typeof baseProfile.settings?.providerName === 'string' ? baseProfile.settings.providerName : undefined)) !== undefined
+                          ? { providerName: baseProfile.providerName ?? (baseProfile.settings?.providerName as string) }
+                          : {}),
                       },
                     })
                     finalProfileId = saved.id

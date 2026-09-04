@@ -120,6 +120,8 @@ export interface ModelProfileSaveDraft {
   clearCredential?: boolean
   isDefault: boolean
   settings: ModelProfile['settings']
+  /** The provider connection this materialized model hangs under, when known. */
+  providerId?: string
 }
 
 export interface DiscoveredModel {
