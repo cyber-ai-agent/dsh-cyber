@@ -849,6 +849,8 @@ export interface ModelProfile {
   settings: JsonObject
   /** The provider connection this profile hangs under, when it came from the model hub. */
   providerId?: string
+  /** Display-only projection of the provider connection's name, attached by routes; never stored on the profile row. */
+  providerName?: string
   /** manual = typed in the form; imported = materialized from a provider's discovered catalog. */
   origin?: ModelProfileOrigin
   /** Capability verdicts from an explicit probe; absent means never probed. */
