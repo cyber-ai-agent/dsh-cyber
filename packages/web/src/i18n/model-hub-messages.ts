@@ -155,7 +155,7 @@ const messages = {
   'modelHub.probe': ['检测能力', '偵測能力', 'Probe capabilities', '能力を検出', '능력 검사', 'Probar capacidades', 'Tester les capacités', 'Fähigkeiten prüfen', 'Testar capacidades', 'Проверить возможности', 'فحص القدرات', 'क्षमताएँ जाँचें'],
   'modelHub.probeFailed': ['能力探测失败。', '能力偵測失敗。', 'Capability probe failed.', '能力テストに失敗しました。', '능력 검사 실패.', 'Prueba de capacidades fallida.', 'Échec du test de capacités.', 'Fähigkeitstest fehlgeschlagen.', 'Teste de capacidades falhou.', 'Проверка возможностей не удалась.', 'فشل فحص القدرات.', 'क्षमता जाँच विफल।'],
   'modelHub.dismiss': ['收起', '收起', 'Dismiss', '閉じる', '감추기', 'Ocultar', 'Masquer', 'Ausblenden', 'Ocultar', 'Скрыть', 'إخفاء', 'छिपाएँ'],
-  'modelHub.defaultModel': ['默认', '預設', 'Default', '既定', '기본', 'Predeterminado', 'Par défaut', 'Standard', 'Padrão', 'По умолчанию', 'افتراضي', 'डिफ़ॉल्ट'],
+  'modelHub.defaultModel': ['默认模型', '預設模型', 'Default model', '既定モデル', '기본 모델', 'Modelo predeterminado', 'Modèle par défaut', 'Standardmodell', 'Modelo padrão', 'Модель по умолчанию', 'النموذج الافتراضي', 'डिफ़ॉल्ट मॉडल'],
   'modelHub.fromProvider': ['来自 {name}', '來自 {name}', 'from {name}', '{name} 由来', '{name} 기준', 'de {name}', 'de {name}', 'von {name}', 'de {name}', 'из {name}', 'من {name}', '{name} से'],
   'modelHub.legacyConnection': ['独立配置', '獨立設定', 'Standalone config', '単体設定', '단독 설정', 'Configuración independiente', 'Configuration autonome', 'Einzelkonfiguration', 'Configuração independente', 'Отдельная настройка', 'إعداد مستقل', 'स्वतंत्र विन्यास'],
   'modelHub.capTools': ['工具', '工具', 'Tools', 'ツール', '도구', 'Herramientas', 'Outils', 'Tools', 'Ferramentas', 'Инструменты', 'أدوات', 'उपकरण'],

@@ -81,6 +81,11 @@
 .model-hub__col-actions { width: 150px; text-align: right; }
 .model-hub__row-actions { display: inline-flex; gap: 6px; align-items: center; justify-content: flex-end; }
 .model-hub__pool-tools { display: flex; gap: 10px; align-items: center; }
+.model-hub__star { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; color: var(--text-muted); background: none; border: none; border-radius: 7px; cursor: pointer; }
+.model-hub__star:hover:not(:disabled) { color: var(--text); background: var(--surface-2, rgba(255, 255, 255, 0.05)); }
+.model-hub__star:disabled { opacity: 0.5; cursor: not-allowed; }
+.model-hub__star.is-on { color: #e8a33d; cursor: default; }
+.model-hub__star.is-on:hover { background: none; }
 .model-hub__pool-tools .model-hub__search { flex: 1; }
 .model-hub__pool-tools > button { display: inline-flex; gap: 6px; align-items: center; min-height: 36px; padding: 6px 12px; color: var(--text-soft); background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
 .model-hub__pool-tools > button:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }

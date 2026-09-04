@@ -521,7 +521,7 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
               const assigned = assignedProfileIds.has(profile.id)
               const removing = busy === `remove:${profile.id}`
               return <tr key={profile.id}>
-                <td><strong title={profile.displayName}>{profile.displayName}</strong>{profile.isDefault ? <span className="model-hub__badge is-ok">{t('modelHub.defaultModel', '默认')}</span> : null}</td>
+                <td><strong title={profile.displayName}>{profile.displayName}</strong></td>
                 <td><code title={profile.modelId}>{profile.modelId}</code></td>
                 <td title={providerNameOf(profile)}>{providerNameOf(profile)}</td>
                 <td>{formatContext(declared.context)}</td>
@@ -534,7 +534,9 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
                   : <span className="model-hub__verdict is-no" title={t('modelHub.reasonNo', '不支持')} aria-label={t('modelHub.reasonNo', '不支持')}>×</span>}
                 </td>
                 <td className="model-hub__col-actions"><span className="model-hub__row-actions">
-                  {profile.isDefault ? null : <button type="button" disabled={busy === `default:${profile.id}`} title={t('modelHub.setDefault', '设为默认模型')} aria-label={t('modelHub.setDefaultAria', '将 {name} 设为默认模型', { name: profile.displayName })} onClick={() => void runSetDefault(profile)}><Star size={13} /></button>}
+                  {profile.isDefault
+                    ? <span className="model-hub__star is-on" title={t('modelHub.defaultModel', '默认模型')} aria-label={t('modelHub.defaultModel', '默认模型')}><Star size={14} weight="fill" /></span>
+                    : <button type="button" className="model-hub__star" disabled={busy === `default:${profile.id}`} title={t('modelHub.setDefault', '设为默认模型')} aria-label={t('modelHub.setDefaultAria', '将 {name} 设为默认模型', { name: profile.displayName })} onClick={() => void runSetDefault(profile)}><Star size={14} /></button>}
                   {confirmingRemove === profile.id
                     ? <span className="model-hub__confirm"><button type="button" className="is-danger" onClick={() => void runRemoveProfile(profile)}>{t('modelHub.confirmRemove', '确认移除')}</button><button type="button" onClick={() => setConfirmingRemove(undefined)}>{t('modelHub.cancel', '取消')}</button></span>
                     : <button type="button" disabled={assigned || removing} title={assigned ? t('modelHub.removeBlocked', '正在被分配使用，请先在角色或世界中改选其它模型') : t('modelHub.removeFromPool', '从模型池移除')} aria-label={t('modelHub.removeFromAria', '移除模型 {name}', { name: profile.displayName })} onClick={() => setConfirmingRemove(profile.id)}><Trash size={14} /></button>}
@@ -587,7 +589,7 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
                 const isCurrent = targetCurrentProfileId === model.id
                 const applying = busy === `assign:${activeTarget.kind}:${activeTarget.id}` || busy === `unassign:${activeTarget.kind}:${activeTarget.id}`
                 return <tr key={model.id} className={isCurrent ? 'is-current' : undefined}>
-                  <td><strong title={model.displayName}>{model.displayName}</strong>{model.isDefault ? <span className="model-hub__badge is-ok">{t('modelHub.defaultModel', '默认')}</span> : null}</td>
+                  <td><strong title={model.displayName}>{model.displayName}</strong>{model.isDefault ? <span className="model-hub__star is-on" title={t('modelHub.defaultModel', '默认模型')}><Star size={12} weight="fill" /></span> : null}</td>
                   <td><code title={model.modelId}>{model.modelId}</code></td>
                   <td>{formatContext(declared.context)}</td>
                   <td>{modalityChips(declared.inputTypes)}</td>

@@ -171,7 +171,13 @@ export default function App() {
   const [preferences, setPreferences] = useState<WorkspacePreferences | undefined>(demoMode ? demoData.preferences : undefined)
   const [models, setModels] = useState<ModelProfile[]>(demoMode ? demoData.modelProfiles : [])
   const [modelAssignments, setModelAssignments] = useState<ModelAssignment[]>([])
-  const [conversationModelProfiles, setConversationModelProfiles] = useState<Record<string, string>>({})
+  const [conversationModelProfiles, setConversationModelProfiles] = useState<Record<string, string>>(() => readConversationModelProfiles())
+  useEffect(() => {
+    // Per-conversation model choice must survive a refresh, the same promise
+    // the permission selector makes; a deleted profile resolves nowhere and
+    // the composer falls back exactly as before.
+    writeConversationModelProfiles(conversationModelProfiles)
+  }, [conversationModelProfiles])
   const [discoveredCatalog] = useState<Record<string, CachedModelCatalog>>(() => loadDiscoveredModelsCache())
   const selectableModels = useMemo(() => {
     const configuredBaseUrls = new Set(
@@ -3006,8 +3012,29 @@ function defaultRolePermissionMode(
   }).reduce<ConversationPermissionMode>((least, mode) => rank[mode] < rank[least] ? mode : least, 'danger-full-access')
 }
 
-function readConversationPermissionMode(worldId: string, permissionKey: string): ConversationPermissionMode | undefined {
+const CONVERSATION_MODELS_STORAGE_KEY = 'dsh-cyber:conversation-models'
+
+function readConversationModelProfiles(): Record<string, string> {
   try {
+    const raw = window.localStorage.getItem(CONVERSATION_MODELS_STORAGE_KEY)
+    if (raw === null) return {}
+    const parsed: unknown = JSON.parse(raw)
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    return Object.fromEntries(Object.entries(parsed as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
+  } catch {
+    return {}
+  }
+}
+
+function writeConversationModelProfiles(map: Record<string, string>): void {
+  try {
+    window.localStorage.setItem(CONVERSATION_MODELS_STORAGE_KEY, JSON.stringify(map))
+  } catch {
+    // localStorage may be unavailable (private mode); the in-memory choice still applies now.
+  }
+}
+
+function readConversationPermissionMode(worldId: string, permissionKey: string): ConversationPermissionMode | undefined {  try {
     const value = window.localStorage.getItem(conversationPermissionStorageKey(worldId, permissionKey))
     return value === 'danger-full-access' || value === 'workspace-write' || value === 'read-only' ? value : undefined
   } catch {
