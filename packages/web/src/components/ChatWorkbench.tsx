@@ -488,7 +488,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
             <input ref={fileInputRef} className="composer-file-input" type="file" accept=".png,.jpg,.jpeg,.webp,.txt,.md,.json,.pdf" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAttachment(file) }} />
             <button className="icon-button composer-attachment-button" type="button" aria-label={uploading ? '正在上传附件' : '添加附件'} title={uploading ? '正在上传附件' : '添加附件'} disabled={uploading} onClick={() => fileInputRef.current?.click()}>{uploading ? <CircleNotch size={18} className="spin" /> : <Paperclip size={18} />}</button>
             {onChangePermissionMode === undefined ? null : <ConversationPermissionControl value={permissionMode} onChange={onChangePermissionMode} {...(onRequestFullAccess === undefined ? {} : { onRequestFullAccess })} />}
-            {onChangeModelProfile === undefined ? null : <div className="composer-model-picker"><ModelPicker models={models} value={modelProfileId} inheritLabel={resolvedModelLabel} ariaLabel={t('workbench.modelLabel', '当前会话模型')} onChange={onChangeModelProfile} /></div>}
+            {onChangeModelProfile === undefined || conversationKind === 'group' ? null : <div className="composer-model-picker"><ModelPicker models={models} value={modelProfileId} inheritLabel={resolvedModelLabel} ariaLabel={t('workbench.modelLabel', '当前会话模型')} onChange={onChangeModelProfile} /></div>}
             <CommandPicker commands={installedPlugins} draft={draft} onDraftChange={onDraftChange} {...(onOpenPluginMarket === undefined ? {} : { onOpenMarket: onOpenPluginMarket })} onFocus={() => inputRef.current?.focus()} />
           </div>
           <div className="composer__actions-right">
