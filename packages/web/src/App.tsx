@@ -74,6 +74,7 @@ import {
 import { ChatWorkbench, isChatMessage } from './components/ChatWorkbench.js'
 import type { ConversationPermissionMode } from './components/ConversationPermissionControl.js'
 import { CreativeWorkshopLauncher } from './components/CreativeWorkshopLauncher.js'
+import { ModelHubLauncher } from './features/model-hub/ModelHubLauncher.js'
 import { NavigationPane } from './components/NavigationPane.js'
 import { ResizableShell } from './components/ResizableShell.js'
 import { WorldThemeSwitcher } from './components/WorldThemeSwitcher.js'
@@ -81,7 +82,6 @@ import { applyWorldTheme, readWorldTheme, saveWorldTheme, themeRegistry } from '
 import { syncInstalledSkinThemes, type InstalledSkinDeclaration } from './features/world/installed-skin-themes.js'
 import type {
   DiscoveredModel,
-  ModelDiscoveryDraft,
   ModelProfileSaveDraft,
   SettingsSection,
   SystemAction,
@@ -91,7 +91,6 @@ import type {
 import {
   buildUnifiedModelList,
   loadDiscoveredModelsCache,
-  saveDiscoveredModelsToCache,
   type CachedModelCatalog,
 } from './features/models/discovered-models-storage.js'
 import { demoData, demoTavernDossiers, demoTavernEmployees, demoTavernMessages, demoTavernSessions } from './demo-data.js'
@@ -172,8 +171,14 @@ export default function App() {
   const [preferences, setPreferences] = useState<WorkspacePreferences | undefined>(demoMode ? demoData.preferences : undefined)
   const [models, setModels] = useState<ModelProfile[]>(demoMode ? demoData.modelProfiles : [])
   const [modelAssignments, setModelAssignments] = useState<ModelAssignment[]>([])
-  const [conversationModelProfiles, setConversationModelProfiles] = useState<Record<string, string>>({})
-  const [discoveredCatalog, setDiscoveredCatalog] = useState<Record<string, CachedModelCatalog>>(() => loadDiscoveredModelsCache())
+  const [conversationModelProfiles, setConversationModelProfiles] = useState<Record<string, string>>(() => readConversationModelProfiles())
+  useEffect(() => {
+    // Per-conversation model choice must survive a refresh, the same promise
+    // the permission selector makes; a deleted profile resolves nowhere and
+    // the composer falls back exactly as before.
+    writeConversationModelProfiles(conversationModelProfiles)
+  }, [conversationModelProfiles])
+  const [discoveredCatalog] = useState<Record<string, CachedModelCatalog>>(() => loadDiscoveredModelsCache())
   const selectableModels = useMemo(() => {
     const configuredBaseUrls = new Set(
       models
@@ -312,7 +317,16 @@ export default function App() {
   const activeRunningCount = activePendingTurns.filter((turn) => turn.status === 'running' || turn.status === 'waiting-approval' || turn.status === 'stopping').length
   const queuedInConversation = activePendingTurns.filter((turn) => turn.status === 'queued').length
   const activeQueuedCount = Math.max(0, queuedInConversation - (activeRunningCount === 0 && queuedInConversation > 0 ? 1 : 0))
-  const conversationModelProfileId = activeConversationKey === undefined ? undefined : conversationModelProfiles[activeConversationKey]
+  const directEmployeeId = activeConversationKey !== undefined && activeConversationKey.startsWith('direct:') ? activeConversationKey.slice('direct:'.length) : undefined
+  // A direct conversation's model selector IS the character's assignment: one
+  // durable fact, two views (composer and model hub), no parallel override
+  // layer to fall out of sync. Group chats keep the transient per-conversation
+  // choice - several characters cannot share one "conversation model".
+  const conversationModelProfileId = activeConversationKey === undefined
+    ? undefined
+    : directEmployeeId !== undefined
+    ? modelAssignments.find((assignment) => assignment.scope === 'employee' && assignment.scopeId === directEmployeeId)?.modelProfileId
+    : conversationModelProfiles[activeConversationKey]
   activeWorldRef.current = activeWorld
   activeSessionIdRef.current = activeSessionId
   activeConversationKeyRef.current = activeConversationKey
@@ -2073,6 +2087,34 @@ export default function App() {
     return `assets/${result.asset.id}`
   }, [workspace])
 
+  // The model hub writes providers/pool/assignments through its own routes;
+  // when it closes, the shell re-pulls the profile list and the assignments so
+  // the composer's picker and every inheritance label see the new reality
+  // without a page reload.
+  const refreshModelProfiles = useCallback(async (): Promise<void> => {
+    if (workspace === undefined || demoMode) return
+    try {
+      const result = await api<{ items: ModelProfile[]; assignments: ModelAssignment[] }>(`/api/workspaces/${workspace.id}/model-profiles`)
+      setModels(result.items)
+      setModelAssignments(result.assignments)
+    } catch {
+      // A failed refresh leaves the previous list standing; the hub itself
+      // already surfaced any write error to the user.
+    }
+  }, [demoMode, workspace])
+
+  const assignEmployeeModel = useCallback(async (employeeId: string, modelProfileId: string | undefined): Promise<void> => {
+    if (workspace === undefined) throw new Error('请先创建工作区')
+    const endpoint = `/api/workspaces/${workspace.id}/model-assignments/employee/${encodeURIComponent(employeeId)}`
+    if (modelProfileId === undefined) {
+      await api<{ removed: boolean }>(endpoint, { method: 'DELETE' })
+      setModelAssignments((current) => current.filter((item) => !(item.scope === 'employee' && item.scopeId === employeeId)))
+      return
+    }
+    const result = await api<{ assignment: ModelAssignment }>(endpoint, { method: 'PUT', body: JSON.stringify({ modelProfileId }) })
+    setModelAssignments((current) => [...current.filter((item) => !(item.scope === 'employee' && item.scopeId === employeeId)), result.assignment])
+  }, [workspace])
+
   const saveModel = useCallback(async (profile: ModelProfileSaveDraft): Promise<ModelProfile> => {
     if (workspace === undefined) throw new Error('请先创建工作区')
     modelMutationRevisionRef.current += 1
@@ -2111,76 +2153,6 @@ export default function App() {
     clearError()
     return result.profile
   }, [clearError, demoMode, models, workspace])
-
-  const discoverModels = useCallback(async (input: ModelDiscoveryDraft): Promise<DiscoveredModel[]> => {
-    if (workspace === undefined) throw new Error('请先创建工作区')
-    if (demoMode) {
-      await delay(250)
-      return [
-        { id: 'qwen3.5' },
-        { id: 'qwen3.5:9b' },
-        { id: 'deepseek-chat' },
-      ]
-    }
-    const result = await api<{ items: DiscoveredModel[] }>(`/api/workspaces/${workspace.id}/model-profiles/discover`, {
-      method: 'POST',
-      body: JSON.stringify(input),
-    })
-    if (result.items.length > 0) {
-      const profile = input.profileId === undefined ? undefined : models.find((item) => item.id === input.profileId)
-      const entry: CachedModelCatalog = {
-        models: result.items,
-        baseUrl: input.baseUrl,
-        ...(profile === undefined ? {} : { providerKind: profile.providerKind, providerName: profile.displayName }),
-        updatedAt: Date.now(),
-      }
-      if (input.profileId !== undefined) saveDiscoveredModelsToCache(input.profileId, entry)
-      saveDiscoveredModelsToCache(input.baseUrl, entry)
-      setDiscoveredCatalog((current) => ({ ...current, ...(input.profileId === undefined ? {} : { [input.profileId]: entry }), [input.baseUrl]: entry }))
-    }
-    return result.items
-  }, [demoMode, models, workspace])
-
-  const deleteModel = useCallback(async (modelProfileId: string): Promise<void> => {
-    if (workspace === undefined) throw new Error('请先创建工作区')
-    if (demoMode) {
-      setModels((current) => {
-        const removed = current.find((item) => item.id === modelProfileId)
-        const remaining = current.filter((item) => item.id !== modelProfileId)
-        if (removed?.isDefault && remaining[0]) remaining[0] = { ...remaining[0], isDefault: true }
-        return remaining
-      })
-      setModelAssignments((current) => current.filter((item) => item.modelProfileId !== modelProfileId))
-      setConversationModelProfiles((current) => Object.fromEntries(Object.entries(current).filter(([, id]) => id !== modelProfileId)))
-      return
-    }
-    const result = await api<{ removed: boolean; items: ModelProfile[]; assignments: ModelAssignment[] }>(`/api/workspaces/${workspace.id}/model-profiles/${encodeURIComponent(modelProfileId)}`, {
-      method: 'DELETE',
-    })
-    if (!result.removed) throw new Error('模型配置不存在或已被删除')
-    setModels(result.items)
-    setModelAssignments(result.assignments)
-    setConversationModelProfiles((current) => Object.fromEntries(Object.entries(current).filter(([, id]) => id !== modelProfileId)))
-  }, [workspace])
-
-  const assignModel = useCallback(async (input: { scope: ModelAssignment['scope']; scopeId: string; modelProfileId?: string }) => {
-    if (workspace === undefined) return
-    if (demoMode) {
-      setModelAssignments((current) => {
-        const remaining = current.filter((item) => item.scope !== input.scope || item.scopeId !== input.scopeId)
-        return input.modelProfileId === undefined ? remaining : [...remaining, { ...input, modelProfileId: input.modelProfileId, workspaceId: workspace.id, updatedAt: new Date().toISOString() }]
-      })
-      return
-    }
-    const endpoint = `/api/workspaces/${workspace.id}/model-assignments/${input.scope}/${encodeURIComponent(input.scopeId)}`
-    if (input.modelProfileId === undefined) {
-      await api(endpoint, { method: 'DELETE' })
-      setModelAssignments((current) => current.filter((item) => item.scope !== input.scope || item.scopeId !== input.scopeId))
-    } else {
-      const result = await api<{ assignment: ModelAssignment }>(endpoint, { method: 'PUT', body: JSON.stringify({ modelProfileId: input.modelProfileId }) })
-      setModelAssignments((current) => [...current.filter((item) => item.scope !== result.assignment.scope || item.scopeId !== result.assignment.scopeId), result.assignment])
-    }
-  }, [workspace])
 
   const runSystemAction = useCallback(async (action: SystemAction, input?: SystemActionInput): Promise<SystemActionResult> => {
     if (demoMode) {
@@ -2333,6 +2305,7 @@ export default function App() {
         <nav aria-label="全局功能">
           <CreativeWorkshopLauncher workspaceId={workspace.id} onCreated={(project) => { void openWorkshopWorld(project.worldId).catch((cause) => setError(cause instanceof Error ? cause.message : '创意工坊世界已创建，但打开失败，请从世界列表重新进入。')) }} onOpenWorld={(worldId) => { void openWorkshopWorld(worldId).catch((cause) => setError(cause instanceof Error ? cause.message : '世界打开失败')) }} />
           <button type="button" onClick={() => void openPackageMarket('theme')}><Storefront size={16} />{t('app.market', '市场')}</button>
+          <ModelHubLauncher workspaceId={workspace.id} worlds={worlds} employees={employees} onClosed={() => void refreshModelProfiles()} />
           <button type="button" onClick={() => { clearError(); setSettingsSection('maintenance'); setSettingsOpen(true) }}><Pulse size={16} /><span>{t('app.systemStatus', '系统状态')}</span><i className="health-indicator" />{t('app.healthy', '良好')}</button>
           <button type="button" onClick={() => { clearError(); setSettingsSection('appearance'); setSettingsOpen(true) }}><GearSix size={17} />{t('app.settings', '设置')}</button>
         </nav>
@@ -2378,20 +2351,13 @@ export default function App() {
             {...(conversationModelProfileId === undefined ? {} : { modelProfileId: conversationModelProfileId })}
             onChangeModelProfile={async (modelProfileId) => {
               if (activeConversationKey === undefined) return
-              if (modelProfileId === undefined) {
-                setConversationModelProfiles((current) => {
-                  const next = { ...current }
-                  delete next[activeConversationKey]
-                  return next
-                })
-                return
-              }
-              if (modelProfileId.startsWith('discovered:')) {
+              let finalProfileId = modelProfileId
+              if (modelProfileId !== undefined && modelProfileId.startsWith('discovered:')) {
                 const parts = modelProfileId.split(':')
                 const baseProfileId = parts[1]
                 const rawModelId = parts.slice(2).join(':')
                 const baseProfile = models.find((m) => m.id === baseProfileId)
-                if (baseProfile && rawModelId) {
+                if (baseProfile !== undefined && rawModelId !== '') {
                   try {
                     const { contextWindow: _unusedContext, maxTokens: _unusedMaxTokens, ...cleanSettings } = baseProfile.settings
                     const saved = await saveModel({
@@ -2402,25 +2368,44 @@ export default function App() {
                       api: baseProfile.api,
                       isDefault: false,
                       ...(baseProfile.credentialEnvName ? { credentialEnvName: baseProfile.credentialEnvName } : {}),
+                      ...(baseProfile.providerId !== undefined ? { providerId: baseProfile.providerId } : {}),
                       settings: {
                         ...cleanSettings,
-                        providerName: baseProfile.displayName,
+                        ...(baseProfile.providerId !== undefined ? { providerId: baseProfile.providerId } : {}),
+                        // Label by the provider connection, never by the base
+                        // profile's display name - that name is a model name.
+                        ...((baseProfile.providerName ?? (typeof baseProfile.settings?.providerName === 'string' ? baseProfile.settings.providerName : undefined)) !== undefined
+                          ? { providerName: baseProfile.providerName ?? (baseProfile.settings?.providerName as string) }
+                          : {}),
                       },
                     })
-                    setConversationModelProfiles((current) => ({
-                      ...current,
-                      [activeConversationKey]: saved.id,
-                    }))
-                    return
+                    finalProfileId = saved.id
                   } catch (err) {
                     console.error('Failed to auto-save discovered model:', err)
+                    return
                   }
                 }
               }
-              setConversationModelProfiles((current) => ({
-                ...current,
-                [activeConversationKey]: modelProfileId,
-              }))
+              if (directEmployeeId !== undefined) {
+                if (finalProfileId !== undefined && finalProfileId.startsWith('discovered:')) return
+                await assignEmployeeModel(directEmployeeId, finalProfileId)
+                setConversationModelProfiles((current) => {
+                  if (!(activeConversationKey in current)) return current
+                  const next = { ...current }
+                  delete next[activeConversationKey]
+                  return next
+                })
+                return
+              }
+              setConversationModelProfiles((current) => {
+                if (finalProfileId === undefined || finalProfileId.startsWith('discovered:')) {
+                  if (finalProfileId !== undefined && finalProfileId.startsWith('discovered:')) return current
+                  const next = { ...current }
+                  delete next[activeConversationKey]
+                  return next
+                }
+                return { ...current, [activeConversationKey]: finalProfileId }
+              })
             }}
             pendingCount={activePendingCount}
             queuedCount={activeQueuedCount}
@@ -2538,8 +2523,6 @@ export default function App() {
       {settingsOpen ? (
         <Suspense fallback={<div className="dialog-loading" role="status">正在打开设置…</div>}><SettingsDialog
           preferences={preferences}
-          models={models}
-          assignments={modelAssignments}
           workspace={workspace}
           worlds={worlds}
           employees={employees}
@@ -2548,13 +2531,10 @@ export default function App() {
           onClose={() => setSettingsOpen(false)}
           onSavePreferences={savePreferences}
           onUploadBackground={uploadBackground}
-          onSaveModel={saveModel}
-          onDiscoverModels={discoverModels}
-          onDeleteModel={deleteModel}
-          onAssignModel={assignModel}
           onSystemAction={runSystemAction}
           onLoadModelLogs={loadModelLogs}
           onClearModelLogs={clearModelLogs}
+          onHubClosed={() => void refreshModelProfiles()}
         /></Suspense>
       ) : null}
       {worldLibraryOpen ? (
@@ -3082,8 +3062,29 @@ function defaultRolePermissionMode(
   }).reduce<ConversationPermissionMode>((least, mode) => rank[mode] < rank[least] ? mode : least, 'danger-full-access')
 }
 
-function readConversationPermissionMode(worldId: string, permissionKey: string): ConversationPermissionMode | undefined {
+const CONVERSATION_MODELS_STORAGE_KEY = 'dsh-cyber:conversation-models'
+
+function readConversationModelProfiles(): Record<string, string> {
   try {
+    const raw = window.localStorage.getItem(CONVERSATION_MODELS_STORAGE_KEY)
+    if (raw === null) return {}
+    const parsed: unknown = JSON.parse(raw)
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    return Object.fromEntries(Object.entries(parsed as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
+  } catch {
+    return {}
+  }
+}
+
+function writeConversationModelProfiles(map: Record<string, string>): void {
+  try {
+    window.localStorage.setItem(CONVERSATION_MODELS_STORAGE_KEY, JSON.stringify(map))
+  } catch {
+    // localStorage may be unavailable (private mode); the in-memory choice still applies now.
+  }
+}
+
+function readConversationPermissionMode(worldId: string, permissionKey: string): ConversationPermissionMode | undefined {  try {
     const value = window.localStorage.getItem(conversationPermissionStorageKey(worldId, permissionKey))
     return value === 'danger-full-access' || value === 'workspace-write' || value === 'read-only' ? value : undefined
   } catch {

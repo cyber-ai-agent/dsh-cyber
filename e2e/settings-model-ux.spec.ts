@@ -9,92 +9,114 @@ import { attachAppConsoleRecorder } from './console-test-helpers.js'
 let server: CyberServer | undefined
 let origin = ''
 let stateRoot = ''
+const previousCatalogUrl = process.env.DSH_CYBER_MODEL_CATALOG_URL
 
 test.beforeAll(async () => {
-  stateRoot = await mkdtemp(join(tmpdir(), 'dsh-settings-model-ux-'))
-  server = await createCyberServer({ stateRoot, workspacePath: stateRoot, webRoot: join(process.cwd(), 'packages', 'web', 'dist'), port: 0, bootstrapDefaultWorld: true })
+  // Keep this browser contract deterministic and offline: the hub still
+  // exercises the bundled catalog and signup guidance fallback.
+  process.env.DSH_CYBER_MODEL_CATALOG_URL = ''
+  stateRoot = await mkdtemp(join(tmpdir(), 'dsh-model-hub-ux-'))
+  server = await createCyberServer({
+    stateRoot,
+    workspacePath: stateRoot,
+    webRoot: join(process.cwd(), 'packages', 'web', 'dist'),
+    port: 0,
+    bootstrapDefaultWorld: true,
+  })
   const workspaceId = server.store.listWorkspaces()[0]!.id
-  for (const [displayName, modelId, port, isDefault] of [
-    ['本地推理模型', 'qwen3:14b', 11434, true],
-    ['视觉模型', 'qwen2.5-vl:7b', 11435, false],
-    ['代码模型', 'deepseek-coder:6.7b', 11436, false],
-  ] as const) {
-    server.store.saveModelProfile({ workspaceId, displayName, providerKind: 'openai-compatible-local', baseUrl: `http://127.0.0.1:${port}/v1`, modelId, api: 'openai-completions', isDefault, settings: { providerId: 'ollama', providerName: 'Ollama', contextWindow: 32_000 } })
-  }
+  const provider = server.store.saveModelProvider({
+    workspaceId,
+    kind: 'local',
+    catalogRef: 'ollama',
+    name: 'Ollama',
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    api: 'openai-completions',
+    providerKind: 'openai-compatible-local',
+  })
+  const models = [
+    ['本地推理模型', 'qwen3:14b', true],
+    ['视觉模型', 'qwen2.5-vl:7b', false],
+    ['代码模型', 'deepseek-coder:6.7b', false],
+  ] as const
+  const profiles = models.map(([displayName, modelId, isDefault]) => server!.store.saveModelProfile({
+    workspaceId,
+    providerId: provider.id,
+    origin: 'imported',
+    displayName,
+    providerKind: provider.providerKind,
+    baseUrl: provider.baseUrl,
+    modelId,
+    api: provider.api,
+    isDefault,
+    settings: {
+      providerId: provider.id,
+      providerName: provider.name,
+      contextWindow: 32_768,
+      inputTypes: ['text'],
+      outputTypes: ['text'],
+    },
+  }))
+  server.store.saveModelAssignment({ workspaceId, scope: 'workspace', scopeId: workspaceId, modelProfileId: profiles[0]!.id })
   origin = (await server.start()).origin
 })
 
-test.afterAll(async () => { await server?.close(); await rm(stateRoot, { recursive: true, force: true }) })
+test.afterAll(async () => {
+  await server?.close()
+  await rm(stateRoot, { recursive: true, force: true })
+  if (previousCatalogUrl === undefined) delete process.env.DSH_CYBER_MODEL_CATALOG_URL
+  else process.env.DSH_CYBER_MODEL_CATALOG_URL = previousCatalogUrl
+})
 
-test('keeps model setup single-column, localized and responsive', async ({ page }) => {
+test('opens the model hub from settings, shows the pool and remains responsive', async ({ page }) => {
   const consoleIssues: string[] = []
-  const responseFailures: string[] = []
   attachAppConsoleRecorder(page, consoleIssues)
-  page.on('response', (response) => { if (response.status() >= 400) responseFailures.push(`${response.status()} ${response.url()}`) })
   const screenshotRoot = join(process.cwd(), 'artifacts', 'settings-model-ux')
   await mkdir(screenshotRoot, { recursive: true })
 
   await page.goto(origin)
+  await expect(page.locator('.workbench-shell')).toBeVisible()
   await page.getByRole('button', { name: '设置', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: '设置' })
-  await dialog.getByRole('button', { name: /AI 模型/ }).click()
-  await expect(dialog.locator('.settings-nav')).toBeVisible()
-  await expect(dialog.locator('.model-card-item')).toHaveCount(3)
-  await expect(dialog.locator('.model-editor-panel')).toHaveCount(0)
-  await expect(dialog.locator('.model-provider-pills')).toHaveCount(0)
+  const settings = page.getByRole('dialog', { name: '设置' })
+  await settings.getByRole('button', { name: /AI 模型/ }).click()
+  await expect(settings.getByText('新的 AI 模型管理中心', { exact: true })).toBeVisible()
+  await settings.getByRole('button', { name: '打开模型中心', exact: true }).click()
 
-  for (const viewport of [{ width: 1440, height: 900, label: '1440x900' }, { width: 1920, height: 1080, label: '1920x1080' }, { width: 3840, height: 2160, label: '3840x2160' }]) {
+  const hub = page.getByRole('dialog', { name: 'AI 模型管理中心' })
+  await expect(hub).toBeVisible()
+  await expect(hub.getByRole('button', { name: '模型服务商', exact: true })).toHaveAttribute('aria-current', 'true')
+  await expect(hub.locator('.model-hub__provider-card')).toHaveCount(1)
+  await expect(hub.locator('.model-hub__provider-card')).toContainText('Ollama')
+  await expect(hub.locator('.model-hub__provider-card')).toContainText('安装 Ollama')
+
+  await hub.getByRole('button', { name: '模型池', exact: true }).click()
+  const pool = hub.locator('.model-hub__table')
+  await expect(pool.locator('tbody tr')).toHaveCount(3)
+  await expect(pool.getByText('32K', { exact: true })).toHaveCount(3)
+  await expect(pool.getByText('Ollama', { exact: true })).toHaveCount(3)
+
+  await hub.getByRole('button', { name: '模型设置', exact: true }).click()
+  await expect(hub.locator('.model-hub__assign-targets button').first()).toContainText('全局')
+  await expect(hub.locator('.model-hub__assign-current').first()).toContainText('本地推理模型')
+
+  for (const viewport of [
+    { width: 1_440, height: 900, label: '1440x900' },
+    { width: 1_920, height: 1_080, label: '1920x1080' },
+    { width: 3_840, height: 2_160, label: '3840x2160' },
+  ]) {
     await page.setViewportSize(viewport)
-    const layout = await dialog.evaluate((element) => ({ scrollWidth: element.scrollWidth, clientWidth: element.clientWidth }))
+    const layout = await hub.evaluate((element) => ({ scrollWidth: element.scrollWidth, clientWidth: element.clientWidth }))
     expect(layout.scrollWidth, JSON.stringify(layout)).toBeLessThanOrEqual(layout.clientWidth + 1)
-    await page.screenshot({ path: join(screenshotRoot, `model-list-${viewport.label}.png`) })
+    await page.screenshot({ path: join(screenshotRoot, `model-hub-${viewport.label}.png`) })
   }
 
-  await page.setViewportSize({ width: 720, height: 900 })
-  expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
-  await expect(dialog.locator('.settings-nav')).toBeVisible()
-  await page.screenshot({ path: join(screenshotRoot, 'model-list-720x900.png') })
+  await hub.getByRole('button', { name: '关闭模型中心' }).click()
+  await expect(hub).toBeHidden()
+  await expect(settings).toBeVisible()
+  await settings.getByRole('button', { name: '关闭设置' }).click()
+  await expect(page.getByRole('button', { name: '模型中心', exact: true })).toBeVisible()
 
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await dialog.locator('.model-card-item__select').first().click()
-  const editor = dialog.locator('.model-editor-panel')
-  await expect(editor).toBeVisible()
-  await expect(dialog.locator('.model-list')).toBeHidden()
-  await expect(editor.getByLabel('模型服务商')).toBeVisible()
-  await expect(editor.getByLabel(/服务接口地址/)).toBeVisible()
-  await expect(editor.getByRole('button', { name: '测试连接并获取模型' })).toBeVisible()
-  expect(await editor.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
-  await page.screenshot({ path: join(screenshotRoot, 'model-editor-1440x900.png') })
-
-  // Saving must use the current draft (not a stale provider/field snapshot),
-  // expose a durable success notice, and clear a validation error as soon as
-  // the user fixes the field.
-  await editor.getByRole('button', { name: '保存修改' }).click()
-  await expect(editor.getByRole('status')).toContainText('模型连接已更新')
-  const displayName = editor.getByLabel('连接显示名称')
-  await displayName.fill(' ')
-  await editor.getByRole('button', { name: '保存修改' }).click()
-  await expect(editor.getByRole('alert')).toContainText('请输入模型配置名称')
-  await displayName.fill('本地推理模型')
-  await expect(editor.getByRole('alert')).toHaveCount(0)
-
-  await dialog.getByRole('button', { name: '外观与布局' }).click()
-  await dialog.getByLabel('界面语言').selectOption('en-US')
-  const englishDialog = page.getByRole('dialog', { name: 'Settings' })
-  await englishDialog.getByRole('button', { name: /AI models/i }).click()
-  const englishSection = englishDialog.locator('.settings-section--models')
-  await expect(englishSection.getByText('Connected models', { exact: true })).toBeVisible()
-  await expect(englishSection.getByRole('button', { name: 'Add service' })).toBeVisible()
-  expect(await englishSection.textContent()).not.toMatch(/已连接模型|添加服务|模型使用范围|设置为默认/)
-  await page.screenshot({ path: join(screenshotRoot, 'model-list-en-1440x900.png') })
-
-  await englishDialog.locator('.settings-nav button').first().click()
-  await englishDialog.getByLabel('Interface language').selectOption('ar-SA')
-  const arabicDialog = page.locator('.settings-dialog')
-  await arabicDialog.locator('.settings-nav button').nth(1).click()
-  await expect(arabicDialog.getByText('النماذج المتصلة', { exact: true })).toBeVisible()
-  await expect(page.locator('html')).toHaveAttribute('dir', 'rtl')
-  expect(await arabicDialog.locator('.settings-section--models').textContent()).not.toMatch(/已连接模型|添加服务|模型使用范围|设置为默认/)
-  await page.screenshot({ path: join(screenshotRoot, 'model-list-ar-1440x900.png') })
-  expect(consoleIssues, [...consoleIssues, ...responseFailures].join('\n')).toEqual([])
+  await page.getByRole('button', { name: '模型中心', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: 'AI 模型管理中心' })).toBeVisible()
+  await page.getByRole('button', { name: '关闭模型中心' }).click()
+  expect(consoleIssues, consoleIssues.join('\n')).toEqual([])
 })

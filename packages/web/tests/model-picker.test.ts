@@ -41,6 +41,7 @@ describe('ModelPicker', () => {
     }))
 
     expect(html).toContain('继承全局或角色设置')
+    expect(html).toContain('恢复为继承上级')
     expect(html).toContain('DeepSeek')
     expect(html).toContain('备用连接')
     expect(html).toContain('deepseek-chat')
@@ -57,6 +58,26 @@ describe('ModelPicker', () => {
     expect(filterModelPickerGroups(groups, 'qwen3').flatMap((group) => group.models).map((item) => item.id)).toEqual(['profile-b'])
     expect(filterModelPickerGroups(groups, 'vision').flatMap((group) => group.models).map((item) => item.id)).toEqual(['profile-b'])
     expect(filterModelPickerGroups(groups, 'deepseek').flatMap((group) => group.models)).toHaveLength(1)
+  })
+
+  it('opens as two panes: a provider rail on the left with 全部 first', () => {
+    const models = [
+      model({ settings: { providerId: 'deepseek' } }),
+      model({ id: 'profile-b', displayName: '本地小核', modelId: 'qwen3:14b', settings: { providerId: 'custom-local' } }),
+    ]
+    const html = renderToStaticMarkup(createElement(ModelPicker, {
+      models,
+      initiallyOpen: true,
+      onChange: vi.fn(),
+    }))
+    expect(html).toContain('model-picker__rail')
+    // 全部 + the two providers, each with its count, before the model list.
+    expect(html).toContain('model-picker__provider')
+    expect(html.match(/model-picker__provider/g)?.length ?? 0).toBeGreaterThanOrEqual(3)
+    expect(html).toContain('全部')
+    // Default pane is 全部, so every model is on the right.
+    expect(html).toContain('deepseek-chat')
+    expect(html).toContain('qwen3:14b')
   })
 
   it('keeps the closed trigger keyboard-focusable and omits absent metadata', () => {

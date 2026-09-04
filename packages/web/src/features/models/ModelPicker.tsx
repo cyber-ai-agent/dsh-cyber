@@ -77,15 +77,29 @@ interface ModelPickerGroup {
   models: readonly ModelProfile[]
 }
 
+const ALL_LABEL: Record<UiLocale, string> = {
+  'zh-CN': '全部', 'zh-TW': '全部', 'en-US': 'All', 'ja-JP': 'すべて', 'ko-KR': '전체', 'es-ES': 'Todos', 'fr-FR': 'Tous', 'de-DE': 'Alle', 'pt-BR': 'Todos', 'ru-RU': 'Все', 'ar-SA': 'الكل', 'hi-IN': 'सभी',
+}
+
+// The panel's last row is an action, not a display: it must read as
+// "restore the inherited choice" while naming what that inheritance currently
+// resolves to. A bare model name as the button text was unrecognisable.
+const RESTORE_LABEL: Record<UiLocale, string> = {
+  'zh-CN': '恢复为继承上级', 'zh-TW': '恢復為繼承上層', 'en-US': 'Restore inherited model', 'ja-JP': '継承モデルに戻す', 'ko-KR': '상속 모델로 복원', 'es-ES': 'Restaurar modelo heredado', 'fr-FR': 'Rétablir le modèle hérité', 'de-DE': 'Geerbtes Modell wiederherstellen', 'pt-BR': 'Restaurar modelo herdado', 'ru-RU': 'Вернуть наследуемую модель', 'ar-SA': 'استعادة النموذج الموروث', 'hi-IN': 'विरासत मॉडल बहाल करें',
+}
+
 export function modelPickerGroups(models: readonly ModelProfile[], locale: UiLocale): ModelPickerGroup[] {
   const groups = new Map<string, { label: string; models: ModelProfile[] }>()
   for (const model of models) {
-    const providerId = settingText(model, 'providerId') ?? model.providerKind
-    const isCustom = providerId === 'custom-local' || providerId === 'custom-remote'
-    const key = isCustom ? `${providerId}:${model.id}` : providerId
-    const label = settingText(model, 'providerName') ?? (isCustom
-      ? model.displayName
-      : providerLabel(providerId, locale))
+    // Group by the real provider connection the owner added (first-class
+    // providerId, joined name from the server projection). Only pre-hub
+    // profiles without a connection fall back to their settings or, when
+    // even that is missing, to a kind+label bucket so unrelated custom
+    // endpoints never merge into one anonymous "远程模型服务".
+    const connectionId = model.providerId ?? settingText(model, 'providerId')
+    const name = model.providerName ?? settingText(model, 'providerName')
+    const key = connectionId ?? `${model.providerKind}:${name ?? providerLabel(model.providerKind, locale)}`
+    const label = name ?? providerLabel(connectionId ?? model.providerKind, locale)
     const group = groups.get(key)
     if (group) group.models.push(model)
     else groups.set(key, { label, models: [model] })
@@ -120,24 +134,38 @@ export function ModelPicker({
   const copy = COPY[locale]
   const [open, setOpen] = useState(initiallyOpen)
   const [query, setQuery] = useState('')
+  const [provider, setProvider] = useState('all')
   const triggerRef = useRef<HTMLButtonElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const modelRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const rootRef = useRef<HTMLDivElement>(null)
 
-  const needle = query.trim().toLocaleLowerCase()
-  const filteredModels = useMemo(() => {
-    if (!needle) return [...models]
-    return models.filter((model) => modelSearchText(model).includes(needle))
-  }, [models, needle])
+  const groups = useMemo(() => modelPickerGroups(models, locale), [models, locale])
+  const filteredGroups = useMemo(() => filterModelPickerGroups(groups, query), [groups, query])
+  // The chosen provider survives search only while it still has matches; once
+  // the query leaves it empty, the rail falls back to 全部 rather than showing
+  // a blank right pane under a stale selection.
+  const activeGroup = provider === 'all' || filteredGroups.some((group) => group.id === provider) ? provider : 'all'
+  const visibleModels = activeGroup === 'all'
+    ? filteredGroups.flatMap((group) => [...group.models])
+    : [...(filteredGroups.find((group) => group.id === activeGroup)?.models ?? [])]
 
   const selectedModel = models.find((model) => model.id === value)
 
   useEffect(() => {
     if (!open) {
       setQuery('')
+      setProvider('all')
       return
     }
     searchRef.current?.focus()
+    // A dropdown you can only dismiss by re-clicking its own trigger is a
+    // trap: any other click on the page closes it, as every menu does.
+    const onPointerDown = (event: PointerEvent) => {
+      if (rootRef.current !== null && !rootRef.current.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => { document.removeEventListener('pointerdown', onPointerDown) }
   }, [open])
 
   const close = () => {
@@ -155,7 +183,7 @@ export function ModelPicker({
       : selectedModel.modelId
 
   return (
-    <div className={`model-picker${open ? ' is-open' : ''}${disabled ? ' is-disabled' : ''}`}>
+    <div ref={rootRef} className={`model-picker${open ? ' is-open' : ''}${disabled ? ' is-disabled' : ''}`}>
       <button
         ref={triggerRef}
         type="button"
@@ -185,7 +213,7 @@ export function ModelPicker({
                 if (event.key === 'Escape') { event.preventDefault(); close() }
                 if (event.key === 'ArrowDown') {
                   event.preventDefault()
-                  const firstModel = filteredModels[0]
+                  const firstModel = visibleModels[0]
                   if (firstModel) modelRefs.current[firstModel.id]?.focus()
                 }
               }}
@@ -198,14 +226,24 @@ export function ModelPicker({
           </div>
 
           <div className="model-picker__summary-row">
-            <span>{format(copy.providerCount, filteredModels.length)}</span>
+            <span>{activeGroup === 'all' ? ALL_LABEL[locale] : (filteredGroups.find((group) => group.id === activeGroup)?.label ?? '')}</span>
+            <span>{format(copy.providerCount, visibleModels.length)}</span>
           </div>
 
-          <div className="model-picker__list" role="listbox" aria-label={format(copy.modelCount, filteredModels.length)}>
-            {filteredModels.length === 0 ? (
+          <div className="model-picker__columns">
+            <nav className="model-picker__rail" aria-label={copy.chooseProvider}>
+              <button type="button" className={`model-picker__provider${activeGroup === 'all' ? ' is-active' : ''}`} aria-current={activeGroup === 'all'} onClick={() => setProvider('all')}>
+                <span>{ALL_LABEL[locale]}</span><small>{models.length}</small>
+              </button>
+              {filteredGroups.map((group) => <button key={group.id} type="button" className={`model-picker__provider${activeGroup === group.id ? ' is-active' : ''}`} aria-current={activeGroup === group.id} onClick={() => setProvider(group.id)} title={group.id}>
+                <span>{group.label}</span><small>{group.models.length}</small>
+              </button>)}
+            </nav>
+            <div className="model-picker__list" role="listbox" aria-label={format(copy.modelCount, visibleModels.length)}>
+            {visibleModels.length === 0 ? (
               <span className="model-picker__empty">{models.length === 0 ? copy.noModels : copy.noMatches}</span>
             ) : (
-              filteredModels.map((model) => {
+              visibleModels.map((model) => {
                 const capabilities = modelCapabilities(model)
                 const contextWindow = modelSettingNumber(model, 'contextWindow')
                 const configured = modelConfigured(model)
@@ -239,10 +277,11 @@ export function ModelPicker({
                 )
               })
             )}
+            </div>
           </div>
 
           <button type="button" className="model-picker__inherit" onClick={() => selectModel(undefined)}>
-            <span>{inheritLabel ?? copy.inherit}</span>
+            <span className="model-picker__inherit-text"><strong>{RESTORE_LABEL[locale]}</strong>{inheritLabel !== undefined ? <small>{inheritLabel}</small> : null}</span>
             {selectedModel === undefined ? <Check size={14} aria-hidden="true" /> : null}
           </button>
         </div>
