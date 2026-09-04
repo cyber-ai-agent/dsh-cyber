@@ -30,6 +30,7 @@ import { registerEmployeeRoutes } from './routes/employee-routes.js'
 import { registerIntegrationRoutes } from './routes/integration-routes.js'
 import { registerModelInteractionRoutes } from './routes/model-interaction-routes.js'
 import { registerModelRoutes } from './routes/model-routes.js'
+import { registerModelHubRoutes } from './routes/model-hub-routes.js'
 import { registerPackageRoutes } from './routes/package-routes.js'
 import { registerSystemRoutes } from './routes/system-routes.js'
 import { registerTaskScheduleRoutes } from './routes/task-schedule-routes.js'
@@ -58,6 +59,7 @@ import { GroupTaskCollaborationService } from './services/group-task-collaborati
 import { EmployeeActivityProjectionService } from './services/employee-activity-projection-service.js'
 import { harnessModelRoute } from './services/harness-model-route.js'
 import { ModelCatalogService } from './services/model-catalog-service.js'
+import { createModelHubServices } from './compose-model-hub.js'
 import { ModelCredentialService } from './services/model-credential-service.js'
 import { ModelInteractionService, TurnInteractionLoggingRuntime } from './services/model-interaction-service.js'
 import { HarnessToolApprovalService } from './services/harness-tool-approval-service.js'
@@ -214,6 +216,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const worldAccess = new WorldAccessService(worldRoots)
   const credentials = await ModelCredentialService.open(stateRoot)
   const modelCatalog = new ModelCatalogService(credentials)
+  const modelHub = createModelHubServices({ stateRoot })
   const worldPackages = new WorldPackageInstanceService(store, worldRoots)
   const authority = new WorldCharacterAuthorityService(store)
   let publishArtifactChanged: ((worldId: string, payload: JsonObject) => void) | undefined
@@ -456,6 +459,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   composeGenerators({ store, credentials, skillCatalog, packageCatalog, marketplace: generatedMarketplace, overrides: options }).registerGeneratorRoutes(router)
   registerWorkspaceRoutes(router, { store })
   registerModelRoutes(router, { store, credentials, modelCatalog, interactions })
+  registerModelHubRoutes(router, { store, credentials, modelCatalog, providerCatalog: modelHub.providerCatalog, balance: modelHub.balance, probe: modelHub.probe })
   registerIntegrationRoutes(router, {
     store,
     integrations,

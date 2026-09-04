@@ -797,6 +797,7 @@ describe('SqliteStore', () => {
     legacy.exec(`
       DROP TABLE model_assignments;
       DROP TABLE model_profiles;
+      DROP TABLE model_providers;
       DROP TABLE workspace_preferences;
       DROP TABLE local_assets;
       DROP TABLE runtime_update_transactions;
@@ -941,6 +942,12 @@ describe('SqliteStore', () => {
       DROP TABLE IF EXISTS employee_memory_index_fts;
       DROP TABLE employee_memory_index;
       ALTER TABLE employee_milestones DROP COLUMN origin;
+      DROP INDEX model_profiles_provider_model_idx;
+      ALTER TABLE model_profiles DROP COLUMN provider_id;
+      ALTER TABLE model_profiles DROP COLUMN origin;
+      ALTER TABLE model_profiles DROP COLUMN capabilities_json;
+      ALTER TABLE model_profiles DROP COLUMN probed_at;
+      DROP TABLE model_providers;
       DELETE FROM schema_migrations WHERE version > 36;
       PRAGMA user_version = 36;
     `)
@@ -1013,6 +1020,12 @@ describe('SqliteStore', () => {
     const legacy = new DatabaseSync(path)
     legacy.exec(`
       DROP TABLE agent_run_context_snapshots;
+      DROP INDEX model_profiles_provider_model_idx;
+      ALTER TABLE model_profiles DROP COLUMN provider_id;
+      ALTER TABLE model_profiles DROP COLUMN origin;
+      ALTER TABLE model_profiles DROP COLUMN capabilities_json;
+      ALTER TABLE model_profiles DROP COLUMN probed_at;
+      DROP TABLE model_providers;
       DELETE FROM schema_migrations WHERE version > 38;
       PRAGMA user_version = 38;
     `)
@@ -1383,6 +1396,12 @@ describe('SqliteStore', () => {
       DROP TABLE agent_run_context_snapshots;
       ALTER TABLE employee_milestones DROP COLUMN origin;
       DROP TABLE employee_memory_index;
+      DROP INDEX model_profiles_provider_model_idx;
+      ALTER TABLE model_profiles DROP COLUMN provider_id;
+      ALTER TABLE model_profiles DROP COLUMN origin;
+      ALTER TABLE model_profiles DROP COLUMN capabilities_json;
+      ALTER TABLE model_profiles DROP COLUMN probed_at;
+      DROP TABLE model_providers;
       DELETE FROM schema_migrations WHERE version > 36;
       PRAGMA user_version = 36;
     `)

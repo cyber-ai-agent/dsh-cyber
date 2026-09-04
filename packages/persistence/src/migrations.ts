@@ -1958,6 +1958,86 @@ const MIGRATIONS: readonly Migration[] = [
         ON agent_run_context_snapshots(stable_prefix_hash, created_at DESC);
     `,
   },
+  {
+    version: 40,
+    name: 'model-hub-provider-connections',
+    sql: `
+      -- One row per provider connection: an endpoint, a transport and one
+      -- credential. Model profiles (the assignable units) hang underneath via
+      -- provider_id; every consumer — assignments, worker launch, knowledge —
+      -- keeps reading profiles exactly as before.
+      CREATE TABLE model_providers (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK (kind IN ('builtin', 'custom', 'local')),
+        catalog_ref TEXT,
+        name TEXT NOT NULL,
+        base_url TEXT NOT NULL,
+        api TEXT NOT NULL CHECK (
+          api IN ('openai-completions', 'openai-responses', 'anthropic-messages')
+        ),
+        provider_kind TEXT NOT NULL CHECK (
+          provider_kind IN ('deepseek', 'openai-compatible-local', 'openai-compatible-remote')
+        ),
+        credential_env_name TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      ) STRICT;
+
+      CREATE INDEX model_providers_workspace_idx
+        ON model_providers(workspace_id, name, id);
+
+      ALTER TABLE model_profiles ADD COLUMN provider_id TEXT REFERENCES model_providers(id) ON DELETE RESTRICT;
+      ALTER TABLE model_profiles ADD COLUMN origin TEXT NOT NULL DEFAULT 'manual'
+        CHECK (origin IN ('manual', 'imported'));
+      -- Capability probes write only verdicts, never request or response bodies.
+      ALTER TABLE model_profiles ADD COLUMN capabilities_json TEXT
+        CHECK (capabilities_json IS NULL OR json_valid(capabilities_json));
+      ALTER TABLE model_profiles ADD COLUMN probed_at TEXT;
+
+      -- Import is idempotent per provider+model; legacy unassigned profiles keep
+      -- sharing the plain (workspace, model) semantics they always had.
+      CREATE UNIQUE INDEX model_profiles_provider_model_idx
+        ON model_profiles(workspace_id, provider_id, model_id) WHERE provider_id IS NOT NULL;
+
+      -- Backfill: group the profiles that already exist by connection shape so
+      -- the hub opens onto real providers instead of an empty list. The name is
+      -- the group's display name; when a group held several, the alphabetically
+      -- first — a label, never a behavior.
+      INSERT INTO model_providers
+        (id, workspace_id, kind, catalog_ref, name, base_url, api, provider_kind, credential_env_name, created_at, updated_at)
+      SELECT
+        'provider-' || lower(hex(randomblob(8))),
+        g.workspace_id,
+        CASE g.provider_kind WHEN 'openai-compatible-local' THEN 'local' ELSE 'custom' END,
+        NULL,
+        MIN(g.display_name),
+        g.base_url,
+        g.api,
+        g.provider_kind,
+        MIN(g.credential_env_name),
+        MIN(g.created_at),
+        MAX(g.updated_at)
+      FROM (
+        SELECT workspace_id, base_url, api, provider_kind,
+               display_name, credential_env_name, created_at, updated_at
+        FROM model_profiles
+      ) g
+      GROUP BY g.workspace_id, g.base_url, g.api, g.provider_kind;
+
+      UPDATE model_profiles
+      SET provider_id = (
+        SELECT mp.id FROM model_providers mp
+        WHERE mp.workspace_id = model_profiles.workspace_id
+          AND mp.base_url = model_profiles.base_url
+          AND mp.api = model_profiles.api
+          AND mp.provider_kind = model_profiles.provider_kind
+        ORDER BY mp.name, mp.id
+        LIMIT 1
+      )
+      WHERE provider_id IS NULL;
+    `,
+  },
 ]
 
 /**

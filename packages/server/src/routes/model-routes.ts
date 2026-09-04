@@ -39,9 +39,14 @@ export function registerModelRoutes(router: Router, dependencies: ModelRoutesDep
 
   router.get(/^\/api\/workspaces\/([^/]+)\/model-profiles$/, ({ response, params }) => {
     const workspaceId = params[0]!
+    // Attach the connection's name so the composer's model picker can group by
+    // the providers the owner actually added, instead of a generic local/remote
+    // kind. Display-only: never stored on the profile row.
+    const providerNames = new Map(store.listModelProviders(workspaceId).map((provider) => [provider.id, provider.name]))
     writeJson(response, 200, {
       items: store.listModelProfiles(workspaceId).map((profile) => ({
         ...profile,
+        ...(profile.providerId === undefined ? {} : { providerName: providerNames.get(profile.providerId) ?? profile.providerName }),
         credentialConfigured: isManagedModelCredentialName(profile.credentialEnvName)
           ? credentials.has(profile.id)
           : profile.credentialEnvName === undefined
