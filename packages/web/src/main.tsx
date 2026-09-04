@@ -29,6 +29,7 @@ await Promise.all([
   import('./i18n/world-generator-messages.js'),
   import('./i18n/skin-generator-messages.js'),
   import('./i18n/plugin-generator-messages.js'),
+  import('./i18n/model-hub-messages.js'),
 ])
 
 const root = document.getElementById('root')
