@@ -100,7 +100,7 @@ describe('Plugin Generator analyzer', () => {
     const seen: string[] = []
     const good = validDraft().transforms[0]!
     const analyzer = new PluginImportAnalyzer(
-      { getWorkspace: () => ({ id: 'workspace-plugin-generator' }), listModelProfiles: () => [fakeProfile()] } as any,
+      { getWorkspace: () => ({ id: 'workspace-plugin-generator' }), resolveWorkspaceDefaultProfile: () => fakeProfile() } as any,
       { resolve: () => 'fake-key' } as any,
       {
         fetch: (async (_url: URL | string, init?: RequestInit) => {

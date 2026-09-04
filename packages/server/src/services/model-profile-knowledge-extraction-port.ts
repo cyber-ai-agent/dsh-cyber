@@ -19,7 +19,7 @@ const MAX_OUTPUT_TOKENS = 8_192
 const MAX_RESPONSE_BYTES = 1024 * 1024
 
 export interface ModelProfileKnowledgeExtractionPortOptions {
-  store: Pick<SqliteStore, 'getModelAssignment' | 'getModelProfile' | 'listModelProfiles'>
+  store: Pick<SqliteStore, 'getModelAssignment' | 'getModelProfile' | 'resolveWorkspaceDefaultProfile'>
   credentials: ModelCredentialService
   fetch?: typeof fetch
   timeoutMs?: number
@@ -77,15 +77,15 @@ export class ModelProfileKnowledgeExtractionPort implements KnowledgeExtractionP
       const selected = this.#store.getModelProfile(input.modelProfileId)
       return selected?.workspaceId === input.workspaceId ? selected : undefined
     }
+    // The world's own assignment is the most specific scope available to
+    // knowledge extraction (no employee runs it); anything else falls back to
+    // the workspace default, exactly as chat inheritance does.
     const world = this.#store.getModelAssignment(input.workspaceId, 'world', input.worldId)
-    const workspace = this.#store.getModelAssignment(input.workspaceId, 'workspace', input.workspaceId)
-    const profileId = world?.modelProfileId ?? workspace?.modelProfileId
-    if (profileId !== undefined) {
-      const assigned = this.#store.getModelProfile(profileId)
+    if (world !== undefined) {
+      const assigned = this.#store.getModelProfile(world.modelProfileId)
       if (assigned?.workspaceId === input.workspaceId) return assigned
     }
-    const profiles = this.#store.listModelProfiles(input.workspaceId)
-    return profiles.find((profile) => profile.isDefault) ?? profiles[0]
+    return this.#store.resolveWorkspaceDefaultProfile(input.workspaceId)
   }
 }
 

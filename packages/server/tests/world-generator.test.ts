@@ -45,7 +45,7 @@ describe('World Generator analyzer', () => {
     const source = await readFile(fixturePath, 'utf8')
     const seen: string[] = []
     const analyzer = new WorldImportAnalyzer(
-      { getWorkspace: () => ({ id: 'workspace-world-generator' }), listModelProfiles: () => [fakeProfile()] } as any,
+      { getWorkspace: () => ({ id: 'workspace-world-generator' }), resolveWorkspaceDefaultProfile: () => fakeProfile() } as any,
       { resolve: () => 'fake-key' } as any,
       { listWorkspace: async () => [
         { id: 'coding', displayName: '软件实现', summary: '代码实现', routingHints: ['代码'] },

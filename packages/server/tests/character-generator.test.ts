@@ -71,7 +71,7 @@ describe('Character Generator server contracts', () => {
       }) } }] }), { status: 200, headers: { 'content-type': 'application/json' } })
     }) as typeof fetch
     const analyzer = new CharacterImportAnalyzer(
-      { getWorkspace: () => ({ id: 'workspace-character-generator' }), listModelProfiles: () => [profile] } as any,
+      { getWorkspace: () => ({ id: 'workspace-character-generator' }), resolveWorkspaceDefaultProfile: () => profile } as any,
       { resolve: () => 'fake-key' } as any,
       { listWorkspace: async () => [
         { id: 'coding', displayName: '软件实现', summary: '代码实现', routingHints: ['代码'] },

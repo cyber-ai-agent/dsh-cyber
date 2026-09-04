@@ -65,7 +65,7 @@ export interface PluginImportAnalyzerOptions {
   maxOutputTokens?: number
 }
 
-type AnalyzerStore = Pick<SqliteStore, 'getWorkspace' | 'listModelProfiles'>
+type AnalyzerStore = Pick<SqliteStore, 'getWorkspace' | 'resolveWorkspaceDefaultProfile'>
 
 /**
  * Host-side, review-only plugin importer. It never creates a plugin package,
@@ -129,8 +129,7 @@ export class PluginImportAnalyzer implements PluginImportAnalyzerPort {
   }
 
   #defaultProfile(workspaceId: string): ModelProfile {
-    const profiles = this.#store.listModelProfiles(workspaceId)
-    const profile = profiles.find((item) => item.isDefault) ?? profiles[0]
+    const profile = this.#store.resolveWorkspaceDefaultProfile(workspaceId)
     if (profile === undefined) {
       throw new ServiceError('invalid', 'plugin_model_missing', '请先配置默认模型，再分析提示词配方。')
     }
