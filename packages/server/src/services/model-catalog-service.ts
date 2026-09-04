@@ -33,10 +33,11 @@ export interface DiscoveredModel {
   displayName?: string
   contextLength?: number
   inputTypes?: string[]
+  outputTypes?: string[]
   reasoning?: boolean
 }
 
-const INPUT_MODALITIES = new Set(['text', 'image', 'video', 'audio'])
+const MODALITIES = new Set(['text', 'image', 'video', 'audio'])
 export interface ModelCatalogServiceOptions {
   fetch?: typeof fetch
   timeoutMs?: number
@@ -218,7 +219,8 @@ function parseModels(value: unknown): DiscoveredModel[] {
       ?? positiveNumber(candidate.effective_context_length)
       ?? (isRecord(candidate.metadata) ? positiveNumber(candidate.metadata.context_length) : undefined)
       ?? (isRecord(candidate.architecture) ? positiveNumber(candidate.architecture.context_length) : undefined)
-    const inputTypes = extractInputTypes(candidate)
+    const inputTypes = extractModalities(candidate, 'input')
+    const outputTypes = extractModalities(candidate, 'output')
     const reasoning = extractReasoning(candidate)
     const existing = discovered.get(id)
     discovered.set(id, {
@@ -226,6 +228,7 @@ function parseModels(value: unknown): DiscoveredModel[] {
       ...(displayName ? { displayName } : existing?.displayName ? { displayName: existing.displayName } : {}),
       ...(contextLength !== undefined ? { contextLength } : existing?.contextLength ? { contextLength: existing.contextLength } : {}),
       ...(inputTypes !== undefined ? { inputTypes } : existing?.inputTypes ? { inputTypes: existing.inputTypes } : {}),
+      ...(outputTypes !== undefined ? { outputTypes } : existing?.outputTypes ? { outputTypes: existing.outputTypes } : {}),
       ...(reasoning !== undefined ? { reasoning } : existing?.reasoning !== undefined ? { reasoning: existing.reasoning } : {}),
     })
   }
@@ -240,25 +243,27 @@ function positiveNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined
 }
 
-// OpenAI-compatible catalogues report input modalities inconsistently:
-// OpenRouter nests them under `architecture.input_modalities`, other gateways
-// flatten them to `input_modalities` or a single `modality` string like
-// "text+image->text". Keep only the four types the product renders and drop the
-// output half. Nothing matched yields undefined, so the pool shows '—' rather
-// than guessing text.
-function extractInputTypes(candidate: Record<string, unknown>): string[] | undefined {
-  const raw = Array.isArray(candidate.input_modalities)
-    ? candidate.input_modalities
-    : isRecord(candidate.architecture) && Array.isArray(candidate.architecture.input_modalities)
-    ? candidate.architecture.input_modalities
+// OpenAI-compatible catalogues report modalities inconsistently: OpenRouter
+// nests them under `architecture.{input,output}_modalities`, other gateways
+// flatten to `{input,output}_modalities` or one `modality` string like
+// "text+image->text" (the arrow splits input from output). Only the four types
+// the product renders survive; nothing matched yields undefined, so the pool
+// shows '—' rather than guessing.
+function extractModalities(candidate: Record<string, unknown>, direction: 'input' | 'output'): string[] | undefined {
+  const architecture = isRecord(candidate.architecture) ? candidate.architecture : undefined
+  const key = `${direction}_modalities` as const
+  const arrayValue = Array.isArray(candidate[key])
+    ? candidate[key]
+    : architecture !== undefined && Array.isArray(architecture[key])
+    ? architecture[key]
     : typeof candidate.modality === 'string'
-    ? (candidate.modality.split('->')[0] ?? '').split('+')
+    ? (direction === 'input' ? (candidate.modality.split('->')[0] ?? '') : (candidate.modality.split('->')[1] ?? '')).split('+')
     : []
   const types = new Set<string>()
-  for (const value of raw) {
+  for (const value of arrayValue) {
     if (typeof value !== 'string') continue
     const normalized = value.trim().toLowerCase()
-    if (INPUT_MODALITIES.has(normalized)) types.add(normalized)
+    if (MODALITIES.has(normalized)) types.add(normalized)
   }
   return types.size > 0 ? [...types].sort() : undefined
 }
