@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { ArrowLeft, ArrowsClockwise, CheckCircle, Eye, EyeSlash, Lightning, MagnifyingGlass, PencilSimple, Plus, Stack, Trash, WarningCircle, X } from '@phosphor-icons/react'
 
 import './model-hub.css'
@@ -257,7 +258,10 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
     ? t('modelHub.sourceCache', '目录来源：本地缓存')
     : t('modelHub.sourceBundled', '目录来源：随应用打包')
 
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && wizard === undefined) onClose() }}>
+  // Portal to <body>: the launcher renders from the top bar, where global
+  // rules like `.topbar nav { height: 100% }` would claim the hub's own tab
+  // strip, and a modal belongs outside the banner landmark anyway.
+  return createPortal(<div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && wizard === undefined) onClose() }}>
     <section ref={panelRef} className="model-hub" role="dialog" aria-modal="true" aria-labelledby="model-hub-title">
       <header className="model-hub__header">
         <div>
@@ -402,5 +406,5 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
         </div> : null}
       </div> : null}
     </section>
-  </div>
+  </div>, document.body)
 }
