@@ -93,4 +93,10 @@
 .model-hub__models-step li span { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .model-hub__models-step strong { font-size: 14px; }
 .model-hub__models-step code, .model-hub__models-step small { color: var(--text-muted); font-size: 12px; }
+.model-hub__models-tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.model-hub__models-tools .model-hub__search { flex: 1; min-width: 220px; }
+.model-hub__models-tools button { min-height: 36px; padding: 6px 12px; color: var(--text-soft); background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.model-hub__models-tools button:hover:not(:disabled) { color: var(--text); border-color: var(--border-strong, var(--accent)); }
+.model-hub__models-tools button:disabled { opacity: 0.5; cursor: not-allowed; }
+.model-hub__empty-inline { display: block; color: var(--text-muted); font-size: 13px; padding: 8px 10px; }
 .model-hub__models-step footer { display: flex; gap: 12px; align-items: center; justify-content: flex-end; font-size: 13px; }

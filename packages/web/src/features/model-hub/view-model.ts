@@ -26,6 +26,33 @@ export function selectionModels(models: readonly DiscoveredModel[], selected: Re
   return models.filter((model) => selected.has(model.id))
 }
 
+/**
+ * The import list's search box: filtering changes only what is shown. The
+ * selection is a separate set, so boxes ticked under one query survive every
+ * later query and the clearing of the search — exactly how it must behave
+ * when an aggregator serves hundreds of models.
+ */
+export function searchModels(models: readonly DiscoveredModel[], query: string): DiscoveredModel[] {
+  const needle = query.trim().toLocaleLowerCase()
+  if (needle === '') return [...models]
+  return models.filter((model) => `${model.displayName ?? ''} ${model.id}`.toLocaleLowerCase().includes(needle))
+}
+
+export function mergeSelection(selected: ReadonlySet<string>, ids: Iterable<string>): Set<string> {
+  const next = new Set(selected)
+  for (const id of ids) next.add(id)
+  return next
+}
+
+export function unmergeSelection(selected: ReadonlySet<string>, ids: Iterable<string>): Set<string> {
+  const drop = new Set(ids)
+  return new Set([...selected].filter((id) => !drop.has(id)))
+}
+
+export function allSelected(models: readonly DiscoveredModel[], selected: ReadonlySet<string>): boolean {
+  return models.length > 0 && models.every((model) => selected.has(model.id))
+}
+
 /** The pool's left rail: 全部, one entry per provider, plus orphan rows. */
 export type PoolFilterKey = 'all' | 'legacy' | string // otherwise a provider id
 

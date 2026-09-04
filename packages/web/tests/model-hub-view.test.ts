@@ -3,14 +3,18 @@ import { describe, expect, it } from 'vitest'
 import type { HubProfile, HubProvider } from '../src/features/model-hub/api.js'
 
 import {
+  allSelected,
   declaredCapabilities,
   defaultSelection,
   filterPool,
   formatContext,
+  mergeSelection,
   poolFilters,
+  searchModels,
   selectionModels,
   summarizeSync,
   toggleSelection,
+  unmergeSelection,
 } from '../src/features/model-hub/view-model.js'
 
 function profile(id: string, overrides: Partial<HubProfile> = {}): HubProfile {
@@ -59,6 +63,30 @@ describe('model hub view model', () => {
     expect([...selected]).toEqual(['a', 'b'])
     selected = toggleSelection(selected, 'a')
     expect(selectionModels(models, selected)).toEqual([{ id: 'b' }])
+  })
+
+  it('keeps the selection independent of the import-list search', () => {
+    const models = [
+      { id: 'anthropic/claude-x', displayName: 'Claude X' },
+      { id: 'deepseek/deepseek-chat' },
+      { id: 'qwen/qwen-2.5' },
+    ]
+    // Select "deepseek" under a narrow query...
+    let selected = new Set(searchModels(models, 'deepseek').map((m) => m.id))
+    expect([...selected]).toEqual(['deepseek/deepseek-chat'])
+    // ...then search a different term and select those too.
+    selected = mergeSelection(selected, searchModels(models, 'qwen').map((m) => m.id))
+    expect([...selected].sort()).toEqual(['deepseek/deepseek-chat', 'qwen/qwen-2.5'])
+    // Clearing the search keeps both checked.
+    expect(searchModels(models, '').filter((m) => selected.has(m.id)).map((m) => m.id).sort()).toEqual(['deepseek/deepseek-chat', 'qwen/qwen-2.5'])
+    // "Select all results" over a query that matches one already-selected row does not drop the other.
+    const visible = searchModels(models, 'deepseek')
+    expect(allSelected(visible, selected)).toBe(true)
+    selected = unmergeSelection(selected, visible.map((m) => m.id))
+    expect([...selected]).toEqual(['qwen/qwen-2.5'])
+    // displayName is searchable too.
+    expect(searchModels(models, 'claude').map((m) => m.id)).toEqual(['anthropic/claude-x'])
+    expect(searchModels(models, 'nope')).toEqual([])
   })
 
   it('builds the left rail as all + providers (+ legacy only when orphans exist)', () => {

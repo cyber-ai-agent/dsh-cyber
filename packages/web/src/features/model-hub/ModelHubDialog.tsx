@@ -25,15 +25,19 @@ import {
   type SyncOutcome,
 } from './api.js'
 import {
+  allSelected,
   declaredCapabilities,
   defaultSelection,
   filterPool,
   formatContext,
   IMPORT_CAP,
+  mergeSelection,
   poolFilters,
+  searchModels,
   selectionModels,
   summarizeSync,
   toggleSelection,
+  unmergeSelection,
   type PoolFilterKey,
 } from './view-model.js'
 
@@ -93,6 +97,7 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
   const [poolQuery, setPoolQuery] = useState('')
   const [poolFilter, setPoolFilter] = useState<PoolFilterKey>('all')
   const [wizard, setWizard] = useState<WizardState>()
+  const [modelQuery, setModelQuery] = useState('')
   const panelRef = useRef<HTMLElement>(null)
 
   const reload = useCallback(async () => {
@@ -167,6 +172,7 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
   }
 
   const openWizard = (editing?: HubProvider): void => {
+    setModelQuery('')
     const ref = editing === undefined
       ? CUSTOM_REF
       : editing.catalogRef ?? (editing.providerKind === 'openai-compatible-local' ? LOCAL_REF : CUSTOM_REF)
@@ -400,22 +406,33 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
             </footer>
           </div>
         })() : null}
-        {wizard.step === 'models' ? <div className="model-hub__models-step">
-          <p>{t('modelHub.modelsFound', '获取到 {count} 个模型，勾选后导入模型池。', { count: wizard.models.length })}</p>
-          <ul>{wizard.models.map((model) => <li key={model.id}>
-            <label><input type="checkbox" checked={wizard.selected.has(model.id)} onChange={() => setWizard({ ...wizard, selected: toggleSelection(wizard.selected, model.id) })} />
-              <span><strong>{model.displayName ?? model.id}</strong><code>{model.id}</code>
-                {model.contextLength === undefined ? null : <small>{t('modelHub.contextBadge', '上下文 {tokens}', { tokens: model.contextLength.toLocaleString() })}</small>}
-                {model.inputTypes === undefined || model.inputTypes.length === 0 ? null : <small>{model.inputTypes.map(modalityLabel).join('/')}</small>}
-                {model.reasoning === undefined ? null : <small>{model.reasoning ? t('modelHub.reasonYes', '支持') : t('modelHub.reasonNo', '不支持')}·{t('modelHub.colReasoning', '推理')}</small>}
-              </span>
-            </label>
-          </li>)}</ul>
-          <footer>
-            <span>{t('modelHub.selectedCount', '已选 {count} 个', { count: Math.min(wizard.selected.size, IMPORT_CAP) })}</span>
-            <button type="button" className="primary-button" disabled={busy === 'import'} onClick={() => void confirmImport(wizard)}>{busy === 'import' ? t('modelHub.importing', '正在导入…') : t('modelHub.import', '保存并导入模型池')}</button>
-          </footer>
-        </div> : null}
+        {wizard.step === 'models' ? (() => {
+          const visible = searchModels(wizard.models, modelQuery)
+          const visibleIds = visible.map((model) => model.id)
+          const everyVisible = allSelected(visible, wizard.selected)
+          return <div className="model-hub__models-step">
+            <p>{t('modelHub.modelsFound', '获取到 {count} 个模型，勾选后导入模型池。', { count: wizard.models.length })}</p>
+            <div className="model-hub__models-tools">
+              <label className="model-hub__search"><MagnifyingGlass size={15} /><input value={modelQuery} onChange={(event) => setModelQuery(event.target.value)} placeholder={t('modelHub.searchModels', '搜索模型（不影响已勾选）')} aria-label={t('modelHub.searchModelsAria', '搜索模型列表')} /></label>
+              <button type="button" disabled={visible.length === 0} onClick={() => setWizard({ ...wizard, selected: everyVisible ? unmergeSelection(wizard.selected, visibleIds) : mergeSelection(wizard.selected, visibleIds) })}>
+                {everyVisible ? t('modelHub.clearVisible', '取消本页全选') : t('modelHub.selectAllVisible', '全选搜索结果')}
+              </button>
+            </div>
+            <ul>{visible.map((model) => <li key={model.id}>
+              <label><input type="checkbox" checked={wizard.selected.has(model.id)} onChange={() => setWizard({ ...wizard, selected: toggleSelection(wizard.selected, model.id) })} />
+                <span><strong>{model.displayName ?? model.id}</strong><code>{model.id}</code>
+                  {model.contextLength === undefined ? null : <small>{t('modelHub.contextBadge', '上下文 {tokens}', { tokens: model.contextLength.toLocaleString() })}</small>}
+                  {model.inputTypes === undefined || model.inputTypes.length === 0 ? null : <small>{model.inputTypes.map(modalityLabel).join('/')}</small>}
+                  {model.reasoning === undefined ? null : <small>{model.reasoning ? t('modelHub.reasonYes', '支持') : t('modelHub.reasonNo', '不支持')}·{t('modelHub.colReasoning', '推理')}</small>}
+                </span>
+              </label>
+            </li>)}{visible.length === 0 ? <li><span className="model-hub__empty-inline">{t('modelHub.noModelMatches', '没有匹配的模型')}</span></li> : null}</ul>
+            <footer>
+              <span>{t('modelHub.selectedCount', '已选 {count} 个', { count: wizard.selected.size })}{wizard.selected.size > IMPORT_CAP ? t('modelHub.overImportCap', '（单次最多导入 {max} 个，将取前 {max} 个）', { max: IMPORT_CAP }) : ''}</span>
+              <button type="button" className="primary-button" disabled={busy === 'import' || wizard.selected.size === 0} onClick={() => void confirmImport(wizard)}>{busy === 'import' ? t('modelHub.importing', '正在导入…') : t('modelHub.import', '保存并导入模型池')}</button>
+            </footer>
+          </div>
+        })() : null}
       </div> : null}
     </section>
   </div>, document.body)
