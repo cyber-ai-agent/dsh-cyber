@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowsClockwise, CheckCircle, Lightning, MagnifyingGlass, PencilSimple, Plus, Stack, Trash, WarningCircle, X } from '@phosphor-icons/react'
+import { ArrowLeft, ArrowsClockwise, CheckCircle, Eye, EyeSlash, Lightning, MagnifyingGlass, PencilSimple, Plus, Stack, Trash, WarningCircle, X } from '@phosphor-icons/react'
 
 import './model-hub.css'
 import { useI18n } from '../../i18n/runtime.js'
@@ -38,35 +38,37 @@ import {
 } from './view-model.js'
 
 interface FormState {
+  providerRef: string
   name: string
   api: string
   providerKind: string
   baseUrl: string
   apiKey: string
-  useEnvironment: boolean
   credentialEnvName: string
 }
 
-type WizardStep = 'source' | 'form' | 'models'
+type WizardStep = 'form' | 'models'
 
 interface WizardState {
   step: WizardStep
-  entry?: HubCatalogEntry
-  editing?: HubProvider
   /** Set once the connection row exists (saved at the test step). */
   providerId?: string
+  editing?: HubProvider
   form: FormState
   models: DiscoveredModel[]
   selected: Set<string>
 }
 
+const CUSTOM_REF = 'custom'
+const LOCAL_REF = 'local'
+
 const EMPTY_FORM: FormState = {
+  providerRef: CUSTOM_REF,
   name: '',
   api: 'openai-completions',
   providerKind: 'openai-compatible-remote',
   baseUrl: '',
   apiKey: '',
-  useEnvironment: false,
   credentialEnvName: '',
 }
 
@@ -89,6 +91,7 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
   const [poolQuery, setPoolQuery] = useState('')
   const [probing, setProbing] = useState<Record<string, string>>({})
   const [wizard, setWizard] = useState<WizardState>()
+  const [showKey, setShowKey] = useState(false)
   const panelRef = useRef<HTMLElement>(null)
 
   const reload = useCallback(async () => {
@@ -116,12 +119,13 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [onClose, wizard])
 
-  const catalogEntryFor = (provider: HubProvider): HubCatalogEntry | undefined =>
-    catalog?.catalog.providers.find((entry) => entry.id === provider.catalogRef)
+  const entryForRef = (ref: string): HubCatalogEntry | undefined =>
+    catalog?.catalog.providers.find((candidate) => candidate.id === ref)
 
   const runWizardTest = async (state: WizardState): Promise<void> => {
     setBusy('test')
     setError(undefined)
+    const entry = entryForRef(state.form.providerRef)
     try {
       const saved = await saveProvider(workspaceId, {
         ...(state.editing === undefined ? {} : { id: state.editing.id }),
@@ -129,9 +133,9 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
         baseUrl: state.form.baseUrl,
         api: state.form.api,
         providerKind: state.form.providerKind,
-        ...(state.entry === undefined ? {} : { catalogRef: state.entry.id }),
-        ...(state.form.useEnvironment
-          ? { credentialEnvName: state.form.credentialEnvName.trim() || null }
+        ...(entry === undefined ? {} : { catalogRef: entry.id }),
+        ...(state.form.credentialEnvName.trim() !== ''
+          ? { credentialEnvName: state.form.credentialEnvName.trim() }
           : state.form.apiKey.trim() !== ''
           ? { apiKey: state.form.apiKey.trim() }
           : state.editing !== undefined
@@ -139,7 +143,9 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
           : { credentialEnvName: null }),
       })
       const models = await testProvider(workspaceId, saved.id)
-      setWizard({ ...state, step: 'models', providerId: saved.id, models, selected: defaultSelection(models, state.entry?.popularModels ?? []) })
+      // From here the connection row exists: editing the form and re-testing
+      // must upsert this row, never mint a duplicate provider.
+      setWizard({ ...state, step: 'models', providerId: saved.id, editing: state.editing ?? saved, models, selected: defaultSelection(models, entry?.popularModels ?? []) })
       await reload()
     } catch (cause) {
       setError(errorMessage(cause, t('modelHub.testFailed', '测试连接失败，请检查地址与密钥。')))
@@ -148,19 +154,21 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
     }
   }
 
-  const openForm = (entry?: HubCatalogEntry, kind?: 'custom' | 'local', editing?: HubProvider): void => {
-    setWizard({
-      step: 'form',
-      ...(entry === undefined ? {} : { entry }),
-      ...(editing === undefined ? {} : { editing }),
-      form: editing !== undefined
-        ? { ...EMPTY_FORM, name: editing.name, api: editing.api, providerKind: editing.providerKind, baseUrl: editing.baseUrl }
-        : entry !== undefined
-        ? { ...EMPTY_FORM, name: entry.name, api: entry.api, providerKind: entry.providerKind, baseUrl: entry.baseUrl, useEnvironment: entry.credentialMode === 'environment' }
-        : { ...EMPTY_FORM, providerKind: kind === 'local' ? 'openai-compatible-local' : 'openai-compatible-remote', ...(kind === 'local' ? { baseUrl: 'http://127.0.0.1:8000/v1' } : {}) },
-      models: [],
-      selected: new Set<string>(),
-    })
+  const formForRef = (ref: string, editing?: HubProvider): FormState => {
+    if (editing !== undefined) {
+      return { ...EMPTY_FORM, providerRef: ref, name: editing.name, api: editing.api, providerKind: editing.providerKind, baseUrl: editing.baseUrl }
+    }
+    const entry = entryForRef(ref)
+    if (entry !== undefined) return { ...EMPTY_FORM, providerRef: ref, name: entry.name, api: entry.api, providerKind: entry.providerKind, baseUrl: entry.baseUrl }
+    if (ref === LOCAL_REF) return { ...EMPTY_FORM, providerRef: ref, name: t('modelHub.sourceLocal', '本机 / 局域网推理服务'), baseUrl: 'http://127.0.0.1:8000/v1' }
+    return { ...EMPTY_FORM, providerRef: ref, name: t('modelHub.sourceCustom', '自定义 HTTPS 服务') }
+  }
+
+  const openWizard = (editing?: HubProvider): void => {
+    const ref = editing === undefined
+      ? CUSTOM_REF
+      : editing.catalogRef ?? (editing.providerKind === 'openai-compatible-local' ? LOCAL_REF : CUSTOM_REF)
+    setWizard({ step: 'form', ...(editing === undefined ? {} : { editing }), form: formForRef(ref, editing), models: [], selected: new Set<string>() })
   }
 
   const confirmImport = async (state: WizardState): Promise<void> => {
@@ -249,9 +257,9 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
     ? t('modelHub.sourceCache', '目录来源：本地缓存')
     : t('modelHub.sourceBundled', '目录来源：随应用打包')
 
-  return <div className="model-hub-scrim" onMouseDown={(event) => { if (event.target === event.currentTarget && wizard === undefined) onClose() }}>
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && wizard === undefined) onClose() }}>
     <section ref={panelRef} className="model-hub" role="dialog" aria-modal="true" aria-labelledby="model-hub-title">
-      <header className="dialog-header">
+      <header className="model-hub__header">
         <div>
           <h2 id="model-hub-title"><Stack size={18} /> {t('modelHub.title', 'AI 模型管理中心')}</h2>
           <p>{sourceBadge}{catalog === undefined ? '' : ` · ${t('modelHub.catalogVersion', '目录版本 {version}', { version: catalog.catalog.version })}`}{catalog?.notice === undefined ? '' : ` · ${catalog.notice}`}</p>
@@ -274,7 +282,7 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
 
       {wizard === undefined && tab === 'providers' ? <div className="model-hub__body">
         <div className="model-hub__toolbar">
-          <button type="button" className="primary-button" onClick={() => setWizard({ step: 'source', form: EMPTY_FORM, models: [], selected: new Set() })}><Plus size={15} />{t('modelHub.addProvider', '添加服务商')}</button>
+          <button type="button" className="primary-button" onClick={() => openWizard()}><Plus size={15} />{t('modelHub.addProvider', '添加服务商')}</button>
           <span className="model-hub__hint">{t('modelHub.providersHint', '一个服务商 = 一个端点、一份密钥；模型从服务商导入后分配给角色。')}</span>
         </div>
         {providers.length === 0 ? <div className="model-hub__empty"><strong>{t('modelHub.emptyProviders', '还没有添加服务商')}</strong><span>{t('modelHub.emptyProvidersHint', '点击“添加服务商”，内置目录里选一家填上密钥即可。')}</span></div> : providers.map((provider) => {
@@ -292,7 +300,7 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
             <code title={provider.baseUrl}>{provider.baseUrl}</code>
             {provider.signup !== undefined ? <p className="model-hub__signup">{provider.signup.text} <a href={provider.signup.url} target="_blank" rel="noopener noreferrer">{t('modelHub.openSignup', '打开注册页 ↗')}</a></p> : null}
             <footer>
-              <button type="button" onClick={() => openForm(catalogEntryFor(provider), undefined, provider)}><PencilSimple size={14} />{t('modelHub.edit', '编辑')}</button>
+              <button type="button" onClick={() => openWizard(provider)}><PencilSimple size={14} />{t('modelHub.edit', '编辑')}</button>
               <button type="button" disabled={busy === `sync:${provider.id}`} onClick={() => void runSync(provider)}><ArrowsClockwise size={14} className={busy === `sync:${provider.id}` ? 'spin' : undefined} />{t('modelHub.sync', '同步模型')}</button>
               {provider.balanceSupported ? <button type="button" onClick={() => void runBalance(provider)}><Lightning size={14} />{t('modelHub.balance', '查余额')}</button> : null}
               {confirmingDelete === provider.id
@@ -355,30 +363,31 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
 
       {wizard !== undefined ? <div className="model-hub__wizard" role="region" aria-label={t('modelHub.wizardAria', '添加或编辑服务商')}>
         <header>
-          {wizard.step !== 'source' ? <button type="button" className="icon-button" aria-label={t('modelHub.wizardBack', '上一步')} onClick={() => setWizard(wizard.step === 'models' ? { ...wizard, step: 'form' } : { ...wizard, step: 'source' })}><ArrowsClockwise size={14} style={{ transform: 'scaleX(-1)' }} /></button> : null}
-          <strong>{wizard.step === 'source' ? t('modelHub.sourceTitle', '选择服务商来源') : wizard.step === 'form' ? t('modelHub.formTitle', '填写连接信息') : t('modelHub.modelsTitle', '选择要导入的模型')}</strong>
-          <button type="button" className="icon-button" aria-label={t('modelHub.wizardCancel', '取消并返回')} onClick={() => { setWizard(undefined); void reload() }}><X size={16} /></button>
+          {wizard.step === 'models' ? <button type="button" className="icon-button" aria-label={t('modelHub.wizardBack', '上一步')} onClick={() => setWizard({ ...wizard, step: 'form' })}><ArrowLeft size={15} /></button> : null}
+          <strong>{wizard.step === 'form' ? (wizard.editing === undefined ? t('modelHub.formTitle', '填写连接信息') : t('modelHub.editTitle', '编辑服务商')) : t('modelHub.modelsTitle', '选择要导入的模型')}</strong>
+          <button type="button" className="icon-button" aria-label={wizard.step === 'models' ? t('modelHub.wizardDone', '完成（服务商已保存，可稍后同步模型）') : t('modelHub.wizardCancel', '取消并返回')} onClick={() => { setWizard(undefined); void reload() }}>{wizard.step === 'models' ? <CheckCircle size={16} /> : <X size={16} />}</button>
         </header>
-        {wizard.step === 'source' ? <div className="model-hub__source-grid">
-          {(catalog?.catalog.providers ?? []).map((entry) => <button type="button" key={entry.id} className="model-hub__source-card" onClick={() => openForm(entry)}>
-            <strong>{entry.name}{entry.badge === undefined ? '' : ` · ${entry.badge}`}</strong>
-            <span>{entry.description}</span>
-          </button>)}
-          <button type="button" className="model-hub__source-card is-manual" onClick={() => openForm(undefined, 'custom')}><strong>{t('modelHub.sourceCustom', '自定义 HTTPS 服务')}</strong><span>{t('modelHub.sourceCustomHint', '连接其他可信的 OpenAI 兼容网关。')}</span></button>
-          <button type="button" className="model-hub__source-card is-manual" onClick={() => openForm(undefined, 'local')}><strong>{t('modelHub.sourceLocal', '本机 / 局域网推理服务')}</strong><span>{t('modelHub.sourceLocalHint', 'vLLM、Ollama、LM Studio、Sub2API 等 HTTP 端点。')}</span></button>
-        </div> : null}
-        {wizard.step === 'form' ? <div className="model-hub__form">
-          {wizard.entry !== undefined ? <p className="model-hub__signup">{wizard.entry.signup.text} <a href={wizard.entry.signup.url} target="_blank" rel="noopener noreferrer">{t('modelHub.openSignup', '打开注册页 ↗')}</a></p> : null}
-          <label><span>{t('modelHub.fieldName', '名称')}</span><input value={wizard.form.name} onChange={(event) => setWizard({ ...wizard, form: { ...wizard.form, name: event.target.value } })} maxLength={80} /></label>
-          <label><span>{t('modelHub.fieldBaseUrl', '接口地址 Base URL')}</span><input value={wizard.form.baseUrl} onChange={(event) => setWizard({ ...wizard, form: { ...wizard.form, baseUrl: event.target.value } })} placeholder={wizard.entry?.modelPlaceholder === undefined ? 'https://api.example.com/v1' : wizard.entry.baseUrl} /></label>
-          <details className="model-hub__advanced"><summary>{t('modelHub.advanced', '高级配置')}</summary>
-            <label><span>{t('modelHub.fieldApi', '接口协议')}</span><select value={wizard.form.api} onChange={(event) => setWizard({ ...wizard, form: { ...wizard.form, api: event.target.value } })}><option value="openai-completions">OpenAI 对话补全</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic-messages">Anthropic 消息协议</option></select></label>
-            {wizard.form.providerKind !== 'openai-compatible-local' ? <label><span>{t('modelHub.fieldKey', 'API 密钥')}</span><input type="password" value={wizard.form.apiKey} onChange={(event) => setWizard({ ...wizard, form: { ...wizard.form, apiKey: event.target.value } })} placeholder={wizard.editing !== undefined && !wizard.editing.credentialConfigured ? t('modelHub.keyPlaceholderUnset', '尚未配置') : t('modelHub.keyPlaceholderKeep', '留空则保持不变')} autoComplete="off" /></label> : null}
-          </details>
-          <footer>
-            <button type="button" className="primary-button" disabled={busy === 'test' || !wizard.form.name.trim() || !wizard.form.baseUrl.trim()} onClick={() => void runWizardTest(wizard)}>{busy === 'test' ? t('modelHub.testing', '正在测试并获取模型…') : t('modelHub.testFetch', '测试服务商并获取模型列表')}</button>
-          </footer>
-        </div> : null}
+        {wizard.step === 'form' ? (() => {
+          const selectedEntry = entryForRef(wizard.form.providerRef)
+          const setForm = (patch: Partial<FormState>) => setWizard({ ...wizard, form: { ...wizard.form, ...patch } })
+          const switchRef = (ref: string) => setWizard({ ...wizard, form: { ...formForRef(ref), apiKey: wizard.form.apiKey, credentialEnvName: wizard.form.credentialEnvName } })
+          return <div className="model-hub__form">
+            <label><span>{t('modelHub.fieldProvider', '选择服务商')}</span><select value={wizard.form.providerRef} onChange={(event) => switchRef(event.target.value)}>
+              <option value={CUSTOM_REF}>{t('modelHub.sourceCustom', '自定义 HTTPS 服务')}</option>
+              <option value={LOCAL_REF}>{t('modelHub.sourceLocal', '本机 / 局域网推理服务')}</option>
+              {(catalog?.catalog.providers ?? []).map((entry) => <option key={entry.id} value={entry.id}>{entry.name}{entry.badge === undefined ? '' : `（${entry.badge}）`}</option>)}
+            </select></label>
+            <label><span>{t('modelHub.fieldName', '名称')}</span><input value={wizard.form.name} onChange={(event) => setForm({ name: event.target.value })} maxLength={80} /></label>
+            <label><span>{t('modelHub.fieldApi', '接口协议')}</span><select value={wizard.form.api} onChange={(event) => setForm({ api: event.target.value })}><option value="openai-completions">OpenAI 对话补全</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic-messages">Anthropic 消息协议</option></select></label>
+            <label><span>{t('modelHub.fieldKey', 'API 密钥')}</span><span className="model-hub__key"><input type={showKey ? 'text' : 'password'} value={wizard.form.apiKey} onChange={(event) => setForm({ apiKey: event.target.value })} placeholder={wizard.editing !== undefined ? t('modelHub.keyPlaceholderKeep', '留空则保持不变') : wizard.form.providerKind === 'openai-compatible-local' ? t('modelHub.keyHintLocal', '本地服务通常可留空') : t('modelHub.keyPlaceholderUnset', '尚未配置')} autoComplete="off" /><button type="button" className="icon-button" aria-label={showKey ? t('modelHub.hideKey', '隐藏密钥') : t('modelHub.showKey', '显示密钥')} aria-pressed={showKey} onClick={() => setShowKey(!showKey)}>{showKey ? <EyeSlash size={15} /> : <Eye size={15} />}</button></span></label>
+            <label className="is-wide"><span>{t('modelHub.fieldBaseUrl', '接口地址 Base URL')}</span><input value={wizard.form.baseUrl} onChange={(event) => setForm({ baseUrl: event.target.value })} placeholder={selectedEntry !== undefined ? selectedEntry.baseUrl : wizard.form.providerKind === 'openai-compatible-local' ? 'http://192.168.x.x:8000/v1' : 'https://api.example.com/v1'} /></label>
+            <label className="is-wide"><span>{t('modelHub.fieldEnvName', '凭据环境变量名（可选，与 API 密钥二选一）')}</span><input value={wizard.form.credentialEnvName} onChange={(event) => setForm({ credentialEnvName: event.target.value.toUpperCase() })} placeholder="MY_MODEL_API_KEY" /></label>
+            {selectedEntry !== undefined ? <p className="model-hub__signup">{selectedEntry.signup.text} <a href={selectedEntry.signup.url} target="_blank" rel="noopener noreferrer">{t('modelHub.openSignup', '打开注册页 ↗')}</a></p> : <p className="model-hub__signup">{wizard.form.providerRef === LOCAL_REF ? t('modelHub.sourceLocalHint', 'vLLM、Ollama、LM Studio、Sub2API 等 HTTP 端点。') : t('modelHub.sourceCustomHint', '连接其他可信的 OpenAI 兼容网关。')}</p>}
+            <footer>
+              <button type="button" className="primary-button" disabled={busy === 'test' || !wizard.form.name.trim() || !wizard.form.baseUrl.trim()} onClick={() => void runWizardTest(wizard)}>{busy === 'test' ? t('modelHub.testing', '正在测试并获取模型…') : t('modelHub.testFetch', '测试服务商并获取模型列表')}</button>
+            </footer>
+          </div>
+        })() : null}
         {wizard.step === 'models' ? <div className="model-hub__models-step">
           <p>{t('modelHub.modelsFound', '获取到 {count} 个模型，勾选后导入模型池。', { count: wizard.models.length })}</p>
           <ul>{wizard.models.map((model) => <li key={model.id}>
