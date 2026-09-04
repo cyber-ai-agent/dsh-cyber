@@ -176,7 +176,10 @@ export function registerModelHubRoutes(router: Router, dependencies: ModelHubRou
       const value = item as Record<string, unknown>
       const modelId = typeof value.id === 'string' ? value.id.trim() : ''
       if (!modelId) continue
-      const displayName = typeof value.displayName === 'string' && value.displayName.trim() ? value.displayName.trim() : modelId
+      const prior = existing.find((profile) => profile.modelId === modelId)
+      // Re-importing a row without a name (e.g. applying a sync patch) keeps
+      // the name the owner has; only fresh rows fall back to the raw id.
+      const displayName = typeof value.displayName === 'string' && value.displayName.trim() ? value.displayName.trim() : prior?.displayName ?? modelId
       const contextLength = typeof value.contextLength === 'number' && Number.isInteger(value.contextLength) && value.contextLength >= 1_024 ? value.contextLength : undefined
       const inputTypes = Array.isArray(value.inputTypes)
         ? value.inputTypes.filter((item): item is string => item === 'text' || item === 'image' || item === 'video' || item === 'audio').slice(0, 4)
@@ -185,12 +188,13 @@ export function registerModelHubRoutes(router: Router, dependencies: ModelHubRou
         ? value.outputTypes.filter((item): item is string => item === 'text' || item === 'image' || item === 'video' || item === 'audio').slice(0, 4)
         : undefined
       const reasoning = typeof value.reasoning === 'boolean' ? value.reasoning : undefined
-      const settings: JsonObject = {}
+      // Merge onto any stored settings so a partial sync patch (say, context
+      // only) cannot wipe the modalities/reasoning already recorded.
+      const settings: JsonObject = { ...(prior?.settings ?? {}) }
       if (contextLength !== undefined) settings.contextWindow = contextLength
       if (inputTypes !== undefined && inputTypes.length > 0) settings.inputTypes = inputTypes
       if (outputTypes !== undefined && outputTypes.length > 0) settings.outputTypes = outputTypes
       if (reasoning !== undefined) settings.reasoning = reasoning
-      const prior = existing.find((profile) => profile.modelId === modelId)
       // The connection owns the key; a profile re-imported before the provider
       // captured one (migration backfilled the profile's own reference) must
       // keep working, so the prior reference is the fallback.
@@ -228,13 +232,30 @@ export function registerModelHubRoutes(router: Router, dependencies: ModelHubRou
     const discoveredIds = new Set(items.map((item) => item.id))
     const added = items.filter((item) => !storedIds.has(item.id))
     const removed = stored.filter((profile) => !discoveredIds.has(profile.modelId)).map((profile) => ({ id: profile.id, modelId: profile.modelId }))
+    // Per-field diff of what the endpoint now declares against what is stored.
+    // Only fields with a concrete new value go into the patch, so applying it
+    // never blanks a column the endpoint stopped reporting.
+    const sameList = (a: readonly string[] | undefined, b: readonly string[] | undefined): boolean => {
+      const x = a ?? []
+      const y = b ?? []
+      return x.length === y.length && [...x].sort().join('|') === [...y].sort().join('|')
+    }
     const changed = items
       .filter((item) => storedIds.has(item.id))
       .map((item) => {
         const profile = stored.find((candidate) => candidate.modelId === item.id)
-        const currentContext = typeof profile?.settings.contextWindow === 'number' ? profile.settings.contextWindow : undefined
-        if (item.contextLength === undefined || item.contextLength === currentContext) return undefined
-        return { modelId: item.id, from: currentContext, to: item.contextLength, profileId: profile?.id }
+        if (profile === undefined) return undefined
+        const storedContext = typeof profile.settings.contextWindow === 'number' ? profile.settings.contextWindow : undefined
+        const storedInput = Array.isArray(profile.settings.inputTypes) ? profile.settings.inputTypes as string[] : undefined
+        const storedOutput = Array.isArray(profile.settings.outputTypes) ? profile.settings.outputTypes as string[] : undefined
+        const storedReasoning = typeof profile.settings.reasoning === 'boolean' ? profile.settings.reasoning : undefined
+        const patch: Record<string, unknown> = {}
+        if (item.contextLength !== undefined && item.contextLength !== storedContext) patch.contextLength = item.contextLength
+        if (item.inputTypes !== undefined && !sameList(item.inputTypes, storedInput)) patch.inputTypes = item.inputTypes
+        if (item.outputTypes !== undefined && !sameList(item.outputTypes, storedOutput)) patch.outputTypes = item.outputTypes
+        if (item.reasoning !== undefined && item.reasoning !== storedReasoning) patch.reasoning = item.reasoning
+        if (Object.keys(patch).length === 0) return undefined
+        return { modelId: item.id, profileId: profile.id, patch }
       })
       .filter((item): item is NonNullable<typeof item> => item !== undefined)
     writeJson(response, 200, { added, removed, changed, unchanged: items.length - added.length })
