@@ -1436,4 +1436,55 @@ describe('SqliteStore', () => {
     expect(migrated.getEmployeeMemoryIndexEntry(legacy.id)).toBeUndefined()
     expect(migrated.removeLegacyConversationMilestones(employee.id)).toBe(0)
   })
+
+  it('backfills provider connections without collapsing duplicate legacy model profiles', async () => {
+    const { path, store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: '重复模型迁移工作区' })
+    const base = {
+      workspaceId: workspace.id,
+      providerKind: 'openai-compatible-local' as const,
+      baseUrl: 'http://127.0.0.1:9/v1',
+      modelId: 'same-model',
+      api: 'openai-completions' as const,
+      settings: {},
+    }
+    const first = store.saveModelProfile({ ...base, displayName: '重复模型 A', credentialEnvName: 'MODEL_KEY_A' })
+    const second = store.saveModelProfile({ ...base, displayName: '重复模型 A（副本）', credentialEnvName: 'MODEL_KEY_A' })
+    const third = store.saveModelProfile({ ...base, displayName: '重复模型 B', credentialEnvName: 'MODEL_KEY_B' })
+    expect(new Set([first.id, second.id, third.id]).size).toBe(3)
+    store.close()
+    stores.splice(stores.indexOf(store), 1)
+
+    // Rewind only the provider migration, keeping the duplicate legacy rows
+    // that v39 allowed so the forward migration must preserve them.
+    const legacy = new DatabaseSync(path)
+    legacy.exec(`
+      DROP INDEX model_profiles_provider_model_idx;
+      ALTER TABLE model_profiles DROP COLUMN provider_id;
+      ALTER TABLE model_profiles DROP COLUMN origin;
+      ALTER TABLE model_profiles DROP COLUMN capabilities_json;
+      ALTER TABLE model_profiles DROP COLUMN probed_at;
+      DROP TABLE model_providers;
+      DELETE FROM schema_migrations WHERE version > 39;
+      PRAGMA user_version = 39;
+    `)
+    legacy.close()
+
+    const migrated = await SqliteStore.open(path)
+    stores.push(migrated)
+    expect(migrated.doctor()).toMatchObject({ ok: true, schemaVersion: CYBER_SCHEMA_VERSION })
+    expect(migrated.listModelProfiles(workspace.id)).toHaveLength(3)
+    expect(migrated.database.prepare('SELECT COUNT(*) AS count FROM model_providers WHERE workspace_id = ?').get(workspace.id))
+      .toMatchObject({ count: 2 })
+    const links = migrated.database
+      .prepare('SELECT id, provider_id FROM model_profiles WHERE workspace_id = ? ORDER BY id')
+      .all(workspace.id) as Array<{ id: string; provider_id: string | null }>
+    expect(links.filter((row) => row.provider_id !== null)).toHaveLength(2)
+    expect(links.filter((row) => row.provider_id === null)).toHaveLength(1)
+
+    const recoveryPath = join(path, '..', 'recovery.json')
+    await exportReadonlyRecovery(path, recoveryPath)
+    const recovery = JSON.parse(await readFile(recoveryPath, 'utf8')) as { tables?: { model_providers?: unknown[] } }
+    expect(recovery.tables?.model_providers).toHaveLength(2)
+  })
 })

@@ -302,7 +302,7 @@ export interface SaveModelProviderInput {
   id?: string
   workspaceId: string
   kind: ModelProviderConnectionKind
-  catalogRef?: string
+  catalogRef?: string | null
   name: string
   baseUrl: string
   api: ModelApiKind
@@ -678,6 +678,7 @@ const KNOWN_TABLES = [
   'employee_daily_journals',
   'employee_relationships',
   'workspace_preferences',
+  'model_providers',
   'model_profiles',
   'model_assignments',
   'local_assets',
@@ -1109,8 +1110,14 @@ export class SqliteStore {
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     }
-    if (input.catalogRef !== undefined) provider.catalogRef = input.catalogRef
-    else if (existing?.catalogRef !== undefined) provider.catalogRef = existing.catalogRef
+    if (input.catalogRef === null) {
+      // Explicit null clears a built-in catalog identity when a connection is
+      // converted to a custom endpoint. Undefined keeps the existing value on
+      // partial edits, matching the other optional provider fields.
+    } else if (input.catalogRef !== undefined) {
+      const catalogRef = input.catalogRef.trim()
+      if (catalogRef) provider.catalogRef = catalogRef
+    } else if (existing?.catalogRef !== undefined) provider.catalogRef = existing.catalogRef
     // A value replaces the reference, null clears it, undefined keeps it.
     if (input.credentialEnvName === null) {
       // cleared
@@ -1225,14 +1232,33 @@ export class SqliteStore {
       })
     if (assignedScopeIds.length > 0) return { status: 'blocked', assignedScopeIds }
     return this.#transaction(() => {
+      const removedDefault = this.database
+        .prepare('SELECT 1 AS present FROM model_profiles WHERE provider_id = ? AND is_default = 1 LIMIT 1')
+        .get(providerId) !== undefined
       this.database.prepare('DELETE FROM model_profiles WHERE provider_id = ?').run(providerId)
+      let fallbackProfileId: string | undefined
+      if (removedDefault) {
+        const fallback = this.database
+          .prepare('SELECT id FROM model_profiles WHERE workspace_id = ? ORDER BY display_name, id LIMIT 1')
+          .get(workspaceId) as { id?: unknown } | undefined
+        if (typeof fallback?.id === 'string') {
+          fallbackProfileId = fallback.id
+          this.database
+            .prepare('UPDATE model_profiles SET is_default = 1, updated_at = ? WHERE id = ? AND workspace_id = ?')
+            .run(this.#clock(), fallbackProfileId, workspaceId)
+        }
+      }
       this.database.prepare('DELETE FROM model_providers WHERE id = ? AND workspace_id = ?').run(providerId, workspaceId)
       this.#appendEvent({
         workspaceId,
         type: 'model.provider.updated',
         actorId,
         actorKind: 'owner',
-        payload: { modelProviderId: providerId, deleted: true },
+        payload: {
+          modelProviderId: providerId,
+          deleted: true,
+          ...(fallbackProfileId === undefined ? {} : { fallbackProfileId }),
+        },
       })
       return { status: 'deleted' as const }
     })

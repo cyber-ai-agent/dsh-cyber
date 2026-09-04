@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module'
+import { isIP } from 'node:net'
 import { lstat, mkdir, open, readFile, readlink, rename, symlink, unlink } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -229,15 +230,24 @@ async function ensurePackageLink(linkPath: string, targetPath: string): Promise<
   await symlink(resolve(targetPath), linkPath, 'junction')
 }
 
-function validateProviderProfile(profile: HarnessProviderProfile): void {
+export function validateProviderProfile(profile: HarnessProviderProfile): void {
   if (!/^[a-z0-9][a-z0-9-]*$/.test(profile.route)) throw new Error('Invalid provider route')
   if (!profile.displayName.trim() || !profile.api.trim() || !profile.model.id.trim()) {
     throw new Error('Provider display name, API and model are required')
   }
   const endpoint = new URL(profile.baseURL)
-  const local = endpoint.hostname === '127.0.0.1' || endpoint.hostname === 'localhost' || endpoint.hostname === '::1'
-  if (endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && local)) {
-    throw new Error('Provider URL must use HTTPS, except loopback HTTP endpoints')
+  // Only HTTP(S) transports are valid model endpoints. HTTPS is accepted
+  // anywhere; plain HTTP only on a private network (loopback and RFC1918-style
+  // addresses), matching the policy the server applies when saving model
+  // profiles (model-url-policy.assertModelBaseUrl) so a LAN vLLM/Ollama box is
+  // not rejected at worker-launch time after passing the settings form. Other
+  // schemes — ftp/ws/etc. — are rejected even on private hosts, and public
+  // hosts still require HTTPS.
+  if (
+    endpoint.protocol !== 'https:'
+    && !(endpoint.protocol === 'http:' && isExplicitPrivateHostname(normalizeHostname(endpoint.hostname)))
+  ) {
+    throw new Error('Provider URL must use HTTPS, except private-network HTTP endpoints')
   }
   if (profile.apiKeyEnv !== undefined && !/^[A-Z_][A-Z0-9_]*$/.test(profile.apiKeyEnv)) {
     throw new Error('Invalid provider credential environment variable')
@@ -249,4 +259,74 @@ function validateProviderProfile(profile: HarnessProviderProfile): void {
       throw new Error('Invalid web search credential environment variable')
     }
   }
+}
+
+function normalizeHostname(value: string): string {
+  return value.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '')
+}
+
+function parseIpv4(value: string): readonly [number, number, number, number] | undefined {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(value)
+  if (m === null) return undefined
+  const o = m.slice(1).map(Number)
+  if (o.some((n) => n > 255)) return undefined
+  return o as [number, number, number, number]
+}
+
+function parseIpv6(value: string): bigint | undefined {
+  const m = /^([0-9a-fA-F]{1,4}):([0-9a-fA-F]{1,4}):([0-9a-fA-F]{1,4}):([0-9a-fA-F]{1,4}):([0-9a-fA-F]{1,4}):([0-9a-fA-F]{1,4}):([0-9a-fA-F]{1,4}):([0-9a-fA-F]{1,4})$/.exec(value)
+  if (m !== null) {
+    let result = 0n
+    for (let i = 1; i <= 8; i++) {
+      result = (result << 16n) | BigInt(parseInt(m[i]!, 16))
+    }
+    return result
+  }
+  // Handle :: compression
+  const parts = value.split('::')
+  if (parts.length === 2) {
+    const left = parts[0] ? parts[0].split(':') : []
+    const right = parts[1] ? parts[1].split(':') : []
+    const missing = 8 - left.length - right.length
+    const all = [...left, ...Array(missing).fill('0'), ...right]
+    if (all.length !== 8) return undefined
+    let result = 0n
+    for (const part of all) {
+      result = (result << 16n) | BigInt(parseInt(part, 16))
+    }
+    return result
+  }
+  return undefined
+}
+
+function inIpv6Range(value: bigint, rangeStr: string, prefixBits: number): boolean {
+  const range = parseIpv6(rangeStr)
+  if (range === undefined) return false
+  const mask = (~0n << BigInt(128 - prefixBits))
+  return (value & mask) === (range & mask)
+}
+
+function isPrivateAddress(address: string): boolean {
+  const normalized = normalizeHostname(address)
+  if (isIP(normalized) === 4) {
+    const octets = parseIpv4(normalized)
+    if (octets === undefined) return false
+    const [first, second] = octets
+    return first === 10 || first === 127
+      || (first === 172 && second >= 16 && second <= 31)
+      || (first === 192 && second === 168)
+  }
+  if (isIP(normalized) === 6) {
+    const value = parseIpv6(normalized)
+    if (value === undefined) return false
+    return inIpv6Range(value, 'fc00::', 7) || inIpv6Range(value, '::1', 128)
+  }
+  return false
+}
+
+function isExplicitPrivateHostname(hostname: string): boolean {
+  if (hostname === 'localhost' || hostname.endsWith('.localhost')
+    || hostname === 'host.docker.internal' || hostname === 'host.containers.internal'
+    || hostname.endsWith('.local')) return true
+  return isIP(hostname) !== 0 && isPrivateAddress(hostname)
 }

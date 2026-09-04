@@ -96,6 +96,9 @@ export class ImageGenerationService {
         },
         body,
         signal: AbortSignal.timeout(this.#timeoutMs),
+        // A provider endpoint is already validated, but it must not be able to
+        // redirect an authenticated request to a different host.
+        redirect: 'error',
       })
     } catch (cause) {
       const timedOut = cause instanceof Error && (cause.name === 'TimeoutError' || cause.name === 'AbortError')
@@ -136,7 +139,11 @@ export class ImageGenerationService {
     }
     let response: Response
     try {
-      response = await this.#fetch(url, { signal: AbortSignal.timeout(this.#timeoutMs), headers: { accept: 'image/*' } })
+      response = await this.#fetch(url, {
+        signal: AbortSignal.timeout(this.#timeoutMs),
+        headers: { accept: 'image/*' },
+        redirect: 'error',
+      })
     } catch {
       throw new ServiceError('unavailable', 'image_fetch_failed', '无法从图像服务下载生成的图片。')
     }

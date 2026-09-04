@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-import type { JsonObject, ModelApiKind, ModelProviderConnection, ModelProviderKind } from '@dsh-cyber/contracts'
+import type { JsonObject, ModelApiKind, ModelProviderCatalogEntry, ModelProviderConnection, ModelProviderKind } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import type { Router } from '../http/router.js'
@@ -9,7 +9,7 @@ import { nullableString, readJson, requiredEnum, requiredString } from '../http/
 import { writeJson } from '../http/response.js'
 import { type ModelCredentialService } from '../services/model-credential-service.js'
 import type { ModelCatalogService } from '../services/model-catalog-service.js'
-import { assertModelBaseUrl, ModelUrlPolicyError } from '../services/model-url-policy.js'
+import { assertModelBaseUrl, modelBaseUrlIdentity, ModelUrlPolicyError } from '../services/model-url-policy.js'
 import { ServiceError } from '../services/service-error.js'
 import type { ModelProviderCatalogService } from '../services/model-provider-catalog.js'
 import type { ModelProviderBalanceService } from '../services/model-provider-balance.js'
@@ -96,6 +96,7 @@ export function registerModelHubRoutes(router: Router, dependencies: ModelHubRou
     const workspaceId = params[0]!
     const body = await readJson(request)
     const id = body.id === undefined ? randomUUID() : requiredString(body, 'id')
+    const existingProvider = store.getModelProvider(id)
     const providerKind = requiredEnum(body, 'providerKind', PROVIDER_KINDS) as ModelProviderKind
     const api = requiredEnum(body, 'api', API_KINDS) as ModelApiKind
     const name = requiredString(body, 'name')
@@ -106,7 +107,19 @@ export function registerModelHubRoutes(router: Router, dependencies: ModelHubRou
       if (error instanceof ModelUrlPolicyError) throw new HttpError(422, error.code, error.message)
       throw error
     }
-    const catalogRef = body.catalogRef === undefined ? undefined : requiredString(body, 'catalogRef')
+    const catalogRef = body.catalogRef === null
+      ? null
+      : body.catalogRef === undefined
+        ? existingProvider?.catalogRef
+        : requiredString(body, 'catalogRef')
+    if (catalogRef !== undefined && catalogRef !== null) {
+      const entry = await providerCatalogEntry(providerCatalog, catalogRef)
+      const submittedIdentity = modelBaseUrlIdentity(baseUrl)
+      const catalogIdentity = modelBaseUrlIdentity(entry.baseUrl)
+      if (submittedIdentity === undefined || submittedIdentity !== catalogIdentity || api !== entry.api || providerKind !== entry.providerKind) {
+        throw new HttpError(422, 'catalog_provider_mismatch', '内置服务商的地址、协议或接口类型与目录不一致；自定义地址请取消目录绑定。')
+      }
+    }
     const apiKey = body.apiKey === undefined ? undefined : requiredString(body, 'apiKey')
     const credentialEnvName = body.credentialEnvName === undefined ? undefined : nullableString(body.credentialEnvName)
     if (apiKey !== undefined && credentialEnvName !== undefined) {
@@ -333,6 +346,7 @@ export function registerModelHubRoutes(router: Router, dependencies: ModelHubRou
     if (entry?.balance === undefined) {
       throw new HttpError(422, 'balance_unsupported', '该服务商暂不支持余额查询。')
     }
+    assertProviderMatchesCatalog(provider, entry)
     const result = await balance.fetchBalance(provider, entry.balance, requireProviderKey(provider))
     writeJson(response, 200, result)
   })
@@ -370,4 +384,26 @@ function requireProvider(store: SqliteStore, workspaceId: string, providerId: st
     throw new HttpError(404, 'model_provider_not_found', '服务商不存在。')
   }
   return provider
+}
+
+async function providerCatalogEntry(
+  catalog: ModelProviderCatalogService,
+  catalogRef: string,
+): Promise<ModelProviderCatalogEntry> {
+  const entry = (await catalog.state()).catalog.providers.find((candidate) => candidate.id === catalogRef)
+  if (entry === undefined) throw new HttpError(422, 'catalog_provider_unknown', '内置服务商不在当前目录中。')
+  return entry
+}
+
+function assertProviderMatchesCatalog(
+  provider: { baseUrl: string; api: ModelApiKind; providerKind: ModelProviderKind },
+  entry: ModelProviderCatalogEntry,
+): void {
+  if (
+    modelBaseUrlIdentity(provider.baseUrl) !== modelBaseUrlIdentity(entry.baseUrl)
+    || provider.api !== entry.api
+    || provider.providerKind !== entry.providerKind
+  ) {
+    throw new HttpError(409, 'catalog_provider_mismatch', '服务商连接已偏离目录定义，已停止使用目录专属能力。')
+  }
 }

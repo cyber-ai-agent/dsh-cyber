@@ -2001,8 +2001,10 @@ const MIGRATIONS: readonly Migration[] = [
         ON model_profiles(workspace_id, provider_id, model_id) WHERE provider_id IS NOT NULL;
 
       -- Backfill: group the profiles that already exist by connection shape so
-      -- the hub opens onto real providers instead of an empty list. The name is
-      -- the group's display name; when a group held several, the alphabetically
+      -- the hub opens onto real providers instead of an empty list. Credentials
+      -- are part of the connection shape: two profiles with different secret
+      -- references must not be collapsed into one provider. The name is the
+      -- group's display name; when a group held several, the alphabetically
       -- first — a label, never a behavior.
       INSERT INTO model_providers
         (id, workspace_id, kind, catalog_ref, name, base_url, api, provider_kind, credential_env_name, created_at, updated_at)
@@ -2023,7 +2025,7 @@ const MIGRATIONS: readonly Migration[] = [
                display_name, credential_env_name, created_at, updated_at
         FROM model_profiles
       ) g
-      GROUP BY g.workspace_id, g.base_url, g.api, g.provider_kind;
+      GROUP BY g.workspace_id, g.base_url, g.api, g.provider_kind, g.credential_env_name;
 
       UPDATE model_profiles
       SET provider_id = (
@@ -2032,10 +2034,25 @@ const MIGRATIONS: readonly Migration[] = [
           AND mp.base_url = model_profiles.base_url
           AND mp.api = model_profiles.api
           AND mp.provider_kind = model_profiles.provider_kind
+          AND mp.credential_env_name IS model_profiles.credential_env_name
         ORDER BY mp.name, mp.id
         LIMIT 1
       )
-      WHERE provider_id IS NULL;
+      WHERE provider_id IS NULL
+        -- Legacy storage allowed duplicate rows for one model. Link only the
+        -- deterministic first row; leave the other manual rows unassigned so
+        -- the new provider+model uniqueness index cannot make migration fail
+        -- or silently discard user data.
+        AND model_profiles.id = (
+          SELECT MIN(duplicate.id)
+          FROM model_profiles duplicate
+          WHERE duplicate.workspace_id = model_profiles.workspace_id
+            AND duplicate.base_url = model_profiles.base_url
+            AND duplicate.api = model_profiles.api
+            AND duplicate.provider_kind = model_profiles.provider_kind
+            AND duplicate.model_id = model_profiles.model_id
+            AND duplicate.credential_env_name IS model_profiles.credential_env_name
+        );
     `,
   },
 ]

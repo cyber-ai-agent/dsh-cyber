@@ -55,6 +55,22 @@ describe('image generation service', () => {
     await expect(evil.generate({ baseUrl: 'https://gw.example.com/v1', model: 'm', prompt: 'p' })).rejects.toMatchObject({ code: 'image_url_insecure' })
   })
 
+  it('does not follow redirects on authenticated image requests', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
+      expect((init as RequestInit).redirect).toBe('error')
+      return String(url).endsWith('/images/generations')
+        ? jsonResponse({ data: [{ b64_json: PNG.toString('base64') }] })
+        : new Response(PNG, { headers: { 'content-type': 'image/png' } })
+    })
+    await expect(new ImageGenerationService({ fetch: fetchMock as never }).generate({
+      baseUrl: 'https://gw.example.com/v1',
+      apiKey: 'sk-x',
+      model: 'm',
+      prompt: 'p',
+    })).resolves.toMatchObject({ mimeType: 'image/png' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('maps status codes to distinct Chinese outcomes and keeps the http status', async () => {
     const service = new ImageGenerationService({ fetch: vi.fn<typeof fetch>(async () => jsonResponse({ error: 'slow down' }, 429)) as never })
     await expect(service.generate({ baseUrl: 'https://gw.example.com/v1', model: 'm', prompt: 'p' }))

@@ -90,6 +90,13 @@ describe('model hub routes', () => {
     expect(qwen).toMatchObject({ origin: 'imported', providerId, displayName: '本地 Qwen' })
     expect(qwen.settings.contextWindow).toBe(32_768)
 
+    // A local tuning must survive a later catalog import; only discovered
+    // metadata (the context window here) is allowed to change.
+    server.store.saveModelProfile({
+      ...server.store.getModelProfile(qwen.id),
+      settings: { ...qwen.settings, contextWindow: 32_768, maxTokens: 2_048, webSearchEnabled: false },
+    })
+
     // Re-import updates in place — no duplicate rows.
     const again = await call(origin, 'POST', `/api/workspaces/${workspace.id}/model-providers/${providerId}/import`, {
       models: [{ id: 'qwen-9b', displayName: '改名 Qwen', contextLength: 16_384 }],
@@ -98,7 +105,7 @@ describe('model hub routes', () => {
     expect(again.body.updated).toBe(1)
     const profiles = server.store.listProviderProfiles(providerId)
     expect(profiles.filter((profile) => profile.modelId === 'qwen-9b')).toHaveLength(1)
-    expect(profiles.find((profile) => profile.modelId === 'qwen-9b')?.settings.contextWindow).toBe(16_384)
+    expect(profiles.find((profile) => profile.modelId === 'qwen-9b')?.settings).toMatchObject({ contextWindow: 16_384, maxTokens: 2_048, webSearchEnabled: false })
 
     // Assigning a pool model blocks provider deletion.
     await call(origin, 'PUT', `/api/workspaces/${workspace.id}/model-assignments/world/${world.id}`, { modelProfileId: qwen.id })
@@ -107,9 +114,35 @@ describe('model hub routes', () => {
     expect(blocked.body.error.message).toContain('分配')
 
     await call(origin, 'DELETE', `/api/workspaces/${workspace.id}/model-assignments/world/${world.id}`)
+    const fallback = server.store.saveModelProfile({
+      workspaceId: workspace.id,
+      displayName: '备用模型',
+      providerKind: 'deepseek',
+      baseUrl: 'https://api.deepseek.com/v1',
+      modelId: 'deepseek-chat',
+      api: 'openai-completions',
+      settings: {},
+    })
+    const defaultProfile = server.store.getModelProfile(qwen.id)!
+    server.store.saveModelProfile({ ...defaultProfile, isDefault: true })
     const removed = await call(origin, 'DELETE', `/api/workspaces/${workspace.id}/model-providers/${providerId}`)
     expect(removed.status).toBe(200)
     expect(server.store.listProviderProfiles(providerId)).toEqual([])
+    expect(server.store.getModelProfile(fallback.id)?.isDefault).toBe(true)
+  })
+
+  it('rejects a catalog identity that points at a different endpoint', async () => {
+    const server = await startServer()
+    const workspace = server.store.listWorkspaces()[0]!
+    const response = await call(server.origin, 'POST', `/api/workspaces/${workspace.id}/model-providers`, {
+      name: '伪装 DeepSeek',
+      catalogRef: 'deepseek',
+      baseUrl: 'https://attacker.example/v1',
+      api: 'openai-completions',
+      providerKind: 'deepseek',
+    })
+    expect(response.status).toBe(422)
+    expect(response.body.error.code).toBe('catalog_provider_mismatch')
   })
 
   it('rejects remote HTTP endpoints for remote provider kinds', async () => {

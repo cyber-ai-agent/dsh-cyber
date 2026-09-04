@@ -81,7 +81,7 @@ export class ModelProviderCatalogService {
         return this.#state(now)
       }
       if (outcome === 'error') notice = '无法获取远程服务商目录，已使用本地缓存。'
-      // outcome === 'unchanged': fall through to the cache with a fresh clock.
+      if (outcome === 'unchanged' && this.#cached !== undefined) return this.#state(now)
     }
     try {
       const cached = await this.#readCache()
@@ -123,7 +123,9 @@ export class ModelProviderCatalogService {
         // Malformed documents never replace the last good copy — strict parse
         // first, and a parse throw lands in the 'error' branch below.
         const parsed = parseModelProviderCatalog(JSON.parse(text) as unknown)
-        if (this.#cached !== undefined && this.#cached.catalog.version === parsed.version) return 'unchanged'
+        if (this.#cached !== undefined
+          && this.#cached.catalog.version === parsed.version
+          && catalogContentHash(this.#cached.catalog) === catalogContentHash(parsed)) return 'unchanged'
         return parsed
       } finally {
         clearTimeout(timer)
