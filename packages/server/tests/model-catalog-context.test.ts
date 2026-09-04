@@ -37,6 +37,21 @@ describe('ModelCatalogService context window discovery', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('reads declared input modalities and reasoning capability without guessing', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => json({ data: [
+      { id: 'or-model', architecture: { input_modalities: ['text', 'image', 'unknown'] }, supported_parameters: ['tools', 'reasoning'], context_length: 200_000 },
+      { id: 'plain-model', display_name: '显示名', modality: 'text+image->text' },
+      { id: 'quiet-model' },
+    ] }))
+    const models = await discover(service(fetchMock as never), { baseUrl: 'https://openrouter.ai/api/v1', api: 'openai-completions', providerKind: 'openai-compatible-remote' })
+    expect(models.find((m) => m.id === 'or-model')).toMatchObject({ inputTypes: ['image', 'text'], reasoning: true, contextLength: 200_000 })
+    expect(models.find((m) => m.id === 'plain-model')).toMatchObject({ displayName: '显示名', inputTypes: ['image', 'text'] })
+    const quiet = models.find((m) => m.id === 'quiet-model')
+    expect(quiet).toBeDefined()
+    expect(quiet).not.toHaveProperty('inputTypes')
+    expect(quiet).not.toHaveProperty('reasoning')
+  })
+
   it('probes llama.cpp /props for a local endpoint whose catalog omits context', async () => {
     const fetchMock = vi.fn<typeof fetch>(async (url) => {
       if (String(url).endsWith('/v1/models')) return json({ data: [{ id: 'qwen' }] })

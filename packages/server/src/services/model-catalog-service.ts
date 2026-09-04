@@ -22,7 +22,21 @@ export interface ModelCatalogDiscoveryInput {
   profileId?: string
 }
 
-export interface DiscoveredModel { id: string; displayName?: string; contextLength?: number }
+/**
+ * What `/models` reports about a model. Besides the id: the context window
+ * (#152) and, where the endpoint declares them, the input modalities and the
+ * reasoning capability — the model pool shows exactly these and never guesses:
+ * a gateway that reports nothing renders '—' rather than an invented badge.
+ */
+export interface DiscoveredModel {
+  id: string
+  displayName?: string
+  contextLength?: number
+  inputTypes?: string[]
+  reasoning?: boolean
+}
+
+const INPUT_MODALITIES = new Set(['text', 'image', 'video', 'audio'])
 export interface ModelCatalogServiceOptions {
   fetch?: typeof fetch
   timeoutMs?: number
@@ -203,11 +217,16 @@ function parseModels(value: unknown): DiscoveredModel[] {
       ?? positiveNumber(candidate.max_model_len)
       ?? positiveNumber(candidate.effective_context_length)
       ?? (isRecord(candidate.metadata) ? positiveNumber(candidate.metadata.context_length) : undefined)
+      ?? (isRecord(candidate.architecture) ? positiveNumber(candidate.architecture.context_length) : undefined)
+    const inputTypes = extractInputTypes(candidate)
+    const reasoning = extractReasoning(candidate)
     const existing = discovered.get(id)
     discovered.set(id, {
       id,
       ...(displayName ? { displayName } : existing?.displayName ? { displayName: existing.displayName } : {}),
       ...(contextLength !== undefined ? { contextLength } : existing?.contextLength ? { contextLength: existing.contextLength } : {}),
+      ...(inputTypes !== undefined ? { inputTypes } : existing?.inputTypes ? { inputTypes: existing.inputTypes } : {}),
+      ...(reasoning !== undefined ? { reasoning } : existing?.reasoning !== undefined ? { reasoning: existing.reasoning } : {}),
     })
   }
   return [...discovered.values()].sort((left, right) => left.id.localeCompare(right.id))
@@ -219,6 +238,45 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function positiveNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined
+}
+
+// OpenAI-compatible catalogues report input modalities inconsistently:
+// OpenRouter nests them under `architecture.input_modalities`, other gateways
+// flatten them to `input_modalities` or a single `modality` string like
+// "text+image->text". Keep only the four types the product renders and drop the
+// output half. Nothing matched yields undefined, so the pool shows '—' rather
+// than guessing text.
+function extractInputTypes(candidate: Record<string, unknown>): string[] | undefined {
+  const raw = Array.isArray(candidate.input_modalities)
+    ? candidate.input_modalities
+    : isRecord(candidate.architecture) && Array.isArray(candidate.architecture.input_modalities)
+    ? candidate.architecture.input_modalities
+    : typeof candidate.modality === 'string'
+    ? (candidate.modality.split('->')[0] ?? '').split('+')
+    : []
+  const types = new Set<string>()
+  for (const value of raw) {
+    if (typeof value !== 'string') continue
+    const normalized = value.trim().toLowerCase()
+    if (INPUT_MODALITIES.has(normalized)) types.add(normalized)
+  }
+  return types.size > 0 ? [...types].sort() : undefined
+}
+
+// Reasoning is only claimed when the endpoint says so — a supported parameter
+// named reasoning/thinking, or an explicit boolean — never inferred from the
+// model name.
+function extractReasoning(candidate: Record<string, unknown>): boolean | undefined {
+  if (typeof candidate.reasoning === 'boolean') return candidate.reasoning
+  if (isRecord(candidate.capabilities) && typeof candidate.capabilities.reasoning === 'boolean') return candidate.capabilities.reasoning
+  const supported = Array.isArray(candidate.supported_parameters)
+    ? candidate.supported_parameters
+    : isRecord(candidate.architecture) && Array.isArray(candidate.architecture.supported_parameters)
+    ? candidate.architecture.supported_parameters
+    : []
+  if (supported.some((value) => value === 'reasoning' || value === 'thinking')) return true
+  if (supported.length > 0) return false
+  return undefined
 }
 
 async function readProbeJson(fetchImpl: typeof fetch, url: string, headers: Record<string, string>): Promise<unknown | undefined> {

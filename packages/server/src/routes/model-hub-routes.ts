@@ -7,7 +7,7 @@ import type { Router } from '../http/router.js'
 import { HttpError } from '../http/errors.js'
 import { nullableString, readJson, requiredEnum, requiredString } from '../http/request.js'
 import { writeJson } from '../http/response.js'
-import { isManagedModelCredentialName, type ModelCredentialService } from '../services/model-credential-service.js'
+import { type ModelCredentialService } from '../services/model-credential-service.js'
 import type { ModelCatalogService } from '../services/model-catalog-service.js'
 import { assertModelBaseUrl, ModelUrlPolicyError } from '../services/model-url-policy.js'
 import { ServiceError } from '../services/service-error.js'
@@ -52,11 +52,13 @@ export function registerModelHubRoutes(router: Router, dependencies: ModelHubRou
       return {
         ...provider,
         modelCount: profiles.length,
-        credentialConfigured: isManagedModelCredentialName(provider.credentialEnvName)
-          ? credentials.has(provider.id)
-          : provider.credentialEnvName === undefined
-          ? provider.providerKind === 'openai-compatible-local'
-          : Boolean(process.env[provider.credentialEnvName]),
+        // A credential counts as configured when it is reachable right now:
+        // the vault re-activates every stored entry's env var at start
+        // (profile-keyed before the hub existed, provider-keyed after), and
+        // owners may point at their own environment variable instead.
+        credentialConfigured: provider.credentialEnvName !== undefined
+          ? Boolean(process.env[provider.credentialEnvName]) || credentials.has(provider.id)
+          : credentials.has(provider.id) || provider.providerKind === 'openai-compatible-local',
         assignedCount: profiles.filter((profile) => store.listModelAssignments(workspaceId)
           .some((assignment) => assignment.modelProfileId === profile.id)).length,
         balanceSupported: balance.supports(entry?.balance),
@@ -152,9 +154,19 @@ export function registerModelHubRoutes(router: Router, dependencies: ModelHubRou
       if (!modelId) continue
       const displayName = typeof value.displayName === 'string' && value.displayName.trim() ? value.displayName.trim() : modelId
       const contextLength = typeof value.contextLength === 'number' && Number.isInteger(value.contextLength) && value.contextLength >= 1_024 ? value.contextLength : undefined
+      const inputTypes = Array.isArray(value.inputTypes)
+        ? value.inputTypes.filter((item): item is string => item === 'text' || item === 'image' || item === 'video' || item === 'audio').slice(0, 4)
+        : undefined
+      const reasoning = typeof value.reasoning === 'boolean' ? value.reasoning : undefined
       const settings: JsonObject = {}
       if (contextLength !== undefined) settings.contextWindow = contextLength
+      if (inputTypes !== undefined && inputTypes.length > 0) settings.inputTypes = inputTypes
+      if (reasoning !== undefined) settings.reasoning = reasoning
       const prior = existing.find((profile) => profile.modelId === modelId)
+      // The connection owns the key; a profile re-imported before the provider
+      // captured one (migration backfilled the profile's own reference) must
+      // keep working, so the prior reference is the fallback.
+      const credentialEnvName = provider.credentialEnvName ?? prior?.credentialEnvName
       store.saveModelProfile({
         ...(prior === undefined ? {} : { id: prior.id }),
         workspaceId: provider.workspaceId,
@@ -165,7 +177,7 @@ export function registerModelHubRoutes(router: Router, dependencies: ModelHubRou
         baseUrl: provider.baseUrl,
         modelId,
         api: provider.api,
-        ...(provider.credentialEnvName === undefined ? {} : { credentialEnvName: provider.credentialEnvName }),
+        ...(credentialEnvName === undefined ? {} : { credentialEnvName }),
         settings,
       })
       if (prior === undefined) created += 1
