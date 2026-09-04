@@ -163,6 +163,29 @@ export async function removeProfile(workspaceId: string, profileId: string): Pro
 
 export type HubAssignmentScope = 'workspace' | 'world' | 'employee'
 
+/** The three fields the assignment rail needs from a world's roster. */
+export interface HubStaff {
+  id: string
+  displayName: string
+  worldId: string
+  status: string
+}
+
+/**
+ * Characters of one world. The workspace snapshot does not carry employees,
+ * and the shell only holds the *active* world's roster - so the assignment
+ * tab fetches a world's own snapshot when its scope is selected.
+ */
+export async function listWorldEmployees(worldId: string): Promise<HubStaff[]> {
+  const snapshot = await api<{ employees?: Array<{ id: string; displayName: string; worldId: string; status?: string; archivedAt?: string }> }>(`/api/worlds/${enc(worldId)}/snapshot`)
+  return (snapshot.employees ?? []).map((employee) => ({
+    id: employee.id,
+    displayName: employee.displayName,
+    worldId: employee.worldId,
+    status: employee.archivedAt !== undefined ? 'archived' : employee.status ?? 'available',
+  }))
+}
+
 export async function setAssignment(workspaceId: string, scope: HubAssignmentScope, scopeId: string, modelProfileId: string): Promise<void> {
   await api<unknown>(`/api/workspaces/${enc(workspaceId)}/model-assignments/${scope}/${enc(scopeId)}`, {
     method: 'PUT',

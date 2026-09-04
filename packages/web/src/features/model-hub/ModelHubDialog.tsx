@@ -13,6 +13,7 @@ import {
   importModels,
   listProfiles,
   listProviders,
+  listWorldEmployees,
   loadCatalog,
   refreshCatalog,
   removeProfile,
@@ -25,6 +26,7 @@ import {
   type HubCatalogState,
   type HubProfile,
   type HubProvider,
+  type HubStaff,
   type ModelAssignmentRef,
   type SyncOutcome,
 } from './api.js'
@@ -109,6 +111,7 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
   const [assignScope, setAssignScope] = useState<'global' | string>('global')
   const [assignTarget, setAssignTarget] = useState<AssignmentRow>()
   const [assignProvider, setAssignProvider] = useState<string>()
+  const [worldStaff, setWorldStaff] = useState<Record<string, HubStaff[]>>({})
   const [wizard, setWizard] = useState<WizardState>()
   const [modelQuery, setModelQuery] = useState('')
   const panelRef = useRef<HTMLElement>(null)
@@ -317,11 +320,28 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
     return providers.find((provider) => provider.id === key)?.name ?? key
   }
 
-  // ---------- 模型设置 (assignment) tab data ----------
+  // The assignment tab needs the roster of whichever world is in scope, and
+  // the shell only carries the active world's - pull the world's own snapshot
+  // once per selected world and keep it cached for the dialog's lifetime.
+  useEffect(() => {
+    if (tab !== 'assign' || assignScope === 'global' || worldStaff[assignScope] !== undefined) return
+    let cancelled = false
+    void listWorldEmployees(assignScope)
+      .then((staff) => { if (!cancelled) setWorldStaff((current) => ({ ...current, [assignScope]: staff })) })
+      .catch(() => { if (!cancelled) setWorldStaff((current) => ({ ...current, [assignScope]: [] })) })
+    return () => { cancelled = true }
+  }, [tab, assignScope, worldStaff])
+
   const globalLabel = t('modelHub.scopeGlobal', '全局')
+  const staffPool = useMemo(() => {
+    const merged = new Map<string, HubStaff>()
+    for (const employee of employees) merged.set(employee.id, { id: employee.id, displayName: employee.displayName, worldId: employee.worldId, status: employee.status })
+    for (const staff of Object.values(worldStaff)) for (const employee of staff) merged.set(employee.id, employee)
+    return [...merged.values()]
+  }, [employees, worldStaff])
   const targetRows = useMemo(
-    () => assignmentRows(assignScope, workspaceId, worlds, employees, { global: globalLabel, thisWorld: t('modelHub.assignThisWorld', '本世界') }),
-    [assignScope, workspaceId, worlds, employees, globalLabel, t],
+    () => assignmentRows(assignScope, workspaceId, worlds, staffPool, { global: globalLabel, thisWorld: t('modelHub.assignThisWorld', '本世界') }),
+    [assignScope, workspaceId, worlds, staffPool, globalLabel, t],
   )
   const activeTarget = targetRows.find((row) => assignTarget !== undefined && row.kind === assignTarget.kind && row.id === assignTarget.id) ?? targetRows[0]
   const profileById = useMemo(() => new Map(profiles.map((profile) => [profile.id, profile])), [profiles])
