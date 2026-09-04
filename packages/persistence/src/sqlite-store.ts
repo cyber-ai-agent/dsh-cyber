@@ -57,6 +57,10 @@ import {
   type ModelInteractionLogSource,
   type ModelInteractionLogStatus,
   type ModelProfile,
+  type ModelCapabilities,
+  type ModelProfileOrigin,
+  type ModelProviderConnection,
+  type ModelProviderConnectionKind,
   type ModelProviderKind,
   type OwnerRuntimeAccessGrant,
   type CyberPackageManifest,
@@ -289,6 +293,21 @@ export interface SaveModelProfileInput {
   credentialEnvName?: string | null
   isDefault?: boolean
   settings?: JsonObject
+  providerId?: string
+  origin?: ModelProfileOrigin
+  actorId?: string
+}
+
+export interface SaveModelProviderInput {
+  id?: string
+  workspaceId: string
+  kind: ModelProviderConnectionKind
+  catalogRef?: string | null
+  name: string
+  baseUrl: string
+  api: ModelApiKind
+  providerKind: ModelProviderKind
+  credentialEnvName?: string | null
   actorId?: string
 }
 
@@ -659,6 +678,7 @@ const KNOWN_TABLES = [
   'employee_daily_journals',
   'employee_relationships',
   'workspace_preferences',
+  'model_providers',
   'model_profiles',
   'model_assignments',
   'local_assets',
@@ -961,6 +981,13 @@ export class SqliteStore {
     if (credentialEnvName !== undefined && !/^[A-Z_][A-Z0-9_]*$/.test(credentialEnvName)) {
       throw new PersistenceError('Credential environment variable name is invalid')
     }
+    const providerId = input.providerId?.trim() || existing?.providerId
+    if (providerId !== undefined) {
+      const provider = this.getModelProvider(providerId)
+      if (provider === undefined || provider.workspaceId !== input.workspaceId) {
+        throw new PersistenceError('Model profile provider must exist in the same workspace')
+      }
+    }
     const now = this.#clock()
     const profile: ModelProfile = {
       id,
@@ -972,10 +999,14 @@ export class SqliteStore {
       api: input.api,
       isDefault: input.isDefault ?? existing?.isDefault ?? false,
       settings: input.settings ?? existing?.settings ?? {},
+      origin: input.origin ?? existing?.origin ?? 'manual',
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     }
     if (credentialEnvName !== undefined) profile.credentialEnvName = credentialEnvName
+    if (providerId !== undefined) profile.providerId = providerId
+    if (existing?.capabilities !== undefined) profile.capabilities = existing.capabilities
+    if (existing?.probedAt !== undefined) profile.probedAt = existing.probedAt
     assertSecretFree(profile.settings)
 
     return this.#transaction(() => {
@@ -988,8 +1019,8 @@ export class SqliteStore {
         .prepare(
           `INSERT INTO model_profiles
            (id, workspace_id, display_name, provider_kind, base_url, model_id, api,
-            credential_env_name, is_default, settings_json, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            credential_env_name, is_default, settings_json, provider_id, origin, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (id) DO UPDATE SET
              display_name = excluded.display_name,
              provider_kind = excluded.provider_kind,
@@ -999,6 +1030,8 @@ export class SqliteStore {
              credential_env_name = excluded.credential_env_name,
              is_default = excluded.is_default,
              settings_json = excluded.settings_json,
+             provider_id = excluded.provider_id,
+             origin = excluded.origin,
              updated_at = excluded.updated_at`,
         )
         .run(
@@ -1012,6 +1045,8 @@ export class SqliteStore {
           profile.credentialEnvName ?? null,
           profile.isDefault ? 1 : 0,
           stringifyJson(profile.settings),
+          profile.providerId ?? null,
+          profile.origin ?? 'manual',
           profile.createdAt,
           profile.updatedAt,
         )
@@ -1046,6 +1081,201 @@ export class SqliteStore {
       )
       .all(workspaceId)
       .map(mapModelProfile)
+  }
+
+  saveModelProvider(input: SaveModelProviderInput): ModelProviderConnection {
+    this.#assertWritable()
+    this.#requireWorkspace(input.workspaceId)
+    const id = input.id?.trim() || this.#idFactory()
+    const existing = this.getModelProvider(id)
+    if (existing !== undefined && existing.workspaceId !== input.workspaceId) {
+      throw new PersistenceError('Model provider cannot move between workspaces')
+    }
+    const name = input.name.trim()
+    if (!name) throw new PersistenceError('Model provider name cannot be empty')
+    const baseUrl = normalizeModelBaseUrl(input.baseUrl, input.providerKind)
+    const credentialEnvName = input.credentialEnvName === null ? undefined : input.credentialEnvName?.trim() || undefined
+    if (credentialEnvName !== undefined && !/^[A-Z_][A-Z0-9_]*$/.test(credentialEnvName)) {
+      throw new PersistenceError('Credential environment variable name is invalid')
+    }
+    const now = this.#clock()
+    const provider: ModelProviderConnection = {
+      id,
+      workspaceId: input.workspaceId,
+      kind: input.kind,
+      name,
+      baseUrl,
+      api: input.api,
+      providerKind: input.providerKind,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    }
+    if (input.catalogRef === null) {
+      // Explicit null clears a built-in catalog identity when a connection is
+      // converted to a custom endpoint. Undefined keeps the existing value on
+      // partial edits, matching the other optional provider fields.
+    } else if (input.catalogRef !== undefined) {
+      const catalogRef = input.catalogRef.trim()
+      if (catalogRef) provider.catalogRef = catalogRef
+    } else if (existing?.catalogRef !== undefined) provider.catalogRef = existing.catalogRef
+    // A value replaces the reference, null clears it, undefined keeps it.
+    if (input.credentialEnvName === null) {
+      // cleared
+    } else if (credentialEnvName !== undefined) {
+      provider.credentialEnvName = credentialEnvName
+    } else if (existing?.credentialEnvName !== undefined) {
+      provider.credentialEnvName = existing.credentialEnvName
+    }
+
+    return this.#transaction(() => {
+      this.database
+        .prepare(
+          `INSERT INTO model_providers
+           (id, workspace_id, kind, catalog_ref, name, base_url, api, provider_kind,
+            credential_env_name, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (id) DO UPDATE SET
+             kind = excluded.kind,
+             catalog_ref = excluded.catalog_ref,
+             name = excluded.name,
+             base_url = excluded.base_url,
+             api = excluded.api,
+             provider_kind = excluded.provider_kind,
+             credential_env_name = excluded.credential_env_name,
+             updated_at = excluded.updated_at`,
+        )
+        .run(
+          provider.id,
+          provider.workspaceId,
+          provider.kind,
+          provider.catalogRef ?? null,
+          provider.name,
+          provider.baseUrl,
+          provider.api,
+          provider.providerKind,
+          provider.credentialEnvName ?? null,
+          provider.createdAt,
+          provider.updatedAt,
+        )
+      // The connection owns the endpoint the profiles hang under; editing it
+      // must reach every model imported from it, or the hub would lie about
+      // what it manages. Credentials live per profile reference and stay.
+      if (existing !== undefined) {
+        this.database
+          .prepare(
+            `UPDATE model_profiles
+             SET base_url = ?, api = ?, provider_kind = ?, credential_env_name = COALESCE(?, credential_env_name), updated_at = ?
+             WHERE provider_id = ?`,
+          )
+          .run(provider.baseUrl, provider.api, provider.providerKind, provider.credentialEnvName ?? null, now, provider.id)
+      }
+      this.#appendEvent({
+        workspaceId: provider.workspaceId,
+        type: 'model.provider.updated',
+        actorId: input.actorId ?? 'owner',
+        actorKind: 'owner',
+        payload: {
+          modelProviderId: provider.id,
+          name: provider.name,
+          kind: provider.kind,
+          hasCredentialReference: provider.credentialEnvName !== undefined,
+        },
+      })
+      return provider
+    })
+  }
+
+  getModelProvider(providerId: string): ModelProviderConnection | undefined {
+    const row = this.database.prepare('SELECT * FROM model_providers WHERE id = ?').get(providerId)
+    return row ? mapModelProvider(row) : undefined
+  }
+
+  listModelProviders(workspaceId: string): ModelProviderConnection[] {
+    return this.database
+      .prepare('SELECT * FROM model_providers WHERE workspace_id = ? ORDER BY name, id')
+      .all(workspaceId)
+      .map(mapModelProvider)
+  }
+
+  /** Profiles currently hanging under a provider (pool rows for the UI). */
+  listProviderProfiles(providerId: string): ModelProfile[] {
+    return this.database
+      .prepare('SELECT * FROM model_profiles WHERE provider_id = ? ORDER BY display_name, id')
+      .all(providerId)
+      .map(mapModelProfile)
+  }
+
+  /**
+   * Delete a provider together with the pool rows it owns. Assigned profiles
+   * block the whole operation — the caller must clear references first, so a
+   * running world never loses the model behind an employee's back.
+   */
+  deleteModelProvider(
+    workspaceId: string,
+    providerId: string,
+    actorId = 'owner',
+  ): { status: 'deleted' } | { status: 'not-found' } | { status: 'blocked'; assignedScopeIds: string[] } {
+    this.#assertWritable()
+    this.#requireWorkspace(workspaceId)
+    const provider = this.getModelProvider(providerId)
+    if (provider === undefined || provider.workspaceId !== workspaceId) return { status: 'not-found' }
+    const assignedScopeIds = this.database
+      .prepare(
+        `SELECT a.scope, a.scope_id FROM model_assignments a
+         JOIN model_profiles p ON p.id = a.model_profile_id
+         WHERE p.provider_id = ?`,
+      )
+      .all(providerId)
+      .map((row) => {
+        const value = row as { scope: string; scope_id: string }
+        return `${value.scope}:${value.scope_id}`
+      })
+    if (assignedScopeIds.length > 0) return { status: 'blocked', assignedScopeIds }
+    return this.#transaction(() => {
+      const removedDefault = this.database
+        .prepare('SELECT 1 AS present FROM model_profiles WHERE provider_id = ? AND is_default = 1 LIMIT 1')
+        .get(providerId) !== undefined
+      this.database.prepare('DELETE FROM model_profiles WHERE provider_id = ?').run(providerId)
+      let fallbackProfileId: string | undefined
+      if (removedDefault) {
+        const fallback = this.database
+          .prepare('SELECT id FROM model_profiles WHERE workspace_id = ? ORDER BY display_name, id LIMIT 1')
+          .get(workspaceId) as { id?: unknown } | undefined
+        if (typeof fallback?.id === 'string') {
+          fallbackProfileId = fallback.id
+          this.database
+            .prepare('UPDATE model_profiles SET is_default = 1, updated_at = ? WHERE id = ? AND workspace_id = ?')
+            .run(this.#clock(), fallbackProfileId, workspaceId)
+        }
+      }
+      this.database.prepare('DELETE FROM model_providers WHERE id = ? AND workspace_id = ?').run(providerId, workspaceId)
+      this.#appendEvent({
+        workspaceId,
+        type: 'model.provider.updated',
+        actorId,
+        actorKind: 'owner',
+        payload: {
+          modelProviderId: providerId,
+          deleted: true,
+          ...(fallbackProfileId === undefined ? {} : { fallbackProfileId }),
+        },
+      })
+      return { status: 'deleted' as const }
+    })
+  }
+
+  /** Persist a capability probe outcome. Never touches request/response bodies. */
+  setModelProfileCapabilities(profileId: string, capabilities: ModelCapabilities): ModelProfile | undefined {
+    this.#assertWritable()
+    const profile = this.getModelProfile(profileId)
+    if (profile === undefined) return undefined
+    const now = this.#clock()
+    this.#transaction(() => {
+      this.database
+        .prepare('UPDATE model_profiles SET capabilities_json = ?, probed_at = ?, updated_at = ? WHERE id = ?')
+        .run(JSON.stringify(capabilities), now, now, profileId)
+    })
+    return this.getModelProfile(profileId)
   }
 
   deleteModelProfile(workspaceId: string, profileId: string, actorId = 'owner'): boolean {
@@ -6808,7 +7038,40 @@ function mapModelProfile(row: object): ModelProfile {
   if (typeof value.credential_env_name === 'string') {
     profile.credentialEnvName = value.credential_env_name
   }
+  if (typeof value.provider_id === 'string') profile.providerId = value.provider_id
+  if (value.origin === 'imported') profile.origin = 'imported'
+  if (typeof value.capabilities_json === 'string' && value.capabilities_json) {
+    try {
+      const parsed = JSON.parse(value.capabilities_json) as ModelCapabilities
+      if (VALID_CAPABILITY_VERDICTS.has(parsed.tools) && VALID_CAPABILITY_VERDICTS.has(parsed.json)) {
+        profile.capabilities = parsed
+        if (typeof value.probed_at === 'string') profile.probedAt = value.probed_at
+      }
+    } catch {
+      // A malformed probe record says nothing; treat it as never probed.
+    }
+  }
   return profile
+}
+
+const VALID_CAPABILITY_VERDICTS = new Set<string>(['supported', 'unsupported', 'unclear', 'error'])
+
+function mapModelProvider(row: object): ModelProviderConnection {
+  const value = row as Record<string, unknown>
+  const provider: ModelProviderConnection = {
+    id: String(value.id),
+    workspaceId: String(value.workspace_id),
+    kind: value.kind as ModelProviderConnectionKind,
+    name: String(value.name),
+    baseUrl: String(value.base_url),
+    api: value.api as ModelApiKind,
+    providerKind: value.provider_kind as ModelProviderKind,
+    createdAt: String(value.created_at),
+    updatedAt: String(value.updated_at),
+  }
+  if (typeof value.catalog_ref === 'string') provider.catalogRef = value.catalog_ref
+  if (typeof value.credential_env_name === 'string') provider.credentialEnvName = value.credential_env_name
+  return provider
 }
 
 function mapModelAssignment(row: object): ModelAssignment {

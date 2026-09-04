@@ -39,9 +39,14 @@ export function registerModelRoutes(router: Router, dependencies: ModelRoutesDep
 
   router.get(/^\/api\/workspaces\/([^/]+)\/model-profiles$/, ({ response, params }) => {
     const workspaceId = params[0]!
+    // Attach the connection's name so the composer's model picker can group by
+    // the providers the owner actually added, instead of a generic local/remote
+    // kind. Display-only: never stored on the profile row.
+    const providerNames = new Map(store.listModelProviders(workspaceId).map((provider) => [provider.id, provider.name]))
     writeJson(response, 200, {
       items: store.listModelProfiles(workspaceId).map((profile) => ({
         ...profile,
+        ...(profile.providerId === undefined ? {} : { providerName: providerNames.get(profile.providerId) ?? profile.providerName }),
         credentialConfigured: isManagedModelCredentialName(profile.credentialEnvName)
           ? credentials.has(profile.id)
           : profile.credentialEnvName === undefined
@@ -107,6 +112,12 @@ export function registerModelRoutes(router: Router, dependencies: ModelRoutesDep
     let profile
     try {
       validateWebSearchSettings(settings, credentialEnvName)
+      // A materialized discovered model may carry the provider connection it
+      // came from (via the base profile). Validate it belongs to this
+      // workspace; a stale or foreign id is ignored rather than trusted.
+      const requestedProviderId = typeof body.providerId === 'string' ? body.providerId : undefined
+      const providerConnection = requestedProviderId === undefined ? undefined : store.getModelProvider(requestedProviderId)
+      const providerId = providerConnection !== undefined && providerConnection.workspaceId === params[0] ? providerConnection.id : undefined
       profile = store.saveModelProfile({
         id: profileId,
         workspaceId: params[0]!,
@@ -118,6 +129,7 @@ export function registerModelRoutes(router: Router, dependencies: ModelRoutesDep
         ...(credentialEnvName === undefined ? {} : { credentialEnvName }),
         ...(typeof body.isDefault === 'boolean' ? { isDefault: body.isDefault } : {}),
         ...(settings === undefined ? {} : { settings: settings as JsonObject }),
+        ...(providerId === undefined ? {} : { providerId }),
       })
     } catch (error) {
       if (apiKey !== undefined) {

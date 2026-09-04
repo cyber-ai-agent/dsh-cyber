@@ -1,7 +1,7 @@
 import type { WorldCharacterAuthority } from './world-authority.js'
 import type { UiLocale } from './locales.js'
 
-export const CYBER_SCHEMA_VERSION = 39 as const
+export const CYBER_SCHEMA_VERSION = 40 as const
 
 export * from './runtime-access.js'
 export * from './locales.js'
@@ -847,8 +847,94 @@ export interface ModelProfile {
   credentialEnvName?: string
   isDefault: boolean
   settings: JsonObject
+  /** The provider connection this profile hangs under, when it came from the model hub. */
+  providerId?: string
+  /** Display-only projection of the provider connection's name, attached by routes; never stored on the profile row. */
+  providerName?: string
+  /** manual = typed in the form; imported = materialized from a provider's discovered catalog. */
+  origin?: ModelProfileOrigin
+  /** Capability verdicts from an explicit probe; absent means never probed. */
+  capabilities?: ModelCapabilities
+  probedAt?: IsoTimestamp
   createdAt: IsoTimestamp
   updatedAt: IsoTimestamp
+}
+
+export type ModelProfileOrigin = 'manual' | 'imported'
+
+export type ModelProviderConnectionKind = 'builtin' | 'custom' | 'local'
+
+/** One provider = one connection: name, endpoint, transport and a single credential. */
+export interface ModelProviderConnection {
+  id: string
+  workspaceId: string
+  kind: ModelProviderConnectionKind
+  /** The built-in catalog entry id this connection was seeded from. */
+  catalogRef?: string
+  name: string
+  baseUrl: string
+  api: ModelApiKind
+  providerKind: ModelProviderKind
+  credentialEnvName?: string
+  createdAt: IsoTimestamp
+  updatedAt: IsoTimestamp
+}
+
+/**
+ * A capability verdict. 'unclear' means the request was accepted but produced
+ * no positive evidence — never rendered as a failure. 'error' means the probe
+ * itself could not complete (transport/timeout) and says nothing about the
+ * model. Only an explicit rejection of the feature's parameters is 'unsupported'.
+ */
+export type ModelCapabilityVerdict = 'supported' | 'unsupported' | 'unclear' | 'error'
+
+export interface ModelCapabilities {
+  tools: ModelCapabilityVerdict
+  json: ModelCapabilityVerdict
+}
+
+/**
+ * The built-in provider catalog: a data file shipped in the repository and
+ * optionally refreshed from a pinned remote URL. It is untrusted input — the
+ * server parses it strictly and only ever serves validated entries.
+ */
+export interface ModelProviderCatalogEntry {
+  id: string
+  name: string
+  badge?: string
+  description: string
+  /** Where and how the owner obtains an API key. The URL is displayed and
+   * opened by the user only; nothing is ever fetched from it automatically. */
+  signup: { text: string; url: string }
+  baseUrl: string
+  api: ModelApiKind
+  providerKind: ModelProviderKind
+  credentialMode: 'api-key' | 'environment' | 'none'
+  modelPlaceholder?: string
+  popularModels: string[]
+  defaults?: {
+    contextWindow?: number
+    maxTokens?: number
+    webSearchBaseUrl?: string
+  }
+  /** A server-side balance parser registered for this kind; absent = no button. */
+  balance?: 'deepseek' | 'openrouter' | 'moonshot' | 'siliconflow'
+}
+
+export interface ModelProviderCatalog {
+  schemaVersion: 1
+  version: string
+  providers: ModelProviderCatalogEntry[]
+}
+
+export type ModelProviderCatalogSource = 'remote' | 'cache' | 'bundled'
+
+export interface ModelProviderCatalogState {
+  catalog: ModelProviderCatalog
+  source: ModelProviderCatalogSource
+  checkedAt: IsoTimestamp
+  /** Set when the remote fetch failed and the state fell back. */
+  notice?: string
 }
 
 export type ModelAssignmentScope = 'workspace' | 'world' | 'employee'
@@ -1024,6 +1110,7 @@ export const DOMAIN_EVENT_TYPES = [
   'celebration.finished',
   'workspace.preferences.updated',
   'model.profile.updated',
+  'model.provider.updated',
   'model.assignment.updated',
   'local.asset.saved',
   'session.created',
