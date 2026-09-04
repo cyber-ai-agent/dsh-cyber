@@ -128,6 +128,11 @@
 .model-hub__assign-providers button small { color: var(--text-muted); font-size: 12px; }
 .model-hub__assign-providers p { margin: 8px 4px; line-height: 1.5; }
 .model-hub__assign-models { min-width: 0; min-height: 0; overflow-y: auto; display: grid; align-content: start; gap: 10px; }
+.model-hub__assign-toolbar { display: flex; align-items: center; gap: 8px; }
+.model-hub__assign-toolbar .model-hub__search { flex: 1; min-width: 0; }
+.model-hub__assign-restore { display: inline-flex; align-items: center; gap: 5px; min-height: 32px; padding: 5px 10px; color: var(--accent); background: var(--surface-1); border: 1px solid var(--border); border-radius: 7px; font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.model-hub__assign-restore:hover { border-color: var(--accent); }
+.model-hub__assign-restore:disabled { opacity: 0.55; cursor: default; }
 .model-hub__assign-table tr.is-current td { background: color-mix(in srgb, var(--success) 6%, transparent); }
 .model-hub__assign-table th:nth-child(1), .model-hub__assign-table td:nth-child(1) { width: 24%; }
 .model-hub__assign-table th:nth-child(2), .model-hub__assign-table td:nth-child(2) { width: 30%; }
