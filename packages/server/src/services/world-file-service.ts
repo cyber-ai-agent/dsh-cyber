@@ -78,6 +78,51 @@ export class WorldFileService {
     }
   }
 
+  /**
+   * Persist a model-generated image under the same attachment convention as
+   * user uploads, so chat rendering, the assets route and backup bundles all
+   * treat one generated picture exactly like any other attachment. The size
+   * cap is larger: generated PNGs legitimately exceed a manual upload.
+   */
+  async saveGeneratedImage(worldId: string, input: { bytes: Buffer; mimeType: 'image/png' | 'image/jpeg' | 'image/webp'; name: string }): Promise<ChatAttachment> {
+    const MAX_GENERATED_IMAGE_BYTES = 20 * 1024 * 1024
+    if (input.bytes.length < 1 || input.bytes.length > MAX_GENERATED_IMAGE_BYTES) {
+      throw new ServiceError('too-large', 'generated_image_size_rejected', '生成的图片超出大小范围')
+    }
+    const root = await this.#roots.ensure(worldId)
+    const id = randomUUID()
+    const fileName = `${id}.${input.mimeType === 'image/jpeg' ? 'jpg' : input.mimeType === 'image/webp' ? 'webp' : 'png'}`
+    const attachmentDirectory = join(root.assetsPath, 'attachments')
+    await mkdir(attachmentDirectory, { recursive: true })
+    const safeDirectory = await safeAttachmentDirectory(root.assetsPath, attachmentDirectory)
+    const destination = join(safeDirectory, fileName)
+    const metadataPath = join(safeDirectory, `${id}.json`)
+    const metadata: WorldAttachmentMetadata = {
+      schemaVersion: 1,
+      id,
+      name: input.name.trim().slice(0, 180) || '生成的图片',
+      mimeType: input.mimeType,
+      byteLength: input.bytes.length,
+      sha256: sha256(input.bytes),
+      fileName,
+      createdAt: new Date().toISOString(),
+    }
+    try {
+      await writeAtomically(destination, input.bytes)
+      await writeAtomically(metadataPath, Buffer.from(`${JSON.stringify(metadata, null, 2)}\n`, 'utf8'))
+    } catch (error) {
+      await Promise.all([unlink(destination).catch(() => undefined), unlink(metadataPath).catch(() => undefined)])
+      throw error
+    }
+    return {
+      assetId: id,
+      name: metadata.name,
+      mimeType: input.mimeType,
+      byteLength: input.bytes.length,
+      url: `/api/worlds/${encodeURIComponent(worldId)}/assets/${encodeURIComponent(id)}`,
+    }
+  }
+
   async getAttachment(worldId: string, assetId: string): Promise<ChatAttachment> {
     const { metadata, filePath, rootAssetsPath } = await this.#loadAttachment(worldId, assetId)
     try {

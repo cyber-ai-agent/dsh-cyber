@@ -59,6 +59,8 @@ import { GroupTaskCollaborationService } from './services/group-task-collaborati
 import { EmployeeActivityProjectionService } from './services/employee-activity-projection-service.js'
 import { harnessModelRoute } from './services/harness-model-route.js'
 import { ModelCatalogService } from './services/model-catalog-service.js'
+import { ImageGenerationService } from './services/image-generation-service.js'
+import { createImageAwareRuntime } from './services/image-turn-runtime.js'
 import { createModelHubServices } from './compose-model-hub.js'
 import { ModelCredentialService } from './services/model-credential-service.js'
 import { ModelInteractionService, TurnInteractionLoggingRuntime } from './services/model-interaction-service.js'
@@ -226,6 +228,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     roots: worldRoots,
     onChanged: (worldId, payload) => publishArtifactChanged?.(worldId, payload),
   })
+  const worldFiles = new WorldFileService(worldRoots)
   const worldKnowledgeRepository = new WorldKnowledgeRepository(store.database)
   const worldKnowledgeSearch = createKnowledgeSearchPort({
     // The repository always exposes a world-scoped indexed SQL path. This
@@ -301,21 +304,16 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     ...(options.knowledgeExtractionPort === undefined ? {} : { extractionPort: options.knowledgeExtractionPort }),
     publish: (worldId, payload) => publishKnowledgeChanged?.(worldId, payload),
   })
-  const baseRuntime = options.runtime ?? new HarnessModelRouter({
-    stateRoot: runtimeStateRoot,
-    ...(activeDshBinPath === undefined ? {} : { dshBinPath: activeDshBinPath }),
-    resolveRoute(request) { return resolveHarnessRoute(store, request) },
-  })
+  const baseRuntime = options.runtime ?? new HarnessModelRouter({ stateRoot: runtimeStateRoot, ...(activeDshBinPath === undefined ? {} : { dshBinPath: activeDshBinPath }), resolveRoute(request) { return resolveHarnessRoute(store, request) } })
   // World settings are the source of the envelope's `world-context` layer: the
   // runtime renders them into the cacheable prefix, so the request composers
   // below no longer repeat them behind the retrieved memories.
   const profileRuntime = new CharacterProfileRuntime(baseRuntime, store, skillRegistry, authority, skillAvailability, undefined, undefined, worldSettings)
   const contextRuntime = new ContextPlanningRuntime(profileRuntime, (request) => contextModelLimits(resolveHarnessRoute(store, request)))
-  const runtime = new TurnInteractionLoggingRuntime({
-    inner: contextRuntime,
-    service: interactions,
-    resolveRoute(request) { return resolveHarnessRoute(store, request) },
-  })
+  const loggingRuntime = new TurnInteractionLoggingRuntime({ inner: contextRuntime, service: interactions, resolveRoute(request) { return resolveHarnessRoute(store, request) } })
+  // Image-model turns branch before the whole chat stack: the prompt goes to
+  // the images endpoint and never becomes a conversational request.
+  const runtime = createImageAwareRuntime({ inner: loggingRuntime, store, credentials, images: new ImageGenerationService(), worldFiles, worldArtifacts, interactions })
   const completionWorker = composeCompletionWorker(store, worldArtifacts)
   const groupTurnPlanner = composeGroupTurnPlanner(store, credentials, options.groupTurnPlanner)
   const orchestrator = new ConversationOrchestrator({
@@ -448,7 +446,6 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const applicationAccess = new ApplicationAccessService(stateRoot)
   const assets = new AssetService(store, stateRoot)
   const localTtsAssets = new LocalTtsAssetService(stateRoot)
-  const worldFiles = new WorldFileService(worldRoots)
 
   const router = new Router()
   const workSystem = composeWorkSystem({ store, groupTasks, router, worldAccess })
