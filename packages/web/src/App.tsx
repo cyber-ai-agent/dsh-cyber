@@ -317,7 +317,16 @@ export default function App() {
   const activeRunningCount = activePendingTurns.filter((turn) => turn.status === 'running' || turn.status === 'waiting-approval' || turn.status === 'stopping').length
   const queuedInConversation = activePendingTurns.filter((turn) => turn.status === 'queued').length
   const activeQueuedCount = Math.max(0, queuedInConversation - (activeRunningCount === 0 && queuedInConversation > 0 ? 1 : 0))
-  const conversationModelProfileId = activeConversationKey === undefined ? undefined : conversationModelProfiles[activeConversationKey]
+  const directEmployeeId = activeConversationKey !== undefined && activeConversationKey.startsWith('direct:') ? activeConversationKey.slice('direct:'.length) : undefined
+  // A direct conversation's model selector IS the character's assignment: one
+  // durable fact, two views (composer and model hub), no parallel override
+  // layer to fall out of sync. Group chats keep the transient per-conversation
+  // choice - several characters cannot share one "conversation model".
+  const conversationModelProfileId = activeConversationKey === undefined
+    ? undefined
+    : directEmployeeId !== undefined
+    ? modelAssignments.find((assignment) => assignment.scope === 'employee' && assignment.scopeId === directEmployeeId)?.modelProfileId
+    : conversationModelProfiles[activeConversationKey]
   activeWorldRef.current = activeWorld
   activeSessionIdRef.current = activeSessionId
   activeConversationKeyRef.current = activeConversationKey
@@ -2078,6 +2087,18 @@ export default function App() {
     return `assets/${result.asset.id}`
   }, [workspace])
 
+  const assignEmployeeModel = useCallback(async (employeeId: string, modelProfileId: string | undefined): Promise<void> => {
+    if (workspace === undefined) throw new Error('请先创建工作区')
+    const endpoint = `/api/workspaces/${workspace.id}/model-assignments/employee/${encodeURIComponent(employeeId)}`
+    if (modelProfileId === undefined) {
+      await api<{ removed: boolean }>(endpoint, { method: 'DELETE' })
+      setModelAssignments((current) => current.filter((item) => !(item.scope === 'employee' && item.scopeId === employeeId)))
+      return
+    }
+    const result = await api<{ assignment: ModelAssignment }>(endpoint, { method: 'PUT', body: JSON.stringify({ modelProfileId }) })
+    setModelAssignments((current) => [...current.filter((item) => !(item.scope === 'employee' && item.scopeId === employeeId)), result.assignment])
+  }, [workspace])
+
   const saveModel = useCallback(async (profile: ModelProfileSaveDraft): Promise<ModelProfile> => {
     if (workspace === undefined) throw new Error('请先创建工作区')
     modelMutationRevisionRef.current += 1
@@ -2314,20 +2335,13 @@ export default function App() {
             {...(conversationModelProfileId === undefined ? {} : { modelProfileId: conversationModelProfileId })}
             onChangeModelProfile={async (modelProfileId) => {
               if (activeConversationKey === undefined) return
-              if (modelProfileId === undefined) {
-                setConversationModelProfiles((current) => {
-                  const next = { ...current }
-                  delete next[activeConversationKey]
-                  return next
-                })
-                return
-              }
-              if (modelProfileId.startsWith('discovered:')) {
+              let finalProfileId = modelProfileId
+              if (modelProfileId !== undefined && modelProfileId.startsWith('discovered:')) {
                 const parts = modelProfileId.split(':')
                 const baseProfileId = parts[1]
                 const rawModelId = parts.slice(2).join(':')
                 const baseProfile = models.find((m) => m.id === baseProfileId)
-                if (baseProfile && rawModelId) {
+                if (baseProfile !== undefined && rawModelId !== '') {
                   try {
                     const { contextWindow: _unusedContext, maxTokens: _unusedMaxTokens, ...cleanSettings } = baseProfile.settings
                     const saved = await saveModel({
@@ -2343,20 +2357,33 @@ export default function App() {
                         providerName: baseProfile.displayName,
                       },
                     })
-                    setConversationModelProfiles((current) => ({
-                      ...current,
-                      [activeConversationKey]: saved.id,
-                    }))
-                    return
+                    finalProfileId = saved.id
                   } catch (err) {
                     console.error('Failed to auto-save discovered model:', err)
+                    return
                   }
                 }
               }
-              setConversationModelProfiles((current) => ({
-                ...current,
-                [activeConversationKey]: modelProfileId,
-              }))
+              if (directEmployeeId !== undefined) {
+                if (finalProfileId !== undefined && finalProfileId.startsWith('discovered:')) return
+                await assignEmployeeModel(directEmployeeId, finalProfileId)
+                setConversationModelProfiles((current) => {
+                  if (!(activeConversationKey in current)) return current
+                  const next = { ...current }
+                  delete next[activeConversationKey]
+                  return next
+                })
+                return
+              }
+              setConversationModelProfiles((current) => {
+                if (finalProfileId === undefined || finalProfileId.startsWith('discovered:')) {
+                  if (finalProfileId !== undefined && finalProfileId.startsWith('discovered:')) return current
+                  const next = { ...current }
+                  delete next[activeConversationKey]
+                  return next
+                }
+                return { ...current, [activeConversationKey]: finalProfileId }
+              })
             }}
             pendingCount={activePendingCount}
             queuedCount={activeQueuedCount}
