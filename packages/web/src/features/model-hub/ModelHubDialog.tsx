@@ -157,7 +157,7 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
     }
     const entry = entryForRef(ref)
     if (entry !== undefined) return { ...EMPTY_FORM, providerRef: ref, name: entry.name, api: entry.api, providerKind: entry.providerKind, baseUrl: entry.baseUrl }
-    if (ref === LOCAL_REF) return { ...EMPTY_FORM, providerRef: ref, name: t('modelHub.sourceLocal', '本机 / 局域网推理服务'), baseUrl: 'http://127.0.0.1:8000/v1' }
+    if (ref === LOCAL_REF) return { ...EMPTY_FORM, providerRef: ref, providerKind: 'openai-compatible-local', name: t('modelHub.sourceLocal', '本机 / 局域网推理服务'), baseUrl: 'http://127.0.0.1:8000/v1' }
     return { ...EMPTY_FORM, providerRef: ref, name: t('modelHub.sourceCustom', '自定义 HTTPS 服务') }
   }
 
@@ -172,7 +172,9 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
         baseUrl: state.form.baseUrl,
         api: state.form.api,
         providerKind: state.form.providerKind,
-        ...(entry === undefined ? {} : { catalogRef: entry.id }),
+        ...(entry === undefined
+          ? state.editing?.catalogRef === undefined ? {} : { catalogRef: null }
+          : { catalogRef: entry.id }),
         ...(state.form.credentialEnvName.trim() !== ''
           ? { credentialEnvName: state.form.credentialEnvName.trim() }
           : state.form.apiKey.trim() !== ''

@@ -105,7 +105,7 @@ export async function saveProvider(
     baseUrl: string
     api: string
     providerKind: string
-    catalogRef?: string
+    catalogRef?: string | null
     apiKey?: string
     credentialEnvName?: string | null
     clearCredential?: boolean
@@ -215,4 +215,3 @@ export async function setProfileImageFlag(workspaceId: string, profileId: string
     body: JSON.stringify({ value }),
   })
 }
-
