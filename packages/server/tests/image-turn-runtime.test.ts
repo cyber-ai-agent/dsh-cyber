@@ -34,12 +34,18 @@ function makeRequest(events: AgentRuntimeEvent[]): AgentTurnRequest {
   } as unknown as AgentTurnRequest
 }
 
+function makeAssignedRequest(events: AgentRuntimeEvent[]): AgentTurnRequest {
+  const request = makeRequest(events)
+  delete (request as { modelProfileId?: string }).modelProfileId
+  return request
+}
+
 function deps(overrides: Record<string, unknown> = {}) {
   const events: AgentRuntimeEvent[] = []
   const inner = { runTurn: vi.fn(async () => ({ agentSessionId: 'inner', finalResponse: 'chat', eventCount: 1 })), close: vi.fn(async () => {}) }
   const d = {
     inner,
-    store: { getModelProfile: vi.fn((id: string) => (id === IMAGE_PROFILE.id ? IMAGE_PROFILE : id === CHAT_PROFILE.id ? CHAT_PROFILE : undefined)) },
+    store: { getModelProfile: vi.fn((id: string) => (id === IMAGE_PROFILE.id ? IMAGE_PROFILE : id === CHAT_PROFILE.id ? CHAT_PROFILE : undefined)), resolveModelProfile: vi.fn(() => IMAGE_PROFILE) },
     credentials: { resolve: vi.fn(() => 'sk-key') },
     images: { generate: vi.fn(async () => ({ bytes: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 1]), mimeType: 'image/png' })) },
     worldFiles: { saveGeneratedImage: vi.fn(async () => ({ assetId: 'asset-1', name: 'x.png', mimeType: 'image/png', byteLength: 13, url: '/api/worlds/world-1/assets/asset-1' })) },
@@ -77,6 +83,15 @@ describe('image-aware runtime', () => {
     expect(d.interactions.recordTurn).toHaveBeenCalledWith(expect.objectContaining({ status: 'success', modelId: 'wan2.7-image', agentRunId: 'run-1' }))
     // 产物幂等键绑定 agentRun：重放同一轮不会存出两张
     expect(d.worldArtifacts.publishGeneratedImage).toHaveBeenCalledWith(expect.objectContaining({ idempotencyKey: 'generated-image:run-1' }))
+  })
+
+  it('takes the image path when the model comes from the assignment chain alone', async () => {
+    const { d, events } = deps()
+    const runtime = createImageAwareRuntime(d as never)
+    const result = await runtime.runTurn(makeAssignedRequest(events))
+    expect(events.map((event) => event.kind)).toEqual(['turn.started', 'assistant.message', 'turn.completed'])
+    expect(d.inner.runTurn).not.toHaveBeenCalled()
+    expect(result.finalResponse).toContain('图片已经生成')
   })
 
   it('fails the turn through turn.failed and records the attempt when the endpoint errors', async () => {

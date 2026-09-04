@@ -36,8 +36,16 @@ export interface ImageTurnRuntimeDependencies {
  */
 export function createImageAwareRuntime(deps: ImageTurnRuntimeDependencies): AgentRuntimePort {
   const runTurn = async (request: AgentTurnRequest): Promise<AgentTurnResult> => {
-    const profileId = request.modelProfileId
-    const profile = profileId === undefined ? undefined : deps.store.getModelProfile(profileId)
+    // Mirror the route resolver's authority order exactly: an explicit
+    // conversation selection validated against the workspace first, then the
+    // employee → world → workspace → default assignment chain. Without the
+    // fallback, a character whose DEFAULT model is an image generator would be
+    // missed (its turn carries no explicit modelProfileId) and sent a chat
+    // request the model rejects.
+    const explicit = request.modelProfileId === undefined ? undefined : deps.store.getModelProfile(request.modelProfileId)
+    const profile = explicit !== undefined && explicit.workspaceId === request.agent.workspaceId
+      ? explicit
+      : deps.store.resolveModelProfile(request.agent.workspaceId, request.agent.worldId, request.agent.id)
     if (profile === undefined || !isImageGenerationModel(profile)) return deps.inner.runTurn(request)
 
     const employee = request.agent
