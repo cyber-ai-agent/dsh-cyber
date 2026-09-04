@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowLeft, ArrowsClockwise, CheckCircle, Eye, EyeSlash, Lightning, MagnifyingGlass, PencilSimple, Plus, Stack, Trash, WarningCircle, X } from '@phosphor-icons/react'
+import { ArrowLeft, ArrowsClockwise, CheckCircle, Lightning, MagnifyingGlass, PencilSimple, Plus, Stack, Trash, WarningCircle, X } from '@phosphor-icons/react'
 
 import './model-hub.css'
 import { useI18n } from '../../i18n/runtime.js'
@@ -93,7 +93,6 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
   const [poolQuery, setPoolQuery] = useState('')
   const [poolFilter, setPoolFilter] = useState<PoolFilterKey>('all')
   const [wizard, setWizard] = useState<WizardState>()
-  const [showKey, setShowKey] = useState(false)
   const panelRef = useRef<HTMLElement>(null)
 
   const reload = useCallback(async () => {
@@ -168,7 +167,6 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
   }
 
   const openWizard = (editing?: HubProvider): void => {
-    setShowKey(false)
     const ref = editing === undefined
       ? CUSTOM_REF
       : editing.catalogRef ?? (editing.providerKind === 'openai-compatible-local' ? LOCAL_REF : CUSTOM_REF)
@@ -394,7 +392,7 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
             <label><span>{t('modelHub.fieldName', '名称')}</span><input value={wizard.form.name} onChange={(event) => setForm({ name: event.target.value })} maxLength={80} /></label>
             <label><span>{t('modelHub.fieldApi', '接口协议')}</span><select value={wizard.form.api} onChange={(event) => setForm({ api: event.target.value })}><option value="openai-completions">OpenAI 对话补全</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic-messages">Anthropic 消息协议</option></select></label>
             <label><span>{t('modelHub.fieldBaseUrl', '接口地址 Base URL')}</span><input value={wizard.form.baseUrl} onChange={(event) => setForm({ baseUrl: event.target.value })} placeholder={selectedEntry !== undefined ? selectedEntry.baseUrl : wizard.form.providerKind === 'openai-compatible-local' ? 'http://192.168.x.x:8000/v1' : 'https://api.example.com/v1'} /></label>
-            <label><span>{t('modelHub.fieldKey', 'API 密钥')}</span><span className="model-hub__key"><input type={showKey ? 'text' : 'password'} value={wizard.form.apiKey} onChange={(event) => setForm({ apiKey: event.target.value })} placeholder={wizard.editing !== undefined ? t('modelHub.keyPlaceholderKeep', '留空则保持不变') : wizard.form.providerKind === 'openai-compatible-local' ? t('modelHub.keyHintLocal', '本地服务通常可留空') : t('modelHub.keyPlaceholderUnset', '尚未配置')} autoComplete="off" /><button type="button" className="icon-button" aria-label={showKey ? t('modelHub.hideKey', '隐藏密钥') : t('modelHub.showKey', '显示密钥')} aria-pressed={showKey} onClick={() => setShowKey(!showKey)}>{showKey ? <EyeSlash size={15} /> : <Eye size={15} />}</button></span>{wizard.editing?.credentialConfigured === true && wizard.form.apiKey === '' ? <small>{wizard.editing.credentialTail === undefined ? t('modelHub.keySaved', '本机已保存该服务商的密钥') : `${t('modelHub.keySaved', '本机已保存该服务商的密钥')} ····${wizard.editing.credentialTail}`}</small> : null}</label>
+            <label><span>{t('modelHub.fieldKey', 'API 密钥')}</span><input type="password" value={wizard.form.apiKey} onChange={(event) => setForm({ apiKey: event.target.value })} placeholder={wizard.editing !== undefined ? t('modelHub.keyPlaceholderKeep', '留空则保持不变') : wizard.form.providerKind === 'openai-compatible-local' ? t('modelHub.keyHintLocal', '本地服务通常可留空') : t('modelHub.keyPlaceholderUnset', '尚未配置')} autoComplete="new-password" />{wizard.editing?.credentialConfigured === true && wizard.form.apiKey === '' ? <small>{wizard.editing.credentialTail === undefined ? t('modelHub.keySaved', '本机已保存该服务商的密钥') : `${t('modelHub.keySaved', '本机已保存该服务商的密钥')} ····${wizard.editing.credentialTail}`}</small> : null}</label>
             <label><span>{t('modelHub.fieldEnvName', '凭据环境变量名（可选，与 API 密钥二选一）')}</span><input value={wizard.form.credentialEnvName} onChange={(event) => setForm({ credentialEnvName: event.target.value.toUpperCase() })} placeholder="MY_MODEL_API_KEY" /></label>
             {selectedEntry !== undefined ? <p className="model-hub__signup">{selectedEntry.signup.text} <a href={selectedEntry.signup.url} target="_blank" rel="noopener noreferrer">{t('modelHub.openSignup', '打开注册页 ↗')}</a></p> : <p className="model-hub__signup">{wizard.form.providerRef === LOCAL_REF ? t('modelHub.sourceLocalHint', 'vLLM、Ollama、LM Studio、Sub2API 等 HTTP 端点。') : t('modelHub.sourceCustomHint', '连接其他可信的 OpenAI 兼容网关。')}</p>}
             <footer>

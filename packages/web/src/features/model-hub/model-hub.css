@@ -84,9 +84,6 @@
 .model-hub__form label > span { color: var(--text-soft); }
 .model-hub__form label > small { color: var(--text-muted); font-size: 12px; }
 .model-hub__form input, .model-hub__form select { width: 100%; min-height: 36px; padding: 7px 10px; color: var(--text); background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 14px; }
-.model-hub__key { position: relative; display: block; }
-.model-hub__key input { padding-right: 44px; }
-.model-hub__key .icon-button { position: absolute; top: 50%; right: 4px; width: 32px; height: 32px; translate: 0 -50%; color: var(--text-soft); }
 .model-hub__form p.model-hub__signup { margin: 0; padding: 9px 12px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 9px; }
 .model-hub__form footer { grid-column: 1 / -1; display: flex; gap: 10px; justify-content: flex-end; }
 .model-hub__models-step { display: grid; gap: 12px; }
