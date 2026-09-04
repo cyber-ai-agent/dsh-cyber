@@ -172,7 +172,11 @@ export function registerModelHubRoutes(router: Router, dependencies: ModelHubRou
       api: provider.api,
       providerKind: provider.providerKind,
       ...(provider.credentialEnvName === undefined ? {} : { credentialEnvName: provider.credentialEnvName }),
-      ...(contextLength === undefined ? {} : { settings: { contextWindow: contextLength } }),
+      settings: {
+        providerId: provider.id,
+        providerName: provider.name,
+        ...(contextLength === undefined ? {} : { contextWindow: contextLength }),
+      },
     })
     writeJson(response, 201, { profile })
   })
@@ -230,6 +234,11 @@ export function registerModelHubRoutes(router: Router, dependencies: ModelHubRou
       // Merge onto any stored settings so a partial sync patch (say, context
       // only) cannot wipe the modalities/reasoning already recorded.
       const settings: JsonObject = { ...(prior?.settings ?? {}) }
+      // The composer's model picker groups by these two: every pooled model
+      // carries its own provider's identity, so hundreds of aggregator models
+      // no longer collapse into one anonymous "远程模型服务" bucket.
+      settings.providerId = provider.id
+      settings.providerName = provider.name
       if (contextLength !== undefined) settings.contextWindow = contextLength
       if (inputTypes !== undefined && inputTypes.length > 0) settings.inputTypes = inputTypes
       if (outputTypes !== undefined && outputTypes.length > 0) settings.outputTypes = outputTypes
