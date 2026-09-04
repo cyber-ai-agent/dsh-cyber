@@ -1,9 +1,9 @@
 import type { DiscoveredModel, HubProfile, HubProvider } from './api.js'
 
 /**
- * Pure view logic of the model hub: what is selected by default, how a
- * capability verdict reads, and how the pool groups. Kept free of React so
- * the behavior is testable and the component stays presentational.
+ * Pure view logic of the model hub: what is selected by default, how the pool
+ * filters, and what a profile declares. Kept free of React and of display
+ * copy so the behavior is testable and the component stays presentational.
  */
 
 export function defaultSelection(models: readonly DiscoveredModel[], popular: readonly string[]): Set<string> {
@@ -26,68 +26,63 @@ export function selectionModels(models: readonly DiscoveredModel[], selected: Re
   return models.filter((model) => selected.has(model.id))
 }
 
-export type CapabilityTone = 'good' | 'bad' | 'unknown'
+/** The pool's left rail: 全部, one entry per provider, plus orphan rows. */
+export type PoolFilterKey = 'all' | 'legacy' | string // otherwise a provider id
 
-export function capabilityTone(verdict: string | undefined): CapabilityTone {
-  switch (verdict) {
-    case 'supported': return 'good'
-    case 'unsupported': return 'bad'
-    default: return 'unknown'
-  }
+export interface PoolFilterOption {
+  key: PoolFilterKey
+  count: number
 }
 
-export const CAPABILITY_MESSAGE_KEYS = {
-  supported: 'modelHub.verdictSupported',
-  unsupported: 'modelHub.verdictUnsupported',
-  unclear: 'modelHub.verdictUnclear',
-  error: 'modelHub.verdictError',
-} as const
-
-export function capabilityFallback(verdict: string | undefined): string {
-  switch (verdict) {
-    case 'supported': return '支持'
-    case 'unsupported': return '不支持'
-    case 'unclear': return '未证实'
-    case 'error': return '探测失败'
-    default: return '未检测'
-  }
+export function poolFilters(providers: readonly HubProvider[], profiles: readonly HubProfile[]): PoolFilterOption[] {
+  const legacy = profiles.filter((profile) => profile.providerId === undefined || !providers.some((provider) => provider.id === profile.providerId)).length
+  return [
+    { key: 'all', count: profiles.length },
+    ...providers.map((provider) => ({ key: provider.id, count: profiles.filter((profile) => profile.providerId === provider.id).length })),
+    ...(legacy > 0 ? [{ key: 'legacy' as const, count: legacy }] : []),
+  ]
 }
 
-export interface PoolGroup {
-  provider: HubProvider | undefined
-  profiles: HubProfile[]
-}
-
-export function groupPool(profiles: readonly HubProfile[], providers: readonly HubProvider[], query: string): PoolGroup[] {
+export function filterPool(
+  profiles: readonly HubProfile[],
+  providers: readonly HubProvider[],
+  filter: PoolFilterKey,
+  query: string,
+): HubProfile[] {
   const needle = query.trim().toLowerCase()
-  const matched = needle
-    ? profiles.filter((profile) => `${profile.displayName} ${profile.modelId}`.toLowerCase().includes(needle))
-    : [...profiles]
-  const byProvider = new Map<string | 'unassigned', HubProfile[]>()
-  for (const profile of matched) {
-    const key = profile.providerId ?? 'unassigned'
-    const list = byProvider.get(key)
-    if (list === undefined) byProvider.set(key, [profile])
-    else list.push(profile)
-  }
-  const groups: PoolGroup[] = []
-  for (const provider of providers) {
-    const list = byProvider.get(provider.id)
-    if (list !== undefined) groups.push({ provider, profiles: list.sort((a, b) => a.displayName.localeCompare(b.displayName)) })
-  }
-  const rest = byProvider.get('unassigned')
-  if (rest !== undefined) groups.push({ provider: undefined, profiles: rest.sort((a, b) => a.displayName.localeCompare(b.displayName)) })
-  return groups
+  return profiles
+    .filter((profile) => {
+      if (filter === 'all') return true
+      if (filter === 'legacy') return profile.providerId === undefined || !providers.some((provider) => provider.id === profile.providerId)
+      return profile.providerId === filter
+    })
+    .filter((profile) => needle === '' || `${profile.displayName} ${profile.modelId}`.toLowerCase().includes(needle))
+    .sort((left, right) => left.displayName.localeCompare(right.displayName))
 }
 
-export function contextOf(profile: HubProfile): number | undefined {
-  const value = profile.settings.contextWindow
-  return typeof value === 'number' && value >= 1_024 ? value : undefined
+export interface ModelDeclaredCapabilities {
+  context: number | undefined
+  inputTypes: string[]
+  reasoning: boolean | undefined
+}
+
+/**
+ * What the endpoint declared for this model, read back from the settings the
+ * import wrote. Missing stays missing: the table renders '—', never a guess.
+ */
+export function declaredCapabilities(profile: HubProfile): ModelDeclaredCapabilities {
+  const settings = profile.settings
+  const context = typeof settings.contextWindow === 'number' && settings.contextWindow >= 1_024 ? settings.contextWindow : undefined
+  const rawTypes = Array.isArray(settings.inputTypes) ? settings.inputTypes : []
+  const inputTypes = rawTypes.filter((item): item is string => item === 'text' || item === 'image' || item === 'video' || item === 'audio')
+  const reasoning = typeof settings.reasoning === 'boolean' ? settings.reasoning : undefined
+  return { context, inputTypes, reasoning }
 }
 
 export function formatContext(value: number | undefined): string {
   if (value === undefined) return '—'
-  return value >= 1_000 ? `${Math.round(value / 1024)}K` : String(value)
+  if (value >= 1_048_576) return `${Math.round(value / 1_048_576)}M`
+  return value >= 1_024 ? `${Math.round(value / 1_024)}K` : String(value)
 }
 
 export interface SyncSummary {

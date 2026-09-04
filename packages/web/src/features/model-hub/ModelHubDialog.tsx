@@ -12,8 +12,8 @@ import {
   listProfiles,
   listProviders,
   loadCatalog,
-  probeProfile,
   refreshCatalog,
+  removeProfile,
   saveProvider,
   syncProvider,
   testProvider,
@@ -25,17 +25,16 @@ import {
   type SyncOutcome,
 } from './api.js'
 import {
-  CAPABILITY_MESSAGE_KEYS,
-  capabilityFallback,
-  capabilityTone,
-  contextOf,
+  declaredCapabilities,
   defaultSelection,
+  filterPool,
   formatContext,
-  groupPool,
   IMPORT_CAP,
+  poolFilters,
   selectionModels,
   summarizeSync,
   toggleSelection,
+  type PoolFilterKey,
 } from './view-model.js'
 
 interface FormState {
@@ -84,13 +83,15 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
   const [catalog, setCatalog] = useState<HubCatalogState>()
   const [providers, setProviders] = useState<HubProvider[]>([])
   const [profiles, setProfiles] = useState<HubProfile[]>([])
+  const [assignedProfileIds, setAssignedProfileIds] = useState<Set<string>>(new Set())
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState<string>()
   const [balances, setBalances] = useState<Record<string, { lines: string[]; asOf: string } | 'loading' | string>>({})
   const [syncs, setSyncs] = useState<Record<string, SyncOutcome>>({})
   const [confirmingDelete, setConfirmingDelete] = useState<string>()
+  const [confirmingRemove, setConfirmingRemove] = useState<string>()
   const [poolQuery, setPoolQuery] = useState('')
-  const [probing, setProbing] = useState<Record<string, string>>({})
+  const [poolFilter, setPoolFilter] = useState<PoolFilterKey>('all')
   const [wizard, setWizard] = useState<WizardState>()
   const [showKey, setShowKey] = useState(false)
   const panelRef = useRef<HTMLElement>(null)
@@ -99,7 +100,8 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
     const [nextCatalog, nextProviders, nextProfiles] = await Promise.all([loadCatalog(), listProviders(workspaceId), listProfiles(workspaceId)])
     setCatalog(nextCatalog)
     setProviders(nextProviders)
-    setProfiles(nextProfiles)
+    setProfiles(nextProfiles.profiles)
+    setAssignedProfileIds(new Set(nextProfiles.assignments.map((assignment) => assignment.modelProfileId)))
   }, [workspaceId])
 
   useEffect(() => {
@@ -122,6 +124,16 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
 
   const entryForRef = (ref: string): HubCatalogEntry | undefined =>
     catalog?.catalog.providers.find((candidate) => candidate.id === ref)
+
+  const formForRef = (ref: string, editing?: HubProvider): FormState => {
+    if (editing !== undefined) {
+      return { ...EMPTY_FORM, providerRef: ref, name: editing.name, api: editing.api, providerKind: editing.providerKind, baseUrl: editing.baseUrl }
+    }
+    const entry = entryForRef(ref)
+    if (entry !== undefined) return { ...EMPTY_FORM, providerRef: ref, name: entry.name, api: entry.api, providerKind: entry.providerKind, baseUrl: entry.baseUrl }
+    if (ref === LOCAL_REF) return { ...EMPTY_FORM, providerRef: ref, name: t('modelHub.sourceLocal', '本机 / 局域网推理服务'), baseUrl: 'http://127.0.0.1:8000/v1' }
+    return { ...EMPTY_FORM, providerRef: ref, name: t('modelHub.sourceCustom', '自定义 HTTPS 服务') }
+  }
 
   const runWizardTest = async (state: WizardState): Promise<void> => {
     setBusy('test')
@@ -155,17 +167,8 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
     }
   }
 
-  const formForRef = (ref: string, editing?: HubProvider): FormState => {
-    if (editing !== undefined) {
-      return { ...EMPTY_FORM, providerRef: ref, name: editing.name, api: editing.api, providerKind: editing.providerKind, baseUrl: editing.baseUrl }
-    }
-    const entry = entryForRef(ref)
-    if (entry !== undefined) return { ...EMPTY_FORM, providerRef: ref, name: entry.name, api: entry.api, providerKind: entry.providerKind, baseUrl: entry.baseUrl }
-    if (ref === LOCAL_REF) return { ...EMPTY_FORM, providerRef: ref, name: t('modelHub.sourceLocal', '本机 / 局域网推理服务'), baseUrl: 'http://127.0.0.1:8000/v1' }
-    return { ...EMPTY_FORM, providerRef: ref, name: t('modelHub.sourceCustom', '自定义 HTTPS 服务') }
-  }
-
   const openWizard = (editing?: HubProvider): void => {
+    setShowKey(false)
     const ref = editing === undefined
       ? CUSTOM_REF
       : editing.catalogRef ?? (editing.providerKind === 'openai-compatible-local' ? LOCAL_REF : CUSTOM_REF)
@@ -208,6 +211,20 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
     }
   }
 
+  const runRemoveProfile = async (profile: HubProfile): Promise<void> => {
+    setBusy(`remove:${profile.id}`)
+    setError(undefined)
+    try {
+      await removeProfile(workspaceId, profile.id)
+      setConfirmingRemove(undefined)
+      await reload()
+    } catch (cause) {
+      setError(errorMessage(cause, t('modelHub.removeFailed', '从模型池移除失败。')))
+    } finally {
+      setBusy(undefined)
+    }
+  }
+
   const runSync = async (provider: HubProvider): Promise<void> => {
     setBusy(`sync:${provider.id}`)
     setError(undefined)
@@ -231,32 +248,24 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
     }
   }
 
-  const runProbe = async (profile: HubProfile): Promise<void> => {
-    setProbing((current) => ({ ...current, [profile.id]: 'loading' }))
-    setError(undefined)
-    try {
-      await probeProfile(workspaceId, profile.id)
-      setProbing((current) => {
-        const next = { ...current }
-        delete next[profile.id]
-        return next
-      })
-      await reload()
-    } catch (cause) {
-      setProbing((current) => ({ ...current, [profile.id]: errorMessage(cause, t('modelHub.probeFailed', '能力探测失败。')) }))
-      await reload()
-    }
-  }
-
-  const poolGroups = useMemo(() => groupPool(profiles, providers, poolQuery), [profiles, providers, poolQuery])
-  const providerName = (profile: HubProfile): string =>
+  const filterOptions = useMemo(() => poolFilters(providers, profiles), [providers, profiles])
+  const poolRows = useMemo(() => filterPool(profiles, providers, poolFilter, poolQuery), [profiles, providers, poolFilter, poolQuery])
+  const providerNameOf = (profile: HubProfile): string =>
     providers.find((provider) => provider.id === profile.providerId)?.name ?? t('modelHub.legacyConnection', '独立配置')
+  const filterLabel = (key: PoolFilterKey): string => {
+    if (key === 'all') return t('modelHub.poolAll', '全部')
+    if (key === 'legacy') return t('modelHub.legacyConnection', '独立配置')
+    return providers.find((provider) => provider.id === key)?.name ?? key
+  }
 
   const sourceBadge = catalog === undefined ? '' : catalog.source === 'remote'
     ? t('modelHub.sourceRemote', '目录来源：远程最新')
     : catalog.source === 'cache'
     ? t('modelHub.sourceCache', '目录来源：本地缓存')
     : t('modelHub.sourceBundled', '目录来源：随应用打包')
+
+  const modalityLabel = (type: string): string =>
+    type === 'text' ? t('modelHub.modalityText', '文本') : type === 'image' ? t('modelHub.modalityImage', '图片') : type === 'video' ? t('modelHub.modalityVideo', '视频') : t('modelHub.modalityAudio', '音频')
 
   // Portal to <body>: the launcher renders from the top bar, where global
   // rules like `.topbar nav { height: 100% }` would claim the hub's own tab
@@ -277,9 +286,9 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
         </div>
       </header>
 
-      <nav className="model-hub__tabs" role="tablist">
-        <button role="tab" type="button" aria-selected={tab === 'providers'} className={tab === 'providers' ? 'is-active' : ''} onClick={() => setTab('providers')}>{t('modelHub.tabProviders', '模型服务商')}</button>
-        <button role="tab" type="button" aria-selected={tab === 'pool'} className={tab === 'pool' ? 'is-active' : ''} onClick={() => setTab('pool')}>{t('modelHub.tabPool', '模型池')}</button>
+      <nav className="model-hub__tabs" aria-label={t('modelHub.tabsAria', '模型中心分区')}>
+        <button type="button" aria-current={tab === 'providers'} className={tab === 'providers' ? 'is-active' : ''} onClick={() => setTab('providers')}>{t('modelHub.tabProviders', '模型服务商')}</button>
+        <button type="button" aria-current={tab === 'pool'} className={tab === 'pool' ? 'is-active' : ''} onClick={() => setTab('pool')}>{t('modelHub.tabPool', '模型池')}</button>
       </nav>
 
       {error !== undefined ? <div className="model-hub__error" role="alert"><WarningCircle size={15} /><span>{error}</span><button type="button" className="icon-button" aria-label={t('modelHub.dismissError', '收起提示')} onClick={() => setError(undefined)}><X size={13} /></button></div> : null}
@@ -289,7 +298,7 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
           <button type="button" className="primary-button" onClick={() => openWizard()}><Plus size={15} />{t('modelHub.addProvider', '添加服务商')}</button>
           <span className="model-hub__hint">{t('modelHub.providersHint', '一个服务商 = 一个端点、一份密钥；模型从服务商导入后分配给角色。')}</span>
         </div>
-        {providers.length === 0 ? <div className="model-hub__empty"><strong>{t('modelHub.emptyProviders', '还没有添加服务商')}</strong><span>{t('modelHub.emptyProvidersHint', '点击“添加服务商”，内置目录里选一家填上密钥即可。')}</span></div> : providers.map((provider) => {
+        {providers.length === 0 ? <div className="model-hub__empty"><strong>{t('modelHub.emptyProviders', '还没有添加服务商')}</strong><span>{t('modelHub.emptyProvidersHint', '点击“添加服务商”，选择一家填上密钥即可。')}</span></div> : providers.map((provider) => {
           const balance = balances[provider.id]
           const sync = syncs[provider.id]
           return <article key={provider.id} className="model-hub__provider-card">
@@ -327,42 +336,43 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
         })}
       </div> : null}
 
-      {wizard === undefined && tab === 'pool' ? <div className="model-hub__body">
-        <label className="model-hub__search"><MagnifyingGlass size={15} /><input value={poolQuery} onChange={(event) => setPoolQuery(event.target.value)} placeholder={t('modelHub.searchPool', '搜索模型名称或粘贴模型 ID')} aria-label={t('modelHub.searchPoolAria', '搜索模型池')} /></label>
-        {poolGroups.length === 0 ? <div className="model-hub__empty"><strong>{t('modelHub.poolEmpty', '模型池是空的')}</strong><span>{t('modelHub.poolEmptyHint', '先在“模型服务商”里添加服务商，测试连接后勾选模型导入。')}</span></div> : poolGroups.map((group) => <section key={group.provider?.id ?? 'unassigned'} className="model-hub__group">
-          <h3>{group.provider?.name ?? t('modelHub.legacyConnection', '独立配置')}<small>{t('modelHub.groupCount', '{count} 个模型', { count: group.profiles.length })}</small></h3>
-          {group.profiles.map((profile) => {
-            const probeState = probing[profile.id]
-            return <article key={profile.id} className="model-hub__model-card">
-              <header>
-                <strong>{profile.displayName}{profile.isDefault ? <span className="model-hub__badge is-ok">{t('modelHub.defaultModel', '默认')}</span> : null}</strong>
-                <code>{profile.modelId}</code>
-              </header>
-              <p>
-                {t('modelHub.contextLabel', '上下文 {value}', { value: formatContext(contextOf(profile)) })}
-                {' · '}{(() => {
-                  const tone = capabilityTone(profile.capabilities?.tools)
-                  const verdict = profile.capabilities?.tools
-                  const label = verdict === undefined ? capabilityFallback(undefined) : t(CAPABILITY_MESSAGE_KEYS[verdict as keyof typeof CAPABILITY_MESSAGE_KEYS] ?? 'modelHub.verdictUnclear', capabilityFallback(verdict))
-                  return <span className={`model-hub__cap is-${tone}`} title={t('modelHub.capToolsTitle', '工具调用能力：{verdict}', { verdict: label })}><CheckCircle size={12} />{t('modelHub.capTools', '工具')}·{label}</span>
-                })()}
-                {' '}{(() => {
-                  const tone = capabilityTone(profile.capabilities?.json)
-                  const verdict = profile.capabilities?.json
-                  const label = verdict === undefined ? capabilityFallback(undefined) : t(CAPABILITY_MESSAGE_KEYS[verdict as keyof typeof CAPABILITY_MESSAGE_KEYS] ?? 'modelHub.verdictUnclear', capabilityFallback(verdict))
-                  return <span className={`model-hub__cap is-${tone}`} title={t('modelHub.capJsonTitle', '结构化 JSON 能力：{verdict}', { verdict: label })}><CheckCircle size={12} />JSON·{label}</span>
-                })()}
-              </p>
-              <footer>
-                <span className="model-hub__from">{t('modelHub.fromProvider', '来自 {name}', { name: providerName(profile) })}{profile.probedAt === undefined ? '' : ` · ${new Date(profile.probedAt).toLocaleString()}`}</span>
-                {probeState === 'loading'
-                  ? <span className="model-hub__balance">{t('modelHub.probing', '正在探测能力…')}</span>
-                  : probeState !== undefined && probeState !== 'loading'
-                  ? <span className="model-hub__balance is-error">{probeState}<button type="button" onClick={() => setProbing((current) => { const next = { ...current }; delete next[profile.id]; return next })}>{t('modelHub.dismiss', '收起')}</button></span>
-                  : <button type="button" onClick={() => void runProbe(profile)}><Lightning size={14} />{t('modelHub.probe', '检测能力')}</button>}
-              </footer>
-            </article>
-          })}</section>)}
+      {wizard === undefined && tab === 'pool' ? <div className="model-hub__pool">
+        <aside className="model-hub__pool-filters" aria-label={t('modelHub.filterAria', '按服务商筛选模型')}>
+          {filterOptions.map((option) => <button key={option.key} type="button" className={poolFilter === option.key ? 'is-active' : ''} aria-current={poolFilter === option.key} onClick={() => setPoolFilter(option.key)}>
+            <span>{filterLabel(option.key)}</span><small>{option.count}</small>
+          </button>)}
+        </aside>
+        <div className="model-hub__pool-main">
+          <label className="model-hub__search"><MagnifyingGlass size={15} /><input value={poolQuery} onChange={(event) => setPoolQuery(event.target.value)} placeholder={t('modelHub.searchPool', '搜索模型名称或粘贴模型 ID')} aria-label={t('modelHub.searchPoolAria', '搜索模型池')} /></label>
+          {poolRows.length === 0 ? <div className="model-hub__empty"><strong>{t('modelHub.poolEmpty', '这里还没有模型')}</strong><span>{t('modelHub.poolEmptyHint', '到“模型服务商”里测试连接并勾选导入模型。')}</span></div> : <table className="model-hub__table">
+            <thead><tr>
+              <th>{t('modelHub.colModel', '模型名称')}</th>
+              <th>{t('modelHub.colModelId', '模型 ID')}</th>
+              <th>{t('modelHub.colProvider', '服务商')}</th>
+              <th>{t('modelHub.colContext', '上下文')}</th>
+              <th>{t('modelHub.colInput', '输入格式')}</th>
+              <th>{t('modelHub.colReasoning', '推理')}</th>
+              <th className="model-hub__col-actions" aria-label={t('modelHub.colActions', '操作')} />
+            </tr></thead>
+            <tbody>{poolRows.map((profile) => {
+              const declared = declaredCapabilities(profile)
+              const assigned = assignedProfileIds.has(profile.id)
+              const removing = busy === `remove:${profile.id}`
+              return <tr key={profile.id}>
+                <td><strong>{profile.displayName}</strong>{profile.isDefault ? <span className="model-hub__badge is-ok">{t('modelHub.defaultModel', '默认')}</span> : null}</td>
+                <td><code>{profile.modelId}</code></td>
+                <td>{providerNameOf(profile)}</td>
+                <td>{formatContext(declared.context)}</td>
+                <td>{declared.inputTypes.length === 0 ? '—' : declared.inputTypes.map((type) => <span key={type} className="model-hub__badge">{modalityLabel(type)}</span>)}</td>
+                <td>{declared.reasoning === undefined ? '—' : declared.reasoning ? <span className="model-hub__cap is-good">{t('modelHub.reasonYes', '支持')}</span> : <span className="model-hub__cap">{t('modelHub.reasonNo', '不支持')}</span>}</td>
+                <td className="model-hub__col-actions">{confirmingRemove === profile.id
+                  ? <span className="model-hub__confirm"><button type="button" className="is-danger" onClick={() => void runRemoveProfile(profile)}>{t('modelHub.confirmRemove', '确认移除')}</button><button type="button" onClick={() => setConfirmingRemove(undefined)}>{t('modelHub.cancel', '取消')}</button></span>
+                  : <button type="button" disabled={assigned || removing} title={assigned ? t('modelHub.removeBlocked', '正在被分配使用，请先在角色或世界中改选其它模型') : t('modelHub.removeFromPool', '从模型池移除')} aria-label={t('modelHub.removeFromAria', '移除模型 {name}', { name: profile.displayName })} onClick={() => setConfirmingRemove(profile.id)}><Trash size={14} /></button>}
+                </td>
+              </tr>
+            })}</tbody>
+          </table>}
+        </div>
       </div> : null}
 
       {wizard !== undefined ? <div className="model-hub__wizard" role="region" aria-label={t('modelHub.wizardAria', '添加或编辑服务商')}>
@@ -383,9 +393,9 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
             </select></label>
             <label><span>{t('modelHub.fieldName', '名称')}</span><input value={wizard.form.name} onChange={(event) => setForm({ name: event.target.value })} maxLength={80} /></label>
             <label><span>{t('modelHub.fieldApi', '接口协议')}</span><select value={wizard.form.api} onChange={(event) => setForm({ api: event.target.value })}><option value="openai-completions">OpenAI 对话补全</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic-messages">Anthropic 消息协议</option></select></label>
+            <label><span>{t('modelHub.fieldBaseUrl', '接口地址 Base URL')}</span><input value={wizard.form.baseUrl} onChange={(event) => setForm({ baseUrl: event.target.value })} placeholder={selectedEntry !== undefined ? selectedEntry.baseUrl : wizard.form.providerKind === 'openai-compatible-local' ? 'http://192.168.x.x:8000/v1' : 'https://api.example.com/v1'} /></label>
             <label><span>{t('modelHub.fieldKey', 'API 密钥')}</span><span className="model-hub__key"><input type={showKey ? 'text' : 'password'} value={wizard.form.apiKey} onChange={(event) => setForm({ apiKey: event.target.value })} placeholder={wizard.editing !== undefined ? t('modelHub.keyPlaceholderKeep', '留空则保持不变') : wizard.form.providerKind === 'openai-compatible-local' ? t('modelHub.keyHintLocal', '本地服务通常可留空') : t('modelHub.keyPlaceholderUnset', '尚未配置')} autoComplete="off" /><button type="button" className="icon-button" aria-label={showKey ? t('modelHub.hideKey', '隐藏密钥') : t('modelHub.showKey', '显示密钥')} aria-pressed={showKey} onClick={() => setShowKey(!showKey)}>{showKey ? <EyeSlash size={15} /> : <Eye size={15} />}</button></span></label>
-            <label className="is-wide"><span>{t('modelHub.fieldBaseUrl', '接口地址 Base URL')}</span><input value={wizard.form.baseUrl} onChange={(event) => setForm({ baseUrl: event.target.value })} placeholder={selectedEntry !== undefined ? selectedEntry.baseUrl : wizard.form.providerKind === 'openai-compatible-local' ? 'http://192.168.x.x:8000/v1' : 'https://api.example.com/v1'} /></label>
-            <label className="is-wide"><span>{t('modelHub.fieldEnvName', '凭据环境变量名（可选，与 API 密钥二选一）')}</span><input value={wizard.form.credentialEnvName} onChange={(event) => setForm({ credentialEnvName: event.target.value.toUpperCase() })} placeholder="MY_MODEL_API_KEY" /></label>
+            <label><span>{t('modelHub.fieldEnvName', '凭据环境变量名（可选，与 API 密钥二选一）')}</span><input value={wizard.form.credentialEnvName} onChange={(event) => setForm({ credentialEnvName: event.target.value.toUpperCase() })} placeholder="MY_MODEL_API_KEY" /></label>
             {selectedEntry !== undefined ? <p className="model-hub__signup">{selectedEntry.signup.text} <a href={selectedEntry.signup.url} target="_blank" rel="noopener noreferrer">{t('modelHub.openSignup', '打开注册页 ↗')}</a></p> : <p className="model-hub__signup">{wizard.form.providerRef === LOCAL_REF ? t('modelHub.sourceLocalHint', 'vLLM、Ollama、LM Studio、Sub2API 等 HTTP 端点。') : t('modelHub.sourceCustomHint', '连接其他可信的 OpenAI 兼容网关。')}</p>}
             <footer>
               <button type="button" className="primary-button" disabled={busy === 'test' || !wizard.form.name.trim() || !wizard.form.baseUrl.trim()} onClick={() => void runWizardTest(wizard)}>{busy === 'test' ? t('modelHub.testing', '正在测试并获取模型…') : t('modelHub.testFetch', '测试服务商并获取模型列表')}</button>
@@ -396,7 +406,11 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
           <p>{t('modelHub.modelsFound', '获取到 {count} 个模型，勾选后导入模型池。', { count: wizard.models.length })}</p>
           <ul>{wizard.models.map((model) => <li key={model.id}>
             <label><input type="checkbox" checked={wizard.selected.has(model.id)} onChange={() => setWizard({ ...wizard, selected: toggleSelection(wizard.selected, model.id) })} />
-              <span><strong>{model.displayName ?? model.id}</strong><code>{model.id}</code>{model.contextLength === undefined ? null : <small>{t('modelHub.contextBadge', '上下文 {tokens}', { tokens: model.contextLength.toLocaleString() })}</small>}</span>
+              <span><strong>{model.displayName ?? model.id}</strong><code>{model.id}</code>
+                {model.contextLength === undefined ? null : <small>{t('modelHub.contextBadge', '上下文 {tokens}', { tokens: model.contextLength.toLocaleString() })}</small>}
+                {model.inputTypes === undefined || model.inputTypes.length === 0 ? null : <small>{model.inputTypes.map(modalityLabel).join('/')}</small>}
+                {model.reasoning === undefined ? null : <small>{model.reasoning ? t('modelHub.reasonYes', '支持') : t('modelHub.reasonNo', '不支持')}·{t('modelHub.colReasoning', '推理')}</small>}
+              </span>
             </label>
           </li>)}</ul>
           <footer>

@@ -3,11 +3,11 @@ import { describe, expect, it } from 'vitest'
 import type { HubProfile, HubProvider } from '../src/features/model-hub/api.js'
 
 import {
-  capabilityTone,
-  contextOf,
+  declaredCapabilities,
   defaultSelection,
+  filterPool,
   formatContext,
-  groupPool,
+  poolFilters,
   selectionModels,
   summarizeSync,
   toggleSelection,
@@ -61,36 +61,48 @@ describe('model hub view model', () => {
     expect(selectionModels(models, selected)).toEqual([{ id: 'b' }])
   })
 
-  it('never maps unclear or error to the alarming tone', () => {
-    expect(capabilityTone('supported')).toBe('good')
-    expect(capabilityTone('unsupported')).toBe('bad')
-    expect(capabilityTone('unclear')).toBe('unknown')
-    expect(capabilityTone('error')).toBe('unknown')
-    expect(capabilityTone(undefined)).toBe('unknown')
-  })
-
-  it('groups the pool by provider with unassigned rows last, filtered by query', () => {
+  it('builds the left rail as all + providers (+ legacy only when orphans exist)', () => {
     const deepseek = provider('p1', 'DeepSeek')
     const local = provider('p2', '本地')
-    const profiles = [
-      profile('zeta', { providerId: 'p2', displayName: 'Zeta' }),
-      profile('beta', { providerId: 'p1', displayName: 'Beta' }),
-      profile('legacy-1', { displayName: 'Legacy' }),
-      profile('alpha', { providerId: 'p1', displayName: 'Alpha' }),
-    ]
-    const groups = groupPool(profiles, [deepseek, local], '')
-    expect(groups.map((group) => group.provider?.name ?? '独立')).toEqual(['DeepSeek', '本地', '独立'])
-    expect(groups[0]!.profiles.map((item) => item.displayName)).toEqual(['Alpha', 'Beta'])
-    expect(groupPool(profiles, [deepseek, local], 'beta').map((group) => group.profiles[0]?.displayName)).toEqual(['Beta'])
-    // Paste-the-id search works on model ids, not just display names.
-    expect(groupPool(profiles, [deepseek, local], 'legacy-1').flatMap((group) => group.profiles).map((item) => item.id)).toEqual(['legacy-1'])
+    const rows = [profile('a', { providerId: 'p1' }), profile('b', { providerId: 'p1' }), profile('c', { providerId: 'p2' })]
+    expect(poolFilters([deepseek, local], rows)).toEqual([
+      { key: 'all', count: 3 },
+      { key: 'p1', count: 2 },
+      { key: 'p2', count: 1 },
+    ])
+    const withOrphan = [...rows, profile('orphan')]
+    const filters = poolFilters([deepseek, local], withOrphan)
+    expect(filters[filters.length - 1]).toEqual({ key: 'legacy', count: 1 })
   })
 
-  it('hides unusable context numbers and formats thousands', () => {
-    expect(contextOf(profile('x', { settings: { contextWindow: 512 } }))).toBeUndefined()
-    expect(contextOf(profile('x', { settings: { contextWindow: 32_768 } }))).toBe(32_768)
+  it('filters the pool by provider, search, and shows orphans under legacy', () => {
+    const deepseek = provider('p1', 'DeepSeek')
+    const rows = [
+      profile('zeta', { providerId: 'p2', displayName: 'Zeta' }),
+      profile('beta', { providerId: 'p1', displayName: 'Beta' }),
+      profile('orphan-1'),
+      profile('alpha', { providerId: 'p1', displayName: 'Alpha' }),
+    ]
+    expect(filterPool(rows, [deepseek], 'p1', '').map((row) => row.displayName)).toEqual(['Alpha', 'Beta'])
+    // p2 is a real provider with no profiles row here: legacy only collects
+    // profiles whose providerId matches no known provider, or none at all.
+    expect(filterPool(rows, [deepseek], 'legacy', '').map((row) => row.id)).toEqual(['orphan-1', 'zeta'])
+    expect(filterPool(rows, [deepseek], 'all', 'beta').map((row) => row.id)).toEqual(['beta'])
+    expect(filterPool(rows, [deepseek], 'all', 'orphan-1').map((row) => row.id)).toEqual(['orphan-1'])
+  })
+
+  it('reads declared capabilities and drops unusable values', () => {
+    const declared = profile('x', { settings: { contextWindow: 32_768, inputTypes: ['text', 'image', 'hologram'], reasoning: true } })
+    expect(declaredCapabilities(declared)).toEqual({ context: 32_768, inputTypes: ['text', 'image'], reasoning: true })
+    const empty = profile('y', { settings: { contextWindow: 512 } })
+    expect(declaredCapabilities(empty)).toEqual({ context: undefined, inputTypes: [], reasoning: undefined })
+  })
+
+  it('formats context sizes compactly and honestly', () => {
     expect(formatContext(undefined)).toBe('—')
     expect(formatContext(32_768)).toBe('32K')
+    expect(formatContext(1_048_576)).toBe('1M')
+    expect(formatContext(900)).toBe('900')
   })
 
   it('summarizes sync without double counting changed rows', () => {

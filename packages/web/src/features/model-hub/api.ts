@@ -62,6 +62,14 @@ export interface DiscoveredModel {
   id: string
   displayName?: string
   contextLength?: number
+  inputTypes?: string[]
+  reasoning?: boolean
+}
+
+export interface ModelAssignmentRef {
+  scope: string
+  scopeId: string
+  modelProfileId: string
 }
 
 export interface SyncOutcome {
@@ -141,17 +149,12 @@ export async function fetchBalance(workspaceId: string, providerId: string): Pro
   )
 }
 
-export async function probeProfile(
-  workspaceId: string,
-  profileId: string,
-): Promise<{ capabilities: { tools: string; json: string }; probedAt: string }> {
-  return api<{ capabilities: { tools: string; json: string }; probedAt: string }>(
-    `/api/workspaces/${enc(workspaceId)}/model-profiles/${enc(profileId)}/probe`,
-    { method: 'POST' },
-  )
+export async function listProfiles(workspaceId: string): Promise<{ profiles: HubProfile[]; assignments: ModelAssignmentRef[] }> {
+  const result = await api<{ items: HubProfile[]; assignments: ModelAssignmentRef[] }>(`/api/workspaces/${enc(workspaceId)}/model-profiles`)
+  return { profiles: result.items, assignments: result.assignments ?? [] }
 }
 
-export async function listProfiles(workspaceId: string): Promise<HubProfile[]> {
-  const result = await api<{ items: HubProfile[] }>(`/api/workspaces/${enc(workspaceId)}/model-profiles`)
-  return result.items
+export async function removeProfile(workspaceId: string, profileId: string): Promise<void> {
+  await api<unknown>(`/api/workspaces/${enc(workspaceId)}/model-profiles/${enc(profileId)}`, { method: 'DELETE' })
 }
+
