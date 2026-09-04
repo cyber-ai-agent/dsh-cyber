@@ -123,6 +123,20 @@ describe('ModelProviderCatalogService fallback chain', () => {
     expect(state.catalog.version).toBe('good')
   })
 
+  it('refreshes a same-version remote when its content hash changes', async () => {
+    const root = await stateRoot()
+    let remote = { ...structuredClone(BUNDLED_MODEL_PROVIDER_CATALOG), version: 'same-version' }
+    const fetchMock = vi.fn<typeof fetch>(async () => response(remote))
+    const service = new ModelProviderCatalogService({
+      stateRoot: root,
+      remoteUrl: 'https://example.test/catalog.json',
+      fetch: fetchMock,
+    })
+    expect((await service.state()).catalog.providers[0]!.description).toBe(BUNDLED_MODEL_PROVIDER_CATALOG.providers[0]!.description)
+    remote = { ...remote, providers: remote.providers.map((provider, index) => index === 0 ? { ...provider, description: '更新后的目录说明' } : provider) }
+    expect((await service.state(true)).catalog.providers[0]!.description).toBe('更新后的目录说明')
+  })
+
   it('lands on the bundled snapshot when nothing else exists', async () => {
     const root = await stateRoot()
     const service = new ModelProviderCatalogService({
