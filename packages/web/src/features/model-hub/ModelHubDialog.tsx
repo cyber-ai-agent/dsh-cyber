@@ -35,6 +35,7 @@ import {
   poolFilters,
   searchModels,
   selectionModels,
+  splitRemovable,
   summarizeSync,
   toggleSelection,
   unmergeSelection,
@@ -96,6 +97,7 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
   const [confirmingRemove, setConfirmingRemove] = useState<string>()
   const [poolQuery, setPoolQuery] = useState('')
   const [poolFilter, setPoolFilter] = useState<PoolFilterKey>('all')
+  const [confirmClearPool, setConfirmClearPool] = useState(false)
   const [wizard, setWizard] = useState<WizardState>()
   const [modelQuery, setModelQuery] = useState('')
   const panelRef = useRef<HTMLElement>(null)
@@ -229,6 +231,21 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
     }
   }
 
+  const runClearPool = async (targets: HubProfile[]): Promise<void> => {
+    setBusy('clear-pool')
+    setError(undefined)
+    try {
+      for (const profile of targets) await removeProfile(workspaceId, profile.id)
+      setConfirmClearPool(false)
+      await reload()
+    } catch (cause) {
+      setError(errorMessage(cause, t('modelHub.clearFailed', '清空未完成，已移除的部分不会恢复。')))
+      await reload()
+    } finally {
+      setBusy(undefined)
+    }
+  }
+
   const runSync = async (provider: HubProvider): Promise<void> => {
     setBusy(`sync:${provider.id}`)
     setError(undefined)
@@ -342,7 +359,7 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
 
       {wizard === undefined && tab === 'pool' ? <div className="model-hub__pool">
         <aside className="model-hub__pool-filters" aria-label={t('modelHub.filterAria', '按服务商筛选模型')}>
-          {filterOptions.map((option) => <button key={option.key} type="button" className={poolFilter === option.key ? 'is-active' : ''} aria-current={poolFilter === option.key} onClick={() => setPoolFilter(option.key)}>
+          {filterOptions.map((option) => <button key={option.key} type="button" className={poolFilter === option.key ? 'is-active' : ''} aria-current={poolFilter === option.key} onClick={() => { setPoolFilter(option.key); setConfirmClearPool(false) }}>
             <span>{filterLabel(option.key)}</span><small>{option.count}</small>
           </button>)}
         </aside>
@@ -356,7 +373,16 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
               <th>{t('modelHub.colContext', '上下文')}</th>
               <th>{t('modelHub.colInput', '输入格式')}</th>
               <th>{t('modelHub.colReasoning', '推理')}</th>
-              <th className="model-hub__col-actions" aria-label={t('modelHub.colActions', '操作')} />
+              <th className="model-hub__col-actions">{(() => {
+                // Clear removes exactly the removable rows in the current view
+                // (left filter + search applied); in-use rows are held and the
+                // count tells the truth about it. Scope is the visible list.
+                const { removable, held } = splitRemovable(poolRows, assignedProfileIds)
+                if (removable.length === 0) return held > 0 ? <span title={t('modelHub.clearAllHeld', '使用中，不可清空')}>{t('modelHub.colActions', '操作')}</span> : t('modelHub.colActions', '操作')
+                return confirmClearPool
+                  ? <span className="model-hub__confirm"><button type="button" className="is-danger" disabled={busy === 'clear-pool'} title={held > 0 ? t('modelHub.clearHeldSuffix', '{count} in-use kept', { count: held }) : undefined} onClick={() => void runClearPool(removable)}>{busy === 'clear-pool' ? t('modelHub.clearing', 'Clearing…') : t('modelHub.confirmClear', 'Confirm clear ({count})', { count: removable.length })}</button><button type="button" onClick={() => setConfirmClearPool(false)}>{t('modelHub.cancel', '取消')}</button></span>
+                  : <button type="button" className="model-hub__col-actions-clear" onClick={() => setConfirmClearPool(true)}>{t('modelHub.clearPool', 'Clear')}</button>
+              })()}</th>
             </tr></thead>
             <tbody>{poolRows.map((profile) => {
               const declared = declaredCapabilities(profile)

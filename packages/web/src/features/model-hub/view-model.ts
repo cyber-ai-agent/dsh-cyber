@@ -53,6 +53,16 @@ export function allSelected(models: readonly DiscoveredModel[], selected: Readon
   return models.length > 0 && models.every((model) => selected.has(model.id))
 }
 
+/**
+ * Who the pool's clear button may remove: rows in the current view that no
+ * assignment references. In-use rows are never silently deleted by a bulk
+ * action - the held count is shown so the promise matches the act.
+ */
+export function splitRemovable(rows: readonly HubProfile[], assignedProfileIds: ReadonlySet<string>): { removable: HubProfile[]; held: number } {
+  const removable = rows.filter((row) => !assignedProfileIds.has(row.id))
+  return { removable, held: rows.length - removable.length }
+}
+
 /** The pool's left rail: 全部, one entry per provider, plus orphan rows. */
 export type PoolFilterKey = 'all' | 'legacy' | string // otherwise a provider id
 

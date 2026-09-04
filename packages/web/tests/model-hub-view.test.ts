@@ -12,6 +12,7 @@ import {
   poolFilters,
   searchModels,
   selectionModels,
+  splitRemovable,
   summarizeSync,
   toggleSelection,
   unmergeSelection,
@@ -136,5 +137,16 @@ describe('model hub view model', () => {
   it('summarizes sync without double counting changed rows', () => {
     const summary = summarizeSync({ added: [1, 2], removed: [], changed: [3], unchanged: 10 })
     expect(summary).toEqual({ added: 2, removed: 0, changed: 1, untouched: 9 })
+  })
+
+  it('clears only unassigned rows and reports how many are held', () => {
+    const rows = [profile('a'), profile('b'), profile('c')]
+    const assigned = new Set(['b'])
+    const { removable, held } = splitRemovable(rows, assigned)
+    expect(removable.map((row) => row.id)).toEqual(['a', 'c'])
+    expect(held).toBe(1)
+    // All held: nothing removable, so the header hides the clear affordance.
+    expect(splitRemovable(rows, new Set(['a', 'b', 'c']))).toEqual({ removable: [], held: 3 })
+    expect(splitRemovable(rows, new Set()).removable).toHaveLength(3)
   })
 })
