@@ -206,6 +206,26 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
     return effectiveDefaultModel.modelId || effectiveDefaultModel.displayName
   }, [effectiveDefaultModel, modelProfileId, participantModels, t])
 
+  /**
+   * What "restore inherited" actually hands control to: the world → workspace
+   * → default chain, deliberately skipping the character's own assignment (the
+   * level being cleared) and the current selection. The panel's secondary text
+   * used to echo the current model back, which read as a no-op.
+   */
+  const inheritResolutionLabel = useMemo(() => {
+    const worldAssigned = modelAssignments.find((item) => item.scope === 'world' && item.scopeId === world.id)
+    const byWorld = worldAssigned === undefined ? undefined : models.find((item) => item.id === worldAssigned.modelProfileId)
+    if (byWorld !== undefined) return byWorld.modelId || byWorld.displayName
+    const worldSettingsModelId = (world as unknown as { settings?: { model?: { defaultModelProfileId?: string } } }).settings?.model?.defaultModelProfileId
+    const byWorldSettings = worldSettingsModelId === undefined ? undefined : models.find((item) => item.id === worldSettingsModelId)
+    if (byWorldSettings !== undefined) return byWorldSettings.modelId || byWorldSettings.displayName
+    const wsAssigned = modelAssignments.find((item) => item.scope === 'workspace')
+    const byWorkspace = wsAssigned === undefined ? undefined : models.find((item) => item.id === wsAssigned.modelProfileId)
+    if (byWorkspace !== undefined) return byWorkspace.modelId || byWorkspace.displayName
+    const fallback = models.find((item) => item.isDefault) ?? models[0]
+    return fallback === undefined ? '未配置模型' : fallback.modelId || fallback.displayName
+  }, [modelAssignments, models, world])
+
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     const container = scrollRef.current
     if (container === null) return
@@ -488,7 +508,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
             <input ref={fileInputRef} className="composer-file-input" type="file" accept=".png,.jpg,.jpeg,.webp,.txt,.md,.json,.pdf" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAttachment(file) }} />
             <button className="icon-button composer-attachment-button" type="button" aria-label={uploading ? '正在上传附件' : '添加附件'} title={uploading ? '正在上传附件' : '添加附件'} disabled={uploading} onClick={() => fileInputRef.current?.click()}>{uploading ? <CircleNotch size={18} className="spin" /> : <Paperclip size={18} />}</button>
             {onChangePermissionMode === undefined ? null : <ConversationPermissionControl value={permissionMode} onChange={onChangePermissionMode} {...(onRequestFullAccess === undefined ? {} : { onRequestFullAccess })} />}
-            {onChangeModelProfile === undefined || conversationKind === 'group' ? null : <div className="composer-model-picker"><ModelPicker models={models} value={modelProfileId} inheritLabel={resolvedModelLabel} ariaLabel={t('workbench.modelLabel', '当前会话模型')} onChange={onChangeModelProfile} /></div>}
+            {onChangeModelProfile === undefined || conversationKind === 'group' ? null : <div className="composer-model-picker"><ModelPicker models={models} value={modelProfileId} inheritLabel={inheritResolutionLabel} ariaLabel={t('workbench.modelLabel', '当前会话模型')} onChange={onChangeModelProfile} /></div>}
             <CommandPicker commands={installedPlugins} draft={draft} onDraftChange={onDraftChange} {...(onOpenPluginMarket === undefined ? {} : { onOpenMarket: onOpenPluginMarket })} onFocus={() => inputRef.current?.focus()} />
           </div>
           <div className="composer__actions-right">

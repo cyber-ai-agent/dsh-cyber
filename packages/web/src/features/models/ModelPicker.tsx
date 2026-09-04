@@ -91,12 +91,15 @@ const RESTORE_LABEL: Record<UiLocale, string> = {
 export function modelPickerGroups(models: readonly ModelProfile[], locale: UiLocale): ModelPickerGroup[] {
   const groups = new Map<string, { label: string; models: ModelProfile[] }>()
   for (const model of models) {
-    const providerId = settingText(model, 'providerId') ?? model.providerKind
-    const isCustom = providerId === 'custom-local' || providerId === 'custom-remote'
-    const key = isCustom ? `${providerId}:${model.id}` : providerId
-    const label = settingText(model, 'providerName') ?? (isCustom
-      ? model.displayName
-      : providerLabel(providerId, locale))
+    // Group by the real provider connection the owner added (first-class
+    // providerId, joined name from the server projection). Only pre-hub
+    // profiles without a connection fall back to their settings or, when
+    // even that is missing, to a kind+label bucket so unrelated custom
+    // endpoints never merge into one anonymous "远程模型服务".
+    const connectionId = model.providerId ?? settingText(model, 'providerId')
+    const name = model.providerName ?? settingText(model, 'providerName')
+    const key = connectionId ?? `${model.providerKind}:${name ?? providerLabel(model.providerKind, locale)}`
+    const label = name ?? providerLabel(connectionId ?? model.providerKind, locale)
     const group = groups.get(key)
     if (group) group.models.push(model)
     else groups.set(key, { label, models: [model] })
@@ -135,6 +138,7 @@ export function ModelPicker({
   const triggerRef = useRef<HTMLButtonElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const modelRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const rootRef = useRef<HTMLDivElement>(null)
 
   const groups = useMemo(() => modelPickerGroups(models, locale), [models, locale])
   const filteredGroups = useMemo(() => filterModelPickerGroups(groups, query), [groups, query])
@@ -155,6 +159,13 @@ export function ModelPicker({
       return
     }
     searchRef.current?.focus()
+    // A dropdown you can only dismiss by re-clicking its own trigger is a
+    // trap: any other click on the page closes it, as every menu does.
+    const onPointerDown = (event: PointerEvent) => {
+      if (rootRef.current !== null && !rootRef.current.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => { document.removeEventListener('pointerdown', onPointerDown) }
   }, [open])
 
   const close = () => {
@@ -172,7 +183,7 @@ export function ModelPicker({
       : selectedModel.modelId
 
   return (
-    <div className={`model-picker${open ? ' is-open' : ''}${disabled ? ' is-disabled' : ''}`}>
+    <div ref={rootRef} className={`model-picker${open ? ' is-open' : ''}${disabled ? ' is-disabled' : ''}`}>
       <button
         ref={triggerRef}
         type="button"
