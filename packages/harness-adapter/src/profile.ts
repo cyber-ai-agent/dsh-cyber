@@ -236,14 +236,18 @@ export function validateProviderProfile(profile: HarnessProviderProfile): void {
     throw new Error('Provider display name, API and model are required')
   }
   const endpoint = new URL(profile.baseURL)
-  // Plain HTTP is safe on a private network: loopback and RFC1918-style
-  // addresses follow the same policy the server applies when saving model
-  // profiles (model-url-policy.assertModelBaseUrl), so a LAN vLLM/Ollama box
-  // is not rejected at worker-launch time after passing the settings form.
-  // Anything else — public hosts, or hostnames that could resolve there —
-  // still requires HTTPS.
-  if (endpoint.protocol !== 'https:' && !isExplicitPrivateHostname(normalizeHostname(endpoint.hostname))) {
-    throw new Error('Provider URL must use HTTPS, except loopback or private-network HTTP endpoints')
+  // Only HTTP(S) transports are valid model endpoints. HTTPS is accepted
+  // anywhere; plain HTTP only on a private network (loopback and RFC1918-style
+  // addresses), matching the policy the server applies when saving model
+  // profiles (model-url-policy.assertModelBaseUrl) so a LAN vLLM/Ollama box is
+  // not rejected at worker-launch time after passing the settings form. Other
+  // schemes — ftp/ws/etc. — are rejected even on private hosts, and public
+  // hosts still require HTTPS.
+  if (
+    endpoint.protocol !== 'https:'
+    && !(endpoint.protocol === 'http:' && isExplicitPrivateHostname(normalizeHostname(endpoint.hostname)))
+  ) {
+    throw new Error('Provider URL must use HTTPS, except private-network HTTP endpoints')
   }
   if (profile.apiKeyEnv !== undefined && !/^[A-Z_][A-Z0-9_]*$/.test(profile.apiKeyEnv)) {
     throw new Error('Invalid provider credential environment variable')

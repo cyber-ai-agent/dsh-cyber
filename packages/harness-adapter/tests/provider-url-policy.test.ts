@@ -47,6 +47,16 @@ describe('provider URL transport policy', () => {
     }
   })
 
+  it('rejects non-HTTP(S) transports even on private hosts', () => {
+    for (const url of [
+      'ftp://127.0.0.1/v1',
+      'ws://192.168.1.10:8080/v1',
+      'file:///C:/model',
+    ]) {
+      expect(() => validateProviderProfile(provider(url)), url).toThrow(/must use HTTPS/)
+    }
+  })
+
   it('172.16 boundary follows RFC1918: /12 in, 172.32 out', () => {
     expect(() => validateProviderProfile(provider('http://172.16.0.1:8000/v1'))).not.toThrow()
     expect(() => validateProviderProfile(provider('http://172.31.0.1:8000/v1'))).not.toThrow()
