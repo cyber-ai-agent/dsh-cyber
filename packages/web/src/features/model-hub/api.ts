@@ -208,3 +208,11 @@ export async function addManualModel(workspaceId: string, providerId: string, mo
   })
 }
 
+/** Marks a pooled model as an image generator so a chat turn routes to the images endpoint. */
+export async function setProfileImageFlag(workspaceId: string, profileId: string, value: boolean): Promise<void> {
+  await api<unknown>(`/api/workspaces/${enc(workspaceId)}/model-profiles/${enc(profileId)}/image-flag`, {
+    method: 'PUT',
+    body: JSON.stringify({ value }),
+  })
+}
+

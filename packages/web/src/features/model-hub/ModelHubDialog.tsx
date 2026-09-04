@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { EmployeeInstance, World } from '@dsh-cyber/contracts'
-import { ArrowLeft, ArrowsClockwise, CheckCircle, ImageSquare, Lightning, MagnifyingGlass, PencilSimple, Plus, Stack, Star, TextAa, Trash, VideoCamera, WarningCircle, Waveform, X } from '@phosphor-icons/react'
+import { ArrowLeft, ArrowsClockwise, CheckCircle, ImageSquare, Lightning, MagnifyingGlass, Palette, PencilSimple, Plus, Stack, Star, TextAa, Trash, VideoCamera, WarningCircle, Waveform, X } from '@phosphor-icons/react'
 
 import './model-hub.css'
 import { useI18n } from '../../i18n/runtime.js'
@@ -21,6 +21,7 @@ import {
   saveProvider,
   setAssignment,
   setDefaultProfile,
+  setProfileImageFlag,
   syncProvider,
   testProvider,
   type DiscoveredModel,
@@ -304,6 +305,19 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
     }
   }
 
+  const runToggleImageFlag = async (profile: HubProfile, value: boolean): Promise<void> => {
+    setBusy(`image:${profile.id}`)
+    setError(undefined)
+    try {
+      await setProfileImageFlag(workspaceId, profile.id, value)
+      await reload()
+    } catch (cause) {
+      setError(errorMessage(cause, t('modelHub.imageFlagFailed', '切换生图模式失败。')))
+    } finally {
+      setBusy(undefined)
+    }
+  }
+
   const runManualAdd = async (): Promise<void> => {
     setBusy('manual')
     setError(undefined)
@@ -534,6 +548,10 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
                   : <span className="model-hub__verdict is-no" title={t('modelHub.reasonNo', '不支持')} aria-label={t('modelHub.reasonNo', '不支持')}>×</span>}
                 </td>
                 <td className="model-hub__col-actions"><span className="model-hub__row-actions">
+                  {(() => {
+                    const imageMode = profile.settings.imageGeneration === true || (declared.outputTypes.length > 0 && declared.outputTypes.includes('image') && !declared.outputTypes.includes('text'))
+                    return <button type="button" className={imageMode ? 'model-hub__star is-on' : 'model-hub__star'} disabled={busy === `image:${profile.id}`} title={imageMode ? t('modelHub.imageModeOn', '生图模式：发消息即生成图片（点击改回对话模型）') : t('modelHub.imageModeOff', '标为图像生成模型（对话将直接出图）')} aria-label={imageMode ? t('modelHub.imageModeOnAria', '将 {name} 改回对话模型', { name: profile.displayName }) : t('modelHub.imageModeOffAria', '将 {name} 标为图像生成模型', { name: profile.displayName })} onClick={() => void runToggleImageFlag(profile, !imageMode)}><Palette size={14} weight={imageMode ? 'fill' : 'regular'} /></button>
+                  })()}
                   {profile.isDefault
                     ? <span className="model-hub__star is-on" title={t('modelHub.defaultModel', '默认模型')} aria-label={t('modelHub.defaultModel', '默认模型')}><Star size={14} weight="fill" /></span>
                     : <button type="button" className="model-hub__star" disabled={busy === `default:${profile.id}`} title={t('modelHub.setDefault', '设为默认模型')} aria-label={t('modelHub.setDefaultAria', '将 {name} 设为默认模型', { name: profile.displayName })} onClick={() => void runSetDefault(profile)}><Star size={14} /></button>}

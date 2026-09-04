@@ -13,6 +13,7 @@ import {
   X,
 } from '@phosphor-icons/react'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { WORLD_CHARACTER_MANAGEMENT_PERMISSIONS, type ChatAttachment, type CompletionJob, type EmployeeDossier, type InstalledPluginCommand, type JsonObject, type LocalAssetMimeType, type ModelAssignment, type ModelProfile, type WorkMessage, type WorkSession, type World, type WorldCharacterPermission, type WorldPermissionDecisionScope, type WorldPermissionRequest } from '@dsh-cyber/contracts'
 
 import { api } from '../api.js'
@@ -91,6 +92,15 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
   const shouldFollowOutputRef = useRef(true)
   const historyAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | undefined>(undefined)
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
+  // Clicking an image in the transcript enlarges it in place (portal overlay)
+  // instead of spawning a browser tab per picture.
+  const [zoomImage, setZoomImage] = useState<ChatAttachment>()
+  useEffect(() => {
+    if (zoomImage === undefined) return
+    const onKey = (event: KeyboardEvent): void => { if (event.key === 'Escape') setZoomImage(undefined) }
+    window.addEventListener('keydown', onKey)
+    return () => { window.removeEventListener('keydown', onKey) }
+  }, [zoomImage])
   const [uploading, setUploading] = useState(false)
   const [attachmentError, setAttachmentError] = useState<string>()
   const [messageMenu, setMessageMenu] = useState<{ message: WorkMessage; position: ContextMenuPosition }>()
@@ -456,7 +466,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
                 <div className="message__body">
                   <header className="message__meta">{owner ? <span className="sr-only">我的消息</span> : <><strong>{employee?.displayName ?? experience.personLabel}<AuthorityBadge role={employee?.authorityRole} /></strong><span>{employee?.role}</span></>}{owner || employee === undefined ? null : <MessageSpeechButton employeeId={employee.id} employeeName={employee.displayName} {...(dossiers[employee.id]?.profile === undefined ? {} : { profile: dossiers[employee.id]!.profile })} text={message.content} />}<time>{displayTime(message)}</time>{copiedMessageId === message.id ? <span role="status">已复制</span> : rememberingMessageId === message.id ? <span role="status">正在提交整理…</span> : submittedKnowledgeMessageIds.has(message.id) ? <span role="status">已提交整理</span> : null}</header>
                   <div className="message__content">{streaming && message.content.length === 0 ? <span className="stream-placeholder">正在回复中…</span> : <RichText value={message.content} worldId={world.id} />}{streaming ? <span className="stream-cursor" aria-hidden="true" /> : null}</div>
-                  <MessageAttachments attachments={messageAttachments(message.metadata)} />
+                  <MessageAttachments attachments={messageAttachments(message.metadata)} onZoom={(attachment) => setZoomImage(attachment)} />
                   <CompletionJobStatus metadata={message.metadata} {...(onRetryCompletionJob === undefined ? {} : { onRetry: onRetryCompletionJob })} {...(onCompletionJobSettled === undefined ? {} : { onSettled: onCompletionJobSettled })} />
                   {artifactRefsFromMetadata(message.metadata).length === 0 ? null : <Suspense fallback={<div className="chat-artifact-refs" role="status">正在载入产物卡…</div>}><ArtifactReferenceCards worldId={world.id} artifactRefs={artifactRefsFromMetadata(message.metadata)} onOpen={onOpenArtifact} /></Suspense>}
                 </div>
@@ -518,6 +528,10 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
           </div>
         </div>
       </div></div>
+      {zoomImage !== undefined ? createPortal(<div className="chat-image-zoom" role="dialog" aria-modal="true" aria-label={zoomImage.name} onMouseDown={(event) => { if (event.target === event.currentTarget) setZoomImage(undefined) }}>
+        <img src={zoomImage.url} alt={zoomImage.name} />
+        <button type="button" className="icon-button chat-image-zoom__close" aria-label={t('common.close', '关闭')} onClick={() => setZoomImage(undefined)}><X size={18} /></button>
+      </div>, document.body) : null}
     </section>
   )
 }
@@ -595,9 +609,9 @@ function namedClipboardImage(file: File, index: number): File {
   return new File([file], `粘贴图片-${Date.now()}-${index + 1}.${extension}`, { type: file.type || 'image/png', lastModified: file.lastModified })
 }
 
-function MessageAttachments({ attachments }: { attachments: ChatAttachment[] }) {
+function MessageAttachments({ attachments, onZoom }: { attachments: ChatAttachment[]; onZoom?(attachment: ChatAttachment): void }) {
   if (attachments.length === 0) return null
-  return <div className="message-attachments">{attachments.map((attachment) => attachment.mimeType.startsWith('image/') ? <a key={attachment.assetId} className="message-attachment message-attachment--image" href={attachment.url} target="_blank" rel="noreferrer"><img src={attachment.url} alt={attachment.name} /><span><strong>{attachment.name}</strong><small>{formatBytes(attachment.byteLength)}</small></span></a> : <a key={attachment.assetId} className="message-attachment" href={attachment.url} target="_blank" rel="noreferrer"><FileIcon size={19} /><span><strong>{attachment.name}</strong><small>{attachment.mimeType} · {formatBytes(attachment.byteLength)}</small></span><span>打开</span></a>)}</div>
+  return <div className="message-attachments">{attachments.map((attachment) => attachment.mimeType.startsWith('image/') ? <a key={attachment.assetId} className="message-attachment message-attachment--image" href={attachment.url} target="_blank" rel="noreferrer" onClick={(event) => { if (onZoom === undefined) return; event.preventDefault(); onZoom(attachment) }}><img src={attachment.url} alt={attachment.name} /><span><strong>{attachment.name}</strong><small>{formatBytes(attachment.byteLength)}</small></span></a> : <a key={attachment.assetId} className="message-attachment" href={attachment.url} target="_blank" rel="noreferrer"><FileIcon size={19} /><span><strong>{attachment.name}</strong><small>{attachment.mimeType} · {formatBytes(attachment.byteLength)}</small></span><span>打开</span></a>)}</div>
 }
 
 function messageAttachments(metadata: JsonObject): ChatAttachment[] {

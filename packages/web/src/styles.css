@@ -1534,8 +1534,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .message-attachment > span { min-width: 0; display: grid; gap: 2px; }
 .message-attachment strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .message-attachment small, .message-attachment > span:last-child { color: var(--text-muted); font-size: 8px; }
-.message-attachment--image { max-width: 380px; grid-template-columns: 84px minmax(0, 1fr); }
+.message-attachment--image { max-width: 380px; grid-template-columns: 84px minmax(0, 1fr); cursor: zoom-in; }
 .message-attachment--image img { width: 84px; height: 64px; object-fit: cover; border: 1px solid var(--border); }
+.chat-image-zoom { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; background: rgba(4, 6, 10, 0.82); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+.chat-image-zoom img { max-width: min(92vw, 1600px); max-height: 90vh; object-fit: contain; border: 1px solid var(--border-strong, var(--border)); border-radius: 10px; box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6); background: var(--surface-1); }
+.chat-image-zoom__close { position: absolute; top: 18px; right: 22px; width: 40px; height: 40px; color: #fff; background: rgba(255, 255, 255, 0.08); }
+.chat-image-zoom__close:hover { background: rgba(255, 255, 255, 0.16); }
 .send-button { width: 32px; height: 30px; display: grid; place-items: center; border: 0; background: var(--accent); color: #171108; }
 .send-button--stop { background: var(--danger); color: #fff; }
 .mention-menu { position: absolute; z-index: 10; left: 8px; bottom: calc(100% + 6px); width: 300px; max-height: 300px; overflow: auto; border: 1px solid var(--border-strong); background: var(--surface-2); box-shadow: var(--shadow); }
