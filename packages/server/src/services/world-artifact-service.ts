@@ -84,6 +84,20 @@ export interface PublishBrowserScreenshotInput {
   idempotencyKey?: string
 }
 
+/** A model-generated image becoming a durable Artifact. */
+export interface PublishGeneratedImageInput {
+  workspaceId: string
+  worldId: string
+  bytes: Buffer
+  mimeType: 'image/png' | 'image/jpeg' | 'image/webp'
+  title: string
+  createdById: string
+  sessionId?: string
+  workTurnId?: string
+  agentRunId?: string
+  idempotencyKey?: string
+}
+
 export interface ArtifactPreview {
   artifact: WorldArtifact
   version: WorldArtifactVersion
@@ -173,6 +187,37 @@ export class WorldArtifactService {
         mimeType: 'image/png',
         createdByKind: 'employee',
         createdById: input.createdById,
+        ...(input.workTurnId === undefined ? {} : { workTurnId: input.workTurnId }),
+        ...(input.agentRunId === undefined ? {} : { agentRunId: input.agentRunId }),
+        ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),
+      })
+    } finally {
+      await rm(cachePath, { force: true }).catch(() => undefined)
+    }
+  }
+
+  /** Publish an image a model just generated as a durable Artifact. */
+  async publishGeneratedImage(input: PublishGeneratedImageInput): Promise<WorldArtifactPublication> {
+    if (!Buffer.isBuffer(input.bytes) || input.bytes.byteLength === 0 || input.bytes.byteLength > 20 * 1024 * 1024) {
+      throw invalid('generated_image_size_invalid', '生成的图片大小无效')
+    }
+    const extension = input.mimeType === 'image/jpeg' ? 'jpg' : input.mimeType === 'image/webp' ? 'webp' : 'png'
+    const root = await this.#roots.ensure(input.worldId)
+    const cacheDirectory = join(root.cachePath, 'generated-images')
+    await mkdir(cacheDirectory, { recursive: true })
+    const cachePath = join(cacheDirectory, `${randomUUID()}.${extension}`)
+    await writeFile(cachePath, input.bytes, { flag: 'wx', mode: 0o600 })
+    try {
+      return await this.publishImportedFile({
+        workspaceId: input.workspaceId,
+        worldId: input.worldId,
+        sourcePath: cachePath,
+        title: input.title,
+        kind: 'image',
+        mimeType: input.mimeType,
+        createdByKind: 'employee',
+        createdById: input.createdById,
+        ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
         ...(input.workTurnId === undefined ? {} : { workTurnId: input.workTurnId }),
         ...(input.agentRunId === undefined ? {} : { agentRunId: input.agentRunId }),
         ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),

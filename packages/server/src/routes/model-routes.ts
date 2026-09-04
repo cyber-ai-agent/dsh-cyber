@@ -112,6 +112,12 @@ export function registerModelRoutes(router: Router, dependencies: ModelRoutesDep
     let profile
     try {
       validateWebSearchSettings(settings, credentialEnvName)
+      // A materialized discovered model may carry the provider connection it
+      // came from (via the base profile). Validate it belongs to this
+      // workspace; a stale or foreign id is ignored rather than trusted.
+      const requestedProviderId = typeof body.providerId === 'string' ? body.providerId : undefined
+      const providerConnection = requestedProviderId === undefined ? undefined : store.getModelProvider(requestedProviderId)
+      const providerId = providerConnection !== undefined && providerConnection.workspaceId === params[0] ? providerConnection.id : undefined
       profile = store.saveModelProfile({
         id: profileId,
         workspaceId: params[0]!,
@@ -123,6 +129,7 @@ export function registerModelRoutes(router: Router, dependencies: ModelRoutesDep
         ...(credentialEnvName === undefined ? {} : { credentialEnvName }),
         ...(typeof body.isDefault === 'boolean' ? { isDefault: body.isDefault } : {}),
         ...(settings === undefined ? {} : { settings: settings as JsonObject }),
+        ...(providerId === undefined ? {} : { providerId }),
       })
     } catch (error) {
       if (apiKey !== undefined) {

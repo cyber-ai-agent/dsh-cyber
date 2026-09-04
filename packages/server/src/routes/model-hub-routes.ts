@@ -192,6 +192,23 @@ export function registerModelHubRoutes(router: Router, dependencies: ModelHubRou
     writeJson(response, 200, { profile: saved })
   })
 
+  // Explicit "this is an image-generation model" mark: gateways that hide or
+  // misreport modalities need the owner's word, and the mark is what lets a
+  // chat turn route to the images endpoint instead of failing as chat.
+  router.put(/^\/api\/workspaces\/([^/]+)\/model-profiles\/([^/]+)\/image-flag$/, async ({ request, response, params }) => {
+    const profile = store.getModelProfile(params[1]!)
+    if (profile === undefined || profile.workspaceId !== params[0]!) {
+      throw new HttpError(404, 'model_profile_not_found', '模型不存在。')
+    }
+    const body = await readJson(request)
+    if (typeof body.value !== 'boolean') throw new HttpError(422, 'image_flag_invalid', 'value 需为布尔值。')
+    const settings: JsonObject = { ...profile.settings }
+    if (body.value) settings.imageGeneration = true
+    else delete settings.imageGeneration
+    const saved = store.saveModelProfile({ ...profile, settings })
+    writeJson(response, 200, { profile: saved })
+  })
+
   router.post(/^\/api\/workspaces\/([^/]+)\/model-providers\/([^/]+)\/test$/, async ({ response, params }) => {
     const provider = requireProvider(store, params[0]!, params[1]!)
     const key = requireProviderKey(provider)
