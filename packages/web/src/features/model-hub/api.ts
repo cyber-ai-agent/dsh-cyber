@@ -35,6 +35,8 @@ export interface HubProvider {
   credentialEnvName?: string
   modelCount: number
   credentialConfigured: boolean
+  /** Last four characters of the stored key, for telling saved keys apart. */
+  credentialTail?: string
   assignedCount: number
   balanceSupported: boolean
   signup?: { text: string; url: string }

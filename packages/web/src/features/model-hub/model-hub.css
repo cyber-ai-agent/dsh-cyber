@@ -82,6 +82,7 @@
 .model-hub__form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; max-width: 680px; }
 .model-hub__form label { display: grid; gap: 6px; font-size: 13px; min-width: 0; }
 .model-hub__form label > span { color: var(--text-soft); }
+.model-hub__form label > small { color: var(--text-muted); font-size: 12px; }
 .model-hub__form input, .model-hub__form select { width: 100%; min-height: 36px; padding: 7px 10px; color: var(--text); background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 14px; }
 .model-hub__key { position: relative; display: block; }
 .model-hub__key input { padding-right: 44px; }
