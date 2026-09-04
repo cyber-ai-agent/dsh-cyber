@@ -4,6 +4,8 @@ import type { HubProfile, HubProvider } from '../src/features/model-hub/api.js'
 
 import {
   allSelected,
+  assignmentRows,
+  currentAssignment,
   declaredCapabilities,
   defaultSelection,
   filterPool,
@@ -148,5 +150,38 @@ describe('model hub view model', () => {
     // All held: nothing removable, so the header hides the clear affordance.
     expect(splitRemovable(rows, new Set(['a', 'b', 'c']))).toEqual({ removable: [], held: 3 })
     expect(splitRemovable(rows, new Set()).removable).toHaveLength(3)
+  })
+
+  it('builds the assignment rail for global and per-world scopes', () => {
+    const worlds = [
+      { id: 'w1', name: '赛博公司', status: 'active' },
+      { id: 'w2', name: '月影酒馆', status: 'active' },
+      { id: 'w3', name: '旧世界', status: 'archived' },
+    ]
+    const staff = [
+      { id: 'e1', displayName: '秘书', worldId: 'w1', status: 'available' },
+      { id: 'e2', displayName: '工程师', worldId: 'w1', status: 'available' },
+      { id: 'e3', displayName: '酒保', worldId: 'w2', status: 'available' },
+      { id: 'e4', displayName: '幽灵', worldId: 'w1', status: 'archived' },
+    ]
+    const labels = { global: '全局', thisWorld: '本世界' }
+    const global = assignmentRows('global', 'ws-1', worlds, staff, labels)
+    expect(global.map((row) => `${row.kind}:${row.name}`)).toEqual(['workspace:全局', 'world:赛博公司', 'world:月影酒馆'])
+    const inWorld = assignmentRows('w1', 'ws-1', worlds, staff, labels)
+    expect(inWorld.map((row) => `${row.kind}:${row.id}`)).toEqual(['world:w1', 'employee:e1', 'employee:e2'])
+    expect(inWorld[1]!.subtitle).toBe('赛博公司')
+    // Unknown scope degrades to the global view rather than an empty rail.
+    expect(assignmentRows('nope', 'ws-1', worlds, staff, labels).map((row) => row.kind)).toEqual(['workspace'])
+  })
+
+  it('finds the current assignment of a target row', () => {
+    const assignments = [
+      { scope: 'world', scopeId: 'w1', modelProfileId: 'p-a' },
+      { scope: 'employee', scopeId: 'e1', modelProfileId: 'p-b' },
+    ]
+    expect(currentAssignment(assignments, { kind: 'world', id: 'w1', name: 'x' })).toBe('p-a')
+    expect(currentAssignment(assignments, { kind: 'employee', id: 'e1', name: 'x' })).toBe('p-b')
+    expect(currentAssignment(assignments, { kind: 'employee', id: 'e9', name: 'x' })).toBeUndefined()
+    expect(currentAssignment(assignments, { kind: 'workspace', id: 'ws', name: 'x' })).toBeUndefined()
   })
 })

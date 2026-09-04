@@ -922,7 +922,7 @@ function ModelSettings({
         <span><strong>{t('settings.model.hubTitle', '新的 AI 模型管理中心')}</strong><small>{t('settings.model.hubCopy', '服务商与模型池在此统一管理：一个服务商一份密钥，模型测试后勾选导入。这里保留默认模型快捷选择。')}</small></span>
         <button type="button" className="primary-button" onClick={() => setModelHubOpen(true)}>{t('settings.model.hubOpen', '打开模型中心')}</button>
       </div>
-      {modelHubOpen ? <Suspense fallback={null}><ModelHubDialog workspaceId={workspace.id} onClose={() => setModelHubOpen(false)} /></Suspense> : null}
+      {modelHubOpen ? <Suspense fallback={null}><ModelHubDialog workspaceId={workspace.id} worlds={worlds} employees={employees} onClose={() => setModelHubOpen(false)} /></Suspense> : null}
 
       <div className="model-config-layout">
         {/* 左侧：已连接模型列表面板 */}

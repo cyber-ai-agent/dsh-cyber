@@ -161,3 +161,16 @@ export async function removeProfile(workspaceId: string, profileId: string): Pro
   await api<unknown>(`/api/workspaces/${enc(workspaceId)}/model-profiles/${enc(profileId)}`, { method: 'DELETE' })
 }
 
+export type HubAssignmentScope = 'workspace' | 'world' | 'employee'
+
+export async function setAssignment(workspaceId: string, scope: HubAssignmentScope, scopeId: string, modelProfileId: string): Promise<void> {
+  await api<unknown>(`/api/workspaces/${enc(workspaceId)}/model-assignments/${scope}/${enc(scopeId)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ modelProfileId }),
+  })
+}
+
+export async function clearAssignment(workspaceId: string, scope: HubAssignmentScope, scopeId: string): Promise<void> {
+  await api<unknown>(`/api/workspaces/${enc(workspaceId)}/model-assignments/${scope}/${enc(scopeId)}`, { method: 'DELETE' })
+}
+

@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import type { EmployeeInstance, World } from '@dsh-cyber/contracts'
 import { ArrowLeft, ArrowsClockwise, CheckCircle, ImageSquare, Lightning, MagnifyingGlass, PencilSimple, Plus, Stack, TextAa, Trash, VideoCamera, WarningCircle, Waveform, X } from '@phosphor-icons/react'
 
 import './model-hub.css'
 import { useI18n } from '../../i18n/runtime.js'
 import { ApiError } from '../../api.js'
 import {
+  clearAssignment,
   deleteProvider,
   fetchBalance,
   importModels,
@@ -15,6 +17,7 @@ import {
   refreshCatalog,
   removeProfile,
   saveProvider,
+  setAssignment,
   syncProvider,
   testProvider,
   type DiscoveredModel,
@@ -22,10 +25,13 @@ import {
   type HubCatalogState,
   type HubProfile,
   type HubProvider,
+  type ModelAssignmentRef,
   type SyncOutcome,
 } from './api.js'
 import {
   allSelected,
+  assignmentRows,
+  currentAssignment,
   declaredCapabilities,
   defaultSelection,
   filterPool,
@@ -39,6 +45,7 @@ import {
   summarizeSync,
   toggleSelection,
   unmergeSelection,
+  type AssignmentRow,
   type PoolFilterKey,
 } from './view-model.js'
 
@@ -82,12 +89,13 @@ function errorMessage(cause: unknown, fallback: string): string {
   return cause instanceof Error && cause.message ? cause.message : fallback
 }
 
-export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; onClose(): void }) {
+export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { workspaceId: string; worlds: World[]; employees: EmployeeInstance[]; onClose(): void }) {
   const { t } = useI18n()
-  const [tab, setTab] = useState<'providers' | 'pool'>('providers')
+  const [tab, setTab] = useState<'providers' | 'pool' | 'assign'>('providers')
   const [catalog, setCatalog] = useState<HubCatalogState>()
   const [providers, setProviders] = useState<HubProvider[]>([])
   const [profiles, setProfiles] = useState<HubProfile[]>([])
+  const [assignments, setAssignments] = useState<ModelAssignmentRef[]>([])
   const [assignedProfileIds, setAssignedProfileIds] = useState<Set<string>>(new Set())
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState<string>()
@@ -98,6 +106,9 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
   const [poolQuery, setPoolQuery] = useState('')
   const [poolFilter, setPoolFilter] = useState<PoolFilterKey>('all')
   const [confirmClearPool, setConfirmClearPool] = useState(false)
+  const [assignScope, setAssignScope] = useState<'global' | string>('global')
+  const [assignTarget, setAssignTarget] = useState<AssignmentRow>()
+  const [assignProvider, setAssignProvider] = useState<string>()
   const [wizard, setWizard] = useState<WizardState>()
   const [modelQuery, setModelQuery] = useState('')
   const panelRef = useRef<HTMLElement>(null)
@@ -107,6 +118,7 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
     setCatalog(nextCatalog)
     setProviders(nextProviders)
     setProfiles(nextProfiles.profiles)
+    setAssignments(nextProfiles.assignments)
     setAssignedProfileIds(new Set(nextProfiles.assignments.map((assignment) => assignment.modelProfileId)))
   }, [workspaceId])
 
@@ -246,6 +258,32 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
     }
   }
 
+  const runAssign = async (target: AssignmentRow, profileId: string): Promise<void> => {
+    setBusy(`assign:${target.kind}:${target.id}`)
+    setError(undefined)
+    try {
+      await setAssignment(workspaceId, target.kind, target.id, profileId)
+      await reload()
+    } catch (cause) {
+      setError(errorMessage(cause, t('modelHub.assignFailed', '分配模型失败。')))
+    } finally {
+      setBusy(undefined)
+    }
+  }
+
+  const runUnassign = async (target: AssignmentRow): Promise<void> => {
+    setBusy(`unassign:${target.kind}:${target.id}`)
+    setError(undefined)
+    try {
+      await clearAssignment(workspaceId, target.kind, target.id)
+      await reload()
+    } catch (cause) {
+      setError(errorMessage(cause, t('modelHub.unassignFailed', '清除分配失败。')))
+    } finally {
+      setBusy(undefined)
+    }
+  }
+
   const runSync = async (provider: HubProvider): Promise<void> => {
     setBusy(`sync:${provider.id}`)
     setError(undefined)
@@ -278,6 +316,17 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
     if (key === 'legacy') return t('modelHub.legacyConnection', '独立配置')
     return providers.find((provider) => provider.id === key)?.name ?? key
   }
+
+  // ---------- 模型设置 (assignment) tab data ----------
+  const globalLabel = t('modelHub.scopeGlobal', '全局')
+  const targetRows = useMemo(
+    () => assignmentRows(assignScope, workspaceId, worlds, employees, { global: globalLabel, thisWorld: t('modelHub.assignThisWorld', '本世界') }),
+    [assignScope, workspaceId, worlds, employees, globalLabel, t],
+  )
+  const activeTarget = targetRows.find((row) => assignTarget !== undefined && row.kind === assignTarget.kind && row.id === assignTarget.id) ?? targetRows[0]
+  const profileById = useMemo(() => new Map(profiles.map((profile) => [profile.id, profile])), [profiles])
+  const targetCurrentProfileId = activeTarget === undefined ? undefined : currentAssignment(assignments, activeTarget)
+  const assignModels = assignProvider === undefined ? [] : profiles.filter((profile) => profile.providerId === assignProvider)
 
   const sourceBadge = catalog === undefined ? '' : catalog.source === 'remote'
     ? t('modelHub.sourceRemote', '目录来源：远程最新')
@@ -318,6 +367,7 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
       <nav className="model-hub__tabs" aria-label={t('modelHub.tabsAria', '模型中心分区')}>
         <button type="button" aria-current={tab === 'providers'} className={tab === 'providers' ? 'is-active' : ''} onClick={() => setTab('providers')}>{t('modelHub.tabProviders', '模型服务商')}</button>
         <button type="button" aria-current={tab === 'pool'} className={tab === 'pool' ? 'is-active' : ''} onClick={() => setTab('pool')}>{t('modelHub.tabPool', '模型池')}</button>
+        <button type="button" aria-current={tab === 'assign'} className={tab === 'assign' ? 'is-active' : ''} onClick={() => setTab('assign')}>{t('modelHub.tabAssign', '模型设置')}</button>
       </nav>
 
       {error !== undefined ? <div className="model-hub__error" role="alert"><WarningCircle size={15} /><span>{error}</span><button type="button" className="icon-button" aria-label={t('modelHub.dismissError', '收起提示')} onClick={() => setError(undefined)}><X size={13} /></button></div> : null}
@@ -417,6 +467,64 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
               </tr>
             })}</tbody>
           </table>}
+        </div>
+      </div> : null}
+
+      {wizard === undefined && tab === 'assign' ? <div className="model-hub__assign">
+        <aside className="model-hub__assign-scopes">
+          <label className="model-hub__assign-scope"><span>{t('modelHub.assignScope', '分配范围')}</span><select value={assignScope} onChange={(event) => { setAssignScope(event.target.value); setAssignTarget(undefined) }}>
+            <option value="global">{globalLabel}</option>
+            {worlds.filter((world) => world.status !== 'archived').map((world) => <option key={world.id} value={world.id}>{world.name}</option>)}
+          </select></label>
+          <div className="model-hub__assign-targets">
+            {targetRows.map((row) => {
+              const isActive = activeTarget !== undefined && row.kind === activeTarget.kind && row.id === activeTarget.id
+              const currentId = currentAssignment(assignments, row)
+              const currentName = currentId === undefined ? undefined : profileById.get(currentId)?.displayName
+              return <button key={`${row.kind}:${row.id}`} type="button" className={isActive ? 'is-active' : ''} aria-current={isActive} onClick={() => setAssignTarget(row)}>
+                <span className="model-hub__assign-name"><strong title={row.name}>{row.name}</strong>{row.subtitle === undefined ? null : <small>{row.subtitle}</small>}</span>
+                <small className={currentName === undefined ? 'model-hub__assign-none' : 'model-hub__assign-current'} title={currentName ?? t('modelHub.assignInherit', '继承上级')}>{currentName ?? t('modelHub.assignInherit', '继承上级')}</small>
+              </button>
+            })}
+          </div>
+        </aside>
+        <nav className="model-hub__assign-providers" aria-label={t('modelHub.assignProvidersAria', '选择服务商')}><strong>{t('modelHub.colProvider', '服务商')}</strong>
+          {providers.map((provider) => <button key={provider.id} type="button" className={assignProvider === provider.id ? 'is-active' : ''} aria-current={assignProvider === provider.id} onClick={() => setAssignProvider(provider.id)}>
+            <span title={provider.name}>{provider.name}</span><small>{provider.modelCount}</small>
+          </button>)}
+          {providers.length === 0 ? <p className="model-hub__assign-none">{t('modelHub.assignNoProviders', '请先在“模型服务商”添加服务商')}</p> : null}
+        </nav>
+        <div className="model-hub__assign-models">
+          {activeTarget === undefined ? null : assignProvider === undefined
+            ? <div className="model-hub__empty"><strong>{t('modelHub.assignPickProvider', '选择一个服务商查看它的模型')}</strong><span>{t('modelHub.assignPickProviderHint', '点击中间列的服务商，右侧列出模型池中该服务商的模型。')}</span></div>
+            : assignModels.length === 0
+            ? <div className="model-hub__empty"><strong>{t('modelHub.assignProviderEmpty', '该服务商还没有导入模型')}</strong><span>{t('modelHub.assignProviderEmptyHint', '到“模型池”或服务商的“同步模型”里导入后即可分配。')}</span></div>
+            : <table className="model-hub__table model-hub__assign-table"><thead><tr>
+              <th>{t('modelHub.colModel', '模型名称')}</th>
+              <th>{t('modelHub.colModelId', '模型 ID')}</th>
+              <th>{t('modelHub.colContext', '上下文')}</th>
+              <th title={t('modelHub.colInput', '输入格式')}>{t('modelHub.colInputShort', '入')}</th>
+              <th title={t('modelHub.colOutput', '输出格式')}>{t('modelHub.colOutputShort', '出')}</th>
+              <th className="model-hub__col-actions">{t('modelHub.colActions', '操作')}</th>
+            </tr></thead>
+              <tbody>{assignModels.map((model) => {
+                const declared = declaredCapabilities(model)
+                const isCurrent = targetCurrentProfileId === model.id
+                const applying = busy === `assign:${activeTarget.kind}:${activeTarget.id}` || busy === `unassign:${activeTarget.kind}:${activeTarget.id}`
+                return <tr key={model.id} className={isCurrent ? 'is-current' : undefined}>
+                  <td><strong title={model.displayName}>{model.displayName}</strong>{model.isDefault ? <span className="model-hub__badge is-ok">{t('modelHub.defaultModel', '默认')}</span> : null}</td>
+                  <td><code title={model.modelId}>{model.modelId}</code></td>
+                  <td>{formatContext(declared.context)}</td>
+                  <td>{modalityChips(declared.inputTypes)}</td>
+                  <td>{modalityChips(declared.outputTypes)}</td>
+                  <td className="model-hub__col-actions">{isCurrent
+                    ? <span className="model-hub__confirm"><span className="model-hub__verdict is-yes" title={t('modelHub.assignCurrent', '当前使用')}>√</span><button type="button" disabled={applying} onClick={() => void runUnassign(activeTarget)}>{t('modelHub.assignUnassign', '清除')}</button></span>
+                    : <button type="button" disabled={applying} onClick={() => void runAssign(activeTarget, model.id)}>{busy === `assign:${activeTarget.kind}:${activeTarget.id}` ? t('modelHub.assignApplying', '应用中…') : t('modelHub.assignApply', '应用')}</button>}
+                  </td>
+                </tr>
+              })}</tbody>
+            </table>}
+          {activeTarget === undefined ? null : <p className="model-hub__assign-note">{t('modelHub.assignTo', '正在为「{name}」分配模型', { name: activeTarget.name })}{targetCurrentProfileId !== undefined ? ` · ${profileById.get(targetCurrentProfileId)?.displayName ?? ''}` : ` · ${t('modelHub.assignInherit', '继承上级')}`}</p>}
         </div>
       </div> : null}
 

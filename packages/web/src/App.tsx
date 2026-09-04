@@ -2334,7 +2334,7 @@ export default function App() {
         <nav aria-label="全局功能">
           <CreativeWorkshopLauncher workspaceId={workspace.id} onCreated={(project) => { void openWorkshopWorld(project.worldId).catch((cause) => setError(cause instanceof Error ? cause.message : '创意工坊世界已创建，但打开失败，请从世界列表重新进入。')) }} onOpenWorld={(worldId) => { void openWorkshopWorld(worldId).catch((cause) => setError(cause instanceof Error ? cause.message : '世界打开失败')) }} />
           <button type="button" onClick={() => void openPackageMarket('theme')}><Storefront size={16} />{t('app.market', '市场')}</button>
-          <ModelHubLauncher workspaceId={workspace.id} />
+          <ModelHubLauncher workspaceId={workspace.id} worlds={worlds} employees={employees} />
           <button type="button" onClick={() => { clearError(); setSettingsSection('maintenance'); setSettingsOpen(true) }}><Pulse size={16} /><span>{t('app.systemStatus', '系统状态')}</span><i className="health-indicator" />{t('app.healthy', '良好')}</button>
           <button type="button" onClick={() => { clearError(); setSettingsSection('appearance'); setSettingsOpen(true) }}><GearSix size={17} />{t('app.settings', '设置')}</button>
         </nav>

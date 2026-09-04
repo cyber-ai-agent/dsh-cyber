@@ -139,3 +139,55 @@ export function summarizeSync(outcome: { added: unknown[]; removed: unknown[]; c
 }
 
 export const IMPORT_CAP = 50
+
+/** ---------- assignment tab ---------- */
+
+export type HubAssignmentScope = 'workspace' | 'world' | 'employee'
+
+export interface AssignmentRow {
+  kind: HubAssignmentScope
+  id: string
+  name: string
+  /** Where a row belongs, for nested display (employee → world name). */
+  subtitle?: string
+}
+
+/**
+ * The left rail of 模型设置. The scope select switches between 全局 (the
+ * workspace plus every world as a target) and one world (the world itself plus
+ * its characters). Archived rows never appear - you cannot assign a model to
+ * something that no longer works. Labels come from the caller so this module
+ * stays free of copy.
+ */
+export function assignmentRows(
+  scope: 'global' | string,
+  workspaceId: string,
+  worlds: readonly { id: string; name: string; status: string }[],
+  employees: readonly { id: string; displayName: string; worldId: string; status: string }[],
+  labels: { global: string; thisWorld: string },
+): AssignmentRow[] {
+  if (scope === 'global') {
+    return [
+      { kind: 'workspace', id: workspaceId, name: labels.global },
+      ...worlds.filter((world) => world.status !== 'archived').map((world) => ({ kind: 'world' as const, id: world.id, name: world.name })),
+    ]
+  }
+  const world = worlds.find((candidate) => candidate.id === scope)
+  if (world === undefined) return [{ kind: 'workspace', id: workspaceId, name: labels.global }]
+  return [
+    { kind: 'world', id: world.id, name: `${labels.thisWorld} · ${world.name}` },
+    ...employees
+      .filter((employee) => employee.worldId === world.id && employee.status !== 'archived')
+      .map((employee) => ({ kind: 'employee' as const, id: employee.id, name: employee.displayName, subtitle: world.name })),
+  ]
+}
+
+export interface AssignmentRefLite {
+  scope: string
+  scopeId: string
+  modelProfileId: string
+}
+
+export function currentAssignment(assignments: readonly AssignmentRefLite[], row: AssignmentRow): string | undefined {
+  return assignments.find((assignment) => assignment.scope === row.kind && assignment.scopeId === row.id)?.modelProfileId
+}

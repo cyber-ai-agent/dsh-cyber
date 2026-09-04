@@ -90,6 +90,32 @@
 .model-hub__table .model-hub__col-actions .model-hub__confirm { display: inline-flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
 @media (max-width: 860px) { .model-hub__pool { grid-template-columns: minmax(0, 1fr); } .model-hub__pool-filters { grid-auto-flow: column; grid-auto-columns: max-content; overflow-x: auto; } }
 
+/* 模型设置：作用域树 → 服务商 → 模型应用，三栏 */
+.model-hub__assign { flex: 1; min-height: 0; display: grid; grid-template-columns: 250px 190px minmax(0, 1fr); gap: 14px; overflow: hidden; padding: 16px 18px 22px; }
+.model-hub__assign-scopes { min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 10px; }
+.model-hub__assign-scope { display: grid; gap: 6px; font-size: 13px; }
+.model-hub__assign-scope > span { color: var(--text-soft); }
+.model-hub__assign-scope select { width: 100%; min-height: 36px; padding: 7px 10px; color: var(--text); background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 14px; }
+.model-hub__assign-targets { min-height: 0; overflow-y: auto; display: grid; align-content: start; gap: 4px; padding-right: 4px; }
+.model-hub__assign-targets button, .model-hub__assign-providers button { min-height: 44px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 7px 10px; color: var(--text-soft); text-align: left; background: none; border: 1px solid transparent; border-radius: 8px; font: inherit; font-size: 14px; cursor: pointer; }
+.model-hub__assign-targets button:hover, .model-hub__assign-providers button:hover { color: var(--text); background: var(--surface-1); }
+.model-hub__assign-targets button.is-active, .model-hub__assign-providers button.is-active { color: var(--text); background: var(--surface-2, rgba(255, 255, 255, 0.06)); border-color: var(--border); }
+.model-hub__assign-name { min-width: 0; display: grid; }
+.model-hub__assign-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.model-hub__assign-name small { color: var(--text-muted); font-size: 12px; }
+.model-hub__assign-current { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--success); font-size: 12px; text-align: right; }
+.model-hub__assign-none { color: var(--text-muted); font-size: 12px; text-align: right; }
+.model-hub__assign-providers { min-height: 0; overflow-y: auto; display: grid; align-content: start; gap: 4px; padding-right: 4px; }
+.model-hub__assign-providers > strong { padding: 2px 4px 6px; color: var(--text-muted); font-size: 12px; }
+.model-hub__assign-providers button small { color: var(--text-muted); font-size: 12px; }
+.model-hub__assign-providers p { margin: 8px 4px; line-height: 1.5; }
+.model-hub__assign-models { min-width: 0; min-height: 0; overflow-y: auto; display: grid; align-content: start; gap: 10px; }
+.model-hub__assign-table tr.is-current td { background: color-mix(in srgb, var(--success) 6%, transparent); }
+.model-hub__assign-table th:nth-child(1), .model-hub__assign-table td:nth-child(1) { width: 24%; }
+.model-hub__assign-table th:nth-child(2), .model-hub__assign-table td:nth-child(2) { width: 30%; }
+.model-hub__assign-note { margin: 0; color: var(--text-muted); font-size: 12px; }
+@media (max-width: 1100px) { .model-hub__assign { grid-template-columns: 220px 170px minmax(0, 1fr); } }
+
 /* 向导：直接在表单里下拉选择服务商，所有字段单列平铺 */
 .model-hub__wizard { flex: 1; min-height: 0; display: grid; align-content: start; gap: 14px; overflow-y: auto; padding: 16px 18px 22px; }
 .model-hub__wizard > header { display: flex; gap: 10px; align-items: center; }
