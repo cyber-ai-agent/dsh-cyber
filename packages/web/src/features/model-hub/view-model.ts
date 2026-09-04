@@ -100,6 +100,7 @@ export function filterPool(
 export interface ModelDeclaredCapabilities {
   context: number | undefined
   inputTypes: string[]
+  outputTypes: string[]
   reasoning: boolean | undefined
 }
 
@@ -110,10 +111,9 @@ export interface ModelDeclaredCapabilities {
 export function declaredCapabilities(profile: HubProfile): ModelDeclaredCapabilities {
   const settings = profile.settings
   const context = typeof settings.contextWindow === 'number' && settings.contextWindow >= 1_024 ? settings.contextWindow : undefined
-  const rawTypes = Array.isArray(settings.inputTypes) ? settings.inputTypes : []
-  const inputTypes = rawTypes.filter((item): item is string => item === 'text' || item === 'image' || item === 'video' || item === 'audio')
-  const reasoning = typeof settings.reasoning === 'boolean' ? settings.reasoning : undefined
-  return { context, inputTypes, reasoning }
+  const known = (value: unknown): value is string[] => value === 'text' || value === 'image' || value === 'video' || value === 'audio'
+  const readTypes = (raw: unknown): string[] => Array.isArray(raw) ? raw.filter((item): item is string => known(item)) : []
+  return { context, inputTypes: readTypes(settings.inputTypes), outputTypes: readTypes(settings.outputTypes), reasoning: typeof settings.reasoning === 'boolean' ? settings.reasoning : undefined }
 }
 
 export function formatContext(value: number | undefined): string {

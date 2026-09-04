@@ -65,6 +65,7 @@ export interface DiscoveredModel {
   displayName?: string
   contextLength?: number
   inputTypes?: string[]
+  outputTypes?: string[]
   reasoning?: boolean
 }
 

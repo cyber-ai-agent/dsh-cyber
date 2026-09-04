@@ -121,10 +121,10 @@ describe('model hub view model', () => {
   })
 
   it('reads declared capabilities and drops unusable values', () => {
-    const declared = profile('x', { settings: { contextWindow: 32_768, inputTypes: ['text', 'image', 'hologram'], reasoning: true } })
-    expect(declaredCapabilities(declared)).toEqual({ context: 32_768, inputTypes: ['text', 'image'], reasoning: true })
+    const declared = profile('x', { settings: { contextWindow: 32_768, inputTypes: ['text', 'image', 'hologram'], outputTypes: ['text', 'video'], reasoning: true } })
+    expect(declaredCapabilities(declared)).toEqual({ context: 32_768, inputTypes: ['text', 'image'], outputTypes: ['text', 'video'], reasoning: true })
     const empty = profile('y', { settings: { contextWindow: 512 } })
-    expect(declaredCapabilities(empty)).toEqual({ context: undefined, inputTypes: [], reasoning: undefined })
+    expect(declaredCapabilities(empty)).toEqual({ context: undefined, inputTypes: [], outputTypes: [], reasoning: undefined })
   })
 
   it('formats context sizes compactly and honestly', () => {

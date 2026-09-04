@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowLeft, ArrowsClockwise, CheckCircle, Lightning, MagnifyingGlass, PencilSimple, Plus, Stack, Trash, WarningCircle, X } from '@phosphor-icons/react'
+import { ArrowLeft, ArrowsClockwise, CheckCircle, ImageSquare, Lightning, MagnifyingGlass, PencilSimple, Plus, Stack, TextAa, Trash, VideoCamera, WarningCircle, Waveform, X } from '@phosphor-icons/react'
 
 import './model-hub.css'
 import { useI18n } from '../../i18n/runtime.js'
@@ -288,6 +288,14 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
   const modalityLabel = (type: string): string =>
     type === 'text' ? t('modelHub.modalityText', '文本') : type === 'image' ? t('modelHub.modalityImage', '图片') : type === 'video' ? t('modelHub.modalityVideo', '视频') : t('modelHub.modalityAudio', '音频')
 
+  // Ultra-compact modality glyphs for the pool table; the text label stays
+  // available as the tooltip and accessible name.
+  const modalityIcon = (type: string) =>
+    type === 'text' ? <TextAa size={13} /> : type === 'image' ? <ImageSquare size={13} /> : type === 'video' ? <VideoCamera size={13} /> : <Waveform size={13} />
+  const modalityChips = (types: readonly string[]) => types.length === 0
+    ? <span className="model-hub__none">—</span>
+    : <span className="model-hub__modalities">{types.map((type) => <span key={type} className="model-hub__modality" title={modalityLabel(type)} aria-label={modalityLabel(type)}>{modalityIcon(type)}</span>)}</span>
+
   // Portal to <body>: the launcher renders from the top bar, where global
   // rules like `.topbar nav { height: 100% }` would claim the hub's own tab
   // strip, and a modal belongs outside the banner landmark anyway.
@@ -371,8 +379,9 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
               <th>{t('modelHub.colModelId', '模型 ID')}</th>
               <th>{t('modelHub.colProvider', '服务商')}</th>
               <th>{t('modelHub.colContext', '上下文')}</th>
-              <th>{t('modelHub.colInput', '输入格式')}</th>
-              <th>{t('modelHub.colReasoning', '推理')}</th>
+              <th title={t('modelHub.colInput', '输入格式')}>{t('modelHub.colInputShort', '入')}</th>
+              <th title={t('modelHub.colOutput', '输出格式')}>{t('modelHub.colOutputShort', '出')}</th>
+              <th title={t('modelHub.colReasoning', '推理')}>推理</th>
               <th className="model-hub__col-actions">{(() => {
                 // Clear removes exactly the removable rows in the current view
                 // (left filter + search applied); in-use rows are held and the
@@ -380,8 +389,8 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
                 const { removable, held } = splitRemovable(poolRows, assignedProfileIds)
                 if (removable.length === 0) return held > 0 ? <span title={t('modelHub.clearAllHeld', '使用中，不可清空')}>{t('modelHub.colActions', '操作')}</span> : t('modelHub.colActions', '操作')
                 return confirmClearPool
-                  ? <span className="model-hub__confirm"><button type="button" className="is-danger" disabled={busy === 'clear-pool'} title={held > 0 ? t('modelHub.clearHeldSuffix', '{count} in-use kept', { count: held }) : undefined} onClick={() => void runClearPool(removable)}>{busy === 'clear-pool' ? t('modelHub.clearing', 'Clearing…') : t('modelHub.confirmClear', 'Confirm clear ({count})', { count: removable.length })}</button><button type="button" onClick={() => setConfirmClearPool(false)}>{t('modelHub.cancel', '取消')}</button></span>
-                  : <button type="button" className="model-hub__col-actions-clear" onClick={() => setConfirmClearPool(true)}>{t('modelHub.clearPool', 'Clear')}</button>
+                  ? <span className="model-hub__confirm"><button type="button" className="is-danger" disabled={busy === 'clear-pool'} title={held > 0 ? t('modelHub.clearHeldSuffix', '{count} 个使用中保留', { count: held }) : undefined} onClick={() => void runClearPool(removable)}>{busy === 'clear-pool' ? t('modelHub.clearing', '正在清空…') : t('modelHub.confirmClear', '确认清空（{count} 个）', { count: removable.length })}</button><button type="button" onClick={() => setConfirmClearPool(false)}>{t('modelHub.cancel', '取消')}</button></span>
+                  : <button type="button" className="model-hub__col-actions-clear" onClick={() => setConfirmClearPool(true)}>{t('modelHub.clearPool', '清空')}</button>
               })()}</th>
             </tr></thead>
             <tbody>{poolRows.map((profile) => {
@@ -389,12 +398,18 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
               const assigned = assignedProfileIds.has(profile.id)
               const removing = busy === `remove:${profile.id}`
               return <tr key={profile.id}>
-                <td><strong>{profile.displayName}</strong>{profile.isDefault ? <span className="model-hub__badge is-ok">{t('modelHub.defaultModel', '默认')}</span> : null}</td>
-                <td><code>{profile.modelId}</code></td>
-                <td>{providerNameOf(profile)}</td>
+                <td><strong title={profile.displayName}>{profile.displayName}</strong>{profile.isDefault ? <span className="model-hub__badge is-ok">{t('modelHub.defaultModel', '默认')}</span> : null}</td>
+                <td><code title={profile.modelId}>{profile.modelId}</code></td>
+                <td title={providerNameOf(profile)}>{providerNameOf(profile)}</td>
                 <td>{formatContext(declared.context)}</td>
-                <td>{declared.inputTypes.length === 0 ? '—' : declared.inputTypes.map((type) => <span key={type} className="model-hub__badge">{modalityLabel(type)}</span>)}</td>
-                <td>{declared.reasoning === undefined ? '—' : declared.reasoning ? <span className="model-hub__cap is-good">{t('modelHub.reasonYes', '支持')}</span> : <span className="model-hub__cap">{t('modelHub.reasonNo', '不支持')}</span>}</td>
+                <td>{modalityChips(declared.inputTypes)}</td>
+                <td>{modalityChips(declared.outputTypes)}</td>
+                <td>{declared.reasoning === undefined
+                  ? <span className="model-hub__none">—</span>
+                  : declared.reasoning
+                  ? <span className="model-hub__verdict is-yes" title={t('modelHub.reasonYes', '支持')} aria-label={t('modelHub.reasonYes', '支持')}>√</span>
+                  : <span className="model-hub__verdict is-no" title={t('modelHub.reasonNo', '不支持')} aria-label={t('modelHub.reasonNo', '不支持')}>×</span>}
+                </td>
                 <td className="model-hub__col-actions">{confirmingRemove === profile.id
                   ? <span className="model-hub__confirm"><button type="button" className="is-danger" onClick={() => void runRemoveProfile(profile)}>{t('modelHub.confirmRemove', '确认移除')}</button><button type="button" onClick={() => setConfirmingRemove(undefined)}>{t('modelHub.cancel', '取消')}</button></span>
                   : <button type="button" disabled={assigned || removing} title={assigned ? t('modelHub.removeBlocked', '正在被分配使用，请先在角色或世界中改选其它模型') : t('modelHub.removeFromPool', '从模型池移除')} aria-label={t('modelHub.removeFromAria', '移除模型 {name}', { name: profile.displayName })} onClick={() => setConfirmingRemove(profile.id)}><Trash size={14} /></button>}
