@@ -165,4 +165,39 @@ describe('model hub routes', () => {
     expect(balance.status).toBe(422)
     expect(balance.body.error.code ?? JSON.stringify(balance.body)).toContain('credential')
   })
+
+  it('adds a manual model on the provider and moves the workspace default exclusively', async () => {
+    const server = await startServer()
+    const workspace = server.store.listWorkspaces()[0]!
+    const provider = (await call(server.origin, 'POST', `/api/workspaces/${workspace.id}/model-providers`, {
+      name: '私有网关',
+      baseUrl: 'http://127.0.0.1:9/v1',
+      api: 'openai-completions',
+      providerKind: 'openai-compatible-local',
+      credentialMode: 'none',
+    })).body.provider
+
+    const manual = await call(server.origin, 'POST', `/api/workspaces/${workspace.id}/model-providers/${provider.id}/manual-model`, {
+      modelId: 'secret-model-v1', displayName: '秘钥模型', contextLength: 2048,
+    })
+    expect(manual.status).toBe(201)
+    expect(manual.body.profile).toMatchObject({ modelId: 'secret-model-v1', displayName: '秘钥模型', origin: 'manual', providerId: provider.id, settings: { contextWindow: 2048 } })
+
+    const clash = await call(server.origin, 'POST', `/api/workspaces/${workspace.id}/model-providers/${provider.id}/manual-model`, { modelId: 'secret-model-v1' })
+    expect(clash.status).toBe(422)
+    expect(clash.body.error.code).toBe('model_exists')
+
+    const first = await call(server.origin, 'GET', `/api/workspaces/${workspace.id}/model-profiles`)
+    const profiles = first.body.items as Array<{ id: string; isDefault: boolean }>
+    expect(profiles.length).toBeGreaterThan(0)
+    const other = profiles.find((profile) => !profile.isDefault) ?? profiles[0]!
+    const setDefault = await call(server.origin, 'PUT', `/api/workspaces/${workspace.id}/model-profiles/${other.id}/default`)
+    expect(setDefault.status).toBe(200)
+    const after = await call(server.origin, 'GET', `/api/workspaces/${workspace.id}/model-profiles`)
+    const defaults = (after.body.items as Array<{ id: string; isDefault: boolean }>).filter((profile) => profile.isDefault)
+    expect(defaults).toHaveLength(1)
+    expect(defaults[0]!.id).toBe(other.id)
+    const missing = await call(server.origin, 'PUT', `/api/workspaces/${workspace.id}/model-profiles/nope/default`)
+    expect(missing.status).toBe(404)
+  })
 })

@@ -149,6 +149,45 @@ export function registerModelHubRoutes(router: Router, dependencies: ModelHubRou
     writeJson(response, 200, { removed: true })
   })
 
+  // Manual single-model entry - the explicit fallback AGENTS requires for
+  // gateways that do not serve /models. It lands on the provider connection,
+  // so its credential resolves through the same chain as imported rows.
+  router.post(/^\/api\/workspaces\/([^/]+)\/model-providers\/([^/]+)\/manual-model$/, async ({ request, response, params }) => {
+    const provider = requireProvider(store, params[0]!, params[1]!)
+    const body = await readJson(request)
+    const modelId = requiredString(body, 'modelId')
+    if (modelId.length > 200) throw new HttpError(422, 'model_id_invalid', '模型 ID 过长。')
+    const displayName = typeof body.displayName === 'string' && body.displayName.trim() ? body.displayName.trim().slice(0, 120) : modelId
+    const contextLength = typeof body.contextLength === 'number' && Number.isInteger(body.contextLength) && body.contextLength >= 1_024 ? body.contextLength : undefined
+    if (store.listProviderProfiles(provider.id).some((profile) => profile.modelId === modelId)) {
+      throw new HttpError(422, 'model_exists', '该服务商下已存在同 ID 的模型，请改用同步更新。')
+    }
+    const profile = store.saveModelProfile({
+      workspaceId: provider.workspaceId,
+      providerId: provider.id,
+      origin: 'manual',
+      displayName,
+      modelId,
+      baseUrl: provider.baseUrl,
+      api: provider.api,
+      providerKind: provider.providerKind,
+      ...(provider.credentialEnvName === undefined ? {} : { credentialEnvName: provider.credentialEnvName }),
+      ...(contextLength === undefined ? {} : { settings: { contextWindow: contextLength } }),
+    })
+    writeJson(response, 201, { profile })
+  })
+
+  // Setting the workspace default is a profile-level action; the store keeps
+  // it exclusive (one default per workspace) in the same transaction.
+  router.put(/^\/api\/workspaces\/([^/]+)\/model-profiles\/([^/]+)\/default$/, ({ response, params }) => {
+    const profile = store.getModelProfile(params[1]!)
+    if (profile === undefined || profile.workspaceId !== params[0]!) {
+      throw new HttpError(404, 'model_profile_not_found', '模型不存在。')
+    }
+    const saved = store.saveModelProfile({ ...profile, isDefault: true })
+    writeJson(response, 200, { profile: saved })
+  })
+
   router.post(/^\/api\/workspaces\/([^/]+)\/model-providers\/([^/]+)\/test$/, async ({ response, params }) => {
     const provider = requireProvider(store, params[0]!, params[1]!)
     const key = requireProviderKey(provider)
