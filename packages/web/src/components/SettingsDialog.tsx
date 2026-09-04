@@ -120,14 +120,6 @@ export interface ModelProfileSaveDraft {
   settings: ModelProfile['settings']
 }
 
-export interface ModelDiscoveryDraft {
-  baseUrl: string
-  api: ModelApiKind
-  profileId?: string
-  apiKey?: string
-  credentialEnvName?: string
-}
-
 export interface DiscoveredModel {
   id: string
   displayName?: string | undefined
@@ -252,10 +244,10 @@ export function SettingsDialog({
           {section === 'models' ? (
             <div className="settings-hub-gate">
               <div className="model-hub-entry">
-                <span><strong>{t('settings.model.hubTitle', '新的 AI 模型管理中心')}</strong><small>{t('settings.model.hubCopy', '服务商、模型池与角色分配已在此统一管理：一个服务商一份密钥，模型测试后勾选导入，再按世界与角色分配。')}</small></span>
-                <button type="button" className="primary-button" onClick={() => setHubOpen(true)}>{t('settings.model.hubOpen', '打开模型中心')}</button>
+                <span><strong>{t('modelHub.gateTitle', '新的 AI 模型管理中心')}</strong><small>{t('modelHub.gateCopy', '服务商、模型池与角色分配已统一到模型中心：一个服务商一份密钥，模型测试后勾选导入，再按世界与角色分配。')}</small></span>
+                <button type="button" className="primary-button" onClick={() => setHubOpen(true)}>{t('modelHub.gateOpen', '打开模型中心')}</button>
               </div>
-              <p className="settings-hub-gate__note">{t('settings.model.gateNote', '本节不再单独管理模型；旧配置已在首次启动时自动迁移为服务商。')}</p>
+              <p className="settings-hub-gate__note">{t('modelHub.gateNote', '本设置页不再单独管理模型；旧的模型配置已在首次启动时自动迁移为服务商。')}</p>
             </div>
           ) : null}
           {section === 'integrations' ? <IntegrationSettings workspaceId={workspace.id} /> : null}
