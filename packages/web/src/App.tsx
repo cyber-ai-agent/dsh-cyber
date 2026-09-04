@@ -82,7 +82,6 @@ import { applyWorldTheme, readWorldTheme, saveWorldTheme, themeRegistry } from '
 import { syncInstalledSkinThemes, type InstalledSkinDeclaration } from './features/world/installed-skin-themes.js'
 import type {
   DiscoveredModel,
-  ModelDiscoveryDraft,
   ModelProfileSaveDraft,
   SettingsSection,
   SystemAction,
@@ -92,7 +91,6 @@ import type {
 import {
   buildUnifiedModelList,
   loadDiscoveredModelsCache,
-  saveDiscoveredModelsToCache,
   type CachedModelCatalog,
 } from './features/models/discovered-models-storage.js'
 import { demoData, demoTavernDossiers, demoTavernEmployees, demoTavernMessages, demoTavernSessions } from './demo-data.js'
@@ -174,7 +172,7 @@ export default function App() {
   const [models, setModels] = useState<ModelProfile[]>(demoMode ? demoData.modelProfiles : [])
   const [modelAssignments, setModelAssignments] = useState<ModelAssignment[]>([])
   const [conversationModelProfiles, setConversationModelProfiles] = useState<Record<string, string>>({})
-  const [discoveredCatalog, setDiscoveredCatalog] = useState<Record<string, CachedModelCatalog>>(() => loadDiscoveredModelsCache())
+  const [discoveredCatalog] = useState<Record<string, CachedModelCatalog>>(() => loadDiscoveredModelsCache())
   const selectableModels = useMemo(() => {
     const configuredBaseUrls = new Set(
       models
@@ -2113,76 +2111,6 @@ export default function App() {
     return result.profile
   }, [clearError, demoMode, models, workspace])
 
-  const discoverModels = useCallback(async (input: ModelDiscoveryDraft): Promise<DiscoveredModel[]> => {
-    if (workspace === undefined) throw new Error('请先创建工作区')
-    if (demoMode) {
-      await delay(250)
-      return [
-        { id: 'qwen3.5' },
-        { id: 'qwen3.5:9b' },
-        { id: 'deepseek-chat' },
-      ]
-    }
-    const result = await api<{ items: DiscoveredModel[] }>(`/api/workspaces/${workspace.id}/model-profiles/discover`, {
-      method: 'POST',
-      body: JSON.stringify(input),
-    })
-    if (result.items.length > 0) {
-      const profile = input.profileId === undefined ? undefined : models.find((item) => item.id === input.profileId)
-      const entry: CachedModelCatalog = {
-        models: result.items,
-        baseUrl: input.baseUrl,
-        ...(profile === undefined ? {} : { providerKind: profile.providerKind, providerName: profile.displayName }),
-        updatedAt: Date.now(),
-      }
-      if (input.profileId !== undefined) saveDiscoveredModelsToCache(input.profileId, entry)
-      saveDiscoveredModelsToCache(input.baseUrl, entry)
-      setDiscoveredCatalog((current) => ({ ...current, ...(input.profileId === undefined ? {} : { [input.profileId]: entry }), [input.baseUrl]: entry }))
-    }
-    return result.items
-  }, [demoMode, models, workspace])
-
-  const deleteModel = useCallback(async (modelProfileId: string): Promise<void> => {
-    if (workspace === undefined) throw new Error('请先创建工作区')
-    if (demoMode) {
-      setModels((current) => {
-        const removed = current.find((item) => item.id === modelProfileId)
-        const remaining = current.filter((item) => item.id !== modelProfileId)
-        if (removed?.isDefault && remaining[0]) remaining[0] = { ...remaining[0], isDefault: true }
-        return remaining
-      })
-      setModelAssignments((current) => current.filter((item) => item.modelProfileId !== modelProfileId))
-      setConversationModelProfiles((current) => Object.fromEntries(Object.entries(current).filter(([, id]) => id !== modelProfileId)))
-      return
-    }
-    const result = await api<{ removed: boolean; items: ModelProfile[]; assignments: ModelAssignment[] }>(`/api/workspaces/${workspace.id}/model-profiles/${encodeURIComponent(modelProfileId)}`, {
-      method: 'DELETE',
-    })
-    if (!result.removed) throw new Error('模型配置不存在或已被删除')
-    setModels(result.items)
-    setModelAssignments(result.assignments)
-    setConversationModelProfiles((current) => Object.fromEntries(Object.entries(current).filter(([, id]) => id !== modelProfileId)))
-  }, [workspace])
-
-  const assignModel = useCallback(async (input: { scope: ModelAssignment['scope']; scopeId: string; modelProfileId?: string }) => {
-    if (workspace === undefined) return
-    if (demoMode) {
-      setModelAssignments((current) => {
-        const remaining = current.filter((item) => item.scope !== input.scope || item.scopeId !== input.scopeId)
-        return input.modelProfileId === undefined ? remaining : [...remaining, { ...input, modelProfileId: input.modelProfileId, workspaceId: workspace.id, updatedAt: new Date().toISOString() }]
-      })
-      return
-    }
-    const endpoint = `/api/workspaces/${workspace.id}/model-assignments/${input.scope}/${encodeURIComponent(input.scopeId)}`
-    if (input.modelProfileId === undefined) {
-      await api(endpoint, { method: 'DELETE' })
-      setModelAssignments((current) => current.filter((item) => item.scope !== input.scope || item.scopeId !== input.scopeId))
-    } else {
-      const result = await api<{ assignment: ModelAssignment }>(endpoint, { method: 'PUT', body: JSON.stringify({ modelProfileId: input.modelProfileId }) })
-      setModelAssignments((current) => [...current.filter((item) => item.scope !== result.assignment.scope || item.scopeId !== result.assignment.scopeId), result.assignment])
-    }
-  }, [workspace])
-
   const runSystemAction = useCallback(async (action: SystemAction, input?: SystemActionInput): Promise<SystemActionResult> => {
     if (demoMode) {
       await delay(350)
@@ -2540,8 +2468,6 @@ export default function App() {
       {settingsOpen ? (
         <Suspense fallback={<div className="dialog-loading" role="status">正在打开设置…</div>}><SettingsDialog
           preferences={preferences}
-          models={models}
-          assignments={modelAssignments}
           workspace={workspace}
           worlds={worlds}
           employees={employees}
@@ -2550,10 +2476,6 @@ export default function App() {
           onClose={() => setSettingsOpen(false)}
           onSavePreferences={savePreferences}
           onUploadBackground={uploadBackground}
-          onSaveModel={saveModel}
-          onDiscoverModels={discoverModels}
-          onDeleteModel={deleteModel}
-          onAssignModel={assignModel}
           onSystemAction={runSystemAction}
           onLoadModelLogs={loadModelLogs}
           onClearModelLogs={clearModelLogs}

@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { EmployeeInstance, World } from '@dsh-cyber/contracts'
-import { ArrowLeft, ArrowsClockwise, CheckCircle, ImageSquare, Lightning, MagnifyingGlass, PencilSimple, Plus, Stack, TextAa, Trash, VideoCamera, WarningCircle, Waveform, X } from '@phosphor-icons/react'
+import { ArrowLeft, ArrowsClockwise, CheckCircle, ImageSquare, Lightning, MagnifyingGlass, PencilSimple, Plus, Stack, Star, TextAa, Trash, VideoCamera, WarningCircle, Waveform, X } from '@phosphor-icons/react'
 
 import './model-hub.css'
 import { useI18n } from '../../i18n/runtime.js'
 import { ApiError } from '../../api.js'
 import {
+  addManualModel,
   clearAssignment,
   deleteProvider,
   fetchBalance,
@@ -19,6 +20,7 @@ import {
   removeProfile,
   saveProvider,
   setAssignment,
+  setDefaultProfile,
   syncProvider,
   testProvider,
   type DiscoveredModel,
@@ -108,6 +110,8 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
   const [poolQuery, setPoolQuery] = useState('')
   const [poolFilter, setPoolFilter] = useState<PoolFilterKey>('all')
   const [confirmClearPool, setConfirmClearPool] = useState(false)
+  const [manualOpen, setManualOpen] = useState(false)
+  const [manualForm, setManualForm] = useState({ providerId: '', modelId: '', displayName: '', context: '' })
   const [assignScope, setAssignScope] = useState<'global' | string>('global')
   const [assignTarget, setAssignTarget] = useState<AssignmentRow>()
   const [assignProvider, setAssignProvider] = useState<string>()
@@ -287,6 +291,39 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
     }
   }
 
+  const runSetDefault = async (profile: HubProfile): Promise<void> => {
+    setBusy(`default:${profile.id}`)
+    setError(undefined)
+    try {
+      await setDefaultProfile(workspaceId, profile.id)
+      await reload()
+    } catch (cause) {
+      setError(errorMessage(cause, t('modelHub.defaultFailed', '设置默认模型失败。')))
+    } finally {
+      setBusy(undefined)
+    }
+  }
+
+  const runManualAdd = async (): Promise<void> => {
+    setBusy('manual')
+    setError(undefined)
+    try {
+      const context = manualForm.context.trim() === '' ? undefined : Number(manualForm.context)
+      await addManualModel(workspaceId, manualForm.providerId, {
+        modelId: manualForm.modelId.trim(),
+        ...(manualForm.displayName.trim() ? { displayName: manualForm.displayName.trim() } : {}),
+        ...(context !== undefined && Number.isInteger(context) && context >= 1024 ? { contextLength: context } : {}),
+      })
+      setManualOpen(false)
+      setManualForm({ providerId: '', modelId: '', displayName: '', context: '' })
+      await reload()
+    } catch (cause) {
+      setError(errorMessage(cause, t('modelHub.manualFailed', '手动添加模型失败。')))
+    } finally {
+      setBusy(undefined)
+    }
+  }
+
   const runSync = async (provider: HubProvider): Promise<void> => {
     setBusy(`sync:${provider.id}`)
     setError(undefined)
@@ -442,7 +479,23 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
           </button>)}
         </aside>
         <div className="model-hub__pool-main">
-          <label className="model-hub__search"><MagnifyingGlass size={15} /><input value={poolQuery} onChange={(event) => setPoolQuery(event.target.value)} placeholder={t('modelHub.searchPool', '搜索模型名称或粘贴模型 ID')} aria-label={t('modelHub.searchPoolAria', '搜索模型池')} /></label>
+          <div className="model-hub__pool-tools">
+            <label className="model-hub__search"><MagnifyingGlass size={15} /><input value={poolQuery} onChange={(event) => setPoolQuery(event.target.value)} placeholder={t('modelHub.searchPool', '搜索模型名称或粘贴模型 ID')} aria-label={t('modelHub.searchPoolAria', '搜索模型池')} /></label>
+            <button type="button" disabled={providers.length === 0} title={providers.length === 0 ? t('modelHub.manualNeedsProvider', '先添加一个服务商') : undefined} onClick={() => { setManualOpen(!manualOpen); if (manualForm.providerId === '' && providers.length > 0) setManualForm({ ...manualForm, providerId: providers[0]!.id }) }}><Plus size={14} />{t('modelHub.addManual', '手动添加模型')}</button>
+          </div>
+          {manualOpen ? <form className="model-hub__manual" onSubmit={(event) => { event.preventDefault(); void runManualAdd() }}>
+            <label><span>{t('modelHub.colProvider', '服务商')}</span><select value={manualForm.providerId} onChange={(event) => setManualForm({ ...manualForm, providerId: event.target.value })}>
+              {providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
+            </select></label>
+            <label><span>{t('modelHub.manualModelId', '模型 ID')}</span><input required value={manualForm.modelId} onChange={(event) => setManualForm({ ...manualForm, modelId: event.target.value })} placeholder="deepseek-chat" autoComplete="off" /></label>
+            <label><span>{t('modelHub.manualDisplayName', '显示名称（可选）')}</span><input value={manualForm.displayName} onChange={(event) => setManualForm({ ...manualForm, displayName: event.target.value })} placeholder={manualForm.modelId || t('modelHub.manualDisplayNameHint', '默认与模型 ID 相同')} /></label>
+            <label><span>{t('modelHub.manualContext', '上下文窗口（可选，tokens）')}</span><input type="number" min={1024} step={1} value={manualForm.context} onChange={(event) => setManualForm({ ...manualForm, context: event.target.value })} placeholder="32768" /></label>
+            <footer>
+              <span>{t('modelHub.manualEndpointNote', '端点、协议与密钥跟随所选服务商；适合不公开 /models 列表的网关。')}</span>
+              <button type="submit" className="primary-button" disabled={busy === 'manual' || !manualForm.providerId || !manualForm.modelId.trim()}>{busy === 'manual' ? t('modelHub.manualAdding', '正在添加…') : t('modelHub.manualSubmit', '加入模型池')}</button>
+              <button type="button" onClick={() => setManualOpen(false)}>{t('modelHub.cancel', '取消')}</button>
+            </footer>
+          </form> : null}
           {poolRows.length === 0 ? <div className="model-hub__empty"><strong>{t('modelHub.poolEmpty', '这里还没有模型')}</strong><span>{t('modelHub.poolEmptyHint', '到“模型服务商”里测试连接并勾选导入模型。')}</span></div> : <table className="model-hub__table">
             <thead><tr>
               <th>{t('modelHub.colModel', '模型名称')}</th>
@@ -480,10 +533,12 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
                   ? <span className="model-hub__verdict is-yes" title={t('modelHub.reasonYes', '支持')} aria-label={t('modelHub.reasonYes', '支持')}>√</span>
                   : <span className="model-hub__verdict is-no" title={t('modelHub.reasonNo', '不支持')} aria-label={t('modelHub.reasonNo', '不支持')}>×</span>}
                 </td>
-                <td className="model-hub__col-actions">{confirmingRemove === profile.id
-                  ? <span className="model-hub__confirm"><button type="button" className="is-danger" onClick={() => void runRemoveProfile(profile)}>{t('modelHub.confirmRemove', '确认移除')}</button><button type="button" onClick={() => setConfirmingRemove(undefined)}>{t('modelHub.cancel', '取消')}</button></span>
-                  : <button type="button" disabled={assigned || removing} title={assigned ? t('modelHub.removeBlocked', '正在被分配使用，请先在角色或世界中改选其它模型') : t('modelHub.removeFromPool', '从模型池移除')} aria-label={t('modelHub.removeFromAria', '移除模型 {name}', { name: profile.displayName })} onClick={() => setConfirmingRemove(profile.id)}><Trash size={14} /></button>}
-                </td>
+                <td className="model-hub__col-actions"><span className="model-hub__row-actions">
+                  {profile.isDefault ? null : <button type="button" disabled={busy === `default:${profile.id}`} title={t('modelHub.setDefault', '设为默认模型')} aria-label={t('modelHub.setDefaultAria', '将 {name} 设为默认模型', { name: profile.displayName })} onClick={() => void runSetDefault(profile)}><Star size={13} /></button>}
+                  {confirmingRemove === profile.id
+                    ? <span className="model-hub__confirm"><button type="button" className="is-danger" onClick={() => void runRemoveProfile(profile)}>{t('modelHub.confirmRemove', '确认移除')}</button><button type="button" onClick={() => setConfirmingRemove(undefined)}>{t('modelHub.cancel', '取消')}</button></span>
+                    : <button type="button" disabled={assigned || removing} title={assigned ? t('modelHub.removeBlocked', '正在被分配使用，请先在角色或世界中改选其它模型') : t('modelHub.removeFromPool', '从模型池移除')} aria-label={t('modelHub.removeFromAria', '移除模型 {name}', { name: profile.displayName })} onClick={() => setConfirmingRemove(profile.id)}><Trash size={14} /></button>}
+                </span></td>
               </tr>
             })}</tbody>
           </table>}

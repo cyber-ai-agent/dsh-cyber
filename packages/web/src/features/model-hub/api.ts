@@ -197,3 +197,14 @@ export async function clearAssignment(workspaceId: string, scope: HubAssignmentS
   await api<unknown>(`/api/workspaces/${enc(workspaceId)}/model-assignments/${scope}/${enc(scopeId)}`, { method: 'DELETE' })
 }
 
+export async function setDefaultProfile(workspaceId: string, profileId: string): Promise<void> {
+  await api<unknown>(`/api/workspaces/${enc(workspaceId)}/model-profiles/${enc(profileId)}/default`, { method: 'PUT' })
+}
+
+export async function addManualModel(workspaceId: string, providerId: string, model: { modelId: string; displayName?: string; contextLength?: number }): Promise<void> {
+  await api<unknown>(`/api/workspaces/${enc(workspaceId)}/model-providers/${enc(providerId)}/manual-model`, {
+    method: 'POST',
+    body: JSON.stringify(model),
+  })
+}
+

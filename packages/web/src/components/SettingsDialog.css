@@ -298,5 +298,10 @@
 .settings-dialog .model-action-btn { width: auto !important; min-width: 36px !important; height: 36px !important; }
 .settings-dialog .model-action-btn:not(.model-action-btn--default) { padding-inline: 0 !important; }
 .settings-dialog .model-editor-panel { height: auto !important; max-height: none !important; overflow: visible !important; }
-.settings-dialog .model-editor-scroll { overflow: visible !important; }
-.settings-dialog .model-setting-grid { grid-template-columns: minmax(0, 1fr) !important; }
+/* AI 模型节 = 模型中心的只读网关 */
+.settings-hub-gate { display: grid; gap: 12px; align-content: start; }
+.model-hub-entry { display: flex; gap: 14px; align-items: center; justify-content: space-between; padding: 14px 16px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 11px; flex-wrap: wrap; }
+.model-hub-entry > span { display: grid; gap: 3px; min-width: 240px; }
+.model-hub-entry strong { font-size: 14px; }
+.model-hub-entry small { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.settings-hub-gate__note { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.6; }

@@ -1,8 +1,5 @@
 /* 设置内引导横幅 */
-.model-hub-entry { display: flex; gap: 14px; align-items: center; justify-content: space-between; margin: 10px 0 4px; padding: 12px 14px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 11px; flex-wrap: wrap; }
-.model-hub-entry > span { display: grid; gap: 3px; min-width: 240px; }
-.model-hub-entry strong { font-size: 14px; }
-.model-hub-entry small { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+/* The 设置 entry banner styles live in SettingsDialog.css - the hub chunk is lazy and must not be needed to paint the settings panel. */
 
 /* AI 模型管理中心：外壳尺寸、圆角、阴影与设置面板同一规格（遮罩复用 .modal-backdrop） */
 .model-hub { width: min(1180px, 96vw); height: min(820px, 92vh); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border-strong); border-radius: var(--radius-dialog, 14px); background: var(--surface-0); color: var(--text); box-shadow: 0 28px 80px rgb(0 0 0 / 62%), 0 2px 8px rgb(0 0 0 / 34%); }
@@ -81,7 +78,21 @@
 .model-hub__verdict { font-size: 13px; font-weight: 700; line-height: 1; }
 .model-hub__verdict.is-yes { color: var(--success); }
 .model-hub__verdict.is-no { color: var(--danger); }
-.model-hub__col-actions { width: 104px; text-align: right; }
+.model-hub__col-actions { width: 150px; text-align: right; }
+.model-hub__row-actions { display: inline-flex; gap: 6px; align-items: center; justify-content: flex-end; }
+.model-hub__pool-tools { display: flex; gap: 10px; align-items: center; }
+.model-hub__pool-tools .model-hub__search { flex: 1; }
+.model-hub__pool-tools > button { display: inline-flex; gap: 6px; align-items: center; min-height: 36px; padding: 6px 12px; color: var(--text-soft); background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.model-hub__pool-tools > button:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
+.model-hub__pool-tools > button:disabled { opacity: 0.5; cursor: not-allowed; }
+.model-hub__manual { display: grid; gap: 10px; padding: 14px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; }
+.model-hub__manual label { display: grid; gap: 5px; font-size: 13px; }
+.model-hub__manual label > span { color: var(--text-soft); }
+.model-hub__manual input, .model-hub__manual select { width: 100%; min-height: 34px; padding: 6px 10px; color: var(--text); background: var(--surface-0, rgba(0, 0, 0, 0.15)); border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 14px; }
+.model-hub__manual footer { display: flex; gap: 10px; align-items: center; }
+.model-hub__manual footer > span { flex: 1; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.model-hub__manual footer > button { min-height: 34px; padding: 6px 14px; color: var(--text-soft); background: var(--surface-2, rgba(255, 255, 255, 0.05)); border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 13px; cursor: pointer; }
+.model-hub__manual footer .primary-button { color: var(--accent-contrast, #fff); background: var(--accent); border-color: transparent; }
 .model-hub__col-actions .model-hub__col-actions-clear { min-height: 26px; padding: 3px 10px; color: var(--text-muted); background: none; border: 1px solid var(--border); border-radius: 7px; font: inherit; font-size: 12px; cursor: pointer; }
 .model-hub__col-actions .model-hub__col-actions-clear:hover { color: var(--danger); border-color: currentColor; }
 .model-hub__table .model-hub__col-actions button { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; padding: 4px 8px; color: var(--text-muted); background: none; border: 1px solid var(--border); border-radius: 7px; font: inherit; font-size: 12px; cursor: pointer; }
