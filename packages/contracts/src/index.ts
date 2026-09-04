@@ -916,7 +916,7 @@ export interface ModelProviderCatalogEntry {
     webSearchBaseUrl?: string
   }
   /** A server-side balance parser registered for this kind; absent = no button. */
-  balance?: 'deepseek' | 'openrouter'
+  balance?: 'deepseek' | 'openrouter' | 'moonshot' | 'siliconflow'
 }
 
 export interface ModelProviderCatalog {

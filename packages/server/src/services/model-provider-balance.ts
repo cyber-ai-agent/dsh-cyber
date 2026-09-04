@@ -39,6 +39,36 @@ const BALANCE_PATHS: Record<string, { path: string; parse: (body: Record<string,
       return lines
     },
   },
+  // Kimi (Moonshot): GET /v1/users/me/balance → data.{available,voucher,cash}_balance (CNY).
+  moonshot: {
+    path: '/v1/users/me/balance',
+    parse: (body) => {
+      const data = body.data
+      if (data === null || typeof data !== 'object') return []
+      const balance = data as Record<string, unknown>
+      if (typeof balance.available_balance !== 'number') return []
+      const lines: string[] = [`可用余额 ${balance.available_balance.toFixed(2)} 元`]
+      if (typeof balance.voucher_balance === 'number' && balance.voucher_balance > 0) lines.push(`代金券 ${balance.voucher_balance.toFixed(2)} 元`)
+      if (typeof balance.cash_balance === 'number' && balance.cash_balance < 0) lines.push(`现金已欠费 ${(-balance.cash_balance).toFixed(2)} 元`)
+      return lines
+    },
+  },
+  // SiliconFlow: GET /v1/user/info → data.{totalBalance,balance} (CNY).
+  siliconflow: {
+    path: '/v1/user/info',
+    parse: (body) => {
+      const data = body.data
+      if (data === null || typeof data !== 'object') return []
+      const account = data as Record<string, unknown>
+      const total = typeof account.totalBalance === 'number' ? account.totalBalance : undefined
+      const cash = typeof account.balance === 'number' ? account.balance : undefined
+      if (total === undefined && cash === undefined) return []
+      const lines: string[] = []
+      if (total !== undefined) lines.push(`总余额 ${total.toFixed(2)} 元`)
+      if (cash !== undefined && total !== undefined && cash !== total) lines.push(`其中现金 ${cash.toFixed(2)} 元`)
+      return lines
+    },
+  },
 }
 
 export interface ModelProviderBalanceResult {

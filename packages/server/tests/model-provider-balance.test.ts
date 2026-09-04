@@ -47,6 +47,34 @@ describe('ModelProviderBalanceService', () => {
     expect(result.lines.join(' ')).toContain('剩余 $4.9877')
   })
 
+  it('reads the Kimi balance and surfaces a cash deficit only when negative', async () => {
+    const service = new ModelProviderBalanceService({
+      fetch: vi.fn<typeof fetch>(async (url) => {
+        expect(String(url)).toBe('https://api.moonshot.cn/v1/users/me/balance')
+        return json({ id: 'billing-internal-id', data: { available_balance: 88.5, voucher_balance: 0, cash_balance: -2.5 } })
+      }),
+    })
+    const result = await service.fetchBalance({ ...provider(), baseUrl: 'https://api.moonshot.cn/v1' }, 'moonshot', 'km-key')
+    expect(result.lines).toEqual(['可用余额 88.50 元', '现金已欠费 2.50 元'])
+    expect(JSON.stringify(result)).not.toContain('billing-internal-id')
+  })
+
+  it('reads the SiliconFlow total balance and splits cash when it differs', async () => {
+    const service = new ModelProviderBalanceService({
+      fetch: vi.fn<typeof fetch>(async () => json({ data: { totalBalance: 100.25, balance: 40.25, bonus: 60 } })),
+    })
+    const result = await service.fetchBalance({ ...provider(), baseUrl: 'https://api.siliconflow.cn/v1' }, 'siliconflow', 'sf-key')
+    expect(result.lines).toEqual(['总余额 100.25 元', '其中现金 40.25 元'])
+    expect(JSON.stringify(result)).not.toContain('bonus')
+  })
+
+  it('reports nothing as a number when a shape does not match the parser', async () => {
+    const service = new ModelProviderBalanceService({
+      fetch: vi.fn<typeof fetch>(async () => json({ data: { unexpected: 'shape' } })),
+    })
+    await expect(service.fetchBalance({ ...provider(), baseUrl: 'https://api.moonshot.cn/v1' }, 'moonshot', 'k')).rejects.toMatchObject({ code: 'balance_invalid_response' })
+  })
+
   it('refuses without a credential and never fabricates numbers', async () => {
     const service = new ModelProviderBalanceService({ fetch: vi.fn<typeof fetch>(async () => json({})) })
     await expect(service.fetchBalance(provider(), 'deepseek', undefined)).rejects.toThrowError(ServiceError)
@@ -64,6 +92,8 @@ describe('ModelProviderBalanceService', () => {
     const service = new ModelProviderBalanceService()
     expect(service.supports('deepseek')).toBe(true)
     expect(service.supports('openrouter')).toBe(true)
+    expect(service.supports('moonshot')).toBe(true)
+    expect(service.supports('siliconflow')).toBe(true)
     expect(service.supports(undefined)).toBe(false)
     expect(service.supports('invent-a-balance')).toBe(false)
   })

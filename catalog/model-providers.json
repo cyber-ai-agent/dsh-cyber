@@ -63,7 +63,8 @@
         "deepseek-ai/DeepSeek-V3",
         "deepseek-ai/DeepSeek-R1",
         "Qwen/Qwen2.5-72B-Instruct"
-      ]
+      ],
+      "balance": "siliconflow"
     },
     {
       "id": "zhipu",
@@ -101,7 +102,8 @@
       "popularModels": [
         "moonshot-v1-8k",
         "moonshot-v1-32k"
-      ]
+      ],
+      "balance": "moonshot"
     },
     {
       "id": "openai",

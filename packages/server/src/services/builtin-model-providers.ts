@@ -39,6 +39,7 @@ export const BUNDLED_MODEL_PROVIDER_CATALOG = {
       api: 'openai-completions', providerKind: 'openai-compatible-remote', credentialMode: 'api-key',
       modelPlaceholder: 'deepseek-ai/DeepSeek-V3',
       popularModels: ['deepseek-ai/DeepSeek-V3', 'deepseek-ai/DeepSeek-R1', 'Qwen/Qwen2.5-72B-Instruct'],
+      balance: 'siliconflow',
     },
     {
       id: 'zhipu', name: 'Zhipu AI (GLM)', badge: '国内',
@@ -57,6 +58,7 @@ export const BUNDLED_MODEL_PROVIDER_CATALOG = {
       api: 'openai-completions', providerKind: 'openai-compatible-remote', credentialMode: 'api-key',
       modelPlaceholder: 'moonshot-v1-8k',
       popularModels: ['moonshot-v1-8k', 'moonshot-v1-32k'],
+      balance: 'moonshot',
     },
     {
       id: 'openai', name: 'OpenAI',

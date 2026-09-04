@@ -228,7 +228,9 @@ export function parseModelProviderCatalog(value: unknown): ModelProviderCatalog 
     const webSearchBaseUrl = httpsUrl(defaults?.webSearchBaseUrl)
     const badge = trimmed(entry.badge, 20)
     const modelPlaceholder = trimmed(entry.modelPlaceholder, 120)
-    const balance = entry.balance === 'deepseek' || entry.balance === 'openrouter' ? entry.balance : undefined
+    const balance = entry.balance === 'deepseek' || entry.balance === 'openrouter' || entry.balance === 'moonshot' || entry.balance === 'siliconflow'
+      ? entry.balance
+      : undefined
     entries.push({
       id,
       name,
