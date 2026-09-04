@@ -78,7 +78,7 @@ export interface ModelAssignmentRef {
 export interface SyncOutcome {
   added: DiscoveredModel[]
   removed: Array<{ id: string; modelId: string }>
-  changed: Array<{ modelId: string; from?: number; to: number; profileId?: string }>
+  changed: Array<{ modelId: string; profileId?: string; patch: Partial<Pick<DiscoveredModel, 'contextLength' | 'inputTypes' | 'outputTypes' | 'reasoning'>> }>
   unchanged: number
 }
 

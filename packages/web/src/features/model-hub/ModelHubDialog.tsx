@@ -356,10 +356,10 @@ export function ModelHubDialog({ workspaceId, onClose }: { workspaceId: string; 
               const summary = summarizeSync(sync)
               return summary.added + summary.removed + summary.changed === 0
                 ? t('modelHub.syncClean', '模型列表与服务端一致。')
-                : t('modelHub.syncResult', '新增 {added} · 消失 {removed} · 上下文变化 {changed}', { added: summary.added, removed: summary.removed, changed: summary.changed })
+                : t('modelHub.syncResult', '新增 {added} · 消失 {removed} · 声明更新 {changed}', { added: summary.added, removed: summary.removed, changed: summary.changed })
             })()}
               {sync.added.length > 0 ? <button type="button" onClick={async () => { await importModels(workspaceId, provider.id, sync.added.slice(0, IMPORT_CAP)); setSyncs((current) => { const next = { ...current }; delete next[provider.id]; return next }); await reload() }}>{t('modelHub.importAdded', '导入新增')}</button> : null}
-              {sync.changed.length > 0 ? <button type="button" onClick={async () => { await importModels(workspaceId, provider.id, sync.changed.map((item) => ({ id: item.modelId, contextLength: item.to }))); setSyncs((current) => { const next = { ...current }; delete next[provider.id]; return next }); await reload() }}>{t('modelHub.applyChanged', '应用上下文变化')}</button> : null}
+              {sync.changed.length > 0 ? <button type="button" onClick={async () => { await importModels(workspaceId, provider.id, sync.changed.map((item) => ({ id: item.modelId, ...item.patch }))); setSyncs((current) => { const next = { ...current }; delete next[provider.id]; return next }); await reload() }}>{t('modelHub.applyChanged', '应用更新')}</button> : null}
             </p> : null}
           </article>
         })}
