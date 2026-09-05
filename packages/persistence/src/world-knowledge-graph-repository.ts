@@ -896,7 +896,10 @@ export class WorldKnowledgeGraphRepository {
           return live
         })
       let claims = 0
-      for (const claim of this.listClaims(worldId, { includeArchived: true })) {
+      // An archived statement is one the owner already removed from the graph;
+      // it asserts nothing, so marking it would only inflate the count the
+      // library row shows.
+      for (const claim of this.listClaims(worldId, { includeArchived: false })) {
         if (claim.notCurrent !== undefined) continue
         if (!claim.evidenceIds.some((evidenceId) => fromSource.has(evidenceId))) continue
         if (stillSupported(claim.evidenceIds)) continue
@@ -904,7 +907,7 @@ export class WorldKnowledgeGraphRepository {
         claims += 1
       }
       let relations = 0
-      for (const relation of this.listRelations(worldId, { includeArchived: true })) {
+      for (const relation of this.listRelations(worldId, { includeArchived: false })) {
         if (relation.notCurrent !== undefined) continue
         if (!relation.evidenceIds.some((evidenceId) => fromSource.has(evidenceId))) continue
         if (stillSupported(relation.evidenceIds)) continue
@@ -1673,7 +1676,7 @@ export class WorldKnowledgeGraphRepository {
   #countNotCurrentClaims(worldId: string, sourceType: KnowledgeChunkedSourceType, sourceId: string): number {
     const row = this.#database.prepare(
       `SELECT COUNT(*) AS total FROM knowledge_claims
-       WHERE world_id = ? AND not_current_since IS NOT NULL
+       WHERE world_id = ? AND not_current_since IS NOT NULL AND status <> 'archived'
          AND not_current_source_type = ? AND not_current_source_id = ?`,
     ).get(worldId, sourceType, sourceId) as Record<string, unknown> | undefined
     return Number(row?.total ?? 0)
