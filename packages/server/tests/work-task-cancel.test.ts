@@ -77,6 +77,10 @@ describe('Work Task cancel', () => {
       employeeIds: context.employeeIds, coordinatorEmployeeId: context.employeeIds[0]!,
     })).rejects.toThrow()
 
+    // The guard that stops it is the ready -> running transition, which today
+    // surfaces as a 500 rather than a conflict. That is the executability
+    // refusal's own problem, not the cancel's, so this only pins the product
+    // fact: the task does not run.
     const started = await post<WorkTaskDetail>(context.origin, `/api/tasks/${task.id}/execute`, {
       employeeIds: context.employeeIds, coordinatorEmployeeId: context.employeeIds[0]!,
     })

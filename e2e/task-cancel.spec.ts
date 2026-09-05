@@ -47,9 +47,12 @@ test('cancels a task after confirming, and can still find it afterwards', async 
   await expect(page.locator('.task-status')).toHaveText('待规划')
 
   // Asking first: the confirmation is a step, not a second identical button.
+  const screenshotRoot = join(process.cwd(), 'artifacts', 'task-cancel')
+  await mkdir(screenshotRoot, { recursive: true })
   await page.getByRole('button', { name: '取消任务', exact: true }).click()
   await expect(page.getByText('取消后任务不再出现在默认列表，历史记录会保留。')).toBeVisible()
   expect(current.work.list(world.id)).toHaveLength(1)
+  await page.screenshot({ path: join(screenshotRoot, 'task-cancel-confirming.png') })
 
   await page.getByRole('button', { name: '确认取消' }).click()
   await expect(page.getByText('还没有任务')).toBeVisible()
@@ -61,8 +64,6 @@ test('cancels a task after confirming, and can still find it afterwards', async 
   await expect(page.locator('.task-status')).toHaveText('已取消')
   expect(current.work.list(world.id, 'all')).toHaveLength(1)
 
-  const screenshotRoot = join(process.cwd(), 'artifacts', 'task-cancel')
-  await mkdir(screenshotRoot, { recursive: true })
   for (const viewport of [{ width: 1440, height: 900, label: '1440x900' }, { width: 1920, height: 1080, label: '1920x1080' }, { width: 3840, height: 2160, label: '3840x2160' }]) {
     await page.setViewportSize(viewport)
     const panel = page.getByRole('region', { name: '任务工作台' })
