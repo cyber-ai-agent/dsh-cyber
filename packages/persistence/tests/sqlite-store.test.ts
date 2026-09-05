@@ -12,6 +12,8 @@ import {
   SecretPersistenceError,
   SqliteStore,
   WorkSystemRepository,
+  WorldKnowledgeGraphRepository,
+  WorldKnowledgeRepository,
   exportReadonlyRecovery,
 } from '../src/index.js'
 
@@ -853,6 +855,7 @@ describe('SqliteStore', () => {
       ALTER TABLE employee_instances DROP COLUMN health_error_code;
       ALTER TABLE employee_instances DROP COLUMN health;
       ALTER TABLE employee_revisions DROP COLUMN runtime_permission_mode;
+      DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 2;
       PRAGMA user_version = 2;
     `)
@@ -957,6 +960,7 @@ describe('SqliteStore', () => {
       ALTER TABLE model_profiles DROP COLUMN capabilities_json;
       ALTER TABLE model_profiles DROP COLUMN probed_at;
       DROP TABLE model_providers;
+      DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 36;
       PRAGMA user_version = 36;
     `)
@@ -1039,6 +1043,7 @@ describe('SqliteStore', () => {
       ALTER TABLE model_profiles DROP COLUMN capabilities_json;
       ALTER TABLE model_profiles DROP COLUMN probed_at;
       DROP TABLE model_providers;
+      DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 38;
       PRAGMA user_version = 38;
     `)
@@ -1419,6 +1424,7 @@ describe('SqliteStore', () => {
       ALTER TABLE model_profiles DROP COLUMN capabilities_json;
       ALTER TABLE model_profiles DROP COLUMN probed_at;
       DROP TABLE model_providers;
+      DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 36;
       PRAGMA user_version = 36;
     `)
@@ -1486,6 +1492,7 @@ describe('SqliteStore', () => {
       ALTER TABLE model_profiles DROP COLUMN capabilities_json;
       ALTER TABLE model_profiles DROP COLUMN probed_at;
       DROP TABLE model_providers;
+      DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 39;
       PRAGMA user_version = 39;
     `)
@@ -1538,6 +1545,7 @@ describe('SqliteStore', () => {
       DROP INDEX work_tasks_source_work_turn_idx;
       ALTER TABLE work_tasks DROP COLUMN source_message_id;
       ALTER TABLE work_tasks DROP COLUMN source_work_turn_id;
+      DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 40;
       PRAGMA user_version = 40;
     `)
@@ -1565,6 +1573,58 @@ describe('SqliteStore', () => {
     expect(linked).toMatchObject({ created: true, task: { sourceWorkTurnId: turn.id, sourceMessageId: message.id } })
     expect(repository.createTaskFromSource(source)).toEqual({ created: false, task: linked.task })
     expect(repository.listTasks(world.id).map((task) => task.id).sort()).toEqual([legacyTask.id, linked.task.id].sort())
+  })
+
+  it('adds the knowledge source watermark after v41 without inventing a completed version', async () => {
+    const { directory, path, store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: '分块水位工作区' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '分块水位世界', templateId: 'cyber-company' })
+    const library = new WorldKnowledgeRepository(store.database)
+    const document = library.saveDocument({
+      workspaceId: workspace.id, worldId: world.id, relativePath: 'notes/legacy.md', title: '迁移前资料',
+      mimeType: 'text/markdown', byteLength: 12, sha256: 'a'.repeat(64), origin: 'upload',
+    })
+    library.replaceChunks(world.id, document.id, Array.from({ length: 5 }, (_, ordinal) => ({
+      ordinal, content: `旧资料第 ${ordinal} 块`, contentHash: 'c'.repeat(64),
+    })))
+    const graph = new WorldKnowledgeGraphRepository(store.database)
+    const legacyJob = graph.enqueueConsolidationJob({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+      fromCursor: 0, toCursor: Date.parse('2026-09-01T00:00:00.000Z'),
+    })
+    graph.claimConsolidationJob(legacyJob.id)
+    graph.completeConsolidationJob(world.id, legacyJob.id)
+    store.close()
+    stores.splice(stores.indexOf(store), 1)
+
+    // Rewind only the watermark migration, keeping every row the file held.
+    const legacy = new DatabaseSync(path)
+    legacy.exec(`
+      DROP TABLE knowledge_source_versions;
+      DELETE FROM schema_migrations WHERE version > 41;
+      PRAGMA user_version = 41;
+    `)
+    legacy.close()
+
+    const migrated = await SqliteStore.open(path)
+    stores.push(migrated)
+    expect((await readdir(directory)).some((file) => file.startsWith('cyber.sqlite.pre-migration-v41-'))).toBe(true)
+    expect(migrated.database.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+    expect(migrated.doctor()).toMatchObject({ ok: true, schemaVersion: CYBER_SCHEMA_VERSION })
+
+    // No backfill: how much of that document the pre-42 run actually covered is
+    // unknown, so the upgrade refuses to invent a completed watermark. The
+    // source simply has no version yet and is walked from chunk 0.
+    const upgraded = new WorldKnowledgeGraphRepository(migrated.database)
+    expect(upgraded.getKnowledgeSourceVersion({ worldId: world.id, sourceType: 'document', sourceId: document.id }))
+      .toBeUndefined()
+    expect(upgraded.getConsolidationJob(world.id, legacyJob.id)).toMatchObject({ status: 'completed' })
+    expect(upgraded.createConsolidationJob({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+    })).toMatchObject({ fromCursor: 0 })
+    expect(migrated.database.prepare(
+      `SELECT "unique" AS isUnique, partial FROM pragma_index_list('knowledge_source_versions') WHERE name = 'knowledge_source_versions_current_idx'`,
+    ).get()).toMatchObject({ isUnique: 1, partial: 1 })
   })
 })
 

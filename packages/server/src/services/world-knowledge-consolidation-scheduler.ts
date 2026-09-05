@@ -6,6 +6,7 @@ import {
   type KnowledgeConsolidationCursor,
   type KnowledgeConsolidationSettings,
   type KnowledgeConsolidationJob,
+  type KnowledgeSourceVersionState,
   type WorldKnowledgeConsolidationService,
 } from './world-knowledge-consolidation-service.js'
 import type { KnowledgeConversationSourceStore } from './world-knowledge-source-loader.js'
@@ -23,6 +24,12 @@ export interface KnowledgeBalancedScanRepository {
   getKnowledgeConsolidationCursor?(input: { worldId: string; sourceType: 'conversation'; sourceId: string }): KnowledgeConsolidationCursor | undefined | Promise<KnowledgeConsolidationCursor | undefined>
   getConsolidationSourceJob?(worldId: string, sourceType: 'conversation' | 'document' | 'artifact', sourceId: string): KnowledgeConsolidationJob | undefined | Promise<KnowledgeConsolidationJob | undefined>
   listSources?(worldId: string): readonly { sourceType: 'document' | 'artifact'; sourceId: string; updatedAt: string }[] | Promise<readonly { sourceType: 'document' | 'artifact'; sourceId: string; updatedAt: string }[]>
+  /**
+   * How far the source's *live* content has been walked. Must report nothing
+   * when the recorded version no longer matches what the source holds today,
+   * so a stale watermark can never make the scan skip unread chunks.
+   */
+  getKnowledgeSourceProgress?(input: { worldId: string; sourceType: 'document' | 'artifact'; sourceId: string }): KnowledgeSourceVersionState | undefined | Promise<KnowledgeSourceVersionState | undefined>
 }
 
 export interface WorldKnowledgeConsolidationSchedulerOptions {
@@ -107,12 +114,46 @@ export class WorldKnowledgeConsolidationScheduler {
           if (!Number.isSafeInteger(revision) || revision < 0 || this.#clockMs() - revision < 15_000) continue
           const job = await this.#repository.getConsolidationSourceJob?.(world.worldId, source.sourceType, source.sourceId)
           if (job?.status === 'queued' || job?.status === 'running') continue
+          // A completed job means one chunk window finished, never that the
+          // whole source did. The watermark of the live content decides: when
+          // it has reached the last chunk there is nothing to do whatever the
+          // revision timestamp says, and otherwise the next window starts
+          // exactly where the last one stopped. A host that keeps no watermark
+          // at all cannot tell, so it keeps the older, less precise rule
+          // rather than re-walking every source on every scan.
+          //
+          // "No watermark" is not the same as "nothing to do": a job that
+          // finished before the source-version table existed, or one whose
+          // content has changed since, has an unknown coverage. Such a source
+          // is walked again from chunk 0 — never reported as finished from a
+          // row that predates the rules it would be read under.
+          const tracksChunks = this.#repository.getKnowledgeSourceProgress !== undefined
+          const progress = await this.#repository.getKnowledgeSourceProgress?.({ worldId: world.worldId, sourceType: source.sourceType, sourceId: source.sourceId })
+          if (progress !== undefined && progress.processedChunks >= progress.chunkTotal) continue
           if (job?.toCursor === revision) {
-            if (job.status === 'completed') continue
-            const blocked = await this.#resumeSource(job)
-            if (blocked !== undefined) { queued += blocked; continue }
+            if (job.status === 'completed') {
+              if (!tracksChunks) continue
+            } else {
+              const blocked = await this.#resumeSource(job)
+              if (blocked !== undefined) { queued += blocked; continue }
+            }
           }
-          await this.#service.enqueue({ workspaceId: world.workspaceId, worldId: world.worldId, sourceType: source.sourceType, sourceId: source.sourceId, fromCursor: 0, toCursor: revision })
+          const fromCursor = progress === undefined ? 0 : Math.min(progress.processedChunks, progress.chunkTotal)
+          // A window that completed without moving the watermark would be
+          // re-queued forever. Leave the source visibly incomplete instead of
+          // spinning on it; the truth is already on the row. This can only be
+          // said once a watermark exists — with none, the matching cursors are
+          // a coincidence of the old semantics, not evidence of coverage.
+          if (progress !== undefined && job?.status === 'completed' && job.toCursor === revision && job.fromCursor === fromCursor) continue
+          const enqueued = await this.#service.enqueue({ workspaceId: world.workspaceId, worldId: world.worldId, sourceType: source.sourceType, sourceId: source.sourceId, fromCursor, toCursor: revision })
+          // Enqueue is idempotent per window, so it can hand back a window that
+          // already failed. That is a retry decision, not a fresh queue entry:
+          // let the same bounded backoff own it instead of silently reporting
+          // work that will never run.
+          if (enqueued?.status === 'failed') {
+            queued += await this.#resumeSource(enqueued) ?? 0
+            continue
+          }
           queued += 1
         }
         const worldSessions = await this.#repository.listSessions(world.worldId)

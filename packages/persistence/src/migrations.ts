@@ -2081,6 +2081,71 @@ const MIGRATIONS: readonly Migration[] = [
         ON work_tasks(source_message_id) WHERE source_message_id IS NOT NULL;
     `,
   },
+  {
+    version: 42,
+    name: 'knowledge-source-version-chunk-watermark',
+    sql: `
+      -- A document is loaded at most 40 chunks at a time and one extraction
+      -- covers about 16,000 characters, but the only durable record of that
+      -- work was "this job finished" — so a long document read as fully
+      -- 已整理 after its first window. This table is the missing fact: one row
+      -- per identifiable revision of a chunked source, carrying how far
+      -- extraction has actually got through it.
+      --
+      -- content_hash is the version identity (a document's sha256, an
+      -- artifact's version), so changed content becomes a new row instead of
+      -- silently overwriting the old one's history. processed_chunks is both
+      -- the resume cursor and the completion watermark: a version is complete
+      -- only when it equals chunk_total, which the CHECK on completed_at makes
+      -- impossible to fake. A failed window simply leaves it where it was.
+      --
+      -- superseded_at / superseded_by_hash mark a version whose content has
+      -- since changed. Marking is all this migration does: the claims that
+      -- were extracted from that content are NOT deleted, because deciding
+      -- whether to downgrade, re-verify or keep a user's organised knowledge
+      -- is an explicit later pass that reads exactly these rows.
+      --
+      -- No backfill. How much of any existing document the pre-42 runs really
+      -- covered is unknown, and writing a completed watermark from a guess
+      -- would be the same lie this table exists to remove. Sources with no row
+      -- are simply walked from chunk 0; applying an extraction is idempotent
+      -- on evidence and statement fingerprints, so a re-walk restates the same
+      -- graph rows rather than duplicating them.
+      CREATE TABLE knowledge_source_versions (
+        workspace_id TEXT NOT NULL,
+        world_id TEXT NOT NULL,
+        source_type TEXT NOT NULL CHECK (source_type IN ('document', 'artifact')),
+        source_id TEXT NOT NULL,
+        content_hash TEXT NOT NULL CHECK (length(content_hash) BETWEEN 1 AND 128),
+        chunk_total INTEGER NOT NULL CHECK (chunk_total >= 0),
+        processed_chunks INTEGER NOT NULL DEFAULT 0
+          CHECK (processed_chunks >= 0 AND processed_chunks <= chunk_total),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT,
+        superseded_at TEXT,
+        superseded_by_hash TEXT,
+        PRIMARY KEY (world_id, source_type, source_id, content_hash),
+        CHECK (completed_at IS NULL OR processed_chunks = chunk_total),
+        CHECK (superseded_by_hash IS NULL OR superseded_at IS NOT NULL),
+        FOREIGN KEY (workspace_id, world_id)
+          REFERENCES worlds(workspace_id, id)
+          ON DELETE CASCADE
+      ) STRICT;
+
+      -- At most one current version per source is a database rule, not
+      -- something a process has to remember while two scans overlap.
+      CREATE UNIQUE INDEX knowledge_source_versions_current_idx
+        ON knowledge_source_versions(world_id, source_type, source_id)
+        WHERE superseded_at IS NULL;
+
+      -- The read side of the invalidation seam: what a later evidence
+      -- downgrade pass has to look at, oldest first.
+      CREATE INDEX knowledge_source_versions_superseded_idx
+        ON knowledge_source_versions(world_id, superseded_at, source_type, source_id)
+        WHERE superseded_at IS NOT NULL;
+    `,
+  },
 ]
 
 /**

@@ -76,6 +76,7 @@ export function createWorldKnowledgeGraphRuntime(options: WorldKnowledgeGraphRun
       getKnowledgeConsolidationSettings: (worldId) => repository.getKnowledgeConsolidationSettings(worldId),
       getKnowledgeConsolidationCursor: (input) => repository.getKnowledgeConsolidationCursor(input),
       getConsolidationSourceJob: (worldId, sourceType, sourceId) => repository.getConsolidationSourceJob(worldId, sourceType, sourceId),
+      getKnowledgeSourceProgress: (input) => repository.getKnowledgeSourceProgress(input),
       listSources: (worldId) => {
         const documents = options.libraryRepository.listDocuments(worldId, { status: 'indexed' })
         const importedArtifacts = new Set(documents.map((document) => document.artifactId).filter(Boolean))

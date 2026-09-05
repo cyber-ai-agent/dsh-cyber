@@ -187,6 +187,12 @@ export class WorldKnowledgeSourceLoader implements KnowledgeSourceLoader {
     return { kind: message.kind === 'user' ? 'user' : 'assistant', text, evidence }
   }
 
+  /**
+   * A chunked source is walked one window at a time. `fromCursor` is a chunk
+   * ordinal, and the batch reports the version identity, the total number of
+   * chunks and the exclusive end of the window it examined, so the caller can
+   * record a truthful watermark instead of assuming one pass covered the file.
+   */
   async #loadDocument(input: LoaderInput): Promise<KnowledgeSourceBatch> {
     if (this.#documents === undefined) throw invalid('knowledge_document_source_unavailable', '文档知识来源暂不可用')
     const document = this.#documents.getDocument(input.worldId, input.sourceId)
@@ -195,20 +201,29 @@ export class WorldKnowledgeSourceLoader implements KnowledgeSourceLoader {
     if (document.status !== 'indexed') throw invalid('knowledge_document_not_indexed', '文档尚未完成索引')
     const chunks = this.#documents.listChunks(input.worldId, input.sourceId)
       .filter((chunk) => chunk.worldId === input.worldId && chunk.documentId === input.sourceId)
-      .slice(0, this.#maxItems)
-    const items = chunks
-      .filter((chunk) => chunk.content.trim().length > 0)
-      .map((chunk) => this.#documentItem(input, document, chunk))
+      .slice()
+      .sort((left, right) => left.ordinal - right.ordinal)
+    const chunkTotal = chunks.length
+    const chunkCursor = Math.min(input.fromCursor ?? 0, chunkTotal)
+    const window = chunks.slice(chunkCursor, chunkCursor + this.#maxItems)
+    const items = window
+      .map((chunk, index) => ({ chunk, position: chunkCursor + index }))
+      .filter(({ chunk }) => chunk.content.trim().length > 0)
+      .map(({ chunk, position }) => this.#documentItem(input, document, chunk, position))
     return {
       workspaceId: input.workspaceId,
       worldId: input.worldId,
       sourceType: input.sourceType,
       sourceId: input.sourceId,
+      contentHash: document.sha256,
+      chunkTotal,
+      chunkCursor,
+      chunkExaminedThrough: chunkCursor + window.length,
       items,
     }
   }
 
-  #documentItem(input: LoaderInput, document: KnowledgeDocument, chunk: KnowledgeChunk): KnowledgeVisibleSourceItem {
+  #documentItem(input: LoaderInput, document: KnowledgeDocument, chunk: KnowledgeChunk, position: number): KnowledgeVisibleSourceItem {
     const text = boundText(chunk.content, MAX_TEXT_CHARS)
     const evidence: KnowledgeExtractionEvidence = {
       evidenceId: `document:${document.id}:${chunk.id}`,
@@ -220,9 +235,18 @@ export class WorldKnowledgeSourceLoader implements KnowledgeSourceLoader {
       documentId: document.id,
       chunkId: chunk.id,
     }
-    return { kind: 'source', text, evidence }
+    // The cursor counts positions in the window, not the chunk's own ordinal:
+    // a re-index may leave gaps, and the watermark must stay comparable with
+    // the chunk count the same load reported.
+    return { kind: 'source', text, chunkOrdinal: position, evidence }
   }
 
+  /**
+   * An artifact has no chunk table, so its text is windowed by the same
+   * extraction budget the request is bounded by. Before this, everything past
+   * the first 16,000 characters of a long artifact was dropped and the source
+   * still counted as processed.
+   */
   async #loadArtifact(input: LoaderInput): Promise<KnowledgeSourceBatch> {
     if (this.#artifacts === undefined) throw invalid('knowledge_artifact_source_unavailable', '产物知识来源暂不可用')
     const artifact = await this.#artifacts.read({
@@ -234,9 +258,12 @@ export class WorldKnowledgeSourceLoader implements KnowledgeSourceLoader {
     if (artifact === undefined) throw invalid('knowledge_artifact_not_found', '产物不存在')
     assertScope(artifact.workspaceId, artifact.worldId, input)
     if (!Number.isSafeInteger(artifact.version) || artifact.version < 1) throw invalid('knowledge_artifact_version_invalid', '产物版本无效')
-    const text = boundText(toText(artifact.body), MAX_TEXT_CHARS)
+    const characters = Array.from(toText(artifact.body).normalize('NFC').trim())
+    const chunkTotal = Math.max(1, Math.ceil(characters.length / MAX_TEXT_CHARS))
+    const chunkCursor = Math.min(input.fromCursor ?? 0, chunkTotal)
+    const text = characters.slice(chunkCursor * MAX_TEXT_CHARS, (chunkCursor + 1) * MAX_TEXT_CHARS).join('')
     const evidence: KnowledgeExtractionEvidence = {
-      evidenceId: `artifact:${artifact.artifactId}:v${artifact.version}`,
+      evidenceId: chunkTotal === 1 ? `artifact:${artifact.artifactId}:v${artifact.version}` : `artifact:${artifact.artifactId}:v${artifact.version}#${chunkCursor}`,
       sourceType: 'artifact',
       sourceId: artifact.artifactId,
       excerpt: excerpt(text, this.#excerptChars),
@@ -250,7 +277,11 @@ export class WorldKnowledgeSourceLoader implements KnowledgeSourceLoader {
       worldId: input.worldId,
       sourceType: input.sourceType,
       sourceId: input.sourceId,
-      items: text.length === 0 ? [] : [{ kind: 'source', text, evidence }],
+      contentHash: `v${artifact.version}`,
+      chunkTotal,
+      chunkCursor,
+      chunkExaminedThrough: Math.min(chunkCursor + 1, chunkTotal),
+      items: text.length === 0 ? [] : [{ kind: 'source', text, chunkOrdinal: chunkCursor, evidence }],
     }
   }
 
