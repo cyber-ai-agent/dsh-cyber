@@ -4,7 +4,9 @@ import {
   CYBER_SCHEMA_VERSION,
   type KnowledgeChunk,
   type KnowledgeCollection,
+  type KnowledgeConsolidationJob,
   type KnowledgeDocument,
+  type KnowledgeSourceVersion,
 } from '../src/index.js'
 
 describe('World knowledge contracts', () => {
@@ -49,6 +51,41 @@ describe('World knowledge contracts', () => {
       document: { workspaceId: 'workspace-1', chunkCount: 0 },
       chunk: { worldId: 'world-1', documentId: 'document-1' },
     })
-    expect(CYBER_SCHEMA_VERSION).toBe(41)
+    expect(CYBER_SCHEMA_VERSION).toBe(42)
+  })
+
+  it('exports a source version whose completion watermark counts chunks, not sources', () => {
+    const version: KnowledgeSourceVersion = {
+      workspaceId: 'workspace-1',
+      worldId: 'world-1',
+      sourceType: 'document',
+      sourceId: 'document-1',
+      contentHash: 'c'.repeat(64),
+      chunkTotal: 37,
+      processedChunks: 12,
+      createdAt: '2026-09-05T00:00:00.000Z',
+      updatedAt: '2026-09-05T00:01:00.000Z',
+    }
+    const superseded: KnowledgeSourceVersion = {
+      ...version,
+      contentHash: 'd'.repeat(64),
+      processedChunks: 37,
+      completedAt: '2026-09-05T00:02:00.000Z',
+      supersededAt: '2026-09-05T00:03:00.000Z',
+      supersededByHash: version.contentHash,
+    }
+    expect(version.processedChunks).toBeLessThan(version.chunkTotal)
+    expect(version.completedAt).toBeUndefined()
+    expect(superseded.completedAt).toBeDefined()
+
+    // The job carries the watermark of its source version so a reader never has
+    // to guess that "completed job" means "whole source processed".
+    const job: KnowledgeConsolidationJob = {
+      id: 'job-1', workspaceId: version.workspaceId, worldId: version.worldId,
+      sourceType: 'document', sourceId: version.sourceId, fromCursor: 12, toCursor: 1_757_000_000_000,
+      status: 'completed', attempt: 1, processedChunks: 24, chunkTotal: 37,
+      createdAt: version.createdAt, updatedAt: version.updatedAt,
+    }
+    expect(job).toMatchObject({ processedChunks: 24, chunkTotal: 37 })
   })
 })

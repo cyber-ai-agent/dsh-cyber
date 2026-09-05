@@ -12,6 +12,8 @@ import {
   SecretPersistenceError,
   SqliteStore,
   WorkSystemRepository,
+  WorldKnowledgeGraphRepository,
+  WorldKnowledgeRepository,
   exportReadonlyRecovery,
 } from '../src/index.js'
 
@@ -1565,6 +1567,58 @@ describe('SqliteStore', () => {
     expect(linked).toMatchObject({ created: true, task: { sourceWorkTurnId: turn.id, sourceMessageId: message.id } })
     expect(repository.createTaskFromSource(source)).toEqual({ created: false, task: linked.task })
     expect(repository.listTasks(world.id).map((task) => task.id).sort()).toEqual([legacyTask.id, linked.task.id].sort())
+  })
+
+  it('adds the knowledge source watermark after v41 without inventing a completed version', async () => {
+    const { directory, path, store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: '分块水位工作区' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '分块水位世界', templateId: 'cyber-company' })
+    const library = new WorldKnowledgeRepository(store.database)
+    const document = library.saveDocument({
+      workspaceId: workspace.id, worldId: world.id, relativePath: 'notes/legacy.md', title: '迁移前资料',
+      mimeType: 'text/markdown', byteLength: 12, sha256: 'a'.repeat(64), origin: 'upload',
+    })
+    library.replaceChunks(world.id, document.id, Array.from({ length: 5 }, (_, ordinal) => ({
+      ordinal, content: `旧资料第 ${ordinal} 块`, contentHash: 'c'.repeat(64),
+    })))
+    const graph = new WorldKnowledgeGraphRepository(store.database)
+    const legacyJob = graph.enqueueConsolidationJob({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+      fromCursor: 0, toCursor: Date.parse('2026-09-01T00:00:00.000Z'),
+    })
+    graph.claimConsolidationJob(legacyJob.id)
+    graph.completeConsolidationJob(world.id, legacyJob.id)
+    store.close()
+    stores.splice(stores.indexOf(store), 1)
+
+    // Rewind only the watermark migration, keeping every row the file held.
+    const legacy = new DatabaseSync(path)
+    legacy.exec(`
+      DROP TABLE knowledge_source_versions;
+      DELETE FROM schema_migrations WHERE version > 41;
+      PRAGMA user_version = 41;
+    `)
+    legacy.close()
+
+    const migrated = await SqliteStore.open(path)
+    stores.push(migrated)
+    expect((await readdir(directory)).some((file) => file.startsWith('cyber.sqlite.pre-migration-v41-'))).toBe(true)
+    expect(migrated.database.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+    expect(migrated.doctor()).toMatchObject({ ok: true, schemaVersion: CYBER_SCHEMA_VERSION })
+
+    // No backfill: how much of that document the pre-42 run actually covered is
+    // unknown, so the upgrade refuses to invent a completed watermark. The
+    // source simply has no version yet and is walked from chunk 0.
+    const upgraded = new WorldKnowledgeGraphRepository(migrated.database)
+    expect(upgraded.getKnowledgeSourceVersion({ worldId: world.id, sourceType: 'document', sourceId: document.id }))
+      .toBeUndefined()
+    expect(upgraded.getConsolidationJob(world.id, legacyJob.id)).toMatchObject({ status: 'completed' })
+    expect(upgraded.createConsolidationJob({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+    })).toMatchObject({ fromCursor: 0 })
+    expect(migrated.database.prepare(
+      `SELECT "unique" AS isUnique, partial FROM pragma_index_list('knowledge_source_versions') WHERE name = 'knowledge_source_versions_current_idx'`,
+    ).get()).toMatchObject({ isUnique: 1, partial: 1 })
   })
 })
 

@@ -86,6 +86,165 @@ describe('knowledge consolidation job routes', () => {
   })
 })
 
+describe('knowledge source version, chunk cursor and completion watermark', () => {
+  it('resumes a long document after a rate-limited window and a restart without re-extracting done chunks', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-knowledge-chunk-cursor-'))
+    roots.push(stateRoot)
+    const extractor = new ChunkRecordingExtractor()
+    const first = await createCyberServer({ stateRoot, workspacePath: stateRoot, port: 0, bootstrapDefaultWorld: true, knowledgeExtractionPort: extractor })
+    servers.push(first)
+    const origin = (await first.start()).origin
+    const workspace = first.store.listWorkspaces()[0]!
+    const world = first.store.listWorlds(workspace.id)[0]!
+    const document = await first.knowledge.createFromText({
+      workspaceId: workspace.id, worldId: world.id, title: '长篇资料', text: longDocumentText(40),
+    })
+    expect(document.chunkCount).toBeGreaterThan(20)
+    const jobsUrl = `${origin}/api/worlds/${world.id}/knowledge/consolidation-jobs`
+    const scanUrl = `${origin}/api/worlds/${world.id}/knowledge/consolidate`
+    const ageSources = (): void => {
+      first.store.database.prepare('UPDATE knowledge_documents SET updated_at = ?').run(new Date(Date.now() - 60_000).toISOString())
+    }
+
+    // First window: the document is only partly processed, and the job says so.
+    ageSources()
+    await postJson(scanUrl, {})
+    await waitFor(async () => (await getJson<{ items: KnowledgeJobView[] }>(jobsUrl)).items.some((job) => job.status === 'completed'))
+    const afterFirst = (await getJson<{ items: KnowledgeJobView[] }>(jobsUrl)).items.find((job) => job.sourceId === document.id)!
+    expect(afterFirst.chunkTotal).toBe(document.chunkCount)
+    expect(afterFirst.processedChunks).toBeGreaterThan(0)
+    expect(afterFirst.processedChunks).toBeLessThan(document.chunkCount)
+    const doneAfterFirst = afterFirst.processedChunks!
+
+    // A 429 in the middle leaves the watermark exactly where it was, and the
+    // next window starts at the chunk that failed — never past it.
+    extractor.failNextWith('knowledge_model_rate_limited')
+    ageSources()
+    await postJson(scanUrl, {})
+    await waitFor(async () => (await getJson<{ items: KnowledgeJobView[] }>(`${jobsUrl}?status=failed`)).items.length > 0)
+    const failed = (await getJson<{ items: KnowledgeJobView[] }>(`${jobsUrl}?status=failed`)).items[0]!
+    expect(failed).toMatchObject({ errorCode: 'knowledge_model_rate_limited', fromCursor: doneAfterFirst, processedChunks: doneAfterFirst })
+    expect(failed.processedChunks).toBeLessThan(failed.chunkTotal!)
+
+    // Restart: the durable watermark, not process memory, decides where to go on.
+    await first.close()
+    servers.splice(servers.indexOf(first), 1)
+    const resumed = await createCyberServer({ stateRoot, workspacePath: stateRoot, port: 0, knowledgeExtractionPort: extractor })
+    servers.push(resumed)
+    const resumedOrigin = (await resumed.start()).origin
+    const resumedJobs = `${resumedOrigin}/api/worlds/${world.id}/knowledge/consolidation-jobs`
+    const seenBeforeRestart = new Set(extractor.chunkIds)
+    for (let pass = 0; pass < 8; pass += 1) {
+      resumed.store.database.prepare('UPDATE knowledge_documents SET updated_at = ?').run(new Date(Date.now() - 60_000).toISOString())
+      await postJson(`${resumedOrigin}/api/worlds/${world.id}/knowledge/consolidate`, {})
+      await waitFor(async () => (await getJson<{ items: KnowledgeJobView[] }>(resumedJobs)).items.every((job) => job.status === 'completed' || job.status === 'failed'))
+      const latest = (await getJson<{ items: KnowledgeJobView[] }>(resumedJobs)).items.find((job) => job.sourceId === document.id)!
+      if (latest.processedChunks === latest.chunkTotal) break
+    }
+    const finished = (await getJson<{ items: KnowledgeJobView[] }>(resumedJobs)).items.find((job) => job.sourceId === document.id)!
+    expect(finished.processedChunks).toBe(document.chunkCount)
+    expect(finished.chunkTotal).toBe(document.chunkCount)
+
+    // Every chunk was extracted exactly once across the failure and the restart.
+    expect(new Set(extractor.chunkIds).size).toBe(extractor.chunkIds.length)
+    expect(new Set(extractor.chunkIds).size).toBe(document.chunkCount)
+    expect([...seenBeforeRestart].every((id) => extractor.chunkIds.indexOf(id) === extractor.chunkIds.lastIndexOf(id))).toBe(true)
+
+    // A repeated scan of a fully processed version queues nothing.
+    resumed.store.database.prepare('UPDATE knowledge_documents SET updated_at = ?').run(new Date(Date.now() - 60_000).toISOString())
+    const repeated = await postJson<{ scan: { queued: number } }>(`${resumedOrigin}/api/worlds/${world.id}/knowledge/consolidate`, {})
+    expect(repeated.body.scan.queued).toBe(0)
+  }, 60_000)
+
+  it('starts a new version when the source content changes and keeps the previous claims for review', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-knowledge-source-version-'))
+    roots.push(stateRoot)
+    const extractor = new ChunkRecordingExtractor()
+    const server = await createCyberServer({ stateRoot, workspacePath: stateRoot, port: 0, bootstrapDefaultWorld: true, knowledgeExtractionPort: extractor })
+    servers.push(server)
+    const origin = (await server.start()).origin
+    const workspace = server.store.listWorkspaces()[0]!
+    const world = server.store.listWorlds(workspace.id)[0]!
+    const document = await server.knowledge.createFromText({ workspaceId: workspace.id, worldId: world.id, title: '会更新的资料', text: '第一版：本地存储使用 SQLite。' })
+    const jobsUrl = `${origin}/api/worlds/${world.id}/knowledge/consolidation-jobs`
+    server.store.database.prepare('UPDATE knowledge_documents SET updated_at = ?').run(new Date(Date.now() - 60_000).toISOString())
+    await postJson(`${origin}/api/worlds/${world.id}/knowledge/consolidate`, {})
+    await waitFor(async () => (await getJson<{ items: KnowledgeJobView[] }>(jobsUrl)).items.some((job) => job.status === 'completed'))
+    const completed = (await getJson<{ items: KnowledgeJobView[] }>(jobsUrl)).items[0]!
+    expect(completed).toMatchObject({ processedChunks: document.chunkCount, chunkTotal: document.chunkCount })
+    const graphBefore = await getJson<{ claims: unknown[] }>(`${origin}/api/worlds/${world.id}/knowledge/graph`)
+    expect(graphBefore.claims.length).toBeGreaterThan(0)
+
+    const updated = await server.knowledge.createFromText({
+      workspaceId: workspace.id, worldId: world.id, title: '会更新的资料',
+      text: '第二版：本地存储改为 SQLite WAL 模式，并新增了备份说明。',
+    })
+    expect(updated.id).toBe(document.id)
+    expect(updated.sha256).not.toBe(document.sha256)
+    server.store.database.prepare('UPDATE knowledge_documents SET updated_at = ?').run(new Date(Date.now() - 60_000).toISOString())
+    await postJson(`${origin}/api/worlds/${world.id}/knowledge/consolidate`, {})
+    await waitFor(async () => {
+      const items = (await getJson<{ items: KnowledgeJobView[] }>(jobsUrl)).items
+      return items.length > 1 && items.every((job) => job.status === 'completed')
+    })
+
+    const versions = server.store.database.prepare(
+      'SELECT content_hash, superseded_by_hash, superseded_at, processed_chunks, chunk_total FROM knowledge_source_versions WHERE world_id = ? AND source_id = ? ORDER BY created_at',
+    ).all(world.id, document.id) as Array<Record<string, unknown>>
+    expect(versions).toMatchObject([
+      { content_hash: document.sha256, superseded_by_hash: updated.sha256, superseded_at: expect.any(String) },
+      { content_hash: updated.sha256, superseded_by_hash: null, processed_chunks: updated.chunkCount, chunk_total: updated.chunkCount },
+    ])
+    // The invalidation seam: nothing from the old version was discarded here.
+    // Evidence downgrade is a separate, explicit decision.
+    const graphAfter = await getJson<{ claims: unknown[] }>(`${origin}/api/worlds/${world.id}/knowledge/graph`)
+    expect(graphAfter.claims.length).toBeGreaterThanOrEqual(graphBefore.claims.length)
+  }, 30_000)
+})
+
+interface KnowledgeJobView {
+  id: string
+  sourceType: string
+  sourceId: string
+  status: string
+  fromCursor: number
+  toCursor: number
+  errorCode?: string
+  processedChunks?: number
+  chunkTotal?: number
+}
+
+function longDocumentText(paragraphs: number): string {
+  return Array.from({ length: paragraphs }, (_, index) =>
+    `第 ${index + 1} 段：本地事实源在第 ${index + 1} 节记录了一条独立结论。${'这一段用于占满一个分块的目标长度，使分块边界稳定可预期。'.repeat(24)}`)
+    .join('\n\n')
+}
+
+/** Records the chunk ids handed to the model so a repeat is observable. */
+class ChunkRecordingExtractor implements KnowledgeExtractionPort {
+  readonly chunkIds: string[] = []
+  #failWith: string | undefined
+
+  failNextWith(code: string): void { this.#failWith = code }
+
+  async extract(request: KnowledgeExtractionRequest) {
+    if (this.#failWith !== undefined) {
+      const code = this.#failWith
+      this.#failWith = undefined
+      const error = new Error('model rejected the request') as Error & { code: string }
+      error.code = code
+      throw error
+    }
+    for (const evidence of request.evidence) if (evidence.chunkId !== undefined) this.chunkIds.push(evidence.chunkId)
+    const evidenceId = request.evidence[0]!.evidenceId
+    return { payload: {
+      entities: [{ key: 'store', type: 'technology', canonicalName: '本地事实源', aliases: [], evidenceRefs: [evidenceId] }],
+      claims: [{ key: 'fact', type: 'fact', subjectKey: 'store', predicate: '记录于', objectText: request.sourceId, confidence: 0.9, evidenceRefs: [evidenceId] }],
+      relations: [], evidenceRefs: [{ evidenceId, sourceType: request.sourceType, sourceId: request.sourceId }],
+    } }
+  }
+}
+
 class RecoveringExtractor implements KnowledgeExtractionPort {
   calls = 0
   #failing = true

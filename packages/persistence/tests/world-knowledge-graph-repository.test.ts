@@ -4,9 +4,11 @@ import { mkdtemp } from 'node:fs/promises'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { SqliteStore, WorldKnowledgeGraphRepository } from '../src/index.js'
+import { SqliteStore, WorldKnowledgeGraphRepository, WorldKnowledgeRepository } from '../src/index.js'
 
 const stores: SqliteStore[] = []
+
+const hash = (seed: string): string => seed.repeat(64).slice(0, 64)
 
 afterEach(() => {
   for (const store of stores.splice(0)) store.close()
@@ -303,5 +305,122 @@ describe('WorldKnowledgeGraphRepository', () => {
     expect(repository.listConsolidationJobs(world.id)).toEqual([])
     expect(repository.listClaims(world.id)).toMatchObject([expect.objectContaining({ source: 'manual' })])
     expect(repository.listEvidence(world.id)).toMatchObject([{ sourceType: 'manual', sourceWeight: 1 }])
+  })
+
+  it('keeps a per-version chunk cursor that only moves forward from the expected watermark', async () => {
+    const store = await database()
+    const workspace = store.createWorkspace({ name: '分块游标' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '分块世界', templateId: 'cyber-company' })
+    const library = new WorldKnowledgeRepository(store.database)
+    const document = library.saveDocument({
+      workspaceId: workspace.id, worldId: world.id, relativePath: 'notes/long.md', title: '长资料',
+      mimeType: 'text/markdown', byteLength: 64, sha256: hash('a'), origin: 'upload',
+    })
+    library.replaceChunks(world.id, document.id, Array.from({ length: 37 }, (_, ordinal) => ({
+      ordinal, content: `第 ${ordinal} 块内容`, contentHash: hash(String(ordinal % 2)),
+    })))
+    const repository = new WorldKnowledgeGraphRepository(store.database)
+    const version = repository.beginKnowledgeSourceVersion({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+      contentHash: hash('a'), chunkTotal: 37,
+    })
+    expect(version).toMatchObject({ contentHash: hash('a'), chunkTotal: 37, processedChunks: 0 })
+    expect(version.completedAt).toBeUndefined()
+
+    // Begin is idempotent: a resumed job must not reset a watermark.
+    expect(repository.advanceKnowledgeSourceVersion({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+      contentHash: hash('a'), expectedProcessedChunks: 0, processedChunks: 12,
+    })).toMatchObject({ processedChunks: 12 })
+    expect(repository.beginKnowledgeSourceVersion({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+      contentHash: hash('a'), chunkTotal: 37,
+    })).toMatchObject({ processedChunks: 12 })
+
+    // A stale window (the watermark moved on) never advances the cursor.
+    expect(repository.advanceKnowledgeSourceVersion({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+      contentHash: hash('a'), expectedProcessedChunks: 0, processedChunks: 20,
+    })).toMatchObject({ processedChunks: 12 })
+
+    expect(repository.getKnowledgeSourceVersion({ worldId: world.id, sourceType: 'document', sourceId: document.id }))
+      .toMatchObject({ processedChunks: 12, chunkTotal: 37 })
+    expect(repository.advanceKnowledgeSourceVersion({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+      contentHash: hash('a'), expectedProcessedChunks: 12, processedChunks: 37,
+    })).toMatchObject({ processedChunks: 37, completedAt: expect.any(String) })
+  })
+
+  it('starts a new version for changed content and leaves the previous claims for a later downgrade', async () => {
+    const store = await database()
+    const workspace = store.createWorkspace({ name: '来源版本' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '版本世界', templateId: 'cyber-company' })
+    const library = new WorldKnowledgeRepository(store.database)
+    const document = library.saveDocument({
+      workspaceId: workspace.id, worldId: world.id, relativePath: 'notes/changing.md', title: '会更新的资料',
+      mimeType: 'text/markdown', byteLength: 8, sha256: hash('a'), origin: 'upload',
+    })
+    library.replaceChunks(world.id, document.id, [{ ordinal: 0, content: '第一版内容', contentHash: hash('a') }])
+    const repository = new WorldKnowledgeGraphRepository(store.database)
+    repository.beginKnowledgeSourceVersion({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+      contentHash: hash('a'), chunkTotal: 1,
+    })
+    repository.advanceKnowledgeSourceVersion({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+      contentHash: hash('a'), expectedProcessedChunks: 0, processedChunks: 1,
+    })
+    const evidence = repository.createEvidence({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', documentId: document.id,
+      chunkId: library.listChunks(world.id, document.id)[0]!.id, excerpt: '第一版内容',
+    })
+    const subject = repository.upsertEntity({ workspaceId: workspace.id, worldId: world.id, type: 'topic', canonicalName: '第一版主题' })
+    repository.upsertClaim({
+      workspaceId: workspace.id, worldId: world.id, type: 'fact', subjectEntityId: subject.id,
+      predicate: '来自', objectText: '第一版内容', evidenceIds: [evidence.id],
+    })
+
+    const next = repository.beginKnowledgeSourceVersion({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+      contentHash: hash('b'), chunkTotal: 4,
+    })
+    expect(next).toMatchObject({ contentHash: hash('b'), chunkTotal: 4, processedChunks: 0 })
+    expect(repository.getKnowledgeSourceVersion({ worldId: world.id, sourceType: 'document', sourceId: document.id }))
+      .toMatchObject({ contentHash: hash('b') })
+    // The invalidation seam: the old version is marked, never silently dropped,
+    // and its claims stay active until an explicit downgrade pass decides.
+    expect(repository.listSupersededKnowledgeSourceVersions(world.id))
+      .toMatchObject([{ contentHash: hash('a'), supersededByHash: hash('b'), supersededAt: expect.any(String) }])
+    expect(repository.listClaims(world.id)).toMatchObject([{ status: 'active', predicate: '来自' }])
+  })
+
+  it('reports the source watermark on consolidation jobs and resumes a manual run mid-document', async () => {
+    const store = await database()
+    const workspace = store.createWorkspace({ name: '水位投影' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '水位世界', templateId: 'cyber-company' })
+    const library = new WorldKnowledgeRepository(store.database)
+    const document = library.saveDocument({
+      workspaceId: workspace.id, worldId: world.id, relativePath: 'notes/watermark.md', title: '水位资料',
+      mimeType: 'text/markdown', byteLength: 16, sha256: hash('a'), origin: 'upload',
+    })
+    library.replaceChunks(world.id, document.id, Array.from({ length: 8 }, (_, ordinal) => ({
+      ordinal, content: `水位第 ${ordinal} 块`, contentHash: hash(String(ordinal % 2)),
+    })))
+    const repository = new WorldKnowledgeGraphRepository(store.database)
+    repository.beginKnowledgeSourceVersion({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+      contentHash: hash('a'), chunkTotal: 8,
+    })
+    repository.advanceKnowledgeSourceVersion({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+      contentHash: hash('a'), expectedProcessedChunks: 0, processedChunks: 3,
+    })
+    // A manual "吸收到知识图谱" run resumes at chunk 3 rather than starting over.
+    const job = repository.createConsolidationJob({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+    })
+    expect(job).toMatchObject({ fromCursor: 3, processedChunks: 3, chunkTotal: 8 })
+    expect(repository.listConsolidationJobs(world.id))
+      .toMatchObject([{ id: job.id, processedChunks: 3, chunkTotal: 8 }])
   })
 })
