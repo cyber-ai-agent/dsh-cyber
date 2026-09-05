@@ -2634,6 +2634,7 @@ export default function App() {
             world={activeWorld}
             value={worldSettings}
             models={selectableModels}
+            modelAssignments={modelAssignments}
             installedSkinIds={installedSkinIds}
             saving={savingSettings}
             onClose={() => setWorldSettingsOpen(false)}

@@ -2,7 +2,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 
-import { WorldSettingsDialog } from '../src/components/WorldSettingsDialog.js'
+import { resolveInheritedModel, WorldSettingsDialog } from '../src/components/WorldSettingsDialog.js'
 
 describe('WorldSettingsDialog permission layers', () => {
   it('keeps world settings focused on world configuration and role capability guidance', () => {
@@ -21,6 +21,7 @@ describe('WorldSettingsDialog permission layers', () => {
         updatedAt: '2026-08-25T08:00:00.000Z',
       } as never,
       models: [],
+      modelAssignments: [],
       employees: [],
       saving: false,
       onClose: () => undefined,
@@ -36,5 +37,18 @@ describe('WorldSettingsDialog permission layers', () => {
     expect(markup).not.toContain('完整访问：读写此电脑')
     expect(markup).not.toContain('本次电脑访问')
     expect(markup).not.toContain('permission-risk-confirm')
+  })
+
+  it('uses the workspace model as the inheritance target when a world override exists', () => {
+    const models = [
+      { id: 'world-model', modelId: 'world-model-id', displayName: '世界覆盖模型', isDefault: false, settings: {} },
+      { id: 'workspace-model', modelId: 'workspace-model-id', displayName: '工作区默认模型', isDefault: false, settings: {} },
+    ] as never
+    const assignments = [
+      { id: 'world-assignment', scope: 'world', scopeId: 'world-1', modelProfileId: 'world-model' },
+      { id: 'workspace-assignment', scope: 'workspace', scopeId: 'workspace-1', modelProfileId: 'workspace-model' },
+    ] as never
+
+    expect(resolveInheritedModel(models, assignments, 'workspace-1')?.id).toBe('workspace-model')
   })
 })
