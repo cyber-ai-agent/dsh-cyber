@@ -423,4 +423,52 @@ describe('WorldKnowledgeGraphRepository', () => {
     expect(repository.listConsolidationJobs(world.id))
       .toMatchObject([{ id: job.id, processedChunks: 3, chunkTotal: 8 }])
   })
+
+  it('reopens a completed window that no source version accounts for', async () => {
+    const store = await database()
+    const workspace = store.createWorkspace({ name: '迁移前任务' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '迁移前世界', templateId: 'cyber-company' })
+    const library = new WorldKnowledgeRepository(store.database)
+    const document = library.saveDocument({
+      workspaceId: workspace.id, worldId: world.id, relativePath: 'notes/legacy.md', title: '迁移前资料',
+      mimeType: 'text/markdown', byteLength: 32, sha256: hash('a'), origin: 'upload',
+    })
+    library.replaceChunks(world.id, document.id, Array.from({ length: 6 }, (_, ordinal) => ({
+      ordinal, content: `旧第 ${ordinal} 块`, contentHash: hash(String(ordinal % 2)),
+    })))
+    const repository = new WorldKnowledgeGraphRepository(store.database)
+    // The pre-42 shape: one window over the whole source, completed, and no
+    // version row saying how many chunks it actually read. The revision is the
+    // source row's own timestamp, which indexing has already moved once.
+    const revision = Date.parse(library.getDocument(world.id, document.id)!.updatedAt)
+    const legacy = repository.enqueueConsolidationJob({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+      fromCursor: 0, toCursor: revision,
+    })
+    repository.completeConsolidationJob({ jobId: legacy.id })
+    expect(repository.getKnowledgeSourceVersion({ worldId: world.id, sourceType: 'document', sourceId: document.id })).toBeUndefined()
+
+    // Enqueueing that window again must not hand back a completion nobody can
+    // verify, and must not invent a watermark for it either.
+    expect(repository.createConsolidationJob({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+    })).toMatchObject({ id: legacy.id, status: 'queued', fromCursor: 0, toCursor: revision })
+    expect(repository.listKnowledgeSourceVersions(world.id, 'document', document.id)).toEqual([])
+
+    // Once the walk has recorded a complete watermark, the same window is
+    // idempotent again: a completion under the new rules is trusted.
+    repository.beginKnowledgeSourceVersion({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+      contentHash: hash('a'), chunkTotal: 6,
+    })
+    repository.advanceKnowledgeSourceVersion({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+      contentHash: hash('a'), expectedProcessedChunks: 0, processedChunks: 6,
+    })
+    repository.completeConsolidationJob({ jobId: legacy.id })
+    expect(repository.enqueueConsolidationJob({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+      fromCursor: 0, toCursor: revision,
+    })).toMatchObject({ id: legacy.id, status: 'completed', processedChunks: 6, chunkTotal: 6 })
+  })
 })
