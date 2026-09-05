@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ConversationHistoryEntry } from '@dsh-cyber/contracts'
+import { estimateTextTokens } from '@dsh-cyber/contracts'
 
 import { formatRecoveredHistoryPrompt, unseenHistory } from '../src/index.js'
 
@@ -97,7 +98,7 @@ describe('formatRecoveredHistoryPrompt', () => {
       index % 2 === 0 ? '用户' : '小刘',
       `第 ${index + 1} 轮内容：${'这是需要恢复的长会话信息。'.repeat(12)}`,
     ))
-    const prompt = formatRecoveredHistoryPrompt(history, '当前请求', { maxTokens: 320 })
+    const prompt = formatRecoveredHistoryPrompt(history, '当前请求', { maxTokens: 1_000 })
     const jsonLine = prompt.split('\n').find((line) => line.startsWith('{"type":"recovered_conversation_history"'))
     const envelope = JSON.parse(jsonLine!) as {
       checkpoint: { throughSequence: number; entryCount: number; summary: string }
@@ -106,9 +107,28 @@ describe('formatRecoveredHistoryPrompt', () => {
 
     expect(envelope.checkpoint.entryCount).toBeGreaterThan(0)
     expect(envelope.checkpoint.throughSequence).toBeLessThan(envelope.entries[0]!.sequence)
-    expect(envelope.checkpoint.summary).toContain('·')
+    expect(typeof envelope.checkpoint.summary).toBe('string')
     expect(envelope.entries.at(-1)?.sequence).toBe(12)
     expect(envelope.entries.length).toBeLessThan(history.length)
     expect(prompt.endsWith('当前请求')).toBe(true)
+    expect(estimateTextTokens(prompt.slice(0, -'\n\n当前请求'.length))).toBeLessThanOrEqual(1_000)
+  })
+
+  it.each([0, 32, 255, 256, 320, 1_000])('bounds serialized recovery to %s estimated tokens even for one huge message', (maxTokens) => {
+    const history = [entry(1, '用户', '中文😀\\\"\n'.repeat(20_000))]
+    const prompt = formatRecoveredHistoryPrompt(history, '当前请求', { maxTokens })
+    expect(prompt.endsWith('当前请求')).toBe(true)
+    const block = prompt === '当前请求' ? '' : prompt.slice(0, -'\n\n当前请求'.length)
+    expect(estimateTextTokens(block)).toBeLessThanOrEqual(maxTokens)
+    if (block) {
+      const envelope = JSON.parse(block.split('\n').find((line) => line.startsWith('{'))!)
+      expect(envelope.truncated).toBe(true)
+      expect(envelope.entries[0].content.length).toBeLessThan(history[0]!.content.length)
+    }
+  })
+
+  it('does not double the transcript content in an utterance alias', () => {
+    const prompt = formatRecoveredHistoryPrompt([entry(1, '用户', 'UNIQUE-HISTORY-MARKER')], '当前请求')
+    expect(prompt.split('UNIQUE-HISTORY-MARKER')).toHaveLength(2)
   })
 })

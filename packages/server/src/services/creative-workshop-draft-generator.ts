@@ -54,7 +54,7 @@ export class CreativeWorkshopDraftGenerator implements CreativeWorkshopDraftGene
       credentials,
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
       ...(options.resolveHostname === undefined ? {} : { resolveHostname: options.resolveHostname }),
-      ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+      timeoutMs: options.timeoutMs ?? 180_000,
       maxOutputTokens: 8_192,
       // Creative Workshop already constrains JSON in the system prompt and
       // validates it strictly afterwards. Omitting response_format keeps the

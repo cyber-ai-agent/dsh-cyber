@@ -248,7 +248,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       lane.persona = request.revision.persona
       lane.runtime = runtime
     }
-    // The 0.1.2-alpha.3 SDK server creates its session through
+    // The 0.1.2-rc.1 SDK server creates its session through
     // ctx.agents.create. SessionStore.prepare rejects a live collision but does
     // not restore a JSONL log created by an earlier worker process. Every
     // conversation therefore gets a brand-new random id the first time it runs

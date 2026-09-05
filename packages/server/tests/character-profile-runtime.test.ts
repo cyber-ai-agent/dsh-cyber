@@ -117,8 +117,9 @@ describe('CharacterProfileRuntime', () => {
   })
 
   it('describes the effective DSH operation permission for every turn', () => {
-    expect(composeConversationPermissionPersona('基础设定', 'read-only')).toContain('模式：read-only（请求批准）')
-    expect(composeConversationPermissionPersona('基础设定', 'workspace-write')).toContain('模式：workspace-write（帮我批准）')
+    expect(composeConversationPermissionPersona('基础设定', 'read-only')).toContain('模式：read-only（只读访问）')
+    expect(composeConversationPermissionPersona('基础设定', 'read-only')).toContain('工具并未关闭')
+    expect(composeConversationPermissionPersona('基础设定', 'workspace-write')).toContain('模式：workspace-write（当前世界）')
     expect(composeConversationPermissionPersona('基础设定', 'danger-full-access')).toContain('模式：danger-full-access（完全访问）')
   })
 

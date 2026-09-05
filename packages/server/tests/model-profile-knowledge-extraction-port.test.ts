@@ -19,6 +19,18 @@ const profile: ModelProfile = {
 }
 
 describe('ModelProfileKnowledgeExtractionPort', () => {
+  it('uses the shared full-response timeout with a knowledge-specific error', async () => {
+    const cancel = vi.fn()
+    const port = new ModelProfileKnowledgeExtractionPort({
+      store: { getModelAssignment: () => undefined, getModelProfile: () => profile, resolveWorkspaceDefaultProfile: () => profile },
+      credentials: { resolve: () => undefined } as never, timeoutMs: 25,
+      fetch: async () => new Response(new ReadableStream({ cancel }), { status: 200 }),
+    })
+    await expect(port.extract({ workspaceId: 'workspace-1', worldId: 'world-1', sourceType: 'manual', sourceId: 'note', inputChars: 2, visibleText: '资料', evidence: [] }))
+      .rejects.toMatchObject({ code: 'knowledge_model_timeout' })
+    expect(cancel).toHaveBeenCalledOnce()
+  })
+
   it('uses the configured profile without creating a character runtime identity', async () => {
     const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
       expect(String(url)).toBe('http://127.0.0.1:11434/v1/chat/completions')

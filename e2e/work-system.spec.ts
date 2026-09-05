@@ -39,6 +39,7 @@ test('runs the task, immutable deliverable review, change request, and accepted 
   await page.getByRole('button', { name: '生成计划并执行' }).click()
   await expect(page.locator('.task-status')).toHaveText('等待验收', { timeout: 15_000 })
   await expect(page.getByText('计划 v1')).toBeVisible()
+  await page.locator('details.dock-detail-fold > summary').filter({ hasText: '执行与证据' }).click()
   await expect(page.getByText(/选择原因/).first()).toBeVisible()
 
   const task = current.work.list(world.id)[0]!

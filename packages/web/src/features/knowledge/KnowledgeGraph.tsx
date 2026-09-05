@@ -318,9 +318,8 @@ export function KnowledgeGraph({ worldId, workspaceId, demoMode = false, onOpenL
   return <section ref={graphRootRef} className={`knowledge-graph knowledge-graph--ready${fullscreen ? ' knowledge-graph--fullscreen' : ''}`} aria-label="知识图谱">
     <header className="knowledge-graph__header">
       <div>
-        <span className="knowledge-eyebrow"><Crosshair size={15} aria-hidden="true" />实体关系</span>
         <h3>知识图谱</h3>
-        <p>对话、资料与产物会在后台整理为有证据的长期知识。{snapshot.nodes.length}{snapshot.truncated ? '+' : ''} 个实体 · {snapshot.edges.length} 条关系</p>
+        <p>{snapshot.nodes.length}{snapshot.truncated ? '+' : ''} 个实体 · {snapshot.edges.length} 条关系</p>
       </div>
       <div className="knowledge-graph__header-actions">
         <button type="button" className="knowledge-icon-button" onClick={() => fitToGraph(visible.nodes)} aria-label="适配全部节点" title="适配全部节点"><Crosshair size={17} aria-hidden="true" /></button>

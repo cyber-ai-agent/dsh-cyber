@@ -32,7 +32,7 @@ test.afterAll(async () => {
   await rm(stateRoot, { recursive: true, force: true })
 })
 
-test('uses the recruited role default, persists full access, and exposes no administrator UI', async ({ page }) => {
+test('uses the recruited role default, persists full access, and exposes no administrator UI', async ({ page }, testInfo) => {
   const issues: string[] = []
   attachAppConsoleRecorder(page, issues)
   await page.goto(origin)
@@ -50,7 +50,7 @@ test('uses the recruited role default, persists full access, and exposes no admi
   const recruitment = page.getByRole('dialog', { name: '新增角色' })
   await recruitment.getByRole('button', { name: /开发工程师 v1/ }).click()
   await recruitment.getByLabel('角色名字（可选）').fill('默认权限工程师')
-  await recruitment.getByRole('radio', { name: /帮我批准/ }).check()
+  await recruitment.getByRole('radio', { name: /当前世界/ }).check()
   await recruitment.getByRole('button', { name: /确认新增|再创建一名/ }).click()
   await expect(recruitment).toBeHidden()
 
@@ -60,7 +60,7 @@ test('uses the recruited role default, persists full access, and exposes no admi
 
   await expect(page.getByRole('button', { name: '与默认权限工程师私聊' })).toBeVisible()
   await page.getByRole('button', { name: '与默认权限工程师私聊' }).click()
-  await expect(page.getByRole('button', { name: '当前消息权限' })).toContainText('帮我批准')
+  await expect(page.getByRole('button', { name: '当前消息权限' })).toContainText('当前世界')
   const composer = page.getByRole('textbox', { name: /给当前世界的.+发送消息/ })
   await composer.fill('验证角色默认权限')
   await page.getByRole('button', { name: '发送', exact: true }).click()
@@ -97,7 +97,19 @@ test('uses the recruited role default, persists full access, and exposes no admi
 
   await page.reload()
   await page.getByRole('button', { name: '与默认权限工程师私聊' }).click()
-  await expect(page.getByRole('button', { name: '当前消息权限' })).toContainText('请求批准')
+  await expect(page.getByRole('button', { name: '当前消息权限' })).toContainText('只读访问')
+  for (const [width, height] of [[1440, 900], [1920, 1080], [3840, 2160]] as const) {
+    await page.setViewportSize({ width, height })
+    await page.getByRole('button', { name: '当前消息权限' }).click()
+    const menu = page.getByRole('menu', { name: '当前消息权限' })
+    await expect(menu.getByRole('menuitemradio', { name: /^只读访问/ })).toBeVisible()
+    await expect(menu.getByRole('menuitemradio', { name: /^当前世界/ })).toBeVisible()
+    await expect(menu.getByRole('menuitemradio', { name: /^完全访问/ })).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath(`permissions-${width}x${height}.png`) })
+    await page.keyboard.press('Escape')
+    await expect(menu).toBeHidden()
+    if (width === 1920) await page.screenshot({ path: testInfo.outputPath('workspace-1920x1080.png') })
+  }
   expect(issues, issues.join('\n')).toEqual([])
 })
 

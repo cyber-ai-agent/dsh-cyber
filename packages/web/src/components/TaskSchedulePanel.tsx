@@ -91,7 +91,7 @@ export function TaskSchedulePanel({ employees, items, busy, onCreate, onStatus, 
   return <section className="task-schedule-panel" aria-label="任务日程">
     <header>
       <span className="task-schedule-panel__mark"><CalendarBlank size={20}/></span>
-      <span><strong>任务日程</strong><small>让指定角色在约定时间执行任务，服务重启后仍会保留</small></span>
+      <span><strong>任务日程</strong><small>查看下一次执行，管理角色的定时工作</small></span>
       <button type="button" className={creating ? 'text-button' : 'primary-button'} aria-expanded={creating} aria-controls="task-schedule-form" onClick={() => creating ? resetForm() : setCreating(true)}>
         {creating ? <X size={15}/> : <Plus size={15}/>}{creating ? '取消新建' : '新建日程'}
       </button>
@@ -130,11 +130,11 @@ export function TaskSchedulePanel({ employees, items, busy, onCreate, onStatus, 
       <fieldset className="schedule-choice-field">
         <legend>任务权限</legend>
         <div className="schedule-choice">
-          <label className={permissionMode === 'read-only' ? 'is-selected' : ''}><input type="radio" name="schedule-permission" value="read-only" checked={permissionMode === 'read-only'} onChange={() => setPermissionMode('read-only')}/><span><strong>只读</strong><small>查看资料，不修改文件</small></span></label>
-          <label className={permissionMode === 'workspace-write' ? 'is-selected' : ''}><input type="radio" name="schedule-permission" value="workspace-write" checked={permissionMode === 'workspace-write'} onChange={() => setPermissionMode('workspace-write')}/><span><strong>世界内读写</strong><small>可修改当前世界目录</small></span></label>
+          <label className={permissionMode === 'read-only' ? 'is-selected' : ''}><input type="radio" name="schedule-permission" value="read-only" checked={permissionMode === 'read-only'} onChange={() => setPermissionMode('read-only')}/><span><strong>只读访问</strong><small>查看资料，不修改文件</small></span></label>
+          <label className={permissionMode === 'workspace-write' ? 'is-selected' : ''}><input type="radio" name="schedule-permission" value="workspace-write" checked={permissionMode === 'workspace-write'} onChange={() => setPermissionMode('workspace-write')}/><span><strong>当前世界</strong><small>可修改当前世界目录</small></span></label>
         </div>
       </fieldset>
-      <p className="task-schedule-panel__guard">无人值守日程不开放“完整访问”，避免在没有人在场确认时修改当前世界目录之外的文件。</p>
+      <p className="task-schedule-panel__guard">无人值守日程不开放“完全访问”，避免在没有人在场确认时修改当前世界目录之外的文件。</p>
       <div className="task-schedule-panel__form-actions"><button type="button" className="text-button" disabled={busy} onClick={resetForm}>取消</button><button type="submit" className="primary-button" disabled={busy}>{busy ? '保存中…' : '保存日程'}</button></div>
     </form> : null}
     {sorted.length === 0 && !creating ? <div className="task-schedule-panel__empty"><CalendarBlank size={30}/><strong>还没有任务日程</strong><p>新建后可查看下次执行时间、最近执行时间和当前状态。</p><button type="button" className="primary-button" onClick={() => setCreating(true)}><Plus size={15}/>新建日程</button></div> : <ol>{sorted.map((item) => {
@@ -142,8 +142,8 @@ export function TaskSchedulePanel({ employees, items, busy, onCreate, onStatus, 
       const nextStatus = item.status === 'paused' ? 'active' : 'paused'
       return <li key={item.id}>
         <div><span className={`schedule-state is-${item.status}`}>{statusLabel(item.status)}</span><strong>{item.title}</strong><small>{employee?.displayName ?? '角色已不可用'} · {item.kind === 'once' ? '单次' : `每 ${Math.round((item.everySeconds ?? 300) / 60)} 分钟`}</small></div>
-        <p>{item.prompt}</p>
-        <dl><div><dt>下次执行</dt><dd>{item.nextRunAt ? formatTime(item.nextRunAt) : '无'}</dd></div><div><dt>最近执行</dt><dd>{item.lastRunAt ? formatTime(item.lastRunAt) : '尚未执行'}</dd></div><div><dt>权限</dt><dd>{item.permissionMode === 'read-only' ? '只读' : '世界内读写'}</dd></div></dl>
+        <p className="schedule-next-run">下次执行：{item.nextRunAt ? formatTime(item.nextRunAt) : '暂无安排'}</p><details className="dock-detail-fold"><summary>任务内容与设置</summary><p>{item.prompt}</p>
+        <dl><div><dt>下次执行</dt><dd>{item.nextRunAt ? formatTime(item.nextRunAt) : '无'}</dd></div><div><dt>最近执行</dt><dd>{item.lastRunAt ? formatTime(item.lastRunAt) : '尚未执行'}</dd></div><div><dt>权限</dt><dd>{item.permissionMode === 'read-only' ? '只读访问' : '当前世界'}</dd></div></dl></details>
         <footer>
           <button type="button" disabled={busy || item.status === 'completed'} aria-label={`${item.title}：${nextStatus === 'active' ? '恢复日程' : '暂停日程'}`} onClick={() => void onStatus(item, nextStatus)}>{item.status === 'paused' ? <Play size={14}/> : <Pause size={14}/>} {item.status === 'paused' ? '恢复' : '暂停'}</button>
           <button type="button" disabled={busy} onClick={() => void onRun(item)}><Play size={14}/>立即运行</button>

@@ -1,7 +1,9 @@
-import type { ModelApiKind, ModelProfile } from '@dsh-cyber/contracts'
+import type { ModelProfile } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import type { ModelCredentialService } from './model-credential-service.js'
+import { ModelJsonCall } from './model-json-call.js'
+import { ServiceError } from './service-error.js'
 import { KNOWLEDGE_CLAIM_TYPES, KNOWLEDGE_ENTITY_TYPES } from './world-knowledge-graph-service.js'
 import type {
   KnowledgeExtractionPort,
@@ -34,42 +36,34 @@ export interface ModelProfileKnowledgeExtractionPortOptions {
  */
 export class ModelProfileKnowledgeExtractionPort implements KnowledgeExtractionPort {
   readonly #store: ModelProfileKnowledgeExtractionPortOptions['store']
-  readonly #credentials: ModelCredentialService
-  readonly #fetch: typeof fetch
-  readonly #timeoutMs: number
+  readonly #call: ModelJsonCall
 
   constructor(options: ModelProfileKnowledgeExtractionPortOptions) {
     this.#store = options.store
-    this.#credentials = options.credentials
-    this.#fetch = options.fetch ?? fetch
-    this.#timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
+    this.#call = new ModelJsonCall({
+      credentials: options.credentials,
+      ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+      timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
+      maxResponseBytes: MAX_RESPONSE_BYTES,
+      jsonResponseMode: 'prompt-only',
+    })
   }
 
   async extract(input: KnowledgeExtractionRequest): Promise<KnowledgeExtractionPortResult> {
     const profile = this.#resolveProfile(input)
     if (profile === undefined) throw extractionError('knowledge_model_unconfigured', '请先为当前世界配置可用模型，再开始知识整理。')
-    const apiKey = this.#credentials.resolve(profile.id)
-      ?? (profile.credentialEnvName === undefined ? undefined : process.env[profile.credentialEnvName])
-    const request = modelRequest(profile, apiKey, extractionPrompt(input))
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), this.#timeoutMs)
-    let response: Response
     try {
-      response = await this.#fetch(request.url, {
-        method: 'POST',
-        headers: request.headers,
-        body: JSON.stringify(request.body),
-        signal: controller.signal,
-      })
+      const result = await this.#call.call(profile, extractionPrompt(input))
+      return { payload: result.text, usage: result.usage }
     } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') throw extractionError('knowledge_model_timeout', '知识整理模型响应超时，请稍后重试。')
+      if (error instanceof ServiceError) {
+        if (error.code === 'model_call_upstream_error' && error.httpStatus !== undefined) throw upstreamError(error.httpStatus)
+        const suffix = error.code.replace(/^model_call_/, '')
+        throw extractionError(`knowledge_model_${suffix}`, error.message)
+      }
       throw extractionError('knowledge_model_unreachable', '无法连接知识整理模型，请检查模型连接。')
-    } finally {
-      clearTimeout(timeout)
     }
-    if (!response.ok) throw upstreamError(response.status)
-    const payload = await readBoundedJson(response)
-    return responsePayload(profile.api, payload, profile.modelId)
   }
 
   #resolveProfile(input: KnowledgeExtractionRequest): ModelProfile | undefined {
@@ -121,117 +115,6 @@ function extractionPrompt(input: KnowledgeExtractionRequest): { system: string; 
   }
 }
 
-function modelRequest(profile: ModelProfile, apiKey: string | undefined, prompt: { system: string; user: string }): {
-  url: URL
-  headers: Record<string, string>
-  body: Record<string, unknown>
-} {
-  const headers: Record<string, string> = { Accept: 'application/json', 'Content-Type': 'application/json' }
-  if (apiKey !== undefined && apiKey.trim() !== '') headers.Authorization = `Bearer ${apiKey}`
-  if (profile.api === 'anthropic-messages') {
-    if (apiKey !== undefined && apiKey.trim() !== '') headers['x-api-key'] = apiKey
-    headers['anthropic-version'] = '2023-06-01'
-    return {
-      url: endpoint(profile.baseUrl, 'messages'),
-      headers,
-      body: { model: profile.modelId, max_tokens: MAX_OUTPUT_TOKENS, temperature: 0, system: prompt.system, messages: [{ role: 'user', content: prompt.user }] },
-    }
-  }
-  if (profile.api === 'openai-responses') {
-    return {
-      url: endpoint(profile.baseUrl, 'responses'),
-      headers,
-      body: { model: profile.modelId, temperature: 0, max_output_tokens: MAX_OUTPUT_TOKENS, instructions: prompt.system, input: prompt.user },
-    }
-  }
-  // No response_format: the system prompt already demands one bare JSON object,
-  // and compatible gateways that ignore or reject json_object were the direct
-  // cause of empty-content failures. Same prompt-only choice as #92.
-  return {
-    url: endpoint(profile.baseUrl, 'chat/completions'),
-    headers,
-    body: { model: profile.modelId, temperature: 0, max_tokens: MAX_OUTPUT_TOKENS, stream: false, messages: [{ role: 'system', content: prompt.system }, { role: 'user', content: prompt.user }] },
-  }
-}
-
-function endpoint(baseUrl: string, suffix: string): URL {
-  let url: URL
-  try { url = new URL(baseUrl) } catch { throw extractionError('knowledge_model_url_invalid', '模型接口地址无效。') }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw extractionError('knowledge_model_url_invalid', '模型接口只支持 HTTP 或 HTTPS。')
-  const normalized = url.pathname.replace(/\/+$/, '')
-  url.pathname = normalized.endsWith(`/${suffix}`) ? normalized : `${normalized}/${suffix}`
-  url.search = ''
-  url.hash = ''
-  return url
-}
-
-async function readBoundedJson(response: Response): Promise<unknown> {
-  const declared = Number(response.headers.get('content-length'))
-  if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) throw extractionError('knowledge_model_response_too_large', '知识整理模型响应过大。')
-  if (response.body === null) throw extractionError('knowledge_model_response_empty', '知识整理模型返回了空响应。')
-  const reader = response.body.getReader()
-  const chunks: Uint8Array[] = []
-  let bytes = 0
-  while (true) {
-    const result = await reader.read()
-    if (result.done) break
-    bytes += result.value.byteLength
-    if (bytes > MAX_RESPONSE_BYTES) {
-      await reader.cancel()
-      throw extractionError('knowledge_model_response_too_large', '知识整理模型响应过大。')
-    }
-    chunks.push(result.value)
-  }
-  const body = Buffer.concat(chunks.map((item) => Buffer.from(item))).toString('utf8')
-  const cleaned = body.replace(/^\uFEFF/, '').trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i, '$1').trim()
-  try { return JSON.parse(cleaned) as unknown } catch {
-    throw extractionError('knowledge_model_response_invalid', '知识整理模型返回了无法识别的响应。')
-  }
-}
-
-function responsePayload(api: ModelApiKind, value: unknown, fallbackModel: string): KnowledgeExtractionPortResult {
-  const record = object(value)
-  const model = typeof record.model === 'string' ? record.model : fallbackModel
-  const usage = usageFrom(record, api, model)
-  if (api === 'anthropic-messages') {
-    const content = Array.isArray(record.content) ? record.content : []
-    const text = content.flatMap((item) => {
-      const part = objectOrUndefined(item)
-      return part?.type === 'text' && typeof part.text === 'string' ? [part.text] : []
-    }).join('')
-    if (!text.trim()) throw extractionError('knowledge_model_response_invalid', '知识整理模型没有返回 JSON 内容。')
-    return { payload: text, usage }
-  }
-  if (api === 'openai-responses') {
-    const direct = typeof record.output_text === 'string' ? record.output_text : undefined
-    const nested = Array.isArray(record.output) ? record.output.flatMap((item) => {
-      const output = objectOrUndefined(item)
-      if (!Array.isArray(output?.content)) return []
-      return output.content.flatMap((part) => {
-        const content = objectOrUndefined(part)
-        return (content?.type === 'output_text' || content?.type === 'text') && typeof content.text === 'string' ? [content.text] : []
-      })
-    }).join('') : ''
-    const text = direct ?? nested
-    if (!text.trim()) throw extractionError('knowledge_model_response_invalid', '知识整理模型没有返回 JSON 内容。')
-    return { payload: text, usage }
-  }
-  const choices = Array.isArray(record.choices) ? record.choices : []
-  const first = objectOrUndefined(choices[0])
-  const message = objectOrUndefined(first?.message)
-  const text = typeof message?.content === 'string' ? message.content : ''
-  if (!text.trim()) throw extractionError('knowledge_model_response_invalid', '知识整理模型没有返回 JSON 内容。')
-  return { payload: text, usage }
-}
-
-function usageFrom(value: Record<string, unknown>, api: ModelApiKind, model: string): { model: string; inputTokens?: number; outputTokens?: number } {
-  const usage = objectOrUndefined(value.usage)
-  if (usage === undefined) return { model }
-  const input = finiteNumber(api === 'anthropic-messages' ? usage.input_tokens : usage.prompt_tokens ?? usage.input_tokens)
-  const output = finiteNumber(api === 'anthropic-messages' ? usage.output_tokens : usage.completion_tokens ?? usage.output_tokens)
-  return { model, ...(input === undefined ? {} : { inputTokens: input }), ...(output === undefined ? {} : { outputTokens: output }) }
-}
-
 function upstreamError(status: number): Error & { code: string; httpStatus: number } {
   const code = status === 401 || status === 403 ? 'knowledge_model_credential_rejected'
     : status === 404 ? 'knowledge_model_not_found'
@@ -248,14 +131,4 @@ function upstreamError(status: number): Error & { code: string; httpStatus: numb
 
 function extractionError(code: string, message: string): Error & { code: string } {
   return Object.assign(new Error(message), { code })
-}
-function object(value: unknown): Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw extractionError('knowledge_model_response_invalid', '知识整理模型返回了无法识别的响应。')
-  return value as Record<string, unknown>
-}
-function objectOrUndefined(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
-}
-function finiteNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
 }

@@ -287,7 +287,7 @@ describe('role runtime access', () => {
     expect(turn.workspacePath).toContain(join('worlds'))
     expect(turn.workspacePath).not.toContain('restricted-workspace')
     expect(turn.permissionMode).toBe('workspace-write')
-    expect(turn.persona).toContain('模式：workspace-write（帮我批准）')
+    expect(turn.persona).toContain('模式：workspace-write（当前世界）')
   })
 
   it('allows a conversation to temporarily choose a safer mode', async () => {

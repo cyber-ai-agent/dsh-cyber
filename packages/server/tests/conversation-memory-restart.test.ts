@@ -171,8 +171,8 @@ describe('SQLite conversation memory across runtime restarts', () => {
     // The character can read the previous exchange…
     const recovered = secondRuns[0]!.prompt
     expect(recovered).toContain(HISTORY_HEADER)
-    expect(recovered).toContain('用户：登录接口最近变慢了。')
-    expect(recovered).toContain('小刘：我先建立性能基线。')
+    expect(recoveredEntries(recovered)).toEqual(expect.arrayContaining([expect.objectContaining({ speakerName: '用户', content: '登录接口最近变慢了。' })]))
+    expect(recoveredEntries(recovered)).toEqual(expect.arrayContaining([expect.objectContaining({ speakerName: '小刘', content: '我先建立性能基线。' })]))
     expect(recovered).toContain('基线跑出来了吗？')
 
     // …and it does so without resuming any Harness log from the old process.
@@ -232,8 +232,8 @@ describe('SQLite conversation memory across runtime restarts', () => {
     })
 
     expect(runs[1]!.sessionId).not.toBe(runs[0]!.sessionId)
-    expect(runs[1]!.prompt).toContain('用户：只读模式的第一句。')
-    expect(runs[1]!.prompt).toContain('小刘：只读回答。')
+    expect(recoveredEntries(runs[1]!.prompt)).toEqual(expect.arrayContaining([expect.objectContaining({ speakerName: '用户', content: '只读模式的第一句。' })]))
+    expect(recoveredEntries(runs[1]!.prompt)).toEqual(expect.arrayContaining([expect.objectContaining({ speakerName: '小刘', content: '只读回答。' })]))
   })
 
   it('recovers history after the employee worker is closed', async () => {
@@ -259,7 +259,7 @@ describe('SQLite conversation memory across runtime restarts', () => {
     })
 
     expect(runs[1]!.sessionId).not.toBe(runs[0]!.sessionId)
-    expect(runs[1]!.prompt).toContain('用户：关闭 worker 之前的一句。')
+    expect(recoveredEntries(runs[1]!.prompt)).toEqual(expect.arrayContaining([expect.objectContaining({ speakerName: '用户', content: '关闭 worker 之前的一句。' })]))
   })
 
   it('carries history into the session rotated by a persisted-log collision', async () => {
@@ -288,7 +288,7 @@ describe('SQLite conversation memory across runtime restarts', () => {
     // Only the colliding conversation rotates, and the fresh session is seeded.
     expect(runs[2]!.sessionId).not.toBe(runs[1]!.sessionId)
     expect(runs[2]!.prompt).toContain(HISTORY_HEADER)
-    expect(runs[2]!.prompt).toContain('用户：碰撞之前的一句。')
+    expect(recoveredEntries(runs[2]!.prompt)).toEqual(expect.arrayContaining([expect.objectContaining({ speakerName: '用户', content: '碰撞之前的一句。' })]))
     expect(runs[2]!.prompt).toContain('碰撞发生的这一轮。')
   })
 
@@ -345,7 +345,7 @@ describe('SQLite conversation memory across runtime restarts', () => {
     const engineerRoundTwo = runs[2]!
     // 小刘 speaks first again, so groupPrompt() carries nothing from round 1.
     // Without a catch-up the character simply never learns what 老王 said.
-    expect(engineerRoundTwo.prompt).toContain('老王：我建议延后一天。')
+    expect(recoveredEntries(engineerRoundTwo.prompt)).toEqual(expect.arrayContaining([expect.objectContaining({ speakerName: '老王', content: '我建议延后一天。' })]))
     expect(engineerRoundTwo.prompt).toContain('那就按结论走，谁来通知？')
   })
 
@@ -382,8 +382,8 @@ describe('SQLite conversation memory across runtime restarts', () => {
     const engineerRoundTwo = runs[2]!
     const architectRoundTwo = runs[3]!
     // 小刘 only needs the one statement it missed, not its own past.
-    expect(engineerRoundTwo.prompt).not.toContain('用户：这次发布要不要延后？')
-    expect(engineerRoundTwo.prompt).not.toContain('小刘：回归测试还没跑完。')
+    expect(recoveredEntries(engineerRoundTwo.prompt)).not.toEqual(expect.arrayContaining([expect.objectContaining({ speakerName: '用户', content: '这次发布要不要延后？' })]))
+    expect(recoveredEntries(engineerRoundTwo.prompt)).not.toEqual(expect.arrayContaining([expect.objectContaining({ speakerName: '小刘', content: '回归测试还没跑完。' })]))
     // 老王 spoke last in round 1, so its session already saw everything and
     // gets no recovered history at all.
     expect(architectRoundTwo.prompt).not.toContain(HISTORY_HEADER)
@@ -448,10 +448,15 @@ describe('SQLite conversation memory across runtime restarts', () => {
     expect(recoveredDirect.sessionId).not.toBe(recoveredGroupForEngineer.sessionId)
     expect([directSessionId, groupSessionId]).not.toContain(recoveredDirect.sessionId)
 
-    expect(recoveredDirect.prompt).toContain('用户：私聊里的绩效谈话。')
+    expect(recoveredEntries(recoveredDirect.prompt)).toEqual(expect.arrayContaining([expect.objectContaining({ speakerName: '用户', content: '私聊里的绩效谈话。' })]))
     expect(recoveredDirect.prompt).not.toContain('群聊里的排期讨论。')
 
-    expect(recoveredGroupForEngineer.prompt).toContain('用户：群聊里的排期讨论。')
+    expect(recoveredEntries(recoveredGroupForEngineer.prompt)).toEqual(expect.arrayContaining([expect.objectContaining({ speakerName: '用户', content: '群聊里的排期讨论。' })]))
     expect(recoveredGroupForEngineer.prompt).not.toContain('私聊里的绩效谈话。')
   })
 })
+
+function recoveredEntries(prompt: string): Array<{ speakerName: string; content: string }> {
+  const json = prompt.split('\n').find((line) => line.startsWith('{"type":"recovered_conversation_history"'));
+  return json === undefined ? [] : JSON.parse(json).entries;
+}

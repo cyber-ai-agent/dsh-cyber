@@ -1,6 +1,19 @@
 # DSH 0.1.2 compatibility matrix
 
-状态：Phase A 已选择并适配 `@deepseek-ai/dsh` 0.1.2-alpha.3；升级前实现基线为 0.1.1-rc.1。
+状态：当前运行时精确锁定 `@deepseek-ai/dsh` **0.1.2-rc.1**。上游截至 2026-09-05 没有正式稳定版；选择最新候选版，暂不采用标注历史会话性能回退的 0.1.3-alpha.1。
+
+## 当前兼容结论
+
+- 全部直接 DSH 依赖和 SDK/Bundle 使用 rc.1；候选检查拒绝旧 alpha 或混合版本。
+- 审批桥接使用 `Session.seq` 和 `eventAt(SessionSeq)`，不再读取已移除的 `Session.events`；审批类型直接依赖上游类型，避免自造接口掩盖破坏性变更。
+- 原生文件权限值保留 `read-only`、`workspace-write`、`danger-full-access`；用户名称为“只读访问／当前世界／完全访问”。当前世界对应世界的 `files` 目录；DSH 原生工作区策略还允许部分平台临时目录。审批只扩大本次操作，不改变持久授权。
+- rc.1 SDK server 仍用 `agents.create()`，没有命名会话的冷恢复 RPC。因此继续在新 Worker 使用随机 ID，并从 SQLite 恢复有界历史；同进程会话只补未观察消息。
+- 历史预算按最终 JSON 与指令包装估算；不重复保存同一内容的 `utterance`，超长消息带截断标记，小预算不能反向关闭限制。估算不代表模型的精确 tokenizer 计数。
+- 真实 Worker 已验证两轮连续性、关闭重建后的单次恢复、候选 canary，以及只读拒写、项目内写入、项目外拒写、单次批准/拒绝和完全访问写入。
+
+来源：[rc.1 发行说明](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.2-rc.1)、[Session API](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.1.2-rc.1/packages/core/session/src/index.ts)、[SDK server](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.1.2-rc.1/packages/sdk/server/src/server.ts)。
+
+## 历史差异矩阵（alpha.3 升级记录）
 
 本文件把官方 `dsh-v0.1.2-alpha.1`、`alpha.2`、`alpha.3` 的 release notes 与 DSH Cyber Harness adapter 对齐。alpha.1/alpha.2 是历史差异证据，活动运行时只支持并精确 pin alpha.3；通过本文件列出的门禁后才允许发布。
 

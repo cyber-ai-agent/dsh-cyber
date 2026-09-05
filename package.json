@@ -30,6 +30,7 @@
     "voice:verify-loop": "node scripts/verify-local-voice-loop.mjs",
     "voice:verify-websocket": "node scripts/verify-voice-websocket.mjs",
     "context:benchmark": "node scripts/benchmark-context.mjs",
+    "package:prepare": "tsx scripts/prepare-package.ts",
     "dsh-cyber": "node packages/cli/lib/bin.js"
   },
   "devDependencies": {

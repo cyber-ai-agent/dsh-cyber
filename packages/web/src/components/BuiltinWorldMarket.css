@@ -1,0 +1,26 @@
+.builtin-world-market {
+  --builtin-market-gap: 14px;
+  display: grid;
+  gap: var(--builtin-market-gap);
+  padding-block-end: var(--builtin-market-gap);
+  border-bottom: 1px solid var(--border);
+}
+
+.builtin-world-market form {
+  display: grid;
+  gap: var(--builtin-market-gap);
+}
+
+.builtin-world-market .market-card-grid article > footer button {
+  color: var(--text-strong);
+  background: var(--surface-2);
+  border-color: var(--border);
+  box-shadow: none;
+}
+
+.builtin-world-market .market-card-grid article > footer button:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  box-shadow: none;
+  transform: none;
+}

@@ -333,6 +333,11 @@ export type CyberMarketActivation =
       themeId: string
     }
 
+export interface PackageCatalogDiagnostic {
+  directory: string
+  reason: string
+}
+
 export interface CyberMarketPackage {
   market: CyberMarketKind
   manifest: CyberPackageManifest

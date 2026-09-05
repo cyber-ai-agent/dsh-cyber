@@ -159,8 +159,9 @@ export class WorldKnowledgeConsolidationService {
     if (input.fromCursor !== undefined && (!Number.isSafeInteger(input.fromCursor) || input.fromCursor < 0)) throw invalid('knowledge_cursor_invalid', '知识游标无效')
     if (input.toCursor !== undefined && (!Number.isSafeInteger(input.toCursor) || input.toCursor < 0)) throw invalid('knowledge_cursor_invalid', '知识游标无效')
     if (input.fromCursor !== undefined && input.toCursor !== undefined && input.toCursor < input.fromCursor) throw invalid('knowledge_cursor_invalid', '知识游标范围无效')
-    const job = await this.#repository.createConsolidationJob({ ...input, id: this.#idFactory(), createdAt: now })
-    this.#onChanged?.(job.worldId, { type: 'knowledge.consolidation.changed', jobId: job.id, status: job.status })
+    const id = this.#idFactory()
+    const job = await this.#repository.createConsolidationJob({ ...input, id, createdAt: now })
+    if (job.id === id) this.#onChanged?.(job.worldId, { type: 'knowledge.consolidation.changed', jobId: job.id, status: job.status })
     return job
   }
 

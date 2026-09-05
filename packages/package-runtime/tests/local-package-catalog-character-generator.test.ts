@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { LocalPackageCatalog } from '../src/local-package-catalog.js'
 import { packageContentDigest } from '../src/package-manager.js'
+import { prepareLocalPackage } from '../src/package-authoring.js'
 
 const roots: string[] = []
 
@@ -15,6 +16,23 @@ afterEach(async () => {
 })
 
 describe('LocalPackageCatalog Character Generator roots', () => {
+  it('explains an edited package and restores it after one prepare command', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-package-edit-'))
+    roots.push(root)
+    const generatedRoot = join(root, 'generated')
+    const packageRoot = await writeTalentPackage(generatedRoot, { packageId: 'workshop.editable', withCertification: false })
+    const catalog = new LocalPackageCatalog(root, { additionalRoots: [generatedRoot] })
+    const item = (await catalog.list({ market: 'talent' }))[0]!
+    const file = join(packageRoot, item.manifest.files[0]!.path)
+    await writeFile(file, `${await readFile(file, 'utf8')}\n`)
+    expect(await catalog.list({ market: 'talent' })).toHaveLength(0)
+    expect(catalog.diagnostics({ market: 'talent' })[0]?.reason).toContain('文件已修改')
+    expect(catalog.diagnostics({ market: 'theme' })).toEqual([])
+    await prepareLocalPackage(packageRoot)
+    expect(await catalog.list({ market: 'talent' })).toHaveLength(1)
+    expect(catalog.diagnostics()).toEqual([])
+  })
+
   it('discovers generated talent packages as unverified local packages', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-character-generator-catalog-'))
     roots.push(root)

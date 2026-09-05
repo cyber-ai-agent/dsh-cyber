@@ -355,9 +355,9 @@ export function composeWorldAuthorityPersona(
 
 export function composeConversationPermissionPersona(persona: string, permissionMode: AgentPermissionMode): string {
   const guidance: Record<AgentPermissionMode, string> = {
-    'read-only': '模式：read-only（请求批准）\n当前工作目录只读；文件写入和命令工具由运行时关闭。需要更高权限时，请在回复中说明所需操作。',
-    'workspace-write': '模式：workspace-write（帮我批准）\n可以读取、创建和修改当前工作目录中的文件，也可以使用工作区命令工具。外部 Skill 的风险动作继续使用产品审批流程。',
-    'danger-full-access': '模式：danger-full-access（完全访问）\n用户已为当前会话和当前角色完成高风险确认。可以访问当前系统账号可访问的路径，并使用文件和命令工具完成用户要求。',
+    'read-only': '模式：read-only（只读访问）\n允许读取和搜索，默认不允许修改文件。工具并未关闭；按实际工具能力执行，遇到沙箱拒绝时按工具指引请求本次操作审批，禁止将未执行的操作说成已完成。',
+    'workspace-write': '模式：workspace-write（当前世界）\n可以读取、创建和修改当前世界的项目目录中的文件，并使用命令工具；目录外写入按工具指引单独请求审批。外部 Skill 的风险动作继续使用产品审批流程。',
+    'danger-full-access': '模式：danger-full-access（完全访问）\n用户已为当前会话和当前角色完成高风险确认。可以访问当前系统账号可访问的路径，并使用文件和命令工具完成用户要求；不能突破系统账号本身的权限。',
   }
   return `${persona.trim()}\n\n[当前会话 DSH 操作权限]\n${guidance[permissionMode]}`
 }

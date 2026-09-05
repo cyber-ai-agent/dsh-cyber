@@ -2990,6 +2990,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .market-catalog, .market-review-panel { min-height: 0; overflow: auto; }
 .market-catalog { display: grid; align-content: start; gap: 16px; padding: 20px; background: var(--dialog-bg) !important; }
 .market-review-panel { padding: 20px; border-left: 1px solid var(--dialog-border) !important; background: var(--dialog-nav-bg) !important; }
+.dock-detail-fold { margin-block: 16px; border-top: 1px solid var(--border); }
+.dock-detail-fold > summary { padding-block: 14px; color: var(--text-soft); font-size: 14px; font-weight: 600; cursor: pointer; }
+.dock-detail-fold > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dock-detail-fold > summary span { color: var(--text-muted); font-weight: 400; }
 .market-intro { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
 .market-intro > div { display: grid; gap: 4px; }
 .market-intro strong { font-size: 20px; font-weight: 700; color: var(--text-strong); }

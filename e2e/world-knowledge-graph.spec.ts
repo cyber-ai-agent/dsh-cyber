@@ -89,6 +89,7 @@ test('shows a failed consolidation, retries it, renders the Canvas graph, and su
     await page.screenshot({ path: join(screenshotRoot, `knowledge-consolidation-failed-${viewport.label}.png`), fullPage: false })
   }
   knowledgeExtractor.recover()
+  await failedPanel.locator('summary').click()
   await failedPanel.getByRole('button', { name: '重试' }).click()
 
   const graph = await expectGraph(world.id)

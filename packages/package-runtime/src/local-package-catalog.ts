@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { lstat, open, readFile, readdir } from 'node:fs/promises'
-import { dirname, join, resolve, sep } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import { Readable } from 'node:stream'
 
 import type {
@@ -89,6 +89,7 @@ export class LocalPackageCatalog {
   readonly #verified = new Map<string, VerifiedPackage>()
   readonly #workspaceRoots: WorkspaceScopedCatalogRoots | undefined
   readonly #workspaceContainer: string | undefined
+  readonly #diagnostics = new Map<string, { market: CyberMarketKind; reason: string }>()
 
   constructor(root: string, options: LocalPackageCatalogOptions = {}) {
     const primaryRoot = resolve(root)
@@ -110,6 +111,15 @@ export class LocalPackageCatalog {
    */
   invalidate(): void {
     this.#verified.clear()
+    this.#diagnostics.clear()
+  }
+
+  diagnostics(scope: PackageCatalogScope & { market?: CyberMarketKind } = {}): Array<{ directory: string; reason: string }> {
+    return [...this.#diagnostics].filter(([path, diagnostic]) =>
+      (scope.market === undefined || diagnostic.market === scope.market)
+      && !this.#ownedByOtherWorkspace(scope.workspaceId, path)
+      && this.#rootsFor(scope.workspaceId).some((root) => isPathWithin(root.path, path)),
+    ).map(([path, diagnostic]) => ({ directory: basename(path), reason: diagnostic.reason }))
   }
 
   async list(input: PackageCatalogQuery = {}): Promise<CyberMarketPackage[]> {
@@ -259,21 +269,26 @@ export class LocalPackageCatalog {
       return cached.item
     }
     this.#verified.delete(cacheKey)
+    this.#diagnostics.delete(cacheKey)
+    const reject = (reason: string): undefined => {
+      this.#diagnostics.set(cacheKey, { market, reason })
+      return undefined
+    }
     const manifestPath = join(sourceDirectory, PACKAGE_MANIFEST_FILE)
     try {
       const metadata = await lstat(manifestPath)
-      if (!metadata.isFile() || metadata.isSymbolicLink()) return undefined
+      if (!metadata.isFile() || metadata.isSymbolicLink()) return reject('清单不是普通文件')
       const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as CyberPackageManifest
       validatePackageManifest(manifest)
-      if (!kindMatchesMarket(manifest, market)) return undefined
+      if (!kindMatchesMarket(manifest, market)) return reject('包类型与所在市场目录不一致')
       await verifyPackageSourceInventory(sourceDirectory, manifest)
       const files = new Map<string, FileStamp>()
       for (const file of manifest.files) {
         const absolutePath = join(sourceDirectory, ...file.path.split('/'))
         const fileMetadata = await lstat(absolutePath)
-        if (!fileMetadata.isFile() || fileMetadata.isSymbolicLink()) return undefined
+        if (!fileMetadata.isFile() || fileMetadata.isSymbolicLink()) return reject(`文件不可用：${file.path}`)
         const digest = createHash('sha256').update(await readFile(absolutePath)).digest('hex')
-        if (digest !== file.sha256) return undefined
+        if (digest !== file.sha256) return reject(`文件已修改，清单待更新：${file.path}`)
         files.set(file.path, fileStamp(fileMetadata))
       }
       const certification = manifest.certification
@@ -288,8 +303,9 @@ export class LocalPackageCatalog {
       }
       return item
     } catch (error) {
-      if (isMissingFile(error) || error instanceof SyntaxError) return undefined
-      return undefined
+      if (isMissingFile(error)) return reject('清单或已声明的文件缺失')
+      if (error instanceof SyntaxError) return reject('清单 JSON 无法解析')
+      return reject('文件清单或内容摘要需要更新；运行 package:prepare 检查具体问题')
     }
   }
 

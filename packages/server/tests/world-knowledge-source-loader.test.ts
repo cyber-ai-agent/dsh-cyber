@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   createKnowledgeArtifactSourceReader,
@@ -57,6 +57,51 @@ describe('WorldKnowledgeSourceLoader', () => {
 })
 
 describe('WorldKnowledgeConsolidationScheduler', () => {
+  it('coalesces changed sources and bounds retries without repeating configuration failures', async () => {
+    const now = Date.parse('2026-09-05T00:10:00.000Z')
+    const revision = now - 60_000
+    let job: any = undefined
+    const enqueue = vi.fn(async () => ({} as never))
+    const retryJob = vi.fn(async () => ({} as never))
+    const scheduler = new WorldKnowledgeConsolidationScheduler({
+      repository: {
+        listWorlds: () => [{ workspaceId: 'workspace', worldId: 'world' }],
+        listSessions: () => [],
+        listSources: () => [{ sourceType: 'document', sourceId: 'doc', updatedAt: new Date(revision).toISOString() }],
+        getConsolidationSourceJob: () => job,
+      },
+      messages: { listMessagesPage: () => ({ items: [] }) },
+      service: { enqueue, retryJob, enqueueConversation: vi.fn() }, clockMs: () => now,
+    })
+    await scheduler.scanOnce()
+    expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ sourceId: 'doc', toCursor: revision }))
+    enqueue.mockClear()
+    job = { id: 'job', worldId: 'world', status: 'running', toCursor: revision - 1 }
+    await scheduler.scanOnce()
+    expect(enqueue).not.toHaveBeenCalled()
+    job = { ...job, status: 'completed', toCursor: revision }
+    await scheduler.scanOnce()
+    expect(enqueue).not.toHaveBeenCalled()
+    job = { ...job, status: 'failed', attempt: 1, errorCode: 'knowledge_model_timeout', updatedAt: new Date(now - 10_000).toISOString() }
+    await scheduler.scanOnce()
+    expect(retryJob).not.toHaveBeenCalled()
+    job.updatedAt = new Date(now - 31_000).toISOString()
+    await scheduler.scanOnce()
+    expect(retryJob).toHaveBeenCalledWith('world', 'job')
+    retryJob.mockClear()
+    job.attempt = 3
+    await scheduler.scanOnce()
+    expect(retryJob).not.toHaveBeenCalled()
+    job.attempt = 1
+    job.errorCode = 'knowledge_model_credential_rejected'
+    await scheduler.scanOnce()
+    expect(retryJob).not.toHaveBeenCalled()
+    expect(enqueue).not.toHaveBeenCalled()
+    job.toCursor = revision - 1
+    await scheduler.scanOnce()
+    expect(enqueue).toHaveBeenCalledOnce()
+  })
+
   it('queues a balanced shared-group window without invoking extraction and preserves the durable cursor range', async () => {
     const queued: Array<{ workspaceId: string; worldId: string; sessionId: string; fromCursor?: number; toCursor?: number }> = []
     const scheduler = new WorldKnowledgeConsolidationScheduler({

@@ -72,7 +72,7 @@ export function registerCatalogRoutes(router: Router, dependencies: CatalogRoute
         : { worldVersion: worldInstances.find((instance) => instance.packageId === item.manifest.id)!.packageVersion }),
       ...await marketActivation(packageCatalog, item, scope),
     })))
-    writeJson(response, 200, { items })
+    writeJson(response, 200, { items, diagnostics: packageCatalog.diagnostics({ ...scope, ...(market === null ? {} : { market: market as CyberMarketKind }) }) })
   })
 
   router.get(/^\/api\/marketplace\/packages\/([^/]+)\/([^/]+)\/preview$/, async ({ response, params, url }) => {

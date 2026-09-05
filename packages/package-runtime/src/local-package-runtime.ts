@@ -13,6 +13,7 @@ import {
 import { dirname, join, resolve, sep } from 'node:path'
 
 import type { CyberPackageManifest, InstalledPackage } from '@dsh-cyber/contracts'
+import { isPackageDevelopmentEntry } from './package-authoring.js'
 
 import {
   type PackageActivationReceipt,
@@ -165,7 +166,7 @@ export class LocalPackageRuntime implements PackageRuntimePort {
         }
         if (metadata.size > MAX_PACKAGE_FILE_BYTES) throw new Error(`Package file is too large: ${file.path}`)
         const digest = createHash('sha256').update(await readFile(sourcePath)).digest('hex')
-        if (digest !== file.sha256) throw new Error(`Package file integrity mismatch: ${file.path}`)
+        if (digest !== file.sha256) throw new Error(`Package file integrity mismatch: ${file.path}. 本地修改后运行 pnpm package:prepare <包目录> 更新清单。`)
         const targetPath = join(stagedPath, ...file.path.split('/'))
         await mkdir(dirname(targetPath), { recursive: true })
         await copyFile(sourcePath, targetPath)
@@ -296,7 +297,9 @@ export async function verifyPackageSourceInventory(sourceRoot: string, manifest:
   const visit = async (directory: string, prefix: string): Promise<void> => {
     const entries = await readdir(directory, { withFileTypes: true })
     for (const entry of entries) {
-      if (entry.name.startsWith('.')) throw new Error(`Hidden package entries are not allowed: ${entry.name}`)
+      // Local repositories contain editor state and uncommitted credentials.
+      // Ignore these source-only files; staging still copies declared files only.
+      if (isPackageDevelopmentEntry(entry.name)) continue
       const relativePath = prefix === '' ? entry.name : `${prefix}/${entry.name}`
       const absolutePath = resolve(directory, entry.name)
       const metadata = await lstat(absolutePath)

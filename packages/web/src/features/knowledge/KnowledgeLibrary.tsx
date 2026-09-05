@@ -95,9 +95,7 @@ export function KnowledgeLibrary({ world, demoMode, state }: KnowledgeLibraryPro
   return <section className="knowledge-library" aria-label={`${world.name} - ${t('knowledge.libraryTitle', '知识库')}`} aria-busy={state.loading || state.busyAction !== undefined}>
     <header className="knowledge-library__header">
       <div>
-        <span className="knowledge-eyebrow"><Books size={15} aria-hidden="true" />{t('knowledge.libraryEyebrow', '原始资料')}</span>
         <h3>{t('knowledge.libraryTitle', '知识库')}</h3>
-        <p>{t('knowledge.librarySubtitle', '把当前世界要长期参考的文件、网页和笔记放在一起。')}</p>
       </div>
       <div className="knowledge-library__actions" aria-label={t('knowledge.libraryImportAction', '知识库导入操作')}>
         <input ref={fileInputRef} className="knowledge-visually-hidden" type="file" accept=".md,.markdown,.txt,.json,.pdf,text/markdown,text/plain,application/json,application/pdf" onChange={handleFileChange} disabled={actionsDisabled} aria-label={t('knowledge.libraryImportFile', '选择要导入的资料文件')} />
@@ -109,11 +107,11 @@ export function KnowledgeLibrary({ world, demoMode, state }: KnowledgeLibraryPro
             <button type="button" role="menuitem" onClick={() => { setImportMenuOpen(false); fileInputRef.current?.click() }}><FileText size={16} aria-hidden="true" /><span><strong>{t('knowledge.libraryImportFile', '导入文件')}</strong><small>{t('knowledge.libraryImportFileDesc', 'Markdown、TXT、JSON、PDF')}</small></span></button>
             <button type="button" role="menuitem" onClick={() => { setImportMenuOpen(false); zipInputRef.current?.click() }}><Package size={16} aria-hidden="true" /><span><strong>{t('knowledge.libraryImportZip', '导入 ZIP 知识包')}</strong><small>{t('knowledge.libraryImportZipDesc', '保留压缩包内的目录')}</small></span></button>
             <button type="button" role="menuitem" onClick={() => { setImportMenuOpen(false); folderInputRef.current?.click() }}><FolderOpen size={16} aria-hidden="true" /><span><strong>{t('knowledge.libraryImportFolder', '导入文件夹')}</strong><small>{t('knowledge.libraryImportFolderDesc', '批量导入资料目录')}</small></span></button>
+            <button type="button" role="menuitem" onClick={() => { setImportMenuOpen(false); setDialog('paste') }}><ClipboardText size={16} aria-hidden="true" /><span>{t('knowledge.libraryPasteAction', '粘贴内容')}</span></button>
+            <button type="button" role="menuitem" onClick={() => { setImportMenuOpen(false); setDialog('web') }}><GlobeSimple size={16} aria-hidden="true" /><span>{t('knowledge.libraryWebAction', '从网页导入')}</span></button>
+            <button type="button" role="menuitem" onClick={() => { setImportMenuOpen(false); void state.rescan().catch(() => undefined) }}><ArrowsClockwise size={16} aria-hidden="true" /><span>{t('knowledge.libraryRescanAction', '重新扫描')}</span></button>
           </div> : null}
         </div>
-        <button type="button" className="knowledge-action" onClick={() => setDialog('paste')} disabled={actionsDisabled} title={demoMode ? t('knowledge.libraryDemoNotice', '演示世界未连接本地知识库') : t('knowledge.pasteTitle', '粘贴一段资料')}><ClipboardText size={16} aria-hidden="true" />{t('knowledge.libraryPasteAction', '粘贴内容')}</button>
-        <button type="button" className="knowledge-action" onClick={() => setDialog('web')} disabled={actionsDisabled} title={demoMode ? t('knowledge.libraryDemoNotice', '演示世界未连接本地知识库') : t('knowledge.webTitle', '从公开网页导入文字')}><GlobeSimple size={16} aria-hidden="true" />{t('knowledge.libraryWebAction', '从网页导入')}</button>
-        <button type="button" className="knowledge-action knowledge-action--quiet" onClick={() => void state.rescan().catch(() => undefined)} disabled={actionsDisabled} title={demoMode ? t('knowledge.libraryDemoNotice', '演示世界未连接本地知识库') : t('knowledge.libraryRescanTitle', '扫描知识库目录中的变化')}><ArrowsClockwise size={16} aria-hidden="true" />{t('knowledge.libraryRescanAction', '重新扫描')}</button>
       </div>
     </header>
 
@@ -131,15 +129,11 @@ export function KnowledgeLibrary({ world, demoMode, state }: KnowledgeLibraryPro
 
     {state.searchError === undefined ? null : <div className="knowledge-notice knowledge-notice--error knowledge-notice--inline" role="alert"><WarningCircle size={16} aria-hidden="true" /><span>{state.searchError}</span></div>}
 
-    <div className="knowledge-evidence" aria-label="知识库来源、索引和更新时间">
-      <span><strong>{t('knowledge.libraryStatSources', '来源')}</strong><b>{state.documents.length}</b><small>{t('knowledge.libraryStatSourcesUnit', '份资料')}</small></span>
-      <span><strong>{t('knowledge.libraryStatIndexed', '索引')}</strong><b>{indexedCount}/{state.documents.length}</b><small>{t('knowledge.libraryStatIndexedUnit', '已完成')}</small></span>
-      <span><strong>{t('knowledge.libraryStatUpdated', '更新')}</strong><b>{formatDate(lastUpdated, t)}</b><small>{t('knowledge.libraryStatUpdatedUnit', '最近变更')}</small></span>
-    </div>
+    <p className="knowledge-statusline" title={`${t('knowledge.libraryStatUpdated', '更新')} ${formatDate(lastUpdated, t)}`}>{state.documents.length} 份资料 <span>·</span> {indexedCount === state.documents.length ? '全部已索引' : `${state.documents.length - indexedCount} 份待处理`}</p>
 
     {state.loading ? <div className="knowledge-state" role="status"><SpinnerGap size={22} className="knowledge-spin" aria-hidden="true" /><span>{t('knowledge.libraryLoading', '正在读取知识库…')}</span></div> : hasSearch ? <SearchResults results={state.searchResults} query={state.searchQuery} /> : <>
-      <CollectionSection collections={state.collections} documents={state.documents} />
       <DocumentSection documents={state.documents} consolidationByDocument={consolidationByDocument} demoMode={demoMode} onConsolidate={(document) => void consolidateDocument(document)} />
+      {state.collections.length === 0 ? null : <details className="dock-detail-fold"><summary>知识包 <span>{state.collections.length}</span></summary><CollectionSection collections={state.collections} documents={state.documents} /></details>}
     </>}
 
     {dialog === 'paste' ? <PasteDialog busy={state.busyAction === 'paste'} onClose={() => setDialog(undefined)} onSubmit={async (input) => { await state.createFromText(input); setDialog(undefined) }} /> : null}
@@ -156,7 +150,7 @@ function KnowledgeConsolidationPanel({ state }: { state: UseWorldKnowledgeResult
   if (actionable.length === 0 && state.consolidationError === undefined) return null
   const failedCount = jobs.filter((job) => job.status === 'failed').length
   const activeCount = jobs.filter((job) => job.status === 'queued' || job.status === 'running').length
-  return <section className="knowledge-consolidation" aria-label={t('knowledge.consolidationTitle', '知识整理任务')}>
+  return <section className="knowledge-consolidation" aria-label={t('knowledge.consolidationTitle', '知识整理任务')}><details><summary>{failedCount > 0 ? `${failedCount} 项整理需要处理 · ${friendlyConsolidationError(actionable.find((job) => job.status === 'failed')?.errorCode, t)}` : `${activeCount} 项资料正在整理`}</summary>
     <header><div><strong>{t('knowledge.consolidationTitle', '知识整理任务')}</strong><span>{failedCount > 0 ? t('knowledge.consolidationFailedSummary', '{count} 个任务失败', { count: failedCount }) : t('knowledge.consolidationActiveSummary', '{count} 个任务处理中', { count: activeCount })}</span></div>{activeCount > 0 ? <SpinnerGap size={16} className="knowledge-spin" aria-label={t('knowledge.consolidationActiveSummary', '知识整理处理中')} /> : <WarningCircle size={16} aria-hidden="true" />}</header>
     {state.consolidationError === undefined ? null : <p className="knowledge-consolidation__error" role="alert">{state.consolidationError}</p>}
     {visible.length === 0 ? null : <ul>{visible.map((job) => <li key={job.id} className={`knowledge-consolidation__job knowledge-consolidation__job--${job.status}`}>
@@ -164,7 +158,7 @@ function KnowledgeConsolidationPanel({ state }: { state: UseWorldKnowledgeResult
       {job.status === 'failed' ? <button type="button" disabled={state.retryingJobId !== undefined} onClick={() => void state.retryConsolidation(job.id).catch(() => undefined)}>{state.retryingJobId === job.id ? t('workbench.retrying', '正在重试…') : t('knowledge.libraryRetry', '重试')}</button> : <em>{job.status === 'running' ? t('knowledge.consolidatePending', '正在加入…') : t('knowledge.consolidateQueued', '已排队')}</em>}
     </li>)}</ul>}
     {actionable.length <= 4 ? null : <button type="button" className="knowledge-consolidation__more" aria-expanded={expanded} onClick={() => setExpanded((current) => !current)}>{expanded ? t('knowledge.consolidationCollapse', '收起任务') : t('knowledge.consolidationMore', '查看全部 {count} 个任务', { count: actionable.length })}</button>}
-  </section>
+  </details></section>
 }
 
 function consolidationEntriesBySource(jobs: KnowledgeConsolidationJob[], sourceType: KnowledgeConsolidationJob['sourceType'], t: (key: string, fallback: string) => string): Record<string, KnowledgeConsolidationEntry> {
@@ -193,6 +187,9 @@ function consolidationSourceLabel(job: KnowledgeConsolidationJob, t: (key: strin
 function friendlyConsolidationError(code: string | undefined, t: (key: string, fallback: string) => string): string {
   if (code === undefined) return t('knowledge.consolidateQueued', '已排队')
   if (/timeout/iu.test(code)) return t('knowledge.consolidationTimeout', '模型整理超时')
+  if (/rate_limited/iu.test(code)) return '模型服务限流，请稍后重试'
+  if (/credential/iu.test(code)) return '模型密钥不可用，请检查模型连接'
+  if (/unconfigured/iu.test(code)) return '请先在模型中心配置可用模型'
   if (/response_invalid|text_invalid|schema|parse/iu.test(code)) return t('knowledge.consolidationInvalidResponse', '模型返回格式无效')
   return t('knowledge.consolidationGenericFailure', '知识整理失败')
 }
@@ -242,19 +239,20 @@ function DocumentRow({ document, consolidation, demoMode, onConsolidate }: { doc
   const canConsolidate = document.status === 'indexed' && !demoMode && !consolidationActive
   const originKey = `knowledge.origin${document.origin.charAt(0).toUpperCase() + document.origin.slice(1)}`
   const statusKey = `knowledge.status${document.status.charAt(0).toUpperCase() + document.status.slice(1)}`
-  return <li className="knowledge-row knowledge-row--document">
+  return <li className="knowledge-document"><details><summary>
     <span className="knowledge-row__icon" aria-hidden="true"><FileText size={18} /></span>
-    <span className="knowledge-row__body"><strong>{document.title}</strong><small>{t(originKey, document.origin)} · {document.relativePath || '来源路径未提供'}</small></span>
-    <span className="knowledge-row__status"><span className={`knowledge-status knowledge-status--${document.status}`}><StatusIcon status={document.status} aria-hidden="true" />{t(statusKey, document.status)}</span><small>{document.chunkCount} 段 · {formatBytes(document.byteLength)}</small></span>
+    <span className="knowledge-row__body"><strong>{document.title}</strong><small>{t(originKey, document.origin)} · {formatDate(document.updatedAt, t)}</small></span>
+    <span className="knowledge-row__status"><span className={`knowledge-status knowledge-status--${document.status}`}><StatusIcon status={document.status} aria-hidden="true" />{t(statusKey, document.status)}</span></span>
+    </summary><div className="knowledge-document__details"><p>{document.chunkCount} 段 · {formatBytes(document.byteLength)}</p>
     <span className="knowledge-row__evidence"><span>{t('knowledge.libraryStatSources', '来源')} {document.sourceUrl || document.relativePath || '本地资料'}</span><span>{t('knowledge.libraryStatUpdated', '更新')} {formatDate(document.updatedAt, t)}</span></span>
     {document.status === 'indexed' ? <span className="knowledge-row__consolidation"><button type="button" className="knowledge-row__consolidation-button" onClick={() => onConsolidate(document)} disabled={!canConsolidate} aria-describedby={`knowledge-consolidation-${document.id}`} title={demoMode ? t('knowledge.libraryDemoNotice', '演示世界暂不可整理知识') : consolidation?.state === 'error' ? t('knowledge.consolidateButton', '重新加入知识图谱') : t('knowledge.consolidateButton', '吸收到知识图谱')}>{consolidation?.state === 'pending' ? t('knowledge.consolidatePending', '正在加入…') : consolidation?.state === 'queued' ? t('knowledge.consolidateQueued', '已排队') : consolidation?.state === 'success' ? t('knowledge.consolidateSuccess', '已加入知识图谱') : t('knowledge.consolidateButton', '吸收到知识图谱')}</button>{consolidation === undefined ? null : <small id={`knowledge-consolidation-${document.id}`} className={`knowledge-row__consolidation-status knowledge-row__consolidation-status--${consolidation.state}`} role={consolidation.state === 'error' ? 'alert' : 'status'} aria-live="polite">{consolidation.message}</small>}</span> : null}
-  </li>
+  </div></details></li>
 }
 
 function SearchResults({ results, query }: { results: KnowledgeSearchResult[]; query: string }) {
   const { t } = useI18n()
   return <section className="knowledge-section knowledge-section--search" aria-labelledby="knowledge-search-results-heading" aria-live="polite">
-    <header className="knowledge-section__heading"><div><h4 id="knowledge-search-results-heading">{t('knowledge.librarySearchSubmit', '搜索结果')}</h4><span>“{query}”</span></div><b>{results.length}</b></header>
+    <header className="knowledge-section__heading"><div><h4 id="knowledge-search-results-heading">{t('knowledge.librarySearchResults', '搜索结果')}</h4><span>“{query}”</span></div><b>{results.length}</b></header>
     {results.length === 0 ? <div className="knowledge-empty"><MagnifyingGlass size={22} aria-hidden="true" /><strong>没有找到匹配资料</strong><span>换一个关键词，或先导入一份资料。</span></div> : <ul className="knowledge-rows knowledge-search-results" aria-label="知识库搜索结果">{results.map((result) => <li key={result.id} className="knowledge-row knowledge-row--result"><span className="knowledge-row__icon" aria-hidden="true"><LinkSimple size={18} /></span><span className="knowledge-row__body"><strong>{result.title}</strong><small>{result.collectionName || t('knowledge.libraryTitle', '知识库')} · {result.relativePath || '来源路径未提供'}</small><span className="knowledge-result__snippet">{result.snippet || '该资料片段没有可显示的摘要。'}</span></span><span className="knowledge-row__evidence"><span>{t('knowledge.libraryStatSources', '来源')} {result.sourceUrl || result.relativePath || '本地资料'}</span><span>相关度 {formatScore(result.score)}</span><span>{t('knowledge.libraryStatUpdated', '更新')} {formatDate(result.updatedAt, t)}</span></span></li>)}</ul>}
   </section>
 }

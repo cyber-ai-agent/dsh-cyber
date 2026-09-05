@@ -12,7 +12,7 @@ const HISTORY_INSTRUCTION = [
 /**
  * Renders recovered conversation history in front of the live prompt.
  *
- * The DSH 0.1.2-alpha.3 SDK server creates named sessions through
+ * The DSH 0.1.2-rc.1 SDK server creates named sessions through
  * `ctx.agents.create`; that path does not resume a JSONL log owned by an earlier
  * worker process. Every conversation therefore gets a fresh random runtime
  * session id per process. Continuity is restored from the local store, not from
@@ -31,22 +31,33 @@ export function formatRecoveredHistoryPrompt(
   options: { maxTokens?: number } = {},
 ): string {
   if (entries.length === 0) return currentPrompt
-  const recovered = recoverWithinBudget(entries, options.maxTokens)
+  const budget = options.maxTokens === undefined ? 8_192
+    : Number.isSafeInteger(options.maxTokens) && options.maxTokens >= 0 ? options.maxTokens : 0
+  const recovered = recoverWithinBudget(entries, budget)
+  if (recovered === undefined) return currentPrompt
+  return `${recovered}\n\n${currentPrompt}`
+}
+
+function serializeHistory(
+  entries: readonly ConversationHistoryEntry[],
+  checkpoint?: { throughSequence: number; entryCount: number; summary: string },
+  truncated = false,
+): string {
   // Keep the recovered transcript as one JSON value. JSON.stringify escapes
   // line breaks, quotes, controls and delimiter-like text inside content, so
   // a historical message cannot manufacture a new section in this prompt.
   const transcript = JSON.stringify({
     type: 'recovered_conversation_history',
     trust: 'data_only',
-    ...(recovered.checkpoint === undefined ? {} : { checkpoint: recovered.checkpoint }),
-    entries: recovered.entries.map((entry) => ({
+    ...(checkpoint === undefined ? {} : { checkpoint }),
+    ...(truncated ? { truncated: true } : {}),
+    entries: entries.map((entry) => ({
       role: entry.role,
       sequence: entry.sequence,
       speakerId: entry.speakerId,
       speakerName: entry.speakerName,
       createdAt: entry.createdAt,
       content: entry.content,
-      ...(recovered.checkpoint === undefined ? { utterance: `${entry.speakerName}：${entry.content}` } : {}),
     })),
   })
   return [
@@ -56,61 +67,64 @@ export function formatRecoveredHistoryPrompt(
     transcript,
     '',
     HISTORY_FOOTER,
-    '',
-    currentPrompt,
   ].join('\n')
 }
 
 function recoverWithinBudget(
   entries: readonly ConversationHistoryEntry[],
-  maxTokens: number | undefined,
-): {
-  entries: ConversationHistoryEntry[]
-  checkpoint?: { throughSequence: number; entryCount: number; summary: string }
-} {
-  if (!Number.isSafeInteger(maxTokens) || maxTokens! < 256) return { entries: [...entries] }
-  const budget = maxTokens!
-  const total = entries.reduce((sum, entry) => sum + historyEntryTokens(entry), 0)
-  if (total <= budget) return { entries: [...entries] }
-
-  const payloadBudget = Math.max(256, budget - 768)
-  // Leave room for the JSON envelope, trust framing and a compact checkpoint.
-  const recentBudget = Math.max(128, Math.floor(payloadBudget * 0.62))
+  budget: number,
+): string | undefined {
+  if (budget === 0) return undefined
+  // Measure the actual serialized block, including framing, metadata and JSON
+  // escaping. Never force an oversized last message through the budget.
   const recent: ConversationHistoryEntry[] = []
-  let recentTokens = 0
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const entry = entries[index]!
-    const tokens = historyEntryTokens(entry)
-    if (recent.length > 0 && recentTokens + tokens > recentBudget) break
+    if (estimateTextTokens(serializeHistory([entry, ...recent], undefined, true)) > budget) break
     recent.unshift(entry)
-    recentTokens += tokens
+  }
+  if (recent.length === entries.length) return serializeHistory(recent)
+  if (recent.length === 0) {
+    const latest = entries[entries.length - 1]!
+    // Binary search the content rather than repeatedly trimming a huge string.
+    // Metadata alone can exceed a very small budget: then omit this block.
+    let low = 0
+    let high = latest.content.length
+    let result: string | undefined
+    while (low <= high) {
+      const length = Math.floor((low + high) / 2)
+      const content = `${latest.content.slice(0, length).replace(/[\uD800-\uDBFF]$/, '')}…`
+      const candidate = serializeHistory([{ ...latest, content }], undefined, true)
+      if (estimateTextTokens(candidate) <= budget) {
+        result = candidate
+        low = length + 1
+      } else high = length - 1
+    }
+    return result
   }
   const olderCount = Math.max(0, entries.length - recent.length)
-  if (olderCount === 0) return { entries: recent }
   const older = entries.slice(0, olderCount)
-  const checkpointBudget = Math.max(96, payloadBudget - recentTokens)
+  const checkpoint = { throughSequence: older[older.length - 1]!.sequence, entryCount: olderCount, summary: '' }
+  // Reserve space for omission metadata by dropping the oldest selected entry
+  // only if another complete recent entry remains.
+  while (recent.length > 1 && estimateTextTokens(serializeHistory(recent, checkpoint)) > budget) {
+    const removed = recent.shift()!
+    older.push(removed)
+    checkpoint.throughSequence = removed.sequence
+    checkpoint.entryCount += 1
+  }
+  let result = serializeHistory(recent, checkpoint)
+  if (estimateTextTokens(result) > budget) return serializeHistory(recent, undefined, true)
   const lines: string[] = []
-  let summaryTokens = 0
   for (let index = older.length - 1; index >= 0; index -= 1) {
     const entry = older[index]!
     const line = `${entry.sequence} · ${entry.speakerName}：${concise(entry.content, 140)}`
-    const tokens = estimateTextTokens(line)
-    if (lines.length > 0 && summaryTokens + tokens > checkpointBudget) break
+    const candidate = serializeHistory(recent, { ...checkpoint, summary: [line, ...lines].join('\n') })
+    if (estimateTextTokens(candidate) > budget) break
     lines.unshift(line)
-    summaryTokens += tokens
+    result = candidate
   }
-  return {
-    entries: recent,
-    checkpoint: {
-      throughSequence: older[older.length - 1]!.sequence,
-      entryCount: older.length,
-      summary: lines.join('\n'),
-    },
-  }
-}
-
-function historyEntryTokens(entry: ConversationHistoryEntry): number {
-  return 24 + estimateTextTokens(entry.speakerName) + estimateTextTokens(entry.content)
+  return result
 }
 
 function concise(value: string, limit: number): string {
