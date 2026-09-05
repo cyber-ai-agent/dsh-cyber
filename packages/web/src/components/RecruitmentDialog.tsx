@@ -125,7 +125,7 @@ export function RecruitmentDialog({ blueprints, initialBlueprintId, employees, w
       <section className="recruitment-dialog" role="dialog" aria-modal="true" aria-labelledby="recruitment-title">
         <header className="dialog-header">
           <div><h2 id="recruitment-title">{dialogTitle}</h2><p>{t('workbench.recruitDesc', '从当前已安装或内置的角色模板中创建独立实例。新的模板请先到顶部「市场 → 角色」安装。')}</p></div>
-          <button className="icon-button" type="button" aria-label={t('workbench.cancel', '关闭')} onClick={onClose}><X size={18} /></button>
+          <button className="icon-button" type="button" aria-label={t('common.close', '关闭')} onClick={onClose}><X size={18} /></button>
         </header>
 
         <div className="recruitment-layout">

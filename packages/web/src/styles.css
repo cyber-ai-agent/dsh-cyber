@@ -2690,6 +2690,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 
 .world-theme-card {
+  /* 皮肤卡片是真实按钮：键盘可达、有 aria-pressed，不靠可点击的 div。 */
+  width: 100%;
+  padding: 0;
+  margin: 0;
+  text-align: start;
+  font: inherit;
+  color: inherit;
+  appearance: none;
   border-radius: 12px;
   border: 1px solid var(--dialog-border);
   background: rgba(0, 0, 0, 0.3);
@@ -2698,6 +2706,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   transition: all var(--duration-fast) var(--ease-smooth);
   display: flex;
   flex-direction: column;
+}
+
+.world-theme-card:focus-visible {
+  outline: 2px solid var(--dialog-accent);
+  outline-offset: 2px;
 }
 
 .world-theme-card:hover {
