@@ -359,6 +359,11 @@ export class WorldKnowledgeGraphRetrievalService {
     let used = 0
     for (const claim of graphSearch.claims) {
       if (used >= budgetChars || hits.length >= limit) break
+      // The repository already excludes these from lexical search. Checking
+      // again at the point the text is composed is deliberate: this is the last
+      // place before a claim becomes part of a prompt, and a fact whose last
+      // live evidence is gone must not reach the model through any port.
+      if (claim.notCurrent !== undefined) continue
       const subject = graphSearch.entities.find((entity) => entity.id === claim.subjectEntityId)?.canonicalName ?? '实体'
       const object = claim.objectText ?? graphSearch.entities.find((entity) => entity.id === claim.objectEntityId)?.canonicalName ?? ''
       const statement = subject + '：' + claim.predicate + (object ? '：' + object : '')
