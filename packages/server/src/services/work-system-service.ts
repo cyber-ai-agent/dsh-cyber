@@ -1,4 +1,4 @@
-import type { Deliverable, Review, WorkTask, WorkTaskDetail, WorkTaskPriority, WorkTaskStatus } from '@dsh-cyber/contracts'
+import { parseCreateWorkTask, type Deliverable, type Review, type WorkTask, type WorkTaskDetail, type WorkTaskFromSource, type WorkTaskPriority, type WorkTaskStatus } from '@dsh-cyber/contracts'
 import { SqliteUnitOfWork, WorkSystemRepository, type SqliteStore } from '@dsh-cyber/persistence'
 
 import type { GroupTaskCollaborationService } from './group-task-collaboration-service.js'
@@ -23,7 +23,37 @@ export class WorkSystemService {
     return this.#repository.createTask({ ...input, createdBy: 'owner' })
   }
 
+  /**
+   * The task a conversation turn asked for.
+   *
+   * Created on the first call; found again when the same turn comes back
+   * through a resend, the recovery pass after a restart or a retry — never a
+   * second task for one turn, and never an error the UI cannot act on: the
+   * later caller gets the earlier caller's task with `created: false`. This
+   * only records the task. Execution stays with the queue and the Run that
+   * already own the turn.
+   */
+  createFromSource(input: { worldId: string; workTurnId: string; title: string; description: string; priority?: WorkTaskPriority; dueAt?: string; coordinatorEmployeeId?: string }): WorkTaskFromSource {
+    const world = this.#store.getWorld(input.worldId)
+    if (world === undefined || world.status === 'archived') throw new Error('任务世界不可用')
+    const turn = this.#store.getWorkTurn(input.workTurnId)
+    if (turn === undefined) throw new Error('来源回合不存在')
+    if (turn.workspaceId !== world.workspaceId || turn.worldId !== world.id) throw new Error('来源回合不属于当前世界')
+    const draft = parseCreateWorkTask({
+      title: input.title,
+      description: input.description,
+      priority: input.priority,
+      dueAt: input.dueAt,
+      coordinatorEmployeeId: input.coordinatorEmployeeId,
+    })
+    if (draft.coordinatorEmployeeId !== undefined) this.#requireEmployee(world.id, draft.coordinatorEmployeeId)
+    return this.#uow.run(() => this.#repository.createTaskFromSource({
+      ...draft, workspaceId: world.workspaceId, worldId: world.id, workTurnId: turn.id, createdBy: 'owner',
+    }))
+  }
+
   list(worldId: string, status?: WorkTaskStatus): WorkTask[] { return this.#repository.listTasks(worldId, status) }
+  taskForSourceTurn(workTurnId: string): WorkTask | undefined { return this.#repository.getTaskBySourceWorkTurn(workTurnId) }
   detail(taskId: string): WorkTaskDetail { return this.#repository.detail(taskId) }
   currentWork(employeeId: string): WorkTaskDetail[] { return this.#repository.currentWork(employeeId) }
   taskForDeliverable(deliverableId: string): WorkTask | undefined { return this.#repository.taskForDeliverable(deliverableId) }
