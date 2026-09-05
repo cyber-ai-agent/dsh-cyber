@@ -32,6 +32,27 @@ interface WorldSettingsDialogProps {
 
 type WorldManagementTab = 'basic' | 'visual' | 'model' | 'permissions'
 
+/**
+ * Resolve the model shown by the "restore inherited" action.
+ *
+ * World assignments are local overrides and therefore deliberately excluded;
+ * the value to inherit comes from the workspace assignment, then the legacy
+ * default flag, then the first available model. A stale assignment reference
+ * also falls through instead of making the settings panel claim no model exists.
+ */
+export function resolveInheritedModel(
+  models: readonly ModelProfile[],
+  assignments: readonly ModelAssignment[],
+  workspaceId: string,
+): ModelProfile | undefined {
+  const workspaceAssignment = assignments.find(
+    (assignment) => assignment.scope === 'workspace' && assignment.scopeId === workspaceId,
+  )
+  return models.find((model) => model.id === workspaceAssignment?.modelProfileId)
+    ?? models.find((model) => model.isDefault)
+    ?? models[0]
+}
+
 export function WorldSettingsDialog({
   world,
   value,
@@ -55,22 +76,7 @@ export function WorldSettingsDialog({
   const [skinQuery, setSkinQuery] = useState('')
 
   const defaultGlobalModel = useMemo(() => {
-    // Check world-level assignment first
-    const worldAssignment = modelAssignments.find(
-      (a) => a.scope === 'world' && a.scopeId === world.id
-    )
-    if (worldAssignment) {
-      return models.find((m) => m.id === worldAssignment.modelProfileId)
-    }
-    // Fall back to workspace-level assignment
-    const workspaceAssignment = modelAssignments.find(
-      (a) => a.scope === 'workspace' && a.scopeId === world.workspaceId
-    )
-    if (workspaceAssignment) {
-      return models.find((m) => m.id === workspaceAssignment.modelProfileId)
-    }
-    // Last resort: isDefault or first model
-    return models.find((m) => m.isDefault) ?? models[0]
+    return resolveInheritedModel(models, modelAssignments, world.workspaceId)
   }, [models, modelAssignments, world.id, world.workspaceId])
 
   const defaultGlobalModelLabel = useMemo(() => {
