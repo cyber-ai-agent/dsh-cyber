@@ -85,6 +85,24 @@ describe('World Knowledge Graph service', () => {
     const result = await new WorldKnowledgeGraphService({ repository }).search({ worldId: 'world-a', query: '值班安排' })
     expect(result.entities).toEqual([entityA])
   })
+
+  it('never composes a not-current claim into the prompt context', async () => {
+    const notCurrent: KnowledgeGraphClaim = {
+      id: 'claim-not-current', workspaceId: 'workspace-a', worldId: 'world-a', type: 'fact',
+      subjectEntityId: entityA.id, predicate: '负责', objectText: '已经撤销的观测计划', confidence: 0.95,
+      status: 'active', source: 'auto', evidenceIds: ['evidence-a'],
+      notCurrent: { since: '2026-09-05T00:00:00.000Z', sourceType: 'document', sourceId: 'document-a', contentHash: 'a'.repeat(64) },
+      createdAt: '2026-08-26T00:00:00.000Z', updatedAt: '2026-09-05T00:00:00.000Z',
+    }
+    const repository = graphRepository()
+    repository.searchClaims = ({ worldId, limit }) => worldId === 'world-a' ? [notCurrent, claim].slice(0, limit) : []
+    const retrieval = new WorldKnowledgeGraphRetrievalService({ graph: new WorldKnowledgeGraphService({ repository }) })
+    const context = await retrieval.retrieve({ worldId: 'world-a', query: '负责', limit: 4 })
+    expect(context?.text).not.toContain('已经撤销的观测计划')
+    expect(context?.hits.map((hit) => hit.id)).not.toContain(notCurrent.id)
+    // The still-supported fact on the same subject keeps standing.
+    expect(context?.hits.map((hit) => hit.id)).toContain(claim.id)
+  })
 })
 
 describe('strict knowledge extraction', () => {

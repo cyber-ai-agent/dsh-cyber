@@ -4,7 +4,7 @@ import { mkdtemp } from 'node:fs/promises'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { SqliteStore, WorldKnowledgeGraphRepository, WorldKnowledgeRepository } from '../src/index.js'
+import { SqliteStore, WorldArtifactRepository, WorldKnowledgeGraphRepository, WorldKnowledgeRepository } from '../src/index.js'
 
 const stores: SqliteStore[] = []
 
@@ -470,5 +470,264 @@ describe('WorldKnowledgeGraphRepository', () => {
       workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
       fromCursor: 0, toCursor: revision,
     })).toMatchObject({ id: legacy.id, status: 'completed', processedChunks: 6, chunkTotal: 6 })
+  })
+
+  it('downgrades only the statements a superseded version left without live evidence', async () => {
+    const store = await database()
+    const workspace = store.createWorkspace({ name: '证据失效' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '失效世界', templateId: 'cyber-company' })
+    const session = store.createSession({ workspaceId: workspace.id, worldId: world.id, kind: 'direct', title: '讨论' })
+    const message = store.appendMessage({ sessionId: session.id, senderId: 'owner', senderKind: 'owner', kind: 'user', content: '这条会话证据不随资料改写而消失。' })
+    const library = new WorldKnowledgeRepository(store.database)
+    const document = library.saveDocument({
+      workspaceId: workspace.id, worldId: world.id, relativePath: 'notes/policy.md', title: '政策',
+      mimeType: 'text/markdown', byteLength: 8, sha256: hash('a'), origin: 'upload',
+    })
+    library.replaceChunks(world.id, document.id, [{ ordinal: 0, content: '第一版政策', contentHash: hash('a') }])
+    const repository = new WorldKnowledgeGraphRepository(store.database)
+    repository.beginKnowledgeSourceVersion({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+      contentHash: hash('a'), chunkTotal: 1,
+    })
+    repository.advanceKnowledgeSourceVersion({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+      contentHash: hash('a'), expectedProcessedChunks: 0, processedChunks: 1,
+    })
+    const fromDocument = repository.createEvidence({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', documentId: document.id,
+      chunkId: library.listChunks(world.id, document.id)[0]!.id, excerpt: '第一版政策',
+    })
+    const fromChat = repository.createEvidence({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'conversation', sessionId: session.id,
+      messageId: message.id, sequence: message.sequence, excerpt: message.content,
+    })
+    const subject = repository.upsertEntity({ workspaceId: workspace.id, worldId: world.id, type: 'topic', canonicalName: '政策' })
+    const team = repository.upsertEntity({ workspaceId: workspace.id, worldId: world.id, type: 'organization', canonicalName: '团队' })
+    const orphaned = repository.upsertClaim({
+      workspaceId: workspace.id, worldId: world.id, type: 'fact', subjectEntityId: subject.id,
+      predicate: '只有资料证据', objectText: '第一版政策', evidenceIds: [fromDocument.id],
+    })
+    const coSupported = repository.upsertClaim({
+      workspaceId: workspace.id, worldId: world.id, type: 'fact', subjectEntityId: subject.id,
+      predicate: '还有会话证据', objectText: '第一版政策', evidenceIds: [fromDocument.id, fromChat.id],
+    })
+    const orphanedRelation = repository.upsertRelation({
+      workspaceId: workspace.id, worldId: world.id, fromEntityId: subject.id, toEntityId: team.id,
+      predicate: '写给', evidenceIds: [fromDocument.id],
+    })
+
+    // The owner edits the source: new text, new hash, previous version superseded.
+    library.saveDocument({
+      workspaceId: workspace.id, worldId: world.id, relativePath: 'notes/policy.md', title: '政策',
+      mimeType: 'text/markdown', byteLength: 9, sha256: hash('b'), origin: 'upload',
+    })
+    library.replaceChunks(world.id, document.id, [{ ordinal: 0, content: '第二版政策', contentHash: hash('b') }])
+    repository.beginKnowledgeSourceVersion({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+      contentHash: hash('b'), chunkTotal: 1,
+    })
+
+    expect(repository.listPendingKnowledgeSourceInvalidations(world.id)).toMatchObject([{ contentHash: hash('a') }])
+    expect(repository.invalidateKnowledgeSourceVersion({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id, contentHash: hash('a'),
+    })).toMatchObject({ claims: 1, relations: 1 })
+
+    expect(repository.getClaim(world.id, orphaned.id)).toMatchObject({
+      notCurrent: { sourceType: 'document', sourceId: document.id, contentHash: hash('a'), since: expect.any(String) },
+    })
+    expect(repository.getClaim(world.id, coSupported.id)?.notCurrent).toBeUndefined()
+    expect(repository.getRelation(world.id, orphanedRelation.id)?.notCurrent).toMatchObject({ contentHash: hash('a') })
+
+    // Nothing was deleted: every row the owner gathered is still readable.
+    expect(repository.listClaims(world.id, { includeArchived: true }).map((claim) => claim.id).sort())
+      .toEqual([orphaned.id, coSupported.id].sort())
+    expect(repository.getEvidence(world.id, fromDocument.id)).toMatchObject({ id: fromDocument.id, excerpt: '第一版政策' })
+    expect(repository.getRelation(world.id, orphanedRelation.id)).toMatchObject({ id: orphanedRelation.id, predicate: '写给' })
+
+    // Idempotent: the work list is empty and a forced re-run changes nothing.
+    const downgraded = repository.getClaim(world.id, orphaned.id)
+    expect(repository.listPendingKnowledgeSourceInvalidations(world.id)).toEqual([])
+    expect(repository.invalidateKnowledgeSourceVersion({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id, contentHash: hash('a'),
+    })).toMatchObject({ claims: 0, relations: 0 })
+    expect(repository.getClaim(world.id, orphaned.id)).toEqual(downgraded)
+  })
+
+  it('keeps a downgraded claim out of retrieval while the library still lists it', async () => {
+    const store = await database()
+    const workspace = store.createWorkspace({ name: '检索排除' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '检索世界', templateId: 'cyber-company' })
+    const library = new WorldKnowledgeRepository(store.database)
+    const document = library.saveDocument({
+      workspaceId: workspace.id, worldId: world.id, relativePath: 'notes/pricing.md', title: '定价',
+      mimeType: 'text/markdown', byteLength: 8, sha256: hash('a'), origin: 'upload',
+    })
+    library.replaceChunks(world.id, document.id, [{ ordinal: 0, content: '旧定价', contentHash: hash('a') }])
+    const repository = new WorldKnowledgeGraphRepository(store.database)
+    repository.beginKnowledgeSourceVersion({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+      contentHash: hash('a'), chunkTotal: 1,
+    })
+    const evidence = repository.createEvidence({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', documentId: document.id,
+      chunkId: library.listChunks(world.id, document.id)[0]!.id, excerpt: '旧定价',
+    })
+    const subject = repository.upsertEntity({ workspaceId: workspace.id, worldId: world.id, type: 'topic', canonicalName: '定价' })
+    const claim = repository.upsertClaim({
+      workspaceId: workspace.id, worldId: world.id, type: 'fact', subjectEntityId: subject.id,
+      predicate: '每席位月费', objectText: '99 元', evidenceIds: [evidence.id],
+    })
+    expect(repository.searchClaims(world.id, '每席位月费', 10).map((item) => item.id)).toEqual([claim.id])
+
+    library.saveDocument({
+      workspaceId: workspace.id, worldId: world.id, relativePath: 'notes/pricing.md', title: '定价',
+      mimeType: 'text/markdown', byteLength: 9, sha256: hash('b'), origin: 'upload',
+    })
+    library.replaceChunks(world.id, document.id, [{ ordinal: 0, content: '新定价', contentHash: hash('b') }])
+    repository.beginKnowledgeSourceVersion({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+      contentHash: hash('b'), chunkTotal: 1,
+    })
+    repository.invalidateKnowledgeSourceVersion({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id, contentHash: hash('a'),
+    })
+
+    // A superseded fact must stop reaching the model, and stay visible to the owner.
+    expect(repository.searchClaims(world.id, '每席位月费', 10)).toEqual([])
+    expect(repository.listClaims(world.id).map((item) => item.id)).toEqual([claim.id])
+  })
+
+  it('retires the version of a removed document and of an archived artifact, then reinstates a restored one', async () => {
+    const store = await database()
+    const workspace = store.createWorkspace({ name: '删除归档' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '归档世界', templateId: 'cyber-company' })
+    const library = new WorldKnowledgeRepository(store.database)
+    const document = library.saveDocument({
+      workspaceId: workspace.id, worldId: world.id, relativePath: 'notes/removed.md', title: '会删除的资料',
+      mimeType: 'text/markdown', byteLength: 8, sha256: hash('a'), origin: 'upload',
+    })
+    library.replaceChunks(world.id, document.id, [{ ordinal: 0, content: '待删除内容', contentHash: hash('a') }])
+    const artifacts = new WorldArtifactRepository(store.database)
+    const published = artifacts.publish({
+      workspaceId: workspace.id, worldId: world.id, title: '归档产物', kind: 'markdown',
+      relativePath: 'artifacts/archived/v1.md', byteLength: 12, sha256: hash('c'),
+      createdByKind: 'owner', createdById: 'owner-1',
+    })
+    const repository = new WorldKnowledgeGraphRepository(store.database)
+    for (const source of [
+      { sourceType: 'document' as const, sourceId: document.id, contentHash: hash('a') },
+      { sourceType: 'artifact' as const, sourceId: published.artifact.id, contentHash: 'v1' },
+    ]) {
+      repository.beginKnowledgeSourceVersion({ workspaceId: workspace.id, worldId: world.id, ...source, chunkTotal: 1 })
+    }
+    const documentEvidence = repository.createEvidence({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', documentId: document.id,
+      chunkId: library.listChunks(world.id, document.id)[0]!.id, excerpt: '待删除内容',
+    })
+    const artifactEvidence = repository.createEvidence({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'artifact', artifactId: published.artifact.id,
+      artifactVersion: 1, excerpt: '归档产物内容',
+    })
+    const subject = repository.upsertEntity({ workspaceId: workspace.id, worldId: world.id, type: 'topic', canonicalName: '归档主题' })
+    const fromDocument = repository.upsertClaim({
+      workspaceId: workspace.id, worldId: world.id, type: 'fact', subjectEntityId: subject.id,
+      predicate: '来自被删除资料', objectText: '待删除内容', evidenceIds: [documentEvidence.id],
+    })
+    const fromArtifact = repository.upsertClaim({
+      workspaceId: workspace.id, worldId: world.id, type: 'fact', subjectEntityId: subject.id,
+      predicate: '来自被归档产物', objectText: '归档产物内容', evidenceIds: [artifactEvidence.id],
+    })
+
+    library.deleteDocument(world.id, document.id)
+    artifacts.archive(world.id, published.artifact.id)
+    // Deletion and archival travel the same seam: the version is superseded,
+    // with no replacement hash because no replacement content exists.
+    expect(repository.retireRemovedKnowledgeSources(world.id).map((version) => version.sourceId).sort())
+      .toEqual([document.id, published.artifact.id].sort())
+    expect(repository.listSupersededKnowledgeSourceVersions(world.id))
+      .toMatchObject([{ supersededAt: expect.any(String) }, { supersededAt: expect.any(String) }])
+    expect(repository.listSupersededKnowledgeSourceVersions(world.id).every((version) => version.supersededByHash === undefined)).toBe(true)
+    for (const version of repository.listPendingKnowledgeSourceInvalidations(world.id)) {
+      repository.invalidateKnowledgeSourceVersion({ workspaceId: workspace.id, ...version })
+    }
+    expect(repository.getClaim(world.id, fromDocument.id)?.notCurrent).toMatchObject({ sourceType: 'document', sourceId: document.id })
+    expect(repository.getClaim(world.id, fromArtifact.id)?.notCurrent).toMatchObject({ sourceType: 'artifact', sourceId: published.artifact.id })
+    expect(repository.getEvidence(world.id, documentEvidence.id)).toBeDefined()
+
+    // Restoring the artifact makes its version current again, so the claim that
+    // stood on it is current again too — without re-running extraction.
+    artifacts.restore(world.id, published.artifact.id)
+    repository.beginKnowledgeSourceVersion({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'artifact', sourceId: published.artifact.id,
+      contentHash: 'v1', chunkTotal: 1,
+    })
+    expect(repository.reinstateCurrentKnowledgeSourceVersions(world.id)).toMatchObject({ claims: 1, relations: 0 })
+    expect(repository.getClaim(world.id, fromArtifact.id)?.notCurrent).toBeUndefined()
+    expect(repository.getClaim(world.id, fromDocument.id)?.notCurrent).toMatchObject({ sourceId: document.id })
+  })
+
+  it('clears the not-current mark when a live version re-states the same claim', async () => {
+    const store = await database()
+    const workspace = store.createWorkspace({ name: '重新核对' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '核对世界', templateId: 'cyber-company' })
+    const library = new WorldKnowledgeRepository(store.database)
+    const document = library.saveDocument({
+      workspaceId: workspace.id, worldId: world.id, relativePath: 'notes/reverify.md', title: '复核资料',
+      mimeType: 'text/markdown', byteLength: 8, sha256: hash('a'), origin: 'upload',
+    })
+    library.replaceChunks(world.id, document.id, [{ ordinal: 0, content: '第一版结论', contentHash: hash('a') }])
+    const repository = new WorldKnowledgeGraphRepository(store.database)
+    repository.beginKnowledgeSourceVersion({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+      contentHash: hash('a'), chunkTotal: 1,
+    })
+    const job = repository.enqueueConsolidationJob({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id, fromCursor: 0, toCursor: 1,
+    })
+    const firstChunk = library.listChunks(world.id, document.id)[0]!
+    const extraction = (chunkId: string, evidenceId: string) => ({
+      entities: [{ key: 'topic', type: 'topic' as const, canonicalName: '复核主题', aliases: [], evidenceRefs: [evidenceId] }],
+      claims: [{ key: 'claim', type: 'fact' as const, subjectKey: 'topic', predicate: '结论', objectText: '保持不变', confidence: 0.9, evidenceRefs: [evidenceId] }],
+      relations: [],
+      evidenceRefs: [{ sourceType: 'document' as const, sourceId: document.id, evidenceId }],
+    })
+    const evidenceInput = (chunkId: string, evidenceId: string) => ([{
+      evidenceId, sourceType: 'document' as const, sourceId: document.id, excerpt: '结论保持不变',
+      worldId: world.id, workspaceId: workspace.id, documentId: document.id, chunkId,
+    }])
+    repository.applyKnowledgeExtraction({
+      jobId: job.id, workspaceId: workspace.id, worldId: world.id,
+      extraction: extraction(firstChunk.id, 'evidence-v1'), evidence: evidenceInput(firstChunk.id, 'evidence-v1'),
+      sourceType: 'document', sourceId: document.id, now: new Date().toISOString(),
+    })
+
+    library.saveDocument({
+      workspaceId: workspace.id, worldId: world.id, relativePath: 'notes/reverify.md', title: '复核资料',
+      mimeType: 'text/markdown', byteLength: 9, sha256: hash('b'), origin: 'upload',
+    })
+    library.replaceChunks(world.id, document.id, [{ ordinal: 0, content: '第二版正文，结论未变', contentHash: hash('b') }])
+    repository.beginKnowledgeSourceVersion({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+      contentHash: hash('b'), chunkTotal: 1,
+    })
+    repository.invalidateKnowledgeSourceVersion({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id, contentHash: hash('a'),
+    })
+    const claimId = repository.listClaims(world.id)[0]!.id
+    expect(repository.getClaim(world.id, claimId)?.notCurrent).toMatchObject({ contentHash: hash('a') })
+    expect(repository.searchClaims(world.id, '结论', 10)).toEqual([])
+
+    // The new version re-states the same fact: it stands on live evidence again.
+    const secondChunk = library.listChunks(world.id, document.id)[0]!
+    const next = repository.enqueueConsolidationJob({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id, fromCursor: 1, toCursor: 2,
+    })
+    repository.applyKnowledgeExtraction({
+      jobId: next.id, workspaceId: workspace.id, worldId: world.id,
+      extraction: extraction(secondChunk.id, 'evidence-v2'), evidence: evidenceInput(secondChunk.id, 'evidence-v2'),
+      sourceType: 'document', sourceId: document.id, now: new Date().toISOString(),
+    })
+    expect(repository.getClaim(world.id, claimId)?.notCurrent).toBeUndefined()
+    expect(repository.searchClaims(world.id, '结论', 10).map((item) => item.id)).toEqual([claimId])
   })
 })

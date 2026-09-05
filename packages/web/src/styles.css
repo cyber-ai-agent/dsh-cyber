@@ -4655,7 +4655,7 @@ html[dir='rtl'] .task-workspace { text-align: start; }
 }
 
 .context-menu button small {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted, #8b949e);
   line-height: 1.3;
 }
