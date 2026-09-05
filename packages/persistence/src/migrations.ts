@@ -2055,6 +2055,32 @@ const MIGRATIONS: readonly Migration[] = [
         );
     `,
   },
+  {
+    version: 41,
+    name: 'work-task-source-link',
+    sql: `
+      -- A task that grew out of a conversation remembers the turn that asked
+      -- for it and the owner message inside that turn. The turn id is the one
+      -- identity a resend, a recovery pass and a retry all share, so "one task
+      -- per turn" is a unique index the database enforces rather than a check
+      -- a process has to remember. NULLs are distinct to SQLite: tasks created
+      -- from the board or a schedule carry no source and are unaffected.
+      --
+      -- pruneHistory deletes settled turns. The link is released (SET NULL)
+      -- and the task survives: the task is the durable work fact, the
+      -- transcript is not. Messages are never pruned, so the message reference
+      -- outlives the turn. No backfill: rows that predate this migration have
+      -- no source and stay exactly as they are.
+      ALTER TABLE work_tasks ADD COLUMN source_work_turn_id TEXT
+        REFERENCES work_turns(id) ON DELETE SET NULL;
+      ALTER TABLE work_tasks ADD COLUMN source_message_id TEXT
+        REFERENCES messages(id) ON DELETE SET NULL;
+      CREATE UNIQUE INDEX work_tasks_source_work_turn_idx
+        ON work_tasks(source_work_turn_id);
+      CREATE INDEX work_tasks_source_message_idx
+        ON work_tasks(source_message_id) WHERE source_message_id IS NOT NULL;
+    `,
+  },
 ]
 
 /**
