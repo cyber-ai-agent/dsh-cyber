@@ -41,8 +41,7 @@ describe('Work System retry, single assignee and restart', () => {
     expect(f.server.store.getWorkTurn(failedRuns[0]!.turnId)).toMatchObject({ status: 'failed' })
     expect(runsNow.filter((run) => run.status === 'completed')).toHaveLength(2)
 
-    // The HTTP retry the web client sends lands on the same path once the task failed again.
-    f.runtime.failNextTurns = 1
+    // A rejected review also lands in failed; the HTTP retry the web client sends takes the same path.
     const rejected = f.server.work.review(await deliverFor(f, retried), { decision: 'reject', feedback: '方向不对，重来。' })
     expect(rejected.task.status).toBe('failed')
     const viaHttp = await post<WorkTaskDetail>(f.origin, `/api/tasks/${task.id}/execute`, roster(f))
@@ -208,17 +207,18 @@ function roster(f: Fixture): { employeeIds: string[]; coordinatorEmployeeId: str
 /** Publishes a real artifact version for the latest run and submits it, so a review can happen. */
 async function deliverFor(f: Fixture, detail: WorkTaskDetail): Promise<string> {
   const run = detail.runs.at(-1)!
+  const author = f.server.store.getAgentRun(run.agentRunIds[0]!)!.employeeId
   const { mkdir, writeFile } = await import('node:fs/promises')
   const filesPath = join(f.stateRoot, 'worlds', f.world.id, 'files')
   await mkdir(filesPath, { recursive: true })
   await writeFile(join(filesPath, `${detail.task.id}.md`), `# ${detail.task.title}\n`, 'utf8')
   const published = await f.server.artifacts.publishFromWorkspace({
     workspaceId: f.workspace.id, worldId: f.world.id, sourceRelativePath: `${detail.task.id}.md`, title: detail.task.title, kind: 'markdown',
-    createdByKind: 'employee', createdById: f.partner.id, employeeId: f.partner.id,
+    createdByKind: 'employee', createdById: author, employeeId: author,
     workTurnId: run.workTurnId, agentRunId: run.agentRunIds[0], idempotencyKey: `retry-${detail.task.id}-${run.attempt}`,
   })
   const deliverable = f.server.work.submitDeliverable({
-    taskId: detail.task.id, taskRunId: run.id, submittedByEmployeeId: f.partner.id,
+    taskId: detail.task.id, taskRunId: run.id, submittedByEmployeeId: author,
     artifactId: published.artifact.id, artifactVersionId: published.version.version, title: detail.task.title, summary: '第一版结果。',
   })
   return deliverable.id

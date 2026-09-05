@@ -2,6 +2,15 @@ import { parseCreateWorkTask, type Deliverable, type Review, type WorkTask, type
 import { SqliteUnitOfWork, WorkSystemRepository, type SqliteStore } from '@dsh-cyber/persistence'
 
 import type { GroupTaskCollaborationService } from './group-task-collaboration-service.js'
+import { ServiceError } from './service-error.js'
+
+/**
+ * States the owner may start an execution from. `failed` is included so a
+ * task that lost its turn (model refusal, rejected review, restart) is retried
+ * on the same row: plans, runs, deliverables and reviews of earlier attempts
+ * stay as history and the next attempt number continues from them.
+ */
+const EXECUTABLE_STATUSES: readonly WorkTaskStatus[] = ['draft', 'changes-requested', 'failed']
 
 export class WorkSystemService {
   readonly #store: SqliteStore
@@ -64,14 +73,19 @@ export class WorkSystemService {
     if (world === undefined) throw new Error('任务世界不可用')
     if (world.status === 'archived') throw new Error(`世界「${world.name}」已归档，无法执行任务。请先恢复该世界。`)
     const employeeIds = [...new Set(input.employeeIds.map((id) => id.trim()).filter(Boolean))]
-    if (employeeIds.length < 2) throw new Error('真实任务协作至少需要两名角色')
+    if (employeeIds.length < 1) throw new Error('任务至少需要一名角色')
     for (const employeeId of employeeIds) this.#requireEmployee(task.worldId, employeeId)
-    const coordinatorEmployeeId = input.coordinatorEmployeeId ?? task.coordinatorEmployeeId ?? employeeIds[0]!
+    // A sole assignee coordinates their own task. The coordinator chosen at
+    // creation only binds while the roster can still contain them.
+    const coordinatorEmployeeId = input.coordinatorEmployeeId ?? (employeeIds.length === 1 ? employeeIds[0]! : task.coordinatorEmployeeId ?? employeeIds[0]!)
     if (!employeeIds.includes(coordinatorEmployeeId)) throw new Error('协调角色必须属于任务成员')
+    if (!EXECUTABLE_STATUSES.includes(task.status)) {
+      throw new ServiceError('conflict', 'work_task_not_executable', `任务当前处于「${task.status}」状态，不能再次执行`)
+    }
     const previousFeedback = this.#repository.detail(task.id).reviews.filter((review) => review.decision === 'request-changes').at(-1)?.feedback
     this.#uow.run(() => {
-      if (task.status === 'draft' || task.status === 'changes-requested') task = this.#repository.transitionTask(task.id, [task.status], 'planning')
-      if (task.status === 'planning') task = this.#repository.transitionTask(task.id, ['planning'], 'ready')
+      task = this.#repository.transitionTask(task.id, [...EXECUTABLE_STATUSES], 'planning')
+      task = this.#repository.transitionTask(task.id, ['planning'], 'ready')
       task = this.#repository.transitionTask(task.id, ['ready'], 'running')
     })
     const started = Date.now()
@@ -111,6 +125,28 @@ export class WorkSystemService {
 
   review(deliverableId: string, input: { decision: Review['decision']; feedback: string }): WorkTaskDetail {
     return this.#uow.run(() => this.#repository.review({ deliverableId, decision: input.decision, feedback: input.feedback, reviewerId: 'owner' }))
+  }
+
+  /**
+   * A task is `running` only while this process awaits its turn. After a
+   * restart nothing awaits it any more and the store has already marked the
+   * turn `interrupted` / `service-restarted`; the task follows into `failed`
+   * so the owner sees a status that is true and can retry the same task.
+   * Nothing is re-executed here.
+   */
+  recoverAfterRestart(): { failed: number } {
+    let failed = 0
+    this.#uow.run(() => {
+      for (const workspace of this.#store.listWorkspaces()) {
+        for (const world of this.#store.listWorlds(workspace.id, true)) {
+          for (const task of this.#repository.listTasks(world.id, 'running')) {
+            this.#repository.markExecutionFailed(task.id)
+            failed += 1
+          }
+        }
+      }
+    })
+    return { failed }
   }
 
   #requireEmployee(worldId: string, employeeId: string): void {
