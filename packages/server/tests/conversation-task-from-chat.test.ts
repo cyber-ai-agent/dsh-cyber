@@ -108,6 +108,21 @@ describe('a chat instruction becomes one task in the task list', () => {
     expect(server.store.listTurnAgentRuns(instructed.body.workTurnId)).toHaveLength(1)
   })
 
+  it('shows the task of a queued instruction before its turn has run', async () => {
+    const intent = stubIntent({
+      [INSTRUCTION]: { title: '整理用户反馈改进清单', description: '汇总上周用户反馈，输出一份带优先级的改进清单。', priority: 'normal' },
+    })
+    const { origin, server, world, employee } = await start(intent)
+    const queued = await json(origin, `/api/worlds/${world.id}/chat`, post({
+      employeeIds: [employee.id], prompt: INSTRUCTION, queueMode: 'normal',
+    }))
+    expect(queued.status).toBe(202)
+    // Queued: the turn is only reserved. The task is already there to read and
+    // edit, which is the point — a task is visible before anything runs.
+    expect(queued.body.proposedTask).toMatchObject({ status: 'draft', sourceWorkTurnId: queued.body.workTurnId })
+    expect(server.store.getWorkTurn(queued.body.workTurnId)?.status).not.toBe('completed')
+  })
+
   it('runs the recorded task on an explicit action and keeps one task across execution, failure and restart', async () => {
     const intent = stubIntent({
       [INSTRUCTION]: { title: '整理用户反馈改进清单', description: '汇总上周用户反馈，按影响面排序，输出一份带优先级的改进清单。', priority: 'normal' },
