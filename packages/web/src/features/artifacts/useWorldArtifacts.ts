@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { WorldArtifact, WorldArtifactKind, WorldArtifactStatus, WorldArtifactVersion } from '@dsh-cyber/contracts'
+import type {
+  WorldArtifact,
+  WorldArtifactEvidenceGrade,
+  WorldArtifactKind,
+  WorldArtifactStatus,
+  WorldArtifactVersion,
+  WorldArtifactVersionEvidence,
+} from '@dsh-cyber/contracts'
 
 import { api } from '../../api.js'
 import { subscribeWorldLive } from '../../world-live-client.js'
@@ -30,6 +37,46 @@ export interface ArtifactRecord extends WorldArtifact {
   versions?: WorldArtifactVersion[]
   preview?: ArtifactPreviewPayload
   files?: ArtifactFileEntry[]
+  /** What the host can prove about each version's origin, detail view only. */
+  evidence?: WorldArtifactVersionEvidence[]
+}
+
+const EVIDENCE_GRADES: readonly WorldArtifactEvidenceGrade[] = [
+  'host-observed', 'shared-window', 'manifest-declared', 'unproven-window', 'owner-published', 'unknown',
+]
+
+/**
+ * One short sentence per grade. Only `host-observed` may read as proof; every
+ * other line has to say plainly what the host could not establish.
+ */
+export function artifactEvidenceLabel(grade: WorldArtifactEvidenceGrade): { label: string; hint: string } {
+  const labels: Record<WorldArtifactEvidenceGrade, { label: string; hint: string }> = {
+    'host-observed': { label: '宿主已核实落盘', hint: '本次运行执行期间，宿主观察到这份内容写入当前世界工作目录，同一时刻没有其他运行；登记时内容仍与观察到的完全一致。' },
+    'shared-window': { label: '归属未确认', hint: '宿主观察到了写入，但同一时刻还有其他运行，或登记时的内容已不是宿主看到落盘的那份：运行结束后被改动，或目录里有宿主没有观察到的文件。' },
+    'manifest-declared': { label: '按角色清单登记', hint: '文件真实存在并已校验复制，但宿主没有这次运行的写入观察记录，无法证明由本次运行产生。' },
+    'unproven-window': { label: '仅按时间匹配，未验证', hint: '只按运行的开始与结束时间挑选了这个文件，并发情况下可能属于另一次运行。' },
+    'owner-published': { label: '由你手动发布', hint: '这份产物由用户或宿主直接发布，不涉及角色运行归属。' },
+    unknown: { label: '来源记录已缺失', hint: '宿主没有保留这次发布的观察记录，无法说明它的归属。' },
+  }
+  return labels[grade]
+}
+
+function normalizeEvidence(value: unknown): WorldArtifactVersionEvidence | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const candidate = value as Record<string, unknown>
+  const grade = EVIDENCE_GRADES.find((known) => known === candidate.grade)
+  if (typeof candidate.version !== 'number' || grade === undefined) return undefined
+  return {
+    version: candidate.version,
+    grade,
+    // Proof is a host statement, never inferred in the browser: an unknown
+    // payload must degrade to "not proven".
+    proven: candidate.proven === true && grade === 'host-observed',
+    ...(typeof candidate.observedAt === 'string' ? { observedAt: candidate.observedAt } : {}),
+    ...(typeof candidate.contentMatchesObservation === 'boolean' ? { contentMatchesObservation: candidate.contentMatchesObservation } : {}),
+    ...(Array.isArray(candidate.concurrentRunIds) ? { concurrentRunIds: candidate.concurrentRunIds.filter((id): id is string => typeof id === 'string') } : {}),
+    ...(typeof candidate.scanTruncated === 'boolean' ? { scanTruncated: candidate.scanTruncated } : {}),
+  }
 }
 
 export interface ArtifactListResponse {
@@ -237,19 +284,23 @@ function isProjectTree(value: unknown): value is { entries: Array<{ path: string
   return (value as { entries: unknown[] }).entries.every((entry) => entry !== null && typeof entry === 'object' && typeof (entry as { path?: unknown }).path === 'string')
 }
 
-function normalizeArtifactView(value: unknown): ArtifactRecord | undefined {
+export function normalizeArtifactView(value: unknown): ArtifactRecord | undefined {
   if (!value || typeof value !== 'object') return undefined
   const candidate = value as Record<string, unknown>
   const artifact = normalizeArtifact(candidate.artifact ?? candidate.item ?? value)
   if (artifact === undefined) return undefined
+  const evidence = Array.isArray(candidate.evidence)
+    ? candidate.evidence.map(normalizeEvidence).filter((entry): entry is WorldArtifactVersionEvidence => entry !== undefined)
+    : undefined
   const versions = Array.isArray(candidate.versions)
     ? candidate.versions.map(normalizeVersion).filter((version): version is WorldArtifactVersion => version !== undefined)
     : artifact.versions
-  if (versions === undefined) return artifact
+  if (versions === undefined) return { ...artifact, ...(evidence === undefined ? {} : { evidence }) }
   const currentVersionInfo = versions.find((version) => version.version === artifact.currentVersion)
   return {
     ...artifact,
     versions,
+    ...(evidence === undefined ? {} : { evidence }),
     ...(currentVersionInfo === undefined ? {} : { currentVersionInfo }),
   }
 }

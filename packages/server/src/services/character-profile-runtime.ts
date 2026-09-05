@@ -38,6 +38,7 @@ import {
   availableWorldSkillIds,
   type WorldSkillAvailabilityPort,
 } from './world-skill-availability.js'
+import type { AgentRunFileEvidencePort } from './agent-run-file-evidence.js'
 
 type CharacterRuntimeStore = Pick<
   SqliteStore,
@@ -85,6 +86,15 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
   readonly #snapshots: ContextSnapshotService | undefined
   readonly #worldContext: WorldContextPort | undefined
   /**
+   * The only place the Host itself brackets a run.
+   *
+   * Everything downstream - the completion job, the Artifact registry, the
+   * Trace - happens after the run is over and can only compare timestamps. A
+   * census taken here, immediately either side of the forwarded turn, is what
+   * makes "this file came from this run" a Host observation instead of a claim.
+   */
+  readonly #runFileEvidence: AgentRunFileEvidencePort | undefined
+  /**
    * What the Context Inspector reads back.
    *
    * The record is taken here rather than rebuilt later from durable rows: a
@@ -104,6 +114,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
     memory?: CharacterMemoryContextPort,
     inspection?: ContextInspectionService,
     worldContext?: WorldContextPort,
+    runFileEvidence?: AgentRunFileEvidencePort,
   ) {
     this.#inner = inner
     this.#store = store
@@ -111,6 +122,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
     this.#authority = authority
     this.#skillAvailability = skillAvailability
     this.#worldContext = worldContext
+    this.#runFileEvidence = runFileEvidence
     this.contextInspection = inspection ?? new ContextInspectionService()
     this.#memory = memory ?? defaultMemoryForStore(store)
     this.#context = defaultConversationContextComposer(
@@ -238,31 +250,49 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
           originalOnEvent(snapshotSequence === undefined ? event : withObservation(event, snapshotSequence))
         }
 
-    const result = await this.#inner.runTurn({
-      ...request,
-      agent,
-      prompt,
-      // The composer owns the cache decision because it owns the layer order
-      // that makes the prefix cacheable. The provider adapter only maps it.
-      ...(composed?.envelope.promptCache === undefined
-        ? {}
-        : { promptCache: composed.envelope.promptCache }),
-      ...(composed === undefined ? {} : { history: composed.recentHistory }),
-      ...(durableObserved === undefined ? {} : { observedThroughSequence: durableObserved }),
-      ...(onEvent === undefined ? {} : { onEvent }),
-      revision: {
-        ...revision,
-        // Keep historical unavailable grants durable, but do not expose them
-        // to the model prompt or downstream Harness runtime for this turn.
-        skillGrants: grantedSkillIds,
-        // The persona is what a provider adapter treats as the prefix (the
-        // Harness binds it as the system prompt), so the world context is
-        // rendered here, after the identity and before anything per-turn.
-        persona: worldContext === undefined
-          ? effectivePersona
-          : `${effectivePersona.trim()}\n\n${worldContext.text}`,
-      },
-    })
+    // Bracket every forwarded turn, not only the writable ones: a read-only
+    // turn can still write after a single-action approval, and an unbracketed
+    // run would let a concurrent run claim that write as its own.
+    const bracket = request.agentRunId === undefined
+      ? undefined
+      : await this.#runFileEvidence?.begin({
+          worldId: agent.worldId,
+          agentRunId: request.agentRunId,
+          workspacePath: request.workspacePath,
+        })
+    let result: Awaited<ReturnType<AgentRuntimePort['runTurn']>>
+    try {
+      result = await this.#inner.runTurn({
+        ...request,
+        agent,
+        prompt,
+        // The composer owns the cache decision because it owns the layer order
+        // that makes the prefix cacheable. The provider adapter only maps it.
+        ...(composed?.envelope.promptCache === undefined
+          ? {}
+          : { promptCache: composed.envelope.promptCache }),
+        ...(composed === undefined ? {} : { history: composed.recentHistory }),
+        ...(durableObserved === undefined ? {} : { observedThroughSequence: durableObserved }),
+        ...(onEvent === undefined ? {} : { onEvent }),
+        revision: {
+          ...revision,
+          // Keep historical unavailable grants durable, but do not expose them
+          // to the model prompt or downstream Harness runtime for this turn.
+          skillGrants: grantedSkillIds,
+          // The persona is what a provider adapter treats as the prefix (the
+          // Harness binds it as the system prompt), so the world context is
+          // rendered here, after the identity and before anything per-turn.
+          persona: worldContext === undefined
+            ? effectivePersona
+            : `${effectivePersona.trim()}\n\n${worldContext.text}`,
+        },
+      })
+    } finally {
+      // A failed or aborted turn may still have written files, and it is the
+      // run most likely to be argued about, so it is closed exactly like a
+      // successful one. The recorder never throws back into the turn.
+      await this.#runFileEvidence?.complete(bracket)
+    }
 
     // Some providers return only finalResponse. Emit one assembled event so the
     // orchestrator persists the observation cursor on the durable assistant

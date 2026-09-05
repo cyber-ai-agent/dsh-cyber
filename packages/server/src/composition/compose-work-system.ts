@@ -12,6 +12,10 @@ export function composeWorkSystem(options: {
   worldAccess: WorldAccessService
 }): WorkSystemService {
   const service = new WorkSystemService({ store: options.store, groupTasks: options.groupTasks })
+  // Runs at open, next to the store's own turn recovery: a task left `running`
+  // by the previous process can never finish on its own.
+  const recovered = service.recoverAfterRestart()
+  if (recovered.failed > 0) console.warn(`[dsh-cyber] 上次运行中断了 ${recovered.failed} 个执行中的任务，已标记为失败，可重新执行。`)
   registerWorkSystemRoutes(options.router, { store: options.store, work: service, access: options.worldAccess })
   return service
 }

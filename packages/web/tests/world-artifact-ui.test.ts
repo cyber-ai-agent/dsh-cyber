@@ -5,8 +5,9 @@ import { describe, expect, it } from 'vitest'
 import type { World, WorldArtifactVersion } from '@dsh-cyber/contracts'
 
 import { ArtifactCenter, artifactRefsFromMetadata } from '../src/features/artifacts/ArtifactCenter.js'
+import { ArtifactDetail } from '../src/features/artifacts/ArtifactDetail.js'
 import { ArtifactPreview } from '../src/features/artifacts/ArtifactPreview.js'
-import type { ArtifactRecord } from '../src/features/artifacts/useWorldArtifacts.js'
+import { normalizeArtifactView, type ArtifactRecord } from '../src/features/artifacts/useWorldArtifacts.js'
 
 const world: World = {
   id: 'world-artifact-test',
@@ -138,6 +139,39 @@ describe('Durable artifact UI seams', () => {
     expect(html).toContain('>Markdown</button>')
     expect(html).toContain('从工作目录发布')
     expect(html).not.toContain('v0.3.0-架构设计')
+  })
+
+  it('never renders an unproven attribution as host-verified evidence', () => {
+    const proven = renderToStaticMarkup(createElement(ArtifactDetail, {
+      worldId: world.id,
+      artifact: artifact({ evidence: [{ version: 2, grade: 'host-observed', proven: true, observedAt: '2026-08-25T00:04:00.000Z' }] }),
+      onBack: () => undefined,
+      onRename: async () => undefined,
+      onArchive: async () => undefined,
+    }))
+    expect(proven).toContain('宿主已核实落盘')
+    expect(proven).toContain('artifact-detail__evidence--proven')
+
+    for (const grade of ['unproven-window', 'shared-window', 'manifest-declared', 'unknown'] as const) {
+      const html = renderToStaticMarkup(createElement(ArtifactDetail, {
+        worldId: world.id,
+        artifact: artifact({ evidence: [{ version: 2, grade, proven: false }] }),
+        onBack: () => undefined,
+        onRename: async () => undefined,
+        onArchive: async () => undefined,
+      }))
+      expect(html, grade).toContain('artifact-detail__evidence--unproven')
+      expect(html, grade).not.toContain('宿主已核实落盘')
+    }
+  })
+
+  it('drops a proven flag that does not come with a host-observed grade', () => {
+    const view = normalizeArtifactView({
+      artifact: artifact(),
+      versions: [version],
+      evidence: [{ version: 2, grade: 'unproven-window', proven: true }],
+    })
+    expect(view?.evidence).toEqual([{ version: 2, grade: 'unproven-window', proven: false }])
   })
 
   it('explains automatic run registration without implying desktop files are scanned', () => {
