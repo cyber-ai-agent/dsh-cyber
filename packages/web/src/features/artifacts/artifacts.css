@@ -1,17 +1,14 @@
 
-.dock-empty-state { min-height: 100%; display: grid; place-content: center; justify-items: center; gap: 9px; padding: 28px; color: var(--text-muted); text-align: center; }
-.dock-empty-state__mark { display: grid; place-items: center; width: 48px; height: 48px; border: 1px solid var(--border-strong); color: var(--accent); background: var(--surface-1); }
-.dock-empty-state h2 { margin: 0; color: var(--text); font-size: 17px; }
-.dock-empty-state p { max-width: 290px; margin: 0; font-size: 13px; line-height: 1.6; }
-
-.artifact-center { min-height: 100%; padding: 20px 18px 32px; color: var(--text); }
-.artifact-center__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 18px; }
-.artifact-center__header h2 { margin: 4px 0 4px; font-size: 22px; letter-spacing: -.02em; }
-.artifact-center__header p { margin: 0; color: var(--text-muted); font-size: 13px; line-height: 1.55; }
+/* The dock header, empty state, row and details fold live in
+ * `components/dock/dock-surface.css`, shared by all four dock surfaces. */
+.artifact-center { min-height: 100%; color: var(--text); }
+.artifact-center > *:not(.dock-surface__header) { margin-inline: 18px; }
+.artifact-center > .artifact-center__toolbar { margin-top: 16px; }
+.artifact-center > .artifact-list:last-child, .artifact-center > .dock-empty-state:last-child { margin-bottom: 32px; }
 .artifact-eyebrow { display: inline-flex; align-items: center; gap: 5px; color: var(--accent-strong); font-size: 12px; }
 .artifact-button, .artifact-icon-button { min-height: 38px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-control, 8px); background: var(--surface-2); color: var(--text-soft); padding: 0 14px; font-size: 13px; font-weight: 600; text-decoration: none; cursor: pointer; transition: all var(--duration-fast) var(--ease-smooth); }
 .artifact-button:hover, .artifact-icon-button:hover { border-color: var(--accent); color: var(--text-strong); background: var(--surface-3); }
-.artifact-button:focus-visible, .artifact-icon-button:focus-visible, .artifact-card button:focus-visible, .artifact-filters button:focus-visible, .artifact-reader button:focus-visible, .artifact-project-tree button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.artifact-button:focus-visible, .artifact-icon-button:focus-visible, .artifact-filters button:focus-visible, .artifact-reader button:focus-visible, .artifact-project-tree button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .artifact-button--primary { border: 1px solid color-mix(in srgb, var(--accent) 65%, transparent); background: linear-gradient(135deg, var(--accent), var(--accent-strong, var(--accent))); color: #ffffff; font-weight: 650; box-shadow: 0 2px 12px color-mix(in srgb, var(--accent) 30%, transparent); }
 .artifact-button--primary:hover { filter: brightness(1.08); color: #ffffff; box-shadow: 0 4px 20px color-mix(in srgb, var(--accent) 45%, transparent); }
 .artifact-button--future { color: var(--text-muted); }
@@ -26,24 +23,9 @@
 .artifact-filters button:hover { border-color: var(--accent); color: var(--text-strong); background: var(--accent-soft); }
 .artifact-filters button.is-active { border-color: var(--accent); color: var(--text-strong); background: color-mix(in srgb, var(--accent) 22%, var(--surface-2)); box-shadow: 0 0 8px var(--accent-soft); }
 .artifact-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.artifact-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; border: 1px solid var(--border); border-radius: var(--radius-md, 10px); background: var(--surface-1); transition: all var(--duration-fast) var(--ease-smooth); }
-.artifact-card:hover { border-color: var(--accent); background: var(--surface-2); box-shadow: var(--shadow-sm); transform: translateY(-1px); }
-.artifact-card.is-archived { opacity: .72; }
-.artifact-card__main { min-width: 0; display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 12px; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .artifact-card__mark { display: grid; place-items: center; width: 40px; height: 40px; border: 1px solid var(--border); border-radius: var(--radius-sm, 8px); color: var(--accent); background: var(--surface-0); }
-.artifact-card__copy { min-width: 0; display: grid; gap: 3px; }
-.artifact-card__copy strong { overflow: hidden; color: var(--text-strong); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
-.artifact-card__copy span { color: var(--accent-strong); font-size: 12px; }
-.artifact-card__copy small { overflow: hidden; color: var(--text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.artifact-card__archived { color: var(--text-muted); }
-.artifact-card__actions { display: flex; align-items: center; gap: 4px; padding: 8px; }
-.artifact-card__actions button { min-height: 36px; padding: 0 9px; border: 1px solid transparent; background: transparent; color: var(--text-muted); font-size: 12px; cursor: pointer; }
-.artifact-card__actions button:hover { border-color: var(--border-strong); color: var(--text); }
-.artifact-center__state, .artifact-center__empty, .artifact-center__error { display: grid; justify-items: center; gap: 12px; padding: 42px 24px; border: 1px solid var(--border); border-radius: var(--radius-panel, 14px); background: color-mix(in srgb, var(--surface-1) 70%, transparent); text-align: center; box-shadow: var(--shadow-sm); }
+.artifact-center__state, .artifact-center__error { display: grid; justify-items: center; gap: 12px; padding: 42px 24px; border: 1px solid var(--border); border-radius: var(--radius-panel, 14px); background: color-mix(in srgb, var(--surface-1) 70%, transparent); text-align: center; box-shadow: var(--shadow-sm); }
 .artifact-center__state { min-height: 160px; align-content: center; color: var(--text-muted); }
-.artifact-center__empty-mark { display: grid; place-items: center; width: 56px; height: 56px; border: 1px solid var(--border-strong); border-radius: var(--radius-md, 12px); background: color-mix(in srgb, var(--accent) 12%, var(--surface-2)); color: var(--accent-strong); }
-.artifact-center__empty h3 { margin: 0; font-size: 17px; font-weight: 700; color: var(--text-strong); }
-.artifact-center__empty p { max-width: 360px; margin: 0; color: var(--text-muted); font-size: 13.5px; line-height: 1.6; }
 .artifact-center__error { grid-template-columns: minmax(0, 1fr) auto; justify-items: start; align-items: center; border-style: solid; border-color: color-mix(in srgb, var(--danger) 55%, var(--border)); background: color-mix(in srgb, var(--danger) 7%, var(--surface-1)); text-align: left; }
 .artifact-center__error strong { color: var(--danger); font-size: 13px; }
 .artifact-center__error span { color: var(--text-soft); font-size: 12px; }
@@ -181,11 +163,8 @@
 
 
 @media (max-width: 760px) {
-  .artifact-center, .artifact-detail { padding-inline: 13px; }
-  .artifact-center__header { display: grid; }
-  .artifact-center__header .artifact-button { justify-self: start; }
-  .artifact-card { grid-template-columns: 1fr; }
-  .artifact-card__actions { justify-content: flex-end; border-top: 1px solid var(--border); }
+  .artifact-detail { padding-inline: 13px; }
+  .artifact-center > *:not(.dock-surface__header) { margin-inline: 13px; }
   .artifact-project-reader { grid-template-columns: 1fr; }
   .artifact-project-tree { border-right: 0; border-bottom: 1px solid var(--border); }
   .artifact-project-tree ul { max-height: 190px; }

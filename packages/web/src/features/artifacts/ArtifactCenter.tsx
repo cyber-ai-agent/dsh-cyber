@@ -1,6 +1,7 @@
-import { Archive, ArrowLeft, FileArrowUp, FolderOpen, MagnifyingGlass, Package, Plus, SpinnerGap } from '@phosphor-icons/react'
+import { ArrowLeft, FileArrowUp, FolderOpen, MagnifyingGlass, Package, SpinnerGap } from '@phosphor-icons/react'
 import { useEffect, useState } from 'react'
 import type { World, WorldArtifactKind } from '@dsh-cyber/contracts'
+import { DockEmptyState, DockRow, DockSurfaceHeader } from '../../components/dock/DockSurface.js'
 import { formatDateTime } from '../../i18n/format.js'
 
 import { ArtifactDetail } from './ArtifactDetail.js'
@@ -49,11 +50,14 @@ export function ArtifactCenter({ world, demoMode = false, canAddToKnowledge, foc
 
   if (selected !== undefined) return <ArtifactDetail worldId={world.id} artifact={selected} demoMode={demoMode} canAddToKnowledge={knowledgeActionAllowed} onBack={() => setSelectedArtifactId(undefined)} onRename={async (title) => { await rename(selected.id, title) }} onArchive={async () => { await archive(selected.id) }} />
 
-  return <section className="artifact-center" aria-label="世界产物中心">
-    <header className="artifact-center__header">
-      <div><h2>世界产物</h2><p>只展示已明确发布、可持续引用的世界文件。</p></div>
-      <button type="button" className="artifact-button artifact-button--primary" onClick={() => setPublishOpen(true)}><FileArrowUp size={17} />从工作目录发布</button>
-    </header>
+  return <section className="artifact-center dock-surface" aria-label="世界产物中心">
+    <DockSurfaceHeader
+      mark={<Package size={18} />}
+      title="世界产物"
+      summary="只展示已明确发布、可持续引用的世界文件。"
+      {...(artifacts.length === 0 ? {} : { meta: `${artifacts.length} 个产物` })}
+      action={<button type="button" className="artifact-button artifact-button--primary" onClick={() => setPublishOpen(true)}><FileArrowUp size={17} />从工作目录发布</button>}
+    />
     <div className="artifact-center__toolbar">
       <label className="artifact-search"><MagnifyingGlass size={17} /><span className="sr-only">搜索产物</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索产物名称或来源" /></label>
       <nav className="artifact-filters" aria-label="产物类型筛选">{filters.map((filter) => <button type="button" key={filter.id} className={kind === filter.id ? 'is-active' : ''} aria-pressed={kind === filter.id} onClick={() => setKind(filter.id)}>{filter.label}</button>)}</nav>
@@ -65,19 +69,25 @@ export function ArtifactCenter({ world, demoMode = false, canAddToKnowledge, foc
 }
 
 function ArtifactCard({ artifact, onOpen }: { artifact: ArtifactRecord; onOpen(): void }) {
-  const version = artifact.currentVersionInfo
-  return <li><article className={`artifact-card${artifact.status === 'archived' ? ' is-archived' : ''}`}>
-    <button type="button" className="artifact-card__main" onClick={onOpen} aria-label={`打开产物 ${artifact.title}`}>
-      <span className="artifact-card__mark" aria-hidden="true">{artifact.kind === 'project' ? <FolderOpen size={22} /> : <Package size={22} />}</span>
-      <span className="artifact-card__copy"><strong>{artifact.title}</strong><span>{artifactKindLabel(artifact.kind)} · v{artifact.currentVersion}</span><small>{version?.sourceRelativePath ?? version?.relativePath ?? '已发布产物'} · {formatDate(artifact.updatedAt)}</small></span>
-      {artifact.status === 'archived' ? <Archive size={16} className="artifact-card__archived" aria-label="已归档" /> : null}
-    </button>
-    <div className="artifact-card__actions"><button type="button" onClick={onOpen}>预览</button><button type="button" aria-label={`打开 ${artifact.title} 更多操作`} title="更多操作" onClick={onOpen}>更多</button></div>
-  </article></li>
+  // The publish path, the id and the version list live in the detail view; the
+  // row keeps one line so a narrow dock never has to shrink its type.
+  return <li><DockRow
+    mark={<span className="artifact-card__mark" aria-hidden="true">{artifact.kind === 'project' ? <FolderOpen size={22} /> : <Package size={22} />}</span>}
+    title={artifact.title}
+    secondary={`${artifactKindLabel(artifact.kind)} · v${artifact.currentVersion} · ${formatDate(artifact.updatedAt)}`}
+    {...(artifact.status === 'archived' ? { badge: '已归档' } : {})}
+    onOpen={onOpen}
+    openLabel={`打开产物 ${artifact.title}`}
+  /></li>
 }
 
 function ArtifactEmptyState({ onPublish }: { onPublish(): void }) {
-  return <div className="artifact-center__empty"><div className="artifact-center__empty-mark"><Package size={28} /></div><h3>这个世界还没有已发布产物</h3><p>角色在当前世界工作目录中完成一轮运行后，真实新增或修改的文件会自动登记。桌面和世界目录外的文件仍需从工作目录手动发布。</p><button type="button" className="artifact-button artifact-button--primary" onClick={onPublish}><FileArrowUp size={17} />从工作目录发布</button></div>
+  return <DockEmptyState
+    mark={<Package size={28} />}
+    title="这个世界还没有已发布产物"
+    description="角色在当前世界工作目录中完成一轮运行后，真实新增或修改的文件会自动登记。桌面和世界目录外的文件仍需从工作目录手动发布。"
+    action={<button type="button" className="artifact-button artifact-button--primary" onClick={onPublish}><FileArrowUp size={17} />从工作目录发布</button>}
+  />
 }
 
 function PublishArtifactDialog({ busy, onClose, onPublish }: { busy: boolean; onClose(): void; onPublish(input: Omit<ArtifactMutationInput, 'workspaceId'>): Promise<void> }) {

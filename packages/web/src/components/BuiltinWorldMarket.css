@@ -1,10 +1,10 @@
 .builtin-world-market {
   --builtin-market-gap: 14px;
-  display: grid;
-  gap: var(--builtin-market-gap);
   padding-block-end: var(--builtin-market-gap);
   border-bottom: 1px solid var(--border);
 }
+
+.builtin-world-market .market-intro strong { font-size: 16px; }
 
 .builtin-world-market form {
   display: grid;

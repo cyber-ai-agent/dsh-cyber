@@ -31,7 +31,9 @@ test('runs the task, immutable deliverable review, change request, and accepted 
 
   await page.goto(origin)
   await openTasks(page)
-  await page.getByRole('button', { name: '新建任务' }).click()
+  // The surface header carries the primary action; the empty list repeats it,
+  // so take the header's, the way the schedule panel is driven.
+  await page.getByRole('button', { name: '新建任务' }).first().click()
   await page.getByLabel('任务标题').fill('工作系统浏览器验收')
   await page.getByLabel('任务目标').fill('实现、验证并交付一个可恢复的真实任务闭环。')
   await page.getByRole('button', { name: '创建任务', exact: true }).click()

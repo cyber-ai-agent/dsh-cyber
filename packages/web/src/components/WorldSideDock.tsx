@@ -17,6 +17,7 @@ import type { EmployeeDossier as EmployeeDossierData, World } from '@dsh-cyber/c
 
 import type { CyberEmployee, DockTab } from '../types.js'
 import { useI18n } from '../i18n/runtime.js'
+import { DockEmptyState } from './dock/DockSurface.js'
 import { EmployeeDossier } from './EmployeeDossier.js'
 import { EmployeeDossierDirectory } from './EmployeeDossierDirectory.js'
 import { WorldView } from './WorldView.js'
@@ -256,5 +257,10 @@ function readOpenTabs(worldId: string): Exclude<DockTab, 'world' | 'trace'>[] {
 }
 
 function ArtifactEmptyState() {
-  return <div className="dock-empty-state" aria-label="产物空状态"><span className="dock-empty-state__mark" aria-hidden="true"><Cube size={22} /></span><h2>还没有已发布产物</h2><p>完成工作后从工作目录明确发布，稳定版本和来源会出现在这里。</p></div>
+  return <DockEmptyState
+    label="产物空状态"
+    mark={<Cube size={22} />}
+    title="还没有已发布产物"
+    description="完成工作后从工作目录明确发布，稳定版本和来源会出现在这里。"
+  />
 }

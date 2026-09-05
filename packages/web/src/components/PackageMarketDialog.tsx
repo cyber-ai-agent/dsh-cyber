@@ -130,6 +130,9 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
   const [customPluginOpen, setCustomPluginOpen] = useState(false)
   const [generatorCloseRequest, setGeneratorCloseRequest] = useState(0)
   const generatorOpen = customRoleOpen || customWorldOpen || customSkinOpen || customPluginOpen
+  // The world tab shows two grids: templates that ship with the application,
+  // and theme packages that have to be installed.
+  const builtinWorlds = market === 'theme' ? props.onCreateBuiltinWorld : undefined
   const selectedCurrent = selected === undefined
     ? undefined
     : props.items.find((item) => item.manifest.id === selected.manifest.id && item.manifest.version === selected.manifest.version) ?? selected
@@ -447,7 +450,11 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
             </div>
             {error === undefined ? null : <div className="package-error" role="alert"><Warning size={16} />{error}</div>}
             {props.diagnostics?.length ? <details className="market-catalog-diagnostics"><summary>{props.diagnostics.length} 个本地扩展需要处理</summary><p>每条已写明原因与对应命令；连续开发可加 <code>--watch</code> 持续同步。</p><ul>{props.diagnostics.map((item) => <li key={item.directory}><strong>{item.directory}</strong>：{item.reason}</li>)}</ul></details> : null}
-            {market === 'theme' && props.onCreateBuiltinWorld !== undefined ? <BuiltinWorldMarket query={query} onCreate={props.onCreateBuiltinWorld} /> : null}
+            {builtinWorlds === undefined ? null : <BuiltinWorldMarket query={query} onCreate={builtinWorlds} />}
+            <section className="market-section market-section--packages" aria-label="扩展包">
+              {/* Two grids on the world tab. They read alike, but only this one
+                * installs anything: built-in templates are available already. */}
+              {builtinWorlds === undefined ? null : <header className="market-intro"><div><strong>可安装的世界主题包</strong><span>来自市场或本地导入。安装是一次可审阅、可回滚的事务，安装成功后才能用它创建世界。</span></div><span>{t('workbench.marketExtensionCount', '{count} 个扩展', { count: props.items.length })}</span></header>}
             {props.loading ? <div className="dialog-empty">{t('workbench.marketCheckingLocal', '正在校验本地市场目录…')}</div> : props.items.length === 0 ? (
               <div className="market-empty"><Cube size={30} /><strong>{t('workbench.marketEmpty', '没有匹配的扩展')}</strong><span>{t('workbench.marketEmptyDesc', '可以修改关键词，或使用下方“本地导入”安装自定义包。')}</span></div>
             ) : (
@@ -468,7 +475,7 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
                       {item.market === 'skin' ? <div className="market-plugin-scope">安装后出现在世界皮肤下拉 · 完整场景与聊天样式同步</div> : null}
                       <div className="market-capabilities">{item.manifest.capabilities.slice(0, 4).map((capability) => <code key={capability}>{capabilityLabel(capability)}</code>)}</div>
                       <footer>
-                        <span>{packageStateLabel(item, state)}</span>
+                        <span className="market-card-state">{packageStateLabel(item, state)}</span>
                         {marketAction(item, state, () => prepareWorld(item), () => void inspect(item), () => activateMarketItem(item))}
                       </footer>
                     </article>
@@ -476,6 +483,7 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
                 })}
               </div>
             )}
+            </section>
             <button className="manual-install-toggle" type="button" onClick={() => setManualOpen((value) => !value)}><FolderOpen size={16} />{manualOpen ? t('workbench.marketManualToggleOpen', '收起本地导入') : t('workbench.marketManualToggleClose', '本地导入自定义包')}</button>
             {manualOpen ? <ManualInstaller installing={props.installing} onPreview={props.onPreview} onInstall={props.onInstall} /> : null}
           </main>
