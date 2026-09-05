@@ -107,4 +107,46 @@ describe('Task list live refresh', () => {
     await act(async () => { root.unmount() })
     host.remove()
   })
+
+  it('tells the owner what the turn that asked for the draft actually did, without claiming the task ran', async () => {
+    const detail = {
+      task: proposed,
+      plans: [], steps: [], assignments: [], runs: [], deliverables: [], reviews: [], growthEvidence: [],
+      sourceTurn: {
+        workTurnId: 'turn-from-chat',
+        sessionId: 'session-from-chat',
+        status: 'completed',
+        createdAt: '2026-09-04T00:00:00.000Z',
+        startedAt: '2026-09-04T00:00:01.000Z',
+        completedAt: '2026-09-04T00:00:09.000Z',
+        runs: [{ id: 'run-from-chat', employeeId: 'employee-1', status: 'completed', startedAt: '2026-09-04T00:00:01.000Z', completedAt: '2026-09-04T00:00:09.000Z' }],
+      },
+    }
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const body = url.endsWith('/tasks') ? { items: [proposed] } : url.endsWith('/artifacts') ? { artifacts: [] } : detail
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('EventSource', FakeEventSource)
+
+    const host = document.createElement('div')
+    document.body.append(host)
+    const root = createRoot(host)
+    await act(async () => { root.render(createElement(TaskWorkspace, { world, employees: [] })) })
+    await vi.waitFor(() => expect(host.textContent).toContain('来源对话'))
+
+    // The source turn: which turn, how it ended, and how many characters ran in
+    // it — the execution the draft came out of.
+    expect(host.textContent).toContain('turn-fro')
+    expect(host.textContent).toContain('已完成')
+    expect(host.textContent).toContain('1 个角色运行')
+    // And the line that keeps it honest: that turn is not this task's own work.
+    expect(host.textContent).toContain('不是任务本身的执行')
+    // The task is still a draft, so starting it is still the owner's click.
+    expect(host.textContent).toContain('开始真实协作')
+
+    await act(async () => { root.unmount() })
+    host.remove()
+  })
 })

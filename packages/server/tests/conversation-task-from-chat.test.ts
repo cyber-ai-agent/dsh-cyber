@@ -47,6 +47,54 @@ function stubIntent(answers: Record<string, unknown>): ConversationTaskIntentPor
   }
 }
 
+/**
+ * A classifier that answers only when this test says so.
+ *
+ * The real one is a network call with an eight second ceiling. Holding it open
+ * is how a test can tell "the send overlapped the decision" from "the send
+ * waited for it" without measuring a clock.
+ */
+function gatedIntent(answer: unknown): ConversationTaskIntentPort & { release(): void; entered: Promise<void> } {
+  let release!: () => void
+  let entered!: () => void
+  const gate = new Promise<void>((resolve) => { release = resolve })
+  const started = new Promise<void>((resolve) => { entered = resolve })
+  return {
+    release,
+    entered: started,
+    async classify() {
+      entered()
+      await gate
+      if (answer instanceof Error) throw answer
+      return answer as never
+    },
+  }
+}
+
+/** Fails with the caller's own sentence instead of an anonymous suite timeout. */
+async function answeredWithin<T>(pending: Promise<T>, milliseconds: number, complaint: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      pending,
+      new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error(complaint)), milliseconds) }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+/** Polls a read model until it says what the caller is waiting for. */
+async function eventually<T>(read: () => T | undefined | Promise<T | undefined>, complaint: string, milliseconds = 5_000): Promise<T> {
+  const deadline = Date.now() + milliseconds
+  for (;;) {
+    const value = await read()
+    if (value !== undefined) return value
+    if (Date.now() > deadline) throw new Error(complaint)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+}
+
 async function start(intent: ConversationTaskIntentPort) {
   const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-chat-task-intent-'))
   roots.push(stateRoot)
@@ -108,19 +156,55 @@ describe('a chat instruction becomes one task in the task list', () => {
     expect(server.store.listTurnAgentRuns(instructed.body.workTurnId)).toHaveLength(1)
   })
 
-  it('shows the task of a queued instruction before its turn has run', async () => {
-    const intent = stubIntent({
-      [INSTRUCTION]: { title: '整理用户反馈改进清单', description: '汇总上周用户反馈，输出一份带优先级的改进清单。', priority: 'normal' },
-    })
+  it('accepts a queued instruction without waiting for the decision, then records its task', async () => {
+    const intent = gatedIntent({ title: '整理用户反馈改进清单', description: '汇总上周用户反馈，输出一份带优先级的改进清单。', priority: 'normal' })
     const { origin, server, world, employee } = await start(intent)
-    const queued = await json(origin, `/api/worlds/${world.id}/chat`, post({
-      employeeIds: [employee.id], prompt: INSTRUCTION, queueMode: 'normal',
-    }))
+
+    // Enqueuing reserves a turn and returns. It does no model work of its own,
+    // so it must not be charged for the classifier's — which is still inside
+    // `classify` and will stay there until this test lets it out.
+    const queued = await answeredWithin(
+      json(origin, `/api/worlds/${world.id}/chat`, post({ employeeIds: [employee.id], prompt: INSTRUCTION, queueMode: 'normal' })),
+      2_000,
+      '排队发送等待了意图判定才返回',
+    )
     expect(queued.status).toBe(202)
-    // Queued: the turn is only reserved. The task is already there to read and
-    // edit, which is the point — a task is visible before anything runs.
-    expect(queued.body.proposedTask).toMatchObject({ status: 'draft', sourceWorkTurnId: queued.body.workTurnId })
+    // Nothing decided yet, so the 202 carries no task. The panel learns about
+    // it from the world-task event, the same way it learns about every other
+    // task the host records behind an open list.
+    expect(queued.body.proposedTask).toBeUndefined()
+    expect(server.work.list(world.id)).toEqual([])
     expect(server.store.getWorkTurn(queued.body.workTurnId)?.status).not.toBe('completed')
+
+    intent.release()
+    const task = await eventually(() => server.work.list(world.id)[0], '排队指令的任务始终没有被记录')
+    expect(task).toMatchObject({ status: 'draft', title: '整理用户反馈改进清单', sourceWorkTurnId: queued.body.workTurnId })
+  })
+
+  it('keeps a queued turn healthy and puts the failure on the trace when the decision fails late', async () => {
+    const intent = gatedIntent(new ServiceError('unavailable', 'model_call_timeout', '模型响应超时。'))
+    const { origin, server, world, employee } = await start(intent)
+    const queued = await answeredWithin(
+      json(origin, `/api/worlds/${world.id}/chat`, post({ employeeIds: [employee.id], prompt: INSTRUCTION, queueMode: 'normal' })),
+      2_000,
+      '排队发送等待了意图判定才返回',
+    )
+    expect(queued.status).toBe(202)
+    expect(queued.body.proposedTask).toBeUndefined()
+
+    intent.release()
+    const failure = await eventually(async () => {
+      const trace = await json(origin, `/api/worlds/${world.id}/trace`)
+      return (trace.body.items as WorldTraceEntry[]).find((entry) => entry.summary.includes('任务意图'))
+    }, '判定失败没有出现在轨迹里')
+    expect(failure.status).toBe('failed')
+    expect(server.work.list(world.id)).toEqual([])
+    // The turn the owner actually queued still ran and answered.
+    const settled = await eventually(() => {
+      const turn = server.store.getWorkTurn(queued.body.workTurnId)
+      return turn?.status === 'completed' ? turn : undefined
+    }, '排队的回合没有正常完成')
+    expect(settled.errorCode).toBeUndefined()
   })
 
   it('runs the recorded task on an explicit action and keeps one task across execution, failure and restart', async () => {
