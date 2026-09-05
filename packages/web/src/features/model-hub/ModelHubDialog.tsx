@@ -392,12 +392,11 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
   // provider and model id on top of the rail choice.
   const assignPool = useMemo(() => {
     const providerIds = new Set(providers.map((provider) => provider.id))
-    const byProvider = assignProvider === 'all'
-      ? profiles
-      : profiles.filter((profile) => profile.providerId === assignProvider)
     const scoped = assignProvider === 'all'
-      ? byProvider.filter((profile) => profile.providerId === undefined || providerIds.has(profile.providerId))
-      : byProvider
+      ? profiles
+      : assignProvider === 'legacy'
+      ? profiles.filter((profile) => profile.providerId === undefined || !providerIds.has(profile.providerId))
+      : profiles.filter((profile) => profile.providerId === assignProvider)
     const needle = assignQuery.trim().toLocaleLowerCase()
     if (needle === '') return scoped
     return scoped.filter((profile) =>

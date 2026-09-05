@@ -57,6 +57,16 @@ test.beforeAll(async () => {
     },
   }))
   server.store.saveModelAssignment({ workspaceId, scope: 'workspace', scopeId: workspaceId, modelProfileId: profiles[0]!.id })
+  server.store.saveModelProfile({
+    workspaceId,
+    origin: 'manual',
+    displayName: '遗留模型',
+    providerKind: 'openai-compatible-local',
+    baseUrl: 'http://127.0.0.1:11500/v1',
+    modelId: 'legacy-model',
+    api: 'openai-completions',
+    settings: { providerName: '独立配置', contextWindow: 16_384, inputTypes: ['text'], outputTypes: ['text'] },
+  })
   origin = (await server.start()).origin
 })
 
@@ -90,13 +100,17 @@ test('opens the model hub from settings, shows the pool and remains responsive',
 
   await hub.getByRole('button', { name: '模型池', exact: true }).click()
   const pool = hub.locator('.model-hub__table')
-  await expect(pool.locator('tbody tr')).toHaveCount(3)
+  await expect(pool.locator('tbody tr')).toHaveCount(4)
   await expect(pool.getByText('32K', { exact: true })).toHaveCount(3)
   await expect(pool.getByText('Ollama', { exact: true })).toHaveCount(3)
 
   await hub.getByRole('button', { name: '模型设置', exact: true }).click()
   await expect(hub.locator('.model-hub__assign-targets button').first()).toContainText('全局')
   await expect(hub.locator('.model-hub__assign-current').first()).toContainText('本地推理模型')
+  const legacyProvider = hub.locator('.model-hub__assign-providers button').filter({ hasText: '独立配置' })
+  await expect(legacyProvider).toHaveCount(1)
+  await legacyProvider.click()
+  await expect(hub.locator('.model-hub__assign-table tbody tr').filter({ hasText: '遗留模型' })).toBeVisible()
 
   for (const viewport of [
     { width: 1_440, height: 900, label: '1440x900' },
