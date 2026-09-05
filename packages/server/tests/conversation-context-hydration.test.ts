@@ -15,6 +15,17 @@ import { SqliteStore, memoryIndexTerms } from '@dsh-cyber/persistence'
 import { ConversationContextComposer } from '../src/services/conversation-context-composer.js'
 import { EmployeeConversationMemoryService } from '../src/services/employee-conversation-memory-service.js'
 
+/**
+ * The private secret these probes must never see leak.
+ *
+ * It carries letters outside hex on purpose. The marker used to be the bare
+ * digits `7391`, and `allLayerText` includes generated ids, so a memory whose
+ * uuid happened to end `…5bdf7391bee4` failed the leak assertion with nothing
+ * leaked — which is the worst way for a privacy guard to fail, because the
+ * next person to hit it is being taught that this test cries wolf.
+ */
+const VAULT_SECRET = 'ZQ7391XK'
+
 const stores: SqliteStore[] = []
 
 afterEach(() => {
@@ -289,7 +300,7 @@ describe('retrieved memory hydration', () => {
       session: direct,
       memory,
       ask: '记下金库处置方案',
-      answer: longAnswer('金库密码 7391'),
+      answer: longAnswer(`金库密码 ${VAULT_SECRET}`),
       runId: 'run-private',
     })
     for (let index = 2; index <= 12; index += 1) {
@@ -351,7 +362,7 @@ describe('retrieved memory hydration', () => {
       memoryBudgetTokens: 4_000,
     })
     expect(own.coverage.hydratedSourceMessageCount).toBeGreaterThan(0)
-    expect(own.envelope.retrievedMemories?.text ?? '').toContain('7391')
+    expect(own.envelope.retrievedMemories?.text ?? '').toContain(VAULT_SECRET)
 
     const result = await composer.compose({
       employee,
@@ -364,7 +375,7 @@ describe('retrieved memory hydration', () => {
     })
 
     expect(result.coverage.memoryScopes).toEqual(['group', 'task'])
-    expect(allLayerText(result)).not.toContain('7391')
+    expect(allLayerText(result)).not.toContain(VAULT_SECRET)
     const privateMessageIds = new Set(store.listMessages(direct.id).map((message) => message.id))
     const refs = result.envelope.retrievedMemories?.sourceRefs ?? []
     expect(refs.some((ref) => ref.kind === 'message' && privateMessageIds.has(ref.id))).toBe(false)
@@ -400,7 +411,7 @@ describe('retrieved memory hydration', () => {
     // boundary from the message's own session, so it must refuse.
     const memoryIds = (result.envelope.memoryIndex?.sourceRefs ?? []).map((ref) => ref.id)
     expect(memoryIds).toContain(privateMilestone.id)
-    expect(allLayerText(result)).not.toContain('7391')
+    expect(allLayerText(result)).not.toContain(VAULT_SECRET)
     const hydrated = (result.envelope.retrievedMemories?.text ?? '').split('[记忆原文]')[1] ?? ''
     expect(hydrated).not.toContain(privateMilestone.id)
     expect(hydrated).not.toContain('迁移方案要点')
