@@ -58,6 +58,25 @@ export interface KnowledgeSearchResult {
   updatedAt?: string
 }
 
+export interface KnowledgeDocumentPreviewParagraph {
+  ordinal: number
+  text: string
+}
+
+/** One window of a document's extracted body, as returned by the preview route. */
+export interface KnowledgeDocumentPreview {
+  documentId: string
+  title: string
+  mimeType: string
+  status: KnowledgeDocumentStatus
+  previewable: boolean
+  reason?: 'unsupported'
+  total: number
+  offset: number
+  nextOffset?: number
+  paragraphs: KnowledgeDocumentPreviewParagraph[]
+}
+
 export interface KnowledgeLibrarySnapshot {
   collections: KnowledgeCollection[]
   documents: KnowledgeDocument[]
@@ -112,6 +131,10 @@ const documentStatuses = new Set<KnowledgeDocumentStatus>(['pending', 'indexed',
 
 export function knowledgeLibraryPath(worldId: string, suffix = ''): string {
   return `/api/worlds/${encodeURIComponent(worldId)}/knowledge/library${suffix}`
+}
+
+export function knowledgeDocumentPreviewPath(worldId: string, documentId: string): string {
+  return `${knowledgeLibraryPath(worldId, '/documents')}/${encodeURIComponent(documentId)}/preview`
 }
 
 export function knowledgeSearchPath(worldId: string, query: string, limit = 8): string {
@@ -187,6 +210,49 @@ export function normalizeKnowledgeSearchResults(value: unknown, worldId: string)
         ? value.items
         : []
   return source.map((item) => normalizeKnowledgeSearchResult(item, worldId)).filter(isDefined)
+}
+
+/**
+ * Reads one window of a document's body.
+ *
+ * The response is text the server extracted when it parsed the source. It is
+ * normalized into plain strings here and rendered as characters by the reader:
+ * imported content is data, never markup the host application executes.
+ */
+export async function fetchKnowledgeDocumentPreview(
+  worldId: string,
+  documentId: string,
+  window: { offset?: number; limit?: number } = {},
+): Promise<KnowledgeDocumentPreview> {
+  const params = new URLSearchParams()
+  if (window.offset !== undefined && window.offset > 0) params.set('offset', String(window.offset))
+  if (window.limit !== undefined) params.set('limit', String(window.limit))
+  const query = params.toString()
+  const path = knowledgeDocumentPreviewPath(worldId, documentId)
+  return normalizeKnowledgeDocumentPreview(await api<unknown>(query === '' ? path : `${path}?${query}`), documentId)
+}
+
+export function normalizeKnowledgeDocumentPreview(value: unknown, documentId: string): KnowledgeDocumentPreview {
+  const source = isRecord(value) ? value : {}
+  const paragraphs = Array.isArray(source.paragraphs)
+    ? source.paragraphs.flatMap((item) => isRecord(item) && typeof item.text === 'string'
+      ? [{ ordinal: asNumber(item.ordinal), text: item.text }]
+      : [])
+    : []
+  const previewable = source.previewable !== false
+  const nextOffset = typeof source.nextOffset === 'number' ? source.nextOffset : undefined
+  return {
+    documentId: typeof source.documentId === 'string' ? source.documentId : documentId,
+    title: typeof source.title === 'string' ? source.title : '',
+    mimeType: typeof source.mimeType === 'string' ? source.mimeType : '',
+    status: asEnum(source.status, documentStatuses, 'pending'),
+    previewable,
+    ...(previewable ? {} : { reason: 'unsupported' as const }),
+    total: asNumber(source.total),
+    offset: asNumber(source.offset),
+    ...(nextOffset === undefined || paragraphs.length === 0 ? {} : { nextOffset }),
+    paragraphs: previewable ? paragraphs : [],
+  }
 }
 
 function normalizeKnowledgeSearchResult(value: unknown, worldId: string): KnowledgeSearchResult | undefined {

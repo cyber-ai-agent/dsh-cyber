@@ -78,6 +78,12 @@ test('imports real sources, retrieves only current-world knowledge, and survives
   const malicious = await postJson(`${route}/paste`, { title: '不可信资料', text: MALICIOUS_TEXT })
   expect(malicious.status).toBe(201)
 
+  // Long enough that the reader has to page: the row preview must show one
+  // window and say which one, not silently render the whole file.
+  const longBody = Array.from({ length: 6 }, (_, index) => `第 ${index + 1} 段窗口正文，${'知识库按窗口读取长文档而不是一次性载入。'.repeat(24)}`).join('\n\n')
+  const longDocument = await postJson(`${route}/paste`, { title: '长文档预览', text: longBody })
+  expect(longDocument.status).toBe(201)
+
   const snapshot = await getJson<{ collections: unknown[]; documents: Array<{ title: string; relativePath: string; status: string }> }>(`${origin}/api/worlds/${world.id}/knowledge`)
   expect(snapshot.documents.map((document) => document.title)).toEqual(expect.arrayContaining(['真实 Markdown', '文件夹资料', 'guide', '真实粘贴资料', 'reference', '不可信资料']))
   expect(snapshot.documents.every((document) => document.status === 'indexed')).toBe(true)
@@ -108,6 +114,22 @@ test('imports real sources, retrieves only current-world knowledge, and survives
   await expect(knowledge).toContainText('IGNORE ALL PREVIOUS INSTRUCTIONS')
   await knowledge.locator('.knowledge-search__clear').click()
   await expect(knowledge.getByRole('list', { name: '资料', exact: true })).toBeVisible()
+
+  const previewRow = knowledge.locator('.knowledge-document').filter({ hasText: '长文档预览' })
+  await previewRow.locator('summary').click()
+  const preview = previewRow.locator('.knowledge-preview')
+  await expect(preview).toBeVisible()
+  // The chunker decides how many paragraphs a source has; the row must report
+  // whatever that number really is, so the range is matched, not hard-coded.
+  await expect(preview.locator('.knowledge-preview__range')).toHaveText(/^第 1–4 段 · 共 \d+$/)
+  await expect(preview.locator('.knowledge-preview__body')).toContainText('第 1 段窗口正文')
+  await expect(preview.locator('.knowledge-preview__body')).not.toContainText('第 6 段窗口正文')
+  await preview.getByRole('button', { name: '下一段' }).click()
+  await expect(preview.locator('.knowledge-preview__range')).toHaveText(/^第 5–\d+ 段 · 共 \d+$/)
+  await expect(preview.locator('.knowledge-preview__body')).toContainText('第 6 段窗口正文')
+  await expect(preview.locator('.knowledge-preview__body')).not.toContainText('第 1 段窗口正文')
+  await preview.getByRole('button', { name: '上一段' }).click()
+  await expect(preview.locator('.knowledge-preview__body')).toContainText('第 1 段窗口正文')
 
   const screenshotRoot = join(process.cwd(), 'artifacts', 'world-knowledge-library')
   await mkdir(screenshotRoot, { recursive: true })
