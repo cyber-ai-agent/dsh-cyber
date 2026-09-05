@@ -446,7 +446,7 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
               {market === 'plugin' ? <button ref={customPluginButtonRef} className="market-custom-role-button" type="button" onClick={openCustomPluginGenerator}><Plug size={17} aria-hidden="true" />{t('pluginGenerator.title', '自定义插件')}</button> : null}
             </div>
             {error === undefined ? null : <div className="package-error" role="alert"><Warning size={16} />{error}</div>}
-            {props.diagnostics?.length ? <details className="market-catalog-diagnostics"><summary>{props.diagnostics.length} 个本地扩展需要更新清单</summary><p>修改扩展后可运行 <code>pnpm package:prepare &lt;包目录&gt;</code> 自动更新，或加 <code>--watch</code> 持续同步。</p><ul>{props.diagnostics.map((item) => <li key={item.directory}><strong>{item.directory}</strong>：{item.reason}</li>)}</ul></details> : null}
+            {props.diagnostics?.length ? <details className="market-catalog-diagnostics"><summary>{props.diagnostics.length} 个本地扩展需要处理</summary><p>每条已写明原因与对应命令；连续开发可加 <code>--watch</code> 持续同步。</p><ul>{props.diagnostics.map((item) => <li key={item.directory}><strong>{item.directory}</strong>：{item.reason}</li>)}</ul></details> : null}
             {market === 'theme' && props.onCreateBuiltinWorld !== undefined ? <BuiltinWorldMarket query={query} onCreate={props.onCreateBuiltinWorld} /> : null}
             {props.loading ? <div className="dialog-empty">{t('workbench.marketCheckingLocal', '正在校验本地市场目录…')}</div> : props.items.length === 0 ? (
               <div className="market-empty"><Cube size={30} /><strong>{t('workbench.marketEmpty', '没有匹配的扩展')}</strong><span>{t('workbench.marketEmptyDesc', '可以修改关键词，或使用下方“本地导入”安装自定义包。')}</span></div>
