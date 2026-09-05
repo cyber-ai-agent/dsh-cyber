@@ -102,8 +102,11 @@ describe('knowledge source version, chunk cursor and completion watermark', () =
     expect(document.chunkCount).toBeGreaterThan(20)
     const jobsUrl = `${origin}/api/worlds/${world.id}/knowledge/consolidation-jobs`
     const scanUrl = `${origin}/api/worlds/${world.id}/knowledge/consolidate`
+    // One fixed revision past the source quiet window: the document is not
+    // being edited between windows, only walked further.
+    const aged = new Date(Date.now() - 60_000).toISOString()
     const ageSources = (): void => {
-      first.store.database.prepare('UPDATE knowledge_documents SET updated_at = ?').run(new Date(Date.now() - 60_000).toISOString())
+      first.store.database.prepare('UPDATE knowledge_documents SET updated_at = ?').run(aged)
     }
 
     // First window: the document is only partly processed, and the job says so.
@@ -134,8 +137,11 @@ describe('knowledge source version, chunk cursor and completion watermark', () =
     const resumedOrigin = (await resumed.start()).origin
     const resumedJobs = `${resumedOrigin}/api/worlds/${world.id}/knowledge/consolidation-jobs`
     const seenBeforeRestart = new Set(extractor.chunkIds)
-    for (let pass = 0; pass < 8; pass += 1) {
-      resumed.store.database.prepare('UPDATE knowledge_documents SET updated_at = ?').run(new Date(Date.now() - 60_000).toISOString())
+    for (let pass = 0; pass < 12; pass += 1) {
+      resumed.store.database.prepare('UPDATE knowledge_documents SET updated_at = ?').run(aged)
+      // Only the transient-failure backoff is fast-forwarded; the retry itself
+      // still goes through the production scan path.
+      resumed.store.database.prepare("UPDATE knowledge_consolidation_jobs SET updated_at = ? WHERE status = 'failed'").run(aged)
       await postJson(`${resumedOrigin}/api/worlds/${world.id}/knowledge/consolidate`, {})
       await waitFor(async () => (await getJson<{ items: KnowledgeJobView[] }>(resumedJobs)).items.every((job) => job.status === 'completed' || job.status === 'failed'))
       const latest = (await getJson<{ items: KnowledgeJobView[] }>(resumedJobs)).items.find((job) => job.sourceId === document.id)!
@@ -150,7 +156,9 @@ describe('knowledge source version, chunk cursor and completion watermark', () =
     expect(new Set(extractor.chunkIds).size).toBe(document.chunkCount)
     expect([...seenBeforeRestart].every((id) => extractor.chunkIds.indexOf(id) === extractor.chunkIds.lastIndexOf(id))).toBe(true)
 
-    // A repeated scan of a fully processed version queues nothing.
+    // A fully processed version queues nothing again — and a source row merely
+    // touched by a re-scan does not re-extract a document whose text is
+    // unchanged, because the watermark is keyed on content, not a timestamp.
     resumed.store.database.prepare('UPDATE knowledge_documents SET updated_at = ?').run(new Date(Date.now() - 60_000).toISOString())
     const repeated = await postJson<{ scan: { queued: number } }>(`${resumedOrigin}/api/worlds/${world.id}/knowledge/consolidate`, {})
     expect(repeated.body.scan.queued).toBe(0)

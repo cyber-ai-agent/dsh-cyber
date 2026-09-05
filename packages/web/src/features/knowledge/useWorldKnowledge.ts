@@ -428,6 +428,11 @@ export function normalizeConsolidationJobs(value: unknown, worldId: string): Kno
       status: item.status,
       attempt: asNumber(item.attempt),
       ...(typeof item.errorCode === 'string' ? { errorCode: item.errorCode } : {}),
+      // How much of the source is really done. Kept only when both numbers are
+      // present: half a fraction would be another way of overstating progress.
+      ...(typeof item.processedChunks === 'number' && typeof item.chunkTotal === 'number'
+        ? { processedChunks: asNumber(item.processedChunks), chunkTotal: asNumber(item.chunkTotal) }
+        : {}),
       createdAt: asString(item.createdAt),
       updatedAt: asString(item.updatedAt),
       ...(typeof item.startedAt === 'string' ? { startedAt: item.startedAt } : {}),

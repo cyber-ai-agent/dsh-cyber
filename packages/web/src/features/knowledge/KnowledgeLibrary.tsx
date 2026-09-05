@@ -161,17 +161,30 @@ function KnowledgeConsolidationPanel({ state }: { state: UseWorldKnowledgeResult
   </details></section>
 }
 
-function consolidationEntriesBySource(jobs: KnowledgeConsolidationJob[], sourceType: KnowledgeConsolidationJob['sourceType'], t: (key: string, fallback: string) => string): Record<string, KnowledgeConsolidationEntry> {
+function consolidationEntriesBySource(jobs: KnowledgeConsolidationJob[], sourceType: KnowledgeConsolidationJob['sourceType'], t: (key: string, fallback: string, variables?: Record<string, string | number>) => string): Record<string, KnowledgeConsolidationEntry> {
   const output: Record<string, KnowledgeConsolidationEntry> = {}
   for (const job of jobs) {
     if (job.sourceType !== sourceType || output[job.sourceId] !== undefined) continue
     output[job.sourceId] = job.status === 'completed'
-      ? { state: 'success', message: t('knowledge.consolidateSuccess', '已加入知识图谱') }
+      ? { state: 'success', message: consolidationSuccessMessage(job, t) }
       : job.status === 'failed'
         ? { state: 'error', message: t('knowledge.statusFailed', '处理失败') }
         : { state: 'queued', message: job.status === 'running' ? t('knowledge.consolidatePending', '正在加入…') : t('knowledge.consolidateQueued', '已排队') }
   }
   return output
+}
+
+/**
+ * A finished job covers one chunk window, not necessarily the whole document.
+ * Saying 已加入知识图谱 while most of a long file has never been read would be
+ * the product lying about its own state, so a partial source says how far it
+ * actually got and only a full one drops the counter.
+ */
+function consolidationSuccessMessage(job: KnowledgeConsolidationJob, t: (key: string, fallback: string, variables?: Record<string, string | number>) => string): string {
+  const done = job.processedChunks
+  const total = job.chunkTotal
+  if (done === undefined || total === undefined || total === 0 || done >= total) return t('knowledge.consolidateSuccess', '已加入知识图谱')
+  return t('knowledge.consolidatePartial', '已加入知识图谱 {done}/{total} 块', { done, total })
 }
 
 function latestConsolidationJob(jobs: KnowledgeConsolidationJob[], sourceType: KnowledgeConsolidationJob['sourceType'], sourceId: string): KnowledgeConsolidationJob | undefined {
@@ -245,7 +258,7 @@ function DocumentRow({ document, consolidation, demoMode, onConsolidate }: { doc
     <span className="knowledge-row__status"><span className={`knowledge-status knowledge-status--${document.status}`}><StatusIcon status={document.status} aria-hidden="true" />{t(statusKey, document.status)}</span></span>
     </summary><div className="knowledge-document__details"><p>{document.chunkCount} 段 · {formatBytes(document.byteLength)}</p>
     <span className="knowledge-row__evidence"><span>{t('knowledge.libraryStatSources', '来源')} {document.sourceUrl || document.relativePath || '本地资料'}</span><span>{t('knowledge.libraryStatUpdated', '更新')} {formatDate(document.updatedAt, t)}</span></span>
-    {document.status === 'indexed' ? <span className="knowledge-row__consolidation"><button type="button" className="knowledge-row__consolidation-button" onClick={() => onConsolidate(document)} disabled={!canConsolidate} aria-describedby={`knowledge-consolidation-${document.id}`} title={demoMode ? t('knowledge.libraryDemoNotice', '演示世界暂不可整理知识') : consolidation?.state === 'error' ? t('knowledge.consolidateButton', '重新加入知识图谱') : t('knowledge.consolidateButton', '吸收到知识图谱')}>{consolidation?.state === 'pending' ? t('knowledge.consolidatePending', '正在加入…') : consolidation?.state === 'queued' ? t('knowledge.consolidateQueued', '已排队') : consolidation?.state === 'success' ? t('knowledge.consolidateSuccess', '已加入知识图谱') : t('knowledge.consolidateButton', '吸收到知识图谱')}</button>{consolidation === undefined ? null : <small id={`knowledge-consolidation-${document.id}`} className={`knowledge-row__consolidation-status knowledge-row__consolidation-status--${consolidation.state}`} role={consolidation.state === 'error' ? 'alert' : 'status'} aria-live="polite">{consolidation.message}</small>}</span> : null}
+    {document.status === 'indexed' ? <span className="knowledge-row__consolidation"><button type="button" className="knowledge-row__consolidation-button" onClick={() => onConsolidate(document)} disabled={!canConsolidate} aria-describedby={`knowledge-consolidation-${document.id}`} title={demoMode ? t('knowledge.libraryDemoNotice', '演示世界暂不可整理知识') : consolidation?.state === 'error' ? t('knowledge.consolidateButton', '重新加入知识图谱') : t('knowledge.consolidateButton', '吸收到知识图谱')}>{consolidation?.state === 'pending' ? t('knowledge.consolidatePending', '正在加入…') : consolidation?.state === 'queued' ? t('knowledge.consolidateQueued', '已排队') : consolidation?.state === 'success' ? consolidation.message : t('knowledge.consolidateButton', '吸收到知识图谱')}</button>{consolidation === undefined ? null : <small id={`knowledge-consolidation-${document.id}`} className={`knowledge-row__consolidation-status knowledge-row__consolidation-status--${consolidation.state}`} role={consolidation.state === 'error' ? 'alert' : 'status'} aria-live="polite">{consolidation.message}</small>}</span> : null}
   </div></details></li>
 }
 

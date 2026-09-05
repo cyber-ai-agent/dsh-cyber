@@ -855,6 +855,7 @@ describe('SqliteStore', () => {
       ALTER TABLE employee_instances DROP COLUMN health_error_code;
       ALTER TABLE employee_instances DROP COLUMN health;
       ALTER TABLE employee_revisions DROP COLUMN runtime_permission_mode;
+      DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 2;
       PRAGMA user_version = 2;
     `)
@@ -959,6 +960,7 @@ describe('SqliteStore', () => {
       ALTER TABLE model_profiles DROP COLUMN capabilities_json;
       ALTER TABLE model_profiles DROP COLUMN probed_at;
       DROP TABLE model_providers;
+      DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 36;
       PRAGMA user_version = 36;
     `)
@@ -1041,6 +1043,7 @@ describe('SqliteStore', () => {
       ALTER TABLE model_profiles DROP COLUMN capabilities_json;
       ALTER TABLE model_profiles DROP COLUMN probed_at;
       DROP TABLE model_providers;
+      DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 38;
       PRAGMA user_version = 38;
     `)
@@ -1421,6 +1424,7 @@ describe('SqliteStore', () => {
       ALTER TABLE model_profiles DROP COLUMN capabilities_json;
       ALTER TABLE model_profiles DROP COLUMN probed_at;
       DROP TABLE model_providers;
+      DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 36;
       PRAGMA user_version = 36;
     `)
@@ -1488,6 +1492,7 @@ describe('SqliteStore', () => {
       ALTER TABLE model_profiles DROP COLUMN capabilities_json;
       ALTER TABLE model_profiles DROP COLUMN probed_at;
       DROP TABLE model_providers;
+      DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 39;
       PRAGMA user_version = 39;
     `)
@@ -1540,6 +1545,7 @@ describe('SqliteStore', () => {
       DROP INDEX work_tasks_source_work_turn_idx;
       ALTER TABLE work_tasks DROP COLUMN source_message_id;
       ALTER TABLE work_tasks DROP COLUMN source_work_turn_id;
+      DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 40;
       PRAGMA user_version = 40;
     `)

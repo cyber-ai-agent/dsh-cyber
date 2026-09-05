@@ -201,7 +201,7 @@ describe('WorldKnowledgeConsolidationScheduler', () => {
         listSessions: () => [],
         listSources: () => [{ sourceType: 'document', sourceId: 'doc', updatedAt: new Date(revision).toISOString() }],
         getConsolidationSourceJob: () => job,
-        getKnowledgeSourceVersion: () => version === undefined ? undefined : {
+        getKnowledgeSourceProgress: () => version === undefined ? undefined : {
           workspaceId: 'workspace', worldId: 'world', sourceType: 'document', sourceId: 'doc',
           contentHash: 'a'.repeat(64), createdAt: '2026-09-05T00:00:00.000Z', updatedAt: '2026-09-05T00:05:00.000Z',
           ...version,

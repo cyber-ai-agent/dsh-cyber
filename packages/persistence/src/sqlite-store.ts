@@ -723,6 +723,7 @@ const KNOWN_TABLES = [
   'knowledge_relations',
   'knowledge_conversation_cursors',
   'knowledge_consolidation_jobs',
+  'knowledge_source_versions',
   'world_knowledge_settings',
   'knowledge_suppressions',
 ] as const

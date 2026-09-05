@@ -212,6 +212,41 @@ export interface KnowledgeConversationCursor {
 export type KnowledgeConsolidationSourceType = 'conversation' | 'document' | 'artifact'
 export type KnowledgeConsolidationJobStatus = 'queued' | 'running' | 'completed' | 'failed'
 
+/** Chunked sources are walked window by window; a conversation is not. */
+export type KnowledgeChunkedSourceType = 'document' | 'artifact'
+
+/**
+ * One identifiable revision of a chunked knowledge source, plus how far
+ * extraction has actually got through it.
+ *
+ * `contentHash` is the version identity — a document's sha256, an artifact's
+ * version — so changed content becomes a *new* version instead of silently
+ * overwriting the previous one. `processedChunks` is the resume cursor and the
+ * completion watermark at once: a version is finished only when it equals
+ * `chunkTotal`, which is the single fact any "已整理" status may be derived
+ * from. A failure leaves it exactly where it was, so the next attempt restarts
+ * at the chunk that failed and never past it.
+ *
+ * `supersededAt` / `supersededByHash` mark a version whose content has since
+ * changed. Marking is deliberately all that happens here: the claims extracted
+ * from that content stay untouched, and deciding whether to downgrade,
+ * re-verify or keep them is an explicit later pass over exactly these rows.
+ */
+export interface KnowledgeSourceVersion {
+  workspaceId: string
+  worldId: string
+  sourceType: KnowledgeChunkedSourceType
+  sourceId: string
+  contentHash: string
+  chunkTotal: number
+  processedChunks: number
+  createdAt: IsoTimestamp
+  updatedAt: IsoTimestamp
+  completedAt?: IsoTimestamp
+  supersededAt?: IsoTimestamp
+  supersededByHash?: string
+}
+
 export interface KnowledgeConsolidationJob {
   id: string
   workspaceId: string
@@ -223,6 +258,14 @@ export interface KnowledgeConsolidationJob {
   status: KnowledgeConsolidationJobStatus
   attempt: number
   errorCode?: string
+  /**
+   * Watermark of the job's source version, not of this one window. A reader
+   * must never conclude from `status: 'completed'` alone that the whole source
+   * has been processed; these two say how much of it actually has. Absent for
+   * conversation sources, which carry a sequence cursor instead.
+   */
+  processedChunks?: number
+  chunkTotal?: number
   createdAt: IsoTimestamp
   updatedAt: IsoTimestamp
   startedAt?: IsoTimestamp
