@@ -113,8 +113,8 @@ export function ArtifactDetail({ worldId, artifact, onBack, onRename, onArchive,
 
     <div className="artifact-detail__body">
       <div className="artifact-detail__preview"><ArtifactPreview worldId={worldId} artifact={artifact} /></div>
-      <section className="artifact-detail__metadata" aria-labelledby="artifact-provenance-heading">
-        <h3 id="artifact-provenance-heading">来源与版本</h3>
+      <details className="artifact-detail__metadata dock-detail-fold">
+        <summary>来源与版本</summary>
         <dl>
           <div><dt>类型</dt><dd>{artifactKindLabel(artifact.kind)}</dd></div>
           <div><dt>当前版本</dt><dd>v{artifact.currentVersion}</dd></div>
@@ -126,7 +126,7 @@ export function ArtifactDetail({ worldId, artifact, onBack, onRename, onArchive,
           {currentVersion?.agentRunId === undefined ? null : <div><dt>角色运行</dt><dd><code>{currentVersion.agentRunId}</code></dd></div>}
           <div><dt>更新时间</dt><dd><Clock size={15} />{formatDate(artifact.updatedAt)}</dd></div>
         </dl>
-      </section>
+      </details>
       <section className="artifact-detail__versions" aria-labelledby="artifact-version-heading">
         <h3 id="artifact-version-heading">版本历史</h3>
         {versions.length === 0 ? <p className="artifact-detail__muted">暂无版本记录</p> : <ol>{[...versions].sort((a, b) => b.version - a.version).map((version) => <li key={version.version} className={version.version === artifact.currentVersion ? 'is-current' : ''}><span>v{version.version}</span><code>{version.relativePath}</code><small>{formatDate(version.createdAt)}</small></li>)}</ol>}

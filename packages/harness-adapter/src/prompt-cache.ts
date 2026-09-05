@@ -5,7 +5,7 @@ import { promptCacheKey } from '@dsh-cyber/contracts'
  * Maps the domain's provider-neutral prompt cache policy onto what the DeepSeek
  * Harness runtime can actually do.
  *
- * What 0.1.2-alpha.3 offers, checked rather than assumed: the SDK exposes no
+ * What 0.1.2-rc.1 offers, checked rather than assumed: the SDK exposes no
  * cache knob at all — no `cache_control`, no `prompt_cache_key`, nothing on the
  * agent, session or turn surface. What it does expose is accounting:
  * `TokenUsage` carries `cacheReadTokens` / `cacheWriteTokens`, and the DeepSeek

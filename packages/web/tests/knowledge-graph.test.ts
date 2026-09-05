@@ -67,7 +67,7 @@ describe('knowledge graph UI', () => {
     expect(markup).toContain('来源')
     expect(markup).toContain('深度')
     expect(markup).toContain('全屏显示')
-    expect(markup).toContain('对话、资料与产物会在后台整理为有证据的长期知识')
+    expect(markup).toContain('2 个实体 · 1 条关系')
     expect(markup).toContain('自动整理')
     expect(markup).toContain('提取模型')
     expect(markup).toContain('开始整理')

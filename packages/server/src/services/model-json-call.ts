@@ -25,6 +25,7 @@ export interface ModelJsonCallOptions {
   resolveHostname?: ModelHostnameResolver
   timeoutMs?: number
   maxOutputTokens?: number
+  maxResponseBytes?: number
   /**
    * `native` asks OpenAI-compatible chat endpoints for JSON mode explicitly.
    * Some compatible gateways implement ordinary chat but reject
@@ -46,6 +47,11 @@ export interface ModelJsonPrompt {
   user: string
 }
 
+export interface ModelJsonResult {
+  text: string
+  usage: { model: string; inputTokens?: number; outputTokens?: number }
+}
+
 export class ModelJsonCall {
   readonly #credentials: ModelCredentialService
   readonly #fetch: typeof fetch
@@ -53,6 +59,7 @@ export class ModelJsonCall {
   readonly #timeoutMs: number
   readonly #maxOutputTokens: number
   readonly #jsonResponseMode: 'native' | 'prompt-only'
+  readonly #maxResponseBytes: number
 
   constructor(options: ModelJsonCallOptions) {
     this.#credentials = options.credentials
@@ -61,10 +68,15 @@ export class ModelJsonCall {
     this.#timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
     this.#maxOutputTokens = options.maxOutputTokens ?? 1_024
     this.#jsonResponseMode = options.jsonResponseMode ?? 'native'
+    this.#maxResponseBytes = options.maxResponseBytes ?? MAX_RESPONSE_BYTES
   }
 
   /** Returns the model's raw text, which the caller parses. */
   async text(profile: ModelProfile, prompt: ModelJsonPrompt): Promise<string> {
+    return (await this.call(profile, prompt)).text
+  }
+
+  async call(profile: ModelProfile, prompt: ModelJsonPrompt): Promise<ModelJsonResult> {
     const url = await assertModelDiscoveryUrl(profile.baseUrl, profile.providerKind, { resolver: this.#resolver })
     const suffix = profile.api === 'openai-responses' ? 'responses' : profile.api === 'anthropic-messages' ? 'messages' : 'chat/completions'
     const normalized = url.pathname.replace(/\/+$/, '')
@@ -79,15 +91,14 @@ export class ModelJsonCall {
       headers.Authorization = `Bearer ${secret}`
       if (profile.api === 'anthropic-messages') {
         headers['x-api-key'] = secret
-        headers['anthropic-version'] = '2023-06-01'
       }
     }
+    if (profile.api === 'anthropic-messages') headers['anthropic-version'] = '2023-06-01'
 
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), this.#timeoutMs)
-    let response: Response
     try {
-      response = await this.#fetch(url, {
+      const response = await this.#fetch(url, {
         method: 'POST',
         headers,
         body: JSON.stringify(requestBody(profile, prompt, this.#maxOutputTokens, this.#jsonResponseMode)),
@@ -98,21 +109,26 @@ export class ModelJsonCall {
         // bounce a completion.
         redirect: 'manual',
       })
+      if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
+        await response.body?.cancel()
+        throw new ServiceError('unavailable', 'model_call_redirected', '模型接口发生了重定向，已拒绝以避免凭证外泄。', response.status)
+      }
+      if (!response.ok) {
+        await response.body?.cancel()
+        throw new ServiceError('unavailable', 'model_call_upstream_error', '模型服务返回了错误。', response.status)
+      }
+      const payload = await readBoundedJson(response, controller.signal, this.#maxResponseBytes)
+      const value = object(payload)
+      return { text: extractText(profile.api, payload), usage: responseUsage(value, profile.modelId) }
     } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
+      if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
         throw new ServiceError('unavailable', 'model_call_timeout', '模型响应超时。')
       }
+      if (error instanceof ServiceError) throw error
       throw new ServiceError('unavailable', 'model_call_unreachable', '无法连接模型服务。')
     } finally {
       clearTimeout(timeout)
     }
-    if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
-      throw new ServiceError('unavailable', 'model_call_redirected', '模型接口发生了重定向，已拒绝以避免凭证外泄。', response.status)
-    }
-    if (!response.ok) {
-      throw new ServiceError('unavailable', 'model_call_upstream_error', '模型服务返回了错误。', response.status)
-    }
-    return extractText(profile.api, await readBoundedJson(response))
   }
 }
 
@@ -144,34 +160,59 @@ function requestBody(
     model: profile.modelId,
     temperature: 0,
     max_tokens: maxOutputTokens,
+    stream: false,
     ...(jsonResponseMode === 'native' ? { response_format: { type: 'json_object' } } : {}),
     messages: [{ role: 'system', content: prompt.system }, { role: 'user', content: prompt.user }],
   }
 }
 
-async function readBoundedJson(response: Response): Promise<unknown> {
+async function readBoundedJson(response: Response, signal: AbortSignal, maxBytes: number): Promise<unknown> {
   const declared = Number(response.headers.get('content-length'))
-  if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) {
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await response.body?.cancel()
     throw new ServiceError('too-large', 'model_call_response_too_large', '模型响应过大。')
   }
   if (response.body === null) throw new ServiceError('unavailable', 'model_call_response_empty', '模型返回了空响应。')
   const reader = response.body.getReader()
+  const abort = () => { void reader.cancel().catch(() => undefined) }
+  signal.addEventListener('abort', abort, { once: true })
+  if (signal.aborted) abort()
   const chunks: Buffer[] = []
   let bytes = 0
-  for (;;) {
-    const result = await reader.read()
-    if (result.done) break
-    bytes += result.value.byteLength
-    if (bytes > MAX_RESPONSE_BYTES) {
-      await reader.cancel()
-      throw new ServiceError('too-large', 'model_call_response_too_large', '模型响应过大。')
-    }
-    chunks.push(Buffer.from(result.value))
-  }
   try {
-    return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown
+    for (;;) {
+      const result = await reader.read()
+      if (result.done) break
+      bytes += result.value.byteLength
+      if (bytes > maxBytes) {
+        await reader.cancel()
+        throw new ServiceError('too-large', 'model_call_response_too_large', '模型响应过大。')
+      }
+      chunks.push(Buffer.from(result.value))
+    }
+  } finally {
+    signal.removeEventListener('abort', abort)
+    reader.releaseLock()
+  }
+  if (signal.aborted) throw new ServiceError('unavailable', 'model_call_timeout', '模型响应超时。')
+  try {
+    const text = Buffer.concat(chunks).toString('utf8').replace(/^\uFEFF/, '').trim()
+      .replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i, '$1').trim()
+    return JSON.parse(text) as unknown
   } catch {
     throw new ServiceError('unavailable', 'model_call_response_invalid', '模型返回了无法识别的响应。')
+  }
+}
+
+function responseUsage(value: Record<string, unknown>, fallbackModel: string): ModelJsonResult['usage'] {
+  const usage = objectOrUndefined(value.usage)
+  const count = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined
+  const input = count(usage?.prompt_tokens ?? usage?.input_tokens)
+  const output = count(usage?.completion_tokens ?? usage?.output_tokens)
+  return {
+    model: typeof value.model === 'string' ? value.model : fallbackModel,
+    ...(input === undefined ? {} : { inputTokens: input }),
+    ...(output === undefined ? {} : { outputTokens: output }),
   }
 }
 

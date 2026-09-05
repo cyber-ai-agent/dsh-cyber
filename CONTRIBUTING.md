@@ -134,6 +134,23 @@ Right: World / Dossier
 
 ## 市场 / MOD 贡献
 
+本地开发不需要手算或手改哈希。修改主题、角色或插件后运行：
+
+```bash
+pnpm package:prepare marketplace/themes/official-cyber-nocturne
+```
+
+它自动同步新增/删除文件、文件哈希和已有的内容摘要；不会改变包的名称、版本、能力和授权声明。连续开发可以开启监听：
+
+```bash
+pnpm package:prepare <包目录> --watch
+pnpm package:prepare <包目录> --check
+```
+
+`--check` 只检查，不写文件；清单需要更新时返回非零退出码。编辑器目录、Git 元数据、隐藏本地配置和 `node_modules` 会被排除，不必为打包删掉它们，也不会被复制到安装包中。重新安装已经发布的同一版本前，请先更新包版本，避免覆盖现有用户的不可变安装记录。
+
+普通改动只需运行相关测试；不需要为了修改一个主题或文案重新执行所有集成和浏览器测试。涉及持久化、权限、执行流程或主要界面的改动，再补对应的回归证据。
+
 市场包请先阅读：
 
 - [`docs/community/package-ecosystem.md`](./docs/community/package-ecosystem.md)

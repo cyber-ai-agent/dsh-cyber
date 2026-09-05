@@ -153,7 +153,7 @@ export function registerWorldKnowledgeRoutes(router: Router, dependencies: World
     if (body.sourceType !== undefined && sourceType === undefined) throw new HttpError(422, 'knowledge_source_type_invalid', '知识来源类型无效')
     if (sourceType === undefined) {
       if (dependencies.consolidationScheduler === undefined) throw new HttpError(503, 'knowledge_consolidation_unavailable', '知识整理扫描服务尚未配置')
-      writeJson(response, 202, { scan: await dependencies.consolidationScheduler.scanOnce() })
+      writeJson(response, 202, { scan: await dependencies.consolidationScheduler.scanOnce(world.id) })
       return
     }
     if (sourceType !== 'conversation' && sourceType !== 'document' && sourceType !== 'artifact') {

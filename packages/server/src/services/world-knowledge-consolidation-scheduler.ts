@@ -5,6 +5,7 @@ import {
   shouldConsolidate,
   type KnowledgeConsolidationCursor,
   type KnowledgeConsolidationSettings,
+  type KnowledgeConsolidationJob,
   type WorldKnowledgeConsolidationService,
 } from './world-knowledge-consolidation-service.js'
 import type { KnowledgeConversationSourceStore } from './world-knowledge-source-loader.js'
@@ -20,12 +21,14 @@ export interface KnowledgeBalancedScanRepository {
   listSessions(worldId: string): readonly WorkSession[] | Promise<readonly WorkSession[]>
   getKnowledgeConsolidationSettings?(worldId: string): KnowledgeConsolidationSettings | undefined | Promise<KnowledgeConsolidationSettings | undefined>
   getKnowledgeConsolidationCursor?(input: { worldId: string; sourceType: 'conversation'; sourceId: string }): KnowledgeConsolidationCursor | undefined | Promise<KnowledgeConsolidationCursor | undefined>
+  getConsolidationSourceJob?(worldId: string, sourceType: 'conversation' | 'document' | 'artifact', sourceId: string): KnowledgeConsolidationJob | undefined | Promise<KnowledgeConsolidationJob | undefined>
+  listSources?(worldId: string): readonly { sourceType: 'document' | 'artifact'; sourceId: string; updatedAt: string }[] | Promise<readonly { sourceType: 'document' | 'artifact'; sourceId: string; updatedAt: string }[]>
 }
 
 export interface WorldKnowledgeConsolidationSchedulerOptions {
   repository: KnowledgeBalancedScanRepository
   messages: Pick<KnowledgeConversationSourceStore, 'listMessagesPage'>
-  service: Pick<WorldKnowledgeConsolidationService, 'enqueueConversation'>
+  service: Pick<WorldKnowledgeConsolidationService, 'enqueueConversation'> & Partial<Pick<WorldKnowledgeConsolidationService, 'retryJob' | 'enqueue'>>
   clockMs?: () => number
   intervalMs?: number
   /** Avoid queueing excessively many sessions in one scheduler tick. */
@@ -49,7 +52,7 @@ export interface WorldKnowledgeConsolidationSchedulerOptions {
 export class WorldKnowledgeConsolidationScheduler {
   readonly #repository: KnowledgeBalancedScanRepository
   readonly #messages: Pick<KnowledgeConversationSourceStore, 'listMessagesPage'>
-  readonly #service: Pick<WorldKnowledgeConsolidationService, 'enqueueConversation'>
+  readonly #service: WorldKnowledgeConsolidationSchedulerOptions['service']
   readonly #clockMs: () => number
   readonly #intervalMs: number
   readonly #maxJobsPerScan: number
@@ -80,14 +83,14 @@ export class WorldKnowledgeConsolidationScheduler {
     this.#timer = undefined
   }
 
-  async scanOnce(): Promise<{ worlds: number; sessions: number; queued: number }> {
+  async scanOnce(worldId?: string): Promise<{ worlds: number; sessions: number; queued: number }> {
     if (this.#scanning) return { worlds: 0, sessions: 0, queued: 0 }
     this.#scanning = true
     let worlds = 0
     let sessions = 0
     let queued = 0
     try {
-      const worldRefs = await this.#repository.listWorlds()
+      const worldRefs = (await this.#repository.listWorlds()).filter((world) => worldId === undefined || world.worldId === worldId)
       worlds = worldRefs.length
       for (const world of worldRefs) {
         if (queued >= this.#maxJobsPerScan) break
@@ -95,6 +98,23 @@ export class WorldKnowledgeConsolidationScheduler {
           ? undefined
           : await this.#repository.getKnowledgeConsolidationSettings(world.worldId)
         if (settings?.autoConsolidationMode === 'off') continue
+        // Imported documents and published files are durable sources too.
+        // Scanning their revision also recovers an event lost during shutdown.
+        const sources = await this.#repository.listSources?.(world.worldId) ?? []
+        for (const source of sources) {
+          if (queued >= this.#maxJobsPerScan || this.#service.enqueue === undefined) break
+          const revision = Date.parse(source.updatedAt)
+          if (!Number.isSafeInteger(revision) || revision < 0 || this.#clockMs() - revision < 15_000) continue
+          const job = await this.#repository.getConsolidationSourceJob?.(world.worldId, source.sourceType, source.sourceId)
+          if (job?.status === 'queued' || job?.status === 'running') continue
+          if (job?.toCursor === revision) {
+            if (job.status === 'completed') continue
+            const blocked = await this.#resumeSource(job)
+            if (blocked !== undefined) { queued += blocked; continue }
+          }
+          await this.#service.enqueue({ workspaceId: world.workspaceId, worldId: world.worldId, sourceType: source.sourceType, sourceId: source.sourceId, fromCursor: 0, toCursor: revision })
+          queued += 1
+        }
         const worldSessions = await this.#repository.listSessions(world.worldId)
         for (const session of worldSessions) {
           if (queued >= this.#maxJobsPerScan) break
@@ -104,6 +124,11 @@ export class WorldKnowledgeConsolidationScheduler {
           // knowledge flow, but balanced background scanning never does it.
           if (session.kind === 'direct') continue
           sessions += 1
+          const sourceJob = await this.#repository.getConsolidationSourceJob?.(world.worldId, 'conversation', session.id)
+          // A changing toCursor must not create overlapping jobs while the same
+          // source is being extracted. New messages remain behind its cursor.
+          const blocked = await this.#resumeSource(sourceJob)
+          if (blocked !== undefined) { queued += blocked; continue }
           const cursor = this.#repository.getKnowledgeConsolidationCursor === undefined
             ? undefined
             : await this.#repository.getKnowledgeConsolidationCursor({ worldId: world.worldId, sourceType: 'conversation', sourceId: session.id })
@@ -134,6 +159,19 @@ export class WorldKnowledgeConsolidationScheduler {
     } finally {
       this.#scanning = false
     }
+  }
+
+  /** undefined means ready; zero/one means blocked or a queued retry. */
+  async #resumeSource(job: KnowledgeConsolidationJob | undefined): Promise<number | undefined> {
+    if (job?.status === 'queued' || job?.status === 'running') return 0
+    if (job?.status !== 'failed') return undefined
+    const transient = ['knowledge_model_timeout', 'knowledge_model_unreachable', 'knowledge_model_rate_limited', 'knowledge_model_upstream_error'].includes(job.errorCode ?? '')
+    const delayMs = 30_000 * 2 ** Math.max(0, job.attempt - 1)
+    if (transient && job.attempt < 3 && this.#clockMs() - parseTime(job.updatedAt) >= delayMs && this.#service.retryJob !== undefined) {
+      await this.#service.retryJob(job.worldId, job.id)
+      return 1
+    }
+    return 0
   }
 }
 

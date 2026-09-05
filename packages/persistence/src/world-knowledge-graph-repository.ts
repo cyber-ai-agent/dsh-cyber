@@ -713,6 +713,15 @@ export class WorldKnowledgeGraphRepository {
     return row === undefined ? undefined : mapJob(row)
   }
 
+  /** Active work takes precedence; otherwise expose the latest source outcome. */
+  getConsolidationSourceJob(worldId: string, sourceType: KnowledgeEvidenceSourceType, sourceId: string): KnowledgeConsolidationJob | undefined {
+    const row = this.#database.prepare(
+      `SELECT * FROM knowledge_consolidation_jobs WHERE world_id = ? AND source_type = ? AND source_id = ?
+       ORDER BY CASE WHEN status IN ('queued', 'running') THEN 0 ELSE 1 END, updated_at DESC, id DESC LIMIT 1`,
+    ).get(worldId, sourceType, sourceId)
+    return row === undefined ? undefined : mapJob(row)
+  }
+
   /** Provider-neutral object form used by the background consolidation service. */
   createConsolidationJob(input: {
     id?: string
@@ -762,7 +771,8 @@ export class WorldKnowledgeGraphRepository {
     const where = clauses.length === 0 ? '' : ` WHERE ${clauses.join(' AND ')}`
     const limitSql = limit === undefined ? '' : ' LIMIT ?'
     if (limit !== undefined) params.push(limit)
-    const rows = this.#database.prepare(`SELECT * FROM knowledge_consolidation_jobs${where} ORDER BY created_at DESC, id DESC${limitSql}`).all(...params)
+    const order = resolvedStatus === 'queued' ? 'ASC' : 'DESC'
+    const rows = this.#database.prepare(`SELECT * FROM knowledge_consolidation_jobs${where} ORDER BY created_at ${order}, id ${order}${limitSql}`).all(...params)
     return rows.map(mapJob)
   }
 

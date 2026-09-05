@@ -107,7 +107,7 @@ describe('Harness compatibility server contracts', () => {
       port: 0,
       runtime: new RecordingRuntime(),
       bootstrapDefaultWorld: true,
-    })).rejects.toThrow(/0\.1\.2-alpha\.3/)
+    })).rejects.toThrow(/0\.1\.2-rc\.1/)
   })
 
   it('keeps a verified image attachment in direct and queued turns without sending raw bytes to the runtime', async () => {

@@ -75,6 +75,24 @@ export function createWorldKnowledgeGraphRuntime(options: WorldKnowledgeGraphRun
       listSessions: (worldId) => options.store.listSessions(worldId),
       getKnowledgeConsolidationSettings: (worldId) => repository.getKnowledgeConsolidationSettings(worldId),
       getKnowledgeConsolidationCursor: (input) => repository.getKnowledgeConsolidationCursor(input),
+      getConsolidationSourceJob: (worldId, sourceType, sourceId) => repository.getConsolidationSourceJob(worldId, sourceType, sourceId),
+      listSources: (worldId) => {
+        const documents = options.libraryRepository.listDocuments(worldId, { status: 'indexed' })
+        const importedArtifacts = new Set(documents.map((document) => document.artifactId).filter(Boolean))
+        return [
+          ...documents.map((document) => ({ sourceType: 'document' as const, sourceId: document.id, updatedAt: document.updatedAt })),
+          ...options.artifacts.list(worldId, { status: 'active' })
+            .filter((artifact) => {
+              if (importedArtifacts.has(artifact.id) || artifact.kind === 'project') return false
+              const version = options.artifacts.get(worldId, artifact.id).versions.find((version) => version.version === artifact.currentVersion)
+              const mime = version?.mimeType?.split(';')[0]?.trim().toLowerCase() ?? ''
+              // Binary artifacts require an explicit library import/parser;
+              // decoding PDF/Office/image bytes as UTF-8 is not extraction.
+              return mime.startsWith('text/') || ['application/json', 'application/xml', 'application/javascript'].includes(mime)
+            })
+            .map((artifact) => ({ sourceType: 'artifact' as const, sourceId: artifact.id, updatedAt: artifact.updatedAt })),
+        ]
+      },
     },
     messages: options.store,
     service: consolidation,

@@ -5,30 +5,19 @@ import {
   type JsonRpcConfig,
 } from '@deepseek-ai/dsh-sdk-jsonrpc-server'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
+import { SessionSeq, type Session } from '@deepseek-ai/dsh-session'
+import type { ApprovalOutcome, ApprovalRequestEvent } from '@deepseek-ai/dsh-user-approval/types'
 
 export { Config, type JsonRpcConfig }
 
 export const name = 'dsh-cyber-sdk-jsonrpc'
 export const inject = ['agents', 'approval']
 
-type ApprovalOutcome = 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'
-
-interface NativeApprovalRequest {
+interface NativeApprovalRequest extends Pick<ApprovalRequestEvent, 'toolName' | 'callId' | 'signal'> {
   agent: {
-    session: {
-      events: ReadonlyArray<{ type: string; data: Record<string, unknown> }>
-    }
+    session: Pick<Session, 'seq' | 'eventAt'>
   }
-  toolName: string
-  callId?: string
-  signal?: AbortSignal
 }
-
-type ApprovalListenerRegistrar = (
-  event: 'approval/request',
-  listener: (request: NativeApprovalRequest) => Promise<ApprovalOutcome>,
-  options: { global: true },
-) => void
 
 interface PendingApproval {
   settle: (outcome: ApprovalOutcome) => void
@@ -67,8 +56,8 @@ export function apply(ctx: Context, config: JsonRpcConfig): void {
     return exitTask
   }
 
-  const onApproval = ctx.on.bind(ctx) as unknown as ApprovalListenerRegistrar
-  onApproval('approval/request', async (request) => {
+  ctx.on('approval/request', async (request) => {
+    if (request.signal?.aborted) return 'cancelled'
     const approvalRequestId = latestApprovalRequestId(request)
     if (approvalRequestId === undefined || pending.has(approvalRequestId)) return 'unavailable'
     return await new Promise<ApprovalOutcome>((resolvePromise) => {
@@ -110,15 +99,23 @@ export function apply(ctx: Context, config: JsonRpcConfig): void {
   }, 'jsonrpc.serve')
 }
 
-function latestApprovalRequestId(request: NativeApprovalRequest): string | undefined {
-  const events = request.agent.session.events
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index]
+export function latestApprovalRequestId(request: NativeApprovalRequest): string | undefined {
+  const session = request.agent.session
+  const decided = new Set<string>()
+  // rc.1 removed Session.events. Read backwards without copying the full log,
+  // and never attach an approval to an earlier turn or a settled question.
+  for (let index = Number(session.seq) - 1; index >= 0; index -= 1) {
+    const event = session.eventAt(SessionSeq(index))
+    if (event?.type === 'turn/start' || event?.type === 'turn/end') break
+    if (event?.type === 'approval/decided') {
+      decided.add(event.data.id)
+      continue
+    }
     if (event?.type !== 'approval/asked') continue
     if (event.data.toolName !== request.toolName) continue
     if (request.callId !== undefined && event.data.callId !== request.callId) continue
     const id = event.data.id
-    if (typeof id !== 'string' || id.length === 0) continue
+    if (typeof id !== 'string' || id.length === 0 || decided.has(id)) continue
     return id
   }
   return undefined

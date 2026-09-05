@@ -1,6 +1,7 @@
 import { FolderSimple, ShieldCheck, ShieldWarning } from '@phosphor-icons/react'
 import type { AgentPermissionMode } from '@dsh-cyber/contracts'
 import { useI18n } from '../i18n/runtime.js'
+import { runtimePermissionCopy } from './runtime-permission-copy.js'
 
 export function RuntimePermissionSelector({ value, onChange, legend }: {
   value: AgentPermissionMode
@@ -15,9 +16,9 @@ export function RuntimePermissionSelector({ value, onChange, legend }: {
     description: string
     icon: typeof ShieldCheck
   }> = [
-    { value: 'read-only', label: t('workbench.permissionReadOnly', t('workbench.approval', '请求批准')), description: t('workbench.permissionReadOnlyDesc', '可以读取当前世界；编辑文件、联网和风险操作会先询问。'), icon: ShieldCheck },
-    { value: 'workspace-write', label: t('workbench.permissionWorkspaceWrite', '帮我批准'), description: t('workbench.permissionWorkspaceWriteDesc', '可以读写当前世界目录，仅对检测到的风险操作请求批准。'), icon: FolderSimple },
-    { value: 'danger-full-access', label: t('workbench.permissionFullAccess', '完全访问'), description: t('workbench.permissionFullAccessDesc', '可以访问互联网和当前系统账号可访问的任意文件。'), icon: ShieldWarning },
+    { value: 'read-only', ...runtimePermissionCopy(t, 'read-only'), icon: ShieldCheck },
+    { value: 'workspace-write', ...runtimePermissionCopy(t, 'workspace-write'), icon: FolderSimple },
+    { value: 'danger-full-access', ...runtimePermissionCopy(t, 'danger-full-access'), icon: ShieldWarning },
   ]
 
   return <fieldset className="runtime-permission-selector">

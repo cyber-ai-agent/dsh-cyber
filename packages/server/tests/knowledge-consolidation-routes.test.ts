@@ -16,6 +16,42 @@ afterEach(async () => {
 })
 
 describe('knowledge consolidation job routes', () => {
+  it('connects indexed library documents to the graph and keeps manual scans world-scoped', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-knowledge-source-scan-'))
+    roots.push(stateRoot)
+    const requests: KnowledgeExtractionRequest[] = []
+    const extractor: KnowledgeExtractionPort = { async extract(input) {
+      requests.push(input)
+      const evidenceId = input.evidence[0]!.evidenceId
+      return { payload: {
+        entities: [{ key: 'sqlite', type: 'technology', canonicalName: 'SQLite', aliases: [], evidenceRefs: [evidenceId] }],
+        claims: [{ key: 'local', type: 'fact', subjectKey: 'sqlite', predicate: '存储方式', objectText: '本地数据库', confidence: 0.9, evidenceRefs: [evidenceId] }],
+        relations: [], evidenceRefs: [{ evidenceId, sourceType: input.sourceType, sourceId: input.sourceId }],
+      } }
+    } }
+    const server = await createCyberServer({ stateRoot, workspacePath: stateRoot, port: 0, bootstrapDefaultWorld: true, knowledgeExtractionPort: extractor })
+    servers.push(server)
+    const origin = (await server.start()).origin
+    const workspace = server.store.listWorkspaces()[0]!
+    const world = server.store.listWorlds(workspace.id)[0]!
+    const other = server.store.createWorld({ workspaceId: workspace.id, name: '其他资料', templateId: 'personal-world' })
+    for (const current of [world, other]) await server.knowledge.createFromText({ workspaceId: workspace.id, worldId: current.id, title: '数据库说明', text: 'SQLite 是本地数据库。' })
+    // Move only fixture timestamps past the source quiet window. No real sleep
+    // or explicit source enqueue bypasses the production scan path.
+    server.store.database.prepare('UPDATE knowledge_documents SET updated_at = ?').run(new Date(Date.now() - 60_000).toISOString())
+    const scan = await postJson<{ scan: { worlds: number; queued: number } }>(`${origin}/api/worlds/${world.id}/knowledge/consolidate`, {})
+    expect(scan.body.scan).toEqual({ worlds: 1, sessions: 0, queued: 1 })
+    await waitFor(async () => (await getJson<{ items: Array<{ status: string }> }>(`${origin}/api/worlds/${world.id}/knowledge/consolidation-jobs`)).items.some((job) => job.status === 'completed'))
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.sourceType).toBe('document')
+    expect(requests[0]?.worldId).toBe(world.id)
+    const graph = await getJson<{ claims: unknown[]; evidence: Array<{ sourceType: string }> }>(`${origin}/api/worlds/${world.id}/knowledge/graph`)
+    expect(graph.claims).toHaveLength(1)
+    expect(graph.evidence[0]?.sourceType).toBe('document')
+    const repeated = await postJson<{ scan: { queued: number } }>(`${origin}/api/worlds/${world.id}/knowledge/consolidate`, {})
+    expect(repeated.body.scan.queued).toBe(0)
+  })
+
   it('lists a failed conversation job and retries it to completion', async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-knowledge-job-routes-'))
     roots.push(stateRoot)

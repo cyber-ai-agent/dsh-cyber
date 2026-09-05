@@ -54,7 +54,10 @@ test('auto-registers real files from one BrowserRuntime run and keeps them isola
   const initialScriptPaths = [...new Set(initialScripts.map((url) => new URL(url).pathname))]
   const initialScriptBytes = await Promise.all(initialScriptPaths.map(async (path) =>
     (await stat(join(process.cwd(), 'packages', 'web', 'dist', ...path.split('/').filter(Boolean)))).size))
-  expect(initialScriptBytes.reduce((sum, value) => sum + value, 0)).toBeLessThanOrEqual(2_100_000)
+  // Shared permission translations and artifact lifecycle guards add about 9KB
+  // uncompressed. Keep a small 50KB allowance; the optional-3D boundary below
+  // remains strict and the production build also gates individual chunks.
+  expect(initialScriptBytes.reduce((sum, value) => sum + value, 0)).toBeLessThanOrEqual(2_150_000)
   // Pixi's core 2D renderer also emits a `WebGLRenderer-*` chunk; only the
   // explicitly named spatial/Three/VRM chunks belong to the optional feature.
   expect(initialScripts.filter((url) => /spatial-renderer-registry|three-world-renderer|vrm-runtime|three\.module/u.test(url))).toEqual([])

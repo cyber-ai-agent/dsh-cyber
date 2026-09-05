@@ -233,6 +233,7 @@ export default function App() {
   const [packageMarketOpen, setPackageMarketOpen] = useState(false)
   const [packageMarketKind, setPackageMarketKind] = useState<CyberMarketKind>('theme')
   const [marketplaceItems, setMarketplaceItems] = useState<CyberMarketPackage[]>([])
+  const [marketplaceDiagnostics, setMarketplaceDiagnostics] = useState<Array<{ directory: string; reason: string }>>([])
   const [installedPackages, setInstalledPackages] = useState<InstalledPackage[]>([])
   const [installedPluginCommands, setInstalledPluginCommands] = useState<InstalledPluginCommand[]>([])
   const [packageTransactions, setPackageTransactions] = useState<PackageInstallTransaction[]>([])
@@ -1107,8 +1108,9 @@ export default function App() {
       }) : [])
       return
     }
-    const result = await api<{ items: CyberMarketPackage[] }>(`/api/marketplace?market=${market}&workspaceId=${encodeURIComponent(workspace.id)}${activeWorld === undefined ? '' : `&worldId=${encodeURIComponent(activeWorld.id)}`}&q=${encodeURIComponent(query)}`)
+    const result = await api<{ items: CyberMarketPackage[]; diagnostics?: Array<{ directory: string; reason: string }> }>(`/api/marketplace?market=${market}&workspaceId=${encodeURIComponent(workspace.id)}${activeWorld === undefined ? '' : `&worldId=${encodeURIComponent(activeWorld.id)}`}&q=${encodeURIComponent(query)}`)
     setMarketplaceItems(result.items)
+    setMarketplaceDiagnostics(result.diagnostics ?? [])
   }, [activeWorld, demoMode, workspace])
 
   const openPackageMarket = useCallback(async (market: CyberMarketKind = 'theme') => {
@@ -2564,6 +2566,7 @@ export default function App() {
           world={activeWorld}
           worlds={worlds}
           items={marketplaceItems}
+          diagnostics={marketplaceDiagnostics}
           installed={installedPackages}
           transactions={packageTransactions}
           loading={packageLoading}
@@ -2592,6 +2595,14 @@ export default function App() {
           onUninstall={uninstallPackage}
           onOpenSettings={openIntegrationSettings}
           onCreateThemeWorld={createWorldFromTheme}
+          onCreateBuiltinWorld={async (templateId, name) => {
+            if (demoMode) throw new Error('请在本地工作区创建世界')
+            const result = await api<{ world: World }>(`/api/workspaces/${encodeURIComponent(workspace.id)}/worlds`, {
+              method: 'POST', body: JSON.stringify({ templateId, name }),
+            })
+            await openWorkshopWorld(result.world.id)
+            setPackageMarketOpen(false)
+          }}
           onRecruitTalent={async (item) => {
             const activation = item.activation?.kind === 'employee-blueprint' ? item.activation : undefined
             if (activation === undefined) throw new Error('这份角色模板没有可用的招募入口')

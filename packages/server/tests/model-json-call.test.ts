@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { ModelProfile } from '@dsh-cyber/contracts'
 
@@ -45,6 +45,14 @@ function completion(content: string): Response {
 }
 
 describe('ModelJsonCall', () => {
+  it('times out a stalled body after receiving successful headers and cancels the stream', async () => {
+    const cancel = vi.fn()
+    const call = new ModelJsonCall({ credentials, resolveHostname, timeoutMs: 25,
+      fetch: async () => new Response(new ReadableStream({ cancel }), { status: 200 }) })
+    await expect(call.text(PROFILE, { system: 's', user: 'u' })).rejects.toMatchObject({ code: 'model_call_timeout' })
+    expect(cancel).toHaveBeenCalledOnce()
+  })
+
   it('returns the model text', async () => {
     const { call } = callWith(() => completion('{"ok":true}'))
     expect(await call.text(PROFILE, { system: 's', user: 'u' })).toBe('{"ok":true}')

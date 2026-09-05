@@ -8,7 +8,7 @@ export const HARNESS_PROTOCOL_CONTRACT = 'dsh-session-events-v1' as const
 
 /**
  * Runtimes DSH Cyber can actually drive. The launch API and profile layout were
- * rewritten for 0.1.2-alpha.3, so every older DSH release is unreachable: the
+ * rewritten for 0.1.2-rc.1, so every older DSH release is unreachable: the
  * matrix must never advertise a version the adapter cannot start.
  */
 export const HARNESS_COMPATIBILITY_MATRIX = [

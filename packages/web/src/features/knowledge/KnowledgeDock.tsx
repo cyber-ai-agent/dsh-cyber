@@ -37,14 +37,6 @@ export function KnowledgeDock({ world, demoMode = false, initialCollections, ini
   })
 
   return <section className="knowledge-dock" aria-label={`${world.name} - ${t('knowledge.knowledgeTitle', '知识')}`}>
-    <header className="knowledge-dock__header">
-      <div>
-        <span className="knowledge-dock__kicker">{t('knowledge.knowledgeKicker', '世界知识')}</span>
-        <h2>{t('knowledge.knowledgeTitle', '知识')}</h2>
-        <p>{t('knowledge.knowledgeSubtitle', '原始资料与有来源的长期参考。')}</p>
-      </div>
-      <span className="knowledge-dock__scope" title={t('knowledge.knowledgeScopeTitle', '当前世界范围')}>{world.name}</span>
-    </header>
     <nav className="knowledge-switcher" role="tablist" aria-label={t('knowledge.knowledgeTitle', '知识视图')}>
       <button id="knowledge-tab-graph" type="button" role="tab" aria-selected={view === 'graph'} aria-controls="knowledge-panel-graph" className={view === 'graph' ? 'is-active' : ''} onClick={() => setView('graph')}><span>{t('knowledge.knowledgeTabGraph', '知识图谱')}</span><small>{t('knowledge.knowledgeTabGraphDesc', '实体关系')}</small></button>
       <button id="knowledge-tab-library" type="button" role="tab" aria-selected={view === 'library'} aria-controls="knowledge-panel-library" className={view === 'library' ? 'is-active' : ''} onClick={() => setView('library')}><span>{t('knowledge.knowledgeTabLibrary', '知识库')}</span><small>{t('knowledge.knowledgeTabLibraryDesc', '{count} 份资料', { count: state.documents.length })}</small></button>

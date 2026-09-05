@@ -54,8 +54,8 @@ describe('role runtime permission UI', () => {
 
   it('renders the same three permission levels as the conversation control', () => {
     const markup = renderToStaticMarkup(createElement(RuntimePermissionSelector, { value: 'workspace-write', onChange: () => undefined }))
-    expect(markup).toContain('请求批准')
-    expect(markup).toContain('帮我批准')
+    expect(markup).toContain('只读访问')
+    expect(markup).toContain('当前世界')
     expect(markup).toContain('完全访问')
     expect(markup).not.toContain('世界管理员')
   })

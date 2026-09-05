@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { WorldArtifact, WorldArtifactKind, WorldArtifactStatus, WorldArtifactVersion } from '@dsh-cyber/contracts'
 
 import { api } from '../../api.js'
@@ -208,21 +208,26 @@ export async function getWorldArtifact(worldId: string, artifactId: string): Pro
 }
 
 export async function fetchArtifactPreview(worldId: string, artifact: ArtifactRecord, version?: number, selectedPath?: string): Promise<ArtifactPreviewPayload> {
-  const mimeTypeHint = artifact.currentVersionInfo?.mimeType ?? mimeTypeForKind(artifact.kind)
+  const selectedKind = selectedPath === undefined ? artifact.kind : artifactKindFromPath(selectedPath)
+  const mimeTypeHint = selectedPath === undefined ? artifact.currentVersionInfo?.mimeType ?? mimeTypeForKind(artifact.kind) : undefined
   // HTML must remain a direct, controlled preview response. Fetching it into a
   // blob URL would bypass the host response CSP and make origin reasoning less
   // obvious; the iframe itself supplies the required sandbox boundary.
-  if (artifact.kind === 'html' || mimeTypeHint?.includes('html')) return { src: artifactPreviewUrl(worldId, artifact.id, version, selectedPath), mimeType: mimeTypeHint ?? 'text/html' }
-  if (artifact.kind === 'image' || mimeTypeHint?.startsWith('image/') || mimeTypeHint === 'application/pdf') return { src: artifactPreviewUrl(worldId, artifact.id, version, selectedPath), ...(mimeTypeHint === undefined ? {} : { mimeType: mimeTypeHint }) }
+  if (selectedKind === 'html' || mimeTypeHint?.includes('html')) return { src: artifactPreviewUrl(worldId, artifact.id, version, selectedPath), mimeType: 'text/html' }
+  if (selectedKind === 'image' || mimeTypeHint?.startsWith('image/') || mimeTypeHint === 'application/pdf' || selectedPath?.toLowerCase().endsWith('.pdf')) return { src: artifactPreviewUrl(worldId, artifact.id, version, selectedPath), ...(mimeTypeHint === undefined ? {} : { mimeType: mimeTypeHint }) }
   const response = await fetch(artifactPreviewUrl(worldId, artifact.id, version, selectedPath))
   if (!response.ok) throw new Error(`无法读取产物预览（${response.status}）`)
   const mimeType = response.headers.get('content-type') ?? artifact.currentVersionInfo?.mimeType
   if (mimeType?.includes('application/json')) {
     const body = await response.json() as unknown
-    const preview = normalizePreview(body)
-    if (preview !== undefined) return { ...preview, ...(mimeType === undefined ? {} : { mimeType }) }
-    if (isProjectTree(body)) return { files: body.entries.map((entry) => ({ path: entry.path, ...(typeof entry.byteLength === 'number' ? { byteLength: entry.byteLength } : {}) })), mimeType: 'application/json' }
-    if (typeof body === 'object' && body !== null) return { content: JSON.stringify(body, null, 2), mimeType: 'application/json' }
+    // Only the project-root endpoint returns a host-owned tree. A JSON file
+    // may contain arbitrary keys such as content/src/entries; all are data.
+    if (artifact.kind === 'project' && selectedPath === undefined && isProjectTree(body)) return { files: body.entries.map((entry) => ({ path: entry.path, ...(typeof entry.byteLength === 'number' ? { byteLength: entry.byteLength } : {}) })), mimeType: 'application/json' }
+    return { content: JSON.stringify(body, null, 2), mimeType: 'application/json' }
+  }
+  if (mimeType && !mimeType.startsWith('text/') && !/(?:^application\/(?:json|javascript|ecmascript|xml)|\+(?:json|xml))(?:;|$)/i.test(mimeType)) {
+    await response.body?.cancel()
+    return { src: artifactPreviewUrl(worldId, artifact.id, version, selectedPath), mimeType }
   }
   return { content: await response.text(), ...(mimeType === undefined ? {} : { mimeType }) }
 }
@@ -255,7 +260,6 @@ function mimeTypeForKind(kind: WorldArtifactKind): string | undefined {
   if (kind === 'data') return 'application/json'
   if (kind === 'markdown') return 'text/markdown'
   if (kind === 'code') return 'text/plain'
-  if (kind === 'document') return 'application/pdf'
   return undefined
 }
 
@@ -266,23 +270,41 @@ export function useWorldArtifacts({ worldId, enabled = true, initialArtifacts = 
   const [query, setQuery] = useState('')
   const [kind, setKind] = useState<ArtifactKindFilter>('all')
   const [selectedArtifactId, setSelectedArtifactId] = useState<string>()
+  const requestGeneration = useRef(0)
+  const currentScope = useRef('')
+  const currentWorld = useRef(worldId)
+  currentWorld.current = worldId
+  const scope = JSON.stringify([worldId, enabled, query, kind])
+  currentScope.current = scope
+
+  useEffect(() => {
+    setArtifacts(initialArtifacts.filter((item) => item.worldId === worldId))
+    setSelectedArtifactId(undefined)
+    setError(undefined)
+    setQuery('')
+    setKind('all')
+  }, [worldId])
 
   const reload = useCallback(async () => {
     if (!enabled) return
+    const generation = ++requestGeneration.current
+    const isCurrent = () => generation === requestGeneration.current && currentScope.current === scope
     setLoading(true)
     setError(undefined)
     try {
-      setArtifacts(await listWorldArtifacts(worldId, { query, kind }))
+      const next = await listWorldArtifacts(worldId, { query, kind })
+      if (isCurrent()) setArtifacts(next.filter((item) => item.worldId === worldId))
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '产物列表加载失败')
+      if (isCurrent()) setError(cause instanceof Error ? cause.message : '产物列表加载失败')
     } finally {
-      setLoading(false)
+      if (isCurrent()) setLoading(false)
     }
-  }, [enabled, kind, query, worldId])
+  }, [enabled, kind, query, worldId, scope])
 
   useEffect(() => {
     if (!enabled) return
     void reload()
+    return () => { requestGeneration.current += 1 }
   }, [enabled, reload])
 
   useEffect(() => {
@@ -311,6 +333,8 @@ export function useWorldArtifacts({ worldId, enabled = true, initialArtifacts = 
     })
     const record = normalizeArtifact('artifact' in response ? response.artifact : 'item' in response ? response.item : response)
     if (record === undefined) throw new Error('发布结果格式无效')
+    if (currentWorld.current !== worldId) return record
+    requestGeneration.current += 1
     setArtifacts((current) => [record, ...current.filter((item) => item.id !== record.id)])
     setSelectedArtifactId(record.id)
     return record
@@ -320,6 +344,8 @@ export function useWorldArtifacts({ worldId, enabled = true, initialArtifacts = 
     const response = await api<ArtifactRecord | ArtifactReferenceResponse>(artifactPath(worldId, artifactId), { method: 'PATCH', body: JSON.stringify({ title }) })
     const record = normalizeArtifact('artifact' in response ? response.artifact : 'item' in response ? response.item : response)
     if (record === undefined) throw new Error('重命名结果格式无效')
+    if (currentWorld.current !== worldId) return record
+    requestGeneration.current += 1
     setArtifacts((current) => current.map((item) => item.id === record.id ? record : item))
     return record
   }, [worldId])
@@ -328,16 +354,19 @@ export function useWorldArtifacts({ worldId, enabled = true, initialArtifacts = 
     const response = await api<ArtifactRecord | ArtifactReferenceResponse>(artifactPath(worldId, artifactId, '/archive'), { method: 'POST', body: JSON.stringify({}) })
     const record = normalizeArtifact('artifact' in response ? response.artifact : 'item' in response ? response.item : response)
     if (record === undefined) throw new Error('归档结果格式无效')
+    if (currentWorld.current !== worldId) return record
+    requestGeneration.current += 1
     setArtifacts((current) => current.map((item) => item.id === record.id ? record : item))
     return record
   }, [worldId])
 
+  const worldArtifacts = useMemo(() => artifacts.filter((artifact) => artifact.worldId === worldId), [artifacts, worldId])
   const filteredArtifacts = useMemo(() => {
-    if (kind === 'all') return artifacts
-    return artifacts.filter((artifact) => artifact.kind === kind || (kind === 'text' && artifact.kind === 'other') || (kind === 'json' && artifact.kind === 'data'))
-  }, [artifacts, kind])
+    if (kind === 'all') return worldArtifacts
+    return worldArtifacts.filter((artifact) => artifact.kind === kind || (kind === 'text' && artifact.kind === 'other') || (kind === 'json' && artifact.kind === 'data'))
+  }, [worldArtifacts, kind])
 
-  return { artifacts: filteredArtifacts, allArtifacts: artifacts, loading, error, query, setQuery, kind, setKind, selectedArtifactId, setSelectedArtifactId, reload, publishFromWorkspace, rename, archive }
+  return { artifacts: filteredArtifacts, allArtifacts: worldArtifacts, loading, error, query, setQuery, kind, setKind, selectedArtifactId, setSelectedArtifactId, reload, publishFromWorkspace, rename, archive }
 }
 
 export function useArtifactReferences(worldId: string, artifactRefs: string[]) {

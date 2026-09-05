@@ -2,7 +2,7 @@
   min-height: 100%;
   height: 100%;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
   color: var(--text);
   background: var(--surface-0);
@@ -34,7 +34,7 @@
 .knowledge-dock__content { min-height: 0; overflow: auto; outline: none; }
 .knowledge-dock__content:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
 .knowledge-library { min-height: 100%; padding: 16px 16px 28px; }
-.knowledge-library__header { display: grid; gap: 13px; margin-bottom: 14px; }
+.knowledge-library__header { display: flex; align-items: center; justify-content: space-between; gap: 13px; margin-bottom: 16px; }
 .knowledge-library__header h3 { margin: 4px 0 3px; color: var(--text); font-size: 19px; letter-spacing: -.015em; }
 .knowledge-library__header p { max-width: 370px; margin: 0; color: var(--text-muted); font-size: 14px; line-height: 1.55; }
 .knowledge-eyebrow { display: inline-flex; align-items: center; gap: 6px; color: var(--accent-strong); font-size: 12px; }
@@ -141,6 +141,17 @@
 .knowledge-state { min-height: 190px; align-content: center; }
 .knowledge-state span { font-size: 13px; }
 .knowledge-spin { color: var(--accent); animation: knowledge-spin 900ms linear infinite; }
+
+.knowledge-statusline { display: flex; gap: 8px; margin: 12px 0 20px; color: var(--text-soft); font-size: 13px; }
+.knowledge-document { border-bottom: 1px solid var(--border); }
+.knowledge-document summary { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 16px 0; cursor: pointer; list-style: none; }
+.knowledge-document summary:hover { background: var(--surface-1); }
+.knowledge-document summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.knowledge-document__details { display: grid; gap: 12px; padding: 0 0 16px 40px; color: var(--text-soft); font-size: 13px; }
+.knowledge-document__details p { margin: 0; }
+.knowledge-document__details .knowledge-row__evidence, .knowledge-document__details .knowledge-row__consolidation { grid-column: auto; }
+.knowledge-document__details .knowledge-row__evidence span { white-space: normal; overflow-wrap: anywhere; }
+.knowledge-consolidation summary { padding: 12px; color: var(--text-soft); font-size: 13px; cursor: pointer; }
 @keyframes knowledge-spin { to { transform: rotate(360deg); } }
 
 .knowledge-result__snippet { display: -webkit-box; overflow: hidden; color: var(--text-soft); font-size: 14px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
