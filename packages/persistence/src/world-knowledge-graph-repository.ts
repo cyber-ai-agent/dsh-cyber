@@ -856,8 +856,37 @@ export class WorldKnowledgeGraphRepository {
         `SELECT * FROM knowledge_consolidation_jobs WHERE world_id = ? AND source_type = ? AND source_id = ? AND from_cursor = ? AND to_cursor = ?`,
       ).get(world.id, input.sourceType, input.sourceId.trim(), input.fromCursor, input.toCursor)
       if (row === undefined) throw new PersistenceError('Knowledge consolidation job could not be read after enqueue')
-      return this.#withSourceWatermark(mapJob(row))
+      return this.#withSourceWatermark(this.#reopenUnverifiedWindow(mapJob(row)))
     })
+  }
+
+  /**
+   * Enqueue is idempotent per window, which is only sound for a chunked source
+   * while the coverage of that window is actually recorded. A completed row
+   * with no source version for the live content — a job finished before the
+   * version table existed, or content that has changed since — says nothing
+   * about how many chunks were read, so handing it back would report the
+   * source as done on the strength of a row written under the old rules.
+   *
+   * Such a window is reopened and walked again instead. No watermark is
+   * invented for it: applying an extraction is idempotent on evidence and
+   * statement fingerprints, so the re-walk restates the same graph rows and
+   * then records, for the first time, how far the source really was read.
+   */
+  #reopenUnverifiedWindow(job: KnowledgeConsolidationJob): KnowledgeConsolidationJob {
+    if (job.sourceType === 'conversation' || job.status !== 'completed') return job
+    const progress = this.getKnowledgeSourceProgress({ worldId: job.worldId, sourceType: job.sourceType, sourceId: job.sourceId })
+    if (progress !== undefined) return job
+    const result = this.#database.prepare(
+      `UPDATE knowledge_consolidation_jobs
+       SET status = 'queued', error_code = NULL, started_at = NULL, completed_at = NULL, updated_at = ?
+       WHERE world_id = ? AND id = ? AND status = 'completed'`,
+    ).run(this.#clock(), job.worldId, job.id)
+    if (Number(result.changes) !== 1) return job
+    const row = this.#database.prepare(
+      'SELECT * FROM knowledge_consolidation_jobs WHERE world_id = ? AND id = ?',
+    ).get(job.worldId, job.id)
+    return row === undefined ? job : mapJob(row)
   }
 
   getConsolidationJob(worldId: string, jobId: string): KnowledgeConsolidationJob | undefined {

@@ -164,6 +164,65 @@ describe('knowledge source version, chunk cursor and completion watermark', () =
     expect(repeated.body.scan.queued).toBe(0)
   }, 60_000)
 
+  it('walks a long document whose pre-migration job already reports completed', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-knowledge-legacy-job-'))
+    roots.push(stateRoot)
+    const extractor = new ChunkRecordingExtractor()
+    const server = await createCyberServer({ stateRoot, workspacePath: stateRoot, port: 0, bootstrapDefaultWorld: true, knowledgeExtractionPort: extractor })
+    servers.push(server)
+    const origin = (await server.start()).origin
+    const workspace = server.store.listWorkspaces()[0]!
+    const world = server.store.listWorlds(workspace.id)[0]!
+    const document = await server.knowledge.createFromText({
+      workspaceId: workspace.id, worldId: world.id, title: '迁移前就整理过的长资料', text: longDocumentText(40),
+    })
+    expect(document.chunkCount).toBeGreaterThan(20)
+
+    // The pre-42 state, written the way the old code wrote it: one job row for
+    // the whole source, from_cursor 0 and the revision timestamp as to_cursor,
+    // status completed — and no knowledge_source_versions row at all, because
+    // migration 42 deliberately backfills nothing.
+    const aged = new Date(Date.now() - 60_000).toISOString()
+    const ageSources = (): void => {
+      server.store.database.prepare('UPDATE knowledge_documents SET updated_at = ?').run(aged)
+    }
+    server.store.database.prepare(
+      `INSERT INTO knowledge_consolidation_jobs
+       (id, workspace_id, world_id, source_type, source_id, from_cursor, to_cursor, status, attempt, created_at, updated_at, started_at, completed_at)
+       VALUES (?, ?, ?, 'document', ?, 0, ?, 'completed', 1, ?, ?, ?, ?)`,
+    ).run('legacy-completed-job', workspace.id, world.id, document.id, Date.parse(aged), aged, aged, aged, aged)
+    ageSources()
+    expect(server.store.database.prepare('SELECT COUNT(*) AS total FROM knowledge_source_versions').get()).toMatchObject({ total: 0 })
+
+    const jobsUrl = `${origin}/api/worlds/${world.id}/knowledge/consolidation-jobs`
+    const scanUrl = `${origin}/api/worlds/${world.id}/knowledge/consolidate`
+    // The very first scan must refuse to accept that row as coverage.
+    const firstScan = await postJson<{ scan: { queued: number } }>(scanUrl, {})
+    expect(firstScan.body.scan.queued).toBe(1)
+
+    for (let pass = 0; pass < 12; pass += 1) {
+      ageSources()
+      await postJson(scanUrl, {})
+      await waitFor(async () => (await getJson<{ items: KnowledgeJobView[] }>(jobsUrl)).items.every((job) => job.status === 'completed' || job.status === 'failed'))
+      const latest = (await getJson<{ items: KnowledgeJobView[] }>(jobsUrl)).items.find((job) => job.sourceId === document.id)!
+      if (latest.chunkTotal !== undefined && latest.processedChunks === latest.chunkTotal) break
+    }
+
+    // A real watermark, walked chunk by chunk — never a completion stamped
+    // from the legacy row.
+    const versions = server.store.database.prepare(
+      'SELECT processed_chunks, chunk_total, completed_at FROM knowledge_source_versions WHERE world_id = ? AND source_id = ?',
+    ).all(world.id, document.id) as Array<Record<string, unknown>>
+    expect(versions).toMatchObject([{ processed_chunks: document.chunkCount, chunk_total: document.chunkCount, completed_at: expect.any(String) }])
+    expect(new Set(extractor.chunkIds).size).toBe(document.chunkCount)
+    expect(new Set(extractor.chunkIds).size).toBe(extractor.chunkIds.length)
+
+    // Once the watermark is real, the source stops being re-queued.
+    ageSources()
+    const repeated = await postJson<{ scan: { queued: number } }>(scanUrl, {})
+    expect(repeated.body.scan.queued).toBe(0)
+  }, 60_000)
+
   it('starts a new version when the source content changes and keeps the previous claims for review', async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-knowledge-source-version-'))
     roots.push(stateRoot)
