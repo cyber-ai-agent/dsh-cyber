@@ -1,4 +1,4 @@
-import type { AgentPermissionMode, ChatAttachment, JsonObject, ReasoningEffort, WorkSessionCollaborationMode } from '@dsh-cyber/contracts'
+import type { AgentPermissionMode, ChatAttachment, JsonObject, ReasoningEffort, WorkSessionCollaborationMode, WorkTask } from '@dsh-cyber/contracts'
 import type {
   ConversationOrchestrator,
   DirectConversationInput,
@@ -52,6 +52,7 @@ import type { GroupTaskRoutingResult } from '../services/group-task-router.js'
 import type { PreparedGroupTurnPlanner } from '../services/prepared-group-turn-planner.js'
 import type { ConversationQueueService } from '../services/conversation-queue-service.js'
 import { GroupIntentRouter } from '../services/group-intent-router.js'
+import type { ConversationTaskIntentOutcome, ConversationTaskIntentService } from '../services/conversation-task-intent-service.js'
 import { listApprovalRequestViews } from '../services/approval-request-views.js'
 import type { HarnessToolApprovalService } from '../services/harness-tool-approval-service.js'
 
@@ -79,6 +80,13 @@ export interface ConversationRoutesDependencies {
   groupTasks?: GroupTaskCollaborationService
   groupTurnPlanner?: PreparedGroupTurnPlanner
   conversationQueue?: ConversationQueueService
+  /**
+   * Turns an owner message that asks for work into one draft task.
+   *
+   * Optional: a host composed without it simply never proposes a task, and
+   * every conversation path behaves exactly as it did before.
+   */
+  taskIntent?: ConversationTaskIntentService
 }
 
 export function registerConversationRoutes(router: Router, dependencies: ConversationRoutesDependencies): void {
@@ -106,6 +114,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     groupTasks,
     groupTurnPlanner,
     conversationQueue,
+    taskIntent,
   } = dependencies
   const delegatedCollaboration = new DelegatedCollaborationService({
     store,
@@ -205,6 +214,15 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
         return
       }
     }
+
+    // The one place a message is classified, and the narrowest one: an owner
+    // message that is about to open a new WorkTurn here. Approval replies
+    // returned above; peer collaboration, schedules, ambient life, task step
+    // runs and every queue re-execution of an existing turn enter elsewhere and
+    // are never classified. Started now rather than after the turn so the call
+    // overlaps attachments, planning, permissions and the characters' own work,
+    // and settled once the turn has an id.
+    const proposedTaskIntent = taskIntent?.propose({ workspaceId: world.workspaceId, worldId: world.id, prompt })
 
     if (body.collaborationMode !== undefined) {
       requiredEnum<WorkSessionCollaborationMode>(body, 'collaborationMode', ['discussion', 'task'])
@@ -467,9 +485,10 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
         })
       }
     }
+    const proposedTask = await settleTaskIntent(taskIntent, proposedTaskIntent, world, result)
     for (const employeeId of runtimeEmployeeIds) employeeActivity.project(employeeId)
     worldRuntime.publishCurrent(world.id)
-    writeJson(response, responseStatus, result)
+    writeJson(response, responseStatus, proposedTask === undefined ? result : { ...result, proposedTask })
     } finally {
       await publishTraceChanges(world.id, worldTrace, traceCheckpoint, runtimeStreamHub)
     }
@@ -635,6 +654,34 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     if (session === undefined) throw new HttpError(404, 'session_not_found', 'Session not found')
     await worldAccess.assertUnlocked(session.worldId, request)
     writeJson(response, 200, { items: store.listParticipants(session.id) })
+  })
+}
+
+/**
+ * Records the task this turn asked for, once the turn owns an id.
+ *
+ * Every chat entry point returns the WorkTurn it created — the queued one
+ * included, which is why a queued instruction is visible as a task before it
+ * ever runs. A result carrying no turn has nothing to own a task and records
+ * none. This never throws and never starts anything: `attach` writes the draft
+ * row, and executing it stays an explicit action by the owner.
+ */
+async function settleTaskIntent(
+  taskIntent: ConversationTaskIntentService | undefined,
+  pending: Promise<ConversationTaskIntentOutcome> | undefined,
+  world: { id: string; workspaceId: string },
+  result: unknown,
+): Promise<WorkTask | undefined> {
+  if (taskIntent === undefined || pending === undefined) return undefined
+  const outcome = await pending
+  const workTurnId = (result as { workTurnId?: unknown }).workTurnId
+  if (typeof workTurnId !== 'string' || workTurnId === '') return undefined
+  const sessionId = (result as { session?: { id?: unknown } }).session?.id
+  return taskIntent.attach(outcome, {
+    workspaceId: world.workspaceId,
+    worldId: world.id,
+    workTurnId,
+    ...(typeof sessionId === 'string' ? { sessionId } : {}),
   })
 }
 

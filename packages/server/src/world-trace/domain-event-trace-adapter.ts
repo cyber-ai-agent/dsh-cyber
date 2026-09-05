@@ -186,6 +186,21 @@ function presentDomainEvent(type: DomainEventType, payload: Record<string, unkno
     case 'task.waiting': return { category: 'task', status: 'waiting', summary: '任务正在等待', lifecycle: 'task' }
     case 'task.blocked': return { category: 'task', status: 'failed', summary: '任务已被阻塞', lifecycle: 'task' }
     case 'task.completed': return { category: 'task', status: 'success', summary: '真实任务已完成', lifecycle: 'task' }
+    // No `lifecycle`: these are one-off facts about the decision, not stages of
+    // a task's execution, so they keep their own entry instead of folding into
+    // the task lifecycle card.
+    case 'work.task.proposed': return {
+      category: 'task',
+      status: 'pending',
+      summary: '对话已生成任务草稿',
+      ...(stringField(payload, 'title') === undefined ? {} : { detail: stringField(payload, 'title')! }),
+    }
+    case 'work.task.proposal.failed': return {
+      category: 'task',
+      status: 'failed',
+      summary: '任务意图判定失败，未生成任务',
+      ...(stringField(payload, 'code') === undefined ? {} : { detail: stringField(payload, 'code')! }),
+    }
     case 'schedule.created': return { category: 'schedule', status: 'pending', summary: '计划任务已创建' }
     case 'schedule.updated': return { category: 'schedule', status: 'info', summary: '计划任务已更新' }
     case 'schedule.run.started': return { category: 'schedule', status: 'running', summary: '计划任务开始执行' }

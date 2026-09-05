@@ -99,8 +99,9 @@ describe('Task list live refresh', () => {
     tasks = [proposed]
     await act(async () => { FakeEventSource.instances[0]?.emit('world-task') })
     await vi.waitFor(() => expect(host.textContent).toContain('整理用户反馈改进清单'))
-    // Draft, not running: recording a task never starts one.
-    expect(host.textContent).toContain('待规划')
+    // Draft, not running: recording a task never starts one, so the panel still
+    // offers the action that starts it.
+    expect(host.textContent).toContain('开始真实协作')
     expect(host.textContent).toContain('来自对话')
 
     await act(async () => { root.unmount() })

@@ -5,6 +5,7 @@ import type { Deliverable, WorkTask, WorkTaskDetail, World, WorldArtifact } from
 import { api } from '../../api.js'
 import { useI18n } from '../../i18n/runtime.js'
 import type { CyberEmployee } from '../../types.js'
+import { subscribeWorldLive } from '../../world-live-client.js'
 import './task-workspace.css'
 
 const GROUPS: WorkTask['status'][] = ['draft', 'running', 'waiting-approval', 'waiting-review', 'changes-requested', 'completed', 'failed']
@@ -36,6 +37,13 @@ export function TaskWorkspace({ world, employees }: { world: World; employees: C
   }, [locale, selectedId, t, world.id])
 
   useEffect(() => { void load() }, [world.id])
+  // A task the host recorded from a conversation lands while this panel is
+  // already open. Without this it stayed invisible until the owner switched
+  // worlds or wrote something themselves.
+  useEffect(() => {
+    if (typeof EventSource === 'undefined') return
+    return subscribeWorldLive(world.id, 'world-task', () => { void load() })
+  }, [load, world.id])
   useEffect(() => { if (selectedId !== undefined) void api<WorkTaskDetail>(`/api/tasks/${selectedId}`).then(setDetail).catch((cause) => setError(localizedTaskError(cause, locale, t('task.error.detail', '任务详情加载失败')))) }, [locale, selectedId, t])
 
   const mutate = async (operation: () => Promise<unknown>) => {
@@ -49,7 +57,7 @@ export function TaskWorkspace({ world, employees }: { world: World; employees: C
     {creating ? <CreateTaskForm employees={employees} disabled={busy} onCancel={() => setCreating(false)} onCreate={(input) => mutate(async () => { const result = await api<{ task: WorkTask }>(`/api/worlds/${world.id}/tasks`, { method: 'POST', body: JSON.stringify(input) }); setSelectedId(result.task.id); setCreating(false) })} /> : null}
     <div className="task-workspace__layout">
       <nav className="task-board" aria-label={t('task.board.label', '任务看板')}>
-        {GROUPS.map((group) => { const items = tasks.filter((task) => task.status === group); return items.length === 0 ? null : <section key={group}><header><strong>{taskGroupLabel(group, t)}</strong><span>{formatNumber(items.length)}</span></header>{items.map((task) => <button key={task.id} type="button" className={selectedId === task.id ? 'is-active' : ''} onClick={() => setSelectedId(task.id)}><strong>{task.title}</strong><small>{priorityLabel(task.priority, t)} · v{task.currentPlanRevision}</small></button>)}</section> })}
+        {GROUPS.map((group) => { const items = tasks.filter((task) => task.status === group); return items.length === 0 ? null : <section key={group}><header><strong>{taskGroupLabel(group, t)}</strong><span>{formatNumber(items.length)}</span></header>{items.map((task) => <button key={task.id} type="button" className={selectedId === task.id ? 'is-active' : ''} onClick={() => setSelectedId(task.id)}><strong>{task.title}</strong><small>{priorityLabel(task.priority, t)} · v{task.currentPlanRevision}{task.sourceWorkTurnId === undefined ? '' : ` · ${t('task.source.conversation', '来自对话')}`}</small></button>)}</section> })}
         {tasks.length === 0 ? <div className="task-board__empty"><strong>{t('task.empty.title', '还没有任务')}</strong><span>{t('task.empty.description', '新建一个可分工、可交付、可验收的真实任务。')}</span></div> : null}
       </nav>
       <div className="task-detail">{detail === undefined ? <div className="task-board__empty"><strong>{t('task.select', '选择任务查看详情')}</strong></div> : <TaskDetail detail={detail} employees={employees} artifacts={artifacts} busy={busy} mutate={mutate} />}</div>

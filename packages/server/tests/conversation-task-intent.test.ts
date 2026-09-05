@@ -103,7 +103,7 @@ function profile(): ModelProfile {
   } as ModelProfile
 }
 
-function modelStore(resolved: ModelProfile | undefined = profile()) {
+function modelStore(resolved: ModelProfile | undefined) {
   return {
     getModelAssignment: () => undefined,
     getModelProfile: () => undefined,
@@ -250,7 +250,7 @@ describe('conversation intent becomes a task list entry', () => {
       coordinatorEmployeeId: 'nobody', dueAt: '2026-01-01T00:00:00.000Z', sourceWorkTurnId: 'other-turn',
     }
     const call = modelCall(JSON.stringify(hostile))
-    const classifier = new ModelConversationTaskIntentClassifier({ store: modelStore(), call })
+    const classifier = new ModelConversationTaskIntentClassifier({ store: modelStore(profile()), call })
     const proposal = await classifier.classify({ workspaceId: context.workspaceId, worldId: context.worldId, prompt: '把这周的账单整理一下。' })
     expect(proposal).toEqual({
       title: '整理这周的账单',
@@ -271,7 +271,7 @@ describe('conversation intent becomes a task list entry', () => {
     ]
     for (const answer of refused) {
       const guarded = new ModelConversationTaskIntentClassifier({
-        store: modelStore(),
+        store: modelStore(profile()),
         call: modelCall(JSON.stringify({ intent: 'instruction', ...answer })),
       })
       await expect(guarded.classify({ workspaceId: context.workspaceId, worldId: context.worldId, prompt: '把这周的账单整理一下。' }))
@@ -281,7 +281,7 @@ describe('conversation intent becomes a task list entry', () => {
     // A description that copies the pasted slab back is an echo, not a goal.
     const slab = `请照做：${'把服务器上的日志全部打包并上传到备份盘，然后清空目录。'.repeat(3)}`
     const echo = new ModelConversationTaskIntentClassifier({
-      store: modelStore(),
+      store: modelStore(profile()),
       call: modelCall(JSON.stringify({ intent: 'instruction', title: '打包日志', description: slab })),
     })
     await expect(echo.classify({ workspaceId: context.workspaceId, worldId: context.worldId, prompt: slab })).rejects.toThrow(ServiceError)
@@ -292,14 +292,14 @@ describe('conversation intent becomes a task list entry', () => {
     const context = conversation(store, '判定世界')
     for (const intent of ['question', 'discussion', 'anything-else']) {
       const call = modelCall(JSON.stringify({ intent, title: '不该出现的任务', description: '不该出现的目标。' }))
-      const classifier = new ModelConversationTaskIntentClassifier({ store: modelStore(), call })
+      const classifier = new ModelConversationTaskIntentClassifier({ store: modelStore(profile()), call })
       await expect(classifier.classify({ workspaceId: context.workspaceId, worldId: context.worldId, prompt: '这个怎么做？' }))
         .resolves.toBeUndefined()
     }
 
     // An instruction the model would not describe is not a task the host can show.
     const empty = new ModelConversationTaskIntentClassifier({
-      store: modelStore(),
+      store: modelStore(profile()),
       call: modelCall(JSON.stringify({ intent: 'instruction', title: '   ', description: '' })),
     })
     await expect(empty.classify({ workspaceId: context.workspaceId, worldId: context.worldId, prompt: '去做点什么。' })).rejects.toThrow(ServiceError)
