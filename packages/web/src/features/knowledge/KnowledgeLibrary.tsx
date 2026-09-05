@@ -167,11 +167,18 @@ function consolidationEntriesBySource(jobs: KnowledgeConsolidationJob[], sourceT
   const output: Record<string, KnowledgeConsolidationEntry> = {}
   for (const job of jobs) {
     if (job.sourceType !== sourceType || output[job.sourceId] !== undefined) continue
-    output[job.sourceId] = job.status === 'completed'
+    const entry: KnowledgeConsolidationEntry = job.status === 'completed'
       ? { state: 'success', message: consolidationSuccessMessage(job, t) }
       : job.status === 'failed'
         ? { state: 'error', message: t('knowledge.statusFailed', '处理失败') }
         : { state: 'queued', message: job.status === 'running' ? t('knowledge.consolidatePending', '正在加入…') : t('knowledge.consolidateQueued', '已排队') }
+    // The source changed after it was read, so some of what the graph holds no
+    // longer has evidence behind it. Say so instead of leaving it reading as
+    // fully current knowledge.
+    const notCurrent = job.notCurrentClaims ?? 0
+    output[job.sourceId] = notCurrent === 0
+      ? entry
+      : { ...entry, message: `${entry.message} · ${t('knowledge.consolidationNotCurrent', '{count} 条主张待重新核对', { count: notCurrent })}` }
   }
   return output
 }

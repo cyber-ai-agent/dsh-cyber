@@ -4,6 +4,7 @@ import {
   CYBER_SCHEMA_VERSION,
   type KnowledgeChunk,
   type KnowledgeCollection,
+  type KnowledgeClaim,
   type KnowledgeConsolidationJob,
   type KnowledgeDocument,
   type KnowledgeSourceVersion,
@@ -51,7 +52,7 @@ describe('World knowledge contracts', () => {
       document: { workspaceId: 'workspace-1', chunkCount: 0 },
       chunk: { worldId: 'world-1', documentId: 'document-1' },
     })
-    expect(CYBER_SCHEMA_VERSION).toBe(42)
+    expect(CYBER_SCHEMA_VERSION).toBe(43)
   })
 
   it('exports a source version whose completion watermark counts chunks, not sources', () => {
@@ -87,5 +88,37 @@ describe('World knowledge contracts', () => {
       createdAt: version.createdAt, updatedAt: version.updatedAt,
     }
     expect(job).toMatchObject({ processedChunks: 24, chunkTotal: 37 })
+  })
+
+  it('marks a claim as not current without changing its status or removing it', () => {
+    const supported: KnowledgeClaim = {
+      id: 'claim-1', workspaceId: 'workspace-1', worldId: 'world-1', type: 'fact',
+      subjectEntityId: 'entity-1', predicate: '价格', objectText: '99 元', confidence: 0.9,
+      status: 'active', source: 'auto', evidenceIds: ['evidence-1'],
+      createdAt: '2026-09-05T00:00:00.000Z', updatedAt: '2026-09-05T00:00:00.000Z',
+    }
+    const notCurrent: KnowledgeClaim = {
+      ...supported,
+      notCurrent: {
+        since: '2026-09-05T01:00:00.000Z',
+        sourceType: 'document',
+        sourceId: 'document-1',
+        contentHash: 'c'.repeat(64),
+      },
+    }
+    // The downgrade is a separate fact, not a fifth status: the claim keeps its
+    // own status, its evidence and its identity, and only retrieval changes.
+    expect(supported.notCurrent).toBeUndefined()
+    expect(notCurrent).toMatchObject({ status: 'active', evidenceIds: ['evidence-1'] })
+    expect(notCurrent.notCurrent?.sourceId).toBe('document-1')
+
+    // The job projection is what lets one library row say it out loud.
+    const job: KnowledgeConsolidationJob = {
+      id: 'job-2', workspaceId: 'workspace-1', worldId: 'world-1', sourceType: 'document',
+      sourceId: 'document-1', fromCursor: 0, toCursor: 1_757_000_000_000, status: 'completed',
+      attempt: 1, processedChunks: 4, chunkTotal: 4, notCurrentClaims: 2,
+      createdAt: '2026-09-05T00:00:00.000Z', updatedAt: '2026-09-05T01:00:00.000Z',
+    }
+    expect(job).toMatchObject({ status: 'completed', notCurrentClaims: 2 })
   })
 })

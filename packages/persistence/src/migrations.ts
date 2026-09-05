@@ -2146,6 +2146,64 @@ const MIGRATIONS: readonly Migration[] = [
         WHERE superseded_at IS NOT NULL;
     `,
   },
+  {
+    version: 43,
+    name: 'knowledge-evidence-invalidation',
+    sql: `
+      -- Migration 42 marked a source revision as superseded and deliberately
+      -- stopped there: what should happen to the claims extracted from content
+      -- the world no longer holds was left as an explicit decision. This is
+      -- that decision, written into the schema.
+      --
+      -- A claim whose every supporting evidence belongs to a superseded
+      -- revision becomes NOT CURRENT: it keeps its row, its status, its
+      -- evidence and its place in the graph the owner is looking at, and it
+      -- stops being handed to a model as if it were still true. Deleting it
+      -- would destroy organised knowledge over a file edit; leaving it in
+      -- retrieval would let the product assert something it can no longer
+      -- support. Neither is acceptable, so the mark is a separate nullable
+      -- fact rather than a fifth status value: a claim can be conflicted and
+      -- not-current at the same time, and clearing the mark restores exactly
+      -- the state the claim already had.
+      --
+      -- not_current_source_type/id/hash name the revision the statement was
+      -- last supported by, which is what lets the library row say "N 条主张待
+      -- 重新核对" for one source without scanning the whole graph, and what the
+      -- pass compares against when a version becomes current again.
+      ALTER TABLE knowledge_claims ADD COLUMN not_current_since TEXT;
+      ALTER TABLE knowledge_claims ADD COLUMN not_current_source_type TEXT
+        CHECK (not_current_source_type IS NULL OR not_current_source_type IN ('document', 'artifact'));
+      ALTER TABLE knowledge_claims ADD COLUMN not_current_source_id TEXT;
+      ALTER TABLE knowledge_claims ADD COLUMN not_current_source_hash TEXT;
+
+      ALTER TABLE knowledge_relations ADD COLUMN not_current_since TEXT;
+      ALTER TABLE knowledge_relations ADD COLUMN not_current_source_type TEXT
+        CHECK (not_current_source_type IS NULL OR not_current_source_type IN ('document', 'artifact'));
+      ALTER TABLE knowledge_relations ADD COLUMN not_current_source_id TEXT;
+      ALTER TABLE knowledge_relations ADD COLUMN not_current_source_hash TEXT;
+
+      CREATE INDEX IF NOT EXISTS knowledge_claims_not_current_idx
+        ON knowledge_claims(world_id, not_current_source_type, not_current_source_id, id)
+        WHERE not_current_since IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS knowledge_relations_not_current_idx
+        ON knowledge_relations(world_id, not_current_source_type, not_current_source_id, id)
+        WHERE not_current_since IS NOT NULL;
+
+      -- The pass's own resume marker. It is a timestamp, not a flag, because a
+      -- version can be superseded, become current again (a restored artifact,
+      -- a re-imported file) and be superseded once more; comparing it with
+      -- superseded_at re-opens exactly that row instead of skipping it.
+      ALTER TABLE knowledge_source_versions ADD COLUMN invalidated_at TEXT;
+
+      -- No backfill. Every existing claim stays current: which of them lost
+      -- their evidence is decided by reading the source versions, and writing
+      -- a downgrade from a guess would be the same lie the version table was
+      -- added to remove. The pass walks the superseded rows on its own.
+      CREATE INDEX IF NOT EXISTS knowledge_source_versions_pending_invalidation_idx
+        ON knowledge_source_versions(world_id, superseded_at, source_type, source_id)
+        WHERE superseded_at IS NOT NULL AND invalidated_at IS NULL;
+    `,
+  },
 ]
 
 /**

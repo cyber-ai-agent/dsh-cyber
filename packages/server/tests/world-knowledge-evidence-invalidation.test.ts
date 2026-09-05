@@ -68,11 +68,11 @@ async function supersededDocument(input: {
   })
   library.saveDocument({
     workspaceId, worldId, relativePath: `notes/source-${index}.md`, title: `资料 ${index}`,
-    mimeType: 'text/markdown', byteLength: 9, sha256: hash(`${index}x`), origin: 'upload',
+    mimeType: 'text/markdown', byteLength: 9, sha256: hash(String(index + 8)), origin: 'upload',
   })
-  library.replaceChunks(worldId, document.id, [{ ordinal: 0, content: `第二版内容 ${index}`, contentHash: hash(`${index}x`) }])
+  library.replaceChunks(worldId, document.id, [{ ordinal: 0, content: `第二版内容 ${index}`, contentHash: hash(String(index + 8)) }])
   repository.beginKnowledgeSourceVersion({
-    workspaceId, worldId, sourceType: 'document', sourceId: document.id, contentHash: hash(`${index}x`), chunkTotal: 1,
+    workspaceId, worldId, sourceType: 'document', sourceId: document.id, contentHash: hash(String(index + 8)), chunkTotal: 1,
   })
   return { documentId: document.id, claimId: claim.id, evidenceId: evidence.id }
 }
