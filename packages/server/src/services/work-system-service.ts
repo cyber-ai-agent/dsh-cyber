@@ -1,4 +1,4 @@
-import { parseCreateWorkTask, type Deliverable, type Review, type WorkTask, type WorkTaskDetail, type WorkTaskFromSource, type WorkTaskPriority, type WorkTaskStatus } from '@dsh-cyber/contracts'
+import { parseCreateWorkTask, type Deliverable, type Review, type WorkTask, type WorkTaskDetail, type WorkTaskFromSource, type WorkTaskPriority, type WorkTaskStatus, type WorkTurnStatus } from '@dsh-cyber/contracts'
 import { SqliteUnitOfWork, WorkSystemRepository, type SqliteStore } from '@dsh-cyber/persistence'
 
 import type { GroupTaskCollaborationService } from './group-task-collaboration-service.js'
@@ -11,6 +11,14 @@ import { ServiceError } from './service-error.js'
  * stay as history and the next attempt number continues from them.
  */
 const EXECUTABLE_STATUSES: readonly WorkTaskStatus[] = ['draft', 'changes-requested', 'failed']
+
+/**
+ * Source-turn states that mean the work is still in someone else's hands.
+ *
+ * `waiting-approval` counts: the turn is paused on a decision and will carry on
+ * afterwards, so the work it was asked for has not finished either.
+ */
+const UNSETTLED_SOURCE_TURN: readonly WorkTurnStatus[] = ['queued', 'running', 'waiting-approval']
 
 export class WorkSystemService {
   readonly #store: SqliteStore
@@ -81,6 +89,17 @@ export class WorkSystemService {
     if (!employeeIds.includes(coordinatorEmployeeId)) throw new Error('协调角色必须属于任务成员')
     if (!EXECUTABLE_STATUSES.includes(task.status)) {
       throw new ServiceError('conflict', 'work_task_not_executable', `任务当前处于「${task.status}」状态，不能再次执行`)
+    }
+    // The conversation turn that proposed this task may still be doing the work.
+    // Running the task now would repeat it concurrently, with whatever real
+    // side effects it has — so this is a boundary, not a warning: the owner may
+    // repeat the work once the turn that asked for it has settled, and the
+    // settled turn's outcome is on the task for them to read first.
+    if (task.sourceWorkTurnId !== undefined) {
+      const sourceTurn = this.#store.getWorkTurn(task.sourceWorkTurnId)
+      if (sourceTurn !== undefined && UNSETTLED_SOURCE_TURN.includes(sourceTurn.status)) {
+        throw new ServiceError('conflict', 'work_task_source_turn_unsettled', `提出该任务的对话仍在进行（${sourceTurn.status}），等它结束后再执行，以免重复产生一次真实副作用`)
+      }
     }
     const previousFeedback = this.#repository.detail(task.id).reviews.filter((review) => review.decision === 'request-changes').at(-1)?.feedback
     this.#uow.run(() => {
