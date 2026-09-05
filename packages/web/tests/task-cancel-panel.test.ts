@@ -97,6 +97,41 @@ describe('Task cancel in the panel', () => {
     host.remove()
   })
 
+  it('does not carry an open confirm from one task to the next', async () => {
+    const other: WorkTask = { ...draft, id: 'task-other', title: '另一条草稿', sourceWorkTurnId: 'turn-other' }
+    const cancelled: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/cancel')) { cancelled.push(url); expect(init?.method).toBe('POST'); return json({ task: draft, plans: [], steps: [], assignments: [], runs: [], deliverables: [], reviews: [], growthEvidence: [] }) }
+      if (url.includes('/tasks?') || url.endsWith('/tasks')) return json({ items: [draft, other] })
+      if (url.endsWith('/artifacts')) return json({ artifacts: [] })
+      const task = url.includes(other.id) ? other : draft
+      return json({ task, plans: [], steps: [], assignments: [], runs: [], deliverables: [], reviews: [], growthEvidence: [] })
+    }))
+
+    const host = document.createElement('div')
+    document.body.append(host)
+    const root = createRoot(host)
+    await act(async () => { root.render(createElement(TaskWorkspace, { world, employees: [] })) })
+    await vi.waitFor(() => expect(host.textContent).toContain('误判产生的草稿'))
+
+    // Open the confirm on the first task, then look at a different one without
+    // answering it.
+    await act(async () => { button(host, '取消任务').click() })
+    expect(host.textContent).toContain('取消后任务不再出现在默认列表')
+    await act(async () => { button(host, '另一条草稿').click() })
+    await vi.waitFor(() => expect(host.textContent).toContain('另一条草稿'))
+
+    // The second task must start from its own unopened state. Otherwise the
+    // owner is one click away from cancelling a task they only meant to read.
+    expect(host.textContent).not.toContain('取消后任务不再出现在默认列表')
+    expect([...host.querySelectorAll('button')].some((node) => node.textContent?.includes('确认取消'))).toBe(false)
+    expect(cancelled).toEqual([])
+
+    await act(async () => { root.unmount() })
+    host.remove()
+  })
+
   it('offers no cancel while a task is running', async () => {
     const running: WorkTask = { ...draft, id: 'task-running', title: '正在执行的任务', status: 'running' }
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
