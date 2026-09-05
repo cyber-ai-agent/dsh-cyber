@@ -54,9 +54,13 @@ test('keeps a text-only reply as an owner-published document without claiming a 
 
   const reply = page.locator('.message').filter({ hasText: '整理调研材料' }).last()
   await expect(reply).toBeVisible()
+  // A reply still streaming has no settled text to keep, and the row refuses
+  // its menu until the turn lands. Wait for that instead of racing it.
+  await expect(reply).not.toHaveClass(/message--streaming/)
   await reply.click({ button: 'right' })
   const menu = page.getByRole('menu', { name: '消息操作' })
   await expect(menu).toBeVisible()
+  await page.screenshot({ path: join(screenshotRoot, 'reply-menu-1440x900.png'), fullPage: false })
   await menu.getByRole('menuitem', { name: /将回复保存为文档/ }).click()
   await expect(page.getByText('已保存为文档').first()).toBeVisible()
 

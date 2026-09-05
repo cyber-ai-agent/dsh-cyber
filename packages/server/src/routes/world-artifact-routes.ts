@@ -5,6 +5,7 @@ import { HttpError } from '../http/errors.js'
 import type { Router } from '../http/router.js'
 import { optionalString, readJson, record, requiredString } from '../http/request.js'
 import { writeArtifactPreview, writeJson } from '../http/response.js'
+import type { SavedReplyDocumentService } from '../services/saved-reply-document-service.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
 import type {
   PublishImportedArtifactInput,
@@ -19,12 +20,13 @@ const ARTIFACT_STATUSES: readonly WorldArtifactStatus[] = ['active', 'archived',
 export interface WorldArtifactRoutesDependencies {
   store: SqliteStore
   artifacts: WorldArtifactService
+  savedReplyDocuments: SavedReplyDocumentService
   access: WorldAccessService
   authority: WorldCharacterAuthorityService
 }
 
 export function registerWorldArtifactRoutes(router: Router, dependencies: WorldArtifactRoutesDependencies): void {
-  const { store, artifacts, access, authority } = dependencies
+  const { store, artifacts, savedReplyDocuments, access, authority } = dependencies
 
   router.get(/^\/api\/worlds\/([^/]+)\/artifacts$/, async ({ request, response, params, url }) => {
     const worldId = params[0]!
@@ -57,6 +59,28 @@ export function registerWorldArtifactRoutes(router: Router, dependencies: WorldA
     const body = await readJson(request)
     const input = importedInput(body, worldId)
     const publication = await artifacts.publishImportedFile(input)
+    writeJson(response, publication.created ? 201 : 200, { ...publication, publication })
+  })
+
+  /**
+   * Keep one character reply as a document in this world.
+   *
+   * The request names a message, never a body and never a provenance: the
+   * service reads the stored reply itself and publishes it as the owner, so
+   * the result is always `owner-published` and never claims execution.
+   */
+  router.post(/^\/api\/worlds\/([^/]+)\/artifacts\/save-reply$/, async ({ request, response, params }) => {
+    const worldId = params[0]!
+    assertWorld(store, worldId)
+    await access.assertUnlocked(worldId, request)
+    const body = await readJson(request)
+    assertSavedReplyBody(body)
+    const title = optionalString(body.title)
+    const publication = await savedReplyDocuments.saveAssistantReply({
+      worldId,
+      messageId: requiredString(body, 'messageId'),
+      ...(title === undefined ? {} : { title }),
+    })
     writeJson(response, publication.created ? 201 : 200, { ...publication, publication })
   })
 
@@ -162,6 +186,24 @@ function assertBrowserPublication(body: Record<string, unknown>): void {
   }
   for (const key of ['createdById', 'employeeId', 'sessionId', 'workTurnId', 'agentRunId', 'actorEmployeeId']) {
     if (body[key] !== undefined) throw new HttpError(403, 'artifact_run_scope_denied', '不能从浏览器伪造 AgentRun 产物 provenance')
+  }
+}
+
+/**
+ * A saved reply may carry a name and nothing else.
+ *
+ * Refusing a body field here is not defence in depth for its own sake: it is
+ * the difference between "the World kept what the character said" and "the
+ * browser wrote a document and called it a reply". The provenance keys are
+ * refused for the same reason the publish routes refuse them.
+ */
+function assertSavedReplyBody(body: Record<string, unknown>): void {
+  assertBrowserPublication(body)
+  for (const key of ['text', 'content', 'body', 'markdown', 'kind', 'sourcePath', 'sourceRelativePath', 'artifactId', 'idempotencyKey']) {
+    if (body[key] !== undefined) throw new HttpError(403, 'artifact_reply_body_rejected', '保存回复只接受消息标识，正文由宿主自己读取')
+  }
+  for (const key of Object.keys(body)) {
+    if (key !== 'messageId' && key !== 'title') throw new HttpError(422, 'artifact_reply_field_unknown', '保存回复请求包含未知字段')
   }
 }
 
