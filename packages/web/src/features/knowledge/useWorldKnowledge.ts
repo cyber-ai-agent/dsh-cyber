@@ -499,6 +499,10 @@ export function normalizeConsolidationJobs(value: unknown, worldId: string): Kno
       ...(typeof item.processedChunks === 'number' && typeof item.chunkTotal === 'number'
         ? { processedChunks: asNumber(item.processedChunks), chunkTotal: asNumber(item.chunkTotal) }
         : {}),
+      // Claims this source can no longer support because its content moved on.
+      ...(typeof item.notCurrentClaims === 'number' && item.notCurrentClaims > 0
+        ? { notCurrentClaims: asNumber(item.notCurrentClaims) }
+        : {}),
       createdAt: asString(item.createdAt),
       updatedAt: asString(item.updatedAt),
       ...(typeof item.startedAt === 'string' ? { startedAt: item.startedAt } : {}),

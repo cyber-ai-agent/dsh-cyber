@@ -45,6 +45,12 @@ type KnowledgeConsolidationState = 'pending' | 'queued' | 'success' | 'error'
 interface KnowledgeConsolidationEntry {
   state: KnowledgeConsolidationState
   message: string
+  /**
+   * Added to the status line only, never to the action label: the row keeps one
+   * primary action, and how many claims still need re-verifying is a fact about
+   * the source rather than a second thing to click.
+   */
+  note?: string
 }
 
 export function KnowledgeLibrary({ world, demoMode, state }: KnowledgeLibraryProps) {
@@ -167,11 +173,18 @@ function consolidationEntriesBySource(jobs: KnowledgeConsolidationJob[], sourceT
   const output: Record<string, KnowledgeConsolidationEntry> = {}
   for (const job of jobs) {
     if (job.sourceType !== sourceType || output[job.sourceId] !== undefined) continue
-    output[job.sourceId] = job.status === 'completed'
+    const entry: KnowledgeConsolidationEntry = job.status === 'completed'
       ? { state: 'success', message: consolidationSuccessMessage(job, t) }
       : job.status === 'failed'
         ? { state: 'error', message: t('knowledge.statusFailed', '处理失败') }
         : { state: 'queued', message: job.status === 'running' ? t('knowledge.consolidatePending', '正在加入…') : t('knowledge.consolidateQueued', '已排队') }
+    // The source changed after it was read, so some of what the graph holds no
+    // longer has evidence behind it. Say so instead of leaving it reading as
+    // fully current knowledge.
+    const notCurrent = job.notCurrentClaims ?? 0
+    output[job.sourceId] = notCurrent === 0
+      ? entry
+      : { ...entry, note: t('knowledge.consolidationNotCurrent', '{count} 条主张待重新核对', { count: notCurrent }) }
   }
   return output
 }
@@ -262,7 +275,7 @@ function DocumentRow({ worldId, document, consolidation, demoMode, onConsolidate
     </summary><div className="knowledge-document__details"><p>{document.chunkCount} 段 · {formatBytes(document.byteLength)}</p>
     <KnowledgeDocumentPreview worldId={worldId} document={document} open={expanded} demoMode={demoMode} />
     <span className="knowledge-row__evidence"><span>{t('knowledge.libraryStatSources', '来源')} {document.sourceUrl || document.relativePath || '本地资料'}</span><span>{t('knowledge.libraryStatUpdated', '更新')} {formatDate(document.updatedAt, t)}</span></span>
-    {document.status === 'indexed' ? <span className="knowledge-row__consolidation"><button type="button" className="knowledge-row__consolidation-button" onClick={() => onConsolidate(document)} disabled={!canConsolidate} aria-describedby={`knowledge-consolidation-${document.id}`} title={demoMode ? t('knowledge.libraryDemoNotice', '演示世界暂不可整理知识') : consolidation?.state === 'error' ? t('knowledge.consolidateButton', '重新加入知识图谱') : t('knowledge.consolidateButton', '吸收到知识图谱')}>{consolidation?.state === 'pending' ? t('knowledge.consolidatePending', '正在加入…') : consolidation?.state === 'queued' ? t('knowledge.consolidateQueued', '已排队') : consolidation?.state === 'success' ? consolidation.message : t('knowledge.consolidateButton', '吸收到知识图谱')}</button>{consolidation === undefined ? null : <small id={`knowledge-consolidation-${document.id}`} className={`knowledge-row__consolidation-status knowledge-row__consolidation-status--${consolidation.state}`} role={consolidation.state === 'error' ? 'alert' : 'status'} aria-live="polite">{consolidation.message}</small>}</span> : null}
+    {document.status === 'indexed' ? <span className="knowledge-row__consolidation"><button type="button" className="knowledge-row__consolidation-button" onClick={() => onConsolidate(document)} disabled={!canConsolidate} aria-describedby={`knowledge-consolidation-${document.id}`} title={demoMode ? t('knowledge.libraryDemoNotice', '演示世界暂不可整理知识') : consolidation?.state === 'error' ? t('knowledge.consolidateButton', '重新加入知识图谱') : t('knowledge.consolidateButton', '吸收到知识图谱')}>{consolidation?.state === 'pending' ? t('knowledge.consolidatePending', '正在加入…') : consolidation?.state === 'queued' ? t('knowledge.consolidateQueued', '已排队') : consolidation?.state === 'success' ? consolidation.message : t('knowledge.consolidateButton', '吸收到知识图谱')}</button>{consolidation === undefined ? null : <small id={`knowledge-consolidation-${document.id}`} className={`knowledge-row__consolidation-status knowledge-row__consolidation-status--${consolidation.state}`} role={consolidation.state === 'error' ? 'alert' : 'status'} aria-live="polite">{consolidation.note === undefined ? consolidation.message : `${consolidation.message} · ${consolidation.note}`}</small>}</span> : null}
   </div></details></li>
 }
 

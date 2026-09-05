@@ -855,6 +855,16 @@ describe('SqliteStore', () => {
       ALTER TABLE employee_instances DROP COLUMN health_error_code;
       ALTER TABLE employee_instances DROP COLUMN health;
       ALTER TABLE employee_revisions DROP COLUMN runtime_permission_mode;
+      DROP INDEX knowledge_claims_not_current_idx;
+      DROP INDEX knowledge_relations_not_current_idx;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_since;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
       DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 2;
       PRAGMA user_version = 2;
@@ -960,6 +970,16 @@ describe('SqliteStore', () => {
       ALTER TABLE model_profiles DROP COLUMN capabilities_json;
       ALTER TABLE model_profiles DROP COLUMN probed_at;
       DROP TABLE model_providers;
+      DROP INDEX knowledge_claims_not_current_idx;
+      DROP INDEX knowledge_relations_not_current_idx;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_since;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
       DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 36;
       PRAGMA user_version = 36;
@@ -1043,6 +1063,16 @@ describe('SqliteStore', () => {
       ALTER TABLE model_profiles DROP COLUMN capabilities_json;
       ALTER TABLE model_profiles DROP COLUMN probed_at;
       DROP TABLE model_providers;
+      DROP INDEX knowledge_claims_not_current_idx;
+      DROP INDEX knowledge_relations_not_current_idx;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_since;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
       DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 38;
       PRAGMA user_version = 38;
@@ -1424,6 +1454,16 @@ describe('SqliteStore', () => {
       ALTER TABLE model_profiles DROP COLUMN capabilities_json;
       ALTER TABLE model_profiles DROP COLUMN probed_at;
       DROP TABLE model_providers;
+      DROP INDEX knowledge_claims_not_current_idx;
+      DROP INDEX knowledge_relations_not_current_idx;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_since;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
       DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 36;
       PRAGMA user_version = 36;
@@ -1492,6 +1532,16 @@ describe('SqliteStore', () => {
       ALTER TABLE model_profiles DROP COLUMN capabilities_json;
       ALTER TABLE model_profiles DROP COLUMN probed_at;
       DROP TABLE model_providers;
+      DROP INDEX knowledge_claims_not_current_idx;
+      DROP INDEX knowledge_relations_not_current_idx;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_since;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
       DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 39;
       PRAGMA user_version = 39;
@@ -1545,6 +1595,16 @@ describe('SqliteStore', () => {
       DROP INDEX work_tasks_source_work_turn_idx;
       ALTER TABLE work_tasks DROP COLUMN source_message_id;
       ALTER TABLE work_tasks DROP COLUMN source_work_turn_id;
+      DROP INDEX knowledge_claims_not_current_idx;
+      DROP INDEX knowledge_relations_not_current_idx;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_since;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
       DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 40;
       PRAGMA user_version = 40;
@@ -1600,6 +1660,16 @@ describe('SqliteStore', () => {
     // Rewind only the watermark migration, keeping every row the file held.
     const legacy = new DatabaseSync(path)
     legacy.exec(`
+      DROP INDEX knowledge_claims_not_current_idx;
+      DROP INDEX knowledge_relations_not_current_idx;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_since;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
       DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 41;
       PRAGMA user_version = 41;
@@ -1625,6 +1695,68 @@ describe('SqliteStore', () => {
     expect(migrated.database.prepare(
       `SELECT "unique" AS isUnique, partial FROM pragma_index_list('knowledge_source_versions') WHERE name = 'knowledge_source_versions_current_idx'`,
     ).get()).toMatchObject({ isUnique: 1, partial: 1 })
+  })
+
+  it('adds the evidence-invalidation columns after v42 and downgrades nothing on the way', async () => {
+    const { directory, path, store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: '证据失效工作区' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '证据失效世界', templateId: 'cyber-company' })
+    const library = new WorldKnowledgeRepository(store.database)
+    const document = library.saveDocument({
+      workspaceId: workspace.id, worldId: world.id, relativePath: 'notes/pre-43.md', title: '迁移前资料',
+      mimeType: 'text/markdown', byteLength: 12, sha256: 'a'.repeat(64), origin: 'upload',
+    })
+    library.replaceChunks(world.id, document.id, [{ ordinal: 0, content: '迁移前内容', contentHash: 'c'.repeat(64) }])
+    const graph = new WorldKnowledgeGraphRepository(store.database)
+    const evidence = graph.createEvidence({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', documentId: document.id,
+      chunkId: library.listChunks(world.id, document.id)[0]!.id, excerpt: '迁移前内容',
+    })
+    const subject = graph.upsertEntity({ workspaceId: workspace.id, worldId: world.id, type: 'topic', canonicalName: '迁移前主题' })
+    const claim = graph.upsertClaim({
+      workspaceId: workspace.id, worldId: world.id, type: 'fact', subjectEntityId: subject.id,
+      predicate: '迁移前结论', objectText: '迁移前内容', evidenceIds: [evidence.id],
+    })
+    store.close()
+    stores.splice(stores.indexOf(store), 1)
+
+    // Rewind only the invalidation migration, keeping every row the file held.
+    const legacy = new DatabaseSync(path)
+    legacy.exec(`
+      DROP INDEX knowledge_claims_not_current_idx;
+      DROP INDEX knowledge_relations_not_current_idx;
+      DROP INDEX knowledge_source_versions_pending_invalidation_idx;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_since;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
+      ALTER TABLE knowledge_source_versions DROP COLUMN invalidated_at;
+      DELETE FROM schema_migrations WHERE version > 42;
+      PRAGMA user_version = 42;
+    `)
+    legacy.close()
+
+    const migrated = await SqliteStore.open(path)
+    stores.push(migrated)
+    expect((await readdir(directory)).some((file) => file.startsWith('cyber.sqlite.pre-migration-v42-'))).toBe(true)
+    expect(migrated.database.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+    expect(migrated.doctor()).toMatchObject({ ok: true, schemaVersion: CYBER_SCHEMA_VERSION })
+
+    // No backfill: which existing claims lost their evidence is decided by
+    // reading source versions, never guessed while upgrading a file. Every
+    // claim the owner already had stays current, visible and retrievable.
+    const upgraded = new WorldKnowledgeGraphRepository(migrated.database)
+    expect(upgraded.getClaim(world.id, claim.id)).toMatchObject({ status: 'active', evidenceIds: [evidence.id] })
+    expect(upgraded.getClaim(world.id, claim.id)?.notCurrent).toBeUndefined()
+    expect(upgraded.searchClaims(world.id, '迁移前结论', 10).map((item) => item.id)).toEqual([claim.id])
+    expect(upgraded.listPendingKnowledgeSourceInvalidations(world.id)).toEqual([])
+    expect(migrated.database.prepare(
+      `SELECT partial FROM pragma_index_list('knowledge_claims') WHERE name = 'knowledge_claims_not_current_idx'`,
+    ).get()).toMatchObject({ partial: 1 })
   })
 })
 
