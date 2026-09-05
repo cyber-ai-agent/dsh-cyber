@@ -159,6 +159,8 @@ export interface CyberServerOptions {
    * nobody was addressed by name.
    */
   groupTurnPlanner?: GroupTurnPlannerPort
+  /** Decides whether a chat message asked for work; tests and CI pass a deterministic stub. */
+  conversationTaskIntent?: import('./services/conversation-task-intent-classifier.js').ConversationTaskIntentPort
 }
 
 export interface CyberServerAddress { host: string; port: number; origin: string }
@@ -445,7 +447,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const localTtsAssets = new LocalTtsAssetService(stateRoot)
 
   const router = new Router()
-  const workSystem = composeWorkSystem({ store, groupTasks, router, worldAccess })
+  const { work: workSystem, taskIntent } = composeWorkSystem({ store, credentials, groupTasks, router, worldAccess, worldRuntime, ...(options.conversationTaskIntent === undefined ? {} : { intentClassifier: options.conversationTaskIntent }) })
   registerApplicationAccessRoutes(router, applicationAccess)
   registerSystemRoutes(router, { store, stateRoot, runtimeUpdates, applicationUpdates })
   registerWorkspaceFileRoutes(router, { worldFiles, access: worldAccess })
@@ -485,8 +487,8 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     consolidationScheduler: knowledgeGraphRuntime.scheduler,
   })
   registerModelInteractionRoutes(router, { store, interactions })
-  const conversationControl = composeConversationControl({ store, router, worldAccess, orchestrator, continuations: turnContinuations, employeeActivity, worldRuntime, worldTrace, runtimeStreamHub, groupTasks, worldPackages, runtimeContext: worldRuntimeContext, skillRuntime })
-  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, turnContinuations, toolApprovals, groupTasks, groupTurnPlanner, conversationQueue: conversationControl.queue, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, runtimeContext: worldRuntimeContext, worldTrace, employeeActivity, worldPackages, worldRuntimePermissions, ownerRuntimeAccess })
+  const conversationControl = composeConversationControl({ store, router, worldAccess, orchestrator, continuations: turnContinuations, employeeActivity, worldRuntime, worldTrace, runtimeStreamHub, groupTasks, worldPackages, runtimeContext: worldRuntimeContext, skillRuntime, work: workSystem })
+  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, turnContinuations, toolApprovals, groupTasks, groupTurnPlanner, taskIntent, conversationQueue: conversationControl.queue, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, runtimeContext: worldRuntimeContext, worldTrace, employeeActivity, worldPackages, worldRuntimePermissions, ownerRuntimeAccess })
   registerGroupTaskRoutes(router, { store, worldAccess, groupTasks })
   registerEmployeeRoutes(router, {
     store,

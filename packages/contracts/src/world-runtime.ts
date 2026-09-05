@@ -118,6 +118,8 @@ export type WorldRuntimeStreamEventKind =
   | 'world-artifact'
   /** A durable Knowledge document, collection or index projection changed. */
   | 'world-knowledge'
+  /** A Work Task was recorded, so an open task list is now stale. */
+  | 'world-task'
   | 'world-state'
   | 'world-cue'
   | 'heartbeat'
