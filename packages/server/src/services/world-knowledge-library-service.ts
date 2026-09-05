@@ -15,7 +15,7 @@ import type {
 import type { WorldKnowledgeRepository } from '@dsh-cyber/persistence'
 
 import { ServiceError } from './service-error.js'
-import { KNOWLEDGE_DOCUMENT_LIMITS, KnowledgeParseError, parseKnowledgeDocument, type ParsedKnowledgeDocument } from './knowledge-document-parser.js'
+import { KNOWLEDGE_DOCUMENT_LIMITS, KnowledgeParseError, parseKnowledgeDocument, type ParsedKnowledgeDocument, type KnowledgeDocumentMimeType } from './knowledge-document-parser.js'
 import type { KnowledgeSearchPort, KnowledgeSearchResult } from './knowledge-search-port.js'
 import { isPathWithin, type WorldRoot, type WorldRootService } from './world-root-service.js'
 import { resolveCanonicalPathWithoutSymlinkHops, SymlinkHopError } from './canonical-path.js'
@@ -44,7 +44,18 @@ export type KnowledgeRepositoryPort = Pick<WorldKnowledgeRepository, 'listCollec
  * stored under any other mime type was never read as text, and the preview says
  * so instead of inventing a format for it.
  */
-const KNOWLEDGE_TEXT_MIME_TYPES: ReadonlySet<string> = new Set(['text/markdown', 'text/plain', 'application/json', 'application/pdf'])
+/**
+ * Exactly the parser's own output vocabulary, as a Record over its type
+ * rather than a Set of strings: adding a format to the parser then fails
+ * this file to compile. A document the library can parse but the preview
+ * silently calls 未解析为文本 would be the same lie this preview removes.
+ */
+const PREVIEWABLE_MIME_TYPES: Readonly<Record<KnowledgeDocumentMimeType, true>> = {
+  'text/markdown': true,
+  'text/plain': true,
+  'application/json': true,
+  'application/pdf': true,
+}
 
 export const KNOWLEDGE_PREVIEW_LIMITS = {
   defaultParagraphs: 8,
@@ -347,7 +358,7 @@ export class WorldKnowledgeLibraryService {
       status: document.status,
       offset: 0,
     }
-    if (!KNOWLEDGE_TEXT_MIME_TYPES.has(document.mimeType.split(';')[0]?.trim().toLowerCase() ?? '')) {
+    if (!Object.hasOwn(PREVIEWABLE_MIME_TYPES, document.mimeType.split(';')[0]?.trim().toLowerCase() ?? '')) {
       return { ...head, previewable: false, reason: 'unsupported', total: 0, paragraphs: [] }
     }
     const offset = boundedPreviewNumber(window.offset ?? 0, 0, Number.MAX_SAFE_INTEGER, 'knowledge_preview_offset_invalid', '正文预览起点无效')
