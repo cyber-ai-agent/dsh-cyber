@@ -43,7 +43,7 @@ describe('ModelProfileKnowledgeExtractionPort', () => {
       store: {
         getModelAssignment: () => undefined,
         getModelProfile: (id) => id === profile.id ? profile : undefined,
-        listModelProfiles: () => [profile],
+        resolveWorkspaceDefaultProfile: () => profile,
       },
       credentials: { resolve: () => 'local-secret' } as never,
       fetch: fetchMock,
@@ -77,7 +77,7 @@ describe('ModelProfileKnowledgeExtractionPort', () => {
       store: {
         getModelAssignment: () => undefined,
         getModelProfile: () => profile,
-        listModelProfiles: () => [profile],
+        resolveWorkspaceDefaultProfile: () => profile,
       },
       credentials: { resolve: () => 'local-secret' } as never,
       fetch: vi.fn(async () => new Response(`\uFEFF\n\`\`\`json\n${JSON.stringify({ choices: [{ message: { content: '{"entities":[],"claims":[],"relations":[],"evidenceRefs":[]}' } }] })}\n\`\`\``)),
@@ -94,7 +94,7 @@ describe('ModelProfileKnowledgeExtractionPort', () => {
       store: {
         getModelAssignment: () => undefined,
         getModelProfile: () => profile,
-        listModelProfiles: () => [profile],
+        resolveWorkspaceDefaultProfile: () => profile,
       },
       credentials: { resolve: () => 'local-secret' } as never,
       fetch: vi.fn(async (_url, init) => {
@@ -112,7 +112,7 @@ describe('ModelProfileKnowledgeExtractionPort', () => {
       store: {
         getModelAssignment: () => undefined,
         getModelProfile: () => ({ ...profile, workspaceId: 'another-workspace' }),
-        listModelProfiles: () => [],
+        resolveWorkspaceDefaultProfile: () => undefined,
       },
       credentials: { resolve: () => undefined } as never,
       fetch: vi.fn(),

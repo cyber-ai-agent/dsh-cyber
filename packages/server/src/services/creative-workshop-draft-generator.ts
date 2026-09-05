@@ -107,8 +107,7 @@ export class CreativeWorkshopDraftGenerator implements CreativeWorkshopDraftGene
   }
 
   #defaultProfile(workspaceId: string): ModelProfile {
-    const profiles = this.#store.listModelProfiles(workspaceId)
-    const profile = profiles.find((item) => item.isDefault) ?? profiles[0]
+    const profile = this.#store.resolveWorkspaceDefaultProfile(workspaceId)
     if (profile === undefined) throw new ServiceError('invalid', 'workshop_model_missing', '请先在设置中配置默认模型，再使用 AI 生成草稿。')
     return profile
   }

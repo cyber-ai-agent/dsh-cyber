@@ -66,7 +66,7 @@ export interface SkinImportAnalyzerOptions {
   maxOutputTokens?: number
 }
 
-type AnalyzerStore = Pick<SqliteStore, 'getWorkspace' | 'listModelProfiles'>
+type AnalyzerStore = Pick<SqliteStore, 'getWorkspace' | 'resolveWorkspaceDefaultProfile'>
 
 /**
  * Host-side, review-only skin importer. It never creates a skin package, a
@@ -124,8 +124,7 @@ export class SkinImportAnalyzer implements SkinImportAnalyzerPort {
   }
 
   #defaultProfile(workspaceId: string): ModelProfile {
-    const profiles = this.#store.listModelProfiles(workspaceId)
-    const profile = profiles.find((item) => item.isDefault) ?? profiles[0]
+    const profile = this.#store.resolveWorkspaceDefaultProfile(workspaceId)
     if (profile === undefined) {
       throw new ServiceError('invalid', 'skin_model_missing', '请先配置默认模型，再分析皮肤描述。')
     }

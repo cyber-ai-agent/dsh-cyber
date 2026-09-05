@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { EmployeeInstance, World } from '@dsh-cyber/contracts'
-import { ArrowLeft, ArrowsClockwise, CheckCircle, ImageSquare, Lightning, MagnifyingGlass, Palette, PencilSimple, Plus, Stack, Star, TextAa, Trash, VideoCamera, WarningCircle, Waveform, X } from '@phosphor-icons/react'
+import { ArrowCounterClockwise, ArrowLeft, ArrowsClockwise, CheckCircle, ImageSquare, Lightning, MagnifyingGlass, Palette, PencilSimple, Plus, Stack, TextAa, Trash, VideoCamera, WarningCircle, Waveform, X } from '@phosphor-icons/react'
 
 import './model-hub.css'
 import { useI18n } from '../../i18n/runtime.js'
@@ -20,7 +20,6 @@ import {
   removeProfile,
   saveProvider,
   setAssignment,
-  setDefaultProfile,
   setProfileImageFlag,
   syncProvider,
   testProvider,
@@ -115,7 +114,8 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
   const [manualForm, setManualForm] = useState({ providerId: '', modelId: '', displayName: '', context: '' })
   const [assignScope, setAssignScope] = useState<'global' | string>('global')
   const [assignTarget, setAssignTarget] = useState<AssignmentRow>()
-  const [assignProvider, setAssignProvider] = useState<string>()
+  const [assignProvider, setAssignProvider] = useState<string>('all')
+  const [assignQuery, setAssignQuery] = useState('')
   const [worldStaff, setWorldStaff] = useState<Record<string, HubStaff[]>>({})
   const [wizard, setWizard] = useState<WizardState>()
   const [modelQuery, setModelQuery] = useState('')
@@ -294,19 +294,6 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
     }
   }
 
-  const runSetDefault = async (profile: HubProfile): Promise<void> => {
-    setBusy(`default:${profile.id}`)
-    setError(undefined)
-    try {
-      await setDefaultProfile(workspaceId, profile.id)
-      await reload()
-    } catch (cause) {
-      setError(errorMessage(cause, t('modelHub.defaultFailed', '设置默认模型失败。')))
-    } finally {
-      setBusy(undefined)
-    }
-  }
-
   const runToggleImageFlag = async (profile: HubProfile, value: boolean): Promise<void> => {
     setBusy(`image:${profile.id}`)
     setError(undefined)
@@ -399,7 +386,30 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
   const activeTarget = targetRows.find((row) => assignTarget !== undefined && row.kind === assignTarget.kind && row.id === assignTarget.id) ?? targetRows[0]
   const profileById = useMemo(() => new Map(profiles.map((profile) => [profile.id, profile])), [profiles])
   const targetCurrentProfileId = activeTarget === undefined ? undefined : currentAssignment(assignments, activeTarget)
-  const assignModels = assignProvider === undefined ? [] : profiles.filter((profile) => profile.providerId === assignProvider)
+  // The assignment rail lists the whole pool: 全部模型 shows every profile
+  // (each provider's models plus legacy standalone rows), while a provider
+  // selection narrows to that connection. The text query filters by name,
+  // provider and model id on top of the rail choice.
+  const assignPool = useMemo(() => {
+    const providerIds = new Set(providers.map((provider) => provider.id))
+    const scoped = assignProvider === 'all'
+      ? profiles
+      : assignProvider === 'legacy'
+      ? profiles.filter((profile) => profile.providerId === undefined || !providerIds.has(profile.providerId))
+      : profiles.filter((profile) => profile.providerId === assignProvider)
+    const needle = assignQuery.trim().toLocaleLowerCase()
+    if (needle === '') return scoped
+    return scoped.filter((profile) =>
+      `${profile.displayName} ${profile.modelId} ${providerNameOf(profile)}`.toLocaleLowerCase().includes(needle),
+    )
+  }, [assignProvider, assignQuery, profiles, providers])
+  const assignRailOptions = useMemo(() => {
+    const providerIds = new Set(providers.map((provider) => provider.id))
+    const legacyCount = profiles.filter((profile) => profile.providerId === undefined || !providerIds.has(profile.providerId)).length
+    const options = providers.map((provider) => ({ id: provider.id, name: provider.name, count: profiles.filter((profile) => profile.providerId === provider.id).length }))
+    if (legacyCount > 0) options.push({ id: 'legacy', name: t('modelHub.legacyConnection', '独立配置'), count: legacyCount })
+    return options
+  }, [providers, profiles, t])
 
   const sourceBadge = catalog === undefined ? '' : catalog.source === 'remote'
     ? t('modelHub.sourceRemote', '目录来源：远程最新')
@@ -554,9 +564,6 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
                     const imageMode = profile.settings.imageGeneration === true || (declared.outputTypes.length > 0 && declared.outputTypes.includes('image') && !declared.outputTypes.includes('text'))
                     return <button type="button" className={imageMode ? 'model-hub__star is-on' : 'model-hub__star'} disabled={busy === `image:${profile.id}`} title={imageMode ? t('modelHub.imageModeOn', '生图模式：发消息即生成图片（点击改回对话模型）') : t('modelHub.imageModeOff', '标为图像生成模型（对话将直接出图）')} aria-label={imageMode ? t('modelHub.imageModeOnAria', '将 {name} 改回对话模型', { name: profile.displayName }) : t('modelHub.imageModeOffAria', '将 {name} 标为图像生成模型', { name: profile.displayName })} onClick={() => void runToggleImageFlag(profile, !imageMode)}><Palette size={14} weight={imageMode ? 'fill' : 'regular'} /></button>
                   })()}
-                  {profile.isDefault
-                    ? <span className="model-hub__star is-on" title={t('modelHub.defaultModel', '默认模型')} aria-label={t('modelHub.defaultModel', '默认模型')}><Star size={14} weight="fill" /></span>
-                    : <button type="button" className="model-hub__star" disabled={busy === `default:${profile.id}`} title={t('modelHub.setDefault', '设为默认模型')} aria-label={t('modelHub.setDefaultAria', '将 {name} 设为默认模型', { name: profile.displayName })} onClick={() => void runSetDefault(profile)}><Star size={14} /></button>}
                   {confirmingRemove === profile.id
                     ? <span className="model-hub__confirm"><button type="button" className="is-danger" onClick={() => void runRemoveProfile(profile)}>{t('modelHub.confirmRemove', '确认移除')}</button><button type="button" onClick={() => setConfirmingRemove(undefined)}>{t('modelHub.cancel', '取消')}</button></span>
                     : <button type="button" disabled={assigned || removing} title={assigned ? t('modelHub.removeBlocked', '正在被分配使用，请先在角色或世界中改选其它模型') : t('modelHub.removeFromPool', '从模型池移除')} aria-label={t('modelHub.removeFromAria', '移除模型 {name}', { name: profile.displayName })} onClick={() => setConfirmingRemove(profile.id)}><Trash size={14} /></button>}
@@ -577,7 +584,12 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
             {targetRows.map((row) => {
               const isActive = activeTarget !== undefined && row.kind === activeTarget.kind && row.id === activeTarget.id
               const currentId = currentAssignment(assignments, row)
-              const currentName = currentId === undefined ? undefined : profileById.get(currentId)?.displayName
+              const currentName = currentId === undefined
+                ? row.kind === 'workspace'
+                  // 全局没有上级：未单独分配时生效的就是默认模型（模型池 ⭐）。
+                  ? profiles.find((profile) => profile.isDefault)?.displayName
+                  : undefined
+                : profileById.get(currentId)?.displayName
               return <button key={`${row.kind}:${row.id}`} type="button" className={isActive ? 'is-active' : ''} aria-current={isActive} onClick={() => setAssignTarget(row)}>
                 <span className="model-hub__assign-name"><strong title={row.name}>{row.name}</strong>{row.subtitle === undefined ? null : <small>{row.subtitle}</small>}</span>
                 <small className={currentName === undefined ? 'model-hub__assign-none' : 'model-hub__assign-current'} title={currentName ?? t('modelHub.assignInherit', '继承上级')}>{currentName ?? t('modelHub.assignInherit', '继承上级')}</small>
@@ -586,15 +598,23 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
           </div>
         </aside>
         <nav className="model-hub__assign-providers" aria-label={t('modelHub.assignProvidersAria', '选择服务商')}><strong>{t('modelHub.colProvider', '服务商')}</strong>
-          {providers.map((provider) => <button key={provider.id} type="button" className={assignProvider === provider.id ? 'is-active' : ''} aria-current={assignProvider === provider.id} onClick={() => setAssignProvider(provider.id)}>
-            <span title={provider.name}>{provider.name}</span><small>{provider.modelCount}</small>
+          <button type="button" className={assignProvider === 'all' ? 'is-active' : ''} aria-current={assignProvider === 'all'} onClick={() => setAssignProvider('all')}>
+            <span>{t('modelHub.assignAllModels', '全部模型')}</span><small>{profiles.length}</small>
+          </button>
+          {assignRailOptions.map((option) => <button key={option.id} type="button" className={assignProvider === option.id ? 'is-active' : ''} aria-current={assignProvider === option.id} onClick={() => setAssignProvider(option.id)}>
+            <span title={option.name}>{option.name}</span><small>{option.count}</small>
           </button>)}
           {providers.length === 0 ? <p className="model-hub__assign-none">{t('modelHub.assignNoProviders', '请先在“模型服务商”添加服务商')}</p> : null}
         </nav>
         <div className="model-hub__assign-models">
-          {activeTarget === undefined ? null : assignProvider === undefined
-            ? <div className="model-hub__empty"><strong>{t('modelHub.assignPickProvider', '选择一个服务商查看它的模型')}</strong><span>{t('modelHub.assignPickProviderHint', '点击中间列的服务商，右侧列出模型池中该服务商的模型。')}</span></div>
-            : assignModels.length === 0
+          {activeTarget === undefined ? null : <>
+            <div className="model-hub__assign-toolbar">
+              <label className="model-hub__search"><MagnifyingGlass size={15} /><input value={assignQuery} onChange={(event) => setAssignQuery(event.target.value)} placeholder={t('modelHub.assignSearch', '搜索模型名称、服务商或 ID')} aria-label={t('modelHub.assignSearchAria', '搜索模型')} /></label>
+              {targetCurrentProfileId !== undefined
+                ? <button type="button" className="model-hub__assign-restore" disabled={busy === `unassign:${activeTarget.kind}:${activeTarget.id}`} onClick={() => void runUnassign(activeTarget)}><ArrowCounterClockwise size={14} />{t('modelHub.assignRestoreInherit', '恢复继承上级')}</button>
+                : null}
+            </div>
+            {assignPool.length === 0
             ? <div className="model-hub__empty"><strong>{t('modelHub.assignProviderEmpty', '该服务商还没有导入模型')}</strong><span>{t('modelHub.assignProviderEmptyHint', '到“模型池”或服务商的“同步模型”里导入后即可分配。')}</span></div>
             : <table className="model-hub__table model-hub__assign-table"><thead><tr>
               <th>{t('modelHub.colModel', '模型名称')}</th>
@@ -604,24 +624,29 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
               <th title={t('modelHub.colOutput', '输出格式')}>{t('modelHub.colOutputShort', '出')}</th>
               <th className="model-hub__col-actions">{t('modelHub.colActions', '操作')}</th>
             </tr></thead>
-              <tbody>{assignModels.map((model) => {
+              <tbody>{assignPool.map((model) => {
                 const declared = declaredCapabilities(model)
                 const isCurrent = targetCurrentProfileId === model.id
                 const applying = busy === `assign:${activeTarget.kind}:${activeTarget.id}` || busy === `unassign:${activeTarget.kind}:${activeTarget.id}`
                 return <tr key={model.id} className={isCurrent ? 'is-current' : undefined}>
-                  <td><strong title={model.displayName}>{model.displayName}</strong>{model.isDefault ? <span className="model-hub__star is-on" title={t('modelHub.defaultModel', '默认模型')}><Star size={12} weight="fill" /></span> : null}</td>
+                  <td><strong title={model.displayName}>{model.displayName}</strong></td>
                   <td><code title={model.modelId}>{model.modelId}</code></td>
                   <td>{formatContext(declared.context)}</td>
                   <td>{modalityChips(declared.inputTypes)}</td>
                   <td>{modalityChips(declared.outputTypes)}</td>
                   <td className="model-hub__col-actions">{isCurrent
-                    ? <span className="model-hub__confirm"><span className="model-hub__verdict is-yes" title={t('modelHub.assignCurrent', '当前使用')}>√</span><button type="button" disabled={applying} onClick={() => void runUnassign(activeTarget)}>{t('modelHub.assignUnassign', '清除')}</button></span>
+                    ? <span className="model-hub__confirm"><button type="button" disabled={applying} onClick={() => void runUnassign(activeTarget)}>{t('modelHub.assignUnassign', '清除')}</button></span>
                     : <button type="button" disabled={applying} onClick={() => void runAssign(activeTarget, model.id)}>{busy === `assign:${activeTarget.kind}:${activeTarget.id}` ? t('modelHub.assignApplying', '应用中…') : t('modelHub.assignApply', '应用')}</button>}
                   </td>
                 </tr>
               })}</tbody>
             </table>}
-          {activeTarget === undefined ? null : <p className="model-hub__assign-note">{t('modelHub.assignTo', '正在为「{name}」分配模型', { name: activeTarget.name })}{targetCurrentProfileId !== undefined ? ` · ${profileById.get(targetCurrentProfileId)?.displayName ?? ''}` : ` · ${t('modelHub.assignInherit', '继承上级')}`}</p>}
+          </>}
+          {activeTarget === undefined ? null : <p className="model-hub__assign-note">{t('modelHub.assignTo', '正在为「{name}」分配模型', { name: activeTarget.name })}：{targetCurrentProfileId !== undefined
+            ? (profileById.get(targetCurrentProfileId)?.displayName ?? t('modelHub.assignUnassigned', '未分配'))
+            : activeTarget.kind === 'workspace'
+            ? (profiles.find((profile) => profile.isDefault)?.displayName ?? t('modelHub.assignInherit', '继承上级'))
+            : t('modelHub.assignInherit', '继承上级')}</p>}
         </div>
       </div> : null}
 

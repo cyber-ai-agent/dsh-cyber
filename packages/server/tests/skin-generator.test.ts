@@ -78,7 +78,7 @@ describe('Skin Generator analyzer', () => {
     const source = await readFile(fixturePath, 'utf8')
     const seen: string[] = []
     const analyzer = new SkinImportAnalyzer(
-      { getWorkspace: () => ({ id: 'workspace-skin-generator' }), listModelProfiles: () => [fakeProfile()] } as any,
+      { getWorkspace: () => ({ id: 'workspace-skin-generator' }), resolveWorkspaceDefaultProfile: () => fakeProfile() } as any,
       { resolve: () => 'fake-key' } as any,
       {
         fetch: (async (_url: URL | string, init?: RequestInit) => {

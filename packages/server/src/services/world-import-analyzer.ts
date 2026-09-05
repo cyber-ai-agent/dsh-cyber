@@ -75,7 +75,7 @@ export interface WorldImportAnalyzerOptions {
   maxOutputTokens?: number
 }
 
-type AnalyzerStore = Pick<SqliteStore, 'getWorkspace' | 'listModelProfiles'>
+type AnalyzerStore = Pick<SqliteStore, 'getWorkspace' | 'resolveWorkspaceDefaultProfile'>
 type AnalyzerSkillCatalog = Pick<SkillCatalogService, 'listWorkspace'>
 
 interface AllowedSkillCatalog {
@@ -150,8 +150,7 @@ export class WorldImportAnalyzer implements WorldImportAnalyzerPort {
   }
 
   #defaultProfile(workspaceId: string): ModelProfile {
-    const profiles = this.#store.listModelProfiles(workspaceId)
-    const profile = profiles.find((item) => item.isDefault) ?? profiles[0]
+    const profile = this.#store.resolveWorkspaceDefaultProfile(workspaceId)
     if (profile === undefined) {
       throw new ServiceError('invalid', 'world_model_missing', '请先配置默认模型，再分析世界资料。')
     }

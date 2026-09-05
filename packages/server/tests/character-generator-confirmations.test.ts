@@ -370,12 +370,12 @@ describe('B-FIX-9 community fixture and offline analyzer contract', () => {
     const analyzer = new CharacterImportAnalyzer(
       {
         getWorkspace: () => ({ id: 'workspace-confirmations' }),
-        listModelProfiles: () => [{
+        resolveWorkspaceDefaultProfile: () => ({
           id: 'profile-confirmations', workspaceId: 'workspace-confirmations', displayName: 'fake',
           providerKind: 'openai-compatible-remote', baseUrl: 'https://models.example.test/v1', modelId: 'fake',
           api: 'openai-completions', isDefault: true, settings: {},
           createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z',
-        }],
+        }),
       } as any,
       { resolve: () => 'fake-key' } as any,
       { listWorkspace: async () => [{ id: 'coding', displayName: '软件实现', summary: '代码实现' }] as any },

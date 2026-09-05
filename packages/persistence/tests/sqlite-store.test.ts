@@ -744,6 +744,7 @@ describe('SqliteStore', () => {
     })
 
     expect(store.resolveModelProfile(workspace.id, world.id, employee.id)?.id).toBe(defaultModel.id)
+    expect(store.resolveWorkspaceDefaultProfile(workspace.id)?.id).toBe(defaultModel.id)
     store.saveModelAssignment({ workspaceId: workspace.id, scope: 'world', scopeId: world.id, modelProfileId: worldModel.id })
     expect(store.resolveModelProfile(workspace.id, world.id, employee.id)?.id).toBe(worldModel.id)
     store.saveModelAssignment({ workspaceId: workspace.id, scope: 'employee', scopeId: employee.id, modelProfileId: employeeModel.id })
@@ -751,6 +752,9 @@ describe('SqliteStore', () => {
     expect(store.listModelAssignments(workspace.id)).toHaveLength(2)
     expect(store.clearModelAssignment(workspace.id, 'employee', employee.id)).toBe(true)
     expect(store.resolveModelProfile(workspace.id, world.id, employee.id)?.id).toBe(worldModel.id)
+    store.clearModelAssignment(workspace.id, 'world', world.id)
+    store.saveModelAssignment({ workspaceId: workspace.id, scope: 'workspace', scopeId: workspace.id, modelProfileId: employeeModel.id })
+    expect(store.resolveWorkspaceDefaultProfile(workspace.id)?.id).toBe(employeeModel.id)
   })
 
   it('falls back to the default when a legacy assignment points to a missing profile', async () => {

@@ -1424,6 +1424,23 @@ export class SqliteStore {
     return profiles.find((profile) => profile.isDefault) ?? profiles[0]
   }
 
+  /**
+   * The workspace's own default model — what every context without a more
+   * specific (world/employee) assignment falls back to. One resolution for
+   * every feature that needs a model but has no character context: workshop
+   * draft generation, character/plugin/skin/world import analysis, knowledge
+   * consolidation. Mirrors resolveModelProfile's workspace level exactly.
+   */
+  resolveWorkspaceDefaultProfile(workspaceId: string): ModelProfile | undefined {
+    const workspace = this.getModelAssignment(workspaceId, 'workspace', workspaceId)
+    if (workspace !== undefined) {
+      const assigned = this.getModelProfile(workspace.modelProfileId)
+      if (assigned !== undefined && assigned.workspaceId === workspaceId) return assigned
+    }
+    const profiles = this.listModelProfiles(workspaceId)
+    return profiles.find((profile) => profile.isDefault) ?? profiles[0]
+  }
+
   recordModelInteraction(input: RecordModelInteractionInput): ModelInteractionLog {
     this.#assertWritable()
     const workspace = this.#requireWorkspace(input.workspaceId)
