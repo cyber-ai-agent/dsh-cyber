@@ -1567,3 +1567,51 @@ describe('SqliteStore', () => {
     expect(repository.listTasks(world.id).map((task) => task.id).sort()).toEqual([legacyTask.id, linked.task.id].sort())
   })
 })
+
+describe('world trace watermark', () => {
+  it('changes when a run changes status inside a single clock tick', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-cyber-'))
+    // A frozen clock turns "the two writes landed in the same millisecond" from
+    // a race that reproduces about once in six runs into a certainty. Real
+    // runs hit it whenever a turn fails immediately: `startAgentRun` and
+    // `failAgentRun` then carry the same timestamp.
+    const store = await SqliteStore.open(join(directory, 'cyber.sqlite'), { clock: () => '2026-09-05T00:00:00.000Z' })
+    stores.push(store)
+    const workspace = store.createWorkspace({ name: '水位工作区' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '水位世界', templateId: 'cyber-company' })
+    store.saveBlueprint(blueprint({ id: 'watermark.worker', worldTemplateId: 'cyber-company' }))
+    const employee = store.recruitEmployee({
+      workspaceId: workspace.id, worldId: world.id, blueprintId: 'watermark.worker', blueprintVersion: 1,
+    })
+    const session = store.createSession({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      kind: 'direct',
+      title: '私聊',
+      participants: [{ participantId: 'owner', kind: 'owner' }, { participantId: employee.id, kind: 'employee' }],
+    })
+    const turn = store.createWorkTurn({
+      workspaceId: workspace.id, worldId: world.id, sessionId: session.id, interactionKind: 'chat',
+    })
+    const run = store.createAgentRun({
+      workspaceId: workspace.id, worldId: world.id, turnId: turn.id,
+      sessionId: session.id, employeeId: employee.id, ordinal: 1,
+    })
+
+    store.startAgentRun(run.id)
+    const whileRunning = store.worldTraceWatermark(world.id)
+    store.failAgentRun(run.id, 'model-timeout')
+
+    // The watermark is what the trace read model uses to decide whether its
+    // cached projection is still good. If it does not move here, the user
+    // keeps seeing a run that says it is running after it has failed.
+    expect(store.worldTraceWatermark(world.id)).not.toBe(whileRunning)
+  })
+
+  it('stays byte-identical when nothing changed', async () => {
+    const { store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: '稳定工作区' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '稳定世界', templateId: 'cyber-company' })
+    expect(store.worldTraceWatermark(world.id)).toBe(store.worldTraceWatermark(world.id))
+  })
+})

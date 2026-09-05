@@ -4903,11 +4903,24 @@ export class SqliteStore {
    * updated_at; task runs and context snapshots are append/terminal facts;
    * approvals stamp decided_at; knowledge jobs carry updated_at).
    */
+  /**
+   * A change detector for the trace's cached projection.
+   *
+   * Counts and max timestamps alone miss a status change that lands in the
+   * same millisecond as the write before it — a turn that fails immediately
+   * does exactly that, and the owner then keeps seeing a run that claims to
+   * be running. The run component therefore also carries a digest of the
+   * status column: the sum of first code points and the sum of lengths.
+   * Both move for any single transition among the five run statuses, whose
+   * (code point, length) pairs are all distinct.
+   */
   worldTraceWatermark(worldId: string): string {
     const row = this.database
       .prepare(
         `SELECT
-           (SELECT COUNT(1) || '@' || COALESCE(MAX(COALESCE(completed_at, started_at, created_at)), '') FROM agent_runs WHERE world_id = ?) AS runs,
+           (SELECT COUNT(1) || '@' || COALESCE(MAX(COALESCE(completed_at, started_at, created_at)), '')
+              || '@' || COALESCE(SUM(unicode(status)), 0) || '.' || COALESCE(SUM(length(status)), 0)
+            FROM agent_runs WHERE world_id = ?) AS runs,
            (SELECT COUNT(1) || '@' || COALESCE(MAX(created_at), '') FROM domain_events WHERE world_id = ?) AS events,
            (SELECT COUNT(1) || '@' || COALESCE(MAX(created_at), '') FROM messages WHERE session_id IN (SELECT id FROM work_sessions WHERE world_id = ?)) AS messages,
            (SELECT COUNT(1) || '@' || COALESCE(MAX(updated_at), '') FROM skill_actions WHERE world_id = ?) AS actions,
