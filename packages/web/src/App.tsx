@@ -3389,6 +3389,9 @@ function demoSkinPackages(): CyberMarketPackage[] {
 
 function runtimeFailureMessage(event: AgentRuntimeEvent): string {
   const failure = metadataText(event.metadata.failure) ?? metadataText(event.metadata.errorCode)
+  if (failure === 'context-limit' || failure === 'runtime-context-limit') {
+    return '本次输入和角色资料过长，超过当前模型可用上下文。请缩短消息、角色设定或资料，或切换更大上下文的模型后重试。'
+  }
   if (failure === 'provider-authentication' || failure === 'authentication') {
     return 'API 密钥被模型服务拒绝。请打开“设置 → 模型”重新填写密钥，并先获取模型列表确认连接成功。'
   }

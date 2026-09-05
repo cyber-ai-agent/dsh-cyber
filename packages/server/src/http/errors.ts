@@ -1,5 +1,6 @@
 import type { ServerResponse } from 'node:http'
 
+import { ContextInputTooLargeError } from '@dsh-cyber/contracts'
 import {
   AgentTurnFailedError,
   ConversationOrchestrationError,
@@ -48,10 +49,28 @@ export function writeError(response: ServerResponse, error: unknown): void {
     writeJson(response, status, errorPayload(error.code, error.message))
     return
   }
+  if (error instanceof ContextInputTooLargeError) {
+    writeJson(response, 413, errorPayload(
+      'context_input_too_large',
+      agentTurnFailureMessage('context-limit'),
+      {
+        estimatedTokens: error.estimatedTokens,
+        inputBudgetTokens: error.inputBudgetTokens,
+      },
+    ))
+    return
+  }
   if (error instanceof AgentTurnFailedError) {
-    writeJson(response, 502, {
-      ...errorPayload(`model_turn_${error.failureKind.replaceAll('-', '_')}`, agentTurnFailureMessage(error.failureKind)),
-    })
+    const contextLimit = error.failureKind === 'context-limit'
+    const hasLimits = contextLimit && error.estimatedTokens !== undefined
+      && error.inputBudgetTokens !== undefined
+    writeJson(response, contextLimit ? 413 : 502, errorPayload(
+      `model_turn_${error.failureKind.replaceAll('-', '_')}`,
+      agentTurnFailureMessage(error.failureKind),
+      hasLimits
+        ? { estimatedTokens: error.estimatedTokens, inputBudgetTokens: error.inputBudgetTokens }
+        : undefined,
+    ))
     return
   }
   if (error instanceof ConversationOrchestrationError) {
@@ -84,12 +103,18 @@ export function writeError(response: ServerResponse, error: unknown): void {
   })
 }
 
-function errorPayload(code: string, message: string): { error: { code: string; message: string; messageKey: string } } {
-  return { error: { code, message, messageKey: `error.${code}` } }
+function errorPayload(
+  code: string,
+  message: string,
+  details?: Record<string, number>,
+): { error: { code: string; message: string; messageKey: string; [key: string]: string | number } } {
+  return { error: { code, message, messageKey: `error.${code}`, ...(details ?? {}) } }
 }
 
 export function agentTurnFailureMessage(kind: AgentTurnFailureKind): string {
   switch (kind) {
+    case 'context-limit':
+      return '本次输入和角色资料过长，超过当前模型可用上下文。请缩短消息、角色设定或资料，或切换更大上下文的模型后重试。'
     case 'authentication':
       return 'API 密钥被模型服务拒绝。请打开“设置 → 模型”重新填写密钥，并先获取模型列表确认连接成功。'
     case 'model-not-found':

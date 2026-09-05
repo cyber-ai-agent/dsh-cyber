@@ -15,6 +15,7 @@ import type {
   JsonObject,
   ModelTokenUsage,
 } from '@dsh-cyber/contracts'
+import { assertContextInputFits, planContextBudget } from '@dsh-cyber/contracts'
 
 import { formatRecoveredHistoryPrompt, unseenHistory } from './history-prompt.js'
 import { resolveHarnessPromptCache } from './prompt-cache.js'
@@ -204,10 +205,50 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     lane: EmployeeLane,
     task: LaneTask,
   ): Promise<EmployeeTurnResult> {
-    const profile = await this.#getProfile()
     assertLaneTaskActive(task)
     const permissionMode = request.permissionMode ?? 'read-only'
     const workspacePath = resolve(request.workspacePath)
+    // A changed persona, permission mode or cwd requires a new process and a
+    // new Harness session. Treat it as fresh while preparing the prompt, but
+    // leave the old lane untouched until the fixed-input check passes.
+    const needsReset =
+      (lane.permissionMode !== undefined && lane.permissionMode !== permissionMode) ||
+      (lane.workspacePath !== undefined && lane.workspacePath !== workspacePath) ||
+      (lane.persona !== undefined && lane.persona !== request.revision.persona)
+    // This is the last provider-neutral boundary where the complete
+    // server-authored input is available. The ContextPlanningRuntime usually
+    // supplied the plan; the provider-profile fallback keeps direct adapter
+    // embedders safe when they already declare model limits.
+    const contextBudget = resolveAdapterContextBudget(request, this.#options.providerProfile)
+    const existingSessionId = needsReset ? undefined : lane.agentSessionId
+    const formatPrompt = (
+      freshSession: boolean,
+      observedThroughSequence = request.observedThroughSequence,
+    ): string => {
+      const formatted = formatRecoveredHistoryPrompt(
+        unseenHistory(request.history, observedThroughSequence, freshSession),
+        request.prompt,
+        contextBudget === undefined ? {} : { maxTokens: contextBudget.historyTokens },
+      )
+      if (contextBudget !== undefined) {
+        // The native Harness session may retain additional provider-owned
+        // history or tool schemas. This fixed-input check covers only the
+        // system prompt and the exact prompt we are about to pass to it; it
+        // does not prove that the provider's complete context fits.
+        assertContextInputFits(
+          [employeeSystemPrompt(request.employee, request.revision), formatted],
+          contextBudget.inputBudgetTokens,
+        )
+      }
+      return formatted
+    }
+    // Run the check before profile creation, runtime creation and session-id
+    // binding. A rejected fresh turn must remain fresh so its next attempt
+    // still receives the history it has never actually observed.
+    const prompt = formatPrompt(existingSessionId === undefined)
+
+    const profile = await this.#getProfile()
+    assertLaneTaskActive(task)
     // The cwd is fixed when the runtime process starts, so a lane that keeps
     // running after the owner revokes a file permission would keep the
     // directory it was given. Both halves of the sandbox have to invalidate
@@ -217,11 +258,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     // prompt, and it now carries the world's stable rules. A lane that kept
     // running after the owner edited those rules (or the persona itself)
     // would keep answering under the old ones.
-    if (
-      (lane.permissionMode !== undefined && lane.permissionMode !== permissionMode) ||
-      (lane.workspacePath !== undefined && lane.workspacePath !== workspacePath) ||
-      (lane.persona !== undefined && lane.persona !== request.revision.persona)
-    ) {
+    if (needsReset) {
       // Permission is lane-local. Changing a private chat from read-only to
       // workspace-write must not tear down the same employee's group lane.
       await lane.runtime?.close()
@@ -272,14 +309,8 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     // for a private chat, where the character has seen every message of the
     // conversation, and non-empty in a group, where whoever spoke first last
     // round never saw the characters that answered after it.
-    const existingSessionId = lane.agentSessionId
-    const agentSessionId = existingSessionId ?? freshAgentSessionId(request.employee.id)
-    if (existingSessionId === undefined) lane.agentSessionId = agentSessionId
-    const prompt = formatRecoveredHistoryPrompt(
-      unseenHistory(request.history, request.observedThroughSequence, existingSessionId === undefined),
-      request.prompt,
-      request.contextBudget === undefined ? {} : { maxTokens: request.contextBudget.historyTokens },
-    )
+    const agentSessionId = lane.agentSessionId ?? freshAgentSessionId(request.employee.id)
+    if (lane.agentSessionId === undefined) lane.agentSessionId = agentSessionId
 
     let observedNotification = false
     const onNotification = request.onNotification === undefined
@@ -299,15 +330,24 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       // the prompt is queued. Only that exact, side-effect-free failure is safe
       // to retry.
       if (observedNotification || !isPersistedSessionCollision(error)) throw error
-      const recoveredSessionId = freshAgentSessionId(request.employee.id)
       if (task.aborted) throw error
+      // Session recovery replays from sequence zero. Re-apply the same guard
+      // to that larger prompt before binding the replacement id or calling the
+      // Harness a second time.
+      // The first id has already been proven invalid by the collision. Clear
+      // it before the guard so a rejected recovery cannot make the next valid
+      // turn retry the same stale binding.
+      lane.agentSessionId = undefined
+      const recoveredPrompt = formatPrompt(true, 0)
+      if (task.aborted) throw error
+      const recoveredSessionId = freshAgentSessionId(request.employee.id)
       lane.agentSessionId = recoveredSessionId
       // Only this conversation rotates. The recovered session starts empty, so
       // the whole history is replayed even if the conversation had already run
       // in this process.
       const result = await lane.runtime!.run(
         recoveredSessionId,
-        formatRecoveredHistoryPrompt(unseenHistory(request.history, 0, true), request.prompt, request.contextBudget === undefined ? {} : { maxTokens: request.contextBudget.historyTokens }),
+        recoveredPrompt,
         request.onNotification,
       )
       return { agentSessionId: recoveredSessionId, ...result }
@@ -860,6 +900,26 @@ function requiredConversationId(value: string | undefined): string {
     throw new Error('A Harness turn requires the conversation it belongs to')
   }
   return conversationId
+}
+
+/**
+ * Resolve a plan for direct adapter embedders that bypass the server's
+ * ContextPlanningRuntime. Production requests already carry this plan, so
+ * the fallback is deliberately opt-in: an adapter with no declared model
+ * limits must preserve its legacy behavior rather than invent a window.
+ */
+function resolveAdapterContextBudget(
+  request: Pick<EmployeeTurnRequest, 'contextBudget' | 'revision' | 'prompt'>,
+  providerProfile: HarnessProviderProfile | undefined,
+): AgentTurnRequest['contextBudget'] | undefined {
+  if (request.contextBudget !== undefined) return request.contextBudget
+  const model = providerProfile?.model
+  if (model === undefined || (model.contextWindow === undefined && model.maxTokens === undefined)) return undefined
+  return planContextBudget({
+    ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
+    ...(model.maxTokens === undefined ? {} : { maxOutputTokens: model.maxTokens }),
+    fixedText: [request.revision.persona, request.prompt],
+  })
 }
 
 function assertLaneTaskActive(task: LaneTask): void {

@@ -4,6 +4,11 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import {
+  ContextInputTooLargeError,
+  estimateTextTokens,
+  planContextBudget,
+} from '@dsh-cyber/contracts'
 import type {
   AgentRuntimePort,
   EmployeeInstance,
@@ -73,6 +78,352 @@ describe('Harness profile and adapter', () => {
     }]
     expect(extractHarnessTokenUsage(notifications)).toEqual({ prompt: 420, completion: 80, total: 500 })
     expect(extractHarnessTokenUsage([])).toBeUndefined()
+  })
+
+  it.each([
+    ['CJK', '长'.repeat(4_000)],
+    ['code', 'function run() { return "value" }\n'.repeat(1_000)],
+    ['emoji', '🧩'.repeat(10_000)],
+  ])('rejects an oversized %s prompt before invoking Harness', async (_kind, prompt) => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-context-input-'))
+    let runs = 0
+    const adapter = new HarnessCompatibilityAdapter({
+      stateRoot,
+      runtimeFactory: () => ({
+        async run() {
+          runs += 1
+          return { finalResponse: 'unexpected', notifications: [] }
+        },
+        async close() {},
+      }),
+    })
+
+    await expect(adapter.runEmployeeTurn({
+      employee: employee(),
+      revision: revision(),
+      conversationId: 'context-input-too-large',
+      history: [],
+      observedThroughSequence: 0,
+      prompt,
+      workspacePath: stateRoot,
+      contextBudget: planContextBudget({ contextWindow: 4_096, maxOutputTokens: 1_024 }),
+    })).rejects.toBeInstanceOf(ContextInputTooLargeError)
+    expect(runs).toBe(0)
+    await adapter.close()
+  })
+
+  it('counts the final expanded system persona and allows the exact estimated boundary', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-context-boundary-'))
+    const currentRevision = revision()
+    const profile = {
+      homeDir: stateRoot,
+      profileDir: stateRoot,
+      profileManifestPath: stateRoot,
+      profilePatchPath: stateRoot,
+      settingsPath: stateRoot,
+    }
+    const systemPrompt = workerEnvironment({}, {
+      employee: employee(),
+      revision: currentRevision,
+      profile,
+      workspacePath: stateRoot,
+      sessionsRoot: join(stateRoot, 'sessions'),
+      permissionMode: 'read-only',
+    }).DSH_SYSTEM_PROMPT!
+    const prompt = '边界'
+    const exactInputTokens = estimateTextTokens(systemPrompt) + estimateTextTokens(prompt)
+    const baseBudget = planContextBudget({ contextWindow: 4_096, maxOutputTokens: 1_024 })
+    const exactBudget = { ...baseBudget, inputBudgetTokens: exactInputTokens, historyTokens: 0 }
+    let runs = 0
+    const adapter = new HarnessCompatibilityAdapter({
+      stateRoot,
+      runtimeFactory: () => ({
+        async run() {
+          runs += 1
+          return { finalResponse: 'ok', notifications: [] }
+        },
+        async close() {},
+      }),
+    })
+
+    await adapter.runEmployeeTurn({
+      employee: employee(),
+      revision: currentRevision,
+      conversationId: 'context-boundary',
+      history: [],
+      observedThroughSequence: 0,
+      prompt,
+      workspacePath: stateRoot,
+      contextBudget: exactBudget,
+    })
+    expect(runs).toBe(1)
+
+    await expect(adapter.runEmployeeTurn({
+      employee: employee(),
+      revision: currentRevision,
+      conversationId: 'context-boundary',
+      history: [],
+      observedThroughSequence: 0,
+      prompt,
+      workspacePath: stateRoot,
+      contextBudget: { ...exactBudget, inputBudgetTokens: exactInputTokens - 1 },
+    })).rejects.toBeInstanceOf(ContextInputTooLargeError)
+    expect(runs).toBe(1)
+    await adapter.close()
+  })
+
+  it('does not bind a fresh session on rejection, so the next valid turn replays history', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-context-rejection-recovery-'))
+    const calls: Array<{ sessionId: string; prompt: string }> = []
+    const history = [{
+      role: 'user' as const,
+      sequence: 1,
+      speakerId: 'owner',
+      speakerName: '用户',
+      content: '此前结论',
+      createdAt: '2026-09-06T00:00:00.000Z',
+    }]
+    const adapter = new HarnessCompatibilityAdapter({
+      stateRoot,
+      runtimeFactory: () => ({
+        async run(sessionId, prompt) {
+          calls.push({ sessionId, prompt })
+          return { finalResponse: 'ok', notifications: [] }
+        },
+        async close() {},
+      }),
+    })
+
+    await expect(adapter.runEmployeeTurn({
+      employee: employee(),
+      revision: revision(),
+      conversationId: 'context-rejection-recovery',
+      history,
+      observedThroughSequence: 1,
+      prompt: '长'.repeat(4_000),
+      workspacePath: stateRoot,
+      contextBudget: planContextBudget({ contextWindow: 4_096, maxOutputTokens: 1_024 }),
+    })).rejects.toBeInstanceOf(ContextInputTooLargeError)
+    expect(calls).toHaveLength(0)
+
+    await adapter.runEmployeeTurn({
+      employee: employee(),
+      revision: revision(),
+      conversationId: 'context-rejection-recovery',
+      history,
+      observedThroughSequence: 1,
+      prompt: '继续',
+      workspacePath: stateRoot,
+      contextBudget: planContextBudget({ contextWindow: 8_192, maxOutputTokens: 1_024 }),
+    })
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.prompt).toContain('[本地持久会话历史]')
+    expect(calls[0]!.prompt).toContain('此前结论')
+    await adapter.close()
+  })
+
+  it('resets a changed persona before selecting the session and replays full history', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-context-persona-reset-'))
+    const specs: HarnessRuntimeSpec[] = []
+    const calls: Array<{ sessionId: string; prompt: string }> = []
+    let closes = 0
+    const adapter = new HarnessCompatibilityAdapter({
+      stateRoot,
+      runtimeFactory(spec) {
+        specs.push(spec)
+        return {
+          async run(sessionId, prompt) {
+            calls.push({ sessionId, prompt })
+            return { finalResponse: 'ok', notifications: [] }
+          },
+          async close() {
+            closes += 1
+          },
+        }
+      },
+    })
+    const baseRevision = revision()
+
+    await adapter.runEmployeeTurn({
+      employee: employee(),
+      revision: baseRevision,
+      conversationId: 'context-persona-reset',
+      history: [],
+      observedThroughSequence: 0,
+      prompt: '第一轮',
+      workspacePath: stateRoot,
+    })
+    const firstSessionId = calls[0]!.sessionId
+    const changedRevision = { ...baseRevision, persona: `${baseRevision.persona}\n\n新的角色设定` }
+    const history = [{
+      role: 'user' as const,
+      sequence: 1,
+      speakerId: 'owner',
+      speakerName: '用户',
+      content: '需要完整恢复的历史消息',
+      createdAt: '2026-09-06T00:00:00.000Z',
+    }]
+
+    await adapter.runEmployeeTurn({
+      employee: employee(),
+      revision: changedRevision,
+      conversationId: 'context-persona-reset',
+      history,
+      // A stale-session implementation would filter sequence 1 out here.
+      observedThroughSequence: 1,
+      prompt: '第二轮',
+      workspacePath: stateRoot,
+      permissionMode: 'workspace-write',
+    })
+
+    expect(calls[1]!.sessionId).not.toBe(firstSessionId)
+    expect(calls[1]!.prompt).toContain('[本地持久会话历史]')
+    expect(calls[1]!.prompt).toContain('需要完整恢复的历史消息')
+    expect(specs).toHaveLength(2)
+    expect(specs[1]!.revision.persona).toBe(changedRevision.persona)
+    expect(specs[1]!.permissionMode).toBe('workspace-write')
+    expect(closes).toBe(1)
+    await adapter.close()
+    expect(closes).toBe(2)
+  })
+
+  it('keeps the old lane intact when a changed persona is rejected by the budget guard', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-context-reset-reject-'))
+    const specs: HarnessRuntimeSpec[] = []
+    const calls: string[] = []
+    let closes = 0
+    const adapter = new HarnessCompatibilityAdapter({
+      stateRoot,
+      runtimeFactory(spec) {
+        specs.push(spec)
+        return {
+          async run(sessionId) {
+            calls.push(sessionId)
+            return { finalResponse: 'ok', notifications: [] }
+          },
+          async close() {
+            closes += 1
+          },
+        }
+      },
+    })
+    const baseRevision = revision()
+
+    await adapter.runEmployeeTurn({
+      employee: employee(),
+      revision: baseRevision,
+      conversationId: 'context-reset-reject',
+      history: [],
+      observedThroughSequence: 0,
+      prompt: '第一轮',
+      workspacePath: stateRoot,
+    })
+    const firstSessionId = calls[0]!
+    const changedRevision = { ...baseRevision, persona: `${baseRevision.persona}\n\n${'长'.repeat(2_000)}` }
+
+    await expect(adapter.runEmployeeTurn({
+      employee: employee(),
+      revision: changedRevision,
+      conversationId: 'context-reset-reject',
+      history: [],
+      observedThroughSequence: 1,
+      prompt: '长'.repeat(4_000),
+      workspacePath: stateRoot,
+      permissionMode: 'workspace-write',
+      contextBudget: planContextBudget({ contextWindow: 4_096, maxOutputTokens: 1_024 }),
+    })).rejects.toBeInstanceOf(ContextInputTooLargeError)
+
+    expect(closes).toBe(0)
+    expect(specs).toHaveLength(1)
+    expect(calls).toHaveLength(1)
+
+    await adapter.runEmployeeTurn({
+      employee: employee(),
+      revision: baseRevision,
+      conversationId: 'context-reset-reject',
+      history: [],
+      observedThroughSequence: 1,
+      prompt: '继续',
+      workspacePath: stateRoot,
+    })
+    expect(calls).toHaveLength(2)
+    expect(calls[1]).toBe(firstSessionId)
+    expect(specs).toHaveLength(1)
+    expect(closes).toBe(0)
+    await adapter.close()
+    expect(closes).toBe(1)
+  })
+
+  it('rechecks the full history before a persisted-session collision retry', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-context-collision-'))
+    const currentRevision = { ...revision(), persona: '长'.repeat(2_100) }
+    const contextBudget = planContextBudget({ contextWindow: 4_096, maxOutputTokens: 1_024 })
+    const history = [{
+      role: 'user' as const,
+      sequence: 1,
+      speakerId: 'owner',
+      speakerName: '用户',
+      content: '历史内容'.repeat(600),
+      createdAt: '2026-09-06T00:00:00.000Z',
+    }]
+    const calls: string[] = []
+    const prompts: string[] = []
+    const adapter = new HarnessCompatibilityAdapter({
+      stateRoot,
+      runtimeFactory: () => ({
+        async run(sessionId, prompt) {
+          calls.push(sessionId)
+          prompts.push(prompt)
+          if (calls.length === 2) {
+            throw new Error('session already has a persisted log on disk that does not match this live session (id collision)')
+          }
+          return { finalResponse: 'ok', notifications: [] }
+        },
+        async close() {},
+      }),
+    })
+
+    await adapter.runEmployeeTurn({
+      employee: employee(),
+      revision: currentRevision,
+      conversationId: 'context-collision',
+      history: [],
+      observedThroughSequence: 0,
+      prompt: '启动',
+      workspacePath: stateRoot,
+      contextBudget,
+    })
+    await expect(adapter.runEmployeeTurn({
+      employee: employee(),
+      revision: currentRevision,
+      conversationId: 'context-collision',
+      history,
+      // The live session has observed sequence 1, so the initial attempt has
+      // no recovered history; collision recovery must replay it from zero.
+      observedThroughSequence: 1,
+      prompt: '继续',
+      workspacePath: stateRoot,
+      contextBudget,
+    })).rejects.toBeInstanceOf(ContextInputTooLargeError)
+    expect(calls).toHaveLength(2)
+
+    // The collided id was cleared before the rejected recovery check. A later
+    // request must allocate a fresh id and replay the history it still has not
+    // delivered to the live Harness session.
+    await adapter.runEmployeeTurn({
+      employee: employee(),
+      revision: currentRevision,
+      conversationId: 'context-collision',
+      history,
+      observedThroughSequence: 1,
+      prompt: '第三次尝试',
+      workspacePath: stateRoot,
+      contextBudget: planContextBudget({ contextWindow: 8_192, maxOutputTokens: 1_024 }),
+    })
+    expect(calls).toHaveLength(3)
+    expect(calls[2]).not.toBe(calls[1])
+    expect(prompts[2]).toContain('历史内容')
+    await adapter.close()
   })
 
   it('normalizes Harness facts without persisting tool arguments', () => {

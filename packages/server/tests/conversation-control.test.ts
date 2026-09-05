@@ -80,6 +80,66 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 describe('Conversation control and durable queue', () => {
+  it('rejects an oversized CJK prompt before the runtime for immediate and queued chat', async () => {
+    const { origin, server, runtime, world, employee } = await start()
+    const profile = server.store.saveModelProfile({
+      workspaceId: world.workspaceId,
+      displayName: '4K context test model',
+      providerKind: 'openai-compatible-local',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      modelId: 'context-4k-test',
+      api: 'openai-completions',
+      isDefault: true,
+      settings: { contextWindow: 4_096, maxTokens: 1_024 },
+    })
+    server.store.saveModelAssignment({
+      workspaceId: world.workspaceId,
+      scope: 'employee',
+      scopeId: employee.id,
+      modelProfileId: profile.id,
+    })
+    const prompt = '中'.repeat(32_000)
+
+    const immediate = await json(origin, `/api/worlds/${world.id}/chat`, post({
+      employeeIds: [employee.id],
+      prompt,
+    }))
+    expect(immediate.response.status).toBe(413)
+    expect(immediate.body.error).toMatchObject({
+      code: 'model_turn_context_limit',
+      estimatedTokens: expect.any(Number),
+      inputBudgetTokens: expect.any(Number),
+    })
+    expect(immediate.body.error.message).toContain('上下文')
+    expect(runtime.calls).toHaveLength(0)
+
+    const queued = await json(origin, `/api/worlds/${world.id}/chat-queue`, post({
+      employeeIds: [employee.id],
+      prompt,
+      queueMode: 'normal',
+      clientTurnId: 'context-limit-queued',
+    }))
+    expect(queued.response.status).toBe(202)
+    await waitFor(() => server.store.getWorkTurn(queued.body.workTurnId)?.status === 'failed')
+    expect(runtime.calls).toHaveLength(0)
+
+    const failed = await json(origin, `/api/worlds/${world.id}/chat-queue?status=failed`)
+    expect(failed.body.items[0]).toMatchObject({
+      id: 'context-limit-queued',
+      errorCode: 'runtime-context-limit',
+    })
+    expect(failed.body.items[0].error).toContain('上下文')
+    const failedEvents = server.store.listWorldDomainEvents(world.id)
+      .filter((event) => event.type === 'turn.failed' && event.payload?.workTurnId === queued.body.workTurnId)
+    expect(failedEvents).toHaveLength(1)
+    expect(failedEvents[0]?.payload).toMatchObject({
+      failure: 'context-limit',
+      estimatedTokens: expect.any(Number),
+      inputBudgetTokens: expect.any(Number),
+    })
+    expect(JSON.stringify(failedEvents[0])).not.toContain(prompt)
+  })
+
   it('claims a queued WorkTurn and continues the original turn without rebuilding it', async () => {
     const { origin, server, runtime, world, employee } = await start()
     const queued = await json(origin, `/api/worlds/${world.id}/chat-queue`, post({

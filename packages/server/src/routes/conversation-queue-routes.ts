@@ -2,6 +2,8 @@ import type { AgentPermissionMode, JsonObject, ReasoningEffort } from '@dsh-cybe
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { HttpError } from '../http/errors.js'
+import { agentTurnFailureMessage } from '../http/errors.js'
+import type { AgentTurnFailureKind } from '@dsh-cyber/orchestration'
 import { requireWorldAcceptingWork } from '../services/world-work-guard.js'
 import { optionalString, readJson, requiredString } from '../http/request.js'
 import type { Router } from '../http/router.js'
@@ -106,7 +108,7 @@ export function registerConversationQueueRoutes(router: Router, dependencies: Co
         title: session?.title ?? '对话任务',
         ...(userMessage?.content === undefined ? {} : { content: userMessage.content }),
         createdAt: item.enqueuedAt,
-        ...(item.errorCode === undefined ? {} : { error: item.errorCode }),
+        ...(item.errorCode === undefined ? {} : { error: queueErrorMessage(item.errorCode) }),
       }
     })
     writeJson(response, 200, { items })
@@ -167,6 +169,23 @@ export function registerConversationQueueRoutes(router: Router, dependencies: Co
     const sessionId = optionalString(url.searchParams.get('sessionId'))
     writeJson(response, 200, { removed: queue.clear(world.id, world.workspaceId, sessionId) })
   })
+}
+
+function queueErrorMessage(errorCode: string): string {
+  if (!errorCode.startsWith('runtime-')) return errorCode
+  const kind = errorCode.slice('runtime-'.length)
+  if (!isAgentTurnFailureKind(kind)) return errorCode
+  return agentTurnFailureMessage(kind)
+}
+
+function isAgentTurnFailureKind(value: string): value is AgentTurnFailureKind {
+  return value === 'context-limit'
+    || value === 'authentication'
+    || value === 'model-not-found'
+    || value === 'rate-limited'
+    || value === 'timeout'
+    || value === 'unreachable'
+    || value === 'unknown'
 }
 
 function parsePermissionMode(value: unknown): AgentPermissionMode | undefined {

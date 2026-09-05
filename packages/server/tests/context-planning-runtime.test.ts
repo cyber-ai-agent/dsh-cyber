@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { AgentRuntimePort, AgentTurnRequest } from '@dsh-cyber/contracts'
+import { ContextInputTooLargeError, planContextBudget } from '@dsh-cyber/contracts'
 
 import { ContextPlanningRuntime } from '../src/services/context-planning-runtime.js'
 
@@ -26,6 +27,23 @@ describe('ContextPlanningRuntime', () => {
     await runtime.runTurn({ ...request, contextBudget })
 
     expect(inner.request?.contextBudget).toBe(contextBudget)
+  })
+
+  it('refuses a reachable long chat before calling the inner model runtime', async () => {
+    const inner = new CaptureRuntime()
+    const runtime = new ContextPlanningRuntime(inner, () => ({ contextWindow: 4_096, maxOutputTokens: 1_024 }))
+    const request = { ...turnRequest(), prompt: '中'.repeat(32_000) }
+    await expect(runtime.runTurn(request)).rejects.toBeInstanceOf(ContextInputTooLargeError)
+    expect(inner.request).toBeUndefined()
+    expect(request.prompt).toHaveLength(32_000)
+  })
+
+  it('does not let a supplied plan bypass the fixed input check', async () => {
+    const inner = new CaptureRuntime()
+    const runtime = new ContextPlanningRuntime(inner, () => undefined)
+    const request = { ...turnRequest(), contextBudget: planContextBudget({ contextWindow: 4_096, maxOutputTokens: 1_024 }), prompt: '中'.repeat(3_000) }
+    await expect(runtime.runTurn(request)).rejects.toBeInstanceOf(ContextInputTooLargeError)
+    expect(inner.request).toBeUndefined()
   })
 })
 

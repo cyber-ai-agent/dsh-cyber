@@ -25,6 +25,7 @@ import type {
   WorkSessionParticipant,
   World,
 } from '@dsh-cyber/contracts'
+import { ContextInputTooLargeError } from '@dsh-cyber/contracts'
 
 import {
   buildConversationHistory,
@@ -369,6 +370,7 @@ export class AgentTurnInterruptedError extends ConversationOrchestrationError {
 }
 
 export type AgentTurnFailureKind =
+  | 'context-limit'
   | 'authentication'
   | 'model-not-found'
   | 'rate-limited'
@@ -379,12 +381,20 @@ export type AgentTurnFailureKind =
 export class AgentTurnFailedError extends ConversationOrchestrationError {
   readonly employeeId: string
   readonly failureKind: AgentTurnFailureKind
+  readonly estimatedTokens: number | undefined
+  readonly inputBudgetTokens: number | undefined
 
-  constructor(employeeId: string, failureKind: AgentTurnFailureKind = 'unknown') {
+  constructor(
+    employeeId: string,
+    failureKind: AgentTurnFailureKind = 'unknown',
+    context?: { estimatedTokens?: number; inputBudgetTokens?: number },
+  ) {
     super('Agent model turn failed')
     this.name = 'AgentTurnFailedError'
     this.employeeId = employeeId
     this.failureKind = failureKind
+    this.estimatedTokens = context?.estimatedTokens
+    this.inputBudgetTokens = context?.inputBudgetTokens
   }
 }
 
@@ -1413,6 +1423,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
     const pendingAssistantMessages: PendingAssistantMessage[] = []
     let failedTurn = false
     let failedTurnKind: AgentTurnFailureKind = 'unknown'
+    let failedTurnContext: ContextLimitDetails | undefined
     try {
       this.#store.appendDomainEvent({
         workspaceId: session.workspaceId,
@@ -1453,6 +1464,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
           if (tracedEvent.kind === 'turn.failed') {
             failedTurn = true
             failedTurnKind = classifyRuntimeFailure(tracedEvent.metadata)
+            failedTurnContext = contextLimitDetails(tracedEvent.metadata)
           }
           if (tracedEvent.kind === 'assistant.message' && tracedEvent.content?.trim()) {
             responsePersisted = true
@@ -1473,7 +1485,7 @@ export class ConversationOrchestrator implements AsyncDisposable {
       this.#store.bindEmployeeAgentSession(employee.id, result.agentSessionId)
       if (failedTurn) {
         this.#store.failAgentRun(agentRun.id, `runtime-${failedTurnKind}`, result.agentSessionId)
-        throw new AgentTurnFailedError(employee.id, failedTurnKind)
+        throw new AgentTurnFailedError(employee.id, failedTurnKind, failedTurnContext)
       }
       const content = result.finalResponse.trim()
       const completionStatus = this.#completionJobType === undefined ? 'completed' : 'pending'
@@ -1558,21 +1570,56 @@ export class ConversationOrchestrator implements AsyncDisposable {
         throw error instanceof AgentTurnInterruptedError ? error : new AgentTurnInterruptedError(employee.id)
       }
       if (!(error instanceof AgentTurnFailedError)) {
-        this.#store.failAgentRun(agentRun.id, lifecycleErrorCode(error))
-        this.#store.appendDomainEvent({
-          workspaceId: session.workspaceId,
-          worldId: session.worldId,
-          sessionId: session.id,
-          type: 'turn.failed',
-          actorId: employee.id,
-          actorKind: 'employee',
-          correlationId: session.id,
-          payload: { employeeId: employee.id, failure: 'runtime-error', traceTurnId, agentRunId: agentRun.id, workTurnId: workTurn.id },
-        })
+        const failureKind = classifyRuntimeFailure(error)
+        const failureContext = contextLimitDetails(error)
+        const failureCode = `runtime-${failureKind}`
+        this.#store.failAgentRun(agentRun.id, failureCode)
+        if (failureKind === 'context-limit' && failureContext !== undefined && !failedTurn) {
+          // The context guard runs before the provider runtime, so there may
+          // be no runtime event to relay. Publish one safe terminal fact for
+          // both immediate and queued callers; never include the prompt.
+          const contextLimitEvent: AgentRuntimeEvent = {
+            kind: 'turn.failed',
+            source: 'context-budget',
+            sourceSessionId: agentRun.id,
+            failed: true,
+            metadata: {
+              failure: 'context-limit',
+              errorCode: failureCode,
+              estimatedTokens: failureContext.estimatedTokens,
+              inputBudgetTokens: failureContext.inputBudgetTokens,
+              traceTurnId,
+              agentRunId: agentRun.id,
+              workTurnId: workTurn.id,
+              ...(clientTurnId === undefined ? {} : { clientTurnId }),
+            },
+          }
+          this.#persistRuntimeEvent(session, employee, contextLimitEvent)
+          this.#emit({
+            workspaceId: session.workspaceId,
+            worldId: session.worldId,
+            sessionId: session.id,
+            agentId: employee.id,
+            agentRunId: agentRun.id,
+            workTurnId: workTurn.id,
+            event: contextLimitEvent,
+          })
+        } else if (!failedTurn) {
+          this.#store.appendDomainEvent({
+            workspaceId: session.workspaceId,
+            worldId: session.worldId,
+            sessionId: session.id,
+            type: 'turn.failed',
+            actorId: employee.id,
+            actorKind: 'employee',
+            correlationId: session.id,
+            payload: { employeeId: employee.id, failure: 'runtime-error', traceTurnId, agentRunId: agentRun.id, workTurnId: workTurn.id },
+          })
+        }
       }
       throw error instanceof AgentTurnFailedError
         ? error
-        : new AgentTurnFailedError(employee.id, classifyRuntimeFailure(error))
+        : new AgentTurnFailedError(employee.id, classifyRuntimeFailure(error), contextLimitDetails(error))
     } finally {
       this.#activeAgentRuns.delete(agentRun.id)
       this.#abortedAgentRuns.delete(agentRun.id)
@@ -1803,7 +1850,44 @@ interface PendingAssistantMessage {
   metadata: JsonObject
 }
 
+interface ContextLimitDetails {
+  estimatedTokens: number
+  inputBudgetTokens: number
+}
+
+function contextLimitDetails(value: unknown): ContextLimitDetails | undefined {
+  if (value instanceof ContextInputTooLargeError) {
+    return {
+      estimatedTokens: value.estimatedTokens,
+      inputBudgetTokens: value.inputBudgetTokens,
+    }
+  }
+  if (value instanceof AgentTurnFailedError && value.failureKind === 'context-limit') {
+    return validContextLimitDetails(value.estimatedTokens, value.inputBudgetTokens)
+  }
+  if (value === null || typeof value !== 'object') return undefined
+  const record = value as Record<string, unknown>
+  const code = record.code
+  const failure = record.failure ?? record.errorCode
+  if (code !== 'context-input-too-large' && failure !== 'context-limit' && failure !== 'runtime-context-limit') return undefined
+  return validContextLimitDetails(record.estimatedTokens, record.inputBudgetTokens)
+}
+
+function validContextLimitDetails(estimatedTokens: unknown, inputBudgetTokens: unknown): ContextLimitDetails | undefined {
+  if (typeof estimatedTokens !== 'number' || !Number.isFinite(estimatedTokens)) return undefined
+  if (typeof inputBudgetTokens !== 'number' || !Number.isFinite(inputBudgetTokens)) return undefined
+  return { estimatedTokens, inputBudgetTokens }
+}
+
 function classifyRuntimeFailure(value: unknown): AgentTurnFailureKind {
+  if (value instanceof ContextInputTooLargeError) return 'context-limit'
+  if (value instanceof AgentTurnFailedError && value.failureKind === 'context-limit') return 'context-limit'
+  if (value !== null && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    if (record.code === 'context-input-too-large' || record.failure === 'context-limit' || record.errorCode === 'runtime-context-limit') {
+      return 'context-limit'
+    }
+  }
   const signal = value instanceof Error
     ? `${value.name} ${value.message}`
     : value !== null && typeof value === 'object'
