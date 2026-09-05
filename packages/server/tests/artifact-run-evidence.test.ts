@@ -70,6 +70,25 @@ describe('AgentRun file evidence', () => {
     expect(fixture.service.list(fixture.world.id)).toEqual([])
   })
 
+  it('does not call a run text-only when the host saw writes it could not publish', async () => {
+    const fixture = await createFixture()
+    const bracket = await fixture.evidence.begin({ worldId: fixture.world.id, agentRunId: fixture.run.id, workspacePath: fixture.root.filesPath })
+    const target = join(fixture.root.filesPath, 'draft.md')
+    await writeFile(target, '# will be deleted before publication\n')
+    const record = await fixture.evidence.complete(bracket)
+    expect(record?.files).toHaveLength(1)
+    await rm(target)
+
+    const contribution = await fixture.service.publishAgentRun(fixture.context())
+    expect(contribution.messageMetadata).toMatchObject({
+      artifactCount: 0,
+      completionOutcome: 'no-artifact',
+      artifactFailureCount: 1,
+      artifactFailures: [{ path: 'draft.md', code: 'artifact_source_not_found' }],
+    })
+    expect(contribution.messageMetadata?.completionOutcome).not.toBe('text-only')
+  })
+
   it('marks two runs writing the same file name in overlapping windows as unproven', async () => {
     const fixture = await createFixture()
     const secondRun = fixture.store.createAgentRun({

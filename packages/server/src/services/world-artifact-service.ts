@@ -756,7 +756,10 @@ function completionContribution(input: {
     ? 'none'
     : EVIDENCE_ORDER.find((grade) => grades.includes(grade)) ?? 'unproven-window'
   const unprovenCount = grades.filter((grade) => grade !== 'host-observed').length
-  const hostSaysNothingLanded = input.observed !== undefined && !input.observed.truncated
+  // "The reply was text only" is a positive Host statement, so it needs an
+  // untruncated census that saw no write at all. Files the Host did see but
+  // could not publish are a failure to report, never a quiet text-only turn.
+  const hostSaysNothingLanded = input.observed !== undefined && !input.observed.truncated && input.observed.files.length === 0
   const messageMetadata: JsonObject = {
     artifactCount: input.artifactRefs.length,
     completionOutcome: input.artifactRefs.length > 0
