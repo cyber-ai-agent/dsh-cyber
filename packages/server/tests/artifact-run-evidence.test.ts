@@ -312,6 +312,25 @@ describe('AgentRun file evidence', () => {
     const view = await fixture.service.describe(fixture.world.id, contribution.artifactRefs![0]!)
     expect(view.evidence?.[0]).toMatchObject({ grade: 'host-observed', proven: true, contentMatchesObservation: true })
   })
+
+  it('refuses to re-assert proof from a stored record that never carried the content check', async () => {
+    const fixture = await createFixture()
+    await writeFile(join(fixture.root.filesPath, 'analysis.md'), '# generated analysis\n')
+    await writeManifest(fixture, [{ path: 'analysis.md', title: '分析', kind: 'markdown' }])
+    const contribution = await fixture.service.publishAgentRun(fixture.context())
+    const artifactId = contribution.artifactRefs![0]!
+
+    // A record written before the bytes were re-checked at publication time.
+    // The reader may repeat only what such a record can still defend.
+    await fixture.evidence.recordPublications({
+      worldId: fixture.world.id,
+      agentRunId: fixture.run.id,
+      entries: [{ artifactId, version: 1, sourceRelativePath: 'analysis.md', grade: 'host-observed', observedAtMs: Date.now() }],
+    })
+
+    const view = await fixture.service.describe(fixture.world.id, artifactId)
+    expect(view.evidence?.[0]).toMatchObject({ version: 1, grade: 'host-observed', proven: false })
+  })
 })
 
 describe('CharacterProfileRuntime run bracket', () => {
