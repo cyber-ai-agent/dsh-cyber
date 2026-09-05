@@ -153,6 +153,33 @@ describe('HTTP error mapping', () => {
     })
     expect(fake.text()).not.toContain('employee-private-id')
   })
+
+  it('maps context-limit failures to 413 with numeric limits and no prompt details', () => {
+    const { fake, node } = response()
+    writeError(node, new AgentTurnFailedError('employee-private-id', 'context-limit', {
+      estimatedTokens: 32_768,
+      inputBudgetTokens: 4_096,
+    }))
+
+    expect(fake.statusCode).toBe(413)
+    const payload = JSON.parse(fake.text()) as { error: Record<string, unknown> }
+    expect(payload.error).toMatchObject({
+      code: 'model_turn_context_limit',
+      estimatedTokens: 32_768,
+      inputBudgetTokens: 4_096,
+    })
+    expect(String(payload.error.message)).toContain('上下文')
+    expect(fake.text()).not.toContain('employee-private-id')
+    expect(fake.text()).not.toContain('prompt')
+  })
+
+  it('keeps a known context refusal at 413 when numeric usage is unavailable', () => {
+    const { fake, node } = response()
+    writeError(node, new AgentTurnFailedError('employee', 'context-limit'))
+    expect(fake.statusCode).toBe(413)
+    expect(JSON.parse(fake.text()).error).toMatchObject({ code: 'model_turn_context_limit' })
+    expect(JSON.parse(fake.text()).error).not.toHaveProperty('estimatedTokens')
+  })
 })
 
 describe('stream lifecycle', () => {

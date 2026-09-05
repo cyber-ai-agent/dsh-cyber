@@ -99,9 +99,21 @@ describe('group Skill approval continuation', () => {
     expect(runtime.calls.some((call) => call.prompt.includes('来自受控浏览器的真实公开网页事实'))).toBe(true)
     expect(server.store.listMessages(task.body.session.id).filter((message) => message.kind === 'user')).toHaveLength(1)
 
+    // Both group members can now propose the same browser action. The group
+    // preparation boundary must still reserve only the first actual action;
+    // the task assignee above remains the only task executor.
+    const observerGranted = await postJson(`${origin}/api/employees/${observer.id}/revisions`, {
+      reason: '群聊重复动作限制测试',
+      skillGrants: ['browser.read'],
+      capabilityGrants: [],
+      modelPolicy: {},
+    })
+    expect(observerGranted.status).toBe(201)
+
     const callsBeforeReject = runtime.calls.length
     const discussion = await postJson<{ session: { id: string }; workTurnId: string; queueItem: { id: string } }>(`${origin}/api/worlds/${world.id}/chat`, {
-      employeeIds: [observer.id, browserEmployee.id],
+      // Put the task-capable member first so the expected winner is stable.
+      employeeIds: [browserEmployee.id, observer.id],
       prompt: '请读取 https://example.com/reject 后分别讨论',
       collaborationMode: 'discussion',
       queueMode: 'normal',
@@ -113,7 +125,10 @@ describe('group Skill approval continuation', () => {
       'discussion WorkTurn to enter waiting-approval',
       () => approvalWaitDiagnostics(server, world.id, discussion.body.workTurnId, discussion.body.queueItem.id),
     )
-    const rejectedApproval = server.store.listWorldApprovalRequests(world.id, 'pending').find((request) => request.workTurnId === discussion.body.workTurnId)
+    const discussionApprovals = server.store.listWorldApprovalRequests(world.id, 'pending')
+      .filter((request) => request.workTurnId === discussion.body.workTurnId)
+    expect(discussionApprovals).toHaveLength(1)
+    const rejectedApproval = discussionApprovals[0]
     expect(rejectedApproval).toBeDefined()
     const rejected = await postJson(`${origin}/api/approvals/${rejectedApproval!.id}/decision`, { decision: 'rejected', scope: 'once' })
     expect(rejected.status).toBe(200)

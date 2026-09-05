@@ -1,4 +1,4 @@
-import { planContextBudget, type AgentRuntimePort, type AgentTurnRequest, type AgentTurnResult } from '@dsh-cyber/contracts'
+import { assertContextInputFits, planContextBudget, type AgentRuntimePort, type AgentTurnRequest, type AgentTurnResult } from '@dsh-cyber/contracts'
 
 export interface ContextModelLimits {
   contextWindow?: number
@@ -18,8 +18,11 @@ export class ContextPlanningRuntime implements AgentRuntimePort {
     private readonly resolveLimits: (request: AgentTurnRequest) => ContextModelLimits | undefined,
   ) {}
 
-  runTurn(request: AgentTurnRequest): Promise<AgentTurnResult> {
-    if (request.contextBudget !== undefined) return this.inner.runTurn(request)
+  async runTurn(request: AgentTurnRequest): Promise<AgentTurnResult> {
+    if (request.contextBudget !== undefined) {
+      assertContextInputFits([request.revision.persona, request.prompt], request.contextBudget.inputBudgetTokens)
+      return this.inner.runTurn(request)
+    }
     const limits = this.resolveLimits(request)
     const contextBudget = planContextBudget({
       ...(limits?.contextWindow === undefined ? {} : { contextWindow: limits.contextWindow }),

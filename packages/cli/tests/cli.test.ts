@@ -84,6 +84,10 @@ describe('dsh-cyber CLI', () => {
     expect(exported.format).toBe('dsh-cyber-export')
     expect(backup.stdout).toEqual([backupPath])
     expect(portable.stdout).toEqual([exportPath])
+    const restored = captureIo()
+    expect(await runCli(['restore', '--input', backupPath, '--data-dir', stateRoot, '--force'], { io: restored.io })).toBe(0)
+    expect(restored.stdout.join('\n')).toContain('已恢复到')
+    expect(restored.stderr).toEqual([])
   })
 
   it('prints self-contained help and rejects unknown commands without throwing', async () => {

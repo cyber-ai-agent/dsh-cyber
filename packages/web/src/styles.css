@@ -1389,16 +1389,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .composer textarea { width: 100%; min-height: 72px; max-height: 160px; resize: vertical; padding: 14px 16px 4px; border: 0; background: transparent; font-size: var(--text-sm); line-height: 1.6; color: var(--text); }
 .composer textarea:focus-visible { outline: 0; }
 .composer-file-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-.composer-attachments { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 12px 0; }
-.composer-attachments > span { min-width: 0; max-width: 260px; display: grid; grid-template-columns: 18px minmax(0, 1fr) 20px; align-items: center; gap: 7px; padding: 7px 9px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
-.composer-attachments > span.is-image { grid-template-columns: 46px minmax(0, 1fr) 20px; }
+.composer-attachments { --attachment-action-size: 40px; --attachment-text-size: 12px; display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 12px 0; }
+.composer-attachments > span { min-width: 0; max-width: 260px; display: grid; grid-template-columns: 18px minmax(0, 1fr) var(--attachment-action-size); align-items: center; gap: 7px; padding: 7px 9px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+.composer-attachments > span.is-image { grid-template-columns: 46px minmax(0, 1fr) var(--attachment-action-size); }
 .composer-attachments__preview { width: 46px; height: 46px; display: block; border-radius: 4px; object-fit: cover; background: var(--surface-3); }
 .composer-attachments > span > span { min-width: 0; display: grid; gap: 1px; }
-.composer-attachments strong { overflow: hidden; color: var(--text-soft); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.composer-attachments small { color: var(--text-muted); font: 9px var(--font-mono); }
-.composer-attachments button { width: 22px; height: 22px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); }
+.composer-attachments strong { overflow: hidden; color: var(--text-soft); font-size: var(--attachment-text-size); text-overflow: ellipsis; white-space: nowrap; }
+.composer-attachments small { color: var(--text-muted); font-size: var(--attachment-text-size); line-height: 1.35; }
+.composer-attachment--failed small, .composer-attachment--interrupted small { color: var(--danger); }
+.composer-attachments button { width: var(--attachment-action-size); height: var(--attachment-action-size); display: grid; place-items: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); }
 .composer-attachments button:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent); }
-.composer-error { margin: 6px 12px 0; color: var(--danger); font-size: 11px; }
+.composer-error { margin: 6px 12px 0; color: var(--danger); font-size: 12px; line-height: 1.4; }
 .composer-topic-notice { display: grid; grid-template-columns: minmax(24px, 1fr) auto minmax(24px, 1fr); align-items: center; gap: 10px; margin: 0 8px 10px; color: var(--text-muted); font-size: 12px; line-height: 1.4; text-align: center; }
 .composer-topic-notice::before, .composer-topic-notice::after { content: ''; height: 1px; background: color-mix(in srgb, var(--border) 72%, transparent); }
 .composer__toolbar { min-height: 46px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 12px 8px; }
@@ -1468,15 +1469,16 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .composer textarea:focus-visible { outline: 0; }
 .composer-file-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .composer-attachments { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 9px 0; }
-.composer-attachments > span { min-width: 0; max-width: 260px; display: grid; grid-template-columns: 16px minmax(0, 1fr) 20px; align-items: center; gap: 6px; padding: 6px 7px; border: 1px solid var(--border); background: var(--surface-2); }
-.composer-attachments > span.is-image { grid-template-columns: 42px minmax(0, 1fr) 20px; }
+.composer-attachments > span { min-width: 0; max-width: 260px; display: grid; grid-template-columns: 16px minmax(0, 1fr) var(--attachment-action-size); align-items: center; gap: 6px; padding: 6px 7px; border: 1px solid var(--border); background: var(--surface-2); }
+.composer-attachments > span.is-image { grid-template-columns: 42px minmax(0, 1fr) var(--attachment-action-size); }
 .composer-attachments__preview { width: 42px; height: 42px; }
 .composer-attachments > span > span { min-width: 0; display: grid; gap: 1px; }
-.composer-attachments strong { overflow: hidden; color: var(--text-soft); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
-.composer-attachments small { color: var(--text-muted); font: 8px var(--font-mono); }
-.composer-attachments button { width: 20px; height: 20px; display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: var(--text-muted); }
+.composer-attachments strong { overflow: hidden; color: var(--text-soft); font-size: var(--attachment-text-size); text-overflow: ellipsis; white-space: nowrap; }
+.composer-attachments small { color: var(--text-muted); font-size: var(--attachment-text-size); line-height: 1.35; }
+.composer-attachment--failed small, .composer-attachment--interrupted small { color: var(--danger); }
+.composer-attachments button { width: var(--attachment-action-size); height: var(--attachment-action-size); display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: var(--text-muted); }
 .composer-attachments button:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
-.composer-error { margin: 6px 10px 0; color: var(--danger); font-size: 9px; }
+.composer-error { margin: 6px 10px 0; color: var(--danger); font-size: 12px; line-height: 1.4; }
 .composer-topic-notice { display: grid; grid-template-columns: minmax(24px, 1fr) auto minmax(24px, 1fr); align-items: center; gap: 10px; margin: 0 8px 8px; color: var(--text-muted); font-size: 12px; line-height: 1.4; text-align: center; }
 .composer-topic-notice::before, .composer-topic-notice::after { content: ''; height: 1px; background: color-mix(in srgb, var(--border) 72%, transparent); }
 .composer__toolbar { min-height: 42px; display: flex; align-items: center; justify-content: flex-start; gap: 8px; padding: 5px 8px 6px; }

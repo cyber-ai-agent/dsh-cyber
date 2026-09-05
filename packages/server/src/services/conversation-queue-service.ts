@@ -7,7 +7,13 @@ import type {
 } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
-import type { ConversationControlEnvelope, ConversationOrchestrator, ConversationResult, GroupConversationInput } from '@dsh-cyber/orchestration'
+import {
+  AgentTurnFailedError,
+  type ConversationControlEnvelope,
+  type ConversationOrchestrator,
+  type ConversationResult,
+  type GroupConversationInput,
+} from '@dsh-cyber/orchestration'
 import type { TurnAwareApprovalContinuationService, TurnAwareDirectInput } from './turn-aware-approval-continuation-service.js'
 
 type QueueStore = Pick<SqliteStore,
@@ -535,7 +541,7 @@ export class ConversationQueueService implements AsyncDisposable {
         this.#store.failConversationQueueEntry({
           queueEntryId: entry.id,
           expectedRevision: current.revision,
-          errorCode: error instanceof Error ? error.message.slice(0, 120) || 'queue-run-failed' : 'queue-run-failed',
+          errorCode: queueFailureCode(error),
         })
       } catch {
         // A Stop/cancel/recovery transition won the durable race.
@@ -545,6 +551,11 @@ export class ConversationQueueService implements AsyncDisposable {
       try { await this.#onSettled?.(entry) } catch { /* projections never replace the durable turn result */ }
     }
   }
+}
+
+function queueFailureCode(error: unknown): string {
+  if (error instanceof AgentTurnFailedError) return `runtime-${error.failureKind}`
+  return error instanceof Error ? error.message.slice(0, 120) || 'queue-run-failed' : 'queue-run-failed'
 }
 
 function queueEmployeeIds(metadata: Record<string, unknown> | undefined): string[] {

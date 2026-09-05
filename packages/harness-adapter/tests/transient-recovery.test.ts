@@ -39,6 +39,9 @@ function request(events: AgentRuntimeEvent[]): AgentTurnRequest {
   return {
     agent: employee,
     revision,
+    conversationId: 'conversation-1',
+    history: [],
+    observedThroughSequence: 0,
     prompt: '你好',
     workspacePath: '/tmp/world-1',
     onEvent: (event) => events.push(event),
@@ -81,7 +84,7 @@ describe('Harness transient recovery', () => {
         })
         return { agentSessionId: 'session-1', finalResponse: '恢复成功', eventCount: 1 }
       },
-      async closeAgent(agentId) { closedAgents.push(agentId) },
+      async resetSession(agentId) { closedAgents.push(agentId) },
       async close() {},
     }
     const router = new HarnessModelRouter({
@@ -113,7 +116,7 @@ describe('Harness transient recovery', () => {
         }
         return { agentSessionId: 'session-1', finalResponse: 'ok', eventCount: 0 }
       },
-      async closeAgent() { resets += 1 },
+      async resetSession() { resets += 1 },
       async close() {},
     }
     const router = new HarnessModelRouter({
@@ -153,7 +156,7 @@ describe('Harness transient recovery', () => {
         })
         return { agentSessionId: 'session-1', finalResponse: '部分回复', eventCount: 2 }
       },
-      async closeAgent() { resets += 1 },
+      async resetSession() { resets += 1 },
       async close() {},
     }
     const router = new HarnessModelRouter({

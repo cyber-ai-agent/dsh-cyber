@@ -62,8 +62,17 @@ export interface HarnessModelRouterOptions {
 }
 
 interface AdapterEntry {
+  routeId: string
   fingerprint: string
   adapter: AgentRuntimePort
+  leases: number
+  retired: boolean
+  closePromise?: Promise<void>
+}
+
+interface AdapterLease {
+  entry: AdapterEntry
+  release(): void
 }
 
 interface AttemptObservation {
@@ -85,76 +94,116 @@ interface AttemptObservation {
  */
 export class HarnessModelRouter implements AgentRuntimePort, AsyncDisposable {
   readonly #options: HarnessModelRouterOptions
-  readonly #entries = new Map<string, AdapterEntry>()
+  /** The current generation for each route id. Retired generations remain in #allEntries. */
+  readonly #currentEntries = new Map<string, AdapterEntry>()
+  /** Every generation created by this router, including retired generations. */
+  readonly #allEntries = new Set<AdapterEntry>()
   readonly #runEntries = new Map<string, AdapterEntry>()
   readonly #abortedRuns = new Set<string>()
+  #closed = false
+  #closePromise: Promise<void> | undefined
 
   constructor(options: HarnessModelRouterOptions) {
     this.#options = options
   }
 
   async runTurn(request: AgentTurnRequest): Promise<AgentTurnResult> {
+    if (this.#closed) throw new Error('Harness model router closed')
     const route = this.#options.resolveRoute(request)
     const routeId = route?.id ?? '__dsh-default__'
     const fingerprint = routeFingerprint(route)
-    let entry = await this.#entry(routeId, route, fingerprint)
+    // Entry acquisition and lease binding intentionally happen synchronously.
+    // There must be no await between selecting a generation and registering the
+    // run: a concurrent route update may retire the generation, but it must not
+    // close it while this turn is still about to start.
+    const lease = this.#acquireLease(routeId, route, fingerprint)
+    const entry = lease.entry
     if (request.agentRunId !== undefined && this.#abortedRuns.has(request.agentRunId)) {
+      lease.release()
       throw new Error('Agent run aborted')
     }
     if (request.agentRunId !== undefined) this.#runEntries.set(request.agentRunId, entry)
-    const observation: AttemptObservation = { unsafeToRetry: false }
-    const turnRequest = withoutUnsupportedReasoningEffort(request, route)
-    const observedRequest: AgentTurnRequest = {
-      ...turnRequest,
-      onEvent: (event) => {
-        if (event.kind === 'turn.failed') {
-          observation.terminalFailure = event
-          return
-        }
-        if (
-          event.kind === 'assistant.message'
-          || event.kind === 'text.delta'
-          || event.kind === 'tool.started'
-          || event.kind === 'tool.completed'
-        ) {
-          observation.unsafeToRetry = true
-        }
-        request.onEvent?.(event)
-      },
-    }
 
     try {
-      const result = await entry.adapter.runTurn(observedRequest)
-      const failure = observation.terminalFailure
-      if (
-        failure !== undefined
-        && !observation.unsafeToRetry
-        && !this.#isAborted(request)
-        && isTransientRuntimeFailure(failure.metadata)
-        && (entry.adapter.abortRun !== undefined || entry.adapter.closeAgent !== undefined)
-      ) {
-        await this.#resetFailedRun(entry, request)
-        return entry.adapter.runTurn(turnRequest)
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        if (this.#isAborted(request)) throw new Error('Agent run aborted')
+        const observation: AttemptObservation = { unsafeToRetry: false }
+        // Re-normalize the request and rebuild the event boundary for every
+        // attempt. The retry must carry the same provider-safe request shape,
+        // and its events must remain visible to the router for retry safety and
+        // approval routing.
+        const turnRequest = withoutUnsupportedReasoningEffort(request, route)
+        const observedRequest: AgentTurnRequest = {
+          ...turnRequest,
+          onEvent: (event) => {
+            if (event.kind === 'turn.failed') {
+              observation.terminalFailure = event
+              return
+            }
+            if (
+              event.kind === 'assistant.message'
+              || event.kind === 'text.delta'
+              || event.kind === 'tool.started'
+              || event.kind === 'tool.completed'
+              || event.kind === 'approval.requested'
+            ) {
+              observation.unsafeToRetry = true
+            }
+            request.onEvent?.(event)
+          },
+        }
+
+        let result: AgentTurnResult | undefined
+        let thrown = false
+        let error: unknown
+        try {
+          result = await entry.adapter.runTurn(observedRequest)
+        } catch (caught) {
+          thrown = true
+          error = caught
+        }
+
+        if (this.#isAborted(request)) {
+          // Preserve the provider's cancellation error when the adapter was
+          // able to interrupt the underlying run. A successful late result is
+          // rejected locally so cancellation can never enter the retry path.
+          if (thrown) throw error
+          throw new Error('Agent run aborted')
+        }
+        const failureSignal = observation.terminalFailure?.metadata ?? (thrown ? error : undefined)
+        const canRetry = attempt === 0
+          && !observation.unsafeToRetry
+          && entry.adapter.resetSession !== undefined
+          && request.conversationId.trim().length > 0
+          && isTransientRuntimeFailure(failureSignal)
+
+        if (canRetry) {
+          try {
+            await this.#resetFailedRun(entry, request)
+          } catch (resetError) {
+            // The original transient failure is otherwise hidden while the
+            // router was deciding whether it could safely retry. If reset
+            // itself fails, surface that original terminal fact once before
+            // returning the reset error.
+            if (observation.terminalFailure !== undefined) request.onEvent?.(observation.terminalFailure)
+            throw resetError
+          }
+          if (this.#isAborted(request)) throw new Error('Agent run aborted')
+          // A turn remains pinned to the generation it acquired before its
+          // first await. Route updates affect later turns; they must not swap
+          // the adapter underneath this retry while the old generation drains.
+          continue
+        }
+
+        if (observation.terminalFailure !== undefined) request.onEvent?.(observation.terminalFailure)
+        if (thrown) throw error
+        return result!
       }
-      if (failure !== undefined) request.onEvent?.(failure)
-      return result
-    } catch (error) {
-      const failureSignal = observation.terminalFailure?.metadata ?? error
-      if (
-        !observation.unsafeToRetry
-        && !this.#isAborted(request)
-        && isTransientRuntimeFailure(failureSignal)
-        && (entry.adapter.abortRun !== undefined || entry.adapter.closeAgent !== undefined)
-      ) {
-        await this.#resetFailedRun(entry, request)
-        entry = await this.#entry(routeId, route, fingerprint)
-        return entry.adapter.runTurn(request)
-      }
-      if (observation.terminalFailure !== undefined) request.onEvent?.(observation.terminalFailure)
-      throw error
+      throw new Error('Harness model router exhausted retry attempts')
     } finally {
+      lease.release()
       if (request.agentRunId !== undefined) {
-        this.#runEntries.delete(request.agentRunId)
+        if (this.#runEntries.get(request.agentRunId) === entry) this.#runEntries.delete(request.agentRunId)
         this.#abortedRuns.delete(request.agentRunId)
       }
     }
@@ -169,7 +218,7 @@ export class HarnessModelRouter implements AgentRuntimePort, AsyncDisposable {
     }
     // A queued/just-starting run may not have reached the adapter map yet.
     // Keep the tombstone so a late runTurn cannot start it after Stop.
-    await Promise.all([...this.#entries.values()].map((item) => item.adapter.abortRun?.(agentRunId)))
+    await Promise.all([...this.#allEntries].map((item) => item.adapter.abortRun?.(agentRunId)))
   }
 
   async decideApproval(agentRunId: string, approvalRequestId: string, decision: 'approved' | 'rejected'): Promise<void> {
@@ -180,25 +229,35 @@ export class HarnessModelRouter implements AgentRuntimePort, AsyncDisposable {
 
   async closeAgent(agentId: string): Promise<void> {
     await Promise.all(
-      [...this.#entries.values()].map((entry) => entry.adapter.closeAgent?.(agentId)),
+      [...this.#allEntries]
+        .filter((entry) => !entry.retired || entry.leases > 0)
+        .map((entry) => entry.adapter.closeAgent?.(agentId)),
     )
   }
 
   async close(): Promise<void> {
-    const adapters = [...this.#entries.values()].map((entry) => entry.adapter)
-    this.#entries.clear()
+    if (this.#closePromise !== undefined) return this.#closePromise
+    this.#closed = true
     this.#runEntries.clear()
     this.#abortedRuns.clear()
-    const results = await Promise.allSettled(adapters.map((adapter) => adapter.close()))
-    const failures = results.filter(
-      (result): result is PromiseRejectedResult => result.status === 'rejected',
-    )
-    if (failures.length > 0) {
-      throw new AggregateError(
-        failures.map((failure) => failure.reason),
-        `Failed to close ${failures.length} routed Harness runtime(s)`,
-      )
+    for (const [routeId, entry] of this.#currentEntries) {
+      this.#currentEntries.delete(routeId)
+      this.#retireEntry(entry)
     }
+    const entries = [...this.#allEntries]
+    this.#closePromise = (async () => {
+      const results = await Promise.allSettled(entries.map((entry) => this.#closeEntry(entry, true)))
+      const failures = results.filter(
+        (result): result is PromiseRejectedResult => result.status === 'rejected',
+      )
+      if (failures.length > 0) {
+        throw new AggregateError(
+          failures.map((failure) => failure.reason),
+          `Failed to close ${failures.length} routed Harness runtime(s)`,
+        )
+      }
+    })()
+    return this.#closePromise
   }
 
   [Symbol.asyncDispose](): Promise<void> {
@@ -206,40 +265,83 @@ export class HarnessModelRouter implements AgentRuntimePort, AsyncDisposable {
   }
 
   #isAborted(request: AgentTurnRequest): boolean {
-    return request.agentRunId !== undefined && this.#abortedRuns.has(request.agentRunId)
+    return this.#closed || (request.agentRunId !== undefined && this.#abortedRuns.has(request.agentRunId))
   }
 
   async #resetFailedRun(entry: AdapterEntry, request: AgentTurnRequest): Promise<void> {
-    if (request.agentRunId !== undefined && entry.adapter.abortRun !== undefined) {
-      await entry.adapter.abortRun(request.agentRunId)
-    }
-    // A rejected turn has normally left the adapter's active-run table before
-    // the router observes the failure, so abortRun alone can be a no-op. Close
-    // this employee's cached lanes as the definitive reset boundary; the next
-    // attempt then creates a fresh worker without disturbing other employees or
-    // provider adapters.
-    await entry.adapter.closeAgent?.(request.agent.id)
+    // Only the conversation-scoped reset is a valid retry boundary. Aborting a
+    // run or closing an employee can either be a no-op after a terminal event
+    // or tear down unrelated conversation lanes.
+    if (entry.adapter.resetSession === undefined) throw new Error('Harness adapter cannot reset a conversation session')
+    await entry.adapter.resetSession(request.agent.id, request.conversationId)
   }
 
-  async #entry(
+  #acquireLease(
     routeId: string,
     route: HarnessModelRoute | undefined,
     fingerprint: string,
-  ): Promise<AdapterEntry> {
-    let entry = this.#entries.get(routeId)
-    if (entry !== undefined && entry.fingerprint !== fingerprint) {
-      this.#entries.delete(routeId)
-      await entry.adapter.close()
-      entry = undefined
+  ): AdapterLease {
+    if (this.#closed) throw new Error('Harness model router closed')
+    const current = this.#currentEntries.get(routeId)
+    if (current !== undefined && current.fingerprint === fingerprint && !current.retired) {
+      return this.#lease(current)
     }
-    if (entry === undefined) {
-      entry = {
-        fingerprint,
-        adapter: this.#createAdapter(route, fingerprint),
-      }
-      this.#entries.set(routeId, entry)
+
+    if (current !== undefined) {
+      this.#currentEntries.delete(routeId)
+      this.#retireEntry(current)
     }
-    return entry
+
+    // The factory is deliberately called before publishing the new entry. A
+    // transient factory failure therefore leaves no poisoned cache entry, so a
+    // later turn can retry creation.
+    const entry: AdapterEntry = {
+      routeId,
+      fingerprint,
+      adapter: this.#createAdapter(route, fingerprint),
+      leases: 0,
+      retired: false,
+    }
+    this.#currentEntries.set(routeId, entry)
+    this.#allEntries.add(entry)
+    return this.#lease(entry)
+  }
+
+  #lease(entry: AdapterEntry): AdapterLease {
+    entry.leases += 1
+    let released = false
+    return {
+      entry,
+      release: () => {
+        if (released) return
+        released = true
+        entry.leases = Math.max(0, entry.leases - 1)
+        if (entry.leases === 0 && (entry.retired || this.#closed)) this.#closeEntry(entry)
+      },
+    }
+  }
+
+  #retireEntry(entry: AdapterEntry): void {
+    if (entry.retired) return
+    entry.retired = true
+    if (entry.leases === 0) this.#closeEntry(entry)
+  }
+
+  #closeEntry(entry: AdapterEntry, force = false): Promise<void> {
+    if (entry.closePromise !== undefined) return entry.closePromise
+    if (!force && entry.leases > 0) return Promise.resolve()
+    entry.closePromise = Promise.resolve()
+      .then(() => entry.adapter.close())
+      .then(() => {
+        // Successful retired generations no longer need to stay in the
+        // registry. Failed closes remain recorded so close() can report the
+        // evidence and never invoke the same adapter twice.
+        this.#allEntries.delete(entry)
+      })
+    // Retired generations are closed in the background. Router.close() still
+    // awaits the same promise and reports any close failure to its caller.
+    void entry.closePromise.catch(() => undefined)
+    return entry.closePromise
   }
 
   #createAdapter(route: HarnessModelRoute | undefined, fingerprint: string): AgentRuntimePort {

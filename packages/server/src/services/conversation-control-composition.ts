@@ -161,10 +161,10 @@ async function runQueuedGroup(
 }
 
 /**
- * Prepare at most one host action per actual executor. The old loop returned
- * the first matching action in room order, which meant an unrelated first
- * member could perform the browser/audio/etc action for the employee who was
- * actually assigned the work. Total actions stay bounded for cost/safety.
+ * Prepare at most one host action for the whole group request. The first
+ * member without a matching authorized proposal is skipped so a later member
+ * can still carry the action; once one action is returned, preparation stops
+ * before another member can reserve a duplicate external action.
  *
  * In task mode a coordinator may be reserved only so it can synthesize the
  * final answer. It must not steal an external action from a step assignee, so
@@ -180,7 +180,6 @@ async function prepareGroupSkillActions(
   const actionEmployees = taskRouting === undefined
     ? entry.employeeIds
     : [...new Set(taskRouting.steps.flatMap((step) => step.assignedEmployeeIds))]
-  const actions: CharacterSkillAction[] = []
   for (const characterId of actionEmployees) {
     const prepared = await skillRuntime.prepare({
       workspaceId: entry.workspaceId,
@@ -191,10 +190,12 @@ async function prepareGroupSkillActions(
       prompt,
       maxActions: 1,
     })
-    actions.push(...prepared.actions)
-    if (actions.length >= 4) break
+    // CharacterSkillRuntime applies maxActions before reserving or executing
+    // anything. Treat the first returned action as the group-wide winner and
+    // do not ask another member to prepare the same user request.
+    if (prepared.actions.length > 0) return [prepared.actions[0]!]
   }
-  return actions.slice(0, 4)
+  return []
 }
 
 function currentTurnUserMessage(messages: WorkMessage[], workTurnId: string): WorkMessage | undefined {

@@ -1297,6 +1297,8 @@ export interface AgentRuntimePort {
   decideApproval?(agentRunId: string, approvalRequestId: string, decision: 'approved' | 'rejected'): Promise<void>
   /** Abort exactly one live AgentRun without closing another conversation lane. */
   abortRun?(agentRunId: string): Promise<void>
+  /** Reset only the named conversation lane; unrelated conversations keep running. */
+  resetSession?(agentId: string, conversationId: string): Promise<void>
   closeAgent?(agentId: string): Promise<void>
   close(): Promise<void>
 }
