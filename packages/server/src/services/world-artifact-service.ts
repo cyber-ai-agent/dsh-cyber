@@ -109,6 +109,31 @@ export interface PublishGeneratedImageInput {
   idempotencyKey?: string
 }
 
+/**
+ * Text the owner decided to keep, written down as a document.
+ *
+ * There is deliberately no field here an employee id, a work turn or an
+ * AgentRun could travel in, so nothing reaching this method can raise the
+ * publication above `owner-published`: `describe` reads `owner-published`
+ * exactly when the version names no run and the artifact was created by the
+ * owner, and both of those are fixed below rather than supplied by a caller.
+ */
+export interface PublishOwnerDocumentInput {
+  workspaceId: string
+  worldId: string
+  /** Markdown body, stored byte for byte as the document's only content. */
+  text: string
+  title: string
+  description?: string
+  /** Stable retry key so a repeated save stays one document. */
+  idempotencyKey?: string
+  /** Stable id so a retry after a crash repairs instead of orphaning. */
+  artifactId?: string
+}
+
+/** The only creator identity an owner publication may carry. */
+const OWNER_PUBLISHER_ID = 'local-user'
+
 export interface ArtifactPreview {
   artifact: WorldArtifact
   version: WorldArtifactVersion
@@ -237,6 +262,49 @@ export class WorldArtifactService {
       })
     } finally {
       await rm(cachePath, { force: true }).catch(() => undefined)
+    }
+  }
+
+  /**
+   * Publish text the owner chose to keep as a Markdown document.
+   *
+   * The bytes go through the same managed cache → verified copy → registry
+   * path every other publication uses, so the document is a real file with a
+   * real digest. What it is not is evidence of execution: it is published as
+   * the owner, with no run identity at all, which is exactly the
+   * `owner-published` grade and never anything stronger.
+   */
+  async publishOwnerDocument(input: PublishOwnerDocumentInput): Promise<WorldArtifactPublication> {
+    if (typeof input.text !== 'string' || input.text.trim() === '') {
+      throw invalid('artifact_document_empty', '没有可保存的正文')
+    }
+    const bytes = Buffer.from(input.text, 'utf8')
+    if (bytes.byteLength > WORLD_ARTIFACT_LIMITS.maxFileBytes) throw invalid('artifact_size_rejected', '文档超过大小限制')
+    const title = input.title.trim()
+    if (title === '') throw invalid('artifact_document_title_required', '文档需要一个名称')
+    const root = await this.#roots.ensure(input.worldId)
+    // A per-save directory keeps two documents that derive the same file name
+    // from colliding in the cache while they are being staged.
+    const cacheDirectory = join(root.cachePath, 'owner-documents', randomUUID())
+    await mkdir(cacheDirectory, { recursive: true })
+    const cachePath = join(cacheDirectory, documentFileName(title))
+    await writeFile(cachePath, bytes, { flag: 'wx', mode: 0o600 })
+    try {
+      return await this.publishImportedFile({
+        workspaceId: input.workspaceId,
+        worldId: input.worldId,
+        sourcePath: cachePath,
+        title,
+        kind: 'markdown',
+        mimeType: 'text/markdown; charset=utf-8',
+        createdByKind: 'owner',
+        createdById: OWNER_PUBLISHER_ID,
+        ...(input.description === undefined ? {} : { description: input.description }),
+        ...(input.artifactId === undefined ? {} : { artifactId: input.artifactId }),
+        ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),
+      })
+    } finally {
+      await rm(cacheDirectory, { recursive: true, force: true }).catch(() => undefined)
     }
   }
 
@@ -860,6 +928,25 @@ async function discoverRunArtifactEntries(
     candidateCount: files.length,
     truncated: false,
   }
+}
+
+/**
+ * A file name the owner would recognise, derived from the document's title.
+ *
+ * Everything a path could use to mean something else - separators, control
+ * characters, a leading dot, the Windows-reserved punctuation - is replaced
+ * rather than escaped, so the result is always a single plain segment.
+ */
+function documentFileName(title: string): string {
+  const cleaned = title
+    .replace(/[\p{Cc}\p{Cf}\\/:*?"<>|]/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .replace(/^[.\s]+/u, '')
+    .trim()
+  // Slice by code point so a title ending in an emoji cannot leave half of a
+  // surrogate pair behind in a file name.
+  const base = [...cleaned].slice(0, 60).join('').trim()
+  return `${base === '' ? '会话文档' : base}.md`
 }
 
 function artifactKindFromPath(path: string): WorldArtifactKind {
