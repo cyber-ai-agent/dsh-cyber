@@ -223,4 +223,35 @@ describe('WorldKnowledgeConsolidationScheduler', () => {
     await scheduler.scanOnce()
     expect(enqueue).not.toHaveBeenCalled()
   })
+
+  it('re-walks a source whose completed job predates the watermark instead of trusting it', async () => {
+    const now = Date.parse('2026-09-05T00:10:00.000Z')
+    const revision = now - 60_000
+    const enqueue = vi.fn(async () => ({} as never))
+    // Exactly what a pre-42 run left behind: the window was recorded as done
+    // with fromCursor 0 and the source revision as toCursor, and no source
+    // version row was ever written, so how much of the document that run
+    // actually covered is unknown.
+    const legacyJob = {
+      id: 'legacy-job', worldId: 'world', workspaceId: 'workspace', sourceType: 'document' as const, sourceId: 'doc',
+      status: 'completed' as const, attempt: 1, fromCursor: 0, toCursor: revision,
+      createdAt: '2026-08-01T00:00:00.000Z', updatedAt: '2026-08-01T00:05:00.000Z',
+    }
+    const scheduler = new WorldKnowledgeConsolidationScheduler({
+      repository: {
+        listWorlds: () => [{ workspaceId: 'workspace', worldId: 'world' }],
+        listSessions: () => [],
+        listSources: () => [{ sourceType: 'document', sourceId: 'doc', updatedAt: new Date(revision).toISOString() }],
+        getConsolidationSourceJob: () => legacyJob,
+        // No row for this source: the watermark table knows nothing about it.
+        getKnowledgeSourceProgress: () => undefined,
+      },
+      messages: { listMessagesPage: () => ({ items: [] }) },
+      service: { enqueue, enqueueConversation: vi.fn() },
+      clockMs: () => now,
+    })
+
+    await scheduler.scanOnce()
+    expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ sourceId: 'doc', fromCursor: 0, toCursor: revision }))
+  })
 })
