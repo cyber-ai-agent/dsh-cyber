@@ -12,7 +12,7 @@ import {
   X,
 } from '@phosphor-icons/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { AgentPermissionMode, ModelProfile, ReasoningEffort, World, WorldSettings } from '@dsh-cyber/contracts'
+import type { AgentPermissionMode, ModelAssignment, ModelProfile, ReasoningEffort, World, WorldSettings } from '@dsh-cyber/contracts'
 
 import { useDialogFocusTrap } from './useDialogFocusTrap.js'
 import { ModelPicker } from '../features/models/ModelPicker.js'
@@ -23,6 +23,7 @@ interface WorldSettingsDialogProps {
   world: World
   value: WorldSettings
   models: ModelProfile[]
+  modelAssignments: ModelAssignment[]
   installedSkinIds?: readonly string[]
   saving: boolean
   onClose(): void
@@ -35,6 +36,7 @@ export function WorldSettingsDialog({
   world,
   value,
   models,
+  modelAssignments,
   installedSkinIds,
   saving,
   onClose,
@@ -53,8 +55,23 @@ export function WorldSettingsDialog({
   const [skinQuery, setSkinQuery] = useState('')
 
   const defaultGlobalModel = useMemo(() => {
+    // Check world-level assignment first
+    const worldAssignment = modelAssignments.find(
+      (a) => a.scope === 'world' && a.scopeId === world.id
+    )
+    if (worldAssignment) {
+      return models.find((m) => m.id === worldAssignment.modelProfileId)
+    }
+    // Fall back to workspace-level assignment
+    const workspaceAssignment = modelAssignments.find(
+      (a) => a.scope === 'workspace' && a.scopeId === world.workspaceId
+    )
+    if (workspaceAssignment) {
+      return models.find((m) => m.id === workspaceAssignment.modelProfileId)
+    }
+    // Last resort: isDefault or first model
     return models.find((m) => m.isDefault) ?? models[0]
-  }, [models])
+  }, [models, modelAssignments, world.id, world.workspaceId])
 
   const defaultGlobalModelLabel = useMemo(() => {
     if (!defaultGlobalModel) return t('worldSettings.noModelConfigured', '未配置模型')

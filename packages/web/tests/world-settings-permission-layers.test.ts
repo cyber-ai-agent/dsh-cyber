@@ -21,6 +21,7 @@ describe('WorldSettingsDialog permission layers', () => {
         updatedAt: '2026-08-25T08:00:00.000Z',
       } as never,
       models: [],
+      modelAssignments: [],
       employees: [],
       saving: false,
       onClose: () => undefined,
