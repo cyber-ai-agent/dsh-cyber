@@ -29,6 +29,36 @@ const MAX_PACKAGE_FILE_BYTES = 64 * 1024 * 1024
 const MAX_PACKAGE_TOTAL_BYTES = 256 * 1024 * 1024
 const MAX_PACKAGE_MANIFEST_BYTES = 1024 * 1024
 
+/** Why a package directory does not match the manifest that describes it. */
+export type PackageSourceIssueCode =
+  | 'undeclared-file'
+  | 'missing-file'
+  | 'symbolic-link'
+  | 'irregular-file'
+  | 'file-too-large'
+  | 'total-too-large'
+  | 'manifest-too-large'
+  | 'manifest-mismatch'
+
+/**
+ * One inventory mismatch, carrying enough structure for a caller to explain it.
+ *
+ * The message text is unchanged from the plain `Error` this replaces, and
+ * `name` is deliberately left at `Error` so failed installs keep recording the
+ * same transaction error code they always did.
+ */
+export class PackageSourceInventoryError extends Error {
+  readonly code: PackageSourceIssueCode
+  /** The package-relative path at fault, when the issue names one. */
+  readonly path: string | undefined
+
+  constructor(code: PackageSourceIssueCode, message: string, path?: string) {
+    super(message)
+    this.code = code
+    this.path = path
+  }
+}
+
 export class LocalPackageRuntime implements PackageRuntimePort {
   readonly #root: string
 
@@ -304,33 +334,33 @@ export async function verifyPackageSourceInventory(sourceRoot: string, manifest:
       const absolutePath = resolve(directory, entry.name)
       const metadata = await lstat(absolutePath)
       if (metadata.isSymbolicLink() || entry.isSymbolicLink()) {
-        throw new Error(`Package paths cannot contain symbolic links: ${relativePath}`)
+        throw new PackageSourceInventoryError('symbolic-link', `Package paths cannot contain symbolic links: ${relativePath}`, relativePath)
       }
       if (metadata.isDirectory()) {
         await visit(absolutePath, relativePath)
         continue
       }
-      if (!metadata.isFile()) throw new Error(`Package entry must be a regular file: ${relativePath}`)
+      if (!metadata.isFile()) throw new PackageSourceInventoryError('irregular-file', `Package entry must be a regular file: ${relativePath}`, relativePath)
       if (relativePath === 'dsh-cyber.package.json') {
-        if (metadata.size > MAX_PACKAGE_MANIFEST_BYTES) throw new Error('Package source manifest is too large')
+        if (metadata.size > MAX_PACKAGE_MANIFEST_BYTES) throw new PackageSourceInventoryError('manifest-too-large', 'Package source manifest is too large', relativePath)
         const sourceManifest = JSON.parse(await readFile(absolutePath, 'utf8')) as CyberPackageManifest
         validatePackageManifest(sourceManifest)
         if (packageManifestDigest(sourceManifest) !== packageManifestDigest(manifest)) {
-          throw new Error('Package source manifest does not match the approved manifest')
+          throw new PackageSourceInventoryError('manifest-mismatch', 'Package source manifest does not match the approved manifest', relativePath)
         }
         continue
       }
-      if (!declared.has(relativePath)) throw new Error(`Package source contains an undeclared file: ${relativePath}`)
-      if (metadata.size > MAX_PACKAGE_FILE_BYTES) throw new Error(`Package file is too large: ${relativePath}`)
+      if (!declared.has(relativePath)) throw new PackageSourceInventoryError('undeclared-file', `Package source contains an undeclared file: ${relativePath}`, relativePath)
+      if (metadata.size > MAX_PACKAGE_FILE_BYTES) throw new PackageSourceInventoryError('file-too-large', `Package file is too large: ${relativePath}`, relativePath)
       totalBytes += metadata.size
-      if (totalBytes > MAX_PACKAGE_TOTAL_BYTES) throw new Error('Package contents exceed the total size limit')
+      if (totalBytes > MAX_PACKAGE_TOTAL_BYTES) throw new PackageSourceInventoryError('total-too-large', 'Package contents exceed the total size limit')
       discovered.add(relativePath)
     }
   }
 
   await visit(sourceRoot, '')
   for (const path of declared) {
-    if (!discovered.has(path)) throw new Error(`Declared package file is missing: ${path}`)
+    if (!discovered.has(path)) throw new PackageSourceInventoryError('missing-file', `Declared package file is missing: ${path}`, path)
   }
 }
 
