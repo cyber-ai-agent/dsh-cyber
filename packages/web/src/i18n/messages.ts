@@ -118,7 +118,6 @@ export const enUS: Record<MessageKey, string> = {
   'task.source.heading': 'Source conversation',
   'task.source.turn': 'Turn {id} that asked for this task · {status}',
   'task.source.note': 'This is the conversation that asked for the task, not the task’s own execution.',
-  'task.group.draft': 'To plan', 'task.group.running': 'In progress', 'task.group.waitingApproval': 'Awaiting approval', 'task.group.waitingReview': 'Awaiting review', 'task.group.changesRequested': 'Changes requested', 'task.group.completed': 'Completed', 'task.group.failed': 'Failed',
   'task.action.feedbackVersion': 'Create a new version from feedback', 'task.action.start': 'Start real collaboration', 'task.action.sourceAlreadyRan': 'This conversation already did the work once. Running it again repeats the real side effects.', 'task.action.sourceStillWorking': 'The conversation that asked for this task is still working. Wait for it to finish, or the real side effects happen twice.', 'task.action.working': 'Working', 'task.action.available': 'Available', 'task.action.newVersion': 'Create new version', 'task.action.planAndRun': 'Create plan and run',
   'task.plan.heading': 'Plan and assignments', 'task.plan.empty': 'The real plan and selection reasons appear after execution.', 'task.plan.version': 'Plan v{version}',
   'task.execution.heading': 'Execution and evidence', 'task.execution.attempt': 'Run {attempt} · {status}', 'task.execution.workTurn': 'Work turn {id}', 'task.execution.agentRuns': '{count} role runs', 'task.execution.reason': 'Why {name} was selected',
