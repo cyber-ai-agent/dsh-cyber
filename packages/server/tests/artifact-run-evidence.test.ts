@@ -255,6 +255,63 @@ describe('AgentRun file evidence', () => {
     const view = await fixture.service.describe(fixture.world.id, contribution.artifactRefs![0]!)
     expect(view.evidence?.[0]).toMatchObject({ grade: 'shared-window', proven: false, contentMatchesObservation: false })
   })
+
+  it('does not call a project directory host-observed when its bytes were replaced after the run', async () => {
+    const fixture = await createFixture()
+    const bracket = await fixture.evidence.begin({ worldId: fixture.world.id, agentRunId: fixture.run.id, workspacePath: fixture.root.filesPath })
+    const project = join(fixture.root.filesPath, 'site')
+    await mkdir(project, { recursive: true })
+    await writeFile(join(project, 'index.html'), '<!doctype html><h1>observed</h1>')
+    const record = await fixture.evidence.complete(bracket)
+    expect(record?.files).toEqual([expect.objectContaining({ path: 'site/index.html', exclusive: true })])
+
+    await writeManifest(fixture, [{ path: 'site', title: '站点', kind: 'project', entrypoint: 'index.html' }])
+    // The bracket is closed. The completion job publishes later, so anything
+    // may still rewrite the directory in between.
+    await writeFile(join(project, 'index.html'), '<!doctype html><h1>replaced after the run</h1>')
+    await utimes(join(project, 'index.html'), new Date(), new Date())
+
+    const contribution = await fixture.service.publishAgentRun(fixture.context())
+    expect(contribution.messageMetadata).toMatchObject({ artifactCount: 1, artifactEvidence: 'shared-window' })
+    const view = await fixture.service.describe(fixture.world.id, contribution.artifactRefs![0]!)
+    expect(view.evidence?.[0]).toMatchObject({ grade: 'shared-window', proven: false, contentMatchesObservation: false })
+    expect(view.evidence?.[0]?.proven).toBe(false)
+  })
+
+  it('does not call a project directory host-observed when it carries a file no bracket ever covered', async () => {
+    const fixture = await createFixture()
+    const bracket = await fixture.evidence.begin({ worldId: fixture.world.id, agentRunId: fixture.run.id, workspacePath: fixture.root.filesPath })
+    const project = join(fixture.root.filesPath, 'site')
+    await mkdir(project, { recursive: true })
+    await writeFile(join(project, 'index.html'), '<!doctype html><h1>observed</h1>')
+    await fixture.evidence.complete(bracket)
+
+    await writeManifest(fixture, [{ path: 'site', title: '站点', kind: 'project', entrypoint: 'index.html' }])
+    // Every observed file still holds the observed bytes, but the tree the user
+    // will read is not the tree the host saw land.
+    await writeFile(join(project, 'smuggled.js'), 'console.log("never observed")\n')
+
+    const contribution = await fixture.service.publishAgentRun(fixture.context())
+    expect(contribution.messageMetadata).toMatchObject({ artifactCount: 1, artifactEvidence: 'shared-window' })
+    const view = await fixture.service.describe(fixture.world.id, contribution.artifactRefs![0]!)
+    expect(view.evidence?.[0]).toMatchObject({ grade: 'shared-window', proven: false, contentMatchesObservation: false })
+  })
+
+  it('still proves a project directory the run wrote whole and nobody touched afterwards', async () => {
+    const fixture = await createFixture()
+    const bracket = await fixture.evidence.begin({ worldId: fixture.world.id, agentRunId: fixture.run.id, workspacePath: fixture.root.filesPath })
+    const project = join(fixture.root.filesPath, 'site')
+    await mkdir(join(project, 'assets'), { recursive: true })
+    await writeFile(join(project, 'index.html'), '<!doctype html><h1>observed</h1>')
+    await writeFile(join(project, 'assets', 'data.json'), '{"ok":true}\n')
+    await fixture.evidence.complete(bracket)
+    await writeManifest(fixture, [{ path: 'site', title: '站点', kind: 'project', entrypoint: 'index.html' }])
+
+    const contribution = await fixture.service.publishAgentRun(fixture.context())
+    expect(contribution.messageMetadata).toMatchObject({ artifactCount: 1, artifactEvidence: 'host-observed' })
+    const view = await fixture.service.describe(fixture.world.id, contribution.artifactRefs![0]!)
+    expect(view.evidence?.[0]).toMatchObject({ grade: 'host-observed', proven: true, contentMatchesObservation: true })
+  })
 })
 
 describe('CharacterProfileRuntime run bracket', () => {
