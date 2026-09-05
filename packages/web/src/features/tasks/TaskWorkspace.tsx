@@ -115,7 +115,7 @@ function TaskDetail({ detail, employees, artifacts, busy, mutate }: { detail: Wo
     <details className="dock-detail-fold"><summary>{t('task.execution.heading', '执行与证据')} · {detail.runs.length}</summary>{detail.runs.map((run) => <article key={run.id} className="task-run"><strong>{t('task.execution.attempt', '第 {attempt} 次执行 · {status}', { attempt: run.attempt, status: taskStatusLabel(run.status, t) })}</strong><span>{t('task.execution.workTurn', '工作回合 {id}', { id: run.workTurnId.slice(0, 8) })} · {t('task.execution.agentRuns', '{count} 个角色运行', { count: formatNumber(run.agentRunIds.length) })} · {formatMilliseconds(run.latency ?? 0, locale)}</span></article>)}{detail.assignments.map((assignment) => <details key={assignment.id}><summary>{t('task.execution.reason', '{name} 的选择原因', { name: employeeName(employees, assignment.employeeId) })}</summary><pre>{JSON.stringify(assignment.assignmentReason, null, 2)}</pre></details>)}</details>
     {detail.task.status === 'waiting-review' && latestRun !== undefined && submitted === undefined ? <SubmitDeliverable taskId={detail.task.id} runId={latestRun.id} employees={employees} artifacts={artifacts} busy={busy} mutate={mutate} /> : null}
     <section><h3>{t('task.delivery.heading', '交付与验收')}</h3>{detail.deliverables.length === 0 ? <p>{t('task.delivery.empty', '还没有交付版本。')}</p> : detail.deliverables.map((item) => <DeliverableRow key={item.id} deliverable={item} reviews={detail.reviews.filter((review) => review.deliverableId === item.id)} />)}{submitted === undefined ? null : <ReviewForm deliverable={submitted} busy={busy} mutate={mutate} />}</section>
-    {CANCELLABLE.includes(detail.task.status) ? <CancelTask taskId={detail.task.id} busy={busy} mutate={mutate} /> : null}
+    {CANCELLABLE.includes(detail.task.status) ? <CancelTask key={detail.task.id} taskId={detail.task.id} busy={busy} mutate={mutate} /> : null}
   </>
 }
 
@@ -141,7 +141,10 @@ function SourceTurn({ turn, employees }: { turn: WorkTaskSourceTurn; employees: 
     {turn.runs.length === 0 ? null : <small>{formatList(turn.runs.map((run) => employeeName(employees, run.employeeId)))}</small>}
     {turn.errorCode === undefined ? null : <small className="task-source__error">{turn.errorCode}</small>}
     <small>{t('task.source.note', '这是提出任务的那次对话，不是任务本身的执行。')}</small>
+  </section>
+}
 
+/**
  * The way out of a task the owner did not want.
  *
  * It asks first, because the row stops being part of the working list. It is
