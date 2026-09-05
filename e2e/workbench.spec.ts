@@ -6,6 +6,7 @@ import { expect, test } from '@playwright/test'
 import type { AgentRuntimePort, AgentTurnRequest } from '../packages/contracts/lib/index.js'
 import { createCyberServer, type CyberServer } from '../packages/server/lib/index.js'
 import { openDockTab } from './dock-test-helpers.js'
+import { openTraceEntry } from './trace-test-helpers.js'
 
 let server: CyberServer
 let origin: string
@@ -75,9 +76,7 @@ test('onboards, recruits from dossier, talks, browses dossiers and keeps file su
   await page.getByRole('button', { name: '发送' }).click()
   await expect(page.getByText('我先建立性能基线。').first()).toBeVisible()
   await openDockTab(dock, '轨迹')
-  const completedTrace = dock.locator('.world-trace-item').filter({ hasText: '完成处理' }).filter({ hasText: '阿帆' }).first()
-  await expect(completedTrace).toBeVisible()
-  await completedTrace.locator('summary').click()
+  const completedTrace = await openTraceEntry(dock, '完成处理', '阿帆')
   await expect(completedTrace.locator('.world-trace-item__detail')).toContainText('核对事实与权限。')
   await expect(completedTrace.locator('.world-trace-item__detail')).toContainText('search_workspace')
   await expect(page.getByText('阿帆的思考过程')).toHaveCount(0)
@@ -231,12 +230,12 @@ test('keeps world sessions and message history isolated when world requests fini
 
   await page.goto(origin)
   await expect(page.locator('.workbench-shell')).toBeVisible()
-  await page.getByLabel(/切换世界，当前为/).click()
+  await page.getByLabel(/切换世界：/).click()
   await page.getByRole('menuitemradio', { name: new RegExp(slowWorld.world.name) }).click()
-  await page.getByLabel(new RegExp(`切换世界，当前为${slowWorld.world.name}`)).click()
+  await page.getByLabel(new RegExp(`切换世界：${slowWorld.world.name}`)).click()
   await page.getByRole('menuitemradio', { name: new RegExp(targetWorld.world.name) }).click()
 
-  await expect(page.getByLabel(new RegExp(`切换世界，当前为${targetWorld.world.name}`))).toBeVisible()
+  await expect(page.getByLabel(new RegExp(`切换世界：${targetWorld.world.name}`))).toBeVisible()
   await expect(page.getByRole('button', { name: `与${targetWorld.employeeName}私聊` })).toBeVisible()
   await expect(page.getByRole('button', { name: `与${slowWorld.employeeName}私聊` })).toHaveCount(0)
   await page.getByRole('button', { name: `与${targetWorld.employeeName}私聊` }).click()
@@ -272,14 +271,14 @@ test('keeps world sessions and message history isolated when world requests fini
   })
 
   await page.waitForTimeout(1_000)
-  await expect(page.getByLabel(new RegExp(`切换世界，当前为${targetWorld.world.name}`))).toBeVisible()
+  await expect(page.getByLabel(new RegExp(`切换世界：${targetWorld.world.name}`))).toBeVisible()
   await expect(page.getByRole('button', { name: `与${targetWorld.employeeName}私聊` })).toBeVisible()
   await expect(page.getByRole('button', { name: `与${slowWorld.employeeName}私聊` })).toHaveCount(0)
   await expect(chat.getByText('乙世界工程师历史·角色', { exact: true })).toBeVisible()
 
   await page.unroute(`**/api/worlds/${slowWorld.world.id}/snapshot`)
   await page.unroute(`**/api/sessions/${targetWorld.sessionId}/messages?*`)
-  await page.getByLabel(new RegExp(`切换世界，当前为${targetWorld.world.name}`)).click()
+  await page.getByLabel(new RegExp(`切换世界：${targetWorld.world.name}`)).click()
   await page.getByRole('menuitemradio', { name: new RegExp(slowWorld.world.name) }).click()
   await expect(page.getByRole('button', { name: `与${slowWorld.employeeName}私聊` })).toBeVisible()
   await page.getByRole('button', { name: `与${slowWorld.employeeName}私聊` }).click()
@@ -288,9 +287,9 @@ test('keeps world sessions and message history isolated when world requests fini
   await expect(chat.getByText(`${targetWorld.historyText}·角色`, { exact: true })).toHaveCount(0)
 
   if (returnWorld !== undefined && returnWorld.id !== slowWorld.world.id) {
-    await page.getByLabel(new RegExp(`切换世界，当前为${slowWorld.world.name}`)).click()
+    await page.getByLabel(new RegExp(`切换世界：${slowWorld.world.name}`)).click()
     await page.getByRole('menuitemradio', { name: new RegExp(returnWorld.name) }).click()
-    await expect(page.getByLabel(new RegExp(`切换世界，当前为${returnWorld.name}`))).toBeVisible()
+    await expect(page.getByLabel(new RegExp(`切换世界：${returnWorld.name}`))).toBeVisible()
   }
   expect(liveRequests.filter((url) => /\/stream(?:\?|$)/.test(url))).toEqual([])
   expect(targetSharedLiveRequests).toBe(1)
@@ -322,8 +321,10 @@ test('runs direct and group conversations with real world lifecycle, persistence
 
   const taskStartedBeforeIntent = server.store.listWorldDomainEvents(worldId).filter((event) => event.type === 'task.started').length
   await page.getByRole('button', { name: '与阿帆私聊' }).click()
+  const chat = page.getByRole('region', { name: '当前世界多角色会话' })
   await expect(page.getByRole('heading', { name: '阿帆', exact: true })).toBeVisible()
-  await expect(page.getByLabel('当前会话成员')).toContainText('阿帆')
+  // 会话成员现在由会话头部承载（世界视图不再叠加成员浮层）。
+  await expect(chat.getByRole('button', { name: '打开阿帆角色' })).toBeVisible()
   const dock = page.getByRole('region', { name: '世界与角色侧边栏' })
   expect(server.store.getEmployee(engineer.id)?.status).toBe('available')
   expect(server.store.listWorldDomainEvents(worldId).filter((event) => event.type === 'task.started')).toHaveLength(taskStartedBeforeIntent)
@@ -367,7 +368,8 @@ test('runs direct and group conversations with real world lifecycle, persistence
   expect(server.store.getEmployee(engineer.id)?.status).toBe('available')
   expect(server.store.getEmployee(product.id)?.status).toBe('available')
   await expect(page.getByRole('heading', { name: '世界运行时联席会' })).toBeVisible()
-  await expect(page.getByLabel('当前会话成员')).toContainText('阿帆、小周')
+  // 群聊成员现在写在会话头像的可访问名称里。
+  await expect(chat.getByRole('img', { name: '群聊头像：阿帆、小周' })).toBeVisible()
   await composer.fill('请召开真实多人会议，依次汇报恢复方案。')
   await page.getByRole('button', { name: '发送' }).click()
   await expect.poll(() => server.store.listWorldDomainEvents(worldId).filter((event) => event.type === 'meeting.finished').length).toBeGreaterThan(0)
@@ -376,7 +378,9 @@ test('runs direct and group conversations with real world lifecycle, persistence
   const latestMeeting = meetingEvents.at(-1)!
   expect(latestMeeting.payload.participantIds).toEqual([engineer.id, product.id])
   const groupSession = server.store.listSessions(worldId).find((session) => session.kind === 'group')!
-  expect(server.store.listMessages(groupSession.id).filter((message) => message.kind === 'assistant').map((message) => message.senderId)).toEqual([engineer.id, product.id])
+  // 同一波次里被判定为彼此独立的发言者并发运行，落库先后由谁先返回决定；
+  // 会议名单的顺序（上一行）才是确定的，这里断言两名成员各真实发言一次。
+  expect(server.store.listMessages(groupSession.id).filter((message) => message.kind === 'assistant').map((message) => message.senderId).sort()).toEqual([engineer.id, product.id].sort())
 
   const evidenceEvent = server.store.listWorldDomainEvents(worldId).find((event) => event.type === 'task.completed')!
   for (const category of ['skill', 'delivery', 'promotion'] as const) {
@@ -444,10 +448,14 @@ test('creates a durable safe schedule, runs it once, and restores it after reloa
   await expect(panel.getByLabel(/日程名称/)).toBeFocused()
   await panel.getByLabel(/日程名称/).fill('E2E 每日交付摘要')
   await panel.getByLabel('任务内容').fill('任务：汇总今日交付并给出下一步。')
-  await panel.getByRole('radio', { name: /世界内读写/ }).check()
+  // 权限名称固定为「只读访问 / 当前世界 / 完全访问」；无人值守日程不开放完全访问。
+  await panel.getByRole('radio', { name: /当前世界/ }).check()
   await panel.getByRole('button', { name: '保存日程' }).click()
   await expect(panel.getByText('E2E 每日交付摘要')).toBeVisible()
-  await expect(panel.getByText('世界内读写', { exact: true })).toBeVisible()
+  const savedRow = panel.locator('li').filter({ hasText: 'E2E 每日交付摘要' })
+  // 侧栏只留主信息，权限这类次要说明收进「任务内容与设置」详情里。
+  await savedRow.locator('details summary').click()
+  await expect(savedRow.locator('dd').filter({ hasText: '当前世界' })).toBeVisible()
 
   await page.reload()
   await openDockTab(page.getByRole('region', { name: '世界与角色侧边栏' }), '日程')
@@ -621,16 +629,20 @@ test('discovers, installs, and creates a visually distinct world from the world-
   const market = page.getByRole('dialog', { name: '扩展市场' })
   await expect(market).toBeVisible()
   await expect(market.locator('.market-tabs button')).toHaveText(['世界', '角色', '插件', '皮肤'])
+  // 「世界」页同时展示内置模板区和可安装的世界包，两块各有自己的卡片网格；
+  // 这里断言的是可安装的世界包，内置模板由 market-builtin-worlds.spec.ts 覆盖。
+  const packageCards = market.locator('.market-catalog > .market-card-grid > article')
+  await expect(market.getByRole('region', { name: '内置世界模板' }).locator('.market-card-grid > article').filter({ hasText: '赛博公司' })).toBeVisible()
   for (const worldName of ['赛博公司', '月影酒馆', '云端创作工坊', '远星观测站']) {
-    await expect(market.locator('.market-card-grid > article').filter({ hasText: worldName })).toBeVisible()
+    await expect(packageCards.filter({ hasText: worldName })).toBeVisible()
   }
-  const cyberCard = market.locator('.market-card-grid > article').filter({ hasText: '赛博公司' })
+  const cyberCard = packageCards.filter({ hasText: '赛博公司' })
   await expect(cyberCard).toContainText('已内置 · 当前可用')
   await expect(cyberCard.getByRole('button', { name: '已内置' })).toBeDisabled()
   const covers = market.locator('.market-world-cover')
   await expect(covers).toHaveCount(4)
   expect(await covers.evaluateAll((images) => images.every((image) => (image as HTMLImageElement).naturalWidth > 1_000))).toBe(true)
-  const cardParagraphSize = await market.locator('.market-card-grid article > p').first().evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))
+  const cardParagraphSize = await packageCards.locator('> p').first().evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))
   expect(cardParagraphSize).toBeGreaterThanOrEqual(14)
   await page.screenshot({ path: join(process.cwd(), 'artifacts', 'world-market-starter-content', 'market-1920x1080.png') })
   await page.setViewportSize({ width: 1_440, height: 900 })
@@ -639,7 +651,7 @@ test('discovers, installs, and creates a visually distinct world from the world-
   await page.screenshot({ path: join(process.cwd(), 'artifacts', 'world-market-starter-content', 'market-3840x2160.png') })
   await page.setViewportSize({ width: 1_920, height: 1_080 })
 
-  const tavernCard = market.locator('.market-card-grid > article').filter({ hasText: '月影酒馆' })
+  const tavernCard = packageCards.filter({ hasText: '月影酒馆' })
   await tavernCard.getByRole('button', { name: '查看并安装' }).click()
   await market.getByRole('checkbox', { name: /我已审阅发布者/ }).check()
   await market.getByRole('button', { name: /批准安装/ }).click()
@@ -676,7 +688,7 @@ test('discovers, installs, and creates a visually distinct world from the world-
   await page.getByRole('button', { name: '市场', exact: true }).click()
   await market.getByRole('button', { name: '角色', exact: true }).click()
   for (const roleName of ['档案管理员', '织梦说书人', '视觉导演', '异星生态学家']) {
-    await expect(market.locator('.market-card-grid > article').filter({ hasText: roleName })).toBeVisible()
+    await expect(packageCards.filter({ hasText: roleName })).toBeVisible()
   }
   const roleCovers = market.locator('.market-role-cover')
   expect(await roleCovers.count()).toBeGreaterThanOrEqual(4)
@@ -686,12 +698,12 @@ test('discovers, installs, and creates a visually distinct world from the world-
   }
   await page.screenshot({ path: join(process.cwd(), 'artifacts', 'world-market-starter-content', 'roles-1920x1080.png') })
 
-  const storytellerCard = market.locator('.market-card-grid > article').filter({ hasText: '织梦说书人' })
+  const storytellerCard = packageCards.filter({ hasText: '织梦说书人' })
   await storytellerCard.getByRole('button', { name: '查看并安装' }).click()
   await market.getByRole('checkbox', { name: /我已审阅发布者/ }).check()
   await market.getByRole('button', { name: /批准安装/ }).click()
   await expect(storytellerCard.getByRole('button', { name: '招募到世界' })).toBeVisible()
-  await storytellerCard.getByRole('button', { name: '招募到世界' }).click()
+  // 安装完成后右侧审阅区先说明模板与当前世界的关系，再由「选择名字与权限」进入招募。
   await expect(market.getByText('角色模板已安装')).toBeVisible()
   await expect(market.getByText('与当前世界兼容')).toBeVisible()
   await page.screenshot({ path: join(process.cwd(), 'artifacts', 'market-activation-audit', 'role-ready-1920x1080.png') })
@@ -709,12 +721,12 @@ test('discovers, installs, and creates a visually distinct world from the world-
   await page.getByRole('button', { name: '市场', exact: true }).click()
   await market.getByRole('button', { name: '插件', exact: true }).click()
   for (const pluginName of ['会议纪要助手', '研究简报', '决策记录', '发布检查']) {
-    await expect(market.locator('.market-card-grid > article').filter({ hasText: pluginName })).toBeVisible()
+    await expect(packageCards.filter({ hasText: pluginName })).toBeVisible()
   }
   await expect(market.getByText(/按世界启用/).first()).toBeVisible()
   await page.screenshot({ path: join(process.cwd(), 'artifacts', 'world-market-starter-content', 'plugins-1920x1080.png') })
 
-  const researchCard = market.locator('.market-card-grid > article').filter({ hasText: '研究简报' })
+  const researchCard = packageCards.filter({ hasText: '研究简报' })
   await researchCard.getByRole('button', { name: '查看并安装' }).click()
   await market.getByRole('checkbox', { name: /我已审阅发布者/ }).check()
   await market.getByRole('button', { name: /批准安装/ }).click()
@@ -741,13 +753,13 @@ test('discovers, installs, and creates a visually distinct world from the world-
 
 test('opens the dossier as an all-employee information directory', async ({ page }) => {
   await page.goto(`${origin}?demo=1`)
-  await page.getByLabel(/切换世界，当前为/).click()
+  await page.getByLabel(/切换世界：/).click()
   await page.getByRole('menuitemradio', { name: /月影酒馆/ }).click()
   await expect(page.getByLabel('月影酒馆实时世界')).toBeVisible()
   await expect(page.getByRole('button', { name: '与伊瑟拉私聊' })).toBeVisible()
-  await page.getByLabel(/切换世界，当前为月影酒馆/).click()
+  await page.getByLabel(/切换世界：月影酒馆/).click()
   await page.getByRole('menuitemradio', { name: /赛博公司/ }).click()
-  await page.getByLabel(/切换世界，当前为赛博公司/).click()
+  await page.getByLabel(/切换世界：赛博公司/).click()
   await page.getByRole('button', { name: /探索更多世界/ }).click()
   const themeMarket = page.getByRole('dialog', { name: '扩展市场' })
   await expect(themeMarket.getByRole('button', { name: '世界', exact: true })).toBeVisible()
@@ -820,9 +832,7 @@ test('keeps chat conversational while World Trace explains execution during and 
   // 3) 执行过程只进入右侧轨迹中心，聊天不再混入推理和工具事件
   await openDockTab(page.getByRole('region', { name: '世界与角色侧边栏' }), '轨迹')
   await expect(page.locator('.world-trace-panel')).toBeVisible()
-  const executionTrace = page.locator('.world-trace-item').filter({ hasText: '完成处理' }).filter({ hasText: '阿帆' }).first()
-  await expect(executionTrace).toBeVisible()
-  await executionTrace.locator('summary').click()
+  const executionTrace = await openTraceEntry(page, '完成处理', '阿帆')
   await expect(executionTrace.locator('.world-trace-item__detail')).toContainText('核对事实与权限')
   await expect(executionTrace.locator('.world-trace-item__detail')).toContainText('search_workspace')
   await expect(page.locator('.live-turns-block')).toHaveCount(0)
@@ -845,7 +855,11 @@ test('keeps chat conversational while World Trace explains execution during and 
   }).toBe(agentTraceBefore.items.length + 1)
   const agentTraceAfter = await (await fetch(`${origin}/api/worlds/${traceWorld.id}/trace?category=tool&actorId=${traceEmployee.id}&limit=200`)).json() as typeof agentTraceBefore
   expect(agentTraceAfter.items).toHaveLength(agentTraceBefore.items.length + 1)
-  await expect(page.locator('.world-trace-item').filter({ hasText: '完成处理' }).filter({ hasText: '阿帆' }).last()).toBeVisible()
+  // 同一条轨迹在回合内被更新：界面上的完成卡片数量与服务端记录一一对应，
+  // 不会为同一次运行多画一张生命周期卡片。
+  const completedRuns = agentTraceAfter.items.filter((item) => item.summary.includes('完成处理')).length
+  await expect(page.locator('.world-trace-item').filter({ hasText: '完成处理' }).filter({ hasText: '阿帆' })).toHaveCount(completedRuns)
+  await openTraceEntry(page, '完成处理', '阿帆')
 
   // 5) 模型执行失败不撤回已经持久化的用户消息；排队回合的失败原因进入轨迹
   const failedOwnerText = '模拟失败：这条用户消息必须保留在聊天中'
@@ -856,10 +870,10 @@ test('keeps chat conversational while World Trace explains execution during and 
   await sendButton.click()
   expect((await failedChatResponse).status()).toBe(202)
   await expect(page.locator('.message--owner').filter({ hasText: failedOwnerText })).toBeVisible()
-  const failedTrace = page.locator('.world-trace-item').filter({ hasText: '处理失败' }).first()
-  await expect(failedTrace).toBeVisible()
-  await failedTrace.locator('summary').click()
-  await expect(failedTrace.locator('.world-trace-item__detail')).toContainText('本轮运行未能完成，请在会话中重试。')
+  const failedTrace = await openTraceEntry(page, '处理失败')
+  // 轨迹按运行返回的失败码给出可执行的说明，而不是一句通用的「请重试」。
+  await expect(failedTrace.locator('.world-trace-item__detail')).toContainText('模型服务认证失败')
+  await expect(failedTrace.locator('.world-trace-item__detail')).toContainText('检查密钥和接口权限')
 
   // 视觉审批证据：记录控制台 error/warn，并断言无未捕获页面错误
   await writeFile(
@@ -969,7 +983,8 @@ test('guides new users through world, role, permission, and review steps in Crea
   await page.getByRole('button', { name: '创意工坊', exact: true }).click()
   const workshop = page.getByRole('dialog', { name: '创意工坊' })
   await expect(workshop).toBeVisible()
-  const createFirst = workshop.getByRole('button', { name: '创建第一个世界' })
+  // 还没有项目时是创作起航大厅的「新建空白世界」，有项目后是项目库头部的「新建」。
+  const createFirst = workshop.getByRole('button', { name: '新建空白世界' })
   if (await createFirst.count()) await createFirst.click()
   else await workshop.getByRole('button', { name: '新建', exact: true }).click()
 
@@ -979,27 +994,29 @@ test('guides new users through world, role, permission, and review steps in Crea
   await workshop.getByLabel('当前目标').fill('验证引导式创建和最小权限配置。')
   await workshop.getByRole('button', { name: /下一步/ }).click()
 
-  await expect(workshop.getByRole('heading', { name: '配置初始角色' })).toBeVisible()
-  await expect(workshop.getByLabel('搜索角色 Skills')).toHaveCount(0)
+  await expect(workshop.getByRole('heading', { name: '检查初始角色' })).toBeVisible()
+  await expect(workshop.getByLabel('搜索角色技能')).toHaveCount(0)
   await workshop.getByLabel('角色名字').fill('向导管理员')
-  await workshop.getByLabel('岗位 / 身份').fill('世界管家')
-  await workshop.getByLabel('职责摘要').fill('管理当前世界的角色设定和协作边界。')
-  await workshop.getByLabel('工作原则与表达方式').fill('先核对当前世界身份和权限，再执行清晰、可审计的操作。')
+  // 名字之外都是可稍后补充的推荐信息，收在一个折叠区里。
+  await workshop.locator('.workshop-disclosure summary').click()
+  await workshop.getByLabel('岗位 / 身份（可选）').fill('世界管家')
+  await workshop.getByLabel('职责摘要（可选）').fill('管理当前世界的角色设定和协作边界。')
+  await workshop.getByLabel('工作原则与表达方式（可选）').fill('先核对当前世界身份和权限，再执行清晰、可审计的操作。')
   await workshop.getByRole('button', { name: /下一步/ }).click()
 
-  await expect(workshop.getByRole('heading', { name: '为角色配置能力范围' })).toBeVisible()
-  const skillSearch = workshop.getByLabel('搜索角色 Skills')
+  await expect(workshop.getByRole('heading', { name: '检查模型与能力' })).toBeVisible()
+  const skillSearch = workshop.getByLabel('搜索角色技能')
   await expect(skillSearch).toBeVisible()
   const firstSkill = workshop.locator('.creative-workshop-skill-catalog input[type="checkbox"]').first()
   await expect(firstSkill).toBeVisible()
   await firstSkill.check()
-  await expect(workshop.getByText('已选择 1 个 Skill')).toBeVisible()
+  await expect(workshop.getByText('已选择 1 个技能')).toBeVisible()
   await workshop.getByRole('button', { name: /下一步/ }).click()
 
   await expect(workshop.getByRole('heading', { name: '确认后创建本地世界' })).toBeVisible()
   await expect(workshop.getByText('向导验收世界', { exact: true })).toBeVisible()
   await expect(workshop.getByText('向导管理员', { exact: true })).toBeVisible()
-  await expect(workshop.getByText('请求 1 个 Skill')).toBeVisible()
+  await expect(workshop.getByText('请求 1 个技能')).toBeVisible()
   await page.setViewportSize({ width: 1_920, height: 1_080 })
   await page.screenshot({ path: join(process.cwd(), 'artifacts', 'settings-experience', 'workshop-review-1920x1080.png') })
   await workshop.getByRole('button', { name: '关闭创意工坊' }).click()

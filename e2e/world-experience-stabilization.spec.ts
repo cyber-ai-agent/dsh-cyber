@@ -59,34 +59,43 @@ test('previews, cancels and persists world appearance settings', async ({ page }
 
   const root = page.locator('html')
   const before = await root.getAttribute('data-skin')
+  // World Scene 属于世界本身，会话皮肤不得改写它；记下切换前的场景身份用于比对。
+  const worldCanvas = page.locator('.world-canvas-host')
+  const sceneThemeBefore = await worldCanvas.getAttribute('data-theme-id')
+  expect(sceneThemeBefore).toBeTruthy()
 
-  await page.getByRole('button', { name: '世界设置' }).click()
-  let dialog = page.getByRole('dialog', { name: /世界设置 · 我的世界/ })
-  await expect(dialog).toBeVisible()
+  const openWorldSettings = async () => {
+    await page.getByRole('button', { name: '世界管理' }).click()
+    const opened = page.getByRole('dialog', { name: /世界管理 · 我的世界/ })
+    await expect(opened).toBeVisible()
+    // 会话皮肤从基础设定分出了自己的分栏。
+    await opened.getByRole('button', { name: '会话皮肤', exact: true }).click()
+    return opened
+  }
+
+  let dialog = await openWorldSettings()
   const deepOcean = dialog.getByRole('button', { name: /深海女仆工坊/ })
   await deepOcean.click()
   await expect(root).toHaveAttribute('data-skin', 'maid-atelier')
-  await expect(dialog.getByText('这里的样式会跟着设置实时变化。')).toBeVisible()
+  await expect(dialog.getByLabel('聊天视觉实时预览')).toContainText('右侧世界场景仍保持当前世界自己的空间。')
 
   await dialog.getByRole('button', { name: '取消' }).click()
   await expect(dialog).toBeHidden()
   await expect.poll(() => root.getAttribute('data-skin')).toBe(before)
 
-  await page.getByRole('button', { name: '世界设置' }).click()
-  dialog = page.getByRole('dialog', { name: /世界设置 · 我的世界/ })
+  dialog = await openWorldSettings()
   await dialog.getByRole('button', { name: /深海女仆工坊/ }).click()
-  await dialog.getByRole('button', { name: '保存世界设置' }).click()
-  await expect(dialog.getByRole('status')).toContainText('世界设置已保存')
+  await dialog.getByRole('button', { name: '保存世界管理' }).click()
+  await expect(dialog.getByRole('status')).toContainText('世界管理设定已保存')
   await expect(dialog).toBeHidden({ timeout: 3_000 })
 
-  await page.getByRole('button', { name: '世界设置' }).click()
-  dialog = page.getByRole('dialog', { name: /世界设置 · 我的世界/ })
+  dialog = await openWorldSettings()
   await expect(dialog.getByRole('button', { name: /深海女仆工坊/ })).toHaveClass(/is-active/)
   await dialog.getByRole('button', { name: '取消' }).click()
 
   await expect(root).toHaveAttribute('data-skin', 'maid-atelier')
   await expect.poll(() => root.evaluate((element) => element.style.getPropertyValue('--theme-backdrop-image'))).toContain('maid-palace-night')
-  await expect(page.locator('.world-canvas-host')).toHaveAttribute('data-theme-id', /maid/i)
+  await expect(worldCanvas).toHaveAttribute('data-theme-id', sceneThemeBefore!)
   await expect(page.locator('.world-view__header')).toHaveCount(0)
 
   const screenshotRoot = join(process.cwd(), 'artifacts', 'world-theme-unified')
@@ -94,7 +103,7 @@ test('previews, cancels and persists world appearance settings', async ({ page }
   for (const viewport of [{ width: 1440, height: 900, label: '1440x900' }, { width: 1920, height: 1080, label: '1920x1080' }, { width: 3840, height: 2160, label: '3840x2160' }]) {
     await page.setViewportSize(viewport)
     expect(await page.locator('body').evaluate((body) => body.scrollWidth <= body.clientWidth + 1)).toBe(true)
-    await page.screenshot({ path: join(screenshotRoot, `maid-shared-scene-${viewport.label}.png`) })
+    await page.screenshot({ path: join(screenshotRoot, `maid-skin-with-own-scene-${viewport.label}.png`) })
   }
 
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -110,8 +119,8 @@ test('previews, cancels and persists world appearance settings', async ({ page }
   await customizer.locator('.theme-customizer-dialog__footer .primary-button').click()
   await expect(root).toHaveAttribute('data-skin', /^custom-/)
   await expect.poll(() => root.evaluate((element) => element.style.getPropertyValue('--theme-backdrop-image'))).toContain('/api/assets/')
-  await expect(page.locator('.world-canvas-host')).toHaveAttribute('data-theme-id', /custom-/)
-  await page.screenshot({ path: join(screenshotRoot, 'uploaded-custom-shared-scene-1440x900.png') })
+  await expect(worldCanvas).toHaveAttribute('data-theme-id', sceneThemeBefore!)
+  await page.screenshot({ path: join(screenshotRoot, 'uploaded-custom-skin-with-own-scene-1440x900.png') })
 })
 
 test('shows existing role instances and warns before creating a duplicate name', async ({ page }) => {
@@ -123,7 +132,8 @@ test('shows existing role instances and warns before creating a duplicate name',
   await dock.getByRole('button', { name: '新增角色', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: '新增角色' })
   await expect(dialog).toBeVisible()
-  await dialog.getByRole('button', { name: /管家 v1/ }).click()
+  // 目录里还有中枢/日程/知识管家等模板，这里要的是基础「管家」模板本身。
+  await dialog.getByRole('button', { name: /^管家 v1/ }).click()
   await expect(dialog.getByText('当前世界已有 1 名', { exact: true })).toBeVisible()
   await expect(dialog.getByText(/当前世界已有 1 名角色来自这份模板：管家/)).toBeVisible()
 
