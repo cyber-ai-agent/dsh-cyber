@@ -94,6 +94,8 @@ packageId + packageVersion + themeId + themeVersion + contentDigest
 
 主题 id/version 不要求与包 id/version 相等。这样可以防止两个包声明相同主题 id/version 时同时被误判为同一个活动主题；渲染器 mount key 也必须包含不可冲突的包身份和内容摘要。
 
+本地调试同样受这条约束：改了内容就要换版本号。用 `pnpm package:prepare <包目录> --dev` 生成明确标记的 `-dev.N` 版本，它是普通版本号，安装到自己的目录，不会覆盖别人已安装的发行版本；提交 PR 前把版本改回正式号再运行一次不带 `--dev` 的 prepare。
+
 ## PR 最低证据
 
 市场包 PR MUST 包含：

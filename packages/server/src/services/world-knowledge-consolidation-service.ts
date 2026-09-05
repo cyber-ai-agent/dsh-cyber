@@ -61,6 +61,8 @@ export interface KnowledgeVisibleSourceItem {
   /** source is used for document, artifact and owner-confirmed manual text. */
   kind: 'user' | 'assistant' | 'source'
   text: string
+  /** Position of this item inside a chunked source, used by the watermark. */
+  chunkOrdinal?: number
   evidence: KnowledgeExtractionEvidence
 }
 
@@ -71,11 +73,31 @@ export interface KnowledgeSourceBatch {
   sourceId: string
   fromCursor?: number
   toCursor?: number
+  /** Version identity of a chunked source: a document sha256, an artifact version. */
+  contentHash?: string
+  /** How many chunks this version has in total. */
+  chunkTotal?: number
+  /** First chunk position this window looked at. */
+  chunkCursor?: number
+  /** Exclusive end of the window that was examined, blank chunks included. */
+  chunkExaminedThrough?: number
   items: readonly KnowledgeVisibleSourceItem[]
 }
 
 export interface KnowledgeSourceLoader {
   load(input: { workspaceId: string; worldId: string; sourceType: KnowledgeEvidenceSourceType; sourceId: string; fromCursor?: number; toCursor?: number }): Promise<KnowledgeSourceBatch>
+}
+
+/** One identifiable revision of a chunked source and how far it has been walked. */
+export interface KnowledgeSourceVersionState {
+  workspaceId: string
+  worldId: string
+  sourceType: 'document' | 'artifact'
+  sourceId: string
+  contentHash: string
+  chunkTotal: number
+  processedChunks: number
+  completedAt?: string
 }
 
 export interface KnowledgeConsolidationRepository extends KnowledgeGraphRepositoryPort {
@@ -105,6 +127,25 @@ export interface KnowledgeConsolidationRepository extends KnowledgeGraphReposito
     sourceId: string
     now: string
   }): Promise<void> | void
+  /** Opens the version a window is about to read; a changed hash supersedes the previous one. */
+  beginKnowledgeSourceVersion?(input: {
+    workspaceId: string
+    worldId: string
+    sourceType: 'document' | 'artifact'
+    sourceId: string
+    contentHash: string
+    chunkTotal: number
+  }): KnowledgeSourceVersionState | Promise<KnowledgeSourceVersionState>
+  /** Compare-and-set on the chunk cursor; a stale window leaves it untouched. */
+  advanceKnowledgeSourceVersion?(input: {
+    workspaceId: string
+    worldId: string
+    sourceType: 'document' | 'artifact'
+    sourceId: string
+    contentHash: string
+    expectedProcessedChunks: number
+    processedChunks: number
+  }): KnowledgeSourceVersionState | Promise<KnowledgeSourceVersionState>
   recoverRunningConsolidationJobs?(): number | Promise<number>
   getKnowledgeConsolidationSettings?(worldId: string): KnowledgeConsolidationSettings | undefined | Promise<KnowledgeConsolidationSettings | undefined>
   getKnowledgeConsolidationCursor?(input: { worldId: string; sourceType: KnowledgeEvidenceSourceType; sourceId: string }): KnowledgeConsolidationCursor | undefined | Promise<KnowledgeConsolidationCursor | undefined>
@@ -326,9 +367,14 @@ export class WorldKnowledgeConsolidationService {
         ...(claimed.toCursor === undefined ? {} : { toCursor: claimed.toCursor }),
       })
       validateBatch(batch, claimed)
+      await this.#openSourceVersion(claimed, batch)
       const fit = fitBatchToBudget(batch.items)
       const visibleText = fit.visibleText
       if (!visibleText) {
+        // Nothing extractable in this window, but the window was still looked
+        // at: advancing past it is what stops a run of blank chunks from
+        // re-queueing the same source forever.
+        await this.#advanceSourceVersion(claimed, batch, batch.chunkExaminedThrough)
         return await this.#repository.completeConsolidationJob({ jobId: claimed.id, ...(batch.toCursor === undefined ? {} : { toCursor: batch.toCursor }), completedAt: this.#clock() })
       }
       const evidence = fit.evidence
@@ -372,6 +418,7 @@ export class WorldKnowledgeConsolidationService {
       // Only advance the cursor to the last item actually sent to the model.
       // The old behaviour jumped to the whole batch's end, so anything beyond
       // the character budget was silently skipped forever.
+      await this.#advanceSourceVersion(claimed, batch, fit.consumedChunksThrough ?? batch.chunkExaminedThrough)
       const effectiveCursor = fit.consumedThrough ?? batch.toCursor
       const completed = await this.#repository.completeConsolidationJob({ jobId: claimed.id, ...(effectiveCursor === undefined ? {} : { toCursor: effectiveCursor }), completedAt: this.#clock() })
       this.#onChanged?.(claimed.worldId, { type: 'knowledge.graph.changed', jobId: claimed.id })
@@ -392,6 +439,44 @@ export class WorldKnowledgeConsolidationService {
       this.#onChanged?.(claimed.worldId, { type: 'knowledge.consolidation.changed', jobId: claimed.id, status: failed.status, errorCode: code })
       return failed
     }
+  }
+
+  /**
+   * Register the revision this window is about to read. A source whose content
+   * changed becomes a new version here; the previous version is marked, not
+   * deleted, and what happens to the claims it produced is a separate decision.
+   */
+  async #openSourceVersion(job: KnowledgeConsolidationJob, batch: KnowledgeSourceBatch): Promise<void> {
+    if (this.#repository.beginKnowledgeSourceVersion === undefined) return
+    if (job.sourceType === 'conversation' || batch.contentHash === undefined || batch.chunkTotal === undefined) return
+    await this.#repository.beginKnowledgeSourceVersion({
+      workspaceId: job.workspaceId,
+      worldId: job.worldId,
+      sourceType: job.sourceType,
+      sourceId: job.sourceId,
+      contentHash: batch.contentHash,
+      chunkTotal: batch.chunkTotal,
+    })
+  }
+
+  /**
+   * Record how far this version has really been walked. The watermark moves
+   * only after the graph write succeeded, and only from the position this
+   * window started at, so a failure — a 429 included — leaves the cursor on
+   * the chunk that failed rather than skipping it.
+   */
+  async #advanceSourceVersion(job: KnowledgeConsolidationJob, batch: KnowledgeSourceBatch, processedChunks: number | undefined): Promise<void> {
+    if (this.#repository.advanceKnowledgeSourceVersion === undefined) return
+    if (job.sourceType === 'conversation' || batch.contentHash === undefined || processedChunks === undefined) return
+    await this.#repository.advanceKnowledgeSourceVersion({
+      workspaceId: job.workspaceId,
+      worldId: job.worldId,
+      sourceType: job.sourceType,
+      sourceId: job.sourceId,
+      contentHash: batch.contentHash,
+      expectedProcessedChunks: batch.chunkCursor ?? 0,
+      processedChunks,
+    })
   }
 
   /**
@@ -462,10 +547,16 @@ function validateBatch(batch: KnowledgeSourceBatch, job: Pick<KnowledgeConsolida
  * tail of a dense conversation is picked up by the next job instead of being
  * silently skipped forever.
  */
-function fitBatchToBudget(items: readonly KnowledgeVisibleSourceItem[]): { visibleText: string; evidence: KnowledgeExtractionEvidence[]; consumedThrough: number | undefined } {
+function fitBatchToBudget(items: readonly KnowledgeVisibleSourceItem[]): {
+  visibleText: string
+  evidence: KnowledgeExtractionEvidence[]
+  consumedThrough: number | undefined
+  consumedChunksThrough: number | undefined
+} {
   const lines: string[] = []
   const evidence: KnowledgeExtractionEvidence[] = []
   let consumedThrough: number | undefined
+  let consumedChunksThrough: number | undefined
   let chars = 0
   for (const item of items.slice(0, KNOWLEDGE_CONSOLIDATION_THRESHOLDS.maxMessages)) {
     let line = item.kind + '：' + item.text.trim()
@@ -479,8 +570,10 @@ function fitBatchToBudget(items: readonly KnowledgeVisibleSourceItem[]): { visib
     evidence.push(item.evidence)
     chars += Math.min(cost, KNOWLEDGE_CONSOLIDATION_THRESHOLDS.maxCharacters)
     if (item.evidence.sequence !== undefined) consumedThrough = item.evidence.sequence
+    // Exclusive end: the chunk after the last one actually sent to the model.
+    if (item.chunkOrdinal !== undefined) consumedChunksThrough = item.chunkOrdinal + 1
   }
-  return { visibleText: lines.join('\n'), evidence, consumedThrough }
+  return { visibleText: lines.join('\n'), evidence, consumedThrough, consumedChunksThrough }
 }
 
 function normalizePortResult(value: unknown | KnowledgeExtractionPortResult): KnowledgeExtractionPortResult {

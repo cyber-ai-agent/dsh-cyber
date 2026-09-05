@@ -13,6 +13,7 @@ import type { RuntimeContextContributor } from './world-runtime-context-composer
 import type { WorldArtifactService } from './world-artifact-service.js'
 import { WorldKnowledgeConsolidationScheduler } from './world-knowledge-consolidation-scheduler.js'
 import { WorldKnowledgeConsolidationService } from './world-knowledge-consolidation-service.js'
+import { WorldKnowledgeEvidenceInvalidationService } from './world-knowledge-evidence-invalidation-service.js'
 import {
   createKnowledgeGraphAdminPort,
   createKnowledgeGraphRepositoryPort,
@@ -34,6 +35,8 @@ export interface WorldKnowledgeGraphRuntimeOptions {
 /** Composition boundary for the durable knowledge graph and its background worker. */
 export function createWorldKnowledgeGraphRuntime(options: WorldKnowledgeGraphRuntimeOptions) {
   const repository = new WorldKnowledgeGraphRepository(options.store.database)
+  const listGraphWorlds = () => options.store.listWorkspaces().flatMap((workspace) =>
+    options.store.listWorlds(workspace.id).map((world) => ({ workspaceId: workspace.id, worldId: world.id })))
   const graph = new WorldKnowledgeGraphService({ repository: createKnowledgeGraphRepositoryPort(repository) })
   const admin = createKnowledgeGraphAdminPort(repository)
   const retrieval = new WorldKnowledgeGraphRetrievalService({ graph })
@@ -70,12 +73,12 @@ export function createWorldKnowledgeGraphRuntime(options: WorldKnowledgeGraphRun
     repository: {
       // Consolidation is background world work; an archived world stays
       // dormant and its knowledge is left exactly as the owner archived it.
-      listWorlds: () => options.store.listWorkspaces().flatMap((workspace) =>
-        options.store.listWorlds(workspace.id).map((world) => ({ workspaceId: workspace.id, worldId: world.id }))),
+      listWorlds: () => listGraphWorlds(),
       listSessions: (worldId) => options.store.listSessions(worldId),
       getKnowledgeConsolidationSettings: (worldId) => repository.getKnowledgeConsolidationSettings(worldId),
       getKnowledgeConsolidationCursor: (input) => repository.getKnowledgeConsolidationCursor(input),
       getConsolidationSourceJob: (worldId, sourceType, sourceId) => repository.getConsolidationSourceJob(worldId, sourceType, sourceId),
+      getKnowledgeSourceProgress: (input) => repository.getKnowledgeSourceProgress(input),
       listSources: (worldId) => {
         const documents = options.libraryRepository.listDocuments(worldId, { status: 'indexed' })
         const importedArtifacts = new Set(documents.map((document) => document.artifactId).filter(Boolean))
@@ -98,6 +101,20 @@ export function createWorldKnowledgeGraphRuntime(options: WorldKnowledgeGraphRun
     service: consolidation,
     onError: (error) => console.warn('[dsh-cyber] 自动知识整理扫描失败，已等待下一次扫描：', error instanceof Error ? error.message : String(error)),
   })
+  // Superseding a source version records that its content is gone; deciding
+  // what that means for the claims extracted from it is this pass, and it runs
+  // on its own timer so it never competes with extraction cadence.
+  const invalidation = new WorldKnowledgeEvidenceInvalidationService({
+    repository: {
+      listWorlds: listGraphWorlds,
+      retireRemovedKnowledgeSources: (worldId, limit) => repository.retireRemovedKnowledgeSources(worldId, limit),
+      reinstateCurrentKnowledgeSourceVersions: (worldId) => repository.reinstateCurrentKnowledgeSourceVersions(worldId),
+      listPendingKnowledgeSourceInvalidations: (worldId, limit) => repository.listPendingKnowledgeSourceInvalidations(worldId, limit),
+      invalidateKnowledgeSourceVersion: (input) => repository.invalidateKnowledgeSourceVersion(input),
+    },
+    onChanged: (worldId, payload) => options.publish(worldId, payload as JsonObject),
+    onError: (error) => console.warn('[dsh-cyber] 知识证据失效检查失败，已等待下一轮：', error instanceof Error ? error.message : String(error)),
+  })
   const contributor: RuntimeContextContributor = {
     id: 'world-knowledge-graph',
     async contribute(input) {
@@ -119,15 +136,18 @@ export function createWorldKnowledgeGraphRuntime(options: WorldKnowledgeGraphRun
     retrieval,
     consolidation,
     scheduler,
+    invalidation,
     contributor,
     async start() {
       await consolidation.recover()
       consolidation.start()
       scheduler.start()
+      invalidation.start()
     },
     stop() {
       scheduler.stop()
       consolidation.stop()
+      invalidation.stop()
     },
   }
 }

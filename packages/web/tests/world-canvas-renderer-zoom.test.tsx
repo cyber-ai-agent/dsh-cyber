@@ -4,7 +4,6 @@ import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import type {
-  RendererKind,
   RendererRegistry,
   WorldCue,
   WorldRenderer,
@@ -16,9 +15,19 @@ import type {
 
 import { WorldCanvas } from '../src/features/world/WorldCanvas.js'
 
+/**
+ * A zoom command belongs to the render it arrived on.
+ *
+ * This file was never collected — the vitest projects matched only `*.test.ts`
+ * — so it kept asserting a `rendererKind` prop and a Three follow camera that
+ * `WorldCanvas` deliberately no longer has: Three, VRM and 3D camera state live
+ * in the optional spatial extension and are never imported by this path. What
+ * survives, and is still worth holding, is that a command id applies once.
+ */
+
 class ZoomRenderer implements WorldRenderer<HTMLElement> {
   #zoom = 1
-  constructor(readonly kind: RendererKind) {}
+  constructor(readonly kind: string) {}
   async mount(): Promise<void> {}
   updateSnapshot(): void {}
   applyCues(_cues: WorldCue[]): void {}
@@ -32,17 +41,17 @@ class ZoomRenderer implements WorldRenderer<HTMLElement> {
 }
 
 class ZoomRegistry implements RendererRegistry<HTMLElement> {
-  readonly created = new Map<RendererKind, ZoomRenderer[]>()
+  readonly created = new Map<string, ZoomRenderer[]>()
   register(): void {}
   supports(): boolean { return true }
-  create(kind: RendererKind, _callbacks: WorldRendererCallbacks): WorldRenderer<HTMLElement> {
+  create(kind: string, _callbacks: WorldRendererCallbacks): WorldRenderer<HTMLElement> {
     const renderer = new ZoomRenderer(kind)
     const list = this.created.get(kind) ?? []
     list.push(renderer)
     this.created.set(kind, list)
     return renderer
   }
-  latest(kind: RendererKind): ZoomRenderer {
+  latest(kind: string): ZoomRenderer {
     const renderer = this.created.get(kind)?.at(-1)
     if (renderer === undefined) throw new Error(`renderer not created: ${kind}`)
     return renderer
@@ -54,32 +63,24 @@ afterEach(() => {
   for (const root of roots.splice(0)) act(() => root.unmount())
 })
 
-const spatialCapabilityProvider = {
-  supportsSpatialRendering: () => true,
-  quality: () => 'high' as const,
-}
-
 describe('WorldCanvas renderer-local zoom', () => {
-  it('does not replay a Pixi scale into the Three follow camera and restores each renderer independently', async () => {
+  it('applies a zoom command once per id and never replays it on a later render', async () => {
     const registry = new ZoomRegistry()
     const host = document.createElement('div')
     document.body.appendChild(host)
     const root = createRoot(host)
     roots.push(root)
 
-    await render(root, registry, 'pixi-2d')
-    await render(root, registry, 'pixi-2d', { id: '2d-zoom-1', delta: 0.1 })
-    await render(root, registry, 'pixi-2d', { id: '2d-zoom-2', delta: 0.1 })
-    expect(registry.latest('pixi-2d').getZoom()).toBeCloseTo(1.2)
+    await render(root, registry)
+    await render(root, registry, { id: 'zoom-1', delta: 0.1 })
+    expect(registry.latest('pixi-2d').getZoom()).toBeCloseTo(1.1)
 
-    await render(root, registry, 'three-3d', { id: '2d-zoom-2', delta: 0.1 })
-    expect(registry.latest('three-3d').getZoom()).toBeCloseTo(1)
+    // The same command id arriving again is the same command, not a second one.
+    await render(root, registry, { id: 'zoom-1', delta: 0.1 })
+    expect(registry.latest('pixi-2d').getZoom()).toBeCloseTo(1.1)
 
-    await render(root, registry, 'three-3d', { id: '3d-zoom-1', delta: -0.1 })
-    expect(registry.latest('three-3d').getZoom()).toBeCloseTo(0.9)
-
-    await render(root, registry, 'pixi-2d', { id: '3d-zoom-1', delta: -0.1 })
-    expect(registry.latest('pixi-2d').getZoom()).toBeCloseTo(1.2)
+    await render(root, registry, { id: 'zoom-2', delta: -0.3 })
+    expect(registry.latest('pixi-2d').getZoom()).toBeCloseTo(0.8)
 
     document.body.removeChild(host)
   })
@@ -88,19 +89,16 @@ describe('WorldCanvas renderer-local zoom', () => {
 async function render(
   root: ReturnType<typeof createRoot>,
   registry: RendererRegistry<HTMLElement>,
-  rendererKind: RendererKind,
   zoomCommand?: WorldZoomCommand,
 ): Promise<void> {
   await act(async () => {
     root.render(createElement(WorldCanvas, {
       manifest: manifest(),
-      rendererKind,
       rendererRegistry: registry,
-      spatialCapabilityProvider,
       rendererIdentity: 'zoom-test',
       snapshot: snapshot(),
       cues: [],
-      cameraMode: rendererKind === 'three-3d' ? 'follow' : 'overview',
+      cameraMode: 'overview',
       cameraSubjectId: 'employee-a',
       fitRequest: 0,
       ...(zoomCommand === undefined ? {} : { zoomCommand }),

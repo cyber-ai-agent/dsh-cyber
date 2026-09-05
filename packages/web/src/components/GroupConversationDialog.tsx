@@ -57,7 +57,7 @@ export function GroupConversationDialog({ employees, creating = false, onClose, 
             <h2 id="group-dialog-title">{t('workbench.groupTitle', '创建群聊')}</h2>
             <p>{t('workbench.groupSubtitle', '选择至少两名角色，创建后立即出现在左侧会话列表。')}</p>
           </div>
-          <button className="icon-button" type="button" aria-label={t('workbench.cancel', '关闭')} disabled={creating} onClick={onClose}><X size={18} /></button>
+          <button className="icon-button" type="button" aria-label={t('common.close', '关闭')} disabled={creating} onClick={onClose}><X size={18} /></button>
         </header>
 
         <div className="group-dialog__body">

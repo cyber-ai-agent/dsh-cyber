@@ -15,7 +15,7 @@ export default defineConfig({
         test: {
           ...shared,
           name: 'node',
-          include: ['packages/**/tests/**/*.test.ts'],
+          include: ['packages/**/tests/**/*.test.ts', 'packages/**/tests/**/*.test.tsx'],
           exclude: [...shared.exclude, 'packages/web/tests/**'],
         },
       },
@@ -23,7 +23,7 @@ export default defineConfig({
         test: {
           ...shared,
           name: 'web',
-          include: ['packages/web/tests/**/*.test.ts'],
+          include: ['packages/web/tests/**/*.test.ts', 'packages/web/tests/**/*.test.tsx'],
           setupFiles: ['packages/web/tests/setup.ts'],
           // Web tests render into a real DOM so effects, subscriptions and
           // event listeners actually run. Without it every web test was a

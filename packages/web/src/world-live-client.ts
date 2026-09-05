@@ -8,6 +8,7 @@ const WORLD_LIVE_EVENT_NAMES = [
   'world-decision',
   'world-artifact',
   'world-knowledge',
+  'world-task',
   'world-runtime',
   'world-state',
 ] as const

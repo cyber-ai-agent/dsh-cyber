@@ -17,6 +17,7 @@ import type { RuntimeStreamHub } from '../streams/runtime-stream-hub.js'
 import type { WorldRuntimeService } from '../world-runtime-service.js'
 import { ConversationQueueService } from './conversation-queue-service.js'
 import type { GroupTaskCollaborationService } from './group-task-collaboration-service.js'
+import type { WorkSystemService } from './work-system-service.js'
 import type { GroupTaskRoutingResult } from './group-task-router.js'
 import type { WorldPackageInstanceService } from './world-package-instance-service.js'
 import type { WorldRuntimePromptComposer } from './world-runtime-context-composer.js'
@@ -37,6 +38,8 @@ export function composeConversationControl(options: {
   worldPackages: WorldPackageInstanceService
   runtimeContext: Pick<WorldRuntimePromptComposer, 'composeGroupRuntimePrompt'>
   skillRuntime: Pick<CharacterSkillRuntime, 'prepare'>
+  /** Looked up only to see whether a settled turn is the source of a draft. */
+  work: Pick<WorkSystemService, 'taskForSourceTurn'>
 }): { queue: ConversationQueueService; start(): void; close(): Promise<void> } {
   const queue = new ConversationQueueService({
     store: options.store,
@@ -53,6 +56,15 @@ export function composeConversationControl(options: {
       options.worldRuntime.publishCurrent(entry.worldId)
       if (options.store.getWorkTurn(entry.workTurnId)?.status === 'waiting-approval') {
         options.worldRuntime.publishDecisionChanged(entry.worldId, { workTurnId: entry.workTurnId, status: 'waiting-approval' })
+      }
+      // A queued instruction records its draft while the turn is still waiting
+      // in line, and the task shows that turn's execution. The turn has just
+      // ended, so a panel that is already open is displaying a state that is
+      // no longer true. Nothing about the task itself changed — a draft stays
+      // a draft — this only says "re-read the row".
+      const sourceTask = options.work.taskForSourceTurn(entry.workTurnId)
+      if (sourceTask !== undefined) {
+        options.worldRuntime.publishTaskChanged(entry.worldId, { taskId: sourceTask.id, status: sourceTask.status, source: 'conversation' })
       }
       const trace = await options.worldTrace.list(entry.worldId, { limit: 50 })
       options.runtimeStreamHub.publishTrace(entry.worldId, trace.items.filter((item) => item.workTurnId === entry.workTurnId))

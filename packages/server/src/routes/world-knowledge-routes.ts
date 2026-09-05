@@ -354,6 +354,27 @@ export function registerWorldKnowledgeRoutes(router: Router, dependencies: World
     writeJson(response, 200, { removed: await library.removeDocument(world.id, params[1]!) })
   })
 
+  /**
+   * One window of a document's extracted body.
+   *
+   * The ownership rules are the ones the artifact preview route already uses:
+   * the World must exist and be unlocked for this request, and the lookup is
+   * world-scoped, so a document from another world or workspace is a 404 rather
+   * than a leak. The body is returned as JSON text and rendered as characters
+   * by the client; the sandboxed artifact preview response stays the only place
+   * that hands imported content to a browser as a document.
+   */
+  router.get(/^\/api\/worlds\/([^/]+)\/knowledge\/library\/documents\/([^/]+)\/preview$/, async ({ request, response, params, url }) => {
+    const world = assertWorld(store, params[0]!)
+    await access?.assertUnlocked(world.id, request)
+    const offset = parseBoundedNumber(url.searchParams.get('offset'), 0, Number.MAX_SAFE_INTEGER)
+    const limit = parseBoundedNumber(url.searchParams.get('limit'), 1, 40)
+    writeJson(response, 200, library.previewDocument(world.id, params[1]!, {
+      ...(offset === undefined ? {} : { offset }),
+      ...(limit === undefined ? {} : { limit }),
+    }))
+  })
+
   router.post(/^\/api\/worlds\/([^/]+)\/knowledge\/library\/documents\/([^/]+)\/reindex$/, async ({ request, response, params }) => {
     const world = assertWorld(store, params[0]!)
     await access?.assertUnlocked(world.id, request)

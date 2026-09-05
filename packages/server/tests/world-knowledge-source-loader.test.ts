@@ -40,6 +40,51 @@ describe('WorldKnowledgeSourceLoader', () => {
     expect(artifact.items[0]?.evidence.artifactVersion).toBe('2')
   })
 
+  it('walks a long document one chunk window at a time and reports the version identity', async () => {
+    const chunks = Array.from({ length: 37 }, (_, ordinal) => ({
+      id: `chunk-${ordinal}`, worldId: 'world-a', documentId: 'doc-long', ordinal,
+      content: `第 ${ordinal} 块正文`, contentHash: 'c'.repeat(64), createdAt: '2026-09-05T00:00:00.000Z',
+    }))
+    const loader = new WorldKnowledgeSourceLoader({
+      documents: {
+        getDocument: () => ({
+          id: 'doc-long', workspaceId: 'workspace-a', worldId: 'world-a', relativePath: 'long.md', title: '长文档',
+          mimeType: 'text/markdown', byteLength: 1_000, sha256: 'a'.repeat(64), origin: 'upload', status: 'indexed',
+          chunkCount: chunks.length, createdAt: '2026-09-05T00:00:00.000Z', updatedAt: '2026-09-05T00:00:00.000Z',
+        }),
+        listChunks: () => chunks,
+      },
+      maxItems: 10,
+    })
+    const first = await loader.load({ workspaceId: 'workspace-a', worldId: 'world-a', sourceType: 'document', sourceId: 'doc-long' })
+    expect(first).toMatchObject({ contentHash: 'a'.repeat(64), chunkTotal: 37, chunkCursor: 0, chunkExaminedThrough: 10 })
+    expect(first.items).toHaveLength(10)
+    expect(first.items[0]?.chunkOrdinal).toBe(0)
+
+    const resumed = await loader.load({ workspaceId: 'workspace-a', worldId: 'world-a', sourceType: 'document', sourceId: 'doc-long', fromCursor: 30 })
+    expect(resumed).toMatchObject({ chunkCursor: 30, chunkExaminedThrough: 37 })
+    expect(resumed.items.map((item) => item.chunkOrdinal)).toEqual([30, 31, 32, 33, 34, 35, 36])
+
+    // Past the end there is nothing left to examine, and the window never
+    // reports having covered more chunks than the document has.
+    const exhausted = await loader.load({ workspaceId: 'workspace-a', worldId: 'world-a', sourceType: 'document', sourceId: 'doc-long', fromCursor: 37 })
+    expect(exhausted).toMatchObject({ chunkCursor: 37, chunkExaminedThrough: 37, items: [] })
+  })
+
+  it('windows an artifact longer than one extraction budget instead of silently truncating it', async () => {
+    const body = 'x'.repeat(40_000)
+    const loader = new WorldKnowledgeSourceLoader({
+      artifacts: { async read() { return { workspaceId: 'workspace-a', worldId: 'world-a', artifactId: 'artifact-long', version: 4, body } } },
+    })
+    const first = await loader.load({ workspaceId: 'workspace-a', worldId: 'world-a', sourceType: 'artifact', sourceId: 'artifact-long' })
+    expect(first).toMatchObject({ contentHash: 'v4', chunkTotal: 3, chunkCursor: 0, chunkExaminedThrough: 1 })
+    expect(first.items[0]?.text).toHaveLength(16_000)
+    const last = await loader.load({ workspaceId: 'workspace-a', worldId: 'world-a', sourceType: 'artifact', sourceId: 'artifact-long', fromCursor: 2 })
+    expect(last).toMatchObject({ chunkCursor: 2, chunkExaminedThrough: 3 })
+    expect(last.items[0]?.text).toHaveLength(8_000)
+    expect(last.items[0]?.evidence.evidenceId).not.toBe(first.items[0]?.evidence.evidenceId)
+  })
+
   it('adapts the world artifact preview authority and rejects a foreign preview', async () => {
     const reader = createKnowledgeArtifactSourceReader({
       async preview() {
@@ -138,5 +183,75 @@ describe('WorldKnowledgeConsolidationScheduler', () => {
 
     await expect(scheduler.scanOnce()).resolves.toEqual({ worlds: 1, sessions: 0, queued: 0 })
     expect(queued).toEqual([])
+  })
+
+  it('keeps queueing the next chunk window until the source watermark is complete', async () => {
+    const now = Date.parse('2026-09-05T00:10:00.000Z')
+    const revision = now - 60_000
+    const enqueue = vi.fn(async () => ({} as never))
+    let version: { chunkTotal: number; processedChunks: number } | undefined
+    const job = {
+      id: 'job-doc', worldId: 'world', workspaceId: 'workspace', sourceType: 'document' as const, sourceId: 'doc',
+      status: 'completed' as const, attempt: 1, fromCursor: 0, toCursor: revision,
+      createdAt: '2026-09-05T00:00:00.000Z', updatedAt: '2026-09-05T00:05:00.000Z',
+    }
+    const scheduler = new WorldKnowledgeConsolidationScheduler({
+      repository: {
+        listWorlds: () => [{ workspaceId: 'workspace', worldId: 'world' }],
+        listSessions: () => [],
+        listSources: () => [{ sourceType: 'document', sourceId: 'doc', updatedAt: new Date(revision).toISOString() }],
+        getConsolidationSourceJob: () => job,
+        getKnowledgeSourceProgress: () => version === undefined ? undefined : {
+          workspaceId: 'workspace', worldId: 'world', sourceType: 'document', sourceId: 'doc',
+          contentHash: 'a'.repeat(64), createdAt: '2026-09-05T00:00:00.000Z', updatedAt: '2026-09-05T00:05:00.000Z',
+          ...version,
+        },
+      },
+      messages: { listMessagesPage: () => ({ items: [] }) },
+      service: { enqueue, enqueueConversation: vi.fn() },
+      clockMs: () => now,
+    })
+
+    // A completed job over a partly processed document is not a finished
+    // document: the next window starts exactly where the watermark stopped.
+    version = { chunkTotal: 37, processedChunks: 12 }
+    await scheduler.scanOnce()
+    expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ sourceId: 'doc', fromCursor: 12, toCursor: revision }))
+
+    enqueue.mockClear()
+    version = { chunkTotal: 37, processedChunks: 37 }
+    await scheduler.scanOnce()
+    expect(enqueue).not.toHaveBeenCalled()
+  })
+
+  it('re-walks a source whose completed job predates the watermark instead of trusting it', async () => {
+    const now = Date.parse('2026-09-05T00:10:00.000Z')
+    const revision = now - 60_000
+    const enqueue = vi.fn(async () => ({} as never))
+    // Exactly what a pre-42 run left behind: the window was recorded as done
+    // with fromCursor 0 and the source revision as toCursor, and no source
+    // version row was ever written, so how much of the document that run
+    // actually covered is unknown.
+    const legacyJob = {
+      id: 'legacy-job', worldId: 'world', workspaceId: 'workspace', sourceType: 'document' as const, sourceId: 'doc',
+      status: 'completed' as const, attempt: 1, fromCursor: 0, toCursor: revision,
+      createdAt: '2026-08-01T00:00:00.000Z', updatedAt: '2026-08-01T00:05:00.000Z',
+    }
+    const scheduler = new WorldKnowledgeConsolidationScheduler({
+      repository: {
+        listWorlds: () => [{ workspaceId: 'workspace', worldId: 'world' }],
+        listSessions: () => [],
+        listSources: () => [{ sourceType: 'document', sourceId: 'doc', updatedAt: new Date(revision).toISOString() }],
+        getConsolidationSourceJob: () => legacyJob,
+        // No row for this source: the watermark table knows nothing about it.
+        getKnowledgeSourceProgress: () => undefined,
+      },
+      messages: { listMessagesPage: () => ({ items: [] }) },
+      service: { enqueue, enqueueConversation: vi.fn() },
+      clockMs: () => now,
+    })
+
+    await scheduler.scanOnce()
+    expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ sourceId: 'doc', fromCursor: 0, toCursor: revision }))
   })
 })

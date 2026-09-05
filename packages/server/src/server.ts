@@ -11,7 +11,7 @@ import {
 } from '@dsh-cyber/harness-adapter'
 import { ConversationOrchestrator, type GroupTurnPlannerPort } from '@dsh-cyber/orchestration'
 import type { PackageManager, PackageRuntimePort } from '@dsh-cyber/package-runtime'
-import { SqliteStore, WorldArtifactRepository, WorldKnowledgeRepository, WorldSimulationStore } from '@dsh-cyber/persistence'
+import { SqliteStore, WorldKnowledgeRepository, WorldSimulationStore } from '@dsh-cyber/persistence'
 import { dispatchHttpRequest } from './http/context.js'
 import { assertApplicationAccess } from './http/application-access-guard.js'
 import { writeError } from './http/errors.js'
@@ -75,6 +75,7 @@ import { WorldAccessService } from './services/world-access-service.js'
 import type { WorkSystemService } from './services/work-system-service.js'
 import { composeWorkSystem } from './composition/compose-work-system.js'
 import { composeWorldTrace } from './composition/compose-world-trace.js'
+import { composeArtifactServices } from './composition/compose-artifacts.js'
 import { composeCompletionWorker } from './composition/compose-completion.js'
 import { composeGroupTurnPlanner } from './composition/compose-group-turn-planner.js'
 import { composePackageSystem } from './composition/compose-package-system.js'
@@ -158,6 +159,8 @@ export interface CyberServerOptions {
    * nobody was addressed by name.
    */
   groupTurnPlanner?: GroupTurnPlannerPort
+  /** Decides whether a chat message asked for work; tests and CI pass a deterministic stub. */
+  conversationTaskIntent?: import('./services/conversation-task-intent-classifier.js').ConversationTaskIntentPort
 }
 
 export interface CyberServerAddress { host: string; port: number; origin: string }
@@ -223,11 +226,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const authority = new WorldCharacterAuthorityService(store)
   let publishArtifactChanged: ((worldId: string, payload: JsonObject) => void) | undefined
   let publishKnowledgeChanged: ((worldId: string, payload: JsonObject) => void) | undefined
-  const worldArtifacts = new WorldArtifactService({
-    repository: new WorldArtifactRepository(store.database),
-    roots: worldRoots,
-    onChanged: (worldId, payload) => publishArtifactChanged?.(worldId, payload),
-  })
+  const { artifacts: worldArtifacts, runFileEvidence, savedReplyDocuments } = composeArtifactServices(store, worldRoots, (worldId, payload) => publishArtifactChanged?.(worldId, payload))
   const worldFiles = new WorldFileService(worldRoots)
   const worldKnowledgeRepository = new WorldKnowledgeRepository(store.database)
   const worldKnowledgeSearch = createKnowledgeSearchPort({
@@ -308,7 +307,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   // World settings are the source of the envelope's `world-context` layer: the
   // runtime renders them into the cacheable prefix, so the request composers
   // below no longer repeat them behind the retrieved memories.
-  const profileRuntime = new CharacterProfileRuntime(baseRuntime, store, skillRegistry, authority, skillAvailability, undefined, undefined, worldSettings)
+  const profileRuntime = new CharacterProfileRuntime(baseRuntime, store, skillRegistry, authority, skillAvailability, undefined, undefined, worldSettings, runFileEvidence)
   const contextRuntime = new ContextPlanningRuntime(profileRuntime, (request) => contextModelLimits(resolveHarnessRoute(store, request)))
   const loggingRuntime = new TurnInteractionLoggingRuntime({ inner: contextRuntime, service: interactions, resolveRoute(request) { return resolveHarnessRoute(store, request) } })
   // Image-model turns branch before the whole chat stack: the prompt goes to
@@ -448,7 +447,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const localTtsAssets = new LocalTtsAssetService(stateRoot)
 
   const router = new Router()
-  const workSystem = composeWorkSystem({ store, groupTasks, router, worldAccess })
+  const { work: workSystem, taskIntent } = composeWorkSystem({ store, credentials, groupTasks, router, worldAccess, worldRuntime, ...(options.conversationTaskIntent === undefined ? {} : { intentClassifier: options.conversationTaskIntent }) })
   registerApplicationAccessRoutes(router, applicationAccess)
   registerSystemRoutes(router, { store, stateRoot, runtimeUpdates, applicationUpdates })
   registerWorkspaceFileRoutes(router, { worldFiles, access: worldAccess })
@@ -475,7 +474,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
   registerWorldTraceRoutes(router, { store, trace: worldTrace, access: worldAccess, contextInspection: profileRuntime.contextInspection, contextSnapshots })
   registerCompletionJobRoutes(router, { store, access: worldAccess, wake: () => completionWorker.wake() })
-  registerWorldArtifactRoutes(router, { store, artifacts: worldArtifacts, access: worldAccess, authority })
+  registerWorldArtifactRoutes(router, { store, artifacts: worldArtifacts, savedReplyDocuments, access: worldAccess, authority })
   registerWorldKnowledgeRoutes(router, {
     store,
     library: worldKnowledge,
@@ -488,8 +487,8 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
     consolidationScheduler: knowledgeGraphRuntime.scheduler,
   })
   registerModelInteractionRoutes(router, { store, interactions })
-  const conversationControl = composeConversationControl({ store, router, worldAccess, orchestrator, continuations: turnContinuations, employeeActivity, worldRuntime, worldTrace, runtimeStreamHub, groupTasks, worldPackages, runtimeContext: worldRuntimeContext, skillRuntime })
-  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, turnContinuations, toolApprovals, groupTasks, groupTurnPlanner, conversationQueue: conversationControl.queue, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, runtimeContext: worldRuntimeContext, worldTrace, employeeActivity, worldPackages, worldRuntimePermissions, ownerRuntimeAccess })
+  const conversationControl = composeConversationControl({ store, router, worldAccess, orchestrator, continuations: turnContinuations, employeeActivity, worldRuntime, worldTrace, runtimeStreamHub, groupTasks, worldPackages, runtimeContext: worldRuntimeContext, skillRuntime, work: workSystem })
+  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, turnContinuations, toolApprovals, groupTasks, groupTurnPlanner, taskIntent, conversationQueue: conversationControl.queue, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, runtimeContext: worldRuntimeContext, worldTrace, employeeActivity, worldPackages, worldRuntimePermissions, ownerRuntimeAccess })
   registerGroupTaskRoutes(router, { store, worldAccess, groupTasks })
   registerEmployeeRoutes(router, {
     store,

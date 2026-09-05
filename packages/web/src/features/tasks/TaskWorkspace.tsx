@@ -1,13 +1,22 @@
-import { ArrowClockwise, Check, ClipboardText, PaperPlaneTilt, WarningCircle } from '@phosphor-icons/react'
+import { ArrowClockwise, Check, ClipboardText, PaperPlaneTilt, Prohibit, WarningCircle } from '@phosphor-icons/react'
 import { useCallback, useEffect, useState } from 'react'
 
-import type { Deliverable, WorkTask, WorkTaskDetail, World, WorldArtifact } from '@dsh-cyber/contracts'
+import type { Deliverable, WorkTask, WorkTaskDetail, WorkTaskSourceTurn, World, WorldArtifact } from '@dsh-cyber/contracts'
 import { api } from '../../api.js'
+import { DockDetailFold, DockEmptyState, DockRow, DockSurfaceHeader } from '../../components/dock/DockSurface.js'
 import { useI18n } from '../../i18n/runtime.js'
 import type { CyberEmployee } from '../../types.js'
+import { subscribeWorldLive } from '../../world-live-client.js'
 import './task-workspace.css'
 
 const GROUPS: WorkTask['status'][] = ['draft', 'running', 'waiting-approval', 'waiting-review', 'changes-requested', 'completed', 'failed']
+const GROUPS_WITH_CANCELLED: WorkTask['status'][] = [...GROUPS, 'cancelled']
+/**
+ * Where the panel offers a cancel. The server decides — it refuses anything a
+ * running execution owns — so this only keeps the button off rows that would
+ * always be refused.
+ */
+const CANCELLABLE: WorkTask['status'][] = ['draft', 'planning', 'ready', 'changes-requested', 'failed', 'recovery-required']
 
 export function TaskWorkspace({ world, employees }: { world: World; employees: CyberEmployee[] }) {
   const { locale, t, formatNumber } = useI18n()
@@ -16,26 +25,36 @@ export function TaskWorkspace({ world, employees }: { world: World; employees: C
   const [detail, setDetail] = useState<WorkTaskDetail>()
   const [artifacts, setArtifacts] = useState<WorldArtifact[]>([])
   const [creating, setCreating] = useState(false)
+  const [revealCancelled, setRevealCancelled] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
 
   const load = useCallback(async () => {
     try {
       const [taskResult, artifactResult] = await Promise.all([
-        api<{ items: WorkTask[] }>(`/api/worlds/${world.id}/tasks`),
+        api<{ items: WorkTask[] }>(`/api/worlds/${world.id}/tasks${revealCancelled ? '?status=all' : ''}`),
         api<{ artifacts: WorldArtifact[] }>(`/api/worlds/${world.id}/artifacts`),
       ])
       setTasks(taskResult.items)
       setArtifacts(artifactResult.artifacts)
-      const target = selectedId ?? taskResult.items[0]?.id
+      // A task that just left this view — cancelled while it was selected —
+      // must not leave the detail pane on a row the board no longer lists.
+      const target = taskResult.items.some((task) => task.id === selectedId) ? selectedId : taskResult.items[0]?.id
       setSelectedId(target)
       if (target !== undefined) setDetail(await api<WorkTaskDetail>(`/api/tasks/${target}`))
       else setDetail(undefined)
       setError(undefined)
     } catch (cause) { setError(localizedTaskError(cause, locale, t('task.error.load', '任务加载失败'))) }
-  }, [locale, selectedId, t, world.id])
+  }, [locale, revealCancelled, selectedId, t, world.id])
 
-  useEffect(() => { void load() }, [world.id])
+  useEffect(() => { void load() }, [revealCancelled, world.id])
+  // A task the host recorded from a conversation lands while this panel is
+  // already open. Without this it stayed invisible until the owner switched
+  // worlds or wrote something themselves.
+  useEffect(() => {
+    if (typeof EventSource === 'undefined') return
+    return subscribeWorldLive(world.id, 'world-task', () => { void load() })
+  }, [load, world.id])
   useEffect(() => { if (selectedId !== undefined) void api<WorkTaskDetail>(`/api/tasks/${selectedId}`).then(setDetail).catch((cause) => setError(localizedTaskError(cause, locale, t('task.error.detail', '任务详情加载失败')))) }, [locale, selectedId, t])
 
   const mutate = async (operation: () => Promise<unknown>) => {
@@ -43,16 +62,32 @@ export function TaskWorkspace({ world, employees }: { world: World; employees: C
     try { await operation(); await load() } catch (cause) { setError(localizedTaskError(cause, locale, t('task.error.operation', '任务操作失败'))) } finally { setBusy(false) }
   }
 
-  return <section className="task-workspace" aria-label={t('task.workspace.title', '任务工作台')} aria-busy={busy}>
-    <header className="task-workspace__header"><div><strong>{t('task.workspace.title', '任务工作台')}</strong><span>{t('task.workspace.subtitle', '真实分工、交付与验收')}</span></div><button type="button" onClick={() => setCreating((value) => !value)}><ClipboardText size={16} aria-hidden="true" />{t('task.new', '新建任务')}</button></header>
+  const newTaskLabel = t('task.new', '新建任务')
+  return <section className="task-workspace dock-surface" aria-label={t('task.workspace.title', '任务工作台')} aria-busy={busy}>
+    <DockSurfaceHeader
+      mark={<ClipboardText size={18} aria-hidden="true" />}
+      title={t('task.workspace.title', '任务工作台')}
+      summary={t('task.workspace.subtitle', '真实分工、交付与验收')}
+      action={<button type="button" className="primary-button" onClick={() => setCreating((value) => !value)}>{newTaskLabel}</button>}
+    />
     {error === undefined ? null : <div className="task-workspace__error" role="alert"><WarningCircle size={16} aria-hidden="true" /><span>{error}</span><button type="button" onClick={() => void load()}>{t('common.retry', '重试')}</button></div>}
     {creating ? <CreateTaskForm employees={employees} disabled={busy} onCancel={() => setCreating(false)} onCreate={(input) => mutate(async () => { const result = await api<{ task: WorkTask }>(`/api/worlds/${world.id}/tasks`, { method: 'POST', body: JSON.stringify(input) }); setSelectedId(result.task.id); setCreating(false) })} /> : null}
     <div className="task-workspace__layout">
       <nav className="task-board" aria-label={t('task.board.label', '任务看板')}>
-        {GROUPS.map((group) => { const items = tasks.filter((task) => task.status === group); return items.length === 0 ? null : <section key={group}><header><strong>{taskGroupLabel(group, t)}</strong><span>{formatNumber(items.length)}</span></header>{items.map((task) => <button key={task.id} type="button" className={selectedId === task.id ? 'is-active' : ''} onClick={() => setSelectedId(task.id)}><strong>{task.title}</strong><small>{priorityLabel(task.priority, t)} · v{task.currentPlanRevision}</small></button>)}</section> })}
-        {tasks.length === 0 ? <div className="task-board__empty"><strong>{t('task.empty.title', '还没有任务')}</strong><span>{t('task.empty.description', '新建一个可分工、可交付、可验收的真实任务。')}</span></div> : null}
+        {(revealCancelled ? GROUPS_WITH_CANCELLED : GROUPS).map((group) => { const items = tasks.filter((task) => task.status === group); return items.length === 0 ? null : <section key={group}><header><strong>{taskGroupLabel(group, t)}</strong><span>{formatNumber(items.length)}</span></header>{items.map((task) => <DockRow key={task.id} title={task.title} secondary={`${priorityLabel(task.priority, t)} · v${task.currentPlanRevision}${task.sourceWorkTurnId === undefined ? '' : ` · ${t('task.source.conversation', '来自对话')}`}`} selected={selectedId === task.id} onOpen={() => setSelectedId(task.id)} />)}</section> })}
+        {tasks.length === 0 ? <DockEmptyState
+          mark={<ClipboardText size={26} aria-hidden="true" />}
+          title={t('task.empty.title', '还没有任务')}
+          description={t('task.empty.description', '新建一个可分工、可交付、可验收的真实任务。')}
+          action={<button type="button" className="primary-button" onClick={() => setCreating(true)}>{newTaskLabel}</button>}
+        /> : null}
+        {/* Cancelled tasks are kept, not deleted, so the board can bring them back. */}
+        <button type="button" className="task-board__reveal" aria-pressed={revealCancelled} onClick={() => setRevealCancelled((value) => !value)}>{revealCancelled ? t('task.filter.hideCancelled', '隐藏已取消') : t('task.filter.showCancelled', '显示已取消')}</button>
       </nav>
-      <div className="task-detail">{detail === undefined ? <div className="task-board__empty"><strong>{t('task.select', '选择任务查看详情')}</strong></div> : <TaskDetail detail={detail} employees={employees} artifacts={artifacts} busy={busy} mutate={mutate} />}</div>
+      <div className="task-detail">{detail === undefined ? <DockEmptyState
+        title={t('task.select', '选择任务查看详情')}
+        description={t('task.select.description', '选中一个任务后，这里会显示它的计划、执行证据与交付验收。')}
+      /> : <TaskDetail detail={detail} employees={employees} artifacts={artifacts} busy={busy} mutate={mutate} />}</div>
     </div>
   </section>
 }
@@ -75,16 +110,75 @@ function TaskDetail({ detail, employees, artifacts, busy, mutate }: { detail: Wo
   const { locale, t, formatList, formatNumber } = useI18n()
   const [selectedEmployees, setSelectedEmployees] = useState(() => new Set(employees.map((employee) => employee.id)))
   const [coordinator, setCoordinator] = useState(detail.task.coordinatorEmployeeId ?? employees[0]?.id ?? '')
+  // The coordinator has to be someone actually selected. With a single
+  // assignee that is simply them. Without this the select can show a name
+  // the request will not carry, and the server refuses a coordinator who is
+  // not a member — which is how a one-person task failed even after the
+  // server started accepting one.
+  const effectiveCoordinator = selectedEmployees.has(coordinator) ? coordinator : [...selectedEmployees][0]
+  // The service refuses an execute while the turn that proposed this task is
+  // still working, because repeating it now would duplicate whatever real
+  // side effects that turn is producing. Offer no button that can only fail.
+  const sourceTurnWorking = detail.sourceTurn !== undefined && ['queued', 'running', 'waiting-approval'].includes(detail.sourceTurn.status)
   const latestRun = detail.runs.at(-1)
   const submitted = detail.deliverables.findLast((item) => item.status === 'submitted')
   return <>
     <header className="task-detail__header"><div><h2>{detail.task.title}</h2><p>{detail.task.description}</p></div><span className={`task-status task-status--${detail.task.status}`}>{taskStatusLabel(detail.task.status, t)}</span></header>
-    {(detail.task.status === 'draft' || detail.task.status === 'changes-requested' || detail.task.status === 'failed') ? <section className="task-action"><h3>{detail.task.status === 'changes-requested' ? t('task.action.feedbackVersion', '按反馈生成新版本') : t('task.action.start', '开始真实协作')}</h3><div className="task-employee-picker">{employees.map((employee) => <label key={employee.id}><input type="checkbox" checked={selectedEmployees.has(employee.id)} onChange={(event) => setSelectedEmployees((current) => { const next = new Set(current); if (event.target.checked) next.add(employee.id); else next.delete(employee.id); return next })} /><span><strong>{employee.displayName}</strong><small>{employee.role} · {employee.presence === 'working' ? t('task.action.working', '工作中') : t('task.action.available', '可接任务')}</small></span></label>)}</div><label><span>{t('task.create.coordinator', '协调角色')}</span><select value={coordinator} onChange={(event) => setCoordinator(event.target.value)}>{employees.filter((employee) => selectedEmployees.has(employee.id)).map((employee) => <option key={employee.id} value={employee.id}>{employee.displayName}</option>)}</select></label><button type="button" disabled={busy || selectedEmployees.size < 2} onClick={() => void mutate(() => api(`/api/tasks/${detail.task.id}/execute`, { method: 'POST', body: JSON.stringify({ employeeIds: [...selectedEmployees], coordinatorEmployeeId: coordinator }) }))}><PaperPlaneTilt size={16} aria-hidden="true" />{detail.task.status === 'changes-requested' ? t('task.action.newVersion', '生成新版本') : t('task.action.planAndRun', '生成计划并执行')}</button></section> : null}
+    {detail.sourceTurn === undefined ? null : <SourceTurn turn={detail.sourceTurn} employees={employees} />}
+    {(detail.task.status === 'draft' || detail.task.status === 'changes-requested' || detail.task.status === 'failed') ? <section className="task-action"><h3>{detail.task.status === 'changes-requested' ? t('task.action.feedbackVersion', '按反馈生成新版本') : t('task.action.start', '开始真实协作')}</h3>{detail.sourceTurn?.status === 'completed' && detail.sourceTurn.runs.length > 0 ? <p className="task-action__repeat">{t('task.action.sourceAlreadyRan', '这次对话已经执行过一遍。再次执行会重新产生一次真实副作用。')}</p> : null}{sourceTurnWorking ? <p className="task-action__repeat">{t('task.action.sourceStillWorking', '提出该任务的对话仍在进行，等它结束后再执行，以免重复产生一次真实副作用。')}</p> : null}<div className="task-employee-picker">{employees.map((employee) => <label key={employee.id}><input type="checkbox" checked={selectedEmployees.has(employee.id)} onChange={(event) => setSelectedEmployees((current) => { const next = new Set(current); if (event.target.checked) next.add(employee.id); else next.delete(employee.id); return next })} /><span><strong>{employee.displayName}</strong><small>{employee.role} · {employee.presence === 'working' ? t('task.action.working', '工作中') : t('task.action.available', '可接任务')}</small></span></label>)}</div><label><span>{t('task.create.coordinator', '协调角色')}</span><select value={effectiveCoordinator ?? ''} onChange={(event) => setCoordinator(event.target.value)}>{employees.filter((employee) => selectedEmployees.has(employee.id)).map((employee) => <option key={employee.id} value={employee.id}>{employee.displayName}</option>)}</select></label><button type="button" disabled={busy || sourceTurnWorking || selectedEmployees.size < 1} onClick={() => void mutate(() => api(`/api/tasks/${detail.task.id}/execute`, { method: 'POST', body: JSON.stringify({ employeeIds: [...selectedEmployees], ...(effectiveCoordinator === undefined ? {} : { coordinatorEmployeeId: effectiveCoordinator }) }) }))}><PaperPlaneTilt size={16} aria-hidden="true" />{detail.task.status === 'changes-requested' ? t('task.action.newVersion', '生成新版本') : t('task.action.planAndRun', '生成计划并执行')}</button></section> : null}
     <section><h3>{t('task.plan.heading', '计划与分工')}</h3>{detail.plans.length === 0 ? <p>{t('task.plan.empty', '执行后将显示真实计划和选择原因。')}</p> : detail.plans.map((plan) => <div key={plan.id} className="task-plan"><header><strong>{t('task.plan.version', '计划 v{version}', { version: plan.revision })}</strong><span>{taskStatusLabel(plan.status, t)}</span></header>{detail.steps.filter((step) => step.planRevisionId === plan.id).map((step) => <article key={step.id}><div><strong>{step.ordinal}. {step.title}</strong><span>{taskStatusLabel(step.status, t)}</span></div><p>{step.expectedOutput}</p><small>{t('common.role', '角色')}：{formatList(step.assignedEmployeeIds.map((id) => employeeName(employees, id)))} · {t('common.skill', '技能')}：{step.requiredSkills.length > 0 ? formatList(step.requiredSkills) : '—'}</small></article>)}</div>)}</section>
-    <details className="dock-detail-fold"><summary>{t('task.execution.heading', '执行与证据')} · {detail.runs.length}</summary>{detail.runs.map((run) => <article key={run.id} className="task-run"><strong>{t('task.execution.attempt', '第 {attempt} 次执行 · {status}', { attempt: run.attempt, status: taskStatusLabel(run.status, t) })}</strong><span>{t('task.execution.workTurn', '工作回合 {id}', { id: run.workTurnId.slice(0, 8) })} · {t('task.execution.agentRuns', '{count} 个角色运行', { count: formatNumber(run.agentRunIds.length) })} · {formatMilliseconds(run.latency ?? 0, locale)}</span></article>)}{detail.assignments.map((assignment) => <details key={assignment.id}><summary>{t('task.execution.reason', '{name} 的选择原因', { name: employeeName(employees, assignment.employeeId) })}</summary><pre>{JSON.stringify(assignment.assignmentReason, null, 2)}</pre></details>)}</details>
+    <DockDetailFold label={t('task.execution.heading', '执行与证据')} meta={formatNumber(detail.runs.length)}>{detail.runs.map((run) => <article key={run.id} className="task-run"><strong>{t('task.execution.attempt', '第 {attempt} 次执行 · {status}', { attempt: run.attempt, status: taskStatusLabel(run.status, t) })}</strong><span>{t('task.execution.workTurn', '工作回合 {id}', { id: run.workTurnId.slice(0, 8) })} · {t('task.execution.agentRuns', '{count} 个角色运行', { count: formatNumber(run.agentRunIds.length) })} · {formatMilliseconds(run.latency ?? 0, locale)}</span></article>)}{detail.assignments.map((assignment) => <details key={assignment.id}><summary>{t('task.execution.reason', '{name} 的选择原因', { name: employeeName(employees, assignment.employeeId) })}</summary><pre>{JSON.stringify(assignment.assignmentReason, null, 2)}</pre></details>)}</DockDetailFold>
     {detail.task.status === 'waiting-review' && latestRun !== undefined && submitted === undefined ? <SubmitDeliverable taskId={detail.task.id} runId={latestRun.id} employees={employees} artifacts={artifacts} busy={busy} mutate={mutate} /> : null}
     <section><h3>{t('task.delivery.heading', '交付与验收')}</h3>{detail.deliverables.length === 0 ? <p>{t('task.delivery.empty', '还没有交付版本。')}</p> : detail.deliverables.map((item) => <DeliverableRow key={item.id} deliverable={item} reviews={detail.reviews.filter((review) => review.deliverableId === item.id)} />)}{submitted === undefined ? null : <ReviewForm deliverable={submitted} busy={busy} mutate={mutate} />}</section>
+    {CANCELLABLE.includes(detail.task.status) ? <CancelTask key={detail.task.id} taskId={detail.task.id} busy={busy} mutate={mutate} /> : null}
   </>
+}
+
+/**
+ * The conversation turn this task came out of, and what that turn did.
+ *
+ * A draft recorded from a chat message used to say only "来自对话" on its row:
+ * the turn behind it could be waiting in the queue, still answering, or long
+ * finished, and the panel looked identical in all three cases. It says which
+ * turn, how that turn ended and who ran in it — and then says plainly that
+ * none of it is this task's own work, because the task has not run and will
+ * not until the owner starts it.
+ */
+function SourceTurn({ turn, employees }: { turn: WorkTaskSourceTurn; employees: CyberEmployee[] }) {
+  const { t, formatList, formatNumber } = useI18n()
+  return <section className="task-source">
+    <h3>{t('task.source.heading', '来源对话')}</h3>
+    <p>
+      {t('task.source.turn', '提出该任务的回合 {id} · {status}', { id: turn.workTurnId.slice(0, 8), status: taskStatusLabel(turn.status, t) })}
+      {' · '}
+      {t('task.execution.agentRuns', '{count} 个角色运行', { count: formatNumber(turn.runs.length) })}
+    </p>
+    {turn.runs.length === 0 ? null : <small>{formatList(turn.runs.map((run) => employeeName(employees, run.employeeId)))}</small>}
+    {turn.errorCode === undefined ? null : <small className="task-source__error">{turn.errorCode}</small>}
+    <small>{t('task.source.note', '这是提出任务的那次对话，不是任务本身的执行。')}</small>
+  </section>
+}
+
+/**
+ * The way out of a task the owner did not want.
+ *
+ * It asks first, because the row stops being part of the working list. It is
+ * not a delete: the plans, runs, deliverables and reviews stay, and the board's
+ * own filter brings the task back.
+ */
+function CancelTask({ taskId, busy, mutate }: { taskId: string; busy: boolean; mutate(operation: () => Promise<unknown>): Promise<void> }) {
+  const { t } = useI18n()
+  const [confirming, setConfirming] = useState(false)
+  if (!confirming) {
+    return <section className="task-cancel"><button type="button" disabled={busy} onClick={() => setConfirming(true)}><Prohibit size={15} aria-hidden="true" />{t('task.cancel.action', '取消任务')}</button></section>
+  }
+  return <section className="task-cancel is-confirming">
+    <p>{t('task.cancel.warning', '取消后任务不再出现在默认列表，历史记录会保留。')}</p>
+    <div>
+      <button type="button" onClick={() => setConfirming(false)}>{t('task.cancel.back', '返回')}</button>
+      <button type="button" className="danger-button" disabled={busy} onClick={() => void mutate(() => api(`/api/tasks/${taskId}/cancel`, { method: 'POST' }))}>{t('task.cancel.confirm', '确认取消')}</button>
+    </div>
+  </section>
 }
 
 function SubmitDeliverable({ taskId, runId, employees, artifacts, busy, mutate }: { taskId: string; runId: string; employees: CyberEmployee[]; artifacts: WorldArtifact[]; busy: boolean; mutate(operation: () => Promise<unknown>): Promise<void> }) {

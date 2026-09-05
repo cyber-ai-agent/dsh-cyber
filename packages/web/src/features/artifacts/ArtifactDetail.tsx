@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { api, jsonBody } from '../../api.js'
 import { formatDateTime } from '../../i18n/format.js'
 import { knowledgeConsolidatePath } from '../knowledge/knowledge-api.js'
-import { artifactFileUrl, artifactKindLabel, type ArtifactRecord } from './useWorldArtifacts.js'
+import { artifactEvidenceLabel, artifactFileUrl, artifactKindLabel, type ArtifactRecord } from './useWorldArtifacts.js'
 import { ArtifactPreview } from './ArtifactPreview.js'
 
 interface ArtifactDetailProps {
@@ -32,6 +32,7 @@ export function ArtifactDetail({ worldId, artifact, onBack, onRename, onArchive,
   const [knowledgeMessage, setKnowledgeMessage] = useState<string>()
   const currentVersion = artifact.currentVersionInfo
   const versions = artifact.versions ?? (currentVersion === undefined ? [] : [currentVersion])
+  const currentEvidence = artifact.evidence?.find((entry) => entry.version === artifact.currentVersion)
   const knowledgeActionAllowed = !demoMode && canAddToKnowledgeProp && artifact.status !== 'archived'
 
   useEffect(() => {
@@ -102,6 +103,10 @@ export function ArtifactDetail({ worldId, artifact, onBack, onRename, onArchive,
         {editing ? <button type="button" className="artifact-button artifact-button--primary" disabled={busy || title.trim().length === 0} onClick={() => void rename()}>保存名称</button> : <button type="button" className="artifact-icon-button" aria-label="重命名产物" title="重命名产物" onClick={() => setEditing(true)}><PencilSimple size={17} /></button>}
       </div>
       <p>{artifact.description ?? '世界内可持续引用的已发布产物。'}</p>
+      {currentEvidence === undefined ? null : <p
+        className={`artifact-detail__evidence artifact-detail__evidence--${currentEvidence.proven ? 'proven' : 'unproven'}`}
+        title={artifactEvidenceLabel(currentEvidence.grade).hint}
+      >{artifactEvidenceLabel(currentEvidence.grade).label}</p>}
       <div className="artifact-detail__actions">
         <a className="artifact-button" href={artifactFileUrl(worldId, artifact.id, artifact.currentVersion)} target="_blank" rel="noreferrer"><LinkSimple size={16} />打开文件</a>
         <button type="button" className="artifact-button" disabled={busy || artifact.status === 'archived'} onClick={() => void archive()}><Archive size={16} />{artifact.status === 'archived' ? '已归档' : '归档'}</button>
@@ -124,6 +129,8 @@ export function ArtifactDetail({ worldId, artifact, onBack, onRename, onArchive,
           {currentVersion?.sessionId === undefined ? null : <div><dt>会话</dt><dd><code>{currentVersion.sessionId}</code></dd></div>}
           {currentVersion?.workTurnId === undefined ? null : <div><dt>工作回合</dt><dd><code>{currentVersion.workTurnId}</code></dd></div>}
           {currentVersion?.agentRunId === undefined ? null : <div><dt>角色运行</dt><dd><code>{currentVersion.agentRunId}</code></dd></div>}
+          {currentEvidence === undefined ? null : <div><dt>归属证据</dt><dd>{artifactEvidenceLabel(currentEvidence.grade).hint}</dd></div>}
+          {currentEvidence?.concurrentRunIds === undefined ? null : <div><dt>同时执行的运行</dt><dd>{currentEvidence.concurrentRunIds.map((id) => <code key={id}>{id}</code>)}</dd></div>}
           <div><dt>更新时间</dt><dd><Clock size={15} />{formatDate(artifact.updatedAt)}</dd></div>
         </dl>
       </details>

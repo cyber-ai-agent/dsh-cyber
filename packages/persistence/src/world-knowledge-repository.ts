@@ -396,6 +396,41 @@ export class WorldKnowledgeRepository {
     return row === undefined ? undefined : mapChunk(row)
   }
 
+  /**
+   * Reads one bounded window of a document's chunk projection.
+   *
+   * `listChunks` materializes every chunk of a source, which is fine for a
+   * one-off reindex and wrong for a reader: a 2,000,000-character document has
+   * thousands of rows and nobody looks at them at once. The window is applied
+   * in SQL so a preview costs the size of what is shown, and `total` comes from
+   * the same world-scoped statement so a caller can state the range honestly.
+   */
+  listChunkWindow(
+    worldId: string,
+    documentId: string,
+    window: { offset?: number; limit?: number } = {},
+  ): { items: KnowledgeChunk[]; total: number } {
+    const document = this.getDocument(worldId, documentId)
+    if (document === undefined) return { items: [], total: 0 }
+    const offset = boundedWindowValue(window.offset ?? 0, 'Knowledge chunk window offset')
+    const limit = boundedWindowValue(window.limit ?? 20, 'Knowledge chunk window limit')
+    const totalRow = this.#database
+      .prepare('SELECT COUNT(*) AS total FROM knowledge_chunks WHERE world_id = ? AND document_id = ?')
+      .get(worldId, document.id)
+    const total = integerColumn(record(totalRow, 'knowledge chunk window total'), 'total')
+    if (limit === 0 || offset >= total) return { items: [], total }
+    const items = this.#database
+      .prepare(
+        `SELECT * FROM knowledge_chunks
+         WHERE world_id = ? AND document_id = ?
+         ORDER BY ordinal ASC, id ASC
+         LIMIT ? OFFSET ?`,
+      )
+      .all(worldId, document.id, limit, offset)
+      .map(mapChunk)
+    return { items, total }
+  }
+
   listChunks(worldId: string, documentId: string): KnowledgeChunk[]
   listChunks(worldId: string): KnowledgeSearchBackendResult[]
   listChunks(worldId: string, documentId?: string): KnowledgeChunk[] | KnowledgeSearchBackendResult[] {
@@ -1133,6 +1168,11 @@ function stringColumn(value: Record<string, unknown>, key: string): string {
   const entry = value[key]
   if (typeof entry !== 'string') throw new PersistenceError(`Invalid Knowledge column: ${key}`)
   return entry
+}
+
+function boundedWindowValue(value: number, label: string): number {
+  if (!Number.isSafeInteger(value) || value < 0) throw new PersistenceError(`${label} must be a non-negative integer`)
+  return value
 }
 
 function integerColumn(value: Record<string, unknown>, key: string): number {

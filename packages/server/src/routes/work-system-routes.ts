@@ -10,7 +10,7 @@ import { HttpError } from '../http/errors.js'
 import type { Router } from '../http/router.js'
 import { readJson } from '../http/request.js'
 import { writeJson } from '../http/response.js'
-import type { WorkSystemService } from '../services/work-system-service.js'
+import type { WorkSystemService, WorkTaskListScope } from '../services/work-system-service.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
 import { requireWorldAcceptingWork } from '../services/world-work-guard.js'
 
@@ -23,10 +23,12 @@ export function registerWorkSystemRoutes(router: Router, dependencies: { store: 
     const world = store.getWorld(worldId)
     if (world === undefined) throw new HttpError(404, 'world_not_found', '世界不存在')
     await access.assertUnlocked(worldId, request)
+    // No filter is the default view: everything except the cancelled tasks,
+    // which stay reachable through `cancelled` or `all`.
     const raw = url.searchParams.get('status')
-    const status = raw === null ? undefined : TASK_STATUSES.find((item) => item === raw)
-    if (raw !== null && status === undefined) throw new HttpError(422, 'task_status_invalid', '任务状态无效')
-    writeJson(response, 200, { items: work.list(worldId, status) })
+    const scope: WorkTaskListScope | undefined = raw === null ? undefined : raw === 'all' ? 'all' : TASK_STATUSES.find((item) => item === raw)
+    if (raw !== null && scope === undefined) throw new HttpError(422, 'task_status_invalid', '任务状态无效')
+    writeJson(response, 200, { items: work.list(worldId, scope) })
   })
 
   router.post(/^\/api\/worlds\/([^/]+)\/tasks$/, async ({ request, response, params }) => {
@@ -53,6 +55,16 @@ export function registerWorkSystemRoutes(router: Router, dependencies: { store: 
     const coordinatorEmployeeId = typeof body.coordinatorEmployeeId === 'string' && body.coordinatorEmployeeId.trim() ? body.coordinatorEmployeeId.trim() : undefined
     const result = await work.execute(detail.task.id, { employeeIds, ...(coordinatorEmployeeId === undefined ? {} : { coordinatorEmployeeId }) })
     writeJson(response, 200, result)
+  })
+
+  // Cancel, not delete: the task keeps its history and stays readable here, it
+  // only leaves the default list. Unlike execute this starts no work, so an
+  // archived world may still be tidied; a task an execution is holding refuses
+  // with a 409 instead of racing it.
+  router.post(/^\/api\/tasks\/([^/]+)\/cancel$/, async ({ request, response, params }) => {
+    const detail = safeDetail(work, params[0]!)
+    await access.assertUnlocked(detail.task.worldId, request)
+    writeJson(response, 200, work.cancel(detail.task.id))
   })
 
   router.post(/^\/api\/tasks\/([^/]+)\/deliverables$/, async ({ request, response, params }) => {
@@ -94,4 +106,4 @@ function contract<T>(operation: () => T): T { try { return operation() } catch (
 function safeDetail(work: WorkSystemService, id: string) { try { return work.detail(id) } catch { throw new HttpError(404, 'task_not_found', '任务不存在') } }
 function text(value: unknown, field: string): string { if (typeof value !== 'string' || !value.trim()) throw new HttpError(422, 'work_system_contract_invalid', `${field} 不能为空`); return value.trim() }
 function positiveInteger(value: unknown, field: string): number { if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) throw new HttpError(422, 'work_system_contract_invalid', `${field} 必须是正整数`); return value }
-function stringArray(value: unknown, field: string): string[] { if (!Array.isArray(value)) throw new HttpError(422, 'work_system_contract_invalid', `${field} 必须是数组`); const result = [...new Set(value.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean))]; if (field === '任务角色' && result.length < 2) throw new HttpError(422, 'work_system_contract_invalid', '任务角色至少需要两名'); return result }
+function stringArray(value: unknown, field: string): string[] { if (!Array.isArray(value)) throw new HttpError(422, 'work_system_contract_invalid', `${field} 必须是数组`); const result = [...new Set(value.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean))]; if (field === '任务角色' && result.length < 1) throw new HttpError(422, 'work_system_contract_invalid', '任务角色至少需要一名'); return result }

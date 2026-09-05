@@ -1067,7 +1067,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .authority-badge svg { width: 14px; height: 14px; }
 .authority-badge--md { width: 16px; height: 16px; margin-inline-start: 6px; }
 .authority-badge--md svg { width: 16px; height: 16px; }
-.session-row__copy strong, .message__meta strong, .dossier-hero__identity h2, .dossier-card > header > div strong, .relationship-list article > div strong, .world-admin-list__item strong, .world-agent__label strong { display: inline-flex; align-items: center; min-width: 0; }
+.session-row__copy strong, .message__meta strong, .dossier-hero__identity h2, .relationship-list article > div strong, .world-admin-list__item strong, .world-agent__label strong { display: inline-flex; align-items: center; min-width: 0; }
 .avatar-edit-button { display: grid; place-items: center; padding: 0; border: 0; background: transparent; }
 .avatar-edit-button:hover .avatar, .avatar-edit-button:focus-visible .avatar { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
@@ -1549,7 +1549,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .mention-menu strong { font-size: 11px; }
 .mention-menu small { color: var(--text-muted); font-size: 9px; }
 
-.artifact-dock { height: 100%; display: grid; grid-template-rows: 56px minmax(0, 1fr); }
+/* The single column has to be allowed to be narrower than its content, or the
+   tab strip's max-content width makes the whole dock — header, list and all —
+   wider than the space the shell gave it, and the right edge is simply cut off
+   once a world has pinned a few surfaces. */
+.artifact-dock { height: 100%; display: grid; grid-template-rows: 56px minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); }
 
 /* 统一 Dock 顶栏容器：固定高度、严整居中 */
 .dock-tabs {
@@ -1910,201 +1914,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   background: var(--surface-0);
 }
 
-.dossier-directory__header {
-  min-height: 72px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface-1);
-}
-
-.dossier-directory__header > div {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.dossier-directory__header > div > svg {
-  color: var(--accent);
-  filter: drop-shadow(0 0 8px var(--accent-soft));
-}
-
-.dossier-directory__header > div > span {
-  display: grid;
-  gap: 4px;
-}
-
-.dossier-directory__header strong {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text-strong);
-}
-
-.dossier-directory__header small,
-.dossier-directory__header > span {
-  color: var(--text-muted);
-  font-size: 12.5px;
-}
-
-.dossier-directory__header-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.dossier-directory__header-actions > span {
-  color: var(--text-muted);
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.dossier-directory__invite {
-  border-radius: 999px !important;
-  padding: 8px 18px !important;
-  font-size: 13px !important;
-  box-shadow: 0 4px 14px var(--accent-soft) !important;
-}
-
-.dossier-directory__summary {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--border);
-  background: transparent;
-}
-
-.dossier-directory__summary > div {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg, 12px);
-  background: var(--surface-1);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
-  transition: all var(--duration-fast) var(--ease-smooth);
-}
-
-.dossier-directory__summary > div:hover {
-  border-color: var(--accent);
-  background: var(--surface-2);
-  transform: translateY(-2px);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.15);
-}
-
-.dossier-directory__summary svg {
-  color: var(--accent);
-  font-size: 20px;
-  flex-shrink: 0;
-}
-
-.dossier-directory__summary strong {
-  color: var(--text-strong);
-  font: 700 18px var(--font-mono);
-}
-
-.dossier-directory__summary span {
-  overflow: hidden;
-  color: var(--text-muted);
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .dossier-directory__list {
   display: grid;
   gap: 14px;
   padding: 16px 18px;
 }
 
-.dossier-directory__empty {
-  min-height: 320px;
-  display: grid;
-  place-content: center;
-  justify-items: center;
-  color: var(--text-muted);
-  text-align: center;
-}
-
-.dossier-directory__empty strong {
-  margin-top: 12px;
-  color: var(--text-strong);
-  font-size: 15px;
-}
-
-.dossier-directory__empty p {
-  max-width: 340px;
-  font-size: 13px;
-  line-height: 1.7;
-}
-
-/* 现代圆润流线角色卡片 */
-.dossier-card {
-  display: grid;
-  gap: 14px;
-  padding: 18px;
-  border-radius: 16px;
-  border: 1px solid var(--border);
-  background: var(--surface-1);
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.12);
-  transition: all var(--duration-normal) var(--ease-smooth);
-}
-
-.dossier-card:hover {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--surface-2) 75%, var(--surface-1));
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
-  transform: translateY(-2px);
-}
-
-.dossier-card > header {
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-}
-
-.dossier-card > header > div {
-  min-width: 0;
-  display: grid;
-  gap: 3px;
-}
-
-.dossier-card > header > div strong {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--text-strong);
-}
-
-.dossier-card > header > div span {
-  overflow: hidden;
-  color: var(--text-muted);
-  font-size: 12.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.dossier-card__activity {
-  margin: 0;
-  padding: 10px 14px;
-  border-radius: 10px;
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-  background: var(--accent-soft);
-  color: var(--text-strong);
-  font-size: 13px;
-  line-height: 1.55;
-  font-weight: 500;
-}
-
+/* Dossier content inside the shared row's details fold. */
 .dossier-card__traits {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  padding-bottom: 10px;
 }
 
 .dossier-card__traits span {
@@ -2140,7 +1961,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 .dossier-card dt {
   color: var(--text-muted);
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .dossier-card dd {
@@ -2156,72 +1977,28 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .dossier-card__evidence {
   display: grid;
   gap: 4px;
+  margin-top: 10px;
   padding: 10px 12px;
+  border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface-2);
-  border: 1px solid var(--border);
 }
 
 .dossier-card__evidence span {
   overflow: hidden;
   color: var(--text-strong);
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .dossier-card__evidence small {
-  display: -webkit-box;
-  overflow: hidden;
   color: var(--text-muted);
   font-size: 12px;
   line-height: 1.6;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
 }
 
-.dossier-card > footer {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-  padding-top: 4px;
-}
-
-.dossier-card > footer .icon-button {
-  border-radius: 50%;
-  width: 36px;
-  height: 36px;
-  display: inline-grid;
-  place-items: center;
-}
-
-.dossier-card > footer .text-button {
-  border-radius: 999px;
-  padding: 8px 16px;
-  font-size: 13px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  color: var(--text-strong);
-  transition: all var(--duration-fast) var(--ease-smooth);
-}
-
-.dossier-card > footer .text-button:hover {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--accent-strong);
-}
-
-.dossier-card > footer .primary-button {
-  border-radius: 999px;
-  padding: 8px 18px;
-  font-size: 13px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  box-shadow: 0 4px 14px var(--accent-soft);
-}
 .evidence-principle svg { flex: none; color: var(--accent); }
 .evidence-principle p { margin: 0; }
 .skill-list, .journal-list { display: grid; gap: 9px; }
@@ -2690,6 +2467,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 
 .world-theme-card {
+  /* 皮肤卡片是真实按钮：键盘可达、有 aria-pressed，不靠可点击的 div。 */
+  width: 100%;
+  padding: 0;
+  margin: 0;
+  text-align: start;
+  font: inherit;
+  color: inherit;
+  appearance: none;
   border-radius: 12px;
   border: 1px solid var(--dialog-border);
   background: rgba(0, 0, 0, 0.3);
@@ -2698,6 +2483,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   transition: all var(--duration-fast) var(--ease-smooth);
   display: flex;
   flex-direction: column;
+}
+
+.world-theme-card:focus-visible {
+  outline: 2px solid var(--dialog-accent);
+  outline-offset: 2px;
 }
 
 .world-theme-card:hover {
@@ -2998,6 +2788,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .market-intro > div { display: grid; gap: 4px; }
 .market-intro strong { font-size: 20px; font-weight: 700; color: var(--text-strong); }
 .market-intro span { color: var(--text-soft); font-size: 13px; line-height: 1.6; }
+/* Both world grids are sections with the same header and the same state line;
+   only one of them installs anything. */
+.market-section { display: grid; gap: 14px; }
+.market-section > .market-intro strong { font-size: 16px; }
 .market-search-row { min-width: 0; display: flex; align-items: stretch; gap: 8px; }
 .market-search-row .market-search { flex: 1 1 auto; min-width: 0; }
 .market-custom-role-button { min-height: 48px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; flex: 0 0 auto; padding: 0 14px; border: 1px solid color-mix(in srgb, var(--gold, var(--accent)) 70%, var(--border-strong)); border-radius: var(--radius-md, 10px); color: var(--gold, var(--accent)); background: color-mix(in srgb, var(--gold-soft, var(--accent-soft)) 70%, var(--surface-1)); font-size: 14px; font-weight: 650; cursor: pointer; }
@@ -3544,8 +3338,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .world-view { grid-template-rows: 68px minmax(0, 1fr) 44px; }
   .world-view__header strong { font-size: 13px; }
   .world-view__stats, .world-view__footer, .world-view__footer button { font-size: 11px; }
-  .dossier-directory__header strong { font-size: 15px; }
-  .dossier-card > header > div strong { font-size: 14px; }
+  .dossier-directory .dock-surface__heading h2 { font-size: 15px; }
   .settings-dialog { width: min(1020px, 80vw); height: min(720px, 75vh); }
   .settings-dialog__header { padding-inline: 24px; }
   .settings-dialog__header h2 { font-size: 18px; }
@@ -4096,57 +3889,40 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   background: transparent !important;
 }
 
-:root[data-skin='maid-atelier'] .dossier-directory__header {
+:root[data-skin='maid-atelier'] .dossier-directory .dock-surface__header {
   background: rgba(10, 23, 59, 0.94) !important;
   border-bottom: 1px solid rgba(197, 164, 104, 0.5) !important;
 }
 
-:root[data-skin='maid-atelier'] .dossier-directory__summary > div {
-  background: rgba(14, 28, 68, 0.85) !important;
-  border: 1px solid rgba(197, 164, 104, 0.4) !important;
-  box-shadow: 0 4px 16px rgba(4, 11, 35, 0.4) !important;
-}
-
-:root[data-skin='maid-atelier'] .dossier-directory__summary > div:hover {
-  border-color: #c5a468 !important;
-  background: rgba(22, 42, 98, 0.92) !important;
-}
-
-:root[data-skin='maid-atelier'] .dossier-card {
+:root[data-skin='maid-atelier'] .dossier-directory .dock-row {
   background: rgba(12, 25, 62, 0.92) !important;
   border: 1px solid rgba(197, 164, 104, 0.45) !important;
   box-shadow: 0 8px 28px rgba(4, 11, 35, 0.5) !important;
 }
 
-:root[data-skin='maid-atelier'] .dossier-card:hover {
+:root[data-skin='maid-atelier'] .dossier-directory .dock-row:hover {
   border-color: #c5a468 !important;
   box-shadow: 0 12px 36px rgba(4, 11, 35, 0.65), 0 0 20px rgba(197, 164, 104, 0.25) !important;
 }
 
-:root[data-skin='maid-atelier'] .dossier-card__activity {
-  background: rgba(197, 164, 104, 0.12) !important;
-  border: 1px solid rgba(197, 164, 104, 0.5) !important;
-  color: #f8f6f0 !important;
-}
-
-:root[data-skin='maid-atelier'] .dossier-card dl > div {
+:root[data-skin='maid-atelier'] .dossier-directory .dock-row dl > div {
   background: rgba(8, 18, 48, 0.85) !important;
   border: 1px solid rgba(197, 164, 104, 0.3) !important;
 }
 
-:root[data-skin='maid-atelier'] .dossier-card__evidence {
+:root[data-skin='maid-atelier'] .dossier-directory .dossier-card__evidence {
   background: rgba(8, 18, 48, 0.85) !important;
   border: 1px solid rgba(197, 164, 104, 0.3) !important;
 }
 
-:root[data-skin='maid-atelier'] .dossier-card > footer .primary-button {
+:root[data-skin='maid-atelier'] .dossier-directory .dock-surface__action .primary-button {
   background: linear-gradient(135deg, #f8e5be 0%, #c5a468 55%, #9b793d 100%) !important;
   color: #08122d !important;
   border: 1px solid rgba(255, 245, 215, 0.8) !important;
   font-weight: 700 !important;
 }
 
-:root[data-skin='maid-atelier'] .dossier-card > footer .text-button {
+:root[data-skin='maid-atelier'] .dossier-directory .dock-row__actions .text-button {
   background: rgba(197, 164, 104, 0.12) !important;
   border: 1px solid rgba(197, 164, 104, 0.5) !important;
   color: #f8f6f0 !important;
@@ -4879,7 +4655,7 @@ html[dir='rtl'] .task-workspace { text-align: start; }
 }
 
 .context-menu button small {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted, #8b949e);
   line-height: 1.3;
 }

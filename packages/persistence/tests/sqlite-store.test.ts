@@ -11,6 +11,9 @@ import {
   DatabaseCorruptError,
   SecretPersistenceError,
   SqliteStore,
+  WorkSystemRepository,
+  WorldKnowledgeGraphRepository,
+  WorldKnowledgeRepository,
   exportReadonlyRecovery,
 } from '../src/index.js'
 
@@ -852,6 +855,17 @@ describe('SqliteStore', () => {
       ALTER TABLE employee_instances DROP COLUMN health_error_code;
       ALTER TABLE employee_instances DROP COLUMN health;
       ALTER TABLE employee_revisions DROP COLUMN runtime_permission_mode;
+      DROP INDEX knowledge_claims_not_current_idx;
+      DROP INDEX knowledge_relations_not_current_idx;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_since;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
+      DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 2;
       PRAGMA user_version = 2;
     `)
@@ -942,6 +956,10 @@ describe('SqliteStore', () => {
     // keeping every milestone that database already held.
     const legacy = new DatabaseSync(path)
     legacy.exec(`
+      DROP INDEX work_tasks_source_message_idx;
+      DROP INDEX work_tasks_source_work_turn_idx;
+      ALTER TABLE work_tasks DROP COLUMN source_message_id;
+      ALTER TABLE work_tasks DROP COLUMN source_work_turn_id;
       DROP TABLE agent_run_context_snapshots;
       DROP TABLE IF EXISTS employee_memory_index_fts;
       DROP TABLE employee_memory_index;
@@ -952,6 +970,17 @@ describe('SqliteStore', () => {
       ALTER TABLE model_profiles DROP COLUMN capabilities_json;
       ALTER TABLE model_profiles DROP COLUMN probed_at;
       DROP TABLE model_providers;
+      DROP INDEX knowledge_claims_not_current_idx;
+      DROP INDEX knowledge_relations_not_current_idx;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_since;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
+      DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 36;
       PRAGMA user_version = 36;
     `)
@@ -1023,6 +1052,10 @@ describe('SqliteStore', () => {
     // keeping every row that database already held.
     const legacy = new DatabaseSync(path)
     legacy.exec(`
+      DROP INDEX work_tasks_source_message_idx;
+      DROP INDEX work_tasks_source_work_turn_idx;
+      ALTER TABLE work_tasks DROP COLUMN source_message_id;
+      ALTER TABLE work_tasks DROP COLUMN source_work_turn_id;
       DROP TABLE agent_run_context_snapshots;
       DROP INDEX model_profiles_provider_model_idx;
       ALTER TABLE model_profiles DROP COLUMN provider_id;
@@ -1030,6 +1063,17 @@ describe('SqliteStore', () => {
       ALTER TABLE model_profiles DROP COLUMN capabilities_json;
       ALTER TABLE model_profiles DROP COLUMN probed_at;
       DROP TABLE model_providers;
+      DROP INDEX knowledge_claims_not_current_idx;
+      DROP INDEX knowledge_relations_not_current_idx;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_since;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
+      DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 38;
       PRAGMA user_version = 38;
     `)
@@ -1397,6 +1441,10 @@ describe('SqliteStore', () => {
     // the whole stack the way a 36 database in the field would.
     const downgraded = new DatabaseSync(path)
     downgraded.exec(`
+      DROP INDEX work_tasks_source_message_idx;
+      DROP INDEX work_tasks_source_work_turn_idx;
+      ALTER TABLE work_tasks DROP COLUMN source_message_id;
+      ALTER TABLE work_tasks DROP COLUMN source_work_turn_id;
       DROP TABLE agent_run_context_snapshots;
       ALTER TABLE employee_milestones DROP COLUMN origin;
       DROP TABLE employee_memory_index;
@@ -1406,6 +1454,17 @@ describe('SqliteStore', () => {
       ALTER TABLE model_profiles DROP COLUMN capabilities_json;
       ALTER TABLE model_profiles DROP COLUMN probed_at;
       DROP TABLE model_providers;
+      DROP INDEX knowledge_claims_not_current_idx;
+      DROP INDEX knowledge_relations_not_current_idx;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_since;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
+      DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 36;
       PRAGMA user_version = 36;
     `)
@@ -1463,12 +1522,27 @@ describe('SqliteStore', () => {
     // that v39 allowed so the forward migration must preserve them.
     const legacy = new DatabaseSync(path)
     legacy.exec(`
+      DROP INDEX work_tasks_source_message_idx;
+      DROP INDEX work_tasks_source_work_turn_idx;
+      ALTER TABLE work_tasks DROP COLUMN source_message_id;
+      ALTER TABLE work_tasks DROP COLUMN source_work_turn_id;
       DROP INDEX model_profiles_provider_model_idx;
       ALTER TABLE model_profiles DROP COLUMN provider_id;
       ALTER TABLE model_profiles DROP COLUMN origin;
       ALTER TABLE model_profiles DROP COLUMN capabilities_json;
       ALTER TABLE model_profiles DROP COLUMN probed_at;
       DROP TABLE model_providers;
+      DROP INDEX knowledge_claims_not_current_idx;
+      DROP INDEX knowledge_relations_not_current_idx;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_since;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
+      DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 39;
       PRAGMA user_version = 39;
     `)
@@ -1490,5 +1564,246 @@ describe('SqliteStore', () => {
     await exportReadonlyRecovery(path, recoveryPath)
     const recovery = JSON.parse(await readFile(recoveryPath, 'utf8')) as { tables?: { model_providers?: unknown[] } }
     expect(recovery.tables?.model_providers).toHaveLength(2)
+  })
+
+  it('adds the task source link after v40 without rewriting existing tasks', async () => {
+    const { directory, path, store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: '任务来源迁移工作区' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '任务来源世界', templateId: 'cyber-company' })
+    store.saveBlueprint(blueprint({ id: 'source.worker', worldTemplateId: 'cyber-company' }))
+    const employee = store.recruitEmployee({
+      workspaceId: workspace.id, worldId: world.id, blueprintId: 'source.worker', blueprintVersion: 1,
+    })
+    const session = store.createSession({
+      workspaceId: workspace.id, worldId: world.id, kind: 'direct', title: '私聊',
+      participants: [{ participantId: 'owner', kind: 'owner' }, { participantId: employee.id, kind: 'employee' }],
+    })
+    const turn = store.createWorkTurn({ workspaceId: workspace.id, worldId: world.id, sessionId: session.id, interactionKind: 'chat' })
+    const message = store.appendMessage({
+      sessionId: session.id, senderId: 'owner', senderKind: 'owner', kind: 'user', content: '请整理本周周报。', metadata: { workTurnId: turn.id },
+    })
+    const legacyTask = new WorkSystemRepository(store.database).createTask({
+      workspaceId: workspace.id, worldId: world.id, title: '迁移前的任务', description: '在来源关联存在之前创建。', priority: 'normal', createdBy: 'owner',
+    })
+    store.close()
+    stores.splice(stores.indexOf(store), 1)
+
+    // Rewind only the source-link migration, keeping every row the file held.
+    const legacy = new DatabaseSync(path)
+    legacy.exec(`
+      DROP INDEX work_tasks_source_message_idx;
+      DROP INDEX work_tasks_source_work_turn_idx;
+      ALTER TABLE work_tasks DROP COLUMN source_message_id;
+      ALTER TABLE work_tasks DROP COLUMN source_work_turn_id;
+      DROP INDEX knowledge_claims_not_current_idx;
+      DROP INDEX knowledge_relations_not_current_idx;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_since;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
+      DROP TABLE knowledge_source_versions;
+      DELETE FROM schema_migrations WHERE version > 40;
+      PRAGMA user_version = 40;
+    `)
+    legacy.close()
+
+    const migrated = await SqliteStore.open(path)
+    stores.push(migrated)
+    expect((await readdir(directory)).some((file) => file.startsWith('cyber.sqlite.pre-migration-v40-'))).toBe(true)
+    expect(migrated.database.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+    expect(migrated.doctor()).toMatchObject({ ok: true, schemaVersion: CYBER_SCHEMA_VERSION })
+
+    // Additive only: the task that predates the migration reads back exactly
+    // as it was and gains no invented source. One task per turn is a database
+    // rule (a unique index), not something the process has to remember.
+    const repository = new WorkSystemRepository(migrated.database)
+    expect(repository.getTask(legacyTask.id)).toEqual(legacyTask)
+    expect(migrated.database.prepare(
+      `SELECT "unique" AS isUnique, partial FROM pragma_index_list('work_tasks') WHERE name = 'work_tasks_source_work_turn_idx'`,
+    ).get()).toMatchObject({ isUnique: 1, partial: 0 })
+    const source = {
+      workspaceId: workspace.id, worldId: world.id, workTurnId: turn.id,
+      title: '整理本周周报', description: '把本周的会议纪要整理成一页周报。', priority: 'normal' as const, createdBy: 'owner',
+    }
+    const linked = repository.createTaskFromSource(source)
+    expect(linked).toMatchObject({ created: true, task: { sourceWorkTurnId: turn.id, sourceMessageId: message.id } })
+    expect(repository.createTaskFromSource(source)).toEqual({ created: false, task: linked.task })
+    expect(repository.listTasks(world.id).map((task) => task.id).sort()).toEqual([legacyTask.id, linked.task.id].sort())
+  })
+
+  it('adds the knowledge source watermark after v41 without inventing a completed version', async () => {
+    const { directory, path, store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: '分块水位工作区' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '分块水位世界', templateId: 'cyber-company' })
+    const library = new WorldKnowledgeRepository(store.database)
+    const document = library.saveDocument({
+      workspaceId: workspace.id, worldId: world.id, relativePath: 'notes/legacy.md', title: '迁移前资料',
+      mimeType: 'text/markdown', byteLength: 12, sha256: 'a'.repeat(64), origin: 'upload',
+    })
+    library.replaceChunks(world.id, document.id, Array.from({ length: 5 }, (_, ordinal) => ({
+      ordinal, content: `旧资料第 ${ordinal} 块`, contentHash: 'c'.repeat(64),
+    })))
+    const graph = new WorldKnowledgeGraphRepository(store.database)
+    const legacyJob = graph.enqueueConsolidationJob({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+      fromCursor: 0, toCursor: Date.parse('2026-09-01T00:00:00.000Z'),
+    })
+    graph.claimConsolidationJob(legacyJob.id)
+    graph.completeConsolidationJob(world.id, legacyJob.id)
+    store.close()
+    stores.splice(stores.indexOf(store), 1)
+
+    // Rewind only the watermark migration, keeping every row the file held.
+    const legacy = new DatabaseSync(path)
+    legacy.exec(`
+      DROP INDEX knowledge_claims_not_current_idx;
+      DROP INDEX knowledge_relations_not_current_idx;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_since;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
+      DROP TABLE knowledge_source_versions;
+      DELETE FROM schema_migrations WHERE version > 41;
+      PRAGMA user_version = 41;
+    `)
+    legacy.close()
+
+    const migrated = await SqliteStore.open(path)
+    stores.push(migrated)
+    expect((await readdir(directory)).some((file) => file.startsWith('cyber.sqlite.pre-migration-v41-'))).toBe(true)
+    expect(migrated.database.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+    expect(migrated.doctor()).toMatchObject({ ok: true, schemaVersion: CYBER_SCHEMA_VERSION })
+
+    // No backfill: how much of that document the pre-42 run actually covered is
+    // unknown, so the upgrade refuses to invent a completed watermark. The
+    // source simply has no version yet and is walked from chunk 0.
+    const upgraded = new WorldKnowledgeGraphRepository(migrated.database)
+    expect(upgraded.getKnowledgeSourceVersion({ worldId: world.id, sourceType: 'document', sourceId: document.id }))
+      .toBeUndefined()
+    expect(upgraded.getConsolidationJob(world.id, legacyJob.id)).toMatchObject({ status: 'completed' })
+    expect(upgraded.createConsolidationJob({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+    })).toMatchObject({ fromCursor: 0 })
+    expect(migrated.database.prepare(
+      `SELECT "unique" AS isUnique, partial FROM pragma_index_list('knowledge_source_versions') WHERE name = 'knowledge_source_versions_current_idx'`,
+    ).get()).toMatchObject({ isUnique: 1, partial: 1 })
+  })
+
+  it('adds the evidence-invalidation columns after v42 and downgrades nothing on the way', async () => {
+    const { directory, path, store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: '证据失效工作区' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '证据失效世界', templateId: 'cyber-company' })
+    const library = new WorldKnowledgeRepository(store.database)
+    const document = library.saveDocument({
+      workspaceId: workspace.id, worldId: world.id, relativePath: 'notes/pre-43.md', title: '迁移前资料',
+      mimeType: 'text/markdown', byteLength: 12, sha256: 'a'.repeat(64), origin: 'upload',
+    })
+    library.replaceChunks(world.id, document.id, [{ ordinal: 0, content: '迁移前内容', contentHash: 'c'.repeat(64) }])
+    const graph = new WorldKnowledgeGraphRepository(store.database)
+    const evidence = graph.createEvidence({
+      workspaceId: workspace.id, worldId: world.id, sourceType: 'document', documentId: document.id,
+      chunkId: library.listChunks(world.id, document.id)[0]!.id, excerpt: '迁移前内容',
+    })
+    const subject = graph.upsertEntity({ workspaceId: workspace.id, worldId: world.id, type: 'topic', canonicalName: '迁移前主题' })
+    const claim = graph.upsertClaim({
+      workspaceId: workspace.id, worldId: world.id, type: 'fact', subjectEntityId: subject.id,
+      predicate: '迁移前结论', objectText: '迁移前内容', evidenceIds: [evidence.id],
+    })
+    store.close()
+    stores.splice(stores.indexOf(store), 1)
+
+    // Rewind only the invalidation migration, keeping every row the file held.
+    const legacy = new DatabaseSync(path)
+    legacy.exec(`
+      DROP INDEX knowledge_claims_not_current_idx;
+      DROP INDEX knowledge_relations_not_current_idx;
+      DROP INDEX knowledge_source_versions_pending_invalidation_idx;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_claims DROP COLUMN not_current_since;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_hash;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_id;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_source_type;
+      ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
+      ALTER TABLE knowledge_source_versions DROP COLUMN invalidated_at;
+      DELETE FROM schema_migrations WHERE version > 42;
+      PRAGMA user_version = 42;
+    `)
+    legacy.close()
+
+    const migrated = await SqliteStore.open(path)
+    stores.push(migrated)
+    expect((await readdir(directory)).some((file) => file.startsWith('cyber.sqlite.pre-migration-v42-'))).toBe(true)
+    expect(migrated.database.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+    expect(migrated.doctor()).toMatchObject({ ok: true, schemaVersion: CYBER_SCHEMA_VERSION })
+
+    // No backfill: which existing claims lost their evidence is decided by
+    // reading source versions, never guessed while upgrading a file. Every
+    // claim the owner already had stays current, visible and retrievable.
+    const upgraded = new WorldKnowledgeGraphRepository(migrated.database)
+    expect(upgraded.getClaim(world.id, claim.id)).toMatchObject({ status: 'active', evidenceIds: [evidence.id] })
+    expect(upgraded.getClaim(world.id, claim.id)?.notCurrent).toBeUndefined()
+    expect(upgraded.searchClaims(world.id, '迁移前结论', 10).map((item) => item.id)).toEqual([claim.id])
+    expect(upgraded.listPendingKnowledgeSourceInvalidations(world.id)).toEqual([])
+    expect(migrated.database.prepare(
+      `SELECT partial FROM pragma_index_list('knowledge_claims') WHERE name = 'knowledge_claims_not_current_idx'`,
+    ).get()).toMatchObject({ partial: 1 })
+  })
+})
+
+describe('world trace watermark', () => {
+  it('changes when a run changes status inside a single clock tick', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-cyber-'))
+    // A frozen clock turns "the two writes landed in the same millisecond" from
+    // a race that reproduces about once in six runs into a certainty. Real
+    // runs hit it whenever a turn fails immediately: `startAgentRun` and
+    // `failAgentRun` then carry the same timestamp.
+    const store = await SqliteStore.open(join(directory, 'cyber.sqlite'), { clock: () => '2026-09-05T00:00:00.000Z' })
+    stores.push(store)
+    const workspace = store.createWorkspace({ name: '水位工作区' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '水位世界', templateId: 'cyber-company' })
+    store.saveBlueprint(blueprint({ id: 'watermark.worker', worldTemplateId: 'cyber-company' }))
+    const employee = store.recruitEmployee({
+      workspaceId: workspace.id, worldId: world.id, blueprintId: 'watermark.worker', blueprintVersion: 1,
+    })
+    const session = store.createSession({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      kind: 'direct',
+      title: '私聊',
+      participants: [{ participantId: 'owner', kind: 'owner' }, { participantId: employee.id, kind: 'employee' }],
+    })
+    const turn = store.createWorkTurn({
+      workspaceId: workspace.id, worldId: world.id, sessionId: session.id, interactionKind: 'chat',
+    })
+    const run = store.createAgentRun({
+      workspaceId: workspace.id, worldId: world.id, turnId: turn.id,
+      sessionId: session.id, employeeId: employee.id, ordinal: 1,
+    })
+
+    store.startAgentRun(run.id)
+    const whileRunning = store.worldTraceWatermark(world.id)
+    store.failAgentRun(run.id, 'model-timeout')
+
+    // The watermark is what the trace read model uses to decide whether its
+    // cached projection is still good. If it does not move here, the user
+    // keeps seeing a run that says it is running after it has failed.
+    expect(store.worldTraceWatermark(world.id)).not.toBe(whileRunning)
+  })
+
+  it('stays byte-identical when nothing changed', async () => {
+    const { store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: '稳定工作区' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '稳定世界', templateId: 'cyber-company' })
+    expect(store.worldTraceWatermark(world.id)).toBe(store.worldTraceWatermark(world.id))
   })
 })

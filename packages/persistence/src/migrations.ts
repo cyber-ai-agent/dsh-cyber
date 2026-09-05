@@ -2055,6 +2055,155 @@ const MIGRATIONS: readonly Migration[] = [
         );
     `,
   },
+  {
+    version: 41,
+    name: 'work-task-source-link',
+    sql: `
+      -- A task that grew out of a conversation remembers the turn that asked
+      -- for it and the owner message inside that turn. The turn id is the one
+      -- identity a resend, a recovery pass and a retry all share, so "one task
+      -- per turn" is a unique index the database enforces rather than a check
+      -- a process has to remember. NULLs are distinct to SQLite: tasks created
+      -- from the board or a schedule carry no source and are unaffected.
+      --
+      -- pruneHistory deletes settled turns. The link is released (SET NULL)
+      -- and the task survives: the task is the durable work fact, the
+      -- transcript is not. Messages are never pruned, so the message reference
+      -- outlives the turn. No backfill: rows that predate this migration have
+      -- no source and stay exactly as they are.
+      ALTER TABLE work_tasks ADD COLUMN source_work_turn_id TEXT
+        REFERENCES work_turns(id) ON DELETE SET NULL;
+      ALTER TABLE work_tasks ADD COLUMN source_message_id TEXT
+        REFERENCES messages(id) ON DELETE SET NULL;
+      CREATE UNIQUE INDEX work_tasks_source_work_turn_idx
+        ON work_tasks(source_work_turn_id);
+      CREATE INDEX work_tasks_source_message_idx
+        ON work_tasks(source_message_id) WHERE source_message_id IS NOT NULL;
+    `,
+  },
+  {
+    version: 42,
+    name: 'knowledge-source-version-chunk-watermark',
+    sql: `
+      -- A document is loaded at most 40 chunks at a time and one extraction
+      -- covers about 16,000 characters, but the only durable record of that
+      -- work was "this job finished" — so a long document read as fully
+      -- 已整理 after its first window. This table is the missing fact: one row
+      -- per identifiable revision of a chunked source, carrying how far
+      -- extraction has actually got through it.
+      --
+      -- content_hash is the version identity (a document's sha256, an
+      -- artifact's version), so changed content becomes a new row instead of
+      -- silently overwriting the old one's history. processed_chunks is both
+      -- the resume cursor and the completion watermark: a version is complete
+      -- only when it equals chunk_total, which the CHECK on completed_at makes
+      -- impossible to fake. A failed window simply leaves it where it was.
+      --
+      -- superseded_at / superseded_by_hash mark a version whose content has
+      -- since changed. Marking is all this migration does: the claims that
+      -- were extracted from that content are NOT deleted, because deciding
+      -- whether to downgrade, re-verify or keep a user's organised knowledge
+      -- is an explicit later pass that reads exactly these rows.
+      --
+      -- No backfill. How much of any existing document the pre-42 runs really
+      -- covered is unknown, and writing a completed watermark from a guess
+      -- would be the same lie this table exists to remove. Sources with no row
+      -- are simply walked from chunk 0; applying an extraction is idempotent
+      -- on evidence and statement fingerprints, so a re-walk restates the same
+      -- graph rows rather than duplicating them.
+      CREATE TABLE knowledge_source_versions (
+        workspace_id TEXT NOT NULL,
+        world_id TEXT NOT NULL,
+        source_type TEXT NOT NULL CHECK (source_type IN ('document', 'artifact')),
+        source_id TEXT NOT NULL,
+        content_hash TEXT NOT NULL CHECK (length(content_hash) BETWEEN 1 AND 128),
+        chunk_total INTEGER NOT NULL CHECK (chunk_total >= 0),
+        processed_chunks INTEGER NOT NULL DEFAULT 0
+          CHECK (processed_chunks >= 0 AND processed_chunks <= chunk_total),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT,
+        superseded_at TEXT,
+        superseded_by_hash TEXT,
+        PRIMARY KEY (world_id, source_type, source_id, content_hash),
+        CHECK (completed_at IS NULL OR processed_chunks = chunk_total),
+        CHECK (superseded_by_hash IS NULL OR superseded_at IS NOT NULL),
+        FOREIGN KEY (workspace_id, world_id)
+          REFERENCES worlds(workspace_id, id)
+          ON DELETE CASCADE
+      ) STRICT;
+
+      -- At most one current version per source is a database rule, not
+      -- something a process has to remember while two scans overlap.
+      CREATE UNIQUE INDEX knowledge_source_versions_current_idx
+        ON knowledge_source_versions(world_id, source_type, source_id)
+        WHERE superseded_at IS NULL;
+
+      -- The read side of the invalidation seam: what a later evidence
+      -- downgrade pass has to look at, oldest first.
+      CREATE INDEX knowledge_source_versions_superseded_idx
+        ON knowledge_source_versions(world_id, superseded_at, source_type, source_id)
+        WHERE superseded_at IS NOT NULL;
+    `,
+  },
+  {
+    version: 43,
+    name: 'knowledge-evidence-invalidation',
+    sql: `
+      -- Migration 42 marked a source revision as superseded and deliberately
+      -- stopped there: what should happen to the claims extracted from content
+      -- the world no longer holds was left as an explicit decision. This is
+      -- that decision, written into the schema.
+      --
+      -- A claim whose every supporting evidence belongs to a superseded
+      -- revision becomes NOT CURRENT: it keeps its row, its status, its
+      -- evidence and its place in the graph the owner is looking at, and it
+      -- stops being handed to a model as if it were still true. Deleting it
+      -- would destroy organised knowledge over a file edit; leaving it in
+      -- retrieval would let the product assert something it can no longer
+      -- support. Neither is acceptable, so the mark is a separate nullable
+      -- fact rather than a fifth status value: a claim can be conflicted and
+      -- not-current at the same time, and clearing the mark restores exactly
+      -- the state the claim already had.
+      --
+      -- not_current_source_type/id/hash name the revision the statement was
+      -- last supported by, which is what lets the library row say "N 条主张待
+      -- 重新核对" for one source without scanning the whole graph, and what the
+      -- pass compares against when a version becomes current again.
+      ALTER TABLE knowledge_claims ADD COLUMN not_current_since TEXT;
+      ALTER TABLE knowledge_claims ADD COLUMN not_current_source_type TEXT
+        CHECK (not_current_source_type IS NULL OR not_current_source_type IN ('document', 'artifact'));
+      ALTER TABLE knowledge_claims ADD COLUMN not_current_source_id TEXT;
+      ALTER TABLE knowledge_claims ADD COLUMN not_current_source_hash TEXT;
+
+      ALTER TABLE knowledge_relations ADD COLUMN not_current_since TEXT;
+      ALTER TABLE knowledge_relations ADD COLUMN not_current_source_type TEXT
+        CHECK (not_current_source_type IS NULL OR not_current_source_type IN ('document', 'artifact'));
+      ALTER TABLE knowledge_relations ADD COLUMN not_current_source_id TEXT;
+      ALTER TABLE knowledge_relations ADD COLUMN not_current_source_hash TEXT;
+
+      CREATE INDEX IF NOT EXISTS knowledge_claims_not_current_idx
+        ON knowledge_claims(world_id, not_current_source_type, not_current_source_id, id)
+        WHERE not_current_since IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS knowledge_relations_not_current_idx
+        ON knowledge_relations(world_id, not_current_source_type, not_current_source_id, id)
+        WHERE not_current_since IS NOT NULL;
+
+      -- The pass's own resume marker. It is a timestamp, not a flag, because a
+      -- version can be superseded, become current again (a restored artifact,
+      -- a re-imported file) and be superseded once more; comparing it with
+      -- superseded_at re-opens exactly that row instead of skipping it.
+      ALTER TABLE knowledge_source_versions ADD COLUMN invalidated_at TEXT;
+
+      -- No backfill. Every existing claim stays current: which of them lost
+      -- their evidence is decided by reading the source versions, and writing
+      -- a downgrade from a guess would be the same lie the version table was
+      -- added to remove. The pass walks the superseded rows on its own.
+      CREATE INDEX IF NOT EXISTS knowledge_source_versions_pending_invalidation_idx
+        ON knowledge_source_versions(world_id, superseded_at, source_type, source_id)
+        WHERE superseded_at IS NOT NULL AND invalidated_at IS NULL;
+    `,
+  },
 ]
 
 /**

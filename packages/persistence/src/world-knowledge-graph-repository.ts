@@ -2,11 +2,15 @@ import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 
 import type {
+  KnowledgeChunkedSourceType,
   KnowledgeClaim,
   KnowledgeClaimInput,
   KnowledgeConversationEvidence,
   KnowledgeConversationCursor,
   KnowledgeConsolidationJob,
+  KnowledgeEvidenceInvalidationResult,
+  KnowledgeNotCurrentMark,
+  KnowledgeSourceVersion,
   KnowledgeEntity,
   KnowledgeEntityInput,
   KnowledgeEntityStatus,
@@ -49,6 +53,45 @@ export interface KnowledgeConsolidationJobInput {
   fromCursor: number
   toCursor: number
   createdAt?: string
+}
+
+export interface KnowledgeSourceVersionRef {
+  worldId: string
+  sourceType: KnowledgeChunkedSourceType
+  sourceId: string
+  contentHash?: string
+}
+
+export interface KnowledgeSourceVersionBeginInput {
+  workspaceId: string
+  worldId: string
+  sourceType: KnowledgeChunkedSourceType
+  sourceId: string
+  contentHash: string
+  chunkTotal: number
+  now?: string
+}
+
+export interface KnowledgeSourceVersionAdvanceInput {
+  workspaceId: string
+  worldId: string
+  sourceType: KnowledgeChunkedSourceType
+  sourceId: string
+  contentHash: string
+  /** The watermark this window started from; a mismatch never advances. */
+  expectedProcessedChunks: number
+  processedChunks: number
+  now?: string
+}
+
+export interface KnowledgeSourceVersionInvalidateInput {
+  /** Optional ownership check; the pass already resolved the world. */
+  workspaceId?: string
+  worldId: string
+  sourceType: KnowledgeChunkedSourceType
+  sourceId: string
+  contentHash: string
+  now?: string
 }
 
 export interface KnowledgeGraphListFilter {
@@ -352,11 +395,15 @@ export class WorldKnowledgeGraphRepository {
     if (!normalized) return []
     const contains = `%${escapeLike(normalized)}%`
     const prefix = `${escapeLike(normalized)}%`
+    // Lexical search is the retrieval path that composes prompts, so it is
+    // where a not-current claim must stop: the graph keeps the row and the
+    // library keeps showing it, but the model is never handed a fact whose
+    // last live evidence is gone.
     return this.#database.prepare(
       `SELECT claim.* FROM knowledge_claims AS claim
        INNER JOIN knowledge_entities AS subject ON subject.world_id = claim.world_id AND subject.id = claim.subject_entity_id
        LEFT JOIN knowledge_entities AS object ON object.world_id = claim.world_id AND object.id = claim.object_entity_id
-       WHERE claim.world_id = ? AND claim.status = 'active'
+       WHERE claim.world_id = ? AND claim.status = 'active' AND claim.not_current_since IS NULL
          AND (claim.predicate LIKE ? ESCAPE '\\' OR claim.object_text LIKE ? ESCAPE '\\'
            OR subject.canonical_name LIKE ? ESCAPE '\\' OR object.canonical_name LIKE ? ESCAPE '\\')
        ORDER BY claim.predicate = ? COLLATE NOCASE DESC,
@@ -683,6 +730,275 @@ export class WorldKnowledgeGraphRepository {
     })
   }
 
+  /**
+   * The current, not-yet-superseded version of a chunked source, or the exact
+   * revision named by `contentHash`.
+   */
+  getKnowledgeSourceVersion(input: KnowledgeSourceVersionRef): KnowledgeSourceVersion | undefined {
+    const row = input.contentHash === undefined
+      ? this.#database.prepare(
+        `SELECT * FROM knowledge_source_versions
+         WHERE world_id = ? AND source_type = ? AND source_id = ? AND superseded_at IS NULL`,
+      ).get(input.worldId, input.sourceType, input.sourceId)
+      : this.#database.prepare(
+        `SELECT * FROM knowledge_source_versions
+         WHERE world_id = ? AND source_type = ? AND source_id = ? AND content_hash = ?`,
+      ).get(input.worldId, input.sourceType, input.sourceId, input.contentHash)
+    return row === undefined ? undefined : mapSourceVersion(row)
+  }
+
+  /**
+   * How far the source's *live* content has been processed. A version whose
+   * hash no longer matches what the source holds today describes text that is
+   * no longer there, so it reports nothing rather than a watermark that would
+   * make the scanner skip chunks it has never read.
+   */
+  getKnowledgeSourceProgress(input: { worldId: string; sourceType: KnowledgeChunkedSourceType; sourceId: string }): KnowledgeSourceVersion | undefined {
+    const version = this.getKnowledgeSourceVersion(input)
+    if (version === undefined) return undefined
+    const identity = this.#consolidationSourceIdentity(input.worldId, input.sourceType, input.sourceId)
+    return identity === undefined || identity === version.contentHash ? version : undefined
+  }
+
+  listKnowledgeSourceVersions(worldId: string, sourceType: KnowledgeChunkedSourceType, sourceId: string): KnowledgeSourceVersion[] {
+    return this.#database.prepare(
+      `SELECT * FROM knowledge_source_versions
+       WHERE world_id = ? AND source_type = ? AND source_id = ? ORDER BY created_at, content_hash`,
+    ).all(worldId, sourceType, sourceId).map(mapSourceVersion)
+  }
+
+  /**
+   * The read side of the invalidation seam. A version listed here was extracted
+   * from content that no longer exists; its claims are still active because
+   * discarding a user's organised knowledge is an explicit decision, not a side
+   * effect of re-indexing a file.
+   */
+  listSupersededKnowledgeSourceVersions(worldId: string, limit = 100): KnowledgeSourceVersion[] {
+    return this.#database.prepare(
+      `SELECT * FROM knowledge_source_versions
+       WHERE world_id = ? AND superseded_at IS NOT NULL ORDER BY superseded_at, content_hash LIMIT ?`,
+    ).all(worldId, clampLimit(limit)).map(mapSourceVersion)
+  }
+
+  /**
+   * The downgrade pass's work list: superseded versions whose claims have not
+   * been reconsidered since. `invalidated_at` is compared with `superseded_at`
+   * rather than merely checked for presence, so a version that became current
+   * again and was superseded a second time re-enters the list.
+   */
+  listPendingKnowledgeSourceInvalidations(worldId: string, limit = 50): KnowledgeSourceVersion[] {
+    return this.#database.prepare(
+      `SELECT * FROM knowledge_source_versions
+       WHERE world_id = ? AND superseded_at IS NOT NULL AND (invalidated_at IS NULL OR invalidated_at < superseded_at)
+       ORDER BY superseded_at, source_type, source_id, content_hash LIMIT ?`,
+    ).all(worldId, clampLimit(limit)).map(mapSourceVersion)
+  }
+
+  /**
+   * Supersede the versions of sources the world no longer holds — a deleted
+   * document, an artifact that was archived or lost its file.
+   *
+   * Deletion and archival travel exactly the seam a content edit travels: the
+   * version is marked, with no replacement hash because no replacement content
+   * exists, and the claims extracted from it are left for the same downgrade
+   * pass. Discovering the retirement here rather than pushing it from each
+   * delete path also covers what happened while the app was closed, and keeps
+   * one place responsible for the decision.
+   */
+  retireRemovedKnowledgeSources(worldId: string, limit = 50): KnowledgeSourceVersion[] {
+    return this.#withTransaction(() => {
+      const retired = this.#database.prepare(
+        `SELECT version.* FROM knowledge_source_versions AS version
+         LEFT JOIN knowledge_documents AS document
+           ON version.source_type = 'document' AND document.world_id = version.world_id AND document.id = version.source_id
+         LEFT JOIN world_artifacts AS artifact
+           ON version.source_type = 'artifact' AND artifact.world_id = version.world_id AND artifact.id = version.source_id
+         WHERE version.world_id = ? AND version.superseded_at IS NULL
+           AND ((version.source_type = 'document' AND document.id IS NULL)
+             OR (version.source_type = 'artifact' AND (artifact.id IS NULL OR artifact.status <> 'active')))
+         ORDER BY version.updated_at, version.source_type, version.source_id
+         LIMIT ?`,
+      ).all(worldId, clampLimit(limit)).map(mapSourceVersion)
+      const now = this.#clock()
+      const marked: KnowledgeSourceVersion[] = []
+      for (const version of retired) {
+        this.#database.prepare(
+          `UPDATE knowledge_source_versions SET superseded_at = ?, superseded_by_hash = NULL, updated_at = ?
+           WHERE world_id = ? AND source_type = ? AND source_id = ? AND content_hash = ? AND superseded_at IS NULL`,
+        ).run(now, now, worldId, version.sourceType, version.sourceId, version.contentHash)
+        const reread = this.getKnowledgeSourceVersion({ worldId, sourceType: version.sourceType, sourceId: version.sourceId, contentHash: version.contentHash })
+        if (reread !== undefined) marked.push(reread)
+      }
+      return marked
+    })
+  }
+
+  /**
+   * Release the statements whose source version is current again — a restored
+   * artifact, a file re-imported unchanged. The version they were attributed to
+   * describes content the world holds today, so they stand on live evidence
+   * once more without re-running extraction.
+   */
+  reinstateCurrentKnowledgeSourceVersions(worldId: string): { claims: number; relations: number } {
+    return this.#withTransaction(() => {
+      const now = this.#clock()
+      const clear = (table: 'knowledge_claims' | 'knowledge_relations'): number => Number(this.#database.prepare(
+        `UPDATE ${table}
+         SET not_current_since = NULL, not_current_source_type = NULL, not_current_source_id = NULL,
+             not_current_source_hash = NULL, updated_at = ?
+         WHERE world_id = ? AND not_current_since IS NOT NULL AND EXISTS (
+           SELECT 1 FROM knowledge_source_versions AS version
+           WHERE version.world_id = ${table}.world_id AND version.superseded_at IS NULL
+             AND version.source_type = ${table}.not_current_source_type
+             AND version.source_id = ${table}.not_current_source_id
+             AND version.content_hash = ${table}.not_current_source_hash)`,
+      ).run(now, worldId).changes)
+      return { claims: clear('knowledge_claims'), relations: clear('knowledge_relations') }
+    })
+  }
+
+  /**
+   * Downgrade exactly the statements one superseded version left unsupported.
+   *
+   * A statement is examined only when it cites this source at all, and is
+   * marked only when *every* piece of evidence behind it names content the
+   * world no longer holds. One that still stands on a live chunk, an active
+   * artifact version, a conversation message or an owner note keeps standing on
+   * that evidence alone. Nothing is deleted here and no status changes: the row
+   * gains a not-current mark naming the revision it came from, which is what
+   * keeps it out of retrieval until live evidence supports it again.
+   *
+   * The whole thing is one transaction and re-running it is a no-op, so a run
+   * interrupted between versions resumes at the version it never reached.
+   */
+  invalidateKnowledgeSourceVersion(input: KnowledgeSourceVersionInvalidateInput): KnowledgeEvidenceInvalidationResult {
+    return this.#withTransaction(() => {
+      const worldId = input.workspaceId === undefined
+        ? this.#assertWorldById(input.worldId).id
+        : this.#assertWorld(input.workspaceId, input.worldId).id
+      const sourceId = input.sourceId.trim()
+      const contentHash = input.contentHash.trim()
+      const version = this.getKnowledgeSourceVersion({ worldId, sourceType: input.sourceType, sourceId, contentHash })
+      if (version === undefined) throw new EntityNotFoundError(`Knowledge source version not found: ${sourceId}`)
+      // Still current, or already reconsidered since it was superseded.
+      if (version.supersededAt === undefined) return { version, claims: 0, relations: 0 }
+      if (version.invalidatedAt !== undefined && version.invalidatedAt >= version.supersededAt) return { version, claims: 0, relations: 0 }
+      const now = input.now ?? this.#clock()
+      const fromSource = new Set(this.#sourceEvidenceIds(worldId, input.sourceType, sourceId))
+      const liveness = new Map<string, boolean>()
+      const stillSupported = (evidenceIds: readonly string[]): boolean =>
+        evidenceIds.some((evidenceId) => {
+          const known = liveness.get(evidenceId)
+          if (known !== undefined) return known
+          const evidence = this.getEvidence(worldId, evidenceId)
+          const live = evidence !== undefined && this.#evidenceIsLive(worldId, evidence)
+          liveness.set(evidenceId, live)
+          return live
+        })
+      let claims = 0
+      // An archived statement is one the owner already removed from the graph;
+      // it asserts nothing, so marking it would only inflate the count the
+      // library row shows.
+      for (const claim of this.listClaims(worldId, { includeArchived: false })) {
+        if (claim.notCurrent !== undefined) continue
+        if (!claim.evidenceIds.some((evidenceId) => fromSource.has(evidenceId))) continue
+        if (stillSupported(claim.evidenceIds)) continue
+        this.#markNotCurrent('claim', worldId, claim.id, version, now)
+        claims += 1
+      }
+      let relations = 0
+      for (const relation of this.listRelations(worldId, { includeArchived: false })) {
+        if (relation.notCurrent !== undefined) continue
+        if (!relation.evidenceIds.some((evidenceId) => fromSource.has(evidenceId))) continue
+        if (stillSupported(relation.evidenceIds)) continue
+        this.#markNotCurrent('relation', worldId, relation.id, version, now)
+        relations += 1
+      }
+      this.#database.prepare(
+        `UPDATE knowledge_source_versions SET invalidated_at = ?, updated_at = ?
+         WHERE world_id = ? AND source_type = ? AND source_id = ? AND content_hash = ?`,
+      ).run(now, now, worldId, input.sourceType, sourceId, contentHash)
+      return {
+        version: this.getKnowledgeSourceVersion({ worldId, sourceType: input.sourceType, sourceId, contentHash })!,
+        claims,
+        relations,
+      }
+    })
+  }
+
+  /**
+   * Open (or reopen) the version a window is about to be extracted from. A
+   * different content hash supersedes the previous version rather than
+   * overwriting it, and a resumed window never resets an existing watermark.
+   */
+  beginKnowledgeSourceVersion(input: KnowledgeSourceVersionBeginInput): KnowledgeSourceVersion {
+    if (!Number.isSafeInteger(input.chunkTotal) || input.chunkTotal < 0) throw new PersistenceError('Knowledge source chunk total is invalid')
+    const contentHash = input.contentHash.trim()
+    if (!contentHash || contentHash.length > 128) throw new PersistenceError('Knowledge source content hash is invalid')
+    return this.#withTransaction(() => {
+      const world = this.#assertWorld(input.workspaceId, input.worldId)
+      this.#assertConsolidationSource(world, input.sourceType, input.sourceId.trim())
+      const sourceId = input.sourceId.trim()
+      const now = input.now ?? this.#clock()
+      const current = this.getKnowledgeSourceVersion({ worldId: world.id, sourceType: input.sourceType, sourceId })
+      if (current !== undefined && current.contentHash !== contentHash) {
+        this.#database.prepare(
+          `UPDATE knowledge_source_versions SET superseded_at = ?, superseded_by_hash = ?, updated_at = ?
+           WHERE world_id = ? AND source_type = ? AND source_id = ? AND content_hash = ?`,
+        ).run(now, contentHash, now, world.id, input.sourceType, sourceId, current.contentHash)
+      }
+      const existing = this.getKnowledgeSourceVersion({ worldId: world.id, sourceType: input.sourceType, sourceId, contentHash })
+      if (existing === undefined) {
+        this.#database.prepare(
+          `INSERT INTO knowledge_source_versions
+           (workspace_id, world_id, source_type, source_id, content_hash, chunk_total, processed_chunks, created_at, updated_at, completed_at)
+           VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+        ).run(world.workspaceId, world.id, input.sourceType, sourceId, contentHash, input.chunkTotal, now, now,
+          input.chunkTotal === 0 ? now : null)
+      } else {
+        // Re-chunking may change the denominator. Keep the watermark, keep the
+        // total honest, and drop a completion that the new total invalidates.
+        const chunkTotal = Math.max(input.chunkTotal, existing.processedChunks)
+        this.#database.prepare(
+          `UPDATE knowledge_source_versions
+           SET chunk_total = ?, completed_at = ?, superseded_at = NULL, superseded_by_hash = NULL, updated_at = ?
+           WHERE world_id = ? AND source_type = ? AND source_id = ? AND content_hash = ?`,
+        ).run(chunkTotal, existing.processedChunks === chunkTotal ? existing.completedAt ?? now : null, now,
+          world.id, input.sourceType, sourceId, contentHash)
+      }
+      return this.getKnowledgeSourceVersion({ worldId: world.id, sourceType: input.sourceType, sourceId, contentHash })!
+    })
+  }
+
+  /**
+   * Move the chunk cursor forward by compare-and-set. A window whose start no
+   * longer matches the stored watermark — the source changed underneath it, or
+   * another pass got there first — leaves the row exactly as it is: the work
+   * it did was still applied to the graph, but nothing may claim chunks were
+   * processed that this version has not actually walked.
+   */
+  advanceKnowledgeSourceVersion(input: KnowledgeSourceVersionAdvanceInput): KnowledgeSourceVersion {
+    assertSequence(input.expectedProcessedChunks)
+    assertSequence(input.processedChunks)
+    return this.#withTransaction(() => {
+      const world = this.#assertWorld(input.workspaceId, input.worldId)
+      const sourceId = input.sourceId.trim()
+      const contentHash = input.contentHash.trim()
+      const current = this.getKnowledgeSourceVersion({ worldId: world.id, sourceType: input.sourceType, sourceId, contentHash })
+      if (current === undefined) throw new EntityNotFoundError(`Knowledge source version not found: ${sourceId}`)
+      if (current.processedChunks !== input.expectedProcessedChunks) return current
+      const processedChunks = Math.min(Math.max(input.processedChunks, current.processedChunks), current.chunkTotal)
+      if (processedChunks === current.processedChunks && current.completedAt !== undefined) return current
+      const now = input.now ?? this.#clock()
+      this.#database.prepare(
+        `UPDATE knowledge_source_versions SET processed_chunks = ?, completed_at = ?, updated_at = ?
+         WHERE world_id = ? AND source_type = ? AND source_id = ? AND content_hash = ? AND processed_chunks = ?`,
+      ).run(processedChunks, processedChunks === current.chunkTotal ? now : null, now,
+        world.id, input.sourceType, sourceId, contentHash, input.expectedProcessedChunks)
+      return this.getKnowledgeSourceVersion({ worldId: world.id, sourceType: input.sourceType, sourceId, contentHash })!
+    })
+  }
+
   enqueueConsolidationJob(input: KnowledgeConsolidationJobInput): KnowledgeConsolidationJob {
     assertSequence(input.fromCursor)
     assertSequence(input.toCursor)
@@ -702,15 +1018,44 @@ export class WorldKnowledgeGraphRepository {
         `SELECT * FROM knowledge_consolidation_jobs WHERE world_id = ? AND source_type = ? AND source_id = ? AND from_cursor = ? AND to_cursor = ?`,
       ).get(world.id, input.sourceType, input.sourceId.trim(), input.fromCursor, input.toCursor)
       if (row === undefined) throw new PersistenceError('Knowledge consolidation job could not be read after enqueue')
-      return mapJob(row)
+      return this.#withSourceWatermark(this.#reopenUnverifiedWindow(mapJob(row)))
     })
+  }
+
+  /**
+   * Enqueue is idempotent per window, which is only sound for a chunked source
+   * while the coverage of that window is actually recorded. A completed row
+   * with no source version for the live content — a job finished before the
+   * version table existed, or content that has changed since — says nothing
+   * about how many chunks were read, so handing it back would report the
+   * source as done on the strength of a row written under the old rules.
+   *
+   * Such a window is reopened and walked again instead. No watermark is
+   * invented for it: applying an extraction is idempotent on evidence and
+   * statement fingerprints, so the re-walk restates the same graph rows and
+   * then records, for the first time, how far the source really was read.
+   */
+  #reopenUnverifiedWindow(job: KnowledgeConsolidationJob): KnowledgeConsolidationJob {
+    if (job.sourceType === 'conversation' || job.status !== 'completed') return job
+    const progress = this.getKnowledgeSourceProgress({ worldId: job.worldId, sourceType: job.sourceType, sourceId: job.sourceId })
+    if (progress !== undefined) return job
+    const result = this.#database.prepare(
+      `UPDATE knowledge_consolidation_jobs
+       SET status = 'queued', error_code = NULL, started_at = NULL, completed_at = NULL, updated_at = ?
+       WHERE world_id = ? AND id = ? AND status = 'completed'`,
+    ).run(this.#clock(), job.worldId, job.id)
+    if (Number(result.changes) !== 1) return job
+    const row = this.#database.prepare(
+      'SELECT * FROM knowledge_consolidation_jobs WHERE world_id = ? AND id = ?',
+    ).get(job.worldId, job.id)
+    return row === undefined ? job : mapJob(row)
   }
 
   getConsolidationJob(worldId: string, jobId: string): KnowledgeConsolidationJob | undefined {
     const row = this.#database.prepare(
       'SELECT * FROM knowledge_consolidation_jobs WHERE world_id = ? AND id = ?',
     ).get(worldId, jobId)
-    return row === undefined ? undefined : mapJob(row)
+    return row === undefined ? undefined : this.#withSourceWatermark(mapJob(row))
   }
 
   /** Active work takes precedence; otherwise expose the latest source outcome. */
@@ -719,7 +1064,25 @@ export class WorldKnowledgeGraphRepository {
       `SELECT * FROM knowledge_consolidation_jobs WHERE world_id = ? AND source_type = ? AND source_id = ?
        ORDER BY CASE WHEN status IN ('queued', 'running') THEN 0 ELSE 1 END, updated_at DESC, id DESC LIMIT 1`,
     ).get(worldId, sourceType, sourceId)
-    return row === undefined ? undefined : mapJob(row)
+    return row === undefined ? undefined : this.#withSourceWatermark(mapJob(row))
+  }
+
+  /**
+   * A completed job means one window finished, never that a whole source did.
+   * Carrying the version watermark on the job is what lets a reader — the
+   * knowledge list included — say "已加入知识图谱 12/37 块" instead of implying
+   * the document was fully processed.
+   */
+  #withSourceWatermark(job: KnowledgeConsolidationJob): KnowledgeConsolidationJob {
+    if (job.sourceType === 'conversation') return job
+    // How many of this source's claims are waiting to be re-verified is carried
+    // alongside the watermark for the same reason: the library row must be able
+    // to say a finished source has facts its content no longer supports.
+    const notCurrentClaims = this.#countNotCurrentClaims(job.worldId, job.sourceType, job.sourceId)
+    const marked = notCurrentClaims === 0 ? job : { ...job, notCurrentClaims }
+    const version = this.getKnowledgeSourceVersion({ worldId: job.worldId, sourceType: job.sourceType, sourceId: job.sourceId })
+    if (version === undefined) return marked
+    return { ...marked, processedChunks: version.processedChunks, chunkTotal: version.chunkTotal }
   }
 
   /** Provider-neutral object form used by the background consolidation service. */
@@ -735,9 +1098,12 @@ export class WorldKnowledgeGraphRepository {
   }): KnowledgeConsolidationJob {
     const sourceType = input.sourceType
     if (sourceType === 'manual') throw new PersistenceError('Manual knowledge does not use a consolidation job')
+    // For a chunked source the cursor is a chunk ordinal, so an owner-triggered
+    // run picks up where the last window stopped instead of re-extracting the
+    // part of the document that is already in the graph.
     const cursor = sourceType === 'conversation'
       ? this.getConversationCursor(input.worldId, input.sourceId)?.processedThroughSequence ?? 0
-      : 0
+      : this.#resumeChunkCursor(input.worldId, sourceType, input.sourceId)
     const fromCursor = input.fromCursor ?? cursor
     const toCursor = input.toCursor ?? (sourceType === 'conversation'
       ? fromCursor
@@ -773,7 +1139,7 @@ export class WorldKnowledgeGraphRepository {
     if (limit !== undefined) params.push(limit)
     const order = resolvedStatus === 'queued' ? 'ASC' : 'DESC'
     const rows = this.#database.prepare(`SELECT * FROM knowledge_consolidation_jobs${where} ORDER BY created_at ${order}, id ${order}${limitSql}`).all(...params)
-    return rows.map(mapJob)
+    return rows.map((row) => this.#withSourceWatermark(mapJob(row)))
   }
 
   /** Requeue work that was interrupted by a process restart; no extraction is retried here. */
@@ -1080,6 +1446,12 @@ export class WorldKnowledgeGraphRepository {
       const exact = claims.find((claim) => claimFingerprint(claim) === claimFingerprint(candidate))
       if (exact !== undefined) {
         if (exact.status === 'archived') continue
+        // Re-verification: the revision being extracted now restates this fact,
+        // so it stands on evidence that exists today and the mark it was given
+        // when its old revision went away is released.
+        if (exact.notCurrent !== undefined && this.#anyEvidenceIsLive(world.id, evidenceIds, evidenceById)) {
+          this.#clearNotCurrent('claim', world.id, exact.id, now)
+        }
         const merged = this.upsertClaim({ ...exact, evidenceIds: uniqueStrings([...exact.evidenceIds, ...evidenceIds]), confidence: Math.max(exact.confidence, item.confidence) })
         claims.splice(claims.indexOf(exact), 1, merged)
         continue
@@ -1119,6 +1491,9 @@ export class WorldKnowledgeGraphRepository {
       const exact = relations.find((relation) => relationFingerprint(relation) === relationFingerprint(candidate))
       if (exact !== undefined) {
         if (exact.status === 'archived') continue
+        if (exact.notCurrent !== undefined && this.#anyEvidenceIsLive(world.id, evidenceIds, evidenceById)) {
+          this.#clearNotCurrent('relation', world.id, exact.id, now)
+        }
         const merged = this.upsertRelation({ ...exact, evidenceIds: uniqueStrings([...exact.evidenceIds, ...evidenceIds]), confidence: Math.max(exact.confidence, item.confidence) })
         relations.splice(relations.indexOf(exact), 1, merged)
         continue
@@ -1212,6 +1587,26 @@ export class WorldKnowledgeGraphRepository {
     }
   }
 
+  /**
+   * Where the next window of a chunked source starts. A version that no longer
+   * matches the source's current content identity resumes at 0: its watermark
+   * counted chunks of text that is no longer there.
+   */
+  #resumeChunkCursor(worldId: string, sourceType: KnowledgeChunkedSourceType, sourceId: string): number {
+    const version = this.getKnowledgeSourceProgress({ worldId, sourceType, sourceId })
+    return version === undefined ? 0 : Math.min(version.processedChunks, version.chunkTotal)
+  }
+
+  /** The source's current content identity: a document sha256, an artifact version. */
+  #consolidationSourceIdentity(worldId: string, sourceType: KnowledgeChunkedSourceType, sourceId: string): string | undefined {
+    if (sourceType === 'document') {
+      const row = this.#database.prepare('SELECT sha256 FROM knowledge_documents WHERE world_id = ? AND id = ?').get(worldId, sourceId) as Record<string, unknown> | undefined
+      return typeof row?.sha256 === 'string' ? row.sha256 : undefined
+    }
+    const row = this.#database.prepare('SELECT current_version FROM world_artifacts WHERE world_id = ? AND id = ?').get(worldId, sourceId) as Record<string, unknown> | undefined
+    return row?.current_version === undefined || row.current_version === null ? undefined : `v${Number(row.current_version)}`
+  }
+
   #consolidationSourceRevision(worldId: string, sourceType: 'document' | 'artifact', sourceId: string): number {
     const table = sourceType === 'document' ? 'knowledge_documents' : 'world_artifacts'
     const row = this.#database.prepare(`SELECT updated_at FROM ${table} WHERE world_id = ? AND id = ?`).get(worldId, sourceId) as Record<string, unknown> | undefined
@@ -1219,6 +1614,72 @@ export class WorldKnowledgeGraphRepository {
     const revision = Date.parse(row.updated_at)
     if (!Number.isSafeInteger(revision) || revision < 0) throw new PersistenceError('Knowledge consolidation source revision is invalid')
     return revision
+  }
+
+  #anyEvidenceIsLive(worldId: string, evidenceIds: readonly string[], evidenceById: ReadonlyMap<string, KnowledgeEvidence>): boolean {
+    return evidenceIds.some((evidenceId) => {
+      const evidence = evidenceById.get(evidenceId) ?? this.getEvidence(worldId, evidenceId)
+      return evidence !== undefined && this.#evidenceIsLive(worldId, evidence)
+    })
+  }
+
+  /** Every evidence row extracted from one chunked source, whatever its revision. */
+  #sourceEvidenceIds(worldId: string, sourceType: KnowledgeChunkedSourceType, sourceId: string): string[] {
+    const column = sourceType === 'document' ? 'document_id' : 'artifact_id'
+    return this.#database.prepare(
+      `SELECT id FROM knowledge_evidence WHERE world_id = ? AND source_type = ? AND ${column} = ?`,
+    ).all(worldId, sourceType, sourceId).map((row) => text(record(row).id))
+  }
+
+  /**
+   * Whether the content a piece of evidence cites still exists in this world.
+   *
+   * A conversation message and an owner note always do — neither is a chunked
+   * source and neither is rewritten underneath the graph. A document excerpt
+   * does while its chunk row is still in the projection; re-indexing replaces
+   * chunks, so an excerpt from an earlier revision no longer points at text the
+   * library holds. An artifact excerpt does while the artifact is active at the
+   * version the excerpt was taken from.
+   */
+  #evidenceIsLive(worldId: string, evidence: KnowledgeEvidence): boolean {
+    if (evidence.sourceType === 'conversation' || evidence.sourceType === 'manual') return true
+    if (evidence.sourceType === 'document') {
+      return this.#database.prepare(
+        'SELECT 1 FROM knowledge_chunks WHERE world_id = ? AND document_id = ? AND id = ?',
+      ).get(worldId, evidence.documentId, evidence.chunkId) !== undefined
+    }
+    const row = this.#database.prepare(
+      'SELECT status, current_version FROM world_artifacts WHERE world_id = ? AND id = ?',
+    ).get(worldId, evidence.artifactId) as Record<string, unknown> | undefined
+    if (row === undefined || row.status !== 'active') return false
+    return evidence.artifactVersion === undefined || Number(row.current_version) === evidence.artifactVersion
+  }
+
+  #markNotCurrent(kind: 'claim' | 'relation', worldId: string, id: string, version: KnowledgeSourceVersion, now: string): void {
+    this.#database.prepare(
+      `UPDATE knowledge_${kind}s
+       SET not_current_since = ?, not_current_source_type = ?, not_current_source_id = ?,
+           not_current_source_hash = ?, updated_at = ?
+       WHERE world_id = ? AND id = ? AND not_current_since IS NULL`,
+    ).run(now, version.sourceType, version.sourceId, version.contentHash, now, worldId, id)
+  }
+
+  #clearNotCurrent(kind: 'claim' | 'relation', worldId: string, id: string, now: string): void {
+    this.#database.prepare(
+      `UPDATE knowledge_${kind}s
+       SET not_current_since = NULL, not_current_source_type = NULL, not_current_source_id = NULL,
+           not_current_source_hash = NULL, updated_at = ?
+       WHERE world_id = ? AND id = ?`,
+    ).run(now, worldId, id)
+  }
+
+  #countNotCurrentClaims(worldId: string, sourceType: KnowledgeChunkedSourceType, sourceId: string): number {
+    const row = this.#database.prepare(
+      `SELECT COUNT(*) AS total FROM knowledge_claims
+       WHERE world_id = ? AND not_current_since IS NOT NULL AND status <> 'archived'
+         AND not_current_source_type = ? AND not_current_source_id = ?`,
+    ).get(worldId, sourceType, sourceId) as Record<string, unknown> | undefined
+    return Number(row?.total ?? 0)
   }
 
   #assertEvidenceInWorld(world: { id: string; workspaceId: string }, evidenceIds: readonly string[]): void {
@@ -1465,6 +1926,8 @@ function mapClaim(row: unknown): KnowledgeClaim {
   if (typeof value.object_text === 'string') claim.objectText = value.object_text
   if (typeof value.conflict_group === 'string') claim.conflictGroup = value.conflict_group
   if (typeof value.superseded_by_id === 'string') claim.supersededById = value.superseded_by_id
+  const notCurrent = mapNotCurrent(value)
+  if (notCurrent !== undefined) claim.notCurrent = notCurrent
   return claim
 }
 
@@ -1478,7 +1941,29 @@ function mapRelation(row: unknown): KnowledgeRelation {
   }
   if (typeof value.conflict_group === 'string') relation.conflictGroup = value.conflict_group
   if (typeof value.superseded_by_id === 'string') relation.supersededById = value.superseded_by_id
+  const notCurrent = mapNotCurrent(value)
+  if (notCurrent !== undefined) relation.notCurrent = notCurrent
   return relation
+}
+
+/**
+ * The mark is all-or-nothing: a row that names a revision without saying when
+ * it stopped being current, or the reverse, would be a half-written downgrade
+ * and is read as no downgrade at all.
+ */
+function mapNotCurrent(value: Record<string, unknown>): KnowledgeNotCurrentMark | undefined {
+  if (typeof value.not_current_since !== 'string') return undefined
+  if (typeof value.not_current_source_type !== 'string' || typeof value.not_current_source_id !== 'string') return undefined
+  if (typeof value.not_current_source_hash !== 'string') return undefined
+  if (value.not_current_source_type !== 'document' && value.not_current_source_type !== 'artifact') {
+    throw new PersistenceError(`Unknown Knowledge source type: ${String(value.not_current_source_type)}`)
+  }
+  return {
+    since: value.not_current_since,
+    sourceType: value.not_current_source_type,
+    sourceId: value.not_current_source_id,
+    contentHash: value.not_current_source_hash,
+  }
 }
 
 function mapEvidence(row: unknown): KnowledgeEvidence {
@@ -1509,6 +1994,21 @@ function mapJob(row: unknown): KnowledgeConsolidationJob {
   if (typeof value.started_at === 'string') job.startedAt = value.started_at
   if (typeof value.completed_at === 'string') job.completedAt = value.completed_at
   return job
+}
+
+function mapSourceVersion(row: unknown): KnowledgeSourceVersion {
+  const value = record(row)
+  const version: KnowledgeSourceVersion = {
+    workspaceId: text(value.workspace_id), worldId: text(value.world_id),
+    sourceType: value.source_type as KnowledgeChunkedSourceType, sourceId: text(value.source_id),
+    contentHash: text(value.content_hash), chunkTotal: Number(value.chunk_total), processedChunks: Number(value.processed_chunks),
+    createdAt: text(value.created_at), updatedAt: text(value.updated_at),
+  }
+  if (typeof value.completed_at === 'string') version.completedAt = value.completed_at
+  if (typeof value.superseded_at === 'string') version.supersededAt = value.superseded_at
+  if (typeof value.superseded_by_hash === 'string') version.supersededByHash = value.superseded_by_hash
+  if (typeof value.invalidated_at === 'string') version.invalidatedAt = value.invalidated_at
+  return version
 }
 
 function mapSettings(row: unknown): WorldKnowledgeSettings {

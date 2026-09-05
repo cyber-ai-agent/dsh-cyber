@@ -12,10 +12,14 @@ import type {
   TaskRun,
   WorkTask,
   WorkTaskDetail,
+  WorkTaskFromSource,
   WorkTaskPriority,
+  WorkTaskSourceTurn,
   WorkTaskStatus,
+  WorkTurnStatus,
   TaskCollaborationPlan,
   AgentRun,
+  AgentRunStatus,
 } from '@dsh-cyber/contracts'
 
 import { EntityNotFoundError, PersistenceError } from './errors.js'
@@ -43,8 +47,52 @@ export class WorkSystemRepository {
     return this.getTask(id)!
   }
 
+  /**
+   * The one task a conversation turn owns.
+   *
+   * Creates it on the first call and returns it on every later one — a resend
+   * of the same message, the recovery pass after a restart, a retry of the
+   * turn. Two callers racing for the same turn both get the same task because
+   * the decision is the unique index on `source_work_turn_id`, not a lookup
+   * this process did a moment earlier: the loser's insert is a no-op and the
+   * read that follows returns the winner. A later call never rewrites an
+   * existing task, even when it derived a different title this time; the
+   * owner may have edited it since.
+   */
+  createTaskFromSource(input: { workspaceId: string; worldId: string; workTurnId: string; title: string; description: string; priority: WorkTaskPriority; dueAt?: string; coordinatorEmployeeId?: string; createdBy: string }): WorkTaskFromSource {
+    const turn = this.#database.prepare('SELECT workspace_id, world_id, session_id FROM work_turns WHERE id = ?').get(input.workTurnId) as
+      | { workspace_id: string; world_id: string; session_id: string }
+      | undefined
+    if (turn === undefined) throw new EntityNotFoundError(`Source work turn not found: ${input.workTurnId}`)
+    if (turn.workspace_id !== input.workspaceId || turn.world_id !== input.worldId) throw new PersistenceError('Source work turn does not belong to this world')
+    // The same rule the queue uses to find a turn's prompt again after a restart.
+    const message = this.#database.prepare(
+      `SELECT id FROM messages
+       WHERE session_id = ? AND kind = 'user' AND json_extract(metadata_json, '$.workTurnId') = ?
+       ORDER BY sequence LIMIT 1`,
+    ).get(turn.session_id, input.workTurnId) as { id: string } | undefined
+    if (message === undefined) throw new PersistenceError('Source work turn has no owner message')
+    const now = this.#clock()
+    const inserted = this.#database.prepare(
+      `INSERT INTO work_tasks
+       (id, workspace_id, world_id, title, description, status, priority, due_at,
+        budget_json, created_by, coordinator_employee_id, current_plan_revision, created_at, updated_at,
+        source_work_turn_id, source_message_id)
+       VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, '{}', ?, ?, 0, ?, ?, ?, ?)
+       ON CONFLICT (source_work_turn_id) DO NOTHING`,
+    ).run(this.#id(), input.workspaceId, input.worldId, input.title, input.description, input.priority, input.dueAt ?? null, input.createdBy, input.coordinatorEmployeeId ?? null, now, now, input.workTurnId, message.id)
+    const task = this.getTaskBySourceWorkTurn(input.workTurnId)
+    if (task === undefined) throw new PersistenceError(`Work Task for source turn ${input.workTurnId} is missing after insert`)
+    return { task, created: Number(inserted.changes) === 1 }
+  }
+
   getTask(taskId: string): WorkTask | undefined {
     const row = this.#database.prepare('SELECT * FROM work_tasks WHERE id = ?').get(taskId)
+    return row === undefined ? undefined : mapTask(row)
+  }
+
+  getTaskBySourceWorkTurn(workTurnId: string): WorkTask | undefined {
+    const row = this.#database.prepare('SELECT * FROM work_tasks WHERE source_work_turn_id = ?').get(workTurnId)
     return row === undefined ? undefined : mapTask(row)
   }
 
@@ -171,8 +219,10 @@ export class WorkSystemRepository {
 
   detail(taskId: string): WorkTaskDetail {
     const task = this.requireTask(taskId)
+    const sourceTurn = this.#sourceTurn(task)
     return {
       task,
+      ...(sourceTurn === undefined ? {} : { sourceTurn }),
       plans: this.#database.prepare('SELECT * FROM task_plan_revisions WHERE task_id = ? ORDER BY revision').all(taskId).map(mapPlan),
       steps: this.#database.prepare(`SELECT step.* FROM task_plan_steps step JOIN task_plan_revisions plan ON plan.id = step.plan_revision_id WHERE plan.task_id = ? ORDER BY plan.revision, step.ordinal`).all(taskId).map(mapStep),
       assignments: this.#database.prepare('SELECT * FROM task_assignments WHERE task_id = ? ORDER BY created_at, id').all(taskId).map(mapAssignment),
@@ -207,6 +257,47 @@ export class WorkSystemRepository {
     return task
   }
 
+  /**
+   * The turn that asked for this task, as it stands right now.
+   *
+   * Read every time the detail is built, never cached onto the task: the turn
+   * is queued when a task from a queued send is first recorded and finishes
+   * minutes later, and a snapshot taken at creation would keep saying "排队中"
+   * forever. Nothing here is a `task_runs` row — those are attempts at the
+   * task, which only the owner can start.
+   *
+   * `source_work_turn_id` is released when the turn is pruned, so a row that
+   * still names a turn names one that exists; the `undefined` below is for the
+   * ordinary case of a task with no conversation behind it.
+   */
+  #sourceTurn(task: WorkTask): WorkTaskSourceTurn | undefined {
+    if (task.sourceWorkTurnId === undefined) return undefined
+    const turn = this.#database.prepare(
+      'SELECT id, session_id, status, error_code, created_at, started_at, completed_at FROM work_turns WHERE id = ?',
+    ).get(task.sourceWorkTurnId) as Record<string, unknown> | undefined
+    if (turn === undefined) return undefined
+    const runs = this.#database.prepare(
+      'SELECT id, employee_id, status, error_code, started_at, completed_at FROM agent_runs WHERE turn_id = ? ORDER BY ordinal, id',
+    ).all(task.sourceWorkTurnId) as Array<Record<string, unknown>>
+    return {
+      workTurnId: String(turn.id),
+      sessionId: String(turn.session_id),
+      status: turn.status as WorkTurnStatus,
+      createdAt: String(turn.created_at),
+      ...(optional(turn.error_code) === undefined ? {} : { errorCode: optional(turn.error_code)! }),
+      ...(optional(turn.started_at) === undefined ? {} : { startedAt: optional(turn.started_at)! }),
+      ...(optional(turn.completed_at) === undefined ? {} : { completedAt: optional(turn.completed_at)! }),
+      runs: runs.map((run) => ({
+        id: String(run.id),
+        employeeId: String(run.employee_id),
+        status: run.status as AgentRunStatus,
+        ...(optional(run.error_code) === undefined ? {} : { errorCode: optional(run.error_code)! }),
+        ...(optional(run.started_at) === undefined ? {} : { startedAt: optional(run.started_at)! }),
+        ...(optional(run.completed_at) === undefined ? {} : { completedAt: optional(run.completed_at)! }),
+      })),
+    }
+  }
+
   #getDeliverable(id: string): Deliverable | undefined {
     const row = this.#database.prepare('SELECT * FROM deliverables WHERE id = ?').get(id)
     return row === undefined ? undefined : mapDeliverable(row)
@@ -226,7 +317,7 @@ export class WorkSystemRepository {
 
 const json = <T>(value: unknown): T => JSON.parse(String(value)) as T
 const optional = (value: unknown): string | undefined => typeof value === 'string' ? value : undefined
-function mapTask(row: object): WorkTask { const v = row as Record<string, unknown>; return { id: String(v.id), workspaceId: String(v.workspace_id), worldId: String(v.world_id), title: String(v.title), description: String(v.description), status: v.status as WorkTaskStatus, priority: v.priority as WorkTaskPriority, budget: json<JsonObject>(v.budget_json), createdBy: String(v.created_by), currentPlanRevision: Number(v.current_plan_revision), createdAt: String(v.created_at), updatedAt: String(v.updated_at), ...(optional(v.due_at) === undefined ? {} : { dueAt: optional(v.due_at)! }), ...(optional(v.coordinator_employee_id) === undefined ? {} : { coordinatorEmployeeId: optional(v.coordinator_employee_id)! }) } }
+function mapTask(row: object): WorkTask { const v = row as Record<string, unknown>; return { id: String(v.id), workspaceId: String(v.workspace_id), worldId: String(v.world_id), title: String(v.title), description: String(v.description), status: v.status as WorkTaskStatus, priority: v.priority as WorkTaskPriority, budget: json<JsonObject>(v.budget_json), createdBy: String(v.created_by), currentPlanRevision: Number(v.current_plan_revision), createdAt: String(v.created_at), updatedAt: String(v.updated_at), ...(optional(v.due_at) === undefined ? {} : { dueAt: optional(v.due_at)! }), ...(optional(v.coordinator_employee_id) === undefined ? {} : { coordinatorEmployeeId: optional(v.coordinator_employee_id)! }), ...(optional(v.source_work_turn_id) === undefined ? {} : { sourceWorkTurnId: optional(v.source_work_turn_id)! }), ...(optional(v.source_message_id) === undefined ? {} : { sourceMessageId: optional(v.source_message_id)! }) } }
 function mapPlan(row: object): TaskPlanRevision { const v = row as Record<string, unknown>; return { id: String(v.id), taskId: String(v.task_id), revision: Number(v.revision), status: v.status as TaskPlanRevision['status'], summary: String(v.summary), executionMode: v.execution_mode as TaskPlanRevision['executionMode'], createdBy: String(v.created_by), createdAt: String(v.created_at) } }
 function mapStep(row: object): TaskPlanStep { const v = row as Record<string, unknown>; return { id: String(v.id), planRevisionId: String(v.plan_revision_id), ordinal: Number(v.ordinal), title: String(v.title), description: String(v.description), requiredSkills: json<string[]>(v.required_skills_json), assignedEmployeeIds: json<string[]>(v.assigned_employee_ids_json), dependsOn: json<string[]>(v.depends_on_json), executionMode: v.execution_mode as TaskPlanStep['executionMode'], expectedOutput: String(v.expected_output), status: v.status as TaskPlanStep['status'] } }
 function mapAssignment(row: object): TaskAssignment { const v = row as Record<string, unknown>; return { id: String(v.id), taskId: String(v.task_id), planRevisionId: String(v.plan_revision_id), stepId: String(v.step_id), employeeId: String(v.employee_id), assignmentReason: json<JsonObject>(v.assignment_reason_json), requiredSkills: json<string[]>(v.required_skills_json), status: v.status as TaskAssignment['status'], createdAt: String(v.created_at), updatedAt: String(v.updated_at) } }

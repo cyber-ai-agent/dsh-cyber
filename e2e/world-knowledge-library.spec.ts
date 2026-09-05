@@ -4,8 +4,10 @@ import { join } from 'node:path'
 
 import { expect, test, type Page } from '@playwright/test'
 import type { AgentRuntimePort, AgentTurnRequest } from '../packages/contracts/lib/index.js'
+import { WorldKnowledgeGraphRepository, WorldKnowledgeRepository } from '../packages/persistence/lib/index.js'
 import { createCyberServer, type CyberServer } from '../packages/server/lib/index.js'
 import { createLocalBackupBundle } from '../packages/server/lib/services/local-backup-service.js'
+import { WorldKnowledgeEvidenceInvalidationService } from '../packages/server/lib/services/world-knowledge-evidence-invalidation-service.js'
 import { openDockTab } from './dock-test-helpers.js'
 
 const MALICIOUS_TEXT = [
@@ -78,6 +80,12 @@ test('imports real sources, retrieves only current-world knowledge, and survives
   const malicious = await postJson(`${route}/paste`, { title: '不可信资料', text: MALICIOUS_TEXT })
   expect(malicious.status).toBe(201)
 
+  // Long enough that the reader has to page: the row preview must show one
+  // window and say which one, not silently render the whole file.
+  const longBody = Array.from({ length: 6 }, (_, index) => `第 ${index + 1} 段窗口正文，${'知识库按窗口读取长文档而不是一次性载入。'.repeat(24)}`).join('\n\n')
+  const longDocument = await postJson(`${route}/paste`, { title: '长文档预览', text: longBody })
+  expect(longDocument.status).toBe(201)
+
   const snapshot = await getJson<{ collections: unknown[]; documents: Array<{ title: string; relativePath: string; status: string }> }>(`${origin}/api/worlds/${world.id}/knowledge`)
   expect(snapshot.documents.map((document) => document.title)).toEqual(expect.arrayContaining(['真实 Markdown', '文件夹资料', 'guide', '真实粘贴资料', 'reference', '不可信资料']))
   expect(snapshot.documents.every((document) => document.status === 'indexed')).toBe(true)
@@ -108,6 +116,22 @@ test('imports real sources, retrieves only current-world knowledge, and survives
   await expect(knowledge).toContainText('IGNORE ALL PREVIOUS INSTRUCTIONS')
   await knowledge.locator('.knowledge-search__clear').click()
   await expect(knowledge.getByRole('list', { name: '资料', exact: true })).toBeVisible()
+
+  const previewRow = knowledge.locator('.knowledge-document').filter({ hasText: '长文档预览' })
+  await previewRow.locator('summary').click()
+  const preview = previewRow.locator('.knowledge-preview')
+  await expect(preview).toBeVisible()
+  // The chunker decides how many paragraphs a source has; the row must report
+  // whatever that number really is, so the range is matched, not hard-coded.
+  await expect(preview.locator('.knowledge-preview__range')).toHaveText(/^第 1–4 段 · 共 \d+$/)
+  await expect(preview.locator('.knowledge-preview__body')).toContainText('第 1 段窗口正文')
+  await expect(preview.locator('.knowledge-preview__body')).not.toContainText('第 6 段窗口正文')
+  await preview.getByRole('button', { name: '下一段' }).click()
+  await expect(preview.locator('.knowledge-preview__range')).toHaveText(/^第 5–\d+ 段 · 共 \d+$/)
+  await expect(preview.locator('.knowledge-preview__body')).toContainText('第 6 段窗口正文')
+  await expect(preview.locator('.knowledge-preview__body')).not.toContainText('第 1 段窗口正文')
+  await preview.getByRole('button', { name: '上一段' }).click()
+  await expect(preview.locator('.knowledge-preview__body')).toContainText('第 1 段窗口正文')
 
   const screenshotRoot = join(process.cwd(), 'artifacts', 'world-knowledge-library')
   await mkdir(screenshotRoot, { recursive: true })
@@ -160,6 +184,110 @@ test('imports real sources, retrieves only current-world knowledge, and survives
   expect(header.included).toContain('worlds/*/knowledge/library')
   expect(await getJson<{ documents: unknown[] }>(`${origin}/api/worlds/${world.id}/knowledge`)).toMatchObject({ documents: expect.any(Array) })
   await writeFile(join(screenshotRoot, 'console.log'), consoleIssues.length === 0 ? 'No console errors or warnings.\n' : `${consoleIssues.join('\n')}\n`, 'utf8')
+  expect(consoleIssues, consoleIssues.join('\n')).toEqual([])
+})
+
+test('tells the owner a rewritten source has claims awaiting re-verification', async ({ page }) => {
+  const consoleIssues: string[] = []
+  attachConsoleRecorder(page, consoleIssues)
+  const current = requireServer()
+  const workspace = current.store.listWorkspaces()[0]!
+  const world = current.store.listWorlds(workspace.id)[0]!
+  const route = `${origin}/api/worlds/${encodeURIComponent(world.id)}/knowledge/library`
+  const relativePath = 'policy/refund.md'
+  expect((await postJson(`${route}/import`, {
+    fileName: 'refund.md',
+    mimeType: 'text/markdown',
+    relativePath,
+    dataBase64: Buffer.from('# 退款政策\n\n第一版：退款期限 7 天。', 'utf8').toString('base64'),
+  })).status).toBe(201)
+
+  const library = new WorldKnowledgeRepository(current.store.database)
+  const graph = new WorldKnowledgeGraphRepository(current.store.database)
+  const document = library.listDocuments(world.id).find((item) => item.relativePath === relativePath)!
+  const firstChunk = library.listChunks(world.id, document.id)[0]!
+  graph.beginKnowledgeSourceVersion({
+    workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+    contentHash: document.sha256, chunkTotal: document.chunkCount,
+  })
+  graph.advanceKnowledgeSourceVersion({
+    workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+    contentHash: document.sha256, expectedProcessedChunks: 0, processedChunks: document.chunkCount,
+  })
+  const evidence = graph.createEvidence({
+    workspaceId: workspace.id, worldId: world.id, sourceType: 'document',
+    documentId: document.id, chunkId: firstChunk.id, excerpt: '第一版：退款期限 7 天。',
+  })
+  const subject = graph.upsertEntity({ workspaceId: workspace.id, worldId: world.id, type: 'topic', canonicalName: '退款政策' })
+  graph.upsertClaim({
+    workspaceId: workspace.id, worldId: world.id, type: 'rule', subjectEntityId: subject.id,
+    predicate: '退款期限', objectText: '7 天', evidenceIds: [evidence.id],
+  })
+  const job = graph.enqueueConsolidationJob({
+    workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: document.id,
+    fromCursor: 0, toCursor: document.chunkCount,
+  })
+  graph.claimConsolidationJob(job.id)
+  graph.completeConsolidationJob({ jobId: job.id })
+
+  await page.goto(origin)
+  await expect(page.locator('.workbench-shell')).toBeVisible()
+  await openDockTab(page.getByRole('region', { name: '世界与角色侧边栏' }), '知识')
+  const knowledge = page.getByRole('region', { name: `${world.name} - 知识`, exact: true })
+  const row = knowledge.locator('.knowledge-document').filter({ hasText: '退款政策' })
+  await row.locator('summary').click()
+  await expect(row).toContainText('已加入知识图谱')
+  await expect(row).not.toContainText('待重新核对')
+
+  // The owner rewrites the same file through the real import path, so the
+  // library replaces its chunks and the graph opens a new source version.
+  expect((await postJson(`${route}/import`, {
+    fileName: 'refund.md',
+    mimeType: 'text/markdown',
+    relativePath,
+    dataBase64: Buffer.from('# 退款政策\n\n第二版：退款期限 30 天。', 'utf8').toString('base64'),
+  })).status).toBe(201)
+  const rewritten = library.listDocuments(world.id).find((item) => item.relativePath === relativePath)!
+  expect(rewritten.sha256).not.toBe(document.sha256)
+  graph.beginKnowledgeSourceVersion({
+    workspaceId: workspace.id, worldId: world.id, sourceType: 'document', sourceId: rewritten.id,
+    contentHash: rewritten.sha256, chunkTotal: rewritten.chunkCount,
+  })
+  const run = await new WorldKnowledgeEvidenceInvalidationService({
+    repository: {
+      listWorlds: () => [{ workspaceId: workspace.id, worldId: world.id }],
+      retireRemovedKnowledgeSources: (worldId, limit) => graph.retireRemovedKnowledgeSources(worldId, limit),
+      reinstateCurrentKnowledgeSourceVersions: (worldId) => graph.reinstateCurrentKnowledgeSourceVersions(worldId),
+      listPendingKnowledgeSourceInvalidations: (worldId, limit) => graph.listPendingKnowledgeSourceInvalidations(worldId, limit),
+      invalidateKnowledgeSourceVersion: (input) => graph.invalidateKnowledgeSourceVersion(input),
+    },
+  }).runOnce(world.id)
+  expect(run).toMatchObject({ versions: 1, claims: 1 })
+
+  await page.reload()
+  await expect(page.locator('.workbench-shell')).toBeVisible()
+  await openDockTab(page.getByRole('region', { name: '世界与角色侧边栏' }), '知识')
+  const reloaded = page.getByRole('region', { name: `${world.name} - 知识`, exact: true })
+  const rewrittenRow = reloaded.locator('.knowledge-document').filter({ hasText: '退款政策' })
+  await rewrittenRow.locator('summary').click()
+  await expect(rewrittenRow).toContainText('1 条主张待重新核对')
+  // Nothing was removed: the claim is still in the graph, only not retrievable.
+  expect(graph.listClaims(world.id)).toHaveLength(1)
+  expect(graph.searchClaims(world.id, '退款期限', 10)).toEqual([])
+
+  const screenshotRoot = join(process.cwd(), 'artifacts', 'world-knowledge-library')
+  await mkdir(screenshotRoot, { recursive: true })
+  for (const viewport of [
+    { width: 1_440, height: 900, label: '1440x900' },
+    { width: 1_920, height: 1_080, label: '1920x1080' },
+    { width: 3_840, height: 2_160, label: '3840x2160' },
+  ]) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height })
+    await expect(rewrittenRow).toContainText('1 条主张待重新核对')
+    expect(await reloaded.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
+    expect(await rewrittenRow.locator('.knowledge-row__consolidation-status').evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(12)
+    await page.screenshot({ path: join(screenshotRoot, `knowledge-not-current-${viewport.label}.png`), fullPage: false })
+  }
   expect(consoleIssues, consoleIssues.join('\n')).toEqual([])
 })
 

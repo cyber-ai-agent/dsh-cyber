@@ -5,6 +5,7 @@ import {
   ClockCounterClockwise,
   Copy,
   File as FileIcon,
+  FilePlus,
   PaperPlaneRight,
   Paperclip,
   Stop,
@@ -109,6 +110,9 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
   const [knowledgeError, setKnowledgeError] = useState<string>()
   const [copiedMessageId, setCopiedMessageId] = useState<string>()
   const [copyError, setCopyError] = useState<string>()
+  const [savingDocumentMessageId, setSavingDocumentMessageId] = useState<string>()
+  const [savedDocumentMessageIds, setSavedDocumentMessageIds] = useState<Set<string>>(() => new Set())
+  const [saveDocumentError, setSaveDocumentError] = useState<string>()
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
   const [topicNotice, setTopicNotice] = useState(false)
   const experience = worldExperience(world)
@@ -414,6 +418,36 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
     }
   }
 
+  /**
+   * Keep one reply as a document in this world.
+   *
+   * Only the message id travels: the host reads the reply it already stored
+   * and publishes it as the owner's own document. Nothing here turns the row
+   * into a delivered file — the status says the reply was kept, not that a
+   * character executed anything to produce it.
+   */
+  const saveReplyAsDocument = async (message: WorkMessage) => {
+    if (savingDocumentMessageId !== undefined || savedDocumentMessageIds.has(message.id)) return
+    setMessageMenu(undefined)
+    setSaveDocumentError(undefined)
+    setSavingDocumentMessageId(message.id)
+    try {
+      const response = await fetch(`/api/worlds/${encodeURIComponent(world.id)}/artifacts/save-reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageId: message.id }),
+      })
+      const result = await response.json() as { artifact?: { id?: unknown }; error?: { message?: string } }
+      if (!response.ok) throw new Error(result.error?.message ?? '这条回复暂时无法保存为文档')
+      if (typeof result.artifact?.id !== 'string') throw new Error('产物服务没有返回可查看的文档记录')
+      setSavedDocumentMessageIds((current) => new Set(current).add(message.id))
+    } catch (cause) {
+      setSaveDocumentError(cause instanceof Error ? cause.message : '这条回复暂时无法保存为文档')
+    } finally {
+      setSavingDocumentMessageId(undefined)
+    }
+  }
+
   const copyMessage = async (message: WorkMessage) => {
     setMessageMenu(undefined)
     setCopyError(undefined)
@@ -434,7 +468,8 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
       </div>
       <header className="chat-header">
         <div className="chat-header__identity">
-          <span className={`chat-header__avatars${conversationKind === 'group' || conversationKind === 'meeting' ? ' chat-header__avatars--group' : ''}`} aria-hidden={directEmployee === undefined}>
+          {/* 群聊头像自己带 role="img" 和成员名，是这里唯一的成员说明，不能被 aria-hidden 藏掉。 */}
+          <span className={`chat-header__avatars${conversationKind === 'group' || conversationKind === 'meeting' ? ' chat-header__avatars--group' : ''}`}>
             {directEmployee !== undefined
               ? <button className="chat-header__avatar-button" type="button" onClick={() => onOpenDossier(directEmployee.id)} aria-label={`打开${directEmployee.displayName}角色`} title={`打开${directEmployee.displayName}角色`}><Avatar index={directEmployee.avatarIndex} size="sm" label={directEmployee.displayName} authorityRole={directEmployee.authorityRole} assetUrl={directEmployee.avatarAssetUrl} rendererKind={directEmployee.avatarProfile?.rendererKind} /></button>
               : <GroupAvatar participants={participantEmployees} size="md" />}
@@ -464,7 +499,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
               <article key={message.id} className={`message${owner ? ' message--owner' : ''}${streaming ? ' message--streaming' : ''}`} onContextMenu={(event) => { if (streaming) return; event.preventDefault(); setMessageMenu({ message, position: { x: event.clientX, y: event.clientY } }) }} onKeyDown={(event) => { if (streaming || (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10'))) return; event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); setMessageMenu({ message, position: { x: rect.left + Math.min(rect.width, 220), y: rect.top + 28 } }) }} tabIndex={streaming ? undefined : 0}>
                 {owner ? null : <button className="avatar-button" type="button" onClick={() => employee && onOpenDossier(employee.id)} aria-label={`打开${employee?.displayName ?? experience.personLabel}角色`}><Avatar index={employee?.avatarIndex ?? 7} label={employee?.displayName ?? '角色'} authorityRole={employee?.authorityRole} assetUrl={employee?.avatarAssetUrl} rendererKind={employee?.avatarProfile?.rendererKind} /></button>}
                 <div className="message__body">
-                  <header className="message__meta">{owner ? <span className="sr-only">我的消息</span> : <><strong>{employee?.displayName ?? experience.personLabel}<AuthorityBadge role={employee?.authorityRole} /></strong><span>{employee?.role}</span></>}{owner || employee === undefined ? null : <MessageSpeechButton employeeId={employee.id} employeeName={employee.displayName} {...(dossiers[employee.id]?.profile === undefined ? {} : { profile: dossiers[employee.id]!.profile })} text={message.content} />}<time>{displayTime(message)}</time>{copiedMessageId === message.id ? <span role="status">已复制</span> : rememberingMessageId === message.id ? <span role="status">正在提交整理…</span> : submittedKnowledgeMessageIds.has(message.id) ? <span role="status">已提交整理</span> : null}</header>
+                  <header className="message__meta">{owner ? <span className="sr-only">我的消息</span> : <><strong>{employee?.displayName ?? experience.personLabel}<AuthorityBadge role={employee?.authorityRole} /></strong><span>{employee?.role}</span></>}{owner || employee === undefined ? null : <MessageSpeechButton employeeId={employee.id} employeeName={employee.displayName} {...(dossiers[employee.id]?.profile === undefined ? {} : { profile: dossiers[employee.id]!.profile })} text={message.content} />}<time>{displayTime(message)}</time>{copiedMessageId === message.id ? <span role="status">已复制</span> : savingDocumentMessageId === message.id ? <span role="status">正在保存为文档…</span> : savedDocumentMessageIds.has(message.id) ? <span role="status">已保存为文档</span> : rememberingMessageId === message.id ? <span role="status">正在提交整理…</span> : submittedKnowledgeMessageIds.has(message.id) ? <span role="status">已提交整理</span> : null}</header>
                   <div className="message__content">{streaming && message.content.length === 0 ? <span className="stream-placeholder">正在回复中…</span> : <RichText value={message.content} worldId={world.id} />}{streaming ? <span className="stream-cursor" aria-hidden="true" /> : null}</div>
                   <MessageAttachments attachments={messageAttachments(message.metadata)} onZoom={(attachment) => setZoomImage(attachment)} />
                   <CompletionJobStatus metadata={message.metadata} {...(onRetryCompletionJob === undefined ? {} : { onRetry: onRetryCompletionJob })} {...(onCompletionJobSettled === undefined ? {} : { onSettled: onCompletionJobSettled })} />
@@ -488,6 +523,14 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
           disabled: copiedMessageId === messageMenu.message.id,
           onSelect: () => { void copyMessage(messageMenu.message) },
         }] : []),
+        ...(canSaveReplyAsDocument(messageMenu.message) ? [{
+          id: 'save-reply-as-document',
+          label: savedDocumentMessageIds.has(messageMenu.message.id) ? '已保存为文档' : '将回复保存为文档',
+          description: '把这段文字存成世界里的 Markdown 文档；不代表角色执行过任务',
+          icon: <FilePlus size={17} />,
+          disabled: savingDocumentMessageId !== undefined || savedDocumentMessageIds.has(messageMenu.message.id),
+          onSelect: () => { void saveReplyAsDocument(messageMenu.message) },
+        }] : []),
         {
           id: 'remember-message',
           label: submittedKnowledgeMessageIds.has(messageMenu.message.id) ? '已提交整理' : '加入长期知识',
@@ -499,6 +542,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
       ]} />}
       <div className="composer-zone">
         {copyError === undefined ? null : <div className="chat-knowledge-error" role="alert"><span>{copyError}</span><button type="button" onClick={() => setCopyError(undefined)} aria-label="关闭提示"><X size={14} /></button></div>}
+        {saveDocumentError === undefined ? null : <div className="chat-knowledge-error" role="alert"><span>{saveDocumentError}</span><button type="button" onClick={() => setSaveDocumentError(undefined)} aria-label="关闭提示"><X size={14} /></button></div>}
         {knowledgeError === undefined ? null : <div className="chat-knowledge-error" role="alert"><span>{knowledgeError}</span><button type="button" onClick={() => setKnowledgeError(undefined)} aria-label="关闭提示"><X size={14} /></button></div>}
         {onDecideWorldPermissionRequest === undefined ? null : <WorldPermissionRequests items={permissionRequests} employees={employees} activeSessionId={session?.id} onDecide={onDecideWorldPermissionRequest} />}
         {onDecideApproval === undefined ? null : <ApprovalRequests items={approvals} onDecide={onDecideApproval} />}
@@ -844,6 +888,20 @@ function formatPermissionExpiry(value: string): string {
 
 function displayTime(message: WorkMessage): string { const metadataTime = message.metadata.displayTime; return typeof metadataTime === 'string' ? metadataTime : formatTime(message.createdAt) }
 function currentMention(value: string): string | undefined { return /@([^\s@]*)$/.exec(value)?.[1] }
+/**
+ * Is there a finished character reply here worth keeping as a document?
+ *
+ * The owner's own rows, product notices and anything still streaming have no
+ * settled reply to save, and an empty row would publish an empty file. The
+ * action is offered only where saving means something.
+ */
+export function canSaveReplyAsDocument(message: WorkMessage): boolean {
+  return message.kind === 'assistant'
+    && message.senderKind === 'employee'
+    && message.metadata.streaming !== true
+    && message.content.trim().length > 0
+}
+
 export function isChatMessage(message: WorkMessage): boolean {
   if (message.kind === 'user' || message.kind === 'assistant') return true
   return message.kind === 'system' && message.metadata.productNotice === true

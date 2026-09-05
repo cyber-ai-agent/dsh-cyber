@@ -431,8 +431,10 @@ export function WorldSettingsDialog({
                       const active = visibleSelectedThemeId === theme.id
                       const previewImage = theme.tokens.backdropImage ?? theme.tokens.worldMapImage
                       return (
-                        <div
+                        <button
                           key={theme.id}
+                          type="button"
+                          aria-pressed={active}
                           className={`world-theme-card ${active ? 'is-active' : ''}`}
                           onClick={() => {
                             setSelectedThemeId(theme.id)
@@ -465,7 +467,7 @@ export function WorldSettingsDialog({
                             </div>
                             <p>{theme.description}</p>
                           </div>
-                        </div>
+                        </button>
                       )
                     })}
                   </div>

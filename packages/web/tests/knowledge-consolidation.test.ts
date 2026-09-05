@@ -209,6 +209,84 @@ describe('Knowledge consolidation actions', () => {
     failureHost.remove()
   })
 
+  it('says how much of a long document is really in the graph instead of claiming all of it', async () => {
+    const longDocument: KnowledgeDocument = { ...document, chunkCount: 37 }
+    const completedJob = {
+      id: 'job-partial-1', workspaceId: world.workspaceId, worldId: world.id, sourceType: 'document' as const,
+      sourceId: longDocument.id, fromCursor: 0, toCursor: 1_757_000_000_000, status: 'completed' as const, attempt: 1,
+      createdAt: world.createdAt, updatedAt: world.updatedAt,
+    }
+    const state: UseWorldKnowledgeResult = {
+      collections: [],
+      documents: [longDocument],
+      consolidationJobs: [{ ...completedJob, processedChunks: 12, chunkTotal: 37 }],
+      loading: false,
+      searching: false,
+      searchQuery: '',
+      searchResults: [],
+      reload: vi.fn(async () => undefined),
+      search: vi.fn(async () => []),
+      clearSearch: vi.fn(),
+      importFile: vi.fn(async () => undefined),
+      importPack: vi.fn(async () => undefined),
+      createFromText: vi.fn(async () => undefined),
+      importFromWeb: vi.fn(async () => undefined),
+      rescan: vi.fn(async () => undefined),
+      consolidate: vi.fn(async () => undefined),
+      retryConsolidation: vi.fn(async () => undefined),
+    }
+    const host = documentForTest()
+    const root = createRoot(host)
+    await act(async () => { root.render(createElement(KnowledgeLibrary, { world, demoMode: false, state })) })
+    expect(host.textContent).toContain('已加入知识图谱 12/37 块')
+
+    await act(async () => {
+      root.render(createElement(KnowledgeLibrary, { world, demoMode: false, state: { ...state, consolidationJobs: [{ ...completedJob, processedChunks: 37, chunkTotal: 37 }] } }))
+    })
+    expect(host.textContent).toContain('已加入知识图谱')
+    expect(host.textContent).not.toContain('/37 块')
+    await act(async () => { root.unmount() })
+    host.remove()
+  })
+
+  it('says a source has claims awaiting re-verification after its content changed', async () => {
+    const completedJob = {
+      id: 'job-not-current-1', workspaceId: world.workspaceId, worldId: world.id, sourceType: 'document' as const,
+      sourceId: document.id, fromCursor: 0, toCursor: 1_757_000_000_000, status: 'completed' as const, attempt: 1,
+      processedChunks: 4, chunkTotal: 4, createdAt: world.createdAt, updatedAt: world.updatedAt,
+    }
+    const state: UseWorldKnowledgeResult = {
+      collections: [],
+      documents: [document],
+      consolidationJobs: [{ ...completedJob, notCurrentClaims: 2 }],
+      loading: false,
+      searching: false,
+      searchQuery: '',
+      searchResults: [],
+      reload: vi.fn(async () => undefined),
+      search: vi.fn(async () => []),
+      clearSearch: vi.fn(),
+      importFile: vi.fn(async () => undefined),
+      importPack: vi.fn(async () => undefined),
+      createFromText: vi.fn(async () => undefined),
+      importFromWeb: vi.fn(async () => undefined),
+      rescan: vi.fn(async () => undefined),
+      consolidate: vi.fn(async () => undefined),
+      retryConsolidation: vi.fn(async () => undefined),
+    }
+    const host = documentForTest()
+    const root = createRoot(host)
+    await act(async () => { root.render(createElement(KnowledgeLibrary, { world, demoMode: false, state })) })
+    expect(host.textContent).toContain('2 条主张待重新核对')
+
+    await act(async () => {
+      root.render(createElement(KnowledgeLibrary, { world, demoMode: false, state: { ...state, consolidationJobs: [completedJob] } }))
+    })
+    expect(host.textContent).not.toContain('待重新核对')
+    await act(async () => { root.unmount() })
+    host.remove()
+  })
+
   it('keeps the artifact action visible but disabled in demo mode and without permission', () => {
     const demoHtml = renderToStaticMarkup(createElement(ArtifactDetail, { worldId: world.id, artifact, demoMode: true, onBack: vi.fn(), onRename: vi.fn(async () => undefined), onArchive: vi.fn(async () => undefined) }))
     expect(demoHtml).toContain('加入知识')
