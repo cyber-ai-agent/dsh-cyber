@@ -222,7 +222,11 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     // are never classified. Started now rather than after the turn so the call
     // overlaps attachments, planning, permissions and the characters' own work,
     // and settled once the turn has an id.
+    // Track settlement without joining it: the response may carry the decision
+    // when it is already there, and must never wait for one that is not.
     const proposedTaskIntent = taskIntent?.propose({ workspaceId: world.workspaceId, worldId: world.id, prompt })
+    let intentSettled: ConversationTaskIntentOutcome | undefined
+    proposedTaskIntent?.then((outcome) => { intentSettled = outcome }, () => undefined)
 
     if (body.collaborationMode !== undefined) {
       requiredEnum<WorkSessionCollaborationMode>(body, 'collaborationMode', ['discussion', 'task'])
@@ -492,9 +496,16 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     // whole ceiling for a draft nobody is looking at yet. So the recording
     // follows on its own, and the open task list hears about it the way it
     // hears about every other task the host records — `world-task`.
+    // One contract for both paths: the reply never waits on the decision. A
+    // decision that already landed rides along, because the caller can use it
+    // without a second round trip; one that has not lands on the live event,
+    // which is how every task the host records behind an open list arrives.
     let proposedTask: WorkTask | undefined
-    if (responseStatus === 202) deferTaskIntent(taskIntent, proposedTaskIntent, world, result, worldTrace, runtimeStreamHub)
-    else proposedTask = await settleTaskIntent(taskIntent, proposedTaskIntent, world, result)
+    if (taskIntent !== undefined && intentSettled !== undefined) {
+      proposedTask = attachSettledIntent(taskIntent, intentSettled, world, result)
+    } else {
+      deferTaskIntent(taskIntent, proposedTaskIntent, world, result, worldTrace, runtimeStreamHub)
+    }
     for (const employeeId of runtimeEmployeeIds) employeeActivity.project(employeeId)
     worldRuntime.publishCurrent(world.id)
     writeJson(response, responseStatus, proposedTask === undefined ? result : { ...result, proposedTask })
