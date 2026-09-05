@@ -51,8 +51,8 @@ const EVIDENCE_GRADES: readonly WorldArtifactEvidenceGrade[] = [
  */
 export function artifactEvidenceLabel(grade: WorldArtifactEvidenceGrade): { label: string; hint: string } {
   const labels: Record<WorldArtifactEvidenceGrade, { label: string; hint: string }> = {
-    'host-observed': { label: '宿主已核实落盘', hint: '本次运行执行期间，宿主观察到这份内容写入当前世界工作目录，同一时刻没有其他运行。' },
-    'shared-window': { label: '归属未确认', hint: '宿主观察到了写入，但同一时刻还有其他运行，或文件在运行结束后又被改动，无法确定由哪次运行产生。' },
+    'host-observed': { label: '宿主已核实落盘', hint: '本次运行执行期间，宿主观察到这份内容写入当前世界工作目录，同一时刻没有其他运行；登记时内容仍与观察到的完全一致。' },
+    'shared-window': { label: '归属未确认', hint: '宿主观察到了写入，但同一时刻还有其他运行，或登记时的内容已不是宿主看到落盘的那份：运行结束后被改动，或目录里有宿主没有观察到的文件。' },
     'manifest-declared': { label: '按角色清单登记', hint: '文件真实存在并已校验复制，但宿主没有这次运行的写入观察记录，无法证明由本次运行产生。' },
     'unproven-window': { label: '仅按时间匹配，未验证', hint: '只按运行的开始与结束时间挑选了这个文件，并发情况下可能属于另一次运行。' },
     'owner-published': { label: '由你手动发布', hint: '这份产物由用户或宿主直接发布，不涉及角色运行归属。' },

@@ -381,7 +381,7 @@ export class WorldArtifactService {
         continue
       }
       artifactRefs.push(publication.artifact.id)
-      decisions.push(publicationDecision(publication, sourceRelativePath, entry.kind, observations, discovery, observed?.truncated === true))
+      decisions.push(await publicationDecision(root, publication, sourceRelativePath, entry.kind, observations, discovery, observed?.truncated === true))
     }
     if (decisions.length > 0) {
       await this.#evidence?.recordPublications({ worldId: context.worldId, agentRunId: context.agentRunId, entries: decisions })
@@ -445,7 +445,7 @@ export class WorldArtifactService {
       : view.versions.find((candidate) => candidate.version === versionNumber)
     if (version === undefined) throw notFound('artifact_version_not_found', '产物版本不存在')
     const root = await this.#roots.ensure(worldId)
-    const path = this.#publishedPath(root, version.relativePath)
+    const path = publishedArtifactPath(root, version.relativePath)
     let body: Buffer
     let selectedContentType: string | undefined
     let selectedIsHtml = false
@@ -494,15 +494,6 @@ export class WorldArtifactService {
       contentType,
       isHtml: selectedIsHtml || view.artifact.kind === 'html' || contentType === 'text/html',
     }
-  }
-
-  #publishedPath(root: WorldRoot, relativePath: string): string {
-    const normalized = normalizeRelativePath(relativePath, 'published artifact path')
-    const path = resolve(root.rootPath, ...normalized.split('/'))
-    if (!isPathWithin(root.exportsArtifactsPath, path)) {
-      throw conflict('artifact_path_invalid', '产物路径越界')
-    }
-    return path
   }
 
   async #publishSource(
@@ -692,16 +683,17 @@ interface RunWindowScan {
 }
 
 /** One publication's grade, decided while the Host still holds the observation. */
-function publicationDecision(
+async function publicationDecision(
+  root: WorldRoot,
   publication: WorldArtifactPublication,
   sourceRelativePath: string,
   kind: WorldArtifactKind,
   observations: readonly AgentRunFileObservation[] | undefined,
   discovery: 'manifest' | 'host-evidence' | 'run-window',
   scanTruncated: boolean,
-): AgentRunPublicationEntry {
-  const observation = observations === undefined ? undefined : matchObservation(observations, sourceRelativePath, kind)
-  if (observation === undefined) {
+): Promise<AgentRunPublicationEntry> {
+  const matched = observations === undefined ? undefined : matchObservation(observations, sourceRelativePath, kind)
+  if (matched === undefined) {
     return {
       artifactId: publication.artifact.id,
       version: publication.version.version,
@@ -710,34 +702,86 @@ function publicationDecision(
       ...(scanTruncated ? { scanTruncated } : {}),
     }
   }
-  // A project digest covers a whole tree, so only a single file's published
-  // bytes can be compared against what the Host saw land.
-  const contentMatchesObservation = kind === 'project' ? undefined : observation.sha256 === publication.version.sha256
-  const proven = observation.exclusive && contentMatchesObservation !== false
+  // The census records content when the bracket closes; publication happens
+  // later, so the published bytes are compared against the observation before
+  // any grade claims proof. A project is a whole tree: every file the reader
+  // will open has to be a file this bracket saw, holding the bytes it saw.
+  const { observation } = matched
+  const contentMatchesObservation = kind === 'project'
+    ? await publishedProjectMatchesObservation(root, publication.version.relativePath, sourceRelativePath, matched.inside)
+    : observation.sha256 === publication.version.sha256
+  const proven = observation.exclusive && contentMatchesObservation
   return {
     artifactId: publication.artifact.id,
     version: publication.version.version,
     sourceRelativePath,
     grade: proven ? 'host-observed' : 'shared-window',
     observedAtMs: observation.modifiedAtMs,
-    ...(contentMatchesObservation === undefined ? {} : { contentMatchesObservation }),
+    contentMatchesObservation,
     ...(observation.concurrentRunIds.length === 0 ? {} : { concurrentRunIds: observation.concurrentRunIds }),
   }
+}
+
+interface MatchedObservation {
+  /** The single write, or a project's writes folded into one summary row. */
+  observation: AgentRunFileObservation
+  /** Every observed write the publication covers, kept for the content check. */
+  inside: readonly AgentRunFileObservation[]
 }
 
 function matchObservation(
   observations: readonly AgentRunFileObservation[],
   sourceRelativePath: string,
   kind: WorldArtifactKind,
-): AgentRunFileObservation | undefined {
-  if (kind !== 'project') return observations.find((candidate) => candidate.path === sourceRelativePath)
+): MatchedObservation | undefined {
+  if (kind !== 'project') {
+    const observation = observations.find((candidate) => candidate.path === sourceRelativePath)
+    return observation === undefined ? undefined : { observation, inside: [observation] }
+  }
   const inside = observations.filter((candidate) => candidate.path.startsWith(`${sourceRelativePath}/`))
   if (inside.length === 0) return undefined
   // A project is proven only when every observed write inside it is proven.
   const exclusive = inside.every((candidate) => candidate.exclusive)
   const concurrentRunIds = [...new Set(inside.flatMap((candidate) => candidate.concurrentRunIds))]
   const newest = inside.reduce((left, right) => right.modifiedAtMs > left.modifiedAtMs ? right : left)
-  return { ...newest, exclusive, concurrentRunIds }
+  return { observation: { ...newest, exclusive, concurrentRunIds }, inside }
+}
+
+/**
+ * Is the published tree exactly the tree the Host watched land?
+ *
+ * The version digest cannot answer this: it only says the immutable copy
+ * matches the source directory as it stood at publication time, which is the
+ * very moment in doubt. So the published files are re-hashed and compared with
+ * the run's own observation, one path at a time. Anything the Host cannot line
+ * up - a rewritten file, a file no bracket ever covered, an observed write it
+ * was too busy to hash, a tree it can no longer read - answers no.
+ */
+async function publishedProjectMatchesObservation(
+  root: WorldRoot,
+  publishedRelativePath: string,
+  sourceRelativePath: string,
+  inside: readonly AgentRunFileObservation[],
+): Promise<boolean> {
+  const prefix = `${sourceRelativePath}/`
+  const observed = new Map(inside.map((candidate) => [candidate.path.slice(prefix.length), candidate.sha256]))
+  let published: ProjectFile[]
+  try {
+    published = await collectProjectFiles(publishedArtifactPath(root, publishedRelativePath), 0)
+  } catch {
+    return false
+  }
+  if (published.length !== observed.size) return false
+  for (const file of published) {
+    const expected = observed.get(file.relativePath)
+    if (expected === undefined || expected === '') return false
+    try {
+      if (sha256(await readFile(file.absolutePath)) !== expected) return false
+    } catch {
+      return false
+    }
+  }
+  return true
 }
 
 /** The weakest grade in the batch: a list is only as trustworthy as its worst row. */
@@ -846,6 +890,16 @@ function parseManifestEntry(value: unknown): WorldArtifactPublishManifestEntry {
     ...(object.entrypoint === undefined ? {} : { entrypoint: requiredString(object.entrypoint, 'manifest entrypoint') }),
     ...(object.description === undefined ? {} : { description: object.description as string }),
   }
+}
+
+/** Where one registered version's immutable bytes live, refusing any escape. */
+function publishedArtifactPath(root: WorldRoot, relativePath: string): string {
+  const normalized = normalizeRelativePath(relativePath, 'published artifact path')
+  const path = resolve(root.rootPath, ...normalized.split('/'))
+  if (!isPathWithin(root.exportsArtifactsPath, path)) {
+    throw conflict('artifact_path_invalid', '产物路径越界')
+  }
+  return path
 }
 
 interface SourceInspection {

@@ -24,6 +24,11 @@ import { isPathWithin, type WorldRoot } from './world-root-service.js'
  * What it does not prove: that the model's own process performed the write.  An
  * owner upload, an external editor or (under 完全访问) any other program writing
  * into the World during the same bracket is indistinguishable from the agent.
+ *
+ * What it says nothing about: anything that happened after the bracket closed.
+ * A record is a statement about one past instant, and publication comes later,
+ * so a reader of these files has to re-check the bytes against the record
+ * before presenting a record as proof of what it is publishing.
  */
 
 export interface AgentRunFileEvidenceLimits {
@@ -111,6 +116,11 @@ export interface AgentRunPublicationEntry {
   sourceRelativePath: string
   grade: 'host-observed' | 'shared-window' | 'manifest-declared' | 'unproven-window'
   observedAtMs?: number
+  /**
+   * Whether the published bytes were still the observed bytes at publication
+   * time. Absent only when no observation matched at all; `host-observed`
+   * requires it to be true.
+   */
   contentMatchesObservation?: boolean
   concurrentRunIds?: string[]
   scanTruncated?: boolean

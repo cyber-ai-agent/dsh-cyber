@@ -76,10 +76,15 @@ export interface WorldArtifactRunProvenance {
  * other grade is a description of what the Host could *not* prove.
  *
  * - `host-observed`  the Host bracketed the Run, saw exactly this content land
- *                    inside the bracket, and no other Run's bracket covered the
- *                    write instant.
- * - `shared-window`  the Host saw the write, but another Run was executing at
- *                    the same instant, or the bytes changed again afterwards.
+ *                    inside the bracket, no other Run's bracket covered the
+ *                    write instant, and the bytes it published are still the
+ *                    bytes it saw. A project earns this only when every file in
+ *                    the published tree is a file the bracket covered.
+ * - `shared-window`  the Host saw a write here but cannot claim these exact
+ *                    bytes for this Run alone: another Run was executing at the
+ *                    same instant, or the published content is not the observed
+ *                    content - rewritten after the bracket closed, or a tree
+ *                    carrying files no bracket ever covered.
  * - `manifest-declared` the Run asked for the file in its manifest and the Host
  *                    verified and copied a real file, but never observed a write.
  * - `unproven-window` the file only matched the Run's start/completion window.
@@ -101,7 +106,11 @@ export interface WorldArtifactVersionEvidence {
   /** True only for `host-observed`. A surface must not claim proof otherwise. */
   proven: boolean
   observedAt?: IsoTimestamp
-  /** False when the published bytes differ from what the Host observed. */
+  /**
+   * False when the published bytes are not the bytes the Host observed. For a
+   * project this covers the whole tree: a rewritten file, a missing one, or one
+   * no bracket ever saw all make it false.
+   */
   contentMatchesObservation?: boolean
   /** Other Runs whose brackets covered the same write instant. */
   concurrentRunIds?: string[]
