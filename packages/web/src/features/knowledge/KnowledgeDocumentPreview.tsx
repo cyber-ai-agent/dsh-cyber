@@ -38,11 +38,15 @@ export function KnowledgeDocumentPreview({ worldId, document, open, demoMode }: 
   const [attempt, setAttempt] = useState(0)
   const requestGeneration = useRef(0)
 
+  // A reindex or a replaced source is a different body, so the window restarts
+  // and is read again rather than showing what the previous version said.
+  const revision = `${document.id}:${document.updatedAt}:${document.chunkCount}`
+
   useEffect(() => {
     setOffset(0)
     setPreview(undefined)
     setError(undefined)
-  }, [document.id, document.updatedAt, document.chunkCount])
+  }, [revision])
 
   useEffect(() => {
     if (!open || demoMode) return undefined
@@ -61,7 +65,7 @@ export function KnowledgeDocumentPreview({ worldId, document, open, demoMode }: 
         setLoading(false)
       })
     return () => { requestGeneration.current += 1 }
-  }, [attempt, demoMode, document.id, offset, open, t, worldId])
+  }, [attempt, demoMode, document.id, offset, open, revision, t, worldId])
 
   if (!open) return null
   if (demoMode) return <p className="knowledge-preview__state">{t('knowledge.previewDemo', '演示世界不提供资料正文预览。')}</p>
