@@ -115,6 +115,42 @@ describe('Task list live refresh', () => {
     host.remove()
   })
 
+  it('warns that the source conversation already did the work before a second run', async () => {
+    // The turn that proposed this task ran to completion and a character worked
+    // in it. Running the draft now repeats that work for real — files, skills,
+    // whatever the turn already did. The owner may still want it, but they must
+    // not learn about it afterwards.
+    const detail = {
+      task: { ...proposed, status: 'draft' },
+      plans: [], steps: [], assignments: [], runs: [], deliverables: [], reviews: [], growthEvidence: [],
+      sourceTurn: {
+        workTurnId: 'turn-from-chat', sessionId: 'session-1', status: 'completed',
+        createdAt: '2026-09-05T00:00:00.000Z', completedAt: '2026-09-05T00:01:00.000Z',
+        runs: [{ agentRunId: 'run-1', employeeId: 'employee-1', status: 'completed' }],
+      },
+    }
+    const respond = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/tasks?') || url.endsWith('/tasks')) return respond({ items: [detail.task] })
+      if (url.endsWith('/artifacts')) return respond({ artifacts: [] })
+      return respond(detail)
+    }))
+
+    const host = document.createElement('div')
+    document.body.append(host)
+    const root = createRoot(host)
+    await act(async () => { root.render(createElement(TaskWorkspace, { world, employees: [] })) })
+    await vi.waitFor(() => expect(host.textContent).toContain('来源对话'))
+
+    expect(host.textContent).toContain('这次对话已经执行过')
+    // Warned, not blocked: the conversation may only have discussed the work.
+    expect([...host.querySelectorAll('button')].some((node) => node.textContent?.includes('生成计划并执行'))).toBe(true)
+
+    await act(async () => { root.unmount() })
+    host.remove()
+  })
+
   it('tells the owner what the turn that asked for the draft actually did, without claiming the task ran', async () => {
     const detail = {
       task: proposed,
