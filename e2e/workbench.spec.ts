@@ -324,7 +324,8 @@ test('runs direct and group conversations with real world lifecycle, persistence
   const chat = page.getByRole('region', { name: '当前世界多角色会话' })
   await expect(page.getByRole('heading', { name: '阿帆', exact: true })).toBeVisible()
   // 会话成员现在由会话头部承载（世界视图不再叠加成员浮层）。
-  await expect(chat.getByRole('button', { name: '打开阿帆角色' })).toBeVisible()
+  // 断言限定在会话头部：消息里的头像按钮同名，历史一旦先渲染就会命中两个元素。
+  await expect(chat.locator('.chat-header__identity').getByRole('button', { name: '打开阿帆角色' })).toBeVisible()
   const dock = page.getByRole('region', { name: '世界与角色侧边栏' })
   expect(server.store.getEmployee(engineer.id)?.status).toBe('available')
   expect(server.store.listWorldDomainEvents(worldId).filter((event) => event.type === 'task.started')).toHaveLength(taskStartedBeforeIntent)
@@ -629,9 +630,10 @@ test('discovers, installs, and creates a visually distinct world from the world-
   const market = page.getByRole('dialog', { name: '扩展市场' })
   await expect(market).toBeVisible()
   await expect(market.locator('.market-tabs button')).toHaveText(['世界', '角色', '插件', '皮肤'])
-  // 「世界」页同时展示内置模板区和可安装的世界包，两块各有自己的卡片网格；
+  // 「世界」页同时展示内置模板区和可安装的世界包，两块各有自己的带标题分区和卡片网格；
   // 这里断言的是可安装的世界包，内置模板由 market-builtin-worlds.spec.ts 覆盖。
-  const packageCards = market.locator('.market-catalog > .market-card-grid > article')
+  const packageCards = market.locator('.market-section--packages > .market-card-grid > article')
+  await expect(market.getByRole('region', { name: '内置世界模板' })).toContainText('无需安装 · 可直接创建')
   await expect(market.getByRole('region', { name: '内置世界模板' }).locator('.market-card-grid > article').filter({ hasText: '赛博公司' })).toBeVisible()
   for (const worldName of ['赛博公司', '月影酒馆', '云端创作工坊', '远星观测站']) {
     await expect(packageCards.filter({ hasText: worldName })).toBeVisible()
@@ -773,8 +775,8 @@ test('opens the dossier as an all-employee information directory', async ({ page
   for (const employee of ['小羽', '老周', '阿帆', '小Q', '安澜', '墨游', '小E', '秘书']) {
     await expect(dock.getByRole('article').filter({ hasText: employee })).toBeVisible()
   }
-  await expect(dock.getByText('8', { exact: true }).first()).toBeVisible()
-  await expect(dock.getByText('32', { exact: true })).toBeVisible()
+  // 概览计数并入页头的一行说明，不再是三块独立的统计卡片。
+  await expect(dock.getByText(/8 名角色 · \d+ 项已验证技能 · \d+ 条真实事迹/)).toBeVisible()
 })
 
 test('keeps chat conversational while World Trace explains execution during and after a turn', async ({ page }) => {
