@@ -121,6 +121,12 @@ export class WorldKnowledgeConsolidationScheduler {
           // exactly where the last one stopped. A host that keeps no watermark
           // at all cannot tell, so it keeps the older, less precise rule
           // rather than re-walking every source on every scan.
+          //
+          // "No watermark" is not the same as "nothing to do": a job that
+          // finished before the source-version table existed, or one whose
+          // content has changed since, has an unknown coverage. Such a source
+          // is walked again from chunk 0 — never reported as finished from a
+          // row that predates the rules it would be read under.
           const tracksChunks = this.#repository.getKnowledgeSourceProgress !== undefined
           const progress = await this.#repository.getKnowledgeSourceProgress?.({ worldId: world.worldId, sourceType: source.sourceType, sourceId: source.sourceId })
           if (progress !== undefined && progress.processedChunks >= progress.chunkTotal) continue
@@ -135,8 +141,10 @@ export class WorldKnowledgeConsolidationScheduler {
           const fromCursor = progress === undefined ? 0 : Math.min(progress.processedChunks, progress.chunkTotal)
           // A window that completed without moving the watermark would be
           // re-queued forever. Leave the source visibly incomplete instead of
-          // spinning on it; the truth is already on the row.
-          if (job?.status === 'completed' && job.toCursor === revision && job.fromCursor === fromCursor) continue
+          // spinning on it; the truth is already on the row. This can only be
+          // said once a watermark exists — with none, the matching cursors are
+          // a coincidence of the old semantics, not evidence of coverage.
+          if (progress !== undefined && job?.status === 'completed' && job.toCursor === revision && job.fromCursor === fromCursor) continue
           const enqueued = await this.#service.enqueue({ workspaceId: world.workspaceId, worldId: world.worldId, sourceType: source.sourceType, sourceId: source.sourceId, fromCursor, toCursor: revision })
           // Enqueue is idempotent per window, so it can hand back a window that
           // already failed. That is a retry decision, not a fresh queue entry:
