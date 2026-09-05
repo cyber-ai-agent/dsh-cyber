@@ -41,58 +41,15 @@ export function saveDiscoveredModelsToCache(
   }
 }
 
+/**
+ * The conversation picker is a view of saved profiles, not a discovery catalog.
+ * Cached provider catalogs may outlive a removed connection; discovering a
+ * model does not configure it. Keep the cache argument for existing callers,
+ * but do not inspect it or manufacture selectable profiles from it.
+ */
 export function buildUnifiedModelList(
   configuredProfiles: readonly ModelProfile[],
-  discoveredCatalog: Record<string, CachedModelCatalog>,
+  _discoveredCatalog: Record<string, CachedModelCatalog>,
 ): ModelProfile[] {
-  const result: ModelProfile[] = [...configuredProfiles]
-  const existingModelIds = new Set(configuredProfiles.map((p) => p.modelId))
-
-  for (const profile of configuredProfiles) {
-    const cached = discoveredCatalog[profile.id] ?? discoveredCatalog[profile.baseUrl]
-    if (!cached || !Array.isArray(cached.models)) continue
-
-    for (const item of cached.models) {
-      if (!item.id || existingModelIds.has(item.id)) continue
-      existingModelIds.add(item.id)
-
-      const { contextWindow: _unusedContext, maxTokens: _unusedMaxTokens, ...baseSettings } = profile.settings
-      result.push({
-        id: `discovered:${profile.id}:${item.id}`,
-        workspaceId: profile.workspaceId,
-        displayName: item.displayName || item.id,
-        providerKind: profile.providerKind,
-        baseUrl: profile.baseUrl,
-        modelId: item.id,
-        api: profile.api,
-        isDefault: false,
-        // Inherit the base profile's provider connection so the synthetic
-        // model groups under the same named provider in the picker, instead
-        // of floating into an anonymous bucket.
-        ...(profile.providerId !== undefined ? { providerId: profile.providerId } : {}),
-        ...(profile.providerName !== undefined ? { providerName: profile.providerName } : {}),
-        ...((profile as ModelProfile & { credentialConfigured?: boolean }).credentialConfigured !== undefined
-          ? { credentialConfigured: (profile as ModelProfile & { credentialConfigured?: boolean }).credentialConfigured }
-          : { credentialConfigured: true }),
-        ...(profile.credentialEnvName !== undefined ? { credentialEnvName: profile.credentialEnvName } : {}),
-        settings: {
-          ...baseSettings,
-          ...(typeof item.contextLength === 'number' && item.contextLength >= 1_024 ? { contextWindow: item.contextLength } : {}),
-          ...(profile.providerId !== undefined ? { providerId: profile.providerId } : profile.settings?.providerId !== undefined ? { providerId: profile.settings.providerId } : {}),
-          // The provider label must be a provider's name. Falling back to the
-          // base profile's displayName let a MODEL name become a provider
-          // group in the picker - exactly what owners saw and distrusted.
-          ...((profile.providerName ?? (typeof profile.settings?.providerName === 'string' ? profile.settings.providerName : undefined)) !== undefined
-            ? { providerName: profile.providerName ?? (profile.settings?.providerName as string) }
-            : {}),
-          isDiscovered: true,
-          baseProfileId: profile.id,
-        },
-        createdAt: profile.createdAt,
-        updatedAt: profile.updatedAt,
-      } as ModelProfile)
-    }
-  }
-
-  return result
+  return [...configuredProfiles]
 }
