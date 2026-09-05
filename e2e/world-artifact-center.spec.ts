@@ -94,6 +94,18 @@ test('auto-registers real files from one BrowserRuntime run and keeps them isola
   const manifestPath = join(run!.workspacePath, '.dsh', 'artifacts', `${agentRunId}.json`)
   await expect(readFile(manifestPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
 
+  // With no manifest the registration is host evidence, not a time-window
+  // guess: the server censused the workspace either side of this exact run.
+  const evidencePath = join(stateRoot, 'worlds', encodeURIComponent(world.id), 'runs', 'evidence', `${agentRunId}.json`)
+  const evidence = JSON.parse(await readFile(evidencePath, 'utf8')) as {
+    files: Array<{ path: string; change: string; exclusive: boolean; sha256: string }>
+  }
+  expect(evidence.files.map((file) => file.path).sort()).toEqual([HTML_PATH, MARKDOWN_PATH].sort())
+  for (const file of evidence.files) {
+    expect(file, file.path).toMatchObject({ change: 'created', exclusive: true })
+    expect(file.sha256, file.path).toMatch(/^[0-9a-f]{64}$/)
+  }
+
   const filesRoot = join(stateRoot, 'worlds', encodeURIComponent(world.id), 'files')
   await expect(readFile(join(filesRoot, MARKDOWN_PATH), 'utf8')).resolves.toContain('# 运行交付说明')
   await expect(readFile(join(filesRoot, HTML_PATH), 'utf8')).resolves.toContain('<h1>运行预览页面</h1>')
@@ -130,6 +142,7 @@ test('auto-registers real files from one BrowserRuntime run and keeps them isola
   await center.getByRole('button', { name: `打开产物 ${MARKDOWN_TITLE}` }).click()
   const markdownDetail = page.getByRole('region', { name: `${MARKDOWN_TITLE}产物详情` })
   await expect(markdownDetail).toBeVisible()
+  await expect(markdownDetail.locator('.artifact-detail__evidence--proven')).toHaveText('宿主已核实落盘')
   const markdownReader = markdownDetail.locator('.artifact-markdown-reader')
   await expect(markdownReader.locator('h1')).toContainText('运行交付说明')
   await expect(markdownReader.locator('ul')).toContainText('一次真实角色运行回合')

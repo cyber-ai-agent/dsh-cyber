@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 
 import { isPathWithin, type WorldRoot } from './world-root-service.js'
@@ -160,15 +160,19 @@ export class AgentRunFileEvidenceService implements AgentRunFileEvidencePort, Ag
   async begin(input: { worldId: string; agentRunId: string; workspacePath: string }): Promise<AgentRunBracket | undefined> {
     try {
       const root = await this.#roots.ensure(input.worldId)
-      if (!isBracketableWorkspace(root, input.workspacePath)) return undefined
+      // The caller may still name the workspace through the operator's own
+      // symlink (a state root below `/var` on macOS); the World root is already
+      // canonical, so a lexical path would silently never match it.
+      const workspacePath = await realpath(input.workspacePath)
+      if (!isBracketableWorkspace(root, workspacePath)) return undefined
       safeRunSegment(input.agentRunId)
       const startedAtMs = this.#clock()
-      const census = await censusOf(input.workspacePath, this.#limits)
+      const census = await censusOf(workspacePath, this.#limits)
       this.#windowsFor(input.worldId).push({ agentRunId: input.agentRunId, startedAtMs })
       return {
         worldId: input.worldId,
         agentRunId: input.agentRunId,
-        workspacePath: input.workspacePath,
+        workspacePath,
         startedAtMs,
         baseline: census.entries,
         truncated: census.truncated,
