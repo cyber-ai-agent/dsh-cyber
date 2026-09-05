@@ -122,4 +122,37 @@ describe('WorldKnowledgeRepository', () => {
     expect(repository.listChunks(world.id, document.id)).toEqual([])
     expect(store.doctor()).toMatchObject({ ok: true, counts: { knowledgeDocumentsMissing: 0, knowledgeChunks: 0 } })
   })
+
+  it('reads a bounded chunk window in ordinal order and keeps it world-scoped', async () => {
+    const store = await database()
+    const workspace = store.createWorkspace({ name: '窗口工作区' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '窗口世界', templateId: 'personal-world' })
+    const other = store.createWorld({ workspaceId: workspace.id, name: '旁观世界', templateId: 'personal-world' })
+    const repository = new WorldKnowledgeRepository(store.database)
+    const document = repository.createDocument({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      relativePath: 'notes/long.md',
+      title: '长资料',
+      mimeType: 'text/markdown',
+      byteLength: 120,
+      sha256: digest('a'),
+      origin: 'paste',
+    })
+    repository.replaceChunks(world.id, document.id, Array.from({ length: 5 }, (_, ordinal) => ({
+      ordinal,
+      content: `第 ${ordinal + 1} 段`,
+      contentHash: digest('a'),
+    })))
+
+    expect(repository.listChunkWindow(world.id, document.id, { offset: 1, limit: 2 })).toEqual({
+      total: 5,
+      items: [expect.objectContaining({ ordinal: 1, content: '第 2 段' }), expect.objectContaining({ ordinal: 2, content: '第 3 段' })],
+    })
+    expect(repository.listChunkWindow(world.id, document.id, { offset: 4, limit: 8 }).items).toHaveLength(1)
+    // Past the end still reports the real total so a caller can say 共 5.
+    expect(repository.listChunkWindow(world.id, document.id, { offset: 9 })).toEqual({ total: 5, items: [] })
+    expect(repository.listChunkWindow(other.id, document.id)).toEqual({ total: 0, items: [] })
+    expect(() => repository.listChunkWindow(world.id, document.id, { offset: -1 })).toThrow(/non-negative integer/)
+  })
 })

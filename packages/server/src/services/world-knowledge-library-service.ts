@@ -34,7 +34,47 @@ export const WORLD_KNOWLEDGE_LIMITS = {
 
 export type KnowledgeOrigin = KnowledgeDocumentOrigin
 export type { KnowledgeChunk, KnowledgeCollection, KnowledgeDocument, KnowledgeDocumentOrigin, KnowledgeDocumentStatus, KnowledgeCollectionOrigin } from '@dsh-cyber/contracts'
-export type KnowledgeRepositoryPort = Pick<WorldKnowledgeRepository, 'listCollections' | 'getCollection' | 'upsertCollection' | 'listDocuments' | 'getDocument' | 'upsertDocument' | 'replaceChunks' | 'deleteDocument' | 'deleteCollection' | 'markMissing'>
+export type KnowledgeRepositoryPort = Pick<WorldKnowledgeRepository, 'listCollections' | 'getCollection' | 'upsertCollection' | 'listDocuments' | 'getDocument' | 'upsertDocument' | 'replaceChunks' | 'deleteDocument' | 'deleteCollection' | 'markMissing' | 'listChunkWindow'>
+
+/**
+ * The mime types this library actually turns into text.
+ *
+ * The parser writes one of these onto every document it indexes, so the set is
+ * the record of what was parsed — not a guess from a file extension. A source
+ * stored under any other mime type was never read as text, and the preview says
+ * so instead of inventing a format for it.
+ */
+const KNOWLEDGE_TEXT_MIME_TYPES: ReadonlySet<string> = new Set(['text/markdown', 'text/plain', 'application/json', 'application/pdf'])
+
+export const KNOWLEDGE_PREVIEW_LIMITS = {
+  defaultParagraphs: 8,
+  maxParagraphs: 40,
+  /** A window is bounded by characters too: 40 long chunks are not a preview. */
+  maxChars: 24_000,
+} as const
+
+export interface KnowledgeDocumentPreviewParagraph {
+  /** Position in the document's chunk projection, counted from zero. */
+  ordinal: number
+  text: string
+}
+
+export interface KnowledgeDocumentPreview {
+  documentId: string
+  worldId: string
+  title: string
+  relativePath: string
+  mimeType: string
+  status: KnowledgeDocumentStatus
+  /** False when the library holds no extracted text for this source at all. */
+  previewable: boolean
+  reason?: 'unsupported'
+  total: number
+  offset: number
+  /** Absent when the window reaches the end of what was extracted. */
+  nextOffset?: number
+  paragraphs: KnowledgeDocumentPreviewParagraph[]
+}
 
 export interface WorldKnowledgeLibraryServiceOptions {
   repository: KnowledgeRepositoryPort
@@ -280,6 +320,59 @@ export class WorldKnowledgeLibraryService {
     return this.#search.search({ worldId, query, limit, maxChars: 6_000 })
   }
 
+  /**
+   * One window of a document's extracted body.
+   *
+   * The text comes from the chunk projection this library wrote when it parsed
+   * the source, so a PDF or a pasted note is shown as the characters that were
+   * actually extracted. The source file is never re-read here: decoding stored
+   * bytes on the way to a screen is how a binary ends up rendered as mojibake,
+   * and guessing a format from an extension is how an Office file ends up
+   * announced as a PDF. A source with no extracted text is refused, not
+   * approximated.
+   */
+  previewDocument(
+    worldId: string,
+    documentId: string,
+    window: { offset?: number; limit?: number } = {},
+  ): KnowledgeDocumentPreview {
+    const document = this.#repository.getDocument(worldId, documentId)
+    if (document === undefined) throw notFound('knowledge_document_not_found', '知识文档不存在')
+    const head = {
+      documentId: document.id,
+      worldId: document.worldId,
+      title: document.title,
+      relativePath: document.relativePath,
+      mimeType: document.mimeType,
+      status: document.status,
+      offset: 0,
+    }
+    if (!KNOWLEDGE_TEXT_MIME_TYPES.has(document.mimeType.split(';')[0]?.trim().toLowerCase() ?? '')) {
+      return { ...head, previewable: false, reason: 'unsupported', total: 0, paragraphs: [] }
+    }
+    const offset = boundedPreviewNumber(window.offset ?? 0, 0, Number.MAX_SAFE_INTEGER, 'knowledge_preview_offset_invalid', '正文预览起点无效')
+    const limit = boundedPreviewNumber(window.limit ?? KNOWLEDGE_PREVIEW_LIMITS.defaultParagraphs, 1, KNOWLEDGE_PREVIEW_LIMITS.maxParagraphs, 'knowledge_preview_limit_invalid', '正文预览段数超出范围')
+    const { items, total } = this.#repository.listChunkWindow(worldId, document.id, { offset, limit })
+    const paragraphs: KnowledgeDocumentPreviewParagraph[] = []
+    let characters = 0
+    for (const [index, chunk] of items.entries()) {
+      // The character budget can end a window early. Reporting the paragraphs
+      // that were actually returned keeps the range the reader is shown true.
+      if (index > 0 && characters + chunk.content.length > KNOWLEDGE_PREVIEW_LIMITS.maxChars) break
+      paragraphs.push({ ordinal: offset + index, text: chunk.content.slice(0, KNOWLEDGE_PREVIEW_LIMITS.maxChars) })
+      characters += chunk.content.length
+    }
+    const nextOffset = offset + paragraphs.length
+    return {
+      ...head,
+      previewable: true,
+      total,
+      offset,
+      ...(nextOffset < total && paragraphs.length > 0 ? { nextOffset } : {}),
+      paragraphs,
+    }
+  }
+
   async #parse(bytes: Buffer, fileName: string, mimeType?: string, title?: string): Promise<ParsedKnowledgeDocument> {
     try { return await parseKnowledgeDocument({ bytes, fileName, ...(mimeType === undefined ? {} : { mimeType }), ...(title === undefined ? {} : { title }) }) }
     catch (error) {
@@ -508,6 +601,10 @@ function toPosix(value: string): string { return value.replaceAll('\\', '/') }
 function sha256(value: Buffer): string { return createHash('sha256').update(value).digest('hex') }
 function toChunk(id: string, worldId: string, documentId: string, value: ParsedKnowledgeDocument['chunks'][number], createdAt: string): KnowledgeChunk { return { id, worldId, documentId, ordinal: value.ordinal, content: value.content, contentHash: sha256(Buffer.from(value.content, 'utf8')), startOffset: value.startOffset, endOffset: value.endOffset, createdAt } }
 async function writeAtomically(destination: string, bytes: Buffer): Promise<void> { const temporary = `${destination}.tmp-${randomUUID()}`; await mkdir(dirname(destination), { recursive: true }); const handle = await open(temporary, 'wx', 0o600); try { await handle.writeFile(bytes); await handle.sync() } finally { await handle.close() }; await rename(temporary, destination) }
+function boundedPreviewNumber(value: number, min: number, max: number, code: string, message: string): number {
+  if (!Number.isSafeInteger(value) || value < min || value > max) throw invalid(code, message)
+  return value
+}
 function invalid(code: string, message: string): ServiceError { return new ServiceError('invalid', code, message) }
 function forbidden(code: string, message: string): ServiceError { return new ServiceError('forbidden', code, message) }
 function notFound(code: string, message: string): ServiceError { return new ServiceError('not-found', code, message) }
