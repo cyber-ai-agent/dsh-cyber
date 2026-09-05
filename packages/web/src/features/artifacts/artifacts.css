@@ -60,6 +60,9 @@
 .artifact-detail__actions { display: flex; flex-wrap: wrap; gap: 7px; }
 .artifact-detail__actions .artifact-button { min-height: 44px; }
 .artifact-detail__status { color: var(--accent-strong) !important; }
+.artifact-detail__evidence { margin: 0 !important; font-size: 12px !important; line-height: 1.5; }
+.artifact-detail__evidence--proven { color: var(--success) !important; }
+.artifact-detail__evidence--unproven { color: var(--text-muted) !important; }
 .artifact-detail__knowledge-status { margin: 0; color: var(--text-muted); font-size: 13px; line-height: 1.5; }
 .artifact-detail__knowledge-status--pending, .artifact-detail__knowledge-status--queued { color: var(--accent-strong); }
 .artifact-detail__knowledge-status--success { color: var(--success); }

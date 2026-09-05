@@ -37,7 +37,7 @@ export function registerWorldArtifactRoutes(router: Router, dependencies: WorldA
     const worldId = params[0]!
     assertWorld(store, worldId)
     await access.assertUnlocked(worldId, request)
-    writeJson(response, 200, artifacts.get(worldId, params[1]!))
+    writeJson(response, 200, await artifacts.describe(worldId, params[1]!))
   })
 
   router.post(/^\/api\/worlds\/([^/]+)\/artifacts\/publish$/, async ({ request, response, params }) => {

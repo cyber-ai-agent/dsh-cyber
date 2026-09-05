@@ -70,6 +70,45 @@ export interface WorldArtifactRunProvenance {
   agentRunId?: string
 }
 
+/**
+ * How strongly the Host itself can bind one published version to the Run named
+ * on it.  Only `host-observed` may be presented to a user as evidence; every
+ * other grade is a description of what the Host could *not* prove.
+ *
+ * - `host-observed`  the Host bracketed the Run, saw exactly this content land
+ *                    inside the bracket, and no other Run's bracket covered the
+ *                    write instant.
+ * - `shared-window`  the Host saw the write, but another Run was executing at
+ *                    the same instant, or the bytes changed again afterwards.
+ * - `manifest-declared` the Run asked for the file in its manifest and the Host
+ *                    verified and copied a real file, but never observed a write.
+ * - `unproven-window` the file only matched the Run's start/completion window.
+ * - `owner-published` the user or the Host published it; no Run attribution.
+ * - `unknown`        no Host record survives for this publication.
+ */
+export type WorldArtifactEvidenceGrade =
+  | 'host-observed'
+  | 'shared-window'
+  | 'manifest-declared'
+  | 'unproven-window'
+  | 'owner-published'
+  | 'unknown'
+
+/** Per-version attribution evidence, derived from Host-owned run records. */
+export interface WorldArtifactVersionEvidence {
+  version: number
+  grade: WorldArtifactEvidenceGrade
+  /** True only for `host-observed`. A surface must not claim proof otherwise. */
+  proven: boolean
+  observedAt?: IsoTimestamp
+  /** False when the published bytes differ from what the Host observed. */
+  contentMatchesObservation?: boolean
+  /** Other Runs whose brackets covered the same write instant. */
+  concurrentRunIds?: string[]
+  /** True when the Host workspace scan hit its bound and could not cover it all. */
+  scanTruncated?: boolean
+}
+
 /** World-scoped registry query. Unknown fields are intentionally not accepted. */
 export interface WorldArtifactFilter {
   query?: string

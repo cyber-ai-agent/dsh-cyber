@@ -134,7 +134,14 @@ describe('WorldArtifactService', () => {
     })
     expect(contribution).toMatchObject({
       artifactRefs: [expect.any(String)],
-      messageMetadata: { artifactCount: 1, completionOutcome: 'artifacts-published', artifactDiscovery: 'run-window' },
+      messageMetadata: {
+        artifactCount: 1,
+        completionOutcome: 'artifacts-published',
+        artifactDiscovery: 'run-window',
+        // The time window is a guess, so it is labelled as one everywhere.
+        artifactEvidence: 'unproven-window',
+        unprovenArtifactCount: 1,
+      },
     })
     const artifacts = fixture.service.list(fixture.world.id)
     expect(artifacts).toHaveLength(1)
@@ -158,7 +165,9 @@ describe('WorldArtifactService', () => {
       runStartedAt: new Date(Date.now() - 5_000).toISOString(),
       runCompletedAt: new Date(Date.now() + 5_000).toISOString(),
     })
-    expect(contribution).toEqual({ messageMetadata: { artifactCount: 0, completionOutcome: 'no-artifact' } })
+    expect(contribution).toEqual({
+      messageMetadata: { artifactCount: 0, completionOutcome: 'no-artifact', artifactDiscovery: 'manifest', artifactEvidence: 'none' },
+    })
     expect(fixture.service.list(fixture.world.id)).toEqual([])
   })
 

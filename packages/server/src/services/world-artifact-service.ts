@@ -12,10 +12,17 @@ import type {
   WorldArtifactPublication,
   WorldArtifactRunProvenance,
   WorldArtifactVersion,
+  WorldArtifactVersionEvidence,
 } from '@dsh-cyber/contracts'
 import { WorldArtifactRepository } from '@dsh-cyber/persistence'
 import type { AgentRunCompletionContext, AgentRunCompletionContribution, AgentRunCompletionHook } from '@dsh-cyber/orchestration'
 
+import type {
+  AgentRunFileEvidenceReader,
+  AgentRunFileEvidenceRecord,
+  AgentRunFileObservation,
+  AgentRunPublicationEntry,
+} from './agent-run-file-evidence.js'
 import { ServiceError } from './service-error.js'
 import { isPathWithin, type WorldRoot, WorldRootService } from './world-root-service.js'
 import { resolveCanonicalPathWithoutSymlinkHops, SymlinkHopError } from './canonical-path.js'
@@ -41,11 +48,15 @@ export interface WorldArtifactServiceOptions {
   clock?: () => string
   /** Called after registry mutation so the single world live stream can announce it. */
   onChanged?: (worldId: string, payload: JsonObject) => void
+  /** Host-owned record of what each AgentRun actually wrote into the workspace. */
+  evidence?: AgentRunFileEvidenceReader
 }
 
 export interface WorldArtifactView {
   artifact: WorldArtifact
   versions: WorldArtifactVersion[]
+  /** Present only on `describe`, which reads the Host-owned run records. */
+  evidence?: WorldArtifactVersionEvidence[]
 }
 
 export interface PublishWorkspaceArtifactInput {
@@ -116,12 +127,14 @@ export class WorldArtifactService {
   readonly #roots: WorldRootService
   readonly #clock: () => string
   readonly #onChanged: ((worldId: string, payload: JsonObject) => void) | undefined
+  readonly #evidence: AgentRunFileEvidenceReader | undefined
 
   constructor(options: WorldArtifactServiceOptions) {
     this.#repository = options.repository
     this.#roots = options.roots
     this.#clock = options.clock ?? (() => new Date().toISOString())
     this.#onChanged = options.onChanged
+    this.#evidence = options.evidence
   }
 
   list(worldId: string, filter: WorldArtifactFilter = {}): WorldArtifact[] {
@@ -284,8 +297,18 @@ export class WorldArtifactService {
   }
 
   /**
-   * Read only the exact run manifest injected by the host.  No directory scan
-   * or assistant-text inference is performed here.
+   * Decide what one AgentRun produced, in strict order of how much the Host can
+   * actually prove.
+   *
+   * 1. The run's exact manifest, when it wrote one - a request, still verified
+   *    file by file before anything is copied.
+   * 2. Otherwise the Host's own bracketed observation of the workspace, which is
+   *    the only source that can bind a file to a run under concurrency.
+   * 3. Otherwise the run start/completion time window, which is a guess. Its
+   *    results are always labelled unproven and never reported as evidence.
+   *
+   * An empty, untruncated observation is a positive fact - the run wrote
+   * nothing - so it must not fall through to the time window.
    */
   async publishAgentRun(context: AgentRunCompletionContext): Promise<AgentRunCompletionContribution> {
     const root = await this.#roots.ensure(context.worldId)
@@ -293,10 +316,31 @@ export class WorldArtifactService {
     if (workspacePath === undefined) return noArtifactContribution()
     const manifestPath = this.#roots.publicationManifestPathAt(workspacePath, context.agentRunId)
     const manifestRead = await readExactManifest(workspacePath, manifestPath)
-    const entries = manifestRead.found
-      ? manifestRead.manifest.artifacts
-      : await discoverRunArtifactEntries(workspacePath, context.runStartedAt, context.runCompletedAt)
+    const observed = await this.#evidence?.read(context.worldId, context.agentRunId)
+    // A truncated census may report a pre-existing file as created, so it can
+    // support no per-file claim at all; it is kept only to say so out loud.
+    const observations = observed !== undefined && !observed.truncated ? observed.files : undefined
+    let discovery: 'manifest' | 'host-evidence' | 'run-window' = 'run-window'
+    let entries: WorldArtifactPublishManifestEntry[]
+    let windowScan: RunWindowScan | undefined
+    if (manifestRead.found) {
+      discovery = 'manifest'
+      entries = manifestRead.manifest.artifacts
+    } else if (observations !== undefined) {
+      discovery = 'host-evidence'
+      entries = observations.map((observation) => ({
+        path: observation.path,
+        title: basename(observation.path),
+        kind: artifactKindFromPath(observation.path),
+      }))
+    } else {
+      windowScan = await discoverRunArtifactEntries(workspacePath, context.runStartedAt, context.runCompletedAt)
+      entries = windowScan.entries
+    }
+
     const artifactRefs: string[] = []
+    const failures: Array<{ path: string; code: string }> = []
+    const decisions: AgentRunPublicationEntry[] = []
     for (const entry of entries) {
       const sourceRelativePath = normalizeRelativePath(entry.path, 'manifest path')
       const sourcePath = join(workspacePath, ...sourceRelativePath.split('/'))
@@ -304,39 +348,89 @@ export class WorldArtifactService {
       if (!worldRelativePath || worldRelativePath.startsWith('..')) {
         throw conflict('artifact_path_invalid', '产物路径不在当前世界工作区内')
       }
-      const fingerprint = await inspectSource(root.filesPath, sourcePath)
       // The run and source path, rather than a random artifact id, define one
       // logical publication. If the process dies after the atomic move but
       // before SQLite commits, retrying finds the same target and repairs the
       // registry instead of leaving an orphaned version.
       const idempotencyKey = `agent-run:v1:${context.agentRunId}:${worldRelativePath}`
-      const publication = await this.#publishSource(root, sourcePath, sourceRelativePath, {
-        workspaceId: context.workspaceId,
-        worldId: context.worldId,
-        sourceRelativePath,
-        title: entry.title,
-        kind: entry.kind,
-        ...(entry.description === undefined ? {} : { description: entry.description }),
-        ...(entry.entrypoint === undefined ? {} : { entrypoint: entry.entrypoint }),
-        createdByKind: 'employee',
-        createdById: context.employeeId,
-        employeeId: context.employeeId,
-        sessionId: context.sessionId,
-        workTurnId: context.workTurnId,
-        agentRunId: context.agentRunId,
-        artifactId: stableArtifactId(context.worldId, context.agentRunId, worldRelativePath),
-        idempotencyKey,
-      })
+      let publication: WorldArtifactPublication
+      try {
+        publication = await this.#publishSource(root, sourcePath, sourceRelativePath, {
+          workspaceId: context.workspaceId,
+          worldId: context.worldId,
+          sourceRelativePath,
+          title: entry.title,
+          kind: entry.kind,
+          ...(entry.description === undefined ? {} : { description: entry.description }),
+          ...(entry.entrypoint === undefined ? {} : { entrypoint: entry.entrypoint }),
+          createdByKind: 'employee',
+          createdById: context.employeeId,
+          employeeId: context.employeeId,
+          sessionId: context.sessionId,
+          workTurnId: context.workTurnId,
+          agentRunId: context.agentRunId,
+          artifactId: stableArtifactId(context.worldId, context.agentRunId, worldRelativePath),
+          idempotencyKey,
+        })
+      } catch (error) {
+        // One unusable entry must not discard the deliverables beside it, but a
+        // containment violation still rejects the whole manifest: it means the
+        // request itself is untrustworthy, not that one file went missing.
+        if (!(error instanceof ServiceError) || HARD_PUBLICATION_FAILURES.has(error.code)) throw error
+        failures.push({ path: sourceRelativePath, code: error.code })
+        continue
+      }
       artifactRefs.push(publication.artifact.id)
+      decisions.push(publicationDecision(publication, sourceRelativePath, entry.kind, observations, discovery, observed?.truncated === true))
     }
-    return artifactRefs.length === 0 ? noArtifactContribution() : {
-      artifactRefs: [...new Set(artifactRefs)],
-      messageMetadata: {
-        artifactCount: artifactRefs.length,
-        completionOutcome: 'artifacts-published',
-        artifactDiscovery: manifestRead.found ? 'manifest' : 'run-window',
-      },
+    if (decisions.length > 0) {
+      await this.#evidence?.recordPublications({ worldId: context.worldId, agentRunId: context.agentRunId, entries: decisions })
+        .catch(() => undefined)
     }
+    return completionContribution({
+      artifactRefs,
+      decisions,
+      failures,
+      discovery,
+      observed,
+      ...(windowScan === undefined ? {} : { windowScan }),
+    })
+  }
+
+  /**
+   * The registry view plus what the Host can prove about each version's origin.
+   *
+   * `get` stays a pure registry read; the grade lives in Host-owned run records
+   * on disk, so only this variant touches them.
+   */
+  async describe(worldId: string, artifactId: string): Promise<WorldArtifactView> {
+    const view = this.get(worldId, artifactId)
+    const decisions = new Map<string, AgentRunPublicationEntry[]>()
+    const evidence: WorldArtifactVersionEvidence[] = []
+    for (const version of view.versions) {
+      if (version.agentRunId === undefined) {
+        evidence.push({ version: version.version, grade: view.artifact.createdByKind === 'owner' ? 'owner-published' : 'unknown', proven: false })
+        continue
+      }
+      if (!decisions.has(version.agentRunId)) {
+        const record = await this.#evidence?.readPublications(worldId, version.agentRunId).catch(() => undefined)
+        decisions.set(version.agentRunId, record?.entries ?? [])
+      }
+      const decision = decisions.get(version.agentRunId)!
+        .find((candidate) => candidate.artifactId === version.artifactId && candidate.version === version.version)
+      evidence.push(decision === undefined
+        ? { version: version.version, grade: 'unknown', proven: false }
+        : {
+            version: version.version,
+            grade: decision.grade,
+            proven: decision.grade === 'host-observed',
+            ...(decision.observedAtMs === undefined ? {} : { observedAt: new Date(decision.observedAtMs).toISOString() }),
+            ...(decision.contentMatchesObservation === undefined ? {} : { contentMatchesObservation: decision.contentMatchesObservation }),
+            ...(decision.concurrentRunIds === undefined || decision.concurrentRunIds.length === 0 ? {} : { concurrentRunIds: decision.concurrentRunIds }),
+            ...(decision.scanTruncated === undefined ? {} : { scanTruncated: decision.scanTruncated }),
+          })
+    }
+    return { ...view, evidence }
   }
 
   /** Safe implementation of the provider-neutral orchestration seam. */
@@ -585,28 +679,137 @@ function noArtifactContribution(): AgentRunCompletionContribution {
   return { messageMetadata: { artifactCount: 0, completionOutcome: 'no-artifact' } }
 }
 
+/**
+ * Failures that reject the entire publication request instead of one entry.
+ * They mean the request escaped the World, not that one deliverable is broken.
+ */
+const HARD_PUBLICATION_FAILURES = new Set(['artifact_path_invalid', 'artifact_symlink_rejected', 'artifact_workspace_invalid'])
+
+interface RunWindowScan {
+  entries: WorldArtifactPublishManifestEntry[]
+  candidateCount: number
+  truncated: boolean
+}
+
+/** One publication's grade, decided while the Host still holds the observation. */
+function publicationDecision(
+  publication: WorldArtifactPublication,
+  sourceRelativePath: string,
+  kind: WorldArtifactKind,
+  observations: readonly AgentRunFileObservation[] | undefined,
+  discovery: 'manifest' | 'host-evidence' | 'run-window',
+  scanTruncated: boolean,
+): AgentRunPublicationEntry {
+  const observation = observations === undefined ? undefined : matchObservation(observations, sourceRelativePath, kind)
+  if (observation === undefined) {
+    return {
+      artifactId: publication.artifact.id,
+      version: publication.version.version,
+      sourceRelativePath,
+      grade: discovery === 'manifest' ? 'manifest-declared' : 'unproven-window',
+      ...(scanTruncated ? { scanTruncated } : {}),
+    }
+  }
+  // A project digest covers a whole tree, so only a single file's published
+  // bytes can be compared against what the Host saw land.
+  const contentMatchesObservation = kind === 'project' ? undefined : observation.sha256 === publication.version.sha256
+  const proven = observation.exclusive && contentMatchesObservation !== false
+  return {
+    artifactId: publication.artifact.id,
+    version: publication.version.version,
+    sourceRelativePath,
+    grade: proven ? 'host-observed' : 'shared-window',
+    observedAtMs: observation.modifiedAtMs,
+    ...(contentMatchesObservation === undefined ? {} : { contentMatchesObservation }),
+    ...(observation.concurrentRunIds.length === 0 ? {} : { concurrentRunIds: observation.concurrentRunIds }),
+  }
+}
+
+function matchObservation(
+  observations: readonly AgentRunFileObservation[],
+  sourceRelativePath: string,
+  kind: WorldArtifactKind,
+): AgentRunFileObservation | undefined {
+  if (kind !== 'project') return observations.find((candidate) => candidate.path === sourceRelativePath)
+  const inside = observations.filter((candidate) => candidate.path.startsWith(`${sourceRelativePath}/`))
+  if (inside.length === 0) return undefined
+  // A project is proven only when every observed write inside it is proven.
+  const exclusive = inside.every((candidate) => candidate.exclusive)
+  const concurrentRunIds = [...new Set(inside.flatMap((candidate) => candidate.concurrentRunIds))]
+  const newest = inside.reduce((left, right) => right.modifiedAtMs > left.modifiedAtMs ? right : left)
+  return { ...newest, exclusive, concurrentRunIds }
+}
+
+/** The weakest grade in the batch: a list is only as trustworthy as its worst row. */
+const EVIDENCE_ORDER: readonly AgentRunPublicationEntry['grade'][] = ['unproven-window', 'shared-window', 'manifest-declared', 'host-observed']
+
+function completionContribution(input: {
+  artifactRefs: string[]
+  decisions: AgentRunPublicationEntry[]
+  failures: Array<{ path: string; code: string }>
+  discovery: 'manifest' | 'host-evidence' | 'run-window'
+  observed: AgentRunFileEvidenceRecord | undefined
+  windowScan?: RunWindowScan
+}): AgentRunCompletionContribution {
+  const grades = input.decisions.map((decision) => decision.grade)
+  const weakest = grades.length === 0
+    ? 'none'
+    : EVIDENCE_ORDER.find((grade) => grades.includes(grade)) ?? 'unproven-window'
+  const unprovenCount = grades.filter((grade) => grade !== 'host-observed').length
+  const hostSaysNothingLanded = input.observed !== undefined && !input.observed.truncated
+  const messageMetadata: JsonObject = {
+    artifactCount: input.artifactRefs.length,
+    completionOutcome: input.artifactRefs.length > 0
+      ? 'artifacts-published'
+      : hostSaysNothingLanded && input.discovery === 'host-evidence' ? 'text-only' : 'no-artifact',
+    artifactDiscovery: input.discovery,
+    artifactEvidence: weakest,
+    ...(unprovenCount === 0 ? {} : { unprovenArtifactCount: unprovenCount }),
+    ...(input.failures.length === 0 ? {} : { artifactFailureCount: input.failures.length, artifactFailures: input.failures }),
+    ...(input.observed?.truncated === true
+      ? { evidenceScanTruncated: true, evidenceScanLimit: input.observed.entryLimit }
+      : {}),
+    ...(input.windowScan?.truncated === true
+      ? { discoveryTruncated: true, discoveryCandidateCount: input.windowScan.candidateCount }
+      : {}),
+  }
+  return input.artifactRefs.length === 0
+    ? { messageMetadata }
+    : { artifactRefs: [...new Set(input.artifactRefs)], messageMetadata }
+}
+
 const RUN_ARTIFACT_TIME_TOLERANCE_MS = 2_000
 
+/**
+ * The unproven fallback. It never throws the whole run away: an oversized
+ * candidate set is reported so the user can see the host refused to guess.
+ */
 async function discoverRunArtifactEntries(
   workspacePath: string,
   runStartedAt: string | undefined,
   runCompletedAt: string | undefined,
-): Promise<WorldArtifactPublishManifestEntry[]> {
+): Promise<RunWindowScan> {
   const startedAt = Date.parse(runStartedAt ?? '')
   const completedAt = Date.parse(runCompletedAt ?? '')
-  if (!Number.isFinite(startedAt) || !Number.isFinite(completedAt) || completedAt < startedAt) return []
+  if (!Number.isFinite(startedAt) || !Number.isFinite(completedAt) || completedAt < startedAt) {
+    return { entries: [], candidateCount: 0, truncated: false }
+  }
   const files = (await collectProjectFiles(workspacePath, 0)).filter((file) =>
     file.modifiedAtMs >= startedAt - RUN_ARTIFACT_TIME_TOLERANCE_MS &&
     file.modifiedAtMs <= completedAt + RUN_ARTIFACT_TIME_TOLERANCE_MS,
   )
   if (files.length > WORLD_ARTIFACT_LIMITS.maxManifestEntries) {
-    throw invalid('artifact_auto_discovery_too_many', `本轮修改了超过 ${WORLD_ARTIFACT_LIMITS.maxManifestEntries} 个文件，请使用产物 manifest 明确发布范围`)
+    return { entries: [], candidateCount: files.length, truncated: true }
   }
-  return files.map((file) => ({
-    path: file.relativePath,
-    title: basename(file.relativePath),
-    kind: artifactKindFromPath(file.relativePath),
-  }))
+  return {
+    entries: files.map((file) => ({
+      path: file.relativePath,
+      title: basename(file.relativePath),
+      kind: artifactKindFromPath(file.relativePath),
+    })),
+    candidateCount: files.length,
+    truncated: false,
+  }
 }
 
 function artifactKindFromPath(path: string): WorldArtifactKind {
