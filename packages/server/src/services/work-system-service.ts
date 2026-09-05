@@ -20,6 +20,21 @@ const EXECUTABLE_STATUSES: readonly WorkTaskStatus[] = ['draft', 'changes-reques
  */
 const UNSETTLED_SOURCE_TURN: readonly WorkTurnStatus[] = ['queued', 'running', 'waiting-approval']
 
+/** What the task list asks for: the default view, one status, or everything. */
+export type WorkTaskListScope = WorkTaskStatus | 'all'
+
+/**
+ * The statuses a task can be cancelled from.
+ *
+ * Every one of them is a task that will not reach a useful end on its own:
+ * nothing is executing, and the owner is the only thing that would move it.
+ * `running` and `waiting-approval` are deliberately absent — an execution owns
+ * that row and settles it itself, so cancelling underneath it would race a turn
+ * still in flight. So is `waiting-review`, which already has a deliverable and
+ * is ended by a review decision, and `completed`, which is history.
+ */
+const CANCELLABLE: readonly WorkTaskStatus[] = ['draft', 'planning', 'ready', 'changes-requested', 'failed', 'recovery-required']
+
 export class WorkSystemService {
   readonly #store: SqliteStore
   readonly #repository: WorkSystemRepository
@@ -69,7 +84,39 @@ export class WorkSystemService {
     }))
   }
 
-  list(worldId: string, status?: WorkTaskStatus): WorkTask[] { return this.#repository.listTasks(worldId, status) }
+  /**
+   * The world's tasks, with cancelled ones out of the default view.
+   *
+   * A cancelled task is kept, not deleted, so it has to stay reachable: asking
+   * for `cancelled` or for `all` shows it again. This is the same shape the
+   * world list uses for archived worlds — a deliberate second view, never mixed
+   * into the main one.
+   */
+  list(worldId: string, scope?: WorkTaskListScope): WorkTask[] {
+    if (scope === 'all') return this.#repository.listTasks(worldId)
+    if (scope !== undefined) return this.#repository.listTasks(worldId, scope)
+    return this.#repository.listTasks(worldId).filter((task) => task.status !== 'cancelled')
+  }
+
+  /**
+   * The owner's way out of a task that should not have been created.
+   *
+   * Cancel, not delete: the row keeps its plans, runs, deliverables and reviews
+   * and stays readable by id. It only leaves the default list. A task an
+   * execution is holding refuses instead of racing it, and so does one that
+   * another action already settled — including a second cancel, which is a
+   * refusal rather than a quiet success, because it means the caller was
+   * looking at a stale view.
+   */
+  cancel(taskId: string): WorkTaskDetail {
+    const task = this.#repository.requireTask(taskId)
+    if (!CANCELLABLE.includes(task.status)) throw new ServiceError('conflict', 'work_task_not_cancellable', cancelRefusal(task.status))
+    return this.#uow.run(() => {
+      this.#repository.transitionTask(task.id, [task.status], 'cancelled')
+      return this.#repository.detail(task.id)
+    })
+  }
+
   taskForSourceTurn(workTurnId: string): WorkTask | undefined { return this.#repository.getTaskBySourceWorkTurn(workTurnId) }
   detail(taskId: string): WorkTaskDetail { return this.#repository.detail(taskId) }
   currentWork(employeeId: string): WorkTaskDetail[] { return this.#repository.currentWork(employeeId) }
@@ -171,5 +218,21 @@ export class WorkSystemService {
   #requireEmployee(worldId: string, employeeId: string): void {
     const employee = this.#store.getEmployee(employeeId)
     if (employee === undefined || employee.worldId !== worldId || employee.status === 'archived') throw new Error(`任务角色不可用：${employeeId}`)
+  }
+}
+
+function cancelRefusal(status: WorkTaskStatus): string {
+  switch (status) {
+    case 'running':
+    case 'waiting-approval':
+      return '任务正在执行，无法取消。等这次执行结束后再处理。'
+    case 'waiting-review':
+      return '任务已经产出交付，请用验收结束它，而不是取消。'
+    case 'completed':
+      return '任务已完成，不能取消。'
+    case 'cancelled':
+      return '任务已经取消。'
+    default:
+      return `任务当前状态无法取消：${status}`
   }
 }

@@ -10,7 +10,7 @@ import { HttpError } from '../http/errors.js'
 import type { Router } from '../http/router.js'
 import { readJson } from '../http/request.js'
 import { writeJson } from '../http/response.js'
-import type { WorkSystemService } from '../services/work-system-service.js'
+import type { WorkSystemService, WorkTaskListScope } from '../services/work-system-service.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
 import { requireWorldAcceptingWork } from '../services/world-work-guard.js'
 
@@ -23,10 +23,12 @@ export function registerWorkSystemRoutes(router: Router, dependencies: { store: 
     const world = store.getWorld(worldId)
     if (world === undefined) throw new HttpError(404, 'world_not_found', '世界不存在')
     await access.assertUnlocked(worldId, request)
+    // No filter is the default view: everything except the cancelled tasks,
+    // which stay reachable through `cancelled` or `all`.
     const raw = url.searchParams.get('status')
-    const status = raw === null ? undefined : TASK_STATUSES.find((item) => item === raw)
-    if (raw !== null && status === undefined) throw new HttpError(422, 'task_status_invalid', '任务状态无效')
-    writeJson(response, 200, { items: work.list(worldId, status) })
+    const scope: WorkTaskListScope | undefined = raw === null ? undefined : raw === 'all' ? 'all' : TASK_STATUSES.find((item) => item === raw)
+    if (raw !== null && scope === undefined) throw new HttpError(422, 'task_status_invalid', '任务状态无效')
+    writeJson(response, 200, { items: work.list(worldId, scope) })
   })
 
   router.post(/^\/api\/worlds\/([^/]+)\/tasks$/, async ({ request, response, params }) => {
@@ -53,6 +55,16 @@ export function registerWorkSystemRoutes(router: Router, dependencies: { store: 
     const coordinatorEmployeeId = typeof body.coordinatorEmployeeId === 'string' && body.coordinatorEmployeeId.trim() ? body.coordinatorEmployeeId.trim() : undefined
     const result = await work.execute(detail.task.id, { employeeIds, ...(coordinatorEmployeeId === undefined ? {} : { coordinatorEmployeeId }) })
     writeJson(response, 200, result)
+  })
+
+  // Cancel, not delete: the task keeps its history and stays readable here, it
+  // only leaves the default list. Unlike execute this starts no work, so an
+  // archived world may still be tidied; a task an execution is holding refuses
+  // with a 409 instead of racing it.
+  router.post(/^\/api\/tasks\/([^/]+)\/cancel$/, async ({ request, response, params }) => {
+    const detail = safeDetail(work, params[0]!)
+    await access.assertUnlocked(detail.task.worldId, request)
+    writeJson(response, 200, work.cancel(detail.task.id))
   })
 
   router.post(/^\/api\/tasks\/([^/]+)\/deliverables$/, async ({ request, response, params }) => {
