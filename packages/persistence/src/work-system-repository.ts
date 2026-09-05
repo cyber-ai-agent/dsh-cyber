@@ -14,9 +14,12 @@ import type {
   WorkTaskDetail,
   WorkTaskFromSource,
   WorkTaskPriority,
+  WorkTaskSourceTurn,
   WorkTaskStatus,
+  WorkTurnStatus,
   TaskCollaborationPlan,
   AgentRun,
+  AgentRunStatus,
 } from '@dsh-cyber/contracts'
 
 import { EntityNotFoundError, PersistenceError } from './errors.js'
@@ -216,8 +219,10 @@ export class WorkSystemRepository {
 
   detail(taskId: string): WorkTaskDetail {
     const task = this.requireTask(taskId)
+    const sourceTurn = this.#sourceTurn(task)
     return {
       task,
+      ...(sourceTurn === undefined ? {} : { sourceTurn }),
       plans: this.#database.prepare('SELECT * FROM task_plan_revisions WHERE task_id = ? ORDER BY revision').all(taskId).map(mapPlan),
       steps: this.#database.prepare(`SELECT step.* FROM task_plan_steps step JOIN task_plan_revisions plan ON plan.id = step.plan_revision_id WHERE plan.task_id = ? ORDER BY plan.revision, step.ordinal`).all(taskId).map(mapStep),
       assignments: this.#database.prepare('SELECT * FROM task_assignments WHERE task_id = ? ORDER BY created_at, id').all(taskId).map(mapAssignment),
@@ -250,6 +255,47 @@ export class WorkSystemRepository {
     const task = this.getTask(taskId)
     if (task === undefined) throw new EntityNotFoundError(`Work Task not found: ${taskId}`)
     return task
+  }
+
+  /**
+   * The turn that asked for this task, as it stands right now.
+   *
+   * Read every time the detail is built, never cached onto the task: the turn
+   * is queued when a task from a queued send is first recorded and finishes
+   * minutes later, and a snapshot taken at creation would keep saying "排队中"
+   * forever. Nothing here is a `task_runs` row — those are attempts at the
+   * task, which only the owner can start.
+   *
+   * `source_work_turn_id` is released when the turn is pruned, so a row that
+   * still names a turn names one that exists; the `undefined` below is for the
+   * ordinary case of a task with no conversation behind it.
+   */
+  #sourceTurn(task: WorkTask): WorkTaskSourceTurn | undefined {
+    if (task.sourceWorkTurnId === undefined) return undefined
+    const turn = this.#database.prepare(
+      'SELECT id, session_id, status, error_code, created_at, started_at, completed_at FROM work_turns WHERE id = ?',
+    ).get(task.sourceWorkTurnId) as Record<string, unknown> | undefined
+    if (turn === undefined) return undefined
+    const runs = this.#database.prepare(
+      'SELECT id, employee_id, status, error_code, started_at, completed_at FROM agent_runs WHERE turn_id = ? ORDER BY ordinal, id',
+    ).all(task.sourceWorkTurnId) as Array<Record<string, unknown>>
+    return {
+      workTurnId: String(turn.id),
+      sessionId: String(turn.session_id),
+      status: turn.status as WorkTurnStatus,
+      createdAt: String(turn.created_at),
+      ...(optional(turn.error_code) === undefined ? {} : { errorCode: optional(turn.error_code)! }),
+      ...(optional(turn.started_at) === undefined ? {} : { startedAt: optional(turn.started_at)! }),
+      ...(optional(turn.completed_at) === undefined ? {} : { completedAt: optional(turn.completed_at)! }),
+      runs: runs.map((run) => ({
+        id: String(run.id),
+        employeeId: String(run.employee_id),
+        status: run.status as AgentRunStatus,
+        ...(optional(run.error_code) === undefined ? {} : { errorCode: optional(run.error_code)! }),
+        ...(optional(run.started_at) === undefined ? {} : { startedAt: optional(run.started_at)! }),
+        ...(optional(run.completed_at) === undefined ? {} : { completedAt: optional(run.completed_at)! }),
+      })),
+    }
   }
 
   #getDeliverable(id: string): Deliverable | undefined {

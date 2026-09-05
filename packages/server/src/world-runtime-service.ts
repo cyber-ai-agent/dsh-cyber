@@ -359,6 +359,27 @@ export class WorldRuntimeService {
     })
   }
 
+  /**
+   * Announces Work Task registry changes on the shared world/live SSE.
+   *
+   * The task list has no polling: a task the host recorded behind an open
+   * panel — the draft a conversation turn asked for — stayed invisible until
+   * the owner switched worlds or wrote something themselves.
+   */
+  publishTaskChanged(worldId: string, payload: JsonObject): void {
+    const snapshot = this.#store.getWorldRuntimeSnapshot(worldId)
+    const marker = typeof payload.taskId === 'string' ? payload.taskId : 'tasks'
+    this.#publish({
+      contractVersion: 1,
+      id: `task-${marker}-${this.#clock()}`,
+      worldId,
+      sequence: snapshot?.sequence ?? 0,
+      kind: 'world-task',
+      payload,
+      createdAt: this.#clock(),
+    })
+  }
+
   /** Announces Knowledge Library changes on the shared world/live SSE. */
   publishKnowledgeChanged(worldId: string, payload: JsonObject): void {
     const snapshot = this.#store.getWorldRuntimeSnapshot(worldId)

@@ -1,4 +1,4 @@
-import type { IsoTimestamp, JsonObject } from './index.js'
+import type { AgentRunStatus, IsoTimestamp, JsonObject, WorkTurnStatus } from './index.js'
 
 export type WorkTaskStatus = 'draft' | 'planning' | 'ready' | 'running' | 'waiting-approval' | 'waiting-review' | 'changes-requested' | 'completed' | 'failed' | 'cancelled' | 'recovery-required'
 export type WorkTaskPriority = 'low' | 'normal' | 'high' | 'urgent'
@@ -136,6 +136,47 @@ export interface GrowthEvidence {
   createdAt: IsoTimestamp
 }
 
+/** One character's run inside the turn that asked for a task. */
+export interface WorkTaskSourceRun {
+  id: string
+  employeeId: string
+  status: AgentRunStatus
+  errorCode?: string
+  startedAt?: IsoTimestamp
+  completedAt?: IsoTimestamp
+}
+
+/**
+ * What the conversation turn named by `WorkTask.sourceWorkTurnId` actually did.
+ *
+ * A task born from a chat message is recorded next to a turn that then goes on
+ * to live its own life: it waits in the queue, runs, answers, or fails. The
+ * task stays a draft through all of it, because classifying a message is not
+ * permission to execute anything — but a draft that shows nothing about its
+ * own origin reads as though the instruction vanished.
+ *
+ * So this is the turn, read at request time from `work_turns` and `agent_runs`
+ * and never copied onto the task. It is deliberately *not* a `TaskRun`: those
+ * are attempts at the task itself, recorded only when the owner runs it, and
+ * conflating the two would let a chat reply pass for a delivered task. It also
+ * never influences `WorkTask.status`; a turn finishing moves nothing.
+ *
+ * Absent for tasks created on the board or by a schedule, and for a task whose
+ * settled turn has since been pruned from history — the link is released with
+ * the transcript, while the task itself survives.
+ */
+export interface WorkTaskSourceTurn {
+  workTurnId: string
+  sessionId: string
+  status: WorkTurnStatus
+  errorCode?: string
+  createdAt: IsoTimestamp
+  startedAt?: IsoTimestamp
+  completedAt?: IsoTimestamp
+  /** The characters that ran in that turn. Empty while it is still queued. */
+  runs: WorkTaskSourceRun[]
+}
+
 export interface WorkTaskDetail {
   task: WorkTask
   plans: TaskPlanRevision[]
@@ -145,6 +186,8 @@ export interface WorkTaskDetail {
   deliverables: Deliverable[]
   reviews: Review[]
   growthEvidence: GrowthEvidence[]
+  /** The conversation turn that asked for this task, and what it did. */
+  sourceTurn?: WorkTaskSourceTurn
 }
 
 export class WorkSystemContractError extends Error {
