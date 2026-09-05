@@ -15,6 +15,8 @@ interface WorldLibraryDialogProps {
   onClose(): void
   /** Called after any lifecycle change so the shell can refresh its own world list. */
   onChanged(): void | Promise<void>
+  /** Called only after the server confirms permanent deletion. */
+  onDeleted?(worldId: string): void
 }
 
 /**
@@ -25,7 +27,7 @@ interface WorldLibraryDialogProps {
  * `?status=archived` is the second view. Every mutation is a server call — this
  * component never predicts the outcome, it re-reads the list afterwards.
  */
-export function WorldLibraryDialog({ workspaceId, activeWorldId, onClose, onChanged }: WorldLibraryDialogProps) {
+export function WorldLibraryDialog({ workspaceId, activeWorldId, onClose, onChanged, onDeleted }: WorldLibraryDialogProps) {
   const { t, formatDateTime } = useI18n()
   const [tab, setTab] = useState<WorldStatus>('active')
   const [worlds, setWorlds] = useState<World[]>()
@@ -85,6 +87,7 @@ export function WorldLibraryDialog({ workspaceId, activeWorldId, onClose, onChan
       method: 'DELETE',
       body: JSON.stringify({ confirmName }),
     })
+    onDeleted?.(world.id)
     setPendingDelete(undefined)
     setWorlds(await readWorlds(tab))
     await onChanged()

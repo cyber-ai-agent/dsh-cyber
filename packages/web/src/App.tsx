@@ -103,6 +103,12 @@ import { subscribeWorldLive } from './world-live-client.js'
 import { publishStreamingSpeech } from './features/voice/streaming-speech-bus.js'
 import { resolveEmployeeVoiceProfile } from './features/voice/employee-voice-profile.js'
 import { forgetVoiceTurn, registerVoiceTurn, speechContextForTurn, type SpeechInputSurface } from './features/voice/SpeechCoordinator.js'
+import {
+  composerDraftOwnerKey,
+  composerDraftStore,
+  useComposerDraft,
+  type ComposerAttachmentDraft,
+} from './composer-draft-store.js'
 
 const SettingsDialog = lazy(async () => ({ default: (await import('./components/SettingsDialog.js')).SettingsDialog }))
 const WorldSideDock = lazy(async () => ({ default: (await import('./components/WorldSideDock.js')).WorldSideDock }))
@@ -207,7 +213,6 @@ export default function App() {
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | undefined>()
   const [dockTab, setDockTab] = useState<DockTab>('world')
   const [dockCollapsed, setDockCollapsed] = useState(false)
-  const [draft, setDraft] = useState('')
   const [composerFocusRequest, setComposerFocusRequest] = useState(0)
   const [pendingTurns, setPendingTurns] = useState<PendingChatTurn[]>([])
   const [outboxMessages, setOutboxMessages] = useState<Record<string, WorkMessage[]>>({})
@@ -285,6 +290,27 @@ export default function App() {
     activeParticipantIds,
     queueKeyBySessionRef.current,
   )
+  const activeComposerOwnerKey = activeWorld === undefined
+    ? undefined
+    : composerDraftOwnerKey(activeWorld.id, activeConversationKey ?? '__scratch__')
+  const activeComposerDraft = useComposerDraft(activeComposerOwnerKey)
+  const draft = activeComposerDraft.text
+  const setDraft = useCallback((value: string) => {
+    composerDraftStore.setText(activeComposerOwnerKey, value)
+  }, [activeComposerOwnerKey])
+  const updateComposerAttachments = useCallback((updater: (current: readonly ComposerAttachmentDraft[]) => ComposerAttachmentDraft[]) => {
+    composerDraftStore.updateAttachments(activeComposerOwnerKey, updater)
+  }, [activeComposerOwnerKey])
+  const clearActiveComposerDraft = useCallback(() => {
+    composerDraftStore.clear(activeComposerOwnerKey)
+    if (activeComposerOwnerKey === undefined) return
+    setConversationModelProfiles((current) => {
+      if (!(activeComposerOwnerKey in current)) return current
+      const next = { ...current }
+      delete next[activeComposerOwnerKey]
+      return next
+    })
+  }, [activeComposerOwnerKey])
   const activePermissionKey = activeSessionId === undefined
     ? activeConversationKey
     : `session:${activeSessionId}`
@@ -323,11 +349,9 @@ export default function App() {
   // durable fact, two views (composer and model hub), no parallel override
   // layer to fall out of sync. Group chats keep the transient per-conversation
   // choice - several characters cannot share one "conversation model".
-  const conversationModelProfileId = activeConversationKey === undefined
-    ? undefined
-    : directEmployeeId !== undefined
+  const conversationModelProfileId = directEmployeeId !== undefined
     ? modelAssignments.find((assignment) => assignment.scope === 'employee' && assignment.scopeId === directEmployeeId)?.modelProfileId
-    : conversationModelProfiles[activeConversationKey]
+    : activeComposerDraft.modelProfileId ?? (activeComposerOwnerKey === undefined ? undefined : conversationModelProfiles[activeComposerOwnerKey])
   activeWorldRef.current = activeWorld
   activeSessionIdRef.current = activeSessionId
   activeConversationKeyRef.current = activeConversationKey
@@ -397,7 +421,6 @@ export default function App() {
     setHistoryOpen(false)
     setMessages([])
     setMessagePage({ hasMore: false, loading: false })
-    setDraft('')
     setSelectedEmployeeId(undefined)
     setSelectedArtifactId(undefined)
     setEmployees([])
@@ -430,6 +453,12 @@ export default function App() {
       setMessagePage({ hasMore: nextMessages.length > MESSAGE_PAGE_SIZE, loading: false })
       setSessionParticipants(inferDemoSessionParticipants(nextSessions, nextMessages, nextEmployees))
       setDossiers(isCompany ? demoData.dossiers : demoTavernDossiers)
+      for (const session of nextSessions) {
+        const ownerAlias = composerDraftStore.getSessionOwnerAlias(world.id, session.id)
+        if (ownerAlias === undefined) continue
+        queueKeyBySessionRef.current.set(session.id, ownerAlias)
+        sessionByQueueKeyRef.current.set(ownerAlias, session.id)
+      }
       setActiveSessionId(nextSessions[0]?.id)
       return
     }
@@ -481,6 +510,12 @@ export default function App() {
       // This keeps the composer and history action attached to a real conversation
       // instead of presenting an empty, non-sendable center pane after refresh.
       setActiveSessionId(snapshot.openSessions[0]?.id)
+      for (const session of snapshot.openSessions) {
+        const ownerAlias = composerDraftStore.getSessionOwnerAlias(world.id, session.id)
+        if (ownerAlias === undefined) continue
+        queueKeyBySessionRef.current.set(session.id, ownerAlias)
+        sessionByQueueKeyRef.current.set(ownerAlias, session.id)
+      }
       setSessionParticipants(nextSessionParticipants)
       const restoredGrants = Object.fromEntries(runtimeAccessResult.items.map((grant) => [grant.sessionId, grant]))
       const restoredModes = Object.fromEntries(runtimeAccessResult.items.map((grant) => [`session:${grant.sessionId}`, 'danger-full-access' as const]))
@@ -633,6 +668,7 @@ export default function App() {
   const bindConversationSession = useCallback((queueKey: string, session: WorkSession, employeeIds: string[]) => {
     sessionByQueueKeyRef.current.set(queueKey, session.id)
     queueKeyBySessionRef.current.set(session.id, queueKey)
+    composerDraftStore.setSessionOwnerAlias(session.worldId, session.id, queueKey)
     setPendingTurns((current) => {
       const next = current.map((turn) => turn.queueKey === queueKey && turn.sessionId === undefined
         ? { ...turn, sessionId: session.id }
@@ -995,7 +1031,6 @@ export default function App() {
     ))
     if (existing?.id === activeSessionId) {
       setConversationIntent(undefined)
-      setDraft('')
       setSelectedEmployeeId(employee.id)
       if (!demoMode && messages.length === 0) setTranscriptReload((value) => value + 1)
       return
@@ -1008,7 +1043,6 @@ export default function App() {
     } : undefined)
     setMessages([])
     setMessagePage({ hasMore: false, loading: false })
-    setDraft('')
     setSelectedEmployeeId(employee.id)
   }, [activeSessionId, messages.length, sessionParticipants, sessions])
 
@@ -1039,7 +1073,6 @@ export default function App() {
       setConversationIntent(undefined)
       setMessages([])
       setMessagePage({ hasMore: false, loading: false })
-      setDraft('')
       setSelectedEmployeeId(selected[0]?.id)
       setAppMode('workbench')
       setDockCollapsed(false)
@@ -1341,7 +1374,6 @@ export default function App() {
       })
       setConversationPermissionModes((current) => ({ ...current, [`direct:${employee.id}`]: runtimePermissionMode }))
       if (issuedGrant !== undefined) setSessionHostAccessGrants((current) => ({ ...current, [issuedGrant!.sessionId]: issuedGrant! }))
-      setDraft('')
       setSelectedEmployeeId(employee.id)
       setAppMode('world')
       setDockTab('world')
@@ -1609,7 +1641,6 @@ export default function App() {
     const participantIds = sessionParticipants[sessionId] ?? discoveredParticipantIds
     if (sessionId === activeSessionId) {
       setConversationIntent(undefined)
-      setDraft('')
       setSelectedEmployeeId(participantIds[0])
       if (!demoMode && messages.length === 0) setTranscriptReload((value) => value + 1)
       return
@@ -1618,7 +1649,6 @@ export default function App() {
     setActiveSessionId(sessionId)
     setMessagePage({ hasMore: false, loading: false })
     if (!demoMode) setMessages([])
-    setDraft('')
     setSelectedEmployeeId(participantIds[0])
     if (demoMode) {
       const next = demoMessagesForSession(sessionId)
@@ -1731,7 +1761,11 @@ export default function App() {
         ? `与 ${employees.find((employee) => employee.id === targetIds[0])?.displayName ?? '角色'} 对话`
         : compactPrompt(prompt))
     const queueKey = activeConversationKey ?? targetConversationQueueKey(targetIds, title)
-    const capturedModelProfileId = conversationModelProfiles[queueKey]
+    const capturedComposerOwnerKey = activeComposerOwnerKey
+    const capturedModelProfileId = conversationModelProfileId
+    const startedFromWorldScratch = activeConversationKey === undefined
+      && activeSessionId === undefined
+      && conversationIntent === undefined
     const sessionHostAccessGrant = activeSessionId === undefined ? undefined : sessionHostAccessGrants[activeSessionId]
     const preparedSessionHostAccess = sessionHostAccessGrant !== undefined
       && sessionHostAccessGrant.worldId === world.id
@@ -1791,7 +1825,24 @@ export default function App() {
       createdAt,
     }
 
-    setDraft('')
+    if (startedFromWorldScratch) {
+      // Local validation has accepted the submission. Select its target before
+      // yielding so subsequent edits already belong to the eventual session.
+      setConversationIntent({ kind: targetIds.length > 1 ? 'group' : 'direct', employeeIds: targetIds, title })
+      activeConversationKeyRef.current = queueKey
+    }
+    // Consume only after all local validation has accepted this submission.
+    // The owner revision guard keeps text or files typed after the request
+    // started from being cleared by its eventual completion.
+    const submittedDraft = composerDraftStore.get(capturedComposerOwnerKey)
+    const submittedAssetIds = new Set(attachments.map((attachment) => attachment.assetId))
+    composerDraftStore.consume(capturedComposerOwnerKey, {
+      text: submittedDraft.text,
+      attachmentIds: submittedDraft.attachments
+        .filter((item) => item.status === 'ready' && item.attachment !== undefined && submittedAssetIds.has(item.attachment.assetId))
+        .map((item) => item.id),
+      revision: submittedDraft.revision,
+    })
     setError(undefined)
     setPendingTurns((current) => {
       const next = [...current, pendingTurn]
@@ -1918,16 +1969,17 @@ export default function App() {
     return demoMode ? turnQueueRef.current.enqueue(queueKey, runTurn, clientTurnId) : runTurn()
   }, [
     activeConversationKey,
+    activeComposerOwnerKey,
     activePermissionKey,
     activeSession,
     activeSessionId,
     activeWorld,
     bindConversationSession,
     conversationIntent,
+    conversationModelProfileId,
     demoMode,
     employees,
     conversationPermissionMode,
-    conversationModelProfiles,
     patchPendingTurn,
     reasoningEffort,
     refreshConversationTranscript,
@@ -2035,7 +2087,7 @@ export default function App() {
     finally { setScheduleBusy(false) }
   }, [activeWorld])
 
-  const uploadChatAttachment = useCallback(async (file: File): Promise<ChatAttachment> => {
+  const uploadChatAttachment = useCallback(async (file: File, signal?: AbortSignal): Promise<ChatAttachment> => {
     if (workspace === undefined) throw new Error('请先创建工作区')
     const mimeType = attachmentMimeType(file)
     if (demoMode) {
@@ -2050,6 +2102,7 @@ export default function App() {
     const dataBase64 = await fileToBase64(file)
     const result = await api<{ attachment: ChatAttachment }>(`/api/workspaces/${workspace.id}/assets/attachment`, {
       method: 'POST',
+      ...(signal === undefined ? {} : { signal }),
       body: JSON.stringify({ name: file.name, mimeType, dataBase64 }),
     })
     return result.attachment
@@ -2350,9 +2403,13 @@ export default function App() {
             installedPlugins={installedPluginCommands}
             models={selectableModels}
             modelAssignments={modelAssignments}
+            {...(activeComposerOwnerKey === undefined ? {} : { composerOwnerKey: activeComposerOwnerKey })}
+            attachments={activeComposerDraft.attachments}
+            onAttachmentsChange={updateComposerAttachments}
+            onClearDraft={clearActiveComposerDraft}
             {...(conversationModelProfileId === undefined ? {} : { modelProfileId: conversationModelProfileId })}
             onChangeModelProfile={async (modelProfileId) => {
-              if (activeConversationKey === undefined) return
+              if (activeComposerOwnerKey === undefined || activeConversationKey === undefined) return
               let finalProfileId = modelProfileId
               if (modelProfileId !== undefined && modelProfileId.startsWith('discovered:')) {
                 const parts = modelProfileId.split(':')
@@ -2391,22 +2448,24 @@ export default function App() {
               if (directEmployeeId !== undefined) {
                 if (finalProfileId !== undefined && finalProfileId.startsWith('discovered:')) return
                 await assignEmployeeModel(directEmployeeId, finalProfileId)
+                composerDraftStore.setModelProfile(activeComposerOwnerKey, undefined)
                 setConversationModelProfiles((current) => {
-                  if (!(activeConversationKey in current)) return current
+                  if (!(activeComposerOwnerKey in current)) return current
                   const next = { ...current }
-                  delete next[activeConversationKey]
+                  delete next[activeComposerOwnerKey]
                   return next
                 })
                 return
               }
+              composerDraftStore.setModelProfile(activeComposerOwnerKey, finalProfileId)
               setConversationModelProfiles((current) => {
                 if (finalProfileId === undefined || finalProfileId.startsWith('discovered:')) {
                   if (finalProfileId !== undefined && finalProfileId.startsWith('discovered:')) return current
                   const next = { ...current }
-                  delete next[activeConversationKey]
+                  delete next[activeComposerOwnerKey]
                   return next
                 }
-                return { ...current, [activeConversationKey]: finalProfileId }
+                return { ...current, [activeComposerOwnerKey]: finalProfileId }
               })
             }}
             pendingCount={activePendingCount}
@@ -2545,6 +2604,7 @@ export default function App() {
           activeWorldId={activeWorld.id}
           onClose={() => setWorldLibraryOpen(false)}
           onChanged={refreshWorldList}
+          onDeleted={(worldId) => composerDraftStore.clearWorld(worldId)}
         /></Suspense>
       ) : null}
       {recruitmentOpen ? (
@@ -3074,7 +3134,9 @@ function defaultRolePermissionMode(
   }).reduce<ConversationPermissionMode>((least, mode) => rank[mode] < rank[least] ? mode : least, 'danger-full-access')
 }
 
-const CONVERSATION_MODELS_STORAGE_KEY = 'dsh-cyber:conversation-models'
+// v2 includes the world in every owner key. The legacy key is deliberately
+// not migrated because its entries cannot be assigned to a world safely.
+const CONVERSATION_MODELS_STORAGE_KEY = 'dsh-cyber:conversation-models:v2'
 
 function readConversationModelProfiles(): Record<string, string> {
   try {

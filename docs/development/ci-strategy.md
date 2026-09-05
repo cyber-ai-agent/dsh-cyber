@@ -14,6 +14,8 @@ pnpm typecheck
 pnpm test
 pnpm test:migration
 pnpm test:schema
+pnpm exec playwright install --with-deps chromium
+pnpm exec playwright test --config playwright.smoke.config.ts
 ```
 
 这层是当前唯一 Required Gate，保护：
@@ -26,10 +28,13 @@ pnpm test:schema
 - Skill Runtime；
 - Workshop service；
 - migration / backup 等核心逻辑。
+- 会话草稿与附件归属、刷新恢复、上传部分失败和清空草稿的核心浏览器行为。
 
-### L2 — Opt-in Chromium Smoke / Full E2E
+核心 Smoke 使用确定性本地运行时，不依赖外部模型或密钥。失败时保留截图、trace 和控制台记录，CI 上传 `core-browser-smoke` 工件并保留 7 天。必须在浏览器检查成功后才发布 `CI / required` 状态。
 
-浏览器验证不再阻塞每一个开发 PR。`full-e2e.yml` 默认运行于：
+### L2 — Opt-in Full E2E
+
+完整浏览器套件独立于必过核心 Smoke。`full-e2e.yml` 默认运行于：
 
 - `main` push；
 - nightly schedule；
@@ -52,7 +57,7 @@ pnpm test:schema
 
 Pre-Alpha Draft PR 不要求 Full E2E 每次提交都通过。准备把大型重构 PR 标记为 Ready for review 或准备合并 `main` 时，应添加 label 或手动运行完整 E2E 并处理仍然有效的回归。
 
-进入 Alpha 后可把核心 Smoke E2E 提升为 Required；完整 Chromium 回归仍保留在更慢的非阻塞层。
+核心 Smoke 随稳定产品路径扩充；完整 Chromium 回归仍保留在更慢的独立层。
 
 ### L4 — Release Validation
 
@@ -88,8 +93,8 @@ E2E 应验证：
 
 | 阶段 | Required Gate |
 | --- | --- |
-| Pre-Alpha（当前） | Typecheck + Unit/Integration + Migration/Schema |
-| Alpha | + 核心 Smoke E2E |
+| Pre-Alpha（当前） | Typecheck + Unit/Integration + Migration/Schema + 核心 Smoke E2E |
+| Alpha | 扩充核心黄金路径 Smoke |
 | Beta | + Full E2E |
 | Stable | + Migration + Backup/Restore + OS matrix |
 | Release | + Real Harness Canary + package/release validation |
