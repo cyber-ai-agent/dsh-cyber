@@ -4,6 +4,7 @@ import type { AgentPermissionMode, TaskSchedule } from '@dsh-cyber/contracts'
 
 import type { CyberEmployee } from '../types.js'
 import { formatDateTime } from '../i18n/format.js'
+import { DockDetailFold, DockEmptyState, DockRow, DockSurfaceHeader } from './dock/DockSurface.js'
 import './TaskSchedulePanel.css'
 
 interface TaskSchedulePanelProps {
@@ -88,14 +89,16 @@ export function TaskSchedulePanel({ employees, items, busy, onCreate, onStatus, 
     }
   }
 
-  return <section className="task-schedule-panel" aria-label="任务日程">
-    <header>
-      <span className="task-schedule-panel__mark"><CalendarBlank size={20}/></span>
-      <span><strong>任务日程</strong><small>查看下一次执行，管理角色的定时工作</small></span>
-      <button type="button" className={creating ? 'text-button' : 'primary-button'} aria-expanded={creating} aria-controls="task-schedule-form" onClick={() => creating ? resetForm() : setCreating(true)}>
+  return <section className="task-schedule-panel dock-surface" aria-label="任务日程">
+    <DockSurfaceHeader
+      mark={<CalendarBlank size={18}/>}
+      title="任务日程"
+      summary="查看下一次执行，管理角色的定时工作"
+      {...(sorted.length === 0 ? {} : { meta: `${sorted.length} 条日程` })}
+      action={<button type="button" className={creating ? 'text-button' : 'primary-button'} aria-expanded={creating} aria-controls="task-schedule-form" onClick={() => creating ? resetForm() : setCreating(true)}>
         {creating ? <X size={15}/> : <Plus size={15}/>}{creating ? '取消新建' : '新建日程'}
-      </button>
-    </header>
+      </button>}
+    />
     {creating ? <form id="task-schedule-form" noValidate aria-busy={busy} onSubmit={(event) => { event.preventDefault(); void submit() }}>
       {errors.form === undefined ? null : <p className="task-schedule-panel__form-error is-wide" role="alert">{errors.form}</p>}
       <label>执行角色
@@ -137,18 +140,29 @@ export function TaskSchedulePanel({ employees, items, busy, onCreate, onStatus, 
       <p className="task-schedule-panel__guard">无人值守日程不开放“完全访问”，避免在没有人在场确认时修改当前世界目录之外的文件。</p>
       <div className="task-schedule-panel__form-actions"><button type="button" className="text-button" disabled={busy} onClick={resetForm}>取消</button><button type="submit" className="primary-button" disabled={busy}>{busy ? '保存中…' : '保存日程'}</button></div>
     </form> : null}
-    {sorted.length === 0 && !creating ? <div className="task-schedule-panel__empty"><CalendarBlank size={30}/><strong>还没有任务日程</strong><p>新建后可查看下次执行时间、最近执行时间和当前状态。</p><button type="button" className="primary-button" onClick={() => setCreating(true)}><Plus size={15}/>新建日程</button></div> : <ol>{sorted.map((item) => {
+    {sorted.length === 0 && !creating ? <DockEmptyState
+      mark={<CalendarBlank size={26}/>}
+      title="还没有任务日程"
+      description="新建日程后，可以在这里查看下次执行时间、最近执行时间和当前状态。"
+      action={<button type="button" className="primary-button" onClick={() => setCreating(true)}><Plus size={15}/>新建日程</button>}
+    /> : <ol>{sorted.map((item) => {
       const employee = employees.find((value) => value.id === item.employeeId)
       const nextStatus = item.status === 'paused' ? 'active' : 'paused'
       return <li key={item.id}>
-        <div><span className={`schedule-state is-${item.status}`}>{statusLabel(item.status)}</span><strong>{item.title}</strong><small>{employee?.displayName ?? '角色已不可用'} · {item.kind === 'once' ? '单次' : `每 ${Math.round((item.everySeconds ?? 300) / 60)} 分钟`}</small></div>
-        <p className="schedule-next-run">下次执行：{item.nextRunAt ? formatTime(item.nextRunAt) : '暂无安排'}</p><details className="dock-detail-fold"><summary>任务内容与设置</summary><p>{item.prompt}</p>
-        <dl><div><dt>下次执行</dt><dd>{item.nextRunAt ? formatTime(item.nextRunAt) : '无'}</dd></div><div><dt>最近执行</dt><dd>{item.lastRunAt ? formatTime(item.lastRunAt) : '尚未执行'}</dd></div><div><dt>权限</dt><dd>{item.permissionMode === 'read-only' ? '只读访问' : '当前世界'}</dd></div></dl></details>
-        <footer>
-          <button type="button" disabled={busy || item.status === 'completed'} aria-label={`${item.title}：${nextStatus === 'active' ? '恢复日程' : '暂停日程'}`} onClick={() => void onStatus(item, nextStatus)}>{item.status === 'paused' ? <Play size={14}/> : <Pause size={14}/>} {item.status === 'paused' ? '恢复' : '暂停'}</button>
-          <button type="button" disabled={busy} onClick={() => void onRun(item)}><Play size={14}/>立即运行</button>
-          <button type="button" className="is-danger" disabled={busy} onClick={() => { if (window.confirm(`删除日程“${item.title}”？`)) void onDelete(item) }}><Trash size={14}/>删除</button>
-        </footer>
+        <DockRow
+          title={item.title}
+          secondary={`${employee?.displayName ?? '角色已不可用'} · ${item.kind === 'once' ? '单次' : `每 ${Math.round((item.everySeconds ?? 300) / 60)} 分钟`} · 下次执行 ${item.nextRunAt ? formatTime(item.nextRunAt) : '暂无安排'}`}
+          badge={<span className={`schedule-state is-${item.status}`}>{statusLabel(item.status)}</span>}
+          actions={<>
+            <button type="button" disabled={busy || item.status === 'completed'} aria-label={`${item.title}：${nextStatus === 'active' ? '恢复日程' : '暂停日程'}`} onClick={() => void onStatus(item, nextStatus)}>{item.status === 'paused' ? <Play size={14}/> : <Pause size={14}/>} {item.status === 'paused' ? '恢复' : '暂停'}</button>
+            <button type="button" className="is-primary" disabled={busy} onClick={() => void onRun(item)}><Play size={14}/>立即运行</button>
+            <button type="button" className="is-danger" disabled={busy} onClick={() => { if (window.confirm(`删除日程“${item.title}”？`)) void onDelete(item) }}><Trash size={14}/>删除</button>
+          </>}
+          fold={<DockDetailFold label="任务内容与设置">
+            <p>{item.prompt}</p>
+            <dl><div><dt>下次执行</dt><dd>{item.nextRunAt ? formatTime(item.nextRunAt) : '无'}</dd></div><div><dt>最近执行</dt><dd>{item.lastRunAt ? formatTime(item.lastRunAt) : '尚未执行'}</dd></div><div><dt>权限</dt><dd>{item.permissionMode === 'read-only' ? '只读访问' : '当前世界'}</dd></div></dl>
+          </DockDetailFold>}
+        />
       </li>
     })}</ol>}
   </section>

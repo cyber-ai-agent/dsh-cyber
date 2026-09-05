@@ -5,6 +5,7 @@ import App from './App.js'
 import { ApplicationLockGate } from './components/ApplicationLockGate.js'
 import './styles.css'
 import './styles-world-settings.css'
+import './components/dock/dock-surface.css'
 import './features/world/world-runtime.css'
 import './features/artifacts/artifacts.css'
 

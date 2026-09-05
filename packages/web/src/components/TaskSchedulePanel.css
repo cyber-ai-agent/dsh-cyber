@@ -6,53 +6,6 @@
   background: var(--surface-0);
 }
 
-.task-schedule-panel > header {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 18px 22px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface-1);
-}
-
-.task-schedule-panel > header > span:nth-child(2) {
-  min-width: 0;
-  flex: 1;
-  display: grid;
-  gap: 3px;
-}
-
-.task-schedule-panel > header strong {
-  font-size: 17px;
-  font-weight: 700;
-  color: var(--text-strong);
-}
-
-.task-schedule-panel > header small {
-  color: var(--text-muted);
-  font-size: 13px;
-  line-height: 1.4;
-}
-
-.task-schedule-panel > header button {
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
-  gap: 6px;
-  min-height: 36px;
-}
-
-.task-schedule-panel__mark {
-  display: grid;
-  place-items: center;
-  width: 42px;
-  height: 42px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md, 10px);
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface-2));
-  color: var(--accent-strong);
-}
-
 .task-schedule-panel form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -246,44 +199,28 @@
 }
 
 .task-schedule-panel ol {
+  display: grid;
+  gap: 10px;
   margin: 0;
-  padding: 0;
+  padding: 16px 18px;
   list-style: none;
 }
 
-.task-schedule-panel li {
-  padding: 18px 22px;
-  border-bottom: 1px solid var(--border);
-  transition: background var(--duration-fast) var(--ease-smooth);
-}
-
-.task-schedule-panel li:hover {
-  background: var(--surface-1);
-}
-
-.task-schedule-panel li > div:first-child {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
-  gap: 5px 10px;
-}
-
-.task-schedule-panel li strong {
-  font-size: 15px;
-  font-weight: 650;
-  color: var(--text-strong);
-}
-
-.task-schedule-panel li small {
-  grid-column: 2;
-  color: var(--text-muted);
+.schedule-state {
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
   font-size: 12px;
 }
 
-.task-schedule-panel li > p {
-  margin: 12px 0;
+.schedule-state.is-paused { color: var(--text-muted); }
+.schedule-state.is-active { color: var(--success); border-color: color-mix(in srgb, var(--success) 45%, var(--border)); }
+.schedule-state.is-completed { color: var(--accent-strong); }
+
+.task-schedule-panel .dock-detail-fold p {
+  margin: 0 0 10px;
   color: var(--text-soft);
-  font-size: 13.5px;
+  font-size: 13px;
   line-height: 1.55;
   white-space: pre-wrap;
 }
@@ -316,32 +253,4 @@
   margin: 3px 0 0;
   font-size: 13px;
   color: var(--text-strong);
-}
-
-.task-schedule-panel li footer {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.task-schedule-panel li footer button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 34px;
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control, 6px);
-  background: var(--surface-2);
-  color: var(--text-soft);
-  font-size: 12.5px;
-  transition: all var(--duration-fast) var(--ease-smooth);
-}
-
-.task-schedule-panel li footer button:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--text-strong);
-  background: var(--surface-3);
 }
