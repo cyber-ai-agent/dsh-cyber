@@ -423,7 +423,10 @@ export class WorldArtifactService {
         : {
             version: version.version,
             grade: decision.grade,
-            proven: decision.grade === 'host-observed',
+            // The grade already encodes the content check, but a record on disk
+            // outlives the code that wrote it. Proof is re-asserted here only
+            // when the record itself still carries the answer.
+            proven: decision.grade === 'host-observed' && decision.contentMatchesObservation === true,
             ...(decision.observedAtMs === undefined ? {} : { observedAt: new Date(decision.observedAtMs).toISOString() }),
             ...(decision.contentMatchesObservation === undefined ? {} : { contentMatchesObservation: decision.contentMatchesObservation }),
             ...(decision.concurrentRunIds === undefined || decision.concurrentRunIds.length === 0 ? {} : { concurrentRunIds: decision.concurrentRunIds }),
