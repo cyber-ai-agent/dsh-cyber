@@ -226,7 +226,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   const authority = new WorldCharacterAuthorityService(store)
   let publishArtifactChanged: ((worldId: string, payload: JsonObject) => void) | undefined
   let publishKnowledgeChanged: ((worldId: string, payload: JsonObject) => void) | undefined
-  const { artifacts: worldArtifacts, runFileEvidence } = composeArtifactServices(store, worldRoots, (worldId, payload) => publishArtifactChanged?.(worldId, payload))
+  const { artifacts: worldArtifacts, runFileEvidence, savedReplyDocuments } = composeArtifactServices(store, worldRoots, (worldId, payload) => publishArtifactChanged?.(worldId, payload))
   const worldFiles = new WorldFileService(worldRoots)
   const worldKnowledgeRepository = new WorldKnowledgeRepository(store.database)
   const worldKnowledgeSearch = createKnowledgeSearchPort({
@@ -474,7 +474,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   registerWorldRuntimeRoutes(router, { store, worldRuntime, worldStreamHub, worldAccess })
   registerWorldTraceRoutes(router, { store, trace: worldTrace, access: worldAccess, contextInspection: profileRuntime.contextInspection, contextSnapshots })
   registerCompletionJobRoutes(router, { store, access: worldAccess, wake: () => completionWorker.wake() })
-  registerWorldArtifactRoutes(router, { store, artifacts: worldArtifacts, access: worldAccess, authority })
+  registerWorldArtifactRoutes(router, { store, artifacts: worldArtifacts, savedReplyDocuments, access: worldAccess, authority })
   registerWorldKnowledgeRoutes(router, {
     store,
     library: worldKnowledge,
