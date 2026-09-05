@@ -45,11 +45,25 @@ export function buildUnifiedModelList(
   configuredProfiles: readonly ModelProfile[],
   discoveredCatalog: Record<string, CachedModelCatalog>,
 ): ModelProfile[] {
+  // Build a set of valid model IDs from configured profiles for cache validation
+  const validModelIds = new Set(configuredProfiles.map((p) => p.modelId))
+
+  // Filter cache: only keep entries where the base profile still exists
+  // and model IDs are still valid (not stale from removed providers)
+  const filteredCatalog: Record<string, CachedModelCatalog> = {}
+  for (const [key, catalog] of Object.entries(discoveredCatalog)) {
+    if (!catalog || !Array.isArray(catalog.models)) continue
+    // Filter out models whose IDs no longer exist in configured profiles
+    const validModels = catalog.models.filter((item) => item.id && validModelIds.has(item.id))
+    if (validModels.length === 0) continue
+    filteredCatalog[key] = { ...catalog, models: validModels }
+  }
+
   const result: ModelProfile[] = [...configuredProfiles]
-  const existingModelIds = new Set(configuredProfiles.map((p) => p.modelId))
+  const existingModelIds = new Set(validModelIds)
 
   for (const profile of configuredProfiles) {
-    const cached = discoveredCatalog[profile.id] ?? discoveredCatalog[profile.baseUrl]
+    const cached = filteredCatalog[profile.id] ?? filteredCatalog[profile.baseUrl]
     if (!cached || !Array.isArray(cached.models)) continue
 
     for (const item of cached.models) {
