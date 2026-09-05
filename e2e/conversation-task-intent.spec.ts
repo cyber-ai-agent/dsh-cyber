@@ -78,6 +78,16 @@ test('records one editable task from a chat instruction and nothing from a quest
   await expect(page.getByRole('button', { name: '生成计划并执行' })).toBeVisible()
   expect(current.work.list(world.id)).toHaveLength(1)
 
+  // And the draft says what the turn behind it actually did — that turn ran
+  // and answered — while saying in the same breath that this is not the task's
+  // own execution, which has not happened and needs the click above.
+  await expect(page.getByRole('heading', { name: '来源对话' })).toBeVisible()
+  const source = page.locator('.task-source')
+  await expect(source).toContainText('已完成')
+  await expect(source).toContainText('1 个角色运行')
+  await expect(source).toContainText('不是任务本身的执行')
+  await expect(page.getByText('执行与证据 · 0')).toBeVisible()
+
   const screenshotRoot = join(process.cwd(), 'artifacts', 'conversation-task-intent')
   await mkdir(screenshotRoot, { recursive: true })
   for (const viewport of [{ width: 1440, height: 900, label: '1440x900' }, { width: 1920, height: 1080, label: '1920x1080' }, { width: 3840, height: 2160, label: '3840x2160' }]) {

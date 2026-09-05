@@ -1,7 +1,7 @@
 import { ArrowClockwise, Check, ClipboardText, PaperPlaneTilt, WarningCircle } from '@phosphor-icons/react'
 import { useCallback, useEffect, useState } from 'react'
 
-import type { Deliverable, WorkTask, WorkTaskDetail, World, WorldArtifact } from '@dsh-cyber/contracts'
+import type { Deliverable, WorkTask, WorkTaskDetail, WorkTaskSourceTurn, World, WorldArtifact } from '@dsh-cyber/contracts'
 import { api } from '../../api.js'
 import { useI18n } from '../../i18n/runtime.js'
 import type { CyberEmployee } from '../../types.js'
@@ -93,12 +93,38 @@ function TaskDetail({ detail, employees, artifacts, busy, mutate }: { detail: Wo
   const submitted = detail.deliverables.findLast((item) => item.status === 'submitted')
   return <>
     <header className="task-detail__header"><div><h2>{detail.task.title}</h2><p>{detail.task.description}</p></div><span className={`task-status task-status--${detail.task.status}`}>{taskStatusLabel(detail.task.status, t)}</span></header>
+    {detail.sourceTurn === undefined ? null : <SourceTurn turn={detail.sourceTurn} employees={employees} />}
     {(detail.task.status === 'draft' || detail.task.status === 'changes-requested' || detail.task.status === 'failed') ? <section className="task-action"><h3>{detail.task.status === 'changes-requested' ? t('task.action.feedbackVersion', '按反馈生成新版本') : t('task.action.start', '开始真实协作')}</h3><div className="task-employee-picker">{employees.map((employee) => <label key={employee.id}><input type="checkbox" checked={selectedEmployees.has(employee.id)} onChange={(event) => setSelectedEmployees((current) => { const next = new Set(current); if (event.target.checked) next.add(employee.id); else next.delete(employee.id); return next })} /><span><strong>{employee.displayName}</strong><small>{employee.role} · {employee.presence === 'working' ? t('task.action.working', '工作中') : t('task.action.available', '可接任务')}</small></span></label>)}</div><label><span>{t('task.create.coordinator', '协调角色')}</span><select value={effectiveCoordinator ?? ''} onChange={(event) => setCoordinator(event.target.value)}>{employees.filter((employee) => selectedEmployees.has(employee.id)).map((employee) => <option key={employee.id} value={employee.id}>{employee.displayName}</option>)}</select></label><button type="button" disabled={busy || selectedEmployees.size < 1} onClick={() => void mutate(() => api(`/api/tasks/${detail.task.id}/execute`, { method: 'POST', body: JSON.stringify({ employeeIds: [...selectedEmployees], ...(effectiveCoordinator === undefined ? {} : { coordinatorEmployeeId: effectiveCoordinator }) }) }))}><PaperPlaneTilt size={16} aria-hidden="true" />{detail.task.status === 'changes-requested' ? t('task.action.newVersion', '生成新版本') : t('task.action.planAndRun', '生成计划并执行')}</button></section> : null}
     <section><h3>{t('task.plan.heading', '计划与分工')}</h3>{detail.plans.length === 0 ? <p>{t('task.plan.empty', '执行后将显示真实计划和选择原因。')}</p> : detail.plans.map((plan) => <div key={plan.id} className="task-plan"><header><strong>{t('task.plan.version', '计划 v{version}', { version: plan.revision })}</strong><span>{taskStatusLabel(plan.status, t)}</span></header>{detail.steps.filter((step) => step.planRevisionId === plan.id).map((step) => <article key={step.id}><div><strong>{step.ordinal}. {step.title}</strong><span>{taskStatusLabel(step.status, t)}</span></div><p>{step.expectedOutput}</p><small>{t('common.role', '角色')}：{formatList(step.assignedEmployeeIds.map((id) => employeeName(employees, id)))} · {t('common.skill', '技能')}：{step.requiredSkills.length > 0 ? formatList(step.requiredSkills) : '—'}</small></article>)}</div>)}</section>
     <details className="dock-detail-fold"><summary>{t('task.execution.heading', '执行与证据')} · {detail.runs.length}</summary>{detail.runs.map((run) => <article key={run.id} className="task-run"><strong>{t('task.execution.attempt', '第 {attempt} 次执行 · {status}', { attempt: run.attempt, status: taskStatusLabel(run.status, t) })}</strong><span>{t('task.execution.workTurn', '工作回合 {id}', { id: run.workTurnId.slice(0, 8) })} · {t('task.execution.agentRuns', '{count} 个角色运行', { count: formatNumber(run.agentRunIds.length) })} · {formatMilliseconds(run.latency ?? 0, locale)}</span></article>)}{detail.assignments.map((assignment) => <details key={assignment.id}><summary>{t('task.execution.reason', '{name} 的选择原因', { name: employeeName(employees, assignment.employeeId) })}</summary><pre>{JSON.stringify(assignment.assignmentReason, null, 2)}</pre></details>)}</details>
     {detail.task.status === 'waiting-review' && latestRun !== undefined && submitted === undefined ? <SubmitDeliverable taskId={detail.task.id} runId={latestRun.id} employees={employees} artifacts={artifacts} busy={busy} mutate={mutate} /> : null}
     <section><h3>{t('task.delivery.heading', '交付与验收')}</h3>{detail.deliverables.length === 0 ? <p>{t('task.delivery.empty', '还没有交付版本。')}</p> : detail.deliverables.map((item) => <DeliverableRow key={item.id} deliverable={item} reviews={detail.reviews.filter((review) => review.deliverableId === item.id)} />)}{submitted === undefined ? null : <ReviewForm deliverable={submitted} busy={busy} mutate={mutate} />}</section>
   </>
+}
+
+/**
+ * The conversation turn this task came out of, and what that turn did.
+ *
+ * A draft recorded from a chat message used to say only "来自对话" on its row:
+ * the turn behind it could be waiting in the queue, still answering, or long
+ * finished, and the panel looked identical in all three cases. It says which
+ * turn, how that turn ended and who ran in it — and then says plainly that
+ * none of it is this task's own work, because the task has not run and will
+ * not until the owner starts it.
+ */
+function SourceTurn({ turn, employees }: { turn: WorkTaskSourceTurn; employees: CyberEmployee[] }) {
+  const { t, formatList, formatNumber } = useI18n()
+  return <section className="task-source">
+    <h3>{t('task.source.heading', '来源对话')}</h3>
+    <p>
+      {t('task.source.turn', '提出该任务的回合 {id} · {status}', { id: turn.workTurnId.slice(0, 8), status: taskStatusLabel(turn.status, t) })}
+      {' · '}
+      {t('task.execution.agentRuns', '{count} 个角色运行', { count: formatNumber(turn.runs.length) })}
+    </p>
+    {turn.runs.length === 0 ? null : <small>{formatList(turn.runs.map((run) => employeeName(employees, run.employeeId)))}</small>}
+    {turn.errorCode === undefined ? null : <small className="task-source__error">{turn.errorCode}</small>}
+    <small>{t('task.source.note', '这是提出任务的那次对话，不是任务本身的执行。')}</small>
+  </section>
 }
 
 function SubmitDeliverable({ taskId, runId, employees, artifacts, busy, mutate }: { taskId: string; runId: string; employees: CyberEmployee[]; artifacts: WorldArtifact[]; busy: boolean; mutate(operation: () => Promise<unknown>): Promise<void> }) {

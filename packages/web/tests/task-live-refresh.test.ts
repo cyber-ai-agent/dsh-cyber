@@ -1,10 +1,17 @@
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import type { World, WorkTask } from '@dsh-cyber/contracts'
 
 import { TaskWorkspace } from '../src/features/tasks/TaskWorkspace.js'
+// Loads and registers every catalog; the locale is then pinned so the panel is
+// read in the words the owner sees rather than in the English fallbacks the
+// components carry for keys that might never have been translated.
+import '../src/i18n/messages.js'
+import { setUiLocale } from '../src/i18n/runtime.js'
+
+beforeAll(() => { setUiLocale('zh-CN') })
 
 /**
  * A task the conversation recorded arrives while the panel is already open, so
