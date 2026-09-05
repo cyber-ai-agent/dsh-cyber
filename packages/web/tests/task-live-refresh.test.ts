@@ -115,6 +115,39 @@ describe('Task list live refresh', () => {
     host.remove()
   })
 
+  it('will not offer to run a draft while its source conversation is still working', async () => {
+    // The server refuses this outright. The panel must not hand the owner a
+    // button whose only outcome is a conflict.
+    const detail = {
+      task: { ...proposed, status: 'draft' },
+      plans: [], steps: [], assignments: [], runs: [], deliverables: [], reviews: [], growthEvidence: [],
+      sourceTurn: {
+        workTurnId: 'turn-from-chat', sessionId: 'session-1', status: 'running',
+        createdAt: '2026-09-05T00:00:00.000Z', runs: [{ agentRunId: 'run-1', employeeId: 'employee-1', status: 'running' }],
+      },
+    }
+    const respond = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/tasks?') || url.endsWith('/tasks')) return respond({ items: [detail.task] })
+      if (url.endsWith('/artifacts')) return respond({ artifacts: [] })
+      return respond(detail)
+    }))
+
+    const host = document.createElement('div')
+    document.body.append(host)
+    const root = createRoot(host)
+    await act(async () => { root.render(createElement(TaskWorkspace, { world, employees: [] })) })
+    await vi.waitFor(() => expect(host.textContent).toContain('来源对话'))
+
+    expect(host.textContent).toContain('提出该任务的对话仍在进行')
+    const run = [...host.querySelectorAll('button')].find((node) => node.textContent?.includes('生成计划并执行'))
+    expect(run?.disabled).toBe(true)
+
+    await act(async () => { root.unmount() })
+    host.remove()
+  })
+
   it('warns that the source conversation already did the work before a second run', async () => {
     // The turn that proposed this task ran to completion and a character worked
     // in it. Running the draft now repeats that work for real — files, skills,
