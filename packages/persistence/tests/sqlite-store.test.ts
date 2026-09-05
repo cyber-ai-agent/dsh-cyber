@@ -11,6 +11,7 @@ import {
   DatabaseCorruptError,
   SecretPersistenceError,
   SqliteStore,
+  WorkSystemRepository,
   exportReadonlyRecovery,
 } from '../src/index.js'
 
@@ -942,6 +943,10 @@ describe('SqliteStore', () => {
     // keeping every milestone that database already held.
     const legacy = new DatabaseSync(path)
     legacy.exec(`
+      DROP INDEX work_tasks_source_message_idx;
+      DROP INDEX work_tasks_source_work_turn_idx;
+      ALTER TABLE work_tasks DROP COLUMN source_message_id;
+      ALTER TABLE work_tasks DROP COLUMN source_work_turn_id;
       DROP TABLE agent_run_context_snapshots;
       DROP TABLE IF EXISTS employee_memory_index_fts;
       DROP TABLE employee_memory_index;
@@ -1023,6 +1028,10 @@ describe('SqliteStore', () => {
     // keeping every row that database already held.
     const legacy = new DatabaseSync(path)
     legacy.exec(`
+      DROP INDEX work_tasks_source_message_idx;
+      DROP INDEX work_tasks_source_work_turn_idx;
+      ALTER TABLE work_tasks DROP COLUMN source_message_id;
+      ALTER TABLE work_tasks DROP COLUMN source_work_turn_id;
       DROP TABLE agent_run_context_snapshots;
       DROP INDEX model_profiles_provider_model_idx;
       ALTER TABLE model_profiles DROP COLUMN provider_id;
@@ -1397,6 +1406,10 @@ describe('SqliteStore', () => {
     // the whole stack the way a 36 database in the field would.
     const downgraded = new DatabaseSync(path)
     downgraded.exec(`
+      DROP INDEX work_tasks_source_message_idx;
+      DROP INDEX work_tasks_source_work_turn_idx;
+      ALTER TABLE work_tasks DROP COLUMN source_message_id;
+      ALTER TABLE work_tasks DROP COLUMN source_work_turn_id;
       DROP TABLE agent_run_context_snapshots;
       ALTER TABLE employee_milestones DROP COLUMN origin;
       DROP TABLE employee_memory_index;
@@ -1463,6 +1476,10 @@ describe('SqliteStore', () => {
     // that v39 allowed so the forward migration must preserve them.
     const legacy = new DatabaseSync(path)
     legacy.exec(`
+      DROP INDEX work_tasks_source_message_idx;
+      DROP INDEX work_tasks_source_work_turn_idx;
+      ALTER TABLE work_tasks DROP COLUMN source_message_id;
+      ALTER TABLE work_tasks DROP COLUMN source_work_turn_id;
       DROP INDEX model_profiles_provider_model_idx;
       ALTER TABLE model_profiles DROP COLUMN provider_id;
       ALTER TABLE model_profiles DROP COLUMN origin;
@@ -1490,6 +1507,64 @@ describe('SqliteStore', () => {
     await exportReadonlyRecovery(path, recoveryPath)
     const recovery = JSON.parse(await readFile(recoveryPath, 'utf8')) as { tables?: { model_providers?: unknown[] } }
     expect(recovery.tables?.model_providers).toHaveLength(2)
+  })
+
+  it('adds the task source link after v40 without rewriting existing tasks', async () => {
+    const { directory, path, store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: '任务来源迁移工作区' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '任务来源世界', templateId: 'cyber-company' })
+    store.saveBlueprint(blueprint({ id: 'source.worker', worldTemplateId: 'cyber-company' }))
+    const employee = store.recruitEmployee({
+      workspaceId: workspace.id, worldId: world.id, blueprintId: 'source.worker', blueprintVersion: 1,
+    })
+    const session = store.createSession({
+      workspaceId: workspace.id, worldId: world.id, kind: 'direct', title: '私聊',
+      participants: [{ participantId: 'owner', kind: 'owner' }, { participantId: employee.id, kind: 'employee' }],
+    })
+    const turn = store.createWorkTurn({ workspaceId: workspace.id, worldId: world.id, sessionId: session.id, interactionKind: 'chat' })
+    const message = store.appendMessage({
+      sessionId: session.id, senderId: 'owner', senderKind: 'owner', kind: 'user', content: '请整理本周周报。', metadata: { workTurnId: turn.id },
+    })
+    const legacyTask = new WorkSystemRepository(store.database).createTask({
+      workspaceId: workspace.id, worldId: world.id, title: '迁移前的任务', description: '在来源关联存在之前创建。', priority: 'normal', createdBy: 'owner',
+    })
+    store.close()
+    stores.splice(stores.indexOf(store), 1)
+
+    // Rewind only the source-link migration, keeping every row the file held.
+    const legacy = new DatabaseSync(path)
+    legacy.exec(`
+      DROP INDEX work_tasks_source_message_idx;
+      DROP INDEX work_tasks_source_work_turn_idx;
+      ALTER TABLE work_tasks DROP COLUMN source_message_id;
+      ALTER TABLE work_tasks DROP COLUMN source_work_turn_id;
+      DELETE FROM schema_migrations WHERE version > 40;
+      PRAGMA user_version = 40;
+    `)
+    legacy.close()
+
+    const migrated = await SqliteStore.open(path)
+    stores.push(migrated)
+    expect((await readdir(directory)).some((file) => file.startsWith('cyber.sqlite.pre-migration-v40-'))).toBe(true)
+    expect(migrated.database.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+    expect(migrated.doctor()).toMatchObject({ ok: true, schemaVersion: CYBER_SCHEMA_VERSION })
+
+    // Additive only: the task that predates the migration reads back exactly
+    // as it was and gains no invented source. One task per turn is a database
+    // rule (a unique index), not something the process has to remember.
+    const repository = new WorkSystemRepository(migrated.database)
+    expect(repository.getTask(legacyTask.id)).toEqual(legacyTask)
+    expect(migrated.database.prepare(
+      `SELECT "unique" AS isUnique, partial FROM pragma_index_list('work_tasks') WHERE name = 'work_tasks_source_work_turn_idx'`,
+    ).get()).toMatchObject({ isUnique: 1, partial: 0 })
+    const source = {
+      workspaceId: workspace.id, worldId: world.id, workTurnId: turn.id,
+      title: '整理本周周报', description: '把本周的会议纪要整理成一页周报。', priority: 'normal' as const, createdBy: 'owner',
+    }
+    const linked = repository.createTaskFromSource(source)
+    expect(linked).toMatchObject({ created: true, task: { sourceWorkTurnId: turn.id, sourceMessageId: message.id } })
+    expect(repository.createTaskFromSource(source)).toEqual({ created: false, task: linked.task })
+    expect(repository.listTasks(world.id).map((task) => task.id).sort()).toEqual([legacyTask.id, linked.task.id].sort())
   })
 })
 

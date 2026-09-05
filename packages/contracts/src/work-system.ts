@@ -18,6 +18,23 @@ export interface WorkTask {
   currentPlanRevision: number
   createdAt: IsoTimestamp
   updatedAt: IsoTimestamp
+  /**
+   * The conversation turn whose message asked for this task.
+   *
+   * A turn owns at most one task (the database enforces it), so resending,
+   * recovering or retrying that turn finds this task again instead of minting
+   * a duplicate. Absent for tasks created from the board or a schedule, and
+   * released when the settled turn is pruned from history.
+   */
+  sourceWorkTurnId?: string
+  /** The owner message inside that turn that carried the instruction. Outlives the turn: messages are never pruned. */
+  sourceMessageId?: string
+}
+
+/** The one task a conversation turn owns, and whether this call is the one that created it. */
+export interface WorkTaskFromSource {
+  task: WorkTask
+  created: boolean
 }
 
 export type TaskPlanRevisionStatus = 'draft' | 'active' | 'superseded' | 'completed' | 'failed'
