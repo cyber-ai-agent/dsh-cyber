@@ -181,6 +181,29 @@ describe('a chat instruction becomes one task in the task list', () => {
     expect(task).toMatchObject({ status: 'draft', title: '整理用户反馈改进清单', sourceWorkTurnId: queued.body.workTurnId })
   })
 
+  it('answers an immediate send without waiting for a slow decision either', async () => {
+    // The 200 path already waited for the turn, so a settled decision rides
+    // along for free. A decision that has not landed must not hold the reply:
+    // the owner gets their answer, and the task arrives on the live event like
+    // every other task the host records behind an open list.
+    const intent = gatedIntent({ title: '整理用户反馈改进清单', description: '汇总上周用户反馈，输出一份带优先级的改进清单。', priority: 'normal' })
+    const { origin, server, world, employee } = await start(intent)
+
+    const answered = await answeredWithin(
+      json(origin, `/api/worlds/${world.id}/chat`, post({ employeeIds: [employee.id], prompt: INSTRUCTION })),
+      2_000,
+      '即时发送等待了意图判定才返回',
+    )
+    expect(answered.status).toBe(200)
+    expect(answered.body.replies?.length ?? 0).toBeGreaterThan(0)
+    expect(answered.body.proposedTask).toBeUndefined()
+
+    // Released, the decision still lands as a draft on the same turn.
+    intent.release()
+    const recorded = await eventually(() => server.work.list(world.id)[0], '延迟的判定没有落成草稿')
+    expect(recorded).toMatchObject({ status: 'draft', sourceWorkTurnId: answered.body.workTurnId })
+  })
+
   it('keeps a queued turn healthy and puts the failure on the trace when the decision fails late', async () => {
     const intent = gatedIntent(new ServiceError('unavailable', 'model_call_timeout', '模型响应超时。'))
     const { origin, server, world, employee } = await start(intent)
