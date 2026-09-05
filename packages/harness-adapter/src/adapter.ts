@@ -94,6 +94,8 @@ interface EmployeeLane {
   current: LaneTask | undefined
   pending: LaneTask[]
   lastUsed: number
+  resetting?: Promise<void>
+  resetFailed?: boolean
 }
 
 interface EmployeeWorker {
@@ -168,6 +170,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     const conversationId = requiredConversationId(request.conversationId)
     const worker = this.#runtimes.get(request.employee.id) ?? this.#createWorker(request.employee.id)
     const existingLane = worker.lanes.get(conversationId)
+    if (existingLane?.resetFailed) throw new Error('Conversation runtime recovery failed')
     return new Promise<EmployeeTurnResult>((resolvePromise, rejectPromise) => {
       const task: LaneTask = {
         request,
@@ -339,7 +342,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
   }
 
   #pumpLane(worker: EmployeeWorker, lane: EmployeeLane): void {
-    if (lane.current !== undefined) return
+    if (worker.closed || lane.resetFailed || lane.resetting !== undefined || lane.current !== undefined) return
     const task = lane.pending.shift()
     if (task === undefined) {
       this.#drainWaiting(worker)
@@ -356,8 +359,8 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
         if (!task.aborted) task.reject(error)
       })
       .finally(() => {
-        if (task.request.agentRunId !== undefined) this.#activeRuns.delete(task.request.agentRunId)
-        if (task.request.agentRunId !== undefined) this.#runTasks.delete(task.request.agentRunId)
+        if (task.request.agentRunId !== undefined && this.#activeRuns.get(task.request.agentRunId)?.task === task) this.#activeRuns.delete(task.request.agentRunId)
+        if (task.request.agentRunId !== undefined && this.#runTasks.get(task.request.agentRunId)?.task === task) this.#runTasks.delete(task.request.agentRunId)
         if (lane.current === task) lane.current = undefined
         this.#pumpLane(worker, lane)
         this.#drainWaiting(worker)
@@ -394,7 +397,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       return
     }
     const idle = [...worker.lanes.values()]
-      .filter((lane) => lane.current === undefined && lane.pending.length === 0)
+      .filter((lane) => lane.resetting === undefined && lane.current === undefined && lane.pending.length === 0)
       .sort((left, right) => left.lastUsed - right.lastUsed)[0]
     if (worker.lanes.size + worker.closingLanes >= MAX_ACTIVE_LANES_PER_EMPLOYEE && idle !== undefined) {
       worker.lanes.delete(idle.conversationId)
@@ -455,6 +458,9 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     const lanes = [...worker.lanes.values()]
     worker.lanes.clear()
     await Promise.allSettled(lanes.map(async (lane) => {
+      // A lane reset already owns its process close; wait before retiring the
+      // employee so shutdown cannot close that same process concurrently.
+      await lane.resetting?.catch(() => undefined)
       if (lane.current !== undefined) {
         lane.current.aborted = true
         lane.current.reject(new Error('Employee runtime closed'))
@@ -496,6 +502,46 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     await active.lane.runtime?.close()
     active.lane.runtime = undefined
     active.lane.agentSessionId = undefined
+  }
+
+  async resetSession(agentId: string, conversationId: string): Promise<void> {
+    const worker = this.#runtimes.get(agentId)
+    const lane = worker?.lanes.get(conversationId)
+    if (worker === undefined || lane === undefined) return
+    if (lane.resetting !== undefined) return lane.resetting
+    // Keep the lane reserved while close is pending. New work cannot use the
+    // old process or exceed the employee's bounded pool during recovery.
+    const resetting = Promise.resolve().then(async () => {
+      const task = lane.current
+      if (task !== undefined) {
+        task.aborted = true
+        task.reject(new Error('Conversation runtime reset'))
+        const runId = task.request.agentRunId
+        if (runId !== undefined && this.#activeRuns.get(runId)?.task === task) this.#activeRuns.delete(runId)
+        if (runId !== undefined && this.#runTasks.get(runId)?.task === task) this.#runTasks.delete(runId)
+      }
+      await lane.runtime?.close()
+      lane.runtime = undefined
+      lane.agentSessionId = undefined
+      if (lane.current === task) lane.current = undefined
+      delete lane.resetFailed
+    })
+    lane.resetting = resetting
+    try {
+      await resetting
+    } catch (error) {
+      lane.resetFailed = true
+      for (const pending of lane.pending.splice(0)) {
+        pending.aborted = true
+        pending.reject(error)
+        if (pending.request.agentRunId !== undefined) this.#runTasks.delete(pending.request.agentRunId)
+      }
+      throw error
+    } finally {
+      delete lane.resetting
+      this.#pumpLane(worker, lane)
+      this.#drainWaiting(worker)
+    }
   }
 
   closeAgent(agentId: string): Promise<void> {

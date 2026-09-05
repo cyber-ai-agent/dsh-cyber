@@ -66,3 +66,7 @@ pnpm typecheck
 pnpm test
 pnpm exec playwright test e2e/digital-human-world.spec.ts
 ```
+
+## 审计整改记录 v2026.09.05-01
+
+新增运行生命周期工程护栏，原因：审计 F01–F03 确认重试 finally 提前清理、角色级恢复扩大故障域、模型代际创建竞争。落实有界尝试、会话级重置、代际租约与任务身份清理；执行状态及验收见 `development/audit-remediation-2026-09-05.md`。本文不记录凭据或用户数据。
