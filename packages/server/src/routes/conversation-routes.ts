@@ -485,7 +485,16 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
         })
       }
     }
-    const proposedTask = await settleTaskIntent(taskIntent, proposedTaskIntent, world, result)
+    // An immediate send has already waited for the turn the classification was
+    // started alongside, so the answer is there and travels back with it. A
+    // queued send has run nothing: it reserved a turn and is done, and making
+    // it wait for a decision about that turn would charge it the classifier's
+    // whole ceiling for a draft nobody is looking at yet. So the recording
+    // follows on its own, and the open task list hears about it the way it
+    // hears about every other task the host records — `world-task`.
+    let proposedTask: WorkTask | undefined
+    if (responseStatus === 202) deferTaskIntent(taskIntent, proposedTaskIntent, world, result, worldTrace, runtimeStreamHub)
+    else proposedTask = await settleTaskIntent(taskIntent, proposedTaskIntent, world, result)
     for (const employeeId of runtimeEmployeeIds) employeeActivity.project(employeeId)
     worldRuntime.publishCurrent(world.id)
     writeJson(response, responseStatus, proposedTask === undefined ? result : { ...result, proposedTask })
@@ -658,13 +667,13 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
 }
 
 /**
- * Records the task this turn asked for, once the turn owns an id.
+ * Records the task this turn asked for, once the turn owns an id, and hands it
+ * back so the response can carry it.
  *
- * Every chat entry point returns the WorkTurn it created — the queued one
- * included, which is why a queued instruction is visible as a task before it
- * ever runs. A result carrying no turn has nothing to own a task and records
- * none. This never throws and never starts anything: `attach` writes the draft
- * row, and executing it stays an explicit action by the owner.
+ * Only for a send that already waited for its turn. A result carrying no turn
+ * has nothing to own a task and records none. This never throws and never
+ * starts anything: `attach` writes the draft row, and executing it stays an
+ * explicit action by the owner.
  */
 async function settleTaskIntent(
   taskIntent: ConversationTaskIntentService | undefined,
@@ -673,7 +682,51 @@ async function settleTaskIntent(
   result: unknown,
 ): Promise<WorkTask | undefined> {
   if (taskIntent === undefined || pending === undefined) return undefined
-  const outcome = await pending
+  return attachSettledIntent(taskIntent, await pending, world, result)
+}
+
+/**
+ * The same recording, off the response's critical path.
+ *
+ * Used by the queued send, whose 202 therefore carries no `proposedTask`: at
+ * the moment it is written there is no answer yet, and inventing a field for
+ * one would be the delay this exists to remove. What the owner sees instead is
+ * the live event — the task appears in an open list a moment later, still in
+ * `draft`, exactly as it would have.
+ *
+ * The request's own trace checkpoint was spent before this answer existed, so
+ * a fresh one is taken here; without it the failure of a late decision would
+ * only reach the trace on the next read of it.
+ */
+function deferTaskIntent(
+  taskIntent: ConversationTaskIntentService | undefined,
+  pending: Promise<ConversationTaskIntentOutcome> | undefined,
+  world: { id: string; workspaceId: string },
+  result: unknown,
+  trace: WorldTraceService,
+  stream: RuntimeStreamHub,
+): void {
+  if (taskIntent === undefined || pending === undefined) return
+  void (async () => {
+    try {
+      const outcome = await pending
+      const checkpoint = await createTraceCheckpoint(world.id, trace)
+      attachSettledIntent(taskIntent, outcome, world, result)
+      await publishTraceChanges(world.id, trace, checkpoint, stream)
+    } catch {
+      // Every step above is already total. This guard is here so that a change
+      // to one of them can never turn a background decision into an unhandled
+      // rejection that takes the process down.
+    }
+  })()
+}
+
+function attachSettledIntent(
+  taskIntent: ConversationTaskIntentService,
+  outcome: ConversationTaskIntentOutcome,
+  world: { id: string; workspaceId: string },
+  result: unknown,
+): WorkTask | undefined {
   const workTurnId = (result as { workTurnId?: unknown }).workTurnId
   if (typeof workTurnId !== 'string' || workTurnId === '') return undefined
   const sessionId = (result as { session?: { id?: unknown } }).session?.id
