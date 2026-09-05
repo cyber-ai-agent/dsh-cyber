@@ -18,6 +18,7 @@ import { writeError } from './http/errors.js'
 import { Router } from './http/router.js'
 import { isLoopbackHost } from './http/security.js'
 import { closeServer, listenBrowserSafe } from './http/server-lifecycle.js'
+import { createServerWithStateRootLease } from './services/server-state-lifecycle.js'
 import { registerAmbientLifeRoutes } from './routes/ambient-life-routes.js'
 import { registerApplicationAccessRoutes } from './routes/application-access-routes.js'
 import { registerAssetRoutes } from './routes/asset-routes.js'
@@ -177,6 +178,10 @@ export interface CyberServer {
 }
 
 export async function createCyberServer(options: CyberServerOptions): Promise<CyberServer> {
+  return createServerWithStateRootLease(options, createLeasedCyberServer)
+}
+
+async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpened: (store: SqliteStore) => void): Promise<CyberServer> {
   const host = options.host ?? DEFAULT_HOST
   if (!isLoopbackHost(host)) throw new Error('Phase 1 server only supports loopback hosts')
   const port = options.port ?? DEFAULT_PORT
@@ -192,6 +197,7 @@ export async function createCyberServer(options: CyberServerOptions): Promise<Cy
   if (!compatibility.ok) throw new Error(`Harness compatibility check failed: ${compatibility.errors.join('; ')}`)
 
   const store = await SqliteStore.open(join(stateRoot, 'data', 'dsh-cyber.sqlite'))
+  onStoreOpened(store)
   store.recoverConversationQueueLeases(true)
   store.recoverConversationRuntimeAfterRestart()
   // Built-in blueprint identities are immutable once persisted. Older local

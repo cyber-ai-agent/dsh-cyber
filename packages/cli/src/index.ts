@@ -10,7 +10,7 @@ import {
   readActiveHarnessRuntime,
 } from '@dsh-cyber/harness-adapter'
 import { SqliteStore } from '@dsh-cyber/persistence'
-import { createCyberServer, createLocalBackupBundle, restoreLocalBackupBundle, type CyberServer } from '@dsh-cyber/server'
+import { acquireStateRootLease, createCyberServer, createLocalBackupBundle, recoverLocalRestoreTransactions, restoreLocalBackupBundle, type CyberServer } from '@dsh-cyber/server'
 
 export interface CliIo {
   stdout: (line: string) => void
@@ -26,6 +26,7 @@ export interface CliContext {
 }
 
 export async function runCli(args: string[], context: CliContext = {}): Promise<number> {
+  let releaseState: (() => Promise<void>) | undefined
   const io = context.io ?? {
     stdout: (line) => console.log(line),
     stderr: (line) => console.error(line),
@@ -40,6 +41,12 @@ export async function runCli(args: string[], context: CliContext = {}): Promise<
     const environment = context.environment ?? process.env
     const cwd = resolve(context.cwd ?? process.cwd())
     const stateRoot = resolve(optionString(options, 'data-dir') ?? defaultStateRoot(environment))
+    // Offline commands must not open SQLite halfway through a restore. The
+    // running server offers its own live backup/diagnostic endpoints.
+    if (['doctor', 'runtime-check', 'runtime-rollback', 'backup', 'export', 'prune'].includes(command)) {
+      releaseState = await acquireStateRootLease(stateRoot)
+      await recoverLocalRestoreTransactions(stateRoot)
+    }
 
     if (command === 'web') {
       const port = optionInteger(options, 'port') ?? 43123
@@ -171,6 +178,8 @@ export async function runCli(args: string[], context: CliContext = {}): Promise<
   } catch (error) {
     io.stderr(error instanceof Error ? error.message : String(error))
     return 1
+  } finally {
+    await releaseState?.()
   }
 }
 
@@ -201,7 +210,7 @@ function parseOptions(args: string[]): Map<string, string | true> {
     if (token === undefined || !token.startsWith('--')) throw new Error(`Unexpected argument: ${token}`)
     const key = token.slice(2)
     if (!key) throw new Error('Invalid empty option')
-    if (key === 'no-open') {
+    if (key === 'no-open' || key === 'force') {
       options.set(key, true)
       continue
     }
