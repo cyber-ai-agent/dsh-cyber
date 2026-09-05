@@ -368,7 +368,8 @@ test('runs direct and group conversations with real world lifecycle, persistence
   expect(server.store.getEmployee(engineer.id)?.status).toBe('available')
   expect(server.store.getEmployee(product.id)?.status).toBe('available')
   await expect(page.getByRole('heading', { name: '世界运行时联席会' })).toBeVisible()
-  await expect(page.getByLabel('当前会话成员')).toContainText('阿帆、小周')
+  // 群聊成员现在写在会话头像的可访问名称里。
+  await expect(chat.getByRole('img', { name: '群聊头像：阿帆、小周' })).toBeVisible()
   await composer.fill('请召开真实多人会议，依次汇报恢复方案。')
   await page.getByRole('button', { name: '发送' }).click()
   await expect.poll(() => server.store.listWorldDomainEvents(worldId).filter((event) => event.type === 'meeting.finished').length).toBeGreaterThan(0)
@@ -377,7 +378,9 @@ test('runs direct and group conversations with real world lifecycle, persistence
   const latestMeeting = meetingEvents.at(-1)!
   expect(latestMeeting.payload.participantIds).toEqual([engineer.id, product.id])
   const groupSession = server.store.listSessions(worldId).find((session) => session.kind === 'group')!
-  expect(server.store.listMessages(groupSession.id).filter((message) => message.kind === 'assistant').map((message) => message.senderId)).toEqual([engineer.id, product.id])
+  // 同一波次里被判定为彼此独立的发言者并发运行，落库先后由谁先返回决定；
+  // 会议名单的顺序（上一行）才是确定的，这里断言两名成员各真实发言一次。
+  expect(server.store.listMessages(groupSession.id).filter((message) => message.kind === 'assistant').map((message) => message.senderId).sort()).toEqual([engineer.id, product.id].sort())
 
   const evidenceEvent = server.store.listWorldDomainEvents(worldId).find((event) => event.type === 'task.completed')!
   for (const category of ['skill', 'delivery', 'promotion'] as const) {
@@ -700,7 +703,7 @@ test('discovers, installs, and creates a visually distinct world from the world-
   await market.getByRole('checkbox', { name: /我已审阅发布者/ }).check()
   await market.getByRole('button', { name: /批准安装/ }).click()
   await expect(storytellerCard.getByRole('button', { name: '招募到世界' })).toBeVisible()
-  await storytellerCard.getByRole('button', { name: '招募到世界' }).click()
+  // 安装完成后右侧审阅区先说明模板与当前世界的关系，再由「选择名字与权限」进入招募。
   await expect(market.getByText('角色模板已安装')).toBeVisible()
   await expect(market.getByText('与当前世界兼容')).toBeVisible()
   await page.screenshot({ path: join(process.cwd(), 'artifacts', 'market-activation-audit', 'role-ready-1920x1080.png') })
@@ -852,8 +855,10 @@ test('keeps chat conversational while World Trace explains execution during and 
   }).toBe(agentTraceBefore.items.length + 1)
   const agentTraceAfter = await (await fetch(`${origin}/api/worlds/${traceWorld.id}/trace?category=tool&actorId=${traceEmployee.id}&limit=200`)).json() as typeof agentTraceBefore
   expect(agentTraceAfter.items).toHaveLength(agentTraceBefore.items.length + 1)
-  // 同一条轨迹在回合内被更新，不会多出第二张完成卡片。
-  await expect(page.locator('.world-trace-item').filter({ hasText: '完成处理' }).filter({ hasText: '阿帆' })).toHaveCount(1)
+  // 同一条轨迹在回合内被更新：界面上的完成卡片数量与服务端记录一一对应，
+  // 不会为同一次运行多画一张生命周期卡片。
+  const completedRuns = agentTraceAfter.items.filter((item) => item.summary.includes('完成处理')).length
+  await expect(page.locator('.world-trace-item').filter({ hasText: '完成处理' }).filter({ hasText: '阿帆' })).toHaveCount(completedRuns)
   await openTraceEntry(page, '完成处理', '阿帆')
 
   // 5) 模型执行失败不撤回已经持久化的用户消息；排队回合的失败原因进入轨迹
@@ -866,7 +871,9 @@ test('keeps chat conversational while World Trace explains execution during and 
   expect((await failedChatResponse).status()).toBe(202)
   await expect(page.locator('.message--owner').filter({ hasText: failedOwnerText })).toBeVisible()
   const failedTrace = await openTraceEntry(page, '处理失败')
-  await expect(failedTrace.locator('.world-trace-item__detail')).toContainText('本轮运行未能完成，请在会话中重试。')
+  // 轨迹按运行返回的失败码给出可执行的说明，而不是一句通用的「请重试」。
+  await expect(failedTrace.locator('.world-trace-item__detail')).toContainText('模型服务认证失败')
+  await expect(failedTrace.locator('.world-trace-item__detail')).toContainText('检查密钥和接口权限')
 
   // 视觉审批证据：记录控制台 error/warn，并断言无未捕获页面错误
   await writeFile(
@@ -987,27 +994,29 @@ test('guides new users through world, role, permission, and review steps in Crea
   await workshop.getByLabel('当前目标').fill('验证引导式创建和最小权限配置。')
   await workshop.getByRole('button', { name: /下一步/ }).click()
 
-  await expect(workshop.getByRole('heading', { name: '配置初始角色' })).toBeVisible()
-  await expect(workshop.getByLabel('搜索角色 Skills')).toHaveCount(0)
+  await expect(workshop.getByRole('heading', { name: '检查初始角色' })).toBeVisible()
+  await expect(workshop.getByLabel('搜索角色技能')).toHaveCount(0)
   await workshop.getByLabel('角色名字').fill('向导管理员')
-  await workshop.getByLabel('岗位 / 身份').fill('世界管家')
-  await workshop.getByLabel('职责摘要').fill('管理当前世界的角色设定和协作边界。')
-  await workshop.getByLabel('工作原则与表达方式').fill('先核对当前世界身份和权限，再执行清晰、可审计的操作。')
+  // 名字之外都是可稍后补充的推荐信息，收在一个折叠区里。
+  await workshop.locator('.workshop-disclosure summary').click()
+  await workshop.getByLabel('岗位 / 身份（可选）').fill('世界管家')
+  await workshop.getByLabel('职责摘要（可选）').fill('管理当前世界的角色设定和协作边界。')
+  await workshop.getByLabel('工作原则与表达方式（可选）').fill('先核对当前世界身份和权限，再执行清晰、可审计的操作。')
   await workshop.getByRole('button', { name: /下一步/ }).click()
 
-  await expect(workshop.getByRole('heading', { name: '为角色配置能力范围' })).toBeVisible()
-  const skillSearch = workshop.getByLabel('搜索角色 Skills')
+  await expect(workshop.getByRole('heading', { name: '检查模型与能力' })).toBeVisible()
+  const skillSearch = workshop.getByLabel('搜索角色技能')
   await expect(skillSearch).toBeVisible()
   const firstSkill = workshop.locator('.creative-workshop-skill-catalog input[type="checkbox"]').first()
   await expect(firstSkill).toBeVisible()
   await firstSkill.check()
-  await expect(workshop.getByText('已选择 1 个 Skill')).toBeVisible()
+  await expect(workshop.getByText('已选择 1 个技能')).toBeVisible()
   await workshop.getByRole('button', { name: /下一步/ }).click()
 
   await expect(workshop.getByRole('heading', { name: '确认后创建本地世界' })).toBeVisible()
   await expect(workshop.getByText('向导验收世界', { exact: true })).toBeVisible()
   await expect(workshop.getByText('向导管理员', { exact: true })).toBeVisible()
-  await expect(workshop.getByText('请求 1 个 Skill')).toBeVisible()
+  await expect(workshop.getByText('请求 1 个技能')).toBeVisible()
   await page.setViewportSize({ width: 1_920, height: 1_080 })
   await page.screenshot({ path: join(process.cwd(), 'artifacts', 'settings-experience', 'workshop-review-1920x1080.png') })
   await workshop.getByRole('button', { name: '关闭创意工坊' }).click()
