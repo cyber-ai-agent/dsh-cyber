@@ -173,10 +173,10 @@ test('installs governed Browser read, keeps action approval one-shot, and persis
   await page.reload()
   await expect(page.locator('.workbench-shell')).toBeVisible()
   await expect(page.getByRole('button', { name: '当前消息权限' })).toContainText('完全访问')
-  await page.getByLabel(new RegExp(`切换世界，当前为${world.name}`)).click()
+  await page.getByLabel(new RegExp(`切换世界：${world.name}`)).click()
   await page.getByRole('menuitemradio', { name: new RegExp(secondWorld.body.world.name) }).click()
-  await expect(page.getByLabel(new RegExp(`切换世界，当前为${secondWorld.body.world.name}`))).toBeVisible()
-  await page.getByLabel(new RegExp(`切换世界，当前为${secondWorld.body.world.name}`)).click()
+  await expect(page.getByLabel(new RegExp(`切换世界：${secondWorld.body.world.name}`))).toBeVisible()
+  await page.getByLabel(new RegExp(`切换世界：${secondWorld.body.world.name}`)).click()
   await page.getByRole('menuitemradio', { name: new RegExp(world.name) }).click()
   await expect(page.getByRole('button', { name: '当前消息权限' })).toContainText('完全访问')
 

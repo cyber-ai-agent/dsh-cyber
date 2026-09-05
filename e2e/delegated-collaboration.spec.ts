@@ -88,7 +88,10 @@ test('lets the user delegate a real role consultation and receive a grounded rep
     delegatedPeerSessionId: meeting.id,
     delegatedParticipantIds: [butler.id, engineer.id],
   })
-  expect(directMessages.find((message) => message.kind === 'assistant')).toMatchObject({
+  // The report is streamed into the chat before its row is committed, so on a
+  // loaded machine the visible text can arrive a beat ahead of the store. Poll
+  // for the same durable fact instead of reading it once.
+  await expect.poll(() => server.store.listMessages(direct.id).find((message) => message.kind === 'assistant')).toMatchObject({
     senderId: butler.id,
     content: expect.stringContaining('我已经向阿帆确认'),
   })

@@ -434,7 +434,8 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
       </div>
       <header className="chat-header">
         <div className="chat-header__identity">
-          <span className={`chat-header__avatars${conversationKind === 'group' || conversationKind === 'meeting' ? ' chat-header__avatars--group' : ''}`} aria-hidden={directEmployee === undefined}>
+          {/* 群聊头像自己带 role="img" 和成员名，是这里唯一的成员说明，不能被 aria-hidden 藏掉。 */}
+          <span className={`chat-header__avatars${conversationKind === 'group' || conversationKind === 'meeting' ? ' chat-header__avatars--group' : ''}`}>
             {directEmployee !== undefined
               ? <button className="chat-header__avatar-button" type="button" onClick={() => onOpenDossier(directEmployee.id)} aria-label={`打开${directEmployee.displayName}角色`} title={`打开${directEmployee.displayName}角色`}><Avatar index={directEmployee.avatarIndex} size="sm" label={directEmployee.displayName} authorityRole={directEmployee.authorityRole} assetUrl={directEmployee.avatarAssetUrl} rendererKind={directEmployee.avatarProfile?.rendererKind} /></button>
               : <GroupAvatar participants={participantEmployees} size="md" />}
