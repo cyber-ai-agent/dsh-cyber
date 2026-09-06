@@ -91,4 +91,6 @@ Direct HTTP 接线检查点：`/chat` 的 direct immediate/queued 在 task class
 
 Group HTTP 接线检查点：`/chat` 的 discussion/task immediate/queued 在 planner 前先查 claim；无命中才规划实际 reservation，并原子写入计划 metadata 与事实。无 queue 的 group 复用 `runAcceptedGroup(existingWorkTurnId)`，审批回调同样继续该回合；有 queue 仍由原 dispatcher 执行。并发 discussion、完成后 task queue 重试均保持一个 WorkTurn、owner 消息和既有 AgentRuns；不同 roster/payload 的同 key 返回 409。群聊/Skill/路由及架构定向 21 项通过。委托协作与旧 `/chat-queue` 仍待接入。
 
+旧 `/chat-queue` direct 兼容入口已改为先 claim 后建会话；与 `/chat` 的 `queueMode=normal` 可跨入口回放同一 queue/WorkTurn。无 sessionId 重试不再创建空会话，改变 payload 返回 409；无 clientTurnId 的旧调用保持原行为但不承诺幂等。构建预算通过，受理/队列/持久化定向 23 项通过。委托协作、任务中心与日程仍未接入。
+
 已创建当前任务的“DSH Cyber 审计持续整改”自动接续（每小时），沿用此分支与 PR #178。电脑和桌面应用运行时继续未完成批次；每批更新证据，完成全部整改后暂停。自动接续不是剩余批次已完成的声明。

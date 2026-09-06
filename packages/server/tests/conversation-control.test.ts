@@ -108,6 +108,36 @@ describe('Conversation control and durable queue', () => {
     expect(runtime.calls).toHaveLength(1)
   })
 
+  it('shares one queued claim across the legacy and current chat endpoints without orphan sessions', async () => {
+    const { origin, server, runtime, world, employee } = await start()
+    const legacyBody = {
+      employeeIds: [employee.id],
+      prompt: 'legacy queue idempotency',
+      clientTurnId: 'legacy-queue-shared-claim',
+    }
+    const legacy = await json(origin, `/api/worlds/${world.id}/chat-queue`, post(legacyBody))
+    expect(legacy.response.status).toBe(202)
+    const current = await json(origin, `/api/worlds/${world.id}/chat`, post({
+      ...legacyBody,
+      queueMode: 'normal',
+    }))
+    expect(current.response.status).toBe(202)
+    expect(current.body.workTurnId).toBe(legacy.body.workTurnId)
+    expect(current.body.queueItem.id).toBe(legacy.body.queueItem.id)
+    await waitFor(() => server.store.getWorkTurn(legacy.body.workTurnId)?.status === 'completed')
+    expect(runtime.calls).toHaveLength(1)
+    expect(server.store.listSessions(world.id)).toHaveLength(1)
+    expect(server.store.listSessionTurns(legacy.body.session.id)).toHaveLength(1)
+    expect(server.store.listMessages(legacy.body.session.id).filter((message) => message.kind === 'user')).toHaveLength(1)
+
+    const conflict = await json(origin, `/api/worlds/${world.id}/chat-queue`, post({
+      ...legacyBody,
+      prompt: 'changed legacy payload',
+    }))
+    expect(conflict.response.status).toBe(409)
+    expect(server.store.listSessions(world.id)).toHaveLength(1)
+  })
+
   it('replays one immediate group discussion without a second plan, turn, message or run', async () => {
     const { origin, server, runtime, world, employee } = await start()
     const colleague = server.store.recruitEmployee({

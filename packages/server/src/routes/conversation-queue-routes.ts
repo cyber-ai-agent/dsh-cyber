@@ -10,6 +10,11 @@ import type { Router } from '../http/router.js'
 import { writeJson } from '../http/response.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
 import { ConversationQueueService } from '../services/conversation-queue-service.js'
+import {
+  ConversationIngressService,
+  conversationIngressFingerprint,
+  conversationPromptHash,
+} from '../services/conversation-ingress-service.js'
 
 export interface ConversationQueueRoutesDependencies {
   store: SqliteStore
@@ -19,6 +24,7 @@ export interface ConversationQueueRoutesDependencies {
 
 export function registerConversationQueueRoutes(router: Router, dependencies: ConversationQueueRoutesDependencies): void {
   const { store, worldAccess, queue } = dependencies
+  const ingress = new ConversationIngressService({ store })
 
   router.post(/^\/api\/worlds\/([^/]+)\/(?:chat\/(?:queue|queued)|chat-queue)$/, async ({ request, response, params }) => {
     const world = requireWorldAcceptingWork(store, params[0]!)
@@ -34,6 +40,71 @@ export function registerConversationQueueRoutes(router: Router, dependencies: Co
       throw new HttpError(422, 'character_unavailable', '所选角色不属于当前世界或已归档')
     }
     const requestedSessionId = optionalString(body.sessionId)
+    const permissionMode = parsePermissionMode(body.permissionMode)
+    const reasoningEffort = parseReasoningEffort(body.reasoningEffort)
+    const clientTurnId = optionalString(body.clientTurnId)
+    const metadata: JsonObject = {
+      interactionKind: 'chat',
+      queueEmployeeId: employee.id,
+      ...(permissionMode === undefined ? {} : { permissionMode }),
+      ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+      ...(clientTurnId === undefined ? {} : { clientTurnId }),
+    }
+    const queuePosition = optionalString(body.queuePosition)
+    if (queuePosition !== undefined && queuePosition !== 'normal' && queuePosition !== 'next') {
+      throw new HttpError(422, 'invalid_queue_position', 'queuePosition must be normal or next')
+    }
+    if (clientTurnId !== undefined) {
+      const queueMode = queuePosition === 'next' ? 'next' as const : 'normal' as const
+      const title = optionalString(body.title)
+      const fingerprintSha256 = conversationIngressFingerprint({
+        workspaceId: world.workspaceId,
+        worldId: world.id,
+        clientTurnId,
+        kind: 'direct',
+        promptHash: conversationPromptHash(prompt),
+        employeeIds: [employee.id],
+        ...(requestedSessionId === undefined ? {} : { sessionId: requestedSessionId }),
+        ...(title === undefined ? {} : { title }),
+        interactionKind: 'chat',
+        queueMode,
+        ...(permissionMode === undefined ? {} : { permissionMode }),
+        ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+        attachments: [],
+      })
+      const accepted = await ingress.run({
+        identity: { workspaceId: world.workspaceId, worldId: world.id, clientTurnId, fingerprintSha256 },
+        prepare: () => ({
+          input: {
+            workspaceId: world.workspaceId,
+            worldId: world.id,
+            idempotencyKey: clientTurnId,
+            fingerprintSha256,
+            ...(requestedSessionId === undefined ? {} : { sessionId: requestedSessionId }),
+            sessionKind: 'direct',
+            ...(title === undefined ? {} : { sessionTitle: title }),
+            participantEmployeeIds: [employee.id],
+            reservationEmployeeIds: [employee.id],
+            interactionKind: 'chat',
+            ownerMessage: { content: prompt, metadata },
+            queue: {
+              employeeIds: [employee.id],
+              queueMode,
+              ...(permissionMode === undefined ? {} : { permissionMode }),
+              ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+            },
+          },
+          context: undefined,
+        }),
+        execute: (receipt) => {
+          queue.wake()
+          return queuedReceipt(receipt)
+        },
+        replay: queuedReceipt,
+      })
+      writeJson(response, 202, accepted.value)
+      return
+    }
     const session = requestedSessionId === undefined
       ? store.createSession({
           workspaceId: world.workspaceId,
@@ -49,20 +120,6 @@ export function registerConversationQueueRoutes(router: Router, dependencies: Co
       : store.getSession(requestedSessionId)
     if (session === undefined || session.worldId !== world.id || session.kind !== 'direct') {
       throw new HttpError(422, 'session_unavailable', '所选会话不可用于排队')
-    }
-    const permissionMode = parsePermissionMode(body.permissionMode)
-    const reasoningEffort = parseReasoningEffort(body.reasoningEffort)
-    const clientTurnId = optionalString(body.clientTurnId)
-    const metadata: JsonObject = {
-      interactionKind: 'chat',
-      queueEmployeeId: employee.id,
-      ...(permissionMode === undefined ? {} : { permissionMode }),
-      ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
-      ...(clientTurnId === undefined ? {} : { clientTurnId }),
-    }
-    const queuePosition = optionalString(body.queuePosition)
-    if (queuePosition !== undefined && queuePosition !== 'normal' && queuePosition !== 'next') {
-      throw new HttpError(422, 'invalid_queue_position', 'queuePosition must be normal or next')
     }
     const queued = queue.enqueueDirect({
       workspaceId: world.workspaceId,
@@ -169,6 +226,17 @@ export function registerConversationQueueRoutes(router: Router, dependencies: Co
     const sessionId = optionalString(url.searchParams.get('sessionId'))
     writeJson(response, 200, { removed: queue.clear(world.id, world.workspaceId, sessionId) })
   })
+}
+
+function queuedReceipt(receipt: import('@dsh-cyber/contracts').ConversationSubmissionReceipt) {
+  if (receipt.queueEntry === undefined) throw new Error('Queued submission claim has no queue entry')
+  return {
+    session: receipt.session,
+    workTurnId: receipt.workTurn.id,
+    queueEntry: receipt.queueEntry,
+    queueItem: receipt.queueEntry,
+    status: 'queued' as const,
+  }
 }
 
 function queueErrorMessage(errorCode: string): string {
