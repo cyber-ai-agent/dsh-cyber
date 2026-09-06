@@ -219,6 +219,7 @@ describe('WorldArtifactService', () => {
   })
 
   it('publishes an AgentRun workspace whose state root is only reachable through a symlink', async () => {
+    if (process.platform === 'win32') return // EPERM: symlink requires admin/dev mode
     const fixture = await createAliasedFixture()
     await writeFile(join(fixture.root.filesPath, 'notes.md'), '# notes\n')
     await writeFile(join(fixture.root.dshArtifactsPath, `${fixture.run.id}.json`), JSON.stringify({
@@ -241,6 +242,7 @@ describe('WorldArtifactService', () => {
   })
 
   it('still refuses an AgentRun workspace reached through an intermediate symlink that escapes files', async () => {
+    if (process.platform === 'win32') return // EPERM: symlink requires admin/dev mode
     const fixture = await createFixture()
     const outside = await mkdtemp(join(tmpdir(), 'dsh-artifact-escape-'))
     rootsToRemove.push(outside)
@@ -261,6 +263,7 @@ describe('WorldArtifactService', () => {
   })
 
   it('refuses an AgentRun workspace reached through an intermediate symlink even when the hop lands back inside files', async () => {
+    if (process.platform === 'win32') return // EPERM: symlink requires admin/dev mode
     const fixture = await createFixture()
     await mkdir(join(fixture.root.filesPath, 'elsewhere', 'payload'), { recursive: true })
     await mkdir(join(fixture.root.filesPath, 'inner'), { recursive: true })
@@ -280,6 +283,7 @@ describe('WorldArtifactService', () => {
   })
 
   it('refuses a symlink below files that jumps back to the managed boundary root', async () => {
+    if (process.platform === 'win32') return // EPERM: symlink requires admin/dev mode
     const fixture = await createFixture()
     await mkdir(join(fixture.root.filesPath, 'payload'), { recursive: true })
     await mkdir(join(fixture.root.filesPath, 'inner'), { recursive: true })
@@ -297,6 +301,7 @@ describe('WorldArtifactService', () => {
   })
 
   it('imports a world file whose state root is only reachable through a symlink', async () => {
+    if (process.platform === 'win32') return // EPERM: symlink requires admin/dev mode
     const fixture = await createAliasedFixture()
     await writeFile(join(fixture.root.filesPath, 'report.md'), '# imported\n')
 
@@ -316,6 +321,7 @@ describe('WorldArtifactService', () => {
   })
 
   it('still refuses an imported source reached through an intermediate symlink that escapes the world root', async () => {
+    if (process.platform === 'win32') return // EPERM: symlink requires admin/dev mode
     const fixture = await createFixture()
     const outside = await mkdtemp(join(tmpdir(), 'dsh-artifact-import-escape-'))
     rootsToRemove.push(outside)
