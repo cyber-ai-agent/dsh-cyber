@@ -8,6 +8,7 @@ import { SqliteStore } from '@dsh-cyber/persistence'
 import type { ConversationOrchestrator } from '@dsh-cyber/orchestration'
 import { createCyberServer, type CyberServer } from '../src/index.js'
 import { ConversationQueueService } from '../src/services/conversation-queue-service.js'
+import { conversationIngressFingerprint, conversationPromptHash } from '../src/services/conversation-ingress-service.js'
 
 const servers: CyberServer[] = []
 const roots: string[] = []
@@ -80,6 +81,33 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 describe('Conversation control and durable queue', () => {
+  it('replays one claimed immediate turn and rejects a changed request with the same client id', async () => {
+    const { origin, server, runtime, world, employee } = await start()
+    const body = {
+      employeeIds: [employee.id],
+      prompt: '只执行一次的即时请求',
+      clientTurnId: 'immediate-idempotent-once',
+    }
+    const [first, duplicate] = await Promise.all([
+      json(origin, `/api/worlds/${world.id}/chat`, post(body)),
+      json(origin, `/api/worlds/${world.id}/chat`, post(body)),
+    ])
+    expect([first.response.status, duplicate.response.status]).toEqual([200, 200])
+    expect(duplicate.body.workTurnId).toBe(first.body.workTurnId)
+    expect(duplicate.body.session.id).toBe(first.body.session.id)
+    expect(runtime.calls).toHaveLength(1)
+    expect(server.store.listSessionTurns(first.body.session.id)).toHaveLength(1)
+    expect(server.store.listMessages(first.body.session.id).filter((message) => message.kind === 'user')).toHaveLength(1)
+
+    const conflict = await json(origin, `/api/worlds/${world.id}/chat`, post({
+      ...body,
+      prompt: '同一个 key 的另一条内容',
+    }))
+    expect(conflict.response.status).toBe(409)
+    expect(conflict.body.error).toMatchObject({ code: 'client_turn_conflict' })
+    expect(runtime.calls).toHaveLength(1)
+  })
+
   it('rejects an oversized CJK prompt before the runtime for immediate and queued chat', async () => {
     const { origin, server, runtime, world, employee } = await start()
     const profile = server.store.saveModelProfile({
@@ -113,7 +141,7 @@ describe('Conversation control and durable queue', () => {
     expect(immediate.body.error.message).toContain('上下文')
     expect(runtime.calls).toHaveLength(0)
 
-    const queued = await json(origin, `/api/worlds/${world.id}/chat-queue`, post({
+    const queued = await json(origin, `/api/worlds/${world.id}/chat`, post({
       employeeIds: [employee.id],
       prompt,
       queueMode: 'normal',
@@ -142,7 +170,7 @@ describe('Conversation control and durable queue', () => {
 
   it('claims a queued WorkTurn and continues the original turn without rebuilding it', async () => {
     const { origin, server, runtime, world, employee } = await start()
-    const queued = await json(origin, `/api/worlds/${world.id}/chat-queue`, post({
+    const queued = await json(origin, `/api/worlds/${world.id}/chat`, post({
       employeeIds: [employee.id],
       prompt: '排队执行一次真实回复',
       queueMode: 'normal',
@@ -165,6 +193,33 @@ describe('Conversation control and durable queue', () => {
     const messages = server.store.listMessages(queued.body.session.id)
     expect(messages.filter((message) => message.kind === 'user')).toHaveLength(1)
     expect(messages.some((message) => message.kind === 'assistant')).toBe(true)
+    const fingerprintBase = {
+      workspaceId: world.workspaceId, worldId: world.id, clientTurnId: 'client-queued-once', kind: 'direct' as const,
+      promptHash: conversationPromptHash(messages.find((message) => message.kind === 'user')!.content), employeeIds: [employee.id],
+      interactionKind: 'chat' as const, queueMode: 'normal' as const, attachments: [],
+    }
+    const claimedFingerprint = server.store.getConversationSubmissionClaim(world.workspaceId, world.id, 'client-queued-once')?.claim.fingerprintSha256
+    const candidates = [
+      ['base', conversationIngressFingerprint(fingerprintBase)],
+      ['permission', conversationIngressFingerprint({ ...fingerprintBase, permissionMode: 'read-only' })],
+      ['reasoning', conversationIngressFingerprint({ ...fingerprintBase, reasoningEffort: 'high' })],
+      ['both', conversationIngressFingerprint({ ...fingerprintBase, permissionMode: 'read-only', reasoningEffort: 'high' })],
+      ['session', conversationIngressFingerprint({ ...fingerprintBase, sessionId: queued.body.session.id })],
+      ['title', conversationIngressFingerprint({ ...fingerprintBase, title: `与 ${employee.displayName} 对话` })],
+      ['session-permission', conversationIngressFingerprint({ ...fingerprintBase, sessionId: queued.body.session.id, permissionMode: 'read-only' })],
+    ]
+    expect(candidates).toContainEqual(['base', claimedFingerprint])
+    const replay = await json(origin, `/api/worlds/${world.id}/chat`, post({
+      employeeIds: [employee.id],
+      prompt: '排队执行一次真实回合',
+      queueMode: 'normal',
+      clientTurnId: 'client-queued-once',
+      ...{ prompt: messages.find((message) => message.kind === 'user')!.content },
+    }))
+    expect(replay.response.status, JSON.stringify(replay.body)).toBe(202)
+    expect(replay.body.workTurnId).toBe(queued.body.workTurnId)
+    expect(replay.body.queueItem.id).toBe(queued.body.queueItem.id)
+    expect(runtime.calls).toHaveLength(1)
     const terminalStop = await json(origin, `/api/turns/${queued.body.workTurnId}/abort`, post({ reason: 'late-stop' }))
     expect(terminalStop.response.status).toBe(200)
     expect(terminalStop.body.entry.status).toBe('completed')

@@ -1,4 +1,4 @@
-import type { AgentPermissionMode, ChatAttachment, JsonObject, ReasoningEffort, WorkSessionCollaborationMode, WorkTask } from '@dsh-cyber/contracts'
+import type { AgentPermissionMode, ChatAttachment, ConversationSubmissionReceipt, JsonObject, ReasoningEffort, WorkSessionCollaborationMode, WorkTask } from '@dsh-cyber/contracts'
 import type {
   ConversationOrchestrator,
   DirectConversationInput,
@@ -55,6 +55,11 @@ import { GroupIntentRouter } from '../services/group-intent-router.js'
 import type { ConversationTaskIntentOutcome, ConversationTaskIntentService } from '../services/conversation-task-intent-service.js'
 import { listApprovalRequestViews } from '../services/approval-request-views.js'
 import type { HarnessToolApprovalService } from '../services/harness-tool-approval-service.js'
+import {
+  ConversationIngressService,
+  conversationIngressFingerprint,
+  conversationPromptHash,
+} from '../services/conversation-ingress-service.js'
 
 const MAX_GROUP_PARTICIPANTS = 20
 
@@ -124,6 +129,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
   })
   const conversationHub = new ConversationHubService(store)
   const groupIntentRouter = new GroupIntentRouter()
+  const conversationIngress = new ConversationIngressService({ store })
 
   router.post(/^\/api\/worlds\/([^/]+)\/group-sessions$/, async ({ request, response, params }) => {
     const world = requireWorldAcceptingWork(store, params[0]!)
@@ -224,9 +230,13 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     // and settled once the turn has an id.
     // Track settlement without joining it: the response may carry the decision
     // when it is already there, and must never wait for one that is not.
-    const proposedTaskIntent = taskIntent?.propose({ workspaceId: world.workspaceId, worldId: world.id, prompt })
+    let proposedTaskIntent: ReturnType<ConversationTaskIntentService['propose']> | undefined
     let intentSettled: ConversationTaskIntentOutcome | undefined
-    proposedTaskIntent?.then((outcome) => { intentSettled = outcome }, () => undefined)
+    const startTaskIntent = (): void => {
+      if (proposedTaskIntent !== undefined || taskIntent === undefined) return
+      proposedTaskIntent = taskIntent.propose({ workspaceId: world.workspaceId, worldId: world.id, prompt })
+      proposedTaskIntent.then((outcome) => { intentSettled = outcome }, () => undefined)
+    }
 
     if (body.collaborationMode !== undefined) {
       requiredEnum<WorkSessionCollaborationMode>(body, 'collaborationMode', ['discussion', 'task'])
@@ -258,13 +268,14 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
 
     const attachments = await validatedChatAttachments(body.attachments, store, world.workspaceId, world.id, worldFiles)
     const attachmentPrompt = attachments.length === 0 ? prompt : attachmentAwarePrompt(prompt, attachments)
-    const transformedPrompt = queueMode === undefined
-      ? await applyInstalledPromptTransforms(await worldPackages.listRuntimePackages(world.id), attachmentPrompt)
-      : attachmentPrompt
     const clientTurnId = optionalString(body.clientTurnId)
     if (clientTurnId !== undefined && clientTurnId.length > 128) {
       throw new HttpError(422, 'invalid_client_turn_id', 'clientTurnId cannot exceed 128 characters')
     }
+    const claimedDirect = employeeIds.length === 1 && clientTurnId !== undefined
+    const transformedPrompt = queueMode === undefined && !claimedDirect
+      ? await applyInstalledPromptTransforms(await worldPackages.listRuntimePackages(world.id), attachmentPrompt)
+      : attachmentPrompt
 
     // Plan before permissions and queue reservation. Room membership is social
     // visibility; runtimeEmployeeIds is the minimum set that actually needs a
@@ -399,7 +410,81 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
         initiator: character,
         characters: store.listEmployees(world.id),
       })
-      if (delegation !== undefined) {
+      if (clientTurnId !== undefined && delegation === undefined) {
+        const fingerprintSha256 = conversationIngressFingerprint({
+          workspaceId: world.workspaceId,
+          worldId: world.id,
+          clientTurnId,
+          kind: 'direct',
+          promptHash: conversationPromptHash(prompt),
+          employeeIds,
+          ...(requestedSessionId === undefined ? {} : { sessionId: requestedSessionId }),
+          ...(title === undefined ? {} : { title }),
+          interactionKind: metadata.interactionKind === 'task' || metadata.interactionKind === 'meeting'
+            ? metadata.interactionKind
+            : 'chat',
+          ...(queueMode === undefined ? {} : { queueMode }),
+          ...(body.permissionMode === undefined ? {} : { permissionMode }),
+          ...(body.reasoningEffort === undefined ? {} : { reasoningEffort: requestedReasoning }),
+          ...(modelProfileId === undefined ? {} : { modelProfileId }),
+          ...(runtimeAccessGrantId === undefined ? {} : { runtimeAccessGrantId }),
+          attachments,
+        })
+        const accepted = await conversationIngress.run({
+          identity: { workspaceId: world.workspaceId, worldId: world.id, clientTurnId, fingerprintSha256 },
+          prepare: () => ({
+            input: {
+              workspaceId: world.workspaceId,
+              worldId: world.id,
+              idempotencyKey: clientTurnId,
+              fingerprintSha256,
+              ...(sessionId === undefined ? {} : { sessionId }),
+              sessionKind: 'direct',
+              ...(title === undefined ? {} : { sessionTitle: title }),
+              participantEmployeeIds: employeeIds,
+              reservationEmployeeIds: employeeIds,
+              interactionKind: metadata.interactionKind === 'task' || metadata.interactionKind === 'meeting'
+                ? metadata.interactionKind
+                : 'chat',
+              ownerMessage: { content: prompt, metadata },
+              ...(queueMode === undefined ? {} : {
+                queue: {
+                  employeeIds,
+                  queueMode,
+                  permissionMode,
+                  ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
+                },
+              }),
+            },
+            context: undefined,
+          }),
+          execute: async (receipt) => {
+            startTaskIntent()
+            if (queueMode !== undefined) {
+              conversationQueue?.wake()
+              return replayClaimedConversation(store, receipt)
+            }
+            const continued = await turnContinuations.runQueuedDirect(receipt.workTurn.id)
+            if (continued === undefined) throw new Error('Accepted direct WorkTurn could not be continued')
+            return continued
+          },
+          replay: async (receipt) => {
+            const current = store.getWorkTurn(receipt.workTurn.id)
+            // A process may stop after the atomic acceptance commit but before
+            // an immediate turn starts. With no queue row and no AgentRun this
+            // queued state is safe to resume exactly once.
+            if (receipt.claim.queueEntryId === undefined && current?.status === 'queued') {
+              startTaskIntent()
+              const continued = await turnContinuations.runQueuedDirect(receipt.workTurn.id)
+              if (continued !== undefined) return continued
+            }
+            return replayClaimedConversation(store, receipt)
+          },
+        })
+        result = accepted.value
+        responseStatus = accepted.receipt.queueEntry === undefined ? 200 : 202
+      } else if (delegation !== undefined) {
+        startTaskIntent()
         result = await delegatedCollaboration.run({
           ...delegation,
           workspaceId: world.workspaceId,
@@ -412,6 +497,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
           ...(title === undefined ? {} : { title }),
         })
       } else {
+        startTaskIntent()
         const directInput: DirectConversationInput = {
           workspaceId: world.workspaceId,
           worldId: world.id,
@@ -433,6 +519,7 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
         }
       }
     } else {
+      startTaskIntent()
       const effectiveCollaborationMode = collaborationMode ?? 'discussion'
       // The host intent core is authoritative for this turn. Client hints and
       // a legacy session mode cannot make a discussion look like a task (or
@@ -921,6 +1008,39 @@ function taskRoutingJson(routing: GroupTaskRoutingResult): JsonObject {
 
 function uniqueEmployeeIds(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))]
+}
+
+/** Rebuild an idempotent HTTP result from existing durable facts only. */
+function replayClaimedConversation(store: SqliteStore, receipt: ConversationSubmissionReceipt) {
+  const workTurn = store.getWorkTurn(receipt.workTurn.id) ?? receipt.workTurn
+  const queueEntry = receipt.claim.queueEntryId === undefined
+    ? undefined
+    : store.getConversationQueueEntry(receipt.claim.queueEntryId) ?? receipt.queueEntry
+  const runs = store.listTurnAgentRuns(workTurn.id)
+  const runtimeSessionByEmployee = new Map(runs.flatMap((run) => (
+    run.runtimeSessionId === undefined ? [] : [[run.employeeId, run.runtimeSessionId] as const]
+  )))
+  const replies = store.listMessages(receipt.session.id)
+    .filter((message) => message.kind === 'assistant' && message.metadata.workTurnId === workTurn.id)
+    .flatMap((message) => {
+      const employee = store.getEmployee(message.senderId)
+      if (employee === undefined) return []
+      const agentSessionId = typeof message.metadata.agentSessionId === 'string'
+        ? message.metadata.agentSessionId
+        : runtimeSessionByEmployee.get(employee.id) ?? ''
+      return [{ employeeId: employee.id, displayName: employee.displayName, agentSessionId, content: message.content }]
+    })
+  return {
+    session: receipt.session,
+    replies,
+    workTurnId: workTurn.id,
+    waitingForApproval: workTurn.status === 'waiting-approval',
+    ...(queueEntry === undefined ? {} : {
+      queueEntry,
+      queueItem: queueEntry,
+      status: 'queued' as const,
+    }),
+  }
 }
 
 function mentionedEmployeeIds(prompt: string, employees: Array<{ id: string; displayName: string }>): string[] {

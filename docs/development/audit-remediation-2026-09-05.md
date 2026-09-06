@@ -87,4 +87,6 @@ F06 前置保护已完成：规划不再压低固定 token 占用；最终角色
 
 2026-09-06 新增 schema 44 `conversation_submission_claims` 与 `ConversationIngressService` 基础：一次事务创建/复用会话、WorkTurn、owner 消息和可选队列行；claim 只保存 fingerprint 与事实 ID，不复制回复正文。旧 `clientTurnId` 没有可信 fingerprint 时 fail closed；同成员 group 无 sessionId 继续创建独立群聊。持久化 15 文件、93 项通过；原子 claim 的跨连接回放、冲突、整体回滚、旧 key 与群聊隔离测试通过。该检查点尚未接入 HTTP 聊天路由，因此第四批仍为开发中。
 
+Direct HTTP 接线检查点：`/chat` 的 direct immediate/queued 在 task classifier、Skill 和 runtime 之前进入同一 keyed ingress；claim 后只继续已有 WorkTurn。相同请求并发或完成后重发均返回原事实，修改 prompt 复用 key 返回 409。进程中断后若 immediate claim 仍为 queued 且没有 queue 行，可安全继续原 WorkTurn。服务器定向 16 项与全类型检查通过。Group、委托协作和旧 `/chat-queue` 入口尚未接入，第四批仍未完成。
+
 已创建当前任务的“DSH Cyber 审计持续整改”自动接续（每小时），沿用此分支与 PR #178。电脑和桌面应用运行时继续未完成批次；每批更新证据，完成全部整改后暂停。自动接续不是剩余批次已完成的声明。
