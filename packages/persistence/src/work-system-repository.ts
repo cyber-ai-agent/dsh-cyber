@@ -417,6 +417,48 @@ export class WorkSystemRepository {
     return row === undefined ? undefined : mapRun(row)
   }
 
+  getTaskRunByWorkTurn(workTurnId: string): TaskRun | undefined {
+    const row = this.#database.prepare('SELECT * FROM task_runs WHERE work_turn_id = ?').get(workTurnId)
+    return row === undefined ? undefined : mapRun(row)
+  }
+
+  getTaskExecution(taskRunId: string): Omit<BeginTaskExecutionResult, 'created'> {
+    return this.#readTaskExecutionFacts(this.#requireTaskRun(taskRunId))
+  }
+
+  /** Pause every Task Center lifecycle row on the same durable approval. */
+  waitExecutionForApproval(taskRunId: string): WorkTaskDetail {
+    return this.#transaction(() => {
+      const run = this.#requireTaskRun(taskRunId)
+      const task = this.requireTask(run.taskId)
+      const turn = this.#database.prepare('SELECT status FROM work_turns WHERE id = ?').get(run.workTurnId) as { status: string } | undefined
+      if (run.status !== 'running' || task.status !== 'running' || turn?.status !== 'running') {
+        throw new PersistenceError('Task execution is not running before approval wait')
+      }
+      const now = this.#clock()
+      this.#database.prepare("UPDATE task_runs SET status = 'waiting-approval' WHERE id = ? AND status = 'running'").run(run.id)
+      this.#database.prepare("UPDATE work_tasks SET status = 'waiting-approval', updated_at = ? WHERE id = ? AND status = 'running'").run(now, task.id)
+      this.#database.prepare("UPDATE work_turns SET status = 'waiting-approval' WHERE id = ? AND status = 'running'").run(run.workTurnId)
+      return this.detail(task.id)
+    })
+  }
+
+  /** The approval coordinator already resumed the WorkTurn; resume its Task facts too. */
+  resumeExecutionAfterApproval(taskRunId: string): WorkTaskDetail {
+    return this.#transaction(() => {
+      const run = this.#requireTaskRun(taskRunId)
+      const task = this.requireTask(run.taskId)
+      const turn = this.#database.prepare('SELECT status FROM work_turns WHERE id = ?').get(run.workTurnId) as { status: string } | undefined
+      if (run.status !== 'waiting-approval' || task.status !== 'waiting-approval' || turn?.status !== 'running') {
+        throw new PersistenceError('Task execution is not ready to resume after approval')
+      }
+      const now = this.#clock()
+      this.#database.prepare("UPDATE task_runs SET status = 'running' WHERE id = ? AND status = 'waiting-approval'").run(run.id)
+      this.#database.prepare("UPDATE work_tasks SET status = 'running', updated_at = ? WHERE id = ? AND status = 'waiting-approval'").run(now, task.id)
+      return this.detail(task.id)
+    })
+  }
+
   /** Complete the preclaimed TaskRun and publish the formal plan revision. */
   completeExecution(input: CompleteTaskExecutionInput): WorkTaskDetail {
     return this.#transaction(() => {
@@ -508,12 +550,12 @@ export class WorkSystemRepository {
     })
   }
 
-  /** Mark preclaimed executions as recovery-required during server startup. */
+  /** Mark actively running executions as recovery-required; approval waits remain resumable. */
   recoverExecutionsAfterRestart(): { recovered: number } {
     return this.#transaction(() => {
       const rows = this.#database.prepare(
         `SELECT id, plan_revision_id, task_id, work_turn_id FROM task_runs
-         WHERE status IN ('running', 'waiting-approval')`,
+         WHERE status = 'running'`,
       ).all() as Array<{ id: string; plan_revision_id: string; task_id: string; work_turn_id: string }>
       let recovered = 0
       for (const row of rows) {
@@ -523,7 +565,7 @@ export class WorkSystemRepository {
         ).all(row.work_turn_id) as Array<{ id: string }>).map((agentRun) => agentRun.id)
         this.#database.prepare(
           `UPDATE task_runs SET agent_run_ids_json = ?, status = 'recovery-required', error_code = 'service-restarted', completed_at = ?
-           WHERE id = ? AND status IN ('running', 'waiting-approval')`,
+           WHERE id = ? AND status = 'running'`,
         ).run(JSON.stringify(agentRunIds), now, row.id)
         this.#database.prepare(
           `UPDATE task_plan_revisions SET status = 'failed'
@@ -539,11 +581,11 @@ export class WorkSystemRepository {
         ).run(now, row.plan_revision_id)
         this.#database.prepare(
           `UPDATE work_turns SET status = 'failed', error_code = ?, completed_at = ?
-           WHERE id = ? AND status IN ('queued', 'running', 'waiting-approval')`,
+           WHERE id = ? AND status IN ('queued', 'running')`,
         ).run('service-restarted', now, row.work_turn_id)
         this.#database.prepare(
           `UPDATE work_tasks SET status = 'failed', updated_at = ?
-           WHERE id = ? AND status IN ('running', 'waiting-approval')`,
+           WHERE id = ? AND status = 'running'`,
         ).run(now, row.task_id)
         recovered += 1
       }

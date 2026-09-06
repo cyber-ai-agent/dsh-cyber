@@ -445,7 +445,7 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
   const { worldTrace, contextSnapshots } = composeWorldTrace({ store, actions: skillActions, artifacts: worldArtifacts })
   const employeeActivity = new EmployeeActivityProjectionService(store)
   employeeActivity.projectAll()
-  const taskSchedules = new TaskScheduleService({ store, orchestrator, settings: worldRuntimeContext, employeeActivity })
+  const taskSchedules = new TaskScheduleService({ store, orchestrator, settings: worldRuntimeContext, employeeActivity, skills: skillRuntime, continuations: turnContinuations })
   const runtimeUpdates = new RuntimeUpdateService(store, stateRoot, workspaceRoot)
   const applicationUpdates = new ApplicationUpdateService(store, stateRoot, workspaceRoot)
   const applicationAccess = new ApplicationAccessService(stateRoot)
@@ -453,7 +453,7 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
   const localTtsAssets = new LocalTtsAssetService(stateRoot)
 
   const router = new Router()
-  const { work: workSystem, taskIntent } = composeWorkSystem({ store, credentials, groupTasks, router, worldAccess, worldRuntime, ...(options.conversationTaskIntent === undefined ? {} : { intentClassifier: options.conversationTaskIntent }) })
+  const { work: workSystem, taskIntent } = composeWorkSystem({ store, credentials, groupTasks, router, worldAccess, worldRuntime, skillRuntime, continuations: turnContinuations, ...(options.conversationTaskIntent === undefined ? {} : { intentClassifier: options.conversationTaskIntent }) })
   registerApplicationAccessRoutes(router, applicationAccess)
   registerSystemRoutes(router, { store, stateRoot, runtimeUpdates, applicationUpdates })
   registerWorkspaceFileRoutes(router, { worldFiles, access: worldAccess })
@@ -494,6 +494,7 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
   })
   registerModelInteractionRoutes(router, { store, interactions })
   const conversationControl = composeConversationControl({ store, router, worldAccess, orchestrator, continuations: turnContinuations, employeeActivity, worldRuntime, worldTrace, runtimeStreamHub, groupTasks, worldPackages, runtimeContext: worldRuntimeContext, skillRuntime, work: workSystem })
+  taskSchedules.setQueue(conversationControl.queue)
   registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, turnContinuations, toolApprovals, groupTasks, groupTurnPlanner, taskIntent, conversationQueue: conversationControl.queue, acceptedGroupRunner: conversationControl.runAcceptedGroup, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, runtimeContext: worldRuntimeContext, worldTrace, employeeActivity, worldPackages, worldRuntimePermissions, ownerRuntimeAccess })
   registerGroupTaskRoutes(router, { store, worldAccess, groupTasks })
   registerEmployeeRoutes(router, {

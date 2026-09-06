@@ -42,6 +42,8 @@ export class TurnAwareApprovalContinuationService {
   readonly #worldPermissions: WorldPermissionRequestService | undefined
   readonly #decisionCoordinator: TurnDecisionCoordinator
   #groupContinuationHandler: ((turn: { id: string; workspaceId: string; worldId: string; sessionId: string }, actions: CharacterSkillAction[], now: Date) => Promise<TurnAwareConversationResult | undefined>) | undefined
+  #taskContinuationHandler: ((workTurnId: string, actions: CharacterSkillAction[]) => Promise<ConversationResult>) | undefined
+  #turnSettledHandler: ((workTurnId: string) => Promise<void>) | undefined
 
   constructor(options: {
     store: SqliteStore
@@ -65,6 +67,15 @@ export class TurnAwareApprovalContinuationService {
 
   setGroupContinuationHandler(handler: (turn: { id: string; workspaceId: string; worldId: string; sessionId: string }, actions: CharacterSkillAction[], now: Date) => Promise<TurnAwareConversationResult | undefined>): void {
     this.#groupContinuationHandler = handler
+  }
+
+  setTaskContinuationHandler(handler: (workTurnId: string, actions: CharacterSkillAction[]) => Promise<ConversationResult>): void {
+    this.#taskContinuationHandler = handler
+  }
+
+  /** Notify durable producers after an approval continuation settles its turn. */
+  setTurnSettledHandler(handler: (workTurnId: string) => Promise<void>): void {
+    this.#turnSettledHandler = handler
   }
 
   async direct(input: TurnAwareDirectInput): Promise<TurnAwareConversationResult> {
@@ -317,7 +328,9 @@ export class TurnAwareApprovalContinuationService {
       throw error
     }
     try {
-      return await this.#continueAfterResume(turn, actions, now)
+      const result = await this.#continueAfterResume(turn, actions, now)
+      try { await this.#turnSettledHandler?.(turn.id) } catch { /* projections never replace the durable turn result */ }
+      return result
     } catch (error) {
       this.#failTurnQuietly(turn.id, 'approval-continuation-failed')
       throw error
@@ -331,6 +344,15 @@ export class TurnAwareApprovalContinuationService {
   ): Promise<TurnAwareConversationResult | undefined> {
     const session = this.#store.getSession(turn.sessionId)
     if (session?.kind === 'group') {
+      const ownerMessage = currentTurnUserMessage(this.#store.listMessages(turn.sessionId), turn.id)
+      if (stringMetadata(ownerMessage?.metadata, 'taskRunId') !== undefined) {
+        if (this.#taskContinuationHandler === undefined) {
+          this.#store.failWorkTurn(turn.id, 'task-approval-continuation-unavailable')
+          return undefined
+        }
+        const result = await this.#taskContinuationHandler(turn.id, actions)
+        return { ...result, workTurnId: turn.id, waitingForApproval: false }
+      }
       if (this.#groupContinuationHandler === undefined) {
         this.#store.failWorkTurn(turn.id, 'group-approval-continuation-unavailable')
         return undefined

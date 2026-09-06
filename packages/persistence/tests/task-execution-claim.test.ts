@@ -59,6 +59,24 @@ describe('Task Center execution claims', () => {
       .toThrow(PersistenceError)
     expect(fixture.repository.detail(fixture.task.id).runs).toEqual([])
   })
+
+  it('moves TaskRun, WorkTask and WorkTurn through one approval lifecycle', async () => {
+    const fixture = await setup()
+    const execution = fixture.repository.beginExecution(input(fixture, 'approval-run', 'f'.repeat(64)))
+    fixture.store.startWorkTurn(execution.workTurn.id)
+
+    const waiting = fixture.repository.waitExecutionForApproval(execution.taskRun.id)
+    expect(waiting.task.status).toBe('waiting-approval')
+    expect(waiting.runs[0]?.status).toBe('waiting-approval')
+    expect(fixture.store.getWorkTurn(execution.workTurn.id)?.status).toBe('waiting-approval')
+
+    fixture.store.resumeWorkTurnAfterApproval(execution.workTurn.id)
+    const resumed = fixture.repository.resumeExecutionAfterApproval(execution.taskRun.id)
+    expect(resumed.task.status).toBe('running')
+    expect(resumed.runs[0]?.status).toBe('running')
+    expect(fixture.store.getWorkTurn(execution.workTurn.id)?.status).toBe('running')
+    expect(fixture.repository.getTaskExecution(execution.taskRun.id).workTurn.id).toBe(execution.workTurn.id)
+  })
 })
 
 async function setup() {

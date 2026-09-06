@@ -383,6 +383,32 @@ export class ConversationQueueService implements AsyncDisposable {
     }
   }
 
+  /**
+   * Run one already-enqueued entry synchronously for a host-owned producer
+   * such as TaskScheduleService. The same durable claim and runner used by
+   * the background dispatcher are retained, so a scheduler race can only
+   * produce one AgentRun. Waiting approval returns the durable waiting row;
+   * the approval continuation owns the later resume.
+   */
+  async runEntryNow(queueEntryId: string, expectedRevision?: number): Promise<ConversationQueueEntry> {
+    const current = this.#store.getConversationQueueEntry(queueEntryId)
+    if (current === undefined) throw new Error(`Conversation queue entry not found: ${queueEntryId}`)
+    if (current.status !== 'queued') return current
+    let claimed: ConversationQueueEntry
+    try {
+      claimed = this.#store.claimConversationQueueEntry({
+        queueEntryId,
+        ...(expectedRevision === undefined ? {} : { expectedRevision }),
+        leaseOwner: this.#leaseOwner,
+        leaseDurationMs: this.#leaseDurationMs,
+      })
+    } catch {
+      return this.#store.getConversationQueueEntry(queueEntryId) ?? current
+    }
+    await this.#runClaimed(claimed)
+    return this.#store.getConversationQueueEntry(queueEntryId) ?? claimed
+  }
+
   /** Reconcile approval continuations that settle the WorkTurn outside the dispatcher. */
   async reconcileWaiting(): Promise<number> {
     let changed = 0
@@ -396,6 +422,9 @@ export class ConversationQueueService implements AsyncDisposable {
           try {
             if (entry.status === 'queued' && turn.status === 'interrupted') {
               this.#store.interruptConversationQueueEntry({ queueEntryId: entry.id, expectedRevision: entry.revision, errorCode: turn.errorCode ?? 'interrupted' })
+              changed += 1
+            } else if (entry.status === 'running' && turn.status === 'waiting-approval') {
+              this.#store.waitConversationQueueEntryForApproval({ queueEntryId: entry.id, expectedRevision: entry.revision })
               changed += 1
             } else if (entry.status === 'waiting-approval' && turn.status === 'running') {
               this.#store.resumeConversationQueueEntryAfterApproval({ queueEntryId: entry.id, expectedRevision: entry.revision })

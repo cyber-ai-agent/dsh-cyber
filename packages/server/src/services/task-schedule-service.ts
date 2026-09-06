@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 
 import type {
   AgentPermissionMode,
+  ConversationQueueEntry,
   TaskSchedule,
   TaskScheduleKind,
   TaskScheduleRun,
@@ -11,7 +12,19 @@ import type { ConversationOrchestrator } from '@dsh-cyber/orchestration'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import type { EmployeeActivityProjectionService } from './employee-activity-projection-service.js'
+import type { CharacterSkillRuntime } from './character-skill-runtime.js'
+import { factualRuntimeSource, type TurnAwareApprovalContinuationService } from './turn-aware-approval-continuation-service.js'
 import type { WorldRuntimePromptComposer } from './world-runtime-context-composer.js'
+
+interface ScheduleQueue {
+  runEntryNow(queueEntryId: string, expectedRevision?: number): Promise<ConversationQueueEntry>
+  reconcileWaiting(): Promise<number>
+}
+
+interface ScheduleContinuations {
+  runQueuedDirect(workTurnId: string): Promise<unknown>
+  setTurnSettledHandler?(handler: (workTurnId: string) => Promise<void>): void
+}
 
 export interface CreateTaskScheduleInput {
   worldId: string
@@ -30,16 +43,49 @@ export class TaskScheduleService {
   readonly #orchestrator: ConversationOrchestrator
   readonly #settings: Pick<WorldRuntimePromptComposer, 'composeRuntimePrompt'>
   readonly #employeeActivity: EmployeeActivityProjectionService
+  readonly #skills: Pick<CharacterSkillRuntime, 'prepare'> | undefined
+  readonly #continuations: ScheduleContinuations | undefined
+  #queue: ScheduleQueue | undefined
   #timer: NodeJS.Timeout | undefined
   #running = false
   readonly #activeRuns = new Set<Promise<TaskScheduleRun>>()
 
-  constructor(input: { store: SqliteStore; orchestrator: ConversationOrchestrator; settings: Pick<WorldRuntimePromptComposer, 'composeRuntimePrompt'>; employeeActivity: EmployeeActivityProjectionService }) {
+  constructor(input: {
+    store: SqliteStore
+    orchestrator: ConversationOrchestrator
+    settings: Pick<WorldRuntimePromptComposer, 'composeRuntimePrompt'>
+    employeeActivity: EmployeeActivityProjectionService
+    skills?: Pick<CharacterSkillRuntime, 'prepare'>
+    continuations?: Pick<TurnAwareApprovalContinuationService, 'runQueuedDirect' | 'setTurnSettledHandler'>
+    queue?: ScheduleQueue
+  }) {
     this.#store = input.store
     this.#orchestrator = input.orchestrator
     this.#settings = input.settings
     this.#employeeActivity = input.employeeActivity
+    this.#skills = input.skills
+    this.#continuations = input.continuations
+    this.#queue = input.queue
+    this.#continuations?.setTurnSettledHandler?.(async (workTurnId) => { await this.reconcileWorkTurn(workTurnId) })
     this.#recoverInterruptedRuns()
+  }
+
+  /** Attach the shared durable queue after server composition has completed. */
+  setQueue(queue: ScheduleQueue): void {
+    this.#queue = queue
+  }
+
+  /** Reconcile a schedule-backed WorkTurn immediately after approval resume. */
+  async reconcileWorkTurn(workTurnId: string): Promise<void> {
+    const row = this.#store.database.prepare(
+      "SELECT * FROM task_schedule_runs WHERE work_turn_id = ? AND status IN ('running', 'waiting-approval') ORDER BY started_at DESC LIMIT 1",
+    ).get(workTurnId)
+    if (row === undefined) return
+    const run = mapRun(row)
+    const scheduleRow = this.#store.database.prepare('SELECT * FROM task_schedules WHERE id = ?').get(run.scheduleId)
+    if (scheduleRow === undefined) return
+    const schedule = mapSchedule(scheduleRow)
+    await this.#reconcileRunState(schedule, run.id, run.scheduledFor, false)
   }
 
   start(): void {
@@ -132,6 +178,7 @@ export class TaskScheduleService {
     const world = this.#store.getWorld(worldId)
     if (world === undefined) throw new Error('计划所属世界不存在')
     if (world.status === 'archived') throw new Error(`世界「${world.name}」已归档，计划任务不会运行。请先恢复该世界。`)
+    await this.#reconcileRunningRuns()
     return this.#run(this.#require(worldId, scheduleId), new Date().toISOString(), true)
   }
 
@@ -139,6 +186,7 @@ export class TaskScheduleService {
     if (this.#running) return
     this.#running = true
     try {
+      await this.#reconcileRunningRuns()
       const now = new Date().toISOString()
       // An archived world is never driven by the scheduler. The join keeps
       // its schedules on the shelf instead of failing once per tick.
@@ -159,7 +207,7 @@ export class TaskScheduleService {
 
   #run(schedule: TaskSchedule, scheduledFor: string, manual: boolean): Promise<TaskScheduleRun> {
     const existing = this.#store.database.prepare(
-      "SELECT * FROM task_schedule_runs WHERE schedule_id = ? AND status = 'running' ORDER BY started_at DESC LIMIT 1",
+      "SELECT * FROM task_schedule_runs WHERE schedule_id = ? AND status IN ('running', 'waiting-approval') ORDER BY started_at DESC LIMIT 1",
     ).get(schedule.id)
     if (existing !== undefined) return Promise.resolve(mapRun(existing))
     const execution = this.#execute(schedule, scheduledFor, manual)
@@ -172,6 +220,7 @@ export class TaskScheduleService {
   }
 
   async #execute(schedule: TaskSchedule, scheduledFor: string, manual: boolean): Promise<TaskScheduleRun> {
+    const useQueue = this.#queue !== undefined && this.#continuations !== undefined
     const claim = this.#store.claimTaskScheduleRun({
       scheduleId: schedule.id,
       scheduledFor,
@@ -181,6 +230,7 @@ export class TaskScheduleService {
       title: schedule.title,
       prompt: schedule.prompt,
       permissionMode: schedule.permissionMode,
+      ...(useQueue ? { queue: { id: scheduleQueueId(schedule.id, scheduledFor), queueMode: 'normal' as const } } : {}),
     })
     if (!claim.created) {
       // A crash can leave a terminal run committed before the schedule cursor
@@ -200,46 +250,132 @@ export class TaskScheduleService {
     if (workTurnId === undefined) throw new Error('计划运行缺少 WorkTurn')
     try {
       this.#appendEvent(schedule, 'schedule.run.started', { scheduleId: schedule.id, runId: run.id, scheduledFor, manual })
-      const employee = this.#store.getEmployee(schedule.employeeId)
-      if (employee === undefined || employee.status === 'archived') throw new Error('计划角色已不可用')
-      const runtimePrompt = await this.#settings.composeRuntimePrompt(schedule.worldId, employee, schedule.prompt)
-      this.#store.startWorkTurn(workTurnId)
-      const result = await this.#orchestrator.continueDirect({
-        workTurnId,
-        employeeId: schedule.employeeId,
-        runtimePrompt,
-        permissionMode: schedule.permissionMode,
-      })
-      // The concrete orchestrator settles the WorkTurn itself. Keep the seam
-      // safe for a host runner that only returns a result after doing its work.
-      if (this.#store.getWorkTurn(workTurnId)?.status === 'running') this.#store.completeWorkTurn(workTurnId)
-      const completedAt = new Date().toISOString()
-      const summary = result.replies[0]?.content.trim().slice(0, 500) ?? ''
-      this.#store.database.prepare(
-        `UPDATE task_schedule_runs SET status = 'completed', completed_at = ?, session_id = ?, summary = ? WHERE id = ?`,
-      ).run(completedAt, result.session.id, summary, run.id)
-      this.#advance(schedule, scheduledFor, completedAt, manual)
-      this.#appendEvent(schedule, 'schedule.run.completed', { scheduleId: schedule.id, runId: run.id, sessionId: result.session.id })
-      this.#employeeActivity.project(schedule.employeeId)
-      return this.listRuns(schedule.id).find((item) => item.id === run.id)!
+      if (useQueue && claim.queueEntry !== undefined) {
+        await this.#queue!.runEntryNow(claim.queueEntry.id, claim.queueEntry.revision)
+        return this.#reconcileRunState(schedule, run.id, scheduledFor, manual)
+      }
+      return await this.#executeImmediate(schedule, run, scheduledFor, manual)
     } catch (cause) {
       const currentTurn = this.#store.getWorkTurn(workTurnId)
       // An approval pauses the existing turn. Keep the schedule occurrence
-      // running and let the approval continuation resume this exact turn; a
+      // waiting and let the approval continuation resume this exact turn; a
       // later scheduler tick sees the existing run and cannot duplicate it.
-      if (currentTurn?.status === 'waiting-approval') return this.listRuns(schedule.id).find((item) => item.id === run.id)!
+      if (currentTurn?.status === 'waiting-approval') {
+        this.#markRunWaiting(run.id)
+        return this.listRuns(schedule.id).find((item) => item.id === run.id)!
+      }
+      if (currentTurn?.status === 'completed') return this.listRuns(schedule.id).find((item) => item.id === run.id)!
       const errorCode = scheduleError(cause)
       if (currentTurn !== undefined && (currentTurn.status === 'queued' || currentTurn.status === 'running')) {
         try { this.#store.interruptWorkTurn(workTurnId, errorCode) } catch { /* a recovery/controller race already settled it */ }
       }
-      const completedAt = new Date().toISOString()
-      this.#store.database.prepare(
-        `UPDATE task_schedule_runs SET status = 'failed', completed_at = ?, error_code = ? WHERE id = ?`,
-      ).run(completedAt, errorCode, run.id)
-      this.#advance(schedule, scheduledFor, completedAt, manual)
-      this.#appendEvent(schedule, 'schedule.run.failed', { scheduleId: schedule.id, runId: run.id, errorCode })
+      return this.#failRun(schedule, run.id, scheduledFor, manual, errorCode)
+    }
+  }
+
+  async #executeImmediate(schedule: TaskSchedule, run: TaskScheduleRun, scheduledFor: string, manual: boolean): Promise<TaskScheduleRun> {
+    const employee = this.#store.getEmployee(schedule.employeeId)
+    if (employee === undefined || employee.status === 'archived') throw new Error('计划角色已不可用')
+    if (run.workTurnId === undefined || run.sessionId === undefined) throw new Error('计划运行缺少会话事实')
+    this.#store.startWorkTurn(run.workTurnId)
+    const prepared = this.#skills === undefined
+      ? undefined
+      : await this.#skills.prepare({
+          workspaceId: schedule.workspaceId,
+          worldId: schedule.worldId,
+          sessionId: run.sessionId,
+          workTurnId: run.workTurnId,
+          characterId: employee.id,
+          prompt: schedule.prompt,
+        })
+    const actions = prepared?.actions ?? []
+    if (actions.some((action) => action.status === 'waiting-for-approval')) {
+      this.#store.waitWorkTurnForApproval(run.workTurnId)
+      this.#markRunWaiting(run.id)
       return this.listRuns(schedule.id).find((item) => item.id === run.id)!
     }
+    const result = await this.#orchestrator.continueDirect({
+      workTurnId: run.workTurnId,
+      employeeId: employee.id,
+      runtimePrompt: await this.#settings.composeRuntimePrompt(schedule.worldId, employee, factualRuntimeSource(schedule.prompt, actions)),
+      permissionMode: schedule.permissionMode,
+    })
+    // The concrete orchestrator settles the WorkTurn itself. Keep the seam
+    // safe for a host runner that only returns a result after doing its work.
+    if (this.#store.getWorkTurn(run.workTurnId)?.status === 'running') this.#store.completeWorkTurn(run.workTurnId)
+    return this.#completeRun(schedule, run.id, scheduledFor, manual, result.session.id, result.replies[0]?.content)
+  }
+
+  async #reconcileRunningRuns(): Promise<void> {
+    const rows = this.#store.database.prepare(
+      "SELECT * FROM task_schedule_runs WHERE status IN ('running', 'waiting-approval') ORDER BY started_at, id",
+    ).all().map(mapRun)
+    for (const run of rows) {
+      const scheduleRow = this.#store.database.prepare('SELECT * FROM task_schedules WHERE id = ?').get(run.scheduleId)
+      if (scheduleRow === undefined) continue
+      const schedule = mapSchedule(scheduleRow)
+      await this.#reconcileRunState(schedule, run.id, run.scheduledFor, false)
+    }
+  }
+
+  async #reconcileRunState(schedule: TaskSchedule, runId: string, scheduledFor: string, manual: boolean): Promise<TaskScheduleRun> {
+    await this.#queue?.reconcileWaiting()
+    const current = this.listRuns(schedule.id).find((item) => item.id === runId)
+    if (current === undefined) throw new Error('计划运行不存在')
+    if (current.status !== 'running' && current.status !== 'waiting-approval') return current
+    const turn = current.workTurnId === undefined ? undefined : this.#store.getWorkTurn(current.workTurnId)
+    if (turn?.status === 'waiting-approval') {
+      this.#markRunWaiting(current.id)
+      return this.listRuns(schedule.id).find((item) => item.id === runId)!
+    }
+    if (turn?.status === 'completed') {
+      return this.#completeRun(schedule, current.id, scheduledFor, manual, current.sessionId, this.#summaryForRun(current))
+    }
+    if (turn?.status === 'failed' || turn?.status === 'interrupted') {
+      return this.#failRun(schedule, current.id, scheduledFor, manual, turn.errorCode ?? 'turn-failed')
+    }
+    return current
+  }
+
+  #markRunWaiting(runId: string): void {
+    this.#store.database.prepare(
+      "UPDATE task_schedule_runs SET status = 'waiting-approval', completed_at = NULL, error_code = NULL WHERE id = ? AND status = 'running'",
+    ).run(runId)
+  }
+
+  #completeRun(schedule: TaskSchedule, runId: string, scheduledFor: string, manual: boolean, sessionId: string | undefined, summary: string | undefined): TaskScheduleRun {
+    const completedAt = new Date().toISOString()
+    const normalizedSummary = summary?.trim().slice(0, 500) ?? ''
+    const result = this.#store.database.prepare(
+      `UPDATE task_schedule_runs
+       SET status = 'completed', completed_at = ?, session_id = COALESCE(?, session_id), summary = ?, error_code = NULL
+       WHERE id = ? AND status IN ('running', 'waiting-approval')`,
+    ).run(completedAt, sessionId ?? null, normalizedSummary, runId)
+    if (Number(result.changes) !== 1) return this.listRuns(schedule.id).find((item) => item.id === runId)!
+    this.#advance(schedule, scheduledFor, completedAt, manual)
+    this.#appendEvent(schedule, 'schedule.run.completed', { scheduleId: schedule.id, runId, sessionId: sessionId ?? '' })
+    this.#employeeActivity.project(schedule.employeeId)
+    return this.listRuns(schedule.id).find((item) => item.id === runId)!
+  }
+
+  #failRun(schedule: TaskSchedule, runId: string, scheduledFor: string, manual: boolean, errorCode: string): TaskScheduleRun {
+    const completedAt = new Date().toISOString()
+    const result = this.#store.database.prepare(
+      `UPDATE task_schedule_runs
+       SET status = 'failed', completed_at = ?, error_code = ?
+       WHERE id = ? AND status IN ('running', 'waiting-approval')`,
+    ).run(completedAt, errorCode, runId)
+    if (Number(result.changes) !== 1) return this.listRuns(schedule.id).find((item) => item.id === runId)!
+    this.#advance(schedule, scheduledFor, completedAt, manual)
+    this.#appendEvent(schedule, 'schedule.run.failed', { scheduleId: schedule.id, runId, errorCode })
+    return this.listRuns(schedule.id).find((item) => item.id === runId)!
+  }
+
+  #summaryForRun(run: TaskScheduleRun): string {
+    if (run.sessionId === undefined) return ''
+    const message = this.#store.listMessages(run.sessionId).findLast((item) =>
+      item.kind === 'assistant' && (run.workTurnId === undefined || item.metadata.workTurnId === run.workTurnId))
+    return message?.content ?? ''
   }
 
   #advance(schedule: TaskSchedule, scheduledFor: string, now: string, manual = false): void {
@@ -259,22 +395,74 @@ export class TaskScheduleService {
   #recoverInterruptedRuns(): void {
     const now = new Date().toISOString()
     const interrupted = this.#store.database.prepare(
-      `SELECT runs.scheduled_for, runs.work_turn_id, schedules.*
-       FROM task_schedule_runs AS runs JOIN task_schedules AS schedules ON schedules.id = runs.schedule_id
-       WHERE runs.status = 'running'`,
-    ).all() as Array<Record<string, unknown> & { scheduled_for: unknown; work_turn_id?: unknown }>
-    for (const row of interrupted) {
-      const workTurnId = typeof row.work_turn_id === 'string' ? row.work_turn_id : undefined
-      const workTurn = workTurnId === undefined ? undefined : this.#store.getWorkTurn(workTurnId)
-      if (workTurn !== undefined && ['queued', 'running', 'waiting-approval'].includes(workTurn.status)) {
+      "SELECT * FROM task_schedule_runs WHERE status IN ('running', 'waiting-approval') ORDER BY started_at, id",
+    ).all().map(mapRun)
+    for (const run of interrupted) {
+      const scheduleRow = this.#store.database.prepare('SELECT * FROM task_schedules WHERE id = ?').get(run.scheduleId)
+      if (scheduleRow === undefined) continue
+      const schedule = mapSchedule(scheduleRow)
+      const workTurn = run.workTurnId === undefined ? undefined : this.#store.getWorkTurn(run.workTurnId)
+      const queueEntry = run.workTurnId === undefined || workTurn === undefined
+        ? undefined
+        : this.#store.getConversationQueueEntryByWorkTurn(workTurn.worldId, run.workTurnId)
+
+      // An approval pause is a durable, recoverable state. Keep both the run
+      // and its WorkTurn; repair only the queue projection if the process died
+      // between the two state transitions.
+      if (workTurn?.status === 'waiting-approval') {
+        if (queueEntry?.status === 'running') {
+          try {
+            this.#store.waitConversationQueueEntryForApproval({ queueEntryId: queueEntry.id, expectedRevision: queueEntry.revision })
+          } catch { /* another recovery path won */ }
+        }
+        this.#markRunWaiting(run.id)
+        continue
+      }
+
+      // A queued schedule has not entered an AgentRun and can safely remain in
+      // the shared queue for the next dispatcher process.
+      if (workTurn?.status === 'queued' && queueEntry?.status === 'queued') {
+        if (run.status === 'waiting-approval') {
+          this.#store.database.prepare(
+            "UPDATE task_schedule_runs SET status = 'running' WHERE id = ? AND status = 'waiting-approval'",
+          ).run(run.id)
+        }
+        continue
+      }
+
+      if (workTurn?.status === 'completed') {
+        this.#completeRunSync(schedule, run, now)
+        continue
+      }
+      if (workTurn?.status === 'failed' || workTurn?.status === 'interrupted') {
+        this.#failRunSync(schedule, run, now, workTurn.errorCode ?? 'service-restarted')
+        continue
+      }
+
+      if (workTurn !== undefined && ['queued', 'running'].includes(workTurn.status)) {
         try { this.#store.interruptWorkTurn(workTurn.id, 'service-restarted') } catch { /* another recovery path won */ }
       }
-      this.#advance(mapSchedule(row), String(row.scheduled_for), now)
+      this.#failRunSync(schedule, run, now, 'service-restarted')
     }
-    this.#store.database.prepare(
-      `UPDATE task_schedule_runs SET status = 'failed', completed_at = ?, error_code = 'service-restarted'
-       WHERE status = 'running'`,
-    ).run(now)
+  }
+
+  #completeRunSync(schedule: TaskSchedule, run: TaskScheduleRun, completedAt: string): void {
+    const result = this.#store.database.prepare(
+      `UPDATE task_schedule_runs
+       SET status = 'completed', completed_at = ?, summary = ?, error_code = NULL
+       WHERE id = ? AND status IN ('running', 'waiting-approval')`,
+    ).run(completedAt, this.#summaryForRun(run).trim().slice(0, 500), run.id)
+    if (Number(result.changes) !== 1) return
+    this.#advance(schedule, run.scheduledFor, completedAt, false)
+  }
+
+  #failRunSync(schedule: TaskSchedule, run: TaskScheduleRun, completedAt: string, errorCode: string): void {
+    const result = this.#store.database.prepare(
+      `UPDATE task_schedule_runs SET status = 'failed', completed_at = ?, error_code = ?
+       WHERE id = ? AND status IN ('running', 'waiting-approval')`,
+    ).run(completedAt, errorCode, run.id)
+    if (Number(result.changes) !== 1) return
+    this.#advance(schedule, run.scheduledFor, completedAt, false)
   }
 
   #require(worldId: string, scheduleId: string): TaskSchedule {
@@ -329,6 +517,10 @@ function intervalAfter(scheduledFor: string, everySeconds: number, now: string):
 function nextOccurrence(schedule: TaskSchedule, now: string): string | undefined {
   if (schedule.kind === 'once') return new Date(schedule.scheduledAt).valueOf() > Date.now() ? schedule.scheduledAt : now
   return intervalAfter(schedule.lastRunAt ?? schedule.scheduledAt, schedule.everySeconds!, now)
+}
+
+function scheduleQueueId(scheduleId: string, scheduledFor: string): string {
+  return `schedule:${scheduleId}:${scheduledFor}:queue`
 }
 
 function scheduleError(cause: unknown): string {

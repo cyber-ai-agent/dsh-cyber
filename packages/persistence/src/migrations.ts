@@ -2268,6 +2268,47 @@ const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX task_runs_work_turn_idx ON task_runs(work_turn_id, attempt DESC, id);
     `,
   },
+  {
+    version: 47,
+    name: 'task-schedule-run-approval-state',
+    sql: `
+      -- Schedule runs share the WorkTurn/queue approval state. Rebuild the
+      -- small legacy table so waiting-approval is durable across restart.
+      DROP INDEX idx_task_schedule_runs_schedule;
+      DROP INDEX task_schedule_runs_work_turn_idx;
+      ALTER TABLE task_schedule_runs RENAME TO task_schedule_runs_v46;
+      CREATE TABLE task_schedule_runs (
+        id TEXT PRIMARY KEY,
+        schedule_id TEXT NOT NULL REFERENCES task_schedules(id) ON DELETE CASCADE,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        employee_id TEXT NOT NULL REFERENCES employee_instances(id) ON DELETE CASCADE,
+        status TEXT NOT NULL CHECK (status IN ('running', 'waiting-approval', 'completed', 'failed', 'skipped')),
+        scheduled_for TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        completed_at TEXT,
+        session_id TEXT,
+        work_turn_id TEXT REFERENCES work_turns(id) ON DELETE SET NULL,
+        summary TEXT,
+        error_code TEXT,
+        UNIQUE(schedule_id, scheduled_for)
+      ) STRICT;
+      INSERT INTO task_schedule_runs
+        (id, schedule_id, workspace_id, world_id, employee_id, status,
+         scheduled_for, started_at, completed_at, session_id, work_turn_id,
+         summary, error_code)
+      SELECT id, schedule_id, workspace_id, world_id, employee_id, status,
+             scheduled_for, started_at, completed_at, session_id, work_turn_id,
+             summary, error_code
+      FROM task_schedule_runs_v46;
+      DROP TABLE task_schedule_runs_v46;
+      CREATE INDEX idx_task_schedule_runs_schedule
+        ON task_schedule_runs(schedule_id, started_at DESC);
+      CREATE INDEX task_schedule_runs_work_turn_idx
+        ON task_schedule_runs(work_turn_id, started_at DESC)
+        WHERE work_turn_id IS NOT NULL;
+    `,
+  },
 ]
 
 /**

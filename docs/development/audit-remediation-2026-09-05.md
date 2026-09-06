@@ -17,7 +17,7 @@
 | 01 | F01–F03 | 重试循环、运行映射、会话级 reset、适配器代际租约和退役 | 重试中审批/停止、双会话隔离、并发配置变更、工厂失败、关闭竞争 | 已提交，CI 通过 |
 | 02 | F04/F05 | 稳定读取、临时发布及读回、恢复 journal、失败回滚与独占保护 | 同尺寸改写、增长/删除、逐步 rename 故障、进程中断后恢复、救援副本保留 | 已提交，CI 通过 |
 | 03 | F07/F13/F17 部分 | 按世界和会话持有草稿，上传回调归属、逐文件状态；先采用诚实的“清空草稿”语义 | 上传中切会话/世界、部分失败、删除/卸载、可见入口浏览器冒烟 | 已提交，含浏览器的 CI 通过 |
-| 04 | F08 | 在现有 WorkTurn/队列上统一受理：聊天 → 任务 → 日程 | 同 key 幂等/冲突、授权一致、审批重启、无双重派发 | 开发中，聊天/委派/任务/日程已具备副作用前事实 claim |
+| 04 | F08 | 在现有 WorkTurn/队列上统一受理：聊天 → 任务 → 日程 | 同 key 幂等/冲突、授权一致、审批重启、无双重派发 | 实现与本地门禁完成，待精确提交 CI |
 | 05 | F09 | 依赖 04；日程受理解耦执行、有界并发、公平性、关闭期限 | 长任务不阻塞独立任务、停止期限、错过触发和时区、未知结果不重做 | 待执行 |
 | 06 | F06/F10/F11 | 最终有效上下文、硬预算、检查器来源、稳定 FTS 候选 | 捕获实际入参比对、超限不请求、私聊边界、50/500/5000 候选评测 | 待执行 |
 | 07 | F12/F14/F16 | SSE 缓冲上限、订阅异常隔离、状态所有权、保存反馈、布局退出/键盘 | 慢连接、异常订阅者、保存失败、pointercancel、Profiler 和滚动锚点 | 待执行 |
@@ -98,3 +98,7 @@ Group HTTP 接线检查点：`/chat` 的 discussion/task immediate/queued 在 pl
 第四批受理边界继续扩展：委派协作先 claim 原始 direct WorkTurn，再执行 peer 协作，并以 `continueDirect(existingWorkTurnId)` 汇报；同进程重复等待首个执行，进程重启后 running/interrupted/终态只回放，不重新产生 peer 副作用。委派排队当前明确返回 422，避免绕开幂等边界。Task Center 由服务端计算请求 fingerprint，在模型执行前一次事务创建 TaskRun attempt、任务会话、WorkTurn、owner 消息、计划与分配；失败 attempt 保留，重试创建新 attempt。日程以 `(scheduleId, scheduledFor)` 原子创建 run、canonical direct 会话、WorkTurn 与消息，并让模型继续该 WorkTurn；重启中断未知结果，不重做同一时间片。schema 已推进到 46。
 
 提交 `b79be` 的 CI 暴露 accepted group 在 `queued` 状态直接进入审批，以及角色名“档案管理员”被误判为管理命令。修复后先启动原 WorkTurn，并在意图识别时从动作文本中移除已匹配角色名；提交 `46b22f2` 的完整 CI 已通过。后续本地整合验证覆盖类型检查、生产构建预算、SQLite 迁移回放以及聊天/群聊/委派/任务/日程定向 90 项。第四批仍保留授权一致与任务/日程审批接线的最终复核，完成前不标记整批结束。
+
+提交 `8ded612801490c29935181cfe22cd6cf12c87656` 的 CI `34005578820` 已完整成功，包含 1831 项单元/集成、schema 46 迁移回放和核心浏览器冒烟。
+
+第四批最终审批接线已完成本地实现：Task Center 在已 claim 的 TaskRun/WorkTurn 上按实际步骤承担者准备至多一个 Skill 动作，Task/Run/Turn 同步进入等待；批准、拒绝或过期后复用原计划、SkillAction 和 WorkTurn，不重新 prepare。日程统一通过现有 Conversation Queue 与 `runQueuedDirect`，schema 47 持久化 `waiting-approval`；审批继续后即时收敛原 schedule run，重启保留待审批和未执行队列。新增真实受控浏览器 Adapter 回归，覆盖 Task Center 批准/拒绝、审批跨重启及日程批准；均断言审批前无 AgentRun/Adapter 副作用、审批后只执行一次。整仓生产构建/预算通过，329 个测试文件中 328 个、1833 项通过、1 项跳过；唯一失败为 `server.ts` 超过 600 行 7 行，压缩装配表达后架构与审批 6 项复验通过，交由精确提交 CI 完整复核。

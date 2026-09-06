@@ -1,9 +1,13 @@
 import { createHash } from 'node:crypto'
 
 import { parseCreateWorkTask, type Deliverable, type Review, type WorkTask, type WorkTaskDetail, type WorkTaskFromSource, type WorkTaskPriority, type WorkTaskStatus, type WorkTurnStatus } from '@dsh-cyber/contracts'
+import type { CharacterSkillAction } from '@dsh-cyber/contracts/skill-runtime'
 import { SqliteUnitOfWork, WorkSystemRepository, type SqliteStore } from '@dsh-cyber/persistence'
 
-import type { GroupTaskCollaborationService } from './group-task-collaboration-service.js'
+import type { GroupTaskCollaborationService, GroupTaskRunResult } from './group-task-collaboration-service.js'
+import type { GroupTaskRoutingResult } from './group-task-router.js'
+import type { CharacterSkillRuntime } from './character-skill-runtime.js'
+import { factualRuntimeSource } from './turn-aware-approval-continuation-service.js'
 import { ServiceError } from './service-error.js'
 
 /**
@@ -42,12 +46,14 @@ export class WorkSystemService {
   readonly #repository: WorkSystemRepository
   readonly #uow: SqliteUnitOfWork
   readonly #groupTasks: GroupTaskCollaborationService
+  readonly #skillRuntime: Pick<CharacterSkillRuntime, 'prepare'> | undefined
 
-  constructor(options: { store: SqliteStore; groupTasks: GroupTaskCollaborationService }) {
+  constructor(options: { store: SqliteStore; groupTasks: GroupTaskCollaborationService; skillRuntime?: Pick<CharacterSkillRuntime, 'prepare'> }) {
     this.#store = options.store
     this.#repository = new WorkSystemRepository(options.store.database)
     this.#uow = new SqliteUnitOfWork(options.store.database)
     this.#groupTasks = options.groupTasks
+    this.#skillRuntime = options.skillRuntime
   }
 
   create(input: { workspaceId: string; worldId: string; title: string; description: string; priority: WorkTaskPriority; dueAt?: string; coordinatorEmployeeId?: string }): WorkTask {
@@ -213,27 +219,12 @@ export class WorkSystemService {
     if (!reservation.created) return this.#repository.detail(task.id)
     const started = Date.now()
     try {
-      const result = await this.#groupTasks.run({
-        workspaceId: task.workspaceId,
-        worldId: task.worldId,
-        employeeIds,
-        coordinatorEmployeeId,
-        prompt,
-        transformedPrompt: prompt,
-        title: task.title,
-        sessionId: reservation.session.id,
-        existingWorkTurnId: reservation.workTurn.id,
-        metadata: { workTaskId: task.id, taskRunId: reservation.taskRun.id },
-        preplannedRouting: routing,
-      })
-      const runs = this.#store.listTurnAgentRuns(result.workTurnId)
-      return this.#repository.completeExecution({
-        taskRunId: reservation.taskRun.id,
-        plan: result.plan,
-        agentRuns: runs,
-        coordinatorEmployeeId: routing.coordinatorEmployeeId,
-        latency: Date.now() - started,
-      })
+      this.#store.startWorkTurn(reservation.workTurn.id)
+      const actions = await this.#prepareSkillAction(reservation.workTurn.id, reservation.session.id, prompt, routing)
+      if (actions.some((action) => action.status === 'waiting-for-approval')) {
+        return this.#repository.waitExecutionForApproval(reservation.taskRun.id)
+      }
+      return (await this.#runClaimedExecution(reservation.taskRun.id, routing, actions, started)).detail
     } catch (error) {
       try {
         this.#repository.failExecution({
@@ -247,6 +238,79 @@ export class WorkSystemService {
       }
       throw error
     }
+  }
+
+  /** Continue an approved/rejected Task Center action without planning or preparing it again. */
+  async continueAfterApproval(workTurnId: string, actions: CharacterSkillAction[]): Promise<GroupTaskRunResult> {
+    const run = this.#repository.getTaskRunByWorkTurn(workTurnId)
+    if (run === undefined || run.status !== 'waiting-approval') throw new Error('Task approval continuation is unavailable')
+    const detail = this.#repository.detail(run.taskId)
+    const routing = routingFromTaskDetail(detail, run.planRevisionId)
+    this.#repository.resumeExecutionAfterApproval(run.id)
+    try {
+      return (await this.#runClaimedExecution(run.id, routing, actions, Date.now())).result
+    } catch (error) {
+      try {
+        this.#repository.failExecution({
+          taskRunId: run.id,
+          errorCode: executionErrorCode(error),
+          agentRunIds: this.#store.listTurnAgentRuns(workTurnId).map((agentRun) => agentRun.id),
+        })
+      } catch {
+        // Keep the continuation failure; startup recovery owns any residue.
+      }
+      throw error
+    }
+  }
+
+  async #prepareSkillAction(workTurnId: string, sessionId: string, prompt: string, routing: GroupTaskRoutingResult): Promise<CharacterSkillAction[]> {
+    if (this.#skillRuntime === undefined) return []
+    const turn = this.#store.getWorkTurn(workTurnId)
+    if (turn === undefined) throw new Error('Task execution WorkTurn is unavailable')
+    const actionEmployees = [...new Set(routing.steps.flatMap((step) => step.assignedEmployeeIds))]
+    for (const characterId of actionEmployees) {
+      const prepared = await this.#skillRuntime.prepare({
+        workspaceId: turn.workspaceId,
+        worldId: turn.worldId,
+        sessionId,
+        workTurnId,
+        characterId,
+        prompt,
+        maxActions: 1,
+      })
+      if (prepared.actions.length > 0) return [prepared.actions[0]!]
+    }
+    return []
+  }
+
+  async #runClaimedExecution(taskRunId: string, routing: GroupTaskRoutingResult, actions: CharacterSkillAction[], started: number): Promise<{ detail: WorkTaskDetail; result: GroupTaskRunResult }> {
+    const execution = this.#repository.getTaskExecution(taskRunId)
+    const task = this.#repository.requireTask(execution.taskRun.taskId)
+    const employeeIds = this.#store.listParticipants(execution.session.id)
+      .filter((participant) => participant.kind === 'employee')
+      .map((participant) => participant.participantId)
+    const result = await this.#groupTasks.run({
+      workspaceId: task.workspaceId,
+      worldId: task.worldId,
+      employeeIds,
+      coordinatorEmployeeId: routing.coordinatorEmployeeId,
+      prompt: execution.ownerMessage.content,
+      transformedPrompt: factualRuntimeSource(execution.ownerMessage.content, actions),
+      title: task.title,
+      sessionId: execution.session.id,
+      existingWorkTurnId: execution.workTurn.id,
+      metadata: execution.ownerMessage.metadata,
+      preplannedRouting: routing,
+    })
+    const agentRuns = this.#store.listTurnAgentRuns(result.workTurnId)
+    const detail = this.#repository.completeExecution({
+      taskRunId,
+      plan: result.plan,
+      agentRuns,
+      coordinatorEmployeeId: routing.coordinatorEmployeeId,
+      latency: Date.now() - started,
+    })
+    return { detail, result }
   }
 
   submitDeliverable(input: { taskId: string; taskRunId: string; submittedByEmployeeId: string; artifactId: string; artifactVersionId: number; title: string; summary: string; evidenceRefs?: string[] }): Deliverable {
@@ -313,6 +377,29 @@ function executionErrorCode(error: unknown): string {
     if (typeof failureKind === 'string' && /^[a-z-]+$/.test(failureKind)) return `runtime-${failureKind}`
   }
   return 'task-execution-failed'
+}
+
+function routingFromTaskDetail(detail: WorkTaskDetail, planRevisionId: string): GroupTaskRoutingResult {
+  const plan = detail.plans.find((candidate) => candidate.id === planRevisionId)
+  if (plan === undefined) throw new Error('Task execution plan is unavailable')
+  const steps = detail.steps
+    .filter((step) => step.planRevisionId === plan.id)
+    .sort((left, right) => left.ordinal - right.ordinal)
+    .map((step) => ({
+      id: step.id,
+      ordinal: step.ordinal,
+      requiredSkills: [...step.requiredSkills],
+      assignedEmployeeIds: [...step.assignedEmployeeIds],
+      dependsOn: [...step.dependsOn],
+      executionMode: step.executionMode,
+      status: 'pending' as const,
+    }))
+  if (steps.length === 0 || detail.task.coordinatorEmployeeId === undefined) throw new Error('Task execution routing is unavailable')
+  return {
+    coordinatorEmployeeId: detail.task.coordinatorEmployeeId,
+    requiredSkillIds: [...new Set(steps.flatMap((step) => step.requiredSkills))],
+    steps,
+  }
 }
 
 function cancelRefusal(status: WorkTaskStatus): string {
