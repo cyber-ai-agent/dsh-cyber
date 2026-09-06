@@ -135,6 +135,7 @@ async function runAcceptedGroup(
     enqueuedAt: turn.createdAt,
     updatedAt: turn.createdAt,
   } as ConversationQueueEntry
+  if (turn.status === 'queued') options.store.startWorkTurn(turn.id)
   return runQueuedGroup(entry, options, preparedActions)
 }
 

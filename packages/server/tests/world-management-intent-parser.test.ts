@@ -72,6 +72,16 @@ describe('WorldManagementIntentParser', () => {
     expect((proposal?.parameters.candidates as unknown[])).toHaveLength(2)
   })
 
+  it('does not treat a role word inside addressed character names as a management command', () => {
+    expect(parser.parse('@软件工程师 @档案管理员 讨论登录性能与历史证据', {
+      worldId: 'world-1',
+      characters: [
+        { id: 'engineer', displayName: '软件工程师' },
+        { id: 'archivist', displayName: '档案管理员' },
+      ],
+    })).toEqual([])
+  })
+
   it('resolves the longest matching name rather than refusing on a false ambiguity', () => {
     const [proposal] = parser.parse('把老王设成管理员', {
       worldId: 'world-1',
@@ -98,4 +108,3 @@ describe('WorldManagementIntentParser', () => {
     expect(plan.unhandled).toEqual(['请老王喝杯咖啡'.replace('老王', '他')])
   })
 })
-
