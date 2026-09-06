@@ -172,38 +172,47 @@ export class TaskScheduleService {
   }
 
   async #execute(schedule: TaskSchedule, scheduledFor: string, manual: boolean): Promise<TaskScheduleRun> {
-    const startedAt = new Date().toISOString()
-    const run: TaskScheduleRun = {
-      id: randomUUID(), scheduleId: schedule.id, workspaceId: schedule.workspaceId, worldId: schedule.worldId,
-      employeeId: schedule.employeeId, status: 'running', scheduledFor, startedAt,
+    const claim = this.#store.claimTaskScheduleRun({
+      scheduleId: schedule.id,
+      scheduledFor,
+      workspaceId: schedule.workspaceId,
+      worldId: schedule.worldId,
+      employeeId: schedule.employeeId,
+      title: schedule.title,
+      prompt: schedule.prompt,
+      permissionMode: schedule.permissionMode,
+    })
+    if (!claim.created) {
+      // A crash can leave a terminal run committed before the schedule cursor
+      // advances. Move that cursor once the same occurrence is observed again;
+      // the existing run itself is never executed a second time.
+      if (
+        !manual &&
+        schedule.nextRunAt === scheduledFor &&
+        (claim.run.status === 'completed' || claim.run.status === 'failed' || claim.run.status === 'skipped')
+      ) {
+        this.#advance(schedule, scheduledFor, new Date().toISOString(), false)
+      }
+      return claim.run
     }
+    const run = claim.run
+    const workTurnId = run.workTurnId
+    if (workTurnId === undefined) throw new Error('计划运行缺少 WorkTurn')
     try {
-      this.#store.database.prepare(
-        `INSERT INTO task_schedule_runs
-         (id, schedule_id, workspace_id, world_id, employee_id, status, scheduled_for, started_at)
-         VALUES (?, ?, ?, ?, ?, 'running', ?, ?)`,
-      ).run(run.id, run.scheduleId, run.workspaceId, run.worldId, run.employeeId, run.scheduledFor, run.startedAt)
-    } catch {
-      const existing = this.#store.database.prepare(
-        'SELECT * FROM task_schedule_runs WHERE schedule_id = ? AND scheduled_for = ?',
-      ).get(schedule.id, scheduledFor)
-      if (existing !== undefined) return mapRun(existing)
-      throw new Error('计划运行记录创建失败')
-    }
-    this.#appendEvent(schedule, 'schedule.run.started', { scheduleId: schedule.id, runId: run.id, scheduledFor, manual })
-    try {
+      this.#appendEvent(schedule, 'schedule.run.started', { scheduleId: schedule.id, runId: run.id, scheduledFor, manual })
       const employee = this.#store.getEmployee(schedule.employeeId)
       if (employee === undefined || employee.status === 'archived') throw new Error('计划角色已不可用')
-      const result = await this.#orchestrator.direct({
-        workspaceId: schedule.workspaceId,
-        worldId: schedule.worldId,
+      const runtimePrompt = await this.#settings.composeRuntimePrompt(schedule.worldId, employee, schedule.prompt)
+      this.#store.startWorkTurn(workTurnId)
+      const result = await this.#orchestrator.continueDirect({
+        workTurnId,
         employeeId: schedule.employeeId,
-        title: `计划 · ${schedule.title}`,
-        prompt: schedule.prompt,
-        metadata: { interactionKind: 'task', scheduleId: schedule.id, scheduleRunId: run.id, scheduledFor },
-        runtimePrompt: await this.#settings.composeRuntimePrompt(schedule.worldId, employee, schedule.prompt),
+        runtimePrompt,
         permissionMode: schedule.permissionMode,
       })
+      // The concrete orchestrator settles the WorkTurn itself. Keep the seam
+      // safe for a host runner that only returns a result after doing its work.
+      if (this.#store.getWorkTurn(workTurnId)?.status === 'running') this.#store.completeWorkTurn(workTurnId)
       const completedAt = new Date().toISOString()
       const summary = result.replies[0]?.content.trim().slice(0, 500) ?? ''
       this.#store.database.prepare(
@@ -214,8 +223,16 @@ export class TaskScheduleService {
       this.#employeeActivity.project(schedule.employeeId)
       return this.listRuns(schedule.id).find((item) => item.id === run.id)!
     } catch (cause) {
-      const completedAt = new Date().toISOString()
+      const currentTurn = this.#store.getWorkTurn(workTurnId)
+      // An approval pauses the existing turn. Keep the schedule occurrence
+      // running and let the approval continuation resume this exact turn; a
+      // later scheduler tick sees the existing run and cannot duplicate it.
+      if (currentTurn?.status === 'waiting-approval') return this.listRuns(schedule.id).find((item) => item.id === run.id)!
       const errorCode = scheduleError(cause)
+      if (currentTurn !== undefined && (currentTurn.status === 'queued' || currentTurn.status === 'running')) {
+        try { this.#store.interruptWorkTurn(workTurnId, errorCode) } catch { /* a recovery/controller race already settled it */ }
+      }
+      const completedAt = new Date().toISOString()
       this.#store.database.prepare(
         `UPDATE task_schedule_runs SET status = 'failed', completed_at = ?, error_code = ? WHERE id = ?`,
       ).run(completedAt, errorCode, run.id)
@@ -242,11 +259,18 @@ export class TaskScheduleService {
   #recoverInterruptedRuns(): void {
     const now = new Date().toISOString()
     const interrupted = this.#store.database.prepare(
-      `SELECT runs.scheduled_for, schedules.*
+      `SELECT runs.scheduled_for, runs.work_turn_id, schedules.*
        FROM task_schedule_runs AS runs JOIN task_schedules AS schedules ON schedules.id = runs.schedule_id
        WHERE runs.status = 'running'`,
-    ).all() as Array<Record<string, unknown> & { scheduled_for: unknown }>
-    for (const row of interrupted) this.#advance(mapSchedule(row), String(row.scheduled_for), now)
+    ).all() as Array<Record<string, unknown> & { scheduled_for: unknown; work_turn_id?: unknown }>
+    for (const row of interrupted) {
+      const workTurnId = typeof row.work_turn_id === 'string' ? row.work_turn_id : undefined
+      const workTurn = workTurnId === undefined ? undefined : this.#store.getWorkTurn(workTurnId)
+      if (workTurn !== undefined && ['queued', 'running', 'waiting-approval'].includes(workTurn.status)) {
+        try { this.#store.interruptWorkTurn(workTurn.id, 'service-restarted') } catch { /* another recovery path won */ }
+      }
+      this.#advance(mapSchedule(row), String(row.scheduled_for), now)
+    }
     this.#store.database.prepare(
       `UPDATE task_schedule_runs SET status = 'failed', completed_at = ?, error_code = 'service-restarted'
        WHERE status = 'running'`,
@@ -282,6 +306,7 @@ function mapRun(row: Record<string, unknown>): TaskScheduleRun {
     employeeId: String(row.employee_id), status: row.status as TaskScheduleRun['status'], scheduledFor: String(row.scheduled_for), startedAt: String(row.started_at),
     ...(row.completed_at === null ? {} : { completedAt: String(row.completed_at) }),
     ...(row.session_id === null ? {} : { sessionId: String(row.session_id) }),
+    ...(typeof row.work_turn_id === 'string' ? { workTurnId: row.work_turn_id } : {}),
     ...(row.summary === null ? {} : { summary: String(row.summary) }),
     ...(row.error_code === null ? {} : { errorCode: String(row.error_code) }),
   }

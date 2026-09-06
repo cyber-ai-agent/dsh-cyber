@@ -85,6 +85,10 @@ export interface TaskRun {
   planRevisionId: string
   attempt: number
   workTurnId: string
+  /** Caller supplied execution key. Absent for legacy/non-idempotent callers. */
+  idempotencyKey?: string
+  /** SHA-256 of the normalized execution request, never the raw task prompt. */
+  fingerprintSha256?: string
   agentRunIds: string[]
   status: 'running' | 'waiting-approval' | 'completed' | 'failed' | 'cancelled' | 'recovery-required'
   cost?: number

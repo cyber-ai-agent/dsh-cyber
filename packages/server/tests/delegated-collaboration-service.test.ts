@@ -6,9 +6,11 @@ import type {
   JsonObject,
   WorkMessage,
   WorkSession,
+  WorkTurn,
 } from '@dsh-cyber/contracts'
 import type {
   ConversationResult,
+  ContinueDirectConversationInput,
   DirectConversationInput,
 } from '@dsh-cyber/orchestration'
 import type { PeerCollaborationResult } from '../src/services/peer-collaboration-service.js'
@@ -137,7 +139,182 @@ describe('delegated character collaboration', () => {
       episodeId: 'episode-1',
     })
   })
+
+  it('starts a claimed original turn and continues it for the report without calling direct()', async () => {
+    const butler = character('butler', '管家', '世界管家')
+    const engineer = character('engineer', '阿帆', '开发工程师')
+    let original = workTurn('original-turn', 'queued')
+    const started: string[] = []
+    const failed: Array<{ id: string; code: string }> = []
+    const continued: ContinueDirectConversationInput[] = []
+    const merged: Array<{ id: string; patch: JsonObject }> = []
+    let directCalls = 0
+    const service = new DelegatedCollaborationService({
+      store: {
+        getEmployee(id) {
+          return id === butler.id ? butler : id === engineer.id ? engineer : undefined
+        },
+        appendMessage(input) {
+          return message(input.sessionId, input.senderId, input.content, input.metadata ?? {})
+        },
+        getWorkTurn() {
+          return original
+        },
+        startWorkTurn(id) {
+          started.push(id)
+          original = { ...original, status: 'running' }
+          return original
+        },
+        failWorkTurn(id, errorCode) {
+          failed.push({ id, code: errorCode })
+          original = { ...original, status: 'failed' }
+          return original
+        },
+        mergeMessageMetadata(id, patch) {
+          merged.push({ id, patch })
+          return message('direct-message', 'owner', 'delegated', patch)
+        },
+      },
+      peerCollaboration: {
+        async run() {
+          return collaborationResult(butler, engineer)
+        },
+      },
+      orchestrator: {
+        async direct() {
+          directCalls += 1
+          return directResult(butler)
+        },
+        async continueDirect(input) {
+          continued.push(input)
+          return directResult(butler)
+        },
+      },
+      worldSettings: {
+        async composeGroupRuntimePrompt(_worldId, prompt) {
+          return `[GROUP]\n${prompt}`
+        },
+        async composeRuntimePrompt(_worldId, _character, prompt) {
+          return `[DIRECT]\n${prompt}`
+        },
+      },
+    })
+
+    const result = await service.run({
+      ...delegationInput(butler, engineer),
+      existingWorkTurnId: original.id,
+      ownerMessageId: 'owner-message',
+      sessionId: 'direct-existing',
+    })
+
+    expect(started).toEqual(['original-turn'])
+    expect(directCalls).toBe(0)
+    expect(continued).toHaveLength(1)
+    expect(continued[0]).toMatchObject({
+      workTurnId: 'original-turn',
+      employeeId: butler.id,
+      runtimePrompt: expect.stringContaining('[系统已完成一次真实角色协作]'),
+    })
+    expect(merged).toEqual([
+      expect.objectContaining({
+        id: 'owner-message',
+        patch: expect.objectContaining({ delegatedPeerSessionId: 'peer-session', delegatedEpisodeId: 'episode-1' }),
+      }),
+    ])
+    expect(result.workTurnId).toBe('original-turn')
+    expect(result.delegation?.episodeId).toBe('episode-1')
+    expect(failed).toHaveLength(0)
+  })
+
+  it('fails the claimed original turn when peer execution fails and refuses a running replay', async () => {
+    const butler = character('butler', '管家', '世界管家')
+    const engineer = character('engineer', '阿帆', '开发工程师')
+    let original = workTurn('original-turn', 'queued')
+    const failed: Array<{ id: string; code: string }> = []
+    let peerCalls = 0
+    let continueCalls = 0
+    const service = new DelegatedCollaborationService({
+      store: {
+        getEmployee(id) {
+          return id === butler.id ? butler : id === engineer.id ? engineer : undefined
+        },
+        appendMessage(input) {
+          return message(input.sessionId, input.senderId, input.content, input.metadata ?? {})
+        },
+        getWorkTurn() {
+          return original
+        },
+        startWorkTurn() {
+          original = { ...original, status: 'running' }
+          return original
+        },
+        failWorkTurn(id, errorCode) {
+          failed.push({ id, code: errorCode })
+          original = { ...original, status: 'failed' }
+          return original
+        },
+      },
+      peerCollaboration: {
+        async run() {
+          peerCalls += 1
+          throw new Error('peer failed')
+        },
+      },
+      orchestrator: {
+        async direct() {
+          return directResult(butler)
+        },
+        async continueDirect() {
+          continueCalls += 1
+          return directResult(butler)
+        },
+      },
+      worldSettings: {
+        async composeGroupRuntimePrompt(_worldId, prompt) {
+          return prompt
+        },
+        async composeRuntimePrompt(_worldId, _character, prompt) {
+          return prompt
+        },
+      },
+    })
+
+    await expect(service.run({ ...delegationInput(butler, engineer), existingWorkTurnId: original.id })).rejects.toThrow('peer failed')
+    expect(peerCalls).toBe(1)
+    expect(continueCalls).toBe(0)
+    expect(original.status).toBe('failed')
+    expect(failed).toEqual([{ id: 'original-turn', code: 'delegation-failed' }])
+
+    await expect(service.run({ ...delegationInput(butler, engineer), existingWorkTurnId: original.id })).rejects.toMatchObject({ code: 'delegation_work_turn_unavailable' })
+    expect(peerCalls).toBe(1)
+  })
 })
+
+function delegationInput(butler: EmployeeInstance, engineer: EmployeeInstance) {
+  return {
+    workspaceId: butler.workspaceId,
+    worldId: butler.worldId,
+    initiatorId: butler.id,
+    targetIds: [engineer.id],
+    purpose: `请帮我向 @${engineer.displayName} 确认进度，然后回来告诉我。`,
+    maxRounds: 1,
+    transformedPrompt: `请帮我向 @${engineer.displayName} 确认进度，然后回来告诉我。`,
+    metadata: { clientTurnId: 'delegated-turn' },
+  }
+}
+
+function workTurn(id: string, status: WorkTurn['status']): WorkTurn {
+  return {
+    id,
+    workspaceId: 'workspace-1',
+    worldId: 'world-1',
+    sessionId: 'direct-existing',
+    clientTurnId: 'delegated-turn',
+    interactionKind: 'chat',
+    status,
+    createdAt: '2026-08-22T00:00:00.000Z',
+  }
+}
 
 function character(id: string, displayName: string, role: string): EmployeeInstance {
   return {

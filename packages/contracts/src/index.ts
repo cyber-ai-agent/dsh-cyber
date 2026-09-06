@@ -1,7 +1,7 @@
 import type { WorldCharacterAuthority } from './world-authority.js'
 import type { UiLocale } from './locales.js'
 
-export const CYBER_SCHEMA_VERSION = 44 as const
+export const CYBER_SCHEMA_VERSION = 46 as const
 
 export * from './runtime-access.js'
 export * from './locales.js'
@@ -122,6 +122,8 @@ export interface TaskScheduleRun {
   startedAt: IsoTimestamp
   completedAt?: IsoTimestamp
   sessionId?: string
+  /** The durable WorkTurn claimed before model or adapter execution. */
+  workTurnId?: string
   summary?: string
   errorCode?: string
 }

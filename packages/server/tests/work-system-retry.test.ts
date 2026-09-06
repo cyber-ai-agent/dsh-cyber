@@ -27,11 +27,13 @@ describe('Work System retry, single assignee and restart', () => {
     expect(failedRuns).toHaveLength(1)
     const requestsAfterFailure = f.runtime.requests.length
 
-    // The web retry control posts the same execute request again.
+    // The web retry control starts a new attempt with a new WorkTurn.
     const retried = await f.server.work.execute(task.id, roster(f))
-    expect(retried.task).toMatchObject({ status: 'waiting-review', currentPlanRevision: 1 })
-    expect(retried.runs).toHaveLength(1)
-    expect(retried.runs[0]).toMatchObject({ attempt: 1, status: 'completed' })
+    expect(retried.task).toMatchObject({ status: 'waiting-review', currentPlanRevision: 2 })
+    expect(retried.runs).toHaveLength(2)
+    expect(retried.runs.map((run) => run.attempt)).toEqual([1, 2])
+    expect(retried.runs[0]).toMatchObject({ attempt: 1, status: 'failed' })
+    expect(retried.runs[1]).toMatchObject({ attempt: 2, status: 'completed' })
 
     // Retry never rebuilds the task and never replays the failed attempt.
     expect(f.server.work.list(f.world.id)).toHaveLength(1)
@@ -46,8 +48,8 @@ describe('Work System retry, single assignee and restart', () => {
     expect(rejected.task.status).toBe('failed')
     const viaHttp = await post<WorkTaskDetail>(f.origin, `/api/tasks/${task.id}/execute`, roster(f))
     expect(viaHttp.status, JSON.stringify(viaHttp.body)).toBe(200)
-    expect(viaHttp.body.task).toMatchObject({ status: 'waiting-review', currentPlanRevision: 2 })
-    expect(viaHttp.body.runs.map((run) => run.attempt)).toEqual([1, 2])
+    expect(viaHttp.body.task).toMatchObject({ status: 'waiting-review', currentPlanRevision: 3 })
+    expect(viaHttp.body.runs.map((run) => run.attempt)).toEqual([1, 2, 3])
     expect(viaHttp.body.reviews).toHaveLength(1)
     expect(viaHttp.body.deliverables.map((item) => item.status)).toEqual(['rejected'])
     expect(f.server.work.list(f.world.id)).toHaveLength(1)
@@ -110,14 +112,16 @@ describe('Work System retry, single assignee and restart', () => {
     expect(reopened.server.store.getAgentRun(liveRuns[0]!.id)).toMatchObject({ status: 'failed', errorCode: 'service-restarted' })
     expect(reopened.server.store.getWorkTurn(liveRuns[0]!.turnId)).toMatchObject({ status: 'interrupted', errorCode: 'service-restarted' })
     expect(recovered.task.status).toBe('failed')
-    expect(recovered.runs).toEqual([])
+    expect(recovered.runs).toMatchObject([{ attempt: 1, status: 'recovery-required', errorCode: 'service-restarted' }])
     expect(reopened.server.work.list(f.world.id)).toHaveLength(1)
     expect(runtime.requests).toHaveLength(0)
 
     const retried = await reopened.server.work.execute(task.id, roster(f))
-    expect(retried.task).toMatchObject({ status: 'waiting-review', currentPlanRevision: 1 })
-    expect(retried.runs).toHaveLength(1)
-    expect(retried.runs[0]).toMatchObject({ attempt: 1, status: 'completed' })
+    expect(retried.task).toMatchObject({ status: 'waiting-review', currentPlanRevision: 2 })
+    expect(retried.runs).toHaveLength(2)
+    expect(retried.runs.map((run) => run.attempt)).toEqual([1, 2])
+    expect(retried.runs[0]).toMatchObject({ attempt: 1, status: 'recovery-required' })
+    expect(retried.runs[1]).toMatchObject({ attempt: 2, status: 'completed' })
     expect(reopened.server.work.list(f.world.id)).toHaveLength(1)
     expect(runtime.requests).toHaveLength(2)
     expect(reopened.server.store.getAgentRun(liveRuns[0]!.id)).toMatchObject({ status: 'failed', errorCode: 'service-restarted' })

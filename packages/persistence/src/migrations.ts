@@ -2238,6 +2238,36 @@ const MIGRATIONS: readonly Migration[] = [
         ON conversation_submission_claims(session_id, created_at DESC, id);
     `,
   },
+  {
+    version: 45,
+    name: 'task-schedule-run-work-turn-link',
+    sql: `
+      -- A scheduled attempt claims its WorkTurn before entering the model or
+      -- adapter. Existing runs predate that seam, so the edge is nullable and
+      -- deliberately has no guessed backfill. New runs always write it.
+      ALTER TABLE task_schedule_runs ADD COLUMN work_turn_id TEXT
+        REFERENCES work_turns(id) ON DELETE SET NULL;
+      CREATE INDEX task_schedule_runs_work_turn_idx
+        ON task_schedule_runs(work_turn_id, started_at DESC)
+        WHERE work_turn_id IS NOT NULL;
+    `,
+  },
+  {
+    version: 46,
+    name: 'task-execution-idempotency',
+    sql: `
+      -- A Task Center retry must have a durable execution fact before any
+      -- model, Skill or AgentRun side effect begins. The key is scoped to a
+      -- task, while the digest prevents a reused key from silently changing
+      -- its roster, coordinator or request.
+      ALTER TABLE task_runs ADD COLUMN idempotency_key TEXT;
+      ALTER TABLE task_runs ADD COLUMN fingerprint_sha256 TEXT;
+      CREATE UNIQUE INDEX task_runs_task_idempotency_idx
+        ON task_runs(task_id, idempotency_key)
+        WHERE idempotency_key IS NOT NULL;
+      CREATE INDEX task_runs_work_turn_idx ON task_runs(work_turn_id, attempt DESC, id);
+    `,
+  },
 ]
 
 /**

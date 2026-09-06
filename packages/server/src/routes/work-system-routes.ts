@@ -53,7 +53,16 @@ export function registerWorkSystemRoutes(router: Router, dependencies: { store: 
     const body = await readJson(request)
     const employeeIds = stringArray(body.employeeIds, '任务角色')
     const coordinatorEmployeeId = typeof body.coordinatorEmployeeId === 'string' && body.coordinatorEmployeeId.trim() ? body.coordinatorEmployeeId.trim() : undefined
-    const result = await work.execute(detail.task.id, { employeeIds, ...(coordinatorEmployeeId === undefined ? {} : { coordinatorEmployeeId }) })
+    const idempotencyKey = optionalText(body.idempotencyKey)
+    const submissionKey = optionalText(body.submissionKey)
+    const clientTurnId = optionalText(body.clientTurnId)
+    const result = await work.execute(detail.task.id, {
+      employeeIds,
+      ...(coordinatorEmployeeId === undefined ? {} : { coordinatorEmployeeId }),
+      ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+      ...(submissionKey === undefined ? {} : { submissionKey }),
+      ...(clientTurnId === undefined ? {} : { clientTurnId }),
+    })
     writeJson(response, 200, result)
   })
 
@@ -105,5 +114,6 @@ export function registerWorkSystemRoutes(router: Router, dependencies: { store: 
 function contract<T>(operation: () => T): T { try { return operation() } catch (error) { if (error instanceof WorkSystemContractError) throw new HttpError(422, error.code, error.message); throw error } }
 function safeDetail(work: WorkSystemService, id: string) { try { return work.detail(id) } catch { throw new HttpError(404, 'task_not_found', '任务不存在') } }
 function text(value: unknown, field: string): string { if (typeof value !== 'string' || !value.trim()) throw new HttpError(422, 'work_system_contract_invalid', `${field} 不能为空`); return value.trim() }
+function optionalText(value: unknown): string | undefined { return typeof value === 'string' && value.trim() ? value.trim() : undefined }
 function positiveInteger(value: unknown, field: string): number { if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) throw new HttpError(422, 'work_system_contract_invalid', `${field} 必须是正整数`); return value }
 function stringArray(value: unknown, field: string): string[] { if (!Array.isArray(value)) throw new HttpError(422, 'work_system_contract_invalid', `${field} 必须是数组`); const result = [...new Set(value.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean))]; if (field === '任务角色' && result.length < 1) throw new HttpError(422, 'work_system_contract_invalid', '任务角色至少需要一名'); return result }

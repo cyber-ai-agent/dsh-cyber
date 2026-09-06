@@ -3,6 +3,7 @@ import type {
   ConversationSubmissionInput,
   ConversationSubmissionReceipt,
   ConversationSubmissionResult,
+  JsonObject,
 } from '@dsh-cyber/contracts'
 
 import { HttpError } from '../http/errors.js'
@@ -30,6 +31,7 @@ export interface ConversationIngressFingerprintInput {
   modelProfileIds?: Readonly<Record<string, string>>
   runtimeAccessGrantId?: string
   coordinatorEmployeeId?: string
+  planningFingerprint?: JsonObject
   attachments?: readonly ConversationIngressAttachment[]
 }
 
@@ -74,6 +76,7 @@ export function conversationIngressFingerprint(input: ConversationIngressFingerp
     ...(input.modelProfileIds === undefined ? {} : { modelProfileIds: sortedMap(input.modelProfileIds) }),
     ...(runtimeAccessGrantId === undefined ? {} : { runtimeAccessGrantId }),
     ...(coordinatorEmployeeId === undefined ? {} : { coordinatorEmployeeId }),
+    ...(input.planningFingerprint === undefined ? {} : { planningFingerprint: input.planningFingerprint }),
     ...(input.attachments === undefined ? {} : {
       attachments: [...input.attachments]
         .map((attachment) => {

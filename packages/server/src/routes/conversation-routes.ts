@@ -457,6 +457,9 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
         initiator: character,
         characters: store.listEmployees(world.id),
       })
+      if (delegation !== undefined && queueMode !== undefined) {
+        throw new HttpError(422, 'delegation_queue_unsupported', '委派协作暂不支持排队，请先使用即时发送')
+      }
       if (clientTurnId !== undefined && delegation === undefined) {
         const fingerprintSha256 = conversationIngressFingerprint({
           workspaceId: world.workspaceId,
@@ -531,18 +534,93 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
         result = accepted.value
         responseStatus = accepted.receipt.queueEntry === undefined ? 200 : 202
       } else if (delegation !== undefined) {
-        startTaskIntent()
-        result = await delegatedCollaboration.run({
-          ...delegation,
-          workspaceId: world.workspaceId,
-          worldId: world.id,
-          transformedPrompt,
-          metadata,
-          ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
-          permissionMode,
-          ...(sessionId === undefined ? {} : { sessionId }),
-          ...(title === undefined ? {} : { title }),
-        })
+        const delegatedParticipantIds = uniqueEmployeeIds([character.id, ...delegation.targetIds])
+        const delegatedMetadata: JsonObject = {
+          ...metadata,
+          delegatedWorkflow: true,
+          delegatedParticipantIds,
+          delegatedPurpose: delegation.purpose,
+          delegatedMaxRounds: delegation.maxRounds,
+          ...(sessionId === undefined ? {} : { delegatedDirectSessionId: sessionId }),
+        }
+        if (clientTurnId !== undefined) {
+          const fingerprintSha256 = conversationIngressFingerprint({
+            workspaceId: world.workspaceId,
+            worldId: world.id,
+            clientTurnId,
+            kind: 'direct',
+            promptHash: conversationPromptHash(prompt),
+            employeeIds,
+            ...(requestedSessionId === undefined ? {} : { sessionId: requestedSessionId }),
+            ...(title === undefined ? {} : { title }),
+            interactionKind: metadata.interactionKind === 'task' || metadata.interactionKind === 'meeting'
+              ? metadata.interactionKind
+              : 'chat',
+            ...(isPermissionMode(body.permissionMode) ? { permissionMode: body.permissionMode } : {}),
+            ...(body.reasoningEffort === undefined ? {} : { reasoningEffort: requestedReasoning }),
+            ...(modelProfileId === undefined ? {} : { modelProfileId }),
+            ...(runtimeAccessGrantId === undefined ? {} : { runtimeAccessGrantId }),
+            planningFingerprint: {
+              kind: 'delegated-collaboration',
+              targetIds: delegation.targetIds,
+              maxRounds: delegation.maxRounds,
+            },
+            attachments,
+          })
+          const accepted = await conversationIngress.run({
+            identity: { workspaceId: world.workspaceId, worldId: world.id, clientTurnId, fingerprintSha256 },
+            prepare: () => ({
+              input: {
+                workspaceId: world.workspaceId,
+                worldId: world.id,
+                idempotencyKey: clientTurnId,
+                fingerprintSha256,
+                ...(sessionId === undefined ? {} : { sessionId }),
+                sessionKind: 'direct' as const,
+                ...(title === undefined ? {} : { sessionTitle: title }),
+                participantEmployeeIds: [character.id],
+                reservationEmployeeIds: [character.id],
+                interactionKind: metadata.interactionKind === 'task' || metadata.interactionKind === 'meeting'
+                  ? metadata.interactionKind
+                  : 'chat',
+                ownerMessage: { content: prompt, metadata: delegatedMetadata },
+              },
+              context: undefined,
+            }),
+            execute: async (receipt) => {
+              startTaskIntent()
+              return delegatedCollaboration.run({
+                ...delegation,
+                workspaceId: world.workspaceId,
+                worldId: world.id,
+                transformedPrompt,
+                metadata: delegatedMetadata,
+                ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
+                permissionMode,
+                sessionId: receipt.session.id,
+                ...(title === undefined ? {} : { title }),
+                existingWorkTurnId: receipt.workTurn.id,
+                ownerMessageId: receipt.ownerMessage.id,
+              })
+            },
+            replay: async (receipt) => replayDelegatedConversation(store, receipt),
+          })
+          result = accepted.value
+          responseStatus = delegatedClaimResponseStatus(store, accepted.receipt)
+        } else {
+          startTaskIntent()
+          result = await delegatedCollaboration.run({
+            ...delegation,
+            workspaceId: world.workspaceId,
+            worldId: world.id,
+            transformedPrompt,
+            metadata: delegatedMetadata,
+            ...(requestedReasoning === 'auto' ? {} : { reasoningEffort: requestedReasoning }),
+            permissionMode,
+            ...(sessionId === undefined ? {} : { sessionId }),
+            ...(title === undefined ? {} : { title }),
+          })
+        }
       } else {
         startTaskIntent()
         const directInput: DirectConversationInput = {
@@ -1162,6 +1240,41 @@ function replayClaimedConversation(store: SqliteStore, receipt: ConversationSubm
       status: 'queued' as const,
     }),
   }
+}
+
+/** Rebuild a delegated response without invoking peer or model execution again. */
+function replayDelegatedConversation(store: SqliteStore, receipt: ConversationSubmissionReceipt) {
+  const value = replayClaimedConversation(store, receipt)
+  const ownerMessage = store.listMessages(receipt.session.id)
+    .find((message) => message.kind === 'user' && message.metadata.workTurnId === receipt.workTurn.id)
+  const metadata = ownerMessage?.metadata ?? receipt.ownerMessage.metadata
+  const peerSessionId = typeof metadata.delegatedPeerSessionId === 'string'
+    ? metadata.delegatedPeerSessionId
+    : undefined
+  const episodeId = typeof metadata.delegatedEpisodeId === 'string'
+    ? metadata.delegatedEpisodeId
+    : undefined
+  if (peerSessionId === undefined || episodeId === undefined) return value
+  const peerSession = store.getSession(peerSessionId)
+  if (peerSession === undefined) return value
+  const participantIds = Array.isArray(metadata.delegatedParticipantIds)
+    ? metadata.delegatedParticipantIds.filter((item): item is string => typeof item === 'string')
+    : store.listParticipants(peerSession.id)
+        .filter((participant) => participant.kind === 'employee')
+        .map((participant) => participant.participantId)
+  return {
+    ...value,
+    delegation: {
+      session: peerSession,
+      participantIds,
+      episodeId,
+    },
+  }
+}
+
+function delegatedClaimResponseStatus(store: SqliteStore, receipt: ConversationSubmissionReceipt): 200 | 202 {
+  const status = store.getWorkTurn(receipt.workTurn.id)?.status ?? receipt.workTurn.status
+  return status === 'completed' || status === 'failed' || status === 'interrupted' ? 200 : 202
 }
 
 async function replayAcceptedGroup(

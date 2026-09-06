@@ -8,6 +8,7 @@ import type {
 import type {
   ConversationOrchestrator,
   ConversationResult,
+  ContinueDirectConversationInput,
   DirectConversationInput,
 } from '@dsh-cyber/orchestration'
 import type { SqliteStore } from '@dsh-cyber/persistence'
@@ -40,19 +41,31 @@ export interface DelegatedCollaborationInput extends DelegatedCollaborationInten
   permissionMode?: AgentPermissionMode
   sessionId?: string
   title?: string
+  /** Internal atomic-ingress continuation. The original owner WorkTurn is already claimed. */
+  existingWorkTurnId?: string
+  /** Owner message created by the atomic ingress claim, when available. */
+  ownerMessageId?: string
 }
 
 export interface DelegatedCollaborationResult extends ConversationResult {
-  delegation: {
+  workTurnId?: string
+  delegation?: {
     session: WorkSession
     participantIds: string[]
     episodeId: string
   }
 }
 
+type DelegatedCollaborationStore = Pick<SqliteStore, 'getEmployee' | 'appendMessage'> & Partial<Pick<
+  SqliteStore,
+  'getWorkTurn' | 'startWorkTurn' | 'failWorkTurn' | 'mergeMessageMetadata'
+>>
+
 export interface DelegatedCollaborationServiceOptions {
-  store: Pick<SqliteStore, 'getEmployee' | 'appendMessage'>
-  orchestrator: Pick<ConversationOrchestrator, 'direct'>
+  store: DelegatedCollaborationStore
+  orchestrator: Pick<ConversationOrchestrator, 'direct'> & {
+    continueDirect?: ConversationOrchestrator['continueDirect']
+  }
   peerCollaboration: Pick<PeerCollaborationService, 'run'>
   worldSettings: WorldRuntimePromptComposer
 }
@@ -101,74 +114,149 @@ export class DelegatedCollaborationService {
       return target
     })
 
-    const collaboration = await this.#peerCollaboration.run({
-      workspaceId: input.workspaceId,
-      worldId: input.worldId,
-      initiatorId: initiator.id,
-      participantIds: targetIds,
-      purpose: input.purpose,
-      maxRounds: input.maxRounds,
-      runtimePrompt: await this.#worldSettings.composeGroupRuntimePrompt(
-        input.worldId,
-        input.transformedPrompt,
-      ),
-      ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
-      title: `${initiator.displayName} 代你向 ${targets.map((target) => target.displayName).join('、')} 确认`,
-    })
-
-    const directMetadata: JsonObject = {
-      ...input.metadata,
-      delegatedWorkflow: true,
-      delegatedPeerSessionId: collaboration.session.id,
-      delegatedEpisodeId: collaboration.episode.id,
-      delegatedParticipantIds: collaboration.participantIds,
-      delegatedPurpose: input.purpose,
+    if (input.existingWorkTurnId !== undefined) {
+      this.#prepareOriginalTurn(input.existingWorkTurnId, input.workspaceId, input.worldId)
     }
-    const reportPrompt = buildGroundedReportPrompt(
-      input.transformedPrompt,
-      initiator,
-      targets,
-      collaboration,
-    )
-    const directInput: DirectConversationInput = {
-      workspaceId: input.workspaceId,
-      worldId: input.worldId,
-      employeeId: initiator.id,
-      prompt: input.purpose,
-      metadata: directMetadata,
-      runtimePrompt: await this.#worldSettings.composeRuntimePrompt(
+
+    try {
+      const collaboration = await this.#peerCollaboration.run({
+        workspaceId: input.workspaceId,
+        worldId: input.worldId,
+        initiatorId: initiator.id,
+        participantIds: targetIds,
+        purpose: input.purpose,
+        maxRounds: input.maxRounds,
+        runtimePrompt: await this.#worldSettings.composeGroupRuntimePrompt(
+          input.worldId,
+          input.transformedPrompt,
+        ),
+        ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
+        title: `${initiator.displayName} 代你向 ${targets.map((target) => target.displayName).join('、')} 确认`,
+      })
+
+      const directMetadata: JsonObject = {
+        ...input.metadata,
+        delegatedWorkflow: true,
+        delegatedPeerSessionId: collaboration.session.id,
+        delegatedEpisodeId: collaboration.episode.id,
+        delegatedParticipantIds: collaboration.participantIds,
+        delegatedPurpose: input.purpose,
+        ...(input.sessionId === undefined ? {} : { delegatedDirectSessionId: input.sessionId }),
+      }
+      if (input.ownerMessageId !== undefined && this.#store.mergeMessageMetadata !== undefined) {
+        this.#store.mergeMessageMetadata(input.ownerMessageId, {
+          delegatedWorkflow: true,
+          delegatedPeerSessionId: collaboration.session.id,
+          delegatedEpisodeId: collaboration.episode.id,
+          delegatedParticipantIds: collaboration.participantIds,
+          delegatedPurpose: input.purpose,
+          ...(input.sessionId === undefined ? {} : { delegatedDirectSessionId: input.sessionId }),
+        })
+      }
+      const reportPrompt = buildGroundedReportPrompt(
+        input.transformedPrompt,
+        initiator,
+        targets,
+        collaboration,
+      )
+      const reportRuntimePrompt = await this.#worldSettings.composeRuntimePrompt(
         input.worldId,
         initiator,
         reportPrompt,
-      ),
-      ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
-      ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
+      )
+      const directInput: DirectConversationInput = {
+        workspaceId: input.workspaceId,
+        worldId: input.worldId,
+        employeeId: initiator.id,
+        prompt: input.purpose,
+        metadata: directMetadata,
+        runtimePrompt: reportRuntimePrompt,
+        ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
+        ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
+      }
+      if (input.sessionId !== undefined) directInput.sessionId = input.sessionId
+      if (input.title !== undefined) directInput.title = input.title
+
+      const direct = input.existingWorkTurnId === undefined
+        ? await this.#orchestrator.direct(directInput)
+        : await this.#continueOriginalTurn({
+            workTurnId: input.existingWorkTurnId,
+            employeeId: initiator.id,
+            runtimePrompt: reportRuntimePrompt,
+            ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
+            ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
+          })
+      this.#store.appendMessage({
+        sessionId: collaboration.session.id,
+        senderId: 'system',
+        senderKind: 'system',
+        kind: 'system',
+        content: `${initiator.displayName} 已将本次协作结果汇报给用户。`,
+        metadata: {
+          source: 'delegated-collaboration',
+          delegatedDirectSessionId: direct.session.id,
+          delegatedEpisodeId: collaboration.episode.id,
+        },
+        correlationId: direct.session.id,
+      })
+
+      return {
+        ...direct,
+        ...(input.existingWorkTurnId === undefined ? {} : { workTurnId: input.existingWorkTurnId }),
+        delegation: {
+          session: collaboration.session,
+          participantIds: collaboration.participantIds,
+          episodeId: collaboration.episode.id,
+        },
+      }
+    } catch (error) {
+      if (input.existingWorkTurnId !== undefined) this.#failOriginalTurn(input.existingWorkTurnId)
+      throw error
     }
-    if (input.sessionId !== undefined) directInput.sessionId = input.sessionId
-    if (input.title !== undefined) directInput.title = input.title
+  }
 
-    const direct = await this.#orchestrator.direct(directInput)
-    this.#store.appendMessage({
-      sessionId: collaboration.session.id,
-      senderId: 'system',
-      senderKind: 'system',
-      kind: 'system',
-      content: `${initiator.displayName} 已将本次协作结果汇报给用户。`,
-      metadata: {
-        source: 'delegated-collaboration',
-        delegatedDirectSessionId: direct.session.id,
-        delegatedEpisodeId: collaboration.episode.id,
-      },
-      correlationId: direct.session.id,
-    })
+  #prepareOriginalTurn(workTurnId: string, workspaceId: string, worldId: string): void {
+    if (
+      this.#store.getWorkTurn === undefined ||
+      this.#store.startWorkTurn === undefined ||
+      this.#store.failWorkTurn === undefined ||
+      this.#orchestrator.continueDirect === undefined
+    ) {
+      throw new ServiceError('unavailable', 'delegation_continuation_unavailable', '委派协作无法继续原始工作回合')
+    }
+    const workTurn = this.#store.getWorkTurn(workTurnId)
+    if (
+      workTurn === undefined ||
+      workTurn.workspaceId !== workspaceId ||
+      workTurn.worldId !== worldId
+    ) {
+      throw new ServiceError('not-found', 'delegation_work_turn_unavailable', '委派协作的原始工作回合不存在')
+    }
+    if (workTurn.status !== 'queued') {
+      // A running row can be left by a crashed process after the peer side
+      // effects have started. There is no durable phase marker that makes
+      // replaying those effects safe, so only the freshly claimed queued row
+      // may enter the delegated executor.
+      throw new ServiceError('conflict', 'delegation_work_turn_unavailable', '委派协作的原始工作回合已无法安全重放')
+    }
+    this.#store.startWorkTurn(workTurn.id)
+  }
 
-    return {
-      ...direct,
-      delegation: {
-        session: collaboration.session,
-        participantIds: collaboration.participantIds,
-        episodeId: collaboration.episode.id,
-      },
+  async #continueOriginalTurn(input: ContinueDirectConversationInput): Promise<ConversationResult> {
+    if (this.#orchestrator.continueDirect === undefined) {
+      throw new ServiceError('unavailable', 'delegation_continuation_unavailable', '委派协作无法继续原始工作回合')
+    }
+    return this.#orchestrator.continueDirect(input)
+  }
+
+  #failOriginalTurn(workTurnId: string): void {
+    if (this.#store.getWorkTurn === undefined || this.#store.failWorkTurn === undefined) return
+    try {
+      if (this.#store.getWorkTurn(workTurnId)?.status === 'running') {
+        this.#store.failWorkTurn(workTurnId, 'delegation-failed')
+      }
+    } catch {
+      // A concurrent stop or continuation may already have made the turn terminal.
     }
   }
 }

@@ -80,6 +80,7 @@ import {
   type TaskCollaborationPlanStatus,
   type TaskCollaborationStep,
   type TaskCollaborationStepStatus,
+  type TaskScheduleRun,
   type SkillEvidence,
   type SkillEvidenceKind,
   type SkillEvidenceOutcome,
@@ -425,6 +426,38 @@ export interface CreateWorkTurnInput {
   sessionId: string
   clientTurnId?: string
   interactionKind: WorkTurnInteractionKind
+}
+
+/**
+ * The durable claim made by the scheduler before a model or adapter can run.
+ * The schedule row is the authority for identity; the duplicated scope and
+ * execution fields are checked against it inside the same transaction.
+ */
+export interface ClaimTaskScheduleRunInput {
+  scheduleId: string
+  scheduledFor: string
+  workspaceId: string
+  worldId: string
+  employeeId: string
+  title: string
+  prompt: string
+  permissionMode: Exclude<AgentPermissionMode, 'danger-full-access'>
+  /** Optional future queue handoff; omitted for immediate scheduler runs. */
+  queue?: {
+    id?: string
+    queueMode?: 'normal' | 'next'
+    priority?: number
+  }
+}
+
+/** A first claim includes all newly persisted facts; legacy replays may only have the run row. */
+export interface TaskScheduleRunClaim {
+  created: boolean
+  run: TaskScheduleRun
+  session?: WorkSession
+  workTurn?: WorkTurn
+  ownerMessage?: WorkMessage
+  queueEntry?: ConversationQueueEntry
 }
 
 export interface EnqueueConversationTurnInput {
@@ -3497,6 +3530,149 @@ export class SqliteStore {
   }
 
   /**
+   * Atomically claim one scheduled occurrence and its conversation facts.
+   *
+   * The unique `(schedule_id, scheduled_for)` constraint is the cross-process
+   * idempotency boundary. A new row is committed together with its direct
+   * session, queued WorkTurn, owner message and optional queue entry; callers
+   * may enter model or adapter execution only after this method returns a
+   * newly created claim. Existing legacy rows are replayed without guessing a
+   * missing WorkTurn, which keeps an interrupted or unknown side effect from
+   * being automatically re-run.
+   */
+  claimTaskScheduleRun(input: ClaimTaskScheduleRunInput): TaskScheduleRunClaim {
+    this.#assertWritable()
+    const scheduleId = normalizeRequiredToken(input.scheduleId, 'Task schedule id', 160)
+    const scheduledFor = normalizeIsoTimestamp(input.scheduledFor, 'Task schedule scheduled time')
+    const workspaceId = normalizeRequiredToken(input.workspaceId, 'Task schedule workspace id', 160)
+    const worldId = normalizeRequiredToken(input.worldId, 'Task schedule world id', 160)
+    const employeeId = normalizeRequiredToken(input.employeeId, 'Task schedule employee id', 160)
+    const title = normalizeRequiredText(input.title, 'Task schedule title', 120)
+    const prompt = normalizeRequiredText(input.prompt, 'Task schedule prompt', 8_000)
+    const permissionMode = validateSchedulePermissionMode(input.permissionMode)
+    const queue = input.queue === undefined
+      ? undefined
+      : {
+          id: input.queue.id === undefined ? undefined : normalizeRequiredToken(input.queue.id, 'Task schedule queue id', 160),
+          queueMode: input.queue.queueMode ?? 'normal',
+          priority: input.queue.priority,
+        }
+    if (queue !== undefined) {
+      if (queue.queueMode !== 'normal' && queue.queueMode !== 'next') {
+        throw new PersistenceError('Task schedule queue mode is invalid')
+      }
+      if (queue.priority !== undefined) validateQueuePriority(queue.priority)
+    }
+
+    const workspace = this.#requireWorkspace(workspaceId)
+    this.#assertWorldAcceptsWork(worldId)
+    const employee = this.#requireEmployee(employeeId)
+    if (employee.workspaceId !== workspace.id || employee.worldId !== worldId || employee.status === 'archived') {
+      throw new PersistenceError('Task schedule employee is unavailable')
+    }
+
+    return this.#transaction(() => {
+      const currentWorld = this.#assertWorldAcceptsWork(worldId)
+      const currentEmployee = this.#requireEmployee(employeeId)
+      const schedule = this.database.prepare(
+        `SELECT id, workspace_id, world_id, employee_id, title, prompt, permission_mode
+         FROM task_schedules WHERE id = ?`,
+      ).get(scheduleId) as Record<string, unknown> | undefined
+      if (schedule === undefined) throw new EntityNotFoundError(`Task schedule not found: ${scheduleId}`)
+      if (
+        String(schedule.workspace_id) !== workspace.id ||
+        String(schedule.world_id) !== currentWorld.id ||
+        String(schedule.employee_id) !== currentEmployee.id ||
+        String(schedule.title) !== title ||
+        String(schedule.prompt) !== prompt ||
+        String(schedule.permission_mode) !== permissionMode
+      ) {
+        throw new PersistenceError('Task schedule changed concurrently; reload before running')
+      }
+      if (currentEmployee.workspaceId !== workspace.id || currentEmployee.worldId !== currentWorld.id || currentEmployee.status === 'archived') {
+        throw new PersistenceError('Task schedule employee is unavailable')
+      }
+
+      const existingRow = this.database.prepare(
+        `SELECT * FROM task_schedule_runs
+         WHERE schedule_id = ? AND scheduled_for = ?`,
+      ).get(scheduleId, scheduledFor)
+      if (existingRow !== undefined) {
+        const run = mapTaskScheduleRun(existingRow)
+        return { created: false, run, ...this.#readTaskScheduleRunFacts(run) }
+      }
+
+      const runId = this.#idFactory()
+      const startedAt = this.#clock()
+      const session = this.#resolveDirectScheduleSession({
+        workspaceId: workspace.id,
+        worldId: currentWorld.id,
+        employeeId: currentEmployee.id,
+        title,
+      })
+      const workTurn = this.#insertConversationSubmissionWorkTurn({
+        workspaceId: workspace.id,
+        worldId: currentWorld.id,
+        sessionId: session.id,
+        clientTurnId: taskScheduleRunClientTurnId(scheduleId, scheduledFor),
+        interactionKind: 'task',
+      })
+      const ownerMessage = this.#appendMessage({
+        sessionId: session.id,
+        senderId: 'owner',
+        senderKind: 'owner',
+        kind: 'user',
+        content: prompt,
+        metadata: {
+          interactionKind: 'task',
+          scheduleId,
+          scheduleRunId: runId,
+          scheduledFor,
+          workTurnId: workTurn.id,
+          permissionMode,
+        },
+        correlationId: session.id,
+      })
+      const queueEntry = queue === undefined
+        ? undefined
+        : this.#insertConversationSubmissionQueueEntry({
+            workspaceId: workspace.id,
+            worldId: currentWorld.id,
+            session,
+            workTurn,
+            queue: {
+              employeeIds: [currentEmployee.id],
+              queueMode: queue.queueMode,
+              collaborationMode: 'discussion',
+              permissionMode,
+              ...(queue.id === undefined ? {} : { id: queue.id }),
+              ...(queue.priority === undefined ? {} : { priority: queue.priority }),
+            },
+          })
+      this.database.prepare(
+        `INSERT INTO task_schedule_runs
+         (id, schedule_id, workspace_id, world_id, employee_id, status, scheduled_for,
+          started_at, session_id, work_turn_id)
+         VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?)`,
+      ).run(
+        runId,
+        scheduleId,
+        workspace.id,
+        currentWorld.id,
+        currentEmployee.id,
+        scheduledFor,
+        startedAt,
+        session.id,
+        workTurn.id,
+      )
+      const run = mapTaskScheduleRun(this.database.prepare(
+        'SELECT * FROM task_schedule_runs WHERE id = ?',
+      ).get(runId)!)
+      return { created: true, run, session, workTurn, ownerMessage, ...(queueEntry === undefined ? {} : { queueEntry }) }
+    })
+  }
+
+  /**
    * Atomically accept one owner chat submission.
    *
    * This is the persistence seam for the HTTP/application facade. It owns the
@@ -3877,6 +4053,103 @@ export class SqliteStore {
       : this.database.prepare('SELECT * FROM conversation_queue_entries WHERE id = ?').get(claim.queueEntryId)
     return {
       claim,
+      session,
+      workTurn,
+      ownerMessage: mapMessage(messageRow),
+      ...(queueRow === undefined ? {} : { queueEntry: mapConversationQueueEntry(queueRow) }),
+    }
+  }
+
+  #resolveDirectScheduleSession(input: {
+    workspaceId: string
+    worldId: string
+    employeeId: string
+    title: string
+  }): WorkSession {
+    const candidates = this.listSessions(input.worldId, 'open')
+      .filter((session) => session.workspaceId === input.workspaceId && session.kind === 'direct')
+      .filter((session) => (session.collaborationMode ?? 'discussion') === 'discussion')
+      .filter((session) => {
+        const employees = this.#sessionEmployeeIds(session.id)
+        return employees.length === 1 && employees[0] === input.employeeId
+      })
+    if (candidates.length > 1) {
+      throw new PersistenceError('Multiple canonical direct sessions match this employee and require reconciliation')
+    }
+    const canonical = candidates[0]
+    if (canonical !== undefined) {
+      this.#ensureOwnerParticipant(canonical)
+      return this.getSession(canonical.id)!
+    }
+
+    const now = this.#clock()
+    const session: WorkSession = {
+      id: this.#idFactory(),
+      workspaceId: input.workspaceId,
+      worldId: input.worldId,
+      kind: 'direct',
+      collaborationMode: 'discussion',
+      title: `计划 · ${input.title}`,
+      status: 'open',
+      createdAt: now,
+      updatedAt: now,
+    }
+    this.database.prepare(
+      `INSERT INTO work_sessions
+       (id, workspace_id, world_id, kind, collaboration_mode, title, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      session.id,
+      session.workspaceId,
+      session.worldId,
+      session.kind,
+      session.collaborationMode ?? 'discussion',
+      session.title,
+      session.status,
+      session.createdAt,
+      session.updatedAt,
+    )
+    this.#appendEvent({
+      workspaceId: session.workspaceId,
+      worldId: session.worldId,
+      type: 'session.created',
+      actorId: 'owner',
+      actorKind: 'owner',
+      sessionId: session.id,
+      payload: {
+        sessionId: session.id,
+        worldId: session.worldId,
+        kind: session.kind,
+        title: session.title,
+      },
+    })
+    this.#addParticipant(session, 'owner', 'owner')
+    this.#addParticipant(session, input.employeeId, 'employee')
+    return session
+  }
+
+  #readTaskScheduleRunFacts(run: TaskScheduleRun): {
+    session?: WorkSession
+    workTurn?: WorkTurn
+    ownerMessage?: WorkMessage
+    queueEntry?: ConversationQueueEntry
+  } {
+    if (run.workTurnId === undefined) return {}
+    const workTurn = this.getWorkTurn(run.workTurnId)
+    if (workTurn === undefined || workTurn.workspaceId !== run.workspaceId || workTurn.worldId !== run.worldId) return {}
+    const session = this.getSession(workTurn.sessionId)
+    if (session === undefined || session.workspaceId !== run.workspaceId || session.worldId !== run.worldId) return {}
+    const messageRow = this.database.prepare(
+      `SELECT * FROM messages
+       WHERE session_id = ? AND kind = 'user'
+         AND json_extract(metadata_json, '$.workTurnId') = ?
+       ORDER BY sequence LIMIT 1`,
+    ).get(session.id, workTurn.id)
+    if (messageRow === undefined) return { session, workTurn }
+    const queueRow = this.database.prepare(
+      'SELECT * FROM conversation_queue_entries WHERE work_turn_id = ?',
+    ).get(workTurn.id)
+    return {
       session,
       workTurn,
       ownerMessage: mapMessage(messageRow),
@@ -5077,6 +5350,28 @@ export class SqliteStore {
   appendMessage(input: AppendMessageInput): WorkMessage {
     this.#assertWritable()
     return this.#transaction(() => this.#appendMessage(input))
+  }
+
+  /** Merge host-owned metadata onto one durable message without changing its content or sequence. */
+  mergeMessageMetadata(messageId: string, patch: JsonObject): WorkMessage {
+    this.#assertWritable()
+    const id = messageId.trim()
+    if (!id) throw new PersistenceError('Message id cannot be empty')
+    return this.#transaction(() => {
+      const row = this.database.prepare(
+        'SELECT * FROM messages WHERE id = ?',
+      ).get(id) as { metadata_json?: unknown } | undefined
+      if (row === undefined) throw new PersistenceError('Message is unavailable')
+      const metadata = {
+        ...parseJson<JsonObject>(String(row.metadata_json ?? '{}')),
+        ...patch,
+      }
+      assertSecretFree(metadata)
+      this.database.prepare(
+        'UPDATE messages SET metadata_json = ? WHERE id = ?',
+      ).run(stringifyJson(metadata), id)
+      return mapMessage(this.database.prepare('SELECT * FROM messages WHERE id = ?').get(id)!)
+    })
   }
 
   listMessages(sessionId: string, afterSequence = 0): WorkMessage[] {
@@ -7624,6 +7919,26 @@ function mapWorkTurn(row: object): WorkTurn {
   return turn
 }
 
+function mapTaskScheduleRun(row: object): TaskScheduleRun {
+  const value = row as Record<string, unknown>
+  const run: TaskScheduleRun = {
+    id: String(value.id),
+    scheduleId: String(value.schedule_id),
+    workspaceId: String(value.workspace_id),
+    worldId: String(value.world_id),
+    employeeId: String(value.employee_id),
+    status: value.status as TaskScheduleRun['status'],
+    scheduledFor: String(value.scheduled_for),
+    startedAt: String(value.started_at),
+  }
+  if (typeof value.completed_at === 'string') run.completedAt = value.completed_at
+  if (typeof value.session_id === 'string') run.sessionId = value.session_id
+  if (typeof value.work_turn_id === 'string') run.workTurnId = value.work_turn_id
+  if (typeof value.summary === 'string') run.summary = value.summary
+  if (typeof value.error_code === 'string') run.errorCode = value.error_code
+  return run
+}
+
 function mapConversationSubmissionClaim(row: object): ConversationSubmissionClaim {
   const value = row as Record<string, unknown>
   const claim: ConversationSubmissionClaim = {
@@ -8262,6 +8577,28 @@ function normalizeRequiredToken(value: string, label: string, maximum: number): 
     throw new PersistenceError(`${label} is invalid`)
   }
   return normalized
+}
+
+function normalizeRequiredText(value: string, label: string, maximum: number): string {
+  const normalized = value.trim()
+  if (!normalized || normalized.length > maximum) throw new PersistenceError(`${label} is invalid`)
+  return normalized
+}
+
+function normalizeIsoTimestamp(value: string, label: string): string {
+  const normalized = normalizeRequiredToken(value, label, 80)
+  const parsed = new Date(normalized)
+  if (!Number.isFinite(parsed.valueOf())) throw new PersistenceError(`${label} is invalid`)
+  return parsed.toISOString()
+}
+
+function validateSchedulePermissionMode(value: Exclude<AgentPermissionMode, 'danger-full-access'>): Exclude<AgentPermissionMode, 'danger-full-access'> {
+  if (value !== 'read-only' && value !== 'workspace-write') throw new PersistenceError('Task schedule permission mode is invalid')
+  return value
+}
+
+function taskScheduleRunClientTurnId(scheduleId: string, scheduledFor: string): string {
+  return `schedule:${scheduleId}:${scheduledFor}`
 }
 
 function normalizeOptionalId(value: string | undefined, idFactory: () => string): string {
