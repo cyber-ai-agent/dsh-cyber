@@ -58,6 +58,10 @@ export interface ConversationQueueServiceOptions {
   closeDrainTimeoutMs?: number
   /** Maximum time to wait for the runtime abort before recording a stop fact. */
   stopTimeoutMs?: number
+  /** Maximum wait before a queued entry outranks newer priority inserts. */
+  priorityAgingThresholdMs?: number
+  /** Test seam for durable queue aging decisions. */
+  clock?: () => number
   onSettled?: (entry: ConversationQueueEntry) => void | Promise<void>
 }
 
@@ -102,6 +106,8 @@ export class ConversationQueueService implements AsyncDisposable {
   readonly #leaseOwner: string
   readonly #closeDrainTimeoutMs: number
   readonly #stopTimeoutMs: number
+  readonly #priorityAgingThresholdMs: number
+  readonly #clock: () => number
   readonly #onSettled: ConversationQueueServiceOptions['onSettled']
   readonly #activeRuns = new Map<string, Promise<void>>()
   #timer: NodeJS.Timeout | undefined
@@ -123,6 +129,8 @@ export class ConversationQueueService implements AsyncDisposable {
     this.#leaseOwner = options.leaseOwner?.trim() || `conversation-worker-${randomUUID()}`
     this.#closeDrainTimeoutMs = boundedTimeout(options.closeDrainTimeoutMs, 5_000)
     this.#stopTimeoutMs = boundedTimeout(options.stopTimeoutMs, 5_000)
+    this.#priorityAgingThresholdMs = boundedTimeout(options.priorityAgingThresholdMs, 30_000)
+    this.#clock = options.clock ?? Date.now
     this.#onSettled = options.onSettled
   }
 
@@ -555,7 +563,17 @@ export class ConversationQueueService implements AsyncDisposable {
         result.push(...this.#store.listConversationQueue(world.id, undefined, 'queued'))
       }
     }
-    return result.sort((left, right) => right.priority - left.priority || left.enqueuedAt.localeCompare(right.enqueuedAt) || left.id.localeCompare(right.id))
+    const now = this.#clock()
+    return result.sort((left, right) => {
+      const leftAged = hasAged(left, now, this.#priorityAgingThresholdMs)
+      const rightAged = hasAged(right, now, this.#priorityAgingThresholdMs)
+      // Once an entry reaches the maximum wait, durable FIFO order wins over
+      // all newer priority inserts. This places a finite bound on `next`
+      // bursts without weakening their short-lived interactive semantics.
+      if (leftAged !== rightAged) return leftAged ? -1 : 1
+      if (leftAged) return left.enqueuedAt.localeCompare(right.enqueuedAt) || left.id.localeCompare(right.id)
+      return right.priority - left.priority || left.enqueuedAt.localeCompare(right.enqueuedAt) || left.id.localeCompare(right.id)
+    })
   }
 
   #durableScheduleState(): { employeeLoads: Map<string, number>; occupiedSessions: Set<string> } {
@@ -666,6 +684,11 @@ function queueFailureCode(error: unknown): string {
 
 function boundedTimeout(value: number | undefined, fallback: number): number {
   return value === undefined || !Number.isFinite(value) ? fallback : Math.max(0, Math.floor(value))
+}
+
+function hasAged(entry: ConversationQueueEntry, now: number, thresholdMs: number): boolean {
+  const enqueuedAt = Date.parse(entry.enqueuedAt)
+  return Number.isFinite(enqueuedAt) && now - enqueuedAt >= thresholdMs
 }
 
 function settleWithin(promise: Promise<unknown>, timeoutMs: number): Promise<boolean> {

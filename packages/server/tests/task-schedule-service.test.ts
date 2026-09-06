@@ -46,12 +46,22 @@ describe('TaskScheduleService', () => {
     expect(service.list(world.id)).toEqual([schedule])
     const [run, duplicate] = await Promise.all([service.runNow(world.id, schedule.id), service.runNow(world.id, schedule.id)])
     expect(run).toMatchObject({ status: 'completed', scheduleId: schedule.id })
+    expect(run.acceptedAt).toEqual(expect.any(String))
+    expect(run.startedAt).toEqual(expect.any(String))
+    expect(Date.parse(run.startedAt!)).toBeGreaterThanOrEqual(Date.parse(run.acceptedAt))
     expect(duplicate.id).toBe(run.id)
     expect(turns).toBe(1)
     expect(run.workTurnId).toBeDefined()
     expect(store.getWorkTurn(run.workTurnId!)).toMatchObject({ id: run.workTurnId, status: 'completed' })
     expect(store.listSessionTurns(run.sessionId!)).toHaveLength(1)
     expect(store.listMessages(run.sessionId!).filter((message) => message.kind === 'user')).toHaveLength(1)
+    expect(store.listDomainEvents(workspace.id)
+      .filter((event) => event.payload.runId === run.id)
+      .map((event) => event.type)).toEqual([
+        'schedule.run.accepted',
+        'schedule.run.started',
+        'schedule.run.completed',
+      ])
     expect(service.list(world.id)[0]).toMatchObject({ status: 'completed' })
     expect(store.getEmployeeDossier(employee.id).milestones[0]?.title).toContain('完成任务')
 
@@ -100,7 +110,23 @@ describe('TaskScheduleService', () => {
     }
     const created = store.claimTaskScheduleRun(input)
     expect(created).toMatchObject({ created: true, run: { scheduleId: schedule.id, workTurnId: expect.any(String), sessionId: expect.any(String) } })
+    expect(created.run.acceptedAt).toEqual(expect.any(String))
+    expect(created.run.startedAt).toBeUndefined()
     expect(created.queueEntry).toMatchObject({ workTurnId: created.run.workTurnId, status: 'queued' })
+
+    const claimedQueue = store.claimConversationQueueEntry({
+      queueEntryId: created.queueEntry!.id,
+      expectedRevision: created.queueEntry!.revision,
+      leaseOwner: 'schedule-test-worker',
+      leaseDurationMs: 30_000,
+    })
+    expect(claimedQueue).toMatchObject({ status: 'running', workTurnId: created.run.workTurnId })
+    const started = store.database.prepare(
+      'SELECT accepted_at, started_at FROM task_schedule_runs WHERE id = ?',
+    ).get(created.run.id) as { accepted_at: string; started_at: string | null }
+    expect(started.accepted_at).toBe(created.run.acceptedAt)
+    expect(started.started_at).toEqual(expect.any(String))
+    expect(Date.parse(started.started_at!)).toBeGreaterThanOrEqual(Date.parse(started.accepted_at))
 
     const reopened = await SqliteStore.open(databasePath); stores.push(reopened)
     const replay = reopened.claimTaskScheduleRun(input)

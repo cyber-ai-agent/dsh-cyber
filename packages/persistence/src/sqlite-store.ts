@@ -3603,7 +3603,11 @@ export class SqliteStore {
       }
 
       const runId = this.#idFactory()
-      const startedAt = this.#clock()
+      const acceptedAt = this.#clock()
+      // Immediate schedule runs have no queue boundary, so acceptance is the
+      // execution claim. Queued runs stay explicitly unstarted until the
+      // shared queue claims their WorkTurn.
+      const startedAt = queue === undefined ? acceptedAt : undefined
       const session = this.#resolveDirectScheduleSession({
         workspaceId: workspace.id,
         worldId: currentWorld.id,
@@ -3652,8 +3656,8 @@ export class SqliteStore {
       this.database.prepare(
         `INSERT INTO task_schedule_runs
          (id, schedule_id, workspace_id, world_id, employee_id, status, scheduled_for,
-          started_at, session_id, work_turn_id)
-         VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?)`,
+          accepted_at, started_at, session_id, work_turn_id)
+         VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?)`,
       ).run(
         runId,
         scheduleId,
@@ -3661,7 +3665,8 @@ export class SqliteStore {
         currentWorld.id,
         currentEmployee.id,
         scheduledFor,
-        startedAt,
+        acceptedAt,
+        startedAt ?? null,
         session.id,
         workTurn.id,
       )
@@ -4343,6 +4348,32 @@ export class SqliteStore {
            WHERE id = ? AND status = 'queued'`,
         ).run(now, entry.workTurnId)
         if (Number(turnResult.changes) !== 1) throw new PersistenceError('Queued WorkTurn changed concurrently')
+      }
+      // A queued schedule run is accepted before it reaches this seam. Its
+      // actual start is the first successful queue claim, so project that
+      // timestamp atomically with the queue and WorkTurn transitions.
+      const startedScheduleRun = this.database.prepare(
+        `UPDATE task_schedule_runs
+         SET started_at = COALESCE(started_at, ?)
+         WHERE work_turn_id = ? AND started_at IS NULL
+           AND status IN ('running', 'waiting-approval')
+         RETURNING id, schedule_id, workspace_id, world_id, employee_id, scheduled_for`,
+      ).get(now, entry.workTurnId) as Record<string, unknown> | undefined
+      if (startedScheduleRun !== undefined) {
+        this.#appendEvent({
+          workspaceId: String(startedScheduleRun.workspace_id),
+          worldId: String(startedScheduleRun.world_id),
+          type: 'schedule.run.started',
+          actorId: String(startedScheduleRun.employee_id),
+          actorKind: 'employee',
+          correlationId: String(startedScheduleRun.schedule_id),
+          payload: {
+            scheduleId: String(startedScheduleRun.schedule_id),
+            runId: String(startedScheduleRun.id),
+            scheduledFor: String(startedScheduleRun.scheduled_for),
+            workTurnId: entry.workTurnId,
+          },
+        })
       }
       return this.getConversationQueueEntry(entry.id)!
     })
@@ -7929,8 +7960,9 @@ function mapTaskScheduleRun(row: object): TaskScheduleRun {
     employeeId: String(value.employee_id),
     status: value.status as TaskScheduleRun['status'],
     scheduledFor: String(value.scheduled_for),
-    startedAt: String(value.started_at),
+    acceptedAt: typeof value.accepted_at === 'string' ? value.accepted_at : String(value.started_at),
   }
+  if (typeof value.started_at === 'string') run.startedAt = value.started_at
   if (typeof value.completed_at === 'string') run.completedAt = value.completed_at
   if (typeof value.session_id === 'string') run.sessionId = value.session_id
   if (typeof value.work_turn_id === 'string') run.workTurnId = value.work_turn_id

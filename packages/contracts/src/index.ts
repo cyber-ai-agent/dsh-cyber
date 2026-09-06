@@ -1,7 +1,7 @@
 import type { WorldCharacterAuthority } from './world-authority.js'
 import type { UiLocale } from './locales.js'
 
-export const CYBER_SCHEMA_VERSION = 47 as const
+export const CYBER_SCHEMA_VERSION = 48 as const
 
 export * from './runtime-access.js'
 export * from './locales.js'
@@ -119,7 +119,10 @@ export interface TaskScheduleRun {
   employeeId: string
   status: TaskScheduleRunStatus
   scheduledFor: IsoTimestamp
-  startedAt: IsoTimestamp
+  /** The durable acceptance boundary before any queue or model execution. */
+  acceptedAt: IsoTimestamp
+  /** The first real execution claim; absent while a queued run awaits dispatch. */
+  startedAt?: IsoTimestamp
   completedAt?: IsoTimestamp
   sessionId?: string
   /** The durable WorkTurn claimed before model or adapter execution. */
@@ -1136,6 +1139,7 @@ export const DOMAIN_EVENT_TYPES = [
   'task.completed',
   'schedule.created',
   'schedule.updated',
+  'schedule.run.accepted',
   'schedule.run.started',
   'schedule.run.completed',
   'schedule.run.failed',

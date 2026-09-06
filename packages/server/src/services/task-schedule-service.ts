@@ -84,7 +84,7 @@ export class TaskScheduleService {
   /** Reconcile a schedule-backed WorkTurn immediately after approval resume. */
   async reconcileWorkTurn(workTurnId: string): Promise<void> {
     const row = this.#store.database.prepare(
-      "SELECT * FROM task_schedule_runs WHERE work_turn_id = ? AND status IN ('running', 'waiting-approval') ORDER BY started_at DESC LIMIT 1",
+      "SELECT * FROM task_schedule_runs WHERE work_turn_id = ? AND status IN ('running', 'waiting-approval') ORDER BY accepted_at DESC LIMIT 1",
     ).get(workTurnId)
     if (row === undefined) return
     const run = mapRun(row)
@@ -132,7 +132,7 @@ export class TaskScheduleService {
 
   listRuns(scheduleId: string): TaskScheduleRun[] {
     return this.#store.database.prepare(
-      'SELECT * FROM task_schedule_runs WHERE schedule_id = ? ORDER BY started_at DESC, id DESC LIMIT 50',
+      'SELECT * FROM task_schedule_runs WHERE schedule_id = ? ORDER BY accepted_at DESC, id DESC LIMIT 50',
     ).all(scheduleId).map(mapRun)
   }
 
@@ -239,7 +239,7 @@ export class TaskScheduleService {
 
   #run(schedule: TaskSchedule, scheduledFor: string, manual: boolean): Promise<TaskScheduleRun> {
     const existing = this.#store.database.prepare(
-      "SELECT * FROM task_schedule_runs WHERE schedule_id = ? AND status IN ('running', 'waiting-approval') ORDER BY started_at DESC LIMIT 1",
+      "SELECT * FROM task_schedule_runs WHERE schedule_id = ? AND status IN ('running', 'waiting-approval') ORDER BY accepted_at DESC LIMIT 1",
     ).get(schedule.id)
     if (existing !== undefined) return Promise.resolve(mapRun(existing))
     const execution = this.#execute(schedule, scheduledFor, manual)
@@ -281,7 +281,10 @@ export class TaskScheduleService {
     const workTurnId = run.workTurnId
     if (workTurnId === undefined) throw new Error('计划运行缺少 WorkTurn')
     try {
-      this.#appendEvent(schedule, 'schedule.run.started', { scheduleId: schedule.id, runId: run.id, scheduledFor, manual })
+      this.#appendEvent(schedule, 'schedule.run.accepted', { scheduleId: schedule.id, runId: run.id, scheduledFor, manual })
+      if (claim.queueEntry === undefined) {
+        this.#appendEvent(schedule, 'schedule.run.started', { scheduleId: schedule.id, runId: run.id, scheduledFor, manual })
+      }
       if (useQueue && claim.queueEntry !== undefined) {
         if (!manual) {
           this.#queue!.wake()
@@ -354,7 +357,7 @@ export class TaskScheduleService {
 
   async #reconcileRunningRuns(): Promise<void> {
     const rows = this.#store.database.prepare(
-      "SELECT * FROM task_schedule_runs WHERE status IN ('running', 'waiting-approval') ORDER BY started_at, id",
+      "SELECT * FROM task_schedule_runs WHERE status IN ('running', 'waiting-approval') ORDER BY accepted_at, id",
     ).all().map(mapRun)
     for (const run of rows) {
       const scheduleRow = this.#store.database.prepare('SELECT * FROM task_schedules WHERE id = ?').get(run.scheduleId)
@@ -441,7 +444,7 @@ export class TaskScheduleService {
   #recoverInterruptedRuns(): void {
     const now = new Date().toISOString()
     const interrupted = this.#store.database.prepare(
-      "SELECT * FROM task_schedule_runs WHERE status IN ('running', 'waiting-approval') ORDER BY started_at, id",
+      "SELECT * FROM task_schedule_runs WHERE status IN ('running', 'waiting-approval') ORDER BY accepted_at, id",
     ).all().map(mapRun)
     for (const run of interrupted) {
       const scheduleRow = this.#store.database.prepare('SELECT * FROM task_schedules WHERE id = ?').get(run.scheduleId)
@@ -517,7 +520,7 @@ export class TaskScheduleService {
     return mapSchedule(row)
   }
 
-  #appendEvent(schedule: TaskSchedule, type: 'schedule.created' | 'schedule.updated' | 'schedule.run.started' | 'schedule.run.completed' | 'schedule.run.failed', payload: Record<string, string | boolean>): void {
+  #appendEvent(schedule: TaskSchedule, type: 'schedule.created' | 'schedule.updated' | 'schedule.run.accepted' | 'schedule.run.started' | 'schedule.run.completed' | 'schedule.run.failed', payload: Record<string, string | boolean>): void {
     this.#store.appendDomainEvent({ workspaceId: schedule.workspaceId, worldId: schedule.worldId, type, actorId: 'owner', actorKind: 'owner', correlationId: schedule.id, payload })
   }
 }
@@ -537,7 +540,9 @@ function mapSchedule(row: Record<string, unknown>): TaskSchedule {
 function mapRun(row: Record<string, unknown>): TaskScheduleRun {
   return {
     id: String(row.id), scheduleId: String(row.schedule_id), workspaceId: String(row.workspace_id), worldId: String(row.world_id),
-    employeeId: String(row.employee_id), status: row.status as TaskScheduleRun['status'], scheduledFor: String(row.scheduled_for), startedAt: String(row.started_at),
+    employeeId: String(row.employee_id), status: row.status as TaskScheduleRun['status'], scheduledFor: String(row.scheduled_for),
+    acceptedAt: typeof row.accepted_at === 'string' ? row.accepted_at : String(row.started_at),
+    ...(typeof row.started_at === 'string' ? { startedAt: row.started_at } : {}),
     ...(row.completed_at === null ? {} : { completedAt: String(row.completed_at) }),
     ...(row.session_id === null ? {} : { sessionId: String(row.session_id) }),
     ...(typeof row.work_turn_id === 'string' ? { workTurnId: row.work_turn_id } : {}),

@@ -553,6 +553,60 @@ describe('Conversation control and durable queue', () => {
     await queue.close()
   })
 
+  it('ages an old normal entry ahead of a sustained burst of newer next entries', async () => {
+    let now = new Date('2026-09-06T00:00:00.000Z')
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-queue-aging-'))
+    roots.push(stateRoot)
+    const store = await SqliteStore.open(join(stateRoot, 'queue.sqlite'), { clock: () => now.toISOString() })
+    stores.push(store)
+    const workspace = store.createWorkspace({ name: '防饥饿队列' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '公平世界', templateId: 'personal-world' })
+    store.saveBlueprint(testBlueprint())
+    const employee = store.recruitEmployee({ workspaceId: workspace.id, worldId: world.id, blueprintId: 'queue.employee', blueprintVersion: 1 })
+    const firstSession = createDirectSession(store, workspace.id, world.id, employee.id, '占用通道一')
+    const secondSession = createDirectSession(store, workspace.id, world.id, employee.id, '占用通道二')
+    const first = enqueueStoredTurn(store, workspace.id, world.id, firstSession.id, employee.id, '占用第一条通道')
+    const second = enqueueStoredTurn(store, workspace.id, world.id, secondSession.id, employee.id, '占用第二条通道')
+    let releaseFirst!: () => void
+    let releaseSecond!: () => void
+    let releaseOld!: () => void
+    let oldEntryId: string | undefined
+    const seen: string[] = []
+    const queue = new ConversationQueueService({
+      store,
+      orchestrator: { interruptWorkTurn: async () => undefined } as unknown as ConversationOrchestrator,
+      runner: async (entry) => {
+        seen.push(entry.id)
+        if (entry.id === first.id) await new Promise<void>((resolve) => { releaseFirst = resolve })
+        else if (entry.id === second.id) await new Promise<void>((resolve) => { releaseSecond = resolve })
+        else if (entry.id === oldEntryId) await new Promise<void>((resolve) => { releaseOld = resolve })
+      },
+      pollIntervalMs: 10_000,
+      priorityAgingThresholdMs: 30_000,
+      clock: () => now.getTime(),
+    })
+
+    await queue.dispatchOnce()
+    await waitFor(() => seen.length === 2)
+    const oldSession = createDirectSession(store, workspace.id, world.id, employee.id, '旧普通请求')
+    const old = enqueueStoredTurn(store, workspace.id, world.id, oldSession.id, employee.id, '必须最终执行的普通请求')
+    oldEntryId = old.id
+    now = new Date('2026-09-06T00:00:31.000Z')
+    const insertedNext = Array.from({ length: 8 }, (_, index) => {
+      const session = createDirectSession(store, workspace.id, world.id, employee.id, `持续插队 ${index + 1}`)
+      return enqueueStoredTurn(store, workspace.id, world.id, session.id, employee.id, `next ${index + 1}`, true)
+    })
+
+    releaseFirst()
+    await waitFor(() => seen.includes(old.id))
+    expect(seen.filter((id) => id !== first.id && id !== second.id)[0]).toBe(old.id)
+
+    releaseSecond()
+    releaseOld()
+    await waitFor(() => insertedNext.every((entry) => store.getConversationQueueEntry(entry.id)?.status === 'completed'))
+    await queue.close()
+  })
+
   it('bounds queue shutdown and records an unresolved runner as an unknown result', async () => {
     const fixture = await createStoredQueueFixture('队列关闭期限')
     let release!: () => void
@@ -728,7 +782,7 @@ function createDirectSession(store: SqliteStore, workspaceId: string, worldId: s
   })
 }
 
-function enqueueStoredTurn(store: SqliteStore, workspaceId: string, worldId: string, sessionId: string, employeeId: string, content: string) {
+function enqueueStoredTurn(store: SqliteStore, workspaceId: string, worldId: string, sessionId: string, employeeId: string, content: string, next = false) {
   const turn = store.createWorkTurn({ workspaceId, worldId, sessionId, interactionKind: 'chat' })
   store.appendMessage({
     sessionId,
@@ -739,14 +793,15 @@ function enqueueStoredTurn(store: SqliteStore, workspaceId: string, worldId: str
     metadata: { workTurnId: turn.id, queueEmployeeId: employeeId },
     correlationId: sessionId,
   })
-  return store.enqueueConversationTurn({
+  const input = {
     workspaceId,
     worldId,
     sessionId,
     workTurnId: turn.id,
     employeeIds: [employeeId],
     conversationKind: 'direct',
-  })
+  } as const
+  return next ? store.enqueueNextConversationTurn(input) : store.enqueueConversationTurn(input)
 }
 
 async function createStoredQueueFixture(name: string) {
