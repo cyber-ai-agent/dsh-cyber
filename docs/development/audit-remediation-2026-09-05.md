@@ -89,4 +89,6 @@ F06 前置保护已完成：规划不再压低固定 token 占用；最终角色
 
 Direct HTTP 接线检查点：`/chat` 的 direct immediate/queued 在 task classifier、Skill 和 runtime 之前进入同一 keyed ingress；claim 后只继续已有 WorkTurn。相同请求并发或完成后重发均返回原事实，修改 prompt 复用 key 返回 409。进程中断后若 immediate claim 仍为 queued 且没有 queue 行，可安全继续原 WorkTurn。服务器定向 16 项与全类型检查通过。Group、委托协作和旧 `/chat-queue` 入口尚未接入，第四批仍未完成。
 
+Group HTTP 接线检查点：`/chat` 的 discussion/task immediate/queued 在 planner 前先查 claim；无命中才规划实际 reservation，并原子写入计划 metadata 与事实。无 queue 的 group 复用 `runAcceptedGroup(existingWorkTurnId)`，审批回调同样继续该回合；有 queue 仍由原 dispatcher 执行。并发 discussion、完成后 task queue 重试均保持一个 WorkTurn、owner 消息和既有 AgentRuns；不同 roster/payload 的同 key 返回 409。群聊/Skill/路由及架构定向 21 项通过。委托协作与旧 `/chat-queue` 仍待接入。
+
 已创建当前任务的“DSH Cyber 审计持续整改”自动接续（每小时），沿用此分支与 PR #178。电脑和桌面应用运行时继续未完成批次；每批更新证据，完成全部整改后暂停。自动接续不是剩余批次已完成的声明。

@@ -108,6 +108,38 @@ describe('Conversation control and durable queue', () => {
     expect(runtime.calls).toHaveLength(1)
   })
 
+  it('replays one immediate group discussion without a second plan, turn, message or run', async () => {
+    const { origin, server, runtime, world, employee } = await start()
+    const colleague = server.store.recruitEmployee({
+      workspaceId: world.workspaceId,
+      worldId: world.id,
+      blueprintId: 'core.butler',
+      blueprintVersion: 1,
+      displayName: '幂等协作角色',
+    })
+    const request = {
+      employeeIds: [employee.id, colleague.id],
+      prompt: 'group idempotency check',
+      collaborationMode: 'discussion',
+      clientTurnId: 'group-immediate-idempotent',
+    }
+    const [first, duplicate] = await Promise.all([
+      json(origin, `/api/worlds/${world.id}/chat`, post(request)),
+      json(origin, `/api/worlds/${world.id}/chat`, post(request)),
+    ])
+    expect([first.response.status, duplicate.response.status]).toEqual([200, 200])
+    expect(duplicate.body.workTurnId).toBe(first.body.workTurnId)
+    expect(duplicate.body.session.id).toBe(first.body.session.id)
+    expect(server.store.listSessionTurns(first.body.session.id)).toHaveLength(1)
+    expect(server.store.listMessages(first.body.session.id).filter((message) => message.kind === 'user')).toHaveLength(1)
+    expect(server.store.listTurnAgentRuns(first.body.workTurnId)).toHaveLength(2)
+    expect(runtime.calls).toHaveLength(2)
+
+    const conflict = await json(origin, `/api/worlds/${world.id}/chat`, post({ ...request, employeeIds: [employee.id] }))
+    expect(conflict.response.status).toBe(409)
+    expect(runtime.calls).toHaveLength(2)
+  })
+
   it('rejects an oversized CJK prompt before the runtime for immediate and queued chat', async () => {
     const { origin, server, runtime, world, employee } = await start()
     const profile = server.store.saveModelProfile({
@@ -431,6 +463,21 @@ describe('Conversation control and durable queue', () => {
     expect(server.store.listMessages(queued.body.session.id).filter((message) => message.kind === 'user')).toHaveLength(1)
     const expectedRuns = plan!.steps.reduce((count, step) => count + step.assignedEmployeeIds.length, 0) + 1
     expect(server.store.listTurnAgentRuns(queued.body.workTurnId)).toHaveLength(expectedRuns)
+    const runtimeCalls = server.store.listTurnAgentRuns(queued.body.workTurnId).length
+    const originalPrompt = server.store.listMessages(queued.body.session.id).find((message) => message.kind === 'user')!.content
+    const replay = await json(origin, `/api/worlds/${world.id}/chat`, post({
+      employeeIds: [employee.id, colleague.id],
+      prompt: originalPrompt,
+      collaborationMode: 'task',
+      queueMode: 'next',
+      clientTurnId: 'group-task-queued',
+      coordinatorEmployeeId: employee.id,
+    }))
+    expect(replay.response.status).toBe(202)
+    expect(replay.body.workTurnId).toBe(queued.body.workTurnId)
+    expect(replay.body.queueItem.id).toBe(queued.body.queueItem.id)
+    expect(server.store.listTurnAgentRuns(queued.body.workTurnId)).toHaveLength(runtimeCalls)
+    expect(server.store.listMessages(queued.body.session.id).filter((message) => message.kind === 'user')).toHaveLength(1)
   })
 
   it('keeps waiting approval as a session lock while releasing the employee lane to another session', async () => {

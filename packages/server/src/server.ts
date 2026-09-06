@@ -494,7 +494,7 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
   })
   registerModelInteractionRoutes(router, { store, interactions })
   const conversationControl = composeConversationControl({ store, router, worldAccess, orchestrator, continuations: turnContinuations, employeeActivity, worldRuntime, worldTrace, runtimeStreamHub, groupTasks, worldPackages, runtimeContext: worldRuntimeContext, skillRuntime, work: workSystem })
-  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, turnContinuations, toolApprovals, groupTasks, groupTurnPlanner, taskIntent, conversationQueue: conversationControl.queue, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, runtimeContext: worldRuntimeContext, worldTrace, employeeActivity, worldPackages, worldRuntimePermissions, ownerRuntimeAccess })
+  registerConversationRoutes(router, { store, orchestrator, peerCollaboration, skillRuntime, turnContinuations, toolApprovals, groupTasks, groupTurnPlanner, taskIntent, conversationQueue: conversationControl.queue, acceptedGroupRunner: conversationControl.runAcceptedGroup, runtimeStreamHub, worldRuntime, worldAccess, worldFiles, worldSettings, runtimeContext: worldRuntimeContext, worldTrace, employeeActivity, worldPackages, worldRuntimePermissions, ownerRuntimeAccess })
   registerGroupTaskRoutes(router, { store, worldAccess, groupTasks })
   registerEmployeeRoutes(router, {
     store,
