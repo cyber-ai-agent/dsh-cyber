@@ -19,6 +19,7 @@ import type { WorldRuntimePromptComposer } from './world-runtime-context-compose
 interface ScheduleQueue {
   runEntryNow(queueEntryId: string, expectedRevision?: number): Promise<ConversationQueueEntry>
   reconcileWaiting(): Promise<number>
+  wake(): void
 }
 
 interface ScheduleContinuations {
@@ -48,7 +49,10 @@ export class TaskScheduleService {
   #queue: ScheduleQueue | undefined
   #timer: NodeJS.Timeout | undefined
   #running = false
+  #closed = false
+  readonly #closeDrainTimeoutMs: number
   readonly #activeRuns = new Set<Promise<TaskScheduleRun>>()
+  readonly #locallyExecutingTurns = new Set<string>()
 
   constructor(input: {
     store: SqliteStore
@@ -58,6 +62,7 @@ export class TaskScheduleService {
     skills?: Pick<CharacterSkillRuntime, 'prepare'>
     continuations?: Pick<TurnAwareApprovalContinuationService, 'runQueuedDirect' | 'setTurnSettledHandler'>
     queue?: ScheduleQueue
+    closeDrainTimeoutMs?: number
   }) {
     this.#store = input.store
     this.#orchestrator = input.orchestrator
@@ -66,6 +71,7 @@ export class TaskScheduleService {
     this.#skills = input.skills
     this.#continuations = input.continuations
     this.#queue = input.queue
+    this.#closeDrainTimeoutMs = input.closeDrainTimeoutMs ?? 5_000
     this.#continuations?.setTurnSettledHandler?.(async (workTurnId) => { await this.reconcileWorkTurn(workTurnId) })
     this.#recoverInterruptedRuns()
   }
@@ -89,6 +95,7 @@ export class TaskScheduleService {
   }
 
   start(): void {
+    if (this.#closed) return
     if (this.#timer !== undefined) return
     this.#timer = setInterval(() => void this.runDue(), 5_000)
     this.#timer.unref()
@@ -96,9 +103,25 @@ export class TaskScheduleService {
   }
 
   async close(): Promise<void> {
+    if (this.#closed) return
+    this.#closed = true
     if (this.#timer !== undefined) clearInterval(this.#timer)
     this.#timer = undefined
-    await Promise.allSettled([...this.#activeRuns])
+    if (this.#activeRuns.size === 0) return
+    const drained = await drainWithin([...this.#activeRuns], this.#closeDrainTimeoutMs)
+    if (drained) return
+    const completedAt = new Date().toISOString()
+    for (const workTurnId of [...this.#locallyExecutingTurns]) {
+      const row = this.#store.database.prepare(
+        "SELECT * FROM task_schedule_runs WHERE work_turn_id = ? AND status IN ('running', 'waiting-approval') LIMIT 1",
+      ).get(workTurnId)
+      if (row === undefined) continue
+      const run = mapRun(row)
+      const scheduleRow = this.#store.database.prepare('SELECT * FROM task_schedules WHERE id = ?').get(run.scheduleId)
+      if (scheduleRow === undefined) continue
+      try { this.#store.interruptWorkTurn(workTurnId, 'shutdown-timeout-unknown-result') } catch { /* execution settled at the deadline */ }
+      this.#failRunSync(mapSchedule(scheduleRow), run, completedAt, 'shutdown-timeout-unknown-result')
+    }
   }
 
   list(worldId: string): TaskSchedule[] {
@@ -138,7 +161,7 @@ export class TaskScheduleService {
       kind: input.kind,
       scheduledAt,
       ...(everySeconds === undefined ? {} : { everySeconds }),
-      timeZone: (input.timeZone ?? 'Asia/Shanghai').slice(0, 80),
+      timeZone: validTimeZone(input.timeZone ?? 'Asia/Shanghai'),
       permissionMode: input.permissionMode,
       status: 'active',
       nextRunAt: scheduledAt,
@@ -175,6 +198,7 @@ export class TaskScheduleService {
   }
 
   async runNow(worldId: string, scheduleId: string): Promise<TaskScheduleRun> {
+    if (this.#closed) throw new Error('计划调度器已关闭')
     const world = this.#store.getWorld(worldId)
     if (world === undefined) throw new Error('计划所属世界不存在')
     if (world.status === 'archived') throw new Error(`世界「${world.name}」已归档，计划任务不会运行。请先恢复该世界。`)
@@ -183,7 +207,7 @@ export class TaskScheduleService {
   }
 
   async runDue(): Promise<void> {
-    if (this.#running) return
+    if (this.#closed || this.#running) return
     this.#running = true
     try {
       await this.#reconcileRunningRuns()
@@ -197,9 +221,17 @@ export class TaskScheduleService {
            AND worlds.status = 'active'
            AND task_schedules.next_run_at IS NOT NULL
            AND task_schedules.next_run_at <= ?
+           AND NOT EXISTS (
+             SELECT 1 FROM task_schedule_runs
+             WHERE task_schedule_runs.schedule_id = task_schedules.id
+               AND task_schedule_runs.status IN ('running', 'waiting-approval')
+           )
          ORDER BY task_schedules.next_run_at, task_schedules.id LIMIT 20`,
       ).all(now).map(mapSchedule)
-      for (const schedule of due) await this.#run(schedule, schedule.nextRunAt!, false)
+      // The synchronous part of #run persists each acceptance. Automatic
+      // execution stays in the shared queue, so a slow model turn cannot
+      // block independent due schedules in this scan.
+      for (const schedule of due) void this.#run(schedule, schedule.nextRunAt!, false)
     } finally {
       this.#running = false
     }
@@ -251,10 +283,24 @@ export class TaskScheduleService {
     try {
       this.#appendEvent(schedule, 'schedule.run.started', { scheduleId: schedule.id, runId: run.id, scheduledFor, manual })
       if (useQueue && claim.queueEntry !== undefined) {
-        await this.#queue!.runEntryNow(claim.queueEntry.id, claim.queueEntry.revision)
-        return this.#reconcileRunState(schedule, run.id, scheduledFor, manual)
+        if (!manual) {
+          this.#queue!.wake()
+          return run
+        }
+        this.#locallyExecutingTurns.add(workTurnId)
+        try {
+          await this.#queue!.runEntryNow(claim.queueEntry.id, claim.queueEntry.revision)
+          return this.#reconcileRunState(schedule, run.id, scheduledFor, manual)
+        } finally {
+          this.#locallyExecutingTurns.delete(workTurnId)
+        }
       }
-      return await this.#executeImmediate(schedule, run, scheduledFor, manual)
+      this.#locallyExecutingTurns.add(workTurnId)
+      try {
+        return await this.#executeImmediate(schedule, run, scheduledFor, manual)
+      } finally {
+        this.#locallyExecutingTurns.delete(workTurnId)
+      }
     } catch (cause) {
       const currentTurn = this.#store.getWorkTurn(workTurnId)
       // An approval pauses the existing turn. Keep the schedule occurrence
@@ -507,16 +553,43 @@ function validFutureOrRecentTime(value: string): string {
   return date.toISOString()
 }
 
+function validTimeZone(value: string): string {
+  const timeZone = value.trim().slice(0, 80)
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone }).format(0)
+  } catch {
+    throw new Error('时区无效')
+  }
+  return timeZone
+}
+
 function intervalAfter(scheduledFor: string, everySeconds: number, now: string): string {
-  let next = new Date(scheduledFor).valueOf() + everySeconds * 1_000
+  const intervalMs = everySeconds * 1_000
+  const firstNext = new Date(scheduledFor).valueOf() + intervalMs
   const current = new Date(now).valueOf()
-  while (next <= current) next += everySeconds * 1_000
+  const skipped = firstNext > current ? 0 : Math.floor((current - firstNext) / intervalMs) + 1
+  const next = firstNext + skipped * intervalMs
   return new Date(next).toISOString()
 }
 
 function nextOccurrence(schedule: TaskSchedule, now: string): string | undefined {
-  if (schedule.kind === 'once') return new Date(schedule.scheduledAt).valueOf() > Date.now() ? schedule.scheduledAt : now
+  if (schedule.kind === 'once') return new Date(schedule.scheduledAt).valueOf() > new Date(now).valueOf() ? schedule.scheduledAt : now
   return intervalAfter(schedule.lastRunAt ?? schedule.scheduledAt, schedule.everySeconds!, now)
+}
+
+function drainWithin(runs: readonly Promise<TaskScheduleRun>[], timeoutMs: number): Promise<boolean> {
+  if (timeoutMs <= 0) return Promise.resolve(false)
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (drained: boolean) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve(drained)
+    }
+    const timer = setTimeout(() => finish(false), timeoutMs)
+    void Promise.allSettled(runs).then(() => finish(true))
+  })
 }
 
 function scheduleQueueId(scheduleId: string, scheduledFor: string): string {

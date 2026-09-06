@@ -54,6 +54,10 @@ export interface ConversationQueueServiceOptions {
   pollIntervalMs?: number
   leaseDurationMs?: number
   leaseOwner?: string
+  /** Maximum time to let local runners settle during shutdown. */
+  closeDrainTimeoutMs?: number
+  /** Maximum time to wait for the runtime abort before recording a stop fact. */
+  stopTimeoutMs?: number
   onSettled?: (entry: ConversationQueueEntry) => void | Promise<void>
 }
 
@@ -96,11 +100,15 @@ export class ConversationQueueService implements AsyncDisposable {
   readonly #pollIntervalMs: number
   readonly #leaseDurationMs: number
   readonly #leaseOwner: string
+  readonly #closeDrainTimeoutMs: number
+  readonly #stopTimeoutMs: number
   readonly #onSettled: ConversationQueueServiceOptions['onSettled']
+  readonly #activeRuns = new Map<string, Promise<void>>()
   #timer: NodeJS.Timeout | undefined
   #wakeTimer: NodeJS.Timeout | undefined
   #dispatching = false
   #closed = false
+  #closePromise: Promise<void> | undefined
 
   constructor(options: ConversationQueueServiceOptions) {
     if (options.runner === undefined && options.continuations === undefined) {
@@ -113,6 +121,8 @@ export class ConversationQueueService implements AsyncDisposable {
     this.#pollIntervalMs = Math.max(250, Math.floor(options.pollIntervalMs ?? 2_000))
     this.#leaseDurationMs = Math.max(1_000, Math.floor(options.leaseDurationMs ?? 30_000))
     this.#leaseOwner = options.leaseOwner?.trim() || `conversation-worker-${randomUUID()}`
+    this.#closeDrainTimeoutMs = boundedTimeout(options.closeDrainTimeoutMs, 5_000)
+    this.#stopTimeoutMs = boundedTimeout(options.stopTimeoutMs, 5_000)
     this.#onSettled = options.onSettled
   }
 
@@ -242,6 +252,9 @@ export class ConversationQueueService implements AsyncDisposable {
     if (entry === undefined) throw new Error(`Conversation queue entry not found: ${queueEntryId}`)
     if (entry.status === 'queued') return { entry: this.remove(queueEntryId, expectedRevision) }
     if (entry.status !== 'running' && entry.status !== 'waiting-approval') return { entry }
+    if (expectedRevision !== undefined && expectedRevision !== entry.revision) {
+      throw new Error('Conversation queue entry changed concurrently')
+    }
 
     // Reconcile a terminal WorkTurn that won the race before the Stop command
     // arrived; never turn a completed/failed turn into a fake interruption.
@@ -262,14 +275,13 @@ export class ConversationQueueService implements AsyncDisposable {
       } catch { return { entry } }
     }
 
-    await this.#orchestrator.interruptWorkTurn(entry.workTurnId)
+    const interruption = Promise.resolve()
+      .then(() => this.#orchestrator.interruptWorkTurn(entry.workTurnId))
+    const completed = await settleWithin(interruption, this.#stopTimeoutMs)
     const current = this.#store.getConversationQueueEntry(queueEntryId)
     if (current === undefined) return { entry }
-    const interrupted = this.#store.interruptConversationQueueEntry({
-      queueEntryId,
-      ...(expectedRevision === undefined ? { expectedRevision: current.revision } : { expectedRevision }),
-      errorCode: 'interrupted',
-    })
+    if (current.status !== 'running' && current.status !== 'waiting-approval') return { entry: current }
+    const interrupted = this.#interruptQueueEntryAfterStop(current, completed ? 'interrupted' : 'stop-timeout-unknown-result')
     const workTurn = this.#store.getWorkTurn(entry.workTurnId)
     return { entry: interrupted, ...(workTurn === undefined ? {} : { workTurn }) }
   }
@@ -279,8 +291,19 @@ export class ConversationQueueService implements AsyncDisposable {
     if (turn === undefined) throw new Error(`Work turn not found: ${workTurnId}`)
     const entry = this.#entryForTurn(turn.worldId, workTurnId)
     if (entry !== undefined) return this.stop(entry.id, entry.revision)
-    const control = await this.#orchestrator.interruptWorkTurn(workTurnId)
-    const current = this.#store.getWorkTurn(workTurnId)
+    let control: ConversationControlEnvelope | undefined
+    const interruption = Promise.resolve()
+      .then(() => this.#orchestrator.interruptWorkTurn(workTurnId))
+      .then((result) => { control = result })
+    const completed = await settleWithin(interruption, this.#stopTimeoutMs)
+    let current = this.#store.getWorkTurn(workTurnId)
+    if (current !== undefined && ['queued', 'running', 'waiting-approval'].includes(current.status)) {
+      try {
+        current = this.#store.interruptWorkTurn(workTurnId, completed ? 'interrupted' : 'stop-timeout-unknown-result')
+      } catch {
+        current = this.#store.getWorkTurn(workTurnId)
+      }
+    }
     return { ...(current === undefined ? {} : { workTurn: current }), ...(control === undefined ? {} : { control }) }
   }
 
@@ -370,12 +393,7 @@ export class ConversationQueueService implements AsyncDisposable {
         this.#active.add(entry.id)
         occupiedSessions.add(entry.sessionId)
         for (const employeeId of entry.employeeIds) loads.set(employeeId, (loads.get(employeeId) ?? 0) + 1)
-        void this.#runClaimed(claimedEntry)
-          .catch(() => undefined)
-          .finally(() => {
-            this.#active.delete(entry.id)
-            this.wake()
-          })
+        this.#trackClaimed(claimedEntry, this.#runClaimed(claimedEntry))
       }
       return claimed
     } finally {
@@ -393,7 +411,7 @@ export class ConversationQueueService implements AsyncDisposable {
   async runEntryNow(queueEntryId: string, expectedRevision?: number): Promise<ConversationQueueEntry> {
     const current = this.#store.getConversationQueueEntry(queueEntryId)
     if (current === undefined) throw new Error(`Conversation queue entry not found: ${queueEntryId}`)
-    if (current.status !== 'queued') return current
+    if (this.#closed || current.status !== 'queued') return current
     let claimed: ConversationQueueEntry
     try {
       claimed = this.#store.claimConversationQueueEntry({
@@ -405,7 +423,10 @@ export class ConversationQueueService implements AsyncDisposable {
     } catch {
       return this.#store.getConversationQueueEntry(queueEntryId) ?? current
     }
-    await this.#runClaimed(claimed)
+    this.#active.add(claimed.id)
+    this.#trackClaimed(claimed, this.#runClaimed(claimed))
+    const execution = this.#activeRuns.get(claimed.id)
+    if (execution !== undefined) await execution
     return this.#store.getConversationQueueEntry(queueEntryId) ?? claimed
   }
 
@@ -456,16 +477,72 @@ export class ConversationQueueService implements AsyncDisposable {
   }
 
   async close(): Promise<void> {
-    this.#closed = true
-    this.stopDispatcher()
-    // Do not abort live conversations during server shutdown. Their durable
-    // running state is recovered by the normal runtime recovery path; queued
-    // entries remain queued for the next dispatcher process.
-    await Promise.resolve()
+    if (this.#closePromise !== undefined) return this.#closePromise
+    this.#closePromise = this.#closeInternal()
+    return this.#closePromise
   }
 
   [Symbol.asyncDispose](): Promise<void> {
     return this.close()
+  }
+
+  async #closeInternal(): Promise<void> {
+    this.#closed = true
+    this.stopDispatcher()
+    const active = [...this.#activeRuns.values()]
+    if (active.length === 0) return
+    const drained = await drainWithin(active, this.#closeDrainTimeoutMs)
+    if (drained) return
+
+    // A runner that did not settle by the shutdown deadline has an unknown
+    // provider result. End the durable turn once and leave no queued fact that
+    // a later process could replay. The runner may still unwind in the
+    // background, but its late result cannot transition an interrupted turn.
+    for (const queueEntryId of this.#activeRuns.keys()) {
+      const current = this.#store.getConversationQueueEntry(queueEntryId)
+      if (current === undefined || (current.status !== 'running' && current.status !== 'waiting-approval')) continue
+      try {
+        void Promise.resolve()
+          .then(() => this.#orchestrator.interruptWorkTurn(current.workTurnId))
+          .catch(() => undefined)
+        this.#store.interruptConversationQueueEntry({
+          queueEntryId: current.id,
+          expectedRevision: current.revision,
+          errorCode: 'shutdown-timeout-unknown-result',
+        })
+      } catch {
+        // A runtime/controller race may already have written a terminal fact.
+      }
+    }
+  }
+
+  #trackClaimed(entry: ConversationQueueEntry, execution: Promise<void>): void {
+    this.#activeRuns.set(entry.id, execution)
+    void execution.then(
+      () => this.#releaseClaim(entry.id),
+      () => this.#releaseClaim(entry.id),
+    )
+  }
+
+  #releaseClaim(queueEntryId: string): void {
+    this.#activeRuns.delete(queueEntryId)
+    this.#active.delete(queueEntryId)
+    if (!this.#closed) this.wake()
+  }
+
+  #interruptQueueEntryAfterStop(entry: ConversationQueueEntry, errorCode: string): ConversationQueueEntry {
+    try {
+      return this.#store.interruptConversationQueueEntry({
+        queueEntryId: entry.id,
+        expectedRevision: entry.revision,
+        errorCode,
+      })
+    } catch {
+      const latest = this.#store.getConversationQueueEntry(entry.id)
+      if (latest === undefined) throw new Error(`Conversation queue entry not found: ${entry.id}`)
+      if (latest.status !== 'running' && latest.status !== 'waiting-approval') return latest
+      throw new Error('Conversation queue entry changed concurrently')
+    }
   }
 
   #listQueuedEntries(): ConversationQueueEntry[] {
@@ -585,6 +662,47 @@ export class ConversationQueueService implements AsyncDisposable {
 function queueFailureCode(error: unknown): string {
   if (error instanceof AgentTurnFailedError) return `runtime-${error.failureKind}`
   return error instanceof Error ? error.message.slice(0, 120) || 'queue-run-failed' : 'queue-run-failed'
+}
+
+function boundedTimeout(value: number | undefined, fallback: number): number {
+  return value === undefined || !Number.isFinite(value) ? fallback : Math.max(0, Math.floor(value))
+}
+
+function settleWithin(promise: Promise<unknown>, timeoutMs: number): Promise<boolean> {
+  if (timeoutMs <= 0) {
+    void promise.catch(() => undefined)
+    return Promise.resolve(false)
+  }
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (completed: boolean) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve(completed)
+    }
+    const timer = setTimeout(() => finish(false), timeoutMs)
+    void promise.then(() => finish(true), () => finish(true))
+  })
+}
+
+function drainWithin(promises: readonly Promise<unknown>[], timeoutMs: number): Promise<boolean> {
+  if (promises.length === 0) return Promise.resolve(true)
+  if (timeoutMs <= 0) {
+    void Promise.allSettled(promises)
+    return Promise.resolve(false)
+  }
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (drained: boolean) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve(drained)
+    }
+    const timer = setTimeout(() => finish(false), timeoutMs)
+    void Promise.allSettled(promises).then(() => finish(true))
+  })
 }
 
 function queueEmployeeIds(metadata: Record<string, unknown> | undefined): string[] {

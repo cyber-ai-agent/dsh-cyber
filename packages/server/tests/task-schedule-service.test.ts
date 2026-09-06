@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { EmployeeActivityProjectionService } from '../src/services/employee-activity-projection-service.js'
 import { TaskScheduleService } from '../src/services/task-schedule-service.js'
+import type { TurnAwareApprovalContinuationService } from '../src/services/turn-aware-approval-continuation-service.js'
 import type { WorldSettingsService } from '../src/services/world-settings-service.js'
 
 const stores: SqliteStore[] = []
@@ -143,4 +144,115 @@ describe('TaskScheduleService', () => {
     await recovered.runDue()
     expect(recovered.listRuns(schedule.id)).toHaveLength(1)
   })
+
+  it('accepts independent due schedules without running them inline', async () => {
+    const fixture = await createScheduleFixture('并发受理')
+    let wakes = 0
+    let inlineRuns = 0
+    const queue = {
+      wake() { wakes += 1 },
+      async reconcileWaiting() { return 0 },
+      async runEntryNow() { inlineRuns += 1; throw new Error('automatic schedules must use the shared dispatcher') },
+    }
+    const continuations = {
+      async runQueuedDirect() { return undefined },
+      setTurnSettledHandler() {},
+    } as unknown as TurnAwareApprovalContinuationService
+    const service = new TaskScheduleService({
+      store: fixture.store,
+      orchestrator: {} as ConversationOrchestrator,
+      settings: fixture.settings,
+      employeeActivity: new EmployeeActivityProjectionService(fixture.store),
+      queue,
+      continuations,
+    })
+    const first = service.create(scheduleInput(fixture, '长任务'))
+    const second = service.create(scheduleInput(fixture, '独立任务'))
+    const dueAt = new Date(Date.now() - 60_000).toISOString()
+    fixture.store.database.prepare('UPDATE task_schedules SET next_run_at = ? WHERE id IN (?, ?)').run(dueAt, first.id, second.id)
+
+    await service.runDue()
+
+    expect(service.listRuns(first.id)).toHaveLength(1)
+    expect(service.listRuns(second.id)).toHaveLength(1)
+    expect(fixture.store.listConversationQueue(fixture.world.id, undefined, 'queued')).toHaveLength(2)
+    expect(wakes).toBe(2)
+    expect(inlineRuns).toBe(0)
+  })
+
+  it('coalesces missed interval occurrences and keeps the next instant in the future', async () => {
+    const fixture = await createScheduleFixture('错过触发')
+    const queue = { wake() {}, async reconcileWaiting() { return 0 }, async runEntryNow() { throw new Error('unexpected inline run') } }
+    const continuations = { async runQueuedDirect() { return undefined }, setTurnSettledHandler() {} } as unknown as TurnAwareApprovalContinuationService
+    const service = new TaskScheduleService({ store: fixture.store, orchestrator: {} as ConversationOrchestrator, settings: fixture.settings, employeeActivity: new EmployeeActivityProjectionService(fixture.store), queue, continuations })
+    const schedule = service.create({ ...scheduleInput(fixture, '周期汇总'), kind: 'interval', everySeconds: 300 })
+    const missedAt = new Date(Date.now() - 24 * 60 * 60 * 1_000).toISOString()
+    fixture.store.database.prepare('UPDATE task_schedules SET next_run_at = ? WHERE id = ?').run(missedAt, schedule.id)
+    await service.runDue()
+    const [run] = service.listRuns(schedule.id)
+    expect(run?.scheduledFor).toBe(missedAt)
+    fixture.store.startWorkTurn(run!.workTurnId!)
+    fixture.store.completeWorkTurn(run!.workTurnId!)
+
+    await service.runDue()
+
+    expect(service.listRuns(schedule.id)).toHaveLength(1)
+    const updated = service.list(fixture.world.id).find((item) => item.id === schedule.id)!
+    expect(updated.status).toBe('active')
+    expect(new Date(updated.nextRunAt!).valueOf()).toBeGreaterThan(Date.now())
+    expect((new Date(updated.nextRunAt!).valueOf() - new Date(missedAt).valueOf()) % 300_000).toBe(0)
+  })
+
+  it('validates IANA time zones while preserving the scheduled UTC instant', async () => {
+    const fixture = await createScheduleFixture('跨时区')
+    const service = new TaskScheduleService({ store: fixture.store, orchestrator: {} as ConversationOrchestrator, settings: fixture.settings, employeeActivity: new EmployeeActivityProjectionService(fixture.store) })
+    const scheduledAt = new Date(Date.now() + 60_000).toISOString()
+    const schedule = service.create({ ...scheduleInput(fixture, '纽约提醒'), scheduledAt, timeZone: 'America/New_York' })
+    expect(schedule).toMatchObject({ scheduledAt, nextRunAt: scheduledAt, timeZone: 'America/New_York' })
+    expect(() => service.create({ ...scheduleInput(fixture, '错误时区'), timeZone: 'Mars/Olympus_Mons' })).toThrow('时区无效')
+  })
+
+  it('bounds shutdown and marks an unresolved local execution as an unknown result', async () => {
+    const fixture = await createScheduleFixture('关闭期限')
+    const never = new Promise<never>(() => {})
+    const orchestrator = { async continueDirect() { return never } } as unknown as ConversationOrchestrator
+    const service = new TaskScheduleService({ store: fixture.store, orchestrator, settings: fixture.settings, employeeActivity: new EmployeeActivityProjectionService(fixture.store), closeDrainTimeoutMs: 10 })
+    const schedule = service.create(scheduleInput(fixture, '不可取消执行'))
+    void service.runNow(fixture.world.id, schedule.id)
+    await expect.poll(() => service.listRuns(schedule.id)[0]?.status).toBe('running')
+
+    await service.close()
+
+    expect(service.listRuns(schedule.id)[0]).toMatchObject({ status: 'failed', errorCode: 'shutdown-timeout-unknown-result' })
+    const workTurnId = service.listRuns(schedule.id)[0]!.workTurnId!
+    expect(fixture.store.getWorkTurn(workTurnId)).toMatchObject({ status: 'interrupted', errorCode: 'shutdown-timeout-unknown-result' })
+    const recovered = new TaskScheduleService({ store: fixture.store, orchestrator: {} as ConversationOrchestrator, settings: fixture.settings, employeeActivity: new EmployeeActivityProjectionService(fixture.store) })
+    await recovered.runDue()
+    expect(recovered.listRuns(schedule.id)).toHaveLength(1)
+    await expect(service.runNow(fixture.world.id, schedule.id)).rejects.toThrow('调度器已关闭')
+  })
 })
+
+async function createScheduleFixture(name: string) {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-cyber-schedule-f09-'))
+  const store = await SqliteStore.open(join(directory, 'cyber.sqlite')); stores.push(store)
+  for (const blueprint of BUILTIN_BLUEPRINTS) store.saveBlueprint(blueprint)
+  const workspace = store.createWorkspace({ name })
+  const world = store.createWorld({ workspaceId: workspace.id, name: `${name}世界`, templateId: 'cyber-company' })
+  const blueprint = BUILTIN_BLUEPRINTS[0]!
+  const employee = store.recruitEmployee({ workspaceId: workspace.id, worldId: world.id, blueprintId: blueprint.id, blueprintVersion: blueprint.version })
+  const settings = { async composeRuntimePrompt(_worldId: string, _employee: unknown, prompt: string) { return prompt } } as unknown as WorldSettingsService
+  return { store, workspace, world, employee, settings }
+}
+
+function scheduleInput(fixture: Awaited<ReturnType<typeof createScheduleFixture>>, title: string) {
+  return {
+    worldId: fixture.world.id,
+    employeeId: fixture.employee.id,
+    title,
+    prompt: `执行${title}`,
+    kind: 'once' as const,
+    scheduledAt: new Date(Date.now() + 60_000).toISOString(),
+    permissionMode: 'workspace-write' as const,
+  }
+}

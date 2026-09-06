@@ -553,6 +553,64 @@ describe('Conversation control and durable queue', () => {
     await queue.close()
   })
 
+  it('bounds queue shutdown and records an unresolved runner as an unknown result', async () => {
+    const fixture = await createStoredQueueFixture('队列关闭期限')
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const queue = new ConversationQueueService({
+      store: fixture.store,
+      orchestrator: { interruptWorkTurn: async () => new Promise<never>(() => {}) } as unknown as ConversationOrchestrator,
+      runner: async () => { await gate },
+      closeDrainTimeoutMs: 10,
+      pollIntervalMs: 10_000,
+    })
+    await queue.dispatchOnce()
+    await waitFor(() => fixture.store.getConversationQueueEntry(fixture.entry.id)?.status === 'running')
+
+    const started = Date.now()
+    await queue.close()
+
+    expect(Date.now() - started).toBeLessThan(500)
+    expect(fixture.store.getConversationQueueEntry(fixture.entry.id)).toMatchObject({
+      status: 'interrupted', errorCode: 'shutdown-timeout-unknown-result',
+    })
+    expect(fixture.store.getWorkTurn(fixture.entry.workTurnId)).toMatchObject({
+      status: 'interrupted', errorCode: 'shutdown-timeout-unknown-result',
+    })
+    expect(await queue.dispatchOnce()).toBe(0)
+    release()
+  })
+
+  it('bounds Stop when runtime abort never settles and keeps the timeout fact terminal', async () => {
+    const fixture = await createStoredQueueFixture('队列停止期限')
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const queue = new ConversationQueueService({
+      store: fixture.store,
+      orchestrator: { interruptWorkTurn: async () => new Promise<never>(() => {}) } as unknown as ConversationOrchestrator,
+      runner: async () => { await gate },
+      stopTimeoutMs: 10,
+      closeDrainTimeoutMs: 10,
+      pollIntervalMs: 10_000,
+    })
+    await queue.dispatchOnce()
+    await waitFor(() => fixture.store.getConversationQueueEntry(fixture.entry.id)?.status === 'running')
+
+    const started = Date.now()
+    const stopped = await queue.stop(fixture.entry.id)
+
+    expect(Date.now() - started).toBeLessThan(500)
+    expect(stopped.entry).toMatchObject({ status: 'interrupted', errorCode: 'stop-timeout-unknown-result' })
+    expect(fixture.store.getWorkTurn(fixture.entry.workTurnId)).toMatchObject({
+      status: 'interrupted', errorCode: 'stop-timeout-unknown-result',
+    })
+    release()
+    await queue.close()
+    expect(fixture.store.getConversationQueueEntry(fixture.entry.id)).toMatchObject({
+      status: 'interrupted', errorCode: 'stop-timeout-unknown-result',
+    })
+  })
+
   it('recovers a queued group discussion after a full service restart', async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-group-queue-restart-'))
     roots.push(stateRoot)
@@ -689,4 +747,18 @@ function enqueueStoredTurn(store: SqliteStore, workspaceId: string, worldId: str
     employeeIds: [employeeId],
     conversationKind: 'direct',
   })
+}
+
+async function createStoredQueueFixture(name: string) {
+  const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-queue-deadline-'))
+  roots.push(stateRoot)
+  const store = await SqliteStore.open(join(stateRoot, 'queue.sqlite'))
+  stores.push(store)
+  const workspace = store.createWorkspace({ name })
+  const world = store.createWorld({ workspaceId: workspace.id, name: `${name}世界`, templateId: 'personal-world' })
+  store.saveBlueprint(testBlueprint())
+  const employee = store.recruitEmployee({ workspaceId: workspace.id, worldId: world.id, blueprintId: 'queue.employee', blueprintVersion: 1 })
+  const session = createDirectSession(store, workspace.id, world.id, employee.id, name)
+  const entry = enqueueStoredTurn(store, workspace.id, world.id, session.id, employee.id, `${name}长任务`)
+  return { store, workspace, world, employee, session, entry }
 }
