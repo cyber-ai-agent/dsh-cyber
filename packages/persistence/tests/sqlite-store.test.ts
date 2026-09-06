@@ -802,6 +802,7 @@ describe('SqliteStore', () => {
     seeded.close()
     const legacy = new DatabaseSync(databasePath)
     legacy.exec(`
+      DROP TABLE conversation_submission_claims;
       DROP TABLE model_assignments;
       DROP TABLE model_profiles;
       DROP TABLE model_providers;
@@ -982,6 +983,7 @@ describe('SqliteStore', () => {
       ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
       DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 36;
+      DROP TABLE conversation_submission_claims;
       PRAGMA user_version = 36;
     `)
     legacy.close()
@@ -1075,6 +1077,7 @@ describe('SqliteStore', () => {
       ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
       DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 38;
+      DROP TABLE conversation_submission_claims;
       PRAGMA user_version = 38;
     `)
     legacy.close()
@@ -1466,6 +1469,7 @@ describe('SqliteStore', () => {
       ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
       DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 36;
+      DROP TABLE conversation_submission_claims;
       PRAGMA user_version = 36;
     `)
     downgraded.close()
@@ -1544,6 +1548,7 @@ describe('SqliteStore', () => {
       ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
       DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 39;
+      DROP TABLE conversation_submission_claims;
       PRAGMA user_version = 39;
     `)
     legacy.close()
@@ -1607,6 +1612,7 @@ describe('SqliteStore', () => {
       ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
       DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 40;
+      DROP TABLE conversation_submission_claims;
       PRAGMA user_version = 40;
     `)
     legacy.close()
@@ -1672,6 +1678,7 @@ describe('SqliteStore', () => {
       ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
       DROP TABLE knowledge_source_versions;
       DELETE FROM schema_migrations WHERE version > 41;
+      DROP TABLE conversation_submission_claims;
       PRAGMA user_version = 41;
     `)
     legacy.close()
@@ -1736,6 +1743,7 @@ describe('SqliteStore', () => {
       ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
       ALTER TABLE knowledge_source_versions DROP COLUMN invalidated_at;
       DELETE FROM schema_migrations WHERE version > 42;
+      DROP TABLE conversation_submission_claims;
       PRAGMA user_version = 42;
     `)
     legacy.close()

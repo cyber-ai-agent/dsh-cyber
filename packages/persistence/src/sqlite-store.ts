@@ -19,6 +19,10 @@ import {
   type CompletionJobDraft,
   type CharacterAvatarAsset,
   type CharacterAvatarAssetRendererKind,
+  type ConversationSubmissionInput,
+  type ConversationSubmissionClaim,
+  type ConversationSubmissionReceipt,
+  type ConversationSubmissionResult,
   isWorldCharacterPermission,
   isDomainEventType,
   type DatabaseDoctorReport,
@@ -684,6 +688,7 @@ const KNOWN_TABLES = [
   'local_assets',
   'character_avatar_assets',
   'work_sessions',
+  'conversation_submission_claims',
   'owner_runtime_access_grants',
   'conversation_queue_entries',
   'task_collaboration_plans',
@@ -3491,6 +3496,409 @@ export class SqliteStore {
     return turn
   }
 
+  /**
+   * Atomically accept one owner chat submission.
+   *
+   * This is the persistence seam for the HTTP/application facade. It owns the
+   * idempotency claim and creates or reuses the conversation session, WorkTurn,
+   * owner message and optional queue row under one BEGIN IMMEDIATE transaction.
+   * A retry with the same scoped key and fingerprint returns the original
+   * facts; a different fingerprint is a conflict. Legacy clientTurnId rows
+   * are never guessed into a new claim because they have no request digest.
+   */
+  claimConversationSubmission(input: ConversationSubmissionInput): ConversationSubmissionResult {
+    this.#assertWritable()
+    const normalized = normalizeConversationSubmissionInput(input)
+    const workspace = this.#requireWorkspace(normalized.workspaceId)
+    const world = this.#assertWorldAcceptsWork(normalized.worldId)
+    if (world.workspaceId !== workspace.id) {
+      throw new PersistenceError('Conversation submission world does not belong to workspace')
+    }
+
+    return this.#transaction(() => {
+      const existingRow = this.database.prepare(
+        `SELECT * FROM conversation_submission_claims
+         WHERE workspace_id = ? AND world_id = ? AND idempotency_key = ?`,
+      ).get(workspace.id, world.id, normalized.idempotencyKey)
+      if (existingRow !== undefined) {
+        const existingClaim = mapConversationSubmissionClaim(existingRow)
+        if (existingClaim.fingerprintSha256 !== normalized.fingerprintSha256) {
+          throw new PersistenceError('Conversation submission idempotency key is already bound to a different fingerprint')
+        }
+        return { created: false, ...this.#readConversationSubmissionReceipt(existingClaim) }
+      }
+
+      // Before the claim table existed, clientTurnId was an ordinary indexed
+      // column and could have zero, one or many rows. A single surviving row
+      // still has no fingerprint, so mapping it silently would make a retry
+      // appear idempotent while choosing an unverified historical fact.
+      const legacyRows = this.database.prepare(
+        `SELECT id FROM work_turns
+         WHERE workspace_id = ? AND world_id = ? AND client_turn_id = ?
+         ORDER BY created_at, id`,
+      ).all(workspace.id, world.id, normalized.idempotencyKey)
+      if (legacyRows.length > 0) {
+        throw new PersistenceError(
+          'Conversation submission idempotency key belongs to legacy WorkTurn data and requires explicit reconciliation',
+        )
+      }
+
+      const session = this.#resolveConversationSubmissionSession(workspace.id, world.id, normalized)
+      const workTurn = this.#insertConversationSubmissionWorkTurn({
+        workspaceId: workspace.id,
+        worldId: world.id,
+        sessionId: session.id,
+        clientTurnId: normalized.idempotencyKey,
+        interactionKind: normalized.interactionKind,
+      })
+      const ownerMessage = this.#appendMessage({
+        sessionId: session.id,
+        senderId: 'owner',
+        senderKind: 'owner',
+        kind: 'user',
+        content: normalized.ownerMessage.content,
+        metadata: {
+          ...normalized.ownerMessage.metadata,
+          clientTurnId: normalized.idempotencyKey,
+          workTurnId: workTurn.id,
+          participantIds: normalized.participantEmployeeIds,
+          collaborationMode: normalized.collaborationMode,
+          ...((normalized.reservationEmployeeIds ?? normalized.queue?.employeeIds) === undefined
+            ? {}
+            : { reservationEmployeeIds: normalized.reservationEmployeeIds ?? normalized.queue!.employeeIds }),
+        },
+        ...(normalized.ownerMessage.causationId === undefined ? {} : { causationId: normalized.ownerMessage.causationId }),
+        correlationId: normalized.ownerMessage.correlationId ?? session.id,
+      })
+      const queueEntry = normalized.queue === undefined
+        ? undefined
+        : this.#insertConversationSubmissionQueueEntry({
+            workspaceId: workspace.id,
+            worldId: world.id,
+            session,
+            workTurn,
+            queue: normalized.queue,
+          })
+      const claim: ConversationSubmissionClaim = {
+        id: this.#idFactory(),
+        workspaceId: workspace.id,
+        worldId: world.id,
+        idempotencyKey: normalized.idempotencyKey,
+        fingerprintSha256: normalized.fingerprintSha256,
+        sessionId: session.id,
+        workTurnId: workTurn.id,
+        ownerMessageId: ownerMessage.id,
+        ...(queueEntry === undefined ? {} : { queueEntryId: queueEntry.id }),
+        createdAt: workTurn.createdAt,
+      }
+      this.database.prepare(
+        `INSERT INTO conversation_submission_claims
+         (id, workspace_id, world_id, idempotency_key, fingerprint_sha256,
+          session_id, work_turn_id, owner_message_id, queue_entry_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        claim.id,
+        claim.workspaceId,
+        claim.worldId,
+        claim.idempotencyKey,
+        claim.fingerprintSha256,
+        claim.sessionId,
+        claim.workTurnId,
+        claim.ownerMessageId,
+        claim.queueEntryId ?? null,
+        claim.createdAt,
+      )
+      return {
+        created: true,
+        claim,
+        session,
+        workTurn,
+        ownerMessage,
+        ...(queueEntry === undefined ? {} : { queueEntry }),
+      }
+    })
+  }
+
+  /** Read a submission receipt without changing any durable state. */
+  getConversationSubmissionClaim(
+    workspaceId: string,
+    worldId: string,
+    idempotencyKey: string,
+  ): ConversationSubmissionReceipt | undefined {
+    const normalizedKey = normalizeRequiredToken(idempotencyKey, 'Conversation submission idempotency key', 128)
+    const row = this.database.prepare(
+      `SELECT * FROM conversation_submission_claims
+       WHERE workspace_id = ? AND world_id = ? AND idempotency_key = ?`,
+    ).get(workspaceId, worldId, normalizedKey)
+    if (row === undefined) return undefined
+    return this.#readConversationSubmissionReceipt(mapConversationSubmissionClaim(row))
+  }
+
+  /** Explicit read alias for facades that prefer a verb over a claim noun. */
+  readConversationSubmission(
+    workspaceId: string,
+    worldId: string,
+    idempotencyKey: string,
+  ): ConversationSubmissionReceipt | undefined {
+    return this.getConversationSubmissionClaim(workspaceId, worldId, idempotencyKey)
+  }
+
+  #resolveConversationSubmissionSession(
+    workspaceId: string,
+    worldId: string,
+    input: NormalizedConversationSubmissionInput,
+  ): WorkSession {
+    const wantedEmployeeIds = new Set(input.participantEmployeeIds)
+    if (input.sessionId !== undefined) {
+      const session = this.getSession(input.sessionId)
+      if (
+        session === undefined ||
+        session.workspaceId !== workspaceId ||
+        session.worldId !== worldId ||
+        session.kind !== input.sessionKind ||
+        session.status !== 'open'
+      ) {
+        throw new PersistenceError('Conversation submission session is unavailable')
+      }
+      const employeeIds = this.#sessionEmployeeIds(session.id)
+      if (session.kind === 'direct') {
+        const requested = input.participantEmployeeIds[0]
+        if (requested === undefined) throw new PersistenceError('Direct submission requires one employee')
+        if (employeeIds.length === 0) {
+          this.#addParticipant(session, requested, 'employee')
+        } else if (employeeIds.length !== 1 || employeeIds[0] !== requested) {
+          throw new PersistenceError('Direct submission session participant does not match')
+        }
+      } else if (input.participantEmployeeIds.some((employeeId) => !employeeIds.includes(employeeId))) {
+        throw new PersistenceError('Group submission contains an employee outside the session')
+      }
+      this.#ensureOwnerParticipant(session)
+      return this.getSession(session.id)!
+    }
+
+    const canonicalCandidates = this.listSessions(worldId, 'open')
+      .filter((session) => session.workspaceId === workspaceId && session.kind === input.sessionKind)
+      .filter((session) => (session.collaborationMode ?? 'discussion') === input.collaborationMode)
+      .filter((session) => {
+        const employeeIds = this.#sessionEmployeeIds(session.id)
+        return employeeIds.length === wantedEmployeeIds.size && employeeIds.every((employeeId) => wantedEmployeeIds.has(employeeId))
+      })
+    // A direct conversation is canonical by character. A group without an
+    // explicit session id is a new room even when its roster matches an older
+    // room; reusing it would merge two independent conversations. Multiple
+    // direct matches are legacy ambiguity and must be reconciled explicitly.
+    if (input.sessionKind === 'direct') {
+      if (canonicalCandidates.length > 1) {
+        throw new PersistenceError('Multiple canonical direct sessions match this employee and require reconciliation')
+      }
+      const canonical = canonicalCandidates[0]
+      if (canonical !== undefined) {
+        this.#ensureOwnerParticipant(canonical)
+        return this.getSession(canonical.id)!
+      }
+    }
+
+    const now = this.#clock()
+    const session: WorkSession = {
+      id: this.#idFactory(),
+      workspaceId,
+      worldId,
+      kind: input.sessionKind,
+      collaborationMode: input.collaborationMode,
+      title: input.sessionTitle ?? defaultConversationSubmissionTitle(input),
+      status: 'open',
+      createdAt: now,
+      updatedAt: now,
+    }
+    if (!session.title) throw new PersistenceError('Conversation submission session title cannot be empty')
+    this.database.prepare(
+      `INSERT INTO work_sessions
+       (id, workspace_id, world_id, kind, collaboration_mode, title, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      session.id,
+      session.workspaceId,
+      session.worldId,
+      session.kind,
+      input.collaborationMode,
+      session.title,
+      session.status,
+      session.createdAt,
+      session.updatedAt,
+    )
+    this.#appendEvent({
+      workspaceId,
+      worldId,
+      type: 'session.created',
+      actorId: 'owner',
+      actorKind: 'owner',
+      sessionId: session.id,
+      payload: {
+        sessionId: session.id,
+        worldId,
+        kind: session.kind,
+        title: session.title,
+      },
+    })
+    this.#addParticipant(session, 'owner', 'owner')
+    for (const employeeId of input.participantEmployeeIds) this.#addParticipant(session, employeeId, 'employee')
+    return session
+  }
+
+  #insertConversationSubmissionWorkTurn(input: {
+    workspaceId: string
+    worldId: string
+    sessionId: string
+    clientTurnId: string
+    interactionKind: WorkTurnInteractionKind
+  }): WorkTurn {
+    const createdAt = this.#clock()
+    const turn: WorkTurn = {
+      id: this.#idFactory(),
+      workspaceId: input.workspaceId,
+      worldId: input.worldId,
+      sessionId: input.sessionId,
+      clientTurnId: input.clientTurnId,
+      interactionKind: input.interactionKind,
+      status: 'queued',
+      createdAt,
+    }
+    this.database.prepare(
+      `INSERT INTO work_turns
+       (id, workspace_id, world_id, session_id, client_turn_id, interaction_kind, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      turn.id,
+      turn.workspaceId,
+      turn.worldId,
+      turn.sessionId,
+      input.clientTurnId,
+      turn.interactionKind,
+      turn.status,
+      turn.createdAt,
+    )
+    return turn
+  }
+
+  #insertConversationSubmissionQueueEntry(input: {
+    workspaceId: string
+    worldId: string
+    session: WorkSession
+    workTurn: WorkTurn
+    queue: NormalizedConversationSubmissionQueueInput
+  }): ConversationQueueEntry {
+    const { session, workTurn, queue } = input
+    if (workTurn.status !== 'queued') throw new PersistenceError('Conversation submission WorkTurn is not queued')
+    const collaborationMode = queue.collaborationMode ?? session.collaborationMode ?? 'discussion'
+    if (collaborationMode === 'task' && session.kind !== 'group') {
+      throw new PersistenceError('Task collaboration mode requires a group session')
+    }
+    if (session.kind === 'group' && (collaborationMode === 'task') !== (workTurn.interactionKind === 'task')) {
+      throw new PersistenceError('Conversation submission queue mode does not match its WorkTurn')
+    }
+    const sessionEmployeeIds = new Set(this.#sessionEmployeeIds(session.id))
+    for (const employeeId of queue.employeeIds) {
+      const employee = this.#requireEmployee(employeeId)
+      if (
+        employee.workspaceId !== input.workspaceId ||
+        employee.worldId !== input.worldId ||
+        employee.status === 'archived' ||
+        !sessionEmployeeIds.has(employeeId)
+      ) {
+        throw new PersistenceError('Conversation submission queue employee is not a session participant')
+      }
+    }
+    if (session.kind === 'direct' && queue.employeeIds.length !== 1) {
+      throw new PersistenceError('Direct conversation submission queue requires one employee')
+    }
+    const priority = queue.priority ?? (queue.queueMode === 'next'
+      ? Number((this.database.prepare(
+          `SELECT COALESCE(MAX(priority), -1) + 1 AS priority
+           FROM conversation_queue_entries
+           WHERE world_id = ? AND status IN ('queued', 'running', 'waiting-approval')`,
+        ).get(input.worldId) as { priority: number }).priority)
+      : 0)
+    const id = normalizeRequiredToken(queue.id ?? this.#idFactory(), 'Conversation submission queue id', 160)
+    const now = this.#clock()
+    this.database.prepare(
+      `INSERT INTO conversation_queue_entries
+       (id, workspace_id, world_id, session_id, work_turn_id, employee_ids_json,
+        conversation_kind, collaboration_mode, reasoning_effort, permission_mode,
+        priority, revision, status, error_code, attempt_count, available_at,
+        lease_owner, lease_expires_at, enqueued_at, claimed_at, completed_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      id,
+      input.workspaceId,
+      input.worldId,
+      session.id,
+      workTurn.id,
+      stringifyJson(queue.employeeIds),
+      session.kind,
+      collaborationMode,
+      queue.reasoningEffort ?? null,
+      queue.permissionMode ?? null,
+      priority,
+      1,
+      'queued',
+      null,
+      0,
+      now,
+      null,
+      null,
+      now,
+      null,
+      null,
+      now,
+    )
+    return mapConversationQueueEntry(this.database.prepare(
+      'SELECT * FROM conversation_queue_entries WHERE id = ?',
+    ).get(id)!)
+  }
+
+  #readConversationSubmissionReceipt(claim: ConversationSubmissionClaim): ConversationSubmissionReceipt {
+    const session = this.getSession(claim.sessionId)
+    const workTurn = this.getWorkTurn(claim.workTurnId)
+    const messageRow = this.database.prepare(
+      'SELECT * FROM messages WHERE id = ? AND session_id = ?',
+    ).get(claim.ownerMessageId, claim.sessionId)
+    if (
+      session === undefined ||
+      workTurn === undefined ||
+      workTurn.sessionId !== session.id ||
+      workTurn.workspaceId !== claim.workspaceId ||
+      workTurn.worldId !== claim.worldId ||
+      messageRow === undefined
+    ) {
+      throw new PersistenceError('Conversation submission claim references missing facts')
+    }
+    const queueRow = claim.queueEntryId === undefined
+      ? undefined
+      : this.database.prepare('SELECT * FROM conversation_queue_entries WHERE id = ?').get(claim.queueEntryId)
+    return {
+      claim,
+      session,
+      workTurn,
+      ownerMessage: mapMessage(messageRow),
+      ...(queueRow === undefined ? {} : { queueEntry: mapConversationQueueEntry(queueRow) }),
+    }
+  }
+
+  #sessionEmployeeIds(sessionId: string): string[] {
+    return this.database.prepare(
+      `SELECT participant_id FROM work_session_participants
+       WHERE session_id = ? AND kind = 'employee' ORDER BY joined_at, participant_id`,
+    ).all(sessionId).map((row) => String((row as { participant_id: unknown }).participant_id))
+  }
+
+  #ensureOwnerParticipant(session: WorkSession): void {
+    const exists = this.database.prepare(
+      `SELECT 1 FROM work_session_participants
+       WHERE session_id = ? AND participant_id = 'owner' AND kind = 'owner'`,
+    ).get(session.id)
+    if (exists === undefined) this.#addParticipant(session, 'owner', 'owner')
+  }
+
   getWorkTurn(turnId: string): WorkTurn | undefined {
     const row = this.database.prepare('SELECT * FROM work_turns WHERE id = ?').get(turnId)
     return row === undefined ? undefined : mapWorkTurn(row)
@@ -5816,6 +6224,7 @@ export class SqliteStore {
         localAssets: countRows(this.database, 'local_assets'),
         sessions: countRows(this.database, 'work_sessions'),
         conversationQueueEntries: countRows(this.database, 'conversation_queue_entries'),
+        conversationSubmissionClaims: countRows(this.database, 'conversation_submission_claims'),
         completionJobs: countRows(this.database, 'completion_jobs'),
         taskCollaborationPlans: countRows(this.database, 'task_collaboration_plans'),
         taskCollaborationSteps: countRows(this.database, 'task_collaboration_steps'),
@@ -7215,6 +7624,23 @@ function mapWorkTurn(row: object): WorkTurn {
   return turn
 }
 
+function mapConversationSubmissionClaim(row: object): ConversationSubmissionClaim {
+  const value = row as Record<string, unknown>
+  const claim: ConversationSubmissionClaim = {
+    id: String(value.id),
+    workspaceId: String(value.workspace_id),
+    worldId: String(value.world_id),
+    idempotencyKey: String(value.idempotency_key),
+    fingerprintSha256: String(value.fingerprint_sha256).toLowerCase(),
+    sessionId: String(value.session_id),
+    workTurnId: String(value.work_turn_id),
+    ownerMessageId: String(value.owner_message_id),
+    createdAt: String(value.created_at),
+  }
+  if (typeof value.queue_entry_id === 'string') claim.queueEntryId = value.queue_entry_id
+  return claim
+}
+
 function mapConversationQueueEntry(row: object): ConversationQueueEntry {
   const value = row as Record<string, unknown>
   const entry: ConversationQueueEntry = {
@@ -7684,6 +8110,150 @@ function sameConversationQueueMetadata(
     existing.priority === input.priority &&
     existing.employeeIds.length === input.employeeIds.length &&
     existing.employeeIds.every((employeeId, index) => employeeId === input.employeeIds[index])
+}
+
+interface NormalizedConversationSubmissionQueueInput {
+  id?: string
+  employeeIds: string[]
+  queueMode: 'normal' | 'next'
+  collaborationMode?: WorkSessionCollaborationMode
+  reasoningEffort?: Exclude<ReasoningEffort, 'auto'>
+  permissionMode?: AgentPermissionMode
+  priority?: number
+}
+
+interface NormalizedConversationSubmissionInput {
+  workspaceId: string
+  worldId: string
+  idempotencyKey: string
+  fingerprintSha256: string
+  sessionId?: string
+  sessionKind: 'direct' | 'group'
+  sessionTitle?: string
+  participantEmployeeIds: string[]
+  reservationEmployeeIds?: string[]
+  interactionKind: WorkTurnInteractionKind
+  collaborationMode: WorkSessionCollaborationMode
+  ownerMessage: {
+    content: string
+    metadata: JsonObject
+    causationId?: string
+    correlationId?: string
+  }
+  queue?: NormalizedConversationSubmissionQueueInput
+}
+
+function normalizeConversationSubmissionInput(
+  input: ConversationSubmissionInput,
+): NormalizedConversationSubmissionInput {
+  const workspaceId = normalizeRequiredToken(input.workspaceId, 'Conversation submission workspace id', 160)
+  const worldId = normalizeRequiredToken(input.worldId, 'Conversation submission world id', 160)
+  const idempotencyKey = normalizeRequiredToken(input.idempotencyKey, 'Conversation submission idempotency key', 128)
+  const fingerprintSha256 = input.fingerprintSha256.trim().toLowerCase()
+  if (!/^[0-9a-f]{64}$/.test(fingerprintSha256)) {
+    throw new PersistenceError('Conversation submission fingerprint must be a SHA-256 digest')
+  }
+  const sessionKind = input.sessionKind
+  if (sessionKind !== 'direct' && sessionKind !== 'group') {
+    throw new PersistenceError('Conversation submission session kind is invalid')
+  }
+  const participantEmployeeIds = normalizeSubmissionEmployeeIds(input.participantEmployeeIds, 'Conversation submission participants')
+  if (sessionKind === 'direct' && participantEmployeeIds.length !== 1) {
+    throw new PersistenceError('Direct conversation submission requires one participant')
+  }
+  if (sessionKind === 'group' && participantEmployeeIds.length < 2) {
+    throw new PersistenceError('Group conversation submission requires at least two participants')
+  }
+  const interactionKind = input.interactionKind
+  if (!['chat', 'task', 'meeting', 'peer'].includes(interactionKind)) {
+    throw new PersistenceError('Conversation submission interaction kind is invalid')
+  }
+  const collaborationMode = validateSessionCollaborationMode(
+    input.collaborationMode ?? (sessionKind === 'group' && interactionKind === 'task' ? 'task' : 'discussion'),
+  )
+  if (sessionKind === 'direct' && collaborationMode !== 'discussion') {
+    throw new PersistenceError('Direct conversation submission requires discussion mode')
+  }
+  if (sessionKind === 'group' && (collaborationMode === 'task') !== (interactionKind === 'task')) {
+    throw new PersistenceError('Conversation submission collaboration mode does not match its interaction kind')
+  }
+  const sessionId = input.sessionId === undefined
+    ? undefined
+    : normalizeRequiredToken(input.sessionId, 'Conversation submission session id', 160)
+  const sessionTitle = input.sessionTitle === undefined
+    ? undefined
+    : input.sessionTitle.trim()
+  if (sessionTitle !== undefined && sessionTitle.length > 160) {
+    throw new PersistenceError('Conversation submission session title is invalid')
+  }
+  const ownerMessage = input.ownerMessage
+  if (ownerMessage === undefined || typeof ownerMessage.content !== 'string' || !ownerMessage.content.trim()) {
+    throw new PersistenceError('Conversation submission owner message cannot be empty')
+  }
+  const metadata = ownerMessage.metadata ?? {}
+  assertSecretFree(metadata)
+  const normalized: NormalizedConversationSubmissionInput = {
+    workspaceId,
+    worldId,
+    idempotencyKey,
+    fingerprintSha256,
+    ...(sessionId === undefined ? {} : { sessionId }),
+    sessionKind,
+    ...(sessionTitle === undefined ? {} : { sessionTitle }),
+    participantEmployeeIds,
+    interactionKind,
+    collaborationMode,
+    ownerMessage: {
+      content: ownerMessage.content,
+      metadata,
+      ...(ownerMessage.causationId === undefined ? {} : { causationId: ownerMessage.causationId }),
+      ...(ownerMessage.correlationId === undefined ? {} : { correlationId: ownerMessage.correlationId }),
+    },
+  }
+  if (input.reservationEmployeeIds !== undefined) {
+    normalized.reservationEmployeeIds = normalizeSubmissionEmployeeIds(input.reservationEmployeeIds, 'Conversation submission reservations')
+    const participants = new Set(participantEmployeeIds)
+    if (normalized.reservationEmployeeIds.some((employeeId) => !participants.has(employeeId))) {
+      throw new PersistenceError('Conversation submission reservation employee is not a participant')
+    }
+  }
+  if (input.queue !== undefined) {
+    const queue = input.queue
+    const queueMode = queue.queueMode ?? 'normal'
+    if (queueMode !== 'normal' && queueMode !== 'next') {
+      throw new PersistenceError('Conversation submission queue mode is invalid')
+    }
+    const queueInput: NormalizedConversationSubmissionQueueInput = {
+      employeeIds: normalizeSubmissionEmployeeIds(queue.employeeIds, 'Conversation submission queue employees'),
+      queueMode,
+      ...(queue.id === undefined ? {} : { id: normalizeRequiredToken(queue.id, 'Conversation submission queue id', 160) }),
+      ...(queue.collaborationMode === undefined ? {} : { collaborationMode: validateSessionCollaborationMode(queue.collaborationMode) }),
+      ...(queue.reasoningEffort === undefined ? {} : { reasoningEffort: validateQueueReasoningEffort(queue.reasoningEffort) }),
+      ...(queue.permissionMode === undefined ? {} : { permissionMode: validateQueuePermissionMode(queue.permissionMode) }),
+      ...(queue.priority === undefined ? {} : { priority: validateQueuePriority(queue.priority) }),
+    }
+    if (queueInput.collaborationMode !== undefined && queueInput.collaborationMode !== collaborationMode) {
+      throw new PersistenceError('Conversation submission queue collaboration mode does not match the session')
+    }
+    normalized.queue = queueInput
+  }
+  return normalized
+}
+
+function normalizeSubmissionEmployeeIds(values: string[], label: string): string[] {
+  if (!Array.isArray(values) || values.length === 0) throw new PersistenceError(`${label} are required`)
+  const normalized = values.map((value) => {
+    if (typeof value !== 'string') throw new PersistenceError(`${label} are invalid`)
+    return normalizeRequiredToken(value, `${label} employee id`, 160)
+  })
+  if (new Set(normalized).size !== normalized.length) throw new PersistenceError(`${label} must be unique`)
+  return normalized
+}
+
+function defaultConversationSubmissionTitle(input: NormalizedConversationSubmissionInput): string {
+  return input.sessionKind === 'direct'
+    ? '私聊'
+    : input.interactionKind === 'task' ? '任务协作' : '群聊'
 }
 
 function normalizeRequiredToken(value: string, label: string, maximum: number): string {

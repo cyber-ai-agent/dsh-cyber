@@ -85,4 +85,6 @@ F06 前置保护已完成：规划不再压低固定 token 占用；最终角色
 
 统一提交入口本身尚未完成。下一步先实现聊天受理的原子幂等与相同 key 不同请求冲突，再接任务中心及日程。不得通过只增加外层查找、只处理排队请求或重复创建会话来宣称幂等完成；委托协作等现有路径也需要核对，不能丢弃旧能力。
 
+2026-09-06 新增 schema 44 `conversation_submission_claims` 与 `ConversationIngressService` 基础：一次事务创建/复用会话、WorkTurn、owner 消息和可选队列行；claim 只保存 fingerprint 与事实 ID，不复制回复正文。旧 `clientTurnId` 没有可信 fingerprint 时 fail closed；同成员 group 无 sessionId 继续创建独立群聊。持久化 15 文件、93 项通过；原子 claim 的跨连接回放、冲突、整体回滚、旧 key 与群聊隔离测试通过。该检查点尚未接入 HTTP 聊天路由，因此第四批仍为开发中。
+
 已创建当前任务的“DSH Cyber 审计持续整改”自动接续（每小时），沿用此分支与 PR #178。电脑和桌面应用运行时继续未完成批次；每批更新证据，完成全部整改后暂停。自动接续不是剩余批次已完成的声明。

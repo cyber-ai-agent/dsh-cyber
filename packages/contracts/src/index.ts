@@ -1,7 +1,7 @@
 import type { WorldCharacterAuthority } from './world-authority.js'
 import type { UiLocale } from './locales.js'
 
-export const CYBER_SCHEMA_VERSION = 43 as const
+export const CYBER_SCHEMA_VERSION = 44 as const
 
 export * from './runtime-access.js'
 export * from './locales.js'
@@ -1328,6 +1328,7 @@ export interface DatabaseDoctorReport {
     localAssets: number
     sessions: number
     conversationQueueEntries: number
+    conversationSubmissionClaims: number
     completionJobs: number
     taskCollaborationPlans: number
     taskCollaborationSteps: number
@@ -1379,6 +1380,7 @@ export * from './world-knowledge.js'
 export * from './world-knowledge-graph.js'
 export * from './task-collaboration.js'
 export * from './conversation-queue.js'
+export * from './conversation-submission.js'
 export * from './browser-skill.js'
 export * from './workspace-preferences.js'
 export * from './completion-job.js'

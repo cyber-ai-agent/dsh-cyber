@@ -2204,6 +2204,40 @@ const MIGRATIONS: readonly Migration[] = [
         WHERE superseded_at IS NOT NULL AND invalidated_at IS NULL;
     `,
   },
+  {
+    version: 44,
+    name: 'conversation-submission-claims',
+    sql: `
+      -- A client retry must claim the whole owner submission, not look up a
+      -- WorkTurn and create the rest in separate transactions. The three
+      -- non-null foreign keys make a claim an all-or-nothing receipt: a row
+      -- cannot exist without the session, turn and owner message it returns.
+      -- Queue entries are optional because immediate turns do not need one.
+      --
+      -- Existing work_turns.client_turn_id rows are deliberately not
+      -- backfilled. They predate a request fingerprint, and duplicate legacy
+      -- ids cannot be mapped to one fact without guessing. The new claim API
+      -- detects such ids and asks the host to reconcile them explicitly.
+      CREATE TABLE conversation_submission_claims (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        idempotency_key TEXT NOT NULL CHECK (length(idempotency_key) BETWEEN 1 AND 128),
+        fingerprint_sha256 TEXT NOT NULL CHECK (length(fingerprint_sha256) = 64),
+        session_id TEXT NOT NULL REFERENCES work_sessions(id) ON DELETE CASCADE,
+        work_turn_id TEXT NOT NULL UNIQUE REFERENCES work_turns(id) ON DELETE CASCADE,
+        owner_message_id TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+        queue_entry_id TEXT UNIQUE REFERENCES conversation_queue_entries(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE (workspace_id, world_id, idempotency_key)
+      ) STRICT;
+
+      CREATE INDEX conversation_submission_claims_scope_idx
+        ON conversation_submission_claims(workspace_id, world_id, created_at DESC, id);
+      CREATE INDEX conversation_submission_claims_session_idx
+        ON conversation_submission_claims(session_id, created_at DESC, id);
+    `,
+  },
 ]
 
 /**
