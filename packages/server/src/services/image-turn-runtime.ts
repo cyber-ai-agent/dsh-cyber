@@ -8,7 +8,6 @@ import { isImageGenerationModel } from './image-generation-service.js'
 import type { ModelCredentialService } from './model-credential-service.js'
 import type { ModelInteractionService } from './model-interaction-service.js'
 import { ServiceError } from './service-error.js'
-import type { WorldArtifactService } from './world-artifact-service.js'
 import type { WorldFileService } from './world-file-service.js'
 
 export interface ImageTurnRuntimeDependencies {
@@ -17,7 +16,6 @@ export interface ImageTurnRuntimeDependencies {
   credentials: ModelCredentialService
   images: ImageGenerationService
   worldFiles: WorldFileService
-  worldArtifacts: WorldArtifactService
   interactions: ModelInteractionService
 }
 
@@ -25,9 +23,13 @@ export interface ImageTurnRuntimeDependencies {
  * A chat turn whose resolved model is an image generator is not a conversation
  * with that model - it is a request for a picture. This port answers exactly
  * that: the user's message becomes the prompt, the generated image becomes an
- * attachment on the assistant message AND a durable Artifact, and the ordinary
- * runtime event sequence (turn.started / assistant.message / turn.completed)
- * keeps every downstream projection - trace, SSE, completion jobs - unchanged.
+ * attachment on the assistant message AND a real world file under
+ * `files/图片/`, and the ordinary runtime event sequence (turn.started /
+ * assistant.message / turn.completed) keeps every downstream projection -
+ * trace, SSE, completion jobs - unchanged. The run-completion worker then
+ * registers that world file as the run's one durable Artifact, through the
+ * same authoritative path as every other AgentRun - this port never publishes
+ * an artifact itself, so one generation cannot produce two.
  *
  * The chat pipeline normally sends system prompt + tools + history; image
  * models reject that shape entirely (the usage log's context-window and
@@ -65,22 +67,13 @@ export function createImageAwareRuntime(deps: ImageTurnRuntimeDependencies): Age
         ...(typeof profile.settings.imageSize === 'string' ? { size: profile.settings.imageSize } : {}),
       })
       const fileName = `生成图片-${shortTime(new Date())}`
+      // The file service derives and appends the extension itself, so the name
+      // must stay bare - otherwise the visible file ends up with two of them
+      // (生成图片-....png-<id8>.png).
       const attachment = await deps.worldFiles.saveGeneratedImage(employee.worldId, {
         bytes: image.bytes,
         mimeType: image.mimeType,
-        name: `${fileName}.${image.mimeType === 'image/jpeg' ? 'jpg' : image.mimeType === 'image/webp' ? 'webp' : 'png'}`,
-      })
-      const publication = await deps.worldArtifacts.publishGeneratedImage({
-        workspaceId: employee.workspaceId,
-        worldId: employee.worldId,
-        bytes: image.bytes,
-        mimeType: image.mimeType,
-        title: fileName,
-        createdById: employee.id,
-        sessionId: request.conversationId,
-        ...(request.workTurnId === undefined ? {} : { workTurnId: request.workTurnId }),
-        ...(request.agentRunId === undefined ? {} : { agentRunId: request.agentRunId }),
-        ...(request.agentRunId === undefined ? {} : { idempotencyKey: `generated-image:${request.agentRunId}` }),
+        name: fileName,
       })
       const caption = '图片已经生成，点击可以放大查看；它也已存入本世界的产物。'
       const metadata: JsonObject = {
@@ -91,7 +84,6 @@ export function createImageAwareRuntime(deps: ImageTurnRuntimeDependencies): Age
           byteLength: attachment.byteLength,
           url: attachment.url,
         }],
-        artifactRefs: [{ artifactId: publication.artifact.id, title: publication.artifact.title, kind: 'image' }],
         imageModel: profile.modelId,
         generatedImage: true,
       }

@@ -318,7 +318,7 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
   const loggingRuntime = new TurnInteractionLoggingRuntime({ inner: contextRuntime, service: interactions, resolveRoute(request) { return resolveHarnessRoute(store, request) } })
   // Image-model turns branch before the whole chat stack: the prompt goes to
   // the images endpoint and never becomes a conversational request.
-  const runtime = createImageAwareRuntime({ inner: loggingRuntime, store, credentials, images: new ImageGenerationService(), worldFiles, worldArtifacts, interactions })
+  const runtime = createImageAwareRuntime({ inner: loggingRuntime, store, credentials, images: new ImageGenerationService(), worldFiles, interactions })
   const completionWorker = composeCompletionWorker(store, worldArtifacts)
   const groupTurnPlanner = composeGroupTurnPlanner(store, credentials, options.groupTurnPlanner)
   const orchestrator = new ConversationOrchestrator({
