@@ -124,7 +124,7 @@ function modelCall(answer: string | (() => never)) {
 }
 
 describe('conversation intent becomes a task list entry', () => {
-  it('turns one clear instruction into one visible draft task and leaves questions and discussion alone', async () => {
+  it('turns one clear instruction into one task following its queued source and leaves questions and discussion alone', async () => {
     const store = await open()
     const context = conversation(store, '意图世界')
     const published: string[] = []
@@ -146,9 +146,8 @@ describe('conversation intent becomes a task list entry', () => {
     )
     expect(created).toMatchObject({
       title: '整理客服工单复盘文档',
-      // Created in its draft state: visible before anything runs, and running
-      // it stays a separate, explicit action.
-      status: 'draft',
+      // The existing queued source owns execution; recording creates no second run.
+      status: 'ready',
       priority: 'high',
       sourceWorkTurnId: instruction.id,
       createdBy: 'owner',

@@ -77,7 +77,7 @@ describe('WorkSystemService.createFromSource', () => {
     const first = work.createFromSource(input)
     expect(first.created).toBe(true)
     expect(first.task).toMatchObject({
-      worldId: context.worldId, status: 'draft', priority: 'normal', sourceWorkTurnId: turn.id, sourceMessageId: message.id,
+      worldId: context.worldId, status: 'ready', priority: 'normal', sourceWorkTurnId: turn.id, sourceMessageId: message.id,
     })
     expect(work.createFromSource(input)).toEqual({ created: false, task: first.task })
 

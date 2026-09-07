@@ -106,9 +106,9 @@ describe('Task list live refresh', () => {
     tasks = [proposed]
     await act(async () => { FakeEventSource.instances[0]?.emit('world-task'); await new Promise((resolve) => setTimeout(resolve, 60)) })
     await vi.waitFor(() => expect(host.textContent).toContain('整理用户反馈改进清单'))
-    // Draft, not running: recording a task never starts one, so the panel still
-    // offers the action that starts it.
-    await vi.waitFor(() => expect(host.textContent).toContain('开始真实协作'))
+    // Missing legacy source evidence never invents work. Manual execution stays
+    // available as a secondary, collapsed action.
+    await vi.waitFor(() => expect(host.textContent).toContain('重新执行任务'))
     expect(host.textContent).toContain('来自对话')
 
     tasks = [{ ...proposed, title: '断线期间新增的任务' }]
@@ -144,9 +144,9 @@ describe('Task list live refresh', () => {
     await act(async () => { root.render(createElement(TaskWorkspace, { world, employees: [] })) })
     await vi.waitFor(() => expect(host.textContent).toContain('来源对话'))
 
-    expect(host.textContent).toContain('提出该任务的对话仍在进行')
+    expect(host.textContent).toContain('来源对话正在处理')
     const run = [...host.querySelectorAll('button')].find((node) => node.textContent?.includes('生成计划并执行'))
-    expect(run?.disabled).toBe(true)
+    expect(run).toBeUndefined()
 
     await act(async () => { root.unmount() })
     host.remove()
@@ -221,10 +221,11 @@ describe('Task list live refresh', () => {
     expect(host.textContent).toContain('turn-fro')
     expect(host.textContent).toContain('已完成')
     expect(host.textContent).toContain('1 个角色运行')
-    // And the line that keeps it honest: that turn is not this task's own work.
-    expect(host.textContent).toContain('不是任务本身的执行')
-    // The task is still a draft, so starting it is still the owner's click.
-    expect(host.textContent).toContain('开始真实协作')
+    // The source has finished, but acceptance remains an explicit owner decision.
+    expect(host.textContent).toContain('确认完成')
+    expect(host.textContent).not.toContain('执行与证据')
+    expect(host.querySelector('.task-source-retry')?.hasAttribute('open')).toBe(false)
+    expect(host.textContent).toContain('重新执行任务')
 
     await act(async () => { root.unmount() })
     host.remove()

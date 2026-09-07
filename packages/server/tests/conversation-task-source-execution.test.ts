@@ -9,14 +9,9 @@ import { createCyberServer, type CyberServer } from '../src/index.js'
 import type { ConversationTaskIntentPort } from '../src/services/conversation-task-intent-classifier.js'
 
 /**
- * What a draft says about the turn that asked for it.
- *
- * A conversation turn records a task and then goes on to run: it answers, or
- * it fails, or it is still sitting in the queue. The task is a draft the whole
- * time, because a classification is not permission to execute anything. But
- * "still a draft" must not read as "nothing ever happened" — the owner has to
- * be able to see the turn their instruction actually produced, and tell it
- * apart from the task's own execution, which has not begun.
+ * Source tasks follow their existing conversation lifecycle without creating a
+ * second execution. A successful source waits for owner confirmation; plans,
+ * TaskRuns and deliverables remain empty until an explicit independent run.
  */
 
 const servers: CyberServer[] = []
@@ -113,7 +108,7 @@ describe('a draft is linked to the execution of its source turn', () => {
     expect(instructed.status).toBe(200)
 
     const detail = (await json(origin, `/api/tasks/${instructed.body.proposedTask.id}`)).body as WorkTaskDetail
-    expect(detail.task.status).toBe('draft')
+    expect(detail.task.status).toBe('waiting-review')
     // The task's own execution list stays empty: a draft has never run, and
     // the source turn is not an attempt at it.
     expect(detail.runs).toEqual([])
@@ -156,7 +151,7 @@ describe('a draft is linked to the execution of its source turn', () => {
       expect(settled.sourceTurn?.runs).toHaveLength(1)
       // Its turn ran, answered and finished. The task did not move: only the
       // owner may start it.
-      expect(settled.task.status).toBe('draft')
+      expect(settled.task.status).toBe('waiting-review')
       expect(settled.runs).toEqual([])
     } finally {
       runtime.release()

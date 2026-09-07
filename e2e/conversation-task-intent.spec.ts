@@ -41,7 +41,7 @@ test.beforeAll(async () => {
 })
 test.afterAll(async () => { await server?.close(); await rm(stateRoot, { recursive: true, force: true }) })
 
-test('records one editable task from a chat instruction and nothing from a question', async ({ page }) => {
+test('records one source task, follows its completion and confirms without repeating work', async ({ page }) => {
   const current = server!
   const world = current.store.listWorlds(current.store.listWorkspaces()[0]!.id)[0]!
   const issues: string[] = []
@@ -72,21 +72,29 @@ test('records one editable task from a chat instruction and nothing from a quest
   const row = page.getByRole('button', { name: /整理用户反馈改进清单/ })
   await expect(row).toBeVisible({ timeout: 20_000 })
   await expect(row).toContainText('来自对话')
-  // Draft, not running: the task is visible before anything executes, and
-  // starting it is still the owner's own click.
-  await expect(page.locator('.task-status')).toHaveText('待规划')
-  await expect(page.getByRole('button', { name: '生成计划并执行' })).toBeVisible()
+  // A source task follows the actual chat, rather than keeping a separate
+  // unstarted draft forever. Acceptance does not run the instruction again.
+  await expect(page.locator('.task-status')).toHaveText('等待验收')
   expect(current.work.list(world.id)).toHaveLength(1)
-
-  // And the draft says what the turn behind it actually did — that turn ran
-  // and answered — while saying in the same breath that this is not the task's
-  // own execution, which has not happened and needs the click above.
+  const taskId = current.work.list(world.id)[0]!.id
   await expect(page.getByRole('heading', { name: '来源对话' })).toBeVisible()
   const source = page.locator('.task-source')
-  await expect(source).toContainText('已完成')
+  await expect(source).toContainText('对话执行已结束')
   await expect(source).toContainText('1 个角色运行')
-  await expect(source).toContainText('不是任务本身的执行')
-  await expect(page.getByText('执行与证据 · 0')).toBeVisible()
+  await source.locator('.task-source-result summary').click()
+  await expect(source.locator('.task-source-result pre')).toContainText('管家 已回复。')
+  const repeat = page.getByRole('button', { name: '生成计划并执行' })
+  await expect(repeat).not.toBeVisible()
+  await page.locator('.task-source-retry > summary').click()
+  await expect(repeat).toBeVisible()
+  await page.locator('.task-source-retry > summary').click()
+  const sourceRunIds = current.work.detail(taskId).sourceTurn!.runs.map((run) => run.id)
+  await page.getByRole('button', { name: '确认完成', exact: true }).click()
+  await expect(page.locator('.task-status')).toHaveText('已完成')
+  await expect(source.getByRole('heading')).toHaveText('已确认完成')
+  expect(current.work.detail(taskId).runs).toEqual([])
+  expect(current.work.detail(taskId).sourceTurn!.runs.map((run) => run.id)).toEqual(sourceRunIds)
+  await expect(page.locator('.task-source-retry')).toHaveCount(0)
 
   const screenshotRoot = join(process.cwd(), 'artifacts', 'conversation-task-intent')
   await mkdir(screenshotRoot, { recursive: true })

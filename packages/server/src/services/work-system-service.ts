@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 
 import { parseCreateWorkTask, type Deliverable, type Review, type WorkTask, type WorkTaskDetail, type WorkTaskFromSource, type WorkTaskPriority, type WorkTaskStatus, type WorkTurnStatus } from '@dsh-cyber/contracts'
 import type { CharacterSkillAction } from '@dsh-cyber/contracts/skill-runtime'
-import { SqliteUnitOfWork, WorkSystemRepository, type SqliteStore } from '@dsh-cyber/persistence'
+import { SqliteUnitOfWork, WorkSystemRepository, projectSourceTasks, sourceTaskResults, type SqliteStore } from '@dsh-cyber/persistence'
 
 import type { GroupTaskCollaborationService, GroupTaskRunResult } from './group-task-collaboration-service.js'
 import type { GroupTaskRoutingResult } from './group-task-router.js'
@@ -87,9 +87,10 @@ export class WorkSystemService {
       coordinatorEmployeeId: input.coordinatorEmployeeId,
     })
     if (draft.coordinatorEmployeeId !== undefined) this.#requireEmployee(world.id, draft.coordinatorEmployeeId)
-    return this.#uow.run(() => this.#repository.createTaskFromSource({
+    const result = this.#uow.run(() => this.#repository.createTaskFromSource({
       ...draft, workspaceId: world.workspaceId, worldId: world.id, workTurnId: turn.id, createdBy: 'owner',
     }))
+    return { ...result, task: projectSourceTasks(this.#store.database, [result.task])[0]! }
   }
 
   /**
@@ -101,9 +102,9 @@ export class WorkSystemService {
    * into the main one.
    */
   list(worldId: string, scope?: WorkTaskListScope): WorkTask[] {
-    if (scope === 'all') return this.#repository.listTasks(worldId)
-    if (scope !== undefined) return this.#repository.listTasks(worldId, scope)
-    return this.#repository.listTasks(worldId).filter((task) => task.status !== 'cancelled')
+    const tasks = projectSourceTasks(this.#store.database, this.#repository.listTasks(worldId))
+    if (scope === 'all') return tasks
+    return tasks.filter((task) => scope === undefined ? task.status !== 'cancelled' : task.status === scope)
   }
 
   /**
@@ -118,6 +119,10 @@ export class WorkSystemService {
    */
   cancel(taskId: string): WorkTaskDetail {
     const task = this.#repository.requireTask(taskId)
+    const source = task.sourceWorkTurnId === undefined ? undefined : this.#store.getWorkTurn(task.sourceWorkTurnId)
+    if (source !== undefined && UNSETTLED_SOURCE_TURN.includes(source.status)) {
+      throw new ServiceError('conflict', 'work_task_source_turn_unsettled', '来源对话仍在执行，请先停止对话或等待它结束。')
+    }
     if (!CANCELLABLE.includes(task.status)) throw new ServiceError('conflict', 'work_task_not_cancellable', cancelRefusal(task.status))
     return this.#uow.run(() => {
       this.#repository.transitionTask(task.id, [task.status], 'cancelled')
@@ -125,8 +130,45 @@ export class WorkSystemService {
     })
   }
 
-  taskForSourceTurn(workTurnId: string): WorkTask | undefined { return this.#repository.getTaskBySourceWorkTurn(workTurnId) }
-  detail(taskId: string): WorkTaskDetail { return this.#repository.detail(taskId) }
+  taskForSourceTurn(workTurnId: string): WorkTask | undefined {
+    const task = this.#repository.getTaskBySourceWorkTurn(workTurnId)
+    return task === undefined ? undefined : projectSourceTasks(this.#store.database, [task])[0]
+  }
+  detail(taskId: string): WorkTaskDetail {
+    const detail = this.#repository.detail(taskId)
+    return {
+      ...detail, task: projectSourceTasks(this.#store.database, [detail.task])[0]!,
+      ...(detail.sourceTurn === undefined ? {} : { sourceTurn: {
+        ...detail.sourceTurn, results: sourceTaskResults(this.#store.database, detail.task, detail.sourceTurn),
+      } }),
+    }
+  }
+
+  /** Explicit owner acceptance of the existing source result, not another run.
+   * The transaction rechecks ownership and the live source before changing the
+   * row. Interrupted/failed sources require the owner's explanation; their
+   * actual run status and errors remain intact for audit.
+   */
+  completeFromSource(taskId: string, input: { sourceWorkTurnId: string; confirmed: boolean; note?: string }): WorkTaskDetail {
+    if (input.confirmed !== true) throw new ServiceError('invalid', 'work_task_confirmation_required', '请明确确认任务已经完成。')
+    const note = input.note?.trim() ?? ''
+    if (note.length > 2000) throw new ServiceError('invalid', 'work_task_completion_note_invalid', '完成说明不能超过 2000 字。')
+    return this.#uow.run(() => {
+      const detail = this.#repository.detail(taskId)
+      const { task, sourceTurn } = detail
+      if (task.sourceWorkTurnId !== input.sourceWorkTurnId || task.currentPlanRevision !== 0 || detail.runs.length > 0 || detail.plans.length > 0) {
+        throw new ServiceError('conflict', 'work_task_source_completion_unavailable', '任务已变化，或已有独立执行，请刷新后按当前交付验收。')
+      }
+      if (task.status === 'completed') return this.detail(taskId)
+      if (task.status !== 'draft' || sourceTurn === undefined || UNSETTLED_SOURCE_TURN.includes(sourceTurn.status)
+        || sourceTurn.runs.some((run) => ['queued', 'running', 'waiting-approval'].includes(run.status))) {
+        throw new ServiceError('conflict', 'work_task_source_turn_unsettled', '当前任务不能确认完成；来源对话须先结束，已取消任务不能修改。')
+      }
+      if (sourceTurn.status !== 'completed' && !note) throw new ServiceError('invalid', 'work_task_completion_note_required', '来源对话未正常结束，请说明你已核对的完成结果。')
+      this.#repository.confirmSourceCompletion(task, sourceTurn, note)
+      return this.detail(taskId)
+    })
+  }
   currentWork(employeeId: string): WorkTaskDetail[] { return this.#repository.currentWork(employeeId) }
   taskForDeliverable(deliverableId: string): WorkTask | undefined { return this.#repository.taskForDeliverable(deliverableId) }
 

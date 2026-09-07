@@ -74,3 +74,15 @@ it('defers new subscribers until the next event and skips subscribers removed du
   source.emit('runtime'); expect(late).not.toHaveBeenCalled(); expect(removed).not.toHaveBeenCalled()
   source.emit('runtime'); expect(late).toHaveBeenCalledOnce()
 })
+
+
+it('coalesces task and artifact publication into one owned refresh with a single ready subscription', async () => {
+  const refresh = vi.fn()
+  stops.push(subscribeWorldLiveRefresh('task-with-artifacts', ['world-task', 'world-artifact', 'world-task'], refresh))
+  const source = Source.instances.at(-1)!
+  source.emit('ready'); source.emit('world-task'); source.emit('world-artifact')
+  await vi.advanceTimersByTimeAsync(50)
+  expect(refresh).toHaveBeenCalledOnce()
+  stops.pop()!(); source.emit('world-artifact'); await vi.advanceTimersByTimeAsync(100)
+  expect(refresh).toHaveBeenCalledOnce()
+})

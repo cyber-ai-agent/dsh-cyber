@@ -151,23 +151,9 @@ export interface WorkTaskSourceRun {
 }
 
 /**
- * What the conversation turn named by `WorkTask.sourceWorkTurnId` actually did.
- *
- * A task born from a chat message is recorded next to a turn that then goes on
- * to live its own life: it waits in the queue, runs, answers, or fails. The
- * task stays a draft through all of it, because classifying a message is not
- * permission to execute anything — but a draft that shows nothing about its
- * own origin reads as though the instruction vanished.
- *
- * So this is the turn, read at request time from `work_turns` and `agent_runs`
- * and never copied onto the task. It is deliberately *not* a `TaskRun`: those
- * are attempts at the task itself, recorded only when the owner runs it, and
- * conflating the two would let a chat reply pass for a delivered task. It also
- * never influences `WorkTask.status`; a turn finishing moves nothing.
- *
- * Absent for tasks created on the board or by a schedule, and for a task whose
- * settled turn has since been pruned from history — the link is released with
- * the transcript, while the task itself survives.
+ * Current source execution, read from durable turn/run facts. An unexecuted
+ * conversation task follows this lifecycle; a completed turn awaits owner
+ * confirmation, never an invented TaskRun, deliverable or acceptance.
  */
 export interface WorkTaskSourceTurn {
   workTurnId: string
@@ -179,6 +165,12 @@ export interface WorkTaskSourceTurn {
   completedAt?: IsoTimestamp
   /** The characters that ran in that turn. Empty while it is still queued. */
   runs: WorkTaskSourceRun[]
+  /** Bounded, persisted final replies and published versions from this exact turn. */
+  results?: {
+    messages: Array<{ id: string; employeeId: string; content: string; truncated: boolean }>
+    artifacts: Array<{ artifactId: string; version: number; title: string; kind: string }>
+    hasMore: boolean
+  }
 }
 
 export interface WorkTaskDetail {

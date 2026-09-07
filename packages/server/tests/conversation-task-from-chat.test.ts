@@ -124,7 +124,7 @@ const QUESTION = '用户反馈一般多久处理一轮比较合适？'
 const DISCUSSION = '我在想我们是不是该把反馈渠道再收一收，你觉得呢？'
 
 describe('a chat instruction becomes one task in the task list', () => {
-  it('records one editable draft, ignores a question and a discussion, and answers every turn', async () => {
+  it('records one source task awaiting confirmation, ignores a question and a discussion, and answers every turn', async () => {
     const intent = stubIntent({
       [INSTRUCTION]: { title: '整理用户反馈改进清单', description: '汇总上周用户反馈，按影响面排序，输出一份带优先级的改进清单。', priority: 'high' },
       [QUESTION]: undefined,
@@ -137,7 +137,7 @@ describe('a chat instruction becomes one task in the task list', () => {
     // The turn still answers: the task is recorded beside the reply, not instead of it.
     expect(instructed.body.replies?.length ?? 0).toBeGreaterThan(0)
     expect(instructed.body.proposedTask).toMatchObject({
-      title: '整理用户反馈改进清单', status: 'draft', priority: 'high', sourceWorkTurnId: instructed.body.workTurnId,
+      title: '整理用户反馈改进清单', status: 'waiting-review', priority: 'high', sourceWorkTurnId: instructed.body.workTurnId,
     })
 
     for (const chatter of [QUESTION, DISCUSSION]) {
@@ -149,7 +149,7 @@ describe('a chat instruction becomes one task in the task list', () => {
     const listed = await json(origin, `/api/worlds/${world.id}/tasks`)
     expect(listed.status).toBe(200)
     expect((listed.body.items as WorkTask[]).map((task) => ({ title: task.title, status: task.status }))).toEqual([
-      { title: '整理用户反馈改进清单', status: 'draft' },
+      { title: '整理用户反馈改进清单', status: 'waiting-review' },
     ])
     expect(intent.prompts).toEqual([INSTRUCTION, QUESTION, DISCUSSION])
     // Recording a task starts nothing: only the three conversation turns ran.
@@ -177,8 +177,8 @@ describe('a chat instruction becomes one task in the task list', () => {
     expect(server.store.getWorkTurn(queued.body.workTurnId)?.status).not.toBe('completed')
 
     intent.release()
-    const task = await eventually(() => server.work.list(world.id)[0], '排队指令的任务始终没有被记录')
-    expect(task).toMatchObject({ status: 'draft', title: '整理用户反馈改进清单', sourceWorkTurnId: queued.body.workTurnId })
+    const task = await eventually(() => { const value = server.work.list(world.id)[0]; return value?.status === 'waiting-review' ? value : undefined }, '排队指令的任务没有跟随来源执行结束')
+    expect(task).toMatchObject({ status: 'waiting-review', title: '整理用户反馈改进清单', sourceWorkTurnId: queued.body.workTurnId })
   })
 
   it('answers an immediate send without waiting for a slow decision either', async () => {
@@ -201,7 +201,7 @@ describe('a chat instruction becomes one task in the task list', () => {
     // Released, the decision still lands as a draft on the same turn.
     intent.release()
     const recorded = await eventually(() => server.work.list(world.id)[0], '延迟的判定没有落成草稿')
-    expect(recorded).toMatchObject({ status: 'draft', sourceWorkTurnId: answered.body.workTurnId })
+    expect(recorded).toMatchObject({ status: 'waiting-review', sourceWorkTurnId: answered.body.workTurnId })
   })
 
   it('keeps a queued turn healthy and puts the failure on the trace when the decision fails late', async () => {

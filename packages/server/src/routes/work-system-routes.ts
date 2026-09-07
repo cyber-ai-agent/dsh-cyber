@@ -3,6 +3,7 @@ import {
   parseReviewDecision,
   WorkSystemContractError,
   type WorkTaskStatus,
+  type JsonObject,
 } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
@@ -16,8 +17,9 @@ import { requireWorldAcceptingWork } from '../services/world-work-guard.js'
 
 const TASK_STATUSES: readonly WorkTaskStatus[] = ['draft','planning','ready','running','waiting-approval','waiting-review','changes-requested','completed','failed','cancelled','recovery-required']
 
-export function registerWorkSystemRoutes(router: Router, dependencies: { store: SqliteStore; work: WorkSystemService; access: WorldAccessService }): void {
-  const { store, work, access } = dependencies
+export function registerWorkSystemRoutes(router: Router, dependencies: { store: SqliteStore; work: WorkSystemService; access: WorldAccessService; runtime?: { publishTaskChanged(worldId: string, payload: JsonObject): void } }): void {
+  const { store, work, access, runtime } = dependencies
+  const changed = (task: { id: string; worldId: string; status: WorkTaskStatus }) => runtime?.publishTaskChanged(task.worldId, { taskId: task.id, status: task.status })
   router.get(/^\/api\/worlds\/([^/]+)\/tasks$/, async ({ request, response, params, url }) => {
     const worldId = params[0]!
     const world = store.getWorld(worldId)
@@ -37,7 +39,9 @@ export function registerWorkSystemRoutes(router: Router, dependencies: { store: 
     await access.assertUnlocked(worldId, request)
     const body = await readJson(request)
     const input = contract(() => parseCreateWorkTask(body))
-    writeJson(response, 201, { task: work.create({ workspaceId: world.workspaceId, worldId, ...input }) })
+    const task = work.create({ workspaceId: world.workspaceId, worldId, ...input })
+    changed(task)
+    writeJson(response, 201, { task })
   })
 
   router.get(/^\/api\/tasks\/([^/]+)$/, async ({ request, response, params }) => {
@@ -63,6 +67,7 @@ export function registerWorkSystemRoutes(router: Router, dependencies: { store: 
       ...(submissionKey === undefined ? {} : { submissionKey }),
       ...(clientTurnId === undefined ? {} : { clientTurnId }),
     })
+    changed(result.task)
     writeJson(response, 200, result)
   })
 
@@ -73,7 +78,23 @@ export function registerWorkSystemRoutes(router: Router, dependencies: { store: 
   router.post(/^\/api\/tasks\/([^/]+)\/cancel$/, async ({ request, response, params }) => {
     const detail = safeDetail(work, params[0]!)
     await access.assertUnlocked(detail.task.worldId, request)
-    writeJson(response, 200, work.cancel(detail.task.id))
+    const result = work.cancel(detail.task.id)
+    changed(result.task)
+    writeJson(response, 200, result)
+  })
+
+  router.post(/^\/api\/tasks\/([^/]+)\/complete-source$/, async ({ request, response, params }) => {
+    const detail = safeDetail(work, params[0]!)
+    await access.assertUnlocked(detail.task.worldId, request)
+    const body = await readJson(request)
+    if (body.note !== undefined && typeof body.note !== 'string') throw new HttpError(422, 'work_task_completion_note_invalid', '完成说明必须是文字')
+    const result = work.completeFromSource(detail.task.id, {
+      sourceWorkTurnId: text(body.sourceWorkTurnId, 'sourceWorkTurnId'),
+      confirmed: body.confirmed === true,
+      ...(typeof body.note === 'string' ? { note: body.note } : {}),
+    })
+    changed(result.task)
+    writeJson(response, 200, result)
   })
 
   router.post(/^\/api\/tasks\/([^/]+)\/deliverables$/, async ({ request, response, params }) => {
@@ -90,6 +111,7 @@ export function registerWorkSystemRoutes(router: Router, dependencies: { store: 
       summary: text(body.summary, 'summary'),
       evidenceRefs: stringArray(body.evidenceRefs ?? [], 'evidenceRefs'),
     })
+    changed(work.detail(detail.task.id).task)
     writeJson(response, 201, { deliverable })
   })
 
@@ -100,6 +122,7 @@ export function registerWorkSystemRoutes(router: Router, dependencies: { store: 
     const body = await readJson(request)
     const input = contract(() => parseReviewDecision(body))
     const result = work.review(params[0]!, input)
+    changed(result.task)
     writeJson(response, 201, result)
   })
 

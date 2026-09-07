@@ -65,8 +65,8 @@ export function composeConversationControl(options: {
       // A queued instruction records its draft while the turn is still waiting
       // in line, and the task shows that turn's execution. The turn has just
       // ended, so a panel that is already open is displaying a state that is
-      // no longer true. Nothing about the task itself changed — a draft stays
-      // a draft — this only says "re-read the row".
+      // no longer true. Re-read the projected source lifecycle; a completed
+      // source now awaits owner confirmation instead of remaining a draft.
       const sourceTask = options.work.taskForSourceTurn(entry.workTurnId)
       if (sourceTask !== undefined) {
         options.worldRuntime.publishTaskChanged(entry.worldId, { taskId: sourceTask.id, status: sourceTask.status, source: 'conversation' })

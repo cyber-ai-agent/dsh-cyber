@@ -37,7 +37,7 @@ test('cancels a task after confirming, and can still find it afterwards', async 
   await openTasks(page)
   await expect(page.getByText('还没有任务')).toBeVisible()
 
-  await page.getByRole('button', { name: '新建任务' }).click()
+  await page.locator('.task-workspace > .dock-surface__header').getByRole('button', { name: '新建任务', exact: true }).click()
   await page.getByLabel('任务标题').fill('误判产生的草稿')
   await page.getByLabel('任务目标').fill('这条任务是分类器搞错了，应该可以清掉。')
   await page.getByRole('button', { name: '创建任务' }).click()
