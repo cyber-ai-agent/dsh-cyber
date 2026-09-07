@@ -114,6 +114,7 @@ describe('LocalPackageCatalog validation diagnostics', () => {
   })
 
   it('refuses a symbolic link with its own diagnostic', async () => {
+    if (process.platform === 'win32') return // EPERM: symlink requires admin/dev mode
     const { catalog, packageRoot } = await buildCatalog()
     // Link a declared file, so the symbolic link is the only thing left to fault.
     await symlink(join(packageRoot, 'SKILL.md'), join(packageRoot, 'link.md'))

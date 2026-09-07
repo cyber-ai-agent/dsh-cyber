@@ -96,6 +96,7 @@ describe('Character Generator avatar upload boundary', () => {
   })
 
   it('refuses to publish through a symlinked directory component under the state root', async () => {
+    if (process.platform === 'win32') return // EPERM: symlink requires admin/dev mode
     const outside = await mkdtemp(join(tmpdir(), 'dsh-character-generator-outside-'))
     roots.push(outside)
     const server = await startServer(async (root) => {
@@ -108,6 +109,7 @@ describe('Character Generator avatar upload boundary', () => {
   })
 
   it('refuses to publish when the talent directory itself is a symlink out of the root', async () => {
+    if (process.platform === 'win32') return // EPERM: symlink requires admin/dev mode
     const outside = await mkdtemp(join(tmpdir(), 'dsh-character-generator-outside-'))
     roots.push(outside)
     const server = await startServer()
