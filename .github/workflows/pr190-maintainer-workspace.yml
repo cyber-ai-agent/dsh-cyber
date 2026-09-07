@@ -15,7 +15,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Verify exact contribution and patch, then remove transfer files
+      - name: Verify exact contribution and patch, then remove source transfer files
         env:
           EXPECTED_HEAD: ${{ github.sha }}
         run: |
@@ -37,11 +37,12 @@ jobs:
           assert hashlib.sha256(patch).hexdigest() == '338c359a10150f44f0d79c2425cb1e3527826a8235e9bf14a755120e44e1894a'
           pathlib.Path('/tmp/pr190-maintainer.patch').write_bytes(patch)
           PY
-          git apply --unidiff-zero --check /tmp/pr190-maintainer.patch
-          git apply --unidiff-zero /tmp/pr190-maintainer.patch
-          git rm .github/pr190-fix-{0,1,2,3}.b64 .github/workflows/pr190-maintainer-workspace.yml
+          git apply --unidiff-zero --exclude=.github/workflows/ci.yml --check /tmp/pr190-maintainer.patch
+          git apply --unidiff-zero --exclude=.github/workflows/ci.yml /tmp/pr190-maintainer.patch
+          git rm .github/pr190-fix-{0,1,2,3}.b64
           git add --all
           git diff --cached --check
+          test -z "$(git diff --cached --name-only -- .github/workflows)"
           git config user.name 'cyber-ai-agent'
           git config user.email '318511541+cyber-ai-agent@users.noreply.github.com'
           git commit -m 'fix(model-stats): correct attribution and metrics, race-safe filters, and v49 telemetry migration'
