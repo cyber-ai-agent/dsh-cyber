@@ -1,0 +1,30 @@
+name: Runtime review workspace
+on:
+  push:
+    branches: [codex/runtime-reliability-20260907]
+    paths: [.github/workflows/runtime-review-workspace.yml]
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Export pinned source history, never user state
+        run: |
+          git fetch origin --prune
+          test "$(git rev-parse origin/main)" = 59f45b5825b7c2485d050ee40cd3afc9bcb9df46
+          git branch reviewed-main origin/main
+          mkdir -p /tmp/runtime-review
+          git bundle create /tmp/runtime-review/source.bundle reviewed-main
+          git rev-parse origin/main > /tmp/runtime-review/base.txt
+          sha256sum /tmp/runtime-review/source.bundle > /tmp/runtime-review/sha256.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: runtime-reviewed-main
+          path: /tmp/runtime-review
+          retention-days: 1
