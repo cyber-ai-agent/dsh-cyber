@@ -9,15 +9,17 @@ import type {
   AgentRuntimePort,
   AgentTurnRequest,
   AgentTurnResult,
+  ContextSourceRef,
   ConversationHistoryEntry,
   EmployeeInstance,
   EmployeeRevision,
   JsonObject,
   ModelTokenUsage,
+  RuntimeContextUsage,
 } from '@dsh-cyber/contracts'
-import { assertContextInputFits, planContextBudget } from '@dsh-cyber/contracts'
+import { ContextInputTooLargeError, estimateTextTokens, planContextBudget } from '@dsh-cyber/contracts'
 
-import { formatRecoveredHistoryPrompt, unseenHistory } from './history-prompt.js'
+import { projectRecoveredHistoryPrompt, unseenHistory } from './history-prompt.js'
 import { resolveHarnessPromptCache } from './prompt-cache.js'
 import {
   ensureHarnessProfile,
@@ -36,6 +38,7 @@ export interface EmployeeTurnRequest {
   /** Sequence of this employee's own last statement in the conversation, or 0. */
   observedThroughSequence: number
   contextBudget?: AgentTurnRequest['contextBudget']
+  contextSourceRefs?: ContextSourceRef[]
   /** Durable AgentRun used to target one runtime lane for interruption. */
   agentRunId?: string
   prompt: string
@@ -48,6 +51,7 @@ export interface EmployeeTurnResult {
   agentSessionId: string
   finalResponse: string
   notifications: HarnessNotification[]
+  contextUsage?: RuntimeContextUsage
 }
 
 export interface HarnessRuntime {
@@ -92,6 +96,8 @@ interface EmployeeLane {
   persona: string | undefined
   runtime: HarnessRuntime | undefined
   agentSessionId: string | undefined
+  /** Conservative estimate of user/assistant/tool content retained by the live Harness session. */
+  retainedContextTokens: number
   current: LaneTask | undefined
   pending: LaneTask[]
   lastUsed: number
@@ -114,6 +120,17 @@ interface RunTaskRecord {
 
 const MAX_ACTIVE_LANES_PER_EMPLOYEE = 2
 
+/**
+ * Estimated tokens of the exact model-facing `tools` array emitted by the
+ * pinned DSH 0.1.2-rc.1 worker profile. The real loopback Harness test guards
+ * this value against schema drift. A DSH/profile upgrade must refresh both.
+ */
+export const PINNED_HARNESS_NATIVE_TOOL_SCHEMA_TOKENS = 9_570
+/** Additional pinned DSH system instructions beyond `DSH_SYSTEM_PROMPT`. */
+export const PINNED_HARNESS_NATIVE_SYSTEM_OVERHEAD_TOKENS = 1_400
+/** Per-turn runtime-context snapshot injected as a separate user message. */
+export const PINNED_HARNESS_NATIVE_TURN_CONTEXT_TOKENS = 256
+
 export interface HarnessAdapterOptions {
   stateRoot: string
   runtimeFactory?: HarnessRuntimeFactory
@@ -122,6 +139,14 @@ export interface HarnessAdapterOptions {
   model?: string
   providerProfile?: HarnessProviderProfile
   dshBinPath?: string
+  /** Test/custom-runtime schema cost. Production uses the pinned real-worker value. */
+  nativeToolSchemaTokens?: number
+  /** Test/custom-runtime fixed system cost beyond the employee prompt. */
+  nativeSystemOverheadTokens?: number
+  /** Test/custom-runtime context retained after each successful turn. */
+  nativeTurnContextTokens?: number
+  /** Bounded DSH profile handshake; local Windows hosts can exceed 10s under load. */
+  initializeTimeoutMs?: number
 }
 
 export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDisposable {
@@ -143,6 +168,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       history: request.history,
       observedThroughSequence: request.observedThroughSequence,
       ...(request.contextBudget === undefined ? {} : { contextBudget: request.contextBudget }),
+      ...(request.contextSourceRefs === undefined ? {} : { contextSourceRefs: request.contextSourceRefs }),
       ...(request.agentRunId === undefined ? {} : { agentRunId: request.agentRunId }),
       prompt: request.prompt,
       workspacePath: request.workspacePath,
@@ -164,6 +190,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       eventCount: result.notifications.length,
       ...(tokenUsage === undefined ? {} : { tokenUsage }),
       ...(promptCache === undefined ? {} : { promptCache }),
+      ...(result.contextUsage === undefined ? {} : { contextUsage: result.contextUsage }),
     }
   }
 
@@ -221,31 +248,68 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     // embedders safe when they already declare model limits.
     const contextBudget = resolveAdapterContextBudget(request, this.#options.providerProfile)
     const existingSessionId = needsReset ? undefined : lane.agentSessionId
-    const formatPrompt = (
+    const nativeContext = resolveNativeContextTokens(this.#options)
+    const preparePrompt = (
       freshSession: boolean,
       observedThroughSequence = request.observedThroughSequence,
-    ): string => {
-      const formatted = formatRecoveredHistoryPrompt(
+    ): { prompt: string; contextUsage: RuntimeContextUsage } => {
+      const retainedTokens = freshSession ? 0 : lane.retainedContextTokens
+      const systemPrompt = employeeSystemPrompt(request.employee, request.revision)
+      const currentPromptTokens = estimateTextTokens(request.prompt)
+      const historyCapacity = contextBudget === undefined
+        ? undefined
+        : Math.max(0, Math.min(
+            contextBudget.historyTokens,
+            contextBudget.inputBudgetTokens
+              - estimateTextTokens(systemPrompt)
+              - nativeContext.fixedTokens
+              - retainedTokens
+              - currentPromptTokens,
+          ))
+      const projection = projectRecoveredHistoryPrompt(
         unseenHistory(request.history, observedThroughSequence, freshSession),
         request.prompt,
-        contextBudget === undefined ? {} : { maxTokens: contextBudget.historyTokens },
+        historyCapacity === undefined ? {} : { maxTokens: historyCapacity },
       )
+      const formatted = projection.prompt
       if (contextBudget !== undefined) {
-        // The native Harness session may retain additional provider-owned
-        // history or tool schemas. This fixed-input check covers only the
-        // system prompt and the exact prompt we are about to pass to it; it
-        // does not prove that the provider's complete context fits.
-        assertContextInputFits(
-          [employeeSystemPrompt(request.employee, request.revision), formatted],
+        assertEffectiveContextFits(
+          [systemPrompt, formatted],
+          nativeContext.fixedTokens + retainedTokens,
           contextBudget.inputBudgetTokens,
         )
       }
-      return formatted
+      const replayedSequences = projection.replayedSequences
+      return {
+        prompt: formatted,
+        contextUsage: {
+          systemTokens: estimateTextTokens(systemPrompt),
+          promptTokens: currentPromptTokens,
+          historyTokens: Math.max(0, estimateTextTokens(formatted) - currentPromptTokens),
+          nativeReservedTokens: nativeContext.fixedTokens,
+          retainedTokens,
+          ...(replayedSequences.length === 0 ? {} : { replayedThroughSequence: Math.max(...replayedSequences) }),
+          replayedSequences,
+          sourceRefs: runtimeContextSourceRefs(request.contextSourceRefs, replayedSequences),
+        },
+      }
     }
     // Run the check before profile creation, runtime creation and session-id
     // binding. A rejected fresh turn must remain fresh so its next attempt
     // still receives the history it has never actually observed.
-    const prompt = formatPrompt(existingSessionId === undefined)
+    let budgetRequiresReset = false
+    let prepared: ReturnType<typeof preparePrompt>
+    try {
+      prepared = preparePrompt(existingSessionId === undefined)
+    } catch (error) {
+      if (existingSessionId === undefined || !(error instanceof ContextInputTooLargeError)) throw error
+      // The live session may have accumulated more history than the next
+      // request can carry. Prove a fresh, bounded SQLite replay fits before
+      // closing anything; a genuinely oversized request is rejected without
+      // creating, replacing or binding a runtime.
+      prepared = preparePrompt(true, 0)
+      budgetRequiresReset = true
+    }
 
     const profile = await this.#getProfile()
     assertLaneTaskActive(task)
@@ -258,12 +322,13 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     // prompt, and it now carries the world's stable rules. A lane that kept
     // running after the owner edited those rules (or the persona itself)
     // would keep answering under the old ones.
-    if (needsReset) {
+    if (needsReset || budgetRequiresReset) {
       // Permission is lane-local. Changing a private chat from read-only to
       // workspace-write must not tear down the same employee's group lane.
       await lane.runtime?.close()
       lane.runtime = undefined
       lane.agentSessionId = undefined
+      lane.retainedContextTokens = 0
       assertLaneTaskActive(task)
     }
     if (lane.runtime === undefined) {
@@ -321,8 +386,9 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
         }
     try {
       assertLaneTaskActive(task)
-      const result = await lane.runtime!.run(agentSessionId, prompt, onNotification)
-      return { agentSessionId, ...result }
+      const result = await lane.runtime!.run(agentSessionId, prepared.prompt, onNotification)
+      lane.retainedContextTokens += retainedTurnTokens(prepared.prompt, result) + nativeContext.retainedPerTurnTokens
+      return { agentSessionId, ...result, contextUsage: prepared.contextUsage }
     } catch (error) {
       if (task.aborted) throw error
       // The SDK server's session-create path does not resume a persisted log
@@ -338,7 +404,8 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       // it before the guard so a rejected recovery cannot make the next valid
       // turn retry the same stale binding.
       lane.agentSessionId = undefined
-      const recoveredPrompt = formatPrompt(true, 0)
+      lane.retainedContextTokens = 0
+      const recovered = preparePrompt(true, 0)
       if (task.aborted) throw error
       const recoveredSessionId = freshAgentSessionId(request.employee.id)
       lane.agentSessionId = recoveredSessionId
@@ -347,10 +414,11 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       // in this process.
       const result = await lane.runtime!.run(
         recoveredSessionId,
-        recoveredPrompt,
+        recovered.prompt,
         request.onNotification,
       )
-      return { agentSessionId: recoveredSessionId, ...result }
+      lane.retainedContextTokens += retainedTurnTokens(recovered.prompt, result) + nativeContext.retainedPerTurnTokens
+      return { agentSessionId: recoveredSessionId, ...result, contextUsage: recovered.contextUsage }
     }
   }
 
@@ -369,6 +437,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       persona: undefined,
       runtime: undefined,
       agentSessionId: undefined,
+      retainedContextTokens: 0,
       current: undefined,
       pending: [],
       lastUsed: Date.now(),
@@ -514,6 +583,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       await lane.runtime?.close()
       lane.runtime = undefined
       lane.agentSessionId = undefined
+      lane.retainedContextTokens = 0
     }))
   }
 
@@ -542,6 +612,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     await active.lane.runtime?.close()
     active.lane.runtime = undefined
     active.lane.agentSessionId = undefined
+    active.lane.retainedContextTokens = 0
   }
 
   async resetSession(agentId: string, conversationId: string): Promise<void> {
@@ -563,6 +634,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       await lane.runtime?.close()
       lane.runtime = undefined
       lane.agentSessionId = undefined
+      lane.retainedContextTokens = 0
       if (lane.current === task) lane.current = undefined
       delete lane.resetFailed
     })
@@ -633,6 +705,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       cwd: spec.workspacePath,
       provider: this.#options.provider ?? 'deepseek-official',
       model: this.#options.model ?? 'deepseek-v4-flash',
+      initializeTimeoutMs: boundedInitializeTimeout(this.#options.initializeTimeoutMs),
     })
     return {
       async run(sessionId, prompt, onNotification) {
@@ -920,6 +993,71 @@ function resolveAdapterContextBudget(
     ...(model.maxTokens === undefined ? {} : { maxOutputTokens: model.maxTokens }),
     fixedText: [request.revision.persona, request.prompt],
   })
+}
+
+function resolveNativeContextTokens(options: HarnessAdapterOptions): {
+  fixedTokens: number
+  retainedPerTurnTokens: number
+} {
+  const realWorker = options.runtimeFactory === undefined
+  const toolSchemaTokens = options.nativeToolSchemaTokens
+    ?? (realWorker ? PINNED_HARNESS_NATIVE_TOOL_SCHEMA_TOKENS : 0)
+  const systemOverheadTokens = options.nativeSystemOverheadTokens
+    ?? (realWorker ? PINNED_HARNESS_NATIVE_SYSTEM_OVERHEAD_TOKENS : 0)
+  const retainedPerTurnTokens = options.nativeTurnContextTokens
+    ?? (realWorker ? PINNED_HARNESS_NATIVE_TURN_CONTEXT_TOKENS : 0)
+  for (const value of [toolSchemaTokens, systemOverheadTokens, retainedPerTurnTokens]) {
+    if (!Number.isSafeInteger(value) || value < 0) throw new Error('Harness native context token estimate is invalid')
+  }
+  return {
+    fixedTokens: toolSchemaTokens + systemOverheadTokens + retainedPerTurnTokens,
+    retainedPerTurnTokens,
+  }
+}
+
+function boundedInitializeTimeout(value: number | undefined): number {
+  if (value === undefined) return 30_000
+  if (!Number.isSafeInteger(value) || value < 1_000) throw new Error('Harness initialize timeout is invalid')
+  return Math.min(value, 120_000)
+}
+
+function assertEffectiveContextFits(
+  texts: readonly string[],
+  reservedTokens: number,
+  inputBudgetTokens: number,
+): number {
+  const estimatedTokens = reservedTokens + texts.reduce((sum, text) => sum + estimateTextTokens(text), 0)
+  if (estimatedTokens > inputBudgetTokens) {
+    throw new ContextInputTooLargeError(estimatedTokens, inputBudgetTokens)
+  }
+  return estimatedTokens
+}
+
+function runtimeContextSourceRefs(
+  refs: readonly ContextSourceRef[] | undefined,
+  replayedSequences: readonly number[],
+): ContextSourceRef[] {
+  if (refs === undefined) return []
+  const replayed = new Set(replayedSequences.map(String))
+  return refs.filter((ref) => ref.kind !== 'message' || (ref.revision !== undefined && replayed.has(ref.revision)))
+    .map((ref) => ({
+      kind: ref.kind,
+      id: ref.id,
+      ...(ref.revision === undefined ? {} : { revision: ref.revision }),
+    }))
+}
+
+function retainedTurnTokens(
+  prompt: string,
+  result: Pick<EmployeeTurnResult, 'finalResponse' | 'notifications'>,
+): number {
+  // The owned notification interval contains assistant messages plus native
+  // tool calls/results. Counting its full JSON envelope is conservative and
+  // avoids silently omitting provider-owned tool history. Minimal fake
+  // runtimes may return no notifications, so retain their final response too.
+  return estimateTextTokens(prompt)
+    + estimateTextTokens(JSON.stringify(result.notifications))
+    + estimateTextTokens(result.finalResponse)
 }
 
 function assertLaneTaskActive(task: LaneTask): void {

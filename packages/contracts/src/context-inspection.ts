@@ -1,6 +1,6 @@
 import type { EmployeeMemoryScope, IsoTimestamp } from './index.js'
 import type { ContextLayerKind } from './context-envelope.js'
-import type { ContextSnapshotSummary } from './context-snapshot.js'
+import type { ContextSnapshotSummary, RuntimeContextUsage } from './context-snapshot.js'
 
 /**
  * The Context Inspector projection (Magic Context V1, slice D3).
@@ -101,8 +101,10 @@ export interface ContextInspection {
   workTurnId?: string
   /** The AgentRun this context was composed for, when the turn had one. */
   agentRunId?: string
-  /** Sum of the layer estimates; the composer's own arithmetic, not the provider's. */
+  /** Exact runtime-facing input estimate when `runtime` is present; composer estimate for legacy records. */
   usedTokens: number
+  /** Text-free accounting returned by the runtime adapter. */
+  runtime?: RuntimeContextUsage
   budget: ContextBudgetInspection
   layers: ContextLayerInspection[]
   memoryHits: ContextMemoryHitInspection[]

@@ -155,4 +155,112 @@ describe('WorldKnowledgeRepository', () => {
     expect(repository.listChunkWindow(other.id, document.id)).toEqual({ total: 0, items: [] })
     expect(() => repository.listChunkWindow(world.id, document.id, { offset: -1 })).toThrow(/non-negative integer/)
   })
+
+  it('repairs a same-sized stale FTS mirror before searching', async () => {
+    const store = await database()
+    const workspace = store.createWorkspace({ name: '知识镜像工作区' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '知识镜像世界', templateId: 'personal-world' })
+    const repository = new WorldKnowledgeRepository(store.database)
+    const document = repository.createDocument({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      relativePath: 'notes/stale.md',
+      title: '镜像资料',
+      mimeType: 'text/markdown',
+      byteLength: 16,
+      sha256: digest('a'),
+      origin: 'paste',
+    })
+    repository.replaceChunks(world.id, document.id, [{
+      id: 'stale-chunk',
+      ordinal: 0,
+      content: '内容应该可以检索。',
+      contentHash: digest('a'),
+    }])
+    if (!repository.fts5Available) return
+
+    const beforeCount = Number((store.database.prepare(
+      'SELECT COUNT(*) AS count FROM knowledge_chunks_fts',
+    ).get() as { count: number }).count)
+    store.database.prepare(
+      'UPDATE knowledge_chunks_fts SET content = ? WHERE chunk_id = ?',
+    ).run('陈旧镜像内容', 'stale-chunk')
+    expect(Number((store.database.prepare(
+      'SELECT COUNT(*) AS count FROM knowledge_chunks_fts',
+    ).get() as { count: number }).count)).toBe(beforeCount)
+
+    const repaired = new WorldKnowledgeRepository(store.database)
+    expect(store.database.prepare(
+      'SELECT content FROM knowledge_chunks_fts WHERE chunk_id = ?',
+    ).get('stale-chunk')).toMatchObject({ content: '内容应该可以检索。' })
+    expect(repaired.search({ worldId: world.id, query: '应该可以检索', limit: 1 })[0]?.chunkId)
+      .toBe('stale-chunk')
+  })
+
+  it('keeps the tail of a long Chinese query in the knowledge term set', async () => {
+    const store = await database()
+    const workspace = store.createWorkspace({ name: '中文查询工作区' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '中文查询世界', templateId: 'personal-world' })
+    const repository = new WorldKnowledgeRepository(store.database)
+    const document = repository.createDocument({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      relativePath: 'notes/tail.md',
+      title: '资料',
+      mimeType: 'text/markdown',
+      byteLength: 20,
+      sha256: digest('a'),
+      origin: 'paste',
+    })
+    repository.replaceChunks(world.id, document.id, [{
+      ordinal: 0,
+      content: '目标关键词只出现在资料正文。',
+      contentHash: digest('a'),
+    }])
+
+    expect(repository.search({
+      worldId: world.id,
+      query: '这是一段用于验证检索的很长中文上下文其中真正的目标关键词位于句尾',
+      limit: 1,
+    })[0]).toMatchObject({ documentId: document.id })
+  })
+
+  it.each([50, 500, 5000])('re-ranks a stable bounded candidate set for %i indexed chunks', async (candidateCount) => {
+    const store = await database()
+    const workspace = store.createWorkspace({ name: '检索规模工作区' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '检索规模世界', templateId: 'personal-world' })
+    const repository = new WorldKnowledgeRepository(store.database)
+    const document = repository.createDocument({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      relativePath: 'notes/candidates.md',
+      title: '候选资料',
+      mimeType: 'text/markdown',
+      byteLength: candidateCount * 32,
+      sha256: digest('a'),
+      origin: 'paste',
+    })
+    repository.replaceChunks(world.id, document.id, Array.from({ length: candidateCount }, (_, ordinal) => ({
+      id: `chunk-${String(ordinal).padStart(5, '0')}`,
+      ordinal,
+      content: ordinal === candidateCount - 1
+        ? '长期项目 target-alpha 使用 shared-term 完成。'
+        : `普通记录 shared-term ${ordinal}`,
+      contentHash: digest('a'),
+    })))
+
+    const fts = repository.search({ worldId: world.id, query: 'shared-term target-alpha', limit: 100 })
+
+    // Exercise the portable SQL path after the FTS mirror is unavailable.
+    // The durable chunk projection remains intact and the repository must
+    // still rank the specific late candidate deterministically.
+    store.database.exec('DROP TABLE knowledge_chunks_fts')
+    const first = repository.search({ worldId: world.id, query: 'shared-term target-alpha', limit: 1 })
+    const second = repository.search({ worldId: world.id, query: 'shared-term target-alpha', limit: 1 })
+    const like = repository.search({ worldId: world.id, query: 'shared-term target-alpha', limit: 100 })
+    expect(like[0]).toEqual(fts[0])
+    expect(fts[0]).toMatchObject({ documentId: document.id, ordinal: candidateCount - 1 })
+    expect(first[0]).toMatchObject({ documentId: document.id, ordinal: candidateCount - 1 })
+    expect(first).toEqual(second)
+  })
 })

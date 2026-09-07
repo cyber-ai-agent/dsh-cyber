@@ -172,6 +172,123 @@ describe('Harness profile and adapter', () => {
     await adapter.close()
   })
 
+  it('counts native tool schemas before creating a runtime', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-native-schema-budget-'))
+    const prompt = '边界'
+    const profile = { homeDir: stateRoot, profileDir: stateRoot, profileManifestPath: stateRoot, profilePatchPath: stateRoot, settingsPath: stateRoot }
+    const systemPrompt = workerEnvironment({}, {
+      employee: employee(), revision: revision(), profile, workspacePath: stateRoot,
+      sessionsRoot: join(stateRoot, 'sessions'), permissionMode: 'read-only',
+    }).DSH_SYSTEM_PROMPT!
+    const base = planContextBudget({ contextWindow: 4_096, maxOutputTokens: 1_024 })
+    let factories = 0
+    const adapter = new HarnessCompatibilityAdapter({
+      stateRoot,
+      nativeToolSchemaTokens: 100,
+      runtimeFactory: () => {
+        factories += 1
+        return { run: async () => ({ finalResponse: 'unexpected', notifications: [] }), close: async () => {} }
+      },
+    })
+
+    await expect(adapter.runEmployeeTurn({
+      employee: employee(), revision: revision(), conversationId: 'native-schema-budget',
+      history: [], observedThroughSequence: 0, prompt, workspacePath: stateRoot,
+      contextBudget: {
+        ...base,
+        inputBudgetTokens: estimateTextTokens(systemPrompt) + estimateTextTokens(prompt) + 99,
+        historyTokens: 0,
+      },
+    })).rejects.toBeInstanceOf(ContextInputTooLargeError)
+    expect(factories).toBe(0)
+    await adapter.close()
+  })
+
+  it('rebuilds an accumulated live session from one bounded SQLite history projection', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-live-context-rebuild-'))
+    const profile = { homeDir: stateRoot, profileDir: stateRoot, profileManifestPath: stateRoot, profilePatchPath: stateRoot, settingsPath: stateRoot }
+    const systemPrompt = workerEnvironment({}, {
+      employee: employee(), revision: revision(), profile, workspacePath: stateRoot,
+      sessionsRoot: join(stateRoot, 'sessions'), permissionMode: 'read-only',
+    }).DSH_SYSTEM_PROMPT!
+    const base = planContextBudget({ contextWindow: 4_096, maxOutputTokens: 1_024 })
+    const prompts: string[] = []
+    let factories = 0
+    let closes = 0
+    const adapter = new HarnessCompatibilityAdapter({
+      stateRoot,
+      nativeToolSchemaTokens: 20,
+      runtimeFactory: () => {
+        factories += 1
+        return {
+          async run(_sessionId, prompt) {
+            prompts.push(prompt)
+            return { finalResponse: '答'.repeat(500), notifications: [] }
+          },
+          async close() { closes += 1 },
+        }
+      },
+    })
+    const contextBudget = {
+      ...base,
+      inputBudgetTokens: estimateTextTokens(systemPrompt) + 20 + 450,
+      historyTokens: 350,
+    }
+    await adapter.runEmployeeTurn({
+      employee: employee(), revision: revision(), conversationId: 'live-context-rebuild', history: [],
+      observedThroughSequence: 0, prompt: '第一轮', workspacePath: stateRoot, contextBudget,
+    })
+    const second = await adapter.runEmployeeTurn({
+      employee: employee(), revision: revision(), conversationId: 'live-context-rebuild',
+      history: [{ role: 'user', sequence: 1, speakerId: 'owner', speakerName: '用户', createdAt: '2026-09-06T00:00:00.000Z', content: '旧'.repeat(4_000) }],
+      observedThroughSequence: 0, prompt: '第二轮', workspacePath: stateRoot, contextBudget,
+      contextSourceRefs: [
+        { kind: 'world', id: 'world-1' },
+        { kind: 'message', id: 'message-1', revision: '1' },
+        { kind: 'message', id: 'message-omitted', revision: '99' },
+      ],
+    })
+
+    expect(factories).toBe(2)
+    expect(closes).toBe(1)
+    expect(prompts[1]).toContain('recovered_conversation_history')
+    expect(estimateTextTokens(prompts[1]!)).toBeLessThanOrEqual(450)
+    expect(second.contextUsage).toMatchObject({
+      replayedThroughSequence: 1,
+      replayedSequences: [1],
+      nativeReservedTokens: 20,
+      retainedTokens: 0,
+      sourceRefs: [
+        { kind: 'world', id: 'world-1' },
+        { kind: 'message', id: 'message-1', revision: '1' },
+      ],
+    })
+    await adapter.close()
+  })
+
+  it('does not replace a live runtime when even a fresh effective context is oversized', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-live-context-rejection-'))
+    let factories = 0
+    let closes = 0
+    const adapter = new HarnessCompatibilityAdapter({
+      stateRoot,
+      runtimeFactory: () => {
+        factories += 1
+        return { run: async () => ({ finalResponse: '答'.repeat(500), notifications: [] }), close: async () => { closes += 1 } }
+      },
+    })
+    const contextBudget = planContextBudget({ contextWindow: 4_096, maxOutputTokens: 1_024 })
+    await adapter.runEmployeeTurn({ employee: employee(), revision: revision(), conversationId: 'live-context-rejection', history: [], observedThroughSequence: 0, prompt: '第一轮', workspacePath: stateRoot, contextBudget })
+
+    await expect(adapter.runEmployeeTurn({
+      employee: employee(), revision: revision(), conversationId: 'live-context-rejection', history: [],
+      observedThroughSequence: 0, prompt: '超'.repeat(4_000), workspacePath: stateRoot, contextBudget,
+    })).rejects.toBeInstanceOf(ContextInputTooLargeError)
+    expect(factories).toBe(1)
+    expect(closes).toBe(0)
+    await adapter.close()
+  })
+
   it('does not bind a fresh session on rejection, so the next valid turn replays history', async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-context-rejection-recovery-'))
     const calls: Array<{ sessionId: string; prompt: string }> = []
@@ -354,7 +471,7 @@ describe('Harness profile and adapter', () => {
     expect(closes).toBe(1)
   })
 
-  it('rechecks the full history before a persisted-session collision retry', async () => {
+  it('prepares one bounded full-history projection for a persisted-session collision retry', async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-context-collision-'))
     const currentRevision = { ...revision(), persona: '长'.repeat(2_100) }
     const contextBudget = planContextBudget({ contextWindow: 4_096, maxOutputTokens: 1_024 })
@@ -393,7 +510,7 @@ describe('Harness profile and adapter', () => {
       workspacePath: stateRoot,
       contextBudget,
     })
-    await expect(adapter.runEmployeeTurn({
+    await adapter.runEmployeeTurn({
       employee: employee(),
       revision: currentRevision,
       conversationId: 'context-collision',
@@ -404,25 +521,11 @@ describe('Harness profile and adapter', () => {
       prompt: '继续',
       workspacePath: stateRoot,
       contextBudget,
-    })).rejects.toBeInstanceOf(ContextInputTooLargeError)
-    expect(calls).toHaveLength(2)
-
-    // The collided id was cleared before the rejected recovery check. A later
-    // request must allocate a fresh id and replay the history it still has not
-    // delivered to the live Harness session.
-    await adapter.runEmployeeTurn({
-      employee: employee(),
-      revision: currentRevision,
-      conversationId: 'context-collision',
-      history,
-      observedThroughSequence: 1,
-      prompt: '第三次尝试',
-      workspacePath: stateRoot,
-      contextBudget: planContextBudget({ contextWindow: 8_192, maxOutputTokens: 1_024 }),
     })
     expect(calls).toHaveLength(3)
     expect(calls[2]).not.toBe(calls[1])
-    expect(prompts[2]).toContain('历史内容')
+    expect(prompts[2]).toContain('继续')
+    expect(estimateTextTokens(prompts[2]!)).toBeLessThanOrEqual(contextBudget.historyTokens + estimateTextTokens('继续'))
     await adapter.close()
   })
 

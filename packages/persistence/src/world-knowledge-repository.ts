@@ -25,6 +25,15 @@ export interface WorldKnowledgeRepositoryOptions {
 
 export type KnowledgeSearchCapability = 'fts5-trigram' | 'fts5' | 'like'
 
+/**
+ * Search returns a small top-K, but lexical ranking needs an over-fetched
+ * candidate window first. Keeping that window bounded prevents a large world
+ * from turning one chat lookup into an unbounded materialization while still
+ * giving the final ranker room to prefer a specific older chunk.
+ */
+export const MAX_KNOWLEDGE_SEARCH_CANDIDATES = 256
+const SEARCH_CANDIDATE_OVERFETCH = 8
+
 export interface KnowledgeSearchBackendResult {
   worldId: string
   documentId: string
@@ -606,10 +615,11 @@ export class WorldKnowledgeRepository {
     const terms = lexicalSearchTerms(query)
     if (terms.length === 0) return []
     const limit = clampSearchLimit(input.limit)
+    const candidateLimit = boundedCandidateLimit(limit)
     if (this.#fts5Available) {
       try {
-        const indexed = this.#searchFts5(input.worldId, terms, limit)
-        if (indexed.length > 0) return indexed
+        const indexed = this.#searchFts5(input.worldId, terms, query, candidateLimit)
+        if (indexed.length > 0) return indexed.slice(0, limit)
       } catch {
         // A SQLite build can expose FTS5 but reject a tokenizer/query syntax.
         // Keep the portable, world-scoped SQL fallback available.
@@ -620,12 +630,13 @@ export class WorldKnowledgeRepository {
       const pattern = `%${escapeLike(term)}%`
       return [pattern, pattern, pattern]
     })
+    const score = lexicalCandidateScore(terms, query)
     const rows = this.#database
       .prepare(
         `SELECT
            document.world_id, document.id AS document_id, chunk.id AS chunk_id,
            document.collection_id, document.title, document.relative_path,
-           chunk.ordinal, chunk.content
+           chunk.ordinal, chunk.content, (${score.expression}) AS search_score
          FROM knowledge_chunks AS chunk
          INNER JOIN knowledge_documents AS document
            ON document.world_id = chunk.world_id AND document.id = chunk.document_id
@@ -633,13 +644,14 @@ export class WorldKnowledgeRepository {
            AND document.status = 'indexed'
            AND (${termClause})
          ORDER BY
-           document.updated_at DESC, chunk.ordinal ASC, chunk.id ASC
+           search_score DESC, document.updated_at DESC, chunk.ordinal ASC, chunk.id ASC
          LIMIT ?`,
       )
       .all(
+        ...score.parameters,
         input.worldId,
         ...termParameters,
-        limit,
+        candidateLimit,
       )
     return rows.map((row) => {
       const value = record(row, 'knowledge search result')
@@ -651,11 +663,11 @@ export class WorldKnowledgeRepository {
         relativePath: stringColumn(value, 'relative_path'),
         ordinal: integerColumn(value, 'ordinal'),
         content: stringColumn(value, 'content'),
-        score: 1,
+        score: Number(value.search_score),
       }
       if (typeof value.collection_id === 'string') result.collectionId = value.collection_id
       return result
-    })
+    }).slice(0, limit)
   }
 
   /** Indexed backend seam used by the server search port. */
@@ -725,29 +737,53 @@ export class WorldKnowledgeRepository {
            VALUES (NEW.id, NEW.world_id, NEW.document_id, NEW.content);
          END;`,
       )
-      // Rebuild from the source projection so a derived FTS table can always
-      // be discarded and recreated after restore or index upgrades.
-      this.#database.exec(
-        `DELETE FROM knowledge_chunks_fts;
-         INSERT INTO knowledge_chunks_fts (chunk_id, world_id, document_id, content)
-         SELECT id, world_id, document_id, content FROM knowledge_chunks;`,
-      )
+      // Rebuild from the source projection only when the derived mirror is
+      // missing a row or has stale identity/content. Counts alone cannot catch
+      // an out-of-band content edit that leaves the mirror the same size.
+      if (!this.#ftsMirrorMatches()) this.#rebuildFts()
       return tokenizer
     } catch {
       return undefined
     }
   }
 
-  #searchFts5(worldId: string, terms: readonly string[], limit: number): KnowledgeSearchResult[] {
+  #ftsMirrorMatches(): boolean {
+    const source = this.#database.prepare(
+      'SELECT id AS chunk_id, world_id, document_id, content FROM knowledge_chunks ORDER BY id',
+    ).all() as Array<{ chunk_id: string; world_id: string; document_id: string; content: string }>
+    const mirror = this.#database.prepare(
+      'SELECT chunk_id, world_id, document_id, content FROM knowledge_chunks_fts ORDER BY chunk_id',
+    ).all() as Array<{ chunk_id: string; world_id: string; document_id: string; content: string }>
+    return source.length === mirror.length && source.every((row, index) => {
+      const candidate = mirror[index]
+      return candidate !== undefined && row.chunk_id === candidate.chunk_id && row.world_id === candidate.world_id
+        && row.document_id === candidate.document_id && row.content === candidate.content
+    })
+  }
+
+  #rebuildFts(): void {
+    this.#database.exec(
+      `DELETE FROM knowledge_chunks_fts;
+       INSERT INTO knowledge_chunks_fts (chunk_id, world_id, document_id, content)
+       SELECT id, world_id, document_id, content FROM knowledge_chunks;`,
+    )
+  }
+
+  #searchFts5(
+    worldId: string,
+    terms: readonly string[],
+    query: string,
+    limit: number,
+  ): KnowledgeSearchResult[] {
     // Each lexical term is quoted independently so user text can never become
     // an FTS operator. OR semantics make natural-language Chinese prompts
     // useful without a second model call or an in-memory full scan.
-    const match = terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(' OR ')
-    const rows = this.#database
-      .prepare(
+    const quoted = terms.map((term) => `"${term.replaceAll('"', '""')}"`)
+    const statement = this.#database.prepare(
         `SELECT
            document.world_id, document.id AS document_id, chunk.id AS chunk_id,
            document.collection_id, document.title, document.relative_path,
+           document.updated_at AS document_updated_at,
            chunk.ordinal, chunk.content, knowledge_chunks_fts.rank AS rank
          FROM knowledge_chunks_fts
          INNER JOIN knowledge_chunks AS chunk
@@ -757,14 +793,14 @@ export class WorldKnowledgeRepository {
          WHERE knowledge_chunks_fts MATCH ?
            AND document.world_id = ?
            AND document.status = 'indexed'
-         ORDER BY knowledge_chunks_fts.rank ASC, document.updated_at DESC,
-           chunk.ordinal ASC, chunk.id ASC
-         LIMIT ?`,
+          ORDER BY knowledge_chunks_fts.rank ASC, document.updated_at DESC,
+            chunk.ordinal ASC, chunk.id ASC
+          LIMIT ?`,
       )
-      .all(match, worldId, limit)
+    let rows = statement.all(quoted.join(' AND '), worldId, limit)
+    if (rows.length === 0 && quoted.length > 1) rows = statement.all(quoted.join(' OR '), worldId, limit)
     return rows.map((row) => {
       const value = record(row, 'knowledge FTS result')
-      const rank = Number(value.rank)
       const result: KnowledgeSearchResult = {
         worldId: stringColumn(value, 'world_id'),
         documentId: stringColumn(value, 'document_id'),
@@ -773,11 +809,22 @@ export class WorldKnowledgeRepository {
         relativePath: stringColumn(value, 'relative_path'),
         ordinal: integerColumn(value, 'ordinal'),
         content: stringColumn(value, 'content'),
-        score: Number.isFinite(rank) ? Math.max(0, -rank) : 1,
+        score: knowledgeLexicalScore(
+          stringColumn(value, 'content'),
+          stringColumn(value, 'title'),
+          stringColumn(value, 'relative_path'),
+          terms,
+          query,
+        ),
       }
       if (typeof value.collection_id === 'string') result.collectionId = value.collection_id
-      return result
-    })
+      return { result, updatedAt: stringColumn(value, 'document_updated_at') }
+    }).sort((left, right) =>
+      right.result.score - left.result.score
+      || right.updatedAt.localeCompare(left.updatedAt)
+      || left.result.ordinal - right.result.ordinal
+      || left.result.chunkId.localeCompare(right.result.chunkId))
+      .map((item) => item.result)
   }
 
   #insertDocument(input: KnowledgeDocumentInput): KnowledgeDocument {
@@ -1125,6 +1172,43 @@ function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (character) => `\\${character}`)
 }
 
+function boundedCandidateLimit(limit: number): number {
+  return Math.min(MAX_KNOWLEDGE_SEARCH_CANDIDATES, Math.max(limit, limit * SEARCH_CANDIDATE_OVERFETCH))
+}
+
+function lexicalCandidateScore(
+  terms: readonly string[],
+  query: string,
+): { expression: string; parameters: Array<string | number> } {
+  const parameters: Array<string | number> = []
+  const expressions = terms.map((term) => {
+    const pattern = `%${escapeLike(term)}%`
+    parameters.push(pattern, pattern, pattern)
+    return `CASE WHEN (chunk.content LIKE ? ESCAPE '\\' OR document.title LIKE ? ESCAPE '\\' OR document.relative_path LIKE ? ESCAPE '\\') THEN 1 ELSE 0 END`
+  })
+  const phrase = `%${escapeLike(query.toLocaleLowerCase())}%`
+  parameters.push(phrase, phrase, phrase)
+  expressions.push(`CASE WHEN (chunk.content LIKE ? ESCAPE '\\' OR document.title LIKE ? ESCAPE '\\' OR document.relative_path LIKE ? ESCAPE '\\') THEN 4 ELSE 0 END`)
+  return { expression: expressions.join(' + '), parameters }
+}
+
+function knowledgeLexicalScore(
+  content: string,
+  title: string,
+  relativePath: string,
+  terms: readonly string[],
+  query: string,
+): number {
+  const fields = [content, title, relativePath].map((value) => value.normalize('NFKC').toLocaleLowerCase('zh-CN'))
+  let score = 0
+  for (const term of terms) {
+    if (fields.some((field) => field.includes(term))) score += 1
+  }
+  const phrase = query.normalize('NFKC').toLocaleLowerCase('zh-CN')
+  if (fields.some((field) => field.includes(phrase))) score += 4
+  return score
+}
+
 function lexicalSearchTerms(value: string): string[] {
   const normalized = value.normalize('NFKC').toLowerCase()
   const terms: string[] = []
@@ -1137,11 +1221,27 @@ function lexicalSearchTerms(value: string): string[] {
   }
   for (const token of normalized.match(/[a-z0-9][a-z0-9._-]{1,63}/g) ?? []) push(token)
   for (const sequence of normalized.match(/[\p{Script=Han}]{2,}/gu) ?? []) {
-    if (sequence.length <= 6) push(sequence)
-    const width = sequence.length === 2 ? 2 : 3
-    for (let index = 0; index <= sequence.length - width && terms.length < 20; index += 1) push(sequence.slice(index, index + width))
+    if (sequence.length <= 6) {
+      push(sequence)
+    } else {
+      // Preserve both ends of a long Chinese run. A head-only gram window can
+      // drop the actual keyword when a natural-language query puts it at the
+      // sentence tail.
+      push(sequence.slice(0, 6))
+      push(sequence.slice(-12))
+      const last = sequence.length - 3
+      for (let index = 0; index < Math.min(6, sequence.length - 2); index += 1) push(sequence.slice(index, index + 3))
+      for (let index = Math.max(0, last - 11); index <= last; index += 1) push(sequence.slice(index, index + 3))
+    }
   }
-  return terms.slice(0, 20)
+  return boundedTerms(terms, 20)
+}
+
+function boundedTerms(terms: readonly string[], limit: number): string[] {
+  if (terms.length <= limit) return [...terms]
+  const head = Math.ceil(limit / 2)
+  const tail = limit - head
+  return [...new Set([...terms.slice(0, head), ...terms.slice(-tail)])]
 }
 
 function clampPageSize(value: number): number {

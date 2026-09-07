@@ -4,6 +4,7 @@ import type {
   ContextSnapshotLayer,
   ContextSnapshotSummary,
   ContextSourceRef,
+  RuntimeContextUsage,
   EmployeeMemoryIndexEntry,
   EmployeeMemoryScope,
   WorkMessage,
@@ -97,13 +98,16 @@ export class ContextSnapshotService {
    * the snapshot table or the run is unknown, because a missing observability
    * record must never fail the turn that produced it.
    */
-  save(input: { agentRunId: string; envelope: ContextEnvelope }): ContextSnapshot | undefined {
+  save(input: { agentRunId: string; envelope: ContextEnvelope; runtime?: RuntimeContextUsage }): ContextSnapshot | undefined {
     const write = this.#store.saveAgentRunContextSnapshot
     if (write === undefined) return undefined
     if (this.#store.getAgentRun(input.agentRunId) === undefined) return undefined
     return write.call(this.#store, {
       agentRunId: input.agentRunId,
-      snapshot: composeContextSnapshot({ envelope: input.envelope }),
+      snapshot: composeContextSnapshot({
+        envelope: input.envelope,
+        ...(input.runtime === undefined ? {} : { runtime: input.runtime }),
+      }),
     })
   }
 

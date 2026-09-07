@@ -7,8 +7,9 @@ import type {
   ContextLayerInspection,
   ContextMemoryHitInspection,
   EmployeeMemoryIndexHit,
+  RuntimeContextUsage,
 } from '@dsh-cyber/contracts'
-import { contextEnvelopeLayers } from '@dsh-cyber/contracts'
+import { contextEnvelopeLayers, copyRuntimeContextUsage, runtimeContextInputTokens } from '@dsh-cyber/contracts'
 
 import { TraceSanitizer } from '../world-trace/trace-sanitizer.js'
 import type { ContextConversationLane, ContextCoverage } from './conversation-context-composer.js'
@@ -74,6 +75,8 @@ export interface ContextInspectionCapture {
   coverage: ContextCoverage
   /** The turn's resolved allocation, when one was planned for it. */
   budget?: ContextBudgetPlan
+  /** Final text-free accounting returned by the runtime lane. */
+  runtime?: RuntimeContextUsage
   /**
    * Prompt-cache statistics for this turn.
    *
@@ -140,7 +143,10 @@ export class ContextInspectionService {
   }
 
   #project(conversationId: string, capture: ContextInspectionCapture): ContextInspection {
-    const layers = contextEnvelopeLayers(capture.envelope).map((layer) => this.#layer(layer))
+    const runtimeRefs = capture.runtime === undefined
+      ? undefined
+      : new Set(capture.runtime.sourceRefs.map(sourceRefKey))
+    const layers = contextEnvelopeLayers(capture.envelope).map((layer) => this.#layer(layer, runtimeRefs, capture.runtime))
     return {
       conversationId,
       employeeId: capture.employeeId,
@@ -149,7 +155,10 @@ export class ContextInspectionService {
       lane: capture.lane,
       ...(capture.workTurnId === undefined ? {} : { workTurnId: capture.workTurnId }),
       ...(capture.agentRunId === undefined ? {} : { agentRunId: capture.agentRunId }),
-      usedTokens: capture.envelope.totalTokenEstimate,
+      usedTokens: capture.runtime === undefined
+        ? capture.envelope.totalTokenEstimate
+        : runtimeContextInputTokens(capture.runtime),
+      ...(capture.runtime === undefined ? {} : { runtime: copyRuntimeContextUsage(capture.runtime) }),
       budget: capture.budget === undefined ? {} : {
         contextWindow: capture.budget.contextWindow,
         inputBudgetTokens: capture.budget.inputBudgetTokens,
@@ -175,15 +184,24 @@ export class ContextInspectionService {
     }
   }
 
-  #layer(layer: ContextLayer): ContextLayerInspection {
-    const preview = this.#preview(layer.text, MAX_LAYER_PREVIEW_CHARS, MAX_LAYER_PREVIEW_LINES)
+  #layer(
+    layer: ContextLayer,
+    runtimeRefs?: ReadonlySet<string>,
+    runtime?: RuntimeContextUsage,
+  ): ContextLayerInspection {
+    const replayed = runtime !== undefined && layer.kind === 'recent-conversation'
+      ? `运行时重放序列：${runtime.replayedSequences.join('、') || '无'}`
+      : undefined
+    const preview = this.#preview(replayed ?? layer.text, MAX_LAYER_PREVIEW_CHARS, MAX_LAYER_PREVIEW_LINES)
     return {
       kind: layer.kind,
       id: layer.id,
       revision: layer.revision,
       contentHash: layer.contentHash,
       tokenEstimate: layer.tokenEstimate,
-      sourceCount: layer.sourceRefs.length,
+      sourceCount: runtimeRefs === undefined
+        ? layer.sourceRefs.length
+        : layer.sourceRefs.filter((ref) => runtimeRefs.has(sourceRefKey(ref))).length,
       preview: preview.text,
       previewTruncated: preview.truncated,
     }
@@ -262,4 +280,8 @@ export class ContextInspectionService {
   #redact(value: string, maxCharacters: number): string {
     return this.#sanitizer.text(value.replace(ENVIRONMENT_CREDENTIAL, REDACTED), maxCharacters)
   }
+}
+
+function sourceRefKey(ref: import('@dsh-cyber/contracts').ContextSourceRef): string {
+  return `${ref.kind}\u0000${ref.id}\u0000${ref.revision ?? ''}`
 }

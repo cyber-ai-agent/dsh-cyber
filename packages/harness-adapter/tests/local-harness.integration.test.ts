@@ -6,12 +6,16 @@ import { join, resolve } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import type { EmployeeInstance, EmployeeRevision } from '@dsh-cyber/contracts'
+import { estimateTextTokens, type EmployeeInstance, type EmployeeRevision } from '@dsh-cyber/contracts'
 
 import {
   HarnessCompatibilityAdapter,
+  PINNED_HARNESS_NATIVE_SYSTEM_OVERHEAD_TOKENS,
+  PINNED_HARNESS_NATIVE_TOOL_SCHEMA_TOKENS,
+  PINNED_HARNESS_NATIVE_TURN_CONTEXT_TOKENS,
   normalizeHarnessNotification,
   runHarnessCandidateCanary,
+  workerEnvironment,
 } from '../src/index.js'
 
 const servers: Server[] = []
@@ -38,9 +42,11 @@ describe('real Harness worker with a loopback model provider', () => {
     ] as const
     let active: { path: string; escalate: boolean } = { path: '', escalate: false }
     let calls = 0
+    const observedNativeSchemaTokens: number[] = []
     const provider = createServer((request, response) => {
       void (async () => {
-        await readJson(request)
+        const body = await readJson(request)
+        observedNativeSchemaTokens.push(estimateTextTokens(JSON.stringify(body.tools)))
         calls += 1
         const envelope = { id: `scope-${calls}`, object: 'chat.completion.chunk', created: 1_777_777_777, model: 'local-test' }
         const args = { file_path: active.path, content: 'VERIFIED-NATIVE-WRITE',
@@ -65,7 +71,7 @@ describe('real Harness worker with a loopback model provider', () => {
         inheritedEnvironment: { ...process.env, DSH_CYBER_LOCAL_TEST_KEY: 'local-test-only' },
         providerProfile: { route: 'local-scopes', displayName: 'Local scope test', api: 'openai-completions',
           apiKeyEnv: 'DSH_CYBER_LOCAL_TEST_KEY',
-          baseURL: `http://127.0.0.1:${address.port}/v1`, model: { id: 'local-test', contextWindow: 8192, maxTokens: 512 } } })
+          baseURL: `http://127.0.0.1:${address.port}/v1`, model: { id: 'local-test', contextWindow: 32_768, maxTokens: 512 } } })
       const employee: EmployeeInstance = { id: 'scope-employee', workspaceId: 'scope-workspace', worldId: 'scope-world', blueprintId: 'scope-role',
         blueprintVersion: 1, displayName: '权限验证', role: '验证', status: 'available', currentRevision: 1,
         createdAt: '2026-09-05T00:00:00.000Z', updatedAt: '2026-09-05T00:00:00.000Z' }
@@ -87,6 +93,7 @@ describe('real Harness worker with a loopback model provider', () => {
         expect(approvals.length).toBe(decision === undefined ? 0 : 1)
       } finally { await adapter.close() }
     }
+    expect(new Set(observedNativeSchemaTokens)).toEqual(new Set([PINNED_HARNESS_NATIVE_TOOL_SCHEMA_TOKENS]))
   }, 90_000)
 
   it('runs and resumes one persistent employee session without cloud access', async () => {
@@ -176,7 +183,7 @@ describe('real Harness worker with a loopback model provider', () => {
         api: 'openai-completions',
         baseURL: `http://127.0.0.1:${address.port}/v1`,
         apiKeyEnv: 'DSH_CYBER_LOCAL_TEST_KEY',
-        model: { id: 'local-test', contextWindow: 8_192, maxTokens: 512 },
+        model: { id: 'local-test', contextWindow: 32_768, maxTokens: 512 },
       },
     })
 
@@ -210,6 +217,16 @@ describe('real Harness worker with a loopback model provider', () => {
       expect(second.finalResponse).toContain('LOCAL-HARNESS-CONTINUED')
       expect(second.agentSessionId).toBe(first.agentSessionId)
       expect(requests).toHaveLength(2)
+      const measuredSchema = JSON.stringify(requests[0]?.tools)
+      expect(estimateTextTokens(measuredSchema)).toBe(PINNED_HARNESS_NATIVE_TOOL_SCHEMA_TOKENS)
+      const wireMessages = requests[0]?.messages as Array<Record<string, unknown>>
+      const rawPersona = workerEnvironment({}, { employee, revision, profile: { homeDir: stateRoot, profileDir: stateRoot, profileManifestPath: stateRoot, profilePatchPath: stateRoot, settingsPath: stateRoot }, workspacePath: stateRoot, sessionsRoot: stateRoot, permissionMode: 'read-only' }).DSH_SYSTEM_PROMPT!
+      const systemOverhead = estimateTextTokens(String(wireMessages[0]?.content)) - estimateTextTokens(rawPersona)
+      const turnContext = estimateTextTokens(String(wireMessages[2]?.content))
+      expect(systemOverhead).toBeGreaterThan(0)
+      expect(systemOverhead).toBeLessThanOrEqual(PINNED_HARNESS_NATIVE_SYSTEM_OVERHEAD_TOKENS)
+      expect(turnContext).toBeGreaterThan(0)
+      expect(turnContext).toBeLessThanOrEqual(PINNED_HARNESS_NATIVE_TURN_CONTEXT_TOKENS)
       expect(JSON.stringify(requests[1])).toContain('LOCAL-HARNESS-OK')
       expect(JSON.stringify(requests[1])).toContain('第二轮：继续同一会话。')
 
@@ -255,7 +272,7 @@ describe('real Harness worker with a loopback model provider', () => {
         baseURL: `http://127.0.0.1:${address.port}/v1`,
         modelId: 'local-test',
         apiKeyEnv: 'DSH_CYBER_LOCAL_TEST_KEY',
-        contextWindow: 8_192,
+        contextWindow: 32_768,
         maxTokens: 512,
       },
     })

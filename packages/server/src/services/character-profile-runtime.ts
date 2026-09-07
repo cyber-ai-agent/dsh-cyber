@@ -9,7 +9,7 @@ import type {
   JsonObject,
   WorkMessage,
 } from '@dsh-cyber/contracts'
-import { composeContextLayer } from '@dsh-cyber/contracts'
+import { composeContextLayer, contextEnvelopeLayers } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 import type { CharacterSkillAdapterRegistry } from '../skills/skill-adapter.js'
 import type { WorldCharacterAuthority } from '@dsh-cyber/contracts/world-authority'
@@ -199,35 +199,6 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       ...(request.workTurnId === undefined ? {} : { workTurnId: request.workTurnId }),
       ...(request.contextBudget === undefined ? {} : { memoryBudgetTokens: request.contextBudget.memoryTokens }),
     })
-    // The context record is written before the turn runs, so a run that fails
-    // or is interrupted still explains what it was given. It is observability:
-    // it never fails the turn, and it stores no prompt text.
-    if (composed !== undefined && request.agentRunId !== undefined) {
-      try {
-        this.#snapshots?.save({ agentRunId: request.agentRunId, envelope: composed.envelope })
-      } catch {
-        // A missing context record must never cost the owner a reply.
-      }
-    }
-
-    // Recorded before the turn runs, so a run that fails or is aborted still
-    // leaves behind the context it was given - that is exactly the turn a user
-    // most wants to look at afterwards.
-    if (composed !== undefined) {
-      this.contextInspection.record({
-        conversationId: request.conversationId,
-        employeeId: agent.id,
-        employeeName: agent.displayName,
-        lane: composed.coverage.lane,
-        ...(request.workTurnId === undefined ? {} : { workTurnId: request.workTurnId }),
-        ...(request.agentRunId === undefined ? {} : { agentRunId: request.agentRunId }),
-        envelope: composed.envelope,
-        memoryHits: composed.memoryHits,
-        coverage: composed.coverage,
-        ...(request.contextBudget === undefined ? {} : { budget: request.contextBudget }),
-      })
-    }
-
     const memoryContext = composed !== undefined
       ? undefined
       : await this.#memory?.compose({
@@ -250,6 +221,27 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
           originalOnEvent(snapshotSequence === undefined ? event : withObservation(event, snapshotSequence))
         }
 
+    // Preserve a composer-level record before dispatch so failed or aborted
+    // runs remain inspectable. A successful adapter response overwrites it
+    // below with the runtime-facing accounting from the same AgentRun.
+    if (composed !== undefined) {
+      if (request.agentRunId !== undefined) {
+        try { this.#snapshots?.save({ agentRunId: request.agentRunId, envelope: composed.envelope }) } catch { /* observability never fails a turn */ }
+      }
+      this.contextInspection.record({
+        conversationId: request.conversationId,
+        employeeId: agent.id,
+        employeeName: agent.displayName,
+        lane: composed.coverage.lane,
+        ...(request.workTurnId === undefined ? {} : { workTurnId: request.workTurnId }),
+        ...(request.agentRunId === undefined ? {} : { agentRunId: request.agentRunId }),
+        envelope: composed.envelope,
+        memoryHits: composed.memoryHits,
+        coverage: composed.coverage,
+        ...(request.contextBudget === undefined ? {} : { budget: request.contextBudget }),
+      })
+    }
+
     // Bracket every forwarded turn, not only the writable ones: a read-only
     // turn can still write after a single-action approval, and an unbracketed
     // run would let a concurrent run claim that write as its own.
@@ -271,6 +263,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
         ...(composed?.envelope.promptCache === undefined
           ? {}
           : { promptCache: composed.envelope.promptCache }),
+        ...(composed === undefined ? {} : { contextSourceRefs: runtimeSourceRefs(composed.envelope) }),
         ...(composed === undefined ? {} : { history: composed.recentHistory }),
         ...(durableObserved === undefined ? {} : { observedThroughSequence: durableObserved }),
         ...(onEvent === undefined ? {} : { onEvent }),
@@ -292,6 +285,42 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       // run most likely to be argued about, so it is closed exactly like a
       // successful one. The recorder never throws back into the turn.
       await this.#runFileEvidence?.complete(bracket)
+    }
+
+    // Persist and expose the same runtime-facing projection only after the
+    // adapter has accepted the input. The projection contains estimates and
+    // durable refs, never rendered prompt text. Legacy adapters may omit it;
+    // their records remain explicitly composer-estimated.
+    if (composed !== undefined) {
+      if (request.agentRunId !== undefined) {
+        try {
+          this.#snapshots?.save({
+            agentRunId: request.agentRunId,
+            envelope: composed.envelope,
+            ...(result.contextUsage === undefined ? {} : { runtime: result.contextUsage }),
+          })
+        } catch {
+          // A missing context record must never cost the owner a reply.
+        }
+      }
+      try {
+        this.contextInspection.record({
+          conversationId: request.conversationId,
+          employeeId: agent.id,
+          employeeName: agent.displayName,
+          lane: composed.coverage.lane,
+          ...(request.workTurnId === undefined ? {} : { workTurnId: request.workTurnId }),
+          ...(request.agentRunId === undefined ? {} : { agentRunId: request.agentRunId }),
+          envelope: composed.envelope,
+          memoryHits: composed.memoryHits,
+          coverage: composed.coverage,
+          ...(request.contextBudget === undefined ? {} : { budget: request.contextBudget }),
+          ...(result.contextUsage === undefined ? {} : { runtime: result.contextUsage }),
+        })
+      } catch {
+        // Invalid optional telemetry cannot turn a successful model reply into
+        // a failed product turn.
+      }
     }
 
     // Some providers return only finalResponse. Emit one assembled event so the
@@ -456,4 +485,15 @@ function observationMetadata(metadata: JsonObject, sequence: number): JsonObject
 
 function textValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
+}
+
+function runtimeSourceRefs(envelope: import('@dsh-cyber/contracts').ContextEnvelope) {
+  const refs = contextEnvelopeLayers(envelope).flatMap((layer) => layer.sourceRefs)
+  const seen = new Set<string>()
+  return refs.filter((ref) => {
+    const key = `${ref.kind}\u0000${ref.id}\u0000${ref.revision ?? ''}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }

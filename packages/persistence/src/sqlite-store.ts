@@ -6,6 +6,7 @@ import { DatabaseSync, backup } from 'node:sqlite'
 import {
   CONTEXT_SNAPSHOT_VERSION,
   CYBER_SCHEMA_VERSION,
+  copyRuntimeContextUsage,
   RECOMMENDED_ADMIN_PERMISSIONS,
   WORKSPACE_PREFERENCES_LIMITS,
   parseWorkspacePaneWidth,
@@ -4748,7 +4749,14 @@ export class SqliteStore {
       ...(previous === undefined ? {} : { previousStablePrefixHash: previous }),
       prefixReused: previous !== undefined && previous === input.snapshot.stablePrefixHash,
     }
-    const snapshot: ContextSnapshot = { ...input.snapshot, layers, cache }
+    const snapshot: ContextSnapshot = {
+      ...input.snapshot,
+      layers,
+      cache,
+      ...(input.snapshot.runtime === undefined
+        ? {}
+        : { runtime: copyRuntimeContextUsage(input.snapshot.runtime) }),
+    }
 
     this.database.prepare(
       `INSERT INTO agent_run_context_snapshots
@@ -4769,7 +4777,10 @@ export class SqliteStore {
       run.id, run.workspaceId, run.worldId, run.sessionId, run.employeeId,
       snapshot.snapshotVersion, snapshot.envelopeVersion, snapshot.stablePrefixHash,
       snapshot.structureHash, nonNegativeInteger(snapshot.totalTokenEstimate),
-      JSON.stringify(layers), JSON.stringify(cache), this.#clock(),
+      JSON.stringify(layers), JSON.stringify({
+        ...cache,
+        ...(snapshot.runtime === undefined ? {} : { runtime: snapshot.runtime }),
+      }), this.#clock(),
     )
     return snapshot
   }
@@ -8032,7 +8043,9 @@ function mapAgentRun(row: object): AgentRun {
 }
 
 function mapContextSnapshot(row: Record<string, unknown>): ContextSnapshot {
-  const cache = JSON.parse(String(row.cache_json)) as ContextSnapshotCacheStats
+  const cache = JSON.parse(String(row.cache_json)) as ContextSnapshotCacheStats & {
+    runtime?: import('@dsh-cyber/contracts').RuntimeContextUsage
+  }
   const previous = typeof cache.previousStablePrefixHash === 'string' ? cache.previousStablePrefixHash : undefined
   return {
     snapshotVersion: CONTEXT_SNAPSHOT_VERSION,
@@ -8041,6 +8054,7 @@ function mapContextSnapshot(row: Record<string, unknown>): ContextSnapshot {
     structureHash: String(row.structure_hash),
     layers: (JSON.parse(String(row.layers_json)) as ContextSnapshotLayer[]).map(sanitizeSnapshotLayer),
     totalTokenEstimate: Number(row.total_token_estimate),
+    ...(cache.runtime === undefined ? {} : { runtime: copyRuntimeContextUsage(cache.runtime) }),
     cache: {
       stablePrefixTokens: nonNegativeInteger(cache.stablePrefixTokens),
       volatileTokens: nonNegativeInteger(cache.volatileTokens),

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { ConversationHistoryEntry } from '@dsh-cyber/contracts'
 import { estimateTextTokens } from '@dsh-cyber/contracts'
 
-import { formatRecoveredHistoryPrompt, unseenHistory } from '../src/index.js'
+import { formatRecoveredHistoryPrompt, projectRecoveredHistoryPrompt, unseenHistory } from '../src/index.js'
 
 function entry(sequence: number, speakerName: string, content: string): ConversationHistoryEntry {
   return {
@@ -112,6 +112,10 @@ describe('formatRecoveredHistoryPrompt', () => {
     expect(envelope.entries.length).toBeLessThan(history.length)
     expect(prompt.endsWith('当前请求')).toBe(true)
     expect(estimateTextTokens(prompt.slice(0, -'\n\n当前请求'.length))).toBeLessThanOrEqual(1_000)
+    const projection = projectRecoveredHistoryPrompt(history, '当前请求', { maxTokens: 1_000 })
+    expect(projection.prompt).toBe(prompt)
+    expect(projection.replayedSequences.at(-1)).toBe(12)
+    expect(projection.replayedSequences.every((sequence) => prompt.includes(`\"sequence\":${sequence}`) || prompt.includes(`${sequence} ·`))).toBe(true)
   })
 
   it.each([0, 32, 255, 256, 320, 1_000])('bounds serialized recovery to %s estimated tokens even for one huge message', (maxTokens) => {

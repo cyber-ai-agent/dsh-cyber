@@ -170,6 +170,12 @@ describe('ConversationContextComposer', () => {
     expect(result.envelope.retrievedMemories?.text).toContain('老仓库迁移方案')
     expect(result.envelope.memoryIndex).toBeDefined()
     expect(result.envelope.recentConversation?.text).toContain('第 12 轮回答')
+    const replayedSequences = new Set(result.recentHistory.map((entry) => entry.sequence))
+    const replayedMessageRefs = result.envelope.recentConversation!.sourceRefs
+      .filter((ref) => ref.kind === 'message')
+    expect(replayedMessageRefs.length).toBe(result.recentHistory.length)
+    expect(replayedMessageRefs.every((ref) => replayedSequences.has(Number(ref.revision)))).toBe(true)
+    expect(replayedMessageRefs.every((ref) => store.getMessages([ref.id]).length === 1)).toBe(true)
   })
 
   it('never reaches a private memory from a group conversation', async () => {
