@@ -46,7 +46,7 @@ afterEach(() => {
 })
 
 describe('Knowledge live refresh', () => {
-  it('shares /live and reloads only on world-knowledge events', async () => {
+  it('shares /live and reloads on knowledge changes and reconnect, not token-level world state', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ collections: [], documents: [] }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
@@ -69,11 +69,15 @@ describe('Knowledge live refresh', () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect({ library: libraryRequests(), jobs: jobRequests() }).toEqual(beforeWorldState)
 
-    await act(async () => { FakeEventSource.instances[0]?.emit('world-knowledge') })
+    await act(async () => { FakeEventSource.instances[0]?.emit('world-knowledge'); await new Promise((resolve) => setTimeout(resolve, 60)) })
     await vi.waitFor(() => expect({ library: libraryRequests(), jobs: jobRequests() }).toEqual({
       library: beforeWorldState.library + 1,
       jobs: beforeWorldState.jobs + 1,
     }))
+
+    await act(async () => { FakeEventSource.instances[0]?.emit('ready'); await new Promise((resolve) => setTimeout(resolve, 60)) })
+    expect(libraryRequests()).toBe(beforeWorldState.library + 2)
+    expect(jobRequests()).toBe(beforeWorldState.jobs + 2)
 
     await act(async () => { root.unmount() })
     host.remove()

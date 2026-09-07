@@ -9,7 +9,7 @@ import type {
 } from '@dsh-cyber/contracts'
 
 import { api } from '../../api.js'
-import { subscribeWorldLive } from '../../world-live-client.js'
+import { subscribeWorldLiveRefresh } from '../../world-live-client.js'
 
 export type ArtifactKindFilter = 'all' | WorldArtifactKind | 'text' | 'json'
 
@@ -360,7 +360,7 @@ export function useWorldArtifacts({ worldId, enabled = true, initialArtifacts = 
 
   useEffect(() => {
     if (!enabled || typeof EventSource === 'undefined') return
-    return subscribeWorldLive(worldId, 'world-artifact', () => { void reload() })
+    return subscribeWorldLiveRefresh(worldId, 'world-artifact', reload)
   }, [enabled, reload, worldId])
 
   useEffect(() => {

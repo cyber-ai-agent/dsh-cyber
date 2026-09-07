@@ -2,7 +2,7 @@ import { ArrowsOut, Books, Crosshair, MagnifyingGlass, Minus, Plus, SpinnerGap, 
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent as ReactWheelEvent } from 'react'
 
 import { ApiError, api } from '../../api.js'
-import { subscribeWorldLive } from '../../world-live-client.js'
+import { subscribeWorldLiveRefresh } from '../../world-live-client.js'
 import {
   filterKnowledgeGraph,
   KNOWLEDGE_GRAPH_CLAIM_STATUS_LABELS,
@@ -134,7 +134,7 @@ export function KnowledgeGraph({ worldId, workspaceId, demoMode = false, onOpenL
 
   useEffect(() => {
     if (demoMode) return undefined
-    return subscribeWorldLive(worldId, 'world-knowledge', () => { void loadGraph() })
+    return subscribeWorldLiveRefresh(worldId, 'world-knowledge', loadGraph)
   }, [demoMode, loadGraph, worldId])
 
   const positions = useMemo(() => layoutKnowledgeGraph(snapshot.nodes), [snapshot.nodes])

@@ -67,6 +67,17 @@ jobs:
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 3
+      - name: Preserve reconnect browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: runtime-reconnect-evidence
+          path: |
+            .private/playwright-results/runtime-reconnect-*/reconnect-*.png
+            .private/playwright-results/runtime-reconnect-*/console.json
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 3
       - name: Preserve failed browser evidence
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

@@ -61,11 +61,16 @@ export class WorldStreamHub {
       'X-Accel-Buffering': 'no',
     })
     let client: WorldStreamClient
-    const connection = new SseConnection(response, () => this.#clients.delete(client), this.#connectionOptions)
+    const remove = () => connection.close()
+    const connection = new SseConnection(response, () => {
+      this.#clients.delete(client)
+      request.removeListener('close', remove)
+      request.removeListener('aborted', remove)
+    }, this.#connectionOptions)
     client = { worldId, connection, lastSequence: snapshot.sequence }
     this.#clients.add(client)
-    if (typeof response.once === 'function') response.once('close', () => connection.close())
-    request.once('close', () => connection.close())
+    request.once('aborted', remove)
+    request.once('close', remove)
     if (invalidCursor || after !== snapshot.sequence) {
       const recoveryRequired: WorldRuntimeStreamEnvelope = {
         contractVersion: 1,

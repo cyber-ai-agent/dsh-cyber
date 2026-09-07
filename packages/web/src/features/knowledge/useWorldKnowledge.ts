@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { KnowledgeConsolidationJob } from '@dsh-cyber/contracts'
 import { ApiError, api, jsonBody } from '../../api.js'
-import { subscribeWorldLive } from '../../world-live-client.js'
+import { subscribeWorldLiveRefresh } from '../../world-live-client.js'
 import { knowledgeConsolidatePath, knowledgeConsolidationJobsPath, knowledgeConsolidationRetryPath } from './knowledge-api.js'
 
 export type KnowledgeCollectionOrigin = 'folder' | 'zip' | 'manual' | 'web' | 'artifact'
@@ -339,7 +339,7 @@ export function useWorldKnowledge(options: UseWorldKnowledgeOptions): UseWorldKn
 
   useEffect(() => {
     if (!enabled) return undefined
-    return subscribeWorldLive(worldId, 'world-knowledge', () => { void reload() })
+    return subscribeWorldLiveRefresh(worldId, 'world-knowledge', reload)
   }, [enabled, reload, worldId])
 
   const runMutation = useCallback(async (action: KnowledgeMutation, request: () => Promise<unknown>) => {
