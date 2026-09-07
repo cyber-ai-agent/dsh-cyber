@@ -1,3 +1,4 @@
+import { composeWorldDirectoryLayer, defaultWorldCharacterDirectory, type WorldCharacterDirectoryService } from './world-character-directory-service.js'
 import type {
   AgentPermissionMode,
   AgentRuntimeEvent,
@@ -85,6 +86,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
   readonly #context: ConversationContextComposer | undefined
   readonly #snapshots: ContextSnapshotService | undefined
   readonly #worldContext: WorldContextPort | undefined
+  readonly #directory: WorldCharacterDirectoryService | undefined
   /**
    * The only place the Host itself brackets a run.
    *
@@ -122,6 +124,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
     this.#authority = authority
     this.#skillAvailability = skillAvailability
     this.#worldContext = worldContext
+    this.#directory = defaultWorldCharacterDirectory(store, skillAvailability)
     this.#runFileEvidence = runFileEvidence
     this.contextInspection = inspection ?? new ContextInspectionService()
     this.#memory = memory ?? defaultMemoryForStore(store)
@@ -187,6 +190,9 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
     // the identity: in the cacheable prefix, in front of every retrieved
     // memory, instead of being re-sent behind them on every request.
     const worldContext = await this.#composeWorldContext(agent, request.conversationId)
+    const worldDirectory = await this.#directory?.snapshot(agent.worldId, agent.id)
+    const directoryLayer = worldDirectory === undefined ? undefined : composeWorldDirectoryLayer(worldDirectory)
+    const fixedContext = [effectivePersona, ...(worldContext === undefined ? [] : [worldContext.text]), ...(directoryLayer === undefined ? [] : [directoryLayer.text]), turnPrompt]
     // ContextPlanningRuntime can only see the raw revision before this layer
     // resolves profile, authority, permission and Skill instructions. When
     // its recognizable raw plan arrives, rebuild the allocation against the
@@ -198,12 +204,12 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       ? planContextBudget({
           contextWindow: request.contextBudget.contextWindow,
           maxOutputTokens: request.contextBudget.maxOutputTokens,
-          fixedText: [effectivePersona, ...(worldContext === undefined ? [] : [worldContext.text]), turnPrompt],
+          fixedText: fixedContext,
         })
       : request.contextBudget
     if (effectiveContextBudget !== undefined) {
       assertContextInputFits(
-        [effectivePersona, ...(worldContext === undefined ? [] : [worldContext.text]), turnPrompt],
+        fixedContext,
         effectiveContextBudget.inputBudgetTokens,
       )
     }
@@ -212,6 +218,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       persona: effectivePersona,
       personaRevision: revision.revision,
       ...(worldContext === undefined ? {} : { worldContext }),
+      ...(directoryLayer === undefined ? {} : { worldDirectory: directoryLayer }),
       conversationId: request.conversationId,
       prompt: turnPrompt,
       history: request.history ?? [],
@@ -277,6 +284,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       result = await this.#inner.runTurn({
         ...request,
         agent,
+        ...(worldDirectory === undefined ? {} : { worldDirectory }),
         ...(effectiveContextBudget === undefined ? {} : { contextBudget: effectiveContextBudget }),
         prompt,
         // The composer owns the cache decision because it owns the layer order
@@ -296,9 +304,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
           // The persona is what a provider adapter treats as the prefix (the
           // Harness binds it as the system prompt), so the world context is
           // rendered here, after the identity and before anything per-turn.
-          persona: worldContext === undefined
-            ? effectivePersona
-            : `${effectivePersona.trim()}\n\n${worldContext.text}`,
+          persona: [effectivePersona.trim(), worldContext?.text, directoryLayer?.text].filter(Boolean).join('\n\n'),
         },
       })
     } finally {

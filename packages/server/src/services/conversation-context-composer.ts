@@ -104,6 +104,7 @@ export interface ComposeTurnContextInput {
    * that moves per turn may be put in it.
    */
   worldContext?: ContextLayer
+  worldDirectory?: ContextLayer
   conversationId: string
   prompt: string
   history: readonly ConversationHistoryEntry[]
@@ -270,14 +271,15 @@ export class ConversationContextComposer {
     const envelope = composeContextEnvelope({
       stableIdentity,
       ...(worldContext === undefined ? {} : { worldContext }),
+      ...(input.worldDirectory === undefined ? {} : { worldDirectory: input.worldDirectory }),
       promptCache: derivePromptCachePolicy({
-        stablePrefixHash: stableContextHash(stableIdentity, worldContext),
+        stablePrefixHash: stableContextHash(stableIdentity, worldContext, input.worldDirectory),
         // Partitioned down to the character. Two characters whose prefixes are
         // byte-identical still never share one, because a cache partition is a
         // boundary and boundaries are not an optimisation.
         namespace: `${input.employee.worldId}/${input.employee.id}`,
         scope: 'employee',
-        stablePrefixTokens: stableIdentity.tokenEstimate + (worldContext?.tokenEstimate ?? 0),
+        stablePrefixTokens: stableIdentity.tokenEstimate + (worldContext?.tokenEstimate ?? 0) + (input.worldDirectory?.tokenEstimate ?? 0),
         // A direct lane is the same character answering again tomorrow; a group
         // or task lane is assembled per collaboration and rarely reruns.
         retentionHint: lane === 'direct' ? 'long' : 'short',

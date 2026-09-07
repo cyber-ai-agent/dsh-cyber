@@ -1243,6 +1243,8 @@ export interface ConversationHistoryEntry {
 }
 
 export interface AgentTurnRequest {
+  /** Public turn-start membership snapshot for read-only directory tools. */
+  worldDirectory?: import('./world-directory.js').WorldDirectorySnapshot
   agent: EmployeeInstance
   revision: EmployeeRevision
   /**
@@ -1422,3 +1424,5 @@ export type {
   SkillCatalogSource,
   PersistentApprovalCapability,
 } from './skill-runtime.js'
+export * from './tool-trace.js'
+export * from './world-directory.js'

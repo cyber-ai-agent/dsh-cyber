@@ -633,7 +633,7 @@ describe('Harness profile and adapter', () => {
     expect(events[0]).toMatchObject({
       kind: 'tool.started',
       toolName: 'bash',
-      metadata: { toolSummary: 'git commit', toolDetail: 'git commit' },
+      metadata: { toolSummary: 'git commit', toolDetail: 'git commit -m msg' },
     })
     // The raw argument key survives only as its redacted subject.
     expect(JSON.stringify(events)).not.toContain('"arguments"')

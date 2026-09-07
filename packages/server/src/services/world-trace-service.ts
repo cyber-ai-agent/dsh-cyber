@@ -83,7 +83,7 @@ export interface WorldTraceServiceOptions {
 export type WorldTraceCheckpoint = ReadonlyMap<string, string>
 
 /** Bump whenever adapters/sanitizing change, so cached projections rebuild. */
-const TRACE_PROJECTION_VERSION = 3
+const TRACE_PROJECTION_VERSION = 4
 const MAX_CACHED_PROJECTIONS = 8
 
 interface CachedTraceProjection {
@@ -438,7 +438,7 @@ function traceSearchText(entry: WorldTraceEntry, actorNames: ReadonlyMap<string,
     entry.actorId === undefined ? undefined : actorNames.get(entry.actorId),
     entry.modelId,
     entry.provider,
-    ...((entry.tools ?? []).flatMap((tool) => [tool.label, tool.name])),
+    ...((entry.tools ?? []).flatMap((tool) => [tool.label, tool.name, tool.description, tool.input, tool.output])),
     ...((entry.artifacts ?? []).map((artifact) => artifact.title)),
   ].filter((value): value is string => typeof value === 'string')
     .join('\n')
