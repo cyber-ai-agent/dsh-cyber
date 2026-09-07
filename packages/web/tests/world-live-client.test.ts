@@ -76,6 +76,24 @@ describe('subscribeWorldLive', () => {
     stop()
   })
 
+  it('isolates one subscriber failure from the other listeners on the shared stream', () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const seen: unknown[] = []
+    const stopBroken = subscribeWorldLive('world-isolated', 'runtime', () => {
+      throw new Error('panel failed')
+    })
+    const stopHealthy = subscribeWorldLive('world-isolated', 'runtime', (event) => {
+      seen.push(JSON.parse((event as MessageEvent<string>).data))
+    })
+    const source = FakeEventSource.instances.at(-1)!
+    expect(() => source.emit('runtime', { worldId: 'world-isolated', sequence: 1 })).not.toThrow()
+    expect(seen).toEqual([{ worldId: 'world-isolated', sequence: 1 }])
+    expect(errors).toHaveBeenCalledOnce()
+    stopBroken()
+    stopHealthy()
+    errors.mockRestore()
+  })
+
   it('does not deliver one event kind to another kind of listener', () => {
     const decisions: unknown[] = []
     const stop = subscribeWorldLive('world-b', 'world-decision', () => decisions.push(1))

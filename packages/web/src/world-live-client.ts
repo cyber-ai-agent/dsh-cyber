@@ -76,7 +76,16 @@ function getOrCreateClient(worldId: string): SharedWorldLiveClient {
   const client: SharedWorldLiveClient = { source, listeners }
   for (const eventName of listeners.keys()) {
     source.addEventListener(eventName, (event) => {
-      for (const listener of client.listeners.get(eventName) ?? []) listener(event)
+      for (const listener of client.listeners.get(eventName) ?? []) {
+        try {
+          listener(event)
+        } catch (error) {
+          // One panel must not prevent the other panels from receiving the
+          // same world fact. Keep the failure visible without tearing down the
+          // shared EventSource used by the rest of the world.
+          console.error('[dsh-cyber] world live subscriber failed', error)
+        }
+      }
     })
   }
   clients.set(worldId, client)
