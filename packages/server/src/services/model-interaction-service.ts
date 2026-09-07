@@ -7,6 +7,8 @@ import type {
   ModelInteractionLogFilter,
   ModelInteractionLogPage,
   ModelInteractionLogStatus,
+  ModelStatsQueryParams,
+  ModelStatsResponse,
 } from '@dsh-cyber/contracts'
 import type { HarnessModelRoute } from '@dsh-cyber/harness-adapter'
 import type { SqliteStore } from '@dsh-cyber/persistence'
@@ -118,6 +120,10 @@ export class ModelInteractionService {
 
   clear(workspaceId: string): number {
     return this.#store.clearModelInteractions(workspaceId)
+  }
+
+  aggregateStats(workspaceId: string, params: ModelStatsQueryParams): ModelStatsResponse {
+    return this.#store.aggregateModelStats(workspaceId, params)
   }
 }
 
