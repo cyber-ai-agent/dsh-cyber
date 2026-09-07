@@ -38,7 +38,8 @@ export function ResizableShell({
   }, [])
 
   const beginResize = useCallback((side: 'left' | 'right', startEvent: ReactPointerEvent) => {
-    startEvent.currentTarget.setPointerCapture(startEvent.pointerId)
+    const handle = startEvent.currentTarget
+    handle.setPointerCapture(startEvent.pointerId)
     const originX = startEvent.clientX
     const initial = widthsRef.current
     const shellWidth = (shellRef.current?.clientWidth ?? window.innerWidth) / paneScale
@@ -64,10 +65,14 @@ export function ResizableShell({
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onEnd)
       window.removeEventListener('pointercancel', onEnd)
+      window.removeEventListener('blur', onEnd)
+      handle.removeEventListener('lostpointercapture', onEnd)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onEnd)
     window.addEventListener('pointercancel', onEnd)
+    window.addEventListener('blur', onEnd)
+    handle.addEventListener('lostpointercapture', onEnd, { once: true })
   }, [onResize, paneScale])
 
   const handleWidth = Math.round(5 * paneScale)
