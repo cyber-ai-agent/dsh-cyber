@@ -1,0 +1,25 @@
+name: Trace directory workspace
+
+on:
+  push:
+    branches: [codex/trace-details-world-directory-20260907]
+    paths: [.github/workflows/trace-directory-workspace.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Export tracked source only
+        run: git archive --format=tar.gz --output=source.tar.gz HEAD
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: trace-directory-source
+          path: source.tar.gz
+          retention-days: 1
