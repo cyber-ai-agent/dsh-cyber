@@ -53,6 +53,7 @@ export function createImageAwareRuntime(deps: ImageTurnRuntimeDependencies): Age
     const employee = request.agent
     const startedAt = Date.now()
     const provider = profileDisplayName(profile)
+    const providerSnapshot = deps.interactions.captureProvider(employee.workspaceId, profile.id)
     const emit = (kind: 'turn.started' | 'assistant.message' | 'turn.completed' | 'turn.failed', extra?: { content?: string; metadata?: JsonObject }): void => {
       request.onEvent?.({ kind, source: 'image-generation', sourceSessionId: request.conversationId, metadata: {}, ...extra })
     }
@@ -97,6 +98,7 @@ export function createImageAwareRuntime(deps: ImageTurnRuntimeDependencies): Age
         ...(request.workTurnId === undefined ? {} : { workTurnId: request.workTurnId }),
         ...(request.agentRunId === undefined ? {} : { agentRunId: request.agentRunId }),
         modelId: profile.modelId,
+        providerSnapshot,
         provider,
         status: 'success',
         prompt: request.prompt,
@@ -125,6 +127,7 @@ export function createImageAwareRuntime(deps: ImageTurnRuntimeDependencies): Age
         ...(request.workTurnId === undefined ? {} : { workTurnId: request.workTurnId }),
         ...(request.agentRunId === undefined ? {} : { agentRunId: request.agentRunId }),
         modelId: profile.modelId,
+        providerSnapshot,
         provider,
         status: 'failed',
         ...(cause instanceof ServiceError ? { errorCode: cause.code } : {}),

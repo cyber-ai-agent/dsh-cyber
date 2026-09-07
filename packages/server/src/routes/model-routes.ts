@@ -175,6 +175,7 @@ export function registerModelRoutes(router: Router, dependencies: ModelRoutesDep
     const startedAt = Date.now()
     const modelId = profile?.modelId ?? '-'
     const provider = profile?.displayName ?? baseUrl
+    const providerSnapshot = interactions.captureProvider(workspaceId, profileId)
     let items
     try {
       items = await modelCatalog.discover({
@@ -191,6 +192,7 @@ export function registerModelRoutes(router: Router, dependencies: ModelRoutesDep
       })
       interactions.recordDiscovery({
         workspaceId,
+        providerSnapshot,
         modelId,
         provider,
         status: 'success',
@@ -201,6 +203,7 @@ export function registerModelRoutes(router: Router, dependencies: ModelRoutesDep
       const httpStatus = serviceErrorHttpStatus(error)
       interactions.recordDiscovery({
         workspaceId,
+        providerSnapshot,
         modelId,
         provider,
         status: 'failed',

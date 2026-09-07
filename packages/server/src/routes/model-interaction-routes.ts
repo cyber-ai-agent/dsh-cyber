@@ -1,3 +1,4 @@
+import { parseModelStatsQuery, ModelStatsQueryError, type ModelStatsGroupBy } from '@dsh-cyber/contracts'
 import type { ModelInteractionLogStatus } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
@@ -50,5 +51,21 @@ export function registerModelInteractionRoutes(
   router.delete(/^\/api\/workspaces\/([^/]+)\/model-interactions$/, ({ response, params }) => {
     const removed = interactions.clear(params[0]!)
     writeJson(response, 200, { removed })
+  })
+
+  router.get(/^\/api\/workspaces\/([^/]+)\/model-stats$/, ({ response, params, url }) => {
+    const workspaceId = params[0]!
+    try {
+      const query = parseModelStatsQuery({
+        ...(url.searchParams.has('groupBy') ? { groupBy: url.searchParams.get('groupBy') as ModelStatsGroupBy } : {}),
+        ...(url.searchParams.has('from') ? { from: url.searchParams.get('from')! } : {}),
+        ...(url.searchParams.has('to') ? { to: url.searchParams.get('to')! } : {}),
+        ...(url.searchParams.has('providerId') ? { providerId: url.searchParams.get('providerId')! } : {}),
+      }, new Date().toISOString())
+      writeJson(response, 200, interactions.aggregateStats(workspaceId, query))
+    } catch (error) {
+      if (error instanceof ModelStatsQueryError) throw new HttpError(422, error.code, error.message)
+      throw error
+    }
   })
 }
