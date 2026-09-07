@@ -48,8 +48,7 @@ function deps(overrides: Record<string, unknown> = {}) {
     store: { getModelProfile: vi.fn((id: string) => (id === IMAGE_PROFILE.id ? IMAGE_PROFILE : id === CHAT_PROFILE.id ? CHAT_PROFILE : undefined)), resolveModelProfile: vi.fn(() => IMAGE_PROFILE) },
     credentials: { resolve: vi.fn(() => 'sk-key') },
     images: { generate: vi.fn(async () => ({ bytes: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 1]), mimeType: 'image/png' })) },
-    worldFiles: { saveGeneratedImage: vi.fn(async () => ({ assetId: 'asset-1', name: 'x.png', mimeType: 'image/png', byteLength: 13, url: '/api/worlds/world-1/assets/asset-1' })) },
-    worldArtifacts: { publishGeneratedImage: vi.fn(async () => ({ artifact: { id: 'art-1', title: '生成图片' }, version: {} })) },
+    worldFiles: { saveGeneratedImage: vi.fn(async () => ({ assetId: 'asset-1', name: 'x.png', mimeType: 'image/png', byteLength: 13, url: '/api/worlds/world-1/file?path=x.png' })) },
     interactions: { recordTurn: vi.fn() },
     ...overrides,
   }
@@ -65,24 +64,34 @@ describe('image-aware runtime', () => {
     const result = await runtime.runTurn({ ...request, modelProfileId: CHAT_PROFILE.id })
     expect(result.finalResponse).toBe('chat')
     expect(inner.runTurn).toHaveBeenCalledOnce()
-    expect((d.worldArtifacts.publishGeneratedImage as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0)
+    expect(d.worldFiles.saveGeneratedImage).not.toHaveBeenCalled()
   })
 
-  it('runs an image model as a picture: same event channel, attachment and artifact', async () => {
+  it('runs an image model as a picture: same event channel, a visible world file - and no runtime artifact of its own', async () => {
     const { d, events } = deps()
     const runtime = createImageAwareRuntime(d as never)
     const result = await runtime.runTurn(makeRequest(events))
     expect(events.map((event) => event.kind)).toEqual(['turn.started', 'assistant.message', 'turn.completed'])
     const message = events[1]!
     expect(message.content).toContain('图片已经生成')
-    const metadata = message.metadata as { attachments: Array<Record<string, unknown>>; artifactRefs: Array<Record<string, unknown>>; generatedImage?: boolean }
-    expect(metadata.attachments[0]).toMatchObject({ assetId: 'asset-1', url: '/api/worlds/world-1/assets/asset-1', mimeType: 'image/png' })
-    expect(metadata.artifactRefs[0]).toMatchObject({ artifactId: 'art-1', kind: 'image' })
+    const metadata = message.metadata as { attachments: Array<Record<string, unknown>>; artifactRefs?: Array<Record<string, unknown>>; imageModel?: string; generatedImage?: boolean }
+    expect(metadata.attachments[0]).toMatchObject({ assetId: 'asset-1', url: '/api/worlds/world-1/file?path=x.png', mimeType: 'image/png' })
     expect(metadata.generatedImage).toBe(true)
+    expect(metadata.imageModel).toBe('wan2.7-image')
     expect(result.finalResponse).toBe(message.content)
     expect(d.interactions.recordTurn).toHaveBeenCalledWith(expect.objectContaining({ status: 'success', modelId: 'wan2.7-image', agentRunId: 'run-1' }))
-    // 产物幂等键绑定 agentRun：重放同一轮不会存出两张
-    expect(d.worldArtifacts.publishGeneratedImage).toHaveBeenCalledWith(expect.objectContaining({ idempotencyKey: 'generated-image:run-1' }))
+    // One generation must produce exactly one durable artifact, and it is the
+    // run-completion worker - not this runtime - who registers the world file
+    // it just wrote. The runtime publishes nothing: no artifactRefs on the
+    // message, no extra bytes in a cache copy, so the worker's later
+    // publication cannot double with a manual one.
+    expect(metadata.artifactRefs).toBeUndefined()
+    const saveArgs = (d.worldFiles.saveGeneratedImage as ReturnType<typeof vi.fn>).mock.calls[0]![1] as { bytes: Buffer; mimeType: string; name: string }
+    expect(saveArgs.bytes.byteLength).toBeGreaterThan(0)
+    // The file service appends the extension itself; a name that already
+    // carries one would produce the visible 生成图片-...png-<id8>.png.
+    expect(saveArgs.name).not.toMatch(/\.(png|jpe?g|webp)$/u)
+    expect(saveArgs.name.startsWith('生成图片-')).toBe(true)
   })
 
   it('takes the image path when the model comes from the assignment chain alone', async () => {
@@ -92,6 +101,7 @@ describe('image-aware runtime', () => {
     expect(events.map((event) => event.kind)).toEqual(['turn.started', 'assistant.message', 'turn.completed'])
     expect(d.inner.runTurn).not.toHaveBeenCalled()
     expect(result.finalResponse).toContain('图片已经生成')
+    expect(d.worldFiles.saveGeneratedImage).toHaveBeenCalledOnce()
   })
 
   it('fails the turn through turn.failed and records the attempt when the endpoint errors', async () => {
