@@ -56,6 +56,17 @@ jobs:
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 3
+      - name: Preserve model stats browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: model-stats-browser-evidence
+          path: |
+            .private/playwright-results/model-stats-*/model-stats-*.png
+            .private/playwright-results/model-stats-*/console.json
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 3
       - name: Preserve failed browser evidence
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
