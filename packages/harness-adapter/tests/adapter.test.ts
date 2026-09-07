@@ -172,6 +172,56 @@ describe('Harness profile and adapter', () => {
     await adapter.close()
   })
 
+  it('counts the expanded system prompt when a provider fallback builds the budget', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-provider-budget-'))
+    const currentEmployee = employee()
+    const currentRevision = revision()
+    const prompt = '保留真实边界'
+    const profile = { homeDir: stateRoot, profileDir: stateRoot, profileManifestPath: stateRoot, profilePatchPath: stateRoot, settingsPath: stateRoot }
+    const systemPrompt = workerEnvironment({}, {
+      employee: currentEmployee,
+      revision: currentRevision,
+      profile,
+      workspacePath: stateRoot,
+      sessionsRoot: join(stateRoot, 'sessions'),
+      permissionMode: 'read-only',
+    }).DSH_SYSTEM_PROMPT!
+    const expandedFixedTokens = estimateTextTokens(systemPrompt) + estimateTextTokens(prompt)
+    const rawPersonaTokens = estimateTextTokens(currentRevision.persona) + estimateTextTokens(prompt)
+    expect(expandedFixedTokens).toBeGreaterThan(rawPersonaTokens)
+    const contextWindow = expandedFixedTokens + 1_024 + 512
+    let runs = 0
+    const adapter = new HarnessCompatibilityAdapter({
+      stateRoot,
+      providerProfile: {
+        route: 'fallback-model',
+        displayName: 'Fallback model',
+        api: 'openai-completions',
+        baseURL: 'http://127.0.0.1:1/v1',
+        model: { id: 'fallback-model', contextWindow, maxTokens: 1_024 },
+      },
+      runtimeFactory: () => ({
+        async run() {
+          runs += 1
+          return { finalResponse: 'ok', notifications: [] }
+        },
+        async close() {},
+      }),
+    })
+
+    await adapter.runEmployeeTurn({
+      employee: currentEmployee,
+      revision: currentRevision,
+      conversationId: 'provider-budget-fallback',
+      history: [],
+      observedThroughSequence: 0,
+      prompt,
+      workspacePath: stateRoot,
+    })
+    expect(runs).toBe(1)
+    await adapter.close()
+  })
+
   it('counts native tool schemas before creating a runtime', async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-cyber-native-schema-budget-'))
     const prompt = '边界'
