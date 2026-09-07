@@ -55,6 +55,12 @@ export interface WorldTraceToolStep {
    * unknown or sensitive keys are never rendered.
    */
   input?: string
+  /** Bounded, credential-redacted text actually returned by this tool call. */
+  output?: string
+  outputTruncated?: boolean
+  outputRedacted?: boolean
+  /** Only present when the runtime explicitly supplied a process exit code. */
+  exitCode?: number
 }
 
 /**

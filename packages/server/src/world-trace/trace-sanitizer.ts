@@ -1,3 +1,4 @@
+import { redactToolTraceText, TOOL_TRACE_INPUT_LIMIT } from '@dsh-cyber/contracts'
 import type { JsonObject, JsonValue, WorldTraceEntry } from '@dsh-cyber/contracts'
 
 const SENSITIVE_KEY = /^(?:authorization|cookie|set-cookie|password|passphrase|secret|api[-_]?key|access[-_]?token|refresh[-_]?token|token|credential)$/i
@@ -10,7 +11,7 @@ const SENSITIVE_TEXT = [
 
 export class TraceSanitizer {
   text(value: string, maximumLength = 500): string {
-    let sanitized = value.replaceAll(/\s+/g, ' ').trim()
+    let sanitized = redactToolTraceText(value, Math.max(maximumLength, 4_000)).replaceAll(/\s+/g, ' ').trim()
     for (const pattern of SENSITIVE_TEXT) sanitized = sanitized.replace(pattern, '[已隐藏敏感信息]')
     return sanitized.length <= maximumLength
       ? sanitized
@@ -33,7 +34,8 @@ export class TraceSanitizer {
       ...(tool.description === undefined ? {} : { description: this.text(tool.description, 300) }),
       // Second redaction layer for the call target produced at the adapter
       // boundary; the trace exit must never trust an upstream string.
-      ...(tool.input === undefined ? {} : { input: this.text(tool.input, 400) }),
+      ...(tool.input === undefined ? {} : { input: redactToolTraceText(tool.input, TOOL_TRACE_INPUT_LIMIT) }),
+      ...(tool.output === undefined ? {} : { output: redactToolTraceText(tool.output) }),
     }))
     // Artifact titles are author-supplied text and reach the trace verbatim, so
     // they pass through the same redaction as every other displayed string.

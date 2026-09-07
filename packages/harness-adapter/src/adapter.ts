@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path'
 
 import { DeepSeekHarness, type HarnessNotification } from '@deepseek-ai/dsh-sdk-client'
 import { summarizeToolCall } from './tool-summary.js'
+import { summarizeToolResult, ToolTraceSubjects } from './tool-result-summary.js'
 import type {
   AgentRuntimeEvent,
   AgentPermissionMode,
@@ -29,6 +30,7 @@ import {
 } from './profile.js'
 
 export interface EmployeeTurnRequest {
+  worldDirectory?: AgentTurnRequest['worldDirectory']
   employee: EmployeeInstance
   revision: EmployeeRevision
   /** Durable WorkSession id. Every conversation owns its own Harness session. */
@@ -59,6 +61,7 @@ export interface HarnessRuntime {
     sessionId: string,
     prompt: string,
     onNotification?: (notification: HarnessNotification) => void,
+    worldDirectory?: AgentTurnRequest['worldDirectory'],
   ): Promise<{ finalResponse: string; notifications: HarnessNotification[] }>
   decideApproval?(approvalRequestId: string, decision: 'approved' | 'rejected'): Promise<void>
   close(): Promise<void>
@@ -94,6 +97,7 @@ interface EmployeeLane {
   workspacePath: string | undefined
   /** The persona this lane's runtime was started with; it is the process's system prompt. */
   persona: string | undefined
+  hasWorldDirectory?: boolean
   runtime: HarnessRuntime | undefined
   agentSessionId: string | undefined
   /** Conservative estimate of user/assistant/tool content retained by the live Harness session. */
@@ -130,6 +134,8 @@ export const PINNED_HARNESS_NATIVE_TOOL_SCHEMA_TOKENS = 9_570
 export const PINNED_HARNESS_NATIVE_SYSTEM_OVERHEAD_TOKENS = 1_400
 /** Per-turn runtime-context snapshot injected as a separate user message. */
 export const PINNED_HARNESS_NATIVE_TURN_CONTEXT_TOKENS = 256
+/** Conservative reserve, tested against the directory tools' actual schemas. */
+export const WORLD_DIRECTORY_TOOL_SCHEMA_RESERVE = 1_600
 
 export interface HarnessAdapterOptions {
   stateRoot: string
@@ -161,8 +167,15 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
   }
 
   async runTurn(request: AgentTurnRequest): Promise<AgentTurnResult> {
+    const directory = request.worldDirectory
+    if (directory !== undefined && (
+      directory.actorId !== request.agent.id || directory.worldId !== request.agent.worldId
+      || directory.workspaceId !== request.agent.workspaceId
+      || !directory.members.some((member) => member.characterId === request.agent.id)
+    )) throw new Error('成员目录与当前角色或世界不匹配。')
     const employeeRequest: EmployeeTurnRequest = {
       employee: request.agent,
+      ...(request.worldDirectory === undefined ? {} : { worldDirectory: request.worldDirectory }),
       revision: request.revision,
       conversationId: request.conversationId,
       history: request.history,
@@ -175,8 +188,9 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       ...(request.permissionMode === undefined ? {} : { permissionMode: request.permissionMode }),
     }
     if (request.onEvent !== undefined) {
+      const toolSubjects = new ToolTraceSubjects()
       employeeRequest.onNotification = (notification) => {
-        for (const event of normalizeHarnessNotification(notification)) {
+        for (const event of normalizeHarnessTraceNotification(notification, toolSubjects)) {
           request.onEvent?.(event)
         }
       }
@@ -195,6 +209,12 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
   }
 
   async runEmployeeTurn(request: EmployeeTurnRequest): Promise<EmployeeTurnResult> {
+    if (request.worldDirectory !== undefined && (
+      request.worldDirectory.actorId !== request.employee.id
+      || request.worldDirectory.worldId !== request.employee.worldId
+      || request.worldDirectory.workspaceId !== request.employee.workspaceId
+      || !request.worldDirectory.members.some((member) => member.characterId === request.employee.id)
+    )) throw new Error('成员目录与当前角色或世界不匹配。')
     const conversationId = requiredConversationId(request.conversationId)
     const worker = this.#runtimes.get(request.employee.id) ?? this.#createWorker(request.employee.id)
     const existingLane = worker.lanes.get(conversationId)
@@ -241,7 +261,8 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     const needsReset =
       (lane.permissionMode !== undefined && lane.permissionMode !== permissionMode) ||
       (lane.workspacePath !== undefined && lane.workspacePath !== workspacePath) ||
-      (lane.persona !== undefined && lane.persona !== request.revision.persona)
+      (lane.persona !== undefined && lane.persona !== request.revision.persona) ||
+      (lane.hasWorldDirectory !== undefined && lane.hasWorldDirectory !== (request.worldDirectory !== undefined))
     // This is the last provider-neutral boundary where the complete
     // server-authored input is available. The ContextPlanningRuntime usually
     // supplied the plan; the provider-profile fallback keeps direct adapter
@@ -249,6 +270,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
     const contextBudget = resolveAdapterContextBudget(request, this.#options.providerProfile)
     const existingSessionId = needsReset ? undefined : lane.agentSessionId
     const nativeContext = resolveNativeContextTokens(this.#options)
+    if (request.worldDirectory !== undefined) nativeContext.fixedTokens += WORLD_DIRECTORY_TOOL_SCHEMA_RESERVE
     const preparePrompt = (
       freshSession: boolean,
       observedThroughSequence = request.observedThroughSequence,
@@ -351,6 +373,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       lane.permissionMode = permissionMode
       lane.workspacePath = workspacePath
       lane.persona = request.revision.persona
+      lane.hasWorldDirectory = request.worldDirectory !== undefined
       lane.runtime = runtime
     }
     // The 0.1.2-rc.1 SDK server creates its session through
@@ -386,7 +409,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
         }
     try {
       assertLaneTaskActive(task)
-      const result = await lane.runtime!.run(agentSessionId, prepared.prompt, onNotification)
+      const result = await lane.runtime!.run(agentSessionId, prepared.prompt, onNotification, request.worldDirectory)
       lane.retainedContextTokens += retainedTurnTokens(prepared.prompt, result) + nativeContext.retainedPerTurnTokens
       return { agentSessionId, ...result, contextUsage: prepared.contextUsage }
     } catch (error) {
@@ -416,6 +439,7 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
         recoveredSessionId,
         recovered.prompt,
         request.onNotification,
+        request.worldDirectory,
       )
       lane.retainedContextTokens += retainedTurnTokens(recovered.prompt, result) + nativeContext.retainedPerTurnTokens
       return { agentSessionId: recoveredSessionId, ...result, contextUsage: recovered.contextUsage }
@@ -708,7 +732,11 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
       initializeTimeoutMs: boundedInitializeTimeout(this.#options.initializeTimeoutMs),
     })
     return {
-      async run(sessionId, prompt, onNotification) {
+      async run(sessionId, prompt, onNotification, worldDirectory) {
+        if (worldDirectory !== undefined) {
+          await harness.start()
+          await harness.client.request('world-directory/set', worldDirectory)
+        }
         const result = await harness
           .session(sessionId)
           .run(prompt, onNotification === undefined ? undefined : { onNotification })
@@ -726,8 +754,14 @@ export class HarnessCompatibilityAdapter implements AgentRuntimePort, AsyncDispo
   }
 }
 
-export function normalizeHarnessNotification(
+export function normalizeHarnessNotification(notification: HarnessNotification): AgentRuntimeEvent[] {
+  return normalizeHarnessTraceNotification(notification)
+}
+
+/** Scoped evidence collector; the one-argument normalizer stays Array.flatMap-compatible. */
+export function normalizeHarnessTraceNotification(
   notification: HarnessNotification,
+  toolSubjects?: ToolTraceSubjects,
 ): AgentRuntimeEvent[] {
   if (notification.method !== 'session.event') return []
   const event = record(notification.params.event)
@@ -820,6 +854,7 @@ export function normalizeHarnessNotification(
       const metadata: JsonObject = { turn: numberValue(data.turn) ?? 0, step: numberValue(data.step) ?? 0 }
       // The raw argument blob never travels; only its redacted allow-listed
       // subject does, so the trace can say what a call operated on.
+      toolSubjects?.start(sourceSessionId, callId, toolName, data.arguments)
       const summary = summarizeToolCall(data.arguments)
       if (summary !== undefined) {
         metadata.toolSummary = summary.summary
@@ -839,9 +874,10 @@ export function normalizeHarnessNotification(
       const callId = stringValue(source?.callId) ?? 'unknown-call'
       const failure = record(data.error)
       const failed = failure !== undefined
-      const metadata: JsonObject = { failed }
+      const subject = toolSubjects?.complete(sourceSessionId, callId)
+      const metadata: JsonObject = { failed, ...summarizeToolResult(data, subject) }
       appendFailureDiagnostics(metadata, failure, data)
-      return [make('tool.completed', { callId, failed, metadata })]
+      return [make('tool.completed', { callId, failed, metadata, ...(subject === undefined ? {} : { toolName: subject.name }) })]
     }
     case 'turn/end': {
       const reason = record(data.reason)
@@ -1266,6 +1302,6 @@ function employeeSystemPrompt(employee: EmployeeInstance, revision: EmployeeRevi
     '始终保持当前身份一致，维护属于自己的持续会话，不得冒充其他角色。',
     '协作提示中出现其他角色的发言时，请回应其实际内容，并清楚说明认同点或分歧点。',
     '联网搜索不可用时，用简明中文说明原因，并引导用户前往“设置 → 模型 → 编辑当前模型 → 启用联网搜索”。不得编造搜索结果，也不得引导用户寻找不存在的隐藏页面。',
-    '基于当前身份、记忆和已授权能力，使用简洁中文给出有证据的回答。需要调用工具时，向用户提供可公开、安全、简短的中文推理摘要，说明目标、判断依据和工具调度结果；不得暴露隐藏思维链、密钥、原始工具参数或原始工具结果。',
+    '基于当前身份、记忆和已授权能力，使用简洁中文给出有证据的回答。需要调用工具时，向用户提供可公开、安全、简短的中文推理摘要，说明目标、判断依据和工具调度结果；不得暴露隐藏思维链或凭据；可以解释经脱敏的工具参数、结果片段和变更证据，执行详情由轨迹展示。',
   ].join('\n\n')
 }

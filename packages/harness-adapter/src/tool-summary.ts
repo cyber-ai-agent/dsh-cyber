@@ -1,18 +1,6 @@
-/**
- * A redacted, allow-listed summary of what a tool call operated on.
- *
- * The runtime hands the adapter a raw JSON argument blob per call. Persisting
- * it verbatim is forbidden by the trace guardrail (arguments may carry inline
- * tokens) and dropping it entirely leaves the audit trail silent about *what*
- * a run did. This is the narrow middle, and it is deny-by-default: only
- * file/command/pattern/url-ish keys are read; a command keeps its program and
- * only a lowercase subcommand or a path-shaped argument; path and URL segments
- * must positively read as human-authored (short, lowercase, no credential
- * words, no id-shaped digit or mixed-case runs) or they are masked per
- * segment; query strings are stripped; home directories fold to ~; known
- * secret shapes are masked; everything is truncated. A call whose arguments
- * hold nothing safe yields no summary at all.
- */
+import { isSensitiveToolPath, redactToolTraceText, TOOL_TRACE_INPUT_LIMIT } from '@dsh-cyber/contracts'
+
+/** Structured targets for the owner's trace; credential values are never retained. */
 export interface ToolCallSummary {
   /** One short line for the list: program name + first argument, or the file. */
   summary: string
@@ -25,7 +13,7 @@ const PATH_KEYS = ['path', 'file_path', 'filepath', 'file', 'filename', 'directo
 const PATTERN_KEYS = ['pattern', 'glob', 'query', 'search', 'regex'] as const
 const URL_KEYS = ['url', 'uri', 'endpoint'] as const
 const MAX_SUMMARY = 120
-const MAX_DETAIL = 480
+const MAX_DETAIL = TOOL_TRACE_INPUT_LIMIT
 
 const SECRET_PATTERNS: ReadonlyArray<RegExp> = [
   /\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi,
@@ -67,9 +55,9 @@ function safeSegment(segment: string): boolean {
 }
 
 function redactPathish(value: string): string {
-  const segments = value.split('/')
-  const kept = segments.map((segment) => (safeSegment(segment) ? segment : '[已隐藏]'))
-  return kept.join('/')
+  // Long source filenames, UUID artifact manifests and words such as session
+  // or keyboard are legitimate filesystem identifiers. Redact values only.
+  return redactToolTraceText(value, MAX_DETAIL)
 }
 
 function redactUrl(value: string): string {
@@ -89,7 +77,7 @@ function redactUrl(value: string): string {
 function take(record: Record<string, unknown>, keys: readonly string[]): string | undefined {
   for (const key of keys) {
     const value = record[key]
-    if (typeof value === 'string' && value.trim()) return value.trim().replaceAll(/\s+/g, ' ')
+    if (typeof value === 'string' && value.trim()) return value.slice(0, 64_000).trim()
   }
   return undefined
 }
@@ -114,14 +102,14 @@ function summarizeParts(parts: string[]): { summary: string; detail: string } | 
   const unique = [...new Set(parts.filter((part) => part.length > 0))]
   if (unique.length === 0) return undefined
   return {
-    summary: unique.join(' · ').slice(0, MAX_SUMMARY),
-    detail: unique.join(' · ').slice(0, MAX_DETAIL),
+    summary: redactToolTraceText(unique.join(' · '), MAX_SUMMARY),
+    detail: redactToolTraceText(unique.join(' · '), MAX_DETAIL),
   }
 }
 
 function argsRecord(raw: unknown): Record<string, unknown> | undefined {
   if (raw !== null && typeof raw === 'object' && !Array.isArray(raw)) return raw as Record<string, unknown>
-  if (typeof raw !== 'string' || !raw.trim()) return undefined
+  if (typeof raw !== 'string' || !raw.trim() || raw.length > 1_000_000) return undefined
   try {
     const parsed: unknown = JSON.parse(raw)
     return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : undefined
@@ -145,10 +133,19 @@ export function summarizeToolCall(rawArguments: unknown): ToolCallSummary | unde
   // The detail line keeps fuller pattern text; commands stay on
   // firstCommandLine so a pipeline tail cannot smuggle anything through.
   const detailParts: string[] = []
-  if (command !== undefined) detailParts.push(firstCommandLine(command) + (command.includes('&&') || command.includes(';') ? ' …' : ''))
+  if (command !== undefined) detailParts.push(commandDetail(command))
   if (pattern !== undefined) detailParts.push(redact(pattern.slice(0, 160)))
   if (url !== undefined) detailParts.push(redactUrl(url))
   if (path !== undefined) detailParts.push(redact(redactPathish(foldHome(path))))
+  for (const key of ['offset', 'limit', 'start_line', 'end_line', 'startLine', 'endLine', 'line_start', 'line_end']) {
+    const value = record[key]
+    if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) detailParts.push(`${key}=${value}`)
+  }
+  if (typeof record.characterId === 'string') {
+    parts.push(redactToolTraceText(record.characterId, 160))
+    detailParts.push(redactToolTraceText(record.characterId, 160))
+  }
+  if (parts.length === 0 && detailParts.length > 0) parts.push(...detailParts)
   const result = summarizeParts(parts)
   if (result === undefined) return undefined
   const full = summarizeParts(detailParts)
@@ -156,4 +153,33 @@ export function summarizeToolCall(rawArguments: unknown): ToolCallSummary | unde
     summary: result.summary,
     detail: full === undefined ? result.detail : full.detail,
   }
+}
+
+
+function commandDetail(command: string): string {
+  // Show real flags for ordinary development commands. Unknown programs and
+  // inline scripts remain summarized; do not pretend to parse a full shell.
+  const commands = command.split(/&&|\|\||[;\n]/)
+  const known = /^(?:git|pnpm|npm|yarn|bun|node|python3?|pytest|vitest|tsc|cargo|go|make|cmake|rg|grep|find|ls|pwd|cat|head|tail|wc|docker|curl)(?:\s|$)/
+  if (commands.every((part) => known.test(part.trim())) && !/[|`]|\$\(|(?:^|\s)(?:-e|-c|--eval|--command)(?:\s|=)/.test(command)) {
+    return redactToolTraceText(command, MAX_DETAIL)
+  }
+  return firstCommandLine(command) + (commands.length > 1 ? ' …' : '')
+}
+
+export function toolCallAllowsOutput(rawArguments: unknown, toolName: string): boolean {
+  const args = argsRecord(rawArguments)
+  if (args === undefined) return false
+  const path = take(args, PATH_KEYS)
+  if (path !== undefined && isSensitiveToolPath(path)) return false
+  const command = take(args, COMMAND_KEYS)
+  if (command !== undefined) {
+    // Normal development commands may expose bounded, value-redacted output.
+    // Environment dumps, credential containers and inline shell programs do not.
+    if (/[|`]|\$\(|(?:^|\s)(?:-e|-c|--eval|--command)(?:\s|=)/.test(command)) return false
+    if (command.split(/[\s"']+/).some(isSensitiveToolPath)) return false
+    const parts = command.split(/&&|\|\||[;\n]/).map((part) => part.trim())
+    return parts.every((part) => /^(?:git (?:status|diff|log|show|ls-files|rev-parse)|(?:pnpm|npm|yarn|bun) (?:test|build|typecheck|run (?:test|build|typecheck)|exec (?:vitest|tsc|playwright))|(?:vitest|tsc|pytest|ls|pwd|rg|grep|head|tail|cat|wc|find)|cargo (?:test|build|check)|go (?:test|build|vet))(?:\s|$)/.test(part))
+  }
+  return /^(?:read|read_file|readfile|write|write_file|edit|str_replace_editor|apply_patch|grep|glob|search|find|world_directory_(?:list|search|get))$/i.test(toolName)
 }

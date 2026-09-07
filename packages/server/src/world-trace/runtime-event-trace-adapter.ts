@@ -1,6 +1,6 @@
 import type { AgentRuntimeEvent, WorldTraceEntry, WorldTraceStatus } from '@dsh-cyber/contracts'
 
-import { toolDisplayLabel, toolPresentation } from './agent-run-trace-adapter.js'
+import { toolDisplayLabel, toolPresentation, toolResultFields } from './agent-run-trace-adapter.js'
 import { traceId, type RuntimeTraceFact, type WorldTraceAdapter } from './trace-adapter.js'
 
 export class RuntimeEventTraceAdapter implements WorldTraceAdapter<'runtime-event'> {
@@ -48,6 +48,7 @@ export class RuntimeEventTraceAdapter implements WorldTraceAdapter<'runtime-even
         // empty so the merge keeps the started call's concrete summary.
         ...(event.kind === 'tool.started' ? { description: summary ?? presentation.description } : {}),
         ...(detail === undefined ? {} : { input: detail }),
+        ...toolResultFields(event.metadata),
         status: event.kind === 'tool.started' ? 'running' : event.failed ? 'failed' : 'success',
         ...(event.kind === 'tool.started' ? { createdAt: value.createdAt } : { completedAt: value.createdAt }),
       }]

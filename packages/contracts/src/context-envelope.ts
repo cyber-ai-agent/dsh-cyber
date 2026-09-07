@@ -21,6 +21,7 @@ export const CONTEXT_ENVELOPE_VERSION = 1 as const
 export type ContextLayerKind =
   | 'stable-identity'
   | 'world-context'
+  | 'world-directory'
   | 'task-context'
   | 'memory-index'
   | 'retrieved-memories'
@@ -31,6 +32,7 @@ export type ContextLayerKind =
 export const CONTEXT_LAYER_ORDER = [
   'stable-identity',
   'world-context',
+  'world-directory',
   'task-context',
   'memory-index',
   'retrieved-memories',
@@ -83,6 +85,7 @@ export interface ContextEnvelope {
   envelopeVersion: typeof CONTEXT_ENVELOPE_VERSION
   stableIdentity: ContextLayer
   worldContext?: ContextLayer
+  worldDirectory?: ContextLayer
   taskContext?: ContextLayer
   memoryIndex?: ContextLayer
   retrievedMemories?: ContextLayer
@@ -241,6 +244,7 @@ export interface ComposeContextEnvelopeInput {
   stableIdentity: ContextLayer
   currentRequest: ContextLayer
   worldContext?: ContextLayer
+  worldDirectory?: ContextLayer
   taskContext?: ContextLayer
   memoryIndex?: ContextLayer
   retrievedMemories?: ContextLayer
@@ -253,12 +257,13 @@ export function composeContextEnvelope(input: ComposeContextEnvelopeInput): Cont
     envelopeVersion: CONTEXT_ENVELOPE_VERSION,
     stableIdentity: input.stableIdentity,
     ...(input.worldContext === undefined ? {} : { worldContext: input.worldContext }),
+    ...(input.worldDirectory === undefined ? {} : { worldDirectory: input.worldDirectory }),
     ...(input.taskContext === undefined ? {} : { taskContext: input.taskContext }),
     ...(input.memoryIndex === undefined ? {} : { memoryIndex: input.memoryIndex }),
     ...(input.retrievedMemories === undefined ? {} : { retrievedMemories: input.retrievedMemories }),
     ...(input.recentConversation === undefined ? {} : { recentConversation: input.recentConversation }),
     currentRequest: input.currentRequest,
-    stableContextHash: stableContextHash(input.stableIdentity, input.worldContext),
+    stableContextHash: stableContextHash(input.stableIdentity, input.worldContext, input.worldDirectory),
     ...(input.promptCache === undefined ? {} : { promptCache: input.promptCache }),
     totalTokenEstimate: 0,
   }
@@ -270,6 +275,7 @@ export function contextEnvelopeLayers(envelope: ContextEnvelope): ContextLayer[]
   const byKind: Record<ContextLayerKind, ContextLayer | undefined> = {
     'stable-identity': envelope.stableIdentity,
     'world-context': envelope.worldContext,
+    'world-directory': envelope.worldDirectory,
     'task-context': envelope.taskContext,
     'memory-index': envelope.memoryIndex,
     'retrieved-memories': envelope.retrievedMemories,
@@ -290,12 +296,13 @@ export function contextEnvelopeLayers(envelope: ContextEnvelope): ContextLayer[]
  * An envelope without world context hashes exactly as it did before the layer
  * joined the prefix, so nothing that recorded a hash earlier is invalidated.
  */
-export function stableContextHash(identity: ContextLayer, worldContext?: ContextLayer): string {
+export function stableContextHash(identity: ContextLayer, worldContext?: ContextLayer, worldDirectory?: ContextLayer): string {
   return contextContentHash([
     identity.kind,
     identity.id,
     identity.contentHash,
     ...(worldContext === undefined ? [] : [worldContext.kind, worldContext.id, worldContext.contentHash]),
+    ...(worldDirectory === undefined ? [] : [worldDirectory.kind, worldDirectory.id, worldDirectory.contentHash]),
   ])
 }
 
@@ -331,7 +338,7 @@ function normalizeSourceRefs(refs: readonly ContextSourceRef[]): ContextSourceRe
       id,
       ...(ref.revision === undefined || !ref.revision.trim() ? {} : { revision: ref.revision.trim() }),
     }
-    byKey.set(`${normalized.kind} ${normalized.id}`, normalized)
+    byKey.set(`${normalized.kind}\0${normalized.id}`, normalized)
   }
   return [...byKey.values()]
 }

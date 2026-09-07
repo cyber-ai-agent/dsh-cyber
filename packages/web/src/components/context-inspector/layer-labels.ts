@@ -18,6 +18,11 @@ export const CONTEXT_LAYER_LABELS: Record<ContextLayerKind, { key: string; label
     label: '世界规则',
     hint: '当前世界的设定与运行规则。',
   },
+  'world-directory': {
+    key: 'context.layerDirectory',
+    label: '世界成员名册',
+    hint: '本轮注入的真实成员、公开职责与名册版本；私聊内容不共享。',
+  },
   'task-context': {
     key: 'context.layerTask',
     label: '任务上下文',

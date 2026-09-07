@@ -45,6 +45,17 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
       - name: Core browser smoke
         run: pnpm exec playwright test --config playwright.smoke.config.ts
+      - name: Preserve successful trace screenshots
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: trace-evidence-screenshots
+          path: |
+            .private/playwright-results/trace-evidence-*/trace-*.png
+            .private/playwright-results/trace-evidence-*/console.json
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 3
       - name: Preserve model stats browser evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

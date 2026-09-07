@@ -97,6 +97,7 @@ function buildToolSteps(messages: readonly WorkMessage[]): WorldTraceToolStep[] 
         createdAt: message.createdAt,
         ...(current?.completedAt === undefined ? {} : { completedAt: current.completedAt }),
         ...(durationMs === undefined ? {} : { durationMs }),
+        ...toolResultFields(current === undefined ? {} : { toolOutput: current.output, toolOutputTruncated: current.outputTruncated, toolOutputRedacted: current.outputRedacted, toolExitCode: current.exitCode }),
       })
       continue
     }
@@ -109,6 +110,7 @@ function buildToolSteps(messages: readonly WorkMessage[]): WorldTraceToolStep[] 
       label: current?.label ?? '执行工具',
       ...(current?.description === undefined ? {} : { description: current.description }),
       ...(current?.input === undefined ? {} : { input: current.input }),
+      ...toolResultFields(message.metadata),
       status: failed ? 'failed' : 'success',
       ...(current?.createdAt === undefined ? {} : { createdAt: current.createdAt }),
       completedAt: message.createdAt,
@@ -130,11 +132,12 @@ export function toolDisplayLabel(name: string | undefined): string {
 export function toolPresentation(name: string | undefined): Pick<WorldTraceToolStep, 'label' | 'description'> {
   if (!name) return { label: '执行工具', description: '运行时未提供工具名称' }
   const normalized = name.toLowerCase()
+  if (/^world_directory_(?:list|search|get)$/.test(normalized)) return { label: '查询世界成员', description: '读取当前世界真实成员的公开身份与职责' }
   if (/firecrawl|web[_-]?search|search[_-]?query/.test(normalized)) return { label: '搜索网络信息', description: '检索公开网页和来源，获取与当前任务相关的信息' }
   if (/search|find[_-]?(text|content)|ripgrep|\brg\b/.test(normalized)) return { label: '查找内容', description: '在可访问的数据或文件中定位相关内容' }
   if (/apply[_-]?patch|patch|edit|replace|update[_-]?file/.test(normalized)) return { label: '修改文件内容', description: '按任务要求更新已有文件中的指定内容' }
   if (/write|create[_-]?file|save/.test(normalized)) return { label: '写入文件', description: '创建文件或保存新的文件内容' }
-  if (/read[_-]?file|open[_-]?file|view[_-]?file/.test(normalized)) return { label: '读取文件', description: '读取文件内容用于分析或处理' }
+  if (/^read$|read[_-]?file|open[_-]?file|view[_-]?file/.test(normalized)) return { label: '读取文件', description: '读取文件内容用于分析或处理' }
   if (/shell|bash|pwsh|\bcmd\b|command|terminal|exec/.test(normalized)) return { label: '执行本地命令', description: '在当前权限范围内运行命令或开发工具' }
   if (/browser|click|navigate|screenshot/.test(normalized)) return { label: '操作浏览器', description: '打开、检查或操作网页界面' }
   if (/glob|list[_-]?(file|dir)|directory|file/.test(normalized)) return { label: '检查文件', description: '查看目录或文件列表，确认工作区内容' }
@@ -185,4 +188,17 @@ function friendlyRunError(
   }
   if (/interrupt|abort|user[-_ ]?stop/.test(signal)) return '本轮运行被中断。'
   return '模型服务未能完成本轮请求。请查看模型交互日志后重试。'
+}
+
+
+/** Shared by historical and live projections; unknown result fields stay absent. */
+export function toolResultFields(metadata: Record<string, unknown>): Pick<WorldTraceToolStep, 'output' | 'outputTruncated' | 'outputRedacted' | 'exitCode'> {
+  const output = typeof metadata.toolOutput === 'string' && metadata.toolOutput.trim() ? metadata.toolOutput : undefined
+  const exitCode = typeof metadata.toolExitCode === 'number' && Number.isSafeInteger(metadata.toolExitCode) ? metadata.toolExitCode : undefined
+  return {
+    ...(output === undefined ? {} : { output }),
+    ...(metadata.toolOutputTruncated === true ? { outputTruncated: true } : {}),
+    ...(metadata.toolOutputRedacted === true ? { outputRedacted: true } : {}),
+    ...(exitCode === undefined ? {} : { exitCode }),
+  }
 }

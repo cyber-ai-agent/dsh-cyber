@@ -1,3 +1,4 @@
+import { WorldDirectoryTools } from './world-directory-tools.js'
 import type { Context } from '@deepseek-ai/cordis'
 import {
   Config,
@@ -11,7 +12,7 @@ import type { ApprovalOutcome, ApprovalRequestEvent } from '@deepseek-ai/dsh-use
 export { Config, type JsonRpcConfig }
 
 export const name = 'dsh-cyber-sdk-jsonrpc'
-export const inject = ['agents', 'approval']
+export const inject = ['agents', 'approval', 'tools']
 
 interface NativeApprovalRequest extends Pick<ApprovalRequestEvent, 'toolName' | 'callId' | 'signal'> {
   agent: {
@@ -40,6 +41,7 @@ export function apply(ctx: Context, config: JsonRpcConfig): void {
     ...(config.maxTokensAsSuccess === undefined ? {} : { maxTokensAsSuccess: config.maxTokensAsSuccess }),
   })
   const pending = new Map<string, PendingApproval>()
+  const directory = new WorldDirectoryTools(ctx)
   let exitTask: Promise<void> | undefined
 
   const settleAll = (outcome: ApprovalOutcome) => {
@@ -83,6 +85,7 @@ export function apply(ctx: Context, config: JsonRpcConfig): void {
 
   transport.onRequest(async (method, params) => {
     if (method === 'initialize') await ctx.get('loader')?.await()
+    if (method === 'world-directory/set') return directory.update(params)
     if (method === 'approval/decide') return decideApproval(pending, params)
     const result = await server.handleRequest(method, params)
     if (method === 'shutdown') setImmediate(() => { void disposeAndExit() })

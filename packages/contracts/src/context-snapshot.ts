@@ -113,6 +113,7 @@ export interface ContextSnapshot {
 const STABLE_PREFIX_KINDS: ReadonlySet<ContextLayerKind> = new Set<ContextLayerKind>([
   'stable-identity',
   'world-context',
+  'world-directory',
 ])
 
 export interface ComposeContextSnapshotInput {

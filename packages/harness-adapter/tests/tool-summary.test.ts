@@ -8,10 +8,10 @@ describe('summarizeToolCall', () => {
     expect(summary?.summary).toBe('git status')
   })
 
-  it('keeps only the leading command of a chain and flags truncation', () => {
+  it('keeps the concise command title and exposes a safe development chain in detail', () => {
     const summary = summarizeToolCall('{"command":"npm install && npm test"}')
     expect(summary?.summary).toBe('npm install')
-    expect(summary?.detail).toContain('…')
+    expect(summary?.detail).toBe('npm install && npm test')
   })
 
   it('folds user home prefixes out of file paths', () => {
@@ -58,10 +58,9 @@ describe('summarizeToolCall', () => {
     expect(docs?.summary).toBe('https://code.example.com/guide/intro')
   })
 
-  it('masks credential-shaped file path segments', () => {
+  it('keeps credential container filenames while content policy handles their bodies', () => {
     const summary = summarizeToolCall('{"file_path":"C:\\\\Users\\\\bob\\\\.config\\\\gh_hosts_token.yml"}')
-    expect(summary?.summary).toContain('[已隐藏]')
-    expect(JSON.stringify(summary)).not.toContain('gh_hosts_token')
+    expect(summary?.summary).toBe('~/.config/gh_hosts_token.yml')
     const safe = summarizeToolCall('{"file_path":"/home/bob/notes/meeting.md"}')
     expect(safe?.summary).toBe('~/notes/meeting.md')
   })
