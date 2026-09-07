@@ -9,7 +9,7 @@ import type {
   JsonObject,
   WorkMessage,
 } from '@dsh-cyber/contracts'
-import { composeContextLayer, contextEnvelopeLayers } from '@dsh-cyber/contracts'
+import { assertContextInputFits, composeContextLayer, contextEnvelopeLayers } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 import type { CharacterSkillAdapterRegistry } from '../skills/skill-adapter.js'
 import type { WorldCharacterAuthority } from '@dsh-cyber/contracts/world-authority'
@@ -187,6 +187,17 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
     // the identity: in the cacheable prefix, in front of every retrieved
     // memory, instead of being re-sent behind them on every request.
     const worldContext = await this.#composeWorldContext(agent, request.conversationId)
+    // ContextPlanningRuntime can only see the raw revision before this layer
+    // resolves profile, authority, permission and Skill instructions. Recheck
+    // the exact fixed text now, before retrieval or a runtime lane is started,
+    // so an expanded effective persona cannot consume the history budget that
+    // the provider boundary must reserve for it.
+    if (request.contextBudget !== undefined) {
+      assertContextInputFits(
+        [effectivePersona, ...(worldContext === undefined ? [] : [worldContext.text]), turnPrompt],
+        request.contextBudget.inputBudgetTokens,
+      )
+    }
     const composed = await this.#context?.compose({
       employee: agent,
       persona: effectivePersona,

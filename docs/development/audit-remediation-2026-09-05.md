@@ -118,3 +118,5 @@ Group HTTP 接线检查点：`/chat` 的 discussion/task immediate/queued 在 pl
 2026-09-07：继续整合本地未提交整改。SSE runtime/world 流统一使用有界连接缓冲，单个异常或慢订阅者只会被关闭，不影响健康订阅者；共享 world live 客户端在短暂卸载/重挂载窗口内复用连接。模型服务商目录改为优先读取仓库 `catalog/model-providers.json`，远程目录仅在仓库文件不可用且显式配置时作为备用，随后依次使用 stateRoot 缓存和内置快照。仓库目录仍经过同一严格解析器，目录变更在本地服务下一次读取时生效；批次 07/08 仍需其余审计范围和真实浏览器证据，未标记完成。
 
 同日第六批补充：Harness adapter 在 direct embedder 未提供 `ContextBudget`、但 provider profile 声明上下文窗口时，预算回退现在按实际 `employeeSystemPrompt` 估算固定层，而不是只按裸 Persona 估算；新增回归验证展开后的身份/安全/工具提示进入预算且仍能在精确边界执行。适配器定向 32 项、类型检查和生产构建/预算通过；第六批仍保持开发中，尚未宣称覆盖真实供应商 tokenizer 或完整 provider canary。
+
+随后补充有效上下文前置拒绝：`CharacterProfileRuntime` 在解析角色资料、世界权限、Skill 指令和世界规则后，再用实际固定文本对已有预算做一次校验；预算不足时在检索、创建运行时和外部 provider 调用前拒绝，避免用错误的裸 Persona 预算消耗历史空间。定向上下文 14 项与类型检查通过，第六批仍未完成真实供应商 tokenizer/canary 验收。
