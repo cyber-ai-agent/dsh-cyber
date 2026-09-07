@@ -26,7 +26,7 @@ import type { TurnAwareApprovalContinuationService } from '../services/turn-awar
  * The classifier's timeout is deliberately far below a conversational one. It
  * is one extra call per owner chat message, made in parallel with the turn, and
  * a slow or dead endpoint has to give up long before the turn does — the answer
- * is only ever a draft the owner may run later, never something the reply waits
+ * is a task linked to its existing source execution, never something the reply waits
  * on. Its own prompt asks for a category and two short strings, so the token
  * budget is small enough that this stays cheap next to the turn it accompanies.
  */
@@ -44,7 +44,7 @@ export function composeWorkSystem(options: {
 }): { work: WorkSystemService; taskIntent: ConversationTaskIntentService } {
   const work = new WorkSystemService({ store: options.store, groupTasks: options.groupTasks, skillRuntime: options.skillRuntime })
   options.continuations.setTaskContinuationHandler(async (workTurnId, actions) => work.continueAfterApproval(workTurnId, actions))
-  registerWorkSystemRoutes(options.router, { store: options.store, work, access: options.worldAccess })
+  registerWorkSystemRoutes(options.router, { store: options.store, work, access: options.worldAccess, runtime: options.worldRuntime })
   // Runs at open, next to the store's own turn recovery: a task left `running`
   // by the previous process can never finish on its own.
   const recovered = work.recoverAfterRestart()

@@ -189,6 +189,7 @@ function presentDomainEvent(type: DomainEventType, payload: Record<string, unkno
     // No `lifecycle`: these are one-off facts about the decision, not stages of
     // a task's execution, so they keep their own entry instead of folding into
     // the task lifecycle card.
+    case 'work.task.source.confirmed': return { category: 'task', status: 'success', summary: '用户已确认任务完成' }
     case 'work.task.proposed': return {
       category: 'task',
       status: 'pending',

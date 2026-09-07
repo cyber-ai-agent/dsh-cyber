@@ -1709,6 +1709,8 @@ export class SqliteStore {
    * and leaves the ledger rows intact with their links set to null.
    *
    * Only settled rows are eligible — a queued or running turn is live state.
+   * Pending source tasks retain their turn/run evidence. Owner confirmation
+   * events are durable decisions, not telemetry, and are retained as well.
    */
   pruneHistory(input: PruneHistoryInput): PruneHistoryResult {
     this.#assertWritable()
@@ -1722,14 +1724,18 @@ export class SqliteStore {
 
     return this.#transaction(() => {
       const workTurns = Number(this.database
-        .prepare(`DELETE FROM work_turns WHERE status IN ${settled} AND created_at < ?${scope === undefined ? '' : ' AND workspace_id = ?'}`)
+        .prepare(`DELETE FROM work_turns WHERE status IN ${settled}
+          AND NOT EXISTS (SELECT 1 FROM work_tasks task WHERE task.source_work_turn_id = work_turns.id AND task.status = 'draft' AND task.current_plan_revision = 0)
+          AND created_at < ?${scope === undefined ? '' : ' AND workspace_id = ?'}`)
         .run(...(scope === undefined ? [before] : [before, scope])).changes)
       // Runs whose turn is still live but which settled long ago.
       const agentRuns = Number(this.database
-        .prepare(`DELETE FROM agent_runs WHERE status IN ${settled} AND created_at < ?${scope === undefined ? '' : ' AND workspace_id = ?'}`)
+        .prepare(`DELETE FROM agent_runs WHERE status IN ${settled}
+          AND NOT EXISTS (SELECT 1 FROM work_tasks task WHERE task.source_work_turn_id = agent_runs.turn_id AND task.status = 'draft' AND task.current_plan_revision = 0)
+          AND created_at < ?${scope === undefined ? '' : ' AND workspace_id = ?'}`)
         .run(...(scope === undefined ? [before] : [before, scope])).changes)
       const domainEvents = Number(this.database
-        .prepare(`DELETE FROM domain_events WHERE created_at < ?${scope === undefined ? '' : ' AND workspace_id = ?'}`)
+        .prepare(`DELETE FROM domain_events WHERE type <> 'work.task.source.confirmed' AND created_at < ?${scope === undefined ? '' : ' AND workspace_id = ?'}`)
         .run(...(scope === undefined ? [before] : [before, scope])).changes)
       const modelInteractions = Number(this.database
         .prepare(`DELETE FROM model_interaction_logs WHERE created_at < ?${scope === undefined ? '' : ' AND workspace_id = ?'}`)

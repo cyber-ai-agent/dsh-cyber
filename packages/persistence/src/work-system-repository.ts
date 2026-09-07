@@ -772,6 +772,17 @@ export class WorkSystemRepository {
     })
   }
 
+  /** Called inside the caller's unit of work: status and audit event commit together. */
+  confirmSourceCompletion(task: WorkTask, source: WorkTaskSourceTurn, note: string): void {
+    this.transitionTask(task.id, ['draft'], 'completed')
+    this.#appendExecutionEvent({
+      workspaceId: task.workspaceId, worldId: task.worldId, type: 'work.task.source.confirmed',
+      actorId: 'owner', actorKind: 'owner', sessionId: source.sessionId, correlationId: source.workTurnId,
+      payload: { taskId: task.id, workTurnId: source.workTurnId, sourceStatus: source.status,
+        completionKind: 'owner-confirmed', note, agentRunIds: source.runs.map((run) => run.id) },
+    })
+  }
+
   #appendExecutionEvent(input: {
     workspaceId: string
     worldId: string

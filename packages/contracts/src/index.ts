@@ -1225,6 +1225,7 @@ export const DOMAIN_EVENT_TYPES = [
   'knowledge.retrieval.completed',
   /** A conversation turn asked for work, and the host recorded the draft task it owns. */
   'work.task.proposed',
+  'work.task.source.confirmed',
   /** The host could not decide whether a turn asked for work, so it recorded no task. */
   'work.task.proposal.failed',
 ] as const

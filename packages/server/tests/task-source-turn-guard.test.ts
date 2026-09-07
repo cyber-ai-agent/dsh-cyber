@@ -78,9 +78,9 @@ describe('a draft cannot run while the turn that proposed it is still running', 
     await expect(f.server.work.execute(task.id, { employeeIds: [f.employee.id] }))
       .rejects.toMatchObject({ code: 'work_task_source_turn_unsettled' })
 
-    // Nothing started: the task is untouched and no run appeared.
+    // No second execution started. The board follows the existing source run.
     const after = f.server.work.detail(task.id)
-    expect(after.task.status).toBe('draft')
+    expect(after.task.status).toBe('running')
     expect(after.runs).toHaveLength(0)
     expect(f.server.store.listWorldAgentRuns(f.world.id)).toHaveLength(runsBefore)
     expect(f.runtime.requests).toHaveLength(0)

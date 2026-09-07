@@ -117,7 +117,7 @@ function reportSubscriberError(error: unknown): void {
  */
 export function subscribeWorldLiveRefresh(
   worldId: string,
-  eventName: 'world-task' | 'world-artifact' | 'world-knowledge',
+  eventName: 'world-task' | 'world-artifact' | 'world-knowledge' | readonly ('world-task' | 'world-artifact' | 'world-knowledge')[],
   refresh: () => void | Promise<void>,
 ): () => void {
   let disposed = false
@@ -140,12 +140,13 @@ export function subscribeWorldLiveRefresh(
       if (dirty && !disposed) schedule()
     }
   }
-  const stopEvent = subscribeWorldLive(worldId, eventName, schedule)
+  const names = typeof eventName === 'string' ? [eventName] : eventName
+  const stops = [...new Set(names)].map((name) => subscribeWorldLive(worldId, name, schedule))
   const stopReady = subscribeWorldLive(worldId, 'ready', schedule)
   return () => {
     disposed = true
     if (timer !== undefined) window.clearTimeout(timer)
-    stopEvent()
+    for (const stop of stops) stop()
     stopReady()
   }
 }

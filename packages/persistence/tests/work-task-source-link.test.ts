@@ -173,7 +173,7 @@ describe('WorkTask source link', () => {
     expect(repository.listTasks(elsewhere.worldId)).toEqual([])
   })
 
-  it('keeps the task and its message reference when the settled source turn is pruned', async () => {
+  it('retains pending source evidence and only prunes it after the owner settles the task', async () => {
     const { store } = await testDatabase()
     const context = conversation(store, '清理世界')
     const repository = new WorkSystemRepository(store.database)
@@ -182,6 +182,9 @@ describe('WorkTask source link', () => {
     store.startWorkTurn(turn.id)
     store.completeWorkTurn(turn.id)
 
+    store.pruneHistory({ before: '2999-01-01T00:00:00.000Z' })
+    expect(store.getWorkTurn(turn.id)).toBeDefined()
+    repository.transitionTask(task.id, ['draft'], 'cancelled')
     const pruned = store.pruneHistory({ before: '2999-01-01T00:00:00.000Z' })
     expect(pruned.workTurns).toBeGreaterThanOrEqual(1)
     expect(store.getWorkTurn(turn.id)).toBeUndefined()
