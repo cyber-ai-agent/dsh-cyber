@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { subscribeWorldLive } from '../src/world-live-client.js'
 
@@ -50,6 +50,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   delete (globalThis as { EventSource?: unknown }).EventSource
 })
 
@@ -92,5 +93,21 @@ describe('subscribeWorldLive', () => {
     expect(FakeEventSource.instances.filter((item) => item.url.includes('world-c'))).toHaveLength(1)
     stopA()
     stopB()
+  })
+
+  it('keeps the shared connection through a short unmount/remount gap', () => {
+    vi.useFakeTimers()
+    const stop = subscribeWorldLive('world-grace', 'runtime', () => {})
+    const source = FakeEventSource.instances.at(-1)!
+    stop()
+
+    vi.advanceTimersByTime(249)
+    const remountedStop = subscribeWorldLive('world-grace', 'trace', () => {})
+    expect(FakeEventSource.instances.filter((item) => item.url.includes('world-grace'))).toHaveLength(1)
+    expect(source.closed).toBe(false)
+
+    remountedStop()
+    vi.advanceTimersByTime(250)
+    expect(source.closed).toBe(true)
   })
 })

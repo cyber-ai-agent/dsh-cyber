@@ -7,21 +7,23 @@ import type {
 } from '@dsh-cyber/contracts'
 
 import { headerValue } from '../http/request.js'
-import { isSseSequence, sseSequence, writeSse } from '../http/sse.js'
+import { isSseSequence, SseConnection, sseSequence, type SseConnectionOptions } from '../http/sse.js'
 
 interface WorldStreamClient {
   worldId: string
-  response: ServerResponse
+  connection: SseConnection
   lastSequence: number
 }
 
 export class WorldStreamHub {
   readonly #clients = new Set<WorldStreamClient>()
   readonly #heartbeat: NodeJS.Timeout
+  readonly #connectionOptions: SseConnectionOptions
 
-  constructor(heartbeatMs = 15_000) {
+  constructor(heartbeatMs = 15_000, connectionOptions: SseConnectionOptions = {}) {
+    this.#connectionOptions = connectionOptions
     this.#heartbeat = setInterval(() => {
-      for (const client of this.#clients) {
+      for (const client of [...this.#clients]) {
         const heartbeatEvent: WorldRuntimeStreamEnvelope = {
           contractVersion: 1,
           id: String(client.lastSequence),
@@ -31,7 +33,7 @@ export class WorldStreamHub {
           payload: {},
           createdAt: new Date().toISOString(),
         }
-        writeSse(client.response, 'heartbeat', heartbeatEvent, heartbeatEvent.id)
+        client.connection.send('heartbeat', heartbeatEvent, heartbeatEvent.id)
       }
     }, heartbeatMs)
     this.#heartbeat.unref()
@@ -58,6 +60,12 @@ export class WorldStreamHub {
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
     })
+    let client: WorldStreamClient
+    const connection = new SseConnection(response, () => this.#clients.delete(client), this.#connectionOptions)
+    client = { worldId, connection, lastSequence: snapshot.sequence }
+    this.#clients.add(client)
+    if (typeof response.once === 'function') response.once('close', () => connection.close())
+    request.once('close', () => connection.close())
     if (invalidCursor || after !== snapshot.sequence) {
       const recoveryRequired: WorldRuntimeStreamEnvelope = {
         contractVersion: 1,
@@ -72,7 +80,7 @@ export class WorldStreamHub {
         },
         createdAt: new Date().toISOString(),
       }
-      writeSse(response, 'recovery-required', recoveryRequired, recoveryRequired.id)
+      connection.send('recovery-required', recoveryRequired, recoveryRequired.id)
       const recoveryState: WorldRuntimeStreamEnvelope = {
         contractVersion: 1,
         id: String(snapshot.sequence),
@@ -82,9 +90,9 @@ export class WorldStreamHub {
         payload: snapshot as unknown as JsonObject,
         createdAt: new Date().toISOString(),
       }
-      writeSse(response, 'world-state', recoveryState, recoveryState.id)
+      connection.send('world-state', recoveryState, recoveryState.id)
     } else {
-      writeSse(response, 'ready', {
+      connection.send('ready', {
         contractVersion: 1,
         id: String(snapshot.sequence),
         worldId,
@@ -94,22 +102,19 @@ export class WorldStreamHub {
         createdAt: new Date().toISOString(),
       }, String(snapshot.sequence))
     }
-    const client = { worldId, response, lastSequence: snapshot.sequence }
-    this.#clients.add(client)
-    request.once('close', () => this.#clients.delete(client))
   }
 
   publish(event: WorldRuntimeStreamEnvelope): void {
-    for (const client of this.#clients) {
+    for (const client of [...this.#clients]) {
       if (client.worldId !== event.worldId) continue
-      writeSse(client.response, event.kind, event, event.id)
+      client.connection.send(event.kind, event, event.id)
       client.lastSequence = Math.max(client.lastSequence, event.sequence)
     }
   }
 
   close(): void {
     clearInterval(this.#heartbeat)
-    for (const client of this.#clients) client.response.end()
+    for (const client of [...this.#clients]) client.connection.close()
     this.#clients.clear()
   }
 }

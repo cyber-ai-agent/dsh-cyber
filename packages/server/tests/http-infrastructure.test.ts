@@ -43,6 +43,34 @@ class FakeResponse {
   }
 }
 
+class ThrowingResponse extends FakeResponse {
+  override write(_value: string | Buffer): boolean {
+    throw new Error('subscriber write failed')
+  }
+}
+
+class SlowResponse extends FakeResponse {
+  writableLength = 0
+  readonly #drainListeners: Array<() => void> = []
+
+  override write(value: string | Buffer): boolean {
+    const chunk = String(value)
+    this.chunks.push(chunk)
+    this.writableLength += Buffer.byteLength(chunk, 'utf8')
+    return false
+  }
+
+  once(event: string, listener: (...args: any[]) => void): this {
+    if (event === 'drain') this.#drainListeners.push(() => listener())
+    return this
+  }
+
+  drain(): void {
+    this.writableLength = 0
+    for (const listener of this.#drainListeners.splice(0)) listener()
+  }
+}
+
 function request(
   url: string,
   headers: IncomingMessage['headers'] = {},
@@ -229,6 +257,62 @@ describe('stream lifecycle', () => {
     expect(fake.text()).toContain('event: world-runtime')
     incoming.emit('close')
     expect(hub.clientCount).toBe(0)
+    hub.close()
+  })
+
+  it('isolates a subscriber write failure from healthy subscribers', () => {
+    const hub = new RuntimeStreamHub(60_000)
+    const throwing = new ThrowingResponse()
+    hub.connect('world-1', request('/api/worlds/world-1/live'), throwing as unknown as ServerResponse)
+    const healthy = response()
+    hub.connect('world-1', request('/api/worlds/world-1/live'), healthy.node)
+
+    hub.publish({
+      workspaceId: 'workspace-1',
+      worldId: 'world-1',
+      sessionId: 'session-1',
+      agentId: 'employee-1',
+      event: {
+        kind: 'turn.started',
+        source: 'test',
+        sourceSessionId: 'agent-session-1',
+        sourceSequence: 1,
+        metadata: {},
+      },
+    })
+
+    expect(hub.clientCount).toBe(1)
+    expect(healthy.fake.text()).toContain('event: runtime')
+    hub.close()
+  })
+
+  it('bounds a slow subscriber buffer and removes it without affecting healthy peers', () => {
+    const hub = new RuntimeStreamHub(60_000, { maxBufferedBytes: 512 })
+    const slow = new SlowResponse()
+    hub.connect('world-1', request('/api/worlds/world-1/live'), slow as unknown as ServerResponse)
+    const healthy = response()
+    hub.connect('world-1', request('/api/worlds/world-1/live'), healthy.node)
+
+    for (let index = 0; index < 10; index += 1) {
+      hub.publish({
+        workspaceId: 'workspace-1',
+        worldId: 'world-1',
+        sessionId: 'session-1',
+        agentId: 'employee-1',
+        event: {
+          kind: 'assistant.message',
+          source: 'test',
+          sourceSessionId: 'agent-session-1',
+          sourceSequence: index,
+          content: 'x'.repeat(100),
+          metadata: {},
+        },
+      })
+    }
+
+    expect(hub.clientCount).toBe(1)
+    expect(slow.writableEnded).toBe(true)
+    expect(healthy.fake.text()).toContain('event: runtime')
     hub.close()
   })
 
