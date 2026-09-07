@@ -1,0 +1,85 @@
+name: PR191 reviewed integration
+on:
+  push:
+    branches: [codex/trace-details-world-directory-20260907]
+    paths: [.github/workflows/pr191-integration-once.yml]
+permissions:
+  contents: write
+jobs:
+  integrate:
+    if: github.repository == 'cyber-ai-agent/dsh-cyber'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Merge only the reviewed main and preserve both feature contracts
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+          TARGET_MAIN: 17215335b4283996cad44d8a5a3281e397eeaa43
+        run: |
+          git fetch origin --prune
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git rev-parse HEAD^)" = 32c6b304b9372dac99f7deb7aac6aa5dde86c6cc
+          test "$(git rev-parse origin/main)" = "$TARGET_MAIN"
+          test "$(git rev-parse origin/codex/trace-details-world-directory-20260907)" = "$EXPECTED_HEAD"
+          git config user.name 'cyber-ai-agent'
+          git config user.email '318511541+cyber-ai-agent@users.noreply.github.com'
+          python3 - <<'PY'
+          import os, pathlib, subprocess
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True)
+          base = '7d6fa682214aad98aa1a4c7e38e6438c6547e3da'
+          trace = '044655f83c00043f7b8ff0bddbcd3e59c46a64c1'
+          main = os.environ['TARGET_MAIN']
+          shared = {'packages/contracts/src/index.ts', '.github/workflows/ci.yml', 'playwright.smoke.config.ts'}
+          changed = set(git('diff', '--name-only', trace, 'HEAD').splitlines())
+          assert changed == {'.github/workflows/ci.yml', '.github/workflows/pr191-integration-once.yml'}, changed
+          assert git('hash-object', '.github/workflows/ci.yml').strip() == 'a5af9a523b277ad247782b2d816053e4bf04deb1'
+          path = 'packages/contracts/src/index.ts'
+          anchor = 'export interface AgentTurnRequest {\n'
+          field = '  /** Public turn-start membership snapshot for read-only directory tools. */\n  worldDirectory?: import(\'./world-directory.js\').WorldDirectorySnapshot\n'
+          exports = "export * from './tool-trace.js'\nexport * from './world-directory.js'\n"
+          original = git('show', f'{base}:{path}')
+          assert original.count(anchor) == 1
+          expected_trace = original.replace(anchor, anchor + field, 1) + exports
+          assert git('show', f'{trace}:{path}') == expected_trace
+          main_contract = git('show', f'{main}:{path}')
+          assert 'CYBER_SCHEMA_VERSION = 49' in main_contract
+          assert "export { parseModelStatsQuery, ModelStatsQueryError } from './model-stats-query.js'" in main_contract
+          assert main_contract.count(anchor) == 1 and 'worldDirectory?:' not in main_contract
+          merged_contract = main_contract.replace(anchor, anchor + field, 1) + exports
+          smoke = 'playwright.smoke.config.ts'
+          old_smoke = git('show', f'{trace}:{smoke}')
+          main_smoke = git('show', f'{main}:{smoke}')
+          assert main_smoke == old_smoke.replace("'trace-evidence.spec.ts'", "'model-stats.spec.ts'")
+          merged_smoke = old_smoke.replace("'trace-evidence.spec.ts'", "'trace-evidence.spec.ts', 'model-stats.spec.ts'")
+          merged_ci = pathlib.Path('.github/workflows/ci.yml').read_text()
+          result = subprocess.run(['git', 'merge', '--no-commit', '--no-ff', main])
+          assert result.returncode in (0, 1), result.returncode
+          conflicts = set(git('diff', '--name-only', '--diff-filter=U').splitlines())
+          assert conflicts <= shared, f'Unexpected conflicts: {conflicts - shared}'
+          print('Reviewed conflicts:', sorted(conflicts))
+          pathlib.Path(path).write_text(merged_contract)
+          pathlib.Path(smoke).write_text(merged_smoke)
+          pathlib.Path('.github/workflows/ci.yml').write_text(merged_ci)
+          subprocess.run(['git', 'add', *sorted(shared)], check=True)
+          assert not git('diff', '--name-only', '--diff-filter=U').strip()
+          assert not git('diff', '--cached', '--name-only', '--', '.github/workflows/').strip(), 'Actions must not modify workflows'
+          subprocess.run(['git', 'diff', '--cached', '--check'], check=True)
+          subprocess.run(['git', 'commit', '-m', 'merge: integrate model stats fixes with trace evidence and world directory'], check=True)
+          subprocess.run(['git', 'merge-base', '--is-ancestor', main, 'HEAD'], check=True)
+          subprocess.run(['git', 'merge-base', '--is-ancestor', trace, 'HEAD'], check=True)
+          print('Integrated commit:', git('rev-parse', 'HEAD').strip())
+          PY
+      - name: Fast-forward only the authorized PR191 branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          test "$(git ls-remote origin refs/heads/codex/trace-details-world-directory-20260907 | cut -f1)" = "$EXPECTED_HEAD"
+          AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          echo "::add-mask::$AUTH"
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $AUTH" git push origin HEAD:refs/heads/codex/trace-details-world-directory-20260907
