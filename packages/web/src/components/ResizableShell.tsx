@@ -24,6 +24,7 @@ export function ResizableShell({
 }: ResizableShellProps) {
   const shellRef = useRef<HTMLDivElement>(null)
   const widthsRef = useRef({ leftWidth, rightWidth })
+  const resizeCleanupRef = useRef<(() => void) | null>(null)
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
   const paneScale = viewportWidth >= 3_200 ? 1.35 : viewportWidth >= 2_200 ? 1.18 : 1
 
@@ -37,13 +38,20 @@ export function ResizableShell({
     return () => window.removeEventListener('resize', updateViewport)
   }, [])
 
+  // A removed handle can send lostpointercapture to document rather than
+  // itself. Explicitly end the session on unmount and layout changes too.
+  useEffect(() => () => resizeCleanupRef.current?.(), [rightCollapsed, paneScale])
+
   const beginResize = useCallback((side: 'left' | 'right', startEvent: ReactPointerEvent) => {
+    if (startEvent.button !== 0 || resizeCleanupRef.current !== null) return
     const handle = startEvent.currentTarget
-    handle.setPointerCapture(startEvent.pointerId)
+    const pointerId = startEvent.pointerId
+    handle.setPointerCapture(pointerId)
     const originX = startEvent.clientX
     const initial = widthsRef.current
     const shellWidth = (shellRef.current?.clientWidth ?? window.innerWidth) / paneScale
     const onMove = (event: PointerEvent) => {
+      if (event.pointerId !== pointerId) return
       const delta = (event.clientX - originX) / paneScale
       const nextLeft = side === 'left'
         ? clamp(
@@ -61,18 +69,25 @@ export function ResizableShell({
         : initial.rightWidth
       onResize(nextLeft, nextRight)
     }
-    const onEnd = () => {
+    const cleanup = () => {
+      if (resizeCleanupRef.current !== cleanup) return
+      resizeCleanupRef.current = null
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onEnd)
       window.removeEventListener('pointercancel', onEnd)
-      window.removeEventListener('blur', onEnd)
-      handle.removeEventListener('lostpointercapture', onEnd)
+      window.removeEventListener('blur', cleanup)
+      window.removeEventListener('lostpointercapture', onEnd)
+      if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId)
     }
+    const onEnd = (event: PointerEvent) => {
+      if (event.pointerId === pointerId) cleanup()
+    }
+    resizeCleanupRef.current = cleanup
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onEnd)
     window.addEventListener('pointercancel', onEnd)
-    window.addEventListener('blur', onEnd)
-    handle.addEventListener('lostpointercapture', onEnd, { once: true })
+    window.addEventListener('blur', cleanup)
+    window.addEventListener('lostpointercapture', onEnd)
   }, [onResize, paneScale])
 
   const handleWidth = Math.round(5 * paneScale)
