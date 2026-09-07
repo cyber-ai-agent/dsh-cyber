@@ -52,6 +52,7 @@ import type { GroupTaskRoutingResult } from '../services/group-task-router.js'
 import type { PreparedGroupTurnPlanner } from '../services/prepared-group-turn-planner.js'
 import type { ConversationQueueService } from '../services/conversation-queue-service.js'
 import { GroupIntentRouter } from '../services/group-intent-router.js'
+import { isImageGenerationModel } from '../services/image-generation-service.js'
 import type { ConversationTaskIntentOutcome, ConversationTaskIntentService } from '../services/conversation-task-intent-service.js'
 import { listApprovalRequestViews } from '../services/approval-request-views.js'
 import type { HarnessToolApprovalService } from '../services/harness-tool-approval-service.js'
@@ -233,10 +234,19 @@ export function registerConversationRoutes(router: Router, dependencies: Convers
     // and settled once the turn has an id.
     // Track settlement without joining it: the response may carry the decision
     // when it is already there, and must never wait for one that is not.
+    // An image-model character answers only with pictures: the classifier
+    // would judge their message against the world's TEXT default model and
+    // record a misleading "任务意图判定失败" failure beside the image the turn
+    // actually produced. Skip classification for a solo turn whose resolved
+    // model generates images - there is no instruction for it to run.
+    const resolvedImageCharacter = employeeIds.length === 1
+      ? store.resolveModelProfile(world.workspaceId, world.id, employeeIds[0]!)
+      : undefined
+    const imageCharacterTurn = resolvedImageCharacter !== undefined && isImageGenerationModel(resolvedImageCharacter)
     let proposedTaskIntent: ReturnType<ConversationTaskIntentService['propose']> | undefined
     let intentSettled: ConversationTaskIntentOutcome | undefined
     const startTaskIntent = (): void => {
-      if (proposedTaskIntent !== undefined || taskIntent === undefined) return
+      if (imageCharacterTurn || proposedTaskIntent !== undefined || taskIntent === undefined) return
       proposedTaskIntent = taskIntent.propose({ workspaceId: world.workspaceId, worldId: world.id, prompt })
       proposedTaskIntent.then((outcome) => { intentSettled = outcome }, () => undefined)
     }
