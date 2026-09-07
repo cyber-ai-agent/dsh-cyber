@@ -1,0 +1,29 @@
+name: PR190 maintainer workspace
+on:
+  push:
+    branches: [codex/pr190-model-stats-fixes-20260907]
+    paths: [.github/workflows/pr190-maintainer-workspace.yml]
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Export exact reviewed contribution, not user state
+        run: |
+          git fetch origin --prune
+          test "$(git rev-parse origin/main)" = 7d6fa682214aad98aa1a4c7e38e6438c6547e3da
+          mkdir -p /tmp/pr190-review
+          git diff --binary 7d6fa682214aad98aa1a4c7e38e6438c6547e3da a4e2bdd3929c40b8ee8bd98b5cc8a1cd81494d07 > /tmp/pr190-review/pr190.patch
+          git show -s --format=fuller d723728c7322f2a6170b1c8738203ead1aea6b04 > /tmp/pr190-review/contributor.txt
+          git ls-tree -r a4e2bdd3929c40b8ee8bd98b5cc8a1cd81494d07 > /tmp/pr190-review/tree.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pr190-reviewed-source-patch
+          path: /tmp/pr190-review
+          retention-days: 1
