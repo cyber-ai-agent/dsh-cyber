@@ -1,0 +1,34 @@
+name: Task completion review workspace
+on:
+  push:
+    branches: [codex/task-completion-lifecycle-20260908]
+    paths: [.github/workflows/task-completion-workspace.yml]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: bce0a1545109af64afa41992d52f7e07b9cd04df
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Export verified baseline only
+        run: |
+          git fetch origin --prune
+          test "$(git rev-parse origin/main)" = bce0a1545109af64afa41992d52f7e07b9cd04df
+          git switch -c task-completion-baseline origin/main
+          git branch --show-current
+          git rev-parse HEAD origin/main
+          git merge-base HEAD origin/main
+          mkdir -p /tmp/task-completion-source
+          git rev-parse HEAD > /tmp/task-completion-source/base.txt
+          git bundle create /tmp/task-completion-source/source.bundle task-completion-baseline
+          sha256sum /tmp/task-completion-source/source.bundle > /tmp/task-completion-source/sha256.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: task-completion-baseline
+          path: /tmp/task-completion-source
+          retention-days: 1
