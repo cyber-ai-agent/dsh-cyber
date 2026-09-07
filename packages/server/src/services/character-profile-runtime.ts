@@ -9,7 +9,7 @@ import type {
   JsonObject,
   WorkMessage,
 } from '@dsh-cyber/contracts'
-import { assertContextInputFits, composeContextLayer, contextEnvelopeLayers } from '@dsh-cyber/contracts'
+import { assertContextInputFits, composeContextLayer, contextEnvelopeLayers, estimateTextTokens, planContextBudget } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 import type { CharacterSkillAdapterRegistry } from '../skills/skill-adapter.js'
 import type { WorldCharacterAuthority } from '@dsh-cyber/contracts/world-authority'
@@ -188,14 +188,23 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
     // memory, instead of being re-sent behind them on every request.
     const worldContext = await this.#composeWorldContext(agent, request.conversationId)
     // ContextPlanningRuntime can only see the raw revision before this layer
-    // resolves profile, authority, permission and Skill instructions. Recheck
-    // the exact fixed text now, before retrieval or a runtime lane is started,
-    // so an expanded effective persona cannot consume the history budget that
-    // the provider boundary must reserve for it.
-    if (request.contextBudget !== undefined) {
+    // resolves profile, authority, permission and Skill instructions. When
+    // its recognizable raw plan arrives, rebuild the allocation against the
+    // exact fixed text now. This gives retrieval the smaller, truthful history
+    // budget instead of letting the adapter reject an overfilled request later.
+    const rawFixedTokens = estimateTextTokens(revision.persona) + estimateTextTokens(request.prompt)
+    const effectiveContextBudget = request.contextBudget !== undefined
+      && request.contextBudget.fixedTokens === rawFixedTokens
+      ? planContextBudget({
+          contextWindow: request.contextBudget.contextWindow,
+          maxOutputTokens: request.contextBudget.maxOutputTokens,
+          fixedText: [effectivePersona, ...(worldContext === undefined ? [] : [worldContext.text]), turnPrompt],
+        })
+      : request.contextBudget
+    if (effectiveContextBudget !== undefined) {
       assertContextInputFits(
         [effectivePersona, ...(worldContext === undefined ? [] : [worldContext.text]), turnPrompt],
-        request.contextBudget.inputBudgetTokens,
+        effectiveContextBudget.inputBudgetTokens,
       )
     }
     const composed = await this.#context?.compose({
@@ -208,7 +217,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       history: request.history ?? [],
       observedThroughSequence: durableObserved ?? request.observedThroughSequence ?? 0,
       ...(request.workTurnId === undefined ? {} : { workTurnId: request.workTurnId }),
-      ...(request.contextBudget === undefined ? {} : { memoryBudgetTokens: request.contextBudget.memoryTokens }),
+      ...(effectiveContextBudget === undefined ? {} : { memoryBudgetTokens: effectiveContextBudget.memoryTokens }),
     })
     const memoryContext = composed !== undefined
       ? undefined
@@ -216,7 +225,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
           employeeId: agent.id,
           conversationId: request.conversationId,
           prompt: request.prompt,
-          ...(request.contextBudget === undefined ? {} : { budgetTokens: request.contextBudget.memoryTokens }),
+          ...(effectiveContextBudget === undefined ? {} : { budgetTokens: effectiveContextBudget.memoryTokens }),
         })
     const prompt = composed?.prompt
       ?? (memoryContext === undefined
@@ -249,7 +258,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
         envelope: composed.envelope,
         memoryHits: composed.memoryHits,
         coverage: composed.coverage,
-        ...(request.contextBudget === undefined ? {} : { budget: request.contextBudget }),
+        ...(effectiveContextBudget === undefined ? {} : { budget: effectiveContextBudget }),
       })
     }
 
@@ -268,6 +277,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       result = await this.#inner.runTurn({
         ...request,
         agent,
+        ...(effectiveContextBudget === undefined ? {} : { contextBudget: effectiveContextBudget }),
         prompt,
         // The composer owns the cache decision because it owns the layer order
         // that makes the prefix cacheable. The provider adapter only maps it.
@@ -325,7 +335,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
           envelope: composed.envelope,
           memoryHits: composed.memoryHits,
           coverage: composed.coverage,
-          ...(request.contextBudget === undefined ? {} : { budget: request.contextBudget }),
+          ...(effectiveContextBudget === undefined ? {} : { budget: effectiveContextBudget }),
           ...(result.contextUsage === undefined ? {} : { runtime: result.contextUsage }),
         })
       } catch {

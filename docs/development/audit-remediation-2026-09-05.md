@@ -119,4 +119,4 @@ Group HTTP 接线检查点：`/chat` 的 discussion/task immediate/queued 在 pl
 
 同日第六批补充：Harness adapter 在 direct embedder 未提供 `ContextBudget`、但 provider profile 声明上下文窗口时，预算回退现在按实际 `employeeSystemPrompt` 估算固定层，而不是只按裸 Persona 估算；新增回归验证展开后的身份/安全/工具提示进入预算且仍能在精确边界执行。适配器定向 32 项、类型检查和生产构建/预算通过；第六批仍保持开发中，尚未宣称覆盖真实供应商 tokenizer 或完整 provider canary。
 
-随后补充有效上下文前置拒绝：`CharacterProfileRuntime` 在解析角色资料、世界权限、Skill 指令和世界规则后，再用实际固定文本对已有预算做一次校验；预算不足时在检索、创建运行时和外部 provider 调用前拒绝，避免用错误的裸 Persona 预算消耗历史空间。定向上下文 14 项与类型检查通过，第六批仍未完成真实供应商 tokenizer/canary 验收。
+随后补充有效上下文前置拒绝与重分配：`CharacterProfileRuntime` 在解析角色资料、世界权限、Skill 指令和世界规则后，用实际固定文本重建可识别的 planner 预算，并在检索、创建运行时和外部 provider 调用前复核；预算不足时立即拒绝，避免用错误的裸 Persona 预算消耗历史空间。定向上下文 15 项与类型检查通过，第六批仍未完成真实供应商 tokenizer/canary 验收。

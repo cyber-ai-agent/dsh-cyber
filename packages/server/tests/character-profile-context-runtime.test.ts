@@ -120,6 +120,44 @@ describe('CharacterProfileRuntime context composition', () => {
     expect(inner.requests).toHaveLength(0)
   })
 
+  it('reallocates a planner budget after the effective persona expands', async () => {
+    const { store, world, employee } = await setup()
+    const session = store.createSession({
+      workspaceId: world.workspaceId,
+      worldId: world.id,
+      kind: 'direct',
+      title: '私聊',
+      participants: [
+        { participantId: 'owner', kind: 'owner' },
+        { participantId: employee.id, kind: 'employee' },
+      ],
+    })
+    const inner = new CaptureRuntime()
+    const runtime = new CharacterProfileRuntime(inner, store)
+    const revision = store.getEmployeeRevision(employee.id, employee.currentRevision)!
+    const prompt = '继续处理'
+    const rawBudget = planContextBudget({
+      contextWindow: 8_192,
+      maxOutputTokens: 1_024,
+      fixedText: [revision.persona, prompt],
+    })
+
+    await runtime.runTurn({
+      agent: employee,
+      revision,
+      conversationId: session.id,
+      history: [],
+      observedThroughSequence: 0,
+      prompt,
+      workspacePath: '/tmp/world',
+      contextBudget: rawBudget,
+    })
+
+    const effective = inner.requests[0]?.contextBudget
+    expect(effective?.fixedTokens).toBeGreaterThan(rawBudget.fixedTokens)
+    expect(effective?.historyTokens).toBeLessThan(rawBudget.historyTokens)
+  })
+
   it('hands the runtime lane only the recent raw turns and retrieves the rest', async () => {
     const { store, workspace, world, employee, memory } = await setup()
     const session = store.createSession({
