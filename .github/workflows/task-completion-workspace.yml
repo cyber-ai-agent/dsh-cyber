@@ -37,7 +37,7 @@ jobs:
           pathlib.Path('/tmp/task-completion.patch').write_bytes(patch)
           print('Verified patch bytes:', len(patch))
           PY
-      - name: Apply implementation and remove temporary transport
+      - name: Apply verified source changes only
         run: |
           set -euo pipefail
           git apply --check --unidiff-zero /tmp/task-completion.patch
@@ -45,6 +45,10 @@ jobs:
           git rm .github/workflows/task-completion-workspace.yml .github/task-completion-transfer/part-0 .github/task-completion-transfer/part-1 .github/task-completion-transfer/part-2
           git diff --cached --check
           test "$(git write-tree)" = d13abba2fe8da6f43f57bec7d3163d775ecc93c3
+          # This job has contents permission only. Workflow updates and removal
+          # are deliberately left to the authorized maintainer connector.
+          git restore --source=HEAD --staged --worktree .github/workflows/ci.yml .github/workflows/task-completion-workspace.yml
+          test -z "$(git diff --cached --name-only -- .github/workflows)"
           git config user.name 'cyber-ai-agent'
           git config user.email '318511541+cyber-ai-agent@users.noreply.github.com'
           git commit -m "fix(tasks): reconcile source conversation completion and confirm saved results without rerunning"
