@@ -2353,6 +2353,18 @@ const MIGRATIONS: readonly Migration[] = [
         WHERE work_turn_id IS NOT NULL;
     `,
   },
+  {
+    version: 49,
+    name: 'model-interaction-provider-and-cache-facts',
+    sql: `
+      -- No FK: deleting a provider must not rewrite the attribution of old logs.
+      ALTER TABLE model_interaction_logs ADD COLUMN provider_id TEXT;
+      ALTER TABLE model_interaction_logs ADD COLUMN provider_name TEXT;
+      ALTER TABLE model_interaction_logs ADD COLUMN tokens_cached INTEGER CHECK (tokens_cached >= 0);
+      CREATE INDEX model_interaction_stats_provider_idx
+        ON model_interaction_logs(workspace_id, provider_id, created_at);
+    `,
+  },
 ]
 
 /**

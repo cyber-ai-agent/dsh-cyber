@@ -801,6 +801,7 @@ describe('SqliteStore', () => {
     seeded.createWorkspace({ name: '迁移前工作区' })
     seeded.close()
     const legacy = new DatabaseSync(databasePath)
+    removeModelStatsFieldsForLegacyFixture(legacy)
     legacy.exec(`
       DROP TABLE conversation_submission_claims;
       DROP TABLE model_assignments;
@@ -956,6 +957,7 @@ describe('SqliteStore', () => {
     // Rewind the file to the schema shipped before the memory index existed,
     // keeping every milestone that database already held.
     const legacy = new DatabaseSync(path)
+    removeModelStatsFieldsForLegacyFixture(legacy)
     legacy.exec(`
       DROP INDEX work_tasks_source_message_idx;
       DROP INDEX work_tasks_source_work_turn_idx;
@@ -1059,6 +1061,7 @@ describe('SqliteStore', () => {
     // Rewind the file to the schema shipped before context snapshots existed,
     // keeping every row that database already held.
     const legacy = new DatabaseSync(path)
+    removeModelStatsFieldsForLegacyFixture(legacy)
     legacy.exec(`
       DROP INDEX work_tasks_source_message_idx;
       DROP INDEX work_tasks_source_work_turn_idx;
@@ -1455,6 +1458,7 @@ describe('SqliteStore', () => {
     // Rewind past both 37 (memory index) and 38 (origin) so the upgrade replays
     // the whole stack the way a 36 database in the field would.
     const downgraded = new DatabaseSync(path)
+    removeModelStatsFieldsForLegacyFixture(downgraded)
     downgraded.exec(`
       DROP INDEX work_tasks_source_message_idx;
       DROP INDEX work_tasks_source_work_turn_idx;
@@ -1543,6 +1547,7 @@ describe('SqliteStore', () => {
     // Rewind only the provider migration, keeping the duplicate legacy rows
     // that v39 allowed so the forward migration must preserve them.
     const legacy = new DatabaseSync(path)
+    removeModelStatsFieldsForLegacyFixture(legacy)
     legacy.exec(`
       DROP INDEX work_tasks_source_message_idx;
       DROP INDEX work_tasks_source_work_turn_idx;
@@ -1619,6 +1624,7 @@ describe('SqliteStore', () => {
 
     // Rewind only the source-link migration, keeping every row the file held.
     const legacy = new DatabaseSync(path)
+    removeModelStatsFieldsForLegacyFixture(legacy)
     legacy.exec(`
       DROP INDEX work_tasks_source_message_idx;
       DROP INDEX work_tasks_source_work_turn_idx;
@@ -1695,6 +1701,7 @@ describe('SqliteStore', () => {
 
     // Rewind only the watermark migration, keeping every row the file held.
     const legacy = new DatabaseSync(path)
+    removeModelStatsFieldsForLegacyFixture(legacy)
     legacy.exec(`
       DROP INDEX knowledge_claims_not_current_idx;
       DROP INDEX knowledge_relations_not_current_idx;
@@ -1765,6 +1772,7 @@ describe('SqliteStore', () => {
 
     // Rewind only the invalidation migration, keeping every row the file held.
     const legacy = new DatabaseSync(path)
+    removeModelStatsFieldsForLegacyFixture(legacy)
     legacy.exec(`
       DROP INDEX knowledge_claims_not_current_idx;
       DROP INDEX knowledge_relations_not_current_idx;
@@ -1847,6 +1855,7 @@ describe('SqliteStore', () => {
     // Rewind only the new time-fact migration. This reproduces a schema 47
     // file whose only run timestamp was the old started_at value.
     const legacy = new DatabaseSync(path)
+    removeModelStatsFieldsForLegacyFixture(legacy)
     legacy.exec(`
       DROP INDEX idx_task_schedule_runs_schedule;
       DROP INDEX task_schedule_runs_work_turn_idx;
@@ -1948,3 +1957,15 @@ describe('world trace watermark', () => {
     expect(store.worldTraceWatermark(world.id)).toBe(store.worldTraceWatermark(world.id))
   })
 })
+
+/** Undo v49 too when constructing a real pre-v49 fixture from today's schema. */
+function removeModelStatsFieldsForLegacyFixture(database: DatabaseSync): void {
+  const columns = database.prepare('PRAGMA table_info(model_interaction_logs)').all() as Array<{ name: string }>
+  if (!columns.some((column) => column.name === 'provider_id')) return
+  database.exec(`
+    DROP INDEX model_interaction_stats_provider_idx;
+    ALTER TABLE model_interaction_logs DROP COLUMN provider_id;
+    ALTER TABLE model_interaction_logs DROP COLUMN provider_name;
+    ALTER TABLE model_interaction_logs DROP COLUMN tokens_cached;
+  `)
+}

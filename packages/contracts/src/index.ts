@@ -1,7 +1,7 @@
 import type { WorldCharacterAuthority } from './world-authority.js'
 import type { UiLocale } from './locales.js'
 
-export const CYBER_SCHEMA_VERSION = 48 as const
+export const CYBER_SCHEMA_VERSION = 49 as const
 
 export * from './runtime-access.js'
 export * from './locales.js'
@@ -786,6 +786,9 @@ export interface ModelInteractionLog {
   modelId: string
   /** provider 展示名（模型配置显示名，或默认 DSH 模型） */
   provider: string
+  /** Connection identity captured when recording; absent on legacy records. */
+  providerId?: string
+  providerName?: string
   status: ModelInteractionLogStatus
   errorCode?: string
   errorMessage?: string
@@ -802,6 +805,8 @@ export interface ModelInteractionLog {
   tokensPrompt?: number
   tokensCompletion?: number
   tokensTotal?: number
+  /** Reported cache hits; NULL/absent is unknown, not a zero. */
+  tokensCached?: number
   createdAt: IsoTimestamp
 }
 
@@ -815,6 +820,9 @@ export interface RecordModelInteractionInput {
   source: ModelInteractionLogSource
   modelId: string
   provider: string
+  /** Connection identity captured when recording; absent on legacy records. */
+  providerId?: string
+  providerName?: string
   status: ModelInteractionLogStatus
   errorCode?: string
   errorMessage?: string
@@ -827,6 +835,7 @@ export interface RecordModelInteractionInput {
   tokensPrompt?: number
   tokensCompletion?: number
   tokensTotal?: number
+  tokensCached?: number
 }
 
 export interface ModelInteractionLogFilter {
@@ -849,7 +858,7 @@ export type ModelStatsGroupBy = 'all' | 'provider'
 
 export interface ModelStatsQueryParams {
   groupBy: ModelStatsGroupBy
-  /** Provider name (from logs) to filter; only used when groupBy === 'provider' */
+  /** Opaque key from response.providers; legacy raw log labels are also accepted. */
   providerId?: string
   /** ISO-8601 inclusive lower bound; defaults to now-7d server-side when absent. */
   from?: string
@@ -888,11 +897,19 @@ export interface ModelStatsItem {
   hasCacheData?: boolean
 }
 
+export interface ModelStatsProvider {
+  id: string
+  name: string
+  /** Legacy source labels cannot be reliably attributed to a connection. */
+  legacy: boolean
+}
+
 export interface ModelStatsResponse {
   summary: ModelStatsSummary
   items: ModelStatsItem[]
   /** Distinct provider values found in logs, for the left-panel filter list */
   distinctProviders?: string[]
+  providers?: ModelStatsProvider[]
 }
 
 
@@ -1472,3 +1489,5 @@ export type {
   SkillCatalogSource,
   PersistentApprovalCapability,
 } from './skill-runtime.js'
+
+export { parseModelStatsQuery, ModelStatsQueryError } from './model-stats-query.js'

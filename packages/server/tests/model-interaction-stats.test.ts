@@ -1,4 +1,4 @@
-import { mkdtemp } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -8,13 +8,17 @@ import { ModelInteractionService } from '../src/services/model-interaction-servi
 import { SqliteStore } from '@dsh-cyber/persistence'
 
 const stores: SqliteStore[] = []
+const directories: string[] = []
 
 afterEach(async () => {
   for (const store of stores.splice(0)) await store.close()
+  for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true })
 })
 
 async function makeStore() {
-  const path = join(tmpdir(), `dsh-cyber-stats-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-cyber-stats-'))
+  directories.push(directory)
+  const path = join(directory, 'test.db')
   const store = await SqliteStore.open(path)
   stores.push(store)
   return store
@@ -44,7 +48,7 @@ describe('ModelInteractionService aggregateStats (unit)', () => {
       provider: 'OpenAI',
       status: 'success',
       prompt: 'hello',
-      response: 'hi',
+      responseCharCount: 2,
       durationMs: 100,
       tokenUsage: { prompt: 10, completion: 5, total: 15 },
       httpStatus: 200,
@@ -55,7 +59,7 @@ describe('ModelInteractionService aggregateStats (unit)', () => {
       provider: 'OpenAI',
       status: 'success',
       prompt: 'world',
-      response: 'earth',
+      responseCharCount: 5,
       durationMs: 200,
       tokenUsage: { prompt: 20, completion: 10, total: 30 },
       httpStatus: 200,
@@ -66,7 +70,7 @@ describe('ModelInteractionService aggregateStats (unit)', () => {
       provider: 'OpenAI',
       status: 'failed',
       prompt: 'error',
-      response: '',
+      responseCharCount: 0,
       durationMs: 50,
       tokenUsage: { prompt: 3, completion: 0, total: 3 },
       httpStatus: 500,
@@ -85,9 +89,9 @@ describe('ModelInteractionService aggregateStats (unit)', () => {
     const wsId = store.createWorkspace({ name: 'stats-test' }).id
     const svc = new ModelInteractionService(store)
 
-    svc.recordTurn({ workspaceId: wsId, modelId: 'gpt-4', provider: 'OpenAI', status: 'success', prompt: 'a', response: 'b', durationMs: 100, tokenUsage: { prompt: 10, completion: 5, total: 15 }, httpStatus: 200 })
-    svc.recordTurn({ workspaceId: wsId, modelId: 'claude-3', provider: 'Anthropic', status: 'success', prompt: 'c', response: 'd', durationMs: 200, tokenUsage: { prompt: 20, completion: 10, total: 30 }, httpStatus: 200 })
-    svc.recordTurn({ workspaceId: wsId, modelId: 'claude-3', provider: 'Anthropic', status: 'failed', prompt: 'e', response: '', durationMs: 50, tokenUsage: { prompt: 2, completion: 0, total: 2 }, httpStatus: 429 })
+    svc.recordTurn({ workspaceId: wsId, modelId: 'gpt-4', provider: 'OpenAI', status: 'success', prompt: 'a', responseCharCount: 1, durationMs: 100, tokenUsage: { prompt: 10, completion: 5, total: 15 }, httpStatus: 200 })
+    svc.recordTurn({ workspaceId: wsId, modelId: 'claude-3', provider: 'Anthropic', status: 'success', prompt: 'c', responseCharCount: 1, durationMs: 200, tokenUsage: { prompt: 20, completion: 10, total: 30 }, httpStatus: 200 })
+    svc.recordTurn({ workspaceId: wsId, modelId: 'claude-3', provider: 'Anthropic', status: 'failed', prompt: 'e', responseCharCount: 0, durationMs: 50, tokenUsage: { prompt: 2, completion: 0, total: 2 }, httpStatus: 429 })
 
     // All records across all providers
     const all = svc.aggregateStats(wsId, { groupBy: 'all' })
@@ -116,7 +120,7 @@ describe('ModelInteractionService aggregateStats (unit)', () => {
     const svc = new ModelInteractionService(store)
 
     // Image generation turn typically has no token usage fields
-    svc.recordTurn({ workspaceId: wsId, modelId: 'image-model', provider: 'img-provider', status: 'success', prompt: 'draw', response: 'url', durationMs: 5000 })
+    svc.recordTurn({ workspaceId: wsId, modelId: 'image-model', provider: 'img-provider', status: 'success', prompt: 'draw', responseCharCount: 3, durationMs: 5000 })
 
     const result = svc.aggregateStats(wsId, { groupBy: 'provider', providerId: 'img-provider' })
     expect(result.summary.totalRequests).toBe(1)
@@ -130,7 +134,7 @@ describe('ModelInteractionService aggregateStats (unit)', () => {
     const wsId = store.createWorkspace({ name: 'stats-test' }).id
     const svc = new ModelInteractionService(store)
 
-    svc.recordTurn({ workspaceId: wsId, modelId: 'gpt-4', provider: 'OpenAI', status: 'success', prompt: 'hi', response: 'hello', durationMs: 100, tokenUsage: { prompt: 5, completion: 3, total: 8 }, httpStatus: 200 })
+    svc.recordTurn({ workspaceId: wsId, modelId: 'gpt-4', provider: 'OpenAI', status: 'success', prompt: 'hi', responseCharCount: 5, durationMs: 100, tokenUsage: { prompt: 5, completion: 3, total: 8 }, httpStatus: 200 })
 
     // Default window (last 7 days) should include the record
     const all = svc.aggregateStats(wsId, { groupBy: 'all' })

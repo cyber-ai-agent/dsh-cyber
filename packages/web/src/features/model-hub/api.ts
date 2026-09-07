@@ -216,52 +216,15 @@ export async function setProfileImageFlag(workspaceId: string, profileId: string
   })
 }
 
-export type ModelStatsGroupBy = 'all' | 'provider'
-
-export interface ModelStatsItem {
-  id: string
-  name?: string
-  /** world display name for 'all' groupBy; undefined when not applicable */
-  worldName?: string
-  /** provider display name when groupBy === 'provider'; undefined otherwise */
-  providerName?: string
-  tokensSent: number
-  tokensReceived: number
-  /** Cached prompt tokens served from provider cache. 0 or absent when provider did not report cache. */
-  tokensCached?: number
-  requests: number
-  toolCalls: number
-  successCount: number
-  avgLatencyMs?: number
-  /** true when at least one record reported a cached prompt token count */
-  hasCacheData?: boolean
-}
-
-export interface ModelStatsResponse {
-  summary: {
-    totalTokensSent: number
-    totalTokensReceived: number
-    tokensCached?: number
-    totalRequests: number
-    totalToolCalls: number
-    successCount: number
-    avgLatencyMs: number
-    successRate: number
-  }
-  items: ModelStatsItem[]
-  /** Distinct provider values from logs, used as filter keys for the left sidebar */
-  distinctProviders?: string[]
-}
+export type { ModelStatsGroupBy, ModelStatsItem, ModelStatsResponse } from '@dsh-cyber/contracts'
 
 export async function fetchModelStats(
   workspaceId: string,
-  params?: { groupBy?: ModelStatsGroupBy; from?: string; to?: string; providerId?: string },
-): Promise<ModelStatsResponse> {
+  params: Partial<import('@dsh-cyber/contracts').ModelStatsQueryParams> = {},
+  signal?: AbortSignal,
+): Promise<import('@dsh-cyber/contracts').ModelStatsResponse> {
   const qs = new URLSearchParams()
-  if (params?.groupBy !== undefined) qs.set('groupBy', params.groupBy)
-  if (params?.from !== undefined) qs.set('from', params.from)
-  if (params?.to !== undefined) qs.set('to', params.to)
-  if (params?.providerId !== undefined) qs.set('providerId', params.providerId)
+  for (const [key, value] of Object.entries(params)) if (value !== undefined) qs.set(key, value)
   const query = qs.toString()
-  return api<ModelStatsResponse>(`/api/workspaces/${enc(workspaceId)}/model-stats${query.length === 0 ? '' : `?${query}`}`)
+  return api(`/api/workspaces/${enc(workspaceId)}/model-stats${query ? `?${query}` : ''}`, signal === undefined ? undefined : { signal })
 }

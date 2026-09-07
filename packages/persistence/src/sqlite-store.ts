@@ -61,11 +61,8 @@ import {
   type ModelInteractionLogPage,
   type ModelInteractionLogSource,
   type ModelInteractionLogStatus,
-  type ModelStatsGroupBy,
   type ModelStatsQueryParams,
   type ModelStatsResponse,
-  type ModelStatsItem,
-  type ModelStatsSummary,
   type ModelProfile,
   type ModelCapabilities,
   type ModelProfileOrigin,
@@ -118,6 +115,8 @@ import {
   type WorkspaceSnapshot,
 } from '@dsh-cyber/contracts'
 import type { CharacterSkillAction } from '@dsh-cyber/contracts/skill-runtime'
+
+import { ModelStatsRepository } from './model-stats-repository.js'
 
 import { DatabaseCorruptError, EntityNotFoundError, PersistenceError } from './errors.js'
 import { CompletionJobRepository } from './completion-job-repository.js'
@@ -1547,6 +1546,14 @@ export class SqliteStore {
     assertOptionalCount('tokens prompt', input.tokensPrompt)
     assertOptionalCount('tokens completion', input.tokensCompletion)
     assertOptionalCount('tokens total', input.tokensTotal)
+    assertOptionalCount('tokens cached', input.tokensCached)
+    if (input.tokensCached !== undefined && input.tokensPrompt !== undefined && input.tokensCached > input.tokensPrompt) {
+      throw new PersistenceError('Cached tokens cannot exceed prompt tokens')
+    }
+    if (input.providerId !== undefined) {
+      const provider = this.getModelProvider(input.providerId)
+      if (provider !== undefined && provider.workspaceId !== workspace.id) throw new PersistenceError('Model log provider belongs to another workspace')
+    }
 
     const log: ModelInteractionLog = {
       id: this.#idFactory(),
@@ -1578,6 +1585,9 @@ export class SqliteStore {
     if (input.tokensPrompt !== undefined) log.tokensPrompt = input.tokensPrompt
     if (input.tokensCompletion !== undefined) log.tokensCompletion = input.tokensCompletion
     if (input.tokensTotal !== undefined) log.tokensTotal = input.tokensTotal
+    if (input.tokensCached !== undefined) log.tokensCached = input.tokensCached
+    if (input.providerId !== undefined) log.providerId = input.providerId
+    if (input.providerName !== undefined) log.providerName = input.providerName.trim().slice(0, 120)
 
     this.database
       .prepare(
@@ -1586,8 +1596,8 @@ export class SqliteStore {
            source, model_id, provider,
            status, error_code, error_message, http_status, prompt_message_count, prompt_char_count,
            response_char_count, tool_call_count, duration_ms, tokens_prompt,
-           tokens_completion, tokens_total, created_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           tokens_completion, tokens_total, created_at, provider_id, provider_name, tokens_cached
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         log.id,
@@ -1613,6 +1623,9 @@ export class SqliteStore {
         log.tokensCompletion ?? null,
         log.tokensTotal ?? null,
         log.createdAt,
+        log.providerId ?? null,
+        log.providerName ?? null,
+        log.tokensCached ?? null,
       )
     return log
   }
@@ -1733,162 +1746,10 @@ export class SqliteStore {
       .run(workspaceId).changes)
   }
 
-  /**
-   * Aggregates model interaction statistics for a workspace, grouped by the
-   * requested dimension. Uses a single SQL query per group-by strategy to avoid
-   * loading raw rows into application memory.
-   */
+  /** SQL aggregation returns only grouped results, never all raw log rows. */
   aggregateModelStats(workspaceId: string, params: ModelStatsQueryParams): ModelStatsResponse {
     this.#requireWorkspace(workspaceId)
-    const groupBy = (params.groupBy ?? 'all') as ModelStatsGroupBy
-    if (groupBy !== 'all' && groupBy !== 'provider') {
-      throw new PersistenceError('Model stats groupBy must be all/provider')
-    }
-    const now = new Date().toISOString()
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
-    const from = params.from ?? sevenDaysAgo
-    const to = params.to ?? now
-    const baseWhere = 'workspace_id = ? AND created_at >= ? AND created_at <= ?'
-    const baseParams: Array<string | number> = [workspaceId, from, to]
-
-    // Grouped queries - fetch raw rows and aggregate in JS to avoid sqlite
-    // json_group_object + aggregate nesting limitation.
-    interface RawLog {
-      id: string
-      world_id?: string | null
-      employee_id?: string | null
-      model_id: string
-      provider: string
-      status: string
-      tokens_prompt?: number | null
-      tokens_completion?: number | null
-      tool_calls?: number | null
-      duration_ms: number
-      created_at: string
-    }
-
-    const providerFilter = groupBy === 'provider' && params.providerId !== undefined
-      ? ' AND provider = ?'
-      : ''
-    const rows = this.database
-      .prepare(`SELECT
-        id, world_id, employee_id, model_id, provider, status,
-        tokens_prompt, tokens_completion, tool_call_count, duration_ms, created_at
-        FROM model_interaction_logs
-        WHERE ${baseWhere}${providerFilter}
-        ORDER BY created_at DESC, id DESC`)
-      .all(...(providerFilter ? [workspaceId, from, to, params.providerId!] : baseParams)) as unknown as RawLog[]
-
-    function buildStats(items: RawLog[]) {
-      const requests = items.length
-      return {
-        tokensSent: items.reduce((s, r) => s + (r.tokens_prompt ?? 0), 0),
-        tokensReceived: items.reduce((s, r) => s + (r.tokens_completion ?? 0), 0),
-        requests,
-        toolCalls: items.reduce((s, r) => s + (r.tool_calls ?? 0), 0),
-        successCount: items.filter((r) => r.status === 'success').length,
-        avgLatencyMs: requests === 0 ? 0 : Math.round(items.reduce((s, r) => s + r.duration_ms, 0) / requests),
-      }
-    }
-
-    // Build lookup maps.
-    const worldNameMap = Object.fromEntries(
-      (this.database.prepare(`SELECT id, name FROM worlds`).all() as { id: string; name: string }[])
-        .map((w) => [w.id, w.name]),
-    )
-    const empNameMap = Object.fromEntries(
-      (this.database.prepare(`SELECT id, display_name FROM employee_instances`).all() as { id: string; display_name: string }[])
-        .map((e) => [e.id, e.display_name]),
-    )
-    const profileNameMap = Object.fromEntries(
-      (this.database.prepare(`SELECT model_id, display_name FROM model_profiles WHERE workspace_id = ?`)
-        .all(workspaceId) as { model_id: string; display_name: string }[])
-        .map((m) => [m.model_id, m.display_name]),
-    )
-
-    let items: ModelStatsItem[]
-    if (groupBy === 'all') {
-      // Group by employee (system = no employee, or each employee separately).
-      const buckets = new Map<string, RawLog[]>()
-      for (const row of rows) {
-        const key = row.employee_id ?? ''
-        const arr = buckets.get(key) ?? []
-        arr.push(row)
-        buckets.set(key, arr)
-      }
-      items = Array.from(buckets.entries()).map(([id, rRows]) => {
-        const s = buildStats(rRows)
-        const entry: ModelStatsItem = {
-          id,
-          tokensSent: s.tokensSent,
-          tokensReceived: s.tokensReceived,
-          requests: s.requests,
-          toolCalls: s.toolCalls,
-          successCount: s.successCount,
-          avgLatencyMs: s.avgLatencyMs,
-        }
-        if (id === '') {
-          entry.name = '系统'
-        } else {
-          entry.name = empNameMap[id] ?? '（未知）'
-          const sample = rRows.find((r) => r.employee_id === id)
-          if (sample?.world_id !== null && sample?.world_id !== undefined) {
-            const wn = worldNameMap[sample.world_id]
-            if (wn !== undefined) entry.worldName = wn
-          }
-        }
-        return entry
-      })
-      items.sort((a, b) => b.requests - a.requests || (a.name ?? '').localeCompare(b.name ?? ''))
-    } else {
-      // groupBy === 'provider': show only models that have actual log entries
-      // for this provider, ordered by request count descending.
-      const modelBuckets = new Map<string, RawLog[]>()
-      for (const row of rows) {
-        const arr = modelBuckets.get(row.model_id) ?? []
-        arr.push(row)
-        modelBuckets.set(row.model_id, arr)
-      }
-      items = Array.from(modelBuckets.entries()).map(([modelId, rRows]) => {
-        const s = buildStats(rRows)
-        const entry: ModelStatsItem = {
-          id: modelId,
-          tokensSent: s.tokensSent,
-          tokensReceived: s.tokensReceived,
-          requests: s.requests,
-          toolCalls: s.toolCalls,
-          successCount: s.successCount,
-          avgLatencyMs: s.avgLatencyMs,
-        }
-        entry.name = profileNameMap[modelId] ?? modelId
-        if (params.providerId !== undefined) entry.providerName = params.providerId
-        return entry
-      })
-      items.sort((a, b) => b.requests - a.requests || (a.name ?? '').localeCompare(b.name ?? ''))
-    }
-
-    // Compute summary directly from raw rows to avoid double-counting
-    // the synthetic '全部' row that exists only in provider-mode items.
-    const summary = buildStats(rows)
-    const totalRequests = summary.requests
-    const totalSuccess = summary.successCount
-    const totalTokensSent = summary.tokensSent
-    const totalTokensReceived = summary.tokensReceived
-    const totalToolCalls = summary.toolCalls
-    const hasCacheData = false
-    const weightedLatency = items.reduce((s, r) => s + (r.avgLatencyMs ?? 0) * r.requests, 0)
-    const summaryObj: ModelStatsSummary = {
-      totalTokensSent,
-      totalTokensReceived,
-      totalRequests,
-      totalToolCalls,
-      successCount: totalSuccess,
-      avgLatencyMs: totalRequests === 0 ? 0 : Math.round(weightedLatency / totalRequests),
-      successRate: totalRequests === 0 ? 0 : Math.round((totalSuccess / totalRequests) * 10000) / 100,
-    }
-    // Compute distinct providers from raw rows for the left-panel filter.
-    const distinctProviders = Array.from(new Set(rows.map((r) => r.provider))).sort()
-    return { summary: summaryObj, items, distinctProviders }
+    return new ModelStatsRepository(this.database, this.#clock).aggregate(workspaceId, params)
   }
 
   saveLocalAsset(input: SaveLocalAssetInput): LocalAsset {
@@ -8092,6 +7953,9 @@ function mapModelInteractionLog(row: object): ModelInteractionLog {
   if (value.tokens_total !== null && value.tokens_total !== undefined) {
     log.tokensTotal = Number(value.tokens_total)
   }
+  if (typeof value.provider_id === 'string') log.providerId = value.provider_id
+  if (typeof value.provider_name === 'string') log.providerName = value.provider_name
+  if (typeof value.tokens_cached === 'number') log.tokensCached = value.tokens_cached
   return log
 }
 
