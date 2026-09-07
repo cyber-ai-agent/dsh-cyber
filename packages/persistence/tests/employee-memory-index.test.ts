@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import type { EmployeeBlueprint } from '@dsh-cyber/contracts'
 
-import { SqliteStore } from '../src/index.js'
+import { EmployeeMemoryIndexRepository, SqliteStore } from '../src/index.js'
 import { memoryIndexTerms } from '../src/employee-memory-index-repository.js'
 
 const stores: SqliteStore[] = []
@@ -244,5 +244,115 @@ describe('employee memory index', () => {
     const { store } = await setup()
     expect(() => store.indexEmployeeMemory({ memoryId: 'missing-milestone', scope: 'group' }))
       .toThrow(/durable milestone/)
+  })
+
+  it('repairs a same-sized stale FTS mirror before searching', async () => {
+    const { store, employee, session } = await setup()
+    const evidence = store.appendMessage({
+      sessionId: session.id,
+      senderId: 'owner',
+      senderKind: 'owner',
+      kind: 'user',
+      content: '句尾关键词的来源消息。',
+      metadata: {},
+    })
+    const milestone = store.appendEmployeeMilestone({
+      employeeId: employee.id,
+      category: 'task',
+      title: '[task] FTS 镜像',
+      summary: '句尾关键词的持久化经历。',
+      sourceMessageIds: [evidence.id],
+      actorId: 'system',
+    })
+    const original = store.indexEmployeeMemory({
+      memoryId: milestone.id,
+      scope: 'task',
+      keywords: memoryIndexTerms(milestone.summary),
+    })
+    const repository = new EmployeeMemoryIndexRepository(store.database)
+    if (repository.searchCapability !== 'fts5') return
+
+    const beforeCount = Number((store.database.prepare(
+      'SELECT COUNT(*) AS count FROM employee_memory_index_fts',
+    ).get() as { count: number }).count)
+    store.database.prepare(
+      'UPDATE employee_memory_index_fts SET content = ? WHERE memory_id = ?',
+    ).run('陈旧镜像内容', milestone.id)
+    expect(Number((store.database.prepare(
+      'SELECT COUNT(*) AS count FROM employee_memory_index_fts',
+    ).get() as { count: number }).count)).toBe(beforeCount)
+
+    const repaired = new EmployeeMemoryIndexRepository(store.database)
+    expect(store.database.prepare(
+      'SELECT content FROM employee_memory_index_fts WHERE memory_id = ?',
+    ).get(milestone.id)).toMatchObject({
+      content: `${original.summary} ${JSON.stringify(original.keywords)} ${JSON.stringify(original.entities)}`,
+    })
+    expect(repaired.search({ employeeId: employee.id, query: '持久化经历', scopes: ['task'], limit: 1 })[0]?.entry.memoryId)
+      .toBe(milestone.id)
+  })
+
+  it('keeps the tail of a long Chinese query in the memory term set', () => {
+    const terms = memoryIndexTerms('这是一段用于验证检索的很长中文上下文其中真正的目标关键词位于句尾')
+    expect(terms).toContain('目标')
+  })
+
+  it.each([50, 500, 5000])('keeps the best memory in a stable bounded candidate set (%i rows)', async (candidateCount) => {
+    const { store, workspace, world, employee, session } = await setup()
+    const source = store.appendMessage({
+      sessionId: session.id,
+      senderId: 'owner',
+      senderKind: 'owner',
+      kind: 'user',
+      content: '长期项目 target-alpha 的原始消息。',
+      metadata: {},
+    })
+    const insertMilestone = store.database.prepare(
+      `INSERT INTO employee_milestones (
+         id, workspace_id, world_id, employee_id, origin, category, title, summary,
+         source_event_ids_json, source_message_ids_json, artifact_refs_json,
+         occurred_at, created_at
+       ) VALUES (?, ?, ?, ?, 'authored', 'task', ?, ?, '[]', ?, '[]', ?, ?)`,
+    )
+    const insertIndex = store.database.prepare(
+      `INSERT INTO employee_memory_index (
+         memory_id, workspace_id, world_id, employee_id, scope, summary,
+         keywords_json, entities_json, source_message_ids_json, artifact_refs_json,
+         importance, occurred_at, updated_at
+       ) VALUES (?, ?, ?, ?, 'task', ?, ?, ?, ?, '[]', 0.5, ?, ?)`,
+    )
+    store.database.exec('BEGIN')
+    try {
+      for (let index = 0; index < candidateCount - 1; index += 1) {
+        const id = `memory-${String(index).padStart(5, '0')}`
+        const summary = `普通记录 shared-term ${index}`
+        const occurredAt = '2026-08-28T00:00:00.000Z'
+        insertMilestone.run(id, workspace.id, world.id, employee.id, '[task] 普通经历', summary, '[]', occurredAt, occurredAt)
+        insertIndex.run(id, workspace.id, world.id, employee.id, summary, JSON.stringify(['shared-term']), '[]', '[]', occurredAt, occurredAt)
+      }
+      const targetId = 'target-alpha'
+      const targetSummary = '长期项目 target-alpha 使用 shared-term 完成。'
+      const targetOccurredAt = '2025-01-01T00:00:00.000Z'
+      insertMilestone.run(targetId, workspace.id, world.id, employee.id, '[task] 目标经历', targetSummary, JSON.stringify([source.id]), targetOccurredAt, targetOccurredAt)
+      insertIndex.run(targetId, workspace.id, world.id, employee.id, targetSummary, JSON.stringify(['shared-term']), JSON.stringify(['target-alpha']), JSON.stringify([source.id]), targetOccurredAt, targetOccurredAt)
+      store.database.exec('COMMIT')
+    } catch (error) {
+      store.database.exec('ROLLBACK')
+      throw error
+    }
+
+    const repository = new EmployeeMemoryIndexRepository(store.database)
+    const first = repository.search({ employeeId: employee.id, query: 'shared-term target-alpha', scopes: ['task'], limit: 1 })
+    const second = repository.search({ employeeId: employee.id, query: 'shared-term target-alpha', scopes: ['task'], limit: 1 })
+    expect(first[0]?.entry.memoryId).toBe('target-alpha')
+    expect(first).toEqual(second)
+    expect(first[0]?.entry.sourceMessageIds).toEqual([source.id])
+
+    // The portable path must preserve the same candidate and source evidence
+    // when the optional FTS mirror is unavailable.
+    store.database.exec('DROP TABLE employee_memory_index_fts')
+    const likeRepository = new EmployeeMemoryIndexRepository(store.database, { readOnly: true })
+    const fallback = likeRepository.search({ employeeId: employee.id, query: 'shared-term target-alpha', scopes: ['task'], limit: 1 })
+    expect(fallback).toEqual(first)
   })
 })

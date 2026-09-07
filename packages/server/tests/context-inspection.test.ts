@@ -34,7 +34,21 @@ class CaptureRuntime implements AgentRuntimePort {
 
   async runTurn(request: AgentTurnRequest) {
     this.requests.push(request)
-    return { agentSessionId: 'agent-session', finalResponse: '好的。', eventCount: 0 }
+    return {
+      agentSessionId: 'agent-session',
+      finalResponse: '好的。',
+      eventCount: 0,
+      contextUsage: {
+        systemTokens: 101,
+        promptTokens: 37,
+        historyTokens: 23,
+        nativeReservedTokens: 9_570,
+        retainedTokens: 41,
+        replayedThroughSequence: 8,
+        replayedSequences: [7, 8],
+        sourceRefs: request.contextSourceRefs ?? [],
+      },
+    }
   }
 
   async close(): Promise<void> {}
@@ -487,11 +501,27 @@ describe('ContextInspectionService', () => {
     })
     const inner = new CaptureRuntime()
     const runtime = new CharacterProfileRuntime(inner, store)
+    const turn = store.createWorkTurn({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      sessionId: session.id,
+      interactionKind: 'chat',
+    })
+    const run = store.createAgentRun({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      turnId: turn.id,
+      sessionId: session.id,
+      employeeId: employee.id,
+      ordinal: 1,
+    })
 
     await runtime.runTurn({
       agent: employee,
       revision: store.getEmployeeRevision(employee.id, employee.currentRevision)!,
       conversationId: session.id,
+      workTurnId: turn.id,
+      agentRunId: run.id,
       history: [],
       observedThroughSequence: 0,
       prompt: '今天先做什么？',
@@ -503,6 +533,18 @@ describe('ContextInspectionService', () => {
     expect(view).toBeDefined()
     expect(view!.employeeId).toBe(employee.id)
     expect(view!.lane).toBe('direct')
+    expect(view!.usedTokens).toBe(9_772)
+    expect(view!.runtime).toMatchObject({
+      systemTokens: 101,
+      promptTokens: 37,
+      historyTokens: 23,
+      nativeReservedTokens: 9_570,
+      retainedTokens: 41,
+      replayedThroughSequence: 8,
+      replayedSequences: [7, 8],
+    })
+    expect(view!.runtime?.sourceRefs).toEqual(inner.requests[0]?.contextSourceRefs)
+    expect(store.getAgentRunContextSnapshot(run.id)?.runtime).toEqual(view!.runtime)
     const identity = view!.layers.find((layer) => layer.kind === 'stable-identity')
     // The permission mode is a property of the request, not of any durable row.
     // Seeing it here is the proof that this is a record of the real turn rather

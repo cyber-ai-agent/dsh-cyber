@@ -24,6 +24,35 @@ import { contextEnvelopeLayers, contextContentHash } from './context-envelope.js
 export const CONTEXT_SNAPSHOT_VERSION = 1 as const
 
 /**
+ * Provider-neutral accounting for the exact input accepted by a runtime lane.
+ *
+ * The projection deliberately contains estimates and durable pointers only.
+ * It never carries the rendered system prompt, user prompt, recovered history,
+ * native tool schemas or retained provider messages.
+ */
+export interface RuntimeContextUsage {
+  systemTokens: number
+  promptTokens: number
+  historyTokens: number
+  nativeReservedTokens: number
+  retainedTokens: number
+  /** Highest durable history sequence included in this invocation, if any. */
+  replayedThroughSequence?: number
+  /** Exact durable history sequences included, in runtime order. */
+  replayedSequences: number[]
+  /** Durable rows behind the accepted input; no rendered text. */
+  sourceRefs: ContextSourceRef[]
+}
+
+export function runtimeContextInputTokens(usage: RuntimeContextUsage): number {
+  return usage.systemTokens
+    + usage.promptTokens
+    + usage.historyTokens
+    + usage.nativeReservedTokens
+    + usage.retainedTokens
+}
+
+/**
  * One layer, described without its text.
  *
  * These are exactly the fields of `ContextLayer` minus `text`. The omission is
@@ -68,6 +97,8 @@ export interface ContextSnapshot {
   structureHash: string
   layers: ContextSnapshotLayer[]
   totalTokenEstimate: number
+  /** Exact runtime-facing accounting when the adapter reported it. */
+  runtime?: RuntimeContextUsage
   cache: ContextSnapshotCacheStats
 }
 
@@ -86,27 +117,34 @@ const STABLE_PREFIX_KINDS: ReadonlySet<ContextLayerKind> = new Set<ContextLayerK
 
 export interface ComposeContextSnapshotInput {
   envelope: ContextEnvelope
+  /** Final accounting returned by the runtime adapter. */
+  runtime?: RuntimeContextUsage
   /** Prefix hash of the previous run in the same conversation, when there is one. */
   previousStablePrefixHash?: string
 }
 
 /** Projects an envelope to the structure-and-pointers record that gets stored. */
 export function composeContextSnapshot(input: ComposeContextSnapshotInput): ContextSnapshot {
-  const layers = contextEnvelopeLayers(input.envelope).map(snapshotLayer)
+  const runtimeRefs = input.runtime === undefined ? undefined : new Set(input.runtime.sourceRefs.map(sourceRefKey))
+  const layers = contextEnvelopeLayers(input.envelope).map((layer) => snapshotLayer(layer, runtimeRefs))
   const previous = input.previousStablePrefixHash?.trim()
   const stablePrefixTokens = layers
     .filter((layer) => STABLE_PREFIX_KINDS.has(layer.kind))
     .reduce((total, layer) => total + layer.tokenEstimate, 0)
+  const totalTokenEstimate = input.runtime === undefined
+    ? input.envelope.totalTokenEstimate
+    : runtimeContextInputTokens(input.runtime)
   return {
     snapshotVersion: CONTEXT_SNAPSHOT_VERSION,
     envelopeVersion: input.envelope.envelopeVersion,
     stablePrefixHash: input.envelope.stableContextHash,
     structureHash: contextContentHash(layers),
     layers,
-    totalTokenEstimate: input.envelope.totalTokenEstimate,
+    totalTokenEstimate,
+    ...(input.runtime === undefined ? {} : { runtime: copyRuntimeContextUsage(input.runtime) }),
     cache: {
       stablePrefixTokens,
-      volatileTokens: Math.max(0, input.envelope.totalTokenEstimate - stablePrefixTokens),
+      volatileTokens: Math.max(0, totalTokenEstimate - stablePrefixTokens),
       ...(previous === undefined || previous === '' ? {} : { previousStablePrefixHash: previous }),
       prefixReused: previous !== undefined && previous === input.envelope.stableContextHash,
     },
@@ -120,19 +158,25 @@ export function composeContextSnapshot(input: ComposeContextSnapshotInput): Cont
  * `ContextLayer`, including a rendered one. Listing the kept fields means a new
  * field has to be added here on purpose to reach the database.
  */
-function snapshotLayer(layer: ContextLayer): ContextSnapshotLayer {
+function snapshotLayer(layer: ContextLayer, runtimeRefs?: ReadonlySet<string>): ContextSnapshotLayer {
   return {
     id: layer.id,
     kind: layer.kind,
     revision: layer.revision,
     contentHash: layer.contentHash,
     tokenEstimate: layer.tokenEstimate,
-    sourceRefs: layer.sourceRefs.map((ref) => ({
+    sourceRefs: layer.sourceRefs
+      .filter((ref) => runtimeRefs === undefined || runtimeRefs.has(sourceRefKey(ref)))
+      .map((ref) => ({
       kind: ref.kind,
       id: ref.id,
       ...(ref.revision === undefined ? {} : { revision: ref.revision }),
-    })),
+      })),
   }
+}
+
+function sourceRefKey(ref: ContextSourceRef): string {
+  return `${ref.kind}\u0000${ref.id}\u0000${ref.revision ?? ''}`
 }
 
 /**
@@ -159,6 +203,8 @@ export interface ContextSnapshotSummary {
   volatileTokens: number
   /** True when the previous run of the same pair carried the same stable prefix. */
   prefixReused: boolean
+  /** Exact runtime-facing accounting, absent on legacy snapshots. */
+  runtime?: RuntimeContextUsage
 }
 
 /** Projects a snapshot to its inline numbers. Pure and pointer-free by construction. */
@@ -170,7 +216,33 @@ export function summarizeContextSnapshot(snapshot: ContextSnapshot): ContextSnap
     stablePrefixTokens: snapshot.cache.stablePrefixTokens,
     volatileTokens: snapshot.cache.volatileTokens,
     prefixReused: snapshot.cache.prefixReused,
+    ...(snapshot.runtime === undefined ? {} : { runtime: copyRuntimeContextUsage(snapshot.runtime) }),
   }
+}
+
+/** Copies and normalizes the text-free runtime projection at trust boundaries. */
+export function copyRuntimeContextUsage(usage: RuntimeContextUsage): RuntimeContextUsage {
+  return {
+    systemTokens: nonNegativeInteger(usage.systemTokens),
+    promptTokens: nonNegativeInteger(usage.promptTokens),
+    historyTokens: nonNegativeInteger(usage.historyTokens),
+    nativeReservedTokens: nonNegativeInteger(usage.nativeReservedTokens),
+    retainedTokens: nonNegativeInteger(usage.retainedTokens),
+    ...(usage.replayedThroughSequence === undefined
+      ? {}
+      : { replayedThroughSequence: nonNegativeInteger(usage.replayedThroughSequence) }),
+    replayedSequences: usage.replayedSequences.map(nonNegativeInteger),
+    sourceRefs: usage.sourceRefs.map((ref) => ({
+      kind: ref.kind,
+      id: ref.id,
+      ...(ref.revision === undefined ? {} : { revision: ref.revision }),
+    })),
+  }
+}
+
+function nonNegativeInteger(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error('Runtime context estimate must be a non-negative integer')
+  return value
 }
 
 /** All source refs of one kind across a snapshot, de-duplicated, order kept. */

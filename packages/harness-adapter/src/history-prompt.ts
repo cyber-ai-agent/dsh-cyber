@@ -30,12 +30,26 @@ export function formatRecoveredHistoryPrompt(
   currentPrompt: string,
   options: { maxTokens?: number } = {},
 ): string {
-  if (entries.length === 0) return currentPrompt
+  return projectRecoveredHistoryPrompt(entries, currentPrompt, options).prompt
+}
+
+export interface RecoveredHistoryPromptProjection {
+  prompt: string
+  replayedSequences: number[]
+}
+
+/** Render history and report exactly which durable rows contributed content. */
+export function projectRecoveredHistoryPrompt(
+  entries: readonly ConversationHistoryEntry[],
+  currentPrompt: string,
+  options: { maxTokens?: number } = {},
+): RecoveredHistoryPromptProjection {
+  if (entries.length === 0) return { prompt: currentPrompt, replayedSequences: [] }
   const budget = options.maxTokens === undefined ? 8_192
     : Number.isSafeInteger(options.maxTokens) && options.maxTokens >= 0 ? options.maxTokens : 0
   const recovered = recoverWithinBudget(entries, budget)
-  if (recovered === undefined) return currentPrompt
-  return `${recovered}\n\n${currentPrompt}`
+  if (recovered === undefined) return { prompt: currentPrompt, replayedSequences: [] }
+  return { prompt: `${recovered.text}\n\n${currentPrompt}`, replayedSequences: recovered.replayedSequences }
 }
 
 function serializeHistory(
@@ -73,7 +87,7 @@ function serializeHistory(
 function recoverWithinBudget(
   entries: readonly ConversationHistoryEntry[],
   budget: number,
-): string | undefined {
+): { text: string; replayedSequences: number[] } | undefined {
   if (budget === 0) return undefined
   // Measure the actual serialized block, including framing, metadata and JSON
   // escaping. Never force an oversized last message through the budget.
@@ -83,7 +97,7 @@ function recoverWithinBudget(
     if (estimateTextTokens(serializeHistory([entry, ...recent], undefined, true)) > budget) break
     recent.unshift(entry)
   }
-  if (recent.length === entries.length) return serializeHistory(recent)
+  if (recent.length === entries.length) return { text: serializeHistory(recent), replayedSequences: recent.map((entry) => entry.sequence) }
   if (recent.length === 0) {
     const latest = entries[entries.length - 1]!
     // Binary search the content rather than repeatedly trimming a huge string.
@@ -100,7 +114,7 @@ function recoverWithinBudget(
         low = length + 1
       } else high = length - 1
     }
-    return result
+    return result === undefined ? undefined : { text: result, replayedSequences: [latest.sequence] }
   }
   const olderCount = Math.max(0, entries.length - recent.length)
   const older = entries.slice(0, olderCount)
@@ -114,17 +128,24 @@ function recoverWithinBudget(
     checkpoint.entryCount += 1
   }
   let result = serializeHistory(recent, checkpoint)
-  if (estimateTextTokens(result) > budget) return serializeHistory(recent, undefined, true)
+  if (estimateTextTokens(result) > budget) {
+    return { text: serializeHistory(recent, undefined, true), replayedSequences: recent.map((entry) => entry.sequence) }
+  }
   const lines: string[] = []
+  const summarizedSequences: number[] = []
   for (let index = older.length - 1; index >= 0; index -= 1) {
     const entry = older[index]!
     const line = `${entry.sequence} · ${entry.speakerName}：${concise(entry.content, 140)}`
     const candidate = serializeHistory(recent, { ...checkpoint, summary: [line, ...lines].join('\n') })
     if (estimateTextTokens(candidate) > budget) break
     lines.unshift(line)
+    summarizedSequences.unshift(entry.sequence)
     result = candidate
   }
-  return result
+  return {
+    text: result,
+    replayedSequences: [...summarizedSequences, ...recent.map((entry) => entry.sequence)],
+  }
 }
 
 function concise(value: string, limit: number): string {

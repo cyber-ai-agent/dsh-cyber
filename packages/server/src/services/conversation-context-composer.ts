@@ -191,9 +191,7 @@ export class ConversationContextComposer {
     // The durable messages are read once and serve both questions that need
     // them: which older turns an indexed memory can still bring back, and which
     // rows the raw window is about to replay verbatim anyway.
-    const durableMessages = trimmed === undefined || session === undefined
-      ? undefined
-      : this.#store.listMessages?.(session.id)
+    const durableMessages = session === undefined ? undefined : this.#store.listMessages?.(session.id)
 
     const window = rawWindow({
       lane,
@@ -290,7 +288,7 @@ export class ConversationContextComposer {
         : { memoryIndex: composedMemory.memoryIndex, retrievedMemories: composedMemory.retrievedMemories }),
       ...(recentHistory.length === 0
         ? {}
-        : { recentConversation: composeRecentConversationLayer(input.conversationId, recentHistory) }),
+        : { recentConversation: composeRecentConversationLayer(input.conversationId, recentHistory, durableMessages) }),
       currentRequest: composeContextLayer({
         id: `request:${input.workTurnId ?? input.conversationId}`,
         kind: 'current-request',
@@ -459,14 +457,25 @@ function rawWindow(input: {
 function composeRecentConversationLayer(
   conversationId: string,
   entries: readonly ConversationHistoryEntry[],
+  durableMessages: readonly WorkMessage[] | undefined,
 ): ContextLayer {
+  const sequences = new Set(entries.map((entry) => entry.sequence))
   return composeContextLayer({
     id: `recent-conversation:${conversationId}`,
     kind: 'recent-conversation',
     text: entries
       .map((entry) => `${entry.sequence} · ${entry.speakerName}：${entry.content}`)
       .join('\n'),
-    sourceRefs: [{ kind: 'session', id: conversationId }],
+    sourceRefs: [
+      { kind: 'session', id: conversationId },
+      ...(durableMessages ?? [])
+        .filter((message) => sequences.has(message.sequence))
+        .map((message): ContextSourceRef => ({
+          kind: 'message',
+          id: message.id,
+          revision: String(message.sequence),
+        })),
+    ],
   })
 }
 

@@ -9,7 +9,7 @@ import type {
   EmployeeInstance,
   WorkSession,
 } from '@dsh-cyber/contracts'
-import { composeContextSnapshot } from '@dsh-cyber/contracts'
+import { composeContextSnapshot, contextEnvelopeLayers } from '@dsh-cyber/contracts'
 import { SqliteStore } from '@dsh-cyber/persistence'
 
 import { ConversationContextComposer } from '../src/services/conversation-context-composer.js'
@@ -186,9 +186,22 @@ describe('agent run context snapshot', () => {
       workTurnId: turn.id,
     })
 
-    const saved = snapshots.save({ agentRunId: run.id, envelope: composed.envelope })
+    const runtime = {
+      systemTokens: 120,
+      promptTokens: 80,
+      historyTokens: 40,
+      nativeReservedTokens: 9_570,
+      retainedTokens: 320,
+      replayedThroughSequence: 20,
+      replayedSequences: [17, 18, 19, 20],
+      sourceRefs: contextEnvelopeLayers(composed.envelope).flatMap((layer) => layer.sourceRefs),
+    }
+    const saved = snapshots.save({ agentRunId: run.id, envelope: composed.envelope, runtime })
     expect(saved?.stablePrefixHash).toBe(composed.envelope.stableContextHash)
-    expect(saved?.totalTokenEstimate).toBe(composed.envelope.totalTokenEstimate)
+    expect(saved?.totalTokenEstimate).toBe(10_130)
+    expect(saved?.runtime).toEqual(runtime)
+    expect(snapshots.summarize(run.id)?.runtime).toEqual(runtime)
+    expect(store.getAgentRunContextSnapshot(run.id)?.runtime).toEqual(runtime)
 
     const view = snapshots.reconstruct(run.id)
     expect(view).toBeDefined()

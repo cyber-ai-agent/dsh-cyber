@@ -1285,6 +1285,8 @@ export interface AgentTurnRequest {
    * degrades to sending the prompt unchanged.
    */
   promptCache?: import('./prompt-cache.js').PromptCachePolicy
+  /** Durable pointers behind the composed input; never rendered content. */
+  contextSourceRefs?: import('./context-envelope.js').ContextSourceRef[]
   onEvent?: (event: AgentRuntimeEvent) => void
 }
 
@@ -1295,6 +1297,8 @@ export interface AgentTurnResult {
   tokenUsage?: ModelTokenUsage
   /** What the provider adapter did with the declared prompt cache policy. */
   promptCache?: import('./prompt-cache.js').PromptCacheOutcome
+  /** Text-free accounting of the exact input accepted by the runtime lane. */
+  contextUsage?: import('./context-snapshot.js').RuntimeContextUsage
 }
 
 export interface AgentRuntimePort {

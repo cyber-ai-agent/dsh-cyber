@@ -50,6 +50,14 @@ const FTS_TABLE_SQL = (tokenizer: 'trigram' | 'unicode61'): string =>
 
 const MAX_SEARCH_LIMIT = 50
 /**
+ * Retrieval always over-fetches before applying the explainable in-process
+ * score. The cap protects SQLite and the caller from an unbounded lexical
+ * result set while leaving enough room for an older, more specific episode to
+ * outrank newer generic matches.
+ */
+export const MAX_MEMORY_INDEX_CANDIDATES = 256
+const CANDIDATE_OVERFETCH = 8
+/**
  * Hard upper bound on a retrieval query.
  *
  * A caller turning a model prompt into a query has to respect it: a runtime
@@ -185,12 +193,13 @@ export class EmployeeMemoryIndexRepository {
     const terms = searchTerms(query)
     const limit = Math.max(1, Math.min(input.limit ?? 8, MAX_SEARCH_LIMIT))
 
+    const candidateLimit = boundedCandidateLimit(limit)
     const candidates = terms.length === 0
       ? []
-      : this.#candidates(input.employeeId, visible, terms)
+      : this.#candidates(input.employeeId, visible, terms, candidateLimit)
     // Recency and importance still matter when nothing matched lexically:
     // a character asked "还记得吗" should not lose all continuity.
-    const pool = candidates.length > 0 ? candidates : this.list(input.employeeId, visible, MAX_SEARCH_LIMIT)
+    const pool = candidates.length > 0 ? candidates : this.list(input.employeeId, visible, candidateLimit)
 
     const now = Date.parse(this.#clock())
     return pool
@@ -206,20 +215,25 @@ export class EmployeeMemoryIndexRepository {
     employeeId: string,
     scopes: readonly EmployeeMemoryScope[],
     terms: readonly string[],
+    candidateLimit: number,
   ): EmployeeMemoryIndexEntry[] {
     if (this.#fts5) {
       try {
-        const match = terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(' OR ')
-        const rows = this.#database
-          .prepare(
+        const quoted = terms.map((term) => `"${term.replaceAll('"', '""')}"`)
+        const score = lexicalCandidateScore(terms)
+        const statement = this.#database.prepare(
             `SELECT entry.* FROM employee_memory_index_fts AS fts
              INNER JOIN employee_memory_index AS entry ON entry.memory_id = fts.memory_id
              WHERE employee_memory_index_fts MATCH ?
                AND entry.employee_id = ?
                AND entry.scope IN (${scopes.map(() => '?').join(', ')})
+             ORDER BY (${score.expression}) DESC, entry.occurred_at DESC, entry.memory_id ASC
              LIMIT ?`,
           )
-          .all(match, employeeId, ...scopes, MAX_SEARCH_LIMIT)
+        let rows = statement.all(quoted.join(' AND '), employeeId, ...scopes, ...score.parameters, candidateLimit)
+        if (rows.length === 0 && quoted.length > 1) {
+          rows = statement.all(quoted.join(' OR '), employeeId, ...scopes, ...score.parameters, candidateLimit)
+        }
         if (rows.length > 0) return rows.map(mapEntry)
       } catch {
         // A SQLite build can expose FTS5 but reject a tokenizer or query form.
@@ -231,16 +245,17 @@ export class EmployeeMemoryIndexRepository {
       const pattern = `%${escapeLike(term)}%`
       return [pattern, pattern, pattern]
     })
+    const score = lexicalCandidateScore(terms)
     return this.#database
       .prepare(
         `SELECT entry.* FROM employee_memory_index AS entry
          WHERE entry.employee_id = ?
            AND entry.scope IN (${scopes.map(() => '?').join(', ')})
            AND (${clause})
-         ORDER BY entry.occurred_at DESC, entry.memory_id
+         ORDER BY (${score.expression}) DESC, entry.occurred_at DESC, entry.memory_id ASC
          LIMIT ?`,
       )
-      .all(employeeId, ...scopes, ...parameters, MAX_SEARCH_LIMIT)
+      .all(employeeId, ...scopes, ...parameters, ...score.parameters, candidateLimit)
       .map(mapEntry)
   }
 
@@ -249,8 +264,15 @@ export class EmployeeMemoryIndexRepository {
       .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'employee_memory_index_fts'")
       .get() !== undefined
     // A read-only store must never write; it can still use a mirror that a
-    // writable process already built.
-    if (this.#readOnly) return exists()
+    // writable process already built. A stale mirror is unsafe even when it
+    // cannot be repaired here, so read-only callers fall back to LIKE.
+    if (this.#readOnly) {
+      try {
+        return exists() && this.#ftsMirrorMatches()
+      } catch {
+        return false
+      }
+    }
     try {
       if (!exists()) {
         try {
@@ -260,24 +282,40 @@ export class EmployeeMemoryIndexRepository {
           this.#database.exec(FTS_TABLE_SQL('unicode61'))
         }
       }
-      // The mirror is derived twice over. Rebuild it whenever it disagrees with
-      // the index table, so a restore or an out-of-band delete can never
-      // resurrect a memory the index no longer holds.
-      const mirrored = Number((this.#database.prepare('SELECT COUNT(*) AS count FROM employee_memory_index_fts').get() as { count: number }).count)
-      const indexed = Number((this.#database.prepare('SELECT COUNT(*) AS count FROM employee_memory_index').get() as { count: number }).count)
-      if (mirrored !== indexed) {
-        this.#database.exec('DELETE FROM employee_memory_index_fts')
-        this.#database.exec(
-          `INSERT INTO employee_memory_index_fts (memory_id, employee_id, scope, content)
-           SELECT memory_id, employee_id, scope,
-                  summary || ' ' || keywords_json || ' ' || entities_json
-           FROM employee_memory_index`,
-        )
-      }
+      // The mirror is derived twice over. Rebuild it whenever it disagrees
+      // with the index table by count, identity, or content. A same-sized but
+      // stale mirror is just as dangerous as a missing row after a restore.
+      if (!this.#ftsMirrorMatches()) this.#rebuildFts()
       return true
     } catch {
       return false
     }
+  }
+
+  #ftsMirrorMatches(): boolean {
+    const indexed = this.#database.prepare(
+      `SELECT memory_id, employee_id, scope,
+              summary || ' ' || keywords_json || ' ' || entities_json AS content
+       FROM employee_memory_index ORDER BY memory_id`,
+    ).all() as Array<{ memory_id: string; employee_id: string; scope: string; content: string }>
+    const mirrored = this.#database.prepare(
+      'SELECT memory_id, employee_id, scope, content FROM employee_memory_index_fts ORDER BY memory_id',
+    ).all() as Array<{ memory_id: string; employee_id: string; scope: string; content: string }>
+    return indexed.length === mirrored.length && indexed.every((row, index) => {
+      const mirror = mirrored[index]
+      return mirror !== undefined && row.memory_id === mirror.memory_id && row.employee_id === mirror.employee_id
+        && row.scope === mirror.scope && row.content === mirror.content
+    })
+  }
+
+  #rebuildFts(): void {
+    this.#database.exec('DELETE FROM employee_memory_index_fts')
+    this.#database.exec(
+      `INSERT INTO employee_memory_index_fts (memory_id, employee_id, scope, content)
+       SELECT memory_id, employee_id, scope,
+              summary || ' ' || keywords_json || ' ' || entities_json
+       FROM employee_memory_index`,
+    )
   }
 
   #syncFts(entry: EmployeeMemoryIndexEntry): void {
@@ -293,7 +331,7 @@ export class EmployeeMemoryIndexRepository {
           entry.memoryId,
           entry.employeeId,
           entry.scope,
-          `${entry.summary} ${entry.keywords.join(' ')} ${entry.entities.join(' ')}`,
+          `${entry.summary} ${JSON.stringify(entry.keywords)} ${JSON.stringify(entry.entities)}`,
         )
     } catch {
       // Losing the optional mirror degrades to LIKE search, never to a wrong
@@ -307,14 +345,45 @@ export function memoryIndexTerms(value: string): string[] {
   const normalized = value.normalize('NFC').toLocaleLowerCase('zh-CN')
   const latin = normalized.match(/[a-z0-9._-]{2,}/g) ?? []
   const han = normalized.match(/\p{Script=Han}{2,}/gu) ?? []
-  const grams = han.flatMap((item) => item.length <= 4
-    ? [item]
-    : Array.from({ length: Math.min(6, item.length - 1) }, (_unused, index) => item.slice(index, index + 2)))
+  const grams = han.flatMap((item) => {
+    if (item.length <= 4) return [item]
+    // Keep both ends of a long Chinese run. A fixed head-only gram window
+    // silently discarded the keyword when a user put it at the end of a
+    // long sentence.
+    const last = item.length - 2
+    const positions = new Set<number>()
+    for (let index = 0; index < Math.min(6, item.length - 1); index += 1) positions.add(index)
+    for (let index = Math.max(0, last - 11); index <= last; index += 1) positions.add(index)
+    return [item.slice(0, 6), item.slice(-12), ...[...positions].sort((left, right) => left - right).map((index) => item.slice(index, index + 2))]
+  })
   return normalizeTerms([...latin, ...grams])
 }
 
 function searchTerms(query: string): string[] {
-  return memoryIndexTerms(query).slice(0, MAX_TERMS)
+  return boundedTerms(memoryIndexTerms(query), MAX_TERMS)
+}
+
+function boundedTerms(terms: readonly string[], limit: number): string[] {
+  if (terms.length <= limit) return [...terms]
+  const head = Math.ceil(limit / 2)
+  const tail = limit - head
+  return normalizeTerms([...terms.slice(0, head), ...terms.slice(-tail)])
+}
+
+function boundedCandidateLimit(limit: number): number {
+  return Math.min(MAX_MEMORY_INDEX_CANDIDATES, Math.max(limit, limit * CANDIDATE_OVERFETCH))
+}
+
+function lexicalCandidateScore(terms: readonly string[]): { expression: string; parameters: Array<string | number> } {
+  const parameters: Array<string | number> = []
+  const expressions = terms.map((term) => {
+    const pattern = `%${escapeLike(term)}%`
+    const keywordWeight = Math.min(12, term.length * 2)
+    const entityWeight = Math.min(18, term.length * 4)
+    parameters.push(pattern, pattern, keywordWeight, pattern, entityWeight)
+    return `(CASE WHEN (entry.summary LIKE ? ESCAPE '\\' OR entry.keywords_json LIKE ? ESCAPE '\\') THEN ? ELSE 0 END + CASE WHEN entry.entities_json LIKE ? ESCAPE '\\' THEN ? ELSE 0 END)`
+  })
+  return { expression: expressions.join(' + '), parameters }
 }
 
 function rank(entry: EmployeeMemoryIndexEntry, terms: readonly string[], now: number): EmployeeMemoryIndexHit {
