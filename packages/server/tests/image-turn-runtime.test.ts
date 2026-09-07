@@ -49,7 +49,7 @@ function deps(overrides: Record<string, unknown> = {}) {
     credentials: { resolve: vi.fn(() => 'sk-key') },
     images: { generate: vi.fn(async () => ({ bytes: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 1]), mimeType: 'image/png' })) },
     worldFiles: { saveGeneratedImage: vi.fn(async () => ({ assetId: 'asset-1', name: 'x.png', mimeType: 'image/png', byteLength: 13, url: '/api/worlds/world-1/file?path=x.png' })) },
-    interactions: { recordTurn: vi.fn() },
+    interactions: { recordTurn: vi.fn(), captureProvider: () => ({}) },
     ...overrides,
   }
   return { d, events, inner }

@@ -7,6 +7,8 @@ import type {
   ModelInteractionLogFilter,
   ModelInteractionLogPage,
   ModelInteractionLogStatus,
+  ModelStatsQueryParams,
+  ModelStatsResponse,
 } from '@dsh-cyber/contracts'
 import type { HarnessModelRoute } from '@dsh-cyber/harness-adapter'
 import type { SqliteStore } from '@dsh-cyber/persistence'
@@ -43,6 +45,7 @@ export class ModelInteractionService {
       source: 'turn',
       modelId: input.modelId,
       provider: input.provider,
+      ...(input.providerSnapshot ?? this.captureProvider(input.workspaceId, input.modelProfileId)),
       status: input.status,
       ...(input.errorCode === undefined ? {} : { errorCode: input.errorCode }),
       ...(input.errorMessage === undefined ? {} : { errorMessage: sanitizeErrorMessage(input.errorMessage) }),
@@ -56,6 +59,7 @@ export class ModelInteractionService {
         tokensPrompt: input.tokenUsage.prompt,
         tokensCompletion: input.tokenUsage.completion,
         tokensTotal: input.tokenUsage.total,
+        ...(input.tokenUsage.cachedPrompt === undefined ? {} : { tokensCached: input.tokenUsage.cachedPrompt }),
       }),
     })
   }
@@ -70,6 +74,7 @@ export class ModelInteractionService {
       source: 'discovery',
       modelId: input.modelId,
       provider: input.provider,
+      ...(input.providerSnapshot ?? this.captureProvider(input.workspaceId, input.modelProfileId)),
       status: input.status,
       ...(input.errorCode === undefined ? {} : { errorCode: input.errorCode }),
       ...(input.errorMessage === undefined ? {} : { errorMessage: sanitizeErrorMessage(input.errorMessage) }),
@@ -91,6 +96,7 @@ export class ModelInteractionService {
       source: 'knowledge',
       modelId: input.modelId,
       provider: input.provider,
+      ...(input.providerSnapshot ?? this.captureProvider(input.workspaceId, input.modelProfileId)),
       status: input.status,
       ...(input.errorCode === undefined ? {} : { errorCode: input.errorCode }),
       ...(input.errorMessage === undefined ? {} : { errorMessage: sanitizeErrorMessage(input.errorMessage) }),
@@ -119,9 +125,24 @@ export class ModelInteractionService {
   clear(workspaceId: string): number {
     return this.#store.clearModelInteractions(workspaceId)
   }
+
+  /** Capture before dispatch so an in-flight turn keeps its original provider. */
+  captureProvider(workspaceId: string, profileId: string | undefined): { providerId?: string; providerName?: string } {
+    if (profileId === undefined) return {}
+    const profile = this.#store.getModelProfile(profileId)
+    if (profile?.workspaceId !== workspaceId || !profile.providerId) return {}
+    const provider = this.#store.getModelProvider(profile.providerId)
+    return provider?.workspaceId === workspaceId ? { providerId: provider.id, providerName: provider.name } : {}
+  }
+
+  aggregateStats(workspaceId: string, params: ModelStatsQueryParams): ModelStatsResponse {
+    return this.#store.aggregateModelStats(workspaceId, params)
+  }
 }
 
 export interface RecordTurnInteractionInput {
+  modelProfileId?: string
+  providerSnapshot?: { providerId?: string; providerName?: string }
   workspaceId: string
   worldId?: string
   sessionId?: string
@@ -142,6 +163,8 @@ export interface RecordTurnInteractionInput {
 }
 
 export interface RecordDiscoveryInteractionInput {
+  modelProfileId?: string
+  providerSnapshot?: { providerId?: string; providerName?: string }
   workspaceId: string
   modelId: string
   provider: string
@@ -153,6 +176,8 @@ export interface RecordDiscoveryInteractionInput {
 }
 
 export interface RecordKnowledgeInteractionInput {
+  modelProfileId?: string
+  providerSnapshot?: { providerId?: string; providerName?: string }
   workspaceId: string
   worldId: string
   modelId: string
@@ -216,6 +241,7 @@ export class TurnInteractionLoggingRuntime implements AgentRuntimePort {
       },
     }
     const traceContext = {
+      providerSnapshot: this.#service.captureProvider(request.agent.workspaceId, route?.id),
       sessionId: request.conversationId,
       ...(request.workTurnId === undefined ? {} : { workTurnId: request.workTurnId }),
       ...(request.agentRunId === undefined ? {} : { agentRunId: request.agentRunId }),

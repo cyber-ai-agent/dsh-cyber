@@ -1,7 +1,7 @@
 import type { WorldCharacterAuthority } from './world-authority.js'
 import type { UiLocale } from './locales.js'
 
-export const CYBER_SCHEMA_VERSION = 48 as const
+export const CYBER_SCHEMA_VERSION = 49 as const
 
 export * from './runtime-access.js'
 export * from './locales.js'
@@ -786,6 +786,9 @@ export interface ModelInteractionLog {
   modelId: string
   /** provider 展示名（模型配置显示名，或默认 DSH 模型） */
   provider: string
+  /** Connection identity captured when recording; absent on legacy records. */
+  providerId?: string
+  providerName?: string
   status: ModelInteractionLogStatus
   errorCode?: string
   errorMessage?: string
@@ -802,6 +805,8 @@ export interface ModelInteractionLog {
   tokensPrompt?: number
   tokensCompletion?: number
   tokensTotal?: number
+  /** Reported cache hits; NULL/absent is unknown, not a zero. */
+  tokensCached?: number
   createdAt: IsoTimestamp
 }
 
@@ -815,6 +820,9 @@ export interface RecordModelInteractionInput {
   source: ModelInteractionLogSource
   modelId: string
   provider: string
+  /** Connection identity captured when recording; absent on legacy records. */
+  providerId?: string
+  providerName?: string
   status: ModelInteractionLogStatus
   errorCode?: string
   errorMessage?: string
@@ -827,6 +835,7 @@ export interface RecordModelInteractionInput {
   tokensPrompt?: number
   tokensCompletion?: number
   tokensTotal?: number
+  tokensCached?: number
 }
 
 export interface ModelInteractionLogFilter {
@@ -843,6 +852,64 @@ export interface ModelInteractionLogPage {
   pageSize: number
   /** 该工作区出现过（去重）的模型 ID，用于前端筛选下拉 */
   modelIds: string[]
+}
+
+export type ModelStatsGroupBy = 'all' | 'provider'
+
+export interface ModelStatsQueryParams {
+  groupBy: ModelStatsGroupBy
+  /** Opaque key from response.providers; legacy raw log labels are also accepted. */
+  providerId?: string
+  /** ISO-8601 inclusive lower bound; defaults to now-7d server-side when absent. */
+  from?: string
+  /** ISO-8601 inclusive upper bound; defaults to now server-side when absent. */
+  to?: string
+}
+
+export interface ModelStatsSummary {
+  totalTokensSent: number
+  totalTokensReceived: number
+  /** Sum of cached prompt tokens across all records; absent when no record reported cache. */
+  tokensCached?: number
+  totalRequests: number
+  totalToolCalls: number
+  successCount: number
+  avgLatencyMs: number
+  successRate: number
+}
+
+export interface ModelStatsItem {
+  id: string
+  name?: string
+  /** world display name for 'all' groupBy; undefined when not applicable */
+  worldName?: string
+  /** provider display name when groupBy === 'provider'; undefined otherwise */
+  providerName?: string
+  tokensSent: number
+  tokensReceived: number
+  /** Cached prompt tokens served from provider cache. 0 or absent when provider did not report cache. */
+  tokensCached?: number
+  requests: number
+  toolCalls: number
+  successCount: number
+  avgLatencyMs?: number
+  /** true when at least one record reported a cached prompt token count */
+  hasCacheData?: boolean
+}
+
+export interface ModelStatsProvider {
+  id: string
+  name: string
+  /** Legacy source labels cannot be reliably attributed to a connection. */
+  legacy: boolean
+}
+
+export interface ModelStatsResponse {
+  summary: ModelStatsSummary
+  items: ModelStatsItem[]
+  /** Distinct provider values found in logs, for the left-panel filter list */
+  distinctProviders?: string[]
+  providers?: ModelStatsProvider[]
 }
 
 
@@ -1424,5 +1491,7 @@ export type {
   SkillCatalogSource,
   PersistentApprovalCapability,
 } from './skill-runtime.js'
+
+export { parseModelStatsQuery, ModelStatsQueryError } from './model-stats-query.js'
 export * from './tool-trace.js'
 export * from './world-directory.js'

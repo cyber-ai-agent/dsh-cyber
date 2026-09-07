@@ -4,6 +4,7 @@ import type { EmployeeInstance, World } from '@dsh-cyber/contracts'
 import { ArrowCounterClockwise, ArrowLeft, ArrowsClockwise, CheckCircle, ImageSquare, Lightning, MagnifyingGlass, Palette, PencilSimple, Plus, Stack, TextAa, Trash, VideoCamera, WarningCircle, Waveform, X } from '@phosphor-icons/react'
 
 import './model-hub.css'
+import { ModelStatsPanel } from './ModelStatsPanel.js'
 import { useI18n } from '../../i18n/runtime.js'
 import { ApiError } from '../../api.js'
 import {
@@ -95,7 +96,7 @@ function errorMessage(cause: unknown, fallback: string): string {
 
 export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { workspaceId: string; worlds: World[]; employees: EmployeeInstance[]; onClose(): void }) {
   const { t } = useI18n()
-  const [tab, setTab] = useState<'providers' | 'pool' | 'assign'>('providers')
+  const [tab, setTab] = useState<'providers' | 'pool' | 'assign' | 'stats'>('providers')
   const [catalog, setCatalog] = useState<HubCatalogState>()
   const [providers, setProviders] = useState<HubProvider[]>([])
   const [profiles, setProfiles] = useState<HubProfile[]>([])
@@ -431,6 +432,7 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
   // Portal to <body>: the launcher renders from the top bar, where global
   // rules like `.topbar nav { height: 100% }` would claim the hub's own tab
   // strip, and a modal belongs outside the banner landmark anyway.
+
   return createPortal(<div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && wizard === undefined) onClose() }}>
     <section ref={panelRef} className="model-hub" role="dialog" aria-modal="true" aria-labelledby="model-hub-title">
       <header className="model-hub__header">
@@ -451,6 +453,7 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
         <button type="button" aria-current={tab === 'providers'} className={tab === 'providers' ? 'is-active' : ''} onClick={() => setTab('providers')}>{t('modelHub.tabProviders', '模型服务商')}</button>
         <button type="button" aria-current={tab === 'pool'} className={tab === 'pool' ? 'is-active' : ''} onClick={() => setTab('pool')}>{t('modelHub.tabPool', '模型池')}</button>
         <button type="button" aria-current={tab === 'assign'} className={tab === 'assign' ? 'is-active' : ''} onClick={() => setTab('assign')}>{t('modelHub.tabAssign', '模型设置')}</button>
+        <button type="button" aria-current={tab === 'stats'} className={tab === 'stats' ? 'is-active' : ''} onClick={() => setTab('stats')}>{t('modelHub.tabStats', '模型统计')}</button>
       </nav>
 
       {error !== undefined ? <div className="model-hub__error" role="alert"><WarningCircle size={15} /><span>{error}</span><button type="button" className="icon-button" aria-label={t('modelHub.dismissError', '收起提示')} onClick={() => setError(undefined)}><X size={13} /></button></div> : null}
@@ -705,6 +708,8 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
           </div>
         })() : null}
       </div> : null}
+
+      {wizard === undefined && tab === 'stats' ? <ModelStatsPanel key={workspaceId} workspaceId={workspaceId} providers={providers} /> : null}
     </section>
   </div>, document.body)
 }

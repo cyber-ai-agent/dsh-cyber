@@ -61,6 +61,8 @@ import {
   type ModelInteractionLogPage,
   type ModelInteractionLogSource,
   type ModelInteractionLogStatus,
+  type ModelStatsQueryParams,
+  type ModelStatsResponse,
   type ModelProfile,
   type ModelCapabilities,
   type ModelProfileOrigin,
@@ -113,6 +115,8 @@ import {
   type WorkspaceSnapshot,
 } from '@dsh-cyber/contracts'
 import type { CharacterSkillAction } from '@dsh-cyber/contracts/skill-runtime'
+
+import { ModelStatsRepository } from './model-stats-repository.js'
 
 import { DatabaseCorruptError, EntityNotFoundError, PersistenceError } from './errors.js'
 import { CompletionJobRepository } from './completion-job-repository.js'
@@ -1542,6 +1546,14 @@ export class SqliteStore {
     assertOptionalCount('tokens prompt', input.tokensPrompt)
     assertOptionalCount('tokens completion', input.tokensCompletion)
     assertOptionalCount('tokens total', input.tokensTotal)
+    assertOptionalCount('tokens cached', input.tokensCached)
+    if (input.tokensCached !== undefined && input.tokensPrompt !== undefined && input.tokensCached > input.tokensPrompt) {
+      throw new PersistenceError('Cached tokens cannot exceed prompt tokens')
+    }
+    if (input.providerId !== undefined) {
+      const provider = this.getModelProvider(input.providerId)
+      if (provider !== undefined && provider.workspaceId !== workspace.id) throw new PersistenceError('Model log provider belongs to another workspace')
+    }
 
     const log: ModelInteractionLog = {
       id: this.#idFactory(),
@@ -1573,6 +1585,9 @@ export class SqliteStore {
     if (input.tokensPrompt !== undefined) log.tokensPrompt = input.tokensPrompt
     if (input.tokensCompletion !== undefined) log.tokensCompletion = input.tokensCompletion
     if (input.tokensTotal !== undefined) log.tokensTotal = input.tokensTotal
+    if (input.tokensCached !== undefined) log.tokensCached = input.tokensCached
+    if (input.providerId !== undefined) log.providerId = input.providerId
+    if (input.providerName !== undefined) log.providerName = input.providerName.trim().slice(0, 120)
 
     this.database
       .prepare(
@@ -1581,8 +1596,8 @@ export class SqliteStore {
            source, model_id, provider,
            status, error_code, error_message, http_status, prompt_message_count, prompt_char_count,
            response_char_count, tool_call_count, duration_ms, tokens_prompt,
-           tokens_completion, tokens_total, created_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           tokens_completion, tokens_total, created_at, provider_id, provider_name, tokens_cached
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         log.id,
@@ -1608,6 +1623,9 @@ export class SqliteStore {
         log.tokensCompletion ?? null,
         log.tokensTotal ?? null,
         log.createdAt,
+        log.providerId ?? null,
+        log.providerName ?? null,
+        log.tokensCached ?? null,
       )
     return log
   }
@@ -1726,6 +1744,12 @@ export class SqliteStore {
     return Number(this.database
       .prepare('DELETE FROM model_interaction_logs WHERE workspace_id = ?')
       .run(workspaceId).changes)
+  }
+
+  /** SQL aggregation returns only grouped results, never all raw log rows. */
+  aggregateModelStats(workspaceId: string, params: ModelStatsQueryParams): ModelStatsResponse {
+    this.#requireWorkspace(workspaceId)
+    return new ModelStatsRepository(this.database, this.#clock).aggregate(workspaceId, params)
   }
 
   saveLocalAsset(input: SaveLocalAssetInput): LocalAsset {
@@ -7929,6 +7953,9 @@ function mapModelInteractionLog(row: object): ModelInteractionLog {
   if (value.tokens_total !== null && value.tokens_total !== undefined) {
     log.tokensTotal = Number(value.tokens_total)
   }
+  if (typeof value.provider_id === 'string') log.providerId = value.provider_id
+  if (typeof value.provider_name === 'string') log.providerName = value.provider_name
+  if (typeof value.tokens_cached === 'number') log.tokensCached = value.tokens_cached
   return log
 }
 

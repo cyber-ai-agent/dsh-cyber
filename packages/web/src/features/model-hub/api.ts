@@ -215,3 +215,16 @@ export async function setProfileImageFlag(workspaceId: string, profileId: string
     body: JSON.stringify({ value }),
   })
 }
+
+export type { ModelStatsGroupBy, ModelStatsItem, ModelStatsResponse } from '@dsh-cyber/contracts'
+
+export async function fetchModelStats(
+  workspaceId: string,
+  params: Partial<import('@dsh-cyber/contracts').ModelStatsQueryParams> = {},
+  signal?: AbortSignal,
+): Promise<import('@dsh-cyber/contracts').ModelStatsResponse> {
+  const qs = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) if (value !== undefined) qs.set(key, value)
+  const query = qs.toString()
+  return api(`/api/workspaces/${enc(workspaceId)}/model-stats${query ? `?${query}` : ''}`, signal === undefined ? undefined : { signal })
+}

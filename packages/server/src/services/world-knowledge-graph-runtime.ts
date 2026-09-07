@@ -58,6 +58,7 @@ export function createWorldKnowledgeGraphRuntime(options: WorldKnowledgeGraphRun
         workspaceId: interaction.workspaceId,
         worldId: interaction.worldId,
         modelId: interaction.model ?? profile?.modelId ?? 'world-default',
+        ...(profile === undefined ? {} : { modelProfileId: profile.id }),
         provider: profile?.displayName ?? '世界知识模型',
         status: interaction.errorCode === undefined ? 'success' : 'failed',
         ...(interaction.errorCode === undefined ? {} : { errorCode: interaction.errorCode }),
