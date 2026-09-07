@@ -10,6 +10,7 @@ import type {
   EmployeeBlueprint,
   EmployeeInstance,
 } from '@dsh-cyber/contracts'
+import { ContextInputTooLargeError, estimateTextTokens, planContextBudget } from '@dsh-cyber/contracts'
 import { SqliteStore } from '@dsh-cyber/persistence'
 
 import { CharacterProfileRuntime } from '../src/services/character-profile-runtime.js'
@@ -79,6 +80,84 @@ function history(store: SqliteStore, sessionId: string, employee: EmployeeInstan
 }
 
 describe('CharacterProfileRuntime context composition', () => {
+  it('rejects an expanded effective persona before retrieval or runtime dispatch', async () => {
+    const { store, world, employee } = await setup()
+    const session = store.createSession({
+      workspaceId: world.workspaceId,
+      worldId: world.id,
+      kind: 'direct',
+      title: '私聊',
+      participants: [
+        { participantId: 'owner', kind: 'owner' },
+        { participantId: employee.id, kind: 'employee' },
+      ],
+    })
+    const inner = new CaptureRuntime()
+    const runtime = new CharacterProfileRuntime(inner, store)
+    const revision = store.getEmployeeRevision(employee.id, employee.currentRevision)!
+    const prompt = '继续处理'
+    const base = planContextBudget({ contextWindow: 4_096, maxOutputTokens: 1_024 })
+    const narrowBudget = {
+      ...base,
+      inputBudgetTokens: estimateTextTokens(revision.persona) + estimateTextTokens(prompt),
+      fixedTokens: 0,
+      historyTokens: 0,
+      memoryTokens: 0,
+      knowledgeTokens: 0,
+      workingTokens: 0,
+    }
+
+    await expect(runtime.runTurn({
+      agent: employee,
+      revision,
+      conversationId: session.id,
+      history: [],
+      observedThroughSequence: 0,
+      prompt,
+      workspacePath: '/tmp/world',
+      contextBudget: narrowBudget,
+    })).rejects.toBeInstanceOf(ContextInputTooLargeError)
+    expect(inner.requests).toHaveLength(0)
+  })
+
+  it('reallocates a planner budget after the effective persona expands', async () => {
+    const { store, world, employee } = await setup()
+    const session = store.createSession({
+      workspaceId: world.workspaceId,
+      worldId: world.id,
+      kind: 'direct',
+      title: '私聊',
+      participants: [
+        { participantId: 'owner', kind: 'owner' },
+        { participantId: employee.id, kind: 'employee' },
+      ],
+    })
+    const inner = new CaptureRuntime()
+    const runtime = new CharacterProfileRuntime(inner, store)
+    const revision = store.getEmployeeRevision(employee.id, employee.currentRevision)!
+    const prompt = '继续处理'
+    const rawBudget = planContextBudget({
+      contextWindow: 8_192,
+      maxOutputTokens: 1_024,
+      fixedText: [revision.persona, prompt],
+    })
+
+    await runtime.runTurn({
+      agent: employee,
+      revision,
+      conversationId: session.id,
+      history: [],
+      observedThroughSequence: 0,
+      prompt,
+      workspacePath: '/tmp/world',
+      contextBudget: rawBudget,
+    })
+
+    const effective = inner.requests[0]?.contextBudget
+    expect(effective?.fixedTokens).toBeGreaterThan(rawBudget.fixedTokens)
+    expect(effective?.historyTokens).toBeLessThan(rawBudget.historyTokens)
+  })
+
   it('hands the runtime lane only the recent raw turns and retrieves the rest', async () => {
     const { store, workspace, world, employee, memory } = await setup()
     const session = store.createSession({
