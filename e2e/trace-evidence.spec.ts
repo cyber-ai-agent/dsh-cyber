@@ -6,7 +6,6 @@ import type { AgentTurnRequest } from '../packages/contracts/lib/index.js'
 import { createCyberServer, type CyberServer } from '../packages/server/lib/index.js'
 import { normalizeHarnessTraceNotification } from '../packages/harness-adapter/lib/adapter.js'
 import { ToolTraceSubjects } from '../packages/harness-adapter/lib/tool-result-summary.js'
-import { openDockTab } from './dock-test-helpers.js'
 import { openTraceEntry } from './trace-test-helpers.js'
 
 let server: CyberServer
@@ -45,7 +44,14 @@ test('expands and copies sanitized real-event evidence, survives reload, and fit
   await page.getByRole('button', { name: '发送', exact: true }).click()
   await expect(page.getByText('已完成轨迹样例。', { exact: true })).toBeVisible()
   const dock = page.getByRole('region', { name: '世界与角色侧边栏' })
-  await openDockTab(dock, '轨迹')
+  const openTraceTab = async () => {
+    // This is a permanent tab, never a More-menu item. count() during reload
+    // observes an unmounted shell and would incorrectly enter the More menu.
+    const tab = dock.getByRole('tab', { name: '轨迹', exact: true })
+    await expect(tab).toBeVisible()
+    await tab.click()
+  }
+  await openTraceTab()
   let entry = await openTraceEntry(dock, '完成处理')
   const target = 'packages/server/src/services/character-profile-runtime.ts'
   await expect(entry.locator('.world-trace-tool__target')).toHaveText(target)
@@ -67,7 +73,7 @@ test('expands and copies sanitized real-event evidence, survives reload, and fit
     await page.screenshot({ path: info.outputPath(`trace-${size.width}x${size.height}.png`) })
   }
   await page.reload()
-  await openDockTab(dock, '轨迹')
+  await openTraceTab()
   entry = await openTraceEntry(dock, '完成处理')
   await entry.locator('.world-trace-tool__evidence > summary').click()
   await expect(entry.locator('pre')).toContainText('directoryEnabled')
