@@ -63,9 +63,11 @@ export function ResizableShell({
     const onEnd = () => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onEnd)
+      window.removeEventListener('pointercancel', onEnd)
     }
     window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onEnd, { once: true })
+    window.addEventListener('pointerup', onEnd)
+    window.addEventListener('pointercancel', onEnd)
   }, [onResize, paneScale])
 
   const handleWidth = Math.round(5 * paneScale)

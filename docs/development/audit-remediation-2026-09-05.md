@@ -122,3 +122,5 @@ Group HTTP 接线检查点：`/chat` 的 discussion/task immediate/queued 在 pl
 随后补充有效上下文前置拒绝与重分配：`CharacterProfileRuntime` 在解析角色资料、世界权限、Skill 指令和世界规则后，用实际固定文本重建可识别的 planner 预算，并在检索、创建运行时和外部 provider 调用前复核；预算不足时立即拒绝，避免用错误的裸 Persona 预算消耗历史空间。定向上下文 15 项与类型检查通过，第六批仍未完成真实供应商 tokenizer/canary 验收。
 
 第七批首个纵切：共享 world live EventSource 对单个面板订阅者的异常做隔离并记录错误，健康订阅者继续接收同一事实；新增真实事件分发回归，验证失败订阅者不会阻断其它面板。web 定向 6 项与类型检查通过，保存反馈、pointercancel、布局退出/键盘及三视口视觉证据仍待后续验收。
+
+第七批补充：ResizableShell 的拖拽调整在 `pointercancel` 时与 `pointerup` 使用同一清理路径，避免触控中断后遗留全局 `pointermove` 监听并继续修改面板宽度；web 类型检查与生产构建通过，完整拖拽视觉证据仍待后续验收。
