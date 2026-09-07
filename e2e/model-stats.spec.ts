@@ -13,7 +13,7 @@ test.beforeAll(async () => {
   stateRoot = await mkdtemp(join(tmpdir(), 'cyber-model-stats-browser-'))
   server = await createCyberServer({ stateRoot, workspacePath: stateRoot, webRoot: join(process.cwd(), 'packages/web/dist'), port: 0, bootstrapDefaultWorld: true })
   workspaceId = server.store.listWorkspaces()[0]!.id
-  providerId = server.store.saveModelProvider({ workspaceId, kind: 'custom', name: '统计测试服务商', baseUrl: 'https://stats.example/v1', providerKind: 'openai-compatible', api: 'openai-completions' }).id
+  providerId = server.store.saveModelProvider({ workspaceId, kind: 'custom', name: '统计测试服务商', baseUrl: 'https://stats.example/v1', providerKind: 'openai-compatible-remote', api: 'openai-completions' }).id
   for (const [days, tokens, cached] of [[0, 100, 20], [20, 200, 0], [60, 300, undefined]] as const) {
     const row = server.store.recordModelInteraction({ workspaceId, providerId, providerName: '统计测试服务商', source: 'turn', provider: '模型昵称而非服务商名称', modelId: 'shared-model', status: 'success', promptMessageCount: 1, promptCharCount: 5, tokensPrompt: tokens, tokensCompletion: 10, ...(cached === undefined ? {} : { tokensCached: cached }), toolCallCount: 3, durationMs: 100 })
     server.store.database.prepare('UPDATE model_interaction_logs SET created_at=? WHERE id=?').run(new Date(Date.now() - days * 86_400_000).toISOString(), row.id)
@@ -24,7 +24,12 @@ test.afterAll(async () => { await server?.close(); await rm(stateRoot, { recursi
 
 test('filters stats on one click, refreshes actual logs, and fits desktop and small screens', async ({ page }, info) => {
   const consoleIssues: string[] = []; attachAppConsoleRecorder(page, consoleIssues)
-  const requests: URL[] = []; page.on('request', (r) => { if (r.url().includes('/model-interactions/stats?')) requests.push(new URL(r.url())) })
+  const requests: URL[] = []
+  page.on('request', (request) => {
+    const url = new URL(request.url())
+    if (url.pathname === `/api/workspaces/${workspaceId}/model-stats`) requests.push(url)
+  })
+  await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto(origin); await expect(page.locator('.workbench-shell')).toBeVisible()
   await page.getByRole('button', { name: '设置', exact: true }).click()
   const settings = page.getByRole('dialog', { name: '设置' }); await settings.getByRole('button', { name: /AI 模型/ }).click()
