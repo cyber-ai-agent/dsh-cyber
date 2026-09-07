@@ -79,10 +79,11 @@ export class WorldFileService {
   }
 
   /**
-   * Persist a model-generated image under the same attachment convention as
-   * user uploads, so chat rendering, the assets route and backup bundles all
-   * treat one generated picture exactly like any other attachment. The size
-   * cap is larger: generated PNGs legitimately exceed a manual upload.
+   * Persist a model-generated image as a real, visible world file under
+   * `files/图片/` - the folder the world file browser, backup bundles and the
+   * character's own file permission all see. The chat attachment references
+   * the world-file read endpoint, so the transcript renders the very same
+   * bytes instead of a hidden assets copy the owner cannot find.
    */
   async saveGeneratedImage(worldId: string, input: { bytes: Buffer; mimeType: 'image/png' | 'image/jpeg' | 'image/webp'; name: string }): Promise<ChatAttachment> {
     const MAX_GENERATED_IMAGE_BYTES = 20 * 1024 * 1024
@@ -91,35 +92,21 @@ export class WorldFileService {
     }
     const root = await this.#roots.ensure(worldId)
     const id = randomUUID()
-    const fileName = `${id}.${input.mimeType === 'image/jpeg' ? 'jpg' : input.mimeType === 'image/webp' ? 'webp' : 'png'}`
-    const attachmentDirectory = join(root.assetsPath, 'attachments')
-    await mkdir(attachmentDirectory, { recursive: true })
-    const safeDirectory = await safeAttachmentDirectory(root.assetsPath, attachmentDirectory)
+    const extension = input.mimeType === 'image/jpeg' ? 'jpg' : input.mimeType === 'image/webp' ? 'webp' : 'png'
+    const baseName = `${input.name.trim().slice(0, 120) || '生成图片'}-${id.slice(0, 8)}`.replace(/[\\/]/gu, '').replace(/[\u0000-\u001f]/gu, '')
+    const fileName = `${baseName}.${extension}`
+    const picturesDirectory = join(root.filesPath, '图片')
+    await mkdir(picturesDirectory, { recursive: true })
+    const safeDirectory = await safeAttachmentDirectory(root.filesPath, picturesDirectory)
     const destination = join(safeDirectory, fileName)
-    const metadataPath = join(safeDirectory, `${id}.json`)
-    const metadata: WorldAttachmentMetadata = {
-      schemaVersion: 1,
-      id,
+    await writeAtomically(destination, input.bytes)
+    const relativePath = `图片/${fileName}`
+    return {
+      assetId: relativePath,
       name: input.name.trim().slice(0, 180) || '生成的图片',
       mimeType: input.mimeType,
       byteLength: input.bytes.length,
-      sha256: sha256(input.bytes),
-      fileName,
-      createdAt: new Date().toISOString(),
-    }
-    try {
-      await writeAtomically(destination, input.bytes)
-      await writeAtomically(metadataPath, Buffer.from(`${JSON.stringify(metadata, null, 2)}\n`, 'utf8'))
-    } catch (error) {
-      await Promise.all([unlink(destination).catch(() => undefined), unlink(metadataPath).catch(() => undefined)])
-      throw error
-    }
-    return {
-      assetId: id,
-      name: metadata.name,
-      mimeType: input.mimeType,
-      byteLength: input.bytes.length,
-      url: `/api/worlds/${encodeURIComponent(worldId)}/assets/${encodeURIComponent(id)}`,
+      url: `/api/worlds/${encodeURIComponent(worldId)}/file?path=${encodeURIComponent(relativePath)}`,
     }
   }
 

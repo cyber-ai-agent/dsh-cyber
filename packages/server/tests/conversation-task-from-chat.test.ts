@@ -1,8 +1,8 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentRuntimePort, AgentTurnRequest, WorkTask, WorkTaskDetail, WorldTraceEntry } from '@dsh-cyber/contracts'
 
 import { createCyberServer, type CyberServer } from '../src/index.js'
@@ -107,7 +107,7 @@ async function start(intent: ConversationTaskIntentPort) {
   const workspace = server.store.listWorkspaces()[0]!
   const world = server.store.listWorlds(workspace.id)[0]!
   const employee = server.store.listEmployees(world.id)[0]!
-  return { origin, server, runtime, workspace, world, employee }
+  return { origin, server, runtime, workspace, world, employee, stateRoot }
 }
 
 async function json(origin: string, path: string, init?: RequestInit): Promise<{ status: number; body: any }> {
@@ -284,5 +284,52 @@ describe('a chat instruction becomes one task in the task list', () => {
     const failures = (trace.body.items as WorldTraceEntry[]).filter((entry) => entry.summary.includes('任务意图'))
     expect(failures).toHaveLength(3)
     expect(failures.every((entry) => entry.status === 'failed')).toBe(true)
+  })
+
+  it('does not classify an image-model character at all, and still delivers the picture', async () => {
+    const intent = stubIntent({})
+    // Deterministic image endpoint: inline bytes, no real gateway. Stubbed
+    // BEFORE the server composes so ImageGenerationService captures it; every
+    // other request passes through to the real server.
+    const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x01])
+    const realFetch = globalThis.fetch.bind(globalThis)
+    const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => String(url).endsWith('/images/generations')
+      ? new Response(JSON.stringify({ data: [{ b64_json: pngBytes.toString('base64') }] }), { status: 200, headers: { 'content-type': 'application/json' } })
+      : realFetch(url as never, init as never))
+    vi.stubGlobal('fetch', fetchMock as never)
+    try {
+      const { origin, server, world, employee, stateRoot } = await start(intent)
+      // Bind the character to a marked image generator. An instruction-shaped
+      // message to such a character must never reach the classifier (it would
+      // judge against the world's text default and record noise next to the
+      // picture the turn is about to produce).
+      const profile = server.store.saveModelProfile({
+        workspaceId: world.workspaceId,
+        displayName: '形象生成器',
+        providerKind: 'openai-compatible-remote',
+        baseUrl: 'https://images.example.test/v1',
+        modelId: 'gpt-image-test',
+        api: 'openai-completions',
+        isDefault: false,
+        settings: { imageGeneration: true },
+      })
+      server.store.saveModelAssignment({ workspaceId: world.workspaceId, scope: 'employee', scopeId: employee.id, modelProfileId: profile.id })
+      const answered = await json(origin, `/api/worlds/${world.id}/chat`, post({ employeeIds: [employee.id], prompt: INSTRUCTION }))
+      expect(answered.status).toBe(200)
+      expect(answered.body.proposedTask).toBeUndefined()
+      // The classifier never ran: no draft, no misleading failure event.
+      expect(intent.prompts).toEqual([])
+      expect(server.work.list(world.id)).toEqual([])
+      // The turn still answered with the picture's caption.
+      expect(answered.body.replies?.length ?? 0).toBeGreaterThan(0)
+      // The generated image is a real, visible world file under files/图片,
+      // browsable like any other world file - not a hidden assets copy.
+      const picturesDirectory = join(stateRoot, 'worlds', world.id, 'files', '图片')
+      const pictures = await readdir(picturesDirectory)
+      expect(pictures).toHaveLength(1)
+      expect(pictures[0]).toMatch(/\.png$/u)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })
