@@ -937,7 +937,7 @@ export interface ModelProviderCatalog {
   providers: ModelProviderCatalogEntry[]
 }
 
-export type ModelProviderCatalogSource = 'remote' | 'cache' | 'bundled'
+export type ModelProviderCatalogSource = 'repository' | 'remote' | 'cache' | 'bundled'
 
 export interface ModelProviderCatalogState {
   catalog: ModelProviderCatalog

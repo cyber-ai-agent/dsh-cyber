@@ -11,7 +11,7 @@ const servers: CyberServer[] = []
 const roots: string[] = []
 
 beforeAll(() => {
-  // Offline deterministic catalog: the bundled snapshot, never the network.
+  // Offline deterministic catalog: the checked-in repository file, never the network.
   process.env.DSH_CYBER_MODEL_CATALOG_URL = ''
 })
 
@@ -54,11 +54,11 @@ async function call(origin: string, method: string, path: string, body?: unknown
 }
 
 describe('model hub routes', () => {
-  it('serves the bundled catalog offline with signup guidance', async () => {
+  it('serves the repository catalog offline with signup guidance', async () => {
     const { origin } = await startServer()
     const state = await call(origin, 'GET', '/api/model-provider-catalog')
     expect(state.status).toBe(200)
-    expect(state.body.source).toBe('bundled')
+    expect(state.body.source).toBe('repository')
     const deepseek = state.body.catalog.providers.find((entry: { id: string }) => entry.id === 'deepseek')
     expect(deepseek.signup.url).toContain('https://platform.deepseek.com')
     expect(deepseek.balance).toBe('deepseek')

@@ -30,6 +30,8 @@ export class ModelProviderCatalogError extends Error {
 
 export interface ModelProviderCatalogServiceOptions {
   stateRoot: string
+  /** A repository-controlled catalog file used before remote/cache fallbacks. */
+  catalogPath?: string
   remoteUrl?: string
   fetch?: typeof fetch
   timeoutMs?: number
@@ -38,14 +40,16 @@ export interface ModelProviderCatalogServiceOptions {
 }
 
 /**
- * The built-in provider catalog with a three-level fallback:
- * remote (when configured and reachable) → the last good copy cached under
- * the state root → the snapshot bundled in this build. The file is untrusted
- * input: every entry passes the strict parser below before it reaches anyone,
- * and a rejected document never replaces a cached good one.
+ * The provider catalog with a repository-first fallback:
+ * repository file (when configured and valid) → remote (when explicitly
+ * configured and reachable) → the last good copy cached under the state root
+ * → the snapshot bundled in this build. Every source passes the strict parser
+ * below before it reaches anyone, and a rejected document never replaces a
+ * cached good one.
  */
 export class ModelProviderCatalogService {
   readonly #stateRoot: string
+  readonly #catalogPath: string | undefined
   readonly #remoteUrl: string | undefined
   readonly #fetch: typeof fetch
   readonly #timeoutMs: number
@@ -56,6 +60,7 @@ export class ModelProviderCatalogService {
 
   constructor(options: ModelProviderCatalogServiceOptions) {
     this.#stateRoot = options.stateRoot
+    this.#catalogPath = options.catalogPath?.trim() || undefined
     this.#remoteUrl = options.remoteUrl?.trim() || undefined
     this.#fetch = options.fetch ?? fetch
     this.#timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
@@ -73,6 +78,17 @@ export class ModelProviderCatalogService {
       return { catalog: this.#cached.catalog, source: this.#cached.source, checkedAt: new Date(this.#lastCheckedAt).toISOString() }
     }
     let notice: string | undefined
+    if (this.#catalogPath !== undefined) {
+      const repository = await this.#readCatalogFile(this.#catalogPath)
+      if (repository !== undefined) {
+        this.#set({ catalog: repository, source: 'repository' }, now)
+        // Keep the last valid repository copy available if the working tree
+        // is temporarily unavailable on a later start. Serving the repository
+        // file itself never depends on this best-effort write.
+        await this.#writeCache(repository).catch(() => undefined)
+        return this.#state(now)
+      }
+    }
     if (this.#remoteUrl !== undefined) {
       const outcome = await this.#fetchRemote()
       if (typeof outcome === 'object') {
@@ -136,11 +152,15 @@ export class ModelProviderCatalogService {
   }
 
   async #readCache(): Promise<ModelProviderCatalog | undefined> {
+    return this.#readCatalogFile(this.cachePath)
+  }
+
+  async #readCatalogFile(path: string): Promise<ModelProviderCatalog | undefined> {
     try {
-      const raw = await readFile(this.cachePath, 'utf8')
+      const raw = await readFile(path, 'utf8')
+      if (Buffer.byteLength(raw, 'utf8') > MAX_CATALOG_BYTES) return undefined
       return parseModelProviderCatalog(JSON.parse(raw) as unknown)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    } catch {
       return undefined
     }
   }

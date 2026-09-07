@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
@@ -62,13 +62,51 @@ describe('parseModelProviderCatalog', () => {
     expect(parsed.providers[1]!.popularModels).toEqual(['ok'])
   })
 
-  it('keeps the repository catalog and the bundled snapshot identical', async () => {
+  it('accepts the repository catalog as a separately deployable source', async () => {
     const raw = await readFile(REPO_CATALOG_PATH, 'utf8')
-    expect(JSON.parse(raw) as unknown).toEqual(BUNDLED_MODEL_PROVIDER_CATALOG)
+    const parsed = parseModelProviderCatalog(JSON.parse(raw) as unknown)
+    expect(parsed.providers.length).toBeGreaterThan(5)
+    const root = await stateRoot()
+    const service = new ModelProviderCatalogService({ stateRoot: root, catalogPath: REPO_CATALOG_PATH })
+    await expect(service.state()).resolves.toMatchObject({ source: 'repository', catalog: parsed })
   })
 })
 
 describe('ModelProviderCatalogService fallback chain', () => {
+  it('prefers the repository file over an explicitly configured remote', async () => {
+    const root = await stateRoot()
+    const repository = { ...structuredClone(BUNDLED_MODEL_PROVIDER_CATALOG), version: 'repository-1' }
+    const fetchMock = vi.fn<typeof fetch>(async () => response({ ...repository, version: 'remote-1' }))
+    const catalogPath = join(root, 'model-providers.json')
+    await writeFile(catalogPath, JSON.stringify(repository), 'utf8')
+    const service = new ModelProviderCatalogService({
+      stateRoot: root,
+      catalogPath,
+      remoteUrl: 'https://example.test/catalog.json',
+      fetch: fetchMock,
+    })
+    const state = await service.state()
+    expect(state.source).toBe('repository')
+    expect(state.catalog.version).toBe('repository-1')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('falls back to a cached copy when the repository catalog is invalid', async () => {
+    const root = await stateRoot()
+    const seed = new ModelProviderCatalogService({
+      stateRoot: root,
+      remoteUrl: 'https://example.test/catalog.json',
+      fetch: vi.fn<typeof fetch>(async () => response({ ...BUNDLED_MODEL_PROVIDER_CATALOG, version: 'cached-1' })),
+    })
+    await seed.state()
+    const catalogPath = join(root, 'model-providers.json')
+    await writeFile(catalogPath, JSON.stringify({ schemaVersion: 1, version: 'broken', providers: [{ id: 'missing-fields' }] }), 'utf8')
+    const service = new ModelProviderCatalogService({ stateRoot: root, catalogPath })
+    const state = await service.state()
+    expect(state.source).toBe('cache')
+    expect(state.catalog.version).toBe('cached-1')
+  })
+
   it('uses a reachable remote and caches it', async () => {
     const root = await stateRoot()
     const remote = { ...structuredClone(BUNDLED_MODEL_PROVIDER_CATALOG), version: 'remote-1' }
