@@ -116,3 +116,5 @@ Group HTTP 接线检查点：`/chat` 的 discussion/task immediate/queued 在 pl
 第六批首个纵切已完成本地复验：Harness adapter 将最终 runtime-facing 输入按 system、当前请求、实际重放历史、native schema/system/turn-context、live retained context 分项计量；固定 rc.1 wire schema 漂移门禁，活跃会话超限先验证 SQLite fresh replay，失败则保留旧 lane。Inspector 与 snapshot 读取同一无明文 `contextUsage` 投影，并保留最终重放序列和消息来源指针。Memory/Knowledge 检索在 FTS/LIKE 两条路径统一有界 overfetch、lexical score 与稳定 tie-break，修复 500/5000 候选被前 50 行截断、同数 stale mirror 和中文句尾词元丢失。当前定向 126 项通过，完整有效上下文还需继续核对 CharacterProfileRuntime/Inspector 与真实 provider 入参边界，故第六批保持开发中。
 
 2026-09-07：继续整合本地未提交整改。SSE runtime/world 流统一使用有界连接缓冲，单个异常或慢订阅者只会被关闭，不影响健康订阅者；共享 world live 客户端在短暂卸载/重挂载窗口内复用连接。模型服务商目录改为优先读取仓库 `catalog/model-providers.json`，远程目录仅在仓库文件不可用且显式配置时作为备用，随后依次使用 stateRoot 缓存和内置快照。仓库目录仍经过同一严格解析器，目录变更在本地服务下一次读取时生效；批次 07/08 仍需其余审计范围和真实浏览器证据，未标记完成。
+
+同日第六批补充：Harness adapter 在 direct embedder 未提供 `ContextBudget`、但 provider profile 声明上下文窗口时，预算回退现在按实际 `employeeSystemPrompt` 估算固定层，而不是只按裸 Persona 估算；新增回归验证展开后的身份/安全/工具提示进入预算且仍能在精确边界执行。适配器定向 32 项、类型检查和生产构建/预算通过；第六批仍保持开发中，尚未宣称覆盖真实供应商 tokenizer 或完整 provider canary。

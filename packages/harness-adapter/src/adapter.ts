@@ -982,7 +982,7 @@ function requiredConversationId(value: string | undefined): string {
  * limits must preserve its legacy behavior rather than invent a window.
  */
 function resolveAdapterContextBudget(
-  request: Pick<EmployeeTurnRequest, 'contextBudget' | 'revision' | 'prompt'>,
+  request: Pick<EmployeeTurnRequest, 'contextBudget' | 'employee' | 'revision' | 'prompt'>,
   providerProfile: HarnessProviderProfile | undefined,
 ): AgentTurnRequest['contextBudget'] | undefined {
   if (request.contextBudget !== undefined) return request.contextBudget
@@ -991,7 +991,12 @@ function resolveAdapterContextBudget(
   return planContextBudget({
     ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
     ...(model.maxTokens === undefined ? {} : { maxOutputTokens: model.maxTokens }),
-    fixedText: [request.revision.persona, request.prompt],
+    // The fallback is used by direct adapter embedders that do not run the
+    // server's ContextPlanningRuntime. Count the exact system prompt that the
+    // worker will receive, rather than only the raw persona; otherwise the
+    // planner allocates history against tokens that the runtime has already
+    // reserved for identity, safety and tool-use instructions.
+    fixedText: [employeeSystemPrompt(request.employee, request.revision), request.prompt],
   })
 }
 
