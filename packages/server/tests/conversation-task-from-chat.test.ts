@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -107,7 +107,7 @@ async function start(intent: ConversationTaskIntentPort) {
   const workspace = server.store.listWorkspaces()[0]!
   const world = server.store.listWorlds(workspace.id)[0]!
   const employee = server.store.listEmployees(world.id)[0]!
-  return { origin, server, runtime, workspace, world, employee }
+  return { origin, server, runtime, workspace, world, employee, stateRoot }
 }
 
 async function json(origin: string, path: string, init?: RequestInit): Promise<{ status: number; body: any }> {
@@ -298,7 +298,7 @@ describe('a chat instruction becomes one task in the task list', () => {
       : realFetch(url as never, init as never))
     vi.stubGlobal('fetch', fetchMock as never)
     try {
-      const { origin, server, world, employee } = await start(intent)
+      const { origin, server, world, employee, stateRoot } = await start(intent)
       // Bind the character to a marked image generator. An instruction-shaped
       // message to such a character must never reach the classifier (it would
       // judge against the world's text default and record noise next to the
@@ -322,6 +322,12 @@ describe('a chat instruction becomes one task in the task list', () => {
       expect(server.work.list(world.id)).toEqual([])
       // The turn still answered with the picture's caption.
       expect(answered.body.replies?.length ?? 0).toBeGreaterThan(0)
+      // The generated image is a real, visible world file under files/图片,
+      // browsable like any other world file - not a hidden assets copy.
+      const picturesDirectory = join(stateRoot, 'worlds', world.id, 'files', '图片')
+      const pictures = await readdir(picturesDirectory)
+      expect(pictures).toHaveLength(1)
+      expect(pictures[0]).toMatch(/\.png$/u)
     } finally {
       vi.unstubAllGlobals()
     }
