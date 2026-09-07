@@ -14,7 +14,7 @@ const WORLD_LIVE_EVENT_NAMES = [
 ] as const
 
 type WorldLiveEventName = (typeof WORLD_LIVE_EVENT_NAMES)[number]
-type WorldLiveListener = (event: Event) => void
+type WorldLiveListener = (event: Event) => void | Promise<void>
 
 interface SharedWorldLiveClient {
   source: EventSource
@@ -42,12 +42,17 @@ export function subscribeWorldLive(
   // Never assert here: an unknown name should register, not crash the app.
   const bucket = client.listeners.get(eventName) ?? new Set<WorldLiveListener>()
   client.listeners.set(eventName, bucket)
-  bucket.add(listener)
+  // Each call owns a distinct subscription, even when callbacks are identical.
+  const ownedListener: WorldLiveListener = (event) => listener(event)
+  bucket.add(ownedListener)
+  let stopped = false
 
   return () => {
+    if (stopped) return
+    stopped = true
     const current = clients.get(worldId)
-    if (current === undefined) return
-    current.listeners.get(eventName)?.delete(listener)
+    if (current !== client) return
+    current.listeners.get(eventName)?.delete(ownedListener)
     if (hasListeners(current)) return
 
     // React development mode intentionally remounts effects. A short grace period
@@ -76,14 +81,16 @@ function getOrCreateClient(worldId: string): SharedWorldLiveClient {
   const client: SharedWorldLiveClient = { source, listeners }
   for (const eventName of listeners.keys()) {
     source.addEventListener(eventName, (event) => {
-      for (const listener of client.listeners.get(eventName) ?? []) {
+      const bucket = client.listeners.get(eventName)
+      // Subscribers added by a callback start at the next event. Removed owners
+      // are skipped rather than receiving a callback after unmount.
+      for (const listener of [...(bucket ?? [])]) {
+        if (!bucket?.has(listener)) continue
         try {
-          listener(event)
+          const pending = listener(event)
+          if (pending !== undefined) void Promise.resolve(pending).catch(reportSubscriberError)
         } catch (error) {
-          // One panel must not prevent the other panels from receiving the
-          // same world fact. Keep the failure visible without tearing down the
-          // shared EventSource used by the rest of the world.
-          console.error('[dsh-cyber] world live subscriber failed', error)
+          reportSubscriberError(error)
         }
       }
     })
@@ -97,4 +104,48 @@ function hasListeners(client: SharedWorldLiveClient): boolean {
     if (listeners.size > 0) return true
   }
   return false
+}
+
+function reportSubscriberError(error: unknown): void {
+  console.error('[dsh-cyber] world live subscriber failed', error)
+}
+
+/**
+ * For snapshot-backed panels only: ready reconciles events missed while offline.
+ * Coalesce bursts and allow at most one live-refresh request plus one dirty bit.
+ * Transient deltas/cues must still use subscribeWorldLive directly.
+ */
+export function subscribeWorldLiveRefresh(
+  worldId: string,
+  eventName: 'world-task' | 'world-artifact' | 'world-knowledge',
+  refresh: () => void | Promise<void>,
+): () => void {
+  let disposed = false
+  let running = false
+  let dirty = false
+  let timer: number | undefined
+  const schedule = () => {
+    if (disposed) return
+    dirty = true
+    if (running || timer !== undefined) return
+    timer = window.setTimeout(() => { timer = undefined; void flush() }, 50)
+  }
+  const flush = async () => {
+    if (disposed) return
+    dirty = false
+    running = true
+    try { await refresh() } catch (error) { reportSubscriberError(error) }
+    finally {
+      running = false
+      if (dirty && !disposed) schedule()
+    }
+  }
+  const stopEvent = subscribeWorldLive(worldId, eventName, schedule)
+  const stopReady = subscribeWorldLive(worldId, 'ready', schedule)
+  return () => {
+    disposed = true
+    if (timer !== undefined) window.clearTimeout(timer)
+    stopEvent()
+    stopReady()
+  }
 }

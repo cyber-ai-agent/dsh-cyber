@@ -6,9 +6,12 @@ import type { ServerResponse } from 'node:http'
  * Node's writable buffer to grow without a bound.
  */
 export const DEFAULT_SSE_MAX_BUFFERED_BYTES = 64 * 1024
+export const DEFAULT_SSE_DRAIN_TIMEOUT_MS = 15_000
 
 export interface SseConnectionOptions {
   maxBufferedBytes?: number
+  /** Maximum time a response may remain backpressured without draining. */
+  drainTimeoutMs?: number
 }
 
 /**
@@ -20,6 +23,11 @@ export class SseConnection {
   readonly #response: ServerResponse
   readonly #maxBufferedBytes: number
   readonly #onClose: () => void
+  readonly #drainTimeoutMs: number
+  #drainTimer: NodeJS.Timeout | undefined
+  readonly #onDrain = () => this.#drain()
+  readonly #onResponseClose = () => this.close()
+  readonly #onResponseError = () => this.#finish(true)
   #queued: string[] = []
   #queuedBytes = 0
   #waitingDrain = false
@@ -30,9 +38,16 @@ export class SseConnection {
     if (!Number.isSafeInteger(maxBufferedBytes) || maxBufferedBytes <= 0) {
       throw new Error('SSE maximum buffered bytes must be a positive safe integer')
     }
+    const drainTimeoutMs = options.drainTimeoutMs ?? DEFAULT_SSE_DRAIN_TIMEOUT_MS
+    if (!Number.isSafeInteger(drainTimeoutMs) || drainTimeoutMs <= 0 || drainTimeoutMs > 2_147_483_647) {
+      throw new Error('SSE drain timeout must be a positive timer-safe integer')
+    }
+    this.#drainTimeoutMs = drainTimeoutMs
     this.#response = response
     this.#maxBufferedBytes = maxBufferedBytes
     this.#onClose = onClose
+    response.once?.('close', this.#onResponseClose)
+    response.once?.('error', this.#onResponseError)
   }
 
   get closed(): boolean {
@@ -48,11 +63,11 @@ export class SseConnection {
     try {
       chunk = serializeSse(event, value, id)
     } catch {
-      this.close()
+      this.#finish(true)
       return false
     }
-    if (Buffer.byteLength(chunk, 'utf8') > this.#maxBufferedBytes) {
-      this.close()
+    if (Buffer.byteLength(chunk, 'utf8') + this.#queuedBytes + this.#bufferedBytes() > this.#maxBufferedBytes) {
+      this.#finish(true)
       return false
     }
     if (this.#waitingDrain) {
@@ -66,24 +81,46 @@ export class SseConnection {
         if (!this.#listenForDrain()) return false
       }
     } catch {
-      this.close()
+      this.#finish(true)
       return false
     }
     return this.#enforceLimit()
   }
 
   close(): void {
+    // end() waits for queued bytes to flush. A stalled peer will never flush;
+    // destroy that transport so the OS buffer/socket is actually released.
+    this.#finish(this.#waitingDrain)
+  }
+
+  #finish(abort: boolean): void {
     if (this.#closed) return
     this.#closed = true
     this.#queued = []
     this.#queuedBytes = 0
+    this.#clearDrain()
+    this.#response.removeListener?.('close', this.#onResponseClose)
+    this.#response.removeListener?.('error', this.#onResponseError)
     try {
-      if (!this.#response.writableEnded && !this.#response.destroyed) this.#response.end()
+      if (abort && !this.#response.destroyed && typeof this.#response.destroy === 'function') this.#response.destroy()
+      else if (!this.#response.writableEnded && !this.#response.destroyed) this.#response.end()
     } catch {
-      // A response may already be torn down by the peer. The owner callback is
-      // still invoked below so the hub cannot retain a dead subscriber.
+      // Peer teardown must not interrupt publishing to healthy subscribers.
     }
-    this.#onClose()
+    try { this.#onClose() } catch {
+      console.error('[dsh-cyber] SSE subscriber cleanup failed')
+    }
+  }
+
+  #clearDrain(): void {
+    if (this.#drainTimer !== undefined) clearTimeout(this.#drainTimer)
+    this.#drainTimer = undefined
+    this.#waitingDrain = false
+    this.#response.removeListener?.('drain', this.#onDrain)
+  }
+
+  #bufferedBytes(): number {
+    return Number.isSafeInteger(this.#response.writableLength) ? Math.max(0, this.#response.writableLength) : 0
   }
 
   #queue(chunk: string): void {
@@ -92,26 +129,25 @@ export class SseConnection {
   }
 
   #enforceLimit(): boolean {
-    const responseBytes = Number.isSafeInteger(this.#response.writableLength)
-      ? this.#response.writableLength
-      : 0
-    if (responseBytes + this.#queuedBytes <= this.#maxBufferedBytes) return true
-    this.close()
+    if (this.#bufferedBytes() + this.#queuedBytes <= this.#maxBufferedBytes) return true
+    this.#finish(true)
     return false
   }
 
   #listenForDrain(): boolean {
     if (typeof this.#response.once !== 'function') {
-      this.close()
+      this.#finish(true)
       return false
     }
-    this.#response.once('drain', () => this.#drain())
+    this.#response.once('drain', this.#onDrain)
+    this.#drainTimer = setTimeout(() => this.#finish(true), this.#drainTimeoutMs)
+    this.#drainTimer.unref()
     return true
   }
 
   #drain(): void {
-    if (this.#closed) return
-    this.#waitingDrain = false
+    if (this.closed) { this.close(); return }
+    this.#clearDrain()
     while (this.#queued.length > 0) {
       const chunk = this.#queued.shift()!
       this.#queuedBytes -= Buffer.byteLength(chunk, 'utf8')
@@ -124,7 +160,7 @@ export class SseConnection {
           return
         }
       } catch {
-        this.close()
+        this.#finish(true)
         return
       }
       if (!this.#enforceLimit()) return

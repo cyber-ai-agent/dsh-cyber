@@ -69,3 +69,42 @@ describe('artifact list request ownership', () => {
     } finally { await act(async () => root.unmount()) }
   })
 })
+
+
+it('reconciles the artifact list after ready without refreshing for token events', async () => {
+  vi.useFakeTimers()
+  class Source {
+    static latest: Source
+    listeners = new Map<string, (event: Event) => void>()
+    constructor() { Source.latest = this }
+    addEventListener(name: string, listener: (event: Event) => void) { this.listeners.set(name, listener) }
+    emit(name: string) { this.listeners.get(name)?.(new Event(name)) }
+    close() {}
+  }
+  vi.stubGlobal('EventSource', Source)
+  let items = [{ ...artifact, worldId: 'artifact-reconnect' }]
+  const fetch = vi.fn(async () => Response.json({ artifacts: items }))
+  vi.stubGlobal('fetch', fetch)
+  const host = document.createElement('div'); document.body.append(host)
+  const root = createRoot(host)
+  function Probe() {
+    const state = useWorldArtifacts({ worldId: 'artifact-reconnect' })
+    return createElement('p', null, state.artifacts.map((item) => item.title).join(','))
+  }
+  try {
+    await act(async () => root.render(createElement(Probe)))
+    expect(fetch).toHaveBeenCalledOnce()
+    items = [{ ...artifact, worldId: 'artifact-reconnect', title: '断线期间的产物' }]
+    Source.latest.emit('world-state')
+    await act(async () => vi.advanceTimersByTimeAsync(50))
+    expect(fetch).toHaveBeenCalledOnce()
+    Source.latest.emit('ready')
+    await act(async () => vi.advanceTimersByTimeAsync(50))
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(host.textContent).toBe('断线期间的产物')
+  } finally {
+    await act(async () => root.unmount())
+    vi.advanceTimersByTime(250)
+    vi.useRealTimers()
+  }
+})

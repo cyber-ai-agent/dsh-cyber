@@ -104,12 +104,16 @@ describe('Task list live refresh', () => {
     expect(fetchMock.mock.calls).toHaveLength(before)
 
     tasks = [proposed]
-    await act(async () => { FakeEventSource.instances[0]?.emit('world-task') })
+    await act(async () => { FakeEventSource.instances[0]?.emit('world-task'); await new Promise((resolve) => setTimeout(resolve, 60)) })
     await vi.waitFor(() => expect(host.textContent).toContain('整理用户反馈改进清单'))
     // Draft, not running: recording a task never starts one, so the panel still
     // offers the action that starts it.
-    expect(host.textContent).toContain('开始真实协作')
+    await vi.waitFor(() => expect(host.textContent).toContain('开始真实协作'))
     expect(host.textContent).toContain('来自对话')
+
+    tasks = [{ ...proposed, title: '断线期间新增的任务' }]
+    await act(async () => { FakeEventSource.instances[0]?.emit('ready'); await new Promise((resolve) => setTimeout(resolve, 60)) })
+    await vi.waitFor(() => expect(host.textContent).toContain('断线期间新增的任务'))
 
     await act(async () => { root.unmount() })
     host.remove()

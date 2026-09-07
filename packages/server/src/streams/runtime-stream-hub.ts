@@ -34,13 +34,16 @@ export class RuntimeStreamHub {
       'X-Accel-Buffering': 'no',
     })
     let client: RuntimeStreamClient
-    const connection = new SseConnection(response, () => this.#clients.delete(client), this.#connectionOptions)
+    const remove = () => connection.close()
+    const connection = new SseConnection(response, () => {
+      this.#clients.delete(client)
+      request.removeListener('close', remove)
+      request.removeListener('aborted', remove)
+    }, this.#connectionOptions)
     client = { worldId, connection }
     this.#clients.add(client)
-    const remove = () => connection.close()
-    if (typeof response.once === 'function') response.once('close', () => connection.close())
     request.once('aborted', remove)
-    request.once('close', () => connection.close())
+    request.once('close', remove)
     connection.send('ready', {})
   }
 

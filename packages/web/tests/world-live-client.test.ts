@@ -40,6 +40,7 @@ const EVENT_NAMES = [
   'world-decision',
   'world-artifact',
   'world-knowledge',
+  'world-task',
   'world-runtime',
   'world-state',
 ] as const
@@ -60,9 +61,12 @@ describe('subscribeWorldLive', () => {
     // listener registry threw on the first subscribe and blanked the whole
     // application. Nothing caught it: web tests rendered static markup, so no
     // effect ever ran and no subscription was ever made.
-    const unsubscribes = EVENT_NAMES.map((name, index) =>
-      expect(() => subscribeWorldLive(`world-${index}`, name, () => {})).not.toThrow())
+    vi.useFakeTimers()
+    const unsubscribes = EVENT_NAMES.map((name, index) => subscribeWorldLive(`world-${index}`, name, () => {}))
     expect(unsubscribes).toHaveLength(EVENT_NAMES.length)
+    for (const stop of unsubscribes) stop()
+    vi.advanceTimersByTime(250)
+    expect(FakeEventSource.instances.every((source) => source.closed)).toBe(true)
   })
 
   it('delivers an event to the listener that asked for it', () => {
@@ -128,4 +132,17 @@ describe('subscribeWorldLive', () => {
     vi.advanceTimersByTime(250)
     expect(source.closed).toBe(true)
   })
+})
+
+it('keeps duplicate callback subscriptions independently owned and cleanup idempotent', () => {
+  vi.useFakeTimers()
+  const listener = vi.fn()
+  const stopA = subscribeWorldLive('world-duplicate-owner', 'runtime', listener)
+  const stopB = subscribeWorldLive('world-duplicate-owner', 'runtime', listener)
+  const source = FakeEventSource.instances.at(-1)!
+  stopA(); stopA()
+  source.emit('runtime', {})
+  expect(listener).toHaveBeenCalledOnce()
+  vi.advanceTimersByTime(250); expect(source.closed).toBe(false)
+  stopB(); vi.advanceTimersByTime(250); expect(source.closed).toBe(true)
 })

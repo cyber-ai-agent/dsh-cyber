@@ -1,15 +1,15 @@
 import { ArrowClockwise, Check, ClipboardText, PaperPlaneTilt, Prohibit, WarningCircle } from '@phosphor-icons/react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { Deliverable, WorkTask, WorkTaskDetail, WorkTaskSourceTurn, World, WorldArtifact } from '@dsh-cyber/contracts'
 import { api } from '../../api.js'
 import { DockDetailFold, DockEmptyState, DockRow, DockSurfaceHeader } from '../../components/dock/DockSurface.js'
 import { useI18n } from '../../i18n/runtime.js'
 import type { CyberEmployee } from '../../types.js'
-import { subscribeWorldLive } from '../../world-live-client.js'
+import { subscribeWorldLiveRefresh } from '../../world-live-client.js'
 import './task-workspace.css'
 
-const GROUPS: WorkTask['status'][] = ['draft', 'running', 'waiting-approval', 'waiting-review', 'changes-requested', 'completed', 'failed']
+const GROUPS: WorkTask['status'][] = ['draft', 'planning', 'ready', 'running', 'waiting-approval', 'waiting-review', 'changes-requested', 'completed', 'failed', 'recovery-required']
 const GROUPS_WITH_CANCELLED: WorkTask['status'][] = [...GROUPS, 'cancelled']
 /**
  * Where the panel offers a cancel. The server decides — it refuses anything a
@@ -18,7 +18,14 @@ const GROUPS_WITH_CANCELLED: WorkTask['status'][] = [...GROUPS, 'cancelled']
  */
 const CANCELLABLE: WorkTask['status'][] = ['draft', 'planning', 'ready', 'changes-requested', 'failed', 'recovery-required']
 
-export function TaskWorkspace({ world, employees }: { world: World; employees: CyberEmployee[] }) {
+type TaskWorkspaceProps = { world: World; employees: CyberEmployee[] }
+
+export function TaskWorkspace(props: TaskWorkspaceProps) {
+  // Task selection, forms and mutations belong to this world, not to the dock.
+  return <WorldTaskWorkspace key={props.world.id} {...props} />
+}
+
+function WorldTaskWorkspace({ world, employees }: TaskWorkspaceProps) {
   const { locale, t, formatNumber } = useI18n()
   const [tasks, setTasks] = useState<WorkTask[]>([])
   const [selectedId, setSelectedId] = useState<string>()
@@ -28,34 +35,55 @@ export function TaskWorkspace({ world, employees }: { world: World; employees: C
   const [revealCancelled, setRevealCancelled] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
+  const [listRevision, setListRevision] = useState(0)
+  const listGeneration = useRef(0)
+  const listController = useRef<AbortController | undefined>(undefined)
 
   const load = useCallback(async () => {
+    const generation = ++listGeneration.current
+    listController.current?.abort()
+    const controller = new AbortController()
+    listController.current = controller
+    const current = () => generation === listGeneration.current && !controller.signal.aborted
     try {
       const [taskResult, artifactResult] = await Promise.all([
-        api<{ items: WorkTask[] }>(`/api/worlds/${world.id}/tasks${revealCancelled ? '?status=all' : ''}`),
-        api<{ artifacts: WorldArtifact[] }>(`/api/worlds/${world.id}/artifacts`),
+        api<{ items: WorkTask[] }>(`/api/worlds/${world.id}/tasks${revealCancelled ? '?status=all' : ''}`, { signal: controller.signal }),
+        api<{ artifacts: WorldArtifact[] }>(`/api/worlds/${world.id}/artifacts`, { signal: controller.signal }),
       ])
+      if (!current()) return
       setTasks(taskResult.items)
       setArtifacts(artifactResult.artifacts)
       // A task that just left this view — cancelled while it was selected —
       // must not leave the detail pane on a row the board no longer lists.
-      const target = taskResult.items.some((task) => task.id === selectedId) ? selectedId : taskResult.items[0]?.id
-      setSelectedId(target)
-      if (target !== undefined) setDetail(await api<WorkTaskDetail>(`/api/tasks/${target}`))
-      else setDetail(undefined)
+      setSelectedId((selected) => taskResult.items.some((task) => task.id === selected) ? selected : taskResult.items[0]?.id)
+      setListRevision((revision) => revision + 1)
       setError(undefined)
-    } catch (cause) { setError(localizedTaskError(cause, locale, t('task.error.load', '任务加载失败'))) }
-  }, [locale, revealCancelled, selectedId, t, world.id])
+    } catch (cause) {
+      if (current()) setError(localizedTaskError(cause, locale, t('task.error.load', '任务加载失败')))
+    }
+  }, [locale, revealCancelled, t, world.id])
 
-  useEffect(() => { void load() }, [revealCancelled, world.id])
-  // A task the host recorded from a conversation lands while this panel is
-  // already open. Without this it stayed invisible until the owner switched
-  // worlds or wrote something themselves.
+  useEffect(() => {
+    void load()
+    return () => { listGeneration.current += 1; listController.current?.abort() }
+  }, [load])
   useEffect(() => {
     if (typeof EventSource === 'undefined') return
-    return subscribeWorldLive(world.id, 'world-task', () => { void load() })
+    return subscribeWorldLiveRefresh(world.id, 'world-task', load)
   }, [load, world.id])
-  useEffect(() => { if (selectedId !== undefined) void api<WorkTaskDetail>(`/api/tasks/${selectedId}`).then(setDetail).catch((cause) => setError(localizedTaskError(cause, locale, t('task.error.detail', '任务详情加载失败')))) }, [locale, selectedId, t])
+  useEffect(() => {
+    if (selectedId === undefined) { setDetail(undefined); return }
+    const controller = new AbortController()
+    let current = true
+    // One owner for detail requests; list refreshes no longer fetch it twice.
+    void api<WorkTaskDetail>(`/api/tasks/${selectedId}`, { signal: controller.signal }).then((next) => {
+      if (current && next.task.id === selectedId && next.task.worldId === world.id) setDetail(next)
+    }).catch((cause) => {
+      if (current) setError(localizedTaskError(cause, locale, t('task.error.detail', '任务详情加载失败')))
+    })
+    return () => { current = false; controller.abort() }
+  }, [listRevision, locale, selectedId, t, world.id])
+  const visibleDetail = detail?.task.id === selectedId ? detail : undefined
 
   const mutate = async (operation: () => Promise<unknown>) => {
     setBusy(true); setError(undefined)
@@ -84,10 +112,10 @@ export function TaskWorkspace({ world, employees }: { world: World; employees: C
         {/* Cancelled tasks are kept, not deleted, so the board can bring them back. */}
         <button type="button" className="task-board__reveal" aria-pressed={revealCancelled} onClick={() => setRevealCancelled((value) => !value)}>{revealCancelled ? t('task.filter.hideCancelled', '隐藏已取消') : t('task.filter.showCancelled', '显示已取消')}</button>
       </nav>
-      <div className="task-detail">{detail === undefined ? <DockEmptyState
+      <div className="task-detail">{visibleDetail === undefined ? <DockEmptyState
         title={t('task.select', '选择任务查看详情')}
         description={t('task.select.description', '选中一个任务后，这里会显示它的计划、执行证据与交付验收。')}
-      /> : <TaskDetail detail={detail} employees={employees} artifacts={artifacts} busy={busy} mutate={mutate} />}</div>
+      /> : <TaskDetail key={visibleDetail.task.id} detail={visibleDetail} employees={employees} artifacts={artifacts} busy={busy} mutate={mutate} />}</div>
     </div>
   </section>
 }
