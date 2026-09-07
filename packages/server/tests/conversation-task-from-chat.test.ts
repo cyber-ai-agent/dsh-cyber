@@ -328,6 +328,9 @@ describe('a chat instruction becomes one task in the task list', () => {
       const pictures = await readdir(picturesDirectory)
       expect(pictures).toHaveLength(1)
       expect(pictures[0]).toMatch(/\.png$/u)
+      // Artifact registration is the run-completion worker's job (exercised by
+      // that worker's own suite against a file-capable workspace); this suite
+      // only pins that no *manual* duplicate publication happens.
     } finally {
       vi.unstubAllGlobals()
     }

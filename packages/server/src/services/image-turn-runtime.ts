@@ -8,7 +8,6 @@ import { isImageGenerationModel } from './image-generation-service.js'
 import type { ModelCredentialService } from './model-credential-service.js'
 import type { ModelInteractionService } from './model-interaction-service.js'
 import { ServiceError } from './service-error.js'
-import type { WorldArtifactService } from './world-artifact-service.js'
 import type { WorldFileService } from './world-file-service.js'
 
 export interface ImageTurnRuntimeDependencies {
@@ -17,7 +16,6 @@ export interface ImageTurnRuntimeDependencies {
   credentials: ModelCredentialService
   images: ImageGenerationService
   worldFiles: WorldFileService
-  worldArtifacts: WorldArtifactService
   interactions: ModelInteractionService
 }
 
@@ -68,20 +66,13 @@ export function createImageAwareRuntime(deps: ImageTurnRuntimeDependencies): Age
       const attachment = await deps.worldFiles.saveGeneratedImage(employee.worldId, {
         bytes: image.bytes,
         mimeType: image.mimeType,
-        name: `${fileName}.${image.mimeType === 'image/jpeg' ? 'jpg' : image.mimeType === 'image/webp' ? 'webp' : 'png'}`,
+        name: fileName,
       })
-      const publication = await deps.worldArtifacts.publishGeneratedImage({
-        workspaceId: employee.workspaceId,
-        worldId: employee.worldId,
-        bytes: image.bytes,
-        mimeType: image.mimeType,
-        title: fileName,
-        createdById: employee.id,
-        sessionId: request.conversationId,
-        ...(request.workTurnId === undefined ? {} : { workTurnId: request.workTurnId }),
-        ...(request.agentRunId === undefined ? {} : { agentRunId: request.agentRunId }),
-        ...(request.agentRunId === undefined ? {} : { idempotencyKey: `generated-image:${request.agentRunId}` }),
-      })
+      // No manual publication here. The orchestrator's run-completion worker
+      // (publishAgentRun) turns every file this run wrote under the world's
+      // visible files into the artifact - the same authority every other
+      // AgentRun uses. Publishing again right here used to register the very
+      // same bytes twice in the artifact center.
       const caption = '图片已经生成，点击可以放大查看；它也已存入本世界的产物。'
       const metadata: JsonObject = {
         attachments: [{
@@ -91,7 +82,6 @@ export function createImageAwareRuntime(deps: ImageTurnRuntimeDependencies): Age
           byteLength: attachment.byteLength,
           url: attachment.url,
         }],
-        artifactRefs: [{ artifactId: publication.artifact.id, title: publication.artifact.title, kind: 'image' }],
         imageModel: profile.modelId,
         generatedImage: true,
       }
