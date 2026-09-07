@@ -1,7 +1,7 @@
 import type { WorldCharacterAuthority } from './world-authority.js'
 import type { UiLocale } from './locales.js'
 
-export const CYBER_SCHEMA_VERSION = 43 as const
+export const CYBER_SCHEMA_VERSION = 48 as const
 
 export * from './runtime-access.js'
 export * from './locales.js'
@@ -90,7 +90,7 @@ export interface ApprovalPolicy {
 
 export type TaskScheduleKind = 'once' | 'interval'
 export type TaskScheduleStatus = 'active' | 'paused' | 'completed'
-export type TaskScheduleRunStatus = 'running' | 'completed' | 'failed' | 'skipped'
+export type TaskScheduleRunStatus = 'running' | 'waiting-approval' | 'completed' | 'failed' | 'skipped'
 
 export interface TaskSchedule {
   id: string
@@ -119,9 +119,14 @@ export interface TaskScheduleRun {
   employeeId: string
   status: TaskScheduleRunStatus
   scheduledFor: IsoTimestamp
-  startedAt: IsoTimestamp
+  /** The durable acceptance boundary before any queue or model execution. */
+  acceptedAt: IsoTimestamp
+  /** The first real execution claim; absent while a queued run awaits dispatch. */
+  startedAt?: IsoTimestamp
   completedAt?: IsoTimestamp
   sessionId?: string
+  /** The durable WorkTurn claimed before model or adapter execution. */
+  workTurnId?: string
   summary?: string
   errorCode?: string
 }
@@ -1134,6 +1139,7 @@ export const DOMAIN_EVENT_TYPES = [
   'task.completed',
   'schedule.created',
   'schedule.updated',
+  'schedule.run.accepted',
   'schedule.run.started',
   'schedule.run.completed',
   'schedule.run.failed',
@@ -1297,6 +1303,8 @@ export interface AgentRuntimePort {
   decideApproval?(agentRunId: string, approvalRequestId: string, decision: 'approved' | 'rejected'): Promise<void>
   /** Abort exactly one live AgentRun without closing another conversation lane. */
   abortRun?(agentRunId: string): Promise<void>
+  /** Reset only the named conversation lane; unrelated conversations keep running. */
+  resetSession?(agentId: string, conversationId: string): Promise<void>
   closeAgent?(agentId: string): Promise<void>
   close(): Promise<void>
 }
@@ -1326,6 +1334,7 @@ export interface DatabaseDoctorReport {
     localAssets: number
     sessions: number
     conversationQueueEntries: number
+    conversationSubmissionClaims: number
     completionJobs: number
     taskCollaborationPlans: number
     taskCollaborationSteps: number
@@ -1377,6 +1386,7 @@ export * from './world-knowledge.js'
 export * from './world-knowledge-graph.js'
 export * from './task-collaboration.js'
 export * from './conversation-queue.js'
+export * from './conversation-submission.js'
 export * from './browser-skill.js'
 export * from './workspace-preferences.js'
 export * from './completion-job.js'

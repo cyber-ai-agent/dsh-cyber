@@ -1,4 +1,4 @@
-import { createElement } from 'react'
+import { createElement, useState } from 'react'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { WorkMessage, WorkSession, World } from '@dsh-cyber/contracts'
 import { ChatWorkbench } from '../src/components/ChatWorkbench.js'
+import type { ComposerAttachmentDraft } from '../src/composer-draft-store.js'
 import type { CyberEmployee } from '../src/types.js'
 
 afterEach(() => {
@@ -49,6 +50,276 @@ describe('Chat control UI', () => {
     expect(onUploadAttachment.mock.calls[0]?.[0].name).toMatch(/^粘贴图片-/u)
     expect(host.textContent).toContain('粘贴图片-')
     expect(host.querySelector('img[alt$="预览"]')).not.toBeNull()
+    await act(async () => { root.unmount() })
+  })
+
+  it('keeps successful files visible when a later file in the batch fails', async () => {
+    const employee = { id: 'employee-partial', displayName: '部分角色', role: '分析', avatarIndex: 0, currentActivity: '等待处理' } as CyberEmployee
+    const world = { id: 'world-partial', workspaceId: 'workspace-partial', name: '部分上传世界', templateId: 'personal-world', status: 'active', createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString() } as World
+    const host = document.createElement('div')
+    document.body.append(host)
+    const root = createRoot(host)
+    const onUploadAttachment = vi.fn(async (file: File) => {
+      if (file.name === 'bad.txt') throw new Error('文件内容无效')
+      return { assetId: 'good-asset', name: file.name, mimeType: 'text/plain' as const, byteLength: file.size, url: '/api/worlds/world-partial/assets/good-asset' }
+    })
+    await act(async () => { root.render(createElement(ChatWorkbench, {
+      demoMode: true,
+      world,
+      composerOwnerKey: '["world-partial","conversation-partial"]',
+      participantIds: [employee.id],
+      messages: [],
+      employees: [employee],
+      draft: '',
+      onDraftChange: vi.fn(),
+      onSend: vi.fn(async () => undefined),
+      onUploadAttachment,
+      onOpenDossier: vi.fn(),
+      onOpenArtifact: vi.fn(),
+      onRecruit: vi.fn(),
+    })) })
+
+    const input = host.querySelector<HTMLInputElement>('input[type="file"]')!
+    const good = new File(['ok'], 'good.txt', { type: 'text/plain' })
+    const bad = new File(['bad'], 'bad.txt', { type: 'text/plain' })
+    Object.defineProperty(input, 'files', { configurable: true, value: [good, bad] })
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    expect(onUploadAttachment).toHaveBeenCalledTimes(2)
+    expect(host.querySelector('.composer-attachment--ready')).not.toBeNull()
+    expect(host.querySelector('.composer-attachment--failed')).not.toBeNull()
+    expect(host.textContent).toContain('文件内容无效')
+    await act(async () => { root.unmount() })
+  })
+
+  it('cancels the remaining batch when a pending attachment is removed', async () => {
+    const employee = { id: 'employee-cancel-upload', displayName: '取消角色', role: '分析', avatarIndex: 0, currentActivity: '等待处理' } as CyberEmployee
+    const world = { id: 'world-cancel-upload', workspaceId: 'workspace-cancel-upload', name: '取消上传世界', templateId: 'personal-world', status: 'active', createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString() } as World
+    const host = document.createElement('div')
+    document.body.append(host)
+    const root = createRoot(host)
+    let releaseFirst!: () => void
+    let firstStartedResolve!: () => void
+    const firstStarted = new Promise<void>((resolve) => {
+      firstStartedResolve = resolve
+    })
+    let calls = 0
+    const onUploadAttachment = vi.fn(async (file: File) => {
+      calls += 1
+      if (calls === 1) {
+        firstStartedResolve()
+        await new Promise<void>((resolve) => { releaseFirst = resolve })
+      }
+      return { assetId: file.name, name: file.name, mimeType: 'text/plain' as const, byteLength: file.size, url: `/api/worlds/${world.id}/assets/${file.name}` }
+    })
+    await act(async () => { root.render(createElement(ChatWorkbench, {
+      demoMode: true,
+      world,
+      composerOwnerKey: '["world-cancel-upload","conversation-cancel-upload"]',
+      participantIds: [employee.id],
+      messages: [],
+      employees: [employee],
+      draft: '',
+      onDraftChange: vi.fn(),
+      onSend: vi.fn(async () => undefined),
+      onUploadAttachment,
+      onOpenDossier: vi.fn(),
+      onOpenArtifact: vi.fn(),
+      onRecruit: vi.fn(),
+    })) })
+
+    const input = host.querySelector<HTMLInputElement>('input[type="file"]')!
+    Object.defineProperty(input, 'files', { configurable: true, value: [
+      new File(['one'], 'one.txt', { type: 'text/plain' }),
+      new File(['two'], 'two.txt', { type: 'text/plain' }),
+    ] })
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })) })
+    await firstStarted
+    const remove = host.querySelector<HTMLButtonElement>('button[aria-label="移除附件 one.txt"]')!
+    await act(async () => { remove.click() })
+    expect(host.querySelector('.composer-attachments')).toBeNull()
+    releaseFirst()
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
+    expect(onUploadAttachment).toHaveBeenCalledTimes(1)
+    expect(host.querySelector('.composer-attachments')).toBeNull()
+    await act(async () => { root.unmount() })
+  })
+
+  it('keeps concurrent uploads in separate owner generations', async () => {
+    const employee = { id: 'employee-owner-upload', displayName: '归属角色', role: '分析', avatarIndex: 0, currentActivity: '等待处理' } as CyberEmployee
+    const world = { id: 'world-owner-upload', workspaceId: 'workspace-owner-upload', name: '归属上传世界', templateId: 'personal-world', status: 'active', createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString() } as World
+    const host = document.createElement('div')
+    document.body.append(host)
+    const root = createRoot(host)
+    const ownerA = '["world-owner-upload","conversation-a"]'
+    const ownerB = '["world-owner-upload","conversation-b"]'
+    let releaseA!: () => void
+    let releaseB!: () => void
+    let startedA!: () => void
+    let startedB!: () => void
+    const aStarted = new Promise<void>((resolve) => { startedA = resolve })
+    const bStarted = new Promise<void>((resolve) => { startedB = resolve })
+    const waitA = new Promise<void>((resolve) => { releaseA = resolve })
+    const waitB = new Promise<void>((resolve) => { releaseB = resolve })
+    const onUploadAttachment = vi.fn(async (file: File) => {
+      if (file.name === 'owner-a.txt') {
+        startedA()
+        await waitA
+      } else {
+        startedB()
+        await waitB
+      }
+      return { assetId: file.name, name: file.name, mimeType: 'text/plain' as const, byteLength: file.size, url: `/api/worlds/${world.id}/assets/${file.name}` }
+    })
+    function DraftHarness({ owner }: { owner: string }) {
+      const [drafts, setDrafts] = useState<Record<string, ComposerAttachmentDraft[]>>({})
+      return createElement(ChatWorkbench, {
+        demoMode: true,
+        world,
+        composerOwnerKey: owner,
+        attachments: drafts[owner] ?? [],
+        onAttachmentsChange: (updater) => setDrafts((current) => ({ ...current, [owner]: updater(current[owner] ?? []) })),
+        participantIds: [employee.id],
+        messages: [],
+        employees: [employee],
+        draft: '',
+        onDraftChange: vi.fn(),
+        onSend: vi.fn(async () => undefined),
+        onUploadAttachment,
+        onOpenDossier: vi.fn(),
+        onOpenArtifact: vi.fn(),
+        onRecruit: vi.fn(),
+      })
+    }
+
+    await act(async () => { root.render(createElement(DraftHarness, { owner: ownerA })) })
+    const inputA = host.querySelector<HTMLInputElement>('input[type="file"]')!
+    Object.defineProperty(inputA, 'files', { configurable: true, value: [new File(['a'], 'owner-a.txt', { type: 'text/plain' })] })
+    await act(async () => { inputA.dispatchEvent(new Event('change', { bubbles: true })) })
+    await aStarted
+
+    await act(async () => { root.render(createElement(DraftHarness, { owner: ownerB })) })
+    const inputB = host.querySelector<HTMLInputElement>('input[type="file"]')!
+    Object.defineProperty(inputB, 'files', { configurable: true, value: [new File(['b'], 'owner-b.txt', { type: 'text/plain' })] })
+    await act(async () => { inputB.dispatchEvent(new Event('change', { bubbles: true })) })
+    await bStarted
+    releaseB()
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
+    expect(host.textContent).toContain('owner-b.txt')
+    expect(host.textContent).not.toContain('owner-a.txt')
+    releaseA()
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
+    expect(onUploadAttachment).toHaveBeenCalledTimes(2)
+    expect(host.textContent).not.toContain('owner-a.txt')
+    await act(async () => { root.render(createElement(DraftHarness, { owner: ownerA })) })
+    expect(host.textContent).toContain('owner-a.txt')
+    await act(async () => { root.unmount() })
+  })
+
+  it('marks an in-flight upload interrupted on unmount and restores the owner draft on remount', async () => {
+    const employee = { id: 'employee-remount-upload', displayName: '恢复角色', role: '分析', avatarIndex: 0, currentActivity: '等待处理' } as CyberEmployee
+    const world = { id: 'world-remount-upload', workspaceId: 'workspace-remount-upload', name: '恢复上传世界', templateId: 'personal-world', status: 'active', createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString() } as World
+    const host = document.createElement('div')
+    document.body.append(host)
+    const root = createRoot(host)
+    const owner = '["world-remount-upload","conversation-remount-upload"]'
+    let releaseUpload!: () => void
+    let markUploadStarted!: () => void
+    const uploadStarted = new Promise<void>((resolve) => { markUploadStarted = resolve })
+    const uploadReleased = new Promise<void>((resolve) => { releaseUpload = resolve })
+    let calls = 0
+    const onUploadAttachment = vi.fn(async (file: File) => {
+      calls += 1
+      markUploadStarted()
+      await uploadReleased
+      return { assetId: 'remount-asset', name: file.name, mimeType: 'text/plain' as const, byteLength: file.size, url: `/api/worlds/${world.id}/assets/remount-asset` }
+    })
+    let latestDrafts: Record<string, ComposerAttachmentDraft[]> = {}
+    function DraftHarness({ visible }: { visible: boolean }) {
+      const [drafts, setDrafts] = useState<Record<string, ComposerAttachmentDraft[]>>({ [owner]: [{ id: 'existing', name: 'existing.txt', status: 'ready', attachment: { assetId: 'existing', name: 'existing.txt', mimeType: 'text/plain', byteLength: 8, url: `/api/worlds/${world.id}/assets/existing` } }] })
+      latestDrafts = drafts
+      if (!visible) return null
+      return createElement(ChatWorkbench, {
+        demoMode: true,
+        world,
+        composerOwnerKey: owner,
+        attachments: drafts[owner] ?? [],
+        onAttachmentsChange: (updater) => setDrafts((current) => {
+          const next = { ...current, [owner]: updater(current[owner] ?? []) }
+          latestDrafts = next
+          return next
+        }),
+        participantIds: [employee.id],
+        messages: [],
+        employees: [employee],
+        draft: '旧文本仍要保留',
+        onDraftChange: vi.fn(),
+        onSend: vi.fn(async () => undefined),
+        onUploadAttachment,
+        onOpenDossier: vi.fn(),
+        onOpenArtifact: vi.fn(),
+        onRecruit: vi.fn(),
+      })
+    }
+
+    await act(async () => { root.render(createElement(DraftHarness, { visible: true })) })
+    const input = host.querySelector<HTMLInputElement>('input[type="file"]')!
+    Object.defineProperty(input, 'files', { configurable: true, value: [new File(['pending'], 'pending.txt', { type: 'text/plain' })] })
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })) })
+    await uploadStarted
+    await act(async () => { root.render(createElement(DraftHarness, { visible: false })) })
+    releaseUpload()
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
+    expect(calls).toBe(1)
+    expect(latestDrafts[owner]).toEqual([expect.objectContaining({ id: 'existing', status: 'ready' }), expect.objectContaining({ id: expect.any(String), status: 'interrupted' })])
+
+    await act(async () => { root.render(createElement(DraftHarness, { visible: true })) })
+    expect(host.textContent).toContain('旧文本仍要保留')
+    expect(host.textContent).toContain('existing.txt')
+    expect(host.textContent).toContain('上传已中断')
+    await act(async () => { root.unmount() })
+  })
+
+  it('clears only the local draft when the clear-draft command is submitted', async () => {
+    const employee = { id: 'employee-clear-draft', displayName: '清空角色', role: '分析', avatarIndex: 0, currentActivity: '等待处理' } as CyberEmployee
+    const world = { id: 'world-clear-draft', workspaceId: 'workspace-clear-draft', name: '清空草稿世界', templateId: 'personal-world', status: 'active', createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString() } as World
+    const host = document.createElement('div')
+    document.body.append(host)
+    const root = createRoot(host)
+    const onDraftChange = vi.fn()
+    const onSend = vi.fn(async () => undefined)
+    const common = {
+      demoMode: true,
+      world,
+      composerOwnerKey: '["world-clear-draft","conversation-clear-draft"]',
+      participantIds: [employee.id],
+      messages: [],
+      employees: [employee],
+      onDraftChange,
+      onSend,
+      onUploadAttachment: vi.fn(async (file: File) => ({ assetId: 'clear-asset', name: file.name, mimeType: 'text/plain' as const, byteLength: file.size, url: '/api/worlds/world-clear-draft/assets/clear-asset' })),
+      onOpenDossier: vi.fn(),
+      onOpenArtifact: vi.fn(),
+      onRecruit: vi.fn(),
+    }
+    await act(async () => { root.render(createElement(ChatWorkbench, { ...common, draft: '' })) })
+    const input = host.querySelector<HTMLInputElement>('input[type="file"]')!
+    const file = new File(['keep until clear'], 'clear-me.txt', { type: 'text/plain' })
+    Object.defineProperty(input, 'files', { configurable: true, value: [file] })
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    expect(host.textContent).toContain('clear-me.txt')
+
+    await act(async () => { root.render(createElement(ChatWorkbench, { ...common, draft: '/清空草稿' })) })
+    await act(async () => { host.querySelector<HTMLButtonElement>('.send-button')?.click() })
+    expect(onSend).not.toHaveBeenCalled()
+    expect(onDraftChange).toHaveBeenCalledWith('')
+    expect(host.querySelector('.composer-attachments')).toBeNull()
     await act(async () => { root.unmount() })
   })
 
@@ -218,7 +489,7 @@ describe('Chat control UI', () => {
     await act(async () => { host.querySelector<HTMLButtonElement>('.send-button')?.click() })
     expect(onSend).not.toHaveBeenCalled()
     expect(onDraftChange).toHaveBeenCalledWith('')
-    expect(host.textContent).toContain('已开启新话题，之前的对话记录已保留')
+    expect(host.textContent).toContain('已清空当前会话草稿，已发送消息和已上传资源仍保留')
     await act(async () => { root.unmount() })
   })
 

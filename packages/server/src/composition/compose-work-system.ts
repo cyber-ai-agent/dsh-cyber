@@ -12,6 +12,8 @@ import { WorkSystemService } from '../services/work-system-service.js'
 import type { WorldAccessService } from '../services/world-access-service.js'
 import type { WorldRuntimeService } from '../world-runtime-service.js'
 import type { SqliteStore } from '@dsh-cyber/persistence'
+import type { CharacterSkillRuntime } from '../services/character-skill-runtime.js'
+import type { TurnAwareApprovalContinuationService } from '../services/turn-aware-approval-continuation-service.js'
 
 /**
  * The Work System and the one boundary that lets a conversation reach it.
@@ -35,10 +37,13 @@ export function composeWorkSystem(options: {
   router: Router
   worldAccess: WorldAccessService
   worldRuntime: WorldRuntimeService
+  skillRuntime: Pick<CharacterSkillRuntime, 'prepare'>
+  continuations: Pick<TurnAwareApprovalContinuationService, 'setTaskContinuationHandler'>
   /** Tests and CI pass a deterministic stub so no run calls a cloud model. */
   intentClassifier?: ConversationTaskIntentPort
 }): { work: WorkSystemService; taskIntent: ConversationTaskIntentService } {
-  const work = new WorkSystemService({ store: options.store, groupTasks: options.groupTasks })
+  const work = new WorkSystemService({ store: options.store, groupTasks: options.groupTasks, skillRuntime: options.skillRuntime })
+  options.continuations.setTaskContinuationHandler(async (workTurnId, actions) => work.continueAfterApproval(workTurnId, actions))
   registerWorkSystemRoutes(options.router, { store: options.store, work, access: options.worldAccess })
   // Runs at open, next to the store's own turn recovery: a task left `running`
   // by the previous process can never finish on its own.

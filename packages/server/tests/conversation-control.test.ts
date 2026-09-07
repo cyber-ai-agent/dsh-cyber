@@ -8,6 +8,7 @@ import { SqliteStore } from '@dsh-cyber/persistence'
 import type { ConversationOrchestrator } from '@dsh-cyber/orchestration'
 import { createCyberServer, type CyberServer } from '../src/index.js'
 import { ConversationQueueService } from '../src/services/conversation-queue-service.js'
+import { conversationIngressFingerprint, conversationPromptHash } from '../src/services/conversation-ingress-service.js'
 
 const servers: CyberServer[] = []
 const roots: string[] = []
@@ -80,9 +81,158 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 describe('Conversation control and durable queue', () => {
+  it('replays one claimed immediate turn and rejects a changed request with the same client id', async () => {
+    const { origin, server, runtime, world, employee } = await start()
+    const body = {
+      employeeIds: [employee.id],
+      prompt: '只执行一次的即时请求',
+      clientTurnId: 'immediate-idempotent-once',
+    }
+    const [first, duplicate] = await Promise.all([
+      json(origin, `/api/worlds/${world.id}/chat`, post(body)),
+      json(origin, `/api/worlds/${world.id}/chat`, post(body)),
+    ])
+    expect([first.response.status, duplicate.response.status]).toEqual([200, 200])
+    expect(duplicate.body.workTurnId).toBe(first.body.workTurnId)
+    expect(duplicate.body.session.id).toBe(first.body.session.id)
+    expect(runtime.calls).toHaveLength(1)
+    expect(server.store.listSessionTurns(first.body.session.id)).toHaveLength(1)
+    expect(server.store.listMessages(first.body.session.id).filter((message) => message.kind === 'user')).toHaveLength(1)
+
+    const conflict = await json(origin, `/api/worlds/${world.id}/chat`, post({
+      ...body,
+      prompt: '同一个 key 的另一条内容',
+    }))
+    expect(conflict.response.status).toBe(409)
+    expect(conflict.body.error).toMatchObject({ code: 'client_turn_conflict' })
+    expect(runtime.calls).toHaveLength(1)
+  })
+
+  it('shares one queued claim across the legacy and current chat endpoints without orphan sessions', async () => {
+    const { origin, server, runtime, world, employee } = await start()
+    const legacyBody = {
+      employeeIds: [employee.id],
+      prompt: 'legacy queue idempotency',
+      clientTurnId: 'legacy-queue-shared-claim',
+    }
+    const legacy = await json(origin, `/api/worlds/${world.id}/chat-queue`, post(legacyBody))
+    expect(legacy.response.status).toBe(202)
+    const current = await json(origin, `/api/worlds/${world.id}/chat`, post({
+      ...legacyBody,
+      queueMode: 'normal',
+    }))
+    expect(current.response.status).toBe(202)
+    expect(current.body.workTurnId).toBe(legacy.body.workTurnId)
+    expect(current.body.queueItem.id).toBe(legacy.body.queueItem.id)
+    await waitFor(() => server.store.getWorkTurn(legacy.body.workTurnId)?.status === 'completed')
+    expect(runtime.calls).toHaveLength(1)
+    expect(server.store.listSessions(world.id)).toHaveLength(1)
+    expect(server.store.listSessionTurns(legacy.body.session.id)).toHaveLength(1)
+    expect(server.store.listMessages(legacy.body.session.id).filter((message) => message.kind === 'user')).toHaveLength(1)
+
+    const conflict = await json(origin, `/api/worlds/${world.id}/chat-queue`, post({
+      ...legacyBody,
+      prompt: 'changed legacy payload',
+    }))
+    expect(conflict.response.status).toBe(409)
+    expect(server.store.listSessions(world.id)).toHaveLength(1)
+  })
+
+  it('replays one immediate group discussion without a second plan, turn, message or run', async () => {
+    const { origin, server, runtime, world, employee } = await start()
+    const colleague = server.store.recruitEmployee({
+      workspaceId: world.workspaceId,
+      worldId: world.id,
+      blueprintId: 'core.butler',
+      blueprintVersion: 1,
+      displayName: '幂等协作角色',
+    })
+    const request = {
+      employeeIds: [employee.id, colleague.id],
+      prompt: 'group idempotency check',
+      collaborationMode: 'discussion',
+      clientTurnId: 'group-immediate-idempotent',
+    }
+    const [first, duplicate] = await Promise.all([
+      json(origin, `/api/worlds/${world.id}/chat`, post(request)),
+      json(origin, `/api/worlds/${world.id}/chat`, post(request)),
+    ])
+    expect([first.response.status, duplicate.response.status]).toEqual([200, 200])
+    expect(duplicate.body.workTurnId).toBe(first.body.workTurnId)
+    expect(duplicate.body.session.id).toBe(first.body.session.id)
+    expect(server.store.listSessionTurns(first.body.session.id)).toHaveLength(1)
+    expect(server.store.listMessages(first.body.session.id).filter((message) => message.kind === 'user')).toHaveLength(1)
+    expect(server.store.listTurnAgentRuns(first.body.workTurnId)).toHaveLength(2)
+    expect(runtime.calls).toHaveLength(2)
+
+    const conflict = await json(origin, `/api/worlds/${world.id}/chat`, post({ ...request, employeeIds: [employee.id] }))
+    expect(conflict.response.status).toBe(409)
+    expect(runtime.calls).toHaveLength(2)
+  })
+
+  it('rejects an oversized CJK prompt before the runtime for immediate and queued chat', async () => {
+    const { origin, server, runtime, world, employee } = await start()
+    const profile = server.store.saveModelProfile({
+      workspaceId: world.workspaceId,
+      displayName: '4K context test model',
+      providerKind: 'openai-compatible-local',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      modelId: 'context-4k-test',
+      api: 'openai-completions',
+      isDefault: true,
+      settings: { contextWindow: 4_096, maxTokens: 1_024 },
+    })
+    server.store.saveModelAssignment({
+      workspaceId: world.workspaceId,
+      scope: 'employee',
+      scopeId: employee.id,
+      modelProfileId: profile.id,
+    })
+    const prompt = '中'.repeat(32_000)
+
+    const immediate = await json(origin, `/api/worlds/${world.id}/chat`, post({
+      employeeIds: [employee.id],
+      prompt,
+    }))
+    expect(immediate.response.status).toBe(413)
+    expect(immediate.body.error).toMatchObject({
+      code: 'model_turn_context_limit',
+      estimatedTokens: expect.any(Number),
+      inputBudgetTokens: expect.any(Number),
+    })
+    expect(immediate.body.error.message).toContain('上下文')
+    expect(runtime.calls).toHaveLength(0)
+
+    const queued = await json(origin, `/api/worlds/${world.id}/chat`, post({
+      employeeIds: [employee.id],
+      prompt,
+      queueMode: 'normal',
+      clientTurnId: 'context-limit-queued',
+    }))
+    expect(queued.response.status).toBe(202)
+    await waitFor(() => server.store.getWorkTurn(queued.body.workTurnId)?.status === 'failed')
+    expect(runtime.calls).toHaveLength(0)
+
+    const failed = await json(origin, `/api/worlds/${world.id}/chat-queue?status=failed`)
+    expect(failed.body.items[0]).toMatchObject({
+      id: 'context-limit-queued',
+      errorCode: 'runtime-context-limit',
+    })
+    expect(failed.body.items[0].error).toContain('上下文')
+    const failedEvents = server.store.listWorldDomainEvents(world.id)
+      .filter((event) => event.type === 'turn.failed' && event.payload?.workTurnId === queued.body.workTurnId)
+    expect(failedEvents).toHaveLength(1)
+    expect(failedEvents[0]?.payload).toMatchObject({
+      failure: 'context-limit',
+      estimatedTokens: expect.any(Number),
+      inputBudgetTokens: expect.any(Number),
+    })
+    expect(JSON.stringify(failedEvents[0])).not.toContain(prompt)
+  })
+
   it('claims a queued WorkTurn and continues the original turn without rebuilding it', async () => {
     const { origin, server, runtime, world, employee } = await start()
-    const queued = await json(origin, `/api/worlds/${world.id}/chat-queue`, post({
+    const queued = await json(origin, `/api/worlds/${world.id}/chat`, post({
       employeeIds: [employee.id],
       prompt: '排队执行一次真实回复',
       queueMode: 'normal',
@@ -105,6 +255,33 @@ describe('Conversation control and durable queue', () => {
     const messages = server.store.listMessages(queued.body.session.id)
     expect(messages.filter((message) => message.kind === 'user')).toHaveLength(1)
     expect(messages.some((message) => message.kind === 'assistant')).toBe(true)
+    const fingerprintBase = {
+      workspaceId: world.workspaceId, worldId: world.id, clientTurnId: 'client-queued-once', kind: 'direct' as const,
+      promptHash: conversationPromptHash(messages.find((message) => message.kind === 'user')!.content), employeeIds: [employee.id],
+      interactionKind: 'chat' as const, queueMode: 'normal' as const, attachments: [],
+    }
+    const claimedFingerprint = server.store.getConversationSubmissionClaim(world.workspaceId, world.id, 'client-queued-once')?.claim.fingerprintSha256
+    const candidates = [
+      ['base', conversationIngressFingerprint(fingerprintBase)],
+      ['permission', conversationIngressFingerprint({ ...fingerprintBase, permissionMode: 'read-only' })],
+      ['reasoning', conversationIngressFingerprint({ ...fingerprintBase, reasoningEffort: 'high' })],
+      ['both', conversationIngressFingerprint({ ...fingerprintBase, permissionMode: 'read-only', reasoningEffort: 'high' })],
+      ['session', conversationIngressFingerprint({ ...fingerprintBase, sessionId: queued.body.session.id })],
+      ['title', conversationIngressFingerprint({ ...fingerprintBase, title: `与 ${employee.displayName} 对话` })],
+      ['session-permission', conversationIngressFingerprint({ ...fingerprintBase, sessionId: queued.body.session.id, permissionMode: 'read-only' })],
+    ]
+    expect(candidates).toContainEqual(['base', claimedFingerprint])
+    const replay = await json(origin, `/api/worlds/${world.id}/chat`, post({
+      employeeIds: [employee.id],
+      prompt: '排队执行一次真实回合',
+      queueMode: 'normal',
+      clientTurnId: 'client-queued-once',
+      ...{ prompt: messages.find((message) => message.kind === 'user')!.content },
+    }))
+    expect(replay.response.status, JSON.stringify(replay.body)).toBe(202)
+    expect(replay.body.workTurnId).toBe(queued.body.workTurnId)
+    expect(replay.body.queueItem.id).toBe(queued.body.queueItem.id)
+    expect(runtime.calls).toHaveLength(1)
     const terminalStop = await json(origin, `/api/turns/${queued.body.workTurnId}/abort`, post({ reason: 'late-stop' }))
     expect(terminalStop.response.status).toBe(200)
     expect(terminalStop.body.entry.status).toBe('completed')
@@ -316,6 +493,21 @@ describe('Conversation control and durable queue', () => {
     expect(server.store.listMessages(queued.body.session.id).filter((message) => message.kind === 'user')).toHaveLength(1)
     const expectedRuns = plan!.steps.reduce((count, step) => count + step.assignedEmployeeIds.length, 0) + 1
     expect(server.store.listTurnAgentRuns(queued.body.workTurnId)).toHaveLength(expectedRuns)
+    const runtimeCalls = server.store.listTurnAgentRuns(queued.body.workTurnId).length
+    const originalPrompt = server.store.listMessages(queued.body.session.id).find((message) => message.kind === 'user')!.content
+    const replay = await json(origin, `/api/worlds/${world.id}/chat`, post({
+      employeeIds: [employee.id, colleague.id],
+      prompt: originalPrompt,
+      collaborationMode: 'task',
+      queueMode: 'next',
+      clientTurnId: 'group-task-queued',
+      coordinatorEmployeeId: employee.id,
+    }))
+    expect(replay.response.status).toBe(202)
+    expect(replay.body.workTurnId).toBe(queued.body.workTurnId)
+    expect(replay.body.queueItem.id).toBe(queued.body.queueItem.id)
+    expect(server.store.listTurnAgentRuns(queued.body.workTurnId)).toHaveLength(runtimeCalls)
+    expect(server.store.listMessages(queued.body.session.id).filter((message) => message.kind === 'user')).toHaveLength(1)
   })
 
   it('keeps waiting approval as a session lock while releasing the employee lane to another session', async () => {
@@ -359,6 +551,118 @@ describe('Conversation control and durable queue', () => {
     await waitFor(() => store.getConversationQueueEntry(independent.id)?.status === 'completed')
     expect(store.getEmployee(employee.id)).toMatchObject({ presence: 'working', health: 'healthy' })
     await queue.close()
+  })
+
+  it('ages an old normal entry ahead of a sustained burst of newer next entries', async () => {
+    let now = new Date('2026-09-06T00:00:00.000Z')
+    const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-queue-aging-'))
+    roots.push(stateRoot)
+    const store = await SqliteStore.open(join(stateRoot, 'queue.sqlite'), { clock: () => now.toISOString() })
+    stores.push(store)
+    const workspace = store.createWorkspace({ name: '防饥饿队列' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '公平世界', templateId: 'personal-world' })
+    store.saveBlueprint(testBlueprint())
+    const employee = store.recruitEmployee({ workspaceId: workspace.id, worldId: world.id, blueprintId: 'queue.employee', blueprintVersion: 1 })
+    const firstSession = createDirectSession(store, workspace.id, world.id, employee.id, '占用通道一')
+    const secondSession = createDirectSession(store, workspace.id, world.id, employee.id, '占用通道二')
+    const first = enqueueStoredTurn(store, workspace.id, world.id, firstSession.id, employee.id, '占用第一条通道')
+    const second = enqueueStoredTurn(store, workspace.id, world.id, secondSession.id, employee.id, '占用第二条通道')
+    let releaseFirst!: () => void
+    let releaseSecond!: () => void
+    let releaseOld!: () => void
+    let oldEntryId: string | undefined
+    const seen: string[] = []
+    const queue = new ConversationQueueService({
+      store,
+      orchestrator: { interruptWorkTurn: async () => undefined } as unknown as ConversationOrchestrator,
+      runner: async (entry) => {
+        seen.push(entry.id)
+        if (entry.id === first.id) await new Promise<void>((resolve) => { releaseFirst = resolve })
+        else if (entry.id === second.id) await new Promise<void>((resolve) => { releaseSecond = resolve })
+        else if (entry.id === oldEntryId) await new Promise<void>((resolve) => { releaseOld = resolve })
+      },
+      pollIntervalMs: 10_000,
+      priorityAgingThresholdMs: 30_000,
+      clock: () => now.getTime(),
+    })
+
+    await queue.dispatchOnce()
+    await waitFor(() => seen.length === 2)
+    const oldSession = createDirectSession(store, workspace.id, world.id, employee.id, '旧普通请求')
+    const old = enqueueStoredTurn(store, workspace.id, world.id, oldSession.id, employee.id, '必须最终执行的普通请求')
+    oldEntryId = old.id
+    now = new Date('2026-09-06T00:00:31.000Z')
+    const insertedNext = Array.from({ length: 8 }, (_, index) => {
+      const session = createDirectSession(store, workspace.id, world.id, employee.id, `持续插队 ${index + 1}`)
+      return enqueueStoredTurn(store, workspace.id, world.id, session.id, employee.id, `next ${index + 1}`, true)
+    })
+
+    releaseFirst()
+    await waitFor(() => seen.includes(old.id))
+    expect(seen.filter((id) => id !== first.id && id !== second.id)[0]).toBe(old.id)
+
+    releaseSecond()
+    releaseOld()
+    await waitFor(() => insertedNext.every((entry) => store.getConversationQueueEntry(entry.id)?.status === 'completed'))
+    await queue.close()
+  })
+
+  it('bounds queue shutdown and records an unresolved runner as an unknown result', async () => {
+    const fixture = await createStoredQueueFixture('队列关闭期限')
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const queue = new ConversationQueueService({
+      store: fixture.store,
+      orchestrator: { interruptWorkTurn: async () => new Promise<never>(() => {}) } as unknown as ConversationOrchestrator,
+      runner: async () => { await gate },
+      closeDrainTimeoutMs: 10,
+      pollIntervalMs: 10_000,
+    })
+    await queue.dispatchOnce()
+    await waitFor(() => fixture.store.getConversationQueueEntry(fixture.entry.id)?.status === 'running')
+
+    const started = Date.now()
+    await queue.close()
+
+    expect(Date.now() - started).toBeLessThan(500)
+    expect(fixture.store.getConversationQueueEntry(fixture.entry.id)).toMatchObject({
+      status: 'interrupted', errorCode: 'shutdown-timeout-unknown-result',
+    })
+    expect(fixture.store.getWorkTurn(fixture.entry.workTurnId)).toMatchObject({
+      status: 'interrupted', errorCode: 'shutdown-timeout-unknown-result',
+    })
+    expect(await queue.dispatchOnce()).toBe(0)
+    release()
+  })
+
+  it('bounds Stop when runtime abort never settles and keeps the timeout fact terminal', async () => {
+    const fixture = await createStoredQueueFixture('队列停止期限')
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const queue = new ConversationQueueService({
+      store: fixture.store,
+      orchestrator: { interruptWorkTurn: async () => new Promise<never>(() => {}) } as unknown as ConversationOrchestrator,
+      runner: async () => { await gate },
+      stopTimeoutMs: 10,
+      closeDrainTimeoutMs: 10,
+      pollIntervalMs: 10_000,
+    })
+    await queue.dispatchOnce()
+    await waitFor(() => fixture.store.getConversationQueueEntry(fixture.entry.id)?.status === 'running')
+
+    const started = Date.now()
+    const stopped = await queue.stop(fixture.entry.id)
+
+    expect(Date.now() - started).toBeLessThan(500)
+    expect(stopped.entry).toMatchObject({ status: 'interrupted', errorCode: 'stop-timeout-unknown-result' })
+    expect(fixture.store.getWorkTurn(fixture.entry.workTurnId)).toMatchObject({
+      status: 'interrupted', errorCode: 'stop-timeout-unknown-result',
+    })
+    release()
+    await queue.close()
+    expect(fixture.store.getConversationQueueEntry(fixture.entry.id)).toMatchObject({
+      status: 'interrupted', errorCode: 'stop-timeout-unknown-result',
+    })
   })
 
   it('recovers a queued group discussion after a full service restart', async () => {
@@ -478,7 +782,7 @@ function createDirectSession(store: SqliteStore, workspaceId: string, worldId: s
   })
 }
 
-function enqueueStoredTurn(store: SqliteStore, workspaceId: string, worldId: string, sessionId: string, employeeId: string, content: string) {
+function enqueueStoredTurn(store: SqliteStore, workspaceId: string, worldId: string, sessionId: string, employeeId: string, content: string, next = false) {
   const turn = store.createWorkTurn({ workspaceId, worldId, sessionId, interactionKind: 'chat' })
   store.appendMessage({
     sessionId,
@@ -489,12 +793,27 @@ function enqueueStoredTurn(store: SqliteStore, workspaceId: string, worldId: str
     metadata: { workTurnId: turn.id, queueEmployeeId: employeeId },
     correlationId: sessionId,
   })
-  return store.enqueueConversationTurn({
+  const input = {
     workspaceId,
     worldId,
     sessionId,
     workTurnId: turn.id,
     employeeIds: [employeeId],
     conversationKind: 'direct',
-  })
+  } as const
+  return next ? store.enqueueNextConversationTurn(input) : store.enqueueConversationTurn(input)
+}
+
+async function createStoredQueueFixture(name: string) {
+  const stateRoot = await mkdtemp(join(tmpdir(), 'dsh-queue-deadline-'))
+  roots.push(stateRoot)
+  const store = await SqliteStore.open(join(stateRoot, 'queue.sqlite'))
+  stores.push(store)
+  const workspace = store.createWorkspace({ name })
+  const world = store.createWorld({ workspaceId: workspace.id, name: `${name}世界`, templateId: 'personal-world' })
+  store.saveBlueprint(testBlueprint())
+  const employee = store.recruitEmployee({ workspaceId: workspace.id, worldId: world.id, blueprintId: 'queue.employee', blueprintVersion: 1 })
+  const session = createDirectSession(store, workspace.id, world.id, employee.id, name)
+  const entry = enqueueStoredTurn(store, workspace.id, world.id, session.id, employee.id, `${name}长任务`)
+  return { store, workspace, world, employee, session, entry }
 }

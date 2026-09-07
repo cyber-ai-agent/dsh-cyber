@@ -40,7 +40,12 @@ export function composeConversationControl(options: {
   skillRuntime: Pick<CharacterSkillRuntime, 'prepare'>
   /** Looked up only to see whether a settled turn is the source of a draft. */
   work: Pick<WorkSystemService, 'taskForSourceTurn'>
-}): { queue: ConversationQueueService; start(): void; close(): Promise<void> } {
+}): {
+  queue: ConversationQueueService
+  runAcceptedGroup(workTurnId: string): Promise<{ waitingForApproval?: boolean; result?: ConversationResult }>
+  start(): void
+  close(): Promise<void>
+} {
   const queue = new ConversationQueueService({
     store: options.store,
     orchestrator: options.orchestrator,
@@ -72,8 +77,9 @@ export function composeConversationControl(options: {
   })
   options.continuations.setGroupContinuationHandler(async (turn, actions) => {
     const entry = options.store.getConversationQueueEntryByWorkTurn(turn.worldId, turn.id)
-    if (entry === undefined) throw new Error('Group approval queue entry is unavailable')
-    const resumed = await runQueuedGroup(entry, options, actions)
+    const resumed = entry === undefined
+      ? await runAcceptedGroup(turn.id, options, actions)
+      : await runQueuedGroup(entry, options, actions)
     if (resumed.result === undefined) return undefined
     return { ...resumed.result, workTurnId: turn.id, waitingForApproval: false }
   })
@@ -84,9 +90,53 @@ export function composeConversationControl(options: {
   })
   return {
     queue,
+    runAcceptedGroup(workTurnId) { return runAcceptedGroup(workTurnId, options) },
     start() { queue.start() },
     close() { return queue.close() },
   }
+}
+
+/**
+ * Executes an atomically accepted group submission that intentionally has no
+ * queue row. The synthetic entry only supplies the provider-neutral runner
+ * with the same durable reservation fields used by queued execution; all
+ * identity and lifecycle facts come from the WorkTurn and owner message.
+ */
+async function runAcceptedGroup(
+  workTurnId: string,
+  options: Pick<Parameters<typeof composeConversationControl>[0],
+    'store' | 'orchestrator' | 'groupTasks' | 'worldPackages' | 'runtimeContext' | 'skillRuntime'>,
+  preparedActions?: CharacterSkillAction[],
+): Promise<{ waitingForApproval?: boolean; result?: ConversationResult }> {
+  const turn = options.store.getWorkTurn(workTurnId)
+  const session = turn === undefined ? undefined : options.store.getSession(turn.sessionId)
+  if (turn === undefined || session === undefined || session.kind !== 'group') {
+    throw new Error('Accepted group WorkTurn is unavailable')
+  }
+  const message = currentTurnUserMessage(options.store.listMessages(session.id), turn.id)
+  if (message === undefined) throw new Error('Accepted group owner message is unavailable')
+  const participantIds = stringArray(message.metadata.participantIds)
+  const reservationEmployeeIds = stringArray(message.metadata.reservationEmployeeIds)
+  const employeeIds = participantIds.length >= 2 ? participantIds : reservationEmployeeIds
+  if (employeeIds.length < 2) throw new Error('Accepted group participants are unavailable')
+  const entry = {
+    id: `accepted:${turn.id}`,
+    workspaceId: turn.workspaceId,
+    worldId: turn.worldId,
+    sessionId: session.id,
+    workTurnId: turn.id,
+    employeeIds: reservationEmployeeIds.length > 0 ? reservationEmployeeIds : employeeIds,
+    conversationKind: 'group' as const,
+    collaborationMode: session.collaborationMode ?? 'discussion',
+    priority: 0,
+    revision: 1,
+    status: turn.status === 'running' ? 'running' as const : 'queued' as const,
+    attemptCount: 0,
+    enqueuedAt: turn.createdAt,
+    updatedAt: turn.createdAt,
+  } as ConversationQueueEntry
+  if (turn.status === 'queued') options.store.startWorkTurn(turn.id)
+  return runQueuedGroup(entry, options, preparedActions)
 }
 
 async function runQueuedGroup(
@@ -161,10 +211,10 @@ async function runQueuedGroup(
 }
 
 /**
- * Prepare at most one host action per actual executor. The old loop returned
- * the first matching action in room order, which meant an unrelated first
- * member could perform the browser/audio/etc action for the employee who was
- * actually assigned the work. Total actions stay bounded for cost/safety.
+ * Prepare at most one host action for the whole group request. The first
+ * member without a matching authorized proposal is skipped so a later member
+ * can still carry the action; once one action is returned, preparation stops
+ * before another member can reserve a duplicate external action.
  *
  * In task mode a coordinator may be reserved only so it can synthesize the
  * final answer. It must not steal an external action from a step assignee, so
@@ -180,7 +230,6 @@ async function prepareGroupSkillActions(
   const actionEmployees = taskRouting === undefined
     ? entry.employeeIds
     : [...new Set(taskRouting.steps.flatMap((step) => step.assignedEmployeeIds))]
-  const actions: CharacterSkillAction[] = []
   for (const characterId of actionEmployees) {
     const prepared = await skillRuntime.prepare({
       workspaceId: entry.workspaceId,
@@ -191,10 +240,12 @@ async function prepareGroupSkillActions(
       prompt,
       maxActions: 1,
     })
-    actions.push(...prepared.actions)
-    if (actions.length >= 4) break
+    // CharacterSkillRuntime applies maxActions before reserving or executing
+    // anything. Treat the first returned action as the group-wide winner and
+    // do not ask another member to prepare the same user request.
+    if (prepared.actions.length > 0) return [prepared.actions[0]!]
   }
-  return actions.slice(0, 4)
+  return []
 }
 
 function currentTurnUserMessage(messages: WorkMessage[], workTurnId: string): WorkMessage | undefined {

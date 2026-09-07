@@ -361,7 +361,7 @@ describe('Cyber local server', () => {
         clientTurnId: 'client-turn-group',
       }),
     })
-    expect(chat.response.status).toBe(200)
+    expect(chat.response.status, JSON.stringify(chat.body)).toBe(200)
     expect(chat.body.replies).toHaveLength(2)
     expect(firstRuntime.calls).toHaveLength(2)
     // Both characters were addressed, so both are in the same wave and answer

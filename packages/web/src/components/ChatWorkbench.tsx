@@ -34,6 +34,7 @@ import { MessageSpeechButton } from '../features/voice/MessageSpeechButton.js'
 import { ComposerReplySpeaker } from '../features/voice/ComposerReplySpeaker.js'
 import type { SpeechInputSurface } from '../features/voice/SpeechCoordinator.js'
 import { VoiceConversationControl } from '../features/voice/VoiceConversationControl.js'
+import type { ComposerAttachmentDraft } from '../composer-draft-store.js'
 
 const MarkdownMessage = lazy(async () => ({ default: (await import('./MarkdownMessage.js')).MarkdownMessage }))
 const ArtifactReferenceCards = lazy(async () => ({ default: (await import('../features/artifacts/ArtifactCenter.js')).ArtifactReferenceCards }))
@@ -52,6 +53,12 @@ interface ChatWorkbenchProps {
   modelAssignments?: readonly ModelAssignment[]
   modelProfileId?: string
   onChangeModelProfile?(modelProfileId: string | undefined): void
+  attachments?: ComposerAttachmentDraft[]
+  onAttachmentsChange?(updater: (current: readonly ComposerAttachmentDraft[]) => ComposerAttachmentDraft[]): void
+  /** Owner key used to invalidate late upload callbacks after navigation or clear. */
+  composerOwnerKey?: string
+  /** Clears the complete local owner draft, including temporary model state. */
+  onClearDraft?(): void
   sending?: boolean
   pendingCount?: number
   queuedCount?: number
@@ -60,7 +67,7 @@ interface ChatWorkbenchProps {
   focusRequest?: number
   onDraftChange(value: string): void
   onSend(prompt: string, attachments: ChatAttachment[], queueMode?: 'normal' | 'next', speechSurface?: SpeechInputSurface): Promise<void>
-  onUploadAttachment(file: File): Promise<ChatAttachment>
+  onUploadAttachment(file: File, signal?: AbortSignal): Promise<ChatAttachment>
   onOpenDossier(employeeId: string): void
   onOpenArtifact(artifactId?: string): void
   onRetryCompletionJob?(jobId: string): Promise<void>
@@ -85,14 +92,47 @@ interface ChatWorkbenchProps {
   speechConversationKey?: string
 }
 
-export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, dossiers = {}, installedPlugins = [], models = [], modelAssignments = [], modelProfileId, onChangeModelProfile, sending = false, pendingCount = 0, queuedCount = 0, queueItems = [], draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRetryCompletionJob, onCompletionJobSettled, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, permissionMode = 'read-only', onChangePermissionMode, onRequestFullAccess, onCancelQueuedTurn, onStopTurn, speechConversationKey }: ChatWorkbenchProps) {
+export function ChatWorkbench({ demoMode, world, session, intent, participantIds = [], messages, employees, dossiers = {}, installedPlugins = [], models = [], modelAssignments = [], modelProfileId, onChangeModelProfile, attachments: controlledAttachments, onAttachmentsChange, composerOwnerKey, onClearDraft, sending = false, pendingCount = 0, queuedCount = 0, queueItems = [], draft, focusRequest = 0, onDraftChange, onSend, onUploadAttachment, onOpenDossier, onOpenArtifact, onRetryCompletionJob, onCompletionJobSettled, onRecruit, onOpenPluginMarket, onOpenHistory, hasOlderMessages = false, loadingOlderMessages = false, onLoadOlderMessages, approvals = [], onDecideApproval, permissionRequests = [], onDecideWorldPermissionRequest, permissionMode = 'read-only', onChangePermissionMode, onRequestFullAccess, onCancelQueuedTurn, onStopTurn, speechConversationKey }: ChatWorkbenchProps) {
   const { t } = useI18n()
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const uploadGenerationRef = useRef(new Map<string, number>())
+  const uploadAbortRef = useRef(new Map<string, AbortController>())
+  const uploadOwnersRef = useRef(new Map<string, { update: (updater: (current: readonly ComposerAttachmentDraft[]) => ComposerAttachmentDraft[]) => void; external: boolean }>())
   const scrollRef = useRef<HTMLDivElement>(null)
   const shouldFollowOutputRef = useRef(true)
   const historyAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | undefined>(undefined)
-  const [attachments, setAttachments] = useState<ChatAttachment[]>([])
+  const [localAttachments, setLocalAttachments] = useState<ComposerAttachmentDraft[]>([])
+  const attachments = controlledAttachments ?? localAttachments
+  const updateAttachments = useCallback((updater: (current: readonly ComposerAttachmentDraft[]) => ComposerAttachmentDraft[]) => {
+    if (onAttachmentsChange !== undefined) {
+      onAttachmentsChange(updater)
+      return
+    }
+    setLocalAttachments((current) => updater(current))
+  }, [onAttachmentsChange])
+  const uploadOwnerKey = composerOwnerKey ?? '__local__'
+  const cancelUploads = useCallback(() => {
+    const nextGeneration = (uploadGenerationRef.current.get(uploadOwnerKey) ?? 0) + 1
+    uploadGenerationRef.current.set(uploadOwnerKey, nextGeneration)
+    uploadAbortRef.current.get(uploadOwnerKey)?.abort()
+    uploadAbortRef.current.delete(uploadOwnerKey)
+    uploadOwnersRef.current.delete(uploadOwnerKey)
+  }, [uploadOwnerKey])
+  const cancelAllUploads = useCallback(() => {
+    for (const { update, external } of uploadOwnersRef.current.values()) {
+      if (!external) continue
+      update((current) => current.map((item) => item.status === 'uploading'
+        ? { ...item, status: 'interrupted', error: '离开当前页面时上传未完成，请重新选择文件。' }
+        : item))
+    }
+    for (const [ownerKey, controller] of uploadAbortRef.current) {
+      controller.abort()
+      uploadGenerationRef.current.set(ownerKey, (uploadGenerationRef.current.get(ownerKey) ?? 0) + 1)
+    }
+    uploadAbortRef.current.clear()
+    uploadOwnersRef.current.clear()
+  }, [])
   // Clicking an image in the transcript enlarges it in place (portal overlay)
   // instead of spawning a browser tab per picture.
   const [zoomImage, setZoomImage] = useState<ChatAttachment>()
@@ -102,8 +142,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
     window.addEventListener('keydown', onKey)
     return () => { window.removeEventListener('keydown', onKey) }
   }, [zoomImage])
-  const [uploading, setUploading] = useState(false)
-  const [attachmentError, setAttachmentError] = useState<string>()
+  const [attachmentError, setAttachmentError] = useState<{ ownerKey: string | undefined; message: string }>()
   const [messageMenu, setMessageMenu] = useState<{ message: WorkMessage; position: ContextMenuPosition }>()
   const [rememberingMessageId, setRememberingMessageId] = useState<string>()
   const [submittedKnowledgeMessageIds, setSubmittedKnowledgeMessageIds] = useState<Set<string>>(() => new Set())
@@ -137,7 +176,29 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
   const hasRunningTurn = queueItems.some((turn) => turn.status === 'running' || turn.status === 'waiting-approval' || turn.status === 'stopping')
   const insertsNext = hasRunningTurn || queuedTurns.length > 0
   const nextQueueMode = hasRunningTurn && queuedTurns.length === 0 ? 'next' : 'normal'
+  const readyAttachments = attachments.flatMap((item) => item.status === 'ready' && item.attachment !== undefined ? [item.attachment] : [])
+  const uploading = attachments.some((item) => item.status === 'uploading')
+  const activeAttachmentError = attachmentError === undefined || attachmentError.ownerKey !== composerOwnerKey
+    ? undefined
+    : attachmentError.message
   const showStopButton = canStopCurrentTurn && draft.trim().length === 0 && attachments.length === 0
+
+  useEffect(() => {
+    setAttachmentError(undefined)
+    setTopicNotice(false)
+  }, [composerOwnerKey])
+
+  useEffect(() => cancelAllUploads, [cancelAllUploads])
+
+  const clearComposerDraft = () => {
+    cancelUploads()
+    if (onClearDraft !== undefined) {
+      onClearDraft()
+      return
+    }
+    onDraftChange('')
+    updateAttachments(() => [])
+  }
 
   /**
    * The model a given character would actually run on.
@@ -302,8 +363,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
     const command = prompt.split(/\s+/, 1)[0]
     if (command === '/换个话题') {
       setTopicNotice(true)
-      onDraftChange('')
-      setAttachments([])
+      clearComposerDraft()
       return true
     }
     if (command === '/查看历史') {
@@ -311,9 +371,9 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
       onDraftChange('')
       return true
     }
-    if (command === '/清空输入') {
-      onDraftChange('')
-      setAttachments([])
+    if (command === '/清空草稿' || command === '/清空输入') {
+      setTopicNotice(true)
+      clearComposerDraft()
       return true
     }
     if (command === '/停止回复') {
@@ -330,8 +390,11 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
         return true
       }
       shouldFollowOutputRef.current = true
-      await onSend(`请使用“${skillName}”技能处理以下内容：\n${task}`, attachments, nextQueueMode)
-      setAttachments([])
+      if (onAttachmentsChange === undefined && onClearDraft === undefined) {
+        onDraftChange('')
+        updateAttachments((current) => current.filter((item) => item.status !== 'ready'))
+      }
+      await onSend(`请使用“${skillName}”技能处理以下内容：\n${task}`, readyAttachments, nextQueueMode)
       return true
     }
     return false
@@ -339,39 +402,73 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
 
   const submit = async () => {
     const prompt = draft.trim()
-    if ((!prompt && attachments.length === 0) || uploading) return
+    if ((!prompt && readyAttachments.length === 0) || uploading) return
     if (prompt.length > 0 && await executeLocalCommand(prompt)) return
     shouldFollowOutputRef.current = true
     setShowScrollToBottom(false)
-    await onSend(prompt || '请查看随消息发送的附件。', attachments, nextQueueMode)
-    setAttachments([])
+    if (onAttachmentsChange === undefined && onClearDraft === undefined) {
+      const submittedAttachmentIds = new Set(readyAttachments.map((attachment) => attachment.assetId))
+      // Standalone/demo consumers still own their draft locally. Clear only
+      // the submitted snapshot before awaiting; new text or uploads survive.
+      onDraftChange('')
+      updateAttachments((current) => current.filter((item) => (
+        item.status !== 'ready'
+        || item.attachment === undefined
+        || !submittedAttachmentIds.has(item.attachment.assetId)
+      )))
+    }
+    await onSend(prompt || '请查看随消息发送的附件。', readyAttachments, nextQueueMode)
   }
 
   const uploadAttachments = async (files: File[]) => {
     setAttachmentError(undefined)
-    if (uploading) { setAttachmentError('正在处理上一批附件，请稍候。'); return }
+    if (uploading) { setAttachmentError({ ownerKey: composerOwnerKey, message: '正在处理上一批附件，请稍候。' }); return }
     const available = 8 - attachments.length
-    if (available <= 0) { setAttachmentError('每条消息最多附加 8 个文件。'); return }
+    if (available <= 0) { setAttachmentError({ ownerKey: composerOwnerKey, message: '每条消息最多附加 8 个文件。' }); return }
     const candidates = files.slice(0, available)
     if (candidates.length === 0) return
-    setUploading(true)
-    try {
-      const uploaded: ChatAttachment[] = []
-      for (const file of candidates) {
+    const ownerKey = uploadOwnerKey
+    const generation = (uploadGenerationRef.current.get(ownerKey) ?? 0) + 1
+    uploadGenerationRef.current.set(ownerKey, generation)
+    const controller = new AbortController()
+    uploadAbortRef.current.set(ownerKey, controller)
+    uploadOwnersRef.current.set(ownerKey, { update: updateAttachments, external: onAttachmentsChange !== undefined })
+    const pending = candidates.map<ComposerAttachmentDraft>((file) => ({
+      id: crypto.randomUUID(),
+      name: file.name,
+      byteLength: file.size,
+      status: 'uploading',
+    }))
+    updateAttachments((current) => [...current, ...pending].slice(0, 8))
+    for (const [index, file] of candidates.entries()) {
+      const pendingItem = pending[index]
+      if (pendingItem === undefined || generation !== uploadGenerationRef.current.get(ownerKey) || controller.signal.aborted) break
+      try {
         if (file.size < 1 || file.size > 5 * 1024 * 1024) throw new Error('附件大小需在 1 byte 到 5 MiB 之间。')
-        uploaded.push(demoMode ? await onUploadAttachment(file) : await uploadWorldAttachment(world.id, file))
+        const uploaded = demoMode
+          ? await onUploadAttachment(file, controller.signal)
+          : await uploadWorldAttachment(world.id, file, controller.signal)
+        if (generation !== uploadGenerationRef.current.get(ownerKey) || controller.signal.aborted) break
+        updateAttachments((current) => current.map((item) => {
+          if (item.id !== pendingItem.id) return item
+          const next = { ...item, status: 'ready' as const, mimeType: uploaded.mimeType, byteLength: uploaded.byteLength, attachment: uploaded }
+          delete next.error
+          return next
+        }))
+      } catch (cause) {
+        if (generation !== uploadGenerationRef.current.get(ownerKey) || controller.signal.aborted) break
+        updateAttachments((current) => current.map((item) => item.id === pendingItem.id
+          ? { ...item, status: 'failed', error: cause instanceof Error ? cause.message : '附件上传失败' }
+          : item))
       }
-      setAttachments((current) => [...current, ...uploaded].slice(0, 8))
-      if (files.length > candidates.length) setAttachmentError(`已粘贴 ${candidates.length} 张图片；每条消息最多附加 8 个文件。`)
-    } catch (cause) {
-      setAttachmentError(cause instanceof Error ? cause.message : '附件上传失败')
-    } finally {
-      setUploading(false)
-      if (fileInputRef.current) fileInputRef.current.value = ''
     }
+    if (generation === uploadGenerationRef.current.get(ownerKey) && !controller.signal.aborted && files.length > candidates.length) setAttachmentError({ ownerKey: composerOwnerKey, message: `已选择 ${candidates.length} 个文件；每条消息最多附加 8 个文件。` })
+    if (uploadAbortRef.current.get(ownerKey) === controller) {
+      uploadAbortRef.current.delete(ownerKey)
+      uploadOwnersRef.current.delete(ownerKey)
+    }
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }
-
-  const uploadAttachment = async (file: File) => uploadAttachments([file])
 
   const pasteImages = (event: ReactClipboardEvent<HTMLTextAreaElement>) => {
     const images = Array.from(event.clipboardData.items)
@@ -546,7 +643,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
         {knowledgeError === undefined ? null : <div className="chat-knowledge-error" role="alert"><span>{knowledgeError}</span><button type="button" onClick={() => setKnowledgeError(undefined)} aria-label="关闭提示"><X size={14} /></button></div>}
         {onDecideWorldPermissionRequest === undefined ? null : <WorldPermissionRequests items={permissionRequests} employees={employees} activeSessionId={session?.id} onDecide={onDecideWorldPermissionRequest} />}
         {onDecideApproval === undefined ? null : <ApprovalRequests items={approvals} onDecide={onDecideApproval} />}
-        {topicNotice ? <div className="composer-topic-notice" role="status"><span>已开启新话题，之前的对话记录已保留</span></div> : null}
+        {topicNotice ? <div className="composer-topic-notice" role="status"><span>已清空当前会话草稿，已发送消息和已上传资源仍保留</span></div> : null}
         {queuedTurns.length > 0 ? <section className="composer-inserts" aria-label="插入对话">
           <header><span>插入对话</span><small>当前回复结束后优先处理</small></header>
           {saturatedWaiting ? <p className="composer-inserts__note" role="status">角色通道已满，插入内容会在可用后立即继续。</p> : null}
@@ -554,12 +651,27 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
         </section> : null}
         <div className="composer">
         {suggestions.length === 0 ? null : <div className="mention-menu" role="listbox" aria-label="当前世界角色">{suggestions.map((employee) => <button key={employee.id} type="button" onClick={() => insertMention(employee)}><Avatar index={employee.avatarIndex} size="sm" label={employee.displayName} authorityRole={employee.authorityRole} assetUrl={employee.avatarAssetUrl} rendererKind={employee.avatarProfile?.rendererKind} /><span><strong>{employee.displayName}<AuthorityBadge role={employee.authorityRole} /></strong><small>{employee.role} · 独立角色</small></span></button>)}</div>}
-        {attachments.length > 0 ? <div className="composer-attachments" aria-label="待发送附件">{attachments.map((attachment) => <span key={attachment.assetId} className={attachment.mimeType.startsWith('image/') ? 'is-image' : undefined}>{attachment.mimeType.startsWith('image/') ? <img className="composer-attachments__preview" src={attachment.url} alt={`${attachment.name}预览`} /> : <FileIcon size={15} />}<span><strong>{attachment.name}</strong><small>{formatBytes(attachment.byteLength)}</small></span><button type="button" aria-label={`移除附件 ${attachment.name}`} onClick={() => setAttachments((current) => current.filter((item) => item.assetId !== attachment.assetId))}><X size={13} /></button></span>)}</div> : null}
-        {attachmentError === undefined ? null : <p className="composer-error" role="alert">{attachmentError}</p>}
+        {attachments.length > 0 ? <div className="composer-attachments" aria-label="待发送附件">{attachments.map((item) => {
+          const attachment = item.attachment
+          const image = attachment?.mimeType.startsWith('image/') === true
+          const statusLabel = item.status === 'uploading'
+            ? '正在上传'
+            : item.status === 'failed'
+              ? `上传失败：${item.error ?? '请重试或移除'}`
+              : item.status === 'interrupted'
+                ? '上传已中断，请重新选择文件'
+                : formatBytes(attachment?.byteLength ?? item.byteLength ?? 0)
+          return <span key={item.id} className={`${image ? 'is-image ' : ''}composer-attachment--${item.status}`}>
+            {image && attachment !== undefined ? <img className="composer-attachments__preview" src={attachment.url} alt={`${item.name}预览`} /> : item.status === 'uploading' ? <CircleNotch size={15} className="spin" aria-label="正在上传" /> : <FileIcon size={15} />}
+            <span><strong>{item.name}</strong><small>{statusLabel}</small></span>
+            <button type="button" aria-label={`移除附件 ${item.name}`} onClick={() => { cancelUploads(); updateAttachments((current) => current.filter((candidate) => candidate.id !== item.id && candidate.status !== 'uploading')) }}><X size={13} /></button>
+          </span>
+        })}</div> : null}
+        {activeAttachmentError === undefined ? null : <p className="composer-error" role="alert">{activeAttachmentError}</p>}
         <textarea ref={inputRef} value={draft} onChange={(event) => onDraftChange(event.target.value)} onPaste={pasteImages} disabled={employees.length === 0} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit() } }} placeholder={employees.length === 0 ? experience.emptyTitle : conversationKind === 'group' ? t('workbench.composer', '发送消息给 {name}', { name: participantEmployees.map((employee) => employee.displayName).join('、') }) : conversationKind === 'direct' ? t('workbench.composer', '发送消息给 {name}', { name: participantEmployees[0]?.displayName ?? experience.personLabel }) : '先从左侧选择会话，或输入 @角色名'} rows={2} aria-label={`给当前世界的${experience.peopleLabel}发送消息`} />
         <div className="composer__toolbar">
           <div className="composer__actions-left">
-            <input ref={fileInputRef} className="composer-file-input" type="file" accept=".png,.jpg,.jpeg,.webp,.txt,.md,.json,.pdf" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAttachment(file) }} />
+            <input ref={fileInputRef} className="composer-file-input" type="file" multiple accept=".png,.jpg,.jpeg,.webp,.txt,.md,.json,.pdf" onChange={(event) => { const files = Array.from(event.target.files ?? []); if (files.length > 0) void uploadAttachments(files) }} />
             <button className="icon-button composer-attachment-button" type="button" aria-label={uploading ? '正在上传附件' : '添加附件'} title={uploading ? '正在上传附件' : '添加附件'} disabled={uploading} onClick={() => fileInputRef.current?.click()}>{uploading ? <CircleNotch size={18} className="spin" /> : <Paperclip size={18} />}</button>
             {onChangePermissionMode === undefined ? null : <ConversationPermissionControl value={permissionMode} onChange={onChangePermissionMode} {...(onRequestFullAccess === undefined ? {} : { onRequestFullAccess })} />}
             {onChangeModelProfile === undefined || conversationKind === 'group' ? null : <div className="composer-model-picker"><ModelPicker models={models} value={modelProfileId} inheritLabel={inheritResolutionLabel} ariaLabel={t('workbench.modelLabel', '当前会话模型')} onChange={onChangeModelProfile} /></div>}
@@ -568,7 +680,7 @@ export function ChatWorkbench({ demoMode, world, session, intent, participantIds
           <div className="composer__actions-right">
             <ComposerReplySpeaker {...(directEmployee === undefined ? { employeeId: undefined } : { employeeId: directEmployee.id })} {...(session?.id === undefined ? {} : { sessionId: session.id })} {...(speechConversationKey === undefined ? {} : { conversationKey: speechConversationKey })} dossiers={dossiers} />
             <VoiceConversationControl variant="compact" employeeName={directEmployee?.displayName ?? '当前会话角色'} disabled={employees.length === 0} onFinal={async (text) => { await onSend(text, [], nextQueueMode, 'composer') }} />
-            <button className={`send-button${showStopButton ? ' send-button--stop' : ''}`} type="button" aria-label={showStopButton ? '停止当前回复' : insertsNext ? '插入对话' : sending ? '正在回复中，发送新消息' : '发送'} title={showStopButton ? '停止当前回复' : insertsNext ? '插入对话' : '发送'} disabled={showStopButton ? false : uploading || employees.length === 0 || (!draft.trim() && attachments.length === 0)} onClick={() => { if (showStopButton && activeTurn !== undefined && onStopTurn !== undefined) void onStopTurn(activeTurn.id); else void submit() }}>{showStopButton ? <Stop size={19} weight="bold" /> : sending && !insertsNext ? <CircleNotch size={19} className="spin" /> : <PaperPlaneRight size={19} weight="fill" />}{showStopButton || queuedCount === 0 ? null : <span className="send-button__queue" aria-label={`${queuedCount} 条插入对话`}>{queuedCount}</span>}</button>
+            <button className={`send-button${showStopButton ? ' send-button--stop' : ''}`} type="button" aria-label={showStopButton ? '停止当前回复' : insertsNext ? '插入对话' : sending ? '正在回复中，发送新消息' : '发送'} title={showStopButton ? '停止当前回复' : insertsNext ? '插入对话' : '发送'} disabled={showStopButton ? false : uploading || employees.length === 0 || (!draft.trim() && readyAttachments.length === 0)} onClick={() => { if (showStopButton && activeTurn !== undefined && onStopTurn !== undefined) void onStopTurn(activeTurn.id); else void submit() }}>{showStopButton ? <Stop size={19} weight="bold" /> : sending && !insertsNext ? <CircleNotch size={19} className="spin" /> : <PaperPlaneRight size={19} weight="fill" />}{showStopButton || queuedCount === 0 ? null : <span className="send-button__queue" aria-label={`${queuedCount} 条插入对话`}>{queuedCount}</span>}</button>
           </div>
         </div>
       </div></div>
@@ -615,11 +727,12 @@ export async function copyTextToClipboard(value: string): Promise<boolean> {
   }
 }
 
-async function uploadWorldAttachment(worldId: string, file: File): Promise<ChatAttachment> {
+async function uploadWorldAttachment(worldId: string, file: File, signal?: AbortSignal): Promise<ChatAttachment> {
   const mimeType = attachmentMimeType(file)
   const response = await fetch(`/api/worlds/${encodeURIComponent(worldId)}/assets/attachment`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    ...(signal === undefined ? {} : { signal }),
     body: JSON.stringify({ name: file.name, mimeType, dataBase64: await fileToBase64(file) }),
   })
   const result = await response.json() as { attachment?: ChatAttachment; error?: { message?: string } }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { estimateTextTokens, planContextBudget } from '../src/context-budget.js'
+import { ContextInputTooLargeError, assertContextInputFits, estimateTextTokens, planContextBudget } from '../src/context-budget.js'
 
 describe('context budget planning', () => {
   it('reserves output and safety space before allocating input sections', () => {
@@ -23,8 +23,27 @@ describe('context budget planning', () => {
     expect(plan.historyTokens).toBeGreaterThan(plan.memoryTokens)
   })
 
-  it('never over-allocates a small window with a large fixed prompt', () => {
-    const plan = planContextBudget({ contextWindow: 4_096, maxOutputTokens: 1_024, fixedText: ['长设定'.repeat(4_000)] })
-    expect(plan.fixedTokens + plan.workingTokens + plan.historyTokens + plan.memoryTokens + plan.knowledgeTokens).toBeLessThanOrEqual(plan.inputBudgetTokens)
+  it('rejects oversized fixed text instead of reporting a smaller fictional count', () => {
+    expect(() => planContextBudget({ contextWindow: 4_096, maxOutputTokens: 1_024, fixedText: ['长设定'.repeat(4_000)] }))
+      .toThrow(ContextInputTooLargeError)
+  })
+
+  it('allows the exact boundary without inventing a minimum remaining allocation', () => {
+    const plan = planContextBudget({ contextWindow: 4_096, maxOutputTokens: 1_024, fixedText: ['中'.repeat(2_560)] })
+    expect(plan.fixedTokens).toBe(2_560)
+    expect(plan.historyTokens + plan.memoryTokens + plan.workingTokens + plan.knowledgeTokens).toBe(0)
+  })
+
+  it('reports only estimates and limits in a rejected input', () => {
+    const secret = 'PRIVATE_SOURCE_TEXT'
+    try {
+      assertContextInputFits([secret], 1)
+      throw new Error('expected refusal')
+    } catch (error) {
+      expect(error).toBeInstanceOf(ContextInputTooLargeError)
+      expect(String(error)).toContain('输入过长')
+      expect(String(error)).not.toContain(secret)
+      expect(JSON.stringify(error)).not.toContain(secret)
+    }
   })
 })

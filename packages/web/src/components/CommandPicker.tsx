@@ -38,10 +38,9 @@ const SLASH_CATEGORIES: SlashCategory[] = [
 ]
 
 const BUILTIN_COMMANDS: BuiltinCommand[] = [
-  { trigger: '/换个话题', name: '换个话题', description: '在当前会话开始新话题，保留之前的对话记录' },
   { trigger: '/查看历史', name: '查看历史', description: '打开当前会话的历史消息' },
   { trigger: '/停止回复', name: '停止回复', description: '停止当前正在运行的回复' },
-  { trigger: '/清空输入', name: '清空输入', description: '清除当前输入框中的内容' },
+  { trigger: '/清空草稿', name: '清空草稿', description: '清除当前会话未发送的文本和附件，不删除已发送消息或资源' },
 ]
 
 const BUILTIN_SKILLS: BuiltinSkill[] = [

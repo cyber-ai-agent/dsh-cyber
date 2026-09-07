@@ -18,7 +18,7 @@ jobs:
     name: required
     runs-on: ubuntu-latest
     # Keep the protected PR gate short enough for rapid pre-alpha iteration.
-    # Browser and delivery-pack checks run in the non-blocking Full E2E workflow.
+    # A bounded deterministic browser smoke runs here; Full E2E keeps the broad suite.
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -41,6 +41,19 @@ jobs:
         run: pnpm test
       - name: Migration replay and schema contracts
         run: pnpm test:migration && pnpm test:schema
+      - name: Install browser for core smoke
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Core browser smoke
+        run: pnpm exec playwright test --config playwright.smoke.config.ts
+      - name: Preserve failed browser evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: core-browser-smoke
+          path: .private/playwright-results
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
       # The status can only be written to a commit inside this repository.
       # For fork pull requests the head sha lives in the contributor's fork,
       # where GITHUB_TOKEN has no write access (403), so skip instead of failing.
@@ -57,4 +70,4 @@ jobs:
             --header "Accept: application/vnd.github+json" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${TARGET_SHA}" \
-            --data '{"state":"success","context":"CI / required","description":"fast typecheck, unit/integration, migration and schema checks passed"}'
+            --data '{"state":"success","context":"CI / required","description":"typecheck, unit/integration, migration, schema and browser smoke passed"}'

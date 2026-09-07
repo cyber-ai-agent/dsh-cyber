@@ -24,6 +24,26 @@ export const approximateTokenEstimator: TokenEstimator = {
   estimate: estimateTextTokens,
 }
 
+/** Only estimates/counts travel with this failure, never input text. */
+export class ContextInputTooLargeError extends Error {
+  readonly code = 'context-input-too-large'
+  constructor(readonly estimatedTokens: number, readonly inputBudgetTokens: number) {
+    super(`本次输入过长（估算 ${estimatedTokens} token，可用 ${inputBudgetTokens}）。请缩短消息、角色设定或资料，或切换更大上下文的模型后重试。`)
+    this.name = 'ContextInputTooLargeError'
+  }
+}
+
+export function assertContextInputFits(
+  texts: readonly string[],
+  inputBudgetTokens: number,
+  estimator: TokenEstimator = approximateTokenEstimator,
+): number {
+  if (!Number.isSafeInteger(inputBudgetTokens) || inputBudgetTokens < 0) throw new Error('上下文输入预算无效')
+  const estimatedTokens = texts.reduce((sum, text) => sum + estimator.estimate(text), 0)
+  if (estimatedTokens > inputBudgetTokens) throw new ContextInputTooLargeError(estimatedTokens, inputBudgetTokens)
+  return estimatedTokens
+}
+
 const HAN_CHARACTER = /\p{Script=Han}/u
 
 export function estimateTextTokens(value: string): number {
@@ -45,12 +65,12 @@ export function planContextBudget(input: ContextBudgetInput, estimator: TokenEst
   const defaultOutput = Math.min(outputLimit, 8_192, Math.max(1_024, Math.floor(contextWindow * 0.2)))
   const maxOutputTokens = boundedInteger(input.maxOutputTokens, defaultOutput, 256, outputLimit)
   const inputBudgetTokens = contextWindow - maxOutputTokens - safetyMarginTokens
-  const fixedTokens = Math.min(inputBudgetTokens - 512, (input.fixedText ?? []).reduce((total, value) => total + estimator.estimate(value), 0))
-  const allocatable = Math.max(512, inputBudgetTokens - fixedTokens)
-  const historyTokens = Math.max(1, Math.floor(allocatable * 0.52))
-  const memoryTokens = Math.max(1, Math.floor(allocatable * 0.14))
-  const knowledgeTokens = Math.max(1, Math.floor(allocatable * 0.18))
-  const workingTokens = Math.max(1, allocatable - historyTokens - memoryTokens - knowledgeTokens)
+  const fixedTokens = assertContextInputFits(input.fixedText ?? [], inputBudgetTokens, estimator)
+  const allocatable = inputBudgetTokens - fixedTokens
+  const historyTokens = Math.floor(allocatable * 0.52)
+  const memoryTokens = Math.floor(allocatable * 0.14)
+  const knowledgeTokens = Math.floor(allocatable * 0.18)
+  const workingTokens = allocatable - historyTokens - memoryTokens - knowledgeTokens
   return {
     contextWindow,
     maxOutputTokens,

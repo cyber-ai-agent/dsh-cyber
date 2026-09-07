@@ -10,6 +10,7 @@ import type {
   AgentTurnRequest,
   EmployeeBlueprint,
 } from '@dsh-cyber/contracts'
+import { ContextInputTooLargeError } from '@dsh-cyber/contracts'
 import { SqliteStore } from '@dsh-cyber/persistence'
 
 import { ConversationOrchestrator } from '../src/index.js'
@@ -476,6 +477,68 @@ describe('ConversationOrchestrator', () => {
     const [session] = store.listSessions(company.id)
     const [turn] = store.listSessionTurns(session!.id)
     expect(turn).toMatchObject({ status: 'failed' })
+  })
+
+  it.each([false, true])('projects one safe context failure even when already emitted: %s', async (alreadyEmitted) => {
+    const { directory, store, workspace, company } = await setup()
+    store.saveBlueprint(blueprint('context-limited', 'context tester', 'software engineer'))
+    const employee = store.recruitEmployee({
+      workspaceId: workspace.id,
+      worldId: company.id,
+      blueprintId: 'context-limited',
+      blueprintVersion: 1,
+    })
+    let runtimeCalls = 0
+    const runtime: AgentRuntimePort = {
+      async runTurn(request) {
+        runtimeCalls += 1
+        if (alreadyEmitted) request.onEvent?.({
+          kind: 'turn.failed', source: 'context-budget', sourceSessionId: request.agentRunId!, failed: true,
+          metadata: { failure: 'context-limit', errorCode: 'runtime-context-limit', estimatedTokens: 12_345, inputBudgetTokens: 4_096 },
+        })
+        throw new ContextInputTooLargeError(12_345, 4_096)
+      },
+      async close() {},
+    }
+    const orchestrator = new ConversationOrchestrator({ store, runtime, workspacePath: directory })
+    orchestrators.push(orchestrator)
+    const realtime: AgentRuntimeEvent[] = []
+    orchestrator.subscribe((envelope) => realtime.push(envelope.event))
+
+    await expect(orchestrator.direct({
+      workspaceId: workspace.id,
+      worldId: company.id,
+      employeeId: employee.id,
+      prompt: '这段用户输入不会进入终态事件',
+    })).rejects.toMatchObject({
+      name: 'AgentTurnFailedError',
+      failureKind: 'context-limit',
+      estimatedTokens: 12_345,
+      inputBudgetTokens: 4_096,
+    })
+
+    expect(runtimeCalls).toBe(1)
+    const terminal = realtime.filter((event) => event.kind === 'turn.failed')
+    expect(terminal).toHaveLength(1)
+    expect(terminal[0]).toMatchObject({
+      source: 'context-budget',
+      failed: true,
+      metadata: {
+        failure: 'context-limit',
+        errorCode: 'runtime-context-limit',
+        estimatedTokens: 12_345,
+        inputBudgetTokens: 4_096,
+      },
+    })
+    expect(JSON.stringify(terminal[0])).not.toContain('这段用户输入')
+    const [session] = store.listSessions(company.id)
+    const [turn] = store.listSessionTurns(session!.id)
+    expect(turn).toMatchObject({ status: 'failed', errorCode: 'runtime-context-limit' })
+    expect(store.listTurnAgentRuns(turn!.id)).toEqual([
+      expect.objectContaining({ status: 'failed', errorCode: 'runtime-context-limit' }),
+    ])
+    expect(store.listWorldDomainEvents(company.id).filter((event) => event.type === 'turn.failed')).toHaveLength(1)
+    expect(JSON.stringify(store.listWorldDomainEvents(company.id))).not.toContain('这段用户输入')
   })
 
   it('interrupts one live AgentRun as interrupted and publishes a durable stop notice', async () => {

@@ -2204,6 +2204,155 @@ const MIGRATIONS: readonly Migration[] = [
         WHERE superseded_at IS NOT NULL AND invalidated_at IS NULL;
     `,
   },
+  {
+    version: 44,
+    name: 'conversation-submission-claims',
+    sql: `
+      -- A client retry must claim the whole owner submission, not look up a
+      -- WorkTurn and create the rest in separate transactions. The three
+      -- non-null foreign keys make a claim an all-or-nothing receipt: a row
+      -- cannot exist without the session, turn and owner message it returns.
+      -- Queue entries are optional because immediate turns do not need one.
+      --
+      -- Existing work_turns.client_turn_id rows are deliberately not
+      -- backfilled. They predate a request fingerprint, and duplicate legacy
+      -- ids cannot be mapped to one fact without guessing. The new claim API
+      -- detects such ids and asks the host to reconcile them explicitly.
+      CREATE TABLE conversation_submission_claims (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        idempotency_key TEXT NOT NULL CHECK (length(idempotency_key) BETWEEN 1 AND 128),
+        fingerprint_sha256 TEXT NOT NULL CHECK (length(fingerprint_sha256) = 64),
+        session_id TEXT NOT NULL REFERENCES work_sessions(id) ON DELETE CASCADE,
+        work_turn_id TEXT NOT NULL UNIQUE REFERENCES work_turns(id) ON DELETE CASCADE,
+        owner_message_id TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+        queue_entry_id TEXT UNIQUE REFERENCES conversation_queue_entries(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE (workspace_id, world_id, idempotency_key)
+      ) STRICT;
+
+      CREATE INDEX conversation_submission_claims_scope_idx
+        ON conversation_submission_claims(workspace_id, world_id, created_at DESC, id);
+      CREATE INDEX conversation_submission_claims_session_idx
+        ON conversation_submission_claims(session_id, created_at DESC, id);
+    `,
+  },
+  {
+    version: 45,
+    name: 'task-schedule-run-work-turn-link',
+    sql: `
+      -- A scheduled attempt claims its WorkTurn before entering the model or
+      -- adapter. Existing runs predate that seam, so the edge is nullable and
+      -- deliberately has no guessed backfill. New runs always write it.
+      ALTER TABLE task_schedule_runs ADD COLUMN work_turn_id TEXT
+        REFERENCES work_turns(id) ON DELETE SET NULL;
+      CREATE INDEX task_schedule_runs_work_turn_idx
+        ON task_schedule_runs(work_turn_id, started_at DESC)
+        WHERE work_turn_id IS NOT NULL;
+    `,
+  },
+  {
+    version: 46,
+    name: 'task-execution-idempotency',
+    sql: `
+      -- A Task Center retry must have a durable execution fact before any
+      -- model, Skill or AgentRun side effect begins. The key is scoped to a
+      -- task, while the digest prevents a reused key from silently changing
+      -- its roster, coordinator or request.
+      ALTER TABLE task_runs ADD COLUMN idempotency_key TEXT;
+      ALTER TABLE task_runs ADD COLUMN fingerprint_sha256 TEXT;
+      CREATE UNIQUE INDEX task_runs_task_idempotency_idx
+        ON task_runs(task_id, idempotency_key)
+        WHERE idempotency_key IS NOT NULL;
+      CREATE INDEX task_runs_work_turn_idx ON task_runs(work_turn_id, attempt DESC, id);
+    `,
+  },
+  {
+    version: 47,
+    name: 'task-schedule-run-approval-state',
+    sql: `
+      -- Schedule runs share the WorkTurn/queue approval state. Rebuild the
+      -- small legacy table so waiting-approval is durable across restart.
+      DROP INDEX idx_task_schedule_runs_schedule;
+      DROP INDEX task_schedule_runs_work_turn_idx;
+      ALTER TABLE task_schedule_runs RENAME TO task_schedule_runs_v46;
+      CREATE TABLE task_schedule_runs (
+        id TEXT PRIMARY KEY,
+        schedule_id TEXT NOT NULL REFERENCES task_schedules(id) ON DELETE CASCADE,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        employee_id TEXT NOT NULL REFERENCES employee_instances(id) ON DELETE CASCADE,
+        status TEXT NOT NULL CHECK (status IN ('running', 'waiting-approval', 'completed', 'failed', 'skipped')),
+        scheduled_for TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        completed_at TEXT,
+        session_id TEXT,
+        work_turn_id TEXT REFERENCES work_turns(id) ON DELETE SET NULL,
+        summary TEXT,
+        error_code TEXT,
+        UNIQUE(schedule_id, scheduled_for)
+      ) STRICT;
+      INSERT INTO task_schedule_runs
+        (id, schedule_id, workspace_id, world_id, employee_id, status,
+         scheduled_for, started_at, completed_at, session_id, work_turn_id,
+         summary, error_code)
+      SELECT id, schedule_id, workspace_id, world_id, employee_id, status,
+             scheduled_for, started_at, completed_at, session_id, work_turn_id,
+             summary, error_code
+      FROM task_schedule_runs_v46;
+      DROP TABLE task_schedule_runs_v46;
+      CREATE INDEX idx_task_schedule_runs_schedule
+        ON task_schedule_runs(schedule_id, started_at DESC);
+      CREATE INDEX task_schedule_runs_work_turn_idx
+        ON task_schedule_runs(work_turn_id, started_at DESC)
+        WHERE work_turn_id IS NOT NULL;
+    `,
+  },
+  {
+    version: 48,
+    name: 'task-schedule-run-acceptance-and-start-times',
+    sql: `
+      -- A schedule is accepted when its durable run, WorkTurn and optional
+      -- queue entry commit. It starts only when the shared queue claims that
+      -- WorkTurn. Keep the old start value as the best historical acceptance
+      -- and start fact; new queued rows leave started_at NULL until claim.
+      DROP INDEX idx_task_schedule_runs_schedule;
+      DROP INDEX task_schedule_runs_work_turn_idx;
+      ALTER TABLE task_schedule_runs RENAME TO task_schedule_runs_v47;
+      CREATE TABLE task_schedule_runs (
+        id TEXT PRIMARY KEY,
+        schedule_id TEXT NOT NULL REFERENCES task_schedules(id) ON DELETE CASCADE,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        employee_id TEXT NOT NULL REFERENCES employee_instances(id) ON DELETE CASCADE,
+        status TEXT NOT NULL CHECK (status IN ('running', 'waiting-approval', 'completed', 'failed', 'skipped')),
+        scheduled_for TEXT NOT NULL,
+        accepted_at TEXT NOT NULL,
+        started_at TEXT,
+        completed_at TEXT,
+        session_id TEXT,
+        work_turn_id TEXT REFERENCES work_turns(id) ON DELETE SET NULL,
+        summary TEXT,
+        error_code TEXT,
+        UNIQUE(schedule_id, scheduled_for)
+      ) STRICT;
+      INSERT INTO task_schedule_runs
+        (id, schedule_id, workspace_id, world_id, employee_id, status,
+         scheduled_for, accepted_at, started_at, completed_at, session_id,
+         work_turn_id, summary, error_code)
+      SELECT id, schedule_id, workspace_id, world_id, employee_id, status,
+             scheduled_for, started_at, started_at, completed_at, session_id,
+             work_turn_id, summary, error_code
+      FROM task_schedule_runs_v47;
+      DROP TABLE task_schedule_runs_v47;
+      CREATE INDEX idx_task_schedule_runs_schedule
+        ON task_schedule_runs(schedule_id, accepted_at DESC, id);
+      CREATE INDEX task_schedule_runs_work_turn_idx
+        ON task_schedule_runs(work_turn_id, started_at DESC)
+        WHERE work_turn_id IS NOT NULL;
+    `,
+  },
 ]
 
 /**

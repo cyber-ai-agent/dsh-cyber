@@ -802,6 +802,7 @@ describe('SqliteStore', () => {
     seeded.close()
     const legacy = new DatabaseSync(databasePath)
     legacy.exec(`
+      DROP TABLE conversation_submission_claims;
       DROP TABLE model_assignments;
       DROP TABLE model_profiles;
       DROP TABLE model_providers;
@@ -981,7 +982,14 @@ describe('SqliteStore', () => {
       ALTER TABLE knowledge_relations DROP COLUMN not_current_source_type;
       ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
       DROP TABLE knowledge_source_versions;
+      DROP INDEX task_runs_task_idempotency_idx;
+      DROP INDEX task_runs_work_turn_idx;
+      ALTER TABLE task_runs DROP COLUMN fingerprint_sha256;
+      ALTER TABLE task_runs DROP COLUMN idempotency_key;
+      DROP INDEX task_schedule_runs_work_turn_idx;
+      ALTER TABLE task_schedule_runs DROP COLUMN work_turn_id;
       DELETE FROM schema_migrations WHERE version > 36;
+      DROP TABLE conversation_submission_claims;
       PRAGMA user_version = 36;
     `)
     legacy.close()
@@ -1074,7 +1082,14 @@ describe('SqliteStore', () => {
       ALTER TABLE knowledge_relations DROP COLUMN not_current_source_type;
       ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
       DROP TABLE knowledge_source_versions;
+      DROP INDEX task_runs_task_idempotency_idx;
+      DROP INDEX task_runs_work_turn_idx;
+      ALTER TABLE task_runs DROP COLUMN fingerprint_sha256;
+      ALTER TABLE task_runs DROP COLUMN idempotency_key;
+      DROP INDEX task_schedule_runs_work_turn_idx;
+      ALTER TABLE task_schedule_runs DROP COLUMN work_turn_id;
       DELETE FROM schema_migrations WHERE version > 38;
+      DROP TABLE conversation_submission_claims;
       PRAGMA user_version = 38;
     `)
     legacy.close()
@@ -1465,7 +1480,14 @@ describe('SqliteStore', () => {
       ALTER TABLE knowledge_relations DROP COLUMN not_current_source_type;
       ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
       DROP TABLE knowledge_source_versions;
+      DROP INDEX task_runs_task_idempotency_idx;
+      DROP INDEX task_runs_work_turn_idx;
+      ALTER TABLE task_runs DROP COLUMN fingerprint_sha256;
+      ALTER TABLE task_runs DROP COLUMN idempotency_key;
+      DROP INDEX task_schedule_runs_work_turn_idx;
+      ALTER TABLE task_schedule_runs DROP COLUMN work_turn_id;
       DELETE FROM schema_migrations WHERE version > 36;
+      DROP TABLE conversation_submission_claims;
       PRAGMA user_version = 36;
     `)
     downgraded.close()
@@ -1543,7 +1565,14 @@ describe('SqliteStore', () => {
       ALTER TABLE knowledge_relations DROP COLUMN not_current_source_type;
       ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
       DROP TABLE knowledge_source_versions;
+      DROP INDEX task_runs_task_idempotency_idx;
+      DROP INDEX task_runs_work_turn_idx;
+      ALTER TABLE task_runs DROP COLUMN fingerprint_sha256;
+      ALTER TABLE task_runs DROP COLUMN idempotency_key;
+      DROP INDEX task_schedule_runs_work_turn_idx;
+      ALTER TABLE task_schedule_runs DROP COLUMN work_turn_id;
       DELETE FROM schema_migrations WHERE version > 39;
+      DROP TABLE conversation_submission_claims;
       PRAGMA user_version = 39;
     `)
     legacy.close()
@@ -1606,7 +1635,14 @@ describe('SqliteStore', () => {
       ALTER TABLE knowledge_relations DROP COLUMN not_current_source_type;
       ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
       DROP TABLE knowledge_source_versions;
+      DROP INDEX task_runs_task_idempotency_idx;
+      DROP INDEX task_runs_work_turn_idx;
+      ALTER TABLE task_runs DROP COLUMN fingerprint_sha256;
+      ALTER TABLE task_runs DROP COLUMN idempotency_key;
+      DROP INDEX task_schedule_runs_work_turn_idx;
+      ALTER TABLE task_schedule_runs DROP COLUMN work_turn_id;
       DELETE FROM schema_migrations WHERE version > 40;
+      DROP TABLE conversation_submission_claims;
       PRAGMA user_version = 40;
     `)
     legacy.close()
@@ -1671,7 +1707,14 @@ describe('SqliteStore', () => {
       ALTER TABLE knowledge_relations DROP COLUMN not_current_source_type;
       ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
       DROP TABLE knowledge_source_versions;
+      DROP INDEX task_runs_task_idempotency_idx;
+      DROP INDEX task_runs_work_turn_idx;
+      ALTER TABLE task_runs DROP COLUMN fingerprint_sha256;
+      ALTER TABLE task_runs DROP COLUMN idempotency_key;
+      DROP INDEX task_schedule_runs_work_turn_idx;
+      ALTER TABLE task_schedule_runs DROP COLUMN work_turn_id;
       DELETE FROM schema_migrations WHERE version > 41;
+      DROP TABLE conversation_submission_claims;
       PRAGMA user_version = 41;
     `)
     legacy.close()
@@ -1735,7 +1778,14 @@ describe('SqliteStore', () => {
       ALTER TABLE knowledge_relations DROP COLUMN not_current_source_type;
       ALTER TABLE knowledge_relations DROP COLUMN not_current_since;
       ALTER TABLE knowledge_source_versions DROP COLUMN invalidated_at;
+      DROP INDEX task_runs_task_idempotency_idx;
+      DROP INDEX task_runs_work_turn_idx;
+      ALTER TABLE task_runs DROP COLUMN fingerprint_sha256;
+      ALTER TABLE task_runs DROP COLUMN idempotency_key;
+      DROP INDEX task_schedule_runs_work_turn_idx;
+      ALTER TABLE task_schedule_runs DROP COLUMN work_turn_id;
       DELETE FROM schema_migrations WHERE version > 42;
+      DROP TABLE conversation_submission_claims;
       PRAGMA user_version = 42;
     `)
     legacy.close()
@@ -1757,6 +1807,97 @@ describe('SqliteStore', () => {
     expect(migrated.database.prepare(
       `SELECT partial FROM pragma_index_list('knowledge_claims') WHERE name = 'knowledge_claims_not_current_idx'`,
     ).get()).toMatchObject({ partial: 1 })
+  })
+
+  it('migrates legacy schedule start time into acceptance and keeps it readable', async () => {
+    const { path, store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: '日程时间迁移工作区' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: '日程时间迁移世界', templateId: 'cyber-company' })
+    store.saveBlueprint(blueprint({ id: 'schedule.worker', worldTemplateId: 'cyber-company' }))
+    const employee = store.recruitEmployee({
+      workspaceId: workspace.id, worldId: world.id, blueprintId: 'schedule.worker', blueprintVersion: 1,
+    })
+    const scheduledFor = '2026-09-06T04:00:00.000Z'
+    const scheduleId = 'schedule-legacy-time'
+    store.database.prepare(
+      `INSERT INTO task_schedules
+       (id, workspace_id, world_id, employee_id, title, prompt, kind, scheduled_at,
+        every_seconds, time_zone, permission_mode, status, next_run_at, last_run_at,
+        created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'once', ?, NULL, ?, ?, 'active', ?, NULL, ?, ?)`,
+    ).run(
+      scheduleId, workspace.id, world.id, employee.id, '迁移时间事实', '迁移旧日程运行', scheduledFor,
+      'Asia/Shanghai', 'workspace-write', scheduledFor, '2026-09-06T03:59:00.000Z', '2026-09-06T03:59:00.000Z',
+    )
+    const legacyInput = {
+      scheduleId,
+      scheduledFor,
+      workspaceId: workspace.id,
+      worldId: world.id,
+      employeeId: employee.id,
+      title: '迁移时间事实',
+      prompt: '迁移旧日程运行',
+      permissionMode: 'workspace-write' as const,
+    }
+    const legacyRun = store.claimTaskScheduleRun(legacyInput).run
+    expect(legacyRun.startedAt).toBe(legacyRun.acceptedAt)
+    store.close()
+    stores.splice(stores.indexOf(store), 1)
+
+    // Rewind only the new time-fact migration. This reproduces a schema 47
+    // file whose only run timestamp was the old started_at value.
+    const legacy = new DatabaseSync(path)
+    legacy.exec(`
+      DROP INDEX idx_task_schedule_runs_schedule;
+      DROP INDEX task_schedule_runs_work_turn_idx;
+      ALTER TABLE task_schedule_runs RENAME TO task_schedule_runs_v48;
+      CREATE TABLE task_schedule_runs (
+        id TEXT PRIMARY KEY,
+        schedule_id TEXT NOT NULL REFERENCES task_schedules(id) ON DELETE CASCADE,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+        employee_id TEXT NOT NULL REFERENCES employee_instances(id) ON DELETE CASCADE,
+        status TEXT NOT NULL CHECK (status IN ('running', 'waiting-approval', 'completed', 'failed', 'skipped')),
+        scheduled_for TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        completed_at TEXT,
+        session_id TEXT,
+        work_turn_id TEXT REFERENCES work_turns(id) ON DELETE SET NULL,
+        summary TEXT,
+        error_code TEXT,
+        UNIQUE(schedule_id, scheduled_for)
+      ) STRICT;
+      INSERT INTO task_schedule_runs
+        (id, schedule_id, workspace_id, world_id, employee_id, status,
+         scheduled_for, started_at, completed_at, session_id, work_turn_id,
+         summary, error_code)
+      SELECT id, schedule_id, workspace_id, world_id, employee_id, status,
+             scheduled_for, started_at, completed_at, session_id, work_turn_id,
+             summary, error_code
+      FROM task_schedule_runs_v48;
+      DROP TABLE task_schedule_runs_v48;
+      CREATE INDEX idx_task_schedule_runs_schedule
+        ON task_schedule_runs(schedule_id, started_at DESC);
+      CREATE INDEX task_schedule_runs_work_turn_idx
+        ON task_schedule_runs(work_turn_id, started_at DESC)
+        WHERE work_turn_id IS NOT NULL;
+      DELETE FROM schema_migrations WHERE version > 47;
+      PRAGMA user_version = 47;
+    `)
+    legacy.close()
+
+    const migrated = await SqliteStore.open(path)
+    stores.push(migrated)
+    const replay = migrated.claimTaskScheduleRun(legacyInput)
+    expect(replay.created).toBe(false)
+    expect(replay.run).toMatchObject({
+      id: legacyRun.id,
+      acceptedAt: legacyRun.acceptedAt,
+      startedAt: legacyRun.startedAt,
+    })
+    const columns = migrated.database.prepare('PRAGMA table_info(task_schedule_runs)').all() as Array<{ name: string; notnull: number }>
+    expect(columns.find((column) => column.name === 'accepted_at')).toMatchObject({ notnull: 1 })
+    expect(columns.find((column) => column.name === 'started_at')).toMatchObject({ notnull: 0 })
   })
 })
 

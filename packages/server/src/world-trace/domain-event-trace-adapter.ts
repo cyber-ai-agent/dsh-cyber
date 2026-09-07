@@ -203,6 +203,7 @@ function presentDomainEvent(type: DomainEventType, payload: Record<string, unkno
     }
     case 'schedule.created': return { category: 'schedule', status: 'pending', summary: '计划任务已创建' }
     case 'schedule.updated': return { category: 'schedule', status: 'info', summary: '计划任务已更新' }
+    case 'schedule.run.accepted': return { category: 'schedule', status: 'pending', summary: '计划任务已进入执行队列' }
     case 'schedule.run.started': return { category: 'schedule', status: 'running', summary: '计划任务开始执行' }
     case 'schedule.run.completed': return { category: 'schedule', status: 'success', summary: '计划任务执行完成' }
     case 'schedule.run.failed': return { category: 'schedule', status: 'failed', summary: '计划任务执行失败' }

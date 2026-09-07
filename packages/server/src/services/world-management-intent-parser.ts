@@ -118,7 +118,7 @@ export class WorldManagementIntentParser {
     const target = resolveCharacter(text, context.characters)
     // Ambiguity is scoped to the character branch: two names appearing in a
     // sentence used to veto world-scoped actions that merely mentioned them.
-    if (target.ambiguous && mentionsCharacterAction(text)) {
+    if (target.ambiguous && mentionsCharacterAction(text, target.candidates)) {
       return [this.clarification(context.worldId, target.candidates)]
     }
     // A narrowly-scoped authority query is safe even when written as a
@@ -330,8 +330,12 @@ function splitClauses(text: string): string[] {
 }
 
 /** Whether a clause actually asks for something scoped to a character. */
-function mentionsCharacterAction(text: string): boolean {
-  return /管理员|权限|身份|岗位/u.test(text)
+function mentionsCharacterAction(text: string, candidates: readonly WorldManagementCharacterRef[]): boolean {
+  const actionText = candidates.reduce(
+    (remaining, candidate) => remaining.replaceAll(candidate.displayName, ''),
+    text,
+  )
+  return /管理员|权限|身份|岗位/u.test(actionText)
 }
 
 function isQuestion(text: string): boolean {
