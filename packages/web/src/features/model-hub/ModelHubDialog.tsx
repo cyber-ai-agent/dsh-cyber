@@ -11,6 +11,7 @@ import {
   clearAssignment,
   deleteProvider,
   fetchBalance,
+  fetchModelStats,
   importModels,
   listProfiles,
   listProviders,
@@ -30,6 +31,8 @@ import {
   type HubProvider,
   type HubStaff,
   type ModelAssignmentRef,
+  type ModelStatsGroupBy,
+  type ModelStatsResponse,
   type SyncOutcome,
 } from './api.js'
 import {
@@ -95,7 +98,7 @@ function errorMessage(cause: unknown, fallback: string): string {
 
 export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { workspaceId: string; worlds: World[]; employees: EmployeeInstance[]; onClose(): void }) {
   const { t } = useI18n()
-  const [tab, setTab] = useState<'providers' | 'pool' | 'assign'>('providers')
+  const [tab, setTab] = useState<'providers' | 'pool' | 'assign' | 'stats'>('providers')
   const [catalog, setCatalog] = useState<HubCatalogState>()
   const [providers, setProviders] = useState<HubProvider[]>([])
   const [profiles, setProfiles] = useState<HubProfile[]>([])
@@ -119,6 +122,13 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
   const [worldStaff, setWorldStaff] = useState<Record<string, HubStaff[]>>({})
   const [wizard, setWizard] = useState<WizardState>()
   const [modelQuery, setModelQuery] = useState('')
+  const [statsGroupBy, setStatsGroupBy] = useState<ModelStatsGroupBy>('all')
+  const [statsSelectedProvider, setStatsSelectedProvider] = useState<string>()
+  const [statsFrom, setStatsFrom] = useState<Date | undefined>(undefined)
+  const [statsTo, setStatsTo] = useState<Date | undefined>(undefined)
+  const [statsData, setStatsData] = useState<ModelStatsResponse | undefined>()
+  const [statsBusy, setStatsBusy] = useState(false)
+  const [statsError, setStatsError] = useState<string>()
   const panelRef = useRef<HTMLElement>(null)
 
   const reload = useCallback(async () => {
@@ -360,6 +370,48 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
     return providers.find((provider) => provider.id === key)?.name ?? key
   }
 
+  // Stats sub-tab loader — uses mutable refs for parameters so the load callback
+  // always reads the freshest values, avoiding stale-closure bugs when React
+  // batches setStatsGroupBy and the load call in the same event handler.
+  const statsCacheRef = useRef<{ key: string; data: ModelStatsResponse } | null>(null)
+  const statsParamsRef = useRef({ groupBy: statsGroupBy, from: statsFrom, to: statsTo, providerId: statsSelectedProvider })
+  statsParamsRef.current = { groupBy: statsGroupBy, from: statsFrom, to: statsTo, providerId: statsSelectedProvider }
+  const statsCacheKey = useCallback((p: { groupBy: ModelStatsGroupBy; providerId?: string; from?: Date; to?: Date }) =>
+    `${p.groupBy}|${p.providerId ?? ''}|${p.from?.toISOString() ?? ''}|${p.to?.toISOString() ?? ''}`, [],
+  )
+  const loadStats = useCallback(async () => {
+    const p = statsParamsRef.current
+    const from = p.from ?? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+    const to = p.to ?? new Date()
+    const key = statsCacheKey({ groupBy: p.groupBy, providerId: p.providerId, from, to } as Parameters<typeof statsCacheKey>[0])
+    if (statsCacheRef.current !== null && statsCacheRef.current.key === key) {
+      setStatsData(statsCacheRef.current.data)
+      return
+    }
+    setStatsBusy(true)
+    setStatsError(undefined)
+    try {
+      const data = await fetchModelStats(workspaceId, {
+        groupBy: p.groupBy,
+        from: from.toISOString(),
+        to: to.toISOString(),
+        ...(p.providerId !== undefined ? { providerId: p.providerId } : {}),
+      })
+      statsCacheRef.current = { key, data }
+      setStatsData(data)
+    } catch (cause) {
+      setStatsError(errorMessage(cause, t('modelHub.statsLoadFailed', '模型统计数据加载失败。')))
+    } finally {
+      setStatsBusy(false)
+    }
+  }, [workspaceId, t, statsCacheKey])
+
+  // Auto-load stats when the tab is opened.
+  useEffect(() => {
+    if (tab !== 'stats') return
+    void loadStats()
+  }, [tab, loadStats])
+
   // The assignment tab needs the roster of whichever world is in scope, and
   // the shell only carries the active world's - pull the world's own snapshot
   // once per selected world and keep it cached for the dialog's lifetime.
@@ -431,6 +483,40 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
   // Portal to <body>: the launcher renders from the top bar, where global
   // rules like `.topbar nav { height: 100% }` would claim the hub's own tab
   // strip, and a modal belongs outside the banner landmark anyway.
+
+  const formatTokens = (n: number): string => {
+    if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+    return String(n)
+  }
+
+  const toISOStringDaysAgo = (days: number): string => new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
+
+  const formatDuration = (ms: number): string => {
+    if (ms < 10) return `${ms}ms`
+    if (ms < 1000) return `${Math.round(ms)}ms`
+    if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
+    const m = Math.floor(ms / 60_000)
+    const s = Math.round((ms % 60_000) / 1000)
+    return s > 0 ? `${m}m ${s}s` : `${m}m`
+  }
+
+  const StatsRow = ({ item, groupBy, formatTokens: ft, t }: { item: import('./api.js').ModelStatsItem; groupBy: import('./api.js').ModelStatsGroupBy; formatTokens: (n: number) => string; t: ReturnType<typeof useI18n>['t'] }) => {
+    const successRate = item.requests === 0 ? '—' : `${(item.successCount / item.requests * 100).toFixed(1)}%`
+    const displayName = item.name ?? '—'
+    return <tr>
+      <td><strong>{displayName}</strong></td>
+      <td>{ft(item.tokensSent)}</td>
+      <td>{ft(item.tokensReceived)}</td>
+      <td>{item.hasCacheData ? ft(item.tokensCached ?? 0) : '—'}</td>
+      <td>{item.requests}</td>
+      <td>{item.toolCalls > 0 ? item.toolCalls : '—'}</td>
+      <td>{successRate}</td>
+      <td>{item.requests === 0 ? '—' : formatDuration(item.avgLatencyMs ?? 0)}</td>
+    </tr>
+  }
+
   return createPortal(<div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && wizard === undefined) onClose() }}>
     <section ref={panelRef} className="model-hub" role="dialog" aria-modal="true" aria-labelledby="model-hub-title">
       <header className="model-hub__header">
@@ -451,6 +537,7 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
         <button type="button" aria-current={tab === 'providers'} className={tab === 'providers' ? 'is-active' : ''} onClick={() => setTab('providers')}>{t('modelHub.tabProviders', '模型服务商')}</button>
         <button type="button" aria-current={tab === 'pool'} className={tab === 'pool' ? 'is-active' : ''} onClick={() => setTab('pool')}>{t('modelHub.tabPool', '模型池')}</button>
         <button type="button" aria-current={tab === 'assign'} className={tab === 'assign' ? 'is-active' : ''} onClick={() => setTab('assign')}>{t('modelHub.tabAssign', '模型设置')}</button>
+        <button type="button" aria-current={tab === 'stats'} className={tab === 'stats' ? 'is-active' : ''} onClick={() => { setTab('stats'); void loadStats() }}>{t('modelHub.tabStats', '模型统计')}</button>
       </nav>
 
       {error !== undefined ? <div className="model-hub__error" role="alert"><WarningCircle size={15} /><span>{error}</span><button type="button" className="icon-button" aria-label={t('modelHub.dismissError', '收起提示')} onClick={() => setError(undefined)}><X size={13} /></button></div> : null}
@@ -704,6 +791,79 @@ export function ModelHubDialog({ workspaceId, worlds, employees, onClose }: { wo
             </footer>
           </div>
         })() : null}
+      </div> : null}
+
+      {wizard === undefined && tab === 'stats' ? <div className="model-hub__body model-hub__stats">
+        <div className="model-hub__toolbar">
+          <span className="model-hub__hint">{t('modelHub.statsHint', '基于 workspace 级交互日志聚合；图片模型通常不返 token，计入请求数但不贡献 token 总量。')}</span>
+          <button type="button" className="icon-button" aria-label={t('modelHub.refresh', '刷新')} onClick={() => void loadStats()} disabled={statsBusy}><ArrowsClockwise size={15} className={statsBusy ? 'spin' : undefined} /></button>
+        </div>
+        <div className="model-hub__stats-time">
+          <button type="button" className={statsFrom === undefined && statsTo === undefined ? 'is-active' : ''} onClick={() => { setStatsFrom(undefined); setStatsTo(undefined); void loadStats() }}>{t('modelHub.statsTime7d', '近 7 天')}</button>
+          <button type="button" className={statsFrom !== undefined && toISOStringDaysAgo(7) === statsFrom?.toISOString() && statsTo === undefined ? 'is-active' : ''} onClick={() => { setStatsFrom(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)); setStatsTo(undefined); void loadStats() }}>{t('modelHub.statsTime30d', '近 30 天')}</button>
+          <button type="button" className={statsFrom !== undefined ? 'is-active' : ''} onClick={() => { const all = new Date(0); setStatsFrom(all); setStatsTo(new Date()); void loadStats() }}>{t('modelHub.statsTimeAll', '全部')}</button>
+        </div>
+        <div className="model-hub__stats-layout">
+          {/* Left panel */}
+          <aside className="model-hub__stats-sidebar" aria-label={t('modelHub.statsSidebarAria', '统计分组')}>
+            <button type="button" className={statsGroupBy === 'all' && statsSelectedProvider === undefined ? 'is-active' : ''} onClick={() => {
+              statsParamsRef.current = { groupBy: 'all', from: statsFrom, to: statsTo, providerId: undefined }
+              setStatsGroupBy('all')
+              setStatsSelectedProvider(undefined)
+              void loadStats()
+            }}>
+              {t('modelHub.statsGroupAll', '全部')}
+            </button>
+            {providers.map((provider) => (
+              <button key={provider.id} type="button" className={statsGroupBy === 'provider' && statsSelectedProvider === provider.name ? 'is-active' : ''} onClick={() => {
+                statsParamsRef.current = { groupBy: 'provider', providerId: provider.name, from: statsFrom, to: statsTo }
+                setStatsGroupBy('provider')
+                setStatsSelectedProvider(provider.name)
+                void loadStats()
+              }}>
+                {provider.name}
+              </button>
+            ))}
+          </aside>
+          {/* Right panel */}
+          <div className="model-hub__stats-main">
+            {statsError !== undefined ? <div className="model-hub__error" role="alert"><WarningCircle size={15} /><span>{statsError}</span><button type="button" className="icon-button" aria-label={t('modelHub.dismissError', '收起提示')} onClick={() => setStatsError(undefined)}><X size={13} /></button></div> : null}
+            {statsData === undefined && !statsBusy ? <div className="model-hub__empty"><strong>{t('modelHub.statsEmpty', '尚无交互记录')}</strong><span>{t('modelHub.statsEmptyHint', '完成一次对话后这里会出现统计。')}</span></div> : null}
+            {statsData !== undefined ? <>
+              <div className="model-hub__stats-overview">
+                <div className="model-hub__stat-card"><strong>{formatTokens(statsData.summary.totalTokensSent)}</strong><span>{t('modelHub.statsTotalSent', '发送 token')}</span></div>
+                <div className="model-hub__stat-card"><strong>{formatTokens(statsData.summary.totalTokensReceived)}</strong><span>{t('modelHub.statsTotalReceived', '接收 token')}</span></div>
+                <div className="model-hub__stat-card"><strong>{statsData.summary.tokensCached !== undefined ? formatTokens(statsData.summary.tokensCached) : '—'}</strong><span>{t('modelHub.statsTotalCached', '缓存命中')}</span></div>
+                <div className="model-hub__stat-card"><strong>{statsData.summary.totalRequests}</strong><span>{t('modelHub.statsTotalRequests', '总请求')}</span></div>
+                <div className="model-hub__stat-card"><strong>{statsData.summary.totalToolCalls ?? 0}</strong><span>{t('modelHub.statsTotalToolCalls', '工具调用')}</span></div>
+                <div className="model-hub__stat-card"><strong>{statsData.summary.successRate.toFixed(1)}%</strong><span>{t('modelHub.statsSuccessRate', '成功率')}</span></div>
+              </div>
+              <table className="model-hub__table model-hub__stats-table">
+                <thead><tr>
+                  <th>{statsGroupBy === 'all' ? t('modelHub.colCategory', '类目') : t('modelHub.colModelId', '模型 ID')}</th>
+                  <th>{t('modelHub.colTokensSent', '发送')}</th>
+                  <th>{t('modelHub.colTokensReceived', '接收')}</th>
+                  <th>{t('modelHub.colTokensCached', '缓存命中')}</th>
+                  <th>{t('modelHub.colRequests', '请求')}</th>
+                  <th>{t('modelHub.colToolCalls', '工具调用')}</th>
+                  <th>{t('modelHub.colSuccessRate', '成功率')}</th>
+                  <th>{t('modelHub.colAvgLatency', '平均耗时')}</th>
+                </tr></thead>
+                <tbody>
+                  {statsGroupBy === 'all'
+                    ? <>
+                        {/* 系统行 */}
+                        {statsData.items.filter((i) => i.id === '').map((item) => <StatsRow key={item.id} item={item} groupBy={statsGroupBy} formatTokens={formatTokens} t={t} />)}
+                        {/* 各角色行 */}
+                        {statsData.items.filter((i) => i.id !== '').map((item) => <StatsRow key={item.id} item={item} groupBy={statsGroupBy} formatTokens={formatTokens} t={t} />)}
+                      </>
+                    : statsData.items.map((item) => <StatsRow key={item.id} item={item} groupBy={statsGroupBy} formatTokens={formatTokens} t={t} />)}
+                </tbody>
+              </table>
+            </> : null}
+            {statsBusy ? <div className="model-hub__spinner" aria-label={t('modelHub.loading', '加载中…')}><ArrowsClockwise size={18} className="spin" /></div> : null}
+          </div>
+        </div>
       </div> : null}
     </section>
   </div>, document.body)

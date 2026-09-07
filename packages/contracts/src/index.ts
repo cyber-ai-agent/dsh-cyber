@@ -845,6 +845,56 @@ export interface ModelInteractionLogPage {
   modelIds: string[]
 }
 
+export type ModelStatsGroupBy = 'all' | 'provider'
+
+export interface ModelStatsQueryParams {
+  groupBy: ModelStatsGroupBy
+  /** Provider name (from logs) to filter; only used when groupBy === 'provider' */
+  providerId?: string
+  /** ISO-8601 inclusive lower bound; defaults to now-7d server-side when absent. */
+  from?: string
+  /** ISO-8601 inclusive upper bound; defaults to now server-side when absent. */
+  to?: string
+}
+
+export interface ModelStatsSummary {
+  totalTokensSent: number
+  totalTokensReceived: number
+  /** Sum of cached prompt tokens across all records; absent when no record reported cache. */
+  tokensCached?: number
+  totalRequests: number
+  totalToolCalls: number
+  successCount: number
+  avgLatencyMs: number
+  successRate: number
+}
+
+export interface ModelStatsItem {
+  id: string
+  name?: string
+  /** world display name for 'all' groupBy; undefined when not applicable */
+  worldName?: string
+  /** provider display name when groupBy === 'provider'; undefined otherwise */
+  providerName?: string
+  tokensSent: number
+  tokensReceived: number
+  /** Cached prompt tokens served from provider cache. 0 or absent when provider did not report cache. */
+  tokensCached?: number
+  requests: number
+  toolCalls: number
+  successCount: number
+  avgLatencyMs?: number
+  /** true when at least one record reported a cached prompt token count */
+  hasCacheData?: boolean
+}
+
+export interface ModelStatsResponse {
+  summary: ModelStatsSummary
+  items: ModelStatsItem[]
+  /** Distinct provider values found in logs, for the left-panel filter list */
+  distinctProviders?: string[]
+}
+
 
 export interface ModelProfile {
   id: string

@@ -12,6 +12,20 @@ export interface ModelInteractionRoutesDependencies {
   interactions: ModelInteractionService
 }
 
+const VALID_GROUP_BY = ['all', 'provider'] as const
+type ValidGroupBy = typeof VALID_GROUP_BY[number]
+
+function isValidGroupBy(value: unknown): value is ValidGroupBy {
+  return typeof value === 'string' && (VALID_GROUP_BY as readonly string[]).includes(value)
+}
+
+function toDateISOString(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.trim() === '') return undefined
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return undefined
+  return d.toISOString()
+}
+
 export function registerModelInteractionRoutes(
   router: Router,
   dependencies: ModelInteractionRoutesDependencies,
@@ -50,5 +64,27 @@ export function registerModelInteractionRoutes(
   router.delete(/^\/api\/workspaces\/([^/]+)\/model-interactions$/, ({ response, params }) => {
     const removed = interactions.clear(params[0]!)
     writeJson(response, 200, { removed })
+  })
+
+  router.get(/^\/api\/workspaces\/([^/]+)\/model-stats$/, ({ response, params, url }) => {
+    const workspaceId = params[0]!
+    const groupByValue = url.searchParams.get('groupBy')
+    const groupBy = groupByValue !== null && groupByValue !== ''
+      ? (VALID_GROUP_BY.includes(groupByValue as ValidGroupBy) ? groupByValue as ValidGroupBy : 'all' as ValidGroupBy)
+      : 'all' as ValidGroupBy
+    const from = toDateISOString(url.searchParams.get('from'))
+    const to = toDateISOString(url.searchParams.get('to'))
+    if (from === undefined && url.searchParams.has('from')) {
+      throw new HttpError(422, 'invalid_from_date', 'from 参数不是合法的 ISO-8601 日期')
+    }
+    if (to === undefined && url.searchParams.has('to')) {
+      throw new HttpError(422, 'invalid_to_date', 'to 参数不是合法的 ISO-8601 日期')
+    }
+    writeJson(response, 200, interactions.aggregateStats(workspaceId, {
+      groupBy,
+      ...(from === undefined ? {} : { from }),
+      ...(to === undefined ? {} : { to }),
+      ...(url.searchParams.has('providerId') ? { providerId: url.searchParams.get('providerId')! } : {}),
+    }))
   })
 }
