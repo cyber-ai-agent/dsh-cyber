@@ -890,6 +890,7 @@ export function normalizeHarnessTraceNotification(
         metadata.tokensPrompt = usage.prompt
         metadata.tokensCompletion = usage.completion
         metadata.tokensTotal = usage.total
+        if (usage.cachedPrompt !== undefined) metadata.tokensCached = usage.cachedPrompt
       }
       return [
         make(reasonKind === 'completed' ? 'turn.completed' : 'turn.failed', {
