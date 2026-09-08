@@ -1,7 +1,7 @@
 import type { WorldCharacterAuthority } from './world-authority.js'
 import type { UiLocale } from './locales.js'
 
-export const CYBER_SCHEMA_VERSION = 50 as const
+export const CYBER_SCHEMA_VERSION = 51 as const
 
 export * from './runtime-access.js'
 export * from './locales.js'

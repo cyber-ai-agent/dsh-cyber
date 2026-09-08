@@ -2407,6 +2407,51 @@ const MIGRATIONS: readonly Migration[] = [
       WHERE provider_id IS NULL AND id IN (SELECT log_id FROM candidates);
     `,
   },
+  {
+    version: 51,
+    name: 'model-interaction-backfill-provider-name-attribution',
+    sql: `
+      -- v50 recovered employee-routed legacy rows whose provider column held a
+      -- model nickname. Earlier logs often stored the CONNECTION NAME itself
+      -- (e.g. provider='sandaoliu', provider_id NULL), which no employee-route
+      -- rule can reach - the employee may not even be linked to a profile yet,
+      -- or the row came from a discovery probe. Those rows are unambiguous:
+      -- attribute when the legacy provider label equals exactly one configured
+      -- provider in the workspace, that name is not reused as any profile's
+      -- display name (so a model nickname cannot masquerade as a connection),
+      -- the provider was created before the request, it owns a profile for the
+      -- logged model, and no OTHER provider shares that model id today.
+      WITH routed AS (
+        SELECT l.id, l.workspace_id, l.provider, l.model_id, l.created_at, l.duration_ms,
+          COALESCE(julianday(ar.started_at), julianday(wt.started_at),
+            julianday(l.created_at) - l.duration_ms / 86400000.0) AS routed_at
+        FROM model_interaction_logs l
+        LEFT JOIN agent_runs ar ON ar.id = l.agent_run_id AND ar.workspace_id = l.workspace_id
+        LEFT JOIN work_turns wt ON wt.id = l.work_turn_id AND wt.workspace_id = l.workspace_id
+        WHERE l.provider_id IS NULL
+      ), candidates AS (
+        SELECT r.id AS log_id, p.id AS provider_id, p.name AS provider_name
+        FROM routed r
+        JOIN model_providers p ON p.workspace_id = r.workspace_id AND p.name = r.provider
+        WHERE (SELECT COUNT(*) FROM model_providers p2
+               WHERE p2.workspace_id = r.workspace_id AND p2.name = p.name) = 1
+          AND NOT EXISTS (SELECT 1 FROM model_profiles np
+               WHERE np.workspace_id = r.workspace_id AND np.display_name = p.name)
+          AND EXISTS (SELECT 1 FROM model_profiles mp
+               WHERE mp.workspace_id = r.workspace_id AND mp.provider_id = p.id
+                 AND mp.model_id = r.model_id AND julianday(mp.created_at) <= r.routed_at)
+          AND julianday(p.created_at) <= r.routed_at
+          AND NOT EXISTS (SELECT 1 FROM model_profiles other
+               WHERE other.workspace_id = r.workspace_id AND other.model_id = r.model_id
+                 AND other.provider_id IS NOT NULL AND other.provider_id IS NOT p.id)
+      )
+      UPDATE model_interaction_logs
+      SET (provider_id, provider_name) = (
+        SELECT provider_id, provider_name FROM candidates WHERE log_id = model_interaction_logs.id
+      )
+      WHERE provider_id IS NULL AND id IN (SELECT log_id FROM candidates);
+    `,
+  },
 ]
 
 /**
