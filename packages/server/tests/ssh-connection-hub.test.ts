@@ -145,4 +145,29 @@ describe('SSH multi-connection hub', () => {
     service.close()
     await new Promise<void>((resolve) => server.close(() => resolve()))
   })
+
+  it('tests the on-screen draft instead of the stored host when a form edit is not saved yet', async () => {
+    // Stored device points at 127.0.0.1:22 (closed). The draft edits the host
+    // to the reachable test server: testDraft must probe the draft values.
+    const ssh = createServer((socket) => { socket.write('SSH-2.0-OpenSSH_draft\r\n') })
+    await new Promise<void>((resolve) => ssh.listen(0, '127.0.0.1', resolve))
+    const sshPort = (ssh.address() as { port: number }).port
+    const service = await openService()
+    const connection = await service.save({
+      workspaceId: 'workspace-1', integrationId: SSH_DEVICE_INTEGRATION_ID,
+      config: { displayName: '旧地址设备', host: '127.0.0.1', port: 1, username: 'tester' }, enabled: true, credential: 'draft-key',
+    })
+    expect((await service.test('workspace-1', SSH_DEVICE_INTEGRATION_ID, connection.id)).status).toBe('unreachable')
+    // Draft merges fresh typed secret over the stored one without writing it.
+    const health = await service.testDraft('workspace-1', SSH_DEVICE_INTEGRATION_ID, {
+      connectionId: connection.id,
+      config: { displayName: '旧地址设备', host: '127.0.0.1', port: sshPort, username: 'tester' },
+      secrets: { password: 'draft-password' },
+    })
+    expect(health.status).toBe('ready')
+    expect(JSON.stringify(service.list('workspace-1'))).not.toContain('draft-password')
+    expect(service.secretsForConnection('workspace-1', connection.id)).toEqual({ privateKey: 'draft-key' })
+    service.close()
+    await new Promise<void>((resolve) => ssh.close(() => resolve()))
+  })
 })

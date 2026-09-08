@@ -87,12 +87,29 @@ export function registerIntegrationRoutes(router: Router, dependencies: { store:
     writeJson(response, 200, { connection })
   })
 
-  router.post(/^\/api\/workspaces\/([^/]+)\/integrations\/([^/]+)\/test$/, async ({ response, params, url }) => {
+  router.post(/^\/api\/workspaces\/([^/]+)\/integrations\/([^/]+)\/test$/, async ({ request, response, params, url }) => {
     const workspaceId = requireWorkspace(store, params[0]!)
     const integrationId = params[1]!
     assertIntegrationAvailable(store, workspaceId, integrationId)
     const connectionId = optionalString(url.searchParams.get('connectionId'))
-    const health = await integrations.test(workspaceId, integrationId, connectionId)
+    // Test with the form's current values (the user may edit host/port and
+    // click 测试连接 before saving). Without a body the stored connection is
+    // tested, preserving the legacy single-request behaviour.
+    const body = await readJson(request)
+    const config = record(body.config)
+    const draftSecrets = record(body.secrets)
+    let health
+    try {
+      health = config === undefined && draftSecrets === undefined
+        ? await integrations.test(workspaceId, integrationId, connectionId)
+        : await integrations.testDraft(workspaceId, integrationId, {
+            ...(connectionId === undefined ? {} : { connectionId }),
+            ...(config === undefined ? {} : { config: config as JsonObject }),
+            ...(draftSecrets === undefined ? {} : { secrets: Object.fromEntries(Object.entries(draftSecrets).map(([field, value]) => [field, String(value)])) }),
+          })
+    } catch (error) {
+      throw new HttpError(422, 'integration_config_invalid', error instanceof Error ? error.message : 'Integration configuration is invalid')
+    }
     if (health.status === 'ready') await onChanged?.(integrationId)
     writeJson(response, 200, { health })
   })

@@ -149,11 +149,21 @@ export function IntegrationSettingsPanel({ workspaceId, initialSkillId }: Integr
   }
 
   const test = async () => {
-    if (descriptor === undefined || connection === undefined) return
-    setBusy(true); setError(undefined)
+    if (descriptor === undefined) return
+    setBusy(true); setError(undefined); setHealth(undefined)
     try {
-      const query = `?connectionId=${encodeURIComponent(connection.id)}`
-      const result = await api<{ health: IntegrationHealth }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/${encodeURIComponent(descriptor.id)}/test${query}`, { method: 'POST', body: '{}' })
+      // Test exactly what the form shows right now — no save required. The
+      // server merges freshly typed secrets over the stored ones.
+      const secrets: Record<string, string> = {}
+      for (const field of descriptor.secretFields) {
+        const value = secretInputs[field.id]?.trim()
+        if (value !== undefined && value !== '' && clearedSecrets[field.id] !== true) secrets[field.id] = value
+      }
+      const query = connection === undefined ? '' : `?connectionId=${encodeURIComponent(connection.id)}`
+      const result = await api<{ health: IntegrationHealth }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/${encodeURIComponent(descriptor.id)}/test${query}`, {
+        method: 'POST',
+        body: JSON.stringify({ config, ...(Object.keys(secrets).length === 0 ? {} : { secrets }) }),
+      })
       setHealth(result.health)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '连接测试失败')
@@ -206,7 +216,7 @@ export function IntegrationSettingsPanel({ workspaceId, initialSkillId }: Integr
           <footer>
             {!isNew && connection !== undefined ? <button className="text-button is-danger" type="button" disabled={busy} onClick={() => void removeConnection()}><Trash size={15} />删除连接</button> : null}
             <span className="integration-editor__actions">
-              <button className="secondary-button" type="button" disabled={busy || isNew || connection === undefined} onClick={() => void test()}>测试连接</button>
+              <button className="secondary-button" type="button" disabled={busy} onClick={() => void test()}>测试连接</button>
               <button className="primary-button" type="button" disabled={busy || secretMissing} onClick={() => void save()}>{busy ? '处理中…' : isNew ? '添加连接' : '保存连接'}</button>
             </span>
           </footer>

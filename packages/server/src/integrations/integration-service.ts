@@ -240,6 +240,31 @@ export class IntegrationService {
     })
   }
 
+  /**
+   * Test a form draft: validate the on-screen config (possibly unsaved) and
+   * merge freshly typed secrets over the stored ones for the connection, so
+   * 测试连接 reflects what the user typed without a preceding save.
+   */
+  async testDraft(workspaceId: string, integrationId: string, draft: { connectionId?: string; config?: JsonObject; secrets?: Record<string, string> }): Promise<IntegrationHealth> {
+    const provider = this.#registry.require(integrationId)
+    const now = new Date().toISOString()
+    const base = draft.connectionId === undefined ? undefined : this.getById(workspaceId, draft.connectionId)
+    const storedRaw = base?.enabled === true ? this.#vault.resolve(base.id) : undefined
+    if (draft.config === undefined && base === undefined) {
+      return { status: 'misconfigured', detail: '没有可测试的连接或参数', checkedAt: now, latencyMs: 0 }
+    }
+    const config = draft.config === undefined ? base!.config : provider.validateConfig(draft.config)
+    const mergedSecrets = { ...(storedRaw === undefined ? {} : decodeSecrets(provider, storedRaw)), ...(draft.secrets ?? {}) }
+    const single = storedRaw === undefined ? undefined : singleSecret(provider, storedRaw)
+    return provider.testConnection({
+      config,
+      ...(single === undefined ? {} : { credential: single }),
+      ...(Object.keys(mergedSecrets).length === 0 ? {} : { secrets: mergedSecrets }),
+      fetch: this.#fetch,
+      now: new Date(),
+    })
+  }
+
   async delete(workspaceId: string, integrationId: string, connectionId?: string): Promise<boolean> {
     const connection = connectionId === undefined
       ? this.get(workspaceId, integrationId)
