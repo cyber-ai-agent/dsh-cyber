@@ -22,6 +22,9 @@ export class ModelStatsRepository {
     let where = base
     if (params.groupBy === 'provider') {
       const key = params.providerId!
+      // Legacy `provider` stored model nicknames, not a stable connection ID.
+      // Name-based fallback can count one row under multiple providers. Only
+      // captured IDs or the guarded migration may establish that attribution.
       if (key.startsWith('provider:')) { where += ' AND provider_id = ?'; values.push(key.slice(9)) }
       else { where += ' AND provider_id IS NULL AND provider = ?'; values.push(key.startsWith('legacy:') ? key.slice(7) : key) }
     }
@@ -47,7 +50,7 @@ export class ModelStatsRepository {
       } else item.name = row.model!
       return item
     })
-    // Sidebar is derived from the time window, NOT the currently selected provider.
+    // Historical source metadata remains available to API clients; the sidebar uses configured providers.
     const providerRows = this.db.prepare(`SELECT ${PROVIDER_KEY} AS id, provider_id AS connectionId,
       COALESCE(MAX(provider_name), provider) AS name FROM model_interaction_logs WHERE ${base}
       GROUP BY ${PROVIDER_KEY} ORDER BY name, id`).all(workspaceId, params.from!, params.to!) as Array<{ id: string; connectionId: string | null; name: string }>

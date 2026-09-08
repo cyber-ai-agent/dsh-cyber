@@ -64,3 +64,38 @@ describe('model stats state-owned requests', () => {
     expect(node.querySelector('[role="alert"]')).toBeNull(); expect(inputValue()).toBe('10')
   })
 })
+
+it('lists only configured workspace providers, including providers with no logs', async () => {
+  fetchStats.mockResolvedValue({ ...result(), providers: [{ id: 'legacy:old-name', name: '历史昵称', legacy: true }, { id: 'provider:removed', name: '已删除服务商', legacy: false }] })
+  await act(async () => root.render(createElement(ModelStatsPanel, { workspaceId: 'ws', providers: [
+    { id: 'p1', workspaceId: 'ws', name: '无请求服务商' }, { id: 'foreign', workspaceId: 'other', name: '其他工作区' },
+  ] as HubProvider[] })))
+  const sidebar = node.querySelector('.model-hub__stats-sidebar')!
+  expect([...sidebar.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['全部', '无请求服务商'])
+})
+
+it('distinguishes same-named configured providers while filtering by their IDs', async () => {
+  await act(async () => root.render(createElement(ModelStatsPanel, { workspaceId: 'ws', providers: [
+    { id: 'connection-a', workspaceId: 'ws', name: '同名' }, { id: 'connection-b', workspaceId: 'ws', name: '同名' },
+  ] as HubProvider[] })))
+  const buttons = [...node.querySelectorAll<HTMLButtonElement>('.model-hub__stats-sidebar button')].slice(1)
+  expect(buttons[0]!.textContent).not.toBe(buttons[1]!.textContent)
+  await act(async () => buttons[1]!.click())
+  expect(fetchStats.mock.calls.at(-1)?.[1]).toMatchObject({ groupBy: 'provider', providerId: 'provider:connection-b' })
+})
+
+it('returns to all when the selected configured provider is removed', async () => {
+  await render(); await click('服务商一')
+  await act(async () => root.render(createElement(ModelStatsPanel, { workspaceId: 'ws', providers: [] })))
+  expect(fetchStats.mock.calls.at(-1)?.[1]).toMatchObject({ groupBy: 'all' })
+  expect(fetchStats.mock.calls.at(-1)?.[1]?.providerId).toBeUndefined()
+  expect(node.querySelector('.model-hub__stats-sidebar [aria-pressed="true"]')?.textContent).toBe('全部')
+  expect(fetchStats).toHaveBeenCalledTimes(3)
+})
+
+it('does not carry the selected provider across workspaces even when IDs are reused by a fixture', async () => {
+  await render(); await click('服务商一'); await render('other')
+  expect(fetchStats.mock.calls.at(-1)?.[0]).toBe('other')
+  expect(fetchStats.mock.calls.at(-1)?.[1]).toMatchObject({ groupBy: 'all' })
+  expect(node.querySelector('.model-hub__stats-sidebar [aria-pressed="true"]')?.textContent).toBe('全部')
+})

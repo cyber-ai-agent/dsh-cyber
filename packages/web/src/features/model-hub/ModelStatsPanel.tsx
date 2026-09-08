@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ArrowsClockwise } from '@phosphor-icons/react'
-import type { ModelStatsItem, ModelStatsProvider, ModelStatsResponse } from '@dsh-cyber/contracts'
+import type { ModelStatsItem, ModelStatsResponse } from '@dsh-cyber/contracts'
 import { useI18n } from '../../i18n/runtime.js'
 import { formatDuration, formatNumber } from '../../i18n/format.js'
 import { fetchModelStats, type HubProvider } from './api.js'
@@ -11,10 +11,20 @@ type Resource = { key: string; status: 'loading' } | { key: string; status: 'rea
 export function ModelStatsPanel({ workspaceId, providers }: { workspaceId: string; providers: readonly HubProvider[] }) {
   const { t } = useI18n()
   const [range, setRange] = useState<Range>('7d')
-  const [providerId, setProviderId] = useState<string>()
+  const [selection, setSelection] = useState<{ workspaceId: string; id: string }>()
+  const choices = providers
+    .filter((provider) => provider.workspaceId === workspaceId)
+    .map((provider) => ({ id: `provider:${provider.id}`, name: provider.name }))
+  const providerId = selection?.workspaceId === workspaceId && choices.some((item) => item.id === selection.id)
+    ? selection.id : undefined
+  const setProviderId = (id: string | undefined) => setSelection(id === undefined ? undefined : { workspaceId, id })
+  // Derive the effective filter before fetching; a removed provider or previous
+  // workspace must never issue a request with an invisible active selection.
+  useEffect(() => { if (selection !== undefined && providerId === undefined) setSelection(undefined) }, [selection, providerId])
+  const names = new Map<string, number>()
+  for (const item of choices) names.set(item.name, (names.get(item.name) ?? 0) + 1)
   const [refresh, setRefresh] = useState(0)
   const [resource, setResource] = useState<Resource>()
-  const [menu, setMenu] = useState<{ workspaceId: string; items: ModelStatsProvider[] }>()
   const key = JSON.stringify([workspaceId, range, providerId, refresh])
   const failureMessage = t('modelHub.statsLoadFailed', '模型统计数据加载失败。')
 
@@ -32,9 +42,7 @@ export function ModelStatsPanel({ workspaceId, providers }: { workspaceId: strin
       ...(providerId === undefined ? {} : { providerId }),
       from: from.toISOString(), to: to.toISOString(),
     }, controller.signal).then((data) => {
-      if (!current) return
-      setResource({ key, status: 'ready', data })
-      setMenu({ workspaceId, items: data.providers ?? [] })
+      if (current) setResource({ key, status: 'ready', data })
     }).catch((error: unknown) => {
       if (current) setResource({ key, status: 'error', error: error instanceof Error ? error.message : failureMessage })
     })
@@ -44,15 +52,10 @@ export function ModelStatsPanel({ workspaceId, providers }: { workspaceId: strin
   const active = resource?.key === key ? resource : undefined
   const busy = active === undefined || active.status === 'loading'
   const data = active?.status === 'ready' ? active.data : undefined
-  const choices = new Map<string, ModelStatsProvider>()
-  for (const provider of providers) if (provider.workspaceId === workspaceId) choices.set(`provider:${provider.id}`, { id: `provider:${provider.id}`, name: provider.name, legacy: false })
-  if (menu?.workspaceId === workspaceId) for (const item of menu.items) choices.set(item.id, item)
-  const names = new Map<string, number>()
-  for (const item of choices.values()) names.set(item.name, (names.get(item.name) ?? 0) + 1)
   const summary = data?.summary
   return <div className="model-hub__body model-hub__stats">
     <div className="model-hub__toolbar">
-      <span className="model-hub__hint">{t('modelHub.statsRecordedHint', '按交互日志统计，对话按运行回合计数。仅累加已上报用量；缓存属于输入的一部分。未归属的历史记录单独列出。')}</span>
+      <span className="model-hub__hint">{t('modelHub.statsRecordedHint', '按交互日志统计，对话按运行回合计数。仅累加已上报用量；缓存属于输入的一部分。仅列出已配置服务商；无法归属的历史记录仍计入“全部”。')}</span>
       <button type="button" className="icon-button" aria-label={t('modelHub.statsRefresh', '刷新统计')} disabled={busy} onClick={() => setRefresh((n) => n + 1)}><ArrowsClockwise size={15} className={busy ? 'spin' : undefined} /></button>
     </div>
     <div className="model-hub__stats-time" role="group" aria-label={t('modelHub.statsTimeRange', '统计时间范围')}>
@@ -61,8 +64,8 @@ export function ModelStatsPanel({ workspaceId, providers }: { workspaceId: strin
     <div className="model-hub__stats-layout">
       <aside className="model-hub__stats-sidebar" aria-label={t('modelHub.statsProviderFilter', '统计服务商')}>
         <button type="button" aria-pressed={providerId === undefined} className={providerId === undefined ? 'is-active' : ''} onClick={() => setProviderId(undefined)}>{t('modelHub.statsGroupAll', '全部')}</button>
-        {[...choices.values()].map((item) => <button key={item.id} type="button" aria-pressed={providerId === item.id} className={providerId === item.id ? 'is-active' : ''} title={item.id} onClick={() => setProviderId(item.id)}>
-          <span>{item.name}{(names.get(item.name) ?? 0) > 1 ? ` · ${item.id.slice(-8)}` : ''}{item.legacy ? <small>{t('modelHub.statsLegacy', '历史来源（未归属）')}</small> : null}</span>
+        {choices.map((item) => <button key={item.id} type="button" aria-pressed={providerId === item.id} className={providerId === item.id ? 'is-active' : ''} title={item.id} onClick={() => setProviderId(item.id)}>
+          <span>{item.name}{(names.get(item.name) ?? 0) > 1 ? ` · ${item.id.slice(-8)}` : ''}</span>
         </button>)}
       </aside>
       <div className="model-hub__stats-main" aria-busy={busy}>

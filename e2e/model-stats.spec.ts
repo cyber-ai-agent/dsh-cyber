@@ -18,6 +18,10 @@ test.beforeAll(async () => {
     const row = server.store.recordModelInteraction({ workspaceId, providerId, providerName: '统计测试服务商', source: 'turn', provider: '模型昵称而非服务商名称', modelId: 'shared-model', status: 'success', promptMessageCount: 1, promptCharCount: 5, tokensPrompt: tokens, tokensCompletion: 10, ...(cached === undefined ? {} : { tokensCached: cached }), toolCallCount: 3, durationMs: 100 })
     server.store.database.prepare('UPDATE model_interaction_logs SET created_at=? WHERE id=?').run(new Date(Date.now() - days * 86_400_000).toISOString(), row.id)
   }
+  server.store.saveModelProvider({ workspaceId, kind: 'custom', name: '无交互服务商', baseUrl: 'https://empty.example/v1', providerKind: 'openai-compatible-remote', api: 'openai-completions' })
+  for (const source of [{ provider: '仅日志昵称' }, { provider: '旧模型', providerId: 'removed-provider', providerName: '已删除服务商' }]) {
+    server.store.recordModelInteraction({ workspaceId, ...source, source: 'turn', modelId: 'legacy-model', status: 'success', promptMessageCount: 1, promptCharCount: 0, durationMs: 1 })
+  }
   origin = (await server.start()).origin
 })
 test.afterAll(async () => { await server?.close(); await rm(stateRoot, { recursive: true, force: true }); if (previousCatalog === undefined) delete process.env.DSH_CYBER_MODEL_CATALOG_URL; else process.env.DSH_CYBER_MODEL_CATALOG_URL = previousCatalog })
@@ -37,6 +41,11 @@ test('filters stats on one click, refreshes actual logs, and fits desktop and sm
   const hub = page.getByRole('dialog', { name: 'AI 模型管理中心' }); await hub.getByRole('button', { name: '模型统计', exact: true }).click()
   const value = hub.locator('.model-hub__stat-card strong').first()
   await expect(value).toHaveText('100'); expect(requests).toHaveLength(1)
+  const sidebar = hub.locator('.model-hub__stats-sidebar')
+  await expect(sidebar.getByRole('button')).toHaveCount(3)
+  await expect(sidebar).not.toContainText('仅日志昵称')
+  await expect(sidebar).not.toContainText('已删除服务商')
+  await expect(sidebar.getByRole('button', { name: '无交互服务商', exact: true })).toBeVisible()
   await hub.getByRole('button', { name: '近 30 天', exact: true }).click(); await expect(value).toHaveText('300'); expect(requests).toHaveLength(2)
   expect(Date.parse(requests[1]!.searchParams.get('to')!) - Date.parse(requests[1]!.searchParams.get('from')!)).toBe(30 * 86_400_000)
   await expect(hub.getByRole('button', { name: '近 30 天', exact: true })).toHaveAttribute('aria-pressed', 'true')
@@ -60,5 +69,10 @@ test('filters stats on one click, refreshes actual logs, and fits desktop and sm
     expect(await hub.locator('tbody tr').first().locator('td').last().evaluate((el) => getComputedStyle(el).whiteSpace)).toBe('nowrap')
     await page.screenshot({ path: info.outputPath(`model-stats-${size.width}x${size.height}.png`) })
   }
+  await sidebar.getByRole('button', { name: '无交互服务商', exact: true }).click()
+  await expect(hub.locator('tbody tr')).toHaveCount(0)
+  await expect(value).toHaveText('0')
+  await sidebar.getByRole('button', { name: '全部', exact: true }).click()
+  await expect(value).toHaveText('605')
   await writeFile(info.outputPath('console.json'), JSON.stringify(consoleIssues, null, 2)); expect(consoleIssues).toEqual([])
 })
