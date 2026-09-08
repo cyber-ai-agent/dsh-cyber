@@ -76,7 +76,9 @@ describe('Task panel with a single assignee', () => {
 
     // The picker starts with everyone selected, so narrowing to one person is
     // what an owner actually does for a personal task.
-    const run = button(host, '生成计划并执行')
+    let run: HTMLButtonElement | undefined
+    await vi.waitFor(() => { run = button(host, '自动组队并开工') })
+    if (run === undefined) throw new Error('自动组队按钮未加载')
     expect(run.disabled).toBe(false)
     await act(async () => { checkbox(host, '阿帆').click() })
     expect(host.querySelectorAll('.task-employee-picker input:checked')).toHaveLength(1)

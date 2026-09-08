@@ -49,8 +49,9 @@ describe('Task Center execution claims', () => {
     expect(retry.created).toBe(true)
     expect(retry.taskRun).toMatchObject({ attempt: 2, status: 'running', idempotencyKey: 'run-2' })
     expect(retry.workTurn.id).not.toBe(first.workTurn.id)
+    expect(retry.session.id).toBe(first.session.id)
     expect(fixture.repository.detail(fixture.task.id).runs.map((run) => run.attempt)).toEqual([1, 2])
-    expect(fixture.store.listSessions(fixture.world.id)).toHaveLength(2)
+    expect(fixture.store.listSessions(fixture.world.id)).toHaveLength(1)
   })
 
   it('requires a fingerprint whenever an execution key is supplied', async () => {

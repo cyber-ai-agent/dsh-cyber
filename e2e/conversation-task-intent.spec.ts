@@ -83,7 +83,7 @@ test('records one source task, follows its completion and confirms without repea
   await expect(source).toContainText('1 个角色运行')
   await source.locator('.task-source-result summary').click()
   await expect(source.locator('.task-source-result pre')).toContainText('管家 已回复。')
-  const repeat = page.getByRole('button', { name: '生成计划并执行' })
+  const repeat = page.getByRole('button', { name: '自动组队并开工' })
   await expect(repeat).not.toBeVisible()
   await page.locator('.task-source-retry > summary').click()
   await expect(repeat).toBeVisible()
