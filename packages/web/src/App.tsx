@@ -1396,7 +1396,7 @@ export default function App() {
     }
   }, [activeWorld, employees.length])
 
-  const reviseEmployee = useCallback(async (input: { reason: string; persona?: string; skillGrants?: string[]; capabilityGrants?: string[]; modelPolicy: { modelProfileId?: string }; runtimePermissionMode?: AgentPermissionMode; confirmedFullAccess?: boolean }) => {
+  const reviseEmployee = useCallback(async (input: { reason: string; persona?: string; skillGrants?: string[]; capabilityGrants?: string[]; connectionGrants?: string[]; modelPolicy: { modelProfileId?: string }; runtimePermissionMode?: AgentPermissionMode; confirmedFullAccess?: boolean }) => {
     if (managingEmployee === undefined) return
     setSavingEmployee(true)
     setError(undefined)
@@ -1410,6 +1410,7 @@ export default function App() {
           persona: input.persona ?? previous?.persona ?? '',
           skillGrants: input.skillGrants ?? previous?.skillGrants ?? [],
           capabilityGrants: input.capabilityGrants ?? previous?.capabilityGrants ?? [],
+          connectionGrants: input.connectionGrants ?? previous?.connectionGrants ?? [],
           modelPolicy: input.modelPolicy,
           runtimePermissionMode: input.runtimePermissionMode ?? previous?.runtimePermissionMode ?? 'read-only',
           reason: input.reason,

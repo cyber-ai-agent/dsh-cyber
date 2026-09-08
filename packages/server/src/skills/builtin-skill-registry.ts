@@ -6,6 +6,8 @@ import { CharacterSkillAdapterRegistry } from './skill-adapter.js'
 import { WorldManagementAdapter, type WorldManagementHost } from './world-management-adapter.js'
 import { SshSkillAdapter, type SshSkillAdapterOptions } from './ssh-skill-adapter.js'
 
+export { createConnectionGrantsResolver } from './ssh-skill-adapter.js'
+
 export interface BuiltinSkillRegistryOptions {
   homeAssistant?: HomeAssistantSkillAdapterOptions
   firecrawl?: ConstructorParameters<typeof FirecrawlSkillAdapter>[0]

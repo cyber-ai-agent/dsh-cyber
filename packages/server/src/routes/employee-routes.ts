@@ -85,6 +85,9 @@ export function registerEmployeeRoutes(router: Router, dependencies: EmployeeRou
     if (body.capabilityGrants !== undefined) {
       reviseInput.capabilityGrants = optionalStringArray(body.capabilityGrants)
     }
+    if (body.connectionGrants !== undefined) {
+      reviseInput.connectionGrants = optionalStringArray(body.connectionGrants)
+    }
     const modelPolicy = record(body.modelPolicy)
     if (modelPolicy !== undefined) reviseInput.modelPolicy = modelPolicy as JsonObject
     const revision = store.reviseEmployee(reviseInput)

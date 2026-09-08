@@ -204,6 +204,8 @@ export interface ReviseEmployeeInput {
   persona?: string
   skillGrants?: string[]
   capabilityGrants?: string[]
+  /** Connection-hub connection ids this character may drive. */
+  connectionGrants?: string[]
   modelPolicy?: JsonObject
   runtimePermissionMode?: AgentPermissionMode
   reason: string
@@ -2437,6 +2439,7 @@ export class SqliteStore {
       persona: input.persona ?? blueprint.persona,
       skillGrants: initialSkillGrants,
       capabilityGrants: initialCapabilityGrants,
+      connectionGrants: [],
       modelPolicy: input.modelPolicy ?? {},
       runtimePermissionMode: input.runtimePermissionMode ?? 'read-only',
       reason: input.reason ?? 'recruited',
@@ -2537,6 +2540,9 @@ export class SqliteStore {
     if (input.capabilityGrants !== undefined) {
       assertSubset(input.capabilityGrants, blueprint.requestedCapabilities, 'capability grant')
     }
+    if (input.connectionGrants !== undefined) {
+      assertUnique(input.connectionGrants, 'connection grant')
+    }
     const now = this.#clock()
     const revision: EmployeeRevision = {
       employeeId: employee.id,
@@ -2544,6 +2550,7 @@ export class SqliteStore {
       persona: input.persona ?? previous.persona,
       skillGrants: input.skillGrants ?? previous.skillGrants,
       capabilityGrants: input.capabilityGrants ?? previous.capabilityGrants,
+      connectionGrants: input.connectionGrants ?? previous.connectionGrants,
       modelPolicy: input.modelPolicy ?? previous.modelPolicy,
       runtimePermissionMode: input.runtimePermissionMode ?? previous.runtimePermissionMode ?? 'read-only',
       reason: input.reason,
@@ -7004,8 +7011,8 @@ export class SqliteStore {
       .prepare(
         `INSERT INTO employee_revisions
          (employee_id, revision, persona, skill_grants_json, capability_grants_json,
-           model_policy_json, runtime_permission_mode, reason, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           connection_grants_json, model_policy_json, runtime_permission_mode, reason, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         revision.employeeId,
@@ -7013,6 +7020,7 @@ export class SqliteStore {
         revision.persona,
         stringifyJson(revision.skillGrants),
         stringifyJson(revision.capabilityGrants),
+        stringifyJson(revision.connectionGrants),
         stringifyJson(revision.modelPolicy),
         revision.runtimePermissionMode ?? 'read-only',
         revision.reason,
@@ -7682,6 +7690,7 @@ function mapRevision(row: object): EmployeeRevision {
     persona: String(value.persona),
     skillGrants: parseJson<string[]>(value.skill_grants_json),
     capabilityGrants: parseJson<string[]>(value.capability_grants_json),
+    connectionGrants: parseJson<string[]>(value.connection_grants_json),
     modelPolicy: parseJson<JsonObject>(value.model_policy_json),
     runtimePermissionMode: (typeof value.runtime_permission_mode === 'string' ? value.runtime_permission_mode : 'read-only') as AgentPermissionMode,
     reason: String(value.reason),

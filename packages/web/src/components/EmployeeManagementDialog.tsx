@@ -1,8 +1,9 @@
-import { Archive, IdentificationCard, PuzzlePiece, ShieldCheck, ShieldWarning, SlidersHorizontal, Sparkle, X } from '@phosphor-icons/react'
+import { Archive, IdentificationCard, PlugsConnected, PuzzlePiece, ShieldCheck, ShieldWarning, SlidersHorizontal, Sparkle, X } from '@phosphor-icons/react'
 import { useRef, useState } from 'react'
 import type { AgentPermissionMode, CharacterGender, EmployeeInstance, EmployeeProfile, EmployeeRevision, ModelProfile } from '@dsh-cyber/contracts'
 
 import { CharacterAvatarManager, type UploadedAvatarDraft } from './CharacterAvatarManager.js'
+import { ConnectionGrantEditor } from './ConnectionGrantEditor.js'
 import { SkillGrantEditor } from './SkillGrantEditor.js'
 import { RuntimePermissionSelector } from './RuntimePermissionSelector.js'
 import { useDialogFocusTrap } from './useDialogFocusTrap.js'
@@ -20,7 +21,7 @@ interface EmployeeManagementDialogProps {
   initialSection?: EmployeeSettingsSection
   focusAvatar?: boolean
   onClose(): void
-  onRevise(input: { reason: string; persona?: string; skillGrants?: string[]; capabilityGrants?: string[]; modelPolicy: { modelProfileId?: string }; runtimePermissionMode?: AgentPermissionMode; confirmedFullAccess?: boolean }): Promise<void>
+  onRevise(input: { reason: string; persona?: string; skillGrants?: string[]; capabilityGrants?: string[]; connectionGrants?: string[]; modelPolicy: { modelProfileId?: string }; runtimePermissionMode?: AgentPermissionMode; confirmedFullAccess?: boolean }): Promise<void>
   onUpdateProfile(input: {
     displayName: string
     role: string
@@ -66,6 +67,7 @@ export function EmployeeManagementDialog({ employee, profile, profileHistory = [
   const [reason, setReason] = useState('调整角色设定')
   const [persona, setPersona] = useState(parsed.persona)
   const [skills, setSkills] = useState<string[]>(currentRevision?.skillGrants ?? [])
+  const [connections, setConnections] = useState<string[]>(currentRevision?.connectionGrants ?? [])
   const [capabilities, setCapabilities] = useState(currentRevision?.capabilityGrants.join(', ') ?? '')
   const [runtimePermissionMode, setRuntimePermissionMode] = useState<AgentPermissionMode>(currentRevision?.runtimePermissionMode ?? 'read-only')
   const [confirmedFullAccess, setConfirmedFullAccess] = useState(currentRevision?.runtimePermissionMode === 'danger-full-access')
@@ -103,6 +105,7 @@ export function EmployeeManagementDialog({ employee, profile, profileHistory = [
       persona: composeCharacterPersona(runtimeProfile()),
       skillGrants: skills,
       capabilityGrants: splitList(capabilities),
+      connectionGrants: connections,
       modelPolicy: {},
     })
   }
@@ -114,6 +117,19 @@ export function EmployeeManagementDialog({ employee, profile, profileHistory = [
       persona: composeCharacterPersona(runtimeProfile()),
       skillGrants: skills,
       capabilityGrants: splitList(capabilities),
+      connectionGrants: connections,
+      modelPolicy: {},
+    })
+  }
+
+  const saveAbilities = async () => {
+    if (!role.trim() || !persona.trim() || saving) return
+    await onRevise({
+      reason: '更新角色能力与连接授权',
+      persona: composeCharacterPersona(runtimeProfile()),
+      skillGrants: skills,
+      capabilityGrants: splitList(capabilities),
+      connectionGrants: connections,
       modelPolicy: {},
     })
   }
@@ -163,14 +179,17 @@ export function EmployeeManagementDialog({ employee, profile, profileHistory = [
           {activeSection === 'abilities' ? <section className="employee-settings-panel" role="tabpanel">
             <div className="settings-section__heading"><h3><PuzzlePiece size={18} />技能与工具</h3><p>选择这个角色可以使用的技能与工具。执行计划和外部操作前，系统仍会重新检查当前授权。</p></div>
             <SkillGrantEditor employee={employee} value={skills} onChange={setSkills} />
-            <footer className="employee-settings-actions"><span>高风险操作仍会单独请求确认。</span><button className="primary-button" type="button" disabled={!role.trim() || !persona.trim() || saving} onClick={() => void saveBehavior()}>{saving ? '正在保存…' : '保存能力设置'}</button></footer>
+            <div className="employee-settings-divider" role="separator" />
+            <div className="settings-section__heading"><h3><PlugsConnected size={18} />连接授权</h3><p>勾选这个角色可以驱动的外部连接（SSH 设备等）。技能 + 连接两重授权都满足时，外部操作才会执行。</p></div>
+            <ConnectionGrantEditor employee={employee} value={connections} onChange={setConnections} />
+            <footer className="employee-settings-actions"><span>高风险操作仍会单独请求确认。</span><button className="primary-button" type="button" disabled={!role.trim() || !persona.trim() || saving} onClick={() => void saveAbilities()}>{saving ? '正在保存…' : '保存能力与连接设置'}</button></footer>
           </section> : null}
 
           {activeSection === 'permissions' ? <section className="employee-settings-panel" role="tabpanel">
             <div className="settings-section__heading"><h3><ShieldCheck size={18} />默认对话权限</h3><p>这个角色进入新私聊时自动使用所选档位；你仍可在输入区为单条消息临时调整。</p></div>
             <RuntimePermissionSelector value={runtimePermissionMode} onChange={(mode) => { setRuntimePermissionMode(mode); setConfirmedFullAccess(mode === 'danger-full-access' && currentRevision?.runtimePermissionMode === 'danger-full-access') }} />
             {runtimePermissionMode === 'danger-full-access' ? <label className="host-access-dialog__confirm"><input type="checkbox" checked={confirmedFullAccess} onChange={(event) => setConfirmedFullAccess(event.target.checked)} /><span><strong>我确认允许这个角色默认完全访问</strong><small>确认会持久保存，并在刷新、切换和重启后继续生效。</small></span></label> : null}
-            <footer className="employee-settings-actions"><span>多人会话会采用所有参与角色中最保守的默认档位。</span><button className="primary-button" type="button" disabled={saving || (runtimePermissionMode === 'danger-full-access' && !confirmedFullAccess)} onClick={() => void onRevise({ reason: '更新角色默认对话权限', skillGrants: skills, capabilityGrants: splitList(capabilities), modelPolicy: currentRevision?.modelPolicy ?? {}, runtimePermissionMode, confirmedFullAccess })}>{saving ? '正在保存…' : '保存对话权限'}</button></footer>
+            <footer className="employee-settings-actions"><span>多人会话会采用所有参与角色中最保守的默认档位。</span><button className="primary-button" type="button" disabled={saving || (runtimePermissionMode === 'danger-full-access' && !confirmedFullAccess)} onClick={() => void onRevise({ reason: '更新角色默认对话权限', skillGrants: skills, capabilityGrants: splitList(capabilities), connectionGrants: connections, modelPolicy: currentRevision?.modelPolicy ?? {}, runtimePermissionMode, confirmedFullAccess })}>{saving ? '正在保存…' : '保存对话权限'}</button></footer>
           </section> : null}
 
           {activeSection === 'advanced' ? <section className="employee-settings-panel" role="tabpanel">

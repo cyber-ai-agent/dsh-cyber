@@ -1,7 +1,7 @@
 import type { WorldCharacterAuthority } from './world-authority.js'
 import type { UiLocale } from './locales.js'
 
-export const CYBER_SCHEMA_VERSION = 50 as const
+export const CYBER_SCHEMA_VERSION = 52 as const
 
 export * from './runtime-access.js'
 export * from './locales.js'
@@ -556,6 +556,13 @@ export interface EmployeeRevision {
   persona: string
   skillGrants: string[]
   capabilityGrants: string[]
+  /**
+   * Connection ids (from the connection hub) this character may drive.
+   * Empty/absent means no external connection is authorized regardless of
+   * skill grants — a connection grant is the second, device-level half of
+   * the skill+connection authorization pair.
+   */
+  connectionGrants: string[]
   modelPolicy: JsonObject
   runtimePermissionMode?: AgentPermissionMode
   reason: string

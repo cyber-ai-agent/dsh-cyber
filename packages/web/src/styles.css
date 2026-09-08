@@ -3050,6 +3050,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .avatar-picker .avatar { border: 0; }
 .employee-settings-actions { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding-top: 14px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 12px; }
 .employee-settings-actions .primary-button { min-height: 42px; }
+.employee-settings-divider { height: 1px; margin: 2px 0 14px; border: 0; background: var(--border); }
 .employee-model-field { margin: 12px 0; padding: 12px; border: 1px solid var(--border); background: var(--surface-1); }
 .employee-model-field > span { display: flex; align-items: center; gap: 6px; color: var(--text-soft); font-weight: 600; }
 .employee-model-field small { color: var(--text-muted); line-height: 1.6; }

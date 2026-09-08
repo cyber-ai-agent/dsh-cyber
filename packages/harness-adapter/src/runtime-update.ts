@@ -133,6 +133,7 @@ export async function runHarnessCandidateCanary(options: {
     persona: '只回复 DSH-CYBER-CANARY-OK，不调用工具。',
     skillGrants: [],
     capabilityGrants: [],
+    connectionGrants: [],
     modelPolicy: {},
     reason: 'runtime-update-canary',
     createdAt: now,

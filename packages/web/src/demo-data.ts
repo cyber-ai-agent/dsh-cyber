@@ -173,6 +173,7 @@ function dossier(employee: CyberEmployee, index: number, roster: CyberEmployee[]
       persona: isTavern ? `${employee.role}，始终保持独立人设、知识边界和说话方式。` : `${employee.role}，以可验证结果和清晰协作为工作原则。`,
       skillGrants: [],
       capabilityGrants: [],
+      connectionGrants: [],
       modelPolicy: { modelProfileId: 'deepseek-default' },
       reason: isTavern ? '从角色卡市场进入当前故事世界' : '从角色市场加入当前世界',
       createdAt: now,

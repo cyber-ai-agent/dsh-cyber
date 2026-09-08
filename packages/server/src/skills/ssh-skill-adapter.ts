@@ -41,6 +41,27 @@ interface WorldRef {
 export interface SshSkillAdapterOptions {
   store: { getWorld(worldId: string): WorldRef | undefined }
   integrations: IntegrationService
+  /** Returns the character's current revision grants; undefined blocks connect use. */
+  connectionGrantsFor?(characterId: string): readonly string[] | undefined
+}
+
+/** Minimal store shape the grants resolver needs (SqliteStore satisfies it). */
+export interface ConnectionGrantsRevisionStore {
+  getEmployee(employeeId: string): { id: string; currentRevision: number } | undefined
+  getEmployeeRevision(employeeId: string, revision: number): { connectionGrants?: readonly string[] } | undefined
+}
+
+/**
+ * Resolves the current revision's connection grants for an employee. Unknown
+ * characters resolve to undefined (deny); revisions without grants resolve to
+ * an empty list (deny every device).
+ */
+export function createConnectionGrantsResolver(store: ConnectionGrantsRevisionStore): (characterId: string) => readonly string[] | undefined {
+  return (characterId) => {
+    const employee = store.getEmployee(characterId)
+    if (employee === undefined) return undefined
+    return store.getEmployeeRevision(employee.id, employee.currentRevision)?.connectionGrants ?? []
+  }
 }
 
 export class SshSkillAdapter implements CharacterSkillAdapter {
@@ -48,10 +69,12 @@ export class SshSkillAdapter implements CharacterSkillAdapter {
   readonly descriptors = [DESCRIPTOR] as const
   readonly #store: { getWorld(worldId: string): WorldRef | undefined }
   readonly #integrations: IntegrationService
+  readonly #connectionGrantsFor: ((characterId: string) => readonly string[] | undefined) | undefined
 
   constructor(options: SshSkillAdapterOptions) {
     this.#store = options.store
     this.#integrations = options.integrations
+    this.#connectionGrantsFor = options.connectionGrantsFor
   }
 
   propose(context: CharacterSkillMatchContext): CharacterSkillActionProposal[] {
@@ -96,6 +119,8 @@ export class SshSkillAdapter implements CharacterSkillAdapter {
     if (connectionId === undefined) {
       return { ready: false, detail: '当前工作区没有可用的 SSH 设备，请先在“连接中心”添加设备' }
     }
+    const granted = this.#isConnectionGranted(action.characterId, connectionId)
+    if (!granted) return { ready: false, detail: '该角色没有被授权使用这台设备，请在角色设置中勾选对应连接' }
     const connection = this.#integrations.getById(world.workspaceId, connectionId)
     const credential = this.#integrations.credentialForConnection(world.workspaceId, connectionId)
     if (connection === undefined || !connection.enabled || credential === undefined) {
@@ -113,6 +138,9 @@ export class SshSkillAdapter implements CharacterSkillAdapter {
     const connectionId = await this.#resolveConnectionId(workspaceId, action, op)
     if (connectionId === undefined) {
       return { status: 'waiting-for-integration', detail: '没有指定要操作的设备，请先在“连接中心”添加并选择设备' }
+    }
+    if (!this.#isConnectionGranted(action.characterId, connectionId)) {
+      return { status: 'failed', detail: '该角色没有被授权使用这台设备，动作未执行' }
     }
     const connection = this.#integrations.getById(workspaceId, connectionId)
     const credential = this.#integrations.credentialForConnection(workspaceId, connectionId)
@@ -142,6 +170,12 @@ export class SshSkillAdapter implements CharacterSkillAdapter {
       }
       return { status: 'failed', detail: error instanceof Error ? error.message : 'SSH 操作失败' }
     }
+  }
+
+  #isConnectionGranted(characterId: string, connectionId: string): boolean {
+    if (this.#connectionGrantsFor === undefined) return false
+    const grants = this.#connectionGrantsFor(characterId)
+    return grants !== undefined && grants.includes(connectionId)
   }
 
   async #resolveConnectionId(workspaceId: string, action: CharacterSkillAction, op: SshOperation): Promise<string | undefined> {

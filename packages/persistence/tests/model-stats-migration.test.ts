@@ -18,7 +18,8 @@ it('migrates v48 logs without inventing provider IDs/cache and restores new fiel
       ALTER TABLE model_interaction_logs DROP COLUMN provider_id;
       ALTER TABLE model_interaction_logs DROP COLUMN provider_name;
       ALTER TABLE model_interaction_logs DROP COLUMN tokens_cached;
-      DELETE FROM schema_migrations WHERE version IN (49, 50); PRAGMA user_version = 48;`)
+      ALTER TABLE employee_revisions DROP COLUMN connection_grants_json;
+      DELETE FROM schema_migrations WHERE version > 48; PRAGMA user_version = 48;`)
     legacy.close()
     store = await SqliteStore.open(file)
     expect(store.doctor().ok).toBe(true)

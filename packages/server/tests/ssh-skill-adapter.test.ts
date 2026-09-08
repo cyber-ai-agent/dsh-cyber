@@ -19,8 +19,17 @@ function device(overrides: Partial<Record<'enabled' | 'host' | 'username' | 'pri
 
 function world() { return { id: 'world-1', workspaceId: 'workspace-1' } }
 
-function makeAdapter(integrations: unknown) {
-  return new SshSkillAdapter({ store: { getWorld: () => world() }, integrations: integrations as never })
+function makeAdapter(integrations: unknown, connectionGrantsFor?: (characterId: string) => readonly string[] | undefined) {
+  return new SshSkillAdapter({
+    store: { getWorld: () => world() },
+    integrations: integrations as never,
+    ...(connectionGrantsFor === undefined ? {} : { connectionGrantsFor }),
+  })
+}
+
+/** Grant helper: the character owns device-1, matching the fixture device. */
+function grantsDevice(characterId: string): readonly string[] | undefined {
+  return characterId === 'character-1' ? ['device-1'] : []
 }
 
 function actionFrom(proposal: { skillId: string; adapterId: string; action: string; target: string; label: string; risk: 'external-side-effect' | 'read' | 'write-local'; authorization: string; parameters?: Record<string, unknown> }): CharacterSkillAction {
@@ -45,13 +54,13 @@ describe('SshSkillAdapter', () => {
   })
 
   it('preflight requires a configured and enabled device with a credential', async () => {
-    const adapter = makeAdapter({ listByType: () => [], getById: () => undefined, credentialForConnection: () => undefined })
+    const adapter = makeAdapter({ listByType: () => [], getById: () => undefined, credentialForConnection: () => undefined }, grantsDevice)
     const proposal = adapter.propose({ worldId: 'world-1', characterId: 'character-1', prompt: '看看磁盘', grantedSkillIds: [SSH_COMMAND_SKILL], now: new Date() })[0]!
     expect((await adapter.preflight(actionFrom(proposal)))!.ready).toBe(false)
   })
 
   it('executes a read op through the device and returns the sanitized output', async () => {
-    const adapter = makeAdapter({ listByType: () => [device()], getById: () => device(), credentialForConnection: () => '-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n-----END OPENSSH PRIVATE KEY-----' })
+    const adapter = makeAdapter({ listByType: () => [device()], getById: () => device(), credentialForConnection: () => '-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n-----END OPENSSH PRIVATE KEY-----' }, grantsDevice)
     const proposal = adapter.propose({ worldId: 'world-1', characterId: 'character-1', prompt: '查看磁盘', grantedSkillIds: [SSH_COMMAND_SKILL], now: new Date() })[0]!
     exec.mockResolvedValueOnce({ code: 0, stdout: 'Linux\nlinux-apt', stderr: '' })
       .mockResolvedValueOnce({ code: 0, stdout: '/dev/sda1  50G  12G  36G  25% /', stderr: '' })
@@ -62,7 +71,7 @@ describe('SshSkillAdapter', () => {
   })
 
   it('reports refused auth as failed and connection loss as outcome-unknown', async () => {
-    const adapter = makeAdapter({ listByType: () => [device()], getById: () => device(), credentialForConnection: () => 'key' })
+    const adapter = makeAdapter({ listByType: () => [device()], getById: () => device(), credentialForConnection: () => 'key' }, grantsDevice)
     const proposal = adapter.propose({ worldId: 'world-1', characterId: 'character-1', prompt: '查看内存', grantedSkillIds: [SSH_COMMAND_SKILL], now: new Date() })[0]!
     exec.mockRejectedValueOnce(new (await import('../src/integrations/ssh-client.js')).SshError('auth-failed', 'permission denied'))
     expect((await adapter.execute(actionFrom(proposal), { now: new Date() })).status).toBe('failed')
@@ -75,6 +84,24 @@ describe('SshSkillAdapter', () => {
     const proposal = adapter.propose({ worldId: 'world-1', characterId: 'character-1', prompt: '查看内存', grantedSkillIds: [SSH_COMMAND_SKILL], now: new Date() })[0]!
     const result = await adapter.execute(actionFrom(proposal), { now: new Date() })
     expect(result.status).toBe('waiting-for-integration')
+    expect(exec).not.toHaveBeenCalled()
+  })
+
+  it('denies execution when the connection is not in the character connection grants', async () => {
+    const adapter = makeAdapter({ listByType: () => [device()], getById: () => device(), credentialForConnection: () => 'key' }, () => ['device-2'])
+    const proposal = adapter.propose({ worldId: 'world-1', characterId: 'character-1', prompt: '查看内存', grantedSkillIds: [SSH_COMMAND_SKILL], now: new Date() })[0]!
+    expect((await adapter.preflight(actionFrom(proposal)))!.ready).toBe(false)
+    const result = await adapter.execute(actionFrom(proposal), { now: new Date() })
+    expect(result.status).toBe('failed')
+    expect(exec).not.toHaveBeenCalled()
+  })
+
+  it('blocks all connect use when no grants resolver is wired', async () => {
+    const adapter = makeAdapter({ listByType: () => [device()], getById: () => device(), credentialForConnection: () => 'key' })
+    const proposal = adapter.propose({ worldId: 'world-1', characterId: 'character-1', prompt: '查看内存', grantedSkillIds: [SSH_COMMAND_SKILL], now: new Date() })[0]!
+    expect((await adapter.preflight(actionFrom(proposal)))!.ready).toBe(false)
+    const result = await adapter.execute(actionFrom(proposal), { now: new Date() })
+    expect(result.status).toBe('failed')
     expect(exec).not.toHaveBeenCalled()
   })
 })
