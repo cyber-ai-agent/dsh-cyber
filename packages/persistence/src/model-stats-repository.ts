@@ -22,8 +22,18 @@ export class ModelStatsRepository {
     let where = base
     if (params.groupBy === 'provider') {
       const key = params.providerId!
-      if (key.startsWith('provider:')) { where += ' AND provider_id = ?'; values.push(key.slice(9)) }
-      else { where += ' AND provider_id IS NULL AND provider = ?'; values.push(key.startsWith('legacy:') ? key.slice(7) : key) }
+      if (key.startsWith('provider:')) {
+        // Rows recorded after migration 49 carry provider_id; earlier rows only
+        // kept the provider display name. A configured provider therefore owns
+        // its attributed rows AND the legacy rows logged under that name.
+        const providerId = key.slice(9)
+        const provider = this.db.prepare('SELECT name FROM model_providers WHERE workspace_id = ? AND id = ?').get(workspaceId, providerId) as { name: string } | undefined
+        where += provider
+          ? ' AND (provider_id = ? OR (provider_id IS NULL AND provider = ?))'
+          : ' AND provider_id = ?'
+        values.push(providerId)
+        if (provider) values.push(provider.name)
+      } else { where += ' AND provider_id IS NULL AND provider = ?'; values.push(key.startsWith('legacy:') ? key.slice(7) : key) }
     }
     const total = this.db.prepare(`SELECT ${METRICS} FROM model_interaction_logs WHERE ${where}`).get(...values) as Aggregate
     const group = params.groupBy === 'all' ? 'employee_id, world_id' : 'model_id'
