@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { ArrowsClockwise } from '@phosphor-icons/react'
 import type { ModelStatsItem, ModelStatsResponse } from '@dsh-cyber/contracts'
 import { useI18n } from '../../i18n/runtime.js'
-import { formatDuration, formatNumber } from '../../i18n/format.js'
+import { formatCompactNumber, formatDuration, formatNumber } from '../../i18n/format.js'
 import { fetchModelStats, type HubProvider } from './api.js'
 
 type Range = '7d' | '30d' | 'all'
@@ -73,14 +73,22 @@ export function ModelStatsPanel({ workspaceId, providers }: { workspaceId: strin
         {active?.status === 'error' ? <div className="model-hub__error" role="alert">{active.error}</div> : null}
         {summary && data ? <>
           <div className="model-hub__stats-overview">
-            {[
-              [t('modelHub.colTokensSent', '输入'), formatNumber(summary.totalTokensSent)],
-              [t('modelHub.colTokensReceived', '输出'), formatNumber(summary.totalTokensReceived)],
-              [t('modelHub.statsTotalCached', '缓存命中'), summary.tokensCached === undefined ? '—' : formatNumber(summary.tokensCached)],
-              [t('modelHub.statsInteractions', '交互次数'), formatNumber(summary.totalRequests)],
-              [t('modelHub.statsTotalToolCalls', '工具调用'), formatNumber(summary.totalToolCalls)],
-              [t('modelHub.statsSuccessRate', '成功率'), summary.totalRequests === 0 ? '—' : `${summary.successRate.toFixed(1)}%`],
-            ].map(([label, value]) => <div className="model-hub__stat-card" key={label}><strong>{value}</strong><span>{label}</span></div>)}
+            {(() => {
+              const cards: Array<{ key: string; label: string; display: string; exact?: string }> = []
+              const add = (key: string, label: string, display: string, exact?: string) => {
+                const card: { key: string; label: string; display: string; exact?: string } = { key, label, display }
+                if (exact !== undefined) card.exact = exact
+                cards.push(card)
+              }
+              add('sent', t('modelHub.colTokensSent', '输入'), formatCompactNumber(summary.totalTokensSent), formatNumber(summary.totalTokensSent))
+              add('received', t('modelHub.colTokensReceived', '输出'), formatCompactNumber(summary.totalTokensReceived), formatNumber(summary.totalTokensReceived))
+              if (summary.tokensCached !== undefined) add('cached', t('modelHub.statsTotalCached', '缓存命中'), formatCompactNumber(summary.tokensCached), formatNumber(summary.tokensCached))
+              else add('cached', t('modelHub.statsTotalCached', '缓存命中'), '—')
+              add('requests', t('modelHub.statsInteractions', '交互次数'), formatNumber(summary.totalRequests))
+              add('tools', t('modelHub.statsTotalToolCalls', '工具调用'), formatNumber(summary.totalToolCalls))
+              add('rate', t('modelHub.statsSuccessRate', '成功率'), summary.totalRequests === 0 ? '—' : `${summary.successRate.toFixed(1)}%`)
+              return cards.map((card) => <div className="model-hub__stat-card" key={card.key}><strong title={card.exact}>{card.display}</strong><span>{card.label}</span></div>)
+            })()}
           </div>
           {data.items.length === 0 ? <div className="model-hub__empty"><strong>{t('modelHub.statsEmpty', '尚无交互记录')}</strong><span>{t('modelHub.statsEmptyHint', '完成一次对话后这里会出现统计。')}</span></div>
             : <div className="model-hub__stats-table-scroll" tabIndex={0} role="region" aria-label={t('modelHub.statsDetails', '统计明细')}>
@@ -100,7 +108,9 @@ export function ModelStatsPanel({ workspaceId, providers }: { workspaceId: strin
 function StatsRow({ item, system }: { item: ModelStatsItem; system: boolean }) {
   const { t } = useI18n()
   return <tr><td><strong>{system ? t('modelHub.statsSystem', '系统') : item.name ?? item.id}</strong>{item.worldName ? <small>{item.worldName}</small> : null}</td>
-    <td>{formatNumber(item.tokensSent)}</td><td>{formatNumber(item.tokensReceived)}</td><td>{item.hasCacheData ? formatNumber(item.tokensCached ?? 0) : '—'}</td>
+    <td title={formatNumber(item.tokensSent)}>{formatCompactNumber(item.tokensSent)}</td>
+    <td title={formatNumber(item.tokensReceived)}>{formatCompactNumber(item.tokensReceived)}</td>
+    <td title={item.hasCacheData ? formatNumber(item.tokensCached ?? 0) : undefined}>{item.hasCacheData ? formatCompactNumber(item.tokensCached ?? 0) : '—'}</td>
     <td>{formatNumber(item.requests)}</td><td>{formatNumber(item.toolCalls)}</td><td>{item.requests === 0 ? '—' : `${(item.successCount / item.requests * 100).toFixed(1)}%`}</td><td>{item.avgLatencyMs === undefined ? '—' : formatDuration(item.avgLatencyMs)}</td>
   </tr>
 }
