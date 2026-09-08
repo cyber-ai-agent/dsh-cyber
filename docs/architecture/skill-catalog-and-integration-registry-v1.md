@@ -50,9 +50,12 @@ Marketplace 包只能安装声明式 Skill Recipe。Provider Adapter 由受信�
 
 ## 本地 API
 
+连接中心（连接级，多连接类型见 [connection-hub-v1](./connection-hub-v1.md)）：
+
 - `GET /api/workspaces/:workspaceId/integrations`
-- `PUT /api/workspaces/:workspaceId/integrations/:integrationId`
-- `POST /api/workspaces/:workspaceId/integrations/:integrationId/test`
-- `DELETE /api/workspaces/:workspaceId/integrations/:integrationId`
+- `PUT /api/workspaces/:workspaceId/integrations/:integrationId/connections/:connectionId`
+- `DELETE /api/workspaces/:workspaceId/integrations/:integrationId/connections/:connectionId`
+- `POST /api/workspaces/:workspaceId/integrations/:integrationId/test?connectionId=`
+- 兼容保留类型级 `PUT/DELETE .../integrations/:integrationId`
 
 API 不返回凭据明文，只返回 `credentialConfigured`。

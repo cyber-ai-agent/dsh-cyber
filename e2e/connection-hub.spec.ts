@@ -2,8 +2,10 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
+import type { IntegrationConnection } from '../packages/contracts/lib/index.js'
 import { createCyberServer, type CyberServer } from '../packages/server/lib/index.js'
 import { attachAppConsoleRecorder } from './console-test-helpers.js'
+import { openDockTab } from './dock-test-helpers.js'
 
 let server: CyberServer
 let stateRoot = ''
@@ -53,6 +55,110 @@ test('opens the connection hub from the top bar, adds an SSH device, and edits w
   await writeConsole(info, consoleIssues)
   expect(consoleIssues).toEqual([])
 })
+
+test('lets a role authorize a hub SSH device from 角色设置 连接授权 and persists the grant', async ({ page }, info) => {
+  const consoleIssues: string[] = []; attachAppConsoleRecorder(page, consoleIssues)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const current = requireServer()
+  const workspace = current.store.listWorkspaces()[0]!
+  const world = current.store.listWorlds(workspace.id)[0]!
+  const displayName = `授权测试员-${Date.now().toString(36)}`
+
+  // Recruit a role into the default world so it shows in 档案.
+  const recruited = await postJson<{ employee: { id: string } }>(`/api/worlds/${world.id}/recruit`, {
+    blueprintId: 'cyber-company.software-engineer',
+    blueprintVersion: 1,
+    displayName,
+  })
+  expect(recruited.status, JSON.stringify(recruited.body)).toBe(201)
+  const employeeId = recruited.body.employee.id
+
+  // Add an SSH device through the top-bar hub.
+  await page.goto(origin)
+  const hubButton = page.getByRole('button', { name: '连接中心', exact: true })
+  await expect(hubButton).toBeVisible()
+  await hubButton.click()
+  const hub = page.getByRole('dialog', { name: '连接中心' })
+  await hub.getByRole('button', { name: /SSH 设备/ }).click()
+  await hub.getByLabel('设备名称').fill('授权设备')
+  await hub.getByLabel('主机地址').fill('192.168.7.20')
+  await hub.getByLabel('登录用户').fill('ops')
+  await hub.getByRole('button', { name: '添加连接' }).click()
+  await expect(hub.getByRole('button', { name: /授权设备/ })).toBeVisible()
+  await hub.getByRole('button', { name: '关闭连接中心' }).click()
+
+  // Open the role settings and check the device under 技能与工具 → 连接授权.
+  const dock = page.getByRole('region', { name: '世界与角色侧边栏' })
+  await openDockTab(dock, '角色')
+  await dock.getByRole('article').filter({ hasText: displayName }).getByRole('button', { name: `管理${displayName}` }).click()
+  const management = page.getByRole('dialog', { name: new RegExp(`角色设置 · ${displayName}`) })
+  await management.getByRole('tab', { name: '技能与工具' }).click()
+  const deviceRow = management.locator('.connection-grant-row').filter({ hasText: '授权设备' })
+  await expect(deviceRow).toBeVisible()
+  const deviceCheckbox = deviceRow.getByRole('checkbox')
+  await expect(deviceCheckbox).toBeEnabled()
+  await deviceCheckbox.check()
+
+  const screenshotRoot = join(process.cwd(), 'artifacts', 'connection-hub-role-grant')
+  const { mkdir } = await import('node:fs/promises')
+  await mkdir(screenshotRoot, { recursive: true })
+  for (const viewport of [
+    { width: 1_440, height: 900, label: '1440x900' },
+    { width: 1_920, height: 1_080, label: '1920x1080' },
+    { width: 3_840, height: 2_160, label: '3840x2160' },
+  ]) {
+    await page.setViewportSize(viewport)
+    await expect(management).toBeVisible()
+    const bounds = await management.boundingBox()
+    expect(bounds).not.toBeNull()
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width)
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport.height)
+    expect(await management.evaluate((element) => {
+      const rows = Array.from(element.querySelectorAll('.connection-grant-row'))
+      return { hasRows: rows.length > 0, checked: rows.some((row) => (row.querySelector('input') as HTMLInputElement | null)?.checked === true) }
+    })).toMatchObject({ hasRows: true, checked: true })
+    await page.screenshot({ path: join(screenshotRoot, `role-grant-${viewport.label}.png`) })
+  }
+
+  await management.getByRole('button', { name: '保存能力与连接设置' }).click()
+  await expect(management).toBeHidden()
+
+  // The revision persisted the connection id; the device id comes from the hub API.
+  const listed = await getJson<{ items: IntegrationConnection[] }>(`/api/workspaces/${workspace.id}/integrations`)
+  const deviceId = listed.items.find((item) => item.displayName === '授权设备')?.id
+  expect(deviceId).toBeDefined()
+  const revision = current.store.getEmployeeRevision(employeeId, current.store.getEmployee(employeeId)!.currentRevision)
+  expect(revision?.connectionGrants).toEqual([deviceId])
+
+  // Reload: the checkbox stays checked for the same role.
+  await page.reload()
+  await expect(page.locator('.workbench-shell')).toBeVisible()
+  await openDockTab(page.getByRole('region', { name: '世界与角色侧边栏' }), '角色')
+  await page.getByRole('region', { name: '世界与角色侧边栏' }).getByRole('article').filter({ hasText: displayName }).getByRole('button', { name: `管理${displayName}` }).click()
+  const refreshed = page.getByRole('dialog', { name: new RegExp(`角色设置 · ${displayName}`) })
+  await refreshed.getByRole('tab', { name: '技能与工具' }).click()
+  await expect(refreshed.locator('.connection-grant-row').filter({ hasText: '授权设备' }).getByRole('checkbox')).toBeChecked()
+  await refreshed.getByRole('button', { name: '关闭角色设置' }).click()
+  await writeConsole(info, consoleIssues)
+  expect(consoleIssues).toEqual([])
+})
+
+async function getJson<T>(path: string): Promise<T> {
+  const response = await fetch(`${origin}${path}`)
+  const body = await response.json() as unknown
+  if (!response.ok) throw new Error(`GET ${path} failed: ${response.status} ${JSON.stringify(body)}`)
+  return body as T
+}
+
+async function postJson<T = unknown>(path: string, body: Record<string, unknown>): Promise<{ status: number; body: T }> {
+  const response = await fetch(`${origin}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  return { status: response.status, body: await response.json().catch(() => undefined) as T }
+}
+
+function requireServer(): CyberServer {
+  if (server === undefined) throw new Error('连接中心 E2E 服务尚未启动')
+  return server
+}
 
 async function writeConsole(info: test.Info, issues: string[]) {
   const { writeFile } = await import('node:fs/promises')

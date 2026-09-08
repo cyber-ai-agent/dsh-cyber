@@ -89,6 +89,7 @@ memory categories below remain future work and are not implied by the graph.
 ## Alpha/Beta — Real-world Skill ecosystem
 
 - [ ] Generic Host Skill Registry with scope resolution
+- [x] 连接中心与两级连接授权 V1（Integration Hub 多连接实例、SSH 设备连接、角色技能 + 连接授权、受控 `device.ssh.command`，架构见 [connection-hub-v1](./architecture/connection-hub-v1.md)）
 - [ ] GitHub Adapter
 - [x] 受控网页浏览适配器（公开网页只读、单次审批、世界隔离、截图进入产物中心）
 - [ ] MQTT / Home automation adapters
