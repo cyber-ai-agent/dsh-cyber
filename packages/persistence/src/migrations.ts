@@ -2369,50 +2369,42 @@ const MIGRATIONS: readonly Migration[] = [
     version: 50,
     name: 'model-interaction-backfill-employee-attribution',
     sql: `
-      -- v49 added provider_id but did not backfill. Turns recorded before that
-      -- change carry only the model nickname in ` + '`provider`' + ` and NULL
-      -- provider_id, so they disappear from the per-provider stats view even
-      -- though the employee was routed through a known provider connection at
-      -- the time. Recover attribution deterministically: a legacy row whose
-      -- employee was assigned (model_assignments scope='employee') a profile
-      -- exposing the same model_id, with that assignment effective before the
-      -- row was written, belongs to that profile's provider. Rows without an
-      -- employee, or whose employee has no matching assignment, stay legacy.
-      UPDATE model_interaction_logs
-      SET provider_id = (
-            SELECT p.id FROM model_assignments a
-              JOIN model_profiles mp ON mp.id = a.model_profile_id
-              JOIN model_providers p ON p.id = mp.provider_id
-            WHERE a.workspace_id = model_interaction_logs.workspace_id
-              AND a.scope = 'employee'
-              AND a.scope_id = model_interaction_logs.employee_id
-              AND mp.model_id = model_interaction_logs.model_id
-              AND a.updated_at <= model_interaction_logs.created_at
-            LIMIT 1
-          ),
-          provider_name = (
-            SELECT p.name FROM model_assignments a
-              JOIN model_profiles mp ON mp.id = a.model_profile_id
-              JOIN model_providers p ON p.id = mp.provider_id
-            WHERE a.workspace_id = model_interaction_logs.workspace_id
-              AND a.scope = 'employee'
-              AND a.scope_id = model_interaction_logs.employee_id
-              AND mp.model_id = model_interaction_logs.model_id
-              AND a.updated_at <= model_interaction_logs.created_at
-            LIMIT 1
+      -- A default assignment alone is not a historical route: a turn can
+      -- override it, and a profile can later move to another connection.
+      -- Recover only unchanged, workspace-scoped routes whose exact legacy
+      -- nickname AND model ID match without another possible provider.
+      WITH legacy AS (
+        SELECT l.*,
+          COALESCE(julianday(ar.started_at), julianday(wt.started_at),
+            julianday(l.created_at) - l.duration_ms / 86400000.0) AS routed_at
+        FROM model_interaction_logs l
+        LEFT JOIN agent_runs ar ON ar.id = l.agent_run_id
+          AND ar.workspace_id = l.workspace_id AND ar.employee_id = l.employee_id
+        LEFT JOIN work_turns wt ON wt.id = l.work_turn_id AND wt.workspace_id = l.workspace_id
+        WHERE l.provider_id IS NULL AND l.employee_id IS NOT NULL AND l.source = 'turn'
+      ), candidates AS (
+        SELECT l.id AS log_id, p.id AS provider_id, p.name AS provider_name
+        FROM legacy l
+        JOIN model_assignments a ON a.workspace_id = l.workspace_id
+          AND a.scope = 'employee' AND a.scope_id = l.employee_id
+        JOIN model_profiles mp ON mp.id = a.model_profile_id AND mp.workspace_id = l.workspace_id
+        JOIN model_providers p ON p.id = mp.provider_id AND p.workspace_id = l.workspace_id
+        WHERE mp.model_id = l.model_id AND mp.display_name = l.provider
+          AND julianday(a.updated_at) <= l.routed_at
+          AND julianday(mp.updated_at) <= l.routed_at
+          AND julianday(p.updated_at) <= l.routed_at
+          AND NOT EXISTS (
+            SELECT 1 FROM model_profiles other
+            WHERE other.workspace_id = l.workspace_id
+              AND other.model_id = l.model_id AND other.display_name = l.provider
+              AND other.provider_id IS NOT mp.provider_id
           )
-      WHERE provider_id IS NULL
-        AND employee_id IS NOT NULL
-        AND EXISTS (
-          SELECT 1 FROM model_assignments a
-            JOIN model_profiles mp ON mp.id = a.model_profile_id
-            JOIN model_providers p ON p.id = mp.provider_id
-          WHERE a.workspace_id = model_interaction_logs.workspace_id
-            AND a.scope = 'employee'
-            AND a.scope_id = model_interaction_logs.employee_id
-            AND mp.model_id = model_interaction_logs.model_id
-            AND a.updated_at <= model_interaction_logs.created_at
-        );
+      )
+      UPDATE model_interaction_logs
+      SET (provider_id, provider_name) = (
+        SELECT provider_id, provider_name FROM candidates WHERE log_id = model_interaction_logs.id
+      )
+      WHERE provider_id IS NULL AND id IN (SELECT log_id FROM candidates);
     `,
   },
 ]

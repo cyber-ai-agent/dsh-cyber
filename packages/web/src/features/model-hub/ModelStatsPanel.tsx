@@ -11,7 +11,18 @@ type Resource = { key: string; status: 'loading' } | { key: string; status: 'rea
 export function ModelStatsPanel({ workspaceId, providers }: { workspaceId: string; providers: readonly HubProvider[] }) {
   const { t } = useI18n()
   const [range, setRange] = useState<Range>('7d')
-  const [providerId, setProviderId] = useState<string>()
+  const [selection, setSelection] = useState<{ workspaceId: string; id: string }>()
+  const choices = providers
+    .filter((provider) => provider.workspaceId === workspaceId)
+    .map((provider) => ({ id: `provider:${provider.id}`, name: provider.name }))
+  const providerId = selection?.workspaceId === workspaceId && choices.some((item) => item.id === selection.id)
+    ? selection.id : undefined
+  const setProviderId = (id: string | undefined) => setSelection(id === undefined ? undefined : { workspaceId, id })
+  // Derive the effective filter before fetching; a removed provider or previous
+  // workspace must never issue a request with an invisible active selection.
+  useEffect(() => { if (selection !== undefined && providerId === undefined) setSelection(undefined) }, [selection, providerId])
+  const names = new Map<string, number>()
+  for (const item of choices) names.set(item.name, (names.get(item.name) ?? 0) + 1)
   const [refresh, setRefresh] = useState(0)
   const [resource, setResource] = useState<Resource>()
   const key = JSON.stringify([workspaceId, range, providerId, refresh])
@@ -41,15 +52,10 @@ export function ModelStatsPanel({ workspaceId, providers }: { workspaceId: strin
   const active = resource?.key === key ? resource : undefined
   const busy = active === undefined || active.status === 'loading'
   const data = active?.status === 'ready' ? active.data : undefined
-  // Sidebar shows every provider actually added in this workspace — nothing
-  // derived from log-only names or removed providers.
-  const choices = providers
-    .filter((provider) => provider.workspaceId === workspaceId)
-    .map((provider) => ({ id: `provider:${provider.id}`, name: provider.name }))
   const summary = data?.summary
   return <div className="model-hub__body model-hub__stats">
     <div className="model-hub__toolbar">
-      <span className="model-hub__hint">{t('modelHub.statsRecordedHint', '按交互日志统计，对话按运行回合计数。仅累加已上报用量；缓存属于输入的一部分。未归属的历史记录单独列出。')}</span>
+      <span className="model-hub__hint">{t('modelHub.statsRecordedHint', '按交互日志统计，对话按运行回合计数。仅累加已上报用量；缓存属于输入的一部分。仅列出已配置服务商；无法归属的历史记录仍计入“全部”。')}</span>
       <button type="button" className="icon-button" aria-label={t('modelHub.statsRefresh', '刷新统计')} disabled={busy} onClick={() => setRefresh((n) => n + 1)}><ArrowsClockwise size={15} className={busy ? 'spin' : undefined} /></button>
     </div>
     <div className="model-hub__stats-time" role="group" aria-label={t('modelHub.statsTimeRange', '统计时间范围')}>
@@ -59,7 +65,7 @@ export function ModelStatsPanel({ workspaceId, providers }: { workspaceId: strin
       <aside className="model-hub__stats-sidebar" aria-label={t('modelHub.statsProviderFilter', '统计服务商')}>
         <button type="button" aria-pressed={providerId === undefined} className={providerId === undefined ? 'is-active' : ''} onClick={() => setProviderId(undefined)}>{t('modelHub.statsGroupAll', '全部')}</button>
         {choices.map((item) => <button key={item.id} type="button" aria-pressed={providerId === item.id} className={providerId === item.id ? 'is-active' : ''} title={item.id} onClick={() => setProviderId(item.id)}>
-          <span>{item.name}</span>
+          <span>{item.name}{(names.get(item.name) ?? 0) > 1 ? ` · ${item.id.slice(-8)}` : ''}</span>
         </button>)}
       </aside>
       <div className="model-hub__stats-main" aria-busy={busy}>

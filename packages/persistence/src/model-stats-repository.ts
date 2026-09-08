@@ -22,18 +22,11 @@ export class ModelStatsRepository {
     let where = base
     if (params.groupBy === 'provider') {
       const key = params.providerId!
-      if (key.startsWith('provider:')) {
-        // Rows recorded after migration 49 carry provider_id; earlier rows only
-        // kept the provider display name. A configured provider therefore owns
-        // its attributed rows AND the legacy rows logged under that name.
-        const providerId = key.slice(9)
-        const provider = this.db.prepare('SELECT name FROM model_providers WHERE workspace_id = ? AND id = ?').get(workspaceId, providerId) as { name: string } | undefined
-        where += provider
-          ? ' AND (provider_id = ? OR (provider_id IS NULL AND provider = ?))'
-          : ' AND provider_id = ?'
-        values.push(providerId)
-        if (provider) values.push(provider.name)
-      } else { where += ' AND provider_id IS NULL AND provider = ?'; values.push(key.startsWith('legacy:') ? key.slice(7) : key) }
+      // Legacy `provider` stored model nicknames, not a stable connection ID.
+      // Name-based fallback can count one row under multiple providers. Only
+      // captured IDs or the guarded migration may establish that attribution.
+      if (key.startsWith('provider:')) { where += ' AND provider_id = ?'; values.push(key.slice(9)) }
+      else { where += ' AND provider_id IS NULL AND provider = ?'; values.push(key.startsWith('legacy:') ? key.slice(7) : key) }
     }
     const total = this.db.prepare(`SELECT ${METRICS} FROM model_interaction_logs WHERE ${where}`).get(...values) as Aggregate
     const group = params.groupBy === 'all' ? 'employee_id, world_id' : 'model_id'
@@ -57,7 +50,7 @@ export class ModelStatsRepository {
       } else item.name = row.model!
       return item
     })
-    // Sidebar is derived from the time window, NOT the currently selected provider.
+    // Historical source metadata remains available to API clients; the sidebar uses configured providers.
     const providerRows = this.db.prepare(`SELECT ${PROVIDER_KEY} AS id, provider_id AS connectionId,
       COALESCE(MAX(provider_name), provider) AS name FROM model_interaction_logs WHERE ${base}
       GROUP BY ${PROVIDER_KEY} ORDER BY name, id`).all(workspaceId, params.from!, params.to!) as Array<{ id: string; connectionId: string | null; name: string }>
