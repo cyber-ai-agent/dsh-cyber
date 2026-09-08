@@ -2566,6 +2566,7 @@ export default function App() {
             onManageEmployee={(employee) => { setManagingEmployeeSection('profile'); setManagingEmployeeAvatarFocus(false); setManagingEmployeeId(employee.id) }}
             onShowAllDossiers={() => setSelectedEmployeeId(undefined)}
             onInvite={() => void openRecruitment()}
+            onOpenTaskSession={(session, participantIds) => selectSession(session.id, session, participantIds)}
           /></Suspense>
         )}
       />

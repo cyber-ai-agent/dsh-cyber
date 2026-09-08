@@ -45,7 +45,16 @@ describe('Work System V1', () => {
     expect(firstRun.body.plans).toHaveLength(1)
     expect(firstRun.body.assignments.length).toBeGreaterThan(0)
     expect(firstRun.body.runs[0]?.agentRunIds.length).toBeGreaterThan(0)
+    expect(firstRun.body.runs[0]?.participantIds).toEqual(expect.arrayContaining([coordinator.id, engineerId]))
     expect(firstRun.body.assignments[0]?.assignmentReason).toMatchObject({ source: 'group-task-router' })
+    const taskSessionId = firstRun.body.runs[0]?.sessionId
+    expect(taskSessionId).toBeTypeOf('string')
+    expect(server.store.getSession(taskSessionId!)).toMatchObject({ kind: 'group', collaborationMode: 'task', title: '实现可靠任务闭环' })
+    expect(server.store.listParticipants(taskSessionId!).filter((item) => item.kind === 'employee').map((item) => item.participantId)).toEqual(expect.arrayContaining([coordinator.id, engineerId]))
+    expect(server.store.listMessages(taskSessionId!).find((item) => item.kind === 'system')).toMatchObject({
+      content: '任务群聊已创建，已邀请 2 名角色加入并开始分工。',
+      metadata: expect.objectContaining({ productNotice: true, noticeKind: 'task-team-formed' }),
+    })
 
     const filesPath = join(stateRoot, 'worlds', world.id, 'files')
     await mkdir(filesPath, { recursive: true })
@@ -73,6 +82,9 @@ describe('Work System V1', () => {
     expect(secondRun.status, JSON.stringify(secondRun.body)).toBe(200)
     expect(secondRun.body.task).toMatchObject({ status: 'waiting-review', currentPlanRevision: 2 })
     expect(secondRun.body.runs).toHaveLength(2)
+    expect(secondRun.body.runs[1]?.sessionId).toBe(taskSessionId)
+    expect(server.store.listSessions(world.id).filter((item) => item.collaborationMode === 'task')).toHaveLength(1)
+    expect(server.store.listMessages(taskSessionId!).filter((item) => item.kind === 'system').at(-1)?.content).toBe('任务已重新开工，2 名角色继续在群聊中协作。')
     expect(runtime.requests.some((request) => request.prompt.includes('补充恢复验证'))).toBe(true)
     await writeFile(join(filesPath, 'delivery.md'), '# 第二版交付\n\n已补充恢复验证。\n', 'utf8')
     const secondArtifact = await server.artifacts.createVersion({

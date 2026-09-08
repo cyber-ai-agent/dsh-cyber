@@ -228,12 +228,20 @@ export class WorkSystemRepository {
       }
 
       const now = this.#clock()
-      const sessionId = this.#id()
+      const existingSessionRow = this.#database.prepare(
+        `SELECT session.* FROM task_runs run
+         JOIN work_turns turn ON turn.id = run.work_turn_id
+         JOIN work_sessions session ON session.id = turn.session_id
+         WHERE run.task_id = ? AND session.status = 'open'
+         ORDER BY run.attempt, run.id LIMIT 1`,
+      ).get(task.id)
+      const createdSession = existingSessionRow === undefined
+      const sessionId = createdSession ? this.#id() : String((existingSessionRow as Record<string, unknown>).id)
       const workTurnId = this.#id()
       const taskRunId = this.#id()
       const planId = this.#id()
       const title = normalized.title ?? task.title
-      const session: WorkSession = {
+      const session: WorkSession = createdSession ? {
         id: sessionId,
         workspaceId: task.workspaceId,
         worldId: task.worldId,
@@ -243,24 +251,26 @@ export class WorkSystemRepository {
         status: 'open',
         createdAt: now,
         updatedAt: now,
+      } : mapTaskExecutionSession(existingSessionRow)
+      if (createdSession) {
+        this.#database.prepare(
+          `INSERT INTO work_sessions
+           (id, workspace_id, world_id, kind, collaboration_mode, title, status, created_at, updated_at)
+           VALUES (?, ?, ?, 'group', 'task', ?, 'open', ?, ?)`,
+        ).run(session.id, session.workspaceId, session.worldId, session.title, now, now)
+        this.#appendExecutionEvent({
+          workspaceId: task.workspaceId,
+          worldId: task.worldId,
+          sessionId: session.id,
+          type: 'session.created',
+          actorId: 'owner',
+          actorKind: 'owner',
+          payload: { sessionId: session.id, worldId: task.worldId, kind: 'group', title: session.title },
+        })
       }
-      this.#database.prepare(
-        `INSERT INTO work_sessions
-         (id, workspace_id, world_id, kind, collaboration_mode, title, status, created_at, updated_at)
-         VALUES (?, ?, ?, 'group', 'task', ?, 'open', ?, ?)`,
-      ).run(session.id, session.workspaceId, session.worldId, session.title, now, now)
-      this.#appendExecutionEvent({
-        workspaceId: task.workspaceId,
-        worldId: task.worldId,
-        sessionId: session.id,
-        type: 'session.created',
-        actorId: 'owner',
-        actorKind: 'owner',
-        payload: { sessionId: session.id, worldId: task.worldId, kind: 'group', title: session.title },
-      })
 
-      this.#insertExecutionParticipant(session, 'owner', 'owner', now)
-      for (const employeeId of normalized.employeeIds) this.#insertExecutionParticipant(session, employeeId, 'employee', now)
+      this.#ensureExecutionParticipant(session, 'owner', 'owner', now)
+      for (const employeeId of normalized.employeeIds) this.#ensureExecutionParticipant(session, employeeId, 'employee', now)
 
       const workTurn: WorkTurn = {
         id: workTurnId,
@@ -285,10 +295,13 @@ export class WorkSystemRepository {
         now,
       )
 
+      const ownerSequence = Number((this.#database.prepare(
+        'SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM messages WHERE session_id = ?',
+      ).get(session.id) as { sequence: number }).sequence)
       const ownerMessage: WorkMessage = {
         id: this.#id(),
         sessionId: session.id,
-        sequence: 1,
+        sequence: ownerSequence,
         senderId: 'owner',
         senderKind: 'owner',
         kind: 'user',
@@ -319,6 +332,43 @@ export class WorkSystemRepository {
         actorKind: 'owner',
         correlationId: session.id,
         payload: { messageId: ownerMessage.id, messageSequence: ownerMessage.sequence, messageKind: 'user', senderId: 'owner' },
+      })
+
+      const teamNotice: WorkMessage = {
+        id: this.#id(),
+        sessionId: session.id,
+        sequence: ownerSequence + 1,
+        senderId: 'system',
+        senderKind: 'system',
+        kind: 'system',
+        content: createdSession
+          ? `任务群聊已创建，已邀请 ${normalized.employeeIds.length} 名角色加入并开始分工。`
+          : `任务已重新开工，${normalized.employeeIds.length} 名角色继续在群聊中协作。`,
+        metadata: {
+          productNotice: true,
+          noticeKind: 'task-team-formed',
+          workTaskId: task.id,
+          taskRunId,
+          workTurnId: workTurn.id,
+          participantIds: normalized.employeeIds,
+          coordinatorEmployeeId: normalized.coordinatorEmployeeId,
+        },
+        createdAt: now,
+      }
+      this.#database.prepare(
+        `INSERT INTO messages
+         (id, session_id, sequence, sender_id, sender_kind, kind, content, metadata_json, created_at)
+         VALUES (?, ?, ?, 'system', 'system', 'system', ?, ?, ?)`,
+      ).run(teamNotice.id, teamNotice.sessionId, teamNotice.sequence, teamNotice.content, JSON.stringify(teamNotice.metadata), now)
+      this.#appendExecutionEvent({
+        workspaceId: task.workspaceId,
+        worldId: task.worldId,
+        sessionId: session.id,
+        type: 'message.appended',
+        actorId: 'system',
+        actorKind: 'system',
+        correlationId: session.id,
+        payload: { messageId: teamNotice.id, messageSequence: teamNotice.sequence, messageKind: 'system', senderId: 'system' },
       })
 
       // A failed or interrupted previous attempt must stay visible as history;
@@ -693,7 +743,12 @@ export class WorkSystemRepository {
       plans: this.#database.prepare('SELECT * FROM task_plan_revisions WHERE task_id = ? ORDER BY revision').all(taskId).map(mapPlan),
       steps: this.#database.prepare(`SELECT step.* FROM task_plan_steps step JOIN task_plan_revisions plan ON plan.id = step.plan_revision_id WHERE plan.task_id = ? ORDER BY plan.revision, step.ordinal`).all(taskId).map(mapStep),
       assignments: this.#database.prepare('SELECT * FROM task_assignments WHERE task_id = ? ORDER BY created_at, id').all(taskId).map(mapAssignment),
-      runs: this.#database.prepare('SELECT * FROM task_runs WHERE task_id = ? ORDER BY attempt').all(taskId).map(mapRun),
+      runs: this.#database.prepare(`SELECT run.*, turn.session_id,
+        COALESCE((SELECT json_group_array(participant_id) FROM work_session_participants
+          WHERE session_id = turn.session_id AND kind = 'employee'), '[]') AS participant_ids_json
+        FROM task_runs run
+        JOIN work_turns turn ON turn.id = run.work_turn_id
+        WHERE run.task_id = ? ORDER BY run.attempt`).all(taskId).map(mapRun),
       deliverables: this.#database.prepare('SELECT * FROM deliverables WHERE task_id = ? ORDER BY version').all(taskId).map(mapDeliverable),
       reviews: this.#database.prepare('SELECT * FROM reviews WHERE task_id = ? ORDER BY created_at, id').all(taskId).map(mapReview),
       growthEvidence: this.#database.prepare('SELECT * FROM growth_evidence WHERE task_id = ? ORDER BY created_at, id').all(taskId).map(mapGrowth),
@@ -750,16 +805,17 @@ export class WorkSystemRepository {
     }
   }
 
-  #insertExecutionParticipant(
+  #ensureExecutionParticipant(
     session: WorkSession,
     participantId: string,
     kind: ParticipantKind,
     joinedAt: string,
   ): void {
-    this.#database.prepare(
-      `INSERT INTO work_session_participants (session_id, participant_id, kind, joined_at)
+    const inserted = this.#database.prepare(
+      `INSERT OR IGNORE INTO work_session_participants (session_id, participant_id, kind, joined_at)
        VALUES (?, ?, ?, ?)`,
     ).run(session.id, participantId, kind, joinedAt)
+    if (Number(inserted.changes) === 0) return
     this.#appendExecutionEvent({
       workspaceId: session.workspaceId,
       worldId: session.worldId,
@@ -1057,7 +1113,7 @@ function mapTask(row: object): WorkTask { const v = row as Record<string, unknow
 function mapPlan(row: object): TaskPlanRevision { const v = row as Record<string, unknown>; return { id: String(v.id), taskId: String(v.task_id), revision: Number(v.revision), status: v.status as TaskPlanRevision['status'], summary: String(v.summary), executionMode: v.execution_mode as TaskPlanRevision['executionMode'], createdBy: String(v.created_by), createdAt: String(v.created_at) } }
 function mapStep(row: object): TaskPlanStep { const v = row as Record<string, unknown>; return { id: String(v.id), planRevisionId: String(v.plan_revision_id), ordinal: Number(v.ordinal), title: String(v.title), description: String(v.description), requiredSkills: json<string[]>(v.required_skills_json), assignedEmployeeIds: json<string[]>(v.assigned_employee_ids_json), dependsOn: json<string[]>(v.depends_on_json), executionMode: v.execution_mode as TaskPlanStep['executionMode'], expectedOutput: String(v.expected_output), status: v.status as TaskPlanStep['status'] } }
 function mapAssignment(row: object): TaskAssignment { const v = row as Record<string, unknown>; return { id: String(v.id), taskId: String(v.task_id), planRevisionId: String(v.plan_revision_id), stepId: String(v.step_id), employeeId: String(v.employee_id), assignmentReason: json<JsonObject>(v.assignment_reason_json), requiredSkills: json<string[]>(v.required_skills_json), status: v.status as TaskAssignment['status'], createdAt: String(v.created_at), updatedAt: String(v.updated_at) } }
-function mapRun(row: object): TaskRun { const v = row as Record<string, unknown>; return { id: String(v.id), taskId: String(v.task_id), planRevisionId: String(v.plan_revision_id), attempt: Number(v.attempt), workTurnId: String(v.work_turn_id), ...(optional(v.idempotency_key) === undefined ? {} : { idempotencyKey: optional(v.idempotency_key)! }), ...(optional(v.fingerprint_sha256) === undefined ? {} : { fingerprintSha256: optional(v.fingerprint_sha256)! }), agentRunIds: json<string[]>(v.agent_run_ids_json), status: v.status as TaskRun['status'], startedAt: String(v.started_at), ...(optional(v.completed_at) === undefined ? {} : { completedAt: optional(v.completed_at)! }), ...(typeof v.cost === 'number' ? { cost: v.cost } : {}), ...(typeof v.latency === 'number' ? { latency: v.latency } : {}), ...(optional(v.error_code) === undefined ? {} : { errorCode: optional(v.error_code)! }) } }
+function mapRun(row: object): TaskRun { const v = row as Record<string, unknown>; return { id: String(v.id), taskId: String(v.task_id), planRevisionId: String(v.plan_revision_id), attempt: Number(v.attempt), workTurnId: String(v.work_turn_id), ...(optional(v.session_id) === undefined ? {} : { sessionId: optional(v.session_id)! }), ...(optional(v.participant_ids_json) === undefined ? {} : { participantIds: json<string[]>(v.participant_ids_json) }), ...(optional(v.idempotency_key) === undefined ? {} : { idempotencyKey: optional(v.idempotency_key)! }), ...(optional(v.fingerprint_sha256) === undefined ? {} : { fingerprintSha256: optional(v.fingerprint_sha256)! }), agentRunIds: json<string[]>(v.agent_run_ids_json), status: v.status as TaskRun['status'], startedAt: String(v.started_at), ...(optional(v.completed_at) === undefined ? {} : { completedAt: optional(v.completed_at)! }), ...(typeof v.cost === 'number' ? { cost: v.cost } : {}), ...(typeof v.latency === 'number' ? { latency: v.latency } : {}), ...(optional(v.error_code) === undefined ? {} : { errorCode: optional(v.error_code)! }) } }
 function mapDeliverable(row: object): Deliverable { const v = row as Record<string, unknown>; return { id: String(v.id), taskId: String(v.task_id), taskRunId: String(v.task_run_id), submittedByEmployeeId: String(v.submitted_by_employee_id), artifactId: String(v.artifact_id), artifactVersionId: Number(v.artifact_version_id), title: String(v.title), summary: String(v.summary), evidenceRefs: json<string[]>(v.evidence_refs_json), version: Number(v.version), status: v.status as Deliverable['status'], createdAt: String(v.created_at), ...(optional(v.step_id) === undefined ? {} : { stepId: optional(v.step_id)! }) } }
 function mapReview(row: object): Review { const v = row as Record<string, unknown>; return { id: String(v.id), taskId: String(v.task_id), deliverableId: String(v.deliverable_id), reviewerKind: v.reviewer_kind as Review['reviewerKind'], reviewerId: String(v.reviewer_id), decision: v.decision as Review['decision'], feedback: String(v.feedback), rubric: json<JsonObject>(v.rubric_json), createdAt: String(v.created_at) } }
 function mapGrowth(row: object): GrowthEvidence { const v = row as Record<string, unknown>; return { id: String(v.id), workspaceId: String(v.workspace_id), worldId: String(v.world_id), taskId: String(v.task_id), deliverableId: String(v.deliverable_id), employeeId: String(v.employee_id), skillIds: json<string[]>(v.skill_ids_json), outcome: v.outcome as GrowthEvidence['outcome'], summary: String(v.summary), createdAt: String(v.created_at) } }

@@ -85,6 +85,10 @@ export interface TaskRun {
   planRevisionId: string
   attempt: number
   workTurnId: string
+  /** The task group created for this execution. Derived from the owning WorkTurn. */
+  sessionId?: string
+  /** Current employee membership of that task group. Derived for task-detail reads. */
+  participantIds?: string[]
   /** Caller supplied execution key. Absent for legacy/non-idempotent callers. */
   idempotencyKey?: string
   /** SHA-256 of the normalized execution request, never the raw task prompt. */
