@@ -63,6 +63,16 @@ describe('model stats state-owned requests', () => {
     await act(async () => pending.reject(new Error('旧请求失败')))
     expect(node.querySelector('[role="alert"]')).toBeNull(); expect(inputValue()).toBe('10')
   })
+  it('abbreviates large token columns while keeping exact values in the title', async () => {
+    fetchStats.mockResolvedValueOnce(result(1_250_000))
+    await render()
+    const first = node.querySelector('.model-hub__stat-card strong')!
+    expect(first.textContent).toBe('1.3M')
+    expect(first.getAttribute('title')).toBe('1,250,000')
+    const cells = [...node.querySelectorAll('.model-hub__stats-table tbody tr td')]
+    expect(cells[1]?.textContent).toBe('1.3M')
+    expect(cells[1]?.getAttribute('title')).toBe('1,250,000')
+  })
 })
 
 it('lists only configured workspace providers, including providers with no logs', async () => {

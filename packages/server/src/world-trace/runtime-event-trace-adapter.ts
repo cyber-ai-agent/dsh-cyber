@@ -90,7 +90,9 @@ function tokenUsage(event: AgentRuntimeEvent) {
   const prompt = event.metadata.tokensPrompt
   const completion = event.metadata.tokensCompletion
   const total = event.metadata.tokensTotal
-  return typeof prompt === 'number' && typeof completion === 'number' && typeof total === 'number'
-    ? { prompt, completion, total }
-    : undefined
+  if (typeof prompt !== 'number' || typeof completion !== 'number' || typeof total !== 'number') return undefined
+  const cached = event.metadata.tokensCached
+  return typeof cached === 'number'
+    ? { prompt, completion, total, cachedPrompt: cached }
+    : { prompt, completion, total }
 }

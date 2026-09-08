@@ -65,7 +65,7 @@ export function WorldTraceItem({ entry, employees, open, onToggle, onOpenArtifac
           </>}
         {contextRunId === undefined || onOpenContext === undefined ? null : <button type="button" className="world-trace-context__open" aria-label={`查看运行 ${contextRunId} 的上下文`} onClick={() => onOpenContext(contextRunId)}>{entry.context === undefined ? '查看上下文记录' : '打开上下文检查器'}</button>}
       </section>}
-      {entry.modelId || entry.provider || entry.tokenUsage ? <section className="world-trace-usage"><strong>模型用量</strong><dl>{entry.provider ? <><dt>服务</dt><dd>{entry.provider}</dd></> : null}{entry.modelId ? <><dt>模型</dt><dd>{entry.modelId}</dd></> : null}{entry.tokenUsage ? <><dt>输入</dt><dd>{formatNumber(entry.tokenUsage.prompt)}</dd><dt>输出</dt><dd>{formatNumber(entry.tokenUsage.completion)}</dd><dt>合计</dt><dd>{formatNumber(entry.tokenUsage.total)} Token</dd></> : null}</dl></section> : null}
+      {entry.modelId || entry.provider || entry.tokenUsage ? <section className="world-trace-usage"><strong>模型用量</strong><dl>{entry.provider ? <><dt>服务</dt><dd>{entry.provider}</dd></> : null}{entry.modelId ? <><dt>模型</dt><dd>{entry.modelId}</dd></> : null}{entry.tokenUsage ? <><dt>输入</dt><dd>{formatNumber(entry.tokenUsage.prompt)}</dd><dt>输出</dt><dd>{formatNumber(entry.tokenUsage.completion)}</dd>{entry.tokenUsage.cachedPrompt === undefined ? null : <><dt>缓存命中</dt><dd>{formatNumber(entry.tokenUsage.cachedPrompt)}</dd></>}<dt>合计</dt><dd>{formatNumber(entry.tokenUsage.total)} Token</dd></> : null}</dl></section> : null}
     </div></details></article>}
   </li>
 }

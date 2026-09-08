@@ -24,7 +24,7 @@ class TraceRuntime implements AgentRuntimePort {
     request.onEvent?.({ kind: 'tool.completed', source: 'trace-test', sourceSessionId, sourceSequence: 4, toolName: 'sk-1234567890123456', callId: 'call-1', failed: false, metadata: {} })
     request.onEvent?.({ kind: 'assistant.message', source: 'trace-test', sourceSessionId, sourceSequence: 5, content: '最终回答', metadata: {} })
     request.onEvent?.({ kind: 'turn.completed', source: 'trace-test', sourceSessionId, sourceSequence: 6, metadata: {} })
-    return { agentSessionId: sourceSessionId, finalResponse: '最终回答', eventCount: 6, tokenUsage: { prompt: 120, completion: 30, total: 150 } }
+    return { agentSessionId: sourceSessionId, finalResponse: '最终回答', eventCount: 6, tokenUsage: { prompt: 120, completion: 30, total: 150, cachedPrompt: 40 } }
   }
   async close(): Promise<void> {}
 }
@@ -76,7 +76,7 @@ describe('World Trace HTTP and live recovery', () => {
     expect(JSON.stringify(history)).not.toContain('sk-1234567890123456')
     const liveTurn = live.find((entry) => entry.sourceKind === 'agent-run' && entry.status === 'success')
     const durableTurn = history.items.find((entry) => entry.sourceKind === 'agent-run')
-    expect(durableTurn?.tokenUsage).toEqual({ prompt: 120, completion: 30, total: 150 })
+    expect(durableTurn?.tokenUsage).toEqual({ prompt: 120, completion: 30, total: 150, cachedPrompt: 40 })
     expect(durableTurn?.actorId).toBe(employee.id)
     // A chat run belongs to no task, and its card says so by carrying none.
     expect(durableTurn).not.toHaveProperty('taskId')

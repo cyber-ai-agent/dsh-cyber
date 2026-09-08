@@ -112,3 +112,35 @@ it('does not import a provider from another workspace through a legacy assignmen
   f.time(loggedAt); const row = f.record('shared')
   await f.migrate(); expect(f.store.getModelInteraction(row.id)?.providerId).toBeUndefined()
 })
+
+it('v51 attributes legacy rows logged under the connection name itself', async () => {
+  const f = await fixture()
+  // provider 'conn' is the connection name; the row predates profile routing
+  // and stores provider='conn' (no employee profile assignment needed, even a
+  // discovery probe is attributable). v50's employee-route rule cannot reach
+  // it; v51's name-layer rule must.
+  f.provider('conn')
+  f.profile('pconn', 'conn', 'conn-display')
+  f.time(loggedAt)
+  const turn = f.record('conn', { noEmployee: true })
+  const probe = f.store.recordModelInteraction({ workspaceId: f.workspaceId, source: 'discovery', modelId: 'shared-model', provider: 'conn', status: 'success', durationMs: 40, promptMessageCount: 0, promptCharCount: 0 })
+  await f.migrate()
+  expect(f.store.getModelInteraction(turn.id)).toEqual({ ...turn, providerId: 'conn', providerName: 'conn' })
+  expect(f.store.getModelInteraction(probe.id)).toEqual({ ...probe, providerId: 'conn', providerName: 'conn' })
+  expect(f.store.aggregateModelStats(f.workspaceId, { groupBy: 'provider', providerId: 'provider:conn', ...range }).summary.totalRequests).toBe(2)
+  await f.reopen(); expect(f.store.doctor().ok).toBe(true)
+})
+
+it('v51 does not claim a legacy label that is any profile display name', async () => {
+  const f = await fixture()
+  // Another provider's profile reuses the exact name 'conn' as its nickname,
+  // so a legacy row carrying 'conn' might be that nickname, not this
+  // connection - leave it unclaimed rather than guess.
+  f.provider('conn')
+  f.provider('b'); f.profile('pb', 'b', 'conn')
+  f.time(loggedAt); const row = f.record('conn', { noEmployee: true })
+  await f.migrate()
+  expect(f.store.getModelInteraction(row.id)?.providerId).toBeUndefined()
+  expect(f.store.aggregateModelStats(f.workspaceId, { groupBy: 'provider', providerId: 'provider:conn', ...range }).summary.totalRequests).toBe(0)
+  expect(f.store.aggregateModelStats(f.workspaceId, { groupBy: 'provider', providerId: 'legacy:conn', ...range }).summary.totalRequests).toBe(1)
+})
