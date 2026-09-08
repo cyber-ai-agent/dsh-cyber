@@ -36,10 +36,15 @@ test('opens the connection hub from the top bar, adds an SSH device, and edits w
   await hub.getByLabel('设备名称').fill('测试主机')
   await hub.getByLabel('主机地址').fill('10.0.0.55')
   await hub.getByLabel('登录用户').fill('root')
+  // Password-based login is supported alongside private keys; both stay encrypted.
+  await expect(hub.getByLabel('登录密码')).toBeVisible()
+  await expect(hub.getByLabel('登录私钥')).toBeVisible()
+  await hub.getByLabel('登录密码').fill('passw0rd-demo')
   await hub.getByRole('button', { name: '添加连接' }).click()
   await expect(hub.getByRole('button', { name: /测试主机/ })).toBeVisible()
-  // Confirm the secret stayed out of the page and API listing.
+  // Confirm the secrets stayed out of the page and API listing.
   expect(await page.locator('body').innerText()).not.toContain('BEGIN OPENSSH')
+  expect(await page.locator('body').innerText()).not.toContain('passw0rd-demo')
   for (const size of [{ width: 1440, height: 900 }, { width: 1920, height: 1080 }, { width: 3840, height: 2160 }]) {
     await page.setViewportSize(size)
     await expect(hub).toBeVisible()
