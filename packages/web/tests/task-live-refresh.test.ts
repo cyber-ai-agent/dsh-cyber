@@ -145,7 +145,7 @@ describe('Task list live refresh', () => {
     await vi.waitFor(() => expect(host.textContent).toContain('来源对话'))
 
     expect(host.textContent).toContain('来源对话正在处理')
-    const run = [...host.querySelectorAll('button')].find((node) => node.textContent?.includes('生成计划并执行'))
+    const run = [...host.querySelectorAll('button')].find((node) => node.textContent?.includes('自动组队并开工'))
     expect(run).toBeUndefined()
 
     await act(async () => { root.unmount() })
