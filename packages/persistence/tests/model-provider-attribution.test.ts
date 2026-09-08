@@ -31,7 +31,8 @@ async function fixture() {
     async migrate() {
       await store.close()
       const db = new DatabaseSync(file)
-      db.exec('DELETE FROM schema_migrations WHERE version IN (50, 51); PRAGMA user_version = 49;')
+      db.exec(`ALTER TABLE employee_revisions DROP COLUMN connection_grants_json;
+        DELETE FROM schema_migrations WHERE version > 49; PRAGMA user_version = 49;`)
       db.close()
       store = await SqliteStore.open(file, { clock: () => time })
     },

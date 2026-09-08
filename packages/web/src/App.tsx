@@ -75,6 +75,7 @@ import { ChatWorkbench, isChatMessage } from './components/ChatWorkbench.js'
 import type { ConversationPermissionMode } from './components/ConversationPermissionControl.js'
 import { CreativeWorkshopLauncher } from './components/CreativeWorkshopLauncher.js'
 import { ModelHubLauncher } from './features/model-hub/ModelHubLauncher.js'
+import { ConnectionHubLauncher } from './features/connection-hub/ConnectionHubLauncher.js'
 import { NavigationPane } from './components/NavigationPane.js'
 import { ResizableShell } from './components/ResizableShell.js'
 import { WorldThemeSwitcher } from './components/WorldThemeSwitcher.js'
@@ -121,6 +122,7 @@ const RecruitmentDialog = lazy(async () => ({ default: (await import('./componen
 const WorldSettingsDialog = lazy(async () => ({ default: (await import('./components/WorldSettingsDialog.js')).WorldSettingsDialog }))
 const WorldLibraryDialog = lazy(async () => ({ default: (await import('./components/WorldLibraryDialog.js')).WorldLibraryDialog }))
 const WorldRuntimeDock = lazy(async () => ({ default: (await import('./features/world/WorldRuntimeDock.js')).WorldRuntimeDock }))
+const ConnectionHubDialog = lazy(async () => ({ default: (await import('./features/connection-hub/ConnectionHubDialog.js')).ConnectionHubDialog }))
 const WorldTracePanel = lazy(async () => ({ default: (await import('./components/world-trace/WorldTracePanel.js')).WorldTracePanel }))
 const TaskSchedulePanel = lazy(async () => ({ default: (await import('./components/TaskSchedulePanel.js')).TaskSchedulePanel }))
 
@@ -236,6 +238,7 @@ export default function App() {
   const [groupDialogOpen, setGroupDialogOpen] = useState(false)
   const [groupCreating, setGroupCreating] = useState(false)
   const [packageMarketOpen, setPackageMarketOpen] = useState(false)
+  const [connectionHubFromMarket, setConnectionHubFromMarket] = useState<{ typeId?: string }>()
   const [packageMarketKind, setPackageMarketKind] = useState<CyberMarketKind>('theme')
   const [marketplaceItems, setMarketplaceItems] = useState<CyberMarketPackage[]>([])
   const [marketplaceDiagnostics, setMarketplaceDiagnostics] = useState<Array<{ directory: string; reason: string }>>([])
@@ -1302,11 +1305,12 @@ export default function App() {
     }
   }, [activeWorld, demoMode, loadInstalledPluginCommands, loadPackages, packageMarketKind, searchMarketplace, workspace])
 
-  const openIntegrationSettings = useCallback(() => {
+  // Market → connection hub jump. The old settings' “外部连接” section is gone;
+  // installed Firecrawl plugins now route their setup button into the hub.
+  const openConnectionHubFromMarket = useCallback((typeId?: string) => {
     setPackageMarketOpen(false)
     clearError()
-    setSettingsSection('integrations')
-    setSettingsOpen(true)
+    setConnectionHubFromMarket({ ...(typeId === undefined ? {} : { typeId }) })
   }, [clearError])
 
   const recruitEmployee = useCallback(async (
@@ -1395,7 +1399,7 @@ export default function App() {
     }
   }, [activeWorld, employees.length])
 
-  const reviseEmployee = useCallback(async (input: { reason: string; persona?: string; skillGrants?: string[]; capabilityGrants?: string[]; modelPolicy: { modelProfileId?: string }; runtimePermissionMode?: AgentPermissionMode; confirmedFullAccess?: boolean }) => {
+  const reviseEmployee = useCallback(async (input: { reason: string; persona?: string; skillGrants?: string[]; capabilityGrants?: string[]; connectionGrants?: string[]; modelPolicy: { modelProfileId?: string }; runtimePermissionMode?: AgentPermissionMode; confirmedFullAccess?: boolean }) => {
     if (managingEmployee === undefined) return
     setSavingEmployee(true)
     setError(undefined)
@@ -1409,6 +1413,7 @@ export default function App() {
           persona: input.persona ?? previous?.persona ?? '',
           skillGrants: input.skillGrants ?? previous?.skillGrants ?? [],
           capabilityGrants: input.capabilityGrants ?? previous?.capabilityGrants ?? [],
+          connectionGrants: input.connectionGrants ?? previous?.connectionGrants ?? [],
           modelPolicy: input.modelPolicy,
           runtimePermissionMode: input.runtimePermissionMode ?? previous?.runtimePermissionMode ?? 'read-only',
           reason: input.reason,
@@ -2361,6 +2366,7 @@ export default function App() {
           <CreativeWorkshopLauncher workspaceId={workspace.id} onCreated={(project) => { void openWorkshopWorld(project.worldId).catch((cause) => setError(cause instanceof Error ? cause.message : '创意工坊世界已创建，但打开失败，请从世界列表重新进入。')) }} onOpenWorld={(worldId) => { void openWorkshopWorld(worldId).catch((cause) => setError(cause instanceof Error ? cause.message : '世界打开失败')) }} />
           <button type="button" onClick={() => void openPackageMarket('theme')}><Storefront size={16} />{t('app.market', '市场')}</button>
           <ModelHubLauncher workspaceId={workspace.id} worlds={worlds} employees={employees} onClosed={() => void refreshModelProfiles()} />
+          <ConnectionHubLauncher workspace={workspace} />
           <button type="button" onClick={() => { clearError(); setSettingsSection('maintenance'); setSettingsOpen(true) }}><Pulse size={16} /><span>{t('app.systemStatus', '系统状态')}</span><i className="health-indicator" />{t('app.healthy', '良好')}</button>
           <button type="button" onClick={() => { clearError(); setSettingsSection('appearance'); setSettingsOpen(true) }}><GearSix size={17} />{t('app.settings', '设置')}</button>
         </nav>
@@ -2598,6 +2604,9 @@ export default function App() {
           onHubClosed={() => void refreshModelProfiles()}
         /></Suspense>
       ) : null}
+      {connectionHubFromMarket !== undefined ? (
+        <Suspense fallback={<div className="dialog-loading" role="status">正在打开连接中心…</div>}><ConnectionHubDialog workspace={workspace} {...(connectionHubFromMarket.typeId === undefined ? {} : { initialSkillId: connectionHubFromMarket.typeId })} onClose={() => setConnectionHubFromMarket(undefined)} /></Suspense>
+      ) : null}
       {worldLibraryOpen ? (
         <Suspense fallback={<div className="dialog-loading" role="status">{t('worldLibrary.loading', '正在读取世界列表…')}</div>}><WorldLibraryDialog
           workspaceId={workspace.id}
@@ -2653,7 +2662,7 @@ export default function App() {
           onPreviewMarketplace={previewMarketplacePackage}
           onInstallMarketplace={installMarketplacePackage}
           onUninstall={uninstallPackage}
-          onOpenSettings={openIntegrationSettings}
+          onOpenSettings={(skillId) => openConnectionHubFromMarket(skillId)}
           onCreateThemeWorld={createWorldFromTheme}
           onCreateBuiltinWorld={async (templateId, name) => {
             if (demoMode) throw new Error('请在本地工作区创建世界')

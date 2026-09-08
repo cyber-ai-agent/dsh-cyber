@@ -3050,6 +3050,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .avatar-picker .avatar { border: 0; }
 .employee-settings-actions { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding-top: 14px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 12px; }
 .employee-settings-actions .primary-button { min-height: 42px; }
+.employee-settings-divider { height: 1px; margin: 2px 0 14px; border: 0; background: var(--border); }
 .employee-model-field { margin: 12px 0; padding: 12px; border: 1px solid var(--border); background: var(--surface-1); }
 .employee-model-field > span { display: flex; align-items: center; gap: 6px; color: var(--text-soft); font-weight: 600; }
 .employee-model-field small { color: var(--text-muted); line-height: 1.6; }
@@ -3078,6 +3079,34 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .integration-egress strong { font-size: 13px; }
 .integration-egress span { color: var(--text-soft); font-size: 12px; }
 .integration-editor > footer { display: flex; justify-content: flex-end; gap: 10px; }
+.integration-editor > footer .integration-editor__actions { display: flex; gap: 10px; }
+.integration-editor > footer .text-button.is-danger { margin-right: auto; color: var(--danger); }
+.integration-editor textarea { width: 100%; padding: 9px 11px; color: var(--text); background: var(--surface-0); border: 1px solid var(--border); border-radius: 8px; font: 500 12px/1.5 var(--font-mono); resize: vertical; }
+.integration-connection-list { display: grid; gap: 6px; max-height: 220px; overflow-y: auto; }
+.integration-connection-list button { display: grid; gap: 2px; padding: 10px 12px; border: 1px solid var(--border); color: var(--text); background: var(--surface-1); text-align: left; cursor: pointer; }
+.integration-connection-list button.is-active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface-1)); }
+.integration-connection-list strong { font-size: 13px; }
+.integration-connection-list small { color: var(--text-muted); font-size: 12px; }
+.integration-hub-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 18px; align-items: start; }
+.integration-hub-workspace { display: grid; gap: 14px; min-width: 0; }
+.integration-hub-workspace > .integration-connection-list { max-height: none; }
+.integration-connection-list button.is-new-connection { border-style: dashed; color: var(--accent); display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
+.integration-connection-list button.is-new-connection.is-active { border-style: solid; }
+.integration-connection-list button.is-new-connection strong { font-size: 13px; }
+.integration-connection-list button.is-new-connection small { flex: 1 1 100%; color: var(--text-muted); }
+.integration-secret-clear { padding: 0; border: 0; color: var(--danger); background: transparent; font: inherit; text-decoration: underline; cursor: pointer; }
+.integration-secret-clear:hover { color: var(--danger-strong, var(--danger)); }
+
+/* 连接中心（顶栏弹窗，与模型中心平级） */
+.connection-hub { width: min(1180px, 96vw); height: min(820px, 92vh); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border-strong); border-radius: var(--radius-dialog, 14px); background: var(--surface-0); color: var(--text); box-shadow: 0 28px 80px rgb(0 0 0 / 62%), 0 2px 8px rgb(0 0 0 / 34%); }
+.connection-hub__header { min-height: 72px; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 14px 24px; border-bottom: 1px solid var(--border); background: var(--surface-1); }
+.connection-hub__header > div { min-width: 0; display: grid; gap: 3px; }
+.connection-hub__header h2 { display: flex; gap: 8px; align-items: center; margin: 0; font-size: 20px; line-height: 1.2; letter-spacing: -.01em; }
+.connection-hub__header p { margin: 0; color: var(--text-muted); font-size: 13px; line-height: 1.5; }
+.connection-hub__header .icon-button { width: 40px; height: 40px; flex: none; }
+.connection-hub__glyph { color: var(--accent); font-size: 22px; font-weight: 700; }
+.connection-hub__loading { display: grid; flex: 1; place-items: center; color: var(--text-muted); font-size: 13px; }
+.connection-hub > .integration-hub-layout, .connection-hub > .integration-settings-panel { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 22px 24px; }
 .privacy-lock-card { display: grid; gap: 18px; padding: 20px; border: 1px solid var(--border); background: var(--surface-1); }
 .privacy-lock-card > header { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 12px; align-items: center; }
 .privacy-lock-card > header > span { width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid var(--border-strong); color: var(--accent); background: var(--surface-0); }

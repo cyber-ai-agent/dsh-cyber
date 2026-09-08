@@ -82,7 +82,8 @@ interface PackageMarketDialogProps {
   onPreviewMarketplace(item: CyberMarketPackage): Promise<PackagePermissionPreview>
   onInstallMarketplace(item: CyberMarketPackage, approvalToken: string): Promise<void>
   onUninstall(item: InstalledPackage): Promise<void>
-  onOpenSettings(): void
+  /** Opens the connection hub (external connection setup) for the given skill id. */
+  onOpenSettings?(skillId?: string): void
   onCreateThemeWorld(item: CyberMarketPackage, name: string): Promise<void>
   onCreateBuiltinWorld?(templateId: string, name: string): Promise<void>
   onRecruitTalent(item: CyberMarketPackage): Promise<void>
@@ -497,7 +498,7 @@ export function PackageMarketDialog(props: PackageMarketDialogProps) {
                   : selectedInstalled?.market === 'talent'
                   ? <TalentActivationReview item={selectedInstalled} workspaceId={props.workspaceId} world={props.world} installedPackage={selectedInstalledPackage} installing={props.installing} confirmingUninstall={confirmingUninstall} onConfirmUninstall={setConfirmingUninstall} onUninstall={props.onUninstall} onRecruit={() => props.onRecruitTalent(selectedInstalled)} />
                   : selectedInstalled?.market === 'plugin'
-                    ? <PluginActivationReview item={selectedInstalled} installedPackage={selectedInstalledPackage} installing={props.installing} confirmingUninstall={confirmingUninstall} onConfirmUninstall={setConfirmingUninstall} onUninstall={props.onUninstall} onOpenSettings={props.onOpenSettings} onUse={props.onUsePlugin} />
+                    ? <PluginActivationReview item={selectedInstalled} installedPackage={selectedInstalledPackage} installing={props.installing} confirmingUninstall={confirmingUninstall} onConfirmUninstall={setConfirmingUninstall} onUninstall={props.onUninstall} {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })} onUse={props.onUsePlugin} />
                     : <InstalledOverview installed={props.installed} transactions={props.transactions} installing={props.installing} confirmingUninstall={confirmingUninstall} onConfirmUninstall={setConfirmingUninstall} onUninstall={props.onUninstall} />}
           </aside>
         </div>
@@ -554,15 +555,16 @@ function TalentActivationReview({ item, workspaceId, world, installedPackage, in
   </section>
 }
 
-function PluginActivationReview({ item, installedPackage, installing, confirmingUninstall, onConfirmUninstall, onUninstall, onOpenSettings, onUse }: { item: CyberMarketPackage; installedPackage?: InstalledPackage | undefined; installing: boolean; confirmingUninstall?: string | undefined; onConfirmUninstall(packageId?: string): void; onUninstall(item: InstalledPackage): Promise<void>; onOpenSettings(): void; onUse(command: string): void }) {
+function PluginActivationReview({ item, installedPackage, installing, confirmingUninstall, onConfirmUninstall, onUninstall, onOpenSettings, onUse }: { item: CyberMarketPackage; installedPackage?: InstalledPackage | undefined; installing: boolean; confirmingUninstall?: string | undefined; onConfirmUninstall(packageId?: string): void; onUninstall(item: InstalledPackage): Promise<void>; onOpenSettings?(skillId?: string): void; onUse(command: string): void }) {
   const activation = item.activation?.kind === 'prompt-transform' ? item.activation : undefined
   const commands = activation?.commands ?? []
-  const hasFirecrawlSkill = item.manifest.id.toLocaleLowerCase().includes('firecrawl') || item.manifest.entrypoints?.some((entrypoint) => entrypoint.kind === 'skill' && entrypoint.id === 'web.search.firecrawl') === true
+  const firecrawlSkillId = item.manifest.entrypoints?.find((entrypoint) => entrypoint.kind === 'skill' && entrypoint.id === 'web.search.firecrawl')?.id
+  const hasFirecrawlSkill = item.manifest.id.toLocaleLowerCase().includes('firecrawl') || firecrawlSkillId !== undefined
   return <section className="market-activation-review market-activation-review--plugin">
     <header><span className="market-activation-review__mark"><ChatCircleDots size={20} /></span><div><span>插件已安装 · 所有世界可用</span><h3>{item.manifest.displayName}</h3><p>{item.manifest.summary}</p></div></header>
     {commands.length > 0 ? <div className="market-command-list"><strong>选择一种用法</strong>{commands.map((command) => <button key={command.trigger} type="button" onClick={() => onUse(command.trigger)}><span><code>{command.trigger}</code><small>{command.description}</small></span><span>带入对话<ArrowRight size={15} /></span></button>)}</div> : activation?.automatic ? <p className="market-activation-review__notice"><CheckCircle size={16} />该插件会自动参与符合条件的对话，无需输入命令。</p> : <p className="market-activation-review__notice is-warning"><Warning size={16} />插件已安装，但没有声明可直接触发的指令。</p>}
     <p className="market-activation-review__footnote">点击后只会把指令带入输入框，你可以补充任务内容并确认。</p>
-    {hasFirecrawlSkill ? <button className="secondary-button" type="button" onClick={onOpenSettings}>打开 Firecrawl 设置</button> : null}
+    {hasFirecrawlSkill && onOpenSettings !== undefined ? <button className="secondary-button" type="button" onClick={() => onOpenSettings(firecrawlSkillId ?? 'web.search.firecrawl')}>打开 Firecrawl 设置</button> : null}
     {installedPackage === undefined ? null : <PackageRemovalAction item={installedPackage} installing={installing} confirming={confirmingUninstall === installedPackage.packageId} onConfirm={() => onConfirmUninstall(installedPackage.packageId)} onCancel={() => onConfirmUninstall(undefined)} onUninstall={onUninstall} />}
   </section>
 }

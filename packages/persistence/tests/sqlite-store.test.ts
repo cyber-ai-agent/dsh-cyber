@@ -220,6 +220,48 @@ describe('SqliteStore', () => {
       .toThrow('identity is immutable')
   })
 
+  it('persists connection grants across revise and restart', async () => {
+    const { path, store } = await testDatabase()
+    const workspace = store.createWorkspace({ name: 'Connection grant round trip' })
+    const world = store.createWorld({ workspaceId: workspace.id, name: 'Company', templateId: 'cyber-company' })
+    store.saveBlueprint(blueprint())
+    const employee = store.recruitEmployee({
+      workspaceId: workspace.id,
+      worldId: world.id,
+      blueprintId: 'software-engineer',
+      blueprintVersion: 1,
+      skillGrants: ['device.ssh.command'],
+    })
+    expect(store.getEmployeeRevision(employee.id, employee.currentRevision)).toMatchObject({ connectionGrants: [] })
+    expect(store.reviseEmployee({
+      employeeId: employee.id,
+      reason: 'grant 客厅主机',
+      connectionGrants: ['device-1'],
+    })).toMatchObject({ connectionGrants: ['device-1'], skillGrants: ['device.ssh.command'] })
+    // A grant omitted on a later revise keeps the previous connection grants.
+    expect(store.reviseEmployee({
+      employeeId: employee.id,
+      reason: 'revoke skill only',
+      skillGrants: [],
+    })).toMatchObject({ connectionGrants: ['device-1'], skillGrants: [] })
+    expect(store.reviseEmployee({
+      employeeId: employee.id,
+      reason: 'revoke connection',
+      connectionGrants: [],
+    })).toMatchObject({ connectionGrants: [] })
+    store.close()
+    stores.splice(stores.indexOf(store), 1)
+    const reopened = await SqliteStore.open(path)
+    stores.push(reopened)
+    expect(reopened.getEmployeeRevision(employee.id, 3)).toMatchObject({ connectionGrants: ['device-1'] })
+    expect(reopened.getEmployeeRevision(employee.id, 4)).toMatchObject({ connectionGrants: [] })
+    expect(() => reopened.reviseEmployee({
+      employeeId: employee.id,
+      reason: 'duplicate grant',
+      connectionGrants: ['device-1', 'device-1'],
+    })).toThrow('must be unique')
+  })
+
   it('persists direct and group session history across restart', async () => {
     const { path, store } = await testDatabase()
     const workspace = store.createWorkspace({ name: '本地工作区' })
@@ -1968,4 +2010,11 @@ function removeModelStatsFieldsForLegacyFixture(database: DatabaseSync): void {
     ALTER TABLE model_interaction_logs DROP COLUMN provider_name;
     ALTER TABLE model_interaction_logs DROP COLUMN tokens_cached;
   `)
+  // Fixtures start from a fully-migrated current database, then rewind
+  // user_version. Reproduce a pre-v52 file so replaying the v52 migration
+  // actually adds the column instead of colliding with the existing one.
+  const revisionColumns = database.prepare('PRAGMA table_info(employee_revisions)').all() as Array<{ name: string }>
+  if (revisionColumns.some((column) => column.name === 'connection_grants_json')) {
+    database.exec('ALTER TABLE employee_revisions DROP COLUMN connection_grants_json;')
+  }
 }

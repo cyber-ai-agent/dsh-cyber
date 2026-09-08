@@ -15,7 +15,6 @@ import {
   Moon,
   Palette,
   PencilSimple,
-  Plug,
   Plus,
   ShieldCheck,
   Sparkle,
@@ -55,7 +54,7 @@ const ModelHubDialog = lazy(async () => ({ default: (await import('../features/m
 
 interface ApplicationAccessMutation extends ApplicationAccessSummary { recoveryCode?: string }
 
-export type SettingsSection = 'appearance' | 'models' | 'integrations' | 'privacy' | 'data' | 'logs' | 'maintenance'
+export type SettingsSection = 'appearance' | 'models' | 'privacy' | 'data' | 'logs' | 'maintenance'
 export type SystemAction = 'status' | 'doctor' | 'backup' | 'export' | 'check-application-update' | 'apply-application-update'
 
 export interface SystemActionInput {
@@ -138,7 +137,6 @@ const SETTINGS_GROUPS = [
     items: [
       ['appearance', '外观与布局', Palette, '颜色、背景和界面语言'],
       ['models', 'AI 模型', Cpu, '统一管理已移至模型中心'],
-      ['integrations', '外部连接', Plug, '管理受信任的外部服务'],
       ['privacy', '隐私与锁屏', LockKey, '保护整个本地工作台'],
     ],
   },
@@ -255,7 +253,6 @@ export function SettingsDialog({
               <p className="settings-hub-gate__note">{t('modelHub.gateNote', '本设置页不再单独管理模型；旧的模型配置已在首次启动时自动迁移为服务商。')}</p>
             </div>
           ) : null}
-          {section === 'integrations' ? <IntegrationSettings workspaceId={workspace.id} /> : null}
           {section === 'privacy' ? <PrivacySettings /> : null}
           {section === 'logs' ? (
             <ModelInteractionLogSettings
@@ -278,95 +275,6 @@ export function SettingsDialog({
       </section>
     </div>
   )
-}
-
-function IntegrationSettings({ workspaceId }: { workspaceId: string }) {
-  const [descriptors, setDescriptors] = useState<IntegrationDescriptor[]>([])
-  const [connections, setConnections] = useState<IntegrationConnection[]>([])
-  const [selectedId, setSelectedId] = useState<string>()
-  const [config, setConfig] = useState<JsonObject>({})
-  const [credential, setCredential] = useState('')
-  const [enabled, setEnabled] = useState(true)
-  const [health, setHealth] = useState<IntegrationHealth>()
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string>()
-
-  const load = async () => {
-    const result = await api<{ descriptors: IntegrationDescriptor[]; items: IntegrationConnection[] }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/integrations`)
-    setDescriptors(result.descriptors)
-    setConnections(result.items)
-    setSelectedId((current) => current ?? result.descriptors[0]?.id)
-  }
-
-  useEffect(() => {
-    void load().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : '外部连接加载失败'))
-    // load only changes local connection state for the selected workspace.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId])
-
-  const descriptor = descriptors.find((item) => item.id === selectedId)
-  const connection = connections.find((item) => item.integrationId === selectedId)
-  useEffect(() => {
-    setConfig(Object.fromEntries((descriptor?.configFields ?? []).map((field) => [
-      field.id,
-      connection?.config[field.id] ?? (field.kind === 'boolean' ? false : field.kind === 'number' ? 0 : field.placeholder ?? ''),
-    ])) as JsonObject)
-    setEnabled(connection?.enabled ?? true)
-    setCredential('')
-    setHealth(undefined)
-  }, [connection?.id, descriptor?.id])
-
-  const save = async () => {
-    if (descriptor === undefined) return
-    setBusy(true); setError(undefined); setHealth(undefined)
-    try {
-      await api(`/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/${encodeURIComponent(descriptor.id)}`, {
-        method: 'PUT',
-        body: JSON.stringify({ config, enabled, ...(credential.trim() ? { credential: credential.trim() } : {}) }),
-      })
-      await load()
-      setCredential('')
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '连接保存失败')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const test = async () => {
-    if (descriptor === undefined) return
-    setBusy(true); setError(undefined)
-    try {
-      const result = await api<{ health: IntegrationHealth }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/${encodeURIComponent(descriptor.id)}/test`, { method: 'POST', body: '{}' })
-      setHealth(result.health)
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '连接测试失败')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const requiredConfigMissing = descriptor?.configFields.some((field) => field.required && String(config[field.id] ?? '').trim() === '') ?? true
-
-  return <div className="settings-section settings-section--integrations">
-    <div className="settings-section__heading"><h3>外部连接</h3><p>统一管理受信任服务。安装 Skill 只声明能力，角色获得授权后仍需经过审批策略才能发送数据。</p></div>
-    <div className="integration-provider-list" role="list">
-      {descriptors.map((item) => <button key={item.id} type="button" className={item.id === selectedId ? 'is-active' : ''} onClick={() => setSelectedId(item.id)}><strong>{item.displayName}</strong><small>{item.summary}</small></button>)}
-    </div>
-    {descriptor === undefined ? <div className="dialog-empty">当前没有可配置的外部连接。</div> : <section className="integration-editor">
-      <header><div><h4>{descriptor.displayName}</h4><p>{descriptor.summary}</p></div><label><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />启用连接</label></header>
-      {descriptor.configFields.map((field) => field.kind === 'boolean' ? (
-        <label className="dialog-field dialog-field--checkbox" key={field.id}><input type="checkbox" checked={config[field.id] === true} onChange={(event) => setConfig((current) => ({ ...current, [field.id]: event.target.checked }))} /><span>{field.displayName}</span><small>{field.description}</small></label>
-      ) : (
-        <label className="dialog-field" key={field.id}><span>{field.displayName}</span><input type={field.kind === 'number' ? 'number' : 'text'} value={String(config[field.id] ?? '')} placeholder={field.placeholder} onChange={(event) => setConfig((current) => ({ ...current, [field.id]: field.kind === 'number' ? Number(event.target.value) : event.target.value }))} /><small>{field.description}</small></label>
-      ))}
-      {descriptor.secretFields.map((field) => <label className="dialog-field" key={field.id}><span>{field.displayName}</span><input type="password" autoComplete="new-password" value={credential} placeholder={connection?.credentialConfigured ? '已加密保存；留空保持不变' : field.required ? '请输入连接凭据' : '可选'} onChange={(event) => setCredential(event.target.value)} /><small>{field.description}</small></label>)}
-      <div className="integration-egress"><strong>会发送到外部服务</strong><span>{descriptor.dataEgress.join('、') || '无'}</span></div>
-      {error ? <p className="model-form-message model-form-message--error" role="alert">{error}</p> : null}
-      {health ? <p className={health.status === 'ready' ? 'model-form-message model-form-message--success' : 'model-form-message model-form-message--error'} role="status">{health.detail} · {health.latencyMs} ms</p> : null}
-      <footer><button className="secondary-button" type="button" disabled={busy || connection === undefined} onClick={() => void test()}>测试连接</button><button className="primary-button" type="button" disabled={busy || requiredConfigMissing} onClick={() => void save()}>{busy ? '处理中…' : '保存连接'}</button></footer>
-    </section>}
-  </div>
 }
 
 function PrivacySettings() {

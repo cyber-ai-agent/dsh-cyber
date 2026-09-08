@@ -2452,6 +2452,17 @@ const MIGRATIONS: readonly Migration[] = [
       WHERE provider_id IS NULL AND id IN (SELECT log_id FROM candidates);
     `,
   },
+  {
+    version: 52,
+    name: 'employee-connection-grants',
+    sql: `
+      -- A character may hold a skill grant and still be unable to drive an
+      -- external connection: driving happens per device/endpoint, authorized by
+      -- connection id in the character revision (the second half of the
+      -- skill+connection pair). Existing revisions default to no connections.
+      ALTER TABLE employee_revisions ADD COLUMN connection_grants_json TEXT NOT NULL DEFAULT '[]';
+    `,
+  },
 ]
 
 /**

@@ -37,6 +37,8 @@
 | 应用更新 | 仅支持干净 `main` 分支从 `origin/main` 快进；更新前在隔离工作树完成 frozen install 与 build，并创建完整本地 Backup Bundle | 更新完成后需要用户重启当前进程；非 Git 安装和开发分支会明确显示不支持原因 | 桌面安装包增量更新、签名发布通道 |
 | 动作审批 | 外部副作用先持久化 Skill Action 与 Approval Request；两者关联 WorkTurn；未批准、已拒绝、已过期或授权已撤销时不会进入受信任 Adapter；持久执行 CAS 保证单次进入外部边界；审批后崩溃可安全续跑，已进入外部边界的崩溃转为结果未知并禁止自动重试 | 会话内审批卡先展示中文操作、目标和风险，技术标识折叠在详情中；按钮只依据服务端 `allowedScopes` 显示本次、本角色或本世界范围；可复用策略由 Skill Descriptor 显式授权并绑定 Skill、Action、Target、Risk 与作用域，不支持精确参数约束的动态能力只能单次批准 | 独立审批中心界面、通用文件写入审批、远程审批同步 |
 | MCP Skill Adapter | 官方 MCP TypeScript SDK Streamable HTTP 客户端；工具发现映射为独立 Skill；调用严格经过角色 Grant、单次 Approval 和 SQLite Action Ledger；禁止创建角色级或世界级持久策略；参数加密暂存并确定性清理；原始结果不持久化 | V1 通过显式 `/mcp 工具名 JSON` 命令提出调用；每个工作区当前配置一个 MCP 服务 | stdio Extension Host、模型原生结构化调用、多 MCP 服务实例管理 |
+| 连接中心与 SSH 设备 | 顶栏“连接中心”在模型中心之后常驻，设置页“外部连接”入口已移除，凭据管理只在连接中心一处；左栏连接类目＋右栏操作区；Integration Registry 演进为多连接实例宿主（SSH 设备可多实例，单连接类型保留旧流程）；连接凭据走本机 AES-256-GCM 凭据库，可按字段独立保存/清除 | SSH 连接支持新增、编辑、启用、删除和 TCP+SSH banner 探测；登录支持私钥或密码（私钥优先、密码兜底）；凭据只在宿主机内存用于单次会话 | API Token 等服务类型、连接健康历史、凭据轮换 |
+| 角色连接授权（两级授权） | EmployeeRevision.connectionGrants（schema v52）；角色设置“技能与工具 → 连接授权”按工作区列出 SSH 设备并勾选；SSH 动作 Preflight/Execute 双重校验连接必须处于角色授权内，未授权不发送命令；缺省拒绝所有设备 | 删除的连接以“已移除的连接”保留供显式撤销；技能授权与连接授权互相独立，两者都满足才允许外发 | 连接级审批范围界面（本次/本角色/本世界）、多类型连接目录化勾选 |
 | 模型交互日志 | turn/discovery/knowledge 三类来源采集、SQLite 持久化、分页/筛选/详情/清空 API、设置面板日志界面、错误信息密钥清洗；turn 日志绑定 WorkTurn 与 AgentRun，知识整理只保存模型、耗时、字符数、真实 Token 和错误分类 | 一条 turn 日志表示整轮角色运行，不拆分 worker 内部的多次模型请求；知识整理不保存来源正文、提取提示或模型原始响应；无自动保留策略 | worker 内逐请求明细、日志自动清理和条数上限 |
 | CI | Node 22.19、pnpm 11.7、frozen lockfile、typecheck、test、Chromium、E2E | 仓库工作流名为 `required`；GitHub 分支保护需在仓库设置中另行确认 | 自动发布与包签名流水线 |
 

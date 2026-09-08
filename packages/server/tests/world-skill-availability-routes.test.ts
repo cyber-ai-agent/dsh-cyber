@@ -120,4 +120,33 @@ describe('World Skill Availability route seam', () => {
     expect(revoked.body.revision.skillGrants).toEqual([])
     expect(server.store.getEmployeeRevision(employeeId, revoked.body.revision.revision)?.skillGrants).toEqual([])
   })
+
+  it('round-trips connection grants through the employee revision API', async () => {
+    const { origin, server, world } = await start({
+      isAvailable: () => true,
+    })
+    const recruited = await json(origin, `/api/worlds/${world.id}/recruit`, post({
+      blueprintId: 'cyber-company.software-engineer',
+      blueprintVersion: 1,
+      skillGrants: [],
+    }))
+    expect(recruited.response.status).toBe(201)
+    const employeeId = recruited.body.employee.id as string
+    expect(server.store.getEmployeeRevision(employeeId, 1)?.connectionGrants).toEqual([])
+
+    const granted = await json(origin, `/api/employees/${employeeId}/revisions`, post({
+      reason: '授权 SSH 设备',
+      connectionGrants: ['builtin.ssh-device:device-1'],
+    }))
+    expect(granted.response.status).toBe(201)
+    expect(granted.body.revision.connectionGrants).toEqual(['builtin.ssh-device:device-1'])
+    expect(server.store.getEmployeeRevision(employeeId, granted.body.revision.revision)?.connectionGrants).toEqual(['builtin.ssh-device:device-1'])
+
+    const revoked = await json(origin, `/api/employees/${employeeId}/revisions`, post({
+      reason: '移除连接授权',
+      connectionGrants: [],
+    }))
+    expect(revoked.response.status).toBe(201)
+    expect(revoked.body.revision.connectionGrants).toEqual([])
+  })
 })

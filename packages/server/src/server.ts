@@ -103,7 +103,7 @@ import { WorldCharacterAuthorityService } from './services/world-character-autho
 import { WorldPermissionRequestService } from './services/world-permission-request-service.js'
 import { OwnerRuntimeAccessService } from './services/owner-runtime-access-service.js'
 import { WorldRuntimePermissionResolver } from './services/world-runtime-permission-resolver.js'
-import { createBuiltinSkillRegistry } from './skills/builtin-skill-registry.js'
+import { createBuiltinSkillRegistry, createConnectionGrantsResolver } from './skills/builtin-skill-registry.js'
 import { LocalSkillActionRepository } from './skills/local-skill-action-repository.js'
 import { SqliteSkillActionRepository } from './skills/sqlite-skill-action-repository.js'
 import type { CharacterSkillActionRepository } from './skills/skill-action-repository.js'
@@ -290,12 +290,12 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
     firecrawl: { store, integrations, client: firecrawlClient, listWorldPackages: (worldId) => worldPackages.listRuntimePackages(worldId) },
     browser: { store, listWorldPackages: (worldId) => worldPackages.listRuntimePackages(worldId), publishScreenshot: (input) => worldArtifacts.publishBrowserScreenshot(input), ...(options.browserClientFactory === undefined ? {} : { clientFactory: options.browserClientFactory }), ...(options.browserPolicy === undefined ? {} : { policy: options.browserPolicy }) },
     worldManagement: worldManagementHost,
+    ssh: { store, integrations, connectionGrantsFor: createConnectionGrantsResolver(store) },
   })
   const mcpAdapter = options.skillRegistry === undefined ? new McpSkillAdapter({ store, integrations, clients: mcpClients }) : undefined
   if (mcpAdapter !== undefined) skillRegistry.register(mcpAdapter)
   const skillCatalog = new SkillCatalogService({ store, registry: skillRegistry, worldPackages })
-  // Production uses the derived World Catalog by default. Tests and legacy
-  // embedders may still inject a narrower availability port explicitly.
+  // Production uses the derived World Catalog by default; tests and legacy embedders may inject a narrower port explicitly.
   const skillAvailability = options.skillAvailability ?? skillCatalog
 
   const activeDshBinPath = await resolveActiveRuntime(store, runtimeStateRoot, stateRoot)

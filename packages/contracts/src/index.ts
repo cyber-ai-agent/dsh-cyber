@@ -1,7 +1,7 @@
 import type { WorldCharacterAuthority } from './world-authority.js'
 import type { UiLocale } from './locales.js'
 
-export const CYBER_SCHEMA_VERSION = 51 as const
+export const CYBER_SCHEMA_VERSION = 52 as const
 
 export * from './runtime-access.js'
 export * from './locales.js'
@@ -398,6 +398,8 @@ export interface IntegrationFieldDescriptor {
   kind: IntegrationFieldKind
   required: boolean
   placeholder?: string
+  /** Render the field as a multi-line editor (for example an SSH private key). */
+  multiline?: boolean
 }
 
 /** Public, provider-neutral metadata. It never contains implementation callbacks or credentials. */
@@ -409,6 +411,11 @@ export interface IntegrationDescriptor {
   secretFields: IntegrationFieldDescriptor[]
   skillIds: string[]
   dataEgress: string[]
+  /**
+   * One provider may own several connections (one per SSH device / API
+   * endpoint). False keeps the legacy single-connection-per-type behaviour.
+   */
+  allowsMultipleConnections?: boolean
 }
 
 export interface IntegrationConnection {
@@ -419,6 +426,8 @@ export interface IntegrationConnection {
   config: JsonObject
   enabled: boolean
   credentialConfigured: boolean
+  /** Per-secret-field configuration flags (SSH 私钥/密码 etc.); absent for legacy single-field connections. */
+  secretsConfigured?: Record<string, boolean>
   createdAt: IsoTimestamp
   updatedAt: IsoTimestamp
 }
@@ -549,6 +558,13 @@ export interface EmployeeRevision {
   persona: string
   skillGrants: string[]
   capabilityGrants: string[]
+  /**
+   * Connection ids (from the connection hub) this character may drive.
+   * Empty/absent means no external connection is authorized regardless of
+   * skill grants — a connection grant is the second, device-level half of
+   * the skill+connection authorization pair.
+   */
+  connectionGrants: string[]
   modelPolicy: JsonObject
   runtimePermissionMode?: AgentPermissionMode
   reason: string

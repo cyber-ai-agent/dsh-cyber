@@ -91,7 +91,7 @@ test('uses real world Catalog, revision persistence, availability gates and an a
     }))).toEqual({ noHorizontalOverflow: true, readableText: true, usableControls: true })
     await page.screenshot({ path: join(screenshotRoot, `skill-catalog-${viewport.label}.png`), fullPage: false })
   }
-  await management.getByRole('button', { name: '保存能力设置' }).click()
+  await management.getByRole('button', { name: '保存能力与连接设置' }).click()
   await expect(management).toBeHidden()
 
   const savedRevision = current.store.getEmployeeRevision(employee.id, current.store.getEmployee(employee.id)!.currentRevision)

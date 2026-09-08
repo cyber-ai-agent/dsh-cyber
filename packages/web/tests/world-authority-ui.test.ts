@@ -66,7 +66,7 @@ describe('role runtime permission UI', () => {
       models: [],
       avatarIndex: 0,
       saving: false,
-      currentRevision: { employeeId: employee.id, revision: 1, persona: '负责交付', skillGrants: [], capabilityGrants: [], modelPolicy: {}, runtimePermissionMode: 'workspace-write', reason: 'test', createdAt: employee.createdAt },
+      currentRevision: { employeeId: employee.id, revision: 1, persona: '负责交付', skillGrants: [], capabilityGrants: [], connectionGrants: [], modelPolicy: {}, runtimePermissionMode: 'workspace-write', reason: 'test', createdAt: employee.createdAt },
       initialSection: 'abilities',
       onClose: () => undefined,
       onRevise: async () => undefined,
@@ -76,9 +76,10 @@ describe('role runtime permission UI', () => {
     expect(markup).toContain('身份资料')
     expect(markup).toContain('行为方式')
     expect(markup).toContain('技能与工具')
+    expect(markup).toContain('连接授权')
     expect(markup).toContain('对话权限')
     expect(markup).toContain('高级设置')
-    expect(markup).toContain('保存能力设置')
+    expect(markup).toContain('保存能力与连接设置')
     expect(markup).not.toContain('保存为 r')
     expect(markup).not.toContain('revision')
     expect(markup).not.toContain('Capability')
