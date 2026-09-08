@@ -2365,6 +2365,56 @@ const MIGRATIONS: readonly Migration[] = [
         ON model_interaction_logs(workspace_id, provider_id, created_at);
     `,
   },
+  {
+    version: 50,
+    name: 'model-interaction-backfill-employee-attribution',
+    sql: `
+      -- v49 added provider_id but did not backfill. Turns recorded before that
+      -- change carry only the model nickname in ` + '`provider`' + ` and NULL
+      -- provider_id, so they disappear from the per-provider stats view even
+      -- though the employee was routed through a known provider connection at
+      -- the time. Recover attribution deterministically: a legacy row whose
+      -- employee was assigned (model_assignments scope='employee') a profile
+      -- exposing the same model_id, with that assignment effective before the
+      -- row was written, belongs to that profile's provider. Rows without an
+      -- employee, or whose employee has no matching assignment, stay legacy.
+      UPDATE model_interaction_logs
+      SET provider_id = (
+            SELECT p.id FROM model_assignments a
+              JOIN model_profiles mp ON mp.id = a.model_profile_id
+              JOIN model_providers p ON p.id = mp.provider_id
+            WHERE a.workspace_id = model_interaction_logs.workspace_id
+              AND a.scope = 'employee'
+              AND a.scope_id = model_interaction_logs.employee_id
+              AND mp.model_id = model_interaction_logs.model_id
+              AND a.updated_at <= model_interaction_logs.created_at
+            LIMIT 1
+          ),
+          provider_name = (
+            SELECT p.name FROM model_assignments a
+              JOIN model_profiles mp ON mp.id = a.model_profile_id
+              JOIN model_providers p ON p.id = mp.provider_id
+            WHERE a.workspace_id = model_interaction_logs.workspace_id
+              AND a.scope = 'employee'
+              AND a.scope_id = model_interaction_logs.employee_id
+              AND mp.model_id = model_interaction_logs.model_id
+              AND a.updated_at <= model_interaction_logs.created_at
+            LIMIT 1
+          )
+      WHERE provider_id IS NULL
+        AND employee_id IS NOT NULL
+        AND EXISTS (
+          SELECT 1 FROM model_assignments a
+            JOIN model_profiles mp ON mp.id = a.model_profile_id
+            JOIN model_providers p ON p.id = mp.provider_id
+          WHERE a.workspace_id = model_interaction_logs.workspace_id
+            AND a.scope = 'employee'
+            AND a.scope_id = model_interaction_logs.employee_id
+            AND mp.model_id = model_interaction_logs.model_id
+            AND a.updated_at <= model_interaction_logs.created_at
+        );
+    `,
+  },
 ]
 
 /**
