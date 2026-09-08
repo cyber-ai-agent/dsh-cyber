@@ -109,6 +109,25 @@ describe('WorkspaceFileService', () => {
     const listing = await files.list('')
     expect(listing.items.map((item) => item.name)).toEqual(['src'])
   })
+
+  it('previews generated-size images beyond 2 MiB while keeping the text cap', async () => {
+    const root = await temporaryRoot()
+    const files = new WorkspaceFileService(root)
+    // Generated images are written up to the image pipeline cap (40 MiB), but
+    // the chat transcript renders them through the workspace file preview
+    // endpoint. A >2 MiB picture must open even though text previews stay
+    // capped at 2 MiB (protecting the browser from huge text buffers).
+    const bigImage = Buffer.alloc(3 * 1024 * 1024 + 1, 7)
+    await writeFile(join(root, 'big.png'), bigImage)
+    await expect(files.preview('big.png')).resolves.toMatchObject({ body: bigImage, contentType: 'image/png' })
+
+    const bigText = Buffer.alloc(2 * 1024 * 1024 + 1, 0x61)
+    await writeFile(join(root, 'big.txt'), bigText)
+    await expect(files.preview('big.txt')).rejects.toMatchObject<ServiceError>({
+      kind: 'too-large',
+      code: 'workspace_file_too_large',
+    })
+  })
 })
 
 async function temporaryRoot(): Promise<string> {

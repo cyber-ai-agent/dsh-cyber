@@ -3,7 +3,10 @@ import { extname, join, relative, resolve, sep } from 'node:path'
 
 import { ServiceError } from './service-error.js'
 
-const MAX_WORKSPACE_PREVIEW_BYTES = 2 * 1024 * 1024
+const MAX_WORKSPACE_TEXT_PREVIEW_BYTES = 2 * 1024 * 1024
+// Image payloads ride the same endpoint the chat transcript uses for generated
+// pictures: readAttachment-sized images (up to the generation cap) must render.
+const MAX_WORKSPACE_IMAGE_PREVIEW_BYTES = 40 * 1024 * 1024
 
 export interface WorkspaceFileListItem {
   name: string
@@ -78,11 +81,13 @@ export class WorkspaceFileService {
     const file = await this.#resolveEntry(requestedPath)
     const fileInfo = await stat(file.absolutePath)
     if (!fileInfo.isFile()) throw new ServiceError('invalid', 'workspace_file_required', 'Workspace path is not a file')
-    if (fileInfo.size > MAX_WORKSPACE_PREVIEW_BYTES) {
-      throw new ServiceError('too-large', 'workspace_file_too_large', 'Workspace preview is limited to 2 MiB')
-    }
     const preview = workspacePreviewKind(file.relativePath)
     if (preview === undefined) throw new ServiceError('unsupported', 'workspace_file_unsupported', 'File type cannot be previewed')
+    const cap = preview.kind === 'image' ? MAX_WORKSPACE_IMAGE_PREVIEW_BYTES : MAX_WORKSPACE_TEXT_PREVIEW_BYTES
+    if (fileInfo.size > cap) {
+      throw new ServiceError('too-large', 'workspace_file_too_large',
+        preview.kind === 'image' ? 'Workspace image preview is limited to 40 MiB' : 'Workspace preview is limited to 2 MiB')
+    }
     return { body: await readFile(file.absolutePath), contentType: preview.contentType }
   }
 
