@@ -1,0 +1,36 @@
+name: PR195 review source
+on:
+  push:
+    branches: [codex/pr195-provider-attribution-20260908]
+    paths: [.github/workflows/pr195-review-source.yml]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: c8127dd1f91974617dbad6087119702c6e7132d7
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Export exact main and contributor refs
+        run: |
+          set -euo pipefail
+          git fetch origin --prune
+          test "$(git rev-parse origin/main)" = c8127dd1f91974617dbad6087119702c6e7132d7
+          git switch -c review-main origin/main
+          git branch --show-current
+          git rev-parse HEAD origin/main
+          git merge-base HEAD origin/main
+          git fetch origin refs/pull/195/head:refs/heads/review-pr195
+          test "$(git rev-parse review-pr195)" = a9d31f05e04c03a86162688a490b7e46a806b9fb
+          mkdir -p /tmp/pr195-source
+          git bundle create /tmp/pr195-source/source.bundle review-main review-pr195
+          sha256sum /tmp/pr195-source/source.bundle > /tmp/pr195-source/sha256.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pr195-pinned-source
+          path: /tmp/pr195-source
+          retention-days: 1
