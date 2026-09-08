@@ -13,7 +13,7 @@ const IntegrationSettingsPanel = lazy(async () => ({ default: (await import('./I
  * encrypted connection store (SSH devices, API endpoints, Firecrawl/MCP) and
  * is where characters get connection-level grants in later milestones.
  */
-export function ConnectionHubDialog({ workspace, onClose }: { workspace: Workspace; onClose(): void }) {
+export function ConnectionHubDialog({ workspace, initialSkillId, onClose }: { workspace: Workspace; initialSkillId?: string; onClose(): void }) {
   const { t } = useI18n()
   const [open, setOpen] = useState(true)
   const panelRef = useRef<HTMLElement>(null)
@@ -29,7 +29,7 @@ export function ConnectionHubDialog({ workspace, onClose }: { workspace: Workspa
         <button type="button" className="icon-button" aria-label={t('connectionHub.close', '关闭连接中心')} data-dialog-initial-focus onClick={() => { setOpen(false); onClose() }}><X size={18} /></button>
       </header>
       <Suspense fallback={<div className="connection-hub__loading">{t('connectionHub.loading', '加载连接中心…')}</div>}>
-        <IntegrationSettingsPanel workspaceId={workspace.id} />
+        <IntegrationSettingsPanel workspaceId={workspace.id} {...(initialSkillId === undefined ? {} : { initialSkillId })} />
       </Suspense>
     </section>
   </div>, document.body)

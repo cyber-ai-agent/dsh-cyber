@@ -426,6 +426,8 @@ export interface IntegrationConnection {
   config: JsonObject
   enabled: boolean
   credentialConfigured: boolean
+  /** Per-secret-field configuration flags (SSH 私钥/密码 etc.); absent for legacy single-field connections. */
+  secretsConfigured?: Record<string, boolean>
   createdAt: IsoTimestamp
   updatedAt: IsoTimestamp
 }

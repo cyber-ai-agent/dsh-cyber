@@ -20,6 +20,7 @@ export interface SshDeviceCredential {
   port: number
   username: string
   privateKey?: string
+  password?: string
 }
 
 export interface SshExecResult {
@@ -81,7 +82,10 @@ export function sshExecOnce(credential: SshDeviceCredential, command: string, op
       host: credential.host,
       port: credential.port,
       username: credential.username,
+      // Private key wins; password is the fallback for devices that only
+      // allow keyboard-interactive password login.
       ...(credential.privateKey === undefined ? {} : { privateKey: Buffer.from(credential.privateKey, 'utf8') }),
+      ...(credential.privateKey !== undefined || credential.password === undefined ? {} : { password: credential.password }),
       readyTimeout: connectTimeoutMs,
       keepaliveInterval: 0,
     })

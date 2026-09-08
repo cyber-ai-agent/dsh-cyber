@@ -18,7 +18,8 @@ const DESCRIPTOR: IntegrationDescriptor = {
     { id: 'allowPublic', displayName: '允许公网设备', description: '默认拒绝公网地址；打开后仍会在每次执行时提示高风险。', kind: 'boolean', required: false },
   ],
   secretFields: [
-    { id: 'privateKey', displayName: '登录私钥', description: 'OpenSSH 私钥原文，仅在本机加密凭据库保存，保存后不回显。', kind: 'secret', required: false, multiline: true, placeholder: '-----BEGIN OPENSSH PRIVATE KEY-----' },
+    { id: 'privateKey', displayName: '登录私钥', description: 'OpenSSH 私钥原文；优先于密码。仅在本机加密凭据库保存，保存后不回显。', kind: 'secret', required: false, multiline: true, placeholder: '-----BEGIN OPENSSH PRIVATE KEY-----' },
+    { id: 'password', displayName: '登录密码', description: 'SSH 密码登录凭据；无私钥时使用。仅在本机加密凭据库保存，保存后不回显。', kind: 'secret', required: false },
   ],
   skillIds: ['device.ssh.command'],
   dataEgress: ['设备名称/主机地址', '角色经审批后执行的命令文本'],
@@ -53,9 +54,11 @@ export class SshDeviceIntegrationProvider implements IntegrationProvider {
   async testConnection(context: IntegrationProviderContext): Promise<IntegrationHealth> {
     const startedAt = Date.now()
     const config = this.validateConfig(context.config)
-    const credentialPresent = Boolean(context.credential)
-    const detail = credentialPresent
-      ? 'SSH 端口可达，凭据已保存（完整登录验证在执行命令时进行）'
+    const hasPrivateKey = typeof context.secrets?.privateKey === 'string' && context.secrets.privateKey.length > 0
+    const hasPassword = typeof context.secrets?.password === 'string' && context.secrets.password.length > 0
+    const method = hasPrivateKey ? '私钥' : hasPassword ? '密码' : ''
+    const detail = method
+      ? `SSH 端口可达，已保存${method}凭据（完整登录验证在执行命令时进行）`
       : 'SSH 端口可达，但尚未配置私钥或密码'
     try {
       await probeSshBanner(String(config.host), Number(config.port), 5_000)

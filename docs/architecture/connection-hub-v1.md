@@ -4,9 +4,10 @@
 
 ## 产品位置与信息架构
 
-- 顶部工具栏在“模型中心”之后、系统状态之前增加“连接中心”入口（`ConnectionHubLauncher` → `ConnectionHubDialog`）。
-- 原“设置 → 外部连接”被并入连接中心（`IntegrationSettingsPanel` 共享组件，设置面板与顶栏对话框复用同一实现）。
-- 每个连接类型（Provider）可以持有多个连接实例；当前只有 SSH 设备声明 `allowsMultipleConnections`，单连接类型保持旧的一类型一连接流程。
+- 顶部工具栏在“模型中心”之后、系统状态之前常驻“连接中心”入口（`ConnectionHubLauncher` → `ConnectionHubDialog`）。
+- 设置页的“外部连接”入口已移除：连接与凭据管理只保留在连接中心一个位置，避免双入口不同步；市场里已安装 Firecrawl 插件的“打开 Firecrawl 设置”直接跳转到连接中心并预选对应类型。
+- 连接中心采用左栏类目（Provider）＋右栏操作区的布局：右栏承载当前类目的连接列表与“添加设备/新建连接”编辑表单。
+- 每个连接类型（Provider）可以持有多个连接实例；当前只有 SSH 设备声明 `allowsMultipleConnections`，单连接类型保持一类型一连接流程。
 
 ## 角色两级授权（Skill + Connection）
 
@@ -52,6 +53,7 @@ Character revision
 
 - 允许操作是白名单集合：`system.info`、`disk.usage`、`memory.usage`、`process.list`、`service.restart`、`package.list`、`package.install`、`file.list`。
 - 私钥只在宿主机内存中用于一次 ssh2 会话，绝不落盘、不进动作记录。
+- SSH 连接支持两种登录凭据：**登录私钥** 或 **登录密码**（可同时保存，执行时私钥优先、密码兜底）。两者都只在本机加密凭据库按字段保存，不回显，可单独“清除已保存的…”。
 - 每个动作的最终执行状态写入 Skill Action Ledger；失败原因映射为可读中文（认证失败/不可达为 failed，超时/断流为 outcome-unknown，禁止自动重试）。
 - 世界轨迹通过通用 `SkillActionTraceAdapter` 投影每次 SSH 动作：只暴露摘要、状态与限长结果片段，不带结构化参数、私钥或原始 payload，与其它外部 Skill 共用同一脱敏边界。
 

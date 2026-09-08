@@ -15,7 +15,6 @@ import {
   Moon,
   Palette,
   PencilSimple,
-  Plug,
   Plus,
   ShieldCheck,
   Sparkle,
@@ -47,17 +46,15 @@ import type {
 import { api } from '../api.js'
 import { setUiLocale, UI_LOCALES, useI18n } from '../i18n/runtime.js'
 import { formatDateTime, formatDuration as localeFormatDuration, formatNumber } from '../i18n/format.js'
-import { IntegrationSettingsPanel } from '../features/connection-hub/IntegrationSettingsPanel.js'
 import type { ApplicationAccessSummary } from './ApplicationLockGate.js'
 import { useDialogFocusTrap } from './useDialogFocusTrap.js'
 import './SettingsDialog.css'
 
 const ModelHubDialog = lazy(async () => ({ default: (await import('../features/model-hub/ModelHubDialog.js')).ModelHubDialog }))
-const ConnectionHubDialog = lazy(async () => ({ default: (await import('../features/connection-hub/ConnectionHubDialog.js')).ConnectionHubDialog }))
 
 interface ApplicationAccessMutation extends ApplicationAccessSummary { recoveryCode?: string }
 
-export type SettingsSection = 'appearance' | 'models' | 'integrations' | 'privacy' | 'data' | 'logs' | 'maintenance'
+export type SettingsSection = 'appearance' | 'models' | 'privacy' | 'data' | 'logs' | 'maintenance'
 export type SystemAction = 'status' | 'doctor' | 'backup' | 'export' | 'check-application-update' | 'apply-application-update'
 
 export interface SystemActionInput {
@@ -140,7 +137,6 @@ const SETTINGS_GROUPS = [
     items: [
       ['appearance', '外观与布局', Palette, '颜色、背景和界面语言'],
       ['models', 'AI 模型', Cpu, '统一管理已移至模型中心'],
-      ['integrations', '外部连接', Plug, '管理受信任的外部服务'],
       ['privacy', '隐私与锁屏', LockKey, '保护整个本地工作台'],
     ],
   },
@@ -257,7 +253,6 @@ export function SettingsDialog({
               <p className="settings-hub-gate__note">{t('modelHub.gateNote', '本设置页不再单独管理模型；旧的模型配置已在首次启动时自动迁移为服务商。')}</p>
             </div>
           ) : null}
-          {section === 'integrations' ? <IntegrationSettingsPanel workspaceId={workspace.id} standalone /> : null}
           {section === 'privacy' ? <PrivacySettings /> : null}
           {section === 'logs' ? (
             <ModelInteractionLogSettings

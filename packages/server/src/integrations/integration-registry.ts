@@ -2,7 +2,10 @@ import type { IntegrationDescriptor, IntegrationHealth, JsonObject } from '@dsh-
 
 export interface IntegrationProviderContext {
   config: JsonObject
+  /** Legacy single-field credential (Firecrawl API key, MCP bearer…). */
   credential?: string
+  /** Per-field secrets for multi-secret providers (SSH 私钥/密码). */
+  secrets?: Record<string, string>
   fetch: typeof globalThis.fetch
   now: Date
 }

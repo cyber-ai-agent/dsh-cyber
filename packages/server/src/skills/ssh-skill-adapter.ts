@@ -122,9 +122,9 @@ export class SshSkillAdapter implements CharacterSkillAdapter {
     const granted = this.#isConnectionGranted(action.characterId, connectionId)
     if (!granted) return { ready: false, detail: '该角色没有被授权使用这台设备，请在角色设置中勾选对应连接' }
     const connection = this.#integrations.getById(world.workspaceId, connectionId)
-    const credential = this.#integrations.credentialForConnection(world.workspaceId, connectionId)
-    if (connection === undefined || !connection.enabled || credential === undefined) {
-      return { ready: false, detail: '目标设备未启用或缺少私钥凭据' }
+    const secrets = this.#integrations.secretsForConnection(world.workspaceId, connectionId)
+    if (connection === undefined || !connection.enabled || secrets === undefined || (!secrets.privateKey && !secrets.password)) {
+      return { ready: false, detail: '目标设备未启用或缺少私钥/密码凭据' }
     }
     return { ready: true }
   }
@@ -143,16 +143,17 @@ export class SshSkillAdapter implements CharacterSkillAdapter {
       return { status: 'failed', detail: '该角色没有被授权使用这台设备，动作未执行' }
     }
     const connection = this.#integrations.getById(workspaceId, connectionId)
-    const credential = this.#integrations.credentialForConnection(workspaceId, connectionId)
-    if (connection === undefined || !connection.enabled || credential === undefined) {
-      return { status: 'waiting-for-integration', detail: '该设备未启用或尚未配置私钥，未发送任何命令' }
+    const secrets = this.#integrations.secretsForConnection(workspaceId, connectionId)
+    if (connection === undefined || !connection.enabled || secrets === undefined || (!secrets.privateKey && !secrets.password)) {
+      return { status: 'waiting-for-integration', detail: '该设备未启用或尚未配置私钥/密码，未发送任何命令' }
     }
     const config = connection.config
     const device = {
       host: String(config.host ?? connectionId),
       port: Number(config.port ?? 22),
       username: String(config.username ?? 'root'),
-      privateKey: credential,
+      ...(secrets.privateKey === undefined ? {} : { privateKey: secrets.privateKey }),
+      ...(secrets.privateKey !== undefined || secrets.password === undefined ? {} : { password: secrets.password }),
     }
     try {
       const probe = await sshExecOnce(device, osProbeCommand())

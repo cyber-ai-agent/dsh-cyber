@@ -72,6 +72,50 @@ describe('SSH multi-connection hub', () => {
     service.close()
   })
 
+  it('stores per-field secrets (private key + password), keeps them independent and round-trips over reopen', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-ssh-secrets-'))
+    roots.push(root)
+    const registry = createBuiltinIntegrationRegistry()
+    let service = await IntegrationService.open(root, registry)
+    const keyDevice = await service.save({
+      workspaceId: 'workspace-1', integrationId: SSH_DEVICE_INTEGRATION_ID,
+      config: { displayName: '密钥登录', host: '10.0.0.11', username: 'root' }, enabled: true,
+      secrets: { privateKey: '-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\n-----END OPENSSH PRIVATE KEY-----' },
+    })
+    const passwordDevice = await service.save({
+      workspaceId: 'workspace-1', integrationId: SSH_DEVICE_INTEGRATION_ID,
+      config: { displayName: '密码登录', host: '10.0.0.12', username: 'root' }, enabled: true,
+      secrets: { password: 's3cret-pass' },
+    })
+    expect(service.secretsForConnection('workspace-1', keyDevice.id)).toEqual({ privateKey: expect.stringContaining('BEGIN OPENSSH') })
+    expect(service.secretsForConnection('workspace-1', passwordDevice.id)).toEqual({ password: 's3cret-pass' })
+    // 私钥优先语义只影响执行层；存取层应各自独立。
+    expect(service.credentialForConnection('workspace-1', passwordDevice.id)).toBeUndefined()
+    expect(service.listByType('workspace-1', SSH_DEVICE_INTEGRATION_ID).map((item) => item.secretsConfigured)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ privateKey: true, password: false }),
+      expect.objectContaining({ privateKey: false, password: true }),
+    ]))
+    // 给密码设备补私钥，不清掉已有密码；然后单独清除密码字段。
+    await service.save({
+      workspaceId: 'workspace-1', integrationId: SSH_DEVICE_INTEGRATION_ID, connectionId: passwordDevice.id,
+      config: { displayName: '密码登录', host: '10.0.0.12', username: 'root' }, enabled: true,
+      secrets: { privateKey: 'key-material' },
+    })
+    expect(service.secretsForConnection('workspace-1', passwordDevice.id)).toEqual({ privateKey: 'key-material', password: 's3cret-pass' })
+    await service.save({
+      workspaceId: 'workspace-1', integrationId: SSH_DEVICE_INTEGRATION_ID, connectionId: passwordDevice.id,
+      config: { displayName: '密码登录', host: '10.0.0.12', username: 'root' }, enabled: true,
+      clearSecretFields: ['password'],
+    })
+    expect(service.secretsForConnection('workspace-1', passwordDevice.id)).toEqual({ privateKey: 'key-material' })
+    service.close()
+
+    service = await IntegrationService.open(root, registry)
+    expect(service.secretsForConnection('workspace-1', keyDevice.id)).toEqual({ privateKey: expect.stringContaining('BEGIN OPENSSH') })
+    expect(service.secretsForConnection('workspace-1', passwordDevice.id)).toEqual({ privateKey: 'key-material' })
+    service.close()
+  })
+
   it('tests a connection against a reachable SSH banner without sending credentials', async () => {
     const server = createServer((socket) => { socket.write('SSH-2.0-OpenSSH_test\r\n') })
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))

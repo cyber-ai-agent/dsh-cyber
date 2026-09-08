@@ -122,6 +122,7 @@ const RecruitmentDialog = lazy(async () => ({ default: (await import('./componen
 const WorldSettingsDialog = lazy(async () => ({ default: (await import('./components/WorldSettingsDialog.js')).WorldSettingsDialog }))
 const WorldLibraryDialog = lazy(async () => ({ default: (await import('./components/WorldLibraryDialog.js')).WorldLibraryDialog }))
 const WorldRuntimeDock = lazy(async () => ({ default: (await import('./features/world/WorldRuntimeDock.js')).WorldRuntimeDock }))
+const ConnectionHubDialog = lazy(async () => ({ default: (await import('./features/connection-hub/ConnectionHubDialog.js')).ConnectionHubDialog }))
 const WorldTracePanel = lazy(async () => ({ default: (await import('./components/world-trace/WorldTracePanel.js')).WorldTracePanel }))
 const TaskSchedulePanel = lazy(async () => ({ default: (await import('./components/TaskSchedulePanel.js')).TaskSchedulePanel }))
 
@@ -237,6 +238,7 @@ export default function App() {
   const [groupDialogOpen, setGroupDialogOpen] = useState(false)
   const [groupCreating, setGroupCreating] = useState(false)
   const [packageMarketOpen, setPackageMarketOpen] = useState(false)
+  const [connectionHubFromMarket, setConnectionHubFromMarket] = useState<{ typeId?: string }>()
   const [packageMarketKind, setPackageMarketKind] = useState<CyberMarketKind>('theme')
   const [marketplaceItems, setMarketplaceItems] = useState<CyberMarketPackage[]>([])
   const [marketplaceDiagnostics, setMarketplaceDiagnostics] = useState<Array<{ directory: string; reason: string }>>([])
@@ -1303,11 +1305,12 @@ export default function App() {
     }
   }, [activeWorld, demoMode, loadInstalledPluginCommands, loadPackages, packageMarketKind, searchMarketplace, workspace])
 
-  const openIntegrationSettings = useCallback(() => {
+  // Market → connection hub jump. The old settings' “外部连接” section is gone;
+  // installed Firecrawl plugins now route their setup button into the hub.
+  const openConnectionHubFromMarket = useCallback((typeId?: string) => {
     setPackageMarketOpen(false)
     clearError()
-    setSettingsSection('integrations')
-    setSettingsOpen(true)
+    setConnectionHubFromMarket({ ...(typeId === undefined ? {} : { typeId }) })
   }, [clearError])
 
   const recruitEmployee = useCallback(async (
@@ -2601,6 +2604,9 @@ export default function App() {
           onHubClosed={() => void refreshModelProfiles()}
         /></Suspense>
       ) : null}
+      {connectionHubFromMarket !== undefined ? (
+        <Suspense fallback={<div className="dialog-loading" role="status">正在打开连接中心…</div>}><ConnectionHubDialog workspace={workspace} {...(connectionHubFromMarket.typeId === undefined ? {} : { initialSkillId: connectionHubFromMarket.typeId })} onClose={() => setConnectionHubFromMarket(undefined)} /></Suspense>
+      ) : null}
       {worldLibraryOpen ? (
         <Suspense fallback={<div className="dialog-loading" role="status">{t('worldLibrary.loading', '正在读取世界列表…')}</div>}><WorldLibraryDialog
           workspaceId={workspace.id}
@@ -2656,7 +2662,7 @@ export default function App() {
           onPreviewMarketplace={previewMarketplacePackage}
           onInstallMarketplace={installMarketplacePackage}
           onUninstall={uninstallPackage}
-          onOpenSettings={openIntegrationSettings}
+          onOpenSettings={(skillId) => openConnectionHubFromMarket(skillId)}
           onCreateThemeWorld={createWorldFromTheme}
           onCreateBuiltinWorld={async (templateId, name) => {
             if (demoMode) throw new Error('请在本地工作区创建世界')

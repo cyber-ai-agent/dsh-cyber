@@ -3087,7 +3087,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .integration-connection-list button.is-active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface-1)); }
 .integration-connection-list strong { font-size: 13px; }
 .integration-connection-list small { color: var(--text-muted); font-size: 12px; }
-.integration-hub-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 16px; align-items: start; }
+.integration-hub-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 18px; align-items: start; }
+.integration-hub-workspace { display: grid; gap: 14px; min-width: 0; }
+.integration-hub-workspace > .integration-connection-list { max-height: none; }
+.integration-connection-list button.is-new-connection { border-style: dashed; color: var(--accent); grid-template-columns: 18px minmax(0, 1fr); align-items: center; }
+.integration-connection-list button.is-new-connection.is-active { border-style: solid; }
+.integration-secret-clear { padding: 0; border: 0; color: var(--danger); background: transparent; font: inherit; text-decoration: underline; cursor: pointer; }
+.integration-secret-clear:hover { color: var(--danger-strong, var(--danger)); }
 
 /* 连接中心（顶栏弹窗，与模型中心平级） */
 .connection-hub { width: min(1180px, 96vw); height: min(820px, 92vh); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border-strong); border-radius: var(--radius-dialog, 14px); background: var(--surface-0); color: var(--text); box-shadow: 0 28px 80px rgb(0 0 0 / 62%), 0 2px 8px rgb(0 0 0 / 34%); }

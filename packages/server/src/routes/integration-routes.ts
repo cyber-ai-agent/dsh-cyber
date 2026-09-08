@@ -9,6 +9,27 @@ import type { IntegrationService } from '../integrations/integration-service.js'
 import { FIRECRAWL_INTEGRATION_ID } from '../integrations/firecrawl-provider.js'
 import { FIRECRAWL_SEARCH_SKILL } from '../skills/firecrawl-skill-adapter.js'
 
+function parseSecretWrites(body: Record<string, unknown>): { secrets?: Record<string, string>; clearSecretFields?: string[] } {
+  const rawSecrets = record(body.secrets)
+  if (rawSecrets !== undefined) {
+    for (const [field, value] of Object.entries(rawSecrets)) {
+      if (field.trim() === '' || typeof value !== 'string') throw new HttpError(422, 'integration_secret_invalid', 'secrets must map field ids to strings')
+    }
+    const secrets = Object.fromEntries(Object.entries(rawSecrets).map(([field, value]) => [field, String(value)]))
+    return { secrets, ...parseClearSecretFields(body) }
+  }
+  return parseClearSecretFields(body)
+}
+
+function parseClearSecretFields(body: Record<string, unknown>): { clearSecretFields?: string[] } {
+  const clear = body.clearSecretFields
+  if (clear === undefined) return {}
+  if (!Array.isArray(clear) || clear.some((field) => typeof field !== 'string' || field.trim() === '')) {
+    throw new HttpError(422, 'integration_clear_secret_invalid', 'clearSecretFields must be an array of non-empty strings')
+  }
+  return { clearSecretFields: clear as string[] }
+}
+
 export function registerIntegrationRoutes(router: Router, dependencies: { store: SqliteStore; integrations: IntegrationService; onChanged?: (integrationId: string) => Promise<void> }): void {
   const { store, integrations, onChanged } = dependencies
 
@@ -34,6 +55,7 @@ export function registerIntegrationRoutes(router: Router, dependencies: { store:
         workspaceId, integrationId, connectionId, config: config as JsonObject, enabled: body.enabled !== false,
         ...(body.displayName === undefined ? {} : { displayName: requiredString(body, 'displayName') }),
         ...(body.credential === undefined ? {} : { credential: requiredString(body, 'credential') }),
+        ...parseSecretWrites(body),
         ...(body.clearCredential === true ? { clearCredential: true } : {}),
       })
     } catch (error) {
@@ -55,6 +77,7 @@ export function registerIntegrationRoutes(router: Router, dependencies: { store:
         workspaceId, integrationId, config: config as JsonObject, enabled: body.enabled !== false,
         ...(body.displayName === undefined ? {} : { displayName: requiredString(body, 'displayName') }),
         ...(body.credential === undefined ? {} : { credential: requiredString(body, 'credential') }),
+        ...parseSecretWrites(body),
         ...(body.clearCredential === true ? { clearCredential: true } : {}),
       })
     } catch (error) {
