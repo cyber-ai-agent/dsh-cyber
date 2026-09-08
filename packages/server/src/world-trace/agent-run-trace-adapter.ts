@@ -62,6 +62,7 @@ export class AgentRunTraceAdapter implements WorldTraceAdapter<'agent-run'> {
           prompt: interaction.tokensPrompt,
           completion: interaction.tokensCompletion,
           total: interaction.tokensTotal,
+          ...(interaction.tokensCached === undefined ? {} : { cachedPrompt: interaction.tokensCached }),
         }
       }
     }
