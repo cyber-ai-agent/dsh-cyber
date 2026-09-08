@@ -182,7 +182,7 @@ describe('Task list live refresh', () => {
 
     expect(host.textContent).toContain('这次对话已经执行过')
     // Warned, not blocked: the conversation may only have discussed the work.
-    expect([...host.querySelectorAll('button')].some((node) => node.textContent?.includes('生成计划并执行'))).toBe(true)
+    expect([...host.querySelectorAll('button')].some((node) => node.textContent?.includes('自动组队并开工'))).toBe(true)
 
     await act(async () => { root.unmount() })
     host.remove()
