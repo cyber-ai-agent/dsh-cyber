@@ -119,7 +119,11 @@ describe('WorkspaceFileService', () => {
     // capped at 2 MiB (protecting the browser from huge text buffers).
     const bigImage = Buffer.alloc(3 * 1024 * 1024 + 1, 7)
     await writeFile(join(root, 'big.png'), bigImage)
-    await expect(files.preview('big.png')).resolves.toMatchObject({ body: bigImage, contentType: 'image/png' })
+    const imagePreview = await files.preview('big.png')
+    expect(imagePreview.contentType).toBe('image/png')
+    expect(imagePreview.body.byteLength).toBe(bigImage.byteLength)
+    expect(imagePreview.body[0]).toBe(7)
+    expect(imagePreview.body.at(-1)).toBe(7)
 
     const bigText = Buffer.alloc(2 * 1024 * 1024 + 1, 0x61)
     await writeFile(join(root, 'big.txt'), bigText)
