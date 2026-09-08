@@ -3090,8 +3090,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .integration-hub-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 18px; align-items: start; }
 .integration-hub-workspace { display: grid; gap: 14px; min-width: 0; }
 .integration-hub-workspace > .integration-connection-list { max-height: none; }
-.integration-connection-list button.is-new-connection { border-style: dashed; color: var(--accent); grid-template-columns: 18px minmax(0, 1fr); align-items: center; }
+.integration-connection-list button.is-new-connection { border-style: dashed; color: var(--accent); display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
 .integration-connection-list button.is-new-connection.is-active { border-style: solid; }
+.integration-connection-list button.is-new-connection strong { font-size: 13px; }
+.integration-connection-list button.is-new-connection small { flex: 1 1 100%; color: var(--text-muted); }
 .integration-secret-clear { padding: 0; border: 0; color: var(--danger); background: transparent; font: inherit; text-decoration: underline; cursor: pointer; }
 .integration-secret-clear:hover { color: var(--danger-strong, var(--danger)); }
 
