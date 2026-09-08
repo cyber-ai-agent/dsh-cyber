@@ -290,6 +290,7 @@ async function createLeasedCyberServer(options: CyberServerOptions, onStoreOpene
     firecrawl: { store, integrations, client: firecrawlClient, listWorldPackages: (worldId) => worldPackages.listRuntimePackages(worldId) },
     browser: { store, listWorldPackages: (worldId) => worldPackages.listRuntimePackages(worldId), publishScreenshot: (input) => worldArtifacts.publishBrowserScreenshot(input), ...(options.browserClientFactory === undefined ? {} : { clientFactory: options.browserClientFactory }), ...(options.browserPolicy === undefined ? {} : { policy: options.browserPolicy }) },
     worldManagement: worldManagementHost,
+    ssh: { store, integrations },
   })
   const mcpAdapter = options.skillRegistry === undefined ? new McpSkillAdapter({ store, integrations, clients: mcpClients }) : undefined
   if (mcpAdapter !== undefined) skillRegistry.register(mcpAdapter)
