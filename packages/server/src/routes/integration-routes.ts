@@ -2,7 +2,7 @@ import type { JsonObject } from '@dsh-cyber/contracts'
 import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { HttpError } from '../http/errors.js'
-import { readJson, record, requiredString } from '../http/request.js'
+import { optionalString, readJson, record, requiredString } from '../http/request.js'
 import { writeJson } from '../http/response.js'
 import type { Router } from '../http/router.js'
 import type { IntegrationService } from '../integrations/integration-service.js'
@@ -17,6 +17,30 @@ export function registerIntegrationRoutes(router: Router, dependencies: { store:
     const descriptors = visibleDescriptors(store, integrations, workspaceId)
     const allowed = new Set(descriptors.map((descriptor) => descriptor.id))
     writeJson(response, 200, { descriptors, items: integrations.list(workspaceId).filter((item) => allowed.has(item.integrationId)) })
+  })
+
+  router.put(/^\/api\/workspaces\/([^/]+)\/integrations\/([^/]+)\/connections\/([^/]+)$/, async ({ request, response, params }) => {
+    // Connection-scoped write: edits one exact device/endpoint connection.
+    const workspaceId = requireWorkspace(store, params[0]!); const integrationId = params[1]!; const connectionId = params[2]!
+    assertIntegrationAvailable(store, workspaceId, integrationId)
+    const body = await readJson(request); const config = record(body.config) ?? {}
+    if (body.enabled !== undefined && typeof body.enabled !== 'boolean') throw new HttpError(422, 'integration_enabled_invalid', 'enabled must be boolean')
+    if (body.clearCredential !== undefined && typeof body.clearCredential !== 'boolean') throw new HttpError(422, 'integration_clear_credential_invalid', 'clearCredential must be boolean')
+    const existing = integrations.getById(workspaceId, connectionId)
+    if (existing === undefined || existing.integrationId !== integrationId) throw new HttpError(404, 'integration_connection_not_found', '外部连接不存在')
+    let connection
+    try {
+      connection = await integrations.save({
+        workspaceId, integrationId, connectionId, config: config as JsonObject, enabled: body.enabled !== false,
+        ...(body.displayName === undefined ? {} : { displayName: requiredString(body, 'displayName') }),
+        ...(body.credential === undefined ? {} : { credential: requiredString(body, 'credential') }),
+        ...(body.clearCredential === true ? { clearCredential: true } : {}),
+      })
+    } catch (error) {
+      throw new HttpError(422, 'integration_config_invalid', error instanceof Error ? error.message : 'Integration configuration is invalid')
+    }
+    await onChanged?.(integrationId)
+    writeJson(response, 200, { connection })
   })
 
   router.put(/^\/api\/workspaces\/([^/]+)\/integrations\/([^/]+)$/, async ({ request, response, params }) => {
@@ -40,13 +64,22 @@ export function registerIntegrationRoutes(router: Router, dependencies: { store:
     writeJson(response, 200, { connection })
   })
 
-  router.post(/^\/api\/workspaces\/([^/]+)\/integrations\/([^/]+)\/test$/, async ({ response, params }) => {
+  router.post(/^\/api\/workspaces\/([^/]+)\/integrations\/([^/]+)\/test$/, async ({ response, params, url }) => {
     const workspaceId = requireWorkspace(store, params[0]!)
     const integrationId = params[1]!
     assertIntegrationAvailable(store, workspaceId, integrationId)
-    const health = await integrations.test(workspaceId, integrationId)
+    const connectionId = optionalString(url.searchParams.get('connectionId'))
+    const health = await integrations.test(workspaceId, integrationId, connectionId)
     if (health.status === 'ready') await onChanged?.(integrationId)
     writeJson(response, 200, { health })
+  })
+
+  router.delete(/^\/api\/workspaces\/([^/]+)\/integrations\/([^/]+)\/connections\/([^/]+)$/, async ({ response, params }) => {
+    const workspaceId = requireWorkspace(store, params[0]!); const integrationId = params[1]!; const connectionId = params[2]!
+    assertIntegrationAvailable(store, workspaceId, integrationId)
+    const removed = await integrations.delete(workspaceId, integrationId, connectionId)
+    if (removed) await onChanged?.(integrationId)
+    writeJson(response, 200, { removed })
   })
 
   router.delete(/^\/api\/workspaces\/([^/]+)\/integrations\/([^/]+)$/, async ({ response, params }) => {

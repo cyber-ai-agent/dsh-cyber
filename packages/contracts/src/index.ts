@@ -398,6 +398,8 @@ export interface IntegrationFieldDescriptor {
   kind: IntegrationFieldKind
   required: boolean
   placeholder?: string
+  /** Render the field as a multi-line editor (for example an SSH private key). */
+  multiline?: boolean
 }
 
 /** Public, provider-neutral metadata. It never contains implementation callbacks or credentials. */
@@ -409,6 +411,11 @@ export interface IntegrationDescriptor {
   secretFields: IntegrationFieldDescriptor[]
   skillIds: string[]
   dataEgress: string[]
+  /**
+   * One provider may own several connections (one per SSH device / API
+   * endpoint). False keeps the legacy single-connection-per-type behaviour.
+   */
+  allowsMultipleConnections?: boolean
 }
 
 export interface IntegrationConnection {

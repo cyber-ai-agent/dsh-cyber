@@ -43,12 +43,29 @@ export class IntegrationService {
       .sort((left, right) => left.displayName.localeCompare(right.displayName, 'zh-CN'))
   }
 
+  /**
+   * Connections of one provider type. Multi-connection types (SSH devices,
+   * API endpoints) keep several; legacy single-connection types return 0..1.
+   */
+  listByType(workspaceId: string, integrationId: string): IntegrationConnection[] {
+    return this.list(workspaceId).filter((item) => item.integrationId === integrationId)
+  }
+
   get(workspaceId: string, integrationId: string): IntegrationConnection | undefined {
     return this.list(workspaceId).find((item) => item.integrationId === integrationId)
   }
 
+  getById(workspaceId: string, connectionId: string): IntegrationConnection | undefined {
+    return this.list(workspaceId).find((item) => item.id === connectionId)
+  }
+
   credential(workspaceId: string, integrationId: string): string | undefined {
     const connection = this.get(workspaceId, integrationId)
+    return connection?.enabled === true ? this.#vault.resolve(connection.id) : undefined
+  }
+
+  credentialForConnection(workspaceId: string, connectionId: string): string | undefined {
+    const connection = this.getById(workspaceId, connectionId)
     return connection?.enabled === true ? this.#vault.resolve(connection.id) : undefined
   }
 
@@ -72,15 +89,29 @@ export class IntegrationService {
     return reference.startsWith('mcp-action:') ? this.#vault.delete(reference) : Promise.resolve()
   }
 
-  async save(input: { workspaceId: string; integrationId: string; displayName?: string; config: JsonObject; enabled: boolean; credential?: string; clearCredential?: boolean }): Promise<IntegrationConnection> {
+  async save(input: { workspaceId: string; integrationId: string; connectionId?: string; displayName?: string; config: JsonObject; enabled: boolean; credential?: string; clearCredential?: boolean }): Promise<IntegrationConnection> {
     const provider = this.#registry.require(input.integrationId)
-    const existing = this.get(input.workspaceId, input.integrationId)
     const now = new Date().toISOString()
     const validatedConfig = provider.validateConfig(input.config)
     assertSecretFree(validatedConfig)
+    // An explicit connectionId edits that exact connection; without one, the
+    // legacy single-connection types reuse the type's existing connection and
+    // multi-connection types create a fresh one (used by "add device").
+    const multiple = provider.descriptor.allowsMultipleConnections === true
+    const explicit = input.connectionId === undefined
+      ? undefined
+      : this.#connections.get(input.connectionId)
+    const existing = explicit !== undefined && explicit.workspaceId === input.workspaceId && explicit.integrationId === input.integrationId
+      ? explicit
+      : (input.connectionId === undefined && !multiple
+        ? this.listByType(input.workspaceId, input.integrationId)[0]
+        : undefined)
     const connection: IntegrationConnection = {
-      id: existing?.id ?? randomUUID(), workspaceId: input.workspaceId, integrationId: input.integrationId,
-      displayName: input.displayName?.trim() || provider.descriptor.displayName,
+      id: existing?.id ?? input.connectionId ?? randomUUID(), workspaceId: input.workspaceId, integrationId: input.integrationId,
+      displayName: input.displayName?.trim()
+        || (typeof validatedConfig.displayName === 'string' && validatedConfig.displayName.trim() ? validatedConfig.displayName.trim() : '')
+        || existing?.displayName
+        || provider.descriptor.displayName,
       config: validatedConfig, enabled: input.enabled,
       credentialConfigured: false, createdAt: existing?.createdAt ?? now, updatedAt: now,
     }
@@ -101,8 +132,10 @@ export class IntegrationService {
     return { ...connection, config: { ...connection.config } }
   }
 
-  async test(workspaceId: string, integrationId: string): Promise<IntegrationHealth> {
-    const connection = this.get(workspaceId, integrationId)
+  async test(workspaceId: string, integrationId: string, connectionId?: string): Promise<IntegrationHealth> {
+    const connection = connectionId === undefined
+      ? this.get(workspaceId, integrationId)
+      : this.getById(workspaceId, connectionId)
     if (connection === undefined || !connection.enabled) return { status: 'misconfigured', detail: '连接尚未启用', checkedAt: new Date().toISOString(), latencyMs: 0 }
     const credential = this.#vault.resolve(connection.id)
     return this.#registry.require(integrationId).testConnection({
@@ -113,9 +146,12 @@ export class IntegrationService {
     })
   }
 
-  async delete(workspaceId: string, integrationId: string): Promise<boolean> {
-    const connection = this.get(workspaceId, integrationId)
+  async delete(workspaceId: string, integrationId: string, connectionId?: string): Promise<boolean> {
+    const connection = connectionId === undefined
+      ? this.get(workspaceId, integrationId)
+      : this.getById(workspaceId, connectionId)
     if (connection === undefined) return false
+    if (connection.integrationId !== integrationId) return false
     const previousCredential = this.#vault.resolve(connection.id)
     try {
       await this.#vault.delete(connection.id)
