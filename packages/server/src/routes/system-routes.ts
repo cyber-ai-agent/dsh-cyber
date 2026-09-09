@@ -9,8 +9,10 @@ import type { SqliteStore } from '@dsh-cyber/persistence'
 
 import { HttpError } from '../http/errors.js'
 import type { Router } from '../http/router.js'
-import { readJson, requiredBoolean, requiredString } from '../http/request.js'
+import { readJson, record, requiredBoolean, requiredString } from '../http/request.js'
 import { writeJson } from '../http/response.js'
+import { CUSTOM_TOOL_NAME, type EnvironmentService } from '../environments/environment-service.js'
+import type { EnvironmentProbeTier } from '../environments/environment-probe.js'
 import { createLocalBackupBundle } from '../services/local-backup-service.js'
 import type { RuntimeUpdateService } from '../services/runtime-update-service.js'
 import type { ApplicationUpdateService } from '../services/application-update-service.js'
@@ -20,11 +22,45 @@ export interface SystemRoutesDependencies {
   stateRoot: string
   runtimeUpdates: RuntimeUpdateService
   applicationUpdates: ApplicationUpdateService
+  /** Host machine profile; absent in embedders that never probed one. */
+  environments?: EnvironmentService
 }
 
 export function registerSystemRoutes(router: Router, dependencies: SystemRoutesDependencies): void {
-  const { store, stateRoot, runtimeUpdates, applicationUpdates } = dependencies
+  const { store, stateRoot, runtimeUpdates, applicationUpdates, environments } = dependencies
   const runtimeRoot = join(stateRoot, 'runtime')
+
+  // The machine profile is host state, like backup and doctor, so it lives
+  // here rather than under a world. A name is a name: the probe always runs
+  // its own fixed argument ladder, never a command line the owner typed.
+  if (environments !== undefined) {
+    router.get(/^\/api\/environments\/local$/, ({ response }) => {
+      // Absence is a normal state (nothing probed yet), not an error.
+      writeJson(response, 200, { profile: environments.currentLocal() ?? null })
+    })
+
+    router.post(/^\/api\/environments\/local\/refresh$/, async ({ request, response }) => {
+      writeJson(response, 200, { profile: await environments.refreshLocal(environmentRefreshTier(record(await readJson(request))?.tier)) })
+    })
+
+    router.post(/^\/api\/environments\/local\/tools$/, async ({ request, response }) => {
+      const name = customEnvironmentToolName(requiredString(await readJson(request), 'name'))
+      try {
+        writeJson(response, 201, { profile: await environments.addCustomTool(name) })
+      } catch (cause) {
+        throw new HttpError(422, 'environment_tool_not_addable', cause instanceof Error ? cause.message : '无法添加该工具')
+      }
+    })
+
+    router.delete(/^\/api\/environments\/local\/tools\/([^/]+)$/, async ({ response, params }) => {
+      const name = customEnvironmentToolName(params[0]!)
+      try {
+        writeJson(response, 200, { profile: await environments.removeCustomTool(name) })
+      } catch (cause) {
+        throw new HttpError(404, 'environment_tool_not_found', cause instanceof Error ? cause.message : '自定义工具不存在')
+      }
+    })
+  }
 
   router.get('/api/health', ({ response }) => {
     writeJson(response, 200, { ok: true, database: store.doctor() })
@@ -63,7 +99,7 @@ export function registerSystemRoutes(router: Router, dependencies: SystemRoutesD
       bundle: true,
       output,
       createdAt: new Date().toISOString(),
-      included: ['database.sqlite', 'worlds', 'assets', 'packages', 'workshop', 'skills', 'integrations'],
+      included: ['database.sqlite', 'worlds', 'assets', 'packages', 'workshop', 'skills', 'integrations', 'environments'],
       excluded: ['credentials', 'runtime', 'worlds/*/cache', 'backups'],
     })
   })
@@ -129,4 +165,17 @@ export function registerSystemRoutes(router: Router, dependencies: SystemRoutesD
 
 function artifactTimestamp(): string {
   return new Date().toISOString().replaceAll(/[:.]/g, '-').replace('T', '_').replace('Z', '')
+}
+
+/** An explicit refresh defaults to the full tier; a live turn may ask for fast. */
+function environmentRefreshTier(value: unknown): EnvironmentProbeTier {
+  if (value === undefined) return 'full'
+  if (value === 'fast' || value === 'full') return value
+  throw new HttpError(422, 'environment_tier_invalid', '刷新层级无效')
+}
+
+function customEnvironmentToolName(value: string): string {
+  const name = value.trim().toLowerCase()
+  if (!CUSTOM_TOOL_NAME.test(name)) throw new HttpError(422, 'environment_tool_name_invalid', '自定义工具名无效')
+  return name
 }

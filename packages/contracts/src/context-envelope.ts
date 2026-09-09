@@ -22,6 +22,7 @@ export type ContextLayerKind =
   | 'stable-identity'
   | 'world-context'
   | 'world-directory'
+  | 'environment'
   | 'task-context'
   | 'memory-index'
   | 'retrieved-memories'
@@ -33,6 +34,7 @@ export const CONTEXT_LAYER_ORDER = [
   'stable-identity',
   'world-context',
   'world-directory',
+  'environment',
   'task-context',
   'memory-index',
   'retrieved-memories',
@@ -55,6 +57,7 @@ export type ContextSourceKind =
   | 'artifact'
   | 'knowledge-chunk'
   | 'request'
+  | 'environment'
 
 /**
  * A pointer back to the durable row a layer was built from.
@@ -86,6 +89,16 @@ export interface ContextEnvelope {
   stableIdentity: ContextLayer
   worldContext?: ContextLayer
   worldDirectory?: ContextLayer
+  /**
+   * The host-probed facts of the machine (or device) this turn runs on:
+   * OS, shell, available and missing CLI tools, host-owned operating notes.
+   *
+   * It is a property of the machine, not of the turn, so it sits in the
+   * cacheable prefix behind the world layers. Its text must be a pure
+   * function of the profile content - no clock - or it would defeat the
+   * cache it is supposed to protect.
+   */
+  environment?: ContextLayer
   taskContext?: ContextLayer
   memoryIndex?: ContextLayer
   retrievedMemories?: ContextLayer
@@ -245,6 +258,7 @@ export interface ComposeContextEnvelopeInput {
   currentRequest: ContextLayer
   worldContext?: ContextLayer
   worldDirectory?: ContextLayer
+  environment?: ContextLayer
   taskContext?: ContextLayer
   memoryIndex?: ContextLayer
   retrievedMemories?: ContextLayer
@@ -258,12 +272,13 @@ export function composeContextEnvelope(input: ComposeContextEnvelopeInput): Cont
     stableIdentity: input.stableIdentity,
     ...(input.worldContext === undefined ? {} : { worldContext: input.worldContext }),
     ...(input.worldDirectory === undefined ? {} : { worldDirectory: input.worldDirectory }),
+    ...(input.environment === undefined ? {} : { environment: input.environment }),
     ...(input.taskContext === undefined ? {} : { taskContext: input.taskContext }),
     ...(input.memoryIndex === undefined ? {} : { memoryIndex: input.memoryIndex }),
     ...(input.retrievedMemories === undefined ? {} : { retrievedMemories: input.retrievedMemories }),
     ...(input.recentConversation === undefined ? {} : { recentConversation: input.recentConversation }),
     currentRequest: input.currentRequest,
-    stableContextHash: stableContextHash(input.stableIdentity, input.worldContext, input.worldDirectory),
+    stableContextHash: stableContextHash(input.stableIdentity, input.worldContext, input.worldDirectory, input.environment),
     ...(input.promptCache === undefined ? {} : { promptCache: input.promptCache }),
     totalTokenEstimate: 0,
   }
@@ -276,6 +291,7 @@ export function contextEnvelopeLayers(envelope: ContextEnvelope): ContextLayer[]
     'stable-identity': envelope.stableIdentity,
     'world-context': envelope.worldContext,
     'world-directory': envelope.worldDirectory,
+    'environment': envelope.environment,
     'task-context': envelope.taskContext,
     'memory-index': envelope.memoryIndex,
     'retrieved-memories': envelope.retrievedMemories,
@@ -290,19 +306,27 @@ export function contextEnvelopeLayers(envelope: ContextEnvelope): ContextLayer[]
 
 /**
  * Cache identity of the prefix: the identity layer plus, when present, the
- * world context. Both are properties of the character and its world, not of
- * the turn, which is what lets them sit in front of every dynamic layer.
+ * world context, world directory and environment layers. All are properties of
+ * the character, its world and its machine, not of the turn, which is what
+ * lets them sit in front of every dynamic layer.
  *
- * An envelope without world context hashes exactly as it did before the layer
- * joined the prefix, so nothing that recorded a hash earlier is invalidated.
+ * The hash is additive per layer: an envelope without a given layer hashes
+ * exactly as it did before that layer joined the prefix, so nothing that
+ * recorded a hash earlier is invalidated.
  */
-export function stableContextHash(identity: ContextLayer, worldContext?: ContextLayer, worldDirectory?: ContextLayer): string {
+export function stableContextHash(
+  identity: ContextLayer,
+  worldContext?: ContextLayer,
+  worldDirectory?: ContextLayer,
+  environment?: ContextLayer,
+): string {
   return contextContentHash([
     identity.kind,
     identity.id,
     identity.contentHash,
     ...(worldContext === undefined ? [] : [worldContext.kind, worldContext.id, worldContext.contentHash]),
     ...(worldDirectory === undefined ? [] : [worldDirectory.kind, worldDirectory.id, worldDirectory.contentHash]),
+    ...(environment === undefined ? [] : [environment.kind, environment.id, environment.contentHash]),
   ])
 }
 

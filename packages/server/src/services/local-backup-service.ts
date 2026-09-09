@@ -123,7 +123,7 @@ export async function createLocalBackupBundle(
 
     // Every directory here is user-owned durable state. Add new persistent roots
     // to this list before shipping the feature.
-    for (const directory of ['worlds', 'assets', 'packages', 'workshop', 'skills', 'integrations']) {
+    for (const directory of ['worlds', 'assets', 'packages', 'workshop', 'skills', 'integrations', 'environments']) {
       const source = join(root, directory)
       if (!await exists(source)) continue
       sources.push(...await collectBackupSources(source, directory, directory === 'worlds'))
@@ -144,7 +144,7 @@ export async function createLocalBackupBundle(
       createdAt: new Date().toISOString(),
       included,
       excluded: ['credentials', 'runtime', 'worlds/*/cache', 'backups'],
-      notes: '包含 SQLite、世界文件/设置/资产、knowledge/library、已安装包、创意工坊项目与 Skill 动作。模型密钥和运行时二进制不进入普通备份。逐行 JSON：首行为头部，其余每行是一个文件分片。',
+      notes: '包含 SQLite、世界文件/设置/资产、knowledge/library、已安装包、创意工坊项目、Skill 动作与本机环境档案。模型密钥和运行时二进制不进入普通备份。逐行 JSON：首行为头部，其余每行是一个文件分片。',
     }
     await pipeline(
       Readable.from(bundleRecords(header, sources, options.onPoint), { objectMode: false }),
@@ -253,7 +253,7 @@ function assertBackupDestination(stateRoot: string, destination: string): void {
   if (inside.length === 0 || inside.startsWith('..') || inside.startsWith(`..${sep}`)) return
   const topLevel = inside.split(/[\\/]/)[0]
   if (topLevel === undefined) return
-  if (new Set(['data', 'worlds', 'assets', 'packages', 'workshop', 'skills', 'integrations', 'credentials', 'runtime']).has(topLevel) ||
+  if (new Set(['data', 'worlds', 'assets', 'packages', 'workshop', 'skills', 'integrations', 'environments', 'credentials', 'runtime']).has(topLevel) ||
     topLevel === '.state-root-lease.sqlite' || topLevel === '.restore-transactions' || topLevel.startsWith('.restore-staging-') || topLevel.startsWith('.dsh-cyber-verify-')) {
     throw new Error('Backup output must be outside durable state roots; use the backups directory or an external path')
   }
@@ -453,7 +453,7 @@ interface MaterializedFile {
   sha256: string
 }
 
-const RESTORE_TOP_LEVELS = new Set(['data', 'worlds', 'assets', 'packages', 'workshop', 'skills', 'integrations'])
+const RESTORE_TOP_LEVELS = new Set(['data', 'worlds', 'assets', 'packages', 'workshop', 'skills', 'integrations', 'environments'])
 const RESTORE_INCLUDED_VALUES = new Set([
   DATABASE_ARCHIVE_PATH,
   'worlds',
@@ -462,6 +462,7 @@ const RESTORE_INCLUDED_VALUES = new Set([
   'workshop',
   'skills',
   'integrations',
+  'environments',
   'worlds/*/knowledge/library',
 ])
 

@@ -8,6 +8,7 @@ import './styles-world-settings.css'
 import './components/dock/dock-surface.css'
 import './features/world/world-runtime.css'
 import './features/artifacts/artifacts.css'
+import './features/machine-profile/machine-profile.css'
 
 // Keep translation catalogs outside the main application chunk while still
 // registering them before the first React render, so locale changes never flash
@@ -31,6 +32,7 @@ await Promise.all([
   import('./i18n/plugin-generator-messages.js'),
   import('./i18n/model-hub-messages.js'),
   import('./i18n/connection-hub-messages.js'),
+  import('./i18n/machine-profile-messages.js'),
 ])
 
 const root = document.getElementById('root')

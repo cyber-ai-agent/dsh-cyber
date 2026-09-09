@@ -5,6 +5,7 @@ import type {
   AgentRuntimePort,
   AgentTurnRequest,
   ContextLayer,
+  ContextSourceRef,
   EmployeeInstance,
   EmployeeProfile,
   JsonObject,
@@ -40,6 +41,8 @@ import {
   type WorldSkillAvailabilityPort,
 } from './world-skill-availability.js'
 import type { AgentRunFileEvidencePort } from './agent-run-file-evidence.js'
+import type { EnvironmentContextPort, EnvironmentSnapshot } from '../environments/environment-service.js'
+import type { EnvironmentSignal } from '../environments/environment-change-collector.js'
 
 type CharacterRuntimeStore = Pick<
   SqliteStore,
@@ -58,6 +61,8 @@ type CharacterRuntimeStore = Pick<
 
 const OBSERVED_THROUGH_KEY = 'contextObservedThroughSequence'
 const OBSERVATION_VERSION_KEY = 'contextObservationVersion'
+/** The environment layer a lane pinned on its durable assistant messages. */
+const ENVIRONMENT_LAYER_KEY = 'contextEnvironmentLayer'
 
 /**
  * Where the world's stable rules come from.
@@ -97,6 +102,13 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
    */
   readonly #runFileEvidence: AgentRunFileEvidencePort | undefined
   /**
+   * The machine profile the host has probed: OS, shell dialect, available and
+   * missing CLI tools. Rendered into the cacheable prefix by this runtime,
+   * and pinned per conversation so a later refresh cannot move the prefix of
+   * a lane already mid-conversation.
+   */
+  readonly #environment: EnvironmentContextPort | undefined
+  /**
    * What the Context Inspector reads back.
    *
    * The record is taken here rather than rebuilt later from durable rows: a
@@ -117,6 +129,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
     inspection?: ContextInspectionService,
     worldContext?: WorldContextPort,
     runFileEvidence?: AgentRunFileEvidencePort,
+    environment?: EnvironmentContextPort,
   ) {
     this.#inner = inner
     this.#store = store
@@ -126,6 +139,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
     this.#worldContext = worldContext
     this.#directory = defaultWorldCharacterDirectory(store, skillAvailability)
     this.#runFileEvidence = runFileEvidence
+    this.#environment = environment
     this.contextInspection = inspection ?? new ContextInspectionService()
     this.#memory = memory ?? defaultMemoryForStore(store)
     this.#context = defaultConversationContextComposer(
@@ -197,7 +211,29 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
     const worldContext = await this.#composeWorldContext(agent, request.conversationId)
     const worldDirectory = await this.#directory?.snapshot(agent.worldId, agent.id)
     const directoryLayer = worldDirectory === undefined ? undefined : composeWorldDirectoryLayer(worldDirectory)
-    const fixedContext = [effectivePersona, ...(worldContext === undefined ? [] : [worldContext.text]), ...(directoryLayer === undefined ? [] : [directoryLayer.text]), turnPrompt]
+    // The machine profile is a fact of the host, not of the turn. A lane pins
+    // the revision it first saw on its durable assistant messages: a later
+    // refresh may change what a NEW lane sees, but never what this lane is
+    // already mid-conversation with. A change that happened since the pin is
+    // reported to the model as one line in the volatile suffix instead.
+    const pinnedEnvironment = lastPinnedEnvironmentLayer(durableMessages, agent.id)
+    // A boundary may probe; a mid-lane turn only reads. The pin is what makes
+    // that distinction durable across turns and restarts.
+    const currentEnvironment = await this.#environment?.snapshot({
+      worldId: agent.worldId,
+      characterId: agent.id,
+      laneBoundary: pinnedEnvironment === undefined,
+    })
+    const environmentLayer = pinnedEnvironment?.layer ?? currentEnvironment?.layer
+    const environmentNotice = environmentChangeNotice(pinnedEnvironment, currentEnvironment)
+    const fixedContext = [
+      effectivePersona,
+      ...(worldContext === undefined ? [] : [worldContext.text]),
+      ...(directoryLayer === undefined ? [] : [directoryLayer.text]),
+      ...(environmentLayer === undefined ? [] : [environmentLayer.text]),
+      ...(environmentNotice === undefined ? [] : [environmentNotice]),
+      turnPrompt,
+    ]
     // ContextPlanningRuntime can only see the raw revision before this layer
     // resolves profile, authority, permission and Skill instructions. When
     // its recognizable raw plan arrives, rebuild the allocation against the
@@ -224,6 +260,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       personaRevision: revision.revision,
       ...(worldContext === undefined ? {} : { worldContext }),
       ...(directoryLayer === undefined ? {} : { worldDirectory: directoryLayer }),
+      ...(environmentLayer === undefined ? {} : { environment: environmentLayer }),
       conversationId: request.conversationId,
       prompt: turnPrompt,
       history: request.history ?? [],
@@ -239,18 +276,62 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
           prompt: request.prompt,
           ...(effectiveContextBudget === undefined ? {} : { budgetTokens: effectiveContextBudget.memoryTokens }),
         })
-    const prompt = composed?.prompt
+    const basePrompt = composed?.prompt
       ?? (memoryContext === undefined
         ? turnPrompt
         : `${memoryContext}\n\n[当前请求]\n${turnPrompt}`)
+    // The change notice rides the volatile suffix: the stable prefix this lane
+    // already pinned must not move, but the model still has to know the host
+    // environment is not what it was told.
+    const prompt = environmentNotice === undefined ? basePrompt : `${basePrompt}\n\n${environmentNotice}`
 
     let sawAssistantMessage = false
     const originalOnEvent = request.onEvent
+    // Host-observed run facts that may teach the machine profile something.
+    // They are folded into the durable profile after the turn, so the change
+    // reaches the model on this lane's next turn rather than mid-flight.
+    const environmentSignals: EnvironmentSignal[] = []
+    const commandByCallId = new Map<string, string>()
+    const learnsEnvironment = this.#environment?.applySignals !== undefined
+    // The environment layer chosen this turn rides the durable assistant
+    // messages as the lane's pin. Only assistant events are persisted, and
+    // they are exactly the cursor later turns of this lane read back. The
+    // notice cursor keeps one change from being announced twice.
+    const noticedRevision = environmentNotice !== undefined
+      ? currentEnvironment?.layer.revision
+      : (pinnedEnvironment?.noticedRevision ?? environmentLayer?.revision)
+    const environmentStamp = environmentLayer === undefined
+      ? undefined
+      : {
+          [ENVIRONMENT_LAYER_KEY]: {
+            id: environmentLayer.id,
+            text: environmentLayer.text,
+            revision: environmentLayer.revision,
+            // Plain JSON pointers: the durable message metadata is a JsonObject
+            // and must not carry a live contract type.
+            sourceRefs: environmentLayer.sourceRefs.map((ref) => ({
+              kind: ref.kind as string,
+              id: ref.id,
+              ...(ref.revision === undefined ? {} : { revision: ref.revision }),
+            })),
+            present: [...(pinnedEnvironment?.present ?? currentEnvironment?.present ?? [])],
+            ...(noticedRevision === undefined ? {} : { noticedRevision }),
+          },
+        }
     const onEvent = originalOnEvent === undefined
       ? undefined
       : (event: AgentRuntimeEvent) => {
-          if (event.kind === 'assistant.message' && event.content?.trim()) sawAssistantMessage = true
-          originalOnEvent(snapshotSequence === undefined ? event : withObservation(event, snapshotSequence))
+          if (learnsEnvironment) collectEnvironmentSignal(event, environmentSignals, commandByCallId)
+          if (event.kind !== 'assistant.message' || !event.content?.trim()) {
+            originalOnEvent(snapshotSequence === undefined ? event : withObservation(event, snapshotSequence))
+            return
+          }
+          sawAssistantMessage = true
+          let stamped = event
+          if (environmentStamp !== undefined) {
+            stamped = { ...stamped, metadata: { ...stamped.metadata, ...environmentStamp } }
+          }
+          originalOnEvent(snapshotSequence === undefined ? stamped : withObservation(stamped, snapshotSequence))
         }
 
     // Preserve a composer-level record before dispatch so failed or aborted
@@ -309,7 +390,14 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
           // The persona is what a provider adapter treats as the prefix (the
           // Harness binds it as the system prompt), so the world context is
           // rendered here, after the identity and before anything per-turn.
-          persona: [effectivePersona.trim(), worldContext?.text, directoryLayer?.text].filter(Boolean).join('\n\n'),
+          // The environment layer follows the directory layer: machine facts,
+          // then this turn.
+          persona: [
+            effectivePersona.trim(),
+            worldContext?.text,
+            directoryLayer?.text,
+            ...(environmentLayer === undefined ? [] : [environmentLayer.text]),
+          ].filter(Boolean).join('\n\n'),
         },
       })
     } finally {
@@ -317,6 +405,16 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       // run most likely to be argued about, so it is closed exactly like a
       // successful one. The recorder never throws back into the turn.
       await this.#runFileEvidence?.complete(bracket)
+    }
+
+    // Fold what actually ran into the machine profile. Learning never fails a
+    // turn, and a change made here is announced on this lane's next turn.
+    if (environmentSignals.length > 0) {
+      try {
+        await this.#environment?.applySignals?.(environmentSignals)
+      } catch {
+        /* the profile is an optimisation of the prompt, not a turn dependency */
+      }
     }
 
     // Persist and expose the same runtime-facing projection only after the
@@ -370,7 +468,10 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
         source: 'host-context-observation',
         sourceSessionId: result.agentSessionId,
         content: result.finalResponse,
-        metadata: observationMetadata({}, snapshotSequence),
+        metadata: {
+          ...(environmentStamp === undefined ? {} : environmentStamp),
+          ...observationMetadata({}, snapshotSequence),
+        },
       })
     }
 
@@ -505,6 +606,142 @@ function defaultMemoryForStore(store: CharacterRuntimeStore): CharacterMemoryCon
 
 function withObservation(event: AgentRuntimeEvent, sequence: number): AgentRuntimeEvent {
   return { ...event, metadata: observationMetadata(event.metadata, sequence) }
+}
+
+/**
+ * The environment layer pinned to this conversation lane, plus what the lane
+ * was told about the machine at that moment.
+ *
+ * A lane's first turn composes the layer from the live profile and stamps the
+ * text, revision, presence list and notice cursor onto the durable assistant
+ * messages; every later turn restores that pin, so a host refresh between
+ * turns cannot move the stable prefix of a conversation already mid-flight.
+ * The pin is the exact text the lane saw - re-reading the live profile here
+ * would reintroduce the very churn the prefix hash is built to prevent. A
+ * malformed pin is discarded and the next turn re-pins from the live profile.
+ */
+interface PinnedEnvironment {
+  layer: ContextLayer
+  present: readonly string[]
+  /** Revision already announced to this lane; a change after it is news. */
+  noticedRevision?: string
+}
+
+function lastPinnedEnvironmentLayer(messages: readonly WorkMessage[] | undefined, employeeId: string): PinnedEnvironment | undefined {
+  if (messages === undefined) return undefined
+  let pinned: { id: string; text: string; revision: string; sourceRefs: ContextSourceRef[]; present: string[]; noticedRevision?: string } | undefined
+  let latestSequence = -1
+  for (const message of messages) {
+    if (message.kind !== 'assistant' || message.senderId !== employeeId) continue
+    if (message.sequence <= latestSequence) continue
+    const raw = message.metadata[ENVIRONMENT_LAYER_KEY]
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) continue
+    const candidate = raw as Record<string, unknown>
+    if (typeof candidate.text !== 'string' || candidate.text.trim() === '') continue
+    if (typeof candidate.revision !== 'string' || candidate.revision === '') continue
+    pinned = {
+      id: typeof candidate.id === 'string' && candidate.id !== '' ? candidate.id : 'environment:local',
+      text: candidate.text,
+      revision: candidate.revision,
+      sourceRefs: pinnedSourceRefs(candidate.sourceRefs),
+      present: pinnedPresence(candidate.present),
+      ...(typeof candidate.noticedRevision === 'string' && candidate.noticedRevision !== ''
+        ? { noticedRevision: candidate.noticedRevision }
+        : {}),
+    }
+    latestSequence = message.sequence
+  }
+  if (pinned === undefined) return undefined
+  return {
+    layer: composeContextLayer({
+      id: pinned.id,
+      kind: 'environment',
+      text: pinned.text,
+      revision: pinned.revision,
+      sourceRefs: pinned.sourceRefs,
+    }),
+    present: pinned.present,
+    ...(pinned.noticedRevision === undefined ? {} : { noticedRevision: pinned.noticedRevision }),
+  }
+}
+
+/** Only well-formed durable pointers survive a pin round trip. */
+function pinnedSourceRefs(value: unknown): ContextSourceRef[] {
+  if (!Array.isArray(value)) return []
+  const refs: ContextSourceRef[] = []
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) continue
+    const ref = entry as Record<string, unknown>
+    if (typeof ref.kind !== 'string' || typeof ref.id !== 'string') continue
+    refs.push({
+      kind: ref.kind as ContextSourceRef['kind'],
+      id: ref.id,
+      ...(typeof ref.revision === 'string' ? { revision: ref.revision } : {}),
+    })
+  }
+  return refs
+}
+
+function pinnedPresence(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((entry): entry is string => typeof entry === 'string' && entry !== '').slice(0, 256)
+}
+
+/**
+ * The one line a lane is told when the machine profile changed under it.
+ *
+ * It never rewrites the pinned prefix - it states the delta and points back at
+ * the live check - and the caller stamps the announced revision so the same
+ * change is not repeated on every following turn.
+ */
+function environmentChangeNotice(
+  pinned: PinnedEnvironment | undefined,
+  current: EnvironmentSnapshot | undefined,
+): string | undefined {
+  if (pinned === undefined || current === undefined) return undefined
+  if (current.layer.revision === pinned.layer.revision) return undefined
+  if (pinned.noticedRevision === current.layer.revision) return undefined
+  const before = new Set(pinned.present)
+  const after = new Set(current.present)
+  const added = current.present.filter((name) => !before.has(name))
+  const removed = pinned.present.filter((name) => !after.has(name))
+  const parts: string[] = []
+  if (added.length > 0) parts.push(`新增可用：${added.slice(0, 4).join('、')}`)
+  if (removed.length > 0) parts.push(`不再可用：${removed.slice(0, 4).join('、')}`)
+  const detail = parts.length === 0 ? '档案内容已变化' : parts.join('；')
+  return `[系统提示] 机器档案已更新：${detail}。本轮仍按会话开始时固定的档案执行；实时可用性请用 shell 现场查询。`
+}
+
+/** Bounded per turn: a runaway loop cannot grow the learning buffer. */
+const MAX_ENVIRONMENT_SIGNALS = 64
+
+/**
+ * Reduces one runtime event to a host-observed fact.
+ *
+ * Only the call's own parameters, failure flag, exit code and output are
+ * read - never the model's words about them.
+ */
+function collectEnvironmentSignal(
+  event: AgentRuntimeEvent,
+  signals: EnvironmentSignal[],
+  commands: Map<string, string>,
+): void {
+  if (event.kind === 'tool.started') {
+    const command = typeof event.metadata.toolSummary === 'string' ? event.metadata.toolSummary : undefined
+    if (command !== undefined && event.callId !== undefined) commands.set(event.callId, command)
+    return
+  }
+  if (event.kind !== 'tool.completed' || signals.length >= MAX_ENVIRONMENT_SIGNALS) return
+  const command = event.callId === undefined ? undefined : commands.get(event.callId)
+  const output = typeof event.metadata.toolOutput === 'string' ? event.metadata.toolOutput : undefined
+  const exitCode = typeof event.metadata.toolExitCode === 'number' ? event.metadata.toolExitCode : undefined
+  signals.push({
+    failed: event.failed === true,
+    ...(event.toolName === undefined ? {} : { toolName: event.toolName }),
+    ...(command === undefined ? {} : { command }),
+    ...(output === undefined ? {} : { output }),
+    ...(exitCode === undefined ? {} : { exitCode }),
+  })
 }
 
 function observationMetadata(metadata: JsonObject, sequence: number): JsonObject {

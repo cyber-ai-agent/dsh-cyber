@@ -119,6 +119,33 @@ describe('SshSkillAdapter', () => {
     expect(exec.mock.calls[0]![0]).not.toHaveProperty('privateKey')
   })
 
+  it('records the real remote result against that device profile', async () => {
+    const recorded: Array<{ signals: readonly { toolName?: string; failed: boolean; exitCode?: number; output?: string }[]; profileId?: string }> = []
+    const adapter = new SshSkillAdapter({
+      store: { getWorld: () => world() },
+      integrations: { listByType: () => [device()], getById: () => device(), secretsForConnection: () => ({ privateKey: 'key' }) } as never,
+      connectionGrantsFor: grantsDevice,
+      environment: {
+        applySignals: async (incoming, profileId) => {
+          recorded.push({ signals: incoming, ...(profileId === undefined ? {} : { profileId }) })
+        },
+      },
+    })
+    exec.mockResolvedValueOnce({ code: 0, stdout: 'Linux\nlinux-apt', stderr: '' })
+      .mockResolvedValueOnce({ code: 1, stdout: '', stderr: 'sh: 1: systemctl: not found' })
+    expect((await adapter.execute(directAction(), { now: new Date() })).status).toBe('executed')
+
+    // Only the host-observed result travels, and it is scoped to the device.
+    expect(recorded).toHaveLength(1)
+    expect(recorded[0]!.profileId).toBe('ssh:device-1')
+    expect(recorded[0]!.signals[0]).toMatchObject({
+      toolName: 'ssh',
+      failed: true,
+      exitCode: 1,
+      output: expect.stringContaining('systemctl: not found'),
+    })
+  })
+
   it('reports refused auth as failed and connection loss as outcome-unknown', async () => {
     const adapter = makeAdapter({ listByType: () => [device()], getById: () => device(), secretsForConnection: () => ({ privateKey: 'key' }) }, grantsDevice)
     exec.mockRejectedValueOnce(new (await import('../src/integrations/ssh-client.js')).SshError('auth-failed', 'permission denied'))

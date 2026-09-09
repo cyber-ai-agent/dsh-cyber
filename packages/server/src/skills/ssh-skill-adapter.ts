@@ -47,6 +47,14 @@ export interface SshSkillAdapterOptions {
   connectionGrantsFor?(characterId: string): readonly string[] | undefined
   /** Shared long-lived sessions; default per-command connection when omitted. */
   sessions?: SshSessionPool
+  /**
+   * Machine-profile learning: the real SSH result is the only place a device's
+   * environment facts can be observed, because skill-action rows persist a
+   * human summary rather than the raw output.
+   */
+  environment?: {
+    applySignals?(signals: readonly { toolName?: string; command?: string; failed: boolean; exitCode?: number; output?: string }[], profileId?: string): Promise<unknown>
+  }
 }
 
 /** Minimal store shape the grants resolver needs (SqliteStore satisfies it). */
@@ -81,12 +89,14 @@ export class SshSkillAdapter implements CharacterSkillAdapter {
   readonly #integrations: IntegrationService
   readonly #connectionGrantsFor: ((characterId: string) => readonly string[] | undefined) | undefined
   readonly #sessions: SshSessionPool | undefined
+  readonly #environment: SshSkillAdapterOptions['environment']
 
   constructor(options: SshSkillAdapterOptions) {
     this.#store = options.store
     this.#integrations = options.integrations
     this.#connectionGrantsFor = options.connectionGrantsFor
     this.#sessions = options.sessions
+    this.#environment = options.environment
   }
 
   /**
@@ -195,6 +205,7 @@ export class SshSkillAdapter implements CharacterSkillAdapter {
       const command = sshCommandFor(op, os)
       if (command === undefined) return { status: 'failed', detail: `当前设备系统暂不支持该操作（detected ${os}）` }
       const result = await exec(command)
+      await this.#recordEnvironment(connectionId, command, result)
       return { status: 'executed', detail: summarize(op.summary, result.stdout, result.stderr, result.code) }
     } catch (error) {
       if (error instanceof SshError) {
@@ -228,6 +239,26 @@ export class SshSkillAdapter implements CharacterSkillAdapter {
       }
     }
     return devices.sort((left, right) => left.displayName.localeCompare(right.displayName, 'zh-CN'))
+  }
+
+  /**
+   * Feeds the real remote result to that device's profile. Learning never
+   * changes the action's outcome: a failed write is the host's problem, not
+   * the command's.
+   */
+  async #recordEnvironment(connectionId: string, command: string, result: { code: number | null; stdout: string; stderr: string }): Promise<void> {
+    if (this.#environment?.applySignals === undefined) return
+    try {
+      await this.#environment.applySignals([{
+        toolName: 'ssh',
+        command,
+        failed: result.code !== 0,
+        ...(result.code === null ? {} : { exitCode: result.code }),
+        output: `${result.stdout}\n${result.stderr}`,
+      }], `ssh:${connectionId}`)
+    } catch {
+      /* the machine profile is an optimisation of the prompt, not a turn dependency */
+    }
   }
 
   #secretsFor(workspaceId: string, connectionId: string): Record<string, string> | undefined {
