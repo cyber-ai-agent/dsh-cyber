@@ -79,7 +79,7 @@ export interface WorldContextPort {
 export class CharacterProfileRuntime implements AgentRuntimePort {
   readonly #inner: AgentRuntimePort
   readonly #store: CharacterRuntimeStore
-  readonly #skills: Pick<CharacterSkillAdapterRegistry, 'instructionsFor'> | undefined
+  readonly #skills: Pick<CharacterSkillAdapterRegistry, 'instructionsFor' | 'instructionsForCharacter'> | undefined
   readonly #authority: Pick<WorldAuthorityPort, 'get'> | undefined
   readonly #skillAvailability: WorldSkillAvailabilityPort | undefined
   readonly #memory: CharacterMemoryContextPort | undefined
@@ -110,7 +110,7 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
   constructor(
     inner: AgentRuntimePort,
     store: CharacterRuntimeStore,
-    skills?: Pick<CharacterSkillAdapterRegistry, 'instructionsFor'>,
+    skills?: Pick<CharacterSkillAdapterRegistry, 'instructionsFor' | 'instructionsForCharacter'>,
     authority?: Pick<WorldAuthorityPort, 'get'>,
     skillAvailability?: WorldSkillAvailabilityPort,
     memory?: CharacterMemoryContextPort,
@@ -150,7 +150,12 @@ export class CharacterProfileRuntime implements AgentRuntimePort {
       worldId: agent.worldId,
       skillIds: revision.skillGrants,
     })
-    const recipeInstructions = this.#skills?.instructionsFor(grantedSkillIds) ?? []
+    const recipeInstructions = this.#skills?.instructionsForCharacter({
+      worldId: agent.worldId,
+      characterId: agent.id,
+      workspaceId: agent.workspaceId,
+      grantedSkillIds,
+    }) ?? []
     const profiledPersona = profile === undefined ? revision.persona : composeCharacterPersona(revision.persona, profile)
     // Once the authority service is composed, the compatibility pointer is no
     // longer an authorization source. The fallback only keeps isolated legacy

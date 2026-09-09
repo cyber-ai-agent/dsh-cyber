@@ -19,6 +19,14 @@ export interface CharacterSkillMatchContext {
   promptSource?: 'raw-user'
 }
 
+/** Input for dynamic, per-character skill instructions rendered into the persona. */
+export interface CharacterSkillInstructionContext {
+  worldId: string
+  characterId: string
+  workspaceId?: string
+  grantedSkillIds: readonly string[]
+}
+
 export interface CharacterSkillActionProposal {
   skillId: string
   adapterId: string
@@ -71,6 +79,13 @@ export interface CharacterSkillAdapter {
   /** Dynamic adapters (for example MCP) may expose no skills until discovery completes. */
   readonly dynamicDescriptors?: boolean
   propose(context: CharacterSkillMatchContext): Promise<CharacterSkillActionProposal[]> | CharacterSkillActionProposal[]
+  /**
+   * Optional per-character capability guidance rendered into the persona
+   * (for example “you can operate these SSH devices, ask the user to name
+   * one and an action”). Keep it short, credential-free and stable per
+   * grants so it can live in the cacheable context prefix.
+   */
+  instructionsFor?(context: CharacterSkillInstructionContext): string[] | undefined
   /** Revalidates provider/package/integration availability before the exactly-once claim. */
   preflight?(action: CharacterSkillAction): Promise<CharacterSkillPreflightResult> | CharacterSkillPreflightResult
   execute(action: CharacterSkillAction, context: CharacterSkillExecutionContext): Promise<CharacterSkillExecutionResult>
@@ -168,11 +183,28 @@ export class CharacterSkillAdapterRegistry {
       .sort((left, right) => left.displayName.localeCompare(right.displayName, 'zh-CN') || left.id.localeCompare(right.id))
   }
 
+  /** Static recipe instructions for the granted skill ids. */
   instructionsFor(skillIds: readonly string[]): string[] {
     return skillIds.flatMap((skillId) => {
       const recipe = this.#recipes.get(skillId)
       return recipe === undefined ? [] : [`${recipe.descriptor.displayName}：${recipe.instruction.trim()}`]
     })
+  }
+
+  /**
+   * Full persona guidance for a character: static recipe instructions plus
+   * any per-character capability notes the owning adapters provide (for
+   * example SSH devices this character may operate). Both are stable per
+   * grant set so the text can sit in the cacheable prefix.
+   */
+  instructionsForCharacter(context: CharacterSkillInstructionContext): string[] {
+    const recipeInstructions = this.instructionsFor(context.grantedSkillIds)
+    const adapterNotes: string[] = []
+    for (const adapter of this.#adapters.values()) {
+      const notes = adapter.instructionsFor?.(context)
+      if (notes !== undefined && notes.length > 0) adapterNotes.push(...notes)
+    }
+    return [...recipeInstructions, ...adapterNotes]
   }
 
   adapterById(adapterId: string): CharacterSkillAdapter | undefined {

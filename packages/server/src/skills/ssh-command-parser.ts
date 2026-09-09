@@ -22,8 +22,10 @@ export interface SshOperation {
 }
 
 export interface SshDeviceHint {
-  /** Connection display name the utterance references (e.g. 客厅主机). */
-  displayName?: string
+  /** Candidate device references the utterance may name (displayName/host). */
+  deviceCandidates?: ReadonlyArray<{ displayName: string; host?: string }>
+  /** Display name used when the role only has one usable device. */
+  singleDefaultDisplayName?: string
 }
 
 const UNSAFE = /[;|&$`\\\n\r"'()[\]{}]/
@@ -55,13 +57,51 @@ const DEVICE_REFERENCE = /(?:连|到|通过|ssh|用)\s*(?:SSH\s*)?(?:连接\s*)?
 const NEGATION = /(?:不要|别|不用|无需|避免|勿)[^。！？!?]{0,8}(?:重启|安装|执行|操作|运行|查|看|列)/
 
 /**
+ * Resolve which device an utterance means.
+ *
+ * Device and operation are independent: the user may name the device with a
+ * connector (“连客厅主机…”) or without one (“查下那台客厅主机的磁盘”), may use
+ * the host address, or may refer back to a device with 这台/那台/服务器. When
+ * the caller supplies `singleDefaultDisplayName` (the role only has one usable
+ * device), an utterance that performs an operation but names no device
+ * resolves to that default instead of dangling.
+ */
+function resolveDeviceName(prompt: string, hints: SshDeviceHint): string | undefined {
+  const candidates = hints.deviceCandidates ?? []
+  if (candidates.length > 0) {
+    // Longest name first so “客厅主机” beats the substring “客厅”.
+    const sorted = [...candidates].sort((left, right) => right.displayName.length - left.displayName.length)
+    for (const candidate of sorted) {
+      if (candidate.displayName.length > 0 && prompt.includes(candidate.displayName)) return candidate.displayName
+    }
+    for (const candidate of sorted) {
+      const host = candidate.host ?? ''
+      if (host.length < 4) continue
+      const at = prompt.indexOf(host)
+      if (at < 0) continue
+      // Refuse a prefix match like 10.0.0.1 inside 10.0.0.11 by checking the
+      // next char is not another host/name character.
+      const next = prompt[at + host.length]
+      const boundary = next === undefined || !/[0-9A-Za-z._:.-]/.test(next)
+      if (boundary) return candidate.displayName
+    }
+  }
+  const connector = extractDeviceName(prompt)
+  if (connector !== undefined) return connector
+  // Only one usable device → a bare operation unambiguously targets it.
+  // With several devices we refuse to guess which one the user meant.
+  if (hints.singleDefaultDisplayName !== undefined) return hints.singleDefaultDisplayName
+  return undefined
+}
+
+/**
  * Parse one user utterance into at most one controlled SSH operation.
  * Returns undefined when no whitelisted intent is found or the request is
  * explicitly negated.
  */
 export function parseSshOperation(prompt: string, hints: SshDeviceHint = {}): SshOperation | undefined {
   if (NEGATION.test(prompt)) return undefined
-  const deviceName = hints.displayName ?? extractDeviceName(prompt)
+  const deviceName = resolveDeviceName(prompt, hints)
 
   // Order matters: install/service checks come before generic info verbs so
   // "重启 xx 服务" does not fall into SYSTEM_INFO.

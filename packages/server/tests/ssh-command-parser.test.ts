@@ -22,6 +22,23 @@ describe('SSH command parser', () => {
     expect(parseSshOperation('不要重启服务器，继续用现有配置')).toBeUndefined()
   })
 
+  it('resolves a named candidate device independent of a connector verb', () => {
+    const candidates = [
+      { displayName: '客厅主机', host: '10.0.0.10' },
+      { displayName: '机房网关', host: '172.16.1.125' },
+    ]
+    expect(parseSshOperation('查下 10.0.0.10 的磁盘', { deviceCandidates: candidates })).toMatchObject({ op: 'disk.usage', connectionId: '客厅主机' })
+    expect(parseSshOperation('看看那台机房网关的内存', { deviceCandidates: candidates })).toMatchObject({ op: 'memory.usage', connectionId: '机房网关' })
+    // A prefix like 10.0.0.1 must not match host 10.0.0.10/10.0.0.11 style hosts.
+    expect(parseSshOperation('查 10.0.0.11 磁盘', { deviceCandidates: candidates }).connectionId).toBeUndefined()
+  })
+
+  it('falls back to the single granted device when the user names none', () => {
+    const candidates = [{ displayName: '客厅主机', host: '10.0.0.10' }]
+    expect(parseSshOperation('看看磁盘', { deviceCandidates: candidates, singleDefaultDisplayName: '客厅主机' }))
+      .toMatchObject({ op: 'disk.usage', connectionId: '客厅主机' })
+  })
+
   it('builds real commands only for the detected OS, never free-form', () => {
     expect(sshCommandFor({ op: 'disk.usage', summary: '', params: {} }, 'linux')).toContain('df -h')
     expect(sshCommandFor({ op: 'service.restart', summary: '', params: { service: 'nginx' } }, 'linux')).toContain('systemctl restart nginx')
